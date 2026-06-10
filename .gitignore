@@ -1,0 +1,16 @@
+﻿.vs/
+bin/
+obj/
+artifacts/
+
+*.log
+stdout.txt
+stderr.txt
+build_*.txt
+
+*.user
+*.suo
+*.cache
+*.pdb
+*.exe
+*.dll
