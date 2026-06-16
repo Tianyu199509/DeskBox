@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using System.Text;
 
 namespace DeskBox.Helpers;
 
@@ -40,6 +41,33 @@ public static partial class Win32Helper
     [LibraryImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static partial bool ShowWindow(IntPtr hWnd, int nCmdShow);
+
+    public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+
+    [LibraryImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static partial bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
+
+    [LibraryImport("user32.dll")]
+    public static partial uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    public static extern int GetWindowText(IntPtr hWnd, StringBuilder lpString, int nMaxCount);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    public static extern int GetClassName(IntPtr hWnd, StringBuilder lpClassName, int nMaxCount);
+
+    [LibraryImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static partial bool IsWindowVisible(IntPtr hWnd);
+
+    [LibraryImport("user32.dll")]
+    public static partial IntPtr GetForegroundWindow();
+
+    [LibraryImport("user32.dll")]
+    public static partial IntPtr GetAncestor(IntPtr hWnd, uint gaFlags);
+
+    public const uint GA_ROOT = 2;
 
     // ────────────────────────────────────────────────────────────────
     //  Extended window styles
@@ -141,12 +169,84 @@ public static partial class Win32Helper
     }
 
     /// <summary>
+    /// Keep a window topmost while a native modal dialog is open.
+    /// </summary>
+    public static void SetWindowTopMost(IntPtr hWnd)
+    {
+        SetWindowTopMost(hWnd, showWindow: true);
+    }
+
+    /// <summary>
+    /// Keep a window topmost, optionally without forcing a hidden owner window visible.
+    /// </summary>
+    public static void SetWindowTopMost(IntPtr hWnd, bool showWindow)
+    {
+        uint flags = SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE;
+        if (showWindow)
+        {
+            flags |= SWP_SHOWWINDOW;
+        }
+
+        SetWindowPos(hWnd, HWND_TOPMOST, 0, 0, 0, 0,
+            flags);
+    }
+
+    /// <summary>
     /// Remove topmost state from a window without changing its size or position.
     /// </summary>
     public static void ClearWindowTopMost(IntPtr hWnd)
     {
         SetWindowPos(hWnd, HWND_NOTOPMOST, 0, 0, 0, 0,
             SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+    }
+
+    public static IReadOnlyList<IntPtr> FindVisibleDialogWindowsForCurrentProcess(IntPtr excludeHwnd)
+    {
+        uint currentProcessId = (uint)Environment.ProcessId;
+        var windows = new List<IntPtr>();
+
+        EnumWindows((hWnd, _) =>
+        {
+            if (hWnd == IntPtr.Zero || hWnd == excludeHwnd || !IsWindowVisible(hWnd))
+            {
+                return true;
+            }
+
+            GetWindowThreadProcessId(hWnd, out uint processId);
+            if (processId != currentProcessId)
+            {
+                return true;
+            }
+
+            string className = GetWindowClassName(hWnd);
+            string title = GetWindowTitle(hWnd);
+            if (className.Equals("#32770", StringComparison.OrdinalIgnoreCase) ||
+                className.Equals("CabinetWClass", StringComparison.OrdinalIgnoreCase) ||
+                title.Contains("Select Folder", StringComparison.OrdinalIgnoreCase) ||
+                title.Contains("选择文件夹", StringComparison.OrdinalIgnoreCase) ||
+                title.Contains("浏览文件夹", StringComparison.OrdinalIgnoreCase))
+            {
+                windows.Add(hWnd);
+            }
+
+            return true;
+        }, IntPtr.Zero);
+
+        return windows;
+    }
+
+    private static string GetWindowTitle(IntPtr hWnd)
+    {
+        var builder = new StringBuilder(256);
+        int length = GetWindowText(hWnd, builder, builder.Capacity);
+        return length > 0 ? builder.ToString(0, length) : string.Empty;
+    }
+
+    private static string GetWindowClassName(IntPtr hWnd)
+    {
+        var builder = new StringBuilder(256);
+        int length = GetClassName(hWnd, builder, builder.Capacity);
+        return length > 0 ? builder.ToString(0, length) : string.Empty;
     }
 
     [StructLayout(LayoutKind.Sequential)]

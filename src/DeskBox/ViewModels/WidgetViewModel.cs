@@ -656,6 +656,10 @@ public partial class WidgetViewModel : ObservableObject, IDisposable
 
     public async Task RefreshFromConfigAsync()
     {
+        using var perfScope = PerformanceLogger.Measure(
+            "WidgetViewModel.RefreshFromConfig",
+            $"id={Config.Id} name={Name}");
+
         Config.WidgetKind = WidgetKind.File;
         Config.IsDisabled = false;
         EnsureFolderBackedConfig();
@@ -906,6 +910,10 @@ public partial class WidgetViewModel : ObservableObject, IDisposable
 
     private async Task LoadFolderContentsAsync(string folderPath)
     {
+        using var perfScope = PerformanceLogger.Measure(
+            "WidgetViewModel.LoadFolderContents",
+            $"id={Config.Id} path={folderPath}");
+
         Items.Clear();
 
         List<WidgetItem> items;
@@ -935,6 +943,11 @@ public partial class WidgetViewModel : ObservableObject, IDisposable
 
     private async Task RefreshShortcutIconsAsync()
     {
+        int shortcutCount = Items.Count(item => item.IsShortcut);
+        using var perfScope = PerformanceLogger.Measure(
+            "WidgetViewModel.RefreshShortcutIcons",
+            $"id={Config.Id} count={shortcutCount}");
+
         foreach (var item in Items.Where(item => item.IsShortcut))
         {
             item.Icon = await _fileService.GetIconAsync(item.Path, _hideShortcutArrowOverlay);
@@ -966,6 +979,10 @@ public partial class WidgetViewModel : ObservableObject, IDisposable
         {
             return;
         }
+
+        using var perfScope = PerformanceLogger.Measure(
+            "WidgetViewModel.OnFolderChanged",
+            $"id={Config.Id} changes={changeBatch.Changes.Count} fullReload={changeBatch.RequiresFullReload}");
 
         await _folderRefreshGate.WaitAsync();
         try

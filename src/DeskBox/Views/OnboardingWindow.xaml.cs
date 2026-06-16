@@ -10,7 +10,6 @@ using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Animation;
 using Microsoft.UI.Xaml.Shapes;
 using Windows.UI;
-using Windows.Storage.Pickers;
 using WinRT.Interop;
 
 namespace DeskBox.Views;
@@ -319,20 +318,13 @@ public sealed partial class OnboardingWindow : Window
 
     private async void ChangeStoragePathButton_Click(object sender, RoutedEventArgs e)
     {
-        var picker = new FolderPicker
-        {
-            SuggestedStartLocation = PickerLocationId.DocumentsLibrary
-        };
-        picker.FileTypeFilter.Add("*");
-        InitializeWithWindow.Initialize(picker, _hWnd);
-
-        var folder = await picker.PickSingleFolderAsync();
-        if (folder is null)
+        string? folderPath = FolderPickerService.PickFolder(_hWnd);
+        if (string.IsNullOrWhiteSpace(folderPath))
         {
             return;
         }
 
-        string normalizedPath = SettingsService.NormalizeManagedStorageRootPath(folder.Path);
+        string normalizedPath = SettingsService.NormalizeManagedStorageRootPath(folderPath);
         string currentPath = SettingsService.NormalizeManagedStorageRootPath(_settingsService.Settings.DefaultManagedStorageRootPath);
         if (string.Equals(normalizedPath, currentPath, StringComparison.OrdinalIgnoreCase))
         {

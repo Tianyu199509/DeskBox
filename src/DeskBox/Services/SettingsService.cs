@@ -20,6 +20,19 @@ public sealed class SettingsService
     public const string WidgetCornerPreferenceSquare = "Square";
     public const string WidgetCornerPreferenceSmall = "Small";
     public const string WidgetCornerPreferenceRound = "Round";
+    public const string WidgetAnimationEffectNone = "None";
+    public const string WidgetAnimationEffectFade = "Fade";
+    public const string WidgetAnimationEffectSlideRight = "SlideRight";
+    public const string WidgetAnimationEffectSlideLeft = "SlideLeft";
+    public const string WidgetAnimationEffectSlideUp = "SlideUp";
+    public const string WidgetAnimationEffectSlideDown = "SlideDown";
+    public const string WidgetAnimationEffectScaleFade = "ScaleFade";
+    public const string WidgetAnimationEffectSlideFade = "SlideFade";
+    public const string WidgetAnimationSpeedVeryFast = "VeryFast";
+    public const string WidgetAnimationSpeedFast = "Fast";
+    public const string WidgetAnimationSpeedStandard = "Standard";
+    public const string WidgetAnimationSpeedRelaxed = "Relaxed";
+    public const string WidgetAnimationSpeedSlow = "Slow";
     public const bool DefaultNativeBackdropBlur = true;
     public const string ManagedDropActionMove = "Move";
     public const string ManagedDropActionCopy = "Copy";
@@ -293,6 +306,31 @@ public sealed class SettingsService
             WidgetCornerPreferenceRound))
         {
             settings.WidgetCornerPreference = WidgetCornerPreferenceSmall;
+            changed = true;
+        }
+
+        if (settings.WidgetAnimationEffect is not (
+            WidgetAnimationEffectNone or
+            WidgetAnimationEffectFade or
+            WidgetAnimationEffectSlideRight or
+            WidgetAnimationEffectSlideLeft or
+            WidgetAnimationEffectSlideUp or
+            WidgetAnimationEffectSlideDown or
+            WidgetAnimationEffectScaleFade or
+            WidgetAnimationEffectSlideFade))
+        {
+            settings.WidgetAnimationEffect = WidgetAnimationEffectSlideFade;
+            changed = true;
+        }
+
+        if (settings.WidgetAnimationSpeed is not (
+            WidgetAnimationSpeedVeryFast or
+            WidgetAnimationSpeedFast or
+            WidgetAnimationSpeedStandard or
+            WidgetAnimationSpeedRelaxed or
+            WidgetAnimationSpeedSlow))
+        {
+            settings.WidgetAnimationSpeed = WidgetAnimationSpeedStandard;
             changed = true;
         }
 

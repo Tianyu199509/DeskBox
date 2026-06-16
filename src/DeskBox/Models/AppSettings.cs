@@ -48,6 +48,16 @@ public class AppSettings
     /// </summary>
     public string WidgetCornerPreference { get; set; } = "Small";
 
+    /// <summary>
+    /// Animation effect used when desktop widgets show or hide.
+    /// </summary>
+    public string WidgetAnimationEffect { get; set; } = "SlideFade";
+
+    /// <summary>
+    /// Animation speed preset used when desktop widgets show or hide.
+    /// </summary>
+    public string WidgetAnimationSpeed { get; set; } = "Standard";
+
     /// <summary>Whether to double click to open files.</summary>
     public bool DoubleClickToOpen { get; set; } = true;
 

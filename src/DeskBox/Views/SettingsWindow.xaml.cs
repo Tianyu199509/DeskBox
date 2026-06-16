@@ -12,7 +12,6 @@ using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Shapes;
 using System.Runtime.InteropServices;
 using System.Text;
-using Windows.Storage.Pickers;
 using WinRT.Interop;
 
 namespace DeskBox.Views;
@@ -41,6 +40,7 @@ public sealed partial class SettingsWindow : Window
     private readonly HashSet<Slider> _pressedAppearanceSliders = [];
     private bool _isSubclassInstalled;
     private bool _isAppearanceSliderDragging;
+    private bool _keepTopMostUntilDeactivate;
 
     public SettingsViewModel ViewModel { get; }
 
@@ -108,13 +108,43 @@ public sealed partial class SettingsWindow : Window
             UpdateResponsiveLayout(args.Size.Width);
         };
 
+        Activated += SettingsWindow_Activated;
         Closed += (_, _) =>
         {
+            Win32Helper.ClearWindowTopMost(_hWnd);
             RemoveMinimumSizeHook();
             _themeService.AppearanceChanged -= OnAppearanceChanged;
             _localizationService.LanguageChanged -= OnLanguageChanged;
             ViewModel.Dispose();
         };
+    }
+
+    public void ActivateFromTray()
+    {
+        _keepTopMostUntilDeactivate = true;
+        Win32Helper.SetWindowTopMost(_hWnd);
+        Activate();
+
+        DispatcherQueue.TryEnqueue(async () =>
+        {
+            await Task.Delay(80);
+            if (_keepTopMostUntilDeactivate)
+            {
+                Win32Helper.SetWindowTopMost(_hWnd);
+            }
+        });
+    }
+
+    private void SettingsWindow_Activated(object sender, WindowActivatedEventArgs args)
+    {
+        if (args.WindowActivationState != WindowActivationState.Deactivated ||
+            !_keepTopMostUntilDeactivate)
+        {
+            return;
+        }
+
+        _keepTopMostUntilDeactivate = false;
+        Win32Helper.ClearWindowTopMost(_hWnd);
     }
 
     private async void AccentColorButton_Click(object sender, RoutedEventArgs e)
@@ -195,6 +225,20 @@ public sealed partial class SettingsWindow : Window
                 values = ViewModel.AvailableWidgetCornerPreferences;
                 applyValue = value => ViewModel.SelectedWidgetCornerPreference = value;
                 displayValue = ViewModel.GetCornerDisplayName;
+                break;
+
+            case "WidgetAnimationEffect":
+                selectedValue = ViewModel.SelectedWidgetAnimationEffect;
+                values = ViewModel.AvailableWidgetAnimationEffects;
+                applyValue = value => ViewModel.SelectedWidgetAnimationEffect = value;
+                displayValue = ViewModel.GetWidgetAnimationEffectDisplayName;
+                break;
+
+            case "WidgetAnimationSpeed":
+                selectedValue = ViewModel.SelectedWidgetAnimationSpeed;
+                values = ViewModel.AvailableWidgetAnimationSpeeds;
+                applyValue = value => ViewModel.SelectedWidgetAnimationSpeed = value;
+                displayValue = ViewModel.GetWidgetAnimationSpeedDisplayName;
                 break;
 
             case "ManagedDropAction":
@@ -422,20 +466,13 @@ public sealed partial class SettingsWindow : Window
             return;
         }
 
-        var picker = new FolderPicker
-        {
-            SuggestedStartLocation = PickerLocationId.DocumentsLibrary
-        };
-        picker.FileTypeFilter.Add("*");
-        InitializeWithWindow.Initialize(picker, _hWnd);
-
-        var folder = await picker.PickSingleFolderAsync();
-        if (folder is null)
+        string? folderPath = FolderPickerService.PickFolder(_hWnd);
+        if (string.IsNullOrWhiteSpace(folderPath))
         {
             return;
         }
 
-        string normalizedPath = SettingsService.NormalizeManagedStorageRootPath(folder.Path);
+        string normalizedPath = SettingsService.NormalizeManagedStorageRootPath(folderPath);
         if (string.Equals(normalizedPath, ViewModel.ManagedStorageRootPath, StringComparison.OrdinalIgnoreCase))
         {
             return;

@@ -31,6 +31,7 @@ public sealed class FileService
     /// </summary>
     public async Task<List<WidgetItem>> EnumerateDirectoryAsync(string directoryPath, bool hideShortcutArrowOverlay = false)
     {
+        using var perfScope = PerformanceLogger.Measure("FileService.EnumerateDirectory", $"path={directoryPath}");
         var items = new List<WidgetItem>();
 
         if (!Directory.Exists(directoryPath))
@@ -81,6 +82,7 @@ public sealed class FileService
     /// </summary>
     public async Task<WidgetItem> CreateWidgetItemAsync(string path, bool hideShortcutArrowOverlay = false)
     {
+        using var perfScope = PerformanceLogger.Measure("FileService.CreateWidgetItem", $"path={path}");
         var item = new WidgetItem
         {
             Path = path,

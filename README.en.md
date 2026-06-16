@@ -17,20 +17,18 @@ Download the latest installer from [GitHub Releases](https://github.com/Tianyu19
 
 Current release:
 
-- [DeskBox_Setup_1.0.2_x64.exe](https://github.com/Tianyu199509/DeskBox/releases/download/v1.0.2/DeskBox_Setup_1.0.2_x64.exe)
+- [DeskBox_Setup_1.0.3_x64.exe](https://github.com/Tianyu199509/DeskBox/releases/download/v1.0.3/DeskBox_Setup_1.0.3_x64.exe)
 
 The installer checks for .NET 8 Runtime x64 and Windows App Runtime 2.1.3 x64. If either dependency is missing, the setup flow can download and install it for you.
 
-## What's New In 1.0.2
+## What's New In 1.0.3
 
-- Added full Chinese and English localization across widgets, settings, onboarding, tray menus, dialogs, notes, and status messages.
-- Reworked onboarding so users can set core options while learning the product, including move vs. copy behavior, the default storage path, folder mapping, and startup launch.
-- Improved the onboarding visuals and copy so every step has a clearer, matching animated scene.
-- Fixed startup launch behavior so DeskBox starts silently to the tray instead of opening Settings after reboot.
-- Improved broken shortcut handling by using the native Windows shortcut resolution/delete prompt.
-- Reworked widget show/hide animation to use a unified right-to-left motion with no per-widget cascade, reducing flicker and duplicated icon animations.
-- Improved tray behavior so "Show all widgets" from the right-click menu temporarily raises widgets just like left-clicking the tray icon.
-- Improved selection behavior, drag selection smoothness, mapped-folder refresh behavior, and light-mode text/background contrast.
+- Added widget show/hide animation effect and speed settings, including slide, fade, scale fade, and no-animation options.
+- Improved the animation pipeline to reduce acrylic surface flicker, black backing, and duplicated icon motion.
+- Improved tray left-click behavior so widgets hidden behind other windows are raised first, then hidden on the next click.
+- Improved the tray Settings command so the Settings window opens temporarily on top and returns to normal layering after focus leaves.
+- Improved temporary foreground behavior for new widgets, widget dragging, and native folder picker flows.
+- Added performance logging support to help diagnose future stutter and startup timing issues.
 
 See the full [changelog](CHANGELOG.md).
 
@@ -108,7 +106,7 @@ dotnet publish .\src\DeskBox\DeskBox.csproj --configuration Release -p:Platform=
 Installer output:
 
 ```text
-Output\DeskBox_Setup_1.0.2_x64.exe
+Output\DeskBox_Setup_1.0.3_x64.exe
 ```
 
 ## Project Structure

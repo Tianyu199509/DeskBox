@@ -31,6 +31,8 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
     private string _selectedLanguage = SettingsService.LanguageSystem;
     private string _selectedManagedDropAction = SettingsService.ManagedDropActionMove;
     private string _selectedWidgetCornerPreference = CornerSmall;
+    private string _selectedWidgetAnimationEffect = SettingsService.WidgetAnimationEffectSlideFade;
+    private string _selectedWidgetAnimationSpeed = SettingsService.WidgetAnimationSpeedStandard;
     private bool _useSystemAccentColor;
     private string _accentColorHex = AccentColorHelper.DefaultAccentColorHex;
     private string _managedStorageRootPath = SettingsService.GetDefaultManagedStorageRootPath();
@@ -171,6 +173,52 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
 
     public string SelectedWidgetCornerPreferenceText => GetCornerDisplayName(SelectedWidgetCornerPreference);
 
+    public string SelectedWidgetAnimationEffect
+    {
+        get => _selectedWidgetAnimationEffect;
+        set
+        {
+            if (!SetProperty(ref _selectedWidgetAnimationEffect, NormalizeWidgetAnimationEffect(value)))
+            {
+                return;
+            }
+
+            if (_isRestoringDefaults)
+            {
+                return;
+            }
+
+            _settingsService.Settings.WidgetAnimationEffect = _selectedWidgetAnimationEffect;
+            _settingsService.SaveDebounced();
+            OnPropertyChanged(nameof(SelectedWidgetAnimationEffectText));
+        }
+    }
+
+    public string SelectedWidgetAnimationEffectText => GetWidgetAnimationEffectDisplayName(SelectedWidgetAnimationEffect);
+
+    public string SelectedWidgetAnimationSpeed
+    {
+        get => _selectedWidgetAnimationSpeed;
+        set
+        {
+            if (!SetProperty(ref _selectedWidgetAnimationSpeed, NormalizeWidgetAnimationSpeed(value)))
+            {
+                return;
+            }
+
+            if (_isRestoringDefaults)
+            {
+                return;
+            }
+
+            _settingsService.Settings.WidgetAnimationSpeed = _selectedWidgetAnimationSpeed;
+            _settingsService.SaveDebounced();
+            OnPropertyChanged(nameof(SelectedWidgetAnimationSpeedText));
+        }
+    }
+
+    public string SelectedWidgetAnimationSpeedText => GetWidgetAnimationSpeedDisplayName(SelectedWidgetAnimationSpeed);
+
     public string AccentColorHex
     {
         get => _accentColorHex;
@@ -284,6 +332,25 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
     public string[] AvailableLanguages { get; } = [SettingsService.LanguageSystem, SettingsService.LanguageChinese, SettingsService.LanguageEnglish];
     public string[] AvailableManagedDropActions { get; } = [SettingsService.ManagedDropActionMove, SettingsService.ManagedDropActionCopy];
     public string[] AvailableWidgetCornerPreferences { get; } = [CornerSmall, CornerRound, CornerSquare, CornerDefault];
+    public string[] AvailableWidgetAnimationEffects { get; } =
+    [
+        SettingsService.WidgetAnimationEffectSlideFade,
+        SettingsService.WidgetAnimationEffectSlideRight,
+        SettingsService.WidgetAnimationEffectSlideLeft,
+        SettingsService.WidgetAnimationEffectSlideUp,
+        SettingsService.WidgetAnimationEffectSlideDown,
+        SettingsService.WidgetAnimationEffectFade,
+        SettingsService.WidgetAnimationEffectScaleFade,
+        SettingsService.WidgetAnimationEffectNone
+    ];
+    public string[] AvailableWidgetAnimationSpeeds { get; } =
+    [
+        SettingsService.WidgetAnimationSpeedVeryFast,
+        SettingsService.WidgetAnimationSpeedFast,
+        SettingsService.WidgetAnimationSpeedStandard,
+        SettingsService.WidgetAnimationSpeedRelaxed,
+        SettingsService.WidgetAnimationSpeedSlow
+    ];
 
     public string AppVersion =>
         Assembly.GetExecutingAssembly()
@@ -320,6 +387,8 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
         _selectedWidgetCornerPreference = settings.WidgetCornerPreference is CornerDefault or CornerSquare or CornerSmall or CornerRound
             ? settings.WidgetCornerPreference
             : CornerSmall;
+        _selectedWidgetAnimationEffect = NormalizeWidgetAnimationEffect(settings.WidgetAnimationEffect);
+        _selectedWidgetAnimationSpeed = NormalizeWidgetAnimationSpeed(settings.WidgetAnimationSpeed);
         _iconSize = settings.IconSize;
         _textSize = settings.TextSize;
         _layoutDensityScale = settings.LayoutDensityScale;
@@ -383,6 +452,8 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
             DefaultWidth = SettingsService.DefaultWidgetWidth;
             DefaultHeight = SettingsService.DefaultWidgetHeight;
             SelectedWidgetCornerPreference = CornerSmall;
+            SelectedWidgetAnimationEffect = SettingsService.WidgetAnimationEffectSlideFade;
+            SelectedWidgetAnimationSpeed = SettingsService.WidgetAnimationSpeedStandard;
             WidgetOpacity = SettingsService.DefaultWidgetOpacity;
             IconSize = SettingsService.DefaultIconSize;
             TextSize = SettingsService.DefaultTextSize;
@@ -401,6 +472,8 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
             settings.DefaultWidgetWidth = SettingsService.DefaultWidgetWidth;
             settings.DefaultWidgetHeight = SettingsService.DefaultWidgetHeight;
             settings.WidgetCornerPreference = SettingsService.WidgetCornerPreferenceSmall;
+            settings.WidgetAnimationEffect = SettingsService.WidgetAnimationEffectSlideFade;
+            settings.WidgetAnimationSpeed = SettingsService.WidgetAnimationSpeedStandard;
             settings.UseNativeBackdropBlur = SettingsService.DefaultNativeBackdropBlur;
             settings.WidgetOpacity = SettingsService.DefaultWidgetOpacity;
             settings.IconSize = SettingsService.DefaultIconSize;
@@ -459,6 +532,33 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
         };
     }
 
+    public string GetWidgetAnimationEffectDisplayName(string effect)
+    {
+        return NormalizeWidgetAnimationEffect(effect) switch
+        {
+            SettingsService.WidgetAnimationEffectNone => _localizationService.T("Settings.Animation.Effect.None"),
+            SettingsService.WidgetAnimationEffectFade => _localizationService.T("Settings.Animation.Effect.Fade"),
+            SettingsService.WidgetAnimationEffectSlideRight => _localizationService.T("Settings.Animation.Effect.SlideRight"),
+            SettingsService.WidgetAnimationEffectSlideLeft => _localizationService.T("Settings.Animation.Effect.SlideLeft"),
+            SettingsService.WidgetAnimationEffectSlideUp => _localizationService.T("Settings.Animation.Effect.SlideUp"),
+            SettingsService.WidgetAnimationEffectSlideDown => _localizationService.T("Settings.Animation.Effect.SlideDown"),
+            SettingsService.WidgetAnimationEffectScaleFade => _localizationService.T("Settings.Animation.Effect.ScaleFade"),
+            _ => _localizationService.T("Settings.Animation.Effect.SlideFade")
+        };
+    }
+
+    public string GetWidgetAnimationSpeedDisplayName(string speed)
+    {
+        return NormalizeWidgetAnimationSpeed(speed) switch
+        {
+            SettingsService.WidgetAnimationSpeedVeryFast => _localizationService.T("Settings.Animation.Speed.VeryFast"),
+            SettingsService.WidgetAnimationSpeedFast => _localizationService.T("Settings.Animation.Speed.Fast"),
+            SettingsService.WidgetAnimationSpeedRelaxed => _localizationService.T("Settings.Animation.Speed.Relaxed"),
+            SettingsService.WidgetAnimationSpeedSlow => _localizationService.T("Settings.Animation.Speed.Slow"),
+            _ => _localizationService.T("Settings.Animation.Speed.Standard")
+        };
+    }
+
     public string GetLanguageDisplayName(string language)
     {
         return _localizationService.GetLanguageDisplayName(language);
@@ -475,9 +575,38 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(SelectedLanguageText));
         OnPropertyChanged(nameof(SelectedManagedDropActionText));
         OnPropertyChanged(nameof(SelectedWidgetCornerPreferenceText));
+        OnPropertyChanged(nameof(SelectedWidgetAnimationEffectText));
+        OnPropertyChanged(nameof(SelectedWidgetAnimationSpeedText));
         OnPropertyChanged(nameof(AccentColorDescription));
         OnPropertyChanged(nameof(AboutVersionText));
         OnPropertyChanged(nameof(OpenSourceRepositoryDisplayText));
+    }
+
+    private static string NormalizeWidgetAnimationEffect(string? effect)
+    {
+        return effect is
+            SettingsService.WidgetAnimationEffectNone or
+            SettingsService.WidgetAnimationEffectFade or
+            SettingsService.WidgetAnimationEffectSlideRight or
+            SettingsService.WidgetAnimationEffectSlideLeft or
+            SettingsService.WidgetAnimationEffectSlideUp or
+            SettingsService.WidgetAnimationEffectSlideDown or
+            SettingsService.WidgetAnimationEffectScaleFade or
+            SettingsService.WidgetAnimationEffectSlideFade
+            ? effect
+            : SettingsService.WidgetAnimationEffectSlideFade;
+    }
+
+    private static string NormalizeWidgetAnimationSpeed(string? speed)
+    {
+        return speed is
+            SettingsService.WidgetAnimationSpeedVeryFast or
+            SettingsService.WidgetAnimationSpeedFast or
+            SettingsService.WidgetAnimationSpeedStandard or
+            SettingsService.WidgetAnimationSpeedRelaxed or
+            SettingsService.WidgetAnimationSpeedSlow
+            ? speed
+            : SettingsService.WidgetAnimationSpeedStandard;
     }
 
     partial void OnAutoStartChanged(bool value)

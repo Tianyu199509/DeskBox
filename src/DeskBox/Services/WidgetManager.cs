@@ -3,7 +3,6 @@ using DeskBox.ViewModels;
 using DeskBox.Views;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Windowing;
-using Microsoft.UI.Xaml.Media.Animation;
 
 namespace DeskBox.Services;
 
@@ -42,9 +41,8 @@ public sealed class WidgetManager
     private bool _widgetsRaisedFromTray;
     private bool _isTogglingWidgetsDesktopLayer;
     private bool _isApplyingAppearancePreview;
-    private DispatcherQueueTimer? _bulkTrayAnimationTimer;
-    private long _bulkTrayAnimationGeneration;
     private DateTime _lastTrayLayerToggleUtc = DateTime.MinValue;
+    private DateTime _suppressTrayLayerRestoreUntilUtc = DateTime.MinValue;
 
     public IReadOnlyDictionary<string, (WidgetWindow Window, WidgetViewModel ViewModel)> Widgets => _widgets;
 
@@ -52,6 +50,7 @@ public sealed class WidgetManager
 
     public event Action<WidgetWindow>? WidgetCreated;
     public event Action<string>? WidgetRemoved;
+    public event Action<bool>? TrayLayerStateChanged;
 
     public WidgetManager(
         SettingsService settingsService,
@@ -134,14 +133,21 @@ public sealed class WidgetManager
     /// </summary>
     public async Task RestoreWidgetsAsync()
     {
-        foreach (var config in _settingsService.Settings.Widgets.Where(widget =>
-                     widget.WidgetKind == WidgetKind.File &&
-                     widget.IsVisible &&
-                     !widget.IsDisabled &&
-                     !IsDeleted(widget.Id)).ToList())
+        var configs = _settingsService.Settings.Widgets.Where(widget =>
+                widget.WidgetKind == WidgetKind.File &&
+                widget.IsVisible &&
+                !widget.IsDisabled &&
+                !IsDeleted(widget.Id))
+            .ToList();
+
+        using var perfScope = PerformanceLogger.Measure("WidgetManager.RestoreWidgets", $"count={configs.Count}");
+        foreach (var config in configs)
         {
             try
             {
+                using var widgetPerfScope = PerformanceLogger.Measure(
+                    "WidgetManager.RestoreWidget",
+                    $"id={config.Id} name={config.Name}");
                 await CreateWidgetFromConfigAsync(config);
             }
             catch (Exception ex)
@@ -179,7 +185,7 @@ public sealed class WidgetManager
         _settingsService.Settings.Widgets.Add(config);
         await _settingsService.SaveAsync();
 
-        return await CreateWidgetFromConfigAsync(config);
+        return await CreateWidgetFromConfigAsync(config, revealAfterCreate: true);
     }
 
     /// <summary>
@@ -200,7 +206,7 @@ public sealed class WidgetManager
         _settingsService.Settings.Widgets.Add(config);
         await _settingsService.SaveAsync();
 
-        return await CreateWidgetFromConfigAsync(config);
+        return await CreateWidgetFromConfigAsync(config, revealAfterCreate: true);
     }
 
     /// <summary>
@@ -253,6 +259,7 @@ public sealed class WidgetManager
     /// </summary>
     public async Task<bool?> RaiseWidgetsFromTrayAsync()
     {
+        using var perfScope = PerformanceLogger.Measure("WidgetManager.RaiseWidgetsFromTray");
         var now = DateTime.UtcNow;
         if (_isTogglingWidgetsDesktopLayer || now - _lastTrayLayerToggleUtc < TimeSpan.FromMilliseconds(320))
         {
@@ -282,8 +289,10 @@ public sealed class WidgetManager
                 window.ShowPreparedRaisedFromTray();
             }
 
+            _suppressTrayLayerRestoreUntilUtc = DateTime.UtcNow.AddMilliseconds(500);
             PlayPreparedTrayShowAnimations(windowsToRaise);
-            _widgetsRaisedFromTray = windowsToRaise.Count > 0;
+            windowsToRaise.LastOrDefault()?.ActivateRaisedFromTrayBatch();
+            SetWidgetsRaisedFromTray(windowsToRaise.Count > 0);
             return _widgetsRaisedFromTray;
         }
         finally
@@ -297,6 +306,7 @@ public sealed class WidgetManager
     /// </summary>
     public async Task SetAllWidgetsVisibleAsync(bool visible)
     {
+        using var perfScope = PerformanceLogger.Measure("WidgetManager.SetAllWidgetsVisible", $"visible={visible}");
         if (visible)
         {
             var windowsToShow = new List<WidgetWindow>();
@@ -329,7 +339,7 @@ public sealed class WidgetManager
 
         PlayPreparedTrayHideAnimations(windowsToHide);
 
-        _widgetsRaisedFromTray = false;
+        SetWidgetsRaisedFromTray(false);
     }
 
     /// <summary>
@@ -400,102 +410,18 @@ public sealed class WidgetManager
 
     private void PlayPreparedTrayShowAnimations(IReadOnlyList<WidgetWindow> windows)
     {
-        PlayPreparedTrayAnimations(
-            windows,
-            WidgetWindow.WidgetSlideOffsetX,
-            0,
-            WidgetWindow.WidgetShowAnimationMs,
-            EasingMode.EaseOut,
-            window => window.CompleteTrayShowWithoutAnimation());
+        foreach (var window in windows)
+        {
+            window.PlayTrayShowAnimation();
+        }
     }
 
     private void PlayPreparedTrayHideAnimations(IReadOnlyList<WidgetWindow> windows)
     {
-        PlayPreparedTrayAnimations(
-            windows,
-            0,
-            WidgetWindow.WidgetSlideOffsetX,
-            WidgetWindow.WidgetHideAnimationMs,
-            EasingMode.EaseIn,
-            window => window.CompleteTrayHideAnimation());
-    }
-
-    private void PlayPreparedTrayAnimations(
-        IReadOnlyList<WidgetWindow> windows,
-        double from,
-        double to,
-        int durationMs,
-        EasingMode easingMode,
-        Action<WidgetWindow> completed)
-    {
-        StopBulkTrayAnimation();
-
-        if (windows.Count == 0)
+        foreach (var window in windows)
         {
-            return;
+            window.PlayPreparedTrayHideAnimation();
         }
-
-        var animationWindows = windows.ToList();
-        long animationGeneration = _bulkTrayAnimationGeneration;
-        foreach (var window in animationWindows)
-        {
-            window.ApplyPreparedTrayAnimationOffset(from);
-        }
-
-        var startTime = DateTime.UtcNow;
-        _bulkTrayAnimationTimer = DispatcherQueue.GetForCurrentThread().CreateTimer();
-        _bulkTrayAnimationTimer.Interval = TimeSpan.FromMilliseconds(WidgetWindow.WindowAnimationFrameMs);
-        _bulkTrayAnimationTimer.Tick += (_, _) =>
-        {
-            if (animationGeneration != _bulkTrayAnimationGeneration)
-            {
-                StopBulkTrayAnimation();
-                return;
-            }
-
-            double elapsedMs = (DateTime.UtcNow - startTime).TotalMilliseconds;
-            double progress = Math.Clamp(elapsedMs / Math.Max(1, durationMs), 0.0, 1.0);
-            double easedProgress = EaseCubic(progress, easingMode);
-            double offsetX = from + ((to - from) * easedProgress);
-
-            foreach (var window in animationWindows)
-            {
-                window.ApplyPreparedTrayAnimationOffset(offsetX);
-            }
-
-            if (progress < 1.0)
-            {
-                return;
-            }
-
-            StopBulkTrayAnimation();
-            foreach (var window in animationWindows)
-            {
-                window.ApplyPreparedTrayAnimationOffset(to);
-                completed(window);
-            }
-        };
-        _bulkTrayAnimationTimer.Start();
-    }
-
-    private void StopBulkTrayAnimation()
-    {
-        _bulkTrayAnimationTimer?.Stop();
-        _bulkTrayAnimationTimer = null;
-        _bulkTrayAnimationGeneration++;
-    }
-
-    private static double EaseCubic(double progress, EasingMode easingMode)
-    {
-        progress = Math.Clamp(progress, 0.0, 1.0);
-        return easingMode switch
-        {
-            EasingMode.EaseIn => progress * progress * progress,
-            EasingMode.EaseOut => 1 - Math.Pow(1 - progress, 3),
-            EasingMode.EaseInOut when progress < 0.5 => 4 * progress * progress * progress,
-            EasingMode.EaseInOut => 1 - Math.Pow(-2 * progress + 2, 3) / 2,
-            _ => progress
-        };
     }
 
     public bool CanCleanupManagedStorageForWidget(string widgetId)
@@ -556,6 +482,33 @@ public sealed class WidgetManager
 
         entry.Window.HideWindow();
         return true;
+    }
+
+    public void RestoreRaisedWidgetsToDesktopLayer()
+    {
+        if (_isTogglingWidgetsDesktopLayer ||
+            DateTime.UtcNow < _suppressTrayLayerRestoreUntilUtc)
+        {
+            return;
+        }
+
+        foreach (var (_, (window, _)) in _widgets.ToList())
+        {
+            window.RestoreDesktopLayerFromManager();
+        }
+
+        SetWidgetsRaisedFromTray(false);
+    }
+
+    private void SetWidgetsRaisedFromTray(bool raised)
+    {
+        if (_widgetsRaisedFromTray == raised)
+        {
+            return;
+        }
+
+        _widgetsRaisedFromTray = raised;
+        TrayLayerStateChanged?.Invoke(raised);
     }
 
     public async Task NotifyItemsMovedOutAsync(string widgetId, IEnumerable<string> sourcePaths)
@@ -631,7 +584,6 @@ public sealed class WidgetManager
     /// </summary>
     public void CloseAll()
     {
-        StopBulkTrayAnimation();
         _settingsService.AppearancePreviewChanged -= ApplyAppearancePreview;
         _themeService.AppearanceChanged -= ApplyAppearancePreview;
 
@@ -941,7 +893,10 @@ public sealed class WidgetManager
         return !string.Equals(_settingsService.Settings.ManagedDropAction, SettingsService.ManagedDropActionCopy, StringComparison.OrdinalIgnoreCase);
     }
 
-    private async Task<WidgetWindow> CreateWidgetFromConfigAsync(WidgetConfig config, bool keepPreparedForAnimation = false)
+    private async Task<WidgetWindow> CreateWidgetFromConfigAsync(
+        WidgetConfig config,
+        bool keepPreparedForAnimation = false,
+        bool revealAfterCreate = false)
     {
         if (_widgets.TryGetValue(config.Id, out var existing))
         {
@@ -983,6 +938,10 @@ public sealed class WidgetManager
             if (!keepPreparedForAnimation)
             {
                 window.CompleteTrayShowWithoutAnimation();
+                if (revealAfterCreate)
+                {
+                    window.RevealFromTray(autoRestore: false);
+                }
             }
         }
         catch

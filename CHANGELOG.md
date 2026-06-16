@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.0.3 - 2026-06-16
+
+- Added configurable widget show/hide animation effects and speed presets in Settings, with Chinese and English labels.
+- Reworked tray animation execution to use smoother frame pacing, real window movement for slide effects, and composition-driven opacity/scale transitions.
+- Reduced widget animation flicker by avoiding duplicate item transitions during mapped-folder reveal and by restoring the final visual state consistently.
+- Improved tray left-click behavior so visible desktop-layer widgets hidden behind other apps are raised temporarily instead of being hidden immediately.
+- Improved tray-launched Settings behavior so the Settings window opens temporarily on top and clears topmost state after focus leaves.
+- Improved temporary foreground behavior for newly created widgets, widget dragging, and folder picker ownership.
+- Added performance logging support and coverage for the performance logger.
+
 ## 1.0.2 - 2026-06-16
 
 - Added Chinese and English localization across widgets, settings, tray menus, onboarding, dialogs, notes, empty states, and status messages.

@@ -1,6 +1,7 @@
 using System.Drawing;
 using System.Runtime.InteropServices;
 using System.Collections.Concurrent;
+using DeskBox.Services;
 using Microsoft.UI.Xaml.Media.Imaging;
 
 namespace DeskBox.Helpers;
@@ -49,6 +50,7 @@ public static class IconHelper
     /// </summary>
     public static async Task<BitmapImage?> GetIconAsync(string path, bool hideShortcutArrowOverlay = false)
     {
+        using var perfScope = PerformanceLogger.Measure("IconHelper.GetIcon", $"path={path}");
         var dispatcher = App.UiDispatcherQueue;
         if (dispatcher == null || string.IsNullOrWhiteSpace(path))
         {
@@ -93,6 +95,7 @@ public static class IconHelper
 
     private static byte[]? LoadIconBytes(string resolvedPath)
     {
+        using var perfScope = PerformanceLogger.Measure("IconHelper.LoadIconBytes", $"path={resolvedPath}");
         try
         {
             var shinfo = new SHFILEINFO();
