@@ -57,6 +57,8 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
     [ObservableProperty] private double _horizontalSpacingScale = SettingsService.DefaultHorizontalSpacingScale;
     [ObservableProperty] private double _verticalSpacingScale = SettingsService.DefaultVerticalSpacingScale;
     [ObservableProperty] private double _fileNameWidthScale = SettingsService.DefaultFileNameWidthScale;
+    [ObservableProperty] private bool _showFileExtensions;
+    [ObservableProperty] private bool _hideShortcutExtensionWhenShowingFileExtensions = true;
 
     public string SelectedTheme
     {
@@ -532,6 +534,8 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
         _horizontalSpacingScale = settings.HorizontalSpacingScale;
         _verticalSpacingScale = settings.VerticalSpacingScale;
         _fileNameWidthScale = settings.FileNameWidthScale;
+        _showFileExtensions = settings.ShowFileExtensions;
+        _hideShortcutExtensionWhenShowingFileExtensions = settings.HideShortcutExtensionWhenShowingFileExtensions;
         _selectedManagedDropAction = string.Equals(settings.ManagedDropAction, SettingsService.ManagedDropActionCopy, StringComparison.OrdinalIgnoreCase)
             ? SettingsService.ManagedDropActionCopy
             : SettingsService.ManagedDropActionMove;
@@ -600,6 +604,8 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
             HorizontalSpacingScale = SettingsService.DefaultHorizontalSpacingScale;
             VerticalSpacingScale = SettingsService.DefaultVerticalSpacingScale;
             FileNameWidthScale = SettingsService.DefaultFileNameWidthScale;
+            ShowFileExtensions = false;
+            HideShortcutExtensionWhenShowingFileExtensions = true;
             SelectedManagedDropAction = SettingsService.ManagedDropActionMove;
             DoubleClickToOpen = true;
             HideShortcutArrowOverlay = true;
@@ -621,6 +627,8 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
             settings.HorizontalSpacingScale = SettingsService.DefaultHorizontalSpacingScale;
             settings.VerticalSpacingScale = SettingsService.DefaultVerticalSpacingScale;
             settings.FileNameWidthScale = SettingsService.DefaultFileNameWidthScale;
+            settings.ShowFileExtensions = false;
+            settings.HideShortcutExtensionWhenShowingFileExtensions = true;
             settings.ManagedDropAction = SettingsService.ManagedDropActionMove;
             settings.GlobalHotkeyEnabled = SettingsService.DefaultGlobalHotkeyEnabled;
             settings.GlobalHotkeyModifiers = SettingsService.DefaultGlobalHotkeyModifiers;
@@ -862,6 +870,28 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
         }
 
         _settingsService.Settings.ShowListItemDetails = value;
+        _settingsService.SaveDebounced();
+    }
+
+    partial void OnShowFileExtensionsChanged(bool value)
+    {
+        if (_isRestoringDefaults)
+        {
+            return;
+        }
+
+        _settingsService.Settings.ShowFileExtensions = value;
+        _settingsService.SaveDebounced();
+    }
+
+    partial void OnHideShortcutExtensionWhenShowingFileExtensionsChanged(bool value)
+    {
+        if (_isRestoringDefaults)
+        {
+            return;
+        }
+
+        _settingsService.Settings.HideShortcutExtensionWhenShowingFileExtensions = value;
         _settingsService.SaveDebounced();
     }
 

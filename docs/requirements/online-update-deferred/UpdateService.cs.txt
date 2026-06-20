@@ -1,0 +1,295 @@
+using System.Diagnostics;
+using System.Globalization;
+using System.Net.Http;
+using System.Security.Cryptography;
+using System.Text.Json;
+using DeskBox.Models;
+
+namespace DeskBox.Services;
+
+public sealed class UpdateService : IDisposable
+{
+    public const string DefaultManifestUrl = "https://update.deskbox.app/deskbox/v1/stable/win-x64.json";
+
+    private static readonly JsonSerializerOptions SerializerOptions = new()
+    {
+        PropertyNameCaseInsensitive = true,
+        ReadCommentHandling = JsonCommentHandling.Skip,
+        AllowTrailingCommas = true
+    };
+
+    private readonly HttpClient _httpClient;
+    private readonly string _manifestUrl;
+    private readonly bool _ownsHttpClient;
+
+    public UpdateService(string manifestUrl = DefaultManifestUrl)
+        : this(new HttpClient
+        {
+            Timeout = TimeSpan.FromSeconds(12)
+        }, manifestUrl, ownsHttpClient: true)
+    {
+    }
+
+    public UpdateService(HttpClient httpClient, string manifestUrl = DefaultManifestUrl, bool ownsHttpClient = false)
+    {
+        _httpClient = httpClient;
+        _manifestUrl = manifestUrl;
+        _ownsHttpClient = ownsHttpClient;
+    }
+
+    public async Task<UpdateCheckResult> CheckForUpdateAsync(string currentVersion, CancellationToken cancellationToken = default)
+    {
+        if (!Uri.TryCreate(_manifestUrl, UriKind.Absolute, out var manifestUri) ||
+            manifestUri.Scheme is not ("https" or "http"))
+        {
+            return new UpdateCheckResult(UpdateCheckStatus.Unavailable, ErrorMessage: "Update manifest URL is invalid.");
+        }
+
+        try
+        {
+            using var response = await _httpClient.GetAsync(manifestUri, cancellationToken);
+            if (!response.IsSuccessStatusCode)
+            {
+                return new UpdateCheckResult(
+                    UpdateCheckStatus.NetworkError,
+                    ErrorMessage: $"Update server returned {(int)response.StatusCode}.");
+            }
+
+            await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+            var manifest = await JsonSerializer.DeserializeAsync<UpdateManifest>(stream, SerializerOptions, cancellationToken);
+            if (!IsUsableManifest(manifest))
+            {
+                return new UpdateCheckResult(UpdateCheckStatus.InvalidManifest, manifest);
+            }
+
+            return IsNewerVersion(manifest.LatestVersion!, currentVersion)
+                ? new UpdateCheckResult(UpdateCheckStatus.UpdateAvailable, manifest)
+                : new UpdateCheckResult(UpdateCheckStatus.UpToDate, manifest);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            return new UpdateCheckResult(UpdateCheckStatus.NetworkError, ErrorMessage: "Update check timed out.");
+        }
+        catch (Exception ex) when (ex is HttpRequestException or JsonException or IOException or InvalidOperationException)
+        {
+            return new UpdateCheckResult(UpdateCheckStatus.NetworkError, ErrorMessage: ex.Message);
+        }
+    }
+
+    public async Task<string> DownloadInstallerAsync(
+        UpdateManifest manifest,
+        IProgress<double>? progress = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (manifest.Download is not { } download ||
+            string.IsNullOrWhiteSpace(download.Url) ||
+            !Uri.TryCreate(download.Url, UriKind.Absolute, out var downloadUri) ||
+            downloadUri.Scheme is not ("https" or "http"))
+        {
+            throw new InvalidOperationException("Update download URL is missing or invalid.");
+        }
+
+        string fileName = GetSafeInstallerFileName(download);
+        string updateDirectory = GetUpdateCacheDirectory();
+        Directory.CreateDirectory(updateDirectory);
+        string tempPath = Path.Combine(updateDirectory, fileName + ".download");
+        string destinationPath = Path.Combine(updateDirectory, fileName);
+
+        using var response = await _httpClient.GetAsync(downloadUri, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+        response.EnsureSuccessStatusCode();
+
+        long? contentLength = response.Content.Headers.ContentLength;
+        long expectedLength = download.Size > 0 ? download.Size : contentLength ?? 0;
+        await using (var input = await response.Content.ReadAsStreamAsync(cancellationToken))
+        await using (var output = new FileStream(tempPath, FileMode.Create, FileAccess.Write, FileShare.None, 81920, useAsync: true))
+        {
+            var buffer = new byte[81920];
+            long totalRead = 0;
+            while (true)
+            {
+                int read = await input.ReadAsync(buffer, cancellationToken);
+                if (read <= 0)
+                {
+                    break;
+                }
+
+                await output.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
+                totalRead += read;
+                if (expectedLength > 0)
+                {
+                    progress?.Report(Math.Clamp((double)totalRead / expectedLength, 0, 1));
+                }
+            }
+        }
+
+        if (expectedLength > 0)
+        {
+            var fileInfo = new FileInfo(tempPath);
+            if (fileInfo.Length != expectedLength)
+            {
+                File.Delete(tempPath);
+                throw new IOException("Downloaded installer size does not match the update manifest.");
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(download.Sha256) &&
+            !await VerifySha256Async(tempPath, download.Sha256, cancellationToken))
+        {
+            File.Delete(tempPath);
+            throw new InvalidDataException("Downloaded installer checksum does not match the update manifest.");
+        }
+
+        if (File.Exists(destinationPath))
+        {
+            File.Delete(destinationPath);
+        }
+
+        File.Move(tempPath, destinationPath);
+        progress?.Report(1);
+        return destinationPath;
+    }
+
+    public void LaunchInstaller(string installerPath)
+    {
+        if (string.IsNullOrWhiteSpace(installerPath) || !File.Exists(installerPath))
+        {
+            throw new FileNotFoundException("Update installer was not found.", installerPath);
+        }
+
+        Process.Start(new ProcessStartInfo
+        {
+            FileName = installerPath,
+            UseShellExecute = true,
+            Verb = "runas"
+        });
+    }
+
+    public static bool IsNewerVersion(string latestVersion, string currentVersion)
+    {
+        if (!TryParseVersion(latestVersion, out var latest) ||
+            !TryParseVersion(currentVersion, out var current))
+        {
+            return string.Compare(latestVersion, currentVersion, StringComparison.OrdinalIgnoreCase) > 0;
+        }
+
+        return latest > current;
+    }
+
+    public static string GetReleaseNotesSummary(UpdateManifest? manifest)
+    {
+        if (manifest?.ReleaseNotes is not { } notes)
+        {
+            return string.Empty;
+        }
+
+        var lines = new List<string>();
+        if (!string.IsNullOrWhiteSpace(notes.Summary))
+        {
+            lines.Add(notes.Summary.Trim());
+        }
+
+        foreach (var item in notes.Items.Where(item => !string.IsNullOrWhiteSpace(item.Text)))
+        {
+            lines.Add($"- {item.Text!.Trim()}");
+        }
+
+        return string.Join(Environment.NewLine, lines);
+    }
+
+    public void Dispose()
+    {
+        if (_ownsHttpClient)
+        {
+            _httpClient.Dispose();
+        }
+    }
+
+    private static bool IsUsableManifest(UpdateManifest? manifest)
+    {
+        return manifest is not null &&
+               manifest.ManifestVersion >= 1 &&
+               !string.IsNullOrWhiteSpace(manifest.LatestVersion);
+    }
+
+    private static bool TryParseVersion(string value, out Version version)
+    {
+        version = new Version(0, 0);
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return false;
+        }
+
+        string normalized = value.Trim();
+        if (normalized.StartsWith('v') || normalized.StartsWith('V'))
+        {
+            normalized = normalized[1..];
+        }
+
+        int suffixIndex = normalized.IndexOfAny(['-', '+']);
+        if (suffixIndex >= 0)
+        {
+            normalized = normalized[..suffixIndex];
+        }
+
+        string[] parts = normalized.Split('.', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (parts.Length is < 2 or > 4)
+        {
+            return false;
+        }
+
+        var parsedParts = new int[4];
+        for (int i = 0; i < parts.Length; i++)
+        {
+            if (!int.TryParse(parts[i], NumberStyles.None, CultureInfo.InvariantCulture, out parsedParts[i]))
+            {
+                return false;
+            }
+        }
+
+        version = new Version(parsedParts[0], parsedParts[1], parsedParts[2], parsedParts[3]);
+        return true;
+    }
+
+    private static async Task<bool> VerifySha256Async(string path, string expectedHash, CancellationToken cancellationToken)
+    {
+        string normalizedExpected = expectedHash.Replace(" ", string.Empty, StringComparison.Ordinal).Trim();
+        if (normalizedExpected.Length != 64)
+        {
+            return false;
+        }
+
+        await using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, useAsync: true);
+        byte[] hash = await SHA256.HashDataAsync(stream, cancellationToken);
+        string actual = Convert.ToHexString(hash);
+        return string.Equals(actual, normalizedExpected, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string GetUpdateCacheDirectory()
+    {
+        return Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "DeskBox",
+            "updates");
+    }
+
+    private static string GetSafeInstallerFileName(UpdateDownloadInfo download)
+    {
+        string fileName = string.IsNullOrWhiteSpace(download.FileName)
+            ? Path.GetFileName(new Uri(download.Url!).LocalPath)
+            : download.FileName.Trim();
+
+        if (string.IsNullOrWhiteSpace(fileName))
+        {
+            fileName = "DeskBox_Update.exe";
+        }
+
+        foreach (char invalid in Path.GetInvalidFileNameChars())
+        {
+            fileName = fileName.Replace(invalid, '_');
+        }
+
+        return fileName.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)
+            ? fileName
+            : fileName + ".exe";
+    }
+}

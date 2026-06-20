@@ -18,6 +18,13 @@ public sealed partial class OnboardingWindow : Window
 {
     private const int SceneLoopIntervalMs = 3600;
     private const int SceneLoopInitialDelayMs = 900;
+    private const int DesiredWindowWidth = 960;
+    private const int DesiredWindowHeight = 700;
+    private const int MinWindowWidth = 620;
+    private const int MinWindowHeight = 500;
+    private const int WindowWorkAreaMargin = 96;
+    private const int CompactLayoutThreshold = 820;
+    private static readonly UIntPtr OnboardingWindowSubclassId = new(0xD05C0B01);
 
     private sealed record OnboardingStep(
         string KeyPrefix,
@@ -50,11 +57,14 @@ public sealed partial class OnboardingWindow : Window
     private int _introGeneration;
     private int _stepIndex;
     private bool _hasLoaded;
+    private bool _isSubclassInstalled;
+    private readonly Win32Helper.SubclassProc _windowSubclassProc;
 
     public OnboardingWindow(SettingsService settingsService, LocalizationService localizationService)
     {
         _settingsService = settingsService;
         _localizationService = localizationService;
+        _windowSubclassProc = WindowSubclassProc;
         InitializeComponent();
         _localizationService.LanguageChanged += OnLanguageChanged;
 
@@ -70,23 +80,21 @@ public sealed partial class OnboardingWindow : Window
         var windowId = Win32Interop.GetWindowIdFromWindow(_hWnd);
         _appWindow = AppWindow.GetFromWindowId(windowId);
         AppBranding.ApplyWindowIcon(_appWindow);
-        _appWindow.Resize(new Windows.Graphics.SizeInt32(900, 640));
+        ResizeAndCenterForDisplay(windowId);
+        InstallMinimumSizeHook();
 
         if (_appWindow.Presenter is OverlappedPresenter presenter)
         {
-            presenter.IsResizable = false;
-            presenter.IsMaximizable = false;
+            presenter.IsResizable = true;
+            presenter.IsMaximizable = true;
             presenter.IsMinimizable = false;
         }
 
-        var workArea = DisplayArea.GetFromWindowId(windowId, DisplayAreaFallback.Primary).WorkArea;
-        _appWindow.Move(new Windows.Graphics.PointInt32(
-            workArea.X + Math.Max(0, (workArea.Width - _appWindow.Size.Width) / 2),
-            workArea.Y + Math.Max(0, (workArea.Height - _appWindow.Size.Height) / 2)));
-
+        SizeChanged += (_, _) => ApplyResponsiveLayout();
         RootGrid.Loaded += (_, _) =>
         {
             _hasLoaded = true;
+            ApplyResponsiveLayout();
             ApplyTitleBarButtonColors();
             BuildProgressDots();
             RenderStep(animate: false);
@@ -110,6 +118,7 @@ public sealed partial class OnboardingWindow : Window
             DemoScene.Children.Clear();
             StepHintPanel.Children.Clear();
             StepOptionPanel.Children.Clear();
+            RemoveMinimumSizeHook();
             _localizationService.LanguageChanged -= OnLanguageChanged;
         };
     }
@@ -124,6 +133,103 @@ public sealed partial class OnboardingWindow : Window
         _stepIndex = 0;
         RenderStep(animate: false);
         PlayIntroSequence();
+    }
+
+    private void ResizeAndCenterForDisplay(Microsoft.UI.WindowId windowId)
+    {
+        var workArea = DisplayArea.GetFromWindowId(windowId, DisplayAreaFallback.Primary).WorkArea;
+        double scale = GetCurrentDpiScale();
+        int desiredWidth = ToPhysicalPixels(DesiredWindowWidth, scale);
+        int desiredHeight = ToPhysicalPixels(DesiredWindowHeight, scale);
+        int minWidth = ToPhysicalPixels(MinWindowWidth, scale);
+        int minHeight = ToPhysicalPixels(MinWindowHeight, scale);
+        int workAreaMargin = ToPhysicalPixels(WindowWorkAreaMargin, scale);
+        int width = Math.Clamp(
+            desiredWidth,
+            minWidth,
+            Math.Max(minWidth, workArea.Width - workAreaMargin));
+        int height = Math.Clamp(
+            desiredHeight,
+            minHeight,
+            Math.Max(minHeight, workArea.Height - workAreaMargin));
+
+        _appWindow.Resize(new Windows.Graphics.SizeInt32(width, height));
+        _appWindow.Move(new Windows.Graphics.PointInt32(
+            workArea.X + Math.Max(0, (workArea.Width - width) / 2),
+            workArea.Y + Math.Max(0, (workArea.Height - height) / 2)));
+    }
+
+    private void ApplyResponsiveLayout()
+    {
+        double width = RootGrid.ActualWidth;
+        if (width <= 0)
+        {
+            return;
+        }
+
+        bool compact = width < CompactLayoutThreshold;
+        RootGrid.Padding = compact ? new Thickness(28) : new Thickness(48);
+        TitleBarHost.Margin = compact
+            ? new Thickness(-28, -28, -28, 8)
+            : new Thickness(-48, -48, -48, 8);
+        IntroOverlay.Margin = compact ? new Thickness(-28) : new Thickness(-48);
+        IntroOverlay.Padding = compact ? new Thickness(28) : new Thickness(48);
+        FooterNav.Margin = compact ? new Thickness(0, 20, 0, 0) : new Thickness(0, 32, 0, 0);
+
+        if (compact)
+        {
+            MainContentGrid.ColumnSpacing = 0;
+            MainContentGrid.RowSpacing = 24;
+            MainContentGrid.ColumnDefinitions[0].Width = new GridLength(1, GridUnitType.Star);
+            MainContentGrid.ColumnDefinitions[1].Width = new GridLength(0);
+            Grid.SetRow(StepContentPanel, 0);
+            Grid.SetColumn(StepContentPanel, 0);
+            StepContentPanel.MaxWidth = double.PositiveInfinity;
+            StepContentPanel.VerticalAlignment = VerticalAlignment.Top;
+            Grid.SetRow(DemoSceneHost, 1);
+            Grid.SetColumn(DemoSceneHost, 0);
+            DemoSceneHost.MinHeight = 280;
+            DemoSceneHost.VerticalAlignment = VerticalAlignment.Top;
+            DemoDesktop.Width = 300;
+            DemoDesktop.Height = 234;
+
+            FooterNav.RowSpacing = 14;
+            ProgressDots.HorizontalAlignment = HorizontalAlignment.Center;
+            FooterButtons.HorizontalAlignment = HorizontalAlignment.Center;
+            Grid.SetRow(ProgressDots, 0);
+            Grid.SetColumn(ProgressDots, 0);
+            Grid.SetColumnSpan(ProgressDots, 2);
+            Grid.SetRow(FooterButtons, 1);
+            Grid.SetColumn(FooterButtons, 0);
+            Grid.SetColumnSpan(FooterButtons, 2);
+        }
+        else
+        {
+            MainContentGrid.ColumnSpacing = 40;
+            MainContentGrid.RowSpacing = 0;
+            MainContentGrid.ColumnDefinitions[0].Width = new GridLength(1.05, GridUnitType.Star);
+            MainContentGrid.ColumnDefinitions[1].Width = new GridLength(0.95, GridUnitType.Star);
+            Grid.SetRow(StepContentPanel, 0);
+            Grid.SetColumn(StepContentPanel, 0);
+            StepContentPanel.MaxWidth = 430;
+            StepContentPanel.VerticalAlignment = VerticalAlignment.Center;
+            Grid.SetRow(DemoSceneHost, 0);
+            Grid.SetColumn(DemoSceneHost, 1);
+            DemoSceneHost.MinHeight = 360;
+            DemoSceneHost.VerticalAlignment = VerticalAlignment.Center;
+            DemoDesktop.Width = 320;
+            DemoDesktop.Height = 250;
+
+            FooterNav.RowSpacing = 0;
+            ProgressDots.HorizontalAlignment = HorizontalAlignment.Left;
+            FooterButtons.HorizontalAlignment = HorizontalAlignment.Right;
+            Grid.SetRow(ProgressDots, 0);
+            Grid.SetColumn(ProgressDots, 0);
+            Grid.SetColumnSpan(ProgressDots, 1);
+            Grid.SetRow(FooterButtons, 0);
+            Grid.SetColumn(FooterButtons, 1);
+            Grid.SetColumnSpan(FooterButtons, 1);
+        }
     }
 
     private void BackButton_Click(object sender, RoutedEventArgs e)
@@ -1598,6 +1704,71 @@ public sealed partial class OnboardingWindow : Window
         _sceneLoopStoryboardFactory = null;
     }
 
+    private void InstallMinimumSizeHook()
+    {
+        _isSubclassInstalled = Win32Helper.SetWindowSubclass(_hWnd, _windowSubclassProc, OnboardingWindowSubclassId, UIntPtr.Zero);
+    }
+
+    private void RemoveMinimumSizeHook()
+    {
+        if (!_isSubclassInstalled)
+        {
+            return;
+        }
+
+        Win32Helper.RemoveWindowSubclass(_hWnd, _windowSubclassProc, OnboardingWindowSubclassId);
+        _isSubclassInstalled = false;
+    }
+
+    private IntPtr WindowSubclassProc(
+        IntPtr hWnd,
+        uint message,
+        UIntPtr wParam,
+        IntPtr lParam,
+        UIntPtr subclassId,
+        UIntPtr refData)
+    {
+        const uint WmGetMinMaxInfo = 0x0024;
+        const uint WmNcDestroy = 0x0082;
+
+        if (message == WmGetMinMaxInfo)
+        {
+            var minMaxInfo = System.Runtime.InteropServices.Marshal.PtrToStructure<MinMaxInfo>(lParam);
+            double scale = GetCurrentDpiScale();
+            minMaxInfo.MinTrackSize.X = Math.Max(minMaxInfo.MinTrackSize.X, ToPhysicalPixels(MinWindowWidth, scale));
+            minMaxInfo.MinTrackSize.Y = Math.Max(minMaxInfo.MinTrackSize.Y, ToPhysicalPixels(MinWindowHeight, scale));
+            System.Runtime.InteropServices.Marshal.StructureToPtr(minMaxInfo, lParam, false);
+            return IntPtr.Zero;
+        }
+
+        if (message == WmNcDestroy)
+        {
+            RemoveMinimumSizeHook();
+        }
+
+        return Win32Helper.DefSubclassProc(hWnd, message, wParam, lParam);
+    }
+
+    private double GetCurrentDpiScale()
+    {
+        double xamlScale = RootGrid.XamlRoot?.RasterizationScale ?? 0;
+        if (xamlScale > 0)
+        {
+            return xamlScale;
+        }
+
+        uint dpi = GetDpiForWindow(_hWnd);
+        return dpi > 0 ? dpi / 96.0 : 1.0;
+    }
+
+    private static int ToPhysicalPixels(int logicalPixels, double scale)
+    {
+        return Math.Max(1, (int)Math.Round(logicalPixels * scale, MidpointRounding.AwayFromZero));
+    }
+
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern uint GetDpiForWindow(IntPtr hWnd);
+
     private void PlayContentTransition()
     {
         _contentTransitionStoryboard?.Stop();
@@ -1864,6 +2035,23 @@ public sealed partial class OnboardingWindow : Window
     private static SolidColorBrush BrushFromColor(Color color)
     {
         return new SolidColorBrush(color);
+    }
+
+    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
+    private struct NativePoint
+    {
+        public int X;
+        public int Y;
+    }
+
+    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
+    private struct MinMaxInfo
+    {
+        public NativePoint Reserved;
+        public NativePoint MaxSize;
+        public NativePoint MaxPosition;
+        public NativePoint MinTrackSize;
+        public NativePoint MaxTrackSize;
     }
 
     private sealed record OnboardingPalette(

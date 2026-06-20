@@ -38,7 +38,11 @@ public sealed class FileService
     /// <summary>
     /// Enumerate all files and folders in a directory and create WidgetItem models.
     /// </summary>
-    public async Task<List<WidgetItem>> EnumerateDirectoryAsync(string directoryPath, bool hideShortcutArrowOverlay = false)
+    public async Task<List<WidgetItem>> EnumerateDirectoryAsync(
+        string directoryPath,
+        bool hideShortcutArrowOverlay = false,
+        bool showFileExtensions = false,
+        bool hideShortcutExtensionWhenShowingFileExtensions = true)
     {
         using var perfScope = PerformanceLogger.Measure("FileService.EnumerateDirectory", $"path={directoryPath}");
         var items = new List<WidgetItem>();
@@ -53,7 +57,11 @@ public sealed class FileService
         int sortOrder = 0;
         foreach (var entry in entries)
         {
-            var item = await CreateWidgetItemAsync(entry, hideShortcutArrowOverlay);
+            var item = await CreateWidgetItemAsync(
+                entry,
+                hideShortcutArrowOverlay,
+                showFileExtensions,
+                hideShortcutExtensionWhenShowingFileExtensions);
             item.SortOrder = sortOrder++;
             items.Add(item);
         }
@@ -64,13 +72,21 @@ public sealed class FileService
     /// <summary>
     /// Create a WidgetItem from a file or folder path.
     /// </summary>
-    public async Task<WidgetItem> CreateWidgetItemAsync(string path, bool hideShortcutArrowOverlay = false)
+    public async Task<WidgetItem> CreateWidgetItemAsync(
+        string path,
+        bool hideShortcutArrowOverlay = false,
+        bool showFileExtensions = false,
+        bool hideShortcutExtensionWhenShowingFileExtensions = true)
     {
         using var perfScope = PerformanceLogger.Measure("FileService.CreateWidgetItem", $"path={path}");
         var item = new WidgetItem
         {
             Path = path,
-            Name = Path.GetFileNameWithoutExtension(path),
+            Name = GetDisplayName(
+                path,
+                Directory.Exists(path),
+                showFileExtensions,
+                hideShortcutExtensionWhenShowingFileExtensions),
             IsFolder = Directory.Exists(path),
             IsShortcut = Path.GetExtension(path).Equals(".lnk", StringComparison.OrdinalIgnoreCase)
         };
@@ -81,7 +97,11 @@ public sealed class FileService
             if (info is not null)
             {
                 item.TargetPath = info.TargetPath;
-                item.Name = Path.GetFileNameWithoutExtension(path);
+                item.Name = GetDisplayName(
+                    path,
+                    isFolder: false,
+                    showFileExtensions,
+                    hideShortcutExtensionWhenShowingFileExtensions);
             }
         }
         else
@@ -103,7 +123,11 @@ public sealed class FileService
         }
         else if (item.IsFolder)
         {
-            item.Name = Path.GetFileName(path);
+            item.Name = GetDisplayName(
+                path,
+                isFolder: true,
+                showFileExtensions,
+                hideShortcutExtensionWhenShowingFileExtensions);
             try
             {
                 item.FolderItemCount = Directory.EnumerateFileSystemEntries(path)
@@ -122,13 +146,19 @@ public sealed class FileService
 
     private async Task<WidgetItem> CreateWidgetItemAsync(
         FileSystemEntrySnapshot entry,
-        bool hideShortcutArrowOverlay = false)
+        bool hideShortcutArrowOverlay = false,
+        bool showFileExtensions = false,
+        bool hideShortcutExtensionWhenShowingFileExtensions = true)
     {
         using var perfScope = PerformanceLogger.Measure("FileService.CreateWidgetItem", $"path={entry.Path}");
         var item = new WidgetItem
         {
             Path = entry.Path,
-            Name = entry.Name,
+            Name = GetDisplayName(
+                entry.Path,
+                entry.IsFolder,
+                showFileExtensions,
+                hideShortcutExtensionWhenShowingFileExtensions),
             IsFolder = entry.IsFolder,
             IsShortcut = entry.IsShortcut,
             FileSize = entry.FileSize ?? 0,
@@ -150,14 +180,22 @@ public sealed class FileService
         return item;
     }
 
-    public async Task<WidgetItem?> TryCreateWidgetItemAsync(string path, bool hideShortcutArrowOverlay = false)
+    public async Task<WidgetItem?> TryCreateWidgetItemAsync(
+        string path,
+        bool hideShortcutArrowOverlay = false,
+        bool showFileExtensions = false,
+        bool hideShortcutExtensionWhenShowingFileExtensions = true)
     {
         if (!ShouldDisplayEntry(path))
         {
             return null;
         }
 
-        return await CreateWidgetItemAsync(path, hideShortcutArrowOverlay);
+        return await CreateWidgetItemAsync(
+            path,
+            hideShortcutArrowOverlay,
+            showFileExtensions,
+            hideShortcutExtensionWhenShowingFileExtensions);
     }
 
     public static bool ShouldDisplayEntry(string path)
@@ -249,6 +287,27 @@ public sealed class FileService
             fileSize,
             lastModified,
             folderItemCount);
+    }
+
+    public static string GetDisplayName(
+        string path,
+        bool isFolder,
+        bool showFileExtensions,
+        bool hideShortcutExtensionWhenShowingFileExtensions = true)
+    {
+        bool shouldHideExtension = !showFileExtensions ||
+            (hideShortcutExtensionWhenShowingFileExtensions &&
+             Path.GetExtension(path).Equals(".lnk", StringComparison.OrdinalIgnoreCase));
+
+        if (isFolder || !shouldHideExtension)
+        {
+            return Path.GetFileName(path);
+        }
+
+        string nameWithoutExtension = Path.GetFileNameWithoutExtension(path);
+        return string.IsNullOrWhiteSpace(nameWithoutExtension)
+            ? Path.GetFileName(path)
+            : nameWithoutExtension;
     }
 
     public Task<BitmapImage?> GetIconAsync(string path, bool hideShortcutArrowOverlay = false)

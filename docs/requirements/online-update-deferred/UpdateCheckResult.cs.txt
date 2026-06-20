@@ -1,0 +1,15 @@
+namespace DeskBox.Models;
+
+public sealed record UpdateCheckResult(
+    UpdateCheckStatus Status,
+    UpdateManifest? Manifest = null,
+    string? ErrorMessage = null);
+
+public enum UpdateCheckStatus
+{
+    UpdateAvailable,
+    UpToDate,
+    Unavailable,
+    InvalidManifest,
+    NetworkError
+}

@@ -135,6 +135,16 @@ public class AppSettings
     /// </summary>
     public double FileNameWidthScale { get; set; } = 0.36;
 
+    /// <summary>
+    /// Whether widget item labels should include file extensions.
+    /// </summary>
+    public bool ShowFileExtensions { get; set; }
+
+    /// <summary>
+    /// Whether .lnk shortcuts should keep their extension hidden even when file extensions are shown.
+    /// </summary>
+    public bool HideShortcutExtensionWhenShowingFileExtensions { get; set; } = true;
+
     /// <summary>All configured widgets.</summary>
     public List<WidgetConfig> Widgets { get; set; } = [];
 

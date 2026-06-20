@@ -13,8 +13,9 @@ public static class IconHelper
 {
     private static readonly ConcurrentDictionary<string, byte[]?> s_iconBytesCache = new(StringComparer.OrdinalIgnoreCase);
     private static readonly ConcurrentDictionary<string, Task<BitmapImage?>> s_bitmapImageCache = new(StringComparer.OrdinalIgnoreCase);
-    private static readonly ConcurrentDictionary<string, string> s_resolvedIconPathCache = new(StringComparer.OrdinalIgnoreCase);
     private static readonly SemaphoreSlim s_iconLoadSemaphore = new(4, 4);
+
+    private sealed record IconSource(string Path, int IconIndex = 0, bool UsesExplicitIconIndex = false);
 
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
     private struct SHFILEINFO
@@ -45,6 +46,14 @@ public static class IconHelper
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool DestroyIcon(IntPtr hIcon);
 
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern uint ExtractIconEx(
+        string lpszFile,
+        int nIconIndex,
+        IntPtr[]? phiconLarge,
+        IntPtr[]? phiconSmall,
+        uint nIcons);
+
     /// <summary>
     /// Asynchronously retrieve the native Windows shell icon for the given path.
     /// </summary>
@@ -57,31 +66,32 @@ public static class IconHelper
             return null;
         }
 
-        string resolvedPath = ResolveIconPathCached(path, hideShortcutArrowOverlay);
-        if (string.IsNullOrWhiteSpace(resolvedPath))
+        IconSource iconSource = ResolveIconSource(path, hideShortcutArrowOverlay);
+        if (string.IsNullOrWhiteSpace(iconSource.Path))
         {
             return null;
         }
 
-        string cacheKey = BuildCacheKey(path, resolvedPath);
+        string cacheKey = BuildCacheKey(path, iconSource);
         return await s_bitmapImageCache.GetOrAdd(
             cacheKey,
-            _ => LoadBitmapImageAsync(dispatcher, resolvedPath));
+            _ => LoadBitmapImageAsync(dispatcher, iconSource, cacheKey));
     }
 
     private static async Task<BitmapImage?> LoadBitmapImageAsync(
         Microsoft.UI.Dispatching.DispatcherQueue dispatcher,
-        string resolvedPath)
+        IconSource iconSource,
+        string iconBytesCacheKey)
     {
-        if (!s_iconBytesCache.TryGetValue(resolvedPath, out var bytes))
+        if (!s_iconBytesCache.TryGetValue(iconBytesCacheKey, out var bytes))
         {
             await s_iconLoadSemaphore.WaitAsync();
             try
             {
-                if (!s_iconBytesCache.TryGetValue(resolvedPath, out bytes))
+                if (!s_iconBytesCache.TryGetValue(iconBytesCacheKey, out bytes))
                 {
-                    bytes = await Task.Run(() => LoadIconBytes(resolvedPath));
-                    s_iconBytesCache[resolvedPath] = bytes;
+                    bytes = await Task.Run(() => LoadIconBytes(iconSource));
+                    s_iconBytesCache[iconBytesCacheKey] = bytes;
                 }
             }
             finally
@@ -93,14 +103,23 @@ public static class IconHelper
         return await CreateBitmapImageAsync(dispatcher, bytes);
     }
 
-    private static byte[]? LoadIconBytes(string resolvedPath)
+    private static byte[]? LoadIconBytes(IconSource iconSource)
     {
-        using var perfScope = PerformanceLogger.Measure("IconHelper.LoadIconBytes", $"path={resolvedPath}");
+        using var perfScope = PerformanceLogger.Measure("IconHelper.LoadIconBytes", $"path={iconSource.Path}");
         try
         {
+            if (iconSource.UsesExplicitIconIndex)
+            {
+                var indexedBytes = LoadIndexedIconBytes(iconSource);
+                if (indexedBytes is not null)
+                {
+                    return indexedBytes;
+                }
+            }
+
             var shinfo = new SHFILEINFO();
             IntPtr hImg = SHGetFileInfo(
-                resolvedPath,
+                iconSource.Path,
                 0,
                 ref shinfo,
                 (uint)Marshal.SizeOf(shinfo),
@@ -126,8 +145,50 @@ public static class IconHelper
         }
         catch (Exception ex)
         {
-            App.Log($"[IconHelper] Failed to load icon for {resolvedPath}: {ex.Message}");
+            App.Log($"[IconHelper] Failed to load icon for {iconSource.Path}: {ex.Message}");
             return null;
+        }
+    }
+
+    private static byte[]? LoadIndexedIconBytes(IconSource iconSource)
+    {
+        var largeIcons = new IntPtr[1];
+        var smallIcons = new IntPtr[1];
+        uint count = ExtractIconEx(
+            iconSource.Path,
+            iconSource.IconIndex,
+            largeIcons,
+            smallIcons,
+            1);
+
+        IntPtr iconHandle = largeIcons[0] != IntPtr.Zero
+            ? largeIcons[0]
+            : smallIcons[0];
+
+        if (count == 0 || iconHandle == IntPtr.Zero)
+        {
+            return null;
+        }
+
+        try
+        {
+            using var icon = Icon.FromHandle(iconHandle);
+            using var bitmap = icon.ToBitmap();
+            using var ms = new MemoryStream();
+            bitmap.Save(ms, System.Drawing.Imaging.ImageFormat.Png);
+            return ms.ToArray();
+        }
+        finally
+        {
+            if (largeIcons[0] != IntPtr.Zero)
+            {
+                DestroyIcon(largeIcons[0]);
+            }
+
+            if (smallIcons[0] != IntPtr.Zero && smallIcons[0] != largeIcons[0])
+            {
+                DestroyIcon(smallIcons[0]);
+            }
         }
     }
 
@@ -178,39 +239,57 @@ public static class IconHelper
         return bmp;
     }
 
-    private static string ResolveIconPath(string path, bool hideShortcutArrowOverlay)
+    private static IconSource ResolveIconSource(string path, bool hideShortcutArrowOverlay)
     {
-        if (!hideShortcutArrowOverlay || !path.EndsWith(".lnk", StringComparison.OrdinalIgnoreCase))
+        if (!path.EndsWith(".lnk", StringComparison.OrdinalIgnoreCase))
         {
-            return path;
+            return new IconSource(path);
         }
 
         var shortcut = ShortcutHelper.Resolve(path);
-        if (!string.IsNullOrWhiteSpace(shortcut?.TargetPath) &&
+        if (!hideShortcutArrowOverlay)
+        {
+            return new IconSource(path);
+        }
+
+        if (shortcut is null)
+        {
+            return new IconSource(path);
+        }
+
+        string? iconLocation = NormalizeIconLocation(shortcut.IconLocation);
+        if (!string.IsNullOrWhiteSpace(iconLocation) &&
+            File.Exists(iconLocation))
+        {
+            return new IconSource(iconLocation, shortcut.IconIndex, UsesExplicitIconIndex: true);
+        }
+
+        if (!string.IsNullOrWhiteSpace(shortcut.TargetPath) &&
             (File.Exists(shortcut.TargetPath) || Directory.Exists(shortcut.TargetPath)))
         {
-            return shortcut.TargetPath;
+            return new IconSource(shortcut.TargetPath);
         }
 
-        return path;
+        return new IconSource(path);
     }
 
-    private static string ResolveIconPathCached(string path, bool hideShortcutArrowOverlay)
+    private static string? NormalizeIconLocation(string? iconLocation)
     {
-        if (!hideShortcutArrowOverlay || !path.EndsWith(".lnk", StringComparison.OrdinalIgnoreCase))
+        if (string.IsNullOrWhiteSpace(iconLocation))
         {
-            return path;
+            return null;
         }
 
-        string cacheKey = $"shortcut:{path}";
-        return s_resolvedIconPathCache.GetOrAdd(cacheKey, _ => ResolveIconPath(path, hideShortcutArrowOverlay));
+        string expanded = Environment.ExpandEnvironmentVariables(iconLocation.Trim().Trim('"'));
+        return string.IsNullOrWhiteSpace(expanded) ? null : expanded;
     }
 
-    private static string BuildCacheKey(string sourcePath, string resolvedPath)
+    private static string BuildCacheKey(string sourcePath, IconSource iconSource)
     {
+        string resolvedPath = iconSource.Path;
         if (Directory.Exists(resolvedPath))
         {
-            return $"dir:{resolvedPath}";
+            return $"dir:{resolvedPath}:{GetDirectoryIconVersion(resolvedPath)}";
         }
 
         string extension = Path.GetExtension(resolvedPath);
@@ -223,9 +302,43 @@ public static class IconHelper
             extension.Equals(".ico", StringComparison.OrdinalIgnoreCase) ||
             sourcePath.EndsWith(".lnk", StringComparison.OrdinalIgnoreCase))
         {
-            return $"path:{resolvedPath}";
+            string sourceVersion = sourcePath.EndsWith(".lnk", StringComparison.OrdinalIgnoreCase)
+                ? GetFileIconVersion(sourcePath)
+                : "source";
+            return $"path:{resolvedPath}:{iconSource.IconIndex}:{iconSource.UsesExplicitIconIndex}:{GetFileIconVersion(resolvedPath)}:{sourceVersion}";
         }
 
         return $"ext:{extension}";
+    }
+
+    private static string GetDirectoryIconVersion(string directoryPath)
+    {
+        try
+        {
+            string desktopIniPath = Path.Combine(directoryPath, "desktop.ini");
+            long directoryTicks = Directory.GetLastWriteTimeUtc(directoryPath).Ticks;
+            long desktopIniTicks = File.Exists(desktopIniPath)
+                ? File.GetLastWriteTimeUtc(desktopIniPath).Ticks
+                : 0;
+            return $"{directoryTicks:x}:{desktopIniTicks:x}";
+        }
+        catch
+        {
+            return "unknown";
+        }
+    }
+
+    private static string GetFileIconVersion(string filePath)
+    {
+        try
+        {
+            return File.Exists(filePath)
+                ? File.GetLastWriteTimeUtc(filePath).Ticks.ToString("x")
+                : "missing";
+        }
+        catch
+        {
+            return "unknown";
+        }
     }
 }

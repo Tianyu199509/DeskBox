@@ -50,7 +50,8 @@ public sealed class FolderWatcherService : IDisposable
         {
             Path = folderPath,
             NotifyFilter = NotifyFilters.FileName | NotifyFilters.DirectoryName |
-                           NotifyFilters.LastWrite | NotifyFilters.CreationTime,
+                           NotifyFilters.LastWrite | NotifyFilters.CreationTime |
+                           NotifyFilters.Attributes,
             IncludeSubdirectories = false,
             EnableRaisingEvents = true
         };

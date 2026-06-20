@@ -183,6 +183,48 @@ public sealed class FileServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task EnumerateDirectoryAsync_CanShowFileExtensions()
+    {
+        var service = new FileService();
+        string visibleFile = Path.Combine(_tempRoot, "visible.txt");
+        File.WriteAllText(visibleFile, "visible");
+
+        var items = await service.EnumerateDirectoryAsync(_tempRoot, showFileExtensions: true);
+
+        var item = Assert.Single(items);
+        Assert.Equal("visible.txt", item.Name);
+    }
+
+    [Fact]
+    public async Task EnumerateDirectoryAsync_ExcludesShortcutExtensionByDefaultWhenShowingFileExtensions()
+    {
+        var service = new FileService();
+        string shortcutFile = Path.Combine(_tempRoot, "app.lnk");
+        File.WriteAllText(shortcutFile, "shortcut");
+
+        var items = await service.EnumerateDirectoryAsync(_tempRoot, showFileExtensions: true);
+
+        var item = Assert.Single(items);
+        Assert.Equal("app", item.Name);
+    }
+
+    [Fact]
+    public async Task EnumerateDirectoryAsync_CanShowShortcutExtension()
+    {
+        var service = new FileService();
+        string shortcutFile = Path.Combine(_tempRoot, "app.lnk");
+        File.WriteAllText(shortcutFile, "shortcut");
+
+        var items = await service.EnumerateDirectoryAsync(
+            _tempRoot,
+            showFileExtensions: true,
+            hideShortcutExtensionWhenShowingFileExtensions: false);
+
+        var item = Assert.Single(items);
+        Assert.Equal("app.lnk", item.Name);
+    }
+
+    [Fact]
     public async Task CreateWidgetItemAsync_FolderSecondaryInfoShowsVisibleItemCountOnly()
     {
         var service = new FileService();

@@ -1,0 +1,75 @@
+using System.Text.Json.Serialization;
+
+namespace DeskBox.Models;
+
+public sealed class UpdateManifest
+{
+    [JsonPropertyName("manifestVersion")]
+    public int ManifestVersion { get; set; }
+
+    [JsonPropertyName("channel")]
+    public string? Channel { get; set; }
+
+    [JsonPropertyName("platform")]
+    public string? Platform { get; set; }
+
+    [JsonPropertyName("latestVersion")]
+    public string? LatestVersion { get; set; }
+
+    [JsonPropertyName("minimumVersion")]
+    public string? MinimumVersion { get; set; }
+
+    [JsonPropertyName("publishedAt")]
+    public DateTimeOffset? PublishedAt { get; set; }
+
+    [JsonPropertyName("force")]
+    public bool Force { get; set; }
+
+    [JsonPropertyName("rolloutPercent")]
+    public int RolloutPercent { get; set; } = 100;
+
+    [JsonPropertyName("download")]
+    public UpdateDownloadInfo? Download { get; set; }
+
+    [JsonPropertyName("releaseNotes")]
+    public UpdateReleaseNotes? ReleaseNotes { get; set; }
+}
+
+public sealed class UpdateDownloadInfo
+{
+    [JsonPropertyName("url")]
+    public string? Url { get; set; }
+
+    [JsonPropertyName("fileName")]
+    public string? FileName { get; set; }
+
+    [JsonPropertyName("size")]
+    public long Size { get; set; }
+
+    [JsonPropertyName("sha256")]
+    public string? Sha256 { get; set; }
+}
+
+public sealed class UpdateReleaseNotes
+{
+    [JsonPropertyName("title")]
+    public string? Title { get; set; }
+
+    [JsonPropertyName("summary")]
+    public string? Summary { get; set; }
+
+    [JsonPropertyName("url")]
+    public string? Url { get; set; }
+
+    [JsonPropertyName("items")]
+    public List<UpdateReleaseNoteItem> Items { get; set; } = [];
+}
+
+public sealed class UpdateReleaseNoteItem
+{
+    [JsonPropertyName("type")]
+    public string? Type { get; set; }
+
+    [JsonPropertyName("text")]
+    public string? Text { get; set; }
+}

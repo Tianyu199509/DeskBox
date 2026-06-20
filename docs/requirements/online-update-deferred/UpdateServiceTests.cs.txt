@@ -1,0 +1,18 @@
+using DeskBox.Services;
+
+namespace DeskBox.Tests;
+
+public sealed class UpdateServiceTests
+{
+    [Theory]
+    [InlineData("1.0.5", "1.0.4", true)]
+    [InlineData("v1.0.5", "1.0.4", true)]
+    [InlineData("1.0.5-beta.1", "1.0.4", true)]
+    [InlineData("1.0.4", "1.0.4", false)]
+    [InlineData("1.0.3", "1.0.4", false)]
+    [InlineData("1.0.10", "1.0.9", true)]
+    public void IsNewerVersion_ComparesSemanticVersions(string latestVersion, string currentVersion, bool expected)
+    {
+        Assert.Equal(expected, UpdateService.IsNewerVersion(latestVersion, currentVersion));
+    }
+}

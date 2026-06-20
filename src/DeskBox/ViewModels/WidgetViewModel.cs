@@ -57,6 +57,8 @@ public partial class WidgetViewModel : ObservableObject, IDisposable
     private Thickness _listItemPadding;
     private double _listIconSize;
     private double _listLabelFontSize;
+    private bool _showFileExtensions;
+    private bool _hideShortcutExtensionWhenShowingFileExtensions = true;
 
     public string Name
     {
@@ -301,6 +303,9 @@ public partial class WidgetViewModel : ObservableObject, IDisposable
             SettingsService.MinWidgetOpacity,
             SettingsService.MaxWidgetOpacity);
         _hideShortcutArrowOverlay = _settingsService.Settings.HideShortcutArrowOverlay;
+        _showFileExtensions = _settingsService.Settings.ShowFileExtensions;
+        _hideShortcutExtensionWhenShowingFileExtensions =
+            _settingsService.Settings.HideShortcutExtensionWhenShowingFileExtensions;
         _showListItemDetails = _settingsService.Settings.ShowListItemDetails;
         _isPositionLocked = config.IsPositionLocked;
         _isSizeLocked = config.IsSizeLocked;
@@ -481,6 +486,17 @@ public partial class WidgetViewModel : ObservableObject, IDisposable
         ShowListItemDetails = _settingsService.Settings.ShowListItemDetails;
         ApplyLayoutSettings();
         UpdateDependentProperties();
+
+        bool showFileExtensions = _settingsService.Settings.ShowFileExtensions;
+        bool hideShortcutExtensionWhenShowingFileExtensions =
+            _settingsService.Settings.HideShortcutExtensionWhenShowingFileExtensions;
+        if (_showFileExtensions != showFileExtensions ||
+            _hideShortcutExtensionWhenShowingFileExtensions != hideShortcutExtensionWhenShowingFileExtensions)
+        {
+            _showFileExtensions = showFileExtensions;
+            _hideShortcutExtensionWhenShowingFileExtensions = hideShortcutExtensionWhenShowingFileExtensions;
+            RefreshItemDisplayNames();
+        }
 
         bool hideShortcutArrowOverlay = _settingsService.Settings.HideShortcutArrowOverlay;
         if (_hideShortcutArrowOverlay == hideShortcutArrowOverlay)
@@ -745,7 +761,10 @@ public partial class WidgetViewModel : ObservableObject, IDisposable
         }
 
         string extension = item.IsFolder ? string.Empty : Path.GetExtension(sourcePath);
-        string destinationPath = Path.Combine(parentDirectory, sanitizedName + extension);
+        string destinationName = item.IsFolder
+            ? sanitizedName
+            : BuildRenameFileName(sanitizedName, extension);
+        string destinationPath = Path.Combine(parentDirectory, destinationName);
         if (string.Equals(sourcePath, destinationPath, StringComparison.OrdinalIgnoreCase))
         {
             return;
@@ -757,7 +776,11 @@ public partial class WidgetViewModel : ObservableObject, IDisposable
         }
 
         await _fileService.RelocateEntryAsync(sourcePath, destinationPath);
-        var refreshedItem = await _fileService.CreateWidgetItemAsync(destinationPath, _hideShortcutArrowOverlay);
+        var refreshedItem = await _fileService.CreateWidgetItemAsync(
+            destinationPath,
+            _hideShortcutArrowOverlay,
+            _showFileExtensions,
+            _hideShortcutExtensionWhenShowingFileExtensions);
         ApplyRuntimeItemData(item, refreshedItem);
 
         int originalIndex = Items.IndexOf(item);
@@ -931,8 +954,16 @@ public partial class WidgetViewModel : ObservableObject, IDisposable
         var (userDesktop, publicDesktop) = FileService.GetDesktopPaths();
         if (folderPath.Equals(userDesktop, StringComparison.OrdinalIgnoreCase))
         {
-            var userItems = await _fileService.EnumerateDirectoryAsync(userDesktop, _hideShortcutArrowOverlay);
-            var publicItems = await _fileService.EnumerateDirectoryAsync(publicDesktop, _hideShortcutArrowOverlay);
+            var userItems = await _fileService.EnumerateDirectoryAsync(
+                userDesktop,
+                _hideShortcutArrowOverlay,
+                _showFileExtensions,
+                _hideShortcutExtensionWhenShowingFileExtensions);
+            var publicItems = await _fileService.EnumerateDirectoryAsync(
+                publicDesktop,
+                _hideShortcutArrowOverlay,
+                _showFileExtensions,
+                _hideShortcutExtensionWhenShowingFileExtensions);
 
             items = userItems.Concat(publicItems)
                 .GroupBy(item => item.Name, StringComparer.OrdinalIgnoreCase)
@@ -943,7 +974,11 @@ public partial class WidgetViewModel : ObservableObject, IDisposable
         }
         else
         {
-            items = await _fileService.EnumerateDirectoryAsync(folderPath, _hideShortcutArrowOverlay);
+            items = await _fileService.EnumerateDirectoryAsync(
+                folderPath,
+                _hideShortcutArrowOverlay,
+                _showFileExtensions,
+                _hideShortcutExtensionWhenShowingFileExtensions);
         }
 
         foreach (var item in items)
@@ -963,6 +998,32 @@ public partial class WidgetViewModel : ObservableObject, IDisposable
         {
             item.Icon = await _fileService.GetIconAsync(item.Path, _hideShortcutArrowOverlay);
         }
+    }
+
+    private void RefreshItemDisplayNames()
+    {
+        foreach (var item in Items)
+        {
+            item.Name = FileService.GetDisplayName(
+                item.Path,
+                item.IsFolder,
+                _showFileExtensions,
+                _hideShortcutExtensionWhenShowingFileExtensions);
+        }
+
+        var sortedItems = Items.ToList();
+        sortedItems.Sort(CompareItems);
+        for (int targetIndex = 0; targetIndex < sortedItems.Count; targetIndex++)
+        {
+            var item = sortedItems[targetIndex];
+            int currentIndex = Items.IndexOf(item);
+            if (currentIndex >= 0 && currentIndex != targetIndex)
+            {
+                Items.Move(currentIndex, targetIndex);
+            }
+        }
+
+        NormalizeSortOrder();
     }
 
     private void ConfigureFolderWatchers(string? folderPath)
@@ -1070,7 +1131,11 @@ public partial class WidgetViewModel : ObservableObject, IDisposable
 
     private async Task UpsertFolderItemAsync(string path)
     {
-        var item = await _fileService.TryCreateWidgetItemAsync(path, _hideShortcutArrowOverlay);
+        var item = await _fileService.TryCreateWidgetItemAsync(
+            path,
+            _hideShortcutArrowOverlay,
+            _showFileExtensions,
+            _hideShortcutExtensionWhenShowingFileExtensions);
         if (item is null)
         {
             RemoveItemByPath(path);
@@ -1145,6 +1210,23 @@ public partial class WidgetViewModel : ObservableObject, IDisposable
         target.LastModified = source.LastModified;
         target.IsShortcut = source.IsShortcut;
         target.IsFolder = source.IsFolder;
+    }
+
+    private string BuildRenameFileName(string sanitizedName, string extension)
+    {
+        if (string.IsNullOrWhiteSpace(extension))
+        {
+            return sanitizedName;
+        }
+
+        if (_showFileExtensions)
+        {
+            return sanitizedName.EndsWith(extension, StringComparison.OrdinalIgnoreCase)
+                ? sanitizedName
+                : sanitizedName + extension;
+        }
+
+        return sanitizedName + extension;
     }
 
     private static int CompareItems(WidgetItem left, WidgetItem right)
