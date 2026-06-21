@@ -48,6 +48,8 @@ public sealed partial class SettingsWindow : Window
     private bool _isAppearanceSliderDragging;
     private bool _keepTopMostUntilDeactivate;
     private bool _isRecordingHotkey;
+    private bool _isApplyingQuickCaptureClipboardToggle;
+    private string _currentSettingsSection = "General";
 
     public SettingsViewModel ViewModel { get; }
 
@@ -73,6 +75,7 @@ public sealed partial class SettingsWindow : Window
             CollectResponsiveRows(SettingsRoot);
             ViewModel.RefreshQuickAccessState();
             ViewModel.RefreshGlobalHotkeyState();
+            _ = ViewModel.RefreshQuickCaptureImageCacheInfoAsync();
             RefreshGlobalHotkeyControls();
             UpdateResponsiveLayout(GetWindowWidth());
         };
@@ -180,20 +183,36 @@ public sealed partial class SettingsWindow : Window
     {
         if (args.SelectedItem is NavigationViewItem { Tag: string sectionTag })
         {
-            ShowSettingsSection(sectionTag);
+            ShowSettingsSection(sectionTag, isNestedSection: false);
         }
     }
 
-    private void ShowSettingsSection(string sectionTag)
+    private void SettingsNavigationView_BackRequested(NavigationView sender, NavigationViewBackRequestedEventArgs args)
     {
+        ShowSettingsSection("FeatureWidgets", isNestedSection: false);
+    }
+
+    private void ShowSettingsSection(string sectionTag, bool isNestedSection = false)
+    {
+        _currentSettingsSection = sectionTag;
         AppearanceSection.Visibility = sectionTag == "Appearance" ? Visibility.Visible : Visibility.Collapsed;
         WidgetLayoutSection.Visibility = sectionTag == "WidgetLayout" ? Visibility.Visible : Visibility.Collapsed;
+        FeatureWidgetsSection.Visibility = sectionTag == "FeatureWidgets" ? Visibility.Visible : Visibility.Collapsed;
+        QuickCaptureSettingsSection.Visibility = sectionTag == "QuickCaptureSettings" ? Visibility.Visible : Visibility.Collapsed;
+        if (sectionTag == "QuickCaptureSettings")
+        {
+            ViewModel.RefreshQuickCaptureClipboardDiagnostics();
+            _ = ViewModel.RefreshQuickCaptureImageCacheInfoAsync();
+        }
         AnimationSection.Visibility = sectionTag == "Animation" ? Visibility.Visible : Visibility.Collapsed;
         StorageSection.Visibility = sectionTag == "Storage" ? Visibility.Visible : Visibility.Collapsed;
         InteractionSection.Visibility = sectionTag == "Interaction" ? Visibility.Visible : Visibility.Collapsed;
         GeneralSection.Visibility = sectionTag == "General" ? Visibility.Visible : Visibility.Collapsed;
         MaintenanceSection.Visibility = sectionTag == "Maintenance" ? Visibility.Visible : Visibility.Collapsed;
         AboutSection.Visibility = sectionTag == "About" ? Visibility.Visible : Visibility.Collapsed;
+        SettingsNavigationView.IsBackButtonVisible = isNestedSection
+            ? NavigationViewBackButtonVisible.Visible
+            : NavigationViewBackButtonVisible.Collapsed;
 
         PageScroller.ChangeView(null, 0, null, disableAnimation: true);
         DispatcherQueue.TryEnqueue(() =>
@@ -798,6 +817,7 @@ public sealed partial class SettingsWindow : Window
     {
         var package = new DataPackage();
         package.SetText(DownloadLink);
+        DeskBoxClipboardWriteScope.MarkWrite(text: DownloadLink);
         Clipboard.SetContent(package);
         Clipboard.Flush();
 
@@ -815,6 +835,172 @@ public sealed partial class SettingsWindow : Window
         {
             await Launcher.LaunchUriAsync(uri);
         }
+    }
+
+    private void OpenQuickCaptureSettingsButton_Click(object sender, RoutedEventArgs e)
+    {
+        ShowSettingsSection("QuickCaptureSettings", isNestedSection: true);
+    }
+
+    private async void ShowQuickCaptureWidgetButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (App.Current.WidgetManager is null)
+        {
+            return;
+        }
+
+        ViewModel.QuickCaptureEnabled = true;
+        await App.Current.WidgetManager.CreateOrShowQuickCaptureWidgetAsync();
+    }
+
+    private async void ClearQuickCaptureDataButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (SettingsRoot.XamlRoot is null)
+        {
+            return;
+        }
+
+        var data = await App.Current.QuickCaptureService.GetDataAsync();
+        int recordCount = data.Items.Count(item => !item.IsDeleted);
+        int recentCount = data.RecentItems.Count(item => !item.IsDeleted);
+        var dialog = new ContentDialog
+        {
+            XamlRoot = SettingsRoot.XamlRoot,
+            Title = _localizationService.T("QuickCapture.ClearDataTitle"),
+            PrimaryButtonText = _localizationService.T("QuickCapture.ClearData"),
+            CloseButtonText = _localizationService.T("Common.Cancel"),
+            DefaultButton = ContentDialogButton.Close,
+            Content = new TextBlock
+            {
+                Text = _localizationService.Format(
+                    "QuickCapture.ClearDataDescriptionWithCount",
+                    recordCount,
+                    recentCount),
+                TextWrapping = TextWrapping.Wrap
+            }
+        };
+
+        if (await dialog.ShowAsync() != ContentDialogResult.Primary)
+        {
+            return;
+        }
+
+        await App.Current.QuickCaptureService.ClearAsync();
+        await ViewModel.RefreshQuickCaptureImageCacheInfoAsync();
+    }
+
+    private async void QuickCaptureClipboardToggle_Toggled(object sender, RoutedEventArgs e)
+    {
+        if (_isApplyingQuickCaptureClipboardToggle ||
+            sender is not ToggleSwitch toggle ||
+            toggle.IsOn == ViewModel.QuickCaptureClipboardEnabled)
+        {
+            return;
+        }
+
+        if (!toggle.IsOn)
+        {
+            App.Log("[QuickCaptureClipboard] Disabled from settings");
+            ViewModel.QuickCaptureClipboardEnabled = false;
+            App.Current.QuickCaptureClipboardService?.Refresh();
+            ViewModel.RefreshQuickCaptureClipboardDiagnostics();
+            return;
+        }
+
+        if (!App.Current.SettingsService.Settings.HasConfirmedQuickCaptureClipboardNotice)
+        {
+            bool confirmed = await QuickCaptureClipboardActivationHelper.EnableAsync(SettingsRoot.XamlRoot, _localizationService);
+            if (!confirmed)
+            {
+                SetQuickCaptureClipboardToggle(false);
+                return;
+            }
+        }
+        else
+        {
+            await QuickCaptureClipboardActivationHelper.EnableAsync(SettingsRoot.XamlRoot, _localizationService);
+        }
+
+        ViewModel.QuickCaptureClipboardEnabled = App.Current.SettingsService.Settings.QuickCaptureClipboardEnabled;
+        ViewModel.QuickCaptureEnabled = App.Current.SettingsService.Settings.QuickCaptureEnabled;
+        App.Current.QuickCaptureClipboardService?.Refresh();
+        ViewModel.RefreshQuickCaptureClipboardDiagnostics();
+    }
+
+    private void SetQuickCaptureClipboardToggle(bool isOn)
+    {
+        _isApplyingQuickCaptureClipboardToggle = true;
+        try
+        {
+            QuickCaptureClipboardToggle.IsOn = isOn;
+        }
+        finally
+        {
+            _isApplyingQuickCaptureClipboardToggle = false;
+        }
+    }
+
+    private async void ClearQuickCaptureRecentButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (SettingsRoot.XamlRoot is null)
+        {
+            return;
+        }
+
+        var data = await App.Current.QuickCaptureService.GetDataAsync();
+        int recentCount = data.RecentItems.Count(item => !item.IsDeleted);
+        var dialog = new ContentDialog
+        {
+            XamlRoot = SettingsRoot.XamlRoot,
+            Title = _localizationService.T("QuickCapture.ClearRecentTitle"),
+            PrimaryButtonText = _localizationService.T("QuickCapture.ClearRecent"),
+            CloseButtonText = _localizationService.T("Common.Cancel"),
+            DefaultButton = ContentDialogButton.Close,
+            Content = new TextBlock
+            {
+                Text = _localizationService.Format(
+                    "QuickCapture.ClearRecentDescriptionWithCount",
+                    recentCount),
+                TextWrapping = TextWrapping.Wrap
+            }
+        };
+
+        if (await dialog.ShowAsync() != ContentDialogResult.Primary)
+        {
+            return;
+        }
+
+        await App.Current.QuickCaptureService.ClearRecentAsync();
+        await ViewModel.RefreshQuickCaptureImageCacheInfoAsync();
+    }
+
+    private async void CleanupQuickCaptureImageCacheButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (SettingsRoot.XamlRoot is null)
+        {
+            return;
+        }
+
+        var result = await App.Current.QuickCaptureService.CleanupUnusedImageCacheAsync();
+        await ViewModel.RefreshQuickCaptureImageCacheInfoAsync();
+
+        var dialog = new ContentDialog
+        {
+            XamlRoot = SettingsRoot.XamlRoot,
+            Title = _localizationService.T("Settings.QuickCapture.ImageCacheCleanupTitle"),
+            CloseButtonText = _localizationService.T("Common.Ok"),
+            DefaultButton = ContentDialogButton.Close,
+            Content = new TextBlock
+            {
+                Text = _localizationService.Format(
+                    "Settings.QuickCapture.ImageCacheCleanupDescription",
+                    result.DeletedFileCount,
+                    SettingsViewModel.FormatBytes(result.DeletedBytes)),
+                TextWrapping = TextWrapping.Wrap
+            }
+        };
+
+        await dialog.ShowAsync();
     }
 
     private void ShowOnboardingButton_Click(object sender, RoutedEventArgs e)

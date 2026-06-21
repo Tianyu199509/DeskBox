@@ -201,6 +201,7 @@
             IsSettingsVisible="False"
             OpenPaneLength="208"
             PaneDisplayMode="Left"
+            BackRequested="SettingsNavigationView_BackRequested"
             SelectionChanged="SettingsNavigationView_SelectionChanged">
             <NavigationView.MenuItems>
                 <NavigationViewItem
@@ -223,6 +224,13 @@
                     svc:Localized.Key="Settings.Nav.WidgetLayout">
                     <NavigationViewItem.Icon>
                         <SymbolIcon Symbol="NewFolder" />
+                    </NavigationViewItem.Icon>
+                </NavigationViewItem>
+                <NavigationViewItem
+                    Tag="FeatureWidgets"
+                    svc:Localized.Key="Settings.Nav.FeatureWidgets">
+                    <NavigationViewItem.Icon>
+                        <SymbolIcon Symbol="Favorite" />
                     </NavigationViewItem.Icon>
                 </NavigationViewItem>
                 <NavigationViewItem
@@ -708,6 +716,23 @@
                                     <ColumnDefinition Width="Auto" />
                                 </Grid.ColumnDefinitions>
                                 <StackPanel Grid.Column="0" Style="{StaticResource SettingTextPanelStyle}">
+                                    <TextBlock Style="{StaticResource SettingTitleTextStyle}" svc:Localized.Key="Settings.QuickCapture.ImageClipboardTitle" />
+                                    <TextBlock Style="{StaticResource SettingDescriptionTextStyle}" svc:Localized.Key="Settings.QuickCapture.ImageClipboardDescription" />
+                                </StackPanel>
+                                <ToggleSwitch
+                                    Grid.Column="1"
+                                    IsOn="{Binding QuickCaptureImageClipboardEnabled, Mode=TwoWay}"
+                                    Style="{StaticResource SettingToggleSwitchStyle}" />
+                            </Grid>
+
+                            <Border Style="{StaticResource SettingDividerStyle}" />
+
+                            <Grid Style="{StaticResource SettingRowStyle}">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Grid.Column="0" Style="{StaticResource SettingTextPanelStyle}">
                                     <TextBlock Style="{StaticResource SettingTitleTextStyle}" svc:Localized.Key="Settings.HideShortcutArrow.Title" />
                                     <TextBlock Style="{StaticResource SettingDescriptionTextStyle}" svc:Localized.Key="Settings.HideShortcutArrow.Description" />
                                 </StackPanel>
@@ -808,6 +833,7 @@
                                 <StackPanel Style="{StaticResource SettingTextPanelStyle}">
                                     <TextBlock Style="{StaticResource SettingTitleTextStyle}" svc:Localized.Key="Settings.ManagedPath.Title" />
                                     <TextBlock Style="{StaticResource SettingDescriptionTextStyle}" svc:Localized.Key="Settings.ManagedPath.Description" />
+                                    <TextBlock Style="{StaticResource SettingDescriptionTextStyle}" svc:Localized.Key="Settings.ManagedPath.QuickCaptureNote" />
                                 </StackPanel>
                                 <TextBox
                                     IsReadOnly="True"
@@ -912,6 +938,215 @@
                                     Content="{Binding SelectedWidgetAnimationSpeedText}"
                                     Style="{StaticResource InlineDropDownButtonStyle}"
                                     Tag="WidgetAnimationSpeed" />
+                            </Grid>
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
+
+                <StackPanel
+                    x:Name="FeatureWidgetsSection"
+                    Visibility="Collapsed"
+                    Style="{StaticResource SectionPanelStyle}">
+                    <TextBlock Style="{StaticResource SectionTitleTextStyle}" svc:Localized.Key="Settings.Section.FeatureWidgets" />
+                    <Border Style="{StaticResource SettingsGroupStyle}">
+                        <StackPanel>
+                            <Grid Style="{StaticResource SettingRowStyle}">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Grid.Column="0" Style="{StaticResource SettingTextPanelStyle}">
+                                    <TextBlock Style="{StaticResource SettingTitleTextStyle}" svc:Localized.Key="Settings.QuickCapture.Title" />
+                                    <TextBlock Style="{StaticResource SettingDescriptionTextStyle}" svc:Localized.Key="Settings.QuickCapture.Description" />
+                                    <TextBlock Style="{StaticResource SettingDescriptionTextStyle}" Text="{Binding QuickCaptureStatusText}" />
+                                </StackPanel>
+                                <Grid
+                                    Grid.Column="1"
+                                    MinWidth="190"
+                                    HorizontalAlignment="Right"
+                                    VerticalAlignment="Center"
+                                    ColumnSpacing="10">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <ToggleSwitch
+                                        Grid.Column="0"
+                                        IsOn="{Binding QuickCaptureEnabled, Mode=TwoWay}"
+                                        Style="{StaticResource SettingToggleSwitchStyle}" />
+                                    <Button
+                                        Grid.Column="1"
+                                        Click="OpenQuickCaptureSettingsButton_Click"
+                                        Style="{StaticResource ActionButtonStyle}"
+                                        svc:Localized.ToolTipKey="Settings.QuickCapture.ConfigureTooltip">
+                                        <StackPanel Orientation="Horizontal" Spacing="8">
+                                            <SymbolIcon Symbol="Setting" />
+                                            <TextBlock svc:Localized.Key="Common.Configure" />
+                                        </StackPanel>
+                                    </Button>
+                                </Grid>
+                            </Grid>
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
+
+                <StackPanel
+                    x:Name="QuickCaptureSettingsSection"
+                    Visibility="Collapsed"
+                    Style="{StaticResource SectionPanelStyle}">
+                    <StackPanel Spacing="4">
+                        <TextBlock Style="{StaticResource SectionTitleTextStyle}" svc:Localized.Key="Settings.QuickCapture.Title" />
+                        <TextBlock Style="{StaticResource SettingDescriptionTextStyle}" svc:Localized.Key="Settings.QuickCapture.Description" />
+                        <TextBlock Style="{StaticResource SettingDescriptionTextStyle}" Text="{Binding QuickCaptureDependencyStatusText}" />
+                    </StackPanel>
+                    <Border Style="{StaticResource SettingsGroupStyle}">
+                        <StackPanel>
+                            <Grid Style="{StaticResource SettingRowStyle}">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Grid.Column="0" Style="{StaticResource SettingTextPanelStyle}">
+                                    <TextBlock Style="{StaticResource SettingTitleTextStyle}" svc:Localized.Key="Settings.QuickCapture.EnableTitle" />
+                                    <TextBlock Style="{StaticResource SettingDescriptionTextStyle}" Text="{Binding QuickCaptureStatusText}" />
+                                </StackPanel>
+                                <ToggleSwitch
+                                    Grid.Column="1"
+                                    IsOn="{Binding QuickCaptureEnabled, Mode=TwoWay}"
+                                    Style="{StaticResource SettingToggleSwitchStyle}" />
+                            </Grid>
+
+                            <Border Style="{StaticResource SettingDividerStyle}" />
+
+                            <Grid Style="{StaticResource SettingRowStyle}">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Grid.Column="0" Style="{StaticResource SettingTextPanelStyle}">
+                                    <TextBlock Style="{StaticResource SettingTitleTextStyle}" svc:Localized.Key="Settings.QuickCapture.ShowWidgetTitle" />
+                                    <TextBlock Style="{StaticResource SettingDescriptionTextStyle}" svc:Localized.Key="Settings.QuickCapture.ShowWidgetDescription" />
+                                </StackPanel>
+                                <Button
+                                    Grid.Column="1"
+                                    Click="ShowQuickCaptureWidgetButton_Click"
+                                    Style="{StaticResource ActionButtonStyle}"
+                                    svc:Localized.ToolTipKey="Settings.QuickCapture.ShowWidgetTooltip">
+                                    <StackPanel Orientation="Horizontal" Spacing="8">
+                                        <SymbolIcon Symbol="View" />
+                                        <TextBlock svc:Localized.Key="Common.View" />
+                                    </StackPanel>
+                                </Button>
+                            </Grid>
+
+                            <Border Style="{StaticResource SettingDividerStyle}" />
+
+                            <Grid Style="{StaticResource SettingRowStyle}">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Grid.Column="0" Style="{StaticResource SettingTextPanelStyle}">
+                                    <TextBlock Style="{StaticResource SettingTitleTextStyle}" svc:Localized.Key="Settings.QuickCapture.ClipboardTitle" />
+                                    <TextBlock Style="{StaticResource SettingDescriptionTextStyle}" svc:Localized.Key="Settings.QuickCapture.ClipboardDescription" />
+                                    <TextBlock Style="{StaticResource SettingDescriptionTextStyle}" Text="{Binding QuickCaptureClipboardDiagnosticsText}" />
+                                </StackPanel>
+                                <ToggleSwitch
+                                    x:Name="QuickCaptureClipboardToggle"
+                                    Grid.Column="1"
+                                    IsOn="{Binding QuickCaptureClipboardEnabled, Mode=OneWay}"
+                                    Toggled="QuickCaptureClipboardToggle_Toggled"
+                                    Style="{StaticResource SettingToggleSwitchStyle}" />
+                            </Grid>
+
+                            <Border Style="{StaticResource SettingDividerStyle}" />
+
+                            <Grid Style="{StaticResource SettingRowStyle}">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Grid.Column="0" Style="{StaticResource SettingTextPanelStyle}">
+                                    <TextBlock Style="{StaticResource SettingTitleTextStyle}" svc:Localized.Key="Settings.QuickCapture.RecentLimitTitle" />
+                                    <TextBlock Style="{StaticResource SettingDescriptionTextStyle}" Text="{Binding QuickCaptureRecentLimitText}" />
+                                </StackPanel>
+                                <TextBox
+                                    Grid.Column="1"
+                                    GotFocus="EditableSettingsTextBox_GotFocus"
+                                    InputScope="Number"
+                                    KeyDown="EditableSettingsTextBox_KeyDown"
+                                    Style="{StaticResource InlineNumberTextBoxStyle}"
+                                    Text="{Binding QuickCaptureRecentLimitInput, Mode=TwoWay, UpdateSourceTrigger=LostFocus}" />
+                            </Grid>
+
+                            <Border Style="{StaticResource SettingDividerStyle}" />
+
+                            <Grid Style="{StaticResource SettingRowStyle}">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Grid.Column="0" Style="{StaticResource SettingTextPanelStyle}">
+                                    <TextBlock Style="{StaticResource SettingTitleTextStyle}" svc:Localized.Key="Settings.QuickCapture.ImageCacheTitle" />
+                                    <TextBlock Style="{StaticResource SettingDescriptionTextStyle}" Text="{Binding QuickCaptureImageCacheText}" />
+                                </StackPanel>
+                                <Button
+                                    Grid.Column="1"
+                                    Click="CleanupQuickCaptureImageCacheButton_Click"
+                                    IsEnabled="{Binding CanClearQuickCaptureImageCache}"
+                                    Style="{StaticResource ActionButtonStyle}"
+                                    svc:Localized.ToolTipKey="Settings.QuickCapture.ImageCacheCleanupTooltip">
+                                    <StackPanel Orientation="Horizontal" Spacing="8">
+                                        <SymbolIcon Symbol="Delete" />
+                                        <TextBlock svc:Localized.Key="Common.Cleanup" />
+                                    </StackPanel>
+                                </Button>
+                            </Grid>
+
+                            <Border Style="{StaticResource SettingDividerStyle}" />
+
+                            <Grid Style="{StaticResource SettingRowStyle}">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Grid.Column="0" Style="{StaticResource SettingTextPanelStyle}">
+                                    <TextBlock Style="{StaticResource SettingTitleTextStyle}" svc:Localized.Key="Settings.QuickCapture.ClearRecentTitle" />
+                                    <TextBlock Style="{StaticResource SettingDescriptionTextStyle}" svc:Localized.Key="Settings.QuickCapture.ClearRecentDescription" />
+                                </StackPanel>
+                                <Button
+                                    Grid.Column="1"
+                                    Click="ClearQuickCaptureRecentButton_Click"
+                                    Style="{StaticResource ActionButtonStyle}"
+                                    svc:Localized.ToolTipKey="Settings.QuickCapture.ClearRecentTooltip">
+                                    <StackPanel Orientation="Horizontal" Spacing="8">
+                                        <SymbolIcon Symbol="Delete" />
+                                        <TextBlock svc:Localized.Key="Common.Delete" />
+                                    </StackPanel>
+                                </Button>
+                            </Grid>
+
+                            <Border Style="{StaticResource SettingDividerStyle}" />
+
+                            <Grid Style="{StaticResource SettingRowStyle}">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Grid.Column="0" Style="{StaticResource SettingTextPanelStyle}">
+                                    <TextBlock Style="{StaticResource SettingTitleTextStyle}" svc:Localized.Key="Settings.QuickCapture.ClearTitle" />
+                                    <TextBlock Style="{StaticResource SettingDescriptionTextStyle}" svc:Localized.Key="Settings.QuickCapture.ClearDescription" />
+                                </StackPanel>
+                                <Button
+                                    Grid.Column="1"
+                                    Click="ClearQuickCaptureDataButton_Click"
+                                    Style="{StaticResource ActionButtonStyle}"
+                                    svc:Localized.ToolTipKey="Settings.QuickCapture.ClearTooltip">
+                                    <StackPanel Orientation="Horizontal" Spacing="8">
+                                        <SymbolIcon Symbol="Delete" />
+                                        <TextBlock svc:Localized.Key="Common.Delete" />
+                                    </StackPanel>
+                                </Button>
                             </Grid>
                         </StackPanel>
                     </Border>

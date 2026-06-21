@@ -3,7 +3,7 @@
 ; dotnet publish ..\src\DeskBox\DeskBox.csproj --configuration Release -p:Platform=x64 -p:RuntimeIdentifier=win-x64 -p:SelfContained=false -p:WindowsAppSDKSelfContained=false -o ..\artifacts\publish\DeskBox\x64 -v:minimal
 
 #define MyAppName "DeskBox"
-#define MyAppVersion "1.0.5"
+#define MyAppVersion "1.0.6"
 #define MyAppPublisher "DeskBox 开发者"
 #define MyAppExeName "DeskBox.exe"
 #define MyAppOutputBaseName "DeskBox_Setup"
@@ -29,7 +29,7 @@ RestartApplications=no
 OutputDir=..\Output
 OutputBaseFilename={#MyAppOutputBaseName}_{#MyAppVersion}_x64
 SetupIconFile=..\src\DeskBox\Assets\deskbox.ico
-VersionInfoVersion=1.0.5.0
+VersionInfoVersion=1.0.6.0
 VersionInfoProductVersion={#MyAppVersion}
 VersionInfoTextVersion={#MyAppVersion}
 Compression=lzma

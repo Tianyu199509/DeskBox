@@ -12,6 +12,11 @@ public sealed record ManagedStorageMigrationResult(
     string OldRootPath,
     string NewRootPath);
 
+public sealed record QuickCaptureFileWidgetTarget(
+    string WidgetId,
+    string Name,
+    string FolderPath);
+
 public enum WidgetRemovalAction
 {
     RemoveWidgetOnly,
@@ -24,6 +29,23 @@ public sealed record ManagedStorageFolderCleanupCandidate(
     string Path,
     int ItemCount);
 
+internal interface IDesktopWidgetWindow
+{
+    IntPtr WindowHandle { get; }
+    bool Visible { get; }
+    void ApplyAppearancePreview();
+    void PrepareTrayShowAnimation();
+    void ShowPreparedAtDesktopLayer();
+    void ShowPreparedRaisedFromTray();
+    void PlayTrayShowAnimation();
+    bool PrepareTrayHideAnimation();
+    void PlayPreparedTrayHideAnimation();
+    void ActivateRaisedFromTrayBatch();
+    void EnsureRaisedFromTrayTopMost();
+    void RestoreDesktopLayerFromManager();
+    void HideWindow();
+}
+
 /// <summary>
 /// Manages the lifecycle of all desktop organizer widgets.
 /// </summary>
@@ -35,21 +57,25 @@ public sealed class WidgetManager
     private readonly FileService _fileService;
     private readonly OrganizerService _organizerService;
     private readonly ThemeService _themeService;
+    private readonly QuickCaptureService _quickCaptureService;
     private readonly LocalizationService _localizationService;
     private readonly Func<string> _desktopPathProvider;
     private readonly bool _recycleManagedFolderDeletes;
     private readonly Dictionary<string, (WidgetWindow Window, WidgetViewModel ViewModel)> _widgets = new();
+    private readonly Dictionary<string, (QuickCaptureWidgetWindow Window, QuickCaptureWidgetViewModel ViewModel)> _quickCaptureWidgets = new();
     private readonly HashSet<string> _deletedWidgetIds = [];
     private readonly List<WidgetWindow> _retiredWindows = [];
     private DispatcherQueueTimer? _trayLayerRestoreTimer;
     private bool _widgetsRaisedFromTray;
     private bool _isTogglingWidgetsDesktopLayer;
     private bool _isApplyingAppearancePreview;
+    private bool _lastQuickCaptureEnabled;
     private DateTime _lastTrayLayerToggleUtc = DateTime.MinValue;
     private DateTime _suppressTrayLayerRestoreUntilUtc = DateTime.MinValue;
     private long _trayRaiseBatchGeneration;
 
     public IReadOnlyDictionary<string, (WidgetWindow Window, WidgetViewModel ViewModel)> Widgets => _widgets;
+    public IReadOnlyDictionary<string, (QuickCaptureWidgetWindow Window, QuickCaptureWidgetViewModel ViewModel)> QuickCaptureWidgets => _quickCaptureWidgets;
 
     public bool WidgetsRaisedFromTray => _widgetsRaisedFromTray;
 
@@ -62,12 +88,14 @@ public sealed class WidgetManager
         FileService fileService,
         OrganizerService organizerService,
         ThemeService themeService,
+        QuickCaptureService quickCaptureService,
         LocalizationService? localizationService = null)
         : this(
             settingsService,
             fileService,
             organizerService,
             themeService,
+            quickCaptureService,
             localizationService ?? new LocalizationService(settingsService),
             () => Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory),
             recycleManagedFolderDeletes: true)
@@ -79,6 +107,7 @@ public sealed class WidgetManager
         FileService fileService,
         OrganizerService organizerService,
         ThemeService themeService,
+        QuickCaptureService quickCaptureService,
         Func<string> desktopPathProvider,
         bool recycleManagedFolderDeletes)
         : this(
@@ -86,6 +115,7 @@ public sealed class WidgetManager
             fileService,
             organizerService,
             themeService,
+            quickCaptureService,
             null,
             desktopPathProvider,
             recycleManagedFolderDeletes)
@@ -97,6 +127,7 @@ public sealed class WidgetManager
         FileService fileService,
         OrganizerService organizerService,
         ThemeService themeService,
+        QuickCaptureService quickCaptureService,
         LocalizationService? localizationService,
         Func<string> desktopPathProvider,
         bool recycleManagedFolderDeletes)
@@ -105,11 +136,29 @@ public sealed class WidgetManager
         _fileService = fileService;
         _organizerService = organizerService;
         _themeService = themeService;
+        _quickCaptureService = quickCaptureService;
         _localizationService = localizationService ?? new LocalizationService(settingsService);
         _desktopPathProvider = desktopPathProvider;
         _recycleManagedFolderDeletes = recycleManagedFolderDeletes;
+        _lastQuickCaptureEnabled = _settingsService.Settings.QuickCaptureEnabled;
+        _settingsService.SettingsChanged += OnSettingsChanged;
         _settingsService.AppearancePreviewChanged += ApplyAppearancePreview;
         _themeService.AppearanceChanged += ApplyAppearancePreview;
+    }
+
+    private void OnSettingsChanged()
+    {
+        bool quickCaptureEnabled = _settingsService.Settings.QuickCaptureEnabled;
+        if (quickCaptureEnabled == _lastQuickCaptureEnabled)
+        {
+            return;
+        }
+
+        _lastQuickCaptureEnabled = quickCaptureEnabled;
+        if (!quickCaptureEnabled)
+        {
+            HideLoadedQuickCaptureWidgets();
+        }
     }
 
     private void ApplyAppearancePreview()
@@ -126,6 +175,11 @@ public sealed class WidgetManager
             {
                 window.ApplyAppearancePreview();
             }
+
+            foreach (var (_, (window, _)) in _quickCaptureWidgets.ToList())
+            {
+                window.ApplyAppearancePreview();
+            }
         }
         finally
         {
@@ -139,9 +193,10 @@ public sealed class WidgetManager
     public async Task RestoreWidgetsAsync()
     {
         var configs = _settingsService.Settings.Widgets.Where(widget =>
-                widget.WidgetKind == WidgetKind.File &&
+                widget.WidgetKind is WidgetKind.File or WidgetKind.QuickCapture &&
                 widget.IsVisible &&
                 !widget.IsDisabled &&
+                (widget.WidgetKind == WidgetKind.File || _settingsService.Settings.QuickCaptureEnabled) &&
                 !IsDeleted(widget.Id))
             .ToList();
 
@@ -153,7 +208,14 @@ public sealed class WidgetManager
                 using var widgetPerfScope = PerformanceLogger.Measure(
                     "WidgetManager.RestoreWidget",
                     $"id={config.Id} name={config.Name}");
-                await CreateWidgetFromConfigAsync(config);
+                if (config.WidgetKind == WidgetKind.QuickCapture)
+                {
+                    await CreateQuickCaptureWidgetFromConfigAsync(config);
+                }
+                else
+                {
+                    await CreateWidgetFromConfigAsync(config);
+                }
             }
             catch (Exception ex)
             {
@@ -193,6 +255,39 @@ public sealed class WidgetManager
         return await CreateWidgetFromConfigAsync(config, revealAfterCreate: true);
     }
 
+    public async Task<QuickCaptureWidgetWindow> CreateOrShowQuickCaptureWidgetAsync(bool reveal = true)
+    {
+        _settingsService.Settings.QuickCaptureEnabled = true;
+
+        var config = _settingsService.Settings.Widgets.FirstOrDefault(widget =>
+            widget.WidgetKind == WidgetKind.QuickCapture &&
+            !IsDeleted(widget.Id));
+
+        if (config is null)
+        {
+            config = new WidgetConfig
+            {
+                Name = _localizationService.T("QuickCapture.Name"),
+                WidgetKind = WidgetKind.QuickCapture,
+                Width = _settingsService.Settings.DefaultWidgetWidth,
+                Height = _settingsService.Settings.DefaultWidgetHeight
+            };
+            _settingsService.Settings.Widgets.Add(config);
+        }
+
+        config.IsDisabled = false;
+        config.IsVisible = true;
+        await _settingsService.SaveAsync();
+
+        var window = await CreateQuickCaptureWidgetFromConfigAsync(config);
+        if (reveal)
+        {
+            window.RevealFromTray(autoRestore: false);
+        }
+
+        return window;
+    }
+
     /// <summary>
     /// Create a widget mapped to an arbitrary folder.
     /// </summary>
@@ -226,7 +321,48 @@ public sealed class WidgetManager
         }
 
         var config = FindConfig(widgetId);
-        if (config is null || config.WidgetKind != WidgetKind.File || config.IsDisabled)
+        if (config is null || config.IsDisabled)
+        {
+            return false;
+        }
+
+        if (config.WidgetKind == WidgetKind.QuickCapture && !_settingsService.Settings.QuickCaptureEnabled)
+        {
+            return false;
+        }
+
+        if (config.WidgetKind == WidgetKind.QuickCapture)
+        {
+            if (_quickCaptureWidgets.TryGetValue(widgetId, out var quickCaptureEntry))
+            {
+                if (reveal)
+                {
+                    quickCaptureEntry.Window.RevealFromTray(autoRestoreOnReveal);
+                }
+                else
+                {
+                    quickCaptureEntry.Window.PrepareTrayShowAnimation();
+                    quickCaptureEntry.Window.ShowPreparedAtDesktopLayer();
+                }
+
+                return true;
+            }
+
+            var quickCaptureWindow = await CreateQuickCaptureWidgetFromConfigAsync(config, keepPreparedForAnimation: !reveal);
+            if (reveal)
+            {
+                quickCaptureWindow.RevealFromTray(autoRestoreOnReveal);
+            }
+            else
+            {
+                quickCaptureWindow.PrepareTrayShowAnimation();
+                quickCaptureWindow.ShowPreparedAtDesktopLayer();
+            }
+
+            return true;
+        }
+
+        if (config.WidgetKind != WidgetKind.File)
         {
             return false;
         }
@@ -276,9 +412,12 @@ public sealed class WidgetManager
         _lastTrayLayerToggleUtc = now;
         try
         {
-            var windowsToRaise = new List<WidgetWindow>();
+            var windowsToRaise = new List<IDesktopWidgetWindow>();
             foreach (var widget in _settingsService.Settings.Widgets
-                         .Where(widget => widget.WidgetKind == WidgetKind.File && !widget.IsDisabled && !IsDeleted(widget.Id))
+                         .Where(widget => widget.WidgetKind is WidgetKind.File or WidgetKind.QuickCapture &&
+                                          !widget.IsDisabled &&
+                                          !IsDeleted(widget.Id) &&
+                                          (widget.WidgetKind == WidgetKind.File || _settingsService.Settings.QuickCaptureEnabled))
                          .ToList())
             {
                 var window = await PrepareWidgetForBatchShowAsync(widget, showRaisedWhileInitializing: true);
@@ -317,9 +456,12 @@ public sealed class WidgetManager
         using var perfScope = PerformanceLogger.Measure("WidgetManager.SetAllWidgetsVisible", $"visible={visible}");
         if (visible)
         {
-            var windowsToShow = new List<WidgetWindow>();
+            var windowsToShow = new List<IDesktopWidgetWindow>();
             foreach (var widget in _settingsService.Settings.Widgets
-                         .Where(widget => widget.WidgetKind == WidgetKind.File && !widget.IsDisabled && !IsDeleted(widget.Id))
+                         .Where(widget => widget.WidgetKind is WidgetKind.File or WidgetKind.QuickCapture &&
+                                          !widget.IsDisabled &&
+                                          !IsDeleted(widget.Id) &&
+                                          (widget.WidgetKind == WidgetKind.File || _settingsService.Settings.QuickCaptureEnabled))
                          .ToList())
             {
                 var window = await PrepareWidgetForBatchShowAsync(widget);
@@ -342,6 +484,8 @@ public sealed class WidgetManager
 
         var windowsToHide = _widgets.Values
             .Select(entry => entry.Window)
+            .Cast<IDesktopWidgetWindow>()
+            .Concat(_quickCaptureWidgets.Values.Select(entry => (IDesktopWidgetWindow)entry.Window))
             .Where(window => window.PrepareTrayHideAnimation())
             .ToList();
 
@@ -373,6 +517,14 @@ public sealed class WidgetManager
             entry.ViewModel.Dispose();
             _widgets.Remove(widgetId);
             _retiredWindows.Add(entry.Window);
+        }
+
+        if (_quickCaptureWidgets.TryGetValue(widgetId, out var quickCaptureEntry))
+        {
+            App.Log($"[WidgetManager] Retiring quick capture widget window for delete: {widgetId}");
+            quickCaptureEntry.Window.HideWindow();
+            quickCaptureEntry.ViewModel.Dispose();
+            _quickCaptureWidgets.Remove(widgetId);
         }
 
         _settingsService.RemoveWidget(widgetId);
@@ -466,13 +618,38 @@ public sealed class WidgetManager
         }
     }
 
-    private async Task<WidgetWindow?> PrepareWidgetForBatchShowAsync(
+    private async Task<IDesktopWidgetWindow?> PrepareWidgetForBatchShowAsync(
         WidgetConfig config,
         bool showRaisedWhileInitializing = false)
     {
         if (IsDeleted(config.Id) ||
-            config.WidgetKind != WidgetKind.File ||
             config.IsDisabled)
+        {
+            return null;
+        }
+
+        if (config.WidgetKind == WidgetKind.QuickCapture)
+        {
+            if (!_settingsService.Settings.QuickCaptureEnabled)
+            {
+                return null;
+            }
+
+            if (_quickCaptureWidgets.TryGetValue(config.Id, out var existingQuickCapture))
+            {
+                existingQuickCapture.Window.PrepareTrayShowAnimation();
+                return existingQuickCapture.Window;
+            }
+
+            var quickCaptureWindow = await CreateQuickCaptureWidgetFromConfigAsync(
+                config,
+                keepPreparedForAnimation: true,
+                showRaisedWhileInitializing: showRaisedWhileInitializing);
+            quickCaptureWindow.PrepareTrayShowAnimation();
+            return quickCaptureWindow;
+        }
+
+        if (config.WidgetKind != WidgetKind.File)
         {
             return null;
         }
@@ -491,7 +668,7 @@ public sealed class WidgetManager
         return window;
     }
 
-    private void PlayPreparedTrayShowAnimations(IReadOnlyList<WidgetWindow> windows)
+    private void PlayPreparedTrayShowAnimations(IReadOnlyList<IDesktopWidgetWindow> windows)
     {
         foreach (var window in windows)
         {
@@ -499,7 +676,7 @@ public sealed class WidgetManager
         }
     }
 
-    private void PlayPreparedTrayHideAnimations(IReadOnlyList<WidgetWindow> windows)
+    private void PlayPreparedTrayHideAnimations(IReadOnlyList<IDesktopWidgetWindow> windows)
     {
         foreach (var window in windows)
         {
@@ -507,7 +684,7 @@ public sealed class WidgetManager
         }
     }
 
-    private void QueueTrayRaiseTopMostConfirmation(IReadOnlyList<WidgetWindow> windows)
+    private void QueueTrayRaiseTopMostConfirmation(IReadOnlyList<IDesktopWidgetWindow> windows)
     {
         if (windows.Count == 0)
         {
@@ -521,7 +698,7 @@ public sealed class WidgetManager
     }
 
     private void QueueTrayRaiseTopMostConfirmation(
-        IReadOnlyList<WidgetWindow> windows,
+        IReadOnlyList<IDesktopWidgetWindow> windows,
         long generation,
         TimeSpan delay)
     {
@@ -532,7 +709,7 @@ public sealed class WidgetManager
         });
     }
 
-    private void ConfirmTrayRaiseTopMost(IReadOnlyList<WidgetWindow> windows, long generation)
+    private void ConfirmTrayRaiseTopMost(IReadOnlyList<IDesktopWidgetWindow> windows, long generation)
     {
         if (generation != _trayRaiseBatchGeneration || !_widgetsRaisedFromTray)
         {
@@ -605,6 +782,14 @@ public sealed class WidgetManager
         return true;
     }
 
+    private void HideLoadedQuickCaptureWidgets()
+    {
+        foreach (var (_, (window, _)) in _quickCaptureWidgets.ToList())
+        {
+            window.HideWindow();
+        }
+    }
+
     public void RestoreRaisedWidgetsToDesktopLayer()
     {
         if (_isTogglingWidgetsDesktopLayer ||
@@ -614,6 +799,11 @@ public sealed class WidgetManager
         }
 
         foreach (var (_, (window, _)) in _widgets.ToList())
+        {
+            window.RestoreDesktopLayerFromManager();
+        }
+
+        foreach (var (_, (window, _)) in _quickCaptureWidgets.ToList())
         {
             window.RestoreDesktopLayerFromManager();
         }
@@ -816,9 +1006,10 @@ public sealed class WidgetManager
     public async Task ToggleAllWidgetsAsync()
     {
         bool anyVisible = _settingsService.Settings.Widgets.Any(widget =>
-            widget.WidgetKind == WidgetKind.File &&
+            widget.WidgetKind is WidgetKind.File or WidgetKind.QuickCapture &&
             widget.IsVisible &&
             !widget.IsDisabled &&
+            (widget.WidgetKind == WidgetKind.File || _settingsService.Settings.QuickCaptureEnabled) &&
             !IsDeleted(widget.Id));
 
         await SetAllWidgetsVisibleAsync(!anyVisible);
@@ -829,6 +1020,7 @@ public sealed class WidgetManager
     /// </summary>
     public void CloseAll()
     {
+        _settingsService.SettingsChanged -= OnSettingsChanged;
         _settingsService.AppearancePreviewChanged -= ApplyAppearancePreview;
         _themeService.AppearanceChanged -= ApplyAppearancePreview;
 
@@ -845,6 +1037,20 @@ public sealed class WidgetManager
         }
 
         _widgets.Clear();
+
+        foreach (var (_, (window, viewModel)) in _quickCaptureWidgets)
+        {
+            viewModel.Dispose();
+            try
+            {
+                window.Close();
+            }
+            catch
+            {
+            }
+        }
+
+        _quickCaptureWidgets.Clear();
 
         foreach (var window in _retiredWindows)
         {
@@ -866,6 +1072,70 @@ public sealed class WidgetManager
             widget.WidgetKind == WidgetKind.File &&
             widget.FollowsDefaultStoragePath &&
             !IsDeleted(widget.Id));
+    }
+
+    public IReadOnlyList<QuickCaptureFileWidgetTarget> GetQuickCaptureFileWidgetTargets()
+    {
+        return _settingsService.Settings.Widgets
+            .Where(widget => widget.WidgetKind == WidgetKind.File &&
+                             !widget.IsDisabled &&
+                             !IsDeleted(widget.Id) &&
+                             TryGetFileWidgetFolderPath(widget, out _))
+            .Select(widget =>
+            {
+                TryGetFileWidgetFolderPath(widget, out string folderPath);
+                return new QuickCaptureFileWidgetTarget(widget.Id, widget.Name, folderPath);
+            })
+            .ToList();
+    }
+
+    public QuickCaptureFileWidgetTarget? GetLastQuickCaptureFileWidgetTarget()
+    {
+        string lastTargetId = _settingsService.Settings.LastQuickCaptureFileWidgetId;
+        if (string.IsNullOrWhiteSpace(lastTargetId))
+        {
+            return null;
+        }
+
+        return GetQuickCaptureFileWidgetTargets()
+            .FirstOrDefault(target => string.Equals(target.WidgetId, lastTargetId, StringComparison.Ordinal));
+    }
+
+    public async Task<string?> SaveQuickCaptureItemToFileWidgetAsync(
+        QuickCaptureItem item,
+        string targetWidgetId,
+        string? imageFileNamePrefix = null)
+    {
+        if (item.IsDeleted ||
+            string.IsNullOrWhiteSpace(targetWidgetId) ||
+            FindConfig(targetWidgetId) is not { } targetConfig ||
+            targetConfig.WidgetKind != WidgetKind.File ||
+            targetConfig.IsDisabled ||
+            IsDeleted(targetWidgetId) ||
+            !TryGetFileWidgetFolderPath(targetConfig, out string targetFolderPath))
+        {
+            return null;
+        }
+
+        Directory.CreateDirectory(targetFolderPath);
+        string? destinationPath = item.Type switch
+        {
+            QuickCaptureItemType.Image => await SaveQuickCaptureImageToFolderAsync(item, targetFolderPath, imageFileNamePrefix),
+            QuickCaptureItemType.Link => await SaveQuickCaptureLinkToFolderAsync(item, targetFolderPath),
+            _ => await SaveQuickCaptureTextToFolderAsync(item, targetFolderPath)
+        };
+
+        if (!string.IsNullOrWhiteSpace(destinationPath))
+        {
+            RememberLastQuickCaptureFileWidgetTarget(targetWidgetId);
+            if (_widgets.TryGetValue(targetWidgetId, out var targetEntry))
+            {
+                await targetEntry.ViewModel.RefreshFromConfigAsync();
+                targetEntry.Window.RevealSavedItem(destinationPath);
+            }
+        }
+
+        return destinationPath;
     }
 
     public async Task<ManagedStorageMigrationResult> UpdateDefaultManagedStorageRootAsync(string newRootPath)
@@ -1001,6 +1271,120 @@ public sealed class WidgetManager
     private WidgetConfig? FindConfig(string widgetId)
     {
         return _settingsService.Settings.Widgets.FirstOrDefault(widget => widget.Id == widgetId);
+    }
+
+    private void RememberLastQuickCaptureFileWidgetTarget(string widgetId)
+    {
+        if (string.Equals(_settingsService.Settings.LastQuickCaptureFileWidgetId, widgetId, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        _settingsService.Settings.LastQuickCaptureFileWidgetId = widgetId;
+        _settingsService.SaveDebounced(notifySubscribers: false);
+    }
+
+    private async Task<string?> SaveQuickCaptureImageToFolderAsync(
+        QuickCaptureItem item,
+        string targetFolderPath,
+        string? imageFileNamePrefix)
+    {
+        if (string.IsNullOrWhiteSpace(item.ImagePath) || !File.Exists(item.ImagePath))
+        {
+            return null;
+        }
+
+        string fileName = QuickCaptureService.BuildImageExportFileName(
+            imageFileNamePrefix,
+            item.UpdatedAt == default ? item.CreatedAt : item.UpdatedAt,
+            item.ImagePath);
+        string destinationPath = FileService.GetAvailablePath(Path.Combine(targetFolderPath, fileName));
+        await Task.Run(() => File.Copy(item.ImagePath, destinationPath));
+        return destinationPath;
+    }
+
+    private async Task<string?> SaveQuickCaptureTextToFolderAsync(QuickCaptureItem item, string targetFolderPath)
+    {
+        string body = item.Body?.Trim() ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(body))
+        {
+            return null;
+        }
+
+        string fileName = BuildQuickCaptureContentFileName(
+            body,
+            _localizationService.T("QuickCapture.TextFileNamePrefix"),
+            ".txt");
+        string destinationPath = FileService.GetAvailablePath(Path.Combine(targetFolderPath, fileName));
+        await File.WriteAllTextAsync(destinationPath, body);
+        return destinationPath;
+    }
+
+    private async Task<string?> SaveQuickCaptureLinkToFolderAsync(QuickCaptureItem item, string targetFolderPath)
+    {
+        string url = string.IsNullOrWhiteSpace(item.Url) ? item.Body?.Trim() ?? string.Empty : item.Url.Trim();
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri))
+        {
+            return await SaveQuickCaptureTextToFolderAsync(item, targetFolderPath);
+        }
+
+        string baseText = string.IsNullOrWhiteSpace(uri.Host) ? uri.AbsoluteUri : uri.Host;
+        string fileName = BuildQuickCaptureContentFileName(
+            baseText,
+            _localizationService.T("QuickCapture.LinkFileNamePrefix"),
+            ".url");
+        string destinationPath = FileService.GetAvailablePath(Path.Combine(targetFolderPath, fileName));
+        await File.WriteAllTextAsync(destinationPath, $"[InternetShortcut]{Environment.NewLine}URL={uri.AbsoluteUri}{Environment.NewLine}");
+        return destinationPath;
+    }
+
+    private static string BuildQuickCaptureContentFileName(string? body, string fallbackName, string extension)
+    {
+        string firstLine = body?
+            .Split(["\r\n", "\n"], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .FirstOrDefault() ?? string.Empty;
+        string baseName = FileService.SanitizeFileSystemName(firstLine);
+        if (baseName.Length > 36)
+        {
+            baseName = baseName[..36].Trim().TrimEnd('.');
+        }
+
+        if (string.IsNullOrWhiteSpace(baseName))
+        {
+            baseName = FileService.SanitizeFileSystemName(fallbackName);
+        }
+
+        if (string.IsNullOrWhiteSpace(baseName))
+        {
+            baseName = "Quick Capture";
+        }
+
+        return baseName.EndsWith(extension, StringComparison.OrdinalIgnoreCase)
+            ? baseName
+            : baseName + extension;
+    }
+
+    private bool TryGetFileWidgetFolderPath(WidgetConfig widget, out string folderPath)
+    {
+        folderPath = string.Empty;
+        if (widget.WidgetKind != WidgetKind.File)
+        {
+            return false;
+        }
+
+        if (!string.IsNullOrWhiteSpace(widget.MappedFolderPath))
+        {
+            folderPath = Path.GetFullPath(widget.MappedFolderPath);
+            return true;
+        }
+
+        if (!widget.FollowsDefaultStoragePath || string.IsNullOrWhiteSpace(widget.ManagedFolderName))
+        {
+            return false;
+        }
+
+        folderPath = Path.Combine(GetManagedStorageRootPath(), widget.ManagedFolderName);
+        return true;
     }
 
     private async Task RenameManagedWidgetFolderAsync(WidgetConfig config, string newName)
@@ -1504,6 +1888,90 @@ public sealed class WidgetManager
         return window;
     }
 
+    private async Task<QuickCaptureWidgetWindow> CreateQuickCaptureWidgetFromConfigAsync(
+        WidgetConfig config,
+        bool keepPreparedForAnimation = false,
+        bool revealAfterCreate = false,
+        bool showRaisedWhileInitializing = false)
+    {
+        if (_quickCaptureWidgets.TryGetValue(config.Id, out var existing))
+        {
+            return existing.Window;
+        }
+
+        config.WidgetKind = WidgetKind.QuickCapture;
+        config.Name = string.IsNullOrWhiteSpace(config.Name)
+            ? _localizationService.T("QuickCapture.Name")
+            : config.Name;
+        config.IsDisabled = false;
+        NormalizeWidgetBounds(config);
+
+        var dispatcherQueue = Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread();
+        var viewModel = new QuickCaptureWidgetViewModel(
+            config,
+            _quickCaptureService,
+            _settingsService,
+            _localizationService,
+            dispatcherQueue);
+        var window = new QuickCaptureWidgetWindow(viewModel, _settingsService, _localizationService);
+
+        _themeService.TrackWindow(window);
+        _quickCaptureWidgets[config.Id] = (window, viewModel);
+
+        window.Closed += (_, _) =>
+        {
+            if (IsDeleted(config.Id) || FindConfig(config.Id) is null)
+            {
+                return;
+            }
+
+            config.IsVisible = false;
+            _settingsService.SaveDebounced();
+        };
+
+        try
+        {
+            window.PrepareTrayShowAnimation();
+            if (!keepPreparedForAnimation)
+            {
+                window.Activate();
+                window.PushToBottom();
+            }
+            else if (showRaisedWhileInitializing)
+            {
+                QueueDeferredQuickCaptureInitialization(config, window, viewModel);
+                return window;
+            }
+
+            await viewModel.InitializeAsync();
+            if (!keepPreparedForAnimation)
+            {
+                window.CompleteTrayShowWithoutAnimation();
+                if (revealAfterCreate)
+                {
+                    window.RevealFromTray(autoRestore: false);
+                }
+            }
+        }
+        catch
+        {
+            _quickCaptureWidgets.Remove(config.Id);
+            viewModel.Dispose();
+
+            try
+            {
+                window.Close();
+            }
+            catch
+            {
+            }
+
+            throw;
+        }
+
+        return window;
+    }
+
     private void QueueDeferredWidgetInitialization(
         WidgetConfig config,
         WidgetWindow window,
@@ -1523,6 +1991,38 @@ public sealed class WidgetManager
                     ReferenceEquals(entry.Window, window))
                 {
                     _widgets.Remove(config.Id);
+                    viewModel.Dispose();
+                    try
+                    {
+                        window.Close();
+                    }
+                    catch
+                    {
+                    }
+                }
+            }
+        });
+    }
+
+    private void QueueDeferredQuickCaptureInitialization(
+        WidgetConfig config,
+        QuickCaptureWidgetWindow window,
+        QuickCaptureWidgetViewModel viewModel)
+    {
+        App.UiDispatcherQueue.TryEnqueue(async () =>
+        {
+            await Task.Yield();
+            try
+            {
+                await viewModel.InitializeAsync();
+            }
+            catch (Exception ex)
+            {
+                App.Log($"[WidgetManager] Failed to initialize quick capture widget '{config.Name}' ({config.Id}) after show: {ex}");
+                if (_quickCaptureWidgets.TryGetValue(config.Id, out var entry) &&
+                    ReferenceEquals(entry.Window, window))
+                {
+                    _quickCaptureWidgets.Remove(config.Id);
                     viewModel.Dispose();
                     try
                     {

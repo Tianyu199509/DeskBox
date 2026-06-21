@@ -40,6 +40,7 @@ public partial class App : Application
     private Window? _trayWindow;
     private MenuFlyoutItem? _trayMapFolderItem;
     private MenuFlyoutItem? _trayNewWidgetItem;
+    private MenuFlyoutItem? _trayShowQuickCaptureItem;
     private MenuFlyoutItem? _trayOpenManagedStorageItem;
     private MenuFlyoutItem? _traySettingsItem;
     private MenuFlyoutItem? _trayExitItem;
@@ -56,6 +57,8 @@ public partial class App : Application
     public SettingsService SettingsService { get; } = new();
     public FileService FileService { get; } = new();
     public OrganizerService OrganizerService { get; }
+    public QuickCaptureService QuickCaptureService { get; } = new();
+    public QuickCaptureClipboardService? QuickCaptureClipboardService { get; private set; }
     public LocalizationService LocalizationService { get; private set; } = null!;
     public ThemeService ThemeService { get; private set; } = null!;
     public GlobalHotkeyService? GlobalHotkeyService { get; private set; }
@@ -128,7 +131,8 @@ public partial class App : Application
             return true;
         }
 
-        return WidgetManager?.Widgets.Values.Any(entry => entry.Window.WindowHandle == rootHwnd) == true;
+        return WidgetManager?.Widgets.Values.Any(entry => entry.Window.WindowHandle == rootHwnd) == true ||
+               WidgetManager?.QuickCaptureWidgets.Values.Any(entry => entry.Window.WindowHandle == rootHwnd) == true;
     }
 
     public static void Log(string msg)
@@ -191,7 +195,9 @@ public partial class App : Application
             ThemeService.RefreshAppearance();
 
             GlobalHotkeyService = new GlobalHotkeyService(SettingsService, LocalizationService, ToggleTrayWidgetsAsync);
-            WidgetManager = new WidgetManager(SettingsService, FileService, OrganizerService, ThemeService, LocalizationService);
+            QuickCaptureClipboardService = new QuickCaptureClipboardService(SettingsService, QuickCaptureService);
+            QuickCaptureClipboardService.Refresh();
+            WidgetManager = new WidgetManager(SettingsService, FileService, OrganizerService, ThemeService, QuickCaptureService, LocalizationService);
             WidgetManager.TrayLayerStateChanged += UpdateTrayLayerStateText;
 
             CreateTrayIcon();
@@ -300,6 +306,21 @@ public partial class App : Application
             }
         });
 
+        var showQuickCaptureItem = new MenuFlyoutItem
+        {
+            Text = localization.T("Tray.ShowQuickCapture"),
+            Width = TrayMenuItemWidth,
+            Icon = new SymbolIcon(Symbol.Edit),
+            Style = trayMenuItemStyle
+        };
+        showQuickCaptureItem.Click += async (_, _) => await RunTrayMenuActionAsync(contextMenu, async () =>
+        {
+            if (WidgetManager is not null)
+            {
+                await WidgetManager.CreateOrShowQuickCaptureWidgetAsync();
+            }
+        });
+
         var settingsItem = new MenuFlyoutItem
         {
             Text = localization.T("Tray.Settings"),
@@ -332,10 +353,15 @@ public partial class App : Application
             bool canCreateWidget = WidgetManager is not null;
             newWidgetItem.IsEnabled = canCreateWidget;
             mapFolderItem.IsEnabled = canCreateWidget;
+            showQuickCaptureItem.IsEnabled = canCreateWidget && SettingsService.Settings.QuickCaptureEnabled;
+            showQuickCaptureItem.Visibility = SettingsService.Settings.QuickCaptureEnabled
+                ? Visibility.Visible
+                : Visibility.Collapsed;
         };
 
         contextMenu.Items.Add(newWidgetItem);
         contextMenu.Items.Add(mapFolderItem);
+        contextMenu.Items.Add(showQuickCaptureItem);
         contextMenu.Items.Add(new MenuFlyoutSeparator());
         contextMenu.Items.Add(openManagedStorageItem);
         contextMenu.Items.Add(new MenuFlyoutSeparator());
@@ -345,6 +371,7 @@ public partial class App : Application
 
         _trayMapFolderItem = mapFolderItem;
         _trayNewWidgetItem = newWidgetItem;
+        _trayShowQuickCaptureItem = showQuickCaptureItem;
         _trayOpenManagedStorageItem = openManagedStorageItem;
         _traySettingsItem = settingsItem;
         _trayExitItem = exitItem;
@@ -728,6 +755,11 @@ public partial class App : Application
             _trayNewWidgetItem.Text = LocalizationService.T("Common.NewWidget");
         }
 
+        if (_trayShowQuickCaptureItem is not null)
+        {
+            _trayShowQuickCaptureItem.Text = LocalizationService.T("Tray.ShowQuickCapture");
+        }
+
         if (_traySettingsItem is not null)
         {
             _traySettingsItem.Text = LocalizationService.T("Tray.Settings");
@@ -816,6 +848,12 @@ public partial class App : Application
     private void OpenSettings()
     {
         var settingsWindow = _settingsWindow ?? CreateSettingsWindow();
+        if (WidgetManager?.WidgetsRaisedFromTray == true)
+        {
+            settingsWindow.ActivateFromTray();
+            return;
+        }
+
         settingsWindow.Activate();
     }
 
@@ -888,6 +926,8 @@ public partial class App : Application
         await SettingsService.SaveAsync();
         GlobalHotkeyService?.Dispose();
         GlobalHotkeyService = null;
+        QuickCaptureClipboardService?.Dispose();
+        QuickCaptureClipboardService = null;
         WidgetManager?.CloseAll();
         _trayIcon?.Dispose();
         _activationRegistration?.Unregister(null);

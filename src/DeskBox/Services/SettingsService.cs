@@ -129,6 +129,7 @@ public sealed class SettingsService
                 changed |= NormalizeWidgetContentSettings(_settings);
                 changed |= NormalizeOrganizerSettings(_settings);
                 changed |= NormalizeHotkeySettings(_settings);
+                changed |= NormalizeQuickCaptureSettings(_settings);
                 changed |= NormalizeDeletionSettings(_settings);
             }
 
@@ -187,6 +188,7 @@ public sealed class SettingsService
                 NormalizePresentationSettings(_settings);
                 NormalizeOrganizerSettings(_settings);
                 NormalizeHotkeySettings(_settings);
+                NormalizeQuickCaptureSettings(_settings);
                 json = JsonSerializer.Serialize(_settings, s_jsonOptions);
             }
             await File.WriteAllTextAsync(_settingsPath, json);
@@ -491,7 +493,7 @@ public sealed class SettingsService
 
         foreach (var widget in settings.Widgets)
         {
-            if (widget.WidgetKind != WidgetKind.File)
+            if (widget.WidgetKind is not (WidgetKind.File or WidgetKind.QuickCapture))
             {
                 widget.WidgetKind = WidgetKind.File;
                 changed = true;
@@ -626,6 +628,29 @@ public sealed class SettingsService
         {
             settings.GlobalHotkeyModifiers = DefaultGlobalHotkeyModifiers;
             settings.GlobalHotkeyKey = DefaultGlobalHotkeyKey;
+            changed = true;
+        }
+
+        return changed;
+    }
+
+    private static bool NormalizeQuickCaptureSettings(AppSettings settings)
+    {
+        bool changed = false;
+
+        int normalizedLimit = QuickCaptureService.NormalizeRecentLimit(settings.QuickCaptureRecentLimit);
+        if (settings.QuickCaptureRecentLimit != normalizedLimit)
+        {
+            settings.QuickCaptureRecentLimit = normalizedLimit;
+            changed = true;
+        }
+
+        string normalizedLastFileWidgetId = string.IsNullOrWhiteSpace(settings.LastQuickCaptureFileWidgetId)
+            ? string.Empty
+            : settings.LastQuickCaptureFileWidgetId.Trim();
+        if (!string.Equals(settings.LastQuickCaptureFileWidgetId, normalizedLastFileWidgetId, StringComparison.Ordinal))
+        {
+            settings.LastQuickCaptureFileWidgetId = normalizedLastFileWidgetId;
             changed = true;
         }
 

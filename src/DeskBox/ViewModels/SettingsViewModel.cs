@@ -42,6 +42,9 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
     private string _globalHotkeyText = string.Empty;
     private string _globalHotkeyStatusText = string.Empty;
     private string _globalHotkeyStatusKind = "Normal";
+    private string _quickCaptureImageCacheText = string.Empty;
+    private string _quickCaptureClipboardDiagnosticsText = string.Empty;
+    private bool _canClearQuickCaptureImageCache;
     private bool _isRestoringDefaults;
 
     [ObservableProperty] private bool _autoStart;
@@ -59,6 +62,10 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
     [ObservableProperty] private double _fileNameWidthScale = SettingsService.DefaultFileNameWidthScale;
     [ObservableProperty] private bool _showFileExtensions;
     [ObservableProperty] private bool _hideShortcutExtensionWhenShowingFileExtensions = true;
+    [ObservableProperty] private bool _quickCaptureEnabled;
+    [ObservableProperty] private bool _quickCaptureClipboardEnabled;
+    [ObservableProperty] private bool _quickCaptureImageClipboardEnabled = true;
+    [ObservableProperty] private int _quickCaptureRecentLimit = QuickCaptureService.DefaultRecentLimit;
 
     public string SelectedTheme
     {
@@ -408,6 +415,35 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
 
     public string GlobalHotkeyDescription => _localizationService.T("Settings.GlobalHotkey.Description");
     public bool CanShowGlobalHotkeyWarning => GlobalHotkeyEnabled && GlobalHotkeyService.IsRiskyGesture(GetCurrentGlobalHotkeyGesture());
+    public string QuickCaptureStatusText => QuickCaptureEnabled
+        ? _localizationService.T("Settings.QuickCapture.Status.Enabled")
+        : _localizationService.T("Settings.QuickCapture.Status.Disabled");
+    public string QuickCaptureDependencyStatusText => QuickCaptureEnabled
+        ? _localizationService.T("Settings.QuickCapture.Dependency.Enabled")
+        : _localizationService.T("Settings.QuickCapture.Dependency.Disabled");
+    public string QuickCaptureRecentLimitText => _localizationService.Format("Settings.QuickCapture.RecentLimitValue", QuickCaptureRecentLimit);
+    public string QuickCaptureClipboardDiagnosticsText
+    {
+        get => _quickCaptureClipboardDiagnosticsText;
+        private set => SetProperty(ref _quickCaptureClipboardDiagnosticsText, value);
+    }
+
+    public string QuickCaptureRecentLimitInput
+    {
+        get => QuickCaptureRecentLimit.ToString(CultureInfo.CurrentCulture);
+        set => ApplyQuickCaptureRecentLimitInput(value);
+    }
+    public string QuickCaptureImageCacheText
+    {
+        get => _quickCaptureImageCacheText;
+        private set => SetProperty(ref _quickCaptureImageCacheText, value);
+    }
+
+    public bool CanClearQuickCaptureImageCache
+    {
+        get => _canClearQuickCaptureImageCache;
+        private set => SetProperty(ref _canClearQuickCaptureImageCache, value);
+    }
 
     public SolidColorBrush AccentPreviewBrush { get; } = new(AccentColorHelper.DefaultAccentColor);
 
@@ -505,11 +541,76 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
         ManagedStorageQuickAccessPinState = ExplorerQuickAccessHelper.GetQuickAccessPinState(ManagedStorageRootPath, out _);
     }
 
+    public async Task RefreshQuickCaptureImageCacheInfoAsync()
+    {
+        if (App.Current?.QuickCaptureService is not { } quickCaptureService)
+        {
+            QuickCaptureImageCacheText = _localizationService.T("Settings.QuickCapture.ImageCacheUnavailable");
+            CanClearQuickCaptureImageCache = false;
+            return;
+        }
+
+        try
+        {
+            var info = await quickCaptureService.GetImageCacheInfoAsync();
+            if (info.TotalFileCount == 0)
+            {
+                QuickCaptureImageCacheText = _localizationService.T("Settings.QuickCapture.ImageCacheEmpty");
+                CanClearQuickCaptureImageCache = false;
+                return;
+            }
+
+            QuickCaptureImageCacheText = _localizationService.Format(
+                "Settings.QuickCapture.ImageCacheValue",
+                info.TotalFileCount,
+                FormatBytes(info.TotalBytes),
+                info.UnusedFileCount,
+                FormatBytes(info.UnusedBytes));
+            CanClearQuickCaptureImageCache = info.UnusedFileCount > 0;
+        }
+        catch (Exception ex)
+        {
+            App.Log($"[QuickCapture] Failed to refresh image cache info: {ex}");
+            QuickCaptureImageCacheText = _localizationService.T("Settings.QuickCapture.ImageCacheUnavailable");
+            CanClearQuickCaptureImageCache = false;
+        }
+    }
+
+    public void RefreshQuickCaptureClipboardDiagnostics()
+    {
+        if (App.Current?.QuickCaptureClipboardService is not { } clipboardService)
+        {
+            QuickCaptureClipboardDiagnosticsText = _localizationService.T("Settings.QuickCapture.ClipboardDiagnosticsUnavailable");
+            return;
+        }
+
+        var diagnostics = clipboardService.GetDiagnostics();
+        string reasonText = GetQuickCaptureClipboardReasonText(diagnostics.LastReason);
+        if (diagnostics.LastCapturedAt is { } capturedAt)
+        {
+            QuickCaptureClipboardDiagnosticsText = _localizationService.Format(
+                diagnostics.IsRecording && diagnostics.IsListening
+                    ? "Settings.QuickCapture.ClipboardDiagnosticsRecording"
+                    : "Settings.QuickCapture.ClipboardDiagnosticsNotRecording",
+                capturedAt.ToLocalTime().ToString("HH:mm", CultureInfo.CurrentCulture),
+                reasonText);
+            return;
+        }
+
+        QuickCaptureClipboardDiagnosticsText = _localizationService.Format(
+            diagnostics.IsRecording && diagnostics.IsListening
+                ? "Settings.QuickCapture.ClipboardDiagnosticsNoCapture"
+                : "Settings.QuickCapture.ClipboardDiagnosticsNotRecordingNoCapture",
+            reasonText);
+    }
+
     public SettingsViewModel(SettingsService settingsService, ThemeService themeService, LocalizationService? localizationService = null)
     {
         _settingsService = settingsService;
         _themeService = themeService;
         _localizationService = localizationService ?? new LocalizationService(settingsService);
+        _quickCaptureImageCacheText = _localizationService.T("Settings.QuickCapture.ImageCacheLoading");
+        _quickCaptureClipboardDiagnosticsText = _localizationService.T("Settings.QuickCapture.ClipboardDiagnosticsUnavailable");
 
         var settings = settingsService.Settings;
         _selectedTheme = settings.Theme is ThemeLight or ThemeDark ? settings.Theme : ThemeSystem;
@@ -536,6 +637,10 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
         _fileNameWidthScale = settings.FileNameWidthScale;
         _showFileExtensions = settings.ShowFileExtensions;
         _hideShortcutExtensionWhenShowingFileExtensions = settings.HideShortcutExtensionWhenShowingFileExtensions;
+        _quickCaptureEnabled = settings.QuickCaptureEnabled;
+        _quickCaptureClipboardEnabled = settings.QuickCaptureClipboardEnabled;
+        _quickCaptureImageClipboardEnabled = settings.QuickCaptureImageClipboardEnabled;
+        _quickCaptureRecentLimit = QuickCaptureService.NormalizeRecentLimit(settings.QuickCaptureRecentLimit);
         _selectedManagedDropAction = string.Equals(settings.ManagedDropAction, SettingsService.ManagedDropActionCopy, StringComparison.OrdinalIgnoreCase)
             ? SettingsService.ManagedDropActionCopy
             : SettingsService.ManagedDropActionMove;
@@ -545,6 +650,11 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
         RefreshQuickAccessState();
         _themeService.AppearanceChanged += OnAppearanceChanged;
         _localizationService.LanguageChanged += OnLanguageChanged;
+        if (App.Current?.QuickCaptureClipboardService is { } clipboardService)
+        {
+            clipboardService.DiagnosticsChanged += OnQuickCaptureClipboardDiagnosticsChanged;
+            RefreshQuickCaptureClipboardDiagnostics();
+        }
     }
 
     public Color GetCurrentAccentColor() => _currentAccentColor;
@@ -606,6 +716,7 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
             FileNameWidthScale = SettingsService.DefaultFileNameWidthScale;
             ShowFileExtensions = false;
             HideShortcutExtensionWhenShowingFileExtensions = true;
+            QuickCaptureImageClipboardEnabled = true;
             SelectedManagedDropAction = SettingsService.ManagedDropActionMove;
             DoubleClickToOpen = true;
             HideShortcutArrowOverlay = true;
@@ -629,6 +740,7 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
             settings.FileNameWidthScale = SettingsService.DefaultFileNameWidthScale;
             settings.ShowFileExtensions = false;
             settings.HideShortcutExtensionWhenShowingFileExtensions = true;
+            settings.QuickCaptureImageClipboardEnabled = true;
             settings.ManagedDropAction = SettingsService.ManagedDropActionMove;
             settings.GlobalHotkeyEnabled = SettingsService.DefaultGlobalHotkeyEnabled;
             settings.GlobalHotkeyModifiers = SettingsService.DefaultGlobalHotkeyModifiers;
@@ -739,6 +851,34 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(GlobalHotkeyStatusText));
         OnPropertyChanged(nameof(GlobalHotkeyStatusKind));
         OnPropertyChanged(nameof(CanShowGlobalHotkeyWarning));
+        OnPropertyChanged(nameof(QuickCaptureStatusText));
+        OnPropertyChanged(nameof(QuickCaptureDependencyStatusText));
+        OnPropertyChanged(nameof(QuickCaptureRecentLimitText));
+        OnPropertyChanged(nameof(QuickCaptureRecentLimitInput));
+        RefreshQuickCaptureClipboardDiagnostics();
+        _ = RefreshQuickCaptureImageCacheInfoAsync();
+    }
+
+    private string GetQuickCaptureClipboardReasonText(string reason)
+    {
+        string key = reason switch
+        {
+            "enabled" => "Settings.QuickCapture.ClipboardReason.Enabled",
+            "disabled:quick-capture-off" => "Settings.QuickCapture.ClipboardReason.QuickCaptureOff",
+            "disabled:clipboard-off" => "Settings.QuickCapture.ClipboardReason.ClipboardOff",
+            "disabled:notice-unconfirmed" => "Settings.QuickCapture.ClipboardReason.NoticeUnconfirmed",
+            "ignored:empty-or-unsupported" => "Settings.QuickCapture.ClipboardReason.EmptyOrUnsupported",
+            "ignored:deskbox-write" => "Settings.QuickCapture.ClipboardReason.DeskBoxWrite",
+            "ignored:image-recording-off" => "Settings.QuickCapture.ClipboardReason.ImageOff",
+            "ignored:image-too-large" => "Settings.QuickCapture.ClipboardReason.ImageTooLarge",
+            "ignored:text-too-large" => "Settings.QuickCapture.ClipboardReason.TextTooLarge",
+            "ignored:duplicate-or-app-write" => "Settings.QuickCapture.ClipboardReason.Duplicate",
+            "failed:read-or-save" => "Settings.QuickCapture.ClipboardReason.Failed",
+            _ when reason.StartsWith("captured:", StringComparison.Ordinal) => "Settings.QuickCapture.ClipboardReason.Captured",
+            _ => "Settings.QuickCapture.ClipboardReason.Unknown"
+        };
+
+        return _localizationService.T(key);
     }
 
     private static string NormalizeWidgetAnimationEffect(string? effect)
@@ -893,6 +1033,73 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
 
         _settingsService.Settings.HideShortcutExtensionWhenShowingFileExtensions = value;
         _settingsService.SaveDebounced();
+    }
+
+    partial void OnQuickCaptureEnabledChanged(bool value)
+    {
+        if (_isRestoringDefaults)
+        {
+            OnPropertyChanged(nameof(QuickCaptureStatusText));
+            OnPropertyChanged(nameof(QuickCaptureDependencyStatusText));
+            return;
+        }
+
+        _settingsService.Settings.QuickCaptureEnabled = value;
+        _settingsService.SaveDebounced();
+        OnPropertyChanged(nameof(QuickCaptureStatusText));
+        OnPropertyChanged(nameof(QuickCaptureDependencyStatusText));
+        RefreshQuickCaptureClipboardDiagnostics();
+    }
+
+    partial void OnQuickCaptureClipboardEnabledChanged(bool value)
+    {
+        if (_isRestoringDefaults)
+        {
+            return;
+        }
+
+        _settingsService.Settings.QuickCaptureClipboardEnabled = value;
+        _settingsService.SaveDebounced();
+        RefreshQuickCaptureClipboardDiagnostics();
+    }
+
+    partial void OnQuickCaptureImageClipboardEnabledChanged(bool value)
+    {
+        if (_isRestoringDefaults)
+        {
+            return;
+        }
+
+        _settingsService.Settings.QuickCaptureImageClipboardEnabled = value;
+        _settingsService.SaveDebounced();
+        RefreshQuickCaptureClipboardDiagnostics();
+        if (value)
+        {
+            App.Current.QuickCaptureClipboardService?.CaptureCurrent();
+        }
+    }
+
+    partial void OnQuickCaptureRecentLimitChanged(int value)
+    {
+        if (_isRestoringDefaults)
+        {
+            OnPropertyChanged(nameof(QuickCaptureRecentLimitText));
+            OnPropertyChanged(nameof(QuickCaptureRecentLimitInput));
+            return;
+        }
+
+        int normalizedValue = QuickCaptureService.NormalizeRecentLimit(value);
+        if (normalizedValue != value)
+        {
+            QuickCaptureRecentLimit = normalizedValue;
+            return;
+        }
+
+        _settingsService.Settings.QuickCaptureRecentLimit = normalizedValue;
+        _settingsService.SaveDebounced();
+        _ = App.Current.QuickCaptureService.TrimRecentItemsAsync(normalizedValue);
+        OnPropertyChanged(nameof(QuickCaptureRecentLimitText));
+        OnPropertyChanged(nameof(QuickCaptureRecentLimitInput));
     }
 
     partial void OnWidgetOpacityChanged(double value)
@@ -1096,8 +1303,24 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
 
     public void Dispose()
     {
+        if (App.Current?.QuickCaptureClipboardService is { } clipboardService)
+        {
+            clipboardService.DiagnosticsChanged -= OnQuickCaptureClipboardDiagnosticsChanged;
+        }
+
         _themeService.AppearanceChanged -= OnAppearanceChanged;
         _localizationService.LanguageChanged -= OnLanguageChanged;
+    }
+
+    private void OnQuickCaptureClipboardDiagnosticsChanged()
+    {
+        if (App.UiDispatcherQueue is { } dispatcherQueue)
+        {
+            dispatcherQueue.TryEnqueue(RefreshQuickCaptureClipboardDiagnostics);
+            return;
+        }
+
+        RefreshQuickCaptureClipboardDiagnostics();
     }
 
     private void OnAppearanceChanged()
@@ -1116,6 +1339,26 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
     {
         string format = decimals <= 0 ? "0" : $"0.{new string('#', decimals)}";
         return value.ToString(format, CultureInfo.CurrentCulture);
+    }
+
+    public static string FormatBytes(long bytes)
+    {
+        if (bytes < 1024)
+        {
+            return string.Format(CultureInfo.CurrentCulture, "{0} B", Math.Max(0, bytes));
+        }
+
+        string[] units = ["KB", "MB", "GB"];
+        double value = bytes;
+        int unitIndex = -1;
+        do
+        {
+            value /= 1024d;
+            unitIndex++;
+        }
+        while (value >= 1024d && unitIndex < units.Length - 1);
+
+        return string.Format(CultureInfo.CurrentCulture, "{0:0.#} {1}", value, units[unitIndex]);
     }
 
     private void ApplyNumberInput(
@@ -1142,6 +1385,23 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
         RefreshNumberInputs();
     }
 
+    private void ApplyQuickCaptureRecentLimitInput(string? value)
+    {
+        if (!TryParseNumberInput(value, out double parsedValue))
+        {
+            OnPropertyChanged(nameof(QuickCaptureRecentLimitInput));
+            return;
+        }
+
+        int normalizedValue = QuickCaptureService.NormalizeRecentLimit((int)Math.Round(parsedValue, MidpointRounding.AwayFromZero));
+        if (normalizedValue != QuickCaptureRecentLimit)
+        {
+            QuickCaptureRecentLimit = normalizedValue;
+        }
+
+        OnPropertyChanged(nameof(QuickCaptureRecentLimitInput));
+    }
+
     private static bool TryParseNumberInput(string? value, out double result)
     {
         result = 0;
@@ -1166,6 +1426,7 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(HorizontalSpacingPercentInput));
         OnPropertyChanged(nameof(VerticalSpacingPercentInput));
         OnPropertyChanged(nameof(FileNameWidthPercentInput));
+        OnPropertyChanged(nameof(QuickCaptureRecentLimitInput));
     }
 
     private void ApplySpacingScaleChange(

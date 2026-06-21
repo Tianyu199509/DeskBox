@@ -26,7 +26,7 @@ using WinRT.Interop;
 
 namespace DeskBox.Views;
 
-public sealed partial class WidgetWindow : Window
+public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
 {
     private enum ItemSurfaceState
     {
@@ -366,7 +366,7 @@ public sealed partial class WidgetWindow : Window
         });
     }
 
-    internal void EnsureRaisedFromTrayTopMost()
+    public void EnsureRaisedFromTrayTopMost()
     {
         if (!Visible)
         {
@@ -396,7 +396,7 @@ public sealed partial class WidgetWindow : Window
         PlayTrayRaiseAnimation();
     }
 
-    internal void PlayPreparedTrayHideAnimation()
+    public void PlayPreparedTrayHideAnimation()
     {
         if (!_isHideAnimationRunning)
         {
@@ -1060,7 +1060,7 @@ public sealed partial class WidgetWindow : Window
         });
     }
 
-    internal void RestoreDesktopLayerFromManager()
+    public void RestoreDesktopLayerFromManager()
     {
         RestoreDesktopLayer(force: true);
     }
@@ -1746,6 +1746,30 @@ public sealed partial class WidgetWindow : Window
     public void ClearItemSelection()
     {
         ClearItemSelectionCore(clearCutState: false);
+    }
+
+    public void RevealSavedItem(string itemPath)
+    {
+        if (string.IsNullOrWhiteSpace(itemPath))
+        {
+            return;
+        }
+
+        if (!DispatcherQueue.HasThreadAccess)
+        {
+            DispatcherQueue.TryEnqueue(() => RevealSavedItem(itemPath));
+            return;
+        }
+
+        var item = ViewModel.Items.FirstOrDefault(candidate =>
+            string.Equals(candidate.Path, itemPath, StringComparison.OrdinalIgnoreCase));
+        if (item is null)
+        {
+            return;
+        }
+
+        SelectSingleItem(item);
+        ShowStatusToast(_localizationService.T("Widget.SavedHere"));
     }
 
     private void ClearItemSelectionCore(bool clearCutState)
@@ -2529,8 +2553,10 @@ public sealed partial class WidgetWindow : Window
             return;
         }
 
+        string clipboardText = string.Join(Environment.NewLine, selectedPaths);
         var package = new DataPackage();
-        package.SetText(string.Join(Environment.NewLine, selectedPaths));
+        package.SetText(clipboardText);
+        DeskBoxClipboardWriteScope.MarkWrite(text: clipboardText, paths: selectedPaths);
         Clipboard.SetContent(package);
         Clipboard.Flush();
         ShowStatusToast(_localizationService.Format("Widget.CopyPathCount", selectedPaths.Length));
@@ -2556,6 +2582,9 @@ public sealed partial class WidgetWindow : Window
             return;
         }
 
+        string clipboardText = string.Join(Environment.NewLine, sourcePaths);
+        DeskBoxClipboardWriteScope.MarkWrite(text: clipboardText, paths: sourcePaths);
+
         var package = new DataPackage();
         package.RequestedOperation = cut ? DataPackageOperation.Move : DataPackageOperation.Copy;
         bool shellClipboardSet = ShellClipboardHelper.TrySetFileDropList(sourcePaths, cut);
@@ -2568,7 +2597,7 @@ public sealed partial class WidgetWindow : Window
             }
             else
             {
-                package.SetText(string.Join(Environment.NewLine, sourcePaths));
+                package.SetText(clipboardText);
             }
 
             package.Properties["DeskBoxSourceWidgetId"] = ViewModel.Config.Id;

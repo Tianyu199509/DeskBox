@@ -93,6 +93,9 @@ public enum WidgetKind
     /// <summary>File-oriented widget used for references or folder-backed storage.</summary>
     File,
 
+    /// <summary>Built-in lightweight text/link capture widget.</summary>
+    QuickCapture,
+
     /// <summary>Legacy value kept only for migrating old settings files.</summary>
     Productivity
 }

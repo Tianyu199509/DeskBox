@@ -15,21 +15,21 @@ DeskBox is a lightweight WinUI 3 desktop organizer for Windows 11. It creates na
 
 Download the latest installer from [GitHub Releases](https://github.com/Tianyu199509/DeskBox/releases).
 
-Current release: 1.0.5
+Current release: 1.0.6
 
-- [DeskBox_Setup_1.0.5_x64.exe](https://github.com/Tianyu199509/DeskBox/releases/download/v1.0.5/DeskBox_Setup_1.0.5_x64.exe)
+- [DeskBox_Setup_1.0.6_x64.exe](https://github.com/Tianyu199509/DeskBox/releases/download/v1.0.6/DeskBox_Setup_1.0.6_x64.exe)
 
 The installer checks for .NET 8 Runtime x64 and Windows App Runtime 2.1.3 x64. If either dependency is missing, the setup flow can download and install it for you.
 
-## What's New In 1.0.5
+## What's New In 1.0.6
 
-- Rebuilt first-run onboarding with a logo intro, a five-step guide, looping feature scenes, and Chinese, English, light-mode, and dark-mode support.
-- Added an optional global hotkey for the same show, hide, and temporary-raise behavior as the tray left-click action.
-- Improved Settings and tray access with managed storage shortcuts, Quick Access pinning, download-link actions, and clearer maintenance controls.
-- Improved storage workflows, including default storage migration, mapped shortcut sync, orphan managed-folder cleanup, and steadier drag/drop behavior.
-- Removed remaining stale blur-toggle plumbing and release animation/window references more promptly after Settings or onboarding closes.
+- Added Quick Capture, an optional feature widget for saving text, links, screenshots, and recent clipboard content locally.
+- Added a clearer Quick Capture workflow with Records, Pinned, and Recent views, hover actions, scoped search, drag-out support, and save-to-file-widget actions.
+- Improved upload workflows with managed storage access, Quick Access pinning, mapped-folder shortcuts, and an "open storage folder" tray entry.
+- Improved drag/drop and clipboard behavior so files stay files, text stays text, and DeskBox's own clipboard writes do not pollute Recent items.
+- Improved window layering, widget refresh, onboarding scaling, custom icons, filename extension display, migration feedback, and compact Quick Capture dialogs.
 
-See the full [changelog](CHANGELOG.md). GitHub Release copy is available in [docs/releases/v1.0.5.md](docs/releases/v1.0.5.md).
+See the full [changelog](CHANGELOG.md). GitHub Release copy is available in [docs/releases/v1.0.6.md](docs/releases/v1.0.6.md).
 
 ## Why DeskBox Exists
 
@@ -41,6 +41,7 @@ The product is intentionally built around native Windows behavior. Widgets use W
 
 - **Managed desktop widgets**: create file collection widgets backed by a real folder.
 - **Folder mapping**: display an existing folder as a desktop widget without moving its contents.
+- **Quick Capture**: keep reusable text, links, screenshots, and recent clipboard content in an optional local-only feature widget.
 - **Move or copy on drop**: choose whether managed widgets organize by moving files or by keeping originals and adding copies.
 - **Tray controls**: create widgets, map folders, show or hide all widgets, temporarily raise widgets, open managed storage, open Settings, toggle startup launch, and exit.
 - **Global hotkey**: enable a keyboard shortcut for quickly showing, hiding, or raising widgets.
@@ -118,7 +119,7 @@ dotnet publish .\src\DeskBox\DeskBox.csproj --configuration Release -p:Platform=
 Installer output:
 
 ```text
-Output\DeskBox_Setup_1.0.5_x64.exe
+Output\DeskBox_Setup_1.0.6_x64.exe
 ```
 
 ## Project Structure

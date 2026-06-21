@@ -15,21 +15,21 @@ DeskBox 是一个基于 WinUI 3 的 Windows 11 桌面整理工具。它用轻量
 
 可以在 [GitHub Releases](https://github.com/Tianyu199509/DeskBox/releases) 下载最新版安装包。
 
-当前版本：1.0.5
+当前版本：1.0.6
 
-- [DeskBox_Setup_1.0.5_x64.exe](https://github.com/Tianyu199509/DeskBox/releases/download/v1.0.5/DeskBox_Setup_1.0.5_x64.exe)
+- [DeskBox_Setup_1.0.6_x64.exe](https://github.com/Tianyu199509/DeskBox/releases/download/v1.0.6/DeskBox_Setup_1.0.6_x64.exe)
 
 安装器会检测 .NET 8 Runtime x64 和 Windows App Runtime 2.1.3 x64。若目标电脑缺少运行时依赖，安装流程可以联网下载并安装。
 
-## 1.0.5 更新
+## 1.0.6 更新
 
-- 重构新用户引导：加入前置品牌 logo 动效、五步引导流程、循环演示动效，并适配中文、英文、浅色和深色模式。
-- 新增全局快捷键：可用键盘触发与托盘左键一致的显示、隐藏和临时置顶流程。
-- 优化设置与托盘入口：补充默认收纳目录入口、快速访问固定、下载链接和更清晰的维护操作。
-- 优化文件收纳体验：默认收纳路径迁移、映射快捷方式同步、孤立收纳目录清理和拖拽细节更稳定。
-- 清理旧的模糊开关残留，并在设置窗口、新用户引导关闭后更及时释放动画和窗口引用。
+- 新增随记功能格子：可本地保存文本、链接、截图和最近复制内容，功能可关闭。
+- 优化随记使用流程：记录、固定、最近三个视图，支持悬停操作、当前视图搜索、拖出内容和保存到文件格子。
+- 优化上传友好入口：补充收纳路径入口、快速访问固定、映射文件夹快捷方式和托盘打开收纳目录。
+- 优化拖拽与剪贴板行为：文件拖拽优先保持文件格式，文本单独处理，并避免 DeskBox 自己写入剪贴板的内容污染最近记录。
+- 优化窗口层级、格子刷新、新手引导缩放、自定义图标、文件后缀显示、迁移反馈和随记小窗口弹窗布局。
 
-完整更新记录见 [CHANGELOG.md](CHANGELOG.md)。GitHub Release 可使用 [docs/releases/v1.0.5.md](docs/releases/v1.0.5.md) 中的中英文发布文案。
+完整更新记录见 [CHANGELOG.md](CHANGELOG.md)。GitHub Release 可使用 [docs/releases/v1.0.6.md](docs/releases/v1.0.6.md) 中的中英文发布文案。
 
 ## 为什么做这个产品
 
@@ -41,6 +41,7 @@ DeskBox 是一个基于 WinUI 3 的 Windows 11 桌面整理工具。它用轻量
 
 - **收纳组件**：创建真实文件夹支撑的桌面格子，用于整理文件。
 - **文件夹映射**：把已有文件夹展示为桌面格子，不改变原文件位置。
+- **随记**：用可选的本地功能格子保存常用文本、链接、截图和最近复制内容。
 - **拖入后移动或复制**：可设置拖入收纳组件后的默认处理方式。
 - **托盘管理**：新建组件、映射文件夹、显示或隐藏全部组件、临时置顶、打开收纳目录、打开设置、开机自启和退出。
 - **全局快捷键**：在设置中开启后，可用快捷键快速显示、隐藏或唤起格子。
@@ -116,7 +117,7 @@ dotnet publish .\src\DeskBox\DeskBox.csproj --configuration Release -p:Platform=
 安装包输出：
 
 ```text
-Output\DeskBox_Setup_1.0.5_x64.exe
+Output\DeskBox_Setup_1.0.6_x64.exe
 ```
 
 ## 项目结构

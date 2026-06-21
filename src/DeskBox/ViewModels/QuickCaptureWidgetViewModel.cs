@@ -1,0 +1,656 @@
+using System.Collections.ObjectModel;
+using CommunityToolkit.Mvvm.ComponentModel;
+using DeskBox.Models;
+using DeskBox.Services;
+using Microsoft.UI.Dispatching;
+using Microsoft.UI.Xaml;
+using Windows.ApplicationModel.DataTransfer;
+
+namespace DeskBox.ViewModels;
+
+public sealed partial class QuickCaptureWidgetViewModel : ObservableObject, IDisposable
+{
+    private const int SearchRefreshDebounceMs = 150;
+
+    private readonly QuickCaptureService _quickCaptureService;
+    private readonly SettingsService _settingsService;
+    private readonly LocalizationService _localizationService;
+    private readonly DispatcherQueue _dispatcherQueue;
+    private readonly DispatcherQueueTimer _searchRefreshTimer;
+
+    private string _inputText = string.Empty;
+    private string _searchText = string.Empty;
+    private bool _isSearchExpanded;
+    private QuickCaptureViewMode _selectedView = QuickCaptureViewMode.Records;
+    private double _widgetOpacity;
+    private Visibility _emptyStateVisibility = Visibility.Collapsed;
+    private Visibility _listVisibility = Visibility.Visible;
+    private int _recordCount;
+    private int _pinnedCount;
+    private int _recentCount;
+    private string _emptyStateTitle = string.Empty;
+    private string _emptyStateText = string.Empty;
+    private int _visibleItemsRefreshGeneration;
+
+    public ObservableCollection<QuickCaptureItemViewModel> Items { get; } = [];
+
+    public WidgetConfig Config { get; }
+
+    public QuickCaptureWidgetViewModel(
+        WidgetConfig config,
+        QuickCaptureService quickCaptureService,
+        SettingsService settingsService,
+        LocalizationService localizationService,
+        DispatcherQueue dispatcherQueue)
+    {
+        Config = config;
+        _quickCaptureService = quickCaptureService;
+        _settingsService = settingsService;
+        _localizationService = localizationService;
+        _dispatcherQueue = dispatcherQueue;
+        _searchRefreshTimer = dispatcherQueue.CreateTimer();
+        _searchRefreshTimer.Interval = TimeSpan.FromMilliseconds(SearchRefreshDebounceMs);
+        _searchRefreshTimer.IsRepeating = false;
+        _searchRefreshTimer.Tick += SearchRefreshTimer_Tick;
+        _widgetOpacity = settingsService.Settings.WidgetOpacity;
+        Name = config.Name;
+        _quickCaptureService.Changed += OnQuickCaptureChanged;
+        _settingsService.SettingsChanged += OnSettingsChanged;
+        _localizationService.LanguageChanged += OnLanguageChanged;
+        UpdateEmptyStateText();
+    }
+
+    public string Name
+    {
+        get => Config.Name;
+        private set => Config.Name = value;
+    }
+
+    public string InputText
+    {
+        get => _inputText;
+        set
+        {
+            if (SetProperty(ref _inputText, value))
+            {
+                OnPropertyChanged(nameof(CanAddInput));
+            }
+        }
+    }
+
+    public bool CanAddInput => !string.IsNullOrWhiteSpace(InputText);
+
+    public string SearchText
+    {
+        get => _searchText;
+        set
+        {
+            if (SetProperty(ref _searchText, value))
+            {
+                OnPropertyChanged(nameof(HasSearchText));
+                OnPropertyChanged(nameof(SearchBoxVisibility));
+                OnPropertyChanged(nameof(SearchButtonVisibility));
+                OnPropertyChanged(nameof(SearchScopeVisibility));
+                OnPropertyChanged(nameof(RecentCaptureStatusVisibility));
+                OnPropertyChanged(nameof(RecentCaptureActionVisibility));
+                ScheduleVisibleItemsRefresh();
+            }
+        }
+    }
+
+    public bool HasSearchText => !string.IsNullOrWhiteSpace(SearchText);
+
+    public bool IsSearchExpanded
+    {
+        get => _isSearchExpanded;
+        private set
+        {
+            if (SetProperty(ref _isSearchExpanded, value))
+            {
+                OnPropertyChanged(nameof(SearchBoxVisibility));
+                OnPropertyChanged(nameof(SearchButtonVisibility));
+            }
+        }
+    }
+
+    public Visibility SearchBoxVisibility => IsSearchExpanded ? Visibility.Visible : Visibility.Collapsed;
+
+    public Visibility SearchButtonVisibility => IsSearchExpanded ? Visibility.Collapsed : Visibility.Visible;
+
+    public string SearchPlaceholderText => _localizationService.T("QuickCapture.SearchPlaceholder");
+
+    public string SearchScopeText => _localizationService.T("QuickCapture.SearchScope");
+
+    public Visibility SearchScopeVisibility => HasSearchText ? Visibility.Visible : Visibility.Collapsed;
+
+    public QuickCaptureViewMode SelectedView
+    {
+        get => _selectedView;
+        set
+        {
+            if (!SetProperty(ref _selectedView, value))
+            {
+                return;
+            }
+
+            _ = _quickCaptureService.SetCurrentViewAsync(value);
+            OnPropertyChanged(nameof(IsRecordsView));
+            OnPropertyChanged(nameof(IsPinnedView));
+            OnPropertyChanged(nameof(IsRecentView));
+            OnPropertyChanged(nameof(RecentCaptureStatusVisibility));
+            OnPropertyChanged(nameof(RecentCaptureActionVisibility));
+            RefreshVisibleItemsImmediately();
+        }
+    }
+
+    public bool IsRecordsView => SelectedView == QuickCaptureViewMode.Records;
+
+    public bool IsPinnedView => SelectedView == QuickCaptureViewMode.Pinned;
+
+    public bool IsRecentView => SelectedView == QuickCaptureViewMode.Recent;
+
+    public double WidgetOpacity
+    {
+        get => _widgetOpacity;
+        set => SetProperty(ref _widgetOpacity, value);
+    }
+
+    public Visibility EmptyStateVisibility
+    {
+        get => _emptyStateVisibility;
+        private set => SetProperty(ref _emptyStateVisibility, value);
+    }
+
+    public Visibility ListVisibility
+    {
+        get => _listVisibility;
+        private set => SetProperty(ref _listVisibility, value);
+    }
+
+    public int RecordCount
+    {
+        get => _recordCount;
+        private set => SetProperty(ref _recordCount, value);
+    }
+
+    public int PinnedCount
+    {
+        get => _pinnedCount;
+        private set => SetProperty(ref _pinnedCount, value);
+    }
+
+    public int RecentCount
+    {
+        get => _recentCount;
+        private set => SetProperty(ref _recentCount, value);
+    }
+
+    public string RecordsTabText => _localizationService.Format("QuickCapture.Tab.Records", RecordCount);
+
+    public string PinnedTabText => _localizationService.Format("QuickCapture.Tab.Pinned", PinnedCount);
+
+    public string RecentTabText => _localizationService.Format("QuickCapture.Tab.Recent", RecentCount);
+
+    public string EnableRecentCaptureText => _localizationService.T("QuickCapture.EnableRecentCapture");
+
+    public string RecentCaptureStatusText
+    {
+        get
+        {
+            var settings = _settingsService.Settings;
+            if (!settings.QuickCaptureEnabled)
+            {
+                return _localizationService.T("QuickCapture.RecentStatus.FeatureOff");
+            }
+
+            if (!settings.QuickCaptureClipboardEnabled ||
+                !settings.HasConfirmedQuickCaptureClipboardNotice)
+            {
+                return _localizationService.T("QuickCapture.RecentStatus.Off");
+            }
+
+            return settings.QuickCaptureImageClipboardEnabled
+                ? _localizationService.T("QuickCapture.RecentStatus.OnWithImages")
+                : _localizationService.T("QuickCapture.RecentStatus.On");
+        }
+    }
+
+    public Visibility RecentCaptureStatusVisibility =>
+        SelectedView == QuickCaptureViewMode.Recent &&
+        !HasSearchText &&
+        Items.Count == 0
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+
+    public Visibility RecentCaptureActionVisibility =>
+        SelectedView == QuickCaptureViewMode.Recent &&
+        !HasSearchText &&
+        Items.Count == 0 &&
+        !IsRecentCaptureEnabled()
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+
+    public string EmptyStateTitle
+    {
+        get => _emptyStateTitle;
+        private set => SetProperty(ref _emptyStateTitle, value);
+    }
+
+    public string EmptyStateText
+    {
+        get => _emptyStateText;
+        private set => SetProperty(ref _emptyStateText, value);
+    }
+
+    public async Task InitializeAsync()
+    {
+        var data = await _quickCaptureService.GetDataAsync();
+        _selectedView = data.CurrentView;
+        OnPropertyChanged(nameof(SelectedView));
+        OnPropertyChanged(nameof(IsRecordsView));
+        OnPropertyChanged(nameof(IsPinnedView));
+        OnPropertyChanged(nameof(IsRecentView));
+        OnPropertyChanged(nameof(RecentCaptureStatusVisibility));
+        OnPropertyChanged(nameof(RecentCaptureActionVisibility));
+        await RefreshFromDataAsync(data);
+    }
+
+    public async Task AddInputAsync()
+    {
+        string body = InputText;
+        await AddTextAsync(body);
+        InputText = string.Empty;
+    }
+
+    public async Task AddTextAsync(string body)
+    {
+        if (string.IsNullOrWhiteSpace(body))
+        {
+            return;
+        }
+
+        await _quickCaptureService.AddItemAsync(body);
+        if (SelectedView is QuickCaptureViewMode.Pinned or QuickCaptureViewMode.Recent)
+        {
+            SelectedView = QuickCaptureViewMode.Records;
+        }
+    }
+
+    public Task<QuickCaptureItem?> AddImageFileAsync(string imagePath)
+    {
+        return _quickCaptureService.AddImageFileItemAsync(imagePath);
+    }
+
+    public Task<string?> CreateImageExportFileAsync(QuickCaptureItemViewModel item, string fileNamePrefix)
+    {
+        return _quickCaptureService.CreateImageExportFileAsync(item.ToModel(), fileNamePrefix);
+    }
+
+    public async Task CopyItemAsync(QuickCaptureItemViewModel item)
+    {
+        var dataPackage = new DataPackage();
+        if (item.Type == QuickCaptureItemType.Image &&
+            !string.IsNullOrWhiteSpace(item.ImagePath) &&
+            File.Exists(item.ImagePath))
+        {
+            var file = await Windows.Storage.StorageFile.GetFileFromPathAsync(item.ImagePath);
+            dataPackage.SetBitmap(Windows.Storage.Streams.RandomAccessStreamReference.CreateFromFile(file));
+            DeskBoxClipboardWriteScope.MarkWrite(hasImage: true, paths: [item.ImagePath]);
+        }
+        else
+        {
+            dataPackage.SetText(item.Body);
+            DeskBoxClipboardWriteScope.MarkWrite(text: item.Body);
+        }
+
+        Clipboard.SetContent(dataPackage);
+        Clipboard.Flush();
+        if (item.Type != QuickCaptureItemType.Image)
+        {
+            _quickCaptureService.MarkClipboardTextWrittenByDeskBox(item.Body);
+        }
+
+        await Task.CompletedTask;
+    }
+
+    public async Task EditItemAsync(QuickCaptureItemViewModel item, string body)
+    {
+        await _quickCaptureService.UpdateItemAsync(item.Id, body);
+    }
+
+    public async Task TogglePinnedAsync(QuickCaptureItemViewModel item)
+    {
+        await _quickCaptureService.SetPinnedAsync(item.Id, !item.IsPinned);
+    }
+
+    public async Task MovePinnedItemAsync(QuickCaptureItemViewModel item, int direction)
+    {
+        if (SelectedView != QuickCaptureViewMode.Pinned || HasSearchText)
+        {
+            return;
+        }
+
+        await _quickCaptureService.MovePinnedItemAsync(item.Id, direction);
+    }
+
+    public async Task DeleteItemAsync(QuickCaptureItemViewModel item)
+    {
+        if (item.IsRecent)
+        {
+            await _quickCaptureService.DeleteRecentItemAsync(item.Id);
+            return;
+        }
+
+        await _quickCaptureService.DeleteItemAsync(item.Id);
+    }
+
+    public async Task SaveRecentItemAsync(QuickCaptureItemViewModel item)
+    {
+        if (!item.IsRecent)
+        {
+            return;
+        }
+
+        await _quickCaptureService.SaveRecentItemToRecordsAsync(item.Id, pin: false);
+    }
+
+    public async Task PinRecentItemAsync(QuickCaptureItemViewModel item)
+    {
+        if (!item.IsRecent)
+        {
+            return;
+        }
+
+        await _quickCaptureService.SaveRecentItemToRecordsAsync(item.Id, pin: true);
+    }
+
+    public async Task ClearAsync()
+    {
+        await _quickCaptureService.ClearAsync();
+    }
+
+    public async Task ClearRecentAsync()
+    {
+        await _quickCaptureService.ClearRecentAsync();
+    }
+
+    public void UpdateBounds(int x, int y, int width, int height, bool persist)
+    {
+        Config.X = x;
+        Config.Y = y;
+        Config.Width = width;
+        Config.Height = height;
+        if (persist)
+        {
+            _settingsService.UpdateWidget(Config);
+        }
+    }
+
+    public void ApplyAppearancePreview()
+    {
+        WidgetOpacity = _settingsService.Settings.WidgetOpacity;
+    }
+
+    public void SetPositionLocked(bool locked)
+    {
+        Config.IsPositionLocked = locked;
+        _settingsService.UpdateWidget(Config);
+    }
+
+    public void SetSizeLocked(bool locked)
+    {
+        Config.IsSizeLocked = locked;
+        _settingsService.UpdateWidget(Config);
+    }
+
+    public void ExpandSearch()
+    {
+        IsSearchExpanded = true;
+    }
+
+    public void CollapseSearch()
+    {
+        SearchText = string.Empty;
+        IsSearchExpanded = false;
+        RefreshVisibleItemsImmediately();
+    }
+
+    public void Dispose()
+    {
+        _searchRefreshTimer.Stop();
+        _searchRefreshTimer.Tick -= SearchRefreshTimer_Tick;
+        _quickCaptureService.Changed -= OnQuickCaptureChanged;
+        _settingsService.SettingsChanged -= OnSettingsChanged;
+        _localizationService.LanguageChanged -= OnLanguageChanged;
+    }
+
+    private void OnQuickCaptureChanged()
+    {
+        if (!_dispatcherQueue.HasThreadAccess)
+        {
+            _dispatcherQueue.TryEnqueue(RefreshVisibleItemsImmediately);
+            return;
+        }
+
+        RefreshVisibleItemsImmediately();
+    }
+
+    private void OnLanguageChanged()
+    {
+        UpdateEmptyStateText();
+        OnPropertyChanged(nameof(RecordsTabText));
+        OnPropertyChanged(nameof(PinnedTabText));
+        OnPropertyChanged(nameof(RecentTabText));
+        OnPropertyChanged(nameof(EnableRecentCaptureText));
+        OnPropertyChanged(nameof(SearchPlaceholderText));
+        OnPropertyChanged(nameof(SearchScopeText));
+        OnPropertyChanged(nameof(SearchScopeVisibility));
+        OnPropertyChanged(nameof(RecentCaptureStatusText));
+        OnPropertyChanged(nameof(RecentCaptureStatusVisibility));
+        OnPropertyChanged(nameof(RecentCaptureActionVisibility));
+        foreach (var item in Items)
+        {
+            item.Update(item.ToModel());
+        }
+    }
+
+    private void OnSettingsChanged()
+    {
+        if (!_dispatcherQueue.HasThreadAccess)
+        {
+            _dispatcherQueue.TryEnqueue(OnSettingsChanged);
+            return;
+        }
+
+        UpdateEmptyStateText();
+        OnPropertyChanged(nameof(RecentCaptureStatusText));
+        OnPropertyChanged(nameof(RecentCaptureStatusVisibility));
+        OnPropertyChanged(nameof(RecentCaptureActionVisibility));
+    }
+
+    private async Task RefreshVisibleItemsAsync()
+    {
+        int generation = System.Threading.Interlocked.Increment(ref _visibleItemsRefreshGeneration);
+        var data = await _quickCaptureService.GetDataAsync();
+        if (generation != System.Threading.Volatile.Read(ref _visibleItemsRefreshGeneration))
+        {
+            return;
+        }
+
+        await RefreshFromDataAsync(data);
+    }
+
+    private void ScheduleVisibleItemsRefresh()
+    {
+        if (!_dispatcherQueue.HasThreadAccess)
+        {
+            _dispatcherQueue.TryEnqueue(ScheduleVisibleItemsRefresh);
+            return;
+        }
+
+        _searchRefreshTimer.Stop();
+        _searchRefreshTimer.Start();
+    }
+
+    private void RefreshVisibleItemsImmediately()
+    {
+        if (!_dispatcherQueue.HasThreadAccess)
+        {
+            _dispatcherQueue.TryEnqueue(RefreshVisibleItemsImmediately);
+            return;
+        }
+
+        _searchRefreshTimer.Stop();
+        RefreshVisibleItemsAsync().LogQuickCaptureFailure();
+    }
+
+    private void SearchRefreshTimer_Tick(DispatcherQueueTimer sender, object args)
+    {
+        sender.Stop();
+        RefreshVisibleItemsAsync().LogQuickCaptureFailure();
+    }
+
+    private Task RefreshFromDataAsync(QuickCaptureStoreData data)
+    {
+        var activeItems = data.Items
+            .Where(item => !item.IsDeleted)
+            .OrderBy(item => item.SortOrder)
+            .ThenByDescending(item => item.UpdatedAt)
+            .ToList();
+        var recentItems = data.RecentItems
+            .Where(item => !item.IsDeleted)
+            .OrderBy(item => item.SortOrder)
+            .ThenByDescending(item => item.UpdatedAt)
+            .ToList();
+
+        RecordCount = activeItems.Count;
+        PinnedCount = activeItems.Count(item => item.IsPinned);
+        RecentCount = recentItems.Count;
+        OnPropertyChanged(nameof(RecordsTabText));
+        OnPropertyChanged(nameof(PinnedTabText));
+        OnPropertyChanged(nameof(RecentTabText));
+
+        var visibleItems = SelectedView switch
+        {
+            QuickCaptureViewMode.Pinned => activeItems
+                .Where(item => item.IsPinned)
+                .OrderBy(item => item.PinnedSortOrder < 0 ? int.MaxValue : item.PinnedSortOrder)
+                .ThenBy(item => item.SortOrder)
+                .ThenByDescending(item => item.UpdatedAt)
+                .ToList(),
+            QuickCaptureViewMode.Recent => recentItems,
+            _ => activeItems
+        };
+        bool canShowPinnedSortControls = SelectedView == QuickCaptureViewMode.Pinned && !HasSearchText;
+        if (HasSearchText)
+        {
+            visibleItems = visibleItems
+                .Where(item => MatchesSearch(item, SearchText))
+                .ToList();
+        }
+
+        Items.Clear();
+        for (int index = 0; index < visibleItems.Count; index++)
+        {
+            var item = visibleItems[index];
+            Items.Add(new QuickCaptureItemViewModel(
+                item,
+                _localizationService,
+                showPinnedSortControls: canShowPinnedSortControls,
+                canMovePinnedUp: canShowPinnedSortControls && index > 0,
+                canMovePinnedDown: canShowPinnedSortControls && index < visibleItems.Count - 1));
+        }
+
+        UpdateEmptyStateText();
+        bool hasItems = Items.Count > 0;
+        EmptyStateVisibility = hasItems ? Visibility.Collapsed : Visibility.Visible;
+        ListVisibility = hasItems ? Visibility.Visible : Visibility.Collapsed;
+        OnPropertyChanged(nameof(RecentCaptureStatusText));
+        OnPropertyChanged(nameof(RecentCaptureStatusVisibility));
+        OnPropertyChanged(nameof(RecentCaptureActionVisibility));
+        return Task.CompletedTask;
+    }
+
+    private void UpdateEmptyStateText()
+    {
+        if (HasSearchText)
+        {
+            EmptyStateTitle = _localizationService.T("QuickCapture.Empty.SearchTitle");
+            EmptyStateText = _localizationService.T("QuickCapture.Empty.SearchText");
+            return;
+        }
+
+        if (SelectedView == QuickCaptureViewMode.Pinned)
+        {
+            EmptyStateTitle = _localizationService.T("QuickCapture.Empty.PinnedTitle");
+            EmptyStateText = _localizationService.T("QuickCapture.Empty.PinnedText");
+            return;
+        }
+
+        if (SelectedView == QuickCaptureViewMode.Recent)
+        {
+            if (!IsRecentCaptureEnabled())
+            {
+                EmptyStateTitle = _localizationService.T("QuickCapture.Empty.RecentDisabledTitle");
+                EmptyStateText = _localizationService.T("QuickCapture.Empty.RecentDisabledText");
+                return;
+            }
+
+            EmptyStateTitle = _localizationService.T("QuickCapture.Empty.RecentTitle");
+            EmptyStateText = _settingsService.Settings.QuickCaptureImageClipboardEnabled
+                ? _localizationService.T("QuickCapture.Empty.RecentTextWithImages")
+                : _localizationService.T("QuickCapture.Empty.RecentText");
+            return;
+        }
+
+        EmptyStateTitle = _localizationService.T("QuickCapture.Empty.RecordsTitle");
+        EmptyStateText = _localizationService.T("QuickCapture.Empty.RecordsText");
+    }
+
+    private bool IsRecentCaptureEnabled()
+    {
+        var settings = _settingsService.Settings;
+        return settings.QuickCaptureEnabled &&
+               settings.QuickCaptureClipboardEnabled &&
+               settings.HasConfirmedQuickCaptureClipboardNotice;
+    }
+
+    private bool MatchesSearch(QuickCaptureItem item, string searchText)
+    {
+        if (string.IsNullOrWhiteSpace(searchText))
+        {
+            return true;
+        }
+
+        string keyword = searchText.Trim();
+        if (string.IsNullOrEmpty(keyword))
+        {
+            return true;
+        }
+
+        if (item.Type == QuickCaptureItemType.Image)
+        {
+            return "Image".Contains(keyword, StringComparison.CurrentCultureIgnoreCase) ||
+                   _localizationService.T("QuickCapture.ImageItem").Contains(keyword, StringComparison.CurrentCultureIgnoreCase);
+        }
+
+        return item.Body.Contains(keyword, StringComparison.CurrentCultureIgnoreCase) ||
+               (item.Url?.Contains(keyword, StringComparison.CurrentCultureIgnoreCase) ?? false);
+    }
+}
+
+internal static class QuickCaptureTaskExtensions
+{
+    public static void LogQuickCaptureFailure(this Task task)
+    {
+        _ = task.ContinueWith(
+            completed =>
+            {
+                if (completed.Exception is not null)
+                {
+                    App.Log($"[TaskExtensions] Unhandled task failure: {completed.Exception}");
+                }
+            },
+            TaskContinuationOptions.OnlyOnFaulted);
+    }
+}
