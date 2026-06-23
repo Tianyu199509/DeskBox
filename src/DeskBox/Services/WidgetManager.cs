@@ -66,6 +66,7 @@ public sealed class WidgetManager
     private readonly Dictionary<string, (QuickCaptureWidgetWindow Window, QuickCaptureWidgetViewModel ViewModel)> _quickCaptureWidgets = new();
     private readonly HashSet<string> _deletedWidgetIds = [];
     private readonly List<WidgetWindow> _retiredWindows = [];
+    private readonly SemaphoreSlim _widgetRenameGate = new(1, 1);
     private DispatcherQueueTimer? _trayLayerRestoreTimer;
     private bool _widgetsRaisedFromTray;
     private bool _isTogglingWidgetsDesktopLayer;
@@ -644,29 +645,37 @@ public sealed class WidgetManager
     public async Task RemoveWidgetAsync(string widgetId, WidgetRemovalAction removalAction = WidgetRemovalAction.RemoveWidgetOnly)
     {
         var config = FindConfig(widgetId);
-        if (config is not null)
-        {
-            await ApplyWidgetRemovalActionAsync(config, removalAction);
-            RemoveMappedWidgetShortcut(config);
-        }
-
         _deletedWidgetIds.Add(widgetId);
 
         if (_widgets.TryGetValue(widgetId, out var entry))
         {
             App.Log($"[WidgetManager] Retiring widget window for delete: {widgetId}");
-            entry.Window.HideWindow();
             entry.ViewModel.Dispose();
             _widgets.Remove(widgetId);
+            entry.Window.HideWindow();
             _retiredWindows.Add(entry.Window);
         }
 
         if (_quickCaptureWidgets.TryGetValue(widgetId, out var quickCaptureEntry))
         {
             App.Log($"[WidgetManager] Retiring quick capture widget window for delete: {widgetId}");
-            quickCaptureEntry.Window.HideWindow();
             quickCaptureEntry.ViewModel.Dispose();
             _quickCaptureWidgets.Remove(widgetId);
+            quickCaptureEntry.Window.HideWindow();
+        }
+
+        if (config is not null)
+        {
+            try
+            {
+                await ApplyWidgetRemovalActionAsync(config, removalAction);
+            }
+            catch (Exception ex)
+            {
+                App.Log($"[WidgetManager] Managed folder cleanup failed while deleting widget '{widgetId}'. The widget will be removed and the folder will be kept. {ex}");
+            }
+
+            RemoveMappedWidgetShortcut(config);
         }
 
         _settingsService.RemoveWidget(widgetId);
@@ -677,13 +686,31 @@ public sealed class WidgetManager
 
     public async Task RenameWidgetAsync(string widgetId, string newName)
     {
+        newName = newName.Trim();
+        if (string.IsNullOrWhiteSpace(newName))
+        {
+            throw new InvalidOperationException(_localizationService.T("Widget.Validation.NameRequired"));
+        }
+
+        await _widgetRenameGate.WaitAsync();
+        try
+        {
+            await RenameWidgetCoreAsync(widgetId, newName);
+        }
+        finally
+        {
+            _widgetRenameGate.Release();
+        }
+    }
+
+    private async Task RenameWidgetCoreAsync(string widgetId, string newName)
+    {
         var config = FindConfig(widgetId);
         if (config is null || IsDeleted(widgetId))
         {
             return;
         }
 
-        config.Name = newName;
         if (config.FollowsDefaultStoragePath)
         {
             await RenameManagedWidgetFolderAsync(config, newName);
@@ -693,6 +720,7 @@ public sealed class WidgetManager
             SyncMappedWidgetShortcut(config, newName);
         }
 
+        config.Name = newName;
         _settingsService.UpdateWidget(config);
     }
 
@@ -922,7 +950,8 @@ public sealed class WidgetManager
         var config = FindConfig(widgetId);
         return config is not null &&
                IsDefaultManagedStorageFolder(config.MappedFolderPath) &&
-               config.FollowsDefaultStoragePath;
+               config.FollowsDefaultStoragePath &&
+               Directory.Exists(config.MappedFolderPath);
     }
 
     public IReadOnlyList<ManagedStorageFolderCleanupCandidate> GetOrphanManagedStorageFolders()
@@ -1043,6 +1072,62 @@ public sealed class WidgetManager
     public void ForceRestoreRaisedWidgetsToDesktopLayer()
     {
         RestoreRaisedWidgetsToDesktopLayer(force: true);
+    }
+
+    public bool RequestRestoreRaisedWidgetsToDesktopLayer(string reason = "interaction-ended")
+    {
+        if (!_widgetsRaisedFromTray)
+        {
+            App.LogVerbose($"[TrayBatch] RestoreRequest ignored reason={reason} state=not-raised");
+            return false;
+        }
+
+        if (App.UiDispatcherQueue is { } dispatcherQueue && !dispatcherQueue.HasThreadAccess)
+        {
+            dispatcherQueue.TryEnqueue(() => RequestRestoreRaisedWidgetsToDesktopLayer(reason));
+            return true;
+        }
+
+        _ = Win32Helper.HasMouseButtonActivity();
+        _suppressTrayLayerRestoreUntilUtc = DateTime.UtcNow.AddMilliseconds(160);
+        StartTrayLayerRestoreMonitor(hasRaisedWidgets: true);
+        QueueRequestedLayerRestoreCheck(reason, TimeSpan.FromMilliseconds(180));
+        QueueRequestedLayerRestoreCheck(reason, TimeSpan.FromMilliseconds(420));
+        App.LogVerbose($"[TrayBatch] RestoreRequest queued reason={reason}");
+        return true;
+    }
+
+    private void QueueRequestedLayerRestoreCheck(string reason, TimeSpan delay)
+    {
+        long generation = _trayRaiseBatchGeneration;
+        App.UiDispatcherQueue.TryEnqueue(async () =>
+        {
+            await Task.Delay(delay);
+            TryRestoreRaisedWidgetsAfterInteraction(reason, generation);
+        });
+    }
+
+    private void TryRestoreRaisedWidgetsAfterInteraction(string reason, long generation)
+    {
+        if (!_widgetsRaisedFromTray ||
+            generation != _trayRaiseBatchGeneration ||
+            _isTogglingWidgetsDesktopLayer ||
+            DateTime.UtcNow < _suppressTrayLayerRestoreUntilUtc)
+        {
+            return;
+        }
+
+        Win32Helper.POINT? cursor = TryGetCursorPosition();
+        if (IsForegroundDeskBoxWindow() ||
+            IsPointerOverDeskBoxWindow(cursor) ||
+            IsPointerOverTaskbar(cursor))
+        {
+            App.LogVerbose($"[TrayBatch] RestoreRequest kept reason={reason} cursor={FormatPoint(cursor)}");
+            return;
+        }
+
+        App.LogVerbose($"[TrayBatch] RestoreRequest restoring reason={reason} cursor={FormatPoint(cursor)}");
+        RestoreRaisedWidgetsToDesktopLayer();
     }
 
     private void RestoreRaisedWidgetsToDesktopLayer(bool force)
@@ -1726,18 +1811,38 @@ public sealed class WidgetManager
         string currentFolderPath = string.IsNullOrWhiteSpace(config.MappedFolderPath)
             ? Path.Combine(rootPath, config.ManagedFolderName ?? string.Empty)
             : Path.GetFullPath(config.MappedFolderPath);
+        string currentFolderName = string.IsNullOrWhiteSpace(config.ManagedFolderName)
+            ? Path.GetFileName(currentFolderPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar))
+            : config.ManagedFolderName;
 
-        string desiredFolderName = CreateManagedFolderName(newName, config.Id, currentFolderPath);
-        string destinationFolderPath = Path.Combine(rootPath, desiredFolderName);
-
-        if (Directory.Exists(currentFolderPath) &&
-            !string.Equals(currentFolderPath, destinationFolderPath, StringComparison.OrdinalIgnoreCase))
+        if (!Directory.Exists(currentFolderPath))
         {
-            await _fileService.RelocateDirectoryAsync(currentFolderPath, destinationFolderPath);
+            throw new DirectoryNotFoundException(currentFolderPath);
         }
-        else
+
+        string desiredFolderName = FileService.SanitizeFileSystemName(newName);
+        if (string.IsNullOrWhiteSpace(desiredFolderName))
         {
-            Directory.CreateDirectory(destinationFolderPath);
+            desiredFolderName = _localizationService.T("Widget.ManagedFolderBaseName");
+        }
+
+        if (string.Equals(currentFolderName, desiredFolderName, StringComparison.OrdinalIgnoreCase))
+        {
+            config.ManagedFolderName = currentFolderName;
+            config.MappedFolderPath = currentFolderPath;
+            return;
+        }
+
+        string destinationFolderPath = Path.Combine(rootPath, desiredFolderName);
+        if (IsManagedWidgetNameInUse(newName, desiredFolderName, config.Id) ||
+            IsUnavailableManagedFolderPath(destinationFolderPath, currentFolderPath))
+        {
+            throw new InvalidOperationException(_localizationService.T("Widget.Error.ManagedFolderNameExists"));
+        }
+
+        if (!string.Equals(currentFolderPath, destinationFolderPath, StringComparison.OrdinalIgnoreCase))
+        {
+            await Task.Run(() => Directory.Move(currentFolderPath, destinationFolderPath));
         }
 
         config.ManagedFolderName = desiredFolderName;
@@ -2118,6 +2223,17 @@ public sealed class WidgetManager
         }
 
         return candidate;
+    }
+
+    private bool IsManagedWidgetNameInUse(string displayName, string managedFolderName, string widgetId)
+    {
+        return _settingsService.Settings.Widgets.Any(widget =>
+            widget.WidgetKind == WidgetKind.File &&
+            widget.FollowsDefaultStoragePath &&
+            !IsDeleted(widget.Id) &&
+            !string.Equals(widget.Id, widgetId, StringComparison.Ordinal) &&
+            (string.Equals(widget.Name.Trim(), displayName.Trim(), StringComparison.OrdinalIgnoreCase) ||
+             string.Equals(widget.ManagedFolderName, managedFolderName, StringComparison.OrdinalIgnoreCase)));
     }
 
     private static bool IsUnavailableManagedFolderPath(string folderPath, string? reusableFolderPath)

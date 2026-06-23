@@ -130,6 +130,29 @@
                 <Setter Property="CornerRadius" Value="6" />
             </Style>
 
+            <Style x:Key="IconActionButtonStyle" TargetType="Button">
+                <Setter Property="Width" Value="34" />
+                <Setter Property="Height" Value="34" />
+                <Setter Property="MinWidth" Value="34" />
+                <Setter Property="MinHeight" Value="34" />
+                <Setter Property="Padding" Value="0" />
+                <Setter Property="CornerRadius" Value="6" />
+                <Setter Property="HorizontalContentAlignment" Value="Center" />
+                <Setter Property="VerticalContentAlignment" Value="Center" />
+            </Style>
+
+            <Style x:Key="BreadcrumbButtonStyle" TargetType="Button">
+                <Setter Property="MinWidth" Value="0" />
+                <Setter Property="MinHeight" Value="28" />
+                <Setter Property="Height" Value="28" />
+                <Setter Property="Padding" Value="0,0" />
+                <Setter Property="CornerRadius" Value="4" />
+                <Setter Property="Background" Value="Transparent" />
+                <Setter Property="BorderThickness" Value="0" />
+                <Setter Property="HorizontalContentAlignment" Value="Left" />
+                <Setter Property="VerticalContentAlignment" Value="Center" />
+            </Style>
+
             <Style x:Key="SettingToggleSwitchStyle" TargetType="ToggleSwitch">
                 <Setter Property="Width" Value="44" />
                 <Setter Property="MinWidth" Value="44" />
@@ -963,7 +986,6 @@
                                 </StackPanel>
                                 <Grid
                                     Grid.Column="1"
-                                    MinWidth="190"
                                     HorizontalAlignment="Right"
                                     VerticalAlignment="Center"
                                     ColumnSpacing="10">
@@ -971,20 +993,20 @@
                                         <ColumnDefinition Width="Auto" />
                                         <ColumnDefinition Width="Auto" />
                                     </Grid.ColumnDefinitions>
-                                    <Button
-                                        Grid.Column="0"
-                                        Click="OpenQuickCaptureSettingsButton_Click"
-                                        Style="{StaticResource ActionButtonStyle}"
-                                        svc:Localized.ToolTipKey="Settings.QuickCapture.ConfigureTooltip">
-                                        <StackPanel Orientation="Horizontal" Spacing="8">
-                                            <SymbolIcon Symbol="Setting" />
-                                            <TextBlock svc:Localized.Key="Common.Configure" />
-                                        </StackPanel>
-                                    </Button>
                                     <ToggleSwitch
-                                        Grid.Column="1"
+                                        Grid.Column="0"
                                         IsOn="{Binding QuickCaptureEnabled, Mode=TwoWay}"
                                         Style="{StaticResource SettingToggleSwitchStyle}" />
+                                    <Button
+                                        Grid.Column="1"
+                                        Click="OpenQuickCaptureSettingsButton_Click"
+                                        Style="{StaticResource IconActionButtonStyle}"
+                                        svc:Localized.ToolTipKey="Settings.QuickCapture.ConfigureTooltip">
+                                        <FontIcon
+                                            FontSize="12"
+                                            FontFamily="{ThemeResource SymbolThemeFontFamily}"
+                                            Glyph="&#xE974;" />
+                                    </Button>
                                 </Grid>
                             </Grid>
                         </StackPanel>
@@ -995,8 +1017,30 @@
                     x:Name="QuickCaptureSettingsSection"
                     Visibility="Collapsed"
                     Style="{StaticResource SectionPanelStyle}">
-                    <StackPanel Spacing="4">
-                        <TextBlock Style="{StaticResource SectionTitleTextStyle}" svc:Localized.Key="Settings.QuickCapture.Title" />
+                    <StackPanel Spacing="6">
+                        <StackPanel
+                            VerticalAlignment="Center"
+                            Orientation="Horizontal"
+                            Spacing="8">
+                            <Button
+                                Click="QuickCaptureBreadcrumbBackButton_Click"
+                                Style="{StaticResource BreadcrumbButtonStyle}">
+                                <TextBlock
+                                    FontSize="15"
+                                    FontWeight="SemiBold"
+                                    svc:Localized.Key="Settings.Section.FeatureWidgets" />
+                            </Button>
+                            <FontIcon
+                                VerticalAlignment="Center"
+                                FontSize="10"
+                                FontFamily="{ThemeResource SymbolThemeFontFamily}"
+                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                Glyph="&#xE974;" />
+                            <TextBlock
+                                VerticalAlignment="Center"
+                                Style="{StaticResource SectionTitleTextStyle}"
+                                svc:Localized.Key="Settings.QuickCapture.Title" />
+                        </StackPanel>
                         <TextBlock Style="{StaticResource SettingDescriptionTextStyle}" svc:Localized.Key="Settings.QuickCapture.Description" />
                         <TextBlock Style="{StaticResource SettingDescriptionTextStyle}" Text="{Binding QuickCaptureDependencyStatusText}" />
                     </StackPanel>

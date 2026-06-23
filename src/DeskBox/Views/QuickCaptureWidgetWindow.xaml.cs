@@ -40,7 +40,7 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
 
     private const int MinWidth = (int)SettingsService.MinWidgetWidth;
     private const int MinHeight = (int)SettingsService.MinWidgetHeight;
-    private const int WidgetShowAnimationMs = 400;
+    private const int WidgetShowAnimationMs = 260;
     private const double WidgetSlideOffsetX = 36.0;
     private const float WidgetAnimationRestingOpacity = 1.0f;
     private const float WidgetAnimationSoftOpacity = 0.0f;
@@ -1478,7 +1478,7 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
     private void ShowFlyoutWithElevation(MenuFlyout flyout, FrameworkElement target, Windows.Foundation.Point? position = null)
     {
         ElevateForInteraction();
-        flyout.Closed += (_, _) => RestoreDesktopLayer(force: true);
+        flyout.Closed += (_, _) => ReleaseInteractionLayer("quick-flyout-closed");
 
         if (position is Windows.Foundation.Point point)
         {
@@ -1488,6 +1488,16 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
         {
             flyout.ShowAt(target);
         }
+    }
+
+    private void ReleaseInteractionLayer(string reason)
+    {
+        if (App.Current.WidgetManager?.RequestRestoreRaisedWidgetsToDesktopLayer(reason) == true)
+        {
+            return;
+        }
+
+        RestoreDesktopLayer();
     }
 
     private bool ShouldOpenTitleBarFlyout(object? originalSource)
@@ -2129,7 +2139,10 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
             _restoreDesktopLayerWhenIdle = true;
             if (App.Current.WidgetManager is { } widgetManager)
             {
-                widgetManager.RestoreRaisedWidgetsToDesktopLayer();
+                if (!widgetManager.RequestRestoreRaisedWidgetsToDesktopLayer("quick-window-deactivated"))
+                {
+                    RestoreDesktopLayer(force: true);
+                }
             }
             else
             {
@@ -2890,7 +2903,7 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
         visual.CenterPoint = GetTrayVisualCenterPoint();
         visual.Offset = Vector3.Zero;
         visual.Opacity = WidgetAnimationRestingOpacity;
-        visual.Scale = new Vector3(WidgetAnimationRestingScale, WidgetAnimationRestingScale, 1.0f);
+        visual.Scale = new Vector3(scale, scale, 1.0f);
         ApplyTrayWindowOpacity(opacity);
     }
 
@@ -2930,7 +2943,7 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
 
         if (durationMs <= 1)
         {
-            CompleteTrayWindowAnimation(toOffsetX, toOffsetY, toOpacity, isShowing, animationGeneration, completed);
+            CompleteTrayWindowAnimation(toOffsetX, toOffsetY, toOpacity, toScale, isShowing, animationGeneration, completed);
             return;
         }
 
@@ -2953,9 +2966,11 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
             double currentOffsetX = Lerp(fromOffsetX, toOffsetX, easedProgress);
             double currentOffsetY = Lerp(fromOffsetY, toOffsetY, easedProgress);
             float currentOpacity = (float)Lerp(fromOpacity, toOpacity, easedProgress);
+            float currentScale = (float)Lerp(fromScale, toScale, easedProgress);
 
             ApplyTrayWindowOffset(currentOffsetX, currentOffsetY);
             ApplyTrayWindowOpacity(currentOpacity);
+            ApplyTrayVisualScale(currentScale);
 
             if (rawProgress < 1.0)
             {
@@ -2968,7 +2983,7 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
                 _trayWindowAnimationTimer = null;
             }
 
-            CompleteTrayWindowAnimation(toOffsetX, toOffsetY, toOpacity, isShowing, animationGeneration, completed);
+            CompleteTrayWindowAnimation(toOffsetX, toOffsetY, toOpacity, toScale, isShowing, animationGeneration, completed);
         };
 
         timer.Start();
@@ -3062,6 +3077,7 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
         double finalOffsetX,
         double finalOffsetY,
         float finalOpacity,
+        float finalScale,
         bool isShowing,
         long animationGeneration,
         Action completed)
@@ -3073,6 +3089,7 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
 
         ApplyTrayWindowOffset(finalOffsetX, finalOffsetY);
         ApplyTrayWindowOpacity(finalOpacity);
+        ApplyTrayVisualScale(finalScale);
         LogTrayWindow($"AnimateCompleted mode={(isShowing ? "show" : "hide")} gen={animationGeneration}");
         if (isShowing)
         {
@@ -3120,6 +3137,14 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
         _isTrayWindowOpacityApplied = false;
     }
 
+    private void ApplyTrayVisualScale(float scale)
+    {
+        scale = Math.Clamp(scale, 0.0f, 1.0f);
+        var visual = ElementCompositionPreview.GetElementVisual(RootGrid);
+        visual.CenterPoint = GetTrayVisualCenterPoint();
+        visual.Scale = new Vector3(scale, scale, 1.0f);
+    }
+
     private static double Lerp(double from, double to, double progress)
     {
         return from + (to - from) * progress;
@@ -3129,8 +3154,8 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
     {
         progress = Math.Clamp(progress, 0.0, 1.0);
         return isShowing
-            ? 1.0 - Math.Pow(1.0 - progress, 3.0)
-            : Math.Pow(progress, 3.0);
+            ? Math.Sin(progress * Math.PI / 2.0)
+            : 1.0 - Math.Cos(progress * Math.PI / 2.0);
     }
 
     private void SuppressNativeBackdropForTrayReveal()

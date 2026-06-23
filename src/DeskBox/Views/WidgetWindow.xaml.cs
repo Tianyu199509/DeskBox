@@ -55,8 +55,8 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
 
     private const int MinWidth = (int)SettingsService.MinWidgetWidth;
     private const int MinHeight = (int)SettingsService.MinWidgetHeight;
-    internal const int WidgetShowAnimationMs = 400;
-    internal const int WidgetHideAnimationMs = 400;
+    internal const int WidgetShowAnimationMs = 260;
+    internal const int WidgetHideAnimationMs = 260;
     private const int ItemTransitionRestoreDelayMs = 240;
     internal const double WidgetSlideOffsetX = 36.0;
     private const float WidgetAnimationRestingOpacity = 1.0f;
@@ -111,6 +111,7 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
     private Windows.Foundation.Point? _lastMoreFlyoutPosition;
     private bool _isDeleteWidgetFlyoutOpen;
     private bool _isInlineFlyoutOpen;
+    private bool _isCommittingTitleRename;
     private bool _isCommittingItemRename;
     private DateTime _lastTitleBarClickTimeUtc;
     private Win32Helper.POINT _lastTitleBarClickPoint;
@@ -601,7 +602,7 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
         visual.CenterPoint = GetTrayVisualCenterPoint();
         visual.Offset = Vector3.Zero;
         visual.Opacity = WidgetAnimationRestingOpacity;
-        visual.Scale = new Vector3(WidgetAnimationRestingScale, WidgetAnimationRestingScale, 1.0f);
+        visual.Scale = new Vector3(scale, scale, 1.0f);
         ApplyTrayWindowOpacity(opacity);
     }
 
@@ -641,7 +642,7 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
 
         if (durationMs <= 1)
         {
-            CompleteTrayWindowAnimation(toOffsetX, toOffsetY, toOpacity, isShowing, animationGeneration, completed);
+            CompleteTrayWindowAnimation(toOffsetX, toOffsetY, toOpacity, toScale, isShowing, animationGeneration, completed);
             return;
         }
 
@@ -664,9 +665,11 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
             double currentOffsetX = Lerp(fromOffsetX, toOffsetX, easedProgress);
             double currentOffsetY = Lerp(fromOffsetY, toOffsetY, easedProgress);
             float currentOpacity = (float)Lerp(fromOpacity, toOpacity, easedProgress);
+            float currentScale = (float)Lerp(fromScale, toScale, easedProgress);
 
             ApplyTrayWindowOffset(currentOffsetX, currentOffsetY);
             ApplyTrayWindowOpacity(currentOpacity);
+            ApplyTrayVisualScale(currentScale);
 
             if (rawProgress < 1.0)
             {
@@ -679,7 +682,7 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
                 _trayWindowAnimationTimer = null;
             }
 
-            CompleteTrayWindowAnimation(toOffsetX, toOffsetY, toOpacity, isShowing, animationGeneration, completed);
+            CompleteTrayWindowAnimation(toOffsetX, toOffsetY, toOpacity, toScale, isShowing, animationGeneration, completed);
         };
 
         timer.Start();
@@ -774,6 +777,7 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
         double finalOffsetX,
         double finalOffsetY,
         float finalOpacity,
+        float finalScale,
         bool isShowing,
         long animationGeneration,
         Action completed)
@@ -785,6 +789,7 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
 
         ApplyTrayWindowOffset(finalOffsetX, finalOffsetY);
         ApplyTrayWindowOpacity(finalOpacity);
+        ApplyTrayVisualScale(finalScale);
         LogTrayWindow($"AnimateCompleted mode={(isShowing ? "show" : "hide")} gen={animationGeneration}");
         if (isShowing)
         {
@@ -832,6 +837,14 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
         _isTrayWindowOpacityApplied = false;
     }
 
+    private void ApplyTrayVisualScale(float scale)
+    {
+        scale = Math.Clamp(scale, 0.0f, 1.0f);
+        var visual = ElementCompositionPreview.GetElementVisual(RootGrid);
+        visual.CenterPoint = GetTrayVisualCenterPoint();
+        visual.Scale = new Vector3(scale, scale, 1.0f);
+    }
+
     private static double Lerp(double from, double to, double progress)
     {
         return from + (to - from) * progress;
@@ -841,8 +854,8 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
     {
         progress = Math.Clamp(progress, 0.0, 1.0);
         return isShowing
-            ? 1.0 - Math.Pow(1.0 - progress, 3.0)
-            : Math.Pow(progress, 3.0);
+            ? Math.Sin(progress * Math.PI / 2.0)
+            : 1.0 - Math.Cos(progress * Math.PI / 2.0);
     }
 
     private void SuppressNativeBackdropForTrayReveal()
@@ -1140,7 +1153,10 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
             _restoreDesktopLayerWhenIdle = true;
             if (App.Current.WidgetManager is { } widgetManager)
             {
-                widgetManager.RestoreRaisedWidgetsToDesktopLayer();
+                if (!widgetManager.RequestRestoreRaisedWidgetsToDesktopLayer("file-window-deactivated"))
+                {
+                    RestoreDesktopLayer(force: true);
+                }
             }
             else
             {
@@ -3576,37 +3592,42 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
 
     private async Task CommitRenameAsync()
     {
-        if (TitleEditBox.Visibility != Visibility.Visible)
+        if (_isCommittingTitleRename ||
+            TitleEditBox.Visibility != Visibility.Visible)
         {
             return;
         }
 
         string newName = TitleEditBox.Text.Trim();
-        if (!string.IsNullOrEmpty(newName))
+        _isCommittingTitleRename = true;
+        try
         {
-            try
+            if (!string.IsNullOrEmpty(newName))
             {
                 await ViewModel.RenameAsync(newName);
             }
-            catch (Exception ex)
-            {
-                await ShowErrorDialogAsync(_localizationService.T("Widget.RenameFailed"), ex.Message);
-                TitleEditBox.Focus(FocusState.Programmatic);
-                TitleEditBox.SelectAll();
-                return;
-            }
-        }
 
-        TitleEditBox.Visibility = Visibility.Collapsed;
-        TitleText.Visibility = Visibility.Visible;
-        RestoreDesktopLayer();
+            TitleEditBox.Visibility = Visibility.Collapsed;
+            TitleText.Visibility = Visibility.Visible;
+            ReleaseInteractionLayer("file-title-rename-committed");
+        }
+        catch (Exception ex)
+        {
+            await ShowErrorDialogAsync(_localizationService.T("Widget.RenameFailed"), ex.Message);
+            TitleEditBox.Focus(FocusState.Programmatic);
+            TitleEditBox.SelectAll();
+        }
+        finally
+        {
+            _isCommittingTitleRename = false;
+        }
     }
 
     private void CancelRename()
     {
         TitleEditBox.Visibility = Visibility.Collapsed;
         TitleText.Visibility = Visibility.Visible;
-        RestoreDesktopLayer();
+        ReleaseInteractionLayer("file-title-rename-canceled");
     }
 
     private async void TitleEditBox_LostFocus(object sender, RoutedEventArgs e)
@@ -3730,7 +3751,7 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
             var finalPosition = _appWindow.Position;
             var finalSize = _appWindow.Size;
             ViewModel.UpdateBounds(finalPosition.X, finalPosition.Y, finalSize.Width, finalSize.Height, persist: true);
-            RestoreDesktopLayer();
+            ReleaseInteractionLayer("file-drag-ended");
         }
 
         _hasMovedTitleBarDrag = false;
@@ -3756,7 +3777,7 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
         }
         finally
         {
-            RestoreDesktopLayer();
+            ReleaseInteractionLayer("file-picker-closed");
         }
     }
 
@@ -4025,7 +4046,7 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
         }
         finally
         {
-            RestoreDesktopLayer();
+            ReleaseInteractionLayer("folder-picker-closed");
         }
     }
 
@@ -4055,7 +4076,7 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
         }
         finally
         {
-            RestoreDesktopLayer();
+            ReleaseInteractionLayer("folder-picker-closed");
         }
     }
 
@@ -4202,7 +4223,7 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
 
             _itemDeleteConfirmFlyout = null;
             _isInlineFlyoutOpen = false;
-            RestoreDesktopLayer();
+            ReleaseInteractionLayer("file-delete-confirm-closed");
         };
 
         _isInlineFlyoutOpen = true;
@@ -4341,7 +4362,7 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
         _itemRenameFlyout.Closed += (_, _) =>
         {
             _itemRenameTarget = null;
-            RestoreDesktopLayer();
+            ReleaseInteractionLayer("file-item-rename-closed");
         };
     }
 
@@ -4466,7 +4487,7 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
 
             _isDeleteWidgetFlyoutOpen = false;
             _deleteWidgetFlyout = null;
-            RestoreDesktopLayer();
+            ReleaseInteractionLayer("file-delete-widget-closed");
         };
 
         _isDeleteWidgetFlyoutOpen = true;
@@ -4596,7 +4617,7 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
             _deletePending = false;
             RootGrid.IsHitTestVisible = true;
             await ShowErrorDialogAsync(_localizationService.T("Widget.DeleteWidgetFailed"), ex.Message);
-            RestoreDesktopLayer();
+            ReleaseInteractionLayer("file-delete-widget-failed");
         }
     }
 
@@ -4700,7 +4721,7 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
         var finalPosition = _appWindow.Position;
         var finalSize = _appWindow.Size;
         ViewModel.UpdateBounds(finalPosition.X, finalPosition.Y, finalSize.Width, finalSize.Height, persist: true);
-        RestoreDesktopLayer();
+        ReleaseInteractionLayer("file-resize-ended");
         e.Handled = true;
     }
 
@@ -4811,7 +4832,7 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
 
             _isInlineFlyoutOpen = false;
             completion.TrySetResult();
-            RestoreDesktopLayer();
+            ReleaseInteractionLayer("file-message-closed");
         };
 
         _isInlineFlyoutOpen = true;
@@ -4881,7 +4902,7 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
     private void ShowFlyoutWithElevation(MenuFlyout flyout, FrameworkElement target, Windows.Foundation.Point? position = null)
     {
         ElevateForInteraction();
-        flyout.Closed += (_, _) => RestoreDesktopLayer();
+        flyout.Closed += (_, _) => ReleaseInteractionLayer("file-flyout-closed");
 
         if (position is Windows.Foundation.Point point)
         {
@@ -4891,6 +4912,16 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
         {
             flyout.ShowAt(target);
         }
+    }
+
+    private void ReleaseInteractionLayer(string reason)
+    {
+        if (App.Current.WidgetManager?.RequestRestoreRaisedWidgetsToDesktopLayer(reason) == true)
+        {
+            return;
+        }
+
+        RestoreDesktopLayer();
     }
 
     private bool ShouldStartTitleDrag(object? originalSource)

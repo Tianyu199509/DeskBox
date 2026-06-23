@@ -211,9 +211,7 @@ public sealed partial class SettingsWindow : Window
         GeneralSection.Visibility = sectionTag == "General" ? Visibility.Visible : Visibility.Collapsed;
         MaintenanceSection.Visibility = sectionTag == "Maintenance" ? Visibility.Visible : Visibility.Collapsed;
         AboutSection.Visibility = sectionTag == "About" ? Visibility.Visible : Visibility.Collapsed;
-        SettingsNavigationView.IsBackButtonVisible = isNestedSection
-            ? NavigationViewBackButtonVisible.Visible
-            : NavigationViewBackButtonVisible.Collapsed;
+        SettingsNavigationView.IsBackButtonVisible = NavigationViewBackButtonVisible.Collapsed;
 
         PageScroller.ChangeView(null, 0, null, disableAnimation: true);
         DispatcherQueue.TryEnqueue(() =>
@@ -841,6 +839,12 @@ public sealed partial class SettingsWindow : Window
     private void OpenQuickCaptureSettingsButton_Click(object sender, RoutedEventArgs e)
     {
         ShowSettingsSection("QuickCaptureSettings", isNestedSection: true);
+    }
+
+    private void QuickCaptureBreadcrumbBackButton_Click(object sender, RoutedEventArgs e)
+    {
+        ShowSettingsSection("FeatureWidgets", isNestedSection: false);
+        SettingsNavigationView.SelectedItem = FeatureWidgetsNavItem;
     }
 
     private async void ClearQuickCaptureDataButton_Click(object sender, RoutedEventArgs e)

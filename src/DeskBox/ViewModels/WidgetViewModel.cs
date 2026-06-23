@@ -855,14 +855,17 @@ public partial class WidgetViewModel : ObservableObject, IDisposable
     /// </summary>
     public async Task RenameAsync(string newName)
     {
-        Name = newName;
-        Config.Name = newName;
         if (App.Current?.WidgetManager is { } widgetManager)
         {
             await widgetManager.RenameWidgetAsync(Config.Id, newName);
+            Name = Config.Name;
+            MappedFolderPath = Config.MappedFolderPath;
+            OnPropertyChanged(nameof(FollowsDefaultStoragePath));
             return;
         }
 
+        Name = newName;
+        Config.Name = newName;
         _settingsService.UpdateWidget(Config);
     }
 

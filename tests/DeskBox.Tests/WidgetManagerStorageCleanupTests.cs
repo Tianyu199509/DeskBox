@@ -138,7 +138,43 @@ public sealed class WidgetManagerStorageCleanupTests : IDisposable
     }
 
     [Fact]
-    public async Task RemoveWidgetAsync_RejectsFolderCleanupForMappedFolder()
+    public async Task RemoveWidgetAsync_MissingManagedFolder_RemovesConfigWithoutCreatingFolder()
+    {
+        string missingFolder = Path.Combine(_storageRoot, "Missing");
+        var widget = CreateManagedWidget("Missing", missingFolder);
+        _settingsService.Settings.Widgets.Add(widget);
+
+        Assert.False(_widgetManager.CanCleanupManagedStorageForWidget(widget.Id));
+
+        await _widgetManager.RemoveWidgetAsync(widget.Id, WidgetRemovalAction.DeleteManagedFolder);
+
+        Assert.DoesNotContain(_settingsService.Settings.Widgets, item => item.Id == widget.Id);
+        Assert.Contains(widget.Id, _settingsService.Settings.DeletedWidgetIds);
+        Assert.False(Directory.Exists(missingFolder));
+    }
+
+    [Fact]
+    public async Task RemoveWidgetAsync_InvalidManagedCleanup_RemovesConfigAndKeepsFolder()
+    {
+        string mappedFolder = Directory.CreateDirectory(Path.Combine(_tempRoot, "mapped")).FullName;
+        var widget = new WidgetConfig
+        {
+            Name = "Mapped",
+            WidgetKind = WidgetKind.File,
+            MappedFolderPath = mappedFolder,
+            FollowsDefaultStoragePath = false
+        };
+        _settingsService.Settings.Widgets.Add(widget);
+
+        await _widgetManager.RemoveWidgetAsync(widget.Id, WidgetRemovalAction.DeleteManagedFolder);
+
+        Assert.DoesNotContain(_settingsService.Settings.Widgets, item => item.Id == widget.Id);
+        Assert.Contains(widget.Id, _settingsService.Settings.DeletedWidgetIds);
+        Assert.True(Directory.Exists(mappedFolder));
+    }
+
+    [Fact]
+    public async Task RemoveWidgetAsync_MappedFolderCleanupRequest_RemovesConfigAndKeepsFolder()
     {
         string mappedFolder = Directory.CreateDirectory(Path.Combine(_tempRoot, "mapped")).FullName;
         string mappedFile = Path.Combine(mappedFolder, "note.txt");
@@ -151,13 +187,106 @@ public sealed class WidgetManagerStorageCleanupTests : IDisposable
         };
         _settingsService.Settings.Widgets.Add(widget);
 
-        await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            _widgetManager.RemoveWidgetAsync(widget.Id, WidgetRemovalAction.DeleteManagedFolder));
+        await _widgetManager.RemoveWidgetAsync(widget.Id, WidgetRemovalAction.DeleteManagedFolder);
 
-        Assert.Contains(_settingsService.Settings.Widgets, item => item.Id == widget.Id);
-        Assert.DoesNotContain(widget.Id, _settingsService.Settings.DeletedWidgetIds);
+        Assert.DoesNotContain(_settingsService.Settings.Widgets, item => item.Id == widget.Id);
+        Assert.Contains(widget.Id, _settingsService.Settings.DeletedWidgetIds);
         Assert.True(Directory.Exists(mappedFolder));
         Assert.Equal("mapped", File.ReadAllText(mappedFile));
+    }
+
+    [Fact]
+    public async Task RenameWidgetAsync_ManagedWidgetRejectsDuplicateNameWithoutCreatingFolder()
+    {
+        string existingFolder = Directory.CreateDirectory(Path.Combine(_storageRoot, "AI")).FullName;
+        string targetFolder = Directory.CreateDirectory(Path.Combine(_storageRoot, "Work")).FullName;
+        var existingWidget = CreateManagedWidget("AI", existingFolder);
+        var targetWidget = CreateManagedWidget("Work", targetFolder);
+        _settingsService.Settings.Widgets.Add(existingWidget);
+        _settingsService.Settings.Widgets.Add(targetWidget);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            _widgetManager.RenameWidgetAsync(targetWidget.Id, "AI"));
+
+        Assert.Equal("Work", targetWidget.Name);
+        Assert.Equal("Work", targetWidget.ManagedFolderName);
+        Assert.Equal(targetFolder, targetWidget.MappedFolderPath);
+        Assert.True(Directory.Exists(targetFolder));
+        Assert.False(Directory.Exists(Path.Combine(_storageRoot, "AI (2)")));
+    }
+
+    [Fact]
+    public async Task RenameWidgetAsync_ManagedWidgetMovesFolderAfterValidation()
+    {
+        string sourceFolder = Directory.CreateDirectory(Path.Combine(_storageRoot, "Work")).FullName;
+        File.WriteAllText(Path.Combine(sourceFolder, "note.txt"), "content");
+        var widget = CreateManagedWidget("Work", sourceFolder);
+        _settingsService.Settings.Widgets.Add(widget);
+
+        await _widgetManager.RenameWidgetAsync(widget.Id, "AI");
+
+        string destinationFolder = Path.Combine(_storageRoot, "AI");
+        Assert.Equal("AI", widget.Name);
+        Assert.Equal("AI", widget.ManagedFolderName);
+        Assert.Equal(destinationFolder, widget.MappedFolderPath);
+        Assert.False(Directory.Exists(sourceFolder));
+        Assert.Equal("content", File.ReadAllText(Path.Combine(destinationFolder, "note.txt")));
+    }
+
+    [Fact]
+    public async Task RenameWidgetAsync_ConcurrentManagedRenamesDoNotCreateDuplicateFolders()
+    {
+        string sourceFolder = Directory.CreateDirectory(Path.Combine(_storageRoot, "Work")).FullName;
+        var widget = CreateManagedWidget("Work", sourceFolder);
+        _settingsService.Settings.Widgets.Add(widget);
+
+        var firstRename = _widgetManager.RenameWidgetAsync(widget.Id, "AI");
+        var secondRename = _widgetManager.RenameWidgetAsync(widget.Id, "AI");
+        await Task.WhenAll(firstRename, secondRename);
+
+        string destinationFolder = Path.Combine(_storageRoot, "AI");
+        Assert.Equal("AI", widget.Name);
+        Assert.Equal("AI", widget.ManagedFolderName);
+        Assert.Equal(destinationFolder, widget.MappedFolderPath);
+        Assert.True(Directory.Exists(destinationFolder));
+        Assert.False(Directory.Exists(Path.Combine(_storageRoot, "AI (2)")));
+    }
+
+    [Fact]
+    public async Task RenameWidgetAsync_ConcurrentManagedRenamesRespectDuplicateNameGuard()
+    {
+        string existingFolder = Directory.CreateDirectory(Path.Combine(_storageRoot, "AI")).FullName;
+        string targetFolder = Directory.CreateDirectory(Path.Combine(_storageRoot, "Work")).FullName;
+        var existingWidget = CreateManagedWidget("AI", existingFolder);
+        var targetWidget = CreateManagedWidget("Work", targetFolder);
+        _settingsService.Settings.Widgets.Add(existingWidget);
+        _settingsService.Settings.Widgets.Add(targetWidget);
+
+        var firstRename = _widgetManager.RenameWidgetAsync(targetWidget.Id, "AI");
+        var secondRename = _widgetManager.RenameWidgetAsync(targetWidget.Id, "AI");
+        await Assert.ThrowsAnyAsync<InvalidOperationException>(async () =>
+            await Task.WhenAll(firstRename, secondRename));
+
+        Assert.Equal("Work", targetWidget.Name);
+        Assert.Equal("Work", targetWidget.ManagedFolderName);
+        Assert.Equal(targetFolder, targetWidget.MappedFolderPath);
+        Assert.False(Directory.Exists(Path.Combine(_storageRoot, "AI (2)")));
+    }
+
+    [Fact]
+    public async Task RenameWidgetAsync_ManagedWidgetMissingSourceDoesNotCreateTargetFolder()
+    {
+        string missingFolder = Path.Combine(_storageRoot, "Missing");
+        var widget = CreateManagedWidget("Missing", missingFolder);
+        _settingsService.Settings.Widgets.Add(widget);
+
+        await Assert.ThrowsAsync<DirectoryNotFoundException>(() =>
+            _widgetManager.RenameWidgetAsync(widget.Id, "AI"));
+
+        Assert.Equal("Missing", widget.Name);
+        Assert.Equal("Missing", widget.ManagedFolderName);
+        Assert.Equal(missingFolder, widget.MappedFolderPath);
+        Assert.False(Directory.Exists(Path.Combine(_storageRoot, "AI")));
     }
 
     [Fact]
