@@ -73,8 +73,8 @@
                 <Setter Property="BorderBrush" Value="Transparent" />
                 <Setter Property="BorderThickness" Value="0" />
                 <Setter Property="CornerRadius" Value="8" />
-                <Setter Property="HorizontalAlignment" Value="Left" />
-                <Setter Property="HorizontalContentAlignment" Value="Left" />
+                <Setter Property="HorizontalAlignment" Value="Stretch" />
+                <Setter Property="HorizontalContentAlignment" Value="Stretch" />
                 <Setter Property="VerticalContentAlignment" Value="Stretch" />
                 <Setter Property="Template">
                     <Setter.Value>
@@ -261,6 +261,7 @@
                 PointerMoved="ItemsView_PointerMoved"
                 PointerReleased="ItemsView_PointerReleased"
                 PointerCaptureLost="ItemsView_PointerCaptureLost"
+                SizeChanged="ItemsView_SizeChanged"
                 ItemContainerStyle="{StaticResource WidgetGridViewItemStyle}"
                 ItemClick="ItemsView_ItemClick"
                 ItemsSource="{Binding Items}"
@@ -316,12 +317,22 @@
                                     </ToolTip>
                                 </ToolTipService.ToolTip>
                                 <StackPanel HorizontalAlignment="Center">
-                                    <Image
-                                        Source="{Binding Icon}"
-                                        HorizontalAlignment="Center"
-                                        VerticalAlignment="Center" />
+                                    <Grid HorizontalAlignment="Center" VerticalAlignment="Center">
+                                        <Image
+                                            Source="{Binding Icon}"
+                                            HorizontalAlignment="Center"
+                                            VerticalAlignment="Center"
+                                            Visibility="{Binding IconVisibility}" />
+                                        <FontIcon
+                                            Glyph="{Binding FallbackGlyph}"
+                                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                            HorizontalAlignment="Center"
+                                            VerticalAlignment="Center"
+                                            Visibility="{Binding FallbackIconVisibility}" />
+                                    </Grid>
 
                                     <TextBlock
+                                        x:Name="IconItemNameText"
                                         HorizontalAlignment="Center"
                                         Margin="2,0,2,0"
                                         Text="{Binding Name}"
@@ -346,6 +357,7 @@
                 PointerMoved="ItemsView_PointerMoved"
                 PointerReleased="ItemsView_PointerReleased"
                 PointerCaptureLost="ItemsView_PointerCaptureLost"
+                SizeChanged="ItemsView_SizeChanged"
                 ItemContainerStyle="{StaticResource WidgetListViewItemStyle}"
                 ItemClick="ItemsView_ItemClick"
                 ItemsSource="{Binding Items}"
@@ -357,68 +369,90 @@
                 ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                 ScrollViewer.VerticalScrollBarVisibility="Auto"
                 SelectionMode="Extended"
+                HorizontalContentAlignment="Stretch"
                 Visibility="{Binding ListViewVisibility}">
                 <ListView.ItemTemplate>
                     <DataTemplate>
-                        <Border
-                            Tag="InteractiveSurface"
-                            CornerRadius="8"
-                            CanDrag="True"
-                            AllowDrop="True"
-                            Loaded="WidgetItemSurface_Loaded"
-                            DragLeave="WidgetItemSurface_DragLeave"
-                            DragOver="WidgetItemSurface_DragOver"
-                            PointerEntered="WidgetItemSurface_PointerEntered"
-                            PointerExited="WidgetItemSurface_PointerExited"
-                            PointerMoved="WidgetItemSurface_PointerMoved"
-                            PointerPressed="WidgetItemSurface_PointerPressed"
-                            PointerReleased="WidgetItemSurface_PointerReleased"
-                            PointerCaptureLost="WidgetItemSurface_PointerCaptureLost"
-                            Drop="WidgetItemSurface_Drop"
-                            DragStarting="WidgetItemSurface_DragStarting"
-                            DropCompleted="WidgetItemSurface_DropCompleted">
-                            <ToolTipService.ToolTip>
-                                <ToolTip
-                                    Style="{StaticResource RoundedToolTipStyle}">
-                                    <Border
-                                        MaxWidth="360"
-                                        Padding="10,7"
-                                        CornerRadius="8"
-                                        Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"
-                                        BorderBrush="{ThemeResource SurfaceStrokeColorDefaultBrush}"
-                                        BorderThickness="1">
+                        <Grid HorizontalAlignment="Stretch">
+                            <Border
+                                Tag="InteractiveSurface"
+                                CornerRadius="8"
+                                CanDrag="True"
+                                AllowDrop="True"
+                                HorizontalAlignment="Left"
+                                Loaded="WidgetItemSurface_Loaded"
+                                DragLeave="WidgetItemSurface_DragLeave"
+                                DragOver="WidgetItemSurface_DragOver"
+                                PointerEntered="WidgetItemSurface_PointerEntered"
+                                PointerExited="WidgetItemSurface_PointerExited"
+                                PointerMoved="WidgetItemSurface_PointerMoved"
+                                PointerPressed="WidgetItemSurface_PointerPressed"
+                                PointerReleased="WidgetItemSurface_PointerReleased"
+                                PointerCaptureLost="WidgetItemSurface_PointerCaptureLost"
+                                Drop="WidgetItemSurface_Drop"
+                                DragStarting="WidgetItemSurface_DragStarting"
+                                DropCompleted="WidgetItemSurface_DropCompleted">
+                                <ToolTipService.ToolTip>
+                                    <ToolTip
+                                        Style="{StaticResource RoundedToolTipStyle}">
+                                        <Border
+                                            MaxWidth="360"
+                                            Padding="10,7"
+                                            CornerRadius="8"
+                                            Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"
+                                            BorderBrush="{ThemeResource SurfaceStrokeColorDefaultBrush}"
+                                            BorderThickness="1">
+                                            <TextBlock
+                                                Text="{Binding FullPath}"
+                                                FontSize="12"
+                                                TextWrapping="WrapWholeWords" />
+                                        </Border>
+                                    </ToolTip>
+                                </ToolTipService.ToolTip>
+                                <Grid ColumnSpacing="10" HorizontalAlignment="Left">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+
+                                    <Grid VerticalAlignment="Center">
+                                        <Image
+                                            Source="{Binding Icon}"
+                                            HorizontalAlignment="Center"
+                                            VerticalAlignment="Center"
+                                            Visibility="{Binding IconVisibility}" />
+                                        <FontIcon
+                                            Glyph="{Binding FallbackGlyph}"
+                                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                            HorizontalAlignment="Center"
+                                            VerticalAlignment="Center"
+                                            Visibility="{Binding FallbackIconVisibility}" />
+                                    </Grid>
+
+                                    <StackPanel
+                                        x:Name="ListItemTextHost"
+                                        Grid.Column="1"
+                                        VerticalAlignment="Center"
+                                        HorizontalAlignment="Left"
+                                        Spacing="1">
                                         <TextBlock
-                                            Text="{Binding FullPath}"
-                                            FontSize="12"
-                                            TextWrapping="WrapWholeWords" />
-                                    </Border>
-                                </ToolTip>
-                            </ToolTipService.ToolTip>
-                            <Grid ColumnSpacing="10">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="Auto" />
-                                    <ColumnDefinition Width="*" />
-                                </Grid.ColumnDefinitions>
-
-                                <Image
-                                    Source="{Binding Icon}"
-                                    VerticalAlignment="Center" />
-
-                                <StackPanel
-                                    Grid.Column="1"
-                                    VerticalAlignment="Center"
-                                    Spacing="1">
-                                    <TextBlock
-                                        Text="{Binding Name}"
-                                        TextTrimming="CharacterEllipsis" />
-                                    <TextBlock
-                                        FontSize="11"
-                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                        Text="{Binding SecondaryInfo}"
-                                        TextTrimming="CharacterEllipsis" />
-                                </StackPanel>
-                            </Grid>
-                        </Border>
+                                            x:Name="ListItemNameText"
+                                            Text="{Binding Name}"
+                                            HorizontalAlignment="Left"
+                                            TextTrimming="CharacterEllipsis"
+                                            TextWrapping="NoWrap" />
+                                        <TextBlock
+                                            x:Name="ListItemDetailText"
+                                            FontSize="11"
+                                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                            Text="{Binding SecondaryInfo}"
+                                            HorizontalAlignment="Left"
+                                            TextTrimming="CharacterEllipsis"
+                                            TextWrapping="NoWrap" />
+                                    </StackPanel>
+                                </Grid>
+                            </Border>
+                        </Grid>
                     </DataTemplate>
                 </ListView.ItemTemplate>
             </ListView>

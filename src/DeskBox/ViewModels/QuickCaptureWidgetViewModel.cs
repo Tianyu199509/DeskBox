@@ -23,6 +23,8 @@ public sealed partial class QuickCaptureWidgetViewModel : ObservableObject, IDis
     private bool _isSearchExpanded;
     private QuickCaptureViewMode _selectedView = QuickCaptureViewMode.Records;
     private double _widgetOpacity;
+    private double _textSize;
+    private double _iconSize;
     private Visibility _emptyStateVisibility = Visibility.Collapsed;
     private Visibility _listVisibility = Visibility.Visible;
     private int _recordCount;
@@ -31,6 +33,7 @@ public sealed partial class QuickCaptureWidgetViewModel : ObservableObject, IDis
     private string _emptyStateTitle = string.Empty;
     private string _emptyStateText = string.Empty;
     private int _visibleItemsRefreshGeneration;
+    private QuickCaptureStoreData? _cachedData;
 
     public ObservableCollection<QuickCaptureItemViewModel> Items { get; } = [];
 
@@ -53,6 +56,8 @@ public sealed partial class QuickCaptureWidgetViewModel : ObservableObject, IDis
         _searchRefreshTimer.IsRepeating = false;
         _searchRefreshTimer.Tick += SearchRefreshTimer_Tick;
         _widgetOpacity = settingsService.Settings.WidgetOpacity;
+        _textSize = SettingsService.NormalizeTextSize(settingsService.Settings.TextSize);
+        _iconSize = SettingsService.NormalizeIconSize(settingsService.Settings.IconSize);
         Name = config.Name;
         _quickCaptureService.Changed += OnQuickCaptureChanged;
         _settingsService.SettingsChanged += OnSettingsChanged;
@@ -139,7 +144,7 @@ public sealed partial class QuickCaptureWidgetViewModel : ObservableObject, IDis
             OnPropertyChanged(nameof(IsRecentView));
             OnPropertyChanged(nameof(RecentCaptureStatusVisibility));
             OnPropertyChanged(nameof(RecentCaptureActionVisibility));
-            RefreshVisibleItemsImmediately();
+            RefreshVisibleItemsFromCacheOrService();
         }
     }
 
@@ -154,6 +159,32 @@ public sealed partial class QuickCaptureWidgetViewModel : ObservableObject, IDis
         get => _widgetOpacity;
         set => SetProperty(ref _widgetOpacity, value);
     }
+
+    public double TextSize
+    {
+        get => _textSize;
+        private set => SetProperty(ref _textSize, value);
+    }
+
+    public double TitleTextSize => Math.Min(SettingsService.MaxTextSize + 2, TextSize + 3);
+
+    public double SecondaryTextSize => Math.Max(SettingsService.MinTextSize - 1, TextSize - 2);
+
+    public double CaptionTextSize => Math.Max(SettingsService.MinTextSize, TextSize);
+
+    public double SegmentTextSize => Math.Max(SettingsService.MinTextSize, TextSize);
+
+    public double IconSize
+    {
+        get => _iconSize;
+        private set => SetProperty(ref _iconSize, value);
+    }
+
+    public double TitleIconSize => Math.Clamp(Math.Round(IconSize * 0.54), 11, 18);
+
+    public double ActionIconSize => Math.Max(10, Math.Round(IconSize * 0.42));
+
+    public double EmptyIconSize => Math.Max(18, Math.Round(IconSize * 0.74));
 
     public Visibility EmptyStateVisibility
     {
@@ -245,6 +276,7 @@ public sealed partial class QuickCaptureWidgetViewModel : ObservableObject, IDis
     public async Task InitializeAsync()
     {
         var data = await _quickCaptureService.GetDataAsync();
+        _cachedData = data;
         _selectedView = data.CurrentView;
         OnPropertyChanged(nameof(SelectedView));
         OnPropertyChanged(nameof(IsRecordsView));
@@ -333,15 +365,24 @@ public sealed partial class QuickCaptureWidgetViewModel : ObservableObject, IDis
         await _quickCaptureService.MovePinnedItemAsync(item.Id, direction);
     }
 
-    public async Task DeleteItemAsync(QuickCaptureItemViewModel item)
+    public async Task<QuickCaptureDeletedItemSnapshot?> DeleteItemAsync(QuickCaptureItemViewModel item)
     {
         if (item.IsRecent)
         {
-            await _quickCaptureService.DeleteRecentItemAsync(item.Id);
-            return;
+            return await _quickCaptureService.DeleteRecentItemAsync(item.Id);
         }
 
-        await _quickCaptureService.DeleteItemAsync(item.Id);
+        return await _quickCaptureService.DeleteItemAsync(item.Id);
+    }
+
+    public Task<bool> RestoreDeletedItemAsync(QuickCaptureDeletedItemSnapshot? snapshot)
+    {
+        return _quickCaptureService.RestoreDeletedItemAsync(snapshot);
+    }
+
+    public Task CleanupUnusedImageCacheAsync()
+    {
+        return _quickCaptureService.CleanupUnusedImageCacheAsync();
     }
 
     public async Task SaveRecentItemAsync(QuickCaptureItemViewModel item)
@@ -451,6 +492,7 @@ public sealed partial class QuickCaptureWidgetViewModel : ObservableObject, IDis
         foreach (var item in Items)
         {
             item.Update(item.ToModel());
+            item.UpdateSearchText(SearchText);
         }
     }
 
@@ -463,9 +505,31 @@ public sealed partial class QuickCaptureWidgetViewModel : ObservableObject, IDis
         }
 
         UpdateEmptyStateText();
+        RefreshAppearanceFromSettings();
         OnPropertyChanged(nameof(RecentCaptureStatusText));
         OnPropertyChanged(nameof(RecentCaptureStatusVisibility));
         OnPropertyChanged(nameof(RecentCaptureActionVisibility));
+    }
+
+    private void RefreshAppearanceFromSettings()
+    {
+        var settings = _settingsService.Settings;
+        WidgetOpacity = settings.WidgetOpacity;
+        TextSize = SettingsService.NormalizeTextSize(settings.TextSize);
+        IconSize = SettingsService.NormalizeIconSize(settings.IconSize);
+        OnPropertyChanged(nameof(TitleTextSize));
+        OnPropertyChanged(nameof(SecondaryTextSize));
+        OnPropertyChanged(nameof(CaptionTextSize));
+        OnPropertyChanged(nameof(SegmentTextSize));
+        OnPropertyChanged(nameof(TitleIconSize));
+        OnPropertyChanged(nameof(ActionIconSize));
+        OnPropertyChanged(nameof(EmptyIconSize));
+
+        foreach (var item in Items)
+        {
+            item.UpdateAppearance(TextSize, IconSize);
+            item.UpdateSearchText(SearchText);
+        }
     }
 
     private async Task RefreshVisibleItemsAsync()
@@ -477,7 +541,26 @@ public sealed partial class QuickCaptureWidgetViewModel : ObservableObject, IDis
             return;
         }
 
+        _cachedData = data;
         await RefreshFromDataAsync(data);
+    }
+
+    private void RefreshVisibleItemsFromCacheOrService()
+    {
+        if (!_dispatcherQueue.HasThreadAccess)
+        {
+            _dispatcherQueue.TryEnqueue(RefreshVisibleItemsFromCacheOrService);
+            return;
+        }
+
+        _searchRefreshTimer.Stop();
+        if (_cachedData is { } data)
+        {
+            _ = RefreshFromDataAsync(data);
+            return;
+        }
+
+        RefreshVisibleItemsAsync().LogQuickCaptureFailure();
     }
 
     private void ScheduleVisibleItemsRefresh()
@@ -530,6 +613,7 @@ public sealed partial class QuickCaptureWidgetViewModel : ObservableObject, IDis
         OnPropertyChanged(nameof(PinnedTabText));
         OnPropertyChanged(nameof(RecentTabText));
 
+        bool canShowPinnedSortControls = SelectedView == QuickCaptureViewMode.Pinned && !HasSearchText;
         var visibleItems = SelectedView switch
         {
             QuickCaptureViewMode.Pinned => activeItems
@@ -541,25 +625,19 @@ public sealed partial class QuickCaptureWidgetViewModel : ObservableObject, IDis
             QuickCaptureViewMode.Recent => recentItems,
             _ => activeItems
         };
-        bool canShowPinnedSortControls = SelectedView == QuickCaptureViewMode.Pinned && !HasSearchText;
+
         if (HasSearchText)
         {
-            visibleItems = visibleItems
+            visibleItems = activeItems
+                .Concat(recentItems)
                 .Where(item => MatchesSearch(item, SearchText))
+                .OrderByDescending(item => item.UpdatedAt)
+                .ThenBy(item => item.IsRecent ? 1 : 0)
+                .ThenBy(item => item.SortOrder)
                 .ToList();
         }
 
-        Items.Clear();
-        for (int index = 0; index < visibleItems.Count; index++)
-        {
-            var item = visibleItems[index];
-            Items.Add(new QuickCaptureItemViewModel(
-                item,
-                _localizationService,
-                showPinnedSortControls: canShowPinnedSortControls,
-                canMovePinnedUp: canShowPinnedSortControls && index > 0,
-                canMovePinnedDown: canShowPinnedSortControls && index < visibleItems.Count - 1));
-        }
+        SyncVisibleItems(visibleItems, canShowPinnedSortControls);
 
         UpdateEmptyStateText();
         bool hasItems = Items.Count > 0;
@@ -569,6 +647,61 @@ public sealed partial class QuickCaptureWidgetViewModel : ObservableObject, IDis
         OnPropertyChanged(nameof(RecentCaptureStatusVisibility));
         OnPropertyChanged(nameof(RecentCaptureActionVisibility));
         return Task.CompletedTask;
+    }
+
+    private void SyncVisibleItems(IReadOnlyList<QuickCaptureItem> visibleItems, bool canShowPinnedSortControls)
+    {
+        var existingById = Items
+            .GroupBy(item => item.Id, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.First(), StringComparer.Ordinal);
+        var visibleIds = visibleItems
+            .Select(item => item.Id)
+            .ToHashSet(StringComparer.Ordinal);
+
+        for (int index = Items.Count - 1; index >= 0; index--)
+        {
+            if (!visibleIds.Contains(Items[index].Id))
+            {
+                Items.RemoveAt(index);
+            }
+        }
+
+        for (int targetIndex = 0; targetIndex < visibleItems.Count; targetIndex++)
+        {
+            var model = visibleItems[targetIndex];
+            bool canMoveUp = canShowPinnedSortControls && targetIndex > 0;
+            bool canMoveDown = canShowPinnedSortControls && targetIndex < visibleItems.Count - 1;
+
+            if (!existingById.TryGetValue(model.Id, out var viewModel))
+            {
+                viewModel = new QuickCaptureItemViewModel(
+                    model,
+                    _localizationService,
+                    TextSize,
+                    IconSize,
+                    SearchText,
+                    showPinnedSortControls: canShowPinnedSortControls,
+                    canMovePinnedUp: canMoveUp,
+                    canMovePinnedDown: canMoveDown);
+                Items.Insert(targetIndex, viewModel);
+                continue;
+            }
+
+            viewModel.Update(model);
+            viewModel.UpdateAppearance(TextSize, IconSize);
+            viewModel.UpdateSearchText(SearchText);
+            viewModel.UpdatePinnedSortState(canShowPinnedSortControls, canMoveUp, canMoveDown);
+
+            int currentIndex = Items.IndexOf(viewModel);
+            if (currentIndex < 0)
+            {
+                Items.Insert(targetIndex, viewModel);
+            }
+            else if (currentIndex != targetIndex)
+            {
+                Items.Move(currentIndex, targetIndex);
+            }
+        }
     }
 
     private void UpdateEmptyStateText()

@@ -25,12 +25,20 @@ public partial class App : Application
     private const double TrayMenuItemMinHeight = 36;
     private const int TrayContextMenuFallbackOffsetPixels = 24;
     private const int TrayContextMenuEstimatedWidth = (int)TrayMenuItemWidth + 16;
-    private static readonly bool EnableVerboseLogging = false;
+    private const int MaxQueuedLogLines = 4096;
+    private const string VerboseLoggingEnvironmentVariable = "DESKBOX_VERBOSE_LOG";
+    private static readonly bool EnableVerboseLogging = IsEnabledEnvironmentValue(
+        Environment.GetEnvironmentVariable(VerboseLoggingEnvironmentVariable));
 
     private static readonly string LogPath = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "DeskBox",
         "DeskBox.log");
+    private static readonly System.Collections.Concurrent.ConcurrentQueue<string> s_logQueue = new();
+    private static readonly SemaphoreSlim s_logSignal = new(0);
+    private static int s_logWorkerStarted;
+    private static int s_pendingLogLineCount;
+    private static int s_logDirectoryEnsured;
 
     private static Mutex? _singleInstanceMutex;
     private static EventWaitHandle? _activationEvent;
@@ -40,7 +48,6 @@ public partial class App : Application
     private Window? _trayWindow;
     private MenuFlyoutItem? _trayMapFolderItem;
     private MenuFlyoutItem? _trayNewWidgetItem;
-    private MenuFlyoutItem? _trayShowQuickCaptureItem;
     private MenuFlyoutItem? _trayOpenManagedStorageItem;
     private MenuFlyoutItem? _traySettingsItem;
     private MenuFlyoutItem? _trayExitItem;
@@ -64,6 +71,8 @@ public partial class App : Application
     public GlobalHotkeyService? GlobalHotkeyService { get; private set; }
     public WidgetManager? WidgetManager { get; private set; }
     public SettingsWindow? SettingsWindowInstance => _settingsWindow;
+
+    public static bool IsVerboseLoggingEnabled => EnableVerboseLogging;
 
     public App()
     {
@@ -139,13 +148,16 @@ public partial class App : Application
     {
         try
         {
-            string? dir = Path.GetDirectoryName(LogPath);
-            if (dir is not null && !Directory.Exists(dir))
+            string line = $"[{DateTime.Now:HH:mm:ss.fff}] {msg}{Environment.NewLine}";
+            if (Interlocked.Increment(ref s_pendingLogLineCount) > MaxQueuedLogLines)
             {
-                Directory.CreateDirectory(dir);
+                Interlocked.Decrement(ref s_pendingLogLineCount);
+                return;
             }
 
-            File.AppendAllText(LogPath, $"[{DateTime.Now:HH:mm:ss.fff}] {msg}\n");
+            s_logQueue.Enqueue(line);
+            EnsureLogWorkerStarted();
+            s_logSignal.Release();
         }
         catch
         {
@@ -160,6 +172,69 @@ public partial class App : Application
         }
 
         Log(msg);
+    }
+
+    private static void EnsureLogWorkerStarted()
+    {
+        if (Interlocked.CompareExchange(ref s_logWorkerStarted, 1, 0) == 0)
+        {
+            _ = Task.Run(ProcessLogQueueAsync);
+        }
+    }
+
+    private static async Task ProcessLogQueueAsync()
+    {
+        while (true)
+        {
+            await s_logSignal.WaitAsync().ConfigureAwait(false);
+            DrainLogQueue();
+        }
+    }
+
+    private static void DrainLogQueue()
+    {
+        var builder = new System.Text.StringBuilder();
+        while (s_logQueue.TryDequeue(out string? line))
+        {
+            Interlocked.Decrement(ref s_pendingLogLineCount);
+            builder.Append(line);
+        }
+
+        if (builder.Length == 0)
+        {
+            return;
+        }
+
+        try
+        {
+            EnsureLogDirectory();
+            File.AppendAllText(LogPath, builder.ToString());
+        }
+        catch
+        {
+        }
+    }
+
+    private static void EnsureLogDirectory()
+    {
+        if (Volatile.Read(ref s_logDirectoryEnsured) != 0)
+        {
+            return;
+        }
+
+        string? dir = Path.GetDirectoryName(LogPath);
+        if (dir is not null)
+        {
+            Directory.CreateDirectory(dir);
+        }
+
+        Volatile.Write(ref s_logDirectoryEnsured, 1);
+    }
+
+    private static bool IsEnabledEnvironmentValue(string? value)
+    {
+        return !string.IsNullOrWhiteSpace(value) &&
+               value.Trim() is "1" or "true" or "TRUE" or "yes" or "YES" or "on" or "ON";
     }
 
     private static bool IsStartupLaunch(IEnumerable<string> arguments)
@@ -306,21 +381,6 @@ public partial class App : Application
             }
         });
 
-        var showQuickCaptureItem = new MenuFlyoutItem
-        {
-            Text = localization.T("Tray.ShowQuickCapture"),
-            Width = TrayMenuItemWidth,
-            Icon = new SymbolIcon(Symbol.Edit),
-            Style = trayMenuItemStyle
-        };
-        showQuickCaptureItem.Click += async (_, _) => await RunTrayMenuActionAsync(contextMenu, async () =>
-        {
-            if (WidgetManager is not null)
-            {
-                await WidgetManager.CreateOrShowQuickCaptureWidgetAsync();
-            }
-        });
-
         var settingsItem = new MenuFlyoutItem
         {
             Text = localization.T("Tray.Settings"),
@@ -353,15 +413,10 @@ public partial class App : Application
             bool canCreateWidget = WidgetManager is not null;
             newWidgetItem.IsEnabled = canCreateWidget;
             mapFolderItem.IsEnabled = canCreateWidget;
-            showQuickCaptureItem.IsEnabled = canCreateWidget && SettingsService.Settings.QuickCaptureEnabled;
-            showQuickCaptureItem.Visibility = SettingsService.Settings.QuickCaptureEnabled
-                ? Visibility.Visible
-                : Visibility.Collapsed;
         };
 
         contextMenu.Items.Add(newWidgetItem);
         contextMenu.Items.Add(mapFolderItem);
-        contextMenu.Items.Add(showQuickCaptureItem);
         contextMenu.Items.Add(new MenuFlyoutSeparator());
         contextMenu.Items.Add(openManagedStorageItem);
         contextMenu.Items.Add(new MenuFlyoutSeparator());
@@ -371,7 +426,6 @@ public partial class App : Application
 
         _trayMapFolderItem = mapFolderItem;
         _trayNewWidgetItem = newWidgetItem;
-        _trayShowQuickCaptureItem = showQuickCaptureItem;
         _trayOpenManagedStorageItem = openManagedStorageItem;
         _traySettingsItem = settingsItem;
         _trayExitItem = exitItem;
@@ -753,11 +807,6 @@ public partial class App : Application
         if (_trayNewWidgetItem is not null)
         {
             _trayNewWidgetItem.Text = LocalizationService.T("Common.NewWidget");
-        }
-
-        if (_trayShowQuickCaptureItem is not null)
-        {
-            _trayShowQuickCaptureItem.Text = LocalizationService.T("Tray.ShowQuickCapture");
         }
 
         if (_traySettingsItem is not null)

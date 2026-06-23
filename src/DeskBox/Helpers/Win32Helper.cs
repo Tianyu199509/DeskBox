@@ -83,6 +83,8 @@ public static partial class Win32Helper
     public const int WS_EX_TOOLWINDOW = 0x00000080;
     public const int WS_EX_TRANSPARENT = 0x00000020;
     public const int WS_EX_NOACTIVATE = 0x08000000;
+    public const int WS_EX_LAYERED = 0x00080000;
+    public const uint LWA_ALPHA = 0x00000002;
 
     public const int GWL_STYLE = -16;
     public const int WS_CHILD = 0x40000000;
@@ -98,6 +100,14 @@ public static partial class Win32Helper
 
     [LibraryImport("user32.dll", EntryPoint = "SetWindowLongW")]
     public static partial int SetWindowLong(IntPtr hWnd, int nIndex, int dwNewLong);
+
+    [LibraryImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static partial bool SetLayeredWindowAttributes(
+        IntPtr hwnd,
+        uint crKey,
+        byte bAlpha,
+        uint dwFlags);
 
     [StructLayout(LayoutKind.Sequential)]
     public struct AccentPolicy

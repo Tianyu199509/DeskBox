@@ -14,6 +14,9 @@ namespace DeskBox.ViewModels;
 public partial class WidgetViewModel : ObservableObject, IDisposable
 {
     private const int IncrementalRefreshBatchThreshold = 24;
+    private const int IconHydrationBatchSize = 8;
+    private const int FolderCountHydrationBatchSize = 8;
+    private const int FolderCountHydrationYieldMs = 24;
 
     private readonly DispatcherQueue _dispatcherQueue;
     private readonly FileService _fileService;
@@ -23,6 +26,7 @@ public partial class WidgetViewModel : ObservableObject, IDisposable
     private readonly SettingsService _settingsService;
     private readonly LocalizationService _localizationService;
     private readonly SemaphoreSlim _folderRefreshGate = new(1, 1);
+    private int _itemHydrationGeneration;
 
     private string _name = string.Empty;
     private ViewMode _viewMode;
@@ -683,7 +687,7 @@ public partial class WidgetViewModel : ObservableObject, IDisposable
         MappedFolderPath = Config.MappedFolderPath;
         OnPropertyChanged(nameof(FollowsDefaultStoragePath));
 
-        await LoadFolderContentsAsync(MappedFolderPath!);
+        await LoadFolderContentsAsync(MappedFolderPath!, clearIconCacheBeforeHydration: true);
         ConfigureFolderWatchers(MappedFolderPath);
         UpdateDependentProperties();
     }
@@ -780,8 +784,11 @@ public partial class WidgetViewModel : ObservableObject, IDisposable
             destinationPath,
             _hideShortcutArrowOverlay,
             _showFileExtensions,
-            _hideShortcutExtensionWhenShowingFileExtensions);
+            _hideShortcutExtensionWhenShowingFileExtensions,
+            loadIcon: false,
+            loadFolderItemCount: false);
         ApplyRuntimeItemData(item, refreshedItem);
+        StartItemHydration();
 
         int originalIndex = Items.IndexOf(item);
         if (originalIndex >= 0)
@@ -942,13 +949,11 @@ public partial class WidgetViewModel : ObservableObject, IDisposable
         return candidate;
     }
 
-    private async Task LoadFolderContentsAsync(string folderPath)
+    private async Task LoadFolderContentsAsync(string folderPath, bool clearIconCacheBeforeHydration = false)
     {
         using var perfScope = PerformanceLogger.Measure(
             "WidgetViewModel.LoadFolderContents",
             $"id={Config.Id} path={folderPath}");
-
-        Items.Clear();
 
         List<WidgetItem> items;
         var (userDesktop, publicDesktop) = FileService.GetDesktopPaths();
@@ -958,12 +963,16 @@ public partial class WidgetViewModel : ObservableObject, IDisposable
                 userDesktop,
                 _hideShortcutArrowOverlay,
                 _showFileExtensions,
-                _hideShortcutExtensionWhenShowingFileExtensions);
+                _hideShortcutExtensionWhenShowingFileExtensions,
+                loadIcons: false,
+                loadFolderItemCounts: false);
             var publicItems = await _fileService.EnumerateDirectoryAsync(
                 publicDesktop,
                 _hideShortcutArrowOverlay,
                 _showFileExtensions,
-                _hideShortcutExtensionWhenShowingFileExtensions);
+                _hideShortcutExtensionWhenShowingFileExtensions,
+                loadIcons: false,
+                loadFolderItemCounts: false);
 
             items = userItems.Concat(publicItems)
                 .GroupBy(item => item.Name, StringComparer.OrdinalIgnoreCase)
@@ -978,13 +987,204 @@ public partial class WidgetViewModel : ObservableObject, IDisposable
                 folderPath,
                 _hideShortcutArrowOverlay,
                 _showFileExtensions,
-                _hideShortcutExtensionWhenShowingFileExtensions);
+                _hideShortcutExtensionWhenShowingFileExtensions,
+                loadIcons: false,
+                loadFolderItemCounts: false);
         }
 
-        foreach (var item in items)
+        SyncFolderItems(items);
+        if (clearIconCacheBeforeHydration)
         {
-            Items.Add(item);
+            ClearCurrentItemIconCache();
         }
+
+        StartItemHydration();
+    }
+
+    private void SyncFolderItems(IReadOnlyList<WidgetItem> refreshedItems)
+    {
+        var existingByPath = Items
+            .GroupBy(item => item.Path, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);
+        var refreshedPaths = refreshedItems
+            .Select(item => item.Path)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        for (int index = Items.Count - 1; index >= 0; index--)
+        {
+            if (!refreshedPaths.Contains(Items[index].Path))
+            {
+                Items.RemoveAt(index);
+            }
+        }
+
+        for (int targetIndex = 0; targetIndex < refreshedItems.Count; targetIndex++)
+        {
+            var refreshedItem = refreshedItems[targetIndex];
+            if (!existingByPath.TryGetValue(refreshedItem.Path, out var existingItem))
+            {
+                Items.Insert(targetIndex, refreshedItem);
+                continue;
+            }
+
+            ApplyRuntimeItemData(existingItem, refreshedItem);
+            int currentIndex = Items.IndexOf(existingItem);
+            if (currentIndex < 0)
+            {
+                Items.Insert(targetIndex, existingItem);
+            }
+            else if (currentIndex != targetIndex)
+            {
+                Items.Move(currentIndex, targetIndex);
+            }
+        }
+
+        NormalizeSortOrder();
+    }
+
+    private void StartItemHydration()
+    {
+        int generation = Interlocked.Increment(ref _itemHydrationGeneration);
+        _ = HydrateIconsAsync(generation);
+        _ = HydrateFolderItemCountsAsync(generation);
+    }
+
+    private void ClearCurrentItemIconCache()
+    {
+        foreach (var item in Items)
+        {
+            if (!string.IsNullOrWhiteSpace(item.Path))
+            {
+                item.Icon = null;
+                _fileService.ClearIconCache(item.Path, _hideShortcutArrowOverlay);
+            }
+        }
+    }
+
+    private async Task HydrateIconsAsync(int generation)
+    {
+        var items = Items
+            .Where(item => item.Icon is null)
+            .ToList();
+
+        for (int start = 0; start < items.Count; start += IconHydrationBatchSize)
+        {
+            if (generation != Volatile.Read(ref _itemHydrationGeneration))
+            {
+                return;
+            }
+
+            var batch = items
+                .Skip(start)
+                .Take(IconHydrationBatchSize)
+                .Where(item => Items.Contains(item) && !string.IsNullOrWhiteSpace(item.Path))
+                .Select(async item => (Item: item, Icon: await _fileService.GetIconAsync(item.Path, _hideShortcutArrowOverlay)))
+                .ToArray();
+            var results = await Task.WhenAll(batch);
+
+            foreach (var (item, icon) in results)
+            {
+                if (generation != Volatile.Read(ref _itemHydrationGeneration) ||
+                    !Items.Contains(item))
+                {
+                    return;
+                }
+
+                SetItemIcon(item, icon, item.Path, generation);
+            }
+
+            await Task.Yield();
+        }
+    }
+
+    private async Task HydrateFolderItemCountsAsync(int generation)
+    {
+        var folders = Items
+            .Where(item => item.IsFolder && !item.IsFolderItemCountLoaded)
+            .ToList();
+        int processed = 0;
+
+        foreach (var item in folders)
+        {
+            if (generation != Volatile.Read(ref _itemHydrationGeneration) ||
+                !Items.Contains(item) ||
+                !Directory.Exists(item.Path))
+            {
+                return;
+            }
+
+            string path = item.Path;
+            try
+            {
+                int count = await _fileService.CountVisibleChildrenAsync(path);
+                SetFolderItemCount(item, count, path, generation);
+            }
+            catch
+            {
+                SetFolderItemCount(item, 0, path, generation);
+            }
+            processed++;
+
+            if (processed % FolderCountHydrationBatchSize == 0)
+            {
+                await Task.Delay(FolderCountHydrationYieldMs);
+            }
+        }
+    }
+
+    private void SetItemIcon(
+        WidgetItem item,
+        Microsoft.UI.Xaml.Media.Imaging.BitmapImage? icon,
+        string expectedPath,
+        int generation)
+    {
+        if (_dispatcherQueue.HasThreadAccess)
+        {
+            if (CanApplyHydrationResult(item, expectedPath, generation))
+            {
+                item.Icon = icon;
+            }
+
+            return;
+        }
+
+        _dispatcherQueue.TryEnqueue(() =>
+        {
+            if (CanApplyHydrationResult(item, expectedPath, generation))
+            {
+                item.Icon = icon;
+            }
+        });
+    }
+
+    private void SetFolderItemCount(WidgetItem item, int count, string expectedPath, int generation)
+    {
+        if (_dispatcherQueue.HasThreadAccess)
+        {
+            if (CanApplyHydrationResult(item, expectedPath, generation))
+            {
+                item.FolderItemCount = count;
+                item.IsFolderItemCountLoaded = true;
+            }
+
+            return;
+        }
+
+        _dispatcherQueue.TryEnqueue(() =>
+        {
+            if (CanApplyHydrationResult(item, expectedPath, generation))
+            {
+                item.FolderItemCount = count;
+                item.IsFolderItemCountLoaded = true;
+            }
+        });
+    }
+
+    private bool CanApplyHydrationResult(WidgetItem item, string expectedPath, int generation)
+    {
+        return generation == Volatile.Read(ref _itemHydrationGeneration) &&
+               Items.Contains(item) &&
+               string.Equals(item.Path, expectedPath, StringComparison.OrdinalIgnoreCase);
     }
 
     private async Task RefreshShortcutIconsAsync()
@@ -1135,7 +1335,9 @@ public partial class WidgetViewModel : ObservableObject, IDisposable
             path,
             _hideShortcutArrowOverlay,
             _showFileExtensions,
-            _hideShortcutExtensionWhenShowingFileExtensions);
+            _hideShortcutExtensionWhenShowingFileExtensions,
+            loadIcon: false,
+            loadFolderItemCount: false);
         if (item is null)
         {
             RemoveItemByPath(path);
@@ -1151,6 +1353,7 @@ public partial class WidgetViewModel : ObservableObject, IDisposable
         item.SortOrder = GetSortedInsertIndex(item);
         Items.Insert(GetSortedInsertIndex(item), item);
         NormalizeSortOrder();
+        StartItemHydration();
     }
 
     private void RemoveItemByPath(string path)
@@ -1207,6 +1410,7 @@ public partial class WidgetViewModel : ObservableObject, IDisposable
         target.Icon = source.Icon;
         target.FileSize = source.FileSize;
         target.FolderItemCount = source.FolderItemCount;
+        target.IsFolderItemCountLoaded = source.IsFolderItemCountLoaded;
         target.LastModified = source.LastModified;
         target.IsShortcut = source.IsShortcut;
         target.IsFolder = source.IsFolder;

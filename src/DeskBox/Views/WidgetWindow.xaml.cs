@@ -1,4 +1,4 @@
-﻿using System.ComponentModel;
+using System.ComponentModel;
 using System.Diagnostics;
 using DeskBox.Helpers;
 using DeskBox.Models;
@@ -79,8 +79,8 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
     private Win32Helper.POINT _initialCursorPt;
     private Windows.Graphics.PointInt32 _initialWindowPos;
     private Windows.Graphics.SizeInt32 _initialWindowSize;
-    private Windows.Graphics.PointInt32? _trayAnimationTargetPosition;
-    private CompositionScopedBatch? _trayVisualAnimationBatch;
+    private Windows.Graphics.PointInt32? _trayAnimationTargetPosition;
+    private DispatcherQueueTimer? _trayWindowAnimationTimer;
     private Storyboard? _showButtonsStoryboard;
     private Storyboard? _hideButtonsStoryboard;
     private DispatcherQueueTimer? _statusToastTimer;
@@ -120,17 +120,9 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
     private bool _restoreDesktopLayerWhenIdle;
     private bool _isHideAnimationRunning;
     private bool _isMigrationBusy;
+    private bool _isNativeBackdropSuppressedForTrayReveal;
+    private bool _isTrayWindowOpacityApplied;
     private long _trayAnimationGeneration;
-    private bool _isTrayWindowRenderingSubscribed;
-    private long _trayWindowAnimationStartTicks;
-    private long _trayWindowAnimationGeneration;
-    private double _trayWindowAnimationFromOffsetX;
-    private double _trayWindowAnimationFromOffsetY;
-    private double _trayWindowAnimationToOffsetX;
-    private double _trayWindowAnimationToOffsetY;
-    private int _trayWindowAnimationDurationMs;
-    private bool _isTrayWindowAnimationShowing;
-    private Windows.Graphics.PointInt32? _lastAppliedTrayWindowPosition;
     private bool _isApplyingTrayAnimationBounds;
     private long _backdropRefreshGeneration;
     private bool _areItemTransitionsSuppressed;
@@ -328,13 +320,19 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
         Win32Helper.SetWindowToBottom(_hWnd);
     }
 
-    public void ShowPreparedAtDesktopLayer()
+    public void ShowPreparedAtDesktopLayer(bool persistVisibility = true)
     {
+        LogTrayWindow("ShowPreparedAtDesktopLayer");
+        PrepareTrayRevealHiddenState();
         Win32Helper.ShowWindow(_hWnd, Win32Helper.SW_SHOWNOACTIVATE);
         _appWindow.Show();
         Visible = true;
         ViewModel.Config.IsVisible = true;
-        _settingsService.SaveDebounced();
+        if (persistVisibility)
+        {
+            _settingsService.SaveDebounced();
+        }
+
         QueueBackdropRefresh();
         PushToBottom();
     }
@@ -343,17 +341,23 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
     {
         PrepareTrayShowAnimation();
         ShowPreparedRaisedFromTray();
-        PlayTrayRaiseAnimation();
+        PlayTrayRaiseAnimationAfterFirstFrame();
     }
 
-    public void ShowPreparedRaisedFromTray()
+    public void ShowPreparedRaisedFromTray(bool persistVisibility = true)
     {
+        LogTrayWindow("ShowPreparedRaisedFromTray");
+        PrepareTrayRevealHiddenState();
         _appWindow.Show();
         Win32Helper.ShowWindow(_hWnd, Win32Helper.SW_SHOWNOACTIVATE);
         HoldTemporaryTopMost();
         Visible = true;
         ViewModel.Config.IsVisible = true;
-        _settingsService.SaveDebounced();
+        if (persistVisibility)
+        {
+            _settingsService.SaveDebounced();
+        }
+
         QueueBackdropRefresh();
 
         DispatcherQueue.TryEnqueue(async () =>
@@ -370,9 +374,11 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
     {
         if (!Visible)
         {
+            LogTrayWindow("EnsureRaisedTopMost skipped reason=not-visible");
             return;
         }
 
+        LogTrayWindow("EnsureRaisedTopMost");
         _appWindow.Show();
         Win32Helper.ShowWindow(_hWnd, Win32Helper.SW_SHOWNOACTIVATE);
         HoldTemporaryTopMost();
@@ -393,7 +399,7 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
 
     public void PlayTrayShowAnimation()
     {
-        PlayTrayRaiseAnimation();
+        PlayTrayRaiseAnimationAfterFirstFrame();
     }
 
     public void PlayPreparedTrayHideAnimation()
@@ -415,13 +421,18 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
         _isHideAnimationRunning = false;
 
         var animationProfile = GetWidgetAnimationProfile();
+        LogTrayWindow(
+            $"PrepareShow gen={_trayAnimationGeneration} effect={_settingsService.Settings.WidgetAnimationEffect} " +
+            $"speed={_settingsService.Settings.WidgetAnimationSpeed} enabled={animationProfile.IsEnabled} durationMs={animationProfile.DurationMs}");
         PrepareTrayVisualState(animationProfile.ShowOffsetX, animationProfile.ShowOffsetY, animationProfile.ShowStartOpacity, animationProfile.ShowStartScale);
     }
 
     public void CompleteTrayShowWithoutAnimation()
     {
         var animationGeneration = ++_trayAnimationGeneration;
+        LogTrayWindow($"CompleteShowWithoutAnimation gen={animationGeneration}");
         StopTrayVisualAnimation();
+        RestoreNativeBackdropAfterTrayReveal();
         RestoreTrayVisualState();
         RestoreTrayWindowPosition();
 
@@ -439,10 +450,12 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
         var animationProfile = GetWidgetAnimationProfile();
         if (!animationProfile.IsEnabled)
         {
+            LogTrayWindow($"PlayShow skipped reason=animation-disabled gen={animationGeneration}");
             CompleteTrayShowWithoutAnimation();
             return;
         }
 
+        LogTrayWindow($"PlayShow gen={animationGeneration} durationMs={animationProfile.DurationMs}");
         PrepareTrayVisualState(animationProfile.ShowOffsetX, animationProfile.ShowOffsetY, animationProfile.ShowStartOpacity, animationProfile.ShowStartScale);
         AnimateTrayVisual(
             animationProfile.ShowOffsetX,
@@ -464,22 +477,37 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
         });
     }
 
-    public bool PrepareTrayHideAnimation()
+    private void PlayTrayRaiseAnimationAfterFirstFrame()
+    {
+        if (Visible)
+        {
+            PlayTrayRaiseAnimation();
+        }
+    }
+
+    public bool PrepareTrayHideAnimation(bool persistVisibility = true)
     {
         if (!Visible || _isHideAnimationRunning)
         {
+            LogTrayWindow($"PrepareHide skipped visible={Visible} hideRunning={_isHideAnimationRunning}");
             return false;
         }
 
         _trayAnimationGeneration++;
         StopTrayVisualAnimation();
+        RestoreNativeBackdropAfterTrayReveal();
         RestoreItemContainerTransitions();
         SuppressItemContainerTransitions();
 
         _isHideAnimationRunning = true;
         Visible = false;
         ViewModel.Config.IsVisible = false;
-        _settingsService.SaveDebounced();
+        if (persistVisibility)
+        {
+            _settingsService.SaveDebounced();
+        }
+
+        LogTrayWindow($"PrepareHide gen={_trayAnimationGeneration}");
         PrepareTrayVisualState(0, 0, WidgetAnimationRestingOpacity, WidgetAnimationRestingScale);
         return true;
     }
@@ -490,10 +518,12 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
         var animationProfile = GetWidgetAnimationProfile();
         if (!animationProfile.IsEnabled)
         {
+            LogTrayWindow($"PlayHide skipped reason=animation-disabled gen={animationGeneration}");
             completed();
             return;
         }
 
+        LogTrayWindow($"PlayHide gen={animationGeneration} durationMs={animationProfile.DurationMs}");
         AnimateTrayVisual(
             0,
             0,
@@ -570,8 +600,22 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
         visual.StopAnimation("Scale");
         visual.CenterPoint = GetTrayVisualCenterPoint();
         visual.Offset = Vector3.Zero;
-        visual.Opacity = opacity;
-        visual.Scale = new Vector3(scale, scale, 1.0f);
+        visual.Opacity = WidgetAnimationRestingOpacity;
+        visual.Scale = new Vector3(WidgetAnimationRestingScale, WidgetAnimationRestingScale, 1.0f);
+        ApplyTrayWindowOpacity(opacity);
+    }
+
+    private void PrepareTrayRevealHiddenState()
+    {
+        RootGrid.Opacity = 1;
+        var visual = ElementCompositionPreview.GetElementVisual(RootGrid);
+        visual.StopAnimation("Offset");
+        visual.StopAnimation("Opacity");
+        visual.StopAnimation("Scale");
+        visual.Offset = Vector3.Zero;
+        visual.Opacity = WidgetAnimationRestingOpacity;
+        visual.Scale = new Vector3(WidgetAnimationRestingScale, WidgetAnimationRestingScale, 1.0f);
+        ApplyTrayWindowOpacity(0);
     }
 
     private void AnimateTrayVisual(
@@ -588,72 +632,87 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
         long animationGeneration,
         Action completed)
     {
+        LogTrayWindow(
+            $"AnimateStart mode={(isShowing ? "show" : "hide")} gen={animationGeneration} durationMs={durationMs} " +
+            $"windowOffset=({fromOffsetX:F0},{fromOffsetY:F0})->({toOffsetX:F0},{toOffsetY:F0}) " +
+            $"windowOpacity={fromOpacity:F2}->{toOpacity:F2}");
         StopTrayVisualAnimation();
-        PrepareTrayVisualState(fromOffsetX, fromOffsetY, fromOpacity, fromScale);
+        PrepareTrayVisualState(fromOffsetX, fromOffsetY, fromOpacity, WidgetAnimationRestingScale);
 
-        var visual = ElementCompositionPreview.GetElementVisual(RootGrid);
-        var compositor = visual.Compositor;
-        var easing = CreateTrayVisualEasing(compositor, isShowing);
-        var duration = TimeSpan.FromMilliseconds(durationMs);
-        AnimateTrayWindowOffset(fromOffsetX, fromOffsetY, toOffsetX, toOffsetY, durationMs, isShowing, animationGeneration);
-
-        var opacityAnimation = compositor.CreateScalarKeyFrameAnimation();
-        opacityAnimation.Duration = duration;
-        opacityAnimation.InsertKeyFrame(0.0f, fromOpacity);
-        opacityAnimation.InsertKeyFrame(1.0f, toOpacity, easing);
-
-        var scaleAnimation = compositor.CreateVector3KeyFrameAnimation();
-        scaleAnimation.Duration = duration;
-        scaleAnimation.InsertKeyFrame(0.0f, new Vector3(fromScale, fromScale, 1.0f));
-        scaleAnimation.InsertKeyFrame(1.0f, new Vector3(toScale, toScale, 1.0f), easing);
-
-        var batch = compositor.CreateScopedBatch(CompositionBatchTypes.Animation);
-        _trayVisualAnimationBatch = batch;
-        batch.Completed += (_, _) =>
+        if (durationMs <= 1)
         {
-            if (!ReferenceEquals(_trayVisualAnimationBatch, batch) ||
+            CompleteTrayWindowAnimation(toOffsetX, toOffsetY, toOpacity, isShowing, animationGeneration, completed);
+            return;
+        }
+
+        var stopwatch = Stopwatch.StartNew();
+        var timer = DispatcherQueue.CreateTimer();
+        timer.Interval = TimeSpan.FromMilliseconds(16);
+        _trayWindowAnimationTimer = timer;
+
+        timer.Tick += (_, _) =>
+        {
+            if (!ReferenceEquals(_trayWindowAnimationTimer, timer) ||
                 animationGeneration != _trayAnimationGeneration)
+            {
+                timer.Stop();
+                return;
+            }
+
+            double rawProgress = Math.Clamp(stopwatch.Elapsed.TotalMilliseconds / durationMs, 0.0, 1.0);
+            double easedProgress = EaseTrayWindowAnimation(rawProgress, isShowing);
+            double currentOffsetX = Lerp(fromOffsetX, toOffsetX, easedProgress);
+            double currentOffsetY = Lerp(fromOffsetY, toOffsetY, easedProgress);
+            float currentOpacity = (float)Lerp(fromOpacity, toOpacity, easedProgress);
+
+            ApplyTrayWindowOffset(currentOffsetX, currentOffsetY);
+            ApplyTrayWindowOpacity(currentOpacity);
+
+            if (rawProgress < 1.0)
             {
                 return;
             }
 
-            _trayVisualAnimationBatch = null;
-            RestoreTrayVisualState();
-            completed();
+            timer.Stop();
+            if (ReferenceEquals(_trayWindowAnimationTimer, timer))
+            {
+                _trayWindowAnimationTimer = null;
+            }
+
+            CompleteTrayWindowAnimation(toOffsetX, toOffsetY, toOpacity, isShowing, animationGeneration, completed);
         };
 
-        visual.StartAnimation("Opacity", opacityAnimation);
-        visual.StartAnimation("Scale", scaleAnimation);
-        batch.End();
+        timer.Start();
     }
 
     public void CompleteTrayHideAnimation()
     {
         if (Visible)
         {
+            LogTrayWindow("CompleteHide skipped reason=visible-again");
             return;
         }
 
         _isHideAnimationRunning = false;
         StopTrayVisualAnimation();
-        RestoreTrayVisualState();
-        QueueItemContainerTransitionRestore(_trayAnimationGeneration);
+        RestoreNativeBackdropAfterTrayReveal();
         Win32Helper.ClearWindowTopMost(_hWnd);
         Win32Helper.ShowWindow(_hWnd, Win32Helper.SW_HIDE);
         _appWindow.Hide();
+        RestoreTrayVisualState();
+        QueueItemContainerTransitionRestore(_trayAnimationGeneration);
         RestoreTrayWindowPosition();
+        LogTrayWindow("CompleteHide");
     }
 
     private void RestoreTrayWindowPosition()
     {
-        StopTrayWindowMoveAnimation();
         if (_trayAnimationTargetPosition is { } target)
         {
             _isApplyingTrayAnimationBounds = true;
             try
             {
                 _appWindow.Move(target);
-                _lastAppliedTrayWindowPosition = target;
             }
             finally
             {
@@ -662,62 +721,6 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
         }
 
         _trayAnimationTargetPosition = null;
-        _lastAppliedTrayWindowPosition = null;
-    }
-
-    private void AnimateTrayWindowOffset(
-        double fromX,
-        double fromY,
-        double toX,
-        double toY,
-        int durationMs,
-        bool isShowing,
-        long animationGeneration)
-    {
-        StopTrayWindowMoveAnimation();
-        ApplyTrayWindowOffset(fromX, fromY);
-
-        _trayWindowAnimationFromOffsetX = fromX;
-        _trayWindowAnimationFromOffsetY = fromY;
-        _trayWindowAnimationToOffsetX = toX;
-        _trayWindowAnimationToOffsetY = toY;
-        _trayWindowAnimationDurationMs = Math.Max(1, durationMs);
-        _isTrayWindowAnimationShowing = isShowing;
-        _trayWindowAnimationGeneration = animationGeneration;
-        _trayWindowAnimationStartTicks = Stopwatch.GetTimestamp();
-
-        if (_isTrayWindowRenderingSubscribed)
-        {
-            return;
-        }
-
-        CompositionTarget.Rendering += TrayWindowRendering_Tick;
-        _isTrayWindowRenderingSubscribed = true;
-    }
-
-    private void TrayWindowRendering_Tick(object? sender, object e)
-    {
-        if (_trayWindowAnimationGeneration != _trayAnimationGeneration)
-        {
-            StopTrayWindowMoveAnimation();
-            RestoreTrayWindowPosition();
-            return;
-        }
-
-        double elapsedMs = Stopwatch.GetElapsedTime(_trayWindowAnimationStartTicks).TotalMilliseconds;
-        double progress = Math.Clamp(elapsedMs / _trayWindowAnimationDurationMs, 0.0, 1.0);
-        double easedProgress = EaseTrayWindowProgress(progress, _isTrayWindowAnimationShowing);
-        ApplyTrayWindowOffset(
-            _trayWindowAnimationFromOffsetX + ((_trayWindowAnimationToOffsetX - _trayWindowAnimationFromOffsetX) * easedProgress),
-            _trayWindowAnimationFromOffsetY + ((_trayWindowAnimationToOffsetY - _trayWindowAnimationFromOffsetY) * easedProgress));
-
-        if (progress < 1.0)
-        {
-            return;
-        }
-
-        StopTrayWindowMoveAnimation();
-        ApplyTrayWindowOffset(_trayWindowAnimationToOffsetX, _trayWindowAnimationToOffsetY);
     }
 
     private void ApplyTrayWindowOffset(double offsetX, double offsetY)
@@ -729,18 +732,10 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
             target.X + (int)Math.Round(offsetX),
             target.Y + (int)Math.Round(offsetY));
 
-        if (_lastAppliedTrayWindowPosition is { } previous &&
-            previous.X == nextPosition.X &&
-            previous.Y == nextPosition.Y)
-        {
-            return;
-        }
-
         _isApplyingTrayAnimationBounds = true;
         try
         {
             _appWindow.Move(nextPosition);
-            _lastAppliedTrayWindowPosition = nextPosition;
         }
         finally
         {
@@ -750,26 +745,15 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
 
     private void StopTrayVisualAnimation()
     {
-        StopTrayWindowMoveAnimation();
-        if (_trayVisualAnimationBatch is null)
+        if (_trayWindowAnimationTimer is { } timer)
         {
-            return;
+            timer.Stop();
+            _trayWindowAnimationTimer = null;
         }
-
-        _trayVisualAnimationBatch = null;
         var visual = ElementCompositionPreview.GetElementVisual(RootGrid);
         visual.StopAnimation("Offset");
         visual.StopAnimation("Opacity");
         visual.StopAnimation("Scale");
-    }
-
-    private void StopTrayWindowMoveAnimation()
-    {
-        if (_isTrayWindowRenderingSubscribed)
-        {
-            CompositionTarget.Rendering -= TrayWindowRendering_Tick;
-            _isTrayWindowRenderingSubscribed = false;
-        }
     }
 
     private void RestoreTrayVisualState()
@@ -783,6 +767,106 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
         visual.Offset = Vector3.Zero;
         visual.Opacity = WidgetAnimationRestingOpacity;
         visual.Scale = new Vector3(WidgetAnimationRestingScale, WidgetAnimationRestingScale, 1.0f);
+        RestoreTrayWindowOpacity();
+    }
+
+    private void CompleteTrayWindowAnimation(
+        double finalOffsetX,
+        double finalOffsetY,
+        float finalOpacity,
+        bool isShowing,
+        long animationGeneration,
+        Action completed)
+    {
+        if (animationGeneration != _trayAnimationGeneration)
+        {
+            return;
+        }
+
+        ApplyTrayWindowOffset(finalOffsetX, finalOffsetY);
+        ApplyTrayWindowOpacity(finalOpacity);
+        LogTrayWindow($"AnimateCompleted mode={(isShowing ? "show" : "hide")} gen={animationGeneration}");
+        if (isShowing)
+        {
+            RestoreNativeBackdropAfterTrayReveal();
+            RestoreTrayVisualState();
+        }
+
+        completed();
+    }
+
+    private void ApplyTrayWindowOpacity(float opacity)
+    {
+        opacity = Math.Clamp(opacity, 0.0f, 1.0f);
+        if (opacity >= 0.999f)
+        {
+            RestoreTrayWindowOpacity();
+            return;
+        }
+
+        _isTrayWindowOpacityApplied = true;
+        byte alpha = (byte)Math.Clamp((int)Math.Round(opacity * byte.MaxValue), 0, byte.MaxValue);
+        int exStyle = Win32Helper.GetWindowLong(_hWnd, Win32Helper.GWL_EXSTYLE);
+        if ((exStyle & Win32Helper.WS_EX_LAYERED) == 0)
+        {
+            Win32Helper.SetWindowLong(_hWnd, Win32Helper.GWL_EXSTYLE, exStyle | Win32Helper.WS_EX_LAYERED);
+        }
+
+        Win32Helper.SetLayeredWindowAttributes(_hWnd, 0, alpha, Win32Helper.LWA_ALPHA);
+    }
+
+    private void RestoreTrayWindowOpacity()
+    {
+        if (!_isTrayWindowOpacityApplied)
+        {
+            return;
+        }
+
+        Win32Helper.SetLayeredWindowAttributes(_hWnd, 0, byte.MaxValue, Win32Helper.LWA_ALPHA);
+        int exStyle = Win32Helper.GetWindowLong(_hWnd, Win32Helper.GWL_EXSTYLE);
+        if ((exStyle & Win32Helper.WS_EX_LAYERED) != 0)
+        {
+            Win32Helper.SetWindowLong(_hWnd, Win32Helper.GWL_EXSTYLE, exStyle & ~Win32Helper.WS_EX_LAYERED);
+        }
+
+        _isTrayWindowOpacityApplied = false;
+    }
+
+    private static double Lerp(double from, double to, double progress)
+    {
+        return from + (to - from) * progress;
+    }
+
+    private static double EaseTrayWindowAnimation(double progress, bool isShowing)
+    {
+        progress = Math.Clamp(progress, 0.0, 1.0);
+        return isShowing
+            ? 1.0 - Math.Pow(1.0 - progress, 3.0)
+            : Math.Pow(progress, 3.0);
+    }
+
+    private void SuppressNativeBackdropForTrayReveal()
+    {
+        if (_isNativeBackdropSuppressedForTrayReveal)
+        {
+            return;
+        }
+
+        _isNativeBackdropSuppressedForTrayReveal = true;
+        SystemBackdrop = null;
+        DisposeAcrylicController();
+        Win32Helper.DisableAccentPolicy(_hWnd);
+    }
+
+    private void RestoreNativeBackdropAfterTrayReveal()
+    {
+        if (!_isNativeBackdropSuppressedForTrayReveal)
+        {
+            return;
+        }
+
+        _isNativeBackdropSuppressedForTrayReveal = false;
+        ApplyBackdropPreference();
     }
 
     private Vector3 GetTrayVisualCenterPoint()
@@ -910,25 +994,30 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
         };
     }
 
-    private static double EaseTrayWindowProgress(double progress, bool isShowing)
+    private void LogTrayWindow(string message)
     {
-        progress = Math.Clamp(progress, 0.0, 1.0);
-        return isShowing
-            ? 1 - Math.Pow(1 - progress, 3)
-            : progress * progress * progress;
+        App.LogVerbose($"[TrayWindow] File {ViewModel.Config.Name}#{ShortId(ViewModel.Config.Id)} hwnd=0x{_hWnd.ToInt64():X} {message}");
+    }
+
+    private static string ShortId(string id)
+    {
+        return string.IsNullOrWhiteSpace(id)
+            ? "none"
+            : id.Length <= 8 ? id : id[..8];
     }
 
     public void RevealFromTray(bool autoRestore = true)
     {
         PrepareTrayShowAnimation();
         ElevateForInteraction();
+        PrepareTrayRevealHiddenState();
         Win32Helper.ShowWindow(_hWnd, Win32Helper.SW_SHOWNOACTIVATE);
         base.Activate();
         Visible = true;
         ViewModel.Config.IsVisible = true;
         _settingsService.SaveDebounced();
         QueueBackdropRefresh();
-        PlayTrayRaiseAnimation();
+        PlayTrayRaiseAnimationAfterFirstFrame();
 
         if (!autoRestore)
         {
@@ -1065,6 +1154,12 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
         RestoreDesktopLayer(force: true);
     }
 
+    public void ForceRestoreDesktopLayerFromManager()
+    {
+        ForceCancelTransientState();
+        RestoreDesktopLayer(force: true);
+    }
+
     private void RestoreDesktopLayer(bool force = false)
     {
         if (!force && !_restoreDesktopLayerWhenIdle && _keepRaisedUntilDeactivate)
@@ -1091,6 +1186,14 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
         _restoreDesktopLayerWhenIdle = false;
         PushToBottom();
         ApplyBackdropPreference();
+    }
+
+    private void ForceCancelTransientState()
+    {
+        _restoreDesktopLayerWhenIdle = true;
+        _keepRaisedUntilDeactivate = false;
+        _isDeleteWidgetFlyoutOpen = false;
+        _isInlineFlyoutOpen = false;
     }
 
     private void ApplyWindowBounds(int x, int y, int width, int height, bool persist)
@@ -1141,6 +1244,12 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
 
     private void ApplyBackdropPreference()
     {
+        if (_isNativeBackdropSuppressedForTrayReveal)
+        {
+            ApplySurfaceStyle();
+            return;
+        }
+
         bool isDark = RootGrid.ActualTheme == ElementTheme.Dark;
         double surfaceOpacity = Math.Clamp(ViewModel.WidgetOpacity, 0.0, 1.0);
         var tintColor = BuildNativeBackdropTintColor(isDark);
@@ -1218,6 +1327,11 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
     private void RefreshBackdropIfCurrent(long generation)
     {
         if (generation != _backdropRefreshGeneration)
+        {
+            return;
+        }
+
+        if (!Visible || _isHideAnimationRunning)
         {
             return;
         }
@@ -1550,6 +1664,7 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
         {
             border.Width = double.NaN;
             border.Height = double.NaN;
+            border.HorizontalAlignment = HorizontalAlignment.Left;
             border.Margin = ViewModel.ListItemMargin;
             border.Padding = ViewModel.ListItemPadding;
             border.CornerRadius = GetItemSurfaceCornerRadius();
@@ -1557,6 +1672,7 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
             if (border.Child is Grid listGrid)
             {
                 listGrid.ColumnSpacing = 10;
+                listGrid.HorizontalAlignment = HorizontalAlignment.Left;
 
                 if (TryGetDescendant<Image>(listGrid, out var icon))
                 {
@@ -1564,15 +1680,41 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
                     icon.Height = ViewModel.ListIconSize;
                 }
 
+                if (TryGetDescendant<FontIcon>(listGrid, out var fallbackIcon))
+                {
+                    fallbackIcon.Width = ViewModel.ListIconSize;
+                    fallbackIcon.Height = ViewModel.ListIconSize;
+                    fallbackIcon.FontSize = Math.Clamp(Math.Round(ViewModel.ListIconSize * 0.72), 12, 20);
+                }
+
+                double textMaxWidth = GetListItemTextMaxWidth();
+
+                if (TryGetDescendant<StackPanel>(listGrid, out var textHost, "ListItemTextHost"))
+                {
+                    textHost.MaxWidth = textMaxWidth;
+                }
+
                 if (TryGetDescendant<TextBlock>(listGrid, out var label))
                 {
                     label.FontSize = ViewModel.ListLabelFontSize;
+                    label.MaxWidth = textMaxWidth;
+                    label.HorizontalAlignment = HorizontalAlignment.Left;
                 }
 
-                foreach (var textBlock in FindDescendants<TextBlock>(listGrid).Skip(1))
+                if (TryGetDescendant<TextBlock>(listGrid, out var nameText, "ListItemNameText"))
                 {
-                    textBlock.FontSize = Math.Max(ViewModel.ListLabelFontSize - 2, 9);
-                    textBlock.Visibility = ViewModel.ShowListItemDetails
+                    nameText.FontSize = ViewModel.ListLabelFontSize;
+                    nameText.MaxWidth = textMaxWidth;
+                    nameText.HorizontalAlignment = HorizontalAlignment.Left;
+                    nameText.Visibility = Visibility.Visible;
+                }
+
+                if (TryGetDescendant<TextBlock>(listGrid, out var detailText, "ListItemDetailText"))
+                {
+                    detailText.FontSize = Math.Max(ViewModel.ListLabelFontSize - 2, 9);
+                    detailText.MaxWidth = textMaxWidth;
+                    detailText.HorizontalAlignment = HorizontalAlignment.Left;
+                    detailText.Visibility = ViewModel.ShowListItemDetails
                         ? Visibility.Visible
                         : Visibility.Collapsed;
                 }
@@ -1605,7 +1747,14 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
                 icon.Height = ViewModel.IconImageSize;
             }
 
-            if (TryGetDescendant<TextBlock>(iconStack, out var label))
+            if (TryGetDescendant<FontIcon>(iconStack, out var fallbackIcon))
+            {
+                fallbackIcon.Width = ViewModel.IconImageSize;
+                fallbackIcon.Height = ViewModel.IconImageSize;
+                fallbackIcon.FontSize = Math.Clamp(Math.Round(ViewModel.IconImageSize * 0.72), 16, 34);
+            }
+
+            if (TryGetDescendant<TextBlock>(iconStack, out var label, "IconItemNameText"))
             {
                 label.FontSize = ViewModel.IconLabelFontSize;
                 label.MaxWidth = ViewModel.IconLabelMaxWidth;
@@ -1613,19 +1762,35 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
         }
     }
 
+    private double GetListItemTextMaxWidth()
+    {
+        double availableWidth = ItemsListView.ActualWidth > 0 ? ItemsListView.ActualWidth : ViewModel.Config.Width;
+        double horizontalPadding = ViewModel.ListItemPadding.Left + ViewModel.ListItemPadding.Right;
+        double reservedWidth = ViewModel.ListIconSize + 10 + horizontalPadding + 24;
+        return Math.Max(56, availableWidth - reservedWidth);
+    }
+
     private static bool TryGetDescendant<T>(DependencyObject parent, out T result) where T : DependencyObject
+    {
+        return TryGetDescendant(parent, out result, null);
+    }
+
+    private static bool TryGetDescendant<T>(DependencyObject parent, out T result, string? name) where T : DependencyObject
     {
         int childCount = VisualTreeHelper.GetChildrenCount(parent);
         for (int i = 0; i < childCount; i++)
         {
             var child = VisualTreeHelper.GetChild(parent, i);
-            if (child is T typedChild)
+            if (child is T typedChild &&
+                (string.IsNullOrWhiteSpace(name) ||
+                 (typedChild is FrameworkElement frameworkElement &&
+                  string.Equals(frameworkElement.Name, name, StringComparison.Ordinal))))
             {
                 result = typedChild;
                 return true;
             }
 
-            if (TryGetDescendant(child, out result))
+            if (TryGetDescendant(child, out result, name))
             {
                 return true;
             }
@@ -1699,7 +1864,10 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
             ApplyBackdropPreference();
             UpdateEmptyState();
         }
-        else if (e.PropertyName is nameof(WidgetViewModel.ShowListItemDetails)
+        else if (e.PropertyName is nameof(WidgetViewModel.ViewMode)
+            or nameof(WidgetViewModel.IconViewVisibility)
+            or nameof(WidgetViewModel.ListViewVisibility)
+            or nameof(WidgetViewModel.ShowListItemDetails)
             or nameof(WidgetViewModel.IconTileWidth)
             or nameof(WidgetViewModel.IconTileHeight)
             or nameof(WidgetViewModel.IconTileMargin)
@@ -1715,7 +1883,13 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
         {
             ApplyTitleBarLayout();
             UpdateInteractiveSurfaces();
+            QueueEmptyStateUpdate();
         }
+    }
+
+    private void ItemsView_SizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        UpdateInteractiveSurfaces();
     }
 
     private ListViewBase? GetActiveItemsView()

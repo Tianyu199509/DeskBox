@@ -1,5 +1,6 @@
 using CommunityToolkit.Mvvm.ComponentModel;
 using DeskBox.Services;
+using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Media.Imaging;
 
 namespace DeskBox.Models;
@@ -27,6 +28,8 @@ public partial class WidgetItem : ObservableObject
 
     /// <summary>Thumbnail / icon image for display in the widget.</summary>
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IconVisibility))]
+    [NotifyPropertyChangedFor(nameof(FallbackIconVisibility))]
     private BitmapImage? _icon;
 
     /// <summary>File size in bytes (0 for folders).</summary>
@@ -39,6 +42,11 @@ public partial class WidgetItem : ObservableObject
     [NotifyPropertyChangedFor(nameof(SecondaryInfo))]
     private int _folderItemCount;
 
+    /// <summary>Whether the visible child count has been loaded for a folder item.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(SecondaryInfo))]
+    private bool _isFolderItemCountLoaded = true;
+
     /// <summary>Last modification timestamp.</summary>
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(SecondaryInfo))]
@@ -46,11 +54,13 @@ public partial class WidgetItem : ObservableObject
 
     /// <summary>Whether this item is a .lnk shortcut file.</summary>
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(FallbackGlyph))]
     private bool _isShortcut;
 
     /// <summary>Whether this item represents a directory.</summary>
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(SecondaryInfo))]
+    [NotifyPropertyChangedFor(nameof(FallbackGlyph))]
     private bool _isFolder;
 
     /// <summary>Display order within the parent widget.</summary>
@@ -71,7 +81,9 @@ public partial class WidgetItem : ObservableObject
         {
             if (IsFolder)
             {
-                return LocalizeFormat("FileInfo.FolderItems", FolderItemCount);
+                return IsFolderItemCountLoaded
+                    ? LocalizeFormat("FileInfo.FolderItems", FolderItemCount)
+                    : Localize("FileInfo.Folder");
             }
 
             string typeText = FormatFileSize(FileSize);
@@ -80,6 +92,16 @@ public partial class WidgetItem : ObservableObject
                 : LocalizeFormat("FileInfo.FileModified", typeText, LastModified);
         }
     }
+
+    public Visibility IconVisibility => Icon is null ? Visibility.Collapsed : Visibility.Visible;
+
+    public Visibility FallbackIconVisibility => Icon is null ? Visibility.Visible : Visibility.Collapsed;
+
+    public string FallbackGlyph => IsFolder
+        ? "\uE8B7"
+        : IsShortcut
+            ? "\uE71B"
+            : "\uE7C3";
 
     private static string FormatFileSize(long bytes)
     {

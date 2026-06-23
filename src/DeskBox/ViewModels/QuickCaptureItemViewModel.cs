@@ -12,16 +12,25 @@ public sealed partial class QuickCaptureItemViewModel : ObservableObject
     private bool _showPinnedSortControls;
     private bool _canMovePinnedUp;
     private bool _canMovePinnedDown;
+    private double _textSize;
+    private double _iconSize;
+    private string _searchText;
 
     public QuickCaptureItemViewModel(
         QuickCaptureItem model,
         LocalizationService localizationService,
+        double textSize,
+        double iconSize,
+        string? searchText,
         bool showPinnedSortControls = false,
         bool canMovePinnedUp = false,
         bool canMovePinnedDown = false)
     {
         _model = model;
         _localizationService = localizationService;
+        _textSize = textSize;
+        _iconSize = iconSize;
+        _searchText = NormalizeSearchText(searchText);
         _showPinnedSortControls = showPinnedSortControls;
         _canMovePinnedUp = canMovePinnedUp;
         _canMovePinnedDown = canMovePinnedDown;
@@ -36,6 +45,14 @@ public sealed partial class QuickCaptureItemViewModel : ObservableObject
     public string DisplayText => Type == QuickCaptureItemType.Image
         ? _localizationService.T("QuickCapture.ImageItem")
         : _model.Body;
+
+    public int HighlightStartIndex => GetHighlightStartIndex();
+
+    public int HighlightLength => string.IsNullOrEmpty(_searchText) || HighlightStartIndex < 0
+        ? 0
+        : _searchText.Length;
+
+    public Visibility HighlightVisibility => HighlightLength > 0 ? Visibility.Visible : Visibility.Collapsed;
 
     public string? ImagePath => _model.ImagePath;
 
@@ -87,6 +104,16 @@ public sealed partial class QuickCaptureItemViewModel : ObservableObject
 
     public string UpdatedAtText => FormatUpdatedAt(_model.UpdatedAt);
 
+    public double TextSize => _textSize;
+
+    public double SecondaryTextSize => Math.Max(SettingsService.MinTextSize - 1, _textSize - 2);
+
+    public double IconSize => _iconSize;
+
+    public double TypeIconSize => Math.Max(11, Math.Round(_iconSize * 0.52));
+
+    public double ActionIconSize => Math.Max(10, Math.Round(_iconSize * 0.42));
+
     public QuickCaptureItem ToModel() => new()
     {
         Id = _model.Id,
@@ -110,6 +137,9 @@ public sealed partial class QuickCaptureItemViewModel : ObservableObject
         OnPropertyChanged(nameof(Body));
         OnPropertyChanged(nameof(Url));
         OnPropertyChanged(nameof(DisplayText));
+        OnPropertyChanged(nameof(HighlightStartIndex));
+        OnPropertyChanged(nameof(HighlightLength));
+        OnPropertyChanged(nameof(HighlightVisibility));
         OnPropertyChanged(nameof(ImagePath));
         OnPropertyChanged(nameof(ImagePreviewUri));
         OnPropertyChanged(nameof(IsPinned));
@@ -123,6 +153,37 @@ public sealed partial class QuickCaptureItemViewModel : ObservableObject
         OnPropertyChanged(nameof(MoveUpTooltip));
         OnPropertyChanged(nameof(MoveDownTooltip));
         OnPropertyChanged(nameof(UpdatedAtText));
+    }
+
+    public void UpdateSearchText(string? searchText)
+    {
+        string normalizedSearchText = NormalizeSearchText(searchText);
+        if (string.Equals(_searchText, normalizedSearchText, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        _searchText = normalizedSearchText;
+        OnPropertyChanged(nameof(HighlightStartIndex));
+        OnPropertyChanged(nameof(HighlightLength));
+        OnPropertyChanged(nameof(HighlightVisibility));
+    }
+
+    public void UpdateAppearance(double textSize, double iconSize)
+    {
+        if (Math.Abs(_textSize - textSize) < 0.01 &&
+            Math.Abs(_iconSize - iconSize) < 0.01)
+        {
+            return;
+        }
+
+        _textSize = textSize;
+        _iconSize = iconSize;
+        OnPropertyChanged(nameof(TextSize));
+        OnPropertyChanged(nameof(SecondaryTextSize));
+        OnPropertyChanged(nameof(IconSize));
+        OnPropertyChanged(nameof(TypeIconSize));
+        OnPropertyChanged(nameof(ActionIconSize));
     }
 
     public void UpdatePinnedSortState(bool showControls, bool canMoveUp, bool canMoveDown)
@@ -147,7 +208,24 @@ public sealed partial class QuickCaptureItemViewModel : ObservableObject
         var local = updatedAt.ToLocalTime();
         var now = DateTimeOffset.Now;
         return local.Date == now.Date
-            ? local.ToString("HH:mm")
-            : local.ToString("MM-dd");
+            ? local.ToString("HH:mm:ss")
+            : local.ToString("MM-dd HH:mm:ss");
+    }
+
+    private static string NormalizeSearchText(string? searchText)
+    {
+        return string.IsNullOrWhiteSpace(searchText)
+            ? string.Empty
+            : searchText.Trim();
+    }
+
+    private int GetHighlightStartIndex()
+    {
+        if (string.IsNullOrEmpty(_searchText))
+        {
+            return -1;
+        }
+
+        return DisplayText.IndexOf(_searchText, StringComparison.CurrentCultureIgnoreCase);
     }
 }

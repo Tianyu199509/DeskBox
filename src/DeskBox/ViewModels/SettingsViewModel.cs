@@ -46,6 +46,7 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
     private string _quickCaptureClipboardDiagnosticsText = string.Empty;
     private bool _canClearQuickCaptureImageCache;
     private bool _isRestoringDefaults;
+    private bool _isApplyingSettingsSnapshot;
 
     [ObservableProperty] private bool _autoStart;
     [ObservableProperty] private bool _doubleClickToOpen;
@@ -648,6 +649,7 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
 
         RefreshAccentPreview();
         RefreshQuickAccessState();
+        _settingsService.SettingsChanged += OnSettingsChanged;
         _themeService.AppearanceChanged += OnAppearanceChanged;
         _localizationService.LanguageChanged += OnLanguageChanged;
         if (App.Current?.QuickCaptureClipboardService is { } clipboardService)
@@ -830,6 +832,52 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
     private void OnLanguageChanged()
     {
         RefreshLocalizedProperties();
+    }
+
+    private void OnSettingsChanged()
+    {
+        if (App.UiDispatcherQueue is { } dispatcherQueue && !dispatcherQueue.HasThreadAccess)
+        {
+            dispatcherQueue.TryEnqueue(OnSettingsChanged);
+            return;
+        }
+
+        ApplySettingsSnapshot();
+    }
+
+    private void ApplySettingsSnapshot()
+    {
+        var settings = _settingsService.Settings;
+        bool quickCaptureEnabled = settings.QuickCaptureEnabled;
+        bool quickCaptureClipboardEnabled = settings.QuickCaptureClipboardEnabled;
+        bool quickCaptureImageClipboardEnabled = settings.QuickCaptureImageClipboardEnabled;
+
+        _isApplyingSettingsSnapshot = true;
+        try
+        {
+            if (QuickCaptureEnabled != quickCaptureEnabled)
+            {
+                QuickCaptureEnabled = quickCaptureEnabled;
+            }
+
+            if (QuickCaptureClipboardEnabled != quickCaptureClipboardEnabled)
+            {
+                QuickCaptureClipboardEnabled = quickCaptureClipboardEnabled;
+            }
+
+            if (QuickCaptureImageClipboardEnabled != quickCaptureImageClipboardEnabled)
+            {
+                QuickCaptureImageClipboardEnabled = quickCaptureImageClipboardEnabled;
+            }
+        }
+        finally
+        {
+            _isApplyingSettingsSnapshot = false;
+        }
+
+        OnPropertyChanged(nameof(QuickCaptureStatusText));
+        OnPropertyChanged(nameof(QuickCaptureDependencyStatusText));
+        RefreshQuickCaptureClipboardDiagnostics();
     }
 
     private void RefreshLocalizedProperties()
@@ -1037,7 +1085,7 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
 
     partial void OnQuickCaptureEnabledChanged(bool value)
     {
-        if (_isRestoringDefaults)
+        if (_isRestoringDefaults || _isApplyingSettingsSnapshot)
         {
             OnPropertyChanged(nameof(QuickCaptureStatusText));
             OnPropertyChanged(nameof(QuickCaptureDependencyStatusText));
@@ -1046,14 +1094,30 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
 
         _settingsService.Settings.QuickCaptureEnabled = value;
         _settingsService.SaveDebounced();
+        _ = SyncQuickCaptureEnabledAsync(value);
         OnPropertyChanged(nameof(QuickCaptureStatusText));
         OnPropertyChanged(nameof(QuickCaptureDependencyStatusText));
         RefreshQuickCaptureClipboardDiagnostics();
     }
 
+    private static async Task SyncQuickCaptureEnabledAsync(bool value)
+    {
+        try
+        {
+            if (App.Current?.WidgetManager is { } widgetManager)
+            {
+                await widgetManager.SetQuickCaptureEnabledAsync(value, reveal: value);
+            }
+        }
+        catch (Exception ex)
+        {
+            App.Log($"[SettingsViewModel] Failed to sync Quick Capture enabled state: {ex}");
+        }
+    }
+
     partial void OnQuickCaptureClipboardEnabledChanged(bool value)
     {
-        if (_isRestoringDefaults)
+        if (_isRestoringDefaults || _isApplyingSettingsSnapshot)
         {
             return;
         }
@@ -1065,7 +1129,7 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
 
     partial void OnQuickCaptureImageClipboardEnabledChanged(bool value)
     {
-        if (_isRestoringDefaults)
+        if (_isRestoringDefaults || _isApplyingSettingsSnapshot)
         {
             return;
         }
@@ -1308,6 +1372,7 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
             clipboardService.DiagnosticsChanged -= OnQuickCaptureClipboardDiagnosticsChanged;
         }
 
+        _settingsService.SettingsChanged -= OnSettingsChanged;
         _themeService.AppearanceChanged -= OnAppearanceChanged;
         _localizationService.LanguageChanged -= OnLanguageChanged;
     }

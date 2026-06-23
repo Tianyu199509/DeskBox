@@ -153,12 +153,29 @@ public sealed class QuickCaptureServiceTests : IDisposable
         var first = await service.AddItemAsync("first");
         var second = await service.AddItemAsync("second");
 
-        bool deleted = await service.DeleteItemAsync(second.Id);
+        var deleted = await service.DeleteItemAsync(second.Id);
         var data = await service.GetDataAsync();
 
-        Assert.True(deleted);
+        Assert.NotNull(deleted);
+        Assert.Equal(second.Id, deleted.Item.Id);
+        Assert.False(deleted.IsRecent);
         var item = Assert.Single(data.Items);
         Assert.Equal(first.Id, item.Id);
+    }
+
+    [Fact]
+    public async Task RestoreDeletedItemAsync_RestoresDeletedRecord()
+    {
+        var service = CreateService();
+        var first = await service.AddItemAsync("first");
+        var second = await service.AddItemAsync("second");
+
+        var deleted = await service.DeleteItemAsync(second.Id);
+        bool restored = await service.RestoreDeletedItemAsync(deleted);
+        var data = await service.GetDataAsync();
+
+        Assert.True(restored);
+        Assert.Equal(new[] { second.Id, first.Id }, data.Items.OrderBy(item => item.SortOrder).Select(item => item.Id));
     }
 
     [Fact]
@@ -419,10 +436,12 @@ public sealed class QuickCaptureServiceTests : IDisposable
         await service.AddItemAsync("record");
         var recent = await service.AddRecentClipboardItemAsync("recent", QuickCaptureService.DefaultRecentLimit);
 
-        bool deleted = await service.DeleteRecentItemAsync(recent!.Id);
+        var deleted = await service.DeleteRecentItemAsync(recent!.Id);
         var data = await service.GetDataAsync();
 
-        Assert.True(deleted);
+        Assert.NotNull(deleted);
+        Assert.Equal(recent.Id, deleted.Item.Id);
+        Assert.True(deleted.IsRecent);
         Assert.Single(data.Items);
         Assert.Empty(data.RecentItems);
     }

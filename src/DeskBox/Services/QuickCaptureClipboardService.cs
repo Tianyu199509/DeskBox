@@ -149,7 +149,7 @@ public sealed class QuickCaptureClipboardService : IDisposable
 
     private void Clipboard_ContentChanged(object? sender, object e)
     {
-        App.Log("[QuickCaptureClipboard] ContentChanged");
+        App.LogVerbose("[QuickCaptureClipboard] ContentChanged");
         if (App.UiDispatcherQueue is { } dispatcherQueue)
         {
             dispatcherQueue.TryEnqueue(() => _ = CaptureCurrentClipboardAsync());

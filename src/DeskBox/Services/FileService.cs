@@ -42,7 +42,9 @@ public sealed class FileService
         string directoryPath,
         bool hideShortcutArrowOverlay = false,
         bool showFileExtensions = false,
-        bool hideShortcutExtensionWhenShowingFileExtensions = true)
+        bool hideShortcutExtensionWhenShowingFileExtensions = true,
+        bool loadIcons = true,
+        bool loadFolderItemCounts = true)
     {
         using var perfScope = PerformanceLogger.Measure("FileService.EnumerateDirectory", $"path={directoryPath}");
         var items = new List<WidgetItem>();
@@ -52,7 +54,7 @@ public sealed class FileService
             return items;
         }
 
-        var entries = await Task.Run(() => EnumerateEntrySnapshots(directoryPath));
+        var entries = await Task.Run(() => EnumerateEntrySnapshots(directoryPath, loadFolderItemCounts));
 
         int sortOrder = 0;
         foreach (var entry in entries)
@@ -61,7 +63,8 @@ public sealed class FileService
                 entry,
                 hideShortcutArrowOverlay,
                 showFileExtensions,
-                hideShortcutExtensionWhenShowingFileExtensions);
+                hideShortcutExtensionWhenShowingFileExtensions,
+                loadIcons);
             item.SortOrder = sortOrder++;
             items.Add(item);
         }
@@ -76,7 +79,9 @@ public sealed class FileService
         string path,
         bool hideShortcutArrowOverlay = false,
         bool showFileExtensions = false,
-        bool hideShortcutExtensionWhenShowingFileExtensions = true)
+        bool hideShortcutExtensionWhenShowingFileExtensions = true,
+        bool loadIcon = true,
+        bool loadFolderItemCount = true)
     {
         using var perfScope = PerformanceLogger.Measure("FileService.CreateWidgetItem", $"path={path}");
         var item = new WidgetItem
@@ -128,19 +133,30 @@ public sealed class FileService
                 isFolder: true,
                 showFileExtensions,
                 hideShortcutExtensionWhenShowingFileExtensions);
-            try
+            item.IsFolderItemCountLoaded = loadFolderItemCount;
+            if (loadFolderItemCount)
             {
-                item.FolderItemCount = Directory.EnumerateFileSystemEntries(path)
-                    .Count(ShouldDisplayEntry);
-                item.LastModified = Directory.GetLastWriteTime(path);
+                try
+                {
+                    item.FolderItemCount = CountVisibleChildren(path);
+                    item.LastModified = Directory.GetLastWriteTime(path);
+                }
+                catch
+                {
+                    item.FolderItemCount = 0;
+                }
             }
-            catch
+            else
             {
-                item.FolderItemCount = 0;
+                TryApplyFolderLastModified(item, path);
             }
         }
 
-        item.Icon = await GetIconAsync(path, hideShortcutArrowOverlay);
+        if (loadIcon)
+        {
+            item.Icon = await GetIconAsync(path, hideShortcutArrowOverlay);
+        }
+
         return item;
     }
 
@@ -148,7 +164,8 @@ public sealed class FileService
         FileSystemEntrySnapshot entry,
         bool hideShortcutArrowOverlay = false,
         bool showFileExtensions = false,
-        bool hideShortcutExtensionWhenShowingFileExtensions = true)
+        bool hideShortcutExtensionWhenShowingFileExtensions = true,
+        bool loadIcon = true)
     {
         using var perfScope = PerformanceLogger.Measure("FileService.CreateWidgetItem", $"path={entry.Path}");
         var item = new WidgetItem
@@ -164,6 +181,7 @@ public sealed class FileService
             FileSize = entry.FileSize ?? 0,
             LastModified = entry.LastModified ?? default,
             FolderItemCount = entry.FolderItemCount ?? 0,
+            IsFolderItemCountLoaded = !entry.IsFolder || entry.FolderItemCount.HasValue,
             TargetPath = entry.Path
         };
 
@@ -176,7 +194,11 @@ public sealed class FileService
             }
         }
 
-        item.Icon = await GetIconAsync(entry.Path, hideShortcutArrowOverlay);
+        if (loadIcon)
+        {
+            item.Icon = await GetIconAsync(entry.Path, hideShortcutArrowOverlay);
+        }
+
         return item;
     }
 
@@ -184,7 +206,9 @@ public sealed class FileService
         string path,
         bool hideShortcutArrowOverlay = false,
         bool showFileExtensions = false,
-        bool hideShortcutExtensionWhenShowingFileExtensions = true)
+        bool hideShortcutExtensionWhenShowingFileExtensions = true,
+        bool loadIcon = true,
+        bool loadFolderItemCount = true)
     {
         if (!ShouldDisplayEntry(path))
         {
@@ -195,7 +219,9 @@ public sealed class FileService
             path,
             hideShortcutArrowOverlay,
             showFileExtensions,
-            hideShortcutExtensionWhenShowingFileExtensions);
+            hideShortcutExtensionWhenShowingFileExtensions,
+            loadIcon,
+            loadFolderItemCount);
     }
 
     public static bool ShouldDisplayEntry(string path)
@@ -227,17 +253,19 @@ public sealed class FileService
         }
     }
 
-    private static List<FileSystemEntrySnapshot> EnumerateEntrySnapshots(string directoryPath)
+    private static List<FileSystemEntrySnapshot> EnumerateEntrySnapshots(
+        string directoryPath,
+        bool loadFolderItemCounts)
     {
         return Directory.EnumerateFileSystemEntries(directoryPath)
-            .Select(TryCreateEntrySnapshot)
+            .Select(path => TryCreateEntrySnapshot(path, loadFolderItemCounts))
             .OfType<FileSystemEntrySnapshot>()
             .OrderBy(entry => !entry.IsFolder)
             .ThenBy(entry => entry.Name)
             .ToList();
     }
 
-    private static FileSystemEntrySnapshot? TryCreateEntrySnapshot(string path)
+    private static FileSystemEntrySnapshot? TryCreateEntrySnapshot(string path, bool loadFolderItemCount)
     {
         if (!ShouldDisplayEntry(path))
         {
@@ -269,13 +297,16 @@ public sealed class FileService
         {
             try
             {
-                folderItemCount = Directory.EnumerateFileSystemEntries(path)
-                    .Count(ShouldDisplayEntry);
+                if (loadFolderItemCount)
+                {
+                    folderItemCount = CountVisibleChildren(path);
+                }
+
                 lastModified = Directory.GetLastWriteTime(path);
             }
             catch
             {
-                folderItemCount = 0;
+                folderItemCount = loadFolderItemCount ? 0 : null;
             }
         }
 
@@ -313,6 +344,33 @@ public sealed class FileService
     public Task<BitmapImage?> GetIconAsync(string path, bool hideShortcutArrowOverlay = false)
     {
         return IconHelper.GetIconAsync(path, hideShortcutArrowOverlay);
+    }
+
+    public void ClearIconCache(string path, bool hideShortcutArrowOverlay = false)
+    {
+        IconHelper.ClearIconCache(path, hideShortcutArrowOverlay);
+    }
+
+    public Task<int> CountVisibleChildrenAsync(string folderPath)
+    {
+        return Task.Run(() => CountVisibleChildren(folderPath));
+    }
+
+    private static int CountVisibleChildren(string folderPath)
+    {
+        return Directory.EnumerateFileSystemEntries(folderPath)
+            .Count(ShouldDisplayEntry);
+    }
+
+    private static void TryApplyFolderLastModified(WidgetItem item, string path)
+    {
+        try
+        {
+            item.LastModified = Directory.GetLastWriteTime(path);
+        }
+        catch
+        {
+        }
     }
 
     public async Task<IReadOnlyList<IStorageItem>> GetStorageItemsAsync(IEnumerable<string> sourcePaths)

@@ -100,6 +100,27 @@ public sealed class WidgetManagerStorageCleanupTests : IDisposable
     }
 
     [Fact]
+    public async Task RestoreOrphanManagedStorageFoldersAsync_CreatesManagedWidgetsForExistingFolders()
+    {
+        string orphanFolder = Directory.CreateDirectory(Path.Combine(_storageRoot, "Orphan")).FullName;
+        File.WriteAllText(Path.Combine(orphanFolder, "note.txt"), "orphan");
+
+        int restored = await _widgetManager.RestoreOrphanManagedStorageFoldersAsync([orphanFolder]);
+
+        Assert.Equal(1, restored);
+        var widget = Assert.Single(_settingsService.Settings.Widgets);
+        Assert.Equal("Orphan", widget.Name);
+        Assert.Equal(WidgetKind.File, widget.WidgetKind);
+        Assert.True(widget.FollowsDefaultStoragePath);
+        Assert.Equal("Orphan", widget.ManagedFolderName);
+        Assert.Equal(orphanFolder, widget.MappedFolderPath);
+        Assert.True(widget.IsVisible);
+        Assert.False(widget.IsDisabled);
+        Assert.True(Directory.Exists(orphanFolder));
+        Assert.Empty(_widgetManager.GetOrphanManagedStorageFolders());
+    }
+
+    [Fact]
     public async Task RemoveWidgetAsync_MoveManagedFolderContentsToDesktop_RemovesConfigAndMovesFiles()
     {
         string managedFolder = Directory.CreateDirectory(Path.Combine(_storageRoot, "Managed")).FullName;

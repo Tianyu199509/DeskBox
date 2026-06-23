@@ -35,13 +35,14 @@ internal interface IDesktopWidgetWindow
     bool Visible { get; }
     void ApplyAppearancePreview();
     void PrepareTrayShowAnimation();
-    void ShowPreparedAtDesktopLayer();
-    void ShowPreparedRaisedFromTray();
+    void ShowPreparedAtDesktopLayer(bool persistVisibility = true);
+    void ShowPreparedRaisedFromTray(bool persistVisibility = true);
     void PlayTrayShowAnimation();
-    bool PrepareTrayHideAnimation();
+    bool PrepareTrayHideAnimation(bool persistVisibility = true);
     void PlayPreparedTrayHideAnimation();
     void ActivateRaisedFromTrayBatch();
     void EnsureRaisedFromTrayTopMost();
+    void ForceRestoreDesktopLayerFromManager();
     void RestoreDesktopLayerFromManager();
     void HideWindow();
 }
@@ -157,8 +158,36 @@ public sealed class WidgetManager
         _lastQuickCaptureEnabled = quickCaptureEnabled;
         if (!quickCaptureEnabled)
         {
-            HideLoadedQuickCaptureWidgets();
+            ApplyQuickCaptureEnabledState(enabled: false);
+            return;
         }
+
+        ApplyQuickCaptureEnabledState(enabled: true);
+    }
+
+    private void ApplyQuickCaptureEnabledState(bool enabled)
+    {
+        if (App.UiDispatcherQueue is { } dispatcherQueue && !dispatcherQueue.HasThreadAccess)
+        {
+            dispatcherQueue.TryEnqueue(() => ApplyQuickCaptureEnabledState(enabled));
+            return;
+        }
+
+        if (!enabled)
+        {
+            HideLoadedQuickCaptureWidgets();
+            return;
+        }
+
+        CreateOrShowQuickCaptureWidgetAsync(reveal: true).ContinueWith(
+            task =>
+            {
+                if (task.Exception is not null)
+                {
+                    App.Log($"[WidgetManager] Failed to show Quick Capture after enabling: {task.Exception}");
+                }
+            },
+            TaskContinuationOptions.OnlyOnFaulted);
     }
 
     private void ApplyAppearancePreview()
@@ -258,10 +287,11 @@ public sealed class WidgetManager
     public async Task<QuickCaptureWidgetWindow> CreateOrShowQuickCaptureWidgetAsync(bool reveal = true)
     {
         _settingsService.Settings.QuickCaptureEnabled = true;
+        _lastQuickCaptureEnabled = true;
+        RestoreDeletedQuickCaptureConfigs();
 
         var config = _settingsService.Settings.Widgets.FirstOrDefault(widget =>
-            widget.WidgetKind == WidgetKind.QuickCapture &&
-            !IsDeleted(widget.Id));
+            widget.WidgetKind == WidgetKind.QuickCapture);
 
         if (config is null)
         {
@@ -286,6 +316,45 @@ public sealed class WidgetManager
         }
 
         return window;
+    }
+
+    private void RestoreDeletedQuickCaptureConfigs()
+    {
+        var quickCaptureIds = _settingsService.Settings.Widgets
+            .Where(widget => widget.WidgetKind == WidgetKind.QuickCapture)
+            .Select(widget => widget.Id)
+            .ToHashSet(StringComparer.Ordinal);
+
+        if (quickCaptureIds.Count == 0)
+        {
+            return;
+        }
+
+        _deletedWidgetIds.RemoveWhere(quickCaptureIds.Contains);
+        _settingsService.Settings.DeletedWidgetIds.RemoveAll(quickCaptureIds.Contains);
+    }
+
+    public async Task SetQuickCaptureEnabledAsync(bool enabled, bool reveal = true)
+    {
+        _settingsService.Settings.QuickCaptureEnabled = enabled;
+        _lastQuickCaptureEnabled = enabled;
+
+        if (enabled)
+        {
+            await CreateOrShowQuickCaptureWidgetAsync(reveal);
+            return;
+        }
+
+        foreach (var config in _settingsService.Settings.Widgets.Where(widget =>
+                     widget.WidgetKind == WidgetKind.QuickCapture &&
+                     !IsDeleted(widget.Id)))
+        {
+            config.IsVisible = false;
+            config.IsDisabled = false;
+        }
+
+        HideLoadedQuickCaptureWidgets();
+        await _settingsService.SaveAsync();
     }
 
     /// <summary>
@@ -343,6 +412,7 @@ public sealed class WidgetManager
                 {
                     quickCaptureEntry.Window.PrepareTrayShowAnimation();
                     quickCaptureEntry.Window.ShowPreparedAtDesktopLayer();
+                    quickCaptureEntry.Window.CompleteTrayShowWithoutAnimation();
                 }
 
                 return true;
@@ -357,6 +427,7 @@ public sealed class WidgetManager
             {
                 quickCaptureWindow.PrepareTrayShowAnimation();
                 quickCaptureWindow.ShowPreparedAtDesktopLayer();
+                quickCaptureWindow.CompleteTrayShowWithoutAnimation();
             }
 
             return true;
@@ -377,6 +448,7 @@ public sealed class WidgetManager
             {
                 entry.Window.PrepareTrayShowAnimation();
                 entry.Window.ShowPreparedAtDesktopLayer();
+                entry.Window.CompleteTrayShowWithoutAnimation();
             }
 
             return true;
@@ -391,6 +463,7 @@ public sealed class WidgetManager
         {
             window.PrepareTrayShowAnimation();
             window.ShowPreparedAtDesktopLayer();
+            window.CompleteTrayShowWithoutAnimation();
         }
 
         return true;
@@ -403,8 +476,13 @@ public sealed class WidgetManager
     {
         using var perfScope = PerformanceLogger.Measure("WidgetManager.RaiseWidgetsFromTray");
         var now = DateTime.UtcNow;
+        double sinceLastToggleMs = (now - _lastTrayLayerToggleUtc).TotalMilliseconds;
+        App.LogVerbose(
+            $"[TrayBatch] Raise requested raised={_widgetsRaisedFromTray} toggling={_isTogglingWidgetsDesktopLayer} " +
+            $"sinceLastMs={sinceLastToggleMs:F0} loadedFile={_widgets.Count} loadedQuick={_quickCaptureWidgets.Count}");
         if (_isTogglingWidgetsDesktopLayer || now - _lastTrayLayerToggleUtc < TimeSpan.FromMilliseconds(320))
         {
+            App.LogVerbose("[TrayBatch] Raise ignored reason=busy-or-throttled");
             return null;
         }
 
@@ -412,34 +490,56 @@ public sealed class WidgetManager
         _lastTrayLayerToggleUtc = now;
         try
         {
-            var windowsToRaise = new List<IDesktopWidgetWindow>();
-            foreach (var widget in _settingsService.Settings.Widgets
-                         .Where(widget => widget.WidgetKind is WidgetKind.File or WidgetKind.QuickCapture &&
-                                          !widget.IsDisabled &&
-                                          !IsDeleted(widget.Id) &&
-                                          (widget.WidgetKind == WidgetKind.File || _settingsService.Settings.QuickCaptureEnabled))
-                         .ToList())
-            {
-                var window = await PrepareWidgetForBatchShowAsync(widget, showRaisedWhileInitializing: true);
-                if (window is null)
-                {
-                    continue;
-                }
+            var candidates = _settingsService.Settings.Widgets
+                .Where(widget => widget.WidgetKind is WidgetKind.File or WidgetKind.QuickCapture &&
+                                 !widget.IsDisabled &&
+                                 !IsDeleted(widget.Id) &&
+                                 (widget.WidgetKind == WidgetKind.File || _settingsService.Settings.QuickCaptureEnabled))
+                .ToList();
+            App.LogVerbose($"[TrayBatch] Raise candidates={candidates.Count} widgets={FormatWidgetList(candidates)}");
 
-                windowsToRaise.Add(window);
+            var windowsToRaise = new List<IDesktopWidgetWindow>();
+            foreach (var widget in candidates)
+            {
+                try
+                {
+                    var window = await PrepareWidgetForBatchShowAsync(widget);
+                    if (window is null)
+                    {
+                        continue;
+                    }
+
+                    windowsToRaise.Add(window);
+                }
+                catch (Exception ex)
+                {
+                    App.Log($"[WidgetManager] Failed to prepare widget for tray raise '{widget.Name}' ({widget.Id}): {ex}");
+                }
             }
 
+            App.LogVerbose($"[TrayBatch] Raise prepared={windowsToRaise.Count}/{candidates.Count}");
+            var shownWindows = new List<IDesktopWidgetWindow>();
             foreach (var window in windowsToRaise)
             {
-                window.ShowPreparedRaisedFromTray();
+                try
+                {
+                    window.ShowPreparedRaisedFromTray(persistVisibility: false);
+                    shownWindows.Add(window);
+                }
+                catch (Exception ex)
+                {
+                    App.Log($"[WidgetManager] Failed to show prepared widget from tray hwnd=0x{window.WindowHandle.ToInt64():X}: {ex}");
+                }
             }
 
             _suppressTrayLayerRestoreUntilUtc = DateTime.UtcNow.AddMilliseconds(500);
-            PlayPreparedTrayShowAnimations(windowsToRaise);
-            windowsToRaise.LastOrDefault()?.ActivateRaisedFromTrayBatch();
-            SetWidgetsRaisedFromTray(windowsToRaise.Count > 0);
-            QueueTrayRaiseTopMostConfirmation(windowsToRaise);
-            StartTrayLayerRestoreMonitor(windowsToRaise.Count > 0);
+            PlayPreparedTrayShowAnimations(shownWindows);
+            ActivateLastRaisedWindow(shownWindows);
+            SetWidgetsRaisedFromTray(shownWindows.Count > 0);
+            QueueTrayRaiseTopMostConfirmation(shownWindows);
+            StartTrayLayerRestoreMonitor(shownWindows.Count > 0);
+            SaveBatchVisibilityState();
+            App.LogVerbose($"[TrayBatch] Raise completed raised={_widgetsRaisedFromTray} prepared={windowsToRaise.Count} shown={shownWindows.Count}");
             return _widgetsRaisedFromTray;
         }
         finally
@@ -454,46 +554,88 @@ public sealed class WidgetManager
     public async Task SetAllWidgetsVisibleAsync(bool visible)
     {
         using var perfScope = PerformanceLogger.Measure("WidgetManager.SetAllWidgetsVisible", $"visible={visible}");
+        App.LogVerbose(
+            $"[TrayBatch] SetAllVisible requested visible={visible} raised={_widgetsRaisedFromTray} " +
+            $"loadedFile={_widgets.Count} loadedQuick={_quickCaptureWidgets.Count}");
         if (visible)
         {
-            var windowsToShow = new List<IDesktopWidgetWindow>();
-            foreach (var widget in _settingsService.Settings.Widgets
-                         .Where(widget => widget.WidgetKind is WidgetKind.File or WidgetKind.QuickCapture &&
-                                          !widget.IsDisabled &&
-                                          !IsDeleted(widget.Id) &&
-                                          (widget.WidgetKind == WidgetKind.File || _settingsService.Settings.QuickCaptureEnabled))
-                         .ToList())
-            {
-                var window = await PrepareWidgetForBatchShowAsync(widget);
-                if (window is null)
-                {
-                    continue;
-                }
+            var candidates = _settingsService.Settings.Widgets
+                .Where(widget => widget.WidgetKind is WidgetKind.File or WidgetKind.QuickCapture &&
+                                 !widget.IsDisabled &&
+                                 !IsDeleted(widget.Id) &&
+                                 (widget.WidgetKind == WidgetKind.File || _settingsService.Settings.QuickCaptureEnabled))
+                .ToList();
+            App.LogVerbose($"[TrayBatch] SetAllVisible candidates={candidates.Count} widgets={FormatWidgetList(candidates)}");
 
-                windowsToShow.Add(window);
+            var windowsToShow = new List<IDesktopWidgetWindow>();
+            foreach (var widget in candidates)
+            {
+                try
+                {
+                    var window = await PrepareWidgetForBatchShowAsync(widget);
+                    if (window is null)
+                    {
+                        continue;
+                    }
+
+                    windowsToShow.Add(window);
+                }
+                catch (Exception ex)
+                {
+                    App.Log($"[WidgetManager] Failed to prepare widget for visible state '{widget.Name}' ({widget.Id}): {ex}");
+                }
             }
 
+            App.LogVerbose($"[TrayBatch] SetAllVisible preparedShow={windowsToShow.Count}/{candidates.Count}");
+            var shownWindows = new List<IDesktopWidgetWindow>();
             foreach (var window in windowsToShow)
             {
-                window.ShowPreparedAtDesktopLayer();
+                try
+                {
+                    window.ShowPreparedAtDesktopLayer(persistVisibility: false);
+                    shownWindows.Add(window);
+                }
+                catch (Exception ex)
+                {
+                    App.Log($"[WidgetManager] Failed to show prepared widget at desktop layer hwnd=0x{window.WindowHandle.ToInt64():X}: {ex}");
+                }
             }
 
-            PlayPreparedTrayShowAnimations(windowsToShow);
+            PlayPreparedTrayShowAnimations(shownWindows);
+            SaveBatchVisibilityState();
+            App.LogVerbose($"[TrayBatch] SetAllVisible completed visible=true prepared={windowsToShow.Count} shown={shownWindows.Count}");
             return;
         }
 
-        var windowsToHide = _widgets.Values
+        var hideCandidates = _widgets.Values
             .Select(entry => entry.Window)
             .Cast<IDesktopWidgetWindow>()
             .Concat(_quickCaptureWidgets.Values.Select(entry => (IDesktopWidgetWindow)entry.Window))
-            .Where(window => window.PrepareTrayHideAnimation())
             .ToList();
+        var windowsToHide = new List<IDesktopWidgetWindow>();
+        foreach (var window in hideCandidates)
+        {
+            try
+            {
+                if (window.PrepareTrayHideAnimation(persistVisibility: false))
+                {
+                    windowsToHide.Add(window);
+                }
+            }
+            catch (Exception ex)
+            {
+                App.Log($"[WidgetManager] Failed to prepare widget hide hwnd=0x{window.WindowHandle.ToInt64():X}: {ex}");
+            }
+        }
 
+        App.LogVerbose($"[TrayBatch] SetAllVisible preparedHide={windowsToHide.Count}");
         PlayPreparedTrayHideAnimations(windowsToHide);
 
         SetWidgetsRaisedFromTray(false);
         _trayRaiseBatchGeneration++;
         StopTrayLayerRestoreMonitor();
+        SaveBatchVisibilityState();
+        App.LogVerbose($"[TrayBatch] SetAllVisible completed visible=false prepared={windowsToHide.Count}");
     }
 
     /// <summary>
@@ -622,9 +764,15 @@ public sealed class WidgetManager
         WidgetConfig config,
         bool showRaisedWhileInitializing = false)
     {
-        if (IsDeleted(config.Id) ||
-            config.IsDisabled)
+        if (IsDeleted(config.Id))
         {
+            App.LogVerbose($"[TrayBatch] Prepare skipped reason=deleted widget={FormatWidget(config)}");
+            return null;
+        }
+
+        if (config.IsDisabled)
+        {
+            App.LogVerbose($"[TrayBatch] Prepare skipped reason=disabled widget={FormatWidget(config)}");
             return null;
         }
 
@@ -632,39 +780,43 @@ public sealed class WidgetManager
         {
             if (!_settingsService.Settings.QuickCaptureEnabled)
             {
+                App.LogVerbose($"[TrayBatch] Prepare skipped reason=quick-capture-disabled widget={FormatWidget(config)}");
                 return null;
             }
 
             if (_quickCaptureWidgets.TryGetValue(config.Id, out var existingQuickCapture))
             {
+                App.LogVerbose($"[TrayBatch] Prepare useLoaded widget={FormatWidget(config)} hwnd=0x{existingQuickCapture.Window.WindowHandle.ToInt64():X}");
                 existingQuickCapture.Window.PrepareTrayShowAnimation();
                 return existingQuickCapture.Window;
             }
 
+            App.LogVerbose($"[TrayBatch] Prepare createQuick widget={FormatWidget(config)} raisedInit={showRaisedWhileInitializing}");
             var quickCaptureWindow = await CreateQuickCaptureWidgetFromConfigAsync(
                 config,
                 keepPreparedForAnimation: true,
                 showRaisedWhileInitializing: showRaisedWhileInitializing);
-            quickCaptureWindow.PrepareTrayShowAnimation();
             return quickCaptureWindow;
         }
 
         if (config.WidgetKind != WidgetKind.File)
         {
+            App.LogVerbose($"[TrayBatch] Prepare skipped reason=unsupported-kind widget={FormatWidget(config)}");
             return null;
         }
 
         if (_widgets.TryGetValue(config.Id, out var existing))
         {
+            App.LogVerbose($"[TrayBatch] Prepare useLoaded widget={FormatWidget(config)} hwnd=0x{existing.Window.WindowHandle.ToInt64():X}");
             existing.Window.PrepareTrayShowAnimation();
             return existing.Window;
         }
 
+        App.LogVerbose($"[TrayBatch] Prepare createFile widget={FormatWidget(config)} raisedInit={showRaisedWhileInitializing}");
         var window = await CreateWidgetFromConfigAsync(
             config,
             keepPreparedForAnimation: true,
             showRaisedWhileInitializing: showRaisedWhileInitializing);
-        window.PrepareTrayShowAnimation();
         return window;
     }
 
@@ -672,7 +824,14 @@ public sealed class WidgetManager
     {
         foreach (var window in windows)
         {
-            window.PlayTrayShowAnimation();
+            try
+            {
+                window.PlayTrayShowAnimation();
+            }
+            catch (Exception ex)
+            {
+                App.Log($"[WidgetManager] Failed to play widget show animation hwnd=0x{window.WindowHandle.ToInt64():X}: {ex}");
+            }
         }
     }
 
@@ -680,7 +839,31 @@ public sealed class WidgetManager
     {
         foreach (var window in windows)
         {
-            window.PlayPreparedTrayHideAnimation();
+            try
+            {
+                window.PlayPreparedTrayHideAnimation();
+            }
+            catch (Exception ex)
+            {
+                App.Log($"[WidgetManager] Failed to play widget hide animation hwnd=0x{window.WindowHandle.ToInt64():X}: {ex}");
+            }
+        }
+    }
+
+    private static void ActivateLastRaisedWindow(IReadOnlyList<IDesktopWidgetWindow> windows)
+    {
+        if (windows.LastOrDefault() is not { } window)
+        {
+            return;
+        }
+
+        try
+        {
+            window.ActivateRaisedFromTrayBatch();
+        }
+        catch (Exception ex)
+        {
+            App.Log($"[WidgetManager] Failed to activate raised widget hwnd=0x{window.WindowHandle.ToInt64():X}: {ex}");
         }
     }
 
@@ -693,8 +876,8 @@ public sealed class WidgetManager
 
         long generation = ++_trayRaiseBatchGeneration;
         ConfirmTrayRaiseTopMost(windows, generation);
-        QueueTrayRaiseTopMostConfirmation(windows, generation, TimeSpan.FromMilliseconds(80));
-        QueueTrayRaiseTopMostConfirmation(windows, generation, TimeSpan.FromMilliseconds(180));
+        QueueTrayRaiseTopMostConfirmation(windows, generation, TimeSpan.FromMilliseconds(140));
+        QueueTrayRaiseTopMostConfirmation(windows, generation, TimeSpan.FromMilliseconds(320));
     }
 
     private void QueueTrayRaiseTopMostConfirmation(
@@ -718,8 +901,20 @@ public sealed class WidgetManager
 
         foreach (var window in windows)
         {
-            window.EnsureRaisedFromTrayTopMost();
+            try
+            {
+                window.EnsureRaisedFromTrayTopMost();
+            }
+            catch (Exception ex)
+            {
+                App.Log($"[WidgetManager] Failed to confirm raised widget topmost hwnd=0x{window.WindowHandle.ToInt64():X}: {ex}");
+            }
         }
+    }
+
+    private void SaveBatchVisibilityState()
+    {
+        _settingsService.SaveDebounced(notifySubscribers: false);
     }
 
     public bool CanCleanupManagedStorageForWidget(string widgetId)
@@ -768,6 +963,56 @@ public sealed class WidgetManager
         await _fileService.DeleteEntryAsync(normalizedPath, recycle: _recycleManagedFolderDeletes);
     }
 
+    public async Task<int> RestoreOrphanManagedStorageFoldersAsync(IEnumerable<string> folderPaths)
+    {
+        int restoredCount = 0;
+        bool canCreateWindow = CanCreateWidgetWindowOnCurrentThread();
+        foreach (var folderPath in folderPaths)
+        {
+            string normalizedPath = ValidateOrphanManagedStorageFolderPath(folderPath);
+            if (!Directory.Exists(normalizedPath))
+            {
+                continue;
+            }
+
+            string folderName = Path.GetFileName(normalizedPath);
+            var config = new WidgetConfig
+            {
+                Name = string.IsNullOrWhiteSpace(folderName)
+                    ? _localizationService.T("Widget.DefaultNameShort")
+                    : folderName,
+                WidgetKind = WidgetKind.File,
+                MappedFolderPath = normalizedPath,
+                FollowsDefaultStoragePath = true,
+                ManagedFolderName = folderName,
+                Width = _settingsService.Settings.DefaultWidgetWidth,
+                Height = _settingsService.Settings.DefaultWidgetHeight,
+                IsVisible = true,
+                IsDisabled = false
+            };
+
+            _settingsService.Settings.Widgets.Add(config);
+            if (canCreateWindow)
+            {
+                await CreateWidgetFromConfigAsync(config, revealAfterCreate: true);
+            }
+            restoredCount++;
+            App.Log($"[WidgetManager] Restored orphan managed storage folder as widget: {normalizedPath} -> {config.Id}");
+        }
+
+        if (restoredCount > 0)
+        {
+            await _settingsService.SaveAsync();
+        }
+
+        return restoredCount;
+    }
+
+    private static bool CanCreateWidgetWindowOnCurrentThread()
+    {
+        return App.UiDispatcherQueue is not null;
+    }
+
     /// <summary>
     /// Hide a widget if it is currently loaded.
     /// </summary>
@@ -792,20 +1037,62 @@ public sealed class WidgetManager
 
     public void RestoreRaisedWidgetsToDesktopLayer()
     {
-        if (_isTogglingWidgetsDesktopLayer ||
-            DateTime.UtcNow < _suppressTrayLayerRestoreUntilUtc)
+        RestoreRaisedWidgetsToDesktopLayer(force: false);
+    }
+
+    public void ForceRestoreRaisedWidgetsToDesktopLayer()
+    {
+        RestoreRaisedWidgetsToDesktopLayer(force: true);
+    }
+
+    private void RestoreRaisedWidgetsToDesktopLayer(bool force)
+    {
+        if (!force &&
+            (_isTogglingWidgetsDesktopLayer ||
+             DateTime.UtcNow < _suppressTrayLayerRestoreUntilUtc))
         {
+            App.LogVerbose($"[TrayBatch] RestoreDesktopLayer skipped force={force} reason=busy-or-suppressed");
             return;
         }
 
+        App.LogVerbose(
+            $"[TrayBatch] RestoreDesktopLayer force={force} file={_widgets.Count} quick={_quickCaptureWidgets.Count}");
         foreach (var (_, (window, _)) in _widgets.ToList())
         {
-            window.RestoreDesktopLayerFromManager();
+            try
+            {
+                if (force)
+                {
+                    window.ForceRestoreDesktopLayerFromManager();
+                }
+                else
+                {
+                    window.RestoreDesktopLayerFromManager();
+                }
+            }
+            catch (Exception ex)
+            {
+                App.Log($"[WidgetManager] Failed to restore file widget desktop layer hwnd=0x{window.WindowHandle.ToInt64():X}: {ex}");
+            }
         }
 
         foreach (var (_, (window, _)) in _quickCaptureWidgets.ToList())
         {
-            window.RestoreDesktopLayerFromManager();
+            try
+            {
+                if (force)
+                {
+                    window.ForceRestoreDesktopLayerFromManager();
+                }
+                else
+                {
+                    window.RestoreDesktopLayerFromManager();
+                }
+            }
+            catch (Exception ex)
+            {
+                App.Log($"[WidgetManager] Failed to restore quick capture widget desktop layer hwnd=0x{window.WindowHandle.ToInt64():X}: {ex}");
+            }
         }
 
         SetWidgetsRaisedFromTray(false);
@@ -817,6 +1104,7 @@ public sealed class WidgetManager
     {
         if (!hasRaisedWidgets)
         {
+            App.LogVerbose("[TrayBatch] RestoreMonitor not-started reason=no-raised-windows");
             StopTrayLayerRestoreMonitor();
             return;
         }
@@ -825,10 +1113,11 @@ public sealed class WidgetManager
 
         _trayLayerRestoreTimer ??= App.UiDispatcherQueue.CreateTimer();
         _trayLayerRestoreTimer.Stop();
-        _trayLayerRestoreTimer.Interval = TimeSpan.FromMilliseconds(80);
+        _trayLayerRestoreTimer.Interval = TimeSpan.FromMilliseconds(140);
         _trayLayerRestoreTimer.Tick -= TrayLayerRestoreTimer_Tick;
         _trayLayerRestoreTimer.Tick += TrayLayerRestoreTimer_Tick;
         _trayLayerRestoreTimer.Start();
+        App.LogVerbose("[TrayBatch] RestoreMonitor started intervalMs=140");
     }
 
     private void StopTrayLayerRestoreMonitor()
@@ -840,6 +1129,7 @@ public sealed class WidgetManager
 
         _trayLayerRestoreTimer.Stop();
         _trayLayerRestoreTimer.Tick -= TrayLayerRestoreTimer_Tick;
+        App.LogVerbose("[TrayBatch] RestoreMonitor stopped");
     }
 
     private void TrayLayerRestoreTimer_Tick(DispatcherQueueTimer sender, object args)
@@ -850,14 +1140,19 @@ public sealed class WidgetManager
             return;
         }
 
+        Win32Helper.POINT? cursor = TryGetCursorPosition();
         if (_isTogglingWidgetsDesktopLayer ||
             DateTime.UtcNow < _suppressTrayLayerRestoreUntilUtc)
         {
             return;
         }
 
-        Win32Helper.POINT? cursor = TryGetCursorPosition();
         if (!Win32Helper.HasMouseButtonActivity())
+        {
+            return;
+        }
+
+        if (IsForegroundDeskBoxWindow())
         {
             return;
         }
@@ -868,6 +1163,7 @@ public sealed class WidgetManager
             return;
         }
 
+        App.LogVerbose($"[TrayBatch] RestoreMonitor restoring reason=pointer-left cursor={FormatPoint(cursor)}");
         RestoreRaisedWidgetsToDesktopLayer();
     }
 
@@ -880,6 +1176,13 @@ public sealed class WidgetManager
 
         IntPtr pointerWindow = Win32Helper.WindowFromPoint(cursor.Value);
         return App.Current.IsDeskBoxWindow(pointerWindow);
+    }
+
+    private static bool IsForegroundDeskBoxWindow()
+    {
+        IntPtr foregroundWindow = Win32Helper.GetForegroundWindow();
+        return foregroundWindow != IntPtr.Zero &&
+               App.Current.IsDeskBoxWindow(foregroundWindow);
     }
 
     private static bool IsPointerOverTaskbar(Win32Helper.POINT? cursor)
@@ -942,8 +1245,33 @@ public sealed class WidgetManager
             return;
         }
 
+        App.LogVerbose($"[TrayBatch] RaisedState changed { _widgetsRaisedFromTray } -> {raised}");
         _widgetsRaisedFromTray = raised;
         TrayLayerStateChanged?.Invoke(raised);
+    }
+
+    private static string FormatWidgetList(IReadOnlyList<WidgetConfig> widgets)
+    {
+        return widgets.Count == 0
+            ? "[]"
+            : "[" + string.Join(", ", widgets.Select(FormatWidget)) + "]";
+    }
+
+    private static string FormatWidget(WidgetConfig widget)
+    {
+        return $"{widget.Name}#{ShortId(widget.Id)} kind={widget.WidgetKind} visible={widget.IsVisible} disabled={widget.IsDisabled}";
+    }
+
+    private static string ShortId(string id)
+    {
+        return string.IsNullOrWhiteSpace(id)
+            ? "none"
+            : id.Length <= 8 ? id : id[..8];
+    }
+
+    private static string FormatPoint(Win32Helper.POINT? point)
+    {
+        return point.HasValue ? $"{point.Value.X},{point.Value.Y}" : "unknown";
     }
 
     public async Task NotifyItemsMovedOutAsync(string widgetId, IEnumerable<string> sourcePaths)

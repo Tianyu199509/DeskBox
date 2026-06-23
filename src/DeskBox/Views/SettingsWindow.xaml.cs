@@ -190,6 +190,7 @@ public sealed partial class SettingsWindow : Window
     private void SettingsNavigationView_BackRequested(NavigationView sender, NavigationViewBackRequestedEventArgs args)
     {
         ShowSettingsSection("FeatureWidgets", isNestedSection: false);
+        SettingsNavigationView.SelectedItem = FeatureWidgetsNavItem;
     }
 
     private void ShowSettingsSection(string sectionTag, bool isNestedSection = false)
@@ -842,17 +843,6 @@ public sealed partial class SettingsWindow : Window
         ShowSettingsSection("QuickCaptureSettings", isNestedSection: true);
     }
 
-    private async void ShowQuickCaptureWidgetButton_Click(object sender, RoutedEventArgs e)
-    {
-        if (App.Current.WidgetManager is null)
-        {
-            return;
-        }
-
-        ViewModel.QuickCaptureEnabled = true;
-        await App.Current.WidgetManager.CreateOrShowQuickCaptureWidgetAsync();
-    }
-
     private async void ClearQuickCaptureDataButton_Click(object sender, RoutedEventArgs e)
     {
         if (SettingsRoot.XamlRoot is null)
@@ -1092,6 +1082,11 @@ public sealed partial class SettingsWindow : Window
         };
         optionBox.Items.Add(new TextBlock
         {
+            Text = _localizationService.T("Settings.Dialog.CleanupOptionRestore"),
+            TextWrapping = TextWrapping.Wrap
+        });
+        optionBox.Items.Add(new TextBlock
+        {
             Text = _localizationService.T("Settings.Dialog.CleanupOptionOpen"),
             TextWrapping = TextWrapping.Wrap
         });
@@ -1143,7 +1138,20 @@ public sealed partial class SettingsWindow : Window
         {
             switch (optionBox.SelectedIndex)
             {
+                case 0:
+                    int restoredCount = await App.Current.WidgetManager.RestoreOrphanManagedStorageFoldersAsync(
+                        candidates.Select(candidate => candidate.Path));
+                    await ShowInfoDialogAsync(
+                        _localizationService.T("Settings.Dialog.CleanupComplete"),
+                        _localizationService.Format("Settings.Dialog.CleanupRestored", restoredCount));
+                    break;
+
                 case 1:
+                    Directory.CreateDirectory(ViewModel.ManagedStorageRootPath);
+                    Win32Helper.OpenFile(ViewModel.ManagedStorageRootPath);
+                    break;
+
+                case 2:
                     foreach (var candidate in candidates)
                     {
                         await App.Current.WidgetManager.MoveOrphanManagedStorageFolderContentsToDesktopAsync(candidate.Path);
@@ -1153,7 +1161,7 @@ public sealed partial class SettingsWindow : Window
                         _localizationService.T("Settings.Dialog.CleanupMoved"));
                     break;
 
-                case 2:
+                case 3:
                     foreach (var candidate in candidates)
                     {
                         await App.Current.WidgetManager.DeleteOrphanManagedStorageFolderAsync(candidate.Path);
@@ -1161,11 +1169,6 @@ public sealed partial class SettingsWindow : Window
                     await ShowInfoDialogAsync(
                         _localizationService.T("Settings.Dialog.CleanupComplete"),
                         _localizationService.T("Settings.Dialog.CleanupDeleted"));
-                    break;
-
-                default:
-                    Directory.CreateDirectory(ViewModel.ManagedStorageRootPath);
-                    Win32Helper.OpenFile(ViewModel.ManagedStorageRootPath);
                     break;
             }
         }

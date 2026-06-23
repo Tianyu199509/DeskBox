@@ -340,18 +340,14 @@ public sealed class SettingsService
             changed = true;
         }
 
-        double normalizedIconSize = double.IsFinite(settings.IconSize)
-            ? Math.Clamp(settings.IconSize, MinIconSize, MaxIconSize)
-            : DefaultIconSize;
+        double normalizedIconSize = NormalizeIconSize(settings.IconSize);
         if (Math.Abs(settings.IconSize - normalizedIconSize) > 0.0001)
         {
             settings.IconSize = normalizedIconSize;
             changed = true;
         }
 
-        double normalizedTextSize = double.IsFinite(settings.TextSize)
-            ? Math.Clamp(settings.TextSize, MinTextSize, MaxTextSize)
-            : DefaultTextSize;
+        double normalizedTextSize = NormalizeTextSize(settings.TextSize);
         if (Math.Abs(settings.TextSize - normalizedTextSize) > 0.0001)
         {
             settings.TextSize = normalizedTextSize;
@@ -448,6 +444,20 @@ public sealed class SettingsService
         return double.IsFinite(value)
             ? Math.Clamp(value, min, max)
             : defaultValue;
+    }
+
+    public static double NormalizeIconSize(double value)
+    {
+        return double.IsFinite(value)
+            ? Math.Clamp(value, MinIconSize, MaxIconSize)
+            : DefaultIconSize;
+    }
+
+    public static double NormalizeTextSize(double value)
+    {
+        return double.IsFinite(value)
+            ? Math.Clamp(value, MinTextSize, MaxTextSize)
+            : DefaultTextSize;
     }
 
     private static bool NormalizeAppearanceSettings(AppSettings settings)

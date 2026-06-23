@@ -13,6 +13,10 @@ public sealed record QuickCaptureImageCacheCleanupResult(
     int DeletedFileCount,
     long DeletedBytes);
 
+public sealed record QuickCaptureDeletedItemSnapshot(
+    QuickCaptureItem Item,
+    bool IsRecent);
+
 public sealed class QuickCaptureService
 {
     public const int DefaultRecentLimit = 30;
@@ -415,26 +419,29 @@ public sealed class QuickCaptureService
         }
     }
 
-    public async Task<bool> DeleteItemAsync(string itemId)
+    public async Task<QuickCaptureDeletedItemSnapshot?> DeleteItemAsync(string itemId)
     {
         if (string.IsNullOrWhiteSpace(itemId))
         {
-            return false;
+            return null;
         }
 
         await _gate.WaitAsync();
         try
         {
             await EnsureLoadedCoreAsync();
-            int removed = _data!.Items.RemoveAll(entry => string.Equals(entry.Id, itemId, StringComparison.Ordinal));
-            if (removed == 0)
+            var item = _data!.Items.FirstOrDefault(entry => string.Equals(entry.Id, itemId, StringComparison.Ordinal));
+            if (item is null)
             {
-                return false;
+                return null;
             }
 
+            var deletedItem = Clone(item);
+            _data.Items.Remove(item);
+            NormalizeSortOrders(_data.Items);
+            NormalizePinnedSortOrders(_data.Items);
             await SaveCoreAsync();
-            CleanupUnusedImageCacheCore();
-            return true;
+            return new QuickCaptureDeletedItemSnapshot(deletedItem, IsRecent: false);
         }
         finally
         {
@@ -442,9 +449,38 @@ public sealed class QuickCaptureService
         }
     }
 
-    public async Task<bool> DeleteRecentItemAsync(string itemId)
+    public async Task<QuickCaptureDeletedItemSnapshot?> DeleteRecentItemAsync(string itemId)
     {
         if (string.IsNullOrWhiteSpace(itemId))
+        {
+            return null;
+        }
+
+        await _gate.WaitAsync();
+        try
+        {
+            await EnsureLoadedCoreAsync();
+            var item = _data!.RecentItems.FirstOrDefault(entry => string.Equals(entry.Id, itemId, StringComparison.Ordinal));
+            if (item is null)
+            {
+                return null;
+            }
+
+            var deletedItem = Clone(item);
+            _data.RecentItems.Remove(item);
+            NormalizeSortOrders(_data.RecentItems);
+            await SaveCoreAsync();
+            return new QuickCaptureDeletedItemSnapshot(deletedItem, IsRecent: true);
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    public async Task<bool> RestoreDeletedItemAsync(QuickCaptureDeletedItemSnapshot? snapshot)
+    {
+        if (snapshot is null)
         {
             return false;
         }
@@ -453,15 +489,23 @@ public sealed class QuickCaptureService
         try
         {
             await EnsureLoadedCoreAsync();
-            int removed = _data!.RecentItems.RemoveAll(entry => string.Equals(entry.Id, itemId, StringComparison.Ordinal));
-            if (removed == 0)
+            var targetItems = snapshot.IsRecent ? _data!.RecentItems : _data!.Items;
+            if (targetItems.Any(item => string.Equals(item.Id, snapshot.Item.Id, StringComparison.Ordinal)))
             {
                 return false;
             }
 
-            NormalizeSortOrders(_data.RecentItems);
+            var item = Clone(snapshot.Item);
+            int insertIndex = Math.Clamp(item.SortOrder, 0, targetItems.Count);
+            targetItems.Insert(insertIndex, item);
+
+            NormalizeSortOrders(targetItems);
+            if (!snapshot.IsRecent)
+            {
+                NormalizePinnedSortOrders(_data.Items);
+            }
+
             await SaveCoreAsync();
-            CleanupUnusedImageCacheCore();
             return true;
         }
         finally
@@ -828,7 +872,7 @@ public sealed class QuickCaptureService
         }
 
         string extension = NormalizeImageExtension(sourceImagePath);
-        return $"{prefix} {timestamp.ToLocalTime():yyyy-MM-dd HHmm}{extension}";
+        return $"{prefix} {timestamp.ToLocalTime():yyyy-MM-dd HH-mm-ss}{extension}";
     }
 
     private void CleanupOldExportFiles()

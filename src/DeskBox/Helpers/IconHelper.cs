@@ -78,6 +78,24 @@ public static class IconHelper
             _ => LoadBitmapImageAsync(dispatcher, iconSource, cacheKey));
     }
 
+    public static void ClearIconCache(string path, bool hideShortcutArrowOverlay = false)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return;
+        }
+
+        IconSource iconSource = ResolveIconSource(path, hideShortcutArrowOverlay);
+        if (string.IsNullOrWhiteSpace(iconSource.Path))
+        {
+            return;
+        }
+
+        string cacheKey = BuildCacheKey(path, iconSource);
+        s_bitmapImageCache.TryRemove(cacheKey, out _);
+        s_iconBytesCache.TryRemove(cacheKey, out _);
+    }
+
     private static async Task<BitmapImage?> LoadBitmapImageAsync(
         Microsoft.UI.Dispatching.DispatcherQueue dispatcher,
         IconSource iconSource,
@@ -91,7 +109,10 @@ public static class IconHelper
                 if (!s_iconBytesCache.TryGetValue(iconBytesCacheKey, out bytes))
                 {
                     bytes = await Task.Run(() => LoadIconBytes(iconSource));
-                    s_iconBytesCache[iconBytesCacheKey] = bytes;
+                    if (bytes is { Length: > 0 })
+                    {
+                        s_iconBytesCache[iconBytesCacheKey] = bytes;
+                    }
                 }
             }
             finally
@@ -100,7 +121,14 @@ public static class IconHelper
             }
         }
 
-        return await CreateBitmapImageAsync(dispatcher, bytes);
+        var image = await CreateBitmapImageAsync(dispatcher, bytes);
+        if (image is null)
+        {
+            s_bitmapImageCache.TryRemove(iconBytesCacheKey, out _);
+            s_iconBytesCache.TryRemove(iconBytesCacheKey, out _);
+        }
+
+        return image;
     }
 
     private static byte[]? LoadIconBytes(IconSource iconSource)
