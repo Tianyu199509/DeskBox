@@ -188,15 +188,44 @@ public sealed partial class SettingsWindow : Window
 
     private void SettingsNavigationView_BackRequested(NavigationView sender, NavigationViewBackRequestedEventArgs args)
     {
-        ShowSettingsSection("FeatureWidgets", isNestedSection: false);
-        SettingsNavigationView.SelectedItem = FeatureWidgetsNavItem;
+        switch (_currentSettingsSection)
+        {
+            case "AppearanceDetail":
+                ShowSettingsSection("Appearance", isNestedSection: false);
+                SettingsNavigationView.SelectedItem = FindNavItemByTag("Appearance");
+                break;
+            case "ManagedStorage":
+                ShowSettingsSection("Advanced", isNestedSection: false);
+                SettingsNavigationView.SelectedItem = FindNavItemByTag("Advanced");
+                break;
+            case "QuickCaptureSettings":
+                ShowSettingsSection("FeatureWidgets", isNestedSection: false);
+                SettingsNavigationView.SelectedItem = FeatureWidgetsNavItem;
+                break;
+            default:
+                ShowSettingsSection("FeatureWidgets", isNestedSection: false);
+                SettingsNavigationView.SelectedItem = FeatureWidgetsNavItem;
+                break;
+        }
+    }
+
+    private NavigationViewItem? FindNavItemByTag(string tag)
+    {
+        foreach (var item in SettingsNavigationView.MenuItems)
+        {
+            if (item is NavigationViewItem navItem && navItem.Tag is string navTag && navTag == tag)
+            {
+                return navItem;
+            }
+        }
+        return null;
     }
 
     private void ShowSettingsSection(string sectionTag, bool isNestedSection = false)
     {
         _currentSettingsSection = sectionTag;
         AppearanceSection.Visibility = sectionTag == "Appearance" ? Visibility.Visible : Visibility.Collapsed;
-        WidgetLayoutSection.Visibility = sectionTag == "WidgetLayout" ? Visibility.Visible : Visibility.Collapsed;
+        AppearanceDetailSection.Visibility = sectionTag == "AppearanceDetail" ? Visibility.Visible : Visibility.Collapsed;
         FeatureWidgetsSection.Visibility = sectionTag == "FeatureWidgets" ? Visibility.Visible : Visibility.Collapsed;
         QuickCaptureSettingsSection.Visibility = sectionTag == "QuickCaptureSettings" ? Visibility.Visible : Visibility.Collapsed;
         if (sectionTag == "QuickCaptureSettings")
@@ -204,18 +233,18 @@ public sealed partial class SettingsWindow : Window
             ViewModel.RefreshQuickCaptureClipboardDiagnostics();
             _ = ViewModel.RefreshQuickCaptureImageCacheInfoAsync();
         }
-        AnimationSection.Visibility = sectionTag == "Animation" ? Visibility.Visible : Visibility.Collapsed;
-        StorageSection.Visibility = sectionTag == "Storage" ? Visibility.Visible : Visibility.Collapsed;
+        AdvancedSection.Visibility = sectionTag == "Advanced" ? Visibility.Visible : Visibility.Collapsed;
         ManagedStorageSection.Visibility = sectionTag == "ManagedStorage" ? Visibility.Visible : Visibility.Collapsed;
         if (sectionTag == "ManagedStorage")
         {
             RefreshManagedStorageFolderList();
         }
-        InteractionSection.Visibility = sectionTag == "Interaction" ? Visibility.Visible : Visibility.Collapsed;
         GeneralSection.Visibility = sectionTag == "General" ? Visibility.Visible : Visibility.Collapsed;
         MaintenanceSection.Visibility = sectionTag == "Maintenance" ? Visibility.Visible : Visibility.Collapsed;
         AboutSection.Visibility = sectionTag == "About" ? Visibility.Visible : Visibility.Collapsed;
-        SettingsNavigationView.IsBackButtonVisible = NavigationViewBackButtonVisible.Collapsed;
+        SettingsNavigationView.IsBackButtonVisible = isNestedSection
+            ? NavigationViewBackButtonVisible.Visible
+            : NavigationViewBackButtonVisible.Collapsed;
 
         PageScroller.ChangeView(null, 0, null, disableAnimation: true);
         DispatcherQueue.TryEnqueue(() =>
@@ -268,6 +297,39 @@ public sealed partial class SettingsWindow : Window
         }
 
         ViewModel.SetCustomAccentColor(color);
+    }
+
+    private void SettingsComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (sender is not ComboBox combo ||
+            combo.Tag is not string menuKind ||
+            e.AddedItems.Count == 0 ||
+            e.AddedItems[0] is not string displayName)
+        {
+            return;
+        }
+
+        switch (menuKind)
+        {
+            case "Theme":
+                ViewModel.SelectedTheme = ViewModel.AvailableThemes[combo.SelectedIndex];
+                break;
+            case "Language":
+                ViewModel.SelectedLanguage = ViewModel.AvailableLanguages[combo.SelectedIndex];
+                break;
+            case "WidgetCorner":
+                ViewModel.SelectedWidgetCornerPreference = ViewModel.AvailableWidgetCornerPreferences[combo.SelectedIndex];
+                break;
+            case "WidgetAnimationEffect":
+                ViewModel.SelectedWidgetAnimationEffect = ViewModel.AvailableWidgetAnimationEffects[combo.SelectedIndex];
+                break;
+            case "WidgetAnimationSpeed":
+                ViewModel.SelectedWidgetAnimationSpeed = ViewModel.AvailableWidgetAnimationSpeeds[combo.SelectedIndex];
+                break;
+            case "ManagedDropAction":
+                ViewModel.SelectedManagedDropAction = ViewModel.AvailableManagedDropActions[combo.SelectedIndex];
+                break;
+        }
     }
 
     private void SettingsDropDownButton_Click(object sender, RoutedEventArgs e)
@@ -849,6 +911,17 @@ public sealed partial class SettingsWindow : Window
         ShowSettingsSection("QuickCaptureSettings", isNestedSection: true);
     }
 
+    private void OpenAppearanceDetailButton_Click(object sender, RoutedEventArgs e)
+    {
+        ShowSettingsSection("AppearanceDetail", isNestedSection: true);
+    }
+
+    private void AppearanceBreadcrumbBackButton_Click(object sender, RoutedEventArgs e)
+    {
+        ShowSettingsSection("Appearance", isNestedSection: false);
+        SettingsNavigationView.SelectedItem = FindNavItemByTag("Appearance");
+    }
+
     private void QuickCaptureBreadcrumbBackButton_Click(object sender, RoutedEventArgs e)
     {
         ShowSettingsSection("FeatureWidgets", isNestedSection: false);
@@ -1078,8 +1151,8 @@ public sealed partial class SettingsWindow : Window
 
     private void ManagedStorageBreadcrumbBackButton_Click(object sender, RoutedEventArgs e)
     {
-        ShowSettingsSection("Storage", isNestedSection: false);
-        SettingsNavigationView.SelectedItem = StorageNavItem;
+        ShowSettingsSection("Advanced", isNestedSection: false);
+        SettingsNavigationView.SelectedItem = FindNavItemByTag("Advanced");
     }
 
     private void RefreshManagedStorageButton_Click(object sender, RoutedEventArgs e)

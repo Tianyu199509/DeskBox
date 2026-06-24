@@ -449,9 +449,13 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
     public SolidColorBrush AccentPreviewBrush { get; } = new(AccentColorHelper.DefaultAccentColor);
 
     public string[] AvailableThemes { get; } = [ThemeSystem, ThemeLight, ThemeDark];
+    public string[] AvailableThemeDisplayNames => AvailableThemes.Select(GetThemeDisplayName).ToArray();
     public string[] AvailableLanguages { get; } = [SettingsService.LanguageSystem, SettingsService.LanguageChinese, SettingsService.LanguageEnglish];
+    public string[] AvailableLanguageDisplayNames => AvailableLanguages.Select(_localizationService.GetLanguageDisplayName).ToArray();
     public string[] AvailableManagedDropActions { get; } = [SettingsService.ManagedDropActionMove, SettingsService.ManagedDropActionCopy];
+    public string[] AvailableManagedDropActionDisplayNames => AvailableManagedDropActions.Select(GetManagedDropActionDisplayName).ToArray();
     public string[] AvailableWidgetCornerPreferences { get; } = [CornerSmall, CornerRound, CornerSquare, CornerDefault];
+    public string[] AvailableWidgetCornerPreferenceDisplayNames => AvailableWidgetCornerPreferences.Select(GetCornerDisplayName).ToArray();
     public string[] AvailableWidgetAnimationEffects { get; } =
     [
         SettingsService.WidgetAnimationEffectSlideFade,
@@ -463,6 +467,7 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
         SettingsService.WidgetAnimationEffectScaleFade,
         SettingsService.WidgetAnimationEffectNone
     ];
+    public string[] AvailableWidgetAnimationEffectDisplayNames => AvailableWidgetAnimationEffects.Select(GetWidgetAnimationEffectDisplayName).ToArray();
     public string[] AvailableWidgetAnimationSpeeds { get; } =
     [
         SettingsService.WidgetAnimationSpeedVeryFast,
@@ -471,6 +476,7 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
         SettingsService.WidgetAnimationSpeedRelaxed,
         SettingsService.WidgetAnimationSpeedSlow
     ];
+    public string[] AvailableWidgetAnimationSpeedDisplayNames => AvailableWidgetAnimationSpeeds.Select(GetWidgetAnimationSpeedDisplayName).ToArray();
 
     public string AppVersion =>
         Assembly.GetExecutingAssembly()
