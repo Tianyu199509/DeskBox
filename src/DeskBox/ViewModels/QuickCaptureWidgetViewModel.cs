@@ -183,7 +183,7 @@ public sealed partial class QuickCaptureWidgetViewModel : ObservableObject, IDis
         private set => SetProperty(ref _iconSize, value);
     }
 
-    public double TitleIconSize => Math.Clamp(Math.Round(IconSize * 0.54), 11, 18);
+    public double TitleIconSize => Math.Clamp(Math.Round(IconSize * 0.72 * 0.56 * 0.54), 11, 18);
 
     public double ActionIconSize => Math.Max(10, Math.Round(IconSize * 0.42));
 

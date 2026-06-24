@@ -63,7 +63,7 @@
         </Grid.Resources>
 
         <Grid.RowDefinitions>
-            <RowDefinition Height="40" />
+            <RowDefinition Height="46" />
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
@@ -76,7 +76,7 @@
         <Grid
             x:Name="TitleBarGrid"
             Grid.Row="0"
-            Padding="12,5,10,4"
+            Padding="14,7,12,5"
             Background="Transparent"
             RightTapped="TitleBarGrid_RightTapped"
             PointerPressed="TitleBarGrid_PointerPressed"
@@ -113,8 +113,8 @@
                 VerticalAlignment="Center">
                 <Button
                     x:Name="MoreButton"
-                    Width="28"
-                    Height="28"
+                    Width="22"
+                    Height="22"
                     Padding="0"
                     Click="MoreButton_Click"
                     >
@@ -122,8 +122,8 @@
                 </Button>
                 <Button
                     x:Name="CloseButton"
-                    Width="28"
-                    Height="28"
+                    Width="22"
+                    Height="22"
                     Padding="0"
                     Click="CloseButton_Click"
                     >

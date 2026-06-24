@@ -1751,10 +1751,28 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
         {
             e.AcceptedOperation = DataPackageOperation.Copy;
         }
+        else if (HasFallbackFileFormats(e.DataView))
+        {
+            e.AcceptedOperation = DataPackageOperation.Copy;
+        }
         else
         {
             e.AcceptedOperation = DataPackageOperation.None;
         }
+    }
+
+    private static bool HasFallbackFileFormats(DataPackageView dataView)
+    {
+        foreach (string format in dataView.AvailableFormats)
+        {
+            if (!format.StartsWith("Windows.", StringComparison.Ordinal) &&
+                !format.StartsWith("Preferred DropEffect", StringComparison.Ordinal))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private async void RootGrid_Drop(object sender, DragEventArgs e)
@@ -1878,7 +1896,8 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
 
     private static async Task<QuickCaptureDropContent> TryReadDroppedContentAsync(DataPackageView dataView)
     {
-        if (dataView.Contains(StandardDataFormats.StorageItems))
+        if (dataView.Contains(StandardDataFormats.StorageItems) ||
+            HasFallbackFileFormats(dataView))
         {
             return await TryReadDroppedStorageContentAsync(dataView);
         }
@@ -2273,7 +2292,7 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
             return;
         }
 
-        if (_isDragging || _isResizing)
+        if (!force && (_isDragging || _isResizing))
         {
             if (force || _restoreDesktopLayerWhenIdle)
             {
@@ -2496,7 +2515,7 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
         double titleTextSize = ViewModel.TitleTextSize;
         TitleText.FontSize = titleTextSize;
 
-        const double btnSize = 28;
+        double btnSize = Math.Clamp(titleIconSize + 14, 24, 34);
         MoreButton.Width = btnSize;
         MoreButton.Height = btnSize;
         MoreButton.MinWidth = btnSize;
@@ -2504,7 +2523,7 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
         CloseButton.Height = btnSize;
         CloseButton.MinWidth = btnSize;
 
-        const double btnIconSize = 11;
+        double btnIconSize = Math.Clamp(titleIconSize - 3, 10, 15);
         MoreButtonIcon.FontSize = btnIconSize;
         CloseButtonIcon.FontSize = btnIconSize;
 

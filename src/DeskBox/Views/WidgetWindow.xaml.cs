@@ -1227,12 +1227,13 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
             return;
         }
 
-        if (_isDragging ||
+        if (!force && (
+            _isDragging ||
             _isResizing ||
             TitleEditBox.Visibility == Visibility.Visible ||
             _deletePending ||
             _isDeleteWidgetFlyoutOpen ||
-            _isInlineFlyoutOpen)
+            _isInlineFlyoutOpen))
         {
             if (force || _restoreDesktopLayerWhenIdle)
             {
@@ -3193,7 +3194,22 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
     {
         return TryGetPackageStringArray(dataView.Properties, "DeskBoxSourcePaths").Count > 0 ||
                dataView.Contains(StandardDataFormats.StorageItems) ||
-               dataView.Contains(StandardDataFormats.Text);
+               dataView.Contains(StandardDataFormats.Text) ||
+               HasFallbackFileFormats(dataView);
+    }
+
+    private static bool HasFallbackFileFormats(DataPackageView dataView)
+    {
+        foreach (string format in dataView.AvailableFormats)
+        {
+            if (!format.StartsWith("Windows.", StringComparison.Ordinal) &&
+                !format.StartsWith("Preferred DropEffect", StringComparison.Ordinal))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static async Task<string[]> GetDropPathsAsync(DataPackageView dataView)
@@ -3208,7 +3224,8 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
             return sourcePaths;
         }
 
-        if (dataView.Contains(StandardDataFormats.StorageItems))
+        if (dataView.Contains(StandardDataFormats.StorageItems) ||
+            HasFallbackFileFormats(dataView))
         {
             try
             {
@@ -3954,10 +3971,6 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
         var flyout = new MenuFlyout();
 
         AddCurrentWidgetContentActions(flyout);
-        flyout.Items.Add(new MenuFlyoutSeparator());
-
-        AddCreateWidgetItems(flyout);
-        flyout.Items.Add(new MenuFlyoutSeparator());
 
         var pasteItem = new MenuFlyoutItem
         {
@@ -3978,28 +3991,8 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
         };
         flyout.Items.Add(pasteItem);
 
-        var refreshItem = new MenuFlyoutItem
-        {
-            Text = _localizationService.T("Common.Refresh"),
-            Icon = new FontIcon { Glyph = "\uE72C" }
-        };
-        refreshItem.Click += async (_, _) =>
-        {
-            try
-            {
-                await ViewModel.RefreshFromConfigAsync();
-            }
-            catch (Exception ex)
-            {
-                await ShowErrorDialogAsync(_localizationService.T("Widget.RefreshFailed"), ex.Message);
-            }
-        };
-        flyout.Items.Add(refreshItem);
-
         if (!string.IsNullOrWhiteSpace(ViewModel.MappedFolderPath))
         {
-            flyout.Items.Add(new MenuFlyoutSeparator());
-
             var newFolderItem = new MenuFlyoutItem
             {
                 Text = _localizationService.T("Common.NewFolder"),
@@ -4007,51 +4000,17 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
             };
             newFolderItem.Click += async (_, _) => await CreateFolderInMappedLocationAsync();
             flyout.Items.Add(newFolderItem);
-        }
 
-        return flyout;
-    }
-
-    private void AddCurrentWidgetContentActions(MenuFlyout flyout)
-    {
-        if (ViewModel.FollowsDefaultStoragePath)
-        {
-            var addFileItem = new MenuFlyoutItem
+            var openFolderItem = new MenuFlyoutItem
             {
-                Text = _localizationService.T("Widget.AddFile"),
-                Icon = new FontIcon { Glyph = "\uE8A5" }
+                Text = ViewModel.FollowsDefaultStoragePath
+                    ? _localizationService.T("Widget.OpenStorageFolder")
+                    : _localizationService.T("Widget.OpenCurrentFolder"),
+                Icon = new FontIcon { Glyph = "\uE838" }
             };
-            addFileItem.Click += async (_, _) => await PickAndImportFilesAsync();
-            flyout.Items.Add(addFileItem);
-            return;
+            openFolderItem.Click += (_, _) => Win32Helper.OpenFile(ViewModel.MappedFolderPath);
+            flyout.Items.Add(openFolderItem);
         }
-
-        var changeMappedPathItem = new MenuFlyoutItem
-        {
-            Text = _localizationService.T("Widget.ChangeMappedPath"),
-            Icon = new FontIcon { Glyph = "\uE8B7" }
-        };
-        changeMappedPathItem.Click += async (_, _) => await PickAndApplyMappedFolderAsync();
-        flyout.Items.Add(changeMappedPathItem);
-    }
-
-    private MenuFlyout CreateMoreFlyout()
-    {
-        var flyout = new MenuFlyout();
-
-        var modeInfo = new MenuFlyoutItem
-        {
-            Text = _localizationService.Format("Widget.ModeInfo", ViewModel.ModeLabel),
-            Icon = new FontIcon
-            {
-                Glyph = ViewModel.IconGlyph
-            },
-            IsEnabled = false
-        };
-        flyout.Items.Add(modeInfo);
-        flyout.Items.Add(new MenuFlyoutSeparator());
-
-        AddCreateWidgetItems(flyout);
 
         flyout.Items.Add(new MenuFlyoutSeparator());
 
@@ -4073,6 +4032,51 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
 
         flyout.Items.Add(new MenuFlyoutSeparator());
 
+        var refreshItem = new MenuFlyoutItem
+        {
+            Text = _localizationService.T("Common.Refresh"),
+            Icon = new FontIcon { Glyph = "\uE72C" }
+        };
+        refreshItem.Click += async (_, _) =>
+        {
+            try
+            {
+                await ViewModel.RefreshFromConfigAsync();
+            }
+            catch (Exception ex)
+            {
+                await ShowErrorDialogAsync(_localizationService.T("Widget.RefreshFailed"), ex.Message);
+            }
+        };
+        flyout.Items.Add(refreshItem);
+
+        return flyout;
+    }
+
+    private void AddCurrentWidgetContentActions(MenuFlyout flyout)
+    {
+        if (!ViewModel.FollowsDefaultStoragePath)
+        {
+            return;
+        }
+
+        var addFileItem = new MenuFlyoutItem
+        {
+            Text = _localizationService.T("Widget.AddFile"),
+            Icon = new FontIcon { Glyph = "\uE8A5" }
+        };
+        addFileItem.Click += async (_, _) => await PickAndImportFilesAsync();
+        flyout.Items.Add(addFileItem);
+    }
+
+    private MenuFlyout CreateMoreFlyout()
+    {
+        var flyout = new MenuFlyout();
+
+        AddCreateWidgetItems(flyout);
+
+        flyout.Items.Add(new MenuFlyoutSeparator());
+
         var positionLock = new ToggleMenuFlyoutItem
         {
             Text = _localizationService.T("Widget.LockPosition"),
@@ -4091,7 +4095,8 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
 
         flyout.Items.Add(new MenuFlyoutSeparator());
 
-        if (!string.IsNullOrWhiteSpace(ViewModel.MappedFolderPath))
+        if (!ViewModel.FollowsDefaultStoragePath &&
+            !string.IsNullOrWhiteSpace(ViewModel.MappedFolderPath))
         {
             var openFolder = new MenuFlyoutItem
             {
@@ -4106,6 +4111,17 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
                 }
             };
             flyout.Items.Add(openFolder);
+        }
+
+        if (!ViewModel.FollowsDefaultStoragePath)
+        {
+            var changeMappedPathItem = new MenuFlyoutItem
+            {
+                Text = _localizationService.T("Widget.ChangeMappedPath"),
+                Icon = new FontIcon { Glyph = "\uE8B7" }
+            };
+            changeMappedPathItem.Click += async (_, _) => await PickAndApplyMappedFolderAsync();
+            flyout.Items.Add(changeMappedPathItem);
         }
 
         var rename = new MenuFlyoutItem

@@ -179,8 +179,8 @@
 
                 <Button
                     x:Name="AddButton"
-                    Width="28"
-                    Height="28"
+                    Width="22"
+                    Height="22"
                     Padding="0"
                     Visibility="{Binding TopAddButtonVisibility}"
                     Click="AddFileButton_Click">
@@ -189,8 +189,8 @@
 
                 <Button
                     x:Name="MoreButton"
-                    Width="28"
-                    Height="28"
+                    Width="22"
+                    Height="22"
                     Padding="0"
                     Click="MoreButton_Click">
                     <FontIcon x:Name="MoreButtonIcon" FontSize="11" Glyph="&#xE712;" />
@@ -198,8 +198,8 @@
 
                 <Button
                     x:Name="CloseButton"
-                    Width="28"
-                    Height="28"
+                    Width="22"
+                    Height="22"
                     Padding="0"
                     Click="CloseButton_Click">
                     <FontIcon x:Name="CloseButtonIcon" FontSize="11" Glyph="&#xE74D;" />

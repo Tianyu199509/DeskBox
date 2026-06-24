@@ -19,7 +19,6 @@
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <EnableMsixTooling>true</EnableMsixTooling>
     <AppxPackage>false</AppxPackage>
-    <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <ApplicationIcon>Assets\deskbox.ico</ApplicationIcon>
   </PropertyGroup>

@@ -703,6 +703,7 @@ public sealed class SettingsService
 
         bool hasGenericName =
             string.Equals(widget.Name, "New Widget", StringComparison.Ordinal) ||
+            string.Equals(widget.Name, "Deskbox", StringComparison.Ordinal) ||
             string.Equals(widget.Name, "\u65B0\u5EFA\u7EC4\u4EF6", StringComparison.Ordinal) ||
             string.Equals(widget.Name, "\u65B0\u5EFA\u5C0F\u7EC4\u4EF6", StringComparison.Ordinal);
 

@@ -9,7 +9,7 @@ public class WidgetConfig
     public string Id { get; set; } = Guid.NewGuid().ToString();
 
     /// <summary>User-facing display name.</summary>
-    public string Name { get; set; } = "New Widget";
+    public string Name { get; set; } = "Deskbox";
 
     /// <summary>Screen X position in device-independent pixels.</summary>
     public double X { get; set; } = 100;

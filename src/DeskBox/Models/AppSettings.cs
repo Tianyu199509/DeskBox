@@ -26,13 +26,13 @@ public class AppSettings
     public string CustomAccentColor { get; set; } = "#0078D4";
 
     /// <summary>Whether DeskBox should launch automatically at Windows startup.</summary>
-    public bool AutoStart { get; set; }
+    public bool AutoStart { get; set; } = true;
 
     /// <summary>Whether the built-in Quick Capture widget is enabled.</summary>
     public bool QuickCaptureEnabled { get; set; }
 
     /// <summary>Whether Quick Capture should record recent clipboard text and links.</summary>
-    public bool QuickCaptureClipboardEnabled { get; set; }
+    public bool QuickCaptureClipboardEnabled { get; set; } = true;
 
     /// <summary>Whether Quick Capture should record clipboard images.</summary>
     public bool QuickCaptureImageClipboardEnabled { get; set; } = true;
@@ -47,7 +47,7 @@ public class AppSettings
     public string LastQuickCaptureFileWidgetId { get; set; } = string.Empty;
 
     /// <summary>Whether the global hotkey is enabled.</summary>
-    public bool GlobalHotkeyEnabled { get; set; }
+    public bool GlobalHotkeyEnabled { get; set; } = true;
 
     /// <summary>Global hotkey modifier bit flags.</summary>
     public int GlobalHotkeyModifiers { get; set; } = (int)HotkeyModifierKeys.None;
@@ -78,12 +78,12 @@ public class AppSettings
     /// <summary>
     /// Animation effect used when desktop widgets show or hide.
     /// </summary>
-    public string WidgetAnimationEffect { get; set; } = "SlideFade";
+    public string WidgetAnimationEffect { get; set; } = "Fade";
 
     /// <summary>
     /// Animation speed preset used when desktop widgets show or hide.
     /// </summary>
-    public string WidgetAnimationSpeed { get; set; } = "Standard";
+    public string WidgetAnimationSpeed { get; set; } = "Fast";
 
     /// <summary>Whether to double click to open files.</summary>
     public bool DoubleClickToOpen { get; set; } = true;
