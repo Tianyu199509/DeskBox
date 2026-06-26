@@ -2383,6 +2383,7 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
             if (Visible && !_isAtDesktopLayer &&
                 App.Current.WidgetManager is not { WidgetsRaisedFromTray: true })
             {
+                App.Log($"[ZOrder] QuickCapture Deactivated→QueueRestore hwnd=0x{_hWnd.ToInt64():X}");
                 QueueRestoreDesktopLayerIfForegroundLeavesDeskBox();
             }
 
@@ -2396,9 +2397,11 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
             _isResizing ||
             (App.Current.WidgetManager is { WidgetsRaisedFromTray: true }))
         {
+            App.Log($"[ZOrder] QuickCapture PointerActivated BLOCKED hwnd=0x{_hWnd.ToInt64():X} visible={Visible} atDesktop={_isAtDesktopLayer} raised={App.Current.WidgetManager?.WidgetsRaisedFromTray}");
             return;
         }
 
+        App.Log($"[ZOrder] QuickCapture PointerActivated→Elevate hwnd=0x{_hWnd.ToInt64():X}");
         _isAtDesktopLayer = false;
         _keepRaisedUntilDeactivate = true;
         _restoreDesktopLayerWhenIdle = false;

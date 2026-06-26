@@ -338,6 +338,7 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
         _isAtDesktopLayer = true;
         Win32Helper.ClearWindowTopMost(_hWnd);
         Win32Helper.SetWindowToBottom(_hWnd);
+        App.Log($"[ZOrder] Widget PushToBottom hwnd=0x{_hWnd.ToInt64():X}");
     }
 
     public void ShowPreparedAtDesktopLayer(bool persistVisibility = true)
@@ -1238,6 +1239,7 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
         _keepRaisedUntilDeactivate = true;
         _restoreDesktopLayerWhenIdle = false;
         Win32Helper.SetWindowTopMost(_hWnd);
+        App.Log($"[ZOrder] Widget HoldTemporaryTopMost hwnd=0x{_hWnd.ToInt64():X} raised={App.Current.WidgetManager?.WidgetsRaisedFromTray}");
     }
 
     private void WidgetWindow_Activated(object sender, WindowActivatedEventArgs args)
@@ -1246,8 +1248,10 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
 
         if (args.WindowActivationState == WindowActivationState.Deactivated)
         {
-            if (Visible && !_isAtDesktopLayer)
+            if (Visible && !_isAtDesktopLayer &&
+                App.Current.WidgetManager is not { WidgetsRaisedFromTray: true })
             {
+                App.Log($"[ZOrder] Widget Deactivated→QueueRestore hwnd=0x{_hWnd.ToInt64():X}");
                 QueueRestoreDesktopLayerIfForegroundLeavesDeskBox();
             }
 
@@ -1258,11 +1262,14 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
             !Visible ||
             !_isAtDesktopLayer ||
             _isDragging ||
-            _isResizing)
+            _isResizing ||
+            (App.Current.WidgetManager is { WidgetsRaisedFromTray: true }))
         {
+            App.Log($"[ZOrder] Widget PointerActivated BLOCKED hwnd=0x{_hWnd.ToInt64():X} visible={Visible} atDesktop={_isAtDesktopLayer} raised={App.Current.WidgetManager?.WidgetsRaisedFromTray}");
             return;
         }
 
+        App.Log($"[ZOrder] Widget PointerActivated→Elevate hwnd=0x{_hWnd.ToInt64():X}");
         _isAtDesktopLayer = false;
         _keepRaisedUntilDeactivate = true;
         _restoreDesktopLayerWhenIdle = false;
@@ -1309,6 +1316,7 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
 
     public void ForceRestoreDesktopLayerFromManager()
     {
+        App.Log($"[ZOrder] Widget ForceRestoreDesktopLayerFromManager hwnd=0x{_hWnd.ToInt64():X}");
         ForceCancelTransientState();
         RestoreDesktopLayer(force: true);
     }

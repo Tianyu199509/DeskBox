@@ -567,6 +567,7 @@ public sealed class WidgetManager
                 .ToList();
             PrepareTrayShowAnimations(windowsToAnimate);
 
+            _widgetsRaisedFromTray = windowsToRaise.Count > 0;
             var shownWindows = new List<IDesktopWidgetWindow>();
             foreach (var window in windowsToRaise)
             {
@@ -1458,25 +1459,58 @@ public sealed class WidgetManager
             return;
         }
 
-        IntPtr targetWindow = Win32Helper.WindowFromPoint(cursor);
-        bool overWidget = IsWidgetWindow(targetWindow);
         bool overTaskbar = IsPointerOverTaskbar(cursor);
-
         if (overTaskbar)
         {
             App.LogVerbose($"[TrayBatch] RestoreMouseHook kept taskbar");
             return;
         }
 
+        bool overWidget = IsCursorOverAnyWidget(cursor);
         if (overWidget)
         {
-            App.LogVerbose($"[TrayBatch] RestoreMouseHook restoring-except hwnd=0x{targetWindow.ToInt64():X}");
-            RestoreRaisedWidgetsToDesktopLayerExcept(targetWindow);
+            App.LogVerbose($"[TrayBatch] RestoreMouseHook kept-all over-widget cursor={cursor.X},{cursor.Y}");
             return;
         }
 
-        App.LogVerbose($"[TrayBatch] RestoreMouseHook restoring-all hwnd=0x{targetWindow.ToInt64():X}");
+        IntPtr targetWindow = Win32Helper.WindowFromPoint(cursor);
+        App.LogVerbose($"[TrayBatch] RestoreMouseHook restoring-all cursor={cursor.X},{cursor.Y} hwnd=0x{targetWindow.ToInt64():X}");
         RestoreRaisedWidgetsToDesktopLayer(force: true);
+    }
+
+    private bool IsCursorOverAnyWidget(Win32Helper.POINT cursor)
+    {
+        foreach (var (_, (window, _)) in _widgets)
+        {
+            if (IsCursorOverWindow(window, cursor))
+            {
+                return true;
+            }
+        }
+
+        foreach (var (_, (window, _)) in _quickCaptureWidgets)
+        {
+            if (IsCursorOverWindow(window, cursor))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool IsCursorOverWindow(IDesktopWidgetWindow window, Win32Helper.POINT cursor)
+    {
+        if (!window.Visible)
+        {
+            return false;
+        }
+
+        var bounds = window.AnimationBounds;
+        return cursor.X >= bounds.X &&
+               cursor.X < bounds.X + (int)bounds.Width &&
+               cursor.Y >= bounds.Y &&
+               cursor.Y < bounds.Y + (int)bounds.Height;
     }
 
     private void RestoreRaisedWidgetsToDesktopLayerExcept(IntPtr skipHwnd)
