@@ -699,6 +699,12 @@ public sealed partial class QuickCaptureWidgetViewModel : ObservableObject, IDis
             }
         }
 
+        var currentIndexById = new Dictionary<string, int>(Items.Count, StringComparer.Ordinal);
+        for (int i = 0; i < Items.Count; i++)
+        {
+            currentIndexById[Items[i].Id] = i;
+        }
+
         for (int targetIndex = 0; targetIndex < visibleItems.Count; targetIndex++)
         {
             var model = visibleItems[targetIndex];
@@ -717,6 +723,14 @@ public sealed partial class QuickCaptureWidgetViewModel : ObservableObject, IDis
                     canMovePinnedUp: canMoveUp,
                     canMovePinnedDown: canMoveDown);
                 Items.Insert(targetIndex, viewModel);
+                foreach (var key in currentIndexById.Keys)
+                {
+                    if (currentIndexById[key] >= targetIndex)
+                    {
+                        currentIndexById[key]++;
+                    }
+                }
+
                 continue;
             }
 
@@ -725,14 +739,26 @@ public sealed partial class QuickCaptureWidgetViewModel : ObservableObject, IDis
             viewModel.UpdateSearchText(SearchText);
             viewModel.UpdatePinnedSortState(canShowPinnedSortControls, canMoveUp, canMoveDown);
 
-            int currentIndex = Items.IndexOf(viewModel);
-            if (currentIndex < 0)
+            if (!currentIndexById.TryGetValue(viewModel.Id, out int currentIndex))
             {
                 Items.Insert(targetIndex, viewModel);
+                foreach (var key in currentIndexById.Keys)
+                {
+                    if (currentIndexById[key] >= targetIndex)
+                    {
+                        currentIndexById[key]++;
+                    }
+                }
             }
             else if (currentIndex != targetIndex)
             {
                 Items.Move(currentIndex, targetIndex);
+                int lo = Math.Min(currentIndex, targetIndex);
+                int hi = Math.Max(currentIndex, targetIndex);
+                for (int i = lo; i <= hi; i++)
+                {
+                    currentIndexById[Items[i].Id] = i;
+                }
             }
         }
     }

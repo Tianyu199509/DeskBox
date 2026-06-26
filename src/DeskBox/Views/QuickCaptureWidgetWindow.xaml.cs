@@ -96,6 +96,32 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
     private long _statusToastGeneration;
     private QuickCaptureDeletedItemSnapshot? _pendingDeletedItemSnapshot;
 
+    private bool _hasTabBrushCache;
+    private bool _cachedTabBrushesAreDark;
+    private Windows.UI.Color _cachedTabBrushesAccentColor;
+    private SolidColorBrush? _tabSelectionBackgroundBrush;
+    private SolidColorBrush? _tabSelectionBorderBrush;
+    private SolidColorBrush? _tabTransparentBrush;
+    private SolidColorBrush? _tabNormalBackgroundBrush;
+    private SolidColorBrush? _tabNormalBorderBrush;
+    private SolidColorBrush? _tabNormalForegroundBrush;
+    private SolidColorBrush? _tabSelectedForegroundBrush;
+
+    private bool _hasItemBrushCache;
+    private bool _cachedItemBrushesAreDark;
+    private Windows.UI.Color _cachedItemBrushesAccentColor;
+    private SolidColorBrush? _itemBackgroundBrush;
+    private SolidColorBrush? _itemHoverBackgroundBrush;
+    private SolidColorBrush? _itemPressedBackgroundBrush;
+    private SolidColorBrush? _itemBorderBrush;
+    private SolidColorBrush? _itemHoverBorderBrush;
+    private SolidColorBrush? _itemPressedBorderBrush;
+    private SolidColorBrush? _itemForegroundBrush;
+    private SolidColorBrush? _itemHoverForegroundBrush;
+    private SolidColorBrush? _itemDisabledBackgroundBrush;
+    private SolidColorBrush? _itemDisabledBorderBrush;
+    private SolidColorBrush? _itemDisabledForegroundBrush;
+
     public QuickCaptureWidgetViewModel ViewModel { get; }
 
     public IntPtr WindowHandle => _hWnd;
@@ -417,7 +443,12 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
                 UpdateTabSelectionIndicator();
             });
         };
-        RootGrid.ActualThemeChanged += (_, _) => ApplyBackdropPreference();
+        RootGrid.ActualThemeChanged += (_, _) =>
+        {
+            _hasTabBrushCache = false;
+            _hasItemBrushCache = false;
+            ApplyBackdropPreference();
+        };
     }
 
     private void SetupEventHandlers()
@@ -552,6 +583,8 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
             return;
         }
 
+        _hasTabBrushCache = false;
+        _hasItemBrushCache = false;
         ApplyBackdropPreference();
         QueueBackdropRefresh();
     }
@@ -996,10 +1029,19 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
         }
 
         SetItemActionButtonsVisible(sender, false);
-        ApplyItemActionButtonStyle(
-            sender,
-            RootGrid.ActualTheme == ElementTheme.Dark,
-            App.Current.ThemeService?.GetEffectiveAccentColor() ?? AccentColorHelper.DefaultAccentColor);
+        bool isDark = RootGrid.ActualTheme == ElementTheme.Dark;
+        var accentColor = App.Current.ThemeService?.GetEffectiveAccentColor() ?? AccentColorHelper.DefaultAccentColor;
+        if (!_hasItemBrushCache ||
+            _cachedItemBrushesAreDark != isDark ||
+            _cachedItemBrushesAccentColor != accentColor)
+        {
+            RecomputeItemBrushCache(isDark, accentColor);
+            _hasItemBrushCache = true;
+            _cachedItemBrushesAreDark = isDark;
+            _cachedItemBrushesAccentColor = accentColor;
+        }
+
+        ApplyItemActionButtonStyle(sender, (isDark, accentColor));
         ApplyItemSearchHighlight(sender, item);
 
         if (FindVisualChild<Button>(sender, "SaveRecentItemButton") is { } saveButton)
@@ -2631,10 +2673,95 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
 
     private void ApplyTabStyles(bool isDark, Windows.UI.Color accentColor)
     {
-        ApplyTabSelectionIndicatorStyle(isDark, accentColor);
-        ApplyTabButtonStyle(RecordsTabButton, ViewModel.IsRecordsView, isDark, accentColor);
-        ApplyTabButtonStyle(PinnedTabButton, ViewModel.IsPinnedView, isDark, accentColor);
-        ApplyTabButtonStyle(RecentTabButton, ViewModel.IsRecentView, isDark, accentColor);
+        if (!_hasTabBrushCache ||
+            _cachedTabBrushesAreDark != isDark ||
+            _cachedTabBrushesAccentColor != accentColor)
+        {
+            RecomputeTabBrushCache(isDark, accentColor);
+            _hasTabBrushCache = true;
+            _cachedTabBrushesAreDark = isDark;
+            _cachedTabBrushesAccentColor = accentColor;
+        }
+
+        ReapplyCachedTabBrushes();
+    }
+
+    private void RecomputeTabBrushCache(bool isDark, Windows.UI.Color accentColor)
+    {
+        var indicatorBackground = WithAlpha(
+            BuildAccentSurfaceColor(
+                isDark,
+                accentColor,
+                isDark
+                    ? ColorHelper.FromArgb(0xFF, 0x34, 0x39, 0x42)
+                    : ColorHelper.FromArgb(0xFF, 0xEC, 0xF4, 0xFC),
+                accentMix: isDark ? 0.34 : 0.21,
+                overlayMix: isDark ? 0.08 : 0.05),
+            isDark ? (byte)0xC8 : (byte)0xD8);
+        var indicatorBorder = WithAlpha(accentColor, isDark ? (byte)0xE8 : (byte)0xD8);
+
+        _tabSelectionBackgroundBrush = new SolidColorBrush(indicatorBackground);
+        _tabSelectionBorderBrush = new SolidColorBrush(indicatorBorder);
+
+        var normalBackground = WithAlpha(
+            BuildAccentSurfaceColor(
+                isDark,
+                accentColor,
+                isDark
+                    ? ColorHelper.FromArgb(0xFF, 0x2A, 0x2D, 0x33)
+                    : ColorHelper.FromArgb(0xFF, 0xFB, 0xFB, 0xFC),
+                accentMix: isDark ? 0.12 : 0.08,
+                overlayMix: isDark ? 0.12 : 0.18),
+            isDark ? (byte)0x28 : (byte)0x30);
+        var normalBorder = isDark
+            ? ColorHelper.FromArgb(0x20, 0xFF, 0xFF, 0xFF)
+            : ColorHelper.FromArgb(0x14, 0x00, 0x00, 0x00);
+        var normalFg = isDark
+            ? ColorHelper.FromArgb(0xD8, 0xC0, 0xC3, 0xC8)
+            : ColorHelper.FromArgb(0xD0, 0x62, 0x65, 0x6A);
+        var selectedFg = isDark
+            ? Colors.White
+            : BlendColors(ColorHelper.FromArgb(0xFF, 0x1A, 0x1A, 0x1A), accentColor, 0.18);
+
+        _tabTransparentBrush = new SolidColorBrush(Colors.Transparent);
+        _tabNormalBackgroundBrush = new SolidColorBrush(normalBackground);
+        _tabNormalBorderBrush = new SolidColorBrush(normalBorder);
+        _tabNormalForegroundBrush = new SolidColorBrush(normalFg);
+        _tabSelectedForegroundBrush = new SolidColorBrush(selectedFg);
+    }
+
+    private void ReapplyCachedTabBrushes()
+    {
+        TabSelectionIndicator.Background = _tabSelectionBackgroundBrush!;
+        TabSelectionIndicator.BorderBrush = _tabSelectionBorderBrush!;
+
+        ApplyCachedTabButtonBrushes(RecordsTabButton, ViewModel.IsRecordsView);
+        ApplyCachedTabButtonBrushes(PinnedTabButton, ViewModel.IsPinnedView);
+        ApplyCachedTabButtonBrushes(RecentTabButton, ViewModel.IsRecentView);
+    }
+
+    private void ApplyCachedTabButtonBrushes(Button button, bool isSelected)
+    {
+        var bg = isSelected ? _tabTransparentBrush! : _tabNormalBackgroundBrush!;
+        var border = isSelected ? _tabTransparentBrush! : _tabNormalBorderBrush!;
+        var fg = isSelected ? _tabSelectedForegroundBrush! : _tabNormalForegroundBrush!;
+
+        button.Background = bg;
+        button.BorderBrush = border;
+        button.Foreground = fg;
+
+        button.Resources["ButtonBackground"] = bg;
+        button.Resources["ButtonBackgroundPointerOver"] = bg;
+        button.Resources["ButtonBackgroundPressed"] = bg;
+        button.Resources["ButtonBackgroundDisabled"] = bg;
+        button.Resources["ButtonBorderBrush"] = border;
+        button.Resources["ButtonBorderBrushPointerOver"] = border;
+        button.Resources["ButtonBorderBrushPressed"] = border;
+        button.Resources["ButtonBorderBrushDisabled"] = border;
+        button.Resources["ButtonForeground"] = fg;
+        button.Resources["ButtonForegroundPointerOver"] = fg;
+        button.Resources["ButtonForegroundPressed"] = fg;
+        button.Resources["ButtonForegroundDisabled"] = fg;
     }
 
     private void ApplyTitleBarLayout()
@@ -2726,22 +2853,66 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
 
     private void ApplyItemActionButtonStyleToVisibleItems(bool isDark, Windows.UI.Color accentColor)
     {
+        if (!_hasItemBrushCache ||
+            _cachedItemBrushesAreDark != isDark ||
+            _cachedItemBrushesAccentColor != accentColor)
+        {
+            RecomputeItemBrushCache(isDark, accentColor);
+            _hasItemBrushCache = true;
+            _cachedItemBrushesAreDark = isDark;
+            _cachedItemBrushesAccentColor = accentColor;
+        }
+
+        var stamp = (isDark, accentColor);
         foreach (var item in ItemsListView.Items)
         {
             if (ItemsListView.ContainerFromItem(item) is DependencyObject container)
             {
-                ApplyItemActionButtonStyle(container, isDark, accentColor);
+                ApplyItemActionButtonStyle(container, stamp);
             }
         }
     }
 
-    private static void ApplyItemActionButtonStyle(DependencyObject itemRoot, bool isDark, Windows.UI.Color accentColor)
+    private void ApplyItemActionButtonStyle(DependencyObject itemRoot, (bool isDark, Windows.UI.Color accentColor) stamp)
     {
+        if (itemRoot is FrameworkElement fe &&
+            fe.Tag is (bool tagDark, Windows.UI.Color tagColor) &&
+            tagDark == stamp.isDark && tagColor == stamp.accentColor)
+        {
+            return;
+        }
+
         if (FindVisualChild<StackPanel>(itemRoot, "ItemActionButtons") is not { } actions)
         {
             return;
         }
 
+        foreach (var button in FindVisualChildren<Button>(actions))
+        {
+            ApplyButtonStateBrushes(
+                button,
+                _itemBackgroundBrush!,
+                _itemHoverBackgroundBrush!,
+                _itemPressedBackgroundBrush!,
+                _itemBorderBrush!,
+                _itemHoverBorderBrush!,
+                _itemPressedBorderBrush!,
+                _itemForegroundBrush!,
+                _itemHoverForegroundBrush!,
+                _itemHoverForegroundBrush!,
+                _itemDisabledBackgroundBrush!,
+                _itemDisabledBorderBrush!,
+                _itemDisabledForegroundBrush!);
+        }
+
+        if (itemRoot is FrameworkElement fe2)
+        {
+            fe2.Tag = stamp;
+        }
+    }
+
+    private void RecomputeItemBrushCache(bool isDark, Windows.UI.Color accentColor)
+    {
         var background = BuildAccentSurfaceColor(
             isDark,
             accentColor,
@@ -2763,37 +2934,19 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
             : BlendColors(ColorHelper.FromArgb(0xFF, 0x18, 0x1C, 0x22), accentColor, 0.12);
         var accentForeground = ColorHelper.FromArgb(0xFF, accentColor.R, accentColor.G, accentColor.B);
 
-        var backgroundBrush = new SolidColorBrush(WithAlpha(background, isDark ? (byte)0xF4 : (byte)0xFC));
-        var hoverBackgroundBrush = new SolidColorBrush(WithAlpha(hoverBackground, 0xFF));
-        var pressedBackgroundBrush = new SolidColorBrush(WithAlpha(hoverBackground, 0xFF));
-        var borderBrush = new SolidColorBrush(WithAlpha(accentColor, isDark ? (byte)0x72 : (byte)0x5C));
-        var hoverBorderBrush = new SolidColorBrush(WithAlpha(accentColor, isDark ? (byte)0xF0 : (byte)0xE4));
-        var pressedBorderBrush = new SolidColorBrush(WithAlpha(accentColor, 0xFF));
-        var foregroundBrush = new SolidColorBrush(normalForeground);
-        var hoverForegroundBrush = new SolidColorBrush(accentForeground);
-        var disabledBackgroundBrush = new SolidColorBrush(WithAlpha(background, isDark ? (byte)0xC8 : (byte)0xD6));
-        var disabledBorderBrush = new SolidColorBrush(WithAlpha(accentColor, isDark ? (byte)0x34 : (byte)0x28));
-        var disabledForegroundBrush = new SolidColorBrush(isDark
+        _itemBackgroundBrush = new SolidColorBrush(WithAlpha(background, isDark ? (byte)0xF4 : (byte)0xFC));
+        _itemHoverBackgroundBrush = new SolidColorBrush(WithAlpha(hoverBackground, 0xFF));
+        _itemPressedBackgroundBrush = new SolidColorBrush(WithAlpha(hoverBackground, 0xFF));
+        _itemBorderBrush = new SolidColorBrush(WithAlpha(accentColor, isDark ? (byte)0x72 : (byte)0x5C));
+        _itemHoverBorderBrush = new SolidColorBrush(WithAlpha(accentColor, isDark ? (byte)0xF0 : (byte)0xE4));
+        _itemPressedBorderBrush = new SolidColorBrush(WithAlpha(accentColor, 0xFF));
+        _itemForegroundBrush = new SolidColorBrush(normalForeground);
+        _itemHoverForegroundBrush = new SolidColorBrush(accentForeground);
+        _itemDisabledBackgroundBrush = new SolidColorBrush(WithAlpha(background, isDark ? (byte)0xC8 : (byte)0xD6));
+        _itemDisabledBorderBrush = new SolidColorBrush(WithAlpha(accentColor, isDark ? (byte)0x34 : (byte)0x28));
+        _itemDisabledForegroundBrush = new SolidColorBrush(isDark
             ? ColorHelper.FromArgb(0x76, 0xF4, 0xF8, 0xFF)
             : ColorHelper.FromArgb(0x76, 0x18, 0x1C, 0x22));
-
-        foreach (var button in FindVisualChildren<Button>(actions))
-        {
-            ApplyButtonStateBrushes(
-                button,
-                backgroundBrush,
-                hoverBackgroundBrush,
-                pressedBackgroundBrush,
-                borderBrush,
-                hoverBorderBrush,
-                pressedBorderBrush,
-                foregroundBrush,
-                hoverForegroundBrush,
-                hoverForegroundBrush,
-                disabledBackgroundBrush,
-                disabledBorderBrush,
-                disabledForegroundBrush);
-        }
     }
 
     private static void ApplyButtonStateBrushes(
@@ -2827,74 +2980,6 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
         button.Resources["ButtonForegroundPointerOver"] = pointerForeground;
         button.Resources["ButtonForegroundPressed"] = pressedForeground;
         button.Resources["ButtonForegroundDisabled"] = disabledForeground;
-    }
-
-    private void ApplyTabSelectionIndicatorStyle(bool isDark, Windows.UI.Color accentColor)
-    {
-        var selectedBackground = WithAlpha(
-            BuildAccentSurfaceColor(
-                isDark,
-                accentColor,
-                isDark
-                    ? ColorHelper.FromArgb(0xFF, 0x34, 0x39, 0x42)
-                    : ColorHelper.FromArgb(0xFF, 0xEC, 0xF4, 0xFC),
-                accentMix: isDark ? 0.34 : 0.21,
-                overlayMix: isDark ? 0.08 : 0.05),
-            isDark ? (byte)0xC8 : (byte)0xD8);
-        var selectedBorder = WithAlpha(accentColor, isDark ? (byte)0xE8 : (byte)0xD8);
-
-        TabSelectionIndicator.Background = new SolidColorBrush(selectedBackground);
-        TabSelectionIndicator.BorderBrush = new SolidColorBrush(selectedBorder);
-    }
-
-    private static void ApplyTabButtonStyle(
-        Button button,
-        bool isSelected,
-        bool isDark,
-        Windows.UI.Color accentColor)
-    {
-        var normalBackground = WithAlpha(
-            BuildAccentSurfaceColor(
-                isDark,
-                accentColor,
-                isDark
-                    ? ColorHelper.FromArgb(0xFF, 0x2A, 0x2D, 0x33)
-                    : ColorHelper.FromArgb(0xFF, 0xFB, 0xFB, 0xFC),
-                accentMix: isDark ? 0.12 : 0.08,
-                overlayMix: isDark ? 0.12 : 0.18),
-            isDark ? (byte)0x28 : (byte)0x30);
-        var normalBorder = isDark
-            ? ColorHelper.FromArgb(0x20, 0xFF, 0xFF, 0xFF)
-            : ColorHelper.FromArgb(0x14, 0x00, 0x00, 0x00);
-        var foreground = isSelected
-            ? (isDark
-                ? Colors.White
-                : BlendColors(ColorHelper.FromArgb(0xFF, 0x1A, 0x1A, 0x1A), accentColor, 0.18))
-            : (isDark ? ColorHelper.FromArgb(0xD8, 0xC0, 0xC3, 0xC8) : ColorHelper.FromArgb(0xD0, 0x62, 0x65, 0x6A));
-
-        var transparentBrush = new SolidColorBrush(Colors.Transparent);
-        var backgroundBrush = isSelected
-            ? transparentBrush
-            : new SolidColorBrush(normalBackground);
-        var borderBrush = isSelected
-            ? transparentBrush
-            : new SolidColorBrush(normalBorder);
-        var foregroundBrush = new SolidColorBrush(foreground);
-
-        ApplyButtonStateBrushes(
-            button,
-            backgroundBrush,
-            backgroundBrush,
-            backgroundBrush,
-            borderBrush,
-            borderBrush,
-            borderBrush,
-            foregroundBrush,
-            foregroundBrush,
-            foregroundBrush,
-            backgroundBrush,
-            borderBrush,
-            foregroundBrush);
     }
 
     private void UpdateTabSelectionIndicator()

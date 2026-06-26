@@ -133,26 +133,53 @@ public sealed partial class QuickCaptureItemViewModel : ObservableObject
 
     public void Update(QuickCaptureItem model)
     {
+        var old = _model;
         _model = model;
-        OnPropertyChanged(nameof(Body));
-        OnPropertyChanged(nameof(Url));
-        OnPropertyChanged(nameof(DisplayText));
-        OnPropertyChanged(nameof(HighlightStartIndex));
-        OnPropertyChanged(nameof(HighlightLength));
-        OnPropertyChanged(nameof(HighlightVisibility));
-        OnPropertyChanged(nameof(ImagePath));
-        OnPropertyChanged(nameof(ImagePreviewUri));
-        OnPropertyChanged(nameof(IsPinned));
-        OnPropertyChanged(nameof(IsRecent));
-        OnPropertyChanged(nameof(Type));
-        OnPropertyChanged(nameof(TypeGlyph));
-        OnPropertyChanged(nameof(ImagePreviewVisibility));
-        OnPropertyChanged(nameof(TextPreviewVisibility));
-        OnPropertyChanged(nameof(PinGlyph));
-        OnPropertyChanged(nameof(PinTooltip));
-        OnPropertyChanged(nameof(MoveUpTooltip));
-        OnPropertyChanged(nameof(MoveDownTooltip));
-        OnPropertyChanged(nameof(UpdatedAtText));
+
+        if (old.Body != model.Body || old.Type != model.Type)
+        {
+            OnPropertyChanged(nameof(Body));
+            OnPropertyChanged(nameof(DisplayText));
+            OnPropertyChanged(nameof(HighlightStartIndex));
+            OnPropertyChanged(nameof(HighlightLength));
+            OnPropertyChanged(nameof(HighlightVisibility));
+        }
+
+        if (old.Url != model.Url)
+        {
+            OnPropertyChanged(nameof(Url));
+        }
+
+        if (old.ImagePath != model.ImagePath || old.Type != model.Type)
+        {
+            OnPropertyChanged(nameof(ImagePath));
+            OnPropertyChanged(nameof(ImagePreviewUri));
+            OnPropertyChanged(nameof(ImagePreviewVisibility));
+            OnPropertyChanged(nameof(TextPreviewVisibility));
+        }
+
+        if (old.IsPinned != model.IsPinned)
+        {
+            OnPropertyChanged(nameof(IsPinned));
+            OnPropertyChanged(nameof(PinGlyph));
+            OnPropertyChanged(nameof(PinTooltip));
+        }
+
+        if (old.IsRecent != model.IsRecent)
+        {
+            OnPropertyChanged(nameof(IsRecent));
+        }
+
+        if (old.Type != model.Type)
+        {
+            OnPropertyChanged(nameof(Type));
+            OnPropertyChanged(nameof(TypeGlyph));
+        }
+
+        if (old.UpdatedAt != model.UpdatedAt)
+        {
+            OnPropertyChanged(nameof(UpdatedAtText));
+        }
     }
 
     public void UpdateSearchText(string? searchText)
