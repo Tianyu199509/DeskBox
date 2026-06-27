@@ -1,4 +1,4 @@
-﻿.vs/
+.vs/
 bin/
 obj/
 artifacts/
@@ -24,3 +24,8 @@ build_*.txt
 /黑色.ico
 /wechat_publish/
 /托盘图标/
+
+# Website
+deskbox-site/node_modules/
+deskbox-site/.next/
+deskbox-site/out/
