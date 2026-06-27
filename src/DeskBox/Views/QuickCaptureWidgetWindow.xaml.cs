@@ -94,6 +94,7 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
     private Microsoft.UI.Composition.Visual? _cachedRootVisual;
     private long _backdropRefreshGeneration;
     private long _statusToastGeneration;
+    private Microsoft.UI.Dispatching.DispatcherQueueTimer? _autoRestoreTimer;
     private QuickCaptureDeletedItemSnapshot? _pendingDeletedItemSnapshot;
 
     private bool _hasTabBrushCache;
@@ -337,18 +338,20 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
             return;
         }
 
-        var timer = DispatcherQueue.CreateTimer();
-        timer.IsRepeating = false;
-        timer.Interval = TimeSpan.FromMilliseconds(1200);
-        timer.Tick += (_, _) =>
+        _autoRestoreTimer?.Stop();
+        _autoRestoreTimer = DispatcherQueue.CreateTimer();
+        _autoRestoreTimer.IsRepeating = false;
+        _autoRestoreTimer.Interval = TimeSpan.FromMilliseconds(1200);
+        _autoRestoreTimer.Tick += (_, _) =>
         {
-            timer.Stop();
+            _autoRestoreTimer?.Stop();
+            _autoRestoreTimer = null;
             if (!_isDragging && !_isResizing)
             {
                 RestoreDesktopLayer(force: true);
             }
         };
-        timer.Start();
+        _autoRestoreTimer.Start();
     }
 
     public void HideWindow()
@@ -488,6 +491,8 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
             _localizationService.LanguageChanged -= OnLanguageChanged;
             ViewModel.PropertyChanged -= ViewModel_PropertyChanged;
             _appWindow.Changed -= AppWindow_Changed;
+            _autoRestoreTimer?.Stop();
+            _autoRestoreTimer = null;
 
             StopTrayVisualAnimation();
             RestoreTrayVisualState();

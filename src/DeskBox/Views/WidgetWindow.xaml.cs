@@ -134,6 +134,7 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
     private bool _isApplyingTrayAnimationBounds;
     private long _backdropRefreshGeneration;
     private bool _areItemTransitionsSuppressed;
+    private DispatcherQueueTimer? _autoRestoreTimer;
     private bool _isFileDropSubclassInstalled;
     private TransitionCollection? _savedGridItemTransitions;
     private TransitionCollection? _savedListItemTransitions;
@@ -298,6 +299,8 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
             _localizationService.LanguageChanged -= OnLanguageChanged;
             ViewModel.PropertyChanged -= ViewModel_PropertyChanged;
             _appWindow.Changed -= AppWindow_Changed;
+            _autoRestoreTimer?.Stop();
+            _autoRestoreTimer = null;
             RemoveFileDropSubclass();
             StopTrayVisualAnimation();
             RestoreTrayVisualState();
@@ -1215,18 +1218,20 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
             return;
         }
 
-        var timer = DispatcherQueue.CreateTimer();
-        timer.IsRepeating = false;
-        timer.Interval = TimeSpan.FromMilliseconds(1200);
-        timer.Tick += (_, _) =>
+        _autoRestoreTimer?.Stop();
+        _autoRestoreTimer = DispatcherQueue.CreateTimer();
+        _autoRestoreTimer.IsRepeating = false;
+        _autoRestoreTimer.Interval = TimeSpan.FromMilliseconds(1200);
+        _autoRestoreTimer.Tick += (_, _) =>
         {
-            timer.Stop();
+            _autoRestoreTimer?.Stop();
+            _autoRestoreTimer = null;
             if (!_isDragging && !_isResizing)
             {
                 RestoreDesktopLayer(force: true);
             }
         };
-        timer.Start();
+        _autoRestoreTimer.Start();
     }
 
     public void HideWindow()
