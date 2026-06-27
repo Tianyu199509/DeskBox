@@ -280,20 +280,7 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
 
         Activated += WidgetWindow_Activated;
 
-        _appWindow.Changed += (_, args) =>
-        {
-            if (_isApplyingTrayAnimationBounds)
-            {
-                return;
-            }
-
-            if (args.DidPositionChange || args.DidSizeChange)
-            {
-                var pos = _appWindow.Position;
-                var size = _appWindow.Size;
-                ViewModel.UpdateBounds(pos.X, pos.Y, size.Width, size.Height, persist: false);
-            }
-        };
+        _appWindow.Changed += AppWindow_Changed;
 
         foreach (var child in ResizeGrid.Children)
         {
@@ -310,6 +297,7 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
             _settingsService.SettingsChanged -= OnSettingsChanged;
             _localizationService.LanguageChanged -= OnLanguageChanged;
             ViewModel.PropertyChanged -= ViewModel_PropertyChanged;
+            _appWindow.Changed -= AppWindow_Changed;
             RemoveFileDropSubclass();
             StopTrayVisualAnimation();
             RestoreTrayVisualState();
@@ -331,6 +319,21 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
     private void OnLanguageChanged()
     {
         ApplyLocalizedText();
+    }
+
+    private void AppWindow_Changed(AppWindow sender, AppWindowChangedEventArgs args)
+    {
+        if (_isApplyingTrayAnimationBounds)
+        {
+            return;
+        }
+
+        if (args.DidPositionChange || args.DidSizeChange)
+        {
+            var pos = _appWindow.Position;
+            var size = _appWindow.Size;
+            ViewModel.UpdateBounds(pos.X, pos.Y, size.Width, size.Height, persist: false);
+        }
     }
 
     private void ApplyLocalizedText()
@@ -953,13 +956,6 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
             (float)Math.Max(0, RootGrid.ActualWidth / 2),
             (float)Math.Max(0, RootGrid.ActualHeight / 2),
             0);
-    }
-
-    private static CompositionEasingFunction CreateTrayVisualEasing(Compositor compositor, bool isShowing)
-    {
-        return isShowing
-            ? compositor.CreateCubicBezierEasingFunction(new Vector2(0.16f, 1.0f), new Vector2(0.3f, 1.0f))
-            : compositor.CreateCubicBezierEasingFunction(new Vector2(0.7f, 0.0f), new Vector2(0.84f, 0.0f));
     }
 
     private WidgetAnimationProfile GetWidgetAnimationProfile()

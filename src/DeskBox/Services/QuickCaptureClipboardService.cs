@@ -11,8 +11,8 @@ public sealed class QuickCaptureClipboardService : IDisposable
     private readonly QuickCaptureService _quickCaptureService;
     private readonly IQuickCaptureClipboardReader _clipboardReader;
     private bool _isStarted;
-    private bool _isProcessing;
-    private bool _hasPendingCapture;
+    private volatile bool _isProcessing;
+    private volatile bool _hasPendingCapture;
     private string? _lastStateLog;
     private DateTimeOffset? _lastCapturedAt;
     private string _lastReason = "disabled:initial";

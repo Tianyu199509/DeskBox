@@ -464,20 +464,7 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
         ViewModel.PropertyChanged += ViewModel_PropertyChanged;
         Activated += QuickCaptureWidgetWindow_Activated;
 
-        _appWindow.Changed += (_, args) =>
-        {
-            if (_isApplyingTrayAnimationBounds)
-            {
-                return;
-            }
-
-            if (args.DidPositionChange || args.DidSizeChange)
-            {
-                var pos = _appWindow.Position;
-                var size = _appWindow.Size;
-                ViewModel.UpdateBounds(pos.X, pos.Y, size.Width, size.Height, persist: false);
-            }
-        };
+        _appWindow.Changed += AppWindow_Changed;
 
         foreach (var child in ResizeGrid.Children.OfType<FrameworkElement>())
         {
@@ -500,6 +487,7 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
 
             _localizationService.LanguageChanged -= OnLanguageChanged;
             ViewModel.PropertyChanged -= ViewModel_PropertyChanged;
+            _appWindow.Changed -= AppWindow_Changed;
 
             StopTrayVisualAnimation();
             RestoreTrayVisualState();
@@ -550,6 +538,21 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
     private void OnLanguageChanged()
     {
         ApplyLocalizedText();
+    }
+
+    private void AppWindow_Changed(AppWindow sender, AppWindowChangedEventArgs args)
+    {
+        if (_isApplyingTrayAnimationBounds)
+        {
+            return;
+        }
+
+        if (args.DidPositionChange || args.DidSizeChange)
+        {
+            var pos = _appWindow.Position;
+            var size = _appWindow.Size;
+            ViewModel.UpdateBounds(pos.X, pos.Y, size.Width, size.Height, persist: false);
+        }
     }
 
     private void ViewModel_PropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
@@ -3608,13 +3611,6 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
             (float)Math.Max(0, RootGrid.ActualWidth / 2),
             (float)Math.Max(0, RootGrid.ActualHeight / 2),
             0);
-    }
-
-    private static CompositionEasingFunction CreateTrayVisualEasing(Compositor compositor, bool isShowing)
-    {
-        return isShowing
-            ? compositor.CreateCubicBezierEasingFunction(new Vector2(0.2f, 0.8f), new Vector2(0.4f, 1.0f))
-            : compositor.CreateCubicBezierEasingFunction(new Vector2(0.6f, 0.0f), new Vector2(0.8f, 0.2f));
     }
 
     private WidgetAnimationProfile GetWidgetAnimationProfile()
