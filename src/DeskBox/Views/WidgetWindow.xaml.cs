@@ -421,6 +421,12 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
             return;
         }
 
+        if (App.Current.WidgetManager is not { WidgetsRaisedFromTray: true })
+        {
+            App.Log($"[ZOrder] Widget EnsureRaisedFromTrayTopMost SKIPPED not-raised hwnd=0x{_hWnd.ToInt64():X}");
+            return;
+        }
+
         App.Log($"[ZOrder] Widget EnsureRaisedFromTrayTopMost hwnd=0x{_hWnd.ToInt64():X} atDesktop={_isAtDesktopLayer}");
         _appWindow.Show();
         Win32Helper.ShowWindow(_hWnd, Win32Helper.SW_SHOWNORMAL);

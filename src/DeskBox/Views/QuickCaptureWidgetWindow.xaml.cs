@@ -238,6 +238,12 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
             return;
         }
 
+        if (App.Current.WidgetManager is not { WidgetsRaisedFromTray: true })
+        {
+            LogTrayWindow("EnsureRaisedTopMost skipped reason=not-raised");
+            return;
+        }
+
         LogTrayWindow("EnsureRaisedTopMost");
         _appWindow.Show();
         Win32Helper.ShowWindow(_hWnd, Win32Helper.SW_SHOWNORMAL);

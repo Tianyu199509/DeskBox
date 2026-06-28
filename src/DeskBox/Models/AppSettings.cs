@@ -34,7 +34,7 @@ public class AppSettings
     public bool AutoStart { get; set; } = true;
 
     /// <summary>Whether the built-in Quick Capture widget is enabled.</summary>
-    public bool QuickCaptureEnabled { get; set; }
+    public bool QuickCaptureEnabled { get; set; } = true;
 
     /// <summary>Whether Quick Capture should record recent clipboard text and links.</summary>
     public bool QuickCaptureClipboardEnabled { get; set; } = true;
