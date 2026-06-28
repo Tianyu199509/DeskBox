@@ -1299,19 +1299,13 @@ public partial class App : Application
     private void OpenSettings()
     {
         var settingsWindow = _settingsWindow ?? CreateSettingsWindow();
-        if (WidgetManager?.WidgetsRaisedFromTray == true)
-        {
-            settingsWindow.ActivateFromTray();
-            return;
-        }
-
         settingsWindow.Activate();
     }
 
     private void OpenSettingsFromTray()
     {
         var settingsWindow = _settingsWindow ?? CreateSettingsWindow();
-        settingsWindow.ActivateFromTray();
+        settingsWindow.Activate();
     }
 
     private SettingsWindow CreateSettingsWindow()

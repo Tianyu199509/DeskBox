@@ -43,10 +43,8 @@ public sealed partial class SettingsWindow : Window
     private readonly List<Grid> _metricRows = [];
     private readonly HashSet<Slider> _pressedAppearanceSliders = [];
     private readonly DispatcherTimer _resizeSettleTimer = new() { Interval = ResizeSettleDelay };
-    private DispatcherTimer? _topMostPollTimer;
     private bool _isSubclassInstalled;
     private bool _isAppearanceSliderDragging;
-    private bool _keepTopMostUntilDeactivate;
     private bool _isRecordingHotkey;
     private bool _isApplyingQuickCaptureClipboardToggle;
     private string _currentSettingsSection = "General";
@@ -130,7 +128,6 @@ public sealed partial class SettingsWindow : Window
 
         _resizeSettleTimer.Tick += ResizeSettleTimer_Tick;
 
-        Activated += SettingsWindow_Activated;
         Closed += (_, _) =>
         {
             _resizeSettleTimer.Stop();
@@ -149,60 +146,6 @@ public sealed partial class SettingsWindow : Window
             _metricRows.Clear();
             _pressedAppearanceSliders.Clear();
         };
-    }
-
-    public void ActivateFromTray()
-    {
-        _keepTopMostUntilDeactivate = true;
-        Win32Helper.SetWindowTopMost(_hWnd);
-        Activate();
-
-        DispatcherQueue.TryEnqueue(async () =>
-        {
-            await Task.Delay(80);
-            if (_keepTopMostUntilDeactivate)
-            {
-                Win32Helper.SetWindowTopMost(_hWnd);
-            }
-        });
-
-        _topMostPollTimer?.Stop();
-        _topMostPollTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(100) };
-        _topMostPollTimer.Tick += (_, _) =>
-        {
-            if (!_keepTopMostUntilDeactivate)
-            {
-                _topMostPollTimer.Stop();
-                return;
-            }
-            var foregroundHwnd = Win32Helper.GetForegroundWindow();
-            if (foregroundHwnd != _hWnd)
-            {
-                _keepTopMostUntilDeactivate = false;
-                Win32Helper.ClearWindowTopMost(_hWnd);
-                _topMostPollTimer.Stop();
-                App.Log("[SettingsWindow] Topmost cleared: foreground changed");
-            }
-        };
-        _topMostPollTimer.Start();
-    }
-
-    private void SettingsWindow_Activated(object sender, WindowActivatedEventArgs args)
-    {
-        if (args.WindowActivationState != WindowActivationState.Deactivated ||
-            !_keepTopMostUntilDeactivate)
-        {
-            return;
-        }
-
-        _keepTopMostUntilDeactivate = false;
-        _topMostPollTimer?.Stop();
-        Win32Helper.ClearWindowTopMost(_hWnd);
-
-        if (App.Current.WidgetManager is { } widgetManager)
-        {
-            widgetManager.RequestRestoreRaisedWidgetsToDesktopLayer("settings-deactivated");
-        }
     }
 
     private void SettingsNavigationView_SelectionChanged(NavigationView sender, NavigationViewSelectionChangedEventArgs args)
