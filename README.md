@@ -15,15 +15,11 @@ DeskBox is a lightweight WinUI 3 desktop organizer for Windows 11. It creates na
 
 Download the latest installer from [GitHub Releases](https://github.com/Tianyu199509/DeskBox/releases).
 
-Current release: 1.1.7
+Current release: 1.1.6
 
-- [DeskBox_Setup_1.1.7_x64.exe](https://github.com/Tianyu199509/DeskBox/releases/download/v1.1.7/DeskBox_Setup_1.1.7_x64.exe)
+- [DeskBox_Setup_1.1.6_x64.exe](https://github.com/Tianyu199509/DeskBox/releases/download/v1.1.6/DeskBox_Setup_1.1.6_x64.exe)
 
 The installer checks for .NET 8 Runtime x64 and Windows App Runtime 2.1.3 x64. If either dependency is missing, the setup flow can download and install it for you.
-
-## What's New In 1.1.7
-
-- Fixed toggle switch style not applied on clean installs.
 
 ## What's New In 1.1.6
 
