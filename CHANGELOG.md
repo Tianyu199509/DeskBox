@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.1.7 - 2026-06-29
+
+### English
+
+- Fixed toggle switch style not applied on clean installs: added explicit OffContent/OnContent="" to all toggles to hide "On"/"Off" text labels.
+
+### 中文
+
+- 修复全新安装后开关按钮样式不生效的问题：为所有开关显式设置 OffContent/OnContent="" 以隐藏"开"/"关"文字。
+
 ## 1.1.6 - 2026-06-29
 
 ### English

@@ -337,6 +337,8 @@
                                     Grid.Column="1"
                                     MinWidth="0"
                                     HorizontalAlignment="Right"
+                                    OffContent=""
+                                    OnContent=""
                                     IsOn="{Binding UseSystemAccentColor, Mode=TwoWay}" />
                             </Grid>
 
@@ -754,6 +756,8 @@
                                     Grid.Column="1"
                                     MinWidth="0"
                                     HorizontalAlignment="Right"
+                                    OffContent=""
+                                    OnContent=""
                                     IsOn="{Binding ShowHoverButtons, Mode=TwoWay}" />
                             </Grid>
 
@@ -772,6 +776,8 @@
                                     Grid.Column="1"
                                     MinWidth="0"
                                     HorizontalAlignment="Right"
+                                    OffContent=""
+                                    OnContent=""
                                     IsOn="{Binding HideShortcutArrowOverlay, Mode=TwoWay}" />
                             </Grid>
 
@@ -790,6 +796,8 @@
                                     Grid.Column="1"
                                     MinWidth="0"
                                     HorizontalAlignment="Right"
+                                    OffContent=""
+                                    OnContent=""
                                     IsOn="{Binding ShowFileExtensions, Mode=TwoWay}" />
                             </Grid>
 
@@ -810,6 +818,8 @@
                                     Grid.Column="1"
                                     MinWidth="0"
                                     HorizontalAlignment="Right"
+                                    OffContent=""
+                                    OnContent=""
                                     IsEnabled="{Binding ShowFileExtensions}"
                                     IsOn="{Binding HideShortcutExtensionWhenShowingFileExtensions, Mode=TwoWay}" />
                             </Grid>
@@ -829,6 +839,8 @@
                                     Grid.Column="1"
                                     MinWidth="0"
                                     HorizontalAlignment="Right"
+                                    OffContent=""
+                                    OnContent=""
                                     IsOn="{Binding ShowListItemDetails, Mode=TwoWay}" />
                             </Grid>
 
@@ -970,6 +982,8 @@
                                         Grid.Column="1"
                                         MinWidth="0"
                                         HorizontalAlignment="Right"
+                                        OffContent=""
+                                        OnContent=""
                                         IsOn="{Binding GlobalHotkeyEnabled, Mode=TwoWay}" />
                                     <Button
                                         x:Name="GlobalHotkeyCaptureButton"
@@ -1207,6 +1221,8 @@
                                     Grid.Column="1"
                                     MinWidth="0"
                                     HorizontalAlignment="Right"
+                                    OffContent=""
+                                    OnContent=""
                                     IsOn="{Binding QuickCaptureEnabled, Mode=TwoWay}" />
                             </Grid>
 
@@ -1227,6 +1243,8 @@
                                     Grid.Column="1"
                                     MinWidth="0"
                                     HorizontalAlignment="Right"
+                                    OffContent=""
+                                    OnContent=""
                                     IsOn="{Binding QuickCaptureClipboardEnabled, Mode=OneWay}"
                                     Toggled="QuickCaptureClipboardToggle_Toggled" />
                             </Grid>
@@ -1246,6 +1264,8 @@
                                     Grid.Column="1"
                                     MinWidth="0"
                                     HorizontalAlignment="Right"
+                                    OffContent=""
+                                    OnContent=""
                                     IsOn="{Binding QuickCaptureImageClipboardEnabled, Mode=TwoWay}" />
                             </Grid>
 
@@ -1382,6 +1402,8 @@
                                     Grid.Column="1"
                                     MinWidth="0"
                                     HorizontalAlignment="Right"
+                                    OffContent=""
+                                    OnContent=""
                                     IsOn="{Binding AutoStart, Mode=TwoWay}" />
                             </Grid>
 
@@ -1400,6 +1422,8 @@
                                     Grid.Column="1"
                                     MinWidth="0"
                                     HorizontalAlignment="Right"
+                                    OffContent=""
+                                    OnContent=""
                                     IsOn="{Binding DoubleClickToOpen, Mode=TwoWay}" />
                             </Grid>
 
