@@ -23,9 +23,10 @@ The installer checks for .NET 8 Runtime x64 and Windows App Runtime 2.1.3 x64. I
 
 ## What's New In 1.1.8
 
-- Fixed app not launching on other computers (stale DLL packaging issue).
+- Fixed app not launching on other computers (EnableMsixTooling was disabled).
+- Fixed global hotkey (F7) not working after packaged install.
 - Fixed toggle switch style consistency.
-- Fixed settings window staying on top when opened from tray right-click menu.
+- Fixed settings window staying on top from tray right-click.
 
 See the full [changelog](CHANGELOG.md).
 

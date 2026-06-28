@@ -635,8 +635,17 @@ public partial class App : Application
         return string.Equals(argument.Trim().Trim('"'), "--startup", StringComparison.OrdinalIgnoreCase);
     }
 
+    private bool _isLaunched;
+
     protected override async void OnLaunched(LaunchActivatedEventArgs args)
     {
+        if (_isLaunched)
+        {
+            Log("OnLaunched skipped: already launched");
+            return;
+        }
+        _isLaunched = true;
+
         using var perfScope = PerformanceLogger.Measure("App.OnLaunched", $"startup={IsStartupLaunch(args.Arguments)}");
         Log("OnLaunched start");
 
@@ -673,7 +682,35 @@ public partial class App : Application
             await Task.WhenAll(themeTask, clipboardTask);
 
             QuickCaptureClipboardService = await clipboardTask;
-            GlobalHotkeyService = new GlobalHotkeyService(SettingsService, localizationService, ToggleTrayWidgetsAsync);
+            if (GlobalHotkeyService is null)
+            {
+                try
+                {
+                    GlobalHotkeyService = new GlobalHotkeyService(SettingsService, localizationService, ToggleTrayWidgetsAsync);
+                    Log("[Init] GlobalHotkeyService created");
+                }
+                catch (Exception ex)
+                {
+                    Log($"[Init] GlobalHotkeyService creation failed: {ex}");
+                }
+            }
+
+            if (GlobalHotkeyService is { } hotkeySvc && _trayWindow is not null)
+            {
+                try
+                {
+                    var trayHwnd = WindowNative.GetWindowHandle(_trayWindow);
+                    if (trayHwnd != IntPtr.Zero && !hotkeySvc.IsRegistered)
+                    {
+                        Log($"[Init] Late-attaching GlobalHotkeyService to tray hwnd=0x{trayHwnd.ToInt64():X}");
+                        hotkeySvc.Attach(trayHwnd);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Log($"[Init] GlobalHotkeyService late-attach failed: {ex}");
+                }
+            }
             WidgetManager = new WidgetManager(SettingsService, FileService, OrganizerService, themeService, quickCaptureService, localizationService);
             WidgetManager.TrayLayerStateChanged += UpdateTrayLayerStateText;
 
@@ -886,7 +923,17 @@ public partial class App : Application
             _trayIcon.ForceCreate();
         }
 
-        GlobalHotkeyService?.Attach(WindowNative.GetWindowHandle(_trayWindow));
+        try
+        {
+            var trayHwnd = WindowNative.GetWindowHandle(_trayWindow);
+            Log($"[Init] Attaching GlobalHotkeyService to tray hwnd=0x{trayHwnd.ToInt64():X}");
+            GlobalHotkeyService?.Attach(trayHwnd);
+            Log("[Init] GlobalHotkeyService attached");
+        }
+        catch (Exception ex)
+        {
+            Log($"[Init] GlobalHotkeyService attach failed: {ex}");
+        }
 
         _trayWindow.DispatcherQueue.TryEnqueue(() =>
         {

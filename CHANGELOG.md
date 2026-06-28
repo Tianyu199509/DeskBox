@@ -4,13 +4,17 @@
 
 ### English
 
-- Fixed app not launching and tray menu losing WinUI styling on other computers: caused by stale DLLs in the publish output directory. Now performing a clean publish before packaging.
-- Fixed toggle switch style consistency: all toggles now use SettingToggleSwitchStyle with proper OffContent/OnContent="" to hide text labels.
+- Fixed app not launching and tray menu losing WinUI styling on other computers: caused by `EnableMsixTooling` being disabled. Restored to `true` for proper WinUI resource resolution.
+- Fixed global hotkey (F7) not working: `OnLaunched` was called multiple times, creating a new `GlobalHotkeyService` that overwrote the already-attached instance. Now reuses existing instance and adds late-attach fallback.
+- Fixed toggle switch style consistency: all toggles now use `SettingToggleSwitchStyle`.
+- Fixed settings window staying on top when opened from tray right-click.
 
 ### 中文
 
-- 修复其他电脑上应用无法启动、托盘菜单丢失 WinUI 样式的问题：原因是打包目录中残留了旧版本 DLL，现在每次打包前会清理目录。
-- 修复开关样式一致性：所有开关统一使用 SettingToggleSwitchStyle 样式。
+- 修复其他电脑上应用无法启动、托盘菜单丢失样式的问题：`EnableMsixTooling` 被关闭导致 WinUI 资源解析失败，恢复为 `true`。
+- 修复全局快捷键（F7）不工作：`OnLaunched` 被多次调用，新创建的 `GlobalHotkeyService` 覆盖了已 attach 的实例。现在复用已有实例并添加延迟 attach 兜底。
+- 修复开关样式一致性：所有开关统一使用 `SettingToggleSwitchStyle`。
+- 修复从托盘右键打开设置页面后一直置顶的问题。
 
 ## 1.1.6 - 2026-06-29
 
