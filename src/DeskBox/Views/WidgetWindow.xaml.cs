@@ -267,6 +267,7 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
 
             ApplyBackdropPreference();
             Win32Helper.ApplyFullWindowFrame(_hWnd);
+            Win32Helper.SetWindowBorder(_hWnd, App.Current.SettingsService.Settings.ShowWidgetBorder);
             QueueBackdropRefresh();
         };
 
@@ -1478,7 +1479,6 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
         {
             Win32Helper.SetWindowTheme(_hWnd, isDark);
             Win32Helper.ApplyFullWindowFrame(_hWnd);
-            Win32Helper.SetWindowBorder(_hWnd, App.Current.SettingsService.Settings.ShowWidgetBorder);
 
             int backdropType;
             if (ApplyAcrylicController(isDark, tintColor, surfaceOpacity))

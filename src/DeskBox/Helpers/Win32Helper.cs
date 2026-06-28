@@ -540,15 +540,22 @@ public static partial class Win32Helper
     /// </summary>
     public static void SetWindowBorder(IntPtr hWnd, bool show, int colorRef = -1)
     {
-        if (show)
+        try
         {
-            int color = colorRef >= 0 ? colorRef : 0x00998877; // subtle gray
-            DwmSetWindowAttribute(hWnd, DWMWA_BORDER_COLOR, ref color, sizeof(int));
+            if (show)
+            {
+                int color = colorRef >= 0 ? colorRef : 0x00998877; // subtle gray
+                DwmSetWindowAttribute(hWnd, DWMWA_BORDER_COLOR, ref color, sizeof(int));
+            }
+            else
+            {
+                int color = -1; // DWMWA_BORDER_COLOR = -1 means "no color / default"
+                DwmSetWindowAttribute(hWnd, DWMWA_BORDER_COLOR, ref color, sizeof(int));
+            }
         }
-        else
+        catch
         {
-            int color = -1; // DWMWA_BORDER_COLOR = -1 means "no color / default"
-            DwmSetWindowAttribute(hWnd, DWMWA_BORDER_COLOR, ref color, sizeof(int));
+            // DWMWA_BORDER_COLOR requires Win11 22H2+; silently ignore on older versions
         }
     }
 
