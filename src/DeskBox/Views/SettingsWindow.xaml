@@ -131,7 +131,6 @@
             <x:Double x:Key="ToggleSwitchPostContentMargin">0</x:Double>
 
             <Style x:Key="SettingToggleSwitchStyle" TargetType="ToggleSwitch">
-                <Setter Property="Width" Value="44" />
                 <Setter Property="MinWidth" Value="0" />
                 <Setter Property="HorizontalAlignment" Value="Right" />
                 <Setter Property="VerticalAlignment" Value="Center" />
