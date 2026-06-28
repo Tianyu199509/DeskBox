@@ -25,51 +25,9 @@ The installer checks for .NET 8 Runtime x64 and Windows App Runtime 2.1.3 x64. I
 
 - Fixed app not launching on other computers (stale DLL packaging issue).
 - Fixed toggle switch style consistency.
-
-## What's New In 1.1.6
-
 - Fixed settings window staying on top when opened from tray right-click menu.
-- Improved widget z-order reliability with shorter safety timer.
 
-## What's New In 1.1.5
-
-- Fixed clipboard monitoring not persisting after restart.
-- Fixed widget z-order issue where widgets could get stuck on top after interaction.
-- Improved toggle switch style consistency across all settings.
-- Simplified corner radius options.
-
-## What's New In 1.1.4
-
-- Fixed widget z-order issue where widgets would stay above fullscreen browser after batch raise.
-- Optimized startup initialization for 2-3 second faster launch.
-- Added error handling to critical async event handlers.
-
-## What's New In 1.1.3
-
-- Optimized widget animation with GPU-accelerated opacity and native bezier easing curves.
-- Simplified animation settings: unified slide direction dropdown and easing intensity control.
-- Fixed animation effects inconsistency between file widgets and Quick Capture.
-- Added image thumbnail previews for image files in widgets.
-- Fixed single-click file open when "Double-click to open" is disabled.
-- Fixed right-click triggering single-click open instead of context menu.
-- Fixed click events being consumed by box selection logic.
-- Removed "Focus clicked widget only" setting; all widgets now always show and hide together.
-
-## What's New In 1.1.2
-
-- Fixed internal dragging for shortcut files (`.lnk`) in managed widgets.
-
-## What's New In 1.1.0
-
-- Added drag-and-drop diagnostics and one-click repair in Settings. If Windows 10/11 cannot drag files into widgets, open Settings and run the repair first.
-- Improved Explorer drag/drop fallback handling for managed and mapped widgets, including better diagnostics for blocked or unusual shell formats.
-- Fixed widget sorting stability with natural name ordering and consistent insertion after new files are added.
-- Improved Quick Capture text behavior: double-click opens the inline editor for saved text, and the context menu can edit text in Notepad.
-- Changed the default tray icon style to colorful for new installs and restored defaults.
-- Improved first-run onboarding so it appears only after the first install launch, while remaining available from Settings.
-- Improved uninstall behavior with an optional prompt to remove or keep local DeskBox app data.
-
-See the full [changelog](CHANGELOG.md). GitHub Release copy is available in [docs/releases/v1.1.1.md](docs/releases/v1.1.1.md).
+See the full [changelog](CHANGELOG.md).
 
 ## Why DeskBox Exists
 
