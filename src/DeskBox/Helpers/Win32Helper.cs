@@ -567,6 +567,27 @@ public static partial class Win32Helper
         return isDark ? 0x00555555 : 0x00AAAAAA; // dark: subtle dark, light: subtle light
     }
 
+    /// <summary>
+    /// Convert a Windows.UI.Color to 0x00BBGGRR format for DWM.
+    /// </summary>
+    public static int ColorToDwm(Windows.UI.Color color)
+    {
+        return (color.B << 16) | (color.G << 8) | color.R;
+    }
+
+    /// <summary>
+    /// Get a border color based on accent color, slightly dimmed for subtlety.
+    /// </summary>
+    public static int GetAccentBorderColor(Windows.UI.Color accentColor, bool isDark)
+    {
+        // Dim the accent color to ~40% opacity for a subtle border
+        double factor = isDark ? 0.5 : 0.4;
+        byte r = (byte)(accentColor.R * factor);
+        byte g = (byte)(accentColor.G * factor);
+        byte b = (byte)(accentColor.B * factor);
+        return (b << 16) | (g << 8) | r;
+    }
+
     public static void ApplyFullWindowFrame(IntPtr hWnd)
     {
         var margins = new MARGINS
