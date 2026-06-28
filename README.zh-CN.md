@@ -15,11 +15,16 @@ DeskBox 是一个基于 WinUI 3 的 Windows 11 桌面整理工具。它用轻量
 
 可以在 [GitHub Releases](https://github.com/Tianyu199509/DeskBox/releases) 下载最新版安装包。
 
-当前版本：1.1.5
+当前版本：1.1.6
 
-- [DeskBox_Setup_1.1.5_x64.exe](https://github.com/Tianyu199509/DeskBox/releases/download/v1.1.5/DeskBox_Setup_1.1.5_x64.exe)
+- [DeskBox_Setup_1.1.6_x64.exe](https://github.com/Tianyu199509/DeskBox/releases/download/v1.1.6/DeskBox_Setup_1.1.6_x64.exe)
 
 安装器会检测 .NET 8 Runtime x64 和 Windows App Runtime 2.1.3 x64。若目标电脑缺少运行时依赖，安装流程可以联网下载并安装。
+
+## 1.1.6 更新
+
+- 修复从托盘右键打开设置页面后一直置顶的问题。
+- 优化格子 z-order 可靠性，缩短安全定时器。
 
 ## 1.1.5 更新
 

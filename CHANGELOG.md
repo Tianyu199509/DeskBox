@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.1.6 - 2026-06-29
+
+### English
+
+- Fixed settings window staying on top when opened from tray right-click menu. Removed always-on-top logic and let Windows handle z-order naturally.
+- Improved widget z-order reliability: reduced safety auto-restore timer from 5s to 2s.
+
+### 中文
+
+- 修复从托盘右键打开设置页面后，设置页面一直置顶挡住其他窗口的问题。移除强制置顶逻辑，让 Windows 自然处理窗口层级。
+- 优化格子 z-order 可靠性：安全自动恢复定时器从 5 秒缩短到 2 秒。
+
 ## 1.1.5 - 2026-06-29
 
 ### English
