@@ -444,9 +444,6 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
             ApplySurfaceStyle();
             ApplyBackdropPreference();
             Win32Helper.ApplyFullWindowFrame(_hWnd);
-            bool isDark = RootGrid.ActualTheme == ElementTheme.Dark;
-            var accentColor = App.Current.ThemeService?.GetEffectiveAccentColor() ?? AccentColorHelper.DefaultAccentColor;
-            Win32Helper.SetWindowBorder(_hWnd, App.Current.SettingsService.Settings.ShowWidgetBorder, Win32Helper.GetAccentBorderColor(accentColor, isDark));
             QueueBackdropRefresh();
             UpdateTabSelectionIndicator();
             RootGrid.Focus(FocusState.Programmatic);
@@ -2552,8 +2549,6 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
 
         bool isDark = RootGrid.ActualTheme == ElementTheme.Dark;
         Win32Helper.SetWindowTheme(_hWnd, isDark);
-        var accentColor = App.Current.ThemeService?.GetEffectiveAccentColor() ?? AccentColorHelper.DefaultAccentColor;
-        Win32Helper.SetWindowBorder(_hWnd, App.Current.SettingsService.Settings.ShowWidgetBorder, Win32Helper.GetAccentBorderColor(accentColor, isDark));
 
         double surfaceOpacity = Math.Clamp(ViewModel.WidgetOpacity, 0.0, 1.0);
         var tintColor = BuildNativeBackdropTintColor(isDark);

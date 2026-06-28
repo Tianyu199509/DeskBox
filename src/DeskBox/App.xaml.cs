@@ -1379,16 +1379,8 @@ public partial class App : Application
 
     private async void ExitApplication()
     {
-        ThemeService.AppearanceChanged -= UpdateTrayIconAppearance;
-        if (LocalizationService is not null)
-        {
-            LocalizationService.LanguageChanged -= OnLanguageChanged;
-        }
+        Log("ExitApplication invoked");
         await SettingsService.SaveAsync();
-        GlobalHotkeyService?.Dispose();
-        GlobalHotkeyService = null;
-        QuickCaptureClipboardService?.Dispose();
-        QuickCaptureClipboardService = null;
         WidgetManager?.CloseAll();
         _trayIcon?.Dispose();
         _activationRegistration?.Unregister(null);

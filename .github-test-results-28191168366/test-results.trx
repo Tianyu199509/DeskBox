@@ -1,0 +1,43 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TestRun id="ca5c6b0b-2a71-4937-94dd-f2ac2b59f0d9" name="runneradmin@runnervmo3n6x 2026-06-25 18:25:42" runUser="runnervmo3n6x\runneradmin" xmlns="http://microsoft.com/schemas/VisualStudio/TeamTest/2010">
+  <Times creation="2026-06-25T18:25:42.8357045+00:00" queuing="2026-06-25T18:25:42.8357049+00:00" start="2026-06-25T18:20:16.2907945+00:00" finish="2026-06-25T18:25:42.8365091+00:00" />
+  <TestSettings name="default" id="fee61192-2ae3-45db-acf0-c909f17c8bde">
+    <Deployment runDeploymentRoot="runneradmin_runnervmo3n6x_2026-06-25_18_25_42" />
+  </TestSettings>
+  <TestLists>
+    <TestList name="Results Not in a List" id="8c84fa94-04c1-424b-9868-57a2d4851a1d" />
+    <TestList name="All Loaded Results" id="19431567-8539-422a-85d7-44ee4e166bda" />
+  </TestLists>
+  <ResultSummary outcome="Failed">
+    <Counters total="0" executed="0" passed="0" failed="0" error="0" timeout="0" aborted="0" inconclusive="0" passedButRunAborted="0" notRunnable="0" notExecuted="0" disconnected="0" warning="0" completed="0" inProgress="0" pending="0" />
+    <Output>
+      <StdOut>[xUnit.net 00:00:00.00] xUnit.net VSTest Adapter v2.5.3.1+6b60a9e56a (64-bit .NET 8.0.28)&#xD;
+[xUnit.net 00:00:00.75]   Discovering: DeskBox.Tests&#xD;
+[xUnit.net 00:00:01.12]   Discovered:  DeskBox.Tests&#xD;
+[xUnit.net 00:00:01.12]   Starting:    DeskBox.Tests&#xD;
+[createdump] Writing full dump for process 2144 to file C:\Users\runneradmin\AppData\Local\Temp\b9efc811-515c-4af4-aac0-37f3e0b259b8\testhost_2144_20260625T182526_hangdump.dmp&#xD;
+[createdump] Dump successfully written in 16126ms&#xD;
+</StdOut>
+    </Output>
+    <RunInfos>
+      <RunInfo computerName="runnervmo3n6x" outcome="Error" timestamp="2026-06-25T18:25:42.6923745+00:00">
+        <Text>The active test run was aborted. Reason: Test host process crashed</Text>
+      </RunInfo>
+      <RunInfo computerName="runnervmo3n6x" outcome="Warning" timestamp="2026-06-25T18:25:42.7045336+00:00">
+        <Text>Data collector 'Blame' message: The specified inactivity time of 5 minutes has elapsed. Collecting hang dumps from testhost and its child processes.</Text>
+      </RunInfo>
+    </RunInfos>
+    <CollectorDataEntries>
+      <Collector agentName="runnervmo3n6x" uri="datacollector://microsoft/TestPlatform/Extensions/Blame/v1" collectorDisplayName="Blame">
+        <UriAttachments>
+          <UriAttachment>
+            <A href="runnervmo3n6x\Sequence_a1e02d8e36204a4dba1f5cd29a1dcf41.xml"></A>
+          </UriAttachment>
+          <UriAttachment>
+            <A href="runnervmo3n6x\testhost_2144_20260625T182526_hangdump.dmp"></A>
+          </UriAttachment>
+        </UriAttachments>
+      </Collector>
+    </CollectorDataEntries>
+  </ResultSummary>
+</TestRun>

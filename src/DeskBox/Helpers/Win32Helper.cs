@@ -534,55 +534,6 @@ public static partial class Win32Helper
         DwmSetWindowAttribute(hWnd, DWMWA_USE_IMMERSIVE_DARK_MODE, ref darkMode, sizeof(int));
     }
 
-    /// <summary>
-    /// Set or remove the DWM window border (Win11 22H2+).
-    /// colorRef: 0x00BBGGRR format.
-    /// </summary>
-    public static void SetWindowBorder(IntPtr hWnd, bool show, int colorRef = -1)
-    {
-        try
-        {
-            if (show)
-            {
-                int color = colorRef >= 0 ? colorRef : -1;
-                DwmSetWindowAttribute(hWnd, DWMWA_BORDER_COLOR, ref color, sizeof(int));
-            }
-            else
-            {
-                int color = unchecked((int)0xFFFFFFFE);
-                DwmSetWindowAttribute(hWnd, DWMWA_BORDER_COLOR, ref color, sizeof(int));
-            }
-        }
-        catch
-        {
-            // DWMWA_BORDER_COLOR requires Win11 22H2+; silently ignore on older versions
-        }
-    }
-
-    /// <summary>
-    /// Get a subtle border color: lighter than accent, slightly darker than background.
-    /// Blend accent with white (light mode) or black (dark mode) for subtlety.
-    /// </summary>
-    public static int GetAccentBorderColor(Windows.UI.Color accentColor, bool isDark)
-    {
-        if (isDark)
-        {
-            // Dark mode: accent blended with black at ~25% opacity → subtle dark accent
-            byte r = (byte)(accentColor.R * 0.25);
-            byte g = (byte)(accentColor.G * 0.25);
-            byte b = (byte)(accentColor.B * 0.25);
-            return (b << 16) | (g << 8) | r;
-        }
-        else
-        {
-            // Light mode: accent blended with white at ~20% opacity → subtle light accent
-            byte r = (byte)(accentColor.R * 0.2 + 255 * 0.8);
-            byte g = (byte)(accentColor.G * 0.2 + 255 * 0.8);
-            byte b = (byte)(accentColor.B * 0.2 + 255 * 0.8);
-            return (b << 16) | (g << 8) | r;
-        }
-    }
-
     public static void ApplyFullWindowFrame(IntPtr hWnd)
     {
         var margins = new MARGINS

@@ -563,28 +563,6 @@
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="176" />
                                     <ColumnDefinition Width="*" />
-                                </Grid.ColumnDefinitions>
-                                <StackPanel Grid.Column="0" Style="{StaticResource SettingTextPanelStyle}">
-                                    <TextBlock Style="{StaticResource SettingTitleTextStyle}" Text="显示边框" />
-                                    <TextBlock Style="{StaticResource SettingDescriptionTextStyle}" Text="为格子添加系统原生边框（Win11 22H2+）" />
-                                </StackPanel>
-                                <ToggleSwitch
-                                    Grid.Column="1"
-                                    MinWidth="0"
-                                    HorizontalAlignment="Right"
-                                    IsOn="{Binding ShowWidgetBorder, Mode=TwoWay}"
-                                    Toggled="ShowWidgetBorder_Toggled" />
-                            </Grid>
-
-                            <Border Style="{StaticResource SettingDividerStyle}" />
-
-                            <Grid
-                                Padding="16,14"
-                                ColumnSpacing="16"
-                                RowSpacing="10">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="176" />
-                                    <ColumnDefinition Width="*" />
                                     <ColumnDefinition Width="Auto" />
                                 </Grid.ColumnDefinitions>
                                 <StackPanel Grid.Column="0" Style="{StaticResource SettingTextPanelStyle}">

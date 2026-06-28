@@ -191,9 +191,6 @@ public class AppSettings
     /// </summary>
     public bool FocusClickedWidgetOnRaise { get; set; }
 
-    /// <summary>Show a subtle border on widgets (Win11 22H2+ DWM border).</summary>
-    public bool ShowWidgetBorder { get; set; } = true;
-
     /// <summary>Widget ids that were deleted and should not be restored.</summary>
     public List<string> DeletedWidgetIds { get; set; } = [];
 }

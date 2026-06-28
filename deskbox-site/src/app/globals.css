@@ -1,0 +1,112 @@
+@import "tailwindcss";
+
+:root {
+  --background: #F3F3F3;
+  --foreground: #1A1A1A;
+  --card-background: #FFFFFF;
+  --card-border: #E0E0E0;
+  --text-secondary: #616161;
+  --accent: #0078D4;
+  --accent-hover: #106EBE;
+  --accent-light: #E8F4FD;
+  --shadow-hover: 0 2px 8px rgba(0, 0, 0, 0.08);
+  --shadow-press: 0 1px 4px rgba(0, 0, 0, 0.06);
+  --radius-card: 8px;
+  --radius-button: 4px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #202020;
+    --foreground: #FFFFFF;
+    --card-background: #2D2D2D;
+    --card-border: #404040;
+    --text-secondary: #9E9E9E;
+    --accent: #60CDFF;
+    --accent-hover: #4DB8E8;
+    --accent-light: #1A3A4A;
+    --shadow-hover: 0 2px 8px rgba(0, 0, 0, 0.3);
+    --shadow-press: 0 1px 4px rgba(0, 0, 0, 0.2);
+  }
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card-background);
+  --color-card-border: var(--card-border);
+  --color-secondary: var(--text-secondary);
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-light: var(--accent-light);
+  --font-sans: 'Segoe UI Variable', 'Segoe UI', system-ui, -apple-system, sans-serif;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+.fluent-button {
+  background: var(--accent);
+  color: white;
+  border: none;
+  border-radius: var(--radius-button);
+  padding: 10px 24px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 150ms ease-out;
+  display: inline-block;
+  text-decoration: none;
+}
+
+.fluent-button:hover {
+  background: var(--accent-hover);
+  box-shadow: var(--shadow-hover);
+}
+
+.fluent-button:active {
+  transform: scale(0.98);
+  box-shadow: var(--shadow-press);
+}
+
+.fluent-button-secondary {
+  background: transparent;
+  color: var(--accent);
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius-button);
+  padding: 10px 24px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 150ms ease-out;
+  display: inline-block;
+  text-decoration: none;
+}
+
+.fluent-button-secondary:hover {
+  background: var(--accent-light);
+  border-color: var(--accent);
+}
+
+.fluent-card {
+  background: var(--card-background);
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius-card);
+  padding: 24px;
+  transition: all 200ms ease-out;
+}
+
+.fluent-card:hover {
+  box-shadow: var(--shadow-hover);
+  transform: translateY(-2px);
+}
+
+::-webkit-scrollbar { width: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--card-border); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: var(--text-secondary); }

@@ -1813,12 +1813,6 @@ public sealed partial class SettingsWindow : Window
         return Win32Helper.DefSubclassProc(hWnd, message, wParam, lParam);
     }
 
-    private void ShowWidgetBorder_Toggled(object sender, RoutedEventArgs e)
-    {
-        if (sender is not ToggleSwitch toggle) return;
-        ViewModel.ShowWidgetBorder = toggle.IsOn;
-    }
-
     [StructLayout(LayoutKind.Sequential)]
     private struct NativePoint
     {
