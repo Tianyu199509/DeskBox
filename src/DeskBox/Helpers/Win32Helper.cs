@@ -536,7 +536,7 @@ public static partial class Win32Helper
 
     /// <summary>
     /// Set or remove the DWM window border (Win11 22H2+).
-    /// colorRef: 0x00BBGGRR format, or -1 for default system color.
+    /// colorRef: 0x00BBGGRR format.
     /// </summary>
     public static void SetWindowBorder(IntPtr hWnd, bool show, int colorRef = -1)
     {
@@ -544,12 +544,12 @@ public static partial class Win32Helper
         {
             if (show)
             {
-                int color = colorRef >= 0 ? colorRef : -1; // -1 = system default
+                int color = colorRef >= 0 ? colorRef : -1;
                 DwmSetWindowAttribute(hWnd, DWMWA_BORDER_COLOR, ref color, sizeof(int));
             }
             else
             {
-                int color = unchecked((int)0xFFFFFFFE); // no border at all
+                int color = unchecked((int)0xFFFFFFFE);
                 DwmSetWindowAttribute(hWnd, DWMWA_BORDER_COLOR, ref color, sizeof(int));
             }
         }
@@ -560,32 +560,27 @@ public static partial class Win32Helper
     }
 
     /// <summary>
-    /// Get a subtle border color based on theme.
-    /// </summary>
-    public static int GetThemeBorderColor(bool isDark)
-    {
-        return isDark ? 0x00555555 : 0x00AAAAAA; // dark: subtle dark, light: subtle light
-    }
-
-    /// <summary>
-    /// Convert a Windows.UI.Color to 0x00BBGGRR format for DWM.
-    /// </summary>
-    public static int ColorToDwm(Windows.UI.Color color)
-    {
-        return (color.B << 16) | (color.G << 8) | color.R;
-    }
-
-    /// <summary>
-    /// Get a border color based on accent color, slightly dimmed for subtlety.
+    /// Get a subtle border color: lighter than accent, slightly darker than background.
+    /// Blend accent with white (light mode) or black (dark mode) for subtlety.
     /// </summary>
     public static int GetAccentBorderColor(Windows.UI.Color accentColor, bool isDark)
     {
-        // Dim the accent color to ~40% opacity for a subtle border
-        double factor = isDark ? 0.5 : 0.4;
-        byte r = (byte)(accentColor.R * factor);
-        byte g = (byte)(accentColor.G * factor);
-        byte b = (byte)(accentColor.B * factor);
-        return (b << 16) | (g << 8) | r;
+        if (isDark)
+        {
+            // Dark mode: accent blended with black at ~25% opacity → subtle dark accent
+            byte r = (byte)(accentColor.R * 0.25);
+            byte g = (byte)(accentColor.G * 0.25);
+            byte b = (byte)(accentColor.B * 0.25);
+            return (b << 16) | (g << 8) | r;
+        }
+        else
+        {
+            // Light mode: accent blended with white at ~20% opacity → subtle light accent
+            byte r = (byte)(accentColor.R * 0.2 + 255 * 0.8);
+            byte g = (byte)(accentColor.G * 0.2 + 255 * 0.8);
+            byte b = (byte)(accentColor.B * 0.2 + 255 * 0.8);
+            return (b << 16) | (g << 8) | r;
+        }
     }
 
     public static void ApplyFullWindowFrame(IntPtr hWnd)
