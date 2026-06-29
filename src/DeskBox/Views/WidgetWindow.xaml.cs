@@ -149,6 +149,8 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
 
     public IntPtr WindowHandle => _hWnd;
 
+    public WidgetWindowIdentity Identity => _diagnostics.Identity;
+
     public Windows.Foundation.Rect AnimationBounds => _diagnostics.AnimationBounds;
 
     private bool _isVisibleOnDesktop;

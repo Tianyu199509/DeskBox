@@ -228,6 +228,16 @@ G.2 继续抽只读/纯计算逻辑，建议先统一窗口身份上下文：`Wi
 - 未修改 `WidgetManager` 批量显隐流程。
 - 未接管 AppWindow、DWM、topmost、F7、托盘动画或拖拽逻辑。
 
+## 13. G.3 施工记录
+
+已补齐 Host 侧只读身份接口：
+
+- `IDesktopWidgetWindow` 新增只读 `Identity`。
+- `WidgetWindow.Identity` 返回 `_diagnostics.Identity`。
+- `QuickCaptureWidgetWindow.Identity` 返回 `_diagnostics.Identity`。
+- 当前 `WidgetManager` 仍继续使用原有 `WindowHandle`、`Visible`、`AnimationBounds` 流程。
+- 未改变批量显隐、topmost、F7、托盘动画、拖拽或 IME 行为。
+
 ### G.2 验收记录
 
 用户已在 Debug 版手测通过：
@@ -244,7 +254,7 @@ G.2 继续抽只读/纯计算逻辑，建议先统一窗口身份上下文：`Wi
 - 不建议让 `WidgetSessionManager` 接管层级恢复。
 - 不建议引入天气/Todo 等新功能入口。
 
-## 13. 后续施工护栏
+## 14. 后续施工护栏
 
 每次只动一个目标：
 

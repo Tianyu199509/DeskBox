@@ -143,6 +143,8 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
 
     public IntPtr WindowHandle => _hWnd;
 
+    public WidgetWindowIdentity Identity => _diagnostics.Identity;
+
     public Windows.Foundation.Rect AnimationBounds => _diagnostics.AnimationBounds;
 
     private bool _isVisibleOnDesktop;

@@ -31,6 +31,7 @@ public sealed record ManagedStorageFolderCleanupCandidate(
 
 internal interface IDesktopWidgetWindow
 {
+    WidgetWindowIdentity Identity { get; }
     IntPtr WindowHandle { get; }
     bool Visible { get; }
     Windows.Foundation.Rect AnimationBounds { get; }
