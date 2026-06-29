@@ -8,6 +8,9 @@ namespace DeskBox.Controls;
 
 public sealed partial class WidgetShell : UserControl
 {
+    /// <summary>
+    /// Content hosted below the title area. Future widget kinds should provide their body through this slot.
+    /// </summary>
     public static readonly DependencyProperty ShellContentProperty =
         DependencyProperty.Register(
             nameof(ShellContent),
@@ -22,6 +25,10 @@ public sealed partial class WidgetShell : UserControl
             typeof(WidgetShell),
             new PropertyMetadata("\uE8A5"));
 
+    /// <summary>
+    /// Optional title bar override used by legacy windows while they migrate into the shared shell.
+    /// When set, the built-in title and action buttons are hidden.
+    /// </summary>
     public static readonly DependencyProperty TitleBarContentProperty =
         DependencyProperty.Register(
             nameof(TitleBarContent),
@@ -53,6 +60,10 @@ public sealed partial class WidgetShell : UserControl
         set => SetValue(TitleGlyphProperty, value);
     }
 
+    /// <summary>
+    /// Custom title bar content for migrated legacy widgets that still own title interactions.
+    /// New simple widget kinds should prefer the default title bar.
+    /// </summary>
     public object? TitleBarContent
     {
         get => GetValue(TitleBarContentProperty);
@@ -75,11 +86,17 @@ public sealed partial class WidgetShell : UserControl
         ShellContent = content.View;
     }
 
+    /// <summary>
+    /// Keeps legacy dynamic title sizing centralized on the shell while host windows are migrated.
+    /// </summary>
     public void SetTitleBarRowHeight(GridLength height)
     {
         ShellRoot.RowDefinitions[0].Height = height;
     }
 
+    /// <summary>
+    /// Allows migrated windows to preserve their existing divider alignment during the transition.
+    /// </summary>
     public void SetDividerMargin(Thickness margin)
     {
         HeaderDivider.Margin = margin;
