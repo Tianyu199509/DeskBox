@@ -190,7 +190,12 @@
                 </Grid>
             </controls:WidgetShell.TitleBarContent>
             <controls:WidgetShell.ShellContent>
-                <Grid Padding="12,10,4,12" AllowDrop="True">
+                <!-- Phase E.3: future FileWidgetContent boundary. Keep drag/drop, rename, selection, toast,
+                     and view switching together until this area is extracted as one unit. -->
+                <Grid
+                    x:Name="FileWidgetContentHost"
+                    Padding="12,10,4,12"
+                    AllowDrop="True">
             <ProgressRing
                 x:Name="LoadingRing"
                 Width="24"
