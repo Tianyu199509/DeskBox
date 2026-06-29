@@ -5,22 +5,21 @@ namespace DeskBox.Tests;
 
 public sealed class WidgetKindCoverageTests
 {
-    private static readonly WidgetKind[] ActiveWidgetKinds =
-    [
-        WidgetKind.File,
-        WidgetKind.QuickCapture,
-        WidgetKind.Weather,
-        WidgetKind.Todo,
-        WidgetKind.Tags,
-        WidgetKind.Music,
-        WidgetKind.SystemMonitor
-    ];
+    private static readonly WidgetKind[] LegacyWidgetKinds = [WidgetKind.Productivity];
+
+    private static readonly WidgetKind[] ActiveWidgetKinds = Enum
+        .GetValues<WidgetKind>()
+        .Except(LegacyWidgetKinds)
+        .ToArray();
 
     [Fact]
     public void RegistryAndContentFactory_CoverTheSameActiveWidgetKinds()
     {
         var registry = WidgetRegistry.Default;
         var factory = new WidgetContentFactory();
+        var expectedKinds = ActiveWidgetKinds
+            .OrderBy(widgetKind => widgetKind)
+            .ToArray();
 
         var contentKinds = factory
             .GetDescriptors()
@@ -28,9 +27,9 @@ public sealed class WidgetKindCoverageTests
             .OrderBy(widgetKind => widgetKind)
             .ToArray();
 
-        Assert.Equal(ActiveWidgetKinds.OrderBy(widgetKind => widgetKind), contentKinds);
+        Assert.Equal(expectedKinds, contentKinds);
 
-        foreach (var widgetKind in ActiveWidgetKinds)
+        foreach (var widgetKind in expectedKinds)
         {
             Assert.True(registry.IsKnown(widgetKind));
             Assert.NotNull(factory.GetDescriptor(widgetKind));

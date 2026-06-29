@@ -436,3 +436,47 @@ G.2 继续抽只读/纯计算逻辑，建议先统一窗口身份上下文：`Wi
 ### 下一步建议
 
 H 线的内容元信息铺底可以在 H.4 后暂时收口。下一步建议回到路线文档复核，决定是进入“第一个真实功能格子原型前置设计”，还是继续做只读调试/诊断页面。暂不建议立刻开放天气/Todo 创建入口。
+
+## 22. H 线收口复核
+
+H 线已经完成内容层低风险铺底，可以暂时收口：
+
+- `WidgetContentFactory` 已具备内容 descriptor、能力查询、状态查询。
+- `PlaceholderWidgetContent` 已验证未来类型可以走 `IWidgetContent` 链路。
+- `WidgetKindCoverageTests` 已改为从 `Enum.GetValues<WidgetKind>()` 自动推导 active kinds，只排除旧迁移值 `Productivity`，避免未来新增枚举后漏同步 registry/content。
+- `WidgetRegistry` 仍是窗口创建授权来源。
+- `WidgetContentFactory` 只描述内容能力，不创建窗口、不写设置、不开放 UI。
+- 未来类型仍不进入设置页、托盘菜单、右键菜单或普通创建入口。
+
+### 复核结论
+
+当前没有发现需要立刻修复的架构方向问题。H 线的几个类职责边界基本清楚：
+
+- `WidgetRegistry`：回答“这个 kind 是否已知、是否已实现、是否允许创建窗口”。
+- `WidgetContentFactory`：回答“这个 kind 的内容元信息是什么、是否有占位内容、是否适合显示在创建入口”。
+- `WidgetSessionManager`：当前只记录会话，不接管层级。
+- `WidgetShell`：当前只做外壳，不拥有业务内容。
+
+### 仍需注意的遗漏
+
+- 主进度文档前半部分的测试数量历史值保留了当时记录，例如 `114/114`、`122/122`，不是当前最新总数；以后发阶段总结时需要统一刷新。
+- `docs/architecture/widget_architecture_phase1_g4_checkpoint_summary.md` 仍停在 G4，没有包含 H 线内容；如果要把当前分支交给别人继续，应补一份 H 线 checkpoint summary。
+- `PlaceholderWidgetContent` 仍有英文占位描述 `Content placeholder`；因为没有用户入口，暂不影响产品，但如果未来用于调试页，需要接入本地化。
+- `WidgetContentFactory` 暂未真正接入创建 UI；这是有意保留，不算遗漏。
+- 文件格子内容区、层级控制、动画控制、拖拽和 IME 仍不建议继续在本阶段动。
+
+### 下一阶段建议
+
+H 线后建议先做“第一个真实功能格子前置设计”，不要直接上 UI。推荐顺序：
+
+1. `Todo`：本地数据、无网络和定位权限，适合验证真实 `IWidgetContent`。
+2. `Weather`：需要定位权限、城市搜索、天气 API 和缓存，作为第二个更合适。
+3. `SystemMonitor`：需要性能计数器和刷新节流，适合作为第三个验证实时刷新。
+
+开始真实功能前，应先写独立设计文档，明确：
+
+- 数据存储位置。
+- `WidgetConfig.Metadata` 使用哪些 key。
+- 是否需要独立 store 文件。
+- 是否允许普通创建入口显示。
+- 首轮验证矩阵。
