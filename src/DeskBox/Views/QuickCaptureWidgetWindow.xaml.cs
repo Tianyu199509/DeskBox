@@ -1845,7 +1845,12 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
     private void ShowFlyoutWithElevation(MenuFlyout flyout, FrameworkElement target, Windows.Foundation.Point? position = null)
     {
         ElevateForInteraction();
-        flyout.Closed += (_, _) => ReleaseInteractionLayer("quick-flyout-closed");
+        App.Current.WidgetManager?.BeginWidgetInteraction("quick-flyout-opened");
+        flyout.Closed += (_, _) =>
+        {
+            App.Current.WidgetManager?.EndWidgetInteraction("quick-flyout-closed");
+            ReleaseInteractionLayer("quick-flyout-closed");
+        };
 
         if (position is Windows.Foundation.Point point)
         {

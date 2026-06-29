@@ -89,6 +89,7 @@ public sealed class WidgetManager
 
     public bool WidgetsRaisedFromTray => _widgetsRaisedFromTray;
     public WidgetSessionState SessionState => _sessionManager.State;
+    public bool IsWidgetInteractionActive => _sessionManager.IsInteractionActive;
 
     public bool HasVisibleWidgets => _widgets.Values.Any(entry => entry.Window.Visible) ||
                                      _quickCaptureWidgets.Values.Any(entry => entry.Window.Visible);
@@ -96,6 +97,16 @@ public sealed class WidgetManager
     public bool IsWidgetWindow(IntPtr hwnd)
     {
         return _widgetWindowHandles.Contains(hwnd);
+    }
+
+    public void BeginWidgetInteraction(string reason)
+    {
+        _sessionManager.BeginInteraction(reason);
+    }
+
+    public void EndWidgetInteraction(string reason)
+    {
+        _sessionManager.EndInteraction(reason);
     }
 
     public event Action<WidgetWindow>? WidgetCreated;

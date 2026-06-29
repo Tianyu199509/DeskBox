@@ -73,4 +73,16 @@ public sealed class WidgetSessionManagerTests
         Assert.False(manager.IsRaised);
         Assert.False(manager.IsInteractionActive);
     }
+
+    [Fact]
+    public void EndInteraction_WithoutActiveInteraction_DoesNotChangeState()
+    {
+        var manager = new WidgetSessionManager();
+        manager.MarkRaisedSession("raised");
+
+        manager.EndInteraction("stray-end");
+
+        Assert.Equal(WidgetSessionState.RaisedSession, manager.State);
+        Assert.False(manager.IsInteractionActive);
+    }
 }

@@ -63,11 +63,13 @@ public sealed class WidgetSessionManager
 
     public void EndInteraction(string reason)
     {
-        if (_interactionDepth > 0)
+        if (_interactionDepth <= 0)
         {
-            _interactionDepth--;
+            _log?.Invoke($"[WidgetSession] ignored end reason={reason} state={State}");
+            return;
         }
 
+        _interactionDepth--;
         SetState(_interactionDepth > 0 ? WidgetSessionState.InteractionActive : _stateBeforeInteraction, reason);
     }
 
