@@ -22,6 +22,13 @@ public sealed partial class WidgetShell : UserControl
             typeof(WidgetShell),
             new PropertyMetadata("\uE8A5"));
 
+    public static readonly DependencyProperty TitleBarContentProperty =
+        DependencyProperty.Register(
+            nameof(TitleBarContent),
+            typeof(object),
+            typeof(WidgetShell),
+            new PropertyMetadata(null, OnTitleBarContentChanged));
+
     public event EventHandler<RoutedEventArgs>? MoreRequested;
     public event EventHandler<RoutedEventArgs>? CloseRequested;
     public event EventHandler<RightTappedRoutedEventArgs>? TitleRightTapped;
@@ -46,6 +53,12 @@ public sealed partial class WidgetShell : UserControl
         set => SetValue(TitleGlyphProperty, value);
     }
 
+    public object? TitleBarContent
+    {
+        get => GetValue(TitleBarContentProperty);
+        set => SetValue(TitleBarContentProperty, value);
+    }
+
     public Grid TitleBar => TitleBarGrid;
     public Border BackgroundSurface => BackgroundPlate;
     public Border Divider => HeaderDivider;
@@ -65,6 +78,26 @@ public sealed partial class WidgetShell : UserControl
     public void SetTitleBarRowHeight(GridLength height)
     {
         ShellRoot.RowDefinitions[0].Height = height;
+    }
+
+    public void SetDividerMargin(Thickness margin)
+    {
+        HeaderDivider.Margin = margin;
+    }
+
+    private static void OnTitleBarContentChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
+    {
+        if (d is WidgetShell shell)
+        {
+            shell.UpdateTitleBarContentVisibility();
+        }
+    }
+
+    private void UpdateTitleBarContentVisibility()
+    {
+        bool hasCustomTitleBar = TitleBarContent is not null;
+        CustomTitleBarContentPresenter.Visibility = hasCustomTitleBar ? Visibility.Visible : Visibility.Collapsed;
+        DefaultTitleBarContentHost.Visibility = hasCustomTitleBar ? Visibility.Collapsed : Visibility.Visible;
     }
 
     private void MoreButton_Click(object sender, RoutedEventArgs e)

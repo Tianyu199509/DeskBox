@@ -141,6 +141,8 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
     private TransitionCollection? _savedListItemTransitions;
 
     private Microsoft.UI.Composition.Visual? _cachedRootVisual;
+    private Border BackgroundPlate => FileWidgetShell.BackgroundSurface;
+    private Border HeaderDivider => FileWidgetShell.Divider;
 
     public WidgetViewModel ViewModel { get; }
 
@@ -181,6 +183,7 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
         RootGrid.DataContext = ViewModel;
 
         ApplyLocalizedText();
+        FileWidgetShell.SetDividerMargin(new Thickness(14, 0, 14, 0));
 
         _hWnd = WindowNative.GetWindowHandle(this);
         _windowId = Win32Interop.GetWindowIdFromWindow(_hWnd);
@@ -1814,7 +1817,9 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
         CloseButtonIcon.FontSize = btnIconSize;
 
         double rowHeight = Math.Clamp(titleIconSize + 32, 40, 54);
-        RootGrid.RowDefinitions[0].Height = new GridLength(rowHeight);
+        var titleRowHeight = new GridLength(rowHeight);
+        RootGrid.RowDefinitions[0].Height = titleRowHeight;
+        FileWidgetShell.SetTitleBarRowHeight(titleRowHeight);
 
         double padH = Math.Clamp(Math.Round(titleIconSize * 0.9), 10, 16);
         double padT = Math.Clamp(Math.Round(titleIconSize * 0.5), 4, 10);

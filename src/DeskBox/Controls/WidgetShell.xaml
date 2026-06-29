@@ -30,52 +30,60 @@
             PointerPressed="TitleBarGrid_PointerPressed"
             PointerReleased="TitleBarGrid_PointerReleased"
             RightTapped="TitleBarGrid_RightTapped">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="Auto" />
-            </Grid.ColumnDefinitions>
+            <ContentPresenter
+                x:Name="CustomTitleBarContentPresenter"
+                HorizontalAlignment="Stretch"
+                VerticalAlignment="Stretch"
+                Content="{x:Bind TitleBarContent, Mode=OneWay}" />
 
-            <StackPanel
-                Grid.Column="0"
-                VerticalAlignment="Center"
-                Orientation="Horizontal"
-                Spacing="8">
-                <FontIcon
-                    x:Name="TitleIcon"
-                    FontSize="{Binding TitleIconSize}"
-                    Glyph="{x:Bind TitleGlyph, Mode=OneWay}" />
-                <TextBlock
-                    x:Name="TitleText"
-                    FontSize="{Binding TitleTextSize}"
-                    Text="{Binding DisplayName}"
-                    TextTrimming="CharacterEllipsis"
-                    VerticalAlignment="Center" />
-            </StackPanel>
+            <Grid x:Name="DefaultTitleBarContentHost">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
 
-            <StackPanel
-                x:Name="RightActionButtons"
-                Grid.Column="1"
-                Orientation="Horizontal"
-                Spacing="4"
-                Opacity="0"
-                VerticalAlignment="Center">
-                <Button
-                    x:Name="MoreButton"
-                    Width="22"
-                    Height="22"
-                    Click="MoreButton_Click"
-                    Padding="0">
-                    <FontIcon x:Name="MoreButtonIcon" FontSize="11" Glyph="&#xE712;" />
-                </Button>
-                <Button
-                    x:Name="CloseButton"
-                    Width="22"
-                    Height="22"
-                    Click="CloseButton_Click"
-                    Padding="0">
-                    <FontIcon x:Name="CloseButtonIcon" FontSize="11" Glyph="&#xE74D;" />
-                </Button>
-            </StackPanel>
+                <StackPanel
+                    Grid.Column="0"
+                    VerticalAlignment="Center"
+                    Orientation="Horizontal"
+                    Spacing="8">
+                    <FontIcon
+                        x:Name="TitleIcon"
+                        FontSize="{Binding TitleIconSize}"
+                        Glyph="{x:Bind TitleGlyph, Mode=OneWay}" />
+                    <TextBlock
+                        x:Name="TitleText"
+                        FontSize="{Binding TitleTextSize}"
+                        Text="{Binding DisplayName}"
+                        TextTrimming="CharacterEllipsis"
+                        VerticalAlignment="Center" />
+                </StackPanel>
+
+                <StackPanel
+                    x:Name="RightActionButtons"
+                    Grid.Column="1"
+                    Orientation="Horizontal"
+                    Spacing="4"
+                    Opacity="0"
+                    VerticalAlignment="Center">
+                    <Button
+                        x:Name="MoreButton"
+                        Width="22"
+                        Height="22"
+                        Click="MoreButton_Click"
+                        Padding="0">
+                        <FontIcon x:Name="MoreButtonIcon" FontSize="11" Glyph="&#xE712;" />
+                    </Button>
+                    <Button
+                        x:Name="CloseButton"
+                        Width="22"
+                        Height="22"
+                        Click="CloseButton_Click"
+                        Padding="0">
+                        <FontIcon x:Name="CloseButtonIcon" FontSize="11" Glyph="&#xE74D;" />
+                    </Button>
+                </StackPanel>
+            </Grid>
         </Grid>
 
         <Border
