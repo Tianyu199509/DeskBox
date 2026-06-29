@@ -26,6 +26,7 @@
 | `ac62a44` | E.2：补充 `WidgetShell` 过渡 API 说明并更新迁移进度 | 已测试 |
 | `42c935c` | E.3：标出文件格子内容区未来迁移边界，不移动业务 UI | 已测试 |
 | `0b8adde` | G.1：新增只读 `WidgetWindowDiagnostics`，统一窗口日志和动画边界计算 | 已手测 |
+| `3ac4ff7` | G.2：新增只读 `WidgetWindowIdentity` 上下文 | 已手测 |
 
 ## 3. 已完成范围
 
@@ -112,7 +113,7 @@
 - `dotnet build .\DeskBox.sln -c Debug -p:Platform=x64`
 - `dotnet test .\DeskBox.sln -c Debug -p:Platform=x64 --no-build`
 
-当前测试数：`99/99`。
+当前测试数：`106/106`。
 
 ## 6. 本地备份
 
@@ -226,6 +227,15 @@ G.2 继续抽只读/纯计算逻辑，建议先统一窗口身份上下文：`Wi
 - 未修改 `IDesktopWidgetWindow`。
 - 未修改 `WidgetManager` 批量显隐流程。
 - 未接管 AppWindow、DWM、topmost、F7、托盘动画或拖拽逻辑。
+
+### G.2 验收记录
+
+用户已在 Debug 版手测通过：
+
+- 托盘/F7 行为正常。
+- 随记显示正常。
+- 文件格子显示正常。
+- 格子拖拽未发现异常。
 
 ### 暂不建议直接做
 
