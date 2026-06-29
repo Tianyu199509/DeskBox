@@ -13,13 +13,69 @@ public sealed class WidgetContentFactory
 {
     private static readonly IReadOnlyList<WidgetContentDescriptor> DescriptorList =
     [
-        new(WidgetKind.File, "DeskBox", "\uE8A5", WidgetContentStage.Implemented, CanShowInCreateEntry: true),
-        new(WidgetKind.QuickCapture, "Quick Capture", "\uE70F", WidgetContentStage.Implemented, CanShowInCreateEntry: false),
-        new(WidgetKind.Weather, "Weather", "\uE706", WidgetContentStage.Placeholder, CanShowInCreateEntry: false),
-        new(WidgetKind.Todo, "Todo", "\uE9D5", WidgetContentStage.Placeholder, CanShowInCreateEntry: false),
-        new(WidgetKind.Tags, "Tags", "\uE8EC", WidgetContentStage.Placeholder, CanShowInCreateEntry: false),
-        new(WidgetKind.Music, "Music", "\uEC4F", WidgetContentStage.Placeholder, CanShowInCreateEntry: false),
-        new(WidgetKind.SystemMonitor, "System Monitor", "\uE9D9", WidgetContentStage.Placeholder, CanShowInCreateEntry: false)
+        new(
+            WidgetKind.File,
+            "DeskBox",
+            "\uE8A5",
+            WidgetContentStage.Implemented,
+            CanShowInCreateEntry: true,
+            WidgetContentAvailability.Available,
+            "WidgetContent.File.StatusLabel",
+            "WidgetContent.File.StatusDescription"),
+        new(
+            WidgetKind.QuickCapture,
+            "Quick Capture",
+            "\uE70F",
+            WidgetContentStage.Implemented,
+            CanShowInCreateEntry: false,
+            WidgetContentAvailability.Available,
+            "WidgetContent.QuickCapture.StatusLabel",
+            "WidgetContent.QuickCapture.StatusDescription"),
+        new(
+            WidgetKind.Weather,
+            "Weather",
+            "\uE706",
+            WidgetContentStage.Placeholder,
+            CanShowInCreateEntry: false,
+            WidgetContentAvailability.Planned,
+            "WidgetContent.Weather.StatusLabel",
+            "WidgetContent.Weather.StatusDescription"),
+        new(
+            WidgetKind.Todo,
+            "Todo",
+            "\uE9D5",
+            WidgetContentStage.Placeholder,
+            CanShowInCreateEntry: false,
+            WidgetContentAvailability.Planned,
+            "WidgetContent.Todo.StatusLabel",
+            "WidgetContent.Todo.StatusDescription"),
+        new(
+            WidgetKind.Tags,
+            "Tags",
+            "\uE8EC",
+            WidgetContentStage.Placeholder,
+            CanShowInCreateEntry: false,
+            WidgetContentAvailability.Planned,
+            "WidgetContent.Tags.StatusLabel",
+            "WidgetContent.Tags.StatusDescription"),
+        new(
+            WidgetKind.Music,
+            "Music",
+            "\uEC4F",
+            WidgetContentStage.Placeholder,
+            CanShowInCreateEntry: false,
+            WidgetContentAvailability.Planned,
+            "WidgetContent.Music.StatusLabel",
+            "WidgetContent.Music.StatusDescription"),
+        new(
+            WidgetKind.SystemMonitor,
+            "System Monitor",
+            "\uE9D9",
+            WidgetContentStage.Placeholder,
+            CanShowInCreateEntry: false,
+            WidgetContentAvailability.Planned,
+            "WidgetContent.SystemMonitor.StatusLabel",
+            "WidgetContent.SystemMonitor.StatusDescription")
     ];
 
     private static readonly IReadOnlyDictionary<WidgetKind, WidgetContentDescriptor> Descriptors =
@@ -79,6 +135,18 @@ public sealed class WidgetContentFactory
     {
         return Descriptors.TryGetValue(widgetKind, out var descriptor) &&
                descriptor.CanShowInCreateEntry;
+    }
+
+    public bool IsAvailable(WidgetKind widgetKind)
+    {
+        return Descriptors.TryGetValue(widgetKind, out var descriptor) &&
+               descriptor.IsAvailable;
+    }
+
+    public bool IsPlanned(WidgetKind widgetKind)
+    {
+        return Descriptors.TryGetValue(widgetKind, out var descriptor) &&
+               descriptor.IsPlanned;
     }
 
     public bool CanCreatePlaceholderContent(WidgetKind widgetKind)

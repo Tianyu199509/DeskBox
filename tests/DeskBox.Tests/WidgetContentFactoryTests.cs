@@ -6,18 +6,19 @@ namespace DeskBox.Tests;
 public sealed class WidgetContentFactoryTests
 {
     [Theory]
-    [InlineData(WidgetKind.File, "DeskBox", WidgetContentStage.Implemented, true)]
-    [InlineData(WidgetKind.QuickCapture, "Quick Capture", WidgetContentStage.Implemented, false)]
-    [InlineData(WidgetKind.Weather, "Weather", WidgetContentStage.Placeholder, false)]
-    [InlineData(WidgetKind.Todo, "Todo", WidgetContentStage.Placeholder, false)]
-    [InlineData(WidgetKind.Tags, "Tags", WidgetContentStage.Placeholder, false)]
-    [InlineData(WidgetKind.Music, "Music", WidgetContentStage.Placeholder, false)]
-    [InlineData(WidgetKind.SystemMonitor, "System Monitor", WidgetContentStage.Placeholder, false)]
+    [InlineData(WidgetKind.File, "DeskBox", WidgetContentStage.Implemented, true, WidgetContentAvailability.Available)]
+    [InlineData(WidgetKind.QuickCapture, "Quick Capture", WidgetContentStage.Implemented, false, WidgetContentAvailability.Available)]
+    [InlineData(WidgetKind.Weather, "Weather", WidgetContentStage.Placeholder, false, WidgetContentAvailability.Planned)]
+    [InlineData(WidgetKind.Todo, "Todo", WidgetContentStage.Placeholder, false, WidgetContentAvailability.Planned)]
+    [InlineData(WidgetKind.Tags, "Tags", WidgetContentStage.Placeholder, false, WidgetContentAvailability.Planned)]
+    [InlineData(WidgetKind.Music, "Music", WidgetContentStage.Placeholder, false, WidgetContentAvailability.Planned)]
+    [InlineData(WidgetKind.SystemMonitor, "System Monitor", WidgetContentStage.Placeholder, false, WidgetContentAvailability.Planned)]
     public void GetDescriptor_ReturnsContentMetadata(
         WidgetKind widgetKind,
         string title,
         WidgetContentStage stage,
-        bool canShowInCreateEntry)
+        bool canShowInCreateEntry,
+        WidgetContentAvailability availability)
     {
         var factory = new WidgetContentFactory();
 
@@ -28,6 +29,9 @@ public sealed class WidgetContentFactoryTests
         Assert.False(string.IsNullOrWhiteSpace(descriptor.DefaultGlyph));
         Assert.Equal(stage, descriptor.ContentStage);
         Assert.Equal(canShowInCreateEntry, descriptor.CanShowInCreateEntry);
+        Assert.Equal(availability, descriptor.Availability);
+        Assert.StartsWith($"WidgetContent.{widgetKind}.", descriptor.StatusLabelKey);
+        Assert.StartsWith($"WidgetContent.{widgetKind}.", descriptor.StatusDescriptionKey);
     }
 
     [Fact]
@@ -62,25 +66,43 @@ public sealed class WidgetContentFactoryTests
     }
 
     [Theory]
-    [InlineData(WidgetKind.File, true, false, true)]
-    [InlineData(WidgetKind.QuickCapture, true, false, false)]
-    [InlineData(WidgetKind.Weather, false, true, false)]
-    [InlineData(WidgetKind.Todo, false, true, false)]
-    [InlineData(WidgetKind.Tags, false, true, false)]
-    [InlineData(WidgetKind.Music, false, true, false)]
-    [InlineData(WidgetKind.SystemMonitor, false, true, false)]
-    [InlineData(WidgetKind.Productivity, false, false, false)]
+    [InlineData(WidgetKind.File, true, false, true, true, false)]
+    [InlineData(WidgetKind.QuickCapture, true, false, false, true, false)]
+    [InlineData(WidgetKind.Weather, false, true, false, false, true)]
+    [InlineData(WidgetKind.Todo, false, true, false, false, true)]
+    [InlineData(WidgetKind.Tags, false, true, false, false, true)]
+    [InlineData(WidgetKind.Music, false, true, false, false, true)]
+    [InlineData(WidgetKind.SystemMonitor, false, true, false, false, true)]
+    [InlineData(WidgetKind.Productivity, false, false, false, false, false)]
     public void ContentCapabilityQueries_ReturnExpectedReadOnlyState(
         WidgetKind widgetKind,
         bool hasImplementedContent,
         bool isPlaceholderOnly,
-        bool canShowInCreateEntry)
+        bool canShowInCreateEntry,
+        bool isAvailable,
+        bool isPlanned)
     {
         var factory = new WidgetContentFactory();
 
         Assert.Equal(hasImplementedContent, factory.HasImplementedContent(widgetKind));
         Assert.Equal(isPlaceholderOnly, factory.IsPlaceholderOnly(widgetKind));
         Assert.Equal(canShowInCreateEntry, factory.CanShowInCreateEntry(widgetKind));
+        Assert.Equal(isAvailable, factory.IsAvailable(widgetKind));
+        Assert.Equal(isPlanned, factory.IsPlanned(widgetKind));
+    }
+
+    [Fact]
+    public void StatusKeys_AreStableLocalizationKeys()
+    {
+        var factory = new WidgetContentFactory();
+
+        foreach (var descriptor in factory.GetDescriptors())
+        {
+            Assert.EndsWith(".StatusLabel", descriptor.StatusLabelKey);
+            Assert.EndsWith(".StatusDescription", descriptor.StatusDescriptionKey);
+            Assert.DoesNotContain(' ', descriptor.StatusLabelKey);
+            Assert.DoesNotContain(' ', descriptor.StatusDescriptionKey);
+        }
     }
 
     [Fact]

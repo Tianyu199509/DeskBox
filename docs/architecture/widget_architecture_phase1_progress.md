@@ -380,3 +380,34 @@ G.2 继续抽只读/纯计算逻辑，建议先统一窗口身份上下文：`Wi
 ### 下一步建议
 
 下一步可以做 `H.3`：把未来内容类型的“开发状态/展示状态”文案也纳入只读 descriptor，例如 `PreviewLabel` 或 `StatusText`，方便以后设置页、调试页、创建入口共用同一套状态说明。仍不建议现在开放真实入口。
+
+## 20. H.3 内容展示状态元信息
+
+已补充内容层展示状态元信息，用于后续设置页、调试页和创建入口共用状态说明：
+
+- 新增 `WidgetContentAvailability`，当前分为 `Available` 和 `Planned`。
+- `WidgetContentDescriptor` 增加：
+  - `Availability`
+  - `StatusLabelKey`
+  - `StatusDescriptionKey`
+- `WidgetContentFactory` 增加：
+  - `IsAvailable(WidgetKind)`
+  - `IsPlanned(WidgetKind)`
+- 当前 `File` 与 `QuickCapture` 标记为 `Available`。
+- `Weather`、`Todo`、`Tags`、`Music`、`SystemMonitor` 标记为 `Planned`。
+- 状态说明只保存本地化 key，不直接写死中英文文案。
+- 未修改 `LocalizationService` 字典。
+- 未接入设置页、创建入口、托盘菜单或右键菜单。
+- 未改变 `WidgetManager` 创建流程。
+- 未改变托盘/F7/层级/拖拽/IME/排序/安装器逻辑。
+
+### H.3 验证记录
+
+- `dotnet build .\DeskBox.sln -c Debug -p:Platform=x64 --no-restore`
+- `dotnet test .\DeskBox.sln -c Debug -p:Platform=x64 --no-build`
+
+当前测试数量：`133/133`。
+
+### 下一步建议
+
+内容层只读元信息已经足够支撑未来功能格子的入口规划。建议下一步不要继续堆 descriptor 字段，可以转向 `H.4`：补一个仅供测试/调试使用的 `WidgetKind` 一致性测试，确保 `WidgetRegistry` 与 `WidgetContentFactory` 对已知类型的覆盖一致。仍不接 UI。
