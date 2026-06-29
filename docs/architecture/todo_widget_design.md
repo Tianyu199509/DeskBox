@@ -346,6 +346,10 @@ Recommended commits:
 
 Do not combine all steps into one large commit.
 
+Current checkpoint: `TodoWidgetContentAdapter` now implements `IWidgetContent`
+and can be created through an explicit factory method, but Todo remains hidden
+from user-facing creation flows.
+
 ## 15. Open Questions
 
 Need product decision before implementation:

@@ -97,6 +97,16 @@ public sealed class WidgetContentFactory
         return new PlaceholderWidgetContent(config, descriptor);
     }
 
+    public IWidgetContent CreateTodoContent(WidgetConfig config, TodoWidgetStore? store = null)
+    {
+        if (config.WidgetKind != WidgetKind.Todo)
+        {
+            throw new ArgumentException("Todo content requires a Todo widget config.", nameof(config));
+        }
+
+        return new TodoWidgetContentAdapter(config, store ?? new TodoWidgetStore(config.Id));
+    }
+
     public IReadOnlyList<WidgetContentDescriptor> GetDescriptors()
     {
         return DescriptorList;

@@ -146,6 +146,60 @@ public sealed class WidgetContentFactoryTests
         Assert.False(WidgetRegistry.Default.CanCreateWindow(WidgetKind.Weather));
     }
 
+    [Fact]
+    public void CreateTodoContent_ReturnsAdapterWithoutMakingKindCreatable()
+    {
+        string tempRoot = Path.Combine(Path.GetTempPath(), "DeskBox.Tests", Guid.NewGuid().ToString("N"));
+        var factory = new WidgetContentFactory();
+        var config = new WidgetConfig
+        {
+            Id = "todo-test",
+            Name = "Todo",
+            WidgetKind = WidgetKind.Todo
+        };
+
+        try
+        {
+            string widgetsDataRoot = Directory.CreateDirectory(Path.Combine(tempRoot, "widgets")).FullName;
+            var store = new TodoWidgetStore(widgetsDataRoot, config.Id);
+
+            var content = factory.CreateTodoContent(config, store);
+
+            Assert.IsType<TodoWidgetContentAdapter>(content);
+            Assert.Equal("todo-test", content.WidgetId);
+            Assert.Equal(WidgetKind.Todo, content.WidgetKind);
+            Assert.False(factory.HasImplementedContent(WidgetKind.Todo));
+            Assert.True(factory.IsPlaceholderOnly(WidgetKind.Todo));
+            Assert.False(factory.CanShowInCreateEntry(WidgetKind.Todo));
+            Assert.False(WidgetRegistry.Default.CanCreateWindow(WidgetKind.Todo));
+        }
+        finally
+        {
+            try
+            {
+                if (Directory.Exists(tempRoot))
+                {
+                    Directory.Delete(tempRoot, recursive: true);
+                }
+            }
+            catch
+            {
+            }
+        }
+    }
+
+    [Fact]
+    public void CreateTodoContent_RejectsNonTodoConfig()
+    {
+        var factory = new WidgetContentFactory();
+        var config = new WidgetConfig
+        {
+            WidgetKind = WidgetKind.File
+        };
+
+        Assert.Throws<ArgumentException>(() => factory.CreateTodoContent(config));
+    }
+
     [Theory]
     [InlineData(WidgetKind.File)]
     [InlineData(WidgetKind.QuickCapture)]
