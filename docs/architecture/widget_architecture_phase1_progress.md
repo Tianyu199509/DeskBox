@@ -288,6 +288,10 @@ G.2 继续抽只读/纯计算逻辑，建议先统一窗口身份上下文：`Wi
 
 当前不建议继续推进 `WidgetWindowLayerController`、`WidgetWindowAnimationController` 或 `FileWidgetContent` 内容迁移。下一轮如果继续重构，优先做纯参数/只读类整理，例如 appearance 参数计算；如果要进入内容迁移，需要单独列验证矩阵。
 
+阶段性摘要：
+
+- `docs/architecture/widget_architecture_phase1_g4_checkpoint_summary.md`
+
 ### 暂不建议直接做
 
 - 不建议直接迁移文件格子内容区为 `FileWidgetContent`。
