@@ -6,6 +6,34 @@ namespace DeskBox.Tests;
 public sealed class WidgetContentFactoryTests
 {
     [Theory]
+    [InlineData(WidgetKind.File, "DeskBox", false)]
+    [InlineData(WidgetKind.QuickCapture, "Quick Capture", false)]
+    [InlineData(WidgetKind.Weather, "Weather", true)]
+    [InlineData(WidgetKind.Todo, "Todo", true)]
+    [InlineData(WidgetKind.Tags, "Tags", true)]
+    [InlineData(WidgetKind.Music, "Music", true)]
+    [InlineData(WidgetKind.SystemMonitor, "System Monitor", true)]
+    public void GetDescriptor_ReturnsContentMetadata(WidgetKind widgetKind, string title, bool hasPlaceholderContent)
+    {
+        var factory = new WidgetContentFactory();
+
+        var descriptor = factory.GetDescriptor(widgetKind);
+
+        Assert.Equal(widgetKind, descriptor.WidgetKind);
+        Assert.Equal(title, descriptor.DefaultTitle);
+        Assert.False(string.IsNullOrWhiteSpace(descriptor.DefaultGlyph));
+        Assert.Equal(hasPlaceholderContent, descriptor.HasPlaceholderContent);
+    }
+
+    [Fact]
+    public void GetDescriptor_RejectsLegacyProductivityKind()
+    {
+        var factory = new WidgetContentFactory();
+
+        Assert.Throws<NotSupportedException>(() => factory.GetDescriptor(WidgetKind.Productivity));
+    }
+
+    [Theory]
     [InlineData(WidgetKind.Weather)]
     [InlineData(WidgetKind.Todo)]
     [InlineData(WidgetKind.Tags)]
@@ -16,6 +44,7 @@ public sealed class WidgetContentFactoryTests
         var factory = new WidgetContentFactory();
 
         Assert.True(factory.CanCreatePlaceholderContent(widgetKind));
+        Assert.False(WidgetRegistry.Default.CanCreateWindow(widgetKind));
     }
 
     [Fact]

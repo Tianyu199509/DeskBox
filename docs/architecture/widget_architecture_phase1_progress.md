@@ -325,3 +325,27 @@ G.2 继续抽只读/纯计算逻辑，建议先统一窗口身份上下文：`Wi
 - 不删除旧控件访问路径，先用 forwarding properties 过渡。
 
 如果出现文件拖拽、中文重命名、F7 层级异常，优先 revert 当前阶段 commit，而不是继续在多个阶段上叠修。
+
+## 18. H.1 内容层元信息铺底
+
+已补充内容层只读元信息，用于给后续天气、Todo、标签、音乐、监控等内容控件提供统一描述：
+
+- 新增 `WidgetContentDescriptor`。
+- `WidgetContentFactory` 统一维护内容层默认标题、默认图标和是否存在占位内容。
+- `PlaceholderWidgetContent` 改为消费 descriptor，不再自己维护图标映射。
+- `WidgetRegistry` 仍然负责“是否可创建窗口”，descriptor 不接管窗口创建权限。
+- 未来类型仍然只有占位内容能力，没有用户入口，也不能创建窗口。
+- 未改变 `WidgetManager` 创建流程。
+- 未写入用户设置。
+- 未改变托盘/F7/层级/拖拽/IME/排序/安装器逻辑。
+
+### H.1 验证记录
+
+- `dotnet build .\DeskBox.sln -c Debug -p:Platform=x64 --no-restore`
+- `dotnet test .\DeskBox.sln -c Debug -p:Platform=x64 --no-build`
+
+当前测试数量：`122/122`。
+
+### 下一步建议
+
+继续保持低风险路线。下一步可以做 `H.2`：补一层只读的内容能力查询 API，例如“该类型是否已有真实内容控件、是否只有占位内容、是否允许显示在创建入口”。这一步仍然不开放入口，先把未来功能格子的判断集中起来，避免后面天气/Todo/标签各自散落判断。

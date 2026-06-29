@@ -1,5 +1,6 @@
 using DeskBox.Contracts;
 using DeskBox.Models;
+using DeskBox.Services;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
@@ -13,16 +14,18 @@ namespace DeskBox.Controls.WidgetContents;
 public sealed class PlaceholderWidgetContent : IWidgetContent
 {
     private FrameworkElement? _view;
+    private readonly WidgetContentDescriptor _descriptor;
 
-    public PlaceholderWidgetContent(WidgetConfig config)
+    public PlaceholderWidgetContent(WidgetConfig config, WidgetContentDescriptor descriptor)
     {
         Config = config;
+        _descriptor = descriptor;
     }
 
     public WidgetConfig Config { get; }
     public string WidgetId => Config.Id;
     public WidgetKind WidgetKind => Config.WidgetKind;
-    public FrameworkElement View => _view ??= CreateView(Config);
+    public FrameworkElement View => _view ??= CreateView(_descriptor);
 
     public Task InitializeAsync()
     {
@@ -46,11 +49,11 @@ public sealed class PlaceholderWidgetContent : IWidgetContent
     {
     }
 
-    private static FrameworkElement CreateView(WidgetConfig config)
+    private static FrameworkElement CreateView(WidgetContentDescriptor descriptor)
     {
         var title = new TextBlock
         {
-            Text = config.WidgetKind.ToString(),
+            Text = descriptor.DefaultTitle,
             FontSize = 15,
             FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
             TextAlignment = TextAlignment.Center,
@@ -75,7 +78,7 @@ public sealed class PlaceholderWidgetContent : IWidgetContent
             {
                 new FontIcon
                 {
-                    Glyph = GetGlyph(config.WidgetKind),
+                    Glyph = descriptor.DefaultGlyph,
                     FontSize = 24,
                     HorizontalAlignment = HorizontalAlignment.Center
                 },
@@ -88,19 +91,6 @@ public sealed class PlaceholderWidgetContent : IWidgetContent
         {
             Padding = new Thickness(16),
             Children = { stack }
-        };
-    }
-
-    private static string GetGlyph(WidgetKind kind)
-    {
-        return kind switch
-        {
-            WidgetKind.Weather => "\uE706",
-            WidgetKind.Todo => "\uE9D5",
-            WidgetKind.Tags => "\uE8EC",
-            WidgetKind.Music => "\uEC4F",
-            WidgetKind.SystemMonitor => "\uE9D9",
-            _ => "\uE8A5"
         };
     }
 }
