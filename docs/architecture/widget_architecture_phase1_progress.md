@@ -480,3 +480,21 @@ H 线后建议先做“第一个真实功能格子前置设计”，不要直接
 - 是否需要独立 store 文件。
 - 是否允许普通创建入口显示。
 - 首轮验证矩阵。
+
+## 23. Todo 格子前置设计
+
+已新增第一个真实功能格子的前置设计文档：
+
+- `docs/architecture/todo_widget_design.md`
+
+设计结论：
+
+- Todo 作为第一个真实功能格子。
+- Todo 是独立格子，不放进随记作为主入口。
+- v1 只做本地任务列表、增删改、完成状态、基础过滤。
+- v1 不做提醒、重复任务、优先级、子任务、标签、同步、系统通知。
+- Todo 数据不进入 `settings.json`，使用每个 widget 独立的 `todo.json`。
+- 在 Todo 内容、store、测试完成前，`WidgetRegistry` 和 `WidgetContentFactory` 仍保持 Todo 不可创建、不显示入口。
+- 真正启用 Todo 创建入口必须单独提交，并同步更新 registry/content descriptor 测试。
+
+当前仍未修改生产代码，也未开放 Todo 入口。
