@@ -498,3 +498,35 @@ H 线后建议先做“第一个真实功能格子前置设计”，不要直接
 - 真正启用 Todo 创建入口必须单独提交，并同步更新 registry/content descriptor 测试。
 
 当前仍未修改生产代码，也未开放 Todo 入口。
+
+## 24. Todo Store 第一小步
+
+已开始 Todo 真实功能格子的第一小步，只做数据与存储层：
+
+- 新增 `TodoItem`。
+- 新增 `TodoWidgetData`。
+- 新增 `TodoWidgetStore`。
+- 新增 `TodoWidgetStoreTests`。
+- Todo 数据路径为 `%LocalAppData%/DeskBox/data/widgets/{widgetId}/todo.json`。
+- Store 支持按 widget 隔离数据。
+- Store 会规范化版本、空文本、重复 ID、排序和缺失时间。
+- Store 使用 camelCase JSON。
+- Store 保存时使用临时文件替换，降低写坏风险。
+- 暂未新增 `TodoWidgetViewModel`。
+- 暂未新增 `TodoWidgetContent`。
+- 未修改 `WidgetRegistry`。
+- 未修改 `WidgetContentFactory`。
+- 未开放 Todo 创建入口。
+- 未接入设置页、托盘菜单、右键菜单或新建格子流程。
+- 未改变托盘/F7/层级/拖拽/IME/排序/安装器逻辑。
+
+### Todo Store 验证记录
+
+- `dotnet build .\DeskBox.sln -c Debug -p:Platform=x64 --no-restore`
+- `dotnet test .\DeskBox.sln -c Debug -p:Platform=x64 --no-build`
+
+当前测试数量：`144/144`。
+
+### 下一步建议
+
+下一步可以做 `TodoWidgetViewModel` 与 ViewModel 单元测试，继续不接 UI、不开放入口。
