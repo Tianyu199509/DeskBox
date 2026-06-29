@@ -1,3 +1,4 @@
+using DeskBox.Contracts;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
@@ -55,6 +56,11 @@ public sealed partial class WidgetShell : UserControl
     public Button CloseActionButton => CloseButton;
     public FontIcon MoreActionIcon => MoreButtonIcon;
     public FontIcon CloseActionIcon => CloseButtonIcon;
+
+    public void SetContent(IWidgetContent content)
+    {
+        ShellContent = content.View;
+    }
 
     public void SetTitleBarRowHeight(GridLength height)
     {
