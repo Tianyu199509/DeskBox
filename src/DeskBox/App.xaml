@@ -41,6 +41,24 @@
                 </ResourceDictionary>
             </ResourceDictionary.ThemeDictionaries>
 
+            <FontFamily x:Key="DeskBoxMenuFontFamily">Microsoft YaHei UI, Segoe UI Variable, Segoe UI</FontFamily>
+
+            <Style TargetType="MenuFlyoutPresenter" BasedOn="{StaticResource DefaultMenuFlyoutPresenterStyle}">
+                <Setter Property="FontFamily" Value="{StaticResource DeskBoxMenuFontFamily}" />
+            </Style>
+
+            <Style TargetType="MenuFlyoutItem" BasedOn="{StaticResource DefaultMenuFlyoutItemStyle}">
+                <Setter Property="FontFamily" Value="{StaticResource DeskBoxMenuFontFamily}" />
+            </Style>
+
+            <Style TargetType="ToggleMenuFlyoutItem" BasedOn="{StaticResource DefaultToggleMenuFlyoutItemStyle}">
+                <Setter Property="FontFamily" Value="{StaticResource DeskBoxMenuFontFamily}" />
+            </Style>
+
+            <Style TargetType="MenuFlyoutSubItem" BasedOn="{StaticResource DefaultMenuFlyoutSubItemStyle}">
+                <Setter Property="FontFamily" Value="{StaticResource DeskBoxMenuFontFamily}" />
+            </Style>
+
             <!-- Custom styles to override missing system styles in some environments -->
             <Style x:Key="SubtleButtonStyle" TargetType="Button" BasedOn="{StaticResource DefaultButtonStyle}">
                 <Setter Property="Background" Value="Transparent" />

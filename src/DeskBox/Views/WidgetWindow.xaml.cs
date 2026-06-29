@@ -153,6 +153,8 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
         Math.Max(MinWidgetSlideOffset, ViewModel.Config.Height));
 
     private bool _isVisibleOnDesktop;
+    private bool _isClosing;
+    private DateTime _lastElevateForInteractionUtc = DateTime.MinValue;
     public new bool Visible
     {
         get => _isVisibleOnDesktop;
@@ -295,6 +297,7 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
 
         Closed += (_, _) =>
         {
+            _isClosing = true;
             Visible = false;
             _settingsService.SettingsChanged -= OnSettingsChanged;
             _localizationService.LanguageChanged -= OnLanguageChanged;
@@ -358,6 +361,18 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
         App.Log($"[ZOrder] Widget PushToBottom hwnd=0x{_hWnd.ToInt64():X}");
     }
 
+    public void ClearTopMostOnly()
+    {
+        _isAtDesktopLayer = true;
+        Win32Helper.ClearWindowTopMost(_hWnd);
+        IntPtr foreground = Win32Helper.GetForegroundWindow();
+        if (foreground != IntPtr.Zero && foreground != _hWnd)
+        {
+            Win32Helper.BringWindowToFront(foreground);
+        }
+        App.Log($"[ZOrder] Widget ClearTopMostOnly hwnd=0x{_hWnd.ToInt64():X} fg=0x{foreground.ToInt64():X}");
+    }
+
     public void ShowPreparedAtDesktopLayer(bool persistVisibility = true)
     {
         LogTrayWindow("ShowPreparedAtDesktopLayer");
@@ -419,6 +434,12 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
         if (!Visible)
         {
             App.Log($"[ZOrder] Widget EnsureRaisedFromTrayTopMost SKIPPED not-visible hwnd=0x{_hWnd.ToInt64():X}");
+            return;
+        }
+
+        if (_isAtDesktopLayer)
+        {
+            App.Log($"[ZOrder] Widget EnsureRaisedFromTrayTopMost SKIPPED atDesktop hwnd=0x{_hWnd.ToInt64():X}");
             return;
         }
 
@@ -1041,12 +1062,12 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
             SettingsService.WidgetAnimationEffectSlideFade => new WidgetAnimationProfile(
                 dirX, dirY, dirX, dirY,
                 WidgetAnimationSoftOpacity, WidgetAnimationSoftOpacity,
-                0.8f, 0.8f,
+                WidgetAnimationRestingScale, WidgetAnimationRestingScale,
                 durationMs, true),
             SettingsService.WidgetAnimationEffectScaleSlide => new WidgetAnimationProfile(
                 dirX, dirY, dirX, dirY,
                 WidgetAnimationSoftOpacity, WidgetAnimationSoftOpacity,
-                0.8f, 0.8f,
+                WidgetAnimationRestingScale, WidgetAnimationRestingScale,
                 durationMs, true),
             _ => new WidgetAnimationProfile(
                 dirX, dirY, dirX, dirY,
@@ -1286,7 +1307,9 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
             return;
         }
 
+        _lastElevateForInteractionUtc = DateTime.UtcNow;
         HoldTemporaryTopMost();
+        App.Current.WidgetManager?.BringAllVisibleWidgetsToFront(_hWnd);
         RootGrid.Focus(FocusState.Programmatic);
     }
 
@@ -1329,7 +1352,8 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
         if (args.WindowActivationState == WindowActivationState.Deactivated)
         {
             if (Visible && !_isAtDesktopLayer &&
-                App.Current.WidgetManager is not { WidgetsRaisedFromTray: true })
+                App.Current.WidgetManager is not { WidgetsRaisedFromTray: true } &&
+                (DateTime.UtcNow - _lastElevateForInteractionUtc).TotalMilliseconds > 300)
             {
                 App.Log($"[ZOrder] Widget Deactivated→QueueRestore hwnd=0x{_hWnd.ToInt64():X}");
                 QueueRestoreDesktopLayerIfForegroundLeavesDeskBox();
@@ -1354,6 +1378,7 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
         _keepRaisedUntilDeactivate = true;
         _restoreDesktopLayerWhenIdle = false;
         PlayTrayRaiseAnimation();
+        App.Current.WidgetManager?.BringAllVisibleWidgetsToFront(_hWnd);
     }
 
     private void QueueRestoreDesktopLayerIfForegroundLeavesDeskBox()
@@ -1428,7 +1453,7 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
         _topMostSafetyTimer = null;
         _keepRaisedUntilDeactivate = false;
         _restoreDesktopLayerWhenIdle = false;
-        PushToBottom();
+        ClearTopMostOnly();
         ApplyBackdropPreference();
     }
 
@@ -1488,6 +1513,11 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
 
     private void ApplyBackdropPreference()
     {
+        if (_hWnd == IntPtr.Zero || _isClosing)
+        {
+            return;
+        }
+
         if (_isNativeBackdropSuppressedForTrayReveal)
         {
             ApplySurfaceStyle();

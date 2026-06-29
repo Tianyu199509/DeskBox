@@ -1,6 +1,7 @@
 "use client";
 
 import { motion } from "framer-motion";
+import { CharByChar } from "@/components/CharByChar";
 
 const roadmapItems = [
   { title: "在线更新", description: "客户端自动检测新版本并一键更新" },
@@ -12,10 +13,10 @@ const roadmapItems = [
 
 export default function RoadmapPage() {
   return (
-    <div className="py-16 px-4 sm:px-6 lg:px-8">
+    <div className="pt-28 pb-16 px-4 sm:px-6 lg:px-8">
       <div className="max-w-4xl mx-auto">
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5 }} className="text-center mb-16">
-          <h1 className="text-4xl font-bold mb-4">未来规划</h1>
+          <h1 className="text-4xl font-bold mb-4"><CharByChar text="未来规划" /></h1>
           <p className="text-[var(--secondary)] max-w-2xl mx-auto">DeskBox 的发展路线图</p>
         </motion.div>
         <div className="space-y-6">

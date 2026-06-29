@@ -53,14 +53,17 @@ public sealed class GlobalHotkeyService : IDisposable
 
     public void Attach(IntPtr windowHandle)
     {
+        App.Log($"[GlobalHotkey] Attach called hwnd=0x{windowHandle.ToInt64():X}");
         if (windowHandle == IntPtr.Zero)
         {
+            App.Log("[GlobalHotkey] Attach skipped: windowHandle is Zero");
             return;
         }
 
         Detach();
         _windowHandle = windowHandle;
         _isSubclassInstalled = Win32Helper.SetWindowSubclass(_windowHandle, _subclassProc, SubclassId, UIntPtr.Zero);
+        App.Log($"[GlobalHotkey] Subclass installed={_isSubclassInstalled} error={Marshal.GetLastWin32Error()}");
         RefreshRegistration();
     }
 
@@ -82,8 +85,11 @@ public sealed class GlobalHotkeyService : IDisposable
         Unregister();
         LastError = null;
 
+        App.Log($"[GlobalHotkey] RefreshRegistration hwnd=0x{_windowHandle.ToInt64():X} enabled={_settingsService.Settings.GlobalHotkeyEnabled} gesture={CurrentGestureText}");
+
         if (_windowHandle == IntPtr.Zero || !_settingsService.Settings.GlobalHotkeyEnabled)
         {
+            App.Log("[GlobalHotkey] RefreshRegistration skipped: handle=0 or disabled");
             UninstallKeyboardHook();
             NotifyRegistrationChanged();
             return;
@@ -92,6 +98,7 @@ public sealed class GlobalHotkeyService : IDisposable
         var gesture = CurrentGesture;
         if (!IsValidGesture(gesture))
         {
+            App.Log("[GlobalHotkey] RefreshRegistration skipped: invalid gesture");
             UninstallKeyboardHook();
             LastError = _localizationService.T("Settings.GlobalHotkey.Status.Invalid");
             NotifyRegistrationChanged();

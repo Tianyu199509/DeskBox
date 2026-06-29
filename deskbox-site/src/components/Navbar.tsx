@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { usePathname } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 
@@ -16,7 +16,28 @@ const navItems = [
 
 export function Navbar() {
   const [isOpen, setIsOpen] = useState(false);
+  const [visible, setVisible] = useState(true);
+  const [atTop, setAtTop] = useState(true);
   const pathname = usePathname();
+  const lastScrollY = useRef(0);
+
+  useEffect(() => {
+    const onScroll = () => {
+      const y = window.scrollY;
+      setAtTop(y < 10);
+      if (y < 10) {
+        setVisible(true);
+      } else if (y > lastScrollY.current + 5) {
+        setVisible(false);
+        setIsOpen(false);
+      } else if (y < lastScrollY.current - 5) {
+        setVisible(true);
+      }
+      lastScrollY.current = y;
+    };
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, []);
 
   const isActive = (href: string) => {
     if (href === "/") return pathname === "/";
@@ -24,7 +45,13 @@ export function Navbar() {
   };
 
   return (
-    <nav className="sticky top-0 z-50 backdrop-blur-xl bg-[var(--background)]/70 border-b border-[var(--card-border)]">
+    <motion.nav
+      initial={false}
+      animate={{ y: visible ? 0 : -80 }}
+      transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
+      className="fixed top-0 left-0 right-0 z-50 backdrop-blur-xl bg-[var(--background)]/70 border-b border-[var(--card-border)]"
+      style={{ willChange: "transform" }}
+    >
       <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-16">
           <Link href="/" className="flex items-center gap-2.5">
@@ -36,13 +63,20 @@ export function Navbar() {
               <Link
                 key={item.href}
                 href={item.href}
-                className={`px-3 py-2 rounded-lg text-sm font-medium transition-all duration-150 ${
+                className={`relative px-3 py-2 rounded-lg text-sm font-medium transition-all duration-150 ${
                   isActive(item.href)
-                    ? "text-[var(--accent)] bg-[var(--accent-light)]"
+                    ? "text-[var(--foreground)]"
                     : "text-[var(--secondary)] hover:text-[var(--foreground)] hover:bg-[var(--card-border)]/50"
                 }`}
               >
                 {item.label}
+                {isActive(item.href) && (
+                  <motion.span
+                    layoutId="nav-indicator"
+                    className="absolute bottom-0 left-1/2 -translate-x-1/2 h-[3px] w-5 rounded-full bg-[var(--accent)]"
+                    transition={{ type: "spring", stiffness: 400, damping: 30 }}
+                  />
+                )}
               </Link>
             ))}
             <Link href="/download" className="fluent-button text-sm py-2 px-5 ml-3">下载</Link>
@@ -77,6 +111,6 @@ export function Navbar() {
           </motion.div>
         )}
       </AnimatePresence>
-    </nav>
+    </motion.nav>
   );
 }

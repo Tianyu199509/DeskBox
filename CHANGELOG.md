@@ -1,5 +1,33 @@
 # Changelog
 
+## 1.1.9 - 2026-06-29
+
+### English
+
+- Fixed clipboard monitoring not persisting after restart: `QuickCaptureEnabled` now defaults to `true`.
+- Fixed widget z-order: widgets now follow natural Windows z-order instead of being pushed to bottom. Added 2s safety auto-restore timer.
+- Fixed QuickCapture z-order consistency with WidgetWindow: both now use `ClearTopMostOnly`, `BringAllVisibleWidgetsToFront`, and 300ms deactivation guard.
+- Improved QuickCapture UI: Sticky Notes style input, search moved to tab bar, expand button for full-screen editing, input only visible on Records tab.
+- Fixed toggle switch text localization: deferred to `SettingsRoot.Loaded` for proper control resolution.
+- Fixed tray menu font: explicit `FontFamily` fallback when `DefaultMenuFlyoutItemStyle` not found.
+- Fixed widget animation: removed scale effect from SlideFade and ScaleSlide effects for pure slide-in.
+- Fixed global hotkey (F7) not working after packaged install.
+- Fixed delete widget crash: added `_isClosing` guard to `ApplyBackdropPreference`.
+- Fixed hotkey toggle: `ShouldHideWidgetsForTrayToggle` now hides when widgets are visible.
+
+### 中文
+
+- 修复剪贴板监控重启后不生效：`QuickCaptureEnabled` 默认值改为 `true`。
+- 修复格子 z-order：格子现在跟随 Windows 自然层级，不再被推到底层。新增 2 秒安全自动恢复定时器。
+- 修复随记 z-order 与文件格子的一致性：两者都使用 `ClearTopMostOnly`、`BringAllVisibleWidgetsToFront` 和 300ms 失焦守卫。
+- 优化随记 UI：便签风格输入框，搜索移到 Tab 栏，展开按钮全屏编辑，输入框仅在记录 Tab 显示。
+- 修复开关文字本地化：延迟到 `SettingsRoot.Loaded` 后设置，确保控件已渲染。
+- 修复托盘菜单字体：当 `DefaultMenuFlyoutItemStyle` 找不到时，显式设置 `FontFamily` 兜底。
+- 修复格子动画：移除 SlideFade 和 ScaleSlide 效果的缩放，纯滑入。
+- 修复全局快捷键（F7）打包后不工作。
+- 修复删除格子崩溃：`ApplyBackdropPreference` 加 `_isClosing` 守卫。
+- 修复快捷键切换：`ShouldHideWidgetsForTrayToggle` 在格子可见时返回隐藏。
+
 ## 1.1.8 - 2026-06-29
 
 ### English

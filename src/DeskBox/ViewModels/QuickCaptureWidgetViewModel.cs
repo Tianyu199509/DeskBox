@@ -74,6 +74,8 @@ public sealed partial class QuickCaptureWidgetViewModel : ObservableObject, IDis
         private set => Config.Name = value;
     }
 
+    public string DisplayName => _localizationService.T("QuickCapture.Name");
+
     public string InputText
     {
         get => _inputText;
@@ -117,6 +119,7 @@ public sealed partial class QuickCaptureWidgetViewModel : ObservableObject, IDis
             {
                 OnPropertyChanged(nameof(SearchBoxVisibility));
                 OnPropertyChanged(nameof(SearchButtonVisibility));
+                OnPropertyChanged(nameof(InputAreaVisibility));
             }
         }
     }
@@ -126,6 +129,12 @@ public sealed partial class QuickCaptureWidgetViewModel : ObservableObject, IDis
     public Visibility SearchButtonVisibility => IsSearchExpanded ? Visibility.Collapsed : Visibility.Visible;
 
     public string SearchPlaceholderText => _localizationService.T("QuickCapture.SearchPlaceholder");
+
+    public string InputPlaceholderText => _localizationService.T("QuickCapture.InputPlaceholder");
+
+    public string ExpandInputTooltipText => _localizationService.T("QuickCapture.ExpandInput");
+
+    public Visibility InputAreaVisibility => IsRecordsView && !IsSearchExpanded ? Visibility.Visible : Visibility.Collapsed;
 
     public string SearchScopeText => _localizationService.T("QuickCapture.SearchScope");
 
@@ -145,6 +154,7 @@ public sealed partial class QuickCaptureWidgetViewModel : ObservableObject, IDis
             OnPropertyChanged(nameof(IsRecordsView));
             OnPropertyChanged(nameof(IsPinnedView));
             OnPropertyChanged(nameof(IsRecentView));
+            OnPropertyChanged(nameof(InputAreaVisibility));
             OnPropertyChanged(nameof(RecentCaptureStatusVisibility));
             OnPropertyChanged(nameof(RecentCaptureActionVisibility));
             RefreshVisibleItemsFromCacheOrService();
@@ -512,6 +522,7 @@ public sealed partial class QuickCaptureWidgetViewModel : ObservableObject, IDis
     private void OnLanguageChanged()
     {
         UpdateEmptyStateText();
+        OnPropertyChanged(nameof(DisplayName));
         OnPropertyChanged(nameof(RecordsTabText));
         OnPropertyChanged(nameof(PinnedTabText));
         OnPropertyChanged(nameof(RecentTabText));

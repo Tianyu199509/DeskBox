@@ -15,18 +15,17 @@ DeskBox is a lightweight WinUI 3 desktop organizer for Windows 11. It creates na
 
 Download the latest installer from [GitHub Releases](https://github.com/Tianyu199509/DeskBox/releases).
 
-Current release: 1.1.8
+Current release: 1.1.9
 
-- [DeskBox_Setup_1.1.8_x64.exe](https://github.com/Tianyu199509/DeskBox/releases/download/v1.1.8/DeskBox_Setup_1.1.8_x64.exe)
+- [DeskBox_Setup_1.1.9_x64.exe](https://github.com/Tianyu199509/DeskBox/releases/download/v1.1.9/DeskBox_Setup_1.1.9_x64.exe)
 
 The installer checks for .NET 8 Runtime x64 and Windows App Runtime 2.1.3 x64. If either dependency is missing, the setup flow can download and install it for you.
 
-## What's New In 1.1.8
+## What's New In 1.1.9
 
-- Fixed app not launching on other computers (EnableMsixTooling was disabled).
-- Fixed global hotkey (F7) not working after packaged install.
-- Fixed toggle switch style consistency.
-- Fixed settings window staying on top from tray right-click.
+- Fixed clipboard monitoring persistence and widget z-order issues.
+- Improved QuickCapture UI: Sticky Notes style input, search in tab bar, full-screen editing.
+- Fixed global hotkey, toggle text localization, tray menu font, and widget animation.
 
 See the full [changelog](CHANGELOG.md).
 

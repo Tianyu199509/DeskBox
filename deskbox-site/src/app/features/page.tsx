@@ -2,6 +2,7 @@
 
 import { motion } from "framer-motion";
 import Image from "next/image";
+import { CharByChar } from "@/components/CharByChar";
 
 const features = [
   { title: "收纳格子", subtitle: "把文件收进格子里", description: "创建桌面格子，将文件分门别类。支持图标视图和列表视图，拖拽入格，批量操作。图片文件自动显示缩略图预览。", image: "/widget-light.png", highlights: ["图标视图 / 列表视图切换", "拖拽文件直接入格", "右键菜单批量操作", "图片缩略图预览"] },
@@ -12,10 +13,10 @@ const features = [
 
 export default function FeaturesPage() {
   return (
-    <div className="py-20 px-4 sm:px-6 lg:px-8">
+    <div className="pt-28 pb-20 px-4 sm:px-6 lg:px-8">
       <div className="max-w-6xl mx-auto">
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.6, ease: [0.16, 1, 0.3, 1] }} className="text-center mb-24">
-          <h1 className="text-4xl sm:text-5xl font-bold mb-4">功能</h1>
+          <h1 className="text-4xl sm:text-5xl font-bold mb-4"><CharByChar text="功能" /></h1>
           <p className="text-[var(--secondary)] text-lg max-w-lg mx-auto">每个功能都围绕一个核心需求设计</p>
         </motion.div>
         <div className="space-y-40">
@@ -36,9 +37,9 @@ export default function FeaturesPage() {
                 </ul>
               </div>
               <div className="lg:w-3/5">
-                <div className="relative">
-                  <div className="absolute inset-0 bg-gradient-to-br from-[var(--accent)]/10 to-transparent rounded-2xl blur-3xl" />
-                  <Image src={feature.image} alt={feature.title} width={900} height={560} className="relative rounded-xl border border-[var(--card-border)] shadow-xl w-full" />
+                <div className="feature-image-wrapper rounded-xl border border-[var(--card-border)] shadow-xl">
+                  <div className="absolute inset-0 bg-gradient-to-br from-[var(--accent)]/10 to-transparent rounded-2xl blur-3xl" style={{ position: "absolute", zIndex: 0 }} />
+                  <Image src={feature.image} alt={feature.title} width={900} height={560} className="relative rounded-xl w-full" style={{ position: "relative", zIndex: 1 }} />
                 </div>
               </div>
             </motion.div>

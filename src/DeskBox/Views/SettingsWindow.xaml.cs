@@ -76,6 +76,7 @@ public sealed partial class SettingsWindow : Window
             _ = ViewModel.RefreshQuickCaptureImageCacheInfoAsync();
             RefreshGlobalHotkeyControls();
             UpdateResponsiveLayout(GetWindowWidth());
+            ApplyLocalizedToggleSwitchContent();
         };
 
         SystemBackdrop = new Microsoft.UI.Xaml.Media.MicaBackdrop

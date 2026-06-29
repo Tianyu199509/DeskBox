@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
+import { CharByChar } from "@/components/CharByChar";
 
 interface ChangelogEntry { version: string; date: string; english: string[]; chinese: string[]; }
 
@@ -43,11 +44,11 @@ export default function ChangelogPage() {
   }, []);
 
   return (
-    <div className="py-16 px-4 sm:px-6 lg:px-8">
+    <div className="pt-28 pb-16 px-4 sm:px-6 lg:px-8">
       <div className="max-w-4xl mx-auto">
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5 }} className="flex justify-between items-center mb-12">
           <div>
-            <h1 className="text-4xl font-bold mb-2">更新日志</h1>
+            <h1 className="text-4xl font-bold mb-2"><CharByChar text="更新日志" /></h1>
             <p className="text-[var(--secondary)]">DeskBox 版本更新记录</p>
           </div>
           <div className="flex gap-2">

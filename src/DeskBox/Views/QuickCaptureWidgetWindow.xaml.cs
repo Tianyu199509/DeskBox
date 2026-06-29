@@ -91,11 +91,13 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
     private double? _trayAnimationOffsetOverrideY;
     private bool _isApplyingTrayAnimationBounds;
     private QuickCaptureItemViewModel? _editingItem;
+    private bool _isExpandingInput;
     private Microsoft.UI.Composition.Visual? _cachedRootVisual;
     private long _backdropRefreshGeneration;
     private long _statusToastGeneration;
     private Microsoft.UI.Dispatching.DispatcherQueueTimer? _autoRestoreTimer;
     private Microsoft.UI.Dispatching.DispatcherQueueTimer? _topMostSafetyTimer;
+    private DateTime _lastElevateForInteractionUtc = DateTime.MinValue;
     private QuickCaptureDeletedItemSnapshot? _pendingDeletedItemSnapshot;
 
     private bool _hasTabBrushCache;
@@ -180,6 +182,18 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
         Win32Helper.ClearWindowTopMost(_hWnd);
         Win32Helper.SetWindowToBottom(_hWnd);
         App.Log($"[ZOrder] QuickCapture PushToBottom hwnd=0x{_hWnd.ToInt64():X}");
+    }
+
+    public void ClearTopMostOnly()
+    {
+        _isAtDesktopLayer = true;
+        Win32Helper.ClearWindowTopMost(_hWnd);
+        IntPtr foreground = Win32Helper.GetForegroundWindow();
+        if (foreground != IntPtr.Zero && foreground != _hWnd)
+        {
+            Win32Helper.BringWindowToFront(foreground);
+        }
+        App.Log($"[ZOrder] QuickCapture ClearTopMostOnly hwnd=0x{_hWnd.ToInt64():X} fg=0x{foreground.ToInt64():X}");
     }
 
     public void ShowPreparedAtDesktopLayer(bool persistVisibility = true)
@@ -528,14 +542,12 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
 
         InputTextBox.PlaceholderText = _localizationService.T("QuickCapture.InputPlaceholder");
         SearchTextBox.PlaceholderText = searchText;
-        ToolTipService.SetToolTip(AddInputButton, addInputText);
         ToolTipService.SetToolTip(SearchButton, searchText);
         ToolTipService.SetToolTip(CloseSearchButton, closeSearchText);
         ToolTipService.SetToolTip(MoreButton, moreText);
         ToolTipService.SetToolTip(CloseButton, closeText);
         ToolTipService.SetToolTip(EditCloseButton, _localizationService.T("Common.Cancel"));
         AutomationProperties.SetName(InputTextBox, _localizationService.T("QuickCapture.InputPlaceholder"));
-        AutomationProperties.SetName(AddInputButton, addInputText);
         AutomationProperties.SetName(SearchButton, searchText);
         AutomationProperties.SetName(SearchTextBox, searchText);
         AutomationProperties.SetName(CloseSearchButton, closeSearchText);
@@ -619,6 +631,17 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
     {
         await ViewModel.AddInputAsync();
         InputTextBox.Focus(FocusState.Programmatic);
+    }
+
+    private void ExpandInputButton_Click(object sender, RoutedEventArgs e)
+    {
+        _isExpandingInput = true;
+        _editingItem = null;
+        EditTextBox.Text = InputTextBox.Text;
+        EditTitleText.Text = _localizationService.T("QuickCapture.InputPlaceholder");
+        EditOverlay.Visibility = Visibility.Visible;
+        EditTextBox.Focus(FocusState.Programmatic);
+        EditTextBox.Select(EditTextBox.Text.Length, 0);
     }
 
     private async void InputTextBox_KeyDown(object sender, KeyRoutedEventArgs e)
@@ -1640,16 +1663,24 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
 
     private async Task SaveInlineEditAsync()
     {
-        if (_editingItem is not { } item)
-        {
-            CloseInlineEdit();
-            return;
-        }
-
         string body = EditTextBox.Text;
         if (string.IsNullOrWhiteSpace(body))
         {
             ShowStatusToast(_localizationService.T("QuickCapture.EmptyEdit"));
+            return;
+        }
+
+        if (_isExpandingInput)
+        {
+            InputTextBox.Text = body;
+            await ViewModel.AddInputAsync();
+            CloseInlineEdit();
+            return;
+        }
+
+        if (_editingItem is not { } item)
+        {
+            CloseInlineEdit();
             return;
         }
 
@@ -1660,9 +1691,10 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
     private void CloseInlineEdit()
     {
         _editingItem = null;
+        _isExpandingInput = false;
         EditOverlay.Visibility = Visibility.Collapsed;
         EditTextBox.Text = string.Empty;
-        RootGrid.Focus(FocusState.Programmatic);
+        InputTextBox.Focus(FocusState.Programmatic);
     }
 
     private async Task ConfirmClearDataAsync()
@@ -2411,7 +2443,8 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
         if (args.WindowActivationState == WindowActivationState.Deactivated)
         {
             if (Visible && !_isAtDesktopLayer &&
-                App.Current.WidgetManager is not { WidgetsRaisedFromTray: true })
+                App.Current.WidgetManager is not { WidgetsRaisedFromTray: true } &&
+                (DateTime.UtcNow - _lastElevateForInteractionUtc).TotalMilliseconds > 300)
             {
                 App.Log($"[ZOrder] QuickCapture Deactivated→QueueRestore hwnd=0x{_hWnd.ToInt64():X}");
                 QueueRestoreDesktopLayerIfForegroundLeavesDeskBox();
@@ -2495,7 +2528,7 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
         _topMostSafetyTimer = null;
         _keepRaisedUntilDeactivate = false;
         _restoreDesktopLayerWhenIdle = false;
-        PushToBottom();
+        ClearTopMostOnly();
         ApplyBackdropPreference();
     }
 
@@ -2506,7 +2539,9 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
             return;
         }
 
+        _lastElevateForInteractionUtc = DateTime.UtcNow;
         HoldTemporaryTopMost();
+        App.Current.WidgetManager?.BringAllVisibleWidgetsToFront(_hWnd);
         RootGrid.Focus(FocusState.Programmatic);
     }
 

@@ -131,12 +131,11 @@
             <x:Double x:Key="ToggleSwitchPostContentMargin">0</x:Double>
 
             <Style x:Key="SettingToggleSwitchStyle" TargetType="ToggleSwitch">
-                <Setter Property="MinWidth" Value="0" />
+                <Setter Property="Width" Value="44" />
+                <Setter Property="MinWidth" Value="44" />
                 <Setter Property="HorizontalAlignment" Value="Right" />
                 <Setter Property="VerticalAlignment" Value="Center" />
                 <Setter Property="Margin" Value="0" />
-                <Setter Property="OffContent" Value="" />
-                <Setter Property="OnContent" Value="" />
             </Style>
 
             <Style x:Key="DrillDownRowStyle" TargetType="Button">

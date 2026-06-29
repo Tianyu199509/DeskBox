@@ -124,8 +124,8 @@ public sealed class WidgetManager
         }
 
         App.LogVerbose(
-            $"[TrayBatch] ToggleDecision=raise reason=visible-covered-by-external hwnd=0x{foregroundWindow.ToInt64():X}");
-        return false;
+            $"[TrayBatch] ToggleDecision=hide reason=visible-widgets-exist hwnd=0x{foregroundWindow.ToInt64():X}");
+        return true;
     }
 
     public WidgetManager(
@@ -1257,6 +1257,25 @@ public sealed class WidgetManager
     public void ForceRestoreRaisedWidgetsToDesktopLayer()
     {
         RestoreRaisedWidgetsToDesktopLayer(force: true);
+    }
+
+    public void BringAllVisibleWidgetsToFront(IntPtr exceptHwnd = default)
+    {
+        foreach (var (_, (window, _)) in _widgets)
+        {
+            if (window.Visible && window.WindowHandle != exceptHwnd)
+            {
+                Win32Helper.BringWindowToFront(window.WindowHandle);
+            }
+        }
+
+        foreach (var (_, (window, _)) in _quickCaptureWidgets)
+        {
+            if (window.Visible && window.WindowHandle != exceptHwnd)
+            {
+                Win32Helper.BringWindowToFront(window.WindowHandle);
+            }
+        }
     }
 
     public bool RequestRestoreRaisedWidgetsToDesktopLayer(string reason = "interaction-ended")

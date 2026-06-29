@@ -29,6 +29,8 @@ public partial class App : Application
     private const double TrayMenuItemMinHeight = 36;
     private const int TrayContextMenuFallbackOffsetPixels = 24;
     private const int TrayContextMenuEstimatedWidth = (int)TrayMenuItemWidth + 16;
+    private const string MenuFontFamilyResourceKey = "DeskBoxMenuFontFamily";
+    private const string DefaultMenuFontFamily = "Microsoft YaHei UI, Segoe UI Variable, Segoe UI";
     private const int MaxQueuedLogLines = 4096;
     private const string VerboseLoggingEnvironmentVariable = "DESKBOX_VERBOSE_LOG";
     private static readonly bool EnableVerboseLogging = IsEnabledEnvironmentValue(
@@ -1309,10 +1311,19 @@ public partial class App : Application
             itemStyle.BasedOn = defaultItemStyle;
         }
 
+        itemStyle.Setters.Add(new Setter(Control.FontFamilyProperty, GetMenuFontFamily()));
         itemStyle.Setters.Add(new Setter(FrameworkElement.MinHeightProperty, TrayMenuItemMinHeight));
         itemStyle.Setters.Add(new Setter(Control.PaddingProperty, new Thickness(12, 8, 12, 8)));
         itemStyle.Setters.Add(new Setter(Control.FontSizeProperty, 13.0));
         return itemStyle;
+    }
+
+    private static Microsoft.UI.Xaml.Media.FontFamily GetMenuFontFamily()
+    {
+        return Current.Resources.TryGetValue(MenuFontFamilyResourceKey, out var fontFamily) &&
+               fontFamily is Microsoft.UI.Xaml.Media.FontFamily menuFontFamily
+            ? menuFontFamily
+            : new Microsoft.UI.Xaml.Media.FontFamily(DefaultMenuFontFamily);
     }
 
     private static async Task RunTrayMenuActionAsync(MenuFlyout contextMenu, Action action)

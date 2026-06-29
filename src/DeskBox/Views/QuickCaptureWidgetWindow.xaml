@@ -20,11 +20,14 @@
         Drop="RootGrid_Drop">
         <Grid.Resources>
             <Style x:Key="QuickCaptureIconButtonStyle" TargetType="Button">
-                <Setter Property="Width" Value="26" />
-                <Setter Property="Height" Value="26" />
-                <Setter Property="MinWidth" Value="26" />
+                <Setter Property="Width" Value="22" />
+                <Setter Property="Height" Value="22" />
+                <Setter Property="MinWidth" Value="22" />
                 <Setter Property="Padding" Value="0" />
-                <Setter Property="CornerRadius" Value="6" />
+                <Setter Property="Background" Value="Transparent" />
+                <Setter Property="BorderBrush" Value="Transparent" />
+                <Setter Property="BorderThickness" Value="0" />
+                <Setter Property="CornerRadius" Value="4" />
             </Style>
 
             <Style x:Key="QuickCaptureItemActionButtonStyle" TargetType="Button">
@@ -120,7 +123,7 @@
                 <TextBlock
                     x:Name="TitleText"
                     FontSize="{Binding TitleTextSize}"
-                    Text="{Binding Name}"
+                    Text="{Binding DisplayName}"
                     TextTrimming="CharacterEllipsis"
                     VerticalAlignment="Center" />
             </StackPanel>
@@ -165,10 +168,13 @@
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
                 <RowDefinition Height="*" />
             </Grid.RowDefinitions>
 
-            <Grid Grid.Row="0" ColumnSpacing="8">
+            <Grid Grid.Row="2" ColumnSpacing="6"
+                Margin="0,-4,0,0"
+                Visibility="{Binding InputAreaVisibility}">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="Auto" />
@@ -178,27 +184,32 @@
                     Grid.Column="0"
                     Height="{Binding IconSize}"
                     MinHeight="28"
-                    Padding="8,4,8,0"
+                    Padding="8,7,8,0"
+                    BorderThickness="0"
                     FontSize="{Binding TextSize}"
                     VerticalAlignment="Center"
                     VerticalContentAlignment="Center"
+                    PlaceholderText="{Binding InputPlaceholderText}"
                     Text="{Binding InputText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                     TextWrapping="Wrap"
                     KeyDown="InputTextBox_KeyDown" />
                 <Button
-                    x:Name="AddInputButton"
+                    x:Name="ExpandInputButton"
                     Grid.Column="1"
-                    Click="AddButton_Click"
-                    Width="{Binding IconSize}"
-                    Height="{Binding IconSize}"
-                    MinWidth="{Binding IconSize}"
-                    IsEnabled="{Binding CanAddInput}"
-                    Style="{StaticResource QuickCaptureIconButtonStyle}">
-                    <FontIcon FontSize="{Binding ActionIconSize}" Glyph="&#xE710;" />
+                    Click="ExpandInputButton_Click"
+                    Width="22"
+                    Height="22"
+                    MinWidth="22"
+                    Style="{StaticResource QuickCaptureIconButtonStyle}"
+                    ToolTipService.ToolTip="{Binding ExpandInputTooltipText}">
+                    <FontIcon FontSize="12" Glyph="&#xE740;" />
                 </Button>
             </Grid>
 
-            <Grid Grid.Row="1" ColumnSpacing="5">
+            <Border Grid.Row="1" Height="1" Margin="0,2"
+                Visibility="{Binding InputAreaVisibility}" />
+
+            <Grid Grid.Row="0" ColumnSpacing="5">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="Auto" />
@@ -270,20 +281,20 @@
                     x:Name="SearchButton"
                     Grid.Column="1"
                     Click="SearchButton_Click"
-                    Width="{Binding IconSize}"
-                    Height="{Binding IconSize}"
-                    MinWidth="{Binding IconSize}"
+                    Width="22"
+                    Height="22"
+                    MinWidth="22"
                     Style="{StaticResource QuickCaptureIconButtonStyle}"
                     ToolTipService.ToolTip="{Binding SearchPlaceholderText}"
                     Visibility="{Binding SearchButtonVisibility}">
-                    <FontIcon FontSize="{Binding ActionIconSize}" Glyph="&#xE721;" />
+                    <FontIcon FontSize="12" Glyph="&#xE721;" />
                 </Button>
                 <TextBox
                     x:Name="SearchTextBox"
                     Grid.Column="0"
                     Height="{Binding IconSize}"
                     MinHeight="26"
-                    Padding="8,4,8,0"
+                    Padding="8,7,8,0"
                     BorderThickness="1"
                     FontSize="{Binding TextSize}"
                     VerticalAlignment="Center"
