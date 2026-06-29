@@ -4152,6 +4152,7 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
     private void StartRename()
     {
         _isCancellingTitleRename = false;
+        BeginInteractionLayer("file-title-rename-opened", elevate: false);
         PrepareRenameEditor();
         TitleText.Visibility = Visibility.Collapsed;
         TitleEditBox.Visibility = Visibility.Visible;
@@ -4350,7 +4351,7 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
             return;
         }
 
-        ElevateForInteraction();
+        BeginInteractionLayer("file-map-folder-picker-opened");
 
         try
         {
@@ -4625,7 +4626,7 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
 
     private async Task PickAndImportFilesAsync()
     {
-        ElevateForInteraction();
+        BeginInteractionLayer("file-import-picker-opened");
 
         try
         {
@@ -4669,7 +4670,7 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
             return;
         }
 
-        ElevateForInteraction();
+        BeginInteractionLayer("file-mapped-folder-picker-opened");
 
         try
         {
@@ -4839,7 +4840,7 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
         };
 
         _isInlineFlyoutOpen = true;
-        ElevateForInteraction();
+        BeginInteractionLayer("file-delete-confirm-opened");
 
         var target = items.Length == 1
             ? FindItemSurface(items[0]) ?? GetActiveItemsView() as FrameworkElement ?? RootGrid
@@ -4943,7 +4944,7 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
         PositionItemRenameTextBox(target, contentHost);
         ItemRenameTextBox.Visibility = Visibility.Visible;
         ItemRenameTextBox.IsHitTestVisible = true;
-        ElevateForInteraction();
+        BeginInteractionLayer("file-item-rename-opened");
         FocusTextInputEditor(ItemRenameTextBox, selectAll: true);
         await Task.CompletedTask;
     }
@@ -5163,7 +5164,7 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
         _isDeleteWidgetFlyoutOpen = true;
         DispatcherQueue.TryEnqueue(() =>
         {
-            ElevateForInteraction();
+            BeginInteractionLayer("file-delete-widget-opened");
             if (position is Windows.Foundation.Point point)
             {
                 flyout.ShowAt(target, point);
@@ -5328,7 +5329,7 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
 
         _isResizing = true;
         _resizeDirection = element.Tag as string ?? string.Empty;
-        ElevateForInteraction();
+        BeginInteractionLayer("file-resize-started");
         Win32Helper.GetCursorPos(out _initialCursorPt);
         _initialWindowPos = _appWindow.Position;
         _initialWindowSize = _appWindow.Size;
@@ -5506,7 +5507,7 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
         };
 
         _isInlineFlyoutOpen = true;
-        ElevateForInteraction();
+        BeginInteractionLayer("file-message-opened");
         flyout.ShowAt(MoreButton);
         await completion.Task;
     }
@@ -5571,7 +5572,7 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
 
     private void ShowFlyoutWithElevation(MenuFlyout flyout, FrameworkElement target, Windows.Foundation.Point? position = null)
     {
-        ElevateForInteraction();
+        BeginInteractionLayer("file-flyout-opened");
         flyout.Closed += (_, _) => ReleaseInteractionLayer("file-flyout-closed");
 
         if (position is Windows.Foundation.Point point)
@@ -5584,8 +5585,18 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
         }
     }
 
+    private void BeginInteractionLayer(string reason, bool elevate = true)
+    {
+        App.Current.WidgetManager?.BeginWidgetInteraction(reason);
+        if (elevate)
+        {
+            ElevateForInteraction();
+        }
+    }
+
     private void ReleaseInteractionLayer(string reason)
     {
+        App.Current.WidgetManager?.EndWidgetInteraction(reason);
         if (App.Current.WidgetManager?.RequestRestoreRaisedWidgetsToDesktopLayer(reason) == true)
         {
             return;
