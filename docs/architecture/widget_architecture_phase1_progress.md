@@ -349,3 +349,34 @@ G.2 继续抽只读/纯计算逻辑，建议先统一窗口身份上下文：`Wi
 ### 下一步建议
 
 继续保持低风险路线。下一步可以做 `H.2`：补一层只读的内容能力查询 API，例如“该类型是否已有真实内容控件、是否只有占位内容、是否允许显示在创建入口”。这一步仍然不开放入口，先把未来功能格子的判断集中起来，避免后面天气/Todo/标签各自散落判断。
+
+## 19. H.2 内容能力查询收口
+
+已在内容层补充只读能力查询，用于后续创建入口和功能格子渐进开放：
+
+- 新增 `WidgetContentStage`，当前分为 `Implemented` 和 `Placeholder`。
+- `WidgetContentDescriptor` 增加 `ContentStage` 与 `CanShowInCreateEntry`。
+- `WidgetContentFactory` 增加：
+  - `GetDescriptors()`
+  - `GetCreateEntryDescriptors()`
+  - `HasImplementedContent(WidgetKind)`
+  - `IsPlaceholderOnly(WidgetKind)`
+  - `CanShowInCreateEntry(WidgetKind)`
+- 当前只有 `File` 内容允许显示在普通创建入口。
+- `QuickCapture` 是已实现内容，但仍不显示在普通创建入口，继续走现有随记开关/窗口流程。
+- `Weather`、`Todo`、`Tags`、`Music`、`SystemMonitor` 仍是 placeholder-only，不能显示在创建入口，也不能创建窗口。
+- 继续由 `WidgetRegistry` 决定窗口是否可创建，内容 descriptor 不接管窗口授权。
+- 未接入设置页、托盘菜单、右键菜单或新建格子流程。
+- 未改变 `WidgetManager` 创建流程。
+- 未改变托盘/F7/层级/拖拽/IME/排序/安装器逻辑。
+
+### H.2 验证记录
+
+- `dotnet build .\DeskBox.sln -c Debug -p:Platform=x64 --no-restore`
+- `dotnet test .\DeskBox.sln -c Debug -p:Platform=x64 --no-build`
+
+当前测试数量：`132/132`。
+
+### 下一步建议
+
+下一步可以做 `H.3`：把未来内容类型的“开发状态/展示状态”文案也纳入只读 descriptor，例如 `PreviewLabel` 或 `StatusText`，方便以后设置页、调试页、创建入口共用同一套状态说明。仍不建议现在开放真实入口。

@@ -11,17 +11,19 @@ namespace DeskBox.Services;
 /// </summary>
 public sealed class WidgetContentFactory
 {
+    private static readonly IReadOnlyList<WidgetContentDescriptor> DescriptorList =
+    [
+        new(WidgetKind.File, "DeskBox", "\uE8A5", WidgetContentStage.Implemented, CanShowInCreateEntry: true),
+        new(WidgetKind.QuickCapture, "Quick Capture", "\uE70F", WidgetContentStage.Implemented, CanShowInCreateEntry: false),
+        new(WidgetKind.Weather, "Weather", "\uE706", WidgetContentStage.Placeholder, CanShowInCreateEntry: false),
+        new(WidgetKind.Todo, "Todo", "\uE9D5", WidgetContentStage.Placeholder, CanShowInCreateEntry: false),
+        new(WidgetKind.Tags, "Tags", "\uE8EC", WidgetContentStage.Placeholder, CanShowInCreateEntry: false),
+        new(WidgetKind.Music, "Music", "\uEC4F", WidgetContentStage.Placeholder, CanShowInCreateEntry: false),
+        new(WidgetKind.SystemMonitor, "System Monitor", "\uE9D9", WidgetContentStage.Placeholder, CanShowInCreateEntry: false)
+    ];
+
     private static readonly IReadOnlyDictionary<WidgetKind, WidgetContentDescriptor> Descriptors =
-        new Dictionary<WidgetKind, WidgetContentDescriptor>
-        {
-            [WidgetKind.File] = new(WidgetKind.File, "DeskBox", "\uE8A5", HasPlaceholderContent: false),
-            [WidgetKind.QuickCapture] = new(WidgetKind.QuickCapture, "Quick Capture", "\uE70F", HasPlaceholderContent: false),
-            [WidgetKind.Weather] = new(WidgetKind.Weather, "Weather", "\uE706", HasPlaceholderContent: true),
-            [WidgetKind.Todo] = new(WidgetKind.Todo, "Todo", "\uE9D5", HasPlaceholderContent: true),
-            [WidgetKind.Tags] = new(WidgetKind.Tags, "Tags", "\uE8EC", HasPlaceholderContent: true),
-            [WidgetKind.Music] = new(WidgetKind.Music, "Music", "\uEC4F", HasPlaceholderContent: true),
-            [WidgetKind.SystemMonitor] = new(WidgetKind.SystemMonitor, "System Monitor", "\uE9D9", HasPlaceholderContent: true)
-        };
+        DescriptorList.ToDictionary(descriptor => descriptor.WidgetKind);
 
     public IWidgetContent CreateExistingContent(WidgetConfig config, FrameworkElement view)
     {
@@ -39,6 +41,11 @@ public sealed class WidgetContentFactory
         return new PlaceholderWidgetContent(config, descriptor);
     }
 
+    public IReadOnlyList<WidgetContentDescriptor> GetDescriptors()
+    {
+        return DescriptorList;
+    }
+
     public WidgetContentDescriptor GetDescriptor(WidgetKind widgetKind)
     {
         if (Descriptors.TryGetValue(widgetKind, out var descriptor))
@@ -47,6 +54,31 @@ public sealed class WidgetContentFactory
         }
 
         throw new NotSupportedException($"Widget kind '{widgetKind}' does not have a content descriptor.");
+    }
+
+    public IReadOnlyList<WidgetContentDescriptor> GetCreateEntryDescriptors()
+    {
+        return DescriptorList
+            .Where(descriptor => descriptor.CanShowInCreateEntry)
+            .ToArray();
+    }
+
+    public bool HasImplementedContent(WidgetKind widgetKind)
+    {
+        return Descriptors.TryGetValue(widgetKind, out var descriptor) &&
+               descriptor.HasImplementedContent;
+    }
+
+    public bool IsPlaceholderOnly(WidgetKind widgetKind)
+    {
+        return Descriptors.TryGetValue(widgetKind, out var descriptor) &&
+               descriptor.IsPlaceholderOnly;
+    }
+
+    public bool CanShowInCreateEntry(WidgetKind widgetKind)
+    {
+        return Descriptors.TryGetValue(widgetKind, out var descriptor) &&
+               descriptor.CanShowInCreateEntry;
     }
 
     public bool CanCreatePlaceholderContent(WidgetKind widgetKind)
