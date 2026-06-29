@@ -45,7 +45,8 @@
             <x:Double x:Key="DeskBoxMenuPresenterVerticalPadding">4</x:Double>
             <x:Double x:Key="DeskBoxMenuItemMinHeight">36</x:Double>
             <x:Double x:Key="DeskBoxMenuItemFontSize">13</x:Double>
-            <Thickness x:Key="DeskBoxMenuItemPadding">12,8,12,8</Thickness>
+            <Thickness x:Key="DeskBoxMenuPresenterPadding">0,4,0,4</Thickness>
+            <Thickness x:Key="DeskBoxMenuItemPadding">10,8,10,8</Thickness>
 
             <!-- Shared ToggleSwitch template tuning for settings-style rows. -->
             <x:Double x:Key="ToggleSwitchOuterBorderStrokeThickness">0.25</x:Double>
@@ -78,7 +79,7 @@
 
             <Style TargetType="MenuFlyoutPresenter" BasedOn="{StaticResource DefaultMenuFlyoutPresenterStyle}">
                 <Setter Property="FontFamily" Value="{StaticResource DeskBoxMenuFontFamily}" />
-                <Setter Property="Padding" Value="{StaticResource DeskBoxMenuItemPadding}" />
+                <Setter Property="Padding" Value="{StaticResource DeskBoxMenuPresenterPadding}" />
             </Style>
 
             <Style TargetType="MenuFlyoutItem" BasedOn="{StaticResource DefaultMenuFlyoutItemStyle}">
