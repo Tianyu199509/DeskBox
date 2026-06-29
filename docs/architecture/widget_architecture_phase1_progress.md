@@ -216,6 +216,17 @@
 
 G.2 继续抽只读/纯计算逻辑，建议先统一窗口身份上下文：`WidgetId`、`WidgetKind`、`Name`、`WindowHandle`、`AnimationBounds`、日志显示名。暂不接管 AppWindow、DWM、topmost 或动画执行。
 
+## 12. G.2 施工记录
+
+已完成只读窗口身份上下文：
+
+- 新增 `WidgetWindowIdentity`。
+- `WidgetWindowDiagnostics.Identity` 暴露 `WidgetId`、`WidgetKind`、`Name`、`LogKind`、`ShortWidgetId`、`WindowHandle`、`AnimationBounds`。
+- 新增 `DisplayName` 和 `LogDisplayName`，为后续统一窗口日志、调试面板、诊断页面做准备。
+- 未修改 `IDesktopWidgetWindow`。
+- 未修改 `WidgetManager` 批量显隐流程。
+- 未接管 AppWindow、DWM、topmost、F7、托盘动画或拖拽逻辑。
+
 ### 暂不建议直接做
 
 - 不建议直接迁移文件格子内容区为 `FileWidgetContent`。
@@ -223,7 +234,7 @@ G.2 继续抽只读/纯计算逻辑，建议先统一窗口身份上下文：`Wi
 - 不建议让 `WidgetSessionManager` 接管层级恢复。
 - 不建议引入天气/Todo 等新功能入口。
 
-## 12. 后续施工护栏
+## 13. 后续施工护栏
 
 每次只动一个目标：
 

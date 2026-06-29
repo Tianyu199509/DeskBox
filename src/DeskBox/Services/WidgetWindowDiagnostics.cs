@@ -23,6 +23,15 @@ public sealed class WidgetWindowDiagnostics
 
     public string ShortWidgetId => ShortId(_config.Id);
 
+    public WidgetWindowIdentity Identity => new(
+        WidgetId: _config.Id,
+        WidgetKind: _config.WidgetKind,
+        Name: _config.Name,
+        LogKind: LogKind,
+        ShortWidgetId: ShortWidgetId,
+        WindowHandle: _windowHandleProvider(),
+        AnimationBounds: AnimationBounds);
+
     public Windows.Foundation.Rect AnimationBounds => new(
         _config.X,
         _config.Y,
@@ -40,4 +49,18 @@ public sealed class WidgetWindowDiagnostics
             ? "none"
             : id.Length <= 8 ? id : id[..8];
     }
+}
+
+public sealed record WidgetWindowIdentity(
+    string WidgetId,
+    WidgetKind WidgetKind,
+    string Name,
+    string LogKind,
+    string ShortWidgetId,
+    IntPtr WindowHandle,
+    Windows.Foundation.Rect AnimationBounds)
+{
+    public string DisplayName => $"{Name}#{ShortWidgetId}";
+
+    public string LogDisplayName => $"{LogKind} {DisplayName}";
 }
