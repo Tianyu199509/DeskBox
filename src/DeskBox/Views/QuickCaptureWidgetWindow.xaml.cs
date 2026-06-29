@@ -80,6 +80,7 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
     private readonly ThemeService? _themeService;
     private readonly IntPtr _hWnd;
     private readonly AppWindow _appWindow;
+    private readonly WidgetWindowDiagnostics _diagnostics;
     private DesktopAcrylicController? _acrylicController;
     private SystemBackdropConfiguration? _backdropConfiguration;
     private ICompositionSupportsSystemBackdrop? _backdropTarget;
@@ -142,11 +143,7 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
 
     public IntPtr WindowHandle => _hWnd;
 
-    public Windows.Foundation.Rect AnimationBounds => new(
-        ViewModel.Config.X,
-        ViewModel.Config.Y,
-        Math.Max(MinWidgetSlideOffset, ViewModel.Config.Width),
-        Math.Max(MinWidgetSlideOffset, ViewModel.Config.Height));
+    public Windows.Foundation.Rect AnimationBounds => _diagnostics.AnimationBounds;
 
     private bool _isVisibleOnDesktop;
     public new bool Visible
@@ -170,6 +167,7 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
         _hWnd = WindowNative.GetWindowHandle(this);
         var windowId = Win32Interop.GetWindowIdFromWindow(_hWnd);
         _appWindow = AppWindow.GetFromWindowId(windowId);
+        _diagnostics = new WidgetWindowDiagnostics("Quick", ViewModel.Config, () => _hWnd);
 
         ConfigureWindow();
         SetupEventHandlers();
@@ -3794,13 +3792,6 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
 
     private void LogTrayWindow(string message)
     {
-        App.LogVerbose($"[TrayWindow] Quick {ViewModel.Config.Name}#{ShortId(ViewModel.Config.Id)} hwnd=0x{_hWnd.ToInt64():X} {message}");
-    }
-
-    private static string ShortId(string id)
-    {
-        return string.IsNullOrWhiteSpace(id)
-            ? "none"
-            : id.Length <= 8 ? id : id[..8];
+        App.LogVerbose(_diagnostics.FormatTrayWindowMessage(message));
     }
 }

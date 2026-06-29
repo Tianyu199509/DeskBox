@@ -314,7 +314,7 @@ public Dictionary<string, string> Metadata { get; set; } = [];
 
 普通文件格子比随记复杂很多：文件拖入、拖出、中文重命名、选择框、多选、映射文件夹、收纳文件夹、排序、右键菜单、删除确认、拖回桌面等都在这一层，迁移要更谨慎。
 
-第一轮只移动内容区 XAML，不移动核心代码逻辑。Win32 subclass、OLE 拖放兼容、IME 处理、PushToBottom / topmost、托盘动画、多显示器 bounds 都先留在 `WidgetWindow.xaml.cs`。
+第一轮先接入 `WidgetShell` 外壳并标出内容区边界，不移动核心代码逻辑。第二轮再评估是否把内容区 XAML 作为一个整体迁移到 `FileWidgetContent`。Win32 subclass、OLE 拖放兼容、IME 处理、PushToBottom / topmost、托盘动画、多显示器 bounds 都先留在 `WidgetWindow.xaml.cs`。
 
 验收：
 
@@ -360,10 +360,13 @@ public enum WidgetSessionState
 推荐：
 
 ```text
+WidgetWindowDiagnostics
 WidgetWindowChromeController
 WidgetWindowAnimationController
 WidgetWindowLayerController
 ```
+
+G.1 只允许做 `WidgetWindowDiagnostics` 这类只读辅助对象：统一窗口日志前缀、短 ID、只读 bounds 快照等。它不能调用 `SetWindowPos`、不能保存设置、不能改变 visible/topmost/raised 状态。`WidgetWindowChromeController`、`WidgetWindowAnimationController`、`WidgetWindowLayerController` 必须等 G.1 手测稳定后再分批评估。
 
 ## 8. 测试矩阵
 

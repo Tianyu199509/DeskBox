@@ -24,6 +24,7 @@
 | `51ce88b` | F.3：文件格子部分交互接入 Session 记录 | 已手测 |
 | `7260af0` | E.1：文件格子外壳接入 `WidgetShell`，内容区和业务逻辑保持不变 | 已手测 |
 | `ac62a44` | E.2：补充 `WidgetShell` 过渡 API 说明并更新迁移进度 | 已测试 |
+| `42c935c` | E.3：标出文件格子内容区未来迁移边界，不移动业务 UI | 已测试 |
 
 ## 3. 已完成范围
 
@@ -55,6 +56,7 @@
 - 文件格子使用自定义标题栏插槽保留原有标题编辑、添加按钮、更多按钮、关闭按钮和按钮动画。
 - 文件格子内容区、拖拽、重命名、选择框、resize、迁移遮罩仍保留原窗口逻辑。
 - 文件格子内容区已标出未来 `FileWidgetContent` 边界，但尚未迁移。
+- 总方案已修正：阶段 E 不要求立即移动内容区 XAML，后续必须把内容区作为整体评估迁移。
 
 ### 3.5 IWidgetContent
 
@@ -147,6 +149,7 @@
 - 文档更新。
 - Registry 扩展但不开放入口。
 - Session 日志增强但不改变行为。
+- 只读窗口诊断 helper。
 - 新功能格子内容控件的空壳验证。
 
 ## 8. E.1 验收记录
@@ -183,13 +186,25 @@
 - 文件重命名编辑框。
 - 状态 toast。
 
-## 10. 下一步建议
+## 10. G.1 路线复核记录
 
-### 推荐下一步：阶段 G.1 生命周期 controller 试点
+已复核 `WidgetWindow` 和 `QuickCaptureWidgetWindow` 的生命周期代码。
+
+结论：
+
+- 两个窗口确实存在重复的窗口身份、日志、bounds、动画、层级、DWM 代码。
+- 但动画和层级逻辑混有不同 guard，例如文件格子的重命名、删除弹窗、内联弹窗，随记的编辑、清空、tab 等状态。
+- 当前不适合直接抽 `WidgetWindowLayerController` 或 `WidgetWindowAnimationController`。
+- G.1 只做 `WidgetWindowDiagnostics`：统一短 ID、托盘窗口日志前缀、只读 `AnimationBounds` 计算。
+- `WidgetWindowDiagnostics` 不调用 Win32，不保存设置，不改变 visible/topmost/raised 状态。
+
+## 11. 下一步建议
+
+### 推荐下一步：完成 G.1 验收后再评估 G.2
 
 当前仍不建议马上抽 `FileWidgetContent`。文件内容区仍包含拖拽、选择框、重命名、空状态、toast、GridView/ListView 等大量耦合逻辑，直接迁移风险较高。
 
-更稳的下一步是 G.1：先抽不改变行为的组合对象，例如只封装窗口日志/状态查询，不接管 AppWindow、DWM 或层级。
+G.1 完成后，更稳的 G.2 是继续抽只读/纯计算逻辑，例如窗口日志上下文或 appearance 参数计算；暂不接管 AppWindow、DWM、topmost 或动画执行。
 
 ### 暂不建议直接做
 
@@ -198,7 +213,7 @@
 - 不建议让 `WidgetSessionManager` 接管层级恢复。
 - 不建议引入天气/Todo 等新功能入口。
 
-## 11. 后续施工护栏
+## 12. 后续施工护栏
 
 每次只动一个目标：
 

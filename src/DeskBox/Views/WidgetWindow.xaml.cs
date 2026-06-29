@@ -72,6 +72,7 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
     private readonly LocalizationService _localizationService;
     private readonly IntPtr _hWnd;
     private readonly AppWindow _appWindow;
+    private readonly WidgetWindowDiagnostics _diagnostics;
     private readonly Win32Helper.SubclassProc _fileDropSubclassProc;
     private DesktopAcrylicController? _acrylicController;
     private SystemBackdropConfiguration? _backdropConfiguration;
@@ -148,11 +149,7 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
 
     public IntPtr WindowHandle => _hWnd;
 
-    public Windows.Foundation.Rect AnimationBounds => new(
-        ViewModel.Config.X,
-        ViewModel.Config.Y,
-        Math.Max(MinWidgetSlideOffset, ViewModel.Config.Width),
-        Math.Max(MinWidgetSlideOffset, ViewModel.Config.Height));
+    public Windows.Foundation.Rect AnimationBounds => _diagnostics.AnimationBounds;
 
     private bool _isVisibleOnDesktop;
     private bool _isClosing;
@@ -188,6 +185,7 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
         _hWnd = WindowNative.GetWindowHandle(this);
         _windowId = Win32Interop.GetWindowIdFromWindow(_hWnd);
         _appWindow = AppWindow.GetFromWindowId(_windowId);
+        _diagnostics = new WidgetWindowDiagnostics("File", ViewModel.Config, () => _hWnd);
 
         ConfigureWindow();
         SetupEventHandlers();
@@ -1221,14 +1219,7 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
 
     private void LogTrayWindow(string message)
     {
-        App.LogVerbose($"[TrayWindow] File {ViewModel.Config.Name}#{ShortId(ViewModel.Config.Id)} hwnd=0x{_hWnd.ToInt64():X} {message}");
-    }
-
-    private static string ShortId(string id)
-    {
-        return string.IsNullOrWhiteSpace(id)
-            ? "none"
-            : id.Length <= 8 ? id : id[..8];
+        App.LogVerbose(_diagnostics.FormatTrayWindowMessage(message));
     }
 
     public void RevealFromTray(bool autoRestore = true)
