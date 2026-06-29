@@ -411,3 +411,28 @@ G.2 继续抽只读/纯计算逻辑，建议先统一窗口身份上下文：`Wi
 ### 下一步建议
 
 内容层只读元信息已经足够支撑未来功能格子的入口规划。建议下一步不要继续堆 descriptor 字段，可以转向 `H.4`：补一个仅供测试/调试使用的 `WidgetKind` 一致性测试，确保 `WidgetRegistry` 与 `WidgetContentFactory` 对已知类型的覆盖一致。仍不接 UI。
+
+## 21. H.4 WidgetKind 覆盖一致性测试
+
+已补充测试层护栏，确保后续新增格子类型时不会只改一边：
+
+- 新增 `WidgetKindCoverageTests`。
+- 校验 `WidgetRegistry` 与 `WidgetContentFactory` 覆盖同一组 active `WidgetKind`。
+- 校验旧迁移值 `Productivity` 不进入 active registry/content descriptor。
+- 校验可创建窗口的类型必须同时是 implemented + available 内容。
+- 校验 planned 类型仍是 placeholder-only 且不可创建窗口。
+- 未修改生产代码。
+- 未接入设置页、创建入口、托盘菜单或右键菜单。
+- 未改变 `WidgetManager` 创建流程。
+- 未改变托盘/F7/层级/拖拽/IME/排序/安装器逻辑。
+
+### H.4 验证记录
+
+- `dotnet build .\DeskBox.sln -c Debug -p:Platform=x64 --no-restore`
+- `dotnet test .\DeskBox.sln -c Debug -p:Platform=x64 --no-build`
+
+当前测试数量：`137/137`。
+
+### 下一步建议
+
+H 线的内容元信息铺底可以在 H.4 后暂时收口。下一步建议回到路线文档复核，决定是进入“第一个真实功能格子原型前置设计”，还是继续做只读调试/诊断页面。暂不建议立刻开放天气/Todo 创建入口。
