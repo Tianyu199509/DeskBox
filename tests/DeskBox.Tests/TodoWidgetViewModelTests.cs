@@ -1,6 +1,7 @@
 using DeskBox.Models;
 using DeskBox.Services;
 using DeskBox.ViewModels;
+using Microsoft.UI.Xaml;
 
 namespace DeskBox.Tests;
 
@@ -221,6 +222,33 @@ public sealed class TodoWidgetViewModelTests : IDisposable
         viewModel.SelectedFilter = TodoFilter.Completed;
         Assert.Single(viewModel.VisibleItems);
         Assert.Equal(completed.Id, viewModel.VisibleItems[0].Id);
+    }
+
+    [Fact]
+    public async Task EmptyAndListVisibility_FollowVisibleItems()
+    {
+        var viewModel = CreateViewModel("todo-widget");
+        await viewModel.InitializeAsync();
+
+        Assert.False(viewModel.HasVisibleItems);
+        Assert.Equal(Visibility.Collapsed, viewModel.ListVisibility);
+        Assert.Equal(Visibility.Visible, viewModel.EmptyStateVisibility);
+        Assert.Equal("Add a task to get started.", viewModel.EmptyStateText);
+
+        var item = await viewModel.AddItemAsync("task");
+        Assert.NotNull(item);
+
+        Assert.True(viewModel.HasVisibleItems);
+        Assert.Equal(Visibility.Visible, viewModel.ListVisibility);
+        Assert.Equal(Visibility.Collapsed, viewModel.EmptyStateVisibility);
+
+        await viewModel.SetCompletedAsync(item.Id, true);
+        viewModel.SelectedFilter = TodoFilter.Active;
+
+        Assert.False(viewModel.HasVisibleItems);
+        Assert.Equal(Visibility.Collapsed, viewModel.ListVisibility);
+        Assert.Equal(Visibility.Visible, viewModel.EmptyStateVisibility);
+        Assert.Equal("No active tasks.", viewModel.EmptyStateText);
     }
 
     public void Dispose()

@@ -566,3 +566,36 @@ H 线后建议先做“第一个真实功能格子前置设计”，不要直接
 ### 下一步建议
 
 下一步可以做 `TodoWidgetContent` UI 空接入，但仍不要开放 Todo 创建入口。先让 UI 控件可以绑定 ViewModel，再决定是否需要通用内容 host。
+
+## 26. Todo UI 空接入
+
+已新增 Todo 内容控件，但仍未开放入口：
+
+- 新增 `TodoWidgetContent.xaml`。
+- 新增 `TodoWidgetContent.xaml.cs`。
+- Todo UI 使用 WinUI 原生控件：
+  - `TextBox`
+  - `Button`
+  - `CheckBox`
+  - `ListView`
+- Todo UI 可绑定 `TodoWidgetViewModel`。
+- 支持添加任务、切换过滤、完成/取消完成、删除任务、清理已完成任务。
+- `TodoWidgetViewModel` 补充 UI 绑定所需的空状态和列表可见性属性。
+- 补充 ViewModel 测试覆盖空状态和列表可见性。
+- 暂未新增 `TodoWidgetContent : IWidgetContent` 适配器。
+- 暂未接入 `WidgetContentFactory`。
+- 暂未修改 `WidgetRegistry`。
+- 未开放 Todo 创建入口。
+- 未接入设置页、托盘菜单、右键菜单或新建格子流程。
+- 未改变托盘/F7/层级/拖拽/IME/排序/安装器逻辑。
+
+### Todo UI 验证记录
+
+- `dotnet build .\DeskBox.sln -c Debug -p:Platform=x64 --no-restore`
+- `dotnet test .\DeskBox.sln -c Debug -p:Platform=x64 --no-build`
+
+当前测试数量：`154/154`。
+
+### 下一步建议
+
+下一步建议做一个不开放入口的 `TodoWidgetContentAdapter` 或等价内容封装，让 Todo 真正实现 `IWidgetContent`，但仍不让 `WidgetRegistry` 创建 Todo 窗口。

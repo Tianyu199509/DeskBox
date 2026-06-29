@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using DeskBox.Models;
 using DeskBox.Services;
+using Microsoft.UI.Xaml;
 
 namespace DeskBox.ViewModels;
 
@@ -50,8 +51,10 @@ public sealed partial class TodoWidgetViewModel : ObservableObject
             if (SetProperty(ref _selectedFilter, value))
             {
                 RefreshVisibleItems();
-                OnPropertyChanged(nameof(ActiveCount));
-                OnPropertyChanged(nameof(CompletedCount));
+                OnPropertyChanged(nameof(EmptyStateText));
+                OnPropertyChanged(nameof(IsAllFilterSelected));
+                OnPropertyChanged(nameof(IsActiveFilterSelected));
+                OnPropertyChanged(nameof(IsCompletedFilterSelected));
             }
         }
     }
@@ -63,6 +66,43 @@ public sealed partial class TodoWidgetViewModel : ObservableObject
     public int CompletedCount => Items.Count(item => item.IsCompleted);
 
     public bool HasCompletedItems => CompletedCount > 0;
+
+    public bool HasItems => TotalCount > 0;
+
+    public bool HasVisibleItems => VisibleItems.Count > 0;
+
+    public Visibility ListVisibility => HasVisibleItems ? Visibility.Visible : Visibility.Collapsed;
+
+    public Visibility EmptyStateVisibility => HasVisibleItems ? Visibility.Collapsed : Visibility.Visible;
+
+    public string AddPlaceholderText => "Add a task";
+
+    public string AllFilterText => "All";
+
+    public string ActiveFilterText => "Active";
+
+    public string CompletedFilterText => "Completed";
+
+    public string EmptyStateTitle => "No tasks";
+
+    public string EmptyStateText => SelectedFilter switch
+    {
+        TodoFilter.Active => "No active tasks.",
+        TodoFilter.Completed => "No completed tasks.",
+        _ => "Add a task to get started."
+    };
+
+    public string ClearCompletedText => "Clear completed";
+
+    public string ItemsLeftText => ActiveCount == 1
+        ? "1 item left"
+        : $"{ActiveCount} items left";
+
+    public bool IsAllFilterSelected => SelectedFilter == TodoFilter.All;
+
+    public bool IsActiveFilterSelected => SelectedFilter == TodoFilter.Active;
+
+    public bool IsCompletedFilterSelected => SelectedFilter == TodoFilter.Completed;
 
     public bool IsInitialized
     {
@@ -207,6 +247,11 @@ public sealed partial class TodoWidgetViewModel : ObservableObject
         return completedItems.Count;
     }
 
+    public void SetFilter(TodoFilter filter)
+    {
+        SelectedFilter = filter;
+    }
+
     private TodoItemViewModel? FindItem(string itemId)
     {
         return Items.FirstOrDefault(item => string.Equals(item.Id, itemId, StringComparison.Ordinal));
@@ -228,6 +273,8 @@ public sealed partial class TodoWidgetViewModel : ObservableObject
         {
             VisibleItems.Add(item);
         }
+
+        RefreshVisibleStateProperties();
     }
 
     private bool ShouldShowItem(TodoItemViewModel item)
@@ -254,6 +301,18 @@ public sealed partial class TodoWidgetViewModel : ObservableObject
         OnPropertyChanged(nameof(ActiveCount));
         OnPropertyChanged(nameof(CompletedCount));
         OnPropertyChanged(nameof(HasCompletedItems));
+        OnPropertyChanged(nameof(HasItems));
+        OnPropertyChanged(nameof(HasVisibleItems));
+        OnPropertyChanged(nameof(ItemsLeftText));
+        OnPropertyChanged(nameof(ListVisibility));
+        OnPropertyChanged(nameof(EmptyStateVisibility));
+    }
+
+    private void RefreshVisibleStateProperties()
+    {
+        OnPropertyChanged(nameof(HasVisibleItems));
+        OnPropertyChanged(nameof(ListVisibility));
+        OnPropertyChanged(nameof(EmptyStateVisibility));
     }
 
     private static string NormalizeText(string? text)
