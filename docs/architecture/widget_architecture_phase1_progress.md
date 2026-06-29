@@ -247,6 +247,15 @@ G.2 继续抽只读/纯计算逻辑，建议先统一窗口身份上下文：`Wi
 - 文件格子显示正常。
 - 格子拖拽未发现异常。
 
+## 14. G.4 施工记录
+
+已让 `WidgetManager` 的部分诊断日志使用统一 Host 身份：
+
+- 新增内部日志格式化方法 `FormatHostWindow(IDesktopWidgetWindow window)`。
+- 异常日志和 `Prepare useLoaded` 日志显示 `LogDisplayName`、`WidgetKind` 和 hwnd。
+- `WidgetManager` 的显隐、批处理、topmost 确认、动画调用仍使用原有控制流。
+- 未改变任何 `WindowHandle` 判断、Win32 调用、F7、托盘动画、拖拽或 IME 行为。
+
 ### G.2 验收记录
 
 用户已在 Debug 版手测通过：
@@ -263,7 +272,7 @@ G.2 继续抽只读/纯计算逻辑，建议先统一窗口身份上下文：`Wi
 - 不建议让 `WidgetSessionManager` 接管层级恢复。
 - 不建议引入天气/Todo 等新功能入口。
 
-## 14. 后续施工护栏
+## 15. 后续施工护栏
 
 每次只动一个目标：
 

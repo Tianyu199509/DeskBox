@@ -606,7 +606,7 @@ public sealed class WidgetManager
                 }
                 catch (Exception ex)
                 {
-                    App.Log($"[WidgetManager] Failed to show prepared widget from tray hwnd=0x{window.WindowHandle.ToInt64():X}: {ex}");
+                    App.Log($"[WidgetManager] Failed to show prepared widget from tray {FormatHostWindow(window)}: {ex}");
                 }
             }
 
@@ -683,7 +683,7 @@ public sealed class WidgetManager
                 }
                 catch (Exception ex)
                 {
-                    App.Log($"[WidgetManager] Failed to show prepared widget at desktop layer hwnd=0x{window.WindowHandle.ToInt64():X}: {ex}");
+                    App.Log($"[WidgetManager] Failed to show prepared widget at desktop layer {FormatHostWindow(window)}: {ex}");
                 }
             }
 
@@ -712,7 +712,7 @@ public sealed class WidgetManager
             }
             catch (Exception ex)
             {
-                App.Log($"[WidgetManager] Failed to prepare widget hide hwnd=0x{window.WindowHandle.ToInt64():X}: {ex}");
+                App.Log($"[WidgetManager] Failed to prepare widget hide {FormatHostWindow(window)}: {ex}");
             }
         }
 
@@ -912,7 +912,7 @@ public sealed class WidgetManager
 
             if (_quickCaptureWidgets.TryGetValue(config.Id, out var existingQuickCapture))
             {
-                App.LogVerbose($"[TrayBatch] Prepare useLoaded widget={FormatWidget(config)} hwnd=0x{existingQuickCapture.Window.WindowHandle.ToInt64():X}");
+                App.LogVerbose($"[TrayBatch] Prepare useLoaded widget={FormatWidget(config)} {FormatHostWindow(existingQuickCapture.Window)}");
                 if (!existingQuickCapture.Window.Visible)
                 {
                     existingQuickCapture.Window.PrepareTrayShowAnimation();
@@ -936,7 +936,7 @@ public sealed class WidgetManager
 
         if (_widgets.TryGetValue(config.Id, out var existing))
         {
-            App.LogVerbose($"[TrayBatch] Prepare useLoaded widget={FormatWidget(config)} hwnd=0x{existing.Window.WindowHandle.ToInt64():X}");
+            App.LogVerbose($"[TrayBatch] Prepare useLoaded widget={FormatWidget(config)} {FormatHostWindow(existing.Window)}");
             if (!existing.Window.Visible)
             {
                 existing.Window.PrepareTrayShowAnimation();
@@ -963,7 +963,7 @@ public sealed class WidgetManager
             }
             catch (Exception ex)
             {
-                App.Log($"[WidgetManager] Failed to play widget show animation hwnd=0x{window.WindowHandle.ToInt64():X}: {ex}");
+                App.Log($"[WidgetManager] Failed to play widget show animation {FormatHostWindow(window)}: {ex}");
             }
         }
     }
@@ -979,7 +979,7 @@ public sealed class WidgetManager
             }
             catch (Exception ex)
             {
-                App.Log($"[WidgetManager] Failed to prepare widget show animation hwnd=0x{window.WindowHandle.ToInt64():X}: {ex}");
+                App.Log($"[WidgetManager] Failed to prepare widget show animation {FormatHostWindow(window)}: {ex}");
             }
         }
     }
@@ -995,7 +995,7 @@ public sealed class WidgetManager
             }
             catch (Exception ex)
             {
-                App.Log($"[WidgetManager] Failed to play widget hide animation hwnd=0x{window.WindowHandle.ToInt64():X}: {ex}");
+                App.Log($"[WidgetManager] Failed to play widget hide animation {FormatHostWindow(window)}: {ex}");
             }
         }
     }
@@ -1098,7 +1098,7 @@ public sealed class WidgetManager
         }
         catch (Exception ex)
         {
-            App.Log($"[WidgetManager] Failed to activate raised widget hwnd=0x{window.WindowHandle.ToInt64():X}: {ex}");
+            App.Log($"[WidgetManager] Failed to activate raised widget {FormatHostWindow(window)}: {ex}");
         }
     }
 
@@ -1144,7 +1144,7 @@ public sealed class WidgetManager
             }
             catch (Exception ex)
             {
-                App.Log($"[WidgetManager] Failed to confirm raised widget topmost hwnd=0x{window.WindowHandle.ToInt64():X}: {ex}");
+                App.Log($"[WidgetManager] Failed to confirm raised widget topmost {FormatHostWindow(window)}: {ex}");
             }
         }
     }
@@ -1377,7 +1377,7 @@ public sealed class WidgetManager
             }
             catch (Exception ex)
             {
-                App.Log($"[WidgetManager] Failed to restore file widget desktop layer hwnd=0x{window.WindowHandle.ToInt64():X}: {ex}");
+                App.Log($"[WidgetManager] Failed to restore file widget desktop layer {FormatHostWindow(window)}: {ex}");
             }
         }
 
@@ -1389,7 +1389,7 @@ public sealed class WidgetManager
             }
             catch (Exception ex)
             {
-                App.Log($"[WidgetManager] Failed to restore quick capture widget desktop layer hwnd=0x{window.WindowHandle.ToInt64():X}: {ex}");
+                App.Log($"[WidgetManager] Failed to restore quick capture widget desktop layer {FormatHostWindow(window)}: {ex}");
             }
         }
 
@@ -1710,6 +1710,12 @@ public sealed class WidgetManager
     private static string FormatWidget(WidgetConfig widget)
     {
         return $"{widget.Name}#{ShortId(widget.Id)} kind={widget.WidgetKind} visible={widget.IsVisible} disabled={widget.IsDisabled}";
+    }
+
+    private static string FormatHostWindow(IDesktopWidgetWindow window)
+    {
+        var identity = window.Identity;
+        return $"{identity.LogDisplayName} kind={identity.WidgetKind} hwnd=0x{identity.WindowHandle.ToInt64():X}";
     }
 
     private static string ShortId(string id)
