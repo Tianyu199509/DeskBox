@@ -65,6 +65,7 @@ public sealed class WidgetManager
     private readonly Func<string> _desktopPathProvider;
     private readonly bool _recycleManagedFolderDeletes;
     private readonly WidgetRegistry _widgetRegistry;
+    private readonly WidgetSessionManager _sessionManager;
     private readonly Dictionary<string, (WidgetWindow Window, WidgetViewModel ViewModel)> _widgets = new();
     private readonly Dictionary<string, (QuickCaptureWidgetWindow Window, QuickCaptureWidgetViewModel ViewModel)> _quickCaptureWidgets = new();
     private readonly HashSet<IntPtr> _widgetWindowHandles = new();
@@ -87,6 +88,7 @@ public sealed class WidgetManager
     public IReadOnlyDictionary<string, (QuickCaptureWidgetWindow Window, QuickCaptureWidgetViewModel ViewModel)> QuickCaptureWidgets => _quickCaptureWidgets;
 
     public bool WidgetsRaisedFromTray => _widgetsRaisedFromTray;
+    public WidgetSessionState SessionState => _sessionManager.State;
 
     public bool HasVisibleWidgets => _widgets.Values.Any(entry => entry.Window.Visible) ||
                                      _quickCaptureWidgets.Values.Any(entry => entry.Window.Visible);
@@ -188,6 +190,7 @@ public sealed class WidgetManager
         _desktopPathProvider = desktopPathProvider;
         _recycleManagedFolderDeletes = recycleManagedFolderDeletes;
         _widgetRegistry = WidgetRegistry.Default;
+        _sessionManager = new WidgetSessionManager(App.LogVerbose);
         _lastQuickCaptureEnabled = _settingsService.Settings.QuickCaptureEnabled;
         _settingsService.SettingsChanged += OnSettingsChanged;
         _settingsService.AppearancePreviewChanged += ApplyAppearancePreview;
@@ -302,6 +305,11 @@ public sealed class WidgetManager
             }
 
             await Task.Yield();
+        }
+
+        if (configs.Count > 0)
+        {
+            _sessionManager.MarkDesktopResting("restore-widgets");
         }
     }
 
@@ -700,6 +708,7 @@ public sealed class WidgetManager
         PlayPreparedTrayHideAnimations(windowsToHide);
 
         SetWidgetsRaisedFromTray(false);
+        _sessionManager.MarkHidden("set-all-hidden");
         _trayRaiseBatchGeneration++;
         StopTrayLayerRestoreMonitor();
         SaveBatchVisibilityState();
@@ -1653,11 +1662,29 @@ public sealed class WidgetManager
     {
         if (_widgetsRaisedFromTray == raised)
         {
+            if (raised)
+            {
+                _sessionManager.MarkRaisedSession("raised-state-kept");
+            }
+
             return;
         }
 
         App.LogVerbose($"[TrayBatch] RaisedState changed { _widgetsRaisedFromTray } -> {raised}");
         _widgetsRaisedFromTray = raised;
+        if (raised)
+        {
+            _sessionManager.MarkRaisedSession("tray-raised");
+        }
+        else if (HasVisibleWidgets)
+        {
+            _sessionManager.MarkDesktopResting("tray-restored");
+        }
+        else
+        {
+            _sessionManager.MarkHidden("tray-hidden");
+        }
+
         TrayLayerStateChanged?.Invoke(raised);
     }
 
@@ -1789,6 +1816,7 @@ public sealed class WidgetManager
 
         _quickCaptureWidgets.Clear();
         _retiredWindows.Clear();
+        _sessionManager.MarkHidden("close-all");
     }
 
     public int GetDefaultManagedStorageWidgetCount()
