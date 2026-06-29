@@ -668,22 +668,16 @@ public partial class App : Application
             var themeService = ThemeService;
             var localizationService = LocalizationService;
 
-            // Parallel: theme refresh + clipboard service init
+            // Parallel: theme refresh only. Clipboard event subscription must stay on the UI thread.
             var themeTask = Task.Run(() => themeService.RefreshAppearance());
-            var clipboardTask = Task.Run(() =>
-            {
-                var clipboardService = new QuickCaptureClipboardService(SettingsService, quickCaptureService);
-                clipboardService.Refresh();
-                return clipboardService;
-            });
+            QuickCaptureClipboardService = new QuickCaptureClipboardService(SettingsService, quickCaptureService);
+            QuickCaptureClipboardService.Refresh();
 
             // Parallel: independent UI setup
             CreateTrayIcon();
             RegisterActivationListener();
 
-            await Task.WhenAll(themeTask, clipboardTask);
-
-            QuickCaptureClipboardService = await clipboardTask;
+            await themeTask;
             if (GlobalHotkeyService is null)
             {
                 try

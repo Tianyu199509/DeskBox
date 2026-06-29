@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.1.10 - 2026-06-29
+
+### English
+
+- Fixed Quick Capture recent clipboard monitoring after restart: clipboard event listening now initializes on the UI thread and `Refresh()` safely marshals back to the UI dispatcher when needed.
+- Fixed Quick Capture list scrolling when recent content grows beyond the widget height by constraining the list area to the remaining widget space.
+- Added the phase-1 widget architecture refactoring plan to document the next stable refactor path before starting the architecture work.
+
+### 中文
+
+- 修复随记最近复制内容在重启后偶发不自动记录的问题：剪贴板事件监听现在在 UI 线程初始化，`Refresh()` 在需要时会安全切回 UI 调度线程。
+- 修复随记最近内容过多时列表无法上下滚动的问题：列表区域现在会被限制在格子剩余空间内，内部滚动可以正常工作。
+- 新增第一阶段格子架构重构路线文档，作为后续正式重构前的稳定基线。
+
 ## 1.1.9 - 2026-06-29
 
 ### English

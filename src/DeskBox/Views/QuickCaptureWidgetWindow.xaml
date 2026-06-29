@@ -168,12 +168,10 @@
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
-                <RowDefinition Height="Auto" />
                 <RowDefinition Height="*" />
             </Grid.RowDefinitions>
 
             <Grid Grid.Row="2" ColumnSpacing="6"
-                Margin="0,-4,0,0"
                 Visibility="{Binding InputAreaVisibility}">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*" />

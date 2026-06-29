@@ -35,7 +35,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               operatingSystem: "Windows 11, Windows 10",
               applicationCategory: "UtilitiesApplication",
               offers: { "@type": "Offer", price: "0", priceCurrency: "USD" },
-              softwareVersion: "1.1.4",
+              softwareVersion: "1.1.10",
               description: "轻量级 Windows 11 桌面整理工具，用桌面格子收纳文件、映射文件夹、管理剪贴板。",
               url: "https://github.com/Tianyu199509/DeskBox",
               downloadUrl: "https://github.com/Tianyu199509/DeskBox/releases",

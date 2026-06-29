@@ -33,6 +33,13 @@ public sealed class QuickCaptureClipboardService : IDisposable
 
     public void Refresh()
     {
+        if (App.UiDispatcherQueue is { } dispatcherQueue &&
+            !dispatcherQueue.HasThreadAccess)
+        {
+            dispatcherQueue.TryEnqueue(Refresh);
+            return;
+        }
+
         if (ShouldCaptureClipboard())
         {
             SetReason("enabled");
@@ -123,7 +130,7 @@ public sealed class QuickCaptureClipboardService : IDisposable
 
         _clipboardReader.ContentChanged += Clipboard_ContentChanged;
         _isStarted = true;
-        App.Log("[QuickCaptureClipboard] Started");
+        App.Log($"[QuickCaptureClipboard] Started uiThread={App.UiDispatcherQueue?.HasThreadAccess.ToString() ?? "unknown"}");
         _ = CaptureCurrentClipboardAsync();
     }
 
