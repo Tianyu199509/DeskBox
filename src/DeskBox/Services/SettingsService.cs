@@ -524,11 +524,19 @@ public sealed class SettingsService
 
         foreach (var widget in settings.Widgets)
         {
-            if (widget.WidgetKind is not (WidgetKind.File or WidgetKind.QuickCapture))
+            if (widget.WidgetKind is WidgetKind.Productivity)
             {
                 widget.WidgetKind = WidgetKind.File;
                 changed = true;
             }
+
+            if (!WidgetRegistry.Default.IsKnown(widget.WidgetKind))
+            {
+                widget.WidgetKind = WidgetKind.File;
+                changed = true;
+            }
+
+            widget.Metadata ??= [];
 
             if (widget.IsDisabled)
             {
@@ -715,7 +723,8 @@ public sealed class SettingsService
 
     private static bool IsStaleHiddenWidget(AppSettings settings, WidgetConfig widget)
     {
-        if (widget.IsVisible ||
+        if (widget.WidgetKind != WidgetKind.File ||
+            widget.IsVisible ||
             widget.IsDisabled ||
             !string.IsNullOrEmpty(widget.MappedFolderPath))
         {

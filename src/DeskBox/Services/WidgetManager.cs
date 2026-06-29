@@ -64,6 +64,7 @@ public sealed class WidgetManager
     private readonly LocalizationService _localizationService;
     private readonly Func<string> _desktopPathProvider;
     private readonly bool _recycleManagedFolderDeletes;
+    private readonly WidgetRegistry _widgetRegistry;
     private readonly Dictionary<string, (WidgetWindow Window, WidgetViewModel ViewModel)> _widgets = new();
     private readonly Dictionary<string, (QuickCaptureWidgetWindow Window, QuickCaptureWidgetViewModel ViewModel)> _quickCaptureWidgets = new();
     private readonly HashSet<IntPtr> _widgetWindowHandles = new();
@@ -186,6 +187,7 @@ public sealed class WidgetManager
         _mouseHookProc = TrayLayerMouseHookProc;
         _desktopPathProvider = desktopPathProvider;
         _recycleManagedFolderDeletes = recycleManagedFolderDeletes;
+        _widgetRegistry = WidgetRegistry.Default;
         _lastQuickCaptureEnabled = _settingsService.Settings.QuickCaptureEnabled;
         _settingsService.SettingsChanged += OnSettingsChanged;
         _settingsService.AppearancePreviewChanged += ApplyAppearancePreview;
@@ -266,12 +268,22 @@ public sealed class WidgetManager
     /// </summary>
     public async Task RestoreWidgetsAsync()
     {
-        var configs = _settingsService.Settings.Widgets.Where(widget =>
-                widget.WidgetKind is WidgetKind.File or WidgetKind.QuickCapture &&
+        var visibleConfigs = _settingsService.Settings.Widgets.Where(widget =>
                 widget.IsVisible &&
                 !widget.IsDisabled &&
-                (widget.WidgetKind == WidgetKind.File || _settingsService.Settings.QuickCaptureEnabled) &&
                 !IsDeleted(widget.Id))
+            .ToList();
+
+        foreach (var unsupportedConfig in visibleConfigs.Where(widget => !_widgetRegistry.CanCreateWindow(widget.WidgetKind)))
+        {
+            string reason = _widgetRegistry.IsKnown(unsupportedConfig.WidgetKind)
+                ? "not-implemented-yet"
+                : "unknown-kind";
+            App.Log($"[WidgetManager] Skipping widget restore reason={reason} widget={FormatWidget(unsupportedConfig)}");
+        }
+
+        var configs = visibleConfigs.Where(widget =>
+                _widgetRegistry.IsAvailableForSession(widget, _settingsService.Settings))
             .ToList();
 
         using var perfScope = PerformanceLogger.Measure("WidgetManager.RestoreWidgets", $"count={configs.Count}");
@@ -282,14 +294,7 @@ public sealed class WidgetManager
                 using var widgetPerfScope = PerformanceLogger.Measure(
                     "WidgetManager.RestoreWidget",
                     $"id={config.Id} name={config.Name}");
-                if (config.WidgetKind == WidgetKind.QuickCapture)
-                {
-                    await CreateQuickCaptureWidgetFromConfigAsync(config);
-                }
-                else
-                {
-                    await CreateWidgetFromConfigAsync(config);
-                }
+                await CreateRegisteredWidgetFromConfigAsync(config);
             }
             catch (Exception ex)
             {
@@ -440,7 +445,7 @@ public sealed class WidgetManager
             return false;
         }
 
-        if (config.WidgetKind == WidgetKind.QuickCapture && !_settingsService.Settings.QuickCaptureEnabled)
+        if (!_widgetRegistry.IsAvailableForSession(config, _settingsService.Settings))
         {
             return false;
         }
@@ -463,7 +468,9 @@ public sealed class WidgetManager
                 return true;
             }
 
-            var quickCaptureWindow = await CreateQuickCaptureWidgetFromConfigAsync(config, keepPreparedForAnimation: !reveal);
+            var quickCaptureWindow = (QuickCaptureWidgetWindow)await CreateRegisteredWidgetFromConfigAsync(
+                config,
+                keepPreparedForAnimation: !reveal);
             if (reveal)
             {
                 quickCaptureWindow.RevealFromTray(autoRestoreOnReveal);
@@ -476,11 +483,6 @@ public sealed class WidgetManager
             }
 
             return true;
-        }
-
-        if (config.WidgetKind != WidgetKind.File)
-        {
-            return false;
         }
 
         if (_widgets.TryGetValue(widgetId, out var entry))
@@ -536,10 +538,7 @@ public sealed class WidgetManager
         try
         {
             var candidates = _settingsService.Settings.Widgets
-                .Where(widget => widget.WidgetKind is WidgetKind.File or WidgetKind.QuickCapture &&
-                                 !widget.IsDisabled &&
-                                 !IsDeleted(widget.Id) &&
-                                 (widget.WidgetKind == WidgetKind.File || _settingsService.Settings.QuickCaptureEnabled))
+                .Where(IsSessionCandidate)
                 .ToList();
             App.LogVerbose($"[TrayBatch] Raise candidates={candidates.Count} widgets={FormatWidgetList(candidates)}");
 
@@ -619,10 +618,7 @@ public sealed class WidgetManager
         if (visible)
         {
             var candidates = _settingsService.Settings.Widgets
-                .Where(widget => widget.WidgetKind is WidgetKind.File or WidgetKind.QuickCapture &&
-                                 !widget.IsDisabled &&
-                                 !IsDeleted(widget.Id) &&
-                                 (widget.WidgetKind == WidgetKind.File || _settingsService.Settings.QuickCaptureEnabled))
+                .Where(IsSessionCandidate)
                 .ToList();
             App.LogVerbose($"[TrayBatch] SetAllVisible candidates={candidates.Count} widgets={FormatWidgetList(candidates)}");
 
@@ -862,6 +858,13 @@ public sealed class WidgetManager
         }
     }
 
+    private bool IsSessionCandidate(WidgetConfig widget)
+    {
+        return !widget.IsDisabled &&
+               !IsDeleted(widget.Id) &&
+               _widgetRegistry.IsAvailableForSession(widget, _settingsService.Settings);
+    }
+
     private async Task<IDesktopWidgetWindow?> PrepareWidgetForBatchShowAsync(
         WidgetConfig config,
         bool showRaisedWhileInitializing = false)
@@ -897,7 +900,7 @@ public sealed class WidgetManager
             }
 
             App.LogVerbose($"[TrayBatch] Prepare createQuick widget={FormatWidget(config)} raisedInit={showRaisedWhileInitializing}");
-            var quickCaptureWindow = await CreateQuickCaptureWidgetFromConfigAsync(
+            var quickCaptureWindow = await CreateRegisteredWidgetFromConfigAsync(
                 config,
                 keepPreparedForAnimation: true,
                 showRaisedWhileInitializing: showRaisedWhileInitializing);
@@ -921,7 +924,7 @@ public sealed class WidgetManager
         }
 
         App.LogVerbose($"[TrayBatch] Prepare createFile widget={FormatWidget(config)} raisedInit={showRaisedWhileInitializing}");
-        var window = await CreateWidgetFromConfigAsync(
+        var window = await CreateRegisteredWidgetFromConfigAsync(
             config,
             keepPreparedForAnimation: true,
             showRaisedWhileInitializing: showRaisedWhileInitializing);
@@ -1742,11 +1745,8 @@ public sealed class WidgetManager
     public async Task ToggleAllWidgetsAsync()
     {
         bool anyVisible = _settingsService.Settings.Widgets.Any(widget =>
-            widget.WidgetKind is WidgetKind.File or WidgetKind.QuickCapture &&
             widget.IsVisible &&
-            !widget.IsDisabled &&
-            (widget.WidgetKind == WidgetKind.File || _settingsService.Settings.QuickCaptureEnabled) &&
-            !IsDeleted(widget.Id));
+            IsSessionCandidate(widget));
 
         await SetAllWidgetsVisibleAsync(!anyVisible);
     }
@@ -2643,6 +2643,28 @@ public sealed class WidgetManager
 
         WidgetCreated?.Invoke(window);
         return window;
+    }
+
+    private async Task<IDesktopWidgetWindow> CreateRegisteredWidgetFromConfigAsync(
+        WidgetConfig config,
+        bool keepPreparedForAnimation = false,
+        bool revealAfterCreate = false,
+        bool showRaisedWhileInitializing = false)
+    {
+        return config.WidgetKind switch
+        {
+            WidgetKind.File => await CreateWidgetFromConfigAsync(
+                config,
+                keepPreparedForAnimation,
+                revealAfterCreate,
+                showRaisedWhileInitializing),
+            WidgetKind.QuickCapture => await CreateQuickCaptureWidgetFromConfigAsync(
+                config,
+                keepPreparedForAnimation,
+                revealAfterCreate,
+                showRaisedWhileInitializing),
+            _ => throw new NotSupportedException($"Widget kind '{config.WidgetKind}' is not registered as creatable.")
+        };
     }
 
     private async Task<QuickCaptureWidgetWindow> CreateQuickCaptureWidgetFromConfigAsync(

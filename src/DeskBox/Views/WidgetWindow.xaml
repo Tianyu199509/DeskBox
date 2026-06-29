@@ -23,23 +23,6 @@
         PointerExited="RootGrid_PointerExited">
 
         <Grid.Resources>
-            <Style x:Key="RoundedToolTipStyle" TargetType="ToolTip">
-                <Setter Property="Background" Value="Transparent" />
-                <Setter Property="BorderBrush" Value="Transparent" />
-                <Setter Property="BorderThickness" Value="0" />
-                <Setter Property="Foreground" Value="{ThemeResource TextFillColorPrimaryBrush}" />
-                <Setter Property="Padding" Value="0" />
-                <Setter Property="Template">
-                    <Setter.Value>
-                        <ControlTemplate TargetType="ToolTip">
-                            <ContentPresenter
-                                Content="{TemplateBinding Content}"
-                                ContentTemplate="{TemplateBinding ContentTemplate}" />
-                        </ControlTemplate>
-                    </Setter.Value>
-                </Setter>
-            </Style>
-
             <Style x:Key="WidgetGridViewItemStyle" TargetType="GridViewItem">
                 <Setter Property="Padding" Value="0" />
                 <Setter Property="Margin" Value="0" />

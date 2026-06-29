@@ -1,3 +1,6 @@
+using System.Text.Json;
+using System.Text.Json.Serialization;
+
 namespace DeskBox.Models;
 
 /// <summary>
@@ -24,6 +27,7 @@ public class WidgetConfig
     public double Height { get; set; } = 400;
 
     /// <summary>Widget content type.</summary>
+    [JsonConverter(typeof(WidgetKindJsonConverter))]
     public WidgetKind WidgetKind { get; set; } = WidgetKind.File;
 
     /// <summary>Current view layout mode (Icon grid or List).</summary>
@@ -42,6 +46,12 @@ public class WidgetConfig
     public bool IsSizeLocked { get; set; }
 
     /// <summary>
+    /// Optional widget-specific payload for future widget kinds.
+    /// Stored as simple string values so the config remains easy to serialize and migrate.
+    /// </summary>
+    public Dictionary<string, string> Metadata { get; set; } = [];
+
+    /// <summary>
     /// Optional filesystem folder to mirror. When set, the widget auto-populates
     /// from folder contents. When <c>null</c>, items are managed manually.
     /// </summary>
@@ -52,9 +62,7 @@ public class WidgetConfig
     /// </summary>
     public bool FollowsDefaultStoragePath { get; set; }
 
-    /// <summary>
-    /// <summary>Stable subfolder name used when the widget follows the default managed storage path.
-    /// </summary>
+    /// <summary>Stable subfolder name used when the widget follows the default managed storage path.</summary>
     public string? ManagedFolderName { get; set; }
 
     /// <summary>How items are sorted in this widget.</summary>
@@ -112,6 +120,7 @@ public enum ViewMode
 /// <summary>
 /// Defines the functional mode of a widget.
 /// </summary>
+[JsonConverter(typeof(WidgetKindJsonConverter))]
 public enum WidgetKind
 {
     /// <summary>File-oriented widget used for references or folder-backed storage.</summary>
@@ -120,6 +129,49 @@ public enum WidgetKind
     /// <summary>Built-in lightweight text/link capture widget.</summary>
     QuickCapture,
 
+    /// <summary>Reserved for a future weather widget.</summary>
+    Weather,
+
+    /// <summary>Reserved for a future todo widget.</summary>
+    Todo,
+
+    /// <summary>Reserved for a future tag widget.</summary>
+    Tags,
+
+    /// <summary>Reserved for a future music control widget.</summary>
+    Music,
+
+    /// <summary>Reserved for a future system monitor widget.</summary>
+    SystemMonitor,
+
     /// <summary>Legacy value kept only for migrating old settings files.</summary>
     Productivity
+}
+
+public sealed class WidgetKindJsonConverter : JsonConverter<WidgetKind>
+{
+    public override WidgetKind Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+    {
+        if (reader.TokenType == JsonTokenType.String)
+        {
+            string? value = reader.GetString();
+            return Enum.TryParse(value, ignoreCase: true, out WidgetKind parsed) &&
+                   Enum.IsDefined(parsed)
+                ? parsed
+                : WidgetKind.File;
+        }
+
+        if (reader.TokenType == JsonTokenType.Number && reader.TryGetInt32(out int numericValue))
+        {
+            var parsed = (WidgetKind)numericValue;
+            return Enum.IsDefined(parsed) ? parsed : WidgetKind.File;
+        }
+
+        return WidgetKind.File;
+    }
+
+    public override void Write(Utf8JsonWriter writer, WidgetKind value, JsonSerializerOptions options)
+    {
+        writer.WriteStringValue(Enum.IsDefined(value) ? value.ToString() : WidgetKind.File.ToString());
+    }
 }

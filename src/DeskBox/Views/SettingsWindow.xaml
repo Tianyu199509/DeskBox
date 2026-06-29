@@ -125,19 +125,6 @@
                 <Setter Property="VerticalContentAlignment" Value="Center" />
             </Style>
 
-            <x:Double x:Key="ToggleSwitchOuterBorderStrokeThickness">0.25</x:Double>
-            <x:Double x:Key="ToggleSwitchThemeMinWidth">72</x:Double>
-            <x:Double x:Key="ToggleSwitchPreContentMargin">0</x:Double>
-            <x:Double x:Key="ToggleSwitchPostContentMargin">0</x:Double>
-
-            <Style x:Key="SettingToggleSwitchStyle" TargetType="ToggleSwitch">
-                <Setter Property="Width" Value="44" />
-                <Setter Property="MinWidth" Value="44" />
-                <Setter Property="HorizontalAlignment" Value="Right" />
-                <Setter Property="VerticalAlignment" Value="Center" />
-                <Setter Property="Margin" Value="0" />
-            </Style>
-
             <Style x:Key="DrillDownRowStyle" TargetType="Button">
                 <Setter Property="HorizontalAlignment" Value="Stretch" />
                 <Setter Property="HorizontalContentAlignment" Value="Stretch" />

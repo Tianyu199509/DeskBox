@@ -3,6 +3,7 @@
     x:Class="DeskBox.Views.QuickCaptureWidgetWindow"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:controls="using:DeskBox.Controls"
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     mc:Ignorable="d"
@@ -91,79 +92,17 @@
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
-        <Border
-            x:Name="BackgroundPlate"
+        <controls:WidgetShell
+            x:Name="QuickCaptureShell"
             Grid.RowSpan="2"
-            BorderThickness="0"
-            CornerRadius="0" />
-
-        <Grid
-            x:Name="TitleBarGrid"
-            Grid.Row="0"
-            Padding="14,7,12,5"
-            Background="Transparent"
-            RightTapped="TitleBarGrid_RightTapped"
-            PointerPressed="TitleBarGrid_PointerPressed"
-            PointerMoved="TitleBarGrid_PointerMoved"
-            PointerReleased="TitleBarGrid_PointerReleased">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="Auto" />
-            </Grid.ColumnDefinitions>
-
-            <StackPanel
-                Grid.Column="0"
-                VerticalAlignment="Center"
-                Orientation="Horizontal"
-                Spacing="8">
-                <FontIcon
-                    x:Name="TitleIcon"
-                    FontSize="{Binding TitleIconSize}"
-                    Glyph="&#xE8A5;" />
-                <TextBlock
-                    x:Name="TitleText"
-                    FontSize="{Binding TitleTextSize}"
-                    Text="{Binding DisplayName}"
-                    TextTrimming="CharacterEllipsis"
-                    VerticalAlignment="Center" />
-            </StackPanel>
-
-            <StackPanel
-                x:Name="RightActionButtons"
-                Grid.Column="1"
-                Orientation="Horizontal"
-                Spacing="4"
-                Opacity="0"
-                VerticalAlignment="Center">
-                <Button
-                    x:Name="MoreButton"
-                    Width="22"
-                    Height="22"
-                    Padding="0"
-                    Click="MoreButton_Click"
-                    >
-                    <FontIcon x:Name="MoreButtonIcon" FontSize="11" Glyph="&#xE712;" />
-                </Button>
-                <Button
-                    x:Name="CloseButton"
-                    Width="22"
-                    Height="22"
-                    Padding="0"
-                    Click="CloseButton_Click"
-                    >
-                    <FontIcon x:Name="CloseButtonIcon" FontSize="11" Glyph="&#xE74D;" />
-                </Button>
-            </StackPanel>
-        </Grid>
-
-        <Border
-            x:Name="HeaderDivider"
-            Grid.Row="0"
-            Height="1"
-            Margin="12,0"
-            VerticalAlignment="Bottom" />
-
-        <Grid Grid.Row="1" Padding="10,6,6,8" RowSpacing="4">
+            CloseRequested="CloseButton_Click"
+            MoreRequested="MoreButton_Click"
+            TitlePointerMoved="TitleBarGrid_PointerMoved"
+            TitlePointerPressed="TitleBarGrid_PointerPressed"
+            TitlePointerReleased="TitleBarGrid_PointerReleased"
+            TitleRightTapped="TitleBarGrid_RightTapped">
+            <controls:WidgetShell.ShellContent>
+                <Grid Padding="10,6,6,8" RowSpacing="4">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
@@ -545,7 +484,9 @@
                     </ListView.ItemTemplate>
                 </ListView>
             </Grid>
-        </Grid>
+                </Grid>
+            </controls:WidgetShell.ShellContent>
+        </controls:WidgetShell>
 
         <Border
             x:Name="StatusToast"

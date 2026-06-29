@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Numerics;
+using DeskBox.Controls;
 using DeskBox.Helpers;
 using DeskBox.Models;
 using DeskBox.Services;
@@ -62,6 +63,17 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
         "DeskBox",
         "QuickCapture",
         "Preview");
+
+    private Grid TitleBarGrid => QuickCaptureShell.TitleBar;
+    private Border BackgroundPlate => QuickCaptureShell.BackgroundSurface;
+    private Border HeaderDivider => QuickCaptureShell.Divider;
+    private FontIcon TitleIcon => QuickCaptureShell.TitleIconElement;
+    private TextBlock TitleText => QuickCaptureShell.TitleTextElement;
+    private StackPanel RightActionButtons => QuickCaptureShell.RightActionButtonHost;
+    private Button MoreButton => QuickCaptureShell.MoreActionButton;
+    private Button CloseButton => QuickCaptureShell.CloseActionButton;
+    private FontIcon MoreButtonIcon => QuickCaptureShell.MoreActionIcon;
+    private FontIcon CloseButtonIcon => QuickCaptureShell.CloseActionIcon;
 
     private readonly SettingsService _settingsService;
     private readonly LocalizationService _localizationService;
@@ -2881,7 +2893,9 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
         CloseButtonIcon.FontSize = btnIconSize;
 
         double rowHeight = Math.Clamp(titleIconSize + 32, 40, 54);
-        RootGrid.RowDefinitions[0].Height = new GridLength(rowHeight);
+        var titleRowHeight = new GridLength(rowHeight);
+        RootGrid.RowDefinitions[0].Height = titleRowHeight;
+        QuickCaptureShell.SetTitleBarRowHeight(titleRowHeight);
 
         double padH = Math.Clamp(Math.Round(titleIconSize * 0.9), 10, 16);
         double padT = Math.Clamp(Math.Round(titleIconSize * 0.5), 4, 10);

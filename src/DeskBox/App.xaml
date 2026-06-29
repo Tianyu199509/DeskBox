@@ -42,21 +42,64 @@
             </ResourceDictionary.ThemeDictionaries>
 
             <FontFamily x:Key="DeskBoxMenuFontFamily">Microsoft YaHei UI, Segoe UI Variable, Segoe UI</FontFamily>
+            <x:Double x:Key="DeskBoxMenuPresenterVerticalPadding">4</x:Double>
+            <x:Double x:Key="DeskBoxMenuItemMinHeight">36</x:Double>
+            <x:Double x:Key="DeskBoxMenuItemFontSize">13</x:Double>
+            <Thickness x:Key="DeskBoxMenuItemPadding">12,8,12,8</Thickness>
+
+            <!-- Shared ToggleSwitch template tuning for settings-style rows. -->
+            <x:Double x:Key="ToggleSwitchOuterBorderStrokeThickness">0.25</x:Double>
+            <x:Double x:Key="ToggleSwitchThemeMinWidth">72</x:Double>
+            <x:Double x:Key="ToggleSwitchPreContentMargin">0</x:Double>
+            <x:Double x:Key="ToggleSwitchPostContentMargin">0</x:Double>
+
+            <Style TargetType="ToggleSwitch" BasedOn="{StaticResource DefaultToggleSwitchStyle}">
+                <Setter Property="HorizontalAlignment" Value="Right" />
+                <Setter Property="VerticalAlignment" Value="Center" />
+                <Setter Property="Margin" Value="0" />
+            </Style>
+
+            <Style x:Key="RoundedToolTipStyle" TargetType="ToolTip" BasedOn="{StaticResource DefaultToolTipStyle}">
+                <Setter Property="Background" Value="Transparent" />
+                <Setter Property="BorderBrush" Value="Transparent" />
+                <Setter Property="BorderThickness" Value="0" />
+                <Setter Property="Foreground" Value="{ThemeResource TextFillColorPrimaryBrush}" />
+                <Setter Property="Padding" Value="0" />
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="ToolTip">
+                            <ContentPresenter
+                                Content="{TemplateBinding Content}"
+                                ContentTemplate="{TemplateBinding ContentTemplate}" />
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
 
             <Style TargetType="MenuFlyoutPresenter" BasedOn="{StaticResource DefaultMenuFlyoutPresenterStyle}">
                 <Setter Property="FontFamily" Value="{StaticResource DeskBoxMenuFontFamily}" />
+                <Setter Property="Padding" Value="{StaticResource DeskBoxMenuItemPadding}" />
             </Style>
 
             <Style TargetType="MenuFlyoutItem" BasedOn="{StaticResource DefaultMenuFlyoutItemStyle}">
                 <Setter Property="FontFamily" Value="{StaticResource DeskBoxMenuFontFamily}" />
+                <Setter Property="MinHeight" Value="{StaticResource DeskBoxMenuItemMinHeight}" />
+                <Setter Property="Padding" Value="{StaticResource DeskBoxMenuItemPadding}" />
+                <Setter Property="FontSize" Value="{StaticResource DeskBoxMenuItemFontSize}" />
             </Style>
 
             <Style TargetType="ToggleMenuFlyoutItem" BasedOn="{StaticResource DefaultToggleMenuFlyoutItemStyle}">
                 <Setter Property="FontFamily" Value="{StaticResource DeskBoxMenuFontFamily}" />
+                <Setter Property="MinHeight" Value="{StaticResource DeskBoxMenuItemMinHeight}" />
+                <Setter Property="Padding" Value="{StaticResource DeskBoxMenuItemPadding}" />
+                <Setter Property="FontSize" Value="{StaticResource DeskBoxMenuItemFontSize}" />
             </Style>
 
             <Style TargetType="MenuFlyoutSubItem" BasedOn="{StaticResource DefaultMenuFlyoutSubItemStyle}">
                 <Setter Property="FontFamily" Value="{StaticResource DeskBoxMenuFontFamily}" />
+                <Setter Property="MinHeight" Value="{StaticResource DeskBoxMenuItemMinHeight}" />
+                <Setter Property="Padding" Value="{StaticResource DeskBoxMenuItemPadding}" />
+                <Setter Property="FontSize" Value="{StaticResource DeskBoxMenuItemFontSize}" />
             </Style>
 
             <!-- Custom styles to override missing system styles in some environments -->

@@ -29,8 +29,6 @@ public partial class App : Application
     private const double TrayMenuItemMinHeight = 36;
     private const int TrayContextMenuFallbackOffsetPixels = 24;
     private const int TrayContextMenuEstimatedWidth = (int)TrayMenuItemWidth + 16;
-    private const string MenuFontFamilyResourceKey = "DeskBoxMenuFontFamily";
-    private const string DefaultMenuFontFamily = "Microsoft YaHei UI, Segoe UI Variable, Segoe UI";
     private const int MaxQueuedLogLines = 4096;
     private const string VerboseLoggingEnvironmentVariable = "DESKBOX_VERBOSE_LOG";
     private static readonly bool EnableVerboseLogging = IsEnabledEnvironmentValue(
@@ -790,14 +788,11 @@ public partial class App : Application
         var localization = LocalizationService;
         var contextMenu = new MenuFlyout();
         contextMenu.ShouldConstrainToRootBounds = false;
-        contextMenu.MenuFlyoutPresenterStyle = CreateTrayMenuPresenterStyle();
-        var trayMenuItemStyle = CreateTrayMenuItemStyle();
         var mapFolderItem = new MenuFlyoutItem
         {
             Text = localization.T("Common.NewFolderMapping"),
             Width = TrayMenuItemWidth,
-            Icon = new SymbolIcon(Symbol.OpenFile),
-            Style = trayMenuItemStyle
+            Icon = new SymbolIcon(Symbol.OpenFile)
         };
         mapFolderItem.Click += async (_, _) => await RunTrayMenuActionAsync(contextMenu, CreateFolderWidgetFromPickerAsync);
 
@@ -805,8 +800,7 @@ public partial class App : Application
         {
             Text = localization.T("Common.NewWidget"),
             Width = TrayMenuItemWidth,
-            Icon = new SymbolIcon(Symbol.Add),
-            Style = trayMenuItemStyle
+            Icon = new SymbolIcon(Symbol.Add)
         };
         newWidgetItem.Click += async (_, _) => await RunTrayMenuActionAsync(contextMenu, async () =>
         {
@@ -820,8 +814,7 @@ public partial class App : Application
         {
             Text = localization.T("Tray.Settings"),
             Width = TrayMenuItemWidth,
-            Icon = new SymbolIcon(Symbol.Setting),
-            Style = trayMenuItemStyle
+            Icon = new SymbolIcon(Symbol.Setting)
         };
         settingsItem.Click += async (_, _) => await RunTrayMenuActionAsync(contextMenu, OpenSettingsFromTray);
 
@@ -829,8 +822,7 @@ public partial class App : Application
         {
             Text = localization.T("Tray.OpenManagedStorage"),
             Width = TrayMenuItemWidth,
-            Icon = new SymbolIcon(Symbol.Folder),
-            Style = trayMenuItemStyle
+            Icon = new SymbolIcon(Symbol.Folder)
         };
         openManagedStorageItem.Click += async (_, _) => await RunTrayMenuActionAsync(contextMenu, OpenManagedStorageFromTray);
 
@@ -838,8 +830,7 @@ public partial class App : Application
         {
             Text = localization.T("Tray.Exit"),
             Width = TrayMenuItemWidth,
-            Icon = new SymbolIcon(Symbol.Cancel),
-            Style = trayMenuItemStyle
+            Icon = new SymbolIcon(Symbol.Cancel)
         };
         exitItem.Click += async (_, _) => await RunTrayMenuActionAsync(contextMenu, ExitApplication);
 
@@ -1268,56 +1259,6 @@ public partial class App : Application
         {
             _trayExitItem.Text = LocalizationService.T("Tray.Exit");
         }
-    }
-
-    private static Style CreateTrayMenuPresenterStyle()
-    {
-        var presenterStyle = new Style
-        {
-            TargetType = typeof(MenuFlyoutPresenter)
-        };
-
-        if (Current.Resources.TryGetValue("DefaultMenuFlyoutPresenterStyle", out var basePresenterStyle) &&
-            basePresenterStyle is Style defaultPresenterStyle)
-        {
-            presenterStyle.BasedOn = defaultPresenterStyle;
-        }
-
-        presenterStyle.Setters.Add(new Setter(Control.PaddingProperty, new Thickness(0, TrayMenuVerticalPadding, 0, TrayMenuVerticalPadding)));
-        return presenterStyle;
-    }
-
-    private static Style CreateTrayMenuItemStyle()
-    {
-        return CreateTrayMenuItemStyleCore(typeof(MenuFlyoutItem), "DefaultMenuFlyoutItemStyle");
-    }
-
-    private static Style CreateTrayMenuItemStyleCore(Type targetType, string defaultStyleKey)
-    {
-        var itemStyle = new Style
-        {
-            TargetType = targetType
-        };
-
-        if (Current.Resources.TryGetValue(defaultStyleKey, out var baseStyle) &&
-            baseStyle is Style defaultItemStyle)
-        {
-            itemStyle.BasedOn = defaultItemStyle;
-        }
-
-        itemStyle.Setters.Add(new Setter(Control.FontFamilyProperty, GetMenuFontFamily()));
-        itemStyle.Setters.Add(new Setter(FrameworkElement.MinHeightProperty, TrayMenuItemMinHeight));
-        itemStyle.Setters.Add(new Setter(Control.PaddingProperty, new Thickness(12, 8, 12, 8)));
-        itemStyle.Setters.Add(new Setter(Control.FontSizeProperty, 13.0));
-        return itemStyle;
-    }
-
-    private static Microsoft.UI.Xaml.Media.FontFamily GetMenuFontFamily()
-    {
-        return Current.Resources.TryGetValue(MenuFontFamilyResourceKey, out var fontFamily) &&
-               fontFamily is Microsoft.UI.Xaml.Media.FontFamily menuFontFamily
-            ? menuFontFamily
-            : new Microsoft.UI.Xaml.Media.FontFamily(DefaultMenuFontFamily);
     }
 
     private static async Task RunTrayMenuActionAsync(MenuFlyout contextMenu, Action action)

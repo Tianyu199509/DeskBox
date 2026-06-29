@@ -62,6 +62,66 @@ public sealed class SettingsServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task LoadAsync_PreservesFutureWidgetKindsAndMetadata()
+    {
+        var settings = new AppSettings
+        {
+            Widgets =
+            [
+                new WidgetConfig
+                {
+                    Id = "weather",
+                    Name = "Weather",
+                    WidgetKind = WidgetKind.Weather,
+                    Metadata =
+                    {
+                        ["city"] = "Shanghai",
+                        ["unit"] = "metric"
+                    }
+                }
+            ]
+        };
+
+        await File.WriteAllTextAsync(
+            Path.Combine(_settingsRoot, "settings.json"),
+            JsonSerializer.Serialize(settings, s_jsonOptions));
+
+        var service = new SettingsService(_settingsRoot);
+        await service.LoadAsync();
+
+        var widget = Assert.Single(service.Settings.Widgets);
+        Assert.Equal(WidgetKind.Weather, widget.WidgetKind);
+        Assert.Equal("Shanghai", widget.Metadata["city"]);
+        Assert.Equal("metric", widget.Metadata["unit"]);
+    }
+
+    [Fact]
+    public async Task LoadAsync_SafelyDowngradesUnknownWidgetKind()
+    {
+        await File.WriteAllTextAsync(
+            Path.Combine(_settingsRoot, "settings.json"),
+            """
+            {
+              "widgets": [
+                {
+                  "id": "unknown-kind",
+                  "name": "Unknown",
+                  "widgetKind": "FutureExperimentalWidget",
+                  "isVisible": true
+                }
+              ]
+            }
+            """);
+
+        var service = new SettingsService(_settingsRoot);
+        await service.LoadAsync();
+
+        var widget = Assert.Single(service.Settings.Widgets);
+        Assert.Equal("unknown-kind", widget.Id);
+        Assert.Equal(WidgetKind.File, widget.WidgetKind);
+    }
+
+    [Fact]
     public async Task LoadAsync_NormalizesQuickCaptureRecentLimit()
     {
         var settings = new AppSettings
