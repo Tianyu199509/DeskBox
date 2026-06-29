@@ -530,3 +530,39 @@ H 线后建议先做“第一个真实功能格子前置设计”，不要直接
 ### 下一步建议
 
 下一步可以做 `TodoWidgetViewModel` 与 ViewModel 单元测试，继续不接 UI、不开放入口。
+
+## 25. Todo ViewModel 第一小步
+
+已完成 Todo 行为层第一小步：
+
+- 新增 `TodoFilter`。
+- 新增 `TodoItemViewModel`。
+- 新增 `TodoWidgetViewModel`。
+- 新增 `TodoWidgetViewModelTests`。
+- 支持初始化加载。
+- 支持新增任务，新增任务默认在顶部。
+- 支持输入框新增并成功后清空输入。
+- 支持编辑任务文本，空文本编辑会被拒绝。
+- 支持完成/取消完成。
+- 支持删除单个任务。
+- 支持清理已完成任务。
+- 支持 `All` / `Active` / `Completed` 过滤。
+- 支持计数：总数、未完成数、已完成数。
+- 所有操作通过 `TodoWidgetStore` 持久化。
+- 暂未新增 `TodoWidgetContent`。
+- 未修改 `WidgetRegistry`。
+- 未修改 `WidgetContentFactory`。
+- 未开放 Todo 创建入口。
+- 未接入设置页、托盘菜单、右键菜单或新建格子流程。
+- 未改变托盘/F7/层级/拖拽/IME/排序/安装器逻辑。
+
+### Todo ViewModel 验证记录
+
+- `dotnet build .\DeskBox.sln -c Debug -p:Platform=x64 --no-restore`
+- `dotnet test .\DeskBox.sln -c Debug -p:Platform=x64 --no-build`
+
+当前测试数量：`153/153`。
+
+### 下一步建议
+
+下一步可以做 `TodoWidgetContent` UI 空接入，但仍不要开放 Todo 创建入口。先让 UI 控件可以绑定 ViewModel，再决定是否需要通用内容 host。
