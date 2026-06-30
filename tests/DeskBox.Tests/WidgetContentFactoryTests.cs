@@ -62,6 +62,9 @@ public sealed class WidgetContentFactoryTests
 
         Assert.Equal([WidgetKind.File, WidgetKind.Todo], descriptors.Select(descriptor => descriptor.WidgetKind));
         Assert.All(descriptors, descriptor => Assert.True(WidgetRegistry.Default.CanCreateWindow(descriptor.WidgetKind)));
+        Assert.All(descriptors, descriptor => Assert.False(string.IsNullOrWhiteSpace(descriptor.CreateEntryTextKey)));
+        Assert.Equal("Common.NewWidget", descriptors.Single(descriptor => descriptor.WidgetKind == WidgetKind.File).CreateEntryTextKey);
+        Assert.Equal("Todo.NewWidget", descriptors.Single(descriptor => descriptor.WidgetKind == WidgetKind.Todo).CreateEntryTextKey);
     }
 
     [Theory]

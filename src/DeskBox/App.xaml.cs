@@ -51,8 +51,7 @@ public partial class App : Application
     private TaskbarIcon? _trayIcon;
     private Window? _trayWindow;
     private MenuFlyoutItem? _trayMapFolderItem;
-    private MenuFlyoutItem? _trayNewWidgetItem;
-    private MenuFlyoutItem? _trayNewTodoWidgetItem;
+    private readonly Dictionary<WidgetKind, MenuFlyoutItem> _trayCreateWidgetItems = [];
     private MenuFlyoutItem? _trayOpenManagedStorageItem;
     private MenuFlyoutItem? _traySettingsItem;
     private MenuFlyoutItem? _trayExitItem;
@@ -821,34 +820,6 @@ public partial class App : Application
         };
         mapFolderItem.Click += async (_, _) => await RunTrayMenuActionAsync(contextMenu, CreateFolderWidgetFromPickerAsync);
 
-        var newWidgetItem = new MenuFlyoutItem
-        {
-            Text = localization.T("Common.NewWidget"),
-            Width = TrayMenuItemWidth,
-            Icon = new SymbolIcon(Symbol.Add)
-        };
-        newWidgetItem.Click += async (_, _) => await RunTrayMenuActionAsync(contextMenu, async () =>
-        {
-            if (WidgetManager is not null)
-            {
-                await WidgetManager.CreateManagedWidgetAsync(LocalizationService.T("Widget.DefaultNameShort"));
-            }
-        });
-
-        var newTodoWidgetItem = new MenuFlyoutItem
-        {
-            Text = localization.T("Todo.NewWidget"),
-            Width = TrayMenuItemWidth,
-            Icon = new FontIcon { Glyph = "\uE9D5" }
-        };
-        newTodoWidgetItem.Click += async (_, _) => await RunTrayMenuActionAsync(contextMenu, async () =>
-        {
-            if (WidgetManager is not null)
-            {
-                await WidgetManager.CreateTodoWidgetAsync();
-            }
-        });
-
         var settingsItem = new MenuFlyoutItem
         {
             Text = localization.T("Tray.Settings"),
@@ -876,13 +847,22 @@ public partial class App : Application
         contextMenu.Opening += (_, _) =>
         {
             bool canCreateWidget = WidgetManager is not null;
-            newWidgetItem.IsEnabled = canCreateWidget;
-            newTodoWidgetItem.IsEnabled = canCreateWidget;
+            foreach (var item in _trayCreateWidgetItems.Values)
+            {
+                item.IsEnabled = canCreateWidget;
+            }
+
             mapFolderItem.IsEnabled = canCreateWidget;
         };
 
-        contextMenu.Items.Add(newWidgetItem);
-        contextMenu.Items.Add(newTodoWidgetItem);
+        _trayCreateWidgetItems.Clear();
+        foreach (var descriptor in new WidgetContentFactory().GetCreateEntryDescriptors())
+        {
+            var createItem = CreateTrayCreateWidgetItem(contextMenu, descriptor, localization);
+            _trayCreateWidgetItems[descriptor.WidgetKind] = createItem;
+            contextMenu.Items.Add(createItem);
+        }
+
         contextMenu.Items.Add(mapFolderItem);
         contextMenu.Items.Add(new MenuFlyoutSeparator());
         contextMenu.Items.Add(openManagedStorageItem);
@@ -892,8 +872,6 @@ public partial class App : Application
         contextMenu.Items.Add(exitItem);
 
         _trayMapFolderItem = mapFolderItem;
-        _trayNewWidgetItem = newWidgetItem;
-        _trayNewTodoWidgetItem = newTodoWidgetItem;
         _trayOpenManagedStorageItem = openManagedStorageItem;
         _traySettingsItem = settingsItem;
         _trayExitItem = exitItem;
@@ -975,6 +953,27 @@ public partial class App : Application
         });
 
         ThemeService.AppearanceChanged += UpdateTrayIconAppearance;
+    }
+
+    private MenuFlyoutItem CreateTrayCreateWidgetItem(
+        MenuFlyout contextMenu,
+        WidgetContentDescriptor descriptor,
+        LocalizationService localization)
+    {
+        var item = new MenuFlyoutItem
+        {
+            Text = GetCreateEntryText(descriptor, localization),
+            Width = TrayMenuItemWidth,
+            Icon = new FontIcon { Glyph = descriptor.DefaultGlyph }
+        };
+        item.Click += async (_, _) => await RunTrayMenuActionAsync(contextMenu, async () =>
+        {
+            if (WidgetManager is not null)
+            {
+                await WidgetManager.CreateWidgetOfKindAsync(descriptor.WidgetKind);
+            }
+        });
+        return item;
     }
 
     private void ShowTrayContextMenuFromTray()
@@ -1282,14 +1281,10 @@ public partial class App : Application
             _trayMapFolderItem.Text = LocalizationService.T("Common.NewFolderMapping");
         }
 
-        if (_trayNewWidgetItem is not null)
+        foreach (var (widgetKind, item) in _trayCreateWidgetItems)
         {
-            _trayNewWidgetItem.Text = LocalizationService.T("Common.NewWidget");
-        }
-
-        if (_trayNewTodoWidgetItem is not null)
-        {
-            _trayNewTodoWidgetItem.Text = LocalizationService.T("Todo.NewWidget");
+            var descriptor = new WidgetContentFactory().GetDescriptor(widgetKind);
+            item.Text = GetCreateEntryText(descriptor, LocalizationService);
         }
 
         if (_traySettingsItem is not null)
@@ -1306,6 +1301,13 @@ public partial class App : Application
         {
             _trayExitItem.Text = LocalizationService.T("Tray.Exit");
         }
+    }
+
+    private static string GetCreateEntryText(WidgetContentDescriptor descriptor, LocalizationService localization)
+    {
+        return string.IsNullOrWhiteSpace(descriptor.CreateEntryTextKey)
+            ? descriptor.DefaultTitle
+            : localization.T(descriptor.CreateEntryTextKey);
     }
 
     private static async Task RunTrayMenuActionAsync(MenuFlyout contextMenu, Action action)

@@ -4588,39 +4588,24 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
         return flyout;
     }
 
-    private void NewWidget_Click(object sender, RoutedEventArgs e)
-    {
-        if (App.Current is App app)
-        {
-            _ = app.WidgetManager?.CreateManagedWidgetAsync(_localizationService.T("Widget.DefaultNameShort"));
-        }
-    }
-
-    private void NewTodoWidget_Click(object sender, RoutedEventArgs e)
-    {
-        if (App.Current is App app)
-        {
-            _ = app.WidgetManager?.CreateTodoWidgetAsync();
-        }
-    }
-
     private void AddCreateWidgetItems(MenuFlyout flyout)
     {
-        var newWidget = new MenuFlyoutItem
+        foreach (var descriptor in new WidgetContentFactory().GetCreateEntryDescriptors())
         {
-            Text = _localizationService.T("Common.NewWidget"),
-            Icon = new FontIcon { Glyph = "\uE710" }
-        };
-        newWidget.Click += NewWidget_Click;
-        flyout.Items.Add(newWidget);
-
-        var newTodoWidget = new MenuFlyoutItem
-        {
-            Text = _localizationService.T("Todo.NewWidget"),
-            Icon = new FontIcon { Glyph = "\uE9D5" }
-        };
-        newTodoWidget.Click += NewTodoWidget_Click;
-        flyout.Items.Add(newTodoWidget);
+            var createItem = new MenuFlyoutItem
+            {
+                Text = GetCreateEntryText(descriptor),
+                Icon = new FontIcon { Glyph = descriptor.DefaultGlyph }
+            };
+            createItem.Click += async (_, _) =>
+            {
+                if (App.Current.WidgetManager is { } widgetManager)
+                {
+                    await widgetManager.CreateWidgetOfKindAsync(descriptor.WidgetKind);
+                }
+            };
+            flyout.Items.Add(createItem);
+        }
 
         var mapFolder = new MenuFlyoutItem
         {
@@ -4629,6 +4614,13 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
         };
         mapFolder.Click += MapFolderButton_Click;
         flyout.Items.Add(mapFolder);
+    }
+
+    private string GetCreateEntryText(WidgetContentDescriptor descriptor)
+    {
+        return string.IsNullOrWhiteSpace(descriptor.CreateEntryTextKey)
+            ? descriptor.DefaultTitle
+            : _localizationService.T(descriptor.CreateEntryTextKey);
     }
 
     private MenuFlyout CreateNewWidgetFlyout()

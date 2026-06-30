@@ -430,6 +430,33 @@ public sealed class WidgetManager
         return await CreateContentWidgetFromConfigAsync(config, revealAfterCreate: true);
     }
 
+    public async Task CreateWidgetOfKindAsync(WidgetKind widgetKind)
+    {
+        if (!_widgetRegistry.CanCreateWindow(widgetKind))
+        {
+            throw new NotSupportedException($"Widget kind '{widgetKind}' is not registered as creatable.");
+        }
+
+        switch (widgetKind)
+        {
+            case WidgetKind.File:
+                await CreateManagedWidgetAsync(_localizationService.T("Widget.DefaultNameShort"));
+                break;
+            case WidgetKind.Todo:
+                await CreateTodoWidgetAsync();
+                break;
+            default:
+                await CreateRegisteredWidgetFromConfigAsync(new WidgetConfig
+                {
+                    Name = widgetKind.ToString(),
+                    WidgetKind = widgetKind,
+                    Width = _settingsService.Settings.DefaultWidgetWidth,
+                    Height = _settingsService.Settings.DefaultWidgetHeight
+                }, revealAfterCreate: true);
+                break;
+        }
+    }
+
     private void RestoreDeletedQuickCaptureConfigs()
     {
         var quickCaptureIds = _settingsService.Settings.Widgets

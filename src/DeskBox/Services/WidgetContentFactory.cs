@@ -21,7 +21,8 @@ public sealed class WidgetContentFactory
             CanShowInCreateEntry: true,
             WidgetContentAvailability.Available,
             "WidgetContent.File.StatusLabel",
-            "WidgetContent.File.StatusDescription"),
+            "WidgetContent.File.StatusDescription",
+            "Common.NewWidget"),
         new(
             WidgetKind.QuickCapture,
             "Quick Capture",
@@ -48,7 +49,8 @@ public sealed class WidgetContentFactory
             CanShowInCreateEntry: true,
             WidgetContentAvailability.Available,
             "WidgetContent.Todo.StatusLabel",
-            "WidgetContent.Todo.StatusDescription"),
+            "WidgetContent.Todo.StatusDescription",
+            "Todo.NewWidget"),
         new(
             WidgetKind.Tags,
             "Tags",

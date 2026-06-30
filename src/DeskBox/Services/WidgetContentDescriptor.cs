@@ -25,7 +25,8 @@ public sealed record WidgetContentDescriptor(
     bool CanShowInCreateEntry,
     WidgetContentAvailability Availability,
     string StatusLabelKey,
-    string StatusDescriptionKey)
+    string StatusDescriptionKey,
+    string? CreateEntryTextKey = null)
 {
     public bool HasImplementedContent => ContentStage == WidgetContentStage.Implemented;
     public bool HasPlaceholderContent => ContentStage == WidgetContentStage.Placeholder;
