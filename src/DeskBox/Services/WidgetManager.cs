@@ -69,6 +69,7 @@ public sealed class WidgetManager
     private readonly WidgetSessionManager _sessionManager;
     private readonly Dictionary<string, (WidgetWindow Window, WidgetViewModel ViewModel)> _widgets = new();
     private readonly Dictionary<string, (QuickCaptureWidgetWindow Window, QuickCaptureWidgetViewModel ViewModel)> _quickCaptureWidgets = new();
+    private readonly Dictionary<string, ContentWidgetWindow> _contentWidgets = new();
     private readonly HashSet<IntPtr> _widgetWindowHandles = new();
     private readonly HashSet<string> _deletedWidgetIds = [];
     private readonly List<WidgetWindow> _retiredWindows = [];
@@ -87,13 +88,15 @@ public sealed class WidgetManager
 
     public IReadOnlyDictionary<string, (WidgetWindow Window, WidgetViewModel ViewModel)> Widgets => _widgets;
     public IReadOnlyDictionary<string, (QuickCaptureWidgetWindow Window, QuickCaptureWidgetViewModel ViewModel)> QuickCaptureWidgets => _quickCaptureWidgets;
+    internal IReadOnlyDictionary<string, ContentWidgetWindow> ContentWidgets => _contentWidgets;
 
     public bool WidgetsRaisedFromTray => _widgetsRaisedFromTray;
     public WidgetSessionState SessionState => _sessionManager.State;
     public bool IsWidgetInteractionActive => _sessionManager.IsInteractionActive;
 
     public bool HasVisibleWidgets => _widgets.Values.Any(entry => entry.Window.Visible) ||
-                                     _quickCaptureWidgets.Values.Any(entry => entry.Window.Visible);
+                                     _quickCaptureWidgets.Values.Any(entry => entry.Window.Visible) ||
+                                     _contentWidgets.Values.Any(window => window.Visible);
 
     public bool IsWidgetWindow(IntPtr hwnd)
     {
@@ -268,6 +271,11 @@ public sealed class WidgetManager
             }
 
             foreach (var (_, (window, _)) in _quickCaptureWidgets.ToList())
+            {
+                window.ApplyAppearancePreview();
+            }
+
+            foreach (var (_, window) in _contentWidgets.ToList())
             {
                 window.ApplyAppearancePreview();
             }
@@ -2711,6 +2719,89 @@ public sealed class WidgetManager
                 showRaisedWhileInitializing),
             _ => throw new NotSupportedException($"Widget kind '{config.WidgetKind}' is not registered as creatable.")
         };
+    }
+
+    private Task<ContentWidgetWindow> CreateContentWidgetFromConfigAsync(
+        WidgetConfig config,
+        bool keepPreparedForAnimation = false,
+        bool revealAfterCreate = false,
+        bool showRaisedWhileInitializing = false)
+    {
+        if (_contentWidgets.TryGetValue(config.Id, out var existing))
+        {
+            return Task.FromResult(existing);
+        }
+
+        if (_widgetRegistry.CanCreateWindow(config.WidgetKind))
+        {
+            throw new NotSupportedException(
+                $"Widget kind '{config.WidgetKind}' is already handled by registered window creation.");
+        }
+
+        var factory = new ContentWidgetWindowFactory(new WidgetContentFactory(), _settingsService);
+        if (!factory.CanCreateHiddenContentWindow(config.WidgetKind))
+        {
+            throw new NotSupportedException(
+                $"Widget kind '{config.WidgetKind}' does not support content window creation.");
+        }
+
+        config.IsDisabled = false;
+        NormalizeWidgetBounds(config);
+
+        var window = factory.CreateHiddenContentWindow(config);
+        _themeService.TrackWindow(window);
+        _contentWidgets[config.Id] = window;
+        _widgetWindowHandles.Add(window.WindowHandle);
+
+        window.Closed += (_, _) =>
+        {
+            _contentWidgets.Remove(config.Id);
+            _widgetWindowHandles.Remove(window.WindowHandle);
+            if (IsDeleted(config.Id) || FindConfig(config.Id) is null)
+            {
+                return;
+            }
+
+            config.IsVisible = false;
+            _settingsService.SaveDebounced();
+        };
+
+        try
+        {
+            window.PrepareTrayShowAnimation();
+            if (!keepPreparedForAnimation)
+            {
+                window.ShowPreparedAtDesktopLayer();
+            }
+            else if (showRaisedWhileInitializing)
+            {
+                window.ShowPreparedRaisedFromTray();
+                return Task.FromResult(window);
+            }
+
+            if (revealAfterCreate)
+            {
+                window.ShowPreparedRaisedFromTray();
+                window.PlayTrayShowAnimation();
+            }
+        }
+        catch
+        {
+            _contentWidgets.Remove(config.Id);
+            _widgetWindowHandles.Remove(window.WindowHandle);
+
+            try
+            {
+                window.Close();
+            }
+            catch
+            {
+            }
+
+            throw;
+        }
+
+        return Task.FromResult(window);
     }
 
     private async Task<QuickCaptureWidgetWindow> CreateQuickCaptureWidgetFromConfigAsync(

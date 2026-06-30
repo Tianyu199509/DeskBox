@@ -121,6 +121,23 @@ public sealed class WidgetManagerStorageCleanupTests : IDisposable
     }
 
     [Fact]
+    public async Task RestoreWidgetsAsync_SkipsFutureContentWidgetsWhileRegistryIsClosed()
+    {
+        _settingsService.Settings.Widgets.Add(new WidgetConfig
+        {
+            Id = "todo-hidden",
+            Name = "Todo",
+            WidgetKind = WidgetKind.Todo,
+            IsVisible = true
+        });
+
+        await _widgetManager.RestoreWidgetsAsync();
+
+        Assert.Empty(_widgetManager.ContentWidgets);
+        Assert.False(WidgetRegistry.Default.CanCreateWindow(WidgetKind.Todo));
+    }
+
+    [Fact]
     public async Task RemoveWidgetAsync_MoveManagedFolderContentsToDesktop_RemovesConfigAndMovesFiles()
     {
         string managedFolder = Directory.CreateDirectory(Path.Combine(_storageRoot, "Managed")).FullName;
