@@ -712,9 +712,6 @@ public partial class App : Application
             // Phase 3: Restore widgets
             WidgetManager.SyncStorageFolderEntries();
             await WidgetManager.RestoreWidgetsAsync();
-#if DEBUG
-            await TryCreateDebugTodoWidgetAsync();
-#endif
 
             if (SettingsService.Settings.Widgets.Count(widget =>
                     widget.WidgetKind == WidgetKind.File &&
@@ -739,26 +736,6 @@ public partial class App : Application
             Log($"Exception in OnLaunched: {ex}");
         }
     }
-
-#if DEBUG
-    private async Task TryCreateDebugTodoWidgetAsync()
-    {
-        if (WidgetManager is null || !WidgetManager.IsDebugTodoWidgetEnabled())
-        {
-            return;
-        }
-
-        try
-        {
-            Log("[DebugTodo] Creating hidden Todo content widget for manual validation");
-            await WidgetManager.CreateDebugTodoContentWidgetAsync();
-        }
-        catch (Exception ex)
-        {
-            Log($"[DebugTodo] Failed to create debug Todo content widget: {ex}");
-        }
-    }
-#endif
 
     private void RegisterActivationListener()
     {

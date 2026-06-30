@@ -5,8 +5,7 @@ using DeskBox.Views;
 namespace DeskBox.Services;
 
 /// <summary>
-/// Prepares lightweight content widget windows without exposing future widget
-/// kinds through user-facing creation flows.
+/// Prepares lightweight content widget windows for non-file widget kinds.
 /// </summary>
 public sealed class ContentWidgetWindowFactory
 {
@@ -28,23 +27,23 @@ public sealed class ContentWidgetWindowFactory
         _todoStoreFactory = todoStoreFactory;
     }
 
-    internal bool CanCreateHiddenContentWindow(WidgetKind widgetKind)
+    internal bool CanCreateContentWindow(WidgetKind widgetKind)
     {
         return _contentFactory.CanCreateDetachedContent(widgetKind);
     }
 
-    internal ContentWidgetWindow CreateHiddenContentWindow(WidgetConfig config)
+    internal ContentWidgetWindow CreateContentWindow(WidgetConfig config)
     {
-        var plan = CreateHiddenContentWindowPlan(config);
+        var plan = CreateContentWindowPlan(config);
         return _windowFactory(plan.Config, plan.Content, _settingsService, plan.Descriptor);
     }
 
-    internal ContentWidgetWindowPlan CreateHiddenContentWindowPlan(WidgetConfig config)
+    internal ContentWidgetWindowPlan CreateContentWindowPlan(WidgetConfig config)
     {
-        if (!CanCreateHiddenContentWindow(config.WidgetKind))
+        if (!CanCreateContentWindow(config.WidgetKind))
         {
             throw new NotSupportedException(
-                $"Widget kind '{config.WidgetKind}' does not support hidden content windows.");
+                $"Widget kind '{config.WidgetKind}' does not support content windows.");
         }
 
         var descriptor = _contentFactory.GetDescriptor(config.WidgetKind);

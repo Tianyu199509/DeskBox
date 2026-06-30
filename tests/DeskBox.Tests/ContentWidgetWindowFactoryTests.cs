@@ -16,17 +16,17 @@ public sealed class ContentWidgetWindowFactoryTests : IDisposable
     }
 
     [Fact]
-    public void CreateHiddenContentWindowPlan_ReturnsTodoAdapterForCreatableTodoKind()
+    public void CreateContentWindowPlan_ReturnsTodoAdapterForCreatableTodoKind()
     {
         var config = CreateConfig("todo-window", WidgetKind.Todo);
         var factory = CreateFactory();
 
-        var plan = factory.CreateHiddenContentWindowPlan(config);
+        var plan = factory.CreateContentWindowPlan(config);
 
         Assert.Equal(config, plan.Config);
         Assert.Equal(WidgetKind.Todo, plan.Descriptor.WidgetKind);
         Assert.IsType<TodoWidgetContentAdapter>(plan.Content);
-        Assert.True(factory.CanCreateHiddenContentWindow(WidgetKind.Todo));
+        Assert.True(factory.CanCreateContentWindow(WidgetKind.Todo));
         Assert.True(WidgetRegistry.Default.CanCreateWindow(WidgetKind.Todo));
     }
 
@@ -35,16 +35,16 @@ public sealed class ContentWidgetWindowFactoryTests : IDisposable
     [InlineData(WidgetKind.Tags)]
     [InlineData(WidgetKind.Music)]
     [InlineData(WidgetKind.SystemMonitor)]
-    public void CreateHiddenContentWindowPlan_ReturnsPlaceholderForFutureKinds(WidgetKind widgetKind)
+    public void CreateContentWindowPlan_ReturnsPlaceholderForFutureKinds(WidgetKind widgetKind)
     {
         var config = CreateConfig("future-window", widgetKind);
         var factory = CreateFactory();
 
-        var plan = factory.CreateHiddenContentWindowPlan(config);
+        var plan = factory.CreateContentWindowPlan(config);
 
         Assert.Equal(widgetKind, plan.Descriptor.WidgetKind);
         Assert.IsType<PlaceholderWidgetContent>(plan.Content);
-        Assert.True(factory.CanCreateHiddenContentWindow(widgetKind));
+        Assert.True(factory.CanCreateContentWindow(widgetKind));
         Assert.False(WidgetRegistry.Default.CanCreateWindow(widgetKind));
     }
 
@@ -52,13 +52,13 @@ public sealed class ContentWidgetWindowFactoryTests : IDisposable
     [InlineData(WidgetKind.File)]
     [InlineData(WidgetKind.QuickCapture)]
     [InlineData(WidgetKind.Productivity)]
-    public void CreateHiddenContentWindowPlan_RejectsWindowOwnedAndLegacyKinds(WidgetKind widgetKind)
+    public void CreateContentWindowPlan_RejectsWindowOwnedAndLegacyKinds(WidgetKind widgetKind)
     {
         var config = CreateConfig("unsupported-window", widgetKind);
         var factory = CreateFactory();
 
-        Assert.False(factory.CanCreateHiddenContentWindow(widgetKind));
-        Assert.Throws<NotSupportedException>(() => factory.CreateHiddenContentWindowPlan(config));
+        Assert.False(factory.CanCreateContentWindow(widgetKind));
+        Assert.Throws<NotSupportedException>(() => factory.CreateContentWindowPlan(config));
     }
 
     public void Dispose()
