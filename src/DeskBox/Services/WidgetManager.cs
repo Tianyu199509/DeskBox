@@ -103,6 +103,16 @@ public sealed class WidgetManager
         return _widgetWindowHandles.Contains(hwnd);
     }
 
+    private IReadOnlyList<IDesktopWidgetWindow> GetLoadedDesktopWindows()
+    {
+        var windows = new List<IDesktopWidgetWindow>(
+            _widgets.Count + _quickCaptureWidgets.Count + _contentWidgets.Count);
+        windows.AddRange(_widgets.Values.Select(entry => (IDesktopWidgetWindow)entry.Window));
+        windows.AddRange(_quickCaptureWidgets.Values.Select(entry => (IDesktopWidgetWindow)entry.Window));
+        windows.AddRange(_contentWidgets.Values.Select(window => (IDesktopWidgetWindow)window));
+        return windows;
+    }
+
     public void BeginWidgetInteraction(string reason)
     {
         _sessionManager.BeginInteraction(reason);
@@ -554,7 +564,7 @@ public sealed class WidgetManager
         double sinceLastToggleMs = (now - _lastTrayLayerToggleUtc).TotalMilliseconds;
         App.LogVerbose(
             $"[TrayBatch] Raise requested raised={_widgetsRaisedFromTray} toggling={_isTogglingWidgetsDesktopLayer} " +
-            $"sinceLastMs={sinceLastToggleMs:F0} loadedFile={_widgets.Count} loadedQuick={_quickCaptureWidgets.Count}");
+            $"sinceLastMs={sinceLastToggleMs:F0} loadedFile={_widgets.Count} loadedQuick={_quickCaptureWidgets.Count} loadedContent={_contentWidgets.Count}");
         if (_isTogglingWidgetsDesktopLayer || now - _lastTrayLayerToggleUtc < TimeSpan.FromMilliseconds(320))
         {
             App.LogVerbose("[TrayBatch] Raise ignored reason=busy-or-throttled");
@@ -642,7 +652,7 @@ public sealed class WidgetManager
         using var perfScope = PerformanceLogger.Measure("WidgetManager.SetAllWidgetsVisible", $"visible={visible}");
         App.LogVerbose(
             $"[TrayBatch] SetAllVisible requested visible={visible} raised={_widgetsRaisedFromTray} " +
-            $"loadedFile={_widgets.Count} loadedQuick={_quickCaptureWidgets.Count}");
+            $"loadedFile={_widgets.Count} loadedQuick={_quickCaptureWidgets.Count} loadedContent={_contentWidgets.Count}");
         if (visible)
         {
             var candidates = _settingsService.Settings.Widgets
@@ -701,10 +711,7 @@ public sealed class WidgetManager
             return;
         }
 
-        var hideCandidates = _widgets.Values
-            .Select(entry => entry.Window)
-            .Cast<IDesktopWidgetWindow>()
-            .Concat(_quickCaptureWidgets.Values.Select(entry => (IDesktopWidgetWindow)entry.Window))
+        var hideCandidates = GetLoadedDesktopWindows()
             .Where(window => window.Visible)
             .ToList();
         ApplyTrayAnimationGroupOffset(hideCandidates);
@@ -760,6 +767,15 @@ public sealed class WidgetManager
             _quickCaptureWidgets.Remove(widgetId);
             _widgetWindowHandles.Remove(quickCaptureEntry.Window.WindowHandle);
             quickCaptureEntry.Window.HideWindow();
+        }
+
+        if (_contentWidgets.TryGetValue(widgetId, out var contentWindow))
+        {
+            App.Log($"[WidgetManager] Retiring content widget window for delete: {widgetId}");
+            _contentWidgets.Remove(widgetId);
+            _widgetWindowHandles.Remove(contentWindow.WindowHandle);
+            contentWindow.HideWindow();
+            try { contentWindow.Close(); } catch { }
         }
 
         if (config is not null)
@@ -1264,13 +1280,25 @@ public sealed class WidgetManager
     /// </summary>
     public bool HideWidget(string widgetId)
     {
-        if (!_widgets.TryGetValue(widgetId, out var entry))
+        if (_widgets.TryGetValue(widgetId, out var entry))
         {
-            return false;
+            entry.Window.HideWindow();
+            return true;
         }
 
-        entry.Window.HideWindow();
-        return true;
+        if (_quickCaptureWidgets.TryGetValue(widgetId, out var quickCaptureEntry))
+        {
+            quickCaptureEntry.Window.HideWindow();
+            return true;
+        }
+
+        if (_contentWidgets.TryGetValue(widgetId, out var contentWindow))
+        {
+            contentWindow.HideWindow();
+            return true;
+        }
+
+        return false;
     }
 
     private void HideLoadedQuickCaptureWidgets()
@@ -1293,15 +1321,7 @@ public sealed class WidgetManager
 
     public void BringAllVisibleWidgetsToFront(IntPtr exceptHwnd = default)
     {
-        foreach (var (_, (window, _)) in _widgets)
-        {
-            if (window.Visible && window.WindowHandle != exceptHwnd)
-            {
-                Win32Helper.BringWindowToFront(window.WindowHandle);
-            }
-        }
-
-        foreach (var (_, (window, _)) in _quickCaptureWidgets)
+        foreach (var window in GetLoadedDesktopWindows())
         {
             if (window.Visible && window.WindowHandle != exceptHwnd)
             {
@@ -1376,8 +1396,8 @@ public sealed class WidgetManager
         }
 
         App.Log(
-            $"[TrayBatch] RestoreDesktopLayer force={force} file={_widgets.Count} quick={_quickCaptureWidgets.Count}");
-        foreach (var (_, (window, _)) in _widgets.ToList())
+            $"[TrayBatch] RestoreDesktopLayer force={force} file={_widgets.Count} quick={_quickCaptureWidgets.Count} content={_contentWidgets.Count}");
+        foreach (var window in GetLoadedDesktopWindows())
         {
             try
             {
@@ -1385,19 +1405,7 @@ public sealed class WidgetManager
             }
             catch (Exception ex)
             {
-                App.Log($"[WidgetManager] Failed to restore file widget desktop layer {FormatHostWindow(window)}: {ex}");
-            }
-        }
-
-        foreach (var (_, (window, _)) in _quickCaptureWidgets.ToList())
-        {
-            try
-            {
-                window.ForceRestoreDesktopLayerFromManager();
-            }
-            catch (Exception ex)
-            {
-                App.Log($"[WidgetManager] Failed to restore quick capture widget desktop layer {FormatHostWindow(window)}: {ex}");
+                App.Log($"[WidgetManager] Failed to restore widget desktop layer {FormatHostWindow(window)}: {ex}");
             }
         }
 
@@ -1530,6 +1538,14 @@ public sealed class WidgetManager
         }
 
         foreach (var (_, (window, _)) in _quickCaptureWidgets)
+        {
+            if (IsCursorOverWindow(window, cursor))
+            {
+                return true;
+            }
+        }
+
+        foreach (var (_, window) in _contentWidgets)
         {
             if (IsCursorOverWindow(window, cursor))
             {
@@ -1841,6 +1857,20 @@ public sealed class WidgetManager
         }
 
         _quickCaptureWidgets.Clear();
+
+        foreach (var (_, window) in _contentWidgets.ToList())
+        {
+            try
+            {
+                window.Close();
+            }
+            catch
+            {
+            }
+        }
+
+        _contentWidgets.Clear();
+        _widgetWindowHandles.Clear();
         _retiredWindows.Clear();
         _sessionManager.MarkHidden("close-all");
     }
