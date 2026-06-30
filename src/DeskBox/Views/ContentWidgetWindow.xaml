@@ -19,7 +19,8 @@
             MoreRequested="MoreButton_Click"
             TitlePointerMoved="TitleBarGrid_PointerMoved"
             TitlePointerPressed="TitleBarGrid_PointerPressed"
-            TitlePointerReleased="TitleBarGrid_PointerReleased" />
+            TitlePointerReleased="TitleBarGrid_PointerReleased"
+            TitleRightTapped="TitleBarGrid_RightTapped" />
 
         <Grid
             x:Name="ResizeGrid"

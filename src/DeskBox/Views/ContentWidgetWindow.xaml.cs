@@ -32,6 +32,7 @@ public sealed partial class ContentWidgetWindow : Window, IDesktopWidgetWindow
     private readonly SettingsService _settingsService;
     private readonly WidgetWindowDiagnostics _diagnostics;
     private readonly WidgetShellContentHost _contentHost;
+    private readonly ContentWidgetTitleViewModel _titleViewModel;
     private readonly IntPtr _hWnd;
     private readonly AppWindow _appWindow;
 
@@ -64,7 +65,8 @@ public sealed partial class ContentWidgetWindow : Window, IDesktopWidgetWindow
         _diagnostics = new WidgetWindowDiagnostics("Content", _config, () => _hWnd);
         _contentHost = new WidgetShellContentHost(ContentWidgetShell);
 
-        ContentWidgetShell.DataContext = new ContentWidgetTitleViewModel(_config);
+        _titleViewModel = new ContentWidgetTitleViewModel(_config);
+        ContentWidgetShell.DataContext = _titleViewModel;
         ContentWidgetShell.TitleGlyph = descriptor.DefaultGlyph;
 
         ConfigureWindow();
@@ -790,9 +792,37 @@ public sealed partial class ContentWidgetWindow : Window, IDesktopWidgetWindow
         ShowFlyoutWithInteraction(CreateMoreFlyout(), ContentWidgetShell.MoreActionButton);
     }
 
+    private void TitleBarGrid_RightTapped(object sender, RightTappedRoutedEventArgs e)
+    {
+        ShowFlyoutWithInteraction(CreateMoreFlyout(), ContentWidgetShell.TitleBar, e.GetPosition(ContentWidgetShell.TitleBar));
+        e.Handled = true;
+    }
+
     private MenuFlyout CreateMoreFlyout()
     {
         var flyout = new MenuFlyout();
+
+        flyout.Items.Add(CreateToggleMenuItem(
+            App.Current.LocalizationService.T("Widget.LockPosition"),
+            "\uE72E",
+            _config.IsPositionLocked,
+            SetPositionLocked));
+        flyout.Items.Add(CreateToggleMenuItem(
+            App.Current.LocalizationService.T("Widget.LockSize"),
+            "\uE740",
+            _config.IsSizeLocked,
+            SetSizeLocked));
+        flyout.Items.Add(new MenuFlyoutSeparator());
+
+        var rename = new MenuFlyoutItem
+        {
+            Text = App.Current.LocalizationService.T("Common.Rename"),
+            Icon = new FontIcon { Glyph = "\uE8AC" }
+        };
+        rename.Click += async (_, _) => await ShowRenameDialogAsync();
+        flyout.Items.Add(rename);
+
+        flyout.Items.Add(new MenuFlyoutSeparator());
 
         var deleteWidget = new MenuFlyoutItem
         {
@@ -815,7 +845,105 @@ public sealed partial class ContentWidgetWindow : Window, IDesktopWidgetWindow
         return flyout;
     }
 
-    private void ShowFlyoutWithInteraction(MenuFlyout flyout, FrameworkElement target)
+    private static ToggleMenuFlyoutItem CreateToggleMenuItem(string text, string glyph, bool isChecked, Action<bool> applyValue)
+    {
+        var item = new ToggleMenuFlyoutItem
+        {
+            Text = text,
+            Icon = new FontIcon { Glyph = glyph },
+            IsChecked = isChecked
+        };
+        item.Click += (_, _) => applyValue(item.IsChecked);
+        return item;
+    }
+
+    private void SetPositionLocked(bool value)
+    {
+        if (_config.IsPositionLocked == value)
+        {
+            return;
+        }
+
+        _config.IsPositionLocked = value;
+        _settingsService.UpdateWidget(_config);
+    }
+
+    private void SetSizeLocked(bool value)
+    {
+        if (_config.IsSizeLocked == value)
+        {
+            return;
+        }
+
+        _config.IsSizeLocked = value;
+        _settingsService.UpdateWidget(_config);
+    }
+
+    private async Task ShowRenameDialogAsync()
+    {
+        var localization = App.Current.LocalizationService;
+        var textBox = new TextBox
+        {
+            Text = _config.Name,
+            PlaceholderText = localization.T("Widget.TitlePlaceholder"),
+            MinWidth = 260
+        };
+
+        var dialog = new ContentDialog
+        {
+            XamlRoot = RootGrid.XamlRoot,
+            Title = localization.T("Common.Rename"),
+            Content = textBox,
+            PrimaryButtonText = localization.T("Common.Save"),
+            CloseButtonText = localization.T("Common.Cancel"),
+            DefaultButton = ContentDialogButton.Primary
+        };
+
+        dialog.Opened += (_, _) =>
+        {
+            textBox.Focus(FocusState.Programmatic);
+            textBox.SelectAll();
+        };
+
+        var result = await dialog.ShowAsync();
+        if (result != ContentDialogResult.Primary)
+        {
+            return;
+        }
+
+        string newName = textBox.Text.Trim();
+        try
+        {
+            await App.Current.WidgetManager!.RenameWidgetAsync(_config.Id, newName);
+            _titleViewModel.RefreshDisplayName();
+        }
+        catch (Exception ex)
+        {
+            await ShowErrorDialogAsync(localization.T("Widget.RenameFailed"), ex.Message);
+        }
+    }
+
+    private async Task ShowErrorDialogAsync(string title, string message)
+    {
+        var localization = App.Current.LocalizationService;
+        var dialog = new ContentDialog
+        {
+            XamlRoot = RootGrid.XamlRoot,
+            Title = title,
+            Content = new TextBlock
+            {
+                Text = message,
+                TextWrapping = TextWrapping.WrapWholeWords,
+                MaxWidth = 320
+            },
+            CloseButtonText = localization.T("Common.Ok"),
+            DefaultButton = ContentDialogButton.Close
+        };
+
+        await dialog.ShowAsync();
+    }
+
+    private void ShowFlyoutWithInteraction(MenuFlyout flyout, FrameworkElement target, Windows.Foundation.Point? position = null)
     {
         App.Current.WidgetManager?.BeginWidgetInteraction("content-flyout-opened");
         flyout.Closed += (_, _) =>
@@ -829,15 +957,24 @@ public sealed partial class ContentWidgetWindow : Window, IDesktopWidgetWindow
             RestoreDesktopLayerFromManager();
         };
 
-        flyout.ShowAt(target);
+        if (position is Windows.Foundation.Point point)
+        {
+            flyout.ShowAt(target, point);
+        }
+        else
+        {
+            flyout.ShowAt(target);
+        }
     }
 
-    private sealed class ContentWidgetTitleViewModel
+    private sealed class ContentWidgetTitleViewModel : System.ComponentModel.INotifyPropertyChanged
     {
         public ContentWidgetTitleViewModel(WidgetConfig config)
         {
             Config = config;
         }
+
+        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
 
         public WidgetConfig Config { get; }
 
@@ -848,5 +985,10 @@ public sealed partial class ContentWidgetWindow : Window, IDesktopWidgetWindow
         public double TitleIconSize => Math.Clamp(Math.Round(SettingsService.DefaultIconSize * 0.72 * 0.56 * 0.54), 11, 18);
 
         public double TitleTextSize => 14;
+
+        public void RefreshDisplayName()
+        {
+            PropertyChanged?.Invoke(this, new System.ComponentModel.PropertyChangedEventArgs(nameof(DisplayName)));
+        }
     }
 }
