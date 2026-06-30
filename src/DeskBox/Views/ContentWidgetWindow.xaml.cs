@@ -78,6 +78,8 @@ public sealed partial class ContentWidgetWindow : Window, IDesktopWidgetWindow
 
     public Windows.Foundation.Rect AnimationBounds => _diagnostics.AnimationBounds;
 
+    public WidgetConfig Config => _config;
+
     private bool _isVisibleOnDesktop;
 
     public new bool Visible
