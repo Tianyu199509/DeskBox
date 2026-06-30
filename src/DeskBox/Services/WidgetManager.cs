@@ -56,6 +56,10 @@ internal interface IDesktopWidgetWindow
 public sealed class WidgetManager
 {
     private const string ManagedShortcutDescriptionPrefix = "DeskBox mapped widget shortcut:";
+#if DEBUG
+    internal const string DebugTodoWidgetEnvironmentVariable = "DESKBOX_DEBUG_TODO_WIDGET";
+    private const string DebugTodoWidgetId = "debug-todo-content-window";
+#endif
 
     private readonly SettingsService _settingsService;
     private readonly FileService _fileService;
@@ -907,8 +911,61 @@ public sealed class WidgetManager
     {
         return !widget.IsDisabled &&
                !IsDeleted(widget.Id) &&
-               _widgetRegistry.IsAvailableForSession(widget, _settingsService.Settings);
+               (_widgetRegistry.IsAvailableForSession(widget, _settingsService.Settings)
+#if DEBUG
+                || IsDebugTodoSessionCandidate(widget)
+#endif
+               );
     }
+
+#if DEBUG
+    internal static bool IsDebugTodoWidgetEnabled()
+    {
+        return IsEnabledEnvironmentValue(Environment.GetEnvironmentVariable(DebugTodoWidgetEnvironmentVariable));
+    }
+
+    private static bool IsDebugTodoSessionCandidate(WidgetConfig widget)
+    {
+        return IsDebugTodoWidgetEnabled() &&
+               widget.WidgetKind == WidgetKind.Todo &&
+               string.Equals(widget.Id, DebugTodoWidgetId, StringComparison.Ordinal);
+    }
+
+    private static bool IsEnabledEnvironmentValue(string? value)
+    {
+        return !string.IsNullOrWhiteSpace(value) &&
+               value.Trim() is "1" or "true" or "TRUE" or "yes" or "YES" or "on" or "ON";
+    }
+
+    internal async Task<ContentWidgetWindow> CreateDebugTodoContentWidgetAsync()
+    {
+        var config = _settingsService.Settings.Widgets.FirstOrDefault(widget =>
+            string.Equals(widget.Id, DebugTodoWidgetId, StringComparison.Ordinal));
+
+        if (config is null)
+        {
+            config = new WidgetConfig
+            {
+                Id = DebugTodoWidgetId,
+                Name = "Todo",
+                WidgetKind = WidgetKind.Todo,
+                X = 140,
+                Y = 140,
+                Width = Math.Max(SettingsService.DefaultWidgetWidth, 320),
+                Height = Math.Max(SettingsService.DefaultWidgetHeight, 420),
+                IsVisible = true
+            };
+            _settingsService.Settings.Widgets.Add(config);
+        }
+
+        config.WidgetKind = WidgetKind.Todo;
+        config.IsVisible = true;
+        config.IsDisabled = false;
+        await _settingsService.SaveAsync();
+
+        return await CreateContentWidgetFromConfigAsync(config, revealAfterCreate: true);
+    }
+#endif
 
     private async Task<IDesktopWidgetWindow?> PrepareWidgetForBatchShowAsync(
         WidgetConfig config,
@@ -954,6 +1011,27 @@ public sealed class WidgetManager
 
         if (config.WidgetKind != WidgetKind.File)
         {
+#if DEBUG
+            if (IsDebugTodoSessionCandidate(config))
+            {
+                if (_contentWidgets.TryGetValue(config.Id, out var existingContent))
+                {
+                    App.LogVerbose($"[TrayBatch] Prepare useLoaded debugContent widget={FormatWidget(config)} {FormatHostWindow(existingContent)}");
+                    if (!existingContent.Visible)
+                    {
+                        existingContent.PrepareTrayShowAnimation();
+                    }
+
+                    return existingContent;
+                }
+
+                App.LogVerbose($"[TrayBatch] Prepare createDebugContent widget={FormatWidget(config)} raisedInit={showRaisedWhileInitializing}");
+                return await CreateContentWidgetFromConfigAsync(
+                    config,
+                    keepPreparedForAnimation: true,
+                    showRaisedWhileInitializing: showRaisedWhileInitializing);
+            }
+#endif
             App.LogVerbose($"[TrayBatch] Prepare skipped reason=unsupported-kind widget={FormatWidget(config)}");
             return null;
         }

@@ -21,7 +21,7 @@ namespace DeskBox.Views;
 
 /// <summary>
 /// Lightweight host window for future non-file widget content.
-/// This skeleton is intentionally not wired into WidgetManager yet.
+/// User-facing creation remains gated by WidgetRegistry.
 /// </summary>
 public sealed partial class ContentWidgetWindow : Window, IDesktopWidgetWindow
 {
