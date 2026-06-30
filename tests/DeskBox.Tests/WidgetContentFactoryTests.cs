@@ -200,6 +200,87 @@ public sealed class WidgetContentFactoryTests
         Assert.Throws<ArgumentException>(() => factory.CreateTodoContent(config));
     }
 
+    [Fact]
+    public void CreateDetachedContent_ReturnsTodoAdapterWithoutOpeningCreateEntry()
+    {
+        string tempRoot = Path.Combine(Path.GetTempPath(), "DeskBox.Tests", Guid.NewGuid().ToString("N"));
+        var factory = new WidgetContentFactory();
+        var config = new WidgetConfig
+        {
+            Id = "todo-detached",
+            Name = "Todo",
+            WidgetKind = WidgetKind.Todo
+        };
+
+        try
+        {
+            string widgetsDataRoot = Directory.CreateDirectory(Path.Combine(tempRoot, "widgets")).FullName;
+
+            var content = factory.CreateDetachedContent(
+                config,
+                widget => new TodoWidgetStore(widgetsDataRoot, widget.Id));
+
+            Assert.IsType<TodoWidgetContentAdapter>(content);
+            Assert.Equal(WidgetKind.Todo, content.WidgetKind);
+            Assert.True(factory.CanCreateDetachedContent(WidgetKind.Todo));
+            Assert.False(factory.CanShowInCreateEntry(WidgetKind.Todo));
+            Assert.False(WidgetRegistry.Default.CanCreateWindow(WidgetKind.Todo));
+        }
+        finally
+        {
+            try
+            {
+                if (Directory.Exists(tempRoot))
+                {
+                    Directory.Delete(tempRoot, recursive: true);
+                }
+            }
+            catch
+            {
+            }
+        }
+    }
+
+    [Theory]
+    [InlineData(WidgetKind.Weather)]
+    [InlineData(WidgetKind.Tags)]
+    [InlineData(WidgetKind.Music)]
+    [InlineData(WidgetKind.SystemMonitor)]
+    public void CreateDetachedContent_ReturnsPlaceholderForFutureKinds(WidgetKind widgetKind)
+    {
+        var factory = new WidgetContentFactory();
+        var config = new WidgetConfig
+        {
+            Id = "future-detached",
+            Name = widgetKind.ToString(),
+            WidgetKind = widgetKind
+        };
+
+        var content = factory.CreateDetachedContent(config);
+
+        Assert.IsType<PlaceholderWidgetContent>(content);
+        Assert.Equal(widgetKind, content.WidgetKind);
+        Assert.True(factory.CanCreateDetachedContent(widgetKind));
+        Assert.False(factory.CanShowInCreateEntry(widgetKind));
+        Assert.False(WidgetRegistry.Default.CanCreateWindow(widgetKind));
+    }
+
+    [Theory]
+    [InlineData(WidgetKind.File)]
+    [InlineData(WidgetKind.QuickCapture)]
+    [InlineData(WidgetKind.Productivity)]
+    public void CreateDetachedContent_RejectsLegacyAndWindowOwnedKinds(WidgetKind widgetKind)
+    {
+        var factory = new WidgetContentFactory();
+        var config = new WidgetConfig
+        {
+            WidgetKind = widgetKind
+        };
+
+        Assert.False(factory.CanCreateDetachedContent(widgetKind));
+        Assert.Throws<NotSupportedException>(() => factory.CreateDetachedContent(config));
+    }
+
     [Theory]
     [InlineData(WidgetKind.File)]
     [InlineData(WidgetKind.QuickCapture)]

@@ -107,6 +107,38 @@ public sealed class WidgetContentFactory
         return new TodoWidgetContentAdapter(config, store ?? new TodoWidgetStore(config.Id));
     }
 
+    /// <summary>
+    /// Creates content that is not yet attached to a production widget window.
+    /// This is a hidden pipeline path for validating future widget kinds before
+    /// they are exposed through user-facing creation flows.
+    /// </summary>
+    internal IWidgetContent CreateDetachedContent(
+        WidgetConfig config,
+        Func<WidgetConfig, TodoWidgetStore>? todoStoreFactory = null)
+    {
+        return config.WidgetKind switch
+        {
+            WidgetKind.Todo => CreateTodoContent(
+                config,
+                (todoStoreFactory ?? (widget => new TodoWidgetStore(widget.Id)))(config)),
+            WidgetKind.Weather or
+            WidgetKind.Tags or
+            WidgetKind.Music or
+            WidgetKind.SystemMonitor => CreatePlaceholderContent(config),
+            _ => throw new NotSupportedException(
+                $"Widget kind '{config.WidgetKind}' does not have detached content.")
+        };
+    }
+
+    internal bool CanCreateDetachedContent(WidgetKind widgetKind)
+    {
+        return widgetKind is WidgetKind.Todo or
+            WidgetKind.Weather or
+            WidgetKind.Tags or
+            WidgetKind.Music or
+            WidgetKind.SystemMonitor;
+    }
+
     public IReadOnlyList<WidgetContentDescriptor> GetDescriptors()
     {
         return DescriptorList;
