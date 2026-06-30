@@ -56,5 +56,9 @@ needs to be removed from local settings, delete the widget with id
 - `dotnet build .\DeskBox.sln -c Debug -p:Platform=x64 --no-restore`
 - `dotnet build .\DeskBox.sln -c Release -p:Platform=x64 --no-restore`
 - `dotnet test .\DeskBox.sln -c Debug -p:Platform=x64 --no-build`
+- Manual Debug launch with `DESKBOX_DEBUG_TODO_WIDGET=1` reached the content
+  window path and logged `Content PushToBottom` / `Content HoldTemporaryTopMost`.
+- `App.IsDeskBoxWindow(...)` now recognizes content widget windows, matching the
+  file and quick-capture window identity checks.
 
 Current test count: `179/179`.

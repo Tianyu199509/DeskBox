@@ -507,7 +507,8 @@ public partial class App : Application
         }
 
         return WidgetManager?.Widgets.Values.Any(entry => entry.Window.WindowHandle == rootHwnd) == true ||
-               WidgetManager?.QuickCaptureWidgets.Values.Any(entry => entry.Window.WindowHandle == rootHwnd) == true;
+               WidgetManager?.QuickCaptureWidgets.Values.Any(entry => entry.Window.WindowHandle == rootHwnd) == true ||
+               WidgetManager?.ContentWidgets.Values.Any(window => window.WindowHandle == rootHwnd) == true;
     }
 
     public static void Log(string msg)
