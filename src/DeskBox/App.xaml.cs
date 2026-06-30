@@ -52,6 +52,7 @@ public partial class App : Application
     private Window? _trayWindow;
     private MenuFlyoutItem? _trayMapFolderItem;
     private MenuFlyoutItem? _trayNewWidgetItem;
+    private MenuFlyoutItem? _trayNewTodoWidgetItem;
     private MenuFlyoutItem? _trayOpenManagedStorageItem;
     private MenuFlyoutItem? _traySettingsItem;
     private MenuFlyoutItem? _trayExitItem;
@@ -834,6 +835,20 @@ public partial class App : Application
             }
         });
 
+        var newTodoWidgetItem = new MenuFlyoutItem
+        {
+            Text = localization.T("Todo.NewWidget"),
+            Width = TrayMenuItemWidth,
+            Icon = new FontIcon { Glyph = "\uE9D5" }
+        };
+        newTodoWidgetItem.Click += async (_, _) => await RunTrayMenuActionAsync(contextMenu, async () =>
+        {
+            if (WidgetManager is not null)
+            {
+                await WidgetManager.CreateTodoWidgetAsync();
+            }
+        });
+
         var settingsItem = new MenuFlyoutItem
         {
             Text = localization.T("Tray.Settings"),
@@ -862,10 +877,12 @@ public partial class App : Application
         {
             bool canCreateWidget = WidgetManager is not null;
             newWidgetItem.IsEnabled = canCreateWidget;
+            newTodoWidgetItem.IsEnabled = canCreateWidget;
             mapFolderItem.IsEnabled = canCreateWidget;
         };
 
         contextMenu.Items.Add(newWidgetItem);
+        contextMenu.Items.Add(newTodoWidgetItem);
         contextMenu.Items.Add(mapFolderItem);
         contextMenu.Items.Add(new MenuFlyoutSeparator());
         contextMenu.Items.Add(openManagedStorageItem);
@@ -876,6 +893,7 @@ public partial class App : Application
 
         _trayMapFolderItem = mapFolderItem;
         _trayNewWidgetItem = newWidgetItem;
+        _trayNewTodoWidgetItem = newTodoWidgetItem;
         _trayOpenManagedStorageItem = openManagedStorageItem;
         _traySettingsItem = settingsItem;
         _trayExitItem = exitItem;
@@ -1267,6 +1285,11 @@ public partial class App : Application
         if (_trayNewWidgetItem is not null)
         {
             _trayNewWidgetItem.Text = LocalizationService.T("Common.NewWidget");
+        }
+
+        if (_trayNewTodoWidgetItem is not null)
+        {
+            _trayNewTodoWidgetItem.Text = LocalizationService.T("Todo.NewWidget");
         }
 
         if (_traySettingsItem is not null)

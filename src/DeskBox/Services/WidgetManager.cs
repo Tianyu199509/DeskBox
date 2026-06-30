@@ -410,6 +410,26 @@ public sealed class WidgetManager
         return window;
     }
 
+    public async Task<ContentWidgetWindow> CreateTodoWidgetAsync(string? name = null)
+    {
+        name = string.IsNullOrWhiteSpace(name)
+            ? _localizationService.T("Todo.Title")
+            : name;
+
+        var config = new WidgetConfig
+        {
+            Name = name,
+            WidgetKind = WidgetKind.Todo,
+            Width = Math.Max(_settingsService.Settings.DefaultWidgetWidth, 320),
+            Height = Math.Max(_settingsService.Settings.DefaultWidgetHeight, 420)
+        };
+
+        _settingsService.Settings.Widgets.Add(config);
+        await _settingsService.SaveAsync();
+
+        return await CreateContentWidgetFromConfigAsync(config, revealAfterCreate: true);
+    }
+
     private void RestoreDeletedQuickCaptureConfigs()
     {
         var quickCaptureIds = _settingsService.Settings.Widgets
@@ -522,6 +542,37 @@ public sealed class WidgetManager
                 quickCaptureWindow.PrepareTrayShowAnimation();
                 quickCaptureWindow.ShowPreparedAtDesktopLayer();
                 quickCaptureWindow.CompleteTrayShowWithoutAnimation();
+            }
+
+            return true;
+        }
+
+        if (config.WidgetKind == WidgetKind.Todo)
+        {
+            if (_contentWidgets.TryGetValue(widgetId, out var contentWindow))
+            {
+                contentWindow.PrepareTrayShowAnimation();
+                if (reveal)
+                {
+                    contentWindow.ShowPreparedRaisedFromTray();
+                    contentWindow.PlayTrayShowAnimation();
+                }
+                else
+                {
+                    contentWindow.ShowPreparedAtDesktopLayer();
+                }
+
+                return true;
+            }
+
+            var createdWindow = await CreateContentWidgetFromConfigAsync(
+                config,
+                keepPreparedForAnimation: !reveal,
+                revealAfterCreate: reveal);
+            if (!reveal)
+            {
+                createdWindow.PrepareTrayShowAnimation();
+                createdWindow.ShowPreparedAtDesktopLayer();
             }
 
             return true;
@@ -1032,6 +1083,26 @@ public sealed class WidgetManager
                     showRaisedWhileInitializing: showRaisedWhileInitializing);
             }
 #endif
+            if (config.WidgetKind == WidgetKind.Todo)
+            {
+                if (_contentWidgets.TryGetValue(config.Id, out var existingContent))
+                {
+                    App.LogVerbose($"[TrayBatch] Prepare useLoaded content widget={FormatWidget(config)} {FormatHostWindow(existingContent)}");
+                    if (!existingContent.Visible)
+                    {
+                        existingContent.PrepareTrayShowAnimation();
+                    }
+
+                    return existingContent;
+                }
+
+                App.LogVerbose($"[TrayBatch] Prepare createContent widget={FormatWidget(config)} raisedInit={showRaisedWhileInitializing}");
+                return await CreateRegisteredWidgetFromConfigAsync(
+                    config,
+                    keepPreparedForAnimation: true,
+                    showRaisedWhileInitializing: showRaisedWhileInitializing);
+            }
+
             App.LogVerbose($"[TrayBatch] Prepare skipped reason=unsupported-kind widget={FormatWidget(config)}");
             return null;
         }
@@ -2825,6 +2896,11 @@ public sealed class WidgetManager
                 keepPreparedForAnimation,
                 revealAfterCreate,
                 showRaisedWhileInitializing),
+            WidgetKind.Todo => await CreateContentWidgetFromConfigAsync(
+                config,
+                keepPreparedForAnimation,
+                revealAfterCreate,
+                showRaisedWhileInitializing),
             _ => throw new NotSupportedException($"Widget kind '{config.WidgetKind}' is not registered as creatable.")
         };
     }
@@ -2840,7 +2916,8 @@ public sealed class WidgetManager
             return Task.FromResult(existing);
         }
 
-        if (_widgetRegistry.CanCreateWindow(config.WidgetKind))
+        if (_widgetRegistry.CanCreateWindow(config.WidgetKind) &&
+            config.WidgetKind != WidgetKind.Todo)
         {
             throw new NotSupportedException(
                 $"Widget kind '{config.WidgetKind}' is already handled by registered window creation.");

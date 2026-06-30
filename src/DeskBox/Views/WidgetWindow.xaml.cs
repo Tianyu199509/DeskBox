@@ -4596,6 +4596,14 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
         }
     }
 
+    private void NewTodoWidget_Click(object sender, RoutedEventArgs e)
+    {
+        if (App.Current is App app)
+        {
+            _ = app.WidgetManager?.CreateTodoWidgetAsync();
+        }
+    }
+
     private void AddCreateWidgetItems(MenuFlyout flyout)
     {
         var newWidget = new MenuFlyoutItem
@@ -4605,6 +4613,14 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
         };
         newWidget.Click += NewWidget_Click;
         flyout.Items.Add(newWidget);
+
+        var newTodoWidget = new MenuFlyoutItem
+        {
+            Text = _localizationService.T("Todo.NewWidget"),
+            Icon = new FontIcon { Glyph = "\uE9D5" }
+        };
+        newTodoWidget.Click += NewTodoWidget_Click;
+        flyout.Items.Add(newTodoWidget);
 
         var mapFolder = new MenuFlyoutItem
         {

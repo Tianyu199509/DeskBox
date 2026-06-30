@@ -16,7 +16,7 @@ public sealed class ContentWidgetWindowFactoryTests : IDisposable
     }
 
     [Fact]
-    public void CreateHiddenContentWindowPlan_ReturnsTodoAdapterWithoutOpeningRegistry()
+    public void CreateHiddenContentWindowPlan_ReturnsTodoAdapterForCreatableTodoKind()
     {
         var config = CreateConfig("todo-window", WidgetKind.Todo);
         var factory = CreateFactory();
@@ -27,7 +27,7 @@ public sealed class ContentWidgetWindowFactoryTests : IDisposable
         Assert.Equal(WidgetKind.Todo, plan.Descriptor.WidgetKind);
         Assert.IsType<TodoWidgetContentAdapter>(plan.Content);
         Assert.True(factory.CanCreateHiddenContentWindow(WidgetKind.Todo));
-        Assert.False(WidgetRegistry.Default.CanCreateWindow(WidgetKind.Todo));
+        Assert.True(WidgetRegistry.Default.CanCreateWindow(WidgetKind.Todo));
     }
 
     [Theory]

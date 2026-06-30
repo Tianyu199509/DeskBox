@@ -6,7 +6,7 @@ namespace DeskBox.Tests;
 public sealed class WidgetRegistryTests
 {
     [Fact]
-    public void Default_KnowsFutureWidgetKindsButOnlyCreatesImplementedWindows()
+    public void Default_KnowsFutureWidgetKindsAndCreatesImplementedWindows()
     {
         var registry = WidgetRegistry.Default;
 
@@ -14,6 +14,7 @@ public sealed class WidgetRegistryTests
         Assert.False(registry.CanCreateWindow(WidgetKind.Weather));
         Assert.True(registry.CanCreateWindow(WidgetKind.File));
         Assert.True(registry.CanCreateWindow(WidgetKind.QuickCapture));
+        Assert.True(registry.CanCreateWindow(WidgetKind.Todo));
     }
 
     [Fact]
@@ -43,5 +44,17 @@ public sealed class WidgetRegistryTests
         };
 
         Assert.False(registry.IsAvailableForSession(weatherWidget, new AppSettings()));
+    }
+
+    [Fact]
+    public void IsAvailableForSession_AllowsTodoWithoutFeatureFlag()
+    {
+        var registry = WidgetRegistry.Default;
+        var todoWidget = new WidgetConfig
+        {
+            WidgetKind = WidgetKind.Todo
+        };
+
+        Assert.True(registry.IsAvailableForSession(todoWidget, new AppSettings()));
     }
 }

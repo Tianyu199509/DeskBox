@@ -9,7 +9,7 @@ public sealed class WidgetContentFactoryTests
     [InlineData(WidgetKind.File, "DeskBox", WidgetContentStage.Implemented, true, WidgetContentAvailability.Available)]
     [InlineData(WidgetKind.QuickCapture, "Quick Capture", WidgetContentStage.Implemented, false, WidgetContentAvailability.Available)]
     [InlineData(WidgetKind.Weather, "Weather", WidgetContentStage.Placeholder, false, WidgetContentAvailability.Planned)]
-    [InlineData(WidgetKind.Todo, "Todo", WidgetContentStage.Placeholder, false, WidgetContentAvailability.Planned)]
+    [InlineData(WidgetKind.Todo, "Todo", WidgetContentStage.Implemented, true, WidgetContentAvailability.Available)]
     [InlineData(WidgetKind.Tags, "Tags", WidgetContentStage.Placeholder, false, WidgetContentAvailability.Planned)]
     [InlineData(WidgetKind.Music, "Music", WidgetContentStage.Placeholder, false, WidgetContentAvailability.Planned)]
     [InlineData(WidgetKind.SystemMonitor, "System Monitor", WidgetContentStage.Placeholder, false, WidgetContentAvailability.Planned)]
@@ -60,16 +60,15 @@ public sealed class WidgetContentFactoryTests
 
         var descriptors = factory.GetCreateEntryDescriptors();
 
-        var descriptor = Assert.Single(descriptors);
-        Assert.Equal(WidgetKind.File, descriptor.WidgetKind);
-        Assert.True(WidgetRegistry.Default.CanCreateWindow(descriptor.WidgetKind));
+        Assert.Equal([WidgetKind.File, WidgetKind.Todo], descriptors.Select(descriptor => descriptor.WidgetKind));
+        Assert.All(descriptors, descriptor => Assert.True(WidgetRegistry.Default.CanCreateWindow(descriptor.WidgetKind)));
     }
 
     [Theory]
     [InlineData(WidgetKind.File, true, false, true, true, false)]
     [InlineData(WidgetKind.QuickCapture, true, false, false, true, false)]
     [InlineData(WidgetKind.Weather, false, true, false, false, true)]
-    [InlineData(WidgetKind.Todo, false, true, false, false, true)]
+    [InlineData(WidgetKind.Todo, true, false, true, true, false)]
     [InlineData(WidgetKind.Tags, false, true, false, false, true)]
     [InlineData(WidgetKind.Music, false, true, false, false, true)]
     [InlineData(WidgetKind.SystemMonitor, false, true, false, false, true)]
@@ -115,7 +114,6 @@ public sealed class WidgetContentFactoryTests
 
     [Theory]
     [InlineData(WidgetKind.Weather)]
-    [InlineData(WidgetKind.Todo)]
     [InlineData(WidgetKind.Tags)]
     [InlineData(WidgetKind.Music)]
     [InlineData(WidgetKind.SystemMonitor)]
@@ -147,7 +145,7 @@ public sealed class WidgetContentFactoryTests
     }
 
     [Fact]
-    public void CreateTodoContent_ReturnsAdapterWithoutMakingKindCreatable()
+    public void CreateTodoContent_ReturnsImplementedAdapterForCreatableTodoKind()
     {
         string tempRoot = Path.Combine(Path.GetTempPath(), "DeskBox.Tests", Guid.NewGuid().ToString("N"));
         var factory = new WidgetContentFactory();
@@ -168,10 +166,10 @@ public sealed class WidgetContentFactoryTests
             Assert.IsType<TodoWidgetContentAdapter>(content);
             Assert.Equal("todo-test", content.WidgetId);
             Assert.Equal(WidgetKind.Todo, content.WidgetKind);
-            Assert.False(factory.HasImplementedContent(WidgetKind.Todo));
-            Assert.True(factory.IsPlaceholderOnly(WidgetKind.Todo));
-            Assert.False(factory.CanShowInCreateEntry(WidgetKind.Todo));
-            Assert.False(WidgetRegistry.Default.CanCreateWindow(WidgetKind.Todo));
+            Assert.True(factory.HasImplementedContent(WidgetKind.Todo));
+            Assert.False(factory.IsPlaceholderOnly(WidgetKind.Todo));
+            Assert.True(factory.CanShowInCreateEntry(WidgetKind.Todo));
+            Assert.True(WidgetRegistry.Default.CanCreateWindow(WidgetKind.Todo));
         }
         finally
         {
@@ -201,7 +199,7 @@ public sealed class WidgetContentFactoryTests
     }
 
     [Fact]
-    public void CreateDetachedContent_ReturnsTodoAdapterWithoutOpeningCreateEntry()
+    public void CreateDetachedContent_ReturnsTodoAdapterForContentWindow()
     {
         string tempRoot = Path.Combine(Path.GetTempPath(), "DeskBox.Tests", Guid.NewGuid().ToString("N"));
         var factory = new WidgetContentFactory();
@@ -223,8 +221,8 @@ public sealed class WidgetContentFactoryTests
             Assert.IsType<TodoWidgetContentAdapter>(content);
             Assert.Equal(WidgetKind.Todo, content.WidgetKind);
             Assert.True(factory.CanCreateDetachedContent(WidgetKind.Todo));
-            Assert.False(factory.CanShowInCreateEntry(WidgetKind.Todo));
-            Assert.False(WidgetRegistry.Default.CanCreateWindow(WidgetKind.Todo));
+            Assert.True(factory.CanShowInCreateEntry(WidgetKind.Todo));
+            Assert.True(WidgetRegistry.Default.CanCreateWindow(WidgetKind.Todo));
         }
         finally
         {

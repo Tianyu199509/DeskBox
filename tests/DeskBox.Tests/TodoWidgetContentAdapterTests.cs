@@ -17,7 +17,7 @@ public sealed class TodoWidgetContentAdapterTests : IDisposable
     }
 
     [Fact]
-    public async Task InitializeAsync_LoadsTodoDataWithoutMakingTodoCreatable()
+    public async Task InitializeAsync_LoadsTodoDataForCreatableTodoKind()
     {
         await CreateStore("todo-widget").SaveAsync(new TodoWidgetData
         {
@@ -45,7 +45,7 @@ public sealed class TodoWidgetContentAdapterTests : IDisposable
                 Assert.Equal("second task", item.Text);
                 Assert.True(item.IsCompleted);
             });
-        Assert.False(WidgetRegistry.Default.CanCreateWindow(WidgetKind.Todo));
+        Assert.True(WidgetRegistry.Default.CanCreateWindow(WidgetKind.Todo));
     }
 
     [Fact]

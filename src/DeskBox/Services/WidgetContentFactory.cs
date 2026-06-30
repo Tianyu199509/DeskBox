@@ -44,9 +44,9 @@ public sealed class WidgetContentFactory
             WidgetKind.Todo,
             "Todo",
             "\uE9D5",
-            WidgetContentStage.Placeholder,
-            CanShowInCreateEntry: false,
-            WidgetContentAvailability.Planned,
+            WidgetContentStage.Implemented,
+            CanShowInCreateEntry: true,
+            WidgetContentAvailability.Available,
             "WidgetContent.Todo.StatusLabel",
             "WidgetContent.Todo.StatusDescription"),
         new(

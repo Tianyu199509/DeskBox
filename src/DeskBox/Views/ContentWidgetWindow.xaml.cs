@@ -787,6 +787,49 @@ public sealed partial class ContentWidgetWindow : Window, IDesktopWidgetWindow
 
     private void MoreButton_Click(object sender, RoutedEventArgs e)
     {
+        ShowFlyoutWithInteraction(CreateMoreFlyout(), ContentWidgetShell.MoreActionButton);
+    }
+
+    private MenuFlyout CreateMoreFlyout()
+    {
+        var flyout = new MenuFlyout();
+
+        var deleteWidget = new MenuFlyoutItem
+        {
+            Text = App.Current.LocalizationService.T("Widget.Tooltip.DeleteWidget"),
+            Icon = new FontIcon
+            {
+                Glyph = "\uE74D",
+                Foreground = new SolidColorBrush(Colors.Red)
+            }
+        };
+        deleteWidget.Click += async (_, _) =>
+        {
+            if (App.Current.WidgetManager is { } widgetManager)
+            {
+                await widgetManager.RemoveWidgetAsync(_config.Id);
+            }
+        };
+        flyout.Items.Add(deleteWidget);
+
+        return flyout;
+    }
+
+    private void ShowFlyoutWithInteraction(MenuFlyout flyout, FrameworkElement target)
+    {
+        App.Current.WidgetManager?.BeginWidgetInteraction("content-flyout-opened");
+        flyout.Closed += (_, _) =>
+        {
+            App.Current.WidgetManager?.EndWidgetInteraction("content-flyout-closed");
+            if (App.Current.WidgetManager?.RequestRestoreRaisedWidgetsToDesktopLayer("content-flyout-closed") == true)
+            {
+                return;
+            }
+
+            RestoreDesktopLayerFromManager();
+        };
+
+        flyout.ShowAt(target);
     }
 
     private sealed class ContentWidgetTitleViewModel
