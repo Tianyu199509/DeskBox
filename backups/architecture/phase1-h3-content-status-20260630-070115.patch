@@ -1,0 +1,267 @@
+﻿diff --git a/docs/architecture/widget_architecture_phase1_progress.md b/docs/architecture/widget_architecture_phase1_progress.md
+index 7c68493..837f32d 100644
+--- a/docs/architecture/widget_architecture_phase1_progress.md
++++ b/docs/architecture/widget_architecture_phase1_progress.md
+@@ -380,3 +380,34 @@ G.2 继续抽只读/纯计算逻辑，建议先统一窗口身份上下文：`Wi
+ ### 下一步建议
+ 
+ 下一步可以做 `H.3`：把未来内容类型的“开发状态/展示状态”文案也纳入只读 descriptor，例如 `PreviewLabel` 或 `StatusText`，方便以后设置页、调试页、创建入口共用同一套状态说明。仍不建议现在开放真实入口。
++
++## 20. H.3 内容展示状态元信息
++
++已补充内容层展示状态元信息，用于后续设置页、调试页和创建入口共用状态说明：
++
++- 新增 `WidgetContentAvailability`，当前分为 `Available` 和 `Planned`。
++- `WidgetContentDescriptor` 增加：
++  - `Availability`
++  - `StatusLabelKey`
++  - `StatusDescriptionKey`
++- `WidgetContentFactory` 增加：
++  - `IsAvailable(WidgetKind)`
++  - `IsPlanned(WidgetKind)`
++- 当前 `File` 与 `QuickCapture` 标记为 `Available`。
++- `Weather`、`Todo`、`Tags`、`Music`、`SystemMonitor` 标记为 `Planned`。
++- 状态说明只保存本地化 key，不直接写死中英文文案。
++- 未修改 `LocalizationService` 字典。
++- 未接入设置页、创建入口、托盘菜单或右键菜单。
++- 未改变 `WidgetManager` 创建流程。
++- 未改变托盘/F7/层级/拖拽/IME/排序/安装器逻辑。
++
++### H.3 验证记录
++
++- `dotnet build .\DeskBox.sln -c Debug -p:Platform=x64 --no-restore`
++- `dotnet test .\DeskBox.sln -c Debug -p:Platform=x64 --no-build`
++
++当前测试数量：`133/133`。
++
++### 下一步建议
++
++内容层只读元信息已经足够支撑未来功能格子的入口规划。建议下一步不要继续堆 descriptor 字段，可以转向 `H.4`：补一个仅供测试/调试使用的 `WidgetKind` 一致性测试，确保 `WidgetRegistry` 与 `WidgetContentFactory` 对已知类型的覆盖一致。仍不接 UI。
+diff --git a/src/DeskBox/Services/WidgetContentDescriptor.cs b/src/DeskBox/Services/WidgetContentDescriptor.cs
+index 0286d03..f522305 100644
+--- a/src/DeskBox/Services/WidgetContentDescriptor.cs
++++ b/src/DeskBox/Services/WidgetContentDescriptor.cs
+@@ -8,6 +8,12 @@ public enum WidgetContentStage
+     Placeholder
+ }
+ 
++public enum WidgetContentAvailability
++{
++    Available,
++    Planned
++}
++
+ /// <summary>
+ /// Describes content-level metadata without deciding whether a widget kind can create a window.
+ /// </summary>
+@@ -16,9 +22,14 @@ public sealed record WidgetContentDescriptor(
+     string DefaultTitle,
+     string DefaultGlyph,
+     WidgetContentStage ContentStage,
+-    bool CanShowInCreateEntry)
++    bool CanShowInCreateEntry,
++    WidgetContentAvailability Availability,
++    string StatusLabelKey,
++    string StatusDescriptionKey)
+ {
+     public bool HasImplementedContent => ContentStage == WidgetContentStage.Implemented;
+     public bool HasPlaceholderContent => ContentStage == WidgetContentStage.Placeholder;
+     public bool IsPlaceholderOnly => ContentStage == WidgetContentStage.Placeholder;
++    public bool IsAvailable => Availability == WidgetContentAvailability.Available;
++    public bool IsPlanned => Availability == WidgetContentAvailability.Planned;
+ }
+diff --git a/src/DeskBox/Services/WidgetContentFactory.cs b/src/DeskBox/Services/WidgetContentFactory.cs
+index 03a8c34..62475dc 100644
+--- a/src/DeskBox/Services/WidgetContentFactory.cs
++++ b/src/DeskBox/Services/WidgetContentFactory.cs
+@@ -13,13 +13,69 @@ public sealed class WidgetContentFactory
+ {
+     private static readonly IReadOnlyList<WidgetContentDescriptor> DescriptorList =
+     [
+-        new(WidgetKind.File, "DeskBox", "\uE8A5", WidgetContentStage.Implemented, CanShowInCreateEntry: true),
+-        new(WidgetKind.QuickCapture, "Quick Capture", "\uE70F", WidgetContentStage.Implemented, CanShowInCreateEntry: false),
+-        new(WidgetKind.Weather, "Weather", "\uE706", WidgetContentStage.Placeholder, CanShowInCreateEntry: false),
+-        new(WidgetKind.Todo, "Todo", "\uE9D5", WidgetContentStage.Placeholder, CanShowInCreateEntry: false),
+-        new(WidgetKind.Tags, "Tags", "\uE8EC", WidgetContentStage.Placeholder, CanShowInCreateEntry: false),
+-        new(WidgetKind.Music, "Music", "\uEC4F", WidgetContentStage.Placeholder, CanShowInCreateEntry: false),
+-        new(WidgetKind.SystemMonitor, "System Monitor", "\uE9D9", WidgetContentStage.Placeholder, CanShowInCreateEntry: false)
++        new(
++            WidgetKind.File,
++            "DeskBox",
++            "\uE8A5",
++            WidgetContentStage.Implemented,
++            CanShowInCreateEntry: true,
++            WidgetContentAvailability.Available,
++            "WidgetContent.File.StatusLabel",
++            "WidgetContent.File.StatusDescription"),
++        new(
++            WidgetKind.QuickCapture,
++            "Quick Capture",
++            "\uE70F",
++            WidgetContentStage.Implemented,
++            CanShowInCreateEntry: false,
++            WidgetContentAvailability.Available,
++            "WidgetContent.QuickCapture.StatusLabel",
++            "WidgetContent.QuickCapture.StatusDescription"),
++        new(
++            WidgetKind.Weather,
++            "Weather",
++            "\uE706",
++            WidgetContentStage.Placeholder,
++            CanShowInCreateEntry: false,
++            WidgetContentAvailability.Planned,
++            "WidgetContent.Weather.StatusLabel",
++            "WidgetContent.Weather.StatusDescription"),
++        new(
++            WidgetKind.Todo,
++            "Todo",
++            "\uE9D5",
++            WidgetContentStage.Placeholder,
++            CanShowInCreateEntry: false,
++            WidgetContentAvailability.Planned,
++            "WidgetContent.Todo.StatusLabel",
++            "WidgetContent.Todo.StatusDescription"),
++        new(
++            WidgetKind.Tags,
++            "Tags",
++            "\uE8EC",
++            WidgetContentStage.Placeholder,
++            CanShowInCreateEntry: false,
++            WidgetContentAvailability.Planned,
++            "WidgetContent.Tags.StatusLabel",
++            "WidgetContent.Tags.StatusDescription"),
++        new(
++            WidgetKind.Music,
++            "Music",
++            "\uEC4F",
++            WidgetContentStage.Placeholder,
++            CanShowInCreateEntry: false,
++            WidgetContentAvailability.Planned,
++            "WidgetContent.Music.StatusLabel",
++            "WidgetContent.Music.StatusDescription"),
++        new(
++            WidgetKind.SystemMonitor,
++            "System Monitor",
++            "\uE9D9",
++            WidgetContentStage.Placeholder,
++            CanShowInCreateEntry: false,
++            WidgetContentAvailability.Planned,
++            "WidgetContent.SystemMonitor.StatusLabel",
++            "WidgetContent.SystemMonitor.StatusDescription")
+     ];
+ 
+     private static readonly IReadOnlyDictionary<WidgetKind, WidgetContentDescriptor> Descriptors =
+@@ -81,6 +137,18 @@ public sealed class WidgetContentFactory
+                descriptor.CanShowInCreateEntry;
+     }
+ 
++    public bool IsAvailable(WidgetKind widgetKind)
++    {
++        return Descriptors.TryGetValue(widgetKind, out var descriptor) &&
++               descriptor.IsAvailable;
++    }
++
++    public bool IsPlanned(WidgetKind widgetKind)
++    {
++        return Descriptors.TryGetValue(widgetKind, out var descriptor) &&
++               descriptor.IsPlanned;
++    }
++
+     public bool CanCreatePlaceholderContent(WidgetKind widgetKind)
+     {
+         return Descriptors.TryGetValue(widgetKind, out var descriptor) &&
+diff --git a/tests/DeskBox.Tests/WidgetContentFactoryTests.cs b/tests/DeskBox.Tests/WidgetContentFactoryTests.cs
+index 0cce4fd..9cc3196 100644
+--- a/tests/DeskBox.Tests/WidgetContentFactoryTests.cs
++++ b/tests/DeskBox.Tests/WidgetContentFactoryTests.cs
+@@ -6,18 +6,19 @@ namespace DeskBox.Tests;
+ public sealed class WidgetContentFactoryTests
+ {
+     [Theory]
+-    [InlineData(WidgetKind.File, "DeskBox", WidgetContentStage.Implemented, true)]
+-    [InlineData(WidgetKind.QuickCapture, "Quick Capture", WidgetContentStage.Implemented, false)]
+-    [InlineData(WidgetKind.Weather, "Weather", WidgetContentStage.Placeholder, false)]
+-    [InlineData(WidgetKind.Todo, "Todo", WidgetContentStage.Placeholder, false)]
+-    [InlineData(WidgetKind.Tags, "Tags", WidgetContentStage.Placeholder, false)]
+-    [InlineData(WidgetKind.Music, "Music", WidgetContentStage.Placeholder, false)]
+-    [InlineData(WidgetKind.SystemMonitor, "System Monitor", WidgetContentStage.Placeholder, false)]
++    [InlineData(WidgetKind.File, "DeskBox", WidgetContentStage.Implemented, true, WidgetContentAvailability.Available)]
++    [InlineData(WidgetKind.QuickCapture, "Quick Capture", WidgetContentStage.Implemented, false, WidgetContentAvailability.Available)]
++    [InlineData(WidgetKind.Weather, "Weather", WidgetContentStage.Placeholder, false, WidgetContentAvailability.Planned)]
++    [InlineData(WidgetKind.Todo, "Todo", WidgetContentStage.Placeholder, false, WidgetContentAvailability.Planned)]
++    [InlineData(WidgetKind.Tags, "Tags", WidgetContentStage.Placeholder, false, WidgetContentAvailability.Planned)]
++    [InlineData(WidgetKind.Music, "Music", WidgetContentStage.Placeholder, false, WidgetContentAvailability.Planned)]
++    [InlineData(WidgetKind.SystemMonitor, "System Monitor", WidgetContentStage.Placeholder, false, WidgetContentAvailability.Planned)]
+     public void GetDescriptor_ReturnsContentMetadata(
+         WidgetKind widgetKind,
+         string title,
+         WidgetContentStage stage,
+-        bool canShowInCreateEntry)
++        bool canShowInCreateEntry,
++        WidgetContentAvailability availability)
+     {
+         var factory = new WidgetContentFactory();
+ 
+@@ -28,6 +29,9 @@ public sealed class WidgetContentFactoryTests
+         Assert.False(string.IsNullOrWhiteSpace(descriptor.DefaultGlyph));
+         Assert.Equal(stage, descriptor.ContentStage);
+         Assert.Equal(canShowInCreateEntry, descriptor.CanShowInCreateEntry);
++        Assert.Equal(availability, descriptor.Availability);
++        Assert.StartsWith($"WidgetContent.{widgetKind}.", descriptor.StatusLabelKey);
++        Assert.StartsWith($"WidgetContent.{widgetKind}.", descriptor.StatusDescriptionKey);
+     }
+ 
+     [Fact]
+@@ -62,25 +66,43 @@ public sealed class WidgetContentFactoryTests
+     }
+ 
+     [Theory]
+-    [InlineData(WidgetKind.File, true, false, true)]
+-    [InlineData(WidgetKind.QuickCapture, true, false, false)]
+-    [InlineData(WidgetKind.Weather, false, true, false)]
+-    [InlineData(WidgetKind.Todo, false, true, false)]
+-    [InlineData(WidgetKind.Tags, false, true, false)]
+-    [InlineData(WidgetKind.Music, false, true, false)]
+-    [InlineData(WidgetKind.SystemMonitor, false, true, false)]
+-    [InlineData(WidgetKind.Productivity, false, false, false)]
++    [InlineData(WidgetKind.File, true, false, true, true, false)]
++    [InlineData(WidgetKind.QuickCapture, true, false, false, true, false)]
++    [InlineData(WidgetKind.Weather, false, true, false, false, true)]
++    [InlineData(WidgetKind.Todo, false, true, false, false, true)]
++    [InlineData(WidgetKind.Tags, false, true, false, false, true)]
++    [InlineData(WidgetKind.Music, false, true, false, false, true)]
++    [InlineData(WidgetKind.SystemMonitor, false, true, false, false, true)]
++    [InlineData(WidgetKind.Productivity, false, false, false, false, false)]
+     public void ContentCapabilityQueries_ReturnExpectedReadOnlyState(
+         WidgetKind widgetKind,
+         bool hasImplementedContent,
+         bool isPlaceholderOnly,
+-        bool canShowInCreateEntry)
++        bool canShowInCreateEntry,
++        bool isAvailable,
++        bool isPlanned)
+     {
+         var factory = new WidgetContentFactory();
+ 
+         Assert.Equal(hasImplementedContent, factory.HasImplementedContent(widgetKind));
+         Assert.Equal(isPlaceholderOnly, factory.IsPlaceholderOnly(widgetKind));
+         Assert.Equal(canShowInCreateEntry, factory.CanShowInCreateEntry(widgetKind));
++        Assert.Equal(isAvailable, factory.IsAvailable(widgetKind));
++        Assert.Equal(isPlanned, factory.IsPlanned(widgetKind));
++    }
++
++    [Fact]
++    public void StatusKeys_AreStableLocalizationKeys()
++    {
++        var factory = new WidgetContentFactory();
++
++        foreach (var descriptor in factory.GetDescriptors())
++        {
++            Assert.EndsWith(".StatusLabel", descriptor.StatusLabelKey);
++            Assert.EndsWith(".StatusDescription", descriptor.StatusDescriptionKey);
++            Assert.DoesNotContain(' ', descriptor.StatusLabelKey);
++            Assert.DoesNotContain(' ', descriptor.StatusDescriptionKey);
++        }
+     }
+ 
+     [Fact]

@@ -1,0 +1,35 @@
+From 4b4985fcce3f4219efec685372b98855f4ae58ac Mon Sep 17 00:00:00 2001
+From: Simon <1047078635@qq.com>
+Date: Mon, 29 Jun 2026 18:45:09 +0800
+Subject: [PATCH 04/18] style: tighten widget menu horizontal padding
+
+---
+ src/DeskBox/App.xaml | 5 +++--
+ 1 file changed, 3 insertions(+), 2 deletions(-)
+
+diff --git a/src/DeskBox/App.xaml b/src/DeskBox/App.xaml
+index 8226cae..6e37f53 100644
+--- a/src/DeskBox/App.xaml
++++ b/src/DeskBox/App.xaml
+@@ -45,7 +45,8 @@
+             <x:Double x:Key="DeskBoxMenuPresenterVerticalPadding">4</x:Double>
+             <x:Double x:Key="DeskBoxMenuItemMinHeight">36</x:Double>
+             <x:Double x:Key="DeskBoxMenuItemFontSize">13</x:Double>
+-            <Thickness x:Key="DeskBoxMenuItemPadding">12,8,12,8</Thickness>
++            <Thickness x:Key="DeskBoxMenuPresenterPadding">0,4,0,4</Thickness>
++            <Thickness x:Key="DeskBoxMenuItemPadding">10,8,10,8</Thickness>
+ 
+             <!-- Shared ToggleSwitch template tuning for settings-style rows. -->
+             <x:Double x:Key="ToggleSwitchOuterBorderStrokeThickness">0.25</x:Double>
+@@ -78,7 +79,7 @@
+ 
+             <Style TargetType="MenuFlyoutPresenter" BasedOn="{StaticResource DefaultMenuFlyoutPresenterStyle}">
+                 <Setter Property="FontFamily" Value="{StaticResource DeskBoxMenuFontFamily}" />
+-                <Setter Property="Padding" Value="{StaticResource DeskBoxMenuItemPadding}" />
++                <Setter Property="Padding" Value="{StaticResource DeskBoxMenuPresenterPadding}" />
+             </Style>
+ 
+             <Style TargetType="MenuFlyoutItem" BasedOn="{StaticResource DefaultMenuFlyoutItemStyle}">
+-- 
+2.54.0.windows.1
+

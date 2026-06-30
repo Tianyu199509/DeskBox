@@ -4590,7 +4590,7 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
 
     private void AddCreateWidgetItems(MenuFlyout flyout)
     {
-        foreach (var descriptor in new WidgetContentFactory().GetCreateEntryDescriptors())
+        foreach (var descriptor in new WidgetContentFactory(_localizationService).GetCreateEntryDescriptors())
         {
             var createItem = new MenuFlyoutItem
             {

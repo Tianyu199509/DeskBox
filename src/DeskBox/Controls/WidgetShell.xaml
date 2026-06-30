@@ -9,7 +9,9 @@
 
     <Grid
         x:Name="ShellRoot"
-        Background="Transparent">
+        Background="Transparent"
+        PointerEntered="ShellRoot_PointerEntered"
+        PointerExited="ShellRoot_PointerExited">
         <Grid.RowDefinitions>
             <RowDefinition Height="46" />
             <RowDefinition Height="*" />

@@ -1,0 +1,7 @@
+﻿branch=codex/widget-architecture-phase1
+head=c1f6aec
+base=main
+bundle=D:\project\wingezi\backups\architecture\snapshots\codex-widget-architecture-phase1-g4-checkpoint-20260629-221327.bundle
+formatPatchDir=D:\project\wingezi\backups\architecture\snapshots\format-patch-phase1-g4-checkpoint-20260629-221327
+created=20260629-221327
+note=G4 checkpoint: WidgetShell + content contract + session recording + host identity/log groundwork. No layer/animation takeover.

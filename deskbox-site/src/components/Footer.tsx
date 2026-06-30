@@ -18,6 +18,7 @@ export function Footer() {
             <ul className="space-y-2 text-sm">
               <li><Link href="/features" className="text-[var(--secondary)] hover:text-[var(--foreground)] transition-colors">功能介绍</Link></li>
               <li><Link href="/download" className="text-[var(--secondary)] hover:text-[var(--foreground)] transition-colors">下载</Link></li>
+              <li><Link href="/roadmap" className="text-[var(--secondary)] hover:text-[var(--foreground)] transition-colors">路线图</Link></li>
               <li><Link href="/changelog" className="text-[var(--secondary)] hover:text-[var(--foreground)] transition-colors">更新日志</Link></li>
             </ul>
           </div>
@@ -36,7 +37,7 @@ export function Footer() {
         </div>
         <div className="mt-8 pt-8 border-t border-[var(--card-border)] flex flex-col sm:flex-row justify-between items-center gap-4">
           <p className="text-[var(--secondary)] text-sm">© {new Date().getFullYear()} DeskBox. MIT License.</p>
-          <p className="text-[var(--secondary)] text-sm">Built with WinUI 3 & .NET 8</p>
+          <p className="text-[var(--secondary)] text-sm">Made with ❤️ and AI</p>
         </div>
       </div>
     </footer>

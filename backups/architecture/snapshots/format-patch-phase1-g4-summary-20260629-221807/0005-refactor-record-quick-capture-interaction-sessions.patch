@@ -1,0 +1,103 @@
+From c39433adcb2aaf9d371f2411473cac91ce6f20b0 Mon Sep 17 00:00:00 2001
+From: Simon <1047078635@qq.com>
+Date: Mon, 29 Jun 2026 18:48:16 +0800
+Subject: [PATCH 05/19] refactor: record quick capture interaction sessions
+
+---
+ src/DeskBox/Services/WidgetManager.cs              | 11 +++++++++++
+ src/DeskBox/Services/WidgetSessionManager.cs       |  6 ++++--
+ src/DeskBox/Views/QuickCaptureWidgetWindow.xaml.cs |  7 ++++++-
+ tests/DeskBox.Tests/WidgetSessionManagerTests.cs   | 12 ++++++++++++
+ 4 files changed, 33 insertions(+), 3 deletions(-)
+
+diff --git a/src/DeskBox/Services/WidgetManager.cs b/src/DeskBox/Services/WidgetManager.cs
+index c94a85d..0509918 100644
+--- a/src/DeskBox/Services/WidgetManager.cs
++++ b/src/DeskBox/Services/WidgetManager.cs
+@@ -89,6 +89,7 @@ public sealed class WidgetManager
+ 
+     public bool WidgetsRaisedFromTray => _widgetsRaisedFromTray;
+     public WidgetSessionState SessionState => _sessionManager.State;
++    public bool IsWidgetInteractionActive => _sessionManager.IsInteractionActive;
+ 
+     public bool HasVisibleWidgets => _widgets.Values.Any(entry => entry.Window.Visible) ||
+                                      _quickCaptureWidgets.Values.Any(entry => entry.Window.Visible);
+@@ -98,6 +99,16 @@ public sealed class WidgetManager
+         return _widgetWindowHandles.Contains(hwnd);
+     }
+ 
++    public void BeginWidgetInteraction(string reason)
++    {
++        _sessionManager.BeginInteraction(reason);
++    }
++
++    public void EndWidgetInteraction(string reason)
++    {
++        _sessionManager.EndInteraction(reason);
++    }
++
+     public event Action<WidgetWindow>? WidgetCreated;
+     public event Action<string>? WidgetRemoved;
+     public event Action<bool>? TrayLayerStateChanged;
+diff --git a/src/DeskBox/Services/WidgetSessionManager.cs b/src/DeskBox/Services/WidgetSessionManager.cs
+index b587d67..1b9a4fe 100644
+--- a/src/DeskBox/Services/WidgetSessionManager.cs
++++ b/src/DeskBox/Services/WidgetSessionManager.cs
+@@ -63,11 +63,13 @@ public sealed class WidgetSessionManager
+ 
+     public void EndInteraction(string reason)
+     {
+-        if (_interactionDepth > 0)
++        if (_interactionDepth <= 0)
+         {
+-            _interactionDepth--;
++            _log?.Invoke($"[WidgetSession] ignored end reason={reason} state={State}");
++            return;
+         }
+ 
++        _interactionDepth--;
+         SetState(_interactionDepth > 0 ? WidgetSessionState.InteractionActive : _stateBeforeInteraction, reason);
+     }
+ 
+diff --git a/src/DeskBox/Views/QuickCaptureWidgetWindow.xaml.cs b/src/DeskBox/Views/QuickCaptureWidgetWindow.xaml.cs
+index 2f605bb..f6509ff 100644
+--- a/src/DeskBox/Views/QuickCaptureWidgetWindow.xaml.cs
++++ b/src/DeskBox/Views/QuickCaptureWidgetWindow.xaml.cs
+@@ -1845,7 +1845,12 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
+     private void ShowFlyoutWithElevation(MenuFlyout flyout, FrameworkElement target, Windows.Foundation.Point? position = null)
+     {
+         ElevateForInteraction();
+-        flyout.Closed += (_, _) => ReleaseInteractionLayer("quick-flyout-closed");
++        App.Current.WidgetManager?.BeginWidgetInteraction("quick-flyout-opened");
++        flyout.Closed += (_, _) =>
++        {
++            App.Current.WidgetManager?.EndWidgetInteraction("quick-flyout-closed");
++            ReleaseInteractionLayer("quick-flyout-closed");
++        };
+ 
+         if (position is Windows.Foundation.Point point)
+         {
+diff --git a/tests/DeskBox.Tests/WidgetSessionManagerTests.cs b/tests/DeskBox.Tests/WidgetSessionManagerTests.cs
+index 3640441..6b5222b 100644
+--- a/tests/DeskBox.Tests/WidgetSessionManagerTests.cs
++++ b/tests/DeskBox.Tests/WidgetSessionManagerTests.cs
+@@ -73,4 +73,16 @@ public sealed class WidgetSessionManagerTests
+         Assert.False(manager.IsRaised);
+         Assert.False(manager.IsInteractionActive);
+     }
++
++    [Fact]
++    public void EndInteraction_WithoutActiveInteraction_DoesNotChangeState()
++    {
++        var manager = new WidgetSessionManager();
++        manager.MarkRaisedSession("raised");
++
++        manager.EndInteraction("stray-end");
++
++        Assert.Equal(WidgetSessionState.RaisedSession, manager.State);
++        Assert.False(manager.IsInteractionActive);
++    }
+ }
+-- 
+2.54.0.windows.1
+

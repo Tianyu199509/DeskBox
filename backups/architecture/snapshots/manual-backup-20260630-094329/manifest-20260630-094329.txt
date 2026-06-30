@@ -1,0 +1,9 @@
+﻿DeskBox manual backup
+timestamp=20260630-094329
+repo=D:\project\wingezi
+branch=codex/widget-architecture-phase1
+head=33d5ce71bc01af67c4f7e7325d13ed602357dd11
+bundle=D:\project\wingezi\backups\architecture\snapshots\manual-backup-20260630-094329\codex-widget-architecture-phase1-head-20260630-094329.bundle
+tracked_patch=D:\project\wingezi\backups\architecture\snapshots\manual-backup-20260630-094329\tracked-working-tree-20260630-094329.patch
+untracked_count=132
+untracked_nonbackup_count=1

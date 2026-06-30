@@ -2872,7 +2872,7 @@ public sealed class WidgetManager
                 $"Widget kind '{config.WidgetKind}' is already handled by registered window creation.");
         }
 
-        var factory = new ContentWidgetWindowFactory(new WidgetContentFactory(), _settingsService);
+        var factory = new ContentWidgetWindowFactory(new WidgetContentFactory(_localizationService), _settingsService);
         if (!factory.CanCreateContentWindow(config.WidgetKind))
         {
             throw new NotSupportedException(

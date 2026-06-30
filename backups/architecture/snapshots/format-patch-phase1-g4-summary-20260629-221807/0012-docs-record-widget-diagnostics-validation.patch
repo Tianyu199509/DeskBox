@@ -1,0 +1,49 @@
+From 07ac942ac46c72900c8b49aa39dc51f70cef0584 Mon Sep 17 00:00:00 2001
+From: Simon <1047078635@qq.com>
+Date: Mon, 29 Jun 2026 19:49:53 +0800
+Subject: [PATCH 12/19] docs: record widget diagnostics validation
+
+---
+ .../widget_architecture_phase1_progress.md         | 14 ++++++++++++--
+ 1 file changed, 12 insertions(+), 2 deletions(-)
+
+diff --git a/docs/architecture/widget_architecture_phase1_progress.md b/docs/architecture/widget_architecture_phase1_progress.md
+index ab08523..07edca1 100644
+--- a/docs/architecture/widget_architecture_phase1_progress.md
++++ b/docs/architecture/widget_architecture_phase1_progress.md
+@@ -25,6 +25,7 @@
+ | `7260af0` | E.1：文件格子外壳接入 `WidgetShell`，内容区和业务逻辑保持不变 | 已手测 |
+ | `ac62a44` | E.2：补充 `WidgetShell` 过渡 API 说明并更新迁移进度 | 已测试 |
+ | `42c935c` | E.3：标出文件格子内容区未来迁移边界，不移动业务 UI | 已测试 |
++| `0b8adde` | G.1：新增只读 `WidgetWindowDiagnostics`，统一窗口日志和动画边界计算 | 已手测 |
+ 
+ ## 3. 已完成范围
+ 
+@@ -198,13 +199,22 @@
+ - G.1 只做 `WidgetWindowDiagnostics`：统一短 ID、托盘窗口日志前缀、只读 `AnimationBounds` 计算。
+ - `WidgetWindowDiagnostics` 不调用 Win32，不保存设置，不改变 visible/topmost/raised 状态。
+ 
++### G.1 验收记录
++
++用户已在 Debug 版手测通过：
++
++- 托盘/F7 行为正常。
++- 随记显示正常。
++- 文件格子显示正常。
++- 格子拖拽未发现异常。
++
+ ## 11. 下一步建议
+ 
+-### 推荐下一步：完成 G.1 验收后再评估 G.2
++### 推荐下一步：G.2 只读窗口身份上下文
+ 
+ 当前仍不建议马上抽 `FileWidgetContent`。文件内容区仍包含拖拽、选择框、重命名、空状态、toast、GridView/ListView 等大量耦合逻辑，直接迁移风险较高。
+ 
+-G.1 完成后，更稳的 G.2 是继续抽只读/纯计算逻辑，例如窗口日志上下文或 appearance 参数计算；暂不接管 AppWindow、DWM、topmost 或动画执行。
++G.2 继续抽只读/纯计算逻辑，建议先统一窗口身份上下文：`WidgetId`、`WidgetKind`、`Name`、`WindowHandle`、`AnimationBounds`、日志显示名。暂不接管 AppWindow、DWM、topmost 或动画执行。
+ 
+ ### 暂不建议直接做
+ 
+-- 
+2.54.0.windows.1
+

@@ -1,0 +1,339 @@
+From 0b8addec31cc8050e25a3de8e46bf17c6c09a9e7 Mon Sep 17 00:00:00 2001
+From: Simon <1047078635@qq.com>
+Date: Mon, 29 Jun 2026 19:40:01 +0800
+Subject: [PATCH 11/19] refactor: add widget window diagnostics helper
+
+---
+ .../widget_architecture_phase1_plan.md        |  5 +-
+ .../widget_architecture_phase1_progress.md    | 23 ++++++--
+ .../Services/WidgetWindowDiagnostics.cs       | 43 +++++++++++++++
+ .../Views/QuickCaptureWidgetWindow.xaml.cs    | 33 +++++-------
+ src/DeskBox/Views/WidgetWindow.xaml.cs        | 21 +++-----
+ .../WidgetWindowDiagnosticsTests.cs           | 54 +++++++++++++++++++
+ 6 files changed, 138 insertions(+), 41 deletions(-)
+ create mode 100644 src/DeskBox/Services/WidgetWindowDiagnostics.cs
+ create mode 100644 tests/DeskBox.Tests/WidgetWindowDiagnosticsTests.cs
+
+diff --git a/docs/architecture/widget_architecture_phase1_plan.md b/docs/architecture/widget_architecture_phase1_plan.md
+index 363abe8..ebf0a84 100644
+--- a/docs/architecture/widget_architecture_phase1_plan.md
++++ b/docs/architecture/widget_architecture_phase1_plan.md
+@@ -314,7 +314,7 @@ public Dictionary<string, string> Metadata { get; set; } = [];
+ 
+ 普通文件格子比随记复杂很多：文件拖入、拖出、中文重命名、选择框、多选、映射文件夹、收纳文件夹、排序、右键菜单、删除确认、拖回桌面等都在这一层，迁移要更谨慎。
+ 
+-第一轮只移动内容区 XAML，不移动核心代码逻辑。Win32 subclass、OLE 拖放兼容、IME 处理、PushToBottom / topmost、托盘动画、多显示器 bounds 都先留在 `WidgetWindow.xaml.cs`。
++第一轮先接入 `WidgetShell` 外壳并标出内容区边界，不移动核心代码逻辑。第二轮再评估是否把内容区 XAML 作为一个整体迁移到 `FileWidgetContent`。Win32 subclass、OLE 拖放兼容、IME 处理、PushToBottom / topmost、托盘动画、多显示器 bounds 都先留在 `WidgetWindow.xaml.cs`。
+ 
+ 验收：
+ 
+@@ -360,11 +360,14 @@ public enum WidgetSessionState
+ 推荐：
+ 
+ ```text
++WidgetWindowDiagnostics
+ WidgetWindowChromeController
+ WidgetWindowAnimationController
+ WidgetWindowLayerController
+ ```
+ 
++G.1 只允许做 `WidgetWindowDiagnostics` 这类只读辅助对象：统一窗口日志前缀、短 ID、只读 bounds 快照等。它不能调用 `SetWindowPos`、不能保存设置、不能改变 visible/topmost/raised 状态。`WidgetWindowChromeController`、`WidgetWindowAnimationController`、`WidgetWindowLayerController` 必须等 G.1 手测稳定后再分批评估。
++
+ ## 8. 测试矩阵
+ 
+ 每个阶段至少验证：
+diff --git a/docs/architecture/widget_architecture_phase1_progress.md b/docs/architecture/widget_architecture_phase1_progress.md
+index aab32cd..ab08523 100644
+--- a/docs/architecture/widget_architecture_phase1_progress.md
++++ b/docs/architecture/widget_architecture_phase1_progress.md
+@@ -24,6 +24,7 @@
+ | `51ce88b` | F.3：文件格子部分交互接入 Session 记录 | 已手测 |
+ | `7260af0` | E.1：文件格子外壳接入 `WidgetShell`，内容区和业务逻辑保持不变 | 已手测 |
+ | `ac62a44` | E.2：补充 `WidgetShell` 过渡 API 说明并更新迁移进度 | 已测试 |
++| `42c935c` | E.3：标出文件格子内容区未来迁移边界，不移动业务 UI | 已测试 |
+ 
+ ## 3. 已完成范围
+ 
+@@ -55,6 +56,7 @@
+ - 文件格子使用自定义标题栏插槽保留原有标题编辑、添加按钮、更多按钮、关闭按钮和按钮动画。
+ - 文件格子内容区、拖拽、重命名、选择框、resize、迁移遮罩仍保留原窗口逻辑。
+ - 文件格子内容区已标出未来 `FileWidgetContent` 边界，但尚未迁移。
++- 总方案已修正：阶段 E 不要求立即移动内容区 XAML，后续必须把内容区作为整体评估迁移。
+ 
+ ### 3.5 IWidgetContent
+ 
+@@ -147,6 +149,7 @@
+ - 文档更新。
+ - Registry 扩展但不开放入口。
+ - Session 日志增强但不改变行为。
++- 只读窗口诊断 helper。
+ - 新功能格子内容控件的空壳验证。
+ 
+ ## 8. E.1 验收记录
+@@ -183,13 +186,25 @@
+ - 文件重命名编辑框。
+ - 状态 toast。
+ 
+-## 10. 下一步建议
++## 10. G.1 路线复核记录
+ 
+-### 推荐下一步：阶段 G.1 生命周期 controller 试点
++已复核 `WidgetWindow` 和 `QuickCaptureWidgetWindow` 的生命周期代码。
++
++结论：
++
++- 两个窗口确实存在重复的窗口身份、日志、bounds、动画、层级、DWM 代码。
++- 但动画和层级逻辑混有不同 guard，例如文件格子的重命名、删除弹窗、内联弹窗，随记的编辑、清空、tab 等状态。
++- 当前不适合直接抽 `WidgetWindowLayerController` 或 `WidgetWindowAnimationController`。
++- G.1 只做 `WidgetWindowDiagnostics`：统一短 ID、托盘窗口日志前缀、只读 `AnimationBounds` 计算。
++- `WidgetWindowDiagnostics` 不调用 Win32，不保存设置，不改变 visible/topmost/raised 状态。
++
++## 11. 下一步建议
++
++### 推荐下一步：完成 G.1 验收后再评估 G.2
+ 
+ 当前仍不建议马上抽 `FileWidgetContent`。文件内容区仍包含拖拽、选择框、重命名、空状态、toast、GridView/ListView 等大量耦合逻辑，直接迁移风险较高。
+ 
+-更稳的下一步是 G.1：先抽不改变行为的组合对象，例如只封装窗口日志/状态查询，不接管 AppWindow、DWM 或层级。
++G.1 完成后，更稳的 G.2 是继续抽只读/纯计算逻辑，例如窗口日志上下文或 appearance 参数计算；暂不接管 AppWindow、DWM、topmost 或动画执行。
+ 
+ ### 暂不建议直接做
+ 
+@@ -198,7 +213,7 @@
+ - 不建议让 `WidgetSessionManager` 接管层级恢复。
+ - 不建议引入天气/Todo 等新功能入口。
+ 
+-## 11. 后续施工护栏
++## 12. 后续施工护栏
+ 
+ 每次只动一个目标：
+ 
+diff --git a/src/DeskBox/Services/WidgetWindowDiagnostics.cs b/src/DeskBox/Services/WidgetWindowDiagnostics.cs
+new file mode 100644
+index 0000000..a3e0fa1
+--- /dev/null
++++ b/src/DeskBox/Services/WidgetWindowDiagnostics.cs
+@@ -0,0 +1,43 @@
++using DeskBox.Models;
++
++namespace DeskBox.Services;
++
++/// <summary>
++/// Shared read-only diagnostics for widget host windows.
++/// This does not own z-order, animation, DWM, or visibility decisions.
++/// </summary>
++public sealed class WidgetWindowDiagnostics
++{
++    private const double MinAnimationExtent = 1.0;
++    private readonly WidgetConfig _config;
++    private readonly Func<IntPtr> _windowHandleProvider;
++
++    public WidgetWindowDiagnostics(string logKind, WidgetConfig config, Func<IntPtr> windowHandleProvider)
++    {
++        LogKind = logKind;
++        _config = config;
++        _windowHandleProvider = windowHandleProvider;
++    }
++
++    public string LogKind { get; }
++
++    public string ShortWidgetId => ShortId(_config.Id);
++
++    public Windows.Foundation.Rect AnimationBounds => new(
++        _config.X,
++        _config.Y,
++        Math.Max(MinAnimationExtent, _config.Width),
++        Math.Max(MinAnimationExtent, _config.Height));
++
++    public string FormatTrayWindowMessage(string message)
++    {
++        return $"[TrayWindow] {LogKind} {_config.Name}#{ShortWidgetId} hwnd=0x{_windowHandleProvider().ToInt64():X} {message}";
++    }
++
++    internal static string ShortId(string id)
++    {
++        return string.IsNullOrWhiteSpace(id)
++            ? "none"
++            : id.Length <= 8 ? id : id[..8];
++    }
++}
+diff --git a/src/DeskBox/Views/QuickCaptureWidgetWindow.xaml.cs b/src/DeskBox/Views/QuickCaptureWidgetWindow.xaml.cs
+index f6509ff..25b3ec6 100644
+--- a/src/DeskBox/Views/QuickCaptureWidgetWindow.xaml.cs
++++ b/src/DeskBox/Views/QuickCaptureWidgetWindow.xaml.cs
+@@ -76,11 +76,12 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
+     private FontIcon CloseButtonIcon => QuickCaptureShell.CloseActionIcon;
+ 
+     private readonly SettingsService _settingsService;
+-    private readonly LocalizationService _localizationService;
+-    private readonly ThemeService? _themeService;
+-    private readonly IntPtr _hWnd;
+-    private readonly AppWindow _appWindow;
+-    private DesktopAcrylicController? _acrylicController;
++    private readonly LocalizationService _localizationService;
++    private readonly ThemeService? _themeService;
++    private readonly IntPtr _hWnd;
++    private readonly AppWindow _appWindow;
++    private readonly WidgetWindowDiagnostics _diagnostics;
++    private DesktopAcrylicController? _acrylicController;
+     private SystemBackdropConfiguration? _backdropConfiguration;
+     private ICompositionSupportsSystemBackdrop? _backdropTarget;
+     private bool _isDragging;
+@@ -142,11 +143,7 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
+ 
+     public IntPtr WindowHandle => _hWnd;
+ 
+-    public Windows.Foundation.Rect AnimationBounds => new(
+-        ViewModel.Config.X,
+-        ViewModel.Config.Y,
+-        Math.Max(MinWidgetSlideOffset, ViewModel.Config.Width),
+-        Math.Max(MinWidgetSlideOffset, ViewModel.Config.Height));
++    public Windows.Foundation.Rect AnimationBounds => _diagnostics.AnimationBounds;
+ 
+     private bool _isVisibleOnDesktop;
+     public new bool Visible
+@@ -167,9 +164,10 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
+         InitializeComponent();
+         RootGrid.DataContext = ViewModel;
+ 
+-        _hWnd = WindowNative.GetWindowHandle(this);
+-        var windowId = Win32Interop.GetWindowIdFromWindow(_hWnd);
+-        _appWindow = AppWindow.GetFromWindowId(windowId);
++        _hWnd = WindowNative.GetWindowHandle(this);
++        var windowId = Win32Interop.GetWindowIdFromWindow(_hWnd);
++        _appWindow = AppWindow.GetFromWindowId(windowId);
++        _diagnostics = new WidgetWindowDiagnostics("Quick", ViewModel.Config, () => _hWnd);
+ 
+         ConfigureWindow();
+         SetupEventHandlers();
+@@ -3794,13 +3792,6 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
+ 
+     private void LogTrayWindow(string message)
+     {
+-        App.LogVerbose($"[TrayWindow] Quick {ViewModel.Config.Name}#{ShortId(ViewModel.Config.Id)} hwnd=0x{_hWnd.ToInt64():X} {message}");
+-    }
+-
+-    private static string ShortId(string id)
+-    {
+-        return string.IsNullOrWhiteSpace(id)
+-            ? "none"
+-            : id.Length <= 8 ? id : id[..8];
++        App.LogVerbose(_diagnostics.FormatTrayWindowMessage(message));
+     }
+ }
+diff --git a/src/DeskBox/Views/WidgetWindow.xaml.cs b/src/DeskBox/Views/WidgetWindow.xaml.cs
+index fa4947d..c4b4a4b 100644
+--- a/src/DeskBox/Views/WidgetWindow.xaml.cs
++++ b/src/DeskBox/Views/WidgetWindow.xaml.cs
+@@ -72,6 +72,7 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
+     private readonly LocalizationService _localizationService;
+     private readonly IntPtr _hWnd;
+     private readonly AppWindow _appWindow;
++    private readonly WidgetWindowDiagnostics _diagnostics;
+     private readonly Win32Helper.SubclassProc _fileDropSubclassProc;
+     private DesktopAcrylicController? _acrylicController;
+     private SystemBackdropConfiguration? _backdropConfiguration;
+@@ -148,11 +149,7 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
+ 
+     public IntPtr WindowHandle => _hWnd;
+ 
+-    public Windows.Foundation.Rect AnimationBounds => new(
+-        ViewModel.Config.X,
+-        ViewModel.Config.Y,
+-        Math.Max(MinWidgetSlideOffset, ViewModel.Config.Width),
+-        Math.Max(MinWidgetSlideOffset, ViewModel.Config.Height));
++    public Windows.Foundation.Rect AnimationBounds => _diagnostics.AnimationBounds;
+ 
+     private bool _isVisibleOnDesktop;
+     private bool _isClosing;
+@@ -186,8 +183,9 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
+         FileWidgetShell.SetDividerMargin(new Thickness(14, 0, 14, 0));
+ 
+         _hWnd = WindowNative.GetWindowHandle(this);
+-        _windowId = Win32Interop.GetWindowIdFromWindow(_hWnd);
+-        _appWindow = AppWindow.GetFromWindowId(_windowId);
++        _windowId = Win32Interop.GetWindowIdFromWindow(_hWnd);
++        _appWindow = AppWindow.GetFromWindowId(_windowId);
++        _diagnostics = new WidgetWindowDiagnostics("File", ViewModel.Config, () => _hWnd);
+ 
+         ConfigureWindow();
+         SetupEventHandlers();
+@@ -1221,14 +1219,7 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
+ 
+     private void LogTrayWindow(string message)
+     {
+-        App.LogVerbose($"[TrayWindow] File {ViewModel.Config.Name}#{ShortId(ViewModel.Config.Id)} hwnd=0x{_hWnd.ToInt64():X} {message}");
+-    }
+-
+-    private static string ShortId(string id)
+-    {
+-        return string.IsNullOrWhiteSpace(id)
+-            ? "none"
+-            : id.Length <= 8 ? id : id[..8];
++        App.LogVerbose(_diagnostics.FormatTrayWindowMessage(message));
+     }
+ 
+     public void RevealFromTray(bool autoRestore = true)
+diff --git a/tests/DeskBox.Tests/WidgetWindowDiagnosticsTests.cs b/tests/DeskBox.Tests/WidgetWindowDiagnosticsTests.cs
+new file mode 100644
+index 0000000..8c37066
+--- /dev/null
++++ b/tests/DeskBox.Tests/WidgetWindowDiagnosticsTests.cs
+@@ -0,0 +1,54 @@
++using DeskBox.Models;
++using DeskBox.Services;
++
++namespace DeskBox.Tests;
++
++public sealed class WidgetWindowDiagnosticsTests
++{
++    [Fact]
++    public void AnimationBounds_UsesConfigAndKeepsMinimumExtent()
++    {
++        var config = new WidgetConfig
++        {
++            Id = "1234567890",
++            Name = "Test",
++            X = 12,
++            Y = 34,
++            Width = 0,
++            Height = -5
++        };
++        var diagnostics = new WidgetWindowDiagnostics("File", config, () => new IntPtr(0x1234));
++
++        var bounds = diagnostics.AnimationBounds;
++
++        Assert.Equal(12, bounds.X);
++        Assert.Equal(34, bounds.Y);
++        Assert.Equal(1, bounds.Width);
++        Assert.Equal(1, bounds.Height);
++    }
++
++    [Fact]
++    public void FormatTrayWindowMessage_UsesStableKindNameIdAndHandle()
++    {
++        var config = new WidgetConfig
++        {
++            Id = "abcdef123456",
++            Name = "Documents"
++        };
++        var diagnostics = new WidgetWindowDiagnostics("Quick", config, () => new IntPtr(0xBEEF));
++
++        string message = diagnostics.FormatTrayWindowMessage("PrepareHide gen=2");
++
++        Assert.Equal("[TrayWindow] Quick Documents#abcdef12 hwnd=0xBEEF PrepareHide gen=2", message);
++    }
++
++    [Theory]
++    [InlineData("", "none")]
++    [InlineData("abc", "abc")]
++    [InlineData("12345678", "12345678")]
++    [InlineData("123456789", "12345678")]
++    public void ShortId_HandlesEmptyShortAndLongIds(string id, string expected)
++    {
++        Assert.Equal(expected, WidgetWindowDiagnostics.ShortId(id));
++    }
++}
+-- 
+2.54.0.windows.1
+

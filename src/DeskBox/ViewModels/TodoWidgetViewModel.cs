@@ -16,14 +16,23 @@ public enum TodoFilter
 public sealed partial class TodoWidgetViewModel : ObservableObject
 {
     private readonly TodoWidgetStore _store;
+    private readonly LocalizationService _localizationService;
+    private readonly WidgetConfig _config;
     private TodoFilter _selectedFilter = TodoFilter.All;
     private string _inputText = string.Empty;
     private bool _isInitialized;
 
-    public TodoWidgetViewModel(TodoWidgetStore store)
+    public TodoWidgetViewModel(TodoWidgetStore store, LocalizationService localizationService, WidgetConfig config)
     {
         _store = store;
+        _localizationService = localizationService;
+        _config = config;
+        _localizationService.LanguageChanged += OnLanguageChanged;
     }
+
+    public string DisplayName => _config.IsDefaultTitle
+        ? _localizationService.T("Todo.Title")
+        : _config.Name;
 
     public ObservableCollection<TodoItemViewModel> Items { get; } = [];
 
@@ -75,28 +84,26 @@ public sealed partial class TodoWidgetViewModel : ObservableObject
 
     public Visibility EmptyStateVisibility => HasVisibleItems ? Visibility.Collapsed : Visibility.Visible;
 
-    public string AddPlaceholderText => "Add a task";
+    public string AddPlaceholderText => _localizationService.T("Todo.AddPlaceholder");
 
-    public string AllFilterText => "All";
+    public string AllFilterText => _localizationService.T("Todo.Filter.All");
 
-    public string ActiveFilterText => "Active";
+    public string ActiveFilterText => _localizationService.T("Todo.Filter.Active");
 
-    public string CompletedFilterText => "Completed";
+    public string CompletedFilterText => _localizationService.T("Todo.Filter.Completed");
 
-    public string EmptyStateTitle => "No tasks";
+    public string EmptyStateTitle => _localizationService.T("Todo.Empty.Title");
 
     public string EmptyStateText => SelectedFilter switch
     {
-        TodoFilter.Active => "No active tasks.",
-        TodoFilter.Completed => "No completed tasks.",
-        _ => "Add a task to get started."
+        TodoFilter.Active => _localizationService.T("Todo.Empty.Active"),
+        TodoFilter.Completed => _localizationService.T("Todo.Empty.Completed"),
+        _ => _localizationService.T("Todo.Empty.All")
     };
 
-    public string ClearCompletedText => "Clear completed";
+    public string ClearCompletedText => _localizationService.T("Todo.ClearCompleted");
 
-    public string ItemsLeftText => ActiveCount == 1
-        ? "1 item left"
-        : $"{ActiveCount} items left";
+    public string ItemsLeftText => string.Format(_localizationService.T("Todo.ItemsLeft"), ActiveCount);
 
     public bool IsAllFilterSelected => SelectedFilter == TodoFilter.All;
 
@@ -313,6 +320,19 @@ public sealed partial class TodoWidgetViewModel : ObservableObject
         OnPropertyChanged(nameof(HasVisibleItems));
         OnPropertyChanged(nameof(ListVisibility));
         OnPropertyChanged(nameof(EmptyStateVisibility));
+    }
+
+    private void OnLanguageChanged()
+    {
+        OnPropertyChanged(nameof(DisplayName));
+        OnPropertyChanged(nameof(AddPlaceholderText));
+        OnPropertyChanged(nameof(AllFilterText));
+        OnPropertyChanged(nameof(ActiveFilterText));
+        OnPropertyChanged(nameof(CompletedFilterText));
+        OnPropertyChanged(nameof(EmptyStateTitle));
+        OnPropertyChanged(nameof(EmptyStateText));
+        OnPropertyChanged(nameof(ClearCompletedText));
+        OnPropertyChanged(nameof(ItemsLeftText));
     }
 
     private static string NormalizeText(string? text)

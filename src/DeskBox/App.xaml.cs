@@ -833,7 +833,7 @@ public partial class App : Application
         };
 
         _trayCreateWidgetItems.Clear();
-        foreach (var descriptor in new WidgetContentFactory().GetCreateEntryDescriptors())
+        foreach (var descriptor in new WidgetContentFactory(LocalizationService).GetCreateEntryDescriptors())
         {
             var createItem = CreateTrayCreateWidgetItem(contextMenu, descriptor, localization);
             _trayCreateWidgetItems[descriptor.WidgetKind] = createItem;
@@ -1260,7 +1260,7 @@ public partial class App : Application
 
         foreach (var (widgetKind, item) in _trayCreateWidgetItems)
         {
-            var descriptor = new WidgetContentFactory().GetDescriptor(widgetKind);
+            var descriptor = new WidgetContentFactory(LocalizationService).GetDescriptor(widgetKind);
             item.Text = GetCreateEntryText(descriptor, LocalizationService);
         }
 

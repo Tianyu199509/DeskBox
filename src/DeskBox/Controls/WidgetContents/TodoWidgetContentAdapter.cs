@@ -15,13 +15,13 @@ public sealed class TodoWidgetContentAdapter : IWidgetContent
     private readonly Func<TodoWidgetViewModel, FrameworkElement> _viewFactory;
     private FrameworkElement? _view;
 
-    public TodoWidgetContentAdapter(WidgetConfig config)
-        : this(config, new TodoWidgetStore(config.Id))
+    public TodoWidgetContentAdapter(WidgetConfig config, LocalizationService localizationService)
+        : this(config, new TodoWidgetStore(config.Id), localizationService)
     {
     }
 
-    public TodoWidgetContentAdapter(WidgetConfig config, TodoWidgetStore store)
-        : this(config, new TodoWidgetViewModel(store))
+    public TodoWidgetContentAdapter(WidgetConfig config, TodoWidgetStore store, LocalizationService localizationService)
+        : this(config, new TodoWidgetViewModel(store, localizationService, config))
     {
     }
 

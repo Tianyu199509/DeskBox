@@ -3,6 +3,7 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
+using Microsoft.UI.Xaml.Media.Animation;
 
 namespace DeskBox.Controls;
 
@@ -36,6 +37,17 @@ public sealed partial class WidgetShell : UserControl
             typeof(WidgetShell),
             new PropertyMetadata(null, OnTitleBarContentChanged));
 
+    public static readonly DependencyProperty ShowHoverButtonsProperty =
+        DependencyProperty.Register(
+            nameof(ShowHoverButtons),
+            typeof(bool),
+            typeof(WidgetShell),
+            new PropertyMetadata(true));
+
+    private Storyboard? _showButtonsStoryboard;
+    private Storyboard? _hideButtonsStoryboard;
+    private TranslateTransform? _rightButtonsTransform;
+
     public event EventHandler<RoutedEventArgs>? MoreRequested;
     public event EventHandler<RoutedEventArgs>? CloseRequested;
     public event EventHandler<RightTappedRoutedEventArgs>? TitleRightTapped;
@@ -46,6 +58,16 @@ public sealed partial class WidgetShell : UserControl
     public WidgetShell()
     {
         InitializeComponent();
+        RightActionButtons.SizeChanged += (_, _) =>
+        {
+            _rightButtonsTransform = RightActionButtons.RenderTransform as TranslateTransform;
+        };
+    }
+
+    public bool ShowHoverButtons
+    {
+        get => (bool)GetValue(ShowHoverButtonsProperty);
+        set => SetValue(ShowHoverButtonsProperty, value);
     }
 
     public object? ShellContent
@@ -100,6 +122,80 @@ public sealed partial class WidgetShell : UserControl
     public void SetDividerMargin(Thickness margin)
     {
         HeaderDivider.Margin = margin;
+    }
+
+    private void ShellRoot_PointerEntered(object sender, PointerRoutedEventArgs e)
+    {
+        if (!ShowHoverButtons)
+        {
+            return;
+        }
+
+        EnsureStoryboards();
+        _hideButtonsStoryboard?.Stop();
+        _showButtonsStoryboard?.Begin();
+    }
+
+    private void ShellRoot_PointerExited(object sender, PointerRoutedEventArgs e)
+    {
+        EnsureStoryboards();
+        _showButtonsStoryboard?.Stop();
+        _hideButtonsStoryboard?.Begin();
+    }
+
+    private void EnsureStoryboards()
+    {
+        if (_showButtonsStoryboard is not null)
+        {
+            return;
+        }
+
+        _rightButtonsTransform = new TranslateTransform { X = 12 };
+        RightActionButtons.RenderTransform = _rightButtonsTransform;
+
+        _showButtonsStoryboard = new Storyboard();
+
+        var showOpacity = new DoubleAnimation
+        {
+            To = 1.0,
+            Duration = new Duration(TimeSpan.FromMilliseconds(250)),
+            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
+        };
+        Storyboard.SetTarget(showOpacity, RightActionButtons);
+        Storyboard.SetTargetProperty(showOpacity, "Opacity");
+        _showButtonsStoryboard.Children.Add(showOpacity);
+
+        var showX = new DoubleAnimation
+        {
+            To = 0,
+            Duration = new Duration(TimeSpan.FromMilliseconds(250)),
+            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
+        };
+        Storyboard.SetTarget(showX, _rightButtonsTransform);
+        Storyboard.SetTargetProperty(showX, "X");
+        _showButtonsStoryboard.Children.Add(showX);
+
+        _hideButtonsStoryboard = new Storyboard();
+
+        var hideOpacity = new DoubleAnimation
+        {
+            To = 0.0,
+            Duration = new Duration(TimeSpan.FromMilliseconds(200)),
+            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseIn }
+        };
+        Storyboard.SetTarget(hideOpacity, RightActionButtons);
+        Storyboard.SetTargetProperty(hideOpacity, "Opacity");
+        _hideButtonsStoryboard.Children.Add(hideOpacity);
+
+        var hideX = new DoubleAnimation
+        {
+            To = 12,
+            Duration = new Duration(TimeSpan.FromMilliseconds(200)),
+            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseIn }
+        };
+        Storyboard.SetTarget(hideX, _rightButtonsTransform);
+        Storyboard.SetTargetProperty(hideX, "X");
+        _hideButtonsStoryboard.Children.Add(hideX);
     }
 
     private static void OnTitleBarContentChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)

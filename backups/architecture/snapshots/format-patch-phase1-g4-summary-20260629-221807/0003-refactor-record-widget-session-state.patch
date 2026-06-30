@@ -1,0 +1,276 @@
+From 40161eefe186ae94bba36d57d4443039424a3f73 Mon Sep 17 00:00:00 2001
+From: Simon <1047078635@qq.com>
+Date: Mon, 29 Jun 2026 18:33:27 +0800
+Subject: [PATCH 03/19] refactor: record widget session state
+
+---
+ src/DeskBox/Services/WidgetManager.cs         | 28 ++++++
+ src/DeskBox/Services/WidgetSessionManager.cs  | 86 +++++++++++++++++++
+ .../WidgetSessionManagerTests.cs              | 76 ++++++++++++++++
+ 3 files changed, 190 insertions(+)
+ create mode 100644 src/DeskBox/Services/WidgetSessionManager.cs
+ create mode 100644 tests/DeskBox.Tests/WidgetSessionManagerTests.cs
+
+diff --git a/src/DeskBox/Services/WidgetManager.cs b/src/DeskBox/Services/WidgetManager.cs
+index 4704fdd..c94a85d 100644
+--- a/src/DeskBox/Services/WidgetManager.cs
++++ b/src/DeskBox/Services/WidgetManager.cs
+@@ -65,6 +65,7 @@ public sealed class WidgetManager
+     private readonly Func<string> _desktopPathProvider;
+     private readonly bool _recycleManagedFolderDeletes;
+     private readonly WidgetRegistry _widgetRegistry;
++    private readonly WidgetSessionManager _sessionManager;
+     private readonly Dictionary<string, (WidgetWindow Window, WidgetViewModel ViewModel)> _widgets = new();
+     private readonly Dictionary<string, (QuickCaptureWidgetWindow Window, QuickCaptureWidgetViewModel ViewModel)> _quickCaptureWidgets = new();
+     private readonly HashSet<IntPtr> _widgetWindowHandles = new();
+@@ -87,6 +88,7 @@ public sealed class WidgetManager
+     public IReadOnlyDictionary<string, (QuickCaptureWidgetWindow Window, QuickCaptureWidgetViewModel ViewModel)> QuickCaptureWidgets => _quickCaptureWidgets;
+ 
+     public bool WidgetsRaisedFromTray => _widgetsRaisedFromTray;
++    public WidgetSessionState SessionState => _sessionManager.State;
+ 
+     public bool HasVisibleWidgets => _widgets.Values.Any(entry => entry.Window.Visible) ||
+                                      _quickCaptureWidgets.Values.Any(entry => entry.Window.Visible);
+@@ -188,6 +190,7 @@ public sealed class WidgetManager
+         _desktopPathProvider = desktopPathProvider;
+         _recycleManagedFolderDeletes = recycleManagedFolderDeletes;
+         _widgetRegistry = WidgetRegistry.Default;
++        _sessionManager = new WidgetSessionManager(App.LogVerbose);
+         _lastQuickCaptureEnabled = _settingsService.Settings.QuickCaptureEnabled;
+         _settingsService.SettingsChanged += OnSettingsChanged;
+         _settingsService.AppearancePreviewChanged += ApplyAppearancePreview;
+@@ -303,6 +306,11 @@ public sealed class WidgetManager
+ 
+             await Task.Yield();
+         }
++
++        if (configs.Count > 0)
++        {
++            _sessionManager.MarkDesktopResting("restore-widgets");
++        }
+     }
+ 
+     /// <summary>
+@@ -700,6 +708,7 @@ public sealed class WidgetManager
+         PlayPreparedTrayHideAnimations(windowsToHide);
+ 
+         SetWidgetsRaisedFromTray(false);
++        _sessionManager.MarkHidden("set-all-hidden");
+         _trayRaiseBatchGeneration++;
+         StopTrayLayerRestoreMonitor();
+         SaveBatchVisibilityState();
+@@ -1653,11 +1662,29 @@ public sealed class WidgetManager
+     {
+         if (_widgetsRaisedFromTray == raised)
+         {
++            if (raised)
++            {
++                _sessionManager.MarkRaisedSession("raised-state-kept");
++            }
++
+             return;
+         }
+ 
+         App.LogVerbose($"[TrayBatch] RaisedState changed { _widgetsRaisedFromTray } -> {raised}");
+         _widgetsRaisedFromTray = raised;
++        if (raised)
++        {
++            _sessionManager.MarkRaisedSession("tray-raised");
++        }
++        else if (HasVisibleWidgets)
++        {
++            _sessionManager.MarkDesktopResting("tray-restored");
++        }
++        else
++        {
++            _sessionManager.MarkHidden("tray-hidden");
++        }
++
+         TrayLayerStateChanged?.Invoke(raised);
+     }
+ 
+@@ -1789,6 +1816,7 @@ public sealed class WidgetManager
+ 
+         _quickCaptureWidgets.Clear();
+         _retiredWindows.Clear();
++        _sessionManager.MarkHidden("close-all");
+     }
+ 
+     public int GetDefaultManagedStorageWidgetCount()
+diff --git a/src/DeskBox/Services/WidgetSessionManager.cs b/src/DeskBox/Services/WidgetSessionManager.cs
+new file mode 100644
+index 0000000..b587d67
+--- /dev/null
++++ b/src/DeskBox/Services/WidgetSessionManager.cs
+@@ -0,0 +1,86 @@
++namespace DeskBox.Services;
++
++public enum WidgetSessionState
++{
++    DesktopResting,
++    RaisedSession,
++    InteractionActive,
++    Hidden
++}
++
++/// <summary>
++/// First-pass session coordinator. It records the widget session state only;
++/// window z-order and animation decisions remain owned by WidgetManager/windows.
++/// </summary>
++public sealed class WidgetSessionManager
++{
++    private readonly Action<string>? _log;
++    private int _interactionDepth;
++    private WidgetSessionState _stateBeforeInteraction = WidgetSessionState.DesktopResting;
++
++    public WidgetSessionManager(Action<string>? log = null)
++    {
++        _log = log;
++    }
++
++    public WidgetSessionState State { get; private set; } = WidgetSessionState.DesktopResting;
++    public bool IsRaised => State == WidgetSessionState.RaisedSession || State == WidgetSessionState.InteractionActive;
++    public bool IsInteractionActive => _interactionDepth > 0;
++
++    public void MarkDesktopResting(string reason)
++    {
++        _interactionDepth = 0;
++        SetState(WidgetSessionState.DesktopResting, reason);
++    }
++
++    public void MarkRaisedSession(string reason)
++    {
++        if (_interactionDepth > 0)
++        {
++            SetState(WidgetSessionState.InteractionActive, reason);
++            return;
++        }
++
++        SetState(WidgetSessionState.RaisedSession, reason);
++    }
++
++    public void MarkHidden(string reason)
++    {
++        _interactionDepth = 0;
++        SetState(WidgetSessionState.Hidden, reason);
++    }
++
++    public void BeginInteraction(string reason)
++    {
++        if (_interactionDepth == 0 && State != WidgetSessionState.InteractionActive)
++        {
++            _stateBeforeInteraction = State;
++        }
++
++        _interactionDepth++;
++        SetState(WidgetSessionState.InteractionActive, reason);
++    }
++
++    public void EndInteraction(string reason)
++    {
++        if (_interactionDepth > 0)
++        {
++            _interactionDepth--;
++        }
++
++        SetState(_interactionDepth > 0 ? WidgetSessionState.InteractionActive : _stateBeforeInteraction, reason);
++    }
++
++    private void SetState(WidgetSessionState nextState, string reason)
++    {
++        if (State == nextState)
++        {
++            _log?.Invoke($"[WidgetSession] kept state={State} reason={reason} interactions={_interactionDepth}");
++            return;
++        }
++
++        var previousState = State;
++        State = nextState;
++        _log?.Invoke($"[WidgetSession] changed {previousState} -> {nextState} reason={reason} interactions={_interactionDepth}");
++    }
++}
+diff --git a/tests/DeskBox.Tests/WidgetSessionManagerTests.cs b/tests/DeskBox.Tests/WidgetSessionManagerTests.cs
+new file mode 100644
+index 0000000..3640441
+--- /dev/null
++++ b/tests/DeskBox.Tests/WidgetSessionManagerTests.cs
+@@ -0,0 +1,76 @@
++using DeskBox.Services;
++
++namespace DeskBox.Tests;
++
++public sealed class WidgetSessionManagerTests
++{
++    [Fact]
++    public void MarkRaisedSession_RecordsRaisedState()
++    {
++        var manager = new WidgetSessionManager();
++
++        manager.MarkRaisedSession("test");
++
++        Assert.Equal(WidgetSessionState.RaisedSession, manager.State);
++        Assert.True(manager.IsRaised);
++        Assert.False(manager.IsInteractionActive);
++    }
++
++    [Fact]
++    public void Interaction_ReturnsToPreviousDesktopState()
++    {
++        var manager = new WidgetSessionManager();
++
++        manager.BeginInteraction("start");
++        manager.EndInteraction("end");
++
++        Assert.Equal(WidgetSessionState.DesktopResting, manager.State);
++        Assert.False(manager.IsInteractionActive);
++    }
++
++    [Fact]
++    public void Interaction_ReturnsToPreviousRaisedState()
++    {
++        var manager = new WidgetSessionManager();
++        manager.MarkRaisedSession("raised");
++
++        manager.BeginInteraction("start");
++        manager.EndInteraction("end");
++
++        Assert.Equal(WidgetSessionState.RaisedSession, manager.State);
++        Assert.True(manager.IsRaised);
++        Assert.False(manager.IsInteractionActive);
++    }
++
++    [Fact]
++    public void NestedInteraction_RemainsActiveUntilAllInteractionsEnd()
++    {
++        var manager = new WidgetSessionManager();
++        manager.MarkRaisedSession("raised");
++
++        manager.BeginInteraction("first");
++        manager.BeginInteraction("second");
++        manager.EndInteraction("second-ended");
++
++        Assert.Equal(WidgetSessionState.InteractionActive, manager.State);
++        Assert.True(manager.IsInteractionActive);
++
++        manager.EndInteraction("first-ended");
++
++        Assert.Equal(WidgetSessionState.RaisedSession, manager.State);
++        Assert.False(manager.IsInteractionActive);
++    }
++
++    [Fact]
++    public void MarkHidden_ClearsInteractionState()
++    {
++        var manager = new WidgetSessionManager();
++        manager.BeginInteraction("start");
++
++        manager.MarkHidden("hidden");
++
++        Assert.Equal(WidgetSessionState.Hidden, manager.State);
++        Assert.False(manager.IsRaised);
++        Assert.False(manager.IsInteractionActive);
++    }
++}
+-- 
+2.54.0.windows.1
+

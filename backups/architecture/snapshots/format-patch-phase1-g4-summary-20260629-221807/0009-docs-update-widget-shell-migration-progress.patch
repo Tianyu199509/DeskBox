@@ -1,0 +1,168 @@
+From ac62a44652005bdfc35d87f3414da889f35757c2 Mon Sep 17 00:00:00 2001
+From: Simon <1047078635@qq.com>
+Date: Mon, 29 Jun 2026 19:26:53 +0800
+Subject: [PATCH 09/19] docs: update widget shell migration progress
+
+---
+ .../widget_architecture_phase1_progress.md    | 40 ++++++++++---------
+ src/DeskBox/Controls/WidgetShell.xaml.cs      | 17 ++++++++
+ 2 files changed, 39 insertions(+), 18 deletions(-)
+
+diff --git a/docs/architecture/widget_architecture_phase1_progress.md b/docs/architecture/widget_architecture_phase1_progress.md
+index 56fcb24..ad851d8 100644
+--- a/docs/architecture/widget_architecture_phase1_progress.md
++++ b/docs/architecture/widget_architecture_phase1_progress.md
+@@ -22,6 +22,7 @@
+ | `4b4985f` | 菜单左右边距微调 | 已手测 |
+ | `c39433a` | F.2：随记菜单弹窗接入 Session 记录 | 已手测 |
+ | `51ce88b` | F.3：文件格子部分交互接入 Session 记录 | 已手测 |
++| `7260af0` | E.1：文件格子外壳接入 `WidgetShell`，内容区和业务逻辑保持不变 | 已手测 |
+ 
+ ## 3. 已完成范围
+ 
+@@ -49,7 +50,9 @@
+ - 新增 `WidgetShell`。
+ - 随记窗口已经接入 `WidgetShell` 作为外壳试点。
+ - 随记窗口仍保留原来的 WindowHandle、AppWindow、DWM、动画、层级逻辑。
+-- 文件格子尚未接入 `WidgetShell`。
++- 文件格子已经接入 `WidgetShell` 外壳。
++- 文件格子使用自定义标题栏插槽保留原有标题编辑、添加按钮、更多按钮、关闭按钮和按钮动画。
++- 文件格子内容区、拖拽、重命名、选择框、resize、迁移遮罩仍保留原窗口逻辑。
+ 
+ ### 3.5 IWidgetContent
+ 
+@@ -126,7 +129,6 @@
+ 
+ ### 高风险
+ 
+-- 文件格子接入 `WidgetShell`。
+ - 文件格子内容区 XAML 迁移。
+ - 文件拖入、拖出、格子内拖动、`.lnk` 快捷方式拖动。
+ - 中文重命名 IME。
+@@ -134,7 +136,7 @@
+ 
+ ### 中风险
+ 
+-- 文件格子标题栏接入 `WidgetShell`。
++- 把文件格子内容区抽成 `FileWidgetContent`。
+ - 文件格子右键菜单与 Session 进一步联动。
+ - 标题栏拖动接入 Session 记录。
+ 
+@@ -145,19 +147,11 @@
+ - Session 日志增强但不改变行为。
+ - 新功能格子内容控件的空壳验证。
+ 
+-## 8. 下一步建议
++## 8. E.1 验收记录
+ 
+-### 推荐下一步：阶段 E.1 文件格子 Shell 外壳试点
++文件格子 Shell 外壳试点已完成并手测通过。
+ 
+-只迁移文件格子的外壳，不迁移内容区，不改拖拽、重命名、排序、菜单业务。
+-
+-目标：
+-
+-- 让 `WidgetWindow.xaml` 使用 `WidgetShell` 承载标题栏、背景、分割线、右侧按钮区域。
+-- 文件列表、GridView、ListView、拖拽处理、重命名编辑框、选择框、resize 边框等先保留在原窗口。
+-- `WidgetWindow.xaml.cs` 通过与随记类似的 forwarding properties 继续访问旧控件名称。
+-
+-验收重点：
++已验收：
+ 
+ - 收纳格子拖入文件正常。
+ - 映射格子拖入文件正常。
+@@ -169,18 +163,28 @@
+ - 标题栏右键菜单正常。
+ - F7 / 托盘行为正常。
+ 
+-### 不建议下一步直接做
++## 9. 下一步建议
++
++### 推荐下一步：E.3 前置整理或阶段 G.1
++
++当前不建议马上抽 `FileWidgetContent`。文件内容区仍包含拖拽、选择框、重命名、空状态、toast、GridView/ListView 等大量耦合逻辑，直接迁移风险较高。
++
++更稳的两个选择：
++
++1. E.3 前置整理：只给文件内容区加命名边界和注释，确认未来哪些区域会进入 `FileWidgetContent`，不移动代码。
++2. G.1 生命周期 controller 试点：先抽不改变行为的组合对象，例如只封装窗口日志/状态查询，不接管 AppWindow、DWM 或层级。
++
++### 暂不建议直接做
+ 
+ - 不建议直接迁移文件格子内容区为 `FileWidgetContent`。
+ - 不建议抽 `BaseWidgetWindow`。
+ - 不建议让 `WidgetSessionManager` 接管层级恢复。
+ - 不建议引入天气/Todo 等新功能入口。
+ 
+-## 9. 阶段 E.1 施工护栏
++## 10. 后续施工护栏
+ 
+ 每次只动一个目标：
+ 
+-- 只让文件格子窗口接入 `WidgetShell` 外壳。
+ - 不改 `WidgetViewModel`。
+ - 不改 `FileService`。
+ - 不改 OLE 拖放兼容。
+@@ -188,4 +192,4 @@
+ - 不改托盘动画算法。
+ - 不删除旧控件访问路径，先用 forwarding properties 过渡。
+ 
+-如果出现文件拖拽、中文重命名、F7 层级异常，优先 revert 阶段 E.1 commit，而不是继续在多个阶段上叠修。
++如果出现文件拖拽、中文重命名、F7 层级异常，优先 revert 当前阶段 commit，而不是继续在多个阶段上叠修。
+diff --git a/src/DeskBox/Controls/WidgetShell.xaml.cs b/src/DeskBox/Controls/WidgetShell.xaml.cs
+index 5730e5f..274d719 100644
+--- a/src/DeskBox/Controls/WidgetShell.xaml.cs
++++ b/src/DeskBox/Controls/WidgetShell.xaml.cs
+@@ -8,6 +8,9 @@ namespace DeskBox.Controls;
+ 
+ public sealed partial class WidgetShell : UserControl
+ {
++    /// <summary>
++    /// Content hosted below the title area. Future widget kinds should provide their body through this slot.
++    /// </summary>
+     public static readonly DependencyProperty ShellContentProperty =
+         DependencyProperty.Register(
+             nameof(ShellContent),
+@@ -22,6 +25,10 @@ public sealed partial class WidgetShell : UserControl
+             typeof(WidgetShell),
+             new PropertyMetadata("\uE8A5"));
+ 
++    /// <summary>
++    /// Optional title bar override used by legacy windows while they migrate into the shared shell.
++    /// When set, the built-in title and action buttons are hidden.
++    /// </summary>
+     public static readonly DependencyProperty TitleBarContentProperty =
+         DependencyProperty.Register(
+             nameof(TitleBarContent),
+@@ -53,6 +60,10 @@ public sealed partial class WidgetShell : UserControl
+         set => SetValue(TitleGlyphProperty, value);
+     }
+ 
++    /// <summary>
++    /// Custom title bar content for migrated legacy widgets that still own title interactions.
++    /// New simple widget kinds should prefer the default title bar.
++    /// </summary>
+     public object? TitleBarContent
+     {
+         get => GetValue(TitleBarContentProperty);
+@@ -75,11 +86,17 @@ public sealed partial class WidgetShell : UserControl
+         ShellContent = content.View;
+     }
+ 
++    /// <summary>
++    /// Keeps legacy dynamic title sizing centralized on the shell while host windows are migrated.
++    /// </summary>
+     public void SetTitleBarRowHeight(GridLength height)
+     {
+         ShellRoot.RowDefinitions[0].Height = height;
+     }
+ 
++    /// <summary>
++    /// Allows migrated windows to preserve their existing divider alignment during the transition.
++    /// </summary>
+     public void SetDividerMargin(Thickness margin)
+     {
+         HeaderDivider.Margin = margin;
+-- 
+2.54.0.windows.1
+

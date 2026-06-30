@@ -1,0 +1,193 @@
+From 51ce88b7b95f8371b6fed50c688d58c4b6d7bcbc Mon Sep 17 00:00:00 2001
+From: Simon <1047078635@qq.com>
+Date: Mon, 29 Jun 2026 18:57:53 +0800
+Subject: [PATCH 06/19] refactor: record file widget interaction sessions
+
+---
+ src/DeskBox/Views/WidgetWindow.xaml.cs | 97 ++++++++++++++------------
+ 1 file changed, 54 insertions(+), 43 deletions(-)
+
+diff --git a/src/DeskBox/Views/WidgetWindow.xaml.cs b/src/DeskBox/Views/WidgetWindow.xaml.cs
+index 7cd3385..9627ec2 100644
+--- a/src/DeskBox/Views/WidgetWindow.xaml.cs
++++ b/src/DeskBox/Views/WidgetWindow.xaml.cs
+@@ -4152,6 +4152,7 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
+     private void StartRename()
+     {
+         _isCancellingTitleRename = false;
++        BeginInteractionLayer("file-title-rename-opened", elevate: false);
+         PrepareRenameEditor();
+         TitleText.Visibility = Visibility.Collapsed;
+         TitleEditBox.Visibility = Visibility.Visible;
+@@ -4350,11 +4351,11 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
+             return;
+         }
+ 
+-        ElevateForInteraction();
+-
+-        try
+-        {
+-            string? folderPath = FolderPickerService.PickFolder(_hWnd);
++        BeginInteractionLayer("file-map-folder-picker-opened");
++
++        try
++        {
++            string? folderPath = FolderPickerService.PickFolder(_hWnd);
+             if (!string.IsNullOrWhiteSpace(folderPath))
+             {
+                 await app.WidgetManager.CreateFolderWidgetAsync(folderPath);
+@@ -4623,12 +4624,12 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
+         return flyout;
+     }
+ 
+-    private async Task PickAndImportFilesAsync()
+-    {
+-        ElevateForInteraction();
+-
+-        try
+-        {
++    private async Task PickAndImportFilesAsync()
++    {
++        BeginInteractionLayer("file-import-picker-opened");
++
++        try
++        {
+             var picker = new FileOpenPicker
+             {
+                 SuggestedStartLocation = PickerLocationId.Desktop
+@@ -4669,10 +4670,10 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
+             return;
+         }
+ 
+-        ElevateForInteraction();
+-
+-        try
+-        {
++        BeginInteractionLayer("file-mapped-folder-picker-opened");
++
++        try
++        {
+             string? folderPath = FolderPickerService.PickFolder(_hWnd);
+             if (string.IsNullOrWhiteSpace(folderPath))
+             {
+@@ -4837,14 +4838,14 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
+             _isInlineFlyoutOpen = false;
+             ReleaseInteractionLayer("file-delete-confirm-closed");
+         };
+-
+-        _isInlineFlyoutOpen = true;
+-        ElevateForInteraction();
+-
+-        var target = items.Length == 1
+-            ? FindItemSurface(items[0]) ?? GetActiveItemsView() as FrameworkElement ?? RootGrid
+-            : GetActiveItemsView() as FrameworkElement ?? RootGrid;
+-        flyout.ShowAt(target);
++
++        _isInlineFlyoutOpen = true;
++        BeginInteractionLayer("file-delete-confirm-opened");
++
++        var target = items.Length == 1
++            ? FindItemSurface(items[0]) ?? GetActiveItemsView() as FrameworkElement ?? RootGrid
++            : GetActiveItemsView() as FrameworkElement ?? RootGrid;
++        flyout.ShowAt(target);
+     }
+ 
+     private async Task DeleteItemsWithoutConfirmAsync(IReadOnlyList<WidgetItem> selectedItems)
+@@ -4943,7 +4944,7 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
+         PositionItemRenameTextBox(target, contentHost);
+         ItemRenameTextBox.Visibility = Visibility.Visible;
+         ItemRenameTextBox.IsHitTestVisible = true;
+-        ElevateForInteraction();
++        BeginInteractionLayer("file-item-rename-opened");
+         FocusTextInputEditor(ItemRenameTextBox, selectAll: true);
+         await Task.CompletedTask;
+     }
+@@ -5160,13 +5161,13 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
+             ReleaseInteractionLayer("file-delete-widget-closed");
+         };
+ 
+-        _isDeleteWidgetFlyoutOpen = true;
+-        DispatcherQueue.TryEnqueue(() =>
+-        {
+-            ElevateForInteraction();
+-            if (position is Windows.Foundation.Point point)
+-            {
+-                flyout.ShowAt(target, point);
++        _isDeleteWidgetFlyoutOpen = true;
++        DispatcherQueue.TryEnqueue(() =>
++        {
++            BeginInteractionLayer("file-delete-widget-opened");
++            if (position is Windows.Foundation.Point point)
++            {
++                flyout.ShowAt(target, point);
+             }
+             else
+             {
+@@ -5325,11 +5326,11 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
+         {
+             return;
+         }
+-
+-        _isResizing = true;
+-        _resizeDirection = element.Tag as string ?? string.Empty;
+-        ElevateForInteraction();
+-        Win32Helper.GetCursorPos(out _initialCursorPt);
++
++        _isResizing = true;
++        _resizeDirection = element.Tag as string ?? string.Empty;
++        BeginInteractionLayer("file-resize-started");
++        Win32Helper.GetCursorPos(out _initialCursorPt);
+         _initialWindowPos = _appWindow.Position;
+         _initialWindowSize = _appWindow.Size;
+         element.CapturePointer(e.Pointer);
+@@ -5504,10 +5505,10 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
+             completion.TrySetResult();
+             ReleaseInteractionLayer("file-message-closed");
+         };
+-
+-        _isInlineFlyoutOpen = true;
+-        ElevateForInteraction();
+-        flyout.ShowAt(MoreButton);
++
++        _isInlineFlyoutOpen = true;
++        BeginInteractionLayer("file-message-opened");
++        flyout.ShowAt(MoreButton);
+         await completion.Task;
+     }
+ 
+@@ -5571,10 +5572,10 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
+ 
+     private void ShowFlyoutWithElevation(MenuFlyout flyout, FrameworkElement target, Windows.Foundation.Point? position = null)
+     {
+-        ElevateForInteraction();
++        BeginInteractionLayer("file-flyout-opened");
+         flyout.Closed += (_, _) => ReleaseInteractionLayer("file-flyout-closed");
+-
+-        if (position is Windows.Foundation.Point point)
++
++        if (position is Windows.Foundation.Point point)
+         {
+             flyout.ShowAt(target, point);
+         }
+@@ -5584,8 +5585,18 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
+         }
+     }
+ 
++    private void BeginInteractionLayer(string reason, bool elevate = true)
++    {
++        App.Current.WidgetManager?.BeginWidgetInteraction(reason);
++        if (elevate)
++        {
++            ElevateForInteraction();
++        }
++    }
++
+     private void ReleaseInteractionLayer(string reason)
+     {
++        App.Current.WidgetManager?.EndWidgetInteraction(reason);
+         if (App.Current.WidgetManager?.RequestRestoreRaisedWidgetsToDesktopLayer(reason) == true)
+         {
+             return;
+-- 
+2.54.0.windows.1
+

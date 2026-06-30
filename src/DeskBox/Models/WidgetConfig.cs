@@ -14,6 +14,9 @@ public class WidgetConfig
     /// <summary>User-facing display name.</summary>
     public string Name { get; set; } = "Deskbox";
 
+    /// <summary>Whether the title is the default (not user-customized). Default titles follow language changes.</summary>
+    public bool IsDefaultTitle { get; set; } = true;
+
     /// <summary>Screen X position in device-independent pixels.</summary>
     public double X { get; set; } = 100;
 

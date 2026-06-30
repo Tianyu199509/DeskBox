@@ -1,0 +1,648 @@
+﻿diff --git a/docs/architecture/widget_architecture_phase1_progress.md b/docs/architecture/widget_architecture_phase1_progress.md
+index 6644337..7b7dec7 100644
+--- a/docs/architecture/widget_architecture_phase1_progress.md
++++ b/docs/architecture/widget_architecture_phase1_progress.md
+@@ -530,3 +530,39 @@ H 线后建议先做“第一个真实功能格子前置设计”，不要直接
+ ### 下一步建议
+ 
+ 下一步可以做 `TodoWidgetViewModel` 与 ViewModel 单元测试，继续不接 UI、不开放入口。
++
++## 25. Todo ViewModel 第一小步
++
++已完成 Todo 行为层第一小步：
++
++- 新增 `TodoFilter`。
++- 新增 `TodoItemViewModel`。
++- 新增 `TodoWidgetViewModel`。
++- 新增 `TodoWidgetViewModelTests`。
++- 支持初始化加载。
++- 支持新增任务，新增任务默认在顶部。
++- 支持输入框新增并成功后清空输入。
++- 支持编辑任务文本，空文本编辑会被拒绝。
++- 支持完成/取消完成。
++- 支持删除单个任务。
++- 支持清理已完成任务。
++- 支持 `All` / `Active` / `Completed` 过滤。
++- 支持计数：总数、未完成数、已完成数。
++- 所有操作通过 `TodoWidgetStore` 持久化。
++- 暂未新增 `TodoWidgetContent`。
++- 未修改 `WidgetRegistry`。
++- 未修改 `WidgetContentFactory`。
++- 未开放 Todo 创建入口。
++- 未接入设置页、托盘菜单、右键菜单或新建格子流程。
++- 未改变托盘/F7/层级/拖拽/IME/排序/安装器逻辑。
++
++### Todo ViewModel 验证记录
++
++- `dotnet build .\DeskBox.sln -c Debug -p:Platform=x64 --no-restore`
++- `dotnet test .\DeskBox.sln -c Debug -p:Platform=x64 --no-build`
++
++当前测试数量：`153/153`。
++
++### 下一步建议
++
++下一步可以做 `TodoWidgetContent` UI 空接入，但仍不要开放 Todo 创建入口。先让 UI 控件可以绑定 ViewModel，再决定是否需要通用内容 host。
+diff --git a/src/DeskBox/ViewModels/TodoItemViewModel.cs b/src/DeskBox/ViewModels/TodoItemViewModel.cs
+new file mode 100644
+index 0000000..56e3fee
+--- /dev/null
++++ b/src/DeskBox/ViewModels/TodoItemViewModel.cs
+@@ -0,0 +1,74 @@
++using CommunityToolkit.Mvvm.ComponentModel;
++using DeskBox.Models;
++
++namespace DeskBox.ViewModels;
++
++public sealed partial class TodoItemViewModel : ObservableObject
++{
++    private readonly TodoItem _item;
++    private string _text;
++    private bool _isCompleted;
++
++    public TodoItemViewModel(TodoItem item)
++    {
++        _item = item;
++        _text = item.Text;
++        _isCompleted = item.IsCompleted;
++    }
++
++    public TodoItem Item => _item;
++
++    public string Id => _item.Id;
++
++    public int SortOrder
++    {
++        get => _item.SortOrder;
++        internal set
++        {
++            if (_item.SortOrder != value)
++            {
++                _item.SortOrder = value;
++                OnPropertyChanged();
++            }
++        }
++    }
++
++    public DateTimeOffset CreatedAt => _item.CreatedAt;
++
++    public DateTimeOffset UpdatedAt
++    {
++        get => _item.UpdatedAt;
++        internal set
++        {
++            if (_item.UpdatedAt != value)
++            {
++                _item.UpdatedAt = value;
++                OnPropertyChanged();
++            }
++        }
++    }
++
++    public string Text
++    {
++        get => _text;
++        internal set
++        {
++            if (SetProperty(ref _text, value))
++            {
++                _item.Text = value;
++            }
++        }
++    }
++
++    public bool IsCompleted
++    {
++        get => _isCompleted;
++        internal set
++        {
++            if (SetProperty(ref _isCompleted, value))
++            {
++                _item.IsCompleted = value;
++            }
++        }
++    }
++}
+diff --git a/src/DeskBox/ViewModels/TodoWidgetViewModel.cs b/src/DeskBox/ViewModels/TodoWidgetViewModel.cs
+new file mode 100644
+index 0000000..6742be9
+--- /dev/null
++++ b/src/DeskBox/ViewModels/TodoWidgetViewModel.cs
+@@ -0,0 +1,263 @@
++using System.Collections.ObjectModel;
++using CommunityToolkit.Mvvm.ComponentModel;
++using DeskBox.Models;
++using DeskBox.Services;
++
++namespace DeskBox.ViewModels;
++
++public enum TodoFilter
++{
++    All,
++    Active,
++    Completed
++}
++
++public sealed partial class TodoWidgetViewModel : ObservableObject
++{
++    private readonly TodoWidgetStore _store;
++    private TodoFilter _selectedFilter = TodoFilter.All;
++    private string _inputText = string.Empty;
++    private bool _isInitialized;
++
++    public TodoWidgetViewModel(TodoWidgetStore store)
++    {
++        _store = store;
++    }
++
++    public ObservableCollection<TodoItemViewModel> Items { get; } = [];
++
++    public ObservableCollection<TodoItemViewModel> VisibleItems { get; } = [];
++
++    public string InputText
++    {
++        get => _inputText;
++        set
++        {
++            if (SetProperty(ref _inputText, value))
++            {
++                OnPropertyChanged(nameof(CanAddInput));
++            }
++        }
++    }
++
++    public bool CanAddInput => !string.IsNullOrWhiteSpace(InputText);
++
++    public TodoFilter SelectedFilter
++    {
++        get => _selectedFilter;
++        set
++        {
++            if (SetProperty(ref _selectedFilter, value))
++            {
++                RefreshVisibleItems();
++                OnPropertyChanged(nameof(ActiveCount));
++                OnPropertyChanged(nameof(CompletedCount));
++            }
++        }
++    }
++
++    public int TotalCount => Items.Count;
++
++    public int ActiveCount => Items.Count(item => !item.IsCompleted);
++
++    public int CompletedCount => Items.Count(item => item.IsCompleted);
++
++    public bool HasCompletedItems => CompletedCount > 0;
++
++    public bool IsInitialized
++    {
++        get => _isInitialized;
++        private set => SetProperty(ref _isInitialized, value);
++    }
++
++    public async Task InitializeAsync()
++    {
++        var data = await _store.LoadAsync();
++
++        Items.Clear();
++        foreach (var item in data.Items.OrderBy(item => item.SortOrder).ThenByDescending(item => item.UpdatedAt))
++        {
++            Items.Add(new TodoItemViewModel(item));
++        }
++
++        NormalizeSortOrders();
++        RefreshVisibleItems();
++        RefreshCountProperties();
++        IsInitialized = true;
++    }
++
++    public async Task<TodoItemViewModel?> AddInputAsync()
++    {
++        var item = await AddItemAsync(InputText);
++        if (item is not null)
++        {
++            InputText = string.Empty;
++        }
++
++        return item;
++    }
++
++    public async Task<TodoItemViewModel?> AddItemAsync(string? text)
++    {
++        string normalizedText = NormalizeText(text);
++        if (string.IsNullOrWhiteSpace(normalizedText))
++        {
++            return null;
++        }
++
++        var now = DateTimeOffset.UtcNow;
++        var item = new TodoItem
++        {
++            Id = Guid.NewGuid().ToString("N"),
++            Text = normalizedText,
++            CreatedAt = now,
++            UpdatedAt = now,
++            SortOrder = 0
++        };
++        var viewModel = new TodoItemViewModel(item);
++
++        Items.Insert(0, viewModel);
++        NormalizeSortOrders();
++        RefreshVisibleItems();
++        RefreshCountProperties();
++        await SaveAsync();
++        return viewModel;
++    }
++
++    public async Task<bool> UpdateItemTextAsync(string itemId, string? text)
++    {
++        var item = FindItem(itemId);
++        if (item is null)
++        {
++            return false;
++        }
++
++        string normalizedText = NormalizeText(text);
++        if (string.IsNullOrWhiteSpace(normalizedText))
++        {
++            return false;
++        }
++
++        if (string.Equals(item.Text, normalizedText, StringComparison.Ordinal))
++        {
++            return true;
++        }
++
++        item.Text = normalizedText;
++        item.UpdatedAt = DateTimeOffset.UtcNow;
++        RefreshVisibleItems();
++        await SaveAsync();
++        return true;
++    }
++
++    public async Task<bool> SetCompletedAsync(string itemId, bool isCompleted)
++    {
++        var item = FindItem(itemId);
++        if (item is null)
++        {
++            return false;
++        }
++
++        if (item.IsCompleted == isCompleted)
++        {
++            return true;
++        }
++
++        item.IsCompleted = isCompleted;
++        item.UpdatedAt = DateTimeOffset.UtcNow;
++        RefreshVisibleItems();
++        RefreshCountProperties();
++        await SaveAsync();
++        return true;
++    }
++
++    public async Task<bool> DeleteItemAsync(string itemId)
++    {
++        var item = FindItem(itemId);
++        if (item is null)
++        {
++            return false;
++        }
++
++        Items.Remove(item);
++        NormalizeSortOrders();
++        RefreshVisibleItems();
++        RefreshCountProperties();
++        await SaveAsync();
++        return true;
++    }
++
++    public async Task<int> ClearCompletedAsync()
++    {
++        var completedItems = Items.Where(item => item.IsCompleted).ToList();
++        if (completedItems.Count == 0)
++        {
++            return 0;
++        }
++
++        foreach (var item in completedItems)
++        {
++            Items.Remove(item);
++        }
++
++        NormalizeSortOrders();
++        RefreshVisibleItems();
++        RefreshCountProperties();
++        await SaveAsync();
++        return completedItems.Count;
++    }
++
++    private TodoItemViewModel? FindItem(string itemId)
++    {
++        return Items.FirstOrDefault(item => string.Equals(item.Id, itemId, StringComparison.Ordinal));
++    }
++
++    private async Task SaveAsync()
++    {
++        NormalizeSortOrders();
++        await _store.SaveAsync(new TodoWidgetData
++        {
++            Items = Items.Select(item => item.Item).ToList()
++        });
++    }
++
++    private void RefreshVisibleItems()
++    {
++        VisibleItems.Clear();
++        foreach (var item in Items.Where(ShouldShowItem))
++        {
++            VisibleItems.Add(item);
++        }
++    }
++
++    private bool ShouldShowItem(TodoItemViewModel item)
++    {
++        return SelectedFilter switch
++        {
++            TodoFilter.Active => !item.IsCompleted,
++            TodoFilter.Completed => item.IsCompleted,
++            _ => true
++        };
++    }
++
++    private void NormalizeSortOrders()
++    {
++        for (int index = 0; index < Items.Count; index++)
++        {
++            Items[index].SortOrder = index;
++        }
++    }
++
++    private void RefreshCountProperties()
++    {
++        OnPropertyChanged(nameof(TotalCount));
++        OnPropertyChanged(nameof(ActiveCount));
++        OnPropertyChanged(nameof(CompletedCount));
++        OnPropertyChanged(nameof(HasCompletedItems));
++    }
++
++    private static string NormalizeText(string? text)
++    {
++        return text?.Trim() ?? string.Empty;
++    }
++}
+diff --git a/tests/DeskBox.Tests/TodoWidgetViewModelTests.cs b/tests/DeskBox.Tests/TodoWidgetViewModelTests.cs
+new file mode 100644
+index 0000000..644b03d
+--- /dev/null
++++ b/tests/DeskBox.Tests/TodoWidgetViewModelTests.cs
+@@ -0,0 +1,249 @@
++using DeskBox.Models;
++using DeskBox.Services;
++using DeskBox.ViewModels;
++
++namespace DeskBox.Tests;
++
++public sealed class TodoWidgetViewModelTests : IDisposable
++{
++    private readonly string _tempRoot;
++    private readonly string _widgetsDataRoot;
++
++    public TodoWidgetViewModelTests()
++    {
++        _tempRoot = Path.Combine(Path.GetTempPath(), "DeskBox.Tests", Guid.NewGuid().ToString("N"));
++        _widgetsDataRoot = Directory.CreateDirectory(Path.Combine(_tempRoot, "widgets")).FullName;
++    }
++
++    [Fact]
++    public async Task InitializeAsync_LoadsExistingItemsInSortOrder()
++    {
++        await CreateStore("todo-widget").SaveAsync(new TodoWidgetData
++        {
++            Items =
++            [
++                new TodoItem { Id = "second", Text = "second", SortOrder = 1 },
++                new TodoItem { Id = "first", Text = "first", SortOrder = 0, IsCompleted = true }
++            ]
++        });
++        var viewModel = CreateViewModel("todo-widget");
++
++        await viewModel.InitializeAsync();
++
++        Assert.True(viewModel.IsInitialized);
++        Assert.Collection(
++            viewModel.Items,
++            item =>
++            {
++                Assert.Equal("first", item.Id);
++                Assert.True(item.IsCompleted);
++            },
++            item => Assert.Equal("second", item.Id));
++        Assert.Equal(2, viewModel.TotalCount);
++        Assert.Equal(1, viewModel.ActiveCount);
++        Assert.Equal(1, viewModel.CompletedCount);
++    }
++
++    [Fact]
++    public async Task AddItemAsync_TrimsTextAddsNewestFirstAndPersists()
++    {
++        var viewModel = CreateViewModel("todo-widget");
++        await viewModel.InitializeAsync();
++
++        var first = await viewModel.AddItemAsync(" first ");
++        var second = await viewModel.AddItemAsync("second");
++
++        Assert.NotNull(first);
++        Assert.NotNull(second);
++        Assert.Collection(
++            viewModel.Items,
++            item =>
++            {
++                Assert.Equal(second.Id, item.Id);
++                Assert.Equal("second", item.Text);
++                Assert.Equal(0, item.SortOrder);
++            },
++            item =>
++            {
++                Assert.Equal(first.Id, item.Id);
++                Assert.Equal("first", item.Text);
++                Assert.Equal(1, item.SortOrder);
++            });
++
++        var reloaded = CreateViewModel("todo-widget");
++        await reloaded.InitializeAsync();
++        Assert.Collection(
++            reloaded.Items,
++            item => Assert.Equal(second.Id, item.Id),
++            item => Assert.Equal(first.Id, item.Id));
++    }
++
++    [Fact]
++    public async Task AddInputAsync_ClearsInputOnlyAfterAdding()
++    {
++        var viewModel = CreateViewModel("todo-widget");
++        await viewModel.InitializeAsync();
++
++        viewModel.InputText = "  task  ";
++        var added = await viewModel.AddInputAsync();
++
++        Assert.NotNull(added);
++        Assert.Equal(string.Empty, viewModel.InputText);
++        Assert.False(viewModel.CanAddInput);
++
++        viewModel.InputText = "   ";
++        var ignored = await viewModel.AddInputAsync();
++
++        Assert.Null(ignored);
++        Assert.Equal("   ", viewModel.InputText);
++    }
++
++    [Fact]
++    public async Task UpdateItemTextAsync_TrimsAndPersistsText()
++    {
++        var viewModel = CreateViewModel("todo-widget");
++        await viewModel.InitializeAsync();
++        var item = await viewModel.AddItemAsync("old");
++        Assert.NotNull(item);
++        var originalUpdatedAt = item.UpdatedAt;
++
++        bool updated = await viewModel.UpdateItemTextAsync(item.Id, " new ");
++
++        Assert.True(updated);
++        Assert.Equal("new", item.Text);
++        Assert.True(item.UpdatedAt >= originalUpdatedAt);
++
++        var reloaded = CreateViewModel("todo-widget");
++        await reloaded.InitializeAsync();
++        Assert.Equal("new", Assert.Single(reloaded.Items).Text);
++    }
++
++    [Fact]
++    public async Task UpdateItemTextAsync_RejectsEmptyTextAndMissingItem()
++    {
++        var viewModel = CreateViewModel("todo-widget");
++        await viewModel.InitializeAsync();
++        var item = await viewModel.AddItemAsync("keep");
++        Assert.NotNull(item);
++
++        Assert.False(await viewModel.UpdateItemTextAsync(item.Id, "   "));
++        Assert.False(await viewModel.UpdateItemTextAsync("missing", "new"));
++        Assert.Equal("keep", item.Text);
++    }
++
++    [Fact]
++    public async Task SetCompletedAsync_UpdatesCountsFilterAndPersistence()
++    {
++        var viewModel = CreateViewModel("todo-widget");
++        await viewModel.InitializeAsync();
++        var item = await viewModel.AddItemAsync("task");
++        Assert.NotNull(item);
++
++        bool completed = await viewModel.SetCompletedAsync(item.Id, true);
++
++        Assert.True(completed);
++        Assert.True(item.IsCompleted);
++        Assert.Equal(0, viewModel.ActiveCount);
++        Assert.Equal(1, viewModel.CompletedCount);
++        Assert.True(viewModel.HasCompletedItems);
++
++        viewModel.SelectedFilter = TodoFilter.Active;
++        Assert.Empty(viewModel.VisibleItems);
++        viewModel.SelectedFilter = TodoFilter.Completed;
++        Assert.Single(viewModel.VisibleItems);
++
++        var reloaded = CreateViewModel("todo-widget");
++        await reloaded.InitializeAsync();
++        Assert.True(Assert.Single(reloaded.Items).IsCompleted);
++    }
++
++    [Fact]
++    public async Task DeleteItemAsync_RemovesItemAndPersists()
++    {
++        var viewModel = CreateViewModel("todo-widget");
++        await viewModel.InitializeAsync();
++        var first = await viewModel.AddItemAsync("first");
++        var second = await viewModel.AddItemAsync("second");
++        Assert.NotNull(first);
++        Assert.NotNull(second);
++
++        bool deleted = await viewModel.DeleteItemAsync(first.Id);
++
++        Assert.True(deleted);
++        Assert.Single(viewModel.Items);
++        Assert.Equal(second.Id, viewModel.Items[0].Id);
++        Assert.Equal(0, viewModel.Items[0].SortOrder);
++        Assert.False(await viewModel.DeleteItemAsync("missing"));
++
++        var reloaded = CreateViewModel("todo-widget");
++        await reloaded.InitializeAsync();
++        Assert.Equal(second.Id, Assert.Single(reloaded.Items).Id);
++    }
++
++    [Fact]
++    public async Task ClearCompletedAsync_RemovesOnlyCompletedItems()
++    {
++        var viewModel = CreateViewModel("todo-widget");
++        await viewModel.InitializeAsync();
++        var active = await viewModel.AddItemAsync("active");
++        var completed = await viewModel.AddItemAsync("completed");
++        Assert.NotNull(active);
++        Assert.NotNull(completed);
++        await viewModel.SetCompletedAsync(completed.Id, true);
++
++        int removed = await viewModel.ClearCompletedAsync();
++
++        Assert.Equal(1, removed);
++        Assert.Single(viewModel.Items);
++        Assert.Equal(active.Id, viewModel.Items[0].Id);
++        Assert.False(viewModel.HasCompletedItems);
++        Assert.Equal(0, await viewModel.ClearCompletedAsync());
++    }
++
++    [Fact]
++    public async Task SelectedFilter_ControlsVisibleItems()
++    {
++        var viewModel = CreateViewModel("todo-widget");
++        await viewModel.InitializeAsync();
++        var active = await viewModel.AddItemAsync("active");
++        var completed = await viewModel.AddItemAsync("completed");
++        Assert.NotNull(active);
++        Assert.NotNull(completed);
++        await viewModel.SetCompletedAsync(completed.Id, true);
++
++        viewModel.SelectedFilter = TodoFilter.All;
++        Assert.Equal(2, viewModel.VisibleItems.Count);
++
++        viewModel.SelectedFilter = TodoFilter.Active;
++        Assert.Single(viewModel.VisibleItems);
++        Assert.Equal(active.Id, viewModel.VisibleItems[0].Id);
++
++        viewModel.SelectedFilter = TodoFilter.Completed;
++        Assert.Single(viewModel.VisibleItems);
++        Assert.Equal(completed.Id, viewModel.VisibleItems[0].Id);
++    }
++
++    public void Dispose()
++    {
++        try
++        {
++            if (Directory.Exists(_tempRoot))
++            {
++                Directory.Delete(_tempRoot, recursive: true);
++            }
++        }
++        catch
++        {
++        }
++    }
++
++    private TodoWidgetStore CreateStore(string widgetId)
++    {
++        return new TodoWidgetStore(_widgetsDataRoot, widgetId);
++    }
++
++    private TodoWidgetViewModel CreateViewModel(string widgetId)
++    {
++        return new TodoWidgetViewModel(CreateStore(widgetId));
++    }
++}

@@ -1,0 +1,121 @@
+﻿diff --git a/docs/architecture/widget_architecture_phase1_progress.md b/docs/architecture/widget_architecture_phase1_progress.md
+index 07edca1..a30673c 100644
+--- a/docs/architecture/widget_architecture_phase1_progress.md
++++ b/docs/architecture/widget_architecture_phase1_progress.md
+@@ -216,6 +216,17 @@
+ 
+ G.2 继续抽只读/纯计算逻辑，建议先统一窗口身份上下文：`WidgetId`、`WidgetKind`、`Name`、`WindowHandle`、`AnimationBounds`、日志显示名。暂不接管 AppWindow、DWM、topmost 或动画执行。
+ 
++## 12. G.2 施工记录
++
++已完成只读窗口身份上下文：
++
++- 新增 `WidgetWindowIdentity`。
++- `WidgetWindowDiagnostics.Identity` 暴露 `WidgetId`、`WidgetKind`、`Name`、`LogKind`、`ShortWidgetId`、`WindowHandle`、`AnimationBounds`。
++- 新增 `DisplayName` 和 `LogDisplayName`，为后续统一窗口日志、调试面板、诊断页面做准备。
++- 未修改 `IDesktopWidgetWindow`。
++- 未修改 `WidgetManager` 批量显隐流程。
++- 未接管 AppWindow、DWM、topmost、F7、托盘动画或拖拽逻辑。
++
+ ### 暂不建议直接做
+ 
+ - 不建议直接迁移文件格子内容区为 `FileWidgetContent`。
+@@ -223,7 +234,7 @@ G.2 继续抽只读/纯计算逻辑，建议先统一窗口身份上下文：`Wi
+ - 不建议让 `WidgetSessionManager` 接管层级恢复。
+ - 不建议引入天气/Todo 等新功能入口。
+ 
+-## 12. 后续施工护栏
++## 13. 后续施工护栏
+ 
+ 每次只动一个目标：
+ 
+diff --git a/src/DeskBox/Services/WidgetWindowDiagnostics.cs b/src/DeskBox/Services/WidgetWindowDiagnostics.cs
+index a3e0fa1..a984b6b 100644
+--- a/src/DeskBox/Services/WidgetWindowDiagnostics.cs
++++ b/src/DeskBox/Services/WidgetWindowDiagnostics.cs
+@@ -23,6 +23,15 @@ public sealed class WidgetWindowDiagnostics
+ 
+     public string ShortWidgetId => ShortId(_config.Id);
+ 
++    public WidgetWindowIdentity Identity => new(
++        WidgetId: _config.Id,
++        WidgetKind: _config.WidgetKind,
++        Name: _config.Name,
++        LogKind: LogKind,
++        ShortWidgetId: ShortWidgetId,
++        WindowHandle: _windowHandleProvider(),
++        AnimationBounds: AnimationBounds);
++
+     public Windows.Foundation.Rect AnimationBounds => new(
+         _config.X,
+         _config.Y,
+@@ -41,3 +50,17 @@ public sealed class WidgetWindowDiagnostics
+             : id.Length <= 8 ? id : id[..8];
+     }
+ }
++
++public sealed record WidgetWindowIdentity(
++    string WidgetId,
++    WidgetKind WidgetKind,
++    string Name,
++    string LogKind,
++    string ShortWidgetId,
++    IntPtr WindowHandle,
++    Windows.Foundation.Rect AnimationBounds)
++{
++    public string DisplayName => $"{Name}#{ShortWidgetId}";
++
++    public string LogDisplayName => $"{LogKind} {DisplayName}";
++}
+diff --git a/tests/DeskBox.Tests/WidgetWindowDiagnosticsTests.cs b/tests/DeskBox.Tests/WidgetWindowDiagnosticsTests.cs
+index 8c37066..61eaac9 100644
+--- a/tests/DeskBox.Tests/WidgetWindowDiagnosticsTests.cs
++++ b/tests/DeskBox.Tests/WidgetWindowDiagnosticsTests.cs
+@@ -33,7 +33,8 @@ public sealed class WidgetWindowDiagnosticsTests
+         var config = new WidgetConfig
+         {
+             Id = "abcdef123456",
+-            Name = "Documents"
++            Name = "Documents",
++            WidgetKind = WidgetKind.QuickCapture
+         };
+         var diagnostics = new WidgetWindowDiagnostics("Quick", config, () => new IntPtr(0xBEEF));
+ 
+@@ -42,6 +43,37 @@ public sealed class WidgetWindowDiagnosticsTests
+         Assert.Equal("[TrayWindow] Quick Documents#abcdef12 hwnd=0xBEEF PrepareHide gen=2", message);
+     }
+ 
++    [Fact]
++    public void Identity_ExposesReadOnlyWindowContext()
++    {
++        var config = new WidgetConfig
++        {
++            Id = "file-widget-123",
++            Name = "Work",
++            WidgetKind = WidgetKind.File,
++            X = 3,
++            Y = 4,
++            Width = 320,
++            Height = 180
++        };
++        var diagnostics = new WidgetWindowDiagnostics("File", config, () => new IntPtr(0xCAFE));
++
++        var identity = diagnostics.Identity;
++
++        Assert.Equal("file-widget-123", identity.WidgetId);
++        Assert.Equal(WidgetKind.File, identity.WidgetKind);
++        Assert.Equal("Work", identity.Name);
++        Assert.Equal("File", identity.LogKind);
++        Assert.Equal("file-wid", identity.ShortWidgetId);
++        Assert.Equal(new IntPtr(0xCAFE), identity.WindowHandle);
++        Assert.Equal("Work#file-wid", identity.DisplayName);
++        Assert.Equal("File Work#file-wid", identity.LogDisplayName);
++        Assert.Equal(3, identity.AnimationBounds.X);
++        Assert.Equal(4, identity.AnimationBounds.Y);
++        Assert.Equal(320, identity.AnimationBounds.Width);
++        Assert.Equal(180, identity.AnimationBounds.Height);
++    }
++
+     [Theory]
+     [InlineData("", "none")]
+     [InlineData("abc", "abc")]

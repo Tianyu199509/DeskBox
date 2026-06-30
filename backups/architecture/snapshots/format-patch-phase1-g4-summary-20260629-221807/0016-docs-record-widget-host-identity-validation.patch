@@ -1,0 +1,32 @@
+From f12ae7d02d4adf5b690a199752b979d68398810a Mon Sep 17 00:00:00 2001
+From: Simon <1047078635@qq.com>
+Date: Mon, 29 Jun 2026 21:41:47 +0800
+Subject: [PATCH 16/19] docs: record widget host identity validation
+
+---
+ docs/architecture/widget_architecture_phase1_progress.md | 9 +++++++++
+ 1 file changed, 9 insertions(+)
+
+diff --git a/docs/architecture/widget_architecture_phase1_progress.md b/docs/architecture/widget_architecture_phase1_progress.md
+index bde236d..2eb2196 100644
+--- a/docs/architecture/widget_architecture_phase1_progress.md
++++ b/docs/architecture/widget_architecture_phase1_progress.md
+@@ -238,6 +238,15 @@ G.2 继续抽只读/纯计算逻辑，建议先统一窗口身份上下文：`Wi
+ - 当前 `WidgetManager` 仍继续使用原有 `WindowHandle`、`Visible`、`AnimationBounds` 流程。
+ - 未改变批量显隐、topmost、F7、托盘动画、拖拽或 IME 行为。
+ 
++### G.3 验收记录
++
++用户已在 Debug 版手测通过：
++
++- 托盘/F7 行为正常。
++- 随记显示正常。
++- 文件格子显示正常。
++- 格子拖拽未发现异常。
++
+ ### G.2 验收记录
+ 
+ 用户已在 Debug 版手测通过：
+-- 
+2.54.0.windows.1
+

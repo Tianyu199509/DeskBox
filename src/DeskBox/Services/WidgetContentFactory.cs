@@ -11,6 +11,13 @@ namespace DeskBox.Services;
 /// </summary>
 public sealed class WidgetContentFactory
 {
+    private readonly LocalizationService _localizationService;
+
+    public WidgetContentFactory(LocalizationService localizationService)
+    {
+        _localizationService = localizationService;
+    }
+
     private static readonly IReadOnlyList<WidgetContentDescriptor> DescriptorList =
     [
         new(
@@ -106,7 +113,7 @@ public sealed class WidgetContentFactory
             throw new ArgumentException("Todo content requires a Todo widget config.", nameof(config));
         }
 
-        return new TodoWidgetContentAdapter(config, store ?? new TodoWidgetStore(config.Id));
+        return new TodoWidgetContentAdapter(config, store ?? new TodoWidgetStore(config.Id), _localizationService);
     }
 
     /// <summary>

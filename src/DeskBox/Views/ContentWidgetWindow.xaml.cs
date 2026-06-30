@@ -68,10 +68,18 @@ public sealed partial class ContentWidgetWindow : Window, IDesktopWidgetWindow
         _titleViewModel = new ContentWidgetTitleViewModel(_config);
         ContentWidgetShell.DataContext = _titleViewModel;
         ContentWidgetShell.TitleGlyph = descriptor.DefaultGlyph;
+        ContentWidgetShell.ShowHoverButtons = _settingsService.Settings.ShowHoverButtons;
 
         ConfigureWindow();
         SetupEventHandlers();
         _ = _contentHost.SetContentAsync(content);
+
+        App.Current.LocalizationService.LanguageChanged += OnLanguageChanged;
+    }
+
+    private void OnLanguageChanged()
+    {
+        _titleViewModel.RefreshDisplayName();
     }
 
     public IntPtr WindowHandle => _hWnd;
@@ -83,6 +91,11 @@ public sealed partial class ContentWidgetWindow : Window, IDesktopWidgetWindow
     public WidgetConfig Config => _config;
 
     private bool _isVisibleOnDesktop;
+    private bool _isAtDesktopLayer;
+    private bool _keepRaisedUntilDeactivate;
+    private bool _restoreDesktopLayerWhenIdle;
+    private DateTime _lastElevateForInteractionUtc = DateTime.MinValue;
+    private Microsoft.UI.Dispatching.DispatcherQueueTimer? _topMostSafetyTimer;
 
     public new bool Visible
     {
@@ -198,7 +211,7 @@ public sealed partial class ContentWidgetWindow : Window, IDesktopWidgetWindow
             return;
         }
 
-        PushToBottom();
+        RestoreDesktopLayer(force: true);
         _contentHost.OnDeactivated();
     }
 
@@ -284,6 +297,7 @@ public sealed partial class ContentWidgetWindow : Window, IDesktopWidgetWindow
         Closed += (_, _) =>
         {
             Visible = false;
+            App.Current.LocalizationService.LanguageChanged -= OnLanguageChanged;
             _settingsService.SettingsChanged -= OnSettingsChanged;
             _appWindow.Changed -= AppWindow_Changed;
             DisposeAcrylicController();
@@ -306,6 +320,13 @@ public sealed partial class ContentWidgetWindow : Window, IDesktopWidgetWindow
         if (args.WindowActivationState == WindowActivationState.Deactivated)
         {
             _contentHost.OnDeactivated();
+            if (Visible && !_isAtDesktopLayer &&
+                App.Current.WidgetManager is not { WidgetsRaisedFromTray: true } &&
+                (DateTime.UtcNow - _lastElevateForInteractionUtc).TotalMilliseconds > 300)
+            {
+                App.Log($"[ZOrder] Content Deactivated→Restore hwnd=0x{_hWnd.ToInt64():X}");
+                RestoreDesktopLayer(force: true);
+            }
             return;
         }
 
@@ -335,6 +356,7 @@ public sealed partial class ContentWidgetWindow : Window, IDesktopWidgetWindow
             return;
         }
 
+        ContentWidgetShell.ShowHoverButtons = _settingsService.Settings.ShowHoverButtons;
         ApplyAppearancePreview();
     }
 
@@ -355,15 +377,78 @@ public sealed partial class ContentWidgetWindow : Window, IDesktopWidgetWindow
 
     private void PushToBottom()
     {
+        _isAtDesktopLayer = true;
         Win32Helper.ClearWindowTopMost(_hWnd);
         Win32Helper.SetWindowToBottom(_hWnd);
         App.Log($"[ZOrder] Content PushToBottom hwnd=0x{_hWnd.ToInt64():X}");
     }
 
+    private void ClearTopMostOnly()
+    {
+        _isAtDesktopLayer = true;
+        Win32Helper.ClearWindowTopMost(_hWnd);
+        IntPtr foreground = Win32Helper.GetForegroundWindow();
+        if (foreground != IntPtr.Zero && foreground != _hWnd)
+        {
+            Win32Helper.BringWindowToFront(foreground);
+        }
+        App.Log($"[ZOrder] Content ClearTopMostOnly hwnd=0x{_hWnd.ToInt64():X} fg=0x{foreground.ToInt64():X}");
+    }
+
     private void HoldTemporaryTopMost()
     {
+        _isAtDesktopLayer = false;
+        _keepRaisedUntilDeactivate = true;
+        _restoreDesktopLayerWhenIdle = false;
         Win32Helper.SetWindowTopMost(_hWnd);
         App.Log($"[ZOrder] Content HoldTemporaryTopMost hwnd=0x{_hWnd.ToInt64():X}");
+        StartTopMostSafetyTimer();
+    }
+
+    private void ElevateForInteraction()
+    {
+        if (App.Current.WidgetManager is { WidgetsRaisedFromTray: true })
+        {
+            return;
+        }
+
+        _lastElevateForInteractionUtc = DateTime.UtcNow;
+        HoldTemporaryTopMost();
+        App.Current.WidgetManager?.BringAllVisibleWidgetsToFront(_hWnd);
+    }
+
+    private void RestoreDesktopLayer(bool force = false)
+    {
+        if (!force && !_restoreDesktopLayerWhenIdle && _keepRaisedUntilDeactivate)
+        {
+            return;
+        }
+
+        App.Log($"[ZOrder] Content RestoreDesktopLayer EXECUTING force={force}");
+        _topMostSafetyTimer?.Stop();
+        _topMostSafetyTimer = null;
+        _keepRaisedUntilDeactivate = false;
+        _restoreDesktopLayerWhenIdle = false;
+        ClearTopMostOnly();
+    }
+
+    private void StartTopMostSafetyTimer()
+    {
+        _topMostSafetyTimer?.Stop();
+        _topMostSafetyTimer = DispatcherQueue.CreateTimer();
+        _topMostSafetyTimer.IsRepeating = false;
+        _topMostSafetyTimer.Interval = TimeSpan.FromSeconds(2);
+        _topMostSafetyTimer.Tick += (_, _) =>
+        {
+            _topMostSafetyTimer.Stop();
+            _topMostSafetyTimer = null;
+            if (!_isAtDesktopLayer && App.Current.WidgetManager is not { WidgetsRaisedFromTray: true })
+            {
+                App.Log($"[ZOrder] Content safety timer: force restore hwnd=0x{_hWnd.ToInt64():X}");
+                RestoreDesktopLayer(force: true);
+            }
+        };
+        _topMostSafetyTimer.Start();
     }
 
     private void RestoreVisualState()
@@ -978,9 +1063,35 @@ public sealed partial class ContentWidgetWindow : Window, IDesktopWidgetWindow
 
         public WidgetConfig Config { get; }
 
-        public string DisplayName => string.IsNullOrWhiteSpace(Config.Name)
-            ? Config.WidgetKind.ToString()
-            : Config.Name;
+        public string DisplayName
+        {
+            get
+            {
+                if (Config.IsDefaultTitle)
+                {
+                    var localization = App.Current.LocalizationService;
+                    var key = Config.WidgetKind switch
+                    {
+                        WidgetKind.Todo => "Todo.Title",
+                        WidgetKind.Weather => "Weather.Title",
+                        WidgetKind.Tags => "Tags.Title",
+                        WidgetKind.Music => "Music.Title",
+                        WidgetKind.SystemMonitor => "SystemMonitor.Title",
+                        _ => ""
+                    };
+                    if (!string.IsNullOrEmpty(key))
+                    {
+                        var localized = localization.T(key);
+                        if (!string.IsNullOrEmpty(localized))
+                            return localized;
+                    }
+                }
+
+                return string.IsNullOrWhiteSpace(Config.Name)
+                    ? Config.WidgetKind.ToString()
+                    : Config.Name;
+            }
+        }
 
         public double TitleIconSize => Math.Clamp(Math.Round(SettingsService.DefaultIconSize * 0.72 * 0.56 * 0.54), 11, 18);
 

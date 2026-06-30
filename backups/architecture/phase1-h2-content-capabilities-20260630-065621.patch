@@ -1,0 +1,240 @@
+﻿diff --git a/docs/architecture/widget_architecture_phase1_progress.md b/docs/architecture/widget_architecture_phase1_progress.md
+index e1321ec..7c68493 100644
+--- a/docs/architecture/widget_architecture_phase1_progress.md
++++ b/docs/architecture/widget_architecture_phase1_progress.md
+@@ -349,3 +349,34 @@ G.2 继续抽只读/纯计算逻辑，建议先统一窗口身份上下文：`Wi
+ ### 下一步建议
+ 
+ 继续保持低风险路线。下一步可以做 `H.2`：补一层只读的内容能力查询 API，例如“该类型是否已有真实内容控件、是否只有占位内容、是否允许显示在创建入口”。这一步仍然不开放入口，先把未来功能格子的判断集中起来，避免后面天气/Todo/标签各自散落判断。
++
++## 19. H.2 内容能力查询收口
++
++已在内容层补充只读能力查询，用于后续创建入口和功能格子渐进开放：
++
++- 新增 `WidgetContentStage`，当前分为 `Implemented` 和 `Placeholder`。
++- `WidgetContentDescriptor` 增加 `ContentStage` 与 `CanShowInCreateEntry`。
++- `WidgetContentFactory` 增加：
++  - `GetDescriptors()`
++  - `GetCreateEntryDescriptors()`
++  - `HasImplementedContent(WidgetKind)`
++  - `IsPlaceholderOnly(WidgetKind)`
++  - `CanShowInCreateEntry(WidgetKind)`
++- 当前只有 `File` 内容允许显示在普通创建入口。
++- `QuickCapture` 是已实现内容，但仍不显示在普通创建入口，继续走现有随记开关/窗口流程。
++- `Weather`、`Todo`、`Tags`、`Music`、`SystemMonitor` 仍是 placeholder-only，不能显示在创建入口，也不能创建窗口。
++- 继续由 `WidgetRegistry` 决定窗口是否可创建，内容 descriptor 不接管窗口授权。
++- 未接入设置页、托盘菜单、右键菜单或新建格子流程。
++- 未改变 `WidgetManager` 创建流程。
++- 未改变托盘/F7/层级/拖拽/IME/排序/安装器逻辑。
++
++### H.2 验证记录
++
++- `dotnet build .\DeskBox.sln -c Debug -p:Platform=x64 --no-restore`
++- `dotnet test .\DeskBox.sln -c Debug -p:Platform=x64 --no-build`
++
++当前测试数量：`132/132`。
++
++### 下一步建议
++
++下一步可以做 `H.3`：把未来内容类型的“开发状态/展示状态”文案也纳入只读 descriptor，例如 `PreviewLabel` 或 `StatusText`，方便以后设置页、调试页、创建入口共用同一套状态说明。仍不建议现在开放真实入口。
+diff --git a/src/DeskBox/Services/WidgetContentDescriptor.cs b/src/DeskBox/Services/WidgetContentDescriptor.cs
+index dff8ab7..0286d03 100644
+--- a/src/DeskBox/Services/WidgetContentDescriptor.cs
++++ b/src/DeskBox/Services/WidgetContentDescriptor.cs
+@@ -2,6 +2,12 @@ using DeskBox.Models;
+ 
+ namespace DeskBox.Services;
+ 
++public enum WidgetContentStage
++{
++    Implemented,
++    Placeholder
++}
++
+ /// <summary>
+ /// Describes content-level metadata without deciding whether a widget kind can create a window.
+ /// </summary>
+@@ -9,4 +15,10 @@ public sealed record WidgetContentDescriptor(
+     WidgetKind WidgetKind,
+     string DefaultTitle,
+     string DefaultGlyph,
+-    bool HasPlaceholderContent);
++    WidgetContentStage ContentStage,
++    bool CanShowInCreateEntry)
++{
++    public bool HasImplementedContent => ContentStage == WidgetContentStage.Implemented;
++    public bool HasPlaceholderContent => ContentStage == WidgetContentStage.Placeholder;
++    public bool IsPlaceholderOnly => ContentStage == WidgetContentStage.Placeholder;
++}
+diff --git a/src/DeskBox/Services/WidgetContentFactory.cs b/src/DeskBox/Services/WidgetContentFactory.cs
+index e448ff4..03a8c34 100644
+--- a/src/DeskBox/Services/WidgetContentFactory.cs
++++ b/src/DeskBox/Services/WidgetContentFactory.cs
+@@ -11,17 +11,19 @@ namespace DeskBox.Services;
+ /// </summary>
+ public sealed class WidgetContentFactory
+ {
++    private static readonly IReadOnlyList<WidgetContentDescriptor> DescriptorList =
++    [
++        new(WidgetKind.File, "DeskBox", "\uE8A5", WidgetContentStage.Implemented, CanShowInCreateEntry: true),
++        new(WidgetKind.QuickCapture, "Quick Capture", "\uE70F", WidgetContentStage.Implemented, CanShowInCreateEntry: false),
++        new(WidgetKind.Weather, "Weather", "\uE706", WidgetContentStage.Placeholder, CanShowInCreateEntry: false),
++        new(WidgetKind.Todo, "Todo", "\uE9D5", WidgetContentStage.Placeholder, CanShowInCreateEntry: false),
++        new(WidgetKind.Tags, "Tags", "\uE8EC", WidgetContentStage.Placeholder, CanShowInCreateEntry: false),
++        new(WidgetKind.Music, "Music", "\uEC4F", WidgetContentStage.Placeholder, CanShowInCreateEntry: false),
++        new(WidgetKind.SystemMonitor, "System Monitor", "\uE9D9", WidgetContentStage.Placeholder, CanShowInCreateEntry: false)
++    ];
++
+     private static readonly IReadOnlyDictionary<WidgetKind, WidgetContentDescriptor> Descriptors =
+-        new Dictionary<WidgetKind, WidgetContentDescriptor>
+-        {
+-            [WidgetKind.File] = new(WidgetKind.File, "DeskBox", "\uE8A5", HasPlaceholderContent: false),
+-            [WidgetKind.QuickCapture] = new(WidgetKind.QuickCapture, "Quick Capture", "\uE70F", HasPlaceholderContent: false),
+-            [WidgetKind.Weather] = new(WidgetKind.Weather, "Weather", "\uE706", HasPlaceholderContent: true),
+-            [WidgetKind.Todo] = new(WidgetKind.Todo, "Todo", "\uE9D5", HasPlaceholderContent: true),
+-            [WidgetKind.Tags] = new(WidgetKind.Tags, "Tags", "\uE8EC", HasPlaceholderContent: true),
+-            [WidgetKind.Music] = new(WidgetKind.Music, "Music", "\uEC4F", HasPlaceholderContent: true),
+-            [WidgetKind.SystemMonitor] = new(WidgetKind.SystemMonitor, "System Monitor", "\uE9D9", HasPlaceholderContent: true)
+-        };
++        DescriptorList.ToDictionary(descriptor => descriptor.WidgetKind);
+ 
+     public IWidgetContent CreateExistingContent(WidgetConfig config, FrameworkElement view)
+     {
+@@ -39,6 +41,11 @@ public sealed class WidgetContentFactory
+         return new PlaceholderWidgetContent(config, descriptor);
+     }
+ 
++    public IReadOnlyList<WidgetContentDescriptor> GetDescriptors()
++    {
++        return DescriptorList;
++    }
++
+     public WidgetContentDescriptor GetDescriptor(WidgetKind widgetKind)
+     {
+         if (Descriptors.TryGetValue(widgetKind, out var descriptor))
+@@ -49,6 +56,31 @@ public sealed class WidgetContentFactory
+         throw new NotSupportedException($"Widget kind '{widgetKind}' does not have a content descriptor.");
+     }
+ 
++    public IReadOnlyList<WidgetContentDescriptor> GetCreateEntryDescriptors()
++    {
++        return DescriptorList
++            .Where(descriptor => descriptor.CanShowInCreateEntry)
++            .ToArray();
++    }
++
++    public bool HasImplementedContent(WidgetKind widgetKind)
++    {
++        return Descriptors.TryGetValue(widgetKind, out var descriptor) &&
++               descriptor.HasImplementedContent;
++    }
++
++    public bool IsPlaceholderOnly(WidgetKind widgetKind)
++    {
++        return Descriptors.TryGetValue(widgetKind, out var descriptor) &&
++               descriptor.IsPlaceholderOnly;
++    }
++
++    public bool CanShowInCreateEntry(WidgetKind widgetKind)
++    {
++        return Descriptors.TryGetValue(widgetKind, out var descriptor) &&
++               descriptor.CanShowInCreateEntry;
++    }
++
+     public bool CanCreatePlaceholderContent(WidgetKind widgetKind)
+     {
+         return Descriptors.TryGetValue(widgetKind, out var descriptor) &&
+diff --git a/tests/DeskBox.Tests/WidgetContentFactoryTests.cs b/tests/DeskBox.Tests/WidgetContentFactoryTests.cs
+index 1be7377..0cce4fd 100644
+--- a/tests/DeskBox.Tests/WidgetContentFactoryTests.cs
++++ b/tests/DeskBox.Tests/WidgetContentFactoryTests.cs
+@@ -6,14 +6,18 @@ namespace DeskBox.Tests;
+ public sealed class WidgetContentFactoryTests
+ {
+     [Theory]
+-    [InlineData(WidgetKind.File, "DeskBox", false)]
+-    [InlineData(WidgetKind.QuickCapture, "Quick Capture", false)]
+-    [InlineData(WidgetKind.Weather, "Weather", true)]
+-    [InlineData(WidgetKind.Todo, "Todo", true)]
+-    [InlineData(WidgetKind.Tags, "Tags", true)]
+-    [InlineData(WidgetKind.Music, "Music", true)]
+-    [InlineData(WidgetKind.SystemMonitor, "System Monitor", true)]
+-    public void GetDescriptor_ReturnsContentMetadata(WidgetKind widgetKind, string title, bool hasPlaceholderContent)
++    [InlineData(WidgetKind.File, "DeskBox", WidgetContentStage.Implemented, true)]
++    [InlineData(WidgetKind.QuickCapture, "Quick Capture", WidgetContentStage.Implemented, false)]
++    [InlineData(WidgetKind.Weather, "Weather", WidgetContentStage.Placeholder, false)]
++    [InlineData(WidgetKind.Todo, "Todo", WidgetContentStage.Placeholder, false)]
++    [InlineData(WidgetKind.Tags, "Tags", WidgetContentStage.Placeholder, false)]
++    [InlineData(WidgetKind.Music, "Music", WidgetContentStage.Placeholder, false)]
++    [InlineData(WidgetKind.SystemMonitor, "System Monitor", WidgetContentStage.Placeholder, false)]
++    public void GetDescriptor_ReturnsContentMetadata(
++        WidgetKind widgetKind,
++        string title,
++        WidgetContentStage stage,
++        bool canShowInCreateEntry)
+     {
+         var factory = new WidgetContentFactory();
+ 
+@@ -22,7 +26,61 @@ public sealed class WidgetContentFactoryTests
+         Assert.Equal(widgetKind, descriptor.WidgetKind);
+         Assert.Equal(title, descriptor.DefaultTitle);
+         Assert.False(string.IsNullOrWhiteSpace(descriptor.DefaultGlyph));
+-        Assert.Equal(hasPlaceholderContent, descriptor.HasPlaceholderContent);
++        Assert.Equal(stage, descriptor.ContentStage);
++        Assert.Equal(canShowInCreateEntry, descriptor.CanShowInCreateEntry);
++    }
++
++    [Fact]
++    public void GetDescriptors_ReturnsStableKnownContentKinds()
++    {
++        var factory = new WidgetContentFactory();
++
++        var descriptors = factory.GetDescriptors();
++
++        Assert.Equal(
++        [
++            WidgetKind.File,
++            WidgetKind.QuickCapture,
++            WidgetKind.Weather,
++            WidgetKind.Todo,
++            WidgetKind.Tags,
++            WidgetKind.Music,
++            WidgetKind.SystemMonitor
++        ], descriptors.Select(descriptor => descriptor.WidgetKind));
++    }
++
++    [Fact]
++    public void GetCreateEntryDescriptors_OnlyReturnsCurrentlyCreatableContentEntries()
++    {
++        var factory = new WidgetContentFactory();
++
++        var descriptors = factory.GetCreateEntryDescriptors();
++
++        var descriptor = Assert.Single(descriptors);
++        Assert.Equal(WidgetKind.File, descriptor.WidgetKind);
++        Assert.True(WidgetRegistry.Default.CanCreateWindow(descriptor.WidgetKind));
++    }
++
++    [Theory]
++    [InlineData(WidgetKind.File, true, false, true)]
++    [InlineData(WidgetKind.QuickCapture, true, false, false)]
++    [InlineData(WidgetKind.Weather, false, true, false)]
++    [InlineData(WidgetKind.Todo, false, true, false)]
++    [InlineData(WidgetKind.Tags, false, true, false)]
++    [InlineData(WidgetKind.Music, false, true, false)]
++    [InlineData(WidgetKind.SystemMonitor, false, true, false)]
++    [InlineData(WidgetKind.Productivity, false, false, false)]
++    public void ContentCapabilityQueries_ReturnExpectedReadOnlyState(
++        WidgetKind widgetKind,
++        bool hasImplementedContent,
++        bool isPlaceholderOnly,
++        bool canShowInCreateEntry)
++    {
++        var factory = new WidgetContentFactory();
++
++        Assert.Equal(hasImplementedContent, factory.HasImplementedContent(widgetKind));
++        Assert.Equal(isPlaceholderOnly, factory.IsPlaceholderOnly(widgetKind));
++        Assert.Equal(canShowInCreateEntry, factory.CanShowInCreateEntry(widgetKind));
+     }
+ 
+     [Fact]
