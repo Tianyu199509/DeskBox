@@ -17,9 +17,13 @@ using Microsoft.UI.Xaml.Documents;
 using Microsoft.UI.Xaml.Hosting;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
+using Microsoft.UI.Xaml.Media.Imaging;
 using Windows.System;
 using Windows.ApplicationModel.DataTransfer;
 using Windows.Storage;
+using Windows.Media.Ocr;
+using Windows.Graphics.Imaging;
+using Microsoft.UI.Xaml.Controls.Primitives;
 using WinRT;
 using WinRT.Interop;
 
@@ -27,27 +31,8 @@ namespace DeskBox.Views;
 
 public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWindow
 {
-    private readonly record struct WidgetAnimationProfile(
-        double ShowOffsetX,
-        double ShowOffsetY,
-        double HideOffsetX,
-        double HideOffsetY,
-        float ShowStartOpacity,
-        float HideEndOpacity,
-        float ShowStartScale,
-        float HideEndScale,
-        int DurationMs,
-        bool IsEnabled);
-
     private const int MinWidth = (int)SettingsService.MinWidgetWidth;
     private const int MinHeight = (int)SettingsService.MinWidgetHeight;
-    private const int WidgetShowAnimationMs = 240;
-    private const double MinWidgetSlideOffset = 1.0;
-    private const double OffscreenSlidePadding = 16.0;
-    private const float WidgetAnimationRestingOpacity = 1.0f;
-    private const float WidgetAnimationSoftOpacity = 0.0f;
-    private const float WidgetAnimationRestingScale = 1.0f;
-    private const float WidgetAnimationSoftScale = 0.985f;
     private const long MaxDroppedTextFileBytes = 1024 * 1024;
     private const long MaxDroppedImageFileBytes = QuickCaptureClipboardService.MaxClipboardImageBytes;
     private const double QuickCaptureDialogHorizontalMargin = 24.0;
@@ -55,6 +40,7 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
     private const double QuickCaptureDialogMaxWidth = 360.0;
     private const double QuickCaptureDialogMinButtonWidth = 76.0;
     private const double QuickCaptureDialogMaxButtonWidth = 112.0;
+    private const double DeleteConfirmFlyoutWidth = 232.0;
     private const int CopyToastMs = 900;
     private const int StatusToastDefaultMs = 1400;
     private const int StatusToastUndoMs = 4200;
@@ -78,72 +64,50 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
     private readonly SettingsService _settingsService;
     private readonly LocalizationService _localizationService;
     private readonly ThemeService? _themeService;
+    private readonly WidgetContentDescriptor _chromeDescriptor;
+    private readonly WidgetChromeModeResolver _chromeModeResolver;
     private readonly IntPtr _hWnd;
     private readonly AppWindow _appWindow;
     private readonly WidgetWindowDiagnostics _diagnostics;
+    private readonly WidgetTrayAnimationController _trayAnimation;
     private DesktopAcrylicController? _acrylicController;
     private SystemBackdropConfiguration? _backdropConfiguration;
     private ICompositionSupportsSystemBackdrop? _backdropTarget;
     private bool _isDragging;
     private bool _hasMovedTitleBarDrag;
+    private bool _focusRootAfterDragClick;
     private bool _isResizing;
     private string _resizeDirection = string.Empty;
     private Win32Helper.POINT _initialCursorPt;
     private Windows.Graphics.PointInt32 _initialWindowPos;
     private Windows.Graphics.SizeInt32 _initialWindowSize;
-    private Windows.Graphics.PointInt32? _trayAnimationTargetPosition;
-    private Microsoft.UI.Dispatching.DispatcherQueueTimer? _trayWindowAnimationTimer;
+    private FrameworkElement? _dragCaptureElement;
     private bool _isAtDesktopLayer;
     private bool _keepRaisedUntilDeactivate;
     private bool _restoreDesktopLayerWhenIdle;
     private bool _isHideAnimationRunning;
+    private bool _isClosing;
     private bool _isClearingData;
+    private bool _isCommittingTitleRename;
+    private bool _isCancellingTitleRename;
     private bool _isNativeBackdropSuppressedForTrayReveal;
-    private long _trayAnimationGeneration;
-    private double? _trayAnimationOffsetOverrideX;
-    private double? _trayAnimationOffsetOverrideY;
-    private bool _isApplyingTrayAnimationBounds;
     private QuickCaptureItemViewModel? _editingItem;
     private bool _isExpandingInput;
-    private Microsoft.UI.Composition.Visual? _cachedRootVisual;
     private long _backdropRefreshGeneration;
     private long _statusToastGeneration;
     private Microsoft.UI.Dispatching.DispatcherQueueTimer? _autoRestoreTimer;
     private Microsoft.UI.Dispatching.DispatcherQueueTimer? _topMostSafetyTimer;
     private DateTime _lastElevateForInteractionUtc = DateTime.MinValue;
     private QuickCaptureDeletedItemSnapshot? _pendingDeletedItemSnapshot;
-
-    private bool _hasTabBrushCache;
-    private bool _cachedTabBrushesAreDark;
-    private Windows.UI.Color _cachedTabBrushesAccentColor;
-    private SolidColorBrush? _tabSelectionBackgroundBrush;
-    private SolidColorBrush? _tabSelectionBorderBrush;
-    private SolidColorBrush? _tabTransparentBrush;
-    private SolidColorBrush? _tabNormalBackgroundBrush;
-    private SolidColorBrush? _tabNormalBorderBrush;
-    private SolidColorBrush? _tabNormalForegroundBrush;
-    private SolidColorBrush? _tabSelectedForegroundBrush;
-
-    private bool _hasItemBrushCache;
-    private bool _cachedItemBrushesAreDark;
-    private Windows.UI.Color _cachedItemBrushesAccentColor;
-    private SolidColorBrush? _itemBackgroundBrush;
-    private SolidColorBrush? _itemHoverBackgroundBrush;
-    private SolidColorBrush? _itemPressedBackgroundBrush;
-    private SolidColorBrush? _itemBorderBrush;
-    private SolidColorBrush? _itemHoverBorderBrush;
-    private SolidColorBrush? _itemPressedBorderBrush;
-    private SolidColorBrush? _itemForegroundBrush;
-    private SolidColorBrush? _itemHoverForegroundBrush;
-    private SolidColorBrush? _itemDisabledBackgroundBrush;
-    private SolidColorBrush? _itemDisabledBorderBrush;
-    private SolidColorBrush? _itemDisabledForegroundBrush;
+    private MenuFlyout? _pendingDeleteConfirmFlyout;
 
     public QuickCaptureWidgetViewModel ViewModel { get; }
 
     public IntPtr WindowHandle => _hWnd;
 
     public WidgetWindowIdentity Identity => _diagnostics.Identity;
+
+    public WidgetConfig Config => ViewModel.Config;
 
     public Windows.Foundation.Rect AnimationBounds => _diagnostics.AnimationBounds;
 
@@ -163,13 +127,23 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
         _settingsService = settingsService;
         _localizationService = localizationService;
         _themeService = App.Current.ThemeService;
+        _chromeDescriptor = new WidgetContentFactory(_localizationService).GetDescriptor(WidgetKind.QuickCapture);
+        _chromeModeResolver = new WidgetChromeModeResolver(settingsService);
         InitializeComponent();
         RootGrid.DataContext = ViewModel;
+        QuickCaptureShell.ShowHoverButtons = _settingsService.Settings.ShowHoverButtons;
 
         _hWnd = WindowNative.GetWindowHandle(this);
         var windowId = Win32Interop.GetWindowIdFromWindow(_hWnd);
         _appWindow = AppWindow.GetFromWindowId(windowId);
         _diagnostics = new WidgetWindowDiagnostics("Quick", ViewModel.Config, () => _hWnd);
+        _trayAnimation = new WidgetTrayAnimationController(
+            _appWindow,
+            RootGrid,
+            DispatcherQueue,
+            _hWnd,
+            () => _diagnostics.AnimationBounds,
+            LogTrayWindow);
 
         ConfigureWindow();
         SetupEventHandlers();
@@ -211,7 +185,7 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
     public void ShowPreparedAtDesktopLayer(bool persistVisibility = true)
     {
         LogTrayWindow("ShowPreparedAtDesktopLayer");
-        PrepareTrayRevealHiddenState();
+        _trayAnimation.PrepareHiddenState();
         Win32Helper.ShowWindow(_hWnd, Win32Helper.SW_SHOWNOACTIVATE);
         _appWindow.Show();
         Visible = true;
@@ -227,14 +201,13 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
 
     public void SetTrayAnimationOffsetOverride(double? offsetX, double? offsetY)
     {
-        _trayAnimationOffsetOverrideX = offsetX;
-        _trayAnimationOffsetOverrideY = offsetY;
+        _trayAnimation.SetOffsetOverride(offsetX, offsetY);
     }
 
     public void ShowPreparedRaisedFromTray(bool persistVisibility = true)
     {
         LogTrayWindow("ShowPreparedRaisedFromTray");
-        PrepareTrayRevealHiddenState();
+        _trayAnimation.PrepareHiddenState();
         _appWindow.Show();
         Win32Helper.ShowWindow(_hWnd, Win32Helper.SW_SHOWNOACTIVATE);
         HoldTemporaryTopMost();
@@ -293,14 +266,14 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
 
     public void PrepareTrayShowAnimation()
     {
-        _trayAnimationGeneration++;
-        StopTrayVisualAnimation();
+        _trayAnimation.NextGeneration();
+        _trayAnimation.Stop();
         _isHideAnimationRunning = false;
-        var profile = GetWidgetAnimationProfile();
+        var profile = GetTrayAnimationProfile();
         LogTrayWindow(
-            $"PrepareShow gen={_trayAnimationGeneration} effect={_settingsService.Settings.WidgetAnimationEffect} " +
+            $"PrepareShow gen={_trayAnimation.Generation} effect={_settingsService.Settings.WidgetAnimationEffect} " +
             $"speed={_settingsService.Settings.WidgetAnimationSpeed} enabled={profile.IsEnabled} durationMs={profile.DurationMs}");
-        PrepareTrayVisualState(profile.ShowOffsetX, profile.ShowOffsetY, profile.ShowStartOpacity, profile.ShowStartScale);
+        _trayAnimation.PrepareVisualState(profile.ShowOffsetX, profile.ShowOffsetY, profile.ShowStartOpacity, profile.ShowStartScale);
     }
 
     public void PlayTrayShowAnimation()
@@ -310,13 +283,13 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
 
     public void CompleteTrayShowWithoutAnimation()
     {
-        _trayAnimationGeneration++;
-        LogTrayWindow($"CompleteShowWithoutAnimation gen={_trayAnimationGeneration}");
-        StopTrayVisualAnimation();
+        _trayAnimation.NextGeneration();
+        LogTrayWindow($"CompleteShowWithoutAnimation gen={_trayAnimation.Generation}");
+        _trayAnimation.Stop();
         SetTrayAnimationOffsetOverride(null, null);
         RestoreNativeBackdropAfterTrayReveal();
-        RestoreTrayVisualState();
-        RestoreTrayWindowPosition();
+        _trayAnimation.RestoreVisualState();
+        _trayAnimation.RestoreWindowPosition();
     }
 
     public bool PrepareTrayHideAnimation(bool persistVisibility = true)
@@ -327,8 +300,8 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
             return false;
         }
 
-        _trayAnimationGeneration++;
-        StopTrayVisualAnimation();
+        _trayAnimation.NextGeneration();
+        _trayAnimation.Stop();
         RestoreNativeBackdropAfterTrayReveal();
         _isHideAnimationRunning = true;
         Visible = false;
@@ -338,8 +311,8 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
             _settingsService.SaveDebounced();
         }
 
-        LogTrayWindow($"PrepareHide gen={_trayAnimationGeneration}");
-        PrepareTrayVisualState(0, 0, WidgetAnimationRestingOpacity, WidgetAnimationRestingScale);
+        LogTrayWindow($"PrepareHide gen={_trayAnimation.Generation}");
+        _trayAnimation.PrepareVisualState(0, 0, WidgetTrayAnimationController.RestingOpacity, WidgetTrayAnimationController.RestingScale);
         return true;
     }
 
@@ -357,7 +330,7 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
     {
         PrepareTrayShowAnimation();
         ElevateForInteraction();
-        PrepareTrayRevealHiddenState();
+        _trayAnimation.PrepareHiddenState();
         Win32Helper.ShowWindow(_hWnd, Win32Helper.SW_SHOWNOACTIVATE);
         base.Activate();
         Visible = true;
@@ -397,11 +370,39 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
         PlayTrayHideAnimation(CompleteTrayHideAnimation);
     }
 
+    public void CloseWindow()
+    {
+        if (!DispatcherQueue.HasThreadAccess)
+        {
+            DispatcherQueue.TryEnqueue(CloseWindow);
+            return;
+        }
+
+        if (_isClosing)
+        {
+            return;
+        }
+
+        _isClosing = true;
+        Visible = false;
+        _autoRestoreTimer?.Stop();
+        _autoRestoreTimer = null;
+        _topMostSafetyTimer?.Stop();
+        _topMostSafetyTimer = null;
+        _trayAnimation.Stop();
+        Close();
+    }
+
     public void ApplyAppearancePreview()
     {
         if (!DispatcherQueue.HasThreadAccess)
         {
             DispatcherQueue.TryEnqueue(ApplyAppearancePreview);
+            return;
+        }
+
+        if (_isClosing)
+        {
             return;
         }
 
@@ -452,11 +453,23 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
 
         _appWindow.IsShownInSwitchers = false;
         ExtendsContentIntoTitleBar = false;
+        var config = ViewModel.Config;
+        var workArea = DisplayArea.GetFromRect(
+            new Windows.Graphics.RectInt32(
+                (int)Math.Round(config.X),
+                (int)Math.Round(config.Y),
+                (int)Math.Round(config.Width),
+                (int)Math.Round(config.Height)),
+            DisplayAreaFallback.Nearest).WorkArea;
+        var bounds = WidgetPositioningService.ResolveBounds(
+            config,
+            workArea,
+            WidgetPositioningService.GetAvailableWorkAreas());
         ApplyWindowBounds(
-            (int)ViewModel.Config.X,
-            (int)ViewModel.Config.Y,
-            (int)ViewModel.Config.Width,
-            (int)ViewModel.Config.Height,
+            bounds.X,
+            bounds.Y,
+            bounds.Width,
+            bounds.Height,
             persist: false);
 
         int borderNone = unchecked((int)0xFFFFFFFE);
@@ -472,18 +485,16 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
             ApplyBackdropPreference();
             Win32Helper.ApplyFullWindowFrame(_hWnd);
             QueueBackdropRefresh();
-            UpdateTabSelectionIndicator();
             RootGrid.Focus(FocusState.Programmatic);
             DispatcherQueue.TryEnqueue(() =>
             {
                 ApplyTabStyles();
-                UpdateTabSelectionIndicator();
+                ResetItemsViewTransitionState();
+                ViewModel.RefreshAfterViewReady();
             });
         };
         RootGrid.ActualThemeChanged += (_, _) =>
         {
-            _hasTabBrushCache = false;
-            _hasItemBrushCache = false;
             ApplyBackdropPreference();
         };
     }
@@ -514,6 +525,7 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
 
         Closed += (_, _) =>
         {
+            _isClosing = true;
             Visible = false;
             _settingsService.SettingsChanged -= OnSettingsChanged;
             if (_themeService is not null)
@@ -526,10 +538,12 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
             _appWindow.Changed -= AppWindow_Changed;
             _autoRestoreTimer?.Stop();
             _autoRestoreTimer = null;
+            _topMostSafetyTimer?.Stop();
+            _topMostSafetyTimer = null;
 
-            StopTrayVisualAnimation();
-            RestoreTrayVisualState();
-            RestoreTrayWindowPosition();
+            _trayAnimation.Stop();
+            _trayAnimation.RestoreVisualState();
+            _trayAnimation.RestoreWindowPosition();
             DisposeAcrylicController();
 
             foreach (var child in ResizeGrid.Children.OfType<FrameworkElement>())
@@ -578,7 +592,7 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
 
     private void AppWindow_Changed(AppWindow sender, AppWindowChangedEventArgs args)
     {
-        if (_isApplyingTrayAnimationBounds)
+        if (_trayAnimation.IsApplyingBounds)
         {
             return;
         }
@@ -593,6 +607,12 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
 
     private void ViewModel_PropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
     {
+        if (e.PropertyName == nameof(QuickCaptureWidgetViewModel.DisplayName))
+        {
+            ApplyTitleBarLayout();
+            return;
+        }
+
         if (e.PropertyName == nameof(QuickCaptureWidgetViewModel.WidgetOpacity))
         {
             ApplyBackdropPreference();
@@ -602,7 +622,6 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
         if (e.PropertyName == nameof(QuickCaptureWidgetViewModel.SelectedView))
         {
             ApplyTabStyles();
-            UpdateTabSelectionIndicator();
         }
 
         if (e.PropertyName is nameof(QuickCaptureWidgetViewModel.IconSize) or
@@ -621,8 +640,10 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
         }
 
         ApplyWindowCornerPreference();
+        QuickCaptureShell.ShowHoverButtons = _settingsService.Settings.ShowHoverButtons;
         ApplyBackdropPreference();
         QueueBackdropRefresh();
+        ApplyTitleBarLayout();
     }
 
     private void OnThemeAppearanceChanged()
@@ -633,8 +654,6 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
             return;
         }
 
-        _hasTabBrushCache = false;
-        _hasItemBrushCache = false;
         ApplyBackdropPreference();
         QueueBackdropRefresh();
     }
@@ -717,46 +736,15 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
         SelectView(QuickCaptureViewMode.Recent);
     }
 
-    private void RecordsTabButton_PointerEntered(object sender, PointerRoutedEventArgs e)
-    {
-        SwitchTabOnHover(QuickCaptureViewMode.Records);
-    }
-
-    private void PinnedTabButton_PointerEntered(object sender, PointerRoutedEventArgs e)
-    {
-        SwitchTabOnHover(QuickCaptureViewMode.Pinned);
-    }
-
-    private void RecentTabButton_PointerEntered(object sender, PointerRoutedEventArgs e)
-    {
-        SwitchTabOnHover(QuickCaptureViewMode.Recent);
-    }
-
-    private void TabButton_PointerExited(object sender, PointerRoutedEventArgs e)
-    {
-    }
-
     private void SelectView(QuickCaptureViewMode view)
     {
         if (ViewModel.SelectedView == view)
         {
             ApplyTabStyles();
-            UpdateTabSelectionIndicator();
             return;
         }
 
         ViewModel.SelectedView = view;
-    }
-
-    private void SwitchTabOnHover(QuickCaptureViewMode view)
-    {
-        if (ViewModel.SelectedView == view ||
-            ViewModel.IsSearchExpanded)
-        {
-            return;
-        }
-
-        SelectView(view);
     }
 
     private async void EnableRecentCaptureButton_Click(object sender, RoutedEventArgs e)
@@ -985,7 +973,7 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
         if (e.Key == Windows.System.VirtualKey.Delete)
         {
             e.Handled = true;
-            await DeleteItemWithUndoAsync(item);
+            ShowQuickCaptureDeleteConfirmFlyout(item, ItemsListView);
             return;
         }
 
@@ -1009,11 +997,6 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
         }
     }
 
-    private void TabHost_SizeChanged(object sender, SizeChangedEventArgs e)
-    {
-        UpdateTabSelectionIndicator();
-    }
-
     private void QuickCaptureItem_RightTapped(object sender, RightTappedRoutedEventArgs e)
     {
         if ((sender as FrameworkElement)?.DataContext is not QuickCaptureItemViewModel item)
@@ -1021,8 +1004,9 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
             return;
         }
 
-        var flyout = CreateItemFlyout(item);
-        flyout.ShowAt((FrameworkElement)sender, e.GetPosition((FrameworkElement)sender));
+        var anchor = (FrameworkElement)sender;
+        var flyout = CreateItemFlyout(item, anchor);
+        flyout.ShowAt(anchor, e.GetPosition(anchor));
     }
 
     private async void QuickCaptureItem_Tapped(object sender, TappedRoutedEventArgs e)
@@ -1048,6 +1032,47 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
         catch (Exception ex)
         {
             App.Log($"[QuickCapture] Failed to copy item {item.Id}: {ex}");
+            ShowStatusToast(_localizationService.T("QuickCapture.CopyFailed"));
+        }
+    }
+
+    private async Task CopyImageTextAsync(QuickCaptureItemViewModel item)
+    {
+        if (string.IsNullOrWhiteSpace(item.ImagePath) || !File.Exists(item.ImagePath))
+        {
+            ShowStatusToast(_localizationService.T("QuickCapture.CopyFailed"));
+            return;
+        }
+
+        try
+        {
+            var file = await StorageFile.GetFileFromPathAsync(item.ImagePath);
+            using var stream = await file.OpenAsync(FileAccessMode.Read);
+            var decoder = await BitmapDecoder.CreateAsync(stream);
+            var softwareBitmap = await decoder.GetSoftwareBitmapAsync();
+
+            var ocrEngine = OcrEngine.TryCreateFromUserProfileLanguages();
+            if (ocrEngine is null)
+            {
+                ShowStatusToast(_localizationService.T("QuickCapture.CopyFailed"));
+                return;
+            }
+
+            var ocrResult = await ocrEngine.RecognizeAsync(softwareBitmap);
+            if (string.IsNullOrWhiteSpace(ocrResult.Text))
+            {
+                ShowStatusToast(_localizationService.T("QuickCapture.CopyFailed"));
+                return;
+            }
+
+            var dataPackage = new DataPackage();
+            dataPackage.SetText(ocrResult.Text);
+            Clipboard.SetContent(dataPackage);
+            ShowStatusToast(_localizationService.T("QuickCapture.CopyText") + " ✓");
+        }
+        catch (Exception ex)
+        {
+            App.Log($"[QuickCapture] Failed to OCR image {item.Id}: {ex}");
             ShowStatusToast(_localizationService.T("QuickCapture.CopyFailed"));
         }
     }
@@ -1090,19 +1115,6 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
         }
 
         SetItemActionButtonsVisible(sender, false);
-        bool isDark = RootGrid.ActualTheme == ElementTheme.Dark;
-        var accentColor = App.Current.ThemeService?.GetEffectiveAccentColor() ?? AccentColorHelper.DefaultAccentColor;
-        if (!_hasItemBrushCache ||
-            _cachedItemBrushesAreDark != isDark ||
-            _cachedItemBrushesAccentColor != accentColor)
-        {
-            RecomputeItemBrushCache(isDark, accentColor);
-            _hasItemBrushCache = true;
-            _cachedItemBrushesAreDark = isDark;
-            _cachedItemBrushesAccentColor = accentColor;
-        }
-
-        ApplyItemActionButtonStyle(sender, (isDark, accentColor));
         ApplyItemSearchHighlight(sender, item);
 
         if (FindVisualChild<Button>(sender, "SaveRecentItemButton") is { } saveButton)
@@ -1142,6 +1154,44 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
             ToolTipService.SetToolTip(deleteButton, deleteText);
             AutomationProperties.SetName(deleteButton, deleteText);
         }
+
+        if (FindVisualChild<Image>(sender, "ImagePreview") is { } imagePreview)
+        {
+            _ = LoadImagePreviewAsync(imagePreview, item);
+        }
+    }
+
+    private async void ImagePreview_Loaded(object sender, RoutedEventArgs e)
+    {
+        if (sender is Image { DataContext: QuickCaptureItemViewModel item } image)
+        {
+            await LoadImagePreviewAsync(image, item);
+        }
+    }
+
+    private async Task LoadImagePreviewAsync(Image image, QuickCaptureItemViewModel item)
+    {
+        string itemId = item.Id;
+        image.Source = null;
+        if (item.Type != QuickCaptureItemType.Image ||
+            string.IsNullOrWhiteSpace(item.ImagePath))
+        {
+            return;
+        }
+
+        await Task.Yield();
+        if (!string.Equals((image.DataContext as QuickCaptureItemViewModel)?.Id, itemId, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        image.Source = item.ImagePreviewUri is { } uri
+            ? new BitmapImage
+            {
+                DecodePixelWidth = 180,
+                UriSource = uri
+            }
+            : null;
     }
 
     private static void ApplyItemSearchHighlight(DependencyObject itemRoot, QuickCaptureItemViewModel item)
@@ -1206,14 +1256,95 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
     private static void SetItemActionButtonsVisible(DependencyObject? itemRoot, bool isVisible)
     {
         if (itemRoot is null ||
-            FindVisualChild<Grid>(itemRoot, "ItemActionHost") is not { } actions)
+            FindVisualChild<Border>(itemRoot, "ItemActionHost") is not { } actions)
         {
             return;
         }
 
         actions.Opacity = isVisible ? 1 : 0;
         actions.IsHitTestVisible = isVisible;
+        ApplyActionButtonHostTheme(actions, itemRoot);
         ElementCompositionPreview.GetElementVisual(actions).StopAnimation("Offset");
+    }
+
+    private static void ApplyActionButtonHostTheme(Border actions, DependencyObject itemRoot)
+    {
+        bool isDark = (itemRoot as FrameworkElement)?.ActualTheme == ElementTheme.Dark;
+        var accentColor = App.Current.ThemeService?.GetEffectiveAccentColor() ?? AccentColorHelper.DefaultAccentColor;
+        actions.Background = new SolidColorBrush(WithAlpha(
+            BuildAccentSurfaceColor(
+                isDark,
+                accentColor,
+                isDark ? ColorHelper.FromArgb(0xFF, 0x1E, 0x23, 0x29) : ColorHelper.FromArgb(0xFF, 0xFF, 0xFF, 0xFF),
+                accentMix: isDark ? 0.18 : 0.08,
+                overlayMix: isDark ? 0.03 : 0.02),
+            0xFF));
+        actions.BorderBrush = new SolidColorBrush(WithAlpha(accentColor, isDark ? (byte)0x4A : (byte)0x30));
+        actions.BorderThickness = new Thickness(1);
+
+        foreach (var button in FindVisualChildren<Button>(actions))
+        {
+            ApplyActionButtonTheme(button, isDark, accentColor);
+        }
+    }
+
+    private static void ApplyActionButtonTheme(Button button, bool isDark, Windows.UI.Color accentColor)
+    {
+        var transparent = new SolidColorBrush(Colors.Transparent);
+        var hoverBackground = new SolidColorBrush(WithAlpha(accentColor, isDark ? (byte)0x24 : (byte)0x18));
+        var pressedBackground = new SolidColorBrush(WithAlpha(accentColor, isDark ? (byte)0x36 : (byte)0x24));
+        var foreground = new SolidColorBrush(WithAlpha(accentColor, isDark ? (byte)0xF2 : (byte)0xE2));
+
+        button.Background = transparent;
+        button.BorderBrush = transparent;
+        button.Foreground = foreground;
+        button.Resources["ButtonBackground"] = transparent;
+        button.Resources["ButtonBackgroundPointerOver"] = hoverBackground;
+        button.Resources["ButtonBackgroundPressed"] = pressedBackground;
+        button.Resources["ButtonBackgroundDisabled"] = transparent;
+        button.Resources["ButtonBorderBrush"] = transparent;
+        button.Resources["ButtonBorderBrushPointerOver"] = transparent;
+        button.Resources["ButtonBorderBrushPressed"] = transparent;
+        button.Resources["ButtonBorderBrushDisabled"] = transparent;
+        button.Resources["ButtonForeground"] = foreground;
+        button.Resources["ButtonForegroundPointerOver"] = foreground;
+        button.Resources["ButtonForegroundPressed"] = foreground;
+    }
+
+    private static void ApplyConfirmCommandButtonTheme(Button button, bool isDark, Windows.UI.Color accentColor, bool isPrimary)
+    {
+        var transparent = new SolidColorBrush(Colors.Transparent);
+        var background = new SolidColorBrush(WithAlpha(
+            BuildAccentSurfaceColor(
+                isDark,
+                accentColor,
+                isDark ? ColorHelper.FromArgb(0xFF, 0x24, 0x29, 0x30) : ColorHelper.FromArgb(0xFF, 0xFA, 0xFB, 0xFD),
+                accentMix: isPrimary ? (isDark ? 0.16 : 0.08) : (isDark ? 0.04 : 0.02),
+                overlayMix: isDark ? 0.02 : 0.01),
+            0xFF));
+        var hoverBackground = new SolidColorBrush(WithAlpha(accentColor, isDark ? (byte)0x24 : (byte)0x18));
+        var pressedBackground = new SolidColorBrush(WithAlpha(accentColor, isDark ? (byte)0x36 : (byte)0x24));
+        var border = new SolidColorBrush(WithAlpha(accentColor, isPrimary ? (isDark ? (byte)0x64 : (byte)0x42) : (byte)0x28));
+        var foreground = new SolidColorBrush(isPrimary
+            ? WithAlpha(accentColor, isDark ? (byte)0xF0 : (byte)0xE2)
+            : isDark
+                ? ColorHelper.FromArgb(0xE8, 0xF4, 0xF7, 0xFB)
+                : ColorHelper.FromArgb(0xE8, 0x1D, 0x1F, 0x23));
+
+        button.Background = background;
+        button.BorderBrush = border;
+        button.Foreground = foreground;
+        button.Resources["ButtonBackground"] = background;
+        button.Resources["ButtonBackgroundPointerOver"] = hoverBackground;
+        button.Resources["ButtonBackgroundPressed"] = pressedBackground;
+        button.Resources["ButtonBackgroundDisabled"] = transparent;
+        button.Resources["ButtonBorderBrush"] = border;
+        button.Resources["ButtonBorderBrushPointerOver"] = border;
+        button.Resources["ButtonBorderBrushPressed"] = border;
+        button.Resources["ButtonBorderBrushDisabled"] = transparent;
+        button.Resources["ButtonForeground"] = foreground;
+        button.Resources["ButtonForegroundPointerOver"] = foreground;
+        button.Resources["ButtonForegroundPressed"] = foreground;
     }
 
     private static void SetItemHoverState(DependencyObject? itemRoot, bool isHovered)
@@ -1316,11 +1447,12 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
         }
     }
 
-    private async void DeleteItemButton_Click(object sender, RoutedEventArgs e)
+    private void DeleteItemButton_Click(object sender, RoutedEventArgs e)
     {
-        if ((sender as FrameworkElement)?.Tag is QuickCaptureItemViewModel item)
+        if (sender is FrameworkElement element &&
+            element.Tag is QuickCaptureItemViewModel item)
         {
-            await DeleteItemWithUndoAsync(item);
+            ShowQuickCaptureDeleteConfirmFlyout(item, element);
         }
     }
 
@@ -1337,6 +1469,29 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
             _localizationService.T("QuickCapture.Deleted"),
             _localizationService.T("Common.Undo"),
             StatusToastUndoMs);
+    }
+
+    private void ShowQuickCaptureDeleteConfirmFlyout(QuickCaptureItemViewModel item, FrameworkElement anchor)
+    {
+        ShowConfirmMenu(
+            anchor,
+            _localizationService.T("QuickCapture.DeleteConfirm.Title"),
+            _localizationService.T("Common.Delete"),
+            async () => await DeleteItemWithUndoAsync(item));
+    }
+
+    private string GetDeleteConfirmPreviewText(QuickCaptureItemViewModel item)
+    {
+        string text = item.Type == QuickCaptureItemType.Image
+            ? _localizationService.T("QuickCapture.ImageItem")
+            : item.DisplayText;
+        text = string.Join(" ", text.Split(['\r', '\n', '\t'], StringSplitOptions.RemoveEmptyEntries)).Trim();
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            text = _localizationService.T("QuickCapture.Name");
+        }
+
+        return text.Length <= 34 ? text : $"{text[..34].Trim()}...";
     }
 
     private async Task<bool> TryPrepareQuickCaptureDragPackageAsync(DataPackage dataPackage, QuickCaptureItemViewModel item)
@@ -1392,7 +1547,8 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
 
     private void MoreButton_Click(object sender, RoutedEventArgs e)
     {
-        ShowFlyoutWithElevation(CreateMoreFlyout(), MoreButton);
+        var target = sender as FrameworkElement ?? MoreButton;
+        ShowFlyoutWithElevation(CreateMoreFlyout(), target);
     }
 
     private void TitleBarGrid_RightTapped(object sender, RightTappedRoutedEventArgs e)
@@ -1403,6 +1559,18 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
         }
 
         ShowFlyoutWithElevation(CreateMoreFlyout(), TitleBarGrid, e.GetPosition(TitleBarGrid));
+        e.Handled = true;
+    }
+
+    private void QuickCaptureShell_RightTapped(object sender, RightTappedRoutedEventArgs e)
+    {
+        if (QuickCaptureShell.ChromeMode is not (WidgetChromeMode.Overlay or WidgetChromeMode.Hidden) ||
+            !ShouldOpenTitleBarFlyout(e.OriginalSource))
+        {
+            return;
+        }
+
+        ShowFlyoutWithElevation(CreateMoreFlyout(), QuickCaptureShell, e.GetPosition(QuickCaptureShell));
         e.Handled = true;
     }
 
@@ -1421,38 +1589,61 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
             value => ViewModel.SetSizeLocked(value)));
         flyout.Items.Add(new MenuFlyoutSeparator());
 
-        var clearItem = new MenuFlyoutItem
+        flyout.Items.Add(WidgetChromeMenuBuilder.Create(
+            ViewModel.Config,
+            _chromeDescriptor,
+            _localizationService,
+            SetChromeModeOverride));
+        flyout.Items.Add(new MenuFlyoutSeparator());
+
+        var renameItem = new MenuFlyoutItem
         {
-            Text = ViewModel.IsRecentView
-                ? _localizationService.T("QuickCapture.ClearRecent")
-                : _localizationService.T("QuickCapture.ClearData"),
-            Icon = new FontIcon { Glyph = "\uE894" }
+            Text = _localizationService.T("Common.Rename"),
+            Icon = new FontIcon { Glyph = "\uE8AC" }
         };
-        clearItem.Click += async (_, _) =>
-        {
-            if (ViewModel.IsRecentView)
-            {
-                await ConfirmClearRecentAsync();
-            }
-            else
-            {
-                await ConfirmClearDataAsync();
-            }
-        };
-        flyout.Items.Add(clearItem);
+        renameItem.Click += (_, _) => DispatcherQueue.TryEnqueue(StartTitleRename);
+        flyout.Items.Add(renameItem);
 
         var settingsItem = new MenuFlyoutItem
         {
             Text = _localizationService.T("QuickCapture.OpenSettings"),
             Icon = new FontIcon { Glyph = "\uE713" }
         };
-        settingsItem.Click += (_, _) => App.Current.ShowSettings();
+        settingsItem.Click += (_, _) => App.Current.ShowSettings("QuickCaptureSettings");
         flyout.Items.Add(settingsItem);
+
+        flyout.Items.Add(new MenuFlyoutSeparator());
+
+        var clearItem = new MenuFlyoutItem
+        {
+            Text = _localizationService.T("QuickCapture.ClearData"),
+            Icon = new FontIcon
+            {
+                Glyph = "\uE894",
+                Foreground = new SolidColorBrush(Colors.Red)
+            }
+        };
+        clearItem.Click += (_, _) =>
+        {
+            ShowConfirmMenu(
+                MoreButton,
+                _localizationService.T("QuickCapture.ClearDataTitle"),
+                _localizationService.T("QuickCapture.ClearData"),
+                async () => await ClearDataAsync());
+        };
+        flyout.Items.Add(clearItem);
 
         return flyout;
     }
 
-    private MenuFlyout CreateItemFlyout(QuickCaptureItemViewModel item)
+    private void SetChromeModeOverride(WidgetChromeMode mode)
+    {
+        WidgetChromeModeNames.SetOverrideMode(ViewModel.Config, mode);
+        _settingsService.UpdateWidget(ViewModel.Config);
+        ApplyTitleBarLayout();
+    }
+
+    private MenuFlyout CreateItemFlyout(QuickCaptureItemViewModel item, FrameworkElement anchor)
     {
         var flyout = new MenuFlyout();
 
@@ -1466,6 +1657,20 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
             await CopyItemWithFeedbackAsync(item);
         };
         flyout.Items.Add(copyItem);
+
+        if (item.Type == QuickCaptureItemType.Image &&
+            !string.IsNullOrWhiteSpace(item.ImagePath) &&
+            File.Exists(item.ImagePath))
+        {
+            var copyTextItem = new MenuFlyoutItem
+            {
+                Text = _localizationService.T("QuickCapture.CopyText"),
+                Icon = new FontIcon { Glyph = "\uE8C8" }
+            };
+            copyTextItem.Click += async (_, _) => await CopyImageTextAsync(item);
+            flyout.Items.Add(copyTextItem);
+        }
+
         if (CreateSaveToLastFileWidgetItem(item) is { } saveToLastItem)
         {
             flyout.Items.Add(saveToLastItem);
@@ -1497,7 +1702,7 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
                 Text = _localizationService.T("Common.Delete"),
                 Icon = new FontIcon { Glyph = "\uE74D" }
             };
-            deleteRecentItem.Click += async (_, _) => await DeleteItemWithUndoAsync(item);
+            deleteRecentItem.Click += (_, _) => ShowQuickCaptureDeleteConfirmFlyout(item, anchor);
             flyout.Items.Add(deleteRecentItem);
             return flyout;
         }
@@ -1557,7 +1762,7 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
             Text = _localizationService.T("Common.Delete"),
             Icon = new FontIcon { Glyph = "\uE74D" }
         };
-        deleteItem.Click += async (_, _) => await DeleteItemWithUndoAsync(item);
+        deleteItem.Click += (_, _) => ShowQuickCaptureDeleteConfirmFlyout(item, anchor);
         flyout.Items.Add(deleteItem);
         return flyout;
     }
@@ -1750,6 +1955,24 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
         }
     }
 
+    private async Task ClearDataAsync()
+    {
+        if (_isClearingData)
+        {
+            return;
+        }
+
+        _isClearingData = true;
+        try
+        {
+            await ViewModel.ClearAsync();
+        }
+        finally
+        {
+            _isClearingData = false;
+        }
+    }
+
     private async Task ConfirmClearRecentAsync()
     {
         if (_isClearingData || RootGrid.XamlRoot is null)
@@ -1775,6 +1998,24 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
         ApplyQuickCaptureDialogSizing(dialog);
 
         if (await dialog.ShowAsync() != ContentDialogResult.Primary)
+        {
+            return;
+        }
+
+        _isClearingData = true;
+        try
+        {
+            await ViewModel.ClearRecentAsync();
+        }
+        finally
+        {
+            _isClearingData = false;
+        }
+    }
+
+    private async Task ClearRecentAsync()
+    {
+        if (_isClearingData)
         {
             return;
         }
@@ -1838,8 +2079,137 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
     {
         if (App.Current.WidgetManager is { } widgetManager)
         {
-            await widgetManager.SetQuickCaptureEnabledAsync(false, reveal: false);
+            await widgetManager.SetFeatureWidgetEnabledAsync(WidgetKind.QuickCapture, enabled: false, reveal: false);
         }
+    }
+
+    private void QuickCaptureShell_TitleDoubleTapped(object? sender, DoubleTappedRoutedEventArgs e)
+    {
+        e.Handled = true;
+        DispatcherQueue.TryEnqueue(StartTitleRename);
+    }
+
+    private void StartTitleRename()
+    {
+        if (_isDragging ||
+            _isResizing ||
+            QuickCaptureShell.TitleEditorContent is not null)
+        {
+            return;
+        }
+
+        _isCancellingTitleRename = false;
+        App.Current.WidgetManager?.BeginWidgetInteraction("quick-title-rename-opened");
+        var editor = CreateTitleRenameEditor();
+        QuickCaptureShell.TitleEditorContent = editor;
+        DispatcherQueue.TryEnqueue(() =>
+        {
+            editor.Focus(FocusState.Programmatic);
+            editor.SelectAll();
+        });
+    }
+
+    private TextBox CreateTitleRenameEditor()
+    {
+        double titleWidth = TitleText.ActualWidth > 0
+            ? TitleText.ActualWidth + 36
+            : (ViewModel.DisplayName.Length * 9.5) + 36;
+
+        var editor = new TextBox
+        {
+            Text = ViewModel.DisplayName,
+            PlaceholderText = _localizationService.T("Widget.TitlePlaceholder"),
+            Width = Math.Clamp(titleWidth, 120, 220),
+            MinWidth = 120,
+            MaxWidth = 220,
+            MinHeight = 28,
+            Padding = new Thickness(8, 2, 8, 2),
+            BorderThickness = new Thickness(1),
+            FontSize = Math.Max(TitleText.FontSize - 1, 11),
+            HorizontalAlignment = HorizontalAlignment.Left,
+            HorizontalContentAlignment = HorizontalAlignment.Left,
+            VerticalAlignment = VerticalAlignment.Center,
+            VerticalContentAlignment = VerticalAlignment.Center
+        };
+
+        editor.KeyDown += TitleRenameEditor_KeyDown;
+        editor.LostFocus += TitleRenameEditor_LostFocus;
+        return editor;
+    }
+
+    private async void TitleRenameEditor_LostFocus(object sender, RoutedEventArgs e)
+    {
+        if (_isCancellingTitleRename)
+        {
+            _isCancellingTitleRename = false;
+            return;
+        }
+
+        await CommitTitleRenameAsync();
+    }
+
+    private async void TitleRenameEditor_KeyDown(object sender, KeyRoutedEventArgs e)
+    {
+        if (e.Key == VirtualKey.Enter)
+        {
+            await CommitTitleRenameAsync();
+            e.Handled = true;
+        }
+        else if (e.Key == VirtualKey.Escape)
+        {
+            CancelTitleRename();
+            e.Handled = true;
+        }
+    }
+
+    private async Task CommitTitleRenameAsync()
+    {
+        if (_isCommittingTitleRename ||
+            QuickCaptureShell.TitleEditorContent is not TextBox editor)
+        {
+            return;
+        }
+
+        string newName = editor.Text.Trim();
+        _isCommittingTitleRename = true;
+        try
+        {
+            if (!string.IsNullOrEmpty(newName))
+            {
+                await ViewModel.RenameAsync(newName);
+            }
+
+            CompleteTitleRename("quick-title-rename-committed");
+        }
+        catch (Exception ex)
+        {
+            ShowStatusToast(ex.Message);
+            editor.Focus(FocusState.Programmatic);
+            editor.SelectAll();
+        }
+        finally
+        {
+            _isCommittingTitleRename = false;
+        }
+    }
+
+    private void CancelTitleRename()
+    {
+        _isCancellingTitleRename = true;
+        CompleteTitleRename("quick-title-rename-canceled");
+    }
+
+    private void CompleteTitleRename(string reason)
+    {
+        if (QuickCaptureShell.TitleEditorContent is TextBox editor)
+        {
+            editor.KeyDown -= TitleRenameEditor_KeyDown;
+            editor.LostFocus -= TitleRenameEditor_LostFocus;
+        }
+
+        QuickCaptureShell.TitleEditorContent = null;
+        App.Current.WidgetManager?.EndWidgetInteraction(reason);
+        ReleaseInteractionLayer(reason);
     }
 
     private void ShowFlyoutWithElevation(MenuFlyout flyout, FrameworkElement target, Windows.Foundation.Point? position = null)
@@ -2033,26 +2403,6 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
         {
             deferral.Complete();
         }
-    }
-
-    private void RootGrid_PointerEntered(object sender, PointerRoutedEventArgs e)
-    {
-        if (!_settingsService.Settings.ShowHoverButtons)
-        {
-            return;
-        }
-
-        RightActionButtons.Opacity = 1;
-    }
-
-    private void RootGrid_PointerExited(object sender, PointerRoutedEventArgs e)
-    {
-        if (_isDragging || _isResizing)
-        {
-            return;
-        }
-
-        RightActionButtons.Opacity = 0;
     }
 
     private void ShowCopyToast()
@@ -2285,12 +2635,42 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
 
     private void TitleBarGrid_PointerPressed(object sender, PointerRoutedEventArgs e)
     {
+        BeginWindowDrag(e, TitleBarGrid, focusWhenClicked: true);
+    }
+
+    private void TitleBarGrid_PointerMoved(object sender, PointerRoutedEventArgs e)
+    {
+        ContinueWindowDrag(e);
+    }
+
+    private void TitleBarGrid_PointerReleased(object sender, PointerRoutedEventArgs e)
+    {
+        EndWindowDrag(e);
+    }
+
+    private void DragHandle_PointerPressed(object sender, PointerRoutedEventArgs e)
+    {
+        BeginWindowDrag(e, QuickCaptureShell.DragHandleElement, focusWhenClicked: false);
+    }
+
+    private void DragHandle_PointerMoved(object sender, PointerRoutedEventArgs e)
+    {
+        ContinueWindowDrag(e);
+    }
+
+    private void DragHandle_PointerReleased(object sender, PointerRoutedEventArgs e)
+    {
+        EndWindowDrag(e);
+    }
+
+    private void BeginWindowDrag(PointerRoutedEventArgs e, FrameworkElement captureElement, bool focusWhenClicked)
+    {
         if (ViewModel.Config.IsPositionLocked)
         {
             return;
         }
 
-        var properties = e.GetCurrentPoint(TitleBarGrid).Properties;
+        var properties = e.GetCurrentPoint(captureElement).Properties;
         if (!properties.IsLeftButtonPressed)
         {
             return;
@@ -2298,15 +2678,17 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
 
         _isDragging = true;
         _hasMovedTitleBarDrag = false;
+        _focusRootAfterDragClick = focusWhenClicked;
         ElevateForInteraction();
         Win32Helper.GetCursorPos(out _initialCursorPt);
         _initialWindowPos = _appWindow.Position;
         _initialWindowSize = _appWindow.Size;
-        TitleBarGrid.CapturePointer(e.Pointer);
+        _dragCaptureElement = captureElement;
+        captureElement.CapturePointer(e.Pointer);
         e.Handled = true;
     }
 
-    private void TitleBarGrid_PointerMoved(object sender, PointerRoutedEventArgs e)
+    private void ContinueWindowDrag(PointerRoutedEventArgs e)
     {
         if (!_isDragging)
         {
@@ -2331,7 +2713,7 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
         e.Handled = true;
     }
 
-    private void TitleBarGrid_PointerReleased(object sender, PointerRoutedEventArgs e)
+    private void EndWindowDrag(PointerRoutedEventArgs e)
     {
         if (!_isDragging)
         {
@@ -2339,15 +2721,20 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
         }
 
         _isDragging = false;
-        TitleBarGrid.ReleasePointerCapture(e.Pointer);
+        bool hasMoved = _hasMovedTitleBarDrag;
+        _dragCaptureElement?.ReleasePointerCapture(e.Pointer);
+        _dragCaptureElement = null;
         var pos = _appWindow.Position;
         var size = _appWindow.Size;
+        CapturePositionAnchor(pos.X, pos.Y, size.Width, size.Height);
         ViewModel.UpdateBounds(pos.X, pos.Y, size.Width, size.Height, persist: true);
-        if (!_hasMovedTitleBarDrag)
+        if (!hasMoved && _focusRootAfterDragClick)
         {
             RootGrid.Focus(FocusState.Programmatic);
         }
 
+        _hasMovedTitleBarDrag = false;
+        _focusRootAfterDragClick = false;
         e.Handled = true;
     }
 
@@ -2427,6 +2814,7 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
         element.ReleasePointerCapture(e.Pointer);
         var pos = _appWindow.Position;
         var size = _appWindow.Size;
+        CapturePositionAnchor(pos.X, pos.Y, size.Width, size.Height);
         ViewModel.UpdateBounds(pos.X, pos.Y, size.Width, size.Height, persist: true);
         e.Handled = true;
     }
@@ -2602,6 +2990,51 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
         }
     }
 
+    private void ShowConfirmMenu(FrameworkElement anchor, string title, string actionText, Func<Task> confirmedAction)
+    {
+        _pendingDeleteConfirmFlyout?.Hide();
+
+        var flyout = new MenuFlyout
+        {
+            ShouldConstrainToRootBounds = false
+        };
+        flyout.Items.Add(new MenuFlyoutItem
+        {
+            Text = title,
+            Icon = new FontIcon { Glyph = "\uE783" },
+            IsEnabled = false
+        });
+        flyout.Items.Add(new MenuFlyoutSeparator());
+        var confirmItem = new MenuFlyoutItem
+        {
+            Text = actionText,
+            Icon = new FontIcon
+            {
+                Glyph = "\uE74D",
+                Foreground = new SolidColorBrush(Colors.Red)
+            }
+        };
+        confirmItem.Click += async (_, _) => await confirmedAction();
+        flyout.Items.Add(confirmItem);
+        flyout.Closed += (_, _) =>
+        {
+            if (ReferenceEquals(_pendingDeleteConfirmFlyout, flyout))
+            {
+                _pendingDeleteConfirmFlyout = null;
+            }
+        };
+
+        _pendingDeleteConfirmFlyout = flyout;
+        ShowFlyoutWithElevation(flyout, anchor);
+    }
+
+    private void CapturePositionAnchor(int x, int y, int width, int height)
+    {
+        var bounds = new Windows.Graphics.RectInt32(x, y, width, height);
+        var workArea = DisplayArea.GetFromRect(bounds, DisplayAreaFallback.Nearest).WorkArea;
+        WidgetPositioningService.CaptureAnchor(ViewModel.Config, bounds, workArea);
+    }
+
     private void ApplyWindowCornerPreference()
     {
         int cornerPreference = _settingsService.Settings.WidgetCornerPreference switch
@@ -2617,6 +3050,11 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
 
     private void ApplyBackdropPreference()
     {
+        if (_hWnd == IntPtr.Zero || _isClosing)
+        {
+            return;
+        }
+
         if (_isNativeBackdropSuppressedForTrayReveal)
         {
             ApplySurfaceStyle();
@@ -2639,20 +3077,19 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
             {
                 backdropType = Win32Helper.DWMSBT_NONE;
                 Win32Helper.DwmSetWindowAttribute(_hWnd, Win32Helper.DWMWA_SYSTEMBACKDROP_TYPE, ref backdropType, sizeof(int));
+                Win32Helper.DisableAccentPolicy(_hWnd);
             }
             else
             {
                 backdropType = Win32Helper.DWMSBT_TRANSIENTWINDOW;
                 Win32Helper.DwmSetWindowAttribute(_hWnd, Win32Helper.DWMWA_SYSTEMBACKDROP_TYPE, ref backdropType, sizeof(int));
-                SystemBackdrop ??= new DesktopAcrylicBackdrop();
+                DisposeAcrylicController();
+                Win32Helper.ApplyAccentBlur(_hWnd, tintColor, Math.Min(surfaceOpacity, 0.52), true);
             }
-
-            Win32Helper.DisableAccentPolicy(_hWnd);
         }
         catch (Exception ex)
         {
             App.Log($"QuickCapture ApplyBackdropPreference fallback: {ex}");
-            SystemBackdrop = null;
             DisposeAcrylicController();
             Win32Helper.ApplyAccentBlur(_hWnd, tintColor, Math.Min(surfaceOpacity, 0.52), true);
         }
@@ -2678,7 +3115,6 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
 
         if (_acrylicController is null || _acrylicController.IsClosed)
         {
-            SystemBackdrop = null;
             _acrylicController = new DesktopAcrylicController
             {
                 Kind = DesktopAcrylicKind.Thin
@@ -2773,139 +3209,58 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
         ApplySearchVisualStyle(isDark, accentColor);
         ApplyEditOverlayStyle(isDark, accentColor);
         ApplyTabStyles(isDark, accentColor);
-        ApplyItemActionButtonStyleToVisibleItems(isDark, accentColor);
     }
 
     private void ApplyTabStyles()
     {
-        bool isDark = RootGrid.ActualTheme == ElementTheme.Dark;
-        var accentColor = App.Current.ThemeService?.GetEffectiveAccentColor()
-            ?? AccentColorHelper.DefaultAccentColor;
-        ApplyTabStyles(isDark, accentColor);
+        ApplyTabStyles(RootGrid.ActualTheme == ElementTheme.Dark, App.Current.ThemeService?.GetEffectiveAccentColor()
+            ?? AccentColorHelper.DefaultAccentColor);
     }
 
     private void ApplyTabStyles(bool isDark, Windows.UI.Color accentColor)
     {
-        if (!_hasTabBrushCache ||
-            _cachedTabBrushesAreDark != isDark ||
-            _cachedTabBrushesAccentColor != accentColor)
+        ApplyTabButtonStyle(RecordsTabButton, ViewModel.IsRecordsView);
+        ApplyTabButtonStyle(PinnedTabButton, ViewModel.IsPinnedView);
+        ApplyTabButtonStyle(RecentTabButton, ViewModel.IsRecentView);
+    }
+
+    private void ApplyTabButtonStyle(Button button, bool isSelected)
+    {
+        var style = (Style)RootGrid.Resources[isSelected
+            ? "QuickCaptureTabSelectedButtonStyle"
+            : "QuickCaptureTabButtonStyle"];
+        if (!ReferenceEquals(button.Style, style))
         {
-            RecomputeTabBrushCache(isDark, accentColor);
-            _hasTabBrushCache = true;
-            _cachedTabBrushesAreDark = isDark;
-            _cachedTabBrushesAccentColor = accentColor;
+            button.Style = style;
         }
-
-        ReapplyCachedTabBrushes();
-    }
-
-    private void RecomputeTabBrushCache(bool isDark, Windows.UI.Color accentColor)
-    {
-        var indicatorBackground = WithAlpha(
-            BuildAccentSurfaceColor(
-                isDark,
-                accentColor,
-                isDark
-                    ? ColorHelper.FromArgb(0xFF, 0x34, 0x39, 0x42)
-                    : ColorHelper.FromArgb(0xFF, 0xEC, 0xF4, 0xFC),
-                accentMix: isDark ? 0.34 : 0.21,
-                overlayMix: isDark ? 0.08 : 0.05),
-            isDark ? (byte)0xC8 : (byte)0xD8);
-        var indicatorBorder = WithAlpha(accentColor, isDark ? (byte)0xE8 : (byte)0xD8);
-
-        _tabSelectionBackgroundBrush = new SolidColorBrush(indicatorBackground);
-        _tabSelectionBorderBrush = new SolidColorBrush(indicatorBorder);
-
-        var normalBackground = WithAlpha(
-            BuildAccentSurfaceColor(
-                isDark,
-                accentColor,
-                isDark
-                    ? ColorHelper.FromArgb(0xFF, 0x2A, 0x2D, 0x33)
-                    : ColorHelper.FromArgb(0xFF, 0xFB, 0xFB, 0xFC),
-                accentMix: isDark ? 0.12 : 0.08,
-                overlayMix: isDark ? 0.12 : 0.18),
-            isDark ? (byte)0x28 : (byte)0x30);
-        var normalBorder = isDark
-            ? ColorHelper.FromArgb(0x20, 0xFF, 0xFF, 0xFF)
-            : ColorHelper.FromArgb(0x14, 0x00, 0x00, 0x00);
-        var normalFg = isDark
-            ? ColorHelper.FromArgb(0xD8, 0xC0, 0xC3, 0xC8)
-            : ColorHelper.FromArgb(0xD0, 0x62, 0x65, 0x6A);
-        var selectedFg = isDark
-            ? Colors.White
-            : BlendColors(ColorHelper.FromArgb(0xFF, 0x1A, 0x1A, 0x1A), accentColor, 0.18);
-
-        _tabTransparentBrush = new SolidColorBrush(Colors.Transparent);
-        _tabNormalBackgroundBrush = new SolidColorBrush(normalBackground);
-        _tabNormalBorderBrush = new SolidColorBrush(normalBorder);
-        _tabNormalForegroundBrush = new SolidColorBrush(normalFg);
-        _tabSelectedForegroundBrush = new SolidColorBrush(selectedFg);
-    }
-
-    private void ReapplyCachedTabBrushes()
-    {
-        TabSelectionIndicator.Background = _tabSelectionBackgroundBrush!;
-        TabSelectionIndicator.BorderBrush = _tabSelectionBorderBrush!;
-
-        ApplyCachedTabButtonBrushes(RecordsTabButton, ViewModel.IsRecordsView);
-        ApplyCachedTabButtonBrushes(PinnedTabButton, ViewModel.IsPinnedView);
-        ApplyCachedTabButtonBrushes(RecentTabButton, ViewModel.IsRecentView);
-    }
-
-    private void ApplyCachedTabButtonBrushes(Button button, bool isSelected)
-    {
-        var bg = isSelected ? _tabTransparentBrush! : _tabNormalBackgroundBrush!;
-        var border = isSelected ? _tabTransparentBrush! : _tabNormalBorderBrush!;
-        var fg = isSelected ? _tabSelectedForegroundBrush! : _tabNormalForegroundBrush!;
-
-        button.Background = bg;
-        button.BorderBrush = border;
-        button.Foreground = fg;
-
-        button.Resources["ButtonBackground"] = bg;
-        button.Resources["ButtonBackgroundPointerOver"] = bg;
-        button.Resources["ButtonBackgroundPressed"] = bg;
-        button.Resources["ButtonBackgroundDisabled"] = bg;
-        button.Resources["ButtonBorderBrush"] = border;
-        button.Resources["ButtonBorderBrushPointerOver"] = border;
-        button.Resources["ButtonBorderBrushPressed"] = border;
-        button.Resources["ButtonBorderBrushDisabled"] = border;
-        button.Resources["ButtonForeground"] = fg;
-        button.Resources["ButtonForegroundPointerOver"] = fg;
-        button.Resources["ButtonForegroundPressed"] = fg;
-        button.Resources["ButtonForegroundDisabled"] = fg;
     }
 
     private void ApplyTitleBarLayout()
     {
-        double titleIconSize = ViewModel.TitleIconSize;
-        TitleIcon.FontSize = titleIconSize;
+        var chromeMode = _chromeModeResolver.Resolve(ViewModel.Config, _chromeDescriptor);
+        double titleTextSize = chromeMode == WidgetChromeMode.Compact
+            ? ViewModel.TextSize
+            : ViewModel.TitleTextSize;
+        var metrics = WidgetTitleBarMetricsCalculator.Create(
+            ViewModel.TitleIconSize,
+            titleTextSize,
+            includeInnerPadding: true,
+            chromeMode);
 
-        double titleTextSize = ViewModel.TitleTextSize;
-        TitleText.FontSize = titleTextSize;
+        QuickCaptureShell.ChromeMode = chromeMode;
+        QuickCaptureShell.SetTitleBarPadding(WidgetTitleBarMetricsCalculator.CreateOuterPadding(chromeMode));
+        TitleIcon.FontSize = metrics.TitleIconSize;
+        TitleText.FontSize = metrics.TitleTextSize;
 
-        double btnSize = Math.Clamp(titleIconSize + 14, 24, 34);
-        MoreButton.Width = btnSize;
-        MoreButton.Height = btnSize;
-        MoreButton.MinWidth = btnSize;
-        CloseButton.Width = btnSize;
-        CloseButton.Height = btnSize;
-        CloseButton.MinWidth = btnSize;
+        WidgetTitleBarMetricsCalculator.ApplyActionButton(MoreButton, metrics);
+        WidgetTitleBarMetricsCalculator.ApplyActionButton(CloseButton, metrics);
 
-        double btnIconSize = Math.Clamp(titleIconSize - 3, 10, 15);
-        MoreButtonIcon.FontSize = btnIconSize;
-        CloseButtonIcon.FontSize = btnIconSize;
+        WidgetTitleBarMetricsCalculator.ApplyActionIcon(MoreButtonIcon, metrics);
+        WidgetTitleBarMetricsCalculator.ApplyActionIcon(CloseButtonIcon, metrics);
 
-        double rowHeight = Math.Clamp(titleIconSize + 32, 40, 54);
-        var titleRowHeight = new GridLength(rowHeight);
-        RootGrid.RowDefinitions[0].Height = titleRowHeight;
-        QuickCaptureShell.SetTitleBarRowHeight(titleRowHeight);
-
-        double padH = Math.Clamp(Math.Round(titleIconSize * 0.9), 10, 16);
-        double padT = Math.Clamp(Math.Round(titleIconSize * 0.5), 4, 10);
-        double padB = Math.Clamp(Math.Round(titleIconSize * 0.35), 3, 8);
-        TitleBarGrid.Padding = new Thickness(padH, padT, padH - 2, padB);
+        RootGrid.RowDefinitions[0].Height = metrics.RowHeight;
+        QuickCaptureShell.SetTitleBarRowHeight(metrics.RowHeight);
+        TitleBarGrid.Padding = metrics.InnerTitlePadding;
     }
 
     private void ApplySearchVisualStyle(bool isDark, Windows.UI.Color accentColor)
@@ -2927,26 +3282,28 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
             isDark,
             accentColor,
             isDark
-                ? ColorHelper.FromArgb(0xFF, 0x1F, 0x23, 0x29)
-                : ColorHelper.FromArgb(0xFF, 0xFB, 0xFD, 0xFF),
-            accentMix: isDark ? 0.20 : 0.10,
-            overlayMix: isDark ? 0.06 : 0.02);
+                ? ColorHelper.FromArgb(0xFF, 0x1F, 0x24, 0x2A)
+                : ColorHelper.FromArgb(0xFF, 0xFB, 0xFC, 0xFD),
+            accentMix: isDark ? 0.06 : 0.03,
+            overlayMix: isDark ? 0.03 : 0.02);
         var inputBackground = BuildAccentSurfaceColor(
             isDark,
             accentColor,
             isDark
-                ? ColorHelper.FromArgb(0xFF, 0x16, 0x19, 0x1E)
+                ? ColorHelper.FromArgb(0xFF, 0x18, 0x1D, 0x22)
                 : ColorHelper.FromArgb(0xFF, 0xFF, 0xFF, 0xFF),
-            accentMix: isDark ? 0.10 : 0.04,
-            overlayMix: isDark ? 0.03 : 0.0);
+            accentMix: isDark ? 0.04 : 0.02,
+            overlayMix: isDark ? 0.02 : 0.0);
 
-        EditOverlay.Background = new SolidColorBrush(WithAlpha(overlayBackground, isDark ? (byte)0xFA : (byte)0xFE));
-        EditOverlay.BorderBrush = new SolidColorBrush(WithAlpha(accentColor, isDark ? (byte)0xB8 : (byte)0x92));
-        EditOverlay.BorderThickness = new Thickness(1.2);
+        EditOverlay.Background = new SolidColorBrush(WithAlpha(overlayBackground, 0xFF));
+        EditOverlay.BorderBrush = new SolidColorBrush(isDark
+            ? ColorHelper.FromArgb(0x52, 0xFF, 0xFF, 0xFF)
+            : ColorHelper.FromArgb(0x24, 0x00, 0x00, 0x00));
+        EditOverlay.BorderThickness = new Thickness(0.8);
         EditOverlay.Translation = new Vector3(0, 0, 16);
 
-        EditTextBox.Background = new SolidColorBrush(WithAlpha(inputBackground, isDark ? (byte)0xFF : (byte)0xFE));
-        EditTextBox.BorderBrush = new SolidColorBrush(WithAlpha(accentColor, isDark ? (byte)0x7E : (byte)0x66));
+        EditTextBox.Background = new SolidColorBrush(WithAlpha(inputBackground, 0xFF));
+        EditTextBox.BorderBrush = new SolidColorBrush(WithAlpha(accentColor, isDark ? (byte)0x52 : (byte)0x3A));
         EditTextBox.Foreground = GetBrushResourceOrFallback(
             "TextFillColorPrimaryBrush",
             isDark ? Colors.White : Colors.Black);
@@ -2955,180 +3312,76 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
             BuildAccentSurfaceColor(
                 isDark,
                 accentColor,
-                isDark ? ColorHelper.FromArgb(0xFF, 0x27, 0x2B, 0x32) : ColorHelper.FromArgb(0xFF, 0xF7, 0xFA, 0xFF),
-                accentMix: isDark ? 0.24 : 0.16,
-                overlayMix: isDark ? 0.04 : 0.02),
+                isDark ? ColorHelper.FromArgb(0xFF, 0x24, 0x29, 0x30) : ColorHelper.FromArgb(0xFF, 0xFA, 0xFB, 0xFD),
+                accentMix: isDark ? 0.08 : 0.04,
+                overlayMix: isDark ? 0.02 : 0.01),
             0xFF));
-        var buttonBorder = new SolidColorBrush(WithAlpha(accentColor, isDark ? (byte)0x92 : (byte)0x76));
+        var buttonBorder = new SolidColorBrush(WithAlpha(accentColor, isDark ? (byte)0x54 : (byte)0x38));
         EditCancelButton.Background = buttonBackground;
         EditCancelButton.BorderBrush = buttonBorder;
         EditSaveButton.Background = buttonBackground;
         EditSaveButton.BorderBrush = buttonBorder;
+        ApplyActionButtonTheme(EditCloseButton, isDark, accentColor);
     }
 
-    private void ApplyItemActionButtonStyleToVisibleItems(bool isDark, Windows.UI.Color accentColor)
+    private void PlayItemsViewTransition()
     {
-        if (!_hasItemBrushCache ||
-            _cachedItemBrushesAreDark != isDark ||
-            _cachedItemBrushesAccentColor != accentColor)
+        if (!RootGrid.IsLoaded)
         {
-            RecomputeItemBrushCache(isDark, accentColor);
-            _hasItemBrushCache = true;
-            _cachedItemBrushesAreDark = isDark;
-            _cachedItemBrushesAccentColor = accentColor;
+            ResetItemsViewTransitionState();
+            return;
         }
 
-        var stamp = (isDark, accentColor);
-        foreach (var item in ItemsListView.Items)
+        DispatcherQueue.TryEnqueue(() =>
         {
-            if (ItemsListView.ContainerFromItem(item) is DependencyObject container)
+            if (ItemsListView.Visibility == Visibility.Visible)
             {
-                ApplyItemActionButtonStyle(container, stamp);
+                ItemsListView.Opacity = 0;
+                StartSubtleOffsetAnimation(ItemsListView, 0, 0, 6, 0, 160);
+                StartOpacityAnimation(ItemsListView, 0, 1, 160);
             }
-        }
+
+            if (EmptyState.Visibility == Visibility.Visible)
+            {
+                EmptyState.Opacity = 0;
+                StartSubtleOffsetAnimation(EmptyState, 0, 0, 6, 0, 160);
+                StartOpacityAnimation(EmptyState, 0, 1, 160);
+            }
+        });
     }
 
-    private void ApplyItemActionButtonStyle(DependencyObject itemRoot, (bool isDark, Windows.UI.Color accentColor) stamp)
+    private void ResetItemsViewTransitionState()
     {
-        if (itemRoot is FrameworkElement fe &&
-            fe.Tag is (bool tagDark, Windows.UI.Color tagColor) &&
-            tagDark == stamp.isDark && tagColor == stamp.accentColor)
-        {
-            return;
-        }
-
-        if (FindVisualChild<StackPanel>(itemRoot, "ItemActionButtons") is not { } actions)
-        {
-            return;
-        }
-
-        foreach (var button in FindVisualChildren<Button>(actions))
-        {
-            ApplyButtonStateBrushes(
-                button,
-                _itemBackgroundBrush!,
-                _itemHoverBackgroundBrush!,
-                _itemPressedBackgroundBrush!,
-                _itemBorderBrush!,
-                _itemHoverBorderBrush!,
-                _itemPressedBorderBrush!,
-                _itemForegroundBrush!,
-                _itemHoverForegroundBrush!,
-                _itemHoverForegroundBrush!,
-                _itemDisabledBackgroundBrush!,
-                _itemDisabledBorderBrush!,
-                _itemDisabledForegroundBrush!);
-        }
-
-        if (itemRoot is FrameworkElement fe2)
-        {
-            fe2.Tag = stamp;
-        }
+        ResetTransitionState(ItemsListView);
+        ResetTransitionState(EmptyState);
     }
 
-    private void RecomputeItemBrushCache(bool isDark, Windows.UI.Color accentColor)
+    private static void ResetTransitionState(UIElement element)
     {
-        var background = BuildAccentSurfaceColor(
-            isDark,
-            accentColor,
-            isDark
-                ? ColorHelper.FromArgb(0xFF, 0x24, 0x27, 0x2D)
-                : ColorHelper.FromArgb(0xFF, 0xFB, 0xFD, 0xFF),
-            accentMix: isDark ? 0.30 : 0.18,
-            overlayMix: isDark ? 0.04 : 0.02);
-        var hoverBackground = BuildAccentSurfaceColor(
-            isDark,
-            accentColor,
-            isDark
-                ? ColorHelper.FromArgb(0xFF, 0x2B, 0x2F, 0x36)
-                : ColorHelper.FromArgb(0xFF, 0xF8, 0xFB, 0xFF),
-            accentMix: isDark ? 0.38 : 0.24,
-            overlayMix: isDark ? 0.04 : 0.02);
-        var normalForeground = isDark
-            ? ColorHelper.FromArgb(0xF0, 0xF4, 0xF8, 0xFF)
-            : BlendColors(ColorHelper.FromArgb(0xFF, 0x18, 0x1C, 0x22), accentColor, 0.12);
-        var accentForeground = ColorHelper.FromArgb(0xFF, accentColor.R, accentColor.G, accentColor.B);
+        element.Opacity = 1;
 
-        _itemBackgroundBrush = new SolidColorBrush(WithAlpha(background, isDark ? (byte)0xF4 : (byte)0xFC));
-        _itemHoverBackgroundBrush = new SolidColorBrush(WithAlpha(hoverBackground, 0xFF));
-        _itemPressedBackgroundBrush = new SolidColorBrush(WithAlpha(hoverBackground, 0xFF));
-        _itemBorderBrush = new SolidColorBrush(WithAlpha(accentColor, isDark ? (byte)0x72 : (byte)0x5C));
-        _itemHoverBorderBrush = new SolidColorBrush(WithAlpha(accentColor, isDark ? (byte)0xF0 : (byte)0xE4));
-        _itemPressedBorderBrush = new SolidColorBrush(WithAlpha(accentColor, 0xFF));
-        _itemForegroundBrush = new SolidColorBrush(normalForeground);
-        _itemHoverForegroundBrush = new SolidColorBrush(accentForeground);
-        _itemDisabledBackgroundBrush = new SolidColorBrush(WithAlpha(background, isDark ? (byte)0xC8 : (byte)0xD6));
-        _itemDisabledBorderBrush = new SolidColorBrush(WithAlpha(accentColor, isDark ? (byte)0x34 : (byte)0x28));
-        _itemDisabledForegroundBrush = new SolidColorBrush(isDark
-            ? ColorHelper.FromArgb(0x76, 0xF4, 0xF8, 0xFF)
-            : ColorHelper.FromArgb(0x76, 0x18, 0x1C, 0x22));
-    }
-
-    private static void ApplyButtonStateBrushes(
-        Button button,
-        Brush background,
-        Brush pointerBackground,
-        Brush pressedBackground,
-        Brush border,
-        Brush pointerBorder,
-        Brush pressedBorder,
-        Brush foreground,
-        Brush pointerForeground,
-        Brush pressedForeground,
-        Brush disabledBackground,
-        Brush disabledBorder,
-        Brush disabledForeground)
-    {
-        button.Background = background;
-        button.BorderBrush = border;
-        button.Foreground = foreground;
-
-        button.Resources["ButtonBackground"] = background;
-        button.Resources["ButtonBackgroundPointerOver"] = pointerBackground;
-        button.Resources["ButtonBackgroundPressed"] = pressedBackground;
-        button.Resources["ButtonBackgroundDisabled"] = disabledBackground;
-        button.Resources["ButtonBorderBrush"] = border;
-        button.Resources["ButtonBorderBrushPointerOver"] = pointerBorder;
-        button.Resources["ButtonBorderBrushPressed"] = pressedBorder;
-        button.Resources["ButtonBorderBrushDisabled"] = disabledBorder;
-        button.Resources["ButtonForeground"] = foreground;
-        button.Resources["ButtonForegroundPointerOver"] = pointerForeground;
-        button.Resources["ButtonForegroundPressed"] = pressedForeground;
-        button.Resources["ButtonForegroundDisabled"] = disabledForeground;
-    }
-
-    private void UpdateTabSelectionIndicator()
-    {
-        Button selectedButton = ViewModel.SelectedView switch
-        {
-            QuickCaptureViewMode.Pinned => PinnedTabButton,
-            QuickCaptureViewMode.Recent => RecentTabButton,
-            _ => RecordsTabButton
-        };
-
-        if (TabHost.Visibility != Visibility.Visible)
-        {
-            return;
-        }
-
-        if (selectedButton.ActualWidth <= 0 ||
-            selectedButton.ActualHeight <= 0 ||
-            TabHost.ActualWidth <= 0)
-        {
-            return;
-        }
-
-        var targetPoint = selectedButton
-            .TransformToVisual(TabHost)
-            .TransformPoint(new Windows.Foundation.Point(0, 0));
-        var targetOffset = new Vector3((float)targetPoint.X, (float)targetPoint.Y, 0);
-        var visual = ElementCompositionPreview.GetElementVisual(TabSelectionIndicator);
+        var visual = ElementCompositionPreview.GetElementVisual(element);
+        visual.StopAnimation("Opacity");
         visual.StopAnimation("Offset");
+        visual.Opacity = 1;
+        visual.Offset = Vector3.Zero;
+    }
 
-        TabSelectionIndicator.Width = selectedButton.ActualWidth;
-        TabSelectionIndicator.Height = selectedButton.ActualHeight;
-        TabSelectionIndicator.Opacity = 1;
-        visual.Offset = targetOffset;
+    private static void StartOpacityAnimation(UIElement element, double from, double to, int durationMs)
+    {
+        var visual = ElementCompositionPreview.GetElementVisual(element);
+        var compositor = visual.Compositor;
+        visual.StopAnimation("Opacity");
+
+        var easing = compositor.CreateCubicBezierEasingFunction(
+            new Vector2(0.16f, 1.0f),
+            new Vector2(0.3f, 1.0f));
+        var animation = compositor.CreateScalarKeyFrameAnimation();
+        animation.Duration = TimeSpan.FromMilliseconds(durationMs);
+        animation.InsertKeyFrame(0.0f, (float)from);
+        animation.InsertKeyFrame(1.0f, (float)to, easing);
+        visual.Opacity = (float)to;
+        visual.StartAnimation("Opacity", animation);
     }
 
     private static void StartSubtleOffsetAnimation(
@@ -3308,11 +3561,11 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
 
     private void PlayTrayRaiseAnimation()
     {
-        long generation = ++_trayAnimationGeneration;
-        StopTrayVisualAnimation();
+        long generation = _trayAnimation.NextGeneration();
+        _trayAnimation.Stop();
         _isHideAnimationRunning = false;
 
-        var profile = GetWidgetAnimationProfile();
+        var profile = GetTrayAnimationProfile();
         if (!profile.IsEnabled)
         {
             LogTrayWindow($"PlayShow skipped reason=animation-disabled gen={generation}");
@@ -3321,22 +3574,23 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
         }
 
         LogTrayWindow($"PlayShow gen={generation} durationMs={profile.DurationMs}");
-        AnimateTrayVisual(
+        _trayAnimation.Animate(
             profile.ShowOffsetX,
             profile.ShowOffsetY,
             0,
             0,
             profile.ShowStartOpacity,
-            WidgetAnimationRestingOpacity,
+            WidgetTrayAnimationController.RestingOpacity,
             profile.ShowStartScale,
-            WidgetAnimationRestingScale,
+            WidgetTrayAnimationController.RestingScale,
             profile.DurationMs,
             true,
             generation,
+            _settingsService.Settings.WidgetAnimationEasingIntensity,
             () =>
             {
-                RestoreTrayVisualState();
-                RestoreTrayWindowPosition();
+                _trayAnimation.RestoreVisualState();
+                _trayAnimation.RestoreWindowPosition();
             });
     }
 
@@ -3350,8 +3604,8 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
 
     private void PlayTrayHideAnimation(Action completed)
     {
-        long generation = _trayAnimationGeneration;
-        var profile = GetWidgetAnimationProfile();
+        long generation = _trayAnimation.Generation;
+        var profile = GetTrayAnimationProfile();
         if (!profile.IsEnabled)
         {
             LogTrayWindow($"PlayHide skipped reason=animation-disabled gen={generation}");
@@ -3360,18 +3614,19 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
         }
 
         LogTrayWindow($"PlayHide gen={generation} durationMs={profile.DurationMs}");
-        AnimateTrayVisual(
+        _trayAnimation.Animate(
             0,
             0,
             profile.HideOffsetX,
             profile.HideOffsetY,
-            WidgetAnimationRestingOpacity,
+            WidgetTrayAnimationController.RestingOpacity,
             profile.HideEndOpacity,
-            WidgetAnimationRestingScale,
+            WidgetTrayAnimationController.RestingScale,
             profile.HideEndScale,
             profile.DurationMs,
             false,
             generation,
+            _settingsService.Settings.WidgetAnimationEasingIntensity,
             () =>
             {
                 if (!Visible)
@@ -3379,107 +3634,6 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
                     completed();
                 }
             });
-    }
-
-    private void PrepareTrayVisualState(double offsetX, double offsetY, float opacity, float scale)
-    {
-        _trayAnimationTargetPosition = new Windows.Graphics.PointInt32(
-            (int)Math.Round(ViewModel.Config.X),
-            (int)Math.Round(ViewModel.Config.Y));
-        ApplyTrayWindowOffset(offsetX, offsetY);
-
-        RootGrid.Opacity = 1;
-        var visual = GetCachedRootVisual();
-        visual.StopAnimation("Offset");
-        visual.StopAnimation("Opacity");
-        visual.StopAnimation("Scale");
-        visual.CenterPoint = GetTrayVisualCenterPoint();
-        visual.Offset = Vector3.Zero;
-        visual.Opacity = WidgetAnimationRestingOpacity;
-        visual.Scale = new Vector3(scale, scale, 1.0f);
-        ApplyTrayWindowOpacity(opacity);
-    }
-
-    private void PrepareTrayRevealHiddenState()
-    {
-        RootGrid.Opacity = 1;
-        var visual = GetCachedRootVisual();
-        visual.StopAnimation("Offset");
-        visual.StopAnimation("Opacity");
-        visual.StopAnimation("Scale");
-        visual.Offset = Vector3.Zero;
-        visual.Opacity = WidgetAnimationRestingOpacity;
-        visual.Scale = new Vector3(WidgetAnimationRestingScale, WidgetAnimationRestingScale, 1.0f);
-        ApplyTrayWindowOpacity(0);
-    }
-
-    private void AnimateTrayVisual(
-        double fromOffsetX,
-        double fromOffsetY,
-        double toOffsetX,
-        double toOffsetY,
-        float fromOpacity,
-        float toOpacity,
-        float fromScale,
-        float toScale,
-        int durationMs,
-        bool isShowing,
-        long animationGeneration,
-        Action completed)
-    {
-        LogTrayWindow(
-            $"AnimateStart mode={(isShowing ? "show" : "hide")} gen={animationGeneration} durationMs={durationMs} " +
-            $"windowOffset=({fromOffsetX:F0},{fromOffsetY:F0})->({toOffsetX:F0},{toOffsetY:F0}) " +
-            $"windowOpacity={fromOpacity:F2}->{toOpacity:F2}");
-        StopTrayVisualAnimation();
-        PrepareTrayVisualState(fromOffsetX, fromOffsetY, fromOpacity, fromScale);
-
-        if (durationMs <= 1)
-        {
-            CompleteTrayWindowAnimation(toOffsetX, toOffsetY, toOpacity, toScale, isShowing, animationGeneration, completed);
-            return;
-        }
-
-        var stopwatch = Stopwatch.StartNew();
-        var timer = DispatcherQueue.CreateTimer();
-        timer.Interval = TimeSpan.FromMilliseconds(16);
-        _trayWindowAnimationTimer = timer;
-
-        timer.Tick += (_, _) =>
-        {
-            if (!ReferenceEquals(_trayWindowAnimationTimer, timer) ||
-                animationGeneration != _trayAnimationGeneration)
-            {
-                timer.Stop();
-                return;
-            }
-
-            double rawProgress = Math.Clamp(stopwatch.Elapsed.TotalMilliseconds / durationMs, 0.0, 1.0);
-            double easedProgress = EaseTrayWindowAnimation(rawProgress, isShowing);
-            double currentOffsetX = Lerp(fromOffsetX, toOffsetX, easedProgress);
-            double currentOffsetY = Lerp(fromOffsetY, toOffsetY, easedProgress);
-            float currentOpacity = (float)Lerp(fromOpacity, toOpacity, easedProgress);
-            float currentScale = (float)Lerp(fromScale, toScale, easedProgress);
-
-            ApplyTrayWindowOffset(currentOffsetX, currentOffsetY);
-            ApplyTrayWindowOpacity(currentOpacity);
-            ApplyTrayVisualScale(currentScale);
-
-            if (rawProgress < 1.0)
-            {
-                return;
-            }
-
-            timer.Stop();
-            if (ReferenceEquals(_trayWindowAnimationTimer, timer))
-            {
-                _trayWindowAnimationTimer = null;
-            }
-
-            CompleteTrayWindowAnimation(toOffsetX, toOffsetY, toOpacity, toScale, isShowing, animationGeneration, completed);
-        };
-
-        timer.Start();
     }
 
     private void CompleteTrayHideAnimation()
@@ -3491,192 +3645,14 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
         }
 
         _isHideAnimationRunning = false;
-        StopTrayVisualAnimation();
+        _trayAnimation.Stop();
         RestoreNativeBackdropAfterTrayReveal();
         Win32Helper.ClearWindowTopMost(_hWnd);
         Win32Helper.ShowWindow(_hWnd, Win32Helper.SW_HIDE);
         _appWindow.Hide();
-        RestoreTrayVisualState();
-        RestoreTrayWindowPosition();
+        _trayAnimation.RestoreVisualState();
+        _trayAnimation.RestoreWindowPosition();
         LogTrayWindow("CompleteHide");
-    }
-
-    private void ApplyTrayWindowOffset(double offsetX, double offsetY)
-    {
-        var target = _trayAnimationTargetPosition ?? new Windows.Graphics.PointInt32(
-            (int)Math.Round(ViewModel.Config.X),
-            (int)Math.Round(ViewModel.Config.Y));
-        var nextPosition = new Windows.Graphics.PointInt32(
-            target.X + (int)Math.Round(offsetX),
-            target.Y + (int)Math.Round(offsetY));
-
-        _isApplyingTrayAnimationBounds = true;
-        try
-        {
-            _appWindow.Move(nextPosition);
-        }
-        finally
-        {
-            _isApplyingTrayAnimationBounds = false;
-        }
-    }
-
-    private void RestoreTrayWindowPosition()
-    {
-        if (_trayAnimationTargetPosition is { } target)
-        {
-            _isApplyingTrayAnimationBounds = true;
-            try
-            {
-                _appWindow.Move(target);
-            }
-            finally
-            {
-                _isApplyingTrayAnimationBounds = false;
-            }
-        }
-
-        _trayAnimationTargetPosition = null;
-    }
-
-    private void StopTrayVisualAnimation()
-    {
-        if (_trayWindowAnimationTimer is { } timer)
-        {
-            timer.Stop();
-            _trayWindowAnimationTimer = null;
-        }
-
-        if (_cachedRootVisual is { } visual)
-        {
-            visual.StopAnimation("Offset");
-            visual.StopAnimation("Opacity");
-            visual.StopAnimation("Scale");
-        }
-    }
-
-    private void RestoreTrayVisualState()
-    {
-        RootGrid.Opacity = 1;
-        var visual = GetCachedRootVisual();
-        visual.StopAnimation("Offset");
-        visual.StopAnimation("Opacity");
-        visual.StopAnimation("Scale");
-        visual.CenterPoint = GetTrayVisualCenterPoint();
-        visual.Offset = Vector3.Zero;
-        visual.Opacity = WidgetAnimationRestingOpacity;
-        visual.Scale = new Vector3(WidgetAnimationRestingScale, WidgetAnimationRestingScale, 1.0f);
-        RestoreTrayWindowOpacity();
-    }
-
-    private void CompleteTrayWindowAnimation(
-        double finalOffsetX,
-        double finalOffsetY,
-        float finalOpacity,
-        float finalScale,
-        bool isShowing,
-        long animationGeneration,
-        Action completed)
-    {
-        if (animationGeneration != _trayAnimationGeneration)
-        {
-            return;
-        }
-
-        ApplyTrayWindowOffset(finalOffsetX, finalOffsetY);
-        ApplyTrayWindowOpacity(finalOpacity);
-        ApplyTrayVisualScale(finalScale);
-        SetTrayAnimationOffsetOverride(null, null);
-        LogTrayWindow($"AnimateCompleted mode={(isShowing ? "show" : "hide")} gen={animationGeneration}");
-        if (isShowing)
-        {
-            RestoreNativeBackdropAfterTrayReveal();
-            RestoreTrayVisualState();
-        }
-
-        completed();
-    }
-
-    private void ApplyTrayWindowOpacity(float opacity)
-    {
-        opacity = Math.Clamp(opacity, 0.0f, 1.0f);
-        var visual = GetCachedRootVisual();
-        visual.Opacity = opacity;
-    }
-
-    private void RestoreTrayWindowOpacity()
-    {
-        var visual = GetCachedRootVisual();
-        visual.Opacity = WidgetAnimationRestingOpacity;
-    }
-
-    private void ApplyTrayVisualScale(float scale)
-    {
-        scale = Math.Clamp(scale, 0.0f, 1.0f);
-        var visual = GetCachedRootVisual();
-        visual.CenterPoint = GetTrayVisualCenterPoint();
-        visual.Scale = new Vector3(scale, scale, 1.0f);
-    }
-
-    private static double Lerp(double from, double to, double progress)
-    {
-        return from + (to - from) * progress;
-    }
-
-    private double EaseTrayWindowAnimation(double progress, bool isShowing)
-    {
-        string intensity = _settingsService.Settings.WidgetAnimationEasingIntensity;
-        if (intensity == SettingsService.WidgetAnimationEasingNone)
-        {
-            return progress;
-        }
-
-        if (isShowing)
-        {
-            return intensity switch
-            {
-                SettingsService.WidgetAnimationEasingLight => CubicBezierEase(progress, 0.25, 0.9, 0.25, 1.0),
-                SettingsService.WidgetAnimationEasingStrong => CubicBezierEase(progress, 0.05, 1.1, 0.15, 1.0),
-                _ => CubicBezierEase(progress, 0.16, 1.0, 0.3, 1.0)
-            };
-        }
-
-        return intensity switch
-        {
-            SettingsService.WidgetAnimationEasingLight => CubicBezierEase(progress, 0.6, 0.1, 0.9, 0.3),
-            SettingsService.WidgetAnimationEasingStrong => CubicBezierEase(progress, 0.7, 0.0, 0.95, -0.1),
-            _ => CubicBezierEase(progress, 0.7, 0.0, 0.84, 0.0)
-        };
-    }
-
-    private static double CubicBezierEase(double t, double x1, double y1, double x2, double y2)
-    {
-        if (t <= 0.0) return 0.0;
-        if (t >= 1.0) return 1.0;
-
-        double cx = 3.0 * x1;
-        double bx = 3.0 * (x2 - x1) - cx;
-        double ax = 1.0 - cx - bx;
-        double cy = 3.0 * y1;
-        double by = 3.0 * (y2 - y1) - cy;
-        double ay = 1.0 - cy - by;
-
-        double tGuess = t;
-        for (int i = 0; i < 8; i++)
-        {
-            double x = ((ax * tGuess + bx) * tGuess + cx) * tGuess - t;
-            if (Math.Abs(x) < 1e-7) break;
-            double dx = (3.0 * ax * tGuess + 2.0 * bx) * tGuess + cx;
-            if (Math.Abs(dx) < 1e-10) break;
-            tGuess -= x / dx;
-        }
-
-        return ((ay * tGuess + by) * tGuess + cy) * tGuess;
-    }
-
-    private Microsoft.UI.Composition.Visual GetCachedRootVisual()
-    {
-        return _cachedRootVisual ??= ElementCompositionPreview.GetElementVisual(RootGrid);
     }
 
     private void SuppressNativeBackdropForTrayReveal()
@@ -3687,7 +3663,6 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
         }
 
         _isNativeBackdropSuppressedForTrayReveal = true;
-        SystemBackdrop = null;
         DisposeAcrylicController();
         Win32Helper.DisableAccentPolicy(_hWnd);
     }
@@ -3703,93 +3678,9 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
         ApplyBackdropPreference();
     }
 
-    private Vector3 GetTrayVisualCenterPoint()
+    private WidgetTrayAnimationProfile GetTrayAnimationProfile()
     {
-        return new Vector3(
-            (float)Math.Max(0, RootGrid.ActualWidth / 2),
-            (float)Math.Max(0, RootGrid.ActualHeight / 2),
-            0);
-    }
-
-    private WidgetAnimationProfile GetWidgetAnimationProfile()
-    {
-        string effect = _settingsService.Settings.WidgetAnimationEffect;
-        string direction = _settingsService.Settings.WidgetAnimationSlideDirection;
-        int durationMs = GetWidgetAnimationDurationMs(_settingsService.Settings.WidgetAnimationSpeed);
-        var slideOffsets = GetOffscreenSlideOffsets();
-        var (dirX, dirY) = GetDirectionalSlideOffset(direction, slideOffsets);
-
-        return effect switch
-        {
-            SettingsService.WidgetAnimationEffectNone => new WidgetAnimationProfile(0, 0, 0, 0, 1, 1, 1, 1, 1, false),
-            SettingsService.WidgetAnimationEffectFade => new WidgetAnimationProfile(0, 0, 0, 0, 0, 0, 1, 1, durationMs, true),
-            SettingsService.WidgetAnimationEffectSlideLeft => new WidgetAnimationProfile(-slideOffsets.Left, 0, -slideOffsets.Left, 0, 1, 1, 1, 1, durationMs, true),
-            SettingsService.WidgetAnimationEffectSlideUp => new WidgetAnimationProfile(0, -slideOffsets.Up, 0, -slideOffsets.Up, 1, 1, 1, 1, durationMs, true),
-            SettingsService.WidgetAnimationEffectSlideDown => new WidgetAnimationProfile(0, slideOffsets.Down, 0, slideOffsets.Down, 1, 1, 1, 1, durationMs, true),
-            SettingsService.WidgetAnimationEffectScaleFade => new WidgetAnimationProfile(0, 0, 0, 0, WidgetAnimationSoftOpacity, WidgetAnimationSoftOpacity, WidgetAnimationSoftScale, WidgetAnimationSoftScale, durationMs, true),
-            SettingsService.WidgetAnimationEffectSlideRight => new WidgetAnimationProfile(slideOffsets.Right, 0, slideOffsets.Right, 0, 1, 1, 1, 1, durationMs, true),
-            SettingsService.WidgetAnimationEffectZoom => new WidgetAnimationProfile(0, 0, 0, 0, 0, 0, 0.5f, 0.5f, durationMs, true),
-            SettingsService.WidgetAnimationEffectSlideUpFade => new WidgetAnimationProfile(0, -slideOffsets.Up, 0, -slideOffsets.Up, 0, 0, 1, 1, durationMs, true),
-            SettingsService.WidgetAnimationEffectSlideDownFade => new WidgetAnimationProfile(0, slideOffsets.Down, 0, slideOffsets.Down, 0, 0, 1, 1, durationMs, true),
-            SettingsService.WidgetAnimationEffectSlideLeftFade => new WidgetAnimationProfile(-slideOffsets.Left, 0, -slideOffsets.Left, 0, 0, 0, 1, 1, durationMs, true),
-            SettingsService.WidgetAnimationEffectSlideRightFade => new WidgetAnimationProfile(slideOffsets.Right, 0, slideOffsets.Right, 0, 0, 0, 1, 1, durationMs, true),
-            _ => new WidgetAnimationProfile(dirX, dirY, dirX, dirY, 1, 1, 1, 1, durationMs, true)
-        };
-    }
-
-    private (double X, double Y) GetDirectionalSlideOffset(string direction, (double Left, double Right, double Up, double Down) offsets)
-    {
-        double baseOffset = Math.Max(Math.Max(offsets.Left, offsets.Right), Math.Max(offsets.Up, offsets.Down));
-        if (baseOffset < 1) baseOffset = 200;
-
-        return direction switch
-        {
-            SettingsService.WidgetAnimationSlideDirectionLeft => (-baseOffset, 0),
-            SettingsService.WidgetAnimationSlideDirectionRight => (baseOffset, 0),
-            SettingsService.WidgetAnimationSlideDirectionUp => (0, -baseOffset),
-            SettingsService.WidgetAnimationSlideDirectionDown => (0, baseOffset),
-            _ => (offsets.Right, 0)
-        };
-    }
-
-    private (double Left, double Right, double Up, double Down) GetOffscreenSlideOffsets()
-    {
-        if (_trayAnimationOffsetOverrideX.HasValue ||
-            _trayAnimationOffsetOverrideY.HasValue)
-        {
-            double horizontal = Math.Abs(_trayAnimationOffsetOverrideX.GetValueOrDefault());
-            double vertical = Math.Abs(_trayAnimationOffsetOverrideY.GetValueOrDefault());
-            return (
-                horizontal > 0 ? horizontal : MinWidgetSlideOffset,
-                horizontal > 0 ? horizontal : MinWidgetSlideOffset,
-                vertical > 0 ? vertical : MinWidgetSlideOffset,
-                vertical > 0 ? vertical : MinWidgetSlideOffset);
-        }
-
-        var windowId = Win32Interop.GetWindowIdFromWindow(_hWnd);
-        var workArea = DisplayArea.GetFromWindowId(windowId, DisplayAreaFallback.Primary).WorkArea;
-        double x = ViewModel.Config.X;
-        double y = ViewModel.Config.Y;
-        double width = Math.Max(MinWidgetSlideOffset, ViewModel.Config.Width);
-        double height = Math.Max(MinWidgetSlideOffset, ViewModel.Config.Height);
-
-        double left = Math.Max(MinWidgetSlideOffset, (x + width) - workArea.X + OffscreenSlidePadding);
-        double right = Math.Max(MinWidgetSlideOffset, (workArea.X + workArea.Width) - x + OffscreenSlidePadding);
-        double up = Math.Max(MinWidgetSlideOffset, (y + height) - workArea.Y + OffscreenSlidePadding);
-        double down = Math.Max(MinWidgetSlideOffset, (workArea.Y + workArea.Height) - y + OffscreenSlidePadding);
-        return (left, right, up, down);
-    }
-
-    private static int GetWidgetAnimationDurationMs(string speed)
-    {
-        return speed switch
-        {
-            SettingsService.WidgetAnimationSpeedVeryFast => 120,
-            SettingsService.WidgetAnimationSpeedFast => 220,
-            SettingsService.WidgetAnimationSpeedRelaxed => 520,
-            SettingsService.WidgetAnimationSpeedSlow => 680,
-            _ => WidgetShowAnimationMs
-        };
+        return _trayAnimation.CreateProfile(WidgetAnimationSettings.From(_settingsService.Settings));
     }
 
     private void LogTrayWindow(string message)

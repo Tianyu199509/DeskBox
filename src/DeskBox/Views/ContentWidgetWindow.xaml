@@ -16,7 +16,12 @@
         <controls:WidgetShell
             x:Name="ContentWidgetShell"
             CloseRequested="CloseButton_Click"
+            DragHandlePointerMoved="DragHandle_PointerMoved"
+            DragHandlePointerPressed="DragHandle_PointerPressed"
+            DragHandlePointerReleased="DragHandle_PointerReleased"
             MoreRequested="MoreButton_Click"
+            OverlayTitle="{Binding DisplayName}"
+            TitleDoubleTapped="ContentWidgetShell_TitleDoubleTapped"
             TitlePointerMoved="TitleBarGrid_PointerMoved"
             TitlePointerPressed="TitleBarGrid_PointerPressed"
             TitlePointerReleased="TitleBarGrid_PointerReleased"

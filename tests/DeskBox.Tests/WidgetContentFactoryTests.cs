@@ -9,9 +9,9 @@ public sealed class WidgetContentFactoryTests
     [InlineData(WidgetKind.File, "DeskBox", WidgetContentStage.Implemented, true, WidgetContentAvailability.Available)]
     [InlineData(WidgetKind.QuickCapture, "Quick Capture", WidgetContentStage.Implemented, false, WidgetContentAvailability.Available)]
     [InlineData(WidgetKind.Weather, "Weather", WidgetContentStage.Placeholder, false, WidgetContentAvailability.Planned)]
-    [InlineData(WidgetKind.Todo, "Todo", WidgetContentStage.Implemented, true, WidgetContentAvailability.Available)]
+    [InlineData(WidgetKind.Todo, "Todo", WidgetContentStage.Implemented, false, WidgetContentAvailability.Available)]
     [InlineData(WidgetKind.Tags, "Tags", WidgetContentStage.Placeholder, false, WidgetContentAvailability.Planned)]
-    [InlineData(WidgetKind.Music, "Music", WidgetContentStage.Placeholder, false, WidgetContentAvailability.Planned)]
+    [InlineData(WidgetKind.Music, "Music", WidgetContentStage.Implemented, false, WidgetContentAvailability.Available)]
     [InlineData(WidgetKind.SystemMonitor, "System Monitor", WidgetContentStage.Placeholder, false, WidgetContentAvailability.Planned)]
     public void GetDescriptor_ReturnsContentMetadata(
         WidgetKind widgetKind,
@@ -20,7 +20,7 @@ public sealed class WidgetContentFactoryTests
         bool canShowInCreateEntry,
         WidgetContentAvailability availability)
     {
-        var factory = new WidgetContentFactory();
+        var factory = TestServices.CreateWidgetContentFactory();
 
         var descriptor = factory.GetDescriptor(widgetKind);
 
@@ -37,7 +37,7 @@ public sealed class WidgetContentFactoryTests
     [Fact]
     public void GetDescriptors_ReturnsStableKnownContentKinds()
     {
-        var factory = new WidgetContentFactory();
+        var factory = TestServices.CreateWidgetContentFactory();
 
         var descriptors = factory.GetDescriptors();
 
@@ -45,35 +45,79 @@ public sealed class WidgetContentFactoryTests
         [
             WidgetKind.File,
             WidgetKind.QuickCapture,
-            WidgetKind.Weather,
             WidgetKind.Todo,
-            WidgetKind.Tags,
             WidgetKind.Music,
+            WidgetKind.Weather,
+            WidgetKind.Tags,
             WidgetKind.SystemMonitor
         ], descriptors.Select(descriptor => descriptor.WidgetKind));
+    }
+
+    [Theory]
+    [InlineData(WidgetKind.File, WidgetChromeCategory.Interactive, WidgetChromeMode.Standard)]
+    [InlineData(WidgetKind.QuickCapture, WidgetChromeCategory.Interactive, WidgetChromeMode.Standard)]
+    [InlineData(WidgetKind.Todo, WidgetChromeCategory.Interactive, WidgetChromeMode.Standard)]
+    [InlineData(WidgetKind.Tags, WidgetChromeCategory.Interactive, WidgetChromeMode.Standard)]
+    [InlineData(WidgetKind.Music, WidgetChromeCategory.Display, WidgetChromeMode.Overlay)]
+    [InlineData(WidgetKind.Weather, WidgetChromeCategory.Display, WidgetChromeMode.Overlay)]
+    [InlineData(WidgetKind.SystemMonitor, WidgetChromeCategory.Display, WidgetChromeMode.Overlay)]
+    public void GetDescriptor_ReturnsChromeDefaults(
+        WidgetKind widgetKind,
+        WidgetChromeCategory expectedCategory,
+        WidgetChromeMode expectedDefaultMode)
+    {
+        var factory = TestServices.CreateWidgetContentFactory();
+
+        var descriptor = factory.GetDescriptor(widgetKind);
+
+        Assert.Equal(expectedCategory, descriptor.ChromeCategory);
+        Assert.Equal(expectedDefaultMode, descriptor.DefaultChromeMode);
+        Assert.True(descriptor.CanUseOverlayChrome);
+        Assert.True(descriptor.CanHideChrome);
     }
 
     [Fact]
     public void GetCreateEntryDescriptors_OnlyReturnsCurrentlyCreatableContentEntries()
     {
-        var factory = new WidgetContentFactory();
+        var factory = TestServices.CreateWidgetContentFactory();
 
         var descriptors = factory.GetCreateEntryDescriptors();
 
-        Assert.Equal([WidgetKind.File, WidgetKind.Todo], descriptors.Select(descriptor => descriptor.WidgetKind));
+        Assert.Equal([WidgetKind.File], descriptors.Select(descriptor => descriptor.WidgetKind));
         Assert.All(descriptors, descriptor => Assert.True(WidgetRegistry.Default.CanCreateWindow(descriptor.WidgetKind)));
         Assert.All(descriptors, descriptor => Assert.False(string.IsNullOrWhiteSpace(descriptor.CreateEntryTextKey)));
         Assert.Equal("Common.NewWidget", descriptors.Single(descriptor => descriptor.WidgetKind == WidgetKind.File).CreateEntryTextKey);
-        Assert.Equal("Todo.NewWidget", descriptors.Single(descriptor => descriptor.WidgetKind == WidgetKind.Todo).CreateEntryTextKey);
+    }
+
+    [Fact]
+    public void GetFeatureWidgetEntryDescriptors_ReturnsImplementedAndPlannedFeatureWidgets()
+    {
+        var factory = TestServices.CreateWidgetContentFactory();
+
+        var descriptors = factory.GetFeatureWidgetEntryDescriptors();
+
+        Assert.Equal(
+        [
+            WidgetKind.QuickCapture,
+            WidgetKind.Todo,
+            WidgetKind.Music,
+            WidgetKind.Weather,
+            WidgetKind.Tags,
+            WidgetKind.SystemMonitor
+        ], descriptors.Select(descriptor => descriptor.WidgetKind));
+        Assert.DoesNotContain(descriptors, descriptor => descriptor.WidgetKind == WidgetKind.File);
+        Assert.Contains(descriptors, descriptor => descriptor.WidgetKind == WidgetKind.Todo && descriptor.HasImplementedContent);
+        Assert.Contains(descriptors, descriptor => descriptor.WidgetKind == WidgetKind.Music && descriptor.HasImplementedContent);
+        Assert.Contains(descriptors, descriptor => descriptor.WidgetKind == WidgetKind.Weather && descriptor.IsPlanned);
     }
 
     [Theory]
     [InlineData(WidgetKind.File, true, false, true, true, false)]
     [InlineData(WidgetKind.QuickCapture, true, false, false, true, false)]
     [InlineData(WidgetKind.Weather, false, true, false, false, true)]
-    [InlineData(WidgetKind.Todo, true, false, true, true, false)]
+    [InlineData(WidgetKind.Todo, true, false, false, true, false)]
     [InlineData(WidgetKind.Tags, false, true, false, false, true)]
-    [InlineData(WidgetKind.Music, false, true, false, false, true)]
+    [InlineData(WidgetKind.Music, true, false, false, true, false)]
     [InlineData(WidgetKind.SystemMonitor, false, true, false, false, true)]
     [InlineData(WidgetKind.Productivity, false, false, false, false, false)]
     public void ContentCapabilityQueries_ReturnExpectedReadOnlyState(
@@ -84,7 +128,7 @@ public sealed class WidgetContentFactoryTests
         bool isAvailable,
         bool isPlanned)
     {
-        var factory = new WidgetContentFactory();
+        var factory = TestServices.CreateWidgetContentFactory();
 
         Assert.Equal(hasImplementedContent, factory.HasImplementedContent(widgetKind));
         Assert.Equal(isPlaceholderOnly, factory.IsPlaceholderOnly(widgetKind));
@@ -96,7 +140,7 @@ public sealed class WidgetContentFactoryTests
     [Fact]
     public void StatusKeys_AreStableLocalizationKeys()
     {
-        var factory = new WidgetContentFactory();
+        var factory = TestServices.CreateWidgetContentFactory();
 
         foreach (var descriptor in factory.GetDescriptors())
         {
@@ -110,7 +154,7 @@ public sealed class WidgetContentFactoryTests
     [Fact]
     public void GetDescriptor_RejectsLegacyProductivityKind()
     {
-        var factory = new WidgetContentFactory();
+        var factory = TestServices.CreateWidgetContentFactory();
 
         Assert.Throws<NotSupportedException>(() => factory.GetDescriptor(WidgetKind.Productivity));
     }
@@ -118,11 +162,10 @@ public sealed class WidgetContentFactoryTests
     [Theory]
     [InlineData(WidgetKind.Weather)]
     [InlineData(WidgetKind.Tags)]
-    [InlineData(WidgetKind.Music)]
     [InlineData(WidgetKind.SystemMonitor)]
     public void CanCreatePlaceholderContent_ForFutureWidgetKinds(WidgetKind widgetKind)
     {
-        var factory = new WidgetContentFactory();
+        var factory = TestServices.CreateWidgetContentFactory();
 
         Assert.True(factory.CanCreatePlaceholderContent(widgetKind));
         Assert.False(WidgetRegistry.Default.CanCreateWindow(widgetKind));
@@ -131,7 +174,7 @@ public sealed class WidgetContentFactoryTests
     [Fact]
     public void CreatePlaceholderContent_ReturnsContentWithoutMakingKindCreatable()
     {
-        var factory = new WidgetContentFactory();
+        var factory = TestServices.CreateWidgetContentFactory();
         var config = new WidgetConfig
         {
             Id = "weather-test",
@@ -151,7 +194,7 @@ public sealed class WidgetContentFactoryTests
     public void CreateTodoContent_ReturnsImplementedAdapterForCreatableTodoKind()
     {
         string tempRoot = Path.Combine(Path.GetTempPath(), "DeskBox.Tests", Guid.NewGuid().ToString("N"));
-        var factory = new WidgetContentFactory();
+        var factory = TestServices.CreateWidgetContentFactory();
         var config = new WidgetConfig
         {
             Id = "todo-test",
@@ -171,7 +214,7 @@ public sealed class WidgetContentFactoryTests
             Assert.Equal(WidgetKind.Todo, content.WidgetKind);
             Assert.True(factory.HasImplementedContent(WidgetKind.Todo));
             Assert.False(factory.IsPlaceholderOnly(WidgetKind.Todo));
-            Assert.True(factory.CanShowInCreateEntry(WidgetKind.Todo));
+            Assert.False(factory.CanShowInCreateEntry(WidgetKind.Todo));
             Assert.True(WidgetRegistry.Default.CanCreateWindow(WidgetKind.Todo));
         }
         finally
@@ -192,7 +235,7 @@ public sealed class WidgetContentFactoryTests
     [Fact]
     public void CreateTodoContent_RejectsNonTodoConfig()
     {
-        var factory = new WidgetContentFactory();
+        var factory = TestServices.CreateWidgetContentFactory();
         var config = new WidgetConfig
         {
             WidgetKind = WidgetKind.File
@@ -205,7 +248,7 @@ public sealed class WidgetContentFactoryTests
     public void CreateDetachedContent_ReturnsTodoAdapterForContentWindow()
     {
         string tempRoot = Path.Combine(Path.GetTempPath(), "DeskBox.Tests", Guid.NewGuid().ToString("N"));
-        var factory = new WidgetContentFactory();
+        var factory = TestServices.CreateWidgetContentFactory();
         var config = new WidgetConfig
         {
             Id = "todo-detached",
@@ -224,8 +267,49 @@ public sealed class WidgetContentFactoryTests
             Assert.IsType<TodoWidgetContentAdapter>(content);
             Assert.Equal(WidgetKind.Todo, content.WidgetKind);
             Assert.True(factory.CanCreateDetachedContent(WidgetKind.Todo));
-            Assert.True(factory.CanShowInCreateEntry(WidgetKind.Todo));
+            Assert.False(factory.CanShowInCreateEntry(WidgetKind.Todo));
             Assert.True(WidgetRegistry.Default.CanCreateWindow(WidgetKind.Todo));
+        }
+        finally
+        {
+            try
+            {
+                if (Directory.Exists(tempRoot))
+                {
+                    Directory.Delete(tempRoot, recursive: true);
+                }
+            }
+            catch
+            {
+            }
+        }
+    }
+
+    [Fact]
+    public void CreateDetachedContent_UsesSettingsAwareTodoProviderWhenSettingsServiceIsProvided()
+    {
+        string tempRoot = Path.Combine(Path.GetTempPath(), "DeskBox.Tests", Guid.NewGuid().ToString("N"));
+        var factory = TestServices.CreateWidgetContentFactory();
+        var settingsService = new SettingsService();
+        settingsService.Settings.TextSize = 17;
+        var config = new WidgetConfig
+        {
+            Id = "todo-settings-aware",
+            Name = "Todo",
+            WidgetKind = WidgetKind.Todo
+        };
+
+        try
+        {
+            string widgetsDataRoot = Directory.CreateDirectory(Path.Combine(tempRoot, "widgets")).FullName;
+
+            var content = factory.CreateDetachedContent(
+                config,
+                widget => new TodoWidgetStore(widgetsDataRoot, widget.Id),
+                settingsService);
+
+            var adapter = Assert.IsType<TodoWidgetContentAdapter>(content);
+            Assert.Equal(WidgetKind.Todo, adapter.WidgetKind);
         }
         finally
         {
@@ -245,11 +329,10 @@ public sealed class WidgetContentFactoryTests
     [Theory]
     [InlineData(WidgetKind.Weather)]
     [InlineData(WidgetKind.Tags)]
-    [InlineData(WidgetKind.Music)]
     [InlineData(WidgetKind.SystemMonitor)]
     public void CreateDetachedContent_ReturnsPlaceholderForFutureKinds(WidgetKind widgetKind)
     {
-        var factory = new WidgetContentFactory();
+        var factory = TestServices.CreateWidgetContentFactory();
         var config = new WidgetConfig
         {
             Id = "future-detached",
@@ -266,13 +349,33 @@ public sealed class WidgetContentFactoryTests
         Assert.False(WidgetRegistry.Default.CanCreateWindow(widgetKind));
     }
 
+    [Fact]
+    public void CreateDetachedContent_ReturnsMusicAdapterForImplementedMusicKind()
+    {
+        var factory = TestServices.CreateWidgetContentFactory();
+        var config = new WidgetConfig
+        {
+            Id = "music-detached",
+            Name = "Music",
+            WidgetKind = WidgetKind.Music
+        };
+
+        var content = factory.CreateDetachedContent(config);
+
+        Assert.IsType<MusicWidgetContentAdapter>(content);
+        Assert.Equal(WidgetKind.Music, content.WidgetKind);
+        Assert.True(factory.CanCreateDetachedContent(WidgetKind.Music));
+        Assert.False(factory.CanShowInCreateEntry(WidgetKind.Music));
+        Assert.True(WidgetRegistry.Default.CanCreateWindow(WidgetKind.Music));
+    }
+
     [Theory]
     [InlineData(WidgetKind.File)]
     [InlineData(WidgetKind.QuickCapture)]
     [InlineData(WidgetKind.Productivity)]
     public void CreateDetachedContent_RejectsLegacyAndWindowOwnedKinds(WidgetKind widgetKind)
     {
-        var factory = new WidgetContentFactory();
+        var factory = TestServices.CreateWidgetContentFactory();
         var config = new WidgetConfig
         {
             WidgetKind = widgetKind
@@ -287,7 +390,7 @@ public sealed class WidgetContentFactoryTests
     [InlineData(WidgetKind.QuickCapture)]
     public void CreatePlaceholderContent_RejectsImplementedKinds(WidgetKind widgetKind)
     {
-        var factory = new WidgetContentFactory();
+        var factory = TestServices.CreateWidgetContentFactory();
         var config = new WidgetConfig
         {
             WidgetKind = widgetKind

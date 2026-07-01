@@ -16,7 +16,7 @@ public sealed class WidgetKindCoverageTests
     public void RegistryAndContentFactory_CoverTheSameActiveWidgetKinds()
     {
         var registry = WidgetRegistry.Default;
-        var factory = new WidgetContentFactory();
+        var factory = TestServices.CreateWidgetContentFactory();
         var expectedKinds = ActiveWidgetKinds
             .OrderBy(widgetKind => widgetKind)
             .ToArray();
@@ -40,7 +40,7 @@ public sealed class WidgetKindCoverageTests
     public void LegacyProductivityKind_IsNotRegisteredAsActiveContent()
     {
         var registry = WidgetRegistry.Default;
-        var factory = new WidgetContentFactory();
+        var factory = TestServices.CreateWidgetContentFactory();
 
         Assert.False(registry.IsKnown(WidgetKind.Productivity));
         Assert.Throws<NotSupportedException>(() => factory.GetDescriptor(WidgetKind.Productivity));
@@ -52,7 +52,7 @@ public sealed class WidgetKindCoverageTests
     public void WindowCreatableKinds_AreImplementedAndAvailableContent()
     {
         var registry = WidgetRegistry.Default;
-        var factory = new WidgetContentFactory();
+        var factory = TestServices.CreateWidgetContentFactory();
 
         foreach (var descriptor in factory.GetDescriptors())
         {
@@ -74,7 +74,7 @@ public sealed class WidgetKindCoverageTests
     public void PlannedKinds_ArePlaceholderOnlyAndNotWindowCreatable()
     {
         var registry = WidgetRegistry.Default;
-        var factory = new WidgetContentFactory();
+        var factory = TestServices.CreateWidgetContentFactory();
 
         foreach (var descriptor in factory.GetDescriptors().Where(descriptor => descriptor.IsPlanned))
         {

@@ -9,6 +9,9 @@ namespace DeskBox.Controls;
 public sealed class WidgetShellContentHost
 {
     private readonly Action<IWidgetContent> _setContent;
+    private IWidgetContent? _pendingContent;
+    private int _contentVersion;
+    private bool _isDisposed;
 
     public WidgetShellContentHost(WidgetShell shell)
     {
@@ -27,13 +30,48 @@ public sealed class WidgetShellContentHost
     {
         ArgumentNullException.ThrowIfNull(content);
 
-        await content.InitializeAsync();
+        if (_isDisposed)
+        {
+            (content as IDisposable)?.Dispose();
+            return;
+        }
+
+        int contentVersion = ++_contentVersion;
+        _pendingContent = content;
+        try
+        {
+            await content.InitializeAsync();
+        }
+        catch
+        {
+            if (ReferenceEquals(_pendingContent, content))
+            {
+                _pendingContent = null;
+            }
+
+            (content as IDisposable)?.Dispose();
+            throw;
+        }
+
+        if (_isDisposed || contentVersion != _contentVersion)
+        {
+            if (ReferenceEquals(_pendingContent, content))
+            {
+                _pendingContent = null;
+            }
+
+            (content as IDisposable)?.Dispose();
+            return;
+        }
+
         if (!ReferenceEquals(CurrentContent, content))
         {
             CurrentContent?.OnDeactivated();
+            (CurrentContent as IDisposable)?.Dispose();
         }
 
         CurrentContent = content;
+        _pendingContent = null;
         _setContent(content);
         content.ApplyAppearance();
     }
@@ -56,5 +94,25 @@ public sealed class WidgetShellContentHost
     public void OnDeactivated()
     {
         CurrentContent?.OnDeactivated();
+    }
+
+    public void DisposeContent()
+    {
+        if (_isDisposed && CurrentContent is null && _pendingContent is null)
+        {
+            return;
+        }
+
+        _isDisposed = true;
+        _contentVersion++;
+        if (_pendingContent is not null && !ReferenceEquals(_pendingContent, CurrentContent))
+        {
+            (_pendingContent as IDisposable)?.Dispose();
+            _pendingContent = null;
+        }
+
+        CurrentContent?.OnDeactivated();
+        (CurrentContent as IDisposable)?.Dispose();
+        CurrentContent = null;
     }
 }

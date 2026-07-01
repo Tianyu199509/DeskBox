@@ -46,7 +46,12 @@ public sealed class WidgetRegistry
             return false;
         }
 
-        return widget.WidgetKind != WidgetKind.QuickCapture || settings.QuickCaptureEnabled;
+        if (FeatureWidgetSettings.IsFeatureWidget(widget.WidgetKind))
+        {
+            return FeatureWidgetSettings.IsEnabled(settings, widget.WidgetKind);
+        }
+
+        return true;
     }
 
     private static WidgetRegistry CreateDefault()
@@ -58,7 +63,7 @@ public sealed class WidgetRegistry
             new(WidgetKind.Weather, CanCreateWindow: false, IsImplemented: false),
             new(WidgetKind.Todo, CanCreateWindow: true, IsImplemented: true),
             new(WidgetKind.Tags, CanCreateWindow: false, IsImplemented: false),
-            new(WidgetKind.Music, CanCreateWindow: false, IsImplemented: false),
+            new(WidgetKind.Music, CanCreateWindow: true, IsImplemented: true),
             new(WidgetKind.SystemMonitor, CanCreateWindow: false, IsImplemented: false)
         ]);
     }

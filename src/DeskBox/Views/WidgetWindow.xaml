@@ -82,11 +82,18 @@
 
         <controls:WidgetShell
             x:Name="FileWidgetShell"
-            Grid.RowSpan="2">
+            Grid.RowSpan="2"
+            AddRequested="AddFileButton_Click"
+            CloseRequested="CloseButton_Click"
+            DragHandlePointerMoved="DragHandle_PointerMoved"
+            DragHandlePointerPressed="DragHandle_PointerPressed"
+            DragHandlePointerReleased="DragHandle_PointerReleased"
+            MoreRequested="MoreButton_Click"
+            OverlayTitle="{Binding Name}">
             <controls:WidgetShell.TitleBarContent>
                 <Grid
                     x:Name="TitleBarGrid"
-                    Padding="14,7,12,5"
+                    Padding="0"
                     Background="Transparent"
                     RightTapped="TitleBarGrid_RightTapped"
                     PointerPressed="TitleBarGrid_PointerPressed"
@@ -161,9 +168,7 @@
 
                         <Button
                             x:Name="AddButton"
-                            Width="22"
-                            Height="22"
-                            Padding="0"
+                            Style="{StaticResource WidgetTitleActionButtonStyle}"
                             Visibility="{Binding TopAddButtonVisibility}"
                             Click="AddFileButton_Click">
                             <FontIcon x:Name="AddButtonIcon" FontSize="11" Glyph="&#xE710;" />
@@ -171,18 +176,14 @@
 
                         <Button
                             x:Name="MoreButton"
-                            Width="22"
-                            Height="22"
-                            Padding="0"
+                            Style="{StaticResource WidgetTitleActionButtonStyle}"
                             Click="MoreButton_Click">
                             <FontIcon x:Name="MoreButtonIcon" FontSize="11" Glyph="&#xE712;" />
                         </Button>
 
                         <Button
                             x:Name="CloseButton"
-                            Width="22"
-                            Height="22"
-                            Padding="0"
+                            Style="{StaticResource WidgetTitleActionButtonStyle}"
                             Click="CloseButton_Click">
                             <FontIcon x:Name="CloseButtonIcon" FontSize="11" Glyph="&#xE74D;" />
                         </Button>
@@ -194,7 +195,7 @@
                      and view switching together until this area is extracted as one unit. -->
                 <Grid
                     x:Name="FileWidgetContentHost"
-                    Padding="12,10,4,12"
+                    Padding="10,8,8,8"
                     AllowDrop="True">
             <ProgressRing
                 x:Name="LoadingRing"

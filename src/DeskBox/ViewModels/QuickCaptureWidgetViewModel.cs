@@ -20,6 +20,7 @@ public sealed partial class QuickCaptureWidgetViewModel : ObservableObject, IDis
     private readonly LocalizationService _localizationService;
     private readonly DispatcherQueue _dispatcherQueue;
     private readonly DispatcherQueueTimer _searchRefreshTimer;
+    private readonly DispatcherQueueTimer _currentViewSaveTimer;
 
     private string _inputText = string.Empty;
     private string _searchText = string.Empty;
@@ -35,8 +36,10 @@ public sealed partial class QuickCaptureWidgetViewModel : ObservableObject, IDis
     private int _recentCount;
     private string _emptyStateTitle = string.Empty;
     private string _emptyStateText = string.Empty;
+    private bool _isDisposed;
     private int _visibleItemsRefreshGeneration;
     private QuickCaptureStoreData? _cachedData;
+    private readonly Dictionary<string, QuickCaptureItemViewModel> _itemViewModelCache = new(StringComparer.Ordinal);
 
     public ObservableCollection<QuickCaptureItemViewModel> Items { get; } = [];
 
@@ -58,6 +61,10 @@ public sealed partial class QuickCaptureWidgetViewModel : ObservableObject, IDis
         _searchRefreshTimer.Interval = TimeSpan.FromMilliseconds(SearchRefreshDebounceMs);
         _searchRefreshTimer.IsRepeating = false;
         _searchRefreshTimer.Tick += SearchRefreshTimer_Tick;
+        _currentViewSaveTimer = dispatcherQueue.CreateTimer();
+        _currentViewSaveTimer.Interval = TimeSpan.FromMilliseconds(350);
+        _currentViewSaveTimer.IsRepeating = false;
+        _currentViewSaveTimer.Tick += CurrentViewSaveTimer_Tick;
         _widgetOpacity = settingsService.Settings.WidgetOpacity;
         _textSize = SettingsService.NormalizeTextSize(settingsService.Settings.TextSize);
         _iconSize = SettingsService.NormalizeIconSize(settingsService.Settings.IconSize);
@@ -71,10 +78,16 @@ public sealed partial class QuickCaptureWidgetViewModel : ObservableObject, IDis
     public string Name
     {
         get => Config.Name;
-        private set => Config.Name = value;
+        private set
+        {
+            Config.Name = value;
+            OnPropertyChanged(nameof(DisplayName));
+        }
     }
 
-    public string DisplayName => _localizationService.T("QuickCapture.Name");
+    public string DisplayName => Config.IsDefaultTitle || string.IsNullOrWhiteSpace(Config.Name)
+        ? _localizationService.T("QuickCapture.Name")
+        : Config.Name;
 
     public string InputText
     {
@@ -145,12 +158,17 @@ public sealed partial class QuickCaptureWidgetViewModel : ObservableObject, IDis
         get => _selectedView;
         set
         {
+            if (_isDisposed)
+            {
+                return;
+            }
+
             if (!SetProperty(ref _selectedView, value))
             {
                 return;
             }
 
-            _ = _quickCaptureService.SetCurrentViewAsync(value);
+            ScheduleCurrentViewSave();
             OnPropertyChanged(nameof(IsRecordsView));
             OnPropertyChanged(nameof(IsPinnedView));
             OnPropertyChanged(nameof(IsRecentView));
@@ -258,12 +276,7 @@ public sealed partial class QuickCaptureWidgetViewModel : ObservableObject, IDis
         }
     }
 
-    public Visibility RecentCaptureStatusVisibility =>
-        SelectedView == QuickCaptureViewMode.Recent &&
-        !HasSearchText &&
-        Items.Count == 0
-            ? Visibility.Visible
-            : Visibility.Collapsed;
+    public Visibility RecentCaptureStatusVisibility => Visibility.Collapsed;
 
     public Visibility RecentCaptureActionVisibility =>
         SelectedView == QuickCaptureViewMode.Recent &&
@@ -287,16 +300,37 @@ public sealed partial class QuickCaptureWidgetViewModel : ObservableObject, IDis
 
     public async Task InitializeAsync()
     {
+        if (_isDisposed)
+        {
+            return;
+        }
+
         var data = await _quickCaptureService.GetDataAsync();
+        if (_isDisposed)
+        {
+            return;
+        }
+
         _cachedData = data;
-        _selectedView = data.CurrentView;
+        _selectedView = MapDefaultView(_settingsService.Settings.QuickCaptureDefaultView);
         OnPropertyChanged(nameof(SelectedView));
         OnPropertyChanged(nameof(IsRecordsView));
         OnPropertyChanged(nameof(IsPinnedView));
         OnPropertyChanged(nameof(IsRecentView));
+        OnPropertyChanged(nameof(InputAreaVisibility));
         OnPropertyChanged(nameof(RecentCaptureStatusVisibility));
         OnPropertyChanged(nameof(RecentCaptureActionVisibility));
         await RefreshFromDataAsync(data);
+    }
+
+    public void RefreshAfterViewReady()
+    {
+        if (_isDisposed)
+        {
+            return;
+        }
+
+        RefreshVisibleItemsFromCacheOrService();
     }
 
     public async Task AddInputAsync()
@@ -388,6 +422,16 @@ public sealed partial class QuickCaptureWidgetViewModel : ObservableObject, IDis
         return ex.HResult == ClipboardCannotOpenHResult;
     }
 
+    private static QuickCaptureViewMode MapDefaultView(string? defaultView)
+    {
+        return defaultView switch
+        {
+            SettingsService.QuickCaptureDefaultViewPinned => QuickCaptureViewMode.Pinned,
+            SettingsService.QuickCaptureDefaultViewRecent => QuickCaptureViewMode.Recent,
+            _ => QuickCaptureViewMode.Records
+        };
+    }
+
     public async Task EditItemAsync(QuickCaptureItemViewModel item, string body)
     {
         await _quickCaptureService.UpdateItemAsync(item.Id, body);
@@ -458,6 +502,27 @@ public sealed partial class QuickCaptureWidgetViewModel : ObservableObject, IDis
         await _quickCaptureService.ClearRecentAsync();
     }
 
+    public async Task RenameAsync(string newName)
+    {
+        if (App.Current?.WidgetManager is { } widgetManager)
+        {
+            await widgetManager.RenameWidgetAsync(Config.Id, newName);
+            Name = Config.Name;
+            return;
+        }
+
+        newName = newName.Trim();
+        if (string.IsNullOrWhiteSpace(newName))
+        {
+            throw new InvalidOperationException(_localizationService.T("Widget.Validation.NameRequired"));
+        }
+
+        Config.Name = newName;
+        Config.IsDefaultTitle = false;
+        _settingsService.UpdateWidget(Config);
+        OnPropertyChanged(nameof(DisplayName));
+    }
+
     public void UpdateBounds(int x, int y, int width, int height, bool persist)
     {
         Config.X = x;
@@ -501,15 +566,62 @@ public sealed partial class QuickCaptureWidgetViewModel : ObservableObject, IDis
 
     public void Dispose()
     {
+        if (_isDisposed)
+        {
+            return;
+        }
+
+        _isDisposed = true;
+        System.Threading.Interlocked.Increment(ref _visibleItemsRefreshGeneration);
         _searchRefreshTimer.Stop();
         _searchRefreshTimer.Tick -= SearchRefreshTimer_Tick;
+        _currentViewSaveTimer.Stop();
+        _currentViewSaveTimer.Tick -= CurrentViewSaveTimer_Tick;
         _quickCaptureService.Changed -= OnQuickCaptureChanged;
         _settingsService.SettingsChanged -= OnSettingsChanged;
         _localizationService.LanguageChanged -= OnLanguageChanged;
     }
 
+    private void ScheduleCurrentViewSave()
+    {
+        if (_isDisposed)
+        {
+            return;
+        }
+
+        _currentViewSaveTimer.Stop();
+        _currentViewSaveTimer.Start();
+    }
+
+    private void CurrentViewSaveTimer_Tick(DispatcherQueueTimer sender, object args)
+    {
+        sender.Stop();
+        if (_isDisposed)
+        {
+            return;
+        }
+
+        var view = SelectedView;
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await _quickCaptureService.SetCurrentViewAsync(view);
+            }
+            catch (Exception ex)
+            {
+                App.Log($"[QuickCapture] Failed to save current view: {ex}");
+            }
+        });
+    }
+
     private void OnQuickCaptureChanged()
     {
+        if (_isDisposed)
+        {
+            return;
+        }
+
         if (!_dispatcherQueue.HasThreadAccess)
         {
             _dispatcherQueue.TryEnqueue(RefreshVisibleItemsImmediately);
@@ -521,6 +633,11 @@ public sealed partial class QuickCaptureWidgetViewModel : ObservableObject, IDis
 
     private void OnLanguageChanged()
     {
+        if (_isDisposed)
+        {
+            return;
+        }
+
         UpdateEmptyStateText();
         OnPropertyChanged(nameof(DisplayName));
         OnPropertyChanged(nameof(RecordsTabText));
@@ -542,6 +659,11 @@ public sealed partial class QuickCaptureWidgetViewModel : ObservableObject, IDis
 
     private void OnSettingsChanged()
     {
+        if (_isDisposed)
+        {
+            return;
+        }
+
         if (!_dispatcherQueue.HasThreadAccess)
         {
             _dispatcherQueue.TryEnqueue(OnSettingsChanged);
@@ -578,9 +700,14 @@ public sealed partial class QuickCaptureWidgetViewModel : ObservableObject, IDis
 
     private async Task RefreshVisibleItemsAsync()
     {
+        if (_isDisposed)
+        {
+            return;
+        }
+
         int generation = System.Threading.Interlocked.Increment(ref _visibleItemsRefreshGeneration);
         var data = await _quickCaptureService.GetDataAsync();
-        if (generation != System.Threading.Volatile.Read(ref _visibleItemsRefreshGeneration))
+        if (_isDisposed || generation != System.Threading.Volatile.Read(ref _visibleItemsRefreshGeneration))
         {
             return;
         }
@@ -591,6 +718,11 @@ public sealed partial class QuickCaptureWidgetViewModel : ObservableObject, IDis
 
     private void RefreshVisibleItemsFromCacheOrService()
     {
+        if (_isDisposed)
+        {
+            return;
+        }
+
         if (!_dispatcherQueue.HasThreadAccess)
         {
             _dispatcherQueue.TryEnqueue(RefreshVisibleItemsFromCacheOrService);
@@ -609,6 +741,11 @@ public sealed partial class QuickCaptureWidgetViewModel : ObservableObject, IDis
 
     private void ScheduleVisibleItemsRefresh()
     {
+        if (_isDisposed)
+        {
+            return;
+        }
+
         if (!_dispatcherQueue.HasThreadAccess)
         {
             _dispatcherQueue.TryEnqueue(ScheduleVisibleItemsRefresh);
@@ -621,6 +758,11 @@ public sealed partial class QuickCaptureWidgetViewModel : ObservableObject, IDis
 
     private void RefreshVisibleItemsImmediately()
     {
+        if (_isDisposed)
+        {
+            return;
+        }
+
         if (!_dispatcherQueue.HasThreadAccess)
         {
             _dispatcherQueue.TryEnqueue(RefreshVisibleItemsImmediately);
@@ -633,12 +775,22 @@ public sealed partial class QuickCaptureWidgetViewModel : ObservableObject, IDis
 
     private void SearchRefreshTimer_Tick(DispatcherQueueTimer sender, object args)
     {
+        if (_isDisposed)
+        {
+            return;
+        }
+
         sender.Stop();
         RefreshVisibleItemsAsync().LogQuickCaptureFailure();
     }
 
     private Task RefreshFromDataAsync(QuickCaptureStoreData data)
     {
+        if (_isDisposed)
+        {
+            return Task.CompletedTask;
+        }
+
         var activeItems = data.Items
             .Where(item => !item.IsDeleted)
             .OrderBy(item => item.SortOrder)
@@ -702,6 +854,8 @@ public sealed partial class QuickCaptureWidgetViewModel : ObservableObject, IDis
             .Select(item => item.Id)
             .ToHashSet(StringComparer.Ordinal);
 
+        PruneItemViewModelCache(visibleItems);
+
         for (int index = Items.Count - 1; index >= 0; index--)
         {
             if (!visibleIds.Contains(Items[index].Id))
@@ -722,7 +876,8 @@ public sealed partial class QuickCaptureWidgetViewModel : ObservableObject, IDis
             bool canMoveUp = canShowPinnedSortControls && targetIndex > 0;
             bool canMoveDown = canShowPinnedSortControls && targetIndex < visibleItems.Count - 1;
 
-            if (!existingById.TryGetValue(model.Id, out var viewModel))
+            if (!existingById.TryGetValue(model.Id, out var viewModel) &&
+                !_itemViewModelCache.TryGetValue(model.Id, out viewModel))
             {
                 viewModel = new QuickCaptureItemViewModel(
                     model,
@@ -733,16 +888,7 @@ public sealed partial class QuickCaptureWidgetViewModel : ObservableObject, IDis
                     showPinnedSortControls: canShowPinnedSortControls,
                     canMovePinnedUp: canMoveUp,
                     canMovePinnedDown: canMoveDown);
-                Items.Insert(targetIndex, viewModel);
-                foreach (var key in currentIndexById.Keys)
-                {
-                    if (currentIndexById[key] >= targetIndex)
-                    {
-                        currentIndexById[key]++;
-                    }
-                }
-
-                continue;
+                _itemViewModelCache[model.Id] = viewModel;
             }
 
             viewModel.Update(model);
@@ -771,6 +917,29 @@ public sealed partial class QuickCaptureWidgetViewModel : ObservableObject, IDis
                     currentIndexById[Items[i].Id] = i;
                 }
             }
+        }
+    }
+
+    private void PruneItemViewModelCache(IReadOnlyList<QuickCaptureItem> visibleItems)
+    {
+        if (_cachedData is null && _itemViewModelCache.Count == 0)
+        {
+            return;
+        }
+
+        HashSet<string> retainedIds = _cachedData is { } data
+            ? data.Items
+                .Concat(data.RecentItems)
+                .Where(item => !item.IsDeleted)
+                .Select(item => item.Id)
+                .ToHashSet(StringComparer.Ordinal)
+            : visibleItems
+                .Select(item => item.Id)
+                .ToHashSet(StringComparer.Ordinal);
+
+        foreach (string id in _itemViewModelCache.Keys.Where(id => !retainedIds.Contains(id)).ToList())
+        {
+            _itemViewModelCache.Remove(id);
         }
     }
 

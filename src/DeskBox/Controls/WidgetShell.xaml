@@ -27,6 +27,7 @@
             x:Name="TitleBarGrid"
             Grid.Row="0"
             Padding="14,7,12,5"
+            HorizontalAlignment="Stretch"
             Background="Transparent"
             PointerMoved="TitleBarGrid_PointerMoved"
             PointerPressed="TitleBarGrid_PointerPressed"
@@ -45,6 +46,7 @@
                 </Grid.ColumnDefinitions>
 
                 <StackPanel
+                    x:Name="TitleIdentityHost"
                     Grid.Column="0"
                     VerticalAlignment="Center"
                     Orientation="Horizontal"
@@ -56,9 +58,15 @@
                     <TextBlock
                         x:Name="TitleText"
                         FontSize="{Binding TitleTextSize}"
+                        IsDoubleTapEnabled="{x:Bind IsTitleEditable, Mode=OneWay}"
                         Text="{Binding DisplayName}"
                         TextTrimming="CharacterEllipsis"
-                        VerticalAlignment="Center" />
+                        VerticalAlignment="Center"
+                        DoubleTapped="TitleText_DoubleTapped" />
+                    <ContentPresenter
+                        x:Name="TitleEditorPresenter"
+                        Content="{x:Bind TitleEditorContent, Mode=OneWay}"
+                        Visibility="Collapsed" />
                 </StackPanel>
 
                 <StackPanel
@@ -69,19 +77,22 @@
                     Opacity="0"
                     VerticalAlignment="Center">
                     <Button
+                        x:Name="AddButton"
+                        Click="AddButton_Click"
+                        Style="{StaticResource WidgetTitleActionButtonStyle}"
+                        Visibility="{x:Bind AddButtonVisibility, Mode=OneWay}">
+                        <FontIcon x:Name="AddButtonIcon" FontSize="11" Glyph="&#xE710;" />
+                    </Button>
+                    <Button
                         x:Name="MoreButton"
-                        Width="22"
-                        Height="22"
                         Click="MoreButton_Click"
-                        Padding="0">
+                        Style="{StaticResource WidgetTitleActionButtonStyle}">
                         <FontIcon x:Name="MoreButtonIcon" FontSize="11" Glyph="&#xE712;" />
                     </Button>
                     <Button
                         x:Name="CloseButton"
-                        Width="22"
-                        Height="22"
                         Click="CloseButton_Click"
-                        Padding="0">
+                        Style="{StaticResource WidgetTitleActionButtonStyle}">
                         <FontIcon x:Name="CloseButtonIcon" FontSize="11" Glyph="&#xE74D;" />
                     </Button>
                 </StackPanel>
@@ -96,7 +107,73 @@
             VerticalAlignment="Bottom" />
 
         <ContentPresenter
+            x:Name="ShellContentPresenter"
             Grid.Row="1"
             Content="{x:Bind ShellContent, Mode=OneWay}" />
+
+        <Grid
+            x:Name="OverlayChromeLayer"
+            Grid.RowSpan="2"
+            Canvas.ZIndex="30"
+            Visibility="Collapsed">
+            <Border
+                x:Name="OverlayIdentityHost"
+                MinHeight="28"
+                MaxWidth="210"
+                Margin="8,8,0,0"
+                Padding="9,5,10,5"
+                HorizontalAlignment="Left"
+                VerticalAlignment="Top"
+                Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                BorderThickness="0.8"
+                CornerRadius="8"
+                IsHitTestVisible="False"
+                Opacity="0">
+                <StackPanel
+                    Orientation="Horizontal"
+                    Spacing="6">
+                    <FontIcon
+                        x:Name="OverlayTitleIcon"
+                        Width="13"
+                        FontSize="12"
+                        Glyph="{x:Bind TitleGlyph, Mode=OneWay}"
+                        VerticalAlignment="Center" />
+                    <TextBlock
+                        x:Name="OverlayTitleText"
+                        MaxWidth="170"
+                        FontSize="12"
+                        Text="{x:Bind OverlayTitle, Mode=OneWay}"
+                        TextTrimming="CharacterEllipsis"
+                        VerticalAlignment="Center" />
+                </StackPanel>
+            </Border>
+
+            <Border
+                x:Name="OverlayDragHandle"
+                Width="104"
+                Height="30"
+                Margin="0"
+                Padding="0"
+                HorizontalAlignment="Center"
+                VerticalAlignment="Top"
+                Background="#01000000"
+                BorderThickness="0"
+                Opacity="0"
+                PointerCaptureLost="OverlayDragHandle_PointerCaptureLost"
+                PointerMoved="OverlayDragHandle_PointerMoved"
+                PointerPressed="OverlayDragHandle_PointerPressed"
+                PointerReleased="OverlayDragHandle_PointerReleased">
+                <Border
+                    Width="28"
+                    Height="6"
+                    Margin="0,4,0,0"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Top"
+                    Background="{ThemeResource TextFillColorSecondaryBrush}"
+                    CornerRadius="3"
+                    Opacity="0.76" />
+            </Border>
+        </Grid>
     </Grid>
 </UserControl>

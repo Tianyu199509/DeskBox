@@ -25,6 +25,11 @@ public sealed class TodoWidgetContentAdapter : IWidgetContent
     {
     }
 
+    public TodoWidgetContentAdapter(WidgetConfig config, TodoWidgetStore store, LocalizationService localizationService, SettingsService settingsService)
+        : this(config, new TodoWidgetViewModel(store, localizationService, config, settingsService))
+    {
+    }
+
     internal TodoWidgetContentAdapter(
         WidgetConfig config,
         TodoWidgetViewModel viewModel,
@@ -62,6 +67,7 @@ public sealed class TodoWidgetContentAdapter : IWidgetContent
 
     public void ApplyAppearance()
     {
+        ViewModel.ApplyAppearance();
     }
 
     public void OnActivated()

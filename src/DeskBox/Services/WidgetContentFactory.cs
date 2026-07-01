@@ -12,10 +12,12 @@ namespace DeskBox.Services;
 public sealed class WidgetContentFactory
 {
     private readonly LocalizationService _localizationService;
+    private readonly IReadOnlyDictionary<WidgetKind, IWidgetContentProvider> _contentProviders;
 
     public WidgetContentFactory(LocalizationService localizationService)
     {
         _localizationService = localizationService;
+        _contentProviders = CreateContentProviders();
     }
 
     private static readonly IReadOnlyList<WidgetContentDescriptor> DescriptorList =
@@ -38,7 +40,34 @@ public sealed class WidgetContentFactory
             CanShowInCreateEntry: false,
             WidgetContentAvailability.Available,
             "WidgetContent.QuickCapture.StatusLabel",
-            "WidgetContent.QuickCapture.StatusDescription"),
+            "WidgetContent.QuickCapture.StatusDescription",
+            HasSettingsPage: true,
+            SettingsSectionTag: "QuickCaptureSettings"),
+        new(
+            WidgetKind.Todo,
+            "Todo",
+            "\uE9D5",
+            WidgetContentStage.Implemented,
+            CanShowInCreateEntry: false,
+            WidgetContentAvailability.Available,
+            "WidgetContent.Todo.StatusLabel",
+            "WidgetContent.Todo.StatusDescription",
+            "Todo.NewWidget",
+            HasSettingsPage: true,
+            SettingsSectionTag: "TodoSettings"),
+        new(
+            WidgetKind.Music,
+            "Music",
+            "\uEC4F",
+            WidgetContentStage.Implemented,
+            CanShowInCreateEntry: false,
+            WidgetContentAvailability.Available,
+            "WidgetContent.Music.StatusLabel",
+            "WidgetContent.Music.StatusDescription",
+            HasSettingsPage: true,
+            SettingsSectionTag: "MusicSettings",
+            ChromeCategory: WidgetChromeCategory.Display,
+            DefaultChromeMode: WidgetChromeMode.Overlay),
         new(
             WidgetKind.Weather,
             "Weather",
@@ -47,17 +76,9 @@ public sealed class WidgetContentFactory
             CanShowInCreateEntry: false,
             WidgetContentAvailability.Planned,
             "WidgetContent.Weather.StatusLabel",
-            "WidgetContent.Weather.StatusDescription"),
-        new(
-            WidgetKind.Todo,
-            "Todo",
-            "\uE9D5",
-            WidgetContentStage.Implemented,
-            CanShowInCreateEntry: true,
-            WidgetContentAvailability.Available,
-            "WidgetContent.Todo.StatusLabel",
-            "WidgetContent.Todo.StatusDescription",
-            "Todo.NewWidget"),
+            "WidgetContent.Weather.StatusDescription",
+            ChromeCategory: WidgetChromeCategory.Display,
+            DefaultChromeMode: WidgetChromeMode.Overlay),
         new(
             WidgetKind.Tags,
             "Tags",
@@ -68,15 +89,6 @@ public sealed class WidgetContentFactory
             "WidgetContent.Tags.StatusLabel",
             "WidgetContent.Tags.StatusDescription"),
         new(
-            WidgetKind.Music,
-            "Music",
-            "\uEC4F",
-            WidgetContentStage.Placeholder,
-            CanShowInCreateEntry: false,
-            WidgetContentAvailability.Planned,
-            "WidgetContent.Music.StatusLabel",
-            "WidgetContent.Music.StatusDescription"),
-        new(
             WidgetKind.SystemMonitor,
             "System Monitor",
             "\uE9D9",
@@ -84,7 +96,9 @@ public sealed class WidgetContentFactory
             CanShowInCreateEntry: false,
             WidgetContentAvailability.Planned,
             "WidgetContent.SystemMonitor.StatusLabel",
-            "WidgetContent.SystemMonitor.StatusDescription")
+            "WidgetContent.SystemMonitor.StatusDescription",
+            ChromeCategory: WidgetChromeCategory.Display,
+            DefaultChromeMode: WidgetChromeMode.Overlay)
     ];
 
     private static readonly IReadOnlyDictionary<WidgetKind, WidgetContentDescriptor> Descriptors =
@@ -106,14 +120,17 @@ public sealed class WidgetContentFactory
         return new PlaceholderWidgetContent(config, descriptor);
     }
 
-    public IWidgetContent CreateTodoContent(WidgetConfig config, TodoWidgetStore? store = null)
+    public IWidgetContent CreateTodoContent(WidgetConfig config, TodoWidgetStore? store = null, SettingsService? settingsService = null)
     {
         if (config.WidgetKind != WidgetKind.Todo)
         {
             throw new ArgumentException("Todo content requires a Todo widget config.", nameof(config));
         }
 
-        return new TodoWidgetContentAdapter(config, store ?? new TodoWidgetStore(config.Id), _localizationService);
+        return CreateDetachedContent(
+            config,
+            _ => store ?? new TodoWidgetStore(config.Id),
+            settingsService);
     }
 
     /// <summary>
@@ -123,29 +140,28 @@ public sealed class WidgetContentFactory
     /// </summary>
     internal IWidgetContent CreateDetachedContent(
         WidgetConfig config,
-        Func<WidgetConfig, TodoWidgetStore>? todoStoreFactory = null)
+        Func<WidgetConfig, TodoWidgetStore>? todoStoreFactory = null,
+        SettingsService? settingsService = null)
     {
-        return config.WidgetKind switch
+        if (!_contentProviders.TryGetValue(config.WidgetKind, out var provider) ||
+            !provider.CanCreateDetachedContent)
         {
-            WidgetKind.Todo => CreateTodoContent(
-                config,
-                (todoStoreFactory ?? (widget => new TodoWidgetStore(widget.Id)))(config)),
-            WidgetKind.Weather or
-            WidgetKind.Tags or
-            WidgetKind.Music or
-            WidgetKind.SystemMonitor => CreatePlaceholderContent(config),
-            _ => throw new NotSupportedException(
-                $"Widget kind '{config.WidgetKind}' does not have detached content.")
-        };
+            throw new NotSupportedException(
+                $"Widget kind '{config.WidgetKind}' does not have detached content.");
+        }
+
+        var context = new WidgetContentProviderContext(
+            _localizationService,
+            settingsService,
+            todoStoreFactory,
+            GetDescriptor);
+        return provider.CreateDetachedContent(config, context);
     }
 
     internal bool CanCreateDetachedContent(WidgetKind widgetKind)
     {
-        return widgetKind is WidgetKind.Todo or
-            WidgetKind.Weather or
-            WidgetKind.Tags or
-            WidgetKind.Music or
-            WidgetKind.SystemMonitor;
+        return _contentProviders.TryGetValue(widgetKind, out var provider) &&
+               provider.CanCreateDetachedContent;
     }
 
     public IReadOnlyList<WidgetContentDescriptor> GetDescriptors()
@@ -167,6 +183,13 @@ public sealed class WidgetContentFactory
     {
         return DescriptorList
             .Where(descriptor => descriptor.CanShowInCreateEntry)
+            .ToArray();
+    }
+
+    public IReadOnlyList<WidgetContentDescriptor> GetFeatureWidgetEntryDescriptors()
+    {
+        return DescriptorList
+            .Where(descriptor => descriptor.WidgetKind != WidgetKind.File)
             .ToArray();
     }
 
@@ -204,5 +227,19 @@ public sealed class WidgetContentFactory
     {
         return Descriptors.TryGetValue(widgetKind, out var descriptor) &&
                descriptor.HasPlaceholderContent;
+    }
+
+    private static IReadOnlyDictionary<WidgetKind, IWidgetContentProvider> CreateContentProviders()
+    {
+        IWidgetContentProvider[] providers =
+        [
+            new TodoWidgetContentProvider(),
+            new MusicWidgetContentProvider(),
+            new PlaceholderWidgetContentProvider(WidgetKind.Weather),
+            new PlaceholderWidgetContentProvider(WidgetKind.Tags),
+            new PlaceholderWidgetContentProvider(WidgetKind.SystemMonitor)
+        ];
+
+        return providers.ToDictionary(provider => provider.WidgetKind);
     }
 }

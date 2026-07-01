@@ -1360,6 +1360,13 @@ public partial class App : Application
         OpenSettings();
     }
 
+    public void ShowSettings(string sectionTag)
+    {
+        var settingsWindow = _settingsWindow ?? CreateSettingsWindow();
+        settingsWindow.Activate();
+        settingsWindow.ShowSection(sectionTag);
+    }
+
     public void ShowOnboarding()
     {
         bool shouldRestartIntro = _onboardingWindow is not null;

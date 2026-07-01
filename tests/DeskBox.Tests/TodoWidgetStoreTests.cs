@@ -33,6 +33,7 @@ public sealed class TodoWidgetStoreTests : IDisposable
         var store = CreateStore("todo-widget");
         var createdAt = DateTimeOffset.Parse("2026-06-30T00:00:00Z");
         var updatedAt = DateTimeOffset.Parse("2026-06-30T00:10:00Z");
+        var dueDate = DateTimeOffset.Parse("2026-07-01T00:00:00Z");
 
         await store.SaveAsync(new TodoWidgetData
         {
@@ -43,6 +44,7 @@ public sealed class TodoWidgetStoreTests : IDisposable
                     Id = "first",
                     Text = " first task ",
                     IsCompleted = true,
+                    DueDate = dueDate,
                     SortOrder = 1,
                     CreatedAt = createdAt,
                     UpdatedAt = updatedAt
@@ -74,6 +76,7 @@ public sealed class TodoWidgetStoreTests : IDisposable
                 Assert.Equal("first", item.Id);
                 Assert.Equal("first task", item.Text);
                 Assert.True(item.IsCompleted);
+                Assert.Equal(dueDate, item.DueDate);
                 Assert.Equal(1, item.SortOrder);
             });
     }
@@ -106,6 +109,7 @@ public sealed class TodoWidgetStoreTests : IDisposable
                 {
                     Id = "duplicate",
                     Text = " keep ",
+                    ColorMarker = "RED",
                     SortOrder = -5,
                     CreatedAt = now
                 },
@@ -126,6 +130,7 @@ public sealed class TodoWidgetStoreTests : IDisposable
                 {
                     Id = "",
                     Text = "new id",
+                    ColorMarker = "blue",
                     SortOrder = 5
                 }
             ]
@@ -137,9 +142,11 @@ public sealed class TodoWidgetStoreTests : IDisposable
         Assert.Equal(2, data.Items.Count);
         Assert.Equal("duplicate", data.Items[0].Id);
         Assert.Equal("keep", data.Items[0].Text);
+        Assert.Equal(TodoItem.RedColorMarker, data.Items[0].ColorMarker);
         Assert.Equal(0, data.Items[0].SortOrder);
         Assert.False(string.IsNullOrWhiteSpace(data.Items[1].Id));
         Assert.Equal("new id", data.Items[1].Text);
+        Assert.Equal(TodoItem.BlueColorMarker, data.Items[1].ColorMarker);
         Assert.Equal(1, data.Items[1].SortOrder);
         Assert.NotEqual(default, data.Items[1].CreatedAt);
         Assert.NotEqual(default, data.Items[1].UpdatedAt);
@@ -197,6 +204,8 @@ public sealed class TodoWidgetStoreTests : IDisposable
         Assert.True(document.RootElement.TryGetProperty("version", out _));
         Assert.True(document.RootElement.TryGetProperty("items", out var items));
         Assert.True(items[0].TryGetProperty("isCompleted", out _));
+        Assert.True(items[0].TryGetProperty("dueDate", out _));
+        Assert.True(items[0].TryGetProperty("colorMarker", out _));
         Assert.False(document.RootElement.TryGetProperty("Version", out _));
     }
 

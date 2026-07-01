@@ -48,6 +48,10 @@ public sealed class SettingsService
     public const string WidgetAnimationEasingLight = "Light";
     public const string WidgetAnimationEasingStandard = "Standard";
     public const string WidgetAnimationEasingStrong = "Strong";
+    public const string WidgetChromeModeStandard = WidgetChromeModeNames.Standard;
+    public const string WidgetChromeModeCompact = WidgetChromeModeNames.Compact;
+    public const string WidgetChromeModeOverlay = WidgetChromeModeNames.Overlay;
+    public const string WidgetChromeModeHidden = WidgetChromeModeNames.Hidden;
     public const string ManagedDropActionMove = "Move";
     public const string ManagedDropActionCopy = "Copy";
     public const string LanguageSystem = "System";
@@ -75,6 +79,19 @@ public sealed class SettingsService
     public const double MinSpacingScale = 0.0;
     public const double MaxSpacingScale = 1.0;
     public const int MaxRecentOrganizationHistoryCount = 24;
+    public const string TodoNewTaskPositionTop = "Top";
+    public const string TodoNewTaskPositionBottom = "Bottom";
+    public const string TodoDefaultFilterAll = "All";
+    public const string TodoDefaultFilterToday = "Today";
+    public const string TodoDefaultFilterImportant = "Important";
+    public const string TodoDefaultFilterCompleted = "Completed";
+    public const string QuickCaptureDefaultViewRecords = "Records";
+    public const string QuickCaptureDefaultViewPinned = "Pinned";
+    public const string QuickCaptureDefaultViewRecent = "Recent";
+    public const string MusicRhythmStyleSoftWave = "SoftWave";
+    public const string MusicRhythmStyleGlassSpectrum = "GlassSpectrum";
+    public const string MusicRhythmStyleDotPulse = "DotPulse";
+    public const string MusicRhythmStyleLineSpectrum = "LineSpectrum";
 
     private static readonly JsonSerializerOptions s_jsonOptions = new()
     {
@@ -141,10 +158,13 @@ public sealed class SettingsService
             {
                 changed = NormalizePresentationSettings(_settings);
                 changed |= NormalizeAppearanceSettings(_settings);
+                changed |= NormalizeFeatureWidgetSettings(_settings);
                 changed |= NormalizeWidgetContentSettings(_settings);
                 changed |= NormalizeOrganizerSettings(_settings);
                 changed |= NormalizeHotkeySettings(_settings);
                 changed |= NormalizeQuickCaptureSettings(_settings);
+                changed |= NormalizeTodoSettings(_settings);
+                changed |= NormalizeMusicSettings(_settings);
                 changed |= NormalizeDeletionSettings(_settings);
             }
 
@@ -201,9 +221,14 @@ public sealed class SettingsService
             lock (_lock)
             {
                 NormalizePresentationSettings(_settings);
+                NormalizeAppearanceSettings(_settings);
+                NormalizeFeatureWidgetSettings(_settings);
+                NormalizeWidgetContentSettings(_settings);
                 NormalizeOrganizerSettings(_settings);
                 NormalizeHotkeySettings(_settings);
                 NormalizeQuickCaptureSettings(_settings);
+                NormalizeTodoSettings(_settings);
+                NormalizeMusicSettings(_settings);
                 json = JsonSerializer.Serialize(_settings, s_jsonOptions);
             }
             await File.WriteAllTextAsync(_settingsPath, json);
@@ -307,6 +332,19 @@ public sealed class SettingsService
         SaveDebounced();
     }
 
+    public void RemoveWidgetImmediate(string widgetId)
+    {
+        lock (_lock)
+        {
+            if (!_settings.DeletedWidgetIds.Contains(widgetId))
+            {
+                _settings.DeletedWidgetIds.Add(widgetId);
+            }
+
+            _settings.Widgets.RemoveAll(w => w.Id == widgetId);
+        }
+    }
+
     private static bool NormalizePresentationSettings(AppSettings settings)
     {
         bool changed = false;
@@ -358,6 +396,24 @@ public sealed class SettingsService
             WidgetAnimationSpeedSlow))
         {
             settings.WidgetAnimationSpeed = WidgetAnimationSpeedStandard;
+            changed = true;
+        }
+
+        string normalizedDisplayChrome = NormalizeWidgetChromeModeSetting(
+            settings.DisplayWidgetChromeMode,
+            WidgetChromeMode.Overlay);
+        if (!string.Equals(settings.DisplayWidgetChromeMode, normalizedDisplayChrome, StringComparison.Ordinal))
+        {
+            settings.DisplayWidgetChromeMode = normalizedDisplayChrome;
+            changed = true;
+        }
+
+        string normalizedInteractiveChrome = NormalizeWidgetChromeModeSetting(
+            settings.InteractiveWidgetChromeMode,
+            WidgetChromeMode.Standard);
+        if (!string.Equals(settings.InteractiveWidgetChromeMode, normalizedInteractiveChrome, StringComparison.Ordinal))
+        {
+            settings.InteractiveWidgetChromeMode = normalizedInteractiveChrome;
             changed = true;
         }
 
@@ -481,6 +537,20 @@ public sealed class SettingsService
             : DefaultTextSize;
     }
 
+    public static string NormalizeWidgetChromeModeSetting(string? value, WidgetChromeMode fallback)
+    {
+        return WidgetChromeModeNames.NormalizeSettingValue(value, fallback);
+    }
+
+    public static string NormalizeMusicRhythmStyle(string? value)
+    {
+        return value is MusicRhythmStyleGlassSpectrum or
+            MusicRhythmStyleDotPulse or
+            MusicRhythmStyleLineSpectrum
+                ? value
+                : MusicRhythmStyleSoftWave;
+    }
+
     private static bool NormalizeAppearanceSettings(AppSettings settings)
     {
         bool changed = false;
@@ -538,6 +608,28 @@ public sealed class SettingsService
 
             widget.Metadata ??= [];
 
+            if (widget.Metadata.TryGetValue(WidgetChromeModeNames.MetadataKey, out string? chromeModeValue))
+            {
+                var normalizedChromeMode = WidgetChromeModeNames.NormalizeMode(
+                    chromeModeValue,
+                    WidgetChromeMode.System,
+                    allowSystem: true);
+                if (normalizedChromeMode == WidgetChromeMode.System)
+                {
+                    widget.Metadata.Remove(WidgetChromeModeNames.MetadataKey);
+                    changed = true;
+                }
+                else
+                {
+                    string normalizedChromeModeValue = WidgetChromeModeNames.ToSettingValue(normalizedChromeMode);
+                    if (!string.Equals(chromeModeValue, normalizedChromeModeValue, StringComparison.Ordinal))
+                    {
+                        widget.Metadata[WidgetChromeModeNames.MetadataKey] = normalizedChromeModeValue;
+                        changed = true;
+                    }
+                }
+            }
+
             if (widget.IsDisabled)
             {
                 widget.IsDisabled = false;
@@ -546,6 +638,11 @@ public sealed class SettingsService
         }
 
         return changed;
+    }
+
+    internal static bool NormalizeFeatureWidgetSettings(AppSettings settings)
+    {
+        return FeatureWidgetSettings.Normalize(settings);
     }
 
     public static string GetDefaultManagedStorageRootPath()
@@ -694,6 +791,50 @@ public sealed class SettingsService
         }
 
         return changed;
+    }
+
+    internal static bool NormalizeTodoSettings(AppSettings settings)
+    {
+        bool changed = false;
+
+        if (settings.TodoNewTaskPosition is not (TodoNewTaskPositionTop or TodoNewTaskPositionBottom))
+        {
+            settings.TodoNewTaskPosition = TodoNewTaskPositionTop;
+            changed = true;
+        }
+
+        if (settings.TodoDefaultFilter is not (
+            TodoDefaultFilterAll or
+            TodoDefaultFilterToday or
+            TodoDefaultFilterImportant or
+            TodoDefaultFilterCompleted))
+        {
+            settings.TodoDefaultFilter = TodoDefaultFilterAll;
+            changed = true;
+        }
+
+        if (settings.QuickCaptureDefaultView is not (
+            QuickCaptureDefaultViewRecords or
+            QuickCaptureDefaultViewPinned or
+            QuickCaptureDefaultViewRecent))
+        {
+            settings.QuickCaptureDefaultView = QuickCaptureDefaultViewRecords;
+            changed = true;
+        }
+
+        return changed;
+    }
+
+    internal static bool NormalizeMusicSettings(AppSettings settings)
+    {
+        string normalizedRhythmStyle = NormalizeMusicRhythmStyle(settings.MusicRhythmStyle);
+        if (string.Equals(settings.MusicRhythmStyle, normalizedRhythmStyle, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        settings.MusicRhythmStyle = normalizedRhythmStyle;
+        return true;
     }
 
     private static bool NormalizeDeletionSettings(AppSettings settings)

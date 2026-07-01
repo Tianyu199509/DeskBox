@@ -28,7 +28,7 @@ public sealed class TodoWidgetContentAdapterTests : IDisposable
             ]
         });
         var config = CreateConfig("todo-widget");
-        var viewModel = new TodoWidgetViewModel(CreateStore("todo-widget"));
+        var viewModel = CreateViewModel(config);
         var adapter = new TodoWidgetContentAdapter(config, viewModel);
 
         await adapter.InitializeAsync();
@@ -53,7 +53,7 @@ public sealed class TodoWidgetContentAdapterTests : IDisposable
     {
         var config = CreateConfig("todo-widget");
         var store = CreateStore("todo-widget");
-        var adapter = new TodoWidgetContentAdapter(config, new TodoWidgetViewModel(store));
+        var adapter = new TodoWidgetContentAdapter(config, CreateViewModel(config, store));
 
         await adapter.InitializeAsync();
         Assert.Empty(adapter.ViewModel.Items);
@@ -77,7 +77,7 @@ public sealed class TodoWidgetContentAdapterTests : IDisposable
             WidgetKind = WidgetKind.File
         };
 
-        Assert.Throws<ArgumentException>(() => new TodoWidgetContentAdapter(config, CreateStore("file-widget")));
+        Assert.Throws<ArgumentException>(() => new TodoWidgetContentAdapter(config, CreateStore("file-widget"), TestServices.CreateLocalizationService()));
     }
 
     public void Dispose()
@@ -107,5 +107,13 @@ public sealed class TodoWidgetContentAdapterTests : IDisposable
             Name = "Todo",
             WidgetKind = WidgetKind.Todo
         };
+    }
+
+    private TodoWidgetViewModel CreateViewModel(WidgetConfig config, TodoWidgetStore? store = null)
+    {
+        return new TodoWidgetViewModel(
+            store ?? CreateStore(config.Id),
+            TestServices.CreateLocalizationService(),
+            config);
     }
 }

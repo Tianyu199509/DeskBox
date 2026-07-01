@@ -47,7 +47,10 @@ public sealed class ContentWidgetWindowFactory
         }
 
         var descriptor = _contentFactory.GetDescriptor(config.WidgetKind);
-        var content = _contentFactory.CreateDetachedContent(config, _todoStoreFactory);
+        var content = _contentFactory.CreateDetachedContent(
+            config,
+            _todoStoreFactory,
+            _settingsService);
         return new ContentWidgetWindowPlan(config, content, descriptor);
     }
 }

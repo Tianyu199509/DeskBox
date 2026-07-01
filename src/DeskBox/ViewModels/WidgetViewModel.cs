@@ -49,6 +49,7 @@ public partial class WidgetViewModel : ObservableObject, IDisposable
     private bool _isIconMode;
     private bool _isListMode;
     private bool _hideShortcutArrowOverlay;
+    private bool _showImageFilesAsIcons;
     private bool _showListItemDetails = true;
     private string _modeLabel = string.Empty;
     private string _modeDescription = string.Empty;
@@ -315,6 +316,7 @@ public partial class WidgetViewModel : ObservableObject, IDisposable
             SettingsService.MinWidgetOpacity,
             SettingsService.MaxWidgetOpacity);
         _hideShortcutArrowOverlay = _settingsService.Settings.HideShortcutArrowOverlay;
+        _showImageFilesAsIcons = _settingsService.Settings.ShowImageFilesAsIcons;
         _showFileExtensions = _settingsService.Settings.ShowFileExtensions;
         _hideShortcutExtensionWhenShowingFileExtensions =
             _settingsService.Settings.HideShortcutExtensionWhenShowingFileExtensions;
@@ -511,12 +513,24 @@ public partial class WidgetViewModel : ObservableObject, IDisposable
         }
 
         bool hideShortcutArrowOverlay = _settingsService.Settings.HideShortcutArrowOverlay;
-        if (_hideShortcutArrowOverlay == hideShortcutArrowOverlay)
+        bool showImageFilesAsIcons = _settingsService.Settings.ShowImageFilesAsIcons;
+        bool shouldRefreshAllIcons = _showImageFilesAsIcons != showImageFilesAsIcons;
+        bool shouldRefreshShortcutIcons = _hideShortcutArrowOverlay != hideShortcutArrowOverlay;
+
+        if (!shouldRefreshAllIcons && !shouldRefreshShortcutIcons)
         {
             return;
         }
 
         _hideShortcutArrowOverlay = hideShortcutArrowOverlay;
+        _showImageFilesAsIcons = showImageFilesAsIcons;
+
+        if (shouldRefreshAllIcons)
+        {
+            RefreshAllIcons();
+            return;
+        }
+
         await RefreshShortcutIconsAsync();
     }
 
@@ -790,9 +804,10 @@ public partial class WidgetViewModel : ObservableObject, IDisposable
         await _fileService.RelocateEntryAsync(sourcePath, destinationPath);
         var refreshedItem = await _fileService.CreateWidgetItemAsync(
             destinationPath,
-            _hideShortcutArrowOverlay,
-            _showFileExtensions,
-            _hideShortcutExtensionWhenShowingFileExtensions,
+            hideShortcutArrowOverlay: _hideShortcutArrowOverlay,
+            showImageFilesAsIcons: _showImageFilesAsIcons,
+            showFileExtensions: _showFileExtensions,
+            hideShortcutExtensionWhenShowingFileExtensions: _hideShortcutExtensionWhenShowingFileExtensions,
             loadIcon: false,
             loadFolderItemCount: false);
         ApplyRuntimeItemData(item, refreshedItem);
@@ -874,6 +889,7 @@ public partial class WidgetViewModel : ObservableObject, IDisposable
 
         Name = newName;
         Config.Name = newName;
+        Config.IsDefaultTitle = false;
         _settingsService.UpdateWidget(Config);
     }
 
@@ -972,16 +988,18 @@ public partial class WidgetViewModel : ObservableObject, IDisposable
         {
             var userItems = await _fileService.EnumerateDirectoryAsync(
                 userDesktop,
-                _hideShortcutArrowOverlay,
-                _showFileExtensions,
-                _hideShortcutExtensionWhenShowingFileExtensions,
+                hideShortcutArrowOverlay: _hideShortcutArrowOverlay,
+                showImageFilesAsIcons: _showImageFilesAsIcons,
+                showFileExtensions: _showFileExtensions,
+                hideShortcutExtensionWhenShowingFileExtensions: _hideShortcutExtensionWhenShowingFileExtensions,
                 loadIcons: false,
                 loadFolderItemCounts: false);
             var publicItems = await _fileService.EnumerateDirectoryAsync(
                 publicDesktop,
-                _hideShortcutArrowOverlay,
-                _showFileExtensions,
-                _hideShortcutExtensionWhenShowingFileExtensions,
+                hideShortcutArrowOverlay: _hideShortcutArrowOverlay,
+                showImageFilesAsIcons: _showImageFilesAsIcons,
+                showFileExtensions: _showFileExtensions,
+                hideShortcutExtensionWhenShowingFileExtensions: _hideShortcutExtensionWhenShowingFileExtensions,
                 loadIcons: false,
                 loadFolderItemCounts: false);
 
@@ -996,9 +1014,10 @@ public partial class WidgetViewModel : ObservableObject, IDisposable
         {
             items = await _fileService.EnumerateDirectoryAsync(
                 folderPath,
-                _hideShortcutArrowOverlay,
-                _showFileExtensions,
-                _hideShortcutExtensionWhenShowingFileExtensions,
+                hideShortcutArrowOverlay: _hideShortcutArrowOverlay,
+                showImageFilesAsIcons: _showImageFilesAsIcons,
+                showFileExtensions: _showFileExtensions,
+                hideShortcutExtensionWhenShowingFileExtensions: _hideShortcutExtensionWhenShowingFileExtensions,
                 loadIcons: false,
                 loadFolderItemCounts: false);
         }
@@ -1068,9 +1087,15 @@ public partial class WidgetViewModel : ObservableObject, IDisposable
             if (!string.IsNullOrWhiteSpace(item.Path))
             {
                 item.Icon = null;
-                _fileService.ClearIconCache(item.Path, _hideShortcutArrowOverlay);
+                _fileService.ClearIconCache(item.Path, _hideShortcutArrowOverlay, _showImageFilesAsIcons);
             }
         }
+    }
+
+    private void RefreshAllIcons()
+    {
+        ClearCurrentItemIconCache();
+        StartItemHydration();
     }
 
     private async Task HydrateIconsWithRetryAsync(int generation)
@@ -1146,10 +1171,10 @@ public partial class WidgetViewModel : ObservableObject, IDisposable
         {
             if (clearCacheBeforeLoad)
             {
-                _fileService.ClearIconCache(path, _hideShortcutArrowOverlay);
+                _fileService.ClearIconCache(path, _hideShortcutArrowOverlay, _showImageFilesAsIcons);
             }
 
-            var icon = await _fileService.GetIconAsync(path, _hideShortcutArrowOverlay);
+            var icon = await _fileService.GetIconAsync(path, _hideShortcutArrowOverlay, _showImageFilesAsIcons);
             return (item, icon);
         }
         catch (Exception ex)
@@ -1258,7 +1283,7 @@ public partial class WidgetViewModel : ObservableObject, IDisposable
 
         foreach (var item in Items.Where(item => item.IsShortcut))
         {
-            item.Icon = await _fileService.GetIconAsync(item.Path, _hideShortcutArrowOverlay);
+            item.Icon = await _fileService.GetIconAsync(item.Path, _hideShortcutArrowOverlay, _showImageFilesAsIcons);
         }
     }
 
@@ -1431,9 +1456,10 @@ public partial class WidgetViewModel : ObservableObject, IDisposable
     {
         var item = await _fileService.TryCreateWidgetItemAsync(
             path,
-            _hideShortcutArrowOverlay,
-            _showFileExtensions,
-            _hideShortcutExtensionWhenShowingFileExtensions,
+            hideShortcutArrowOverlay: _hideShortcutArrowOverlay,
+            showImageFilesAsIcons: _showImageFilesAsIcons,
+            showFileExtensions: _showFileExtensions,
+            hideShortcutExtensionWhenShowingFileExtensions: _hideShortcutExtensionWhenShowingFileExtensions,
             loadIcon: false,
             loadFolderItemCount: false);
         if (item is null)

@@ -599,3 +599,356 @@ H 线后建议先做“第一个真实功能格子前置设计”，不要直接
 ### 下一步建议
 
 下一步建议做一个不开放入口的 `TodoWidgetContentAdapter` 或等价内容封装，让 Todo 真正实现 `IWidgetContent`，但仍不让 `WidgetRegistry` 创建 Todo 窗口。
+
+## 27. 2026-06-30 当前进度对齐
+
+本节是对当前代码状态的重新对齐。前面 1-26 节保留历史施工记录，其中部分“未开放 Todo”描述已经是当时状态，不代表当前最新状态。
+
+当前最新状态：
+
+- `Todo` 已经不只是 UI 空接入，已经作为第一个真实内容型格子接入 `ContentWidgetWindow`。
+- `WidgetRegistry` 当前允许 `File`、`QuickCapture`、`Todo` 创建窗口。
+- `Weather`、`Tags`、`Music`、`SystemMonitor` 仍然只是已知/计划类型，不开放窗口创建。
+- `WidgetContentFactory` 当前可以为 `Todo` 创建真实 content，为未来类型创建 placeholder content。
+- `ContentWidgetWindow` 已经承担 Todo 的窗口宿主角色。
+- `AppSettings.TodoEnabled` 当前作为 Todo 的 durable 功能开关。
+- 删除桌面 Todo 或点击 Todo 内容窗口关闭按钮后，会同步关闭 Todo 功能开关，避免 F7/托盘“显示全部”再次把 Todo 拉起来。
+- 设置页的“功能格子”已经有 `FeatureWidgetEntry` 数据结构雏形，但 XAML 里随记/Todo 行仍然是手写。
+- 设置页外观页已经开始把全局显示项前移：默认宽度、默认高度、背景透明度、文字大小、显示悬浮按钮属于全局共用项。
+- “文件格子显示设置”保留文件格子专用项：图标大小、间距、文件名宽度、扩展名等。
+
+最近验证：
+
+- `dotnet build .\DeskBox.sln -c Debug -p:Platform=x64 --no-restore`
+- 构建通过：0 warning / 0 error。
+- Todo 同步修复后曾完整跑过测试：`179/179` 通过。
+
+## 28. 当前短期路线
+
+短期内不继续新增天气、标签、音乐、监控等新格子。当前阶段先把基础能力打稳。
+
+推荐下一步顺序：
+
+1. 通用功能格子开关模型。
+2. 功能格子设置列表动态化。
+3. `ContentWidgetWindow` 关闭语义通用化。
+4. 全局外观上下文继续收口。
+5. `WidgetContentFactory` provider 化或等价注册表化。
+6. Todo 作为样板格子补测试和文档。
+
+这一步的目标是：未来新增一个格子时，只需要实现 Content / ViewModel / Store / 业务设置，而不是继续改多个散落的 switch 和设置字段。
+
+## 29. 当前可复用能力清单
+
+后续所有格子应优先复用：
+
+- `WidgetKind`：类型标识和配置序列化。
+- `WidgetRegistry`：是否已知、是否实现、是否允许创建窗口。
+- `WidgetContentDescriptor`：默认标题、图标、展示状态、创建入口能力。
+- `WidgetContentFactory`：内容控件创建入口。
+- `IWidgetContent`：内容控件和窗口宿主之间的契约。
+- `ContentWidgetWindow`：非文件类内容格子的窗口宿主。
+- `WidgetShell`：标题栏、更多按钮、关闭按钮、内容插槽。
+- `WidgetSessionManager`：当前用于记录会话状态，未来逐步承接更多层级/交互判断。
+- `WidgetManager`：创建、恢复、显隐、F7/托盘协调。
+- 全局菜单样式：托盘菜单、标题菜单、内容菜单应保持统一字体和间距。
+
+这些能力不应在每个新格子里复制。
+
+## 30. 当前仍未完全通用的部分
+
+下面这些点是下一轮基础收口的重点。
+
+### 30.1 功能开关仍是单独字段
+
+当前还有：
+
+- `QuickCaptureEnabled`
+- `TodoEnabled`
+
+不要继续添加：
+
+- `WeatherEnabled`
+- `TagsEnabled`
+- `MusicEnabled`
+- `SystemMonitorEnabled`
+
+新增格子前应优先做通用 feature widget enabled 状态。
+
+### 30.2 WidgetManager 仍有功能格子 switch
+
+`SetFeatureWidgetEnabledAsync(...)`、`CreateOrShowFeatureWidgetAsync(...)`、`IsFeatureWidgetEnabled(...)` 已经有通用名字，但内部仍主要处理 `QuickCapture` 和 `Todo`。
+
+新增格子前应改成 descriptor/registry/provider 驱动。
+
+### 30.3 WidgetContentFactory 仍有 Todo 专门分支
+
+当前 `CreateDetachedContent(...)` 对 Todo 是真实分支，对未来类型是 placeholder 分支。
+
+后续如果新格子增加，应考虑 provider 注册表，避免 factory switch 越来越长。
+
+### 30.4 设置页功能格子列表仍有手写 XAML
+
+`FeatureWidgetEntries` 已经存在，但 `SettingsWindow.xaml` 里随记/Todo 的功能格子入口仍然手写。
+
+新增第三个功能格子前，应先改成数据驱动列表。
+
+### 30.5 ContentWidgetWindow 关闭按钮仍有 Todo 特判
+
+当前关闭按钮会特判 Todo 并关闭 Todo 功能开关。
+
+后续应改为通用规则：如果 kind 是单例功能格子，关闭按钮表示关闭该功能；普通多实例内容窗口再按产品定义处理。
+
+### 30.6 全局外观应用还需补齐
+
+全局外观项包括：
+
+- 文字大小。
+- 背景透明度。
+- 默认宽度。
+- 默认高度。
+- 显示悬浮按钮。
+- 动画效果和动画速度。
+
+这些应逐步形成统一 appearance context。文件格子专用的图标大小、间距、文件名宽度不要混入全局设置。
+
+## 31. 未来新增格子的执行模板
+
+等基础收口后，新增功能格子按以下顺序：
+
+1. 确认 `WidgetKind`。
+2. 补 descriptor：标题、图标、状态、多语言 key、是否单例、是否有设置页。
+3. 接入通用功能开关模型。
+4. 实现 `XxxWidgetContent`。
+5. 实现 `XxxWidgetViewModel`。
+6. 如需持久化，实现 `XxxWidgetStore` 和数据模型。
+7. 用 Adapter 实现 `IWidgetContent`。
+8. 在 factory/provider 中注册创建逻辑。
+9. 在 registry 中从 planned 改成 implemented/creatable。
+10. 接入设置页动态列表。
+11. 补多语言。
+12. 补测试。
+13. 手动验收 F7、托盘、关闭、删除、重启恢复、设置同步、主题、透明度、文字大小。
+
+各格子独立开发内容：
+
+- Weather：定位权限、手动城市、天气 API、缓存、网络错误。
+- Tags：内部索引、文件标签关系、右键打标签；不写入文件本身。
+- Music：Windows 系统媒体会话和播放控制。
+- SystemMonitor：CPU、内存、网络采样和刷新节流。
+- Todo：任务列表、完成状态、本地持久化和 Todo 专属交互。
+
+共用内容不应重复开发：
+
+- 窗口宿主。
+- 标题栏。
+- 菜单字体/间距。
+- 基础更多菜单。
+- F7/托盘显隐。
+- 层级恢复。
+- 全局外观。
+- 设置页功能格子入口。
+
+## 32. 文件格子和功能格子的设置边界
+
+全局外观页应放：
+
+- 默认宽度。
+- 默认高度。
+- 背景透明度。
+- 文字大小。
+- 显示悬浮按钮。
+- 动画效果。
+- 动画速度。
+- 主题、圆角、毛玻璃等所有格子共享项。
+
+`文件格子显示设置` 应放：
+
+- 图标大小。
+- 横向间距。
+- 纵向间距。
+- 文件名宽度。
+- 扩展名显示。
+- 快捷方式扩展名隐藏。
+- 列表详细信息。
+- 其他只影响收纳/映射文件格子的显示细节。
+
+不要把 Todo、天气、标签、音乐、监控的业务设置放进 `文件格子显示设置`。
+
+## 33. 2026-06-30 动画执行与 Shell 标题栏收口
+
+本轮继续做基础能力收口，不新增业务格子。
+
+### 本地备份
+
+已在重构前保存本地 patch：
+
+- `backups/architecture/before-animation-controller-shell-title-20260630-151856.patch`
+
+### 动画执行公共化
+
+新增 `WidgetTrayAnimationController`，把托盘/F7 唤起相关动画里的重复执行逻辑集中到一个 helper：
+
+- 根据 `WidgetAnimationSettings` 生成动画 profile。
+- 统一处理显示/隐藏时的窗口位移。
+- 统一处理透明度、缩放、计时器、缓动和结束状态。
+- 统一记录 animation generation，避免旧动画回调覆盖新状态。
+- 统一恢复窗口位置和 visual 状态。
+- 支持 offset override，用于从托盘方向进入/离开等特殊场景。
+
+当前已接入：
+
+- `WidgetWindow`：文件格子。
+- `QuickCaptureWidgetWindow`：随记格子。
+- `ContentWidgetWindow`：Todo 以及后续内容型功能格子。
+
+各窗口仍保留自己的业务收尾逻辑，例如：
+
+- 文件格子的 item transition 恢复。
+- 文件格子和随记的 backdrop 临时抑制/恢复。
+- 内容型格子的窗口生命周期和关闭语义。
+
+这次没有把所有窗口动画入口完全合并成一个基类，因为文件格子、随记和内容型窗口仍有不同的历史行为。当前做法是先统一“动画执行器”，保留窗口自己的产品语义，风险更低。
+
+### WidgetShell 标题栏扩展点
+
+`WidgetShell` 新增标题栏扩展能力，为后续继续迁移文件格子标题栏做准备：
+
+- `ShowAddButton`：控制是否显示添加按钮。
+- `IsTitleEditable`：控制标题是否支持双击编辑入口。
+- `TitleEditorContent`：允许宿主提供标题编辑控件。
+- `AddRequested`：统一添加按钮事件。
+- `TitleDoubleTapped`：统一标题双击事件。
+- 暴露 `AddActionButton`、`AddActionIcon`、`TitleEditorPresenterElement` 等元素，方便迁移期窗口继续复用现有逻辑。
+
+当前文件格子仍通过 `TitleBarContent` 使用自定义标题栏。原因是文件格子的标题栏涉及：
+
+- 标题重命名和中文输入法兼容。
+- Esc 取消、Enter 保存、失焦保存等编辑语义。
+- 右键菜单。
+- 添加按钮。
+- 拖动窗口。
+- 旧事件链和布局细节。
+
+这些区域之前多次修过，属于高风险区。本轮只补 Shell 能力，不强行深迁移。后续可以按按钮、标题文本、标题编辑三个小步骤逐步迁。
+
+### 当前边界
+
+已经统一：
+
+- 三类窗口共享托盘动画执行逻辑。
+- 内容型格子继续走 `ContentWidgetWindow + WidgetShell`。
+- Shell 具备可选添加按钮和标题编辑扩展能力。
+
+暂未统一：
+
+- 文件格子的完整标题栏交互。
+- 随记窗口内部大量历史业务逻辑。
+- `WidgetManager` 中的整体 F7/托盘调度策略。
+- `WidgetContentFactory` provider 化。
+
+后续建议：
+
+1. 先观察这轮动画公共化在文件格子、随记、Todo 上是否稳定。
+2. 再小步迁移文件格子标题栏，不要一次替换整条标题栏。
+3. 新增天气、标签、音乐、监控前，优先继续收口 provider/descriptor/设置入口。
+
+### 本轮验证
+
+- `dotnet build .\DeskBox.sln -c Debug -p:Platform=x64 --no-restore`
+- `dotnet test .\DeskBox.sln -c Debug -p:Platform=x64 --no-build`
+
+当前测试结果：`184/184` 通过。
+
+## 35. 2026-06-30 Provider 与功能格子 Handler 收口
+
+本轮继续做基础分发收口，不改变用户可见行为。
+
+### WidgetContentFactory provider 化
+
+新增轻量内容 provider：
+
+- `IWidgetContentProvider`
+- `WidgetContentProviderContext`
+- `TodoWidgetContentProvider`
+- `PlaceholderWidgetContentProvider`
+
+`WidgetContentFactory.CreateDetachedContent(...)` 不再使用 `switch` 判断 Todo / Weather / Tags / Music / SystemMonitor，而是通过 provider 注册表分发。
+
+当前 provider 状态：
+
+- `TodoWidgetContentProvider` 创建真实 Todo content / store / view model adapter。
+- `PlaceholderWidgetContentProvider` 继续为 Weather / Tags / Music / SystemMonitor 创建 placeholder content。
+- 外部接口保持兼容：`CreateTodoContent(...)`、`CreateDetachedContent(...)`、`CanCreateDetachedContent(...)` 仍可用。
+
+### ContentWidgetWindowFactory 去 Todo 分支
+
+`ContentWidgetWindowFactory.CreateContentWindowPlan(...)` 不再单独判断 `WidgetKind.Todo`，统一调用 `WidgetContentFactory.CreateDetachedContent(...)`，并把 `SettingsService` 传入 provider context。
+
+这让后续新增内容型格子时，不需要再在窗口工厂里增加新的 kind 分支。
+
+### WidgetManager 功能格子 handler 化
+
+新增内部 `FeatureWidgetHandler` 注册表，用于收口功能格子的创建和启停分发。
+
+当前 handler：
+
+- QuickCapture：仍走专用 `QuickCaptureWidgetWindow` 创建和隐藏逻辑。
+- Todo：仍走 `ContentWidgetWindow` 创建和关闭逻辑。
+
+`CreateOrShowFeatureWidgetAsync(...)` 和 `SetFeatureWidgetEnabledAsync(...)` 不再直接写 QuickCapture/Todo switch，而是通过 handler 注册表分发。
+
+### 文档状态修正
+
+之前章节中这些内容已过期：
+
+- “设置页功能格子列表仍有手写 XAML”：当前已经由 `FeatureWidgetEntries` 动态生成。
+- “ContentWidgetWindow 关闭按钮仍有 Todo 特判”：当前已经改为 `FeatureWidgetSettings.IsFeatureWidget(...)` 通用规则。
+- “WidgetContentFactory 仍有 Todo 专门分支”：当前已改为 provider 注册表。
+- “WidgetManager 功能格子 API 仍有 switch”：当前核心创建/启停 API 已改为 handler 注册表。
+
+仍需继续收口：
+
+- `CreateWidgetOfKindAsync(...)` 和 `CreateRegisteredWidgetFromConfigAsync(...)` 仍有窗口类型分发逻辑，这是窗口宿主差异导致，暂时保留。
+- QuickCapture 仍是专用窗口，Todo 是内容型窗口，二者不能强行合并。
+- `FeatureWidgetSettings` 仍保留 legacy `QuickCaptureEnabled` / `TodoEnabled` 镜像字段，用于兼容旧设置。
+
+验证：
+
+- `dotnet build .\DeskBox.sln -c Debug -p:Platform=x64 --no-restore`
+- `dotnet test .\DeskBox.sln -c Debug -p:Platform=x64 --no-build`
+
+当前测试结果：`185/185` 通过。
+
+## 34. 2026-06-30 标题栏视觉规格统一
+
+本轮继续收口标题栏视觉细节，不改变标题栏业务交互。
+
+新增 `WidgetTitleBarMetrics` / `WidgetTitleBarMetricsCalculator`，统一计算：
+
+- 标题图标大小。
+- 标题文字大小。
+- 右上角操作按钮宽高。
+- 右上角操作按钮图标大小。
+- 标题栏行高。
+- 迁移期自定义标题栏内层 padding。
+
+当前已接入：
+
+- `WidgetWindow`：文件格子。
+- `QuickCaptureWidgetWindow`：随记格子。
+- `ContentWidgetWindow`：Todo 和后续内容型格子。
+
+边界说明：
+
+- 文件格子仍保留自定义标题栏和原有重命名、拖动、右键菜单逻辑。
+- 文件格子自定义标题栏不再叠加内层 padding，避免与 `WidgetShell` 外层 padding 叠加造成左右间距过宽或按钮被压扁。
+- 随记格子保留现有内层 padding，因为当前视觉是正常参照。
+- Todo/内容型格子继续走 `WidgetShell` 默认标题栏。
+
+验证：
+
+- `dotnet build .\DeskBox.sln -c Debug -p:Platform=x64 --no-restore`
+- `dotnet test .\DeskBox.sln -c Debug -p:Platform=x64 --no-build`
+
+当前测试结果：`184/184` 通过。

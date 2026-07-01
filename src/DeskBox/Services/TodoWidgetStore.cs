@@ -95,6 +95,7 @@ public sealed class TodoWidgetStore
             }
 
             item.Text = item.Text?.Trim() ?? string.Empty;
+            item.ColorMarker = TodoItem.NormalizeColorMarker(item.ColorMarker);
             if (item.CreatedAt == default)
             {
                 item.CreatedAt = DateTimeOffset.UtcNow;
@@ -141,4 +142,5 @@ public sealed class TodoWidgetStore
         string safe = new(safeChars);
         return string.IsNullOrWhiteSpace(safe) ? Guid.NewGuid().ToString("N") : safe;
     }
+
 }

@@ -737,6 +737,16 @@ public static partial class Win32Helper
     [return: MarshalAs(UnmanagedType.Bool)]
     public static partial bool GetMonitorInfo(IntPtr hMonitor, ref MONITORINFO lpmi);
 
+    public delegate bool MonitorEnumProc(IntPtr hMonitor, IntPtr hdcMonitor, ref RECT lprcMonitor, IntPtr dwData);
+
+    [LibraryImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static partial bool EnumDisplayMonitors(
+        IntPtr hdc,
+        IntPtr lprcClip,
+        MonitorEnumProc lpfnEnum,
+        IntPtr dwData);
+
     public static bool TryGetMonitorWorkArea(int x, int y, out RECT monitor, out RECT workArea)
     {
         var point = new POINT
@@ -767,6 +777,30 @@ public static partial class Win32Helper
         monitor = info.rcMonitor;
         workArea = info.rcWork;
         return true;
+    }
+
+    public static IReadOnlyList<(RECT Monitor, RECT WorkArea)> GetMonitorWorkAreas()
+    {
+        var areas = new List<(RECT Monitor, RECT WorkArea)>();
+        EnumDisplayMonitors(
+            IntPtr.Zero,
+            IntPtr.Zero,
+            (IntPtr hMonitor, IntPtr _, ref RECT _, IntPtr _) =>
+            {
+                var info = new MONITORINFO
+                {
+                    cbSize = Marshal.SizeOf<MONITORINFO>()
+                };
+                if (GetMonitorInfo(hMonitor, ref info))
+                {
+                    areas.Add((info.rcMonitor, info.rcWork));
+                }
+
+                return true;
+            },
+            IntPtr.Zero);
+
+        return areas;
     }
 
     /// <summary>

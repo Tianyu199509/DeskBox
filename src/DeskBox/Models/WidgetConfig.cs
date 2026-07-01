@@ -23,6 +23,21 @@ public class WidgetConfig
     /// <summary>Screen Y position in device-independent pixels.</summary>
     public double Y { get; set; } = 100;
 
+    /// <summary>
+    /// Corner used to keep this widget stable when display resolution or monitor topology changes.
+    /// Values are "LeftTop", "RightTop", "LeftBottom", or "RightBottom".
+    /// </summary>
+    public string? PositionAnchor { get; set; }
+
+    /// <summary>Horizontal distance from the selected anchor edge.</summary>
+    public double PositionMarginX { get; set; }
+
+    /// <summary>Vertical distance from the selected anchor edge.</summary>
+    public double PositionMarginY { get; set; }
+
+    /// <summary>Work area signature of the monitor where the widget was last positioned.</summary>
+    public string? PositionMonitorKey { get; set; }
+
     /// <summary>Widget width in device-independent pixels.</summary>
     public double Width { get; set; } = 300;
 
