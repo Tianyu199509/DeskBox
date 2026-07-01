@@ -34,8 +34,8 @@ public class AppSettings
     public bool AutoStart { get; set; } = true;
 
     /// <summary>Whether the built-in Quick Capture widget is enabled.</summary>
-    public bool QuickCaptureEnabled { get; set; } = true;
-    public bool TodoEnabled { get; set; } = true;
+    public bool QuickCaptureEnabled { get; set; }
+    public bool TodoEnabled { get; set; }
 
     /// <summary>
     /// Enabled state for singleton feature widgets, keyed by <see cref="WidgetKind"/> name.
@@ -109,7 +109,7 @@ public class AppSettings
     /// <summary>
     /// Background opacity for widget windows (0.0 - 1.0).
     /// </summary>
-    public double WidgetOpacity { get; set; } = 0.30;
+    public double WidgetOpacity { get; set; } = 0.80;
 
     /// <summary>
     /// Native DWM corner style for widget windows.
@@ -198,7 +198,7 @@ public class AppSettings
     /// <summary>
     /// Label text size used by widgets in both icon and list views.
     /// </summary>
-    public double TextSize { get; set; } = 11;
+    public double TextSize { get; set; } = 11.5;
 
     /// <summary>
     /// Layout density for widget content. Valid values: <c>"Comfortable"</c>, <c>"Compact"</c>.

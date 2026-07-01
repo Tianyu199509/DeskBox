@@ -3444,7 +3444,7 @@ public sealed class WidgetManager
 
     private bool ShouldMoveManagedItems()
     {
-        return !string.Equals(_settingsService.Settings.ManagedDropAction, SettingsService.ManagedDropActionCopy, StringComparison.OrdinalIgnoreCase);
+        return true;
     }
 
     private async Task<WidgetWindow> CreateWidgetFromConfigAsync(

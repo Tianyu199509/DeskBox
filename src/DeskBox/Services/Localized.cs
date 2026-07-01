@@ -19,6 +19,20 @@ public static class Localized
             typeof(Localized),
             new PropertyMetadata(null, OnLocalizationPropertyChanged));
 
+    public static readonly DependencyProperty HeaderKeyProperty =
+        DependencyProperty.RegisterAttached(
+            "HeaderKey",
+            typeof(string),
+            typeof(Localized),
+            new PropertyMetadata(null, OnLocalizationPropertyChanged));
+
+    public static readonly DependencyProperty DescriptionKeyProperty =
+        DependencyProperty.RegisterAttached(
+            "DescriptionKey",
+            typeof(string),
+            typeof(Localized),
+            new PropertyMetadata(null, OnLocalizationPropertyChanged));
+
     private static readonly List<WeakReference<DependencyObject>> s_targets = [];
 
     public static string? GetKey(DependencyObject obj)
@@ -39,6 +53,26 @@ public static class Localized
     public static void SetToolTipKey(DependencyObject obj, string? value)
     {
         obj.SetValue(ToolTipKeyProperty, value);
+    }
+
+    public static string? GetHeaderKey(DependencyObject obj)
+    {
+        return (string?)obj.GetValue(HeaderKeyProperty);
+    }
+
+    public static void SetHeaderKey(DependencyObject obj, string? value)
+    {
+        obj.SetValue(HeaderKeyProperty, value);
+    }
+
+    public static string? GetDescriptionKey(DependencyObject obj)
+    {
+        return (string?)obj.GetValue(DescriptionKeyProperty);
+    }
+
+    public static void SetDescriptionKey(DependencyObject obj, string? value)
+    {
+        obj.SetValue(DescriptionKeyProperty, value);
     }
 
     public static void RefreshAll(LocalizationService localizationService)
@@ -96,10 +130,31 @@ public static class Localized
             }
         }
 
+        string? headerKey = GetHeaderKey(target);
+        if (!string.IsNullOrWhiteSpace(headerKey))
+        {
+            SetObjectProperty(target, "Header", localizationService.T(headerKey));
+        }
+
+        string? descriptionKey = GetDescriptionKey(target);
+        if (!string.IsNullOrWhiteSpace(descriptionKey))
+        {
+            SetObjectProperty(target, "Description", localizationService.T(descriptionKey));
+        }
+
         string? toolTipKey = GetToolTipKey(target);
         if (!string.IsNullOrWhiteSpace(toolTipKey) && target is UIElement element)
         {
             ToolTipService.SetToolTip(element, localizationService.T(toolTipKey));
+        }
+    }
+
+    private static void SetObjectProperty(DependencyObject target, string propertyName, object value)
+    {
+        var property = target.GetType().GetProperty(propertyName);
+        if (property?.CanWrite == true)
+        {
+            property.SetValue(target, value);
         }
     }
 }

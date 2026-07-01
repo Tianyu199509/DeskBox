@@ -16,6 +16,8 @@ using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Animation;
 using Windows.ApplicationModel.DataTransfer;
+using Windows.Graphics.Imaging;
+using Windows.Media.Ocr;
 using Windows.Storage;
 using Windows.Storage.Pickers;
 using WinRT;
@@ -1997,14 +1999,8 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
         {
             DataPackageOperation.Copy => false,
             DataPackageOperation.Move => true,
-            DataPackageOperation.Link => !string.Equals(
-                _settingsService.Settings.ManagedDropAction,
-                SettingsService.ManagedDropActionCopy,
-                StringComparison.OrdinalIgnoreCase),
-            _ => !string.Equals(
-                _settingsService.Settings.ManagedDropAction,
-                SettingsService.ManagedDropActionCopy,
-                StringComparison.OrdinalIgnoreCase)
+            DataPackageOperation.Link => true,
+            _ => true
         };
     }
 
@@ -2177,6 +2173,17 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
         };
         copyItem.Click += async (_, _) => await CopySelectionToClipboardAsync(cut: false);
         flyout.Items.Add(copyItem);
+
+        if (CanCopyImageText(item))
+        {
+            var copyImageTextItem = new MenuFlyoutItem
+            {
+                Text = _localizationService.T("Widget.CopyImageText"),
+                Icon = new FontIcon { Glyph = "\uE8C8" }
+            };
+            copyImageTextItem.Click += async (_, _) => await CopyImageTextAsync(item);
+            flyout.Items.Add(copyImageTextItem);
+        }
 
         var copyPathItem = new MenuFlyoutItem
         {
@@ -2712,6 +2719,72 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
         Clipboard.SetContent(package);
         Clipboard.Flush();
         ShowStatusToast(_localizationService.Format("Widget.CopyPathCount", selectedPaths.Length));
+    }
+
+    private async Task CopyImageTextAsync(WidgetItem item)
+    {
+        if (!CanCopyImageText(item))
+        {
+            ShowStatusToast(_localizationService.T("Widget.CopyImageTextFailed"));
+            return;
+        }
+
+        try
+        {
+            var file = await StorageFile.GetFileFromPathAsync(item.Path);
+            using var stream = await file.OpenAsync(FileAccessMode.Read);
+            var decoder = await BitmapDecoder.CreateAsync(stream);
+            using var softwareBitmap = await decoder.GetSoftwareBitmapAsync();
+
+            var ocrEngine = OcrEngine.TryCreateFromUserProfileLanguages();
+            if (ocrEngine is null)
+            {
+                ShowStatusToast(_localizationService.T("Widget.CopyImageTextFailed"));
+                return;
+            }
+
+            var ocrResult = await ocrEngine.RecognizeAsync(softwareBitmap);
+            if (string.IsNullOrWhiteSpace(ocrResult.Text))
+            {
+                ShowStatusToast(_localizationService.T("Widget.CopyImageTextNoText"));
+                return;
+            }
+
+            var package = new DataPackage();
+            package.SetText(ocrResult.Text);
+            DeskBoxClipboardWriteScope.MarkWrite(text: ocrResult.Text);
+            Clipboard.SetContent(package);
+            Clipboard.Flush();
+            ShowStatusToast(_localizationService.T("Widget.CopyImageTextCopied"));
+        }
+        catch (Exception ex)
+        {
+            App.Log($"[WidgetWindow] Failed to copy image text path='{item.Path}': {ex}");
+            ShowStatusToast(_localizationService.T("Widget.CopyImageTextFailed"));
+        }
+    }
+
+    private static bool CanCopyImageText(WidgetItem item)
+    {
+        return !item.IsFolder &&
+               !string.IsNullOrWhiteSpace(item.Path) &&
+               File.Exists(item.Path) &&
+               IsImageFile(item.Path);
+    }
+
+    private static bool IsImageFile(string path)
+    {
+        string extension = Path.GetExtension(path);
+        return extension.Equals(".png", StringComparison.OrdinalIgnoreCase) ||
+               extension.Equals(".jpg", StringComparison.OrdinalIgnoreCase) ||
+               extension.Equals(".jpeg", StringComparison.OrdinalIgnoreCase) ||
+               extension.Equals(".bmp", StringComparison.OrdinalIgnoreCase) ||
+               extension.Equals(".gif", StringComparison.OrdinalIgnoreCase) ||
+               extension.Equals(".webp", StringComparison.OrdinalIgnoreCase) ||
+               extension.Equals(".tiff", StringComparison.OrdinalIgnoreCase) ||
+               extension.Equals(".tif", StringComparison.OrdinalIgnoreCase) ||
+               extension.Equals(".heic", StringComparison.OrdinalIgnoreCase) ||
+               extension.Equals(".heif", StringComparison.OrdinalIgnoreCase);
     }
 
     private async Task CopySelectionToClipboardAsync(bool cut)
@@ -5564,9 +5637,7 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
 
     private DataPackageOperation GetManagedDropOperation()
     {
-        return string.Equals(_settingsService.Settings.ManagedDropAction, SettingsService.ManagedDropActionCopy, StringComparison.OrdinalIgnoreCase)
-            ? DataPackageOperation.Copy
-            : DataPackageOperation.Move;
+        return DataPackageOperation.Move;
     }
 
     private DataPackageOperation GetAcceptedDropOperation(DataPackageOperation requestedOperation, bool movesIntoFolder)

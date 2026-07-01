@@ -13,7 +13,7 @@ namespace DeskBox.Services;
 /// </summary>
 public sealed class SettingsService
 {
-    public const double DefaultWidgetOpacity = 0.30;
+    public const double DefaultWidgetOpacity = 0.80;
     public const double MinWidgetOpacity = 0.0;
     public const double MaxWidgetOpacity = 1.0;
     public const string WidgetCornerPreferenceDefault = "Default";
@@ -59,7 +59,7 @@ public sealed class SettingsService
     public const string LanguageEnglish = "en-US";
     public const double DefaultWidgetWidth = 280;
     public const double DefaultWidgetHeight = 400;
-    public const bool DefaultGlobalHotkeyEnabled = false;
+    public const bool DefaultGlobalHotkeyEnabled = true;
     public const int DefaultGlobalHotkeyModifiers = (int)Models.HotkeyModifierKeys.None;
     public const int DefaultGlobalHotkeyKey = (int)Windows.System.VirtualKey.F7;
     public const double MinWidgetWidth = 200;
@@ -67,7 +67,7 @@ public sealed class SettingsService
     public const double DefaultIconSize = 30;
     public const double MinIconSize = 24;
     public const double MaxIconSize = 56;
-    public const double DefaultTextSize = 11;
+    public const double DefaultTextSize = 11.5;
     public const double MinTextSize = 10;
     public const double MaxTextSize = 16;
     public const double DefaultLayoutDensityScale = 0.56;
@@ -112,6 +112,58 @@ public sealed class SettingsService
     public AppSettings Settings
     {
         get { lock (_lock) return _settings; }
+    }
+
+    /// <summary>
+    /// Restores user preference defaults without touching user data, widget instances, or storage paths.
+    /// </summary>
+    public static void ApplyDefaultPreferences(AppSettings settings)
+    {
+        settings.Theme = "System";
+        settings.TrayIconStyle = "Colorful";
+        settings.AccentColorMode = "System";
+        settings.DefaultWidgetWidth = DefaultWidgetWidth;
+        settings.DefaultWidgetHeight = DefaultWidgetHeight;
+        settings.WidgetCornerPreference = WidgetCornerPreferenceSmall;
+        settings.WidgetAnimationEffect = WidgetAnimationEffectSlideFade;
+        settings.WidgetAnimationSpeed = WidgetAnimationSpeedStandard;
+        settings.WidgetAnimationSlideDirection = WidgetAnimationSlideDirectionRight;
+        settings.WidgetAnimationEasingIntensity = WidgetAnimationEasingStandard;
+        settings.DisplayWidgetChromeMode = WidgetChromeModeOverlay;
+        settings.InteractiveWidgetChromeMode = WidgetChromeModeStandard;
+        settings.WidgetOpacity = DefaultWidgetOpacity;
+        settings.IconSize = DefaultIconSize;
+        settings.TextSize = DefaultTextSize;
+        settings.LayoutDensityScale = DefaultLayoutDensityScale;
+        settings.LayoutDensity = DefaultLayoutDensityScale <= 0.78 ? "Compact" : "Comfortable";
+        settings.HorizontalSpacingScale = DefaultHorizontalSpacingScale;
+        settings.VerticalSpacingScale = DefaultVerticalSpacingScale;
+        settings.FileNameWidthScale = DefaultFileNameWidthScale;
+        settings.ShowFileExtensions = false;
+        settings.ShowImageFilesAsIcons = false;
+        settings.HideShortcutExtensionWhenShowingFileExtensions = true;
+        settings.ShowHoverButtons = true;
+        settings.QuickCaptureClipboardEnabled = true;
+        settings.QuickCaptureImageClipboardEnabled = true;
+        settings.QuickCaptureRecentLimit = QuickCaptureService.DefaultRecentLimit;
+        settings.QuickCaptureDefaultView = QuickCaptureDefaultViewRecords;
+        settings.TodoShowCompletedTasks = true;
+        settings.TodoShowFooterStats = true;
+        settings.TodoShowClearCompletedButton = true;
+        settings.TodoConfirmBeforeDelete = false;
+        settings.MusicUseArtworkBackdrop = true;
+        settings.MusicShowRhythmBars = true;
+        settings.MusicRhythmStyle = MusicRhythmStyleSoftWave;
+        settings.MusicEnableCoverHoverMotion = true;
+        settings.TodoNewTaskPosition = TodoNewTaskPositionTop;
+        settings.TodoDefaultFilter = TodoDefaultFilterAll;
+        settings.ManagedDropAction = ManagedDropActionMove;
+        settings.GlobalHotkeyEnabled = DefaultGlobalHotkeyEnabled;
+        settings.GlobalHotkeyModifiers = DefaultGlobalHotkeyModifiers;
+        settings.GlobalHotkeyKey = DefaultGlobalHotkeyKey;
+        settings.DoubleClickToOpen = true;
+        settings.HideShortcutArrowOverlay = true;
+        settings.ShowListItemDetails = false;
     }
 
     public SettingsService()
@@ -672,7 +724,7 @@ public sealed class SettingsService
     {
         bool changed = false;
 
-        if (settings.ManagedDropAction is not (ManagedDropActionMove or ManagedDropActionCopy))
+        if (!string.Equals(settings.ManagedDropAction, ManagedDropActionMove, StringComparison.Ordinal))
         {
             settings.ManagedDropAction = ManagedDropActionMove;
             changed = true;

@@ -36,7 +36,6 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
     private string _selectedTheme = ThemeSystem;
     private string _selectedTrayIconStyle = TrayIconStyleSystem;
     private string _selectedLanguage = SettingsService.LanguageSystem;
-    private string _selectedManagedDropAction = SettingsService.ManagedDropActionMove;
     private string _selectedWidgetCornerPreference = CornerSmall;
     private string _selectedWidgetAnimationEffect = SettingsService.WidgetAnimationEffectFade;
     private string _selectedWidgetAnimationSpeed = SettingsService.WidgetAnimationSpeedStandard;
@@ -69,13 +68,13 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
     private string[]? _cachedTrayIconStyleDisplayNames;
     private string[]? _cachedThemeDisplayNames;
     private string[]? _cachedLanguageDisplayNames;
-    private string[]? _cachedManagedDropActionDisplayNames;
     private string[]? _cachedWidgetCornerPreferenceDisplayNames;
     private string[]? _cachedWidgetAnimationEffectDisplayNames;
     private string[]? _cachedWidgetAnimationSpeedDisplayNames;
     private string[]? _cachedWidgetAnimationSlideDirectionDisplayNames;
     private string[]? _cachedWidgetAnimationEasingIntensityDisplayNames;
-    private string[]? _cachedWidgetChromeModeDisplayNames;
+    private string[]? _cachedDisplayWidgetChromeModeDisplayNames;
+    private string[]? _cachedInteractiveWidgetChromeModeDisplayNames;
     private string[]? _cachedQuickCaptureDefaultViewDisplayNames;
     private string[]? _cachedTodoNewTaskPositionDisplayNames;
     private string[]? _cachedTodoDefaultFilterDisplayNames;
@@ -222,32 +221,6 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
     }
 
     public bool CanEditCustomAccent => !UseSystemAccentColor;
-
-    public string SelectedManagedDropAction
-    {
-        get => _selectedManagedDropAction;
-        set
-        {
-            if (!SetProperty(ref _selectedManagedDropAction, value))
-            {
-                return;
-            }
-
-            if (_isRestoringDefaults)
-            {
-                return;
-            }
-
-            _settingsService.Settings.ManagedDropAction = value == SettingsService.ManagedDropActionCopy
-                ? SettingsService.ManagedDropActionCopy
-                : SettingsService.ManagedDropActionMove;
-            _settingsService.SaveDebounced();
-            OnPropertyChanged(nameof(SelectedManagedDropActionText));
-        }
-    }
-
-    public string SelectedManagedDropActionText => GetManagedDropActionDisplayName(SelectedManagedDropAction);
-    public int SelectedManagedDropActionIndex => Array.IndexOf(AvailableManagedDropActions, _selectedManagedDropAction);
 
     public string SelectedWidgetCornerPreference
     {
@@ -404,7 +377,7 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
     }
 
     public string SelectedDisplayWidgetChromeModeText => GetWidgetChromeModeDisplayName(SelectedDisplayWidgetChromeMode);
-    public int SelectedDisplayWidgetChromeModeIndex => Array.IndexOf(AvailableWidgetChromeModes, _selectedDisplayWidgetChromeMode);
+    public int SelectedDisplayWidgetChromeModeIndex => Array.IndexOf(AvailableDisplayWidgetChromeModes, _selectedDisplayWidgetChromeMode);
 
     public string SelectedInteractiveWidgetChromeMode
     {
@@ -428,7 +401,7 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
     }
 
     public string SelectedInteractiveWidgetChromeModeText => GetWidgetChromeModeDisplayName(SelectedInteractiveWidgetChromeMode);
-    public int SelectedInteractiveWidgetChromeModeIndex => Array.IndexOf(AvailableWidgetChromeModes, _selectedInteractiveWidgetChromeMode);
+    public int SelectedInteractiveWidgetChromeModeIndex => Array.IndexOf(AvailableInteractiveWidgetChromeModes, _selectedInteractiveWidgetChromeMode);
 
     [RelayCommand]
     public void ResetDisplayWidgetChromeOverrides()
@@ -605,6 +578,20 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
     {
         get => _accentColorHex;
         private set => SetProperty(ref _accentColorHex, value);
+    }
+
+    public Color SelectedAccentColor
+    {
+        get => _currentAccentColor;
+        set
+        {
+            if (_currentAccentColor.Equals(value))
+            {
+                return;
+            }
+
+            SetCustomAccentColor(value);
+        }
     }
 
     public string ManagedStorageRootPath
@@ -1052,8 +1039,6 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
     public string[] AvailableThemeDisplayNames => _cachedThemeDisplayNames ??= AvailableThemes.Select(GetThemeDisplayName).ToArray();
     public string[] AvailableLanguages { get; } = [SettingsService.LanguageSystem, SettingsService.LanguageChinese, SettingsService.LanguageEnglish];
     public string[] AvailableLanguageDisplayNames => _cachedLanguageDisplayNames ??= AvailableLanguages.Select(_localizationService.GetLanguageDisplayName).ToArray();
-    public string[] AvailableManagedDropActions { get; } = [SettingsService.ManagedDropActionMove, SettingsService.ManagedDropActionCopy];
-    public string[] AvailableManagedDropActionDisplayNames => _cachedManagedDropActionDisplayNames ??= AvailableManagedDropActions.Select(GetManagedDropActionDisplayName).ToArray();
     public string[] AvailableWidgetCornerPreferences { get; } = [CornerSmall, CornerRound, CornerSquare];
     public string[] AvailableWidgetCornerPreferenceDisplayNames => _cachedWidgetCornerPreferenceDisplayNames ??= AvailableWidgetCornerPreferences.Select(GetCornerDisplayName).ToArray();
     public string[] AvailableWidgetAnimationEffects { get; } =
@@ -1092,7 +1077,13 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
     ];
     public string[] AvailableWidgetAnimationEasingIntensityDisplayNames => _cachedWidgetAnimationEasingIntensityDisplayNames ??= AvailableWidgetAnimationEasingIntensities.Select(GetWidgetAnimationEasingIntensityDisplayName).ToArray();
 
-    public string[] AvailableWidgetChromeModes { get; } =
+    public string[] AvailableDisplayWidgetChromeModes { get; } =
+    [
+        SettingsService.WidgetChromeModeOverlay,
+        SettingsService.WidgetChromeModeHidden
+    ];
+
+    public string[] AvailableInteractiveWidgetChromeModes { get; } =
     [
         SettingsService.WidgetChromeModeStandard,
         SettingsService.WidgetChromeModeCompact,
@@ -1100,7 +1091,8 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
         SettingsService.WidgetChromeModeHidden
     ];
 
-    public string[] AvailableWidgetChromeModeDisplayNames => _cachedWidgetChromeModeDisplayNames ??= AvailableWidgetChromeModes.Select(GetWidgetChromeModeDisplayName).ToArray();
+    public string[] AvailableDisplayWidgetChromeModeDisplayNames => _cachedDisplayWidgetChromeModeDisplayNames ??= AvailableDisplayWidgetChromeModes.Select(GetWidgetChromeModeDisplayName).ToArray();
+    public string[] AvailableInteractiveWidgetChromeModeDisplayNames => _cachedInteractiveWidgetChromeModeDisplayNames ??= AvailableInteractiveWidgetChromeModes.Select(GetWidgetChromeModeDisplayName).ToArray();
 
     public string[] AvailableQuickCaptureDefaultViews { get; } =
     [
@@ -1433,9 +1425,6 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
         _musicEnableCoverHoverMotion = settings.MusicEnableCoverHoverMotion;
         _selectedTodoNewTaskPosition = NormalizeTodoNewTaskPosition(settings.TodoNewTaskPosition);
         _selectedTodoDefaultFilter = NormalizeTodoDefaultFilter(settings.TodoDefaultFilter);
-        _selectedManagedDropAction = string.Equals(settings.ManagedDropAction, SettingsService.ManagedDropActionCopy, StringComparison.OrdinalIgnoreCase)
-            ? SettingsService.ManagedDropActionCopy
-            : SettingsService.ManagedDropActionMove;
         _managedStorageRootPath = settings.DefaultManagedStorageRootPath;
 
         RefreshAccentPreview();
@@ -1489,11 +1478,13 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
     public async Task RestoreDefaultPreferencesAsync()
     {
         _isRestoringDefaults = true;
+        _isApplyingSettingsSnapshot = true;
         SuppressAppearanceNotifications = true;
         DeferAppearancePersistence = false;
 
         try
         {
+            SettingsService.ApplyDefaultPreferences(_settingsService.Settings);
             SelectedTheme = ThemeSystem;
             SelectedTrayIconStyle = TrayIconStyleColorful;
             UseSystemAccentColor = true;
@@ -1516,8 +1507,10 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
             ShowFileExtensions = false;
             ShowImageFilesAsIcons = false;
             HideShortcutExtensionWhenShowingFileExtensions = true;
+            ShowHoverButtons = true;
             QuickCaptureClipboardEnabled = true;
             QuickCaptureImageClipboardEnabled = true;
+            QuickCaptureRecentLimit = QuickCaptureService.DefaultRecentLimit;
             SelectedQuickCaptureDefaultView = SettingsService.QuickCaptureDefaultViewRecords;
             TodoShowCompletedTasks = true;
             TodoShowFooterStats = true;
@@ -1529,55 +1522,9 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
             MusicEnableCoverHoverMotion = true;
             SelectedTodoNewTaskPosition = SettingsService.TodoNewTaskPositionTop;
             SelectedTodoDefaultFilter = SettingsService.TodoDefaultFilterAll;
-            SelectedManagedDropAction = SettingsService.ManagedDropActionMove;
             DoubleClickToOpen = true;
             HideShortcutArrowOverlay = true;
             ShowListItemDetails = false;
-
-            var settings = _settingsService.Settings;
-            settings.Theme = "System";
-            settings.TrayIconStyle = TrayIconStyleColorful;
-            settings.AccentColorMode = ThemeService.AccentModeSystem;
-            settings.DefaultWidgetWidth = SettingsService.DefaultWidgetWidth;
-            settings.DefaultWidgetHeight = SettingsService.DefaultWidgetHeight;
-            settings.WidgetCornerPreference = SettingsService.WidgetCornerPreferenceSmall;
-            settings.WidgetAnimationEffect = SettingsService.WidgetAnimationEffectSlideFade;
-            settings.WidgetAnimationSpeed = SettingsService.WidgetAnimationSpeedStandard;
-            settings.WidgetAnimationSlideDirection = SettingsService.WidgetAnimationSlideDirectionRight;
-            settings.WidgetAnimationEasingIntensity = SettingsService.WidgetAnimationEasingStandard;
-            settings.DisplayWidgetChromeMode = SettingsService.WidgetChromeModeOverlay;
-            settings.InteractiveWidgetChromeMode = SettingsService.WidgetChromeModeStandard;
-            settings.WidgetOpacity = SettingsService.DefaultWidgetOpacity;
-            settings.IconSize = SettingsService.DefaultIconSize;
-            settings.TextSize = SettingsService.DefaultTextSize;
-            settings.LayoutDensityScale = SettingsService.DefaultLayoutDensityScale;
-            settings.LayoutDensity = SettingsService.DefaultLayoutDensityScale <= 0.78 ? "Compact" : "Comfortable";
-            settings.HorizontalSpacingScale = SettingsService.DefaultHorizontalSpacingScale;
-            settings.VerticalSpacingScale = SettingsService.DefaultVerticalSpacingScale;
-            settings.FileNameWidthScale = SettingsService.DefaultFileNameWidthScale;
-            settings.ShowFileExtensions = false;
-            settings.ShowImageFilesAsIcons = false;
-            settings.HideShortcutExtensionWhenShowingFileExtensions = true;
-            settings.QuickCaptureClipboardEnabled = true;
-            settings.QuickCaptureImageClipboardEnabled = true;
-            settings.QuickCaptureDefaultView = SettingsService.QuickCaptureDefaultViewRecords;
-            settings.TodoShowCompletedTasks = true;
-            settings.TodoShowFooterStats = true;
-            settings.TodoShowClearCompletedButton = true;
-            settings.TodoConfirmBeforeDelete = false;
-            settings.MusicUseArtworkBackdrop = true;
-            settings.MusicShowRhythmBars = true;
-            settings.MusicRhythmStyle = SettingsService.MusicRhythmStyleSoftWave;
-            settings.MusicEnableCoverHoverMotion = true;
-            settings.TodoNewTaskPosition = SettingsService.TodoNewTaskPositionTop;
-            settings.TodoDefaultFilter = SettingsService.TodoDefaultFilterAll;
-            settings.ManagedDropAction = SettingsService.ManagedDropActionMove;
-            settings.GlobalHotkeyEnabled = SettingsService.DefaultGlobalHotkeyEnabled;
-            settings.GlobalHotkeyModifiers = SettingsService.DefaultGlobalHotkeyModifiers;
-            settings.GlobalHotkeyKey = SettingsService.DefaultGlobalHotkeyKey;
-            settings.DoubleClickToOpen = true;
-            settings.HideShortcutArrowOverlay = true;
-            settings.ShowListItemDetails = false;
 
             RefreshAccentPreview();
             RefreshNumberInputs();
@@ -1585,6 +1532,7 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
             OnPropertyChanged(nameof(CanEditCustomAccent));
             OnPropertyChanged(nameof(AccentColorDescription));
             App.Current?.GlobalHotkeyService?.RefreshRegistration();
+            App.Current?.UpdateTrayIcon();
             RefreshGlobalHotkeyState();
             RefreshLocalizedProperties();
             _themeService.RefreshAppearance();
@@ -1596,6 +1544,7 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
         finally
         {
             SuppressAppearanceNotifications = false;
+            _isApplyingSettingsSnapshot = false;
             _isRestoringDefaults = false;
         }
     }
@@ -1619,13 +1568,6 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
             TrayIconStyleWhite => _localizationService.T("Settings.TrayIcon.White"),
             _ => _localizationService.T("Settings.TrayIcon.System")
         };
-    }
-
-    public string GetManagedDropActionDisplayName(string action)
-    {
-        return string.Equals(action, SettingsService.ManagedDropActionCopy, StringComparison.OrdinalIgnoreCase)
-            ? _localizationService.T("Settings.DropAction.Copy")
-            : _localizationService.T("Settings.DropAction.Move");
     }
 
     public string GetCornerDisplayName(string corner)
@@ -1774,6 +1716,7 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
         bool quickCaptureEnabled = FeatureWidgetSettings.IsEnabled(settings, WidgetKind.QuickCapture);
         bool quickCaptureClipboardEnabled = settings.QuickCaptureClipboardEnabled;
         bool quickCaptureImageClipboardEnabled = settings.QuickCaptureImageClipboardEnabled;
+        int quickCaptureRecentLimit = QuickCaptureService.NormalizeRecentLimit(settings.QuickCaptureRecentLimit);
         string quickCaptureDefaultView = NormalizeQuickCaptureDefaultView(settings.QuickCaptureDefaultView);
         bool todoEnabled = FeatureWidgetSettings.IsEnabled(settings, WidgetKind.Todo);
         bool todoShowCompletedTasks = settings.TodoShowCompletedTasks;
@@ -1785,23 +1728,16 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
         string musicRhythmStyle = SettingsService.NormalizeMusicRhythmStyle(settings.MusicRhythmStyle);
         bool musicEnableCoverHoverMotion = settings.MusicEnableCoverHoverMotion;
         bool showImageFilesAsIcons = settings.ShowImageFilesAsIcons;
+        bool showHoverButtons = settings.ShowHoverButtons;
         string displayWidgetChromeMode = NormalizeWidgetChromeModeSetting(settings.DisplayWidgetChromeMode, WidgetChromeMode.Overlay);
         string interactiveWidgetChromeMode = NormalizeWidgetChromeModeSetting(settings.InteractiveWidgetChromeMode, WidgetChromeMode.Standard);
         string todoNewTaskPosition = NormalizeTodoNewTaskPosition(settings.TodoNewTaskPosition);
         string todoDefaultFilter = NormalizeTodoDefaultFilter(settings.TodoDefaultFilter);
-        string managedDropAction = string.Equals(settings.ManagedDropAction, SettingsService.ManagedDropActionCopy, StringComparison.OrdinalIgnoreCase)
-            ? SettingsService.ManagedDropActionCopy
-            : SettingsService.ManagedDropActionMove;
         string managedStorageRootPath = SettingsService.NormalizeManagedStorageRootPath(settings.DefaultManagedStorageRootPath);
 
         _isApplyingSettingsSnapshot = true;
         try
         {
-            if (!string.Equals(SelectedManagedDropAction, managedDropAction, StringComparison.OrdinalIgnoreCase))
-            {
-                SelectedManagedDropAction = managedDropAction;
-            }
-
             if (!string.Equals(ManagedStorageRootPath, managedStorageRootPath, StringComparison.OrdinalIgnoreCase))
             {
                 ManagedStorageRootPath = managedStorageRootPath;
@@ -1821,6 +1757,11 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
             if (QuickCaptureImageClipboardEnabled != quickCaptureImageClipboardEnabled)
             {
                 QuickCaptureImageClipboardEnabled = quickCaptureImageClipboardEnabled;
+            }
+
+            if (QuickCaptureRecentLimit != quickCaptureRecentLimit)
+            {
+                QuickCaptureRecentLimit = quickCaptureRecentLimit;
             }
 
             if (!string.Equals(SelectedQuickCaptureDefaultView, quickCaptureDefaultView, StringComparison.Ordinal))
@@ -1878,6 +1819,11 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
                 ShowImageFilesAsIcons = showImageFilesAsIcons;
             }
 
+            if (ShowHoverButtons != showHoverButtons)
+            {
+                ShowHoverButtons = showHoverButtons;
+            }
+
             if (!string.Equals(SelectedDisplayWidgetChromeMode, displayWidgetChromeMode, StringComparison.Ordinal))
             {
                 SelectedDisplayWidgetChromeMode = displayWidgetChromeMode;
@@ -1903,8 +1849,6 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
             _isApplyingSettingsSnapshot = false;
         }
 
-        OnPropertyChanged(nameof(SelectedManagedDropActionText));
-        OnPropertyChanged(nameof(SelectedManagedDropActionIndex));
         OnPropertyChanged(nameof(SelectedQuickCaptureDefaultViewText));
         OnPropertyChanged(nameof(SelectedQuickCaptureDefaultViewIndex));
         OnPropertyChanged(nameof(SelectedTodoNewTaskPositionText));
@@ -1955,13 +1899,12 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
         _cachedWidgetAnimationSpeedDisplayNames = null;
         _cachedWidgetAnimationSlideDirectionDisplayNames = null;
         _cachedWidgetAnimationEasingIntensityDisplayNames = null;
-        _cachedWidgetChromeModeDisplayNames = null;
+        _cachedDisplayWidgetChromeModeDisplayNames = null;
+        _cachedInteractiveWidgetChromeModeDisplayNames = null;
         _cachedQuickCaptureDefaultViewDisplayNames = null;
         _cachedTodoNewTaskPositionDisplayNames = null;
         _cachedTodoDefaultFilterDisplayNames = null;
         _cachedMusicRhythmStyleDisplayNames = null;
-        _cachedManagedDropActionDisplayNames = null;
-
         OnPropertyChanged(nameof(AvailableThemeDisplayNames));
         OnPropertyChanged(nameof(AvailableTrayIconStyleDisplayNames));
         OnPropertyChanged(nameof(AvailableLanguageDisplayNames));
@@ -1970,20 +1913,18 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(AvailableWidgetAnimationSpeedDisplayNames));
         OnPropertyChanged(nameof(AvailableWidgetAnimationSlideDirectionDisplayNames));
         OnPropertyChanged(nameof(AvailableWidgetAnimationEasingIntensityDisplayNames));
-        OnPropertyChanged(nameof(AvailableWidgetChromeModeDisplayNames));
+        OnPropertyChanged(nameof(AvailableDisplayWidgetChromeModeDisplayNames));
+        OnPropertyChanged(nameof(AvailableInteractiveWidgetChromeModeDisplayNames));
         OnPropertyChanged(nameof(AvailableQuickCaptureDefaultViewDisplayNames));
         OnPropertyChanged(nameof(AvailableTodoNewTaskPositionDisplayNames));
         OnPropertyChanged(nameof(AvailableTodoDefaultFilterDisplayNames));
         OnPropertyChanged(nameof(AvailableMusicRhythmStyleDisplayNames));
-        OnPropertyChanged(nameof(AvailableManagedDropActionDisplayNames));
         OnPropertyChanged(nameof(SelectedThemeText));
         OnPropertyChanged(nameof(SelectedThemeIndex));
         OnPropertyChanged(nameof(SelectedTrayIconStyleText));
         OnPropertyChanged(nameof(SelectedTrayIconStyleIndex));
         OnPropertyChanged(nameof(SelectedLanguageText));
         OnPropertyChanged(nameof(SelectedLanguageIndex));
-        OnPropertyChanged(nameof(SelectedManagedDropActionText));
-        OnPropertyChanged(nameof(SelectedManagedDropActionIndex));
         OnPropertyChanged(nameof(SelectedWidgetCornerPreferenceText));
         OnPropertyChanged(nameof(SelectedWidgetCornerPreferenceIndex));
         OnPropertyChanged(nameof(SelectedWidgetAnimationEffectText));
@@ -2777,6 +2718,7 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
         _currentAccentColor = _themeService.GetEffectiveAccentColor();
         AccentPreviewBrush.Color = _currentAccentColor;
         AccentColorHex = AccentColorHelper.ToHex(_currentAccentColor);
+        OnPropertyChanged(nameof(SelectedAccentColor));
     }
 
     private static string FormatNumber(double value, int decimals)

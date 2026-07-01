@@ -623,32 +623,10 @@ public sealed partial class OnboardingWindow : Window
 
     private void BuildAddFilesOptions()
     {
-        var moveButton = CreateDropActionButton(
-            SettingsService.ManagedDropActionMove,
+        StepOptionPanel.Children.Add(CreateInfoCard(
+            "\uE8AB",
             _localizationService.T("Onboarding.DropAction.MoveTitle"),
-            _localizationService.T("Onboarding.DropAction.MoveDescription"),
-            "\uE8AB");
-        var copyButton = CreateDropActionButton(
-            SettingsService.ManagedDropActionCopy,
-            _localizationService.T("Onboarding.DropAction.CopyTitle"),
-            _localizationService.T("Onboarding.DropAction.CopyDescription"),
-            "\uE8C8");
-
-        StepOptionPanel.Children.Add(new Grid
-        {
-            ColumnSpacing = 10,
-            ColumnDefinitions =
-            {
-                new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) },
-                new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) }
-            },
-            Children =
-            {
-                moveButton,
-                copyButton
-            }
-        });
-        Grid.SetColumn(copyButton, 1);
+            _localizationService.T("Onboarding.DropAction.MoveDescription")));
 
         string path = SettingsService.NormalizeManagedStorageRootPath(_settingsService.Settings.DefaultManagedStorageRootPath);
         StepOptionPanel.Children.Add(CreateInfoCard(
@@ -677,124 +655,6 @@ public sealed partial class OnboardingWindow : Window
             "\uE946",
             _localizationService.T("Onboarding.Step3.NoteTitle"),
             _localizationService.T("Onboarding.Step3.NoteDescription")));
-    }
-
-    private Button CreateDropActionButton(string action, string title, string description, string glyph)
-    {
-        bool selected = string.Equals(_settingsService.Settings.ManagedDropAction, action, StringComparison.OrdinalIgnoreCase);
-        var button = new Button
-        {
-            Background = new SolidColorBrush(Colors.Transparent),
-            BorderBrush = new SolidColorBrush(Colors.Transparent),
-            BorderThickness = new Thickness(0),
-            CornerRadius = new CornerRadius(8),
-            Padding = new Thickness(0),
-            MinHeight = 62,
-            HorizontalContentAlignment = HorizontalAlignment.Stretch,
-            VerticalContentAlignment = VerticalAlignment.Stretch,
-            Content = CreateCompactDropActionContent(glyph, title, description, selected)
-        };
-
-        button.Click += (_, _) =>
-        {
-            _settingsService.Settings.ManagedDropAction = action;
-            _settingsService.SaveDebounced();
-            RenderStep(animate: false);
-        };
-
-        return button;
-    }
-
-    private Grid CreateCompactDropActionContent(string glyph, string title, string description, bool selected)
-    {
-        var content = new Grid
-        {
-            MinHeight = 62,
-            Padding = new Thickness(10, 8, 10, 8),
-            ColumnSpacing = 8,
-            VerticalAlignment = VerticalAlignment.Center,
-            ColumnDefinitions =
-            {
-                new ColumnDefinition { Width = new GridLength(20) },
-                new ColumnDefinition { Width = new GridLength(22) },
-                new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) }
-            }
-        };
-
-        var indicator = new Grid
-        {
-            Width = 18,
-            Height = 18,
-            HorizontalAlignment = HorizontalAlignment.Center,
-            VerticalAlignment = VerticalAlignment.Center
-        };
-        indicator.Children.Add(new Ellipse
-        {
-            Width = 18,
-            Height = 18,
-            StrokeThickness = selected ? 2.6 : 1.2,
-            Stroke = selected ? AccentBrush() : SecondaryTextBrush(),
-            Fill = new SolidColorBrush(Colors.Transparent)
-        });
-        if (selected)
-        {
-            indicator.Children.Add(new Ellipse
-            {
-                Width = 7,
-                Height = 7,
-                Fill = AccentBrush(),
-                HorizontalAlignment = HorizontalAlignment.Center,
-                VerticalAlignment = VerticalAlignment.Center
-            });
-        }
-        content.Children.Add(indicator);
-
-        var iconHost = new Grid
-        {
-            Width = 22,
-            Height = 22,
-            HorizontalAlignment = HorizontalAlignment.Center,
-            VerticalAlignment = VerticalAlignment.Center
-        };
-        iconHost.Children.Add(new FontIcon
-        {
-            Glyph = glyph,
-            FontSize = 18,
-            HorizontalAlignment = HorizontalAlignment.Center,
-            VerticalAlignment = VerticalAlignment.Center,
-            Foreground = AccentBrush()
-        });
-        Grid.SetColumn(iconHost, 1);
-        content.Children.Add(iconHost);
-
-        var textStack = new StackPanel
-        {
-            Spacing = 1,
-            VerticalAlignment = VerticalAlignment.Center,
-            HorizontalAlignment = HorizontalAlignment.Stretch
-        };
-        textStack.Children.Add(new TextBlock
-        {
-            Text = title,
-            LineHeight = 16,
-            FontSize = 13.5,
-            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
-            Foreground = PrimaryTextBrush(),
-            TextTrimming = TextTrimming.CharacterEllipsis
-        });
-        textStack.Children.Add(new TextBlock
-        {
-            Text = description,
-            LineHeight = 14,
-            FontSize = 11.5,
-            Foreground = SecondaryTextBrush(),
-            TextTrimming = TextTrimming.CharacterEllipsis,
-            TextWrapping = TextWrapping.NoWrap
-        });
-        Grid.SetColumn(textStack, 2);
-        content.Children.Add(textStack);
-
-        return content;
     }
 
     private void BuildQuickCaptureOptions()
@@ -990,9 +850,7 @@ public sealed partial class OnboardingWindow : Window
 
     private void BuildAddFilesScene()
     {
-        string badgeKey = string.Equals(_settingsService.Settings.ManagedDropAction, SettingsService.ManagedDropActionCopy, StringComparison.OrdinalIgnoreCase)
-            ? "Onboarding.Scene.CopyBadge"
-            : "Onboarding.Scene.MoveBadge";
+        const string badgeKey = "Onboarding.Scene.MoveBadge";
         string path = SettingsService.NormalizeManagedStorageRootPath(_settingsService.Settings.DefaultManagedStorageRootPath);
 
         DemoScene.Children.Add(CreateDesktopSurface());

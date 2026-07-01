@@ -49,7 +49,25 @@ public sealed partial class SettingsWindow : Window
     private bool _isAppearanceSliderDragging;
     private bool _isRecordingHotkey;
     private bool _isRefreshingFeatureWidgetList;
+    private bool _isSyncingNavigationSelection;
     private string _currentSettingsSection = "General";
+
+    private static readonly IReadOnlyDictionary<string, SettingsSectionRoute> SectionRoutes =
+        new Dictionary<string, SettingsSectionRoute>(StringComparer.Ordinal)
+        {
+            ["General"] = new("General", "Settings.Section.General", null, "General"),
+            ["Appearance"] = new("Appearance", "Settings.Section.Appearance", null, "Appearance"),
+            ["AppearanceDetail"] = new("AppearanceDetail", "Settings.Appearance.DetailTitle", null, "AppearanceDetail"),
+            ["FeatureWidgets"] = new("FeatureWidgets", "Settings.Section.FeatureWidgets", null, "FeatureWidgets"),
+            ["Interaction"] = new("Interaction", "Settings.Section.Interaction", null, "Interaction"),
+            ["Advanced"] = new("Advanced", "Settings.Section.Advanced", null, "Interaction"),
+            ["Maintenance"] = new("Maintenance", "Settings.Section.Maintenance", null, "Maintenance"),
+            ["About"] = new("About", "Settings.Nav.About", null, "About"),
+            ["ManagedStorage"] = new("ManagedStorage", "Settings.ManagedStorage.PageTitle", "AppearanceDetail", "AppearanceDetail"),
+            ["QuickCaptureSettings"] = new("QuickCaptureSettings", "Settings.QuickCapture.Title", "FeatureWidgets", "FeatureWidgets"),
+            ["TodoSettings"] = new("TodoSettings", "Settings.Todo.Title", "FeatureWidgets", "FeatureWidgets"),
+            ["MusicSettings"] = new("MusicSettings", "Settings.Music.Title", "FeatureWidgets", "FeatureWidgets")
+        };
 
     public SettingsViewModel ViewModel { get; }
 
@@ -156,6 +174,11 @@ public sealed partial class SettingsWindow : Window
 
     private void SettingsNavigationView_SelectionChanged(NavigationView sender, NavigationViewSelectionChangedEventArgs args)
     {
+        if (_isSyncingNavigationSelection)
+        {
+            return;
+        }
+
         if (args.SelectedItem is NavigationViewItem { Tag: string sectionTag })
         {
             ShowSettingsSection(sectionTag, isNestedSection: false);
@@ -164,54 +187,16 @@ public sealed partial class SettingsWindow : Window
 
     private void SettingsNavigationView_BackRequested(NavigationView sender, NavigationViewBackRequestedEventArgs args)
     {
-        switch (_currentSettingsSection)
+        if (TryGetSectionRoute(_currentSettingsSection, out var route) &&
+            !string.IsNullOrWhiteSpace(route.ParentTag))
         {
-            case "AppearanceDetail":
-                ShowSettingsSection("AppearanceDetail", isNestedSection: false);
-                SettingsNavigationView.SelectedItem = FileWidgetNavItem;
-                break;
-            case "ManagedStorage":
-                ShowSettingsSection("AppearanceDetail", isNestedSection: false);
-                SettingsNavigationView.SelectedItem = FileWidgetNavItem;
-                break;
-            case "QuickCaptureSettings":
-                ShowSettingsSection("FeatureWidgets", isNestedSection: false);
-                SettingsNavigationView.SelectedItem = FeatureWidgetsNavItem;
-                break;
-            case "TodoSettings":
-                ShowSettingsSection("FeatureWidgets", isNestedSection: false);
-                SettingsNavigationView.SelectedItem = FeatureWidgetsNavItem;
-                break;
-            case "MusicSettings":
-                ShowSettingsSection("FeatureWidgets", isNestedSection: false);
-                SettingsNavigationView.SelectedItem = FeatureWidgetsNavItem;
-                break;
-            default:
-                ShowSettingsSection("FeatureWidgets", isNestedSection: false);
-                SettingsNavigationView.SelectedItem = FeatureWidgetsNavItem;
-                break;
+            NavigateToSettingsSection(route.ParentTag);
         }
     }
 
     public void ShowSection(string sectionTag)
     {
-        bool isNestedSection = sectionTag is
-            "ManagedStorage" or
-            "QuickCaptureSettings" or
-            "TodoSettings" or
-            "MusicSettings";
-
-        ShowSettingsSection(sectionTag, isNestedSection);
-        SettingsNavigationView.SelectedItem = sectionTag switch
-        {
-            "Appearance" => FindNavItemByTag("Appearance"),
-            "AppearanceDetail" or "ManagedStorage" => FileWidgetNavItem,
-            "FeatureWidgets" or "QuickCaptureSettings" or "TodoSettings" or "MusicSettings" => FeatureWidgetsNavItem,
-            "Advanced" or "Interaction" => FindNavItemByTag("Interaction"),
-            "Maintenance" => FindNavItemByTag("Maintenance"),
-            "About" => FindNavItemByTag("About"),
-            _ => GeneralNavItem
-        };
+        NavigateToSettingsSection(sectionTag);
     }
 
     private NavigationViewItem? FindNavItemByTag(string tag)
@@ -226,8 +211,40 @@ public sealed partial class SettingsWindow : Window
         return null;
     }
 
+    private void NavigateToSettingsSection(string sectionTag)
+    {
+        ShowSettingsSection(sectionTag);
+        var navItem = GetNavItemForSection(sectionTag);
+        if (navItem is not null && !ReferenceEquals(SettingsNavigationView.SelectedItem, navItem))
+        {
+            _isSyncingNavigationSelection = true;
+            try
+            {
+                SettingsNavigationView.SelectedItem = navItem;
+            }
+            finally
+            {
+                _isSyncingNavigationSelection = false;
+            }
+        }
+    }
+
+    private NavigationViewItem? GetNavItemForSection(string sectionTag)
+    {
+        return TryGetSectionRoute(sectionTag, out var route)
+            ? FindNavItemByTag(route.NavTag) ?? GeneralNavItem
+            : GeneralNavItem;
+    }
+
     private void ShowSettingsSection(string sectionTag, bool isNestedSection = false)
     {
+        if (!TryGetSectionRoute(sectionTag, out var route))
+        {
+            sectionTag = "General";
+            route = SectionRoutes[sectionTag];
+        }
+
+        isNestedSection = !string.IsNullOrWhiteSpace(route.ParentTag);
         _currentSettingsSection = sectionTag;
         AppearanceSection.Visibility = sectionTag == "Appearance" ? Visibility.Visible : Visibility.Collapsed;
         AppearanceDetailSection.Visibility = sectionTag == "AppearanceDetail" ? Visibility.Visible : Visibility.Collapsed;
@@ -260,6 +277,7 @@ public sealed partial class SettingsWindow : Window
         SettingsNavigationView.IsBackButtonVisible = isNestedSection
             ? NavigationViewBackButtonVisible.Visible
             : NavigationViewBackButtonVisible.Collapsed;
+        UpdateBreadcrumb(route);
 
         PageScroller.ChangeView(null, 0, null, disableAnimation: true);
         DispatcherQueue.TryEnqueue(() =>
@@ -269,38 +287,38 @@ public sealed partial class SettingsWindow : Window
         });
     }
 
-    private async void AccentColorButton_Click(object sender, RoutedEventArgs e)
+    private void UpdateBreadcrumb(SettingsSectionRoute route)
     {
-        if (!ViewModel.CanEditCustomAccent || SettingsRoot.XamlRoot is null)
+        if (string.IsNullOrWhiteSpace(route.ParentTag) ||
+            !TryGetSectionRoute(route.ParentTag, out var parentRoute))
+        {
+            SettingsBreadcrumbBar.Visibility = Visibility.Collapsed;
+            SettingsBreadcrumbBar.ItemsSource = null;
+            return;
+        }
+
+        SettingsBreadcrumbBar.ItemsSource = new[]
+        {
+            new SettingsBreadcrumbItem(parentRoute.Tag, _localizationService.T(parentRoute.TitleKey), 0.62),
+            new SettingsBreadcrumbItem(route.Tag, _localizationService.T(route.TitleKey), 1.0)
+        };
+        SettingsBreadcrumbBar.Visibility = Visibility.Visible;
+    }
+
+    private void SettingsBreadcrumbBar_ItemClicked(BreadcrumbBar sender, BreadcrumbBarItemClickedEventArgs args)
+    {
+        if (args.Item is not SettingsBreadcrumbItem item ||
+            string.Equals(item.SectionTag, _currentSettingsSection, StringComparison.Ordinal))
         {
             return;
         }
 
-        var picker = new ColorPicker
-        {
-            Color = ViewModel.GetCurrentAccentColor(),
-            IsAlphaEnabled = false,
-            IsColorChannelTextInputVisible = true,
-            IsColorSliderVisible = true,
-            IsColorSpectrumVisible = true,
-            IsHexInputVisible = true,
-            MinWidth = 320
-        };
+        NavigateToSettingsSection(item.SectionTag);
+    }
 
-        var dialog = new ContentDialog
-        {
-            XamlRoot = SettingsRoot.XamlRoot,
-            Title = _localizationService.T("Settings.Dialog.AccentTitle"),
-            PrimaryButtonText = _localizationService.T("Common.Ok"),
-            CloseButtonText = _localizationService.T("Common.Cancel"),
-            DefaultButton = ContentDialogButton.Primary,
-            Content = picker
-        };
-
-        if (await dialog.ShowAsync() == ContentDialogResult.Primary)
-        {
-            ViewModel.SetCustomAccentColor(picker.Color);
-        }
+    private static bool TryGetSectionRoute(string sectionTag, out SettingsSectionRoute route)
+    {
+        return SectionRoutes.TryGetValue(sectionTag, out route!);
     }
 
     private void AccentPresetButton_Click(object sender, RoutedEventArgs e)
@@ -349,13 +367,10 @@ public sealed partial class SettingsWindow : Window
                 ViewModel.SelectedWidgetAnimationEasingIntensity = ViewModel.AvailableWidgetAnimationEasingIntensities[combo.SelectedIndex];
                 break;
             case "DisplayWidgetChromeMode":
-                ViewModel.SelectedDisplayWidgetChromeMode = ViewModel.AvailableWidgetChromeModes[combo.SelectedIndex];
+                ViewModel.SelectedDisplayWidgetChromeMode = ViewModel.AvailableDisplayWidgetChromeModes[combo.SelectedIndex];
                 break;
             case "InteractiveWidgetChromeMode":
-                ViewModel.SelectedInteractiveWidgetChromeMode = ViewModel.AvailableWidgetChromeModes[combo.SelectedIndex];
-                break;
-            case "ManagedDropAction":
-                ViewModel.SelectedManagedDropAction = ViewModel.AvailableManagedDropActions[combo.SelectedIndex];
+                ViewModel.SelectedInteractiveWidgetChromeMode = ViewModel.AvailableInteractiveWidgetChromeModes[combo.SelectedIndex];
                 break;
             case "QuickCaptureDefaultView":
                 ViewModel.SelectedQuickCaptureDefaultView = ViewModel.AvailableQuickCaptureDefaultViews[combo.SelectedIndex];
@@ -436,13 +451,6 @@ public sealed partial class SettingsWindow : Window
                 values = ViewModel.AvailableWidgetAnimationEasingIntensities;
                 applyValue = value => ViewModel.SelectedWidgetAnimationEasingIntensity = value;
                 displayValue = ViewModel.GetWidgetAnimationEasingIntensityDisplayName;
-                break;
-
-            case "ManagedDropAction":
-                selectedValue = ViewModel.SelectedManagedDropAction;
-                values = ViewModel.AvailableManagedDropActions;
-                applyValue = value => ViewModel.SelectedManagedDropAction = value;
-                displayValue = ViewModel.GetManagedDropActionDisplayName;
                 break;
 
             default:
@@ -611,12 +619,7 @@ public sealed partial class SettingsWindow : Window
         {
             var resetButton = new Button
             {
-                Width = 32,
-                Height = 32,
-                MinWidth = 32,
-                MinHeight = 32,
                 Padding = new Thickness(0),
-                CornerRadius = new CornerRadius(6),
                 HorizontalAlignment = HorizontalAlignment.Right,
                 VerticalAlignment = VerticalAlignment.Center,
                 Style = (Style)SettingsRoot.Resources["IconActionButtonStyle"],
@@ -676,7 +679,7 @@ public sealed partial class SettingsWindow : Window
     {
         if (sender is Button { Tag: string sectionTag })
         {
-            ShowSettingsSection(sectionTag, isNestedSection: true);
+            NavigateToSettingsSection(sectionTag);
         }
     }
 
@@ -1279,30 +1282,17 @@ public sealed partial class SettingsWindow : Window
 
     private void OpenQuickCaptureSettingsButton_Click(object sender, RoutedEventArgs e)
     {
-        ShowSettingsSection("QuickCaptureSettings", isNestedSection: true);
+        NavigateToSettingsSection("QuickCaptureSettings");
     }
 
     private void OpenTodoSettingsButton_Click(object sender, RoutedEventArgs e)
     {
-        ShowSettingsSection("TodoSettings", isNestedSection: true);
+        NavigateToSettingsSection("TodoSettings");
     }
 
     private void OpenAppearanceDetailButton_Click(object sender, RoutedEventArgs e)
     {
-        ShowSettingsSection("AppearanceDetail", isNestedSection: false);
-        SettingsNavigationView.SelectedItem = FileWidgetNavItem;
-    }
-
-    private void AppearanceBreadcrumbBackButton_Click(object sender, RoutedEventArgs e)
-    {
-        ShowSettingsSection("Appearance", isNestedSection: false);
-        SettingsNavigationView.SelectedItem = FindNavItemByTag("Appearance");
-    }
-
-    private void QuickCaptureBreadcrumbBackButton_Click(object sender, RoutedEventArgs e)
-    {
-        ShowSettingsSection("FeatureWidgets", isNestedSection: false);
-        SettingsNavigationView.SelectedItem = FeatureWidgetsNavItem;
+        NavigateToSettingsSection("AppearanceDetail");
     }
 
     private async void ClearQuickCaptureDataButton_Click(object sender, RoutedEventArgs e)
@@ -1472,13 +1462,7 @@ public sealed partial class SettingsWindow : Window
 
     private void CleanupManagedStorageButton_Click(object sender, RoutedEventArgs e)
     {
-        ShowSettingsSection("ManagedStorage", isNestedSection: true);
-    }
-
-    private void ManagedStorageBreadcrumbBackButton_Click(object sender, RoutedEventArgs e)
-    {
-        ShowSettingsSection("AppearanceDetail", isNestedSection: false);
-        SettingsNavigationView.SelectedItem = FileWidgetNavItem;
+        NavigateToSettingsSection("ManagedStorage");
     }
 
     private void RefreshManagedStorageButton_Click(object sender, RoutedEventArgs e)
@@ -2021,5 +2005,19 @@ public sealed partial class SettingsWindow : Window
         public NativePoint MaxPosition;
         public NativePoint MinTrackSize;
         public NativePoint MaxTrackSize;
+    }
+
+    private sealed record SettingsSectionRoute(
+        string Tag,
+        string TitleKey,
+        string? ParentTag,
+        string NavTag);
+
+    private sealed record SettingsBreadcrumbItem(string SectionTag, string Title, double Opacity)
+    {
+        public override string ToString()
+        {
+            return Title;
+        }
     }
 }

@@ -377,14 +377,12 @@ public partial class WidgetViewModel : ObservableObject, IDisposable
 
     private string GetManagedActionText()
     {
-        return string.Equals(_settingsService.Settings.ManagedDropAction, SettingsService.ManagedDropActionCopy, StringComparison.OrdinalIgnoreCase)
-            ? _localizationService.T("Common.Copy")
-            : _localizationService.T("Common.Move");
+        return _localizationService.T("Common.Move");
     }
 
     private bool ShouldMoveManagedItems()
     {
-        return !string.Equals(_settingsService.Settings.ManagedDropAction, SettingsService.ManagedDropActionCopy, StringComparison.OrdinalIgnoreCase);
+        return true;
     }
 
     private void ApplyLayoutSettings()
