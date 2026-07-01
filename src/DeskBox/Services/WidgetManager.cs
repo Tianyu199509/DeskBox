@@ -29,8 +29,26 @@ public sealed record ManagedStorageFolderCleanupCandidate(
     string Path,
     int ItemCount);
 
+internal sealed record FeatureWidgetHandler(
+    WidgetKind WidgetKind,
+    Func<bool, Task<IDesktopWidgetWindow?>> CreateOrShowAsync,
+    Func<bool, bool, Task> SetEnabledAsync,
+    Action HideLoaded);
+
+internal sealed record WidgetWindowCreationRequest(
+    WidgetConfig Config,
+    bool KeepPreparedForAnimation,
+    bool RevealAfterCreate,
+    bool ShowRaisedWhileInitializing);
+
+internal sealed record WidgetWindowProvider(
+    WidgetKind WidgetKind,
+    Func<WidgetWindowCreationRequest, Task<IDesktopWidgetWindow>> CreateWindowAsync);
+
 internal interface IDesktopWidgetWindow
 {
+    WidgetWindowIdentity Identity { get; }
+    WidgetConfig Config { get; }
     IntPtr WindowHandle { get; }
     bool Visible { get; }
     Windows.Foundation.Rect AnimationBounds { get; }
@@ -40,6 +58,7 @@ internal interface IDesktopWidgetWindow
     void ShowPreparedAtDesktopLayer(bool persistVisibility = true);
     void ShowPreparedRaisedFromTray(bool persistVisibility = true);
     void PlayTrayShowAnimation();
+    void CompleteTrayShowWithoutAnimation();
     bool PrepareTrayHideAnimation(bool persistVisibility = true);
     void PlayPreparedTrayHideAnimation();
     void ActivateRaisedFromTrayBatch();
@@ -47,6 +66,7 @@ internal interface IDesktopWidgetWindow
     void ForceRestoreDesktopLayerFromManager();
     void RestoreDesktopLayerFromManager();
     void HideWindow();
+    void CloseWindow();
 }
 
 /// <summary>
@@ -64,10 +84,14 @@ public sealed class WidgetManager
     private readonly LocalizationService _localizationService;
     private readonly Func<string> _desktopPathProvider;
     private readonly bool _recycleManagedFolderDeletes;
+    private readonly WidgetRegistry _widgetRegistry;
+    private readonly WidgetSessionManager _sessionManager;
     private readonly Dictionary<string, (WidgetWindow Window, WidgetViewModel ViewModel)> _widgets = new();
     private readonly Dictionary<string, (QuickCaptureWidgetWindow Window, QuickCaptureWidgetViewModel ViewModel)> _quickCaptureWidgets = new();
+    private readonly Dictionary<string, ContentWidgetWindow> _contentWidgets = new();
     private readonly HashSet<IntPtr> _widgetWindowHandles = new();
     private readonly HashSet<string> _deletedWidgetIds = [];
+    private readonly HashSet<string> _suppressClosedVisibilityPersistence = [];
     private readonly List<WidgetWindow> _retiredWindows = [];
     private readonly SemaphoreSlim _widgetRenameGate = new(1, 1);
     private const double OffscreenAnimationPadding = 16.0;
@@ -77,27 +101,95 @@ public sealed class WidgetManager
     private bool _widgetsRaisedFromTray;
     private bool _isTogglingWidgetsDesktopLayer;
     private bool _isApplyingAppearancePreview;
-    private bool _lastQuickCaptureEnabled;
+    private readonly Dictionary<WidgetKind, bool> _lastFeatureWidgetEnabledStates = new();
+    private readonly Dictionary<WidgetKind, FeatureWidgetHandler> _featureWidgetHandlers;
+    private readonly Dictionary<WidgetKind, WidgetWindowProvider> _windowProviders;
     private DateTime _lastTrayLayerToggleUtc = DateTime.MinValue;
     private DateTime _suppressTrayLayerRestoreUntilUtc = DateTime.MinValue;
     private long _trayRaiseBatchGeneration;
 
     public IReadOnlyDictionary<string, (WidgetWindow Window, WidgetViewModel ViewModel)> Widgets => _widgets;
     public IReadOnlyDictionary<string, (QuickCaptureWidgetWindow Window, QuickCaptureWidgetViewModel ViewModel)> QuickCaptureWidgets => _quickCaptureWidgets;
+    internal IReadOnlyDictionary<string, ContentWidgetWindow> ContentWidgets => _contentWidgets;
 
     public bool WidgetsRaisedFromTray => _widgetsRaisedFromTray;
+    public WidgetSessionState SessionState => _sessionManager.State;
+    public bool IsWidgetInteractionActive => _sessionManager.IsInteractionActive;
 
     public bool HasVisibleWidgets => _widgets.Values.Any(entry => entry.Window.Visible) ||
-                                     _quickCaptureWidgets.Values.Any(entry => entry.Window.Visible);
+                                     _quickCaptureWidgets.Values.Any(entry => entry.Window.Visible) ||
+                                     _contentWidgets.Values.Any(window => window.Visible);
 
     public bool IsWidgetWindow(IntPtr hwnd)
     {
         return _widgetWindowHandles.Contains(hwnd);
     }
 
+    private IReadOnlyList<IDesktopWidgetWindow> GetLoadedDesktopWindows()
+    {
+        var windows = new List<IDesktopWidgetWindow>(
+            _widgets.Count + _quickCaptureWidgets.Count + _contentWidgets.Count);
+        windows.AddRange(_widgets.Values.Select(entry => (IDesktopWidgetWindow)entry.Window));
+        windows.AddRange(_quickCaptureWidgets.Values.Select(entry => (IDesktopWidgetWindow)entry.Window));
+        windows.AddRange(_contentWidgets.Values.Select(window => (IDesktopWidgetWindow)window));
+        return windows;
+    }
+
+    public void BeginWidgetInteraction(string reason)
+    {
+        _sessionManager.BeginInteraction(reason);
+    }
+
+    public void EndWidgetInteraction(string reason)
+    {
+        _sessionManager.EndInteraction(reason);
+    }
+
     public event Action<WidgetWindow>? WidgetCreated;
     public event Action<string>? WidgetRemoved;
     public event Action<bool>? TrayLayerStateChanged;
+
+    private static bool HasUiThreadAccess()
+    {
+        var dispatcherQueue = App.UiDispatcherQueue;
+        return dispatcherQueue is null || dispatcherQueue.HasThreadAccess;
+    }
+
+    private static Task<T> RunOnUiThreadAsync<T>(Func<Task<T>> action)
+    {
+        var dispatcherQueue = App.UiDispatcherQueue;
+        if (dispatcherQueue is null || dispatcherQueue.HasThreadAccess)
+        {
+            return action();
+        }
+
+        var completion = new TaskCompletionSource<T>(TaskCreationOptions.RunContinuationsAsynchronously);
+        if (!dispatcherQueue.TryEnqueue(async () =>
+        {
+            try
+            {
+                completion.SetResult(await action());
+            }
+            catch (Exception ex)
+            {
+                completion.SetException(ex);
+            }
+        }))
+        {
+            completion.SetException(new InvalidOperationException("Unable to dispatch widget lifecycle operation to the UI thread."));
+        }
+
+        return completion.Task;
+    }
+
+    private static Task RunOnUiThreadAsync(Func<Task> action)
+    {
+        return RunOnUiThreadAsync(async () =>
+        {
+            await action();
+            return true;
+        });
+    }
 
     public bool ShouldHideWidgetsForTrayToggle()
     {
@@ -186,50 +278,124 @@ public sealed class WidgetManager
         _mouseHookProc = TrayLayerMouseHookProc;
         _desktopPathProvider = desktopPathProvider;
         _recycleManagedFolderDeletes = recycleManagedFolderDeletes;
-        _lastQuickCaptureEnabled = _settingsService.Settings.QuickCaptureEnabled;
+        _widgetRegistry = WidgetRegistry.Default;
+        _sessionManager = new WidgetSessionManager(App.LogVerbose);
+        _featureWidgetHandlers = CreateFeatureWidgetHandlers();
+        _windowProviders = CreateWindowProviders();
+        foreach (var kind in FeatureWidgetSettings.FeatureKinds)
+        {
+            _lastFeatureWidgetEnabledStates[kind] = FeatureWidgetSettings.IsEnabled(_settingsService.Settings, kind);
+        }
         _settingsService.SettingsChanged += OnSettingsChanged;
         _settingsService.AppearancePreviewChanged += ApplyAppearancePreview;
         _themeService.AppearanceChanged += ApplyAppearancePreview;
     }
 
-    private void OnSettingsChanged()
+    private Dictionary<WidgetKind, FeatureWidgetHandler> CreateFeatureWidgetHandlers()
     {
-        bool quickCaptureEnabled = _settingsService.Settings.QuickCaptureEnabled;
-        if (quickCaptureEnabled == _lastQuickCaptureEnabled)
-        {
-            return;
-        }
+        FeatureWidgetHandler[] handlers =
+        [
+            new(
+                WidgetKind.QuickCapture,
+                async reveal => await CreateOrShowQuickCaptureWidgetAsync(reveal),
+                SetQuickCaptureEnabledAsync,
+                CloseLoadedQuickCaptureWidgets),
+            new(
+                WidgetKind.Todo,
+                async _ => await CreateTodoWidgetAsync(),
+                SetTodoEnabledAsync,
+                () => HideAndCloseFeatureWidgetAsync(WidgetKind.Todo)),
+            new(
+                WidgetKind.Music,
+                async _ => await CreateSingletonContentFeatureWidgetAsync(WidgetKind.Music),
+                SetContentFeatureWidgetEnabledAsync,
+                () => HideAndCloseFeatureWidgetAsync(WidgetKind.Music))
+        ];
 
-        _lastQuickCaptureEnabled = quickCaptureEnabled;
-        if (!quickCaptureEnabled)
-        {
-            ApplyQuickCaptureEnabledState(enabled: false);
-            return;
-        }
-
-        ApplyQuickCaptureEnabledState(enabled: true);
+        return handlers.ToDictionary(handler => handler.WidgetKind);
     }
 
-    private void ApplyQuickCaptureEnabledState(bool enabled)
+    private Dictionary<WidgetKind, WidgetWindowProvider> CreateWindowProviders()
+    {
+        WidgetWindowProvider[] providers =
+        [
+            new(
+                WidgetKind.File,
+                async request => await CreateWidgetFromConfigAsync(
+                    request.Config,
+                    request.KeepPreparedForAnimation,
+                    request.RevealAfterCreate,
+                    request.ShowRaisedWhileInitializing)),
+            new(
+                WidgetKind.QuickCapture,
+                async request => await CreateQuickCaptureWidgetFromConfigAsync(
+                    request.Config,
+                    request.KeepPreparedForAnimation,
+                    request.RevealAfterCreate,
+                    request.ShowRaisedWhileInitializing)),
+            new(
+                WidgetKind.Todo,
+                async request => await CreateContentWidgetFromConfigAsync(
+                    request.Config,
+                    request.KeepPreparedForAnimation,
+                    request.RevealAfterCreate,
+                    request.ShowRaisedWhileInitializing)),
+            new(
+                WidgetKind.Music,
+                async request => await CreateContentWidgetFromConfigAsync(
+                    request.Config,
+                    request.KeepPreparedForAnimation,
+                    request.RevealAfterCreate,
+                    request.ShowRaisedWhileInitializing))
+        ];
+
+        return providers.ToDictionary(provider => provider.WidgetKind);
+    }
+
+    private void OnSettingsChanged()
+    {
+        foreach (var kind in FeatureWidgetSettings.FeatureKinds)
+        {
+            bool enabled = FeatureWidgetSettings.IsEnabled(_settingsService.Settings, kind);
+            if (_lastFeatureWidgetEnabledStates.TryGetValue(kind, out bool lastEnabled) &&
+                lastEnabled == enabled)
+            {
+                continue;
+            }
+
+            _lastFeatureWidgetEnabledStates[kind] = enabled;
+            ApplyFeatureWidgetEnabledState(kind, enabled);
+        }
+    }
+
+    private void ApplyFeatureWidgetEnabledState(WidgetKind kind, bool enabled)
     {
         if (App.UiDispatcherQueue is { } dispatcherQueue && !dispatcherQueue.HasThreadAccess)
         {
-            dispatcherQueue.TryEnqueue(() => ApplyQuickCaptureEnabledState(enabled));
+            dispatcherQueue.TryEnqueue(() => ApplyFeatureWidgetEnabledState(kind, enabled));
             return;
         }
 
         if (!enabled)
         {
-            HideLoadedQuickCaptureWidgets();
+            if (_featureWidgetHandlers.TryGetValue(kind, out var handler))
+            {
+                handler.HideLoaded();
+            }
+            else
+            {
+                HideAndCloseFeatureWidgetAsync(kind);
+            }
+
             return;
         }
 
-        CreateOrShowQuickCaptureWidgetAsync(reveal: true).ContinueWith(
+        CreateOrShowFeatureWidgetAsync(kind).ContinueWith(
             task =>
             {
                 if (task.Exception is not null)
                 {
-                    App.Log($"[WidgetManager] Failed to show Quick Capture after enabling: {task.Exception}");
+                    App.Log($"[WidgetManager] Failed to show feature widget after enabling kind={kind}: {task.Exception}");
                 }
             },
             TaskContinuationOptions.OnlyOnFaulted);
@@ -254,6 +420,11 @@ public sealed class WidgetManager
             {
                 window.ApplyAppearancePreview();
             }
+
+            foreach (var (_, window) in _contentWidgets.ToList())
+            {
+                window.ApplyAppearancePreview();
+            }
         }
         finally
         {
@@ -266,12 +437,27 @@ public sealed class WidgetManager
     /// </summary>
     public async Task RestoreWidgetsAsync()
     {
-        var configs = _settingsService.Settings.Widgets.Where(widget =>
-                widget.WidgetKind is WidgetKind.File or WidgetKind.QuickCapture &&
+        RepairLegacyContentFeatureFileShells();
+
+        // Dedup feature widgets: each kind should only have one config
+        DeduplicateFeatureWidgets();
+
+        var visibleConfigs = _settingsService.Settings.Widgets.Where(widget =>
                 widget.IsVisible &&
                 !widget.IsDisabled &&
-                (widget.WidgetKind == WidgetKind.File || _settingsService.Settings.QuickCaptureEnabled) &&
                 !IsDeleted(widget.Id))
+            .ToList();
+
+        foreach (var unsupportedConfig in visibleConfigs.Where(widget => !_widgetRegistry.CanCreateWindow(widget.WidgetKind)))
+        {
+            string reason = _widgetRegistry.IsKnown(unsupportedConfig.WidgetKind)
+                ? "not-implemented-yet"
+                : "unknown-kind";
+            App.Log($"[WidgetManager] Skipping widget restore reason={reason} widget={FormatWidget(unsupportedConfig)}");
+        }
+
+        var configs = visibleConfigs.Where(widget =>
+                _widgetRegistry.IsAvailableForSession(widget, _settingsService.Settings))
             .ToList();
 
         using var perfScope = PerformanceLogger.Measure("WidgetManager.RestoreWidgets", $"count={configs.Count}");
@@ -282,14 +468,7 @@ public sealed class WidgetManager
                 using var widgetPerfScope = PerformanceLogger.Measure(
                     "WidgetManager.RestoreWidget",
                     $"id={config.Id} name={config.Name}");
-                if (config.WidgetKind == WidgetKind.QuickCapture)
-                {
-                    await CreateQuickCaptureWidgetFromConfigAsync(config);
-                }
-                else
-                {
-                    await CreateWidgetFromConfigAsync(config);
-                }
+                await CreateRegisteredWidgetFromConfigAsync(config);
             }
             catch (Exception ex)
             {
@@ -297,6 +476,11 @@ public sealed class WidgetManager
             }
 
             await Task.Yield();
+        }
+
+        if (configs.Count > 0)
+        {
+            _sessionManager.MarkDesktopResting("restore-widgets");
         }
     }
 
@@ -331,8 +515,7 @@ public sealed class WidgetManager
 
     public async Task<QuickCaptureWidgetWindow> CreateOrShowQuickCaptureWidgetAsync(bool reveal = true)
     {
-        _settingsService.Settings.QuickCaptureEnabled = true;
-        _lastQuickCaptureEnabled = true;
+        SetFeatureWidgetEnabledState(WidgetKind.QuickCapture, true);
         RestoreDeletedQuickCaptureConfigs();
 
         var config = _settingsService.Settings.Widgets.FirstOrDefault(widget =>
@@ -363,6 +546,141 @@ public sealed class WidgetManager
         return window;
     }
 
+    public async Task<ContentWidgetWindow> CreateTodoWidgetAsync(string? name = null)
+    {
+        SetFeatureWidgetEnabledState(WidgetKind.Todo, true);
+
+        // Single-instance: show existing Todo if one exists
+        var existingConfig = _settingsService.Settings.Widgets
+            .FirstOrDefault(w => w.WidgetKind == WidgetKind.Todo && !IsDeleted(w.Id));
+        if (existingConfig is not null)
+        {
+            await ShowWidgetAsync(existingConfig.Id, reveal: true, autoRestoreOnReveal: false);
+            if (_contentWidgets.TryGetValue(existingConfig.Id, out var existing))
+            {
+                return existing;
+            }
+        }
+
+        name = string.IsNullOrWhiteSpace(name)
+            ? _localizationService.T("Todo.Title")
+            : name;
+
+        var config = new WidgetConfig
+        {
+            Name = name,
+            WidgetKind = WidgetKind.Todo,
+            Width = Math.Max(_settingsService.Settings.DefaultWidgetWidth, 320),
+            Height = Math.Max(_settingsService.Settings.DefaultWidgetHeight, 420)
+        };
+
+        _settingsService.Settings.Widgets.Add(config);
+        await _settingsService.SaveAsync();
+
+        return await CreateContentWidgetFromConfigAsync(config, revealAfterCreate: true);
+    }
+
+    private string GetDefaultFeatureWidgetTitle(WidgetKind kind, WidgetContentDescriptor descriptor)
+    {
+        string key = kind switch
+        {
+            WidgetKind.Todo => "Todo.Title",
+            WidgetKind.Music => "Music.Title",
+            WidgetKind.Weather => "Weather.Title",
+            WidgetKind.Tags => "Tags.Title",
+            WidgetKind.SystemMonitor => "SystemMonitor.Title",
+            _ => string.Empty
+        };
+
+        if (!string.IsNullOrWhiteSpace(key))
+        {
+            string localized = _localizationService.T(key);
+            if (!string.IsNullOrWhiteSpace(localized))
+            {
+                return localized;
+            }
+        }
+
+        return descriptor.DefaultTitle;
+    }
+
+    private async Task<ContentWidgetWindow> CreateSingletonContentFeatureWidgetAsync(WidgetKind kind)
+    {
+        if (!IsContentFeatureWidgetKind(kind))
+        {
+            throw new NotSupportedException($"Widget kind '{kind}' is not a content feature widget.");
+        }
+
+        SetFeatureWidgetEnabledState(kind, true);
+
+        var existingConfig = _settingsService.Settings.Widgets
+            .FirstOrDefault(w => w.WidgetKind == kind && !IsDeleted(w.Id));
+        if (existingConfig is not null)
+        {
+            await ShowWidgetAsync(existingConfig.Id, reveal: true, autoRestoreOnReveal: false);
+            if (_contentWidgets.TryGetValue(existingConfig.Id, out var existing))
+            {
+                return existing;
+            }
+        }
+
+        var descriptor = new WidgetContentFactory(_localizationService).GetDescriptor(kind);
+        var config = new WidgetConfig
+        {
+            Name = GetDefaultFeatureWidgetTitle(kind, descriptor),
+            WidgetKind = kind,
+            Width = kind == WidgetKind.Music
+                ? 380
+                : Math.Max(_settingsService.Settings.DefaultWidgetWidth, 320),
+            Height = kind == WidgetKind.Music
+                ? 190
+                : Math.Max(_settingsService.Settings.DefaultWidgetHeight, 360)
+        };
+
+        _settingsService.Settings.Widgets.Add(config);
+        await _settingsService.SaveAsync();
+
+        return await CreateContentWidgetFromConfigAsync(config, revealAfterCreate: true);
+    }
+
+    public async Task CreateWidgetOfKindAsync(WidgetKind widgetKind)
+    {
+        if (!_widgetRegistry.CanCreateWindow(widgetKind))
+        {
+            throw new NotSupportedException($"Widget kind '{widgetKind}' is not registered as creatable.");
+        }
+
+        switch (widgetKind)
+        {
+            case WidgetKind.File:
+                await CreateManagedWidgetAsync(_localizationService.T("Widget.DefaultNameShort"));
+                break;
+            case WidgetKind.Todo:
+                await CreateTodoWidgetAsync();
+                break;
+            case WidgetKind.Music:
+                await CreateSingletonContentFeatureWidgetAsync(widgetKind);
+                break;
+            default:
+                if (IsContentFeatureWidgetKind(widgetKind))
+                {
+                    await CreateSingletonContentFeatureWidgetAsync(widgetKind);
+                    break;
+                }
+
+                await CreateRegisteredWidgetFromConfigAsync(new WidgetConfig
+                {
+                    Name = GetDefaultFeatureWidgetTitle(
+                        widgetKind,
+                        new WidgetContentFactory(_localizationService).GetDescriptor(widgetKind)),
+                    WidgetKind = widgetKind,
+                    Width = _settingsService.Settings.DefaultWidgetWidth,
+                    Height = _settingsService.Settings.DefaultWidgetHeight
+                }, revealAfterCreate: true);
+                break;
+        }
+    }
+
     private void RestoreDeletedQuickCaptureConfigs()
     {
         var quickCaptureIds = _settingsService.Settings.Widgets
@@ -381,8 +699,7 @@ public sealed class WidgetManager
 
     public async Task SetQuickCaptureEnabledAsync(bool enabled, bool reveal = true)
     {
-        _settingsService.Settings.QuickCaptureEnabled = enabled;
-        _lastQuickCaptureEnabled = enabled;
+        SetFeatureWidgetEnabledState(WidgetKind.QuickCapture, enabled);
 
         if (enabled)
         {
@@ -398,7 +715,7 @@ public sealed class WidgetManager
             config.IsDisabled = false;
         }
 
-        HideLoadedQuickCaptureWidgets();
+        CloseLoadedQuickCaptureWidgets();
         await _settingsService.SaveAsync();
     }
 
@@ -440,7 +757,7 @@ public sealed class WidgetManager
             return false;
         }
 
-        if (config.WidgetKind == WidgetKind.QuickCapture && !_settingsService.Settings.QuickCaptureEnabled)
+        if (!_widgetRegistry.IsAvailableForSession(config, _settingsService.Settings))
         {
             return false;
         }
@@ -463,7 +780,9 @@ public sealed class WidgetManager
                 return true;
             }
 
-            var quickCaptureWindow = await CreateQuickCaptureWidgetFromConfigAsync(config, keepPreparedForAnimation: !reveal);
+            var quickCaptureWindow = (QuickCaptureWidgetWindow)await CreateRegisteredWidgetFromConfigAsync(
+                config,
+                keepPreparedForAnimation: !reveal);
             if (reveal)
             {
                 quickCaptureWindow.RevealFromTray(autoRestoreOnReveal);
@@ -478,8 +797,14 @@ public sealed class WidgetManager
             return true;
         }
 
+        if (IsContentFeatureWidgetKind(config.WidgetKind))
+        {
+            return await ShowContentWidgetAsync(config, reveal);
+        }
+
         if (config.WidgetKind != WidgetKind.File)
         {
+            App.Log($"[WidgetManager] Show skipped reason=unsupported-kind widget={FormatWidget(config)}");
             return false;
         }
 
@@ -514,6 +839,39 @@ public sealed class WidgetManager
         return true;
     }
 
+    private async Task<bool> ShowContentWidgetAsync(WidgetConfig config, bool reveal)
+    {
+        if (_contentWidgets.TryGetValue(config.Id, out var contentWindow))
+        {
+            contentWindow.PrepareTrayShowAnimation();
+            if (reveal)
+            {
+                contentWindow.ShowPreparedRaisedFromTray();
+                contentWindow.PlayTrayShowAnimation();
+            }
+            else
+            {
+                contentWindow.ShowPreparedAtDesktopLayer();
+                contentWindow.CompleteTrayShowWithoutAnimation();
+            }
+
+            return true;
+        }
+
+        var createdWindow = await CreateContentWidgetFromConfigAsync(
+            config,
+            keepPreparedForAnimation: !reveal,
+            revealAfterCreate: reveal);
+        if (!reveal)
+        {
+            createdWindow.PrepareTrayShowAnimation();
+            createdWindow.ShowPreparedAtDesktopLayer();
+            createdWindow.CompleteTrayShowWithoutAnimation();
+        }
+
+        return true;
+    }
+
     /// <summary>
     /// Bring desktop widgets to the front of the normal Z-order from the tray.
     /// </summary>
@@ -524,7 +882,7 @@ public sealed class WidgetManager
         double sinceLastToggleMs = (now - _lastTrayLayerToggleUtc).TotalMilliseconds;
         App.LogVerbose(
             $"[TrayBatch] Raise requested raised={_widgetsRaisedFromTray} toggling={_isTogglingWidgetsDesktopLayer} " +
-            $"sinceLastMs={sinceLastToggleMs:F0} loadedFile={_widgets.Count} loadedQuick={_quickCaptureWidgets.Count}");
+            $"sinceLastMs={sinceLastToggleMs:F0} loadedFile={_widgets.Count} loadedQuick={_quickCaptureWidgets.Count} loadedContent={_contentWidgets.Count}");
         if (_isTogglingWidgetsDesktopLayer || now - _lastTrayLayerToggleUtc < TimeSpan.FromMilliseconds(320))
         {
             App.LogVerbose("[TrayBatch] Raise ignored reason=busy-or-throttled");
@@ -536,10 +894,7 @@ public sealed class WidgetManager
         try
         {
             var candidates = _settingsService.Settings.Widgets
-                .Where(widget => widget.WidgetKind is WidgetKind.File or WidgetKind.QuickCapture &&
-                                 !widget.IsDisabled &&
-                                 !IsDeleted(widget.Id) &&
-                                 (widget.WidgetKind == WidgetKind.File || _settingsService.Settings.QuickCaptureEnabled))
+                .Where(IsSessionCandidate)
                 .ToList();
             App.LogVerbose($"[TrayBatch] Raise candidates={candidates.Count} widgets={FormatWidgetList(candidates)}");
 
@@ -587,7 +942,7 @@ public sealed class WidgetManager
                 }
                 catch (Exception ex)
                 {
-                    App.Log($"[WidgetManager] Failed to show prepared widget from tray hwnd=0x{window.WindowHandle.ToInt64():X}: {ex}");
+                    App.Log($"[WidgetManager] Failed to show prepared widget from tray {FormatHostWindow(window)}: {ex}");
                 }
             }
 
@@ -615,14 +970,11 @@ public sealed class WidgetManager
         using var perfScope = PerformanceLogger.Measure("WidgetManager.SetAllWidgetsVisible", $"visible={visible}");
         App.LogVerbose(
             $"[TrayBatch] SetAllVisible requested visible={visible} raised={_widgetsRaisedFromTray} " +
-            $"loadedFile={_widgets.Count} loadedQuick={_quickCaptureWidgets.Count}");
+            $"loadedFile={_widgets.Count} loadedQuick={_quickCaptureWidgets.Count} loadedContent={_contentWidgets.Count}");
         if (visible)
         {
             var candidates = _settingsService.Settings.Widgets
-                .Where(widget => widget.WidgetKind is WidgetKind.File or WidgetKind.QuickCapture &&
-                                 !widget.IsDisabled &&
-                                 !IsDeleted(widget.Id) &&
-                                 (widget.WidgetKind == WidgetKind.File || _settingsService.Settings.QuickCaptureEnabled))
+                .Where(IsSessionCandidate)
                 .ToList();
             App.LogVerbose($"[TrayBatch] SetAllVisible candidates={candidates.Count} widgets={FormatWidgetList(candidates)}");
 
@@ -667,7 +1019,7 @@ public sealed class WidgetManager
                 }
                 catch (Exception ex)
                 {
-                    App.Log($"[WidgetManager] Failed to show prepared widget at desktop layer hwnd=0x{window.WindowHandle.ToInt64():X}: {ex}");
+                    App.Log($"[WidgetManager] Failed to show prepared widget at desktop layer {FormatHostWindow(window)}: {ex}");
                 }
             }
 
@@ -677,10 +1029,7 @@ public sealed class WidgetManager
             return;
         }
 
-        var hideCandidates = _widgets.Values
-            .Select(entry => entry.Window)
-            .Cast<IDesktopWidgetWindow>()
-            .Concat(_quickCaptureWidgets.Values.Select(entry => (IDesktopWidgetWindow)entry.Window))
+        var hideCandidates = GetLoadedDesktopWindows()
             .Where(window => window.Visible)
             .ToList();
         ApplyTrayAnimationGroupOffset(hideCandidates);
@@ -696,7 +1045,7 @@ public sealed class WidgetManager
             }
             catch (Exception ex)
             {
-                App.Log($"[WidgetManager] Failed to prepare widget hide hwnd=0x{window.WindowHandle.ToInt64():X}: {ex}");
+                App.Log($"[WidgetManager] Failed to prepare widget hide {FormatHostWindow(window)}: {ex}");
             }
         }
 
@@ -704,6 +1053,7 @@ public sealed class WidgetManager
         PlayPreparedTrayHideAnimations(windowsToHide);
 
         SetWidgetsRaisedFromTray(false);
+        _sessionManager.MarkHidden("set-all-hidden");
         _trayRaiseBatchGeneration++;
         StopTrayLayerRestoreMonitor();
         SaveBatchVisibilityState();
@@ -737,6 +1087,15 @@ public sealed class WidgetManager
             quickCaptureEntry.Window.HideWindow();
         }
 
+        if (_contentWidgets.TryGetValue(widgetId, out var contentWindow))
+        {
+            App.Log($"[WidgetManager] Retiring content widget window for delete: {widgetId}");
+            _contentWidgets.Remove(widgetId);
+            _widgetWindowHandles.Remove(contentWindow.WindowHandle);
+            contentWindow.HideWindow();
+            try { contentWindow.Close(); } catch { }
+        }
+
         if (config is not null)
         {
             try
@@ -751,10 +1110,14 @@ public sealed class WidgetManager
             RemoveMappedWidgetShortcut(config);
         }
 
-        _settingsService.RemoveWidget(widgetId);
+        _settingsService.RemoveWidgetImmediate(widgetId);
+        if (config is not null && FeatureWidgetSettings.IsFeatureWidget(config.WidgetKind))
+        {
+            SetFeatureWidgetEnabledState(config.WidgetKind, false);
+        }
         await _settingsService.SaveAsync();
         _deletedWidgetIds.Remove(widgetId);
-        App.Log($"[WidgetManager] Widget delete persisted: {widgetId}");
+        App.Log($"[WidgetManager] Widget delete persisted: {widgetId} kind={config?.WidgetKind} featureEnabled={GetFeatureWidgetEnabledState(config?.WidgetKind)}");
         WidgetRemoved?.Invoke(widgetId);
     }
 
@@ -795,6 +1158,7 @@ public sealed class WidgetManager
         }
 
         config.Name = newName;
+        config.IsDefaultTitle = false;
         _settingsService.UpdateWidget(config);
     }
 
@@ -862,6 +1226,13 @@ public sealed class WidgetManager
         }
     }
 
+    private bool IsSessionCandidate(WidgetConfig widget)
+    {
+        return !widget.IsDisabled &&
+               !IsDeleted(widget.Id) &&
+               _widgetRegistry.IsAvailableForSession(widget, _settingsService.Settings);
+    }
+
     private async Task<IDesktopWidgetWindow?> PrepareWidgetForBatchShowAsync(
         WidgetConfig config,
         bool showRaisedWhileInitializing = false)
@@ -880,7 +1251,7 @@ public sealed class WidgetManager
 
         if (config.WidgetKind == WidgetKind.QuickCapture)
         {
-            if (!_settingsService.Settings.QuickCaptureEnabled)
+            if (!GetFeatureWidgetEnabledState(WidgetKind.QuickCapture))
             {
                 App.LogVerbose($"[TrayBatch] Prepare skipped reason=quick-capture-disabled widget={FormatWidget(config)}");
                 return null;
@@ -888,7 +1259,7 @@ public sealed class WidgetManager
 
             if (_quickCaptureWidgets.TryGetValue(config.Id, out var existingQuickCapture))
             {
-                App.LogVerbose($"[TrayBatch] Prepare useLoaded widget={FormatWidget(config)} hwnd=0x{existingQuickCapture.Window.WindowHandle.ToInt64():X}");
+                App.LogVerbose($"[TrayBatch] Prepare useLoaded widget={FormatWidget(config)} {FormatHostWindow(existingQuickCapture.Window)}");
                 if (!existingQuickCapture.Window.Visible)
                 {
                     existingQuickCapture.Window.PrepareTrayShowAnimation();
@@ -897,7 +1268,7 @@ public sealed class WidgetManager
             }
 
             App.LogVerbose($"[TrayBatch] Prepare createQuick widget={FormatWidget(config)} raisedInit={showRaisedWhileInitializing}");
-            var quickCaptureWindow = await CreateQuickCaptureWidgetFromConfigAsync(
+            var quickCaptureWindow = await CreateRegisteredWidgetFromConfigAsync(
                 config,
                 keepPreparedForAnimation: true,
                 showRaisedWhileInitializing: showRaisedWhileInitializing);
@@ -906,13 +1277,39 @@ public sealed class WidgetManager
 
         if (config.WidgetKind != WidgetKind.File)
         {
+            if (IsContentFeatureWidgetKind(config.WidgetKind))
+            {
+                if (!GetFeatureWidgetEnabledState(config.WidgetKind))
+                {
+                    App.LogVerbose($"[TrayBatch] Prepare skipped reason=feature-disabled widget={FormatWidget(config)}");
+                    return null;
+                }
+
+                if (_contentWidgets.TryGetValue(config.Id, out var existingContent))
+                {
+                    App.LogVerbose($"[TrayBatch] Prepare useLoaded content widget={FormatWidget(config)} {FormatHostWindow(existingContent)}");
+                    if (!existingContent.Visible)
+                    {
+                        existingContent.PrepareTrayShowAnimation();
+                    }
+
+                    return existingContent;
+                }
+
+                App.LogVerbose($"[TrayBatch] Prepare createContent widget={FormatWidget(config)} raisedInit={showRaisedWhileInitializing}");
+                return await CreateRegisteredWidgetFromConfigAsync(
+                    config,
+                    keepPreparedForAnimation: true,
+                    showRaisedWhileInitializing: showRaisedWhileInitializing);
+            }
+
             App.LogVerbose($"[TrayBatch] Prepare skipped reason=unsupported-kind widget={FormatWidget(config)}");
             return null;
         }
 
         if (_widgets.TryGetValue(config.Id, out var existing))
         {
-            App.LogVerbose($"[TrayBatch] Prepare useLoaded widget={FormatWidget(config)} hwnd=0x{existing.Window.WindowHandle.ToInt64():X}");
+            App.LogVerbose($"[TrayBatch] Prepare useLoaded widget={FormatWidget(config)} {FormatHostWindow(existing.Window)}");
             if (!existing.Window.Visible)
             {
                 existing.Window.PrepareTrayShowAnimation();
@@ -921,7 +1318,7 @@ public sealed class WidgetManager
         }
 
         App.LogVerbose($"[TrayBatch] Prepare createFile widget={FormatWidget(config)} raisedInit={showRaisedWhileInitializing}");
-        var window = await CreateWidgetFromConfigAsync(
+        var window = await CreateRegisteredWidgetFromConfigAsync(
             config,
             keepPreparedForAnimation: true,
             showRaisedWhileInitializing: showRaisedWhileInitializing);
@@ -939,7 +1336,7 @@ public sealed class WidgetManager
             }
             catch (Exception ex)
             {
-                App.Log($"[WidgetManager] Failed to play widget show animation hwnd=0x{window.WindowHandle.ToInt64():X}: {ex}");
+                App.Log($"[WidgetManager] Failed to play widget show animation {FormatHostWindow(window)}: {ex}");
             }
         }
     }
@@ -955,7 +1352,7 @@ public sealed class WidgetManager
             }
             catch (Exception ex)
             {
-                App.Log($"[WidgetManager] Failed to prepare widget show animation hwnd=0x{window.WindowHandle.ToInt64():X}: {ex}");
+                App.Log($"[WidgetManager] Failed to prepare widget show animation {FormatHostWindow(window)}: {ex}");
             }
         }
     }
@@ -971,7 +1368,7 @@ public sealed class WidgetManager
             }
             catch (Exception ex)
             {
-                App.Log($"[WidgetManager] Failed to play widget hide animation hwnd=0x{window.WindowHandle.ToInt64():X}: {ex}");
+                App.Log($"[WidgetManager] Failed to play widget hide animation {FormatHostWindow(window)}: {ex}");
             }
         }
     }
@@ -988,15 +1385,13 @@ public sealed class WidgetManager
             window.SetTrayAnimationOffsetOverride(null, null);
         }
 
-        string effect = _settingsService.Settings.WidgetAnimationEffect;
-        if (string.Equals(effect, SettingsService.WidgetAnimationEffectNone, StringComparison.Ordinal) ||
-            string.Equals(effect, SettingsService.WidgetAnimationEffectFade, StringComparison.Ordinal) ||
-            string.Equals(effect, SettingsService.WidgetAnimationEffectScaleFade, StringComparison.Ordinal) ||
-            string.Equals(effect, SettingsService.WidgetAnimationEffectZoom, StringComparison.Ordinal))
+        var options = WidgetAnimationSettings.From(_settingsService.Settings);
+        if (!options.UsesGroupOffset)
         {
             return;
         }
 
+        string effect = options.Effect;
         foreach (var group in windows.GroupBy(GetAnimationWorkAreaKey))
         {
             var groupWindows = group.ToList();
@@ -1074,7 +1469,7 @@ public sealed class WidgetManager
         }
         catch (Exception ex)
         {
-            App.Log($"[WidgetManager] Failed to activate raised widget hwnd=0x{window.WindowHandle.ToInt64():X}: {ex}");
+            App.Log($"[WidgetManager] Failed to activate raised widget {FormatHostWindow(window)}: {ex}");
         }
     }
 
@@ -1120,7 +1515,7 @@ public sealed class WidgetManager
             }
             catch (Exception ex)
             {
-                App.Log($"[WidgetManager] Failed to confirm raised widget topmost hwnd=0x{window.WindowHandle.ToInt64():X}: {ex}");
+                App.Log($"[WidgetManager] Failed to confirm raised widget topmost {FormatHostWindow(window)}: {ex}");
             }
         }
     }
@@ -1232,20 +1627,32 @@ public sealed class WidgetManager
     /// </summary>
     public bool HideWidget(string widgetId)
     {
-        if (!_widgets.TryGetValue(widgetId, out var entry))
+        if (_widgets.TryGetValue(widgetId, out var entry))
         {
-            return false;
+            entry.Window.HideWindow();
+            return true;
         }
 
-        entry.Window.HideWindow();
-        return true;
+        if (_quickCaptureWidgets.TryGetValue(widgetId, out var quickCaptureEntry))
+        {
+            quickCaptureEntry.Window.HideWindow();
+            return true;
+        }
+
+        if (_contentWidgets.TryGetValue(widgetId, out var contentWindow))
+        {
+            contentWindow.HideWindow();
+            return true;
+        }
+
+        return false;
     }
 
-    private void HideLoadedQuickCaptureWidgets()
+    private void CloseLoadedQuickCaptureWidgets()
     {
         foreach (var (_, (window, _)) in _quickCaptureWidgets.ToList())
         {
-            window.HideWindow();
+            CloseFeatureWidgetInstance(window);
         }
     }
 
@@ -1261,15 +1668,7 @@ public sealed class WidgetManager
 
     public void BringAllVisibleWidgetsToFront(IntPtr exceptHwnd = default)
     {
-        foreach (var (_, (window, _)) in _widgets)
-        {
-            if (window.Visible && window.WindowHandle != exceptHwnd)
-            {
-                Win32Helper.BringWindowToFront(window.WindowHandle);
-            }
-        }
-
-        foreach (var (_, (window, _)) in _quickCaptureWidgets)
+        foreach (var window in GetLoadedDesktopWindows())
         {
             if (window.Visible && window.WindowHandle != exceptHwnd)
             {
@@ -1344,8 +1743,8 @@ public sealed class WidgetManager
         }
 
         App.Log(
-            $"[TrayBatch] RestoreDesktopLayer force={force} file={_widgets.Count} quick={_quickCaptureWidgets.Count}");
-        foreach (var (_, (window, _)) in _widgets.ToList())
+            $"[TrayBatch] RestoreDesktopLayer force={force} file={_widgets.Count} quick={_quickCaptureWidgets.Count} content={_contentWidgets.Count}");
+        foreach (var window in GetLoadedDesktopWindows())
         {
             try
             {
@@ -1353,19 +1752,7 @@ public sealed class WidgetManager
             }
             catch (Exception ex)
             {
-                App.Log($"[WidgetManager] Failed to restore file widget desktop layer hwnd=0x{window.WindowHandle.ToInt64():X}: {ex}");
-            }
-        }
-
-        foreach (var (_, (window, _)) in _quickCaptureWidgets.ToList())
-        {
-            try
-            {
-                window.ForceRestoreDesktopLayerFromManager();
-            }
-            catch (Exception ex)
-            {
-                App.Log($"[WidgetManager] Failed to restore quick capture widget desktop layer hwnd=0x{window.WindowHandle.ToInt64():X}: {ex}");
+                App.Log($"[WidgetManager] Failed to restore widget desktop layer {FormatHostWindow(window)}: {ex}");
             }
         }
 
@@ -1498,6 +1885,14 @@ public sealed class WidgetManager
         }
 
         foreach (var (_, (window, _)) in _quickCaptureWidgets)
+        {
+            if (IsCursorOverWindow(window, cursor))
+            {
+                return true;
+            }
+        }
+
+        foreach (var (_, window) in _contentWidgets)
         {
             if (IsCursorOverWindow(window, cursor))
             {
@@ -1650,11 +2045,29 @@ public sealed class WidgetManager
     {
         if (_widgetsRaisedFromTray == raised)
         {
+            if (raised)
+            {
+                _sessionManager.MarkRaisedSession("raised-state-kept");
+            }
+
             return;
         }
 
         App.LogVerbose($"[TrayBatch] RaisedState changed { _widgetsRaisedFromTray } -> {raised}");
         _widgetsRaisedFromTray = raised;
+        if (raised)
+        {
+            _sessionManager.MarkRaisedSession("tray-raised");
+        }
+        else if (HasVisibleWidgets)
+        {
+            _sessionManager.MarkDesktopResting("tray-restored");
+        }
+        else
+        {
+            _sessionManager.MarkHidden("tray-hidden");
+        }
+
         TrayLayerStateChanged?.Invoke(raised);
     }
 
@@ -1668,6 +2081,12 @@ public sealed class WidgetManager
     private static string FormatWidget(WidgetConfig widget)
     {
         return $"{widget.Name}#{ShortId(widget.Id)} kind={widget.WidgetKind} visible={widget.IsVisible} disabled={widget.IsDisabled}";
+    }
+
+    private static string FormatHostWindow(IDesktopWidgetWindow window)
+    {
+        var identity = window.Identity;
+        return $"{identity.LogDisplayName} kind={identity.WidgetKind} hwnd=0x{identity.WindowHandle.ToInt64():X}";
     }
 
     private static string ShortId(string id)
@@ -1742,11 +2161,8 @@ public sealed class WidgetManager
     public async Task ToggleAllWidgetsAsync()
     {
         bool anyVisible = _settingsService.Settings.Widgets.Any(widget =>
-            widget.WidgetKind is WidgetKind.File or WidgetKind.QuickCapture &&
             widget.IsVisible &&
-            !widget.IsDisabled &&
-            (widget.WidgetKind == WidgetKind.File || _settingsService.Settings.QuickCaptureEnabled) &&
-            !IsDeleted(widget.Id));
+            IsSessionCandidate(widget));
 
         await SetAllWidgetsVisibleAsync(!anyVisible);
     }
@@ -1788,7 +2204,22 @@ public sealed class WidgetManager
         }
 
         _quickCaptureWidgets.Clear();
+
+        foreach (var (_, window) in _contentWidgets.ToList())
+        {
+            try
+            {
+                window.Close();
+            }
+            catch
+            {
+            }
+        }
+
+        _contentWidgets.Clear();
+        _widgetWindowHandles.Clear();
         _retiredWindows.Clear();
+        _sessionManager.MarkHidden("close-all");
     }
 
     public int GetDefaultManagedStorageWidgetCount()
@@ -2491,6 +2922,457 @@ public sealed class WidgetManager
                _settingsService.Settings.DeletedWidgetIds.Contains(widgetId);
     }
 
+    internal int RepairLegacyContentFeatureFileShells()
+    {
+        if (!FeatureWidgetSettings.IsEnabled(_settingsService.Settings, WidgetKind.Music))
+        {
+            return 0;
+        }
+
+        bool hasMusicConfig = _settingsService.Settings.Widgets.Any(widget =>
+            widget.WidgetKind == WidgetKind.Music &&
+            !IsDeleted(widget.Id));
+        if (!hasMusicConfig)
+        {
+            return 0;
+        }
+
+        var fileShells = _settingsService.Settings.Widgets
+            .Where(IsLegacyEmptyContentFeatureFileShell)
+            .ToList();
+        if (fileShells.Count == 0)
+        {
+            return 0;
+        }
+
+        foreach (var shell in fileShells)
+        {
+            _settingsService.Settings.Widgets.Remove(shell);
+            if (!_settingsService.Settings.DeletedWidgetIds.Contains(shell.Id))
+            {
+                _settingsService.Settings.DeletedWidgetIds.Add(shell.Id);
+            }
+
+            App.Log($"[WidgetManager] Repaired legacy empty Music file shell: {FormatWidget(shell)}");
+        }
+
+        _settingsService.SaveDebounced();
+        return fileShells.Count;
+    }
+
+    private bool IsLegacyEmptyContentFeatureFileShell(WidgetConfig widget)
+    {
+        return widget.WidgetKind == WidgetKind.File &&
+               string.IsNullOrWhiteSpace(widget.MappedFolderPath) &&
+               !widget.FollowsDefaultStoragePath &&
+               string.IsNullOrWhiteSpace(widget.ManagedFolderName) &&
+               widget.Items.Count == 0 &&
+               IsDefaultMusicTitle(widget.Name);
+    }
+
+    private bool IsDefaultMusicTitle(string title)
+    {
+        string normalized = title.Trim();
+        return string.Equals(normalized, "Music", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(normalized, "\u97F3\u4E50", StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(normalized, _localizationService.T("Music.Title"), StringComparison.OrdinalIgnoreCase);
+    }
+
+    private void DeduplicateFeatureWidgets()
+    {
+        var seen = new HashSet<WidgetKind>();
+        var toRemove = new List<string>();
+
+        foreach (var config in _settingsService.Settings.Widgets.ToList())
+        {
+            if (config.WidgetKind == WidgetKind.File) continue;
+            if (IsDeleted(config.Id)) continue;
+
+            if (!seen.Add(config.WidgetKind))
+            {
+                toRemove.Add(config.Id);
+                App.Log($"[WidgetManager] Dedup: removing duplicate {config.WidgetKind} widget {config.Id}");
+            }
+        }
+
+        if (toRemove.Count > 0)
+        {
+            foreach (var id in toRemove)
+            {
+                _settingsService.Settings.Widgets.RemoveAll(w => w.Id == id);
+                _settingsService.Settings.DeletedWidgetIds.Add(id);
+            }
+            _settingsService.SaveDebounced();
+        }
+    }
+
+    internal IDesktopWidgetWindow? GetFeatureWidget(WidgetKind kind)
+    {
+        if (kind == WidgetKind.QuickCapture)
+        {
+            return _quickCaptureWidgets.Values
+                .Select(entry => (IDesktopWidgetWindow)entry.Window)
+                .FirstOrDefault(window => window.Config.WidgetKind == kind);
+        }
+
+        return _contentWidgets.Values
+            .FirstOrDefault(w => w.Config.WidgetKind == kind);
+    }
+
+    internal bool IsFeatureWidgetEnabled(WidgetKind kind)
+    {
+        return FeatureWidgetSettings.IsFeatureWidget(kind)
+            ? GetFeatureWidgetEnabledState(kind)
+            : GetFeatureWidget(kind)?.Visible == true;
+    }
+
+    internal async Task<IDesktopWidgetWindow?> CreateOrShowFeatureWidgetAsync(WidgetKind kind)
+    {
+        if (!HasUiThreadAccess())
+        {
+            return await RunOnUiThreadAsync(() => CreateOrShowFeatureWidgetAsync(kind));
+        }
+
+        if (_featureWidgetHandlers.TryGetValue(kind, out var handler))
+        {
+            return await handler.CreateOrShowAsync(true);
+        }
+
+        App.Log($"[WidgetManager] CreateOrShowFeatureWidget: unsupported kind={kind}");
+        return null;
+    }
+
+    public async Task SetFeatureWidgetEnabledAsync(WidgetKind kind, bool enabled, bool reveal = true)
+    {
+        if (!HasUiThreadAccess())
+        {
+            await RunOnUiThreadAsync(() => SetFeatureWidgetEnabledAsync(kind, enabled, reveal));
+            return;
+        }
+
+        if (_featureWidgetHandlers.TryGetValue(kind, out var handler))
+        {
+            await handler.SetEnabledAsync(enabled, reveal);
+            return;
+        }
+
+        App.Log($"[WidgetManager] SetFeatureWidgetEnabled: unsupported kind={kind}");
+    }
+
+    public async Task ResetFeatureWidgetAsync(WidgetKind kind)
+    {
+        if (!HasUiThreadAccess())
+        {
+            await RunOnUiThreadAsync(() => ResetFeatureWidgetAsync(kind));
+            return;
+        }
+
+        if (!FeatureWidgetSettings.IsFeatureWidget(kind))
+        {
+            App.Log($"[WidgetManager] ResetFeatureWidget: unsupported kind={kind}");
+            return;
+        }
+
+        bool isEnabled = GetFeatureWidgetEnabledState(kind);
+        var suppressedClosedIds = _settingsService.Settings.Widgets
+            .Where(widget => widget.WidgetKind == kind)
+            .Select(widget => widget.Id)
+            .ToList();
+        foreach (string id in suppressedClosedIds)
+        {
+            _suppressClosedVisibilityPersistence.Add(id);
+        }
+
+        try
+        {
+            CloseLoadedFeatureWidgetWindows(kind);
+
+            var configs = _settingsService.Settings.Widgets
+                .Where(widget => widget.WidgetKind == kind)
+                .ToList();
+            var config = configs.FirstOrDefault(widget => !IsDeleted(widget.Id)) ??
+                         configs.FirstOrDefault();
+
+            foreach (var duplicate in configs.Where(widget => !ReferenceEquals(widget, config)).ToList())
+            {
+                _settingsService.Settings.Widgets.Remove(duplicate);
+                if (!_settingsService.Settings.DeletedWidgetIds.Contains(duplicate.Id))
+                {
+                    _settingsService.Settings.DeletedWidgetIds.Add(duplicate.Id);
+                }
+
+                _deletedWidgetIds.Remove(duplicate.Id);
+                App.Log($"[WidgetManager] ResetFeatureWidget removed duplicate kind={kind} id={duplicate.Id}");
+            }
+
+            if (config is null)
+            {
+                config = CreateDefaultFeatureWidgetConfig(kind, isEnabled);
+                _settingsService.Settings.Widgets.Add(config);
+            }
+            else
+            {
+                ResetFeatureWidgetConfig(config, kind, isEnabled);
+            }
+
+            _settingsService.Settings.DeletedWidgetIds.RemoveAll(id =>
+                string.Equals(id, config.Id, StringComparison.Ordinal));
+            _deletedWidgetIds.Remove(config.Id);
+
+            await _settingsService.SaveAsync();
+            App.Log($"[WidgetManager] ResetFeatureWidget kind={kind} enabled={isEnabled} id={config.Id}");
+
+            if (!isEnabled)
+            {
+                return;
+            }
+
+            switch (kind)
+            {
+                case WidgetKind.QuickCapture:
+                    var quickCaptureWindow = await CreateQuickCaptureWidgetFromConfigAsync(config);
+                    quickCaptureWindow.RevealFromTray(autoRestore: false);
+                    break;
+                case WidgetKind.Todo:
+                case WidgetKind.Music:
+                    await CreateContentWidgetFromConfigAsync(config, revealAfterCreate: true);
+                    break;
+            }
+        }
+        finally
+        {
+            foreach (string id in suppressedClosedIds)
+            {
+                _suppressClosedVisibilityPersistence.Remove(id);
+            }
+        }
+    }
+
+    private WidgetConfig CreateDefaultFeatureWidgetConfig(WidgetKind kind, bool isEnabled)
+    {
+        var config = new WidgetConfig();
+        ResetFeatureWidgetConfig(config, kind, isEnabled);
+        return config;
+    }
+
+    private void ResetFeatureWidgetConfig(WidgetConfig config, WidgetKind kind, bool isEnabled)
+    {
+        var descriptor = new WidgetContentFactory(_localizationService).GetDescriptor(kind);
+        config.WidgetKind = kind;
+        config.Name = kind == WidgetKind.QuickCapture
+            ? _localizationService.T("QuickCapture.Name")
+            : GetDefaultFeatureWidgetTitle(kind, descriptor);
+        config.IsDefaultTitle = true;
+        config.X = 100;
+        config.Y = 100;
+        config.PositionAnchor = null;
+        config.PositionMarginX = 0;
+        config.PositionMarginY = 0;
+        config.PositionMonitorKey = null;
+        (config.Width, config.Height) = GetDefaultFeatureWidgetSize(kind);
+        config.ViewMode = ViewMode.Icon;
+        config.IsVisible = isEnabled;
+        config.IsDisabled = false;
+        config.IsPositionLocked = false;
+        config.IsSizeLocked = false;
+        config.Metadata ??= [];
+        config.Metadata.Clear();
+        config.MappedFolderPath = null;
+        config.FollowsDefaultStoragePath = false;
+        config.ManagedFolderName = null;
+        config.SortMode = WidgetSortMode.Name;
+        config.SortDescending = false;
+        config.Items ??= [];
+        config.Items.Clear();
+    }
+
+    private (double Width, double Height) GetDefaultFeatureWidgetSize(WidgetKind kind)
+    {
+        return kind switch
+        {
+            WidgetKind.Todo => (
+                Math.Max(_settingsService.Settings.DefaultWidgetWidth, 320),
+                Math.Max(_settingsService.Settings.DefaultWidgetHeight, 420)),
+            WidgetKind.Music => (380, 190),
+            _ => (
+                _settingsService.Settings.DefaultWidgetWidth,
+                _settingsService.Settings.DefaultWidgetHeight)
+        };
+    }
+
+    private void CloseLoadedFeatureWidgetWindows(WidgetKind kind)
+    {
+        if (kind == WidgetKind.QuickCapture)
+        {
+            CloseLoadedQuickCaptureWidgets();
+            return;
+        }
+
+        foreach (var window in _contentWidgets.Values
+                     .Where(window => window.Config.WidgetKind == kind)
+                     .ToList())
+        {
+            CloseFeatureWidgetInstance(window);
+        }
+    }
+
+    public async Task SetTodoEnabledAsync(bool enabled, bool reveal = true)
+    {
+        SetFeatureWidgetEnabledState(WidgetKind.Todo, enabled);
+
+        if (enabled)
+        {
+            if (reveal)
+            {
+                await CreateTodoWidgetAsync();
+            }
+            else
+            {
+                var config = _settingsService.Settings.Widgets
+                    .FirstOrDefault(w => w.WidgetKind == WidgetKind.Todo && !IsDeleted(w.Id));
+                if (config is not null)
+                {
+                    config.IsDisabled = false;
+                    config.IsVisible = true;
+                }
+
+                await _settingsService.SaveAsync();
+            }
+
+            return;
+        }
+
+        foreach (var config in _settingsService.Settings.Widgets.Where(widget =>
+                     widget.WidgetKind == WidgetKind.Todo &&
+                     !IsDeleted(widget.Id)))
+        {
+            config.IsVisible = false;
+            config.IsDisabled = false;
+        }
+
+        HideAndCloseFeatureWidgetAsync(WidgetKind.Todo);
+        await _settingsService.SaveAsync();
+    }
+
+    private async Task SetContentFeatureWidgetEnabledAsync(WidgetKind kind, bool enabled, bool reveal = true)
+    {
+        SetFeatureWidgetEnabledState(kind, enabled);
+
+        if (enabled)
+        {
+            if (reveal)
+            {
+                await CreateSingletonContentFeatureWidgetAsync(kind);
+            }
+            else
+            {
+                var config = _settingsService.Settings.Widgets
+                    .FirstOrDefault(w => w.WidgetKind == kind && !IsDeleted(w.Id));
+                if (config is not null)
+                {
+                    config.IsDisabled = false;
+                    config.IsVisible = true;
+                }
+
+                await _settingsService.SaveAsync();
+            }
+
+            return;
+        }
+
+        foreach (var config in _settingsService.Settings.Widgets.Where(widget =>
+                     widget.WidgetKind == kind &&
+                     !IsDeleted(widget.Id)))
+        {
+            config.IsVisible = false;
+            config.IsDisabled = false;
+        }
+
+        HideAndCloseFeatureWidgetAsync(kind);
+        await _settingsService.SaveAsync();
+    }
+
+    private Task SetContentFeatureWidgetEnabledAsync(bool enabled, bool reveal)
+    {
+        return SetContentFeatureWidgetEnabledAsync(WidgetKind.Music, enabled, reveal);
+    }
+
+    private bool GetFeatureWidgetEnabledState(WidgetKind? kind)
+    {
+        return kind is { } featureKind &&
+               FeatureWidgetSettings.IsFeatureWidget(featureKind) &&
+               FeatureWidgetSettings.IsEnabled(_settingsService.Settings, featureKind);
+    }
+
+    private static bool IsContentFeatureWidgetKind(WidgetKind kind)
+    {
+        return FeatureWidgetSettings.IsFeatureWidget(kind) &&
+               kind != WidgetKind.QuickCapture;
+    }
+
+    private void SetFeatureWidgetEnabledState(WidgetKind kind, bool enabled)
+    {
+        FeatureWidgetSettings.SetEnabled(_settingsService.Settings, kind, enabled);
+        _lastFeatureWidgetEnabledStates[kind] = enabled;
+    }
+
+    public void HideAndCloseFeatureWidgetAsync(WidgetKind kind)
+    {
+        var existing = GetFeatureWidget(kind);
+        if (existing is not null)
+        {
+            CloseFeatureWidgetInstance(existing);
+        }
+    }
+
+    private void CloseFeatureWidgetInstance(IDesktopWidgetWindow window)
+    {
+        if (!HasUiThreadAccess())
+        {
+            _ = RunOnUiThreadAsync(() =>
+            {
+                CloseFeatureWidgetInstance(window);
+                return Task.CompletedTask;
+            });
+            return;
+        }
+
+        window.Config.IsVisible = false;
+
+        if (window.Config.WidgetKind == WidgetKind.QuickCapture &&
+            _quickCaptureWidgets.TryGetValue(window.Config.Id, out var quickCaptureEntry) &&
+            ReferenceEquals(quickCaptureEntry.Window, window))
+        {
+            _quickCaptureWidgets.Remove(window.Config.Id);
+            _widgetWindowHandles.Remove(window.WindowHandle);
+            quickCaptureEntry.ViewModel.Dispose();
+        }
+        else if (window.Config.WidgetKind == WidgetKind.File &&
+                 _widgets.TryGetValue(window.Config.Id, out var fileEntry) &&
+                 ReferenceEquals(fileEntry.Window, window))
+        {
+            _widgets.Remove(window.Config.Id);
+            _widgetWindowHandles.Remove(window.WindowHandle);
+            fileEntry.ViewModel.Dispose();
+        }
+        else if (_contentWidgets.TryGetValue(window.Config.Id, out var contentWindow) &&
+                 ReferenceEquals(contentWindow, window))
+        {
+            _contentWidgets.Remove(window.Config.Id);
+            _widgetWindowHandles.Remove(window.WindowHandle);
+        }
+
+        try
+        {
+            window.CloseWindow();
+        }
+        catch
+        {
+        }
+
+        _settingsService.SaveDebounced();
+    }
+
     private string BuildManagedFolderPath(string managedFolderName)
     {
         return Path.Combine(
@@ -2571,12 +3453,17 @@ public sealed class WidgetManager
         bool revealAfterCreate = false,
         bool showRaisedWhileInitializing = false)
     {
+        if (config.WidgetKind != WidgetKind.File)
+        {
+            throw new InvalidOperationException(
+                $"File widget window creation requires a File config. Actual kind: {config.WidgetKind}.");
+        }
+
         if (_widgets.TryGetValue(config.Id, out var existing))
         {
             return existing.Window;
         }
 
-        config.WidgetKind = WidgetKind.File;
         config.IsDisabled = false;
         NormalizeWidgetBounds(config);
 
@@ -2645,6 +3532,131 @@ public sealed class WidgetManager
         return window;
     }
 
+    private async Task<IDesktopWidgetWindow> CreateRegisteredWidgetFromConfigAsync(
+        WidgetConfig config,
+        bool keepPreparedForAnimation = false,
+        bool revealAfterCreate = false,
+        bool showRaisedWhileInitializing = false)
+    {
+        if (!_windowProviders.TryGetValue(config.WidgetKind, out var provider))
+        {
+            throw new NotSupportedException($"Widget kind '{config.WidgetKind}' is not registered as creatable.");
+        }
+
+        return await provider.CreateWindowAsync(new WidgetWindowCreationRequest(
+            config,
+            keepPreparedForAnimation,
+            revealAfterCreate,
+            showRaisedWhileInitializing));
+    }
+
+    private Task<ContentWidgetWindow> CreateContentWidgetFromConfigAsync(
+        WidgetConfig config,
+        bool keepPreparedForAnimation = false,
+        bool revealAfterCreate = false,
+        bool showRaisedWhileInitializing = false)
+    {
+        if (!HasUiThreadAccess())
+        {
+            return RunOnUiThreadAsync(() => CreateContentWidgetFromConfigAsync(
+                config,
+                keepPreparedForAnimation,
+                revealAfterCreate,
+                showRaisedWhileInitializing));
+        }
+
+        if (_contentWidgets.TryGetValue(config.Id, out var existing))
+        {
+            return Task.FromResult(existing);
+        }
+
+        var factory = new ContentWidgetWindowFactory(new WidgetContentFactory(_localizationService), _settingsService);
+        if (!factory.CanCreateContentWindow(config.WidgetKind))
+        {
+            throw new NotSupportedException(
+                $"Widget kind '{config.WidgetKind}' does not support content window creation.");
+        }
+
+        if (!_widgetRegistry.IsAvailableForSession(config, _settingsService.Settings))
+        {
+            throw new InvalidOperationException($"Widget kind '{config.WidgetKind}' is disabled for the current session.");
+        }
+
+        config.IsDisabled = false;
+        NormalizeWidgetBounds(config);
+
+        var window = factory.CreateContentWindow(config);
+        _themeService.TrackWindow(window);
+        _contentWidgets[config.Id] = window;
+        _widgetWindowHandles.Add(window.WindowHandle);
+
+        window.Closed += (_, _) =>
+        {
+            if (_contentWidgets.TryGetValue(config.Id, out var currentWindow) &&
+                ReferenceEquals(currentWindow, window))
+            {
+                _contentWidgets.Remove(config.Id);
+            }
+
+            _widgetWindowHandles.Remove(window.WindowHandle);
+            if (IsDeleted(config.Id) || FindConfig(config.Id) is null)
+            {
+                return;
+            }
+
+            if (_suppressClosedVisibilityPersistence.Contains(config.Id))
+            {
+                return;
+            }
+
+            if (_contentWidgets.ContainsKey(config.Id))
+            {
+                return;
+            }
+
+            config.IsVisible = false;
+            _settingsService.SaveDebounced();
+        };
+
+        try
+        {
+            window.PrepareTrayShowAnimation();
+            if (!keepPreparedForAnimation)
+            {
+                window.ShowPreparedAtDesktopLayer();
+                window.CompleteTrayShowWithoutAnimation();
+            }
+            else if (showRaisedWhileInitializing)
+            {
+                window.ShowPreparedRaisedFromTray();
+                return Task.FromResult(window);
+            }
+
+            if (revealAfterCreate)
+            {
+                window.ShowPreparedRaisedFromTray();
+                window.PlayTrayShowAnimation();
+            }
+        }
+        catch
+        {
+            _contentWidgets.Remove(config.Id);
+            _widgetWindowHandles.Remove(window.WindowHandle);
+
+            try
+            {
+                window.Close();
+            }
+            catch
+            {
+            }
+
+            throw;
+        }
+
+        return Task.FromResult(window);
+    }
+
     private async Task<QuickCaptureWidgetWindow> CreateQuickCaptureWidgetFromConfigAsync(
         WidgetConfig config,
         bool keepPreparedForAnimation = false,
@@ -2678,7 +3690,24 @@ public sealed class WidgetManager
 
         window.Closed += (_, _) =>
         {
+            if (_quickCaptureWidgets.TryGetValue(config.Id, out var currentEntry) &&
+                ReferenceEquals(currentEntry.Window, window))
+            {
+                _quickCaptureWidgets.Remove(config.Id);
+            }
+
+            _widgetWindowHandles.Remove(window.WindowHandle);
             if (IsDeleted(config.Id) || FindConfig(config.Id) is null)
+            {
+                return;
+            }
+
+            if (_suppressClosedVisibilityPersistence.Contains(config.Id))
+            {
+                return;
+            }
+
+            if (_quickCaptureWidgets.ContainsKey(config.Id))
             {
                 return;
             }
@@ -2800,48 +3829,50 @@ public sealed class WidgetManager
         int height = (int)Math.Round(Math.Max(SettingsService.MinWidgetHeight, config.Height));
         int x = (int)Math.Round(config.X);
         int y = (int)Math.Round(config.Y);
+        string? previousAnchor = config.PositionAnchor;
+        double previousMarginX = config.PositionMarginX;
+        double previousMarginY = config.PositionMarginY;
+        string? previousMonitorKey = config.PositionMonitorKey;
 
         var area = DisplayArea.GetFromRect(
             new Windows.Graphics.RectInt32(x, y, width, height),
             DisplayAreaFallback.Nearest);
         var workArea = area.WorkArea;
+        var availableWorkAreas = WidgetPositioningService.GetAvailableWorkAreas();
 
-        int safeX = x;
-        int safeY = y;
-        bool isWildlyOffscreen =
-            safeX + width < workArea.X + 48 ||
-            safeY + height < workArea.Y + 48 ||
-            safeX > workArea.X + workArea.Width - 48 ||
-            safeY > workArea.Y + workArea.Height - 48;
-
-        if (isWildlyOffscreen)
+        var safeBounds = WidgetPositioningService.ResolveBounds(config, workArea, availableWorkAreas);
+        var selectedWorkArea = WidgetPositioningService.SelectWorkArea(config, workArea, availableWorkAreas);
+        bool shouldCaptureAnchor = string.IsNullOrWhiteSpace(config.PositionAnchor) ||
+                                   string.IsNullOrWhiteSpace(config.PositionMonitorKey) ||
+                                   string.Equals(
+                                       config.PositionMonitorKey,
+                                       WidgetPositioningService.CreateMonitorKey(selectedWorkArea),
+                                       StringComparison.Ordinal);
+        if (shouldCaptureAnchor)
         {
-            safeX = workArea.X + 32;
-            safeY = workArea.Y + 32;
-        }
-        else
-        {
-            int maxX = Math.Max(workArea.X, workArea.X + workArea.Width - width);
-            int maxY = Math.Max(workArea.Y, workArea.Y + workArea.Height - height);
-            safeX = Math.Clamp(safeX, workArea.X, maxX);
-            safeY = Math.Clamp(safeY, workArea.Y, maxY);
+            WidgetPositioningService.CaptureAnchor(config, safeBounds, selectedWorkArea);
         }
 
         bool changed =
-            Math.Abs(config.Width - width) > double.Epsilon ||
-            Math.Abs(config.Height - height) > double.Epsilon ||
-            Math.Abs(config.X - safeX) > double.Epsilon ||
-            Math.Abs(config.Y - safeY) > double.Epsilon;
+            Math.Abs(config.Width - safeBounds.Width) > double.Epsilon ||
+            Math.Abs(config.Height - safeBounds.Height) > double.Epsilon ||
+            Math.Abs(config.X - safeBounds.X) > double.Epsilon ||
+            Math.Abs(config.Y - safeBounds.Y) > double.Epsilon ||
+            !string.Equals(config.PositionAnchor, previousAnchor, StringComparison.Ordinal) ||
+            Math.Abs(config.PositionMarginX - previousMarginX) > double.Epsilon ||
+            Math.Abs(config.PositionMarginY - previousMarginY) > double.Epsilon ||
+            !string.Equals(config.PositionMonitorKey, previousMonitorKey, StringComparison.Ordinal);
 
         if (!changed)
         {
             return;
         }
 
-        config.Width = width;
-        config.Height = height;
-        config.X = safeX;
-        config.Y = safeY;
+        config.Width = safeBounds.Width;
+        config.Height = safeBounds.Height;
+        config.X = safeBounds.X;
+        config.Y = safeBounds.Y;
         _settingsService.UpdateWidget(config, notifySubscribers: false);
     }
+
 }

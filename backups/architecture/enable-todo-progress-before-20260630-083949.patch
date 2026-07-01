@@ -1,0 +1,228 @@
+diff --git a/src/DeskBox/App.xaml.cs b/src/DeskBox/App.xaml.cs
+index cd8bbde..166256c 100644
+--- a/src/DeskBox/App.xaml.cs
++++ b/src/DeskBox/App.xaml.cs
+@@ -834,6 +834,20 @@ public partial class App : Application
+             }
+         });
+ 
++        var newTodoWidgetItem = new MenuFlyoutItem
++        {
++            Text = localization.T("Todo.NewWidget"),
++            Width = TrayMenuItemWidth,
++            Icon = new FontIcon { Glyph = "\uE9D5" }
++        };
++        newTodoWidgetItem.Click += async (_, _) => await RunTrayMenuActionAsync(contextMenu, async () =>
++        {
++            if (WidgetManager is not null)
++            {
++                await WidgetManager.CreateTodoWidgetAsync();
++            }
++        });
++
+         var settingsItem = new MenuFlyoutItem
+         {
+             Text = localization.T("Tray.Settings"),
+@@ -862,10 +876,12 @@ public partial class App : Application
+         {
+             bool canCreateWidget = WidgetManager is not null;
+             newWidgetItem.IsEnabled = canCreateWidget;
++            newTodoWidgetItem.IsEnabled = canCreateWidget;
+             mapFolderItem.IsEnabled = canCreateWidget;
+         };
+ 
+         contextMenu.Items.Add(newWidgetItem);
++        contextMenu.Items.Add(newTodoWidgetItem);
+         contextMenu.Items.Add(mapFolderItem);
+         contextMenu.Items.Add(new MenuFlyoutSeparator());
+         contextMenu.Items.Add(openManagedStorageItem);
+diff --git a/src/DeskBox/Services/LocalizationService.cs b/src/DeskBox/Services/LocalizationService.cs
+index f7d1ef5..4865f22 100644
+--- a/src/DeskBox/Services/LocalizationService.cs
++++ b/src/DeskBox/Services/LocalizationService.cs
+@@ -131,6 +131,8 @@ public sealed class LocalizationService
+         ["Common.NewFolder"] = "新建文件夹",
+         ["Common.NewWidget"] = "新建格子",
+         ["Common.NewFolderMapping"] = "新建文件夹映射",
++        ["Todo.Title"] = "待办",
++        ["Todo.NewWidget"] = "新建待办格子",
+         ["Common.Desktop"] = "桌面",
+         ["Common.CurrentLocation"] = "当前位置",
+         ["Common.Items"] = "项",
+@@ -735,6 +737,8 @@ public sealed class LocalizationService
+         ["Common.NewFolder"] = "New Folder",
+         ["Common.NewWidget"] = "New Widget",
+         ["Common.NewFolderMapping"] = "New Folder Mapping",
++        ["Todo.Title"] = "Todo",
++        ["Todo.NewWidget"] = "New Todo Widget",
+         ["Common.Desktop"] = "Desktop",
+         ["Common.CurrentLocation"] = "Current location",
+         ["Common.Items"] = "items",
+diff --git a/src/DeskBox/Services/WidgetContentFactory.cs b/src/DeskBox/Services/WidgetContentFactory.cs
+index 647f023..bd51ca4 100644
+--- a/src/DeskBox/Services/WidgetContentFactory.cs
++++ b/src/DeskBox/Services/WidgetContentFactory.cs
+@@ -44,9 +44,9 @@ public sealed class WidgetContentFactory
+             WidgetKind.Todo,
+             "Todo",
+             "\uE9D5",
+-            WidgetContentStage.Placeholder,
+-            CanShowInCreateEntry: false,
+-            WidgetContentAvailability.Planned,
++            WidgetContentStage.Implemented,
++            CanShowInCreateEntry: true,
++            WidgetContentAvailability.Available,
+             "WidgetContent.Todo.StatusLabel",
+             "WidgetContent.Todo.StatusDescription"),
+         new(
+diff --git a/src/DeskBox/Services/WidgetManager.cs b/src/DeskBox/Services/WidgetManager.cs
+index a2a0cd9..2ebe62b 100644
+--- a/src/DeskBox/Services/WidgetManager.cs
++++ b/src/DeskBox/Services/WidgetManager.cs
+@@ -410,6 +410,26 @@ public sealed class WidgetManager
+         return window;
+     }
+ 
++    public async Task<ContentWidgetWindow> CreateTodoWidgetAsync(string? name = null)
++    {
++        name = string.IsNullOrWhiteSpace(name)
++            ? _localizationService.T("Todo.Title")
++            : name;
++
++        var config = new WidgetConfig
++        {
++            Name = name,
++            WidgetKind = WidgetKind.Todo,
++            Width = Math.Max(_settingsService.Settings.DefaultWidgetWidth, 320),
++            Height = Math.Max(_settingsService.Settings.DefaultWidgetHeight, 420)
++        };
++
++        _settingsService.Settings.Widgets.Add(config);
++        await _settingsService.SaveAsync();
++
++        return await CreateContentWidgetFromConfigAsync(config, revealAfterCreate: true);
++    }
++
+     private void RestoreDeletedQuickCaptureConfigs()
+     {
+         var quickCaptureIds = _settingsService.Settings.Widgets
+@@ -1032,6 +1052,26 @@ public sealed class WidgetManager
+                     showRaisedWhileInitializing: showRaisedWhileInitializing);
+             }
+ #endif
++            if (config.WidgetKind == WidgetKind.Todo)
++            {
++                if (_contentWidgets.TryGetValue(config.Id, out var existingContent))
++                {
++                    App.LogVerbose($"[TrayBatch] Prepare useLoaded content widget={FormatWidget(config)} {FormatHostWindow(existingContent)}");
++                    if (!existingContent.Visible)
++                    {
++                        existingContent.PrepareTrayShowAnimation();
++                    }
++
++                    return existingContent;
++                }
++
++                App.LogVerbose($"[TrayBatch] Prepare createContent widget={FormatWidget(config)} raisedInit={showRaisedWhileInitializing}");
++                return await CreateRegisteredWidgetFromConfigAsync(
++                    config,
++                    keepPreparedForAnimation: true,
++                    showRaisedWhileInitializing: showRaisedWhileInitializing);
++            }
++
+             App.LogVerbose($"[TrayBatch] Prepare skipped reason=unsupported-kind widget={FormatWidget(config)}");
+             return null;
+         }
+@@ -2825,6 +2865,11 @@ public sealed class WidgetManager
+                 keepPreparedForAnimation,
+                 revealAfterCreate,
+                 showRaisedWhileInitializing),
++            WidgetKind.Todo => await CreateContentWidgetFromConfigAsync(
++                config,
++                keepPreparedForAnimation,
++                revealAfterCreate,
++                showRaisedWhileInitializing),
+             _ => throw new NotSupportedException($"Widget kind '{config.WidgetKind}' is not registered as creatable.")
+         };
+     }
+@@ -2840,7 +2885,8 @@ public sealed class WidgetManager
+             return Task.FromResult(existing);
+         }
+ 
+-        if (_widgetRegistry.CanCreateWindow(config.WidgetKind))
++        if (_widgetRegistry.CanCreateWindow(config.WidgetKind) &&
++            config.WidgetKind != WidgetKind.Todo)
+         {
+             throw new NotSupportedException(
+                 $"Widget kind '{config.WidgetKind}' is already handled by registered window creation.");
+diff --git a/src/DeskBox/Services/WidgetRegistry.cs b/src/DeskBox/Services/WidgetRegistry.cs
+index e9f71c3..4bf8022 100644
+--- a/src/DeskBox/Services/WidgetRegistry.cs
++++ b/src/DeskBox/Services/WidgetRegistry.cs
+@@ -56,7 +56,7 @@ public sealed class WidgetRegistry
+             new(WidgetKind.File, CanCreateWindow: true, IsImplemented: true),
+             new(WidgetKind.QuickCapture, CanCreateWindow: true, IsImplemented: true),
+             new(WidgetKind.Weather, CanCreateWindow: false, IsImplemented: false),
+-            new(WidgetKind.Todo, CanCreateWindow: false, IsImplemented: false),
++            new(WidgetKind.Todo, CanCreateWindow: true, IsImplemented: true),
+             new(WidgetKind.Tags, CanCreateWindow: false, IsImplemented: false),
+             new(WidgetKind.Music, CanCreateWindow: false, IsImplemented: false),
+             new(WidgetKind.SystemMonitor, CanCreateWindow: false, IsImplemented: false)
+diff --git a/src/DeskBox/Views/WidgetWindow.xaml.cs b/src/DeskBox/Views/WidgetWindow.xaml.cs
+index 26b0afb..9401829 100644
+--- a/src/DeskBox/Views/WidgetWindow.xaml.cs
++++ b/src/DeskBox/Views/WidgetWindow.xaml.cs
+@@ -4588,13 +4588,21 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
+         return flyout;
+     }
+ 
+-    private void NewWidget_Click(object sender, RoutedEventArgs e)
+-    {
+-        if (App.Current is App app)
+-        {
+-            _ = app.WidgetManager?.CreateManagedWidgetAsync(_localizationService.T("Widget.DefaultNameShort"));
+-        }
+-    }
++    private void NewWidget_Click(object sender, RoutedEventArgs e)
++    {
++        if (App.Current is App app)
++        {
++            _ = app.WidgetManager?.CreateManagedWidgetAsync(_localizationService.T("Widget.DefaultNameShort"));
++        }
++    }
++
++    private void NewTodoWidget_Click(object sender, RoutedEventArgs e)
++    {
++        if (App.Current is App app)
++        {
++            _ = app.WidgetManager?.CreateTodoWidgetAsync();
++        }
++    }
+ 
+     private void AddCreateWidgetItems(MenuFlyout flyout)
+     {
+@@ -4603,11 +4611,19 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
+             Text = _localizationService.T("Common.NewWidget"),
+             Icon = new FontIcon { Glyph = "\uE710" }
+         };
+-        newWidget.Click += NewWidget_Click;
+-        flyout.Items.Add(newWidget);
+-
+-        var mapFolder = new MenuFlyoutItem
+-        {
++        newWidget.Click += NewWidget_Click;
++        flyout.Items.Add(newWidget);
++
++        var newTodoWidget = new MenuFlyoutItem
++        {
++            Text = _localizationService.T("Todo.NewWidget"),
++            Icon = new FontIcon { Glyph = "\uE9D5" }
++        };
++        newTodoWidget.Click += NewTodoWidget_Click;
++        flyout.Items.Add(newTodoWidget);
++
++        var mapFolder = new MenuFlyoutItem
++        {
+             Text = _localizationService.T("Common.NewFolderMapping"),
+             Icon = new FontIcon { Glyph = "\uE8B7" }
+         };

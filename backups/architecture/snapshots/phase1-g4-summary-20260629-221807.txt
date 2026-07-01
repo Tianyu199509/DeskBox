@@ -1,0 +1,8 @@
+﻿branch=codex/widget-architecture-phase1
+head=1481be9
+base=main
+bundle=D:\project\wingezi\backups\architecture\snapshots\codex-widget-architecture-phase1-g4-summary-20260629-221807.bundle
+formatPatchDir=D:\project\wingezi\backups\architecture\snapshots\format-patch-phase1-g4-summary-20260629-221807
+created=20260629-221807
+verification=dotnet build Debug x64 passed; dotnet test Debug x64 passed 106/106
+note=G4 summary checkpoint before any empty widget shell pilot.

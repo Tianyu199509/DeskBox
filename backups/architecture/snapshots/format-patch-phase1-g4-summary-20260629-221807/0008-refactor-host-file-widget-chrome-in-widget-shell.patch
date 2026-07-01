@@ -1,0 +1,494 @@
+From 7260af063121dcaa20054d50e58d3dd3ef033871 Mon Sep 17 00:00:00 2001
+From: Simon <1047078635@qq.com>
+Date: Mon, 29 Jun 2026 19:13:49 +0800
+Subject: [PATCH 08/19] refactor: host file widget chrome in widget shell
+
+---
+ src/DeskBox/Controls/WidgetShell.xaml    |  96 +++++-----
+ src/DeskBox/Controls/WidgetShell.xaml.cs |  33 ++++
+ src/DeskBox/Views/WidgetWindow.xaml      | 218 +++++++++++------------
+ src/DeskBox/Views/WidgetWindow.xaml.cs   |  35 ++--
+ 4 files changed, 211 insertions(+), 171 deletions(-)
+
+diff --git a/src/DeskBox/Controls/WidgetShell.xaml b/src/DeskBox/Controls/WidgetShell.xaml
+index 27e2e1d..08fef65 100644
+--- a/src/DeskBox/Controls/WidgetShell.xaml
++++ b/src/DeskBox/Controls/WidgetShell.xaml
+@@ -30,52 +30,60 @@
+             PointerPressed="TitleBarGrid_PointerPressed"
+             PointerReleased="TitleBarGrid_PointerReleased"
+             RightTapped="TitleBarGrid_RightTapped">
+-            <Grid.ColumnDefinitions>
+-                <ColumnDefinition Width="*" />
+-                <ColumnDefinition Width="Auto" />
+-            </Grid.ColumnDefinitions>
++            <ContentPresenter
++                x:Name="CustomTitleBarContentPresenter"
++                HorizontalAlignment="Stretch"
++                VerticalAlignment="Stretch"
++                Content="{x:Bind TitleBarContent, Mode=OneWay}" />
+ 
+-            <StackPanel
+-                Grid.Column="0"
+-                VerticalAlignment="Center"
+-                Orientation="Horizontal"
+-                Spacing="8">
+-                <FontIcon
+-                    x:Name="TitleIcon"
+-                    FontSize="{Binding TitleIconSize}"
+-                    Glyph="{x:Bind TitleGlyph, Mode=OneWay}" />
+-                <TextBlock
+-                    x:Name="TitleText"
+-                    FontSize="{Binding TitleTextSize}"
+-                    Text="{Binding DisplayName}"
+-                    TextTrimming="CharacterEllipsis"
+-                    VerticalAlignment="Center" />
+-            </StackPanel>
++            <Grid x:Name="DefaultTitleBarContentHost">
++                <Grid.ColumnDefinitions>
++                    <ColumnDefinition Width="*" />
++                    <ColumnDefinition Width="Auto" />
++                </Grid.ColumnDefinitions>
+ 
+-            <StackPanel
+-                x:Name="RightActionButtons"
+-                Grid.Column="1"
+-                Orientation="Horizontal"
+-                Spacing="4"
+-                Opacity="0"
+-                VerticalAlignment="Center">
+-                <Button
+-                    x:Name="MoreButton"
+-                    Width="22"
+-                    Height="22"
+-                    Click="MoreButton_Click"
+-                    Padding="0">
+-                    <FontIcon x:Name="MoreButtonIcon" FontSize="11" Glyph="&#xE712;" />
+-                </Button>
+-                <Button
+-                    x:Name="CloseButton"
+-                    Width="22"
+-                    Height="22"
+-                    Click="CloseButton_Click"
+-                    Padding="0">
+-                    <FontIcon x:Name="CloseButtonIcon" FontSize="11" Glyph="&#xE74D;" />
+-                </Button>
+-            </StackPanel>
++                <StackPanel
++                    Grid.Column="0"
++                    VerticalAlignment="Center"
++                    Orientation="Horizontal"
++                    Spacing="8">
++                    <FontIcon
++                        x:Name="TitleIcon"
++                        FontSize="{Binding TitleIconSize}"
++                        Glyph="{x:Bind TitleGlyph, Mode=OneWay}" />
++                    <TextBlock
++                        x:Name="TitleText"
++                        FontSize="{Binding TitleTextSize}"
++                        Text="{Binding DisplayName}"
++                        TextTrimming="CharacterEllipsis"
++                        VerticalAlignment="Center" />
++                </StackPanel>
++
++                <StackPanel
++                    x:Name="RightActionButtons"
++                    Grid.Column="1"
++                    Orientation="Horizontal"
++                    Spacing="4"
++                    Opacity="0"
++                    VerticalAlignment="Center">
++                    <Button
++                        x:Name="MoreButton"
++                        Width="22"
++                        Height="22"
++                        Click="MoreButton_Click"
++                        Padding="0">
++                        <FontIcon x:Name="MoreButtonIcon" FontSize="11" Glyph="&#xE712;" />
++                    </Button>
++                    <Button
++                        x:Name="CloseButton"
++                        Width="22"
++                        Height="22"
++                        Click="CloseButton_Click"
++                        Padding="0">
++                        <FontIcon x:Name="CloseButtonIcon" FontSize="11" Glyph="&#xE74D;" />
++                    </Button>
++                </StackPanel>
++            </Grid>
+         </Grid>
+ 
+         <Border
+diff --git a/src/DeskBox/Controls/WidgetShell.xaml.cs b/src/DeskBox/Controls/WidgetShell.xaml.cs
+index 1eb77e6..5730e5f 100644
+--- a/src/DeskBox/Controls/WidgetShell.xaml.cs
++++ b/src/DeskBox/Controls/WidgetShell.xaml.cs
+@@ -22,6 +22,13 @@ public sealed partial class WidgetShell : UserControl
+             typeof(WidgetShell),
+             new PropertyMetadata("\uE8A5"));
+ 
++    public static readonly DependencyProperty TitleBarContentProperty =
++        DependencyProperty.Register(
++            nameof(TitleBarContent),
++            typeof(object),
++            typeof(WidgetShell),
++            new PropertyMetadata(null, OnTitleBarContentChanged));
++
+     public event EventHandler<RoutedEventArgs>? MoreRequested;
+     public event EventHandler<RoutedEventArgs>? CloseRequested;
+     public event EventHandler<RightTappedRoutedEventArgs>? TitleRightTapped;
+@@ -46,6 +53,12 @@ public sealed partial class WidgetShell : UserControl
+         set => SetValue(TitleGlyphProperty, value);
+     }
+ 
++    public object? TitleBarContent
++    {
++        get => GetValue(TitleBarContentProperty);
++        set => SetValue(TitleBarContentProperty, value);
++    }
++
+     public Grid TitleBar => TitleBarGrid;
+     public Border BackgroundSurface => BackgroundPlate;
+     public Border Divider => HeaderDivider;
+@@ -67,6 +80,26 @@ public sealed partial class WidgetShell : UserControl
+         ShellRoot.RowDefinitions[0].Height = height;
+     }
+ 
++    public void SetDividerMargin(Thickness margin)
++    {
++        HeaderDivider.Margin = margin;
++    }
++
++    private static void OnTitleBarContentChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
++    {
++        if (d is WidgetShell shell)
++        {
++            shell.UpdateTitleBarContentVisibility();
++        }
++    }
++
++    private void UpdateTitleBarContentVisibility()
++    {
++        bool hasCustomTitleBar = TitleBarContent is not null;
++        CustomTitleBarContentPresenter.Visibility = hasCustomTitleBar ? Visibility.Visible : Visibility.Collapsed;
++        DefaultTitleBarContentHost.Visibility = hasCustomTitleBar ? Visibility.Collapsed : Visibility.Visible;
++    }
++
+     private void MoreButton_Click(object sender, RoutedEventArgs e)
+     {
+         MoreRequested?.Invoke(this, e);
+diff --git a/src/DeskBox/Views/WidgetWindow.xaml b/src/DeskBox/Views/WidgetWindow.xaml
+index a4e7bcb..3c7461f 100644
+--- a/src/DeskBox/Views/WidgetWindow.xaml
++++ b/src/DeskBox/Views/WidgetWindow.xaml
+@@ -3,6 +3,7 @@
+     x:Class="DeskBox.Views.WidgetWindow"
+     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
++    xmlns:controls="using:DeskBox.Controls"
+     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+     mc:Ignorable="d"
+@@ -79,126 +80,117 @@
+             <RowDefinition Height="*" />
+         </Grid.RowDefinitions>
+ 
+-        <Border
+-            x:Name="BackgroundPlate"
+-            Grid.RowSpan="2"
+-            CornerRadius="0"
+-            BorderThickness="0" />
++        <controls:WidgetShell
++            x:Name="FileWidgetShell"
++            Grid.RowSpan="2">
++            <controls:WidgetShell.TitleBarContent>
++                <Grid
++                    x:Name="TitleBarGrid"
++                    Padding="14,7,12,5"
++                    Background="Transparent"
++                    RightTapped="TitleBarGrid_RightTapped"
++                    PointerPressed="TitleBarGrid_PointerPressed"
++                    PointerMoved="TitleBarGrid_PointerMoved"
++                    PointerReleased="TitleBarGrid_PointerReleased">
++                    <Grid.ColumnDefinitions>
++                        <ColumnDefinition Width="*" />
++                        <ColumnDefinition Width="Auto" />
++                    </Grid.ColumnDefinitions>
+ 
+-        <Grid
+-            x:Name="TitleBarGrid"
+-            Grid.Row="0"
+-            Padding="14,7,12,5"
+-            Background="Transparent"
+-            RightTapped="TitleBarGrid_RightTapped"
+-            PointerPressed="TitleBarGrid_PointerPressed"
+-            PointerMoved="TitleBarGrid_PointerMoved"
+-            PointerReleased="TitleBarGrid_PointerReleased">
+-            <Grid.ColumnDefinitions>
+-                <ColumnDefinition Width="*" />
+-                <ColumnDefinition Width="Auto" />
+-            </Grid.ColumnDefinitions>
++                    <Grid Grid.Column="0" Margin="0,0,10,0" VerticalAlignment="Center">
++                        <Grid.ColumnDefinitions>
++                            <ColumnDefinition Width="Auto" />
++                            <ColumnDefinition Width="*" />
++                        </Grid.ColumnDefinitions>
+ 
+-            <Grid Grid.Column="0" Margin="0,0,10,0" VerticalAlignment="Center">
+-                <Grid.ColumnDefinitions>
+-                    <ColumnDefinition Width="Auto" />
+-                    <ColumnDefinition Width="*" />
+-                </Grid.ColumnDefinitions>
++                        <FontIcon
++                            x:Name="TitleIcon"
++                            Glyph="{Binding IconGlyph}"
++                            FontSize="16"
++                            Margin="0,0,8,0"
++                            VerticalAlignment="Center" />
+ 
+-                <FontIcon
+-                    x:Name="TitleIcon"
+-                    Glyph="{Binding IconGlyph}"
+-                    FontSize="16"
+-                    Margin="0,0,8,0"
+-                    VerticalAlignment="Center" />
++                        <Grid
++                            Grid.Column="1"
++                            MaxWidth="300"
++                            HorizontalAlignment="Left"
++                            VerticalAlignment="Center">
++                            <TextBlock
++                                x:Name="TitleText"
++                                MaxWidth="300"
++                                Margin="0,-1,0,0"
++                                FontSize="14"
++                                FontWeight="Normal"
++                                HorizontalAlignment="Left"
++                                IsDoubleTapEnabled="True"
++                                Text="{Binding Name}"
++                                TextAlignment="Left"
++                                TextTrimming="CharacterEllipsis"
++                                VerticalAlignment="Center"
++                                DoubleTapped="TitleText_DoubleTapped" />
+ 
+-                <Grid
+-                    Grid.Column="1"
+-                    MaxWidth="300"
+-                    HorizontalAlignment="Left"
+-                    VerticalAlignment="Center">
+-                    <TextBlock
+-                        x:Name="TitleText"
+-                        MaxWidth="300"
+-                        Margin="0,-1,0,0"
+-                        FontSize="14"
+-                        FontWeight="Normal"
+-                        HorizontalAlignment="Left"
+-                        IsDoubleTapEnabled="True"
+-                        Text="{Binding Name}"
+-                        TextAlignment="Left"
+-                        TextTrimming="CharacterEllipsis"
+-                        VerticalAlignment="Center"
+-                        DoubleTapped="TitleText_DoubleTapped" />
++                            <TextBox
++                                x:Name="TitleEditBox"
++                                Width="168"
++                                MinWidth="120"
++                                MaxWidth="220"
++                                MinHeight="28"
++                                Padding="8,2"
++                                BorderThickness="1"
++                                FontSize="13"
++                                HorizontalAlignment="Left"
++                                HorizontalContentAlignment="Left"
++                                VerticalAlignment="Center"
++                                VerticalContentAlignment="Center"
++                                Visibility="Collapsed"
++                                KeyDown="TitleEditBox_KeyDown"
++                                LostFocus="TitleEditBox_LostFocus" />
++                        </Grid>
++                    </Grid>
+ 
+-                    <TextBox
+-                        x:Name="TitleEditBox"
+-                        Width="168"
+-                        MinWidth="120"
+-                        MaxWidth="220"
+-                        MinHeight="28"
+-                        Padding="8,2"
+-                        BorderThickness="1"
+-                        FontSize="13"
+-                        HorizontalAlignment="Left"
+-                        HorizontalContentAlignment="Left"
++                    <StackPanel
++                        x:Name="RightActionButtons"
++                        Grid.Column="1"
++                        Orientation="Horizontal"
++                        Spacing="4"
+                         VerticalAlignment="Center"
+-                        VerticalContentAlignment="Center"
+-                        Visibility="Collapsed"
+-                        KeyDown="TitleEditBox_KeyDown"
+-                        LostFocus="TitleEditBox_LostFocus" />
+-                </Grid>
+-            </Grid>
++                        Opacity="0">
++                        <StackPanel.RenderTransform>
++                            <TranslateTransform x:Name="RightButtonsTransform" X="12" />
++                        </StackPanel.RenderTransform>
+ 
+-            <StackPanel
+-                x:Name="RightActionButtons"
+-                Grid.Column="1"
+-                Orientation="Horizontal"
+-                Spacing="4"
+-                VerticalAlignment="Center"
+-                Opacity="0">
+-                <StackPanel.RenderTransform>
+-                    <TranslateTransform x:Name="RightButtonsTransform" X="12" />
+-                </StackPanel.RenderTransform>
+-
+-                <Button
+-                    x:Name="AddButton"
+-                    Width="22"
+-                    Height="22"
+-                    Padding="0"
+-                    Visibility="{Binding TopAddButtonVisibility}"
+-                    Click="AddFileButton_Click">
+-                    <FontIcon x:Name="AddButtonIcon" FontSize="11" Glyph="&#xE710;" />
+-                </Button>
++                        <Button
++                            x:Name="AddButton"
++                            Width="22"
++                            Height="22"
++                            Padding="0"
++                            Visibility="{Binding TopAddButtonVisibility}"
++                            Click="AddFileButton_Click">
++                            <FontIcon x:Name="AddButtonIcon" FontSize="11" Glyph="&#xE710;" />
++                        </Button>
+ 
+-                <Button
+-                    x:Name="MoreButton"
+-                    Width="22"
+-                    Height="22"
+-                    Padding="0"
+-                    Click="MoreButton_Click">
+-                    <FontIcon x:Name="MoreButtonIcon" FontSize="11" Glyph="&#xE712;" />
+-                </Button>
++                        <Button
++                            x:Name="MoreButton"
++                            Width="22"
++                            Height="22"
++                            Padding="0"
++                            Click="MoreButton_Click">
++                            <FontIcon x:Name="MoreButtonIcon" FontSize="11" Glyph="&#xE712;" />
++                        </Button>
+ 
+-                <Button
+-                    x:Name="CloseButton"
+-                    Width="22"
+-                    Height="22"
+-                    Padding="0"
+-                    Click="CloseButton_Click">
+-                    <FontIcon x:Name="CloseButtonIcon" FontSize="11" Glyph="&#xE74D;" />
+-                </Button>
+-            </StackPanel>
+-        </Grid>
+-
+-        <Border
+-            x:Name="HeaderDivider"
+-            Grid.Row="0"
+-            Height="1"
+-            Margin="14,0,14,0"
+-            VerticalAlignment="Bottom" />
+-
+-        <Grid Grid.Row="1" Padding="12,10,4,12" AllowDrop="True">
++                        <Button
++                            x:Name="CloseButton"
++                            Width="22"
++                            Height="22"
++                            Padding="0"
++                            Click="CloseButton_Click">
++                            <FontIcon x:Name="CloseButtonIcon" FontSize="11" Glyph="&#xE74D;" />
++                        </Button>
++                    </StackPanel>
++                </Grid>
++            </controls:WidgetShell.TitleBarContent>
++            <controls:WidgetShell.ShellContent>
++                <Grid Padding="12,10,4,12" AllowDrop="True">
+             <ProgressRing
+                 x:Name="LoadingRing"
+                 Width="24"
+@@ -495,7 +487,9 @@
+                     TextTrimming="CharacterEllipsis"
+                     TextWrapping="NoWrap" />
+             </Border>
+-        </Grid>
++                </Grid>
++            </controls:WidgetShell.ShellContent>
++        </controls:WidgetShell>
+ 
+ 
+         <Grid x:Name="ResizeGrid" Grid.RowSpan="2" IsHitTestVisible="True">
+diff --git a/src/DeskBox/Views/WidgetWindow.xaml.cs b/src/DeskBox/Views/WidgetWindow.xaml.cs
+index 9627ec2..fa4947d 100644
+--- a/src/DeskBox/Views/WidgetWindow.xaml.cs
++++ b/src/DeskBox/Views/WidgetWindow.xaml.cs
+@@ -138,10 +138,12 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
+     private DispatcherQueueTimer? _topMostSafetyTimer;
+     private bool _isFileDropSubclassInstalled;
+     private TransitionCollection? _savedGridItemTransitions;
+-    private TransitionCollection? _savedListItemTransitions;
+-
+-    private Microsoft.UI.Composition.Visual? _cachedRootVisual;
+-
++    private TransitionCollection? _savedListItemTransitions;
++
++    private Microsoft.UI.Composition.Visual? _cachedRootVisual;
++    private Border BackgroundPlate => FileWidgetShell.BackgroundSurface;
++    private Border HeaderDivider => FileWidgetShell.Divider;
++
+     public WidgetViewModel ViewModel { get; }
+ 
+     public IntPtr WindowHandle => _hWnd;
+@@ -180,9 +182,10 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
+         InitializeComponent();
+         RootGrid.DataContext = ViewModel;
+ 
+-        ApplyLocalizedText();
+-
+-        _hWnd = WindowNative.GetWindowHandle(this);
++        ApplyLocalizedText();
++        FileWidgetShell.SetDividerMargin(new Thickness(14, 0, 14, 0));
++
++        _hWnd = WindowNative.GetWindowHandle(this);
+         _windowId = Win32Interop.GetWindowIdFromWindow(_hWnd);
+         _appWindow = AppWindow.GetFromWindowId(_windowId);
+ 
+@@ -1809,14 +1812,16 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
+         CloseButton.Height = btnSize;
+ 
+         double btnIconSize = Math.Clamp(titleIconSize - 3, 10, 15);
+-        AddButtonIcon.FontSize = btnIconSize;
+-        MoreButtonIcon.FontSize = btnIconSize;
+-        CloseButtonIcon.FontSize = btnIconSize;
+-
+-        double rowHeight = Math.Clamp(titleIconSize + 32, 40, 54);
+-        RootGrid.RowDefinitions[0].Height = new GridLength(rowHeight);
+-
+-        double padH = Math.Clamp(Math.Round(titleIconSize * 0.9), 10, 16);
++        AddButtonIcon.FontSize = btnIconSize;
++        MoreButtonIcon.FontSize = btnIconSize;
++        CloseButtonIcon.FontSize = btnIconSize;
++
++        double rowHeight = Math.Clamp(titleIconSize + 32, 40, 54);
++        var titleRowHeight = new GridLength(rowHeight);
++        RootGrid.RowDefinitions[0].Height = titleRowHeight;
++        FileWidgetShell.SetTitleBarRowHeight(titleRowHeight);
++
++        double padH = Math.Clamp(Math.Round(titleIconSize * 0.9), 10, 16);
+         double padT = Math.Clamp(Math.Round(titleIconSize * 0.5), 4, 10);
+         double padB = Math.Clamp(Math.Round(titleIconSize * 0.35), 3, 8);
+         TitleBarGrid.Padding = new Thickness(padH, padT, padH - 2, padB);
+-- 
+2.54.0.windows.1
+

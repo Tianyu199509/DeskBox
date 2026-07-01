@@ -41,6 +41,7 @@ public sealed class FileService
     public async Task<List<WidgetItem>> EnumerateDirectoryAsync(
         string directoryPath,
         bool hideShortcutArrowOverlay = false,
+        bool showImageFilesAsIcons = false,
         bool showFileExtensions = false,
         bool hideShortcutExtensionWhenShowingFileExtensions = true,
         bool loadIcons = true,
@@ -62,6 +63,7 @@ public sealed class FileService
             var item = await CreateWidgetItemAsync(
                 entry,
                 hideShortcutArrowOverlay,
+                showImageFilesAsIcons,
                 showFileExtensions,
                 hideShortcutExtensionWhenShowingFileExtensions,
                 loadIcons);
@@ -78,6 +80,7 @@ public sealed class FileService
     public async Task<WidgetItem> CreateWidgetItemAsync(
         string path,
         bool hideShortcutArrowOverlay = false,
+        bool showImageFilesAsIcons = false,
         bool showFileExtensions = false,
         bool hideShortcutExtensionWhenShowingFileExtensions = true,
         bool loadIcon = true,
@@ -154,7 +157,7 @@ public sealed class FileService
 
         if (loadIcon)
         {
-            item.Icon = await GetIconAsync(path, hideShortcutArrowOverlay);
+            item.Icon = await GetIconAsync(path, hideShortcutArrowOverlay, showImageFilesAsIcons);
         }
 
         return item;
@@ -163,6 +166,7 @@ public sealed class FileService
     private async Task<WidgetItem> CreateWidgetItemAsync(
         FileSystemEntrySnapshot entry,
         bool hideShortcutArrowOverlay = false,
+        bool showImageFilesAsIcons = false,
         bool showFileExtensions = false,
         bool hideShortcutExtensionWhenShowingFileExtensions = true,
         bool loadIcon = true)
@@ -196,7 +200,7 @@ public sealed class FileService
 
         if (loadIcon)
         {
-            item.Icon = await GetIconAsync(entry.Path, hideShortcutArrowOverlay);
+            item.Icon = await GetIconAsync(entry.Path, hideShortcutArrowOverlay, showImageFilesAsIcons);
         }
 
         return item;
@@ -205,6 +209,7 @@ public sealed class FileService
     public async Task<WidgetItem?> TryCreateWidgetItemAsync(
         string path,
         bool hideShortcutArrowOverlay = false,
+        bool showImageFilesAsIcons = false,
         bool showFileExtensions = false,
         bool hideShortcutExtensionWhenShowingFileExtensions = true,
         bool loadIcon = true,
@@ -218,6 +223,7 @@ public sealed class FileService
         return await CreateWidgetItemAsync(
             path,
             hideShortcutArrowOverlay,
+            showImageFilesAsIcons,
             showFileExtensions,
             hideShortcutExtensionWhenShowingFileExtensions,
             loadIcon,
@@ -341,14 +347,20 @@ public sealed class FileService
             : nameWithoutExtension;
     }
 
-    public Task<BitmapImage?> GetIconAsync(string path, bool hideShortcutArrowOverlay = false)
+    public Task<BitmapImage?> GetIconAsync(
+        string path,
+        bool hideShortcutArrowOverlay = false,
+        bool showImageFilesAsIcons = false)
     {
-        return IconHelper.GetIconAsync(path, hideShortcutArrowOverlay);
+        return IconHelper.GetIconAsync(path, hideShortcutArrowOverlay, showImageFilesAsIcons);
     }
 
-    public void ClearIconCache(string path, bool hideShortcutArrowOverlay = false)
+    public void ClearIconCache(
+        string path,
+        bool hideShortcutArrowOverlay = false,
+        bool showImageFilesAsIcons = false)
     {
-        IconHelper.ClearIconCache(path, hideShortcutArrowOverlay);
+        IconHelper.ClearIconCache(path, hideShortcutArrowOverlay, showImageFilesAsIcons);
     }
 
     public Task<int> CountVisibleChildrenAsync(string folderPath)

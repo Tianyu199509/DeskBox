@@ -1,0 +1,85 @@
+﻿diff --git a/docs/architecture/widget_architecture_phase1_progress.md b/docs/architecture/widget_architecture_phase1_progress.md
+index ad851d8..aab32cd 100644
+--- a/docs/architecture/widget_architecture_phase1_progress.md
++++ b/docs/architecture/widget_architecture_phase1_progress.md
+@@ -23,6 +23,7 @@
+ | `c39433a` | F.2：随记菜单弹窗接入 Session 记录 | 已手测 |
+ | `51ce88b` | F.3：文件格子部分交互接入 Session 记录 | 已手测 |
+ | `7260af0` | E.1：文件格子外壳接入 `WidgetShell`，内容区和业务逻辑保持不变 | 已手测 |
++| `ac62a44` | E.2：补充 `WidgetShell` 过渡 API 说明并更新迁移进度 | 已测试 |
+ 
+ ## 3. 已完成范围
+ 
+@@ -53,6 +54,7 @@
+ - 文件格子已经接入 `WidgetShell` 外壳。
+ - 文件格子使用自定义标题栏插槽保留原有标题编辑、添加按钮、更多按钮、关闭按钮和按钮动画。
+ - 文件格子内容区、拖拽、重命名、选择框、resize、迁移遮罩仍保留原窗口逻辑。
++- 文件格子内容区已标出未来 `FileWidgetContent` 边界，但尚未迁移。
+ 
+ ### 3.5 IWidgetContent
+ 
+@@ -163,16 +165,31 @@
+ - 标题栏右键菜单正常。
+ - F7 / 托盘行为正常。
+ 
+-## 9. 下一步建议
++## 9. E.3 前置整理记录
+ 
+-### 推荐下一步：E.3 前置整理或阶段 G.1
++已完成低风险边界整理：
+ 
+-当前不建议马上抽 `FileWidgetContent`。文件内容区仍包含拖拽、选择框、重命名、空状态、toast、GridView/ListView 等大量耦合逻辑，直接迁移风险较高。
++- `WidgetWindow.xaml` 中的文件内容区根节点命名为 `FileWidgetContentHost`。
++- 用注释明确未来 `FileWidgetContent` 应整体迁移的范围。
++- 未移动 XAML。
++- 未改变拖拽、重命名、选择框、toast、GridView/ListView、resize、F7 或层级逻辑。
+ 
+-更稳的两个选择：
++后续如果抽 `FileWidgetContent`，应把以下内容作为一个整体迁移，而不是拆散迁移：
+ 
+-1. E.3 前置整理：只给文件内容区加命名边界和注释，确认未来哪些区域会进入 `FileWidgetContent`，不移动代码。
+-2. G.1 生命周期 controller 试点：先抽不改变行为的组合对象，例如只封装窗口日志/状态查询，不接管 AppWindow、DWM 或层级。
++- 加载状态。
++- 空状态。
++- 图标视图和列表视图。
++- 选择框 overlay。
++- 文件重命名编辑框。
++- 状态 toast。
++
++## 10. 下一步建议
++
++### 推荐下一步：阶段 G.1 生命周期 controller 试点
++
++当前仍不建议马上抽 `FileWidgetContent`。文件内容区仍包含拖拽、选择框、重命名、空状态、toast、GridView/ListView 等大量耦合逻辑，直接迁移风险较高。
++
++更稳的下一步是 G.1：先抽不改变行为的组合对象，例如只封装窗口日志/状态查询，不接管 AppWindow、DWM 或层级。
+ 
+ ### 暂不建议直接做
+ 
+@@ -181,7 +198,7 @@
+ - 不建议让 `WidgetSessionManager` 接管层级恢复。
+ - 不建议引入天气/Todo 等新功能入口。
+ 
+-## 10. 后续施工护栏
++## 11. 后续施工护栏
+ 
+ 每次只动一个目标：
+ 
+diff --git a/src/DeskBox/Views/WidgetWindow.xaml b/src/DeskBox/Views/WidgetWindow.xaml
+index 3c7461f..54bc3c9 100644
+--- a/src/DeskBox/Views/WidgetWindow.xaml
++++ b/src/DeskBox/Views/WidgetWindow.xaml
+@@ -190,7 +190,12 @@
+                 </Grid>
+             </controls:WidgetShell.TitleBarContent>
+             <controls:WidgetShell.ShellContent>
+-                <Grid Padding="12,10,4,12" AllowDrop="True">
++                <!-- Phase E.3: future FileWidgetContent boundary. Keep drag/drop, rename, selection, toast,
++                     and view switching together until this area is extracted as one unit. -->
++                <Grid
++                    x:Name="FileWidgetContentHost"
++                    Padding="12,10,4,12"
++                    AllowDrop="True">
+             <ProgressRing
+                 x:Name="LoadingRing"
+                 Width="24"

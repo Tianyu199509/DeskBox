@@ -31,6 +31,7 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
     private readonly SettingsService _settingsService;
     private readonly ThemeService _themeService;
     private readonly LocalizationService _localizationService;
+    private readonly WidgetContentFactory _widgetContentFactory;
     private Color _currentAccentColor;
     private string _selectedTheme = ThemeSystem;
     private string _selectedTrayIconStyle = TrayIconStyleSystem;
@@ -41,6 +42,12 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
     private string _selectedWidgetAnimationSpeed = SettingsService.WidgetAnimationSpeedStandard;
     private string _selectedWidgetAnimationSlideDirection = SettingsService.WidgetAnimationSlideDirectionRight;
     private string _selectedWidgetAnimationEasingIntensity = SettingsService.WidgetAnimationEasingStandard;
+    private string _selectedDisplayWidgetChromeMode = SettingsService.WidgetChromeModeOverlay;
+    private string _selectedInteractiveWidgetChromeMode = SettingsService.WidgetChromeModeStandard;
+    private string _selectedQuickCaptureDefaultView = SettingsService.QuickCaptureDefaultViewRecords;
+    private string _selectedTodoNewTaskPosition = SettingsService.TodoNewTaskPositionTop;
+    private string _selectedTodoDefaultFilter = SettingsService.TodoDefaultFilterAll;
+    private string _selectedMusicRhythmStyle = SettingsService.MusicRhythmStyleSoftWave;
     private bool _useSystemAccentColor;
     private string _accentColorHex = AccentColorHelper.DefaultAccentColorHex;
     private string _managedStorageRootPath = SettingsService.GetDefaultManagedStorageRootPath();
@@ -68,12 +75,18 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
     private string[]? _cachedWidgetAnimationSpeedDisplayNames;
     private string[]? _cachedWidgetAnimationSlideDirectionDisplayNames;
     private string[]? _cachedWidgetAnimationEasingIntensityDisplayNames;
+    private string[]? _cachedWidgetChromeModeDisplayNames;
+    private string[]? _cachedQuickCaptureDefaultViewDisplayNames;
+    private string[]? _cachedTodoNewTaskPositionDisplayNames;
+    private string[]? _cachedTodoDefaultFilterDisplayNames;
+    private string[]? _cachedMusicRhythmStyleDisplayNames;
 
     [ObservableProperty] private bool _autoStart;
     [ObservableProperty] private bool _doubleClickToOpen;
     [ObservableProperty] private double _defaultWidth;
     [ObservableProperty] private double _defaultHeight;
     [ObservableProperty] private bool _hideShortcutArrowOverlay;
+    [ObservableProperty] private bool _showImageFilesAsIcons;
     [ObservableProperty] private bool _showHoverButtons = true;
     [ObservableProperty] private bool _showListItemDetails;
     [ObservableProperty] private double _widgetOpacity = SettingsService.DefaultWidgetOpacity;
@@ -86,6 +99,14 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
     [ObservableProperty] private bool _showFileExtensions;
     [ObservableProperty] private bool _hideShortcutExtensionWhenShowingFileExtensions = true;
     [ObservableProperty] private bool _quickCaptureEnabled;
+    [ObservableProperty] private bool _todoEnabled;
+    [ObservableProperty] private bool _todoShowCompletedTasks = true;
+    [ObservableProperty] private bool _todoShowFooterStats = true;
+    [ObservableProperty] private bool _todoShowClearCompletedButton = true;
+    [ObservableProperty] private bool _todoConfirmBeforeDelete;
+    [ObservableProperty] private bool _musicUseArtworkBackdrop = true;
+    [ObservableProperty] private bool _musicShowRhythmBars = true;
+    [ObservableProperty] private bool _musicEnableCoverHoverMotion = true;
     [ObservableProperty] private bool _quickCaptureClipboardEnabled;
     [ObservableProperty] private bool _quickCaptureImageClipboardEnabled = true;
     [ObservableProperty] private int _quickCaptureRecentLimit = QuickCaptureService.DefaultRecentLimit;
@@ -360,6 +381,225 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
 
     public string SelectedWidgetAnimationEasingIntensityText => GetWidgetAnimationEasingIntensityDisplayName(SelectedWidgetAnimationEasingIntensity);
     public int SelectedWidgetAnimationEasingIntensityIndex => Array.IndexOf(AvailableWidgetAnimationEasingIntensities, _selectedWidgetAnimationEasingIntensity);
+
+    public string SelectedDisplayWidgetChromeMode
+    {
+        get => _selectedDisplayWidgetChromeMode;
+        set
+        {
+            if (!SetProperty(ref _selectedDisplayWidgetChromeMode, NormalizeWidgetChromeModeSetting(value, WidgetChromeMode.Overlay)))
+            {
+                return;
+            }
+
+            if (_isRestoringDefaults || _isApplyingSettingsSnapshot)
+            {
+                return;
+            }
+
+            _settingsService.Settings.DisplayWidgetChromeMode = _selectedDisplayWidgetChromeMode;
+            _settingsService.SaveDebounced();
+            OnPropertyChanged(nameof(SelectedDisplayWidgetChromeModeText));
+        }
+    }
+
+    public string SelectedDisplayWidgetChromeModeText => GetWidgetChromeModeDisplayName(SelectedDisplayWidgetChromeMode);
+    public int SelectedDisplayWidgetChromeModeIndex => Array.IndexOf(AvailableWidgetChromeModes, _selectedDisplayWidgetChromeMode);
+
+    public string SelectedInteractiveWidgetChromeMode
+    {
+        get => _selectedInteractiveWidgetChromeMode;
+        set
+        {
+            if (!SetProperty(ref _selectedInteractiveWidgetChromeMode, NormalizeWidgetChromeModeSetting(value, WidgetChromeMode.Standard)))
+            {
+                return;
+            }
+
+            if (_isRestoringDefaults || _isApplyingSettingsSnapshot)
+            {
+                return;
+            }
+
+            _settingsService.Settings.InteractiveWidgetChromeMode = _selectedInteractiveWidgetChromeMode;
+            _settingsService.SaveDebounced();
+            OnPropertyChanged(nameof(SelectedInteractiveWidgetChromeModeText));
+        }
+    }
+
+    public string SelectedInteractiveWidgetChromeModeText => GetWidgetChromeModeDisplayName(SelectedInteractiveWidgetChromeMode);
+    public int SelectedInteractiveWidgetChromeModeIndex => Array.IndexOf(AvailableWidgetChromeModes, _selectedInteractiveWidgetChromeMode);
+
+    [RelayCommand]
+    public void ResetDisplayWidgetChromeOverrides()
+    {
+        ResetWidgetChromeOverrides(WidgetChromeCategory.Display, SelectedDisplayWidgetChromeMode);
+    }
+
+    [RelayCommand]
+    public void ResetInteractiveWidgetChromeOverrides()
+    {
+        ResetWidgetChromeOverrides(WidgetChromeCategory.Interactive, SelectedInteractiveWidgetChromeMode);
+    }
+
+    internal int ResetWidgetChromeOverrides(WidgetChromeCategory category, string mode)
+    {
+        int changed = ResetWidgetChromeOverrides(
+            _settingsService.Settings,
+            _widgetContentFactory,
+            category,
+            mode);
+
+        if (changed > 0)
+        {
+            _settingsService.SaveDebounced();
+        }
+
+        return changed;
+    }
+
+    internal static int ResetWidgetChromeOverrides(
+        AppSettings settings,
+        WidgetContentFactory widgetContentFactory,
+        WidgetChromeCategory category,
+        string mode)
+    {
+        var fallback = category == WidgetChromeCategory.Display
+            ? WidgetChromeMode.Overlay
+            : WidgetChromeMode.Standard;
+        var normalizedMode = WidgetChromeModeNames.NormalizeMode(
+            NormalizeWidgetChromeModeSetting(mode, fallback),
+            fallback);
+        int changed = 0;
+
+        foreach (var widget in settings.Widgets)
+        {
+            WidgetContentDescriptor descriptor;
+            try
+            {
+                descriptor = widgetContentFactory.GetDescriptor(widget.WidgetKind);
+            }
+            catch (NotSupportedException)
+            {
+                continue;
+            }
+
+            if (descriptor.ChromeCategory != category)
+            {
+                continue;
+            }
+
+            var allowedMode = WidgetChromeModeResolver.CoerceAllowedMode(normalizedMode, descriptor);
+            string targetValue = WidgetChromeModeNames.ToSettingValue(allowedMode);
+            widget.Metadata ??= [];
+            widget.Metadata.TryGetValue(WidgetChromeModeNames.MetadataKey, out string? currentValue);
+            if (string.Equals(currentValue, targetValue, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            WidgetChromeModeNames.SetOverrideMode(widget, allowedMode);
+            changed++;
+        }
+
+        return changed;
+    }
+
+    public string SelectedTodoNewTaskPosition
+    {
+        get => _selectedTodoNewTaskPosition;
+        set
+        {
+            if (!SetProperty(ref _selectedTodoNewTaskPosition, NormalizeTodoNewTaskPosition(value)))
+            {
+                return;
+            }
+
+            if (_isRestoringDefaults || _isApplyingSettingsSnapshot)
+            {
+                return;
+            }
+
+            _settingsService.Settings.TodoNewTaskPosition = _selectedTodoNewTaskPosition;
+            _settingsService.SaveDebounced();
+            OnPropertyChanged(nameof(SelectedTodoNewTaskPositionText));
+        }
+    }
+
+    public string SelectedTodoNewTaskPositionText => GetTodoNewTaskPositionDisplayName(SelectedTodoNewTaskPosition);
+    public int SelectedTodoNewTaskPositionIndex => Array.IndexOf(AvailableTodoNewTaskPositions, _selectedTodoNewTaskPosition);
+
+    public string SelectedQuickCaptureDefaultView
+    {
+        get => _selectedQuickCaptureDefaultView;
+        set
+        {
+            if (!SetProperty(ref _selectedQuickCaptureDefaultView, NormalizeQuickCaptureDefaultView(value)))
+            {
+                return;
+            }
+
+            if (_isRestoringDefaults || _isApplyingSettingsSnapshot)
+            {
+                return;
+            }
+
+            _settingsService.Settings.QuickCaptureDefaultView = _selectedQuickCaptureDefaultView;
+            _settingsService.SaveDebounced();
+            OnPropertyChanged(nameof(SelectedQuickCaptureDefaultViewText));
+        }
+    }
+
+    public string SelectedQuickCaptureDefaultViewText => GetQuickCaptureDefaultViewDisplayName(SelectedQuickCaptureDefaultView);
+    public int SelectedQuickCaptureDefaultViewIndex => Array.IndexOf(AvailableQuickCaptureDefaultViews, _selectedQuickCaptureDefaultView);
+
+    public string SelectedTodoDefaultFilter
+    {
+        get => _selectedTodoDefaultFilter;
+        set
+        {
+            if (!SetProperty(ref _selectedTodoDefaultFilter, NormalizeTodoDefaultFilter(value)))
+            {
+                return;
+            }
+
+            if (_isRestoringDefaults || _isApplyingSettingsSnapshot)
+            {
+                return;
+            }
+
+            _settingsService.Settings.TodoDefaultFilter = _selectedTodoDefaultFilter;
+            _settingsService.SaveDebounced();
+            OnPropertyChanged(nameof(SelectedTodoDefaultFilterText));
+        }
+    }
+
+    public string SelectedTodoDefaultFilterText => GetTodoDefaultFilterDisplayName(SelectedTodoDefaultFilter);
+    public int SelectedTodoDefaultFilterIndex => Array.IndexOf(AvailableTodoDefaultFilters, _selectedTodoDefaultFilter);
+
+    public string SelectedMusicRhythmStyle
+    {
+        get => _selectedMusicRhythmStyle;
+        set
+        {
+            if (!SetProperty(ref _selectedMusicRhythmStyle, SettingsService.NormalizeMusicRhythmStyle(value)))
+            {
+                return;
+            }
+
+            if (_isRestoringDefaults || _isApplyingSettingsSnapshot)
+            {
+                return;
+            }
+
+            _settingsService.Settings.MusicRhythmStyle = _selectedMusicRhythmStyle;
+            _settingsService.SaveDebounced();
+            OnPropertyChanged(nameof(SelectedMusicRhythmStyleText));
+        }
+    }
+
+    public string SelectedMusicRhythmStyleText => GetMusicRhythmStyleDisplayName(SelectedMusicRhythmStyle);
+    public int SelectedMusicRhythmStyleIndex => Array.IndexOf(AvailableMusicRhythmStyles, _selectedMusicRhythmStyle);
 
     public string AccentColorHex
     {
@@ -636,6 +876,176 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
         private set => SetProperty(ref _canClearQuickCaptureImageCache, value);
     }
 
+    public IEnumerable<FeatureWidgetEntry> FeatureWidgetEntries
+    {
+        get
+        {
+            var factory = new FeatureWidgetEntryFactory(
+                _localizationService,
+                new WidgetContentFactory(_localizationService),
+                WidgetRegistry.Default,
+                IsWidgetEnabled);
+            return factory.CreateEntries();
+        }
+    }
+
+    public bool IsWidgetEnabled(WidgetKind kind)
+    {
+        return App.Current?.WidgetManager?.IsFeatureWidgetEnabled(kind) ??
+               FeatureWidgetSettings.IsEnabled(_settingsService.Settings, kind);
+    }
+
+    public void SetWidgetEnabled(WidgetKind kind, bool enabled)
+    {
+        switch (kind)
+        {
+            case WidgetKind.QuickCapture:
+                QuickCaptureEnabled = enabled;
+                return;
+            case WidgetKind.Todo:
+                TodoEnabled = enabled;
+                return;
+        }
+
+        FeatureWidgetSettings.SetEnabled(_settingsService.Settings, kind, enabled);
+        _ = SyncFeatureWidgetAsync(kind, enabled);
+    }
+
+    public async Task ResetFeatureWidgetAsync(WidgetKind kind)
+    {
+        if (!FeatureWidgetSettings.IsFeatureWidget(kind))
+        {
+            return;
+        }
+
+        try
+        {
+            await ApplyFeatureWidgetDefaultSettingsAsync(kind);
+
+            if (App.Current?.WidgetManager is { } widgetManager)
+            {
+                await widgetManager.ResetFeatureWidgetAsync(kind);
+            }
+            else
+            {
+                await _settingsService.SaveAsync();
+            }
+        }
+        catch (Exception ex)
+        {
+            App.Log($"[SettingsViewModel] Failed to reset feature widget kind={kind}: {ex}");
+        }
+        finally
+        {
+            RefreshFeatureWidgetViewState(kind);
+            OnPropertyChanged(nameof(FeatureWidgetEntries));
+        }
+    }
+
+    private async Task ApplyFeatureWidgetDefaultSettingsAsync(WidgetKind kind)
+    {
+        bool wasApplyingSnapshot = _isApplyingSettingsSnapshot;
+        _isApplyingSettingsSnapshot = true;
+        try
+        {
+            switch (kind)
+            {
+                case WidgetKind.QuickCapture:
+                    QuickCaptureClipboardEnabled = true;
+                    QuickCaptureImageClipboardEnabled = true;
+                    QuickCaptureRecentLimit = QuickCaptureService.DefaultRecentLimit;
+                    SelectedQuickCaptureDefaultView = SettingsService.QuickCaptureDefaultViewRecords;
+                    _settingsService.Settings.QuickCaptureClipboardEnabled = true;
+                    _settingsService.Settings.QuickCaptureImageClipboardEnabled = true;
+                    _settingsService.Settings.QuickCaptureRecentLimit = QuickCaptureService.DefaultRecentLimit;
+                    _settingsService.Settings.QuickCaptureDefaultView = SettingsService.QuickCaptureDefaultViewRecords;
+                    App.Current?.QuickCaptureClipboardService?.Refresh();
+                    App.Current?.QuickCaptureClipboardService?.CaptureCurrent();
+                    RefreshQuickCaptureClipboardDiagnostics();
+                    break;
+                case WidgetKind.Todo:
+                    TodoShowCompletedTasks = true;
+                    TodoShowFooterStats = true;
+                    TodoShowClearCompletedButton = true;
+                    TodoConfirmBeforeDelete = false;
+                    SelectedTodoNewTaskPosition = SettingsService.TodoNewTaskPositionTop;
+                    SelectedTodoDefaultFilter = SettingsService.TodoDefaultFilterAll;
+                    _settingsService.Settings.TodoShowCompletedTasks = true;
+                    _settingsService.Settings.TodoShowFooterStats = true;
+                    _settingsService.Settings.TodoShowClearCompletedButton = true;
+                    _settingsService.Settings.TodoConfirmBeforeDelete = false;
+                    _settingsService.Settings.TodoNewTaskPosition = SettingsService.TodoNewTaskPositionTop;
+                    _settingsService.Settings.TodoDefaultFilter = SettingsService.TodoDefaultFilterAll;
+                    break;
+                case WidgetKind.Music:
+                    MusicUseArtworkBackdrop = true;
+                    MusicShowRhythmBars = true;
+                    SelectedMusicRhythmStyle = SettingsService.MusicRhythmStyleSoftWave;
+                    MusicEnableCoverHoverMotion = true;
+                    _settingsService.Settings.MusicUseArtworkBackdrop = true;
+                    _settingsService.Settings.MusicShowRhythmBars = true;
+                    _settingsService.Settings.MusicRhythmStyle = SettingsService.MusicRhythmStyleSoftWave;
+                    _settingsService.Settings.MusicEnableCoverHoverMotion = true;
+                    break;
+            }
+        }
+        finally
+        {
+            _isApplyingSettingsSnapshot = wasApplyingSnapshot;
+        }
+
+        await _settingsService.SaveAsync();
+    }
+
+    private void RefreshFeatureWidgetViewState(WidgetKind kind)
+    {
+        switch (kind)
+        {
+            case WidgetKind.QuickCapture:
+                OnPropertyChanged(nameof(QuickCaptureEnabled));
+                OnPropertyChanged(nameof(QuickCaptureStatusText));
+                OnPropertyChanged(nameof(QuickCaptureDependencyStatusText));
+                OnPropertyChanged(nameof(QuickCaptureRecentLimitText));
+                OnPropertyChanged(nameof(QuickCaptureRecentLimitInput));
+                OnPropertyChanged(nameof(SelectedQuickCaptureDefaultViewText));
+                OnPropertyChanged(nameof(SelectedQuickCaptureDefaultViewIndex));
+                break;
+            case WidgetKind.Todo:
+                OnPropertyChanged(nameof(TodoEnabled));
+                OnPropertyChanged(nameof(SelectedTodoNewTaskPositionText));
+                OnPropertyChanged(nameof(SelectedTodoNewTaskPositionIndex));
+                OnPropertyChanged(nameof(SelectedTodoDefaultFilterText));
+                OnPropertyChanged(nameof(SelectedTodoDefaultFilterIndex));
+                break;
+            case WidgetKind.Music:
+                OnPropertyChanged(nameof(SelectedMusicRhythmStyleText));
+                OnPropertyChanged(nameof(SelectedMusicRhythmStyleIndex));
+                break;
+        }
+    }
+
+    private async Task SyncFeatureWidgetAsync(WidgetKind kind, bool enabled)
+    {
+        try
+        {
+            if (App.Current?.WidgetManager is not { } widgetManager)
+            {
+                await _settingsService.SaveAsync();
+                return;
+            }
+
+            await widgetManager.SetFeatureWidgetEnabledAsync(kind, enabled, reveal: enabled);
+        }
+        catch (Exception ex)
+        {
+            App.Log($"[SettingsViewModel] Failed to sync feature widget enabled state kind={kind}: {ex}");
+        }
+        finally
+        {
+            OnPropertyChanged(nameof(FeatureWidgetEntries));
+        }
+    }
+
     public SolidColorBrush AccentPreviewBrush { get; } = new(AccentColorHelper.DefaultAccentColor);
 
     public string[] AvailableThemes { get; } = [ThemeSystem, ThemeLight, ThemeDark];
@@ -681,6 +1091,53 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
         SettingsService.WidgetAnimationEasingStrong
     ];
     public string[] AvailableWidgetAnimationEasingIntensityDisplayNames => _cachedWidgetAnimationEasingIntensityDisplayNames ??= AvailableWidgetAnimationEasingIntensities.Select(GetWidgetAnimationEasingIntensityDisplayName).ToArray();
+
+    public string[] AvailableWidgetChromeModes { get; } =
+    [
+        SettingsService.WidgetChromeModeStandard,
+        SettingsService.WidgetChromeModeCompact,
+        SettingsService.WidgetChromeModeOverlay,
+        SettingsService.WidgetChromeModeHidden
+    ];
+
+    public string[] AvailableWidgetChromeModeDisplayNames => _cachedWidgetChromeModeDisplayNames ??= AvailableWidgetChromeModes.Select(GetWidgetChromeModeDisplayName).ToArray();
+
+    public string[] AvailableQuickCaptureDefaultViews { get; } =
+    [
+        SettingsService.QuickCaptureDefaultViewRecords,
+        SettingsService.QuickCaptureDefaultViewPinned,
+        SettingsService.QuickCaptureDefaultViewRecent
+    ];
+
+    public string[] AvailableQuickCaptureDefaultViewDisplayNames => _cachedQuickCaptureDefaultViewDisplayNames ??= AvailableQuickCaptureDefaultViews.Select(GetQuickCaptureDefaultViewDisplayName).ToArray();
+
+    public string[] AvailableTodoNewTaskPositions { get; } =
+    [
+        SettingsService.TodoNewTaskPositionTop,
+        SettingsService.TodoNewTaskPositionBottom
+    ];
+
+    public string[] AvailableTodoNewTaskPositionDisplayNames => _cachedTodoNewTaskPositionDisplayNames ??= AvailableTodoNewTaskPositions.Select(GetTodoNewTaskPositionDisplayName).ToArray();
+
+    public string[] AvailableTodoDefaultFilters { get; } =
+    [
+        SettingsService.TodoDefaultFilterAll,
+        SettingsService.TodoDefaultFilterToday,
+        SettingsService.TodoDefaultFilterImportant,
+        SettingsService.TodoDefaultFilterCompleted
+    ];
+
+    public string[] AvailableTodoDefaultFilterDisplayNames => _cachedTodoDefaultFilterDisplayNames ??= AvailableTodoDefaultFilters.Select(GetTodoDefaultFilterDisplayName).ToArray();
+
+    public string[] AvailableMusicRhythmStyles { get; } =
+    [
+        SettingsService.MusicRhythmStyleSoftWave,
+        SettingsService.MusicRhythmStyleGlassSpectrum,
+        SettingsService.MusicRhythmStyleDotPulse,
+        SettingsService.MusicRhythmStyleLineSpectrum
+    ];
+
+    public string[] AvailableMusicRhythmStyleDisplayNames => _cachedMusicRhythmStyleDisplayNames ??= AvailableMusicRhythmStyles.Select(GetMusicRhythmStyleDisplayName).ToArray();
 
     public string AppVersion =>
         Assembly.GetExecutingAssembly()
@@ -921,6 +1378,7 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
         _settingsService = settingsService;
         _themeService = themeService;
         _localizationService = localizationService ?? new LocalizationService(settingsService);
+        _widgetContentFactory = new WidgetContentFactory(_localizationService);
         _quickCaptureImageCacheText = _localizationService.T("Settings.QuickCapture.ImageCacheLoading");
         _quickCaptureClipboardDiagnosticsText = _localizationService.T("Settings.QuickCapture.ClipboardDiagnosticsUnavailable");
         _dragDropPermissionRepairStatusText = string.Empty;
@@ -938,6 +1396,7 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
         _defaultWidth = settings.DefaultWidgetWidth;
         _defaultHeight = settings.DefaultWidgetHeight;
         _hideShortcutArrowOverlay = settings.HideShortcutArrowOverlay;
+        _showImageFilesAsIcons = settings.ShowImageFilesAsIcons;
         _showHoverButtons = settings.ShowHoverButtons;
         _showListItemDetails = settings.ShowListItemDetails;
         _widgetOpacity = settings.WidgetOpacity;
@@ -948,6 +1407,8 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
         _selectedWidgetAnimationSpeed = NormalizeWidgetAnimationSpeed(settings.WidgetAnimationSpeed);
         _selectedWidgetAnimationSlideDirection = NormalizeWidgetAnimationSlideDirection(settings.WidgetAnimationSlideDirection);
         _selectedWidgetAnimationEasingIntensity = NormalizeWidgetAnimationEasingIntensity(settings.WidgetAnimationEasingIntensity);
+        _selectedDisplayWidgetChromeMode = NormalizeWidgetChromeModeSetting(settings.DisplayWidgetChromeMode, WidgetChromeMode.Overlay);
+        _selectedInteractiveWidgetChromeMode = NormalizeWidgetChromeModeSetting(settings.InteractiveWidgetChromeMode, WidgetChromeMode.Standard);
         _iconSize = settings.IconSize;
         _textSize = settings.TextSize;
         _layoutDensityScale = settings.LayoutDensityScale;
@@ -956,10 +1417,22 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
         _fileNameWidthScale = settings.FileNameWidthScale;
         _showFileExtensions = settings.ShowFileExtensions;
         _hideShortcutExtensionWhenShowingFileExtensions = settings.HideShortcutExtensionWhenShowingFileExtensions;
-        _quickCaptureEnabled = settings.QuickCaptureEnabled;
+        _quickCaptureEnabled = FeatureWidgetSettings.IsEnabled(settings, WidgetKind.QuickCapture);
         _quickCaptureClipboardEnabled = settings.QuickCaptureClipboardEnabled;
         _quickCaptureImageClipboardEnabled = settings.QuickCaptureImageClipboardEnabled;
         _quickCaptureRecentLimit = QuickCaptureService.NormalizeRecentLimit(settings.QuickCaptureRecentLimit);
+        _selectedQuickCaptureDefaultView = NormalizeQuickCaptureDefaultView(settings.QuickCaptureDefaultView);
+        _todoEnabled = FeatureWidgetSettings.IsEnabled(settings, WidgetKind.Todo);
+        _todoShowCompletedTasks = settings.TodoShowCompletedTasks;
+        _todoShowFooterStats = settings.TodoShowFooterStats;
+        _todoShowClearCompletedButton = settings.TodoShowClearCompletedButton;
+        _todoConfirmBeforeDelete = settings.TodoConfirmBeforeDelete;
+        _musicUseArtworkBackdrop = settings.MusicUseArtworkBackdrop;
+        _musicShowRhythmBars = settings.MusicShowRhythmBars;
+        _selectedMusicRhythmStyle = SettingsService.NormalizeMusicRhythmStyle(settings.MusicRhythmStyle);
+        _musicEnableCoverHoverMotion = settings.MusicEnableCoverHoverMotion;
+        _selectedTodoNewTaskPosition = NormalizeTodoNewTaskPosition(settings.TodoNewTaskPosition);
+        _selectedTodoDefaultFilter = NormalizeTodoDefaultFilter(settings.TodoDefaultFilter);
         _selectedManagedDropAction = string.Equals(settings.ManagedDropAction, SettingsService.ManagedDropActionCopy, StringComparison.OrdinalIgnoreCase)
             ? SettingsService.ManagedDropActionCopy
             : SettingsService.ManagedDropActionMove;
@@ -1031,6 +1504,8 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
             SelectedWidgetAnimationSpeed = SettingsService.WidgetAnimationSpeedStandard;
             SelectedWidgetAnimationSlideDirection = SettingsService.WidgetAnimationSlideDirectionRight;
             SelectedWidgetAnimationEasingIntensity = SettingsService.WidgetAnimationEasingStandard;
+            SelectedDisplayWidgetChromeMode = SettingsService.WidgetChromeModeOverlay;
+            SelectedInteractiveWidgetChromeMode = SettingsService.WidgetChromeModeStandard;
             WidgetOpacity = SettingsService.DefaultWidgetOpacity;
             IconSize = SettingsService.DefaultIconSize;
             TextSize = SettingsService.DefaultTextSize;
@@ -1039,8 +1514,21 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
             VerticalSpacingScale = SettingsService.DefaultVerticalSpacingScale;
             FileNameWidthScale = SettingsService.DefaultFileNameWidthScale;
             ShowFileExtensions = false;
+            ShowImageFilesAsIcons = false;
             HideShortcutExtensionWhenShowingFileExtensions = true;
+            QuickCaptureClipboardEnabled = true;
             QuickCaptureImageClipboardEnabled = true;
+            SelectedQuickCaptureDefaultView = SettingsService.QuickCaptureDefaultViewRecords;
+            TodoShowCompletedTasks = true;
+            TodoShowFooterStats = true;
+            TodoShowClearCompletedButton = true;
+            TodoConfirmBeforeDelete = false;
+            MusicUseArtworkBackdrop = true;
+            MusicShowRhythmBars = true;
+            SelectedMusicRhythmStyle = SettingsService.MusicRhythmStyleSoftWave;
+            MusicEnableCoverHoverMotion = true;
+            SelectedTodoNewTaskPosition = SettingsService.TodoNewTaskPositionTop;
+            SelectedTodoDefaultFilter = SettingsService.TodoDefaultFilterAll;
             SelectedManagedDropAction = SettingsService.ManagedDropActionMove;
             DoubleClickToOpen = true;
             HideShortcutArrowOverlay = true;
@@ -1057,6 +1545,8 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
             settings.WidgetAnimationSpeed = SettingsService.WidgetAnimationSpeedStandard;
             settings.WidgetAnimationSlideDirection = SettingsService.WidgetAnimationSlideDirectionRight;
             settings.WidgetAnimationEasingIntensity = SettingsService.WidgetAnimationEasingStandard;
+            settings.DisplayWidgetChromeMode = SettingsService.WidgetChromeModeOverlay;
+            settings.InteractiveWidgetChromeMode = SettingsService.WidgetChromeModeStandard;
             settings.WidgetOpacity = SettingsService.DefaultWidgetOpacity;
             settings.IconSize = SettingsService.DefaultIconSize;
             settings.TextSize = SettingsService.DefaultTextSize;
@@ -1066,8 +1556,21 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
             settings.VerticalSpacingScale = SettingsService.DefaultVerticalSpacingScale;
             settings.FileNameWidthScale = SettingsService.DefaultFileNameWidthScale;
             settings.ShowFileExtensions = false;
+            settings.ShowImageFilesAsIcons = false;
             settings.HideShortcutExtensionWhenShowingFileExtensions = true;
+            settings.QuickCaptureClipboardEnabled = true;
             settings.QuickCaptureImageClipboardEnabled = true;
+            settings.QuickCaptureDefaultView = SettingsService.QuickCaptureDefaultViewRecords;
+            settings.TodoShowCompletedTasks = true;
+            settings.TodoShowFooterStats = true;
+            settings.TodoShowClearCompletedButton = true;
+            settings.TodoConfirmBeforeDelete = false;
+            settings.MusicUseArtworkBackdrop = true;
+            settings.MusicShowRhythmBars = true;
+            settings.MusicRhythmStyle = SettingsService.MusicRhythmStyleSoftWave;
+            settings.MusicEnableCoverHoverMotion = true;
+            settings.TodoNewTaskPosition = SettingsService.TodoNewTaskPositionTop;
+            settings.TodoDefaultFilter = SettingsService.TodoDefaultFilterAll;
             settings.ManagedDropAction = SettingsService.ManagedDropActionMove;
             settings.GlobalHotkeyEnabled = SettingsService.DefaultGlobalHotkeyEnabled;
             settings.GlobalHotkeyModifiers = SettingsService.DefaultGlobalHotkeyModifiers;
@@ -1078,6 +1581,7 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
 
             RefreshAccentPreview();
             RefreshNumberInputs();
+            RefreshSelectionProperties();
             OnPropertyChanged(nameof(CanEditCustomAccent));
             OnPropertyChanged(nameof(AccentColorDescription));
             App.Current?.GlobalHotkeyService?.RefreshRegistration();
@@ -1085,6 +1589,8 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
             RefreshLocalizedProperties();
             _themeService.RefreshAppearance();
             await _settingsService.SaveAsync();
+            App.Current?.QuickCaptureClipboardService?.Refresh();
+            App.Current?.QuickCaptureClipboardService?.CaptureCurrent();
             _settingsService.NotifyAppearancePreviewNow();
         }
         finally
@@ -1189,6 +1695,58 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
         };
     }
 
+    public string GetWidgetChromeModeDisplayName(string mode)
+    {
+        return NormalizeWidgetChromeModeSetting(mode, WidgetChromeMode.Standard) switch
+        {
+            SettingsService.WidgetChromeModeCompact => _localizationService.T("Settings.WidgetChrome.Compact"),
+            SettingsService.WidgetChromeModeOverlay => _localizationService.T("Settings.WidgetChrome.Overlay"),
+            SettingsService.WidgetChromeModeHidden => _localizationService.T("Settings.WidgetChrome.Hidden"),
+            _ => _localizationService.T("Settings.WidgetChrome.Standard")
+        };
+    }
+
+    public string GetQuickCaptureDefaultViewDisplayName(string view)
+    {
+        return NormalizeQuickCaptureDefaultView(view) switch
+        {
+            SettingsService.QuickCaptureDefaultViewPinned => _localizationService.T("Settings.QuickCapture.DefaultView.Pinned"),
+            SettingsService.QuickCaptureDefaultViewRecent => _localizationService.T("Settings.QuickCapture.DefaultView.Recent"),
+            _ => _localizationService.T("Settings.QuickCapture.DefaultView.Records")
+        };
+    }
+
+    public string GetTodoNewTaskPositionDisplayName(string position)
+    {
+        return NormalizeTodoNewTaskPosition(position) switch
+        {
+            SettingsService.TodoNewTaskPositionBottom => _localizationService.T("Settings.Todo.NewTaskPosition.Bottom"),
+            _ => _localizationService.T("Settings.Todo.NewTaskPosition.Top")
+        };
+    }
+
+    public string GetTodoDefaultFilterDisplayName(string filter)
+    {
+        return NormalizeTodoDefaultFilter(filter) switch
+        {
+            SettingsService.TodoDefaultFilterToday => _localizationService.T("Settings.Todo.DefaultFilter.Today"),
+            SettingsService.TodoDefaultFilterImportant => _localizationService.T("Settings.Todo.DefaultFilter.Important"),
+            SettingsService.TodoDefaultFilterCompleted => _localizationService.T("Settings.Todo.DefaultFilter.Completed"),
+            _ => _localizationService.T("Settings.Todo.DefaultFilter.All")
+        };
+    }
+
+    public string GetMusicRhythmStyleDisplayName(string style)
+    {
+        return SettingsService.NormalizeMusicRhythmStyle(style) switch
+        {
+            SettingsService.MusicRhythmStyleGlassSpectrum => _localizationService.T("Settings.Music.RhythmStyle.GlassSpectrum"),
+            SettingsService.MusicRhythmStyleDotPulse => _localizationService.T("Settings.Music.RhythmStyle.DotPulse"),
+            SettingsService.MusicRhythmStyleLineSpectrum => _localizationService.T("Settings.Music.RhythmStyle.LineSpectrum"),
+            _ => _localizationService.T("Settings.Music.RhythmStyle.SoftWave")
+        };
+    }
+
     public string GetLanguageDisplayName(string language)
     {
         return _localizationService.GetLanguageDisplayName(language);
@@ -1213,9 +1771,24 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
     private void ApplySettingsSnapshot()
     {
         var settings = _settingsService.Settings;
-        bool quickCaptureEnabled = settings.QuickCaptureEnabled;
+        bool quickCaptureEnabled = FeatureWidgetSettings.IsEnabled(settings, WidgetKind.QuickCapture);
         bool quickCaptureClipboardEnabled = settings.QuickCaptureClipboardEnabled;
         bool quickCaptureImageClipboardEnabled = settings.QuickCaptureImageClipboardEnabled;
+        string quickCaptureDefaultView = NormalizeQuickCaptureDefaultView(settings.QuickCaptureDefaultView);
+        bool todoEnabled = FeatureWidgetSettings.IsEnabled(settings, WidgetKind.Todo);
+        bool todoShowCompletedTasks = settings.TodoShowCompletedTasks;
+        bool todoShowFooterStats = settings.TodoShowFooterStats;
+        bool todoShowClearCompletedButton = settings.TodoShowClearCompletedButton;
+        bool todoConfirmBeforeDelete = settings.TodoConfirmBeforeDelete;
+        bool musicUseArtworkBackdrop = settings.MusicUseArtworkBackdrop;
+        bool musicShowRhythmBars = settings.MusicShowRhythmBars;
+        string musicRhythmStyle = SettingsService.NormalizeMusicRhythmStyle(settings.MusicRhythmStyle);
+        bool musicEnableCoverHoverMotion = settings.MusicEnableCoverHoverMotion;
+        bool showImageFilesAsIcons = settings.ShowImageFilesAsIcons;
+        string displayWidgetChromeMode = NormalizeWidgetChromeModeSetting(settings.DisplayWidgetChromeMode, WidgetChromeMode.Overlay);
+        string interactiveWidgetChromeMode = NormalizeWidgetChromeModeSetting(settings.InteractiveWidgetChromeMode, WidgetChromeMode.Standard);
+        string todoNewTaskPosition = NormalizeTodoNewTaskPosition(settings.TodoNewTaskPosition);
+        string todoDefaultFilter = NormalizeTodoDefaultFilter(settings.TodoDefaultFilter);
         string managedDropAction = string.Equals(settings.ManagedDropAction, SettingsService.ManagedDropActionCopy, StringComparison.OrdinalIgnoreCase)
             ? SettingsService.ManagedDropActionCopy
             : SettingsService.ManagedDropActionMove;
@@ -1249,6 +1822,81 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
             {
                 QuickCaptureImageClipboardEnabled = quickCaptureImageClipboardEnabled;
             }
+
+            if (!string.Equals(SelectedQuickCaptureDefaultView, quickCaptureDefaultView, StringComparison.Ordinal))
+            {
+                SelectedQuickCaptureDefaultView = quickCaptureDefaultView;
+            }
+
+            if (TodoEnabled != todoEnabled)
+            {
+                TodoEnabled = todoEnabled;
+            }
+
+            if (TodoShowCompletedTasks != todoShowCompletedTasks)
+            {
+                TodoShowCompletedTasks = todoShowCompletedTasks;
+            }
+
+            if (TodoShowFooterStats != todoShowFooterStats)
+            {
+                TodoShowFooterStats = todoShowFooterStats;
+            }
+
+            if (TodoShowClearCompletedButton != todoShowClearCompletedButton)
+            {
+                TodoShowClearCompletedButton = todoShowClearCompletedButton;
+            }
+
+            if (TodoConfirmBeforeDelete != todoConfirmBeforeDelete)
+            {
+                TodoConfirmBeforeDelete = todoConfirmBeforeDelete;
+            }
+
+            if (MusicUseArtworkBackdrop != musicUseArtworkBackdrop)
+            {
+                MusicUseArtworkBackdrop = musicUseArtworkBackdrop;
+            }
+
+            if (MusicShowRhythmBars != musicShowRhythmBars)
+            {
+                MusicShowRhythmBars = musicShowRhythmBars;
+            }
+
+            if (!string.Equals(SelectedMusicRhythmStyle, musicRhythmStyle, StringComparison.Ordinal))
+            {
+                SelectedMusicRhythmStyle = musicRhythmStyle;
+            }
+
+            if (MusicEnableCoverHoverMotion != musicEnableCoverHoverMotion)
+            {
+                MusicEnableCoverHoverMotion = musicEnableCoverHoverMotion;
+            }
+
+            if (ShowImageFilesAsIcons != showImageFilesAsIcons)
+            {
+                ShowImageFilesAsIcons = showImageFilesAsIcons;
+            }
+
+            if (!string.Equals(SelectedDisplayWidgetChromeMode, displayWidgetChromeMode, StringComparison.Ordinal))
+            {
+                SelectedDisplayWidgetChromeMode = displayWidgetChromeMode;
+            }
+
+            if (!string.Equals(SelectedInteractiveWidgetChromeMode, interactiveWidgetChromeMode, StringComparison.Ordinal))
+            {
+                SelectedInteractiveWidgetChromeMode = interactiveWidgetChromeMode;
+            }
+
+            if (!string.Equals(SelectedTodoNewTaskPosition, todoNewTaskPosition, StringComparison.Ordinal))
+            {
+                SelectedTodoNewTaskPosition = todoNewTaskPosition;
+            }
+
+            if (!string.Equals(SelectedTodoDefaultFilter, todoDefaultFilter, StringComparison.Ordinal))
+            {
+                SelectedTodoDefaultFilter = todoDefaultFilter;
+            }
         }
         finally
         {
@@ -1257,41 +1905,27 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
 
         OnPropertyChanged(nameof(SelectedManagedDropActionText));
         OnPropertyChanged(nameof(SelectedManagedDropActionIndex));
+        OnPropertyChanged(nameof(SelectedQuickCaptureDefaultViewText));
+        OnPropertyChanged(nameof(SelectedQuickCaptureDefaultViewIndex));
+        OnPropertyChanged(nameof(SelectedTodoNewTaskPositionText));
+        OnPropertyChanged(nameof(SelectedTodoNewTaskPositionIndex));
+        OnPropertyChanged(nameof(SelectedTodoDefaultFilterText));
+        OnPropertyChanged(nameof(SelectedTodoDefaultFilterIndex));
+        OnPropertyChanged(nameof(SelectedMusicRhythmStyleText));
+        OnPropertyChanged(nameof(SelectedMusicRhythmStyleIndex));
+        OnPropertyChanged(nameof(SelectedDisplayWidgetChromeModeText));
+        OnPropertyChanged(nameof(SelectedDisplayWidgetChromeModeIndex));
+        OnPropertyChanged(nameof(SelectedInteractiveWidgetChromeModeText));
+        OnPropertyChanged(nameof(SelectedInteractiveWidgetChromeModeIndex));
         OnPropertyChanged(nameof(QuickCaptureStatusText));
         OnPropertyChanged(nameof(QuickCaptureDependencyStatusText));
+        OnPropertyChanged(nameof(FeatureWidgetEntries));
         RefreshQuickCaptureClipboardDiagnostics();
     }
 
     private void RefreshLocalizedProperties()
     {
-        _cachedThemeDisplayNames = null;
-        _cachedTrayIconStyleDisplayNames = null;
-        _cachedLanguageDisplayNames = null;
-        _cachedWidgetCornerPreferenceDisplayNames = null;
-        _cachedWidgetAnimationEffectDisplayNames = null;
-        _cachedWidgetAnimationSpeedDisplayNames = null;
-        _cachedWidgetAnimationSlideDirectionDisplayNames = null;
-        _cachedWidgetAnimationEasingIntensityDisplayNames = null;
-        _cachedManagedDropActionDisplayNames = null;
-
-        OnPropertyChanged(nameof(AvailableThemeDisplayNames));
-        OnPropertyChanged(nameof(AvailableTrayIconStyleDisplayNames));
-        OnPropertyChanged(nameof(AvailableLanguageDisplayNames));
-        OnPropertyChanged(nameof(AvailableWidgetCornerPreferenceDisplayNames));
-        OnPropertyChanged(nameof(AvailableWidgetAnimationEffectDisplayNames));
-        OnPropertyChanged(nameof(AvailableWidgetAnimationSpeedDisplayNames));
-        OnPropertyChanged(nameof(AvailableWidgetAnimationSlideDirectionDisplayNames));
-        OnPropertyChanged(nameof(AvailableWidgetAnimationEasingIntensityDisplayNames));
-        OnPropertyChanged(nameof(AvailableManagedDropActionDisplayNames));
-        OnPropertyChanged(nameof(SelectedThemeIndex));
-        OnPropertyChanged(nameof(SelectedTrayIconStyleIndex));
-        OnPropertyChanged(nameof(SelectedLanguageIndex));
-        OnPropertyChanged(nameof(SelectedWidgetCornerPreferenceIndex));
-        OnPropertyChanged(nameof(SelectedWidgetAnimationEffectIndex));
-        OnPropertyChanged(nameof(SelectedWidgetAnimationSpeedIndex));
-        OnPropertyChanged(nameof(SelectedWidgetAnimationSlideDirectionIndex));
-        OnPropertyChanged(nameof(SelectedWidgetAnimationEasingIntensityIndex));
-        OnPropertyChanged(nameof(SelectedManagedDropActionIndex));
+        RefreshSelectionProperties();
         OnPropertyChanged(nameof(AccentColorDescription));
         OnPropertyChanged(nameof(AboutVersionText));
         OnPropertyChanged(nameof(OpenSourceRepositoryDisplayText));
@@ -1307,7 +1941,74 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(QuickCaptureStatusText));
         OnPropertyChanged(nameof(QuickCaptureDependencyStatusText));
         OnPropertyChanged(nameof(QuickCaptureRecentLimitText));
+        OnPropertyChanged(nameof(FeatureWidgetEntries));
         RefreshQuickCaptureClipboardDiagnostics();
+    }
+
+    private void RefreshSelectionProperties()
+    {
+        _cachedThemeDisplayNames = null;
+        _cachedTrayIconStyleDisplayNames = null;
+        _cachedLanguageDisplayNames = null;
+        _cachedWidgetCornerPreferenceDisplayNames = null;
+        _cachedWidgetAnimationEffectDisplayNames = null;
+        _cachedWidgetAnimationSpeedDisplayNames = null;
+        _cachedWidgetAnimationSlideDirectionDisplayNames = null;
+        _cachedWidgetAnimationEasingIntensityDisplayNames = null;
+        _cachedWidgetChromeModeDisplayNames = null;
+        _cachedQuickCaptureDefaultViewDisplayNames = null;
+        _cachedTodoNewTaskPositionDisplayNames = null;
+        _cachedTodoDefaultFilterDisplayNames = null;
+        _cachedMusicRhythmStyleDisplayNames = null;
+        _cachedManagedDropActionDisplayNames = null;
+
+        OnPropertyChanged(nameof(AvailableThemeDisplayNames));
+        OnPropertyChanged(nameof(AvailableTrayIconStyleDisplayNames));
+        OnPropertyChanged(nameof(AvailableLanguageDisplayNames));
+        OnPropertyChanged(nameof(AvailableWidgetCornerPreferenceDisplayNames));
+        OnPropertyChanged(nameof(AvailableWidgetAnimationEffectDisplayNames));
+        OnPropertyChanged(nameof(AvailableWidgetAnimationSpeedDisplayNames));
+        OnPropertyChanged(nameof(AvailableWidgetAnimationSlideDirectionDisplayNames));
+        OnPropertyChanged(nameof(AvailableWidgetAnimationEasingIntensityDisplayNames));
+        OnPropertyChanged(nameof(AvailableWidgetChromeModeDisplayNames));
+        OnPropertyChanged(nameof(AvailableQuickCaptureDefaultViewDisplayNames));
+        OnPropertyChanged(nameof(AvailableTodoNewTaskPositionDisplayNames));
+        OnPropertyChanged(nameof(AvailableTodoDefaultFilterDisplayNames));
+        OnPropertyChanged(nameof(AvailableMusicRhythmStyleDisplayNames));
+        OnPropertyChanged(nameof(AvailableManagedDropActionDisplayNames));
+        OnPropertyChanged(nameof(SelectedThemeText));
+        OnPropertyChanged(nameof(SelectedThemeIndex));
+        OnPropertyChanged(nameof(SelectedTrayIconStyleText));
+        OnPropertyChanged(nameof(SelectedTrayIconStyleIndex));
+        OnPropertyChanged(nameof(SelectedLanguageText));
+        OnPropertyChanged(nameof(SelectedLanguageIndex));
+        OnPropertyChanged(nameof(SelectedManagedDropActionText));
+        OnPropertyChanged(nameof(SelectedManagedDropActionIndex));
+        OnPropertyChanged(nameof(SelectedWidgetCornerPreferenceText));
+        OnPropertyChanged(nameof(SelectedWidgetCornerPreferenceIndex));
+        OnPropertyChanged(nameof(SelectedWidgetAnimationEffectText));
+        OnPropertyChanged(nameof(SelectedWidgetAnimationEffectIndex));
+        OnPropertyChanged(nameof(IsDirectionEnabled));
+        OnPropertyChanged(nameof(IsEasingEnabled));
+        OnPropertyChanged(nameof(IsSpeedEnabled));
+        OnPropertyChanged(nameof(SelectedWidgetAnimationSpeedText));
+        OnPropertyChanged(nameof(SelectedWidgetAnimationSpeedIndex));
+        OnPropertyChanged(nameof(SelectedWidgetAnimationSlideDirectionText));
+        OnPropertyChanged(nameof(SelectedWidgetAnimationSlideDirectionIndex));
+        OnPropertyChanged(nameof(SelectedWidgetAnimationEasingIntensityText));
+        OnPropertyChanged(nameof(SelectedWidgetAnimationEasingIntensityIndex));
+        OnPropertyChanged(nameof(SelectedDisplayWidgetChromeModeText));
+        OnPropertyChanged(nameof(SelectedDisplayWidgetChromeModeIndex));
+        OnPropertyChanged(nameof(SelectedInteractiveWidgetChromeModeText));
+        OnPropertyChanged(nameof(SelectedInteractiveWidgetChromeModeIndex));
+        OnPropertyChanged(nameof(SelectedQuickCaptureDefaultViewText));
+        OnPropertyChanged(nameof(SelectedQuickCaptureDefaultViewIndex));
+        OnPropertyChanged(nameof(SelectedTodoNewTaskPositionText));
+        OnPropertyChanged(nameof(SelectedTodoNewTaskPositionIndex));
+        OnPropertyChanged(nameof(SelectedTodoDefaultFilterText));
+        OnPropertyChanged(nameof(SelectedTodoDefaultFilterIndex));
+        OnPropertyChanged(nameof(SelectedMusicRhythmStyleText));
+        OnPropertyChanged(nameof(SelectedMusicRhythmStyleIndex));
     }
 
     private string GetDragDropPermissionSummaryText()
@@ -1436,6 +2137,37 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
             : SettingsService.WidgetAnimationEasingStandard;
     }
 
+    private static string NormalizeWidgetChromeModeSetting(string? mode, WidgetChromeMode fallback)
+    {
+        return SettingsService.NormalizeWidgetChromeModeSetting(mode, fallback);
+    }
+
+    private static string NormalizeTodoNewTaskPosition(string? position)
+    {
+        return position == SettingsService.TodoNewTaskPositionBottom
+            ? SettingsService.TodoNewTaskPositionBottom
+            : SettingsService.TodoNewTaskPositionTop;
+    }
+
+    private static string NormalizeQuickCaptureDefaultView(string? view)
+    {
+        return view is
+            SettingsService.QuickCaptureDefaultViewPinned or
+            SettingsService.QuickCaptureDefaultViewRecent
+            ? view
+            : SettingsService.QuickCaptureDefaultViewRecords;
+    }
+
+    private static string NormalizeTodoDefaultFilter(string? filter)
+    {
+        return filter is
+            SettingsService.TodoDefaultFilterToday or
+            SettingsService.TodoDefaultFilterImportant or
+            SettingsService.TodoDefaultFilterCompleted
+            ? filter
+            : SettingsService.TodoDefaultFilterAll;
+    }
+
     partial void OnAutoStartChanged(bool value)
     {
         if (_isRestoringDefaults)
@@ -1530,6 +2262,17 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
         _settingsService.SaveDebounced();
     }
 
+    partial void OnShowImageFilesAsIconsChanged(bool value)
+    {
+        if (_isRestoringDefaults || _isApplyingSettingsSnapshot)
+        {
+            return;
+        }
+
+        _settingsService.Settings.ShowImageFilesAsIcons = value;
+        _settingsService.SaveDebounced();
+    }
+
     partial void OnShowHoverButtonsChanged(bool value)
     {
         if (_isRestoringDefaults)
@@ -1583,26 +2326,145 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
             return;
         }
 
-        _settingsService.Settings.QuickCaptureEnabled = value;
-        _settingsService.SaveDebounced();
+        FeatureWidgetSettings.SetEnabled(_settingsService.Settings, WidgetKind.QuickCapture, value);
         _ = SyncQuickCaptureEnabledAsync(value);
         OnPropertyChanged(nameof(QuickCaptureStatusText));
         OnPropertyChanged(nameof(QuickCaptureDependencyStatusText));
         RefreshQuickCaptureClipboardDiagnostics();
     }
 
-    private static async Task SyncQuickCaptureEnabledAsync(bool value)
+    private async Task SyncQuickCaptureEnabledAsync(bool value)
     {
         try
         {
             if (App.Current?.WidgetManager is { } widgetManager)
             {
                 await widgetManager.SetQuickCaptureEnabledAsync(value, reveal: value);
+                return;
             }
+
+            await _settingsService.SaveAsync();
         }
         catch (Exception ex)
         {
             App.Log($"[SettingsViewModel] Failed to sync Quick Capture enabled state: {ex}");
+        }
+        finally
+        {
+            App.Current?.QuickCaptureClipboardService?.Refresh();
+            OnPropertyChanged(nameof(FeatureWidgetEntries));
+            RefreshQuickCaptureClipboardDiagnostics();
+        }
+    }
+
+    partial void OnTodoEnabledChanged(bool value)
+    {
+        if (_isRestoringDefaults || _isApplyingSettingsSnapshot)
+        {
+            return;
+        }
+
+        FeatureWidgetSettings.SetEnabled(_settingsService.Settings, WidgetKind.Todo, value);
+        _ = SyncTodoEnabledAsync(value);
+        OnPropertyChanged(nameof(FeatureWidgetEntries));
+    }
+
+    partial void OnTodoShowCompletedTasksChanged(bool value)
+    {
+        if (_isRestoringDefaults || _isApplyingSettingsSnapshot)
+        {
+            return;
+        }
+
+        _settingsService.Settings.TodoShowCompletedTasks = value;
+        _settingsService.SaveDebounced();
+    }
+
+    partial void OnTodoShowFooterStatsChanged(bool value)
+    {
+        if (_isRestoringDefaults || _isApplyingSettingsSnapshot)
+        {
+            return;
+        }
+
+        _settingsService.Settings.TodoShowFooterStats = value;
+        _settingsService.SaveDebounced();
+    }
+
+    partial void OnTodoShowClearCompletedButtonChanged(bool value)
+    {
+        if (_isRestoringDefaults || _isApplyingSettingsSnapshot)
+        {
+            return;
+        }
+
+        _settingsService.Settings.TodoShowClearCompletedButton = value;
+        _settingsService.SaveDebounced();
+    }
+
+    partial void OnTodoConfirmBeforeDeleteChanged(bool value)
+    {
+        if (_isRestoringDefaults || _isApplyingSettingsSnapshot)
+        {
+            return;
+        }
+
+        _settingsService.Settings.TodoConfirmBeforeDelete = value;
+        _settingsService.SaveDebounced();
+    }
+
+    partial void OnMusicUseArtworkBackdropChanged(bool value)
+    {
+        if (_isRestoringDefaults || _isApplyingSettingsSnapshot)
+        {
+            return;
+        }
+
+        _settingsService.Settings.MusicUseArtworkBackdrop = value;
+        _settingsService.SaveDebounced();
+    }
+
+    partial void OnMusicShowRhythmBarsChanged(bool value)
+    {
+        if (_isRestoringDefaults || _isApplyingSettingsSnapshot)
+        {
+            return;
+        }
+
+        _settingsService.Settings.MusicShowRhythmBars = value;
+        _settingsService.SaveDebounced();
+    }
+
+    partial void OnMusicEnableCoverHoverMotionChanged(bool value)
+    {
+        if (_isRestoringDefaults || _isApplyingSettingsSnapshot)
+        {
+            return;
+        }
+
+        _settingsService.Settings.MusicEnableCoverHoverMotion = value;
+        _settingsService.SaveDebounced();
+    }
+
+    private async Task SyncTodoEnabledAsync(bool enabled)
+    {
+        try
+        {
+            if (App.Current?.WidgetManager is { } widgetManager)
+            {
+                await widgetManager.SetFeatureWidgetEnabledAsync(WidgetKind.Todo, enabled, reveal: enabled);
+                return;
+            }
+
+            await _settingsService.SaveAsync();
+        }
+        catch (Exception ex)
+        {
+            App.Log($"[SettingsViewModel] Failed to sync Todo enabled state: {ex}");
+        }
+        finally
+        {
+            OnPropertyChanged(nameof(FeatureWidgetEntries));
         }
     }
 
@@ -1614,7 +2476,33 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
         }
 
         _settingsService.Settings.QuickCaptureClipboardEnabled = value;
+
+        if (value)
+        {
+            FeatureWidgetSettings.SetEnabled(_settingsService.Settings, WidgetKind.QuickCapture, true);
+            bool shouldSyncQuickCapture = !QuickCaptureEnabled;
+            if (shouldSyncQuickCapture)
+            {
+                _quickCaptureEnabled = true;
+                OnPropertyChanged(nameof(QuickCaptureEnabled));
+                OnPropertyChanged(nameof(QuickCaptureStatusText));
+                OnPropertyChanged(nameof(QuickCaptureDependencyStatusText));
+            }
+
+            _ = SyncQuickCaptureEnabledAsync(true);
+        }
+        else
+        {
+            App.Log("[QuickCaptureClipboard] Disabled from settings");
+        }
+
         _settingsService.SaveDebounced();
+        App.Current?.QuickCaptureClipboardService?.Refresh();
+        if (value)
+        {
+            App.Current?.QuickCaptureClipboardService?.CaptureCurrent();
+        }
+
         RefreshQuickCaptureClipboardDiagnostics();
     }
 
@@ -1636,7 +2524,7 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
 
     partial void OnQuickCaptureRecentLimitChanged(int value)
     {
-        if (_isRestoringDefaults)
+        if (_isRestoringDefaults || _isApplyingSettingsSnapshot)
         {
             OnPropertyChanged(nameof(QuickCaptureRecentLimitText));
             OnPropertyChanged(nameof(QuickCaptureRecentLimitInput));

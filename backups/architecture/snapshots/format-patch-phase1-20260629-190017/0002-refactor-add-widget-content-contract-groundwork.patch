@@ -1,0 +1,115 @@
+From d1ec532c94e41a956cc4b595ac823d1d4e7af0ae Mon Sep 17 00:00:00 2001
+From: Simon <1047078635@qq.com>
+Date: Mon, 29 Jun 2026 18:29:25 +0800
+Subject: [PATCH 2/6] refactor: add widget content contract groundwork
+
+---
+ src/DeskBox/Contracts/IWidgetContent.cs       | 22 ++++++++++
+ .../WidgetContents/ExistingWidgetContent.cs   | 44 +++++++++++++++++++
+ src/DeskBox/Controls/WidgetShell.xaml.cs      |  6 +++
+ 3 files changed, 72 insertions(+)
+ create mode 100644 src/DeskBox/Contracts/IWidgetContent.cs
+ create mode 100644 src/DeskBox/Controls/WidgetContents/ExistingWidgetContent.cs
+
+diff --git a/src/DeskBox/Contracts/IWidgetContent.cs b/src/DeskBox/Contracts/IWidgetContent.cs
+new file mode 100644
+index 0000000..7d67f1c
+--- /dev/null
++++ b/src/DeskBox/Contracts/IWidgetContent.cs
+@@ -0,0 +1,22 @@
++using DeskBox.Models;
++using Microsoft.UI.Xaml;
++
++namespace DeskBox.Contracts;
++
++/// <summary>
++/// Common contract for the content area of every widget kind.
++/// Window, z-order, animation, and DWM behavior remain owned by the host window.
++/// </summary>
++public interface IWidgetContent
++{
++    WidgetConfig Config { get; }
++    string WidgetId { get; }
++    WidgetKind WidgetKind { get; }
++    FrameworkElement View { get; }
++
++    Task InitializeAsync();
++    Task RefreshAsync();
++    void ApplyAppearance();
++    void OnActivated();
++    void OnDeactivated();
++}
+diff --git a/src/DeskBox/Controls/WidgetContents/ExistingWidgetContent.cs b/src/DeskBox/Controls/WidgetContents/ExistingWidgetContent.cs
+new file mode 100644
+index 0000000..0faf77f
+--- /dev/null
++++ b/src/DeskBox/Controls/WidgetContents/ExistingWidgetContent.cs
+@@ -0,0 +1,44 @@
++using DeskBox.Contracts;
++using DeskBox.Models;
++using Microsoft.UI.Xaml;
++
++namespace DeskBox.Controls.WidgetContents;
++
++/// <summary>
++/// Adapter for existing widget views while content is migrated incrementally.
++/// </summary>
++public sealed class ExistingWidgetContent : IWidgetContent
++{
++    public ExistingWidgetContent(WidgetConfig config, FrameworkElement view)
++    {
++        Config = config;
++        View = view;
++    }
++
++    public WidgetConfig Config { get; }
++    public string WidgetId => Config.Id;
++    public WidgetKind WidgetKind => Config.WidgetKind;
++    public FrameworkElement View { get; }
++
++    public Task InitializeAsync()
++    {
++        return Task.CompletedTask;
++    }
++
++    public Task RefreshAsync()
++    {
++        return Task.CompletedTask;
++    }
++
++    public void ApplyAppearance()
++    {
++    }
++
++    public void OnActivated()
++    {
++    }
++
++    public void OnDeactivated()
++    {
++    }
++}
+diff --git a/src/DeskBox/Controls/WidgetShell.xaml.cs b/src/DeskBox/Controls/WidgetShell.xaml.cs
+index 7306950..1eb77e6 100644
+--- a/src/DeskBox/Controls/WidgetShell.xaml.cs
++++ b/src/DeskBox/Controls/WidgetShell.xaml.cs
+@@ -1,3 +1,4 @@
++using DeskBox.Contracts;
+ using Microsoft.UI.Xaml;
+ using Microsoft.UI.Xaml.Controls;
+ using Microsoft.UI.Xaml.Input;
+@@ -56,6 +57,11 @@ public sealed partial class WidgetShell : UserControl
+     public FontIcon MoreActionIcon => MoreButtonIcon;
+     public FontIcon CloseActionIcon => CloseButtonIcon;
+ 
++    public void SetContent(IWidgetContent content)
++    {
++        ShellContent = content.View;
++    }
++
+     public void SetTitleBarRowHeight(GridLength height)
+     {
+         ShellRoot.RowDefinitions[0].Height = height;
+-- 
+2.54.0.windows.1
+

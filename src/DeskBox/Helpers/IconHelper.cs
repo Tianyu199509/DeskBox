@@ -59,7 +59,10 @@ public static class IconHelper
     /// Asynchronously retrieve the native Windows shell icon for the given path.
     /// For image files, returns an actual thumbnail preview instead of the generic icon.
     /// </summary>
-    public static async Task<BitmapImage?> GetIconAsync(string path, bool hideShortcutArrowOverlay = false)
+    public static async Task<BitmapImage?> GetIconAsync(
+        string path,
+        bool hideShortcutArrowOverlay = false,
+        bool showImageFilesAsIcons = false)
     {
         using var perfScope = PerformanceLogger.Measure("IconHelper.GetIcon", $"path={path}");
         var dispatcher = App.UiDispatcherQueue;
@@ -68,7 +71,7 @@ public static class IconHelper
             return null;
         }
 
-        if (IsImageFile(path))
+        if (!showImageFilesAsIcons && IsImageFile(path))
         {
             return await LoadImageThumbnailAsync(dispatcher, path);
         }
@@ -140,7 +143,10 @@ public static class IconHelper
         }
     }
 
-    public static void ClearIconCache(string path, bool hideShortcutArrowOverlay = false)
+    public static void ClearIconCache(
+        string path,
+        bool hideShortcutArrowOverlay = false,
+        bool showImageFilesAsIcons = false)
     {
         if (string.IsNullOrWhiteSpace(path))
         {
@@ -151,7 +157,10 @@ public static class IconHelper
         {
             string thumbCacheKey = $"thumb:{path}:{GetFileIconVersion(path)}";
             s_bitmapImageCache.TryRemove(thumbCacheKey, out _);
-            return;
+            if (!showImageFilesAsIcons)
+            {
+                return;
+            }
         }
 
         IconSource iconSource = ResolveIconSource(path, hideShortcutArrowOverlay);

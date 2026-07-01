@@ -1,0 +1,43 @@
+﻿diff --git a/docs/architecture/widget_architecture_phase1_progress.md b/docs/architecture/widget_architecture_phase1_progress.md
+index e2bdab1..e216e1e 100644
+--- a/docs/architecture/widget_architecture_phase1_progress.md
++++ b/docs/architecture/widget_architecture_phase1_progress.md
+@@ -115,7 +115,7 @@
+ - `dotnet build .\DeskBox.sln -c Debug -p:Platform=x64`
+ - `dotnet test .\DeskBox.sln -c Debug -p:Platform=x64 --no-build`
+ 
+-当前测试数：`106/106`。
++当前测试数：`114/114`。
+ 
+ ## 6. 本地备份
+ 
+@@ -292,6 +292,20 @@ G.2 继续抽只读/纯计算逻辑，建议先统一窗口身份上下文：`Wi
+ 
+ - `docs/architecture/widget_architecture_phase1_g4_checkpoint_summary.md`
+ 
++## 16. 空壳内容试点
++
++已增加内容层空壳试点，用于验证 `WidgetKind + IWidgetContent` 链路：
++
++- 新增 `PlaceholderWidgetContent`。
++- 新增 `WidgetContentFactory`。
++- 支持为 `Weather`、`Todo`、`Tags`、`Music`、`SystemMonitor` 创建占位内容。
++- `WidgetRegistry` 仍然不允许这些未来类型创建窗口。
++- 未开放任何用户入口。
++- 未写入用户设置。
++- 未改变 `WidgetManager` 的窗口创建流程。
++
++这个试点只验证内容契约，不代表功能格子已经可用。
++
+ ### 暂不建议直接做
+ 
+ - 不建议直接迁移文件格子内容区为 `FileWidgetContent`。
+@@ -299,7 +313,7 @@ G.2 继续抽只读/纯计算逻辑，建议先统一窗口身份上下文：`Wi
+ - 不建议让 `WidgetSessionManager` 接管层级恢复。
+ - 不建议引入天气/Todo 等新功能入口。
+ 
+-## 16. 后续施工护栏
++## 17. 后续施工护栏
+ 
+ 每次只动一个目标：
+ 

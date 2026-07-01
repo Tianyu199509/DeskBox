@@ -1,0 +1,492 @@
+﻿diff --git a/deskbox-site/src/app/globals.css b/deskbox-site/src/app/globals.css
+index a705b82..7d6c22b 100644
+--- a/deskbox-site/src/app/globals.css
++++ b/deskbox-site/src/app/globals.css
+@@ -1,6 +1,7 @@
+ @import "tailwindcss";
+ 
+-:root {
++:root,
++:root[data-theme="light"] {
+   --background: #F3F3F3;
+   --foreground: #1A1A1A;
+   --card-background: #FFFFFF;
+@@ -15,19 +16,17 @@
+   --radius-button: 4px;
+ }
+ 
+-@media (prefers-color-scheme: dark) {
+-  :root {
+-    --background: #202020;
+-    --foreground: #FFFFFF;
+-    --card-background: #2D2D2D;
+-    --card-border: #404040;
+-    --text-secondary: #9E9E9E;
+-    --accent: #60CDFF;
+-    --accent-hover: #4DB8E8;
+-    --accent-light: #1A3A4A;
+-    --shadow-hover: 0 2px 8px rgba(0, 0, 0, 0.3);
+-    --shadow-press: 0 1px 4px rgba(0, 0, 0, 0.2);
+-  }
++:root[data-theme="dark"] {
++  --background: #202020;
++  --foreground: #FFFFFF;
++  --card-background: #2D2D2D;
++  --card-border: #404040;
++  --text-secondary: #9E9E9E;
++  --accent: #60CDFF;
++  --accent-hover: #4DB8E8;
++  --accent-light: #1A3A4A;
++  --shadow-hover: 0 2px 8px rgba(0, 0, 0, 0.3);
++  --shadow-press: 0 1px 4px rgba(0, 0, 0, 0.2);
+ }
+ 
+ @theme inline {
+@@ -43,13 +42,22 @@
+ }
+ 
+ body {
+-  background: var(--background);
+-  color: var(--foreground);
++  background: var(--background) !important;
++  color: var(--foreground) !important;
+   font-family: var(--font-sans);
+   -webkit-font-smoothing: antialiased;
+   -moz-osx-font-smoothing: grayscale;
+ }
+ 
++* {
++  transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease;
++}
++
++::selection {
++  background: var(--accent-light);
++  color: var(--foreground);
++}
++
+ .fluent-button {
+   background: var(--accent);
+   color: white;
+diff --git a/deskbox-site/src/app/page.tsx b/deskbox-site/src/app/page.tsx
+index cde649b..76d07da 100644
+--- a/deskbox-site/src/app/page.tsx
++++ b/deskbox-site/src/app/page.tsx
+@@ -341,51 +341,69 @@ export default function Home() {
+         </div>
+       </section>
+ 
+-      {/* Tech Highlights */}
++      {/* Tech Highlights - Bento Grid */}
+       <section className="py-24 px-4 sm:px-6 lg:px-8">
+         <div className="max-w-5xl mx-auto">
+           <motion.div initial={{ opacity: 0, y: 20 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }} className="text-center mb-16">
+             <h2 className="text-3xl sm:text-4xl font-bold mb-3"><CharByChar text="技术亮点" /></h2>
+             <p className="text-[var(--secondary)] text-lg">为什么 DeskBox 值得选择</p>
+           </motion.div>
+-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
++          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+             {techHighlights.map((t, i) => (
+               <motion.div
+                 key={i}
+                 initial={{ opacity: 0, y: 20 }}
+                 whileInView={{ opacity: 1, y: 0 }}
+                 viewport={{ once: true }}
+-                transition={{ delay: i * 0.08 }}
++                transition={{ delay: i * 0.06 }}
+                 className="fluent-card group"
+               >
+-                <div className="text-2xl mb-3">{t.icon}</div>
+-                <h3 className="font-semibold mb-2">{t.title}</h3>
+-                <p className="text-[var(--secondary)] text-sm leading-relaxed">{t.desc}</p>
++                <div className="flex items-start gap-3">
++                  <div className="w-10 h-10 rounded-lg bg-[var(--accent-light)] flex items-center justify-center text-xl flex-shrink-0">
++                    {t.icon}
++                  </div>
++                  <div>
++                    <h3 className="font-semibold mb-1">{t.title}</h3>
++                    <p className="text-[var(--secondary)] text-sm leading-relaxed">{t.desc}</p>
++                  </div>
++                </div>
+               </motion.div>
+             ))}
+           </div>
+         </div>
+       </section>
+ 
+-      {/* Features Summary */}
+-      <section className="py-24 px-4 sm:px-6 lg:px-8">
++      {/* Core Features - Compact Icon List */}
++      <section className="py-24 px-4 sm:px-6 lg:px-8 bg-[var(--card-background)]">
+         <div className="max-w-5xl mx-auto">
+           <motion.div initial={{ opacity: 0, y: 20 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }} className="text-center mb-16">
+             <h2 className="text-3xl sm:text-4xl font-bold mb-3"><CharByChar text="核心功能" /></h2>
+             <p className="text-[var(--secondary)] text-lg">简洁高效，专注于桌面文件整理</p>
+           </motion.div>
+-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
++          <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-12 gap-y-6">
+             {[
+-              { title: "收纳格子", desc: "创建桌面格子，拖拽文件入格，支持排序、搜索、批量操作" },
+-              { title: "文件夹映射", desc: "将已有文件夹映射为格子，不移动文件，原地管理" },
+-              { title: "随记", desc: "自动记录剪贴板内容，支持文本、链接、截图，随时调用" },
+-              { title: "全局快捷键", desc: "F7 一键唤起，全屏应用下也能使用，拖拽内容到其他应用" },
+-              { title: "外观定制", desc: "明暗主题、透明度、圆角、动画效果，全部可调" },
+-              { title: "拖拽诊断", desc: "一键修复 Windows 10/11 拖拽兼容性问题" },
++              { icon: "📦", title: "收纳格子", desc: "拖拽文件入格，支持排序、搜索、批量操作" },
++              { icon: "📁", title: "文件夹映射", desc: "将已有文件夹映射为格子，不移动文件" },
++              { icon: "📋", title: "随记", desc: "自动记录剪贴板，文本、链接、截图随时调用" },
++              { icon: "⌨️", title: "全局快捷键", desc: "F7 一键唤起，全屏应用下也能使用" },
++              { icon: "🎨", title: "外观定制", desc: "明暗主题、透明度、圆角、动画全部可调" },
++              { icon: "🔧", title: "拖拽诊断", desc: "一键修复 Win10/11 拖拽兼容性问题" },
+             ].map((f, i) => (
+-              <motion.div key={i} initial={{ opacity: 0, y: 20 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }} transition={{ delay: i * 0.05 }} className="fluent-card">
+-                <h3 className="font-semibold mb-2">{f.title}</h3>
+-                <p className="text-[var(--secondary)] text-sm">{f.desc}</p>
++              <motion.div
++                key={i}
++                initial={{ opacity: 0, x: i % 2 === 0 ? -16 : 16 }}
++                whileInView={{ opacity: 1, x: 0 }}
++                viewport={{ once: true }}
++                transition={{ delay: i * 0.05 }}
++                className="flex items-start gap-4 group"
++              >
++                <div className="w-10 h-10 rounded-lg bg-[var(--accent-light)] flex items-center justify-center text-lg flex-shrink-0 group-hover:scale-110 transition-transform duration-200">
++                  {f.icon}
++                </div>
++                <div>
++                  <h3 className="font-semibold text-[15px] mb-0.5">{f.title}</h3>
++                  <p className="text-[var(--secondary)] text-sm leading-relaxed">{f.desc}</p>
++                </div>
+               </motion.div>
+             ))}
+           </div>
+diff --git a/deskbox-site/src/app/roadmap/page.tsx b/deskbox-site/src/app/roadmap/page.tsx
+index b7fb19e..f77b0dc 100644
+--- a/deskbox-site/src/app/roadmap/page.tsx
++++ b/deskbox-site/src/app/roadmap/page.tsx
+@@ -3,38 +3,157 @@
+ import { motion } from "framer-motion";
+ import { CharByChar } from "@/components/CharByChar";
+ 
+-const roadmapItems = [
+-  { title: "在线更新", description: "客户端自动检测新版本并一键更新" },
+-  { title: "插件系统", description: "支持第三方插件扩展格子功能" },
+-  { title: "更多格子类型", description: "待办清单、天气、时钟等实用格子" },
+-  { title: "多显示器支持", description: "格子可以在多个显示器间自由移动" },
+-  { title: "云同步", description: "设置和格子配置跨设备同步" },
++interface RoadmapItem {
++  title: string;
++  desc: string;
++  tag?: string;
++}
++
++const phases: { phase: string; label: string; color: string; icon: React.ReactNode; items: RoadmapItem[] }[] = [
++  {
++    phase: "P1",
++    label: "架构铺底",
++    color: "var(--accent)",
++    icon: (
++      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
++        <rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/>
++      </svg>
++    ),
++    items: [
++      { title: "统一 WidgetShell", desc: "抽取通用外壳，新增格子只写内容", tag: "进行中" },
++      { title: "注册表 / 工厂", desc: "格子类型集中管理" },
++      { title: "随记迁移", desc: "验证 Shell 架构" },
++      { title: "文件格子迁移", desc: "保持原有拖拽行为" },
++      { title: "会话状态管理", desc: "F7 / 托盘 / 置顶统一管理" },
++    ],
++  },
++  {
++    phase: "P2",
++    label: "功能格子",
++    color: "#8B5CF6",
++    icon: (
++      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
++        <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/>
++      </svg>
++    ),
++    items: [
++      { title: "天气格子", desc: "定位 + 手动选城市" },
++      { title: "系统监控", desc: "CPU / 内存 / 网络" },
++      { title: "音乐控制", desc: "Windows 系统媒体会话" },
++      { title: "独立 Todo", desc: "不并入随记" },
++      { title: "标签系统", desc: "内部索引，不写入文件" },
++    ],
++  },
++  {
++    phase: "P3",
++    label: "体验增强",
++    color: "#F59E0B",
++    icon: (
++      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
++        <path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/>
++      </svg>
++    ),
++    items: [
++      { title: "格子合并", desc: "同类文件格子合并" },
++      { title: "多显示器", desc: "跨屏自由移动" },
++      { title: "在线更新", desc: "自动检测并更新" },
++      { title: "云同步", desc: "设置和配置跨设备" },
++    ],
++  },
+ ];
+ 
+ export default function RoadmapPage() {
+   return (
+-    <div className="pt-28 pb-16 px-4 sm:px-6 lg:px-8">
+-      <div className="max-w-4xl mx-auto">
+-        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5 }} className="text-center mb-16">
+-          <h1 className="text-4xl font-bold mb-4"><CharByChar text="未来规划" /></h1>
+-          <p className="text-[var(--secondary)] max-w-2xl mx-auto">DeskBox 的发展路线图</p>
++    <div className="pt-28 pb-20 px-4 sm:px-6 lg:px-8">
++      <div className="max-w-5xl mx-auto">
++        {/* Header */}
++        <motion.div
++          initial={{ opacity: 0, y: 20 }}
++          animate={{ opacity: 1, y: 0 }}
++          className="text-center mb-20"
++        >
++          <h1 className="text-4xl sm:text-5xl font-bold mb-5"><CharByChar text="未来规划" /></h1>
++          <p className="text-[var(--secondary)] text-lg max-w-xl mx-auto">DeskBox 的发展路线图</p>
+         </motion.div>
+-        <div className="space-y-6">
+-          {roadmapItems.map((item, index) => (
+-            <motion.div key={index} initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} transition={{ duration: 0.5, delay: index * 0.1 }} className="fluent-card flex items-start gap-4">
+-              <div className="w-8 h-8 rounded-full bg-[var(--accent-light)] flex items-center justify-center flex-shrink-0">
+-                <div className="w-3 h-3 rounded-full bg-[var(--accent)]" />
++
++        {/* Phase Cards */}
++        <div className="space-y-12">
++          {phases.map((phase, pi) => (
++            <motion.div
++              key={phase.phase}
++              initial={{ opacity: 0, y: 30 }}
++              whileInView={{ opacity: 1, y: 0 }}
++              viewport={{ once: true, margin: "-40px" }}
++              transition={{ duration: 0.6, delay: pi * 0.1 }}
++            >
++              {/* Phase Header */}
++              <div className="flex items-center gap-4 mb-7">
++                <div
++                  className="w-11 h-11 rounded-xl flex items-center justify-center text-white shadow-md"
++                  style={{ background: phase.color }}
++                >
++                  {phase.icon}
++                </div>
++                <div>
++                  <h2 className="text-xl font-bold">{phase.label}</h2>
++                  <p className="text-[var(--secondary)] text-sm">{phase.items.length} 项规划</p>
++                </div>
++                <div className="flex-1 h-px bg-gradient-to-r from-[var(--card-border)] to-transparent ml-4" />
+               </div>
+-              <div>
+-                <h3 className="font-semibold text-lg">{item.title}</h3>
+-                <p className="text-[var(--secondary)] mt-1">{item.description}</p>
++
++              {/* Items Grid */}
++              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
++                {phase.items.map((item, ii) => (
++                  <div
++                    key={ii}
++                    className="fluent-card !p-5 flex items-start gap-3.5"
++                  >
++                    <div
++                      className="w-2 h-2 rounded-full mt-2 flex-shrink-0"
++                      style={{ background: phase.color }}
++                    />
++                    <div className="flex-1 min-w-0">
++                      <div className="flex items-center gap-2 mb-1">
++                        <h3 className="font-semibold text-[15px]">{item.title}</h3>
++                        {item.tag && (
++                          <span
++                            className="text-[11px] px-2 py-0.5 rounded-full font-medium"
++                            style={{
++                              color: phase.color,
++                              background: `color-mix(in srgb, ${phase.color} 10%, transparent)`,
++                            }}
++                          >
++                            {item.tag}
++                          </span>
++                        )}
++                      </div>
++                      <p className="text-[var(--secondary)] text-sm leading-relaxed">{item.desc}</p>
++                    </div>
++                  </div>
++                ))}
+               </div>
+             </motion.div>
+           ))}
+         </div>
+-        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5, delay: 0.5 }} className="mt-12 text-center">
+-          <p className="text-[var(--secondary)] mb-4">有功能建议？欢迎在 GitHub 提出</p>
+-          <a href="https://github.com/Tianyu199509/DeskBox/issues" target="_blank" rel="noopener noreferrer" className="fluent-button">提交建议</a>
++
++        {/* CTA */}
++        <motion.div
++          initial={{ opacity: 0, y: 20 }}
++          whileInView={{ opacity: 1, y: 0 }}
++          viewport={{ once: true }}
++          className="mt-20 text-center"
++        >
++          <div className="fluent-card inline-flex flex-col items-center gap-5 py-10 px-12">
++            <p className="text-[var(--secondary)] text-lg">有功能建议？</p>
++            <a
++              href="https://github.com/Tianyu199509/DeskBox/issues"
++              target="_blank"
++              rel="noopener noreferrer"
++              className="fluent-button"
++            >
++              在 GitHub 提交建议
++            </a>
++          </div>
+         </motion.div>
+       </div>
+     </div>
+diff --git a/deskbox-site/src/components/Footer.tsx b/deskbox-site/src/components/Footer.tsx
+index c13c2c9..4987aa1 100644
+--- a/deskbox-site/src/components/Footer.tsx
++++ b/deskbox-site/src/components/Footer.tsx
+@@ -18,6 +18,7 @@ export function Footer() {
+             <ul className="space-y-2 text-sm">
+               <li><Link href="/features" className="text-[var(--secondary)] hover:text-[var(--foreground)] transition-colors">功能介绍</Link></li>
+               <li><Link href="/download" className="text-[var(--secondary)] hover:text-[var(--foreground)] transition-colors">下载</Link></li>
++              <li><Link href="/roadmap" className="text-[var(--secondary)] hover:text-[var(--foreground)] transition-colors">路线图</Link></li>
+               <li><Link href="/changelog" className="text-[var(--secondary)] hover:text-[var(--foreground)] transition-colors">更新日志</Link></li>
+             </ul>
+           </div>
+diff --git a/deskbox-site/src/components/Navbar.tsx b/deskbox-site/src/components/Navbar.tsx
+index c9e82a5..43000fd 100644
+--- a/deskbox-site/src/components/Navbar.tsx
++++ b/deskbox-site/src/components/Navbar.tsx
+@@ -10,21 +10,103 @@ const navItems = [
+   { href: "/", label: "首页" },
+   { href: "/features", label: "功能" },
+   { href: "/download", label: "下载" },
++  { href: "/roadmap", label: "路线图" },
+   { href: "/changelog", label: "更新日志" },
+   { href: "/about", label: "关于" },
+ ];
+ 
++function ThemeToggle() {
++  const [theme, setTheme] = useState<"light" | "dark">("light");
++  const [mounted, setMounted] = useState(false);
++
++  useEffect(() => {
++    setMounted(true);
++    const saved = localStorage.getItem("deskbox_theme") as "light" | "dark" | null;
++    if (saved) {
++      setTheme(saved);
++      document.documentElement.setAttribute("data-theme", saved);
++    } else {
++      const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
++      setTheme(prefersDark ? "dark" : "light");
++      document.documentElement.setAttribute("data-theme", prefersDark ? "dark" : "light");
++    }
++  }, []);
++
++  const toggle = () => {
++    const next = theme === "light" ? "dark" : "light";
++    setTheme(next);
++    localStorage.setItem("deskbox_theme", next);
++    document.documentElement.setAttribute("data-theme", next);
++  };
++
++  if (!mounted) return <div className="w-9 h-9" />;
++
++  return (
++    <button
++      onClick={toggle}
++      className="w-9 h-9 rounded-lg flex items-center justify-center text-[var(--secondary)] hover:text-[var(--foreground)] hover:bg-[var(--card-border)]/50 transition-all duration-150"
++      aria-label={theme === "light" ? "切换到深色模式" : "切换到浅色模式"}
++    >
++      <AnimatePresence mode="wait" initial={false}>
++        {theme === "light" ? (
++          <motion.svg
++            key="sun"
++            initial={{ rotate: -90, opacity: 0 }}
++            animate={{ rotate: 0, opacity: 1 }}
++            exit={{ rotate: 90, opacity: 0 }}
++            transition={{ duration: 0.2 }}
++            width="18"
++            height="18"
++            viewBox="0 0 24 24"
++            fill="none"
++            stroke="currentColor"
++            strokeWidth="2"
++            strokeLinecap="round"
++            strokeLinejoin="round"
++          >
++            <circle cx="12" cy="12" r="5" />
++            <line x1="12" y1="1" x2="12" y2="3" />
++            <line x1="12" y1="21" x2="12" y2="23" />
++            <line x1="4.22" y1="4.22" x2="5.64" y2="5.64" />
++            <line x1="18.36" y1="18.36" x2="19.78" y2="19.78" />
++            <line x1="1" y1="12" x2="3" y2="12" />
++            <line x1="21" y1="12" x2="23" y2="12" />
++            <line x1="4.22" y1="19.78" x2="5.64" y2="18.36" />
++            <line x1="18.36" y1="5.64" x2="19.78" y2="4.22" />
++          </motion.svg>
++        ) : (
++          <motion.svg
++            key="moon"
++            initial={{ rotate: 90, opacity: 0 }}
++            animate={{ rotate: 0, opacity: 1 }}
++            exit={{ rotate: -90, opacity: 0 }}
++            transition={{ duration: 0.2 }}
++            width="18"
++            height="18"
++            viewBox="0 0 24 24"
++            fill="none"
++            stroke="currentColor"
++            strokeWidth="2"
++            strokeLinecap="round"
++            strokeLinejoin="round"
++          >
++            <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
++          </motion.svg>
++        )}
++      </AnimatePresence>
++    </button>
++  );
++}
++
+ export function Navbar() {
+   const [isOpen, setIsOpen] = useState(false);
+   const [visible, setVisible] = useState(true);
+-  const [atTop, setAtTop] = useState(true);
+   const pathname = usePathname();
+   const lastScrollY = useRef(0);
+ 
+   useEffect(() => {
+     const onScroll = () => {
+       const y = window.scrollY;
+-      setAtTop(y < 10);
+       if (y < 10) {
+         setVisible(true);
+       } else if (y > lastScrollY.current + 5) {
+@@ -79,13 +161,18 @@ export function Navbar() {
+                 )}
+               </Link>
+             ))}
+-            <Link href="/download" className="fluent-button text-sm py-2 px-5 ml-3">下载</Link>
++            <div className="ml-2 flex items-center gap-1">
++              <ThemeToggle />
++            </div>
++          </div>
++          <div className="flex md:hidden items-center gap-1">
++            <ThemeToggle />
++            <button className="p-2 rounded-lg hover:bg-[var(--card-border)] transition-colors" onClick={() => setIsOpen(!isOpen)} aria-label="Toggle menu">
++              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
++                {isOpen ? <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /> : <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />}
++              </svg>
++            </button>
+           </div>
+-          <button className="md:hidden p-2 rounded-lg hover:bg-[var(--card-border)] transition-colors" onClick={() => setIsOpen(!isOpen)} aria-label="Toggle menu">
+-            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+-              {isOpen ? <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /> : <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />}
+-            </svg>
+-          </button>
+         </div>
+       </div>
+       <AnimatePresence>

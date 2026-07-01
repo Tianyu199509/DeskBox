@@ -121,6 +121,85 @@ public sealed class WidgetManagerStorageCleanupTests : IDisposable
     }
 
     [Fact]
+    public async Task RestoreWidgetsAsync_SkipsFutureContentWidgetsWhileRegistryIsClosed()
+    {
+        _settingsService.Settings.Widgets.Add(new WidgetConfig
+        {
+            Id = "weather-hidden",
+            Name = "Weather",
+            WidgetKind = WidgetKind.Weather,
+            IsVisible = true
+        });
+
+        await _widgetManager.RestoreWidgetsAsync();
+
+        Assert.Empty(_widgetManager.ContentWidgets);
+        Assert.False(WidgetRegistry.Default.CanCreateWindow(WidgetKind.Weather));
+    }
+
+    [Fact]
+    public void RepairLegacyContentFeatureFileShells_RemovesOnlyEmptyMusicFileShells()
+    {
+        var musicConfig = new WidgetConfig
+        {
+            Id = "music-real",
+            Name = "Music",
+            WidgetKind = WidgetKind.Music,
+            IsVisible = true
+        };
+        var legacyShell = new WidgetConfig
+        {
+            Id = "music-shell",
+            Name = "\u97F3\u4E50",
+            WidgetKind = WidgetKind.File,
+            IsVisible = true
+        };
+        var userFileWidget = new WidgetConfig
+        {
+            Id = "music-user-file",
+            Name = "Music",
+            WidgetKind = WidgetKind.File,
+            MappedFolderPath = _desktopRoot,
+            IsVisible = true
+        };
+        FeatureWidgetSettings.SetEnabled(_settingsService.Settings, WidgetKind.Music, true);
+        _settingsService.Settings.Widgets.Add(musicConfig);
+        _settingsService.Settings.Widgets.Add(legacyShell);
+        _settingsService.Settings.Widgets.Add(userFileWidget);
+
+        int repaired = _widgetManager.RepairLegacyContentFeatureFileShells();
+
+        Assert.Equal(1, repaired);
+        Assert.DoesNotContain(_settingsService.Settings.Widgets, widget => widget.Id == legacyShell.Id);
+        Assert.Contains(_settingsService.Settings.Widgets, widget => widget.Id == musicConfig.Id);
+        Assert.Contains(_settingsService.Settings.Widgets, widget => widget.Id == userFileWidget.Id);
+        Assert.Contains(legacyShell.Id, _settingsService.Settings.DeletedWidgetIds);
+    }
+
+    [Fact]
+    public async Task CreateWidgetFromConfigAsync_RejectsContentFeatureConfigBeforeMutatingKind()
+    {
+        var musicConfig = new WidgetConfig
+        {
+            Id = "music-window",
+            Name = "Music",
+            WidgetKind = WidgetKind.Music
+        };
+        var method = typeof(WidgetManager).GetMethod(
+            "CreateWidgetFromConfigAsync",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+
+        Assert.NotNull(method);
+        var task = Assert.IsAssignableFrom<Task>(method!.Invoke(
+            _widgetManager,
+            [musicConfig, false, false, false]));
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(async () => await task);
+        Assert.Contains("File config", exception.Message);
+        Assert.Equal(WidgetKind.Music, musicConfig.WidgetKind);
+    }
+
+    [Fact]
     public async Task RemoveWidgetAsync_MoveManagedFolderContentsToDesktop_RemovesConfigAndMovesFiles()
     {
         string managedFolder = Directory.CreateDirectory(Path.Combine(_storageRoot, "Managed")).FullName;

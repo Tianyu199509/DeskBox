@@ -3,7 +3,7 @@
 English | [简体中文](README.zh-CN.md)
 
 [![CI](https://github.com/Tianyu199509/DeskBox/actions/workflows/ci.yml/badge.svg)](https://github.com/Tianyu199509/DeskBox/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![License: GPL v3](https://img.shields.io/badge/license-GPLv3-blue.svg)](LICENSE)
 [![Windows 11](https://img.shields.io/badge/Windows-11-0078D4.svg)](#requirements)
 [![.NET 8](https://img.shields.io/badge/.NET-8.0-512BD4.svg)](#build)
 
@@ -148,4 +148,8 @@ DeskBox is still an early public release. If file drag/drop fails on Windows 10/
 
 ## License
 
-DeskBox is released under the [MIT License](LICENSE).
+DeskBox is licensed under [GPL-3.0-only](LICENSE).
+
+Earlier DeskBox versions that were already published under the MIT License
+remain available under the MIT License. This license change is not retroactive;
+see [LICENSE_CHANGE.md](LICENSE_CHANGE.md) for details.

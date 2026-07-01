@@ -1,0 +1,437 @@
+<?xml version="1.0" encoding="utf-8"?>
+<UserControl
+    x:Class="DeskBox.Controls.WidgetContents.MusicWidgetContent"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    mc:Ignorable="d">
+
+    <UserControl.Resources>
+        <Style x:Key="MusicIconButtonStyle" TargetType="Button" BasedOn="{StaticResource SubtleButtonStyle}">
+            <Setter Property="Width" Value="30" />
+            <Setter Property="Height" Value="30" />
+            <Setter Property="MinWidth" Value="30" />
+            <Setter Property="MinHeight" Value="30" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="CornerRadius" Value="15" />
+        </Style>
+
+        <Style x:Key="MusicPrimaryButtonStyle" TargetType="Button" BasedOn="{StaticResource AccentButtonStyle}">
+            <Setter Property="Width" Value="42" />
+            <Setter Property="Height" Value="42" />
+            <Setter Property="MinWidth" Value="42" />
+            <Setter Property="MinHeight" Value="42" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="CornerRadius" Value="21" />
+        </Style>
+    </UserControl.Resources>
+
+    <Grid
+        x:Name="RootGrid"
+        MinWidth="320"
+        Padding="0">
+        <Border
+            x:Name="ArtworkBackdrop"
+            HorizontalAlignment="Stretch"
+            VerticalAlignment="Stretch"
+            CornerRadius="10"
+            IsHitTestVisible="False"
+            Visibility="{Binding ArtworkBackdropVisibility}">
+            <Border.Background>
+                <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                    <GradientStop Offset="0" Color="{Binding ArtworkBackdropStartColor}" />
+                    <GradientStop Offset="0.48" Color="{Binding ArtworkBackdropMidColor}" />
+                    <GradientStop Offset="1" Color="{Binding ArtworkBackdropEndColor}" />
+                </LinearGradientBrush>
+            </Border.Background>
+        </Border>
+
+        <Grid
+            x:Name="RhythmBackdrop"
+            Margin="0"
+            Height="48"
+            VerticalAlignment="Bottom"
+            IsHitTestVisible="False"
+            Opacity="{Binding RhythmBarsOpacity}"
+            Visibility="{Binding RhythmBarsVisibility}">
+            <ItemsControl
+                Margin="14,0,14,7"
+                HorizontalAlignment="Stretch"
+                VerticalAlignment="Bottom"
+                ItemsSource="{Binding VisualizerBars}"
+                Visibility="{Binding SoftWaveVisibility}">
+                <ItemsControl.ItemsPanel>
+                    <ItemsPanelTemplate>
+                        <StackPanel
+                            HorizontalAlignment="Center"
+                            Orientation="Horizontal"
+                            Spacing="3"
+                            VerticalAlignment="Bottom" />
+                    </ItemsPanelTemplate>
+                </ItemsControl.ItemsPanel>
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                        <Border
+                            Width="6"
+                            Height="{Binding Height}"
+                            HorizontalAlignment="Center"
+                            VerticalAlignment="Bottom"
+                            Background="{ThemeResource SystemControlHighlightAccentBrush}"
+                            CornerRadius="3"
+                            Opacity="{Binding Opacity}" />
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+
+            <ItemsControl
+                Margin="15,0,15,7"
+                HorizontalAlignment="Stretch"
+                VerticalAlignment="Bottom"
+                ItemsSource="{Binding VisualizerBars}"
+                Visibility="{Binding GlassSpectrumVisibility}">
+                <ItemsControl.ItemsPanel>
+                    <ItemsPanelTemplate>
+                        <StackPanel
+                            HorizontalAlignment="Center"
+                            Orientation="Horizontal"
+                            Spacing="4"
+                            VerticalAlignment="Bottom" />
+                    </ItemsPanelTemplate>
+                </ItemsControl.ItemsPanel>
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                        <Border
+                            Width="4"
+                            Height="{Binding Height}"
+                            HorizontalAlignment="Center"
+                            VerticalAlignment="Bottom"
+                            BorderBrush="#52FFFFFF"
+                            BorderThickness="1"
+                            CornerRadius="2.5"
+                            Opacity="{Binding Opacity}">
+                            <Border.Background>
+                                <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                                    <GradientStop Offset="0" Color="#88FFFFFF" />
+                                    <GradientStop Offset="0.42" Color="#66FFFFFF" />
+                                    <GradientStop Offset="1" Color="#22FFFFFF" />
+                                </LinearGradientBrush>
+                            </Border.Background>
+                        </Border>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+
+            <ItemsControl
+                Margin="14,0,14,9"
+                HorizontalAlignment="Stretch"
+                VerticalAlignment="Bottom"
+                ItemsSource="{Binding VisualizerBars}"
+                Visibility="{Binding DotPulseVisibility}">
+                <ItemsControl.ItemsPanel>
+                    <ItemsPanelTemplate>
+                        <StackPanel
+                            HorizontalAlignment="Center"
+                            Orientation="Horizontal"
+                            Spacing="3"
+                            VerticalAlignment="Bottom" />
+                    </ItemsPanelTemplate>
+                </ItemsControl.ItemsPanel>
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                        <Ellipse
+                            Width="{Binding DotSize}"
+                            Height="{Binding DotSize}"
+                            HorizontalAlignment="Center"
+                            VerticalAlignment="Bottom"
+                            Fill="{ThemeResource SystemControlHighlightAccentBrush}"
+                            Opacity="{Binding Opacity}" />
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+
+            <ItemsControl
+                Margin="10,0,10,5"
+                HorizontalAlignment="Stretch"
+                VerticalAlignment="Bottom"
+                ItemsSource="{Binding VisualizerBars}"
+                Visibility="{Binding LineSpectrumVisibility}">
+                <ItemsControl.ItemsPanel>
+                    <ItemsPanelTemplate>
+                        <StackPanel
+                            HorizontalAlignment="Center"
+                            Orientation="Horizontal"
+                            Spacing="2.5"
+                            VerticalAlignment="Bottom" />
+                    </ItemsPanelTemplate>
+                </ItemsControl.ItemsPanel>
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                        <Border
+                            Width="2"
+                            Height="{Binding Height}"
+                            HorizontalAlignment="Center"
+                            VerticalAlignment="Bottom"
+                            Background="{ThemeResource SystemControlHighlightAccentBrush}"
+                            CornerRadius="1"
+                            Opacity="{Binding Opacity}" />
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+        </Grid>
+
+        <Grid
+            x:Name="ContentGrid"
+            Padding="12,12,12,11"
+            ColumnSpacing="12"
+            RowSpacing="8"
+            VerticalAlignment="Top">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="82" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="82" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+
+            <Border
+                x:Name="AlbumArtShadow"
+                Grid.Row="0"
+                Grid.Column="0"
+                Width="82"
+                Height="82"
+                HorizontalAlignment="Left"
+                VerticalAlignment="Center"
+                Background="#66000000"
+                CornerRadius="12"
+                Opacity="0.28"
+                Translation="0,4,0" />
+
+            <Border
+                x:Name="AlbumArtSurface"
+                Grid.Row="0"
+                Grid.Column="0"
+                Width="82"
+                Height="82"
+                HorizontalAlignment="Left"
+                VerticalAlignment="Center"
+                Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                BorderThickness="1"
+                CornerRadius="12"
+                PointerEntered="AlbumArtSurface_PointerEntered"
+                PointerExited="AlbumArtSurface_PointerExited"
+                PointerMoved="AlbumArtSurface_PointerMoved"
+                SizeChanged="AlbumArtSurface_SizeChanged">
+                <Grid>
+                    <Image
+                        Source="{Binding ThumbnailImage}"
+                        Stretch="UniformToFill"
+                        Visibility="{Binding ThumbnailVisibility}" />
+                    <Border
+                        IsHitTestVisible="False"
+                        Opacity="0.34">
+                        <Border.Background>
+                            <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                                <GradientStop Offset="0" Color="#66FFFFFF" />
+                                <GradientStop Offset="0.42" Color="#12FFFFFF" />
+                                <GradientStop Offset="1" Color="#33000000" />
+                            </LinearGradientBrush>
+                        </Border.Background>
+                    </Border>
+                    <Border
+                        Margin="1"
+                        BorderBrush="#24FFFFFF"
+                        BorderThickness="1"
+                        CornerRadius="11"
+                        IsHitTestVisible="False" />
+                    <Grid Visibility="{Binding ThumbnailPlaceholderVisibility}">
+                        <Rectangle Fill="{ThemeResource CardBackgroundFillColorSecondaryBrush}" />
+                        <FontIcon
+                            FontSize="30"
+                            Glyph="&#xEC4F;"
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                    </Grid>
+                </Grid>
+            </Border>
+
+            <Grid
+                Grid.Row="0"
+                Grid.Column="1"
+                RowSpacing="4"
+                VerticalAlignment="Center">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <TextBlock
+                    Grid.Row="0"
+                    FontSize="{Binding TitleTextSize}"
+                    FontWeight="SemiBold"
+                    MaxLines="1"
+                    Text="{Binding Title}"
+                    TextTrimming="CharacterEllipsis"
+                    TextWrapping="NoWrap" />
+
+                <TextBlock
+                    Grid.Row="1"
+                    FontSize="{Binding SecondaryTextSize}"
+                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                    MaxLines="1"
+                    Text="{Binding Artist}"
+                    TextTrimming="CharacterEllipsis" />
+
+                <TextBlock
+                    Grid.Row="2"
+                    FontSize="{Binding CaptionTextSize}"
+                    Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                    MaxLines="1"
+                    Text="{Binding StatusText}"
+                    TextTrimming="CharacterEllipsis" />
+            </Grid>
+
+            <Grid
+                Grid.Row="1"
+                Grid.ColumnSpan="2"
+                Margin="0,1,0,0"
+                ColumnSpacing="8">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="34" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="34" />
+                </Grid.ColumnDefinitions>
+
+                <TextBlock
+                    Grid.Column="0"
+                    VerticalAlignment="Center"
+                    FontSize="{Binding CaptionTextSize}"
+                    Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                    Text="{Binding PositionText}"
+                    TextAlignment="Left" />
+
+                <Grid
+                    x:Name="ProgressHost"
+                    Grid.Column="1"
+                    Height="18"
+                    MinWidth="72"
+                    Background="Transparent"
+                    HorizontalAlignment="Stretch"
+                    PointerEntered="ProgressHost_PointerEntered"
+                    PointerExited="ProgressHost_PointerExited"
+                    PointerMoved="ProgressHost_PointerMoved"
+                    PointerPressed="ProgressHost_PointerPressed"
+                    PointerReleased="ProgressHost_PointerReleased">
+                    <Border
+                        x:Name="ProgressTrack"
+                        Height="3"
+                        VerticalAlignment="Center"
+                        Background="{ThemeResource ControlStrongStrokeColorDefaultBrush}"
+                        CornerRadius="2"
+                        Opacity="0.36" />
+                    <Border
+                        x:Name="ProgressFill"
+                        Height="3"
+                        Width="0"
+                        HorizontalAlignment="Left"
+                        VerticalAlignment="Center"
+                        Background="{ThemeResource SystemControlHighlightAccentBrush}"
+                        CornerRadius="2" />
+                    <Ellipse
+                        x:Name="ProgressThumb"
+                        Width="10"
+                        Height="10"
+                        HorizontalAlignment="Left"
+                        VerticalAlignment="Center"
+                        Fill="{ThemeResource SystemControlHighlightAccentBrush}"
+                        Opacity="0"
+                        Translation="-5,0,0" />
+                </Grid>
+
+                <TextBlock
+                    Grid.Column="2"
+                    VerticalAlignment="Center"
+                    FontSize="{Binding CaptionTextSize}"
+                    Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                    Text="{Binding DurationText}"
+                    TextAlignment="Right" />
+            </Grid>
+
+            <StackPanel
+                Grid.Row="2"
+                Grid.ColumnSpan="2"
+                Margin="0,1,0,0"
+                HorizontalAlignment="Center"
+                Orientation="Horizontal"
+                Spacing="12"
+                VerticalAlignment="Bottom">
+                <Button
+                    Click="PreviousButton_Click"
+                    IsEnabled="{Binding CanGoPrevious}"
+                    Style="{StaticResource MusicIconButtonStyle}"
+                    ToolTipService.ToolTip="{Binding PreviousTooltip}">
+                    <FontIcon FontSize="15" Glyph="&#xE100;" />
+                </Button>
+
+                <Button
+                    Click="PlayPauseButton_Click"
+                    IsEnabled="{Binding CanPlayPause}"
+                    Style="{StaticResource MusicPrimaryButtonStyle}"
+                    ToolTipService.ToolTip="{Binding PlayPauseTooltip}">
+                    <Grid Width="18" Height="18">
+                        <PathIcon
+                            Width="16"
+                            Height="16"
+                            HorizontalAlignment="Center"
+                            VerticalAlignment="Center"
+                            Data="M 6,3.9 C 6,3.3 6.7,2.9 7.2,3.2 L 14,7.3 C 14.8,7.8 14.8,9.2 14,9.7 L 7.2,13.8 C 6.7,14.1 6,13.7 6,13.1 Z"
+                            Foreground="{ThemeResource TextOnAccentFillColorPrimaryBrush}"
+                            Translation="-1,0,0"
+                            Visibility="{Binding PlayIconVisibility}" />
+                        <Grid
+                            Width="14"
+                            Height="15"
+                            HorizontalAlignment="Center"
+                            VerticalAlignment="Center"
+                            Visibility="{Binding PauseIconVisibility}">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="4" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <Border
+                                Grid.Column="0"
+                                Width="4"
+                                Height="13"
+                                HorizontalAlignment="Right"
+                                VerticalAlignment="Center"
+                                Background="{ThemeResource TextOnAccentFillColorPrimaryBrush}"
+                                CornerRadius="2" />
+                            <Border
+                                Grid.Column="2"
+                                Width="4"
+                                Height="13"
+                                HorizontalAlignment="Left"
+                                VerticalAlignment="Center"
+                                Background="{ThemeResource TextOnAccentFillColorPrimaryBrush}"
+                                CornerRadius="2" />
+                        </Grid>
+                    </Grid>
+                </Button>
+
+                <Button
+                    Click="NextButton_Click"
+                    IsEnabled="{Binding CanGoNext}"
+                    Style="{StaticResource MusicIconButtonStyle}"
+                    ToolTipService.ToolTip="{Binding NextTooltip}">
+                    <FontIcon FontSize="15" Glyph="&#xE101;" />
+                </Button>
+            </StackPanel>
+        </Grid>
+    </Grid>
+</UserControl>

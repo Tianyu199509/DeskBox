@@ -35,6 +35,13 @@ public class AppSettings
 
     /// <summary>Whether the built-in Quick Capture widget is enabled.</summary>
     public bool QuickCaptureEnabled { get; set; } = true;
+    public bool TodoEnabled { get; set; } = true;
+
+    /// <summary>
+    /// Enabled state for singleton feature widgets, keyed by <see cref="WidgetKind"/> name.
+    /// Legacy boolean properties are still kept as compatibility mirrors.
+    /// </summary>
+    public Dictionary<string, bool> FeatureWidgetEnabledStates { get; set; } = [];
 
     /// <summary>Whether Quick Capture should record recent clipboard text and links.</summary>
     public bool QuickCaptureClipboardEnabled { get; set; } = true;
@@ -44,6 +51,39 @@ public class AppSettings
 
     /// <summary>Maximum number of recent clipboard text/link entries kept by Quick Capture.</summary>
     public int QuickCaptureRecentLimit { get; set; } = 30;
+
+    /// <summary>Default Quick Capture view used when the widget opens. Valid values: <c>"Records"</c>, <c>"Pinned"</c>, <c>"Recent"</c>.</summary>
+    public string QuickCaptureDefaultView { get; set; } = "Records";
+
+    /// <summary>Where newly added Todo tasks are inserted. Valid values: <c>"Top"</c>, <c>"Bottom"</c>.</summary>
+    public string TodoNewTaskPosition { get; set; } = "Top";
+
+    /// <summary>Default Todo filter used when the widget opens. Valid values: <c>"All"</c>, <c>"Today"</c>, <c>"Important"</c>, <c>"Completed"</c>.</summary>
+    public string TodoDefaultFilter { get; set; } = "All";
+
+    /// <summary>Whether completed Todo tasks remain visible in non-completed views.</summary>
+    public bool TodoShowCompletedTasks { get; set; } = true;
+
+    /// <summary>Whether the Todo footer item count is visible.</summary>
+    public bool TodoShowFooterStats { get; set; } = true;
+
+    /// <summary>Whether the Todo footer clear-completed command is visible.</summary>
+    public bool TodoShowClearCompletedButton { get; set; } = true;
+
+    /// <summary>Whether Todo delete and clear-completed commands ask for confirmation first.</summary>
+    public bool TodoConfirmBeforeDelete { get; set; }
+
+    /// <summary>Whether the Music widget uses album artwork color as a soft backdrop.</summary>
+    public bool MusicUseArtworkBackdrop { get; set; } = true;
+
+    /// <summary>Whether the Music widget shows playback rhythm bars.</summary>
+    public bool MusicShowRhythmBars { get; set; } = true;
+
+    /// <summary>Music widget playback rhythm visual style. Valid values: <c>"SoftWave"</c>, <c>"GlassSpectrum"</c>, <c>"DotPulse"</c>, <c>"LineSpectrum"</c>.</summary>
+    public string MusicRhythmStyle { get; set; } = "SoftWave";
+
+    /// <summary>Whether the Music widget album cover reacts lightly to pointer hover.</summary>
+    public bool MusicEnableCoverHoverMotion { get; set; } = true;
 
     /// <summary>Last file widget used as the target for saving Quick Capture content.</summary>
     public string LastQuickCaptureFileWidgetId { get; set; } = string.Empty;
@@ -99,6 +139,18 @@ public class AppSettings
     /// </summary>
     public string WidgetAnimationEasingIntensity { get; set; } = "Standard";
 
+    /// <summary>
+    /// Default chrome/title mode for display widgets such as Music, Weather, and System Monitor.
+    /// Valid values: <c>"Standard"</c>, <c>"Compact"</c>, <c>"Overlay"</c>, <c>"Hidden"</c>.
+    /// </summary>
+    public string DisplayWidgetChromeMode { get; set; } = "Overlay";
+
+    /// <summary>
+    /// Default chrome/title mode for interactive widgets such as files, Quick Capture, Todo, and Tags.
+    /// Valid values: <c>"Standard"</c>, <c>"Compact"</c>, <c>"Overlay"</c>, <c>"Hidden"</c>.
+    /// </summary>
+    public string InteractiveWidgetChromeMode { get; set; } = "Standard";
+
     /// <summary>Whether to double click to open files.</summary>
     public bool DoubleClickToOpen { get; set; } = true;
 
@@ -106,6 +158,11 @@ public class AppSettings
     /// Whether shortcut icons should hide the arrow overlay inside DeskBox.
     /// </summary>
     public bool HideShortcutArrowOverlay { get; set; } = true;
+
+    /// <summary>
+    /// Whether image files in file widgets should use the system file icon instead of image thumbnails.
+    /// </summary>
+    public bool ShowImageFilesAsIcons { get; set; }
 
     /// <summary>
     /// Whether to show action buttons on widget hover.

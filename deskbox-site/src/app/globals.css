@@ -1,6 +1,7 @@
 @import "tailwindcss";
 
-:root {
+:root,
+:root[data-theme="light"] {
   --background: #F3F3F3;
   --foreground: #1A1A1A;
   --card-background: #FFFFFF;
@@ -15,19 +16,17 @@
   --radius-button: 4px;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #202020;
-    --foreground: #FFFFFF;
-    --card-background: #2D2D2D;
-    --card-border: #404040;
-    --text-secondary: #9E9E9E;
-    --accent: #60CDFF;
-    --accent-hover: #4DB8E8;
-    --accent-light: #1A3A4A;
-    --shadow-hover: 0 2px 8px rgba(0, 0, 0, 0.3);
-    --shadow-press: 0 1px 4px rgba(0, 0, 0, 0.2);
-  }
+:root[data-theme="dark"] {
+  --background: #202020;
+  --foreground: #FFFFFF;
+  --card-background: #2D2D2D;
+  --card-border: #404040;
+  --text-secondary: #9E9E9E;
+  --accent: #60CDFF;
+  --accent-hover: #4DB8E8;
+  --accent-light: #1A3A4A;
+  --shadow-hover: 0 2px 8px rgba(0, 0, 0, 0.3);
+  --shadow-press: 0 1px 4px rgba(0, 0, 0, 0.2);
 }
 
 @theme inline {
@@ -43,11 +42,21 @@
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
+  background: var(--background) !important;
+  color: var(--foreground) !important;
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+*:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+::selection {
+  background: var(--accent-light);
+  color: var(--foreground);
 }
 
 .fluent-button {
@@ -67,6 +76,7 @@ body {
 .fluent-button:hover {
   background: var(--accent-hover);
   box-shadow: var(--shadow-hover);
+  transform: translateY(-1px);
 }
 
 .fluent-button:active {
@@ -98,7 +108,7 @@ body {
   border: 1px solid var(--card-border);
   border-radius: var(--radius-card);
   padding: 24px;
-  transition: all 200ms ease-out;
+  transition: box-shadow 200ms ease-out, transform 200ms ease-out, background 200ms ease, border-color 200ms ease;
 }
 
 .fluent-card:hover {

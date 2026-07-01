@@ -1,0 +1,30 @@
+﻿33d5ce7 (HEAD -> codex/widget-architecture-phase1) Clean up content window naming
+5357203 Add base menu actions to content widgets
+38f51b6 Drive widget create entries from descriptors
+8c36316 Enable Todo content widgets
+70f6878 Recognize content widget windows as DeskBox windows
+e56f347 Add debug Todo content window path
+3994fe4 Include content widgets in lifecycle paths
+2687e5f Add private manager path for content widgets
+0f3c07d Add content widget window factory
+48beb3f Add content widget window skeleton
+581993f Document content widget window plan
+2f29a76 Add detached widget content factory path
+67a2d4b Add widget shell content host
+2208780 Add Todo widget content adapter
+35e4c21 Add Todo widget content UI
+ed3f1d9 Add Todo widget view model
+d3f5412 Add Todo widget store
+5ed2ad9 Document Todo widget design
+a3a9eea Close out widget content metadata phase
+06da057 Add widget kind coverage tests
+577c041 Add widget content status metadata
+4e3892c Add widget content capability queries
+f168b1d Add widget content descriptors
+2f2ec3e refactor: add placeholder widget content pilot
+1481be9 docs: add widget architecture g4 checkpoint summary
+c1f6aec docs: summarize widget architecture g-phase checkpoint
+a7822b1 refactor: use widget host identity in manager logs
+f12ae7d docs: record widget host identity validation
+81b7ba7 refactor: expose widget host identity
+2243f28 docs: record widget identity validation

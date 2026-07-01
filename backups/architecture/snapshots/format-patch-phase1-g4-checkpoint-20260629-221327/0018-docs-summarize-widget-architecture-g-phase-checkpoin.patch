@@ -1,0 +1,78 @@
+From c1f6aecd6628c5b12bef20487e5e0c7f43ab4264 Mon Sep 17 00:00:00 2001
+From: Simon <1047078635@qq.com>
+Date: Mon, 29 Jun 2026 22:12:52 +0800
+Subject: [PATCH 18/18] docs: summarize widget architecture g-phase checkpoint
+
+---
+ .../widget_architecture_phase1_progress.md    | 27 +++++++++++++++++--
+ 1 file changed, 25 insertions(+), 2 deletions(-)
+
+diff --git a/docs/architecture/widget_architecture_phase1_progress.md b/docs/architecture/widget_architecture_phase1_progress.md
+index 8ca2956..50941f7 100644
+--- a/docs/architecture/widget_architecture_phase1_progress.md
++++ b/docs/architecture/widget_architecture_phase1_progress.md
+@@ -27,6 +27,8 @@
+ | `42c935c` | E.3：标出文件格子内容区未来迁移边界，不移动业务 UI | 已测试 |
+ | `0b8adde` | G.1：新增只读 `WidgetWindowDiagnostics`，统一窗口日志和动画边界计算 | 已手测 |
+ | `3ac4ff7` | G.2：新增只读 `WidgetWindowIdentity` 上下文 | 已手测 |
++| `81b7ba7` | G.3：`IDesktopWidgetWindow` 暴露只读 `Identity` | 已手测 |
++| `a7822b1` | G.4：`WidgetManager` 部分日志使用统一 Host 身份 | 已手测 |
+ 
+ ## 3. 已完成范围
+ 
+@@ -228,6 +230,15 @@ G.2 继续抽只读/纯计算逻辑，建议先统一窗口身份上下文：`Wi
+ - 未修改 `WidgetManager` 批量显隐流程。
+ - 未接管 AppWindow、DWM、topmost、F7、托盘动画或拖拽逻辑。
+ 
++### G.2 验收记录
++
++用户已在 Debug 版手测通过：
++
++- 托盘/F7 行为正常。
++- 随记显示正常。
++- 文件格子显示正常。
++- 格子拖拽未发现异常。
++
+ ## 13. G.3 施工记录
+ 
+ 已补齐 Host 侧只读身份接口：
+@@ -256,7 +267,7 @@ G.2 继续抽只读/纯计算逻辑，建议先统一窗口身份上下文：`Wi
+ - `WidgetManager` 的显隐、批处理、topmost 确认、动画调用仍使用原有控制流。
+ - 未改变任何 `WindowHandle` 判断、Win32 调用、F7、托盘动画、拖拽或 IME 行为。
+ 
+-### G.2 验收记录
++### G.4 验收记录
+ 
+ 用户已在 Debug 版手测通过：
+ 
+@@ -265,6 +276,18 @@ G.2 继续抽只读/纯计算逻辑，建议先统一窗口身份上下文：`Wi
+ - 文件格子显示正常。
+ - 格子拖拽未发现异常。
+ 
++## 15. 当前阶段停止建议
++
++建议暂时停在 G.4：
++
++- `WidgetShell` 已覆盖随记和文件格子的外壳。
++- `IWidgetContent` 契约和 `ExistingWidgetContent` 已存在。
++- `WidgetSessionManager` 已记录会话状态，但尚未接管层级。
++- `IDesktopWidgetWindow` 已具备统一只读身份。
++- `WidgetManager` 已开始在日志层使用统一 Host 身份。
++
++当前不建议继续推进 `WidgetWindowLayerController`、`WidgetWindowAnimationController` 或 `FileWidgetContent` 内容迁移。下一轮如果继续重构，优先做纯参数/只读类整理，例如 appearance 参数计算；如果要进入内容迁移，需要单独列验证矩阵。
++
+ ### 暂不建议直接做
+ 
+ - 不建议直接迁移文件格子内容区为 `FileWidgetContent`。
+@@ -272,7 +295,7 @@ G.2 继续抽只读/纯计算逻辑，建议先统一窗口身份上下文：`Wi
+ - 不建议让 `WidgetSessionManager` 接管层级恢复。
+ - 不建议引入天气/Todo 等新功能入口。
+ 
+-## 15. 后续施工护栏
++## 16. 后续施工护栏
+ 
+ 每次只动一个目标：
+ 
+-- 
+2.54.0.windows.1
+

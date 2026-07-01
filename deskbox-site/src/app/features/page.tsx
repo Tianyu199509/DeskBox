@@ -19,18 +19,20 @@ export default function FeaturesPage() {
           <h1 className="text-4xl sm:text-5xl font-bold mb-4"><CharByChar text="功能" /></h1>
           <p className="text-[var(--secondary)] text-lg max-w-lg mx-auto">每个功能都围绕一个核心需求设计</p>
         </motion.div>
-        <div className="space-y-40">
+        <div className="space-y-32">
           {features.map((feature, index) => (
             <motion.div key={index} initial={{ opacity: 0, y: 50 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true, margin: "-80px" }} transition={{ duration: 0.7, ease: [0.16, 1, 0.3, 1] }}
               className={`flex flex-col ${index % 2 === 1 ? "lg:flex-row-reverse" : "lg:flex-row"} gap-16 items-center`}>
               <div className="lg:w-2/5">
-                <p className="text-[var(--accent)] font-medium text-sm mb-2 tracking-wide uppercase">{feature.subtitle}</p>
+                <span className="inline-block text-xs px-2.5 py-1 rounded-full font-medium bg-[var(--accent-light)] text-[var(--accent)] mb-3">{feature.subtitle}</span>
                 <h2 className="text-3xl sm:text-4xl font-bold mb-4">{feature.title}</h2>
                 <p className="text-[var(--secondary)] text-lg leading-relaxed mb-6">{feature.description}</p>
                 <ul className="space-y-3">
                   {feature.highlights.map((h, i) => (
                     <li key={i} className="flex items-center gap-3">
-                      <div className="w-1.5 h-1.5 rounded-full bg-[var(--accent)] flex-shrink-0" />
+                      <svg className="w-4 h-4 text-emerald-500 flex-shrink-0" viewBox="0 0 20 20" fill="currentColor">
+                        <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                      </svg>
                       <span className="text-[var(--secondary)]">{h}</span>
                     </li>
                   ))}

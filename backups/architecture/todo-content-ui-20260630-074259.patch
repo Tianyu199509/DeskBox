@@ -1,0 +1,475 @@
+﻿diff --git a/docs/architecture/widget_architecture_phase1_progress.md b/docs/architecture/widget_architecture_phase1_progress.md
+index 7b7dec7..cabdeb0 100644
+--- a/docs/architecture/widget_architecture_phase1_progress.md
++++ b/docs/architecture/widget_architecture_phase1_progress.md
+@@ -566,3 +566,36 @@ H 线后建议先做“第一个真实功能格子前置设计”，不要直接
+ ### 下一步建议
+ 
+ 下一步可以做 `TodoWidgetContent` UI 空接入，但仍不要开放 Todo 创建入口。先让 UI 控件可以绑定 ViewModel，再决定是否需要通用内容 host。
++
++## 26. Todo UI 空接入
++
++已新增 Todo 内容控件，但仍未开放入口：
++
++- 新增 `TodoWidgetContent.xaml`。
++- 新增 `TodoWidgetContent.xaml.cs`。
++- Todo UI 使用 WinUI 原生控件：
++  - `TextBox`
++  - `Button`
++  - `CheckBox`
++  - `ListView`
++- Todo UI 可绑定 `TodoWidgetViewModel`。
++- 支持添加任务、切换过滤、完成/取消完成、删除任务、清理已完成任务。
++- `TodoWidgetViewModel` 补充 UI 绑定所需的空状态和列表可见性属性。
++- 补充 ViewModel 测试覆盖空状态和列表可见性。
++- 暂未新增 `TodoWidgetContent : IWidgetContent` 适配器。
++- 暂未接入 `WidgetContentFactory`。
++- 暂未修改 `WidgetRegistry`。
++- 未开放 Todo 创建入口。
++- 未接入设置页、托盘菜单、右键菜单或新建格子流程。
++- 未改变托盘/F7/层级/拖拽/IME/排序/安装器逻辑。
++
++### Todo UI 验证记录
++
++- `dotnet build .\DeskBox.sln -c Debug -p:Platform=x64 --no-restore`
++- `dotnet test .\DeskBox.sln -c Debug -p:Platform=x64 --no-build`
++
++当前测试数量：`154/154`。
++
++### 下一步建议
++
++下一步建议做一个不开放入口的 `TodoWidgetContentAdapter` 或等价内容封装，让 Todo 真正实现 `IWidgetContent`，但仍不让 `WidgetRegistry` 创建 Todo 窗口。
+diff --git a/src/DeskBox/ViewModels/TodoWidgetViewModel.cs b/src/DeskBox/ViewModels/TodoWidgetViewModel.cs
+index 6742be9..c1a3af8 100644
+--- a/src/DeskBox/ViewModels/TodoWidgetViewModel.cs
++++ b/src/DeskBox/ViewModels/TodoWidgetViewModel.cs
+@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
+ using CommunityToolkit.Mvvm.ComponentModel;
+ using DeskBox.Models;
+ using DeskBox.Services;
++using Microsoft.UI.Xaml;
+ 
+ namespace DeskBox.ViewModels;
+ 
+@@ -50,8 +51,10 @@ public sealed partial class TodoWidgetViewModel : ObservableObject
+             if (SetProperty(ref _selectedFilter, value))
+             {
+                 RefreshVisibleItems();
+-                OnPropertyChanged(nameof(ActiveCount));
+-                OnPropertyChanged(nameof(CompletedCount));
++                OnPropertyChanged(nameof(EmptyStateText));
++                OnPropertyChanged(nameof(IsAllFilterSelected));
++                OnPropertyChanged(nameof(IsActiveFilterSelected));
++                OnPropertyChanged(nameof(IsCompletedFilterSelected));
+             }
+         }
+     }
+@@ -64,6 +67,43 @@ public sealed partial class TodoWidgetViewModel : ObservableObject
+ 
+     public bool HasCompletedItems => CompletedCount > 0;
+ 
++    public bool HasItems => TotalCount > 0;
++
++    public bool HasVisibleItems => VisibleItems.Count > 0;
++
++    public Visibility ListVisibility => HasVisibleItems ? Visibility.Visible : Visibility.Collapsed;
++
++    public Visibility EmptyStateVisibility => HasVisibleItems ? Visibility.Collapsed : Visibility.Visible;
++
++    public string AddPlaceholderText => "Add a task";
++
++    public string AllFilterText => "All";
++
++    public string ActiveFilterText => "Active";
++
++    public string CompletedFilterText => "Completed";
++
++    public string EmptyStateTitle => "No tasks";
++
++    public string EmptyStateText => SelectedFilter switch
++    {
++        TodoFilter.Active => "No active tasks.",
++        TodoFilter.Completed => "No completed tasks.",
++        _ => "Add a task to get started."
++    };
++
++    public string ClearCompletedText => "Clear completed";
++
++    public string ItemsLeftText => ActiveCount == 1
++        ? "1 item left"
++        : $"{ActiveCount} items left";
++
++    public bool IsAllFilterSelected => SelectedFilter == TodoFilter.All;
++
++    public bool IsActiveFilterSelected => SelectedFilter == TodoFilter.Active;
++
++    public bool IsCompletedFilterSelected => SelectedFilter == TodoFilter.Completed;
++
+     public bool IsInitialized
+     {
+         get => _isInitialized;
+@@ -207,6 +247,11 @@ public sealed partial class TodoWidgetViewModel : ObservableObject
+         return completedItems.Count;
+     }
+ 
++    public void SetFilter(TodoFilter filter)
++    {
++        SelectedFilter = filter;
++    }
++
+     private TodoItemViewModel? FindItem(string itemId)
+     {
+         return Items.FirstOrDefault(item => string.Equals(item.Id, itemId, StringComparison.Ordinal));
+@@ -228,6 +273,8 @@ public sealed partial class TodoWidgetViewModel : ObservableObject
+         {
+             VisibleItems.Add(item);
+         }
++
++        RefreshVisibleStateProperties();
+     }
+ 
+     private bool ShouldShowItem(TodoItemViewModel item)
+@@ -254,6 +301,18 @@ public sealed partial class TodoWidgetViewModel : ObservableObject
+         OnPropertyChanged(nameof(ActiveCount));
+         OnPropertyChanged(nameof(CompletedCount));
+         OnPropertyChanged(nameof(HasCompletedItems));
++        OnPropertyChanged(nameof(HasItems));
++        OnPropertyChanged(nameof(HasVisibleItems));
++        OnPropertyChanged(nameof(ItemsLeftText));
++        OnPropertyChanged(nameof(ListVisibility));
++        OnPropertyChanged(nameof(EmptyStateVisibility));
++    }
++
++    private void RefreshVisibleStateProperties()
++    {
++        OnPropertyChanged(nameof(HasVisibleItems));
++        OnPropertyChanged(nameof(ListVisibility));
++        OnPropertyChanged(nameof(EmptyStateVisibility));
+     }
+ 
+     private static string NormalizeText(string? text)
+diff --git a/tests/DeskBox.Tests/TodoWidgetViewModelTests.cs b/tests/DeskBox.Tests/TodoWidgetViewModelTests.cs
+index 644b03d..2a1e794 100644
+--- a/tests/DeskBox.Tests/TodoWidgetViewModelTests.cs
++++ b/tests/DeskBox.Tests/TodoWidgetViewModelTests.cs
+@@ -1,6 +1,7 @@
+ using DeskBox.Models;
+ using DeskBox.Services;
+ using DeskBox.ViewModels;
++using Microsoft.UI.Xaml;
+ 
+ namespace DeskBox.Tests;
+ 
+@@ -223,6 +224,33 @@ public sealed class TodoWidgetViewModelTests : IDisposable
+         Assert.Equal(completed.Id, viewModel.VisibleItems[0].Id);
+     }
+ 
++    [Fact]
++    public async Task EmptyAndListVisibility_FollowVisibleItems()
++    {
++        var viewModel = CreateViewModel("todo-widget");
++        await viewModel.InitializeAsync();
++
++        Assert.False(viewModel.HasVisibleItems);
++        Assert.Equal(Visibility.Collapsed, viewModel.ListVisibility);
++        Assert.Equal(Visibility.Visible, viewModel.EmptyStateVisibility);
++        Assert.Equal("Add a task to get started.", viewModel.EmptyStateText);
++
++        var item = await viewModel.AddItemAsync("task");
++        Assert.NotNull(item);
++
++        Assert.True(viewModel.HasVisibleItems);
++        Assert.Equal(Visibility.Visible, viewModel.ListVisibility);
++        Assert.Equal(Visibility.Collapsed, viewModel.EmptyStateVisibility);
++
++        await viewModel.SetCompletedAsync(item.Id, true);
++        viewModel.SelectedFilter = TodoFilter.Active;
++
++        Assert.False(viewModel.HasVisibleItems);
++        Assert.Equal(Visibility.Collapsed, viewModel.ListVisibility);
++        Assert.Equal(Visibility.Visible, viewModel.EmptyStateVisibility);
++        Assert.Equal("No active tasks.", viewModel.EmptyStateText);
++    }
++
+     public void Dispose()
+     {
+         try
+diff --git a/src/DeskBox/Controls/WidgetContents/TodoWidgetContent.xaml b/src/DeskBox/Controls/WidgetContents/TodoWidgetContent.xaml
+new file mode 100644
+index 0000000..f0d3b65
+--- /dev/null
++++ b/src/DeskBox/Controls/WidgetContents/TodoWidgetContent.xaml
+@@ -0,0 +1,170 @@
++<?xml version="1.0" encoding="utf-8"?>
++<UserControl
++    x:Class="DeskBox.Controls.WidgetContents.TodoWidgetContent"
++    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
++    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
++    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
++    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
++    xmlns:viewModels="using:DeskBox.ViewModels"
++    mc:Ignorable="d">
++
++    <Grid Padding="10,8,8,8" RowSpacing="8">
++        <Grid.RowDefinitions>
++            <RowDefinition Height="Auto" />
++            <RowDefinition Height="Auto" />
++            <RowDefinition Height="*" />
++            <RowDefinition Height="Auto" />
++        </Grid.RowDefinitions>
++
++        <Grid Grid.Row="0" ColumnSpacing="6">
++            <Grid.ColumnDefinitions>
++                <ColumnDefinition Width="*" />
++                <ColumnDefinition Width="Auto" />
++            </Grid.ColumnDefinitions>
++
++            <TextBox
++                x:Name="AddTextBox"
++                Grid.Column="0"
++                MinHeight="30"
++                Padding="9,6,9,4"
++                BorderThickness="1"
++                Text="{Binding InputText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
++                PlaceholderText="{Binding AddPlaceholderText}"
++                KeyDown="AddTextBox_KeyDown" />
++
++            <Button
++                Grid.Column="1"
++                Width="30"
++                Height="30"
++                MinWidth="30"
++                Padding="0"
++                Click="AddButton_Click"
++                IsEnabled="{Binding CanAddInput}">
++                <FontIcon FontSize="13" Glyph="&#xE710;" />
++            </Button>
++        </Grid>
++
++        <StackPanel
++            Grid.Row="1"
++            Orientation="Horizontal"
++            Spacing="4">
++            <Button
++                MinWidth="0"
++                Padding="10,4"
++                Click="AllFilterButton_Click">
++                <TextBlock Text="{Binding AllFilterText}" />
++            </Button>
++            <Button
++                MinWidth="0"
++                Padding="10,4"
++                Click="ActiveFilterButton_Click">
++                <TextBlock Text="{Binding ActiveFilterText}" />
++            </Button>
++            <Button
++                MinWidth="0"
++                Padding="10,4"
++                Click="CompletedFilterButton_Click">
++                <TextBlock Text="{Binding CompletedFilterText}" />
++            </Button>
++        </StackPanel>
++
++        <Grid Grid.Row="2">
++            <ListView
++                x:Name="TodoListView"
++                ItemsSource="{Binding VisibleItems}"
++                SelectionMode="None"
++                IsItemClickEnabled="False"
++                Visibility="{Binding ListVisibility}">
++                <ListView.ItemContainerStyle>
++                    <Style TargetType="ListViewItem">
++                        <Setter Property="Padding" Value="0" />
++                        <Setter Property="Margin" Value="0,0,0,4" />
++                        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
++                    </Style>
++                </ListView.ItemContainerStyle>
++                <ListView.ItemTemplate>
++                    <DataTemplate x:DataType="viewModels:TodoItemViewModel">
++                        <Grid
++                            MinHeight="34"
++                            ColumnSpacing="8"
++                            Padding="6,4">
++                            <Grid.ColumnDefinitions>
++                                <ColumnDefinition Width="Auto" />
++                                <ColumnDefinition Width="*" />
++                                <ColumnDefinition Width="Auto" />
++                            </Grid.ColumnDefinitions>
++
++                            <CheckBox
++                                Grid.Column="0"
++                                VerticalAlignment="Center"
++                                IsChecked="{x:Bind IsCompleted, Mode=OneWay}"
++                                Click="ItemCheckBox_Click" />
++
++                            <TextBlock
++                                Grid.Column="1"
++                                VerticalAlignment="Center"
++                                Text="{x:Bind Text, Mode=OneWay}"
++                                TextTrimming="CharacterEllipsis"
++                                TextWrapping="NoWrap" />
++
++                            <Button
++                                Grid.Column="2"
++                                Width="28"
++                                Height="28"
++                                MinWidth="28"
++                                Padding="0"
++                                Click="DeleteItemButton_Click">
++                                <FontIcon FontSize="12" Glyph="&#xE74D;" />
++                            </Button>
++                        </Grid>
++                    </DataTemplate>
++                </ListView.ItemTemplate>
++            </ListView>
++
++            <StackPanel
++                HorizontalAlignment="Center"
++                VerticalAlignment="Center"
++                Spacing="4"
++                Visibility="{Binding EmptyStateVisibility}">
++                <TextBlock
++                    HorizontalAlignment="Center"
++                    FontSize="14"
++                    FontWeight="SemiBold"
++                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
++                    Text="{Binding EmptyStateTitle}" />
++                <TextBlock
++                    MaxWidth="220"
++                    HorizontalAlignment="Center"
++                    FontSize="12"
++                    Foreground="{ThemeResource TextFillColorTertiaryBrush}"
++                    Text="{Binding EmptyStateText}"
++                    TextAlignment="Center"
++                    TextWrapping="Wrap" />
++            </StackPanel>
++        </Grid>
++
++        <Grid Grid.Row="3" ColumnSpacing="8">
++            <Grid.ColumnDefinitions>
++                <ColumnDefinition Width="*" />
++                <ColumnDefinition Width="Auto" />
++            </Grid.ColumnDefinitions>
++
++            <TextBlock
++                Grid.Column="0"
++                VerticalAlignment="Center"
++                FontSize="12"
++                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
++                Text="{Binding ItemsLeftText}"
++                TextTrimming="CharacterEllipsis" />
++
++            <Button
++                Grid.Column="1"
++                MinWidth="0"
++                Padding="8,4"
++                Click="ClearCompletedButton_Click"
++                IsEnabled="{Binding HasCompletedItems}">
++                <TextBlock Text="{Binding ClearCompletedText}" />
++            </Button>
++        </Grid>
++    </Grid>
++</UserControl>
+diff --git a/src/DeskBox/Controls/WidgetContents/TodoWidgetContent.xaml.cs b/src/DeskBox/Controls/WidgetContents/TodoWidgetContent.xaml.cs
+new file mode 100644
+index 0000000..02476e8
+--- /dev/null
++++ b/src/DeskBox/Controls/WidgetContents/TodoWidgetContent.xaml.cs
+@@ -0,0 +1,97 @@
++using DeskBox.ViewModels;
++using Microsoft.UI.Xaml;
++using Microsoft.UI.Xaml.Controls;
++using Microsoft.UI.Xaml.Input;
++using Windows.System;
++
++namespace DeskBox.Controls.WidgetContents;
++
++public sealed partial class TodoWidgetContent : UserControl
++{
++    public TodoWidgetContent()
++    {
++        InitializeComponent();
++    }
++
++    public TodoWidgetContent(TodoWidgetViewModel viewModel)
++        : this()
++    {
++        ViewModel = viewModel;
++    }
++
++    public TodoWidgetViewModel? ViewModel
++    {
++        get => DataContext as TodoWidgetViewModel;
++        set => DataContext = value;
++    }
++
++    private async void AddTextBox_KeyDown(object sender, KeyRoutedEventArgs e)
++    {
++        if (e.Key != VirtualKey.Enter)
++        {
++            return;
++        }
++
++        e.Handled = true;
++        if (ViewModel is not null)
++        {
++            await ViewModel.AddInputAsync();
++        }
++    }
++
++    private async void AddButton_Click(object sender, RoutedEventArgs e)
++    {
++        if (ViewModel is not null)
++        {
++            await ViewModel.AddInputAsync();
++            AddTextBox.Focus(FocusState.Programmatic);
++        }
++    }
++
++    private void AllFilterButton_Click(object sender, RoutedEventArgs e)
++    {
++        ViewModel?.SetFilter(TodoFilter.All);
++    }
++
++    private void ActiveFilterButton_Click(object sender, RoutedEventArgs e)
++    {
++        ViewModel?.SetFilter(TodoFilter.Active);
++    }
++
++    private void CompletedFilterButton_Click(object sender, RoutedEventArgs e)
++    {
++        ViewModel?.SetFilter(TodoFilter.Completed);
++    }
++
++    private async void ItemCheckBox_Click(object sender, RoutedEventArgs e)
++    {
++        if (ViewModel is null ||
++            sender is not CheckBox checkBox ||
++            checkBox.DataContext is not TodoItemViewModel item)
++        {
++            return;
++        }
++
++        await ViewModel.SetCompletedAsync(item.Id, checkBox.IsChecked == true);
++    }
++
++    private async void DeleteItemButton_Click(object sender, RoutedEventArgs e)
++    {
++        if (ViewModel is null ||
++            sender is not FrameworkElement element ||
++            element.DataContext is not TodoItemViewModel item)
++        {
++            return;
++        }
++
++        await ViewModel.DeleteItemAsync(item.Id);
++    }
++
++    private async void ClearCompletedButton_Click(object sender, RoutedEventArgs e)
++    {
++        if (ViewModel is not null)
++        {
++            await ViewModel.ClearCompletedAsync();
++        }
++    }
++}

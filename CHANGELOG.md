@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+### English
+
+- Changed the project license from MIT to GPL-3.0-only for future source code
+  and releases. Previously published MIT-licensed DeskBox versions remain under
+  the MIT License.
+
+### 中文
+
+- 项目授权协议从 MIT 调整为 GPL-3.0-only，适用于后续源码和版本；此前已经按 MIT 发布的 DeskBox 旧版本仍保持 MIT 授权。
+
 ## 1.1.10 - 2026-06-29
 
 ### English

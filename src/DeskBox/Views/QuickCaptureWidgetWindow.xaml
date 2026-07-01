@@ -3,6 +3,7 @@
     x:Class="DeskBox.Views.QuickCaptureWidgetWindow"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:controls="using:DeskBox.Controls"
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     mc:Ignorable="d"
@@ -13,8 +14,6 @@
         Background="Transparent"
         IsTabStop="True"
         KeyDown="RootGrid_KeyDown"
-        PointerEntered="RootGrid_PointerEntered"
-        PointerExited="RootGrid_PointerExited"
         AllowDrop="True"
         DragOver="RootGrid_DragOver"
         Drop="RootGrid_Drop">
@@ -30,16 +29,14 @@
                 <Setter Property="CornerRadius" Value="4" />
             </Style>
 
-            <Style x:Key="QuickCaptureItemActionButtonStyle" TargetType="Button">
+            <Style x:Key="QuickCaptureItemActionButtonStyle" TargetType="Button" BasedOn="{StaticResource SubtleButtonStyle}">
                 <Setter Property="Width" Value="26" />
                 <Setter Property="Height" Value="26" />
                 <Setter Property="MinWidth" Value="26" />
+                <Setter Property="MinHeight" Value="26" />
                 <Setter Property="Padding" Value="0" />
                 <Setter Property="CornerRadius" Value="6" />
-                <Setter Property="BorderThickness" Value="1" />
-                <Setter Property="Background" Value="{ThemeResource ButtonBackground}" />
-                <Setter Property="BorderBrush" Value="{ThemeResource ButtonBorderBrush}" />
-                <Setter Property="Foreground" Value="{ThemeResource ButtonForeground}" />
+                <Setter Property="BorderThickness" Value="0" />
             </Style>
 
             <Style x:Key="QuickCaptureItemButtonStyle" TargetType="Button">
@@ -64,25 +61,30 @@
                 <Setter Property="FontSize" Value="12" />
             </Style>
 
-            <Style x:Key="QuickCaptureTabButtonStyle" TargetType="Button" BasedOn="{StaticResource QuickCaptureSegmentButtonStyle}">
-                <Setter Property="Template">
-                    <Setter.Value>
-                        <ControlTemplate TargetType="Button">
-                            <Border
-                                Background="{TemplateBinding Background}"
-                                BorderBrush="{TemplateBinding BorderBrush}"
-                                BorderThickness="{TemplateBinding BorderThickness}"
-                                CornerRadius="{TemplateBinding CornerRadius}">
-                                <ContentPresenter
-                                    Padding="{TemplateBinding Padding}"
-                                    Content="{TemplateBinding Content}"
-                                    ContentTemplate="{TemplateBinding ContentTemplate}"
-                                    HorizontalContentAlignment="{TemplateBinding HorizontalContentAlignment}"
-                                    VerticalContentAlignment="{TemplateBinding VerticalContentAlignment}" />
-                            </Border>
-                        </ControlTemplate>
-                    </Setter.Value>
-                </Setter>
+            <Style x:Key="QuickCaptureTabButtonStyle" TargetType="Button" BasedOn="{StaticResource DefaultButtonStyle}">
+                <Setter Property="MinWidth" Value="0" />
+                <Setter Property="MinHeight" Value="0" />
+                <Setter Property="Height" Value="24" />
+                <Setter Property="Padding" Value="8,4" />
+                <Setter Property="CornerRadius" Value="5" />
+                <Setter Property="HorizontalContentAlignment" Value="Center" />
+                <Setter Property="VerticalContentAlignment" Value="Center" />
+            </Style>
+
+            <Style x:Key="QuickCaptureTabSelectedButtonStyle" TargetType="Button" BasedOn="{StaticResource AccentButtonStyle}">
+                <Setter Property="MinWidth" Value="0" />
+                <Setter Property="MinHeight" Value="0" />
+                <Setter Property="Height" Value="24" />
+                <Setter Property="Padding" Value="8,4" />
+                <Setter Property="CornerRadius" Value="5" />
+                <Setter Property="HorizontalContentAlignment" Value="Center" />
+                <Setter Property="VerticalContentAlignment" Value="Center" />
+            </Style>
+
+            <Style x:Key="QuickCaptureConfirmCommandButtonStyle" TargetType="Button" BasedOn="{StaticResource DefaultButtonStyle}">
+                <Setter Property="MinWidth" Value="62" />
+                <Setter Property="Padding" Value="10,4" />
+                <Setter Property="CornerRadius" Value="6" />
             </Style>
         </Grid.Resources>
 
@@ -91,79 +93,24 @@
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
-        <Border
-            x:Name="BackgroundPlate"
+        <controls:WidgetShell
+            x:Name="QuickCaptureShell"
             Grid.RowSpan="2"
-            BorderThickness="0"
-            CornerRadius="0" />
-
-        <Grid
-            x:Name="TitleBarGrid"
-            Grid.Row="0"
-            Padding="14,7,12,5"
-            Background="Transparent"
-            RightTapped="TitleBarGrid_RightTapped"
-            PointerPressed="TitleBarGrid_PointerPressed"
-            PointerMoved="TitleBarGrid_PointerMoved"
-            PointerReleased="TitleBarGrid_PointerReleased">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="Auto" />
-            </Grid.ColumnDefinitions>
-
-            <StackPanel
-                Grid.Column="0"
-                VerticalAlignment="Center"
-                Orientation="Horizontal"
-                Spacing="8">
-                <FontIcon
-                    x:Name="TitleIcon"
-                    FontSize="{Binding TitleIconSize}"
-                    Glyph="&#xE8A5;" />
-                <TextBlock
-                    x:Name="TitleText"
-                    FontSize="{Binding TitleTextSize}"
-                    Text="{Binding DisplayName}"
-                    TextTrimming="CharacterEllipsis"
-                    VerticalAlignment="Center" />
-            </StackPanel>
-
-            <StackPanel
-                x:Name="RightActionButtons"
-                Grid.Column="1"
-                Orientation="Horizontal"
-                Spacing="4"
-                Opacity="0"
-                VerticalAlignment="Center">
-                <Button
-                    x:Name="MoreButton"
-                    Width="22"
-                    Height="22"
-                    Padding="0"
-                    Click="MoreButton_Click"
-                    >
-                    <FontIcon x:Name="MoreButtonIcon" FontSize="11" Glyph="&#xE712;" />
-                </Button>
-                <Button
-                    x:Name="CloseButton"
-                    Width="22"
-                    Height="22"
-                    Padding="0"
-                    Click="CloseButton_Click"
-                    >
-                    <FontIcon x:Name="CloseButtonIcon" FontSize="11" Glyph="&#xE74D;" />
-                </Button>
-            </StackPanel>
-        </Grid>
-
-        <Border
-            x:Name="HeaderDivider"
-            Grid.Row="0"
-            Height="1"
-            Margin="12,0"
-            VerticalAlignment="Bottom" />
-
-        <Grid Grid.Row="1" Padding="10,6,6,8" RowSpacing="4">
+            CloseRequested="CloseButton_Click"
+            DragHandlePointerMoved="DragHandle_PointerMoved"
+            DragHandlePointerPressed="DragHandle_PointerPressed"
+            DragHandlePointerReleased="DragHandle_PointerReleased"
+            MoreRequested="MoreButton_Click"
+            OverlayTitle="{Binding DisplayName}"
+            IsTitleEditable="True"
+            TitleDoubleTapped="QuickCaptureShell_TitleDoubleTapped"
+            TitlePointerMoved="TitleBarGrid_PointerMoved"
+            TitlePointerPressed="TitleBarGrid_PointerPressed"
+            TitlePointerReleased="TitleBarGrid_PointerReleased"
+            TitleRightTapped="TitleBarGrid_RightTapped"
+            RightTapped="QuickCaptureShell_RightTapped">
+            <controls:WidgetShell.ShellContent>
+                <Grid Padding="10,6,6,8" RowSpacing="4">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
@@ -216,27 +163,13 @@
                     x:Name="TabHost"
                     Grid.Column="0"
                     HorizontalAlignment="Left"
-                    SizeChanged="TabHost_SizeChanged"
                     Visibility="{Binding SearchButtonVisibility}">
-                    <Border
-                        x:Name="TabSelectionIndicator"
-                        Width="58"
-                        Height="24"
-                        HorizontalAlignment="Left"
-                        VerticalAlignment="Center"
-                        BorderThickness="1"
-                        CornerRadius="6"
-                        IsHitTestVisible="False"
-                        Opacity="0" />
                     <StackPanel
                         Orientation="Horizontal"
                         Spacing="3">
                         <Button
                             x:Name="RecordsTabButton"
                             Click="RecordsTabButton_Click"
-                            PointerEntered="RecordsTabButton_PointerEntered"
-                            PointerExited="TabButton_PointerExited"
-                            Width="58"
                             FontSize="{Binding SegmentTextSize}"
                             Style="{StaticResource QuickCaptureTabButtonStyle}">
                             <TextBlock
@@ -248,9 +181,6 @@
                         <Button
                             x:Name="PinnedTabButton"
                             Click="PinnedTabButton_Click"
-                            PointerEntered="PinnedTabButton_PointerEntered"
-                            PointerExited="TabButton_PointerExited"
-                            Width="58"
                             FontSize="{Binding SegmentTextSize}"
                             Style="{StaticResource QuickCaptureTabButtonStyle}">
                             <TextBlock
@@ -262,9 +192,6 @@
                         <Button
                             x:Name="RecentTabButton"
                             Click="RecentTabButton_Click"
-                            PointerEntered="RecentTabButton_PointerEntered"
-                            PointerExited="TabButton_PointerExited"
-                            Width="58"
                             FontSize="{Binding SegmentTextSize}"
                             Style="{StaticResource QuickCaptureTabButtonStyle}">
                             <TextBlock
@@ -339,18 +266,23 @@
                     x:Name="EmptyState"
                     MaxWidth="220"
                     HorizontalAlignment="Center"
-                    Spacing="6"
+                    Margin="0,-8,0,0"
+                    Spacing="7"
                     VerticalAlignment="Center"
                     Visibility="{Binding EmptyStateVisibility}">
                     <FontIcon
                         x:Name="EmptyStateIcon"
+                        Margin="0,0,0,2"
                         FontSize="{Binding EmptyIconSize}"
                         Glyph="&#xE8A5;"
                         HorizontalAlignment="Center" />
                     <TextBlock
                         FontSize="{Binding TitleTextSize}"
+                        FontWeight="SemiBold"
+                        MaxLines="1"
                         Text="{Binding EmptyStateTitle}"
                         TextAlignment="Center"
+                        TextTrimming="CharacterEllipsis"
                         TextWrapping="Wrap" />
                     <TextBlock
                         FontSize="{Binding TextSize}"
@@ -444,7 +376,7 @@
                                 <StackPanel
                                     x:Name="ItemContentHost"
                                     Grid.Column="1"
-                                    Margin="0,0,28,0"
+                                    Margin="0"
                                     MinWidth="0"
                                     Spacing="4">
                                     <Border
@@ -458,11 +390,10 @@
                                         BorderThickness="1"
                                         Padding="2"
                                         Visibility="{Binding ImagePreviewVisibility}">
-                                        <Image Stretch="Uniform">
-                                            <Image.Source>
-                                                <BitmapImage DecodePixelWidth="180" UriSource="{Binding ImagePreviewUri}" />
-                                            </Image.Source>
-                                        </Image>
+                                        <Image
+                                            x:Name="ImagePreview"
+                                            Loaded="ImagePreview_Loaded"
+                                            Stretch="Uniform" />
                                     </Border>
                                     <TextBlock
                                         x:Name="ItemTextBlock"
@@ -477,10 +408,14 @@
                                         Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                                         Text="{Binding UpdatedAtText}" />
                                 </StackPanel>
-                                <Grid
+                                <Border
                                     x:Name="ItemActionHost"
                                     Grid.ColumnSpan="2"
                                     Canvas.ZIndex="2"
+                                    Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"
+                                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                                    BorderThickness="1"
+                                    CornerRadius="6"
                                     Margin="0,0,6,0"
                                     HorizontalAlignment="Right"
                                     IsHitTestVisible="False"
@@ -488,7 +423,6 @@
                                     VerticalAlignment="Center">
                                     <StackPanel
                                         x:Name="ItemActionButtons"
-                                        Padding="3"
                                         HorizontalAlignment="Right"
                                         Orientation="Horizontal"
                                         Spacing="4"
@@ -539,13 +473,15 @@
                                             <FontIcon FontSize="11" Glyph="&#xE74D;" />
                                         </Button>
                                     </StackPanel>
-                                </Grid>
+                                </Border>
                             </Grid>
                         </DataTemplate>
                     </ListView.ItemTemplate>
                 </ListView>
             </Grid>
-        </Grid>
+                </Grid>
+            </controls:WidgetShell.ShellContent>
+        </controls:WidgetShell>
 
         <Border
             x:Name="StatusToast"
@@ -589,7 +525,7 @@
             Padding="10"
             Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
             BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-            BorderThickness="1"
+            BorderThickness="0.8"
             CornerRadius="8"
             Visibility="Collapsed">
             <Grid RowSpacing="8">

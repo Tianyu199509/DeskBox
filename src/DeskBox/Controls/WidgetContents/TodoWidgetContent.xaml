@@ -1,0 +1,507 @@
+<?xml version="1.0" encoding="utf-8"?>
+<UserControl
+    x:Class="DeskBox.Controls.WidgetContents.TodoWidgetContent"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    mc:Ignorable="d">
+
+    <UserControl.Resources>
+        <Style x:Key="TodoFilterButtonStyle" TargetType="Button" BasedOn="{StaticResource DefaultButtonStyle}">
+            <Setter Property="MinWidth" Value="0" />
+            <Setter Property="MinHeight" Value="0" />
+            <Setter Property="Padding" Value="10,4" />
+            <Setter Property="CornerRadius" Value="5" />
+        </Style>
+
+        <Style x:Key="TodoFilterSelectedButtonStyle" TargetType="Button" BasedOn="{StaticResource AccentButtonStyle}">
+            <Setter Property="MinWidth" Value="0" />
+            <Setter Property="MinHeight" Value="0" />
+            <Setter Property="Padding" Value="10,4" />
+            <Setter Property="CornerRadius" Value="5" />
+        </Style>
+
+        <Style x:Key="TodoColorFilterButtonStyle" TargetType="Button" BasedOn="{StaticResource SubtleButtonStyle}">
+            <Setter Property="Width" Value="22" />
+            <Setter Property="Height" Value="22" />
+            <Setter Property="MinWidth" Value="22" />
+            <Setter Property="MinHeight" Value="22" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="CornerRadius" Value="11" />
+        </Style>
+
+        <Style x:Key="TodoColorFilterSelectedButtonStyle" TargetType="Button" BasedOn="{StaticResource DefaultButtonStyle}">
+            <Setter Property="Width" Value="22" />
+            <Setter Property="Height" Value="22" />
+            <Setter Property="MinWidth" Value="22" />
+            <Setter Property="MinHeight" Value="22" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="BorderThickness" Value="1.4" />
+            <Setter Property="CornerRadius" Value="11" />
+        </Style>
+
+        <Style x:Key="TodoCompletionButtonStyle" TargetType="Button" BasedOn="{StaticResource SubtleButtonStyle}">
+            <Setter Property="Width" Value="22" />
+            <Setter Property="Height" Value="22" />
+            <Setter Property="MinWidth" Value="22" />
+            <Setter Property="MinHeight" Value="22" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="BorderThickness" Value="0" />
+        </Style>
+
+        <Style x:Key="TodoItemActionButtonStyle" TargetType="Button" BasedOn="{StaticResource SubtleButtonStyle}">
+            <Setter Property="Width" Value="26" />
+            <Setter Property="Height" Value="26" />
+            <Setter Property="MinWidth" Value="26" />
+            <Setter Property="MinHeight" Value="26" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="CornerRadius" Value="6" />
+        </Style>
+
+        <Style x:Key="TodoEditorIconButtonStyle" TargetType="Button" BasedOn="{StaticResource SubtleButtonStyle}">
+            <Setter Property="Width" Value="24" />
+            <Setter Property="Height" Value="24" />
+            <Setter Property="MinWidth" Value="24" />
+            <Setter Property="MinHeight" Value="24" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="CornerRadius" Value="5" />
+        </Style>
+
+        <Style x:Key="TodoEditorCommandButtonStyle" TargetType="Button" BasedOn="{StaticResource DefaultButtonStyle}">
+            <Setter Property="MinWidth" Value="58" />
+            <Setter Property="Padding" Value="10,3" />
+            <Setter Property="CornerRadius" Value="6" />
+        </Style>
+
+        <Style x:Key="TodoConfirmCommandButtonStyle" TargetType="Button" BasedOn="{StaticResource DefaultButtonStyle}">
+            <Setter Property="MinWidth" Value="62" />
+            <Setter Property="Padding" Value="10,4" />
+            <Setter Property="CornerRadius" Value="6" />
+        </Style>
+    </UserControl.Resources>
+
+    <Grid
+        x:Name="RootGrid"
+        Padding="10,8,8,8"
+        RowSpacing="8">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <Grid Grid.Row="0" ColumnSpacing="6">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+
+            <TextBox
+                x:Name="AddTextBox"
+                Grid.Column="0"
+                MinHeight="30"
+                Padding="9,6,9,4"
+                BorderThickness="1"
+                FontSize="{Binding TextSize}"
+                KeyDown="AddTextBox_KeyDown"
+                PlaceholderText="{Binding AddPlaceholderText}"
+                Text="{Binding InputText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+
+            <Button
+                Grid.Column="1"
+                Width="30"
+                Height="30"
+                MinWidth="30"
+                Padding="0"
+                Click="AddButton_Click"
+                IsEnabled="{Binding CanAddInput}">
+                <FontIcon FontSize="13" Glyph="&#xE710;" />
+            </Button>
+        </Grid>
+
+        <StackPanel Grid.Row="1" Spacing="6">
+            <StackPanel
+                Orientation="Horizontal"
+                Spacing="4">
+                <Button
+                    x:Name="AllFilterButton"
+                    Click="AllFilterButton_Click"
+                    Style="{StaticResource TodoFilterButtonStyle}">
+                    <TextBlock FontSize="{Binding FilterTextSize}" Text="{Binding AllFilterText}" />
+                </Button>
+                <Button
+                    x:Name="TodayFilterButton"
+                    Click="TodayFilterButton_Click"
+                    Style="{StaticResource TodoFilterButtonStyle}">
+                    <TextBlock FontSize="{Binding FilterTextSize}" Text="{Binding TodayFilterText}" />
+                </Button>
+                <Button
+                    x:Name="ImportantFilterButton"
+                    Click="ImportantFilterButton_Click"
+                    Style="{StaticResource TodoFilterButtonStyle}">
+                    <TextBlock FontSize="{Binding FilterTextSize}" Text="{Binding ImportantFilterText}" />
+                </Button>
+                <Button
+                    x:Name="CompletedFilterButton"
+                    Click="CompletedFilterButton_Click"
+                    Style="{StaticResource TodoFilterButtonStyle}">
+                    <TextBlock FontSize="{Binding FilterTextSize}" Text="{Binding CompletedFilterText}" />
+                </Button>
+            </StackPanel>
+
+            <StackPanel
+                Orientation="Horizontal"
+                Spacing="6"
+                Visibility="{Binding ColorFilterVisibility}">
+                <Button
+                    x:Name="RedColorFilterButton"
+                    Click="RedColorFilterButton_Click"
+                    Style="{StaticResource TodoColorFilterButtonStyle}"
+                    Visibility="{Binding RedColorFilterVisibility}">
+                    <Ellipse Width="9" Height="9" Fill="#E34D4D" />
+                </Button>
+                <Button
+                    x:Name="OrangeColorFilterButton"
+                    Click="OrangeColorFilterButton_Click"
+                    Style="{StaticResource TodoColorFilterButtonStyle}"
+                    Visibility="{Binding OrangeColorFilterVisibility}">
+                    <Ellipse Width="9" Height="9" Fill="#F08A3C" />
+                </Button>
+                <Button
+                    x:Name="YellowColorFilterButton"
+                    Click="YellowColorFilterButton_Click"
+                    Style="{StaticResource TodoColorFilterButtonStyle}"
+                    Visibility="{Binding YellowColorFilterVisibility}">
+                    <Ellipse Width="9" Height="9" Fill="#F2C94C" />
+                </Button>
+                <Button
+                    x:Name="GreenColorFilterButton"
+                    Click="GreenColorFilterButton_Click"
+                    Style="{StaticResource TodoColorFilterButtonStyle}"
+                    Visibility="{Binding GreenColorFilterVisibility}">
+                    <Ellipse Width="9" Height="9" Fill="#4CAF6D" />
+                </Button>
+                <Button
+                    x:Name="BlueColorFilterButton"
+                    Click="BlueColorFilterButton_Click"
+                    Style="{StaticResource TodoColorFilterButtonStyle}"
+                    Visibility="{Binding BlueColorFilterVisibility}">
+                    <Ellipse Width="9" Height="9" Fill="#4D8FE3" />
+                </Button>
+                <Button
+                    x:Name="PurpleColorFilterButton"
+                    Click="PurpleColorFilterButton_Click"
+                    Style="{StaticResource TodoColorFilterButtonStyle}"
+                    Visibility="{Binding PurpleColorFilterVisibility}">
+                    <Ellipse Width="9" Height="9" Fill="#9B6BE8" />
+                </Button>
+            </StackPanel>
+        </StackPanel>
+
+        <Grid Grid.Row="2">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="*" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+
+            <ListView
+                x:Name="TodoListView"
+                Grid.Row="0"
+                IsItemClickEnabled="False"
+                CanDragItems="True"
+                CanReorderItems="True"
+                AllowDrop="True"
+                DragItemsStarting="TodoListView_DragItemsStarting"
+                DragItemsCompleted="TodoListView_DragItemsCompleted"
+                ItemsSource="{Binding VisibleItems}"
+                SelectionMode="None"
+                Visibility="{Binding ListVisibility}">
+                <ListView.ItemContainerStyle>
+                    <Style TargetType="ListViewItem">
+                        <Setter Property="Padding" Value="0" />
+                        <Setter Property="Margin" Value="0,0,0,4" />
+                        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                    </Style>
+                </ListView.ItemContainerStyle>
+                <ListView.ItemTemplate>
+                    <DataTemplate>
+                        <Grid
+                            MinHeight="28"
+                            Padding="6,3"
+                            Background="Transparent"
+                            ColumnSpacing="4"
+                            DataContextChanged="TodoItem_DataContextChanged"
+                            PointerEntered="TodoItem_PointerEntered"
+                            PointerExited="TodoItem_PointerExited"
+                            RightTapped="TodoItem_RightTapped">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+
+                            <Border
+                                x:Name="TodoItemHoverBackground"
+                                Grid.ColumnSpan="3"
+                                Margin="-4,-3,-2,-3"
+                                Background="Transparent"
+                                CornerRadius="7"
+                                Opacity="0" />
+
+                            <Button
+                                Grid.Column="0"
+                                VerticalAlignment="Center"
+                                Click="ItemCompletionButton_Click"
+                                Style="{StaticResource TodoCompletionButtonStyle}">
+                                <Grid Width="14" Height="14">
+                                    <Border
+                                        x:Name="TodoCompletionBox"
+                                        BorderBrush="{ThemeResource TextFillColorSecondaryBrush}"
+                                        BorderThickness="1"
+                                        CornerRadius="3" />
+                                    <FontIcon
+                                        FontSize="10"
+                                        Glyph="{Binding CompletionGlyph}"
+                                        Foreground="{ThemeResource TextOnAccentFillColorPrimaryBrush}"
+                                        Opacity="{Binding CompletionGlyphOpacity}" />
+                                </Grid>
+                            </Button>
+
+                            <Ellipse
+                                Grid.Column="1"
+                                Width="6"
+                                Height="6"
+                                Margin="-2,0,0,0"
+                                VerticalAlignment="Center"
+                                Fill="{Binding ColorMarkerBrush}"
+                                Visibility="{Binding ColorMarkerVisibility}" />
+
+                            <Grid
+                                Grid.Column="2"
+                                MinHeight="20"
+                                VerticalAlignment="Center"
+                                RowSpacing="1">
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                </Grid.RowDefinitions>
+
+                                <TextBlock
+                                    Grid.Row="0"
+                                    HorizontalAlignment="Stretch"
+                                    VerticalAlignment="Top"
+                                    DoubleTapped="TodoItemText_DoubleTapped"
+                                    FontSize="{Binding ElementName=TodoListView, Path=DataContext.TextSize}"
+                                    MaxLines="10"
+                                    Text="{Binding Text, Mode=OneWay}"
+                                    TextAlignment="Left"
+                                    TextTrimming="CharacterEllipsis"
+                                    TextWrapping="Wrap"
+                                    Visibility="{Binding TextVisibility}" />
+
+                                <TextBlock
+                                    Grid.Row="1"
+                                    Margin="0,1,0,0"
+                                    VerticalAlignment="Center"
+                                    FontSize="{Binding ElementName=TodoListView, Path=DataContext.SecondaryTextSize}"
+                                    Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                    Text="{Binding DueStatusText}"
+                                    TextTrimming="CharacterEllipsis"
+                                    Visibility="{Binding DueStatusVisibility}" />
+                            </Grid>
+
+                            <Border
+                                x:Name="TodoItemActionHost"
+                                Grid.Column="2"
+                                Canvas.ZIndex="2"
+                                HorizontalAlignment="Right"
+                                VerticalAlignment="Center"
+                                Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"
+                                CornerRadius="6"
+                                IsHitTestVisible="False"
+                                Opacity="0">
+                                <StackPanel Orientation="Horizontal" Spacing="2">
+                                    <Button
+                                        Click="ImportantItemButton_Click"
+                                        Style="{StaticResource TodoItemActionButtonStyle}">
+                                        <FontIcon FontSize="12" Glyph="{Binding ImportantGlyph}" />
+                                    </Button>
+
+                                    <Button
+                                        x:Name="DeleteItemButton"
+                                        Click="DeleteItemButton_Click"
+                                        Style="{StaticResource TodoItemActionButtonStyle}">
+                                        <FontIcon FontSize="12" Glyph="&#xE74D;" />
+                                    </Button>
+                                </StackPanel>
+                            </Border>
+                        </Grid>
+                    </DataTemplate>
+                </ListView.ItemTemplate>
+            </ListView>
+
+            <StackPanel
+                Grid.Row="0"
+                HorizontalAlignment="Center"
+                VerticalAlignment="Center"
+                Spacing="4"
+                Visibility="{Binding EmptyStateVisibility}">
+                <TextBlock
+                    HorizontalAlignment="Center"
+                    FontSize="{Binding TitleTextSize}"
+                    FontWeight="SemiBold"
+                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                    Text="{Binding EmptyStateTitle}" />
+                <TextBlock
+                    MaxWidth="220"
+                    HorizontalAlignment="Center"
+                    FontSize="{Binding SecondaryTextSize}"
+                    Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                    Text="{Binding EmptyStateText}"
+                    TextAlignment="Center"
+                    TextWrapping="Wrap" />
+            </StackPanel>
+
+        </Grid>
+
+        <Grid
+            Grid.Row="3"
+            ColumnSpacing="8"
+            Visibility="{Binding FooterVisibility}">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+
+            <TextBlock
+                Grid.Column="0"
+                VerticalAlignment="Center"
+                FontSize="{Binding SecondaryTextSize}"
+                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                Text="{Binding ItemsLeftText}"
+                TextTrimming="CharacterEllipsis"
+                Visibility="{Binding FooterStatsVisibility}" />
+
+            <Button
+                x:Name="ClearCompletedButton"
+                Grid.Column="1"
+                MinWidth="0"
+                Padding="8,4"
+                Click="ClearCompletedButton_Click"
+                IsEnabled="{Binding HasCompletedItems}"
+                Visibility="{Binding ClearCompletedButtonVisibility}">
+                <TextBlock FontSize="{Binding SecondaryTextSize}" Text="{Binding ClearCompletedText}" />
+            </Button>
+        </Grid>
+
+        <Border
+            x:Name="UndoToast"
+            Grid.RowSpan="4"
+            Canvas.ZIndex="10"
+            Margin="10,0,10,10"
+            Padding="10,6"
+            HorizontalAlignment="Center"
+            VerticalAlignment="Bottom"
+            Background="{ThemeResource SystemControlAcrylicElementBrush}"
+            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+            BorderThickness="1"
+            CornerRadius="6"
+            IsHitTestVisible="False"
+            Opacity="0">
+            <StackPanel
+                Orientation="Horizontal"
+                Spacing="10">
+                <TextBlock
+                    x:Name="UndoToastText"
+                    FontSize="{Binding TextSize}"
+                    MaxLines="2"
+                    TextAlignment="Center"
+                    TextTrimming="CharacterEllipsis"
+                    TextWrapping="Wrap"
+                    VerticalAlignment="Center" />
+                <Button
+                    x:Name="UndoToastActionButton"
+                    Click="UndoButton_Click"
+                    MinWidth="0"
+                    Padding="8,2"
+                    Visibility="Collapsed" />
+            </StackPanel>
+        </Border>
+
+        <Border
+            x:Name="TodoEditOverlay"
+            Grid.RowSpan="4"
+            Canvas.ZIndex="20"
+            Padding="10"
+            Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+            BorderThickness="0.8"
+            CornerRadius="8"
+            Visibility="Collapsed">
+            <Grid RowSpacing="8">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <Grid Grid.Row="0" ColumnSpacing="8">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock
+                        x:Name="TodoEditTitleText"
+                        Grid.Column="0"
+                        FontSize="{Binding TextSize}"
+                        FontWeight="SemiBold"
+                        TextTrimming="CharacterEllipsis"
+                        VerticalAlignment="Center" />
+                    <Button
+                        x:Name="TodoEditCloseButton"
+                        Grid.Column="1"
+                        Click="TodoEditCancelButton_Click"
+                        Style="{StaticResource TodoEditorIconButtonStyle}">
+                        <FontIcon FontSize="10" Glyph="&#xE711;" />
+                    </Button>
+                </Grid>
+
+                <TextBox
+                    x:Name="TodoEditTextBox"
+                    Grid.Row="1"
+                    AcceptsReturn="True"
+                    BorderThickness="1"
+                    FontSize="{Binding TextSize}"
+                    KeyDown="TodoEditTextBox_KeyDown"
+                    MinHeight="0"
+                    Padding="8,6"
+                    ScrollViewer.VerticalScrollBarVisibility="Auto"
+                    TextWrapping="Wrap"
+                    VerticalAlignment="Stretch" />
+
+                <StackPanel
+                    Grid.Row="2"
+                    HorizontalAlignment="Right"
+                    Orientation="Horizontal"
+                    Spacing="8">
+                    <Button
+                        x:Name="TodoEditCancelButton"
+                        Click="TodoEditCancelButton_Click"
+                        FontSize="{Binding FilterTextSize}"
+                        Style="{StaticResource TodoEditorCommandButtonStyle}" />
+                    <Button
+                        x:Name="TodoEditSaveButton"
+                        Click="TodoEditSaveButton_Click"
+                        FontSize="{Binding FilterTextSize}"
+                        Style="{StaticResource TodoEditorCommandButtonStyle}" />
+                </StackPanel>
+            </Grid>
+        </Border>
+
+    </Grid>
+</UserControl>

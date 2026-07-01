@@ -1,6 +1,8 @@
 using DeskBox.Helpers;
+using DeskBox.Models;
 using DeskBox.Services;
 using DeskBox.ViewModels;
+using System.ComponentModel;
 using Microsoft.UI;
 using Microsoft.UI.Composition.SystemBackdrops;
 using Microsoft.UI.Windowing;
@@ -23,11 +25,11 @@ public sealed partial class SettingsWindow : Window
     private const int DefaultWindowHeight = 760;
     private const int MinWindowWidth = 800;
     private const int MinWindowHeight = 560;
-    private const double ContentMaxWidth = 720;
+    private const double ContentMaxWidth = 760;
     private const double PageSidePadding = 20;
     private const double RowStackContentThreshold = 620;
     private const double NarrowTitleThreshold = 560;
-    private const double NavigationCompactThreshold = 900;
+    private const double NavigationCompactThreshold = 760;
     private const string DownloadLink = "https://pan.quark.cn/s/f7a6769cdaf3";
     private static readonly TimeSpan ResizeSettleDelay = TimeSpan.FromMilliseconds(120);
     private const uint WmGetMinMaxInfo = 0x0024;
@@ -46,7 +48,7 @@ public sealed partial class SettingsWindow : Window
     private bool _isSubclassInstalled;
     private bool _isAppearanceSliderDragging;
     private bool _isRecordingHotkey;
-    private bool _isApplyingQuickCaptureClipboardToggle;
+    private bool _isRefreshingFeatureWidgetList;
     private string _currentSettingsSection = "General";
 
     public SettingsViewModel ViewModel { get; }
@@ -71,6 +73,7 @@ public sealed partial class SettingsWindow : Window
         SettingsRoot.Loaded += (_, _) =>
         {
             CollectResponsiveRows(SettingsRoot);
+            RefreshFeatureWidgetList();
             _ = ViewModel.RefreshQuickAccessStateAsync();
             ViewModel.RefreshGlobalHotkeyState();
             _ = ViewModel.RefreshQuickCaptureImageCacheInfoAsync();
@@ -110,6 +113,7 @@ public sealed partial class SettingsWindow : Window
         _themeService.TrackWindow(this);
         _themeService.AppearanceChanged += OnAppearanceChanged;
         _localizationService.LanguageChanged += OnLanguageChanged;
+        ViewModel.PropertyChanged += ViewModel_PropertyChanged;
         if (App.Current.GlobalHotkeyService is { } hotkeyService)
         {
             hotkeyService.RegistrationChanged += OnGlobalHotkeyRegistrationChanged;
@@ -137,6 +141,7 @@ public sealed partial class SettingsWindow : Window
             RemoveMinimumSizeHook();
             _themeService.AppearanceChanged -= OnAppearanceChanged;
             _localizationService.LanguageChanged -= OnLanguageChanged;
+            ViewModel.PropertyChanged -= ViewModel_PropertyChanged;
             if (App.Current.GlobalHotkeyService is { } hotkeyService)
             {
                 hotkeyService.RegistrationChanged -= OnGlobalHotkeyRegistrationChanged;
@@ -162,14 +167,22 @@ public sealed partial class SettingsWindow : Window
         switch (_currentSettingsSection)
         {
             case "AppearanceDetail":
-                ShowSettingsSection("Appearance", isNestedSection: false);
-                SettingsNavigationView.SelectedItem = FindNavItemByTag("Appearance");
+                ShowSettingsSection("AppearanceDetail", isNestedSection: false);
+                SettingsNavigationView.SelectedItem = FileWidgetNavItem;
                 break;
             case "ManagedStorage":
-                ShowSettingsSection("Advanced", isNestedSection: false);
-                SettingsNavigationView.SelectedItem = FindNavItemByTag("Advanced");
+                ShowSettingsSection("AppearanceDetail", isNestedSection: false);
+                SettingsNavigationView.SelectedItem = FileWidgetNavItem;
                 break;
             case "QuickCaptureSettings":
+                ShowSettingsSection("FeatureWidgets", isNestedSection: false);
+                SettingsNavigationView.SelectedItem = FeatureWidgetsNavItem;
+                break;
+            case "TodoSettings":
+                ShowSettingsSection("FeatureWidgets", isNestedSection: false);
+                SettingsNavigationView.SelectedItem = FeatureWidgetsNavItem;
+                break;
+            case "MusicSettings":
                 ShowSettingsSection("FeatureWidgets", isNestedSection: false);
                 SettingsNavigationView.SelectedItem = FeatureWidgetsNavItem;
                 break;
@@ -178,6 +191,27 @@ public sealed partial class SettingsWindow : Window
                 SettingsNavigationView.SelectedItem = FeatureWidgetsNavItem;
                 break;
         }
+    }
+
+    public void ShowSection(string sectionTag)
+    {
+        bool isNestedSection = sectionTag is
+            "ManagedStorage" or
+            "QuickCaptureSettings" or
+            "TodoSettings" or
+            "MusicSettings";
+
+        ShowSettingsSection(sectionTag, isNestedSection);
+        SettingsNavigationView.SelectedItem = sectionTag switch
+        {
+            "Appearance" => FindNavItemByTag("Appearance"),
+            "AppearanceDetail" or "ManagedStorage" => FileWidgetNavItem,
+            "FeatureWidgets" or "QuickCaptureSettings" or "TodoSettings" or "MusicSettings" => FeatureWidgetsNavItem,
+            "Advanced" or "Interaction" => FindNavItemByTag("Interaction"),
+            "Maintenance" => FindNavItemByTag("Maintenance"),
+            "About" => FindNavItemByTag("About"),
+            _ => GeneralNavItem
+        };
     }
 
     private NavigationViewItem? FindNavItemByTag(string tag)
@@ -198,13 +232,19 @@ public sealed partial class SettingsWindow : Window
         AppearanceSection.Visibility = sectionTag == "Appearance" ? Visibility.Visible : Visibility.Collapsed;
         AppearanceDetailSection.Visibility = sectionTag == "AppearanceDetail" ? Visibility.Visible : Visibility.Collapsed;
         FeatureWidgetsSection.Visibility = sectionTag == "FeatureWidgets" ? Visibility.Visible : Visibility.Collapsed;
+        if (sectionTag == "FeatureWidgets")
+        {
+            RefreshFeatureWidgetList();
+        }
         QuickCaptureSettingsSection.Visibility = sectionTag == "QuickCaptureSettings" ? Visibility.Visible : Visibility.Collapsed;
         if (sectionTag == "QuickCaptureSettings")
         {
             ViewModel.RefreshQuickCaptureClipboardDiagnostics();
             _ = ViewModel.RefreshQuickCaptureImageCacheInfoAsync();
         }
-        AdvancedSection.Visibility = sectionTag == "Advanced" ? Visibility.Visible : Visibility.Collapsed;
+        TodoSettingsSection.Visibility = sectionTag == "TodoSettings" ? Visibility.Visible : Visibility.Collapsed;
+        MusicSettingsSection.Visibility = sectionTag == "MusicSettings" ? Visibility.Visible : Visibility.Collapsed;
+        InteractionSection.Visibility = sectionTag is "Interaction" or "Advanced" ? Visibility.Visible : Visibility.Collapsed;
         ManagedStorageSection.Visibility = sectionTag == "ManagedStorage" ? Visibility.Visible : Visibility.Collapsed;
         if (sectionTag == "ManagedStorage")
         {
@@ -278,6 +318,7 @@ public sealed partial class SettingsWindow : Window
     {
         if (sender is not ComboBox combo ||
             combo.Tag is not string menuKind ||
+            combo.SelectedIndex < 0 ||
             e.AddedItems.Count == 0 ||
             e.AddedItems[0] is not string displayName)
         {
@@ -307,8 +348,26 @@ public sealed partial class SettingsWindow : Window
             case "WidgetAnimationEasingIntensity":
                 ViewModel.SelectedWidgetAnimationEasingIntensity = ViewModel.AvailableWidgetAnimationEasingIntensities[combo.SelectedIndex];
                 break;
+            case "DisplayWidgetChromeMode":
+                ViewModel.SelectedDisplayWidgetChromeMode = ViewModel.AvailableWidgetChromeModes[combo.SelectedIndex];
+                break;
+            case "InteractiveWidgetChromeMode":
+                ViewModel.SelectedInteractiveWidgetChromeMode = ViewModel.AvailableWidgetChromeModes[combo.SelectedIndex];
+                break;
             case "ManagedDropAction":
                 ViewModel.SelectedManagedDropAction = ViewModel.AvailableManagedDropActions[combo.SelectedIndex];
+                break;
+            case "QuickCaptureDefaultView":
+                ViewModel.SelectedQuickCaptureDefaultView = ViewModel.AvailableQuickCaptureDefaultViews[combo.SelectedIndex];
+                break;
+            case "TodoNewTaskPosition":
+                ViewModel.SelectedTodoNewTaskPosition = ViewModel.AvailableTodoNewTaskPositions[combo.SelectedIndex];
+                break;
+            case "TodoDefaultFilter":
+                ViewModel.SelectedTodoDefaultFilter = ViewModel.AvailableTodoDefaultFilters[combo.SelectedIndex];
+                break;
+            case "MusicRhythmStyle":
+                ViewModel.SelectedMusicRhythmStyle = ViewModel.AvailableMusicRhythmStyles[combo.SelectedIndex];
                 break;
             case "TrayIconStyle":
                 ViewModel.SelectedTrayIconStyle = ViewModel.AvailableTrayIconStyles[combo.SelectedIndex];
@@ -412,6 +471,22 @@ public sealed partial class SettingsWindow : Window
         flyout.ShowAt(button);
     }
 
+    private void ViewModel_PropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName != nameof(SettingsViewModel.FeatureWidgetEntries))
+        {
+            return;
+        }
+
+        if (!DispatcherQueue.HasThreadAccess)
+        {
+            DispatcherQueue.TryEnqueue(RefreshFeatureWidgetList);
+            return;
+        }
+
+        RefreshFeatureWidgetList();
+    }
+
     private void OnLanguageChanged()
     {
         App.Current.RefreshSettingsWindow();
@@ -422,6 +497,7 @@ public sealed partial class SettingsWindow : Window
         Title = _localizationService.T("Settings.WindowTitle");
         Localized.RefreshAll(_localizationService);
         ApplyLocalizedToggleSwitchContent();
+        RefreshFeatureWidgetList();
         ViewModel.RefreshGlobalHotkeyState();
         RefreshGlobalHotkeyControls();
         if (string.Equals(_currentSettingsSection, "ManagedStorage", StringComparison.Ordinal))
@@ -438,6 +514,200 @@ public sealed partial class SettingsWindow : Window
         {
             toggle.OnContent = onText;
             toggle.OffContent = offText;
+        }
+    }
+
+    private void RefreshFeatureWidgetList()
+    {
+        if (FeatureWidgetList is null)
+        {
+            return;
+        }
+
+        _isRefreshingFeatureWidgetList = true;
+        try
+        {
+            FeatureWidgetList.Children.Clear();
+
+            foreach (var entry in ViewModel.FeatureWidgetEntries)
+            {
+                FeatureWidgetList.Children.Add(CreateFeatureWidgetRow(entry));
+            }
+        }
+        finally
+        {
+            _isRefreshingFeatureWidgetList = false;
+        }
+
+        ApplyLocalizedToggleSwitchContent();
+    }
+
+    private Border CreateFeatureWidgetRow(FeatureWidgetEntry entry)
+    {
+        var border = new Border
+        {
+            Style = (Style)SettingsRoot.Resources["SettingsGroupStyle"]
+        };
+
+        var root = new Grid
+        {
+            MinHeight = 70
+        };
+
+        if (entry.HasSettingsPage && !string.IsNullOrWhiteSpace(entry.SettingsSectionTag))
+        {
+            var button = new Button
+            {
+                Padding = new Thickness(0),
+                Style = (Style)SettingsRoot.Resources["DrillDownRowStyle"],
+                Tag = entry.SettingsSectionTag
+            };
+            button.Click += FeatureWidgetSettingsButton_Click;
+            root.Children.Add(button);
+        }
+
+        var content = new Grid
+        {
+            Padding = new Thickness(12, 10, 10, 10),
+            ColumnSpacing = 10
+        };
+        content.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        content.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        content.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        content.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        content.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+        var icon = new FontIcon
+        {
+            Glyph = entry.Glyph,
+            FontSize = 18,
+            FontFamily = (FontFamily)Application.Current.Resources["SymbolThemeFontFamily"],
+            Foreground = (Brush)Application.Current.Resources["TextFillColorSecondaryBrush"],
+            IsHitTestVisible = false,
+            VerticalAlignment = VerticalAlignment.Center
+        };
+        Grid.SetColumn(icon, 0);
+        content.Children.Add(icon);
+
+        var textPanel = new StackPanel
+        {
+            IsHitTestVisible = false,
+            Style = (Style)SettingsRoot.Resources["SettingTextPanelStyle"]
+        };
+        textPanel.Children.Add(new TextBlock
+        {
+            Text = entry.Title,
+            Style = (Style)SettingsRoot.Resources["SettingTitleTextStyle"]
+        });
+        textPanel.Children.Add(new TextBlock
+        {
+            Text = entry.DisplayDescription,
+            Style = (Style)SettingsRoot.Resources["SettingDescriptionTextStyle"]
+        });
+        Grid.SetColumn(textPanel, 1);
+        content.Children.Add(textPanel);
+
+        if (FeatureWidgetSettings.IsFeatureWidget(entry.Kind))
+        {
+            var resetButton = new Button
+            {
+                Width = 32,
+                Height = 32,
+                MinWidth = 32,
+                MinHeight = 32,
+                Padding = new Thickness(0),
+                CornerRadius = new CornerRadius(6),
+                HorizontalAlignment = HorizontalAlignment.Right,
+                VerticalAlignment = VerticalAlignment.Center,
+                Style = (Style)SettingsRoot.Resources["IconActionButtonStyle"],
+                Tag = entry.Kind,
+                Content = new FontIcon
+                {
+                    Glyph = "\uE72C",
+                    FontSize = 13,
+                    FontFamily = (FontFamily)Application.Current.Resources["SymbolThemeFontFamily"]
+                }
+            };
+            ToolTipService.SetToolTip(resetButton, _localizationService.T("Settings.FeatureWidgets.ResetTooltip"));
+            resetButton.Click += FeatureWidgetResetButton_Click;
+            Canvas.SetZIndex(resetButton, 2);
+            Grid.SetColumn(resetButton, 2);
+            content.Children.Add(resetButton);
+        }
+
+        if (entry.ShowToggle)
+        {
+            var toggle = new ToggleSwitch
+            {
+                MinWidth = 0,
+                HorizontalAlignment = HorizontalAlignment.Right,
+                IsOn = entry.IsEnabled,
+                IsEnabled = entry.CanToggle,
+                Tag = entry.Kind
+            };
+            toggle.Toggled += FeatureWidgetToggle_Toggled;
+            Canvas.SetZIndex(toggle, 2);
+            Grid.SetColumn(toggle, 3);
+            content.Children.Add(toggle);
+        }
+
+        if (entry.HasSettingsPage && !string.IsNullOrWhiteSpace(entry.SettingsSectionTag))
+        {
+            var arrow = new FontIcon
+            {
+                IsHitTestVisible = false,
+                VerticalAlignment = VerticalAlignment.Center,
+                FontSize = 12,
+                FontFamily = (FontFamily)Application.Current.Resources["SymbolThemeFontFamily"],
+                Glyph = "\uE974",
+                Foreground = (Brush)Application.Current.Resources["TextFillColorSecondaryBrush"],
+                Margin = new Thickness(0, 0, -4, 0)
+            };
+            Grid.SetColumn(arrow, 4);
+            content.Children.Add(arrow);
+        }
+
+        root.Children.Add(content);
+        border.Child = root;
+        return border;
+    }
+
+    private void FeatureWidgetSettingsButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button { Tag: string sectionTag })
+        {
+            ShowSettingsSection(sectionTag, isNestedSection: true);
+        }
+    }
+
+    private async void FeatureWidgetResetButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button { Tag: WidgetKind kind } button)
+        {
+            button.IsEnabled = false;
+            try
+            {
+                await ViewModel.ResetFeatureWidgetAsync(kind);
+                RefreshFeatureWidgetList();
+            }
+            finally
+            {
+                button.IsEnabled = true;
+            }
+        }
+    }
+
+    private void FeatureWidgetToggle_Toggled(object sender, RoutedEventArgs e)
+    {
+        if (_isRefreshingFeatureWidgetList)
+        {
+            return;
+        }
+
+        if (sender is ToggleSwitch { Tag: WidgetKind kind } toggle)
+        {
+            ViewModel.SetWidgetEnabled(kind, toggle.IsOn);
+            DispatcherQueue.TryEnqueue(RefreshFeatureWidgetList);
         }
     }
 
@@ -1012,9 +1282,15 @@ public sealed partial class SettingsWindow : Window
         ShowSettingsSection("QuickCaptureSettings", isNestedSection: true);
     }
 
+    private void OpenTodoSettingsButton_Click(object sender, RoutedEventArgs e)
+    {
+        ShowSettingsSection("TodoSettings", isNestedSection: true);
+    }
+
     private void OpenAppearanceDetailButton_Click(object sender, RoutedEventArgs e)
     {
-        ShowSettingsSection("AppearanceDetail", isNestedSection: true);
+        ShowSettingsSection("AppearanceDetail", isNestedSection: false);
+        SettingsNavigationView.SelectedItem = FileWidgetNavItem;
     }
 
     private void AppearanceBreadcrumbBackButton_Click(object sender, RoutedEventArgs e)
@@ -1063,44 +1339,6 @@ public sealed partial class SettingsWindow : Window
 
         await App.Current.QuickCaptureService.ClearAsync();
         await ViewModel.RefreshQuickCaptureImageCacheInfoAsync();
-    }
-
-    private async void QuickCaptureClipboardToggle_Toggled(object sender, RoutedEventArgs e)
-    {
-        if (_isApplyingQuickCaptureClipboardToggle ||
-            sender is not ToggleSwitch toggle ||
-            toggle.IsOn == ViewModel.QuickCaptureClipboardEnabled)
-        {
-            return;
-        }
-
-        if (!toggle.IsOn)
-        {
-            App.Log("[QuickCaptureClipboard] Disabled from settings");
-            ViewModel.QuickCaptureClipboardEnabled = false;
-            App.Current.QuickCaptureClipboardService?.Refresh();
-            ViewModel.RefreshQuickCaptureClipboardDiagnostics();
-            return;
-        }
-
-        await QuickCaptureClipboardActivationHelper.EnableAsync(SettingsRoot.XamlRoot, _localizationService);
-        ViewModel.QuickCaptureClipboardEnabled = App.Current.SettingsService.Settings.QuickCaptureClipboardEnabled;
-        ViewModel.QuickCaptureEnabled = App.Current.SettingsService.Settings.QuickCaptureEnabled;
-        App.Current.QuickCaptureClipboardService?.Refresh();
-        ViewModel.RefreshQuickCaptureClipboardDiagnostics();
-    }
-
-    private void SetQuickCaptureClipboardToggle(bool isOn)
-    {
-        _isApplyingQuickCaptureClipboardToggle = true;
-        try
-        {
-            QuickCaptureClipboardToggle.IsOn = isOn;
-        }
-        finally
-        {
-            _isApplyingQuickCaptureClipboardToggle = false;
-        }
     }
 
     private async void ClearQuickCaptureRecentButton_Click(object sender, RoutedEventArgs e)
@@ -1239,8 +1477,8 @@ public sealed partial class SettingsWindow : Window
 
     private void ManagedStorageBreadcrumbBackButton_Click(object sender, RoutedEventArgs e)
     {
-        ShowSettingsSection("Advanced", isNestedSection: false);
-        SettingsNavigationView.SelectedItem = FindNavItemByTag("Advanced");
+        ShowSettingsSection("AppearanceDetail", isNestedSection: false);
+        SettingsNavigationView.SelectedItem = FileWidgetNavItem;
     }
 
     private void RefreshManagedStorageButton_Click(object sender, RoutedEventArgs e)
