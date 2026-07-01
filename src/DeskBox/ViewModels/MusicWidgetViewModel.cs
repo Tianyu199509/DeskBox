@@ -78,7 +78,7 @@ public sealed partial class MusicWidgetViewModel : ObservableObject, IDisposable
         _musicSessionService = musicSessionService;
         _localizationService = localizationService;
         _settingsService = settingsService;
-        _dispatcherQueue = dispatcherQueue ?? Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread();
+        _dispatcherQueue = dispatcherQueue ?? TryGetCurrentDispatcherQueue();
 
         if (_settingsService is not null)
         {
@@ -113,6 +113,18 @@ public sealed partial class MusicWidgetViewModel : ObservableObject, IDisposable
         }
 
         AttachServiceEvents();
+    }
+
+    private static Microsoft.UI.Dispatching.DispatcherQueue? TryGetCurrentDispatcherQueue()
+    {
+        try
+        {
+            return Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread();
+        }
+        catch (System.Runtime.InteropServices.COMException)
+        {
+            return null;
+        }
     }
 
     public ObservableCollection<MusicBarViewModel> VisualizerBars { get; } = [];
