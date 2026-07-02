@@ -139,16 +139,11 @@
                             <TextBox
                                 x:Name="TitleEditBox"
                                 Width="168"
-                                MinWidth="120"
                                 MaxWidth="220"
-                                MinHeight="28"
-                                Padding="8,2"
-                                BorderThickness="1"
                                 FontSize="13"
                                 HorizontalAlignment="Left"
-                                HorizontalContentAlignment="Left"
                                 VerticalAlignment="Center"
-                                VerticalContentAlignment="Center"
+                                Style="{StaticResource WidgetTitleRenameTextBoxStyle}"
                                 Visibility="Collapsed"
                                 KeyDown="TitleEditBox_KeyDown"
                                 LostFocus="TitleEditBox_LostFocus" />
@@ -212,29 +207,26 @@
                 DragLeave="RootGrid_DragLeave"
                 DragOver="RootGrid_DragOver"
                 Drop="RootGrid_Drop"
-                MaxWidth="220"
-                HorizontalAlignment="Center"
                 Spacing="10"
-                VerticalAlignment="Center"
+                Style="{StaticResource WidgetEmptyStatePanelStyle}"
                 Visibility="Collapsed">
                 <FontIcon
                     x:Name="EmptyStateIcon"
                     FontSize="22"
                     Glyph="{Binding EmptyStateGlyph}"
-                    HorizontalAlignment="Center" />
+                    Style="{StaticResource WidgetEmptyStateIconStyle}" />
                 <TextBlock
                     x:Name="EmptyStateTitleText"
                     FontSize="14"
                     FontWeight="Normal"
+                    Style="{StaticResource WidgetEmptyStateTitleTextStyle}"
                     Text="{Binding EmptyStateTitle}"
-                    TextAlignment="Center"
                     TextWrapping="Wrap" />
                 <TextBlock
                     x:Name="EmptyStateDescriptionText"
                     FontSize="12"
-                    Text="{Binding EmptyStateText}"
-                    TextAlignment="Center"
-                    TextWrapping="Wrap" />
+                    Style="{StaticResource WidgetEmptyStateDescriptionTextStyle}"
+                    Text="{Binding EmptyStateText}" />
             </StackPanel>
 
             <GridView
@@ -289,16 +281,10 @@
                                     <ToolTip
                                         Style="{StaticResource RoundedToolTipStyle}">
                                         <Border
-                                            MaxWidth="360"
-                                            Padding="10,7"
-                                            CornerRadius="8"
-                                            Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"
-                                            BorderBrush="{ThemeResource SurfaceStrokeColorDefaultBrush}"
-                                            BorderThickness="1">
+                                            Style="{StaticResource WidgetTooltipCardStyle}">
                                             <TextBlock
                                                 Text="{Binding FullPath}"
-                                                FontSize="12"
-                                                TextWrapping="WrapWholeWords" />
+                                                Style="{StaticResource WidgetTooltipTextStyle}" />
                                         </Border>
                                     </ToolTip>
                                 </ToolTipService.ToolTip>
@@ -382,16 +368,10 @@
                                     <ToolTip
                                         Style="{StaticResource RoundedToolTipStyle}">
                                         <Border
-                                            MaxWidth="360"
-                                            Padding="10,7"
-                                            CornerRadius="8"
-                                            Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"
-                                            BorderBrush="{ThemeResource SurfaceStrokeColorDefaultBrush}"
-                                            BorderThickness="1">
+                                            Style="{StaticResource WidgetTooltipCardStyle}">
                                             <TextBlock
                                                 Text="{Binding FullPath}"
-                                                FontSize="12"
-                                                TextWrapping="WrapWholeWords" />
+                                                Style="{StaticResource WidgetTooltipTextStyle}" />
                                         </Border>
                                     </ToolTip>
                                 </ToolTipService.ToolTip>
@@ -459,39 +439,20 @@
             <TextBox
                 x:Name="ItemRenameTextBox"
                 Width="220"
-                MinWidth="120"
                 MaxWidth="280"
-                MinHeight="30"
-                Padding="8,2"
-                BorderThickness="1"
                 HorizontalAlignment="Left"
-                HorizontalContentAlignment="Left"
                 VerticalAlignment="Top"
-                VerticalContentAlignment="Center"
+                Style="{StaticResource WidgetInlineRenameTextBoxStyle}"
                 Visibility="Collapsed"
                 KeyDown="ItemRenameTextBox_KeyDown"
                 LostFocus="ItemRenameTextBox_LostFocus" />
 
             <Border
                 x:Name="StatusToast"
-                MinHeight="30"
-                MaxWidth="260"
-                Margin="0,0,8,8"
-                Padding="10,6"
-                HorizontalAlignment="Right"
-                VerticalAlignment="Bottom"
-                Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"
-                BorderBrush="{ThemeResource SurfaceStrokeColorDefaultBrush}"
-                BorderThickness="1"
-                CornerRadius="8"
-                IsHitTestVisible="False"
-                Opacity="0"
-                Visibility="Collapsed">
+                Style="{StaticResource WidgetInlineStatusToastStyle}">
                 <TextBlock
                     x:Name="StatusToastText"
-                    FontSize="12"
-                    TextTrimming="CharacterEllipsis"
-                    TextWrapping="NoWrap" />
+                    Style="{StaticResource WidgetInlineStatusToastTextStyle}" />
             </Border>
                 </Grid>
             </controls:WidgetShell.ShellContent>

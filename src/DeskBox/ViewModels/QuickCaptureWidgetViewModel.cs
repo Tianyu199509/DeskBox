@@ -194,7 +194,24 @@ public sealed partial class QuickCaptureWidgetViewModel : ObservableObject, IDis
     public double TextSize
     {
         get => _textSize;
-        private set => SetProperty(ref _textSize, value);
+        private set
+        {
+            if (SetProperty(ref _textSize, value))
+            {
+                OnPropertyChanged(nameof(TitleTextSize));
+                OnPropertyChanged(nameof(SecondaryTextSize));
+                OnPropertyChanged(nameof(CaptionTextSize));
+                OnPropertyChanged(nameof(SegmentTextSize));
+                OnPropertyChanged(nameof(SegmentHeight));
+                OnPropertyChanged(nameof(SegmentPadding));
+                OnPropertyChanged(nameof(InputHeight));
+                OnPropertyChanged(nameof(InputButtonSize));
+                OnPropertyChanged(nameof(InputActionIconSize));
+                OnPropertyChanged(nameof(InputPadding));
+                OnPropertyChanged(nameof(ItemTextLineHeight));
+                OnPropertyChanged(nameof(ItemMetaLineHeight));
+            }
+        }
     }
 
     public double TitleTextSize => Math.Min(SettingsService.MaxTextSize + 2, TextSize + 3);
@@ -203,7 +220,23 @@ public sealed partial class QuickCaptureWidgetViewModel : ObservableObject, IDis
 
     public double CaptionTextSize => Math.Max(SettingsService.MinTextSize, TextSize);
 
-    public double SegmentTextSize => Math.Max(SettingsService.MinTextSize, TextSize);
+    public double SegmentTextSize => WidgetSegmentedMetrics.Create(TextSize).TextSize;
+
+    public double SegmentHeight => WidgetSegmentedMetrics.Create(TextSize).Height;
+
+    public Thickness SegmentPadding => WidgetSegmentedMetrics.Create(TextSize).Padding;
+
+    public double InputHeight => WidgetInputMetrics.Create(TextSize).Height;
+
+    public double InputButtonSize => WidgetInputMetrics.Create(TextSize).ButtonSize;
+
+    public double InputActionIconSize => WidgetInputMetrics.Create(TextSize).ActionIconSize;
+
+    public Thickness InputPadding => WidgetInputMetrics.Create(TextSize).Padding;
+
+    public double ItemTextLineHeight => Math.Round(TextSize * 1.24);
+
+    public double ItemMetaLineHeight => Math.Round(SecondaryTextSize * 1.08);
 
     public double IconSize
     {
@@ -683,10 +716,6 @@ public sealed partial class QuickCaptureWidgetViewModel : ObservableObject, IDis
         WidgetOpacity = settings.WidgetOpacity;
         TextSize = SettingsService.NormalizeTextSize(settings.TextSize);
         IconSize = SettingsService.NormalizeIconSize(settings.IconSize);
-        OnPropertyChanged(nameof(TitleTextSize));
-        OnPropertyChanged(nameof(SecondaryTextSize));
-        OnPropertyChanged(nameof(CaptionTextSize));
-        OnPropertyChanged(nameof(SegmentTextSize));
         OnPropertyChanged(nameof(TitleIconSize));
         OnPropertyChanged(nameof(ActionIconSize));
         OnPropertyChanged(nameof(EmptyIconSize));

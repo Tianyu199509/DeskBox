@@ -60,6 +60,10 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
     private Button CloseButton => QuickCaptureShell.CloseActionButton;
     private FontIcon MoreButtonIcon => QuickCaptureShell.MoreActionIcon;
     private FontIcon CloseButtonIcon => QuickCaptureShell.CloseActionIcon;
+    private TextBox EditTextBox => QuickCaptureInlineEditor.EditorTextBox;
+    private Button EditCloseButton => QuickCaptureInlineEditor.CloseButton;
+    private Button EditCancelButton => QuickCaptureInlineEditor.CancelButton;
+    private Button EditSaveButton => QuickCaptureInlineEditor.SaveButton;
 
     private readonly SettingsService _settingsService;
     private readonly LocalizationService _localizationService;
@@ -580,9 +584,9 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
         AutomationProperties.SetName(MoreButton, moreText);
         AutomationProperties.SetName(CloseButton, closeText);
         AutomationProperties.SetName(EditCloseButton, _localizationService.T("Common.Cancel"));
-        EditTitleText.Text = _localizationService.T("QuickCapture.Edit");
-        EditCancelButton.Content = _localizationService.T("Common.Cancel");
-        EditSaveButton.Content = _localizationService.T("Common.Save");
+        QuickCaptureInlineEditor.Title = _localizationService.T("QuickCapture.Edit");
+        QuickCaptureInlineEditor.CancelText = _localizationService.T("Common.Cancel");
+        QuickCaptureInlineEditor.SaveText = _localizationService.T("Common.Save");
     }
 
     private void OnLanguageChanged()
@@ -621,7 +625,7 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
 
         if (e.PropertyName == nameof(QuickCaptureWidgetViewModel.SelectedView))
         {
-            ApplyTabStyles();
+            RefreshSelectedViewSegment();
         }
 
         if (e.PropertyName is nameof(QuickCaptureWidgetViewModel.IconSize) or
@@ -668,11 +672,10 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
     {
         _isExpandingInput = true;
         _editingItem = null;
-        EditTextBox.Text = InputTextBox.Text;
-        EditTitleText.Text = _localizationService.T("QuickCapture.InputPlaceholder");
-        EditOverlay.Visibility = Visibility.Visible;
-        EditTextBox.Focus(FocusState.Programmatic);
-        EditTextBox.Select(EditTextBox.Text.Length, 0);
+        QuickCaptureInlineEditor.Text = InputTextBox.Text;
+        QuickCaptureInlineEditor.Title = _localizationService.T("QuickCapture.InputPlaceholder");
+        QuickCaptureInlineEditor.Visibility = Visibility.Visible;
+        QuickCaptureInlineEditor.FocusEditor(moveCaretToEnd: true);
     }
 
     private async void InputTextBox_KeyDown(object sender, KeyRoutedEventArgs e)
@@ -721,26 +724,16 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
         RootGrid.Focus(FocusState.Programmatic);
     }
 
-    private void RecordsTabButton_Click(object sender, RoutedEventArgs e)
+    private void QuickCaptureViewSegmented_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        SelectView(QuickCaptureViewMode.Records);
-    }
-
-    private void PinnedTabButton_Click(object sender, RoutedEventArgs e)
-    {
-        SelectView(QuickCaptureViewMode.Pinned);
-    }
-
-    private void RecentTabButton_Click(object sender, RoutedEventArgs e)
-    {
-        SelectView(QuickCaptureViewMode.Recent);
+        SelectView(GetSelectedSegmentView());
     }
 
     private void SelectView(QuickCaptureViewMode view)
     {
         if (ViewModel.SelectedView == view)
         {
-            ApplyTabStyles();
+            RefreshSelectedViewSegment();
             return;
         }
 
@@ -1844,10 +1837,10 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
         }
 
         _editingItem = item;
-        EditTextBox.Text = item.Body;
-        EditOverlay.Visibility = Visibility.Visible;
-        EditTextBox.Focus(FocusState.Programmatic);
-        EditTextBox.Select(EditTextBox.Text.Length, 0);
+        QuickCaptureInlineEditor.Title = _localizationService.T("QuickCapture.Edit");
+        QuickCaptureInlineEditor.Text = item.Body;
+        QuickCaptureInlineEditor.Visibility = Visibility.Visible;
+        QuickCaptureInlineEditor.FocusEditor(moveCaretToEnd: true);
         return Task.CompletedTask;
     }
 
@@ -1880,7 +1873,7 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
 
     private async Task SaveInlineEditAsync()
     {
-        string body = EditTextBox.Text;
+        string body = QuickCaptureInlineEditor.Text;
         if (string.IsNullOrWhiteSpace(body))
         {
             ShowStatusToast(_localizationService.T("QuickCapture.EmptyEdit"));
@@ -1909,8 +1902,9 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
     {
         _editingItem = null;
         _isExpandingInput = false;
-        EditOverlay.Visibility = Visibility.Collapsed;
-        EditTextBox.Text = string.Empty;
+        QuickCaptureInlineEditor.Visibility = Visibility.Collapsed;
+        QuickCaptureInlineEditor.Text = string.Empty;
+        QuickCaptureInlineEditor.Title = _localizationService.T("QuickCapture.Edit");
         InputTextBox.Focus(FocusState.Programmatic);
     }
 
@@ -2120,21 +2114,23 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
             Text = ViewModel.DisplayName,
             PlaceholderText = _localizationService.T("Widget.TitlePlaceholder"),
             Width = Math.Clamp(titleWidth, 120, 220),
-            MinWidth = 120,
             MaxWidth = 220,
-            MinHeight = 28,
-            Padding = new Thickness(8, 2, 8, 2),
-            BorderThickness = new Thickness(1),
             FontSize = Math.Max(TitleText.FontSize - 1, 11),
+            Style = GetTextBoxStyleResource("WidgetTitleRenameTextBoxStyle"),
             HorizontalAlignment = HorizontalAlignment.Left,
-            HorizontalContentAlignment = HorizontalAlignment.Left,
-            VerticalAlignment = VerticalAlignment.Center,
-            VerticalContentAlignment = VerticalAlignment.Center
+            VerticalAlignment = VerticalAlignment.Center
         };
 
         editor.KeyDown += TitleRenameEditor_KeyDown;
         editor.LostFocus += TitleRenameEditor_LostFocus;
         return editor;
+    }
+
+    private static Style? GetTextBoxStyleResource(string resourceKey)
+    {
+        return Application.Current.Resources.TryGetValue(resourceKey, out object? resource) && resource is Style style
+            ? style
+            : null;
     }
 
     private async void TitleRenameEditor_LostFocus(object sender, RoutedEventArgs e)
@@ -2994,28 +2990,10 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
     {
         _pendingDeleteConfirmFlyout?.Hide();
 
-        var flyout = new MenuFlyout
-        {
-            ShouldConstrainToRootBounds = false
-        };
-        flyout.Items.Add(new MenuFlyoutItem
-        {
-            Text = title,
-            Icon = new FontIcon { Glyph = "\uE783" },
-            IsEnabled = false
-        });
-        flyout.Items.Add(new MenuFlyoutSeparator());
-        var confirmItem = new MenuFlyoutItem
-        {
-            Text = actionText,
-            Icon = new FontIcon
-            {
-                Glyph = "\uE74D",
-                Foreground = new SolidColorBrush(Colors.Red)
-            }
-        };
-        confirmItem.Click += async (_, _) => await confirmedAction();
-        flyout.Items.Add(confirmItem);
+        var flyout = WidgetCompactConfirmationMenuBuilder.CreateDeleteConfirmation(
+            title,
+            actionText,
+            confirmedAction);
         flyout.Closed += (_, _) =>
         {
             if (ReferenceEquals(_pendingDeleteConfirmFlyout, flyout))
@@ -3208,31 +3186,46 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
         EmptyStateIcon.Foreground = new SolidColorBrush(secondaryForeground);
         ApplySearchVisualStyle(isDark, accentColor);
         ApplyEditOverlayStyle(isDark, accentColor);
-        ApplyTabStyles(isDark, accentColor);
+        RefreshSelectedViewSegment();
     }
 
     private void ApplyTabStyles()
     {
-        ApplyTabStyles(RootGrid.ActualTheme == ElementTheme.Dark, App.Current.ThemeService?.GetEffectiveAccentColor()
-            ?? AccentColorHelper.DefaultAccentColor);
+        RefreshSelectedViewSegment();
     }
 
-    private void ApplyTabStyles(bool isDark, Windows.UI.Color accentColor)
+    private void RefreshSelectedViewSegment()
     {
-        ApplyTabButtonStyle(RecordsTabButton, ViewModel.IsRecordsView);
-        ApplyTabButtonStyle(PinnedTabButton, ViewModel.IsPinnedView);
-        ApplyTabButtonStyle(RecentTabButton, ViewModel.IsRecentView);
-    }
-
-    private void ApplyTabButtonStyle(Button button, bool isSelected)
-    {
-        var style = (Style)RootGrid.Resources[isSelected
-            ? "QuickCaptureTabSelectedButtonStyle"
-            : "QuickCaptureTabButtonStyle"];
-        if (!ReferenceEquals(button.Style, style))
+        if (QuickCaptureViewSegmented is null)
         {
-            button.Style = style;
+            return;
         }
+
+        int selectedIndex = GetViewSegmentIndex(ViewModel.SelectedView);
+        if (QuickCaptureViewSegmented.SelectedIndex != selectedIndex)
+        {
+            QuickCaptureViewSegmented.SelectedIndex = selectedIndex;
+        }
+    }
+
+    private QuickCaptureViewMode GetSelectedSegmentView()
+    {
+        return QuickCaptureViewSegmented?.SelectedIndex switch
+        {
+            1 => QuickCaptureViewMode.Pinned,
+            2 => QuickCaptureViewMode.Recent,
+            _ => QuickCaptureViewMode.Records
+        };
+    }
+
+    private static int GetViewSegmentIndex(QuickCaptureViewMode view)
+    {
+        return view switch
+        {
+            QuickCaptureViewMode.Pinned => 1,
+            QuickCaptureViewMode.Recent => 2,
+            _ => 0
+        };
     }
 
     private void ApplyTitleBarLayout()
@@ -3295,12 +3288,12 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
             accentMix: isDark ? 0.04 : 0.02,
             overlayMix: isDark ? 0.02 : 0.0);
 
-        EditOverlay.Background = new SolidColorBrush(WithAlpha(overlayBackground, 0xFF));
-        EditOverlay.BorderBrush = new SolidColorBrush(isDark
+        QuickCaptureInlineEditor.OverlaySurface.Background = new SolidColorBrush(WithAlpha(overlayBackground, 0xFF));
+        QuickCaptureInlineEditor.OverlaySurface.BorderBrush = new SolidColorBrush(isDark
             ? ColorHelper.FromArgb(0x52, 0xFF, 0xFF, 0xFF)
             : ColorHelper.FromArgb(0x24, 0x00, 0x00, 0x00));
-        EditOverlay.BorderThickness = new Thickness(0.8);
-        EditOverlay.Translation = new Vector3(0, 0, 16);
+        QuickCaptureInlineEditor.OverlaySurface.BorderThickness = new Thickness(0.8);
+        QuickCaptureInlineEditor.Translation = new Vector3(0, 0, 16);
 
         EditTextBox.Background = new SolidColorBrush(WithAlpha(inputBackground, 0xFF));
         EditTextBox.BorderBrush = new SolidColorBrush(WithAlpha(accentColor, isDark ? (byte)0x52 : (byte)0x3A));
@@ -3308,19 +3301,8 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
             "TextFillColorPrimaryBrush",
             isDark ? Colors.White : Colors.Black);
 
-        var buttonBackground = new SolidColorBrush(WithAlpha(
-            BuildAccentSurfaceColor(
-                isDark,
-                accentColor,
-                isDark ? ColorHelper.FromArgb(0xFF, 0x24, 0x29, 0x30) : ColorHelper.FromArgb(0xFF, 0xFA, 0xFB, 0xFD),
-                accentMix: isDark ? 0.08 : 0.04,
-                overlayMix: isDark ? 0.02 : 0.01),
-            0xFF));
-        var buttonBorder = new SolidColorBrush(WithAlpha(accentColor, isDark ? (byte)0x54 : (byte)0x38));
-        EditCancelButton.Background = buttonBackground;
-        EditCancelButton.BorderBrush = buttonBorder;
-        EditSaveButton.Background = buttonBackground;
-        EditSaveButton.BorderBrush = buttonBorder;
+        ApplyConfirmCommandButtonTheme(EditCancelButton, isDark, accentColor, isPrimary: false);
+        ApplyConfirmCommandButtonTheme(EditSaveButton, isDark, accentColor, isPrimary: true);
         ApplyActionButtonTheme(EditCloseButton, isDark, accentColor);
     }
 

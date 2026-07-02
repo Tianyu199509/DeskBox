@@ -22,6 +22,15 @@ public sealed partial class TodoWidgetContent : UserControl
     private MenuFlyout? _pendingConfirmFlyout;
     private Flyout? _customDueDateFlyout;
     private long _undoToastGeneration;
+    private bool _isAddingFromInlineEditor;
+
+    private TextBox TodoEditTextBox => TodoInlineEditor.EditorTextBox;
+
+    private Button TodoEditCancelButton => TodoInlineEditor.CancelButton;
+
+    private Button TodoEditSaveButton => TodoInlineEditor.SaveButton;
+
+    private Button TodoEditCloseButton => TodoInlineEditor.CloseButton;
 
     public TodoWidgetContent()
     {
@@ -110,15 +119,17 @@ public sealed partial class TodoWidgetContent : UserControl
 
     private void ApplyLocalizedText()
     {
-        if (TodoEditTitleText is null)
+        if (TodoInlineEditor is null)
         {
             return;
         }
 
         var localization = App.Current.LocalizationService;
-        TodoEditTitleText.Text = localization.T("Todo.Menu.Edit");
-        TodoEditCancelButton.Content = localization.T("Common.Cancel");
-        TodoEditSaveButton.Content = localization.T("Common.Save");
+        TodoInlineEditor.Title = _isAddingFromInlineEditor
+            ? localization.T("Todo.AddPlaceholder")
+            : localization.T("Todo.Menu.Edit");
+        TodoInlineEditor.CancelText = localization.T("Common.Cancel");
+        TodoInlineEditor.SaveText = localization.T("Common.Save");
     }
 
     private async void AddTextBox_KeyDown(object sender, KeyRoutedEventArgs e)
@@ -135,33 +146,20 @@ public sealed partial class TodoWidgetContent : UserControl
         }
     }
 
-    private async void AddButton_Click(object sender, RoutedEventArgs e)
+    private void ExpandInputButton_Click(object sender, RoutedEventArgs e)
     {
-        if (ViewModel is not null)
-        {
-            await ViewModel.AddInputAsync();
-            AddTextBox.Focus(FocusState.Programmatic);
-        }
+        _editingItem = null;
+        _isAddingFromInlineEditor = true;
+        TodoInlineEditor.Title = App.Current.LocalizationService.T("Todo.AddPlaceholder");
+        TodoInlineEditor.Text = ViewModel?.InputText ?? string.Empty;
+        ApplyEditorVisualStyle();
+        TodoInlineEditor.Visibility = Visibility.Visible;
+        TodoInlineEditor.FocusEditor(moveCaretToEnd: true);
     }
 
-    private void AllFilterButton_Click(object sender, RoutedEventArgs e)
+    private void TodoFilterSegmented_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        SelectFilter(TodoFilter.All);
-    }
-
-    private void TodayFilterButton_Click(object sender, RoutedEventArgs e)
-    {
-        SelectFilter(TodoFilter.Today);
-    }
-
-    private void ImportantFilterButton_Click(object sender, RoutedEventArgs e)
-    {
-        SelectFilter(TodoFilter.Important);
-    }
-
-    private void CompletedFilterButton_Click(object sender, RoutedEventArgs e)
-    {
-        SelectFilter(TodoFilter.Completed);
+        SelectFilter(GetSelectedSegmentFilter());
     }
 
     private void RedColorFilterButton_Click(object sender, RoutedEventArgs e)
@@ -226,15 +224,17 @@ public sealed partial class TodoWidgetContent : UserControl
 
     private void RefreshFilterButtons()
     {
-        if (AllFilterButton is null || ViewModel is null)
+        if (TodoFilterSegmented is null || ViewModel is null)
         {
             return;
         }
 
-        ApplyFilterButtonState(AllFilterButton, ViewModel.SelectedFilter == TodoFilter.All);
-        ApplyFilterButtonState(TodayFilterButton, ViewModel.SelectedFilter == TodoFilter.Today);
-        ApplyFilterButtonState(ImportantFilterButton, ViewModel.SelectedFilter == TodoFilter.Important);
-        ApplyFilterButtonState(CompletedFilterButton, ViewModel.SelectedFilter == TodoFilter.Completed);
+        int selectedIndex = GetFilterSegmentIndex(ViewModel.SelectedFilter);
+        if (TodoFilterSegmented.SelectedIndex != selectedIndex)
+        {
+            TodoFilterSegmented.SelectedIndex = selectedIndex;
+        }
+
         ApplyColorFilterButtonState(RedColorFilterButton, ViewModel.SelectedColorFilter == TodoColorFilter.Red);
         ApplyColorFilterButtonState(OrangeColorFilterButton, ViewModel.SelectedColorFilter == TodoColorFilter.Orange);
         ApplyColorFilterButtonState(YellowColorFilterButton, ViewModel.SelectedColorFilter == TodoColorFilter.Yellow);
@@ -243,11 +243,26 @@ public sealed partial class TodoWidgetContent : UserControl
         ApplyColorFilterButtonState(PurpleColorFilterButton, ViewModel.SelectedColorFilter == TodoColorFilter.Purple);
     }
 
-    private void ApplyFilterButtonState(Button button, bool isSelected)
+    private TodoFilter GetSelectedSegmentFilter()
     {
-        button.Style = (Style)Resources[isSelected
-            ? "TodoFilterSelectedButtonStyle"
-            : "TodoFilterButtonStyle"];
+        return TodoFilterSegmented?.SelectedIndex switch
+        {
+            1 => TodoFilter.Today,
+            2 => TodoFilter.Important,
+            3 => TodoFilter.Completed,
+            _ => TodoFilter.All
+        };
+    }
+
+    private static int GetFilterSegmentIndex(TodoFilter filter)
+    {
+        return filter switch
+        {
+            TodoFilter.Today => 1,
+            TodoFilter.Important => 2,
+            TodoFilter.Completed => 3,
+            _ => 0
+        };
     }
 
     private void ApplyColorFilterButtonState(Button button, bool isSelected)
@@ -684,12 +699,13 @@ public sealed partial class TodoWidgetContent : UserControl
 
     private void BeginItemEdit(TodoItemViewModel item)
     {
+        _isAddingFromInlineEditor = false;
         _editingItem = item;
-        TodoEditTextBox.Text = item.Text;
+        TodoInlineEditor.Title = App.Current.LocalizationService.T("Todo.Menu.Edit");
+        TodoInlineEditor.Text = item.Text;
         ApplyEditorVisualStyle();
-        TodoEditOverlay.Visibility = Visibility.Visible;
-        TodoEditTextBox.Focus(FocusState.Programmatic);
-        TodoEditTextBox.Select(TodoEditTextBox.Text.Length, 0);
+        TodoInlineEditor.Visibility = Visibility.Visible;
+        TodoInlineEditor.FocusEditor(moveCaretToEnd: true);
     }
 
     private async void TodoEditSaveButton_Click(object sender, RoutedEventArgs e)
@@ -721,13 +737,35 @@ public sealed partial class TodoWidgetContent : UserControl
 
     private async Task SaveTodoEditAsync()
     {
-        if (ViewModel is null || _editingItem is not { } item)
+        if (ViewModel is null)
         {
             CloseTodoEdit();
             return;
         }
 
-        bool updated = await ViewModel.UpdateItemTextAsync(item.Id, TodoEditTextBox.Text);
+        if (_isAddingFromInlineEditor)
+        {
+            ViewModel.InputText = TodoInlineEditor.Text;
+            var addedItem = await ViewModel.AddInputAsync();
+            if (addedItem is null)
+            {
+                TodoEditTextBox.Focus(FocusState.Programmatic);
+                TodoEditTextBox.SelectAll();
+                return;
+            }
+
+            CloseTodoEdit();
+            AddTextBox.Focus(FocusState.Programmatic);
+            return;
+        }
+
+        if (_editingItem is not { } item)
+        {
+            CloseTodoEdit();
+            return;
+        }
+
+        bool updated = await ViewModel.UpdateItemTextAsync(item.Id, TodoInlineEditor.Text);
         if (!updated)
         {
             TodoEditTextBox.Focus(FocusState.Programmatic);
@@ -741,13 +779,15 @@ public sealed partial class TodoWidgetContent : UserControl
     private void CloseTodoEdit()
     {
         _editingItem = null;
-        if (TodoEditOverlay is null)
+        _isAddingFromInlineEditor = false;
+        if (TodoInlineEditor is null)
         {
             return;
         }
 
-        TodoEditOverlay.Visibility = Visibility.Collapsed;
-        TodoEditTextBox.Text = string.Empty;
+        TodoInlineEditor.Visibility = Visibility.Collapsed;
+        TodoInlineEditor.Text = string.Empty;
+        TodoInlineEditor.Title = App.Current.LocalizationService.T("Todo.Menu.Edit");
     }
 
     private static void SetTodoItemHoverState(DependencyObject? itemRoot, bool isHovered)
@@ -812,7 +852,7 @@ public sealed partial class TodoWidgetContent : UserControl
 
     private void ApplyEditorVisualStyle()
     {
-        if (TodoEditOverlay is null)
+        if (TodoInlineEditor is null)
         {
             return;
         }
@@ -832,11 +872,11 @@ public sealed partial class TodoWidgetContent : UserControl
             accentMix: isDark ? 0.04 : 0.02,
             overlayMix: isDark ? 0.02 : 0.0);
 
-        TodoEditOverlay.Background = new SolidColorBrush(WithAlpha(overlayBackground, 0xFF));
-        TodoEditOverlay.BorderBrush = new SolidColorBrush(isDark
+        TodoInlineEditor.OverlaySurface.Background = new SolidColorBrush(WithAlpha(overlayBackground, 0xFF));
+        TodoInlineEditor.OverlaySurface.BorderBrush = new SolidColorBrush(isDark
             ? ColorHelper.FromArgb(0x52, 0xFF, 0xFF, 0xFF)
             : ColorHelper.FromArgb(0x24, 0x00, 0x00, 0x00));
-        TodoEditOverlay.BorderThickness = new Thickness(0.8);
+        TodoInlineEditor.OverlaySurface.BorderThickness = new Thickness(0.8);
         TodoEditTextBox.Background = new SolidColorBrush(WithAlpha(inputBackground, 0xFF));
         TodoEditTextBox.BorderBrush = new SolidColorBrush(WithAlpha(accentColor, isDark ? (byte)0x52 : (byte)0x3A));
         TodoEditTextBox.Foreground = GetBrushResourceOrFallback(
@@ -1127,29 +1167,10 @@ public sealed partial class TodoWidgetContent : UserControl
     {
         _pendingConfirmFlyout?.Hide();
 
-        var flyout = new MenuFlyout
-        {
-            ShouldConstrainToRootBounds = false
-        };
-        flyout.Items.Add(new MenuFlyoutItem
-        {
-            Text = title,
-            Icon = new FontIcon { Glyph = "\uE783" },
-            IsEnabled = false
-        });
-        flyout.Items.Add(new MenuFlyoutSeparator());
-        var confirmItem = new MenuFlyoutItem
-        {
-            Text = actionText,
-            Icon = new FontIcon
-            {
-                Glyph = "\uE74D",
-                Foreground = new SolidColorBrush(Colors.Red)
-            }
-        };
-        confirmItem.Click += async (_, _) => await confirmedAction();
-        flyout.Items.Add(confirmItem);
-
+        var flyout = WidgetCompactConfirmationMenuBuilder.CreateDeleteConfirmation(
+            title,
+            actionText,
+            confirmedAction);
         _pendingConfirmFlyout = flyout;
         flyout.Closed += (_, _) =>
         {

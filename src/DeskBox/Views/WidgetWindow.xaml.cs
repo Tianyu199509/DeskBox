@@ -4541,52 +4541,21 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
 
         _itemDeleteConfirmFlyout?.Hide();
 
-        var flyout = new MenuFlyout
-        {
-            ShouldConstrainToRootBounds = false
-        };
-
-        var titleItem = new MenuFlyoutItem
-        {
-            Text = items.Length == 1
-                ? _localizationService.Format("Widget.DeleteItemsTitleOne", items[0].Name)
-                : _localizationService.Format("Widget.DeleteItemsTitleMany", items.Length),
-            Icon = new FontIcon { Glyph = "\uE946" },
-            IsEnabled = false
-        };
-        flyout.Items.Add(titleItem);
-
         string message = items.Length == 1
             ? _localizationService.T("Widget.DeleteFolderNoteOne")
             : _localizationService.Format("Widget.DeleteFolderNoteMany", folderCount);
-        flyout.Items.Add(new MenuFlyoutItem
-        {
-            Text = message,
-            Icon = new FontIcon { Glyph = "\uE783" },
-            IsEnabled = false
-        });
-
-        flyout.Items.Add(new MenuFlyoutSeparator());
-
-        var confirmItem = new MenuFlyoutItem
-        {
-            Text = _localizationService.T("Widget.MoveToRecycleBin"),
-            Icon = new FontIcon
+        var flyout = WidgetCompactConfirmationMenuBuilder.CreateDeleteConfirmation(
+            new WidgetCompactConfirmationOptions(
+                items.Length == 1
+                    ? _localizationService.Format("Widget.DeleteItemsTitleOne", items[0].Name)
+                    : _localizationService.Format("Widget.DeleteItemsTitleMany", items.Length),
+                _localizationService.T("Widget.MoveToRecycleBin"),
+                async () => await DeleteItemsWithoutConfirmAsync(items))
             {
-                Glyph = "\uE74D",
-                Foreground = new SolidColorBrush(Colors.Red)
-            }
-        };
-        confirmItem.Click += async (_, _) => await DeleteItemsWithoutConfirmAsync(items);
-        flyout.Items.Add(confirmItem);
-
-        var cancelItem = new MenuFlyoutItem
-        {
-            Text = _localizationService.T("Common.Cancel"),
-            Icon = new FontIcon { Glyph = "\uE711" }
-        };
-        cancelItem.Click += (_, _) => flyout.Hide();
-        flyout.Items.Add(cancelItem);
+                TitleGlyph = "\uE946",
+                Message = message,
+                CancelText = _localizationService.T("Common.Cancel")
+            });
 
         _itemDeleteConfirmFlyout = flyout;
         flyout.Closed += (_, _) =>
@@ -4703,6 +4672,9 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
         _itemRenameTarget = item;
         _isCancellingItemRename = false;
         ItemRenameTextBox.Text = item.Name;
+        ItemRenameTextBox.FontSize = ViewModel.IsListMode
+            ? ViewModel.ListLabelFontSize
+            : ViewModel.IconLabelFontSize;
         PositionItemRenameTextBox(target, contentHost);
         ItemRenameTextBox.Visibility = Visibility.Visible;
         ItemRenameTextBox.IsHitTestVisible = true;

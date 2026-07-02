@@ -38,9 +38,9 @@ export default function FeaturesPage() {
                   ))}
                 </ul>
               </div>
-              <div className="lg:w-3/5">
-                <div className="feature-image-wrapper rounded-xl border border-[var(--card-border)] shadow-xl">
-                  <div className="absolute inset-0 bg-gradient-to-br from-[var(--accent)]/10 to-transparent rounded-2xl blur-3xl" style={{ position: "absolute", zIndex: 0 }} />
+              <div className="lg:w-3/5" style={{ perspective: "800px" }}>
+                <div className="feature-image-wrapper rounded-xl border border-[var(--card-border)]" style={{ boxShadow: "0 20px 40px -15px rgba(0,0,0,0.12)" }}>
+                  <div className="absolute inset-0 bg-gradient-to-br from-[var(--accent)]/8 to-transparent rounded-2xl blur-3xl" style={{ position: "absolute", zIndex: 0 }} />
                   <Image src={feature.image} alt={feature.title} width={900} height={560} className="relative rounded-xl w-full" style={{ position: "relative", zIndex: 1 }} />
                 </div>
               </div>

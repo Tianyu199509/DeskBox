@@ -4,6 +4,7 @@
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:controls="using:DeskBox.Controls"
+    xmlns:toolkit="using:CommunityToolkit.WinUI.Controls"
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     mc:Ignorable="d"
@@ -29,15 +30,7 @@
                 <Setter Property="CornerRadius" Value="4" />
             </Style>
 
-            <Style x:Key="QuickCaptureItemActionButtonStyle" TargetType="Button" BasedOn="{StaticResource SubtleButtonStyle}">
-                <Setter Property="Width" Value="26" />
-                <Setter Property="Height" Value="26" />
-                <Setter Property="MinWidth" Value="26" />
-                <Setter Property="MinHeight" Value="26" />
-                <Setter Property="Padding" Value="0" />
-                <Setter Property="CornerRadius" Value="6" />
-                <Setter Property="BorderThickness" Value="0" />
-            </Style>
+            <Style x:Key="QuickCaptureItemActionButtonStyle" TargetType="Button" BasedOn="{StaticResource WidgetItemActionButtonStyle}" />
 
             <Style x:Key="QuickCaptureItemButtonStyle" TargetType="Button">
                 <Setter Property="Background" Value="Transparent" />
@@ -61,31 +54,7 @@
                 <Setter Property="FontSize" Value="12" />
             </Style>
 
-            <Style x:Key="QuickCaptureTabButtonStyle" TargetType="Button" BasedOn="{StaticResource DefaultButtonStyle}">
-                <Setter Property="MinWidth" Value="0" />
-                <Setter Property="MinHeight" Value="0" />
-                <Setter Property="Height" Value="24" />
-                <Setter Property="Padding" Value="8,4" />
-                <Setter Property="CornerRadius" Value="5" />
-                <Setter Property="HorizontalContentAlignment" Value="Center" />
-                <Setter Property="VerticalContentAlignment" Value="Center" />
-            </Style>
-
-            <Style x:Key="QuickCaptureTabSelectedButtonStyle" TargetType="Button" BasedOn="{StaticResource AccentButtonStyle}">
-                <Setter Property="MinWidth" Value="0" />
-                <Setter Property="MinHeight" Value="0" />
-                <Setter Property="Height" Value="24" />
-                <Setter Property="Padding" Value="8,4" />
-                <Setter Property="CornerRadius" Value="5" />
-                <Setter Property="HorizontalContentAlignment" Value="Center" />
-                <Setter Property="VerticalContentAlignment" Value="Center" />
-            </Style>
-
-            <Style x:Key="QuickCaptureConfirmCommandButtonStyle" TargetType="Button" BasedOn="{StaticResource DefaultButtonStyle}">
-                <Setter Property="MinWidth" Value="62" />
-                <Setter Property="Padding" Value="10,4" />
-                <Setter Property="CornerRadius" Value="6" />
-            </Style>
+            <Style x:Key="QuickCaptureConfirmCommandButtonStyle" TargetType="Button" BasedOn="{StaticResource WidgetConfirmCommandButtonStyle}" />
         </Grid.Resources>
 
         <Grid.RowDefinitions>
@@ -127,27 +96,25 @@
                 <TextBox
                     x:Name="InputTextBox"
                     Grid.Column="0"
-                    Height="{Binding IconSize}"
-                    MinHeight="28"
-                    Padding="8,7,8,0"
-                    BorderThickness="0"
+                    Height="{Binding InputHeight}"
+                    MinHeight="{Binding InputHeight}"
+                    Padding="{Binding InputPadding}"
                     FontSize="{Binding TextSize}"
-                    VerticalAlignment="Center"
-                    VerticalContentAlignment="Center"
                     PlaceholderText="{Binding InputPlaceholderText}"
+                    Style="{StaticResource WidgetBorderlessInputTextBoxStyle}"
                     Text="{Binding InputText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                    TextWrapping="Wrap"
                     KeyDown="InputTextBox_KeyDown" />
                 <Button
                     x:Name="ExpandInputButton"
                     Grid.Column="1"
                     Click="ExpandInputButton_Click"
-                    Width="22"
-                    Height="22"
-                    MinWidth="22"
-                    Style="{StaticResource QuickCaptureIconButtonStyle}"
+                    Width="{Binding InputButtonSize}"
+                    Height="{Binding InputButtonSize}"
+                    MinWidth="{Binding InputButtonSize}"
+                    MinHeight="{Binding InputButtonSize}"
+                    Style="{StaticResource WidgetCompactIconButtonStyle}"
                     ToolTipService.ToolTip="{Binding ExpandInputTooltipText}">
-                    <FontIcon FontSize="12" Glyph="&#xE740;" />
+                    <FontIcon FontSize="{Binding InputActionIconSize}" Glyph="&#xE740;" />
                 </Button>
             </Grid>
 
@@ -162,45 +129,58 @@
                 <Grid
                     x:Name="TabHost"
                     Grid.Column="0"
-                    HorizontalAlignment="Left"
+                    HorizontalAlignment="Stretch"
                     Visibility="{Binding SearchButtonVisibility}">
-                    <StackPanel
-                        Orientation="Horizontal"
-                        Spacing="3">
-                        <Button
-                            x:Name="RecordsTabButton"
-                            Click="RecordsTabButton_Click"
-                            FontSize="{Binding SegmentTextSize}"
-                            Style="{StaticResource QuickCaptureTabButtonStyle}">
+                    <toolkit:Segmented
+                        x:Name="QuickCaptureViewSegmented"
+                        MinHeight="{Binding SegmentHeight}"
+                        FontSize="{Binding SegmentTextSize}"
+                        HorizontalAlignment="Stretch"
+                        SelectionChanged="QuickCaptureViewSegmented_SelectionChanged"
+                        SelectedIndex="0">
+                        <toolkit:SegmentedItem
+                            Style="{StaticResource WidgetSegmentedItemStyle}"
+                            Tag="Records"
+                            ToolTipService.ToolTip="{Binding RecordsTabText}">
                             <TextBlock
+                                MinWidth="0"
+                                VerticalAlignment="Center"
+                                FontSize="{Binding SegmentTextSize}"
+                                MaxLines="1"
                                 Text="{Binding RecordsTabText}"
                                 TextAlignment="Center"
                                 TextTrimming="CharacterEllipsis"
                                 TextWrapping="NoWrap" />
-                        </Button>
-                        <Button
-                            x:Name="PinnedTabButton"
-                            Click="PinnedTabButton_Click"
-                            FontSize="{Binding SegmentTextSize}"
-                            Style="{StaticResource QuickCaptureTabButtonStyle}">
+                        </toolkit:SegmentedItem>
+                        <toolkit:SegmentedItem
+                            Style="{StaticResource WidgetSegmentedItemStyle}"
+                            Tag="Pinned"
+                            ToolTipService.ToolTip="{Binding PinnedTabText}">
                             <TextBlock
+                                MinWidth="0"
+                                VerticalAlignment="Center"
+                                FontSize="{Binding SegmentTextSize}"
+                                MaxLines="1"
                                 Text="{Binding PinnedTabText}"
                                 TextAlignment="Center"
                                 TextTrimming="CharacterEllipsis"
                                 TextWrapping="NoWrap" />
-                        </Button>
-                        <Button
-                            x:Name="RecentTabButton"
-                            Click="RecentTabButton_Click"
-                            FontSize="{Binding SegmentTextSize}"
-                            Style="{StaticResource QuickCaptureTabButtonStyle}">
+                        </toolkit:SegmentedItem>
+                        <toolkit:SegmentedItem
+                            Style="{StaticResource WidgetSegmentedItemStyle}"
+                            Tag="Recent"
+                            ToolTipService.ToolTip="{Binding RecentTabText}">
                             <TextBlock
+                                MinWidth="0"
+                                VerticalAlignment="Center"
+                                FontSize="{Binding SegmentTextSize}"
+                                MaxLines="1"
                                 Text="{Binding RecentTabText}"
                                 TextAlignment="Center"
                                 TextTrimming="CharacterEllipsis"
                                 TextWrapping="NoWrap" />
-                        </Button>
-                    </StackPanel>
+                        </toolkit:SegmentedItem>
+                    </toolkit:Segmented>
                 </Grid>
                 <Button
                     x:Name="SearchButton"
@@ -217,27 +197,26 @@
                 <TextBox
                     x:Name="SearchTextBox"
                     Grid.Column="0"
-                    Height="{Binding IconSize}"
-                    MinHeight="26"
-                    Padding="8,7,8,0"
-                    BorderThickness="1"
+                    Height="{Binding InputHeight}"
+                    MinHeight="{Binding InputHeight}"
+                    Padding="{Binding InputPadding}"
                     FontSize="{Binding TextSize}"
-                    VerticalAlignment="Center"
-                    VerticalContentAlignment="Center"
                     KeyDown="SearchTextBox_KeyDown"
                     PlaceholderText="{Binding SearchPlaceholderText}"
+                    Style="{StaticResource WidgetSearchTextBoxStyle}"
                     Text="{Binding SearchText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                     Visibility="{Binding SearchBoxVisibility}" />
                 <Button
                     x:Name="CloseSearchButton"
                     Grid.Column="1"
                     Click="CloseSearchButton_Click"
-                    Width="{Binding IconSize}"
-                    Height="{Binding IconSize}"
-                    MinWidth="{Binding IconSize}"
-                    Style="{StaticResource QuickCaptureIconButtonStyle}"
+                    Width="{Binding InputButtonSize}"
+                    Height="{Binding InputButtonSize}"
+                    MinWidth="{Binding InputButtonSize}"
+                    MinHeight="{Binding InputButtonSize}"
+                    Style="{StaticResource WidgetCompactIconButtonStyle}"
                     Visibility="{Binding SearchBoxVisibility}">
-                    <FontIcon FontSize="{Binding ActionIconSize}" Glyph="&#xE711;" />
+                    <FontIcon FontSize="{Binding InputActionIconSize}" Glyph="&#xE711;" />
                 </Button>
             </Grid>
 
@@ -264,34 +243,28 @@
             <Grid Grid.Row="3">
                 <StackPanel
                     x:Name="EmptyState"
-                    MaxWidth="220"
-                    HorizontalAlignment="Center"
                     Margin="0,-8,0,0"
                     Spacing="7"
-                    VerticalAlignment="Center"
+                    Style="{StaticResource WidgetEmptyStatePanelStyle}"
                     Visibility="{Binding EmptyStateVisibility}">
                     <FontIcon
                         x:Name="EmptyStateIcon"
                         Margin="0,0,0,2"
                         FontSize="{Binding EmptyIconSize}"
                         Glyph="&#xE8A5;"
-                        HorizontalAlignment="Center" />
+                        Style="{StaticResource WidgetEmptyStateIconStyle}" />
                     <TextBlock
                         FontSize="{Binding TitleTextSize}"
                         FontWeight="SemiBold"
                         MaxLines="1"
+                        Style="{StaticResource WidgetEmptyStateTitleTextStyle}"
                         Text="{Binding EmptyStateTitle}"
-                        TextAlignment="Center"
-                        TextTrimming="CharacterEllipsis"
-                        TextWrapping="Wrap" />
+                        TextWrapping="NoWrap" />
                     <TextBlock
                         FontSize="{Binding TextSize}"
-                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                         MaxLines="2"
-                        Text="{Binding EmptyStateText}"
-                        TextAlignment="Center"
-                        TextTrimming="CharacterEllipsis"
-                        TextWrapping="Wrap" />
+                        Style="{StaticResource WidgetEmptyStateDescriptionTextStyle}"
+                        Text="{Binding EmptyStateText}" />
                     <Button
                         Click="EnableRecentCaptureButton_Click"
                         FontSize="{Binding SegmentTextSize}"
@@ -363,22 +336,19 @@
                                 <Border
                                     x:Name="ItemHoverBackground"
                                     Grid.ColumnSpan="2"
-                                    Margin="-4,-3,-2,-3"
-                                    Background="Transparent"
-                                    CornerRadius="7"
-                                    Opacity="0" />
+                                    Style="{StaticResource WidgetRowHoverBackgroundStyle}" />
                                 <FontIcon
                                     Grid.Column="0"
                                     Margin="0,2,8,0"
                                     FontSize="{Binding TypeIconSize}"
                                     Glyph="{Binding TypeGlyph}"
                                     Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                                <StackPanel
-                                    x:Name="ItemContentHost"
-                                    Grid.Column="1"
-                                    Margin="0"
-                                    MinWidth="0"
-                                    Spacing="4">
+                                    <StackPanel
+                                        x:Name="ItemContentHost"
+                                        Grid.Column="1"
+                                        Margin="0"
+                                        MinWidth="0"
+                                        Spacing="2">
                                     <Border
                                         x:Name="ImagePreviewBorder"
                                         Width="116"
@@ -398,6 +368,9 @@
                                     <TextBlock
                                         x:Name="ItemTextBlock"
                                         FontSize="{Binding TextSize}"
+                                        CharacterSpacing="8"
+                                        LineHeight="{Binding ElementName=ItemsListView, Path=DataContext.ItemTextLineHeight}"
+                                        LineStackingStrategy="BlockLineHeight"
                                         MaxLines="2"
                                         Text="{Binding DisplayText}"
                                         TextTrimming="CharacterEllipsis"
@@ -406,20 +379,19 @@
                                     <TextBlock
                                         FontSize="{Binding SecondaryTextSize}"
                                         Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                        LineHeight="{Binding ElementName=ItemsListView, Path=DataContext.ItemMetaLineHeight}"
+                                        LineStackingStrategy="BlockLineHeight"
                                         Text="{Binding UpdatedAtText}" />
                                 </StackPanel>
                                 <Border
                                     x:Name="ItemActionHost"
                                     Grid.ColumnSpan="2"
                                     Canvas.ZIndex="2"
-                                    Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"
                                     BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
                                     BorderThickness="1"
-                                    CornerRadius="6"
                                     Margin="0,0,6,0"
                                     HorizontalAlignment="Right"
-                                    IsHitTestVisible="False"
-                                    Opacity="0"
+                                    Style="{StaticResource WidgetHoverActionHostStyle}"
                                     VerticalAlignment="Center">
                                     <StackPanel
                                         x:Name="ItemActionButtons"
@@ -488,15 +460,7 @@
             Grid.Row="1"
             Canvas.ZIndex="10"
             Margin="12,0,12,12"
-            Padding="10,6"
-            HorizontalAlignment="Center"
-            VerticalAlignment="Bottom"
-            Background="{ThemeResource SystemControlAcrylicElementBrush}"
-            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-            BorderThickness="1"
-            CornerRadius="6"
-            IsHitTestVisible="False"
-            Opacity="0">
+            Style="{StaticResource WidgetCompactToastStyle}">
             <StackPanel
                 Orientation="Horizontal"
                 Spacing="10">
@@ -511,90 +475,24 @@
                 <Button
                     x:Name="StatusToastActionButton"
                     Click="StatusToastActionButton_Click"
-                    MinWidth="0"
-                    Padding="8,2"
+                    Style="{StaticResource WidgetToastActionButtonStyle}"
                     Visibility="Collapsed" />
             </StackPanel>
         </Border>
 
-        <Border
-            x:Name="EditOverlay"
+        <controls:WidgetInlineEditor
+            x:Name="QuickCaptureInlineEditor"
             Grid.Row="1"
             Canvas.ZIndex="20"
             Margin="10,6,6,8"
-            Padding="10"
-            Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
-            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-            BorderThickness="0.8"
-            CornerRadius="8"
+            CancelRequested="EditCancelButton_Click"
+            CommandFontSize="{Binding SegmentTextSize}"
+            EditorFontSize="{Binding TextSize}"
+            EditorKeyDown="EditTextBox_KeyDown"
+            SaveRequested="EditSaveButton_Click"
+            TitleFontSize="{Binding TextSize}"
             Visibility="Collapsed">
-            <Grid RowSpacing="8">
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto" />
-                    <RowDefinition Height="*" />
-                    <RowDefinition Height="Auto" />
-                </Grid.RowDefinitions>
-
-                <Grid Grid.Row="0" ColumnSpacing="8">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="Auto" />
-                    </Grid.ColumnDefinitions>
-                    <TextBlock
-                        x:Name="EditTitleText"
-                        Grid.Column="0"
-                        FontSize="{Binding TextSize}"
-                        FontWeight="SemiBold"
-                        TextTrimming="CharacterEllipsis"
-                        VerticalAlignment="Center" />
-                    <Button
-                        x:Name="EditCloseButton"
-                        Grid.Column="1"
-                        Width="24"
-                        Height="24"
-                        MinWidth="24"
-                        Padding="0"
-                        Click="EditCancelButton_Click"
-                        Style="{StaticResource QuickCaptureIconButtonStyle}">
-                        <FontIcon FontSize="10" Glyph="&#xE711;" />
-                    </Button>
-                </Grid>
-
-                <TextBox
-                    x:Name="EditTextBox"
-                    Grid.Row="1"
-                    AcceptsReturn="True"
-                    BorderThickness="1"
-                    FontSize="{Binding TextSize}"
-                    KeyDown="EditTextBox_KeyDown"
-                    MinHeight="0"
-                    Padding="8,6"
-                    ScrollViewer.VerticalScrollBarVisibility="Auto"
-                    TextWrapping="Wrap"
-                    VerticalAlignment="Stretch" />
-
-                <StackPanel
-                    Grid.Row="2"
-                    HorizontalAlignment="Right"
-                    Orientation="Horizontal"
-                    Spacing="8">
-                    <Button
-                        x:Name="EditCancelButton"
-                        Click="EditCancelButton_Click"
-                        FontSize="{Binding SegmentTextSize}"
-                        MinWidth="58"
-                        Padding="10,3"
-                        Style="{StaticResource QuickCaptureSegmentButtonStyle}" />
-                    <Button
-                        x:Name="EditSaveButton"
-                        Click="EditSaveButton_Click"
-                        FontSize="{Binding SegmentTextSize}"
-                        MinWidth="58"
-                        Padding="10,3"
-                        Style="{StaticResource QuickCaptureSegmentButtonStyle}" />
-                </StackPanel>
-            </Grid>
-        </Border>
+        </controls:WidgetInlineEditor>
 
         <Grid
             x:Name="ResizeGrid"

@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="utf-8"?>
+<UserControl
+    x:Class="DeskBox.Controls.WidgetInlineEditor"
+    x:Name="InlineEditorRoot"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    mc:Ignorable="d">
+
+    <Border
+        x:Name="OverlayRoot"
+        Style="{StaticResource WidgetInlineEditorOverlayStyle}">
+        <Grid RowSpacing="8">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+
+            <Grid Grid.Row="0" ColumnSpacing="8">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <TextBlock
+                    x:Name="TitleTextBlockElement"
+                    Grid.Column="0"
+                    FontSize="{Binding TitleFontSize, ElementName=InlineEditorRoot}"
+                    Style="{StaticResource WidgetInlineEditorTitleTextStyle}"
+                    Text="{Binding Title, ElementName=InlineEditorRoot}" />
+
+                <Button
+                    x:Name="CloseButtonElement"
+                    Grid.Column="1"
+                    Click="CancelButton_Click"
+                    Style="{StaticResource WidgetInlineEditorCloseButtonStyle}">
+                    <FontIcon FontSize="10" Glyph="&#xE711;" />
+                </Button>
+            </Grid>
+
+            <TextBox
+                x:Name="EditorTextBoxElement"
+                Grid.Row="1"
+                FontSize="{Binding EditorFontSize, ElementName=InlineEditorRoot}"
+                KeyDown="EditorTextBox_KeyDown"
+                Style="{StaticResource WidgetEditorTextBoxStyle}"
+                Text="{Binding Text, ElementName=InlineEditorRoot, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+
+            <StackPanel
+                Grid.Row="2"
+                HorizontalAlignment="Right"
+                Orientation="Horizontal"
+                Spacing="8">
+                <Button
+                    x:Name="CancelButtonElement"
+                    Click="CancelButton_Click"
+                    Content="{Binding CancelText, ElementName=InlineEditorRoot}"
+                    FontSize="{Binding CommandFontSize, ElementName=InlineEditorRoot}"
+                    Style="{StaticResource WidgetEditorCommandButtonStyle}" />
+                <Button
+                    x:Name="SaveButtonElement"
+                    Click="SaveButton_Click"
+                    Content="{Binding SaveText, ElementName=InlineEditorRoot}"
+                    FontSize="{Binding CommandFontSize, ElementName=InlineEditorRoot}"
+                    Style="{StaticResource WidgetEditorCommandButtonStyle}" />
+            </StackPanel>
+        </Grid>
+    </Border>
+</UserControl>

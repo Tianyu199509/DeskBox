@@ -16,6 +16,8 @@ public sealed partial class MusicWidgetViewModel : ObservableObject, IDisposable
     private const int VisualizerRefreshMs = 140;
     private const int VisualizerTransitionRefreshMs = 33;
     private const double VisualizerTransitionDurationMs = 420;
+    private const int MinVisualizerBarCount = 28;
+    private const int MaxVisualizerBarCount = 64;
     private static readonly double[] s_visualizerSeeds =
     [
         0.28, 0.52, 0.36, 0.68, 0.44, 0.58, 0.32, 0.74,
@@ -29,6 +31,7 @@ public sealed partial class MusicWidgetViewModel : ObservableObject, IDisposable
     ];
 
     private readonly MusicSessionService _musicSessionService;
+    private readonly MusicVolumeService _musicVolumeService;
     private readonly LocalizationService _localizationService;
     private readonly SettingsService? _settingsService;
     private readonly WidgetConfig _config;
@@ -42,6 +45,7 @@ public sealed partial class MusicWidgetViewModel : ObservableObject, IDisposable
     private string _title = string.Empty;
     private string _artist = string.Empty;
     private string _album = string.Empty;
+    private string _sourceAppUserModelId = string.Empty;
     private string _sourceDisplayName = string.Empty;
     private MusicPlaybackState _playbackState = MusicPlaybackState.Unknown;
     private TimeSpan _position;
@@ -52,8 +56,16 @@ public sealed partial class MusicWidgetViewModel : ObservableObject, IDisposable
     private bool _canGoPrevious;
     private bool _canGoNext;
     private bool _canSeek;
+    private bool _canChangeShuffle;
+    private bool _canChangeRepeat;
     private bool _isRefreshing;
     private bool _isSeeking;
+    private bool _isChangingPlaybackMode;
+    private bool _isChangingSystemVolume;
+    private bool _isChangingSessionVolume;
+    private bool _isRefreshingVolume;
+    private double? _pendingSystemVolume;
+    private double? _pendingSessionVolume;
     private bool _isDisposed;
     private DateTimeOffset _visualizerTransitionStartedAt;
     private double[] _visualizerTransitionStartHeights = [];
@@ -61,21 +73,27 @@ public sealed partial class MusicWidgetViewModel : ObservableObject, IDisposable
     private double[] _visualizerTransitionStartOpacities = [];
     private double _textSize = SettingsService.DefaultTextSize;
     private double _seekValue;
+    private double _systemVolume = 0.5;
+    private double _sessionVolume = 0.5;
+    private bool _hasSessionVolume;
     private bool _useArtworkBackdrop = true;
     private bool _showRhythmBars = true;
     private string _rhythmStyle = SettingsService.MusicRhythmStyleSoftWave;
     private bool _enableCoverHoverMotion = true;
     private Color _artworkColor = AccentColorHelper.DefaultAccentColor;
+    private MusicPlaybackMode _playbackMode = MusicPlaybackMode.Normal;
 
     public MusicWidgetViewModel(
         WidgetConfig config,
         MusicSessionService musicSessionService,
         LocalizationService localizationService,
         SettingsService? settingsService = null,
-        Microsoft.UI.Dispatching.DispatcherQueue? dispatcherQueue = null)
+        Microsoft.UI.Dispatching.DispatcherQueue? dispatcherQueue = null,
+        MusicVolumeService? musicVolumeService = null)
     {
         _config = config;
         _musicSessionService = musicSessionService;
+        _musicVolumeService = musicVolumeService ?? new MusicVolumeService();
         _localizationService = localizationService;
         _settingsService = settingsService;
         _dispatcherQueue = dispatcherQueue ?? TryGetCurrentDispatcherQueue();
@@ -107,10 +125,7 @@ public sealed partial class MusicWidgetViewModel : ObservableObject, IDisposable
             _visualizerTransitionTimer.Tick += VisualizerTransitionTimer_Tick;
         }
 
-        foreach (var seed in s_visualizerSeeds)
-        {
-            VisualizerBars.Add(new MusicBarViewModel(ScaleBar(seed)));
-        }
+        EnsureVisualizerBarCount(MinVisualizerBarCount);
 
         AttachServiceEvents();
     }
@@ -136,6 +151,10 @@ public sealed partial class MusicWidgetViewModel : ObservableObject, IDisposable
     public string DisplayName => _config.IsDefaultTitle
         ? _localizationService.T("Music.Title")
         : _config.Name;
+
+    public double WidgetX => _config.X;
+
+    public double WidgetY => _config.Y;
 
     public string Title
     {
@@ -367,6 +386,46 @@ public sealed partial class MusicWidgetViewModel : ObservableObject, IDisposable
         }
     }
 
+    public bool CanChangeShuffle
+    {
+        get => _canChangeShuffle;
+        private set
+        {
+            if (SetProperty(ref _canChangeShuffle, value))
+            {
+                OnPropertyChanged(nameof(CanChangePlaybackMode));
+            }
+        }
+    }
+
+    public bool CanChangeRepeat
+    {
+        get => _canChangeRepeat;
+        private set
+        {
+            if (SetProperty(ref _canChangeRepeat, value))
+            {
+                OnPropertyChanged(nameof(CanChangePlaybackMode));
+            }
+        }
+    }
+
+    public bool CanChangePlaybackMode => CanChangeShuffle || CanChangeRepeat;
+
+    public MusicPlaybackMode PlaybackMode
+    {
+        get => _playbackMode;
+        private set
+        {
+            if (SetProperty(ref _playbackMode, value))
+            {
+                OnPropertyChanged(nameof(PlaybackModeGlyph));
+                OnPropertyChanged(nameof(PlaybackModeTooltip));
+                OnPropertyChanged(nameof(PlaybackModeOpacity));
+            }
+        }
+    }
+
     public bool HasSeekableTimeline => Duration > TimeSpan.Zero && SeekMaximum > 1;
 
     public bool CanInteractWithProgress => CanSeek && HasSeekableTimeline;
@@ -428,6 +487,75 @@ public sealed partial class MusicWidgetViewModel : ObservableObject, IDisposable
     public string PreviousTooltip => _localizationService.T("Music.Control.Previous");
 
     public string NextTooltip => _localizationService.T("Music.Control.Next");
+
+    public string PlaybackModeGlyph => PlaybackMode switch
+    {
+        MusicPlaybackMode.Shuffle => "\uE8B1",
+        MusicPlaybackMode.Repeat => "\uE8EE",
+        _ => "\uE8AB"
+    };
+
+    public string PlaybackModeTooltip => PlaybackMode switch
+    {
+        MusicPlaybackMode.Shuffle => _localizationService.T("Music.Control.Mode.Shuffle"),
+        MusicPlaybackMode.Repeat => _localizationService.T("Music.Control.Mode.Repeat"),
+        _ => _localizationService.T("Music.Control.Mode.Normal")
+    };
+
+    public double PlaybackModeOpacity => PlaybackMode == MusicPlaybackMode.Normal ? 0.74 : 1.0;
+
+    public string VolumeTooltip => _localizationService.T("Music.Control.Volume");
+
+    public double SystemVolume
+    {
+        get => _systemVolume;
+        set
+        {
+            double normalizedValue = NormalizeVolume(value);
+            if (SetProperty(ref _systemVolume, normalizedValue))
+            {
+                OnPropertyChanged(nameof(SystemVolumeText));
+            }
+        }
+    }
+
+    public double SessionVolume
+    {
+        get => _sessionVolume;
+        set
+        {
+            double normalizedValue = NormalizeVolume(value);
+            if (SetProperty(ref _sessionVolume, normalizedValue))
+            {
+                OnPropertyChanged(nameof(SessionVolumeText));
+            }
+        }
+    }
+
+    public bool HasSessionVolume
+    {
+        get => _hasSessionVolume;
+        private set
+        {
+            if (SetProperty(ref _hasSessionVolume, value))
+            {
+                OnPropertyChanged(nameof(SessionVolumeSliderOpacity));
+                OnPropertyChanged(nameof(SessionVolumeText));
+            }
+        }
+    }
+
+    public double SessionVolumeSliderOpacity => HasSessionVolume ? 1.0 : 0.45;
+
+    public string SystemVolumeLabel => _localizationService.T("Music.Volume.System");
+
+    public string SessionVolumeLabel => _localizationService.T("Music.Volume.App");
+
+    public string SystemVolumeText => FormatPercent(SystemVolume);
+
+    public string SessionVolumeText => HasSessionVolume
+        ? FormatPercent(SessionVolume)
+        : _localizationService.T("Music.Volume.Unavailable");
 
     public string RefreshTooltip => _localizationService.T("Common.Refresh");
 
@@ -568,6 +696,171 @@ public sealed partial class MusicWidgetViewModel : ObservableObject, IDisposable
         await RefreshAsync();
     }
 
+    public async Task CyclePlaybackModeAsync()
+    {
+        if (_isDisposed || _isChangingPlaybackMode || !CanChangePlaybackMode)
+        {
+            return;
+        }
+
+        _isChangingPlaybackMode = true;
+        try
+        {
+            MusicPlaybackMode requestedMode = GetNextPlaybackMode();
+            bool didChange = await _musicSessionService.TryChangePlaybackModeAsync(_preferredSessionId, requestedMode);
+            if (!didChange)
+            {
+                App.Log($"[MusicWidget] Playback mode request was rejected. requested={requestedMode}");
+            }
+
+            await RefreshAsync();
+            await Task.Delay(180);
+            await RefreshAsync();
+        }
+        finally
+        {
+            _isChangingPlaybackMode = false;
+        }
+    }
+
+    public async Task RefreshVolumeAsync()
+    {
+        if (_isDisposed || _isRefreshingVolume)
+        {
+            return;
+        }
+
+        _isRefreshingVolume = true;
+        try
+        {
+            var snapshot = await _musicVolumeService.GetVolumeAsync(_sourceAppUserModelId, SourceDisplayName);
+            if (_isDisposed)
+            {
+                return;
+            }
+
+            SystemVolume = snapshot.SystemVolume;
+            SessionVolume = snapshot.SessionVolume;
+            HasSessionVolume = snapshot.HasSessionVolume;
+        }
+        catch (Exception ex)
+        {
+            App.Log($"[MusicWidget] Refresh volume failed: {ex.Message}");
+            HasSessionVolume = false;
+        }
+        finally
+        {
+            _isRefreshingVolume = false;
+        }
+    }
+
+    public async Task RefreshSystemVolumeAsync()
+    {
+        if (_isDisposed || _isRefreshingVolume)
+        {
+            return;
+        }
+
+        _isRefreshingVolume = true;
+        try
+        {
+            double systemVolume = await _musicVolumeService.GetSystemMasterVolumeAsync();
+            if (!_isDisposed)
+            {
+                SystemVolume = systemVolume;
+            }
+        }
+        catch (Exception ex)
+        {
+            App.Log($"[MusicWidget] Refresh system volume failed: {ex.Message}");
+        }
+        finally
+        {
+            _isRefreshingVolume = false;
+        }
+    }
+
+    public async Task SetSystemVolumeAsync(double volume)
+    {
+        if (_isDisposed)
+        {
+            return;
+        }
+
+        SystemVolume = volume;
+        _pendingSystemVolume = SystemVolume;
+        if (_isChangingSystemVolume)
+        {
+            return;
+        }
+
+        _isChangingSystemVolume = true;
+        try
+        {
+            while (_pendingSystemVolume.HasValue)
+            {
+                double requestedVolume = _pendingSystemVolume.Value;
+                _pendingSystemVolume = null;
+
+                bool didChange = await _musicVolumeService.TrySetSystemMasterVolumeAsync(requestedVolume);
+                if (!didChange)
+                {
+                    App.Log("[MusicWidget] System volume request was rejected.");
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            App.Log($"[MusicWidget] Set system volume failed: {ex.Message}");
+        }
+        finally
+        {
+            _isChangingSystemVolume = false;
+        }
+    }
+
+    public async Task SetSessionVolumeAsync(double volume)
+    {
+        if (_isDisposed || !HasSessionVolume)
+        {
+            return;
+        }
+
+        SessionVolume = volume;
+        _pendingSessionVolume = SessionVolume;
+        if (_isChangingSessionVolume)
+        {
+            return;
+        }
+
+        _isChangingSessionVolume = true;
+        try
+        {
+            while (_pendingSessionVolume.HasValue)
+            {
+                double requestedVolume = _pendingSessionVolume.Value;
+                _pendingSessionVolume = null;
+
+                bool didChange = await _musicVolumeService.TrySetSessionVolumeAsync(_sourceAppUserModelId, SourceDisplayName, requestedVolume);
+                if (!didChange)
+                {
+                    App.Log("[MusicWidget] Session volume request was rejected.");
+                    HasSessionVolume = false;
+                    break;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            App.Log($"[MusicWidget] Set session volume failed: {ex.Message}");
+            HasSessionVolume = false;
+        }
+        finally
+        {
+            _isChangingSessionVolume = false;
+        }
+    }
+
     public void BeginSeek()
     {
         _isSeeking = true;
@@ -610,6 +903,17 @@ public sealed partial class MusicWidgetViewModel : ObservableObject, IDisposable
 
         TextSize = SettingsService.NormalizeTextSize(_settingsService.Settings.TextSize);
         ApplyMusicSettings(_settingsService.Settings);
+    }
+
+    public void UpdateVisualizerWidth(double availableWidth)
+    {
+        if (!double.IsFinite(availableWidth) || availableWidth <= 0)
+        {
+            return;
+        }
+
+        int targetCount = Math.Clamp((int)Math.Floor(availableWidth / 6.0), MinVisualizerBarCount, MaxVisualizerBarCount);
+        EnsureVisualizerBarCount(targetCount);
     }
 
     public void OnActivated()
@@ -670,6 +974,7 @@ public sealed partial class MusicWidgetViewModel : ObservableObject, IDisposable
             Title = string.Empty;
             Artist = string.Empty;
             Album = string.Empty;
+            _sourceAppUserModelId = string.Empty;
             SourceDisplayName = string.Empty;
             PlaybackState = MusicPlaybackState.Unknown;
             Position = TimeSpan.Zero;
@@ -681,6 +986,9 @@ public sealed partial class MusicWidgetViewModel : ObservableObject, IDisposable
             CanGoPrevious = false;
             CanGoNext = false;
             CanSeek = false;
+            CanChangeShuffle = false;
+            CanChangeRepeat = false;
+            PlaybackMode = MusicPlaybackMode.Normal;
             RaiseDisplayPropertiesChanged();
             return;
         }
@@ -689,6 +997,7 @@ public sealed partial class MusicWidgetViewModel : ObservableObject, IDisposable
         Title = info.Title;
         Artist = info.Artist;
         Album = info.Album;
+        _sourceAppUserModelId = info.SourceAppUserModelId;
         SourceDisplayName = info.SourceDisplayName;
         PlaybackState = info.PlaybackState;
         Position = info.Position;
@@ -698,6 +1007,9 @@ public sealed partial class MusicWidgetViewModel : ObservableObject, IDisposable
         CanGoPrevious = info.CanGoPrevious;
         CanGoNext = info.CanGoNext;
         CanSeek = info.CanSeek && info.Duration > TimeSpan.Zero;
+        CanChangeShuffle = info.CanChangeShuffle;
+        CanChangeRepeat = info.CanChangeRepeat;
+        PlaybackMode = info.PlaybackMode;
         ThumbnailImage = await CreateThumbnailImageAsync(info);
         ArtworkColor = await TryReadArtworkColorAsync(info) ?? AccentColorHelper.DefaultAccentColor;
         RaiseDisplayPropertiesChanged();
@@ -1020,6 +1332,11 @@ public sealed partial class MusicWidgetViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(PlayPauseTooltip));
         OnPropertyChanged(nameof(PreviousTooltip));
         OnPropertyChanged(nameof(NextTooltip));
+        OnPropertyChanged(nameof(PlaybackModeTooltip));
+        OnPropertyChanged(nameof(VolumeTooltip));
+        OnPropertyChanged(nameof(SystemVolumeLabel));
+        OnPropertyChanged(nameof(SessionVolumeLabel));
+        OnPropertyChanged(nameof(SessionVolumeText));
         OnPropertyChanged(nameof(RefreshTooltip));
         OnPropertyChanged(nameof(ThumbnailVisibility));
         OnPropertyChanged(nameof(ThumbnailPlaceholderVisibility));
@@ -1034,14 +1351,47 @@ public sealed partial class MusicWidgetViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(RhythmBarsOpacity));
     }
 
+    private MusicPlaybackMode GetNextPlaybackMode()
+    {
+        return PlaybackMode switch
+        {
+            MusicPlaybackMode.Normal when CanChangeShuffle => MusicPlaybackMode.Shuffle,
+            MusicPlaybackMode.Normal when CanChangeRepeat => MusicPlaybackMode.Repeat,
+            MusicPlaybackMode.Shuffle when CanChangeRepeat => MusicPlaybackMode.Repeat,
+            MusicPlaybackMode.Shuffle => MusicPlaybackMode.Normal,
+            MusicPlaybackMode.Repeat => MusicPlaybackMode.Normal,
+            _ => MusicPlaybackMode.Normal
+        };
+    }
+
     private static double ScaleBar(double value)
     {
         return Math.Round(3 + value * 22);
     }
 
+    private void EnsureVisualizerBarCount(int targetCount)
+    {
+        int normalizedCount = Math.Clamp(targetCount, MinVisualizerBarCount, MaxVisualizerBarCount);
+        while (VisualizerBars.Count < normalizedCount)
+        {
+            int index = VisualizerBars.Count;
+            double seed = s_visualizerSeeds[index % s_visualizerSeeds.Length];
+            VisualizerBars.Add(new MusicBarViewModel(ScaleBar(seed * (IsPlaying ? 0.9 : 0.45)))
+            {
+                DotSize = ScaleDot(seed),
+                Opacity = IsPlaying ? 0.72 : 0.54
+            });
+        }
+
+        while (VisualizerBars.Count > normalizedCount)
+        {
+            VisualizerBars.RemoveAt(VisualizerBars.Count - 1);
+        }
+    }
+
     private static double ScaleDot(double value)
     {
-        return Math.Round(2.5 + value * 4.5);
+        return Math.Round(2.2 + value * 2.8);
     }
 
     private static double Lerp(double start, double end, double progress)
@@ -1062,5 +1412,17 @@ public sealed partial class MusicWidgetViewModel : ObservableObject, IDisposable
         }
 
         return $"{value.Minutes:00}:{value.Seconds:00}";
+    }
+
+    private static double NormalizeVolume(double value)
+    {
+        return double.IsFinite(value)
+            ? Math.Clamp(Math.Round(value, 3), 0.0, 1.0)
+            : 0.0;
+    }
+
+    private static string FormatPercent(double value)
+    {
+        return $"{Math.Clamp((int)Math.Round(NormalizeVolume(value) * 100), 0, 100)}%";
     }
 }

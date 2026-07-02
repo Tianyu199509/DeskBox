@@ -196,6 +196,8 @@ public sealed partial class TodoWidgetViewModel : ObservableObject
 
     public string AddPlaceholderText => _localizationService.T("Todo.AddPlaceholder");
 
+    public string ExpandInputTooltipText => _localizationService.T("QuickCapture.ExpandInput");
+
     public string AllFilterText => FormatFilterText("Todo.Filter.All", AllFilterCount);
 
     public string ActiveFilterText => FormatFilterText("Todo.Filter.Active", ActiveCount);
@@ -311,6 +313,14 @@ public sealed partial class TodoWidgetViewModel : ObservableObject
                 OnPropertyChanged(nameof(SecondaryTextSize));
                 OnPropertyChanged(nameof(TitleTextSize));
                 OnPropertyChanged(nameof(FilterTextSize));
+                OnPropertyChanged(nameof(SegmentTextSize));
+                OnPropertyChanged(nameof(SegmentHeight));
+                OnPropertyChanged(nameof(SegmentPadding));
+                OnPropertyChanged(nameof(InputHeight));
+                OnPropertyChanged(nameof(InputButtonSize));
+                OnPropertyChanged(nameof(InputActionIconSize));
+                OnPropertyChanged(nameof(InputPadding));
+                OnPropertyChanged(nameof(ItemTextLineHeight));
             }
         }
     }
@@ -320,6 +330,22 @@ public sealed partial class TodoWidgetViewModel : ObservableObject
     public double TitleTextSize => Math.Min(SettingsService.MaxTextSize + 2, TextSize + 3);
 
     public double FilterTextSize => Math.Max(SettingsService.MinTextSize, TextSize);
+
+    public double SegmentTextSize => WidgetSegmentedMetrics.Create(TextSize).TextSize;
+
+    public double SegmentHeight => WidgetSegmentedMetrics.Create(TextSize).Height;
+
+    public Thickness SegmentPadding => WidgetSegmentedMetrics.Create(TextSize).Padding;
+
+    public double InputHeight => WidgetInputMetrics.Create(TextSize).Height;
+
+    public double InputButtonSize => WidgetInputMetrics.Create(TextSize).ButtonSize;
+
+    public double InputActionIconSize => WidgetInputMetrics.Create(TextSize).ActionIconSize;
+
+    public Thickness InputPadding => WidgetInputMetrics.Create(TextSize).Padding;
+
+    public double ItemTextLineHeight => Math.Round(TextSize * 1.26);
 
     public bool IsInitialized
     {
@@ -810,6 +836,7 @@ public sealed partial class TodoWidgetViewModel : ObservableObject
     {
         OnPropertyChanged(nameof(DisplayName));
         OnPropertyChanged(nameof(AddPlaceholderText));
+        OnPropertyChanged(nameof(ExpandInputTooltipText));
         OnPropertyChanged(nameof(AllFilterText));
         OnPropertyChanged(nameof(ActiveFilterText));
         OnPropertyChanged(nameof(TodayFilterText));

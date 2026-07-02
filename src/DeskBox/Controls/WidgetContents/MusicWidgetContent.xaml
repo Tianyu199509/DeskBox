@@ -8,14 +8,35 @@
     mc:Ignorable="d">
 
     <UserControl.Resources>
-        <Style x:Key="MusicIconButtonStyle" TargetType="Button" BasedOn="{StaticResource SubtleButtonStyle}">
+        <Style x:Key="MusicIconButtonStyle" TargetType="Button" BasedOn="{StaticResource DefaultButtonStyle}">
             <Setter Property="Width" Value="30" />
             <Setter Property="Height" Value="30" />
             <Setter Property="MinWidth" Value="30" />
             <Setter Property="MinHeight" Value="30" />
             <Setter Property="Padding" Value="0" />
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderBrush" Value="Transparent" />
             <Setter Property="BorderThickness" Value="0" />
             <Setter Property="CornerRadius" Value="15" />
+            <Setter Property="UseSystemFocusVisuals" Value="False" />
+            <Setter Property="HorizontalContentAlignment" Value="Center" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Grid
+                            Background="Transparent"
+                            CornerRadius="{TemplateBinding CornerRadius}">
+                            <ContentPresenter
+                                Margin="{TemplateBinding Padding}"
+                                HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                VerticalAlignment="{TemplateBinding VerticalContentAlignment}"
+                                Content="{TemplateBinding Content}"
+                                ContentTemplate="{TemplateBinding ContentTemplate}" />
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
         </Style>
 
         <Style x:Key="MusicPrimaryButtonStyle" TargetType="Button" BasedOn="{StaticResource AccentButtonStyle}">
@@ -31,7 +52,6 @@
 
     <Grid
         x:Name="RootGrid"
-        MinWidth="320"
         Padding="0">
         <Border
             x:Name="ArtworkBackdrop"
@@ -58,7 +78,7 @@
             Opacity="{Binding RhythmBarsOpacity}"
             Visibility="{Binding RhythmBarsVisibility}">
             <ItemsControl
-                Margin="14,0,14,7"
+                Margin="4,0,4,7"
                 HorizontalAlignment="Stretch"
                 VerticalAlignment="Bottom"
                 ItemsSource="{Binding VisualizerBars}"
@@ -68,14 +88,14 @@
                         <StackPanel
                             HorizontalAlignment="Center"
                             Orientation="Horizontal"
-                            Spacing="3"
+                            Spacing="2"
                             VerticalAlignment="Bottom" />
                     </ItemsPanelTemplate>
                 </ItemsControl.ItemsPanel>
                 <ItemsControl.ItemTemplate>
                     <DataTemplate>
                         <Border
-                            Width="6"
+                            Width="4"
                             Height="{Binding Height}"
                             HorizontalAlignment="Center"
                             VerticalAlignment="Bottom"
@@ -87,7 +107,7 @@
             </ItemsControl>
 
             <ItemsControl
-                Margin="15,0,15,7"
+                Margin="4,0,4,7"
                 HorizontalAlignment="Stretch"
                 VerticalAlignment="Bottom"
                 ItemsSource="{Binding VisualizerBars}"
@@ -97,14 +117,14 @@
                         <StackPanel
                             HorizontalAlignment="Center"
                             Orientation="Horizontal"
-                            Spacing="4"
+                            Spacing="2"
                             VerticalAlignment="Bottom" />
                     </ItemsPanelTemplate>
                 </ItemsControl.ItemsPanel>
                 <ItemsControl.ItemTemplate>
                     <DataTemplate>
                         <Border
-                            Width="4"
+                            Width="3"
                             Height="{Binding Height}"
                             HorizontalAlignment="Center"
                             VerticalAlignment="Bottom"
@@ -125,7 +145,7 @@
             </ItemsControl>
 
             <ItemsControl
-                Margin="14,0,14,9"
+                Margin="4,0,4,9"
                 HorizontalAlignment="Stretch"
                 VerticalAlignment="Bottom"
                 ItemsSource="{Binding VisualizerBars}"
@@ -135,7 +155,7 @@
                         <StackPanel
                             HorizontalAlignment="Center"
                             Orientation="Horizontal"
-                            Spacing="3"
+                            Spacing="2"
                             VerticalAlignment="Bottom" />
                     </ItemsPanelTemplate>
                 </ItemsControl.ItemsPanel>
@@ -153,7 +173,7 @@
             </ItemsControl>
 
             <ItemsControl
-                Margin="10,0,10,5"
+                Margin="4,0,4,5"
                 HorizontalAlignment="Stretch"
                 VerticalAlignment="Bottom"
                 ItemsSource="{Binding VisualizerBars}"
@@ -163,7 +183,7 @@
                         <StackPanel
                             HorizontalAlignment="Center"
                             Orientation="Horizontal"
-                            Spacing="2.5"
+                            Spacing="2"
                             VerticalAlignment="Bottom" />
                     </ItemsPanelTemplate>
                 </ItemsControl.ItemsPanel>
@@ -189,11 +209,11 @@
             RowSpacing="8"
             VerticalAlignment="Top">
             <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="82" />
-                <ColumnDefinition Width="*" />
+                <ColumnDefinition x:Name="AlbumColumn" Width="82" />
+                <ColumnDefinition Width="*" MinWidth="0" />
             </Grid.ColumnDefinitions>
             <Grid.RowDefinitions>
-                <RowDefinition Height="82" />
+                <RowDefinition x:Name="TopRow" Height="82" />
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
             </Grid.RowDefinitions>
@@ -260,8 +280,10 @@
             </Border>
 
             <Grid
+                x:Name="TrackInfoGrid"
                 Grid.Row="0"
                 Grid.Column="1"
+                MinWidth="0"
                 RowSpacing="4"
                 VerticalAlignment="Center">
                 <Grid.RowDefinitions>
@@ -275,6 +297,7 @@
                     FontSize="{Binding TitleTextSize}"
                     FontWeight="SemiBold"
                     MaxLines="1"
+                    MinWidth="0"
                     Text="{Binding Title}"
                     TextTrimming="CharacterEllipsis"
                     TextWrapping="NoWrap" />
@@ -284,6 +307,7 @@
                     FontSize="{Binding SecondaryTextSize}"
                     Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                     MaxLines="1"
+                    MinWidth="0"
                     Text="{Binding Artist}"
                     TextTrimming="CharacterEllipsis" />
 
@@ -292,19 +316,21 @@
                     FontSize="{Binding CaptionTextSize}"
                     Foreground="{ThemeResource TextFillColorTertiaryBrush}"
                     MaxLines="1"
+                    MinWidth="0"
                     Text="{Binding StatusText}"
                     TextTrimming="CharacterEllipsis" />
             </Grid>
 
             <Grid
+                x:Name="ProgressRow"
                 Grid.Row="1"
                 Grid.ColumnSpan="2"
-                Margin="0,1,0,0"
+                Margin="0,3,0,0"
                 ColumnSpacing="8">
                 <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="34" />
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="34" />
+                    <ColumnDefinition x:Name="PositionColumn" Width="34" />
+                    <ColumnDefinition Width="*" MinWidth="0" />
+                    <ColumnDefinition x:Name="DurationColumn" Width="34" />
                 </Grid.ColumnDefinitions>
 
                 <TextBlock
@@ -319,7 +345,7 @@
                     x:Name="ProgressHost"
                     Grid.Column="1"
                     Height="18"
-                    MinWidth="72"
+                    MinWidth="44"
                     Background="Transparent"
                     HorizontalAlignment="Stretch"
                     PointerEntered="ProgressHost_PointerEntered"
@@ -363,14 +389,26 @@
             </Grid>
 
             <StackPanel
+                x:Name="ControlsPanel"
                 Grid.Row="2"
                 Grid.ColumnSpan="2"
-                Margin="0,1,0,0"
+                Margin="0,5,0,0"
                 HorizontalAlignment="Center"
                 Orientation="Horizontal"
                 Spacing="12"
                 VerticalAlignment="Bottom">
                 <Button
+                    x:Name="PlaybackModeButton"
+                    Click="PlaybackModeButton_Click"
+                    IsEnabled="{Binding CanChangePlaybackMode}"
+                    Opacity="{Binding PlaybackModeOpacity}"
+                    Style="{StaticResource MusicIconButtonStyle}"
+                    ToolTipService.ToolTip="{Binding PlaybackModeTooltip}">
+                    <FontIcon FontSize="14" Glyph="{Binding PlaybackModeGlyph}" />
+                </Button>
+
+                <Button
+                    x:Name="PreviousButton"
                     Click="PreviousButton_Click"
                     IsEnabled="{Binding CanGoPrevious}"
                     Style="{StaticResource MusicIconButtonStyle}"
@@ -379,6 +417,7 @@
                 </Button>
 
                 <Button
+                    x:Name="PlayPauseButton"
                     Click="PlayPauseButton_Click"
                     IsEnabled="{Binding CanPlayPause}"
                     Style="{StaticResource MusicPrimaryButtonStyle}"
@@ -425,13 +464,67 @@
                 </Button>
 
                 <Button
+                    x:Name="NextButton"
                     Click="NextButton_Click"
                     IsEnabled="{Binding CanGoNext}"
                     Style="{StaticResource MusicIconButtonStyle}"
                     ToolTipService.ToolTip="{Binding NextTooltip}">
                     <FontIcon FontSize="15" Glyph="&#xE101;" />
                 </Button>
+
+                <Button
+                    x:Name="VolumeButton"
+                    Click="VolumeButton_Click"
+                    Style="{StaticResource MusicIconButtonStyle}"
+                    ToolTipService.ToolTip="{Binding VolumeTooltip}">
+                    <FontIcon FontSize="15" Glyph="&#xE767;" />
+                </Button>
             </StackPanel>
         </Grid>
+
+        <Border
+            x:Name="InlineVolumePanel"
+            Width="54"
+            Height="126"
+            Padding="7,8,7,9"
+            HorizontalAlignment="Left"
+            VerticalAlignment="Top"
+            Background="#E8262626"
+            BorderBrush="#34FFFFFF"
+            BorderThickness="1"
+            CornerRadius="9"
+            Visibility="Collapsed">
+            <Grid RowSpacing="6">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+
+                <TextBlock
+                    Grid.Row="0"
+                    HorizontalAlignment="Center"
+                    FontSize="{Binding CaptionTextSize}"
+                    FontWeight="SemiBold"
+                    Foreground="{ThemeResource TextFillColorPrimaryBrush}"
+                    Text="{Binding SystemVolumeText}"
+                    TextAlignment="Center" />
+
+                <Slider
+                    x:Name="InlineSystemVolumeSlider"
+                    Grid.Row="1"
+                    Width="32"
+                    Height="80"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Stretch"
+                    LargeChange="0.1"
+                    Maximum="1"
+                    Minimum="0"
+                    Orientation="Vertical"
+                    SmallChange="0.01"
+                    StepFrequency="0.01"
+                    Value="{Binding SystemVolume, Mode=TwoWay}"
+                    ValueChanged="InlineSystemVolumeSlider_ValueChanged" />
+            </Grid>
+        </Border>
     </Grid>
 </UserControl>

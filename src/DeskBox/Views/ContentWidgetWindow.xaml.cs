@@ -1337,21 +1337,23 @@ public sealed partial class ContentWidgetWindow : Window, IDesktopWidgetWindow
             Text = _titleViewModel.DisplayName,
             PlaceholderText = localization.T("Widget.TitlePlaceholder"),
             Width = Math.Clamp(titleWidth, 120, 220),
-            MinWidth = 120,
             MaxWidth = 220,
-            MinHeight = 28,
-            Padding = new Thickness(8, 2, 8, 2),
-            BorderThickness = new Thickness(1),
             FontSize = Math.Max(ContentWidgetShell.TitleTextElement.FontSize - 1, 11),
+            Style = GetTextBoxStyleResource("WidgetTitleRenameTextBoxStyle"),
             HorizontalAlignment = HorizontalAlignment.Left,
-            HorizontalContentAlignment = HorizontalAlignment.Left,
-            VerticalAlignment = VerticalAlignment.Center,
-            VerticalContentAlignment = VerticalAlignment.Center
+            VerticalAlignment = VerticalAlignment.Center
         };
 
         editor.KeyDown += TitleRenameEditor_KeyDown;
         editor.LostFocus += TitleRenameEditor_LostFocus;
         return editor;
+    }
+
+    private static Style? GetTextBoxStyleResource(string resourceKey)
+    {
+        return Application.Current.Resources.TryGetValue(resourceKey, out object? resource) && resource is Style style
+            ? style
+            : null;
     }
 
     private async void TitleRenameEditor_LostFocus(object sender, RoutedEventArgs e)

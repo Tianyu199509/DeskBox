@@ -131,7 +131,7 @@ export function Navbar() {
       initial={false}
       animate={{ y: visible ? 0 : -80 }}
       transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
-      className="fixed top-0 left-0 right-0 z-50 backdrop-blur-xl bg-[var(--background)]/80 border-b border-[var(--card-border)]"
+      className="fixed top-0 left-0 right-0 z-50 backdrop-blur-2xl bg-[var(--background)]/60 border-b border-[var(--card-border)]/50"
       style={{ willChange: "transform" }}
     >
       <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">

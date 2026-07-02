@@ -12,6 +12,13 @@ public enum MusicPlaybackState
     Paused
 }
 
+public enum MusicPlaybackMode
+{
+    Normal,
+    Shuffle,
+    Repeat
+}
+
 public sealed record MusicSessionInfo(
     string SessionId,
     string SourceAppUserModelId,
@@ -27,6 +34,9 @@ public sealed record MusicSessionInfo(
     bool CanGoPrevious,
     bool CanGoNext,
     bool CanSeek,
+    bool CanChangeShuffle,
+    bool CanChangeRepeat,
+    MusicPlaybackMode PlaybackMode,
     IRandomAccessStreamReference? Thumbnail);
 
 public sealed class MusicSessionService : IDisposable
@@ -152,6 +162,63 @@ public sealed class MusicSessionService : IDisposable
         return session is not null && await session.TryChangePlaybackPositionAsync((long)position.TotalMilliseconds * 10_000);
     }
 
+    public async Task<bool> TryChangePlaybackModeAsync(string? sessionId, MusicPlaybackMode playbackMode)
+    {
+        var session = await GetSessionAsync(sessionId);
+        if (session is null)
+        {
+            return false;
+        }
+
+        var playbackInfo = session.GetPlaybackInfo();
+        var controls = playbackInfo.Controls;
+        bool didChange = false;
+
+        switch (playbackMode)
+        {
+            case MusicPlaybackMode.Shuffle:
+                if (!controls.IsShuffleEnabled)
+                {
+                    return false;
+                }
+
+                if (controls.IsRepeatEnabled && playbackInfo.AutoRepeatMode != MediaPlaybackAutoRepeatMode.None)
+                {
+                    didChange |= await session.TryChangeAutoRepeatModeAsync(MediaPlaybackAutoRepeatMode.None);
+                }
+
+                didChange |= await session.TryChangeShuffleActiveAsync(true);
+                return didChange;
+
+            case MusicPlaybackMode.Repeat:
+                if (!controls.IsRepeatEnabled)
+                {
+                    return false;
+                }
+
+                if (controls.IsShuffleEnabled && playbackInfo.IsShuffleActive == true)
+                {
+                    didChange |= await session.TryChangeShuffleActiveAsync(false);
+                }
+
+                didChange |= await session.TryChangeAutoRepeatModeAsync(MediaPlaybackAutoRepeatMode.List);
+                return didChange;
+
+            default:
+                if (controls.IsShuffleEnabled && playbackInfo.IsShuffleActive == true)
+                {
+                    didChange |= await session.TryChangeShuffleActiveAsync(false);
+                }
+
+                if (controls.IsRepeatEnabled && playbackInfo.AutoRepeatMode != MediaPlaybackAutoRepeatMode.None)
+                {
+                    didChange |= await session.TryChangeAutoRepeatModeAsync(MediaPlaybackAutoRepeatMode.None);
+                }
+
+                return didChange;
+        }
+    }
+
     public void Dispose()
     {
         if (_isDisposed)
@@ -229,6 +296,9 @@ public sealed class MusicSessionService : IDisposable
             controls.IsPreviousEnabled,
             controls.IsNextEnabled,
             controls.IsPlaybackPositionEnabled,
+            controls.IsShuffleEnabled,
+            controls.IsRepeatEnabled,
+            MapPlaybackMode(playbackInfo),
             mediaProperties?.Thumbnail);
     }
 
@@ -363,5 +433,17 @@ public sealed class MusicSessionService : IDisposable
             GlobalSystemMediaTransportControlsSessionPlaybackStatus.Stopped => MusicPlaybackState.Stopped,
             _ => MusicPlaybackState.Unknown
         };
+    }
+
+    private static MusicPlaybackMode MapPlaybackMode(GlobalSystemMediaTransportControlsSessionPlaybackInfo playbackInfo)
+    {
+        if (playbackInfo.IsShuffleActive == true)
+        {
+            return MusicPlaybackMode.Shuffle;
+        }
+
+        return playbackInfo.AutoRepeatMode == MediaPlaybackAutoRepeatMode.None
+            ? MusicPlaybackMode.Normal
+            : MusicPlaybackMode.Repeat;
     }
 }

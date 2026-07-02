@@ -85,13 +85,13 @@ function CharByChar({ text, className, delay = 0 }: { text: string; className?: 
   );
 }
 
-function ParallaxImage({ src, alt, width, height, className }: { src: string; alt: string; width: number; height: number; className?: string }) {
+function ParallaxImage({ src, alt, width, height, className, style }: { src: string; alt: string; width: number; height: number; className?: string; style?: React.CSSProperties }) {
   const ref = useRef<HTMLDivElement>(null);
   const { scrollYProgress } = useScroll({ target: ref, offset: ["start end", "end start"] });
   const y = useTransform(scrollYProgress, [0, 1], [30, -30]);
 
   return (
-    <div ref={ref} className={className}>
+    <div ref={ref} className={className} style={style}>
       <motion.div style={{ y }}>
         <Image src={src} alt={alt} width={width} height={height} className="w-full h-auto" />
       </motion.div>
@@ -202,8 +202,9 @@ export default function Home() {
   return (
     <div className="min-h-screen">
       {/* Hero */}
-      <section className="pt-32 pb-20 px-4 sm:px-6 lg:px-8">
-        <div className="max-w-4xl mx-auto text-center">
+      <section className="relative pt-32 pb-20 px-4 sm:px-6 lg:px-8 overflow-hidden">
+        <div className="absolute inset-0 pointer-events-none" style={{ background: "radial-gradient(ellipse 60% 40% at 50% 0%, color-mix(in srgb, var(--accent) 12%, transparent), transparent 70%)" }} />
+        <div className="max-w-4xl mx-auto text-center relative">
           <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.6, ease: [0.16, 1, 0.3, 1] }}>
             <div className="flex items-center justify-center gap-3 mb-8">
               <Image src="/deskbox-logo-static.svg" alt="DeskBox" width={48} height={48} />
@@ -244,7 +245,7 @@ export default function Home() {
       </section>
 
       {/* Stats Bar */}
-      <section className="py-8 px-4 sm:px-6 lg:px-8 border-y border-[var(--card-border)] bg-[var(--card-background)]">
+      <section className="py-12 px-4 sm:px-6 lg:px-8 border-y border-[var(--card-border)] bg-[var(--card-background)]/80 backdrop-blur-sm">
         <div className="max-w-4xl mx-auto">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-8">
             {stats.map((s, i) => (
@@ -254,12 +255,15 @@ export default function Home() {
                 whileInView={{ opacity: 1, y: 0 }}
                 viewport={{ once: true }}
                 transition={{ delay: i * 0.1 }}
-                className="text-center"
+                className="text-center relative"
               >
-                <div className="text-2xl sm:text-3xl font-bold text-[var(--accent)]">
+                <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                  <div className="w-20 h-20 rounded-full bg-[var(--accent)]/5 blur-xl" />
+                </div>
+                <div className="text-2xl sm:text-3xl font-bold text-[var(--accent)] relative">
                   <CountUp target={s.value} suffix={s.suffix} />
                 </div>
-                <div className="text-sm text-[var(--secondary)] mt-1">{s.label}</div>
+                <div className="text-sm text-[var(--secondary)] mt-1 relative">{s.label}</div>
               </motion.div>
             ))}
           </div>
@@ -268,17 +272,17 @@ export default function Home() {
 
       {/* Product Screenshots */}
       <section className="px-4 sm:px-6 lg:px-8 pb-24">
-        <div className="max-w-5xl mx-auto">
-          <motion.div initial={{ opacity: 0, y: 40 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true, margin: "-50px" }} transition={{ duration: 0.8, ease: [0.16, 1, 0.3, 1] }} className="relative">
-            <div className="absolute inset-0 bg-gradient-to-b from-[var(--accent)]/10 to-transparent rounded-3xl blur-3xl" />
-            <ParallaxImage src="/screenshots/product-cover-1280x720.png" alt="DeskBox 界面截图" width={1280} height={720} className="relative rounded-2xl border border-[var(--card-border)] shadow-2xl overflow-hidden" />
+        <div className="max-w-5xl mx-auto" style={{ perspective: "1200px" }}>
+          <motion.div initial={{ opacity: 0, y: 40, rotateX: 4 }} whileInView={{ opacity: 1, y: 0, rotateX: 0 }} viewport={{ once: true, margin: "-50px" }} transition={{ duration: 0.8, ease: [0.16, 1, 0.3, 1] }} className="relative">
+            <div className="absolute inset-0 bg-gradient-to-b from-[var(--accent)]/8 to-transparent rounded-3xl blur-3xl" />
+            <ParallaxImage src="/screenshots/product-cover-1280x720.png" alt="DeskBox 界面截图" width={1280} height={720} className="relative rounded-2xl border border-[var(--card-border)] overflow-hidden" style={{ boxShadow: "0 25px 50px -12px rgba(0,0,0,0.15), 0 0 0 1px rgba(0,0,0,0.03)" }} />
           </motion.div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-4">
             <motion.div initial={{ opacity: 0, y: 20 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }} transition={{ delay: 0.1 }}>
-              <ParallaxImage src="/screenshots/widget-light.png" alt="DeskBox 浅色模式" width={640} height={400} className="rounded-xl border border-[var(--card-border)] shadow-lg overflow-hidden" />
+              <ParallaxImage src="/screenshots/widget-light.png" alt="DeskBox 浅色模式" width={640} height={400} className="rounded-xl border border-[var(--card-border)] overflow-hidden" style={{ boxShadow: "0 10px 30px -10px rgba(0,0,0,0.1)" }} />
             </motion.div>
             <motion.div initial={{ opacity: 0, y: 20 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }} transition={{ delay: 0.2 }}>
-              <ParallaxImage src="/screenshots/widget-dark.png" alt="DeskBox 深色模式" width={640} height={400} className="rounded-xl border border-[var(--card-border)] shadow-lg overflow-hidden" />
+              <ParallaxImage src="/screenshots/widget-dark.png" alt="DeskBox 深色模式" width={640} height={400} className="rounded-xl border border-[var(--card-border)] overflow-hidden" style={{ boxShadow: "0 10px 30px -10px rgba(0,0,0,0.1)" }} />
             </motion.div>
           </div>
         </div>

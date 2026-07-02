@@ -5,28 +5,36 @@
   --background: #F3F3F3;
   --foreground: #1A1A1A;
   --card-background: #FFFFFF;
-  --card-border: #E0E0E0;
+  --card-border: rgba(0, 0, 0, 0.06);
   --text-secondary: #616161;
   --accent: #0078D4;
   --accent-hover: #106EBE;
   --accent-light: #E8F4FD;
-  --shadow-hover: 0 2px 8px rgba(0, 0, 0, 0.08);
+  --shadow-sm: 0 1px 3px rgba(0,0,0,0.04), 0 1px 2px rgba(0,0,0,0.06);
+  --shadow-md: 0 4px 6px -1px rgba(0,0,0,0.05), 0 2px 4px -2px rgba(0,0,0,0.05);
+  --shadow-lg: 0 10px 25px -5px rgba(0,0,0,0.08), 0 8px 10px -6px rgba(0,0,0,0.04);
+  --shadow-hover: 0 8px 20px -4px rgba(0,0,0,0.1);
   --shadow-press: 0 1px 4px rgba(0, 0, 0, 0.06);
-  --radius-card: 8px;
-  --radius-button: 4px;
+  --radius-card: 12px;
+  --radius-button: 8px;
 }
 
 :root[data-theme="dark"] {
-  --background: #202020;
+  --background: #1a1a1a;
   --foreground: #FFFFFF;
-  --card-background: #2D2D2D;
-  --card-border: #404040;
+  --card-background: #252525;
+  --card-border: rgba(255, 255, 255, 0.08);
   --text-secondary: #9E9E9E;
   --accent: #60CDFF;
   --accent-hover: #4DB8E8;
   --accent-light: #1A3A4A;
-  --shadow-hover: 0 2px 8px rgba(0, 0, 0, 0.3);
-  --shadow-press: 0 1px 4px rgba(0, 0, 0, 0.2);
+  --shadow-sm: 0 1px 3px rgba(0,0,0,0.2), 0 1px 2px rgba(0,0,0,0.3);
+  --shadow-md: 0 4px 6px -1px rgba(0,0,0,0.25), 0 2px 4px -2px rgba(0,0,0,0.2);
+  --shadow-lg: 0 10px 25px -5px rgba(0,0,0,0.35), 0 8px 10px -6px rgba(0,0,0,0.2);
+  --shadow-hover: 0 8px 20px -4px rgba(0,0,0,0.4);
+  --shadow-press: 0 1px 4px rgba(0, 0, 0, 0.3);
+  --radius-card: 12px;
+  --radius-button: 8px;
 }
 
 @theme inline {
@@ -42,11 +50,12 @@
 }
 
 body {
-  background: var(--background) !important;
+  background: radial-gradient(ellipse 80% 50% at 50% -20%, var(--accent-light), transparent 70%), var(--background) !important;
   color: var(--foreground) !important;
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  min-height: 100vh;
 }
 
 *:focus-visible {
@@ -60,7 +69,7 @@ body {
 }
 
 .fluent-button {
-  background: var(--accent);
+  background: linear-gradient(135deg, var(--accent), var(--accent-hover));
   color: white;
   border: none;
   border-radius: var(--radius-button);
@@ -68,20 +77,22 @@ body {
   font-size: 14px;
   font-weight: 600;
   cursor: pointer;
-  transition: all 150ms ease-out;
+  transition: all 200ms cubic-bezier(0.16, 1, 0.3, 1);
   display: inline-block;
   text-decoration: none;
+  box-shadow: var(--shadow-sm);
 }
 
 .fluent-button:hover {
-  background: var(--accent-hover);
-  box-shadow: var(--shadow-hover);
+  box-shadow: var(--shadow-md);
   transform: translateY(-1px);
+  filter: brightness(1.05);
 }
 
 .fluent-button:active {
-  transform: scale(0.98);
+  transform: scale(0.98) translateY(0);
   box-shadow: var(--shadow-press);
+  filter: brightness(0.95);
 }
 
 .fluent-button-secondary {
@@ -93,27 +104,40 @@ body {
   font-size: 14px;
   font-weight: 600;
   cursor: pointer;
-  transition: all 150ms ease-out;
+  transition: all 200ms cubic-bezier(0.16, 1, 0.3, 1);
   display: inline-block;
   text-decoration: none;
+  backdrop-filter: blur(8px);
 }
 
 .fluent-button-secondary:hover {
   background: var(--accent-light);
   border-color: var(--accent);
+  box-shadow: var(--shadow-sm);
 }
 
 .fluent-card {
-  background: var(--card-background);
+  background: linear-gradient(180deg, var(--card-background) 0%, color-mix(in srgb, var(--card-background) 95%, var(--background)) 100%);
   border: 1px solid var(--card-border);
   border-radius: var(--radius-card);
   padding: 24px;
-  transition: box-shadow 200ms ease-out, transform 200ms ease-out, background 200ms ease, border-color 200ms ease;
+  box-shadow: var(--shadow-sm);
+  transition: box-shadow 250ms cubic-bezier(0.16, 1, 0.3, 1), transform 250ms cubic-bezier(0.16, 1, 0.3, 1), background 200ms ease, border-color 200ms ease;
 }
 
 .fluent-card:hover {
-  box-shadow: var(--shadow-hover);
+  box-shadow: var(--shadow-md);
   transform: translateY(-2px);
+}
+
+.fluent-card-interactive {
+  background: linear-gradient(180deg, var(--card-background) 0%, color-mix(in srgb, var(--card-background) 95%, var(--background)) 100%);
+}
+
+.fluent-card-interactive:hover {
+  box-shadow: none;
+  transform: none;
+  background: var(--background);
 }
 
 ::-webkit-scrollbar { width: 8px; }
@@ -133,7 +157,7 @@ body {
   left: -60%;
   width: 40%;
   height: 200%;
-  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.25), transparent);
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.2), transparent);
   transform: skewX(-20deg);
   animation: shimmer 3s ease-in-out infinite;
 }
@@ -151,20 +175,19 @@ body {
   width: 44px;
   height: 44px;
   border-radius: 50%;
-  background: var(--accent);
+  background: linear-gradient(135deg, var(--accent), var(--accent-hover));
   color: white;
   border: none;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-  transition: all 200ms ease-out;
+  box-shadow: var(--shadow-md);
+  transition: all 200ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .back-to-top:hover {
-  background: var(--accent-hover);
-  box-shadow: 0 6px 20px rgba(0,0,0,0.2);
+  box-shadow: var(--shadow-lg);
   transform: translateY(-2px);
 }
 
