@@ -50,10 +50,10 @@ public class AppSettings
     public Dictionary<string, bool> FeatureWidgetEnabledStates { get; set; } = [];
 
     /// <summary>Whether Quick Capture should record recent clipboard text and links.</summary>
-    public bool QuickCaptureClipboardEnabled { get; set; } = true;
+    public bool QuickCaptureClipboardEnabled { get; set; }
 
     /// <summary>Whether Quick Capture should record clipboard images.</summary>
-    public bool QuickCaptureImageClipboardEnabled { get; set; } = true;
+    public bool QuickCaptureImageClipboardEnabled { get; set; }
 
     /// <summary>Maximum number of recent clipboard text/link entries kept by Quick Capture.</summary>
     public int QuickCaptureRecentLimit { get; set; } = 30;

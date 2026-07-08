@@ -12,6 +12,7 @@ public sealed partial class QuickCaptureItemViewModel : ObservableObject
     private bool _showPinnedSortControls;
     private bool _canMovePinnedUp;
     private bool _canMovePinnedDown;
+    private bool _isCopySelected;
     private double _textSize;
     private double _iconSize;
     private string _searchText;
@@ -101,6 +102,20 @@ public sealed partial class QuickCaptureItemViewModel : ObservableObject
     public string MoveUpTooltip => _localizationService.T("QuickCapture.MoveUp");
 
     public string MoveDownTooltip => _localizationService.T("QuickCapture.MoveDown");
+
+    public bool IsCopySelected
+    {
+        get => _isCopySelected;
+        set
+        {
+            if (SetProperty(ref _isCopySelected, value))
+            {
+                OnPropertyChanged(nameof(CopySelectionVisibility));
+            }
+        }
+    }
+
+    public Visibility CopySelectionVisibility => IsCopySelected ? Visibility.Visible : Visibility.Collapsed;
 
     public string UpdatedAtText => FormatUpdatedAt(_model.UpdatedAt);
 

@@ -34,6 +34,17 @@ public partial class App : Application
     private const int MaxQueuedLogLines = 4096;
     private const string TodoReminderNotificationSource = "source=todoReminder";
     private const string TodoReminderSourceValue = "todoReminder";
+    private const string TodoReminderActionComplete = "complete";
+    private const string TodoReminderActionSnooze = "snooze";
+    private const string TodoReminderActionSnooze10 = "snooze10";
+    private const string TodoReminderSnoozeInputId = "todoSnooze";
+    private const string TodoReminderSnooze10Minutes = "10m";
+    private const string TodoReminderSnooze30Minutes = "30m";
+    private const string TodoReminderSnooze1Hour = "1h";
+    private const string TodoReminderSnoozeTomorrow = "tomorrow";
+    private const string TodoSnoozeConfirmationNotificationSource = "todoSnoozeConfirmation";
+    private const string TodoSnoozeConfirmationNotificationGroup = "todo-feedback";
+    private const string TodoSnoozeConfirmationNotificationTag = "todo-snooze-confirmation";
     private const string PendingNativeNotificationActivationFileName = "pending-notification-activation.txt";
     private const string VerboseLoggingEnvironmentVariable = "DESKBOX_VERBOSE_LOG";
     private static readonly bool EnableVerboseLogging = IsEnabledEnvironmentValue(
@@ -736,6 +747,7 @@ public partial class App : Application
             WidgetManager.SyncStorageFolderEntries();
             await WidgetManager.RestoreWidgetsAsync();
 
+            StartTodoReminderService();
             StartNativeNotificationService();
 
             if (SettingsService.Settings.Widgets.Count(widget =>
@@ -754,7 +766,6 @@ public partial class App : Application
                 ShowOnboarding();
             }
 
-            StartTodoReminderService();
             ScheduleBackgroundUpdateCheck();
 
             Log("OnLaunched completed successfully");
@@ -816,7 +827,8 @@ public partial class App : Application
     private void StartNativeNotificationService()
     {
         _nativeNotificationService?.Dispose();
-        _nativeNotificationService = new NativeAppNotificationService(HandleNativeNotificationActivation);
+        _nativeNotificationService = new NativeAppNotificationService(
+            activation => HandleNativeNotificationActivation(activation.Arguments, activation.UserInput));
         if (_nativeNotificationService.Register())
         {
             HandleCurrentNativeNotificationActivation();
@@ -825,18 +837,20 @@ public partial class App : Application
 
     private void HandleCurrentNativeNotificationActivation()
     {
-        string? activationArguments = TryGetCurrentNativeNotificationActivationArguments();
-        if (!string.IsNullOrWhiteSpace(activationArguments))
+        NativeAppNotificationActivation? activation = TryGetCurrentNativeNotificationActivation();
+        if (activation is not null)
         {
-            HandleNativeNotificationActivation(activationArguments);
+            HandleNativeNotificationActivation(activation.Arguments, activation.UserInput);
         }
     }
 
-    private void HandleNativeNotificationActivation(string arguments)
+    private void HandleNativeNotificationActivation(
+        string arguments,
+        IReadOnlyDictionary<string, string> userInput)
     {
         if (UiDispatcherQueue is { HasThreadAccess: false } dispatcherQueue)
         {
-            dispatcherQueue.TryEnqueue(() => HandleNativeNotificationActivation(arguments));
+            dispatcherQueue.TryEnqueue(() => HandleNativeNotificationActivation(arguments, userInput));
             return;
         }
 
@@ -846,6 +860,30 @@ public partial class App : Application
         {
             notificationArguments.TryGetValue("widgetId", out string? widgetId);
             notificationArguments.TryGetValue("itemId", out string? itemId);
+            if (notificationArguments.TryGetValue("action", out string? action))
+            {
+                if (string.Equals(action, TodoReminderActionComplete, StringComparison.OrdinalIgnoreCase))
+                {
+                    _ = CompleteTodoReminderFromNotificationAsync(widgetId, itemId);
+                    return;
+                }
+
+                if (string.Equals(action, TodoReminderActionSnooze10, StringComparison.OrdinalIgnoreCase))
+                {
+                    _ = SnoozeTodoReminderFromNotificationAsync(widgetId, itemId, TimeSpan.FromMinutes(10));
+                    return;
+                }
+
+                if (string.Equals(action, TodoReminderActionSnooze, StringComparison.OrdinalIgnoreCase))
+                {
+                    string snoozeSelection = userInput.TryGetValue(TodoReminderSnoozeInputId, out string? selected)
+                        ? selected
+                        : TodoReminderSnooze10Minutes;
+                    _ = SnoozeTodoReminderFromNotificationAsync(widgetId, itemId, snoozeSelection);
+                    return;
+                }
+            }
+
             bool preferTodayFilter = notificationArguments.TryGetValue("view", out string? view) &&
                                      string.Equals(view, "today", StringComparison.OrdinalIgnoreCase);
             _ = ShowTodoWidgetFromNotificationAsync(widgetId, itemId, preferTodayFilter);
@@ -853,6 +891,25 @@ public partial class App : Application
         else
         {
             _ = RaiseTrayWidgetsAsync();
+        }
+    }
+
+    private async Task CompleteTodoReminderFromNotificationAsync(string? widgetId, string? itemId)
+    {
+        try
+        {
+            if (_todoReminderService is not null)
+            {
+                bool completed = await _todoReminderService.CompleteAsync(widgetId, itemId);
+                if (completed)
+                {
+                    await RefreshLoadedTodoWidgetAfterNotificationActionAsync(widgetId);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Log($"[Notification] Failed to complete Todo reminder: {ex}");
         }
     }
 
@@ -874,6 +931,153 @@ public partial class App : Application
         }
     }
 
+    private async Task SnoozeTodoReminderFromNotificationAsync(
+        string? widgetId,
+        string? itemId,
+        string snoozeSelection)
+    {
+        try
+        {
+            if (_todoReminderService is null)
+            {
+                return;
+            }
+
+            DateTimeOffset? snoozedUntil = GetSnoozedUntilFromNotificationSelection(snoozeSelection);
+            if (snoozedUntil is { } until)
+            {
+                bool snoozed = await _todoReminderService.SnoozeUntilAsync(widgetId, itemId, until);
+                if (snoozed)
+                {
+                    await RefreshLoadedTodoWidgetAfterNotificationActionAsync(widgetId);
+                    ShowTodoSnoozeConfirmationNotification(GetTodoSnoozeSelectionText(snoozeSelection));
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Log($"[Notification] Failed to snooze Todo reminder: {ex}");
+        }
+    }
+
+    private async Task SnoozeTodoReminderFromNotificationAsync(
+        string? widgetId,
+        string? itemId,
+        TimeSpan snoozeFor)
+    {
+        try
+        {
+            if (_todoReminderService is not null)
+            {
+                bool snoozed = await _todoReminderService.SnoozeAsync(widgetId, itemId, snoozeFor);
+                if (snoozed)
+                {
+                    await RefreshLoadedTodoWidgetAfterNotificationActionAsync(widgetId);
+                    ShowTodoSnoozeConfirmationNotification(GetTodoSnoozeDurationText(snoozeFor));
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Log($"[Notification] Failed to snooze Todo reminder: {ex}");
+        }
+    }
+
+    private async Task RefreshLoadedTodoWidgetAfterNotificationActionAsync(string? widgetId)
+    {
+        if (WidgetManager is null ||
+            string.IsNullOrWhiteSpace(widgetId) ||
+            !WidgetManager.ContentWidgets.TryGetValue(widgetId, out var window))
+        {
+            return;
+        }
+
+        await (window.CurrentContent?.RefreshAsync() ?? Task.CompletedTask);
+    }
+
+    private void ShowTodoSnoozeConfirmationNotification(string snoozeText)
+    {
+        string title = LocalizationService.T("Todo.Menu.Snooze");
+        string message = LocalizationService.Format("Todo.Snooze.Set", snoozeText);
+        var arguments = new Dictionary<string, string>
+        {
+            ["source"] = TodoSnoozeConfirmationNotificationSource
+        };
+
+        if (_nativeNotificationService?.TryShow(
+                title,
+                message,
+                arguments,
+                options: new NativeAppNotificationOptions(
+                    TodoSnoozeConfirmationNotificationTag,
+                    TodoSnoozeConfirmationNotificationGroup)) == true)
+        {
+            Log($"[TodoReminder] Snooze confirmation notification shown text={snoozeText}");
+            return;
+        }
+
+        if (_trayIcon is null)
+        {
+            return;
+        }
+
+        try
+        {
+            _trayIcon.ShowNotification(
+                title,
+                message,
+                NotificationIcon.Info,
+                customIconHandle: null,
+                largeIcon: false,
+                sound: false,
+                respectQuietTime: true,
+                realtime: false,
+                timeout: TimeSpan.FromSeconds(4));
+        }
+        catch (Exception ex)
+        {
+            Log($"[TodoReminder] Snooze confirmation fallback failed: {ex.Message}");
+        }
+    }
+
+    private string GetTodoSnoozeSelectionText(string? selection)
+    {
+        return selection switch
+        {
+            TodoReminderSnooze30Minutes => LocalizationService.T("Todo.Snooze.30Minutes"),
+            TodoReminderSnooze1Hour => LocalizationService.T("Todo.Snooze.OneHour"),
+            TodoReminderSnoozeTomorrow => LocalizationService.T("Todo.Snooze.Tomorrow"),
+            _ => LocalizationService.T("Todo.Snooze.10Minutes")
+        };
+    }
+
+    private string GetTodoSnoozeDurationText(TimeSpan snoozeFor)
+    {
+        if (snoozeFor >= TimeSpan.FromMinutes(59) && snoozeFor <= TimeSpan.FromMinutes(61))
+        {
+            return LocalizationService.T("Todo.Snooze.OneHour");
+        }
+
+        if (snoozeFor >= TimeSpan.FromMinutes(29) && snoozeFor <= TimeSpan.FromMinutes(31))
+        {
+            return LocalizationService.T("Todo.Snooze.30Minutes");
+        }
+
+        return LocalizationService.T("Todo.Snooze.10Minutes");
+    }
+
+    private static DateTimeOffset? GetSnoozedUntilFromNotificationSelection(string? selection)
+    {
+        DateTimeOffset now = DateTimeOffset.Now;
+        return selection switch
+        {
+            TodoReminderSnooze30Minutes => now.AddMinutes(30),
+            TodoReminderSnooze1Hour => now.AddHours(1),
+            TodoReminderSnoozeTomorrow => new DateTimeOffset(DateTime.Now.Date.AddDays(1).AddHours(9)),
+            _ => now.AddMinutes(10)
+        };
+    }
+
     private void ShowTodoReminderNotification(TodoReminderNotification notification)
     {
         if (UiDispatcherQueue is { HasThreadAccess: false } dispatcherQueue)
@@ -882,16 +1086,60 @@ public partial class App : Application
             return;
         }
 
+        var arguments = new Dictionary<string, string>
+        {
+            ["source"] = TodoReminderSourceValue,
+            ["widgetId"] = notification.WidgetId ?? string.Empty,
+            ["itemId"] = notification.ItemId ?? string.Empty,
+            ["view"] = notification.HasTodayDueItem ? "today" : "all"
+        };
+        List<NativeAppNotificationAction>? actions = null;
+        List<NativeAppNotificationComboBox>? comboBoxes = null;
+        if (notification.Count == 1 && !string.IsNullOrWhiteSpace(notification.ItemId))
+        {
+            comboBoxes =
+            [
+                new(
+                    TodoReminderSnoozeInputId,
+                    LocalizationService.T("Todo.Menu.Snooze"),
+                    TodoReminderSnooze10Minutes,
+                    [
+                        new NativeAppNotificationComboBoxItem(TodoReminderSnooze10Minutes, LocalizationService.T("Todo.Snooze.10Minutes")),
+                        new NativeAppNotificationComboBoxItem(TodoReminderSnooze30Minutes, LocalizationService.T("Todo.Snooze.30Minutes")),
+                        new NativeAppNotificationComboBoxItem(TodoReminderSnooze1Hour, LocalizationService.T("Todo.Snooze.OneHour")),
+                        new NativeAppNotificationComboBoxItem(TodoReminderSnoozeTomorrow, LocalizationService.T("Todo.Snooze.Tomorrow"))
+                    ])
+            ];
+            actions =
+            [
+                new(
+                    LocalizationService.T("Todo.Menu.MarkCompleted"),
+                    new Dictionary<string, string>
+                    {
+                        ["source"] = TodoReminderSourceValue,
+                        ["action"] = TodoReminderActionComplete,
+                        ["widgetId"] = notification.WidgetId ?? string.Empty,
+                        ["itemId"] = notification.ItemId ?? string.Empty
+                    }),
+                new(
+                    LocalizationService.T("Todo.Menu.Snooze"),
+                    new Dictionary<string, string>
+                    {
+                        ["source"] = TodoReminderSourceValue,
+                        ["action"] = TodoReminderActionSnooze,
+                        ["widgetId"] = notification.WidgetId ?? string.Empty,
+                        ["itemId"] = notification.ItemId ?? string.Empty
+                    },
+                    TodoReminderSnoozeInputId)
+            ];
+        }
+
         if (_nativeNotificationService?.TryShow(
                 notification.Title,
                 notification.Message,
-                new Dictionary<string, string>
-                {
-                    ["source"] = TodoReminderSourceValue,
-                    ["widgetId"] = notification.WidgetId ?? string.Empty,
-                    ["itemId"] = notification.ItemId ?? string.Empty,
-                    ["view"] = notification.HasTodayDueItem ? "today" : "all"
-                }) == true)
+                arguments,
+                actions,
+                comboBoxes) == true)
         {
             Log($"[TodoReminder] Native notification shown count={notification.Count} widget={notification.WidgetId ?? "none"} item={notification.ItemId ?? "none"}");
             return;
@@ -961,7 +1209,7 @@ public partial class App : Application
         return parsed;
     }
 
-    private static string? TryGetCurrentNativeNotificationActivationArguments()
+    private static NativeAppNotificationActivation? TryGetCurrentNativeNotificationActivation()
     {
         try
         {
@@ -969,7 +1217,16 @@ public partial class App : Application
             if (activatedArgs.Kind == ExtendedActivationKind.AppNotification &&
                 activatedArgs.Data is AppNotificationActivatedEventArgs notificationArgs)
             {
-                return notificationArgs.Argument;
+                var userInput = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var input in notificationArgs.UserInput)
+                {
+                    if (!string.IsNullOrWhiteSpace(input.Key))
+                    {
+                        userInput[input.Key] = input.Value ?? string.Empty;
+                    }
+                }
+
+                return new NativeAppNotificationActivation(notificationArgs.Argument, userInput);
             }
         }
         catch (Exception ex)
@@ -978,6 +1235,11 @@ public partial class App : Application
         }
 
         return null;
+    }
+
+    private static string? TryGetCurrentNativeNotificationActivationArguments()
+    {
+        return TryGetCurrentNativeNotificationActivation()?.Arguments;
     }
 
     private static void StorePendingNativeNotificationActivationArguments(string arguments)
@@ -1106,7 +1368,9 @@ public partial class App : Application
         string? nativeNotificationActivationArguments = TakePendingNativeNotificationActivationArguments();
         if (!string.IsNullOrWhiteSpace(nativeNotificationActivationArguments))
         {
-            HandleNativeNotificationActivation(nativeNotificationActivationArguments);
+            HandleNativeNotificationActivation(
+                nativeNotificationActivationArguments,
+                new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase));
             return;
         }
 

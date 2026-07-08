@@ -140,7 +140,7 @@ public sealed class SettingsServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task LoadAsync_DefaultsQuickCaptureImageRecordingToEnabled()
+    public async Task LoadAsync_DefaultsQuickCaptureClipboardRecordingToDisabled()
     {
         await File.WriteAllTextAsync(
             Path.Combine(_settingsRoot, "settings.json"),
@@ -149,7 +149,50 @@ public sealed class SettingsServiceTests : IDisposable
         var service = new SettingsService(_settingsRoot);
         await service.LoadAsync();
 
-        Assert.True(service.Settings.QuickCaptureImageClipboardEnabled);
+        Assert.False(service.Settings.QuickCaptureClipboardEnabled);
+        Assert.False(service.Settings.QuickCaptureImageClipboardEnabled);
+    }
+
+    [Fact]
+    public async Task LoadAsync_DisabledQuickCaptureDisablesClipboardRecording()
+    {
+        await File.WriteAllTextAsync(
+            Path.Combine(_settingsRoot, "settings.json"),
+            """
+            {
+              "quickCaptureEnabled": false,
+              "quickCaptureClipboardEnabled": true,
+              "quickCaptureImageClipboardEnabled": true
+            }
+            """);
+
+        var service = new SettingsService(_settingsRoot);
+        await service.LoadAsync();
+
+        Assert.False(FeatureWidgetSettings.IsEnabled(service.Settings, WidgetKind.QuickCapture));
+        Assert.False(service.Settings.QuickCaptureClipboardEnabled);
+        Assert.False(service.Settings.QuickCaptureImageClipboardEnabled);
+    }
+
+    [Fact]
+    public async Task LoadAsync_DisabledClipboardRecordingDisablesImageRecording()
+    {
+        await File.WriteAllTextAsync(
+            Path.Combine(_settingsRoot, "settings.json"),
+            """
+            {
+              "quickCaptureEnabled": true,
+              "quickCaptureClipboardEnabled": false,
+              "quickCaptureImageClipboardEnabled": true
+            }
+            """);
+
+        var service = new SettingsService(_settingsRoot);
+        await service.LoadAsync();
+
+        Assert.True(FeatureWidgetSettings.IsEnabled(service.Settings, WidgetKind.QuickCapture));
+        Assert.False(service.Settings.QuickCaptureClipboardEnabled);
+        Assert.False(service.Settings.QuickCaptureImageClipboardEnabled);
     }
 
     [Fact]
@@ -332,6 +375,10 @@ public sealed class SettingsServiceTests : IDisposable
         Assert.Equal(newUserDefaults.WidgetTitleIconMode, restoredDefaults.WidgetTitleIconMode);
         Assert.True(newUserDefaults.AutoCheckForUpdates);
         Assert.Equal(newUserDefaults.AutoCheckForUpdates, restoredDefaults.AutoCheckForUpdates);
+        Assert.False(newUserDefaults.QuickCaptureClipboardEnabled);
+        Assert.False(newUserDefaults.QuickCaptureImageClipboardEnabled);
+        Assert.Equal(newUserDefaults.QuickCaptureClipboardEnabled, restoredDefaults.QuickCaptureClipboardEnabled);
+        Assert.Equal(newUserDefaults.QuickCaptureImageClipboardEnabled, restoredDefaults.QuickCaptureImageClipboardEnabled);
         Assert.True(newUserDefaults.TodoReminderEnabled);
         Assert.Equal(SettingsService.DefaultTodoReminderOffsetMinutes, newUserDefaults.TodoDefaultReminderOffsetMinutes);
         Assert.Equal(newUserDefaults.TodoReminderEnabled, restoredDefaults.TodoReminderEnabled);

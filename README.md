@@ -15,18 +15,18 @@ DeskBox is a lightweight WinUI 3 desktop organizer for Windows 11. It creates na
 
 Download the latest installer from [GitHub Releases](https://github.com/Tianyu199509/DeskBox/releases).
 
-Current release: 1.2.5
+Current release: 1.2.6
 
-- [DeskBox_Setup_1.2.5_x64.exe](https://github.com/Tianyu199509/DeskBox/releases/download/v1.2.5/DeskBox_Setup_1.2.5_x64.exe)
+- [DeskBox_Setup_1.2.6_x64.exe](https://github.com/Tianyu199509/DeskBox/releases/download/v1.2.6/DeskBox_Setup_1.2.6_x64.exe)
 
 The installer checks for .NET 10 Runtime x64 and Windows App Runtime 2.2 x64. If either dependency is missing, the setup flow can download and install it for you.
 
-## What's New In 1.2.5
+## What's New In 1.2.6
 
-- Todo now supports due time precision, native Windows reminder notifications, overdue labels, click-to-copy, multi-select copying, and drag/drop conversion with Quick Capture.
-- Widget chrome controls are more flexible: configurable hover actions, refreshed Fluent action icons, compact-title icon sizing, and reset-to-follow-global behavior.
-- Music and file widgets received smaller interaction fixes, including a horizontal volume flyout, better light-theme volume styling, ambience corner alignment, and an optional file path tooltip switch.
-- Update handling is clearer across Direct and Store channels, with Store-aware update wording and improved fallback guidance for Direct users.
+- Todo reminders are more complete, with per-task reminder offsets, snooze options, restart recovery, and native notification actions for completing or delaying a task.
+- Recurring Todo tasks now keep the active task clean while folding completed recurrence history under the same task.
+- Quick Capture tab switching is smoother and lighter, with delayed list refresh, stable empty-state layout, softer content transitions, and safer clipboard defaults.
+- Todo and Quick Capture multi-select workflows were refined for rectangle selection, copy, drag-out text, and Escape-to-clear behavior.
 
 See the full [changelog](CHANGELOG.md).
 
@@ -131,7 +131,7 @@ dotnet publish .\src\DeskBox\DeskBox.csproj --configuration Release -p:Platform=
 Installer output:
 
 ```text
-Output\DeskBox_Setup_1.2.5_x64.exe
+Output\DeskBox_Setup_1.2.6_x64.exe
 ```
 
 ## Project Structure

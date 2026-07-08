@@ -31,11 +31,23 @@ public sealed class TodoItem
 
     public DateTimeOffset? DueDate { get; set; }
 
+    public TodoRecurrence? Recurrence { get; set; }
+
     public DateTimeOffset? CompletedAt { get; set; }
 
     public DateTimeOffset? ReminderLastNotifiedAt { get; set; }
 
     public DateTimeOffset? ReminderDismissedForDueDate { get; set; }
+
+    public int? ReminderOffsetMinutes { get; set; }
+
+    public DateTimeOffset? SnoozedUntil { get; set; }
+
+    public DateTimeOffset? SnoozeLastNotifiedAt { get; set; }
+
+    public string? RecurrenceSeriesId { get; set; }
+
+    public string? GeneratedNextItemId { get; set; }
 
     public int SortOrder { get; set; }
 

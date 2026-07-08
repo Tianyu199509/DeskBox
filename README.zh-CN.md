@@ -15,18 +15,18 @@ DeskBox 是一个基于 WinUI 3 的 Windows 11 桌面整理工具。它用轻量
 
 可以在 [GitHub Releases](https://github.com/Tianyu199509/DeskBox/releases) 下载最新版安装包。
 
-当前版本：1.2.5
+当前版本：1.2.6
 
-- [DeskBox_Setup_1.2.5_x64.exe](https://github.com/Tianyu199509/DeskBox/releases/download/v1.2.5/DeskBox_Setup_1.2.5_x64.exe)
+- [DeskBox_Setup_1.2.6_x64.exe](https://github.com/Tianyu199509/DeskBox/releases/download/v1.2.6/DeskBox_Setup_1.2.6_x64.exe)
 
 安装器会检测 .NET 10 Runtime x64 和 Windows App Runtime 2.2 x64。若目标电脑缺少运行时依赖，安装流程可以联网下载并安装。
 
 ## 最新更新
 
-- 待办支持更完整的时间能力：截止时间可精确到时分秒，支持 Windows 原生提醒通知、逾期标识、单击复制、多选复制，以及和随记之间拖拽转换。
-- 格子标题和右上角悬浮按钮继续优化：可配置显示哪些操作按钮，替换为 Fluent 图标，紧凑标题下图标更克制，重置标题样式时会回到跟随全局。
-- 音乐和文件格子补齐了一批细节：横向音量浮窗、浅色模式适配、封面氛围背景圆角跟随格子、文件路径提示开关等。
-- 应用更新逻辑进一步区分 Direct 和 Microsoft Store 渠道，文案更清楚，也保留 Direct 版本的备用下载引导。
+- 待办提醒进一步完善：支持每条任务独立提醒、稍后提醒、重启后恢复提醒状态，并可在系统通知里直接完成或延后任务。
+- 重复待办体验更清爽：完成后的重复历史会折叠在当前任务下方，不再把列表堆得越来越长。
+- 随记切换更顺滑：优化 Tab 切换时的列表刷新、空状态布局、内容过渡动画和剪贴板默认联动，减少卡顿和错位。
+- 待办和随记的多选复制、框选、拖拽文本和 Esc 取消选择继续补齐，日常批量整理更顺手。
 
 完整更新记录见 [CHANGELOG.md](CHANGELOG.md)。
 
@@ -129,7 +129,7 @@ dotnet publish .\src\DeskBox\DeskBox.csproj --configuration Release -p:Platform=
 安装包输出：
 
 ```text
-Output\DeskBox_Setup_1.2.5_x64.exe
+Output\DeskBox_Setup_1.2.6_x64.exe
 ```
 
 ## 项目结构

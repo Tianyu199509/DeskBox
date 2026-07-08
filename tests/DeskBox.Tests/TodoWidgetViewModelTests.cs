@@ -448,6 +448,133 @@ public sealed class TodoWidgetViewModelTests : IDisposable
     }
 
     [Fact]
+    public async Task SetRecurrenceAsync_PersistsAndPrefixesDueStatus()
+    {
+        var viewModel = CreateViewModel("todo-widget");
+        await viewModel.InitializeAsync();
+        var item = await viewModel.AddItemAsync("repeat");
+        Assert.NotNull(item);
+        var dueDate = new DateTimeOffset(new DateTime(2026, 7, 10, 9, 30, 0, DateTimeKind.Local));
+
+        Assert.True(await viewModel.SetDueDateAsync(item.Id, dueDate));
+        Assert.True(await viewModel.SetRecurrenceAsync(item.Id, TodoRecurrenceMode.Daily));
+
+        Assert.Equal(TodoRecurrenceMode.Daily, item.RecurrenceMode);
+        Assert.Contains("Daily", item.DueStatusText, StringComparison.Ordinal);
+
+        var reloaded = CreateViewModel("todo-widget");
+        await reloaded.InitializeAsync();
+        var reloadedItem = Assert.Single(reloaded.Items);
+        Assert.Equal(TodoRecurrenceMode.Daily, reloadedItem.RecurrenceMode);
+        Assert.Equal(dueDate, reloadedItem.Recurrence?.AnchorDueDate);
+    }
+
+    [Fact]
+    public async Task SetDueDateAsync_ClearingDueDateAlsoClearsRecurrence()
+    {
+        var viewModel = CreateViewModel("todo-widget");
+        await viewModel.InitializeAsync();
+        var item = await viewModel.AddItemAsync("repeat");
+        Assert.NotNull(item);
+        var dueDate = new DateTimeOffset(new DateTime(2026, 7, 10, 9, 30, 0, DateTimeKind.Local));
+
+        Assert.True(await viewModel.SetDueDateAsync(item.Id, dueDate));
+        Assert.True(await viewModel.SetRecurrenceAsync(item.Id, TodoRecurrenceMode.Weekly));
+        Assert.True(await viewModel.SetDueDateAsync(item.Id, null));
+
+        Assert.Null(item.DueDate);
+        Assert.Null(item.Recurrence);
+        Assert.Equal(string.Empty, item.DueStatusText);
+    }
+
+    [Fact]
+    public async Task SetCompletedAsync_ForRecurringTask_CreatesNextOccurrence()
+    {
+        var viewModel = CreateViewModel("todo-widget");
+        await viewModel.InitializeAsync();
+        var item = await viewModel.AddItemAsync("repeat");
+        Assert.NotNull(item);
+        var dueDate = new DateTimeOffset(new DateTime(2026, 7, 10, 18, 0, 0, DateTimeKind.Local));
+
+        Assert.True(await viewModel.SetDueDateAsync(item.Id, dueDate));
+        Assert.True(await viewModel.SetRecurrenceAsync(item.Id, TodoRecurrenceMode.Daily));
+        Assert.True(await viewModel.SetCompletedAsync(item.Id, true));
+
+        Assert.Equal(2, viewModel.Items.Count);
+        Assert.True(item.IsCompleted);
+        Assert.NotNull(item.CompletedAt);
+        Assert.False(string.IsNullOrWhiteSpace(item.Item.GeneratedNextItemId));
+
+        var nextItem = Assert.Single(viewModel.Items.Where(entry => entry.Id != item.Id));
+        Assert.False(nextItem.IsCompleted);
+        Assert.Equal(item.Text, nextItem.Text);
+        Assert.Equal(TodoRecurrenceMode.Daily, nextItem.RecurrenceMode);
+        Assert.True(nextItem.DueDate > item.CompletedAt);
+        Assert.Equal(item.Recurrence?.AnchorDueDate, nextItem.Recurrence?.AnchorDueDate);
+    }
+
+    [Fact]
+    public async Task SetCompletedAsync_UncompletingRecurringTaskRemovesUntouchedGeneratedOccurrence()
+    {
+        var viewModel = CreateViewModel("todo-widget");
+        await viewModel.InitializeAsync();
+        var item = await viewModel.AddItemAsync("repeat");
+        Assert.NotNull(item);
+        var dueDate = new DateTimeOffset(new DateTime(2026, 7, 10, 18, 0, 0, DateTimeKind.Local));
+
+        Assert.True(await viewModel.SetDueDateAsync(item.Id, dueDate));
+        Assert.True(await viewModel.SetRecurrenceAsync(item.Id, TodoRecurrenceMode.Weekly));
+        Assert.True(await viewModel.SetCompletedAsync(item.Id, true));
+        Assert.True(await viewModel.SetCompletedAsync(item.Id, false));
+
+        Assert.Single(viewModel.Items);
+        Assert.False(item.IsCompleted);
+        Assert.Null(item.CompletedAt);
+        Assert.Null(item.Item.GeneratedNextItemId);
+    }
+
+    [Fact]
+    public async Task RefreshVisibleItems_CollapsesCompletedRecurringHistoryByDefaultAndCanExpand()
+    {
+        var viewModel = CreateViewModel("todo-widget");
+        await viewModel.InitializeAsync();
+        var first = await viewModel.AddItemAsync("repeat");
+        Assert.NotNull(first);
+        var dueDate = new DateTimeOffset(new DateTime(2026, 7, 10, 10, 30, 0, DateTimeKind.Local));
+
+        Assert.True(await viewModel.SetDueDateAsync(first.Id, dueDate));
+        Assert.True(await viewModel.SetRecurrenceAsync(first.Id, TodoRecurrenceMode.Daily));
+        Assert.True(await viewModel.SetCompletedAsync(first.Id, true));
+
+        var second = Assert.Single(viewModel.Items.Where(item => !item.IsCompleted));
+        Assert.True(await viewModel.SetCompletedAsync(second.Id, true));
+
+        var activeCurrent = Assert.Single(viewModel.Items.Where(item => !item.IsCompleted));
+        var standalone = await viewModel.AddItemAsync("one-off");
+        Assert.NotNull(standalone);
+        Assert.True(await viewModel.SetCompletedAsync(standalone.Id, true));
+
+        viewModel.SelectedFilter = TodoFilter.All;
+
+        var recurringLead = Assert.Single(viewModel.VisibleItems.Where(item => item.IsRecurringHistoryLead));
+        Assert.Equal(2, recurringLead.RecurringHistoryItemCount);
+        Assert.False(recurringLead.IsRecurringHistoryExpanded);
+        Assert.Equal(1, recurringLead.HiddenRecurringHistoryCount);
+        Assert.Contains(activeCurrent, viewModel.VisibleItems);
+        Assert.Contains(standalone, viewModel.VisibleItems);
+        Assert.Equal(3, viewModel.VisibleItems.Count);
+
+        viewModel.ToggleRecurringHistoryGroup(recurringLead.RecurrenceSeriesId);
+
+        recurringLead = Assert.Single(viewModel.VisibleItems.Where(item => item.IsRecurringHistoryLead));
+        Assert.True(recurringLead.IsRecurringHistoryExpanded);
+        Assert.Equal(4, viewModel.VisibleItems.Count);
+        Assert.Equal(2, viewModel.VisibleItems.Count(item =>
+            string.Equals(item.RecurrenceSeriesId, recurringLead.RecurrenceSeriesId, StringComparison.Ordinal) &&
+            item.IsCompleted));
+    }
+
+    [Fact]
     public async Task VisibleItems_SortActiveByDueDateAndCompletedAfterActive()
     {
         var viewModel = CreateViewModel("todo-widget");
@@ -613,6 +740,46 @@ public sealed class TodoWidgetViewModelTests : IDisposable
         Assert.Equal(10, viewModel.SecondaryTextSize);
         Assert.Equal(15, viewModel.TitleTextSize);
         Assert.Equal(12, viewModel.FilterTextSize);
+    }
+
+    [Fact]
+    public async Task SetReminderOffsetAsync_PersistsTaskReminderOverride()
+    {
+        var viewModel = CreateViewModel("todo-widget");
+        await viewModel.InitializeAsync();
+        var item = await viewModel.AddItemAsync("task");
+        Assert.NotNull(item);
+        await viewModel.SetDueDateAsync(item.Id, DateTimeOffset.Now.AddHours(2));
+
+        Assert.True(await viewModel.SetReminderOffsetAsync(item.Id, 30));
+
+        Assert.Equal(30, item.ReminderOffsetMinutes);
+        var reloaded = await CreateStore("todo-widget").LoadAsync();
+        Assert.Equal(30, Assert.Single(reloaded.Items).ReminderOffsetMinutes);
+    }
+
+    [Fact]
+    public async Task SnoozeReminderAsync_PersistsSnoozeAndClearsWhenDueDateChanges()
+    {
+        var viewModel = CreateViewModel("todo-widget");
+        await viewModel.InitializeAsync();
+        var item = await viewModel.AddItemAsync("task");
+        Assert.NotNull(item);
+        var dueDate = DateTimeOffset.Now.AddHours(2);
+        await viewModel.SetDueDateAsync(item.Id, dueDate);
+        DateTimeOffset normalizedDueDate = item.DueDate!.Value;
+
+        Assert.True(await viewModel.SnoozeReminderAsync(item.Id, TimeSpan.FromMinutes(10)));
+        Assert.NotNull(item.SnoozedUntil);
+        Assert.Equal(normalizedDueDate, item.Item.ReminderDismissedForDueDate);
+
+        Assert.True(await viewModel.SetDueDateAsync(item.Id, normalizedDueDate.AddHours(1)));
+
+        Assert.Null(item.SnoozedUntil);
+        Assert.Null(item.Item.SnoozeLastNotifiedAt);
+        Assert.Null(item.Item.ReminderDismissedForDueDate);
+        var reloaded = await CreateStore("todo-widget").LoadAsync();
+        Assert.Null(Assert.Single(reloaded.Items).SnoozedUntil);
     }
 
     public void Dispose()

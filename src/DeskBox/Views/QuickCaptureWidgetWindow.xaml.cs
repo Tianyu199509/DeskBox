@@ -31,6 +31,10 @@ namespace DeskBox.Views;
 
 public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWindow
 {
+    private sealed record QuickCaptureSelectionHitTestItem(
+        QuickCaptureItemViewModel Item,
+        Windows.Foundation.Rect Bounds);
+
     private const int MinWidth = (int)SettingsService.MinWidgetWidth;
     private const int MinHeight = (int)SettingsService.MinWidgetHeight;
     private const long MaxDroppedTextFileBytes = 1024 * 1024;
@@ -44,6 +48,8 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
     private const int CopyToastMs = 900;
     private const int StatusToastDefaultMs = 1400;
     private const int StatusToastUndoMs = 4200;
+    private const int ItemsViewTransitionMs = 280;
+    private const int ItemsViewTransitionOffsetPx = 6;
     private static readonly string QuickCaptureTextPreviewDirectory = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
         "DeskBox",
@@ -114,6 +120,14 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
     private DateTime _lastElevateForInteractionUtc = DateTime.MinValue;
     private QuickCaptureDeletedItemSnapshot? _pendingDeletedItemSnapshot;
     private MenuFlyout? _pendingDeleteConfirmFlyout;
+    private string? _copySelectionAnchorId;
+    private bool _selectionPointerPressed;
+    private bool _isBoxSelecting;
+    private Windows.Foundation.Point _selectionStartPoint;
+    private Windows.Foundation.Point _selectionCurrentPoint;
+    private List<QuickCaptureItemViewModel> _selectionSnapshot = [];
+    private HashSet<QuickCaptureItemViewModel> _selectionPreviewItems = [];
+    private List<QuickCaptureSelectionHitTestItem> _selectionHitTestItems = [];
 
     public QuickCaptureWidgetViewModel ViewModel { get; }
 
@@ -509,6 +523,7 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
         RootGrid.ActualThemeChanged += (_, _) =>
         {
             ApplyBackdropPreference();
+            ApplySurfaceStyle();
         };
     }
 
@@ -696,7 +711,13 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
 
         if (e.PropertyName == nameof(QuickCaptureWidgetViewModel.SelectedView))
         {
+            ClearQuickCaptureCopySelection();
             RefreshSelectedViewSegment();
+        }
+
+        if (e.PropertyName == nameof(QuickCaptureWidgetViewModel.ItemsViewTransitionToken))
+        {
+            PlayItemsViewTransition();
         }
 
         if (e.PropertyName == nameof(QuickCaptureWidgetViewModel.TabStyle))
@@ -1077,6 +1098,28 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
 
     private async void ItemsListView_KeyDown(object sender, KeyRoutedEventArgs e)
     {
+        bool isCtrlPressed = Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Control);
+        if (isCtrlPressed && e.Key == Windows.System.VirtualKey.A)
+        {
+            SelectAllVisibleQuickCaptureItems();
+            e.Handled = true;
+            return;
+        }
+
+        if (isCtrlPressed && e.Key == Windows.System.VirtualKey.C)
+        {
+            await CopySelectedQuickCaptureItemsAsync();
+            e.Handled = true;
+            return;
+        }
+
+        if (e.Key == Windows.System.VirtualKey.Escape && HasQuickCaptureCopySelection())
+        {
+            ClearQuickCaptureCopySelection();
+            e.Handled = true;
+            return;
+        }
+
         if (ItemsListView.SelectedItem is not QuickCaptureItemViewModel item)
         {
             return;
@@ -1116,9 +1159,18 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
             return;
         }
 
+        ItemsListView.Focus(FocusState.Programmatic);
+        if (!item.IsCopySelected)
+        {
+            ClearQuickCaptureCopySelection();
+            item.IsCopySelected = true;
+            _copySelectionAnchorId = item.Id;
+        }
+
         var anchor = (FrameworkElement)sender;
         var flyout = CreateItemFlyout(item, anchor);
         flyout.ShowAt(anchor, e.GetPosition(anchor));
+        e.Handled = true;
     }
 
     private async void QuickCaptureItem_Tapped(object sender, TappedRoutedEventArgs e)
@@ -1128,6 +1180,29 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
             IsItemActionSource(source))
         {
             return;
+        }
+
+        ItemsListView.Focus(FocusState.Programmatic);
+        bool isCtrlPressed = Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Control);
+        bool isShiftPressed = Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Shift);
+        if (isCtrlPressed || isShiftPressed)
+        {
+            if (isShiftPressed)
+            {
+                SelectQuickCaptureRange(item);
+            }
+            else
+            {
+                ToggleQuickCaptureSelection(item);
+            }
+
+            e.Handled = true;
+            return;
+        }
+
+        if (HasQuickCaptureCopySelection())
+        {
+            ClearQuickCaptureCopySelection();
         }
 
         e.Handled = true;
@@ -1324,7 +1399,7 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
             return;
         }
 
-        Uri? previewUri = TryCreateImageUri(previewPath) ?? item.ImagePreviewUri;
+        Uri? previewUri = TryCreateImageUri(previewPath);
         image.Source = previewUri is { } uri
             ? new BitmapImage
             {
@@ -1608,6 +1683,19 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
     private async Task<bool> TryPrepareQuickCaptureDragPackageAsync(DataPackage dataPackage, QuickCaptureItemViewModel item)
     {
         dataPackage.RequestedOperation = DataPackageOperation.Copy;
+        var selectedItems = GetSelectedQuickCaptureItemsInVisibleOrder();
+        if (selectedItems.Count > 1 && item.IsCopySelected)
+        {
+            string text = FormatQuickCaptureBatch(selectedItems);
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                return false;
+            }
+
+            DeskBoxDragData.SetText(dataPackage, text, DeskBoxDragData.SourceQuickCapture);
+            dataPackage.Properties.Title = _localizationService.Format("QuickCapture.CopiedCount", selectedItems.Count);
+            return true;
+        }
 
         if (item.Type == QuickCaptureItemType.Image &&
             !string.IsNullOrWhiteSpace(item.ImagePath) &&
@@ -1769,6 +1857,19 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
     private MenuFlyout CreateItemFlyout(QuickCaptureItemViewModel item, FrameworkElement anchor)
     {
         var flyout = new MenuFlyout();
+        var selectedItems = GetSelectedQuickCaptureItemsInVisibleOrder();
+
+        if (selectedItems.Count > 1 && item.IsCopySelected)
+        {
+            var copySelectedItem = new MenuFlyoutItem
+            {
+                Text = _localizationService.Format("QuickCapture.CopySelected", selectedItems.Count),
+                Icon = new FontIcon { Glyph = "\uE8C8" }
+            };
+            copySelectedItem.Click += async (_, _) => await CopySelectedQuickCaptureItemsAsync(selectedItems);
+            flyout.Items.Add(copySelectedItem);
+            flyout.Items.Add(new MenuFlyoutSeparator());
+        }
 
         var copyItem = new MenuFlyoutItem
         {
@@ -2417,6 +2518,386 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
         return false;
     }
 
+    private void ItemsListView_PointerPressed(object sender, PointerRoutedEventArgs e)
+    {
+        if (sender is not ListViewBase listView)
+        {
+            return;
+        }
+
+        var properties = e.GetCurrentPoint(listView).Properties;
+        if (!properties.IsLeftButtonPressed ||
+            Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Shift) ||
+            !CanStartQuickCaptureBoxSelection(e.OriginalSource))
+        {
+            return;
+        }
+
+        RootGrid.Focus(FocusState.Programmatic);
+        _selectionPointerPressed = true;
+        _isBoxSelecting = false;
+        _selectionStartPoint = e.GetCurrentPoint(SelectionOverlay).Position;
+        _selectionCurrentPoint = _selectionStartPoint;
+        _selectionSnapshot = Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Control)
+            ? GetSelectedQuickCaptureItemsInVisibleOrder().ToList()
+            : [];
+        _selectionPreviewItems = new HashSet<QuickCaptureItemViewModel>(_selectionSnapshot);
+        _selectionHitTestItems = [];
+
+        if (!Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Control))
+        {
+            ClearQuickCaptureCopySelection();
+            ItemsListView.SelectedItem = null;
+        }
+    }
+
+    private void ItemsListView_PointerMoved(object sender, PointerRoutedEventArgs e)
+    {
+        if (sender is not ListViewBase listView || !_selectionPointerPressed)
+        {
+            return;
+        }
+
+        _selectionCurrentPoint = e.GetCurrentPoint(SelectionOverlay).Position;
+        if (!_isBoxSelecting && GetSelectionDragDistance(_selectionStartPoint, _selectionCurrentPoint) < 6.0)
+        {
+            return;
+        }
+
+        if (!_isBoxSelecting)
+        {
+            _isBoxSelecting = true;
+            listView.CapturePointer(e.Pointer);
+            if (_selectionHitTestItems.Count == 0)
+            {
+                CacheQuickCaptureSelectionHitTestItems(listView);
+            }
+        }
+
+        UpdateQuickCaptureSelectionRectangleVisual();
+        ApplyQuickCaptureSelectionRectanglePreview();
+        e.Handled = true;
+    }
+
+    private void ItemsListView_PointerReleased(object sender, PointerRoutedEventArgs e)
+    {
+        if (sender is not ListViewBase listView)
+        {
+            return;
+        }
+
+        bool wasBoxSelecting = _isBoxSelecting;
+        FinishQuickCaptureSelectionRectangle(listView);
+        if (wasBoxSelecting)
+        {
+            listView.ReleasePointerCapture(e.Pointer);
+            e.Handled = true;
+        }
+    }
+
+    private void ItemsListView_PointerCaptureLost(object sender, PointerRoutedEventArgs e)
+    {
+        if (sender is ListViewBase listView)
+        {
+            FinishQuickCaptureSelectionRectangle(listView);
+        }
+    }
+
+    private bool CanStartQuickCaptureBoxSelection(object? originalSource)
+    {
+        if (originalSource is not DependencyObject source)
+        {
+            return false;
+        }
+
+        return FindQuickCaptureItemContainer(source) is null &&
+               !HasAncestorOfType<ScrollBar>(source) &&
+               !HasAncestorOfType<ButtonBase>(source) &&
+               !HasAncestorOfType<TextBox>(source);
+    }
+
+    private void UpdateQuickCaptureSelectionRectangleVisual()
+    {
+        var selectionRect = GetSelectionRect(_selectionStartPoint, _selectionCurrentPoint);
+        Canvas.SetLeft(SelectionRectangle, selectionRect.X);
+        Canvas.SetTop(SelectionRectangle, selectionRect.Y);
+        SelectionRectangle.Width = Math.Max(0, selectionRect.Width);
+        SelectionRectangle.Height = Math.Max(0, selectionRect.Height);
+        SelectionRectangle.Visibility = selectionRect.Width > 0 && selectionRect.Height > 0
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+    }
+
+    private void CacheQuickCaptureSelectionHitTestItems(ListViewBase listView)
+    {
+        _selectionHitTestItems = [];
+
+        foreach (var item in ViewModel.Items)
+        {
+            if (listView.ContainerFromItem(item) is not SelectorItem container ||
+                container.Visibility != Visibility.Visible ||
+                container.ActualWidth <= 0 ||
+                container.ActualHeight <= 0)
+            {
+                continue;
+            }
+
+            var target = FindVisualChild<Grid>(container, "QuickCaptureItemRoot") ?? container as FrameworkElement;
+            if (target is null || target.ActualWidth <= 0 || target.ActualHeight <= 0)
+            {
+                continue;
+            }
+
+            var topLeft = target.TransformToVisual(SelectionOverlay)
+                .TransformPoint(new Windows.Foundation.Point(0, 0));
+            var bounds = new Windows.Foundation.Rect(
+                topLeft.X,
+                topLeft.Y,
+                target.ActualWidth,
+                target.ActualHeight);
+            _selectionHitTestItems.Add(new QuickCaptureSelectionHitTestItem(item, bounds));
+        }
+    }
+
+    private void ApplyQuickCaptureSelectionRectanglePreview()
+    {
+        var selectionRect = GetSelectionRect(_selectionStartPoint, _selectionCurrentPoint);
+        var selectedItems = new HashSet<QuickCaptureItemViewModel>(_selectionSnapshot);
+
+        foreach (var hitTestItem in _selectionHitTestItems)
+        {
+            if (RectsIntersect(selectionRect, hitTestItem.Bounds))
+            {
+                selectedItems.Add(hitTestItem.Item);
+            }
+        }
+
+        ApplyQuickCaptureSelectionPreview(selectedItems);
+    }
+
+    private void FinishQuickCaptureSelectionRectangle(ListViewBase listView)
+    {
+        bool shouldHandle = _selectionPointerPressed || _isBoxSelecting;
+        _selectionPointerPressed = false;
+
+        if (_isBoxSelecting)
+        {
+            ApplyQuickCaptureSelectionRectanglePreview();
+            _copySelectionAnchorId = ViewModel.Items.FirstOrDefault(item => item.IsCopySelected)?.Id;
+        }
+
+        _isBoxSelecting = false;
+        _selectionSnapshot = [];
+        _selectionPreviewItems = [];
+        _selectionHitTestItems = [];
+        SelectionRectangle.Visibility = Visibility.Collapsed;
+        SelectionRectangle.Width = 0;
+        SelectionRectangle.Height = 0;
+
+        if (shouldHandle)
+        {
+            listView.Focus(FocusState.Programmatic);
+        }
+    }
+
+    private void ApplyQuickCaptureSelectionPreview(HashSet<QuickCaptureItemViewModel> selectedItems)
+    {
+        _selectionPreviewItems = selectedItems;
+        foreach (var item in ViewModel.Items)
+        {
+            item.IsCopySelected = selectedItems.Contains(item);
+        }
+    }
+
+    private void ToggleQuickCaptureSelection(QuickCaptureItemViewModel item)
+    {
+        item.IsCopySelected = !item.IsCopySelected;
+        _copySelectionAnchorId = item.Id;
+    }
+
+    private void SelectQuickCaptureRange(QuickCaptureItemViewModel item)
+    {
+        if (ViewModel.Items.Count == 0)
+        {
+            return;
+        }
+
+        int endIndex = ViewModel.Items.IndexOf(item);
+        if (endIndex < 0)
+        {
+            return;
+        }
+
+        int startIndex = endIndex;
+        if (!string.IsNullOrWhiteSpace(_copySelectionAnchorId))
+        {
+            for (int index = 0; index < ViewModel.Items.Count; index++)
+            {
+                if (string.Equals(ViewModel.Items[index].Id, _copySelectionAnchorId, StringComparison.Ordinal))
+                {
+                    startIndex = index;
+                    break;
+                }
+            }
+        }
+
+        int first = Math.Min(startIndex, endIndex);
+        int last = Math.Max(startIndex, endIndex);
+        ClearQuickCaptureCopySelection();
+        for (int index = first; index <= last; index++)
+        {
+            ViewModel.Items[index].IsCopySelected = true;
+        }
+
+        _copySelectionAnchorId = ViewModel.Items[startIndex].Id;
+    }
+
+    private void SelectAllVisibleQuickCaptureItems()
+    {
+        foreach (var item in ViewModel.Items)
+        {
+            item.IsCopySelected = true;
+        }
+
+        _copySelectionAnchorId = ViewModel.Items.FirstOrDefault()?.Id;
+    }
+
+    private void ClearQuickCaptureCopySelection()
+    {
+        foreach (var item in ViewModel.Items)
+        {
+            item.IsCopySelected = false;
+        }
+
+        _copySelectionAnchorId = null;
+    }
+
+    private bool HasQuickCaptureCopySelection()
+    {
+        return ViewModel.Items.Any(item => item.IsCopySelected);
+    }
+
+    private IReadOnlyList<QuickCaptureItemViewModel> GetSelectedQuickCaptureItemsInVisibleOrder()
+    {
+        return ViewModel.Items
+            .Where(item => item.IsCopySelected)
+            .ToList();
+    }
+
+    private async Task CopySelectedQuickCaptureItemsAsync()
+    {
+        await CopySelectedQuickCaptureItemsAsync(GetSelectedQuickCaptureItemsInVisibleOrder());
+    }
+
+    private async Task CopySelectedQuickCaptureItemsAsync(IReadOnlyList<QuickCaptureItemViewModel> selectedItems)
+    {
+        if (selectedItems.Count == 0)
+        {
+            return;
+        }
+
+        if (selectedItems.Count == 1)
+        {
+            await CopyItemWithFeedbackAsync(selectedItems[0]);
+            return;
+        }
+
+        string text = FormatQuickCaptureBatch(selectedItems);
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return;
+        }
+
+        try
+        {
+            SetClipboardText(text);
+            ShowStatusToast(
+                _localizationService.Format("QuickCapture.CopiedCount", selectedItems.Count),
+                durationMs: CopyToastMs);
+        }
+        catch (Exception ex)
+        {
+            App.Log($"[QuickCapture] Failed to copy {selectedItems.Count} selected items: {ex}");
+            ShowStatusToast(_localizationService.T("QuickCapture.CopyFailed"));
+        }
+    }
+
+    private string FormatQuickCaptureBatch(IReadOnlyList<QuickCaptureItemViewModel> selectedItems)
+    {
+        return string.Join(
+            Environment.NewLine + Environment.NewLine,
+            selectedItems
+                .Select(FormatQuickCaptureBatchItem)
+                .Where(text => !string.IsNullOrWhiteSpace(text)));
+    }
+
+    private string FormatQuickCaptureBatchItem(QuickCaptureItemViewModel item)
+    {
+        if (item.Type == QuickCaptureItemType.Image)
+        {
+            string imageText = _localizationService.T("QuickCapture.ImageItem");
+            return string.IsNullOrWhiteSpace(item.ImagePath)
+                ? imageText
+                : $"{imageText}: {item.ImagePath}";
+        }
+
+        return (item.Body ?? string.Empty).Trim();
+    }
+
+    private static void SetClipboardText(string text)
+    {
+        var dataPackage = new DataPackage
+        {
+            RequestedOperation = DataPackageOperation.Copy
+        };
+        dataPackage.SetText(text);
+        Clipboard.SetContent(dataPackage);
+    }
+
+    private static FrameworkElement? FindQuickCaptureItemContainer(DependencyObject source)
+    {
+        DependencyObject? current = source;
+        while (current is not null)
+        {
+            if (current is Grid { Name: "QuickCaptureItemRoot", DataContext: QuickCaptureItemViewModel })
+            {
+                return (FrameworkElement)current;
+            }
+
+            current = VisualTreeHelper.GetParent(current);
+        }
+
+        return null;
+    }
+
+    private static Windows.Foundation.Rect GetSelectionRect(
+        Windows.Foundation.Point startPoint,
+        Windows.Foundation.Point endPoint)
+    {
+        double x = Math.Min(startPoint.X, endPoint.X);
+        double y = Math.Min(startPoint.Y, endPoint.Y);
+        double width = Math.Abs(endPoint.X - startPoint.X);
+        double height = Math.Abs(endPoint.Y - startPoint.Y);
+        return new Windows.Foundation.Rect(x, y, width, height);
+    }
+
+    private static double GetSelectionDragDistance(
+        Windows.Foundation.Point startPoint,
+        Windows.Foundation.Point endPoint)
+    {
+        double deltaX = endPoint.X - startPoint.X;
+        double deltaY = endPoint.Y - startPoint.Y;
+        return Math.Sqrt((deltaX * deltaX) + (deltaY * deltaY));
+    }
+
+    private static bool RectsIntersect(Windows.Foundation.Rect first, Windows.Foundation.Rect second)
+    {
+        return first.X < second.X + second.Width &&
+               first.X + first.Width > second.X &&
+               first.Y < second.Y + second.Height &&
+               first.Y + first.Height > second.Y;
+    }
+
     private static bool HasAncestorOfType<T>(DependencyObject source) where T : DependencyObject
     {
         var current = source;
@@ -2437,6 +2918,16 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
     {
         if (e.Key == Windows.System.VirtualKey.Escape)
         {
+            bool isFromTextBox = e.OriginalSource is DependencyObject source &&
+                HasAncestorOfType<TextBox>(source);
+            if (!isFromTextBox && HasQuickCaptureCopySelection())
+            {
+                ClearQuickCaptureCopySelection();
+                RootGrid.Focus(FocusState.Programmatic);
+                e.Handled = true;
+                return;
+            }
+
             if (ViewModel.IsSearchExpanded)
             {
                 ViewModel.CollapseSearch();
@@ -3408,6 +3899,8 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
         QuickCaptureShell.TitleIconKind = WidgetTitleIconKindNames.QuickCapture;
         QuickCaptureShell.TitleIconMode = _settingsService.Settings.WidgetTitleIconMode;
         EmptyStateIcon.Foreground = new SolidColorBrush(secondaryForeground);
+        SelectionRectangle.Background = new SolidColorBrush(WithAlpha(accentColor, isDark ? (byte)0x2D : (byte)0x24));
+        SelectionRectangle.BorderBrush = new SolidColorBrush(WithAlpha(accentColor, isDark ? (byte)0xD8 : (byte)0xCC));
         ApplySearchVisualStyle(isDark, accentColor);
         ApplyEditOverlayStyle(isDark, accentColor);
         RefreshSelectedViewSegment();
@@ -3575,18 +4068,21 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
 
         DispatcherQueue.TryEnqueue(() =>
         {
+            ItemsListView.UpdateLayout();
+            EmptyStateHost.UpdateLayout();
+
             if (ItemsListView.Visibility == Visibility.Visible)
             {
                 ItemsListView.Opacity = 0;
-                StartSubtleOffsetAnimation(ItemsListView, 0, 0, 6, 0, 160);
-                StartOpacityAnimation(ItemsListView, 0, 1, 160);
+                StartSubtleOffsetAnimation(ItemsListView, 0, 0, ItemsViewTransitionOffsetPx, 0, ItemsViewTransitionMs);
+                StartOpacityAnimation(ItemsListView, 0, 1, ItemsViewTransitionMs);
             }
 
-            if (EmptyState.Visibility == Visibility.Visible)
+            if (EmptyStateHost.Visibility == Visibility.Visible)
             {
-                EmptyState.Opacity = 0;
-                StartSubtleOffsetAnimation(EmptyState, 0, 0, 6, 0, 160);
-                StartOpacityAnimation(EmptyState, 0, 1, 160);
+                EmptyStateHost.Opacity = 0;
+                StartSubtleOffsetAnimation(EmptyStateHost, 0, 0, ItemsViewTransitionOffsetPx, 0, ItemsViewTransitionMs);
+                StartOpacityAnimation(EmptyStateHost, 0, 1, ItemsViewTransitionMs);
             }
         });
     }
@@ -3594,7 +4090,7 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
     private void ResetItemsViewTransitionState()
     {
         ResetTransitionState(ItemsListView);
-        ResetTransitionState(EmptyState);
+        ResetTransitionState(EmptyStateHost);
     }
 
     private static void ResetTransitionState(UIElement element)

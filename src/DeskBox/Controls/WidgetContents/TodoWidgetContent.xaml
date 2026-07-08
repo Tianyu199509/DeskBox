@@ -45,6 +45,14 @@
 
         <Style x:Key="TodoConfirmCommandButtonStyle" TargetType="Button" BasedOn="{StaticResource WidgetConfirmCommandButtonStyle}" />
 
+        <Style x:Key="TodoRecurringHistoryButtonStyle" TargetType="Button" BasedOn="{StaticResource SubtleButtonStyle}">
+            <Setter Property="HorizontalAlignment" Value="Left" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="MinHeight" Value="22" />
+            <Setter Property="MinWidth" Value="0" />
+            <Setter Property="CornerRadius" Value="4" />
+        </Style>
+
         <Style x:Key="TodoCustomDueTimeButtonStyle" TargetType="Button" BasedOn="{StaticResource DefaultButtonStyle}">
             <Setter Property="Height" Value="36" />
             <Setter Property="MinHeight" Value="36" />
@@ -229,6 +237,10 @@
                 CanReorderItems="True"
                 DragOver="TodoListView_DragOver"
                 KeyDown="TodoListView_KeyDown"
+                PointerPressed="TodoListView_PointerPressed"
+                PointerMoved="TodoListView_PointerMoved"
+                PointerReleased="TodoListView_PointerReleased"
+                PointerCaptureLost="TodoListView_PointerCaptureLost"
                 DragItemsStarting="TodoListView_DragItemsStarting"
                 DragItemsCompleted="TodoListView_DragItemsCompleted"
                 ItemsSource="{Binding VisibleItems}"
@@ -244,6 +256,7 @@
                 <ListView.ItemTemplate>
                     <DataTemplate>
                         <Grid
+                            x:Name="TodoItemRoot"
                             MinHeight="28"
                             Padding="6,3"
                             Background="Transparent"
@@ -311,6 +324,7 @@
                                 <Grid.RowDefinitions>
                                     <RowDefinition Height="Auto" />
                                     <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
                                 </Grid.RowDefinitions>
 
                                 <TextBlock
@@ -348,6 +362,24 @@
                                     Text="{Binding DueStatusText}"
                                     TextTrimming="CharacterEllipsis"
                                     Visibility="{Binding DueStatusOverdueVisibility}" />
+
+                                <Button
+                                    Grid.Row="2"
+                                    Margin="0,2,0,0"
+                                    Click="RecurringHistoryToggleButton_Click"
+                                    Style="{StaticResource TodoRecurringHistoryButtonStyle}"
+                                    Visibility="{Binding RecurringHistoryToggleVisibility}">
+                                    <StackPanel Orientation="Horizontal" Spacing="4">
+                                        <FontIcon
+                                            FontSize="11"
+                                            Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                            Glyph="{Binding RecurringHistoryToggleGlyph}" />
+                                        <TextBlock
+                                            FontSize="{Binding ElementName=TodoListView, Path=DataContext.SecondaryTextSize}"
+                                            Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                            Text="{Binding RecurringHistoryToggleText}" />
+                                    </StackPanel>
+                                </Button>
                             </Grid>
 
                             <Border
@@ -376,6 +408,20 @@
                     </DataTemplate>
                 </ListView.ItemTemplate>
             </ListView>
+
+            <Canvas
+                x:Name="TodoSelectionOverlay"
+                Grid.Row="0"
+                Background="Transparent"
+                IsHitTestVisible="False">
+                <Border
+                    x:Name="TodoSelectionRectangle"
+                    Width="0"
+                    Height="0"
+                    BorderThickness="1"
+                    CornerRadius="0"
+                    Visibility="Collapsed" />
+            </Canvas>
 
             <StackPanel
                 Grid.Row="0"

@@ -1,5 +1,27 @@
 # Changelog
 
+## 1.2.6 - 2026-07-08
+
+### English
+
+- Improved Todo reminder reliability with per-task reminder offsets, snooze state persistence after app restart, and safer reminder grace handling for overdue tasks.
+- Added native notification actions for Todo reminders, including completing a task directly from the notification and choosing snooze options from the reminder surface.
+- Refined recurring Todo behavior so completed recurrence history can be folded under the active recurring task instead of filling the main list with repeated completed rows.
+- Improved Todo and Quick Capture multi-select workflows, including rectangle selection from blank list space, formatted copy, drag-out text packages, and Escape-to-clear behavior.
+- Improved Quick Capture tab switching responsiveness by delaying heavier list refresh work, reducing UI-thread churn, stabilizing empty-state layout, and using a softer content transition.
+- Updated Quick Capture clipboard defaults so automatic clipboard capture starts disabled by default, and disabling Quick Capture also disables automatic clipboard and image capture.
+- Expanded automated coverage for Todo reminders, recurring tasks, Quick Capture clipboard settings, multi-select behavior, and settings defaults.
+
+### 中文
+
+- 优化待办提醒可靠性：支持每条任务独立提醒偏移，应用重启后可以恢复稍后提醒状态，并改进逾期待办的提醒宽限逻辑。
+- 系统通知增加待办操作能力，可直接在通知中标记完成，也可以从提醒界面选择稍后提醒。
+- 优化重复待办体验：完成后的重复历史可以折叠在当前重复任务下方，避免主列表被大量已完成记录撑满。
+- 补齐待办和随记的多选流程，包括从空白区域框选、格式化复制、拖拽导出文本，以及按 Esc 取消选择。
+- 优化随记 Tab 切换性能：延迟较重的列表刷新，减少 UI 线程压力，稳定空状态布局，并使用更自然的内容过渡动画。
+- 调整随记剪贴板默认策略：自动复制默认关闭，关闭随记功能时会联动关闭自动复制和图片复制。
+- 扩展自动化测试，覆盖待办提醒、重复任务、随记剪贴板设置、多选行为和设置默认值。
+
 ## 1.2.5 - 2026-07-08
 
 ### English

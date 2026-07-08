@@ -22,7 +22,7 @@ public sealed class TodoWidgetStoreTests : IDisposable
 
         var data = await store.LoadAsync();
 
-        Assert.Equal(1, data.Version);
+        Assert.Equal(2, data.Version);
         Assert.Empty(data.Items);
         Assert.EndsWith(Path.Combine("todo-widget", "todo.json"), store.StorePath);
     }
@@ -91,7 +91,7 @@ public sealed class TodoWidgetStoreTests : IDisposable
 
         var data = await store.LoadAsync();
 
-        Assert.Equal(1, data.Version);
+        Assert.Equal(2, data.Version);
         Assert.Empty(data.Items);
     }
 
@@ -139,7 +139,7 @@ public sealed class TodoWidgetStoreTests : IDisposable
 
         var data = await store.LoadAsync();
 
-        Assert.Equal(1, data.Version);
+        Assert.Equal(2, data.Version);
         Assert.Equal(2, data.Items.Count);
         Assert.Equal("duplicate", data.Items[0].Id);
         Assert.Equal("keep", data.Items[0].Text);
@@ -207,8 +207,103 @@ public sealed class TodoWidgetStoreTests : IDisposable
         Assert.True(document.RootElement.TryGetProperty("items", out var items));
         Assert.True(items[0].TryGetProperty("isCompleted", out _));
         Assert.True(items[0].TryGetProperty("dueDate", out _));
+        Assert.True(items[0].TryGetProperty("recurrence", out _));
         Assert.True(items[0].TryGetProperty("colorMarker", out _));
         Assert.False(document.RootElement.TryGetProperty("Version", out _));
+    }
+
+    [Fact]
+    public async Task SaveAsync_NormalizesRecurrenceAndClearsInvalidGeneratedNextId()
+    {
+        var store = CreateStore("todo-widget");
+        var dueDate = new DateTimeOffset(new DateTime(2026, 7, 10, 18, 30, 0, DateTimeKind.Local));
+
+        await store.SaveAsync(new TodoWidgetData
+        {
+            Items =
+            [
+                new TodoItem
+                {
+                    Id = "recurring",
+                    Text = "task",
+                    DueDate = dueDate,
+                    Recurrence = new TodoRecurrence
+                    {
+                        Mode = "DAILY",
+                        AnchorDueDate = dueDate
+                    },
+                    GeneratedNextItemId = " should-clear "
+                },
+                new TodoItem
+                {
+                    Id = "completed-recurring",
+                    Text = "completed task",
+                    IsCompleted = true,
+                    DueDate = dueDate,
+                    Recurrence = new TodoRecurrence
+                    {
+                        Mode = TodoRecurrenceMode.Weekly
+                    },
+                    GeneratedNextItemId = "next-item"
+                }
+            ]
+        });
+
+        var data = await store.LoadAsync();
+        var recurring = data.Items.Single(item => item.Id == "recurring");
+        var completedRecurring = data.Items.Single(item => item.Id == "completed-recurring");
+
+        Assert.Equal(TodoRecurrenceMode.Daily, recurring.Recurrence?.Mode);
+        Assert.Equal(dueDate, recurring.Recurrence?.AnchorDueDate);
+        Assert.Null(recurring.GeneratedNextItemId);
+        Assert.Equal(TodoRecurrenceMode.Weekly, completedRecurring.Recurrence?.Mode);
+        Assert.Equal(dueDate, completedRecurring.Recurrence?.AnchorDueDate);
+        Assert.Equal("next-item", completedRecurring.GeneratedNextItemId);
+    }
+
+    [Fact]
+    public async Task SaveAsync_AssignsSameRecurrenceSeriesIdAcrossGeneratedChain()
+    {
+        var store = CreateStore("todo-widget");
+        var dueDate = new DateTimeOffset(new DateTime(2026, 7, 10, 10, 30, 0, DateTimeKind.Local));
+
+        await store.SaveAsync(new TodoWidgetData
+        {
+            Items =
+            [
+                new TodoItem
+                {
+                    Id = "first",
+                    Text = "task",
+                    IsCompleted = true,
+                    DueDate = dueDate,
+                    Recurrence = new TodoRecurrence
+                    {
+                        Mode = TodoRecurrenceMode.Daily,
+                        AnchorDueDate = dueDate
+                    },
+                    GeneratedNextItemId = "second"
+                },
+                new TodoItem
+                {
+                    Id = "second",
+                    Text = "task",
+                    DueDate = dueDate.AddDays(1),
+                    Recurrence = new TodoRecurrence
+                    {
+                        Mode = TodoRecurrenceMode.Daily,
+                        AnchorDueDate = dueDate
+                    }
+                }
+            ]
+        });
+
+        var data = await store.LoadAsync();
+        var first = data.Items.Single(item => item.Id == "first");
+        var second = data.Items.Single(item => item.Id == "second");
+
+        Assert.False(string.IsNullOrWhiteSpace(first.RecurrenceSeriesId));
+        Assert.Equal(first.RecurrenceSeriesId, second.RecurrenceSeriesId);
     }
 
     public void Dispose()

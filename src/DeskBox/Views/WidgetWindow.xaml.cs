@@ -90,6 +90,7 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
     private HashSet<WidgetItem> _selectionPreviewItems = [];
     private List<SelectionHitTestItem> _selectionHitTestItems = [];
     private Dictionary<WidgetItem, Border> _selectionSurfaceByItem = [];
+    private readonly HashSet<Border> _interactiveSurfaces = [];
     private bool _isSynchronizingSelection;
     private MenuFlyout? _itemDeleteConfirmFlyout;
     private Flyout? _messageFlyout;
@@ -120,6 +121,16 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
     private bool _isFileDropSubclassInstalled;
     private TransitionCollection? _savedGridItemTransitions;
     private TransitionCollection? _savedListItemTransitions;
+    private SolidColorBrush? _normalItemSurfaceBrush;
+    private SolidColorBrush? _selectedItemSurfaceBrush;
+    private SolidColorBrush? _hoverItemSurfaceBrush;
+    private SolidColorBrush? _pressedItemSurfaceBrush;
+    private SolidColorBrush? _selectedHoverItemSurfaceBrush;
+    private SolidColorBrush? _dropTargetItemSurfaceBrush;
+    private SolidColorBrush? _normalItemBorderBrush;
+    private SolidColorBrush? _dropTargetItemBorderBrush;
+    private bool? _itemSurfaceBrushesAreDark;
+    private Windows.UI.Color? _itemSurfaceBrushesAccentColor;
 
     private Border BackgroundPlate => FileWidgetShell.BackgroundSurface;
     private Border HeaderDivider => FileWidgetShell.Divider;
@@ -1442,6 +1453,7 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
         SelectionRectangle.BorderBrush = new SolidColorBrush(WithAlpha(accentColor, isDark ? (byte)0xD8 : (byte)0xCC));
         StatusToastText.Foreground = new SolidColorBrush(isDark ? Colors.White : Colors.Black);
 
+        ResetItemSurfaceBrushCache();
         UpdateInteractiveSurfaces();
     }
 
@@ -1468,8 +1480,14 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
 
     private void UpdateInteractiveSurfaces()
     {
-        foreach (var border in FindInteractiveSurfaceBorders(RootGrid))
+        foreach (var border in _interactiveSurfaces.ToArray())
         {
+            if (border.XamlRoot is null)
+            {
+                _interactiveSurfaces.Remove(border);
+                continue;
+            }
+
             ApplyWidgetItemLayout(border);
             ApplyWidgetItemTooltip(border);
             ApplyWidgetItemSurfaceState(border, ItemSurfaceState.Normal);
@@ -1680,6 +1698,54 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
         bool isSelected = item?.IsSelected == true;
         bool isCut = item?.IsCut == true;
 
+        EnsureItemSurfaceBrushCache(isDark, accentColor);
+
+        border.Background = state switch
+        {
+            ItemSurfaceState.DropTarget => _dropTargetItemSurfaceBrush,
+            ItemSurfaceState.Hover when isSelected => _selectedHoverItemSurfaceBrush,
+            ItemSurfaceState.Pressed when isSelected => _selectedHoverItemSurfaceBrush,
+            ItemSurfaceState.Hover => _hoverItemSurfaceBrush,
+            ItemSurfaceState.Pressed => _pressedItemSurfaceBrush,
+            _ when isSelected => _selectedItemSurfaceBrush,
+            _ => _normalItemSurfaceBrush
+        };
+        border.BorderBrush = state == ItemSurfaceState.DropTarget
+            ? _dropTargetItemBorderBrush
+            : _normalItemBorderBrush;
+        border.BorderThickness = state == ItemSurfaceState.DropTarget
+            ? new Thickness(1)
+            : new Thickness(0);
+        border.Opacity = isCut ? 0.58 : 1.0;
+    }
+
+    private void ResetItemSurfaceBrushCache()
+    {
+        _normalItemSurfaceBrush = null;
+        _selectedItemSurfaceBrush = null;
+        _hoverItemSurfaceBrush = null;
+        _pressedItemSurfaceBrush = null;
+        _selectedHoverItemSurfaceBrush = null;
+        _dropTargetItemSurfaceBrush = null;
+        _normalItemBorderBrush = null;
+        _dropTargetItemBorderBrush = null;
+        _itemSurfaceBrushesAreDark = null;
+        _itemSurfaceBrushesAccentColor = null;
+    }
+
+    private void EnsureItemSurfaceBrushCache(bool isDark, Windows.UI.Color accentColor)
+    {
+        if (_normalItemSurfaceBrush is not null &&
+            _itemSurfaceBrushesAreDark == isDark &&
+            _itemSurfaceBrushesAccentColor is { } cachedAccentColor &&
+            cachedAccentColor.Equals(accentColor))
+        {
+            return;
+        }
+
+        _itemSurfaceBrushesAreDark = isDark;
+        _itemSurfaceBrushesAccentColor = accentColor;
+
         var defaultBackground = ColorHelper.FromArgb(0x00, 0xFF, 0xFF, 0xFF);
 
         var selectedBackground = WithAlpha(
@@ -1737,25 +1803,14 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
                 overlayMix: isDark ? 0.06 : 0.04),
             isDark ? (byte)0x92 : (byte)0x9C);
 
-        var backgroundColor = state switch
-        {
-            ItemSurfaceState.DropTarget => dropTargetBackground,
-            ItemSurfaceState.Hover when isSelected => selectedHoverBackground,
-            ItemSurfaceState.Pressed when isSelected => selectedHoverBackground,
-            ItemSurfaceState.Hover => hoverBackground,
-            ItemSurfaceState.Pressed => pressedBackground,
-            _ when isSelected => selectedBackground,
-            _ => defaultBackground
-        };
-
-        border.Background = new SolidColorBrush(backgroundColor);
-        border.BorderBrush = new SolidColorBrush(state == ItemSurfaceState.DropTarget
-            ? WithAlpha(accentColor, isDark ? (byte)0xF0 : (byte)0xD8)
-            : Colors.Transparent);
-        border.BorderThickness = state == ItemSurfaceState.DropTarget
-            ? new Thickness(1)
-            : new Thickness(0);
-        border.Opacity = isCut ? 0.58 : 1.0;
+        _normalItemSurfaceBrush = new SolidColorBrush(defaultBackground);
+        _selectedItemSurfaceBrush = new SolidColorBrush(selectedBackground);
+        _hoverItemSurfaceBrush = new SolidColorBrush(hoverBackground);
+        _pressedItemSurfaceBrush = new SolidColorBrush(pressedBackground);
+        _selectedHoverItemSurfaceBrush = new SolidColorBrush(selectedHoverBackground);
+        _dropTargetItemSurfaceBrush = new SolidColorBrush(dropTargetBackground);
+        _normalItemBorderBrush = new SolidColorBrush(Colors.Transparent);
+        _dropTargetItemBorderBrush = new SolidColorBrush(WithAlpha(accentColor, isDark ? (byte)0xF0 : (byte)0xD8));
     }
 
     private void ApplyWidgetItemLayout(Border border)
@@ -3643,9 +3698,18 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
     {
         if (sender is Border border)
         {
+            _interactiveSurfaces.Add(border);
             ApplyWidgetItemLayout(border);
             ApplyWidgetItemTooltip(border);
             ApplyWidgetItemSurfaceState(border, ItemSurfaceState.Normal);
+        }
+    }
+
+    private void WidgetItemSurface_Unloaded(object sender, RoutedEventArgs e)
+    {
+        if (sender is Border border)
+        {
+            _interactiveSurfaces.Remove(border);
         }
     }
 
@@ -3982,10 +4046,11 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
             return false;
         }
 
-        foreach (var border in FindInteractiveSurfaceBorders(RootGrid))
+        foreach (var border in _interactiveSurfaces.ToArray())
         {
             if (border.DataContext is not WidgetItem { IsFolder: true } folder ||
                 !Directory.Exists(folder.Path) ||
+                border.XamlRoot is null ||
                 border.ActualWidth <= 0 ||
                 border.ActualHeight <= 0)
             {

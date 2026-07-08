@@ -693,6 +693,10 @@ public sealed partial class OnboardingWindow : Window
             {
                 FeatureWidgetSettings.SetEnabled(_settingsService.Settings, WidgetKind.QuickCapture, true);
             }
+            else
+            {
+                _settingsService.Settings.QuickCaptureImageClipboardEnabled = false;
+            }
 
             _settingsService.Settings.QuickCaptureClipboardEnabled = clipboardToggle.IsOn;
             _settingsService.SaveDebounced();

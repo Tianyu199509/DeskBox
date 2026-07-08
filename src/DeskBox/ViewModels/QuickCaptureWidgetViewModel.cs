@@ -12,6 +12,7 @@ namespace DeskBox.ViewModels;
 public sealed partial class QuickCaptureWidgetViewModel : ObservableObject, IDisposable
 {
     private const int SearchRefreshDebounceMs = 150;
+    private const int ViewSwitchRefreshDelayMs = 60;
     private const int ClipboardCannotOpenHResult = unchecked((int)0x800401D0);
     private static readonly int[] s_clipboardRetryDelaysMs = [40, 90, 160, 260];
 
@@ -21,6 +22,7 @@ public sealed partial class QuickCaptureWidgetViewModel : ObservableObject, IDis
     private readonly DispatcherQueue _dispatcherQueue;
     private readonly DispatcherQueueTimer _searchRefreshTimer;
     private readonly DispatcherQueueTimer _currentViewSaveTimer;
+    private readonly DispatcherQueueTimer _viewSwitchRefreshTimer;
 
     private string _inputText = string.Empty;
     private string _searchText = string.Empty;
@@ -37,6 +39,8 @@ public sealed partial class QuickCaptureWidgetViewModel : ObservableObject, IDis
     private int _recentCount;
     private string _emptyStateTitle = string.Empty;
     private string _emptyStateText = string.Empty;
+    private bool _isSwitchingView;
+    private int _itemsViewTransitionToken;
     private bool _isDisposed;
     private int _visibleItemsRefreshGeneration;
     private QuickCaptureStoreData? _cachedData;
@@ -66,6 +70,10 @@ public sealed partial class QuickCaptureWidgetViewModel : ObservableObject, IDis
         _currentViewSaveTimer.Interval = TimeSpan.FromMilliseconds(350);
         _currentViewSaveTimer.IsRepeating = false;
         _currentViewSaveTimer.Tick += CurrentViewSaveTimer_Tick;
+        _viewSwitchRefreshTimer = dispatcherQueue.CreateTimer();
+        _viewSwitchRefreshTimer.Interval = TimeSpan.FromMilliseconds(ViewSwitchRefreshDelayMs);
+        _viewSwitchRefreshTimer.IsRepeating = false;
+        _viewSwitchRefreshTimer.Tick += ViewSwitchRefreshTimer_Tick;
         _widgetOpacity = settingsService.Settings.WidgetOpacity;
         _tabStyle = SettingsService.NormalizeWidgetTabStyle(settingsService.Settings.QuickCaptureTabStyle);
         _textSize = SettingsService.NormalizeTextSize(settingsService.Settings.TextSize);
@@ -177,7 +185,7 @@ public sealed partial class QuickCaptureWidgetViewModel : ObservableObject, IDis
             OnPropertyChanged(nameof(InputAreaVisibility));
             OnPropertyChanged(nameof(RecentCaptureStatusVisibility));
             OnPropertyChanged(nameof(RecentCaptureActionVisibility));
-            RefreshVisibleItemsFromCacheOrService();
+            ScheduleViewSwitchRefresh();
         }
     }
 
@@ -268,6 +276,16 @@ public sealed partial class QuickCaptureWidgetViewModel : ObservableObject, IDis
     {
         get => _listVisibility;
         private set => SetProperty(ref _listVisibility, value);
+    }
+
+    public Visibility ViewSwitchLoadingVisibility => _isSwitchingView ? Visibility.Visible : Visibility.Collapsed;
+
+    public bool IsSwitchingView => _isSwitchingView;
+
+    public int ItemsViewTransitionToken
+    {
+        get => _itemsViewTransitionToken;
+        private set => SetProperty(ref _itemsViewTransitionToken, value);
     }
 
     public int RecordCount
@@ -623,9 +641,74 @@ public sealed partial class QuickCaptureWidgetViewModel : ObservableObject, IDis
         _searchRefreshTimer.Tick -= SearchRefreshTimer_Tick;
         _currentViewSaveTimer.Stop();
         _currentViewSaveTimer.Tick -= CurrentViewSaveTimer_Tick;
+        _viewSwitchRefreshTimer.Stop();
+        _viewSwitchRefreshTimer.Tick -= ViewSwitchRefreshTimer_Tick;
         _quickCaptureService.Changed -= OnQuickCaptureChanged;
         _settingsService.SettingsChanged -= OnSettingsChanged;
         _localizationService.LanguageChanged -= OnLanguageChanged;
+    }
+
+    private void SetViewSwitchLoading(bool isLoading)
+    {
+        if (_isSwitchingView == isLoading)
+        {
+            return;
+        }
+
+        _isSwitchingView = isLoading;
+        OnPropertyChanged(nameof(IsSwitchingView));
+        OnPropertyChanged(nameof(ViewSwitchLoadingVisibility));
+    }
+
+    private void ScheduleViewSwitchRefresh()
+    {
+        if (_isDisposed)
+        {
+            return;
+        }
+
+        if (!_dispatcherQueue.HasThreadAccess)
+        {
+            _dispatcherQueue.TryEnqueue(ScheduleViewSwitchRefresh);
+            return;
+        }
+
+        SetViewSwitchLoading(true);
+        _searchRefreshTimer.Stop();
+        _viewSwitchRefreshTimer.Stop();
+        _viewSwitchRefreshTimer.Start();
+    }
+
+    private void ViewSwitchRefreshTimer_Tick(DispatcherQueueTimer sender, object args)
+    {
+        sender.Stop();
+        if (_isDisposed)
+        {
+            return;
+        }
+
+        RefreshVisibleItemsForViewSwitchAsync().LogQuickCaptureFailure();
+    }
+
+    private async Task RefreshVisibleItemsForViewSwitchAsync()
+    {
+        try
+        {
+            if (_cachedData is { } data)
+            {
+                await RefreshFromDataAsync(data);
+                return;
+            }
+
+            await RefreshVisibleItemsAsync();
+        }
+        finally
+        {
+            if (!_isDisposed)
+            {
+                SetViewSwitchLoading(false);
+            }
+        }
     }
 
     private void ScheduleCurrentViewSave()
@@ -885,6 +968,8 @@ public sealed partial class QuickCaptureWidgetViewModel : ObservableObject, IDis
         OnPropertyChanged(nameof(RecentCaptureStatusText));
         OnPropertyChanged(nameof(RecentCaptureStatusVisibility));
         OnPropertyChanged(nameof(RecentCaptureActionVisibility));
+        ItemsViewTransitionToken++;
+        SetViewSwitchLoading(false);
         return Task.CompletedTask;
     }
 
@@ -899,10 +984,38 @@ public sealed partial class QuickCaptureWidgetViewModel : ObservableObject, IDis
 
         PruneItemViewModelCache(visibleItems);
 
+        int existingVisibleOverlap = Items.Count(item => visibleIds.Contains(item.Id));
+        bool shouldRebuildCollection =
+            Items.Count == 0 ||
+            visibleItems.Count == 0 ||
+            existingVisibleOverlap < Math.Min(Items.Count, visibleItems.Count) / 2;
+
+        if (shouldRebuildCollection)
+        {
+            foreach (var item in Items)
+            {
+                item.IsCopySelected = false;
+            }
+
+            Items.Clear();
+            for (int targetIndex = 0; targetIndex < visibleItems.Count; targetIndex++)
+            {
+                Items.Add(GetOrCreateVisibleItemViewModel(
+                    visibleItems[targetIndex],
+                    targetIndex,
+                    visibleItems.Count,
+                    canShowPinnedSortControls,
+                    existingById));
+            }
+
+            return;
+        }
+
         for (int index = Items.Count - 1; index >= 0; index--)
         {
             if (!visibleIds.Contains(Items[index].Id))
             {
+                Items[index].IsCopySelected = false;
                 Items.RemoveAt(index);
             }
         }
@@ -916,28 +1029,12 @@ public sealed partial class QuickCaptureWidgetViewModel : ObservableObject, IDis
         for (int targetIndex = 0; targetIndex < visibleItems.Count; targetIndex++)
         {
             var model = visibleItems[targetIndex];
-            bool canMoveUp = canShowPinnedSortControls && targetIndex > 0;
-            bool canMoveDown = canShowPinnedSortControls && targetIndex < visibleItems.Count - 1;
-
-            if (!existingById.TryGetValue(model.Id, out var viewModel) &&
-                !_itemViewModelCache.TryGetValue(model.Id, out viewModel))
-            {
-                viewModel = new QuickCaptureItemViewModel(
-                    model,
-                    _localizationService,
-                    TextSize,
-                    IconSize,
-                    SearchText,
-                    showPinnedSortControls: canShowPinnedSortControls,
-                    canMovePinnedUp: canMoveUp,
-                    canMovePinnedDown: canMoveDown);
-                _itemViewModelCache[model.Id] = viewModel;
-            }
-
-            viewModel.Update(model);
-            viewModel.UpdateAppearance(TextSize, IconSize);
-            viewModel.UpdateSearchText(SearchText);
-            viewModel.UpdatePinnedSortState(canShowPinnedSortControls, canMoveUp, canMoveDown);
+            var viewModel = GetOrCreateVisibleItemViewModel(
+                model,
+                targetIndex,
+                visibleItems.Count,
+                canShowPinnedSortControls,
+                existingById);
 
             if (!currentIndexById.TryGetValue(viewModel.Id, out int currentIndex))
             {
@@ -961,6 +1058,38 @@ public sealed partial class QuickCaptureWidgetViewModel : ObservableObject, IDis
                 }
             }
         }
+    }
+
+    private QuickCaptureItemViewModel GetOrCreateVisibleItemViewModel(
+        QuickCaptureItem model,
+        int index,
+        int totalCount,
+        bool canShowPinnedSortControls,
+        IReadOnlyDictionary<string, QuickCaptureItemViewModel> existingById)
+    {
+        bool canMoveUp = canShowPinnedSortControls && index > 0;
+        bool canMoveDown = canShowPinnedSortControls && index < totalCount - 1;
+
+        if (!existingById.TryGetValue(model.Id, out var viewModel) &&
+            !_itemViewModelCache.TryGetValue(model.Id, out viewModel))
+        {
+            viewModel = new QuickCaptureItemViewModel(
+                model,
+                _localizationService,
+                TextSize,
+                IconSize,
+                SearchText,
+                showPinnedSortControls: canShowPinnedSortControls,
+                canMovePinnedUp: canMoveUp,
+                canMovePinnedDown: canMoveDown);
+            _itemViewModelCache[model.Id] = viewModel;
+        }
+
+        viewModel.Update(model);
+        viewModel.UpdateAppearance(TextSize, IconSize);
+        viewModel.UpdateSearchText(SearchText);
+        viewModel.UpdatePinnedSortState(canShowPinnedSortControls, canMoveUp, canMoveDown);
+        return viewModel;
     }
 
     private void PruneItemViewModelCache(IReadOnlyList<QuickCaptureItem> visibleItems)

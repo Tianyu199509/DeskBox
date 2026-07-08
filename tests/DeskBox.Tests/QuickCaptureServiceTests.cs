@@ -450,6 +450,33 @@ public sealed class QuickCaptureServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task GetOrCreateImageThumbnailPathAsync_ReusesThumbnailForSameImage()
+    {
+        var service = CreateService();
+        string sourceImagePath = Path.Combine(_tempRoot, "same-source.png");
+        await File.WriteAllBytesAsync(sourceImagePath, Convert.FromBase64String(
+            "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAFElEQVR4nGNkYPj/nwEJMDGgAQAAMQIEA3mLB4MAAAAASUVORK5CYII="));
+        var item = await service.AddImageFileItemAsync(sourceImagePath);
+
+        string? firstThumbnailPath = await service.GetOrCreateImageThumbnailPathAsync(item!.ImagePath);
+        string? secondThumbnailPath = await service.GetOrCreateImageThumbnailPathAsync(item.ImagePath);
+
+        Assert.Equal(firstThumbnailPath, secondThumbnailPath);
+        Assert.True(File.Exists(firstThumbnailPath));
+    }
+
+    [Fact]
+    public async Task GetOrCreateImageThumbnailPathAsync_ReturnsNullForMissingImage()
+    {
+        var service = CreateService();
+
+        string? thumbnailPath = await service.GetOrCreateImageThumbnailPathAsync(
+            Path.Combine(_tempRoot, "missing.png"));
+
+        Assert.Null(thumbnailPath);
+    }
+
+    [Fact]
     public async Task DeleteRecentItemAsync_OnlyRemovesRecentItem()
     {
         var service = CreateService();

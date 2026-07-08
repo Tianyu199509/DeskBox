@@ -243,38 +243,43 @@
                 Visibility="{Binding RecentCaptureStatusVisibility}" />
 
             <Grid Grid.Row="3">
-                <StackPanel
-                    x:Name="EmptyState"
-                    Margin="0,-8,0,0"
-                    Spacing="7"
-                    Style="{StaticResource WidgetEmptyStatePanelStyle}"
+                <Grid
+                    x:Name="EmptyStateHost"
+                    HorizontalAlignment="Stretch"
+                    VerticalAlignment="Stretch"
                     Visibility="{Binding EmptyStateVisibility}">
-                    <FontIcon
-                        x:Name="EmptyStateIcon"
-                        Margin="0,0,0,2"
-                        FontSize="{Binding EmptyIconSize}"
-                        Glyph="&#xE8A5;"
-                        Style="{StaticResource WidgetEmptyStateIconStyle}" />
-                    <TextBlock
-                        FontSize="{Binding TitleTextSize}"
-                        FontWeight="SemiBold"
-                        MaxLines="1"
-                        Style="{StaticResource WidgetEmptyStateTitleTextStyle}"
-                        Text="{Binding EmptyStateTitle}"
-                        TextWrapping="NoWrap" />
-                    <TextBlock
-                        FontSize="{Binding TextSize}"
-                        MaxLines="2"
-                        Style="{StaticResource WidgetEmptyStateDescriptionTextStyle}"
-                        Text="{Binding EmptyStateText}" />
-                    <Button
-                        Click="EnableRecentCaptureButton_Click"
-                        FontSize="{Binding SegmentTextSize}"
-                        HorizontalAlignment="Center"
-                        Style="{StaticResource QuickCaptureSegmentButtonStyle}"
-                        Content="{Binding EnableRecentCaptureText}"
-                        Visibility="{Binding RecentCaptureActionVisibility}" />
-                </StackPanel>
+                    <StackPanel
+                        x:Name="EmptyState"
+                        Margin="0,-8,0,0"
+                        Spacing="7"
+                        Style="{StaticResource WidgetEmptyStatePanelStyle}">
+                        <FontIcon
+                            x:Name="EmptyStateIcon"
+                            Margin="0,0,0,2"
+                            FontSize="{Binding EmptyIconSize}"
+                            Glyph="&#xE8A5;"
+                            Style="{StaticResource WidgetEmptyStateIconStyle}" />
+                        <TextBlock
+                            FontSize="{Binding TitleTextSize}"
+                            FontWeight="SemiBold"
+                            MaxLines="1"
+                            Style="{StaticResource WidgetEmptyStateTitleTextStyle}"
+                            Text="{Binding EmptyStateTitle}"
+                            TextWrapping="NoWrap" />
+                        <TextBlock
+                            FontSize="{Binding TextSize}"
+                            MaxLines="2"
+                            Style="{StaticResource WidgetEmptyStateDescriptionTextStyle}"
+                            Text="{Binding EmptyStateText}" />
+                        <Button
+                            Click="EnableRecentCaptureButton_Click"
+                            FontSize="{Binding SegmentTextSize}"
+                            HorizontalAlignment="Center"
+                            Style="{StaticResource QuickCaptureSegmentButtonStyle}"
+                            Content="{Binding EnableRecentCaptureText}"
+                            Visibility="{Binding RecentCaptureActionVisibility}" />
+                    </StackPanel>
+                </Grid>
 
                 <ListView
                     x:Name="ItemsListView"
@@ -283,6 +288,10 @@
                     HorizontalContentAlignment="Stretch"
                     ItemsSource="{Binding Items}"
                     KeyDown="ItemsListView_KeyDown"
+                    PointerPressed="ItemsListView_PointerPressed"
+                    PointerMoved="ItemsListView_PointerMoved"
+                    PointerReleased="ItemsListView_PointerReleased"
+                    PointerCaptureLost="ItemsListView_PointerCaptureLost"
                     ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                     ScrollViewer.HorizontalScrollMode="Disabled"
                     ScrollViewer.VerticalScrollBarVisibility="Auto"
@@ -339,6 +348,12 @@
                                     x:Name="ItemHoverBackground"
                                     Grid.ColumnSpan="2"
                                     Style="{StaticResource WidgetRowHoverBackgroundStyle}" />
+                                <Border
+                                    Grid.ColumnSpan="2"
+                                    Background="{ThemeResource AccentFillColorDefaultBrush}"
+                                    CornerRadius="6"
+                                    Opacity="0.18"
+                                    Visibility="{Binding CopySelectionVisibility}" />
                                 <FontIcon
                                     Grid.Column="0"
                                     Margin="0,2,8,0"
@@ -452,6 +467,39 @@
                         </DataTemplate>
                     </ListView.ItemTemplate>
                 </ListView>
+
+                <Canvas
+                    x:Name="SelectionOverlay"
+                    Background="Transparent"
+                    IsHitTestVisible="False">
+                    <Border
+                        x:Name="SelectionRectangle"
+                        Width="0"
+                        Height="0"
+                        BorderThickness="1"
+                        CornerRadius="0"
+                        Visibility="Collapsed" />
+                </Canvas>
+
+                <Grid
+                    Background="Transparent"
+                    IsHitTestVisible="False"
+                    Visibility="{Binding ViewSwitchLoadingVisibility}">
+                    <Border
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Center"
+                        Padding="9"
+                        Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                        BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                        BorderThickness="1"
+                        CornerRadius="8"
+                        Opacity="0.92">
+                        <ProgressRing
+                            Width="20"
+                            Height="20"
+                            IsActive="{Binding IsSwitchingView}" />
+                    </Border>
+                </Grid>
             </Grid>
                 </Grid>
             </controls:WidgetShell.ShellContent>

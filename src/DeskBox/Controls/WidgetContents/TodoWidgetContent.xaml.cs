@@ -16,6 +16,10 @@ namespace DeskBox.Controls.WidgetContents;
 
 public sealed partial class TodoWidgetContent : UserControl
 {
+    private sealed record TodoSelectionHitTestItem(
+        TodoItemViewModel Item,
+        Windows.Foundation.Rect Bounds);
+
     private const int UndoToastMs = 4200;
     private const int CopyToastMs = 900;
     private const int CopyTapDelayMs = 210;
@@ -29,6 +33,13 @@ public sealed partial class TodoWidgetContent : UserControl
     private long _undoToastGeneration;
     private long _copyTapGeneration;
     private bool _isAddingFromInlineEditor;
+    private bool _selectionPointerPressed;
+    private bool _isBoxSelecting;
+    private Windows.Foundation.Point _selectionStartPoint;
+    private Windows.Foundation.Point _selectionCurrentPoint;
+    private List<TodoItemViewModel> _selectionSnapshot = [];
+    private HashSet<TodoItemViewModel> _selectionPreviewItems = [];
+    private List<TodoSelectionHitTestItem> _selectionHitTestItems = [];
 
     private TextBox TodoEditTextBox => TodoInlineEditor.EditorTextBox;
 
@@ -43,7 +54,11 @@ public sealed partial class TodoWidgetContent : UserControl
         InitializeComponent();
         Loaded += TodoWidgetContent_Loaded;
         Unloaded += TodoWidgetContent_Unloaded;
-        ActualThemeChanged += (_, _) => ApplyEditorVisualStyle();
+        ActualThemeChanged += (_, _) =>
+        {
+            ApplyEditorVisualStyle();
+            ApplySelectionRectangleStyle();
+        };
     }
 
     public TodoWidgetContent(TodoWidgetViewModel viewModel)
@@ -103,6 +118,7 @@ public sealed partial class TodoWidgetContent : UserControl
         App.Current.LocalizationService.LanguageChanged += OnLanguageChanged;
         ApplyLocalizedText();
         ApplyEditorVisualStyle();
+        ApplySelectionRectangleStyle();
         RefreshFilterButtons();
     }
 
@@ -385,16 +401,47 @@ public sealed partial class TodoWidgetContent : UserControl
         await DeleteItemAsync(item, element);
     }
 
-    private void TodoListView_DragItemsStarting(object sender, DragItemsStartingEventArgs e)
+    private void RecurringHistoryToggleButton_Click(object sender, RoutedEventArgs e)
     {
-        if (HasCopySelection())
+        if (ViewModel is null ||
+            sender is not FrameworkElement element ||
+            element.DataContext is not TodoItemViewModel item)
         {
-            e.Cancel = true;
-            _draggedTodoItemId = null;
             return;
         }
 
+        ViewModel.ToggleRecurringHistoryGroup(item.RecurrenceSeriesId);
+    }
+
+    private void TodoListView_DragItemsStarting(object sender, DragItemsStartingEventArgs e)
+    {
         var draggedItem = e.Items.OfType<TodoItemViewModel>().FirstOrDefault();
+        var selectedItems = GetSelectedCopyItemsInVisibleOrder();
+        if (draggedItem is not null &&
+            selectedItems.Count > 0 &&
+            selectedItems.Contains(draggedItem))
+        {
+            _draggedTodoItemId = null;
+            string text = selectedItems.Count == 1
+                ? TodoClipboardFormatter.FormatSingleText(selectedItems[0])
+                : TodoClipboardFormatter.FormatBatch(selectedItems, App.Current.LocalizationService);
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                e.Cancel = true;
+                return;
+            }
+
+            DeskBoxDragData.SetText(e.Data, text, DeskBoxDragData.SourceTodo);
+            e.Data.RequestedOperation = DataPackageOperation.Copy;
+            e.Data.Properties.Title = App.Current.LocalizationService.Format("Todo.CopiedCount", selectedItems.Count);
+            return;
+        }
+
+        if (selectedItems.Count > 0)
+        {
+            ClearCopySelection();
+        }
+
         _draggedTodoItemId = draggedItem?.Id;
         if (draggedItem is not null)
         {
@@ -565,6 +612,91 @@ public sealed partial class TodoWidgetContent : UserControl
         {
             ClearCopySelection();
             e.Handled = true;
+        }
+    }
+
+    private void TodoListView_PointerPressed(object sender, PointerRoutedEventArgs e)
+    {
+        if (sender is not ListViewBase listView)
+        {
+            return;
+        }
+
+        var properties = e.GetCurrentPoint(listView).Properties;
+        if (!properties.IsLeftButtonPressed ||
+            Win32Helper.IsKeyPressed(VirtualKey.Shift) ||
+            !CanStartTodoBoxSelection(e.OriginalSource))
+        {
+            return;
+        }
+
+        _copyTapGeneration++;
+        TodoListView.Focus(FocusState.Programmatic);
+        _selectionPointerPressed = true;
+        _isBoxSelecting = false;
+        _selectionStartPoint = e.GetCurrentPoint(TodoSelectionOverlay).Position;
+        _selectionCurrentPoint = _selectionStartPoint;
+        _selectionSnapshot = Win32Helper.IsKeyPressed(VirtualKey.Control)
+            ? GetSelectedCopyItemsInVisibleOrder().ToList()
+            : [];
+        _selectionPreviewItems = new HashSet<TodoItemViewModel>(_selectionSnapshot);
+        _selectionHitTestItems = [];
+
+        if (!Win32Helper.IsKeyPressed(VirtualKey.Control))
+        {
+            ClearCopySelection();
+        }
+    }
+
+    private void TodoListView_PointerMoved(object sender, PointerRoutedEventArgs e)
+    {
+        if (sender is not ListViewBase listView || !_selectionPointerPressed)
+        {
+            return;
+        }
+
+        _selectionCurrentPoint = e.GetCurrentPoint(TodoSelectionOverlay).Position;
+        if (!_isBoxSelecting && GetSelectionDragDistance(_selectionStartPoint, _selectionCurrentPoint) < 6.0)
+        {
+            return;
+        }
+
+        if (!_isBoxSelecting)
+        {
+            _isBoxSelecting = true;
+            listView.CapturePointer(e.Pointer);
+            if (_selectionHitTestItems.Count == 0)
+            {
+                CacheTodoSelectionHitTestItems(listView);
+            }
+        }
+
+        UpdateTodoSelectionRectangleVisual();
+        ApplyTodoSelectionRectanglePreview();
+        e.Handled = true;
+    }
+
+    private void TodoListView_PointerReleased(object sender, PointerRoutedEventArgs e)
+    {
+        if (sender is not ListViewBase listView)
+        {
+            return;
+        }
+
+        bool wasBoxSelecting = _isBoxSelecting;
+        FinishTodoSelectionRectangle(listView);
+        if (wasBoxSelecting)
+        {
+            listView.ReleasePointerCapture(e.Pointer);
+            e.Handled = true;
+        }
+    }
+
+    private void TodoListView_PointerCaptureLost(object sender, PointerRoutedEventArgs e)
+    {
+        if (sender is ListViewBase listView)
+        {
+            FinishTodoSelectionRectangle(listView);
         }
     }
 
@@ -802,6 +934,49 @@ public sealed partial class TodoWidgetContent : UserControl
         dueSubItem.Items.Add(clearDueItem);
         flyout.Items.Add(dueSubItem);
 
+        var reminderSubItem = new MenuFlyoutSubItem
+        {
+            Text = localization.T("Todo.Menu.Reminder"),
+            Icon = new FontIcon { Glyph = "\uEA8F" },
+            IsEnabled = item.DueDate is not null && !item.IsCompleted
+        };
+        reminderSubItem.Items.Add(CreateReminderOffsetItem(item, null));
+        reminderSubItem.Items.Add(CreateReminderOffsetItem(item, TodoReminderOptions.ReminderOff));
+        reminderSubItem.Items.Add(new MenuFlyoutSeparator());
+        foreach (int offsetMinutes in TodoReminderOptions.SupportedOffsetMinutes)
+        {
+            reminderSubItem.Items.Add(CreateReminderOffsetItem(item, offsetMinutes));
+        }
+
+        flyout.Items.Add(reminderSubItem);
+
+        var snoozeSubItem = new MenuFlyoutSubItem
+        {
+            Text = localization.T("Todo.Menu.Snooze"),
+            Icon = new FontIcon { Glyph = "\uE823" },
+            IsEnabled = item.DueDate is not null &&
+                        !item.IsCompleted &&
+                        !TodoReminderOptions.IsReminderOff(item.ReminderOffsetMinutes)
+        };
+        snoozeSubItem.Items.Add(CreateSnoozeItem(item, localization.T("Todo.Snooze.10Minutes"), TimeSpan.FromMinutes(10)));
+        snoozeSubItem.Items.Add(CreateSnoozeItem(item, localization.T("Todo.Snooze.30Minutes"), TimeSpan.FromMinutes(30)));
+        snoozeSubItem.Items.Add(CreateSnoozeItem(item, localization.T("Todo.Snooze.OneHour"), TimeSpan.FromHours(1)));
+        snoozeSubItem.Items.Add(CreateSnoozeItem(item, localization.T("Todo.Snooze.Tomorrow"), GetTomorrowSnoozeTime()));
+        flyout.Items.Add(snoozeSubItem);
+
+        var recurrenceSubItem = new MenuFlyoutSubItem
+        {
+            Text = localization.T("Todo.Menu.Recurrence"),
+            Icon = new FontIcon { Glyph = "\uE823" },
+            IsEnabled = item.DueDate is not null && !item.IsCompleted
+        };
+        foreach (string recurrenceMode in TodoRecurrenceMode.SupportedModes)
+        {
+            recurrenceSubItem.Items.Add(CreateRecurrenceItem(item, recurrenceMode));
+        }
+
+        flyout.Items.Add(recurrenceSubItem);
+
         flyout.Items.Add(new MenuFlyoutSeparator());
 
         var deleteItem = new MenuFlyoutItem
@@ -866,6 +1041,126 @@ public sealed partial class TodoWidgetContent : UserControl
             }
         };
         return dueItem;
+    }
+
+    private MenuFlyoutItem CreateRecurrenceItem(TodoItemViewModel item, string recurrenceMode)
+    {
+        string normalizedMode = TodoRecurrenceMode.Normalize(recurrenceMode);
+        bool isSelected = string.Equals(item.RecurrenceMode, normalizedMode, StringComparison.Ordinal);
+        var recurrenceItem = new MenuFlyoutItem
+        {
+            Text = App.Current.LocalizationService.T(TodoRecurrenceService.GetLocalizationKey(normalizedMode)),
+            Icon = isSelected
+                ? new FontIcon { Glyph = "\uE73E" }
+                : null
+        };
+        recurrenceItem.Click += async (_, _) =>
+        {
+            if (ViewModel is not null)
+            {
+                await ViewModel.SetRecurrenceAsync(item.Id, normalizedMode);
+            }
+        };
+        return recurrenceItem;
+    }
+
+    private MenuFlyoutItem CreateReminderOffsetItem(TodoItemViewModel item, int? offsetMinutes)
+    {
+        int? normalizedOffset = TodoReminderOptions.NormalizeOffsetMinutes(offsetMinutes);
+        bool isSelected = Nullable.Equals(item.ReminderOffsetMinutes, normalizedOffset);
+        var reminderItem = new MenuFlyoutItem
+        {
+            Text = FormatReminderOffsetText(normalizedOffset),
+            Icon = isSelected
+                ? new FontIcon { Glyph = "\uE73E" }
+                : null
+        };
+        reminderItem.Click += async (_, _) =>
+        {
+            if (ViewModel is not null)
+            {
+                await ViewModel.SetReminderOffsetAsync(item.Id, normalizedOffset);
+            }
+        };
+        return reminderItem;
+    }
+
+    private MenuFlyoutItem CreateSnoozeItem(TodoItemViewModel item, string text, TimeSpan snoozeFor)
+    {
+        var snoozeItem = new MenuFlyoutItem
+        {
+            Text = text
+        };
+        snoozeItem.Click += async (_, _) =>
+        {
+            if (ViewModel is not null &&
+                await ViewModel.SnoozeReminderAsync(item.Id, snoozeFor))
+            {
+                ShowUndoToast(
+                    App.Current.LocalizationService.Format("Todo.Snooze.Set", text),
+                    durationMs: CopyToastMs,
+                    clearUndoOnHide: false);
+            }
+        };
+        return snoozeItem;
+    }
+
+    private MenuFlyoutItem CreateSnoozeItem(TodoItemViewModel item, string text, DateTimeOffset snoozedUntil)
+    {
+        var snoozeItem = new MenuFlyoutItem
+        {
+            Text = text
+        };
+        snoozeItem.Click += async (_, _) =>
+        {
+            if (ViewModel is not null &&
+                await ViewModel.SnoozeReminderUntilAsync(item.Id, snoozedUntil))
+            {
+                ShowUndoToast(
+                    App.Current.LocalizationService.Format("Todo.Snooze.Set", text),
+                    durationMs: CopyToastMs,
+                    clearUndoOnHide: false);
+            }
+        };
+        return snoozeItem;
+    }
+
+    private static DateTimeOffset GetTomorrowSnoozeTime()
+    {
+        DateTime tomorrowMorning = DateTime.Now.Date.AddDays(1).AddHours(9);
+        return new DateTimeOffset(tomorrowMorning);
+    }
+
+    private static string FormatReminderOffsetText(int? offsetMinutes)
+    {
+        var localization = App.Current.LocalizationService;
+        if (offsetMinutes is null)
+        {
+            int defaultOffsetMinutes = SettingsService.NormalizeTodoReminderOffsetMinutes(
+                App.Current.SettingsService.Settings.TodoDefaultReminderOffsetMinutes);
+            return localization.Format(
+                "Todo.Reminder.Default",
+                FormatExplicitReminderOffsetText(defaultOffsetMinutes));
+        }
+
+        if (TodoReminderOptions.IsReminderOff(offsetMinutes))
+        {
+            return localization.T("Todo.Reminder.Off");
+        }
+
+        return FormatExplicitReminderOffsetText(offsetMinutes.Value);
+    }
+
+    private static string FormatExplicitReminderOffsetText(int offsetMinutes)
+    {
+        var localization = App.Current.LocalizationService;
+        return SettingsService.NormalizeTodoReminderOffsetMinutes(offsetMinutes) switch
+        {
+            0 => localization.T("Todo.Reminder.AtDueTime"),
+            60 => localization.T("Todo.Reminder.OneHourBefore"),
+            1440 => localization.T("Todo.Reminder.OneDayBefore"),
+            int minutes => localization.Format("Todo.Reminder.MinutesBefore", minutes)
+        };
     }
 
     private void CopyTodoItemText(TodoItemViewModel item)
@@ -1008,6 +1303,150 @@ public sealed partial class TodoWidgetContent : UserControl
         }
 
         _copySelectionAnchorId = ViewModel.VisibleItems.FirstOrDefault()?.Id;
+    }
+
+    private bool CanStartTodoBoxSelection(object? originalSource)
+    {
+        if (originalSource is not DependencyObject source)
+        {
+            return false;
+        }
+
+        return FindTodoItemContainer(source) is null &&
+               !HasAncestorOfType<ScrollBar>(source) &&
+               !HasAncestorOfType<ButtonBase>(source) &&
+               !HasAncestorOfType<TextBox>(source);
+    }
+
+    private void UpdateTodoSelectionRectangleVisual()
+    {
+        var selectionRect = GetSelectionRect(_selectionStartPoint, _selectionCurrentPoint);
+        Canvas.SetLeft(TodoSelectionRectangle, selectionRect.X);
+        Canvas.SetTop(TodoSelectionRectangle, selectionRect.Y);
+        TodoSelectionRectangle.Width = Math.Max(0, selectionRect.Width);
+        TodoSelectionRectangle.Height = Math.Max(0, selectionRect.Height);
+        TodoSelectionRectangle.Visibility = selectionRect.Width > 0 && selectionRect.Height > 0
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+    }
+
+    private void CacheTodoSelectionHitTestItems(ListViewBase listView)
+    {
+        _selectionHitTestItems = [];
+
+        if (ViewModel is null)
+        {
+            return;
+        }
+
+        foreach (var item in ViewModel.VisibleItems)
+        {
+            if (listView.ContainerFromItem(item) is not SelectorItem container ||
+                container.Visibility != Visibility.Visible ||
+                container.ActualWidth <= 0 ||
+                container.ActualHeight <= 0)
+            {
+                continue;
+            }
+
+            var target = FindVisualChild<Grid>(container, "TodoItemRoot") ?? container as FrameworkElement;
+            if (target is null || target.ActualWidth <= 0 || target.ActualHeight <= 0)
+            {
+                continue;
+            }
+
+            var topLeft = target.TransformToVisual(TodoSelectionOverlay)
+                .TransformPoint(new Windows.Foundation.Point(0, 0));
+            var bounds = new Windows.Foundation.Rect(
+                topLeft.X,
+                topLeft.Y,
+                target.ActualWidth,
+                target.ActualHeight);
+            _selectionHitTestItems.Add(new TodoSelectionHitTestItem(item, bounds));
+        }
+    }
+
+    private void ApplyTodoSelectionRectanglePreview()
+    {
+        var selectionRect = GetSelectionRect(_selectionStartPoint, _selectionCurrentPoint);
+        var selectedItems = new HashSet<TodoItemViewModel>(_selectionSnapshot);
+
+        foreach (var hitTestItem in _selectionHitTestItems)
+        {
+            if (RectsIntersect(selectionRect, hitTestItem.Bounds))
+            {
+                selectedItems.Add(hitTestItem.Item);
+            }
+        }
+
+        ApplyTodoSelectionPreview(selectedItems);
+    }
+
+    private void FinishTodoSelectionRectangle(ListViewBase listView)
+    {
+        bool shouldHandle = _selectionPointerPressed || _isBoxSelecting;
+        _selectionPointerPressed = false;
+
+        if (_isBoxSelecting)
+        {
+            ApplyTodoSelectionRectanglePreview();
+            _copySelectionAnchorId = ViewModel?.VisibleItems.FirstOrDefault(item => item.IsCopySelected)?.Id;
+        }
+
+        _isBoxSelecting = false;
+        _selectionSnapshot = [];
+        _selectionPreviewItems = [];
+        _selectionHitTestItems = [];
+        TodoSelectionRectangle.Visibility = Visibility.Collapsed;
+        TodoSelectionRectangle.Width = 0;
+        TodoSelectionRectangle.Height = 0;
+
+        if (shouldHandle)
+        {
+            listView.Focus(FocusState.Programmatic);
+        }
+    }
+
+    private void ApplyTodoSelectionPreview(HashSet<TodoItemViewModel> selectedItems)
+    {
+        if (ViewModel is null)
+        {
+            return;
+        }
+
+        _selectionPreviewItems = selectedItems;
+        foreach (var item in ViewModel.Items)
+        {
+            item.IsCopySelected = selectedItems.Contains(item);
+        }
+    }
+
+    private static Windows.Foundation.Rect GetSelectionRect(
+        Windows.Foundation.Point startPoint,
+        Windows.Foundation.Point endPoint)
+    {
+        double x = Math.Min(startPoint.X, endPoint.X);
+        double y = Math.Min(startPoint.Y, endPoint.Y);
+        double width = Math.Abs(endPoint.X - startPoint.X);
+        double height = Math.Abs(endPoint.Y - startPoint.Y);
+        return new Windows.Foundation.Rect(x, y, width, height);
+    }
+
+    private static double GetSelectionDragDistance(
+        Windows.Foundation.Point startPoint,
+        Windows.Foundation.Point endPoint)
+    {
+        double deltaX = endPoint.X - startPoint.X;
+        double deltaY = endPoint.Y - startPoint.Y;
+        return Math.Sqrt((deltaX * deltaX) + (deltaY * deltaY));
+    }
+
+    private static bool RectsIntersect(Windows.Foundation.Rect first, Windows.Foundation.Rect second)
+    {
+        return first.X < second.X + second.Width &&
+               first.X + first.Width > second.X &&
+               first.Y < second.Y + second.Height &&
+               first.Y + first.Height > second.Y;
     }
 
     private void ClearCopySelection()
@@ -1366,6 +1805,19 @@ public sealed partial class TodoWidgetContent : UserControl
         CustomDueDateOverlay.BorderThickness = new Thickness(0.8);
     }
 
+    private void ApplySelectionRectangleStyle()
+    {
+        if (TodoSelectionRectangle is null)
+        {
+            return;
+        }
+
+        bool isDark = ActualTheme == ElementTheme.Dark;
+        var accentColor = App.Current.ThemeService?.GetEffectiveAccentColor() ?? AccentColorHelper.DefaultAccentColor;
+        TodoSelectionRectangle.Background = new SolidColorBrush(WithAlpha(accentColor, isDark ? (byte)0x2D : (byte)0x24));
+        TodoSelectionRectangle.BorderBrush = new SolidColorBrush(WithAlpha(accentColor, isDark ? (byte)0xD8 : (byte)0xCC));
+    }
+
     private static Windows.UI.Color GetNeutralOverlaySurfaceColor(bool isDark)
     {
         return isDark
@@ -1529,6 +1981,22 @@ public sealed partial class TodoWidgetContent : UserControl
         }
 
         return null;
+    }
+
+    private static bool HasAncestorOfType<T>(DependencyObject source) where T : DependencyObject
+    {
+        DependencyObject? current = source;
+        while (current is not null)
+        {
+            if (current is T)
+            {
+                return true;
+            }
+
+            current = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetParent(current);
+        }
+
+        return false;
     }
 
     private async void ClearCompletedButton_Click(object sender, RoutedEventArgs e)

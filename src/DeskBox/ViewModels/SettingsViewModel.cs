@@ -136,7 +136,7 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
     [ObservableProperty] private bool _musicShowRhythmBars = true;
     [ObservableProperty] private bool _musicEnableCoverHoverMotion = true;
     [ObservableProperty] private bool _quickCaptureClipboardEnabled;
-    [ObservableProperty] private bool _quickCaptureImageClipboardEnabled = true;
+    [ObservableProperty] private bool _quickCaptureImageClipboardEnabled;
     [ObservableProperty] private int _quickCaptureRecentLimit = QuickCaptureService.DefaultRecentLimit;
     [ObservableProperty] private bool _isCheckingForUpdates;
     [ObservableProperty] private bool _isDownloadingUpdate;
@@ -1109,18 +1109,17 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
             switch (kind)
             {
                 case WidgetKind.QuickCapture:
-                    QuickCaptureClipboardEnabled = true;
-                    QuickCaptureImageClipboardEnabled = true;
+                    QuickCaptureClipboardEnabled = false;
+                    QuickCaptureImageClipboardEnabled = false;
                     QuickCaptureRecentLimit = QuickCaptureService.DefaultRecentLimit;
                     SelectedQuickCaptureDefaultView = SettingsService.QuickCaptureDefaultViewRecords;
                     SelectedQuickCaptureTabStyle = SettingsService.WidgetTabStylePivot;
-                    _settingsService.Settings.QuickCaptureClipboardEnabled = true;
-                    _settingsService.Settings.QuickCaptureImageClipboardEnabled = true;
+                    _settingsService.Settings.QuickCaptureClipboardEnabled = false;
+                    _settingsService.Settings.QuickCaptureImageClipboardEnabled = false;
                     _settingsService.Settings.QuickCaptureRecentLimit = QuickCaptureService.DefaultRecentLimit;
                     _settingsService.Settings.QuickCaptureDefaultView = SettingsService.QuickCaptureDefaultViewRecords;
                     _settingsService.Settings.QuickCaptureTabStyle = SettingsService.WidgetTabStylePivot;
                     App.Current?.QuickCaptureClipboardService?.Refresh();
-                    App.Current?.QuickCaptureClipboardService?.CaptureCurrent();
                     RefreshQuickCaptureClipboardDiagnostics();
                     break;
                 case WidgetKind.Todo:
@@ -2077,8 +2076,8 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
             ShowHoverButtons = true;
             ApplyHoverButtonActionSelection(SettingsService.DefaultWidgetHoverButtonActions);
             AutoCheckForUpdates = true;
-            QuickCaptureClipboardEnabled = true;
-            QuickCaptureImageClipboardEnabled = true;
+            QuickCaptureClipboardEnabled = false;
+            QuickCaptureImageClipboardEnabled = false;
             QuickCaptureRecentLimit = QuickCaptureService.DefaultRecentLimit;
             SelectedQuickCaptureDefaultView = SettingsService.QuickCaptureDefaultViewRecords;
             SelectedQuickCaptureTabStyle = SettingsService.WidgetTabStylePivot;
@@ -2113,7 +2112,6 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
             _themeService.RefreshAppearance();
             await _settingsService.SaveAsync();
             App.Current?.QuickCaptureClipboardService?.Refresh();
-            App.Current?.QuickCaptureClipboardService?.CaptureCurrent();
             _settingsService.NotifyAppearancePreviewNow();
         }
         finally
@@ -3243,6 +3241,13 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
         }
 
         FeatureWidgetSettings.SetEnabled(_settingsService.Settings, WidgetKind.QuickCapture, value);
+        if (!value)
+        {
+            ApplyQuickCaptureRecordingState(clipboardEnabled: false, imageEnabled: false);
+            _settingsService.SaveDebounced();
+            App.Current?.QuickCaptureClipboardService?.Refresh();
+        }
+
         _ = SyncQuickCaptureEnabledAsync(value);
         OnPropertyChanged(nameof(QuickCaptureStatusText));
         OnPropertyChanged(nameof(QuickCaptureDependencyStatusText));
@@ -3406,7 +3411,9 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
             return;
         }
 
-        _settingsService.Settings.QuickCaptureClipboardEnabled = value;
+        ApplyQuickCaptureRecordingState(
+            clipboardEnabled: value,
+            imageEnabled: value && QuickCaptureImageClipboardEnabled);
 
         if (value)
         {
@@ -3444,12 +3451,64 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
             return;
         }
 
-        _settingsService.Settings.QuickCaptureImageClipboardEnabled = value;
+        if (value)
+        {
+            ApplyQuickCaptureRecordingState(clipboardEnabled: true, imageEnabled: true);
+            FeatureWidgetSettings.SetEnabled(_settingsService.Settings, WidgetKind.QuickCapture, true);
+            bool shouldSyncQuickCapture = !QuickCaptureEnabled;
+            if (shouldSyncQuickCapture)
+            {
+                _quickCaptureEnabled = true;
+                OnPropertyChanged(nameof(QuickCaptureEnabled));
+                OnPropertyChanged(nameof(QuickCaptureStatusText));
+                OnPropertyChanged(nameof(QuickCaptureDependencyStatusText));
+            }
+
+            _ = SyncQuickCaptureEnabledAsync(true);
+        }
+        else
+        {
+            ApplyQuickCaptureRecordingState(
+                clipboardEnabled: QuickCaptureClipboardEnabled,
+                imageEnabled: false);
+        }
+
         _settingsService.SaveDebounced();
+        App.Current?.QuickCaptureClipboardService?.Refresh();
         RefreshQuickCaptureClipboardDiagnostics();
         if (value)
         {
-            App.Current.QuickCaptureClipboardService?.CaptureCurrent();
+            App.Current?.QuickCaptureClipboardService?.CaptureCurrent();
+        }
+    }
+
+    private void ApplyQuickCaptureRecordingState(bool clipboardEnabled, bool imageEnabled)
+    {
+        if (!clipboardEnabled)
+        {
+            imageEnabled = false;
+        }
+
+        _settingsService.Settings.QuickCaptureClipboardEnabled = clipboardEnabled;
+        _settingsService.Settings.QuickCaptureImageClipboardEnabled = imageEnabled;
+
+        bool wasApplyingSnapshot = _isApplyingSettingsSnapshot;
+        _isApplyingSettingsSnapshot = true;
+        try
+        {
+            if (QuickCaptureClipboardEnabled != clipboardEnabled)
+            {
+                QuickCaptureClipboardEnabled = clipboardEnabled;
+            }
+
+            if (QuickCaptureImageClipboardEnabled != imageEnabled)
+            {
+                QuickCaptureImageClipboardEnabled = imageEnabled;
+            }
+        }
+        finally
+        {
+            _isApplyingSettingsSnapshot = wasApplyingSnapshot;
         }
     }
 

@@ -167,8 +167,8 @@ public sealed class SettingsService
         settings.ShowHoverButtons = true;
         settings.WidgetHoverButtonActions = DefaultWidgetHoverButtonActions;
         settings.AutoCheckForUpdates = true;
-        settings.QuickCaptureClipboardEnabled = true;
-        settings.QuickCaptureImageClipboardEnabled = true;
+        settings.QuickCaptureClipboardEnabled = false;
+        settings.QuickCaptureImageClipboardEnabled = false;
         settings.QuickCaptureRecentLimit = QuickCaptureService.DefaultRecentLimit;
         settings.QuickCaptureDefaultView = QuickCaptureDefaultViewRecords;
         settings.QuickCaptureTabStyle = WidgetTabStylePivot;
@@ -964,6 +964,26 @@ public sealed class SettingsService
         if (!string.Equals(settings.QuickCaptureTabStyle, normalizedTabStyle, StringComparison.Ordinal))
         {
             settings.QuickCaptureTabStyle = normalizedTabStyle;
+            changed = true;
+        }
+
+        if (!FeatureWidgetSettings.IsEnabled(settings, WidgetKind.QuickCapture))
+        {
+            if (settings.QuickCaptureClipboardEnabled)
+            {
+                settings.QuickCaptureClipboardEnabled = false;
+                changed = true;
+            }
+
+            if (settings.QuickCaptureImageClipboardEnabled)
+            {
+                settings.QuickCaptureImageClipboardEnabled = false;
+                changed = true;
+            }
+        }
+        else if (!settings.QuickCaptureClipboardEnabled && settings.QuickCaptureImageClipboardEnabled)
+        {
+            settings.QuickCaptureImageClipboardEnabled = false;
             changed = true;
         }
 

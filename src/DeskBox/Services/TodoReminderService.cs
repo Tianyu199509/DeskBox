@@ -29,6 +29,12 @@ public sealed class TodoReminderService : IDisposable
     private bool _isChecking;
     private bool _disposed;
 
+    private enum ReminderTriggerKind
+    {
+        Due,
+        Snooze
+    }
+
     public TodoReminderService(
         SettingsService settingsService,
         LocalizationService localizationService,
@@ -92,9 +98,8 @@ public sealed class TodoReminderService : IDisposable
                 return 0;
             }
 
-            int offsetMinutes = SettingsService.NormalizeTodoReminderOffsetMinutes(
+            int defaultOffsetMinutes = SettingsService.NormalizeTodoReminderOffsetMinutes(
                 settings.TodoDefaultReminderOffsetMinutes);
-            var reminderOffset = TimeSpan.FromMinutes(offsetMinutes);
             var widgets = settings.Widgets
                 .Where(widget =>
                     widget.WidgetKind == WidgetKind.Todo &&
@@ -110,7 +115,7 @@ public sealed class TodoReminderService : IDisposable
             List<TodoReminderCandidate> candidates = [];
             foreach (var widget in widgets)
             {
-                await CollectWidgetCandidatesAsync(widget, now, reminderOffset, candidates);
+                await CollectWidgetCandidatesAsync(widget, now, defaultOffsetMinutes, candidates);
             }
 
             if (candidates.Count == 0)
@@ -145,24 +150,131 @@ public sealed class TodoReminderService : IDisposable
 
     internal static bool ShouldNotify(TodoItem item, DateTimeOffset now, TimeSpan reminderOffset)
     {
-        if (item.IsCompleted || item.DueDate is not { } dueDate)
+        return ShouldNotifyDue(item, now, reminderOffset);
+    }
+
+    internal static bool ShouldNotify(TodoItem item, DateTimeOffset now, int defaultOffsetMinutes)
+    {
+        return TryGetReminderTrigger(item, now, defaultOffsetMinutes, out _, out _);
+    }
+
+    public async Task<bool> SnoozeAsync(string? widgetId, string? itemId, TimeSpan snoozeFor)
+    {
+        if (_disposed ||
+            string.IsNullOrWhiteSpace(widgetId) ||
+            string.IsNullOrWhiteSpace(itemId) ||
+            snoozeFor <= TimeSpan.Zero)
         {
             return false;
         }
 
-        if (item.ReminderDismissedForDueDate is { } dismissedForDueDate &&
-            DateTimeOffset.Equals(dismissedForDueDate, dueDate))
+        return await SnoozeUntilAsync(widgetId, itemId, _clock().Add(snoozeFor));
+    }
+
+    public async Task<bool> SnoozeUntilAsync(string? widgetId, string? itemId, DateTimeOffset snoozedUntil)
+    {
+        if (_disposed ||
+            string.IsNullOrWhiteSpace(widgetId) ||
+            string.IsNullOrWhiteSpace(itemId) ||
+            snoozedUntil <= _clock())
         {
             return false;
         }
 
-        DateTimeOffset reminderAt = dueDate - reminderOffset;
-        if (now < reminderAt)
+        try
+        {
+            if (!TryGetTodoReminderWidget(widgetId, requireReminderEnabled: true, out WidgetConfig? widget))
+            {
+                return false;
+            }
+
+            var store = _storeFactory(widget.Id);
+            var data = await store.LoadAsync();
+            var item = data.Items.FirstOrDefault(item =>
+                string.Equals(item.Id, itemId, StringComparison.Ordinal));
+            if (item is null ||
+                item.IsCompleted ||
+                item.DueDate is null ||
+                TodoReminderOptions.IsReminderOff(item.ReminderOffsetMinutes))
+            {
+                return false;
+            }
+
+            item.SnoozedUntil = snoozedUntil;
+            item.SnoozeLastNotifiedAt = null;
+            item.ReminderDismissedForDueDate = item.DueDate;
+            item.UpdatedAt = _clock().ToUniversalTime();
+            await store.SaveAsync(data);
+            App.Log($"[TodoReminder] Snoozed widget={widgetId} item={itemId} until={item.SnoozedUntil:O}");
+            return true;
+        }
+        catch (Exception ex)
+        {
+            App.Log($"[TodoReminder] Snooze failed: {ex}");
+            return false;
+        }
+    }
+
+    public async Task<bool> CompleteAsync(string? widgetId, string? itemId)
+    {
+        if (_disposed ||
+            string.IsNullOrWhiteSpace(widgetId) ||
+            string.IsNullOrWhiteSpace(itemId))
         {
             return false;
         }
 
-        return now <= dueDate + MissedReminderGrace;
+        try
+        {
+            if (!TryGetTodoReminderWidget(widgetId, requireReminderEnabled: false, out WidgetConfig? widget))
+            {
+                return false;
+            }
+
+            var store = _storeFactory(widget.Id);
+            var data = await store.LoadAsync();
+            int itemIndex = data.Items.FindIndex(item =>
+                string.Equals(item.Id, itemId, StringComparison.Ordinal));
+            if (itemIndex < 0)
+            {
+                return false;
+            }
+
+            var item = data.Items[itemIndex];
+            if (item.IsCompleted)
+            {
+                return true;
+            }
+
+            DateTimeOffset now = _clock().ToUniversalTime();
+            if (item.Recurrence is not null)
+            {
+                item.RecurrenceSeriesId ??= Guid.NewGuid().ToString("N");
+            }
+
+            item.IsCompleted = true;
+            item.CompletedAt = now;
+            item.UpdatedAt = now;
+            item.GeneratedNextItemId = null;
+            item.SnoozedUntil = null;
+            item.SnoozeLastNotifiedAt = null;
+
+            if (TodoRecurrenceService.TryCreateNextOccurrence(item, now, out TodoItem? nextItem) &&
+                nextItem is not null)
+            {
+                item.GeneratedNextItemId = nextItem.Id;
+                data.Items.Insert(Math.Clamp(itemIndex + 1, 0, data.Items.Count), nextItem);
+            }
+
+            await store.SaveAsync(data);
+            App.Log($"[TodoReminder] Completed from notification widget={widgetId} item={itemId}");
+            return true;
+        }
+        catch (Exception ex)
+        {
+            App.Log($"[TodoReminder] Complete failed: {ex}");
+            return false;
+        }
     }
 
     private async Task RunDelayedInitialCheckAsync()
@@ -178,6 +290,33 @@ public sealed class TodoReminderService : IDisposable
         }
     }
 
+    private bool TryGetTodoReminderWidget(
+        string widgetId,
+        bool requireReminderEnabled,
+        out WidgetConfig widget)
+    {
+        widget = null!;
+        var settings = _settingsService.Settings;
+        if ((requireReminderEnabled && !settings.TodoReminderEnabled) ||
+            !FeatureWidgetSettings.IsEnabled(settings, WidgetKind.Todo))
+        {
+            return false;
+        }
+
+        var match = settings.Widgets.FirstOrDefault(entry =>
+            entry.WidgetKind == WidgetKind.Todo &&
+            !entry.IsDisabled &&
+            !settings.DeletedWidgetIds.Contains(entry.Id) &&
+            string.Equals(entry.Id, widgetId, StringComparison.Ordinal));
+        if (match is null)
+        {
+            return false;
+        }
+
+        widget = match;
+        return true;
+    }
+
     private async void Timer_Tick(DispatcherQueueTimer sender, object args)
     {
         await CheckNowAsync(_clock());
@@ -186,7 +325,7 @@ public sealed class TodoReminderService : IDisposable
     private async Task CollectWidgetCandidatesAsync(
         WidgetConfig widget,
         DateTimeOffset now,
-        TimeSpan reminderOffset,
+        int defaultOffsetMinutes,
         List<TodoReminderCandidate> candidates)
     {
         var store = _storeFactory(widget.Id);
@@ -195,19 +334,28 @@ public sealed class TodoReminderService : IDisposable
 
         foreach (var item in data.Items)
         {
-            if (!ShouldNotify(item, now, reminderOffset))
+            if (!TryGetReminderTrigger(item, now, defaultOffsetMinutes, out ReminderTriggerKind triggerKind, out int? effectiveOffsetMinutes))
             {
                 continue;
             }
 
-            string reminderKey = GetReminderKey(widget.Id, item);
+            string reminderKey = GetReminderKey(widget.Id, item, triggerKind, effectiveOffsetMinutes);
             if (!_sessionNotifiedKeys.Add(reminderKey))
             {
                 continue;
             }
 
-            item.ReminderLastNotifiedAt = now;
-            item.ReminderDismissedForDueDate = item.DueDate;
+            if (triggerKind == ReminderTriggerKind.Snooze)
+            {
+                item.SnoozeLastNotifiedAt = now;
+                item.SnoozedUntil = null;
+            }
+            else
+            {
+                item.ReminderLastNotifiedAt = now;
+                item.ReminderDismissedForDueDate = item.DueDate;
+            }
+
             changed = true;
             candidates.Add(new TodoReminderCandidate(widget.Id, widget.Name, item));
         }
@@ -286,10 +434,79 @@ public sealed class TodoReminderService : IDisposable
             : $"{normalized[..maxLength]}...";
     }
 
-    private static string GetReminderKey(string widgetId, TodoItem item)
+    private static bool TryGetReminderTrigger(
+        TodoItem item,
+        DateTimeOffset now,
+        int defaultOffsetMinutes,
+        out ReminderTriggerKind triggerKind,
+        out int? effectiveOffsetMinutes)
+    {
+        triggerKind = ReminderTriggerKind.Due;
+        effectiveOffsetMinutes = null;
+
+        if (item.IsCompleted || item.DueDate is null)
+        {
+            return false;
+        }
+
+        if (TodoReminderOptions.IsReminderOff(item.ReminderOffsetMinutes))
+        {
+            return false;
+        }
+
+        if (item.SnoozedUntil is { } snoozedUntil)
+        {
+            triggerKind = ReminderTriggerKind.Snooze;
+            return now >= snoozedUntil;
+        }
+
+        int normalizedDefaultOffsetMinutes = SettingsService.NormalizeTodoReminderOffsetMinutes(defaultOffsetMinutes);
+        effectiveOffsetMinutes = TodoReminderOptions.NormalizeOffsetMinutes(item.ReminderOffsetMinutes) ??
+                                 normalizedDefaultOffsetMinutes;
+        if (TodoReminderOptions.IsReminderOff(effectiveOffsetMinutes))
+        {
+            return false;
+        }
+
+        return ShouldNotifyDue(
+            item,
+            now,
+            TimeSpan.FromMinutes(Math.Max(0, effectiveOffsetMinutes.Value)));
+    }
+
+    private static bool ShouldNotifyDue(TodoItem item, DateTimeOffset now, TimeSpan reminderOffset)
+    {
+        if (item.IsCompleted || item.DueDate is not { } dueDate)
+        {
+            return false;
+        }
+
+        if (item.ReminderDismissedForDueDate is { } dismissedForDueDate &&
+            DateTimeOffset.Equals(dismissedForDueDate, dueDate))
+        {
+            return false;
+        }
+
+        DateTimeOffset reminderAt = dueDate - reminderOffset;
+        if (now < reminderAt)
+        {
+            return false;
+        }
+
+        return now <= dueDate + MissedReminderGrace;
+    }
+
+    private static string GetReminderKey(
+        string widgetId,
+        TodoItem item,
+        ReminderTriggerKind triggerKind,
+        int? effectiveOffsetMinutes)
     {
         string dueKey = item.DueDate?.UtcTicks.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "none";
-        return $"{widgetId}:{item.Id}:{dueKey}";
+        string triggerKey = triggerKind == ReminderTriggerKind.Snooze
+            ? item.SnoozedUntil?.UtcTicks.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "none"
+            : effectiveOffsetMinutes?.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "default";
+        return $"{widgetId}:{item.Id}:{triggerKind}:{dueKey}:{triggerKey}";
     }
 
     private sealed record TodoReminderCandidate(

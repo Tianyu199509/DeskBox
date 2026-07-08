@@ -16,10 +16,16 @@ public sealed partial class TodoItemViewModel : ObservableObject
     private bool _isImportant;
     private string? _colorMarker;
     private DateTimeOffset? _dueDate;
+    private TodoRecurrence? _recurrence;
     private DateTimeOffset? _completedAt;
+    private int? _reminderOffsetMinutes;
+    private DateTimeOffset? _snoozedUntil;
     private bool _isEditing;
     private bool _isCopySelected;
     private string _editText = string.Empty;
+    private bool _isRecurringHistoryLead;
+    private bool _isRecurringHistoryExpanded;
+    private int _recurringHistoryItemCount;
 
     public TodoItemViewModel(TodoItem item, LocalizationService? localizationService = null)
     {
@@ -31,7 +37,12 @@ public sealed partial class TodoItemViewModel : ObservableObject
         _colorMarker = TodoItem.NormalizeColorMarker(item.ColorMarker);
         item.ColorMarker = _colorMarker;
         _dueDate = item.DueDate;
+        _recurrence = TodoRecurrence.Normalize(item.Recurrence, item.DueDate);
+        item.Recurrence = _recurrence;
         _completedAt = item.CompletedAt;
+        _reminderOffsetMinutes = TodoReminderOptions.NormalizeOffsetMinutes(item.ReminderOffsetMinutes);
+        item.ReminderOffsetMinutes = _reminderOffsetMinutes;
+        _snoozedUntil = item.SnoozedUntil;
     }
 
     public TodoItem Item => _item;
@@ -94,8 +105,15 @@ public sealed partial class TodoItemViewModel : ObservableObject
                 OnPropertyChanged(nameof(DueStatusOverdueVisibility));
                 OnPropertyChanged(nameof(ContentOpacity));
                 OnPropertyChanged(nameof(TextDecorations));
+                OnPropertyChanged(nameof(HasActiveSnooze));
             }
         }
+    }
+
+    public string? RecurrenceSeriesId
+    {
+        get => TodoRecurrenceService.NormalizeSeriesId(_item.RecurrenceSeriesId);
+        internal set => _item.RecurrenceSeriesId = TodoRecurrenceService.NormalizeSeriesId(value);
     }
 
     public bool IsImportant
@@ -142,7 +160,29 @@ public sealed partial class TodoItemViewModel : ObservableObject
                 OnPropertyChanged(nameof(IsOverdue));
                 OnPropertyChanged(nameof(DueStatusNormalVisibility));
                 OnPropertyChanged(nameof(DueStatusOverdueVisibility));
+                OnPropertyChanged(nameof(HasActiveSnooze));
             }
+        }
+    }
+
+    public TodoRecurrence? Recurrence
+    {
+        get => _recurrence;
+        internal set
+        {
+            TodoRecurrence? normalizedValue = TodoRecurrence.Normalize(value, DueDate);
+            if (AreRecurrenceEqual(_recurrence, normalizedValue))
+            {
+                return;
+            }
+
+            _recurrence = normalizedValue;
+            _item.Recurrence = normalizedValue?.Clone();
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(HasRecurrence));
+            OnPropertyChanged(nameof(RecurrenceMode));
+            OnPropertyChanged(nameof(RecurrenceSummaryText));
+            OnPropertyChanged(nameof(DueStatusText));
         }
     }
 
@@ -154,6 +194,33 @@ public sealed partial class TodoItemViewModel : ObservableObject
             if (SetProperty(ref _completedAt, value))
             {
                 _item.CompletedAt = value;
+            }
+        }
+    }
+
+    public int? ReminderOffsetMinutes
+    {
+        get => _reminderOffsetMinutes;
+        internal set
+        {
+            int? normalizedValue = TodoReminderOptions.NormalizeOffsetMinutes(value);
+            if (SetProperty(ref _reminderOffsetMinutes, normalizedValue))
+            {
+                _item.ReminderOffsetMinutes = normalizedValue;
+            }
+        }
+    }
+
+    public DateTimeOffset? SnoozedUntil
+    {
+        get => _snoozedUntil;
+        internal set
+        {
+            if (SetProperty(ref _snoozedUntil, value))
+            {
+                _item.SnoozedUntil = value;
+                OnPropertyChanged(nameof(HasActiveSnooze));
+                OnPropertyChanged(nameof(DueStatusText));
             }
         }
     }
@@ -215,6 +282,17 @@ public sealed partial class TodoItemViewModel : ObservableObject
                              dueDate.ToLocalTime() < DateTimeOffset.Now &&
                              !IsCompleted;
 
+    public bool HasRecurrence => Recurrence is not null &&
+                                 !string.Equals(RecurrenceMode, TodoRecurrenceMode.None, StringComparison.Ordinal);
+
+    public bool HasActiveSnooze => SnoozedUntil is not null && DueDate is not null && !IsCompleted;
+
+    public string RecurrenceMode => TodoRecurrenceMode.Normalize(Recurrence?.Mode);
+
+    public string RecurrenceSummaryText => HasRecurrence
+        ? LocalizedText(TodoRecurrenceService.GetLocalizationKey(RecurrenceMode))
+        : string.Empty;
+
     public string DueStatusText
     {
         get
@@ -244,6 +322,16 @@ public sealed partial class TodoItemViewModel : ObservableObject
                 statusText = Format("Todo.Due.Date", formattedDue);
             }
 
+            if (HasRecurrence)
+            {
+                statusText = $"{RecurrenceSummaryText} \u00B7 {statusText}";
+            }
+
+            if (HasActiveSnooze && SnoozedUntil is { } snoozedUntil)
+            {
+                statusText = $"{statusText} \u00B7 {Format("Todo.Reminder.SnoozedUntil", FormatSnoozeDateTime(snoozedUntil.ToLocalTime()))}";
+            }
+
             return IsOverdue
                 ? $"{statusText} \u00B7 {LocalizedText("Todo.Due.OverdueSuffix")}"
                 : statusText;
@@ -266,6 +354,24 @@ public sealed partial class TodoItemViewModel : ObservableObject
 
     public Visibility EditVisibility => IsEditing ? Visibility.Visible : Visibility.Collapsed;
 
+    public bool IsRecurringHistoryLead => _isRecurringHistoryLead;
+
+    public bool IsRecurringHistoryExpanded => _isRecurringHistoryExpanded;
+
+    public int RecurringHistoryItemCount => _recurringHistoryItemCount;
+
+    public int HiddenRecurringHistoryCount => Math.Max(0, RecurringHistoryItemCount - 1);
+
+    public Visibility RecurringHistoryToggleVisibility => IsRecurringHistoryLead && RecurringHistoryItemCount > 1
+        ? Visibility.Visible
+        : Visibility.Collapsed;
+
+    public string RecurringHistoryToggleText => IsRecurringHistoryExpanded
+        ? Format("Todo.RecurrenceHistory.Collapse", HiddenRecurringHistoryCount)
+        : Format("Todo.RecurrenceHistory.Expand", HiddenRecurringHistoryCount);
+
+    public string RecurringHistoryToggleGlyph => IsRecurringHistoryExpanded ? "\uE70D" : "\uE70E";
+
     internal void BeginEdit()
     {
         EditText = Text;
@@ -280,9 +386,44 @@ public sealed partial class TodoItemViewModel : ObservableObject
 
     internal void RefreshLocalizedText()
     {
+        OnPropertyChanged(nameof(RecurrenceSummaryText));
         OnPropertyChanged(nameof(DueStatusText));
         OnPropertyChanged(nameof(DueStatusNormalVisibility));
         OnPropertyChanged(nameof(DueStatusOverdueVisibility));
+        OnPropertyChanged(nameof(RecurringHistoryToggleText));
+    }
+
+    internal void UpdateRecurringHistoryState(bool isLead, bool isExpanded, int itemCount)
+    {
+        bool changed = false;
+        if (_isRecurringHistoryLead != isLead)
+        {
+            _isRecurringHistoryLead = isLead;
+            OnPropertyChanged(nameof(IsRecurringHistoryLead));
+            changed = true;
+        }
+
+        if (_isRecurringHistoryExpanded != isExpanded)
+        {
+            _isRecurringHistoryExpanded = isExpanded;
+            OnPropertyChanged(nameof(IsRecurringHistoryExpanded));
+            OnPropertyChanged(nameof(RecurringHistoryToggleGlyph));
+            changed = true;
+        }
+
+        if (_recurringHistoryItemCount != itemCount)
+        {
+            _recurringHistoryItemCount = itemCount;
+            OnPropertyChanged(nameof(RecurringHistoryItemCount));
+            OnPropertyChanged(nameof(HiddenRecurringHistoryCount));
+            changed = true;
+        }
+
+        if (changed)
+        {
+            OnPropertyChanged(nameof(RecurringHistoryToggleVisibility));
+            OnPropertyChanged(nameof(RecurringHistoryToggleText));
+        }
     }
 
     private string LocalizedText(string key)
@@ -309,6 +450,25 @@ public sealed partial class TodoItemViewModel : ObservableObject
             : dueDate.ToString("HH:mm:ss");
     }
 
+    private string FormatSnoozeDateTime(DateTimeOffset snoozedUntil)
+    {
+        DateTime today = DateTimeOffset.Now.Date;
+        string time = FormatDueTime(snoozedUntil);
+        if (snoozedUntil.Date == today)
+        {
+            return time;
+        }
+
+        if (snoozedUntil.Date == today.AddDays(1))
+        {
+            return Format("Todo.Due.TomorrowAt", time);
+        }
+
+        return snoozedUntil.Second == 0
+            ? snoozedUntil.ToString("yyyy/M/d HH:mm")
+            : snoozedUntil.ToString("yyyy/M/d HH:mm:ss");
+    }
+
     private static Windows.UI.Color ParseColor(string hex)
     {
         string value = hex.TrimStart('#');
@@ -321,5 +481,13 @@ public sealed partial class TodoItemViewModel : ObservableObject
         }
 
         return ColorHelper.FromArgb(0xFF, red, green, blue);
+    }
+
+    private static bool AreRecurrenceEqual(TodoRecurrence? left, TodoRecurrence? right)
+    {
+        string leftMode = TodoRecurrenceMode.Normalize(left?.Mode);
+        string rightMode = TodoRecurrenceMode.Normalize(right?.Mode);
+        return string.Equals(leftMode, rightMode, StringComparison.Ordinal) &&
+               Nullable.Equals(left?.AnchorDueDate, right?.AnchorDueDate);
     }
 }

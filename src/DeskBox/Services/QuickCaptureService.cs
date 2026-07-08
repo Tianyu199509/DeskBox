@@ -30,6 +30,8 @@ public sealed class QuickCaptureService
 
     private readonly QuickCaptureStore _store;
     private readonly SemaphoreSlim _gate = new(1, 1);
+    private readonly object _thumbnailTaskLock = new();
+    private readonly Dictionary<string, Task<string?>> _thumbnailTasks = new(StringComparer.OrdinalIgnoreCase);
     private QuickCaptureStoreData? _data;
 
     public event Action? Changed;
@@ -621,7 +623,49 @@ public sealed class QuickCaptureService
 
     public Task<string?> GetOrCreateImageThumbnailPathAsync(string? imagePath)
     {
-        return CreateImageThumbnailAsync(imagePath);
+        if (string.IsNullOrWhiteSpace(imagePath))
+        {
+            return Task.FromResult<string?>(null);
+        }
+
+        string normalizedPath = Path.GetFullPath(imagePath);
+        if (!File.Exists(normalizedPath) || !IsImageFile(normalizedPath))
+        {
+            return Task.FromResult<string?>(null);
+        }
+
+        string thumbnailPath = GetThumbnailPath(normalizedPath);
+        if (File.Exists(thumbnailPath))
+        {
+            return Task.FromResult<string?>(thumbnailPath);
+        }
+
+        lock (_thumbnailTaskLock)
+        {
+            if (_thumbnailTasks.TryGetValue(normalizedPath, out var existingTask))
+            {
+                return existingTask;
+            }
+
+            var task = CreateImageThumbnailAndRemoveTaskAsync(normalizedPath);
+            _thumbnailTasks[normalizedPath] = task;
+            return task;
+        }
+    }
+
+    private async Task<string?> CreateImageThumbnailAndRemoveTaskAsync(string imagePath)
+    {
+        try
+        {
+            return await CreateImageThumbnailAsync(imagePath);
+        }
+        finally
+        {
+            lock (_thumbnailTaskLock)
+            {
+                _thumbnailTasks.Remove(imagePath);
+            }
+        }
     }
 
     private async Task EnsureLoadedAsync()

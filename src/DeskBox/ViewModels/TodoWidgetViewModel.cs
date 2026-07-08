@@ -56,6 +56,7 @@ public sealed partial class TodoWidgetViewModel : ObservableObject
     private bool _confirmBeforeDelete;
     private TodoUndoSnapshot? _undoSnapshot;
     private bool _isInitialized;
+    private readonly HashSet<string> _expandedRecurringHistoryGroupKeys = new(StringComparer.Ordinal);
 
     public TodoWidgetViewModel(
         TodoWidgetStore store,
@@ -462,9 +463,43 @@ public sealed partial class TodoWidgetViewModel : ObservableObject
             return true;
         }
 
-        item.IsCompleted = isCompleted;
         var now = DateTimeOffset.UtcNow;
-        item.CompletedAt = isCompleted ? now : null;
+        if (isCompleted)
+        {
+            if (item.Recurrence is not null)
+            {
+                item.RecurrenceSeriesId ??= Guid.NewGuid().ToString("N");
+            }
+
+            item.IsCompleted = true;
+            item.CompletedAt = now;
+            item.SnoozedUntil = null;
+            item.Item.SnoozeLastNotifiedAt = null;
+            item.Item.GeneratedNextItemId = null;
+
+            if (TodoRecurrenceService.TryCreateNextOccurrence(item.Item, now, out TodoItem? nextItem) &&
+                nextItem is not null)
+            {
+                item.Item.GeneratedNextItemId = nextItem.Id;
+                int currentIndex = Items.IndexOf(item);
+                var nextViewModel = new TodoItemViewModel(nextItem, _localizationService);
+                Items.Insert(Math.Clamp(currentIndex + 1, 0, Items.Count), nextViewModel);
+            }
+        }
+        else
+        {
+            TodoItemViewModel? generatedOccurrence = FindGeneratedOccurrence(item);
+            if (generatedOccurrence is not null &&
+                TodoRecurrenceService.ShouldRemoveGeneratedOccurrence(item.Item, generatedOccurrence.Item))
+            {
+                Items.Remove(generatedOccurrence);
+            }
+
+            item.IsCompleted = false;
+            item.CompletedAt = null;
+            item.Item.GeneratedNextItemId = null;
+        }
+
         item.UpdatedAt = now;
         RefreshVisibleItems();
         RefreshCountProperties();
@@ -524,19 +559,162 @@ public sealed partial class TodoWidgetViewModel : ObservableObject
         }
 
         DateTimeOffset? normalizedDueDate = NormalizeDueDate(dueDate);
-        if (Nullable.Equals(item.DueDate, normalizedDueDate))
+        TodoRecurrence? updatedRecurrence = normalizedDueDate is null
+            ? null
+            : item.Recurrence?.Clone();
+        if (updatedRecurrence is not null)
+        {
+            updatedRecurrence.AnchorDueDate = normalizedDueDate;
+        }
+
+        if (Nullable.Equals(item.DueDate, normalizedDueDate) &&
+            AreRecurrenceEqual(item.Recurrence, updatedRecurrence))
         {
             return true;
         }
 
         item.DueDate = normalizedDueDate;
+        item.Recurrence = updatedRecurrence;
+        if (updatedRecurrence is null)
+        {
+            item.RecurrenceSeriesId = null;
+            item.Item.GeneratedNextItemId = null;
+        }
         item.Item.ReminderLastNotifiedAt = null;
         item.Item.ReminderDismissedForDueDate = null;
+        item.SnoozedUntil = null;
+        item.Item.SnoozeLastNotifiedAt = null;
         item.UpdatedAt = DateTimeOffset.UtcNow;
         RefreshVisibleItems();
         RefreshCountProperties();
         await SaveAsync();
         return true;
+    }
+
+    public async Task<bool> SetRecurrenceAsync(string itemId, string? mode)
+    {
+        var item = FindItem(itemId);
+        if (item is null)
+        {
+            return false;
+        }
+
+        string normalizedMode = TodoRecurrenceMode.Normalize(mode);
+        TodoRecurrence? recurrence = TodoRecurrenceService.CreateRecurrence(normalizedMode, item.DueDate);
+        if (AreRecurrenceEqual(item.Recurrence, recurrence))
+        {
+            return true;
+        }
+
+        if (item.DueDate is null && recurrence is not null)
+        {
+            return false;
+        }
+
+        item.Recurrence = recurrence;
+        item.RecurrenceSeriesId = recurrence is null
+            ? null
+            : item.RecurrenceSeriesId ?? Guid.NewGuid().ToString("N");
+        item.Item.GeneratedNextItemId = null;
+        item.Item.ReminderLastNotifiedAt = null;
+        item.Item.ReminderDismissedForDueDate = null;
+        item.SnoozedUntil = null;
+        item.Item.SnoozeLastNotifiedAt = null;
+        item.UpdatedAt = DateTimeOffset.UtcNow;
+        RefreshVisibleItems();
+        RefreshCountProperties();
+        await SaveAsync();
+        return true;
+    }
+
+    public async Task<bool> SetReminderOffsetAsync(string itemId, int? offsetMinutes)
+    {
+        var item = FindItem(itemId);
+        if (item is null)
+        {
+            return false;
+        }
+
+        int? normalizedOffset = TodoReminderOptions.NormalizeOffsetMinutes(offsetMinutes);
+        if (Nullable.Equals(item.ReminderOffsetMinutes, normalizedOffset))
+        {
+            return true;
+        }
+
+        item.ReminderOffsetMinutes = normalizedOffset;
+        item.Item.ReminderLastNotifiedAt = null;
+        item.Item.ReminderDismissedForDueDate = null;
+        if (TodoReminderOptions.IsReminderOff(normalizedOffset))
+        {
+            item.SnoozedUntil = null;
+            item.Item.SnoozeLastNotifiedAt = null;
+        }
+
+        item.UpdatedAt = DateTimeOffset.UtcNow;
+        RefreshVisibleItems();
+        RefreshCountProperties();
+        await SaveAsync();
+        return true;
+    }
+
+    public async Task<bool> SnoozeReminderAsync(string itemId, TimeSpan snoozeFor)
+    {
+        var item = FindItem(itemId);
+        if (item is null ||
+            item.IsCompleted ||
+            item.DueDate is null ||
+            snoozeFor <= TimeSpan.Zero)
+        {
+            return false;
+        }
+
+        DateTimeOffset now = DateTimeOffset.Now;
+        item.SnoozedUntil = now.Add(snoozeFor);
+        item.Item.SnoozeLastNotifiedAt = null;
+        item.Item.ReminderDismissedForDueDate = item.DueDate;
+        item.UpdatedAt = DateTimeOffset.UtcNow;
+        RefreshVisibleItems();
+        RefreshCountProperties();
+        await SaveAsync();
+        return true;
+    }
+
+    public async Task<bool> SnoozeReminderUntilAsync(string itemId, DateTimeOffset snoozedUntil)
+    {
+        var item = FindItem(itemId);
+        if (item is null ||
+            item.IsCompleted ||
+            item.DueDate is null ||
+            snoozedUntil <= DateTimeOffset.Now)
+        {
+            return false;
+        }
+
+        item.SnoozedUntil = snoozedUntil;
+        item.Item.SnoozeLastNotifiedAt = null;
+        item.Item.ReminderDismissedForDueDate = item.DueDate;
+        item.UpdatedAt = DateTimeOffset.UtcNow;
+        RefreshVisibleItems();
+        RefreshCountProperties();
+        await SaveAsync();
+        return true;
+    }
+
+    public void ToggleRecurringHistoryGroup(string? groupKey)
+    {
+        string? normalizedGroupKey = NormalizeRecurringHistoryGroupKey(groupKey);
+        if (normalizedGroupKey is null)
+        {
+            return;
+        }
+
+        if (!_expandedRecurringHistoryGroupKeys.Add(normalizedGroupKey))
+        {
+            _expandedRecurringHistoryGroupKeys.Remove(normalizedGroupKey);
+        }
+
+        RefreshVisibleItems();
+        RefreshCountProperties();
     }
 
     public async Task<bool> SetDueDatePresetAsync(string itemId, TodoDuePreset preset)
@@ -782,6 +960,13 @@ public sealed partial class TodoWidgetViewModel : ObservableObject
         return Items.FirstOrDefault(item => string.Equals(item.Id, itemId, StringComparison.Ordinal));
     }
 
+    private TodoItemViewModel? FindGeneratedOccurrence(TodoItemViewModel item)
+    {
+        return string.IsNullOrWhiteSpace(item.Item.GeneratedNextItemId)
+            ? null
+            : FindItem(item.Item.GeneratedNextItemId);
+    }
+
     private async Task SaveAsync()
     {
         NormalizeSortOrders();
@@ -794,15 +979,98 @@ public sealed partial class TodoWidgetViewModel : ObservableObject
     private void RefreshVisibleItems()
     {
         VisibleItems.Clear();
-        var visibleItems = Items.Where(ShouldShowItem).ToList();
-        visibleItems.Sort(CompareVisibleItems);
+        ResetRecurringHistoryState();
 
-        foreach (var item in visibleItems)
+        var filteredItems = Items.Where(ShouldShowItem).ToList();
+        filteredItems.Sort(CompareVisibleItems);
+
+        var activeItems = filteredItems
+            .Where(item => !item.IsCompleted)
+            .ToList();
+        var completedItems = filteredItems
+            .Where(item => item.IsCompleted)
+            .ToList();
+
+        foreach (var item in activeItems)
+        {
+            VisibleItems.Add(item);
+        }
+
+        foreach (var item in BuildCompletedVisibleItems(completedItems))
         {
             VisibleItems.Add(item);
         }
 
         RefreshVisibleStateProperties();
+    }
+
+    private void ResetRecurringHistoryState()
+    {
+        foreach (var item in Items)
+        {
+            item.UpdateRecurringHistoryState(isLead: false, isExpanded: false, itemCount: 0);
+        }
+    }
+
+    private List<TodoItemViewModel> BuildCompletedVisibleItems(IReadOnlyList<TodoItemViewModel> completedItems)
+    {
+        if (completedItems.Count == 0)
+        {
+            return [];
+        }
+
+        var groupBuckets = completedItems
+            .Where(IsRecurringHistoryCandidate)
+            .GroupBy(GetRecurringHistoryGroupKey, StringComparer.Ordinal)
+            .Where(group => !string.IsNullOrWhiteSpace(group.Key))
+            .ToDictionary(
+                group => group.Key!,
+                group => group
+                    .OrderByDescending(item => item.CompletedAt ?? item.UpdatedAt)
+                    .ThenByDescending(item => item.UpdatedAt)
+                    .ToList(),
+                StringComparer.Ordinal);
+
+        var usedGroupKeys = new HashSet<string>(StringComparer.Ordinal);
+        var completedDisplayItems = new List<TodoItemViewModel>();
+
+        foreach (var item in completedItems)
+        {
+            string? groupKey = GetRecurringHistoryGroupKey(item);
+            if (groupKey is null ||
+                !groupBuckets.TryGetValue(groupKey, out List<TodoItemViewModel>? groupItems) ||
+                groupItems.Count <= 1)
+            {
+                completedDisplayItems.Add(item);
+                continue;
+            }
+
+            if (!usedGroupKeys.Add(groupKey))
+            {
+                continue;
+            }
+
+            bool isExpanded = _expandedRecurringHistoryGroupKeys.Contains(groupKey);
+            groupItems[0].UpdateRecurringHistoryState(
+                isLead: true,
+                isExpanded: isExpanded,
+                itemCount: groupItems.Count);
+            completedDisplayItems.Add(groupItems[0]);
+
+            if (isExpanded)
+            {
+                for (int index = 1; index < groupItems.Count; index++)
+                {
+                    completedDisplayItems.Add(groupItems[index]);
+                }
+            }
+        }
+
+        PruneRecurringHistoryExpansionState(
+            groupBuckets
+                .Where(entry => entry.Value.Count > 1)
+                .Select(entry => entry.Key));
+        return completedDisplayItems;
     }
 
     private bool ShouldShowItem(TodoItemViewModel item)
@@ -1052,6 +1320,51 @@ public sealed partial class TodoWidgetViewModel : ObservableObject
         };
     }
 
+    private static bool IsRecurringHistoryCandidate(TodoItemViewModel item)
+    {
+        return item.IsCompleted &&
+               item.Recurrence is not null &&
+               GetRecurringHistoryGroupKey(item) is not null;
+    }
+
+    private static string? GetRecurringHistoryGroupKey(TodoItemViewModel item)
+    {
+        if (item.Recurrence is null)
+        {
+            return null;
+        }
+
+        string? seriesId = TodoRecurrenceService.NormalizeSeriesId(item.RecurrenceSeriesId);
+        if (!string.IsNullOrWhiteSpace(seriesId))
+        {
+            return seriesId;
+        }
+
+        if (item.DueDate is not { } dueDate)
+        {
+            return null;
+        }
+
+        string recurrenceMode = TodoRecurrenceMode.Normalize(item.Recurrence.Mode);
+        long anchorTicks = (item.Recurrence.AnchorDueDate ?? dueDate).UtcTicks;
+        return $"{recurrenceMode}|{anchorTicks}|{item.Text}";
+    }
+
+    private static string? NormalizeRecurringHistoryGroupKey(string? groupKey)
+    {
+        return string.IsNullOrWhiteSpace(groupKey)
+            ? null
+            : groupKey.Trim();
+    }
+
+    private void PruneRecurringHistoryExpansionState(IEnumerable<string> activeGroupKeys)
+    {
+        var activeKeys = activeGroupKeys
+            .Where(key => !string.IsNullOrWhiteSpace(key))
+            .ToHashSet(StringComparer.Ordinal);
+        _expandedRecurringHistoryGroupKeys.RemoveWhere(groupKey => !activeKeys.Contains(groupKey));
+    }
+
     private string FormatFilterText(string key, int count)
     {
         return $"{_localizationService.T(key)} {count}";
@@ -1096,11 +1409,27 @@ public sealed partial class TodoWidgetViewModel : ObservableObject
             IsImportant = item.IsImportant,
             ColorMarker = item.ColorMarker,
             DueDate = item.DueDate,
+            Recurrence = item.Recurrence?.Clone(),
             CompletedAt = item.CompletedAt,
+            ReminderLastNotifiedAt = item.ReminderLastNotifiedAt,
+            ReminderDismissedForDueDate = item.ReminderDismissedForDueDate,
+            ReminderOffsetMinutes = item.ReminderOffsetMinutes,
+            SnoozedUntil = item.SnoozedUntil,
+            SnoozeLastNotifiedAt = item.SnoozeLastNotifiedAt,
+            RecurrenceSeriesId = item.RecurrenceSeriesId,
+            GeneratedNextItemId = item.GeneratedNextItemId,
             SortOrder = item.SortOrder,
             CreatedAt = item.CreatedAt,
             UpdatedAt = item.UpdatedAt
         };
+    }
+
+    private static bool AreRecurrenceEqual(TodoRecurrence? left, TodoRecurrence? right)
+    {
+        string leftMode = TodoRecurrenceMode.Normalize(left?.Mode);
+        string rightMode = TodoRecurrenceMode.Normalize(right?.Mode);
+        return string.Equals(leftMode, rightMode, StringComparison.Ordinal) &&
+               Nullable.Equals(left?.AnchorDueDate, right?.AnchorDueDate);
     }
 
     private static string NormalizeText(string? text)
