@@ -282,7 +282,7 @@
                 </Grid>
 
                 <ListView
-                    x:Name="ItemsListView"
+                                        x:Name="ItemsListView"
                     Background="Transparent"
                     DoubleTapped="ItemsListView_DoubleTapped"
                     HorizontalContentAlignment="Stretch"

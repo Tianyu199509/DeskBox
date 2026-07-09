@@ -11,6 +11,7 @@ using Microsoft.UI.Input;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Windows.Graphics;
@@ -484,9 +485,9 @@ public sealed partial class ContentWidgetWindow : Window, IDesktopWidgetWindow
         if (args.WindowActivationState == WindowActivationState.Deactivated)
         {
             _contentHost.OnDeactivated();
+            // Always restore desktop layer when deactivated, regardless of _keepRaisedUntilDeactivate
             if (Visible && !_isAtDesktopLayer &&
-                App.Current.WidgetManager is not { WidgetsRaisedFromTray: true } &&
-                (DateTime.UtcNow - _lastElevateForInteractionUtc).TotalMilliseconds > 300)
+                App.Current.WidgetManager is not { WidgetsRaisedFromTray: true })
             {
                 App.Log($"[ZOrder] Content Deactivated→Restore hwnd=0x{_hWnd.ToInt64():X}");
                 RestoreDesktopLayer(force: true);

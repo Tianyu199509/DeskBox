@@ -1484,6 +1484,7 @@ public bool IsOpacitySliderEnabled =>
     public string UpdateDownloadActionText => _localizationService.T(IsStoreUpdateDelivery
         ? "Settings.Update.StoreInstall"
         : "Settings.Update.Download");
+    public string UpdateFallbackActionText => _localizationService.T("Settings.Update.ManualDownload");
     public string UpdateProgressText => $"{Math.Clamp(UpdateProgressValue, 0, 100):0}%";
 
     private bool IsStoreUpdateDelivery => _appUpdateService.DeliveryKind == AppUpdateDeliveryKind.MicrosoftStore;

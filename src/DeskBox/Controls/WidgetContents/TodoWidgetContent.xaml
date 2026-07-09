@@ -228,7 +228,7 @@
                 <RowDefinition Height="Auto" />
             </Grid.RowDefinitions>
 
-            <ListView
+                        <ListView
                 x:Name="TodoListView"
                 Grid.Row="0"
                 AllowDrop="True"
@@ -245,7 +245,9 @@
                 DragItemsCompleted="TodoListView_DragItemsCompleted"
                 ItemsSource="{Binding VisibleItems}"
                 SelectionMode="None"
-                Visibility="{Binding ListVisibility}">
+                Visibility="{Binding ListVisibility}"
+                ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                ScrollViewer.VerticalScrollBarVisibility="Auto">
                 <ListView.ItemContainerStyle>
                     <Style TargetType="ListViewItem">
                         <Setter Property="Padding" Value="0" />

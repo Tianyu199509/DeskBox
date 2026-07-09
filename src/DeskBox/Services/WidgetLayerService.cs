@@ -193,6 +193,14 @@ public static class WidgetLayerService
 
     private static void MoveToDynamicDesktopBottom(IntPtr windowHandle)
     {
+        // Try to attach to desktop icon layer to prevent Win+D from hiding the window
+        // while maintaining dynamic layer behavior (can be raised on interaction)
+        if (TryAttachToDesktopIconLayer(windowHandle))
+        {
+            return;
+        }
+
+        // Fallback: detach and use NOTOPMOST
         DetachFromDesktopIconLayerIfNeeded(windowHandle);
         Win32Helper.ClearWindowTopMost(windowHandle);
         Win32Helper.SetWindowToBottom(windowHandle);

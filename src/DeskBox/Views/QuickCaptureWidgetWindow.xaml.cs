@@ -1840,6 +1840,26 @@ public sealed partial class QuickCaptureWidgetWindow : Window, IDesktopWidgetWin
         };
         flyout.Items.Add(clearItem);
 
+        // Add delete widget option
+        flyout.Items.Add(new MenuFlyoutSeparator());
+        var deleteWidget = new MenuFlyoutItem
+        {
+            Text = _localizationService.T("Widget.Tooltip.DeleteWidget"),
+            Icon = new FontIcon
+            {
+                Glyph = "\uE74D",
+                Foreground = new SolidColorBrush(Colors.Red)
+            }
+        };
+        deleteWidget.Click += async (_, _) =>
+        {
+            if (App.Current.WidgetManager is { } widgetManager)
+            {
+                await widgetManager.RemoveWidgetAsync(ViewModel.Config.Id);
+            }
+        };
+        flyout.Items.Add(deleteWidget);
+
         return flyout;
     }
 

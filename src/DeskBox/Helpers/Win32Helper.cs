@@ -427,6 +427,17 @@ public static partial class Win32Helper
     }
 
     /// <summary>
+    /// Push a window to desktop level without using HWND_BOTTOM.
+    /// This prevents the window from being hidden by Win+D while keeping it at desktop level.
+    /// </summary>
+    public static void SetWindowToDesktopLevel(IntPtr hWnd)
+    {
+        bool r = SetWindowPos(hWnd, HWND_NOTOPMOST, 0, 0, 0, 0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+        App.Log($"[ZOrder] SetWindowToDesktopLevel hwnd=0x{hWnd.ToInt64():X} r={r}");
+    }
+
+    /// <summary>
     /// Bring a window above other normal windows without making it topmost.
     /// </summary>
     public static void BringWindowToFront(IntPtr hWnd)
