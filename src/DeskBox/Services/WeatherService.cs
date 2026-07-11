@@ -20,7 +20,11 @@ public sealed class WeatherService : IDisposable
         PropertyNameCaseInsensitive = true
     };
 
-    private readonly HttpClient _httpClient;
+    private static readonly HttpClient s_httpClient = new()
+    {
+        Timeout = TimeSpan.FromSeconds(15)
+    };
+
     private WeatherData? _cachedData;
     private DateTimeOffset _cacheTimestamp;
     private string _cacheLocationKey = string.Empty;
@@ -28,10 +32,6 @@ public sealed class WeatherService : IDisposable
 
     public WeatherService()
     {
-        _httpClient = new HttpClient
-        {
-            Timeout = TimeSpan.FromSeconds(15)
-        };
     }
 
     /// <summary>
@@ -47,7 +47,7 @@ public sealed class WeatherService : IDisposable
         try
         {
             string url = $"{GeocodingBaseUrl}?name={Uri.EscapeDataString(query)}&count=10&language={language}&format=json";
-            string json = await _httpClient.GetStringAsync(url);
+            string json = await s_httpClient.GetStringAsync(url);
             var result = JsonSerializer.Deserialize<WeatherGeocodingResult>(json, s_jsonOptions);
             return result?.Results ?? [];
         }
@@ -82,7 +82,7 @@ public sealed class WeatherService : IDisposable
         try
         {
             string url = BuildForecastUrl(latitude, longitude);
-            string json = await _httpClient.GetStringAsync(url);
+            string json = await s_httpClient.GetStringAsync(url);
             var data = JsonSerializer.Deserialize<WeatherData>(json, s_jsonOptions);
 
             if (data is not null)
@@ -135,6 +135,6 @@ public sealed class WeatherService : IDisposable
         }
 
         _isDisposed = true;
-        _httpClient.Dispose();
+        // Do not dispose the shared static HttpClient.
     }
 }

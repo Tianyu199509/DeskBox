@@ -49,7 +49,11 @@ internal sealed class WidgetDisplayChangeWatcher : IDisposable
     }
 
     /// <summary>
-    /// Resume restore operations. If a restore was suppressed, it is triggered now.
+    /// Resume restore operations. Any pending restore that was suppressed during
+    /// drag/resize is discarded rather than triggered, because the drag/resize end
+    /// handler has already updated the config to match the current physical position.
+    /// This prevents the window from jumping to an anchor-resolved position that may
+    /// differ from the user's intended drop location after a DPI change during drag.
     /// </summary>
     public void ResumeRestore()
     {
@@ -59,11 +63,7 @@ internal sealed class WidgetDisplayChangeWatcher : IDisposable
         }
 
         _isSuppressed = false;
-        if (_hasPendingRestore)
-        {
-            _hasPendingRestore = false;
-            QueueRestore();
-        }
+        _hasPendingRestore = false;
     }
 
     public void Dispose()

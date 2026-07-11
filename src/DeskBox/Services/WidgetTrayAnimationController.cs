@@ -317,20 +317,36 @@ public sealed class WidgetTrayAnimationController
 
         if (_cachedRootVisual is { } visual)
         {
-            StopVisualAnimations(visual);
+            try
+            {
+                StopVisualAnimations(visual);
+            }
+            catch
+            {
+                // The Composition Visual may be invalid if the window is
+                // being torn down. Swallow to avoid stowed WinRT exceptions.
+            }
         }
     }
 
     public void RestoreVisualState()
     {
-        _rootElement.Opacity = 1;
-        var visual = GetCachedRootVisual();
-        StopVisualAnimations(visual);
-        visual.CenterPoint = GetVisualCenterPoint();
-        visual.Offset = Vector3.Zero;
-        visual.Opacity = RestingOpacity;
-        visual.Scale = new Vector3(RestingScale, RestingScale, 1.0f);
-        RestoreOpacity();
+        try
+        {
+            _rootElement.Opacity = 1;
+            var visual = GetCachedRootVisual();
+            StopVisualAnimations(visual);
+            visual.CenterPoint = GetVisualCenterPoint();
+            visual.Offset = Vector3.Zero;
+            visual.Opacity = RestingOpacity;
+            visual.Scale = new Vector3(RestingScale, RestingScale, 1.0f);
+            RestoreOpacity();
+        }
+        catch
+        {
+            // The Composition Visual may be invalid if the window is
+            // being torn down. Swallow to avoid stowed WinRT exceptions.
+        }
     }
 
     public void RestoreWindowPosition()

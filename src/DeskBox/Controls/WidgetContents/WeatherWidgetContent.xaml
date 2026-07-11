@@ -409,7 +409,7 @@
             <!-- Today view: hourly horizontal scroll -->
             <ScrollViewer
                 Grid.Row="3"
-                HorizontalScrollBarVisibility="Auto"
+                HorizontalScrollBarVisibility="Hidden"
                 VerticalScrollBarVisibility="Disabled"
                 Visibility="{Binding ForecastVisibility}">
                 <ItemsControl
@@ -509,8 +509,6 @@
             RowSpacing="8"
             Visibility="{Binding DetailedLayoutVisibility}">
             <Grid.RowDefinitions>
-                <RowDefinition Height="Auto" />
-                <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
@@ -663,7 +661,7 @@
             <!-- Today view: hourly horizontal scroll -->
             <ScrollViewer
                 Grid.Row="5"
-                HorizontalScrollBarVisibility="Auto"
+                HorizontalScrollBarVisibility="Hidden"
                 VerticalScrollBarVisibility="Disabled"
                 Visibility="{Binding ForecastVisibility}">
                 <ItemsControl
@@ -760,54 +758,45 @@
                 </ItemsControl>
             </ScrollViewer>
 
-            <!-- Hourly trend (24h) for detailed view -->
-            <ScrollViewer
-                Grid.Row="6"
-                HorizontalScrollBarVisibility="Auto"
-                VerticalScrollBarVisibility="Disabled"
-                Visibility="{Binding HourlyTrendVisibility}">
-                <ItemsControl
-                    HorizontalAlignment="Left"
-                    ItemsSource="{Binding HourlyForecast}">
-                    <ItemsControl.ItemsPanel>
-                        <ItemsPanelTemplate>
-                            <StackPanel Orientation="Horizontal" Spacing="4" />
-                        </ItemsPanelTemplate>
-                    </ItemsControl.ItemsPanel>
-                    <ItemsControl.ItemTemplate>
-                        <DataTemplate>
-                            <Border
-                                Width="48"
-                                Padding="0,6"
-                                Style="{StaticResource WeatherForecastCardStyle}">
-                                <StackPanel
-                                    HorizontalAlignment="Center"
-                                    Spacing="3">
-                                    <TextBlock
-                                        HorizontalAlignment="Center"
-                                        FontSize="11"
-                                        Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                                        Text="{Binding HourLabel}" />
-                                    <TextBlock
-                                        HorizontalAlignment="Center"
-                                        FontSize="18"
-                                        Text="{Binding Emoji}" />
-                                    <TextBlock
-                                        HorizontalAlignment="Center"
-                                        FontSize="12"
-                                        FontWeight="SemiBold"
-                                        Text="{Binding TemperatureText}" />
-                                    <TextBlock
-                                        HorizontalAlignment="Center"
-                                        FontSize="10"
-                                        Foreground="{ThemeResource AccentFillColorDefaultBrush}"
-                                        Text="{Binding PrecipitationText}" />
-                                </StackPanel>
-                            </Border>
-                        </DataTemplate>
-                    </ItemsControl.ItemTemplate>
-                </ItemsControl>
-            </ScrollViewer>
+        </Grid>
+
+        <!-- ─── Refresh Status Toast ─── -->
+        <Border
+            x:Name="RefreshStatusToast"
+            Padding="10,6"
+            HorizontalAlignment="Center"
+            VerticalAlignment="Bottom"
+            CornerRadius="6"
+            Background="{ThemeResource AcrylicBackgroundFillColorDefaultBrush}"
+            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+            BorderThickness="1"
+            Visibility="{Binding RefreshStatusVisibility}">
+            <TextBlock
+                FontSize="11"
+                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                Text="{Binding RefreshStatusText}" />
+        </Border>
+
+        <!-- ─── Loading Overlay (first-time data fetch) ─── -->
+        <Grid
+            x:Name="LoadingOverlay"
+            Background="{ThemeResource LayerFillColorDefaultBrush}"
+            CornerRadius="8"
+            Visibility="{Binding LoadingVisibility}">
+            <StackPanel
+                HorizontalAlignment="Center"
+                VerticalAlignment="Center"
+                Spacing="8">
+                <ProgressRing
+                    Width="28"
+                    Height="28"
+                    IsActive="True" />
+                <TextBlock
+                    HorizontalAlignment="Center"
+                    FontSize="12"
+                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                    Text="{Binding LoadingText}" />
+            </StackPanel>
         </Grid>
 
     </Grid>

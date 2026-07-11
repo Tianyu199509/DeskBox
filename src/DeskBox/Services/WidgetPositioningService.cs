@@ -339,12 +339,26 @@ public static class WidgetPositioningService
 
             if (TryParseMonitorKey(config.PositionMonitorKey, out var savedMonitor))
             {
+                AvailableMonitorWorkArea? bestMatch = null;
+                long bestDistance = long.MaxValue;
                 foreach (var area in availableWorkAreas)
                 {
                     if (area.WorkArea.Width == savedMonitor.Width && area.WorkArea.Height == savedMonitor.Height)
                     {
-                        return area.WorkArea;
+                        long dx = area.WorkArea.X - savedMonitor.X;
+                        long dy = area.WorkArea.Y - savedMonitor.Y;
+                        long distance = (dx * dx) + (dy * dy);
+                        if (distance < bestDistance)
+                        {
+                            bestDistance = distance;
+                            bestMatch = area;
+                        }
                     }
+                }
+
+                if (bestMatch.HasValue)
+                {
+                    return bestMatch.Value.WorkArea;
                 }
             }
         }

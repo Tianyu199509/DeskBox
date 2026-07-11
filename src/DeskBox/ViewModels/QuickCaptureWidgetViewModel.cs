@@ -411,6 +411,12 @@ public sealed partial class QuickCaptureWidgetViewModel : ObservableObject, IDis
         {
             SelectedView = QuickCaptureViewMode.Records;
         }
+        else
+        {
+            // Already on Records view — the view-switch refresh won't fire,
+            // so trigger an explicit refresh to ensure the new item appears.
+            RefreshVisibleItemsImmediately();
+        }
     }
 
     public Task<QuickCaptureItem?> AddImageFileAsync(string imagePath)

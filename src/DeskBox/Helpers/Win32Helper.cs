@@ -423,7 +423,7 @@ public static partial class Win32Helper
             SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
         bool r2 = SetWindowPos(hWnd, HWND_BOTTOM, 0, 0, 0, 0,
             SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
-        App.Log($"[ZOrder] SetWindowToBottom hwnd=0x{hWnd.ToInt64():X} r1={r1} r2={r2}");
+        App.LogVerbose($"[ZOrder] SetWindowToBottom hwnd=0x{hWnd.ToInt64():X} r1={r1} r2={r2}");
     }
 
     /// <summary>
@@ -822,6 +822,9 @@ public static partial class Win32Helper
         out uint dpiX,
         out uint dpiY);
 
+    [LibraryImport("user32.dll")]
+    private static partial uint GetDpiForWindow(IntPtr hWnd);
+
     [LibraryImport("user32.dll", EntryPoint = "GetMonitorInfoW", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static partial bool GetMonitorInfo(IntPtr hMonitor, ref MONITORINFO lpmi);
@@ -895,6 +898,29 @@ public static partial class Win32Helper
         catch (DllNotFoundException)
         {
             return 1.0;
+        }
+        catch (EntryPointNotFoundException)
+        {
+            return 1.0;
+        }
+    }
+
+    /// <summary>
+    /// Gets the DPI scale for a window handle, using the XAML RasterizationScale
+    /// when available and falling back to GetDpiForWindow.
+    /// </summary>
+    public static double GetDpiScaleForWindow(IntPtr hWnd, Microsoft.UI.Xaml.XamlRoot? xamlRoot)
+    {
+        double xamlScale = xamlRoot?.RasterizationScale ?? 0;
+        if (xamlScale > 0)
+        {
+            return xamlScale;
+        }
+
+        try
+        {
+            uint dpi = GetDpiForWindow(hWnd);
+            return dpi > 0 ? dpi / 96.0 : 1.0;
         }
         catch (EntryPointNotFoundException)
         {

@@ -95,7 +95,6 @@ public sealed class WidgetManager
     private readonly HashSet<IntPtr> _widgetWindowHandles = new();
     private readonly HashSet<string> _deletedWidgetIds = [];
     private readonly HashSet<string> _suppressClosedVisibilityPersistence = [];
-    private readonly List<WidgetWindow> _retiredWindows = [];
     private readonly SemaphoreSlim _widgetRenameGate = new(1, 1);
     private const double OffscreenAnimationPadding = 16.0;
     private DispatcherQueueTimer? _trayLayerRestoreTimer;
@@ -1638,10 +1637,8 @@ public sealed class WidgetManager
 
         long generation = ++_trayRaiseBatchGeneration;
         ConfirmTrayRaiseTopMost(windows, generation);
-        QueueTrayRaiseTopMostConfirmation(windows, generation, TimeSpan.FromMilliseconds(40));
-        QueueTrayRaiseTopMostConfirmation(windows, generation, TimeSpan.FromMilliseconds(140));
-        QueueTrayRaiseTopMostConfirmation(windows, generation, TimeSpan.FromMilliseconds(320));
-        QueueTrayRaiseTopMostConfirmation(windows, generation, TimeSpan.FromMilliseconds(640));
+        QueueTrayRaiseTopMostConfirmation(windows, generation, TimeSpan.FromMilliseconds(120));
+        QueueTrayRaiseTopMostConfirmation(windows, generation, TimeSpan.FromMilliseconds(400));
     }
 
     private void QueueTrayRaiseTopMostConfirmation(
@@ -1931,7 +1928,7 @@ public sealed class WidgetManager
 
         _trayLayerRestoreTimer ??= App.UiDispatcherQueue.CreateTimer();
         _trayLayerRestoreTimer.Stop();
-        _trayLayerRestoreTimer.Interval = TimeSpan.FromMilliseconds(40);
+        _trayLayerRestoreTimer.Interval = TimeSpan.FromMilliseconds(200);
         _trayLayerRestoreTimer.Tick -= TrayLayerRestoreTimer_Tick;
         _trayLayerRestoreTimer.Tick += TrayLayerRestoreTimer_Tick;
         _trayLayerRestoreTimer.Start();
@@ -2375,7 +2372,6 @@ public sealed class WidgetManager
 
         _contentWidgets.Clear();
         _widgetWindowHandles.Clear();
-        _retiredWindows.Clear();
         _sessionManager.MarkHidden("close-all");
     }
 

@@ -23,6 +23,11 @@ public sealed partial class WeatherWidgetContent : UserControl
     private Storyboard? _refreshRotationStoryboard;
     private bool _animationsInitialized;
 
+    // Track fall animations so their To-value can be updated when the control resizes.
+    private readonly List<DoubleAnimation> _rainFallAnims = [];
+    private readonly List<DoubleAnimation> _snowFallAnims = [];
+    private double _animationFallHeight = 400;
+
     // Track the refresh icon elements across all layouts for rotation animation
     private readonly List<FrameworkElement> _refreshIcons = [];
 
@@ -71,9 +76,24 @@ public sealed partial class WeatherWidgetContent : UserControl
     {
         _isViewLoaded = true;
         FindRefreshIcons();
+
+        // Initialize fall height from actual size before creating animations.
+        if (ActualHeight > 0)
+        {
+            _animationFallHeight = Math.Max(100, ActualHeight + 20);
+        }
+
         InitializeAnimations();
         InitializeRefreshRotation();
         UpdateAnimations();
+        UpdateRichSkinTextTheme();
+
+        // Ensure the layout mode reflects the actual control size.
+        // SizeChanged may fire with 0x0 before the control is fully laid out.
+        if (ActualWidth > 0 && ActualHeight > 0)
+        {
+            _viewModel.UpdateAvailableSize(ActualWidth, ActualHeight);
+        }
     }
 
     private void WeatherWidgetContent_Unloaded(object sender, RoutedEventArgs e)
@@ -97,6 +117,10 @@ public sealed partial class WeatherWidgetContent : UserControl
         {
             UpdateRichSkinColors();
         }
+        else if (e.PropertyName == nameof(WeatherWidgetViewModel.RichSkinUsesLightText))
+        {
+            UpdateRichSkinTextTheme();
+        }
         else if (e.PropertyName == nameof(WeatherWidgetViewModel.IsRefreshing))
         {
             UpdateRefreshRotation();
@@ -108,6 +132,16 @@ public sealed partial class WeatherWidgetContent : UserControl
         // Sync the gradient stop colors from the ViewModel
         RichBackdropTop.Color = _viewModel.RichBackdropTopColor;
         RichBackdropBottom.Color = _viewModel.RichBackdropBottomColor;
+    }
+
+    private void UpdateRichSkinTextTheme()
+    {
+        // When the rich skin background is dark (night, storms, etc.),
+        // force the RootGrid to Dark theme so all ThemeResource text brushes
+        // resolve to light colors — even when the app is in Light mode.
+        RootGrid.RequestedTheme = _viewModel.RichSkinUsesLightText
+            ? ElementTheme.Dark
+            : ElementTheme.Default;
     }
 
     private void InitializeAnimations()
@@ -136,7 +170,7 @@ public sealed partial class WeatherWidgetContent : UserControl
             var anim = new DoubleAnimation
             {
                 From = -20,
-                To = 400,
+                To = _animationFallHeight,
                 Duration = new Duration(TimeSpan.FromSeconds(0.6 + (i % 4) * 0.15)),
                 BeginTime = TimeSpan.FromSeconds(i * 0.12),
                 RepeatBehavior = RepeatBehavior.Forever
@@ -144,6 +178,7 @@ public sealed partial class WeatherWidgetContent : UserControl
             Storyboard.SetTarget(anim, drop);
             Storyboard.SetTargetProperty(anim, "(Canvas.Top)");
             _rainStoryboard.Children.Add(anim);
+            _rainFallAnims.Add(anim);
         }
 
         // Snow animation: falling snowflakes
@@ -163,7 +198,7 @@ public sealed partial class WeatherWidgetContent : UserControl
             var anim = new DoubleAnimation
             {
                 From = -20,
-                To = 400,
+                To = _animationFallHeight,
                 Duration = new Duration(TimeSpan.FromSeconds(3 + (i % 3) * 0.8)),
                 BeginTime = TimeSpan.FromSeconds(i * 0.5),
                 RepeatBehavior = RepeatBehavior.Forever
@@ -171,6 +206,7 @@ public sealed partial class WeatherWidgetContent : UserControl
             Storyboard.SetTarget(anim, flake);
             Storyboard.SetTargetProperty(anim, "(Canvas.Top)");
             _snowStoryboard.Children.Add(anim);
+            _snowFallAnims.Add(anim);
         }
 
         // Thunder flash animation
@@ -289,6 +325,22 @@ public sealed partial class WeatherWidgetContent : UserControl
     private void UserControl_SizeChanged(object sender, SizeChangedEventArgs e)
     {
         _viewModel.UpdateAvailableSize(e.NewSize.Width, e.NewSize.Height);
+
+        // Update the fall distance for rain/snow animations to match the new height.
+        // The animations will pick up the new To-value on their next repeat cycle.
+        double newFallHeight = Math.Max(100, e.NewSize.Height + 20);
+        if (Math.Abs(newFallHeight - _animationFallHeight) > 1)
+        {
+            _animationFallHeight = newFallHeight;
+            foreach (var anim in _rainFallAnims)
+            {
+                anim.To = newFallHeight;
+            }
+            foreach (var anim in _snowFallAnims)
+            {
+                anim.To = newFallHeight;
+            }
+        }
     }
 
     private void ViewSwitch_Click(object sender, RoutedEventArgs e)
@@ -298,7 +350,7 @@ public sealed partial class WeatherWidgetContent : UserControl
 
     private void RefreshButton_Click(object sender, RoutedEventArgs e)
     {
-        _ = _viewModel.RefreshAsync();
+        _ = _viewModel.RefreshAsync(userTriggered: true);
     }
 
     private void InitializeRefreshRotation()

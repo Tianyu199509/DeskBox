@@ -19,4 +19,11 @@ public interface IWidgetContent
     void ApplyAppearance();
     void OnActivated();
     void OnDeactivated();
+
+    /// <summary>
+    /// Called when the host window becomes visible or hidden.
+    /// Use this to start/stop animations and timers based on actual visibility,
+    /// independent of activation state.
+    /// </summary>
+    void OnWindowVisibilityChanged(bool visible) { }
 }

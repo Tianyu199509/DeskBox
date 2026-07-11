@@ -1564,36 +1564,45 @@ svc:Localized.DescriptionKey="Settings.DefaultWidth.Description"
                             <toolkit:SettingsCard.HeaderIcon>
                                 <FontIcon Glyph="&#xE71D;" />
                             </toolkit:SettingsCard.HeaderIcon>
-                            <Grid MinWidth="240">
-                                <Grid.RowDefinitions>
-                                    <RowDefinition Height="Auto" />
-                                    <RowDefinition Height="Auto" />
-                                </Grid.RowDefinitions>
-                                <TextBox
+                            <StackPanel MinWidth="280" Spacing="4">
+                                <!-- AutoSuggestBox: unified search + dropdown -->
+                                <AutoSuggestBox
                                     x:Name="WeatherCitySearchBox"
-                                    Grid.Row="0"
-                                    PlaceholderText="Beijing / 北京"
+                                    PlaceholderText="{Binding WeatherCitySearchPlaceholder}"
                                     Text="{Binding WeatherCitySearchText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-                                    LostFocus="WeatherCitySearchBox_LostFocus" />
-                                <ListView
-                                    Grid.Row="1"
-                                    MaxHeight="200"
-                                    Margin="0,2,0,0"
-                                    ItemsSource="{Binding WeatherCitySearchResults}"
-                                    Visibility="{Binding HasWeatherCitySearchResults}"
-                                    SelectionMode="Single"
-                                    IsItemClickEnabled="True"
-                                    ItemClick="WeatherCityResult_ItemClick">
-                                    <ListView.ItemTemplate>
+                                    ItemsSource="{Binding WeatherCitySuggestions}"
+                                    TextChanged="WeatherCitySearchBox_TextChanged"
+                                    SuggestionChosen="WeatherCitySearchBox_SuggestionChosen"
+                                    QuerySubmitted="WeatherCitySearchBox_QuerySubmitted"
+                                    LostFocus="WeatherCitySearchBox_LostFocus"
+                                    MaxSuggestionListHeight="320">
+                                    <AutoSuggestBox.ItemTemplate>
                                         <DataTemplate>
-                                            <TextBlock
-                                                FontSize="13"
-                                                Text="{Binding DisplayName}"
-                                                TextTrimming="CharacterEllipsis" />
+                                            <StackPanel Spacing="1" Padding="0,2">
+                                                <TextBlock
+                                                    FontSize="13"
+                                                    FontWeight="SemiBold"
+                                                    Text="{Binding Name}"
+                                                    TextTrimming="CharacterEllipsis" />
+                                                <TextBlock
+                                                    FontSize="11"
+                                                    Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                                    Text="{Binding RegionDisplay}"
+                                                    TextTrimming="CharacterEllipsis"
+                                                    Visibility="{Binding Admin1Visibility}" />
+                                            </StackPanel>
                                         </DataTemplate>
-                                    </ListView.ItemTemplate>
-                                </ListView>
-                            </Grid>
+                                    </AutoSuggestBox.ItemTemplate>
+                                </AutoSuggestBox>
+
+                                <!-- No results message -->
+                                <TextBlock
+                                    Margin="0,2,0,0"
+                                    FontSize="12"
+                                    Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                    Text="{Binding WeatherCityNoResultsText}"
+                                    Visibility="{Binding HasNoCitySearchResultsVisibility}" />
+                            </StackPanel>
                         </toolkit:SettingsCard>
 
                         <toolkit:SettingsCard
@@ -1688,17 +1697,6 @@ svc:Localized.DescriptionKey="Settings.DefaultWidth.Description"
                                         OffContent=""
                                         MinWidth="0"
                                         IsOn="{Binding WeatherShowForecast, Mode=TwoWay}" />
-                                </toolkit:SettingsCard>
-
-                                <toolkit:SettingsCard
-                                    HorizontalContentAlignment="Right"
-                                    svc:Localized.DescriptionKey="Settings.Weather.ShowHourlyTrend.Description"
-                                    svc:Localized.HeaderKey="Settings.Weather.ShowHourlyTrend.Title">
-                                    <ToggleSwitch
-                                        OnContent=""
-                                        OffContent=""
-                                        MinWidth="0"
-                                        IsOn="{Binding WeatherShowHourlyTrend, Mode=TwoWay}" />
                                 </toolkit:SettingsCard>
 
                                 <toolkit:SettingsCard

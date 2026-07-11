@@ -25,7 +25,7 @@ using WinRT.Interop;
 
 namespace DeskBox.Views;
 
-public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
+public sealed partial class WidgetWindow : WidgetWindowBase, IDesktopWidgetWindow
 {
     private enum ItemSurfaceState
     {
@@ -46,29 +46,38 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
     private const string DeskBoxInternalDragToken = "DeskBox.WidgetItemDrag.v2";
     private static readonly UIntPtr FileDropSubclassId = new(0xDDB0);
 
+    // ── Backward-compatible aliases for base class fields ──────
+    // These allow the existing WidgetWindow code to reference inherited
+    // protected fields by their original private names without a
+    // massive find-and-replace across 5000+ lines.
+    private SettingsService _settingsService => SettingsService;
+    private LocalizationService _localizationService => _localizationSvc;
+    private IntPtr _hWnd => HWnd;
+    private AppWindow _appWindow => AppWindow;
+    private WidgetWindowDiagnostics _diagnostics => Diagnostics;
+    private WidgetTrayAnimationController _trayAnimation => TrayAnimation;
+
+    // Mutable field aliases for inherited protected state
+    private DesktopAcrylicController? _acrylicController { get => AcrylicController; set => AcrylicController = value; }
+    private MicaController? _micaController { get => MicaController; set => MicaController = value; }
+    private SystemBackdropConfiguration? _backdropConfiguration { get => BackdropConfiguration; set => BackdropConfiguration = value; }
+    private ICompositionSupportsSystemBackdrop? _backdropTarget { get => BackdropTarget; set => BackdropTarget = value; }
+    private bool _isDragging { get => IsDragging; set => IsDragging = value; }
+    private bool _hasMovedTitleBarDrag { get => HasMovedTitleBarDrag; set => HasMovedTitleBarDrag = value; }
+    private bool _isResizing { get => IsResizing; set => IsResizing = value; }
+    private bool _isApplyingBounds { get => IsApplyingBounds; set => IsApplyingBounds = value; }
+    private string _resizeDirection { get => ResizeDirection; set => ResizeDirection = value; }
+    private Win32Helper.POINT _initialCursorPt { get => InitialCursorPt; set => InitialCursorPt = value; }
+    private Windows.Graphics.PointInt32 _initialWindowPos { get => InitialWindowPos; set => InitialWindowPos = value; }
+    private Windows.Graphics.SizeInt32 _initialWindowSize { get => InitialWindowSize; set => InitialWindowSize = value; }
+    private FrameworkElement? _dragCaptureElement { get => DragCaptureElement; set => DragCaptureElement = value; }
+
     private readonly Microsoft.UI.WindowId _windowId;
-    private readonly SettingsService _settingsService;
-    private readonly LocalizationService _localizationService;
-    private readonly IntPtr _hWnd;
-    private readonly AppWindow _appWindow;
-    private readonly WidgetWindowDiagnostics _diagnostics;
-    private readonly WidgetTrayAnimationController _trayAnimation;
+    private readonly LocalizationService _localizationSvc;
     private readonly Win32Helper.SubclassProc _fileDropSubclassProc;
     private readonly WidgetContentDescriptor _chromeDescriptor;
     private readonly WidgetChromeModeResolver _chromeModeResolver;
-    private DesktopAcrylicController? _acrylicController;
-    private MicaController? _micaController;
-    private SystemBackdropConfiguration? _backdropConfiguration;
-    private ICompositionSupportsSystemBackdrop? _backdropTarget;
-    private bool _isDragging;
-    private bool _hasMovedTitleBarDrag;
-    private bool _isResizing;
-    private bool _isApplyingBounds;
-    private string _resizeDirection = string.Empty;
-    private Win32Helper.POINT _initialCursorPt;
-    private Windows.Graphics.PointInt32 _initialWindowPos;
-    private Windows.Graphics.SizeInt32 _initialWindowSize;
-    private FrameworkElement? _dragCaptureElement;
+    private bool _isNativeBackdropSuppressedForTrayReveal;
 
     private Storyboard? _showButtonsStoryboard;
     private Storyboard? _hideButtonsStoryboard;
@@ -110,20 +119,16 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
     private DateTime _lastTitleBarClickTimeUtc;
     private Win32Helper.POINT _lastTitleBarClickPoint;
     private bool _hasPendingTitleBarClick;
-    private bool _isAtDesktopLayer;
-    private bool _keepRaisedUntilDeactivate;
-    private bool _restoreDesktopLayerWhenIdle;
-    private bool _isHideAnimationRunning;
+    private bool _isAtDesktopLayer { get => IsAtDesktopLayer; set => IsAtDesktopLayer = value; }
+    private bool _keepRaisedUntilDeactivate { get => KeepRaisedUntilDeactivate; set => KeepRaisedUntilDeactivate = value; }
+    private bool _restoreDesktopLayerWhenIdle { get => RestoreDesktopLayerWhenIdle; set => RestoreDesktopLayerWhenIdle = value; }
+    private bool _isHideAnimationRunning { get => IsHideAnimationRunning; set => IsHideAnimationRunning = value; }
     private bool _isMigrationBusy;
-    private bool _isNativeBackdropSuppressedForTrayReveal;
-    private long _backdropRefreshGeneration;
+    private long _backdropRefreshGeneration { get => BackdropRefreshGeneration; set => BackdropRefreshGeneration = value; }
     private bool _areItemTransitionsSuppressed;
     private DispatcherQueueTimer? _autoRestoreTimer;
-    private DispatcherQueueTimer? _topMostSafetyTimer;
-    private DispatcherQueueTimer? _backdropRefreshTimer;
-    private int _backdropRefreshStage;
-    private static readonly int[] _backdropRefreshDelays = [80, 240, 580];
-    private WidgetDisplayChangeWatcher? _displayChangeWatcher;
+    private DispatcherQueueTimer? _topMostSafetyTimer { get => TopMostSafetyTimer; set => TopMostSafetyTimer = value; }
+    private WidgetDisplayChangeWatcher? _displayChangeWatcher { get => DisplayChangeWatcher; set => DisplayChangeWatcher = value; }
     private bool _isFileDropSubclassInstalled;
     private TransitionCollection? _savedGridItemTransitions;
     private TransitionCollection? _savedListItemTransitions;
@@ -143,17 +148,71 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
 
     public WidgetViewModel ViewModel { get; }
 
-    public IntPtr WindowHandle => _hWnd;
+    public IntPtr WindowHandle => HWnd;
 
-    public WidgetWindowIdentity Identity => _diagnostics.Identity;
+    public WidgetWindowIdentity Identity => Diagnostics.Identity;
 
-    public WidgetConfig Config => ViewModel.Config;
+    public override WidgetConfig Config => ViewModel.Config;
 
-    public Windows.Foundation.Rect AnimationBounds => _diagnostics.AnimationBounds;
+    public Windows.Foundation.Rect AnimationBounds => Diagnostics.AnimationBounds;
+
+    // ── WidgetWindowBase abstract overrides ────────────────────
+    protected override double WidgetOpacity => ViewModel.WidgetOpacity;
+    protected override FrameworkElement RootElement => RootGrid;
+    protected override string LogPrefix => "Widget";
+    protected override bool IsSizeLocked => ViewModel.IsSizeLocked;
+    protected override bool IsPositionLocked => ViewModel.IsPositionLocked;
+    protected override bool IsBackdropSuppressedForTrayReveal => _isNativeBackdropSuppressedForTrayReveal;
+
+    protected override void OnElevated()
+    {
+        RootGrid.Focus(FocusState.Programmatic);
+    }
+
+    protected override bool HasBlockingFlyoutOpen()
+    {
+        return TitleEditBox.Visibility == Visibility.Visible ||
+               _deletePending ||
+               _isDeleteWidgetFlyoutOpen ||
+               _isInlineFlyoutOpen;
+    }
+
+    protected override void ConfigureWindowExtra()
+    {
+        Win32Helper.AllowShellDragDropMessages(HWnd);
+        InstallFileDropSubclass();
+    }
+
+    protected override void OnRootElementLoaded()
+    {
+        var parent = VisualTreeHelper.GetParent(RootGrid) as FrameworkElement;
+        while (parent is not null)
+        {
+            if (parent is Control control)
+            {
+                control.Background = new SolidColorBrush(Colors.Transparent);
+            }
+            else if (parent is Panel panel)
+            {
+                panel.Background = new SolidColorBrush(Colors.Transparent);
+            }
+            else if (parent is Border border)
+            {
+                border.Background = new SolidColorBrush(Colors.Transparent);
+            }
+            else if (parent is ContentPresenter presenter)
+            {
+                presenter.Background = new SolidColorBrush(Colors.Transparent);
+            }
+
+            parent = VisualTreeHelper.GetParent(parent) as FrameworkElement;
+        }
+        RootGrid.Focus(FocusState.Programmatic);
+    }
 
     private bool _isVisibleOnDesktop;
-    private bool _isClosing;
-    private DateTime _lastElevateForInteractionUtc = DateTime.MinValue;
+    private bool _isClosing { get => IsClosing; set => IsClosing = value; }
+    private DateTime _lastElevateForInteractionUtc { get => LastElevateForInteractionUtc; set => LastElevateForInteractionUtc = value; }
     public new bool Visible
     {
         get => _isVisibleOnDesktop;
@@ -173,10 +232,10 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
     public WidgetWindow(WidgetViewModel viewModel, SettingsService settingsService, LocalizationService? localizationService = null)
     {
         ViewModel = viewModel;
-        _settingsService = settingsService;
-        _localizationService = localizationService ?? new LocalizationService(settingsService);
+        SettingsService = settingsService;
+        _localizationSvc = localizationService ?? new LocalizationService(settingsService);
         _fileDropSubclassProc = FileDropSubclassProc;
-        _chromeDescriptor = new WidgetContentFactory(_localizationService).GetDescriptor(WidgetKind.File);
+        _chromeDescriptor = new WidgetContentFactory(_localizationSvc).GetDescriptor(WidgetKind.File);
         _chromeModeResolver = new WidgetChromeModeResolver(settingsService);
         InitializeComponent();
         RootGrid.DataContext = ViewModel;
@@ -184,16 +243,16 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
         ApplyLocalizedText();
         FileWidgetShell.SetDividerMargin(new Thickness(12, 0, 12, 0));
 
-        _hWnd = WindowNative.GetWindowHandle(this);
-        _windowId = Win32Interop.GetWindowIdFromWindow(_hWnd);
-        _appWindow = AppWindow.GetFromWindowId(_windowId);
-        _diagnostics = new WidgetWindowDiagnostics("File", ViewModel.Config, () => _hWnd);
-        _trayAnimation = new WidgetTrayAnimationController(
-            _appWindow,
+        HWnd = WindowNative.GetWindowHandle(this);
+        _windowId = Win32Interop.GetWindowIdFromWindow(HWnd);
+        AppWindow = AppWindow.GetFromWindowId(_windowId);
+        Diagnostics = new WidgetWindowDiagnostics("File", ViewModel.Config, () => HWnd);
+        TrayAnimation = new WidgetTrayAnimationController(
+            AppWindow,
             RootGrid,
             DispatcherQueue,
-            _hWnd,
-            () => _diagnostics.AnimationBounds,
+            HWnd,
+            () => Diagnostics.AnimationBounds,
             LogTrayWindow);
 
         ConfigureWindow();
@@ -207,94 +266,7 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
 
     private void ConfigureWindow()
     {
-        if (_appWindow.Presenter is OverlappedPresenter presenter)
-        {
-            presenter.SetBorderAndTitleBar(false, false);
-            presenter.IsResizable = false;
-            presenter.IsMaximizable = false;
-            presenter.IsMinimizable = false;
-        }
-
-        int exStyle = Win32Helper.GetWindowLong(_hWnd, Win32Helper.GWL_EXSTYLE);
-        exStyle |= Win32Helper.WS_EX_TOOLWINDOW;
-        Win32Helper.SetWindowLong(_hWnd, Win32Helper.GWL_EXSTYLE, exStyle);
-        Win32Helper.AllowShellDragDropMessages(_hWnd);
-        InstallFileDropSubclass();
-
-        int style = Win32Helper.GetWindowLong(_hWnd, Win32Helper.GWL_STYLE);
-        style &= ~(Win32Helper.WS_CAPTION | Win32Helper.WS_BORDER | Win32Helper.WS_DLGFRAME | Win32Helper.WS_THICKFRAME);
-        Win32Helper.SetWindowLong(_hWnd, Win32Helper.GWL_STYLE, style);
-        Win32Helper.SetWindowPos(
-            _hWnd,
-            IntPtr.Zero,
-            0,
-            0,
-            0,
-            0,
-            Win32Helper.SWP_NOMOVE | Win32Helper.SWP_NOSIZE | Win32Helper.SWP_NOACTIVATE | Win32Helper.SWP_FRAMECHANGED);
-
-        _appWindow.IsShownInSwitchers = false;
-        ExtendsContentIntoTitleBar = false;
-
-        var config = ViewModel.Config;
-        var workArea = DisplayArea.GetFromRect(
-            new Windows.Graphics.RectInt32(
-                (int)Math.Round(config.X),
-                (int)Math.Round(config.Y),
-                (int)Math.Round(config.Width),
-                (int)Math.Round(config.Height)),
-            DisplayAreaFallback.Nearest).WorkArea;
-        var bounds = WidgetPositioningService.ResolveBounds(
-            config,
-            workArea,
-            WidgetPositioningService.GetAvailableWorkAreas());
-        ApplyWindowBounds(
-            bounds.X,
-            bounds.Y,
-            bounds.Width,
-            bounds.Height,
-            persist: false);
-
-        ApplyDwmBorderStyle(RootGrid.ActualTheme == ElementTheme.Dark);
-
-        ApplyWindowCornerPreference();
-
-        Win32Helper.EnsureSystemDispatcherQueue();
-        Win32Helper.ApplyFullWindowFrame(_hWnd);
-        ApplyBackdropPreference();
-
-        RootGrid.Loaded += (_, _) =>
-        {
-            var parent = VisualTreeHelper.GetParent(RootGrid) as FrameworkElement;
-            while (parent is not null)
-            {
-                if (parent is Control control)
-                {
-                    control.Background = new SolidColorBrush(Colors.Transparent);
-                }
-                else if (parent is Panel panel)
-                {
-                    panel.Background = new SolidColorBrush(Colors.Transparent);
-                }
-                else if (parent is Border border)
-                {
-                    border.Background = new SolidColorBrush(Colors.Transparent);
-                }
-                else if (parent is ContentPresenter presenter)
-                {
-                    presenter.Background = new SolidColorBrush(Colors.Transparent);
-                }
-
-                parent = VisualTreeHelper.GetParent(parent) as FrameworkElement;
-            }
-
-            ApplyBackdropPreference();
-            Win32Helper.ApplyFullWindowFrame(_hWnd);
-            QueueBackdropRefresh();
-        };
-
-        RootGrid.ActualThemeChanged += (_, _) => ApplyBackdropPreference();
-        RootGrid.Loaded += (_, _) => RootGrid.Focus(FocusState.Programmatic);
+        ConfigureWindowCore();
     }
 
     private void SetupEventHandlers()
@@ -329,12 +301,9 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
             _displayChangeWatcher = null;
             _autoRestoreTimer?.Stop();
             _autoRestoreTimer = null;
-            _backdropRefreshTimer?.Stop();
-            _backdropRefreshTimer = null;
+            StopBackdropRefreshTimer();
             RemoveFileDropSubclass();
             _trayAnimation.Stop();
-            _trayAnimation.RestoreVisualState();
-            _trayAnimation.RestoreWindowPosition();
             RestoreItemContainerTransitions();
             DisposeAcrylicController();
             DisposeMicaController();
@@ -387,7 +356,7 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
             return true;
         }
 
-        ApplyWindowBounds(bounds.X, bounds.Y, bounds.Width, bounds.Height, persist: false, updateConfig: false);
+        ApplyWindowBounds(bounds.X, bounds.Y, bounds.Width, bounds.Height, persist: false, updateConfig: true);
         return true;
     }
 
@@ -402,6 +371,7 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
             var workArea = DisplayArea.GetFromRect(bounds, DisplayAreaFallback.Nearest).WorkArea;
             WidgetPositioningService.CaptureAnchor(ViewModel.Config, bounds, workArea);
             WidgetPositioningService.UpdateConfigFromPhysicalBounds(ViewModel.Config, bounds, workArea);
+            _settingsService.SaveDebounced();
             return true;
         }
 
@@ -452,14 +422,14 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
     {
         _isAtDesktopLayer = true;
         WidgetLayerService.MoveToDesktopBottom(_hWnd);
-        App.Log($"[ZOrder] Widget PushToBottom hwnd=0x{_hWnd.ToInt64():X}");
+        App.LogVerbose($"[ZOrder] Widget PushToBottom hwnd=0x{_hWnd.ToInt64():X}");
     }
 
     public void ClearTopMostOnly()
     {
         _isAtDesktopLayer = true;
         IntPtr foreground = WidgetLayerService.ClearTopMostPreservingForeground(_hWnd);
-        App.Log($"[ZOrder] Widget ClearTopMostOnly hwnd=0x{_hWnd.ToInt64():X} fg=0x{foreground.ToInt64():X}");
+        App.LogVerbose($"[ZOrder] Widget ClearTopMostOnly hwnd=0x{_hWnd.ToInt64():X} fg=0x{foreground.ToInt64():X}");
     }
 
     public void ShowPreparedAtDesktopLayer(bool persistVisibility = true)
@@ -521,23 +491,23 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
     {
         if (!Visible)
         {
-            App.Log($"[ZOrder] Widget EnsureRaisedFromTrayTopMost SKIPPED not-visible hwnd=0x{_hWnd.ToInt64():X}");
+            App.LogVerbose($"[ZOrder] Widget EnsureRaisedFromTrayTopMost SKIPPED not-visible hwnd=0x{_hWnd.ToInt64():X}");
             return;
         }
 
         if (_isAtDesktopLayer)
         {
-            App.Log($"[ZOrder] Widget EnsureRaisedFromTrayTopMost SKIPPED atDesktop hwnd=0x{_hWnd.ToInt64():X}");
+            App.LogVerbose($"[ZOrder] Widget EnsureRaisedFromTrayTopMost SKIPPED atDesktop hwnd=0x{_hWnd.ToInt64():X}");
             return;
         }
 
         if (App.Current.WidgetManager is not { WidgetsRaisedFromTray: true })
         {
-            App.Log($"[ZOrder] Widget EnsureRaisedFromTrayTopMost SKIPPED not-raised hwnd=0x{_hWnd.ToInt64():X}");
+            App.LogVerbose($"[ZOrder] Widget EnsureRaisedFromTrayTopMost SKIPPED not-raised hwnd=0x{_hWnd.ToInt64():X}");
             return;
         }
 
-        App.Log($"[ZOrder] Widget EnsureRaisedFromTrayTopMost hwnd=0x{_hWnd.ToInt64():X} atDesktop={_isAtDesktopLayer}");
+        App.LogVerbose($"[ZOrder] Widget EnsureRaisedFromTrayTopMost hwnd=0x{_hWnd.ToInt64():X} atDesktop={_isAtDesktopLayer}");
         _appWindow.Show();
         Win32Helper.ShowWindow(_hWnd, Win32Helper.SW_SHOWNORMAL);
         WidgetLayerService.BringToFront(_hWnd);
@@ -985,7 +955,7 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
             _keepRaisedUntilDeactivate = false;
             _restoreDesktopLayerWhenIdle = false;
             WidgetLayerService.MoveToDesktopBottom(_hWnd);
-            App.Log($"[ZOrder] Widget HoldTemporaryTopMost skipped pinned hwnd=0x{_hWnd.ToInt64():X}");
+            App.LogVerbose($"[ZOrder] Widget HoldTemporaryTopMost skipped pinned hwnd=0x{_hWnd.ToInt64():X}");
             return;
         }
 
@@ -993,29 +963,32 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
         _keepRaisedUntilDeactivate = true;
         _restoreDesktopLayerWhenIdle = false;
         WidgetLayerService.HoldTemporaryTopMost(_hWnd);
-        var stack = new System.Diagnostics.StackTrace(true);
-        var frame = stack.GetFrame(1);
-        App.Log($"[ZOrder] Widget HoldTemporaryTopMost hwnd=0x{_hWnd.ToInt64():X} raised={App.Current.WidgetManager?.WidgetsRaisedFromTray} from={frame?.GetMethod()?.DeclaringType?.Name}.{frame?.GetMethod()?.Name}");
+        App.LogVerbose($"[ZOrder] Widget HoldTemporaryTopMost hwnd=0x{_hWnd.ToInt64():X} raised={App.Current.WidgetManager?.WidgetsRaisedFromTray}");
         StartTopMostSafetyTimer();
     }
 
     private void StartTopMostSafetyTimer()
     {
-        _topMostSafetyTimer?.Stop();
-        _topMostSafetyTimer = DispatcherQueue.CreateTimer();
-        _topMostSafetyTimer.IsRepeating = false;
-        _topMostSafetyTimer.Interval = TimeSpan.FromSeconds(2);
-        _topMostSafetyTimer.Tick += (_, _) =>
+        if (_topMostSafetyTimer is null)
         {
-            _topMostSafetyTimer?.Stop();
-            _topMostSafetyTimer = null;
-            if (!_isAtDesktopLayer && !_isDragging && !_isResizing &&
-                App.Current.WidgetManager is not { WidgetsRaisedFromTray: true })
+            _topMostSafetyTimer = DispatcherQueue.CreateTimer();
+            _topMostSafetyTimer.IsRepeating = false;
+            _topMostSafetyTimer.Interval = TimeSpan.FromSeconds(2);
+            _topMostSafetyTimer.Tick += (_, _) =>
             {
-                App.Log($"[ZOrder] Widget safety timer: force restore hwnd=0x{_hWnd.ToInt64():X}");
-                RestoreDesktopLayer(force: true);
-            }
-        };
+                _topMostSafetyTimer?.Stop();
+                if (!_isAtDesktopLayer && !_isDragging && !_isResizing &&
+                    App.Current.WidgetManager is not { WidgetsRaisedFromTray: true })
+                {
+                    App.Log($"[ZOrder] Widget safety timer: force restore hwnd=0x{_hWnd.ToInt64():X}");
+                    RestoreDesktopLayer(force: true);
+                }
+            };
+        }
+        else
+        {
+            _topMostSafetyTimer.Stop();
+        }
         _topMostSafetyTimer.Start();
     }
 
@@ -1044,7 +1017,7 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
             WidgetLayerService.UsesDesktopPinnedMode() ||
             (App.Current.WidgetManager is { WidgetsRaisedFromTray: true }))
         {
-            App.Log($"[ZOrder] Widget PointerActivated BLOCKED hwnd=0x{_hWnd.ToInt64():X} visible={Visible} atDesktop={_isAtDesktopLayer} raised={App.Current.WidgetManager?.WidgetsRaisedFromTray}");
+            App.LogVerbose($"[ZOrder] Widget PointerActivated BLOCKED hwnd=0x{_hWnd.ToInt64():X} visible={Visible} atDesktop={_isAtDesktopLayer} raised={App.Current.WidgetManager?.WidgetsRaisedFromTray}");
             return;
         }
 
@@ -1097,7 +1070,7 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
 
     public void ForceRestoreDesktopLayerFromManager()
     {
-        App.Log($"[ZOrder] Widget ForceRestore hwnd=0x{_hWnd.ToInt64():X} visible={Visible} atDesktop={_isAtDesktopLayer}");
+        App.LogVerbose($"[ZOrder] Widget ForceRestore hwnd=0x{_hWnd.ToInt64():X} visible={Visible} atDesktop={_isAtDesktopLayer}");
         ForceCancelTransientState();
         RestoreDesktopLayer(force: true);
     }
@@ -1184,14 +1157,14 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
         WidgetPositioningService.CaptureAnchor(ViewModel.Config, bounds, workArea);
     }
 
-    private void UpdateConfigBoundsFromPhysical(int x, int y, int width, int height, bool persist)
+    protected override void UpdateConfigBoundsFromPhysical(int x, int y, int width, int height, bool persist)
     {
         var bounds = new Windows.Graphics.RectInt32(x, y, width, height);
         var workArea = DisplayArea.GetFromRect(bounds, DisplayAreaFallback.Nearest).WorkArea;
         WidgetPositioningService.UpdateConfigFromPhysicalBounds(ViewModel.Config, bounds, workArea);
         if (persist)
         {
-            _settingsService.UpdateWidget(ViewModel.Config, notifySubscribers: false);
+            SettingsService.UpdateWidget(ViewModel.Config, notifySubscribers: false);
         }
     }
 
@@ -1398,68 +1371,8 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
         }
     }
 
-    private void QueueBackdropRefresh()
-    {
-        if (!DispatcherQueue.HasThreadAccess)
-        {
-            DispatcherQueue.TryEnqueue(QueueBackdropRefresh);
-            return;
-        }
-
-        long generation = ++_backdropRefreshGeneration;
-        _backdropRefreshStage = 0;
-
-        if (_backdropRefreshTimer is null)
-        {
-            _backdropRefreshTimer = DispatcherQueue.CreateTimer();
-            _backdropRefreshTimer.Tick += (_, _) => OnBackdropRefreshTick(generation);
-        }
-        else
-        {
-            _backdropRefreshTimer.Stop();
-        }
-
-        _backdropRefreshTimer.Interval = TimeSpan.FromMilliseconds(_backdropRefreshDelays[0]);
-        _backdropRefreshTimer.Start();
-    }
-
-    private void OnBackdropRefreshTick(long generation)
-    {
-        if (generation != _backdropRefreshGeneration)
-        {
-            _backdropRefreshTimer?.Stop();
-            return;
-        }
-
-        RefreshBackdropIfCurrent(generation);
-
-        int nextStage = _backdropRefreshStage + 1;
-        _backdropRefreshStage = nextStage;
-
-        if (nextStage < _backdropRefreshDelays.Length)
-        {
-            _backdropRefreshTimer!.Interval = TimeSpan.FromMilliseconds(_backdropRefreshDelays[nextStage]);
-        }
-        else
-        {
-            _backdropRefreshTimer!.Stop();
-        }
-    }
-
-    private void RefreshBackdropIfCurrent(long generation)
-    {
-        if (generation != _backdropRefreshGeneration)
-        {
-            return;
-        }
-
-        if (!Visible || _isHideAnimationRunning)
-        {
-            return;
-        }
-
-        ApplyBackdropPreference();
-    }
+    // QueueBackdropRefresh, OnBackdropRefreshTick, RefreshBackdropIfCurrent
+    // are now inherited from WidgetWindowBase.
 
     private bool ApplyAcrylicController(
         bool isDark,
@@ -1580,7 +1493,7 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
         }
     }
 
-    private Windows.UI.Color BuildNativeBackdropTintColor(bool isDark)
+    protected override Windows.UI.Color BuildNativeBackdropTintColor(bool isDark)
     {
         var accentColor = App.Current.ThemeService?.GetEffectiveAccentColor()
             ?? AccentColorHelper.DefaultAccentColor;
@@ -5796,7 +5709,7 @@ public sealed partial class WidgetWindow : Window, IDesktopWidgetWindow
         _resizeDirection = element.Tag as string ?? string.Empty;
         _displayChangeWatcher?.SuppressRestore();
         BeginInteractionLayer("file-resize-started");
-        Win32Helper.GetCursorPos(out _initialCursorPt);
+        Win32Helper.GetCursorPos(out InitialCursorPt);
         _initialWindowPos = _appWindow.Position;
         _initialWindowSize = _appWindow.Size;
         element.CapturePointer(e.Pointer);

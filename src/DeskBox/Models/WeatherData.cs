@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using Microsoft.UI.Xaml;
 
 namespace DeskBox.Models;
 
@@ -147,4 +148,33 @@ public sealed class WeatherCitySearchResult
     public double Longitude { get; set; }
     public string Country { get; set; } = string.Empty;
     public string Admin1 { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Returns Visible when Admin1 has content and differs from Name.
+    /// </summary>
+    public Visibility Admin1Visibility =>
+        !string.IsNullOrEmpty(Admin1) && Admin1 != Name
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+
+    /// <summary>
+    /// Secondary display line: "Admin1, Country" or just "Country".
+    /// </summary>
+    public string RegionDisplay
+    {
+        get
+        {
+            var parts = new List<string>();
+            if (!string.IsNullOrEmpty(Admin1) && Admin1 != Name) parts.Add(Admin1);
+            if (!string.IsNullOrEmpty(Country)) parts.Add(Country);
+            return string.Join(", ", parts);
+        }
+    }
+
+    /// <summary>
+    /// Used by AutoSuggestBox when a suggestion is chosen (it calls ToString()
+    /// to populate the text box). Returning DisplayName ensures the correct
+    /// city name is shown instead of the fully qualified type name.
+    /// </summary>
+    public override string ToString() => DisplayName;
 }

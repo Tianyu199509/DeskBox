@@ -96,6 +96,11 @@ public sealed class WidgetShellContentHost
         CurrentContent?.OnDeactivated();
     }
 
+    public void OnWindowVisibilityChanged(bool visible)
+    {
+        CurrentContent?.OnWindowVisibilityChanged(visible);
+    }
+
     public void DisposeContent()
     {
         if (_isDisposed && CurrentContent is null && _pendingContent is null)

@@ -52,6 +52,7 @@ public sealed partial class SettingsWindow : Window
     private bool _isRefreshingFeatureWidgetList;
     private bool _isSyncingNavigationSelection;
     private bool _isSettingsRootLoaded;
+    private bool _isSelectingCity;
     private string _currentSettingsSection = "General";
 
     private static readonly IReadOnlyDictionary<string, SettingsSectionRoute> SectionRoutes =
@@ -905,11 +906,42 @@ break;
         e.Handled = true;
     }
 
-    private void WeatherCityResult_ItemClick(object sender, ItemClickEventArgs e)
+    private void WeatherCitySearchBox_TextChanged(AutoSuggestBox sender, AutoSuggestBoxTextChangedEventArgs args)
     {
-        if (e.ClickedItem is WeatherCitySearchResult result)
+        // Suppress search when a city is being selected (SuggestionChosen → TextChanged → QuerySubmitted chain)
+        if (_isSelectingCity || args.Reason != AutoSuggestionBoxTextChangeReason.UserInput)
         {
+            return;
+        }
+
+        _ = ViewModel.UpdateWeatherCitySuggestionsAsync(sender.Text);
+    }
+
+    private void WeatherCitySearchBox_SuggestionChosen(AutoSuggestBox sender, AutoSuggestBoxSuggestionChosenEventArgs args)
+    {
+        if (args.SelectedItem is WeatherCitySearchResult result)
+        {
+            _isSelectingCity = true;
             ViewModel.SelectWeatherCity(result);
+            // Reset on next dispatch cycle, after TextChanged and QuerySubmitted have fired
+            DispatcherQueue.TryEnqueue(() => _isSelectingCity = false);
+        }
+    }
+
+    private void WeatherCitySearchBox_QuerySubmitted(AutoSuggestBox sender, AutoSuggestBoxQuerySubmittedEventArgs args)
+    {
+        // If a suggestion was chosen, SuggestionChosen already handled it
+        if (args.ChosenSuggestion is not null)
+        {
+            return;
+        }
+
+        // User pressed Enter without selecting a suggestion — pick the first match
+        if (!string.IsNullOrWhiteSpace(args.QueryText) && ViewModel.WeatherCitySuggestions.Count > 0)
+        {
+            _isSelectingCity = true;
+            ViewModel.SelectWeatherCity(ViewModel.WeatherCitySuggestions[0]);
+            DispatcherQueue.TryEnqueue(() => _isSelectingCity = false);
         }
     }
 
@@ -918,8 +950,7 @@ break;
         // Clear search results and restore the saved city name if the user didn't select anything.
         DispatcherQueue.TryEnqueue(() =>
         {
-            ViewModel.ClearWeatherCitySearchResults();
-            // Restore the search text to the saved city name
+            ViewModel.ClearWeatherCitySuggestions();
             ViewModel.RestoreWeatherCitySearchText();
         });
     }
@@ -2268,14 +2299,7 @@ break;
 
     private double GetCurrentDpiScale()
     {
-        double xamlScale = SettingsRoot.XamlRoot?.RasterizationScale ?? 0;
-        if (xamlScale > 0)
-        {
-            return xamlScale;
-        }
-
-        uint dpi = GetDpiForWindow(_hWnd);
-        return dpi > 0 ? dpi / 96.0 : 1.0;
+        return Win32Helper.GetDpiScaleForWindow(_hWnd, SettingsRoot.XamlRoot);
     }
 
     private static int ToPhysicalPixels(int logicalPixels, double scale)
@@ -2342,9 +2366,6 @@ break;
         public NativePoint MinTrackSize;
         public NativePoint MaxTrackSize;
     }
-
-    [DllImport("user32.dll")]
-    private static extern uint GetDpiForWindow(IntPtr hWnd);
 
     private sealed record SettingsSectionRoute(
         string Tag,

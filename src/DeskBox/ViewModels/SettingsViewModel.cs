@@ -169,8 +169,6 @@ private string[]? _cachedWeatherRefreshIntervalDisplayNames;
 [ObservableProperty] private bool _weatherShowHumidity = true;
 [ObservableProperty] private bool _weatherShowWind = true;
 [ObservableProperty] private bool _weatherShowPressure;
-[ObservableProperty] private bool _weatherShowHourlyTrend = true;
-
 
     [ObservableProperty] private bool _quickCaptureClipboardEnabled;
     [ObservableProperty] private bool _quickCaptureImageClipboardEnabled;
@@ -1260,7 +1258,6 @@ WeatherShowPrecipitation = true;
 WeatherShowHumidity = true;
 WeatherShowWind = true;
 WeatherShowPressure = false;
-WeatherShowHourlyTrend = true;
 SelectedWeatherRefreshInterval = 60;
                     _settingsService.Settings.MusicUseArtworkBackdrop = true;
                     _settingsService.Settings.MusicShowRhythmBars = true;
@@ -1279,7 +1276,6 @@ WeatherShowPrecipitation = true;
 WeatherShowHumidity = true;
 WeatherShowWind = true;
 WeatherShowPressure = false;
-WeatherShowHourlyTrend = true;
 SelectedWeatherRefreshInterval = 60;
                     break;
             }
@@ -1716,11 +1712,11 @@ public Visibility WeatherCityNameVisibility => WeatherAutoLocation ? Visibility.
 
 partial void OnWeatherCityNameChanged(string value)
 {
-    // Don't save on text change — only save when a city is selected from search results.
-    // See WeatherCitySearchResults / SelectWeatherCityCommand.
+    // Don't save on text change — only save when a city is selected from suggestions.
+    // See WeatherCitySuggestions / SelectWeatherCity.
 }
 
-// ─── Weather city search ───
+// ─── Weather city search (AutoSuggestBox) ───
 
 private string _weatherCitySearchText = string.Empty;
 private bool _isWeatherCitySearchUpdating;
@@ -1728,16 +1724,14 @@ private bool _isWeatherCitySearchUpdating;
 public string WeatherCitySearchText
 {
     get => _weatherCitySearchText;
-    set
-    {
-        if (SetProperty(ref _weatherCitySearchText, value))
-        {
-            _ = SearchWeatherCitiesAsync(value);
-        }
-    }
+    set => SetProperty(ref _weatherCitySearchText, value);
 }
 
-public ObservableCollection<WeatherCitySearchResult> WeatherCitySearchResults { get; } = [];
+/// <summary>
+/// Suggestions shown in the AutoSuggestBox dropdown.
+/// Populated with nearby popular cities when empty, or search results when typing.
+/// </summary>
+public ObservableCollection<WeatherCitySearchResult> WeatherCitySuggestions { get; } = [];
 
 private bool _isWeatherCitySearching;
 public bool IsWeatherCitySearching
@@ -1746,51 +1740,96 @@ public bool IsWeatherCitySearching
     private set => SetProperty(ref _isWeatherCitySearching, value);
 }
 
-public bool HasWeatherCitySearchResults => WeatherCitySearchResults.Count > 0;
+/// <summary>
+/// True when a search was performed but returned no results.
+/// </summary>
+private bool _hasNoCitySearchResults;
+public bool HasNoCitySearchResults
+{
+    get => _hasNoCitySearchResults;
+    private set
+    {
+        if (SetProperty(ref _hasNoCitySearchResults, value))
+        {
+            OnPropertyChanged(nameof(HasNoCitySearchResultsVisibility));
+        }
+    }
+}
+
+public Visibility HasNoCitySearchResultsVisibility => HasNoCitySearchResults
+    ? Visibility.Visible
+    : Visibility.Collapsed;
+
+public string WeatherCitySearchPlaceholder => _localizationService.T("Weather.CitySearch.Placeholder");
+public string WeatherCityNoResultsText => _localizationService.T("Weather.CitySearch.NoResults");
 
 private CancellationTokenSource? _citySearchCts;
+private CitySearchService? _citySearchService;
+private double? _cachedLocationLat;
+private double? _cachedLocationLon;
+private bool _locationInitialized;
 
-private async Task SearchWeatherCitiesAsync(string query)
+/// <summary>
+/// Called from the AutoSuggestBox TextChanged event (code-behind).
+/// Populates suggestions with nearby popular cities when empty,
+/// or search results when the user types.
+/// </summary>
+public async Task UpdateWeatherCitySuggestionsAsync(string query)
 {
-    if (_isWeatherCitySearchUpdating || string.IsNullOrWhiteSpace(query) || query.Length < 2)
+    if (_isWeatherCitySearchUpdating)
     {
-        WeatherCitySearchResults.Clear();
-        OnPropertyChanged(nameof(HasWeatherCitySearchResults));
         return;
     }
 
+    // Cancel any pending search
     _citySearchCts?.Cancel();
     _citySearchCts = new CancellationTokenSource();
+    var ct = _citySearchCts.Token;
+
+    // Empty query → show nearby popular cities
+    if (string.IsNullOrWhiteSpace(query))
+    {
+        WeatherCitySuggestions.Clear();
+        HasNoCitySearchResults = false;
+
+        await PopulateNearbyPopularCitiesAsync();
+        return;
+    }
+
+    // Non-empty but too short → clear and wait
+    if (query.Length < 2)
+    {
+        WeatherCitySuggestions.Clear();
+        HasNoCitySearchResults = false;
+        return;
+    }
 
     IsWeatherCitySearching = true;
     try
     {
-        await Task.Delay(300, _citySearchCts.Token);
+        await Task.Delay(300, ct);
 
-        var weatherService = new WeatherService();
-        var language = _localizationService.IsEnglish ? "en" : "zh";
-        var results = await weatherService.SearchCityAsync(query, language);
-        weatherService.Dispose();
-
-        if (_citySearchCts.Token.IsCancellationRequested)
+        // Guard: if a city was selected while we were waiting, abort.
+        if (_isWeatherCitySearchUpdating || ct.IsCancellationRequested)
         {
             return;
         }
 
-        WeatherCitySearchResults.Clear();
-        foreach (var item in results.Take(8))
+        _citySearchService ??= new CitySearchService();
+        var language = _localizationService.IsEnglish ? "en" : "zh";
+        var results = await _citySearchService.SearchAsync(query, language, ct);
+
+        if (ct.IsCancellationRequested || _isWeatherCitySearchUpdating)
         {
-            WeatherCitySearchResults.Add(new WeatherCitySearchResult
-            {
-                Name = item.Name ?? string.Empty,
-                DisplayName = BuildCityDisplayName(item),
-                Latitude = item.Latitude,
-                Longitude = item.Longitude,
-                Country = item.Country ?? string.Empty,
-                Admin1 = item.Admin1 ?? string.Empty
-            });
+            return;
         }
-        OnPropertyChanged(nameof(HasWeatherCitySearchResults));
+
+        WeatherCitySuggestions.Clear();
+        foreach (var r in results)
+        {
+            WeatherCitySuggestions.Add(r);
+        }
+        HasNoCitySearchResults = WeatherCitySuggestions.Count == 0;
     }
     catch (OperationCanceledException)
     {
@@ -1798,7 +1837,7 @@ private async Task SearchWeatherCitiesAsync(string query)
     }
     catch (Exception ex)
     {
-        App.Log($"[SettingsViewModel] Weather city search failed: {ex.Message}");
+        App.Log($"[SettingsViewModel] City search failed: {ex.Message}");
     }
     finally
     {
@@ -1806,13 +1845,50 @@ private async Task SearchWeatherCitiesAsync(string query)
     }
 }
 
-private static string BuildCityDisplayName(WeatherGeocodingItem item)
+/// <summary>
+/// Populates the suggestions with nearby popular cities based on user location.
+/// Falls back to global popular cities if location is unavailable.
+/// </summary>
+private async Task PopulateNearbyPopularCitiesAsync()
 {
-    var parts = new List<string>();
-    if (!string.IsNullOrEmpty(item.Name)) parts.Add(item.Name);
-    if (!string.IsNullOrEmpty(item.Admin1) && item.Admin1 != item.Name) parts.Add(item.Admin1);
-    if (!string.IsNullOrEmpty(item.Country)) parts.Add(item.Country);
-    return string.Join(", ", parts);
+    try
+    {
+        _citySearchService ??= new CitySearchService();
+        var language = _localizationService.IsEnglish ? "en" : "zh";
+
+        // Try to get user location (cached after first call)
+        if (!_locationInitialized)
+        {
+            var (lat, lon, _) = await WindowsLocationHelper.GetLocationAsync(_localizationService);
+            _cachedLocationLat = lat;
+            _cachedLocationLon = lon;
+            _locationInitialized = true;
+        }
+
+        var cities = _citySearchService.GetNearbyPopularCities(
+            _cachedLocationLat, _cachedLocationLon, language, maxCount: 8);
+
+        WeatherCitySuggestions.Clear();
+        foreach (var c in cities)
+        {
+            WeatherCitySuggestions.Add(c);
+        }
+    }
+    catch (Exception ex)
+    {
+        App.Log($"[SettingsViewModel] Failed to populate nearby cities: {ex.Message}");
+    }
+}
+
+/// <summary>
+/// Called when language changes to refresh the popular cities list.
+/// Clears cached suggestions so they get repopulated on next focus.
+/// </summary>
+public void RefreshWeatherCityPopularCities()
+{
+    _citySearchCts?.Cancel();
+    WeatherCitySuggestions.Clear();
+    HasNoCitySearchResults = false;
 }
 
 public void SelectWeatherCity(WeatherCitySearchResult result)
@@ -1821,6 +1897,9 @@ public void SelectWeatherCity(WeatherCitySearchResult result)
     {
         return;
     }
+
+    // Cancel any pending search so it can't overwrite our state.
+    _citySearchCts?.Cancel();
 
     _isWeatherCitySearchUpdating = true;
     try
@@ -1834,8 +1913,8 @@ public void SelectWeatherCity(WeatherCitySearchResult result)
         _weatherCitySearchText = result.DisplayName;
         OnPropertyChanged(nameof(WeatherCitySearchText));
 
-        WeatherCitySearchResults.Clear();
-        OnPropertyChanged(nameof(HasWeatherCitySearchResults));
+        WeatherCitySuggestions.Clear();
+        HasNoCitySearchResults = false;
     }
     finally
     {
@@ -1843,10 +1922,11 @@ public void SelectWeatherCity(WeatherCitySearchResult result)
     }
 }
 
-public void ClearWeatherCitySearchResults()
+public void ClearWeatherCitySuggestions()
 {
-    WeatherCitySearchResults.Clear();
-    OnPropertyChanged(nameof(HasWeatherCitySearchResults));
+    _citySearchCts?.Cancel();
+    WeatherCitySuggestions.Clear();
+    HasNoCitySearchResults = false;
 }
 
 public void RestoreWeatherCitySearchText()
@@ -1937,17 +2017,6 @@ partial void OnWeatherShowPressureChanged(bool value)
     }
 
     _settingsService.Settings.WeatherShowPressure = value;
-    _settingsService.SaveDebounced();
-}
-
-partial void OnWeatherShowHourlyTrendChanged(bool value)
-{
-    if (_isRestoringDefaults || _isApplyingSettingsSnapshot)
-    {
-        return;
-    }
-
-    _settingsService.Settings.WeatherShowHourlyTrend = value;
     _settingsService.SaveDebounced();
 }
 
@@ -2614,7 +2683,6 @@ _weatherShowPrecipitation = settings.WeatherShowPrecipitation;
 _weatherShowHumidity = settings.WeatherShowHumidity;
 _weatherShowWind = settings.WeatherShowWind;
 _weatherShowPressure = settings.WeatherShowPressure;
-_weatherShowHourlyTrend = settings.WeatherShowHourlyTrend;
 _selectedWeatherRefreshInterval = Math.Clamp(
     settings.WeatherRefreshIntervalMinutes,
     SettingsService.WeatherRefreshMinMinutes,
@@ -2627,7 +2695,8 @@ _selectedWeatherRefreshInterval = Math.Clamp(
         ApplyCachedUpdateResult();
         RefreshAccentPreview();
         RefreshDragDropPermissionDiagnostic();
-        _ = RefreshQuickAccessStateAsync();
+_ = PopulateNearbyPopularCitiesAsync();
+_ = RefreshQuickAccessStateAsync();
         _settingsService.SettingsChanged += OnSettingsChanged;
         _themeService.AppearanceChanged += OnAppearanceChanged;
         _localizationService.LanguageChanged += OnLanguageChanged;
@@ -2740,7 +2809,6 @@ WeatherShowPrecipitation = true;
 WeatherShowHumidity = true;
 WeatherShowWind = true;
 WeatherShowPressure = false;
-WeatherShowHourlyTrend = true;
 SelectedWeatherRefreshInterval = 60;
             SelectedTodoNewTaskPosition = SettingsService.TodoNewTaskPositionTop;
             SelectedTodoDefaultFilter = SettingsService.TodoDefaultFilterAll;
@@ -3269,6 +3337,9 @@ SelectedWeatherRefreshInterval = 60;
         OnPropertyChanged(nameof(QuickCaptureDependencyStatusText));
         OnPropertyChanged(nameof(QuickCaptureRecentLimitText));
         OnPropertyChanged(nameof(FeatureWidgetEntries));
+OnPropertyChanged(nameof(WeatherCitySearchPlaceholder));
+OnPropertyChanged(nameof(WeatherCityNoResultsText));
+RefreshWeatherCityPopularCities();
         RefreshQuickCaptureClipboardDiagnostics();
     }
 
@@ -4447,6 +4518,9 @@ SelectedWeatherRefreshInterval = 60;
         _settingsService.SettingsChanged -= OnSettingsChanged;
         _themeService.AppearanceChanged -= OnAppearanceChanged;
         _localizationService.LanguageChanged -= OnLanguageChanged;
+        _citySearchCts?.Cancel();
+        _citySearchCts?.Dispose();
+        _citySearchService?.Dispose();
     }
 
     private void OnQuickCaptureClipboardDiagnosticsChanged()

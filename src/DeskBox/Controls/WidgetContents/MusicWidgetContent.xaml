@@ -63,13 +63,13 @@
                             </VisualStateManager.VisualStateGroups>
                             <Border
                                 x:Name="IconButtonHoverSurface"
-                                Background="#FFFFFFFF"
+                                Background="{ThemeResource TextFillColorPrimaryBrush}"
                                 CornerRadius="{TemplateBinding CornerRadius}"
                                 IsHitTestVisible="False"
                                 Opacity="0" />
                             <Border
                                 x:Name="IconButtonPressedSurface"
-                                Background="#FFFFFFFF"
+                                Background="{ThemeResource TextFillColorPrimaryBrush}"
                                 CornerRadius="{TemplateBinding CornerRadius}"
                                 IsHitTestVisible="False"
                                 Opacity="0" />

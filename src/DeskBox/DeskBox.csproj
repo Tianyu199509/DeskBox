@@ -81,6 +81,7 @@
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </Content>
     <Content Include="Assets\Store\*.png" />
+    <EmbeddedResource Include="Assets\Cities\cities.json" />
   </ItemGroup>
 
   <ItemGroup>

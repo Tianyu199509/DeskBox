@@ -1,3 +1,5 @@
+using Microsoft.UI.Dispatching;
+
 namespace DeskBox.Services;
 
 public sealed record FolderChange(string FullPath, WatcherChangeTypes ChangeType, string? OldFullPath = null);
@@ -6,7 +8,8 @@ public sealed record FolderChangeBatch(string WatchedPath, IReadOnlyList<FolderC
 
 /// <summary>
 /// Watches a folder for file system changes and notifies via events.
-/// Implements debouncing to avoid duplicate event handling.
+/// Implements debouncing using a DispatcherQueueTimer to avoid creating
+/// short-lived thread-pool tasks on every file-system event.
 /// </summary>
 public sealed class FolderWatcherService : IDisposable
 {
@@ -14,8 +17,8 @@ public sealed class FolderWatcherService : IDisposable
     private const int MaxBufferedChangesBeforeReload = 64;
 
     private FileSystemWatcher? _watcher;
-    private CancellationTokenSource? _debounceCts;
-    private readonly Microsoft.UI.Dispatching.DispatcherQueue _dispatcherQueue;
+    private readonly DispatcherQueueTimer _debounceTimer;
+    private readonly DispatcherQueue _dispatcherQueue;
     private readonly object _lock = new();
     private readonly List<FolderChange> _pendingChanges = [];
     private bool _requiresFullReload;
@@ -31,9 +34,13 @@ public sealed class FolderWatcherService : IDisposable
     /// </summary>
     public string? WatchedPath { get; private set; }
 
-    public FolderWatcherService(Microsoft.UI.Dispatching.DispatcherQueue dispatcherQueue)
+    public FolderWatcherService(DispatcherQueue dispatcherQueue)
     {
         _dispatcherQueue = dispatcherQueue;
+        _debounceTimer = dispatcherQueue.CreateTimer();
+        _debounceTimer.Interval = TimeSpan.FromMilliseconds(DebounceDelayMs);
+        _debounceTimer.IsRepeating = false;
+        _debounceTimer.Tick += DebounceTimer_Tick;
     }
 
     /// <summary>
@@ -68,9 +75,10 @@ public sealed class FolderWatcherService : IDisposable
     /// </summary>
     public void Stop()
     {
+        _debounceTimer.Stop();
+
         lock (_lock)
         {
-            _debounceCts?.Cancel();
             _pendingChanges.Clear();
             _requiresFullReload = false;
         }
@@ -107,12 +115,9 @@ public sealed class FolderWatcherService : IDisposable
 
     private void QueueChange(FolderChange change)
     {
-        CancellationToken token;
-        string? watchedPath;
         lock (_lock)
         {
-            watchedPath = WatchedPath;
-            if (string.IsNullOrWhiteSpace(watchedPath))
+            if (string.IsNullOrWhiteSpace(WatchedPath))
             {
                 return;
             }
@@ -122,71 +127,52 @@ public sealed class FolderWatcherService : IDisposable
             {
                 _requiresFullReload = true;
             }
-
-            token = ResetDebounceTokenUnsafe();
         }
 
-        ScheduleDispatch(watchedPath, token);
+        // Restart the debounce timer — each new change resets the wait period.
+        _dispatcherQueue.TryEnqueue(() => _debounceTimer.Start());
     }
 
     private void QueueFullReload()
     {
-        CancellationToken token;
-        string? watchedPath;
         lock (_lock)
         {
-            watchedPath = WatchedPath;
-            if (string.IsNullOrWhiteSpace(watchedPath))
+            if (string.IsNullOrWhiteSpace(WatchedPath))
             {
                 return;
             }
 
             _requiresFullReload = true;
-            token = ResetDebounceTokenUnsafe();
         }
 
-        ScheduleDispatch(watchedPath, token);
+        _dispatcherQueue.TryEnqueue(() => _debounceTimer.Start());
     }
 
-    private CancellationToken ResetDebounceTokenUnsafe()
+    private void DebounceTimer_Tick(DispatcherQueueTimer sender, object args)
     {
-        _debounceCts?.Cancel();
-        _debounceCts?.Dispose();
-        _debounceCts = new CancellationTokenSource();
-        return _debounceCts.Token;
-    }
-
-    private void ScheduleDispatch(string watchedPath, CancellationToken token)
-    {
-        Task.Run(async () =>
+        FolderChangeBatch batch;
+        lock (_lock)
         {
-            try
+            if (string.IsNullOrWhiteSpace(WatchedPath))
             {
-                await Task.Delay(DebounceDelayMs, token);
-                if (!token.IsCancellationRequested)
-                {
-                    FolderChangeBatch batch;
-                    lock (_lock)
-                    {
-                        batch = new FolderChangeBatch(
-                            watchedPath,
-                            _pendingChanges.ToList(),
-                            _requiresFullReload);
-                        _pendingChanges.Clear();
-                        _requiresFullReload = false;
-                    }
-
-                    _dispatcherQueue.TryEnqueue(() => FolderChanged?.Invoke(batch));
-                }
+                return;
             }
-            catch (TaskCanceledException) { }
-        });
+
+            batch = new FolderChangeBatch(
+                WatchedPath,
+                _pendingChanges.ToList(),
+                _requiresFullReload);
+            _pendingChanges.Clear();
+            _requiresFullReload = false;
+        }
+
+        FolderChanged?.Invoke(batch);
     }
 
     public void Dispose()
     {
         Stop();
-        _debounceCts?.Cancel();
-        _debounceCts?.Dispose();
+        _debounceTimer.Stop();
+        _debounceTimer.Tick -= DebounceTimer_Tick;
     }
 }

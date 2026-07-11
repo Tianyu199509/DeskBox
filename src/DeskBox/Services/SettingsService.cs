@@ -218,7 +218,6 @@ settings.WeatherShowPrecipitation = true;
 settings.WeatherShowHumidity = true;
 settings.WeatherShowWind = true;
 settings.WeatherShowPressure = false;
-settings.WeatherShowHourlyTrend = true;
 settings.WeatherRefreshIntervalMinutes = 60;
         settings.TodoNewTaskPosition = TodoNewTaskPositionTop;
         settings.TodoDefaultFilter = TodoDefaultFilterAll;

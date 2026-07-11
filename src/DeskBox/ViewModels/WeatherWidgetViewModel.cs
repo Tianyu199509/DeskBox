@@ -3,6 +3,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using DeskBox.Helpers;
 using DeskBox.Models;
 using DeskBox.Services;
+using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
 using Windows.UI;
 
@@ -23,6 +24,7 @@ public sealed partial class WeatherWidgetViewModel : ObservableObject, IDisposab
     private bool _isDisposed;
     private bool _isRefreshing;
     private bool _isWidgetActive;
+    private bool _refreshWasUserTriggered;
 
     // Cached location settings for change detection
     private bool _lastWeatherAutoLocation;
@@ -52,7 +54,6 @@ public sealed partial class WeatherWidgetViewModel : ObservableObject, IDisposab
     private bool _showHumidity = true;
     private bool _showWind = true;
     private bool _showPressure;
-    private bool _showHourlyTrend = true;
     private double _textSize = SettingsService.DefaultTextSize;
 
     // Current weather display values
@@ -134,7 +135,13 @@ public sealed partial class WeatherWidgetViewModel : ObservableObject, IDisposab
     public bool IsRefreshing
     {
         get => _isRefreshing;
-        private set => SetProperty(ref _isRefreshing, value);
+        private set
+        {
+            if (SetProperty(ref _isRefreshing, value))
+            {
+                OnPropertyChanged(nameof(LoadingVisibility));
+            }
+        }
     }
 
     public string DisplayName => _config.IsDefaultTitle
@@ -226,8 +233,22 @@ public sealed partial class WeatherWidgetViewModel : ObservableObject, IDisposab
     public bool HasData
     {
         get => _hasData;
-        private set => SetProperty(ref _hasData, value);
+        private set
+        {
+            if (SetProperty(ref _hasData, value))
+            {
+                OnPropertyChanged(nameof(LoadingVisibility));
+            }
+        }
     }
+
+    /// <summary>
+    /// Shows the loading overlay when data is being fetched for the first time
+    /// (no cached data available yet).
+    /// </summary>
+    public Visibility LoadingVisibility => !_hasData && _isRefreshing
+        ? Visibility.Visible
+        : Visibility.Collapsed;
 
     public int CurrentWeatherCode
     {
@@ -336,7 +357,6 @@ public sealed partial class WeatherWidgetViewModel : ObservableObject, IDisposab
     public Visibility HumidityVisibility => _showHumidity ? Visibility.Visible : Visibility.Collapsed;
     public Visibility WindVisibility => _showWind ? Visibility.Visible : Visibility.Collapsed;
     public Visibility PressureVisibility => _showPressure ? Visibility.Visible : Visibility.Collapsed;
-    public Visibility HourlyTrendVisibility => _showHourlyTrend && !_isWeekView ? Visibility.Visible : Visibility.Collapsed;
     public Visibility ViewSwitchVisibility => _showForecast ? Visibility.Visible : Visibility.Collapsed;
     public Visibility MiniLayoutVisibility => _layoutMode == "Mini" ? Visibility.Visible : Visibility.Collapsed;
     public Visibility MiniLocationVisibility => !string.IsNullOrEmpty(_locationDisplay) ? Visibility.Visible : Visibility.Collapsed;
@@ -345,6 +365,20 @@ public sealed partial class WeatherWidgetViewModel : ObservableObject, IDisposab
     public Visibility StandardLayoutVisibility => _layoutMode == "Standard" ? Visibility.Visible : Visibility.Collapsed;
     public Visibility DetailedLayoutVisibility => _layoutMode == "Detailed" ? Visibility.Visible : Visibility.Collapsed;
     public Visibility RichSkinVisibility => _skin == SettingsService.WeatherSkinRich ? Visibility.Visible : Visibility.Collapsed;
+
+    /// <summary>
+    /// When the Rich skin gradient is dark (night, storms, etc.), text should use
+    /// light colors even in light theme mode. This is determined by checking the
+    /// average luminance of the gradient colors.
+    /// </summary>
+    public bool RichSkinUsesLightText { get; private set; }
+
+    private static bool IsColorDark(Color c)
+    {
+        // Standard luminance formula: 0.299R + 0.587G + 0.114B
+        double luminance = (0.299 * c.R + 0.587 * c.G + 0.114 * c.B) / 255.0;
+        return luminance < 0.45;
+    }
 
     // Animation visibility
     public Visibility RainAnimationVisibility =>
@@ -370,6 +404,62 @@ public sealed partial class WeatherWidgetViewModel : ObservableObject, IDisposab
 
     public string RefreshTooltip => _localizationService.T("Common.Refresh");
 
+    public string LoadingText => _localizationService.T("Weather.Loading");
+
+    // ─── Refresh status toast ───
+
+    private string _refreshStatusText = string.Empty;
+    private bool _showRefreshStatus;
+    private Microsoft.UI.Dispatching.DispatcherQueueTimer? _refreshStatusTimer;
+
+    public string RefreshStatusText
+    {
+        get => _refreshStatusText;
+        private set => SetProperty(ref _refreshStatusText, value);
+    }
+
+    public bool ShowRefreshStatus
+    {
+        get => _showRefreshStatus;
+        private set
+        {
+            if (SetProperty(ref _showRefreshStatus, value))
+            {
+                OnPropertyChanged(nameof(RefreshStatusVisibility));
+            }
+        }
+    }
+
+    public Visibility RefreshStatusVisibility => _showRefreshStatus
+        ? Visibility.Visible
+        : Visibility.Collapsed;
+
+    private void ShowRefreshStatusToast(bool success)
+    {
+        RefreshStatusText = success
+            ? _localizationService.T("Weather.RefreshSuccess")
+            : _localizationService.T("Weather.RefreshFailed");
+        ShowRefreshStatus = true;
+
+        _refreshStatusTimer?.Stop();
+        if (_dispatcherQueue is not null)
+        {
+            if (_refreshStatusTimer is null)
+            {
+                _refreshStatusTimer = _dispatcherQueue.CreateTimer();
+                _refreshStatusTimer.Interval = TimeSpan.FromSeconds(2);
+                _refreshStatusTimer.Tick += RefreshStatusTimer_Tick;
+            }
+            _refreshStatusTimer.Start();
+        }
+    }
+
+    private void RefreshStatusTimer_Tick(DispatcherQueueTimer sender, object args)
+    {
+        ShowRefreshStatus = false;
+        sender.Stop();
+    }
+
     // ─── Lifecycle ─────────────────────────────────────────────
 
     public async Task InitializeAsync()
@@ -388,15 +478,17 @@ public sealed partial class WeatherWidgetViewModel : ObservableObject, IDisposab
         _refreshTimer?.Start();
     }
 
-    public async Task RefreshAsync()
+    public async Task RefreshAsync(bool userTriggered = false)
     {
         if (_isDisposed || _isRefreshing)
         {
             return;
         }
 
+        _refreshWasUserTriggered = userTriggered;
         _isRefreshing = true;
         IsRefreshing = true;
+        bool refreshSucceeded = false;
         try
         {
             await EnsureLocationAsync();
@@ -415,6 +507,7 @@ public sealed partial class WeatherWidgetViewModel : ObservableObject, IDisposab
             {
                 ApplyWeatherData(_weatherData);
                 HasData = true;
+                refreshSucceeded = true;
             }
         }
         catch (Exception ex)
@@ -425,6 +518,12 @@ public sealed partial class WeatherWidgetViewModel : ObservableObject, IDisposab
         {
             _isRefreshing = false;
             IsRefreshing = false;
+
+            // Only show the toast for user-triggered refreshes (not auto-timer)
+            if (_refreshWasUserTriggered && HasData)
+            {
+                ShowRefreshStatusToast(refreshSucceeded);
+            }
         }
     }
 
@@ -446,15 +545,40 @@ public sealed partial class WeatherWidgetViewModel : ObservableObject, IDisposab
             return;
         }
 
-        IsWidgetActive = true;
-        _refreshTimer?.Start();
+        // Refresh on user interaction, but don't change IsWidgetActive —
+        // that is now driven by window visibility (OnWindowVisibilityChanged).
         _ = RefreshAsync();
     }
 
     public void OnDeactivated()
     {
-        IsWidgetActive = false;
-        _refreshTimer?.Stop();
+        // No-op: animation and timer lifecycle is controlled by window visibility,
+        // not activation state. This prevents animations from stopping when the
+        // widget is visible at the desktop layer but not foreground-activated.
+    }
+
+    /// <summary>
+    /// Called when the host window becomes visible or hidden.
+    /// Controls animation lifecycle and refresh timer based on actual visibility.
+    /// </summary>
+    public void OnWindowVisibilityChanged(bool visible)
+    {
+        if (_isDisposed)
+        {
+            return;
+        }
+
+        IsWidgetActive = visible;
+
+        if (visible)
+        {
+            _refreshTimer?.Start();
+            _ = RefreshAsync();
+        }
+        else
+        {
+            _refreshTimer?.Stop();
+        }
     }
 
     public void ToggleViewMode()
@@ -462,7 +586,6 @@ public sealed partial class WeatherWidgetViewModel : ObservableObject, IDisposab
         IsWeekView = !IsWeekView;
         OnPropertyChanged(nameof(ForecastVisibility));
         OnPropertyChanged(nameof(WeekForecastVisibility));
-        OnPropertyChanged(nameof(HourlyTrendVisibility));
     }
 
     /// <summary>
@@ -498,27 +621,100 @@ public sealed partial class WeatherWidgetViewModel : ObservableObject, IDisposab
         }
     }
 
-    private static string DetermineLayoutMode(double width, double height)
+    /// <summary>
+    /// Determines layout mode using hysteresis: once in a higher layout, the
+    /// widget stays there until size drops significantly below the upgrade
+    /// threshold. This prevents flickering and the "almost fits" problem where
+    /// a few pixels short would unnecessarily downgrade to a smaller layout.
+    /// </summary>
+    private string DetermineLayoutMode(double width, double height)
     {
-        // Mini: ultra-compact for minimum widget size (200x200) — just emoji + temp
-        if (width <= 230 || height <= 230)
+        const double miniUpgradeW = 250, miniUpgradeH = 250;
+        const double miniDowngradeW = 210, miniDowngradeH = 210;
+
+        const double compactUpgradeW = 270, compactUpgradeH = 170;
+        const double compactDowngradeW = 240, compactDowngradeH = 150;
+
+        const double detailedUpgradeW = 280, detailedUpgradeH = 280;
+        const double detailedDowngradeW = 260, detailedDowngradeH = 250;
+
+        // Mini is always forced for very small sizes regardless of hysteresis
+        if (width <= miniDowngradeW || height <= miniDowngradeH)
         {
             return "Mini";
         }
 
-        // Compact: small widget — icon + temp + location + description
-        if (width < 300 || height < 200)
+        switch (_layoutMode)
         {
-            return "Compact";
-        }
+            case "Mini":
+                // Upgrade to Compact when enough room
+                if (width >= miniUpgradeW && height >= miniUpgradeH)
+                {
+                    goto CheckCompactUp;
+                }
+                return "Mini";
 
-        // Detailed: large widget with room for hourly trend + sunrise/sunset
-        if (width >= 300 && height >= 320)
-        {
-            return "Detailed";
-        }
+            case "Compact":
+            CheckCompactUp:
+                // Upgrade to Standard/Detailed when enough room
+                if (width >= compactUpgradeW && height >= compactUpgradeH)
+                {
+                    // Check if we can go straight to Detailed
+                    if (width >= detailedUpgradeW && height >= detailedUpgradeH)
+                    {
+                        return "Detailed";
+                    }
+                    return "Standard";
+                }
+                // Stay in Compact unless we need to downgrade to Mini
+                if (width <= miniDowngradeW || height <= miniDowngradeH)
+                {
+                    return "Mini";
+                }
+                return "Compact";
 
-        return "Standard";
+            case "Standard":
+                // Upgrade to Detailed if enough room
+                if (width >= detailedUpgradeW && height >= detailedUpgradeH)
+                {
+                    return "Detailed";
+                }
+                // Downgrade to Compact only if significantly smaller
+                if (width <= compactDowngradeW || height <= compactDowngradeH)
+                {
+                    return "Compact";
+                }
+                return "Standard";
+
+            case "Detailed":
+                // Downgrade to Standard if no longer enough room (with hysteresis)
+                if (width <= detailedDowngradeW || height <= detailedDowngradeH)
+                {
+                    // Further check if we should go to Compact
+                    if (width <= compactDowngradeW || height <= compactDowngradeH)
+                    {
+                        return "Compact";
+                    }
+                    return "Standard";
+                }
+                return "Detailed";
+
+            default:
+                // First-time default: use mid-range thresholds
+                if (width >= detailedUpgradeW && height >= detailedUpgradeH)
+                {
+                    return "Detailed";
+                }
+                if (width >= compactUpgradeW && height >= compactUpgradeH)
+                {
+                    return "Standard";
+                }
+                if (width >= miniUpgradeW && height >= miniUpgradeH)
+                {
+                    return "Compact";
+                }
+                return "Mini";
+        }
     }
 
     public void Dispose()
@@ -533,6 +729,12 @@ public sealed partial class WeatherWidgetViewModel : ObservableObject, IDisposab
         {
             _refreshTimer.Stop();
             _refreshTimer.Tick -= RefreshTimer_Tick;
+        }
+
+        if (_refreshStatusTimer is not null)
+        {
+            _refreshStatusTimer.Stop();
+            _refreshStatusTimer.Tick -= RefreshStatusTimer_Tick;
         }
 
         _localizationService.LanguageChanged -= OnLanguageChanged;
@@ -682,7 +884,6 @@ public sealed partial class WeatherWidgetViewModel : ObservableObject, IDisposab
         // Raise all visibility/animation property changes
         OnPropertyChanged(nameof(ForecastVisibility));
         OnPropertyChanged(nameof(WeekForecastVisibility));
-        OnPropertyChanged(nameof(HourlyTrendVisibility));
         OnPropertyChanged(nameof(SunriseVisibility));
         OnPropertyChanged(nameof(UvIndexVisibility));
         OnPropertyChanged(nameof(PrecipitationVisibility));
@@ -727,6 +928,17 @@ public sealed partial class WeatherWidgetViewModel : ObservableObject, IDisposab
 
         RichBackdropTopColor = top;
         RichBackdropBottomColor = bottom;
+
+        // Determine if the rich skin background is dark enough to need light text.
+        // This handles the case where light mode + night/dark-weather conditions
+        // would result in dark text on a dark background.
+        bool needsLightText = _skin == SettingsService.WeatherSkinRich &&
+            (IsColorDark(top) || IsColorDark(bottom));
+        if (RichSkinUsesLightText != needsLightText)
+        {
+            RichSkinUsesLightText = needsLightText;
+            OnPropertyChanged(nameof(RichSkinUsesLightText));
+        }
 
         OnPropertyChanged(nameof(RichBackdropTopColor));
         OnPropertyChanged(nameof(RichBackdropBottomColor));
@@ -943,6 +1155,8 @@ public sealed partial class WeatherWidgetViewModel : ObservableObject, IDisposab
             OnPropertyChanged(nameof(SnowAnimationVisibility));
             OnPropertyChanged(nameof(ThunderAnimationVisibility));
             OnPropertyChanged(nameof(ClearAnimationVisibility));
+            // Re-evaluate light text need when skin changes
+            UpdateRichSkinColors();
         }
 
         _showForecast = settings.WeatherShowForecast;
@@ -952,8 +1166,6 @@ public sealed partial class WeatherWidgetViewModel : ObservableObject, IDisposab
         _showHumidity = settings.WeatherShowHumidity;
         _showWind = settings.WeatherShowWind;
         _showPressure = settings.WeatherShowPressure;
-        _showHourlyTrend = settings.WeatherShowHourlyTrend;
-
         if (_settingsService is not null)
         {
             TextSize = SettingsService.NormalizeTextSize(_settingsService.Settings.TextSize);
@@ -974,7 +1186,6 @@ public sealed partial class WeatherWidgetViewModel : ObservableObject, IDisposab
 
         OnPropertyChanged(nameof(ForecastVisibility));
         OnPropertyChanged(nameof(WeekForecastVisibility));
-        OnPropertyChanged(nameof(HourlyTrendVisibility));
         OnPropertyChanged(nameof(SunriseVisibility));
         OnPropertyChanged(nameof(UvIndexVisibility));
         OnPropertyChanged(nameof(PrecipitationVisibility));
@@ -1067,6 +1278,8 @@ public sealed partial class WeatherWidgetViewModel : ObservableObject, IDisposab
         }
 
         OnPropertyChanged(nameof(DisplayName));
+        OnPropertyChanged(nameof(LoadingText));
+        OnPropertyChanged(nameof(RefreshTooltip));
         UpdateViewSwitchButton();
         if (_weatherData is not null)
         {

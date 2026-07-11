@@ -125,23 +125,23 @@
                 <Grid
                     x:Name="DemoSceneHost"
                     Grid.Column="1"
-                    MinHeight="330"
+                    MinHeight="400"
                     VerticalAlignment="Center">
                     <Border
                         x:Name="DemoDesktop"
-                        Width="320"
-                        Height="250"
+                        Width="400"
+                        Height="320"
                         HorizontalAlignment="Center"
                         VerticalAlignment="Center"
                         Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
                         BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
                         BorderThickness="1"
-                        CornerRadius="8">
+                        CornerRadius="10">
                         <Grid>
                             <Canvas
                                 x:Name="DemoScene"
-                                Width="320"
-                                Height="250"
+                                Width="400"
+                                Height="320"
                                 HorizontalAlignment="Stretch"
                                 VerticalAlignment="Stretch" />
                         </Grid>

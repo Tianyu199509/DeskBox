@@ -388,11 +388,6 @@ public class AppSettings
     public bool WeatherShowPressure { get; set; }
 
     /// <summary>
-    /// Whether to show the 24-hour temperature trend chart.
-    /// </summary>
-    public bool WeatherShowHourlyTrend { get; set; } = true;
-
-    /// <summary>
     /// Refresh interval in minutes. Valid values: 15, 30, 60, 180.
     /// </summary>
     public int WeatherRefreshIntervalMinutes { get; set; } = 60;

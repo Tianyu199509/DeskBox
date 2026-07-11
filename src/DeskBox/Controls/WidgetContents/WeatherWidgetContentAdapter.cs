@@ -67,6 +67,11 @@ public sealed class WeatherWidgetContentAdapter : IWidgetContent, IDisposable
         ViewModel.OnDeactivated();
     }
 
+    public void OnWindowVisibilityChanged(bool visible)
+    {
+        ViewModel.OnWindowVisibilityChanged(visible);
+    }
+
     public void Dispose()
     {
         ViewModel.Dispose();

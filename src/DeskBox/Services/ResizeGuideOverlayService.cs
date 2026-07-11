@@ -37,6 +37,9 @@ public sealed class ResizeGuideOverlayService
     private Windows.UI.Color _highlightColor;
     private IntPtr _currentTargetHwnd;
     private FrameworkElement? _currentTargetRoot;
+    private SnapEdge? _currentResizeEdge;
+    private SnapEdge? _currentTargetEdge;
+    private string? _lastDragSnapSignature;
 
     /// <summary>
     /// Whether a resize session is currently active.
@@ -64,6 +67,8 @@ public sealed class ResizeGuideOverlayService
         _highlightColor = GetHighlightColor();
         _currentTargetHwnd = IntPtr.Zero;
         _currentTargetRoot = null;
+        _currentResizeEdge = null;
+        _currentTargetEdge = null;
         IsActive = true;
 
         App.LogVerbose($"[ResizeGuide] BeginResize hwnd=0x{resizingWidgetHwnd.ToInt64():X}");
@@ -167,8 +172,12 @@ public sealed class ResizeGuideOverlayService
 
         if (snapEdge.HasValue)
         {
-            // Highlight resizing widget's edge
-            ShowHighlight(_resizingWidgetHwnd, _resizingWidgetRoot, snapEdge.Value);
+            // Only rebuild the resizing widget's highlight if the edge changed.
+            if (_currentResizeEdge != snapEdge.Value)
+            {
+                ShowHighlight(_resizingWidgetHwnd, _resizingWidgetRoot, snapEdge.Value);
+                _currentResizeEdge = snapEdge.Value;
+            }
 
             // Highlight target widget's matched edge
             if (targetHwnd.HasValue && targetHwnd.Value != IntPtr.Zero)
@@ -181,13 +190,21 @@ public sealed class ResizeGuideOverlayService
                     // by comparing the snap coordinate to the target's bounds.
                     var targetEdge = ResolveTargetEdge(
                         targetHwnd.Value, snapCoordinate, snapEdge.Value);
-                    ShowHighlight(targetHwnd.Value, targetRoot, targetEdge);
 
                     // Clear previous target if it changed
                     if (_currentTargetHwnd != IntPtr.Zero &&
                         _currentTargetHwnd != targetHwnd.Value)
                     {
                         RemoveHighlight(_currentTargetHwnd);
+                        _currentTargetEdge = null;
+                    }
+
+                    // Only rebuild target highlight if target or edge changed
+                    if (_currentTargetHwnd != targetHwnd.Value ||
+                        _currentTargetEdge != targetEdge)
+                    {
+                        ShowHighlight(targetHwnd.Value, targetRoot, targetEdge);
+                        _currentTargetEdge = targetEdge;
                     }
 
                     _currentTargetHwnd = targetHwnd.Value;
@@ -198,6 +215,8 @@ public sealed class ResizeGuideOverlayService
         else
         {
             ClearAllHighlights();
+            _currentResizeEdge = null;
+            _currentTargetEdge = null;
         }
 
         return snapped;
@@ -219,6 +238,8 @@ public sealed class ResizeGuideOverlayService
         _resizingWidgetRoot = null;
         _currentTargetHwnd = IntPtr.Zero;
         _currentTargetRoot = null;
+        _currentResizeEdge = null;
+        _currentTargetEdge = null;
 
         App.LogVerbose("[ResizeGuide] EndResize");
     }
@@ -364,6 +385,11 @@ public sealed class ResizeGuideOverlayService
 
         // Edge highlight color: bright at edge, slightly translucent
         var edgeColor = Windows.UI.Color.FromArgb(255, c.R, c.G, c.B);
+
+        // Mid-stop: accent color with transparency for both themes.
+        // Previously light theme used white here, which created a gray
+        // transition band between the accent edge and the white mid-stop.
+        // Using accent color with alpha keeps the glow unified and clean.
         var midColor = Windows.UI.Color.FromArgb(100, c.R, c.G, c.B);
 
         if (edge is SnapEdge.Left)
@@ -494,6 +520,8 @@ public sealed class ResizeGuideOverlayService
         _activeHighlights.Clear();
         _currentTargetHwnd = IntPtr.Zero;
         _currentTargetRoot = null;
+        _currentResizeEdge = null;
+        _currentTargetEdge = null;
     }
 
     private static void StopHighlightAnimation(Border border)
@@ -575,6 +603,9 @@ public sealed class ResizeGuideOverlayService
         _highlightColor = GetHighlightColor();
         _currentTargetHwnd = IntPtr.Zero;
         _currentTargetRoot = null;
+        _currentResizeEdge = null;
+        _currentTargetEdge = null;
+        _lastDragSnapSignature = null;
         IsDragActive = true;
 
         App.LogVerbose($"[ResizeGuide] BeginDrag hwnd=0x{draggingWidgetHwnd.ToInt64():X}");
@@ -641,6 +672,23 @@ public sealed class ResizeGuideOverlayService
         }
 
         // ── Update highlights for the best snap ───────────────────────
+
+        // Build a lightweight signature to detect whether the snap state
+        // has actually changed since the last frame.  If it hasn't, we
+        // skip the expensive ClearAll + rebuild cycle entirely.
+        string snapSignature = string.Empty;
+        if (snapInfos.Count > 0)
+        {
+            var horizontalSnap = snapInfos.FirstOrDefault(s => s.Edge is SnapEdge.Left or SnapEdge.Right);
+            var verticalSnap = snapInfos.FirstOrDefault(s => s.Edge is SnapEdge.Top or SnapEdge.Bottom);
+            snapSignature = $"{verticalSnap.Edge},{verticalSnap.TargetHwnd ?? IntPtr.Zero},{horizontalSnap.Edge},{horizontalSnap.TargetHwnd ?? IntPtr.Zero}";
+        }
+
+        if (snapSignature == _lastDragSnapSignature)
+        {
+            return snapped;
+        }
+        _lastDragSnapSignature = snapSignature;
 
         if (snapInfos.Count > 0)
         {
@@ -711,6 +759,9 @@ public sealed class ResizeGuideOverlayService
         _draggingWidgetRoot = null;
         _currentTargetHwnd = IntPtr.Zero;
         _currentTargetRoot = null;
+        _currentResizeEdge = null;
+        _currentTargetEdge = null;
+        _lastDragSnapSignature = null;
 
         App.LogVerbose("[ResizeGuide] EndDrag");
     }
