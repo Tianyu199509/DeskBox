@@ -75,6 +75,8 @@ public sealed class SettingsService
         WidgetHoverActionMore;
     public const string ManagedDropActionMove = "Move";
     public const string ManagedDropActionCopy = "Copy";
+    public const string AttachmentStorageModeLink = "Link";
+    public const string AttachmentStorageModeCopy = "Copy";
     public const string LanguageSystem = "System";
     public const string LanguageChinese = "zh-CN";
     public const string LanguageEnglish = "en-US";
@@ -187,6 +189,7 @@ public const int WeatherRefreshMaxMinutes = 180;
         settings.QuickCaptureImageClipboardEnabled = false;
         settings.QuickCaptureRecentLimit = QuickCaptureService.DefaultRecentLimit;
         settings.QuickCaptureShowCreatedTime = true;
+        settings.AttachmentStorageMode = AttachmentStorageModeLink;
         settings.QuickCaptureDefaultView = QuickCaptureDefaultViewRecords;
         settings.QuickCaptureTabStyle = WidgetTabStyleButton;
         settings.TodoShowCompletedTasks = true;
@@ -920,6 +923,13 @@ changed |= NormalizeDeletionSettings(_settings);
     {
         bool changed = false;
 
+        string normalizedAttachmentStorageMode = NormalizeAttachmentStorageMode(settings.AttachmentStorageMode);
+        if (!string.Equals(settings.AttachmentStorageMode, normalizedAttachmentStorageMode, StringComparison.Ordinal))
+        {
+            settings.AttachmentStorageMode = normalizedAttachmentStorageMode;
+            changed = true;
+        }
+
         if (!string.Equals(settings.ManagedDropAction, ManagedDropActionMove, StringComparison.Ordinal))
         {
             settings.ManagedDropAction = ManagedDropActionMove;
@@ -993,6 +1003,13 @@ changed |= NormalizeDeletionSettings(_settings);
         }
 
         return changed;
+    }
+
+    public static string NormalizeAttachmentStorageMode(string? storageMode)
+    {
+        return string.Equals(storageMode, AttachmentStorageModeCopy, StringComparison.OrdinalIgnoreCase)
+            ? AttachmentStorageModeCopy
+            : AttachmentStorageModeLink;
     }
 
     private static bool NormalizeHotkeySettings(AppSettings settings)

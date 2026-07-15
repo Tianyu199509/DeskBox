@@ -120,7 +120,9 @@ public sealed partial class WidgetWindow
         return Win32Helper.DefSubclassProc(hWnd, message, wParam, lParam);
     }
 
-    private async Task ImportNativeDropPathsAsync(IReadOnlyList<string> paths)
+    private async Task ImportNativeDropPathsAsync(
+        IReadOnlyList<string> paths,
+        bool cleanupTemporaryFiles = false)
     {
         if (_isMigrationBusy || paths.Count == 0)
         {
@@ -171,6 +173,10 @@ public sealed partial class WidgetWindow
             {
                 SetImportBusy(false);
             }
+            if (cleanupTemporaryFiles)
+            {
+                CleanupNativeTemporaryDropFiles(paths);
+            }
         }
     }
 
@@ -214,7 +220,11 @@ public sealed partial class WidgetWindow
         });
     }
 
-    private void OnNativeDrop(IReadOnlyList<string> paths, int screenX, int screenY)
+    private void OnNativeDrop(
+        IReadOnlyList<string> paths,
+        int screenX,
+        int screenY,
+        bool containsTemporaryFiles)
     {
         _isNativeDragActive = false;
         DispatcherQueue.TryEnqueue(() =>
@@ -270,12 +280,51 @@ public sealed partial class WidgetWindow
                     {
                         SetImportBusy(false);
                     }
+                    if (containsTemporaryFiles)
+                    {
+                        CleanupNativeTemporaryDropFiles(paths);
+                    }
                 }
             });
             return;
         }
 
-        DispatcherQueue.TryEnqueue(async () => await ImportNativeDropPathsAsync(paths));
+        DispatcherQueue.TryEnqueue(async () =>
+            await ImportNativeDropPathsAsync(paths, containsTemporaryFiles));
+    }
+
+    private static void CleanupNativeTemporaryDropFiles(IReadOnlyList<string> paths)
+    {
+        string temporaryRoot = Path.GetFullPath(Path.Combine(
+            Path.GetTempPath(),
+            "DeskBox",
+            "VirtualDrops"))
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        foreach (string directory in paths
+                     .Select(Path.GetDirectoryName)
+                     .Where(directory => !string.IsNullOrWhiteSpace(directory))
+                     .Select(directory => Path.GetFullPath(directory!))
+                     .Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            string normalizedDirectory = directory
+                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+            if (!normalizedDirectory.StartsWith(temporaryRoot, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            try
+            {
+                if (Directory.Exists(directory))
+                {
+                    Directory.Delete(directory, recursive: true);
+                }
+            }
+            catch (Exception ex)
+            {
+                App.Log($"[DropTarget] Failed to clean virtual drop directory: {ex.Message}");
+            }
+        }
     }
 
     /// <summary>

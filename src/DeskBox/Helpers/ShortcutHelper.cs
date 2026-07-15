@@ -12,22 +12,47 @@ public static class ShortcutHelper
 {
     private const int MAX_PATH = 260;
 
+    public static bool IsShortcutPath(string? path)
+    {
+        string extension = string.IsNullOrWhiteSpace(path)
+            ? string.Empty
+            : Path.GetExtension(path);
+        return extension.Equals(".lnk", StringComparison.OrdinalIgnoreCase) ||
+               extension.Equals(".url", StringComparison.OrdinalIgnoreCase);
+    }
+
+    public static bool IsShellLinkPath(string? path)
+    {
+        return !string.IsNullOrWhiteSpace(path) &&
+               Path.GetExtension(path).Equals(".lnk", StringComparison.OrdinalIgnoreCase);
+    }
+
     /// <summary>
     /// Resolve a .lnk shortcut file and return its target information.
     /// </summary>
     /// <param name="lnkPath">Absolute path to a .lnk file.</param>
     /// <returns>A <see cref="ShortcutInfo"/> with resolved data, or <c>null</c> on failure.</returns>
-    public static ShortcutInfo? Resolve(string lnkPath)
+    public static ShortcutInfo? Resolve(string shortcutPath)
     {
-        if (!File.Exists(lnkPath))
+        if (!File.Exists(shortcutPath))
             return null;
+
+        if (Path.GetExtension(shortcutPath).Equals(".url", StringComparison.OrdinalIgnoreCase))
+        {
+            return ResolveInternetShortcut(shortcutPath);
+        }
+
+        if (!IsShellLinkPath(shortcutPath))
+        {
+            return null;
+        }
 
         try
         {
             var link = (IShellLinkW)new ShellLink();
             var file = (IPersistFile)link;
 
-            file.Load(lnkPath, 0); // STGM_READ
+            file.Load(shortcutPath, 0); // STGM_READ
             try
             {
                 link.Resolve(IntPtr.Zero, SLR_FLAGS.SLR_NO_UI | SLR_FLAGS.SLR_NOSEARCH);
@@ -60,6 +85,69 @@ public static class ShortcutHelper
                 WorkingDirectory: workDirBuilder.ToString(),
                 IconLocation: iconBuilder.ToString(),
                 IconIndex: iconIndex);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static ShortcutInfo? ResolveInternetShortcut(string shortcutPath)
+    {
+        try
+        {
+            string target = string.Empty;
+            string iconLocation = string.Empty;
+            int iconIndex = 0;
+            bool inInternetShortcutSection = false;
+
+            foreach (string rawLine in File.ReadLines(shortcutPath))
+            {
+                string line = rawLine.Trim();
+                if (line.Length >= 2 && line[0] == '[' && line[^1] == ']')
+                {
+                    inInternetShortcutSection = line.Equals(
+                        "[InternetShortcut]",
+                        StringComparison.OrdinalIgnoreCase);
+                    continue;
+                }
+
+                if (!inInternetShortcutSection)
+                {
+                    continue;
+                }
+
+                int separatorIndex = line.IndexOf('=');
+                if (separatorIndex <= 0)
+                {
+                    continue;
+                }
+
+                string key = line[..separatorIndex].Trim();
+                string value = line[(separatorIndex + 1)..].Trim().Trim('"');
+                if (key.Equals("URL", StringComparison.OrdinalIgnoreCase))
+                {
+                    target = value;
+                }
+                else if (key.Equals("IconFile", StringComparison.OrdinalIgnoreCase))
+                {
+                    iconLocation = value;
+                }
+                else if (key.Equals("IconIndex", StringComparison.OrdinalIgnoreCase))
+                {
+                    _ = int.TryParse(value, out iconIndex);
+                }
+            }
+
+            return string.IsNullOrWhiteSpace(target) && string.IsNullOrWhiteSpace(iconLocation)
+                ? null
+                : new ShortcutInfo(
+                    TargetPath: target,
+                    Description: string.Empty,
+                    Arguments: string.Empty,
+                    WorkingDirectory: string.Empty,
+                    IconLocation: iconLocation,
+                    IconIndex: iconIndex);
         }
         catch
         {

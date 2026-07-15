@@ -1804,6 +1804,21 @@ svc:Localized.DescriptionKey="Settings.DefaultWidth.Description"
 
                         <toolkit:SettingsCard
                             HorizontalContentAlignment="Right"
+                            svc:Localized.DescriptionKey="Settings.AttachmentStorageMode.Description"
+                            svc:Localized.HeaderKey="Settings.AttachmentStorageMode.Title">
+                            <toolkit:SettingsCard.HeaderIcon>
+                                <FontIcon Glyph="&#xE723;" />
+                            </toolkit:SettingsCard.HeaderIcon>
+                            <ComboBox
+                                MinWidth="176"
+                                ItemsSource="{Binding AvailableAttachmentStorageModeDisplayNames}"
+                                SelectedIndex="{Binding SelectedAttachmentStorageModeIndex, Mode=OneWay}"
+                                SelectionChanged="SettingsComboBox_SelectionChanged"
+                                Tag="AttachmentStorageMode" />
+                        </toolkit:SettingsCard>
+
+                        <toolkit:SettingsCard
+                            HorizontalContentAlignment="Right"
                             svc:Localized.DescriptionKey="Settings.ResizeSnap.Description"
                             svc:Localized.HeaderKey="Settings.ResizeSnap.Title">
                             <toolkit:SettingsCard.HeaderIcon>

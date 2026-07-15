@@ -225,6 +225,26 @@ public sealed class FileServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task EnumerateDirectoryAsync_RecognizesInternetShortcutAndHidesExtension()
+    {
+        var service = new FileService();
+        string shortcutFile = Path.Combine(_tempRoot, "Steam.url");
+        await File.WriteAllTextAsync(
+            shortcutFile,
+            "[InternetShortcut]\nURL=steam://rungameid/123\nIconFile=%ProgramFiles%\\Steam\\steam.exe\nIconIndex=0\n");
+
+        var items = await service.EnumerateDirectoryAsync(
+            _tempRoot,
+            showFileExtensions: true,
+            loadIcons: false);
+
+        var item = Assert.Single(items);
+        Assert.True(item.IsShortcut);
+        Assert.Equal("Steam", item.Name);
+        Assert.Equal("steam://rungameid/123", item.TargetPath);
+    }
+
+    [Fact]
     public async Task CreateWidgetItemAsync_FolderSecondaryInfoShowsVisibleItemCountOnly()
     {
         var service = new FileService();

@@ -42,8 +42,13 @@ public sealed partial class TodoWidgetContent : UserControl
     private bool _selectionPointerPressed;
     private bool _isBoxSelecting;
     private bool _isResizingDetailTitle;
+    private Button? _pressedColorFilterButton;
+    private bool _isStartingColorFilterDrag;
+    private bool _colorFilterHandledEventsRegistered;
+    private DateTimeOffset _suppressColorFilterClickUntil;
     private double _detailTitleResizeStartY;
     private double _detailTitleResizeStartHeight;
+    private Windows.Foundation.Point _colorFilterDragStartPoint;
     private Windows.Foundation.Point _selectionStartPoint;
     private Windows.Foundation.Point _selectionCurrentPoint;
     private List<TodoItemViewModel> _selectionSnapshot = [];
@@ -128,6 +133,7 @@ public sealed partial class TodoWidgetContent : UserControl
         ApplyLocalizedText();
         ApplyEditorVisualStyle();
         ApplySelectionRectangleStyle();
+        RegisterColorFilterHandledEvents();
         RefreshFilterButtons();
     }
 
@@ -300,8 +306,215 @@ public sealed partial class TodoWidgetContent : UserControl
         SelectColorFilter(TodoColorFilter.Pink);
     }
 
+    private void ColorFilterButton_DragStarting(UIElement sender, DragStartingEventArgs e)
+    {
+        if (sender is not FrameworkElement { Tag: string colorMarker } ||
+            TodoItem.NormalizeColorMarker(colorMarker) is null)
+        {
+            e.Cancel = true;
+            return;
+        }
+
+        DeskBoxDragData.SetTodoColorMarker(e.Data, colorMarker);
+        e.Data.RequestedOperation = DataPackageOperation.Link;
+        e.Data.Properties.Title = App.Current.LocalizationService.T(
+            TodoItem.GetColorMarkerLocalizationKey(colorMarker));
+    }
+
+    private void ColorFilterButton_PointerPressed(object sender, PointerRoutedEventArgs e)
+    {
+        if (sender is Button button &&
+            e.GetCurrentPoint(button).Properties.IsLeftButtonPressed)
+        {
+            _pressedColorFilterButton = button;
+            _colorFilterDragStartPoint = e.GetCurrentPoint(RootGrid).Position;
+        }
+    }
+
+    private void RegisterColorFilterHandledEvents()
+    {
+        if (_colorFilterHandledEventsRegistered)
+        {
+            return;
+        }
+
+        _colorFilterHandledEventsRegistered = true;
+        foreach (Button button in new[]
+                 {
+                     RedColorFilterButton,
+                     OrangeColorFilterButton,
+                     YellowColorFilterButton,
+                     GreenColorFilterButton,
+                     BlueColorFilterButton,
+                     PurpleColorFilterButton,
+                     TealColorFilterButton,
+                     PinkColorFilterButton
+                 })
+        {
+            button.AddHandler(
+                UIElement.PointerPressedEvent,
+                new PointerEventHandler(ColorFilterButton_PointerPressed),
+                handledEventsToo: true);
+            button.AddHandler(
+                UIElement.PointerMovedEvent,
+                new PointerEventHandler(ColorFilterButton_PointerMoved),
+                handledEventsToo: true);
+        }
+    }
+
+    private async void ColorFilterButton_PointerMoved(object sender, PointerRoutedEventArgs e)
+    {
+        if (_isStartingColorFilterDrag ||
+            sender is not Button button ||
+            !ReferenceEquals(button, _pressedColorFilterButton))
+        {
+            return;
+        }
+
+        var point = e.GetCurrentPoint(RootGrid);
+        if (!point.Properties.IsLeftButtonPressed)
+        {
+            _pressedColorFilterButton = null;
+            return;
+        }
+
+        double deltaX = point.Position.X - _colorFilterDragStartPoint.X;
+        double deltaY = point.Position.Y - _colorFilterDragStartPoint.Y;
+        if ((deltaX * deltaX) + (deltaY * deltaY) < 25)
+        {
+            return;
+        }
+
+        _isStartingColorFilterDrag = true;
+        _suppressColorFilterClickUntil = DateTimeOffset.UtcNow.AddMilliseconds(500);
+        e.Handled = true;
+        try
+        {
+            await button.StartDragAsync(e.GetCurrentPoint(button));
+        }
+        catch (Exception ex)
+        {
+            App.Log($"[Todo] Failed to start color marker drag: {ex.Message}");
+        }
+        finally
+        {
+            _suppressColorFilterClickUntil = DateTimeOffset.UtcNow.AddMilliseconds(350);
+            _pressedColorFilterButton = null;
+            _isStartingColorFilterDrag = false;
+        }
+    }
+
+    private void ColorFilterButton_PointerReleased(object sender, PointerRoutedEventArgs e)
+    {
+        _pressedColorFilterButton = null;
+    }
+
+    private void ColorFilterButton_PointerCaptureLost(object sender, PointerRoutedEventArgs e)
+    {
+        if (!_isStartingColorFilterDrag)
+        {
+            _pressedColorFilterButton = null;
+        }
+    }
+
+    private void TodoItem_DragOver(object sender, DragEventArgs e)
+    {
+        ResetTodoReorderVisualState();
+
+        if (e.DataView.Contains(DeskBoxDragData.TodoColorMarkerFormat))
+        {
+            e.Handled = true;
+            e.AcceptedOperation = DataPackageOperation.Link;
+            e.DragUIOverride.IsGlyphVisible = true;
+            SetTodoItemHoverState(sender as DependencyObject, true);
+            return;
+        }
+
+        if (DeskBoxDragData.HasDroppedFiles(e.DataView))
+        {
+            e.Handled = true;
+            e.AcceptedOperation = DataPackageOperation.Copy;
+            e.DragUIOverride.IsGlyphVisible = true;
+            SetTodoItemHoverState(sender as DependencyObject, true);
+        }
+    }
+
+    private void TodoItem_DragLeave(object sender, DragEventArgs e)
+    {
+        if (e.DataView.Contains(DeskBoxDragData.TodoColorMarkerFormat) ||
+            DeskBoxDragData.HasDroppedFiles(e.DataView))
+        {
+            e.Handled = true;
+            SetTodoItemHoverState(sender as DependencyObject, false);
+        }
+
+        ResetTodoReorderVisualState();
+    }
+
+    private async void TodoItem_Drop(object sender, DragEventArgs e)
+    {
+        if (sender is not FrameworkElement { DataContext: TodoItemViewModel item } || ViewModel is null)
+        {
+            e.AcceptedOperation = DataPackageOperation.None;
+            ResetTodoReorderVisualState();
+            return;
+        }
+
+        if (e.DataView.Contains(DeskBoxDragData.TodoColorMarkerFormat))
+        {
+            e.Handled = true;
+            SetTodoItemHoverState(sender as DependencyObject, false);
+            string? colorMarker = TodoItem.NormalizeColorMarker(
+                await DeskBoxDragData.TryGetTodoColorMarkerAsync(e.DataView));
+            if (colorMarker is null)
+            {
+                e.AcceptedOperation = DataPackageOperation.None;
+                ResetTodoReorderVisualState();
+                return;
+            }
+
+            await ViewModel.SetColorMarkerAsync(item.Id, colorMarker);
+            e.AcceptedOperation = DataPackageOperation.Link;
+            ResetTodoReorderVisualState();
+            return;
+        }
+
+        if (!DeskBoxDragData.HasDroppedFiles(e.DataView))
+        {
+            ResetTodoReorderVisualState();
+            return;
+        }
+
+        e.Handled = true;
+        SetTodoItemHoverState(sender as DependencyObject, false);
+        var deferral = e.GetDeferral();
+        try
+        {
+            using DroppedFileBatch batch = await DeskBoxDragData.TryGetDroppedFilesAsync(e.DataView);
+            int addedCount = await ViewModel.AddDroppedAttachmentsAsync(item.Id, batch.Files);
+            e.AcceptedOperation = addedCount > 0
+                ? DataPackageOperation.Copy
+                : DataPackageOperation.None;
+        }
+        catch (Exception ex)
+        {
+            App.Log($"[Todo] Failed to attach dropped files: {ex}");
+            e.AcceptedOperation = DataPackageOperation.None;
+        }
+        finally
+        {
+            deferral.Complete();
+            ResetTodoReorderVisualState();
+        }
+    }
+
     private void SelectColorFilter(TodoColorFilter filter)
     {
+        if (DateTimeOffset.UtcNow <= _suppressColorFilterClickUntil)
+        {
+            return;
+        }
+
         if (ViewModel is null)
         {
             return;
@@ -474,12 +687,14 @@ public sealed partial class TodoWidgetContent : UserControl
             selectedItems.Contains(draggedItem))
         {
             _draggedTodoItemId = null;
+            TodoListView.CanReorderItems = false;
             string text = selectedItems.Count == 1
-                ? TodoClipboardFormatter.FormatSingleText(selectedItems[0])
+                ? TodoClipboardFormatter.FormatSingle(selectedItems[0], App.Current.LocalizationService)
                 : TodoClipboardFormatter.FormatBatch(selectedItems, App.Current.LocalizationService);
             if (string.IsNullOrWhiteSpace(text))
             {
                 e.Cancel = true;
+                ResetTodoReorderVisualState();
                 return;
             }
 
@@ -497,8 +712,17 @@ public sealed partial class TodoWidgetContent : UserControl
         _draggedTodoItemId = draggedItem?.Id;
         if (draggedItem is not null)
         {
-            DeskBoxDragData.SetText(e.Data, draggedItem.Text, DeskBoxDragData.SourceTodo);
+            TodoListView.CanReorderItems = true;
+            DeskBoxDragData.SetText(
+                e.Data,
+                TodoClipboardFormatter.FormatSingle(draggedItem, App.Current.LocalizationService),
+                DeskBoxDragData.SourceTodo);
             e.Data.RequestedOperation = DataPackageOperation.Copy | DataPackageOperation.Move;
+        }
+        else
+        {
+            e.Cancel = true;
+            ResetTodoReorderVisualState();
         }
     }
 
@@ -520,6 +744,7 @@ public sealed partial class TodoWidgetContent : UserControl
         if (ViewModel is null || string.IsNullOrWhiteSpace(_draggedTodoItemId))
         {
             _draggedTodoItemId = null;
+            ResetTodoReorderVisualState();
             return;
         }
 
@@ -535,6 +760,7 @@ public sealed partial class TodoWidgetContent : UserControl
         finally
         {
             _draggedTodoItemId = null;
+            ResetTodoReorderVisualState();
         }
     }
 
@@ -545,6 +771,7 @@ public sealed partial class TodoWidgetContent : UserControl
             return;
         }
 
+        ResetTodoReorderVisualState();
         await HandleExternalTextDragOverAsync(e);
     }
 
@@ -555,7 +782,13 @@ public sealed partial class TodoWidgetContent : UserControl
             return;
         }
 
+        ResetTodoReorderVisualState();
         await HandleExternalTextDragOverAsync(e);
+    }
+
+    private void ExternalTodoDrag_DragLeave(object sender, DragEventArgs e)
+    {
+        ResetTodoReorderVisualState();
     }
 
     private async Task HandleExternalTextDragOverAsync(DragEventArgs e)
@@ -569,7 +802,8 @@ public sealed partial class TodoWidgetContent : UserControl
         var deferral = e.GetDeferral();
         try
         {
-            e.AcceptedOperation = await HasDroppedTodoTextAsync(e.DataView)
+            e.AcceptedOperation = DeskBoxDragData.HasDroppedFiles(e.DataView) ||
+                                  await HasDroppedTodoTextAsync(e.DataView)
                 ? DataPackageOperation.Copy
                 : DataPackageOperation.None;
             e.DragUIOverride.IsGlyphVisible = e.AcceptedOperation != DataPackageOperation.None;
@@ -577,6 +811,7 @@ public sealed partial class TodoWidgetContent : UserControl
         finally
         {
             deferral.Complete();
+            ResetTodoReorderVisualState();
         }
     }
 
@@ -590,6 +825,46 @@ public sealed partial class TodoWidgetContent : UserControl
         var deferral = e.GetDeferral();
         try
         {
+            if (DeskBoxDragData.HasDroppedFiles(e.DataView))
+            {
+                using DroppedFileBatch batch = await DeskBoxDragData.TryGetDroppedFilesAsync(e.DataView);
+                if (batch.Files.Count == 0 || ViewModel is null)
+                {
+                    string? fallbackText = await TryGetDroppedTodoTextAsync(e.DataView);
+                    if (string.IsNullOrWhiteSpace(fallbackText) || ViewModel is null)
+                    {
+                        e.AcceptedOperation = DataPackageOperation.None;
+                        return;
+                    }
+
+                    await ViewModel.AddItemAsync(fallbackText);
+                    e.AcceptedOperation = DataPackageOperation.Copy;
+                    return;
+                }
+
+                TodoItemViewModel? targetItem = ViewModel.IsDetailPageOpen
+                    ? ViewModel.SelectedDetailItem
+                    : await ViewModel.AddItemAsync(BuildDroppedTodoTitle(batch.Files));
+                if (targetItem is null)
+                {
+                    e.AcceptedOperation = DataPackageOperation.None;
+                    return;
+                }
+
+                int addedCount = await ViewModel.AddDroppedAttachmentsAsync(targetItem.Id, batch.Files);
+                e.AcceptedOperation = addedCount > 0
+                    ? DataPackageOperation.Copy
+                    : DataPackageOperation.None;
+                if (addedCount > 0)
+                {
+                    ShowUndoToast(
+                        App.Current.LocalizationService.T("Todo.Dropped"),
+                        durationMs: CopyToastMs,
+                        clearUndoOnHide: false);
+                }
+                return;
+            }
+
             string? text = await TryGetDroppedTodoTextAsync(e.DataView);
             if (string.IsNullOrWhiteSpace(text) || ViewModel is null)
             {
@@ -615,6 +890,7 @@ public sealed partial class TodoWidgetContent : UserControl
         finally
         {
             deferral.Complete();
+            ResetTodoReorderVisualState();
         }
     }
 
@@ -641,6 +917,19 @@ public sealed partial class TodoWidgetContent : UserControl
         return text.Length <= QuickCaptureClipboardService.MaxClipboardTextCharacters
             ? text
             : text[..QuickCaptureClipboardService.MaxClipboardTextCharacters].Trim();
+    }
+
+    private static string BuildDroppedTodoTitle(IReadOnlyList<DroppedFilePath> files)
+    {
+        string title = files.Count == 1
+            ? System.IO.Path.GetFileNameWithoutExtension(files[0].DisplayName)
+            : string.Join(", ", files.Take(3).Select(file => file.DisplayName));
+        if (files.Count > 3)
+        {
+            title = $"{title} +{files.Count - 3}";
+        }
+
+        return string.IsNullOrWhiteSpace(title) ? "Attachment" : title;
     }
 
     private void TodoListView_KeyDown(object sender, KeyRoutedEventArgs e)
@@ -704,7 +993,15 @@ public sealed partial class TodoWidgetContent : UserControl
         }
 
         var properties = e.GetCurrentPoint(listView).Properties;
-                if (!properties.IsLeftButtonPressed ||
+        bool canStartReorder = properties.IsLeftButtonPressed &&
+                               e.OriginalSource is DependencyObject source &&
+                               FindTodoItemContainer(source) is not null &&
+                               !IsInteractiveTodoSource(source) &&
+                               !Win32Helper.IsKeyPressed(VirtualKey.Shift) &&
+                               !Win32Helper.IsKeyPressed(VirtualKey.Control);
+        listView.CanReorderItems = canStartReorder;
+
+        if (!properties.IsLeftButtonPressed ||
             Win32Helper.IsKeyPressed(VirtualKey.Shift) ||
             !CanStartTodoBoxSelection(e.OriginalSource))
         {
@@ -775,6 +1072,8 @@ public sealed partial class TodoWidgetContent : UserControl
             listView.ReleasePointerCapture(e.Pointer);
             e.Handled = true;
         }
+
+        ResetTodoReorderVisualState();
     }
 
     private void TodoListView_PointerCaptureLost(object sender, PointerRoutedEventArgs e)
@@ -782,7 +1081,35 @@ public sealed partial class TodoWidgetContent : UserControl
         if (sender is ListViewBase listView)
         {
             FinishTodoSelectionRectangle(listView);
+            ResetTodoReorderVisualState();
         }
+    }
+
+    private void ResetTodoReorderVisualState()
+    {
+        if (!string.IsNullOrWhiteSpace(_draggedTodoItemId))
+        {
+            return;
+        }
+
+        bool wasReorderEnabled = TodoListView.CanReorderItems;
+        TodoListView.CanReorderItems = false;
+        if (!wasReorderEnabled)
+        {
+            return;
+        }
+
+        DispatcherQueue.TryEnqueue(() =>
+        {
+            if (!string.IsNullOrWhiteSpace(_draggedTodoItemId))
+            {
+                return;
+            }
+
+            TodoListView.InvalidateMeasure();
+            TodoListView.InvalidateArrange();
+            TodoListView.UpdateLayout();
+        });
     }
 
     private void TodoItem_PointerEntered(object sender, PointerRoutedEventArgs e)
@@ -1550,7 +1877,7 @@ public sealed partial class TodoWidgetContent : UserControl
 
     private void CopyTodoItemText(TodoItemViewModel item)
     {
-        string text = TodoClipboardFormatter.FormatSingleText(item);
+        string text = TodoClipboardFormatter.FormatSingle(item, App.Current.LocalizationService);
         if (string.IsNullOrWhiteSpace(text))
         {
             return;
@@ -1625,6 +1952,7 @@ public sealed partial class TodoWidgetContent : UserControl
         };
         dataPackage.SetText(text);
         Clipboard.SetContent(dataPackage);
+        Clipboard.Flush();
     }
 
     private void ToggleTodoSelection(TodoItemViewModel item)
@@ -2959,23 +3287,13 @@ public sealed partial class TodoWidgetContent : UserControl
             IReadOnlyList<StorageFile> files = await picker.PickMultipleFilesAsync();
             foreach (StorageFile file in files)
             {
-                await ViewModel.AddAttachmentAsync(item.Id, file.Path, file.Name, GetAttachmentType(file.FileType));
+                await ViewModel.AddAttachmentPathAsync(item.Id, file.Path);
             }
         }
         catch (Exception ex)
         {
             App.Log($"[Todo] Add attachment failed: {ex}");
         }
-    }
-
-    private static string GetAttachmentType(string? extension)
-    {
-        return extension?.ToLowerInvariant() switch
-        {
-            ".png" or ".jpg" or ".jpeg" or ".bmp" or ".gif" or ".webp" or ".tiff" or ".tif" or ".heic" or ".heif" => "image",
-            ".pdf" => "pdf",
-            _ => "file"
-        };
     }
 
     private async void DetailOpenAttachmentButton_Click(object sender, RoutedEventArgs e)

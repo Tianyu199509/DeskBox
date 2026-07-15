@@ -41,6 +41,8 @@ public sealed class TodoWidgetStore
 
     internal string StorePath => _storePath;
 
+    internal string AttachmentDirectory => Path.Combine(Path.GetDirectoryName(_storePath)!, "attachments");
+
     public async Task<TodoWidgetData> LoadAsync()
     {
         if (!File.Exists(_storePath))
@@ -214,6 +216,7 @@ public sealed class TodoWidgetStore
                 ? Path.GetFileName(attachment.FilePath)
                 : attachment.DisplayName.Trim();
             attachment.Type = string.IsNullOrWhiteSpace(attachment.Type) ? "file" : attachment.Type.Trim();
+            attachment.StorageMode = TodoAttachment.NormalizeStorageMode(attachment.StorageMode);
             attachment.AddedAt = attachment.AddedAt == default ? DateTimeOffset.UtcNow : attachment.AddedAt;
         }
 

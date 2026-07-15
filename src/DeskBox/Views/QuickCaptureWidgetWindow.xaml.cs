@@ -38,8 +38,6 @@ public sealed partial class QuickCaptureWidgetWindow : WidgetWindowBase, IDeskto
 
     private const int MinWidth = (int)SettingsService.MinWidgetWidth;
     private const int MinHeight = (int)SettingsService.MinWidgetHeight;
-    private const long MaxDroppedTextFileBytes = 1024 * 1024;
-    private const long MaxDroppedImageFileBytes = QuickCaptureClipboardService.MaxClipboardImageBytes;
     private const double QuickCaptureDialogHorizontalMargin = 24.0;
     private const double QuickCaptureDialogMinWidth = 176.0;
     private const double QuickCaptureDialogMaxWidth = 360.0;
@@ -127,7 +125,7 @@ public sealed partial class QuickCaptureWidgetWindow : WidgetWindowBase, IDeskto
     private bool _isCreatingDetail;
     private bool _detailIsPinned;
     private QuickCaptureAppearancePreset _detailAppearance = QuickCaptureAppearancePreset.Default;
-    private string? _pendingDetailImagePath;
+    private List<DroppedFilePath> _pendingDetailAttachments = [];
     private long _statusToastGeneration;
     private Microsoft.UI.Dispatching.DispatcherQueueTimer? _autoRestoreTimer;
     private QuickCaptureDeletedItemSnapshot? _pendingDeletedItemSnapshot;
@@ -732,21 +730,17 @@ public sealed partial class QuickCaptureWidgetWindow : WidgetWindowBase, IDeskto
         _isCreatingDetail = true;
         _detailIsPinned = false;
         _detailAppearance = QuickCaptureAppearancePreset.Default;
-        _pendingDetailImagePath = null;
+        _pendingDetailAttachments = [];
         DetailTitleTextBox.Text = string.Empty;
         DetailBodyTextBox.Text = initialBody ?? string.Empty;
-        DetailImagePreview.Source = null;
-        DetailImagePreview.Tag = null;
-        DetailImagePreview.DataContext = null;
-        DetailImagePreviewBorder.Visibility = Visibility.Collapsed;
-        DetailAddImageButton.Visibility = Visibility.Visible;
+        RefreshDetailAttachmentList();
         DetailTimestampText.Text = _localizationService.Format(
             "QuickCapture.Detail.Created",
             DateTimeOffset.Now.ToString("yyyy/M/d HH:mm"));
         ShowDetailPage();
     }
 
-    private async void OpenDetail(QuickCaptureItemViewModel item)
+    private void OpenDetail(QuickCaptureItemViewModel item)
     {
         if (item.IsRecent)
         {
@@ -757,28 +751,15 @@ public sealed partial class QuickCaptureWidgetWindow : WidgetWindowBase, IDeskto
         _isCreatingDetail = false;
         _detailIsPinned = item.IsPinned;
         _detailAppearance = item.AppearancePreset;
-        _pendingDetailImagePath = null;
+        _pendingDetailAttachments = [];
         DetailTitleTextBox.Text = string.Empty;
         DetailBodyTextBox.Text = item.Type == QuickCaptureItemType.Image &&
                                  string.Equals(item.Body, "Image", StringComparison.Ordinal)
             ? string.Empty
             : BuildBodyText(item);
         DetailTimestampText.Text = BuildDetailTimestampText(item);
-        DetailImagePreview.Source = null;
-        DetailImagePreview.Tag = null;
-        DetailImagePreview.DataContext = item;
-        DetailImagePreviewBorder.Visibility = item.Type == QuickCaptureItemType.Image
-            ? Visibility.Visible
-            : Visibility.Collapsed;
-        DetailAddImageButton.Visibility = item.Type == QuickCaptureItemType.Image
-            ? Visibility.Collapsed
-            : Visibility.Visible;
+        RefreshDetailAttachmentList();
         ShowDetailPage();
-
-        if (item.Type == QuickCaptureItemType.Image)
-        {
-            await LoadImagePreviewFromPathAsync(DetailImagePreview, item.ImagePath!);
-        }
     }
 
     private void ShowDetailPage()
@@ -819,9 +800,10 @@ public sealed partial class QuickCaptureWidgetWindow : WidgetWindowBase, IDeskto
         string body = DetailBodyTextBox.Text;
         if (_isCreatingDetail)
         {
-            if (!string.IsNullOrWhiteSpace(_pendingDetailImagePath))
+            if (_pendingDetailAttachments.Count > 0)
             {
-                QuickCaptureItemViewModel? created = await ViewModel.AddImageFileAsync(_pendingDetailImagePath);
+                QuickCaptureItemViewModel? created = await ViewModel.AddItemWithAttachmentsAsync(
+                    _pendingDetailAttachments);
                 if (created is null)
                 {
                     ShowStatusToast(_localizationService.T("QuickCapture.OpenImageFailed"));
@@ -885,15 +867,13 @@ public sealed partial class QuickCaptureWidgetWindow : WidgetWindowBase, IDeskto
         _isCreatingDetail = false;
         _detailIsPinned = false;
         _detailAppearance = QuickCaptureAppearancePreset.Default;
-        _pendingDetailImagePath = null;
-        DetailImagePreview.Source = null;
-        DetailImagePreview.Tag = null;
-        DetailImagePreview.DataContext = null;
+        _pendingDetailAttachments = [];
+        DetailAttachmentsList.ItemsSource = null;
+        DetailAttachmentScroller.Visibility = Visibility.Collapsed;
         DetailPage.Visibility = Visibility.Collapsed;
         ListPage.Visibility = Visibility.Visible;
         ClearQuickCaptureListContainerSelection();
         RefreshItemMaterialSurfaces();
-        QueueVisibleImagePreviewRefresh();
         RootGrid.Focus(FocusState.Programmatic);
     }
 
@@ -945,11 +925,23 @@ public sealed partial class QuickCaptureWidgetWindow : WidgetWindowBase, IDeskto
         AutomationProperties.SetName(DetailPinButton, tooltip);
     }
 
-    private async void DetailCopyButton_Click(object sender, RoutedEventArgs e)
+    private void DetailCopyButton_Click(object sender, RoutedEventArgs e)
     {
-        string text = string.IsNullOrWhiteSpace(DetailBodyTextBox.Text)
+        string content = string.IsNullOrWhiteSpace(DetailBodyTextBox.Text)
             ? DetailTitleTextBox.Text.Trim()
             : DetailBodyTextBox.Text.Trim();
+        IEnumerable<TodoAttachment> attachments = _detailItem?.Attachments
+            .Select(attachment => attachment.Attachment) ??
+            _pendingDetailAttachments.Select(file => new TodoAttachment
+            {
+                FilePath = file.Path,
+                DisplayName = file.DisplayName,
+                Type = AttachmentStorageService.GetAttachmentType(file.Path)
+            });
+        string text = QuickCaptureClipboardFormatter.FormatContent(
+            content,
+            attachments,
+            _localizationService);
         if (string.IsNullOrWhiteSpace(text))
         {
             return;
@@ -963,129 +955,129 @@ public sealed partial class QuickCaptureWidgetWindow : WidgetWindowBase, IDeskto
         ShowCopyToast();
     }
 
-    private async void DetailImageCopyButton_Click(object sender, RoutedEventArgs e)
+    private async void DetailAddFileButton_Click(object sender, RoutedEventArgs e)
     {
-        if (_detailItem is { Type: QuickCaptureItemType.Image } item)
+        var picker = new FileOpenPicker
         {
-            await CopyImageWithFeedbackAsync(item);
-            return;
-        }
+            SuggestedStartLocation = PickerLocationId.Desktop
+        };
+        picker.FileTypeFilter.Add("*");
+        InitializeWithWindow.Initialize(picker, _hWnd);
 
-        if (!string.IsNullOrWhiteSpace(_pendingDetailImagePath))
-        {
-            await CopyImagePathWithFeedbackAsync(_pendingDetailImagePath);
-        }
+        IReadOnlyList<StorageFile> files = await picker.PickMultipleFilesAsync();
+        var droppedFiles = files
+            .Where(file => !string.IsNullOrWhiteSpace(file.Path) && File.Exists(file.Path))
+            .Select(file => new DroppedFilePath(file.Path, file.Name, ForceManagedCopy: false))
+            .ToList();
+        await AddFilesToCurrentDetailAsync(droppedFiles);
     }
 
-    private async void DetailAddImageButton_Click(object sender, RoutedEventArgs e)
+    private async Task AddFilesToCurrentDetailAsync(IReadOnlyList<DroppedFilePath> files)
     {
-        await SelectDetailImageAsync();
-    }
-
-    private async void DetailReplaceImageButton_Click(object sender, RoutedEventArgs e)
-    {
-        await SelectDetailImageAsync();
-    }
-
-    private async Task SelectDetailImageAsync()
-    {
-        StorageFile? file = await PickQuickCaptureImageAsync();
-        if (file is null)
+        if (files.Count == 0)
         {
             return;
         }
 
         if (_isCreatingDetail || _detailItem is null)
         {
-            _pendingDetailImagePath = file.Path;
-            DetailImagePreview.Source = null;
-            DetailImagePreview.Tag = null;
-            DetailImagePreview.DataContext = null;
-            DetailImagePreviewBorder.Visibility = Visibility.Visible;
-            DetailAddImageButton.Visibility = Visibility.Collapsed;
-            await LoadImagePreviewFromPathAsync(DetailImagePreview, file.Path);
-            return;
-        }
-
-        QuickCaptureItemViewModel item = _detailItem;
-        QuickCaptureItemViewModel? updated = await ViewModel.ReplaceItemImageAsync(item, file.Path);
-        if (updated is null)
-        {
-            ShowStatusToast(_localizationService.T("QuickCapture.OpenImageFailed"));
-            return;
-        }
-
-        _detailItem = updated;
-        _pendingDetailImagePath = null;
-        DetailImagePreview.Source = null;
-        DetailImagePreview.Tag = null;
-        DetailImagePreview.DataContext = updated;
-        DetailImagePreviewBorder.Visibility = Visibility.Visible;
-        DetailAddImageButton.Visibility = Visibility.Collapsed;
-        await LoadImagePreviewFromPathAsync(DetailImagePreview, updated.ImagePath!);
-    }
-
-    private async Task CopyImagePathWithFeedbackAsync(string imagePath)
-    {
-        try
-        {
-            var file = await StorageFile.GetFileFromPathAsync(imagePath);
-            var dataPackage = new DataPackage();
-            dataPackage.SetBitmap(Windows.Storage.Streams.RandomAccessStreamReference.CreateFromFile(file));
-            DeskBoxClipboardWriteScope.MarkWrite(hasImage: true, paths: [imagePath]);
-            Clipboard.SetContent(dataPackage);
-            Clipboard.Flush();
-            ShowCopyToast();
-        }
-        catch (Exception ex)
-        {
-            App.Log($"[QuickCapture] Failed to copy pending detail image: {ex}");
-            ShowStatusToast(_localizationService.T("QuickCapture.CopyFailed"));
-        }
-    }
-
-    private static async Task LoadImagePreviewFromPathAsync(Image image, string imagePath)
-    {
-        try
-        {
-            if (string.IsNullOrWhiteSpace(imagePath) || !File.Exists(imagePath))
+            foreach (DroppedFilePath file in files)
             {
-                image.Source = null;
+                if (!_pendingDetailAttachments.Any(existing =>
+                        string.Equals(existing.Path, file.Path, StringComparison.OrdinalIgnoreCase)))
+                {
+                    _pendingDetailAttachments.Add(file);
+                }
+            }
+            RefreshDetailAttachmentList();
+            return;
+        }
+
+        QuickCaptureItemViewModel? updated = await ViewModel.AddAttachmentsAsync(_detailItem, files);
+        if (updated is not null)
+        {
+            _detailItem = updated;
+            RefreshDetailAttachmentList();
+        }
+    }
+
+    private async void DetailOpenAttachmentButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not FrameworkElement { DataContext: TodoAttachmentViewModel attachment })
+        {
+            return;
+        }
+
+        try
+        {
+            if (!File.Exists(attachment.FilePath))
+            {
+                ShowStatusToast(_localizationService.T("Todo.Detail.FileMissing"));
                 return;
             }
 
-            var file = await StorageFile.GetFileFromPathAsync(imagePath);
-            using var stream = await file.OpenAsync(FileAccessMode.Read);
-            var bitmap = new BitmapImage { DecodePixelWidth = 640 };
-            await bitmap.SetSourceAsync(stream);
-            image.Source = bitmap;
+            StorageFile file = await StorageFile.GetFileFromPathAsync(attachment.FilePath);
+            await Launcher.LaunchFileAsync(file);
         }
-        catch
+        catch (Exception ex)
         {
-            image.Source = null;
+            App.Log($"[QuickCapture] Failed to open attachment: {ex}");
         }
     }
 
-    private async Task<StorageFile?> PickQuickCaptureImageAsync()
+    private async void DetailRemoveAttachmentButton_Click(object sender, RoutedEventArgs e)
     {
-        var picker = new FileOpenPicker
+        if (sender is not FrameworkElement { DataContext: TodoAttachmentViewModel attachment })
         {
-            SuggestedStartLocation = PickerLocationId.PicturesLibrary
-        };
-        picker.FileTypeFilter.Add(".png");
-        picker.FileTypeFilter.Add(".jpg");
-        picker.FileTypeFilter.Add(".jpeg");
-        picker.FileTypeFilter.Add(".bmp");
-        picker.FileTypeFilter.Add(".gif");
-        picker.FileTypeFilter.Add(".webp");
-        InitializeWithWindow.Initialize(picker, _hWnd);
+            return;
+        }
 
-        StorageFile? file = await picker.PickSingleFileAsync();
-        return file is not null &&
-               !string.IsNullOrWhiteSpace(file.Path) &&
-               IsFileWithinSizeLimit(file.Path, MaxDroppedImageFileBytes)
-            ? file
-            : null;
+        if (_isCreatingDetail || _detailItem is null)
+        {
+            _pendingDetailAttachments.RemoveAll(file =>
+                string.Equals(file.Path, attachment.FilePath, StringComparison.OrdinalIgnoreCase));
+            RefreshDetailAttachmentList();
+            return;
+        }
+
+        if (_detailItem.Attachments.Count == 1 && string.IsNullOrWhiteSpace(DetailBodyTextBox.Text))
+        {
+            ShowStatusToast(_localizationService.T("QuickCapture.EmptyEdit"));
+            return;
+        }
+
+        QuickCaptureItemViewModel? updated = await ViewModel.DeleteAttachmentAsync(
+            _detailItem,
+            attachment.Id);
+        if (updated is not null)
+        {
+            _detailItem = updated;
+            RefreshDetailAttachmentList();
+        }
+    }
+
+    private async void QuickCaptureAttachmentPreview_Loaded(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { DataContext: TodoAttachmentViewModel attachment })
+        {
+            await attachment.EnsureThumbnailAsync();
+        }
+    }
+
+    private void RefreshDetailAttachmentList()
+    {
+        IReadOnlyList<TodoAttachmentViewModel> attachments = _detailItem?.Attachments ??
+            _pendingDetailAttachments.Select(file => new TodoAttachmentViewModel(new TodoAttachment
+            {
+                FilePath = file.Path,
+                DisplayName = file.DisplayName,
+                Type = AttachmentStorageService.GetAttachmentType(file.Path),
+                StorageMode = TodoAttachment.LinkedStorageMode
+            })).ToList();
+        DetailAttachmentsList.ItemsSource = attachments;
+        DetailAttachmentScroller.Visibility = attachments.Count > 0
+            ? Visibility.Visible
+            : Visibility.Collapsed;
     }
 
     private void MaterialButton_Click(object sender, RoutedEventArgs e)
@@ -1585,14 +1577,34 @@ public sealed partial class QuickCaptureWidgetWindow : WidgetWindowBase, IDeskto
     {
         if ((sender as FrameworkElement)?.Tag is QuickCaptureItemViewModel item)
         {
-            if (item.Type == QuickCaptureItemType.Image)
-            {
-                await CopyImageWithFeedbackAsync(item);
-            }
-            else
-            {
-                await CopyItemWithFeedbackAsync(item);
-            }
+            await CopyItemWithFeedbackAsync(item);
+        }
+    }
+
+    private async void QuickCaptureAttachmentCopyButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not FrameworkElement { DataContext: TodoAttachmentViewModel attachment } ||
+            !attachment.IsImage ||
+            !File.Exists(attachment.FilePath))
+        {
+            ShowStatusToast(_localizationService.T("QuickCapture.CopyFailed"));
+            return;
+        }
+
+        try
+        {
+            StorageFile file = await StorageFile.GetFileFromPathAsync(attachment.FilePath);
+            var dataPackage = new DataPackage();
+            dataPackage.SetBitmap(Windows.Storage.Streams.RandomAccessStreamReference.CreateFromFile(file));
+            DeskBoxClipboardWriteScope.MarkWrite(hasImage: true, paths: [attachment.FilePath]);
+            Clipboard.SetContent(dataPackage);
+            Clipboard.Flush();
+            ShowCopyToast();
+        }
+        catch (Exception ex)
+        {
+            App.Log($"[QuickCapture] Failed to copy attachment image: {ex}");
+            ShowStatusToast(_localizationService.T("QuickCapture.CopyFailed"));
         }
     }
 
@@ -1721,71 +1733,6 @@ public sealed partial class QuickCaptureWidgetWindow : WidgetWindowBase, IDeskto
             AutomationProperties.SetName(deleteButton, deleteText);
         }
 
-        if (FindVisualChild<Image>(sender, "ImagePreview") is { } imagePreview && imagePreview.IsLoaded)
-        {
-            _ = LoadImagePreviewAsync(imagePreview, item);
-        }
-    }
-
-    private async void ImagePreview_Loaded(object sender, RoutedEventArgs e)
-    {
-        if (sender is Image { DataContext: QuickCaptureItemViewModel item } image)
-        {
-            await LoadImagePreviewAsync(image, item);
-        }
-    }
-
-    private async Task LoadImagePreviewAsync(Image image, QuickCaptureItemViewModel item)
-    {
-        string itemId = item.Id;
-        if (item.Type != QuickCaptureItemType.Image ||
-            string.IsNullOrWhiteSpace(item.ImagePath))
-        {
-            image.Tag = null;
-            image.Source = null;
-            return;
-        }
-
-        string targetKey = $"{item.Id}|{item.ImagePath}";
-        if (string.Equals(image.Tag as string, targetKey, StringComparison.Ordinal) && image.Source is not null)
-        {
-            return;
-        }
-
-        image.Tag = targetKey;
-        image.Source = null;
-
-        await Task.Yield();
-        if (!string.Equals((image.DataContext as QuickCaptureItemViewModel)?.Id, itemId, StringComparison.Ordinal))
-        {
-            if (string.Equals(image.Tag as string, targetKey, StringComparison.Ordinal))
-            {
-                image.Tag = null;
-            }
-
-            return;
-        }
-
-        string? previewPath = await ViewModel.GetOrCreateImageThumbnailPathAsync(item);
-        if (!string.Equals((image.DataContext as QuickCaptureItemViewModel)?.Id, itemId, StringComparison.Ordinal) ||
-            !string.Equals(image.Tag as string, targetKey, StringComparison.Ordinal))
-        {
-            if (string.Equals(image.Tag as string, targetKey, StringComparison.Ordinal))
-            {
-                image.Tag = null;
-            }
-
-            return;
-        }
-
-        Uri? previewUri = TryCreateImageUri(previewPath) ?? TryCreateImageUri(item.ImagePath);
-        image.Source = previewUri is { } uri
-            ? new BitmapImage
-            {
-                DecodePixelWidth = 140,
-                UriSource = uri
-            }
-            : null;
     }
 
     private static Uri? TryCreateImageUri(string? path)
@@ -1992,27 +1939,6 @@ public sealed partial class QuickCaptureWidgetWindow : WidgetWindowBase, IDeskto
         }
     }
 
-    private void QueueVisibleImagePreviewRefresh()
-    {
-        DispatcherQueue.TryEnqueue(() =>
-        {
-            ItemsListView.UpdateLayout();
-            foreach (QuickCaptureItemViewModel item in ViewModel.Items)
-            {
-                if (ItemsListView.ContainerFromItem(item) is not DependencyObject container ||
-                    FindVisualChild<Image>(container, "ImagePreview") is not { } imagePreview ||
-                    !imagePreview.IsLoaded)
-                {
-                    continue;
-                }
-
-                imagePreview.Tag = null;
-                imagePreview.Source = null;
-                _ = LoadImagePreviewAsync(imagePreview, item);
-            }
-        });
-    }
-
     private void QuickCaptureItem_PointerEntered(object sender, PointerRoutedEventArgs e)
     {
         SetItemActionButtonsVisible(sender as DependencyObject, true);
@@ -2023,6 +1949,63 @@ public sealed partial class QuickCaptureWidgetWindow : WidgetWindowBase, IDeskto
     {
         SetItemActionButtonsVisible(sender as DependencyObject, false);
         SetItemHoverState(sender as DependencyObject, false);
+    }
+
+    private void QuickCaptureItem_DragOver(object sender, DragEventArgs e)
+    {
+        if (_isInternalQuickCaptureDrag || !DeskBoxDragData.HasDroppedFiles(e.DataView))
+        {
+            return;
+        }
+
+        e.Handled = true;
+        e.AcceptedOperation = DataPackageOperation.Copy;
+        e.DragUIOverride.IsGlyphVisible = true;
+        SetItemHoverState(sender as DependencyObject, true);
+    }
+
+    private void QuickCaptureItem_DragLeave(object sender, DragEventArgs e)
+    {
+        if (DeskBoxDragData.HasDroppedFiles(e.DataView))
+        {
+            e.Handled = true;
+            SetItemHoverState(sender as DependencyObject, false);
+        }
+    }
+
+    private async void QuickCaptureItem_Drop(object sender, DragEventArgs e)
+    {
+        if (_isInternalQuickCaptureDrag ||
+            !DeskBoxDragData.HasDroppedFiles(e.DataView) ||
+            sender is not FrameworkElement { DataContext: QuickCaptureItemViewModel item })
+        {
+            return;
+        }
+
+        e.Handled = true;
+        SetItemHoverState(sender as DependencyObject, false);
+        var deferral = e.GetDeferral();
+        try
+        {
+            using DroppedFileBatch batch = await DeskBoxDragData.TryGetDroppedFilesAsync(e.DataView);
+            QuickCaptureItemViewModel? updated = await ViewModel.AddAttachmentsAsync(item, batch.Files);
+            e.AcceptedOperation = updated is null
+                ? DataPackageOperation.None
+                : DataPackageOperation.Copy;
+            if (updated is not null)
+            {
+                ShowStatusToast(_localizationService.T("QuickCapture.Dropped"));
+            }
+        }
+        catch (Exception ex)
+        {
+            App.Log($"[QuickCapture] Failed to attach dropped files: {ex}");
+            e.AcceptedOperation = DataPackageOperation.None;
+        }
+        finally
+        {
+            deferral.Complete();
+        }
     }
 
     private static void SetItemActionButtonsVisible(DependencyObject? itemRoot, bool isVisible)
@@ -3519,24 +3502,7 @@ public sealed partial class QuickCaptureWidgetWindow : WidgetWindowBase, IDeskto
 
     private string FormatQuickCaptureBatch(IReadOnlyList<QuickCaptureItemViewModel> selectedItems)
     {
-        return string.Join(
-            Environment.NewLine + Environment.NewLine,
-            selectedItems
-                .Select(FormatQuickCaptureBatchItem)
-                .Where(text => !string.IsNullOrWhiteSpace(text)));
-    }
-
-    private string FormatQuickCaptureBatchItem(QuickCaptureItemViewModel item)
-    {
-        if (item.Type == QuickCaptureItemType.Image)
-        {
-            string imageText = _localizationService.T("QuickCapture.ImageItem");
-            return string.IsNullOrWhiteSpace(item.ImagePath)
-                ? imageText
-                : $"{imageText}: {item.ImagePath}";
-        }
-
-        return item.CopyText.Trim();
+        return QuickCaptureClipboardFormatter.FormatBatch(selectedItems, _localizationService);
     }
 
     private static void SetClipboardText(string text)
@@ -3547,6 +3513,7 @@ public sealed partial class QuickCaptureWidgetWindow : WidgetWindowBase, IDeskto
         };
         dataPackage.SetText(text);
         Clipboard.SetContent(dataPackage);
+        Clipboard.Flush();
     }
 
     private static FrameworkElement? FindQuickCaptureItemContainer(DependencyObject source)
@@ -3648,27 +3615,16 @@ public sealed partial class QuickCaptureWidgetWindow : WidgetWindowBase, IDeskto
         }
     }
 
-    private async void RootGrid_DragOver(object sender, DragEventArgs e)
+    private void RootGrid_DragOver(object sender, DragEventArgs e)
     {
         if (_isInternalQuickCaptureDrag)
         {
             return;
         }
 
-        if (e.DataView.Contains(StandardDataFormats.StorageItems))
+        if (DeskBoxDragData.HasDroppedFiles(e.DataView))
         {
-            var deferral = e.GetDeferral();
-            try
-            {
-                e.AcceptedOperation = await HasSupportedQuickCaptureStorageDropAsync(e.DataView)
-                    ? DataPackageOperation.Copy
-                    : DataPackageOperation.None;
-            }
-            finally
-            {
-                deferral.Complete();
-            }
-
+            e.AcceptedOperation = DataPackageOperation.Copy;
             return;
         }
 
@@ -3677,47 +3633,10 @@ public sealed partial class QuickCaptureWidgetWindow : WidgetWindowBase, IDeskto
         {
             e.AcceptedOperation = DataPackageOperation.Copy;
         }
-        else if (HasFallbackFileFormats(e.DataView))
-        {
-            e.AcceptedOperation = DataPackageOperation.Copy;
-        }
         else
         {
             e.AcceptedOperation = DataPackageOperation.None;
         }
-    }
-
-    private static bool HasFallbackFileFormats(DataPackageView dataView)
-    {
-        foreach (string format in dataView.AvailableFormats)
-        {
-            if (IsLikelyFileTransferFormat(format))
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    private static bool IsLikelyFileTransferFormat(string format)
-    {
-        if (string.IsNullOrWhiteSpace(format))
-        {
-            return false;
-        }
-
-        if (format.StartsWith("Preferred DropEffect", StringComparison.Ordinal))
-        {
-            return false;
-        }
-
-        return format.Contains("StorageItems", StringComparison.OrdinalIgnoreCase) ||
-               format.Contains("StorageItem", StringComparison.OrdinalIgnoreCase) ||
-               format.Contains("FileGroupDescriptor", StringComparison.OrdinalIgnoreCase) ||
-               format.Contains("FileDrop", StringComparison.OrdinalIgnoreCase) ||
-               format.Contains("FileName", StringComparison.OrdinalIgnoreCase) ||
-               format.Contains("Shell", StringComparison.OrdinalIgnoreCase);
     }
 
     private async void RootGrid_Drop(object sender, DragEventArgs e)
@@ -3730,34 +3649,75 @@ public sealed partial class QuickCaptureWidgetWindow : WidgetWindowBase, IDeskto
         var deferral = e.GetDeferral();
         try
         {
-            var content = await TryReadDroppedContentAsync(e.DataView);
-            if (content.Texts.Count == 0 && content.ImagePaths.Count == 0)
+            if (DeskBoxDragData.HasDroppedFiles(e.DataView))
             {
-                if (content.SkippedCount > 0)
+                using DroppedFileBatch batch = await DeskBoxDragData.TryGetDroppedFilesAsync(e.DataView);
+                if (batch.Files.Count == 0)
                 {
-                    ShowStatusToast(_localizationService.T("QuickCapture.DroppedAllSkipped"));
+                    string? fallbackText = await TryReadDroppedTextAsync(e.DataView);
+                    if (!string.IsNullOrWhiteSpace(fallbackText))
+                    {
+                        await ViewModel.AddTextAsync(fallbackText);
+                        e.AcceptedOperation = DataPackageOperation.Copy;
+                        ShowStatusToast(_localizationService.T("QuickCapture.Dropped"));
+                        return;
+                    }
+
+                    if (batch.SkippedCount > 0)
+                    {
+                        ShowStatusToast(_localizationService.T("QuickCapture.DroppedAllSkipped"));
+                    }
+                    e.AcceptedOperation = DataPackageOperation.None;
+                    return;
                 }
 
+                QuickCaptureItemViewModel? imported;
+                if (DetailPage.Visibility == Visibility.Visible && _detailItem is not null)
+                {
+                    imported = await ViewModel.AddAttachmentsAsync(_detailItem, batch.Files);
+                    if (imported is not null)
+                    {
+                        _detailItem = imported;
+                        RefreshDetailAttachmentList();
+                    }
+                }
+                else
+                {
+                    imported = await ViewModel.AddItemWithAttachmentsAsync(batch.Files);
+                    if (imported is not null &&
+                        DetailPage.Visibility == Visibility.Visible &&
+                        _isCreatingDetail)
+                    {
+                        _detailItem = imported;
+                        _isCreatingDetail = false;
+                        _pendingDetailAttachments = [];
+                        RefreshDetailAttachmentList();
+                    }
+                }
+
+                e.AcceptedOperation = imported is null
+                    ? DataPackageOperation.None
+                    : DataPackageOperation.Copy;
+                if (imported is not null)
+                {
+                    ShowStatusToast(batch.SkippedCount > 0
+                        ? _localizationService.T("QuickCapture.DroppedWithSkipped")
+                        : _localizationService.T("QuickCapture.Dropped"));
+                }
                 return;
             }
 
-            foreach (string text in content.Texts)
+            string? text = await TryReadDroppedTextAsync(e.DataView);
+            if (string.IsNullOrWhiteSpace(text))
             {
-                await ViewModel.AddTextAsync(text);
+                e.AcceptedOperation = DataPackageOperation.None;
+                return;
             }
 
-            foreach (string imagePath in content.ImagePaths)
-            {
-                await ViewModel.AddImageFileAsync(imagePath);
-            }
-
-            // Ensure the list reflects all dropped items, even when the
-            // QuickCaptureService.Changed callback raced with bulk inserts.
+            await ViewModel.AddTextAsync(text);
             ViewModel.RefreshAfterViewReady();
-
-            ShowStatusToast(content.SkippedCount > 0
-                ? _localizationService.T("QuickCapture.DroppedWithSkipped")
-                : _localizationService.T("QuickCapture.Dropped"));
+            e.AcceptedOperation = DataPackageOperation.Copy;
+            ShowStatusToast(_localizationService.T("QuickCapture.Dropped"));
         }
         catch (Exception ex)
         {
@@ -3837,20 +3797,14 @@ public sealed partial class QuickCaptureWidgetWindow : WidgetWindowBase, IDeskto
         }
     }
 
-    private static async Task<QuickCaptureDropContent> TryReadDroppedContentAsync(DataPackageView dataView)
+    private static async Task<string?> TryReadDroppedTextAsync(DataPackageView dataView)
     {
         string? internalText = await DeskBoxDragData.TryGetInternalTextAsync(dataView);
         if (!string.IsNullOrWhiteSpace(internalText))
         {
-            return internalText.Length > QuickCaptureClipboardService.MaxClipboardTextCharacters
-                ? new QuickCaptureDropContent([], [], 1)
-                : new QuickCaptureDropContent([internalText], [], 0);
-        }
-
-        if (dataView.Contains(StandardDataFormats.StorageItems) ||
-            HasFallbackFileFormats(dataView))
-        {
-            return await TryReadDroppedStorageContentAsync(dataView);
+            return internalText.Length <= QuickCaptureClipboardService.MaxClipboardTextCharacters
+                ? internalText
+                : null;
         }
 
         if (dataView.Contains(StandardDataFormats.WebLink))
@@ -3858,7 +3812,7 @@ public sealed partial class QuickCaptureWidgetWindow : WidgetWindowBase, IDeskto
             var link = await dataView.GetWebLinkAsync();
             if (!string.IsNullOrWhiteSpace(link?.AbsoluteUri))
             {
-                return new QuickCaptureDropContent([link.AbsoluteUri], [], 0);
+                return link.AbsoluteUri;
             }
         }
 
@@ -3867,142 +3821,13 @@ public sealed partial class QuickCaptureWidgetWindow : WidgetWindowBase, IDeskto
             string text = await dataView.GetTextAsync();
             if (!string.IsNullOrWhiteSpace(text))
             {
-                return text.Length > QuickCaptureClipboardService.MaxClipboardTextCharacters
-                    ? new QuickCaptureDropContent([], [], 1)
-                    : new QuickCaptureDropContent([text], [], 0);
+                return text.Length <= QuickCaptureClipboardService.MaxClipboardTextCharacters
+                    ? text
+                    : null;
             }
         }
 
-        return QuickCaptureDropContent.Empty;
-    }
-
-    private static async Task<QuickCaptureDropContent> TryReadDroppedStorageContentAsync(DataPackageView dataView)
-    {
-        var texts = new List<string>();
-        var imagePaths = new List<string>();
-        int skippedCount = 0;
-
-        try
-        {
-            var storageItems = await dataView.GetStorageItemsAsync();
-            foreach (var storageItem in storageItems)
-            {
-                if (storageItem is not StorageFile file ||
-                    string.IsNullOrWhiteSpace(file.Path))
-                {
-                    skippedCount++;
-                    continue;
-                }
-
-                if (IsImageFile(file.Path))
-                {
-                    if (IsFileWithinSizeLimit(file.Path, MaxDroppedImageFileBytes))
-                    {
-                        imagePaths.Add(file.Path);
-                    }
-                    else
-                    {
-                        skippedCount++;
-                    }
-
-                    continue;
-                }
-
-                if (IsTextFile(file.Path))
-                {
-                    if (!IsFileWithinSizeLimit(file.Path, MaxDroppedTextFileBytes))
-                    {
-                        skippedCount++;
-                        continue;
-                    }
-
-                    string text = await FileIO.ReadTextAsync(file);
-                    if (!string.IsNullOrWhiteSpace(text))
-                    {
-                        if (text.Length <= QuickCaptureClipboardService.MaxClipboardTextCharacters)
-                        {
-                            texts.Add(text);
-                        }
-                        else
-                        {
-                            skippedCount++;
-                        }
-                    }
-
-                    continue;
-                }
-
-                skippedCount++;
-            }
-        }
-        catch (Exception ex)
-        {
-            App.Log($"[QuickCaptureWidget] Failed to read dropped storage content: {ex}");
-        }
-
-        return new QuickCaptureDropContent(texts, imagePaths, skippedCount);
-    }
-
-    private static async Task<bool> HasSupportedQuickCaptureStorageDropAsync(DataPackageView dataView)
-    {
-        try
-        {
-            var storageItems = await dataView.GetStorageItemsAsync();
-            return storageItems.Any(storageItem =>
-                storageItem is StorageFile file &&
-                !string.IsNullOrWhiteSpace(file.Path) &&
-                ((IsImageFile(file.Path) && IsFileWithinSizeLimit(file.Path, MaxDroppedImageFileBytes)) ||
-                 (IsTextFile(file.Path) && IsFileWithinSizeLimit(file.Path, MaxDroppedTextFileBytes))));
-        }
-        catch (Exception ex)
-        {
-            App.Log($"[QuickCaptureWidget] Failed to inspect dropped storage content: {ex}");
-            return false;
-        }
-    }
-
-    private static bool IsImageFile(string? path)
-    {
-        string extension = string.IsNullOrWhiteSpace(path)
-            ? string.Empty
-            : Path.GetExtension(path);
-        return extension.Equals(".png", StringComparison.OrdinalIgnoreCase) ||
-               extension.Equals(".jpg", StringComparison.OrdinalIgnoreCase) ||
-               extension.Equals(".jpeg", StringComparison.OrdinalIgnoreCase) ||
-               extension.Equals(".bmp", StringComparison.OrdinalIgnoreCase) ||
-               extension.Equals(".gif", StringComparison.OrdinalIgnoreCase) ||
-               extension.Equals(".webp", StringComparison.OrdinalIgnoreCase);
-    }
-
-    private static bool IsTextFile(string? path)
-    {
-        string extension = string.IsNullOrWhiteSpace(path)
-            ? string.Empty
-            : Path.GetExtension(path);
-        return extension.Equals(".txt", StringComparison.OrdinalIgnoreCase) ||
-               extension.Equals(".md", StringComparison.OrdinalIgnoreCase) ||
-               extension.Equals(".log", StringComparison.OrdinalIgnoreCase) ||
-               extension.Equals(".csv", StringComparison.OrdinalIgnoreCase);
-    }
-
-    private static bool IsFileWithinSizeLimit(string path, long maxBytes)
-    {
-        try
-        {
-            return new FileInfo(path).Length <= maxBytes;
-        }
-        catch
-        {
-            return false;
-        }
-    }
-
-    private sealed record QuickCaptureDropContent(
-        IReadOnlyList<string> Texts,
-        IReadOnlyList<string> ImagePaths,
-        int SkippedCount)
-    {
-        public static QuickCaptureDropContent Empty { get; } = new([], [], 0);
+        return null;
     }
 
     private void TitleBarGrid_PointerPressed(object sender, PointerRoutedEventArgs e)

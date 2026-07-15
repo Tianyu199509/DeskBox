@@ -18,6 +18,10 @@ public sealed class TodoAttachmentViewModel : ObservableObject
 
     public TodoAttachment Attachment { get; }
 
+    public string StorageMode => Attachment.StorageMode;
+
+    public bool IsManagedCopy => Attachment.IsManagedCopy;
+
     public string Id => Attachment.Id;
 
     public string FilePath => Attachment.FilePath;
@@ -29,6 +33,8 @@ public sealed class TodoAttachmentViewModel : ObservableObject
     public bool Exists => File.Exists(FilePath) || Directory.Exists(FilePath);
 
     public bool IsImage => string.Equals(Type, "image", StringComparison.OrdinalIgnoreCase);
+
+    public Visibility ImageCopyVisibility => IsImage ? Visibility.Visible : Visibility.Collapsed;
 
     public BitmapImage? Thumbnail
     {

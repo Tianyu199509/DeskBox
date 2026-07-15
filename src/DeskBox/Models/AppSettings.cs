@@ -61,6 +61,9 @@ public class AppSettings
     /// <summary>Whether Quick Capture cards show their creation time.</summary>
     public bool QuickCaptureShowCreatedTime { get; set; } = true;
 
+    /// <summary>Default storage behavior for Todo and Quick Capture attachments. Valid values: <c>Link</c>, <c>Copy</c>.</summary>
+    public string AttachmentStorageMode { get; set; } = "Link";
+
     /// <summary>Default Quick Capture view used when the widget opens. Valid values: <c>"Records"</c>, <c>"Pinned"</c>, <c>"Recent"</c>.</summary>
     public string QuickCaptureDefaultView { get; set; } = "Records";
 

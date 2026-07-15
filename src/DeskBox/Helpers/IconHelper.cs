@@ -586,7 +586,7 @@ public static class IconHelper
 
     private static IconSource ResolveIconSource(string path, bool hideShortcutArrowOverlay)
     {
-        if (!path.EndsWith(".lnk", StringComparison.OrdinalIgnoreCase))
+        if (!ShortcutHelper.IsShortcutPath(path))
         {
             return new IconSource(path);
         }
@@ -645,9 +645,9 @@ public static class IconHelper
 
         if (extension.Equals(".exe", StringComparison.OrdinalIgnoreCase) ||
             extension.Equals(".ico", StringComparison.OrdinalIgnoreCase) ||
-            sourcePath.EndsWith(".lnk", StringComparison.OrdinalIgnoreCase))
+            ShortcutHelper.IsShortcutPath(sourcePath))
         {
-            string sourceVersion = sourcePath.EndsWith(".lnk", StringComparison.OrdinalIgnoreCase)
+            string sourceVersion = ShortcutHelper.IsShortcutPath(sourcePath)
                 ? GetFileIconVersion(sourcePath)
                 : "source";
             return $"path:{resolvedPath}:{iconSource.IconIndex}:{iconSource.UsesExplicitIconIndex}:{GetFileIconVersion(resolvedPath)}:{sourceVersion}";

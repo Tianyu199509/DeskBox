@@ -157,7 +157,9 @@ public sealed partial class QuickCaptureWidgetViewModel : ObservableObject, IDis
 
     public string AddNoteText => _localizationService.T("QuickCapture.AddNote");
 
-    public string AddImageText => _localizationService.T("QuickCapture.AddImage");
+    public string AddFileText => _localizationService.T("QuickCapture.AddFile");
+
+    public string DetailRemoveAttachmentText => _localizationService.T("QuickCapture.Detail.RemoveAttachment");
 
     public string ExpandInputTooltipText => _localizationService.T("QuickCapture.ExpandInput");
 
@@ -504,6 +506,105 @@ public sealed partial class QuickCaptureWidgetViewModel : ObservableObject, IDis
         return Items.FirstOrDefault(entry => string.Equals(entry.Id, item.Id, StringComparison.Ordinal));
     }
 
+    public async Task<QuickCaptureItemViewModel?> AddItemWithAttachmentsAsync(
+        IReadOnlyList<DroppedFilePath> droppedFiles)
+    {
+        if (droppedFiles.Count == 0)
+        {
+            return null;
+        }
+
+        bool copyLinkedFiles = SettingsService.NormalizeAttachmentStorageMode(
+            _settingsService.Settings.AttachmentStorageMode) == SettingsService.AttachmentStorageModeCopy;
+        string[] regularPaths = droppedFiles
+            .Where(file => !file.ForceManagedCopy)
+            .Select(file => file.Path)
+            .ToArray();
+        string[] managedPaths = droppedFiles
+            .Where(file => file.ForceManagedCopy)
+            .Select(file => file.Path)
+            .ToArray();
+
+        QuickCaptureItem? created = regularPaths.Length > 0
+            ? await _quickCaptureService.AddItemWithAttachmentsAsync(regularPaths, copyLinkedFiles)
+            : await _quickCaptureService.AddItemWithAttachmentsAsync(managedPaths, copyToManagedStorage: true);
+        if (created is null)
+        {
+            return null;
+        }
+
+        if (regularPaths.Length > 0 && managedPaths.Length > 0)
+        {
+            created = await _quickCaptureService.AddAttachmentsAsync(
+                created.Id,
+                managedPaths,
+                copyToManagedStorage: true) ?? created;
+        }
+
+        if (SelectedView != QuickCaptureViewMode.Records)
+        {
+            SelectedView = QuickCaptureViewMode.Records;
+        }
+
+        await RefreshVisibleItemsAsync();
+        return Items.FirstOrDefault(entry => string.Equals(entry.Id, created.Id, StringComparison.Ordinal));
+    }
+
+    public async Task<QuickCaptureItemViewModel?> AddAttachmentsAsync(
+        QuickCaptureItemViewModel item,
+        IReadOnlyList<DroppedFilePath> droppedFiles)
+    {
+        if (droppedFiles.Count == 0)
+        {
+            return item;
+        }
+
+        bool copyLinkedFiles = SettingsService.NormalizeAttachmentStorageMode(
+            _settingsService.Settings.AttachmentStorageMode) == SettingsService.AttachmentStorageModeCopy;
+        QuickCaptureItem? updated = null;
+        string[] regularPaths = droppedFiles
+            .Where(file => !file.ForceManagedCopy)
+            .Select(file => file.Path)
+            .ToArray();
+        string[] managedPaths = droppedFiles
+            .Where(file => file.ForceManagedCopy)
+            .Select(file => file.Path)
+            .ToArray();
+        if (regularPaths.Length > 0)
+        {
+            updated = await _quickCaptureService.AddAttachmentsAsync(item.Id, regularPaths, copyLinkedFiles);
+        }
+        if (managedPaths.Length > 0)
+        {
+            updated = await _quickCaptureService.AddAttachmentsAsync(
+                item.Id,
+                managedPaths,
+                copyToManagedStorage: true) ?? updated;
+        }
+
+        if (updated is null)
+        {
+            return null;
+        }
+
+        await RefreshVisibleItemsAsync();
+        return Items.FirstOrDefault(entry => string.Equals(entry.Id, item.Id, StringComparison.Ordinal));
+    }
+
+    public async Task<QuickCaptureItemViewModel?> DeleteAttachmentAsync(
+        QuickCaptureItemViewModel item,
+        string attachmentId)
+    {
+        QuickCaptureItem? updated = await _quickCaptureService.DeleteAttachmentAsync(item.Id, attachmentId);
+        if (updated is null)
+        {
+            return null;
+        }
+
+        await RefreshVisibleItemsAsync();
+        return Items.FirstOrDefault(entry => string.Equals(entry.Id, item.Id, StringComparison.Ordinal));
+    }
+
     public async Task<QuickCaptureItemViewModel?> ReplaceItemImageAsync(
         QuickCaptureItemViewModel item,
         string imagePath)
@@ -525,28 +626,29 @@ public sealed partial class QuickCaptureWidgetViewModel : ObservableObject, IDis
 
     public async Task CopyItemAsync(QuickCaptureItemViewModel item)
     {
-        await WriteItemToClipboardWithRetryAsync(item);
-        if (item.Type != QuickCaptureItemType.Image)
+        string formattedText = QuickCaptureClipboardFormatter.FormatSingle(item, _localizationService);
+        await WriteItemToClipboardWithRetryAsync(item, formattedText);
+        if (!string.IsNullOrWhiteSpace(formattedText))
         {
-            _quickCaptureService.MarkClipboardTextWrittenByDeskBox(item.CopyText);
+            _quickCaptureService.MarkClipboardTextWrittenByDeskBox(formattedText);
         }
     }
 
     public Task CopyImageAsync(QuickCaptureItemViewModel item)
     {
-        return WriteItemToClipboardWithRetryAsync(item, includeImageText: false);
+        return WriteItemToClipboardWithRetryAsync(item, recordText: null);
     }
 
     private async Task WriteItemToClipboardWithRetryAsync(
         QuickCaptureItemViewModel item,
-        bool includeImageText = true)
+        string? recordText)
     {
         Exception? lastException = null;
         for (int attempt = 0; attempt <= s_clipboardRetryDelaysMs.Length; attempt++)
         {
             try
             {
-                await WriteItemToClipboardOnceAsync(item, includeImageText);
+                await WriteItemToClipboardOnceAsync(item, recordText);
                 return;
             }
             catch (COMException ex) when (IsRetryableClipboardException(ex) && attempt < s_clipboardRetryDelaysMs.Length)
@@ -564,29 +666,29 @@ public sealed partial class QuickCaptureWidgetViewModel : ObservableObject, IDis
 
     private static async Task WriteItemToClipboardOnceAsync(
         QuickCaptureItemViewModel item,
-        bool includeImageText)
+        string? recordText)
     {
         var dataPackage = new DataPackage();
-        if (item.Type == QuickCaptureItemType.Image &&
+        if (!string.IsNullOrWhiteSpace(recordText))
+        {
+            dataPackage.SetText(recordText);
+            DeskBoxClipboardWriteScope.MarkWrite(text: recordText);
+        }
+        else if (item.Type == QuickCaptureItemType.Image &&
             !string.IsNullOrWhiteSpace(item.ImagePath) &&
             File.Exists(item.ImagePath))
         {
             var file = await Windows.Storage.StorageFile.GetFileFromPathAsync(item.ImagePath);
             dataPackage.SetBitmap(Windows.Storage.Streams.RandomAccessStreamReference.CreateFromFile(file));
-            if (includeImageText && !string.IsNullOrWhiteSpace(item.CopyText))
-            {
-                dataPackage.SetText(item.CopyText);
-            }
-
             DeskBoxClipboardWriteScope.MarkWrite(
-                text: includeImageText && !string.IsNullOrWhiteSpace(item.CopyText) ? item.CopyText : null,
                 hasImage: true,
                 paths: [item.ImagePath]);
         }
         else
         {
-            dataPackage.SetText(item.CopyText);
-            DeskBoxClipboardWriteScope.MarkWrite(text: item.CopyText);
+            string text = recordText ?? item.CopyText;
+            dataPackage.SetText(text);
+            DeskBoxClipboardWriteScope.MarkWrite(text: text);
         }
 
         Clipboard.SetContent(dataPackage);
@@ -949,7 +1051,8 @@ public sealed partial class QuickCaptureWidgetViewModel : ObservableObject, IDis
         OnPropertyChanged(nameof(AddNoteText));
         OnPropertyChanged(nameof(ExpandInputTooltipText));
         OnPropertyChanged(nameof(DetailBackText));
-        OnPropertyChanged(nameof(AddImageText));
+        OnPropertyChanged(nameof(AddFileText));
+        OnPropertyChanged(nameof(DetailRemoveAttachmentText));
         OnPropertyChanged(nameof(DetailTitlePlaceholderText));
         OnPropertyChanged(nameof(DetailBodyPlaceholderText));
         OnPropertyChanged(nameof(DetailAppearanceText));

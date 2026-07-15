@@ -9,6 +9,21 @@ public static class TodoClipboardFormatter
         return FormatSingleText(item.Text);
     }
 
+    public static string FormatSingle(
+        TodoItemViewModel item,
+        LocalizationService localizationService)
+    {
+        if (item.Attachments.Count == 0)
+        {
+            return FormatSingleText(item);
+        }
+
+        return string.Join(
+            Environment.NewLine + Environment.NewLine,
+            $"{localizationService.T("Clipboard.ContentLabel")}{Environment.NewLine}{FormatSingleText(item)}",
+            FormatAttachments(item, localizationService));
+    }
+
     public static string FormatSingleText(string? text)
     {
         return (text ?? string.Empty).Trim();
@@ -19,11 +34,14 @@ public static class TodoClipboardFormatter
         LocalizationService localizationService)
     {
         return string.Join(
-            Environment.NewLine,
-            items.Select(item => FormatBatchLine(item, localizationService)));
+            $"{Environment.NewLine}{Environment.NewLine}---{Environment.NewLine}{Environment.NewLine}",
+            items.Select((item, index) => FormatBatchItem(item, index, localizationService)));
     }
 
-    private static string FormatBatchLine(TodoItemViewModel item, LocalizationService localizationService)
+    private static string FormatBatchItem(
+        TodoItemViewModel item,
+        int index,
+        LocalizationService localizationService)
     {
         string state = item.IsCompleted ? "- [x] \u2705" : "- [ ]";
         string marker = GetColorMarkerEmoji(item.ColorMarker);
@@ -39,7 +57,35 @@ public static class TodoClipboardFormatter
                 ? localizationService.Format("Todo.Copy.Due", item.DueStatusText)
                 : localizationService.T("Todo.Copy.NoDue");
 
-        return $"{state} {title}\uFF5C{metadata}";
+        var sections = new List<string>
+        {
+            localizationService.Format("Todo.Copy.ItemHeader", index + 1),
+            $"{state} {title}",
+            metadata
+        };
+        if (item.Attachments.Count > 0)
+        {
+            sections.Add(FormatAttachments(item, localizationService));
+        }
+
+        return string.Join(Environment.NewLine, sections);
+    }
+
+    private static string FormatAttachments(
+        TodoItemViewModel item,
+        LocalizationService localizationService)
+    {
+        var lines = new List<string>
+        {
+            localizationService.Format("Clipboard.Attachments", item.Attachments.Count)
+        };
+        foreach (TodoAttachmentViewModel attachment in item.Attachments)
+        {
+            lines.Add($"- {attachment.DisplayName}");
+            lines.Add($"  {localizationService.Format("Clipboard.Path", attachment.FilePath)}");
+        }
+
+        return string.Join(Environment.NewLine, lines);
     }
 
     private static string NormalizeLineText(string? text)

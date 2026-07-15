@@ -1167,6 +1167,8 @@ await ConfigureFolderWatchersAsync(normalizedPath);
     {
         var items = Items
             .Where(item => item.Icon is null)
+            .OrderByDescending(item => item.IsShortcut)
+            .ThenBy(item => item.SortOrder)
             .ToList();
 
         for (int start = 0; start < items.Count; start += IconHydrationBatchSize)

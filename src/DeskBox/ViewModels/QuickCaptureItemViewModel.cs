@@ -35,6 +35,7 @@ public sealed partial class QuickCaptureItemViewModel : ObservableObject
         _showPinnedSortControls = showPinnedSortControls;
         _canMovePinnedUp = canMovePinnedUp;
         _canMovePinnedDown = canMovePinnedDown;
+        RefreshAttachments();
     }
 
     public string Id => _model.Id;
@@ -70,6 +71,20 @@ public sealed partial class QuickCaptureItemViewModel : ObservableObject
     public Visibility HighlightVisibility => HighlightLength > 0 ? Visibility.Visible : Visibility.Collapsed;
 
     public string? ImagePath => _model.ImagePath;
+
+    public IReadOnlyList<TodoAttachmentViewModel> Attachments { get; private set; } = [];
+
+    public IReadOnlyList<TodoAttachmentViewModel> ImageAttachments { get; private set; } = [];
+
+    public Visibility ImageAttachmentsVisibility => ImageAttachments.Count > 0
+        ? Visibility.Visible
+        : Visibility.Collapsed;
+
+    public Visibility AttachmentSummaryVisibility => Attachments.Count > 0
+        ? Visibility.Visible
+        : Visibility.Collapsed;
+
+    public string AttachmentSummaryText => Attachments.Count.ToString();
 
     public Uri? ImagePreviewUri =>
         Type == QuickCaptureItemType.Image &&
@@ -160,6 +175,7 @@ public sealed partial class QuickCaptureItemViewModel : ObservableObject
         Url = _model.Url,
         ImagePath = _model.ImagePath,
         ContentHash = _model.ContentHash,
+        Attachments = _model.Attachments?.Select(attachment => attachment.Clone()).ToList() ?? [],
         IsPinned = _model.IsPinned,
         IsRecent = _model.IsRecent,
         IsDeleted = _model.IsDeleted,
@@ -177,6 +193,18 @@ public sealed partial class QuickCaptureItemViewModel : ObservableObject
     {
         var old = _model;
         _model = model;
+
+        bool attachmentsChanged = !(old.Attachments ?? []).Select(GetAttachmentSignature)
+            .SequenceEqual((model.Attachments ?? []).Select(GetAttachmentSignature), StringComparer.Ordinal);
+        if (attachmentsChanged)
+        {
+            RefreshAttachments();
+            OnPropertyChanged(nameof(Attachments));
+            OnPropertyChanged(nameof(ImageAttachments));
+            OnPropertyChanged(nameof(ImageAttachmentsVisibility));
+            OnPropertyChanged(nameof(AttachmentSummaryVisibility));
+            OnPropertyChanged(nameof(AttachmentSummaryText));
+        }
 
         if (old.Body != model.Body || old.Type != model.Type)
         {
@@ -329,5 +357,20 @@ public sealed partial class QuickCaptureItemViewModel : ObservableObject
         }
 
         return DisplayText.IndexOf(_searchText, StringComparison.CurrentCultureIgnoreCase);
+    }
+
+    private void RefreshAttachments()
+    {
+        Attachments = (_model.Attachments ?? [])
+            .Select(attachment => new TodoAttachmentViewModel(attachment))
+            .ToList();
+        ImageAttachments = Attachments
+            .Where(attachment => attachment.IsImage)
+            .ToList();
+    }
+
+    private static string GetAttachmentSignature(TodoAttachment attachment)
+    {
+        return $"{attachment.Id}\0{attachment.FilePath}\0{attachment.DisplayName}\0{attachment.Type}\0{attachment.StorageMode}";
     }
 }

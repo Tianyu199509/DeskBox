@@ -87,7 +87,7 @@ public sealed class QuickCaptureServiceTests : IDisposable
         Assert.Equal("Decide the launch date", saved.Body);
         Assert.Equal(QuickCaptureAppearancePreset.StickyYellow, saved.AppearancePreset);
         Assert.Equal(QuickCaptureSourceKind.Manual, saved.SourceKind);
-        Assert.Equal(2, data.Version);
+        Assert.Equal(3, data.Version);
     }
 
     [Fact]
@@ -150,7 +150,7 @@ public sealed class QuickCaptureServiceTests : IDisposable
         QuickCaptureStoreData data = await store.LoadAsync();
         QuickCaptureItem recent = Assert.Single(data.RecentItems);
 
-        Assert.Equal(2, data.Version);
+        Assert.Equal(3, data.Version);
         Assert.Equal(QuickCaptureAppearancePreset.Default, recent.AppearancePreset);
         Assert.Equal(QuickCaptureSourceKind.Clipboard, recent.SourceKind);
         Assert.True(recent.IsRecent);
@@ -742,6 +742,119 @@ public sealed class QuickCaptureServiceTests : IDisposable
         var data = await reloaded.GetDataAsync();
 
         Assert.Equal(QuickCaptureViewMode.Pinned, data.CurrentView);
+    }
+
+    [Fact]
+    public async Task AddItemWithAttachmentsAsync_GroupsMultipleFilesIntoOneRecord()
+    {
+        string imagePath = Path.Combine(_tempRoot, "first.png");
+        string documentPath = Path.Combine(_tempRoot, "notes.pdf");
+        await File.WriteAllBytesAsync(imagePath, [1, 2, 3]);
+        await File.WriteAllBytesAsync(documentPath, [4, 5, 6]);
+        var service = CreateService();
+
+        QuickCaptureItem? created = await service.AddItemWithAttachmentsAsync(
+            [imagePath, documentPath],
+            copyToManagedStorage: false);
+        QuickCaptureItem saved = Assert.Single((await service.GetDataAsync()).Items);
+
+        Assert.NotNull(created);
+        Assert.Equal(2, saved.Attachments.Count);
+        Assert.All(saved.Attachments, attachment =>
+            Assert.Equal(TodoAttachment.LinkedStorageMode, attachment.StorageMode));
+        Assert.Equal(Path.GetFullPath(imagePath), saved.ImagePath);
+        Assert.Equal(QuickCaptureItemType.Image, saved.Type);
+        Assert.Contains("first.png", saved.Body, StringComparison.Ordinal);
+        Assert.Contains("notes.pdf", saved.Body, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task AddAttachmentsAsync_AppendsManagedCopiesToExistingRecord()
+    {
+        string firstPath = Path.Combine(_tempRoot, "first.txt");
+        string secondPath = Path.Combine(_tempRoot, "second.txt");
+        await File.WriteAllTextAsync(firstPath, "first");
+        await File.WriteAllTextAsync(secondPath, "second");
+        var service = CreateService();
+        QuickCaptureItem item = await service.AddItemAsync("record");
+
+        QuickCaptureItem? firstUpdate = await service.AddAttachmentsAsync(
+            item.Id,
+            [firstPath],
+            copyToManagedStorage: true);
+        QuickCaptureItem? secondUpdate = await service.AddAttachmentsAsync(
+            item.Id,
+            [secondPath],
+            copyToManagedStorage: true);
+        QuickCaptureItem saved = Assert.Single((await service.GetDataAsync()).Items);
+
+        Assert.NotNull(firstUpdate);
+        Assert.NotNull(secondUpdate);
+        Assert.Equal(2, saved.Attachments.Count);
+        Assert.All(saved.Attachments, attachment =>
+        {
+            Assert.Equal(TodoAttachment.ManagedStorageMode, attachment.StorageMode);
+            Assert.True(File.Exists(attachment.FilePath));
+            Assert.StartsWith(
+                Path.Combine(_storeRoot, "attachments", item.Id),
+                attachment.FilePath,
+                StringComparison.OrdinalIgnoreCase);
+        });
+    }
+
+    [Fact]
+    public async Task Store_MigratesLegacyImagePathToManagedAttachment()
+    {
+        string imagePath = Path.Combine(_tempRoot, "legacy.png");
+        await File.WriteAllBytesAsync(imagePath, [1, 2, 3]);
+        var store = new QuickCaptureStore(_storeRoot);
+        string serializedPath = System.Text.Json.JsonSerializer.Serialize(imagePath);
+        await File.WriteAllTextAsync(
+            store.StorePath,
+            $$"""
+            {
+              "version": 2,
+              "items": [
+                {
+                  "id": "legacy-image",
+                  "type": "Image",
+                  "body": "Image",
+                  "imagePath": {{serializedPath}}
+                }
+              ]
+            }
+            """);
+
+        QuickCaptureStoreData data = await store.LoadAsync();
+        QuickCaptureItem item = Assert.Single(data.Items);
+        TodoAttachment attachment = Assert.Single(item.Attachments);
+
+        Assert.Equal(3, data.Version);
+        Assert.Equal(imagePath, attachment.FilePath);
+        Assert.Equal(TodoAttachment.ManagedStorageMode, attachment.StorageMode);
+        Assert.Equal("image", attachment.Type);
+    }
+
+    [Fact]
+    public async Task DeleteAttachmentAsync_FallsBackToNextImage()
+    {
+        string firstPath = Path.Combine(_tempRoot, "first.png");
+        string secondPath = Path.Combine(_tempRoot, "second.jpg");
+        await File.WriteAllBytesAsync(firstPath, [1]);
+        await File.WriteAllBytesAsync(secondPath, [2]);
+        var service = CreateService();
+        QuickCaptureItem item = (await service.AddItemWithAttachmentsAsync(
+            [firstPath, secondPath],
+            copyToManagedStorage: false))!;
+
+        QuickCaptureItem? updated = await service.DeleteAttachmentAsync(
+            item.Id,
+            item.Attachments[0].Id);
+
+        Assert.NotNull(updated);
+        Assert.Single(updated!.Attachments);
+        Assert.Equal(Path.GetFullPath(secondPath), updated.ImagePath);
+        Assert.Equal(QuickCaptureItemType.Image, updated.Type);
     }
 
     private QuickCaptureService CreateService()

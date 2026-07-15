@@ -1575,8 +1575,83 @@ public sealed partial class TodoWidgetViewModel : ObservableObject, IDisposable
             FilePath = filePath.Trim(),
             DisplayName = string.IsNullOrWhiteSpace(displayName) ? Path.GetFileName(filePath) : displayName.Trim(),
             Type = string.IsNullOrWhiteSpace(type) ? "file" : type.Trim(),
+            StorageMode = TodoAttachment.LinkedStorageMode,
             AddedAt = DateTimeOffset.UtcNow
         };
+        return await AddAttachmentAsync(item, attachment);
+    }
+
+    public async Task<TodoAttachmentViewModel?> AddAttachmentPathAsync(
+        string itemId,
+        string filePath,
+        bool? copyToManagedStorageOverride = null)
+    {
+        TodoItemViewModel? item = FindItem(itemId);
+        if (item is null)
+        {
+            return null;
+        }
+
+        bool copyToManagedStorage = copyToManagedStorageOverride ??
+            (_settingsService is not null &&
+             SettingsService.NormalizeAttachmentStorageMode(_settingsService.Settings.AttachmentStorageMode) ==
+             SettingsService.AttachmentStorageModeCopy);
+        TodoAttachment? attachment = await AttachmentStorageService.ImportPathAsync(
+            filePath,
+            GetManagedAttachmentDirectory(itemId),
+            copyToManagedStorage);
+        return attachment is null ? null : await AddAttachmentAsync(item, attachment);
+    }
+
+    public async Task<int> AddDroppedAttachmentsAsync(
+        string itemId,
+        IReadOnlyList<DroppedFilePath> droppedFiles)
+    {
+        int addedCount = 0;
+        foreach (DroppedFilePath droppedFile in droppedFiles)
+        {
+            TodoAttachmentViewModel? attachment = await AddAttachmentPathAsync(
+                itemId,
+                droppedFile.Path,
+                droppedFile.ForceManagedCopy ? true : null);
+            if (attachment is not null)
+            {
+                addedCount++;
+            }
+        }
+
+        return addedCount;
+    }
+
+    public async Task<TodoAttachmentViewModel?> AddAttachmentStreamAsync(
+        string itemId,
+        Stream stream,
+        string? fileName)
+    {
+        TodoItemViewModel? item = FindItem(itemId);
+        if (item is null)
+        {
+            return null;
+        }
+
+        TodoAttachment? attachment = await AttachmentStorageService.SaveStreamAsync(
+            stream,
+            fileName,
+            GetManagedAttachmentDirectory(itemId));
+        return attachment is null ? null : await AddAttachmentAsync(item, attachment);
+    }
+
+    private async Task<TodoAttachmentViewModel?> AddAttachmentAsync(
+        TodoItemViewModel item,
+        TodoAttachment attachment)
+    {
+        if (item.Attachments.Any(existing =>
+                string.Equals(existing.FilePath, attachment.FilePath, StringComparison.OrdinalIgnoreCase)))
+        {
+            return item.Attachments.First(existing =>
+                string.Equals(existing.FilePath, attachment.FilePath, StringComparison.OrdinalIgnoreCase));
+        }
+
         var attachmentViewModel = new TodoAttachmentViewModel(attachment);
         item.Item.Attachments.Add(attachment);
         item.Attachments.Add(attachmentViewModel);
@@ -1601,7 +1676,23 @@ public sealed partial class TodoWidgetViewModel : ObservableObject, IDisposable
         item.UpdatedAt = DateTimeOffset.UtcNow;
         item.RefreshDetailProperties();
         await SaveAsync();
+        if (attachment.Attachment.IsManagedCopy && File.Exists(attachment.FilePath))
+        {
+            try
+            {
+                File.Delete(attachment.FilePath);
+            }
+            catch (Exception ex)
+            {
+                App.Log($"[Todo] Failed to delete managed attachment '{attachment.FilePath}': {ex.Message}");
+            }
+        }
         return true;
+    }
+
+    private string GetManagedAttachmentDirectory(string itemId)
+    {
+        return Path.Combine(_store.AttachmentDirectory, itemId);
     }
 
     public void ToggleExpanded(string itemId)
@@ -2043,27 +2134,6 @@ public sealed partial class TodoWidgetViewModel : ObservableObject, IDisposable
             return left.IsCompleted ? 1 : -1;
         }
 
-        if (left.IsCompleted)
-        {
-            int completedCompare = (right.CompletedAt ?? right.UpdatedAt)
-                .CompareTo(left.CompletedAt ?? left.UpdatedAt);
-            return completedCompare != 0
-                ? completedCompare
-                : left.SortOrder.CompareTo(right.SortOrder);
-        }
-
-        if (left.IsImportant != right.IsImportant)
-        {
-            return left.IsImportant ? -1 : 1;
-        }
-
-        int dueCompare = (left.DueDate ?? DateTimeOffset.MaxValue)
-            .CompareTo(right.DueDate ?? DateTimeOffset.MaxValue);
-        if (dueCompare != 0)
-        {
-            return dueCompare;
-        }
-
         int sortCompare = left.SortOrder.CompareTo(right.SortOrder);
         return sortCompare != 0
             ? sortCompare
@@ -2214,6 +2284,7 @@ public sealed partial class TodoWidgetViewModel : ObservableObject, IDisposable
                 FilePath = attachment.FilePath,
                 DisplayName = attachment.DisplayName,
                 Type = attachment.Type,
+                StorageMode = attachment.StorageMode,
                 AddedAt = attachment.AddedAt
             }).ToList(),
             CompletedAt = item.CompletedAt,

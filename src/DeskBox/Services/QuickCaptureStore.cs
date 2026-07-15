@@ -6,7 +6,7 @@ namespace DeskBox.Services;
 
 public sealed class QuickCaptureStore
 {
-    private const int CurrentVersion = 2;
+    private const int CurrentVersion = 3;
 
     private static readonly JsonSerializerOptions s_jsonOptions = new()
     {
@@ -39,6 +39,8 @@ public sealed class QuickCaptureStore
     internal string ThumbnailDirectory => Path.Combine(Path.GetDirectoryName(_storePath)!, "thumbnails");
 
     internal string ExportDirectory => Path.Combine(Path.GetDirectoryName(_storePath)!, "exports");
+
+    internal string AttachmentDirectory => Path.Combine(Path.GetDirectoryName(_storePath)!, "attachments");
 
     public async Task<QuickCaptureStoreData> LoadAsync()
     {
@@ -127,6 +129,28 @@ public sealed class QuickCaptureStore
             item.Url = string.IsNullOrWhiteSpace(item.Url) ? null : item.Url.Trim();
             item.ImagePath = string.IsNullOrWhiteSpace(item.ImagePath) ? null : item.ImagePath.Trim();
             item.ContentHash = string.IsNullOrWhiteSpace(item.ContentHash) ? null : item.ContentHash.Trim();
+            item.Attachments ??= [];
+            if (!string.IsNullOrWhiteSpace(item.ImagePath) &&
+                !item.Attachments.Any(attachment =>
+                    string.Equals(attachment.FilePath, item.ImagePath, StringComparison.OrdinalIgnoreCase)))
+            {
+                item.Attachments.Insert(0, new TodoAttachment
+                {
+                    FilePath = item.ImagePath,
+                    DisplayName = Path.GetFileName(item.ImagePath),
+                    Type = "image",
+                    StorageMode = TodoAttachment.ManagedStorageMode,
+                    AddedAt = item.CreatedAt == default ? DateTimeOffset.UtcNow : item.CreatedAt
+                });
+            }
+            NormalizeAttachments(item.Attachments);
+            item.ImagePath ??= item.Attachments
+                .FirstOrDefault(attachment => string.Equals(attachment.Type, "image", StringComparison.OrdinalIgnoreCase))
+                ?.FilePath;
+            if (!string.IsNullOrWhiteSpace(item.ImagePath))
+            {
+                item.Type = QuickCaptureItemType.Image;
+            }
             item.IsRecent = isRecent;
             item.Tags = (item.Tags ?? [])
                 .Where(tag => !string.IsNullOrWhiteSpace(tag))
@@ -167,7 +191,27 @@ public sealed class QuickCaptureStore
         return item is not null &&
                (!string.IsNullOrWhiteSpace(item.Title) ||
                 !string.IsNullOrWhiteSpace(item.Body) ||
+                item.Attachments.Count > 0 ||
                 (item.Type == QuickCaptureItemType.Image && !string.IsNullOrWhiteSpace(item.ImagePath)));
+    }
+
+    private static void NormalizeAttachments(List<TodoAttachment> attachments)
+    {
+        foreach (TodoAttachment attachment in attachments.Where(attachment => attachment is not null))
+        {
+            attachment.Id = string.IsNullOrWhiteSpace(attachment.Id)
+                ? Guid.NewGuid().ToString("N")
+                : attachment.Id.Trim();
+            attachment.FilePath = attachment.FilePath?.Trim() ?? string.Empty;
+            attachment.DisplayName = string.IsNullOrWhiteSpace(attachment.DisplayName)
+                ? Path.GetFileName(attachment.FilePath)
+                : attachment.DisplayName.Trim();
+            attachment.Type = string.IsNullOrWhiteSpace(attachment.Type) ? "file" : attachment.Type.Trim();
+            attachment.StorageMode = TodoAttachment.NormalizeStorageMode(attachment.StorageMode);
+            attachment.AddedAt = attachment.AddedAt == default ? DateTimeOffset.UtcNow : attachment.AddedAt;
+        }
+
+        attachments.RemoveAll(attachment => attachment is null || string.IsNullOrWhiteSpace(attachment.FilePath));
     }
 
     private static string GetDeduplicationKey(QuickCaptureItem item)

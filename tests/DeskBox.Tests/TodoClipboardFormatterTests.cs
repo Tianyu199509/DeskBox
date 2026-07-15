@@ -42,12 +42,50 @@ public sealed class TodoClipboardFormatterTests
         }, localization);
 
         string formatted = TodoClipboardFormatter.FormatBatch([active, noDue, completed], localization);
-        string[] lines = formatted.Split(Environment.NewLine);
 
-        Assert.Equal(3, lines.Length);
-        Assert.StartsWith("- [ ] \U0001F534 review release notes\uFF5CDue:", lines[0], StringComparison.Ordinal);
-        Assert.Equal("- [ ] clean inbox\uFF5CNo due date", lines[1]);
-        Assert.StartsWith("- [x] \u2705 send build\uFF5CCompleted:", lines[2], StringComparison.Ordinal);
+        Assert.Contains("Todo 1", formatted, StringComparison.Ordinal);
+        Assert.Contains("- [ ] \U0001F534 review release notes", formatted, StringComparison.Ordinal);
+        Assert.Contains("Due:", formatted, StringComparison.Ordinal);
+        Assert.Contains("Todo 2", formatted, StringComparison.Ordinal);
+        Assert.Contains("- [ ] clean inbox", formatted, StringComparison.Ordinal);
+        Assert.Contains("No due date", formatted, StringComparison.Ordinal);
+        Assert.Contains("Todo 3", formatted, StringComparison.Ordinal);
+        Assert.Contains("- [x] \u2705 send build", formatted, StringComparison.Ordinal);
+        Assert.Contains("Completed:", formatted, StringComparison.Ordinal);
+        Assert.Contains("---", formatted, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void FormatSingle_WithAttachments_IncludesContentNamesAndPaths()
+    {
+        var localization = TestServices.CreateLocalizationService();
+        var item = new TodoItemViewModel(new TodoItem
+        {
+            Text = "review contract",
+            Attachments =
+            [
+                new TodoAttachment
+                {
+                    FilePath = @"C:\docs\contract.pdf",
+                    DisplayName = "contract.pdf"
+                },
+                new TodoAttachment
+                {
+                    FilePath = @"D:\images\markup.png",
+                    DisplayName = "markup.png",
+                    Type = "image"
+                }
+            ]
+        }, localization);
+
+        string formatted = TodoClipboardFormatter.FormatSingle(item, localization);
+
+        Assert.Contains("Content:", formatted, StringComparison.Ordinal);
+        Assert.Contains("review contract", formatted, StringComparison.Ordinal);
+        Assert.Contains("Attachments (2):", formatted, StringComparison.Ordinal);
+        Assert.Contains("- contract.pdf", formatted, StringComparison.Ordinal);
+        Assert.Contains(@"Path: C:\docs\contract.pdf", formatted, StringComparison.Ordinal);
+        Assert.Contains(@"Path: D:\images\markup.png", formatted, StringComparison.Ordinal);
     }
 
     [Fact]

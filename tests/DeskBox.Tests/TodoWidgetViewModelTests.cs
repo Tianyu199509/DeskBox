@@ -768,6 +768,23 @@ public sealed class TodoWidgetViewModelTests : IDisposable
     }
 
     [Fact]
+    public async Task MoveItemAsync_ManualOrderWinsOverImportanceAndDueDate()
+    {
+        var viewModel = CreateViewModel("todo-widget");
+        await viewModel.InitializeAsync();
+        var first = await viewModel.AddItemAsync("first");
+        var second = await viewModel.AddItemAsync("second");
+        Assert.NotNull(first);
+        Assert.NotNull(second);
+
+        await viewModel.SetImportantAsync(first.Id, true);
+        await viewModel.SetDueDateAsync(first.Id, DateTimeOffset.Now.AddDays(-1));
+        Assert.True(await viewModel.MoveItemAsync(first.Id, 0));
+
+        Assert.Equal(new[] { first.Id, second.Id }, viewModel.VisibleItems.Select(item => item.Id));
+    }
+
+    [Fact]
     public async Task EmptyAndListVisibility_FollowVisibleItems()
     {
         var viewModel = CreateViewModel("todo-widget");

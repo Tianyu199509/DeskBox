@@ -1,0 +1,355 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=1600, initial-scale=1">
+  <title>DeskBox 少数派文章封面</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --canvas: #0b1017;
+      --surface: #121923;
+      --surface-strong: #17212d;
+      --text: #f5f7fa;
+      --text-secondary: #b8c2ce;
+      --text-tertiary: #7f8b98;
+      --stroke: rgba(255, 255, 255, 0.12);
+      --stroke-strong: rgba(255, 255, 255, 0.2);
+      --accent: #60cdff;
+      --accent-strong: #2da8e8;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      width: 1600px;
+      height: 1200px;
+      margin: 0;
+      overflow: hidden;
+      background: var(--canvas);
+      font-family: "Segoe UI Variable Display", "Segoe UI Variable", "Segoe UI", "Microsoft YaHei UI", sans-serif;
+      letter-spacing: 0;
+    }
+
+    .cover {
+      position: relative;
+      width: 1600px;
+      height: 1200px;
+      overflow: hidden;
+      color: var(--text);
+      background: var(--canvas);
+    }
+
+    .cover::before {
+      content: "";
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 10px;
+      height: 100%;
+      background: var(--accent);
+    }
+
+    .header {
+      position: absolute;
+      z-index: 3;
+      top: 0;
+      left: 72px;
+      right: 72px;
+      height: 106px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid var(--stroke);
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+
+    .brand img {
+      width: 54px;
+      height: 54px;
+      display: block;
+    }
+
+    .brand-copy {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .brand-name {
+      font-size: 30px;
+      line-height: 1.1;
+      font-weight: 720;
+    }
+
+    .brand-type {
+      color: var(--text-tertiary);
+      font-size: 14px;
+      line-height: 1.2;
+      font-weight: 600;
+      text-transform: uppercase;
+    }
+
+    .platform {
+      display: flex;
+      align-items: center;
+      gap: 20px;
+      color: var(--text-secondary);
+      font-size: 15px;
+      font-weight: 650;
+    }
+
+    .platform span {
+      position: relative;
+      padding-left: 18px;
+    }
+
+    .platform span::before {
+      content: "";
+      position: absolute;
+      top: 50%;
+      left: 0;
+      width: 7px;
+      height: 7px;
+      background: var(--accent);
+      transform: translateY(-50%);
+    }
+
+    .hero-copy {
+      position: absolute;
+      z-index: 3;
+      top: 138px;
+      left: 80px;
+      right: 80px;
+      height: 212px;
+    }
+
+    .kicker {
+      margin: 0 0 16px;
+      color: var(--accent);
+      font-size: 17px;
+      line-height: 1.3;
+      font-weight: 700;
+      text-transform: uppercase;
+    }
+
+    h1 {
+      margin: 0;
+      color: var(--text);
+      font-size: 70px;
+      line-height: 1.12;
+      font-weight: 720;
+    }
+
+    h1 em {
+      color: var(--accent);
+      font-style: normal;
+      font-weight: 720;
+    }
+
+    .subtitle {
+      margin: 14px 0 0;
+      color: var(--text-secondary);
+      font-size: 23px;
+      line-height: 1.45;
+      font-weight: 450;
+    }
+
+    .feature-list {
+      position: absolute;
+      right: 0;
+      bottom: 14px;
+      display: flex;
+      align-items: center;
+      gap: 26px;
+      color: var(--text-tertiary);
+      font-size: 15px;
+      font-weight: 650;
+    }
+
+    .feature-list span {
+      position: relative;
+    }
+
+    .feature-list span + span::before {
+      content: "/";
+      position: absolute;
+      left: -16px;
+      color: #45515d;
+    }
+
+    .shot-shadow {
+      position: absolute;
+      z-index: 1;
+      top: 396px;
+      left: 182px;
+      width: 1418px;
+      height: 804px;
+      background: rgba(0, 0, 0, 0.34);
+    }
+
+    .product-shot {
+      position: absolute;
+      z-index: 2;
+      top: 378px;
+      left: 160px;
+      width: 1440px;
+      height: 810px;
+      margin: 0;
+      overflow: hidden;
+      border: 1px solid var(--stroke-strong);
+      border-radius: 10px 0 0 0;
+      background: var(--surface);
+      box-shadow: 0 34px 86px rgba(0, 0, 0, 0.42);
+    }
+
+    .product-shot img {
+      width: 100%;
+      height: 100%;
+      display: block;
+      object-fit: cover;
+      object-position: center;
+    }
+
+    .shot-header {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 48px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 17px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      color: rgba(255, 255, 255, 0.82);
+      background: rgba(12, 16, 22, 0.9);
+      font-size: 14px;
+      font-weight: 650;
+    }
+
+    .shot-title {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .shot-title::before {
+      content: "";
+      width: 8px;
+      height: 8px;
+      background: var(--accent);
+    }
+
+    .window-actions {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+
+    .window-actions i {
+      position: relative;
+      width: 13px;
+      height: 13px;
+      display: block;
+    }
+
+    .window-actions i:nth-child(1)::before {
+      content: "";
+      position: absolute;
+      left: 1px;
+      right: 1px;
+      bottom: 2px;
+      height: 1px;
+      background: rgba(255, 255, 255, 0.7);
+    }
+
+    .window-actions i:nth-child(2) {
+      border: 1px solid rgba(255, 255, 255, 0.7);
+    }
+
+    .window-actions i:nth-child(3)::before,
+    .window-actions i:nth-child(3)::after {
+      content: "";
+      position: absolute;
+      top: 6px;
+      left: 0;
+      width: 14px;
+      height: 1px;
+      background: rgba(255, 255, 255, 0.7);
+    }
+
+    .window-actions i:nth-child(3)::before {
+      transform: rotate(45deg);
+    }
+
+    .window-actions i:nth-child(3)::after {
+      transform: rotate(-45deg);
+    }
+
+    .edition {
+      position: absolute;
+      z-index: 4;
+      left: 82px;
+      bottom: 45px;
+      color: rgba(255, 255, 255, 0.64);
+      font-size: 14px;
+      font-weight: 650;
+      writing-mode: vertical-rl;
+      transform: rotate(180deg);
+    }
+  </style>
+</head>
+<body>
+  <main class="cover">
+    <header class="header">
+      <div class="brand">
+        <img src="../images/brand/logo-200.png" alt="">
+        <div class="brand-copy">
+          <strong class="brand-name">DeskBox</strong>
+          <span class="brand-type">Desktop organizer</span>
+        </div>
+      </div>
+
+      <div class="platform">
+        <span>OPEN SOURCE</span>
+        <b>WINDOWS 11 · WINUI 3</b>
+      </div>
+    </header>
+
+    <section class="hero-copy">
+      <p class="kicker">Native Windows desktop experience</p>
+      <h1>给 Windows 桌面，<em>加一层秩序</em></h1>
+      <p class="subtitle">原生风格的桌面整理工具</p>
+
+      <div class="feature-list" aria-label="核心功能">
+        <span>文件</span>
+        <span>待办</span>
+        <span>随记</span>
+        <span>天气</span>
+        <span>音乐</span>
+      </div>
+    </section>
+
+    <div class="shot-shadow"></div>
+
+    <figure class="product-shot">
+      <img src="./assets/deskbox-desktop-dark.png" alt="Windows 11 桌面上的 DeskBox 格子">
+      <figcaption class="shot-header">
+        <span class="shot-title">DeskBox Workspace</span>
+        <span class="window-actions" aria-hidden="true"><i></i><i></i><i></i></span>
+      </figcaption>
+    </figure>
+
+    <div class="edition">SSPAI · FIRST ARTICLE</div>
+  </main>
+</body>
+</html>

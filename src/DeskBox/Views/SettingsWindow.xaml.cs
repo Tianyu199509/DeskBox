@@ -481,6 +481,9 @@ WeatherSettingsSection.Visibility = sectionTag == "WeatherSettings" ? Visibility
             case "TodoNewTaskPosition":
                 ViewModel.SelectedTodoNewTaskPosition = ViewModel.AvailableTodoNewTaskPositions[combo.SelectedIndex];
                 break;
+            case "AttachmentStorageMode":
+                ViewModel.SelectedAttachmentStorageMode = ViewModel.AvailableAttachmentStorageModes[combo.SelectedIndex];
+                break;
             case "TodoDefaultFilter":
                 ViewModel.SelectedTodoDefaultFilter = ViewModel.AvailableTodoDefaultFilters[combo.SelectedIndex];
                 break;

@@ -67,6 +67,19 @@
                 <Setter Property="CornerRadius" Value="4" />
             </Style>
 
+            <Style x:Key="QuickCaptureAttachmentActionButtonStyle" TargetType="Button" BasedOn="{StaticResource SubtleButtonStyle}">
+                <Setter Property="Width" Value="22" />
+                <Setter Property="Height" Value="22" />
+                <Setter Property="MinWidth" Value="22" />
+                <Setter Property="MinHeight" Value="22" />
+                <Setter Property="Padding" Value="0" />
+                <Setter Property="Background" Value="{ThemeResource WidgetOverlayInputSurfaceBrush}" />
+                <Setter Property="BorderBrush" Value="{ThemeResource WidgetOverlayStrokeBrush}" />
+                <Setter Property="BorderThickness" Value="1" />
+                <Setter Property="CornerRadius" Value="4" />
+                <Setter Property="Foreground" Value="{ThemeResource TextFillColorPrimaryBrush}" />
+            </Style>
+
             <Style x:Key="QuickCaptureMaterialButtonStyle" TargetType="Button" BasedOn="{StaticResource SubtleButtonStyle}">
                 <Setter Property="Width" Value="28" />
                 <Setter Property="Height" Value="24" />
@@ -389,10 +402,14 @@
                         <DataTemplate>
                             <Grid
                                 x:Name="QuickCaptureItemRoot"
+                                AllowDrop="True"
                                 HorizontalAlignment="Stretch"
                                 Padding="10,6,6,6"
                                 Background="Transparent"
                                 DataContextChanged="QuickCaptureItem_DataContextChanged"
+                                DragLeave="QuickCaptureItem_DragLeave"
+                                DragOver="QuickCaptureItem_DragOver"
+                                Drop="QuickCaptureItem_Drop"
                                 PointerEntered="QuickCaptureItem_PointerEntered"
                                 PointerExited="QuickCaptureItem_PointerExited"
                                 RightTapped="QuickCaptureItem_RightTapped"
@@ -434,22 +451,39 @@
                                         Text="{Binding Title}"
                                         TextTrimming="CharacterEllipsis"
                                         Visibility="Collapsed" />
-                                    <Border
-                                        x:Name="ImagePreviewBorder"
-                                        Width="116"
-                                        Height="72"
+                                    <ScrollViewer
+                                        MaxWidth="360"
                                         HorizontalAlignment="Left"
-                                        Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
-                                        CornerRadius="6"
-                                        BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                                        BorderThickness="1"
-                                        Padding="2"
-                                        Visibility="{Binding ImagePreviewVisibility}">
-                                        <Image
-                                            x:Name="ImagePreview"
-                                            Loaded="ImagePreview_Loaded"
-                                            Stretch="Uniform" />
-                                    </Border>
+                                        HorizontalScrollBarVisibility="Auto"
+                                        HorizontalScrollMode="Enabled"
+                                        VerticalScrollBarVisibility="Disabled"
+                                        VerticalScrollMode="Disabled"
+                                        Visibility="{Binding ImageAttachmentsVisibility}">
+                                        <ItemsControl ItemsSource="{Binding ImageAttachments}">
+                                            <ItemsControl.ItemsPanel>
+                                                <ItemsPanelTemplate>
+                                                    <StackPanel Orientation="Horizontal" Spacing="5" />
+                                                </ItemsPanelTemplate>
+                                            </ItemsControl.ItemsPanel>
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate>
+                                                    <Grid
+                                                        Width="116"
+                                                        Height="72"
+                                                        Loaded="QuickCaptureAttachmentPreview_Loaded">
+                                                        <Border
+                                                            Padding="2"
+                                                            Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                                                            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                                                            BorderThickness="1"
+                                                            CornerRadius="4">
+                                                            <Image Source="{Binding Thumbnail}" Stretch="Uniform" />
+                                                        </Border>
+                                                    </Grid>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+                                    </ScrollViewer>
                                     <TextBlock
                                         x:Name="ItemTextBlock"
                                         FontSize="{Binding TextSize}"
@@ -468,6 +502,10 @@
                                         LineStackingStrategy="BlockLineHeight"
                                         Text="{Binding CreatedAtText}"
                                         Visibility="{Binding ElementName=ItemsListView, Path=DataContext.CreatedTimeVisibility}" />
+                                    <StackPanel Orientation="Horizontal" Spacing="3" Visibility="{Binding AttachmentSummaryVisibility}">
+                                        <FontIcon FontSize="{Binding TypeIconSize}" Foreground="{ThemeResource TextFillColorTertiaryBrush}" Glyph="&#xE723;" />
+                                        <TextBlock FontSize="{Binding SecondaryTextSize}" Foreground="{ThemeResource TextFillColorTertiaryBrush}" Text="{Binding AttachmentSummaryText}" />
+                                    </StackPanel>
                                     </StackPanel>
                                 <Button
                                     x:Name="CopyItemButton"
@@ -620,7 +658,7 @@
                             Style="{StaticResource QuickCaptureDetailIconButtonStyle}"
                             ToolTipService.ToolTip="{Binding DetailBackText}"
                             VerticalAlignment="Center">
-                            <FontIcon FontSize="{Binding ActionIconSize}" Glyph="&#xE72B;" />
+                            <FontIcon FontSize="{Binding ActionIconSize}" Glyph="&#xE73E;" />
                         </Button>
                         <TextBox
                             x:Name="DetailTitleTextBox"
@@ -699,37 +737,73 @@
                                 <RowDefinition Height="Auto" />
                                 <RowDefinition Height="*" />
                             </Grid.RowDefinitions>
-                            <Border
-                                x:Name="DetailImagePreviewBorder"
+                            <ScrollViewer
+                                x:Name="DetailAttachmentScroller"
                                 Grid.Row="0"
-                                Height="120"
-                                Background="{ThemeResource SubtleFillColorSecondaryBrush}"
-                                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                                BorderThickness="1"
-                                CornerRadius="4"
+                                MaxHeight="118"
+                                HorizontalScrollBarVisibility="Auto"
+                                HorizontalScrollMode="Enabled"
+                                VerticalScrollBarVisibility="Disabled"
+                                VerticalScrollMode="Disabled"
                                 Visibility="Collapsed">
-                                <Grid>
-                                    <Image x:Name="DetailImagePreview" Stretch="Uniform" />
-                                    <Button
-                                        Margin="4"
-                                        HorizontalAlignment="Right"
-                                        VerticalAlignment="Top"
-                                        Click="DetailImageCopyButton_Click"
-                                        Style="{StaticResource QuickCaptureDetailIconButtonStyle}"
-                                        ToolTipService.ToolTip="{Binding DetailCopyImageText}">
-                                        <FontIcon FontSize="{Binding ActionIconSize}" Glyph="&#xE8C8;" />
-                                    </Button>
-                                    <Button
-                                        Margin="4"
-                                        HorizontalAlignment="Right"
-                                        VerticalAlignment="Bottom"
-                                        Click="DetailReplaceImageButton_Click"
-                                        Style="{StaticResource QuickCaptureDetailIconButtonStyle}"
-                                        ToolTipService.ToolTip="{Binding DetailReplaceImageText}">
-                                        <FontIcon FontSize="{Binding ActionIconSize}" Glyph="&#xE72C;" />
-                                    </Button>
-                                </Grid>
-                            </Border>
+                                <ItemsControl x:Name="DetailAttachmentsList">
+                                    <ItemsControl.ItemsPanel>
+                                        <ItemsPanelTemplate>
+                                            <StackPanel Orientation="Horizontal" Spacing="5" />
+                                        </ItemsPanelTemplate>
+                                    </ItemsControl.ItemsPanel>
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Grid Width="116" Height="96" Loaded="QuickCaptureAttachmentPreview_Loaded">
+                                                <Button
+                                                    Padding="3"
+                                                    HorizontalContentAlignment="Stretch"
+                                                    VerticalContentAlignment="Stretch"
+                                                    Click="DetailOpenAttachmentButton_Click"
+                                                    Style="{StaticResource SubtleButtonStyle}">
+                                                    <Grid RowSpacing="2">
+                                                        <Grid.RowDefinitions>
+                                                            <RowDefinition Height="68" />
+                                                            <RowDefinition Height="*" />
+                                                        </Grid.RowDefinitions>
+                                                        <Border Background="{ThemeResource SubtleFillColorSecondaryBrush}" CornerRadius="3">
+                                                            <Grid>
+                                                                <Image Source="{Binding Thumbnail}" Stretch="Uniform" Visibility="{Binding ThumbnailVisibility}" />
+                                                                <FontIcon FontSize="24" Glyph="{Binding Glyph}" Visibility="{Binding FileIconVisibility}" />
+                                                            </Grid>
+                                                        </Border>
+                                                        <TextBlock Grid.Row="1" FontSize="{Binding ElementName=ItemsListView, Path=DataContext.SecondaryTextSize}" MaxLines="1" Text="{Binding DisplayName}" TextTrimming="CharacterEllipsis" />
+                                                    </Grid>
+                                                </Button>
+                                                <StackPanel
+                                                    Margin="3"
+                                                    HorizontalAlignment="Right"
+                                                    VerticalAlignment="Top"
+                                                    Canvas.ZIndex="2"
+                                                    Orientation="Horizontal"
+                                                    Spacing="3">
+                                                    <Button
+                                                        AutomationProperties.Name="{Binding ElementName=ItemsListView, Path=DataContext.DetailCopyImageText}"
+                                                        Click="QuickCaptureAttachmentCopyButton_Click"
+                                                        Style="{StaticResource QuickCaptureAttachmentActionButtonStyle}"
+                                                        ToolTipService.ToolTip="{Binding ElementName=ItemsListView, Path=DataContext.DetailCopyImageText}"
+                                                        Visibility="{Binding ImageCopyVisibility}">
+                                                        <FontIcon FontSize="10" Glyph="&#xE8C8;" />
+                                                    </Button>
+                                                    <Button
+                                                        AutomationProperties.Name="{Binding ElementName=ItemsListView, Path=DataContext.DetailRemoveAttachmentText}"
+                                                        Click="DetailRemoveAttachmentButton_Click"
+                                                        Foreground="{ThemeResource SystemFillColorCriticalBrush}"
+                                                        Style="{StaticResource QuickCaptureAttachmentActionButtonStyle}"
+                                                        ToolTipService.ToolTip="{Binding ElementName=ItemsListView, Path=DataContext.DetailRemoveAttachmentText}">
+                                                        <FontIcon FontSize="10" Glyph="&#xE74D;" />
+                                                    </Button>
+                                                </StackPanel>
+                                            </Grid>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </ScrollViewer>
                             <TextBox
                                 x:Name="DetailBodyTextBox"
                                 Grid.Row="2"
@@ -747,17 +821,17 @@
                                 TextWrapping="Wrap"
                                 VerticalContentAlignment="Top" />
                             <Button
-                                x:Name="DetailAddImageButton"
+                                x:Name="DetailAddFileButton"
                                 Grid.Row="1"
                                 MinHeight="32"
                                 Padding="6,3"
                                 HorizontalAlignment="Stretch"
                                 HorizontalContentAlignment="Left"
-                                Click="DetailAddImageButton_Click"
+                                Click="DetailAddFileButton_Click"
                                 Style="{StaticResource SubtleButtonStyle}">
                                 <StackPanel Orientation="Horizontal" Spacing="7">
-                                    <FontIcon FontSize="{Binding ActionIconSize}" Glyph="&#xEB9F;" />
-                                    <TextBlock VerticalAlignment="Center" FontSize="{Binding TextSize}" Text="{Binding AddImageText}" />
+                                    <FontIcon FontSize="{Binding ActionIconSize}" Glyph="&#xE723;" />
+                                    <TextBlock VerticalAlignment="Center" FontSize="{Binding TextSize}" Text="{Binding AddFileText}" />
                                 </StackPanel>
                             </Button>
                         </Grid>

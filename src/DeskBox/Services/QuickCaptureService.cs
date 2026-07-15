@@ -206,6 +206,7 @@ public sealed class QuickCaptureService
                 Type = QuickCaptureItemType.Image,
                 ImagePath = imagePath,
                 ContentHash = contentHash,
+                Attachments = [CreateImageAttachment(imagePath, now)],
                 SourceKind = QuickCaptureSourceKind.Clipboard,
                 IsRecent = true,
                 SortOrder = 0,
@@ -251,6 +252,7 @@ public sealed class QuickCaptureService
                 Type = QuickCaptureItemType.Image,
                 ImagePath = cachedImagePath,
                 ContentHash = contentHash,
+                Attachments = [CreateImageAttachment(cachedImagePath, now)],
                 SourceKind = QuickCaptureSourceKind.Image,
                 IsRecent = false,
                 SortOrder = 0,
@@ -325,6 +327,7 @@ public sealed class QuickCaptureService
                 Url = recentItem.Url,
                 ImagePath = recentItem.ImagePath,
                 ContentHash = recentItem.ContentHash,
+                Attachments = recentItem.Attachments.Select(attachment => attachment.Clone()).ToList(),
                 SourceKind = QuickCaptureSourceKind.Clipboard,
                 IsPinned = pin,
                 IsRecent = false,
@@ -449,6 +452,210 @@ public sealed class QuickCaptureService
         finally
         {
             _gate.Release();
+        }
+    }
+
+    public async Task<QuickCaptureItem?> AddItemWithAttachmentsAsync(
+        IEnumerable<string> filePaths,
+        bool copyToManagedStorage)
+    {
+        string[] paths = filePaths
+            .Where(path => !string.IsNullOrWhiteSpace(path) && File.Exists(path))
+            .Select(Path.GetFullPath)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        if (paths.Length == 0)
+        {
+            return null;
+        }
+
+        string itemId = Guid.NewGuid().ToString("N");
+        var attachments = new List<TodoAttachment>();
+        foreach (string path in paths)
+        {
+            TodoAttachment? attachment = await AttachmentStorageService.ImportPathAsync(
+                path,
+                Path.Combine(_store.AttachmentDirectory, itemId),
+                copyToManagedStorage);
+            if (attachment is not null)
+            {
+                attachments.Add(attachment);
+            }
+        }
+
+        if (attachments.Count == 0)
+        {
+            return null;
+        }
+
+        await _gate.WaitAsync();
+        try
+        {
+            await EnsureLoadedCoreAsync();
+            var now = DateTimeOffset.UtcNow;
+            string? primaryImagePath = attachments
+                .FirstOrDefault(attachment => string.Equals(attachment.Type, "image", StringComparison.OrdinalIgnoreCase))
+                ?.FilePath;
+            var item = new QuickCaptureItem
+            {
+                Id = itemId,
+                Body = string.Join(", ", attachments.Select(attachment => attachment.DisplayName)),
+                Type = primaryImagePath is null ? QuickCaptureItemType.Text : QuickCaptureItemType.Image,
+                ImagePath = primaryImagePath,
+                Attachments = attachments,
+                SourceKind = QuickCaptureSourceKind.DragDrop,
+                SortOrder = 0,
+                CreatedAt = now,
+                UpdatedAt = now
+            };
+
+            foreach (QuickCaptureItem existing in _data!.Items)
+            {
+                existing.SortOrder++;
+            }
+
+            _data.Items.Insert(0, item);
+            await SaveCoreAsync();
+            return Clone(item);
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    public async Task<QuickCaptureItem?> AddAttachmentsAsync(
+        string itemId,
+        IEnumerable<string> filePaths,
+        bool copyToManagedStorage)
+    {
+        string[] paths = filePaths
+            .Where(path => !string.IsNullOrWhiteSpace(path) && File.Exists(path))
+            .Select(Path.GetFullPath)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        if (string.IsNullOrWhiteSpace(itemId) || paths.Length == 0)
+        {
+            return null;
+        }
+
+        var imported = new List<TodoAttachment>();
+        foreach (string path in paths)
+        {
+            TodoAttachment? attachment = await AttachmentStorageService.ImportPathAsync(
+                path,
+                Path.Combine(_store.AttachmentDirectory, itemId),
+                copyToManagedStorage);
+            if (attachment is not null)
+            {
+                imported.Add(attachment);
+            }
+        }
+
+        await _gate.WaitAsync();
+        try
+        {
+            await EnsureLoadedCoreAsync();
+            QuickCaptureItem? item = _data!.Items.FirstOrDefault(entry =>
+                string.Equals(entry.Id, itemId, StringComparison.Ordinal) && !entry.IsDeleted);
+            if (item is null)
+            {
+                return null;
+            }
+
+            foreach (TodoAttachment attachment in imported)
+            {
+                if (!item.Attachments.Any(existing =>
+                        string.Equals(existing.FilePath, attachment.FilePath, StringComparison.OrdinalIgnoreCase)))
+                {
+                    item.Attachments.Add(attachment);
+                }
+            }
+
+            item.ImagePath ??= item.Attachments
+                .FirstOrDefault(attachment => string.Equals(attachment.Type, "image", StringComparison.OrdinalIgnoreCase))
+                ?.FilePath;
+            if (!string.IsNullOrWhiteSpace(item.ImagePath))
+            {
+                item.Type = QuickCaptureItemType.Image;
+            }
+            item.UpdatedAt = DateTimeOffset.UtcNow;
+            await SaveCoreAsync();
+            return Clone(item);
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    public async Task<QuickCaptureItem?> DeleteAttachmentAsync(string itemId, string attachmentId)
+    {
+        if (string.IsNullOrWhiteSpace(itemId) || string.IsNullOrWhiteSpace(attachmentId))
+        {
+            return null;
+        }
+
+        TodoAttachment? removedAttachment = null;
+        bool removalPersisted = false;
+        await _gate.WaitAsync();
+        try
+        {
+            await EnsureLoadedCoreAsync();
+            QuickCaptureItem? item = _data!.Items.FirstOrDefault(entry =>
+                string.Equals(entry.Id, itemId, StringComparison.Ordinal) && !entry.IsDeleted);
+            if (item is null)
+            {
+                return null;
+            }
+
+            removedAttachment = item.Attachments.FirstOrDefault(attachment =>
+                string.Equals(attachment.Id, attachmentId, StringComparison.Ordinal));
+            if (removedAttachment is null)
+            {
+                return Clone(item);
+            }
+
+            item.Attachments.Remove(removedAttachment);
+            if (string.Equals(item.ImagePath, removedAttachment.FilePath, StringComparison.OrdinalIgnoreCase))
+            {
+                item.ImagePath = item.Attachments
+                    .FirstOrDefault(attachment =>
+                        string.Equals(attachment.Type, "image", StringComparison.OrdinalIgnoreCase))
+                    ?.FilePath;
+                item.ContentHash = null;
+                if (string.IsNullOrWhiteSpace(item.ImagePath))
+                {
+                    item.Type = TryDetectUrl(item.Body, out string? url)
+                        ? QuickCaptureItemType.Link
+                        : QuickCaptureItemType.Text;
+                    item.Url = url;
+                }
+            }
+
+            item.UpdatedAt = DateTimeOffset.UtcNow;
+            await SaveCoreAsync();
+            removalPersisted = true;
+            CleanupUnusedImageCacheCore();
+            return Clone(item);
+        }
+        finally
+        {
+            _gate.Release();
+            if (removalPersisted &&
+                removedAttachment is { IsManagedCopy: true } &&
+                File.Exists(removedAttachment.FilePath) &&
+                !IsPathInsideDirectory(removedAttachment.FilePath, _store.ImageDirectory))
+            {
+                try
+                {
+                    File.Delete(removedAttachment.FilePath);
+                }
+                catch (Exception ex)
+                {
+                    App.Log($"[QuickCaptureService] Failed to delete managed attachment: {ex.Message}");
+                }
+            }
         }
     }
 
@@ -650,6 +857,7 @@ public sealed class QuickCaptureService
             _data.RecentItems.Clear();
             await SaveCoreAsync();
             CleanupUnusedImageCacheCore();
+            TryDeleteDirectory(_store.AttachmentDirectory);
         }
         finally
         {
@@ -839,6 +1047,20 @@ public sealed class QuickCaptureService
             {
                 CleanupUnusedImageCacheCore();
                 return null;
+            }
+
+            TodoAttachment? primaryImageAttachment = item.Attachments.FirstOrDefault(attachment =>
+                string.Equals(attachment.FilePath, item.ImagePath, StringComparison.OrdinalIgnoreCase));
+            if (primaryImageAttachment is null)
+            {
+                item.Attachments.Insert(0, CreateImageAttachment(cachedImagePath, DateTimeOffset.UtcNow));
+            }
+            else
+            {
+                primaryImageAttachment.FilePath = cachedImagePath;
+                primaryImageAttachment.DisplayName = Path.GetFileName(cachedImagePath);
+                primaryImageAttachment.Type = "image";
+                primaryImageAttachment.StorageMode = TodoAttachment.ManagedStorageMode;
             }
 
             item.Type = QuickCaptureItemType.Image;
@@ -1230,6 +1452,7 @@ public sealed class QuickCaptureService
             AppearancePreset = item.AppearancePreset,
             SourceKind = item.SourceKind,
             Tags = item.Tags is null ? [] : [.. item.Tags],
+            Attachments = item.Attachments?.Select(attachment => attachment.Clone()).ToList() ?? [],
             ArchivedAt = item.ArchivedAt,
             SortOrder = item.SortOrder,
             PinnedSortOrder = item.PinnedSortOrder,
@@ -1263,6 +1486,41 @@ public sealed class QuickCaptureService
 
         _ = CreateImageThumbnailAsync(imagePath);
         return imagePath;
+    }
+
+    private static TodoAttachment CreateImageAttachment(string imagePath, DateTimeOffset addedAt)
+    {
+        return new TodoAttachment
+        {
+            FilePath = imagePath,
+            DisplayName = Path.GetFileName(imagePath),
+            Type = "image",
+            StorageMode = TodoAttachment.ManagedStorageMode,
+            AddedAt = addedAt
+        };
+    }
+
+    private static bool IsPathInsideDirectory(string path, string directory)
+    {
+        string normalizedPath = Path.GetFullPath(path);
+        string normalizedDirectory = Path.GetFullPath(directory)
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        return normalizedPath.StartsWith(normalizedDirectory, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static void TryDeleteDirectory(string directory)
+    {
+        try
+        {
+            if (Directory.Exists(directory))
+            {
+                Directory.Delete(directory, recursive: true);
+            }
+        }
+        catch (Exception ex)
+        {
+            App.Log($"[QuickCaptureService] Failed to clear attachment directory: {ex.Message}");
+        }
     }
 
     private async Task<string> SaveImageFileAsync(string sourceImagePath)

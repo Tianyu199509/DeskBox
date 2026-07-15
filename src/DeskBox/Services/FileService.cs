@@ -96,7 +96,7 @@ public sealed class FileService
                 showFileExtensions,
                 hideShortcutExtensionWhenShowingFileExtensions),
             IsFolder = Directory.Exists(path),
-            IsShortcut = Path.GetExtension(path).Equals(".lnk", StringComparison.OrdinalIgnoreCase)
+            IsShortcut = ShortcutHelper.IsShortcutPath(path)
         };
 
         if (item.IsShortcut)
@@ -279,7 +279,7 @@ public sealed class FileService
         }
 
         bool isFolder = Directory.Exists(path);
-        bool isShortcut = Path.GetExtension(path).Equals(".lnk", StringComparison.OrdinalIgnoreCase);
+        bool isShortcut = ShortcutHelper.IsShortcutPath(path);
         string name = isFolder
             ? Path.GetFileName(path)
             : Path.GetFileNameWithoutExtension(path);
@@ -334,7 +334,7 @@ public sealed class FileService
     {
         bool shouldHideExtension = !showFileExtensions ||
             (hideShortcutExtensionWhenShowingFileExtensions &&
-             Path.GetExtension(path).Equals(".lnk", StringComparison.OrdinalIgnoreCase));
+             ShortcutHelper.IsShortcutPath(path));
 
         if (isFolder || !shouldHideExtension)
         {
@@ -1194,7 +1194,7 @@ public sealed class FileService
     /// </summary>
     public static OpenItemResult OpenItem(WidgetItem item, IntPtr ownerHwnd = default)
     {
-        if (item.IsShortcut && IsBrokenShortcut(item))
+        if (ShortcutHelper.IsShellLinkPath(item.Path) && IsBrokenShortcut(item))
         {
             var resolution = ShortcutHelper.ResolveBrokenShortcutWithShellUi(item.Path, ownerHwnd);
             return resolution == BrokenShortcutResolution.ShortcutDeleted

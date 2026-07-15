@@ -16,6 +16,8 @@ public sealed class QuickCaptureItem
 
     public string? ContentHash { get; set; }
 
+    public List<TodoAttachment> Attachments { get; set; } = [];
+
     public bool IsPinned { get; set; }
 
     public bool IsRecent { get; set; }

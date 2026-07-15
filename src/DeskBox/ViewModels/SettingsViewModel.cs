@@ -71,6 +71,7 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
     private string _selectedQuickCaptureDefaultView = SettingsService.QuickCaptureDefaultViewRecords;
     private string _selectedQuickCaptureTabStyle = SettingsService.WidgetTabStyleButton;
     private string _selectedTodoNewTaskPosition = SettingsService.TodoNewTaskPositionTop;
+    private string _selectedAttachmentStorageMode = SettingsService.AttachmentStorageModeLink;
     private string _selectedTodoDefaultFilter = SettingsService.TodoDefaultFilterAll;
     private string _selectedTodoTabStyle = SettingsService.WidgetTabStyleButton;
     private int _selectedTodoReminderOffsetMinutes = SettingsService.DefaultTodoReminderOffsetMinutes;
@@ -115,6 +116,7 @@ private int _selectedWeatherRefreshInterval = 60;
     private string[]? _cachedQuickCaptureDefaultViewDisplayNames;
     private string[]? _cachedQuickCaptureTabStyleDisplayNames;
     private string[]? _cachedTodoNewTaskPositionDisplayNames;
+    private string[]? _cachedAttachmentStorageModeDisplayNames;
     private string[]? _cachedTodoDefaultFilterDisplayNames;
     private string[]? _cachedTodoTabStyleDisplayNames;
     private string[]? _cachedTodoReminderOffsetDisplayNames;
@@ -698,6 +700,31 @@ public bool IsOpacitySliderEnabled =>
 
     public string SelectedTodoNewTaskPositionText => GetTodoNewTaskPositionDisplayName(SelectedTodoNewTaskPosition);
     public int SelectedTodoNewTaskPositionIndex => Array.IndexOf(AvailableTodoNewTaskPositions, _selectedTodoNewTaskPosition);
+
+    public string SelectedAttachmentStorageMode
+    {
+        get => _selectedAttachmentStorageMode;
+        set
+        {
+            string normalized = SettingsService.NormalizeAttachmentStorageMode(value);
+            if (!SetProperty(ref _selectedAttachmentStorageMode, normalized))
+            {
+                return;
+            }
+
+            if (!_isRestoringDefaults && !_isApplyingSettingsSnapshot)
+            {
+                _settingsService.Settings.AttachmentStorageMode = normalized;
+                _settingsService.SaveDebounced();
+            }
+
+            OnPropertyChanged(nameof(SelectedAttachmentStorageModeIndex));
+        }
+    }
+
+    public int SelectedAttachmentStorageModeIndex => Array.IndexOf(
+        AvailableAttachmentStorageModes,
+        _selectedAttachmentStorageMode);
 
     public string SelectedQuickCaptureDefaultView
     {
@@ -1439,6 +1466,23 @@ public bool IsOpacitySliderEnabled =>
     ];
 
     public string[] AvailableTodoNewTaskPositionDisplayNames => _cachedTodoNewTaskPositionDisplayNames ??= AvailableTodoNewTaskPositions.Select(GetTodoNewTaskPositionDisplayName).ToArray();
+
+    public string[] AvailableAttachmentStorageModes { get; } =
+    [
+        SettingsService.AttachmentStorageModeLink,
+        SettingsService.AttachmentStorageModeCopy
+    ];
+
+    public string[] AvailableAttachmentStorageModeDisplayNames =>
+        _cachedAttachmentStorageModeDisplayNames ??=
+            AvailableAttachmentStorageModes.Select(GetAttachmentStorageModeDisplayName).ToArray();
+
+    public string GetAttachmentStorageModeDisplayName(string storageMode)
+    {
+        return SettingsService.NormalizeAttachmentStorageMode(storageMode) == SettingsService.AttachmentStorageModeCopy
+            ? _localizationService.T("Settings.AttachmentStorageMode.Copy")
+            : _localizationService.T("Settings.AttachmentStorageMode.Link");
+    }
 
     public string[] AvailableTodoDefaultFilters { get; } =
     [
@@ -2638,6 +2682,7 @@ partial void OnWeatherShowPressureChanged(bool value)
         _quickCaptureImageClipboardEnabled = settings.QuickCaptureImageClipboardEnabled;
         _quickCaptureRecentLimit = QuickCaptureService.NormalizeRecentLimit(settings.QuickCaptureRecentLimit);
         _quickCaptureShowCreatedTime = settings.QuickCaptureShowCreatedTime;
+        _selectedAttachmentStorageMode = SettingsService.NormalizeAttachmentStorageMode(settings.AttachmentStorageMode);
         _selectedQuickCaptureDefaultView = NormalizeQuickCaptureDefaultView(settings.QuickCaptureDefaultView);
         _todoEnabled = FeatureWidgetSettings.IsEnabled(settings, WidgetKind.Todo);
         _todoShowCompletedTasks = settings.TodoShowCompletedTasks;
@@ -2776,6 +2821,7 @@ _ = RefreshQuickAccessStateAsync();
             QuickCaptureImageClipboardEnabled = false;
             QuickCaptureRecentLimit = QuickCaptureService.DefaultRecentLimit;
             QuickCaptureShowCreatedTime = true;
+            SelectedAttachmentStorageMode = SettingsService.AttachmentStorageModeLink;
             SelectedQuickCaptureDefaultView = SettingsService.QuickCaptureDefaultViewRecords;
             SelectedQuickCaptureTabStyle = SettingsService.WidgetTabStyleButton;
             TodoShowCompletedTasks = true;
@@ -3336,6 +3382,7 @@ RefreshWeatherCityPopularCities();
         _cachedQuickCaptureDefaultViewDisplayNames = null;
         _cachedQuickCaptureTabStyleDisplayNames = null;
         _cachedTodoNewTaskPositionDisplayNames = null;
+        _cachedAttachmentStorageModeDisplayNames = null;
         _cachedTodoDefaultFilterDisplayNames = null;
         _cachedTodoTabStyleDisplayNames = null;
         _cachedTodoReminderOffsetDisplayNames = null;
@@ -3362,6 +3409,8 @@ RefreshWeatherCityPopularCities();
         OnPropertyChanged(nameof(AvailableQuickCaptureDefaultViewDisplayNames));
         OnPropertyChanged(nameof(AvailableQuickCaptureTabStyleDisplayNames));
         OnPropertyChanged(nameof(AvailableTodoNewTaskPositionDisplayNames));
+        OnPropertyChanged(nameof(AvailableAttachmentStorageModeDisplayNames));
+        OnPropertyChanged(nameof(SelectedAttachmentStorageModeIndex));
         OnPropertyChanged(nameof(AvailableTodoDefaultFilterDisplayNames));
         OnPropertyChanged(nameof(AvailableTodoTabStyleDisplayNames));
         OnPropertyChanged(nameof(AvailableTodoReminderOffsetDisplayNames));

@@ -447,6 +447,19 @@ public sealed class SettingsServiceTests : IDisposable
         Assert.Equal(SettingsService.QuickCaptureDefaultViewRecords, service.Settings.QuickCaptureDefaultView);
     }
 
+    [Theory]
+    [InlineData(null, SettingsService.AttachmentStorageModeLink)]
+    [InlineData("", SettingsService.AttachmentStorageModeLink)]
+    [InlineData("unknown", SettingsService.AttachmentStorageModeLink)]
+    [InlineData("link", SettingsService.AttachmentStorageModeLink)]
+    [InlineData("copy", SettingsService.AttachmentStorageModeCopy)]
+    public void NormalizeAttachmentStorageMode_UsesLinkAsSafeDefault(
+        string? value,
+        string expected)
+    {
+        Assert.Equal(expected, SettingsService.NormalizeAttachmentStorageMode(value));
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_tempRoot))
