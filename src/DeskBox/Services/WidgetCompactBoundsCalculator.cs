@@ -4,6 +4,13 @@ using Windows.Graphics;
 
 namespace DeskBox.Services;
 
+public enum WidgetCompactWidthTier
+{
+    Narrow,
+    Standard,
+    Wide
+}
+
 public static class WidgetCompactBoundsCalculator
 {
     public const double MinWidth = 144;
@@ -12,22 +19,23 @@ public static class WidgetCompactBoundsCalculator
     public const double SummaryWidth = 248;
     public const double SmartWidth = 272;
     public const double SmartMediaWidth = 320;
-    public const double Height = 48;
-    public const double PillWidth = 220;
-    public const double PillHeight = 40;
+    public const double Height = 42;
+    public const double SmartDetailHeight = 52;
+    public const double StandardWidthThreshold = 210;
+    public const double WideWidthThreshold = 300;
 
     public static RectInt32 Calculate(
         RectInt32 expandedBounds,
         string? positionAnchor,
         double dpiScale,
-        string? collapsedStyle,
+        string? contentMode,
         WidgetKind widgetKind = WidgetKind.File,
         double? compactWidth = null)
     {
         double scale = double.IsFinite(dpiScale) && dpiScale > 0 ? dpiScale : 1;
-        double logicalWidth = ResolveLogicalWidth(collapsedStyle, widgetKind, compactWidth);
+        double logicalWidth = ResolveLogicalWidth(contentMode, widgetKind, compactWidth);
         int width = Math.Max(1, (int)Math.Round(logicalWidth * scale));
-        int height = Math.Max(1, (int)Math.Round(ResolveLogicalHeight(collapsedStyle) * scale));
+        int height = Math.Max(1, (int)Math.Round(ResolveLogicalHeight(contentMode, widgetKind) * scale));
         bool anchorRight = positionAnchor is WidgetPositionAnchors.RightTop or WidgetPositionAnchors.RightBottom;
         bool anchorBottom = positionAnchor is WidgetPositionAnchors.LeftBottom or WidgetPositionAnchors.RightBottom;
         int x = anchorRight ? expandedBounds.X + expandedBounds.Width - width : expandedBounds.X;
@@ -39,7 +47,7 @@ public static class WidgetCompactBoundsCalculator
         WidgetConfig config,
         RectInt32 expandedBounds,
         double dpiScale,
-        string? collapsedStyle)
+        string? contentMode)
     {
         if (config.CompactPlacement is not { } placement)
         {
@@ -47,7 +55,7 @@ public static class WidgetCompactBoundsCalculator
                 expandedBounds,
                 config.PositionAnchor,
                 dpiScale,
-                collapsedStyle,
+                contentMode,
                 config.WidgetKind,
                 config.CompactWidth);
         }
@@ -56,8 +64,8 @@ public static class WidgetCompactBoundsCalculator
         {
             X = placement.X,
             Y = placement.Y,
-            Width = ResolveLogicalWidth(collapsedStyle, config.WidgetKind, config.CompactWidth),
-            Height = ResolveLogicalHeight(collapsedStyle),
+            Width = ResolveLogicalWidth(contentMode, config.WidgetKind, config.CompactWidth),
+            Height = ResolveLogicalHeight(contentMode, config.WidgetKind),
             BoundsCoordinateVersion = placement.BoundsCoordinateVersion,
             PositionAnchor = placement.PositionAnchor,
             PositionMarginX = placement.PositionMarginX,
@@ -138,7 +146,7 @@ public static class WidgetCompactBoundsCalculator
     }
 
     public static double ResolveLogicalWidth(
-        string? collapsedStyle,
+        string? contentMode,
         WidgetKind widgetKind,
         double? compactWidth = null)
     {
@@ -148,24 +156,16 @@ public static class WidgetCompactBoundsCalculator
         }
 
         if (string.Equals(
-                collapsedStyle,
-                SettingsService.WidgetCollapsedStyleMinimal,
+                contentMode,
+                SettingsService.WidgetCompactContentModeMinimal,
                 StringComparison.Ordinal))
         {
             return MinimalWidth;
         }
 
         if (string.Equals(
-                collapsedStyle,
-                SettingsService.WidgetCollapsedStylePill,
-                StringComparison.Ordinal))
-        {
-            return PillWidth;
-        }
-
-        if (string.Equals(
-                collapsedStyle,
-                SettingsService.WidgetCollapsedStyleSmart,
+                contentMode,
+                SettingsService.WidgetCompactContentModeSmart,
                 StringComparison.Ordinal))
         {
             return widgetKind == WidgetKind.Music ? SmartMediaWidth : SmartWidth;
@@ -174,10 +174,15 @@ public static class WidgetCompactBoundsCalculator
         return SummaryWidth;
     }
 
-    public static double ResolveLogicalHeight(string? collapsedStyle) =>
-        string.Equals(collapsedStyle, SettingsService.WidgetCollapsedStylePill, StringComparison.Ordinal)
-            ? PillHeight
-            : Height;
+    public static double ResolveLogicalHeight(string? contentMode, WidgetKind widgetKind)
+    {
+        bool usesSmartDetailLayout = string.Equals(
+                contentMode,
+                SettingsService.WidgetCompactContentModeSmart,
+                StringComparison.Ordinal) &&
+            widgetKind is WidgetKind.Music or WidgetKind.Weather or WidgetKind.QuickCapture;
+        return usesSmartDetailLayout ? SmartDetailHeight : Height;
+    }
 
     public static double ClampLogicalWidth(double width)
     {
@@ -185,28 +190,21 @@ public static class WidgetCompactBoundsCalculator
         return Math.Clamp(finiteWidth, MinWidth, MaxWidth);
     }
 
-    public static double ResolveOuterCornerRadius(string? cornerPreference, string? collapsedStyle = null)
+    public static WidgetCompactWidthTier ResolveWidthTier(double logicalWidth)
     {
-        if (string.Equals(collapsedStyle, SettingsService.WidgetCollapsedStylePill, StringComparison.Ordinal))
+        double width = double.IsFinite(logicalWidth) ? logicalWidth : SummaryWidth;
+        if (width < StandardWidthThreshold)
         {
-            return PillHeight / 2;
+            return WidgetCompactWidthTier.Narrow;
         }
 
-        return cornerPreference switch
-        {
-            SettingsService.WidgetCornerPreferenceSquare => 0,
-            SettingsService.WidgetCornerPreferenceSmall => 8,
-            _ => 16
-        };
+        return width < WideWidthThreshold
+            ? WidgetCompactWidthTier.Standard
+            : WidgetCompactWidthTier.Wide;
     }
 
-    public static double ResolveInnerCornerRadius(string? cornerPreference, string? collapsedStyle = null)
+    public static double ResolveOuterCornerRadius(string? cornerPreference)
     {
-        if (string.Equals(collapsedStyle, SettingsService.WidgetCollapsedStylePill, StringComparison.Ordinal))
-        {
-            return 14;
-        }
-
         return cornerPreference switch
         {
             SettingsService.WidgetCornerPreferenceSquare => 0,
@@ -215,17 +213,26 @@ public static class WidgetCompactBoundsCalculator
         };
     }
 
+    public static double ResolveInnerCornerRadius(string? cornerPreference)
+    {
+        return cornerPreference switch
+        {
+            SettingsService.WidgetCornerPreferenceSquare => 0,
+            SettingsService.WidgetCornerPreferenceSmall => 2,
+            _ => 4
+        };
+    }
+
     public static double ResolveMediaCornerRadius(
         string? mode,
-        string? cornerPreference,
-        string? collapsedStyle = null)
+        string? cornerPreference)
     {
         return SettingsService.NormalizeWidgetCompactMediaCornerMode(mode) switch
         {
             SettingsService.WidgetCompactMediaCornerSquare => 0,
             SettingsService.WidgetCompactMediaCornerSmall => 4,
             SettingsService.WidgetCompactMediaCornerRound => Height / 2,
-            _ => ResolveInnerCornerRadius(cornerPreference, collapsedStyle)
+            _ => ResolveInnerCornerRadius(cornerPreference)
         };
     }
 

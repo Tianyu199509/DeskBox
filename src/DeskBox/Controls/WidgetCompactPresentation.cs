@@ -8,7 +8,14 @@ public sealed record WidgetCompactPresentation(
     string Glyph,
     string DropHint,
     ImageSource? Thumbnail = null,
+    bool ShowPrimaryAction = false,
+    string PrimaryActionGlyph = "\uE73E",
     bool ShowMediaControls = false,
     bool IsPlaying = false,
     bool CanGoPrevious = false,
-    bool CanGoNext = false);
+    bool CanGoNext = false,
+    bool UseStackedText = false,
+    bool EnableMarquee = false,
+    double? Progress = null,
+    bool IsAttention = false,
+    string LiveStateKey = "");

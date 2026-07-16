@@ -300,13 +300,13 @@ public partial class SettingsViewModel
     public int SelectedWidgetCollapseBehaviorIndex =>
         Array.IndexOf(AvailableWidgetCollapseBehaviors, _selectedWidgetCollapseBehavior);
 
-    public string SelectedWidgetCollapsedStyle
+    public string SelectedWidgetCompactContentMode
     {
-        get => _selectedWidgetCollapsedStyle;
+        get => _selectedWidgetCompactContentMode;
         set
         {
-            string normalized = SettingsService.NormalizeWidgetCollapsedStyle(value);
-            if (!SetProperty(ref _selectedWidgetCollapsedStyle, normalized))
+            string normalized = SettingsService.NormalizeWidgetCompactContentMode(value);
+            if (!SetProperty(ref _selectedWidgetCompactContentMode, normalized))
             {
                 return;
             }
@@ -316,18 +316,18 @@ public partial class SettingsViewModel
                 return;
             }
 
-            _settingsService.Settings.WidgetCollapsedStyle = normalized;
+            _settingsService.Settings.WidgetCompactContentMode = normalized;
             _settingsService.SaveDebounced();
-            OnPropertyChanged(nameof(SelectedWidgetCollapsedStyleText));
-            OnPropertyChanged(nameof(SelectedWidgetCollapsedStyleIndex));
+            OnPropertyChanged(nameof(SelectedWidgetCompactContentModeText));
+            OnPropertyChanged(nameof(SelectedWidgetCompactContentModeIndex));
         }
     }
 
-    public string SelectedWidgetCollapsedStyleText =>
-        GetWidgetCollapsedStyleDisplayName(SelectedWidgetCollapsedStyle);
+    public string SelectedWidgetCompactContentModeText =>
+        GetWidgetCompactContentModeDisplayName(SelectedWidgetCompactContentMode);
 
-    public int SelectedWidgetCollapsedStyleIndex =>
-        Array.IndexOf(AvailableWidgetCollapsedStyles, _selectedWidgetCollapsedStyle);
+    public int SelectedWidgetCompactContentModeIndex =>
+        Array.IndexOf(AvailableWidgetCompactContentModes, _selectedWidgetCompactContentMode);
 
     public string SelectedLayoutDensity
     {

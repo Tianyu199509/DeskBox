@@ -89,14 +89,13 @@ public partial class SettingsViewModel
         };
     }
 
-    public string GetWidgetCollapsedStyleDisplayName(string style)
+    public string GetWidgetCompactContentModeDisplayName(string mode)
     {
-        return SettingsService.NormalizeWidgetCollapsedStyle(style) switch
+        return SettingsService.NormalizeWidgetCompactContentMode(mode) switch
         {
-            SettingsService.WidgetCollapsedStylePill => _localizationService.T("Settings.CollapsedStyle.Pill"),
-            SettingsService.WidgetCollapsedStyleSmart => _localizationService.T("Settings.CollapsedStyle.Smart"),
-            SettingsService.WidgetCollapsedStyleMinimal => _localizationService.T("Settings.CollapsedStyle.Minimal"),
-            _ => _localizationService.T("Settings.CollapsedStyle.Summary")
+            SettingsService.WidgetCompactContentModeMinimal => _localizationService.T("Settings.CompactContent.Minimal"),
+            SettingsService.WidgetCompactContentModeSummary => _localizationService.T("Settings.CompactContent.Summary"),
+            _ => _localizationService.T("Settings.CompactContent.Smart")
         };
     }
 

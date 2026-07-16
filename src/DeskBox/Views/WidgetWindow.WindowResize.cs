@@ -61,10 +61,7 @@ public sealed partial class WidgetWindow
         _initialWindowPos = new Windows.Graphics.PointInt32(initialBounds.X, initialBounds.Y);
         _initialWindowSize = new Windows.Graphics.SizeInt32(initialBounds.Width, initialBounds.Height);
         element.CapturePointer(e.Pointer);
-        if (!IsCompactBoundsStateActive)
-        {
-            App.Current.ResizeGuideOverlay.BeginResize(_hWnd, RootGrid);
-        }
+        App.Current.ResizeGuideOverlay.BeginResize(_hWnd, RootGrid);
         e.Handled = true;
     }
 
@@ -98,7 +95,22 @@ public sealed partial class WidgetWindow
                 newX = rightEdge - newWidth;
             }
 
-            ApplyWindowBounds(newX, newY, newWidth, newHeight, persist: false);
+            var compactProposed = new Windows.Graphics.RectInt32(
+                newX,
+                newY,
+                newWidth,
+                newHeight);
+            var compactSnapped = App.Current.ResizeGuideOverlay.UpdateGuidesAndSnap(
+                compactProposed,
+                _resizeDirection,
+                limits.MinWidth,
+                limits.MaxWidth);
+            ApplyWindowBounds(
+                compactSnapped.X,
+                compactSnapped.Y,
+                compactSnapped.Width,
+                compactSnapped.Height,
+                persist: false);
             e.Handled = true;
             return;
         }

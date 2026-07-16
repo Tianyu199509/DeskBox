@@ -223,8 +223,9 @@ WeatherSettingsSection.Visibility = sectionTag == "WeatherSettings" ? Visibility
             case "WidgetCollapseBehavior":
                 ViewModel.SelectedWidgetCollapseBehavior = ViewModel.AvailableWidgetCollapseBehaviors[combo.SelectedIndex];
                 break;
-            case "WidgetCollapsedStyle":
-                ViewModel.SelectedWidgetCollapsedStyle = ViewModel.AvailableWidgetCollapsedStyles[combo.SelectedIndex];
+            case "WidgetCompactContentMode":
+                ViewModel.SelectedWidgetCompactContentMode =
+                    ViewModel.AvailableWidgetCompactContentModes[combo.SelectedIndex];
                 break;
             case "WidgetCompactAnimationEffect":
                 ViewModel.SelectedWidgetCompactAnimationEffect = ViewModel.AvailableWidgetCompactAnimationEffects[combo.SelectedIndex];

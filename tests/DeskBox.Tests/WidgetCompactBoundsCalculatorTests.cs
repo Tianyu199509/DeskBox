@@ -10,20 +10,20 @@ public sealed class WidgetCompactBoundsCalculatorTests
     [Theory]
     [InlineData(WidgetPositionAnchors.LeftTop, 100, 200)]
     [InlineData(WidgetPositionAnchors.RightTop, 452, 200)]
-    [InlineData(WidgetPositionAnchors.LeftBottom, 100, 552)]
-    [InlineData(WidgetPositionAnchors.RightBottom, 452, 552)]
+    [InlineData(WidgetPositionAnchors.LeftBottom, 100, 558)]
+    [InlineData(WidgetPositionAnchors.RightBottom, 452, 558)]
     public void Calculate_PreservesConfiguredAnchor(string anchor, int expectedX, int expectedY)
     {
         var result = WidgetCompactBoundsCalculator.Calculate(
             new RectInt32(100, 200, 600, 400),
             anchor,
             1,
-            SettingsService.WidgetCollapsedStyleSummary);
+            SettingsService.WidgetCompactContentModeSummary);
 
         Assert.Equal(expectedX, result.X);
         Assert.Equal(expectedY, result.Y);
         Assert.Equal(248, result.Width);
-        Assert.Equal(48, result.Height);
+        Assert.Equal(42, result.Height);
     }
 
     [Fact]
@@ -33,28 +33,30 @@ public sealed class WidgetCompactBoundsCalculatorTests
             new RectInt32(0, 0, 600, 400),
             WidgetPositionAnchors.LeftTop,
             1.5,
-            SettingsService.WidgetCollapsedStyleMinimal);
+            SettingsService.WidgetCompactContentModeMinimal);
 
         Assert.Equal(258, result.Width);
-        Assert.Equal(72, result.Height);
+        Assert.Equal(63, result.Height);
     }
 
-    [Fact]
-    public void Calculate_PillStyleUsesLowerFullyRoundedSize()
+    [Theory]
+    [InlineData(SettingsService.WidgetCompactContentModeSmart, WidgetKind.File, 42)]
+    [InlineData(SettingsService.WidgetCompactContentModeSmart, WidgetKind.Todo, 42)]
+    [InlineData(SettingsService.WidgetCompactContentModeSmart, WidgetKind.Music, 52)]
+    [InlineData(SettingsService.WidgetCompactContentModeSmart, WidgetKind.Weather, 52)]
+    [InlineData(SettingsService.WidgetCompactContentModeSmart, WidgetKind.QuickCapture, 52)]
+    [InlineData(SettingsService.WidgetCompactContentModeSummary, WidgetKind.Music, 42)]
+    [InlineData(SettingsService.WidgetCompactContentModeMinimal, WidgetKind.QuickCapture, 42)]
+    public void Calculate_UsesContentAppropriateHeight(string contentMode, WidgetKind kind, int expectedHeight)
     {
         RectInt32 result = WidgetCompactBoundsCalculator.Calculate(
             new RectInt32(0, 0, 600, 400),
             WidgetPositionAnchors.LeftTop,
             1,
-            SettingsService.WidgetCollapsedStylePill);
+            contentMode,
+            kind);
 
-        Assert.Equal(WidgetCompactBoundsCalculator.PillWidth, result.Width);
-        Assert.Equal(WidgetCompactBoundsCalculator.PillHeight, result.Height);
-        Assert.Equal(
-            WidgetCompactBoundsCalculator.PillHeight / 2,
-            WidgetCompactBoundsCalculator.ResolveOuterCornerRadius(
-                SettingsService.WidgetCornerPreferenceSquare,
-                SettingsService.WidgetCollapsedStylePill));
+        Assert.Equal(expectedHeight, result.Height);
     }
 
     [Theory]
@@ -67,7 +69,7 @@ public sealed class WidgetCompactBoundsCalculatorTests
             new RectInt32(0, 0, 600, 400),
             WidgetPositionAnchors.LeftTop,
             1,
-            SettingsService.WidgetCollapsedStyleSmart,
+            SettingsService.WidgetCompactContentModeSmart,
             kind);
 
         Assert.Equal(expectedWidth, result.Width);
@@ -83,7 +85,7 @@ public sealed class WidgetCompactBoundsCalculatorTests
             new RectInt32(0, 0, 600, 400),
             WidgetPositionAnchors.LeftTop,
             1,
-            SettingsService.WidgetCollapsedStyleMinimal,
+            SettingsService.WidgetCompactContentModeMinimal,
             WidgetKind.Music,
             customWidth);
 
@@ -91,10 +93,25 @@ public sealed class WidgetCompactBoundsCalculatorTests
     }
 
     [Theory]
+    [InlineData(144, WidgetCompactWidthTier.Narrow)]
+    [InlineData(209.9, WidgetCompactWidthTier.Narrow)]
+    [InlineData(210, WidgetCompactWidthTier.Standard)]
+    [InlineData(299.9, WidgetCompactWidthTier.Standard)]
+    [InlineData(300, WidgetCompactWidthTier.Wide)]
+    [InlineData(480, WidgetCompactWidthTier.Wide)]
+    [InlineData(double.NaN, WidgetCompactWidthTier.Standard)]
+    public void ResolveWidthTier_UsesLogicalWidthBreakpoints(
+        double width,
+        WidgetCompactWidthTier expected)
+    {
+        Assert.Equal(expected, WidgetCompactBoundsCalculator.ResolveWidthTier(width));
+    }
+
+    [Theory]
     [InlineData(WidgetPositionAnchors.LeftTop, 100, 200)]
     [InlineData(WidgetPositionAnchors.RightTop, 452, 200)]
-    [InlineData(WidgetPositionAnchors.LeftBottom, 100, 302)]
-    [InlineData(WidgetPositionAnchors.RightBottom, 452, 302)]
+    [InlineData(WidgetPositionAnchors.LeftBottom, 100, 308)]
+    [InlineData(WidgetPositionAnchors.RightBottom, 452, 308)]
     public void ApplyCompactSizeToResolvedPlacement_RemovesExpandedMinimumHeight(
         string anchor,
         int expectedX,
@@ -109,7 +126,7 @@ public sealed class WidgetCompactBoundsCalculatorTests
         Assert.Equal(expectedX, result.X);
         Assert.Equal(expectedY, result.Y);
         Assert.Equal(248, result.Width);
-        Assert.Equal(48, result.Height);
+        Assert.Equal(42, result.Height);
     }
 
     [Theory]
@@ -136,9 +153,9 @@ public sealed class WidgetCompactBoundsCalculatorTests
 
     [Theory]
     [InlineData(SettingsService.WidgetCornerPreferenceSquare, 0, 0)]
-    [InlineData(SettingsService.WidgetCornerPreferenceSmall, 8, 4)]
-    [InlineData(SettingsService.WidgetCornerPreferenceRound, 16, 8)]
-    [InlineData(SettingsService.WidgetCornerPreferenceDefault, 16, 8)]
+    [InlineData(SettingsService.WidgetCornerPreferenceSmall, 4, 2)]
+    [InlineData(SettingsService.WidgetCornerPreferenceRound, 8, 4)]
+    [InlineData(SettingsService.WidgetCornerPreferenceDefault, 8, 4)]
     public void CompactCornerRadii_FollowWindowCornerPreference(
         string preference,
         double expectedOuter,
@@ -150,10 +167,10 @@ public sealed class WidgetCompactBoundsCalculatorTests
 
     [Theory]
     [InlineData(SettingsService.WidgetCompactMediaCornerFollowWidget, SettingsService.WidgetCornerPreferenceSquare, 0)]
-    [InlineData(SettingsService.WidgetCompactMediaCornerFollowWidget, SettingsService.WidgetCornerPreferenceRound, 8)]
+    [InlineData(SettingsService.WidgetCompactMediaCornerFollowWidget, SettingsService.WidgetCornerPreferenceRound, 4)]
     [InlineData(SettingsService.WidgetCompactMediaCornerSquare, SettingsService.WidgetCornerPreferenceRound, 0)]
     [InlineData(SettingsService.WidgetCompactMediaCornerSmall, SettingsService.WidgetCornerPreferenceSquare, 4)]
-    [InlineData(SettingsService.WidgetCompactMediaCornerRound, SettingsService.WidgetCornerPreferenceSquare, 24)]
+    [InlineData(SettingsService.WidgetCompactMediaCornerRound, SettingsService.WidgetCornerPreferenceSquare, 21)]
     public void MediaCornerRadius_UsesConfiguredMode(
         string mode,
         string cornerPreference,
@@ -203,6 +220,16 @@ public sealed class WidgetCompactBoundsCalculatorTests
     public void NormalizeCollapsedStyle_ConstrainsValue(string? value, string expected)
     {
         Assert.Equal(expected, SettingsService.NormalizeWidgetCollapsedStyle(value));
+    }
+
+    [Theory]
+    [InlineData(null, SettingsService.WidgetCompactContentModeSmart)]
+    [InlineData("unexpected", SettingsService.WidgetCompactContentModeSmart)]
+    [InlineData("minimal", SettingsService.WidgetCompactContentModeMinimal)]
+    [InlineData("summary", SettingsService.WidgetCompactContentModeSummary)]
+    public void NormalizeCompactContentMode_ConstrainsValue(string? value, string expected)
+    {
+        Assert.Equal(expected, SettingsService.NormalizeWidgetCompactContentMode(value));
     }
 
     [Theory]

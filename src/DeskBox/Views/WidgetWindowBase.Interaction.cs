@@ -255,10 +255,7 @@ public abstract partial class WidgetWindowBase
         InitialWindowPos = new PointInt32(initialBounds.X, initialBounds.Y);
         InitialWindowSize = new SizeInt32(initialBounds.Width, initialBounds.Height);
         element.CapturePointer(e.Pointer);
-        if (!IsCompactBoundsStateActive)
-        {
-            App.Current.ResizeGuideOverlay.BeginResize(HWnd, RootElement);
-        }
+        App.Current.ResizeGuideOverlay.BeginResize(HWnd, RootElement);
         e.Handled = true;
     }
 
@@ -292,7 +289,18 @@ public abstract partial class WidgetWindowBase
                 newX = rightEdge - newWidth;
             }
 
-            ApplyWindowBounds(newX, newY, newWidth, newHeight, persist: false);
+            var compactProposed = new RectInt32(newX, newY, newWidth, newHeight);
+            var compactSnapped = App.Current.ResizeGuideOverlay.UpdateGuidesAndSnap(
+                compactProposed,
+                ResizeDirection,
+                limits.MinWidth,
+                limits.MaxWidth);
+            ApplyWindowBounds(
+                compactSnapped.X,
+                compactSnapped.Y,
+                compactSnapped.Width,
+                compactSnapped.Height,
+                persist: false);
             e.Handled = true;
             return;
         }

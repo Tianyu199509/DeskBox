@@ -874,17 +874,32 @@ svc:Localized.DescriptionKey="Settings.DefaultWidth.Description"
                         <toolkit:SettingsCard
                             HorizontalContentAlignment="Right"
                             IsEnabled="{Binding WidgetCapsuleModeEnabled}"
-                            svc:Localized.DescriptionKey="Settings.CollapsedStyle.Description"
-                            svc:Localized.HeaderKey="Settings.CollapsedStyle.Title">
+                            svc:Localized.DescriptionKey="Settings.CompactContent.Description"
+                            svc:Localized.HeaderKey="Settings.CompactContent.Title">
                             <toolkit:SettingsCard.HeaderIcon>
                                 <FontIcon Glyph="&#xE8A5;" />
                             </toolkit:SettingsCard.HeaderIcon>
                             <ComboBox
                                 MinWidth="176"
-                                ItemsSource="{Binding AvailableWidgetCollapsedStyleDisplayNames}"
-                                SelectedIndex="{Binding SelectedWidgetCollapsedStyleIndex, Mode=OneWay}"
+                                ItemsSource="{Binding AvailableWidgetCompactContentModeDisplayNames}"
+                                SelectedIndex="{Binding SelectedWidgetCompactContentModeIndex, Mode=OneWay}"
                                 SelectionChanged="SettingsComboBox_SelectionChanged"
-                                Tag="WidgetCollapsedStyle" />
+                                Tag="WidgetCompactContentMode" />
+                        </toolkit:SettingsCard>
+
+                        <toolkit:SettingsCard
+                            HorizontalContentAlignment="Right"
+                            IsEnabled="{Binding WidgetCapsuleModeEnabled}"
+                            svc:Localized.DescriptionKey="Settings.CompactPrivacy.Description"
+                            svc:Localized.HeaderKey="Settings.CompactPrivacy.Title">
+                            <toolkit:SettingsCard.HeaderIcon>
+                                <FontIcon Glyph="&#xE72E;" />
+                            </toolkit:SettingsCard.HeaderIcon>
+                            <ToggleSwitch
+                                MinWidth="0"
+                                OffContent=""
+                                OnContent=""
+                                IsOn="{Binding WidgetCompactHideSensitiveContent, Mode=TwoWay}" />
                         </toolkit:SettingsCard>
 
                         <toolkit:SettingsCard

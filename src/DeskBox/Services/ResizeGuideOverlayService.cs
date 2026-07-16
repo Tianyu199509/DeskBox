@@ -81,7 +81,11 @@ public sealed class ResizeGuideOverlayService
     /// the nearest target widget.
     /// Returns the (possibly snapped) bounds to apply.
     /// </summary>
-    public RectInt32 UpdateGuidesAndSnap(RectInt32 proposedBounds, string resizeDirection)
+    public RectInt32 UpdateGuidesAndSnap(
+        RectInt32 proposedBounds,
+        string resizeDirection,
+        int? minimumWidth = null,
+        int? maximumWidth = null)
     {
         if (!IsActive || !IsSnapEnabled)
         {
@@ -106,6 +110,19 @@ public sealed class ResizeGuideOverlayService
                 : proposedBounds.X;
 
             var (snapX, target) = FindSnapEdgeX(edgeX, proposedBounds, otherBounds);
+            if (snapX.HasValue)
+            {
+                int snappedWidth = checkRight
+                    ? snapX.Value - snapped.X
+                    : snapped.X + snapped.Width - snapX.Value;
+                bool widthAllowed = (!minimumWidth.HasValue || snappedWidth >= minimumWidth.Value) &&
+                    (!maximumWidth.HasValue || snappedWidth <= maximumWidth.Value);
+                if (!widthAllowed)
+                {
+                    snapX = null;
+                }
+            }
+
             if (snapX.HasValue)
             {
                 if (checkRight)

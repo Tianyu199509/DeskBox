@@ -212,10 +212,21 @@ public class AppSettings
     public bool WidgetCapsuleModeEnabled { get; set; }
 
     /// <summary>
+    /// Legacy combined compact style retained for settings migration.
+    /// </summary>
+    public string WidgetCollapsedStyle { get; set; } = "Smart";
+
+    /// <summary>
     /// Information density used by compact widgets.
     /// Valid values: <c>"Smart"</c>, <c>"Minimal"</c>, <c>"Summary"</c>.
     /// </summary>
-    public string WidgetCollapsedStyle { get; set; } = "Smart";
+    public string WidgetCompactContentMode { get; set; } = "Smart";
+
+    /// <summary>Whether compact Todo and Quick Capture widgets hide their content previews.</summary>
+    public bool WidgetCompactHideSensitiveContent { get; set; }
+
+    /// <summary>Schema version for compact content settings migrated from the legacy combined style.</summary>
+    public int WidgetCompactSettingsVersion { get; set; }
 
     /// <summary>
     /// Motion style used when compact widgets expand or collapse.

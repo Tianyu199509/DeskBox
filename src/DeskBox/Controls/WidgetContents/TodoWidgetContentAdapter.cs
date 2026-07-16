@@ -3,6 +3,7 @@ using DeskBox.Models;
 using DeskBox.Services;
 using DeskBox.ViewModels;
 using Microsoft.UI.Xaml;
+using Windows.ApplicationModel.DataTransfer;
 
 namespace DeskBox.Controls.WidgetContents;
 
@@ -86,6 +87,20 @@ public sealed class TodoWidgetContentAdapter : IWidgetContent, IWidgetAddActionC
         }
 
         return Task.CompletedTask;
+    }
+
+    internal Task<bool> CanImportExternalDropAsync(DataPackageView dataView)
+    {
+        return View is TodoWidgetContent todoContent
+            ? todoContent.CanImportExternalDropAsync(dataView)
+            : Task.FromResult(false);
+    }
+
+    internal Task<bool> ImportExternalDropAsync(DataPackageView dataView)
+    {
+        return View is TodoWidgetContent todoContent
+            ? todoContent.ImportExternalDropAsync(dataView)
+            : Task.FromResult(false);
     }
 
     public void Dispose()

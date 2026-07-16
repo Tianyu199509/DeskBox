@@ -389,6 +389,41 @@ public sealed class SettingsServiceTests : IDisposable
         Assert.Equal(SettingsService.MaxWidgetMaterialIntensity, service.Settings.WidgetMaterialIntensity);
     }
 
+    [Theory]
+    [InlineData(
+        SettingsService.WidgetCollapsedStylePill,
+        SettingsService.WidgetCompactContentModeSummary)]
+    [InlineData(
+        SettingsService.WidgetCollapsedStyleSmart,
+        SettingsService.WidgetCompactContentModeSmart)]
+    [InlineData(
+        SettingsService.WidgetCollapsedStyleSummary,
+        SettingsService.WidgetCompactContentModeSummary)]
+    [InlineData(
+        SettingsService.WidgetCollapsedStyleMinimal,
+        SettingsService.WidgetCompactContentModeMinimal)]
+    public async Task LoadAsync_MigratesLegacyCompactStyleIntoContentMode(
+        string legacyStyle,
+        string expectedContentMode)
+    {
+        var settings = new AppSettings
+        {
+            WidgetCollapsedStyle = legacyStyle,
+            WidgetCompactSettingsVersion = 0
+        };
+        await File.WriteAllTextAsync(
+            Path.Combine(_settingsRoot, "settings.json"),
+            JsonSerializer.Serialize(settings, s_jsonOptions));
+
+        var service = new SettingsService(_settingsRoot);
+        await service.LoadAsync();
+
+        Assert.Equal(expectedContentMode, service.Settings.WidgetCompactContentMode);
+        Assert.Equal(
+            SettingsService.CurrentWidgetCompactSettingsVersion,
+            service.Settings.WidgetCompactSettingsVersion);
+    }
+
     [Fact]
     public void ApplyDefaultPreferences_MatchesNewUserAppearanceDefaults()
     {
@@ -434,6 +469,7 @@ public sealed class SettingsServiceTests : IDisposable
         Assert.Equal(newUserDefaults.WidgetCapsuleModeEnabled, restoredDefaults.WidgetCapsuleModeEnabled);
         Assert.Equal(SettingsService.WidgetCompactAnimationSmooth, newUserDefaults.WidgetCompactAnimationEffect);
         Assert.Equal(newUserDefaults.WidgetCompactAnimationEffect, restoredDefaults.WidgetCompactAnimationEffect);
+        Assert.Equal(SettingsService.WidgetCompactContentModeSmart, restoredDefaults.WidgetCompactContentMode);
         Assert.Equal(SettingsService.WidgetTitleIconModeColor, newUserDefaults.WidgetTitleIconMode);
         Assert.Equal(newUserDefaults.WidgetTitleIconMode, restoredDefaults.WidgetTitleIconMode);
         Assert.Equal(SettingsService.WidgetBorderStyleThin, newUserDefaults.WidgetBorderStyle);

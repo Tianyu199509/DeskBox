@@ -85,7 +85,8 @@ public partial class SettingsViewModel
             SelectedWidgetLayerMode = SettingsService.WidgetLayerModeDynamic;
             WidgetCapsuleModeEnabled = false;
             SelectedWidgetCollapseBehavior = SettingsService.WidgetCollapseBehaviorClick;
-            SelectedWidgetCollapsedStyle = SettingsService.WidgetCollapsedStyleSmart;
+            SelectedWidgetCompactContentMode = SettingsService.WidgetCompactContentModeSmart;
+            WidgetCompactHideSensitiveContent = false;
             SelectedWidgetCompactAnimationEffect = SettingsService.WidgetCompactAnimationSmooth;
             WidgetCompactAnimationDurationMs = SettingsService.DefaultWidgetCompactAnimationDurationMs;
             WidgetCompactExpandDelayMs = SettingsService.DefaultWidgetCompactExpandDelayMs;

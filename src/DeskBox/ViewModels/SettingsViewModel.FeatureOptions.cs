@@ -684,16 +684,15 @@ public partial class SettingsViewModel
         _cachedWidgetCollapseBehaviorDisplayNames ??=
             AvailableWidgetCollapseBehaviors.Select(GetWidgetCollapseBehaviorDisplayName).ToArray();
 
-    public string[] AvailableWidgetCollapsedStyles { get; } =
+    public string[] AvailableWidgetCompactContentModes { get; } =
     [
-        SettingsService.WidgetCollapsedStylePill,
-        SettingsService.WidgetCollapsedStyleSmart,
-        SettingsService.WidgetCollapsedStyleSummary,
-        SettingsService.WidgetCollapsedStyleMinimal
+        SettingsService.WidgetCompactContentModeSmart,
+        SettingsService.WidgetCompactContentModeSummary,
+        SettingsService.WidgetCompactContentModeMinimal
     ];
-    public string[] AvailableWidgetCollapsedStyleDisplayNames =>
-        _cachedWidgetCollapsedStyleDisplayNames ??=
-            AvailableWidgetCollapsedStyles.Select(GetWidgetCollapsedStyleDisplayName).ToArray();
+    public string[] AvailableWidgetCompactContentModeDisplayNames =>
+        _cachedWidgetCompactContentModeDisplayNames ??=
+            AvailableWidgetCompactContentModes.Select(GetWidgetCompactContentModeDisplayName).ToArray();
     public string[] AvailableLayoutDensities { get; } =
     [
         SettingsService.LayoutDensityCompact,

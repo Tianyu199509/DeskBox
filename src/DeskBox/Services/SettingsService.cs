@@ -98,6 +98,10 @@ public sealed class SettingsService
     public const string WidgetCollapsedStyleSummary = "Summary";
     public const string WidgetCollapsedStyleSmart = "Smart";
     public const string WidgetCollapsedStylePill = "Pill";
+    public const string WidgetCompactContentModeMinimal = "Minimal";
+    public const string WidgetCompactContentModeSummary = "Summary";
+    public const string WidgetCompactContentModeSmart = "Smart";
+    public const int CurrentWidgetCompactSettingsVersion = 1;
     public const string WidgetCompactAnimationSmooth = "Smooth";
     public const string WidgetCompactAnimationSlow = "Slow";
     public const string WidgetCompactAnimationSnappy = "Snappy";
@@ -236,6 +240,9 @@ public const int WeatherRefreshMaxMinutes = 180;
         settings.WidgetCollapseBehavior = WidgetCollapseBehaviorClick;
         settings.WidgetCapsuleModeEnabled = false;
         settings.WidgetCollapsedStyle = WidgetCollapsedStyleSmart;
+        settings.WidgetCompactContentMode = WidgetCompactContentModeSmart;
+        settings.WidgetCompactHideSensitiveContent = false;
+        settings.WidgetCompactSettingsVersion = CurrentWidgetCompactSettingsVersion;
         settings.WidgetCompactAnimationEffect = WidgetCompactAnimationSmooth;
         settings.WidgetCompactAnimationDurationMs = DefaultWidgetCompactAnimationDurationMs;
         settings.WidgetCompactExpandDelayMs = DefaultWidgetCompactExpandDelayMs;
@@ -333,6 +340,8 @@ settings.FocusClickedWidgetOnRaise = false;
         {
             await MigrateLegacySettingsIfNeededAsync();
 
+            bool loadedFromDisk = false;
+
             if (File.Exists(_settingsPath))
             {
                 var json = await File.ReadAllTextAsync(_settingsPath);
@@ -340,12 +349,18 @@ settings.FocusClickedWidgetOnRaise = false;
                 if (loaded is not null)
                 {
                     lock (_lock) _settings = loaded;
+                    loadedFromDisk = true;
                 }
             }
 
             bool changed;
             lock (_lock)
             {
+                if (!loadedFromDisk)
+                {
+                    ApplyDefaultPreferences(_settings);
+                }
+
                 changed = NormalizePresentationSettings(_settings);
                 changed |= NormalizeAppearanceSettings(_settings);
                 changed |= NormalizeFeatureWidgetSettings(_settings);
@@ -738,6 +753,26 @@ changed |= NormalizeDeletionSettings(_settings);
             changed = true;
         }
 
+        if (settings.WidgetCompactSettingsVersion < CurrentWidgetCompactSettingsVersion)
+        {
+            settings.WidgetCompactContentMode = normalizedCollapsedStyle switch
+            {
+                WidgetCollapsedStyleMinimal => WidgetCompactContentModeMinimal,
+                WidgetCollapsedStyleSmart => WidgetCompactContentModeSmart,
+                _ => WidgetCompactContentModeSummary
+            };
+            settings.WidgetCompactSettingsVersion = CurrentWidgetCompactSettingsVersion;
+            changed = true;
+        }
+
+        string normalizedCompactContentMode = NormalizeWidgetCompactContentMode(
+            settings.WidgetCompactContentMode);
+        if (!string.Equals(settings.WidgetCompactContentMode, normalizedCompactContentMode, StringComparison.Ordinal))
+        {
+            settings.WidgetCompactContentMode = normalizedCompactContentMode;
+            changed = true;
+        }
+
         string normalizedCompactAnimation = NormalizeWidgetCompactAnimationEffect(settings.WidgetCompactAnimationEffect);
         if (!string.Equals(settings.WidgetCompactAnimationEffect, normalizedCompactAnimation, StringComparison.Ordinal))
         {
@@ -1015,6 +1050,18 @@ changed |= NormalizeDeletionSettings(_settings);
         return string.Equals(value, WidgetCollapsedStyleMinimal, StringComparison.OrdinalIgnoreCase)
             ? WidgetCollapsedStyleMinimal
             : WidgetCollapsedStyleSummary;
+    }
+
+    public static string NormalizeWidgetCompactContentMode(string? value)
+    {
+        if (string.Equals(value, WidgetCompactContentModeMinimal, StringComparison.OrdinalIgnoreCase))
+        {
+            return WidgetCompactContentModeMinimal;
+        }
+
+        return string.Equals(value, WidgetCompactContentModeSummary, StringComparison.OrdinalIgnoreCase)
+            ? WidgetCompactContentModeSummary
+            : WidgetCompactContentModeSmart;
     }
 
     public static string NormalizeWidgetCompactAnimationEffect(string? value)

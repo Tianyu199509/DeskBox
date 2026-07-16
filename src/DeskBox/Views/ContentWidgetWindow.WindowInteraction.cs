@@ -14,6 +14,7 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
+using Windows.ApplicationModel.DataTransfer;
 using Windows.Graphics;
 using WinRT;
 using WinRT.Interop;
@@ -22,6 +23,70 @@ namespace DeskBox.Views;
 
 public sealed partial class ContentWidgetWindow
 {
+    private async void RootGrid_DragOver(object sender, DragEventArgs e)
+    {
+        if (!IsCompactBoundsStateActive || CurrentContent is not TodoWidgetContentAdapter todo)
+        {
+            return;
+        }
+
+        var deferral = e.GetDeferral();
+        try
+        {
+            e.AcceptedOperation = await todo.CanImportExternalDropAsync(e.DataView)
+                ? DataPackageOperation.Copy
+                : DataPackageOperation.None;
+            e.DragUIOverride.IsGlyphVisible = false;
+            e.DragUIOverride.Caption = e.AcceptedOperation == DataPackageOperation.None
+                ? string.Empty
+                : App.Current.LocalizationService.T("Widget.Compact.TodoDropHint");
+            e.Handled = true;
+        }
+        finally
+        {
+            deferral.Complete();
+        }
+    }
+
+    private async void RootGrid_Drop(object sender, DragEventArgs e)
+    {
+        if (!IsCompactBoundsStateActive || CurrentContent is not TodoWidgetContentAdapter todo)
+        {
+            return;
+        }
+
+        var deferral = e.GetDeferral();
+        try
+        {
+            e.Handled = true;
+            e.AcceptedOperation = await todo.ImportExternalDropAsync(e.DataView)
+                ? DataPackageOperation.Copy
+                : DataPackageOperation.None;
+        }
+        finally
+        {
+            deferral.Complete();
+        }
+    }
+
+    private void RootGrid_KeyDown(object sender, KeyRoutedEventArgs e)
+    {
+        if (e.Handled || e.OriginalSource is DependencyObject source && HasAncestorOfType<TextBox>(source))
+        {
+            return;
+        }
+
+        if (TryHandleCompactActivation(e))
+        {
+            return;
+        }
+
+        if (e.Key == Windows.System.VirtualKey.Escape && TryHandleCompactEscape())
+        {
+            e.Handled = true;
+        }
+    }
+
     private void TitleBarGrid_PointerPressed(object sender, PointerRoutedEventArgs e)
     {
         var properties = e.GetCurrentPoint(ContentWidgetShell.TitleBar).Properties;

@@ -413,6 +413,11 @@ public sealed partial class QuickCaptureWidgetWindow
 
     private async void RootGrid_KeyDown(object sender, KeyRoutedEventArgs e)
     {
+        if (TryHandleCompactActivation(e))
+        {
+            return;
+        }
+
         if (e.Key == Windows.System.VirtualKey.Escape)
         {
             if (DetailPage.Visibility == Visibility.Visible)
@@ -443,10 +448,16 @@ public sealed partial class QuickCaptureWidgetWindow
             if (!string.IsNullOrEmpty(InputTextBox.Text))
             {
                 InputTextBox.Text = string.Empty;
+                RootGrid.Focus(FocusState.Programmatic);
+                e.Handled = true;
+                return;
             }
 
-            RootGrid.Focus(FocusState.Programmatic);
-            e.Handled = true;
+            if (TryHandleCompactEscape())
+            {
+                RootGrid.Focus(FocusState.Programmatic);
+                e.Handled = true;
+            }
         }
     }
 
@@ -460,6 +471,7 @@ public sealed partial class QuickCaptureWidgetWindow
         if (DeskBoxDragData.HasDroppedFiles(e.DataView))
         {
             e.AcceptedOperation = DataPackageOperation.Copy;
+            ApplyCompactQuickCaptureDropCaption(e);
             return;
         }
 
@@ -467,11 +479,23 @@ public sealed partial class QuickCaptureWidgetWindow
             e.DataView.Contains(StandardDataFormats.WebLink))
         {
             e.AcceptedOperation = DataPackageOperation.Copy;
+            ApplyCompactQuickCaptureDropCaption(e);
         }
         else
         {
             e.AcceptedOperation = DataPackageOperation.None;
         }
+    }
+
+    private void ApplyCompactQuickCaptureDropCaption(DragEventArgs e)
+    {
+        if (!IsCompactBoundsStateActive)
+        {
+            return;
+        }
+
+        e.DragUIOverride.IsGlyphVisible = false;
+        e.DragUIOverride.Caption = _localizationService.T("Widget.Compact.QuickCaptureDropHint");
     }
 
     private async void RootGrid_Drop(object sender, DragEventArgs e)

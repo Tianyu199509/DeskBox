@@ -110,12 +110,37 @@ public sealed partial class WidgetWindow : WidgetWindowBase, IDesktopWidgetWindo
 
     protected override DeskBox.Controls.WidgetCompactPresentation CreateCompactPresentation()
     {
+        string contentMode = SettingsService.NormalizeWidgetCompactContentMode(
+            _settingsService.Settings.WidgetCompactContentMode);
+        string itemCount = _localizationService.Format("Widget.Compact.FileCount", ViewModel.Items.Count);
+        string summary = contentMode switch
+        {
+            SettingsService.WidgetCompactContentModeMinimal => string.Empty,
+            SettingsService.WidgetCompactContentModeSmart => BuildSmartFileCompactSummary(itemCount),
+            _ => itemCount
+        };
+
+        WidgetItem? recentItem = GetMostRecentCompactFileItem();
         return new DeskBox.Controls.WidgetCompactPresentation(
             ViewModel.Name,
-            _localizationService.Format("Widget.Compact.FileCount", ViewModel.Items.Count),
+            summary,
             ViewModel.IconGlyph,
-            _localizationService.T("Widget.Compact.FileDropHint"));
+            _localizationService.T("Widget.Compact.FileDropHint"),
+            LiveStateKey: $"{ViewModel.Items.Count}|{recentItem?.Path ?? string.Empty}");
     }
+
+    private string BuildSmartFileCompactSummary(string itemCount)
+    {
+        WidgetItem? recentItem = GetMostRecentCompactFileItem();
+        return recentItem is null
+            ? itemCount
+            : $"{recentItem.Name} · {itemCount}";
+    }
+
+    private WidgetItem? GetMostRecentCompactFileItem() =>
+        ViewModel.Items
+            .Where(item => item.LastModified != default)
+            .MaxBy(item => item.LastModified) ?? ViewModel.Items.LastOrDefault();
 
     protected override void OnElevated()
     {

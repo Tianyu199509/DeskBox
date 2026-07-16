@@ -111,7 +111,7 @@ public sealed partial class SettingsWindow
                 "WidgetBorderColor" => ViewModel.SelectedWidgetBorderColorModeIndex,
                 "WidgetBorder" => ViewModel.SelectedWidgetBorderStyleIndex,
                 "WidgetCollapseBehavior" => ViewModel.SelectedWidgetCollapseBehaviorIndex,
-                "WidgetCollapsedStyle" => ViewModel.SelectedWidgetCollapsedStyleIndex,
+                "WidgetCompactContentMode" => ViewModel.SelectedWidgetCompactContentModeIndex,
                 "WidgetCompactAnimationEffect" => ViewModel.SelectedWidgetCompactAnimationEffectIndex,
                 "WidgetCompactMediaCornerMode" => ViewModel.SelectedWidgetCompactMediaCornerIndex,
                 "LayoutDensity" => ViewModel.SelectedLayoutDensityIndex,

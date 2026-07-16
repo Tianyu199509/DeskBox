@@ -172,11 +172,26 @@ public sealed partial class QuickCaptureWidgetWindow : WidgetWindowBase, IDeskto
 
     protected override WidgetCompactPresentation CreateCompactPresentation()
     {
+        string contentMode = SettingsService.NormalizeWidgetCompactContentMode(
+            _settingsService.Settings.WidgetCompactContentMode);
+        string summary = contentMode switch
+        {
+            SettingsService.WidgetCompactContentModeMinimal => string.Empty,
+            SettingsService.WidgetCompactContentModeSmart
+                when !_settingsService.Settings.WidgetCompactHideSensitiveContent =>
+                ViewModel.Items.FirstOrDefault()?.DisplayText?.ReplaceLineEndings(" ").Trim() ??
+                _localizationService.Format("Widget.Compact.QuickCaptureCount", ViewModel.RecordCount),
+            _ => _localizationService.Format("Widget.Compact.QuickCaptureCount", ViewModel.RecordCount)
+        };
+
         return new WidgetCompactPresentation(
             ViewModel.DisplayName,
-            _localizationService.Format("Widget.Compact.QuickCaptureCount", ViewModel.RecordCount),
+            summary,
             "\uE70F",
-            _localizationService.T("Widget.Compact.QuickCaptureDropHint"));
+            _localizationService.T("Widget.Compact.QuickCaptureDropHint"),
+            UseStackedText: contentMode == SettingsService.WidgetCompactContentModeSmart &&
+                !_settingsService.Settings.WidgetCompactHideSensitiveContent,
+            LiveStateKey: $"{ViewModel.RecordCount}|{summary}");
     }
 
     protected override void OnElevated()

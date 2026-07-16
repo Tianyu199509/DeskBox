@@ -5,6 +5,7 @@ namespace DeskBox.ViewModels;
 public partial class SettingsViewModel
 {
     private bool _widgetCapsuleModeEnabled;
+    private bool _widgetCompactHideSensitiveContent;
     private string _selectedWidgetCompactAnimationEffect = SettingsService.WidgetCompactAnimationSmooth;
     private string _selectedWidgetCompactMediaCornerMode = SettingsService.WidgetCompactMediaCornerFollowWidget;
     private double _widgetCompactAnimationDurationMs = SettingsService.DefaultWidgetCompactAnimationDurationMs;
@@ -43,6 +44,26 @@ public partial class SettingsViewModel
     public bool IsSmartWidgetCollapseBehavior =>
         WidgetCapsuleModeEnabled &&
         SelectedWidgetCollapseBehavior == SettingsService.WidgetCollapseBehaviorSmart;
+
+    public bool WidgetCompactHideSensitiveContent
+    {
+        get => _widgetCompactHideSensitiveContent;
+        set
+        {
+            if (!SetProperty(ref _widgetCompactHideSensitiveContent, value))
+            {
+                return;
+            }
+
+            if (_isRestoringDefaults || _isApplyingSettingsSnapshot)
+            {
+                return;
+            }
+
+            _settingsService.Settings.WidgetCompactHideSensitiveContent = value;
+            _settingsService.SaveDebounced();
+        }
+    }
 
     public string[] AvailableWidgetCompactAnimationEffects { get; } =
     [

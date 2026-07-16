@@ -305,8 +305,7 @@ public abstract partial class WidgetWindowBase
 
         return IsWidgetCollapsedBoundsActive
             ? WidgetCompactBoundsCalculator.ResolveOuterCornerRadius(
-                SettingsService.Settings.WidgetCornerPreference,
-                SettingsService.Settings.WidgetCollapsedStyle)
+                SettingsService.Settings.WidgetCornerPreference)
             : GetCornerRadiusFromPreference();
     }
 

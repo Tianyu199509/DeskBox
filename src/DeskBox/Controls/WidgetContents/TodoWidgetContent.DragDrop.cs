@@ -578,21 +578,40 @@ public sealed partial class TodoWidgetContent
         var deferral = e.GetDeferral();
         try
         {
-            if (DeskBoxDragData.HasDroppedFiles(e.DataView))
+            e.AcceptedOperation = await ImportExternalDropAsync(e.DataView)
+                ? DataPackageOperation.Copy
+                : DataPackageOperation.None;
+        }
+        finally
+        {
+            deferral.Complete();
+            ResetTodoReorderVisualState();
+        }
+    }
+
+    internal async Task<bool> CanImportExternalDropAsync(DataPackageView dataView)
+    {
+        return DeskBoxDragData.HasDroppedFiles(dataView) ||
+            await HasDroppedTodoTextAsync(dataView);
+    }
+
+    internal async Task<bool> ImportExternalDropAsync(DataPackageView dataView)
+    {
+        try
+        {
+            if (DeskBoxDragData.HasDroppedFiles(dataView))
             {
-                using DroppedFileBatch batch = await DeskBoxDragData.TryGetDroppedFilesAsync(e.DataView);
+                using DroppedFileBatch batch = await DeskBoxDragData.TryGetDroppedFilesAsync(dataView);
                 if (batch.Files.Count == 0 || ViewModel is null)
                 {
-                    string? fallbackText = await TryGetDroppedTodoTextAsync(e.DataView);
+                    string? fallbackText = await TryGetDroppedTodoTextAsync(dataView);
                     if (string.IsNullOrWhiteSpace(fallbackText) || ViewModel is null)
                     {
-                        e.AcceptedOperation = DataPackageOperation.None;
-                        return;
+                        return false;
                     }
 
                     await ViewModel.AddItemAsync(fallbackText);
-                    e.AcceptedOperation = DataPackageOperation.Copy;
-                    return;
+                    return true;
                 }
 
                 TodoItemViewModel? targetItem = ViewModel.IsDetailPageOpen
@@ -600,14 +619,10 @@ public sealed partial class TodoWidgetContent
                     : await ViewModel.AddItemAsync(BuildDroppedTodoTitle(batch.Files));
                 if (targetItem is null)
                 {
-                    e.AcceptedOperation = DataPackageOperation.None;
-                    return;
+                    return false;
                 }
 
                 int addedCount = await ViewModel.AddDroppedAttachmentsAsync(targetItem.Id, batch.Files);
-                e.AcceptedOperation = addedCount > 0
-                    ? DataPackageOperation.Copy
-                    : DataPackageOperation.None;
                 if (addedCount > 0)
                 {
                     ShowUndoToast(
@@ -615,14 +630,14 @@ public sealed partial class TodoWidgetContent
                         durationMs: CopyToastMs,
                         clearUndoOnHide: false);
                 }
-                return;
+
+                return addedCount > 0;
             }
 
-            string? text = await TryGetDroppedTodoTextAsync(e.DataView);
+            string? text = await TryGetDroppedTodoTextAsync(dataView);
             if (string.IsNullOrWhiteSpace(text) || ViewModel is null)
             {
-                e.AcceptedOperation = DataPackageOperation.None;
-                return;
+                return false;
             }
 
             await ViewModel.AddItemAsync(text);
@@ -630,19 +645,19 @@ public sealed partial class TodoWidgetContent
                 App.Current.LocalizationService.T("Todo.Dropped"),
                 durationMs: CopyToastMs,
                 clearUndoOnHide: false);
-            e.AcceptedOperation = DataPackageOperation.Copy;
+            return true;
         }
         catch (Exception ex)
         {
-            App.Log($"[Todo] Failed to import dropped text: {ex}");
+            App.Log($"[Todo] Failed to import dropped content: {ex}");
             ShowUndoToast(
                 App.Current.LocalizationService.T("Todo.DropFailed"),
                 durationMs: UndoToastMs,
                 clearUndoOnHide: false);
+            return false;
         }
         finally
         {
-            deferral.Complete();
             ResetTodoReorderVisualState();
         }
     }
