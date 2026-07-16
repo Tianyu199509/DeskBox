@@ -166,18 +166,9 @@ public sealed partial class ContentWidgetWindow
             return;
         }
 
-        var shape = _config.IsSizeLocked
-            ? InputSystemCursorShape.Arrow
-            : element is FrameworkElement frameworkElement
-                ? frameworkElement.Tag switch
-                {
-                    "Left" or "Right" => InputSystemCursorShape.SizeWestEast,
-                    "Top" or "Bottom" => InputSystemCursorShape.SizeNorthSouth,
-                    "TopLeft" or "BottomRight" => InputSystemCursorShape.SizeNorthwestSoutheast,
-                    "TopRight" or "BottomLeft" => InputSystemCursorShape.SizeNortheastSouthwest,
-                    _ => InputSystemCursorShape.Arrow
-                }
-                : InputSystemCursorShape.Arrow;
+        var shape = element is FrameworkElement frameworkElement
+            ? GetResizeCursorShapeForCurrentState(frameworkElement.Tag as string)
+            : InputSystemCursorShape.Arrow;
 
         var property = typeof(UIElement).GetProperty(
             "ProtectedCursor",

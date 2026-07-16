@@ -21,6 +21,8 @@ namespace DeskBox.Views;
 
 public abstract partial class WidgetWindowBase
 {
+    private AcrylicBrush? _compactBackdropBrush;
+
     protected void ApplyBackdropPreference()
     {
         if (HWnd == IntPtr.Zero || IsClosing)
@@ -31,6 +33,12 @@ public abstract partial class WidgetWindowBase
         if (IsBackdropSuppressedForTrayReveal)
         {
             ApplySurfaceStyle();
+            return;
+        }
+
+        if (IsWidgetCollapsed && !_isCollapseAnimationRendering)
+        {
+            ApplyCompactBackdropPreference();
             return;
         }
 
@@ -107,6 +115,62 @@ public abstract partial class WidgetWindowBase
         ApplySurfaceStyle();
     }
 
+    private void ApplyCompactBackdropPreference()
+    {
+        bool isDark = RootElement.ActualTheme == ElementTheme.Dark;
+        string materialType = SettingsService.Settings.WidgetMaterialType;
+        var tintColor = BuildNativeBackdropTintColor(isDark);
+
+        Win32Helper.SetWindowTheme(HWnd, isDark);
+        ApplyDwmBorderStyle(isDark);
+        DetachAcrylicControllerTarget();
+        DetachMicaControllerTarget();
+        int backdropType = Win32Helper.DWMSBT_NONE;
+        Win32Helper.DwmSetWindowAttribute(
+            HWnd,
+            Win32Helper.DWMWA_SYSTEMBACKDROP_TYPE,
+            ref backdropType,
+            sizeof(int));
+        Win32Helper.DisableAccentPolicy(HWnd);
+
+        ApplySurfaceStyle();
+        ApplyCompactBorderVisuals(isDark);
+        if (materialType == SettingsService.WidgetMaterialTypeSolid)
+        {
+            return;
+        }
+
+        try
+        {
+            _compactBackdropBrush ??= new AcrylicBrush
+            {
+                AlwaysUseFallback = false
+            };
+
+            double intensity = NormalizeMaterialIntensity(SettingsService.Settings.WidgetMaterialIntensity);
+            bool strongerMaterial = materialType is
+                SettingsService.WidgetMaterialTypeMicaAlt or
+                SettingsService.WidgetMaterialTypeAcrylicBase;
+            _compactBackdropBrush.TintColor = tintColor;
+            _compactBackdropBrush.FallbackColor = tintColor;
+            _compactBackdropBrush.TintOpacity = Math.Clamp(
+                (strongerMaterial ? 0.62 : 0.42) + (intensity * 0.18),
+                0.2,
+                0.88);
+            _compactBackdropBrush.Opacity = SettingsService.SupportsWidgetOpacity(materialType)
+                ? Math.Clamp(WidgetOpacity, 0.0, 1.0)
+                : 1.0;
+            WidgetShellControl.BackgroundSurface.Background = _compactBackdropBrush;
+        }
+        catch (Exception ex)
+        {
+            App.Log($"[CompactBackdrop] HostBackdrop fallback: {ex}");
+            WidgetShellControl.BackgroundSurface.Background = GetOrUpdateSolidColorBrush(
+                WidgetShellControl.BackgroundSurface.Background,
+                tintColor);
+        }
+    }
+
     protected static SolidColorBrush GetOrUpdateSolidColorBrush(Brush? current, Windows.UI.Color color)
     {
         if (current is SolidColorBrush brush && MutableBrushes.TryGetValue(brush, out _))
@@ -164,6 +228,18 @@ public abstract partial class WidgetWindowBase
             green,
             blue);
         return (thickness, borderColor, dividerColor);
+    }
+
+    private void ApplyCompactBorderVisuals(bool? isDarkOverride = null)
+    {
+        bool isDark = isDarkOverride ?? RootElement.ActualTheme == ElementTheme.Dark;
+        var accentColor = App.Current.ThemeService?.GetEffectiveAccentColor()
+            ?? AccentColorHelper.DefaultAccentColor;
+        var (borderThickness, borderColor, _) = GetWidgetBorderVisuals(isDark, accentColor);
+
+        var surface = WidgetShellControl.BackgroundSurface;
+        surface.BorderThickness = new Thickness(borderThickness);
+        surface.BorderBrush = GetOrUpdateSolidColorBrush(surface.BorderBrush, borderColor);
     }
 
     protected void ScheduleInactiveBackdropControllerCleanup(string materialType)

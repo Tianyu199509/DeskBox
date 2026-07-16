@@ -154,7 +154,7 @@ public sealed partial class WidgetWindow
     public void PrepareTrayShowAnimation()
     {
         _trayAnimation.NextGeneration();
-        _trayAnimation.Stop();
+        _trayAnimation.StopAndRestoreWindowPosition();
         RestoreItemContainerTransitions();
         SuppressItemContainerTransitions();
         _isHideAnimationRunning = false;
@@ -196,7 +196,6 @@ public sealed partial class WidgetWindow
         }
 
         LogTrayWindow($"PlayShow gen={animationGeneration} durationMs={animationProfile.DurationMs}");
-        _trayAnimation.PrepareVisualState(animationProfile.ShowOffsetX, animationProfile.ShowOffsetY, animationProfile.ShowStartOpacity, animationProfile.ShowStartScale);
         _trayAnimation.Animate(
             animationProfile.ShowOffsetX,
             animationProfile.ShowOffsetY,
@@ -235,7 +234,7 @@ public sealed partial class WidgetWindow
         }
 
         _trayAnimation.NextGeneration();
-        _trayAnimation.Stop();
+        _trayAnimation.StopAndRestoreWindowPosition();
         RestoreNativeBackdropAfterTrayReveal();
         RestoreItemContainerTransitions();
         SuppressItemContainerTransitions();

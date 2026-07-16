@@ -97,15 +97,25 @@ public sealed partial class WidgetWindow : WidgetWindowBase, IDesktopWidgetWindo
 
     public override WidgetConfig Config => ViewModel.Config;
 
-    public Windows.Foundation.Rect AnimationBounds => Diagnostics.AnimationBounds;
+    public Windows.Foundation.Rect AnimationBounds => GetCurrentAnimationBounds();
 
     // ── WidgetWindowBase abstract overrides ────────────────────
     protected override double WidgetOpacity => ViewModel.WidgetOpacity;
     protected override FrameworkElement RootElement => RootGrid;
+    protected override DeskBox.Controls.WidgetShell WidgetShellControl => FileWidgetShell;
     protected override string LogPrefix => "Widget";
     protected override bool IsSizeLocked => ViewModel.IsSizeLocked;
     protected override bool IsPositionLocked => ViewModel.IsPositionLocked;
     protected override bool IsBackdropSuppressedForTrayReveal => _isNativeBackdropSuppressedForTrayReveal;
+
+    protected override DeskBox.Controls.WidgetCompactPresentation CreateCompactPresentation()
+    {
+        return new DeskBox.Controls.WidgetCompactPresentation(
+            ViewModel.Name,
+            _localizationService.Format("Widget.Compact.FileCount", ViewModel.Items.Count),
+            ViewModel.IconGlyph,
+            _localizationService.T("Widget.Compact.FileDropHint"));
+    }
 
     protected override void OnElevated()
     {
@@ -195,7 +205,7 @@ public sealed partial class WidgetWindow : WidgetWindowBase, IDesktopWidgetWindo
             RootGrid,
             DispatcherQueue,
             HWnd,
-            () => Diagnostics.AnimationBounds,
+            GetCurrentAnimationBounds,
             LogTrayWindow);
 
         ConfigureWindow();
@@ -236,6 +246,7 @@ public sealed partial class WidgetWindow : WidgetWindowBase, IDesktopWidgetWindo
         {
             _isClosing = true;
             Visible = false;
+            CleanupWidgetCollapse();
             WidgetLayerService.ReleaseWindow(_hWnd);
             _settingsService.SettingsChanged -= OnSettingsChanged;
             _localizationService.LanguageChanged -= OnLanguageChanged;
@@ -295,7 +306,7 @@ public sealed partial class WidgetWindow : WidgetWindowBase, IDesktopWidgetWindo
             return false;
         }
 
-        var bounds = WidgetPositioningService.ResolveBoundsForCurrentTopology(ViewModel.Config);
+        var bounds = ResolveWidgetBoundsForCurrentState();
         var position = _appWindow.Position;
         var size = _appWindow.Size;
         if (position.X == bounds.X &&
@@ -312,6 +323,7 @@ public sealed partial class WidgetWindow : WidgetWindowBase, IDesktopWidgetWindo
 
     private bool RestoreBoundsAfterDisplayChange()
     {
+        InvalidateStableCompactBounds();
         // For hidden windows: update config coordinates to the correct screen
         // without actually moving the window. This ensures the widget appears
         // in the right place when it is next shown.
@@ -364,8 +376,21 @@ public sealed partial class WidgetWindow : WidgetWindowBase, IDesktopWidgetWindo
         ToolTipService.SetToolTip(AddButton, _localizationService.T("Widget.Tooltip.Add"));
         ToolTipService.SetToolTip(MoreButton, _localizationService.T("Widget.Tooltip.More"));
         ToolTipService.SetToolTip(CloseButton, _localizationService.T("Widget.Tooltip.DeleteWidget"));
+        ToolTipService.SetToolTip(CollapseWidgetButton, _localizationService.T("Widget.Compact.Collapse"));
         MigrationTitleText.Text = _localizationService.T("Widget.Migration.Title");
         MigrationDescriptionText.Text = _localizationService.T("Widget.Migration.Description");
+    }
+
+    protected override void OnCollapseBehaviorChanged(WidgetCollapseBehavior behavior)
+    {
+        CollapseWidgetButton.Visibility = behavior == WidgetCollapseBehavior.Expanded
+            ? Visibility.Collapsed
+            : Visibility.Visible;
+    }
+
+    private void CollapseWidgetButton_Click(object sender, RoutedEventArgs e)
+    {
+        CollapseWidgetFromHost();
     }
 
     public void ApplyAppearancePreview()
@@ -618,14 +643,36 @@ public sealed partial class WidgetWindow : WidgetWindowBase, IDesktopWidgetWindo
 
     private void ApplyWindowBounds(int x, int y, int width, int height, bool persist, bool updateConfig = true)
     {
-        var minSize = GetPhysicalMinimumWindowSize(x, y, width, height);
-        width = Math.Max(minSize.Width, width);
-        height = Math.Max(minSize.Height, height);
+        if (!IsCompactBoundsStateActive)
+        {
+            var minSize = GetPhysicalMinimumWindowSize(x, y, width, height);
+            width = Math.Max(minSize.Width, width);
+            height = Math.Max(minSize.Height, height);
+        }
 
         _isApplyingBounds = true;
         try
         {
-            _appWindow.MoveAndResize(new Windows.Graphics.RectInt32(x, y, width, height));
+            var bounds = new Windows.Graphics.RectInt32(x, y, width, height);
+            if (IsCompactBoundsStateActive)
+            {
+                bool moved = Win32Helper.SetWindowPos(
+                    _hWnd,
+                    IntPtr.Zero,
+                    bounds.X,
+                    bounds.Y,
+                    bounds.Width,
+                    bounds.Height,
+                    Win32Helper.SWP_NOZORDER | Win32Helper.SWP_NOACTIVATE);
+                if (!moved)
+                {
+                    _appWindow.MoveAndResize(bounds);
+                }
+            }
+            else
+            {
+                _appWindow.MoveAndResize(bounds);
+            }
         }
         finally
         {
@@ -651,16 +698,44 @@ public sealed partial class WidgetWindow : WidgetWindowBase, IDesktopWidgetWindo
             new Windows.Graphics.RectInt32(x, y, Math.Max(1, width), Math.Max(1, height)));
     }
 
-    private void CapturePositionAnchor(int x, int y, int width, int height)
+    private void CapturePositionAnchor(
+        int x,
+        int y,
+        int width,
+        int height,
+        bool preserveCurrentEdge = false)
     {
         var bounds = new Windows.Graphics.RectInt32(x, y, width, height);
+        if (IsCompactBoundsStateActive)
+        {
+            CaptureCompactPlacement(bounds, persist: false);
+            return;
+        }
+
         var workArea = DisplayArea.GetFromRect(bounds, DisplayAreaFallback.Nearest).WorkArea;
         ViewModel.Config.BoundsCoordinateVersion = WidgetConfig.CurrentBoundsCoordinateVersion;
-        WidgetPositioningService.CaptureAnchor(ViewModel.Config, bounds, workArea);
+        if (preserveCurrentEdge)
+        {
+            WidgetPositioningService.CaptureAnchorPreservingCurrentEdge(ViewModel.Config, bounds, workArea);
+        }
+        else
+        {
+            WidgetPositioningService.CaptureAnchor(ViewModel.Config, bounds, workArea);
+        }
     }
 
     protected override void UpdateConfigBoundsFromPhysical(int x, int y, int width, int height, bool persist)
     {
+        if (IsCompactBoundsStateActive)
+        {
+            if (persist)
+            {
+                SettingsService.UpdateWidget(ViewModel.Config, notifySubscribers: false);
+                SettingsService.SaveDebounced(notifySubscribers: false);
+            }
+            return;
+        }
+
         var bounds = new Windows.Graphics.RectInt32(x, y, width, height);
         var workArea = DisplayArea.GetFromRect(bounds, DisplayAreaFallback.Nearest).WorkArea;
         WidgetPositioningService.UpdateConfigFromPhysicalBounds(ViewModel.Config, bounds, workArea);
@@ -680,6 +755,7 @@ public sealed partial class WidgetWindow : WidgetWindowBase, IDesktopWidgetWindo
     private void ViewModel_ItemsCollectionChanged(object? sender, System.Collections.Specialized.NotifyCollectionChangedEventArgs e)
     {
         QueueEmptyStateUpdate();
+        RefreshCompactPresentation();
     }
 
     private void QueueEmptyStateUpdate()
@@ -699,6 +775,7 @@ public sealed partial class WidgetWindow : WidgetWindowBase, IDesktopWidgetWindo
 
     private void BeginInteractionLayer(string reason, bool elevate = true)
     {
+        BeginCompactInteraction();
         App.Current.WidgetManager?.BeginWidgetInteraction(reason);
         if (elevate)
         {
@@ -708,6 +785,7 @@ public sealed partial class WidgetWindow : WidgetWindowBase, IDesktopWidgetWindo
 
     private void ReleaseInteractionLayer(string reason)
     {
+        EndCompactInteraction();
         App.Current.WidgetManager?.EndWidgetInteraction(reason);
         if (App.Current.WidgetManager?.RequestRestoreRaisedWidgetsToDesktopLayer(reason) == true)
         {

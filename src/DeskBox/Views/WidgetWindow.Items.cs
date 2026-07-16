@@ -35,6 +35,8 @@ public sealed partial class WidgetWindow
             return;
         }
 
+        RefreshCompactPresentation();
+
         if (e.PropertyName is nameof(WidgetViewModel.IsLoading))
         {
             UpdateEmptyState();

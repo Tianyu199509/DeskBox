@@ -396,6 +396,8 @@ public sealed class SettingsServiceTests : IDisposable
         var restoredDefaults = new AppSettings
         {
             WidgetAnimationEffect = SettingsService.WidgetAnimationEffectFade,
+            WidgetCapsuleModeEnabled = true,
+            WidgetCompactAnimationEffect = SettingsService.WidgetCompactAnimationSnappy,
             WidgetTitleIconMode = SettingsService.WidgetTitleIconModeHidden,
             WidgetBorderStyle = SettingsService.WidgetBorderStyleThick,
             WidgetBorderColorMode = SettingsService.WidgetBorderColorModeNone,
@@ -428,6 +430,10 @@ public sealed class SettingsServiceTests : IDisposable
 
         Assert.Equal(SettingsService.WidgetAnimationEffectSlideFade, newUserDefaults.WidgetAnimationEffect);
         Assert.Equal(newUserDefaults.WidgetAnimationEffect, restoredDefaults.WidgetAnimationEffect);
+        Assert.False(newUserDefaults.WidgetCapsuleModeEnabled);
+        Assert.Equal(newUserDefaults.WidgetCapsuleModeEnabled, restoredDefaults.WidgetCapsuleModeEnabled);
+        Assert.Equal(SettingsService.WidgetCompactAnimationSmooth, newUserDefaults.WidgetCompactAnimationEffect);
+        Assert.Equal(newUserDefaults.WidgetCompactAnimationEffect, restoredDefaults.WidgetCompactAnimationEffect);
         Assert.Equal(SettingsService.WidgetTitleIconModeColor, newUserDefaults.WidgetTitleIconMode);
         Assert.Equal(newUserDefaults.WidgetTitleIconMode, restoredDefaults.WidgetTitleIconMode);
         Assert.Equal(SettingsService.WidgetBorderStyleThin, newUserDefaults.WidgetBorderStyle);

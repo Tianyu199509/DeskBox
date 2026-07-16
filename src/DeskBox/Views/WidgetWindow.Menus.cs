@@ -329,6 +329,10 @@ public sealed partial class WidgetWindow
             _chromeDescriptor,
             _localizationService,
             SetChromeModeOverride));
+        flyout.Items.Add(WidgetCollapseMenuBuilder.Create(
+            ViewModel.Config,
+            _localizationService,
+            SetCollapseBehaviorOverride));
 
         flyout.Items.Add(new MenuFlyoutSeparator());
 

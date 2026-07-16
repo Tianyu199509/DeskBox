@@ -4,6 +4,7 @@ using DeskBox.Controls.WidgetContents;
 using DeskBox.Helpers;
 using DeskBox.Models;
 using DeskBox.Services;
+using System.ComponentModel;
 using Microsoft.UI;
 using Microsoft.UI.Composition;
 using Microsoft.UI.Composition.SystemBackdrops;
@@ -35,6 +36,7 @@ public sealed partial class ContentWidgetWindow : WidgetWindowBase, IDesktopWidg
     private bool _isHidePrepared;
     private bool _isCommittingTitleRename;
     private bool _isCancellingTitleRename;
+    private INotifyPropertyChanged? _compactPresentationSource;
 
     private bool _isVisibleOnDesktop;
 
@@ -60,7 +62,7 @@ public sealed partial class ContentWidgetWindow : WidgetWindowBase, IDesktopWidg
             RootGrid,
             DispatcherQueue,
             HWnd,
-            () => Diagnostics.AnimationBounds,
+            GetCurrentAnimationBounds,
             LogTrayWindow);
         _contentHost = new WidgetShellContentHost(ContentWidgetShell);
 
@@ -85,13 +87,81 @@ public sealed partial class ContentWidgetWindow : WidgetWindowBase, IDesktopWidg
     public override WidgetConfig Config => _config;
     protected override double WidgetOpacity => SettingsService.Settings.WidgetOpacity;
     protected override FrameworkElement RootElement => RootGrid;
+    protected override WidgetShell WidgetShellControl => ContentWidgetShell;
     protected override string LogPrefix => "Content";
     protected override bool IsSizeLocked => _config.IsSizeLocked;
     protected override bool IsPositionLocked => _config.IsPositionLocked;
 
+    protected override WidgetCompactPresentation CreateCompactPresentation()
+    {
+        var localization = App.Current.LocalizationService;
+        return CurrentContent switch
+        {
+            TodoWidgetContentAdapter todo => new WidgetCompactPresentation(
+                _titleViewModel.DisplayName,
+                localization.Format(
+                    "Widget.Compact.TodoSummary",
+                    todo.ViewModel.TodayFilterCount,
+                    todo.ViewModel.Items.Count(item => item.IsOverdue)),
+                _descriptor.DefaultGlyph,
+                localization.T("Widget.Compact.TodoDropHint")),
+            MusicWidgetContentAdapter music => new WidgetCompactPresentation(
+                music.ViewModel.Title,
+                music.ViewModel.Artist,
+                _descriptor.DefaultGlyph,
+                string.Empty,
+                music.ViewModel.ThumbnailImage,
+                ShowMediaControls: true,
+                IsPlaying: music.ViewModel.IsPlaying,
+                CanGoPrevious: music.ViewModel.CanGoPrevious,
+                CanGoNext: music.ViewModel.CanGoNext),
+            WeatherWidgetContentAdapter weather => new WidgetCompactPresentation(
+                _titleViewModel.DisplayName,
+                $"{weather.ViewModel.CurrentTemperatureText} · {weather.ViewModel.CurrentDescription}".Trim(' ', '·'),
+                _descriptor.DefaultGlyph,
+                string.Empty),
+            _ => new WidgetCompactPresentation(
+                _titleViewModel.DisplayName,
+                string.Empty,
+                _descriptor.DefaultGlyph,
+                localization.T("Widget.Compact.DropHint"))
+        };
+    }
+
+    protected override Task OnCompactPreviousRequestedAsync()
+    {
+        return CurrentContent is MusicWidgetContentAdapter music
+            ? music.ViewModel.PreviousAsync()
+            : Task.CompletedTask;
+    }
+
+    protected override Task OnCompactPlayPauseRequestedAsync()
+    {
+        return CurrentContent is MusicWidgetContentAdapter music
+            ? music.ViewModel.TogglePlayPauseAsync()
+            : Task.CompletedTask;
+    }
+
+    protected override Task OnCompactNextRequestedAsync()
+    {
+        return CurrentContent is MusicWidgetContentAdapter music
+            ? music.ViewModel.NextAsync()
+            : Task.CompletedTask;
+    }
+
     protected override void UpdateConfigBoundsFromPhysical(
         int x, int y, int width, int height, bool persist)
     {
+        if (IsCompactBoundsStateActive)
+        {
+            if (persist)
+            {
+                SettingsService.UpdateWidget(_config, notifySubscribers: false);
+                SettingsService.SaveDebounced(notifySubscribers: false);
+            }
+            return;
+        }
+
         var bounds = new RectInt32(x, y, width, height);
         var workArea = DisplayArea.GetFromRect(bounds, DisplayAreaFallback.Nearest).WorkArea;
         WidgetPositioningService.UpdateConfigFromPhysicalBounds(_config, bounds, workArea);
@@ -154,7 +224,7 @@ public sealed partial class ContentWidgetWindow : WidgetWindowBase, IDesktopWidg
         ContentWidgetShell.BackgroundSurface.BorderBrush = GetOrUpdateSolidColorBrush(
             ContentWidgetShell.BackgroundSurface.BorderBrush,
             borderColor);
-        ContentWidgetShell.BackgroundSurface.CornerRadius = new CornerRadius(GetCornerRadiusFromPreference());
+        ContentWidgetShell.BackgroundSurface.CornerRadius = new CornerRadius(GetCurrentSurfaceCornerRadius());
         ContentWidgetShell.Divider.Background = GetOrUpdateSolidColorBrush(
             ContentWidgetShell.Divider.Background,
             dividerColor);
@@ -171,7 +241,7 @@ public sealed partial class ContentWidgetWindow : WidgetWindowBase, IDesktopWidg
 
     public IntPtr WindowHandle => HWnd;
     public WidgetWindowIdentity Identity => Diagnostics.Identity;
-    public Windows.Foundation.Rect AnimationBounds => Diagnostics.AnimationBounds;
+    public Windows.Foundation.Rect AnimationBounds => GetCurrentAnimationBounds();
 
     public new bool Visible
     {
@@ -209,7 +279,7 @@ public sealed partial class ContentWidgetWindow : WidgetWindowBase, IDesktopWidg
     public void PrepareTrayShowAnimation()
     {
         TrayAnimation.NextGeneration();
-        TrayAnimation.Stop();
+        TrayAnimation.StopAndRestoreWindowPosition();
         _isHidePrepared = false;
         IsHideAnimationRunning = false;
 
@@ -256,7 +326,7 @@ public sealed partial class ContentWidgetWindow : WidgetWindowBase, IDesktopWidg
         }
 
         TrayAnimation.NextGeneration();
-        TrayAnimation.Stop();
+        TrayAnimation.StopAndRestoreWindowPosition();
         IsHideAnimationRunning = true;
         _isHidePrepared = true;
         Visible = false;
@@ -365,12 +435,47 @@ public sealed partial class ContentWidgetWindow : WidgetWindowBase, IDesktopWidg
     {
         _titleViewModel.RefreshDisplayName();
         ApplyLocalizedTitleActionTooltips();
+        RefreshCompactPresentation();
     }
 
     private async Task LoadContentAsync(IWidgetContent content)
     {
         await _contentHost.SetContentAsync(content);
+        AttachCompactPresentationSource(content);
+        RefreshCompactPresentation();
         ApplyTitleActionButtonConfiguration();
+    }
+
+    private void AttachCompactPresentationSource(IWidgetContent content)
+    {
+        if (_compactPresentationSource is not null)
+        {
+            _compactPresentationSource.PropertyChanged -= CompactPresentationSource_PropertyChanged;
+        }
+
+        _compactPresentationSource = content switch
+        {
+            TodoWidgetContentAdapter todo => todo.ViewModel,
+            MusicWidgetContentAdapter music => music.ViewModel,
+            WeatherWidgetContentAdapter weather => weather.ViewModel,
+            _ => null
+        };
+
+        if (_compactPresentationSource is not null)
+        {
+            _compactPresentationSource.PropertyChanged += CompactPresentationSource_PropertyChanged;
+        }
+    }
+
+    private void CompactPresentationSource_PropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (!DispatcherQueue.HasThreadAccess)
+        {
+            DispatcherQueue.TryEnqueue(RefreshCompactPresentation);
+            return;
+        }
+
+        RefreshCompactPresentation();
     }
 
     private void ApplyLocalizedTitleActionTooltips()
@@ -413,6 +518,11 @@ public sealed partial class ContentWidgetWindow : WidgetWindowBase, IDesktopWidg
             AppWindow.Changed -= OnAppWindowChanged;
             ContentWidgetShell.RightTapped -= ContentWidgetShell_RightTapped;
             ContentWidgetShell.TitleDoubleTapped -= ContentWidgetShell_TitleDoubleTapped;
+            if (_compactPresentationSource is not null)
+            {
+                _compactPresentationSource.PropertyChanged -= CompactPresentationSource_PropertyChanged;
+                _compactPresentationSource = null;
+            }
             try { CleanupBase(); } catch (Exception ex) { App.Log($"[ContentWidget] CleanupBase failed during close: {ex.Message}"); }
             try { _contentHost.DisposeContent(); } catch (Exception ex) { App.Log($"[ContentWidget] DisposeContent failed during close: {ex.Message}"); }
 

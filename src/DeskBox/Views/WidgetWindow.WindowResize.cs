@@ -39,21 +39,32 @@ public sealed partial class WidgetWindow
             return;
         }
 
+        string direction = element.Tag as string ?? string.Empty;
+        if (!CanResizeCurrentWidgetState(direction))
+        {
+            return;
+        }
+
         var properties = e.GetCurrentPoint(element).Properties;
         if (!properties.IsLeftButtonPressed)
         {
             return;
         }
 
+        BeginWidgetBoundsInteraction();
         _isResizing = true;
-        _resizeDirection = element.Tag as string ?? string.Empty;
+        _resizeDirection = direction;
         _displayChangeWatcher?.SuppressRestore();
         BeginInteractionLayer("file-resize-started");
         Win32Helper.GetCursorPos(out InitialCursorPt);
-        _initialWindowPos = _appWindow.Position;
-        _initialWindowSize = _appWindow.Size;
+        var initialBounds = GetActualWindowBounds();
+        _initialWindowPos = new Windows.Graphics.PointInt32(initialBounds.X, initialBounds.Y);
+        _initialWindowSize = new Windows.Graphics.SizeInt32(initialBounds.Width, initialBounds.Height);
         element.CapturePointer(e.Pointer);
-        App.Current.ResizeGuideOverlay.BeginResize(_hWnd, RootGrid);
+        if (!IsCompactBoundsStateActive)
+        {
+            App.Current.ResizeGuideOverlay.BeginResize(_hWnd, RootGrid);
+        }
         e.Handled = true;
     }
 
@@ -72,6 +83,26 @@ public sealed partial class WidgetWindow
         int newHeight = _initialWindowSize.Height;
         int newX = _initialWindowPos.X;
         int newY = _initialWindowPos.Y;
+
+        if (IsCompactBoundsStateActive)
+        {
+            var limits = GetCompactPhysicalWidthLimits();
+            if (_resizeDirection == "Right")
+            {
+                newWidth = Math.Clamp(_initialWindowSize.Width + deltaX, limits.MinWidth, limits.MaxWidth);
+            }
+            else if (_resizeDirection == "Left")
+            {
+                int rightEdge = _initialWindowPos.X + _initialWindowSize.Width;
+                newWidth = Math.Clamp(_initialWindowSize.Width - deltaX, limits.MinWidth, limits.MaxWidth);
+                newX = rightEdge - newWidth;
+            }
+
+            ApplyWindowBounds(newX, newY, newWidth, newHeight, persist: false);
+            e.Handled = true;
+            return;
+        }
+
         var minSize = GetPhysicalMinimumWindowSize(
             _initialWindowPos.X,
             _initialWindowPos.Y,
@@ -117,10 +148,8 @@ public sealed partial class WidgetWindow
         _resizeDirection = string.Empty;
         element.ReleasePointerCapture(e.Pointer);
         App.Current.ResizeGuideOverlay.EndResize();
-        var finalPosition = _appWindow.Position;
-        var finalSize = _appWindow.Size;
-        CapturePositionAnchor(finalPosition.X, finalPosition.Y, finalSize.Width, finalSize.Height);
-        UpdateConfigBoundsFromPhysical(finalPosition.X, finalPosition.Y, finalSize.Width, finalSize.Height, persist: true);
+        PersistCompletedWidgetResize(GetActualWindowBounds());
+        EndWidgetBoundsInteraction();
         ReleaseInteractionLayer("file-resize-ended");
         _displayChangeWatcher?.ResumeRestore();
         e.Handled = true;
@@ -137,10 +166,8 @@ public sealed partial class WidgetWindow
         _resizeDirection = string.Empty;
         _dragCaptureElement = null;
         App.Current?.ResizeGuideOverlay.EndResize();
-        var finalPosition = _appWindow.Position;
-        var finalSize = _appWindow.Size;
-        CapturePositionAnchor(finalPosition.X, finalPosition.Y, finalSize.Width, finalSize.Height);
-        UpdateConfigBoundsFromPhysical(finalPosition.X, finalPosition.Y, finalSize.Width, finalSize.Height, persist: true);
+        PersistCompletedWidgetResize(GetActualWindowBounds());
+        EndWidgetBoundsInteraction();
         ReleaseInteractionLayer("file-resize-capture-lost");
         _displayChangeWatcher?.ResumeRestore();
         QueueBackdropRefresh();
@@ -154,18 +181,9 @@ public sealed partial class WidgetWindow
             return;
         }
 
-        var shape = ViewModel.IsSizeLocked
-            ? InputSystemCursorShape.Arrow
-            : element is FrameworkElement frameworkElement
-                ? frameworkElement.Tag switch
-                {
-                    "Left" or "Right" => InputSystemCursorShape.SizeWestEast,
-                    "Top" or "Bottom" => InputSystemCursorShape.SizeNorthSouth,
-                    "TopLeft" or "BottomRight" => InputSystemCursorShape.SizeNorthwestSoutheast,
-                    "TopRight" or "BottomLeft" => InputSystemCursorShape.SizeNortheastSouthwest,
-                    _ => InputSystemCursorShape.Arrow
-                }
-                : InputSystemCursorShape.Arrow;
+        var shape = element is FrameworkElement frameworkElement
+            ? GetResizeCursorShapeForCurrentState(frameworkElement.Tag as string)
+            : InputSystemCursorShape.Arrow;
 
         var property = typeof(UIElement).GetProperty(
             "ProtectedCursor",

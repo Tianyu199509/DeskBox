@@ -80,6 +80,10 @@ public sealed partial class QuickCaptureWidgetWindow
             _chromeDescriptor,
             _localizationService,
             SetChromeModeOverride));
+        flyout.Items.Add(WidgetCollapseMenuBuilder.Create(
+            ViewModel.Config,
+            _localizationService,
+            SetCollapseBehaviorOverride));
         flyout.Items.Add(new MenuFlyoutSeparator());
 
         var renameItem = new MenuFlyoutItem

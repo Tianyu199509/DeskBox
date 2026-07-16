@@ -14,6 +14,8 @@ public sealed partial class WidgetTitleIcon : UserControl
 {
     private const double DesktopTitleIconScale = 1.3d;
     private string? _currentColorAssetName;
+    private double? _surfaceCornerRadiusOverride;
+    private bool _isCompactPresentation;
 
     public static readonly DependencyProperty GlyphProperty =
         DependencyProperty.Register(
@@ -102,6 +104,25 @@ public sealed partial class WidgetTitleIcon : UserControl
 
     public TextBlock TextLabelElement => LabelElement;
 
+    public void SetSurfaceCornerRadiusOverride(double? radius)
+    {
+        _surfaceCornerRadiusOverride = radius is { } value
+            ? Math.Max(0, value)
+            : null;
+        ApplySurfaceCornerRadiusOverride();
+    }
+
+    public void SetCompactPresentationMode(bool isCompact)
+    {
+        if (_isCompactPresentation == isCompact)
+        {
+            return;
+        }
+
+        _isCompactPresentation = isCompact;
+        UpdateVisualState();
+    }
+
     private static void OnAppearancePropertyChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
     {
         if (d is WidgetTitleIcon titleIcon)
@@ -170,6 +191,16 @@ public sealed partial class WidgetTitleIcon : UserControl
             default:
                 ApplyColorIcon(kind, iconSize);
                 break;
+        }
+
+        ApplySurfaceCornerRadiusOverride();
+    }
+
+    private void ApplySurfaceCornerRadiusOverride()
+    {
+        if (_surfaceCornerRadiusOverride is { } radius)
+        {
+            IconSurface.CornerRadius = new CornerRadius(radius);
         }
     }
 
@@ -317,6 +348,7 @@ public sealed partial class WidgetTitleIcon : UserControl
         LabelElement.Foreground = new SolidColorBrush(AccentColor);
         LabelElement.Visibility = Visibility.Visible;
         Visibility = Visibility.Visible;
+        ApplySurfaceCornerRadiusOverride();
     }
 
     private void ApplyTextLabel(WidgetTitleIconKind kind, double iconSize, Color accent)
@@ -327,15 +359,30 @@ public sealed partial class WidgetTitleIcon : UserControl
             label = CreateShortLabel(LabelText);
         }
 
+        if (_isCompactPresentation)
+        {
+            label = CreateShortLabel(label);
+        }
+
         double height = Math.Clamp(Math.Round(iconSize + 5), 20, 34);
         IconSurface.Width = double.NaN;
         IconSurface.Height = height;
-        IconSurface.MinWidth = Math.Clamp(Math.Round(iconSize + 22), 40, 66);
-        IconSurface.Padding = new Thickness(7, 0, 7, 1);
-        IconSurface.Background = new SolidColorBrush(WithAlpha(accent, IsDarkTheme() ? (byte)0x30 : (byte)0x1C));
-        IconSurface.BorderBrush = new SolidColorBrush(WithAlpha(accent, IsDarkTheme() ? (byte)0x66 : (byte)0x46));
-        IconSurface.BorderThickness = new Thickness(0.8);
-        IconSurface.CornerRadius = new CornerRadius(Math.Clamp(Math.Round(height * 0.32), 6, 9));
+        IconSurface.MinWidth = _isCompactPresentation
+            ? Math.Clamp(Math.Round(iconSize + 5), 20, 34)
+            : Math.Clamp(Math.Round(iconSize + 22), 40, 66);
+        IconSurface.Padding = _isCompactPresentation
+            ? new Thickness(0)
+            : new Thickness(7, 0, 7, 1);
+        IconSurface.Background = _isCompactPresentation
+            ? new SolidColorBrush(Colors.Transparent)
+            : new SolidColorBrush(WithAlpha(accent, IsDarkTheme() ? (byte)0x30 : (byte)0x1C));
+        IconSurface.BorderBrush = _isCompactPresentation
+            ? null
+            : new SolidColorBrush(WithAlpha(accent, IsDarkTheme() ? (byte)0x66 : (byte)0x46));
+        IconSurface.BorderThickness = _isCompactPresentation ? new Thickness(0) : new Thickness(0.8);
+        IconSurface.CornerRadius = _isCompactPresentation
+            ? new CornerRadius(0)
+            : new CornerRadius(Math.Clamp(Math.Round(height * 0.32), 6, 9));
 
         LabelElement.Text = label.Trim();
         LabelElement.FontSize = Math.Clamp(Math.Round(iconSize * 0.66), 10, 14);

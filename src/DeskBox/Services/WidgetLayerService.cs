@@ -103,6 +103,37 @@ public static class WidgetLayerService
         Win32Helper.BringWindowToFront(windowHandle);
     }
 
+    /// <summary>
+    /// Raises one widget above its peers without activating it. In desktop-pinned
+    /// mode the window remains attached to the desktop icon layer and only its
+    /// sibling order changes.
+    /// </summary>
+    public static void BringAbovePeerWidgets(IntPtr windowHandle)
+    {
+        if (UsesDesktopPinnedMode())
+        {
+            if (TryAttachToDesktopIconLayer(windowHandle))
+            {
+                Win32Helper.SetWindowPos(
+                    windowHandle,
+                    Win32Helper.HWND_TOP,
+                    0,
+                    0,
+                    0,
+                    0,
+                    Win32Helper.SWP_NOMOVE |
+                        Win32Helper.SWP_NOSIZE |
+                        Win32Helper.SWP_NOACTIVATE |
+                        Win32Helper.SWP_SHOWWINDOW);
+            }
+
+            return;
+        }
+
+        DetachFromDesktopIconLayerIfNeeded(windowHandle);
+        Win32Helper.BringWindowTemporarilyToFront(windowHandle);
+    }
+
     public static void BringGroupTemporarilyToFront(
         IReadOnlyList<IntPtr> windowHandles,
         IntPtr activeWindowHandle)

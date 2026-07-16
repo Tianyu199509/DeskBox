@@ -83,6 +83,14 @@ public partial class SettingsViewModel
             SelectedInteractiveWidgetChromeMode = SettingsService.WidgetChromeModeStandard;
             SelectedWidgetTitleIconMode = SettingsService.WidgetTitleIconModeColor;
             SelectedWidgetLayerMode = SettingsService.WidgetLayerModeDynamic;
+            WidgetCapsuleModeEnabled = false;
+            SelectedWidgetCollapseBehavior = SettingsService.WidgetCollapseBehaviorClick;
+            SelectedWidgetCollapsedStyle = SettingsService.WidgetCollapsedStyleSmart;
+            SelectedWidgetCompactAnimationEffect = SettingsService.WidgetCompactAnimationSmooth;
+            WidgetCompactAnimationDurationMs = SettingsService.DefaultWidgetCompactAnimationDurationMs;
+            WidgetCompactExpandDelayMs = SettingsService.DefaultWidgetCompactExpandDelayMs;
+            WidgetCompactCollapseDelayMs = SettingsService.DefaultWidgetCompactCollapseDelayMs;
+            SelectedWidgetCompactMediaCornerMode = SettingsService.WidgetCompactMediaCornerFollowWidget;
             WidgetOpacity = SettingsService.DefaultWidgetOpacity;
             IconSize = SettingsService.DefaultIconSize;
             TextSize = SettingsService.DefaultTextSize;

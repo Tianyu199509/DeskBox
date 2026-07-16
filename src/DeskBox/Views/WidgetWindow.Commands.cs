@@ -168,13 +168,15 @@ public sealed partial class WidgetWindow
 
     private void BeginWindowDrag(PointerRoutedEventArgs e, FrameworkElement captureElement, Win32Helper.POINT cursorPt)
     {
+        BeginWidgetBoundsInteraction();
         _isDragging = true;
         _hasMovedTitleBarDrag = false;
         _displayChangeWatcher?.SuppressRestore();
         ElevateForInteraction();
         _initialCursorPt = cursorPt;
-        _initialWindowPos = _appWindow.Position;
-        _initialWindowSize = _appWindow.Size;
+        var initialBounds = GetActualWindowBounds();
+        _initialWindowPos = new Windows.Graphics.PointInt32(initialBounds.X, initialBounds.Y);
+        _initialWindowSize = new Windows.Graphics.SizeInt32(initialBounds.Width, initialBounds.Height);
         _dragCaptureElement = captureElement;
         captureElement.CapturePointer(e.Pointer);
         e.Handled = true;
@@ -219,6 +221,7 @@ public sealed partial class WidgetWindow
             }
 
             _hasMovedTitleBarDrag = true;
+            FileWidgetShell.NotifyCompactDragMoved();
         }
 
         int newX = _initialWindowPos.X + deltaX;
@@ -257,11 +260,11 @@ public sealed partial class WidgetWindow
         App.Current?.ResizeGuideOverlay.EndDrag();
         if (hasMoved)
         {
-            var finalPosition = _appWindow.Position;
-            var finalSize = _appWindow.Size;
-            CapturePositionAnchor(finalPosition.X, finalPosition.Y, finalSize.Width, finalSize.Height);
-            UpdateConfigBoundsFromPhysical(finalPosition.X, finalPosition.Y, finalSize.Width, finalSize.Height, persist: true);
+            var finalBounds = GetActualWindowBounds();
+            CapturePositionAnchor(finalBounds.X, finalBounds.Y, finalBounds.Width, finalBounds.Height);
+            UpdateConfigBoundsFromPhysical(finalBounds.X, finalBounds.Y, finalBounds.Width, finalBounds.Height, persist: true);
         }
+        EndWidgetBoundsInteraction();
         ReleaseInteractionLayer("file-drag-capture-lost");
         _displayChangeWatcher?.ResumeRestore();
         _hasMovedTitleBarDrag = false;
@@ -285,13 +288,13 @@ public sealed partial class WidgetWindow
 
         if (_hasMovedTitleBarDrag)
         {
-            var finalPosition = _appWindow.Position;
-            var finalSize = _appWindow.Size;
-            CapturePositionAnchor(finalPosition.X, finalPosition.Y, finalSize.Width, finalSize.Height);
-            UpdateConfigBoundsFromPhysical(finalPosition.X, finalPosition.Y, finalSize.Width, finalSize.Height, persist: true);
+            var finalBounds = GetActualWindowBounds();
+            CapturePositionAnchor(finalBounds.X, finalBounds.Y, finalBounds.Width, finalBounds.Height);
+            UpdateConfigBoundsFromPhysical(finalBounds.X, finalBounds.Y, finalBounds.Width, finalBounds.Height, persist: true);
             ReleaseInteractionLayer("file-drag-ended");
         }
 
+        EndWidgetBoundsInteraction();
         _displayChangeWatcher?.ResumeRestore();
         _hasMovedTitleBarDrag = false;
         e.Handled = true;

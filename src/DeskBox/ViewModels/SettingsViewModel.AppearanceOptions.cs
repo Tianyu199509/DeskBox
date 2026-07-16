@@ -266,6 +266,69 @@ public partial class SettingsViewModel
     public string SelectedWidgetBorderStyleText => GetBorderStyleDisplayName(SelectedWidgetBorderStyle);
     public int SelectedWidgetBorderStyleIndex => Array.IndexOf(AvailableWidgetBorderStyles, _selectedWidgetBorderStyle);
 
+    public string SelectedWidgetCollapseBehavior
+    {
+        get => _selectedWidgetCollapseBehavior;
+        set
+        {
+            string normalized = SettingsService.NormalizeWidgetCollapseBehavior(value);
+            if (normalized == SettingsService.WidgetCollapseBehaviorExpanded)
+            {
+                normalized = SettingsService.WidgetCollapseBehaviorClick;
+            }
+            if (!SetProperty(ref _selectedWidgetCollapseBehavior, normalized))
+            {
+                return;
+            }
+
+            if (_isRestoringDefaults || _isApplyingSettingsSnapshot)
+            {
+                return;
+            }
+
+            _settingsService.Settings.WidgetCollapseBehavior = normalized;
+            _settingsService.SaveDebounced();
+            OnPropertyChanged(nameof(SelectedWidgetCollapseBehaviorText));
+            OnPropertyChanged(nameof(SelectedWidgetCollapseBehaviorIndex));
+            OnPropertyChanged(nameof(IsSmartWidgetCollapseBehavior));
+        }
+    }
+
+    public string SelectedWidgetCollapseBehaviorText =>
+        GetWidgetCollapseBehaviorDisplayName(SelectedWidgetCollapseBehavior);
+
+    public int SelectedWidgetCollapseBehaviorIndex =>
+        Array.IndexOf(AvailableWidgetCollapseBehaviors, _selectedWidgetCollapseBehavior);
+
+    public string SelectedWidgetCollapsedStyle
+    {
+        get => _selectedWidgetCollapsedStyle;
+        set
+        {
+            string normalized = SettingsService.NormalizeWidgetCollapsedStyle(value);
+            if (!SetProperty(ref _selectedWidgetCollapsedStyle, normalized))
+            {
+                return;
+            }
+
+            if (_isRestoringDefaults || _isApplyingSettingsSnapshot)
+            {
+                return;
+            }
+
+            _settingsService.Settings.WidgetCollapsedStyle = normalized;
+            _settingsService.SaveDebounced();
+            OnPropertyChanged(nameof(SelectedWidgetCollapsedStyleText));
+            OnPropertyChanged(nameof(SelectedWidgetCollapsedStyleIndex));
+        }
+    }
+
+    public string SelectedWidgetCollapsedStyleText =>
+        GetWidgetCollapsedStyleDisplayName(SelectedWidgetCollapsedStyle);
+
+    public int SelectedWidgetCollapsedStyleIndex =>
+        Array.IndexOf(AvailableWidgetCollapsedStyles, _selectedWidgetCollapsedStyle);
+
     public string SelectedLayoutDensity
     {
         get => _selectedLayoutDensity;

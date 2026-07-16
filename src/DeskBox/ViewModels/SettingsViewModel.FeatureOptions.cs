@@ -674,6 +674,26 @@ public partial class SettingsViewModel
 
     public string[] AvailableWidgetBorderStyles { get; } = [BorderThin, BorderMedium, BorderThick];
     public string[] AvailableWidgetBorderStyleDisplayNames => _cachedWidgetBorderStyleDisplayNames ??= AvailableWidgetBorderStyles.Select(GetBorderStyleDisplayName).ToArray();
+
+    public string[] AvailableWidgetCollapseBehaviors { get; } =
+    [
+        SettingsService.WidgetCollapseBehaviorClick,
+        SettingsService.WidgetCollapseBehaviorSmart
+    ];
+    public string[] AvailableWidgetCollapseBehaviorDisplayNames =>
+        _cachedWidgetCollapseBehaviorDisplayNames ??=
+            AvailableWidgetCollapseBehaviors.Select(GetWidgetCollapseBehaviorDisplayName).ToArray();
+
+    public string[] AvailableWidgetCollapsedStyles { get; } =
+    [
+        SettingsService.WidgetCollapsedStylePill,
+        SettingsService.WidgetCollapsedStyleSmart,
+        SettingsService.WidgetCollapsedStyleSummary,
+        SettingsService.WidgetCollapsedStyleMinimal
+    ];
+    public string[] AvailableWidgetCollapsedStyleDisplayNames =>
+        _cachedWidgetCollapsedStyleDisplayNames ??=
+            AvailableWidgetCollapsedStyles.Select(GetWidgetCollapsedStyleDisplayName).ToArray();
     public string[] AvailableLayoutDensities { get; } =
     [
         SettingsService.LayoutDensityCompact,

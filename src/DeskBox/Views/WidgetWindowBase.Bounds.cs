@@ -74,10 +74,12 @@ public abstract partial class WidgetWindowBase
         Win32Helper.EnsureSystemDispatcherQueue();
         Win32Helper.ApplyFullWindowFrame(HWnd);
         ApplyBackdropPreference();
+        InitializeWidgetCollapse();
 
         RootElement.Loaded += (_, _) =>
         {
             OnRootElementLoaded();
+            SettleCompactBoundsAfterHostShown();
             ApplyBackdropPreference();
             Win32Helper.ApplyFullWindowFrame(HWnd);
             if (SupportsBackdropRefresh)
@@ -96,14 +98,36 @@ public abstract partial class WidgetWindowBase
 
     protected void ApplyWindowBounds(int x, int y, int width, int height, bool persist, bool updateConfig = true)
     {
-        var minSize = GetPhysicalMinimumWindowSize(x, y, width, height);
-        width = Math.Max(minSize.Width, width);
-        height = Math.Max(minSize.Height, height);
+        if (!IsCompactBoundsStateActive)
+        {
+            var minSize = GetPhysicalMinimumWindowSize(x, y, width, height);
+            width = Math.Max(minSize.Width, width);
+            height = Math.Max(minSize.Height, height);
+        }
 
         IsApplyingBounds = true;
         try
         {
-            AppWindow.MoveAndResize(new RectInt32(x, y, width, height));
+            var bounds = new RectInt32(x, y, width, height);
+            if (IsCompactBoundsStateActive)
+            {
+                bool moved = Win32Helper.SetWindowPos(
+                    HWnd,
+                    IntPtr.Zero,
+                    bounds.X,
+                    bounds.Y,
+                    bounds.Width,
+                    bounds.Height,
+                    Win32Helper.SWP_NOZORDER | Win32Helper.SWP_NOACTIVATE);
+                if (!moved)
+                {
+                    AppWindow.MoveAndResize(bounds);
+                }
+            }
+            else
+            {
+                AppWindow.MoveAndResize(bounds);
+            }
         }
         finally
         {
@@ -129,9 +153,20 @@ public abstract partial class WidgetWindowBase
             new RectInt32(x, y, Math.Max(1, width), Math.Max(1, height)));
     }
 
-    protected void CapturePositionAnchor(int x, int y, int width, int height)
+    protected void CapturePositionAnchor(
+        int x,
+        int y,
+        int width,
+        int height,
+        bool preserveCurrentEdge = false)
     {
         var bounds = new RectInt32(x, y, width, height);
+        if (IsCompactBoundsStateActive)
+        {
+            CaptureCompactPlacement(bounds, persist: false);
+            return;
+        }
+
         // Use the window center point to determine the owning display.
         // This prevents incorrect anchor capture when the window straddles
         // two monitors during a cross-screen drag.
@@ -140,7 +175,14 @@ public abstract partial class WidgetWindowBase
             y + Math.Max(1, height) / 2);
         var workArea = DisplayArea.GetFromPoint(center, DisplayAreaFallback.Nearest).WorkArea;
         Config.BoundsCoordinateVersion = WidgetConfig.CurrentBoundsCoordinateVersion;
-        WidgetPositioningService.CaptureAnchor(Config, bounds, workArea);
+        if (preserveCurrentEdge)
+        {
+            WidgetPositioningService.CaptureAnchorPreservingCurrentEdge(Config, bounds, workArea);
+        }
+        else
+        {
+            WidgetPositioningService.CaptureAnchor(Config, bounds, workArea);
+        }
     }
 
     // ── Display change restoration ─────────────────────────────
@@ -157,18 +199,17 @@ public abstract partial class WidgetWindowBase
             return true;
         }
 
-        if (IsDragging || IsResizing || TrayAnimation.IsApplyingBounds)
+        if (IsDragging || IsResizing || TrayAnimation.IsPositionTransitionActive)
         {
             return false;
         }
 
-        var bounds = WidgetPositioningService.ResolveBoundsForCurrentTopology(Config);
-        var position = AppWindow.Position;
-        var size = AppWindow.Size;
-        if (position.X == bounds.X &&
-            position.Y == bounds.Y &&
-            size.Width == bounds.Width &&
-            size.Height == bounds.Height)
+        var bounds = ResolveWidgetBoundsForCurrentState();
+        RectInt32 actual = GetActualWindowBounds();
+        if (actual.X == bounds.X &&
+            actual.Y == bounds.Y &&
+            actual.Width == bounds.Width &&
+            actual.Height == bounds.Height)
         {
             return true;
         }
@@ -179,6 +220,7 @@ public abstract partial class WidgetWindowBase
 
     protected bool RestoreBoundsAfterDisplayChange()
     {
+        InvalidateStableCompactBounds();
         if (!Visible)
         {
             var bounds = WidgetPositioningService.ResolveBoundsForCurrentTopology(Config);
@@ -252,6 +294,20 @@ public abstract partial class WidgetWindowBase
             SettingsService.WidgetCornerPreferenceRound => 8,
             _ => 8
         };
+    }
+
+    protected double GetCurrentSurfaceCornerRadius()
+    {
+        if (_isCollapseAnimationRendering)
+        {
+            return WidgetShellControl.BackgroundSurface.CornerRadius.TopLeft;
+        }
+
+        return IsWidgetCollapsedBoundsActive
+            ? WidgetCompactBoundsCalculator.ResolveOuterCornerRadius(
+                SettingsService.Settings.WidgetCornerPreference,
+                SettingsService.Settings.WidgetCollapsedStyle)
+            : GetCornerRadiusFromPreference();
     }
 
     // ── Backdrop preference ────────────────────────────────────

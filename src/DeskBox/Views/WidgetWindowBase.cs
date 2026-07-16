@@ -1,5 +1,6 @@
 // Copyright (c) DeskBox. All rights reserved.
 
+using DeskBox.Controls;
 using DeskBox.Helpers;
 using DeskBox.Models;
 using DeskBox.Services;
@@ -101,6 +102,9 @@ public abstract partial class WidgetWindowBase : Window
     /// <summary>The root XAML element (typically RootGrid).</summary>
     protected abstract FrameworkElement RootElement { get; }
 
+    /// <summary>The shared chrome used to render expanded and compact widget states.</summary>
+    protected abstract WidgetShell WidgetShellControl { get; }
+
     /// <summary>Log prefix used in Z-order and backdrop log messages.</summary>
     protected abstract string LogPrefix { get; }
 
@@ -125,6 +129,9 @@ public abstract partial class WidgetWindowBase : Window
     /// <summary>Extra guards that block RestoreDesktopLayer (e.g. open flyouts).</summary>
     protected virtual bool HasBlockingFlyoutOpen() => false;
 
+    /// <summary>Allows hosts with custom title bars to update collapse actions.</summary>
+    protected virtual void OnCollapseBehaviorChanged(WidgetCollapseBehavior behavior) { }
+
     /// <summary>Called after elevation for interaction (e.g. set focus).</summary>
     protected virtual void OnElevated() { }
 
@@ -146,6 +153,36 @@ public abstract partial class WidgetWindowBase : Window
     /// <summary>Whether the native backdrop is temporarily suppressed for tray reveal animation.</summary>
     protected virtual bool IsBackdropSuppressedForTrayReveal => false;
 
+    protected Windows.Foundation.Rect GetCurrentAnimationBounds()
+    {
+        RectInt32 bounds = GetActualWindowBounds();
+        return new Windows.Foundation.Rect(
+            bounds.X,
+            bounds.Y,
+            bounds.Width,
+            bounds.Height);
+    }
+
+    protected RectInt32 GetActualWindowBounds()
+    {
+        if (HWnd != IntPtr.Zero && Win32Helper.GetWindowRect(HWnd, out var rect))
+        {
+            return new RectInt32(
+                rect.Left,
+                rect.Top,
+                Math.Max(1, rect.Right - rect.Left),
+                Math.Max(1, rect.Bottom - rect.Top));
+        }
+
+        PointInt32 position = AppWindow.Position;
+        SizeInt32 size = AppWindow.Size;
+        return new RectInt32(
+            position.X,
+            position.Y,
+            Math.Max(1, size.Width),
+            Math.Max(1, size.Height));
+    }
+
     /// <summary>Called during ConfigureWindow to install subclass-specific hooks (e.g. file drop subclass).</summary>
     protected virtual void ConfigureWindowExtra() { }
 
@@ -159,6 +196,7 @@ public abstract partial class WidgetWindowBase : Window
 
     protected void CleanupBase()
     {
+        CleanupWidgetCollapse();
         StopBackdropRefreshTimer();
         if (_inactiveBackdropCleanupTimer is not null)
         {

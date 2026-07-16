@@ -75,6 +75,17 @@ public class WidgetConfig
     /// <summary>Whether resizing this widget is locked.</summary>
     public bool IsSizeLocked { get; set; }
 
+    /// <summary>Whether this widget was manually left in its compact state.</summary>
+    public bool IsCollapsed { get; set; }
+
+    /// <summary>Independent persisted placement for the compact capsule.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public WidgetCompactPlacement? CompactPlacement { get; set; }
+
+    /// <summary>Optional user-adjusted compact capsule width in logical pixels.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public double? CompactWidth { get; set; }
+
     /// <summary>
     /// Optional widget-specific payload for future widget kinds.
     /// Stored as simple string values so the config remains easy to serialize and migrate.
@@ -103,6 +114,28 @@ public class WidgetConfig
 
     /// <summary>Ordered list of items displayed in this widget.</summary>
     public List<WidgetItemConfig> Items { get; set; } = [];
+}
+
+public sealed class WidgetCompactPlacement
+{
+    public double X { get; set; }
+
+    public double Y { get; set; }
+
+    public string? PositionAnchor { get; set; }
+
+    public double PositionMarginX { get; set; }
+
+    public double PositionMarginY { get; set; }
+
+    public string? PositionMonitorKey { get; set; }
+
+    public string? PositionMonitorDeviceName { get; set; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? PositionMonitorWasPrimary { get; set; }
+
+    public int BoundsCoordinateVersion { get; set; } = WidgetConfig.CurrentBoundsCoordinateVersion;
 }
 
 /// <summary>

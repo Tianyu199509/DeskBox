@@ -74,6 +74,27 @@ public sealed class WidgetPositioningServiceTests
     }
 
     [Fact]
+    public void CaptureAnchorPreservingCurrentEdge_DoesNotFlipTopAnchorAfterTallResize()
+    {
+        var config = new WidgetConfig
+        {
+            PositionAnchor = WidgetPositionAnchors.LeftTop,
+            BoundsCoordinateVersion = WidgetConfig.CurrentBoundsCoordinateVersion
+        };
+        var workArea = new RectInt32(0, 0, 1920, 1040);
+        var resizedBounds = new RectInt32(100, 80, 600, 900);
+
+        WidgetPositioningService.CaptureAnchorPreservingCurrentEdge(
+            config,
+            resizedBounds,
+            workArea);
+
+        Assert.Equal(WidgetPositionAnchors.LeftTop, config.PositionAnchor);
+        Assert.Equal(100, config.PositionMarginX);
+        Assert.Equal(80, config.PositionMarginY);
+    }
+
+    [Fact]
     public void ResolveBounds_KeepsRightTopMarginWhenWorkAreaWidthChanges()
     {
         var config = new WidgetConfig

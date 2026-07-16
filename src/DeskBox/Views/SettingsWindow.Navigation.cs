@@ -100,6 +100,7 @@ public sealed partial class SettingsWindow
         isNestedSection = !string.IsNullOrWhiteSpace(route.ParentTag);
         _currentSettingsSection = sectionTag;
         AppearanceSection.Visibility = sectionTag == "Appearance" ? Visibility.Visible : Visibility.Collapsed;
+        CapsuleModeSection.Visibility = sectionTag == "CapsuleMode" ? Visibility.Visible : Visibility.Collapsed;
         AppearanceDetailSection.Visibility = sectionTag == "AppearanceDetail" ? Visibility.Visible : Visibility.Collapsed;
         FeatureWidgetsSection.Visibility = sectionTag == "FeatureWidgets" ? Visibility.Visible : Visibility.Collapsed;
         if (sectionTag == "FeatureWidgets")
@@ -218,6 +219,18 @@ WeatherSettingsSection.Visibility = sectionTag == "WeatherSettings" ? Visibility
                 break;
             case "WidgetBorder":
                 ViewModel.SelectedWidgetBorderStyle = ViewModel.AvailableWidgetBorderStyles[combo.SelectedIndex];
+                break;
+            case "WidgetCollapseBehavior":
+                ViewModel.SelectedWidgetCollapseBehavior = ViewModel.AvailableWidgetCollapseBehaviors[combo.SelectedIndex];
+                break;
+            case "WidgetCollapsedStyle":
+                ViewModel.SelectedWidgetCollapsedStyle = ViewModel.AvailableWidgetCollapsedStyles[combo.SelectedIndex];
+                break;
+            case "WidgetCompactAnimationEffect":
+                ViewModel.SelectedWidgetCompactAnimationEffect = ViewModel.AvailableWidgetCompactAnimationEffects[combo.SelectedIndex];
+                break;
+            case "WidgetCompactMediaCornerMode":
+                ViewModel.SelectedWidgetCompactMediaCornerMode = ViewModel.AvailableWidgetCompactMediaCornerModes[combo.SelectedIndex];
                 break;
             case "LayoutDensity":
                 ViewModel.SelectedLayoutDensity = ViewModel.AvailableLayoutDensities[combo.SelectedIndex];

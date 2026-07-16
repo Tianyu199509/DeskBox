@@ -195,6 +195,13 @@
                         </Button>
 
                         <Button
+                            x:Name="CollapseWidgetButton"
+                            Style="{StaticResource WidgetTitleActionButtonStyle}"
+                            Click="CollapseWidgetButton_Click">
+                            <FontIcon x:Name="CollapseWidgetButtonIcon" FontSize="12" Glyph="&#xE70E;" />
+                        </Button>
+
+                        <Button
                             x:Name="MoreButton"
                             Style="{StaticResource WidgetTitleActionButtonStyle}"
                             Click="MoreButton_Click">

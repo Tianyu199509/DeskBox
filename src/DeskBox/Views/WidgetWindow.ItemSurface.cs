@@ -82,7 +82,7 @@ public sealed partial class WidgetWindow
 
         BackgroundPlate.BorderThickness = new Thickness(borderThickness);
         BackgroundPlate.BorderBrush = GetOrUpdateSolidColorBrush(BackgroundPlate.BorderBrush, borderColor);
-        BackgroundPlate.CornerRadius = new CornerRadius(GetCornerRadiusFromPreference());
+        BackgroundPlate.CornerRadius = new CornerRadius(GetCurrentSurfaceCornerRadius());
         HeaderDivider.Background = GetOrUpdateSolidColorBrush(HeaderDivider.Background, dividerColor);
         FileTitleIcon.AccentColor = iconForeground;
         FileTitleIcon.Mode = _settingsService.Settings.WidgetTitleIconMode;

@@ -187,6 +187,10 @@ public sealed partial class ContentWidgetWindow
             _descriptor,
             App.Current.LocalizationService,
             SetChromeModeOverride));
+        flyout.Items.Add(WidgetCollapseMenuBuilder.Create(
+            _config,
+            App.Current.LocalizationService,
+            SetCollapseBehaviorOverride));
         flyout.Items.Add(new MenuFlyoutSeparator());
 
         var rename = new MenuFlyoutItem
@@ -323,6 +327,7 @@ public sealed partial class ContentWidgetWindow
         }
 
         _isCancellingTitleRename = false;
+        BeginCompactInteraction();
         App.Current.WidgetManager?.BeginWidgetInteraction("content-title-rename-opened");
         var editor = CreateTitleRenameEditor();
         ContentWidgetShell.TitleEditorContent = editor;
@@ -439,6 +444,7 @@ public sealed partial class ContentWidgetWindow
         }
 
         ContentWidgetShell.TitleEditorContent = null;
+        EndCompactInteraction();
         App.Current.WidgetManager?.EndWidgetInteraction(reason);
         if (App.Current.WidgetManager?.RequestRestoreRaisedWidgetsToDesktopLayer(reason) == true)
         {
@@ -470,9 +476,11 @@ public sealed partial class ContentWidgetWindow
 
     private void ShowFlyoutWithInteraction(MenuFlyout flyout, FrameworkElement target, Windows.Foundation.Point? position = null)
     {
+        BeginCompactInteraction();
         App.Current.WidgetManager?.BeginWidgetInteraction("content-flyout-opened");
         flyout.Closed += (_, _) =>
         {
+            EndCompactInteraction();
             App.Current.WidgetManager?.EndWidgetInteraction("content-flyout-closed");
             if (App.Current.WidgetManager?.RequestRestoreRaisedWidgetsToDesktopLayer("content-flyout-closed") == true)
             {

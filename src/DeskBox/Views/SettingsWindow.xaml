@@ -259,6 +259,13 @@
                     </NavigationViewItem.Icon>
                 </NavigationViewItem>
                 <NavigationViewItem
+                    Tag="CapsuleMode"
+                    svc:Localized.Key="Settings.Nav.CapsuleMode">
+                    <NavigationViewItem.Icon>
+                        <FontIcon Glyph="&#xE73F;" />
+                    </NavigationViewItem.Icon>
+                </NavigationViewItem>
+                <NavigationViewItem
                     x:Name="FileWidgetNavItem"
                     Tag="AppearanceDetail"
                     svc:Localized.Key="Settings.Nav.FileWidget">
@@ -824,6 +831,146 @@ svc:Localized.DescriptionKey="Settings.DefaultWidth.Description"
                             </toolkit:SettingsExpander.Items>
                         </toolkit:SettingsExpander>
 
+                    </StackPanel>
+                </StackPanel>
+
+                <StackPanel
+                    x:Name="CapsuleModeSection"
+                    Visibility="Collapsed"
+                    Style="{StaticResource SectionPanelStyle}">
+                    <TextBlock Style="{StaticResource SectionTitleTextStyle}" svc:Localized.Key="Settings.Section.CapsuleMode" />
+                    <StackPanel Margin="0,8,0,0" Spacing="4">
+                        <toolkit:SettingsCard
+                            HorizontalContentAlignment="Right"
+                            svc:Localized.DescriptionKey="Settings.Capsule.Enabled.Description"
+                            svc:Localized.HeaderKey="Settings.Capsule.Enabled.Title">
+                            <toolkit:SettingsCard.HeaderIcon>
+                                <FontIcon Glyph="&#xE73F;" />
+                            </toolkit:SettingsCard.HeaderIcon>
+                            <ToggleSwitch
+                                MinWidth="0"
+                                OffContent=""
+                                OnContent=""
+                                IsOn="{Binding WidgetCapsuleModeEnabled, Mode=TwoWay}" />
+                        </toolkit:SettingsCard>
+
+                        <StackPanel Spacing="4">
+                        <toolkit:SettingsCard
+                            HorizontalContentAlignment="Right"
+                            IsEnabled="{Binding WidgetCapsuleModeEnabled}"
+                            svc:Localized.DescriptionKey="Settings.CollapseBehavior.Description"
+                            svc:Localized.HeaderKey="Settings.CollapseBehavior.Title">
+                            <toolkit:SettingsCard.HeaderIcon>
+                                <FontIcon Glyph="&#xE73F;" />
+                            </toolkit:SettingsCard.HeaderIcon>
+                            <ComboBox
+                                MinWidth="176"
+                                ItemsSource="{Binding AvailableWidgetCollapseBehaviorDisplayNames}"
+                                SelectedIndex="{Binding SelectedWidgetCollapseBehaviorIndex, Mode=OneWay}"
+                                SelectionChanged="SettingsComboBox_SelectionChanged"
+                                Tag="WidgetCollapseBehavior" />
+                        </toolkit:SettingsCard>
+
+                        <toolkit:SettingsCard
+                            HorizontalContentAlignment="Right"
+                            IsEnabled="{Binding WidgetCapsuleModeEnabled}"
+                            svc:Localized.DescriptionKey="Settings.CollapsedStyle.Description"
+                            svc:Localized.HeaderKey="Settings.CollapsedStyle.Title">
+                            <toolkit:SettingsCard.HeaderIcon>
+                                <FontIcon Glyph="&#xE8A5;" />
+                            </toolkit:SettingsCard.HeaderIcon>
+                            <ComboBox
+                                MinWidth="176"
+                                ItemsSource="{Binding AvailableWidgetCollapsedStyleDisplayNames}"
+                                SelectedIndex="{Binding SelectedWidgetCollapsedStyleIndex, Mode=OneWay}"
+                                SelectionChanged="SettingsComboBox_SelectionChanged"
+                                Tag="WidgetCollapsedStyle" />
+                        </toolkit:SettingsCard>
+
+                        <toolkit:SettingsCard
+                            HorizontalContentAlignment="Right"
+                            IsEnabled="{Binding IsSmartWidgetCollapseBehavior}"
+                            svc:Localized.DescriptionKey="Settings.Capsule.ExpandDelay.Description"
+                            svc:Localized.HeaderKey="Settings.Capsule.ExpandDelay.Title">
+                            <toolkit:SettingsCard.HeaderIcon>
+                                <FontIcon Glyph="&#xE823;" />
+                            </toolkit:SettingsCard.HeaderIcon>
+                            <StackPanel VerticalAlignment="Center" Orientation="Horizontal" Spacing="8">
+                                <TextBlock Style="{StaticResource SliderSettingValueTextStyle}" Text="{Binding WidgetCompactExpandDelayText}" />
+                                <Slider
+                                    Maximum="1000"
+                                    Minimum="100"
+                                    StepFrequency="10"
+                                    Style="{StaticResource InlineMetricSliderStyle}"
+                                    Value="{Binding WidgetCompactExpandDelayMs, Mode=TwoWay}" />
+                            </StackPanel>
+                        </toolkit:SettingsCard>
+
+                        <toolkit:SettingsExpander
+                            IsExpanded="False"
+                            IsEnabled="{Binding WidgetCapsuleModeEnabled}"
+                            svc:Localized.DescriptionKey="Settings.Capsule.Animation.Description"
+                            svc:Localized.HeaderKey="Settings.Capsule.Animation.Title">
+                            <toolkit:SettingsExpander.HeaderIcon>
+                                <FontIcon Glyph="&#xE7B5;" />
+                            </toolkit:SettingsExpander.HeaderIcon>
+                            <ComboBox
+                                MinWidth="176"
+                                ItemsSource="{Binding AvailableWidgetCompactAnimationEffectDisplayNames}"
+                                SelectedIndex="{Binding SelectedWidgetCompactAnimationEffectIndex, Mode=OneWay}"
+                                SelectionChanged="SettingsComboBox_SelectionChanged"
+                                Tag="WidgetCompactAnimationEffect" />
+                            <toolkit:SettingsExpander.Items>
+                                <toolkit:SettingsCard
+                                    HorizontalContentAlignment="Right"
+                                    IsEnabled="{Binding IsWidgetCompactAnimationEnabled}"
+                                    svc:Localized.DescriptionKey="Settings.Capsule.AnimationDuration.Description"
+                                    svc:Localized.HeaderKey="Settings.Capsule.AnimationDuration.Title">
+                                    <StackPanel VerticalAlignment="Center" Orientation="Horizontal" Spacing="8">
+                                        <TextBlock Style="{StaticResource SliderSettingValueTextStyle}" Text="{Binding WidgetCompactAnimationDurationText}" />
+                                        <Slider
+                                            Maximum="400"
+                                            Minimum="120"
+                                            StepFrequency="10"
+                                            Style="{StaticResource InlineMetricSliderStyle}"
+                                            Value="{Binding WidgetCompactAnimationDurationMs, Mode=TwoWay}" />
+                                    </StackPanel>
+                                </toolkit:SettingsCard>
+
+                                <toolkit:SettingsCard
+                                    HorizontalContentAlignment="Right"
+                                    IsEnabled="{Binding IsSmartWidgetCollapseBehavior}"
+                                    svc:Localized.DescriptionKey="Settings.Capsule.CollapseDelay.Description"
+                                    svc:Localized.HeaderKey="Settings.Capsule.CollapseDelay.Title">
+                                    <StackPanel VerticalAlignment="Center" Orientation="Horizontal" Spacing="8">
+                                        <TextBlock Style="{StaticResource SliderSettingValueTextStyle}" Text="{Binding WidgetCompactCollapseDelayText}" />
+                                        <Slider
+                                            Maximum="1500"
+                                            Minimum="200"
+                                            StepFrequency="20"
+                                            Style="{StaticResource InlineMetricSliderStyle}"
+                                            Value="{Binding WidgetCompactCollapseDelayMs, Mode=TwoWay}" />
+                                    </StackPanel>
+                                </toolkit:SettingsCard>
+                            </toolkit:SettingsExpander.Items>
+                        </toolkit:SettingsExpander>
+
+                        <toolkit:SettingsCard
+                            HorizontalContentAlignment="Right"
+                            IsEnabled="{Binding WidgetCapsuleModeEnabled}"
+                            svc:Localized.DescriptionKey="Settings.Capsule.MediaCorner.Description"
+                            svc:Localized.HeaderKey="Settings.Capsule.MediaCorner.Title">
+                            <toolkit:SettingsCard.HeaderIcon>
+                                <FontIcon Glyph="&#xE91B;" />
+                            </toolkit:SettingsCard.HeaderIcon>
+                            <ComboBox
+                                MinWidth="176"
+                                ItemsSource="{Binding AvailableWidgetCompactMediaCornerDisplayNames}"
+                                SelectedIndex="{Binding SelectedWidgetCompactMediaCornerIndex, Mode=OneWay}"
+                                SelectionChanged="SettingsComboBox_SelectionChanged"
+                                Tag="WidgetCompactMediaCornerMode" />
+                        </toolkit:SettingsCard>
+                        </StackPanel>
                     </StackPanel>
                 </StackPanel>
 

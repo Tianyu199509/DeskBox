@@ -203,6 +203,42 @@ public class AppSettings
     public string InteractiveWidgetChromeMode { get; set; } = "Standard";
 
     /// <summary>
+    /// How widgets enter and leave their compact state.
+    /// Valid values: <c>"Expanded"</c>, <c>"Click"</c>, <c>"Smart"</c>.
+    /// </summary>
+    public string WidgetCollapseBehavior { get; set; } = "Click";
+
+    /// <summary>Whether widgets are allowed to enter compact capsule mode.</summary>
+    public bool WidgetCapsuleModeEnabled { get; set; }
+
+    /// <summary>
+    /// Information density used by compact widgets.
+    /// Valid values: <c>"Smart"</c>, <c>"Minimal"</c>, <c>"Summary"</c>.
+    /// </summary>
+    public string WidgetCollapsedStyle { get; set; } = "Smart";
+
+    /// <summary>
+    /// Motion style used when compact widgets expand or collapse.
+    /// Valid values: <c>"Smooth"</c>, <c>"Snappy"</c>, <c>"None"</c>.
+    /// </summary>
+    public string WidgetCompactAnimationEffect { get; set; } = "Smooth";
+
+    /// <summary>Compact transition duration in milliseconds.</summary>
+    public int WidgetCompactAnimationDurationMs { get; set; } = 220;
+
+    /// <summary>Pointer hover delay before a smart compact widget expands.</summary>
+    public int WidgetCompactExpandDelayMs { get; set; } = 360;
+
+    /// <summary>Pointer leave delay before a smart compact widget collapses.</summary>
+    public int WidgetCompactCollapseDelayMs { get; set; } = 620;
+
+    /// <summary>
+    /// Corner treatment for media inside compact widgets.
+    /// Valid values: <c>"FollowWidget"</c>, <c>"Square"</c>, <c>"Small"</c>, <c>"Round"</c>.
+    /// </summary>
+    public string WidgetCompactMediaCornerMode { get; set; } = "FollowWidget";
+
+    /// <summary>
     /// Title icon presentation for widget title bars.
     /// Valid values: <c>"FilledMono"</c>, <c>"LineMono"</c>, <c>"Color"</c>, <c>"Hidden"</c>, <c>"TextLabel"</c>.
     /// </summary>

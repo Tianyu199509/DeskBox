@@ -33,6 +33,16 @@ public sealed partial class QuickCaptureWidgetWindow
 {
     protected override void UpdateConfigBoundsFromPhysical(int x, int y, int width, int height, bool persist)
     {
+        if (IsCompactBoundsStateActive)
+        {
+            if (persist)
+            {
+                _settingsService.UpdateWidget(ViewModel.Config, notifySubscribers: false);
+                _settingsService.SaveDebounced(notifySubscribers: false);
+            }
+            return;
+        }
+
         var bounds = new Windows.Graphics.RectInt32(x, y, width, height);
         var workArea = DisplayArea.GetFromRect(bounds, DisplayAreaFallback.Nearest).WorkArea;
         WidgetPositioningService.UpdateConfigFromPhysicalBounds(ViewModel.Config, bounds, workArea);
@@ -89,7 +99,7 @@ public sealed partial class QuickCaptureWidgetWindow
 
         BackgroundPlate.BorderThickness = new Thickness(borderThickness);
         BackgroundPlate.BorderBrush = GetOrUpdateSolidColorBrush(BackgroundPlate.BorderBrush, borderColor);
-        BackgroundPlate.CornerRadius = new CornerRadius(GetCornerRadiusFromPreference());
+        BackgroundPlate.CornerRadius = new CornerRadius(GetCurrentSurfaceCornerRadius());
         HeaderDivider.Background = GetOrUpdateSolidColorBrush(HeaderDivider.Background, dividerColor);
         QuickCaptureShell.TitleIconAccentColor = iconForeground;
         QuickCaptureShell.TitleIconKind = WidgetTitleIconKindNames.QuickCapture;

@@ -105,7 +105,7 @@ public sealed class ResizeGuideOverlayService
                 ? proposedBounds.X + proposedBounds.Width
                 : proposedBounds.X;
 
-            var (snapX, target) = FindSnapEdgeX(edgeX, otherBounds);
+            var (snapX, target) = FindSnapEdgeX(edgeX, proposedBounds, otherBounds);
             if (snapX.HasValue)
             {
                 if (checkRight)
@@ -142,7 +142,7 @@ public sealed class ResizeGuideOverlayService
                 ? proposedBounds.Y + proposedBounds.Height
                 : proposedBounds.Y;
 
-            var (snapY, target) = FindSnapEdgeY(edgeY, otherBounds);
+            var (snapY, target) = FindSnapEdgeY(edgeY, proposedBounds, otherBounds);
             if (snapY.HasValue)
             {
                 if (checkBottom)
@@ -285,16 +285,24 @@ public sealed class ResizeGuideOverlayService
     }
 
     private (int? SnapX, IntPtr? TargetHwnd) FindSnapEdgeX(
-        int edgeX, List<(RectInt32 Bounds, IntPtr Hwnd)> otherBounds)
+        int edgeX,
+        RectInt32 sourceBounds,
+        List<(RectInt32 Bounds, IntPtr Hwnd)> otherBounds)
     {
         int bestDelta = (int)Math.Ceiling(SnapThreshold);
+        int bestGap = int.MaxValue;
+        int bestCenterDistance = int.MaxValue;
         int? bestSnap = null;
         IntPtr? bestTarget = null;
 
         foreach (var (other, hwnd) in otherBounds)
         {
-            TrySnap(edgeX, other.X, hwnd, ref bestDelta, ref bestSnap, ref bestTarget);
-            TrySnap(edgeX, other.X + other.Width, hwnd, ref bestDelta, ref bestSnap, ref bestTarget);
+            TrySnapWidget(
+                edgeX, other.X, hwnd, sourceBounds, other, alignX: true,
+                ref bestDelta, ref bestGap, ref bestCenterDistance, ref bestSnap, ref bestTarget);
+            TrySnapWidget(
+                edgeX, other.X + other.Width, hwnd, sourceBounds, other, alignX: true,
+                ref bestDelta, ref bestGap, ref bestCenterDistance, ref bestSnap, ref bestTarget);
         }
 
         // Work area edges (no target widget)
@@ -318,16 +326,24 @@ public sealed class ResizeGuideOverlayService
     }
 
     private (int? SnapY, IntPtr? TargetHwnd) FindSnapEdgeY(
-        int edgeY, List<(RectInt32 Bounds, IntPtr Hwnd)> otherBounds)
+        int edgeY,
+        RectInt32 sourceBounds,
+        List<(RectInt32 Bounds, IntPtr Hwnd)> otherBounds)
     {
         int bestDelta = (int)Math.Ceiling(SnapThreshold);
+        int bestGap = int.MaxValue;
+        int bestCenterDistance = int.MaxValue;
         int? bestSnap = null;
         IntPtr? bestTarget = null;
 
         foreach (var (other, hwnd) in otherBounds)
         {
-            TrySnap(edgeY, other.Y, hwnd, ref bestDelta, ref bestSnap, ref bestTarget);
-            TrySnap(edgeY, other.Y + other.Height, hwnd, ref bestDelta, ref bestSnap, ref bestTarget);
+            TrySnapWidget(
+                edgeY, other.Y, hwnd, sourceBounds, other, alignX: false,
+                ref bestDelta, ref bestGap, ref bestCenterDistance, ref bestSnap, ref bestTarget);
+            TrySnapWidget(
+                edgeY, other.Y + other.Height, hwnd, sourceBounds, other, alignX: false,
+                ref bestDelta, ref bestGap, ref bestCenterDistance, ref bestSnap, ref bestTarget);
         }
 
         // Work area edges
@@ -361,6 +377,53 @@ public sealed class ResizeGuideOverlayService
             bestSnap = candidate;
             bestTarget = hwnd;
         }
+    }
+
+    private static void TrySnapWidget(
+        int edge,
+        int candidate,
+        IntPtr hwnd,
+        RectInt32 source,
+        RectInt32 target,
+        bool alignX,
+        ref int bestDelta,
+        ref int bestGap,
+        ref int bestCenterDistance,
+        ref int? bestSnap,
+        ref IntPtr? bestTarget)
+    {
+        int delta = Math.Abs(edge - candidate);
+        if (delta >= (int)Math.Ceiling(SnapThreshold))
+        {
+            return;
+        }
+
+        int sourceStart = alignX ? source.Y : source.X;
+        int sourceEnd = sourceStart + (alignX ? source.Height : source.Width);
+        int targetStart = alignX ? target.Y : target.X;
+        int targetEnd = targetStart + (alignX ? target.Height : target.Width);
+        int gap = targetEnd < sourceStart
+            ? sourceStart - targetEnd
+            : sourceEnd < targetStart
+                ? targetStart - sourceEnd
+                : 0;
+        int sourceCenter = sourceStart + ((sourceEnd - sourceStart) / 2);
+        int targetCenter = targetStart + ((targetEnd - targetStart) / 2);
+        int centerDistance = Math.Abs(sourceCenter - targetCenter);
+
+        bool isBetter = delta < bestDelta ||
+            delta == bestDelta && gap < bestGap ||
+            delta == bestDelta && gap == bestGap && centerDistance < bestCenterDistance;
+        if (!isBetter)
+        {
+            return;
+        }
+
+        bestDelta = delta;
+        bestGap = gap;
+        bestCenterDistance = centerDistance;
+        bestSnap = candidate;
+        bestTarget = hwnd;
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -642,7 +705,7 @@ public sealed class ResizeGuideOverlayService
         // ── Top edge snapping (vertical alignment of top edge) ──────
 
         int topEdgeY = proposedBounds.Y;
-        var (snapTopY, targetTop) = FindSnapEdgeY(topEdgeY, otherBounds);
+        var (snapTopY, targetTop) = FindSnapEdgeY(topEdgeY, proposedBounds, otherBounds);
         if (snapTopY.HasValue)
         {
             snapped = new RectInt32(
@@ -654,7 +717,7 @@ public sealed class ResizeGuideOverlayService
         // ── Left edge snapping (horizontal alignment of left edge) ──
 
         int leftEdgeX = proposedBounds.X;
-        var (snapLeftX, targetLeft) = FindSnapEdgeX(leftEdgeX, otherBounds);
+        var (snapLeftX, targetLeft) = FindSnapEdgeX(leftEdgeX, proposedBounds, otherBounds);
         if (snapLeftX.HasValue)
         {
             snapped = new RectInt32(
@@ -666,7 +729,7 @@ public sealed class ResizeGuideOverlayService
         // ── Right edge snapping (horizontal alignment of right edge) ─
 
         int rightEdgeX = proposedBounds.X + proposedBounds.Width;
-        var (snapRightX, targetRight) = FindSnapEdgeX(rightEdgeX, otherBounds);
+        var (snapRightX, targetRight) = FindSnapEdgeX(rightEdgeX, proposedBounds, otherBounds);
         if (snapRightX.HasValue)
         {
             // Adjust X so right edge snaps; width stays the same

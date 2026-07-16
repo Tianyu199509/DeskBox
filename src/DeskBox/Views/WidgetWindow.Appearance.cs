@@ -190,6 +190,7 @@ public sealed partial class WidgetWindow
         WidgetTitleBarMetricsCalculator.ApplyActionButton(FileWidgetShell.PositionLockActionButton, metrics);
         WidgetTitleBarMetricsCalculator.ApplyActionButton(FileWidgetShell.SizeLockActionButton, metrics);
         WidgetTitleBarMetricsCalculator.ApplyActionButton(FileWidgetShell.AddActionButton, metrics);
+        WidgetTitleBarMetricsCalculator.ApplyActionButton(CollapseWidgetButton, metrics);
         WidgetTitleBarMetricsCalculator.ApplyActionButton(FileWidgetShell.MoreActionButton, metrics);
         WidgetTitleBarMetricsCalculator.ApplyActionButton(FileWidgetShell.CloseActionButton, metrics);
 
@@ -210,6 +211,7 @@ public sealed partial class WidgetWindow
             FileWidgetShell.SizeLockFilledActionIcon,
             metrics);
         WidgetTitleBarMetricsCalculator.ApplyActionIcon(FileWidgetShell.AddActionIcon, metrics);
+        WidgetTitleBarMetricsCalculator.ApplyActionIcon(CollapseWidgetButtonIcon, metrics);
         WidgetTitleBarMetricsCalculator.ApplyActionIcon(FileWidgetShell.MoreActionIcon, metrics);
         WidgetTitleBarMetricsCalculator.ApplyActionIcon(FileWidgetShell.CloseActionIcon, metrics);
 

@@ -89,6 +89,32 @@ public sealed class SettingsService
     public const string WidgetChromeModeCompact = WidgetChromeModeNames.Compact;
     public const string WidgetChromeModeOverlay = WidgetChromeModeNames.Overlay;
     public const string WidgetChromeModeHidden = WidgetChromeModeNames.Hidden;
+    public const string WidgetCollapseBehaviorExpanded = WidgetCollapseBehaviorNames.Expanded;
+    public const string WidgetCollapseBehaviorClick = WidgetCollapseBehaviorNames.Click;
+    public const string WidgetCollapseBehaviorSmart = WidgetCollapseBehaviorNames.Smart;
+    public const string WidgetCollapseBehaviorManual = WidgetCollapseBehaviorClick;
+    public const string WidgetCollapseBehaviorAuto = WidgetCollapseBehaviorSmart;
+    public const string WidgetCollapsedStyleMinimal = "Minimal";
+    public const string WidgetCollapsedStyleSummary = "Summary";
+    public const string WidgetCollapsedStyleSmart = "Smart";
+    public const string WidgetCollapsedStylePill = "Pill";
+    public const string WidgetCompactAnimationSmooth = "Smooth";
+    public const string WidgetCompactAnimationSlow = "Slow";
+    public const string WidgetCompactAnimationSnappy = "Snappy";
+    public const string WidgetCompactAnimationNone = "None";
+    public const string WidgetCompactMediaCornerFollowWidget = "FollowWidget";
+    public const string WidgetCompactMediaCornerSquare = "Square";
+    public const string WidgetCompactMediaCornerSmall = "Small";
+    public const string WidgetCompactMediaCornerRound = "Round";
+    public const int DefaultWidgetCompactAnimationDurationMs = 220;
+    public const int MinWidgetCompactAnimationDurationMs = 120;
+    public const int MaxWidgetCompactAnimationDurationMs = 400;
+    public const int DefaultWidgetCompactExpandDelayMs = 360;
+    public const int MinWidgetCompactExpandDelayMs = 100;
+    public const int MaxWidgetCompactExpandDelayMs = 1000;
+    public const int DefaultWidgetCompactCollapseDelayMs = 620;
+    public const int MinWidgetCompactCollapseDelayMs = 200;
+    public const int MaxWidgetCompactCollapseDelayMs = 1500;
     public const string WidgetTitleIconModeFilledMono = WidgetTitleIconModeNames.FilledMono;
     public const string WidgetTitleIconModeLineMono = WidgetTitleIconModeNames.LineMono;
     public const string WidgetTitleIconModeColor = WidgetTitleIconModeNames.Color;
@@ -207,6 +233,14 @@ public const int WeatherRefreshMaxMinutes = 180;
         settings.WidgetLayerMode = WidgetLayerModeDynamic;
         settings.DisplayWidgetChromeMode = WidgetChromeModeOverlay;
         settings.InteractiveWidgetChromeMode = WidgetChromeModeStandard;
+        settings.WidgetCollapseBehavior = WidgetCollapseBehaviorClick;
+        settings.WidgetCapsuleModeEnabled = false;
+        settings.WidgetCollapsedStyle = WidgetCollapsedStyleSmart;
+        settings.WidgetCompactAnimationEffect = WidgetCompactAnimationSmooth;
+        settings.WidgetCompactAnimationDurationMs = DefaultWidgetCompactAnimationDurationMs;
+        settings.WidgetCompactExpandDelayMs = DefaultWidgetCompactExpandDelayMs;
+        settings.WidgetCompactCollapseDelayMs = DefaultWidgetCompactCollapseDelayMs;
+        settings.WidgetCompactMediaCornerMode = WidgetCompactMediaCornerFollowWidget;
         settings.WidgetTitleIconMode = WidgetTitleIconModeColor;
         settings.WidgetOpacity = DefaultWidgetOpacity;
         settings.IconSize = DefaultIconSize;
@@ -686,6 +720,59 @@ changed |= NormalizeDeletionSettings(_settings);
             changed = true;
         }
 
+        string normalizedCollapseBehavior = NormalizeWidgetCollapseBehavior(settings.WidgetCollapseBehavior);
+        if (normalizedCollapseBehavior == WidgetCollapseBehaviorExpanded)
+        {
+            normalizedCollapseBehavior = WidgetCollapseBehaviorClick;
+        }
+        if (!string.Equals(settings.WidgetCollapseBehavior, normalizedCollapseBehavior, StringComparison.Ordinal))
+        {
+            settings.WidgetCollapseBehavior = normalizedCollapseBehavior;
+            changed = true;
+        }
+
+        string normalizedCollapsedStyle = NormalizeWidgetCollapsedStyle(settings.WidgetCollapsedStyle);
+        if (!string.Equals(settings.WidgetCollapsedStyle, normalizedCollapsedStyle, StringComparison.Ordinal))
+        {
+            settings.WidgetCollapsedStyle = normalizedCollapsedStyle;
+            changed = true;
+        }
+
+        string normalizedCompactAnimation = NormalizeWidgetCompactAnimationEffect(settings.WidgetCompactAnimationEffect);
+        if (!string.Equals(settings.WidgetCompactAnimationEffect, normalizedCompactAnimation, StringComparison.Ordinal))
+        {
+            settings.WidgetCompactAnimationEffect = normalizedCompactAnimation;
+            changed = true;
+        }
+
+        int normalizedCompactDuration = NormalizeWidgetCompactAnimationDurationMs(settings.WidgetCompactAnimationDurationMs);
+        if (settings.WidgetCompactAnimationDurationMs != normalizedCompactDuration)
+        {
+            settings.WidgetCompactAnimationDurationMs = normalizedCompactDuration;
+            changed = true;
+        }
+
+        int normalizedCompactExpandDelay = NormalizeWidgetCompactExpandDelayMs(settings.WidgetCompactExpandDelayMs);
+        if (settings.WidgetCompactExpandDelayMs != normalizedCompactExpandDelay)
+        {
+            settings.WidgetCompactExpandDelayMs = normalizedCompactExpandDelay;
+            changed = true;
+        }
+
+        int normalizedCompactCollapseDelay = NormalizeWidgetCompactCollapseDelayMs(settings.WidgetCompactCollapseDelayMs);
+        if (settings.WidgetCompactCollapseDelayMs != normalizedCompactCollapseDelay)
+        {
+            settings.WidgetCompactCollapseDelayMs = normalizedCompactCollapseDelay;
+            changed = true;
+        }
+
+        string normalizedCompactMediaCorner = NormalizeWidgetCompactMediaCornerMode(settings.WidgetCompactMediaCornerMode);
+        if (!string.Equals(settings.WidgetCompactMediaCornerMode, normalizedCompactMediaCorner, StringComparison.Ordinal))
+        {
+            settings.WidgetCompactMediaCornerMode = normalizedCompactMediaCorner;
+            changed = true;
+        }
+
         string normalizedTitleIconMode = NormalizeWidgetTitleIconModeSetting(settings.WidgetTitleIconMode);
         if (!string.Equals(settings.WidgetTitleIconMode, normalizedTitleIconMode, StringComparison.Ordinal))
         {
@@ -907,6 +994,72 @@ changed |= NormalizeDeletionSettings(_settings);
         return WidgetChromeModeNames.NormalizeSettingValue(value, fallback);
     }
 
+    public static string NormalizeWidgetCollapseBehavior(string? value)
+    {
+        return WidgetCollapseBehaviorNames.ToSettingValue(
+            WidgetCollapseBehaviorNames.Normalize(value));
+    }
+
+    public static string NormalizeWidgetCollapsedStyle(string? value)
+    {
+        if (string.Equals(value, WidgetCollapsedStylePill, StringComparison.OrdinalIgnoreCase))
+        {
+            return WidgetCollapsedStylePill;
+        }
+
+        if (string.Equals(value, WidgetCollapsedStyleSmart, StringComparison.OrdinalIgnoreCase))
+        {
+            return WidgetCollapsedStyleSmart;
+        }
+
+        return string.Equals(value, WidgetCollapsedStyleMinimal, StringComparison.OrdinalIgnoreCase)
+            ? WidgetCollapsedStyleMinimal
+            : WidgetCollapsedStyleSummary;
+    }
+
+    public static string NormalizeWidgetCompactAnimationEffect(string? value)
+    {
+        if (string.Equals(value, WidgetCompactAnimationSlow, StringComparison.OrdinalIgnoreCase))
+        {
+            return WidgetCompactAnimationSlow;
+        }
+
+        if (string.Equals(value, WidgetCompactAnimationSnappy, StringComparison.OrdinalIgnoreCase))
+        {
+            return WidgetCompactAnimationSnappy;
+        }
+
+        return string.Equals(value, WidgetCompactAnimationNone, StringComparison.OrdinalIgnoreCase)
+            ? WidgetCompactAnimationNone
+            : WidgetCompactAnimationSmooth;
+    }
+
+    public static int NormalizeWidgetCompactAnimationDurationMs(int value) =>
+        Math.Clamp(value, MinWidgetCompactAnimationDurationMs, MaxWidgetCompactAnimationDurationMs);
+
+    public static int NormalizeWidgetCompactExpandDelayMs(int value) =>
+        Math.Clamp(value, MinWidgetCompactExpandDelayMs, MaxWidgetCompactExpandDelayMs);
+
+    public static int NormalizeWidgetCompactCollapseDelayMs(int value) =>
+        Math.Clamp(value, MinWidgetCompactCollapseDelayMs, MaxWidgetCompactCollapseDelayMs);
+
+    public static string NormalizeWidgetCompactMediaCornerMode(string? value)
+    {
+        if (string.Equals(value, WidgetCompactMediaCornerSquare, StringComparison.OrdinalIgnoreCase))
+        {
+            return WidgetCompactMediaCornerSquare;
+        }
+
+        if (string.Equals(value, WidgetCompactMediaCornerSmall, StringComparison.OrdinalIgnoreCase))
+        {
+            return WidgetCompactMediaCornerSmall;
+        }
+
+        return string.Equals(value, WidgetCompactMediaCornerRound, StringComparison.OrdinalIgnoreCase)
+            ? WidgetCompactMediaCornerRound
+            : WidgetCompactMediaCornerFollowWidget;
+    }
+
     public static string NormalizeWidgetTitleIconModeSetting(string? value)
     {
         return WidgetTitleIconModeNames.NormalizeSettingValue(value);
@@ -1022,6 +1175,16 @@ changed |= NormalizeDeletionSettings(_settings);
 
             widget.Metadata ??= [];
 
+            if (widget.CompactWidth is { } compactWidth)
+            {
+                double normalizedCompactWidth = WidgetCompactBoundsCalculator.ClampLogicalWidth(compactWidth);
+                if (Math.Abs(compactWidth - normalizedCompactWidth) > 0.0001)
+                {
+                    widget.CompactWidth = normalizedCompactWidth;
+                    changed = true;
+                }
+            }
+
             if (widget.Metadata.TryGetValue(WidgetChromeModeNames.MetadataKey, out string? chromeModeValue))
             {
                 var normalizedChromeMode = WidgetChromeModeNames.NormalizeMode(
@@ -1039,6 +1202,28 @@ changed |= NormalizeDeletionSettings(_settings);
                     if (!string.Equals(chromeModeValue, normalizedChromeModeValue, StringComparison.Ordinal))
                     {
                         widget.Metadata[WidgetChromeModeNames.MetadataKey] = normalizedChromeModeValue;
+                        changed = true;
+                    }
+                }
+            }
+
+            if (widget.Metadata.TryGetValue(WidgetCollapseBehaviorNames.MetadataKey, out string? collapseBehaviorValue))
+            {
+                WidgetCollapseBehavior normalizedBehavior = WidgetCollapseBehaviorNames.Normalize(
+                    collapseBehaviorValue,
+                    WidgetCollapseBehavior.System,
+                    allowSystem: true);
+                if (normalizedBehavior == WidgetCollapseBehavior.System)
+                {
+                    widget.Metadata.Remove(WidgetCollapseBehaviorNames.MetadataKey);
+                    changed = true;
+                }
+                else
+                {
+                    string normalizedValue = WidgetCollapseBehaviorNames.ToSettingValue(normalizedBehavior);
+                    if (!string.Equals(collapseBehaviorValue, normalizedValue, StringComparison.Ordinal))
+                    {
+                        widget.Metadata[WidgetCollapseBehaviorNames.MetadataKey] = normalizedValue;
                         changed = true;
                     }
                 }

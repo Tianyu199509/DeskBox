@@ -147,13 +147,15 @@ public abstract partial class WidgetWindowBase
 
     protected void BeginWindowDragCore(PointerRoutedEventArgs e, FrameworkElement captureElement)
     {
+        BeginWidgetBoundsInteraction();
         IsDragging = true;
         HasMovedTitleBarDrag = false;
         DisplayChangeWatcher?.SuppressRestore();
         ElevateForInteraction();
         Win32Helper.GetCursorPos(out InitialCursorPt);
-        InitialWindowPos = AppWindow.Position;
-        InitialWindowSize = AppWindow.Size;
+        RectInt32 initialBounds = GetActualWindowBounds();
+        InitialWindowPos = new PointInt32(initialBounds.X, initialBounds.Y);
+        InitialWindowSize = new SizeInt32(initialBounds.Width, initialBounds.Height);
         DragCaptureElement = captureElement;
         captureElement.CapturePointer(e.Pointer);
         e.Handled = true;
@@ -182,6 +184,7 @@ public abstract partial class WidgetWindowBase
             }
 
             HasMovedTitleBarDrag = true;
+            WidgetShellControl.NotifyCompactDragMoved();
         }
 
         int newX = InitialWindowPos.X + deltaX;
@@ -209,10 +212,10 @@ public abstract partial class WidgetWindowBase
 
         App.Current?.ResizeGuideOverlay.EndDrag();
 
-        var finalPosition = AppWindow.Position;
-        var finalSize = AppWindow.Size;
-        CapturePositionAnchor(finalPosition.X, finalPosition.Y, finalSize.Width, finalSize.Height);
-        UpdateConfigBoundsFromPhysical(finalPosition.X, finalPosition.Y, finalSize.Width, finalSize.Height, persist: true);
+        RectInt32 finalBounds = GetActualWindowBounds();
+        CapturePositionAnchor(finalBounds.X, finalBounds.Y, finalBounds.Width, finalBounds.Height);
+        UpdateConfigBoundsFromPhysical(finalBounds.X, finalBounds.Y, finalBounds.Width, finalBounds.Height, persist: true);
+        EndWidgetBoundsInteraction();
         OnDragEnd(hasMoved);
 
         DisplayChangeWatcher?.ResumeRestore();
@@ -230,21 +233,32 @@ public abstract partial class WidgetWindowBase
             return;
         }
 
+        string direction = element.Tag as string ?? string.Empty;
+        if (!CanResizeCurrentWidgetState(direction))
+        {
+            return;
+        }
+
         var properties = e.GetCurrentPoint(element).Properties;
         if (!properties.IsLeftButtonPressed)
         {
             return;
         }
 
+        BeginWidgetBoundsInteraction();
         IsResizing = true;
-        ResizeDirection = element.Tag as string ?? string.Empty;
+        ResizeDirection = direction;
         DisplayChangeWatcher?.SuppressRestore();
         OnResizeStart();
         Win32Helper.GetCursorPos(out InitialCursorPt);
-        InitialWindowPos = AppWindow.Position;
-        InitialWindowSize = AppWindow.Size;
+        RectInt32 initialBounds = GetActualWindowBounds();
+        InitialWindowPos = new PointInt32(initialBounds.X, initialBounds.Y);
+        InitialWindowSize = new SizeInt32(initialBounds.Width, initialBounds.Height);
         element.CapturePointer(e.Pointer);
-        App.Current.ResizeGuideOverlay.BeginResize(HWnd, RootElement);
+        if (!IsCompactBoundsStateActive)
+        {
+            App.Current.ResizeGuideOverlay.BeginResize(HWnd, RootElement);
+        }
         e.Handled = true;
     }
 
@@ -263,6 +277,26 @@ public abstract partial class WidgetWindowBase
         int newHeight = InitialWindowSize.Height;
         int newX = InitialWindowPos.X;
         int newY = InitialWindowPos.Y;
+
+        if (IsCompactBoundsStateActive)
+        {
+            var limits = GetCompactPhysicalWidthLimits();
+            if (ResizeDirection == "Right")
+            {
+                newWidth = Math.Clamp(InitialWindowSize.Width + deltaX, limits.MinWidth, limits.MaxWidth);
+            }
+            else if (ResizeDirection == "Left")
+            {
+                int rightEdge = InitialWindowPos.X + InitialWindowSize.Width;
+                newWidth = Math.Clamp(InitialWindowSize.Width - deltaX, limits.MinWidth, limits.MaxWidth);
+                newX = rightEdge - newWidth;
+            }
+
+            ApplyWindowBounds(newX, newY, newWidth, newHeight, persist: false);
+            e.Handled = true;
+            return;
+        }
+
         var minSize = GetPhysicalMinimumWindowSize(
             InitialWindowPos.X,
             InitialWindowPos.Y,
@@ -308,10 +342,8 @@ public abstract partial class WidgetWindowBase
         ResizeDirection = string.Empty;
         element.ReleasePointerCapture(e.Pointer);
         App.Current.ResizeGuideOverlay.EndResize();
-        var finalPosition = AppWindow.Position;
-        var finalSize = AppWindow.Size;
-        CapturePositionAnchor(finalPosition.X, finalPosition.Y, finalSize.Width, finalSize.Height);
-        UpdateConfigBoundsFromPhysical(finalPosition.X, finalPosition.Y, finalSize.Width, finalSize.Height, persist: true);
+        PersistCompletedWidgetResize(GetActualWindowBounds());
+        EndWidgetBoundsInteraction();
         OnResizeEnd();
         DisplayChangeWatcher?.ResumeRestore();
         QueueBackdropRefresh();
@@ -335,14 +367,29 @@ public abstract partial class WidgetWindowBase
         ResizeDirection = string.Empty;
         DragCaptureElement = null;
         App.Current?.ResizeGuideOverlay.EndResize();
-        var finalPosition = AppWindow.Position;
-        var finalSize = AppWindow.Size;
-        CapturePositionAnchor(finalPosition.X, finalPosition.Y, finalSize.Width, finalSize.Height);
-        UpdateConfigBoundsFromPhysical(finalPosition.X, finalPosition.Y, finalSize.Width, finalSize.Height, persist: true);
+        PersistCompletedWidgetResize(GetActualWindowBounds());
+        EndWidgetBoundsInteraction();
         OnResizeEnd();
         DisplayChangeWatcher?.ResumeRestore();
         QueueBackdropRefresh();
         e.Handled = true;
+    }
+
+    protected InputSystemCursorShape GetResizeCursorShapeForCurrentState(string? direction)
+    {
+        if (IsSizeLocked || !CanResizeCurrentWidgetState(direction))
+        {
+            return InputSystemCursorShape.Arrow;
+        }
+
+        return direction switch
+        {
+            "Left" or "Right" => InputSystemCursorShape.SizeWestEast,
+            "Top" or "Bottom" => InputSystemCursorShape.SizeNorthSouth,
+            "TopLeft" or "BottomRight" => InputSystemCursorShape.SizeNorthwestSoutheast,
+            "TopRight" or "BottomLeft" => InputSystemCursorShape.SizeNortheastSouthwest,
+            _ => InputSystemCursorShape.Arrow
+        };
     }
 
     /// <summary>
@@ -361,10 +408,10 @@ public abstract partial class WidgetWindowBase
         bool hasMoved = HasMovedTitleBarDrag;
         DragCaptureElement = null;
         App.Current?.ResizeGuideOverlay.EndDrag();
-        var finalPosition = AppWindow.Position;
-        var finalSize = AppWindow.Size;
-        CapturePositionAnchor(finalPosition.X, finalPosition.Y, finalSize.Width, finalSize.Height);
-        UpdateConfigBoundsFromPhysical(finalPosition.X, finalPosition.Y, finalSize.Width, finalSize.Height, persist: true);
+        RectInt32 finalBounds = GetActualWindowBounds();
+        CapturePositionAnchor(finalBounds.X, finalBounds.Y, finalBounds.Width, finalBounds.Height);
+        UpdateConfigBoundsFromPhysical(finalBounds.X, finalBounds.Y, finalBounds.Width, finalBounds.Height, persist: true);
+        EndWidgetBoundsInteraction();
         OnDragEnd(hasMoved);
         DisplayChangeWatcher?.ResumeRestore();
         HasMovedTitleBarDrag = false;
@@ -376,6 +423,7 @@ public abstract partial class WidgetWindowBase
 
     protected void BeginInteractionLayer(string reason, bool elevate = true)
     {
+        BeginCompactInteraction();
         App.Current.WidgetManager?.BeginWidgetInteraction(reason);
         if (elevate)
         {
@@ -385,6 +433,7 @@ public abstract partial class WidgetWindowBase
 
     protected void ReleaseInteractionLayer(string reason)
     {
+        EndCompactInteraction();
         App.Current.WidgetManager?.EndWidgetInteraction(reason);
         if (App.Current.WidgetManager?.RequestRestoreRaisedWidgetsToDesktopLayer(reason) == true)
         {

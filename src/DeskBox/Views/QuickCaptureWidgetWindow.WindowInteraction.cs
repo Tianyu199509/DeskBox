@@ -131,14 +131,7 @@ public sealed partial class QuickCaptureWidgetWindow
         }
 
         string tag = element.Tag as string ?? string.Empty;
-        var shape = tag switch
-        {
-            "Left" or "Right" => Microsoft.UI.Input.InputSystemCursorShape.SizeWestEast,
-            "Top" or "Bottom" => Microsoft.UI.Input.InputSystemCursorShape.SizeNorthSouth,
-            "TopLeft" or "BottomRight" => Microsoft.UI.Input.InputSystemCursorShape.SizeNorthwestSoutheast,
-            "TopRight" or "BottomLeft" => Microsoft.UI.Input.InputSystemCursorShape.SizeNortheastSouthwest,
-            _ => Microsoft.UI.Input.InputSystemCursorShape.Arrow
-        };
+        var shape = GetResizeCursorShapeForCurrentState(tag);
         var property = typeof(UIElement).GetProperty(
             "ProtectedCursor",
             System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);

@@ -81,6 +81,8 @@ public sealed class WidgetTrayAnimationController
 
     public bool IsApplyingBounds { get; private set; }
 
+    public bool IsPositionTransitionActive => _targetPosition.HasValue;
+
     public long NextGeneration()
     {
         return ++Generation;
@@ -228,7 +230,16 @@ public sealed class WidgetTrayAnimationController
             $"windowOffset=({fromOffsetX:F0},{fromOffsetY:F0})->({toOffsetX:F0},{toOffsetY:F0}) " +
             $"windowOpacity={fromOpacity:F2}->{toOpacity:F2}");
         Stop();
-        PrepareVisualState(fromOffsetX, fromOffsetY, fromOpacity, fromScale);
+        if (_targetPosition is null)
+        {
+            PrepareVisualState(fromOffsetX, fromOffsetY, fromOpacity, fromScale);
+        }
+        else
+        {
+            ApplyWindowOffset(fromOffsetX, fromOffsetY);
+            ApplyOpacity(fromOpacity);
+            ApplyScale(fromScale);
+        }
 
         if (durationMs <= 1)
         {
@@ -327,6 +338,12 @@ public sealed class WidgetTrayAnimationController
                 // being torn down. Swallow to avoid stowed WinRT exceptions.
             }
         }
+    }
+
+    public void StopAndRestoreWindowPosition()
+    {
+        Stop();
+        RestoreWindowPosition();
     }
 
     public void RestoreVisualState()

@@ -183,12 +183,21 @@ public static class WidgetPositioningService
         CaptureAnchorCore(config, bounds, workArea);
     }
 
+    public static void CaptureAnchorPreservingCurrentEdge(
+        WidgetConfig config,
+        RectInt32 bounds,
+        RectInt32 workArea)
+    {
+        CaptureAnchorCore(config, bounds, workArea, preserveCurrentAnchor: true);
+    }
+
     private static void CaptureAnchorCore(
         WidgetConfig config,
         RectInt32 bounds,
         RectInt32 workArea,
         Func<RectInt32, double>? dpiScaleProvider = null,
-        IReadOnlyList<AvailableMonitorWorkArea>? availableWorkAreas = null)
+        IReadOnlyList<AvailableMonitorWorkArea>? availableWorkAreas = null,
+        bool preserveCurrentAnchor = false)
     {
         double scale = UsesLogicalBounds(config) ? GetDpiScale(workArea, dpiScaleProvider) : 1.0;
         int leftMargin = bounds.X - workArea.X;
@@ -196,8 +205,13 @@ public static class WidgetPositioningService
         int topMargin = bounds.Y - workArea.Y;
         int bottomMargin = (workArea.Y + workArea.Height) - (bounds.Y + bounds.Height);
 
-        bool anchorRight = rightMargin < leftMargin;
-        bool anchorBottom = bottomMargin < topMargin;
+        bool keepCurrentAnchor = preserveCurrentAnchor && HasValidAnchor(config);
+        bool anchorRight = keepCurrentAnchor
+            ? config.PositionAnchor is WidgetPositionAnchors.RightTop or WidgetPositionAnchors.RightBottom
+            : rightMargin < leftMargin;
+        bool anchorBottom = keepCurrentAnchor
+            ? config.PositionAnchor is WidgetPositionAnchors.LeftBottom or WidgetPositionAnchors.RightBottom
+            : bottomMargin < topMargin;
 
         config.PositionAnchor = (anchorRight, anchorBottom) switch
         {
