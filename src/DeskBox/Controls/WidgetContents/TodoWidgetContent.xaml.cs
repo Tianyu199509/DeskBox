@@ -28,6 +28,8 @@ public sealed partial class TodoWidgetContent : UserControl
     private const int CopyTapDelayMs = 210;
 
     private string? _draggedTodoItemId;
+    private readonly List<string> _draggedTodoItemIds = [];
+    private bool _todoTabDropHandled;
     private TodoItemViewModel? _editingItem;
     private TodoItemViewModel? _customDueDateItem;
     private IReadOnlyList<string>? _customDueDateItemIds;
@@ -65,6 +67,10 @@ public sealed partial class TodoWidgetContent : UserControl
     public TodoWidgetContent()
     {
         InitializeComponent();
+        DetailTitleTextBox.AddHandler(
+            UIElement.PreviewKeyDownEvent,
+            new KeyEventHandler(DetailTitleTextBox_KeyDown),
+            handledEventsToo: true);
         Loaded += TodoWidgetContent_Loaded;
         Unloaded += TodoWidgetContent_Unloaded;
         ActualThemeChanged += (_, _) =>
@@ -196,6 +202,12 @@ public sealed partial class TodoWidgetContent : UserControl
         if (e.PropertyName == nameof(TodoWidgetViewModel.TabStyle))
         {
             ApplySegmentedStyle();
+        }
+
+        if (e.PropertyName == nameof(TodoWidgetViewModel.VisibleTabCount))
+        {
+            ApplySegmentedLayout();
+            RefreshFilterButtons();
         }
 
         if (e.PropertyName == nameof(TodoWidgetViewModel.SelectedColorFilter))
@@ -510,8 +522,15 @@ public sealed partial class TodoWidgetContent : UserControl
 
         if (e.Key == VirtualKey.Enter)
         {
-            _ = await ViewModel.CommitEditAsync(item.Id);
             e.Handled = true;
+            if (ShouldSubmitTodoEditor(e))
+            {
+                _ = await ViewModel.CommitEditAsync(item.Id);
+            }
+            else if (sender is TextBox textBox)
+            {
+                TextBoxEditorShortcutHelper.InsertLineBreak(textBox);
+            }
         }
     }
 
@@ -617,15 +636,31 @@ public sealed partial class TodoWidgetContent : UserControl
             return;
         }
 
-        if (e.Key == VirtualKey.Enter && Win32Helper.IsKeyPressed(VirtualKey.Control))
+        if (e.Key == VirtualKey.Enter)
         {
-            if (ViewModel?.SelectedDetailItem is { } item)
-            {
-                await ViewModel.UpdateItemTextAsync(item.Id, DetailTitleTextBox.Text);
-            }
-
             e.Handled = true;
+            if (ShouldSubmitTodoEditor(e))
+            {
+                await CloseDetailAsync();
+            }
+            else
+            {
+                TextBoxEditorShortcutHelper.InsertLineBreak(DetailTitleTextBox);
+            }
         }
+    }
+
+    private static bool ShouldSubmitTodoEditor(KeyRoutedEventArgs e)
+    {
+        if (e.Key != VirtualKey.Enter)
+        {
+            return false;
+        }
+
+        bool controlPressed = Win32Helper.IsKeyPressed(VirtualKey.Control);
+        return SettingsService.ShouldSubmitEditorOnEnter(
+            App.Current.SettingsService.Settings.TodoEditorEnterBehavior,
+            controlPressed);
     }
 
     private void DetailTitleResizeHandle_PointerPressed(object sender, PointerRoutedEventArgs e)

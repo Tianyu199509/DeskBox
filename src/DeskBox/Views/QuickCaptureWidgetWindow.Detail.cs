@@ -77,6 +77,37 @@ public sealed partial class QuickCaptureWidgetWindow
         await ViewModel.AddInputAsync();
     }
 
+    private async void DetailBodyTextBox_KeyDown(object sender, KeyRoutedEventArgs e)
+    {
+        if (e.Key != VirtualKey.Enter)
+        {
+            return;
+        }
+
+        e.Handled = true;
+        if (ShouldSubmitQuickCaptureEditor(e))
+        {
+            await SaveAndCloseDetailAsync();
+        }
+        else
+        {
+            TextBoxEditorShortcutHelper.InsertLineBreak(DetailBodyTextBox);
+        }
+    }
+
+    private bool ShouldSubmitQuickCaptureEditor(KeyRoutedEventArgs e)
+    {
+        if (e.Key != VirtualKey.Enter)
+        {
+            return false;
+        }
+
+        bool controlPressed = Win32Helper.IsKeyPressed(VirtualKey.Control);
+        return SettingsService.ShouldSubmitEditorOnEnter(
+            _settingsService.Settings.QuickCaptureEditorEnterBehavior,
+            controlPressed);
+    }
+
     private void OpenNewDetail(string? initialBody = null)
     {
         _detailItem = null;

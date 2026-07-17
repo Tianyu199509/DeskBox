@@ -7,12 +7,16 @@ public static class WidgetSegmentedLayoutHelper
 {
     public static void ApplyNaturalItemWidths(Segmented segmented)
     {
-        if (segmented.Items.Count == 0)
+        var visibleItems = segmented.Items
+            .OfType<SegmentedItem>()
+            .Where(item => item.Visibility == Visibility.Visible)
+            .ToList();
+        if (visibleItems.Count == 0)
         {
             return;
         }
 
-        foreach (var item in segmented.Items.OfType<SegmentedItem>())
+        foreach (var item in visibleItems)
         {
             item.Width = double.NaN;
             item.MaxWidth = double.PositiveInfinity;
@@ -24,13 +28,17 @@ public static class WidgetSegmentedLayoutHelper
 
     public static void ApplyEqualItemWidths(Segmented segmented)
     {
-        if (segmented.ActualWidth <= 0 || segmented.Items.Count == 0)
+        var visibleItems = segmented.Items
+            .OfType<SegmentedItem>()
+            .Where(item => item.Visibility == Visibility.Visible)
+            .ToList();
+        if (segmented.ActualWidth <= 0 || visibleItems.Count == 0)
         {
             return;
         }
 
-        double itemWidth = Math.Max(0, Math.Floor(segmented.ActualWidth / segmented.Items.Count));
-        foreach (var item in segmented.Items.OfType<SegmentedItem>())
+        double itemWidth = Math.Max(0, Math.Floor(segmented.ActualWidth / visibleItems.Count));
+        foreach (var item in visibleItems)
         {
             item.Width = itemWidth;
             item.MaxWidth = itemWidth;

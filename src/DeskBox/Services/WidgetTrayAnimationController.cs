@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Numerics;
+using DeskBox.Helpers;
 using Microsoft.UI;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Windowing;
@@ -44,6 +45,15 @@ public sealed class WidgetTrayAnimationController
     private double? _offsetOverrideX;
     private double? _offsetOverrideY;
     private Microsoft.UI.Composition.Visual? _cachedRootVisual;
+    private bool _isWindowCloakedForTrayShow;
+    private double _preparedOffsetX;
+    private double _preparedOffsetY;
+    private float _preparedOpacity = RestingOpacity;
+    private float _preparedScale = RestingScale;
+    private EventHandler<object>? _contentReadyRenderingHandler;
+    private int _contentReadyFrameCount;
+    private long _contentReadyGeneration;
+    private Action? _contentReadyAction;
 
     private bool _isRendering;
     private Stopwatch? _renderStopwatch;
@@ -92,6 +102,62 @@ public sealed class WidgetTrayAnimationController
     {
         _offsetOverrideX = offsetX;
         _offsetOverrideY = offsetY;
+    }
+
+    public void CloakWindowForTrayShow()
+    {
+        if (_isWindowCloakedForTrayShow)
+        {
+            return;
+        }
+
+        int cloaked = 1;
+        int result = Win32Helper.DwmSetWindowAttribute(
+            _windowHandle,
+            Win32Helper.DWMWA_CLOAK,
+            ref cloaked,
+            sizeof(int));
+        if (result == 0)
+        {
+            _isWindowCloakedForTrayShow = true;
+        }
+        else
+        {
+            _log($"CloakWindow failed hresult=0x{result:X8}");
+        }
+    }
+
+    public void RevealWindowForTrayShow()
+    {
+        if (!_isWindowCloakedForTrayShow)
+        {
+            return;
+        }
+
+        int cloaked = 0;
+        int result = Win32Helper.DwmSetWindowAttribute(
+            _windowHandle,
+            Win32Helper.DWMWA_CLOAK,
+            ref cloaked,
+            sizeof(int));
+        if (result == 0)
+        {
+            _isWindowCloakedForTrayShow = false;
+        }
+        else
+        {
+            _log($"RevealWindow failed hresult=0x{result:X8}");
+        }
+    }
+
+    public void PlayAfterContentReady(Action action)
+    {
+        CancelContentReadyCallback();
+        _contentReadyGeneration = Generation;
+        _contentReadyFrameCount = 0;
+        _contentReadyAction = action;
+        _contentReadyRenderingHandler = OnContentReadyRenderingFrame;
+        CompositionTarget.Rendering += _contentReadyRenderingHandler;
     }
 
     public WidgetTrayAnimationProfile CreateProfile(WidgetAnimationOptions options)
@@ -165,7 +231,7 @@ public sealed class WidgetTrayAnimationController
                 durationMs, true),
             SettingsService.WidgetAnimationEffectSlideFade => new WidgetTrayAnimationProfile(
                 dirX, dirY, dirX, dirY,
-                SoftOpacity, SoftOpacity,
+                RestingOpacity, RestingOpacity,
                 RestingScale, RestingScale,
                 durationMs, true),
             SettingsService.WidgetAnimationEffectScaleSlide => new WidgetTrayAnimationProfile(
@@ -183,6 +249,10 @@ public sealed class WidgetTrayAnimationController
 
     public void PrepareVisualState(double offsetX, double offsetY, float opacity, float scale)
     {
+        _preparedOffsetX = offsetX;
+        _preparedOffsetY = offsetY;
+        _preparedOpacity = opacity;
+        _preparedScale = scale;
         var bounds = _getAnimationBounds();
         _targetPosition = new PointInt32(
             (int)Math.Round(bounds.X),
@@ -201,6 +271,16 @@ public sealed class WidgetTrayAnimationController
 
     public void PrepareHiddenState()
     {
+        // PrepareTrayShowAnimation already established the effect-specific start state.
+        // Do not replace it with an empty XAML surface after the native window is shown.
+        if (_targetPosition.HasValue)
+        {
+            ApplyWindowOffset(_preparedOffsetX, _preparedOffsetY);
+            ApplyOpacity(_preparedOpacity);
+            ApplyScale(_preparedScale);
+            return;
+        }
+
         _rootElement.Opacity = 1;
         var visual = GetCachedRootVisual();
         StopVisualAnimations(visual);
@@ -324,6 +404,7 @@ public sealed class WidgetTrayAnimationController
 
     public void Stop()
     {
+        CancelContentReadyCallback();
         StopRendering();
 
         if (_cachedRootVisual is { } visual)
@@ -338,6 +419,38 @@ public sealed class WidgetTrayAnimationController
                 // being torn down. Swallow to avoid stowed WinRT exceptions.
             }
         }
+    }
+
+    private void OnContentReadyRenderingFrame(object? sender, object e)
+    {
+        if (_contentReadyGeneration != Generation)
+        {
+            CancelContentReadyCallback();
+            return;
+        }
+
+        // The first frame commits the newly shown XAML surface while the HWND
+        // is still outside the work area. Start moving on the following frame.
+        if (++_contentReadyFrameCount < 2)
+        {
+            return;
+        }
+
+        Action? action = _contentReadyAction;
+        CancelContentReadyCallback();
+        action?.Invoke();
+    }
+
+    private void CancelContentReadyCallback()
+    {
+        if (_contentReadyRenderingHandler is not null)
+        {
+            CompositionTarget.Rendering -= _contentReadyRenderingHandler;
+            _contentReadyRenderingHandler = null;
+        }
+
+        _contentReadyAction = null;
+        _contentReadyFrameCount = 0;
     }
 
     public void StopAndRestoreWindowPosition()
@@ -373,7 +486,7 @@ public sealed class WidgetTrayAnimationController
             IsApplyingBounds = true;
             try
             {
-                _appWindow.Move(target);
+                MoveNativeWindow(target);
             }
             finally
             {
@@ -419,12 +532,17 @@ public sealed class WidgetTrayAnimationController
         IsApplyingBounds = true;
         try
         {
-            _appWindow.Move(nextPosition);
+            MoveNativeWindow(nextPosition);
         }
         finally
         {
             IsApplyingBounds = false;
         }
+    }
+
+    private void MoveNativeWindow(PointInt32 position)
+    {
+        _appWindow.Move(position);
     }
 
     private void ApplyOpacity(float opacity)

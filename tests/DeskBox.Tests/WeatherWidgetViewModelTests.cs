@@ -31,4 +31,49 @@ public sealed class WeatherWidgetViewModelTests
 
         Assert.Equal("Compact", layout);
     }
+
+    [Fact]
+    public void ResponsiveTransition_ExpandingPreselectsFinalLayoutAndIgnoresIntermediateSizes()
+    {
+        WeatherWidgetViewModel viewModel = CreateViewModel();
+
+        viewModel.UpdateAvailableSize(150, 104);
+        viewModel.BeginResponsiveLayoutTransition(320, 260, isCollapsing: false);
+        viewModel.UpdateAvailableSize(190, 140);
+        viewModel.UpdateAvailableSize(255, 180);
+
+        Assert.Equal("Detailed", viewModel.LayoutMode);
+
+        viewModel.CompleteResponsiveLayoutTransition(320, 260);
+        Assert.Equal("Detailed", viewModel.LayoutMode);
+    }
+
+    [Fact]
+    public void ResponsiveTransition_CollapsingKeepsExpandedLayoutUntilContentIsHidden()
+    {
+        WeatherWidgetViewModel viewModel = CreateViewModel();
+
+        viewModel.UpdateAvailableSize(320, 260);
+        viewModel.BeginResponsiveLayoutTransition(150, 104, isCollapsing: true);
+        viewModel.UpdateAvailableSize(255, 180);
+        viewModel.UpdateAvailableSize(190, 140);
+
+        Assert.Equal("Detailed", viewModel.LayoutMode);
+
+        viewModel.CompleteResponsiveLayoutTransition(150, 104);
+        Assert.Equal("Mini", viewModel.LayoutMode);
+    }
+
+    private static WeatherWidgetViewModel CreateViewModel()
+    {
+        return new WeatherWidgetViewModel(
+            new DeskBox.Models.WidgetConfig
+            {
+                Id = Guid.NewGuid().ToString("N"),
+                Name = "Weather",
+                WidgetKind = DeskBox.Models.WidgetKind.Weather
+            },
+            new DeskBox.Services.WeatherService(),
+            TestServices.CreateLocalizationService());
+    }
 }

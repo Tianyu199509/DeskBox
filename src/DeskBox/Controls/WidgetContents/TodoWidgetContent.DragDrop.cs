@@ -323,9 +323,12 @@ public sealed partial class TodoWidgetContent
     {
         return TodoFilterSegmented?.SelectedIndex switch
         {
-            1 => TodoFilter.Today,
-            2 => TodoFilter.Important,
-            3 => TodoFilter.Completed,
+            1 => TodoFilter.Active,
+            2 => TodoFilter.Today,
+            3 => TodoFilter.ThisWeek,
+            4 => TodoFilter.ThisMonth,
+            5 => TodoFilter.Important,
+            6 => TodoFilter.Completed,
             _ => TodoFilter.All
         };
     }
@@ -334,9 +337,12 @@ public sealed partial class TodoWidgetContent
     {
         return filter switch
         {
-            TodoFilter.Today => 1,
-            TodoFilter.Important => 2,
-            TodoFilter.Completed => 3,
+            TodoFilter.Active => 1,
+            TodoFilter.Today => 2,
+            TodoFilter.ThisWeek => 3,
+            TodoFilter.ThisMonth => 4,
+            TodoFilter.Important => 5,
+            TodoFilter.Completed => 6,
             _ => 0
         };
     }
@@ -435,24 +441,28 @@ public sealed partial class TodoWidgetContent
     {
         var draggedItem = e.Items.OfType<TodoItemViewModel>().FirstOrDefault();
         var selectedItems = GetSelectedCopyItemsInVisibleOrder();
+        _draggedTodoItemIds.Clear();
+        _todoTabDropHandled = false;
         if (draggedItem is not null &&
             selectedItems.Count > 0 &&
             selectedItems.Contains(draggedItem))
         {
             _draggedTodoItemId = null;
+            _draggedTodoItemIds.AddRange(selectedItems.Select(item => item.Id));
             TodoListView.CanReorderItems = false;
             string text = selectedItems.Count == 1
                 ? TodoClipboardFormatter.FormatSingle(selectedItems[0], App.Current.LocalizationService)
                 : TodoClipboardFormatter.FormatBatch(selectedItems, App.Current.LocalizationService);
             if (string.IsNullOrWhiteSpace(text))
             {
+                _draggedTodoItemIds.Clear();
                 e.Cancel = true;
                 ResetTodoReorderVisualState();
                 return;
             }
 
             DeskBoxDragData.SetText(e.Data, text, DeskBoxDragData.SourceTodo);
-            e.Data.RequestedOperation = DataPackageOperation.Copy;
+            e.Data.RequestedOperation = DataPackageOperation.Copy | DataPackageOperation.Move;
             e.Data.Properties.Title = App.Current.LocalizationService.Format("Todo.CopiedCount", selectedItems.Count);
             return;
         }
@@ -465,6 +475,7 @@ public sealed partial class TodoWidgetContent
         _draggedTodoItemId = draggedItem?.Id;
         if (draggedItem is not null)
         {
+            _draggedTodoItemIds.Add(draggedItem.Id);
             TodoListView.CanReorderItems = true;
             DeskBoxDragData.SetText(
                 e.Data,
@@ -474,9 +485,83 @@ public sealed partial class TodoWidgetContent
         }
         else
         {
+            _draggedTodoItemIds.Clear();
             e.Cancel = true;
             ResetTodoReorderVisualState();
         }
+    }
+
+    private void TodoTab_DragOver(object sender, DragEventArgs e)
+    {
+        if (ViewModel is null ||
+            _draggedTodoItemIds.Count == 0 ||
+            sender is not FrameworkElement { Tag: string tag } ||
+            !TryGetTodoTabDropTarget(tag, out TodoFilter target) ||
+            !ViewModel.CanApplyTabDrop(_draggedTodoItemIds, target))
+        {
+            e.AcceptedOperation = DataPackageOperation.None;
+            return;
+        }
+
+        e.Handled = true;
+        e.AcceptedOperation = DataPackageOperation.Move;
+        e.DragUIOverride.IsGlyphVisible = true;
+        e.DragUIOverride.Caption = App.Current.LocalizationService.T(target switch
+        {
+            TodoFilter.Active => "Todo.DropTab.Active",
+            TodoFilter.Today => "Todo.DropTab.Today",
+            TodoFilter.Important => "Todo.DropTab.Important",
+            _ => "Todo.DropTab.Completed"
+        });
+    }
+
+    private async void TodoTab_Drop(object sender, DragEventArgs e)
+    {
+        if (ViewModel is null ||
+            _draggedTodoItemIds.Count == 0 ||
+            sender is not FrameworkElement { Tag: string tag } ||
+            !TryGetTodoTabDropTarget(tag, out TodoFilter target) ||
+            !ViewModel.CanApplyTabDrop(_draggedTodoItemIds, target))
+        {
+            e.AcceptedOperation = DataPackageOperation.None;
+            return;
+        }
+
+        e.Handled = true;
+        _todoTabDropHandled = true;
+        var deferral = e.GetDeferral();
+        try
+        {
+            int changedCount = await ViewModel.ApplyTabDropAsync(_draggedTodoItemIds.ToArray(), target);
+            e.AcceptedOperation = changedCount > 0
+                ? DataPackageOperation.Move
+                : DataPackageOperation.None;
+            if (changedCount > 0)
+            {
+                SelectFilter(target);
+                ShowUndoToast(
+                    App.Current.LocalizationService.Format("Todo.DropTab.Applied", changedCount),
+                    durationMs: CopyToastMs,
+                    clearUndoOnHide: false);
+            }
+        }
+        finally
+        {
+            deferral.Complete();
+        }
+    }
+
+    private static bool TryGetTodoTabDropTarget(string tag, out TodoFilter target)
+    {
+        target = tag switch
+        {
+            "Active" => TodoFilter.Active,
+            "Today" => TodoFilter.Today,
+            "Important" => TodoFilter.Important,
+            "Completed" => TodoFilter.Completed,
+            _ => TodoFilter.All
+        };
+        return target is TodoFilter.Active or TodoFilter.Today or TodoFilter.Important or TodoFilter.Completed;
     }
 
     private void TodoItem_DataContextChanged(FrameworkElement sender, DataContextChangedEventArgs args)
@@ -494,7 +579,17 @@ public sealed partial class TodoWidgetContent
 
     private async void TodoListView_DragItemsCompleted(ListViewBase sender, DragItemsCompletedEventArgs args)
     {
+        bool tabDropHandled = _todoTabDropHandled;
+        _todoTabDropHandled = false;
+        _draggedTodoItemIds.Clear();
         if (ViewModel is null || string.IsNullOrWhiteSpace(_draggedTodoItemId))
+        {
+            _draggedTodoItemId = null;
+            ResetTodoReorderVisualState();
+            return;
+        }
+
+        if (tabDropHandled)
         {
             _draggedTodoItemId = null;
             ResetTodoReorderVisualState();
@@ -519,7 +614,7 @@ public sealed partial class TodoWidgetContent
 
     private async void RootGrid_DragOver(object sender, DragEventArgs e)
     {
-        if (!string.IsNullOrWhiteSpace(_draggedTodoItemId))
+        if (_draggedTodoItemIds.Count > 0)
         {
             return;
         }
@@ -530,7 +625,7 @@ public sealed partial class TodoWidgetContent
 
     private async void TodoListView_DragOver(object sender, DragEventArgs e)
     {
-        if (!string.IsNullOrWhiteSpace(_draggedTodoItemId))
+        if (_draggedTodoItemIds.Count > 0)
         {
             return;
         }
@@ -570,7 +665,7 @@ public sealed partial class TodoWidgetContent
 
     private async void RootGrid_Drop(object sender, DragEventArgs e)
     {
-        if (!string.IsNullOrWhiteSpace(_draggedTodoItemId))
+        if (_draggedTodoItemIds.Count > 0)
         {
             return;
         }

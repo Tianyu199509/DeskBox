@@ -13,10 +13,11 @@ internal static class DetailPageTransitionHelper
 
     public static void PlayEnter(UIElement element)
     {
+        ElementCompositionPreview.SetIsTranslationEnabled(element, true);
         var visual = ElementCompositionPreview.GetElementVisual(element);
         var compositor = visual.Compositor;
         visual.StopAnimation("Opacity");
-        visual.StopAnimation("Offset");
+        visual.StopAnimation("Translation");
 
         var easing = compositor.CreateCubicBezierEasingFunction(
             new Vector2(0.16f, 1f),
@@ -26,24 +27,25 @@ internal static class DetailPageTransitionHelper
         opacityAnimation.InsertKeyFrame(0f, 0.28f);
         opacityAnimation.InsertKeyFrame(1f, 1f, easing);
 
-        var offsetAnimation = compositor.CreateVector3KeyFrameAnimation();
-        offsetAnimation.Duration = TimeSpan.FromMilliseconds(EnterDurationMs);
-        offsetAnimation.InsertKeyFrame(0f, new Vector3(0, EnterOffsetY, 0));
-        offsetAnimation.InsertKeyFrame(1f, Vector3.Zero, easing);
+        var translationAnimation = compositor.CreateVector3KeyFrameAnimation();
+        translationAnimation.Duration = TimeSpan.FromMilliseconds(EnterDurationMs);
+        translationAnimation.InsertKeyFrame(0f, new Vector3(0, EnterOffsetY, 0));
+        translationAnimation.InsertKeyFrame(1f, Vector3.Zero, easing);
 
         element.Opacity = 1;
+        element.Translation = Vector3.Zero;
         visual.Opacity = 1f;
-        visual.Offset = Vector3.Zero;
         visual.StartAnimation("Opacity", opacityAnimation);
-        visual.StartAnimation("Offset", offsetAnimation);
+        visual.StartAnimation("Translation", translationAnimation);
     }
 
     public static async Task PlayExitAsync(UIElement element)
     {
+        ElementCompositionPreview.SetIsTranslationEnabled(element, true);
         var visual = ElementCompositionPreview.GetElementVisual(element);
         var compositor = visual.Compositor;
         visual.StopAnimation("Opacity");
-        visual.StopAnimation("Offset");
+        visual.StopAnimation("Translation");
 
         var easing = compositor.CreateCubicBezierEasingFunction(
             new Vector2(0.4f, 0f),
@@ -53,26 +55,27 @@ internal static class DetailPageTransitionHelper
         opacityAnimation.InsertKeyFrame(0f, 1f);
         opacityAnimation.InsertKeyFrame(1f, 0f, easing);
 
-        var offsetAnimation = compositor.CreateVector3KeyFrameAnimation();
-        offsetAnimation.Duration = TimeSpan.FromMilliseconds(ExitDurationMs);
-        offsetAnimation.InsertKeyFrame(0f, Vector3.Zero);
-        offsetAnimation.InsertKeyFrame(1f, new Vector3(0, ExitOffsetY, 0), easing);
+        var translationAnimation = compositor.CreateVector3KeyFrameAnimation();
+        translationAnimation.Duration = TimeSpan.FromMilliseconds(ExitDurationMs);
+        translationAnimation.InsertKeyFrame(0f, Vector3.Zero);
+        translationAnimation.InsertKeyFrame(1f, new Vector3(0, ExitOffsetY, 0), easing);
 
+        element.Translation = new Vector3(0, ExitOffsetY, 0);
         visual.Opacity = 0f;
-        visual.Offset = new Vector3(0, ExitOffsetY, 0);
         visual.StartAnimation("Opacity", opacityAnimation);
-        visual.StartAnimation("Offset", offsetAnimation);
+        visual.StartAnimation("Translation", translationAnimation);
 
         await Task.Delay(ExitDurationMs);
     }
 
     public static void Reset(UIElement element)
     {
+        ElementCompositionPreview.SetIsTranslationEnabled(element, true);
         var visual = ElementCompositionPreview.GetElementVisual(element);
         visual.StopAnimation("Opacity");
-        visual.StopAnimation("Offset");
+        visual.StopAnimation("Translation");
         element.Opacity = 1;
+        element.Translation = Vector3.Zero;
         visual.Opacity = 1f;
-        visual.Offset = Vector3.Zero;
     }
 }

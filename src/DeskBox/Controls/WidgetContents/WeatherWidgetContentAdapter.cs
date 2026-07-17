@@ -6,7 +6,7 @@ using Microsoft.UI.Xaml;
 
 namespace DeskBox.Controls.WidgetContents;
 
-public sealed class WeatherWidgetContentAdapter : IWidgetContent, IDisposable
+public sealed class WeatherWidgetContentAdapter : IWidgetContent, IWidgetResponsiveLayoutContent, IDisposable
 {
     private readonly Func<WeatherWidgetViewModel, FrameworkElement> _viewFactory;
     private FrameworkElement? _view;
@@ -70,6 +70,29 @@ public sealed class WeatherWidgetContentAdapter : IWidgetContent, IDisposable
     public void OnWindowVisibilityChanged(bool visible)
     {
         ViewModel.OnWindowVisibilityChanged(visible);
+    }
+
+    public void BeginResponsiveLayoutTransition(
+        double targetContentWidth,
+        double targetContentHeight,
+        bool isCollapsing)
+    {
+        ViewModel.BeginResponsiveLayoutTransition(
+            targetContentWidth,
+            targetContentHeight,
+            isCollapsing);
+    }
+
+    public void CompleteResponsiveLayoutTransition(
+        double finalContentWidth,
+        double finalContentHeight)
+    {
+        ViewModel.CompleteResponsiveLayoutTransition(finalContentWidth, finalContentHeight);
+    }
+
+    public void CancelResponsiveLayoutTransition()
+    {
+        ViewModel.CancelResponsiveLayoutTransition();
     }
 
     public void Dispose()

@@ -40,7 +40,19 @@ public partial class SettingsViewModel
         bool quickCaptureShowCreatedTime = settings.QuickCaptureShowCreatedTime;
         string quickCaptureDefaultView = NormalizeQuickCaptureDefaultView(settings.QuickCaptureDefaultView);
         string quickCaptureTabStyle = SettingsService.NormalizeWidgetTabStyle(settings.QuickCaptureTabStyle);
+        bool quickCaptureShowTabBar = settings.QuickCaptureShowTabBar;
+        bool quickCaptureShowRecordsTab = settings.QuickCaptureShowRecordsTab;
+        bool quickCaptureShowPinnedTab = settings.QuickCaptureShowPinnedTab;
+        bool quickCaptureShowRecentTab = settings.QuickCaptureShowRecentTab;
         bool todoEnabled = FeatureWidgetSettings.IsEnabled(settings, WidgetKind.Todo);
+        bool todoShowTabBar = settings.TodoShowTabBar;
+        bool todoShowAllTab = settings.TodoShowAllTab;
+        bool todoShowActiveTab = settings.TodoShowActiveTab;
+        bool todoShowTodayTab = settings.TodoShowTodayTab;
+        bool todoShowThisWeekTab = settings.TodoShowThisWeekTab;
+        bool todoShowThisMonthTab = settings.TodoShowThisMonthTab;
+        bool todoShowImportantTab = settings.TodoShowImportantTab;
+        bool todoShowCompletedTab = settings.TodoShowCompletedTab;
         bool todoShowCompletedTasks = settings.TodoShowCompletedTasks;
         bool todoShowFooterStats = settings.TodoShowFooterStats;
         bool todoShowClearCompletedButton = settings.TodoShowClearCompletedButton;
@@ -79,6 +91,8 @@ public partial class SettingsViewModel
         _isApplyingSettingsSnapshot = true;
         try
         {
+            ApplyContentEditorSettingsSnapshot(settings);
+
             if (WidgetCapsuleModeEnabled != widgetCapsuleModeEnabled)
             {
                 WidgetCapsuleModeEnabled = widgetCapsuleModeEnabled;
@@ -130,10 +144,24 @@ public partial class SettingsViewModel
                 SelectedQuickCaptureTabStyle = quickCaptureTabStyle;
             }
 
+            if (QuickCaptureShowTabBar != quickCaptureShowTabBar) QuickCaptureShowTabBar = quickCaptureShowTabBar;
+            if (QuickCaptureShowRecordsTab != quickCaptureShowRecordsTab) QuickCaptureShowRecordsTab = quickCaptureShowRecordsTab;
+            if (QuickCaptureShowPinnedTab != quickCaptureShowPinnedTab) QuickCaptureShowPinnedTab = quickCaptureShowPinnedTab;
+            if (QuickCaptureShowRecentTab != quickCaptureShowRecentTab) QuickCaptureShowRecentTab = quickCaptureShowRecentTab;
+
             if (TodoEnabled != todoEnabled)
             {
                 TodoEnabled = todoEnabled;
             }
+
+            if (TodoShowTabBar != todoShowTabBar) TodoShowTabBar = todoShowTabBar;
+            if (TodoShowAllTab != todoShowAllTab) TodoShowAllTab = todoShowAllTab;
+            if (TodoShowActiveTab != todoShowActiveTab) TodoShowActiveTab = todoShowActiveTab;
+            if (TodoShowTodayTab != todoShowTodayTab) TodoShowTodayTab = todoShowTodayTab;
+            if (TodoShowThisWeekTab != todoShowThisWeekTab) TodoShowThisWeekTab = todoShowThisWeekTab;
+            if (TodoShowThisMonthTab != todoShowThisMonthTab) TodoShowThisMonthTab = todoShowThisMonthTab;
+            if (TodoShowImportantTab != todoShowImportantTab) TodoShowImportantTab = todoShowImportantTab;
+            if (TodoShowCompletedTab != todoShowCompletedTab) TodoShowCompletedTab = todoShowCompletedTab;
 
             if (TodoShowCompletedTasks != todoShowCompletedTasks)
             {
@@ -184,6 +212,8 @@ public partial class SettingsViewModel
             {
                 ShowFileItemPathTooltips = showFileItemPathTooltips;
             }
+
+            ApplyFileStackSettingsSnapshot(settings);
 
             if (ShowHoverButtons != showHoverButtons)
             {
@@ -307,6 +337,7 @@ public partial class SettingsViewModel
         OnPropertyChanged(nameof(QuickCaptureStatusText));
         OnPropertyChanged(nameof(QuickCaptureDependencyStatusText));
         OnPropertyChanged(nameof(FeatureWidgetEntries));
+        NotifyCapsuleOverridePropertiesChanged();
         RefreshQuickCaptureClipboardDiagnostics();
     }
 
@@ -348,6 +379,7 @@ public partial class SettingsViewModel
         OnPropertyChanged(nameof(QuickCaptureDependencyStatusText));
         OnPropertyChanged(nameof(QuickCaptureRecentLimitText));
         OnPropertyChanged(nameof(FeatureWidgetEntries));
+        NotifyCapsuleOverridePropertiesChanged();
 OnPropertyChanged(nameof(WeatherCitySearchPlaceholder));
 OnPropertyChanged(nameof(WeatherCityNoResultsText));
 RefreshWeatherCityPopularCities();
@@ -356,6 +388,7 @@ RefreshWeatherCityPopularCities();
 
     private void RefreshSelectionProperties()
     {
+        RefreshFileStackSelectionProperties();
         _cachedThemeDisplayNames = null;
         _cachedTrayIconStyleDisplayNames = null;
         _cachedLanguageDisplayNames = null;
@@ -424,6 +457,7 @@ RefreshWeatherCityPopularCities();
         OnPropertyChanged(nameof(AvailableTodoTabStyleDisplayNames));
         OnPropertyChanged(nameof(AvailableTodoReminderOffsetDisplayNames));
         OnPropertyChanged(nameof(AvailableMusicDisplayModeDisplayNames));
+        RefreshContentEditorLocalizedProperties();
         OnPropertyChanged(nameof(SelectedThemeText));
         OnPropertyChanged(nameof(SelectedThemeIndex));
         OnPropertyChanged(nameof(SelectedTrayIconStyleText));

@@ -37,6 +37,46 @@ public partial class SettingsViewModel
         RefreshQuickCaptureClipboardDiagnostics();
     }
 
+    partial void OnQuickCaptureShowTabBarChanged(bool value) => PersistQuickCaptureTabSettings();
+    partial void OnQuickCaptureShowRecordsTabChanged(bool value) => PersistQuickCaptureTabSettings();
+    partial void OnQuickCaptureShowPinnedTabChanged(bool value) => PersistQuickCaptureTabSettings();
+    partial void OnQuickCaptureShowRecentTabChanged(bool value) => PersistQuickCaptureTabSettings();
+
+    private void PersistQuickCaptureTabSettings()
+    {
+        if (_isRestoringDefaults || _isApplyingSettingsSnapshot)
+        {
+            return;
+        }
+
+        var settings = _settingsService.Settings;
+        settings.QuickCaptureShowTabBar = QuickCaptureShowTabBar;
+        settings.QuickCaptureShowRecordsTab = QuickCaptureShowRecordsTab;
+        settings.QuickCaptureShowPinnedTab = QuickCaptureShowPinnedTab;
+        settings.QuickCaptureShowRecentTab = QuickCaptureShowRecentTab;
+        if (!QuickCaptureShowRecordsTab && !QuickCaptureShowPinnedTab && !QuickCaptureShowRecentTab)
+        {
+            _isApplyingSettingsSnapshot = true;
+            try
+            {
+                QuickCaptureShowRecordsTab = true;
+            }
+            finally
+            {
+                _isApplyingSettingsSnapshot = false;
+            }
+
+            settings.QuickCaptureShowRecordsTab = true;
+        }
+
+        if (!SettingsService.IsQuickCaptureTabVisible(settings, settings.QuickCaptureDefaultView))
+        {
+            SelectedQuickCaptureDefaultView = SettingsService.GetFirstVisibleQuickCaptureTab(settings);
+        }
+
+        _settingsService.SaveDebounced();
+    }
+
     private async Task SyncQuickCaptureEnabledAsync(bool value)
     {
         try
@@ -72,6 +112,56 @@ public partial class SettingsViewModel
         _ = SyncTodoEnabledAsync(value);
         OnPropertyChanged(nameof(FeatureWidgetEntries));
         App.Current?.TodoReminderService?.Refresh();
+    }
+
+    partial void OnTodoShowTabBarChanged(bool value) => PersistTodoTabSettings();
+    partial void OnTodoShowAllTabChanged(bool value) => PersistTodoTabSettings();
+    partial void OnTodoShowActiveTabChanged(bool value) => PersistTodoTabSettings();
+    partial void OnTodoShowTodayTabChanged(bool value) => PersistTodoTabSettings();
+    partial void OnTodoShowThisWeekTabChanged(bool value) => PersistTodoTabSettings();
+    partial void OnTodoShowThisMonthTabChanged(bool value) => PersistTodoTabSettings();
+    partial void OnTodoShowImportantTabChanged(bool value) => PersistTodoTabSettings();
+    partial void OnTodoShowCompletedTabChanged(bool value) => PersistTodoTabSettings();
+
+    private void PersistTodoTabSettings()
+    {
+        if (_isRestoringDefaults || _isApplyingSettingsSnapshot)
+        {
+            return;
+        }
+
+        var settings = _settingsService.Settings;
+        settings.TodoShowTabBar = TodoShowTabBar;
+        settings.TodoShowAllTab = TodoShowAllTab;
+        settings.TodoShowActiveTab = TodoShowActiveTab;
+        settings.TodoShowTodayTab = TodoShowTodayTab;
+        settings.TodoShowThisWeekTab = TodoShowThisWeekTab;
+        settings.TodoShowThisMonthTab = TodoShowThisMonthTab;
+        settings.TodoShowImportantTab = TodoShowImportantTab;
+        settings.TodoShowCompletedTab = TodoShowCompletedTab;
+        if (!TodoShowAllTab && !TodoShowActiveTab && !TodoShowTodayTab &&
+            !TodoShowThisWeekTab && !TodoShowThisMonthTab &&
+            !TodoShowImportantTab && !TodoShowCompletedTab)
+        {
+            _isApplyingSettingsSnapshot = true;
+            try
+            {
+                TodoShowAllTab = true;
+            }
+            finally
+            {
+                _isApplyingSettingsSnapshot = false;
+            }
+
+            settings.TodoShowAllTab = true;
+        }
+
+        if (!SettingsService.IsTodoTabVisible(settings, settings.TodoDefaultFilter))
+        {
+            SelectedTodoDefaultFilter = SettingsService.GetFirstVisibleTodoTab(settings);
+        }
+
+        _settingsService.SaveDebounced();
     }
 
     partial void OnTodoShowCompletedTasksChanged(bool value)

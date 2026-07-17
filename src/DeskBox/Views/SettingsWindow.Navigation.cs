@@ -102,6 +102,11 @@ public sealed partial class SettingsWindow
         AppearanceSection.Visibility = sectionTag == "Appearance" ? Visibility.Visible : Visibility.Collapsed;
         CapsuleModeSection.Visibility = sectionTag == "CapsuleMode" ? Visibility.Visible : Visibility.Collapsed;
         AppearanceDetailSection.Visibility = sectionTag == "AppearanceDetail" ? Visibility.Visible : Visibility.Collapsed;
+        FileStackSettingsSection.Visibility = sectionTag == "FileStackSettings" ? Visibility.Visible : Visibility.Collapsed;
+        if (sectionTag == "FileStackSettings")
+        {
+            _ = ViewModel.RefreshFileStackRulePreviewFromDiskAsync();
+        }
         FeatureWidgetsSection.Visibility = sectionTag == "FeatureWidgets" ? Visibility.Visible : Visibility.Collapsed;
         if (sectionTag == "FeatureWidgets")
         {
@@ -208,6 +213,19 @@ WeatherSettingsSection.Visibility = sectionTag == "WeatherSettings" ? Visibility
             case "MusicDisplayMode":
                 ViewModel.SelectedMusicDisplayMode = ViewModel.AvailableMusicDisplayModes[combo.SelectedIndex];
                 break;
+            case "FileStackGroupBy":
+                ViewModel.SelectedFileStackGroupBy = ViewModel.AvailableFileStackGroupBys[combo.SelectedIndex];
+                break;
+            case "FileStackThreshold":
+                ViewModel.SelectedFileStackThreshold = ViewModel.AvailableFileStackThresholds[combo.SelectedIndex];
+                break;
+            case "FileStackOrderBy":
+                ViewModel.SelectedFileStackOrderBy = ViewModel.AvailableFileStackOrderBys[combo.SelectedIndex];
+                break;
+            case "FileStackUnmatchedBehavior":
+                ViewModel.SelectedFileStackUnmatchedBehavior =
+                    ViewModel.AvailableFileStackUnmatchedBehaviors[combo.SelectedIndex];
+                break;
             case "WidgetCorner":
                 ViewModel.SelectedWidgetCornerPreference = ViewModel.AvailableWidgetCornerPreferences[combo.SelectedIndex];
                 break;
@@ -274,6 +292,12 @@ WeatherSettingsSection.Visibility = sectionTag == "WeatherSettings" ? Visibility
             case "QuickCaptureTabStyle":
                 ViewModel.SelectedQuickCaptureTabStyle = ViewModel.AvailableWidgetTabStyles[combo.SelectedIndex];
                 break;
+            case "QuickCapturePreviewLines":
+                ViewModel.QuickCaptureItemPreviewLineCount = ViewModel.AvailableItemPreviewLineCounts[combo.SelectedIndex];
+                break;
+            case "QuickCaptureEnterBehavior":
+                ViewModel.QuickCaptureEditorEnterBehavior = ViewModel.AvailableEditorEnterBehaviors[combo.SelectedIndex];
+                break;
             case "TodoNewTaskPosition":
                 ViewModel.SelectedTodoNewTaskPosition = ViewModel.AvailableTodoNewTaskPositions[combo.SelectedIndex];
                 break;
@@ -285,6 +309,12 @@ WeatherSettingsSection.Visibility = sectionTag == "WeatherSettings" ? Visibility
                 break;
             case "TodoTabStyle":
                 ViewModel.SelectedTodoTabStyle = ViewModel.AvailableWidgetTabStyles[combo.SelectedIndex];
+                break;
+            case "TodoPreviewLines":
+                ViewModel.TodoItemPreviewLineCount = ViewModel.AvailableItemPreviewLineCounts[combo.SelectedIndex];
+                break;
+            case "TodoEnterBehavior":
+                ViewModel.TodoEditorEnterBehavior = ViewModel.AvailableEditorEnterBehaviors[combo.SelectedIndex];
                 break;
             case "TodoReminderOffset":
                 ViewModel.SelectedTodoReminderOffsetMinutes = ViewModel.AvailableTodoReminderOffsetMinutes[combo.SelectedIndex];
@@ -308,6 +338,50 @@ break;
                 ViewModel.SelectedTrayIconStyle = ViewModel.AvailableTrayIconStyles[combo.SelectedIndex];
                 break;
         }
+    }
+
+    private void NestedSettingsButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button { Tag: string sectionTag })
+        {
+            NavigateToSettingsSection(sectionTag);
+        }
+    }
+
+    private void AddFileStackRuleButton_Click(object sender, RoutedEventArgs e)
+    {
+        ViewModel.AddFileStackCustomRule();
+    }
+
+    private void RemoveFileStackRuleButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button { DataContext: FileStackCustomRuleEditor editor })
+        {
+            ViewModel.RemoveFileStackCustomRule(editor);
+        }
+    }
+
+    private void MoveFileStackRuleUpButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button { DataContext: FileStackCustomRuleEditor editor })
+        {
+            ViewModel.MoveFileStackCustomRule(editor, -1);
+        }
+    }
+
+    private void MoveFileStackRuleDownButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button { DataContext: FileStackCustomRuleEditor editor })
+        {
+            ViewModel.MoveFileStackCustomRule(editor, 1);
+        }
+    }
+
+    private void FileStackRulesListView_DragItemsCompleted(
+        ListViewBase sender,
+        DragItemsCompletedEventArgs args)
+    {
+        ViewModel.CommitFileStackCustomRuleOrder();
     }
 
     private void SettingsDropDownButton_Click(object sender, RoutedEventArgs e)

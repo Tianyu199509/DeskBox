@@ -87,6 +87,8 @@ public sealed partial class QuickCaptureWidgetViewModel
 
         UpdateEmptyStateText();
         RefreshAppearanceFromSettings();
+        ApplyTabVisibilityFromSettings();
+        OnPropertyChanged(nameof(ItemPreviewLineCount));
         OnPropertyChanged(nameof(CreatedTimeVisibility));
         OnPropertyChanged(nameof(RecentCaptureStatusText));
         OnPropertyChanged(nameof(RecentCaptureStatusVisibility));
@@ -111,6 +113,32 @@ public sealed partial class QuickCaptureWidgetViewModel
             item.UpdateSearchText(SearchText);
         }
     }
+
+    private void ApplyTabVisibilityFromSettings()
+    {
+        var settings = _settingsService.Settings;
+        _showTabBar = settings.QuickCaptureShowTabBar;
+        _showRecordsTab = settings.QuickCaptureShowRecordsTab;
+        _showPinnedTab = settings.QuickCaptureShowPinnedTab;
+        _showRecentTab = settings.QuickCaptureShowRecentTab;
+        OnPropertyChanged(nameof(TabBarVisibility));
+        OnPropertyChanged(nameof(RecordsTabVisibility));
+        OnPropertyChanged(nameof(PinnedTabVisibility));
+        OnPropertyChanged(nameof(RecentTabVisibility));
+        OnPropertyChanged(nameof(VisibleTabCount));
+
+        if (!IsViewVisible(SelectedView))
+        {
+            SelectedView = MapDefaultView(SettingsService.GetFirstVisibleQuickCaptureTab(settings));
+        }
+    }
+
+    private bool IsViewVisible(QuickCaptureViewMode view) => view switch
+    {
+        QuickCaptureViewMode.Pinned => _showPinnedTab,
+        QuickCaptureViewMode.Recent => _showRecentTab,
+        _ => _showRecordsTab
+    };
 
     private static double NormalizeDensity(double value) =>
         double.IsFinite(value)

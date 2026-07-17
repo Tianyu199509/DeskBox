@@ -3,6 +3,7 @@
 using DeskBox.Helpers;
 using DeskBox.Models;
 using DeskBox.Services;
+using DeskBox.ViewModels;
 using Microsoft.UI;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -53,7 +54,10 @@ public sealed partial class WidgetWindow
 
     private List<WidgetItem> GetSelectedItems()
     {
-        return GetActiveItemsView()?.SelectedItems.OfType<WidgetItem>().ToList() ?? [];
+        return GetActiveItemsView()?.SelectedItems
+            .OfType<WidgetItem>()
+            .Where(item => item is not WidgetStackItem)
+            .ToList() ?? [];
     }
 
     private WidgetItem? GetPrimarySelectedItem()
@@ -183,7 +187,7 @@ public sealed partial class WidgetWindow
 
     // ── Box selection (rubber band) ────────────────────────────
 
-    private void ItemsView_PointerPressed(object sender, PointerRoutedEventArgs e)
+    private async void ItemsView_PointerPressed(object sender, PointerRoutedEventArgs e)
     {
         if (sender is not ListViewBase listView)
         {
@@ -191,9 +195,24 @@ public sealed partial class WidgetWindow
         }
 
         var properties = e.GetCurrentPoint(listView).Properties;
+        bool canStartBoxSelection = CanStartBoxSelection(e.OriginalSource);
+        if (properties.IsLeftButtonPressed &&
+            canStartBoxSelection &&
+            !Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Control) &&
+            !Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Shift) &&
+            GetExpandedStack() is { } expandedStack)
+        {
+            RootGrid.Focus(FocusState.Programmatic);
+            listView.SelectedItems.Clear();
+            ApplySelectionState(listView);
+            e.Handled = true;
+            await SetStackExpandedWithAnimationAsync(expandedStack, expanded: false);
+            return;
+        }
+
         if (!properties.IsLeftButtonPressed ||
             Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Shift) ||
-            !CanStartBoxSelection(e.OriginalSource))
+            !canStartBoxSelection)
         {
             return;
         }
@@ -267,6 +286,7 @@ public sealed partial class WidgetWindow
             properties.PointerUpdateKind == Microsoft.UI.Input.PointerUpdateKind.LeftButtonReleased &&
             e.OriginalSource is FrameworkElement element &&
             element.DataContext is WidgetItem item &&
+            item is not WidgetStackItem &&
             !Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Control) &&
             !Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Shift))
         {
@@ -454,7 +474,8 @@ public sealed partial class WidgetWindow
         var current = source;
         while (current is not null)
         {
-            if (current is Border border && border.Tag as string == "InteractiveSurface")
+            if (current is Border border &&
+                border.Tag as string is "InteractiveSurface" or "StackSurface")
             {
                 return true;
             }

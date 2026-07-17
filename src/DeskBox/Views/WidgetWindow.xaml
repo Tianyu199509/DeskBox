@@ -74,6 +74,324 @@
                     </Setter.Value>
                 </Setter>
             </Style>
+
+            <DataTemplate x:Key="FileIconItemTemplate">
+                <Grid
+                    Tag="ItemSlot"
+                    HorizontalAlignment="Left"
+                    VerticalAlignment="Top">
+                    <Border
+                        Tag="InteractiveSurface"
+                        CornerRadius="8"
+                        CanDrag="True"
+                        AllowDrop="True"
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Top"
+                        Loaded="WidgetItemSurface_Loaded"
+                        Unloaded="WidgetItemSurface_Unloaded"
+                        DragLeave="WidgetItemSurface_DragLeave"
+                        DragOver="WidgetItemSurface_DragOver"
+                        PointerEntered="WidgetItemSurface_PointerEntered"
+                        PointerExited="WidgetItemSurface_PointerExited"
+                        PointerPressed="WidgetItemSurface_PointerPressed"
+                        PointerReleased="WidgetItemSurface_PointerReleased"
+                        PointerCaptureLost="WidgetItemSurface_PointerCaptureLost"
+                        Drop="WidgetItemSurface_Drop"
+                        DragStarting="WidgetItemSurface_DragStarting"
+                        DropCompleted="WidgetItemSurface_DropCompleted">
+                        <StackPanel HorizontalAlignment="Center">
+                            <Grid HorizontalAlignment="Center" VerticalAlignment="Center">
+                                <Image
+                                    Source="{Binding Icon}"
+                                    HorizontalAlignment="Center"
+                                    VerticalAlignment="Center"
+                                    Visibility="{Binding IconVisibility}" />
+                                <FontIcon
+                                    Glyph="{Binding FallbackGlyph}"
+                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                    HorizontalAlignment="Center"
+                                    VerticalAlignment="Center"
+                                    Visibility="{Binding FallbackIconVisibility}" />
+                            </Grid>
+
+                            <TextBlock
+                                x:Name="IconItemNameText"
+                                HorizontalAlignment="Center"
+                                Margin="2,0,2,0"
+                                Text="{Binding Name}"
+                                TextAlignment="Center"
+                                TextTrimming="CharacterEllipsis"
+                                TextWrapping="Wrap"
+                                MaxLines="2" />
+                        </StackPanel>
+                    </Border>
+                </Grid>
+            </DataTemplate>
+
+            <DataTemplate x:Key="FileStackIconItemTemplate">
+                <Grid
+                    Width="{Binding TileWidth}"
+                    Height="{Binding TileHeight}"
+                    Margin="{Binding TileMargin}"
+                    HorizontalAlignment="Left"
+                    VerticalAlignment="Top">
+                    <Border
+                        Tag="StackSurface"
+                        AutomationProperties.Name="{Binding Name}"
+                        AutomationProperties.HelpText="{Binding Summary}"
+                        AutomationProperties.ItemStatus="{Binding AutomationState}"
+                        MaxWidth="{Binding TileWidth}"
+                        Padding="{Binding TilePadding}"
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Top"
+                        CornerRadius="8"
+                        Loaded="WidgetStackSurface_Loaded"
+                        Unloaded="WidgetStackSurface_Unloaded"
+                        PointerEntered="WidgetStackSurface_PointerEntered"
+                        PointerExited="WidgetStackSurface_PointerExited"
+                        PointerPressed="WidgetStackSurface_PointerPressed"
+                        PointerReleased="WidgetStackSurface_PointerReleased">
+                        <StackPanel HorizontalAlignment="Center" Spacing="4">
+                            <Grid Width="{Binding PreviewSize}" Height="{Binding PreviewSize}">
+                                <Grid
+                                    Tag="StackCollapsedPreview"
+                                    Visibility="{Binding CollapsedPreviewVisibility}">
+                                <Grid
+                                    Tag="StackPreviewLayer0"
+                                    Width="{Binding PreviewItemSize}"
+                                    Height="{Binding PreviewItemSize}"
+                                    HorizontalAlignment="Center"
+                                    VerticalAlignment="Center"
+                                    Opacity="0.72"
+                                    RenderTransformOrigin="0.5,0.82"
+                                    Visibility="{Binding ThirdPreviewVisibility}">
+                                    <Grid.RenderTransform>
+                                        <CompositeTransform Rotation="-7" ScaleX="0.70" ScaleY="0.70" TranslateX="-5" TranslateY="3" />
+                                    </Grid.RenderTransform>
+                                    <Image Source="{Binding PreviewThree.Icon}" Stretch="Uniform" Visibility="{Binding PreviewThree.IconVisibility}" />
+                                    <FontIcon FontSize="{Binding PreviewItemSize}" Foreground="{ThemeResource TextFillColorTertiaryBrush}" Glyph="{Binding PreviewThree.FallbackGlyph}" Visibility="{Binding PreviewThree.FallbackIconVisibility}" />
+                                </Grid>
+                                <Grid
+                                    Tag="StackPreviewLayer1"
+                                    Width="{Binding PreviewItemSize}"
+                                    Height="{Binding PreviewItemSize}"
+                                    HorizontalAlignment="Center"
+                                    VerticalAlignment="Center"
+                                    Opacity="0.88"
+                                    RenderTransformOrigin="0.5,0.82">
+                                    <Grid.RenderTransform>
+                                        <CompositeTransform Rotation="6" ScaleX="0.80" ScaleY="0.80" TranslateX="5" TranslateY="2" />
+                                    </Grid.RenderTransform>
+                                    <Image Source="{Binding PreviewTwo.Icon}" Stretch="Uniform" Visibility="{Binding PreviewTwo.IconVisibility}" />
+                                    <FontIcon FontSize="{Binding PreviewItemSize}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Glyph="{Binding PreviewTwo.FallbackGlyph}" Visibility="{Binding PreviewTwo.FallbackIconVisibility}" />
+                                </Grid>
+                                <Grid
+                                    Tag="StackPreviewLayer2"
+                                    Width="{Binding PreviewItemSize}"
+                                    Height="{Binding PreviewItemSize}"
+                                    HorizontalAlignment="Center"
+                                    VerticalAlignment="Center"
+                                    RenderTransformOrigin="0.5,0.82">
+                                    <Grid.RenderTransform>
+                                        <CompositeTransform ScaleX="0.90" ScaleY="0.90" TranslateY="-2" />
+                                    </Grid.RenderTransform>
+                                    <Image Source="{Binding PreviewOne.Icon}" Stretch="Uniform" Visibility="{Binding PreviewOne.IconVisibility}" />
+                                    <FontIcon FontSize="{Binding PreviewItemSize}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Glyph="{Binding PreviewOne.FallbackGlyph}" Visibility="{Binding PreviewOne.FallbackIconVisibility}" />
+                                </Grid>
+                                <Border
+                                    Tag="StackPreviewBadge"
+                                    MinWidth="16"
+                                    Height="16"
+                                    Padding="3,0"
+                                    Margin="0,0,1,1"
+                                    HorizontalAlignment="Right"
+                                    VerticalAlignment="Bottom"
+                                    Background="{ThemeResource AccentFillColorDefaultBrush}"
+                                    CornerRadius="8">
+                                    <TextBlock
+                                        HorizontalAlignment="Center"
+                                        VerticalAlignment="Center"
+                                        FontSize="9"
+                                        Foreground="{ThemeResource TextOnAccentFillColorPrimaryBrush}"
+                                        Text="{Binding CountText}" />
+                                </Border>
+                                </Grid>
+                                <Button
+                                    Tag="StackExpandedAnchor"
+                                    AutomationProperties.Name="{Binding CollapseText}"
+                                    Width="{Binding PreviewItemSize}"
+                                    Height="{Binding PreviewItemSize}"
+                                    Padding="0"
+                                    HorizontalAlignment="Center"
+                                    VerticalAlignment="Center"
+                                    Background="{ThemeResource SubtleFillColorSecondaryBrush}"
+                                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                                    BorderThickness="1"
+                                    Click="StackCollapseButton_Click"
+                                    CornerRadius="6"
+                                    IsTabStop="False"
+                                    ToolTipService.ToolTip="{Binding CollapseText}"
+                                    Visibility="{Binding ExpandedAnchorVisibility}">
+                                    <FontIcon
+                                        FontSize="12"
+                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                        Glyph="&#xE70E;" />
+                                </Button>
+                            </Grid>
+
+                            <Grid MaxWidth="{Binding LabelMaxWidth}">
+                                <TextBlock
+                                    Margin="2,0"
+                                    HorizontalAlignment="Center"
+                                    FontSize="{Binding LabelFontSize}"
+                                    MaxLines="2"
+                                    Text="{Binding Name}"
+                                    TextAlignment="Center"
+                                    TextTrimming="CharacterEllipsis"
+                                    TextWrapping="Wrap" />
+                                <FontIcon
+                                    Margin="0,0,1,0"
+                                    HorizontalAlignment="Right"
+                                    VerticalAlignment="Top"
+                                    FontSize="9"
+                                    Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                    Glyph="{Binding ChevronGlyph}"
+                                    Visibility="{Binding CollapsedPreviewVisibility}" />
+                            </Grid>
+                        </StackPanel>
+                    </Border>
+                </Grid>
+            </DataTemplate>
+
+            <DataTemplate x:Key="FileListItemTemplate">
+                <Grid HorizontalAlignment="Stretch">
+                    <Border
+                        Tag="InteractiveSurface"
+                        CornerRadius="8"
+                        CanDrag="True"
+                        AllowDrop="True"
+                        HorizontalAlignment="Left"
+                        Loaded="WidgetItemSurface_Loaded"
+                        Unloaded="WidgetItemSurface_Unloaded"
+                        DragLeave="WidgetItemSurface_DragLeave"
+                        DragOver="WidgetItemSurface_DragOver"
+                        PointerEntered="WidgetItemSurface_PointerEntered"
+                        PointerExited="WidgetItemSurface_PointerExited"
+                        PointerPressed="WidgetItemSurface_PointerPressed"
+                        PointerReleased="WidgetItemSurface_PointerReleased"
+                        PointerCaptureLost="WidgetItemSurface_PointerCaptureLost"
+                        Drop="WidgetItemSurface_Drop"
+                        DragStarting="WidgetItemSurface_DragStarting"
+                        DropCompleted="WidgetItemSurface_DropCompleted">
+                        <Grid ColumnSpacing="10" HorizontalAlignment="Left">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+
+                            <Grid VerticalAlignment="Center">
+                                <Image Source="{Binding Icon}" HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="{Binding IconVisibility}" />
+                                <FontIcon Glyph="{Binding FallbackGlyph}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="{Binding FallbackIconVisibility}" />
+                            </Grid>
+
+                            <StackPanel x:Name="ListItemTextHost" Grid.Column="1" VerticalAlignment="Center" HorizontalAlignment="Left" Spacing="1">
+                                <TextBlock x:Name="ListItemNameText" Text="{Binding Name}" HorizontalAlignment="Left" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" />
+                                <TextBlock x:Name="ListItemDetailText" FontSize="11" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="{Binding SecondaryInfo}" HorizontalAlignment="Left" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" />
+                            </StackPanel>
+                        </Grid>
+                    </Border>
+                </Grid>
+            </DataTemplate>
+
+            <DataTemplate x:Key="FileStackListItemTemplate">
+                <Border
+                    Tag="StackSurface"
+                    AutomationProperties.Name="{Binding Name}"
+                    AutomationProperties.HelpText="{Binding Summary}"
+                    AutomationProperties.ItemStatus="{Binding AutomationState}"
+                    Margin="{Binding ListMargin}"
+                    Padding="{Binding ListPadding}"
+                    HorizontalAlignment="Stretch"
+                    CornerRadius="8"
+                    Loaded="WidgetStackSurface_Loaded"
+                    Unloaded="WidgetStackSurface_Unloaded"
+                    PointerEntered="WidgetStackSurface_PointerEntered"
+                    PointerExited="WidgetStackSurface_PointerExited"
+                    PointerPressed="WidgetStackSurface_PointerPressed"
+                    PointerReleased="WidgetStackSurface_PointerReleased">
+                    <Grid ColumnSpacing="10">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto" />
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+
+                        <Grid Width="{Binding ListIconSize}" Height="{Binding ListIconSize}" VerticalAlignment="Center">
+                            <Grid Tag="StackCollapsedPreview" Visibility="{Binding CollapsedPreviewVisibility}">
+                            <Grid Tag="StackPreviewLayer0" Width="{Binding ListIconSize}" Height="{Binding ListIconSize}" Opacity="0.65" RenderTransformOrigin="0.5,0.8" Visibility="{Binding ThirdPreviewVisibility}">
+                                <Grid.RenderTransform>
+                                    <CompositeTransform Rotation="-8" ScaleX="0.68" ScaleY="0.68" TranslateX="-3" TranslateY="2" />
+                                </Grid.RenderTransform>
+                                <Image Source="{Binding PreviewThree.Icon}" Stretch="Uniform" Visibility="{Binding PreviewThree.IconVisibility}" />
+                                <FontIcon FontSize="{Binding ListIconSize}" Foreground="{ThemeResource TextFillColorTertiaryBrush}" Glyph="{Binding PreviewThree.FallbackGlyph}" Visibility="{Binding PreviewThree.FallbackIconVisibility}" />
+                            </Grid>
+                            <Grid Tag="StackPreviewLayer1" Width="{Binding ListIconSize}" Height="{Binding ListIconSize}" Opacity="0.84" RenderTransformOrigin="0.5,0.8">
+                                <Grid.RenderTransform>
+                                    <CompositeTransform Rotation="6" ScaleX="0.76" ScaleY="0.76" TranslateX="3" TranslateY="1" />
+                                </Grid.RenderTransform>
+                                <Image Source="{Binding PreviewTwo.Icon}" Stretch="Uniform" Visibility="{Binding PreviewTwo.IconVisibility}" />
+                                <FontIcon FontSize="{Binding ListIconSize}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Glyph="{Binding PreviewTwo.FallbackGlyph}" Visibility="{Binding PreviewTwo.FallbackIconVisibility}" />
+                            </Grid>
+                            <Grid Tag="StackPreviewLayer2" Width="{Binding ListIconSize}" Height="{Binding ListIconSize}" RenderTransformOrigin="0.5,0.8">
+                                <Grid.RenderTransform>
+                                    <CompositeTransform ScaleX="0.82" ScaleY="0.82" TranslateY="-1" />
+                                </Grid.RenderTransform>
+                                <Image Source="{Binding PreviewOne.Icon}" Stretch="Uniform" Visibility="{Binding PreviewOne.IconVisibility}" />
+                                <FontIcon FontSize="{Binding ListIconSize}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Glyph="{Binding PreviewOne.FallbackGlyph}" Visibility="{Binding PreviewOne.FallbackIconVisibility}" />
+                            </Grid>
+                            <Border Tag="StackPreviewBadge" MinWidth="14" Height="14" Padding="2,0" HorizontalAlignment="Right" VerticalAlignment="Bottom" Background="{ThemeResource AccentFillColorDefaultBrush}" CornerRadius="7">
+                                <TextBlock HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="8" Foreground="{ThemeResource TextOnAccentFillColorPrimaryBrush}" Text="{Binding CountText}" />
+                            </Border>
+                            </Grid>
+                            <Button
+                                Tag="StackExpandedAnchor"
+                                AutomationProperties.Name="{Binding CollapseText}"
+                                Width="{Binding ListIconSize}"
+                                Height="{Binding ListIconSize}"
+                                Padding="0"
+                                Background="{ThemeResource SubtleFillColorSecondaryBrush}"
+                                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                                BorderThickness="1"
+                                Click="StackCollapseButton_Click"
+                                CornerRadius="6"
+                                IsTabStop="False"
+                                ToolTipService.ToolTip="{Binding CollapseText}"
+                                Visibility="{Binding ExpandedAnchorVisibility}">
+                                <FontIcon
+                                    FontSize="11"
+                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                    Glyph="&#xE70E;" />
+                            </Button>
+                        </Grid>
+
+                        <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="1">
+                            <TextBlock FontSize="{Binding LabelFontSize}" Text="{Binding Name}" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" />
+                            <TextBlock FontSize="11" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="{Binding Summary}" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" />
+                        </StackPanel>
+
+                        <FontIcon Grid.Column="2" Margin="8,0,2,0" VerticalAlignment="Center" FontSize="11" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Glyph="{Binding ChevronGlyph}" Visibility="{Binding CollapsedPreviewVisibility}" />
+                    </Grid>
+                </Border>
+            </DataTemplate>
+
+            <controls:WidgetItemTemplateSelector
+                x:Key="FileIconItemTemplateSelector"
+                ItemTemplate="{StaticResource FileIconItemTemplate}"
+                StackTemplate="{StaticResource FileStackIconItemTemplate}" />
+            <controls:WidgetItemTemplateSelector
+                x:Key="FileListItemTemplateSelector"
+                ItemTemplate="{StaticResource FileListItemTemplate}"
+                StackTemplate="{StaticResource FileStackListItemTemplate}" />
         </Grid.Resources>
 
         <Grid.RowDefinitions>
@@ -274,7 +592,8 @@
                 SizeChanged="ItemsView_SizeChanged"
                 ItemContainerStyle="{StaticResource WidgetGridViewItemStyle}"
                 ItemClick="ItemsView_ItemClick"
-                ItemsSource="{Binding Items}"
+                ItemsSource="{Binding VisibleItems}"
+                ItemTemplateSelector="{StaticResource FileIconItemTemplateSelector}"
                 RightTapped="ItemsView_RightTapped"
                 DoubleTapped="ItemsView_DoubleTapped"
                 SelectionChanged="ItemsView_SelectionChanged"
@@ -284,60 +603,12 @@
                 ScrollViewer.VerticalScrollBarVisibility="Auto"
                 SelectionMode="Extended"
                 Visibility="{Binding IconViewVisibility}">
-                <GridView.ItemTemplate>
-                    <DataTemplate>
-                        <Grid
-                            Tag="ItemSlot"
-                            HorizontalAlignment="Left"
-                            VerticalAlignment="Top">
-                            <Border
-                                Tag="InteractiveSurface"
-                                CornerRadius="8"
-                                CanDrag="True"
-                                AllowDrop="True"
-                                HorizontalAlignment="Center"
-                                VerticalAlignment="Top"
-                                Loaded="WidgetItemSurface_Loaded"
-                                Unloaded="WidgetItemSurface_Unloaded"
-                                DragLeave="WidgetItemSurface_DragLeave"
-                                DragOver="WidgetItemSurface_DragOver"
-                                PointerEntered="WidgetItemSurface_PointerEntered"
-                                PointerExited="WidgetItemSurface_PointerExited"
-                                PointerPressed="WidgetItemSurface_PointerPressed"
-                                PointerReleased="WidgetItemSurface_PointerReleased"
-                                PointerCaptureLost="WidgetItemSurface_PointerCaptureLost"
-                                Drop="WidgetItemSurface_Drop"
-                                DragStarting="WidgetItemSurface_DragStarting"
-                                DropCompleted="WidgetItemSurface_DropCompleted">
-                                <StackPanel HorizontalAlignment="Center">
-                                    <Grid HorizontalAlignment="Center" VerticalAlignment="Center">
-                                        <Image
-                                            Source="{Binding Icon}"
-                                            HorizontalAlignment="Center"
-                                            VerticalAlignment="Center"
-                                            Visibility="{Binding IconVisibility}" />
-                                        <FontIcon
-                                            Glyph="{Binding FallbackGlyph}"
-                                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                            HorizontalAlignment="Center"
-                                            VerticalAlignment="Center"
-                                            Visibility="{Binding FallbackIconVisibility}" />
-                                    </Grid>
-
-                                    <TextBlock
-                                        x:Name="IconItemNameText"
-                                        HorizontalAlignment="Center"
-                                        Margin="2,0,2,0"
-                                        Text="{Binding Name}"
-                                        TextAlignment="Center"
-                                        TextTrimming="CharacterEllipsis"
-                                        TextWrapping="Wrap"
-                                        MaxLines="2" />
-                                </StackPanel>
-                            </Border>
-                        </Grid>
-                    </DataTemplate>
-                </GridView.ItemTemplate>
+                <GridView.ItemContainerTransitions>
+                    <TransitionCollection>
+                        <AddDeleteThemeTransition />
+                        <ReorderThemeTransition />
+                    </TransitionCollection>
+                </GridView.ItemContainerTransitions>
             </GridView>
 
             <ListView
@@ -353,7 +624,8 @@
                 SizeChanged="ItemsView_SizeChanged"
                 ItemContainerStyle="{StaticResource WidgetListViewItemStyle}"
                 ItemClick="ItemsView_ItemClick"
-                ItemsSource="{Binding Items}"
+                ItemsSource="{Binding VisibleItems}"
+                ItemTemplateSelector="{StaticResource FileListItemTemplateSelector}"
                 RightTapped="ItemsView_RightTapped"
                 DoubleTapped="ItemsView_DoubleTapped"
                 SelectionChanged="ItemsView_SelectionChanged"
@@ -364,73 +636,12 @@
                 SelectionMode="Extended"
                 HorizontalContentAlignment="Stretch"
                 Visibility="{Binding ListViewVisibility}">
-                <ListView.ItemTemplate>
-                    <DataTemplate>
-                        <Grid HorizontalAlignment="Stretch">
-                            <Border
-                                Tag="InteractiveSurface"
-                                CornerRadius="8"
-                                CanDrag="True"
-                                AllowDrop="True"
-                                HorizontalAlignment="Left"
-                                Loaded="WidgetItemSurface_Loaded"
-                                Unloaded="WidgetItemSurface_Unloaded"
-                                DragLeave="WidgetItemSurface_DragLeave"
-                                DragOver="WidgetItemSurface_DragOver"
-                                PointerEntered="WidgetItemSurface_PointerEntered"
-                                PointerExited="WidgetItemSurface_PointerExited"
-                                PointerPressed="WidgetItemSurface_PointerPressed"
-                                PointerReleased="WidgetItemSurface_PointerReleased"
-                                PointerCaptureLost="WidgetItemSurface_PointerCaptureLost"
-                                Drop="WidgetItemSurface_Drop"
-                                DragStarting="WidgetItemSurface_DragStarting"
-                                DropCompleted="WidgetItemSurface_DropCompleted">
-                                <Grid ColumnSpacing="10" HorizontalAlignment="Left">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="Auto" />
-                                        <ColumnDefinition Width="Auto" />
-                                    </Grid.ColumnDefinitions>
-
-                                    <Grid VerticalAlignment="Center">
-                                        <Image
-                                            Source="{Binding Icon}"
-                                            HorizontalAlignment="Center"
-                                            VerticalAlignment="Center"
-                                            Visibility="{Binding IconVisibility}" />
-                                        <FontIcon
-                                            Glyph="{Binding FallbackGlyph}"
-                                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                            HorizontalAlignment="Center"
-                                            VerticalAlignment="Center"
-                                            Visibility="{Binding FallbackIconVisibility}" />
-                                    </Grid>
-
-                                    <StackPanel
-                                        x:Name="ListItemTextHost"
-                                        Grid.Column="1"
-                                        VerticalAlignment="Center"
-                                        HorizontalAlignment="Left"
-                                        Spacing="1">
-                                        <TextBlock
-                                            x:Name="ListItemNameText"
-                                            Text="{Binding Name}"
-                                            HorizontalAlignment="Left"
-                                            TextTrimming="CharacterEllipsis"
-                                            TextWrapping="NoWrap" />
-                                        <TextBlock
-                                            x:Name="ListItemDetailText"
-                                            FontSize="11"
-                                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                            Text="{Binding SecondaryInfo}"
-                                            HorizontalAlignment="Left"
-                                            TextTrimming="CharacterEllipsis"
-                                            TextWrapping="NoWrap" />
-                                    </StackPanel>
-                                </Grid>
-                            </Border>
-                        </Grid>
-                    </DataTemplate>
-                </ListView.ItemTemplate>
+                <ListView.ItemContainerTransitions>
+                    <TransitionCollection>
+                        <AddDeleteThemeTransition />
+                        <ReorderThemeTransition />
+                    </TransitionCollection>
+                </ListView.ItemContainerTransitions>
             </ListView>
 
             <Canvas
@@ -464,6 +675,7 @@
                     x:Name="StatusToastText"
                     Style="{StaticResource WidgetInlineStatusToastTextStyle}" />
             </Border>
+
                 </Grid>
             </controls:WidgetShell.ShellContent>
         </controls:WidgetShell>

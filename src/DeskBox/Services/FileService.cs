@@ -4,6 +4,7 @@ using Microsoft.UI.Xaml.Media.Imaging;
 using System.ComponentModel;
 using System.Runtime.InteropServices;
 using Windows.Storage;
+using System.Collections.Concurrent;
 
 namespace DeskBox.Services;
 
@@ -12,6 +13,8 @@ namespace DeskBox.Services;
 /// </summary>
 public sealed class FileService
 {
+    private static readonly ConcurrentDictionary<string, string> s_shellKindCache =
+        new(StringComparer.OrdinalIgnoreCase);
     private sealed record TransferOperation(string SourcePath, string DestinationPath);
 
     private sealed record FileSystemEntrySnapshot(
@@ -20,6 +23,7 @@ public sealed class FileService
         bool IsFolder,
         bool IsShortcut,
         long? FileSize,
+        DateTime? CreatedAt,
         DateTime? LastModified,
         int? FolderItemCount);
 
@@ -123,6 +127,7 @@ public sealed class FileService
             {
                 var fi = new FileInfo(path);
                 item.FileSize = fi.Length;
+                item.CreatedAt = fi.CreationTime;
                 item.LastModified = fi.LastWriteTime;
             }
             catch
@@ -142,6 +147,7 @@ public sealed class FileService
                 try
                 {
                     item.FolderItemCount = CountVisibleChildren(path);
+                    item.CreatedAt = Directory.GetCreationTime(path);
                     item.LastModified = Directory.GetLastWriteTime(path);
                 }
                 catch
@@ -183,6 +189,7 @@ public sealed class FileService
             IsFolder = entry.IsFolder,
             IsShortcut = entry.IsShortcut,
             FileSize = entry.FileSize ?? 0,
+            CreatedAt = entry.CreatedAt ?? default,
             LastModified = entry.LastModified ?? default,
             FolderItemCount = entry.FolderItemCount ?? 0,
             IsFolderItemCountLoaded = !entry.IsFolder || entry.FolderItemCount.HasValue,
@@ -284,6 +291,7 @@ public sealed class FileService
             ? Path.GetFileName(path)
             : Path.GetFileNameWithoutExtension(path);
         long? fileSize = null;
+        DateTime? createdAt = null;
         DateTime? lastModified = null;
         int? folderItemCount = null;
 
@@ -293,6 +301,7 @@ public sealed class FileService
             {
                 var fileInfo = new FileInfo(path);
                 fileSize = fileInfo.Length;
+                createdAt = fileInfo.CreationTime;
                 lastModified = fileInfo.LastWriteTime;
             }
             catch
@@ -308,6 +317,7 @@ public sealed class FileService
                     folderItemCount = CountVisibleChildren(path);
                 }
 
+                createdAt = Directory.GetCreationTime(path);
                 lastModified = Directory.GetLastWriteTime(path);
             }
             catch
@@ -322,6 +332,7 @@ public sealed class FileService
             isFolder,
             isShortcut,
             fileSize,
+            createdAt,
             lastModified,
             folderItemCount);
     }
@@ -361,6 +372,51 @@ public sealed class FileService
         bool showImageFilesAsIcons = false)
     {
         IconHelper.ClearIconCache(path, hideShortcutArrowOverlay, showImageFilesAsIcons);
+    }
+
+    public async Task<string> GetShellKindAsync(WidgetItem item)
+    {
+        string path = item.IsShortcut && !string.IsNullOrWhiteSpace(item.TargetPath)
+            ? item.TargetPath
+            : item.Path;
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return string.Empty;
+        }
+
+        if (Directory.Exists(path))
+        {
+            return "folder";
+        }
+
+        if (s_shellKindCache.TryGetValue(path, out string? cached))
+        {
+            return cached;
+        }
+
+        string kind = string.Empty;
+        try
+        {
+            StorageFile file = await StorageFile.GetFileFromPathAsync(path);
+            var properties = await file.Properties.RetrievePropertiesAsync(["System.Kind"]);
+            if (properties.TryGetValue("System.Kind", out object? value))
+            {
+                kind = value switch
+                {
+                    string text => text,
+                    IEnumerable<string> values => values.FirstOrDefault() ?? string.Empty,
+                    _ => string.Empty
+                };
+            }
+        }
+        catch
+        {
+            // Some shell namespaces and protected paths do not expose WinRT properties.
+        }
+
+        kind = kind.Trim().ToLowerInvariant();
+        s_shellKindCache[path] = kind;
+        return kind;
     }
 
     public Task<int> CountVisibleChildrenAsync(string folderPath)

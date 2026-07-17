@@ -33,6 +33,7 @@ public sealed partial class WeatherWidgetViewModel : ObservableObject, IDisposab
     private string _lastWeatherCityName = string.Empty;
     private double _lastAvailableWidth = 300;
     private double _lastAvailableHeight = 200;
+    private bool _isResponsiveLayoutTransitionActive;
 
     // Cached raw data
     private WeatherData? _weatherData;

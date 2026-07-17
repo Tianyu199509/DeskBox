@@ -69,6 +69,7 @@ await ConfigureFolderWatchersAsync(MappedFolderPath);
 
         foreach (var destinationPath in historyEntry.Items.Select(item => item.DestinationPath))
         {
+            RecordFileAddedAt(destinationPath, DateTimeOffset.Now);
             await UpsertFolderItemAsync(destinationPath);
         }
     }
@@ -227,6 +228,7 @@ await ConfigureFolderWatchersAsync(MappedFolderPath);
         Config.ManagedFolderName = null;
         Config.MappedFolderPath = normalizedPath;
         Config.Items.Clear();
+        ResetAddedAtTracking();
         MappedFolderPath = normalizedPath;
         OnPropertyChanged(nameof(FollowsDefaultStoragePath));
 
@@ -299,6 +301,7 @@ await ConfigureFolderWatchersAsync(normalizedPath);
         }
 
         await _fileService.RelocateEntryAsync(sourcePath, destinationPath);
+        TransferFileAddedAt(sourcePath, destinationPath);
         var refreshedItem = await _fileService.CreateWidgetItemAsync(
             destinationPath,
             hideShortcutArrowOverlay: _hideShortcutArrowOverlay,
@@ -341,6 +344,7 @@ await ConfigureFolderWatchersAsync(normalizedPath);
             else
             {
                 Items.Remove(item);
+                RemoveFileAddedAt(item.Path);
             }
         }
 
@@ -352,6 +356,7 @@ await ConfigureFolderWatchersAsync(normalizedPath);
         foreach (var item in existingTargets)
         {
             Items.Remove(item);
+            RemoveFileAddedAt(item.Path);
         }
 
         NormalizeSortOrder();

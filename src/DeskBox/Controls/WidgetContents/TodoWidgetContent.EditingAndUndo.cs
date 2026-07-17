@@ -278,11 +278,17 @@ public sealed partial class TodoWidgetContent
             return;
         }
 
-        if (e.Key == VirtualKey.Enter &&
-            Win32Helper.IsKeyPressed(VirtualKey.Control))
+        if (e.Key == VirtualKey.Enter)
         {
-            await SaveTodoEditAsync();
             e.Handled = true;
+            if (ShouldSubmitTodoEditor(e))
+            {
+                await SaveTodoEditAsync();
+            }
+            else
+            {
+                TextBoxEditorShortcutHelper.InsertLineBreak(TodoEditTextBox);
+            }
         }
     }
 

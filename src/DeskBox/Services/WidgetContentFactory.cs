@@ -191,7 +191,10 @@ public sealed class WidgetContentFactory
     public IReadOnlyList<WidgetContentDescriptor> GetFeatureWidgetEntryDescriptors()
     {
         return DescriptorList
-            .Where(descriptor => descriptor.WidgetKind != WidgetKind.File)
+            .Where(descriptor =>
+                descriptor.WidgetKind != WidgetKind.File &&
+                descriptor.HasImplementedContent &&
+                descriptor.IsAvailable)
             .ToArray();
     }
 

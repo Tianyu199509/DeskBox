@@ -24,6 +24,7 @@ public partial class WidgetViewModel : ObservableObject, IDisposable
         TimeSpan.FromMilliseconds(2600)
     ];
     private const int FolderCountHydrationBatchSize = 8;
+    private const int ShellKindHydrationBatchSize = 8;
     private const int FolderCountHydrationYieldMs = 24;
 
     private readonly DispatcherQueue _dispatcherQueue;
@@ -350,6 +351,7 @@ public partial class WidgetViewModel : ObservableObject, IDisposable
 
         _settingsService.SettingsChanged += OnSettingsChanged;
         _localizationService.LanguageChanged += OnLanguageChanged;
+        InitializeStacks();
     }
 
     public WidgetViewModel(
@@ -364,6 +366,7 @@ public partial class WidgetViewModel : ObservableObject, IDisposable
 
     public void Dispose()
     {
+        CleanupStacks();
         _folderWatcher.Dispose();
         _publicFolderWatcher.Dispose();
         _folderRefreshGate.Dispose();

@@ -168,6 +168,48 @@ public sealed partial class WeatherWidgetViewModel
         _lastAvailableWidth = width;
         _lastAvailableHeight = height;
 
+        if (_isResponsiveLayoutTransitionActive)
+        {
+            return;
+        }
+
+        ApplyLayoutModeForSize(width, height);
+    }
+
+    internal void BeginResponsiveLayoutTransition(
+        double targetWidth,
+        double targetHeight,
+        bool isCollapsing)
+    {
+        if (!double.IsFinite(targetWidth) || !double.IsFinite(targetHeight))
+        {
+            return;
+        }
+
+        _isResponsiveLayoutTransitionActive = true;
+        _lastAvailableWidth = targetWidth;
+        _lastAvailableHeight = targetHeight;
+        if (!isCollapsing)
+        {
+            ApplyLayoutModeForSize(targetWidth, targetHeight);
+        }
+    }
+
+    internal void CompleteResponsiveLayoutTransition(double finalWidth, double finalHeight)
+    {
+        _isResponsiveLayoutTransitionActive = false;
+        UpdateAvailableSize(finalWidth, finalHeight);
+    }
+
+    internal void CancelResponsiveLayoutTransition()
+    {
+        _isResponsiveLayoutTransitionActive = false;
+        ApplyLayoutModeForSize(_lastAvailableWidth, _lastAvailableHeight);
+    }
+
+    private void ApplyLayoutModeForSize(double width, double height)
+    {
+
         string newLayout = DetermineLayoutMode(width, height, _layoutMode);
         if (!string.Equals(newLayout, _layoutMode, StringComparison.Ordinal))
         {

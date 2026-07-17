@@ -19,10 +19,18 @@ public static class WidgetAnimationSettings
 
     public static WidgetAnimationOptions From(AppSettings settings)
     {
+        string effect = NormalizeEffect(settings.WidgetAnimationEffect);
+        string slideDirection = NormalizeSlideDirection(settings.WidgetAnimationSlideDirection);
+        if (effect == SettingsService.WidgetAnimationEffectSlideFade &&
+            slideDirection == SettingsService.WidgetAnimationSlideDirectionNone)
+        {
+            slideDirection = SettingsService.WidgetAnimationSlideDirectionRight;
+        }
+
         return new WidgetAnimationOptions(
-            NormalizeEffect(settings.WidgetAnimationEffect),
+            effect,
             NormalizeSpeed(settings.WidgetAnimationSpeed),
-            NormalizeSlideDirection(settings.WidgetAnimationSlideDirection),
+            slideDirection,
             NormalizeEasingIntensity(settings.WidgetAnimationEasingIntensity));
     }
 
@@ -63,7 +71,7 @@ public static class WidgetAnimationSettings
             SettingsService.WidgetAnimationSlideDirectionRight => (baseOffset, 0),
             SettingsService.WidgetAnimationSlideDirectionUp => (0, -baseOffset),
             SettingsService.WidgetAnimationSlideDirectionDown => (0, baseOffset),
-            _ => (offsets.Right, 0)
+            _ => (baseOffset, 0)
         };
     }
 

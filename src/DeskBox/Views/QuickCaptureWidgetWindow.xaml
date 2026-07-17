@@ -67,6 +67,14 @@
                 <Setter Property="CornerRadius" Value="4" />
             </Style>
 
+        <Style x:Key="QuickCaptureDetailConfirmButtonStyle" TargetType="Button" BasedOn="{StaticResource QuickCaptureDetailIconButtonStyle}">
+                <Setter Property="Width" Value="30" />
+                <Setter Property="Height" Value="30" />
+                <Setter Property="MinWidth" Value="30" />
+                <Setter Property="MinHeight" Value="30" />
+                <Setter Property="CornerRadius" Value="4" />
+            </Style>
+
             <Style x:Key="QuickCaptureAttachmentActionButtonStyle" TargetType="Button" BasedOn="{StaticResource SubtleButtonStyle}">
                 <Setter Property="Width" Value="22" />
                 <Setter Property="Height" Value="22" />
@@ -172,7 +180,7 @@
                     x:Name="TabHost"
                     Grid.Column="0"
                     HorizontalAlignment="Stretch"
-                    Visibility="{Binding SearchButtonVisibility}">
+                    Visibility="{Binding TabBarVisibility}">
                     <toolkit:Segmented
                         x:Name="QuickCaptureViewSegmented"
                         MinHeight="{Binding SegmentHeight}"
@@ -183,7 +191,11 @@
                         SelectedIndex="0"
                         SizeChanged="QuickCaptureViewSegmented_SizeChanged">
                         <toolkit:SegmentedItem
+                            AllowDrop="True"
+                            DragOver="QuickCaptureTab_DragOver"
+                            Drop="QuickCaptureTab_Drop"
                             Tag="Records"
+                            Visibility="{Binding RecordsTabVisibility}"
                             ToolTipService.ToolTip="{Binding RecordsTabText}">
                             <TextBlock
                                 MinWidth="0"
@@ -196,7 +208,11 @@
                                 TextWrapping="NoWrap" />
                         </toolkit:SegmentedItem>
                         <toolkit:SegmentedItem
+                            AllowDrop="True"
+                            DragOver="QuickCaptureTab_DragOver"
+                            Drop="QuickCaptureTab_Drop"
                             Tag="Pinned"
+                            Visibility="{Binding PinnedTabVisibility}"
                             ToolTipService.ToolTip="{Binding PinnedTabText}">
                             <TextBlock
                                 MinWidth="0"
@@ -209,7 +225,11 @@
                                 TextWrapping="NoWrap" />
                         </toolkit:SegmentedItem>
                         <toolkit:SegmentedItem
+                            AllowDrop="True"
+                            DragOver="QuickCaptureTab_DragOver"
+                            Drop="QuickCaptureTab_Drop"
                             Tag="Recent"
+                            Visibility="{Binding RecentTabVisibility}"
                             ToolTipService.ToolTip="{Binding RecentTabText}">
                             <TextBlock
                                 MinWidth="0"
@@ -499,7 +519,7 @@
                                         CharacterSpacing="8"
                                         LineHeight="{Binding ElementName=ItemsListView, Path=DataContext.ItemTextLineHeight}"
                                         LineStackingStrategy="BlockLineHeight"
-                                        MaxLines="10"
+                                        MaxLines="{Binding ElementName=ItemsListView, Path=DataContext.ItemPreviewLineCount}"
                                         Text="{Binding DisplayText}"
                                         TextTrimming="CharacterEllipsis"
                                         TextWrapping="Wrap"
@@ -648,7 +668,6 @@
 
                 <Border
                     Grid.Row="0"
-                    Margin="-10,-6,-6,0"
                     MinHeight="40"
                     Padding="8,4"
                     Background="Transparent"
@@ -664,10 +683,17 @@
                         </Grid.ColumnDefinitions>
                         <Button
                             Click="DetailBackButton_Click"
-                            Style="{StaticResource QuickCaptureDetailIconButtonStyle}"
+                            Style="{StaticResource QuickCaptureDetailConfirmButtonStyle}"
                             ToolTipService.ToolTip="{Binding DetailBackText}"
                             VerticalAlignment="Center">
-                            <FontIcon FontSize="{Binding ActionIconSize}" Glyph="&#xE73E;" />
+                            <FontIcon
+                                FontSize="{Binding ActionIconSize}"
+                                Glyph="&#xE73E;"
+                                RenderTransformOrigin="0.5,0.5">
+                                <FontIcon.RenderTransform>
+                                    <ScaleTransform ScaleX="1.3" ScaleY="1.3" />
+                                </FontIcon.RenderTransform>
+                            </FontIcon>
                         </Button>
                         <TextBox
                             x:Name="DetailTitleTextBox"
@@ -678,7 +704,7 @@
                             Grid.Column="1"
                             Margin="4,0"
                             VerticalAlignment="Center"
-                            FontSize="{Binding SecondaryTextSize}"
+                            FontSize="{Binding DetailHeaderTextSize}"
                             Foreground="{ThemeResource TextFillColorTertiaryBrush}"
                             MaxLines="1"
                             TextTrimming="CharacterEllipsis"

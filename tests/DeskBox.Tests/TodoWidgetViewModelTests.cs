@@ -223,6 +223,51 @@ public sealed class TodoWidgetViewModelTests : IDisposable
     }
 
     [Fact]
+    public async Task CalendarFilters_ShowCurrentWeekAndMonthDueItems()
+    {
+        var viewModel = CreateViewModel("todo-widget");
+        await viewModel.InitializeAsync();
+        var current = await viewModel.AddItemAsync("current", dueDate: DateTimeOffset.Now.AddHours(1));
+        var future = await viewModel.AddItemAsync("future", dueDate: DateTimeOffset.Now.AddMonths(2));
+        Assert.NotNull(current);
+        Assert.NotNull(future);
+
+        viewModel.SelectedFilter = TodoFilter.ThisWeek;
+        Assert.Contains(viewModel.VisibleItems, item => item.Id == current.Id);
+        Assert.DoesNotContain(viewModel.VisibleItems, item => item.Id == future.Id);
+
+        viewModel.SelectedFilter = TodoFilter.ThisMonth;
+        Assert.Contains(viewModel.VisibleItems, item => item.Id == current.Id);
+        Assert.DoesNotContain(viewModel.VisibleItems, item => item.Id == future.Id);
+    }
+
+    [Fact]
+    public async Task ApplyTabDrop_UpdatesTodoStateForActionableTabs()
+    {
+        var viewModel = CreateViewModel("todo-widget");
+        await viewModel.InitializeAsync();
+        var first = await viewModel.AddItemAsync("first");
+        var second = await viewModel.AddItemAsync("second");
+        Assert.NotNull(first);
+        Assert.NotNull(second);
+
+        Assert.Equal(2, await viewModel.ApplyTabDropAsync([first.Id, second.Id], TodoFilter.Today));
+        Assert.Equal(DateTime.Today, first.DueDate?.ToLocalTime().Date);
+        Assert.Equal(2, await viewModel.ApplyTabDropAsync([first.Id, second.Id], TodoFilter.Important));
+        Assert.True(first.IsImportant);
+        Assert.True(second.IsImportant);
+
+        Assert.Equal(2, await viewModel.ApplyTabDropAsync([first.Id, second.Id], TodoFilter.Completed));
+        Assert.True(first.IsCompleted);
+        Assert.True(second.IsCompleted);
+        Assert.Equal(2, await viewModel.ApplyTabDropAsync([first.Id, second.Id], TodoFilter.Active));
+        Assert.False(first.IsCompleted);
+        Assert.False(second.IsCompleted);
+        Assert.False(viewModel.CanApplyTabDrop([first.Id], TodoFilter.All));
+        Assert.False(viewModel.CanApplyTabDrop([first.Id], TodoFilter.ThisWeek));
+    }
+
+    [Fact]
     public async Task SetColorMarkerAsync_FiltersAndPersistsColorMarkers()
     {
         var viewModel = CreateViewModel("todo-widget");
@@ -1069,6 +1114,21 @@ public sealed class TodoWidgetViewModelTests : IDisposable
         Assert.True(viewModel.ItemMinHeight > compactHeight);
         Assert.True(viewModel.ItemMargin.Bottom > compactGap);
         Assert.True(viewModel.RootPadding.Left > compactPadding);
+    }
+
+    [Fact]
+    public void ApplyAppearance_RefreshesTodoItemPreviewLineCount()
+    {
+        var settingsService = new SettingsService();
+        settingsService.Settings.TodoItemPreviewLineCount = 5;
+        var viewModel = CreateViewModel("todo-widget", settingsService);
+
+        Assert.Equal(5, viewModel.ItemPreviewLineCount);
+
+        settingsService.Settings.TodoItemPreviewLineCount = 1;
+        viewModel.ApplyAppearance();
+
+        Assert.Equal(1, viewModel.ItemPreviewLineCount);
     }
 
     [Fact]

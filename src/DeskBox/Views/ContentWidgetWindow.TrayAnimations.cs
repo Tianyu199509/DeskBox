@@ -62,7 +62,7 @@ public sealed partial class ContentWidgetWindow
     {
         if (Visible)
         {
-            PlayTrayRaiseAnimation();
+            TrayAnimation.PlayAfterContentReady(PlayTrayRaiseAnimation);
         }
     }
 
@@ -114,6 +114,7 @@ public sealed partial class ContentWidgetWindow
         WidgetLayerService.ClearTopMost(HWnd);
         Win32Helper.ShowWindow(HWnd, Win32Helper.SW_HIDE);
         AppWindow.Hide();
+        TrayAnimation.RevealWindowForTrayShow();
         TrayAnimation.RestoreVisualState();
         TrayAnimation.RestoreWindowPosition();
         _contentHost.OnDeactivated();

@@ -581,6 +581,7 @@ public static partial class Win32Helper
     [LibraryImport("dwmapi.dll")]
     public static partial int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int pvAttribute, int cbAttribute);
 
+    public const int DWMWA_CLOAK = 13;
     public const int DWMWA_USE_IMMERSIVE_DARK_MODE = 20;
     public const int DWMWA_BORDER_COLOR = 34;
     public const int DWMWA_WINDOW_CORNER_PREFERENCE = 33;

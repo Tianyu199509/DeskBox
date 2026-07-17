@@ -127,6 +127,10 @@ public sealed partial class WidgetShell : UserControl
     private double _compactMarqueeDistance;
     private DateTimeOffset _compactMarqueeStartedAt;
     private WidgetCompactPresentation? _compactPresentation;
+    private IWidgetResponsiveLayoutContent? _responsiveLayoutContent;
+    private bool _isResponsiveLayoutTransitionActive;
+    private double _responsiveTargetContentWidth;
+    private double _responsiveTargetContentHeight;
     private WidgetCompactWidthTier _compactWidthTier = WidgetCompactWidthTier.Standard;
     private bool _isPointerOverShell;
     private bool _isCollapsed;
@@ -338,7 +342,57 @@ public sealed partial class WidgetShell : UserControl
 
     public void SetContent(IWidgetContent content)
     {
+        _responsiveLayoutContent = content as IWidgetResponsiveLayoutContent;
         ShellContent = content.View;
+    }
+
+    public void BeginResponsiveLayoutTransition(
+        bool isCollapsing,
+        double targetWindowWidth,
+        double targetWindowHeight)
+    {
+        if (_responsiveLayoutContent is null)
+        {
+            _isResponsiveLayoutTransitionActive = false;
+            return;
+        }
+
+        double titleHeight = IsOverlayChromeMode
+            ? 0
+            : _titleBarRowHeight.GridUnitType == GridUnitType.Pixel
+                ? _titleBarRowHeight.Value
+                : Math.Max(0, TitleBarGrid.ActualHeight);
+        _responsiveTargetContentWidth = Math.Max(0, targetWindowWidth);
+        _responsiveTargetContentHeight = Math.Max(0, targetWindowHeight - titleHeight);
+        _isResponsiveLayoutTransitionActive = true;
+        _responsiveLayoutContent.BeginResponsiveLayoutTransition(
+            _responsiveTargetContentWidth,
+            _responsiveTargetContentHeight,
+            isCollapsing);
+    }
+
+    public void CompleteResponsiveLayoutTransition()
+    {
+        if (!_isResponsiveLayoutTransitionActive || _responsiveLayoutContent is null)
+        {
+            return;
+        }
+
+        _responsiveLayoutContent.CompleteResponsiveLayoutTransition(
+            _responsiveTargetContentWidth,
+            _responsiveTargetContentHeight);
+        _isResponsiveLayoutTransitionActive = false;
+    }
+
+    public void CancelResponsiveLayoutTransition()
+    {
+        if (!_isResponsiveLayoutTransitionActive || _responsiveLayoutContent is null)
+        {
+            return;
+        }
+
+        _responsiveLayoutContent.CancelResponsiveLayoutTransition();
+        _isResponsiveLayoutTransitionActive = false;
     }
 
     public void SetCollapsed(bool collapsed, string contentMode)
@@ -425,7 +479,11 @@ public sealed partial class WidgetShell : UserControl
         else
         {
             compactOpacity = 1 - SmoothStep(Math.Clamp(value / 0.46, 0, 1));
-            expandedOpacity = SmoothStep(Math.Clamp((value - 0.28) / 0.72, 0, 1));
+            double expandedRevealStart = _isResponsiveLayoutTransitionActive ? 0.42 : 0.28;
+            expandedOpacity = SmoothStep(Math.Clamp(
+                (value - expandedRevealStart) / (1 - expandedRevealStart),
+                0,
+                1));
         }
 
         CollapsedChromeLayer.Opacity = compactOpacity;
@@ -1255,11 +1313,12 @@ public sealed partial class WidgetShell : UserControl
     {
         _showButtonsStoryboard?.Stop();
         _hideButtonsStoryboard?.Stop();
-        RightActionButtons.Opacity = ShowHoverButtons ? 1 : 0;
-        RightActionButtons.IsHitTestVisible = ShowHoverButtons;
+        HoverActionButtons.Visibility = ShowHoverButtons ? Visibility.Visible : Visibility.Collapsed;
+        RightActionButtons.Opacity = 1;
+        RightActionButtons.IsHitTestVisible = ShowHoverButtons || _isCollapseActionAvailable;
         if (_rightButtonsTransform is not null)
         {
-            _rightButtonsTransform.X = ShowHoverButtons ? 0 : 12;
+            _rightButtonsTransform.X = 0;
         }
     }
 
