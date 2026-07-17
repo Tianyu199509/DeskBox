@@ -415,6 +415,12 @@ public partial class SettingsViewModel
             }
 
             _settingsService.Settings.WidgetAnimationEffect = _selectedWidgetAnimationEffect;
+            if (_selectedWidgetAnimationEffect == SettingsService.WidgetAnimationEffectSlideFade &&
+                _selectedWidgetAnimationSlideDirection == SettingsService.WidgetAnimationSlideDirectionNone)
+            {
+                SelectedWidgetAnimationSlideDirection = SettingsService.WidgetAnimationSlideDirectionRight;
+            }
+
             if (!_isApplyingAnimationPreset)
             {
                 _settingsService.SaveDebounced();
@@ -487,6 +493,7 @@ public partial class SettingsViewModel
                 _settingsService.SaveDebounced();
             }
             OnPropertyChanged(nameof(SelectedWidgetAnimationSlideDirectionText));
+            OnPropertyChanged(nameof(SelectedWidgetAnimationSlideDirectionIndex));
             SyncAnimationPresetSelection();
         }
     }

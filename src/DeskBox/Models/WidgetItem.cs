@@ -52,6 +52,21 @@ public partial class WidgetItem : ObservableObject
     [NotifyPropertyChangedFor(nameof(SecondaryInfo))]
     public partial DateTime LastModified { get; set; }
 
+    /// <summary>Filesystem creation timestamp, used by automatic date stacks.</summary>
+    [ObservableProperty]
+    public partial DateTime CreatedAt { get; set; }
+
+    /// <summary>Time this item was first added to or observed by its DeskBox widget.</summary>
+    [ObservableProperty]
+    public partial DateTimeOffset AddedAt { get; set; }
+
+    /// <summary>Windows Property System kind such as document, picture, music, or video.</summary>
+    [ObservableProperty]
+    public partial string ShellKind { get; set; } = string.Empty;
+
+    [ObservableProperty]
+    public partial bool IsShellKindLoaded { get; set; }
+
     /// <summary>Whether this item is a .lnk shortcut file.</summary>
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(FallbackGlyph))]
@@ -74,6 +89,10 @@ public partial class WidgetItem : ObservableObject
     /// <summary>Whether the item is currently marked as cut.</summary>
     [ObservableProperty]
     public partial bool IsCut { get; set; }
+
+    /// <summary>Temporary indentation marker while an automatic stack is expanded.</summary>
+    [ObservableProperty]
+    public partial bool IsStackChild { get; set; }
 
     public string SecondaryInfo
     {

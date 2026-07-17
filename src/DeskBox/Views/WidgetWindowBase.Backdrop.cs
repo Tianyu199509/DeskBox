@@ -107,6 +107,42 @@ public abstract partial class WidgetWindowBase
         ApplySurfaceStyle();
     }
 
+    protected void SuppressNativeBackdropForTrayReveal()
+    {
+        if (_isNativeBackdropSuppressedForTrayReveal || HWnd == IntPtr.Zero)
+        {
+            return;
+        }
+
+        _isNativeBackdropSuppressedForTrayReveal = true;
+        ++BackdropRefreshGeneration;
+        _backdropRefreshTimer?.Stop();
+
+        DetachAcrylicControllerTarget();
+        DetachMicaControllerTarget();
+
+        int backdropType = Win32Helper.DWMSBT_NONE;
+        Win32Helper.DwmSetWindowAttribute(
+            HWnd,
+            Win32Helper.DWMWA_SYSTEMBACKDROP_TYPE,
+            ref backdropType,
+            sizeof(int));
+        Win32Helper.DisableAccentPolicy(HWnd);
+        Win32Helper.SetWindowBorderColor(HWnd, unchecked((int)0xFFFFFFFE));
+        ApplySurfaceStyle();
+    }
+
+    protected void RestoreNativeBackdropAfterTrayReveal()
+    {
+        if (!_isNativeBackdropSuppressedForTrayReveal)
+        {
+            return;
+        }
+
+        _isNativeBackdropSuppressedForTrayReveal = false;
+        ApplyBackdropPreference();
+    }
+
     protected static SolidColorBrush GetOrUpdateSolidColorBrush(Brush? current, Windows.UI.Color color)
     {
         if (current is SolidColorBrush brush && MutableBrushes.TryGetValue(brush, out _))

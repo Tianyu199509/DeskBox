@@ -145,6 +145,9 @@ public sealed partial class SettingsWindow
         {
             DeskBoxRestorePreparation preparation = await App.Current.DataBackupService.PrepareRestoreAsync(
                 backupFile.Path);
+            string integrityWarning = preparation.HasIntegrityManifest
+                ? string.Empty
+                : $"\n\n{_localizationService.T("Settings.DataBackup.LegacyIntegrityWarning")}";
             var dialog = new ContentDialog
             {
                 XamlRoot = SettingsRoot.XamlRoot,
@@ -157,8 +160,10 @@ public sealed partial class SettingsWindow
                     Text = _localizationService.Format(
                         "Settings.DataBackup.RestoreConfirmBody",
                         preparation.BackupCreatedAtUtc.ToLocalTime().ToString("g"),
+                        preparation.AppVersion,
                         preparation.FileCount,
-                        SettingsViewModel.FormatBytes(preparation.TotalUncompressedBytes)),
+                        SettingsViewModel.FormatBytes(preparation.TotalUncompressedBytes),
+                        integrityWarning),
                     TextWrapping = TextWrapping.Wrap
                 }
             };

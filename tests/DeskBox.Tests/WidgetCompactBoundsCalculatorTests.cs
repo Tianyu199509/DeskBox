@@ -236,6 +236,7 @@ public sealed class WidgetCompactBoundsCalculatorTests
     [InlineData(null, SettingsService.WidgetCompactAnimationSmooth)]
     [InlineData("slow", SettingsService.WidgetCompactAnimationSlow)]
     [InlineData("snappy", SettingsService.WidgetCompactAnimationSnappy)]
+    [InlineData("custom", SettingsService.WidgetCompactAnimationCustom)]
     [InlineData("none", SettingsService.WidgetCompactAnimationNone)]
     [InlineData("unexpected", SettingsService.WidgetCompactAnimationSmooth)]
     public void NormalizeCompactAnimation_ConstrainsValue(string? value, string expected)

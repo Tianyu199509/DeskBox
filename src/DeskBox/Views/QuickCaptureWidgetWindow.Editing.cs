@@ -65,11 +65,17 @@ public sealed partial class QuickCaptureWidgetWindow
             return;
         }
 
-        if (e.Key == Windows.System.VirtualKey.Enter &&
-            Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Control))
+        if (e.Key == Windows.System.VirtualKey.Enter)
         {
-            await SaveInlineEditAsync();
             e.Handled = true;
+            if (ShouldSubmitQuickCaptureEditor(e))
+            {
+                await SaveInlineEditAsync();
+            }
+            else
+            {
+                TextBoxEditorShortcutHelper.InsertLineBreak(EditTextBox);
+            }
         }
     }
 

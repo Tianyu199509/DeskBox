@@ -322,6 +322,8 @@ public sealed partial class WidgetWindow
         listView.Click += SetListView_Click;
         flyout.Items.Add(listView);
 
+        flyout.Items.Add(CreateStackSettingsMenu());
+
         flyout.Items.Add(new MenuFlyoutSeparator());
 
         flyout.Items.Add(WidgetChromeMenuBuilder.Create(
@@ -332,7 +334,8 @@ public sealed partial class WidgetWindow
         flyout.Items.Add(WidgetCollapseMenuBuilder.Create(
             ViewModel.Config,
             _localizationService,
-            SetCollapseBehaviorOverride));
+            SetCollapseBehaviorOverride,
+            ResetCompactWidthOverride));
 
         flyout.Items.Add(new MenuFlyoutSeparator());
 

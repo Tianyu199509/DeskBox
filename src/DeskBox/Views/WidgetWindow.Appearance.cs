@@ -298,7 +298,10 @@ public sealed partial class WidgetWindow
             border.Width = double.NaN;
             border.Height = double.NaN;
             border.HorizontalAlignment = HorizontalAlignment.Left;
-            border.Margin = ViewModel.ListItemMargin;
+            var listMargin = ViewModel.ListItemMargin;
+            border.Margin = border.DataContext is WidgetItem { IsStackChild: true }
+                ? new Thickness(listMargin.Left + 18, listMargin.Top, listMargin.Right, listMargin.Bottom)
+                : listMargin;
             border.Padding = ViewModel.ListItemPadding;
             border.CornerRadius = GetItemSurfaceCornerRadius();
 

@@ -29,6 +29,10 @@ public sealed partial class QuickCaptureWidgetViewModel : ObservableObject, IDis
     private bool _isSearchExpanded;
     private QuickCaptureViewMode _selectedView = QuickCaptureViewMode.Records;
     private string _tabStyle = SettingsService.WidgetTabStyleButton;
+    private bool _showTabBar = true;
+    private bool _showRecordsTab = true;
+    private bool _showPinnedTab = true;
+    private bool _showRecentTab = true;
     private double _widgetOpacity;
     private double _textSize;
     private double _iconSize;
@@ -145,6 +149,7 @@ public sealed partial class QuickCaptureWidgetViewModel : ObservableObject, IDis
                 OnPropertyChanged(nameof(SearchBoxVisibility));
                 OnPropertyChanged(nameof(SearchButtonVisibility));
                 OnPropertyChanged(nameof(InputAreaVisibility));
+                OnPropertyChanged(nameof(TabBarVisibility));
             }
         }
     }
@@ -231,6 +236,18 @@ public sealed partial class QuickCaptureWidgetViewModel : ObservableObject, IDis
 
     public bool IsRecentView => SelectedView == QuickCaptureViewMode.Recent;
 
+    public Visibility TabBarVisibility => _showTabBar && !IsSearchExpanded
+        ? Visibility.Visible
+        : Visibility.Collapsed;
+
+    public Visibility RecordsTabVisibility => _showRecordsTab ? Visibility.Visible : Visibility.Collapsed;
+
+    public Visibility PinnedTabVisibility => _showPinnedTab ? Visibility.Visible : Visibility.Collapsed;
+
+    public Visibility RecentTabVisibility => _showRecentTab ? Visibility.Visible : Visibility.Collapsed;
+
+    public int VisibleTabCount => (_showRecordsTab ? 1 : 0) + (_showPinnedTab ? 1 : 0) + (_showRecentTab ? 1 : 0);
+
     public string TabStyle
     {
         get => _tabStyle;
@@ -252,6 +269,7 @@ public sealed partial class QuickCaptureWidgetViewModel : ObservableObject, IDis
             {
                 OnPropertyChanged(nameof(TitleTextSize));
                 OnPropertyChanged(nameof(SecondaryTextSize));
+                OnPropertyChanged(nameof(DetailHeaderTextSize));
                 OnPropertyChanged(nameof(CaptionTextSize));
                 OnPropertyChanged(nameof(SegmentTextSize));
                 OnPropertyChanged(nameof(SegmentHeight));
@@ -291,6 +309,8 @@ public sealed partial class QuickCaptureWidgetViewModel : ObservableObject, IDis
     public double TitleTextSize => Math.Min(SettingsService.MaxTextSize + 2, TextSize + 3);
 
     public double SecondaryTextSize => Math.Max(SettingsService.MinTextSize, TextSize - 1.5);
+
+    public double DetailHeaderTextSize => Math.Max(SettingsService.MinTextSize, TextSize - 1);
 
     public double CaptionTextSize => Math.Max(SettingsService.MinTextSize, TextSize);
 
@@ -345,6 +365,9 @@ public sealed partial class QuickCaptureWidgetViewModel : ObservableObject, IDis
     public double ItemTextLineHeight => Math.Round(TextSize * DensityMetric(1.18, 1.24, 1.34));
 
     public double ItemMetaLineHeight => Math.Round(SecondaryTextSize * DensityMetric(1.12, 1.16, 1.24));
+
+    public int ItemPreviewLineCount => SettingsService.NormalizeItemPreviewLineCount(
+        _settingsService.Settings.QuickCaptureItemPreviewLineCount);
 
     public Visibility CreatedTimeVisibility => _settingsService.Settings.QuickCaptureShowCreatedTime
         ? Visibility.Visible

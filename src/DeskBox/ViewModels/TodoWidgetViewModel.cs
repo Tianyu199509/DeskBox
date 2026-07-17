@@ -11,6 +11,8 @@ public enum TodoFilter
     All,
     Active,
     Today,
+    ThisWeek,
+    ThisMonth,
     Important,
     Completed
 }
@@ -54,6 +56,14 @@ public sealed partial class TodoWidgetViewModel : ObservableObject, IDisposable
     private double _layoutDensityScale = SettingsService.DefaultLayoutDensityScale;
     private string _newTaskPosition = SettingsService.TodoNewTaskPositionTop;
     private string _tabStyle = SettingsService.WidgetTabStyleButton;
+    private bool _showTabBar = true;
+    private bool _showAllTab = true;
+    private bool _showActiveTab;
+    private bool _showTodayTab = true;
+    private bool _showThisWeekTab;
+    private bool _showThisMonthTab;
+    private bool _showImportantTab = true;
+    private bool _showCompletedTab = true;
     private bool _showCompletedTasks = true;
     private bool _showFooterStats = true;
     private bool _showClearCompletedButton = true;
@@ -206,6 +216,8 @@ public sealed partial class TodoWidgetViewModel : ObservableObject, IDisposable
                 OnPropertyChanged(nameof(IsAllFilterSelected));
                 OnPropertyChanged(nameof(IsActiveFilterSelected));
                 OnPropertyChanged(nameof(IsTodayFilterSelected));
+                OnPropertyChanged(nameof(IsThisWeekFilterSelected));
+                OnPropertyChanged(nameof(IsThisMonthFilterSelected));
                 OnPropertyChanged(nameof(IsImportantFilterSelected));
                 OnPropertyChanged(nameof(IsCompletedFilterSelected));
             }
@@ -246,6 +258,10 @@ public sealed partial class TodoWidgetViewModel : ObservableObject, IDisposable
     public int AllFilterCount => ShowCompletedTasks ? TotalCount : ActiveCount;
 
     public int TodayFilterCount => Items.Count(item => IsDueToday(item) && ShouldCountInNonCompletedFilter(item));
+
+    public int ThisWeekFilterCount => Items.Count(item => IsDueThisWeek(item) && ShouldCountInNonCompletedFilter(item));
+
+    public int ThisMonthFilterCount => Items.Count(item => IsDueThisMonth(item) && ShouldCountInNonCompletedFilter(item));
 
     public int ImportantFilterCount => Items.Count(item => item.IsImportant && ShouldCountInNonCompletedFilter(item));
 
@@ -313,6 +329,10 @@ public sealed partial class TodoWidgetViewModel : ObservableObject, IDisposable
 
     public string TodayFilterText => FormatFilterText("Todo.Filter.Today", TodayFilterCount);
 
+    public string ThisWeekFilterText => FormatFilterText("Todo.Filter.ThisWeek", ThisWeekFilterCount);
+
+    public string ThisMonthFilterText => FormatFilterText("Todo.Filter.ThisMonth", ThisMonthFilterCount);
+
     public string ImportantFilterText => FormatFilterText("Todo.Filter.Important", ImportantFilterCount);
 
     public string CompletedFilterText => FormatFilterText("Todo.Filter.Completed", CompletedCount);
@@ -363,6 +383,8 @@ public sealed partial class TodoWidgetViewModel : ObservableObject, IDisposable
         _ when SelectedColorFilter != TodoColorFilter.All => _localizationService.T("Todo.Empty.Color"),
         TodoFilter.Active => _localizationService.T("Todo.Empty.Active"),
         TodoFilter.Today => _localizationService.T("Todo.Empty.Today"),
+        TodoFilter.ThisWeek => _localizationService.T("Todo.Empty.ThisWeek"),
+        TodoFilter.ThisMonth => _localizationService.T("Todo.Empty.ThisMonth"),
         TodoFilter.Important => _localizationService.T("Todo.Empty.Important"),
         TodoFilter.Completed => _localizationService.T("Todo.Empty.Completed"),
         _ when IsAllTasksCompletedEmptyState
@@ -383,6 +405,10 @@ public sealed partial class TodoWidgetViewModel : ObservableObject, IDisposable
     public bool IsActiveFilterSelected => SelectedFilter == TodoFilter.Active;
 
     public bool IsTodayFilterSelected => SelectedFilter == TodoFilter.Today;
+
+    public bool IsThisWeekFilterSelected => SelectedFilter == TodoFilter.ThisWeek;
+
+    public bool IsThisMonthFilterSelected => SelectedFilter == TodoFilter.ThisMonth;
 
     public bool IsImportantFilterSelected => SelectedFilter == TodoFilter.Important;
 
@@ -409,6 +435,24 @@ public sealed partial class TodoWidgetViewModel : ObservableObject, IDisposable
         get => _tabStyle;
         private set => SetProperty(ref _tabStyle, SettingsService.NormalizeWidgetTabStyle(value));
     }
+
+    public Visibility TabBarVisibility => _showTabBar ? Visibility.Visible : Visibility.Collapsed;
+    public Visibility AllTabVisibility => _showAllTab ? Visibility.Visible : Visibility.Collapsed;
+    public Visibility ActiveTabVisibility => _showActiveTab ? Visibility.Visible : Visibility.Collapsed;
+    public Visibility TodayTabVisibility => _showTodayTab ? Visibility.Visible : Visibility.Collapsed;
+    public Visibility ThisWeekTabVisibility => _showThisWeekTab ? Visibility.Visible : Visibility.Collapsed;
+    public Visibility ThisMonthTabVisibility => _showThisMonthTab ? Visibility.Visible : Visibility.Collapsed;
+    public Visibility ImportantTabVisibility => _showImportantTab ? Visibility.Visible : Visibility.Collapsed;
+    public Visibility CompletedTabVisibility => _showCompletedTab ? Visibility.Visible : Visibility.Collapsed;
+
+    public int VisibleTabCount =>
+        (_showAllTab ? 1 : 0) +
+        (_showActiveTab ? 1 : 0) +
+        (_showTodayTab ? 1 : 0) +
+        (_showThisWeekTab ? 1 : 0) +
+        (_showThisMonthTab ? 1 : 0) +
+        (_showImportantTab ? 1 : 0) +
+        (_showCompletedTab ? 1 : 0);
 
     public string NewTaskPosition
     {
@@ -471,6 +515,7 @@ public sealed partial class TodoWidgetViewModel : ObservableObject, IDisposable
             if (SetProperty(ref _textSize, value))
             {
                 OnPropertyChanged(nameof(SecondaryTextSize));
+                OnPropertyChanged(nameof(DetailHeaderTextSize));
                 OnPropertyChanged(nameof(TitleTextSize));
                 OnPropertyChanged(nameof(FilterTextSize));
                 OnPropertyChanged(nameof(SegmentTextSize));
@@ -512,6 +557,8 @@ public sealed partial class TodoWidgetViewModel : ObservableObject, IDisposable
     }
 
     public double SecondaryTextSize => Math.Max(SettingsService.MinTextSize, TextSize - 1);
+
+    public double DetailHeaderTextSize => Math.Max(SettingsService.MinTextSize, TextSize - 1);
 
     public double TitleTextSize => Math.Min(SettingsService.MaxTextSize + 1, TextSize + 1);
 
@@ -564,6 +611,11 @@ public sealed partial class TodoWidgetViewModel : ObservableObject, IDisposable
         Math.Round(Lerp(4, 8, LayoutDensityScale)));
 
     public double ItemTextLineHeight => Math.Round(TextSize + Lerp(2.5, 6, LayoutDensityScale));
+
+    public int ItemPreviewLineCount => _settingsService is null
+        ? SettingsService.DefaultItemPreviewLineCount
+        : SettingsService.NormalizeItemPreviewLineCount(
+            _settingsService.Settings.TodoItemPreviewLineCount);
 
     public double SmallIconSize => Math.Round(Math.Clamp(TextSize + 1, 11, 15));
 

@@ -27,3 +27,22 @@ public interface IWidgetContent
     /// </summary>
     void OnWindowVisibilityChanged(bool visible) { }
 }
+
+/// <summary>
+/// Optional contract for content whose layout changes at size breakpoints.
+/// Capsule transitions can lock that content to its start or target layout
+/// instead of letting intermediate animated window sizes trigger every layout.
+/// </summary>
+public interface IWidgetResponsiveLayoutContent
+{
+    void BeginResponsiveLayoutTransition(
+        double targetContentWidth,
+        double targetContentHeight,
+        bool isCollapsing);
+
+    void CompleteResponsiveLayoutTransition(
+        double finalContentWidth,
+        double finalContentHeight);
+
+    void CancelResponsiveLayoutTransition();
+}

@@ -117,7 +117,6 @@ public sealed partial class QuickCaptureWidgetWindow : WidgetWindowBase, IDeskto
     private bool _isClearingData;
     private bool _isCommittingTitleRename;
     private bool _isCancellingTitleRename;
-    private bool _isNativeBackdropSuppressedForTrayReveal;
     private QuickCaptureItemViewModel? _editingItem;
     private bool _isExpandingInput;
     private QuickCaptureItemViewModel? _detailItem;
@@ -135,6 +134,8 @@ public sealed partial class QuickCaptureWidgetWindow : WidgetWindowBase, IDeskto
     private string? _copySelectionAnchorId;
     private string? _draggedQuickCaptureItemId;
     private bool _isInternalQuickCaptureDrag;
+    private bool _internalQuickCaptureDragCanReorder;
+    private bool _quickCaptureTabDropHandled;
     private QuickCaptureViewMode? _internalQuickCaptureDragView;
     private bool _selectionPointerPressed;
     private bool _isBoxSelecting;
@@ -168,12 +169,9 @@ public sealed partial class QuickCaptureWidgetWindow : WidgetWindowBase, IDeskto
     protected override string LogPrefix => "Quick";
     protected override bool IsSizeLocked => ViewModel.Config.IsSizeLocked;
     protected override bool IsPositionLocked => ViewModel.Config.IsPositionLocked;
-    protected override bool IsBackdropSuppressedForTrayReveal => _isNativeBackdropSuppressedForTrayReveal;
-
     protected override WidgetCompactPresentation CreateCompactPresentation()
     {
-        string contentMode = SettingsService.NormalizeWidgetCompactContentMode(
-            _settingsService.Settings.WidgetCompactContentMode);
+        string contentMode = ResolveEffectiveCompactContentMode();
         string summary = contentMode switch
         {
             SettingsService.WidgetCompactContentModeMinimal => string.Empty,
@@ -250,6 +248,10 @@ public sealed partial class QuickCaptureWidgetWindow : WidgetWindowBase, IDeskto
         _chromeDescriptor = new WidgetContentFactory(_localizationService).GetDescriptor(WidgetKind.QuickCapture);
         _chromeModeResolver = new WidgetChromeModeResolver(settingsService);
         InitializeComponent();
+        DetailBodyTextBox.AddHandler(
+            UIElement.PreviewKeyDownEvent,
+            new KeyEventHandler(DetailBodyTextBox_KeyDown),
+            handledEventsToo: true);
         RootGrid.DataContext = ViewModel;
         QuickCaptureShell.TitleGlyph = "\uE70F";
         QuickCaptureShell.TitleIconKind = WidgetTitleIconKindNames.QuickCapture;
@@ -297,6 +299,8 @@ public sealed partial class QuickCaptureWidgetWindow : WidgetWindowBase, IDeskto
         _trayAnimation.PrepareHiddenState();
         Win32Helper.ShowWindow(_hWnd, Win32Helper.SW_SHOWNOACTIVATE);
         _appWindow.Show();
+        _trayAnimation.PrepareHiddenState();
+        _trayAnimation.RevealWindowForTrayShow();
         Visible = true;
         ViewModel.Config.IsVisible = true;
         if (persistVisibility)
@@ -319,6 +323,8 @@ public sealed partial class QuickCaptureWidgetWindow : WidgetWindowBase, IDeskto
         _trayAnimation.PrepareHiddenState();
         _appWindow.Show();
         Win32Helper.ShowWindow(_hWnd, Win32Helper.SW_SHOWNOACTIVATE);
+        _trayAnimation.PrepareHiddenState();
+        _trayAnimation.RevealWindowForTrayShow();
         HoldTemporaryTopMost();
         Visible = true;
         ViewModel.Config.IsVisible = true;
@@ -378,12 +384,17 @@ public sealed partial class QuickCaptureWidgetWindow : WidgetWindowBase, IDeskto
     {
         _trayAnimation.NextGeneration();
         _trayAnimation.StopAndRestoreWindowPosition();
+        _trayAnimation.CloakWindowForTrayShow();
         _isHideAnimationRunning = false;
         var profile = GetTrayAnimationProfile();
         LogTrayWindow(
             $"PrepareShow gen={_trayAnimation.Generation} effect={_settingsService.Settings.WidgetAnimationEffect} " +
             $"speed={_settingsService.Settings.WidgetAnimationSpeed} enabled={profile.IsEnabled} durationMs={profile.DurationMs}");
-        _trayAnimation.PrepareVisualState(profile.ShowOffsetX, profile.ShowOffsetY, profile.ShowStartOpacity, profile.ShowStartScale);
+        _trayAnimation.PrepareVisualState(
+            profile.ShowOffsetX,
+            profile.ShowOffsetY,
+            profile.ShowStartOpacity,
+            profile.ShowStartScale);
     }
 
     public void PlayTrayShowAnimation()
@@ -397,9 +408,10 @@ public sealed partial class QuickCaptureWidgetWindow : WidgetWindowBase, IDeskto
         LogTrayWindow($"CompleteShowWithoutAnimation gen={_trayAnimation.Generation}");
         _trayAnimation.Stop();
         SetTrayAnimationOffsetOverride(null, null);
-        RestoreNativeBackdropAfterTrayReveal();
         _trayAnimation.RestoreVisualState();
         _trayAnimation.RestoreWindowPosition();
+        _trayAnimation.RevealWindowForTrayShow();
+        RestoreNativeBackdropAfterTrayReveal();
     }
 
     public bool PrepareTrayHideAnimation(bool persistVisibility = true)
@@ -411,6 +423,7 @@ public sealed partial class QuickCaptureWidgetWindow : WidgetWindowBase, IDeskto
         }
 
         _trayAnimation.NextGeneration();
+        _trayAnimation.RevealWindowForTrayShow();
         _trayAnimation.StopAndRestoreWindowPosition();
         RestoreNativeBackdropAfterTrayReveal();
         _isHideAnimationRunning = true;
@@ -443,6 +456,8 @@ public sealed partial class QuickCaptureWidgetWindow : WidgetWindowBase, IDeskto
         _trayAnimation.PrepareHiddenState();
         Win32Helper.ShowWindow(_hWnd, Win32Helper.SW_SHOWNOACTIVATE);
         base.Activate();
+        _trayAnimation.PrepareHiddenState();
+        _trayAnimation.RevealWindowForTrayShow();
         Visible = true;
         ViewModel.Config.IsVisible = true;
         _settingsService.SaveDebounced();
@@ -512,6 +527,7 @@ public sealed partial class QuickCaptureWidgetWindow : WidgetWindowBase, IDeskto
         _topMostSafetyTimer = null;
         StopBackdropRefreshTimer();
         _trayAnimation.Stop();
+        _trayAnimation.RevealWindowForTrayShow();
         WidgetLayerService.ReleaseWindow(_hWnd);
         Close();
     }
@@ -589,6 +605,7 @@ public sealed partial class QuickCaptureWidgetWindow : WidgetWindowBase, IDeskto
             // TrayAnimation.Stop() was already called in CloseWindow().
             // Call again only as a fallback; Stop() is safe to call twice.
             try { _trayAnimation.Stop(); } catch { }
+            try { _trayAnimation.RevealWindowForTrayShow(); } catch { }
 
             try { CleanupBase(); } catch (Exception ex) { App.Log($"[QuickCapture] CleanupBase failed during close: {ex.Message}"); }
 
@@ -684,6 +701,12 @@ public sealed partial class QuickCaptureWidgetWindow : WidgetWindowBase, IDeskto
             ApplySegmentedStyle();
         }
 
+        if (e.PropertyName == nameof(QuickCaptureWidgetViewModel.VisibleTabCount))
+        {
+            ApplySegmentedLayout();
+            RefreshSelectedViewSegment();
+        }
+
         if (e.PropertyName is nameof(QuickCaptureWidgetViewModel.IconSize) or
             nameof(QuickCaptureWidgetViewModel.TextSize))
         {
@@ -743,6 +766,7 @@ public sealed partial class QuickCaptureWidgetWindow : WidgetWindowBase, IDeskto
             {
                 _trayAnimation.RestoreVisualState();
                 _trayAnimation.RestoreWindowPosition();
+                RestoreNativeBackdropAfterTrayReveal();
             });
     }
 
@@ -750,7 +774,7 @@ public sealed partial class QuickCaptureWidgetWindow : WidgetWindowBase, IDeskto
     {
         if (Visible)
         {
-            PlayTrayRaiseAnimation();
+            _trayAnimation.PlayAfterContentReady(PlayTrayRaiseAnimation);
         }
     }
 
@@ -802,32 +826,10 @@ public sealed partial class QuickCaptureWidgetWindow : WidgetWindowBase, IDeskto
         WidgetLayerService.ClearTopMost(_hWnd);
         Win32Helper.ShowWindow(_hWnd, Win32Helper.SW_HIDE);
         _appWindow.Hide();
+        _trayAnimation.RevealWindowForTrayShow();
         _trayAnimation.RestoreVisualState();
         _trayAnimation.RestoreWindowPosition();
         LogTrayWindow("CompleteHide");
-    }
-
-    private void SuppressNativeBackdropForTrayReveal()
-    {
-        if (_isNativeBackdropSuppressedForTrayReveal)
-        {
-            return;
-        }
-
-        _isNativeBackdropSuppressedForTrayReveal = true;
-        DisposeAcrylicController();
-        Win32Helper.DisableAccentPolicy(_hWnd);
-    }
-
-    private void RestoreNativeBackdropAfterTrayReveal()
-    {
-        if (!_isNativeBackdropSuppressedForTrayReveal)
-        {
-            return;
-        }
-
-        _isNativeBackdropSuppressedForTrayReveal = false;
-        ApplyBackdropPreference();
     }
 
 }

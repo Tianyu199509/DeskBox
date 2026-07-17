@@ -1,3 +1,4 @@
+using CommunityToolkit.Mvvm.Input;
 using DeskBox.Services;
 
 namespace DeskBox.ViewModels;
@@ -70,6 +71,7 @@ public partial class SettingsViewModel
         SettingsService.WidgetCompactAnimationSmooth,
         SettingsService.WidgetCompactAnimationSlow,
         SettingsService.WidgetCompactAnimationSnappy,
+        SettingsService.WidgetCompactAnimationCustom,
         SettingsService.WidgetCompactAnimationNone
     ];
 
@@ -97,6 +99,25 @@ public partial class SettingsViewModel
             }
 
             _settingsService.Settings.WidgetCompactAnimationEffect = normalized;
+            int? presetDuration = normalized switch
+            {
+                SettingsService.WidgetCompactAnimationSmooth =>
+                    SettingsService.DefaultWidgetCompactAnimationDurationMs,
+                SettingsService.WidgetCompactAnimationSlow =>
+                    SettingsService.SlowWidgetCompactAnimationDurationMs,
+                SettingsService.WidgetCompactAnimationSnappy =>
+                    SettingsService.SnappyWidgetCompactAnimationDurationMs,
+                _ => null
+            };
+            if (presetDuration is { } duration &&
+                SetProperty(
+                    ref _widgetCompactAnimationDurationMs,
+                    duration,
+                    nameof(WidgetCompactAnimationDurationMs)))
+            {
+                _settingsService.Settings.WidgetCompactAnimationDurationMs = duration;
+                OnPropertyChanged(nameof(WidgetCompactAnimationDurationText));
+            }
             _settingsService.SaveDebounced();
         }
     }
@@ -125,6 +146,19 @@ public partial class SettingsViewModel
             if (_isRestoringDefaults || _isApplyingSettingsSnapshot)
             {
                 return;
+            }
+
+            if (SelectedWidgetCompactAnimationEffect is not
+                (SettingsService.WidgetCompactAnimationCustom or
+                 SettingsService.WidgetCompactAnimationNone))
+            {
+                _selectedWidgetCompactAnimationEffect = SettingsService.WidgetCompactAnimationCustom;
+                _settingsService.Settings.WidgetCompactAnimationEffect =
+                    SettingsService.WidgetCompactAnimationCustom;
+                OnPropertyChanged(nameof(SelectedWidgetCompactAnimationEffect));
+                OnPropertyChanged(nameof(SelectedWidgetCompactAnimationEffectText));
+                OnPropertyChanged(nameof(SelectedWidgetCompactAnimationEffectIndex));
+                OnPropertyChanged(nameof(IsWidgetCompactAnimationEnabled));
             }
 
             _settingsService.Settings.WidgetCompactAnimationDurationMs = normalized;
@@ -223,11 +257,100 @@ public partial class SettingsViewModel
     public int SelectedWidgetCompactMediaCornerIndex =>
         Array.IndexOf(AvailableWidgetCompactMediaCornerModes, _selectedWidgetCompactMediaCornerMode);
 
+    public int CapsuleCustomRuleCount => _settingsService.Settings.Widgets.Count(widget =>
+        widget.Metadata?.ContainsKey(WidgetCollapseBehaviorNames.MetadataKey) == true);
+
+    public int CapsuleCustomWidthCount =>
+        _settingsService.Settings.Widgets.Count(widget => widget.CompactWidth is not null);
+
+    public int CapsuleSavedPlacementCount =>
+        _settingsService.Settings.Widgets.Count(widget => widget.CompactPlacement is not null);
+
+    public bool HasCapsuleBehaviorOverrides => CapsuleCustomRuleCount > 0;
+
+    public bool HasCapsuleGeometryOverrides =>
+        CapsuleCustomWidthCount > 0 || CapsuleSavedPlacementCount > 0;
+
+    public string CapsuleOverrideSummaryText => _localizationService.Format(
+        "Settings.Capsule.Overrides.Summary",
+        CapsuleCustomRuleCount,
+        CapsuleCustomWidthCount,
+        CapsuleSavedPlacementCount);
+
+    public string CapsuleBehaviorOverrideSummaryText => _localizationService.Format(
+        "Settings.Capsule.Overrides.Behavior.Summary",
+        CapsuleCustomRuleCount);
+
+    public string CapsuleGeometryOverrideSummaryText => _localizationService.Format(
+        "Settings.Capsule.Overrides.Geometry.Summary",
+        CapsuleCustomWidthCount,
+        CapsuleSavedPlacementCount);
+
+    [RelayCommand]
+    private void ResetCapsuleBehaviorOverrides()
+    {
+        int changed = 0;
+        foreach (var widget in _settingsService.Settings.Widgets)
+        {
+            if (widget.Metadata?.Remove(WidgetCollapseBehaviorNames.MetadataKey) == true)
+            {
+                changed++;
+            }
+        }
+
+        if (changed > 0)
+        {
+            _settingsService.SaveDebounced();
+            NotifyCapsuleOverridePropertiesChanged();
+        }
+    }
+
+    [RelayCommand]
+    private void ResetCapsuleGeometryOverrides()
+    {
+        int changed = 0;
+        foreach (var widget in _settingsService.Settings.Widgets)
+        {
+            if (widget.CompactWidth is not null)
+            {
+                widget.CompactWidth = null;
+                changed++;
+            }
+
+            if (widget.CompactPlacement is not null)
+            {
+                widget.CompactPlacement = null;
+                changed++;
+            }
+        }
+
+        if (changed > 0)
+        {
+            _settingsService.SaveDebounced();
+            NotifyCapsuleOverridePropertiesChanged();
+        }
+    }
+
+    private void NotifyCapsuleOverridePropertiesChanged()
+    {
+        OnPropertyChanged(nameof(CapsuleCustomRuleCount));
+        OnPropertyChanged(nameof(CapsuleCustomWidthCount));
+        OnPropertyChanged(nameof(CapsuleSavedPlacementCount));
+        OnPropertyChanged(nameof(HasCapsuleBehaviorOverrides));
+        OnPropertyChanged(nameof(HasCapsuleGeometryOverrides));
+        OnPropertyChanged(nameof(CapsuleOverrideSummaryText));
+        OnPropertyChanged(nameof(CapsuleBehaviorOverrideSummaryText));
+        OnPropertyChanged(nameof(CapsuleGeometryOverrideSummaryText));
+        ResetCapsuleBehaviorOverridesCommand.NotifyCanExecuteChanged();
+        ResetCapsuleGeometryOverridesCommand.NotifyCanExecuteChanged();
+    }
+
     private string GetWidgetCompactAnimationEffectDisplayName(string effect) =>
         SettingsService.NormalizeWidgetCompactAnimationEffect(effect) switch
         {
             SettingsService.WidgetCompactAnimationSnappy => _localizationService.T("Settings.Capsule.Animation.Snappy"),
             SettingsService.WidgetCompactAnimationSlow => _localizationService.T("Settings.Capsule.Animation.Slow"),
+            SettingsService.WidgetCompactAnimationCustom => _localizationService.T("Settings.Capsule.Animation.Custom"),
             SettingsService.WidgetCompactAnimationNone => _localizationService.T("Settings.Capsule.Animation.None"),
             _ => _localizationService.T("Settings.Capsule.Animation.Smooth")
         };

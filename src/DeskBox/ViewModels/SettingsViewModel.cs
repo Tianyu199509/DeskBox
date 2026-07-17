@@ -175,7 +175,19 @@ private string[]? _cachedWeatherRefreshIntervalDisplayNames;
     [ObservableProperty] private bool _showFileExtensions;
     [ObservableProperty] private bool _hideShortcutExtensionWhenShowingFileExtensions = true;
     [ObservableProperty] private bool _quickCaptureEnabled;
+    [ObservableProperty] private bool _quickCaptureShowTabBar = true;
+    [ObservableProperty] private bool _quickCaptureShowRecordsTab = true;
+    [ObservableProperty] private bool _quickCaptureShowPinnedTab = true;
+    [ObservableProperty] private bool _quickCaptureShowRecentTab = true;
     [ObservableProperty] private bool _todoEnabled;
+    [ObservableProperty] private bool _todoShowTabBar = true;
+    [ObservableProperty] private bool _todoShowAllTab = true;
+    [ObservableProperty] private bool _todoShowActiveTab;
+    [ObservableProperty] private bool _todoShowTodayTab = true;
+    [ObservableProperty] private bool _todoShowThisWeekTab;
+    [ObservableProperty] private bool _todoShowThisMonthTab;
+    [ObservableProperty] private bool _todoShowImportantTab = true;
+    [ObservableProperty] private bool _todoShowCompletedTab = true;
     [ObservableProperty] private bool _todoShowCompletedTasks = true;
     [ObservableProperty] private bool _todoShowFooterStats;
     [ObservableProperty] private bool _todoShowClearCompletedButton = true;
@@ -241,6 +253,8 @@ private string[]? _cachedWeatherRefreshIntervalDisplayNames;
         ApplyHoverButtonActionSelection(settings.WidgetHoverButtonActions);
         _showListItemDetails = settings.ShowListItemDetails;
         _showFileItemPathTooltips = settings.ShowFileItemPathTooltips;
+        InitializeFileStackSettings(settings);
+        InitializeContentEditorSettings(settings);
         _widgetOpacity = settings.WidgetOpacity;
         _widgetMaterialIntensity = settings.WidgetMaterialIntensity;
         _selectedWidgetCornerPreference = settings.WidgetCornerPreference is CornerDefault or CornerSquare or CornerSmall or CornerRound
@@ -294,7 +308,20 @@ private string[]? _cachedWeatherRefreshIntervalDisplayNames;
         _quickCaptureShowCreatedTime = settings.QuickCaptureShowCreatedTime;
         _selectedAttachmentStorageMode = SettingsService.NormalizeAttachmentStorageMode(settings.AttachmentStorageMode);
         _selectedQuickCaptureDefaultView = NormalizeQuickCaptureDefaultView(settings.QuickCaptureDefaultView);
+        _selectedQuickCaptureTabStyle = SettingsService.NormalizeWidgetTabStyle(settings.QuickCaptureTabStyle);
+        _quickCaptureShowTabBar = settings.QuickCaptureShowTabBar;
+        _quickCaptureShowRecordsTab = settings.QuickCaptureShowRecordsTab;
+        _quickCaptureShowPinnedTab = settings.QuickCaptureShowPinnedTab;
+        _quickCaptureShowRecentTab = settings.QuickCaptureShowRecentTab;
         _todoEnabled = FeatureWidgetSettings.IsEnabled(settings, WidgetKind.Todo);
+        _todoShowTabBar = settings.TodoShowTabBar;
+        _todoShowAllTab = settings.TodoShowAllTab;
+        _todoShowActiveTab = settings.TodoShowActiveTab;
+        _todoShowTodayTab = settings.TodoShowTodayTab;
+        _todoShowThisWeekTab = settings.TodoShowThisWeekTab;
+        _todoShowThisMonthTab = settings.TodoShowThisMonthTab;
+        _todoShowImportantTab = settings.TodoShowImportantTab;
+        _todoShowCompletedTab = settings.TodoShowCompletedTab;
         _todoShowCompletedTasks = settings.TodoShowCompletedTasks;
         _todoShowFooterStats = settings.TodoShowFooterStats;
         _todoShowClearCompletedButton = settings.TodoShowClearCompletedButton;
@@ -331,6 +358,7 @@ _selectedWeatherRefreshInterval = Math.Clamp(
     SettingsService.WeatherRefreshMaxMinutes);
         _selectedTodoNewTaskPosition = NormalizeTodoNewTaskPosition(settings.TodoNewTaskPosition);
         _selectedTodoDefaultFilter = NormalizeTodoDefaultFilter(settings.TodoDefaultFilter);
+        _selectedTodoTabStyle = SettingsService.NormalizeWidgetTabStyle(settings.TodoTabStyle);
         _selectedTodoReminderOffsetMinutes = SettingsService.NormalizeTodoReminderOffsetMinutes(settings.TodoDefaultReminderOffsetMinutes);
         _managedStorageRootPath = settings.DefaultManagedStorageRootPath;
 
@@ -374,6 +402,7 @@ _ = RefreshQuickAccessStateAsync();
         _settingsService.SettingsChanged -= OnSettingsChanged;
         _themeService.AppearanceChanged -= OnAppearanceChanged;
         _localizationService.LanguageChanged -= OnLanguageChanged;
+        DisposeFileStackSettings();
         _citySearchCts?.Cancel();
         _citySearchCts?.Dispose();
         _citySearchService?.Dispose();
@@ -591,17 +620,13 @@ _ = RefreshQuickAccessStateAsync();
 
     private string ResolveAnimationPreset()
     {
-        if (_selectedWidgetAnimationEffect == SettingsService.WidgetAnimationEffectNone &&
-            _selectedWidgetAnimationSpeed == SettingsService.WidgetAnimationSpeedStandard &&
-            _selectedWidgetAnimationSlideDirection == SettingsService.WidgetAnimationSlideDirectionNone &&
-            _selectedWidgetAnimationEasingIntensity == SettingsService.WidgetAnimationEasingNone)
+        if (_selectedWidgetAnimationEffect == SettingsService.WidgetAnimationEffectNone)
         {
             return AnimationPresetNone;
         }
 
         if (_selectedWidgetAnimationEffect == SettingsService.WidgetAnimationEffectFade &&
             _selectedWidgetAnimationSpeed == SettingsService.WidgetAnimationSpeedRelaxed &&
-            _selectedWidgetAnimationSlideDirection == SettingsService.WidgetAnimationSlideDirectionNone &&
             _selectedWidgetAnimationEasingIntensity == SettingsService.WidgetAnimationEasingLight)
         {
             return AnimationPresetGentle;
@@ -617,7 +642,6 @@ _ = RefreshQuickAccessStateAsync();
 
         if (_selectedWidgetAnimationEffect == SettingsService.WidgetAnimationEffectScaleFade &&
             _selectedWidgetAnimationSpeed == SettingsService.WidgetAnimationSpeedRelaxed &&
-            _selectedWidgetAnimationSlideDirection == SettingsService.WidgetAnimationSlideDirectionNone &&
             _selectedWidgetAnimationEasingIntensity == SettingsService.WidgetAnimationEasingStrong)
         {
             return AnimationPresetEmphasized;

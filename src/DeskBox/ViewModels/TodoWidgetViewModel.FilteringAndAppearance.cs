@@ -191,6 +191,8 @@ public sealed partial class TodoWidgetViewModel
         {
             TodoFilter.Active => !item.IsCompleted,
             TodoFilter.Today => IsDueToday(item),
+            TodoFilter.ThisWeek => IsDueThisWeek(item),
+            TodoFilter.ThisMonth => IsDueThisMonth(item),
             TodoFilter.Important => item.IsImportant,
             TodoFilter.Completed => item.IsCompleted,
             _ => true
@@ -212,6 +214,8 @@ public sealed partial class TodoWidgetViewModel
         OnPropertyChanged(nameof(CompletedCount));
         OnPropertyChanged(nameof(AllFilterCount));
         OnPropertyChanged(nameof(TodayFilterCount));
+        OnPropertyChanged(nameof(ThisWeekFilterCount));
+        OnPropertyChanged(nameof(ThisMonthFilterCount));
         OnPropertyChanged(nameof(ImportantFilterCount));
         OnPropertyChanged(nameof(RedColorFilterCount));
         OnPropertyChanged(nameof(OrangeColorFilterCount));
@@ -229,6 +233,8 @@ public sealed partial class TodoWidgetViewModel
         OnPropertyChanged(nameof(AllFilterText));
         OnPropertyChanged(nameof(ActiveFilterText));
         OnPropertyChanged(nameof(TodayFilterText));
+        OnPropertyChanged(nameof(ThisWeekFilterText));
+        OnPropertyChanged(nameof(ThisMonthFilterText));
         OnPropertyChanged(nameof(ImportantFilterText));
         OnPropertyChanged(nameof(CompletedFilterText));
         OnPropertyChanged(nameof(ColorFilterVisibility));
@@ -258,6 +264,8 @@ public sealed partial class TodoWidgetViewModel
         OnPropertyChanged(nameof(AllFilterText));
         OnPropertyChanged(nameof(ActiveFilterText));
         OnPropertyChanged(nameof(TodayFilterText));
+        OnPropertyChanged(nameof(ThisWeekFilterText));
+        OnPropertyChanged(nameof(ThisMonthFilterText));
         OnPropertyChanged(nameof(ImportantFilterText));
         OnPropertyChanged(nameof(CompletedFilterText));
         OnPropertyChanged(nameof(EmptyStateTitle));
@@ -296,10 +304,12 @@ public sealed partial class TodoWidgetViewModel
 
         NewTaskPosition = normalizedNewTaskPosition;
         TabStyle = settings.TodoTabStyle;
+        ApplyTabVisibilitySettings(settings);
         ShowCompletedTasks = settings.TodoShowCompletedTasks;
         ShowFooterStats = settings.TodoShowFooterStats;
         ShowClearCompletedButton = settings.TodoShowClearCompletedButton;
         ConfirmBeforeDelete = settings.TodoConfirmBeforeDelete;
+        OnPropertyChanged(nameof(ItemPreviewLineCount));
 
         bool filterChanged = false;
         if (updateFilter)
@@ -307,6 +317,12 @@ public sealed partial class TodoWidgetViewModel
             TodoFilter defaultFilter = MapDefaultFilter(settings.TodoDefaultFilter);
             filterChanged = SelectedFilter != defaultFilter;
             SelectedFilter = defaultFilter;
+        }
+        else if (!IsFilterVisible(SelectedFilter))
+        {
+            TodoFilter fallbackFilter = MapDefaultFilter(SettingsService.GetFirstVisibleTodoTab(settings));
+            filterChanged = SelectedFilter != fallbackFilter;
+            SelectedFilter = fallbackFilter;
         }
 
         if (newTaskPositionChanged && !filterChanged)
@@ -320,7 +336,10 @@ public sealed partial class TodoWidgetViewModel
     {
         return defaultFilter switch
         {
+            SettingsService.TodoDefaultFilterActive => TodoFilter.Active,
             SettingsService.TodoDefaultFilterToday => TodoFilter.Today,
+            SettingsService.TodoDefaultFilterThisWeek => TodoFilter.ThisWeek,
+            SettingsService.TodoDefaultFilterThisMonth => TodoFilter.ThisMonth,
             SettingsService.TodoDefaultFilterImportant => TodoFilter.Important,
             SettingsService.TodoDefaultFilterCompleted => TodoFilter.Completed,
             _ => TodoFilter.All
@@ -356,6 +375,65 @@ public sealed partial class TodoWidgetViewModel
         return item.DueDate is { } dueDate &&
                dueDate.ToLocalTime().Date == DateTimeOffset.Now.Date;
     }
+
+    private static bool IsDueThisWeek(TodoItemViewModel item)
+    {
+        if (item.DueDate is not { } dueDate)
+        {
+            return false;
+        }
+
+        DateTime today = DateTime.Today;
+        int daysSinceMonday = ((int)today.DayOfWeek + 6) % 7;
+        DateTime weekStart = today.AddDays(-daysSinceMonday);
+        DateTime nextWeekStart = weekStart.AddDays(7);
+        DateTime localDueDate = dueDate.ToLocalTime().Date;
+        return localDueDate >= weekStart && localDueDate < nextWeekStart;
+    }
+
+    private static bool IsDueThisMonth(TodoItemViewModel item)
+    {
+        if (item.DueDate is not { } dueDate)
+        {
+            return false;
+        }
+
+        DateTime localDueDate = dueDate.ToLocalTime().Date;
+        DateTime today = DateTime.Today;
+        return localDueDate.Year == today.Year && localDueDate.Month == today.Month;
+    }
+
+    private void ApplyTabVisibilitySettings(AppSettings settings)
+    {
+        _showTabBar = settings.TodoShowTabBar;
+        _showAllTab = settings.TodoShowAllTab;
+        _showActiveTab = settings.TodoShowActiveTab;
+        _showTodayTab = settings.TodoShowTodayTab;
+        _showThisWeekTab = settings.TodoShowThisWeekTab;
+        _showThisMonthTab = settings.TodoShowThisMonthTab;
+        _showImportantTab = settings.TodoShowImportantTab;
+        _showCompletedTab = settings.TodoShowCompletedTab;
+        OnPropertyChanged(nameof(TabBarVisibility));
+        OnPropertyChanged(nameof(AllTabVisibility));
+        OnPropertyChanged(nameof(ActiveTabVisibility));
+        OnPropertyChanged(nameof(TodayTabVisibility));
+        OnPropertyChanged(nameof(ThisWeekTabVisibility));
+        OnPropertyChanged(nameof(ThisMonthTabVisibility));
+        OnPropertyChanged(nameof(ImportantTabVisibility));
+        OnPropertyChanged(nameof(CompletedTabVisibility));
+        OnPropertyChanged(nameof(VisibleTabCount));
+    }
+
+    private bool IsFilterVisible(TodoFilter filter) => filter switch
+    {
+        TodoFilter.Active => _showActiveTab,
+        TodoFilter.Today => _showTodayTab,
+        TodoFilter.ThisWeek => _showThisWeekTab,
+        TodoFilter.ThisMonth => _showThisMonthTab,
+        TodoFilter.Important => _showImportantTab,
+        TodoFilter.Completed => _showCompletedTab,
+        _ => _showAllTab
+    };
 
     private static DateTimeOffset WithEndOfDay(DateTimeOffset date)
     {

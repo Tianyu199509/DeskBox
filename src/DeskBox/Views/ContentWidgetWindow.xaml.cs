@@ -96,32 +96,12 @@ public sealed partial class ContentWidgetWindow : WidgetWindowBase, IDesktopWidg
     protected override WidgetCompactPresentation CreateCompactPresentation()
     {
         var localization = App.Current.LocalizationService;
-        string contentMode = SettingsService.NormalizeWidgetCompactContentMode(
-            SettingsService.Settings.WidgetCompactContentMode);
+        string contentMode = ResolveEffectiveCompactContentMode();
         return CurrentContent switch
         {
             TodoWidgetContentAdapter todo => CreateTodoCompactPresentation(todo, contentMode, localization),
-            MusicWidgetContentAdapter music => new WidgetCompactPresentation(
-                music.ViewModel.Title,
-                contentMode == SettingsService.WidgetCompactContentModeMinimal
-                    ? string.Empty
-                    : music.ViewModel.Artist,
-                _descriptor.DefaultGlyph,
-                string.Empty,
-                music.ViewModel.ThumbnailImage,
-                ShowMediaControls: contentMode == SettingsService.WidgetCompactContentModeSmart,
-                IsPlaying: music.ViewModel.IsPlaying,
-                CanGoPrevious: music.ViewModel.CanGoPrevious,
-                CanGoNext: music.ViewModel.CanGoNext,
-                UseStackedText: contentMode == SettingsService.WidgetCompactContentModeSmart,
-                EnableMarquee: true,
-                Progress: GetMusicCompactProgress(music),
-                LiveStateKey: string.Join(
-                    "|",
-                    music.ViewModel.Title,
-                    music.ViewModel.Artist,
-                    music.ViewModel.PlaybackState,
-                    music.ViewModel.Duration.Ticks)),
+            MusicWidgetContentAdapter music =>
+                CreateMusicCompactPresentation(music, contentMode),
             WeatherWidgetContentAdapter weather => new WidgetCompactPresentation(
                 string.IsNullOrWhiteSpace(weather.ViewModel.CurrentTemperatureText)
                     ? _titleViewModel.DisplayName
@@ -146,6 +126,48 @@ public sealed partial class ContentWidgetWindow : WidgetWindowBase, IDesktopWidg
                 EnableMarquee: true,
                 LiveStateKey: _titleViewModel.DisplayName)
         };
+    }
+
+    private WidgetCompactPresentation CreateMusicCompactPresentation(
+        MusicWidgetContentAdapter music,
+        string contentMode)
+    {
+        bool hidesSensitiveContent = WidgetCompactPrivacyPolicy.HidesSensitiveContent(
+            SettingsService.Settings.WidgetCompactHideSensitiveContent,
+            Config.WidgetKind);
+        string title = hidesSensitiveContent
+            ? _titleViewModel.DisplayName
+            : music.ViewModel.Title;
+        string summary = contentMode == SettingsService.WidgetCompactContentModeMinimal
+            ? string.Empty
+            : hidesSensitiveContent
+                ? music.ViewModel.StatusText
+                : music.ViewModel.Artist;
+
+        return new WidgetCompactPresentation(
+            title,
+            summary,
+            _descriptor.DefaultGlyph,
+            string.Empty,
+            hidesSensitiveContent ? null : music.ViewModel.ThumbnailImage,
+            ShowMediaControls: contentMode == SettingsService.WidgetCompactContentModeSmart,
+            IsPlaying: music.ViewModel.IsPlaying,
+            CanGoPrevious: music.ViewModel.CanGoPrevious,
+            CanGoNext: music.ViewModel.CanGoNext,
+            UseStackedText: contentMode == SettingsService.WidgetCompactContentModeSmart,
+            EnableMarquee: !hidesSensitiveContent,
+            Progress: GetMusicCompactProgress(music),
+            LiveStateKey: hidesSensitiveContent
+                ? string.Join(
+                    "|",
+                    music.ViewModel.PlaybackState,
+                    music.ViewModel.Duration.Ticks)
+                : string.Join(
+                    "|",
+                    music.ViewModel.Title,
+                    music.ViewModel.Artist,
+                    music.ViewModel.PlaybackState,
+                    music.ViewModel.Duration.Ticks));
     }
 
     private WidgetCompactPresentation CreateTodoCompactPresentation(
@@ -452,6 +474,7 @@ public sealed partial class ContentWidgetWindow : WidgetWindowBase, IDesktopWidg
     {
         TrayAnimation.NextGeneration();
         TrayAnimation.StopAndRestoreWindowPosition();
+        TrayAnimation.CloakWindowForTrayShow();
         _isHidePrepared = false;
         IsHideAnimationRunning = false;
 
@@ -459,18 +482,26 @@ public sealed partial class ContentWidgetWindow : WidgetWindowBase, IDesktopWidg
         LogTrayWindow(
             $"PrepareShow gen={TrayAnimation.Generation} effect={SettingsService.Settings.WidgetAnimationEffect} " +
             $"speed={SettingsService.Settings.WidgetAnimationSpeed} enabled={profile.IsEnabled} durationMs={profile.DurationMs}");
-        TrayAnimation.PrepareVisualState(profile.ShowOffsetX, profile.ShowOffsetY, profile.ShowStartOpacity, profile.ShowStartScale);
+        TrayAnimation.PrepareVisualState(
+            profile.ShowOffsetX,
+            profile.ShowOffsetY,
+            profile.ShowStartOpacity,
+            profile.ShowStartScale);
     }
 
     public void ShowPreparedAtDesktopLayer(bool persistVisibility = true)
     {
         ShowWithoutActivation(persistVisibility);
+        TrayAnimation.PrepareHiddenState();
+        TrayAnimation.RevealWindowForTrayShow();
         PushToBottom();
     }
 
     public void ShowPreparedRaisedFromTray(bool persistVisibility = true)
     {
         ShowWithoutActivation(persistVisibility);
+        TrayAnimation.PrepareHiddenState();
+        TrayAnimation.RevealWindowForTrayShow();
         HoldTemporaryTopMost();
     }
 
@@ -487,6 +518,8 @@ public sealed partial class ContentWidgetWindow : WidgetWindowBase, IDesktopWidg
         SetTrayAnimationOffsetOverride(null, null);
         TrayAnimation.RestoreVisualState();
         TrayAnimation.RestoreWindowPosition();
+        TrayAnimation.RevealWindowForTrayShow();
+        RestoreNativeBackdropAfterTrayReveal();
     }
 
     public bool PrepareTrayHideAnimation(bool persistVisibility = true)
@@ -498,6 +531,7 @@ public sealed partial class ContentWidgetWindow : WidgetWindowBase, IDesktopWidg
         }
 
         TrayAnimation.NextGeneration();
+        TrayAnimation.RevealWindowForTrayShow();
         TrayAnimation.StopAndRestoreWindowPosition();
         IsHideAnimationRunning = true;
         _isHidePrepared = true;
@@ -569,6 +603,7 @@ public sealed partial class ContentWidgetWindow : WidgetWindowBase, IDesktopWidg
     public void HideWindow()
     {
         TrayAnimation.Stop();
+        TrayAnimation.RevealWindowForTrayShow();
         IsHideAnimationRunning = false;
         _isHidePrepared = false;
         Visible = false;
@@ -597,6 +632,7 @@ public sealed partial class ContentWidgetWindow : WidgetWindowBase, IDesktopWidg
         }
 
         IsClosing = true;
+        TrayAnimation.RevealWindowForTrayShow();
         WidgetLayerService.ReleaseWindow(HWnd);
         Close();
     }
@@ -695,6 +731,7 @@ public sealed partial class ContentWidgetWindow : WidgetWindowBase, IDesktopWidg
                 _compactPresentationSource.PropertyChanged -= CompactPresentationSource_PropertyChanged;
                 _compactPresentationSource = null;
             }
+            try { TrayAnimation.RevealWindowForTrayShow(); } catch { }
             try { CleanupBase(); } catch (Exception ex) { App.Log($"[ContentWidget] CleanupBase failed during close: {ex.Message}"); }
             try { _contentHost.DisposeContent(); } catch (Exception ex) { App.Log($"[ContentWidget] DisposeContent failed during close: {ex.Message}"); }
 

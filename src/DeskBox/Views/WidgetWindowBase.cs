@@ -61,6 +61,7 @@ public abstract partial class WidgetWindowBase : Window
     private DispatcherQueueTimer? _inactiveBackdropCleanupTimer;
     private int _backdropRefreshStage;
     private bool _isTrackedForDiagnostics;
+    private bool _isNativeBackdropSuppressedForTrayReveal;
 
     // ── Protected state: drag & resize ─────────────────────────
     protected bool IsDragging;
@@ -151,7 +152,7 @@ public abstract partial class WidgetWindowBase : Window
     protected virtual bool SupportsBackdropRefresh => true;
 
     /// <summary>Whether the native backdrop is temporarily suppressed for tray reveal animation.</summary>
-    protected virtual bool IsBackdropSuppressedForTrayReveal => false;
+    protected bool IsBackdropSuppressedForTrayReveal => _isNativeBackdropSuppressedForTrayReveal;
 
     protected Windows.Foundation.Rect GetCurrentAnimationBounds()
     {

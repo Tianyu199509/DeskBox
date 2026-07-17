@@ -279,6 +279,31 @@ public sealed partial class WidgetManager
         }
 
         string effect = options.Effect;
+        string direction = effect switch
+        {
+            SettingsService.WidgetAnimationEffectSlideLeft or
+            SettingsService.WidgetAnimationEffectSlideLeftFade =>
+                SettingsService.WidgetAnimationSlideDirectionLeft,
+            SettingsService.WidgetAnimationEffectSlideUp or
+            SettingsService.WidgetAnimationEffectSlideUpFade =>
+                SettingsService.WidgetAnimationSlideDirectionUp,
+            SettingsService.WidgetAnimationEffectSlideDown or
+            SettingsService.WidgetAnimationEffectSlideDownFade =>
+                SettingsService.WidgetAnimationSlideDirectionDown,
+            SettingsService.WidgetAnimationEffectSlideRight or
+            SettingsService.WidgetAnimationEffectSlideRightFade =>
+                SettingsService.WidgetAnimationSlideDirectionRight,
+            SettingsService.WidgetAnimationEffectSlideFade or
+            SettingsService.WidgetAnimationEffectScaleSlide =>
+                options.SlideDirection,
+            _ => SettingsService.WidgetAnimationSlideDirectionNone
+        };
+
+        if (direction == SettingsService.WidgetAnimationSlideDirectionNone)
+        {
+            return;
+        }
+
         foreach (var group in windows.GroupBy(GetAnimationWorkAreaKey))
         {
             var groupWindows = group.ToList();
@@ -295,27 +320,21 @@ public sealed partial class WidgetManager
 
             double offsetX = 0;
             double offsetY = 0;
-            switch (effect)
+            switch (direction)
             {
-                case SettingsService.WidgetAnimationEffectSlideLeft:
-                case SettingsService.WidgetAnimationEffectSlideLeftFade:
+                case SettingsService.WidgetAnimationSlideDirectionLeft:
                     offsetX = -(groupRight - workArea.X + OffscreenAnimationPadding);
                     break;
 
-                case SettingsService.WidgetAnimationEffectSlideUp:
-                case SettingsService.WidgetAnimationEffectSlideUpFade:
+                case SettingsService.WidgetAnimationSlideDirectionUp:
                     offsetY = -(groupBottom - workArea.Y + OffscreenAnimationPadding);
                     break;
 
-                case SettingsService.WidgetAnimationEffectSlideDown:
-                case SettingsService.WidgetAnimationEffectSlideDownFade:
+                case SettingsService.WidgetAnimationSlideDirectionDown:
                     offsetY = workArea.Y + workArea.Height - groupTop + OffscreenAnimationPadding;
                     break;
 
-                case SettingsService.WidgetAnimationEffectSlideRight:
-                case SettingsService.WidgetAnimationEffectSlideFade:
-                case SettingsService.WidgetAnimationEffectSlideRightFade:
-                case SettingsService.WidgetAnimationEffectScaleSlide:
+                case SettingsService.WidgetAnimationSlideDirectionRight:
                 default:
                     offsetX = workArea.X + workArea.Width - groupLeft + OffscreenAnimationPadding;
                     break;

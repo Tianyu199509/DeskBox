@@ -78,6 +78,7 @@ public partial class SettingsViewModel
                 return;
             }
 
+            EnsureQuickCaptureTabEnabled(_selectedQuickCaptureDefaultView);
             _settingsService.Settings.QuickCaptureDefaultView = _selectedQuickCaptureDefaultView;
             _settingsService.SaveDebounced();
             OnPropertyChanged(nameof(SelectedQuickCaptureDefaultViewText));
@@ -127,6 +128,7 @@ public partial class SettingsViewModel
                 return;
             }
 
+            EnsureTodoTabEnabled(_selectedTodoDefaultFilter);
             _settingsService.Settings.TodoDefaultFilter = _selectedTodoDefaultFilter;
             _settingsService.SaveDebounced();
             OnPropertyChanged(nameof(SelectedTodoDefaultFilterText));
@@ -135,6 +137,50 @@ public partial class SettingsViewModel
 
     public string SelectedTodoDefaultFilterText => GetTodoDefaultFilterDisplayName(SelectedTodoDefaultFilter);
     public int SelectedTodoDefaultFilterIndex => Array.IndexOf(AvailableTodoDefaultFilters, _selectedTodoDefaultFilter);
+
+    private void EnsureQuickCaptureTabEnabled(string view)
+    {
+        switch (view)
+        {
+            case SettingsService.QuickCaptureDefaultViewPinned:
+                QuickCaptureShowPinnedTab = true;
+                break;
+            case SettingsService.QuickCaptureDefaultViewRecent:
+                QuickCaptureShowRecentTab = true;
+                break;
+            default:
+                QuickCaptureShowRecordsTab = true;
+                break;
+        }
+    }
+
+    private void EnsureTodoTabEnabled(string filter)
+    {
+        switch (filter)
+        {
+            case SettingsService.TodoDefaultFilterActive:
+                TodoShowActiveTab = true;
+                break;
+            case SettingsService.TodoDefaultFilterToday:
+                TodoShowTodayTab = true;
+                break;
+            case SettingsService.TodoDefaultFilterThisWeek:
+                TodoShowThisWeekTab = true;
+                break;
+            case SettingsService.TodoDefaultFilterThisMonth:
+                TodoShowThisMonthTab = true;
+                break;
+            case SettingsService.TodoDefaultFilterImportant:
+                TodoShowImportantTab = true;
+                break;
+            case SettingsService.TodoDefaultFilterCompleted:
+                TodoShowCompletedTab = true;
+                break;
+            default:
+                TodoShowAllTab = true;
+                break;
+        }
+    }
 
     public string SelectedTodoTabStyle
     {
@@ -512,20 +558,34 @@ public partial class SettingsViewModel
                     QuickCaptureImageClipboardEnabled = false;
                     QuickCaptureRecentLimit = QuickCaptureService.DefaultRecentLimit;
                     QuickCaptureShowCreatedTime = true;
+                    QuickCaptureItemPreviewLineCount = SettingsService.DefaultItemPreviewLineCount;
+                    QuickCaptureEditorEnterBehavior = SettingsService.EditorEnterBehaviorCtrlEnterSaves;
                     SelectedQuickCaptureDefaultView = SettingsService.QuickCaptureDefaultViewRecords;
                     SelectedQuickCaptureTabStyle = SettingsService.WidgetTabStyleButton;
+                    QuickCaptureShowTabBar = true;
+                    QuickCaptureShowRecordsTab = true;
+                    QuickCaptureShowPinnedTab = true;
+                    QuickCaptureShowRecentTab = true;
                     _settingsService.Settings.QuickCaptureClipboardEnabled = false;
                     _settingsService.Settings.QuickCaptureImageClipboardEnabled = false;
                     _settingsService.Settings.QuickCaptureRecentLimit = QuickCaptureService.DefaultRecentLimit;
                     _settingsService.Settings.QuickCaptureShowCreatedTime = true;
+                    _settingsService.Settings.QuickCaptureItemPreviewLineCount = SettingsService.DefaultItemPreviewLineCount;
+                    _settingsService.Settings.QuickCaptureEditorEnterBehavior = SettingsService.EditorEnterBehaviorCtrlEnterSaves;
                     _settingsService.Settings.QuickCaptureDefaultView = SettingsService.QuickCaptureDefaultViewRecords;
                     _settingsService.Settings.QuickCaptureTabStyle = SettingsService.WidgetTabStyleButton;
+                    _settingsService.Settings.QuickCaptureShowTabBar = true;
+                    _settingsService.Settings.QuickCaptureShowRecordsTab = true;
+                    _settingsService.Settings.QuickCaptureShowPinnedTab = true;
+                    _settingsService.Settings.QuickCaptureShowRecentTab = true;
                     _settingsService.Settings.LastQuickCaptureFileWidgetId = string.Empty;
                     App.Current?.QuickCaptureClipboardService?.Refresh();
                     RefreshQuickCaptureClipboardDiagnostics();
                     break;
                 case WidgetKind.Todo:
                     TodoShowCompletedTasks = true;
+                    TodoItemPreviewLineCount = SettingsService.DefaultItemPreviewLineCount;
+                    TodoEditorEnterBehavior = SettingsService.EditorEnterBehaviorCtrlEnterSaves;
                     TodoShowFooterStats = false;
                     TodoShowClearCompletedButton = true;
                     TodoConfirmBeforeDelete = false;
@@ -534,7 +594,17 @@ public partial class SettingsViewModel
                     SelectedTodoNewTaskPosition = SettingsService.TodoNewTaskPositionTop;
                     SelectedTodoDefaultFilter = SettingsService.TodoDefaultFilterAll;
                     SelectedTodoTabStyle = SettingsService.WidgetTabStyleButton;
+                    TodoShowTabBar = true;
+                    TodoShowAllTab = true;
+                    TodoShowActiveTab = false;
+                    TodoShowTodayTab = true;
+                    TodoShowThisWeekTab = false;
+                    TodoShowThisMonthTab = false;
+                    TodoShowImportantTab = true;
+                    TodoShowCompletedTab = true;
                     _settingsService.Settings.TodoShowCompletedTasks = true;
+                    _settingsService.Settings.TodoItemPreviewLineCount = SettingsService.DefaultItemPreviewLineCount;
+                    _settingsService.Settings.TodoEditorEnterBehavior = SettingsService.EditorEnterBehaviorCtrlEnterSaves;
                     _settingsService.Settings.TodoShowFooterStats = false;
                     _settingsService.Settings.TodoShowClearCompletedButton = true;
                     _settingsService.Settings.TodoConfirmBeforeDelete = false;
@@ -543,6 +613,14 @@ public partial class SettingsViewModel
                     _settingsService.Settings.TodoNewTaskPosition = SettingsService.TodoNewTaskPositionTop;
                     _settingsService.Settings.TodoDefaultFilter = SettingsService.TodoDefaultFilterAll;
                     _settingsService.Settings.TodoTabStyle = SettingsService.WidgetTabStyleButton;
+                    _settingsService.Settings.TodoShowTabBar = true;
+                    _settingsService.Settings.TodoShowAllTab = true;
+                    _settingsService.Settings.TodoShowActiveTab = false;
+                    _settingsService.Settings.TodoShowTodayTab = true;
+                    _settingsService.Settings.TodoShowThisWeekTab = false;
+                    _settingsService.Settings.TodoShowThisMonthTab = false;
+                    _settingsService.Settings.TodoShowImportantTab = true;
+                    _settingsService.Settings.TodoShowCompletedTab = true;
                     break;
                 case WidgetKind.Music:
                     MusicUseArtworkBackdrop = true;
@@ -659,7 +737,8 @@ public partial class SettingsViewModel
     public string[] AvailableThemeDisplayNames => _cachedThemeDisplayNames ??= AvailableThemes.Select(GetThemeDisplayName).ToArray();
     public string[] AvailableLanguages { get; } = [SettingsService.LanguageSystem, SettingsService.LanguageChinese, SettingsService.LanguageEnglish];
     public string[] AvailableLanguageDisplayNames => _cachedLanguageDisplayNames ??= AvailableLanguages.Select(_localizationService.GetLanguageDisplayName).ToArray();
-    public string[] AvailableWidgetCornerPreferences { get; } = [CornerSmall, CornerRound, CornerSquare];
+    public string[] AvailableWidgetCornerPreferences { get; } =
+        [CornerDefault, CornerSmall, CornerRound, CornerSquare];
     public string[] AvailableWidgetCornerPreferenceDisplayNames => _cachedWidgetCornerPreferenceDisplayNames ??= AvailableWidgetCornerPreferences.Select(GetCornerDisplayName).ToArray();
 
     public string[] AvailableWidgetMaterialTypes { get; } =
@@ -740,7 +819,6 @@ public partial class SettingsViewModel
     public string[] AvailableWidgetAnimationSpeedDisplayNames => _cachedWidgetAnimationSpeedDisplayNames ??= AvailableWidgetAnimationSpeeds.Select(GetWidgetAnimationSpeedDisplayName).ToArray();
     public string[] AvailableWidgetAnimationSlideDirections { get; } =
     [
-        SettingsService.WidgetAnimationSlideDirectionNone,
         SettingsService.WidgetAnimationSlideDirectionLeft,
         SettingsService.WidgetAnimationSlideDirectionRight,
         SettingsService.WidgetAnimationSlideDirectionUp,
@@ -758,6 +836,8 @@ public partial class SettingsViewModel
 
     public string[] AvailableDisplayWidgetChromeModes { get; } =
     [
+        SettingsService.WidgetChromeModeStandard,
+        SettingsService.WidgetChromeModeCompact,
         SettingsService.WidgetChromeModeOverlay,
         SettingsService.WidgetChromeModeHidden
     ];
@@ -837,7 +917,10 @@ public partial class SettingsViewModel
     public string[] AvailableTodoDefaultFilters { get; } =
     [
         SettingsService.TodoDefaultFilterAll,
+        SettingsService.TodoDefaultFilterActive,
         SettingsService.TodoDefaultFilterToday,
+        SettingsService.TodoDefaultFilterThisWeek,
+        SettingsService.TodoDefaultFilterThisMonth,
         SettingsService.TodoDefaultFilterImportant,
         SettingsService.TodoDefaultFilterCompleted
     ];

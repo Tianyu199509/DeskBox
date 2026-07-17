@@ -190,7 +190,8 @@ public sealed partial class ContentWidgetWindow
         flyout.Items.Add(WidgetCollapseMenuBuilder.Create(
             _config,
             App.Current.LocalizationService,
-            SetCollapseBehaviorOverride));
+            SetCollapseBehaviorOverride,
+            ResetCompactWidthOverride));
         flyout.Items.Add(new MenuFlyoutSeparator());
 
         var rename = new MenuFlyoutItem

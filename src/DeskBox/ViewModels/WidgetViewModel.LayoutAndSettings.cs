@@ -157,10 +157,15 @@ public partial class WidgetViewModel
         if (_dispatcherQueue.HasThreadAccess)
         {
             UpdateDependentProperties();
+            RebuildStackDisplayItems();
             return;
         }
 
-        _dispatcherQueue.TryEnqueue(UpdateDependentProperties);
+        _dispatcherQueue.TryEnqueue(() =>
+        {
+            UpdateDependentProperties();
+            RebuildStackDisplayItems();
+        });
     }
 
     private async Task ApplySettingsChangesAsync()
@@ -173,6 +178,7 @@ public partial class WidgetViewModel
         ShowFileItemPathTooltips = _settingsService.Settings.ShowFileItemPathTooltips;
         ApplyLayoutSettings();
         UpdateDependentProperties();
+        ApplyStackSettings();
 
         bool showFileExtensions = _settingsService.Settings.ShowFileExtensions;
         bool hideShortcutExtensionWhenShowingFileExtensions =

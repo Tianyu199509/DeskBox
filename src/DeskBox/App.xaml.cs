@@ -29,6 +29,7 @@ public partial class App : Application
     private const double TrayMenuItemWidth = 176;
     private const double TrayMenuVerticalPadding = 4;
     private const double TrayMenuItemMinHeight = 36;
+    private const double TrayMenuSeparatorHeight = 12;
     private const int TrayContextMenuFallbackOffsetPixels = 24;
     private const int TrayContextMenuEstimatedWidth = (int)TrayMenuItemWidth + 16;
     private const int MaxQueuedLogLines = 4096;
@@ -745,7 +746,7 @@ public partial class App : Application
             UiDispatcherQueue = Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread();
 
             // A prepared restore is applied before any service reads or normalizes app data.
-            await DataBackupService.ApplyPendingRestoreAsync();
+            DeskBoxRestoreApplyResult restoreResult = await DataBackupService.ApplyPendingRestoreAsync();
 
             // Capture the previous session's data before any startup normalization writes.
             await DataBackupService.CreateAutomaticSnapshotIfDueAsync();
@@ -813,6 +814,7 @@ public partial class App : Application
 
             StartTodoReminderService();
             StartNativeNotificationService();
+            ShowDataRestoreResultNotification(restoreResult);
 
             if (SettingsService.Settings.Widgets.Count(widget =>
                     widget.WidgetKind == WidgetKind.File &&
@@ -1675,6 +1677,7 @@ public partial class App : Application
             }
 
             mapFolderItem.IsEnabled = canCreateWidget;
+            contextMenu.MenuFlyoutPresenterStyle = CreateTrayMenuPresenterStyle(contextMenu);
         };
 
         _trayCreateWidgetItems.Clear();
@@ -1798,6 +1801,69 @@ public partial class App : Application
             }
         });
         return item;
+    }
+
+    private void ShowDataRestoreResultNotification(DeskBoxRestoreApplyResult result)
+    {
+        if (!result.HadPendingRestore)
+        {
+            return;
+        }
+
+        string title = LocalizationService.T(result.Succeeded
+            ? "Settings.DataBackup.RestoreAppliedTitle"
+            : "Settings.DataBackup.RestoreApplyFailedTitle");
+        string message = result.Succeeded
+            ? LocalizationService.T("Settings.DataBackup.RestoreAppliedBody")
+            : LocalizationService.Format(
+                "Settings.DataBackup.RestoreApplyFailedBody",
+                result.ErrorMessage ?? string.Empty);
+
+        if (_nativeNotificationService?.TryShow(title, message) == true || _trayIcon is null)
+        {
+            return;
+        }
+
+        try
+        {
+            _trayIcon.ShowNotification(
+                title,
+                message,
+                NotificationIcon.Info,
+                customIconHandle: null,
+                largeIcon: false,
+                sound: false,
+                respectQuietTime: true,
+                realtime: false,
+                timeout: TimeSpan.FromSeconds(7));
+        }
+        catch (Exception ex)
+        {
+            Log($"[DataBackup] Restore result notification failed: {ex.Message}");
+        }
+    }
+
+    private Style CreateTrayMenuPresenterStyle(MenuFlyout contextMenu)
+    {
+        int visibleCommandCount = contextMenu.Items.Count(item =>
+            item is not MenuFlyoutSeparator && item.Visibility == Visibility.Visible);
+        int visibleSeparatorCount = contextMenu.Items.Count(item =>
+            item is MenuFlyoutSeparator && item.Visibility == Visibility.Visible);
+        double fullContentHeight =
+            (visibleCommandCount * TrayMenuItemMinHeight) +
+            (visibleSeparatorCount * TrayMenuSeparatorHeight) +
+            (TrayMenuVerticalPadding * 2);
+
+        var style = new Style(typeof(MenuFlyoutPresenter))
+        {
+            BasedOn = (Style)Resources[typeof(MenuFlyoutPresenter)]
+        };
+        style.Setters.Add(new Setter(FrameworkElement.MinHeightProperty, fullContentHeight));
+        style.Setters.Add(new Setter(ScrollViewer.VerticalScrollModeProperty, ScrollMode.Disabled));
+        style.Setters.Add(new Setter(
+            ScrollViewer.VerticalScrollBarVisibilityProperty,
+            ScrollBarVisibility.Disabled));
+        return style;
     }
 
     private void ShowTrayContextMenuFromTray()

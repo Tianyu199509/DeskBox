@@ -44,7 +44,6 @@
                 x:Name="EditorTextBoxElement"
                 Grid.Row="1"
                 FontSize="{Binding EditorFontSize, ElementName=InlineEditorRoot}"
-                KeyDown="EditorTextBox_KeyDown"
                 Style="{StaticResource WidgetEditorTextBoxStyle}"
                 Text="{Binding Text, ElementName=InlineEditorRoot, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
 

@@ -148,6 +148,7 @@ public partial class WidgetViewModel
     {
         if (change.ChangeType == WatcherChangeTypes.Renamed && !string.IsNullOrWhiteSpace(change.OldFullPath))
         {
+            TransferFileAddedAt(change.OldFullPath, change.FullPath);
             RemoveItemByPath(change.OldFullPath);
             await UpsertFolderItemAsync(change.FullPath);
             return;
@@ -184,6 +185,8 @@ public partial class WidgetViewModel
             Items.RemoveAt(existingIndex);
         }
 
+        AssignAddedAt(item);
+
         int insertIndex = GetSortedInsertIndex(item);
         item.SortOrder = insertIndex;
         Items.Insert(insertIndex, item);
@@ -200,6 +203,7 @@ public partial class WidgetViewModel
         }
 
         Items.RemoveAt(index);
+        RemoveFileAddedAt(path);
         NormalizeSortOrder();
     }
 
@@ -246,7 +250,13 @@ public partial class WidgetViewModel
         target.FileSize = source.FileSize;
         target.FolderItemCount = source.FolderItemCount;
         target.IsFolderItemCountLoaded = source.IsFolderItemCountLoaded;
+        target.CreatedAt = source.CreatedAt;
         target.LastModified = source.LastModified;
+        if (source.IsShellKindLoaded)
+        {
+            target.ShellKind = source.ShellKind;
+            target.IsShellKindLoaded = true;
+        }
         target.IsShortcut = source.IsShortcut;
         target.IsFolder = source.IsFolder;
     }

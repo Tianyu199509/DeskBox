@@ -61,6 +61,12 @@ public class AppSettings
     /// <summary>Whether Quick Capture cards show their creation time.</summary>
     public bool QuickCaptureShowCreatedTime { get; set; } = true;
 
+    /// <summary>Maximum number of text lines shown for each Quick Capture item in the list.</summary>
+    public int QuickCaptureItemPreviewLineCount { get; set; } = 10;
+
+    /// <summary>Enter-key behavior used by Quick Capture multiline editors.</summary>
+    public string QuickCaptureEditorEnterBehavior { get; set; } = "CtrlEnterSaves";
+
     /// <summary>Default storage behavior for Todo and Quick Capture attachments. Valid values: <c>Link</c>, <c>Copy</c>.</summary>
     public string AttachmentStorageMode { get; set; } = "Link";
 
@@ -70,17 +76,37 @@ public class AppSettings
     /// <summary>Quick Capture tab style. Valid values: <c>"Pivot"</c>, <c>"Button"</c>.</summary>
     public string QuickCaptureTabStyle { get; set; } = "Button";
 
+    public bool QuickCaptureShowTabBar { get; set; } = true;
+    public bool QuickCaptureShowRecordsTab { get; set; } = true;
+    public bool QuickCaptureShowPinnedTab { get; set; } = true;
+    public bool QuickCaptureShowRecentTab { get; set; } = true;
+
     /// <summary>Where newly added Todo tasks are inserted. Valid values: <c>"Top"</c>, <c>"Bottom"</c>.</summary>
     public string TodoNewTaskPosition { get; set; } = "Top";
 
     /// <summary>Todo tab style. Valid values: <c>"Pivot"</c>, <c>"Button"</c>.</summary>
     public string TodoTabStyle { get; set; } = "Button";
 
-    /// <summary>Default Todo filter used when the widget opens. Valid values: <c>"All"</c>, <c>"Today"</c>, <c>"Important"</c>, <c>"Completed"</c>.</summary>
+    public bool TodoShowTabBar { get; set; } = true;
+    public bool TodoShowAllTab { get; set; } = true;
+    public bool TodoShowActiveTab { get; set; }
+    public bool TodoShowTodayTab { get; set; } = true;
+    public bool TodoShowThisWeekTab { get; set; }
+    public bool TodoShowThisMonthTab { get; set; }
+    public bool TodoShowImportantTab { get; set; } = true;
+    public bool TodoShowCompletedTab { get; set; } = true;
+
+    /// <summary>Default Todo filter used when the widget opens.</summary>
     public string TodoDefaultFilter { get; set; } = "All";
 
     /// <summary>Whether completed Todo tasks remain visible in non-completed views.</summary>
     public bool TodoShowCompletedTasks { get; set; } = true;
+
+    /// <summary>Maximum number of text lines shown for each Todo item in the list.</summary>
+    public int TodoItemPreviewLineCount { get; set; } = 10;
+
+    /// <summary>Enter-key behavior used by Todo multiline editors.</summary>
+    public string TodoEditorEnterBehavior { get; set; } = "CtrlEnterSaves";
 
     /// <summary>Whether the Todo footer item count is visible.</summary>
     public bool TodoShowFooterStats { get; set; }
@@ -230,7 +256,8 @@ public class AppSettings
 
     /// <summary>
     /// Motion style used when compact widgets expand or collapse.
-    /// Valid values: <c>"Smooth"</c>, <c>"Snappy"</c>, <c>"None"</c>.
+    /// Valid values: <c>"Smooth"</c>, <c>"Slow"</c>, <c>"Snappy"</c>,
+    /// <c>"Custom"</c>, <c>"None"</c>.
     /// </summary>
     public string WidgetCompactAnimationEffect { get; set; } = "Smooth";
 
@@ -294,6 +321,24 @@ public class AppSettings
     /// Whether file widgets show full path tooltips when hovering items.
     /// </summary>
     public bool ShowFileItemPathTooltips { get; set; } = true;
+
+    /// <summary>Whether file widgets automatically group related items into stacks.</summary>
+    public bool FileStacksEnabled { get; set; }
+
+    /// <summary>Grouping rule used by automatic file stacks.</summary>
+    public string FileStackGroupBy { get; set; } = "Kind";
+
+    /// <summary>Minimum number of related files required to create an automatic stack.</summary>
+    public int FileStackThreshold { get; set; } = 3;
+
+    /// <summary>Ordering rule for members inside an automatic stack.</summary>
+    public string FileStackOrderBy { get; set; } = "Widget";
+
+    /// <summary>User-defined extension groups, evaluated in list order.</summary>
+    public List<FileStackCustomRule> FileStackCustomRules { get; set; } = [];
+
+    /// <summary>How files not matched by a custom rule are displayed.</summary>
+    public string FileStackUnmatchedBehavior { get; set; } = "KeepLoose";
 
     /// <summary>
     /// How files should be handled when dropped into a managed storage widget.

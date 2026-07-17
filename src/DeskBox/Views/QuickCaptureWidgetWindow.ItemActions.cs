@@ -38,6 +38,8 @@ public sealed partial class QuickCaptureWidgetWindow
         {
             _draggedQuickCaptureItemId = null;
             _isInternalQuickCaptureDrag = false;
+            _internalQuickCaptureDragCanReorder = false;
+            _quickCaptureTabDropHandled = false;
             _internalQuickCaptureDragView = null;
             e.Cancel = true;
             return;
@@ -46,8 +48,10 @@ public sealed partial class QuickCaptureWidgetWindow
         bool canReorder = !item.IsRecent &&
                           ViewModel.SelectedView is QuickCaptureViewMode.Records or QuickCaptureViewMode.Pinned &&
                           !ViewModel.HasSearchText;
-        _draggedQuickCaptureItemId = canReorder ? item.Id : null;
-        _isInternalQuickCaptureDrag = canReorder;
+        _draggedQuickCaptureItemId = item.Id;
+        _isInternalQuickCaptureDrag = true;
+        _internalQuickCaptureDragCanReorder = canReorder;
+        _quickCaptureTabDropHandled = false;
         _internalQuickCaptureDragView = canReorder ? ViewModel.SelectedView : null;
         ItemsListView.CanReorderItems = canReorder;
 
@@ -57,20 +61,20 @@ public sealed partial class QuickCaptureWidgetWindow
             {
                 _draggedQuickCaptureItemId = null;
                 _isInternalQuickCaptureDrag = false;
+                _internalQuickCaptureDragCanReorder = false;
                 _internalQuickCaptureDragView = null;
                 e.Cancel = true;
                 return;
             }
 
-            e.Data.RequestedOperation = canReorder
-                ? DataPackageOperation.Copy | DataPackageOperation.Move
-                : DataPackageOperation.Copy;
+            e.Data.RequestedOperation = DataPackageOperation.Copy | DataPackageOperation.Move;
         }
         catch (Exception ex)
         {
             App.Log($"[QuickCaptureWidget] Failed to start drag: {ex}");
             _draggedQuickCaptureItemId = null;
             _isInternalQuickCaptureDrag = false;
+            _internalQuickCaptureDragCanReorder = false;
             _internalQuickCaptureDragView = null;
             e.Cancel = true;
         }
@@ -80,11 +84,15 @@ public sealed partial class QuickCaptureWidgetWindow
     {
         string? itemId = _draggedQuickCaptureItemId;
         QuickCaptureViewMode? dragView = _internalQuickCaptureDragView;
+        bool canReorder = _internalQuickCaptureDragCanReorder;
+        bool tabDropHandled = _quickCaptureTabDropHandled;
         _draggedQuickCaptureItemId = null;
         _internalQuickCaptureDragView = null;
+        _internalQuickCaptureDragCanReorder = false;
+        _quickCaptureTabDropHandled = false;
         ItemsListView.CanReorderItems = true;
         DispatcherQueue.TryEnqueue(() => _isInternalQuickCaptureDrag = false);
-        if (string.IsNullOrWhiteSpace(itemId))
+        if (string.IsNullOrWhiteSpace(itemId) || tabDropHandled || !canReorder)
         {
             return;
         }
@@ -103,6 +111,74 @@ public sealed partial class QuickCaptureWidgetWindow
                 await ViewModel.MoveItemAsync(item, targetIndex);
             }
         }
+    }
+
+    private void QuickCaptureTab_DragOver(object sender, DragEventArgs e)
+    {
+        if (!_isInternalQuickCaptureDrag ||
+            string.IsNullOrWhiteSpace(_draggedQuickCaptureItemId) ||
+            sender is not FrameworkElement { Tag: string tag } ||
+            ViewModel.Items.FirstOrDefault(item =>
+                string.Equals(item.Id, _draggedQuickCaptureItemId, StringComparison.Ordinal)) is not { } item ||
+            !TryGetQuickCaptureTabTarget(tag, out QuickCaptureViewMode target) ||
+            !ViewModel.CanApplyTabDrop(item, target))
+        {
+            e.AcceptedOperation = DataPackageOperation.None;
+            return;
+        }
+
+        e.Handled = true;
+        e.AcceptedOperation = DataPackageOperation.Move;
+        e.DragUIOverride.IsGlyphVisible = true;
+        e.DragUIOverride.Caption = target == QuickCaptureViewMode.Pinned
+            ? _localizationService.T("QuickCapture.DropTab.Pin")
+            : _localizationService.T("QuickCapture.DropTab.Records");
+    }
+
+    private async void QuickCaptureTab_Drop(object sender, DragEventArgs e)
+    {
+        if (!_isInternalQuickCaptureDrag ||
+            string.IsNullOrWhiteSpace(_draggedQuickCaptureItemId) ||
+            sender is not FrameworkElement { Tag: string tag } ||
+            !TryGetQuickCaptureTabTarget(tag, out QuickCaptureViewMode target) ||
+            ViewModel.Items.FirstOrDefault(item =>
+                string.Equals(item.Id, _draggedQuickCaptureItemId, StringComparison.Ordinal)) is not { } item ||
+            !ViewModel.CanApplyTabDrop(item, target))
+        {
+            e.AcceptedOperation = DataPackageOperation.None;
+            return;
+        }
+
+        e.Handled = true;
+        _quickCaptureTabDropHandled = true;
+        var deferral = e.GetDeferral();
+        try
+        {
+            bool changed = await ViewModel.ApplyTabDropAsync(item, target);
+            e.AcceptedOperation = changed ? DataPackageOperation.Move : DataPackageOperation.None;
+            if (changed)
+            {
+                SelectView(target);
+                ShowStatusToast(_localizationService.T(target == QuickCaptureViewMode.Pinned
+                    ? "QuickCapture.DropTab.Pinned"
+                    : "QuickCapture.DropTab.Saved"));
+            }
+        }
+        finally
+        {
+            deferral.Complete();
+        }
+    }
+
+    private static bool TryGetQuickCaptureTabTarget(string tag, out QuickCaptureViewMode target)
+    {
+        target = tag switch
+        {
+            "Pinned" => QuickCaptureViewMode.Pinned,
+            "Records" => QuickCaptureViewMode.Records,
+            _ => QuickCaptureViewMode.Recent
+        };
+        return target != QuickCaptureViewMode.Recent;
     }
 
     private static void ApplyItemMaterialSurface(DependencyObject itemRoot, QuickCaptureItemViewModel item)

@@ -90,7 +90,7 @@ public sealed class WidgetContentFactoryTests
     }
 
     [Fact]
-    public void GetFeatureWidgetEntryDescriptors_ReturnsImplementedAndPlannedFeatureWidgets()
+    public void GetFeatureWidgetEntryDescriptors_OnlyReturnsAvailableImplementedWidgets()
     {
         var factory = TestServices.CreateWidgetContentFactory();
 
@@ -101,11 +101,10 @@ public sealed class WidgetContentFactoryTests
             WidgetKind.QuickCapture,
             WidgetKind.Todo,
             WidgetKind.Music,
-            WidgetKind.Weather,
-            WidgetKind.Tags,
-            WidgetKind.SystemMonitor
+            WidgetKind.Weather
         ], descriptors.Select(descriptor => descriptor.WidgetKind));
         Assert.DoesNotContain(descriptors, descriptor => descriptor.WidgetKind == WidgetKind.File);
+        Assert.DoesNotContain(descriptors, descriptor => descriptor.IsPlanned);
         Assert.Contains(descriptors, descriptor => descriptor.WidgetKind == WidgetKind.Todo && descriptor.HasImplementedContent);
         Assert.Contains(descriptors, descriptor => descriptor.WidgetKind == WidgetKind.Music && descriptor.HasImplementedContent);
         Assert.Contains(descriptors, descriptor => descriptor.WidgetKind == WidgetKind.Weather && descriptor.HasImplementedContent);

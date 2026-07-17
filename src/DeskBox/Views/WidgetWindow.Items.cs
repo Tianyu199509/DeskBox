@@ -106,11 +106,22 @@ public sealed partial class WidgetWindow
         ShowStatusToast(_localizationService.T("Widget.SavedHere"));
     }
 
-    private void ItemsView_ItemClick(object sender, ItemClickEventArgs e)
+    private async void ItemsView_ItemClick(object sender, ItemClickEventArgs e)
     {
+        if (e.ClickedItem is WidgetStackItem stack)
+        {
+            await ToggleStackFromInputAsync(stack);
+            return;
+        }
+
         if (e.ClickedItem is not WidgetItem item)
         {
             return;
+        }
+
+        if (!item.IsStackChild && GetExpandedStack() is { } expandedStack)
+        {
+            await SetStackExpandedWithAnimationAsync(expandedStack, expanded: false);
         }
 
         if (Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Control) ||
@@ -127,6 +138,12 @@ public sealed partial class WidgetWindow
 
     private void ItemsView_DoubleTapped(object sender, DoubleTappedRoutedEventArgs e)
     {
+        if (e.OriginalSource is FrameworkElement { DataContext: WidgetStackItem })
+        {
+            e.Handled = true;
+            return;
+        }
+
         if (_settingsService.Settings.DoubleClickToOpen &&
             e.OriginalSource is FrameworkElement element &&
             element.DataContext is WidgetItem item)
@@ -147,6 +164,15 @@ public sealed partial class WidgetWindow
     {
         if (e.OriginalSource is not FrameworkElement element || element.DataContext is not WidgetItem item)
         {
+            return;
+        }
+
+        if (item is WidgetStackItem stack)
+        {
+            RemoveVirtualStackSelection();
+            var stackFlyout = CreateStackFlyout(stack);
+            ShowFlyoutWithElevation(stackFlyout, element, e.GetPosition(element));
+            e.Handled = true;
             return;
         }
 
@@ -327,6 +353,7 @@ public sealed partial class WidgetWindow
         {
             ClearOtherWidgetSelections();
             listView.SelectAll();
+            RemoveVirtualStackSelection();
             ApplySelectionState(listView);
             e.Handled = true;
             return;
@@ -416,7 +443,19 @@ public sealed partial class WidgetWindow
 
         if (e.Key == Windows.System.VirtualKey.Escape)
         {
-            if (GetSelectedItems().Count > 0 || _cutClipboardPaths.Length > 0)
+            var expandedStack = ViewModel.VisibleItems
+                .OfType<WidgetStackItem>()
+                .FirstOrDefault(stack => stack.IsExpanded);
+            if (expandedStack is not null)
+            {
+                await SetStackExpandedWithAnimationAsync(expandedStack, expanded: false);
+                e.Handled = true;
+            }
+            else if (ViewModel.CollapseExpandedStack())
+            {
+                e.Handled = true;
+            }
+            else if (GetSelectedItems().Count > 0 || _cutClipboardPaths.Length > 0)
             {
                 ClearItemSelectionCore(clearCutState: true);
                 e.Handled = true;
@@ -428,10 +467,43 @@ public sealed partial class WidgetWindow
             return;
         }
 
-        if (e.Key == Windows.System.VirtualKey.Enter && GetPrimarySelectedItem() is { } item)
+        if (listView.SelectedItems.OfType<WidgetStackItem>().FirstOrDefault() is { } selectedStack &&
+            e.Key is Windows.System.VirtualKey.Enter or Windows.System.VirtualKey.Space)
+        {
+            await ToggleStackFromInputAsync(selectedStack);
+            e.Handled = true;
+        }
+        else if (listView.SelectedItems.OfType<WidgetStackItem>().FirstOrDefault() is { } directionalStack &&
+                 e.Key == Windows.System.VirtualKey.Right)
+        {
+            if (!directionalStack.IsExpanded)
+            {
+                await SetStackExpandedWithAnimationAsync(directionalStack, expanded: true);
+            }
+
+            e.Handled = true;
+        }
+        else if (listView.SelectedItems.OfType<WidgetStackItem>().FirstOrDefault() is { } collapseStack &&
+                 e.Key == Windows.System.VirtualKey.Left)
+        {
+            if (collapseStack.IsExpanded)
+            {
+                await SetStackExpandedWithAnimationAsync(collapseStack, expanded: false);
+            }
+
+            e.Handled = true;
+        }
+        else if (e.Key == Windows.System.VirtualKey.Enter && GetPrimarySelectedItem() is { } item)
         {
             OpenItem(item);
             e.Handled = true;
+        }
+        else if (e.Key == Windows.System.VirtualKey.Space &&
+                 GetPrimarySelectedItem() is { } previewItem &&
+                 s_quickLookPreviewService.CanPreview(previewItem.Path))
+        {
+            e.Handled = true;
+            await s_quickLookPreviewService.TryToggleAsync(previewItem.Path);
         }
     }
 

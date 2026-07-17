@@ -25,6 +25,7 @@ public sealed partial class QuickCaptureWidgetViewModel
         }
 
         _cachedData = data;
+        ApplyTabVisibilityFromSettings();
         _selectedView = MapDefaultView(_settingsService.Settings.QuickCaptureDefaultView);
         OnPropertyChanged(nameof(SelectedView));
         OnPropertyChanged(nameof(IsRecordsView));
@@ -345,6 +346,37 @@ public sealed partial class QuickCaptureWidgetViewModel
     public Task<int> SetPinnedAsync(IEnumerable<string> itemIds, bool isPinned)
     {
         return _quickCaptureService.SetPinnedAsync(itemIds, isPinned);
+    }
+
+    public bool CanApplyTabDrop(QuickCaptureItemViewModel item, QuickCaptureViewMode target)
+    {
+        return target switch
+        {
+            QuickCaptureViewMode.Records => item.IsRecent || item.IsPinned,
+            QuickCaptureViewMode.Pinned => item.IsRecent || !item.IsPinned,
+            _ => false
+        };
+    }
+
+    public async Task<bool> ApplyTabDropAsync(
+        QuickCaptureItemViewModel item,
+        QuickCaptureViewMode target)
+    {
+        if (!CanApplyTabDrop(item, target))
+        {
+            return false;
+        }
+
+        if (item.IsRecent)
+        {
+            return await _quickCaptureService.SaveRecentItemToRecordsAsync(
+                item.Id,
+                pin: target == QuickCaptureViewMode.Pinned) is not null;
+        }
+
+        return await _quickCaptureService.SetPinnedAsync(
+            item.Id,
+            isPinned: target == QuickCaptureViewMode.Pinned);
     }
 
     public Task<bool> SetAppearanceAsync(

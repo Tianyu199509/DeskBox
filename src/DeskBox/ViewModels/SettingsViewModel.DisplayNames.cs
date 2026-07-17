@@ -255,7 +255,10 @@ public partial class SettingsViewModel
     {
         return NormalizeTodoDefaultFilter(filter) switch
         {
+            SettingsService.TodoDefaultFilterActive => _localizationService.T("Settings.Todo.DefaultFilter.Active"),
             SettingsService.TodoDefaultFilterToday => _localizationService.T("Settings.Todo.DefaultFilter.Today"),
+            SettingsService.TodoDefaultFilterThisWeek => _localizationService.T("Settings.Todo.DefaultFilter.ThisWeek"),
+            SettingsService.TodoDefaultFilterThisMonth => _localizationService.T("Settings.Todo.DefaultFilter.ThisMonth"),
             SettingsService.TodoDefaultFilterImportant => _localizationService.T("Settings.Todo.DefaultFilter.Important"),
             SettingsService.TodoDefaultFilterCompleted => _localizationService.T("Settings.Todo.DefaultFilter.Completed"),
             _ => _localizationService.T("Settings.Todo.DefaultFilter.All")

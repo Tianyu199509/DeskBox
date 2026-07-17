@@ -16,6 +16,15 @@ public readonly record struct LayoutDensityPresetValues(
     double VerticalSpacingScale,
     double FileNameWidthScale);
 
+internal enum DefaultPreferencePreservationReason
+{
+    UserChoice,
+    SystemIntegration,
+    UserData,
+    Storage,
+    RuntimeState
+}
+
 /// <summary>
 /// Manages application settings persistence using JSON files stored in the application directory.
 /// </summary>
@@ -105,12 +114,15 @@ public sealed class SettingsService
     public const string WidgetCompactAnimationSmooth = "Smooth";
     public const string WidgetCompactAnimationSlow = "Slow";
     public const string WidgetCompactAnimationSnappy = "Snappy";
+    public const string WidgetCompactAnimationCustom = "Custom";
     public const string WidgetCompactAnimationNone = "None";
     public const string WidgetCompactMediaCornerFollowWidget = "FollowWidget";
     public const string WidgetCompactMediaCornerSquare = "Square";
     public const string WidgetCompactMediaCornerSmall = "Small";
     public const string WidgetCompactMediaCornerRound = "Round";
     public const int DefaultWidgetCompactAnimationDurationMs = 220;
+    public const int SlowWidgetCompactAnimationDurationMs = 360;
+    public const int SnappyWidgetCompactAnimationDurationMs = 160;
     public const int MinWidgetCompactAnimationDurationMs = 120;
     public const int MaxWidgetCompactAnimationDurationMs = 400;
     public const int DefaultWidgetCompactExpandDelayMs = 360;
@@ -135,6 +147,24 @@ public sealed class SettingsService
     public const string ManagedDropActionCopy = "Copy";
     public const string AttachmentStorageModeLink = "Link";
     public const string AttachmentStorageModeCopy = "Copy";
+    public const string FileStackGroupByKind = "Kind";
+    public const string FileStackGroupByDateAdded = "DateAdded";
+    // Legacy value used by the first Stack preview build.
+    public const string FileStackGroupByDateCreated = "DateCreated";
+    public const string FileStackGroupByDateModified = "DateModified";
+    public const string FileStackGroupByCustom = "Custom";
+    public const int DefaultFileStackThreshold = 3;
+    public const string FileStackOrderByWidget = "Widget";
+    public const string FileStackOrderByName = "Name";
+    public const string FileStackOrderByDateAdded = "DateAdded";
+    public const string FileStackOrderByDateModified = "DateModified";
+    public const string FileStackUnmatchedKeepLoose = "KeepLoose";
+    public const string FileStackUnmatchedOther = "Other";
+    public const int DefaultItemPreviewLineCount = 10;
+    public const int MinItemPreviewLineCount = 1;
+    public const int MaxItemPreviewLineCount = 10;
+    public const string EditorEnterBehaviorCtrlEnterSaves = "CtrlEnterSaves";
+    public const string EditorEnterBehaviorEnterSaves = "EnterSaves";
     public const string LanguageSystem = "System";
     public const string LanguageChinese = "zh-CN";
     public const string LanguageEnglish = "en-US";
@@ -170,7 +200,10 @@ public sealed class SettingsService
     public const string TodoNewTaskPositionTop = "Top";
     public const string TodoNewTaskPositionBottom = "Bottom";
     public const string TodoDefaultFilterAll = "All";
+    public const string TodoDefaultFilterActive = "Active";
     public const string TodoDefaultFilterToday = "Today";
+    public const string TodoDefaultFilterThisWeek = "ThisWeek";
+    public const string TodoDefaultFilterThisMonth = "ThisMonth";
     public const string TodoDefaultFilterImportant = "Important";
     public const string TodoDefaultFilterCompleted = "Completed";
     public const int DefaultTodoReminderOffsetMinutes = 5;
@@ -199,6 +232,24 @@ public const int WeatherRefreshMaxMinutes = 180;
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
         Converters = { new JsonStringEnumConverter() }
     };
+
+    internal static IReadOnlyDictionary<string, DefaultPreferencePreservationReason>
+        DefaultPreferencePreservationPolicy { get; } =
+            new Dictionary<string, DefaultPreferencePreservationReason>(StringComparer.Ordinal)
+            {
+                [nameof(AppSettings.Language)] = DefaultPreferencePreservationReason.UserChoice,
+                [nameof(AppSettings.AutoStart)] = DefaultPreferencePreservationReason.SystemIntegration,
+                [nameof(AppSettings.FeatureWidgetEnabledStates)] = DefaultPreferencePreservationReason.UserChoice,
+                [nameof(AppSettings.QuickCaptureEnabled)] = DefaultPreferencePreservationReason.UserChoice,
+                [nameof(AppSettings.TodoEnabled)] = DefaultPreferencePreservationReason.UserChoice,
+                [nameof(AppSettings.Widgets)] = DefaultPreferencePreservationReason.UserData,
+                [nameof(AppSettings.DeletedWidgetIds)] = DefaultPreferencePreservationReason.UserData,
+                [nameof(AppSettings.RecentOrganizationHistory)] = DefaultPreferencePreservationReason.UserData,
+                [nameof(AppSettings.DefaultManagedStorageRootPath)] = DefaultPreferencePreservationReason.Storage,
+                [nameof(AppSettings.HasCompletedOnboarding)] = DefaultPreferencePreservationReason.RuntimeState,
+                [nameof(AppSettings.LastQuickCaptureFileWidgetId)] = DefaultPreferencePreservationReason.RuntimeState,
+                [nameof(AppSettings.LastUpdateCheckAt)] = DefaultPreferencePreservationReason.RuntimeState
+            };
 
     private readonly string _settingsPath;
     private AppSettings _settings = new();
@@ -259,6 +310,12 @@ public const int WeatherRefreshMaxMinutes = 180;
         settings.FileNameWidthScale = DefaultFileNameWidthScale;
         settings.ShowFileExtensions = false;
         settings.ShowImageFilesAsIcons = false;
+        settings.FileStacksEnabled = false;
+        settings.FileStackGroupBy = FileStackGroupByKind;
+        settings.FileStackThreshold = DefaultFileStackThreshold;
+        settings.FileStackOrderBy = FileStackOrderByWidget;
+        settings.FileStackCustomRules = [];
+        settings.FileStackUnmatchedBehavior = FileStackUnmatchedKeepLoose;
         settings.HideShortcutExtensionWhenShowingFileExtensions = true;
         settings.ShowHoverButtons = true;
         settings.WidgetHoverButtonActions = DefaultWidgetHoverButtonActions;
@@ -267,10 +324,18 @@ public const int WeatherRefreshMaxMinutes = 180;
         settings.QuickCaptureImageClipboardEnabled = false;
         settings.QuickCaptureRecentLimit = QuickCaptureService.DefaultRecentLimit;
         settings.QuickCaptureShowCreatedTime = true;
+        settings.QuickCaptureItemPreviewLineCount = DefaultItemPreviewLineCount;
+        settings.QuickCaptureEditorEnterBehavior = EditorEnterBehaviorCtrlEnterSaves;
         settings.AttachmentStorageMode = AttachmentStorageModeLink;
         settings.QuickCaptureDefaultView = QuickCaptureDefaultViewRecords;
         settings.QuickCaptureTabStyle = WidgetTabStyleButton;
+        settings.QuickCaptureShowTabBar = true;
+        settings.QuickCaptureShowRecordsTab = true;
+        settings.QuickCaptureShowPinnedTab = true;
+        settings.QuickCaptureShowRecentTab = true;
         settings.TodoShowCompletedTasks = true;
+        settings.TodoItemPreviewLineCount = DefaultItemPreviewLineCount;
+        settings.TodoEditorEnterBehavior = EditorEnterBehaviorCtrlEnterSaves;
         settings.TodoShowFooterStats = false;
         settings.TodoShowClearCompletedButton = true;
         settings.TodoConfirmBeforeDelete = false;
@@ -298,6 +363,14 @@ settings.WeatherRefreshIntervalMinutes = 60;
         settings.TodoNewTaskPosition = TodoNewTaskPositionTop;
         settings.TodoDefaultFilter = TodoDefaultFilterAll;
         settings.TodoTabStyle = WidgetTabStyleButton;
+        settings.TodoShowTabBar = true;
+        settings.TodoShowAllTab = true;
+        settings.TodoShowActiveTab = false;
+        settings.TodoShowTodayTab = true;
+        settings.TodoShowThisWeekTab = false;
+        settings.TodoShowThisMonthTab = false;
+        settings.TodoShowImportantTab = true;
+        settings.TodoShowCompletedTab = true;
         settings.ManagedDropAction = ManagedDropActionMove;
         settings.GlobalHotkeyEnabled = DefaultGlobalHotkeyEnabled;
         settings.GlobalHotkeyModifiers = DefaultGlobalHotkeyModifiers;
@@ -679,21 +752,36 @@ changed |= NormalizeDeletionSettings(_settings);
             changed = true;
         }
 
+        string? migratedAnimationDirection = settings.WidgetAnimationEffect switch
+        {
+            WidgetAnimationEffectSlideLeft or WidgetAnimationEffectSlideLeftFade =>
+                WidgetAnimationSlideDirectionLeft,
+            WidgetAnimationEffectSlideRight or WidgetAnimationEffectSlideRightFade =>
+                WidgetAnimationSlideDirectionRight,
+            WidgetAnimationEffectSlideUp or WidgetAnimationEffectSlideUpFade =>
+                WidgetAnimationSlideDirectionUp,
+            WidgetAnimationEffectSlideDown or WidgetAnimationEffectSlideDownFade =>
+                WidgetAnimationSlideDirectionDown,
+            _ => null
+        };
+        if (migratedAnimationDirection is not null)
+        {
+            settings.WidgetAnimationEffect = WidgetAnimationEffectSlideFade;
+            settings.WidgetAnimationSlideDirection = migratedAnimationDirection;
+            changed = true;
+        }
+        else if (settings.WidgetAnimationEffect == WidgetAnimationEffectScaleSlide)
+        {
+            settings.WidgetAnimationEffect = WidgetAnimationEffectSlideFade;
+            changed = true;
+        }
+
         if (settings.WidgetAnimationEffect is not (
             WidgetAnimationEffectNone or
             WidgetAnimationEffectFade or
-            WidgetAnimationEffectSlideRight or
-            WidgetAnimationEffectSlideLeft or
-            WidgetAnimationEffectSlideUp or
-            WidgetAnimationEffectSlideDown or
             WidgetAnimationEffectScaleFade or
             WidgetAnimationEffectSlideFade or
-            WidgetAnimationEffectZoom or
-            WidgetAnimationEffectSlideUpFade or
-            WidgetAnimationEffectSlideDownFade or
-            WidgetAnimationEffectSlideLeftFade or
-            WidgetAnimationEffectSlideRightFade or
-            WidgetAnimationEffectScaleSlide))
+            WidgetAnimationEffectZoom))
         {
             settings.WidgetAnimationEffect = WidgetAnimationEffectSlideFade;
             changed = true;
@@ -707,6 +795,61 @@ changed |= NormalizeDeletionSettings(_settings);
             WidgetAnimationSpeedSlow))
         {
             settings.WidgetAnimationSpeed = WidgetAnimationSpeedStandard;
+            changed = true;
+        }
+
+        if (settings.WidgetAnimationSlideDirection is not (
+            WidgetAnimationSlideDirectionNone or
+            WidgetAnimationSlideDirectionLeft or
+            WidgetAnimationSlideDirectionRight or
+            WidgetAnimationSlideDirectionUp or
+            WidgetAnimationSlideDirectionDown))
+        {
+            settings.WidgetAnimationSlideDirection = WidgetAnimationSlideDirectionRight;
+            changed = true;
+        }
+
+        if (settings.WidgetAnimationEffect == WidgetAnimationEffectSlideFade &&
+            settings.WidgetAnimationSlideDirection == WidgetAnimationSlideDirectionNone)
+        {
+            settings.WidgetAnimationSlideDirection = WidgetAnimationSlideDirectionRight;
+            changed = true;
+        }
+
+        if (settings.WidgetAnimationEasingIntensity is not (
+            WidgetAnimationEasingNone or
+            WidgetAnimationEasingLight or
+            WidgetAnimationEasingStandard or
+            WidgetAnimationEasingStrong))
+        {
+            settings.WidgetAnimationEasingIntensity = WidgetAnimationEasingStandard;
+            changed = true;
+        }
+
+        if (settings.WidgetAnimationEffect == WidgetAnimationEffectNone)
+        {
+            if (settings.WidgetAnimationSpeed != WidgetAnimationSpeedStandard)
+            {
+                settings.WidgetAnimationSpeed = WidgetAnimationSpeedStandard;
+                changed = true;
+            }
+
+            if (settings.WidgetAnimationSlideDirection != WidgetAnimationSlideDirectionNone)
+            {
+                settings.WidgetAnimationSlideDirection = WidgetAnimationSlideDirectionNone;
+                changed = true;
+            }
+
+            if (settings.WidgetAnimationEasingIntensity != WidgetAnimationEasingNone)
+            {
+                settings.WidgetAnimationEasingIntensity = WidgetAnimationEasingNone;
+                changed = true;
+            }
+        }
+        else if (settings.WidgetAnimationEffect != WidgetAnimationEffectSlideFade &&
+                 settings.WidgetAnimationSlideDirection != WidgetAnimationSlideDirectionNone)
+        {
+            settings.WidgetAnimationSlideDirection = WidgetAnimationSlideDirectionNone;
             changed = true;
         }
 
@@ -1076,6 +1219,11 @@ changed |= NormalizeDeletionSettings(_settings);
             return WidgetCompactAnimationSnappy;
         }
 
+        if (string.Equals(value, WidgetCompactAnimationCustom, StringComparison.OrdinalIgnoreCase))
+        {
+            return WidgetCompactAnimationCustom;
+        }
+
         return string.Equals(value, WidgetCompactAnimationNone, StringComparison.OrdinalIgnoreCase)
             ? WidgetCompactAnimationNone
             : WidgetCompactAnimationSmooth;
@@ -1276,6 +1424,11 @@ changed |= NormalizeDeletionSettings(_settings);
                 }
             }
 
+            if (WidgetFileStackSettings.NormalizeOverrides(widget))
+            {
+                changed = true;
+            }
+
             if (widget.IsDisabled)
             {
                 widget.IsDisabled = false;
@@ -1322,6 +1475,78 @@ changed |= NormalizeDeletionSettings(_settings);
         if (!string.Equals(settings.AttachmentStorageMode, normalizedAttachmentStorageMode, StringComparison.Ordinal))
         {
             settings.AttachmentStorageMode = normalizedAttachmentStorageMode;
+            changed = true;
+        }
+
+        string normalizedFileStackGroupBy = NormalizeFileStackGroupBy(settings.FileStackGroupBy);
+        if (normalizedFileStackGroupBy == FileStackGroupByDateAdded)
+        {
+            normalizedFileStackGroupBy = FileStackGroupByKind;
+        }
+        if (!string.Equals(settings.FileStackGroupBy, normalizedFileStackGroupBy, StringComparison.Ordinal))
+        {
+            settings.FileStackGroupBy = normalizedFileStackGroupBy;
+            changed = true;
+        }
+
+        int normalizedFileStackThreshold = NormalizeFileStackThreshold(settings.FileStackThreshold);
+        if (settings.FileStackThreshold != normalizedFileStackThreshold)
+        {
+            settings.FileStackThreshold = normalizedFileStackThreshold;
+            changed = true;
+        }
+
+        string normalizedFileStackOrderBy = NormalizeFileStackOrderBy(settings.FileStackOrderBy);
+        if (!string.Equals(settings.FileStackOrderBy, normalizedFileStackOrderBy, StringComparison.Ordinal))
+        {
+            settings.FileStackOrderBy = normalizedFileStackOrderBy;
+            changed = true;
+        }
+
+        string normalizedUnmatchedBehavior = NormalizeFileStackUnmatchedBehavior(
+            settings.FileStackUnmatchedBehavior);
+        if (!string.Equals(
+                settings.FileStackUnmatchedBehavior,
+                normalizedUnmatchedBehavior,
+                StringComparison.Ordinal))
+        {
+            settings.FileStackUnmatchedBehavior = normalizedUnmatchedBehavior;
+            changed = true;
+        }
+
+        settings.FileStackCustomRules ??= [];
+        var normalizedRules = new List<FileStackCustomRule>();
+        var usedRuleIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var rule in settings.FileStackCustomRules.Where(rule => rule is not null).Take(32))
+        {
+            string id = rule.Id?.Trim() ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(id) || !usedRuleIds.Add(id))
+            {
+                do
+                {
+                    id = Guid.NewGuid().ToString("N");
+                }
+                while (!usedRuleIds.Add(id));
+            }
+
+            string name = (rule.Name ?? string.Empty).Trim();
+            if (name.Length > 80)
+            {
+                name = name[..80];
+            }
+
+            var extensions = NormalizeFileStackExtensions(rule.Extensions).Take(64).ToList();
+            normalizedRules.Add(new FileStackCustomRule
+            {
+                Id = id,
+                Name = name,
+                Extensions = extensions
+            });
+        }
+
+        if (!FileStackCustomRulesEqual(settings.FileStackCustomRules, normalizedRules))
+        {
+            settings.FileStackCustomRules = normalizedRules;
             changed = true;
         }
 
@@ -1407,6 +1632,126 @@ changed |= NormalizeDeletionSettings(_settings);
             : AttachmentStorageModeLink;
     }
 
+    public static string NormalizeFileStackGroupBy(string? groupBy)
+    {
+        if (string.Equals(groupBy, FileStackGroupByDateAdded, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(groupBy, FileStackGroupByDateCreated, StringComparison.OrdinalIgnoreCase))
+        {
+            return FileStackGroupByDateAdded;
+        }
+
+        if (string.Equals(groupBy, FileStackGroupByDateModified, StringComparison.OrdinalIgnoreCase))
+        {
+            return FileStackGroupByDateModified;
+        }
+
+        return string.Equals(groupBy, FileStackGroupByCustom, StringComparison.OrdinalIgnoreCase)
+            ? FileStackGroupByCustom
+            : FileStackGroupByKind;
+    }
+
+    public static int NormalizeFileStackThreshold(int threshold) => threshold switch
+    {
+        2 or 3 or 5 => threshold,
+        _ => DefaultFileStackThreshold
+    };
+
+    public static string NormalizeFileStackOrderBy(string? orderBy)
+    {
+        if (string.Equals(orderBy, FileStackOrderByName, StringComparison.OrdinalIgnoreCase))
+        {
+            return FileStackOrderByName;
+        }
+
+        if (string.Equals(orderBy, FileStackOrderByDateAdded, StringComparison.OrdinalIgnoreCase))
+        {
+            return FileStackOrderByDateAdded;
+        }
+
+        return string.Equals(orderBy, FileStackOrderByDateModified, StringComparison.OrdinalIgnoreCase)
+            ? FileStackOrderByDateModified
+            : FileStackOrderByWidget;
+    }
+
+    public static string NormalizeFileStackUnmatchedBehavior(string? behavior) =>
+        string.Equals(behavior, FileStackUnmatchedOther, StringComparison.OrdinalIgnoreCase)
+            ? FileStackUnmatchedOther
+            : FileStackUnmatchedKeepLoose;
+
+    public static IReadOnlyList<string> NormalizeFileStackExtensions(
+        IEnumerable<string>? extensions)
+    {
+        if (extensions is null)
+        {
+            return [];
+        }
+
+        var normalized = new List<string>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (string? value in extensions)
+        {
+            string extension = (value ?? string.Empty).Trim();
+            if (extension.StartsWith("*.", StringComparison.Ordinal))
+            {
+                extension = extension[1..];
+            }
+            else if (extension.StartsWith('*'))
+            {
+                extension = extension[1..];
+            }
+
+            if (extension.Length == 0)
+            {
+                continue;
+            }
+
+            if (!extension.StartsWith('.'))
+            {
+                extension = $".{extension}";
+            }
+
+            extension = extension.ToLowerInvariant();
+            if (extension.Length > 24 ||
+                extension.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0 ||
+                extension.Contains(Path.DirectorySeparatorChar) ||
+                extension.Contains(Path.AltDirectorySeparatorChar) ||
+                !seen.Add(extension))
+            {
+                continue;
+            }
+
+            normalized.Add(extension);
+        }
+
+        return normalized;
+    }
+
+    private static bool FileStackCustomRulesEqual(
+        IReadOnlyList<FileStackCustomRule> left,
+        IReadOnlyList<FileStackCustomRule> right)
+    {
+        if (left.Count != right.Count)
+        {
+            return false;
+        }
+
+        for (int index = 0; index < left.Count; index++)
+        {
+            FileStackCustomRule leftRule = left[index];
+            FileStackCustomRule rightRule = right[index];
+            if (!string.Equals(leftRule.Id, rightRule.Id, StringComparison.Ordinal) ||
+                !string.Equals(leftRule.Name, rightRule.Name, StringComparison.Ordinal) ||
+                !leftRule.Extensions.SequenceEqual(
+                    rightRule.Extensions,
+                    StringComparer.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     private static bool NormalizeHotkeySettings(AppSettings settings)
     {
         bool changed = false;
@@ -1434,6 +1779,25 @@ changed |= NormalizeDeletionSettings(_settings);
     {
         bool changed = false;
 
+        int normalizedPreviewLineCount = NormalizeItemPreviewLineCount(
+            settings.QuickCaptureItemPreviewLineCount);
+        if (settings.QuickCaptureItemPreviewLineCount != normalizedPreviewLineCount)
+        {
+            settings.QuickCaptureItemPreviewLineCount = normalizedPreviewLineCount;
+            changed = true;
+        }
+
+        string normalizedEnterBehavior = NormalizeEditorEnterBehavior(
+            settings.QuickCaptureEditorEnterBehavior);
+        if (!string.Equals(
+                settings.QuickCaptureEditorEnterBehavior,
+                normalizedEnterBehavior,
+                StringComparison.Ordinal))
+        {
+            settings.QuickCaptureEditorEnterBehavior = normalizedEnterBehavior;
+            changed = true;
+        }
+
         int normalizedLimit = QuickCaptureService.NormalizeRecentLimit(settings.QuickCaptureRecentLimit);
         if (settings.QuickCaptureRecentLimit != normalizedLimit)
         {
@@ -1456,6 +1820,20 @@ changed |= NormalizeDeletionSettings(_settings);
             QuickCaptureDefaultViewRecent))
         {
             settings.QuickCaptureDefaultView = QuickCaptureDefaultViewRecords;
+            changed = true;
+        }
+
+        if (!settings.QuickCaptureShowRecordsTab &&
+            !settings.QuickCaptureShowPinnedTab &&
+            !settings.QuickCaptureShowRecentTab)
+        {
+            settings.QuickCaptureShowRecordsTab = true;
+            changed = true;
+        }
+
+        if (!IsQuickCaptureTabVisible(settings, settings.QuickCaptureDefaultView))
+        {
+            settings.QuickCaptureDefaultView = GetFirstVisibleQuickCaptureTab(settings);
             changed = true;
         }
 
@@ -1493,6 +1871,25 @@ changed |= NormalizeDeletionSettings(_settings);
     {
         bool changed = false;
 
+        int normalizedPreviewLineCount = NormalizeItemPreviewLineCount(
+            settings.TodoItemPreviewLineCount);
+        if (settings.TodoItemPreviewLineCount != normalizedPreviewLineCount)
+        {
+            settings.TodoItemPreviewLineCount = normalizedPreviewLineCount;
+            changed = true;
+        }
+
+        string normalizedEnterBehavior = NormalizeEditorEnterBehavior(
+            settings.TodoEditorEnterBehavior);
+        if (!string.Equals(
+                settings.TodoEditorEnterBehavior,
+                normalizedEnterBehavior,
+                StringComparison.Ordinal))
+        {
+            settings.TodoEditorEnterBehavior = normalizedEnterBehavior;
+            changed = true;
+        }
+
         if (settings.TodoNewTaskPosition is not (TodoNewTaskPositionTop or TodoNewTaskPositionBottom))
         {
             settings.TodoNewTaskPosition = TodoNewTaskPositionTop;
@@ -1501,11 +1898,32 @@ changed |= NormalizeDeletionSettings(_settings);
 
         if (settings.TodoDefaultFilter is not (
             TodoDefaultFilterAll or
+            TodoDefaultFilterActive or
             TodoDefaultFilterToday or
+            TodoDefaultFilterThisWeek or
+            TodoDefaultFilterThisMonth or
             TodoDefaultFilterImportant or
             TodoDefaultFilterCompleted))
         {
             settings.TodoDefaultFilter = TodoDefaultFilterAll;
+            changed = true;
+        }
+
+        if (!settings.TodoShowAllTab &&
+            !settings.TodoShowActiveTab &&
+            !settings.TodoShowTodayTab &&
+            !settings.TodoShowThisWeekTab &&
+            !settings.TodoShowThisMonthTab &&
+            !settings.TodoShowImportantTab &&
+            !settings.TodoShowCompletedTab)
+        {
+            settings.TodoShowAllTab = true;
+            changed = true;
+        }
+
+        if (!IsTodoTabVisible(settings, settings.TodoDefaultFilter))
+        {
+            settings.TodoDefaultFilter = GetFirstVisibleTodoTab(settings);
             changed = true;
         }
 
@@ -1526,11 +1944,65 @@ changed |= NormalizeDeletionSettings(_settings);
         return changed;
     }
 
+    public static int NormalizeItemPreviewLineCount(int lineCount) =>
+        Math.Clamp(lineCount, MinItemPreviewLineCount, MaxItemPreviewLineCount);
+
+    public static string NormalizeEditorEnterBehavior(string? behavior) =>
+        string.Equals(
+            behavior,
+            EditorEnterBehaviorEnterSaves,
+            StringComparison.OrdinalIgnoreCase)
+            ? EditorEnterBehaviorEnterSaves
+            : EditorEnterBehaviorCtrlEnterSaves;
+
+    public static bool ShouldSubmitEditorOnEnter(string? behavior, bool controlPressed) =>
+        NormalizeEditorEnterBehavior(behavior) == EditorEnterBehaviorEnterSaves
+            ? !controlPressed
+            : controlPressed;
+
     public static string NormalizeWidgetTabStyle(string? style)
     {
         return style == WidgetTabStylePivot
             ? WidgetTabStylePivot
             : WidgetTabStyleButton;
+    }
+
+    public static bool IsQuickCaptureTabVisible(AppSettings settings, string? view) => view switch
+    {
+        QuickCaptureDefaultViewPinned => settings.QuickCaptureShowPinnedTab,
+        QuickCaptureDefaultViewRecent => settings.QuickCaptureShowRecentTab,
+        _ => settings.QuickCaptureShowRecordsTab
+    };
+
+    public static string GetFirstVisibleQuickCaptureTab(AppSettings settings)
+    {
+        if (settings.QuickCaptureShowRecordsTab) return QuickCaptureDefaultViewRecords;
+        if (settings.QuickCaptureShowPinnedTab) return QuickCaptureDefaultViewPinned;
+        if (settings.QuickCaptureShowRecentTab) return QuickCaptureDefaultViewRecent;
+        return QuickCaptureDefaultViewRecords;
+    }
+
+    public static bool IsTodoTabVisible(AppSettings settings, string? filter) => filter switch
+    {
+        TodoDefaultFilterActive => settings.TodoShowActiveTab,
+        TodoDefaultFilterToday => settings.TodoShowTodayTab,
+        TodoDefaultFilterThisWeek => settings.TodoShowThisWeekTab,
+        TodoDefaultFilterThisMonth => settings.TodoShowThisMonthTab,
+        TodoDefaultFilterImportant => settings.TodoShowImportantTab,
+        TodoDefaultFilterCompleted => settings.TodoShowCompletedTab,
+        _ => settings.TodoShowAllTab
+    };
+
+    public static string GetFirstVisibleTodoTab(AppSettings settings)
+    {
+        if (settings.TodoShowAllTab) return TodoDefaultFilterAll;
+        if (settings.TodoShowActiveTab) return TodoDefaultFilterActive;
+        if (settings.TodoShowTodayTab) return TodoDefaultFilterToday;
+        if (settings.TodoShowThisWeekTab) return TodoDefaultFilterThisWeek;
+        if (settings.TodoShowThisMonthTab) return TodoDefaultFilterThisMonth;
+        if (settings.TodoShowImportantTab) return TodoDefaultFilterImportant;
+        if (settings.TodoShowCompletedTab) return TodoDefaultFilterCompleted;
+        return TodoDefaultFilterAll;
     }
 
     public static int NormalizeTodoReminderOffsetMinutes(int minutes)

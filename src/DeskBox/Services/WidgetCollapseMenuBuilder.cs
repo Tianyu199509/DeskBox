@@ -8,7 +8,8 @@ internal static class WidgetCollapseMenuBuilder
     public static MenuFlyoutSubItem Create(
         WidgetConfig config,
         LocalizationService localizationService,
-        Action<WidgetCollapseBehavior> applyBehavior)
+        Action<WidgetCollapseBehavior> applyBehavior,
+        Action resetCompactWidth)
     {
         WidgetCollapseBehavior selectedBehavior = WidgetCollapseBehaviorNames.GetOverride(config);
         var subItem = new MenuFlyoutSubItem
@@ -33,6 +34,16 @@ internal static class WidgetCollapseMenuBuilder
             item.Click += (_, _) => applyBehavior(behavior);
             subItem.Items.Add(item);
         }
+
+        subItem.Items.Add(new MenuFlyoutSeparator());
+        var resetWidthItem = new MenuFlyoutItem
+        {
+            Text = localizationService.T("Widget.Compact.RestoreAutomaticWidth"),
+            Icon = new FontIcon { Glyph = "\uE8A7" },
+            IsEnabled = config.CompactWidth is not null
+        };
+        resetWidthItem.Click += (_, _) => resetCompactWidth();
+        subItem.Items.Add(resetWidthItem);
 
         return subItem;
     }

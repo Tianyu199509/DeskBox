@@ -1,4 +1,5 @@
 using System.IO.Compression;
+using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using DeskBox.Models;
@@ -7,12 +8,14 @@ namespace DeskBox.Services;
 
 public sealed class DeskBoxDataBackupService
 {
-    private const int BackupSchemaVersion = 1;
+    private const int BackupSchemaVersion = 2;
+    private const int MinimumSupportedBackupSchemaVersion = 1;
     private const int MaxAutomaticSnapshotCount = 7;
     private const int MaxPreRestoreBackupCount = 5;
     private const int MaxRestoreFileCount = 100_000;
     private const long MaxRestoreFileSizeBytes = 4L * 1024 * 1024 * 1024;
     private const long MaxRestoreTotalSizeBytes = 16L * 1024 * 1024 * 1024;
+    private const int MaxSnapshotCopyAttempts = 4;
     private static readonly TimeSpan AutomaticSnapshotInterval = TimeSpan.FromDays(1);
     private static readonly JsonSerializerOptions s_jsonOptions = new()
     {
@@ -48,6 +51,8 @@ public sealed class DeskBoxDataBackupService
     internal string PreRestoreBackupDirectory => Path.Combine(_rootPath, "backups", "pre-restore");
 
     internal string RestoreStagingDirectory => Path.Combine(_rootPath, "restore-staging");
+
+    internal string BackupSnapshotStagingDirectory => Path.Combine(_rootPath, "backup-staging");
 
     internal string PendingRestoreMarkerPath => Path.Combine(_rootPath, "restore-pending.json");
 
@@ -167,7 +172,9 @@ public sealed class DeskBoxDataBackupService
                 archiveInfo.Manifest.CreatedAtUtc,
                 archiveInfo.Manifest.AppVersion,
                 archiveInfo.FileCount,
-                archiveInfo.TotalUncompressedBytes);
+                archiveInfo.TotalUncompressedBytes,
+                archiveInfo.Manifest.SchemaVersion,
+                archiveInfo.Manifest.SchemaVersion >= 2);
         }
         catch
         {
@@ -265,6 +272,7 @@ public sealed class DeskBoxDataBackupService
         catch (Exception ex)
         {
             App.Log($"[DataBackup] Pending restore failed: {ex}");
+            DeletePendingRestoreCore();
             return new DeskBoxRestoreApplyResult(true, false, ex.Message);
         }
         finally
@@ -315,15 +323,23 @@ public sealed class DeskBoxDataBackupService
                        throw new InvalidDataException("The backup manifest is invalid.");
         }
 
-        if (manifest.SchemaVersion != BackupSchemaVersion)
+        if (manifest.SchemaVersion < MinimumSupportedBackupSchemaVersion ||
+            manifest.SchemaVersion > BackupSchemaVersion)
         {
             throw new InvalidDataException(
                 $"Unsupported DeskBox backup schema version {manifest.SchemaVersion}.");
         }
 
+        if (IsBackupFromNewerApp(manifest.AppVersion))
+        {
+            throw new InvalidDataException(
+                $"This backup was created by newer DeskBox version {manifest.AppVersion}.");
+        }
+
         string destinationRoot = EnsureTrailingDirectorySeparator(
             Path.GetFullPath(Path.Combine(stagingRoot, "data")));
         var extractedPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var extractedFiles = new Dictionary<string, DeskBoxBackupFileManifest>(StringComparer.OrdinalIgnoreCase);
         int fileCount = 0;
         long totalUncompressedBytes = 0;
         foreach (ZipArchiveEntry entry in archive.Entries)
@@ -359,6 +375,11 @@ public sealed class DeskBoxDataBackupService
                 continue;
             }
 
+            if (string.Equals(entry.FullName, "data", StringComparison.Ordinal))
+            {
+                throw new InvalidDataException("The backup data root entry must be a directory.");
+            }
+
             fileCount++;
             if (fileCount > MaxRestoreFileCount || entry.Length > MaxRestoreFileSizeBytes)
             {
@@ -385,12 +406,25 @@ public sealed class DeskBoxDataBackupService
                 FileShare.None,
                 bufferSize: 81920,
                 useAsync: true);
-            await source.CopyToAsync(destination, cancellationToken);
+            (long extractedLength, string sha256) = await CopyAndHashAsync(
+                source,
+                destination,
+                cancellationToken);
+            string relativePath = entry.FullName["data/".Length..];
+            extractedFiles[relativePath] = new DeskBoxBackupFileManifest(
+                relativePath,
+                extractedLength,
+                sha256);
         }
 
         if (fileCount == 0)
         {
             throw new InvalidDataException("The backup contains no DeskBox data files.");
+        }
+
+        if (manifest.SchemaVersion >= 2)
+        {
+            ValidateIntegrityManifest(manifest.Files, extractedFiles);
         }
 
         ValidateRestoreData(Path.Combine(stagingRoot, "data"));
@@ -405,7 +439,13 @@ public sealed class DeskBoxDataBackupService
             throw new InvalidDataException("The backup data directory is empty.");
         }
 
-        ValidateJsonFileIfPresent<AppSettings>(Path.Combine(dataDirectory, "settings.json"));
+        string settingsPath = Path.Combine(dataDirectory, "settings.json");
+        if (!File.Exists(settingsPath))
+        {
+            throw new InvalidDataException("The backup is missing settings.json.");
+        }
+
+        ValidateJsonFileIfPresent<AppSettings>(settingsPath);
         ValidateJsonFileIfPresent<QuickCaptureStoreData>(
             Path.Combine(dataDirectory, "quick-capture", "quick-capture.json"));
 
@@ -742,9 +782,72 @@ public sealed class DeskBoxDataBackupService
         string backupKind,
         CancellationToken cancellationToken)
     {
-        string[] sourceFiles = Directory
+        string snapshotRoot = Path.Combine(
+            BackupSnapshotStagingDirectory,
+            Guid.NewGuid().ToString("N"));
+        string snapshotDataDirectory = Path.Combine(snapshotRoot, "data");
+        try
+        {
+            await CreateDataSnapshotAsync(snapshotDataDirectory, cancellationToken);
+            ValidateRestoreData(snapshotDataDirectory);
+            await CreateArchiveFromSnapshotAsync(
+                archivePath,
+                backupKind,
+                snapshotDataDirectory,
+                cancellationToken);
+        }
+        finally
+        {
+            TryDeleteDirectory(snapshotRoot);
+            TryDeleteEmptyDirectory(BackupSnapshotStagingDirectory);
+        }
+    }
+
+    private async Task CreateDataSnapshotAsync(
+        string snapshotDataDirectory,
+        CancellationToken cancellationToken)
+    {
+        string settingsPath = Path.Combine(DataDirectory, "settings.json");
+        if (!File.Exists(settingsPath))
+        {
+            throw new InvalidOperationException("DeskBox settings are not available for backup.");
+        }
+
+        (string SourcePath, string RelativePath)[] sourceFiles = Directory
             .EnumerateFiles(DataDirectory, "*", SearchOption.AllDirectories)
-            .Where(path => !path.EndsWith(".tmp", StringComparison.OrdinalIgnoreCase))
+            .Select(path => (
+                SourcePath: path,
+                RelativePath: Path.GetRelativePath(DataDirectory, path)
+                    .Replace(Path.DirectorySeparatorChar, '/')))
+            .Where(file => ShouldIncludeInBackup(file.RelativePath))
+            .OrderBy(file => file.RelativePath, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        Directory.CreateDirectory(snapshotDataDirectory);
+        foreach ((string sourcePath, string relativePath) in sourceFiles)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            string destinationPath = Path.Combine(
+                snapshotDataDirectory,
+                relativePath.Replace('/', Path.DirectorySeparatorChar));
+            Directory.CreateDirectory(Path.GetDirectoryName(destinationPath)!);
+            await CopyStableSnapshotFileAsync(sourcePath, destinationPath, cancellationToken);
+        }
+    }
+
+    private async Task CreateArchiveFromSnapshotAsync(
+        string archivePath,
+        string backupKind,
+        string snapshotDataDirectory,
+        CancellationToken cancellationToken)
+    {
+        (string SourcePath, string RelativePath)[] sourceFiles = Directory
+            .EnumerateFiles(snapshotDataDirectory, "*", SearchOption.AllDirectories)
+            .Select(path => (
+                SourcePath: path,
+                RelativePath: Path.GetRelativePath(snapshotDataDirectory, path)
+                    .Replace(Path.DirectorySeparatorChar, '/')))
+            .OrderBy(file => file.RelativePath, StringComparer.OrdinalIgnoreCase)
             .ToArray();
         string tempArchivePath = $"{archivePath}.{Guid.NewGuid():N}.tmp";
 
@@ -760,12 +863,33 @@ public sealed class DeskBoxDataBackupService
             {
                 using (var archive = new ZipArchive(output, ZipArchiveMode.Create, leaveOpen: true))
                 {
+                    var fileManifest = new List<DeskBoxBackupFileManifest>(sourceFiles.Length);
+                    foreach ((string sourcePath, string relativePath) in sourceFiles)
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
+                        ZipArchiveEntry entry = archive.CreateEntry($"data/{relativePath}", CompressionLevel.Fastest);
+                        await using var source = new FileStream(
+                            sourcePath,
+                            FileMode.Open,
+                            FileAccess.Read,
+                            FileShare.Read,
+                            bufferSize: 81920,
+                            useAsync: true);
+                        await using Stream destination = entry.Open();
+                        (long length, string sha256) = await CopyAndHashAsync(
+                            source,
+                            destination,
+                            cancellationToken);
+                        fileManifest.Add(new DeskBoxBackupFileManifest(relativePath, length, sha256));
+                    }
+
                     var manifest = new DeskBoxBackupManifest(
                         BackupSchemaVersion,
                         backupKind,
                         DateTimeOffset.UtcNow,
                         typeof(DeskBoxDataBackupService).Assembly.GetName().Version?.ToString() ?? "unknown",
-                        DataDirectory);
+                        DataDirectory,
+                        fileManifest);
                     ZipArchiveEntry manifestEntry = archive.CreateEntry("manifest.json", CompressionLevel.Fastest);
                     await using (Stream manifestStream = manifestEntry.Open())
                     {
@@ -774,23 +898,6 @@ public sealed class DeskBoxDataBackupService
                             manifest,
                             s_jsonOptions,
                             cancellationToken);
-                    }
-
-                    foreach (string sourcePath in sourceFiles)
-                    {
-                        cancellationToken.ThrowIfCancellationRequested();
-                        string relativePath = Path.GetRelativePath(DataDirectory, sourcePath)
-                            .Replace(Path.DirectorySeparatorChar, '/');
-                        ZipArchiveEntry entry = archive.CreateEntry($"data/{relativePath}", CompressionLevel.Fastest);
-                        await using var source = new FileStream(
-                            sourcePath,
-                            FileMode.Open,
-                            FileAccess.Read,
-                            FileShare.ReadWrite | FileShare.Delete,
-                            bufferSize: 81920,
-                            useAsync: true);
-                        await using Stream destination = entry.Open();
-                        await source.CopyToAsync(destination, cancellationToken);
                     }
                 }
 
@@ -803,6 +910,69 @@ public sealed class DeskBoxDataBackupService
         {
             TryDeleteFile(tempArchivePath);
         }
+    }
+
+    private static async Task CopyStableSnapshotFileAsync(
+        string sourcePath,
+        string destinationPath,
+        CancellationToken cancellationToken)
+    {
+        for (int attempt = 1; attempt <= MaxSnapshotCopyAttempts; attempt++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            TryDeleteFile(destinationPath);
+
+            try
+            {
+                var before = new FileInfo(sourcePath);
+                long expectedLength = before.Length;
+                DateTime expectedLastWriteUtc = before.LastWriteTimeUtc;
+
+                long copiedLength;
+                await using (var source = new FileStream(
+                                 sourcePath,
+                                 FileMode.Open,
+                                 FileAccess.Read,
+                                 FileShare.ReadWrite | FileShare.Delete,
+                                 bufferSize: 81920,
+                                 useAsync: true))
+                await using (var destination = new FileStream(
+                                 destinationPath,
+                                 FileMode.CreateNew,
+                                 FileAccess.Write,
+                                 FileShare.None,
+                                 bufferSize: 81920,
+                                 useAsync: true))
+                {
+                    (copiedLength, _) = await CopyAndHashAsync(source, destination, cancellationToken);
+                    await destination.FlushAsync(cancellationToken);
+                }
+
+                var after = new FileInfo(sourcePath);
+                if (after.Exists &&
+                    copiedLength == expectedLength &&
+                    after.Length == expectedLength &&
+                    after.LastWriteTimeUtc == expectedLastWriteUtc)
+                {
+                    return;
+                }
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                if (attempt == MaxSnapshotCopyAttempts)
+                {
+                    break;
+                }
+            }
+
+            if (attempt < MaxSnapshotCopyAttempts)
+            {
+                await Task.Yield();
+            }
+        }
+
+        TryDeleteFile(destinationPath);
+        throw new IOException($"DeskBox data file changed while creating a backup snapshot: '{sourcePath}'.");
     }
 
     private void PruneAutomaticSnapshots()
@@ -875,6 +1045,20 @@ public sealed class DeskBoxDataBackupService
         }
     }
 
+    private static void TryDeleteEmptyDirectory(string path)
+    {
+        try
+        {
+            if (Directory.Exists(path) && !Directory.EnumerateFileSystemEntries(path).Any())
+            {
+                Directory.Delete(path);
+            }
+        }
+        catch
+        {
+        }
+    }
+
     private static bool IsPathInsideDirectory(string path, string directory)
     {
         try
@@ -887,6 +1071,103 @@ public sealed class DeskBoxDataBackupService
         {
             return false;
         }
+    }
+
+    private static bool ShouldIncludeInBackup(string relativePath)
+    {
+        if (relativePath.EndsWith(".tmp", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        return !relativePath.StartsWith("quick-capture/thumbnails/", StringComparison.OrdinalIgnoreCase) &&
+               !relativePath.StartsWith("quick-capture/exports/", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static async Task<(long Length, string Sha256)> CopyAndHashAsync(
+        Stream source,
+        Stream destination,
+        CancellationToken cancellationToken)
+    {
+        using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        byte[] buffer = new byte[81920];
+        long totalBytes = 0;
+        while (true)
+        {
+            int bytesRead = await source.ReadAsync(buffer, cancellationToken);
+            if (bytesRead == 0)
+            {
+                break;
+            }
+
+            hash.AppendData(buffer, 0, bytesRead);
+            await destination.WriteAsync(buffer.AsMemory(0, bytesRead), cancellationToken);
+            totalBytes = checked(totalBytes + bytesRead);
+        }
+
+        return (totalBytes, Convert.ToHexString(hash.GetHashAndReset()));
+    }
+
+    private static void ValidateIntegrityManifest(
+        IReadOnlyList<DeskBoxBackupFileManifest>? expectedFiles,
+        IReadOnlyDictionary<string, DeskBoxBackupFileManifest> extractedFiles)
+    {
+        if (expectedFiles is null || expectedFiles.Count == 0)
+        {
+            throw new InvalidDataException("The backup integrity manifest is missing or empty.");
+        }
+
+        var expectedByPath = new Dictionary<string, DeskBoxBackupFileManifest>(StringComparer.OrdinalIgnoreCase);
+        foreach (DeskBoxBackupFileManifest expected in expectedFiles)
+        {
+            if (expected is null ||
+                string.IsNullOrWhiteSpace(expected.Path) ||
+                expected.Path.Contains('\\') ||
+                expected.Path.StartsWith("/", StringComparison.Ordinal) ||
+                expected.Path.Split('/').Any(segment => segment is "" or "." or "..") ||
+                !expectedByPath.TryAdd(expected.Path, expected))
+            {
+                throw new InvalidDataException("The backup integrity manifest contains an invalid path.");
+            }
+
+            if (expected.Length < 0 ||
+                string.IsNullOrWhiteSpace(expected.Sha256) ||
+                expected.Sha256.Length != 64 ||
+                !expected.Sha256.All(Uri.IsHexDigit))
+            {
+                throw new InvalidDataException(
+                    $"The backup integrity entry for '{expected.Path}' is invalid.");
+            }
+        }
+
+        if (expectedByPath.Count != extractedFiles.Count)
+        {
+            throw new InvalidDataException("The backup file list does not match its integrity manifest.");
+        }
+
+        foreach ((string path, DeskBoxBackupFileManifest actual) in extractedFiles)
+        {
+            if (!expectedByPath.TryGetValue(path, out DeskBoxBackupFileManifest? expected) ||
+                expected.Length != actual.Length ||
+                !string.Equals(expected.Sha256, actual.Sha256, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidDataException($"Backup integrity validation failed for '{path}'.");
+            }
+        }
+    }
+
+    private static bool IsBackupFromNewerApp(string? backupVersion)
+    {
+        string? currentVersion = typeof(DeskBoxDataBackupService).Assembly.GetName().Version?.ToString();
+        return TryParseVersion(backupVersion, out Version? backup) &&
+               TryParseVersion(currentVersion, out Version? current) &&
+               backup > current;
+    }
+
+    private static bool TryParseVersion(string? value, out Version? version)
+    {
+        string normalized = (value ?? string.Empty).Split(['-', '+'], 2)[0];
+        return Version.TryParse(normalized, out version);
     }
 
     private static string EnsureTrailingDirectorySeparator(string path)
@@ -902,7 +1183,13 @@ public sealed class DeskBoxDataBackupService
         string Kind,
         DateTimeOffset CreatedAtUtc,
         string AppVersion,
-        string? SourceDataPath = null);
+        string? SourceDataPath = null,
+        IReadOnlyList<DeskBoxBackupFileManifest>? Files = null);
+
+    private sealed record DeskBoxBackupFileManifest(
+        string Path,
+        long Length,
+        string Sha256);
 
     private sealed record RestoreArchiveInfo(
         DeskBoxBackupManifest Manifest,
@@ -921,7 +1208,9 @@ public sealed record DeskBoxRestorePreparation(
     DateTimeOffset BackupCreatedAtUtc,
     string AppVersion,
     int FileCount,
-    long TotalUncompressedBytes);
+    long TotalUncompressedBytes,
+    int BackupSchemaVersion,
+    bool HasIntegrityManifest);
 
 internal sealed record DeskBoxRestoreApplyResult(
     bool HadPendingRestore,

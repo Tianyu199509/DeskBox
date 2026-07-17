@@ -28,6 +28,7 @@ public partial class WidgetViewModel
             Config.ManagedFolderName);
         Directory.CreateDirectory(Config.MappedFolderPath);
         Config.Items.Clear();
+        ResetAddedAtTracking();
         _settingsService.SaveDebounced();
     }
 
@@ -104,6 +105,7 @@ public partial class WidgetViewModel
                 loadFolderItemCounts: false);
         }
 
+        ApplyPersistedAddedTimes(items);
         SyncFolderItems(items);
         SortItems();
         if (clearIconCacheBeforeHydration)
@@ -160,6 +162,7 @@ public partial class WidgetViewModel
         int generation = Interlocked.Increment(ref _itemHydrationGeneration);
         _ = HydrateIconsWithRetryAsync(generation);
         _ = HydrateFolderItemCountsAsync(generation);
+        _ = HydrateShellKindsAsync(generation);
     }
 
     private void ClearCurrentItemIconCache()
@@ -303,6 +306,46 @@ public partial class WidgetViewModel
         }
     }
 
+    private async Task HydrateShellKindsAsync(int generation)
+    {
+        var items = Items
+            .Where(item => !item.IsShellKindLoaded)
+            .OrderBy(item => item.SortOrder)
+            .ToList();
+
+        for (int start = 0; start < items.Count; start += ShellKindHydrationBatchSize)
+        {
+            if (generation != Volatile.Read(ref _itemHydrationGeneration))
+            {
+                return;
+            }
+
+            var batch = items
+                .Skip(start)
+                .Take(ShellKindHydrationBatchSize)
+                .Where(item => Items.Contains(item) && !string.IsNullOrWhiteSpace(item.Path))
+                .Select(async item =>
+                {
+                    string expectedPath = item.Path;
+                    string kind = await _fileService.GetShellKindAsync(item);
+                    return (Item: item, ExpectedPath: expectedPath, Kind: kind);
+                })
+                .ToArray();
+            var results = await Task.WhenAll(batch);
+
+            foreach (var result in results)
+            {
+                SetShellKind(
+                    result.Item,
+                    result.Kind,
+                    result.ExpectedPath,
+                    generation);
+            }
+
+            await Task.Yield();
+        }
+    }
+
     private void SetItemIcon(
         WidgetItem item,
         Microsoft.UI.Xaml.Media.Imaging.BitmapImage? icon,
@@ -349,6 +392,34 @@ public partial class WidgetViewModel
                 item.IsFolderItemCountLoaded = true;
             }
         });
+    }
+
+    private void SetShellKind(WidgetItem item, string kind, string expectedPath, int generation)
+    {
+        void Apply()
+        {
+            if (!CanApplyHydrationResult(item, expectedPath, generation))
+            {
+                return;
+            }
+
+            bool categoryMayChange = !string.Equals(item.ShellKind, kind, StringComparison.OrdinalIgnoreCase);
+            item.ShellKind = kind;
+            item.IsShellKindLoaded = true;
+            if (categoryMayChange && FileStackGroupBy == SettingsService.FileStackGroupByKind)
+            {
+                QueueStackDisplayRebuild();
+            }
+        }
+
+        if (_dispatcherQueue.HasThreadAccess)
+        {
+            Apply();
+        }
+        else
+        {
+            _dispatcherQueue.TryEnqueue(Apply);
+        }
     }
 
     private bool CanApplyHydrationResult(WidgetItem item, string expectedPath, int generation)

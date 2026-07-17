@@ -33,281 +33,173 @@ public partial class SettingsViewModel
     private void ApplySettingsSnapshot()
     {
         var settings = _settingsService.Settings;
-        bool quickCaptureEnabled = FeatureWidgetSettings.IsEnabled(settings, WidgetKind.QuickCapture);
-        bool quickCaptureClipboardEnabled = settings.QuickCaptureClipboardEnabled;
-        bool quickCaptureImageClipboardEnabled = settings.QuickCaptureImageClipboardEnabled;
-        int quickCaptureRecentLimit = QuickCaptureService.NormalizeRecentLimit(settings.QuickCaptureRecentLimit);
-        bool quickCaptureShowCreatedTime = settings.QuickCaptureShowCreatedTime;
-        string quickCaptureDefaultView = NormalizeQuickCaptureDefaultView(settings.QuickCaptureDefaultView);
-        string quickCaptureTabStyle = SettingsService.NormalizeWidgetTabStyle(settings.QuickCaptureTabStyle);
-        bool todoEnabled = FeatureWidgetSettings.IsEnabled(settings, WidgetKind.Todo);
-        bool todoShowCompletedTasks = settings.TodoShowCompletedTasks;
-        bool todoShowFooterStats = settings.TodoShowFooterStats;
-        bool todoShowClearCompletedButton = settings.TodoShowClearCompletedButton;
-        bool todoConfirmBeforeDelete = settings.TodoConfirmBeforeDelete;
-        bool todoReminderEnabled = settings.TodoReminderEnabled;
-        bool musicUseArtworkBackdrop = settings.MusicUseArtworkBackdrop;
-        bool musicEnableCoverHoverMotion = settings.MusicEnableCoverHoverMotion;
-        string musicDisplayMode = SettingsService.NormalizeMusicDisplayMode(settings.MusicDisplayMode);
-        bool showImageFilesAsIcons = settings.ShowImageFilesAsIcons;
-        bool showFileItemPathTooltips = settings.ShowFileItemPathTooltips;
-        bool showHoverButtons = settings.ShowHoverButtons;
-        string hoverButtonActions = SettingsService.NormalizeWidgetHoverButtonActions(settings.WidgetHoverButtonActions);
-        bool autoCheckForUpdates = settings.AutoCheckForUpdates;
-        string displayWidgetChromeMode = NormalizeWidgetChromeModeSetting(settings.DisplayWidgetChromeMode, WidgetChromeMode.Overlay);
-        string interactiveWidgetChromeMode = NormalizeWidgetChromeModeSetting(settings.InteractiveWidgetChromeMode, WidgetChromeMode.Standard);
-        string widgetTitleIconMode = NormalizeWidgetTitleIconModeSetting(settings.WidgetTitleIconMode);
-        string widgetLayerMode = SettingsService.NormalizeWidgetLayerModeSetting(settings.WidgetLayerMode);
-        bool widgetCapsuleModeEnabled = settings.WidgetCapsuleModeEnabled;
-        bool widgetCompactHideSensitiveContent = settings.WidgetCompactHideSensitiveContent;
-        string widgetCollapseBehavior = SettingsService.NormalizeWidgetCollapseBehavior(settings.WidgetCollapseBehavior) == SettingsService.WidgetCollapseBehaviorSmart
-            ? SettingsService.WidgetCollapseBehaviorSmart
-            : SettingsService.WidgetCollapseBehaviorClick;
-        string widgetCompactContentMode = SettingsService.NormalizeWidgetCompactContentMode(
-            settings.WidgetCompactContentMode);
-        string widgetCompactAnimationEffect = SettingsService.NormalizeWidgetCompactAnimationEffect(settings.WidgetCompactAnimationEffect);
-        int widgetCompactAnimationDurationMs = SettingsService.NormalizeWidgetCompactAnimationDurationMs(settings.WidgetCompactAnimationDurationMs);
-        int widgetCompactExpandDelayMs = SettingsService.NormalizeWidgetCompactExpandDelayMs(settings.WidgetCompactExpandDelayMs);
-        int widgetCompactCollapseDelayMs = SettingsService.NormalizeWidgetCompactCollapseDelayMs(settings.WidgetCompactCollapseDelayMs);
-        string widgetCompactMediaCornerMode = SettingsService.NormalizeWidgetCompactMediaCornerMode(settings.WidgetCompactMediaCornerMode);
-        string todoNewTaskPosition = NormalizeTodoNewTaskPosition(settings.TodoNewTaskPosition);
-        string todoDefaultFilter = NormalizeTodoDefaultFilter(settings.TodoDefaultFilter);
-        string todoTabStyle = SettingsService.NormalizeWidgetTabStyle(settings.TodoTabStyle);
-        int todoReminderOffsetMinutes = SettingsService.NormalizeTodoReminderOffsetMinutes(settings.TodoDefaultReminderOffsetMinutes);
-        string managedStorageRootPath = SettingsService.NormalizeManagedStorageRootPath(settings.DefaultManagedStorageRootPath);
+        bool wasRestoringDefaults = _isRestoringDefaults;
 
         _isApplyingSettingsSnapshot = true;
+        _isRestoringDefaults = true;
         try
         {
-            if (WidgetCapsuleModeEnabled != widgetCapsuleModeEnabled)
-            {
-                WidgetCapsuleModeEnabled = widgetCapsuleModeEnabled;
-            }
+            SelectedTheme = settings.Theme is ThemeLight or ThemeDark ? settings.Theme : ThemeSystem;
+            SelectedTrayIconStyle = settings.TrayIconStyle is TrayIconStyleColorful or TrayIconStyleBlack or TrayIconStyleWhite
+                ? settings.TrayIconStyle
+                : TrayIconStyleSystem;
+            SelectedLanguage = LocalizationService.NormalizeLanguageSetting(settings.Language);
+            UseSystemAccentColor = !string.Equals(
+                settings.AccentColorMode,
+                ThemeService.AccentModeCustom,
+                StringComparison.OrdinalIgnoreCase);
 
-            if (WidgetCompactHideSensitiveContent != widgetCompactHideSensitiveContent)
-            {
-                WidgetCompactHideSensitiveContent = widgetCompactHideSensitiveContent;
-            }
+            AutoCheckForUpdates = settings.AutoCheckForUpdates;
+            DoubleClickToOpen = settings.DoubleClickToOpen;
+            DefaultWidth = settings.DefaultWidgetWidth;
+            DefaultHeight = settings.DefaultWidgetHeight;
+            HideShortcutArrowOverlay = settings.HideShortcutArrowOverlay;
+            ShowImageFilesAsIcons = settings.ShowImageFilesAsIcons;
+            ShowHoverButtons = settings.ShowHoverButtons;
+            ResizeSnapEnabled = settings.ResizeSnapEnabled;
+            ShowListItemDetails = settings.ShowListItemDetails;
+            ShowFileItemPathTooltips = settings.ShowFileItemPathTooltips;
+            ApplyHoverButtonActionSelection(settings.WidgetHoverButtonActions);
 
-            if (!string.Equals(ManagedStorageRootPath, managedStorageRootPath, StringComparison.OrdinalIgnoreCase))
-            {
-                ManagedStorageRootPath = managedStorageRootPath;
-                _ = RefreshQuickAccessStateAsync();
-            }
+            WidgetOpacity = settings.WidgetOpacity;
+            WidgetMaterialIntensity = settings.WidgetMaterialIntensity;
+            SelectedWidgetCornerPreference = settings.WidgetCornerPreference is CornerDefault or CornerSquare or CornerSmall or CornerRound
+                ? settings.WidgetCornerPreference
+                : CornerSmall;
+            SelectedWidgetMaterialType = settings.WidgetMaterialType is MaterialMica or MaterialMicaAlt or MaterialAcrylic or MaterialAcrylicBase or MaterialSolid
+                ? settings.WidgetMaterialType
+                : MaterialAcrylic;
+            SelectedWidgetBorderColorMode = settings.WidgetBorderColorMode is BorderColorNeutral or BorderColorAccent or BorderColorNone
+                ? settings.WidgetBorderColorMode
+                : BorderColorNeutral;
+            SelectedWidgetBorderStyle = settings.WidgetBorderStyle is BorderThin or BorderMedium or BorderThick
+                ? settings.WidgetBorderStyle
+                : BorderThin;
 
-            if (QuickCaptureEnabled != quickCaptureEnabled)
-            {
-                QuickCaptureEnabled = quickCaptureEnabled;
-            }
+            WidgetCapsuleModeEnabled = settings.WidgetCapsuleModeEnabled;
+            WidgetCompactHideSensitiveContent = settings.WidgetCompactHideSensitiveContent;
+            SelectedWidgetCollapseBehavior = SettingsService.NormalizeWidgetCollapseBehavior(settings.WidgetCollapseBehavior) == SettingsService.WidgetCollapseBehaviorSmart
+                ? SettingsService.WidgetCollapseBehaviorSmart
+                : SettingsService.WidgetCollapseBehaviorClick;
+            SelectedWidgetCompactContentMode = SettingsService.NormalizeWidgetCompactContentMode(settings.WidgetCompactContentMode);
+            SelectedWidgetCompactAnimationEffect = SettingsService.NormalizeWidgetCompactAnimationEffect(settings.WidgetCompactAnimationEffect);
+            WidgetCompactAnimationDurationMs = SettingsService.NormalizeWidgetCompactAnimationDurationMs(settings.WidgetCompactAnimationDurationMs);
+            WidgetCompactExpandDelayMs = SettingsService.NormalizeWidgetCompactExpandDelayMs(settings.WidgetCompactExpandDelayMs);
+            WidgetCompactCollapseDelayMs = SettingsService.NormalizeWidgetCompactCollapseDelayMs(settings.WidgetCompactCollapseDelayMs);
+            SelectedWidgetCompactMediaCornerMode = SettingsService.NormalizeWidgetCompactMediaCornerMode(settings.WidgetCompactMediaCornerMode);
 
-            if (QuickCaptureClipboardEnabled != quickCaptureClipboardEnabled)
-            {
-                QuickCaptureClipboardEnabled = quickCaptureClipboardEnabled;
-            }
+            SelectedWidgetAnimationEffect = NormalizeWidgetAnimationEffect(settings.WidgetAnimationEffect);
+            SelectedWidgetAnimationSpeed = NormalizeWidgetAnimationSpeed(settings.WidgetAnimationSpeed);
+            SelectedWidgetAnimationSlideDirection = NormalizeWidgetAnimationSlideDirection(settings.WidgetAnimationSlideDirection);
+            SelectedWidgetAnimationEasingIntensity = NormalizeWidgetAnimationEasingIntensity(settings.WidgetAnimationEasingIntensity);
+            SelectedAnimationPreset = ResolveAnimationPreset();
+            SelectedDisplayWidgetChromeMode = NormalizeWidgetChromeModeSetting(
+                settings.DisplayWidgetChromeMode,
+                WidgetChromeMode.Overlay);
+            SelectedInteractiveWidgetChromeMode = NormalizeWidgetChromeModeSetting(
+                settings.InteractiveWidgetChromeMode,
+                WidgetChromeMode.Standard);
+            SelectedWidgetTitleIconMode = NormalizeWidgetTitleIconModeSetting(settings.WidgetTitleIconMode);
+            SelectedWidgetLayerMode = SettingsService.NormalizeWidgetLayerModeSetting(settings.WidgetLayerMode);
 
-            if (QuickCaptureImageClipboardEnabled != quickCaptureImageClipboardEnabled)
-            {
-                QuickCaptureImageClipboardEnabled = quickCaptureImageClipboardEnabled;
-            }
+            IconSize = settings.IconSize;
+            TextSize = settings.TextSize;
+            LayoutDensityScale = settings.LayoutDensityScale;
+            HorizontalSpacingScale = settings.HorizontalSpacingScale;
+            VerticalSpacingScale = settings.VerticalSpacingScale;
+            FileNameWidthScale = settings.FileNameWidthScale;
+            SelectedLayoutDensity = SettingsService.ResolveLayoutDensityPreset(settings);
+            ShowFileExtensions = settings.ShowFileExtensions;
+            HideShortcutExtensionWhenShowingFileExtensions = settings.HideShortcutExtensionWhenShowingFileExtensions;
 
-            if (QuickCaptureRecentLimit != quickCaptureRecentLimit)
-            {
-                QuickCaptureRecentLimit = quickCaptureRecentLimit;
-            }
+            ApplyContentEditorSettingsSnapshot(settings);
+            ApplyFileStackSettingsSnapshot(settings);
 
-            if (QuickCaptureShowCreatedTime != quickCaptureShowCreatedTime)
-            {
-                QuickCaptureShowCreatedTime = quickCaptureShowCreatedTime;
-            }
+            QuickCaptureEnabled = FeatureWidgetSettings.IsEnabled(settings, WidgetKind.QuickCapture);
+            QuickCaptureClipboardEnabled = settings.QuickCaptureClipboardEnabled;
+            QuickCaptureImageClipboardEnabled = settings.QuickCaptureImageClipboardEnabled;
+            QuickCaptureRecentLimit = QuickCaptureService.NormalizeRecentLimit(settings.QuickCaptureRecentLimit);
+            QuickCaptureShowCreatedTime = settings.QuickCaptureShowCreatedTime;
+            SelectedAttachmentStorageMode = SettingsService.NormalizeAttachmentStorageMode(settings.AttachmentStorageMode);
+            SelectedQuickCaptureDefaultView = NormalizeQuickCaptureDefaultView(settings.QuickCaptureDefaultView);
+            SelectedQuickCaptureTabStyle = SettingsService.NormalizeWidgetTabStyle(settings.QuickCaptureTabStyle);
+            QuickCaptureShowTabBar = settings.QuickCaptureShowTabBar;
+            QuickCaptureShowRecordsTab = settings.QuickCaptureShowRecordsTab;
+            QuickCaptureShowPinnedTab = settings.QuickCaptureShowPinnedTab;
+            QuickCaptureShowRecentTab = settings.QuickCaptureShowRecentTab;
 
-            if (!string.Equals(SelectedQuickCaptureDefaultView, quickCaptureDefaultView, StringComparison.Ordinal))
-            {
-                SelectedQuickCaptureDefaultView = quickCaptureDefaultView;
-            }
+            TodoEnabled = FeatureWidgetSettings.IsEnabled(settings, WidgetKind.Todo);
+            TodoShowTabBar = settings.TodoShowTabBar;
+            TodoShowAllTab = settings.TodoShowAllTab;
+            TodoShowActiveTab = settings.TodoShowActiveTab;
+            TodoShowTodayTab = settings.TodoShowTodayTab;
+            TodoShowThisWeekTab = settings.TodoShowThisWeekTab;
+            TodoShowThisMonthTab = settings.TodoShowThisMonthTab;
+            TodoShowImportantTab = settings.TodoShowImportantTab;
+            TodoShowCompletedTab = settings.TodoShowCompletedTab;
+            TodoShowCompletedTasks = settings.TodoShowCompletedTasks;
+            TodoShowFooterStats = settings.TodoShowFooterStats;
+            TodoShowClearCompletedButton = settings.TodoShowClearCompletedButton;
+            TodoConfirmBeforeDelete = settings.TodoConfirmBeforeDelete;
+            TodoReminderEnabled = settings.TodoReminderEnabled;
+            SelectedTodoNewTaskPosition = NormalizeTodoNewTaskPosition(settings.TodoNewTaskPosition);
+            SelectedTodoDefaultFilter = NormalizeTodoDefaultFilter(settings.TodoDefaultFilter);
+            SelectedTodoTabStyle = SettingsService.NormalizeWidgetTabStyle(settings.TodoTabStyle);
+            SelectedTodoReminderOffsetMinutes = SettingsService.NormalizeTodoReminderOffsetMinutes(
+                settings.TodoDefaultReminderOffsetMinutes);
 
-            if (!string.Equals(SelectedQuickCaptureTabStyle, quickCaptureTabStyle, StringComparison.Ordinal))
-            {
-                SelectedQuickCaptureTabStyle = quickCaptureTabStyle;
-            }
+            MusicUseArtworkBackdrop = settings.MusicUseArtworkBackdrop;
+            MusicEnableCoverHoverMotion = settings.MusicEnableCoverHoverMotion;
+            SelectedMusicDisplayMode = SettingsService.NormalizeMusicDisplayMode(settings.MusicDisplayMode);
 
-            if (TodoEnabled != todoEnabled)
-            {
-                TodoEnabled = todoEnabled;
-            }
+            WeatherAutoLocation = settings.WeatherAutoLocation;
+            WeatherCityName = settings.WeatherCityName;
+            WeatherCitySearchText = settings.WeatherCityName;
+            SelectedWeatherTemperatureUnit = settings.WeatherTemperatureUnit == SettingsService.WeatherTemperatureUnitFahrenheit
+                ? SettingsService.WeatherTemperatureUnitFahrenheit
+                : SettingsService.WeatherTemperatureUnitCelsius;
+            SelectedWeatherWindSpeedUnit = settings.WeatherWindSpeedUnit is SettingsService.WeatherWindSpeedUnitMs or SettingsService.WeatherWindSpeedUnitMph
+                ? settings.WeatherWindSpeedUnit
+                : SettingsService.WeatherWindSpeedUnitKmh;
+            SelectedWeatherDefaultView = settings.WeatherDefaultView == SettingsService.WeatherDefaultViewWeek
+                ? SettingsService.WeatherDefaultViewWeek
+                : SettingsService.WeatherDefaultViewToday;
+            SelectedWeatherSkin = settings.WeatherSkin == SettingsService.WeatherSkinRich
+                ? SettingsService.WeatherSkinRich
+                : SettingsService.WeatherSkinStandard;
+            WeatherShowForecast = settings.WeatherShowForecast;
+            WeatherShowSunrise = settings.WeatherShowSunrise;
+            WeatherShowUvIndex = settings.WeatherShowUvIndex;
+            WeatherShowPrecipitation = settings.WeatherShowPrecipitation;
+            WeatherShowHumidity = settings.WeatherShowHumidity;
+            WeatherShowWind = settings.WeatherShowWind;
+            WeatherShowPressure = settings.WeatherShowPressure;
+            SelectedWeatherRefreshInterval = Math.Clamp(
+                settings.WeatherRefreshIntervalMinutes,
+                SettingsService.WeatherRefreshMinMinutes,
+                SettingsService.WeatherRefreshMaxMinutes);
 
-            if (TodoShowCompletedTasks != todoShowCompletedTasks)
-            {
-                TodoShowCompletedTasks = todoShowCompletedTasks;
-            }
-
-            if (TodoShowFooterStats != todoShowFooterStats)
-            {
-                TodoShowFooterStats = todoShowFooterStats;
-            }
-
-            if (TodoShowClearCompletedButton != todoShowClearCompletedButton)
-            {
-                TodoShowClearCompletedButton = todoShowClearCompletedButton;
-            }
-
-            if (TodoConfirmBeforeDelete != todoConfirmBeforeDelete)
-            {
-                TodoConfirmBeforeDelete = todoConfirmBeforeDelete;
-            }
-
-            if (TodoReminderEnabled != todoReminderEnabled)
-            {
-                TodoReminderEnabled = todoReminderEnabled;
-            }
-
-            if (MusicUseArtworkBackdrop != musicUseArtworkBackdrop)
-            {
-                MusicUseArtworkBackdrop = musicUseArtworkBackdrop;
-            }
-
-            if (MusicEnableCoverHoverMotion != musicEnableCoverHoverMotion)
-            {
-                MusicEnableCoverHoverMotion = musicEnableCoverHoverMotion;
-            }
-
-            if (!string.Equals(SelectedMusicDisplayMode, musicDisplayMode, StringComparison.Ordinal))
-            {
-                SelectedMusicDisplayMode = musicDisplayMode;
-            }
-
-            if (ShowImageFilesAsIcons != showImageFilesAsIcons)
-            {
-                ShowImageFilesAsIcons = showImageFilesAsIcons;
-            }
-
-            if (ShowFileItemPathTooltips != showFileItemPathTooltips)
-            {
-                ShowFileItemPathTooltips = showFileItemPathTooltips;
-            }
-
-            if (ShowHoverButtons != showHoverButtons)
-            {
-                ShowHoverButtons = showHoverButtons;
-            }
-
-            ApplyHoverButtonActionSelection(hoverButtonActions);
-
-            if (AutoCheckForUpdates != autoCheckForUpdates)
-            {
-                AutoCheckForUpdates = autoCheckForUpdates;
-            }
-
-            if (!string.Equals(SelectedDisplayWidgetChromeMode, displayWidgetChromeMode, StringComparison.Ordinal))
-            {
-                SelectedDisplayWidgetChromeMode = displayWidgetChromeMode;
-            }
-
-            if (!string.Equals(SelectedInteractiveWidgetChromeMode, interactiveWidgetChromeMode, StringComparison.Ordinal))
-            {
-                SelectedInteractiveWidgetChromeMode = interactiveWidgetChromeMode;
-            }
-
-            if (!string.Equals(SelectedWidgetTitleIconMode, widgetTitleIconMode, StringComparison.Ordinal))
-            {
-                SelectedWidgetTitleIconMode = widgetTitleIconMode;
-            }
-
-            if (!string.Equals(SelectedWidgetLayerMode, widgetLayerMode, StringComparison.Ordinal))
-            {
-                SelectedWidgetLayerMode = widgetLayerMode;
-            }
-
-            if (!string.Equals(SelectedWidgetCollapseBehavior, widgetCollapseBehavior, StringComparison.Ordinal))
-            {
-                SelectedWidgetCollapseBehavior = widgetCollapseBehavior;
-            }
-
-            if (!string.Equals(
-                    SelectedWidgetCompactContentMode,
-                    widgetCompactContentMode,
-                    StringComparison.Ordinal))
-            {
-                SelectedWidgetCompactContentMode = widgetCompactContentMode;
-            }
-
-            if (!string.Equals(SelectedWidgetCompactAnimationEffect, widgetCompactAnimationEffect, StringComparison.Ordinal))
-            {
-                SelectedWidgetCompactAnimationEffect = widgetCompactAnimationEffect;
-            }
-
-            if (Math.Abs(WidgetCompactAnimationDurationMs - widgetCompactAnimationDurationMs) > 0.01)
-            {
-                WidgetCompactAnimationDurationMs = widgetCompactAnimationDurationMs;
-            }
-
-            if (Math.Abs(WidgetCompactExpandDelayMs - widgetCompactExpandDelayMs) > 0.01)
-            {
-                WidgetCompactExpandDelayMs = widgetCompactExpandDelayMs;
-            }
-
-            if (Math.Abs(WidgetCompactCollapseDelayMs - widgetCompactCollapseDelayMs) > 0.01)
-            {
-                WidgetCompactCollapseDelayMs = widgetCompactCollapseDelayMs;
-            }
-
-            if (!string.Equals(SelectedWidgetCompactMediaCornerMode, widgetCompactMediaCornerMode, StringComparison.Ordinal))
-            {
-                SelectedWidgetCompactMediaCornerMode = widgetCompactMediaCornerMode;
-            }
-
-            if (!string.Equals(SelectedTodoNewTaskPosition, todoNewTaskPosition, StringComparison.Ordinal))
-            {
-                SelectedTodoNewTaskPosition = todoNewTaskPosition;
-            }
-
-            if (!string.Equals(SelectedTodoDefaultFilter, todoDefaultFilter, StringComparison.Ordinal))
-            {
-                SelectedTodoDefaultFilter = todoDefaultFilter;
-            }
-
-            if (!string.Equals(SelectedTodoTabStyle, todoTabStyle, StringComparison.Ordinal))
-            {
-                SelectedTodoTabStyle = todoTabStyle;
-            }
-
-            if (SelectedTodoReminderOffsetMinutes != todoReminderOffsetMinutes)
-            {
-                SelectedTodoReminderOffsetMinutes = todoReminderOffsetMinutes;
-            }
+            ManagedStorageRootPath = SettingsService.NormalizeManagedStorageRootPath(settings.DefaultManagedStorageRootPath);
+            GlobalHotkeyEnabled = settings.GlobalHotkeyEnabled;
         }
         finally
         {
             _isApplyingSettingsSnapshot = false;
+            _isRestoringDefaults = wasRestoringDefaults;
         }
 
-        OnPropertyChanged(nameof(SelectedQuickCaptureDefaultViewText));
-        OnPropertyChanged(nameof(SelectedQuickCaptureDefaultViewIndex));
-        OnPropertyChanged(nameof(SelectedQuickCaptureTabStyleText));
-        OnPropertyChanged(nameof(SelectedQuickCaptureTabStyleIndex));
-        OnPropertyChanged(nameof(SelectedTodoNewTaskPositionText));
-        OnPropertyChanged(nameof(SelectedTodoNewTaskPositionIndex));
-        OnPropertyChanged(nameof(SelectedTodoDefaultFilterText));
-        OnPropertyChanged(nameof(SelectedTodoDefaultFilterIndex));
-        OnPropertyChanged(nameof(SelectedTodoTabStyleText));
-        OnPropertyChanged(nameof(SelectedTodoTabStyleIndex));
-        OnPropertyChanged(nameof(SelectedTodoReminderOffsetMinutesText));
-        OnPropertyChanged(nameof(SelectedTodoReminderOffsetMinutesIndex));
-        OnPropertyChanged(nameof(SelectedMusicDisplayModeText));
-        OnPropertyChanged(nameof(SelectedMusicDisplayModeIndex));
-        OnPropertyChanged(nameof(SelectedDisplayWidgetChromeModeText));
-        OnPropertyChanged(nameof(SelectedDisplayWidgetChromeModeIndex));
-        OnPropertyChanged(nameof(SelectedInteractiveWidgetChromeModeText));
-        OnPropertyChanged(nameof(SelectedInteractiveWidgetChromeModeIndex));
-        OnPropertyChanged(nameof(SelectedWidgetTitleIconModeText));
-        OnPropertyChanged(nameof(SelectedWidgetTitleIconModeIndex));
-        OnPropertyChanged(nameof(SelectedWidgetLayerModeText));
-        OnPropertyChanged(nameof(SelectedWidgetLayerModeIndex));
-        NotifyHoverButtonActionPropertiesChanged();
-        OnPropertyChanged(nameof(HoverButtonActionsSummaryText));
+        RefreshNumberInputs();
+        RefreshSelectionProperties();
+        RefreshGlobalHotkeyState();
+        OnPropertyChanged(nameof(CanEditCustomAccent));
+        OnPropertyChanged(nameof(AccentColorDescription));
+        OnPropertyChanged(nameof(WeatherCityNameVisibility));
         OnPropertyChanged(nameof(QuickCaptureStatusText));
         OnPropertyChanged(nameof(QuickCaptureDependencyStatusText));
         OnPropertyChanged(nameof(FeatureWidgetEntries));
+        NotifyCapsuleOverridePropertiesChanged();
         RefreshQuickCaptureClipboardDiagnostics();
+        _ = RefreshQuickAccessStateAsync();
     }
 
     private void RefreshLocalizedProperties()
@@ -348,6 +240,7 @@ public partial class SettingsViewModel
         OnPropertyChanged(nameof(QuickCaptureDependencyStatusText));
         OnPropertyChanged(nameof(QuickCaptureRecentLimitText));
         OnPropertyChanged(nameof(FeatureWidgetEntries));
+        NotifyCapsuleOverridePropertiesChanged();
 OnPropertyChanged(nameof(WeatherCitySearchPlaceholder));
 OnPropertyChanged(nameof(WeatherCityNoResultsText));
 RefreshWeatherCityPopularCities();
@@ -356,6 +249,7 @@ RefreshWeatherCityPopularCities();
 
     private void RefreshSelectionProperties()
     {
+        RefreshFileStackSelectionProperties();
         _cachedThemeDisplayNames = null;
         _cachedTrayIconStyleDisplayNames = null;
         _cachedLanguageDisplayNames = null;
@@ -424,6 +318,7 @@ RefreshWeatherCityPopularCities();
         OnPropertyChanged(nameof(AvailableTodoTabStyleDisplayNames));
         OnPropertyChanged(nameof(AvailableTodoReminderOffsetDisplayNames));
         OnPropertyChanged(nameof(AvailableMusicDisplayModeDisplayNames));
+        RefreshContentEditorLocalizedProperties();
         OnPropertyChanged(nameof(SelectedThemeText));
         OnPropertyChanged(nameof(SelectedThemeIndex));
         OnPropertyChanged(nameof(SelectedTrayIconStyleText));

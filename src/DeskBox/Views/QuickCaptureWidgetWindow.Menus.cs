@@ -83,7 +83,8 @@ public sealed partial class QuickCaptureWidgetWindow
         flyout.Items.Add(WidgetCollapseMenuBuilder.Create(
             ViewModel.Config,
             _localizationService,
-            SetCollapseBehaviorOverride));
+            SetCollapseBehaviorOverride,
+            ResetCompactWidthOverride));
         flyout.Items.Add(new MenuFlyoutSeparator());
 
         var renameItem = new MenuFlyoutItem

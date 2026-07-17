@@ -30,6 +30,7 @@ public sealed partial class WidgetWindow : WidgetWindowBase, IDesktopWidgetWindo
     private const int MinWidth = (int)SettingsService.MinWidgetWidth;
     private const int MinHeight = (int)SettingsService.MinWidgetHeight;
     private const int ItemTransitionRestoreDelayMs = 240;
+    private static readonly QuickLookPreviewService s_quickLookPreviewService = new();
 
     // ── Backward-compatible aliases for base class fields ──────
     // These allow the existing WidgetWindow code to reference inherited
@@ -61,7 +62,6 @@ public sealed partial class WidgetWindow : WidgetWindowBase, IDesktopWidgetWindo
     private readonly LocalizationService _localizationSvc;
     private readonly WidgetContentDescriptor _chromeDescriptor;
     private readonly WidgetChromeModeResolver _chromeModeResolver;
-    private bool _isNativeBackdropSuppressedForTrayReveal;
 
     private Storyboard? _showButtonsStoryboard;
     private Storyboard? _hideButtonsStoryboard;
@@ -106,12 +106,12 @@ public sealed partial class WidgetWindow : WidgetWindowBase, IDesktopWidgetWindo
     protected override string LogPrefix => "Widget";
     protected override bool IsSizeLocked => ViewModel.IsSizeLocked;
     protected override bool IsPositionLocked => ViewModel.IsPositionLocked;
-    protected override bool IsBackdropSuppressedForTrayReveal => _isNativeBackdropSuppressedForTrayReveal;
-
     protected override DeskBox.Controls.WidgetCompactPresentation CreateCompactPresentation()
     {
-        string contentMode = SettingsService.NormalizeWidgetCompactContentMode(
-            _settingsService.Settings.WidgetCompactContentMode);
+        string contentMode = ResolveEffectiveCompactContentMode();
+        bool hidesSensitiveContent = WidgetCompactPrivacyPolicy.HidesSensitiveContent(
+            _settingsService.Settings.WidgetCompactHideSensitiveContent,
+            Config.WidgetKind);
         string itemCount = _localizationService.Format("Widget.Compact.FileCount", ViewModel.Items.Count);
         string summary = contentMode switch
         {
@@ -120,13 +120,17 @@ public sealed partial class WidgetWindow : WidgetWindowBase, IDesktopWidgetWindo
             _ => itemCount
         };
 
-        WidgetItem? recentItem = GetMostRecentCompactFileItem();
+        WidgetItem? recentItem = hidesSensitiveContent
+            ? null
+            : GetMostRecentCompactFileItem();
         return new DeskBox.Controls.WidgetCompactPresentation(
             ViewModel.Name,
             summary,
             ViewModel.IconGlyph,
             _localizationService.T("Widget.Compact.FileDropHint"),
-            LiveStateKey: $"{ViewModel.Items.Count}|{recentItem?.Path ?? string.Empty}");
+            LiveStateKey: hidesSensitiveContent
+                ? ViewModel.Items.Count.ToString()
+                : $"{ViewModel.Items.Count}|{recentItem?.Path ?? string.Empty}");
     }
 
     private string BuildSmartFileCompactSummary(string itemCount)
@@ -271,6 +275,7 @@ public sealed partial class WidgetWindow : WidgetWindowBase, IDesktopWidgetWindo
         {
             _isClosing = true;
             Visible = false;
+            CleanupStackTransitions();
             CleanupWidgetCollapse();
             WidgetLayerService.ReleaseWindow(_hWnd);
             _settingsService.SettingsChanged -= OnSettingsChanged;
@@ -287,6 +292,7 @@ public sealed partial class WidgetWindow : WidgetWindowBase, IDesktopWidgetWindo
             _topMostSafetyTimer = null;
             try { RemoveFileDropSubclass(); } catch (Exception ex) { App.Log($"[WidgetWindow] RemoveFileDropSubclass failed during close: {ex.Message}"); }
             try { _trayAnimation.Stop(); } catch { }
+            try { _trayAnimation.RevealWindowForTrayShow(); } catch { }
             try { RestoreItemContainerTransitions(); } catch { }
             try { DisposeAcrylicController(); } catch { }
             try { DisposeMicaController(); } catch { }

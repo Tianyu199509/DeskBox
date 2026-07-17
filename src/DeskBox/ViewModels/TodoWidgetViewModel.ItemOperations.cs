@@ -181,6 +181,83 @@ public sealed partial class TodoWidgetViewModel
         return true;
     }
 
+    public async Task<int> SetImportantAsync(IEnumerable<string> itemIds, bool isImportant)
+    {
+        var selectedIds = itemIds
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .ToHashSet(StringComparer.Ordinal);
+        var now = DateTimeOffset.UtcNow;
+        int updatedCount = 0;
+        foreach (var item in Items.Where(item => selectedIds.Contains(item.Id) && item.IsImportant != isImportant))
+        {
+            item.IsImportant = isImportant;
+            item.UpdatedAt = now;
+            updatedCount++;
+        }
+
+        if (updatedCount > 0)
+        {
+            RefreshVisibleItems();
+            RefreshCountProperties();
+            await SaveAsync();
+        }
+
+        return updatedCount;
+    }
+
+    public bool CanApplyTabDrop(IEnumerable<string> itemIds, TodoFilter target)
+    {
+        var selectedIds = itemIds.ToHashSet(StringComparer.Ordinal);
+        return target switch
+        {
+            TodoFilter.Active => Items.Any(item => selectedIds.Contains(item.Id) && item.IsCompleted),
+            TodoFilter.Today => Items.Any(item => selectedIds.Contains(item.Id) && !IsDueToday(item)),
+            TodoFilter.Important => Items.Any(item => selectedIds.Contains(item.Id) && !item.IsImportant),
+            TodoFilter.Completed => Items.Any(item => selectedIds.Contains(item.Id) && !item.IsCompleted),
+            _ => false
+        };
+    }
+
+    public async Task<int> ApplyTabDropAsync(IEnumerable<string> itemIds, TodoFilter target)
+    {
+        string[] selectedIds = itemIds
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+        if (!CanApplyTabDrop(selectedIds, target))
+        {
+            return 0;
+        }
+
+        if (target == TodoFilter.Today)
+        {
+            return await SetDueDatePresetAsync(selectedIds, TodoDuePreset.Today);
+        }
+
+        if (target == TodoFilter.Important)
+        {
+            return await SetImportantAsync(selectedIds, true);
+        }
+
+        int changedCount = 0;
+        bool completed = target == TodoFilter.Completed;
+        foreach (string itemId in selectedIds)
+        {
+            TodoItemViewModel? item = FindItem(itemId);
+            if (item is null || item.IsCompleted == completed)
+            {
+                continue;
+            }
+
+            if (await SetCompletedAsync(itemId, completed))
+            {
+                changedCount++;
+            }
+        }
+
+        return changedCount;
+    }
+
     public async Task<bool> SetColorMarkerAsync(string itemId, string? colorMarker)
     {
         var item = FindItem(itemId);

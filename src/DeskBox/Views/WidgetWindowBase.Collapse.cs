@@ -38,9 +38,12 @@ public abstract partial class WidgetWindowBase
     private DispatcherQueueTimer? _collapseLeaveTimer;
     private DispatcherQueueTimer? _collapseDragRestoreTimer;
     private DispatcherQueueTimer? _compactBoundsSettleTimer;
+    private DispatcherQueueTimer? _collapseAnimationWatchdogTimer;
     private RectInt32 _collapseAnimationFrom;
     private RectInt32 _collapseAnimationTo;
     private RectInt32? _stableCompactBounds;
+    private double? _observedCompactWidth;
+    private WidgetCompactPlacement? _observedCompactPlacement;
     private long _collapseAnimationStarted;
     private int _collapseAnimationDurationMs;
     private long _collapseAnimationGeneration;
@@ -79,7 +82,15 @@ public abstract partial class WidgetWindowBase
             : WidgetCollapseBehavior.Expanded;
 
     protected virtual bool SupportsCompactDropExpansion =>
-        Config.WidgetKind == WidgetKind.File;
+        Config.WidgetKind is WidgetKind.File or WidgetKind.Todo or WidgetKind.QuickCapture;
+
+    protected string ResolveEffectiveCompactContentMode()
+    {
+        return WidgetCompactPrivacyPolicy.ResolveContentMode(
+            SettingsService.Settings.WidgetCompactContentMode,
+            SettingsService.Settings.WidgetCompactHideSensitiveContent,
+            Config.WidgetKind);
+    }
 
     protected virtual WidgetCompactPresentation CreateCompactPresentation()
     {
@@ -191,6 +202,34 @@ public abstract partial class WidgetWindowBase
         ApplyEffectiveCollapseBehavior(animate: true);
     }
 
+    protected void ResetCompactWidthOverride()
+    {
+        if (Config.CompactWidth is null)
+        {
+            return;
+        }
+
+        Config.CompactWidth = null;
+        _stableCompactBounds = null;
+        ObserveCompactOverrides();
+        SettingsService.UpdateWidget(Config, notifySubscribers: false);
+        SettingsService.SaveDebounced(notifySubscribers: false);
+
+        if (!_collapseInitialized || !_targetCollapsed || IsClosing)
+        {
+            return;
+        }
+
+        RectInt32 current = GetCurrentWindowBounds();
+        RectInt32 target = GetCompactBounds(current);
+        _stableCompactBounds = target;
+        StartBoundsTransition(
+            current,
+            target,
+            collapsed: true,
+            durationMs: ResolveCompactTransitionDuration(requestedDurationMs: null));
+    }
+
     protected void BeginCompactInteraction()
     {
         _compactInteractionDepth++;
@@ -199,6 +238,12 @@ public abstract partial class WidgetWindowBase
         {
             _compactState = WidgetCompactState.Interacting;
         }
+    }
+
+    protected IDisposable AcquireCompactInteraction(string reason)
+    {
+        BeginCompactInteraction();
+        return new CompactInteractionLease(this, reason);
     }
 
     protected void EndCompactInteraction()
@@ -212,6 +257,12 @@ public abstract partial class WidgetWindowBase
         {
             ScheduleSmartCollapse();
         }
+    }
+
+    private void ReleaseCompactInteraction(string reason)
+    {
+        EndCompactInteraction();
+        App.Log($"[Compact] Interaction released reason={reason} depth={_compactInteractionDepth}");
     }
 
     protected void BeginWidgetBoundsInteraction()
@@ -266,6 +317,7 @@ public abstract partial class WidgetWindowBase
             _ => false
         };
         ApplyCollapsedStateImmediately(initiallyCollapsed);
+        ObserveCompactOverrides();
     }
 
     protected void CleanupWidgetCollapse()
@@ -280,7 +332,9 @@ public abstract partial class WidgetWindowBase
         CancelTimer(ref _collapseLeaveTimer);
         CancelTimer(ref _collapseDragRestoreTimer);
         CancelTimer(ref _compactBoundsSettleTimer);
+        CancelTimer(ref _collapseAnimationWatchdogTimer);
         StopCollapseAnimation();
+        WidgetShellControl.CancelResponsiveLayoutTransition();
 
         WidgetShellControl.CollapseRequested -= WidgetShellControl_CollapseRequested;
         WidgetShellControl.ExpandRequested -= WidgetShellControl_ExpandRequested;
@@ -353,6 +407,13 @@ public abstract partial class WidgetWindowBase
         if (!_collapseInitialized || IsClosing)
         {
             return;
+        }
+
+        if (_observedCompactWidth != Config.CompactWidth ||
+            !ReferenceEquals(_observedCompactPlacement, Config.CompactPlacement))
+        {
+            _stableCompactBounds = null;
+            ObserveCompactOverrides();
         }
 
         RefreshCompactPresentation();
@@ -628,6 +689,7 @@ public abstract partial class WidgetWindowBase
     private void ApplyCollapsedStateImmediately(bool collapsed)
     {
         StopCollapseAnimation();
+        WidgetShellControl.CancelResponsiveLayoutTransition();
         _targetCollapsed = collapsed;
         IsWidgetCollapsedBoundsActive = collapsed;
         _compactState = collapsed ? WidgetCompactState.Collapsed : WidgetCompactState.Expanded;
@@ -807,6 +869,11 @@ public abstract partial class WidgetWindowBase
     private void StartBoundsTransition(RectInt32 from, RectInt32 to, bool collapsed, int durationMs)
     {
         StopCollapseAnimation();
+        double dpiScale = Win32Helper.GetDpiScaleForWindow(HWnd, RootElement.XamlRoot);
+        WidgetShellControl.BeginResponsiveLayoutTransition(
+            collapsed,
+            to.Width / Math.Max(0.01, dpiScale),
+            to.Height / Math.Max(0.01, dpiScale));
         if (!collapsed)
         {
             ApplyBackdropPreference();
@@ -837,6 +904,25 @@ public abstract partial class WidgetWindowBase
         _isCollapseAnimationRendering = true;
         CompositionTarget.Rendering -= CollapseAnimationRendering;
         CompositionTarget.Rendering += CollapseAnimationRendering;
+        ScheduleTimer(
+            ref _collapseAnimationWatchdogTimer,
+            Math.Max(300, durationMs + 320),
+            CompleteBoundsTransitionAfterTimeout);
+    }
+
+    private void CompleteBoundsTransitionAfterTimeout()
+    {
+        if (!_isCollapseAnimationRendering)
+        {
+            return;
+        }
+
+        bool collapsed = _targetCollapsed;
+        long generation = _collapseAnimationGeneration;
+        App.Log($"[Compact] Bounds transition watchdog recovered generation={generation}");
+        StopCollapseAnimation();
+        MoveWindowWithoutPersisting(_collapseAnimationTo);
+        CompleteBoundsTransition(collapsed, generation);
     }
 
     private void CollapseAnimationRendering(object? sender, object args)
@@ -874,6 +960,7 @@ public abstract partial class WidgetWindowBase
         WidgetShellControl.CompleteCompactTransition(
             collapsed,
             SettingsService.Settings.WidgetCompactContentMode);
+        WidgetShellControl.CompleteResponsiveLayoutTransition();
         _isShellTransitionActive = false;
         IsWidgetCollapsedBoundsActive = collapsed;
         _compactState = collapsed
@@ -974,14 +1061,7 @@ public abstract partial class WidgetWindowBase
     private RectInt32 GetCompactBounds(RectInt32 expandedOrCurrent)
     {
         double scale = Win32Helper.GetDpiScaleForWindow(HWnd, RootElement.XamlRoot);
-        string contentMode = SettingsService.NormalizeWidgetCompactContentMode(
-            SettingsService.Settings.WidgetCompactContentMode);
-        if (SettingsService.Settings.WidgetCompactHideSensitiveContent &&
-            contentMode == SettingsService.WidgetCompactContentModeSmart &&
-            Config.WidgetKind is WidgetKind.QuickCapture or WidgetKind.Todo)
-        {
-            contentMode = SettingsService.WidgetCompactContentModeSummary;
-        }
+        string contentMode = ResolveEffectiveCompactContentMode();
 
         RectInt32 resolved = WidgetCompactBoundsCalculator.Resolve(
             Config,
@@ -1023,6 +1103,7 @@ public abstract partial class WidgetWindowBase
     {
         _stableCompactBounds = bounds;
         WidgetCompactBoundsCalculator.CapturePlacement(Config, bounds);
+        ObserveCompactOverrides();
         if (!persist)
         {
             return;
@@ -1030,6 +1111,12 @@ public abstract partial class WidgetWindowBase
 
         SettingsService.UpdateWidget(Config, notifySubscribers: false);
         SettingsService.SaveDebounced(notifySubscribers: false);
+    }
+
+    private void ObserveCompactOverrides()
+    {
+        _observedCompactWidth = Config.CompactWidth;
+        _observedCompactPlacement = Config.CompactPlacement;
     }
 
     private RectInt32 GetCurrentWindowBounds()
@@ -1063,6 +1150,7 @@ public abstract partial class WidgetWindowBase
 
     private void StopCollapseAnimation()
     {
+        CancelTimer(ref _collapseAnimationWatchdogTimer);
         if (!_isCollapseAnimationRendering && !_isShellTransitionActive)
         {
             return;
@@ -1175,12 +1263,7 @@ public abstract partial class WidgetWindowBase
 
         int duration = requestedDurationMs ?? SettingsService.NormalizeWidgetCompactAnimationDurationMs(
             SettingsService.Settings.WidgetCompactAnimationDurationMs);
-        return effect switch
-        {
-            SettingsService.WidgetCompactAnimationSnappy => Math.Max(90, (int)Math.Round(duration * 0.72)),
-            SettingsService.WidgetCompactAnimationSlow => Math.Max(360, (int)Math.Round(duration * 1.75)),
-            _ => duration
-        };
+        return duration;
     }
 
     private static bool SystemAnimationsEnabled()
@@ -1247,4 +1330,22 @@ public abstract partial class WidgetWindowBase
         left.Y == right.Y &&
         left.Width == right.Width &&
         left.Height == right.Height;
+
+    private sealed class CompactInteractionLease : IDisposable
+    {
+        private WidgetWindowBase? _owner;
+        private readonly string _reason;
+
+        public CompactInteractionLease(WidgetWindowBase owner, string reason)
+        {
+            _owner = owner;
+            _reason = reason;
+        }
+
+        public void Dispose()
+        {
+            WidgetWindowBase? owner = Interlocked.Exchange(ref _owner, null);
+            owner?.ReleaseCompactInteraction(_reason);
+        }
+    }
 }

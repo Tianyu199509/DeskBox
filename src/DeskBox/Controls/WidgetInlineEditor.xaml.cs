@@ -64,6 +64,10 @@ public sealed partial class WidgetInlineEditor : UserControl
     public WidgetInlineEditor()
     {
         InitializeComponent();
+        EditorTextBoxElement.AddHandler(
+            UIElement.PreviewKeyDownEvent,
+            new KeyEventHandler(EditorTextBox_KeyDown),
+            handledEventsToo: true);
     }
 
     public string Title

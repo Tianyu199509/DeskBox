@@ -5,7 +5,7 @@ namespace DeskBox.Tests;
 public sealed class FeatureWidgetEntryFactoryTests
 {
     [Fact]
-    public void CreateEntries_AreDescriptorDrivenAndIncludePlannedKinds()
+    public void CreateEntries_OnlyIncludesAvailableImplementedKinds()
     {
         var settingsService = new SettingsService();
         var localizationService = TestServices.CreateLocalizationService();
@@ -22,21 +22,15 @@ public sealed class FeatureWidgetEntryFactoryTests
             WidgetKind.QuickCapture,
             WidgetKind.Todo,
             WidgetKind.Music,
-            WidgetKind.Weather,
-            WidgetKind.Tags,
-            WidgetKind.SystemMonitor
+            WidgetKind.Weather
         ], entries.Select(entry => entry.Kind));
-        Assert.All(entries.Where(entry => entry.Kind is WidgetKind.QuickCapture or WidgetKind.Todo or WidgetKind.Music or WidgetKind.Weather), entry =>
+        Assert.All(entries, entry =>
         {
             Assert.True(entry.ShowToggle);
             Assert.True(entry.CanToggle);
             Assert.True(entry.IsAvailable);
         });
-        Assert.All(entries.Where(entry => entry.Kind is not (WidgetKind.QuickCapture or WidgetKind.Todo or WidgetKind.Music or WidgetKind.Weather)), entry =>
-        {
-            Assert.False(entry.ShowToggle);
-            Assert.False(entry.CanToggle);
-            Assert.False(entry.IsAvailable);
-        });
+        Assert.DoesNotContain(entries, entry =>
+            entry.Kind is WidgetKind.Tags or WidgetKind.SystemMonitor);
     }
 }

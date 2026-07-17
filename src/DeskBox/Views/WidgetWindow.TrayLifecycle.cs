@@ -47,6 +47,8 @@ public sealed partial class WidgetWindow
         _trayAnimation.PrepareHiddenState();
         Win32Helper.ShowWindow(_hWnd, Win32Helper.SW_SHOWNOACTIVATE);
         _appWindow.Show();
+        _trayAnimation.PrepareHiddenState();
+        _trayAnimation.RevealWindowForTrayShow();
         Visible = true;
         ViewModel.Config.IsVisible = true;
         if (persistVisibility)
@@ -76,6 +78,8 @@ public sealed partial class WidgetWindow
         _trayAnimation.PrepareHiddenState();
         _appWindow.Show();
         Win32Helper.ShowWindow(_hWnd, Win32Helper.SW_SHOWNOACTIVATE);
+        _trayAnimation.PrepareHiddenState();
+        _trayAnimation.RevealWindowForTrayShow();
         HoldTemporaryTopMost();
         Visible = true;
         ViewModel.Config.IsVisible = true;
@@ -155,6 +159,7 @@ public sealed partial class WidgetWindow
     {
         _trayAnimation.NextGeneration();
         _trayAnimation.StopAndRestoreWindowPosition();
+        _trayAnimation.CloakWindowForTrayShow();
         RestoreItemContainerTransitions();
         SuppressItemContainerTransitions();
         _isHideAnimationRunning = false;
@@ -163,7 +168,11 @@ public sealed partial class WidgetWindow
         LogTrayWindow(
             $"PrepareShow gen={_trayAnimation.Generation} effect={_settingsService.Settings.WidgetAnimationEffect} " +
             $"speed={_settingsService.Settings.WidgetAnimationSpeed} enabled={animationProfile.IsEnabled} durationMs={animationProfile.DurationMs}");
-        _trayAnimation.PrepareVisualState(animationProfile.ShowOffsetX, animationProfile.ShowOffsetY, animationProfile.ShowStartOpacity, animationProfile.ShowStartScale);
+        _trayAnimation.PrepareVisualState(
+            animationProfile.ShowOffsetX,
+            animationProfile.ShowOffsetY,
+            animationProfile.ShowStartOpacity,
+            animationProfile.ShowStartScale);
     }
 
     public void CompleteTrayShowWithoutAnimation()
@@ -172,9 +181,10 @@ public sealed partial class WidgetWindow
         LogTrayWindow($"CompleteShowWithoutAnimation gen={animationGeneration}");
         _trayAnimation.Stop();
         SetTrayAnimationOffsetOverride(null, null);
-        RestoreNativeBackdropAfterTrayReveal();
         _trayAnimation.RestoreVisualState();
         _trayAnimation.RestoreWindowPosition();
+        _trayAnimation.RevealWindowForTrayShow();
+        RestoreNativeBackdropAfterTrayReveal();
 
         QueueItemContainerTransitionRestore(animationGeneration);
     }
@@ -213,6 +223,7 @@ public sealed partial class WidgetWindow
         {
             _trayAnimation.RestoreVisualState();
             _trayAnimation.RestoreWindowPosition();
+            RestoreNativeBackdropAfterTrayReveal();
             QueueItemContainerTransitionRestore(animationGeneration);
         });
     }
@@ -221,7 +232,7 @@ public sealed partial class WidgetWindow
     {
         if (Visible)
         {
-            PlayTrayRaiseAnimation();
+            _trayAnimation.PlayAfterContentReady(PlayTrayRaiseAnimation);
         }
     }
 
@@ -234,10 +245,11 @@ public sealed partial class WidgetWindow
         }
 
         _trayAnimation.NextGeneration();
+        _trayAnimation.RevealWindowForTrayShow();
         _trayAnimation.StopAndRestoreWindowPosition();
-        RestoreNativeBackdropAfterTrayReveal();
         RestoreItemContainerTransitions();
         SuppressItemContainerTransitions();
+        RestoreNativeBackdropAfterTrayReveal();
 
         _isHideAnimationRunning = true;
         Visible = false;
@@ -248,7 +260,11 @@ public sealed partial class WidgetWindow
         }
 
         LogTrayWindow($"PrepareHide gen={_trayAnimation.Generation}");
-        _trayAnimation.PrepareVisualState(0, 0, WidgetTrayAnimationController.RestingOpacity, WidgetTrayAnimationController.RestingScale);
+        _trayAnimation.PrepareVisualState(
+            0,
+            0,
+            WidgetTrayAnimationController.RestingOpacity,
+            WidgetTrayAnimationController.RestingScale);
         return true;
     }
 
@@ -341,33 +357,11 @@ public sealed partial class WidgetWindow
         WidgetLayerService.ClearTopMost(_hWnd);
         Win32Helper.ShowWindow(_hWnd, Win32Helper.SW_HIDE);
         _appWindow.Hide();
+        _trayAnimation.RevealWindowForTrayShow();
         _trayAnimation.RestoreVisualState();
         QueueItemContainerTransitionRestore(_trayAnimation.Generation);
         _trayAnimation.RestoreWindowPosition();
         LogTrayWindow("CompleteHide");
-    }
-
-    private void SuppressNativeBackdropForTrayReveal()
-    {
-        if (_isNativeBackdropSuppressedForTrayReveal)
-        {
-            return;
-        }
-
-        _isNativeBackdropSuppressedForTrayReveal = true;
-        DisposeAcrylicController();
-        Win32Helper.DisableAccentPolicy(_hWnd);
-    }
-
-    private void RestoreNativeBackdropAfterTrayReveal()
-    {
-        if (!_isNativeBackdropSuppressedForTrayReveal)
-        {
-            return;
-        }
-
-        _isNativeBackdropSuppressedForTrayReveal = false;
-        ApplyBackdropPreference();
     }
 
     private WidgetTrayAnimationProfile GetTrayAnimationProfile()
@@ -387,6 +381,8 @@ public sealed partial class WidgetWindow
         _trayAnimation.PrepareHiddenState();
         Win32Helper.ShowWindow(_hWnd, Win32Helper.SW_SHOWNOACTIVATE);
         base.Activate();
+        _trayAnimation.PrepareHiddenState();
+        _trayAnimation.RevealWindowForTrayShow();
         Visible = true;
         ViewModel.Config.IsVisible = true;
         _settingsService.SaveDebounced();
@@ -426,6 +422,7 @@ public sealed partial class WidgetWindow
 
     public void CloseWindow()
     {
+        _trayAnimation.RevealWindowForTrayShow();
         WidgetLayerService.ReleaseWindow(_hWnd);
         Close();
     }

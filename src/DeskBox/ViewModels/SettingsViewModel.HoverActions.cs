@@ -288,7 +288,10 @@ public partial class SettingsViewModel
     private static string NormalizeTodoDefaultFilter(string? filter)
     {
         return filter is
+            SettingsService.TodoDefaultFilterActive or
             SettingsService.TodoDefaultFilterToday or
+            SettingsService.TodoDefaultFilterThisWeek or
+            SettingsService.TodoDefaultFilterThisMonth or
             SettingsService.TodoDefaultFilterImportant or
             SettingsService.TodoDefaultFilterCompleted
             ? filter

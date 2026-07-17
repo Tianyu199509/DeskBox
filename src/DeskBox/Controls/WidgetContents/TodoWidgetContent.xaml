@@ -47,12 +47,20 @@
         </Style>
 
         <Style x:Key="TodoDetailHeaderIconButtonStyle" TargetType="Button" BasedOn="{StaticResource SubtleButtonStyle}">
-            <Setter Property="Width" Value="28" />
-            <Setter Property="Height" Value="28" />
-            <Setter Property="MinWidth" Value="28" />
-            <Setter Property="MinHeight" Value="28" />
+            <Setter Property="Width" Value="30" />
+            <Setter Property="Height" Value="30" />
+            <Setter Property="MinWidth" Value="30" />
+            <Setter Property="MinHeight" Value="30" />
             <Setter Property="Padding" Value="0" />
             <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="CornerRadius" Value="4" />
+        </Style>
+
+        <Style x:Key="TodoDetailConfirmButtonStyle" TargetType="Button" BasedOn="{StaticResource TodoDetailHeaderIconButtonStyle}">
+            <Setter Property="Width" Value="30" />
+            <Setter Property="Height" Value="30" />
+            <Setter Property="MinWidth" Value="30" />
+            <Setter Property="MinHeight" Value="30" />
             <Setter Property="CornerRadius" Value="4" />
         </Style>
 
@@ -124,20 +132,30 @@
                 MinHeight="{Binding SegmentHeight}"
                 FontSize="{Binding SegmentTextSize}"
                 HorizontalAlignment="Stretch"
+                Visibility="{Binding TabBarVisibility}"
                 Loaded="TodoFilterSegmented_Loaded"
                 SelectionChanged="TodoFilterSegmented_SelectionChanged"
                 SelectedIndex="0"
                 SizeChanged="TodoFilterSegmented_SizeChanged">
-                <toolkit:SegmentedItem Tag="All" ToolTipService.ToolTip="{Binding AllFilterText}">
+                <toolkit:SegmentedItem AllowDrop="True" DragOver="TodoTab_DragOver" Drop="TodoTab_Drop" Tag="All" ToolTipService.ToolTip="{Binding AllFilterText}" Visibility="{Binding AllTabVisibility}">
                     <TextBlock FontSize="{Binding SegmentTextSize}" MaxLines="1" Text="{Binding AllFilterText}" TextAlignment="Center" TextTrimming="CharacterEllipsis" />
                 </toolkit:SegmentedItem>
-                <toolkit:SegmentedItem Tag="Today" ToolTipService.ToolTip="{Binding TodayFilterText}">
+                <toolkit:SegmentedItem AllowDrop="True" DragOver="TodoTab_DragOver" Drop="TodoTab_Drop" Tag="Active" ToolTipService.ToolTip="{Binding ActiveFilterText}" Visibility="{Binding ActiveTabVisibility}">
+                    <TextBlock FontSize="{Binding SegmentTextSize}" MaxLines="1" Text="{Binding ActiveFilterText}" TextAlignment="Center" TextTrimming="CharacterEllipsis" />
+                </toolkit:SegmentedItem>
+                <toolkit:SegmentedItem AllowDrop="True" DragOver="TodoTab_DragOver" Drop="TodoTab_Drop" Tag="Today" ToolTipService.ToolTip="{Binding TodayFilterText}" Visibility="{Binding TodayTabVisibility}">
                     <TextBlock FontSize="{Binding SegmentTextSize}" MaxLines="1" Text="{Binding TodayFilterText}" TextAlignment="Center" TextTrimming="CharacterEllipsis" />
                 </toolkit:SegmentedItem>
-                <toolkit:SegmentedItem Tag="Important" ToolTipService.ToolTip="{Binding ImportantFilterText}">
+                <toolkit:SegmentedItem AllowDrop="True" DragOver="TodoTab_DragOver" Drop="TodoTab_Drop" Tag="ThisWeek" ToolTipService.ToolTip="{Binding ThisWeekFilterText}" Visibility="{Binding ThisWeekTabVisibility}">
+                    <TextBlock FontSize="{Binding SegmentTextSize}" MaxLines="1" Text="{Binding ThisWeekFilterText}" TextAlignment="Center" TextTrimming="CharacterEllipsis" />
+                </toolkit:SegmentedItem>
+                <toolkit:SegmentedItem AllowDrop="True" DragOver="TodoTab_DragOver" Drop="TodoTab_Drop" Tag="ThisMonth" ToolTipService.ToolTip="{Binding ThisMonthFilterText}" Visibility="{Binding ThisMonthTabVisibility}">
+                    <TextBlock FontSize="{Binding SegmentTextSize}" MaxLines="1" Text="{Binding ThisMonthFilterText}" TextAlignment="Center" TextTrimming="CharacterEllipsis" />
+                </toolkit:SegmentedItem>
+                <toolkit:SegmentedItem AllowDrop="True" DragOver="TodoTab_DragOver" Drop="TodoTab_Drop" Tag="Important" ToolTipService.ToolTip="{Binding ImportantFilterText}" Visibility="{Binding ImportantTabVisibility}">
                     <TextBlock FontSize="{Binding SegmentTextSize}" MaxLines="1" Text="{Binding ImportantFilterText}" TextAlignment="Center" TextTrimming="CharacterEllipsis" />
                 </toolkit:SegmentedItem>
-                <toolkit:SegmentedItem Tag="Completed" ToolTipService.ToolTip="{Binding CompletedFilterText}">
+                <toolkit:SegmentedItem AllowDrop="True" DragOver="TodoTab_DragOver" Drop="TodoTab_Drop" Tag="Completed" ToolTipService.ToolTip="{Binding CompletedFilterText}" Visibility="{Binding CompletedTabVisibility}">
                     <TextBlock FontSize="{Binding SegmentTextSize}" MaxLines="1" Text="{Binding CompletedFilterText}" TextAlignment="Center" TextTrimming="CharacterEllipsis" />
                 </toolkit:SegmentedItem>
             </toolkit:Segmented>
@@ -315,7 +333,7 @@
                                         FontSize="{Binding ElementName=TodoListView, Path=DataContext.TextSize}"
                                         LineHeight="{Binding ElementName=TodoListView, Path=DataContext.ItemTextLineHeight}"
                                         LineStackingStrategy="BlockLineHeight"
-                                        MaxLines="10"
+                                        MaxLines="{Binding ElementName=TodoListView, Path=DataContext.ItemPreviewLineCount}"
                                         Text="{Binding Text}"
                                         TextDecorations="{Binding TextDecorations}"
                                         TextTrimming="CharacterEllipsis"
@@ -427,30 +445,36 @@
 
             <Border
                 Grid.Row="0"
-                Margin="-8,-8,-8,0"
                 Padding="8,5"
                 Background="Transparent"
                 BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
                 BorderThickness="0,0,0,1">
                 <StackPanel Spacing="3">
-                    <Grid Height="32" ColumnSpacing="4">
+                    <Grid MinHeight="36" ColumnSpacing="4">
                         <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="28" />
+                            <ColumnDefinition Width="30" />
                             <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="28" />
+                            <ColumnDefinition Width="30" />
                         </Grid.ColumnDefinitions>
                         <Button
                             Grid.Column="0"
                             AutomationProperties.Name="{Binding ElementName=RootGrid, Path=DataContext.DetailBackText}"
                             Click="DetailBackButton_Click"
-                            Style="{StaticResource TodoDetailHeaderIconButtonStyle}"
+                            Style="{StaticResource TodoDetailConfirmButtonStyle}"
                             ToolTipService.ToolTip="{Binding ElementName=RootGrid, Path=DataContext.DetailBackText}">
-                            <FontIcon FontSize="{Binding ElementName=RootGrid, Path=DataContext.SmallIconSize}" Glyph="&#xE73E;" />
+                            <FontIcon
+                                FontSize="{Binding ElementName=RootGrid, Path=DataContext.SmallIconSize}"
+                                Glyph="&#xE73E;"
+                                RenderTransformOrigin="0.5,0.5">
+                                <FontIcon.RenderTransform>
+                                    <ScaleTransform ScaleX="1.3" ScaleY="1.3" />
+                                </FontIcon.RenderTransform>
+                            </FontIcon>
                         </Button>
                         <TextBlock
                             Grid.Column="1"
                             VerticalAlignment="Center"
-                            FontSize="{Binding ElementName=RootGrid, Path=DataContext.SecondaryTextSize}"
+                            FontSize="{Binding ElementName=RootGrid, Path=DataContext.DetailHeaderTextSize}"
                             Foreground="{ThemeResource TextFillColorTertiaryBrush}"
                             Text="{Binding CreatedText}"
                             TextTrimming="CharacterEllipsis" />
@@ -466,9 +490,9 @@
 
                     <Grid ColumnSpacing="2">
                         <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="28" />
+                            <ColumnDefinition Width="30" />
                             <ColumnDefinition Width="*" />
-                            <ColumnDefinition Width="28" />
+                            <ColumnDefinition Width="30" />
                         </Grid.ColumnDefinitions>
                         <Button Grid.Column="0" AutomationProperties.Name="{Binding CompletionToggleText}" Click="DetailCompletionButton_Click" Style="{StaticResource TodoDetailHeaderIconButtonStyle}" ToolTipService.ToolTip="{Binding CompletionToggleText}">
                             <Grid Width="{Binding ElementName=RootGrid, Path=DataContext.PrimaryIconSize}" Height="{Binding ElementName=RootGrid, Path=DataContext.PrimaryIconSize}">
@@ -489,7 +513,6 @@
                                 AcceptsReturn="True"
                                 FontSize="{Binding ElementName=RootGrid, Path=DataContext.TextSize}"
                                 FontWeight="Normal"
-                                KeyDown="DetailTitleTextBox_KeyDown"
                                 LostFocus="DetailTitleTextBox_LostFocus"
                                 MaxLength="2000"
                                 PlaceholderText="{Binding ElementName=RootGrid, Path=DataContext.AddPlaceholderText}"

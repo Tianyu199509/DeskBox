@@ -105,6 +105,7 @@ public sealed partial class WidgetWindow
         StatusToastText.Foreground = GetOrUpdateSolidColorBrush(StatusToastText.Foreground, isDark ? Colors.White : Colors.Black);
 
         UpdateInteractiveSurfaces();
+        UpdateStackSurfaces();
 
         // Keep the drag highlight border's corner radius in sync with the window's
         // corner preference so the breathing border matches the widget shape.
@@ -262,10 +263,13 @@ public sealed partial class WidgetWindow
     {
         if (sender is Border border)
         {
+            ResetStackElementVisual(border);
             _interactiveSurfaces.Add(border);
             ApplyWidgetItemLayout(border);
             ApplyWidgetItemTooltip(border);
             ApplyWidgetItemSurfaceState(border, ItemSurfaceState.Normal);
+            ResetStackElementVisual(border);
+            PrepareStackMemberSurfaceForExpansion(border);
         }
     }
 
@@ -273,6 +277,7 @@ public sealed partial class WidgetWindow
     {
         if (sender is Border border)
         {
+            ResetStackElementVisual(border);
             _interactiveSurfaces.Remove(border);
         }
     }

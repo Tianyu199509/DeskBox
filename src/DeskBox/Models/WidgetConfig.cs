@@ -114,6 +114,12 @@ public class WidgetConfig
 
     /// <summary>Ordered list of items displayed in this widget.</summary>
     public List<WidgetItemConfig> Items { get; set; } = [];
+
+    /// <summary>When each file was first added to or observed by this DeskBox widget.</summary>
+    public Dictionary<string, DateTimeOffset> FileAddedAtByPath { get; set; } = [];
+
+    /// <summary>Whether legacy file entries have been seeded into <see cref="FileAddedAtByPath"/>.</summary>
+    public bool FileAddedAtTrackingInitialized { get; set; }
 }
 
 public sealed class WidgetCompactPlacement

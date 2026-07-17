@@ -260,6 +260,29 @@ public sealed class SettingsServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task LoadAsync_NormalizesQuickCaptureEditorSettings()
+    {
+        await File.WriteAllTextAsync(
+            Path.Combine(_settingsRoot, "settings.json"),
+            """
+            {
+              "quickCaptureItemPreviewLineCount": 40,
+              "quickCaptureEditorEnterBehavior": "unexpected"
+            }
+            """);
+
+        var service = new SettingsService(_settingsRoot);
+        await service.LoadAsync();
+
+        Assert.Equal(
+            SettingsService.MaxItemPreviewLineCount,
+            service.Settings.QuickCaptureItemPreviewLineCount);
+        Assert.Equal(
+            SettingsService.EditorEnterBehaviorCtrlEnterSaves,
+            service.Settings.QuickCaptureEditorEnterBehavior);
+    }
+
+    [Fact]
     public async Task LoadAsync_NormalizesTodoSettings()
     {
         await File.WriteAllTextAsync(
@@ -273,7 +296,9 @@ public sealed class SettingsServiceTests : IDisposable
               "todoShowClearCompletedButton": false,
               "todoConfirmBeforeDelete": true,
               "todoReminderEnabled": false,
-              "todoDefaultReminderOffsetMinutes": 999
+              "todoDefaultReminderOffsetMinutes": 999,
+              "todoItemPreviewLineCount": -4,
+              "todoEditorEnterBehavior": "unexpected"
             }
             """);
 
@@ -288,6 +313,43 @@ public sealed class SettingsServiceTests : IDisposable
         Assert.True(service.Settings.TodoConfirmBeforeDelete);
         Assert.False(service.Settings.TodoReminderEnabled);
         Assert.Equal(SettingsService.DefaultTodoReminderOffsetMinutes, service.Settings.TodoDefaultReminderOffsetMinutes);
+        Assert.Equal(SettingsService.MinItemPreviewLineCount, service.Settings.TodoItemPreviewLineCount);
+        Assert.Equal(
+            SettingsService.EditorEnterBehaviorCtrlEnterSaves,
+            service.Settings.TodoEditorEnterBehavior);
+    }
+
+    [Theory]
+    [InlineData(1, 1)]
+    [InlineData(2, 2)]
+    [InlineData(3, 3)]
+    [InlineData(4, 4)]
+    [InlineData(5, 5)]
+    [InlineData(6, 6)]
+    [InlineData(7, 7)]
+    [InlineData(8, 8)]
+    [InlineData(9, 9)]
+    [InlineData(10, 10)]
+    [InlineData(0, SettingsService.MinItemPreviewLineCount)]
+    [InlineData(100, SettingsService.MaxItemPreviewLineCount)]
+    public void NormalizeItemPreviewLineCount_ClampsToSupportedRange(int value, int expected)
+    {
+        Assert.Equal(expected, SettingsService.NormalizeItemPreviewLineCount(value));
+    }
+
+    [Theory]
+    [InlineData(SettingsService.EditorEnterBehaviorCtrlEnterSaves, false, false)]
+    [InlineData(SettingsService.EditorEnterBehaviorCtrlEnterSaves, true, true)]
+    [InlineData(SettingsService.EditorEnterBehaviorEnterSaves, false, true)]
+    [InlineData(SettingsService.EditorEnterBehaviorEnterSaves, true, false)]
+    public void ShouldSubmitEditorOnEnter_UsesConfiguredModifier(
+        string behavior,
+        bool controlPressed,
+        bool expected)
+    {
+        Assert.Equal(
+            expected,
+            SettingsService.ShouldSubmitEditorOnEnter(behavior, controlPressed));
     }
 
     [Fact]
@@ -424,6 +486,115 @@ public sealed class SettingsServiceTests : IDisposable
             service.Settings.WidgetCompactSettingsVersion);
     }
 
+    [Theory]
+    [InlineData(
+        SettingsService.WidgetAnimationEffectSlideLeftFade,
+        SettingsService.WidgetAnimationSlideDirectionLeft)]
+    [InlineData(
+        SettingsService.WidgetAnimationEffectSlideRight,
+        SettingsService.WidgetAnimationSlideDirectionRight)]
+    [InlineData(
+        SettingsService.WidgetAnimationEffectSlideUpFade,
+        SettingsService.WidgetAnimationSlideDirectionUp)]
+    [InlineData(
+        SettingsService.WidgetAnimationEffectSlideDown,
+        SettingsService.WidgetAnimationSlideDirectionDown)]
+    public async Task LoadAsync_MigratesLegacyDirectionalAnimation(
+        string legacyEffect,
+        string expectedDirection)
+    {
+        var settings = new AppSettings
+        {
+            WidgetAnimationEffect = legacyEffect,
+            WidgetAnimationSlideDirection = SettingsService.WidgetAnimationSlideDirectionNone
+        };
+        await File.WriteAllTextAsync(
+            Path.Combine(_settingsRoot, "settings.json"),
+            JsonSerializer.Serialize(settings, s_jsonOptions));
+
+        var service = new SettingsService(_settingsRoot);
+        await service.LoadAsync();
+
+        Assert.Equal(SettingsService.WidgetAnimationEffectSlideFade, service.Settings.WidgetAnimationEffect);
+        Assert.Equal(expectedDirection, service.Settings.WidgetAnimationSlideDirection);
+    }
+
+    [Fact]
+    public async Task LoadAsync_SlideAnimationWithoutDirectionDefaultsToRight()
+    {
+        var settings = new AppSettings
+        {
+            WidgetAnimationEffect = SettingsService.WidgetAnimationEffectSlideFade,
+            WidgetAnimationSlideDirection = SettingsService.WidgetAnimationSlideDirectionNone
+        };
+        await File.WriteAllTextAsync(
+            Path.Combine(_settingsRoot, "settings.json"),
+            JsonSerializer.Serialize(settings, s_jsonOptions));
+
+        var service = new SettingsService(_settingsRoot);
+        await service.LoadAsync();
+
+        Assert.Equal(
+            SettingsService.WidgetAnimationSlideDirectionRight,
+            service.Settings.WidgetAnimationSlideDirection);
+    }
+
+    [Fact]
+    public async Task LoadAsync_RepairsEmptyTabSelectionsAndHiddenDefaults()
+    {
+        var settings = new AppSettings
+        {
+            QuickCaptureDefaultView = SettingsService.QuickCaptureDefaultViewPinned,
+            QuickCaptureShowRecordsTab = false,
+            QuickCaptureShowPinnedTab = false,
+            QuickCaptureShowRecentTab = false,
+            TodoDefaultFilter = SettingsService.TodoDefaultFilterCompleted,
+            TodoShowAllTab = false,
+            TodoShowActiveTab = false,
+            TodoShowTodayTab = false,
+            TodoShowThisWeekTab = false,
+            TodoShowThisMonthTab = false,
+            TodoShowImportantTab = false,
+            TodoShowCompletedTab = false
+        };
+        await File.WriteAllTextAsync(
+            Path.Combine(_settingsRoot, "settings.json"),
+            JsonSerializer.Serialize(settings, s_jsonOptions));
+
+        var service = new SettingsService(_settingsRoot);
+        await service.LoadAsync();
+
+        Assert.True(service.Settings.QuickCaptureShowRecordsTab);
+        Assert.Equal(SettingsService.QuickCaptureDefaultViewRecords, service.Settings.QuickCaptureDefaultView);
+        Assert.True(service.Settings.TodoShowAllTab);
+        Assert.Equal(SettingsService.TodoDefaultFilterAll, service.Settings.TodoDefaultFilter);
+    }
+
+    [Theory]
+    [InlineData(SettingsService.TodoDefaultFilterThisWeek)]
+    [InlineData(SettingsService.TodoDefaultFilterThisMonth)]
+    public async Task LoadAsync_PreservesEnabledCalendarTabAsDefault(string filter)
+    {
+        var settings = new AppSettings
+        {
+            TodoDefaultFilter = filter,
+            TodoShowAllTab = false,
+            TodoShowTodayTab = false,
+            TodoShowImportantTab = false,
+            TodoShowCompletedTab = false,
+            TodoShowThisWeekTab = filter == SettingsService.TodoDefaultFilterThisWeek,
+            TodoShowThisMonthTab = filter == SettingsService.TodoDefaultFilterThisMonth
+        };
+        await File.WriteAllTextAsync(
+            Path.Combine(_settingsRoot, "settings.json"),
+            JsonSerializer.Serialize(settings, s_jsonOptions));
+
+        var service = new SettingsService(_settingsRoot);
+        await service.LoadAsync();
+
+        Assert.Equal(filter, service.Settings.TodoDefaultFilter);
+    }
+
     [Fact]
     public void ApplyDefaultPreferences_MatchesNewUserAppearanceDefaults()
     {
@@ -433,6 +604,8 @@ public sealed class SettingsServiceTests : IDisposable
             WidgetAnimationEffect = SettingsService.WidgetAnimationEffectFade,
             WidgetCapsuleModeEnabled = true,
             WidgetCompactAnimationEffect = SettingsService.WidgetCompactAnimationSnappy,
+            FileStackThreshold = 5,
+            FileStackOrderBy = SettingsService.FileStackOrderByDateModified,
             WidgetTitleIconMode = SettingsService.WidgetTitleIconModeHidden,
             WidgetBorderStyle = SettingsService.WidgetBorderStyleThick,
             WidgetBorderColorMode = SettingsService.WidgetBorderColorModeNone,
@@ -447,10 +620,14 @@ public sealed class SettingsServiceTests : IDisposable
                 [WidgetKind.Music.ToString()] = true
             },
             QuickCaptureShowCreatedTime = false,
+            QuickCaptureItemPreviewLineCount = 1,
+            QuickCaptureEditorEnterBehavior = SettingsService.EditorEnterBehaviorEnterSaves,
             ResizeSnapEnabled = false,
             QuickCaptureTabStyle = SettingsService.WidgetTabStylePivot,
             TodoTabStyle = SettingsService.WidgetTabStylePivot,
             TodoShowFooterStats = true,
+            TodoItemPreviewLineCount = 1,
+            TodoEditorEnterBehavior = SettingsService.EditorEnterBehaviorEnterSaves,
             TodoReminderEnabled = false,
             TodoDefaultReminderOffsetMinutes = 999,
             ManagedDropAction = SettingsService.ManagedDropActionCopy,
@@ -469,6 +646,8 @@ public sealed class SettingsServiceTests : IDisposable
         Assert.Equal(newUserDefaults.WidgetCapsuleModeEnabled, restoredDefaults.WidgetCapsuleModeEnabled);
         Assert.Equal(SettingsService.WidgetCompactAnimationSmooth, newUserDefaults.WidgetCompactAnimationEffect);
         Assert.Equal(newUserDefaults.WidgetCompactAnimationEffect, restoredDefaults.WidgetCompactAnimationEffect);
+        Assert.Equal(SettingsService.DefaultFileStackThreshold, restoredDefaults.FileStackThreshold);
+        Assert.Equal(SettingsService.FileStackOrderByWidget, restoredDefaults.FileStackOrderBy);
         Assert.Equal(SettingsService.WidgetCompactContentModeSmart, restoredDefaults.WidgetCompactContentMode);
         Assert.Equal(SettingsService.WidgetTitleIconModeColor, newUserDefaults.WidgetTitleIconMode);
         Assert.Equal(newUserDefaults.WidgetTitleIconMode, restoredDefaults.WidgetTitleIconMode);
@@ -494,8 +673,12 @@ public sealed class SettingsServiceTests : IDisposable
         Assert.Equal(SettingsService.WidgetTabStyleButton, restoredDefaults.TodoTabStyle);
         Assert.Equal(SettingsService.LayoutDensityStandard, restoredDefaults.LayoutDensity);
         Assert.True(restoredDefaults.QuickCaptureShowCreatedTime);
+        Assert.Equal(newUserDefaults.QuickCaptureItemPreviewLineCount, restoredDefaults.QuickCaptureItemPreviewLineCount);
+        Assert.Equal(newUserDefaults.QuickCaptureEditorEnterBehavior, restoredDefaults.QuickCaptureEditorEnterBehavior);
         Assert.True(restoredDefaults.ResizeSnapEnabled);
         Assert.False(restoredDefaults.TodoShowFooterStats);
+        Assert.Equal(newUserDefaults.TodoItemPreviewLineCount, restoredDefaults.TodoItemPreviewLineCount);
+        Assert.Equal(newUserDefaults.TodoEditorEnterBehavior, restoredDefaults.TodoEditorEnterBehavior);
         Assert.Equal(SettingsService.LanguageChinese, restoredDefaults.Language);
         Assert.False(restoredDefaults.AutoStart);
         Assert.True(restoredDefaults.QuickCaptureEnabled);
@@ -508,6 +691,84 @@ public sealed class SettingsServiceTests : IDisposable
         Assert.Equal(newUserDefaults.ShowFileItemPathTooltips, restoredDefaults.ShowFileItemPathTooltips);
         Assert.Equal(SettingsService.DefaultWidgetHoverButtonActions, newUserDefaults.WidgetHoverButtonActions);
         Assert.Equal(newUserDefaults.WidgetHoverButtonActions, restoredDefaults.WidgetHoverButtonActions);
+    }
+
+    [Fact]
+    public void ApplyDefaultPreferences_CoversEveryAppSettingAccordingToPreservationPolicy()
+    {
+        var defaults = new AppSettings();
+        SettingsService.ApplyDefaultPreferences(defaults);
+        var settings = new AppSettings();
+        var changedValues = new Dictionary<string, string>(StringComparer.Ordinal);
+        var properties = typeof(AppSettings).GetProperties()
+            .Where(property => property.CanRead && property.CanWrite)
+            .ToArray();
+
+        Assert.All(
+            SettingsService.DefaultPreferencePreservationPolicy.Keys,
+            propertyName => Assert.Contains(properties, property => property.Name == propertyName));
+
+        foreach (var property in properties)
+        {
+            object? changedValue = CreateNonDefaultSettingValue(
+                property.PropertyType,
+                property.GetValue(defaults));
+            property.SetValue(settings, changedValue);
+            changedValues[property.Name] = SerializeSettingValue(changedValue, property.PropertyType);
+        }
+
+        SettingsService.ApplyDefaultPreferences(settings);
+
+        foreach (var property in properties)
+        {
+            string actual = SerializeSettingValue(property.GetValue(settings), property.PropertyType);
+            if (SettingsService.DefaultPreferencePreservationPolicy.ContainsKey(property.Name))
+            {
+                Assert.True(
+                    string.Equals(changedValues[property.Name], actual, StringComparison.Ordinal),
+                    $"{property.Name} should be preserved by the default preference reset policy.");
+            }
+            else
+            {
+                string expected = SerializeSettingValue(
+                    property.GetValue(defaults),
+                    property.PropertyType);
+                Assert.True(
+                    string.Equals(expected, actual, StringComparison.Ordinal),
+                    $"{property.Name} should reset to {expected}, but was {actual}.");
+            }
+        }
+    }
+
+    [Fact]
+    public void ApplyDefaultPreferences_PreservesWidgetInstancesAndPerWidgetOverrides()
+    {
+        var widget = new WidgetConfig
+        {
+            Id = "widget",
+            CompactWidth = 212,
+            CompactPlacement = new WidgetCompactPlacement { X = 40, Y = 72 },
+            Metadata = new Dictionary<string, string>
+            {
+                [WidgetChromeModeNames.MetadataKey] = "Hidden",
+                [WidgetCollapseBehaviorNames.MetadataKey] = "Smart",
+                [WidgetFileStackSettings.GroupByOverrideMetadataKey] =
+                    SettingsService.FileStackGroupByCustom
+            }
+        };
+        var settings = new AppSettings { Widgets = [widget] };
+
+        SettingsService.ApplyDefaultPreferences(settings);
+
+        WidgetConfig preserved = Assert.Single(settings.Widgets);
+        Assert.Same(widget, preserved);
+        Assert.Equal(212, preserved.CompactWidth);
+        Assert.Equal(40, preserved.CompactPlacement?.X);
+        Assert.Equal("Hidden", preserved.Metadata[WidgetChromeModeNames.MetadataKey]);
+        Assert.Equal("Smart", preserved.Metadata[WidgetCollapseBehaviorNames.MetadataKey]);
+        Assert.Equal(
+            SettingsService.FileStackGroupByCustom,
+            preserved.Metadata[WidgetFileStackSettings.GroupByOverrideMetadataKey]);
     }
 
     [Theory]
@@ -582,6 +843,25 @@ public sealed class SettingsServiceTests : IDisposable
     }
 
     [Theory]
+    [InlineData("DateAdded")]
+    [InlineData("DateCreated")]
+    public async Task LoadAsync_MigratesRemovedDateAddedStackGroupingToKind(string legacyValue)
+    {
+        await File.WriteAllTextAsync(
+            Path.Combine(_settingsRoot, "settings.json"),
+            $$"""
+            {
+              "fileStackGroupBy": "{{legacyValue}}"
+            }
+            """);
+
+        var service = new SettingsService(_settingsRoot);
+        await service.LoadAsync();
+
+        Assert.Equal(SettingsService.FileStackGroupByKind, service.Settings.FileStackGroupBy);
+    }
+
+    [Theory]
     [InlineData(null, SettingsService.MusicDisplayModeAuto)]
     [InlineData("", SettingsService.MusicDisplayModeAuto)]
     [InlineData("Unknown", SettingsService.MusicDisplayModeAuto)]
@@ -615,6 +895,65 @@ public sealed class SettingsServiceTests : IDisposable
         await service.SaveAsync(notifySubscribers: false);
 
         Assert.Equal(SettingsService.MaxWidgetOpacity, service.Settings.WidgetOpacity);
+    }
+
+    private static object? CreateNonDefaultSettingValue(Type type, object? defaultValue)
+    {
+        if (type == typeof(string))
+        {
+            return $"{defaultValue}-changed";
+        }
+
+        if (type == typeof(bool))
+        {
+            return !(bool)(defaultValue ?? false);
+        }
+
+        if (type == typeof(int))
+        {
+            return (int)(defaultValue ?? 0) + 17;
+        }
+
+        if (type == typeof(double))
+        {
+            return (double)(defaultValue ?? 0d) + 0.137;
+        }
+
+        if (type == typeof(DateTimeOffset?))
+        {
+            return new DateTimeOffset(2030, 1, 2, 3, 4, 5, TimeSpan.Zero);
+        }
+
+        if (type.IsGenericType && type.GetGenericTypeDefinition() == typeof(List<>))
+        {
+            var list = (System.Collections.IList)Activator.CreateInstance(type)!;
+            Type itemType = type.GetGenericArguments()[0];
+            list.Add(itemType == typeof(string)
+                ? "changed"
+                : Activator.CreateInstance(itemType)!);
+            return list;
+        }
+
+        if (type.IsGenericType && type.GetGenericTypeDefinition() == typeof(Dictionary<,>))
+        {
+            var dictionary = (System.Collections.IDictionary)Activator.CreateInstance(type)!;
+            Type[] arguments = type.GetGenericArguments();
+            object key = arguments[0] == typeof(string)
+                ? "changed"
+                : Activator.CreateInstance(arguments[0])!;
+            object value = arguments[1] == typeof(bool)
+                ? true
+                : Activator.CreateInstance(arguments[1])!;
+            dictionary.Add(key, value);
+            return dictionary;
+        }
+
+        throw new NotSupportedException($"No AppSettings test value factory for {type}.");
+    }
+
+    private static string SerializeSettingValue(object? value, Type type)
+    {
+        return JsonSerializer.Serialize(value, type, s_jsonOptions);
     }
 
     public void Dispose()
