@@ -2410,6 +2410,78 @@ svc:Localized.DescriptionKey="Settings.DefaultWidth.Description"
                     Style="{StaticResource SectionPanelStyle}">
                     <TextBlock Style="{StaticResource SectionTitleTextStyle}" svc:Localized.Key="Settings.Section.Maintenance" />
                     <StackPanel Margin="0,8,0,0" Spacing="4">
+                        <Border Style="{StaticResource SettingsGroupStyle}">
+                            <Button
+                                Click="NestedSettingsButton_Click"
+                                Style="{StaticResource DrillDownRowStyle}"
+                                Tag="BackupRestoreSettings">
+                                <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="12">
+                                    <FontIcon Grid.Column="0" FontSize="18" Glyph="&#xE74E;" IsHitTestVisible="False" VerticalAlignment="Center" />
+                                    <StackPanel Grid.Column="1" IsHitTestVisible="False" Spacing="3" VerticalAlignment="Center">
+                                        <TextBlock Style="{StaticResource SettingTitleTextStyle}" svc:Localized.Key="Settings.DataBackup.Title" />
+                                        <TextBlock Style="{StaticResource SettingDescriptionTextStyle}" TextWrapping="Wrap" svc:Localized.Key="Settings.DataBackup.Description" />
+                                    </StackPanel>
+                                    <FontIcon Grid.Column="2" FontSize="12" Glyph="&#xE76C;" IsHitTestVisible="False" VerticalAlignment="Center" />
+                                </Grid>
+                            </Button>
+                        </Border>
+
+                        <Border Style="{StaticResource SettingsGroupStyle}">
+                            <Button
+                                Click="NestedSettingsButton_Click"
+                                Style="{StaticResource DrillDownRowStyle}"
+                                Tag="DataHealthSettings">
+                                <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="12">
+                                    <FontIcon Grid.Column="0" FontSize="18" Glyph="&#xE9D9;" IsHitTestVisible="False" VerticalAlignment="Center" />
+                                    <StackPanel Grid.Column="1" IsHitTestVisible="False" Spacing="3" VerticalAlignment="Center">
+                                        <TextBlock Style="{StaticResource SettingTitleTextStyle}" svc:Localized.Key="Settings.AttachmentHealth.Title" />
+                                        <TextBlock Style="{StaticResource SettingDescriptionTextStyle}" TextWrapping="Wrap" svc:Localized.Key="Settings.AttachmentHealth.Description" />
+                                    </StackPanel>
+                                    <FontIcon Grid.Column="2" FontSize="12" Glyph="&#xE76C;" IsHitTestVisible="False" VerticalAlignment="Center" />
+                                </Grid>
+                            </Button>
+                        </Border>
+
+                        <Border Style="{StaticResource SettingsGroupStyle}">
+                            <Button
+                                Click="NestedSettingsButton_Click"
+                                Style="{StaticResource DrillDownRowStyle}"
+                                Tag="CompatibilityDiagnosticsSettings">
+                                <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="12">
+                                    <FontIcon Grid.Column="0" FontSize="18" Glyph="&#xE8A7;" IsHitTestVisible="False" VerticalAlignment="Center" />
+                                    <StackPanel Grid.Column="1" IsHitTestVisible="False" Spacing="3" VerticalAlignment="Center">
+                                        <TextBlock Style="{StaticResource SettingTitleTextStyle}" svc:Localized.Key="Settings.DragDropPermission.Title" />
+                                        <TextBlock Style="{StaticResource SettingDescriptionTextStyle}" TextWrapping="Wrap" svc:Localized.Key="Settings.DragDropPermission.Description" />
+                                    </StackPanel>
+                                    <FontIcon Grid.Column="2" FontSize="12" Glyph="&#xE76C;" IsHitTestVisible="False" VerticalAlignment="Center" />
+                                </Grid>
+                            </Button>
+                        </Border>
+
+                        <Border Style="{StaticResource SettingsGroupStyle}">
+                            <Button
+                                Click="NestedSettingsButton_Click"
+                                Style="{StaticResource DrillDownRowStyle}"
+                                Tag="ResetSettings">
+                                <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="12">
+                                    <FontIcon Grid.Column="0" FontSize="18" Glyph="&#xE72C;" IsHitTestVisible="False" VerticalAlignment="Center" />
+                                    <StackPanel Grid.Column="1" IsHitTestVisible="False" Spacing="3" VerticalAlignment="Center">
+                                        <TextBlock Style="{StaticResource SettingTitleTextStyle}" svc:Localized.Key="Settings.Restore.Title" />
+                                        <TextBlock Style="{StaticResource SettingDescriptionTextStyle}" TextWrapping="Wrap" svc:Localized.Key="Settings.Restore.Description" />
+                                    </StackPanel>
+                                    <FontIcon Grid.Column="2" FontSize="12" Glyph="&#xE76C;" IsHitTestVisible="False" VerticalAlignment="Center" />
+                                </Grid>
+                            </Button>
+                        </Border>
+                    </StackPanel>
+                </StackPanel>
+
+                <StackPanel
+                    x:Name="BackupRestoreSettingsSection"
+                    Visibility="Collapsed"
+                    Style="{StaticResource SectionPanelStyle}">
+                    <TextBlock Style="{StaticResource SectionTitleTextStyle}" svc:Localized.Key="Settings.DataBackup.Title" />
+                    <StackPanel Margin="0,8,0,0" Spacing="4">
                         <toolkit:SettingsCard
                             HorizontalContentAlignment="Right"
                             svc:Localized.DescriptionKey="Settings.DataBackup.Description"
@@ -2440,7 +2512,15 @@ svc:Localized.DescriptionKey="Settings.DefaultWidth.Description"
                                 </Button>
                             </StackPanel>
                         </toolkit:SettingsCard>
+                    </StackPanel>
+                </StackPanel>
 
+                <StackPanel
+                    x:Name="DataHealthSettingsSection"
+                    Visibility="Collapsed"
+                    Style="{StaticResource SectionPanelStyle}">
+                    <TextBlock Style="{StaticResource SectionTitleTextStyle}" svc:Localized.Key="Settings.AttachmentHealth.Title" />
+                    <StackPanel Margin="0,8,0,0" Spacing="4">
                         <toolkit:SettingsCard
                             ContentAlignment="Vertical"
                             HorizontalContentAlignment="Stretch"
@@ -2469,7 +2549,15 @@ svc:Localized.DescriptionKey="Settings.DefaultWidth.Description"
                                 </Button>
                             </Grid>
                         </toolkit:SettingsCard>
+                    </StackPanel>
+                </StackPanel>
 
+                <StackPanel
+                    x:Name="ResetSettingsSection"
+                    Visibility="Collapsed"
+                    Style="{StaticResource SectionPanelStyle}">
+                    <TextBlock Style="{StaticResource SectionTitleTextStyle}" svc:Localized.Key="Settings.Restore.Title" />
+                    <StackPanel Margin="0,8,0,0" Spacing="4">
                         <toolkit:SettingsCard
                             HorizontalContentAlignment="Right"
                             svc:Localized.DescriptionKey="Settings.Restore.Description"
@@ -2487,7 +2575,15 @@ svc:Localized.DescriptionKey="Settings.DefaultWidth.Description"
                                 </StackPanel>
                             </Button>
                         </toolkit:SettingsCard>
+                    </StackPanel>
+                </StackPanel>
 
+                <StackPanel
+                    x:Name="CompatibilityDiagnosticsSettingsSection"
+                    Visibility="Collapsed"
+                    Style="{StaticResource SectionPanelStyle}">
+                    <TextBlock Style="{StaticResource SectionTitleTextStyle}" svc:Localized.Key="Settings.DragDropPermission.Title" />
+                    <StackPanel Margin="0,8,0,0" Spacing="4">
                         <toolkit:SettingsCard
                             ContentAlignment="Vertical"
                             HorizontalContentAlignment="Stretch"

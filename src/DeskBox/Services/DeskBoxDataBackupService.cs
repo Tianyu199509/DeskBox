@@ -15,6 +15,7 @@ public sealed class DeskBoxDataBackupService
     private const int MaxRestoreFileCount = 100_000;
     private const long MaxRestoreFileSizeBytes = 4L * 1024 * 1024 * 1024;
     private const long MaxRestoreTotalSizeBytes = 16L * 1024 * 1024 * 1024;
+    private const int MaxSnapshotCopyAttempts = 4;
     private static readonly TimeSpan AutomaticSnapshotInterval = TimeSpan.FromDays(1);
     private static readonly JsonSerializerOptions s_jsonOptions = new()
     {
@@ -50,6 +51,8 @@ public sealed class DeskBoxDataBackupService
     internal string PreRestoreBackupDirectory => Path.Combine(_rootPath, "backups", "pre-restore");
 
     internal string RestoreStagingDirectory => Path.Combine(_rootPath, "restore-staging");
+
+    internal string BackupSnapshotStagingDirectory => Path.Combine(_rootPath, "backup-staging");
 
     internal string PendingRestoreMarkerPath => Path.Combine(_rootPath, "restore-pending.json");
 
@@ -779,6 +782,31 @@ public sealed class DeskBoxDataBackupService
         string backupKind,
         CancellationToken cancellationToken)
     {
+        string snapshotRoot = Path.Combine(
+            BackupSnapshotStagingDirectory,
+            Guid.NewGuid().ToString("N"));
+        string snapshotDataDirectory = Path.Combine(snapshotRoot, "data");
+        try
+        {
+            await CreateDataSnapshotAsync(snapshotDataDirectory, cancellationToken);
+            ValidateRestoreData(snapshotDataDirectory);
+            await CreateArchiveFromSnapshotAsync(
+                archivePath,
+                backupKind,
+                snapshotDataDirectory,
+                cancellationToken);
+        }
+        finally
+        {
+            TryDeleteDirectory(snapshotRoot);
+            TryDeleteEmptyDirectory(BackupSnapshotStagingDirectory);
+        }
+    }
+
+    private async Task CreateDataSnapshotAsync(
+        string snapshotDataDirectory,
+        CancellationToken cancellationToken)
+    {
         string settingsPath = Path.Combine(DataDirectory, "settings.json");
         if (!File.Exists(settingsPath))
         {
@@ -792,6 +820,33 @@ public sealed class DeskBoxDataBackupService
                 RelativePath: Path.GetRelativePath(DataDirectory, path)
                     .Replace(Path.DirectorySeparatorChar, '/')))
             .Where(file => ShouldIncludeInBackup(file.RelativePath))
+            .OrderBy(file => file.RelativePath, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        Directory.CreateDirectory(snapshotDataDirectory);
+        foreach ((string sourcePath, string relativePath) in sourceFiles)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            string destinationPath = Path.Combine(
+                snapshotDataDirectory,
+                relativePath.Replace('/', Path.DirectorySeparatorChar));
+            Directory.CreateDirectory(Path.GetDirectoryName(destinationPath)!);
+            await CopyStableSnapshotFileAsync(sourcePath, destinationPath, cancellationToken);
+        }
+    }
+
+    private async Task CreateArchiveFromSnapshotAsync(
+        string archivePath,
+        string backupKind,
+        string snapshotDataDirectory,
+        CancellationToken cancellationToken)
+    {
+        (string SourcePath, string RelativePath)[] sourceFiles = Directory
+            .EnumerateFiles(snapshotDataDirectory, "*", SearchOption.AllDirectories)
+            .Select(path => (
+                SourcePath: path,
+                RelativePath: Path.GetRelativePath(snapshotDataDirectory, path)
+                    .Replace(Path.DirectorySeparatorChar, '/')))
             .OrderBy(file => file.RelativePath, StringComparer.OrdinalIgnoreCase)
             .ToArray();
         string tempArchivePath = $"{archivePath}.{Guid.NewGuid():N}.tmp";
@@ -817,7 +872,7 @@ public sealed class DeskBoxDataBackupService
                             sourcePath,
                             FileMode.Open,
                             FileAccess.Read,
-                            FileShare.ReadWrite | FileShare.Delete,
+                            FileShare.Read,
                             bufferSize: 81920,
                             useAsync: true);
                         await using Stream destination = entry.Open();
@@ -855,6 +910,69 @@ public sealed class DeskBoxDataBackupService
         {
             TryDeleteFile(tempArchivePath);
         }
+    }
+
+    private static async Task CopyStableSnapshotFileAsync(
+        string sourcePath,
+        string destinationPath,
+        CancellationToken cancellationToken)
+    {
+        for (int attempt = 1; attempt <= MaxSnapshotCopyAttempts; attempt++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            TryDeleteFile(destinationPath);
+
+            try
+            {
+                var before = new FileInfo(sourcePath);
+                long expectedLength = before.Length;
+                DateTime expectedLastWriteUtc = before.LastWriteTimeUtc;
+
+                long copiedLength;
+                await using (var source = new FileStream(
+                                 sourcePath,
+                                 FileMode.Open,
+                                 FileAccess.Read,
+                                 FileShare.ReadWrite | FileShare.Delete,
+                                 bufferSize: 81920,
+                                 useAsync: true))
+                await using (var destination = new FileStream(
+                                 destinationPath,
+                                 FileMode.CreateNew,
+                                 FileAccess.Write,
+                                 FileShare.None,
+                                 bufferSize: 81920,
+                                 useAsync: true))
+                {
+                    (copiedLength, _) = await CopyAndHashAsync(source, destination, cancellationToken);
+                    await destination.FlushAsync(cancellationToken);
+                }
+
+                var after = new FileInfo(sourcePath);
+                if (after.Exists &&
+                    copiedLength == expectedLength &&
+                    after.Length == expectedLength &&
+                    after.LastWriteTimeUtc == expectedLastWriteUtc)
+                {
+                    return;
+                }
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                if (attempt == MaxSnapshotCopyAttempts)
+                {
+                    break;
+                }
+            }
+
+            if (attempt < MaxSnapshotCopyAttempts)
+            {
+                await Task.Yield();
+            }
+        }
+
+        TryDeleteFile(destinationPath);
+        throw new IOException($"DeskBox data file changed while creating a backup snapshot: '{sourcePath}'.");
     }
 
     private void PruneAutomaticSnapshots()
@@ -920,6 +1038,20 @@ public sealed class DeskBoxDataBackupService
             if (Directory.Exists(path))
             {
                 Directory.Delete(path, recursive: true);
+            }
+        }
+        catch
+        {
+        }
+    }
+
+    private static void TryDeleteEmptyDirectory(string path)
+    {
+        try
+        {
+            if (Directory.Exists(path) && !Directory.EnumerateFileSystemEntries(path).Any())
+            {
+                Directory.Delete(path);
             }
         }
         catch

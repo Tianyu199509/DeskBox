@@ -52,6 +52,54 @@ public sealed class DeskBoxDataBackupServiceTests : IDisposable
         JsonElement[] files = manifest.RootElement.GetProperty("files").EnumerateArray().ToArray();
         Assert.Equal(2, files.Length);
         Assert.All(files, file => Assert.Equal(64, file.GetProperty("sha256").GetString()!.Length));
+        Assert.False(Directory.Exists(service.BackupSnapshotStagingDirectory));
+    }
+
+    [Fact]
+    public async Task ExportBackupAsync_ArchivesStableSnapshotWhenSourceChangesAfterStaging()
+    {
+        string dataDirectory = Directory.CreateDirectory(Path.Combine(_appDataRoot, "data")).FullName;
+        string settingsPath = Path.Combine(dataDirectory, "settings.json");
+        await File.WriteAllTextAsync(settingsPath, "{\"theme\":\"Light\"}");
+        string largeFilePath = Path.Combine(dataDirectory, "000-large.bin");
+        await File.WriteAllBytesAsync(largeFilePath, new byte[24 * 1024 * 1024]);
+        var service = new DeskBoxDataBackupService(_appDataRoot);
+
+        Task<string> exportTask = service.ExportBackupAsync(_exportRoot);
+        string stagedSettingsPath = await WaitForStagedFileAsync(
+            service.BackupSnapshotStagingDirectory,
+            Path.Combine("data", "settings.json"));
+        Assert.True(File.Exists(stagedSettingsPath));
+
+        await File.WriteAllTextAsync(settingsPath, "{\"theme\":\"Dark\"}");
+        await File.WriteAllBytesAsync(largeFilePath, [9, 8, 7]);
+        string backupPath = await exportTask;
+
+        using (ZipArchive archive = ZipFile.OpenRead(backupPath))
+        {
+            ZipArchiveEntry settingsEntry = Assert.IsType<ZipArchiveEntry>(archive.GetEntry("data/settings.json"));
+            using var reader = new StreamReader(settingsEntry.Open());
+            Assert.Contains("Light", await reader.ReadToEndAsync());
+        }
+
+        string restoreRoot = Directory.CreateDirectory(Path.Combine(_tempRoot, "snapshot-restore")).FullName;
+        var restoreService = new DeskBoxDataBackupService(restoreRoot);
+        DeskBoxRestorePreparation preparation = await restoreService.PrepareRestoreAsync(backupPath);
+        Assert.True(preparation.HasIntegrityManifest);
+        Assert.False(Directory.Exists(service.BackupSnapshotStagingDirectory));
+    }
+
+    [Fact]
+    public async Task ExportBackupAsync_RemovesSnapshotStagingAfterValidationFailure()
+    {
+        string dataDirectory = Directory.CreateDirectory(Path.Combine(_appDataRoot, "data")).FullName;
+        await File.WriteAllTextAsync(Path.Combine(dataDirectory, "settings.json"), "{ invalid json");
+        var service = new DeskBoxDataBackupService(_appDataRoot);
+
+        await Assert.ThrowsAsync<InvalidDataException>(() => service.ExportBackupAsync(_exportRoot));
+
+        Assert.False(Directory.Exists(service.BackupSnapshotStagingDirectory));
+        Assert.Empty(Directory.EnumerateFiles(_exportRoot));
     }
 
     [Fact]
@@ -68,6 +116,7 @@ public sealed class DeskBoxDataBackupServiceTests : IDisposable
         Assert.True(File.Exists(firstPath));
         Assert.Null(secondPath);
         Assert.Single(Directory.EnumerateFiles(service.AutomaticSnapshotDirectory, "DeskBox-Auto-*.zip"));
+        Assert.False(Directory.Exists(service.BackupSnapshotStagingDirectory));
     }
 
     [Fact]
@@ -217,6 +266,7 @@ public sealed class DeskBoxDataBackupServiceTests : IDisposable
         Assert.Single(Directory.EnumerateFiles(
             targetService.PreRestoreBackupDirectory,
             "DeskBox-PreRestore-*.zip"));
+        Assert.False(Directory.Exists(targetService.BackupSnapshotStagingDirectory));
     }
 
     [Fact]
@@ -368,6 +418,31 @@ public sealed class DeskBoxDataBackupServiceTests : IDisposable
         ZipArchiveEntry entry = archive.CreateEntry(name);
         using var writer = new StreamWriter(entry.Open());
         writer.Write(content);
+    }
+
+    private static async Task<string> WaitForStagedFileAsync(
+        string stagingDirectory,
+        string relativePath)
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        while (!timeout.IsCancellationRequested)
+        {
+            if (Directory.Exists(stagingDirectory))
+            {
+                string? stagedFile = Directory
+                    .EnumerateDirectories(stagingDirectory)
+                    .Select(snapshotRoot => Path.Combine(snapshotRoot, relativePath))
+                    .FirstOrDefault(File.Exists);
+                if (stagedFile is not null)
+                {
+                    return stagedFile;
+                }
+            }
+
+            await Task.Delay(10, timeout.Token);
+        }
+
+        throw new TimeoutException($"Timed out waiting for staged file '{relativePath}'.");
     }
 
     public void Dispose()

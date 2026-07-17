@@ -129,7 +129,11 @@ WeatherSettingsSection.Visibility = sectionTag == "WeatherSettings" ? Visibility
         }
         GeneralSection.Visibility = sectionTag == "General" ? Visibility.Visible : Visibility.Collapsed;
         MaintenanceSection.Visibility = sectionTag == "Maintenance" ? Visibility.Visible : Visibility.Collapsed;
-        if (sectionTag == "Maintenance")
+        BackupRestoreSettingsSection.Visibility = sectionTag == "BackupRestoreSettings" ? Visibility.Visible : Visibility.Collapsed;
+        DataHealthSettingsSection.Visibility = sectionTag == "DataHealthSettings" ? Visibility.Visible : Visibility.Collapsed;
+        CompatibilityDiagnosticsSettingsSection.Visibility = sectionTag == "CompatibilityDiagnosticsSettings" ? Visibility.Visible : Visibility.Collapsed;
+        ResetSettingsSection.Visibility = sectionTag == "ResetSettings" ? Visibility.Visible : Visibility.Collapsed;
+        if (sectionTag == "CompatibilityDiagnosticsSettings")
         {
             ViewModel.RefreshDragDropPermissionDiagnostic();
         }

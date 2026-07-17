@@ -56,129 +56,26 @@ public partial class SettingsViewModel
     public async Task RestoreDefaultPreferencesAsync()
     {
         _isRestoringDefaults = true;
-        _isApplyingSettingsSnapshot = true;
         SuppressAppearanceNotifications = true;
         DeferAppearancePersistence = false;
 
         try
         {
             SettingsService.ApplyDefaultPreferences(_settingsService.Settings);
+            ApplySettingsSnapshot();
             IconHelper.ClearAllThumbnailCaches();
-            SelectedTheme = ThemeSystem;
-            SelectedTrayIconStyle = TrayIconStyleColorful;
-            UseSystemAccentColor = true;
-            DefaultWidth = SettingsService.DefaultWidgetWidth;
-            DefaultHeight = SettingsService.DefaultWidgetHeight;
-            SelectedWidgetCornerPreference = CornerRound;
-            SelectedWidgetMaterialType = MaterialMica;
-            WidgetMaterialIntensity = SettingsService.DefaultWidgetMaterialIntensity;
-            SelectedWidgetBorderColorMode = BorderColorNeutral;
-            SelectedWidgetBorderStyle = BorderThin;
-            SelectedWidgetAnimationEffect = SettingsService.WidgetAnimationEffectSlideFade;
-            SelectedWidgetAnimationSpeed = SettingsService.WidgetAnimationSpeedStandard;
-            SelectedWidgetAnimationSlideDirection = SettingsService.WidgetAnimationSlideDirectionRight;
-            SelectedWidgetAnimationEasingIntensity = SettingsService.WidgetAnimationEasingStandard;
-            SelectedAnimationPreset = AnimationPresetStandard;
-            SelectedDisplayWidgetChromeMode = SettingsService.WidgetChromeModeOverlay;
-            SelectedInteractiveWidgetChromeMode = SettingsService.WidgetChromeModeStandard;
-            SelectedWidgetTitleIconMode = SettingsService.WidgetTitleIconModeColor;
-            SelectedWidgetLayerMode = SettingsService.WidgetLayerModeDynamic;
-            WidgetCapsuleModeEnabled = false;
-            SelectedWidgetCollapseBehavior = SettingsService.WidgetCollapseBehaviorClick;
-            SelectedWidgetCompactContentMode = SettingsService.WidgetCompactContentModeSmart;
-            WidgetCompactHideSensitiveContent = false;
-            SelectedWidgetCompactAnimationEffect = SettingsService.WidgetCompactAnimationSmooth;
-            WidgetCompactAnimationDurationMs = SettingsService.DefaultWidgetCompactAnimationDurationMs;
-            WidgetCompactExpandDelayMs = SettingsService.DefaultWidgetCompactExpandDelayMs;
-            WidgetCompactCollapseDelayMs = SettingsService.DefaultWidgetCompactCollapseDelayMs;
-            SelectedWidgetCompactMediaCornerMode = SettingsService.WidgetCompactMediaCornerFollowWidget;
-            WidgetOpacity = SettingsService.DefaultWidgetOpacity;
-            IconSize = SettingsService.DefaultIconSize;
-            TextSize = SettingsService.DefaultTextSize;
-            LayoutDensityScale = SettingsService.DefaultLayoutDensityScale;
-            HorizontalSpacingScale = SettingsService.DefaultHorizontalSpacingScale;
-            VerticalSpacingScale = SettingsService.DefaultVerticalSpacingScale;
-            FileNameWidthScale = SettingsService.DefaultFileNameWidthScale;
-            SelectedLayoutDensity = SettingsService.LayoutDensityStandard;
-            ShowFileExtensions = false;
-            ShowImageFilesAsIcons = false;
-            HideShortcutExtensionWhenShowingFileExtensions = true;
-            ShowHoverButtons = true;
-            ApplyHoverButtonActionSelection(SettingsService.DefaultWidgetHoverButtonActions);
-            AutoCheckForUpdates = true;
-            QuickCaptureClipboardEnabled = false;
-            QuickCaptureImageClipboardEnabled = false;
-            QuickCaptureRecentLimit = QuickCaptureService.DefaultRecentLimit;
-            QuickCaptureShowCreatedTime = true;
-            QuickCaptureItemPreviewLineCount = SettingsService.DefaultItemPreviewLineCount;
-            QuickCaptureEditorEnterBehavior = SettingsService.EditorEnterBehaviorCtrlEnterSaves;
-            SelectedAttachmentStorageMode = SettingsService.AttachmentStorageModeLink;
-            SelectedQuickCaptureDefaultView = SettingsService.QuickCaptureDefaultViewRecords;
-            SelectedQuickCaptureTabStyle = SettingsService.WidgetTabStyleButton;
-            QuickCaptureShowTabBar = true;
-            QuickCaptureShowRecordsTab = true;
-            QuickCaptureShowPinnedTab = true;
-            QuickCaptureShowRecentTab = true;
-            TodoShowCompletedTasks = true;
-            TodoItemPreviewLineCount = SettingsService.DefaultItemPreviewLineCount;
-            TodoEditorEnterBehavior = SettingsService.EditorEnterBehaviorCtrlEnterSaves;
-            TodoShowFooterStats = false;
-            TodoShowClearCompletedButton = true;
-            TodoConfirmBeforeDelete = false;
-            TodoReminderEnabled = true;
-            SelectedTodoReminderOffsetMinutes = SettingsService.DefaultTodoReminderOffsetMinutes;
-            MusicUseArtworkBackdrop = true;
-            MusicEnableCoverHoverMotion = true;
-            SelectedMusicDisplayMode = SettingsService.MusicDisplayModeAuto;
-WeatherAutoLocation = true;
-WeatherCityName = string.Empty;
-SelectedWeatherTemperatureUnit = SettingsService.WeatherTemperatureUnitCelsius;
-SelectedWeatherWindSpeedUnit = SettingsService.WeatherWindSpeedUnitKmh;
-SelectedWeatherDefaultView = SettingsService.WeatherDefaultViewToday;
-SelectedWeatherSkin = SettingsService.WeatherSkinStandard;
-WeatherShowForecast = true;
-WeatherShowSunrise = true;
-WeatherShowUvIndex = true;
-WeatherShowPrecipitation = true;
-WeatherShowHumidity = true;
-WeatherShowWind = true;
-WeatherShowPressure = false;
-SelectedWeatherRefreshInterval = 60;
-            SelectedTodoNewTaskPosition = SettingsService.TodoNewTaskPositionTop;
-            SelectedTodoDefaultFilter = SettingsService.TodoDefaultFilterAll;
-            SelectedTodoTabStyle = SettingsService.WidgetTabStyleButton;
-            TodoShowTabBar = true;
-            TodoShowAllTab = true;
-            TodoShowActiveTab = false;
-            TodoShowTodayTab = true;
-            TodoShowThisWeekTab = false;
-            TodoShowThisMonthTab = false;
-            TodoShowImportantTab = true;
-            TodoShowCompletedTab = true;
-            DoubleClickToOpen = true;
-            ResizeSnapEnabled = true;
-            GlobalHotkeyEnabled = SettingsService.DefaultGlobalHotkeyEnabled;
-            HideShortcutArrowOverlay = true;
-            ShowListItemDetails = false;
-            ShowFileItemPathTooltips = true;
-            FileStacksEnabled = false;
-            SelectedFileStackGroupBy = SettingsService.FileStackGroupByKind;
-            SelectedFileStackThreshold = SettingsService.DefaultFileStackThreshold;
-            SelectedFileStackOrderBy = SettingsService.FileStackOrderByWidget;
-            ResetFileStackCustomRules();
 
-            App.Current?.ResizeGuideOverlay.IsSnapEnabled = true;
+            if (App.Current is { } app)
+            {
+                app.ResizeGuideOverlay.IsSnapEnabled = _settingsService.Settings.ResizeSnapEnabled;
+            }
 
-            RefreshAccentPreview();
-            RefreshNumberInputs();
-            RefreshSelectionProperties();
-            OnPropertyChanged(nameof(CanEditCustomAccent));
-            OnPropertyChanged(nameof(AccentColorDescription));
             App.Current?.GlobalHotkeyService?.RefreshRegistration();
             App.Current?.UpdateTrayIcon();
             RefreshGlobalHotkeyState();
-            RefreshLocalizedProperties();
             _themeService.RefreshAppearance();
+            RefreshAccentPreview();
+            RefreshLocalizedProperties();
             await _settingsService.SaveAsync();
             App.Current?.QuickCaptureClipboardService?.Refresh();
             _settingsService.NotifyAppearancePreviewNow();
@@ -186,7 +83,6 @@ SelectedWeatherRefreshInterval = 60;
         finally
         {
             SuppressAppearanceNotifications = false;
-            _isApplyingSettingsSnapshot = false;
             _isRestoringDefaults = false;
         }
     }
