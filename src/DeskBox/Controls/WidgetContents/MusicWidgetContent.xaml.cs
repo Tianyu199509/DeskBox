@@ -40,6 +40,7 @@ public sealed partial class MusicWidgetContent : UserControl, IDisposable
     private int _artworkTransitionVersion;
     private bool _isDisposed;
     private bool _isMinimalLayout;
+    private bool _isResponsiveLayoutTransitionActive;
 
     public MusicWidgetContent()
     {
@@ -179,7 +180,10 @@ public sealed partial class MusicWidgetContent : UserControl, IDisposable
 
     private void MusicWidgetContent_SizeChanged(object sender, SizeChangedEventArgs e)
     {
-        ApplyResponsiveLayout();
+        if (!_isResponsiveLayoutTransitionActive)
+        {
+            ApplyResponsiveLayout();
+        }
         UpdateProgressVisuals();
     }
 
@@ -216,6 +220,37 @@ public sealed partial class MusicWidgetContent : UserControl, IDisposable
         {
             StopTitleMarquee();
         }
+    }
+
+    internal void BeginResponsiveLayoutTransition(
+        double targetContentWidth,
+        double targetContentHeight,
+        bool isCollapsing)
+    {
+        if (!double.IsFinite(targetContentWidth) || !double.IsFinite(targetContentHeight))
+        {
+            return;
+        }
+
+        _isResponsiveLayoutTransitionActive = true;
+        if (!isCollapsing)
+        {
+            ApplyResponsiveLayout(targetContentWidth, targetContentHeight);
+        }
+    }
+
+    internal void CompleteResponsiveLayoutTransition(
+        double finalContentWidth,
+        double finalContentHeight)
+    {
+        _isResponsiveLayoutTransitionActive = false;
+        ApplyResponsiveLayout(finalContentWidth, finalContentHeight);
+    }
+
+    internal void CancelResponsiveLayoutTransition()
+    {
+        _isResponsiveLayoutTransitionActive = false;
+        ApplyResponsiveLayout();
     }
 
     private void TitleMarqueeHost_SizeChanged(object sender, SizeChangedEventArgs e)
@@ -330,6 +365,11 @@ public sealed partial class MusicWidgetContent : UserControl, IDisposable
     {
         double width = ActualWidth > 0 ? ActualWidth : RootGrid.ActualWidth;
         double height = ActualHeight > 0 ? ActualHeight : RootGrid.ActualHeight;
+        ApplyResponsiveLayout(width, height);
+    }
+
+    private void ApplyResponsiveLayout(double width, double height)
+    {
         if (width <= 0 || height <= 0)
         {
             return;

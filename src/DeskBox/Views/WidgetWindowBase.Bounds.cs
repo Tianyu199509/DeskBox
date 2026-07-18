@@ -98,7 +98,7 @@ public abstract partial class WidgetWindowBase
 
     protected void ApplyWindowBounds(int x, int y, int width, int height, bool persist, bool updateConfig = true)
     {
-        if (!IsCompactBoundsStateActive)
+        if (!IsCompactBoundsStateActive && !UsesCompactExpansionGeometry())
         {
             var minSize = GetPhysicalMinimumWindowSize(x, y, width, height);
             width = Math.Max(minSize.Width, width);

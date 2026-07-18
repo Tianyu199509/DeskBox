@@ -177,12 +177,15 @@ public sealed partial class WidgetWindow
         var initialBounds = GetActualWindowBounds();
         _initialWindowPos = new Windows.Graphics.PointInt32(initialBounds.X, initialBounds.Y);
         _initialWindowSize = new Windows.Graphics.SizeInt32(initialBounds.Width, initialBounds.Height);
+        bool movesCapsuleBar = BeginCompactArrangementDrag();
         _dragCaptureElement = captureElement;
         captureElement.CapturePointer(e.Pointer);
         e.Handled = true;
 
-        // Begin drag-move snap session
-        App.Current?.ResizeGuideOverlay.BeginDrag(_hWnd, RootGrid);
+        if (!movesCapsuleBar)
+        {
+            App.Current?.ResizeGuideOverlay.BeginDrag(_hWnd, RootGrid);
+        }
     }
 
     private void TitleBarGrid_PointerMoved(object sender, PointerRoutedEventArgs e)
@@ -227,13 +230,19 @@ public sealed partial class WidgetWindow
         int newX = _initialWindowPos.X + deltaX;
         int newY = _initialWindowPos.Y + deltaY;
 
-        // Apply drag-move snap
         var proposedBounds = new Windows.Graphics.RectInt32(
             newX, newY, _initialWindowSize.Width, _initialWindowSize.Height);
-        var snappedBounds = App.Current?.ResizeGuideOverlay.UpdateGuidesAndSnapForDrag(proposedBounds)
-            ?? proposedBounds;
-
-        ApplyWindowBounds(snappedBounds.X, snappedBounds.Y, snappedBounds.Width, snappedBounds.Height, persist: false);
+        if (!TryMoveCompactArrangement(proposedBounds, out _))
+        {
+            var snappedBounds = App.Current?.ResizeGuideOverlay.UpdateGuidesAndSnapForDrag(proposedBounds)
+                ?? proposedBounds;
+            ApplyWindowBounds(
+                snappedBounds.X,
+                snappedBounds.Y,
+                snappedBounds.Width,
+                snappedBounds.Height,
+                persist: false);
+        }
         e.Handled = true;
     }
 
@@ -258,14 +267,16 @@ public sealed partial class WidgetWindow
         bool hasMoved = _hasMovedTitleBarDrag;
         _dragCaptureElement = null;
         App.Current?.ResizeGuideOverlay.EndDrag();
+        CompleteCompactArrangementDrag();
         if (hasMoved)
         {
             var finalBounds = GetActualWindowBounds();
+            finalBounds = CompleteExpandedWidgetDrag(finalBounds);
             CapturePositionAnchor(finalBounds.X, finalBounds.Y, finalBounds.Width, finalBounds.Height);
             UpdateConfigBoundsFromPhysical(finalBounds.X, finalBounds.Y, finalBounds.Width, finalBounds.Height, persist: true);
         }
         EndWidgetBoundsInteraction();
-        ReleaseInteractionLayer("file-drag-capture-lost");
+        RestoreAfterFileDrag("file-drag-capture-lost");
         _displayChangeWatcher?.ResumeRestore();
         _hasMovedTitleBarDrag = false;
         QueueBackdropRefresh();
@@ -286,18 +297,30 @@ public sealed partial class WidgetWindow
         // End drag-move snap session
         App.Current?.ResizeGuideOverlay.EndDrag();
 
+        CompleteCompactArrangementDrag();
         if (_hasMovedTitleBarDrag)
         {
             var finalBounds = GetActualWindowBounds();
+            finalBounds = CompleteExpandedWidgetDrag(finalBounds);
             CapturePositionAnchor(finalBounds.X, finalBounds.Y, finalBounds.Width, finalBounds.Height);
             UpdateConfigBoundsFromPhysical(finalBounds.X, finalBounds.Y, finalBounds.Width, finalBounds.Height, persist: true);
-            ReleaseInteractionLayer("file-drag-ended");
+            RestoreAfterFileDrag("file-drag-ended");
         }
 
         EndWidgetBoundsInteraction();
         _displayChangeWatcher?.ResumeRestore();
         _hasMovedTitleBarDrag = false;
         e.Handled = true;
+    }
+
+    private void RestoreAfterFileDrag(string reason)
+    {
+        if (App.Current.WidgetManager?.RequestRestoreRaisedWidgetsToDesktopLayer(reason) == true)
+        {
+            return;
+        }
+
+        RestoreDesktopLayer();
     }
 
     private async void MapFolderButton_Click(object sender, RoutedEventArgs e)

@@ -21,6 +21,8 @@ public sealed partial class WidgetShell : UserControl
     private const double CompactMarqueeStartDelayMs = 900;
     private const double CompactMarqueeSpeedPixelsPerSecond = 50;
     private const double CompactMarqueeOverflowTolerance = 4;
+    private const double CompactActionTrailingPadding = 2;
+    private const double CompactReorderHandleWidth = 18;
 
     /// <summary>
     /// Content hosted below the title area. Future widget kinds should provide their body through this slot.
@@ -117,6 +119,7 @@ public sealed partial class WidgetShell : UserControl
     private Storyboard? _hideButtonsStoryboard;
     private Storyboard? _overlayHandleVisualStoryboard;
     private Storyboard? _compactLiveStoryboard;
+    private Storyboard? _compactReorderHandleStoryboard;
     private DispatcherQueueTimer? _compactMarqueeDelayTimer;
     private DispatcherQueueTimer? _compactMarqueeFrameTimer;
     private TranslateTransform? _rightButtonsTransform;
@@ -140,9 +143,16 @@ public sealed partial class WidgetShell : UserControl
     private bool _isCompactKeyboardFocused;
     private bool _usesSmartCompactBehavior;
     private bool _showCompactSummary;
+    private bool _isPointerOverCompactIdentity;
+    private bool _isPointerOverCompactExpansionZone;
     private bool _isPointerOverCompactActions;
+    private bool _isPointerOverCompactActionTrigger;
+    private bool _isPointerOverCompactReorderHandle;
+    private bool _isCompactActionRegionReported;
     private bool _isCompactTransitionActive;
     private bool _isDragHandlePressed;
+    private bool _isCompactMoveHandlePress;
+    private bool _isCompactReorderEnabled;
     private bool _isPointerOverDragHandle;
     private DragHandleClickAction _pendingDragHandleClickAction;
     private bool _hasDragHandlePressMoved;
@@ -170,18 +180,20 @@ public sealed partial class WidgetShell : UserControl
     public event EventHandler<RoutedEventArgs>? CloseRequested;
     public event EventHandler<RoutedEventArgs>? CollapseRequested;
     public event EventHandler<RoutedEventArgs>? ExpandRequested;
+    public event EventHandler<RoutedEventArgs>? CompactBodyExpandRequested;
     public event EventHandler<RoutedEventArgs>? CompactPreviousRequested;
     public event EventHandler<RoutedEventArgs>? CompactPrimaryActionRequested;
     public event EventHandler<RoutedEventArgs>? CompactPlayPauseRequested;
     public event EventHandler<RoutedEventArgs>? CompactNextRequested;
     public event EventHandler? CompactPointerEntered;
     public event EventHandler? CompactPointerExited;
+    public event EventHandler? CompactExpansionPointerEntered;
+    public event EventHandler? CompactExpansionPointerExited;
     public event EventHandler? CompactPointerPressed;
     public event EventHandler? CompactActionPointerEntered;
     public event EventHandler? CompactActionPointerExited;
     public event EventHandler? CompactMoveHandlePointerEntered;
     public event EventHandler? CompactMoveHandlePointerExited;
-    public event EventHandler? ExpandedInteractionRequested;
     public event EventHandler? CompactDragEntered;
     public event EventHandler? CompactDragLeft;
     public event EventHandler? CompactDropCompleted;
@@ -199,13 +211,10 @@ public sealed partial class WidgetShell : UserControl
         InitializeComponent();
         CompactTitleIcon.SetCompactPresentationMode(true);
         SetProtectedCursor(CompactIdentityHost, InputSystemCursorShape.SizeAll);
+        SetProtectedCursor(CompactReorderHandle, InputSystemCursorShape.SizeAll);
         ShellRoot.AddHandler(UIElement.DragEnterEvent, new DragEventHandler(ShellRoot_DragEnter), true);
         ShellRoot.AddHandler(UIElement.DragLeaveEvent, new DragEventHandler(ShellRoot_DragLeave), true);
         ShellRoot.AddHandler(UIElement.DropEvent, new DragEventHandler(ShellRoot_Drop), true);
-        ShellRoot.AddHandler(
-            UIElement.PointerPressedEvent,
-            new PointerEventHandler(ShellRoot_PointerPressed),
-            true);
         RightActionButtons.SizeChanged += (_, _) =>
         {
             _rightButtonsTransform = RightActionButtons.RenderTransform as TranslateTransform;
@@ -318,6 +327,8 @@ public sealed partial class WidgetShell : UserControl
     public FrameworkElement OverlayDragHandleElement => OverlayDragHandle;
 
     public FrameworkElement CompactMoveHandleElement => CompactIdentityHost;
+    public FrameworkElement CompactBodyElement => CompactTextContainer;
+    public FrameworkElement CompactReorderHandleElement => CompactReorderHandle;
     public Button MoreActionButton => MoreButton;
     public Button CloseActionButton => CloseButton;
     public FrameworkElement PositionLockActionIcon => PositionLockButtonIcon;
@@ -332,6 +343,17 @@ public sealed partial class WidgetShell : UserControl
     public bool IsOverlayChromeMode => ChromeMode is WidgetChromeMode.Overlay or WidgetChromeMode.Hidden;
 
     public bool IsCollapsed => _isCollapsed;
+
+    public bool IsCompactMoveHandlePress => _isCompactMoveHandlePress;
+
+    public void SetCompactReorderEnabled(bool enabled)
+    {
+        _isCompactReorderEnabled = enabled;
+        CompactReorderHandle.Visibility = enabled ? Visibility.Visible : Visibility.Collapsed;
+        CompactReorderHandle.IsHitTestVisible = enabled && _isCollapsed;
+        UpdateCompactActionRegionWidth();
+        UpdateCompactReorderHandleVisual(animate: false);
+    }
 
     public void SetCompactInteractionMode(bool usesSmartBehavior)
     {
@@ -398,8 +420,13 @@ public sealed partial class WidgetShell : UserControl
     public void SetCollapsed(bool collapsed, string contentMode)
     {
         ResetCompactTransitionVisuals();
+        bool stateChanged = _isCollapsed != collapsed;
         _isCollapsed = collapsed;
-        _isPointerOverCompactActions = false;
+        if (stateChanged)
+        {
+            ResetCompactInteractionRegions();
+        }
+        UpdateCompactInteractionRegionHighlights();
         if (collapsed)
         {
             _isPointerOverDragHandle = false;
@@ -412,6 +439,7 @@ public sealed partial class WidgetShell : UserControl
         ApplyChromeMode();
         UpdateOverlayDragHandleVisual(animate: false);
         ApplyCompactActionVisibility(animate: false);
+        UpdateCompactReorderHandleVisual(animate: false);
         if (collapsed)
         {
             QueueCompactMarquee();
@@ -606,17 +634,18 @@ public sealed partial class WidgetShell : UserControl
             ? (_usesStackedCompactText ? 1 : 6)
             : 0;
 
-        double identitySize = _compactWidthTier switch
+        double identityVisualSize = _compactWidthTier switch
         {
             WidgetCompactWidthTier.Narrow => 24,
             WidgetCompactWidthTier.Wide when _usesStackedCompactText => 36,
             _ when _usesStackedCompactText => 34,
             _ => 28
         };
-        CompactIdentityHost.Width = identitySize;
-        CompactIdentityHost.Height = identitySize;
-        CompactThumbnailHost.Width = identitySize;
-        CompactThumbnailHost.Height = identitySize;
+        double identityHitSize = _compactWidthTier == WidgetCompactWidthTier.Narrow ? 34 : 40;
+        CompactIdentityHost.Width = Math.Max(identityVisualSize, identityHitSize);
+        CompactIdentityHost.Height = Math.Max(identityVisualSize, identityHitSize);
+        CompactThumbnailHost.Width = identityVisualSize;
+        CompactThumbnailHost.Height = identityVisualSize;
         CompactTitleIcon.IconSize = _compactWidthTier == WidgetCompactWidthTier.Narrow
             ? 13
             : _usesStackedCompactText ? 16 : 14;
@@ -643,8 +672,40 @@ public sealed partial class WidgetShell : UserControl
             ? Visibility.Collapsed
             : Visibility.Visible;
 
+        UpdateCompactActionRegionWidth();
         ApplyCompactTextVisibility();
         DispatcherQueue.TryEnqueue(UpdateCompactTextViewportWidths);
+    }
+
+    private void UpdateCompactActionRegionWidth()
+    {
+        Button[] actionButtons =
+        [
+            CompactPrimaryActionButton,
+            CompactPreviousButton,
+            CompactPlayPauseButton,
+            CompactNextButton,
+            CompactExpandButton
+        ];
+        Button[] visibleButtons = actionButtons
+            .Where(button => button.Visibility == Visibility.Visible)
+            .ToArray();
+
+        double buttonWidth = visibleButtons.Sum(button =>
+            double.IsNaN(button.Width)
+                ? Math.Max(0, button.MinWidth)
+                : Math.Max(0, button.Width));
+        double buttonSpacing = Math.Max(0, visibleButtons.Length - 1) * CompactActionHost.Spacing;
+        double trailingWidth = _isCompactReorderEnabled
+            ? CompactReorderHandleWidth + CompactActionTrailingPadding
+            : visibleButtons.Length > 0
+                ? CompactActionTrailingPadding
+                : 0;
+        double actionRegionWidth = buttonWidth + buttonSpacing + trailingWidth;
+
+        CompactActionHost.Margin = new Thickness(0, 0, trailingWidth, 0);
+        CompactActionRegionHighlight.Width = actionRegionWidth;
+        CompactActionRegionTrigger.Width = actionRegionWidth;
     }
 
     private void UpdateCompactTextViewportWidths()
@@ -743,6 +804,8 @@ public sealed partial class WidgetShell : UserControl
     {
         CompactThumbnailHost.CornerRadius = new CornerRadius(_compactMediaCornerRadius);
         CompactTitleIcon.SetSurfaceCornerRadiusOverride(_compactMediaCornerRadius);
+        CompactIdentityRegionHighlight.CornerRadius = new CornerRadius(_compactInnerCornerRadius);
+        CompactActionRegionHighlight.CornerRadius = new CornerRadius(_compactInnerCornerRadius);
 
         foreach (var button in new[]
         {
@@ -867,7 +930,7 @@ public sealed partial class WidgetShell : UserControl
         _compactMarqueeDelayTimer?.Stop();
         if (!_isCollapsed ||
             _compactPresentation?.EnableMarquee != true ||
-            _isPointerOverCompactActions ||
+            IsPointerOverCompactActionRegion() ||
             !SystemAnimationsEnabled())
         {
             return;
@@ -906,7 +969,7 @@ public sealed partial class WidgetShell : UserControl
         StopCompactMarquee(resetDelayTimer: false);
         if (!_isCollapsed ||
             _compactPresentation?.EnableMarquee != true ||
-            _isPointerOverCompactActions ||
+            IsPointerOverCompactActionRegion() ||
             !SystemAnimationsEnabled())
         {
             return;
@@ -1095,6 +1158,7 @@ public sealed partial class WidgetShell : UserControl
         if (_isCollapsed)
         {
             ApplyCompactActionVisibility();
+            UpdateCompactReorderHandleVisual();
             QueueCompactMarquee(500);
             return;
         }
@@ -1115,7 +1179,10 @@ public sealed partial class WidgetShell : UserControl
         CompactPointerExited?.Invoke(this, EventArgs.Empty);
         if (_isCollapsed)
         {
+            ResetCompactInteractionRegions();
+            UpdateCompactInteractionRegionHighlights();
             ApplyCompactActionVisibility();
+            UpdateCompactReorderHandleVisual();
             return;
         }
         bool usesOverlay = ChromeMode is WidgetChromeMode.Overlay or WidgetChromeMode.Hidden;
@@ -1357,7 +1424,8 @@ public sealed partial class WidgetShell : UserControl
 
     private void ApplyCompactActionVisibility(bool animate = true)
     {
-        bool visible = _isCollapsed && (_isPointerOverShell || _isCompactKeyboardFocused);
+        bool visible = _isCollapsed &&
+            (IsPointerOverCompactActionRegion() || _isCompactKeyboardFocused);
         CompactActionHost.IsHitTestVisible = visible;
         if (!animate || !SystemAnimationsEnabled())
         {
@@ -1378,6 +1446,38 @@ public sealed partial class WidgetShell : UserControl
         Storyboard.SetTarget(animation, CompactActionHost);
         Storyboard.SetTargetProperty(animation, "Opacity");
         storyboard.Children.Add(animation);
+        storyboard.Begin();
+    }
+
+    private void UpdateCompactReorderHandleVisual(bool animate = true)
+    {
+        bool visible = _isCompactReorderEnabled &&
+            _isCollapsed &&
+            (_isPointerOverShell || _isDragHandlePressed || _isCompactKeyboardFocused);
+        CompactReorderHandle.IsHitTestVisible = _isCompactReorderEnabled && _isCollapsed;
+        double targetOpacity = visible ? 1 : 0;
+
+        _compactReorderHandleStoryboard?.Stop();
+        if (!animate || !SystemAnimationsEnabled())
+        {
+            CompactReorderHandle.Opacity = targetOpacity;
+            return;
+        }
+
+        var animation = new DoubleAnimation
+        {
+            To = targetOpacity,
+            Duration = new Duration(TimeSpan.FromMilliseconds(visible ? 140 : 100)),
+            EasingFunction = new CubicEase
+            {
+                EasingMode = visible ? EasingMode.EaseOut : EasingMode.EaseIn
+            }
+        };
+        var storyboard = new Storyboard();
+        Storyboard.SetTarget(animation, CompactReorderHandle);
+        Storyboard.SetTargetProperty(animation, "Opacity");
+        storyboard.Children.Add(animation);
+        _compactReorderHandleStoryboard = storyboard;
         storyboard.Begin();
     }
 
@@ -1409,40 +1509,205 @@ public sealed partial class WidgetShell : UserControl
     private void CompactActionHost_PointerEntered(object sender, PointerRoutedEventArgs e)
     {
         _isPointerOverCompactActions = true;
+        UpdateCompactInteractionRegionHighlights();
         StopCompactMarquee();
-        CompactActionPointerEntered?.Invoke(this, EventArgs.Empty);
+        UpdateCompactActionRegionState();
+        ApplyCompactActionVisibility();
     }
 
     private void CompactActionHost_PointerExited(object sender, PointerRoutedEventArgs e)
     {
         _isPointerOverCompactActions = false;
-        QueueCompactMarquee(650);
-        CompactActionPointerExited?.Invoke(this, EventArgs.Empty);
+        QueueCompactActionRegionRefreshAfterExit();
     }
 
     private void CompactIdentityHost_PointerEntered(object sender, PointerRoutedEventArgs e)
     {
-        if (!_isCollapsed)
+        if (!_isCollapsed || _isPointerOverCompactIdentity)
         {
             return;
         }
 
+        _isPointerOverCompactIdentity = true;
+        UpdateCompactInteractionRegionHighlights();
         StopCompactMarquee();
         CompactMoveHandlePointerEntered?.Invoke(this, EventArgs.Empty);
     }
 
     private void CompactIdentityHost_PointerExited(object sender, PointerRoutedEventArgs e)
     {
-        if (!_isCollapsed)
+        if (!_isPointerOverCompactIdentity)
         {
             return;
         }
 
+        _isPointerOverCompactIdentity = false;
+        UpdateCompactInteractionRegionHighlights();
         CompactMoveHandlePointerExited?.Invoke(this, EventArgs.Empty);
         if (_isPointerOverShell)
         {
             QueueCompactMarquee(650);
         }
+    }
+
+    private void CompactReorderHandle_PointerEntered(object sender, PointerRoutedEventArgs e)
+    {
+        if (!_isCollapsed || !_isCompactReorderEnabled)
+        {
+            return;
+        }
+
+        _isPointerOverCompactReorderHandle = true;
+        UpdateCompactInteractionRegionHighlights();
+        CompactReorderGlyph.Opacity = 0.92;
+        StopCompactMarquee();
+        UpdateCompactActionRegionState();
+        ApplyCompactActionVisibility();
+    }
+
+    private void CompactReorderHandle_PointerExited(object sender, PointerRoutedEventArgs e)
+    {
+        _isPointerOverCompactReorderHandle = false;
+        CompactReorderGlyph.Opacity = 0.58;
+        if (!_isCollapsed || !_isCompactReorderEnabled)
+        {
+            return;
+        }
+
+        QueueCompactActionRegionRefreshAfterExit();
+    }
+
+    private void CompactTextContainer_PointerEntered(object sender, PointerRoutedEventArgs e)
+    {
+        if (!_isCollapsed)
+        {
+            return;
+        }
+
+        bool identityWasActive = _isPointerOverCompactIdentity;
+        bool actionRegionWasActive = IsPointerOverCompactActionRegion();
+        _isPointerOverCompactIdentity = false;
+        _isPointerOverCompactActions = false;
+        _isPointerOverCompactActionTrigger = false;
+        _isPointerOverCompactReorderHandle = false;
+        CompactReorderGlyph.Opacity = 0.58;
+        if (identityWasActive)
+        {
+            CompactMoveHandlePointerExited?.Invoke(this, EventArgs.Empty);
+        }
+        if (actionRegionWasActive)
+        {
+            UpdateCompactActionRegionState();
+        }
+
+        _isPointerOverCompactExpansionZone = true;
+        UpdateCompactInteractionRegionHighlights();
+        ApplyCompactActionVisibility();
+        CompactExpansionPointerEntered?.Invoke(this, EventArgs.Empty);
+    }
+
+    private void CompactActionRegionTrigger_PointerEntered(object sender, PointerRoutedEventArgs e)
+    {
+        if (!_isCollapsed)
+        {
+            return;
+        }
+
+        _isPointerOverCompactActionTrigger = true;
+        StopCompactMarquee();
+        UpdateCompactInteractionRegionHighlights();
+        UpdateCompactActionRegionState();
+        ApplyCompactActionVisibility();
+    }
+
+    private void CompactActionRegionTrigger_PointerExited(object sender, PointerRoutedEventArgs e)
+    {
+        _isPointerOverCompactActionTrigger = false;
+        QueueCompactActionRegionRefreshAfterExit();
+    }
+
+    private void CompactTextContainer_PointerExited(object sender, PointerRoutedEventArgs e)
+    {
+        if (!_isPointerOverCompactExpansionZone)
+        {
+            return;
+        }
+
+        _isPointerOverCompactExpansionZone = false;
+        CompactExpansionPointerExited?.Invoke(this, EventArgs.Empty);
+    }
+
+    private void UpdateCompactInteractionRegionHighlights()
+    {
+        CompactIdentityRegionHighlight.Opacity =
+            _isCollapsed && _isPointerOverCompactIdentity
+                ? 1
+                : 0;
+        CompactActionRegionHighlight.Opacity =
+            _isCollapsed && IsPointerOverCompactActionRegion()
+                ? 1
+                : 0;
+    }
+
+    private void ResetCompactInteractionRegions()
+    {
+        bool identityWasActive = _isPointerOverCompactIdentity;
+        bool expansionWasActive = _isPointerOverCompactExpansionZone;
+        _isPointerOverCompactIdentity = false;
+        _isPointerOverCompactExpansionZone = false;
+        _isPointerOverCompactActions = false;
+        _isPointerOverCompactActionTrigger = false;
+        _isPointerOverCompactReorderHandle = false;
+
+        if (identityWasActive)
+        {
+            CompactMoveHandlePointerExited?.Invoke(this, EventArgs.Empty);
+        }
+
+        if (expansionWasActive)
+        {
+            CompactExpansionPointerExited?.Invoke(this, EventArgs.Empty);
+        }
+
+        UpdateCompactActionRegionState();
+    }
+
+    private bool IsPointerOverCompactActionRegion() =>
+        _isPointerOverCompactActionTrigger ||
+        _isPointerOverCompactActions ||
+        _isPointerOverCompactReorderHandle;
+
+    private void UpdateCompactActionRegionState()
+    {
+        bool active = _isCollapsed && IsPointerOverCompactActionRegion();
+        if (_isCompactActionRegionReported == active)
+        {
+            return;
+        }
+
+        _isCompactActionRegionReported = active;
+        if (active)
+        {
+            CompactActionPointerEntered?.Invoke(this, EventArgs.Empty);
+        }
+        else
+        {
+            CompactActionPointerExited?.Invoke(this, EventArgs.Empty);
+        }
+    }
+
+    private void QueueCompactActionRegionRefreshAfterExit()
+    {
+        DispatcherQueue.TryEnqueue(() =>
+        {
+            UpdateCompactInteractionRegionHighlights();
+            UpdateCompactActionRegionState();
+            ApplyCompactActionVisibility();
+            if (!IsPointerOverCompactActionRegion())
+            {
+                QueueCompactMarquee(650);
+            }
+        });
     }
 
     private void CollapsedChromeLayer_GotFocus(object sender, RoutedEventArgs e)
@@ -1573,22 +1838,30 @@ public sealed partial class WidgetShell : UserControl
             return;
         }
 
+        bool startsWindowDrag = true;
         if (_isCollapsed)
         {
             StopCompactMarquee();
             CompactPointerPressed?.Invoke(this, EventArgs.Empty);
             bool pressedMoveHandle = e.OriginalSource is DependencyObject moveSource &&
                 IsWithin(moveSource, CompactIdentityHost);
-            _pendingDragHandleClickAction = pressedMoveHandle
+            bool pressedReorderHandle = _isCompactReorderEnabled &&
+                e.OriginalSource is DependencyObject reorderSource &&
+                IsWithin(reorderSource, CompactReorderHandle);
+            _isCompactMoveHandlePress = pressedMoveHandle;
+            startsWindowDrag = pressedMoveHandle || pressedReorderHandle;
+            _pendingDragHandleClickAction = startsWindowDrag
                 ? DragHandleClickAction.None
                 : DragHandleClickAction.Expand;
         }
         else if (_isCollapseActionAvailable && IsOverlayChromeMode)
         {
+            _isCompactMoveHandlePress = false;
             _pendingDragHandleClickAction = DragHandleClickAction.Collapse;
         }
         else
         {
+            _isCompactMoveHandlePress = false;
             _pendingDragHandleClickAction = DragHandleClickAction.None;
         }
 
@@ -1597,8 +1870,12 @@ public sealed partial class WidgetShell : UserControl
         _isDragHandlePressed = true;
         DragHandleElement.CapturePointer(e.Pointer);
         UpdateOverlayDragHandleVisual();
+        UpdateCompactReorderHandleVisual();
         SetOverlayChromeVisible(true);
-        DragHandlePointerPressed?.Invoke(this, e);
+        if (startsWindowDrag)
+        {
+            DragHandlePointerPressed?.Invoke(this, e);
+        }
     }
 
     private void OverlayDragHandle_PointerMoved(object sender, PointerRoutedEventArgs e)
@@ -1627,7 +1904,7 @@ public sealed partial class WidgetShell : UserControl
         EndDragHandlePress(e.Pointer);
         if (clickAction == DragHandleClickAction.Expand)
         {
-            ExpandRequested?.Invoke(this, e);
+            CompactBodyExpandRequested?.Invoke(this, e);
         }
         else if (clickAction == DragHandleClickAction.Collapse)
         {
@@ -1653,8 +1930,10 @@ public sealed partial class WidgetShell : UserControl
         _isDragHandlePressed = false;
         _pendingDragHandleClickAction = DragHandleClickAction.None;
         _hasDragHandlePressMoved = false;
+        _isCompactMoveHandlePress = false;
         DragHandleElement.ReleasePointerCapture(pointer);
         UpdateOverlayDragHandleVisual();
+        UpdateCompactReorderHandleVisual();
         SetOverlayChromeVisible(_isPointerOverShell);
     }
 
@@ -1716,16 +1995,6 @@ public sealed partial class WidgetShell : UserControl
             "ProtectedCursor",
             System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
         property?.SetValue(element, InputSystemCursor.Create(shape));
-    }
-
-    private void ShellRoot_PointerPressed(object sender, PointerRoutedEventArgs e)
-    {
-        if (_isCollapsed || !e.GetCurrentPoint(ShellRoot).Properties.IsLeftButtonPressed)
-        {
-            return;
-        }
-
-        ExpandedInteractionRequested?.Invoke(this, EventArgs.Empty);
     }
 
     private static bool IsWithin(DependencyObject source, DependencyObject target)

@@ -34,6 +34,22 @@ public sealed class SettingsSynchronizationTests
         settingsService.SettingsChanged += () => settingsChanged = true;
 
         settingsService.Settings.WidgetCapsuleModeEnabled = true;
+        settingsService.Settings.WidgetCompactWidthMode =
+            SettingsService.WidgetCompactWidthModeIndependent;
+        settingsService.Settings.WidgetCapsuleArrangementMode =
+            SettingsService.WidgetCapsuleArrangementBar;
+        settingsService.Settings.WidgetCapsuleBarPlacement =
+            SettingsService.WidgetCapsuleBarPlacementRight;
+        settingsService.Settings.WidgetCapsuleBarDirection =
+            SettingsService.WidgetCapsuleBarDirectionVertical;
+        settingsService.Settings.WidgetCapsuleBarSpacing = 12;
+        settingsService.Settings.WidgetCapsuleBarOrder = ["weather", "todo"];
+        settingsService.Settings.WidgetCapsuleFreePlacements["todo"] = new DeskBox.Models.WidgetCompactPlacement
+        {
+            X = 120,
+            Y = 80,
+            PositionAnchor = WidgetPositionAnchors.LeftTop
+        };
         settingsService.Settings.TodoShowThisWeekTab = true;
         settingsService.Settings.TodoDefaultFilter = SettingsService.TodoDefaultFilterThisWeek;
         settingsService.Settings.WeatherSkin = SettingsService.WeatherSkinRich;
@@ -46,8 +62,45 @@ public sealed class SettingsSynchronizationTests
         await reloadedService.LoadAsync();
 
         Assert.True(reloadedService.Settings.WidgetCapsuleModeEnabled);
+        Assert.Equal(
+            SettingsService.WidgetCompactWidthModeIndependent,
+            reloadedService.Settings.WidgetCompactWidthMode);
+        Assert.Equal(
+            SettingsService.WidgetCapsuleArrangementBar,
+            reloadedService.Settings.WidgetCapsuleArrangementMode);
+        Assert.Equal(
+            SettingsService.WidgetCapsuleBarPlacementRight,
+            reloadedService.Settings.WidgetCapsuleBarPlacement);
+        Assert.Equal(
+            SettingsService.WidgetCapsuleBarDirectionVertical,
+            reloadedService.Settings.WidgetCapsuleBarDirection);
+        Assert.Equal(12d, reloadedService.Settings.WidgetCapsuleBarSpacing);
+        Assert.Equal(new[] { "weather", "todo" }, reloadedService.Settings.WidgetCapsuleBarOrder);
+        Assert.Equal(120d, reloadedService.Settings.WidgetCapsuleFreePlacements["todo"].X);
         Assert.Equal(SettingsService.TodoDefaultFilterThisWeek, reloadedService.Settings.TodoDefaultFilter);
         Assert.Equal(SettingsService.WeatherSkinRich, reloadedService.Settings.WeatherSkin);
+    }
+
+    [Fact]
+    public async Task LegacyCapsuleArrangementMigratesToWidgetBarDirection()
+    {
+        using var scope = new TempSettingsScope();
+        var settingsService = new SettingsService(scope.RootPath);
+        settingsService.Settings.WidgetCapsuleArrangementMode =
+            SettingsService.WidgetCapsuleArrangementVertical;
+        settingsService.Settings.WidgetCapsuleBarOrder = ["legacy-one", "legacy-two"];
+        await settingsService.SaveAsync(notifySubscribers: false);
+
+        var reloadedService = new SettingsService(scope.RootPath);
+        await reloadedService.LoadAsync();
+
+        Assert.Equal(
+            SettingsService.WidgetCapsuleArrangementBar,
+            reloadedService.Settings.WidgetCapsuleArrangementMode);
+        Assert.Equal(
+            SettingsService.WidgetCapsuleBarDirectionVertical,
+            reloadedService.Settings.WidgetCapsuleBarDirection);
+        Assert.Empty(reloadedService.Settings.WidgetCapsuleBarOrder);
     }
 
     private sealed class TempSettingsScope : IDisposable

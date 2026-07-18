@@ -15,6 +15,7 @@ public static class WidgetCompactBoundsCalculator
 {
     public const double MinWidth = 144;
     public const double MaxWidth = 480;
+    public const double MaxAlignedWidth = 1200;
     public const double MinimalWidth = 172;
     public const double SummaryWidth = 248;
     public const double SmartWidth = 272;
@@ -30,10 +31,15 @@ public static class WidgetCompactBoundsCalculator
         double dpiScale,
         string? contentMode,
         WidgetKind widgetKind = WidgetKind.File,
-        double? compactWidth = null)
+        double? compactWidth = null,
+        bool clampCustomWidth = true)
     {
         double scale = double.IsFinite(dpiScale) && dpiScale > 0 ? dpiScale : 1;
-        double logicalWidth = ResolveLogicalWidth(contentMode, widgetKind, compactWidth);
+        double logicalWidth = ResolveLogicalWidth(
+            contentMode,
+            widgetKind,
+            compactWidth,
+            clampCustomWidth);
         int width = Math.Max(1, (int)Math.Round(logicalWidth * scale));
         int height = Math.Max(1, (int)Math.Round(ResolveLogicalHeight(contentMode, widgetKind) * scale));
         bool anchorRight = positionAnchor is WidgetPositionAnchors.RightTop or WidgetPositionAnchors.RightBottom;
@@ -47,8 +53,12 @@ public static class WidgetCompactBoundsCalculator
         WidgetConfig config,
         RectInt32 expandedBounds,
         double dpiScale,
-        string? contentMode)
+        string? contentMode,
+        bool alignToExpandedWidth = false)
     {
+        double? compactWidth = alignToExpandedWidth
+            ? config.Width
+            : config.CompactWidth;
         if (config.CompactPlacement is not { } placement)
         {
             return Calculate(
@@ -57,14 +67,19 @@ public static class WidgetCompactBoundsCalculator
                 dpiScale,
                 contentMode,
                 config.WidgetKind,
-                config.CompactWidth);
+                compactWidth,
+                clampCustomWidth: !alignToExpandedWidth);
         }
 
         var placementConfig = new WidgetConfig
         {
             X = placement.X,
             Y = placement.Y,
-            Width = ResolveLogicalWidth(contentMode, config.WidgetKind, config.CompactWidth),
+            Width = ResolveLogicalWidth(
+                contentMode,
+                config.WidgetKind,
+                compactWidth,
+                clampCustomWidth: !alignToExpandedWidth),
             Height = ResolveLogicalHeight(contentMode, config.WidgetKind),
             BoundsCoordinateVersion = placement.BoundsCoordinateVersion,
             PositionAnchor = placement.PositionAnchor,
@@ -82,7 +97,8 @@ public static class WidgetCompactBoundsCalculator
             placement.PositionAnchor,
             resolvedScale,
             placementConfig.Width,
-            placementConfig.Height);
+            placementConfig.Height,
+            clampLogicalWidth: !alignToExpandedWidth);
     }
 
     public static RectInt32 ApplyCompactSizeToResolvedPlacement(
@@ -90,10 +106,14 @@ public static class WidgetCompactBoundsCalculator
         string? positionAnchor,
         double dpiScale,
         double logicalWidth,
-        double logicalHeight = Height)
+        double logicalHeight = Height,
+        bool clampLogicalWidth = true)
     {
         double scale = double.IsFinite(dpiScale) && dpiScale > 0 ? dpiScale : 1;
-        int width = Math.Max(1, (int)Math.Round(ClampLogicalWidth(logicalWidth) * scale));
+        double normalizedWidth = clampLogicalWidth
+            ? ClampLogicalWidth(logicalWidth)
+            : ClampAlignedLogicalWidth(logicalWidth);
+        int width = Math.Max(1, (int)Math.Round(normalizedWidth * scale));
         int height = Math.Max(1, (int)Math.Round(Math.Max(1, logicalHeight) * scale));
         bool anchorRight = positionAnchor is WidgetPositionAnchors.RightTop or WidgetPositionAnchors.RightBottom;
         bool anchorBottom = positionAnchor is WidgetPositionAnchors.LeftBottom or WidgetPositionAnchors.RightBottom;
@@ -125,34 +145,27 @@ public static class WidgetCompactBoundsCalculator
         string? positionAnchor,
         RectInt32 workArea)
     {
-        int width = Math.Min(Math.Max(1, expandedBounds.Width), Math.Max(1, workArea.Width));
-        int height = Math.Min(Math.Max(1, expandedBounds.Height), Math.Max(1, workArea.Height));
-        bool anchorRight = positionAnchor is WidgetPositionAnchors.RightTop or WidgetPositionAnchors.RightBottom;
-        bool anchorBottom = positionAnchor is WidgetPositionAnchors.LeftBottom or WidgetPositionAnchors.RightBottom;
-        int x = anchorRight
-            ? compactBounds.X + compactBounds.Width - width
-            : compactBounds.X;
-        int y = anchorBottom
-            ? compactBounds.Y + compactBounds.Height - height
-            : compactBounds.Y;
-
-        int maxX = workArea.X + workArea.Width - width;
-        int maxY = workArea.Y + workArea.Height - height;
-        return new RectInt32(
-            Math.Clamp(x, workArea.X, maxX),
-            Math.Clamp(y, workArea.Y, maxY),
-            width,
-            height);
+        WidgetCompactExpansionAnchor anchor =
+            WidgetCompactExpansionCalculator.FromPositionAnchor(positionAnchor) ??
+            WidgetCompactExpansionAnchor.LeftTop;
+        return WidgetCompactExpansionCalculator.Resolve(
+            compactBounds,
+            new SizeInt32(expandedBounds.Width, expandedBounds.Height),
+            workArea,
+            [anchor]).ExpandedBounds;
     }
 
     public static double ResolveLogicalWidth(
         string? contentMode,
         WidgetKind widgetKind,
-        double? compactWidth = null)
+        double? compactWidth = null,
+        bool clampCustomWidth = true)
     {
         if (compactWidth is { } customWidth && double.IsFinite(customWidth))
         {
-            return ClampLogicalWidth(customWidth);
+            return clampCustomWidth
+                ? ClampLogicalWidth(customWidth)
+                : ClampAlignedLogicalWidth(customWidth);
         }
 
         if (string.Equals(
@@ -188,6 +201,12 @@ public static class WidgetCompactBoundsCalculator
     {
         double finiteWidth = double.IsFinite(width) ? width : SummaryWidth;
         return Math.Clamp(finiteWidth, MinWidth, MaxWidth);
+    }
+
+    public static double ClampAlignedLogicalWidth(double width)
+    {
+        double finiteWidth = double.IsFinite(width) ? width : SummaryWidth;
+        return Math.Clamp(finiteWidth, MinWidth, MaxAlignedWidth);
     }
 
     public static WidgetCompactWidthTier ResolveWidthTier(double logicalWidth)

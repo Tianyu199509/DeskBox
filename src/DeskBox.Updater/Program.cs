@@ -86,7 +86,7 @@ internal static class Program
             startInfo.ArgumentList.Add("/VERYSILENT");
             startInfo.ArgumentList.Add("/SUPPRESSMSGBOXES");
             startInfo.ArgumentList.Add("/NORESTART");
-            startInfo.ArgumentList.Add("/CLOSEAPPLICATIONS");
+            startInfo.ArgumentList.Add("/FORCECLOSEAPPLICATIONS");
         }
 
         Log($"Starting installer: {options.InstallerPath}");

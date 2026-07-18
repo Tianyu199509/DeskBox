@@ -274,6 +274,16 @@ private string[]? _cachedWeatherRefreshIntervalDisplayNames;
             ? settings.WidgetBorderStyle
             : BorderThin;
         _widgetCapsuleModeEnabled = settings.WidgetCapsuleModeEnabled;
+        _selectedWidgetCompactWidthMode = SettingsService.NormalizeWidgetCompactWidthMode(
+            settings.WidgetCompactWidthMode);
+        _selectedWidgetCapsuleArrangementMode = SettingsService.NormalizeWidgetCapsuleArrangementMode(
+            settings.WidgetCapsuleArrangementMode);
+        _widgetCapsuleBarSpacing = SettingsService.NormalizeWidgetCapsuleBarSpacing(
+            settings.WidgetCapsuleBarSpacing);
+        _selectedWidgetCapsuleBarPlacement = SettingsService.NormalizeWidgetCapsuleBarPlacement(
+            settings.WidgetCapsuleBarPlacement);
+        _selectedWidgetCapsuleBarDirection = SettingsService.NormalizeWidgetCapsuleBarDirection(
+            settings.WidgetCapsuleBarDirection);
         _widgetCompactHideSensitiveContent = settings.WidgetCompactHideSensitiveContent;
         _selectedWidgetCollapseBehavior = SettingsService.NormalizeWidgetCollapseBehavior(settings.WidgetCollapseBehavior) == SettingsService.WidgetCollapseBehaviorSmart
             ? SettingsService.WidgetCollapseBehaviorSmart
@@ -284,6 +294,9 @@ private string[]? _cachedWeatherRefreshIntervalDisplayNames;
         _widgetCompactAnimationDurationMs = SettingsService.NormalizeWidgetCompactAnimationDurationMs(settings.WidgetCompactAnimationDurationMs);
         _widgetCompactExpandDelayMs = SettingsService.NormalizeWidgetCompactExpandDelayMs(settings.WidgetCompactExpandDelayMs);
         _widgetCompactCollapseDelayMs = SettingsService.NormalizeWidgetCompactCollapseDelayMs(settings.WidgetCompactCollapseDelayMs);
+        _selectedWidgetCompactHoverResponse = SettingsService.ResolveWidgetCompactHoverResponse(
+            settings.WidgetCompactExpandDelayMs,
+            settings.WidgetCompactCollapseDelayMs);
         _selectedWidgetCompactMediaCornerMode = SettingsService.NormalizeWidgetCompactMediaCornerMode(settings.WidgetCompactMediaCornerMode);
         _selectedWidgetAnimationEffect = NormalizeWidgetAnimationEffect(settings.WidgetAnimationEffect);
         _selectedWidgetAnimationSpeed = NormalizeWidgetAnimationSpeed(settings.WidgetAnimationSpeed);

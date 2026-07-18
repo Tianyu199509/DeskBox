@@ -12,6 +12,10 @@
             <ResourceDictionary.MergedDictionaries>
                 <ResourceDictionary Source="ms-appx:///Styles/SettingsOverviewResources.xaml" />
             </ResourceDictionary.MergedDictionaries>
+            <Style x:Key="CapsuleGroupTitleStyle" TargetType="TextBlock" BasedOn="{StaticResource SettingTitleTextStyle}">
+                <Setter Property="FontSize" Value="15" />
+                <Setter Property="Margin" Value="4,14,4,4" />
+            </Style>
         </ResourceDictionary>
     </UserControl.Resources>
 
@@ -32,74 +36,190 @@
                     IsOn="{Binding WidgetCapsuleModeEnabled, Mode=TwoWay}" />
             </toolkit:SettingsCard>
 
-            <Border Style="{StaticResource SettingsGroupStyle}">
+            <TextBlock Style="{StaticResource CapsuleGroupTitleStyle}" svc:Localized.Key="Settings.Capsule.Group.Common" />
+
+            <toolkit:SettingsCard
+                HorizontalContentAlignment="Right"
+                svc:Localized.DescriptionKey="Settings.CollapseBehavior.Description"
+                svc:Localized.HeaderKey="Settings.CollapseBehavior.Title">
+                <toolkit:SettingsCard.HeaderIcon>
+                    <FontIcon Glyph="&#xE73F;" />
+                </toolkit:SettingsCard.HeaderIcon>
+                <ComboBox
+                    MinWidth="{StaticResource SettingsControlMinWidth}"
+                    IsEnabled="{Binding WidgetCapsuleModeEnabled}"
+                    ItemsSource="{Binding AvailableWidgetCollapseBehaviorOptions}"
+                    controls:SettingsComboBox.Value="{Binding SelectedWidgetCollapseBehavior, Mode=TwoWay}" />
+            </toolkit:SettingsCard>
+
+            <toolkit:SettingsCard
+                HorizontalContentAlignment="Right"
+                svc:Localized.DescriptionKey="Settings.Capsule.WidthMode.Description"
+                svc:Localized.HeaderKey="Settings.Capsule.WidthMode.Title">
+                <toolkit:SettingsCard.HeaderIcon>
+                    <FontIcon Glyph="&#xE8A7;" />
+                </toolkit:SettingsCard.HeaderIcon>
+                <ComboBox
+                    MinWidth="{StaticResource SettingsControlMinWidth}"
+                    IsEnabled="{Binding WidgetCapsuleModeEnabled}"
+                    ItemsSource="{Binding AvailableWidgetCompactWidthModeOptions}"
+                    controls:SettingsComboBox.Value="{Binding SelectedWidgetCompactWidthMode, Mode=TwoWay}" />
+            </toolkit:SettingsCard>
+
+            <toolkit:SettingsCard
+                HorizontalContentAlignment="Right"
+                svc:Localized.DescriptionKey="Settings.CompactContent.Description"
+                svc:Localized.HeaderKey="Settings.CompactContent.Title">
+                <toolkit:SettingsCard.HeaderIcon>
+                    <FontIcon Glyph="&#xE8A5;" />
+                </toolkit:SettingsCard.HeaderIcon>
+                <ComboBox
+                    MinWidth="{StaticResource SettingsControlMinWidth}"
+                    IsEnabled="{Binding WidgetCapsuleModeEnabled}"
+                    ItemsSource="{Binding AvailableWidgetCompactContentModeOptions}"
+                    controls:SettingsComboBox.Value="{Binding SelectedWidgetCompactContentMode, Mode=TwoWay}" />
+            </toolkit:SettingsCard>
+
+            <toolkit:SettingsCard
+                HorizontalContentAlignment="Right"
+                svc:Localized.DescriptionKey="Settings.Capsule.Arrangement.Description"
+                svc:Localized.HeaderKey="Settings.Capsule.Arrangement.Title">
+                <toolkit:SettingsCard.HeaderIcon>
+                    <FontIcon Glyph="&#xE8FD;" />
+                </toolkit:SettingsCard.HeaderIcon>
+                <ComboBox
+                    MinWidth="{StaticResource SettingsControlMinWidth}"
+                    IsEnabled="{Binding WidgetCapsuleModeEnabled}"
+                    ItemsSource="{Binding AvailableWidgetCapsuleArrangementOptions}"
+                    controls:SettingsComboBox.Value="{Binding SelectedWidgetCapsuleArrangementMode, Mode=TwoWay}" />
+            </toolkit:SettingsCard>
+
+            <toolkit:SettingsCard
+                HorizontalContentAlignment="Right"
+                svc:Localized.DescriptionKey="Settings.CompactPrivacy.Description"
+                svc:Localized.HeaderKey="Settings.CompactPrivacy.Title">
+                <toolkit:SettingsCard.HeaderIcon>
+                    <FontIcon Glyph="&#xE72E;" />
+                </toolkit:SettingsCard.HeaderIcon>
+                <ToggleSwitch
+                    MinWidth="0"
+                    OffContent=""
+                    OnContent=""
+                    IsEnabled="{Binding WidgetCapsuleModeEnabled}"
+                    IsOn="{Binding WidgetCompactHideSensitiveContent, Mode=TwoWay}" />
+            </toolkit:SettingsCard>
+
+            <TextBlock Style="{StaticResource CapsuleGroupTitleStyle}" svc:Localized.Key="Settings.Capsule.Group.Details" />
+
+            <Border
+                Style="{StaticResource SettingsGroupStyle}"
+                Visibility="{Binding CapsuleHoverResponseEntryVisibility}">
                 <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="12" Margin="4">
-                    <Button Grid.Column="0" Click="NestedSettingsButton_Click" IsEnabled="{Binding WidgetCapsuleModeEnabled}" Style="{StaticResource DrillDownRowStyle}" Tag="CapsuleBehaviorSettings">
+                    <Button
+                        Grid.Column="0"
+                        Click="NestedSettingsButton_Click"
+                        IsHitTestVisible="{Binding CanOpenWidgetCompactHoverResponseDetails}"
+                        IsTabStop="{Binding CanOpenWidgetCompactHoverResponseDetails}"
+                        Style="{StaticResource DrillDownRowStyle}"
+                        Tag="CapsuleBehaviorSettings">
                         <Grid ColumnDefinitions="Auto,*" ColumnSpacing="12">
-                            <FontIcon Grid.Column="0" FontSize="18" Glyph="&#xE73F;" IsHitTestVisible="False" VerticalAlignment="Center" />
+                            <FontIcon Grid.Column="0" FontSize="18" Glyph="&#xE823;" IsHitTestVisible="False" VerticalAlignment="Center" />
                             <StackPanel Grid.Column="1" IsHitTestVisible="False" Spacing="3" VerticalAlignment="Center">
-                                <TextBlock Style="{StaticResource SettingTitleTextStyle}" svc:Localized.Key="Settings.CollapseBehavior.Title" />
-                                <TextBlock Style="{StaticResource SettingDescriptionTextStyle}" Text="{Binding SelectedWidgetCollapseBehaviorText}" />
+                                <TextBlock Style="{StaticResource SettingTitleTextStyle}" svc:Localized.Key="Settings.Capsule.HoverResponse.Title" />
+                                <TextBlock Style="{StaticResource SettingDescriptionTextStyle}" svc:Localized.Key="Settings.Capsule.HoverResponse.Description" />
                             </StackPanel>
                         </Grid>
                     </Button>
                     <ComboBox
                         Grid.Column="1"
                         MinWidth="{StaticResource SettingsControlMinWidth}"
-                        IsEnabled="{Binding WidgetCapsuleModeEnabled}"
                         VerticalAlignment="Center"
-                        ItemsSource="{Binding AvailableWidgetCollapseBehaviorOptions}"
-                        controls:SettingsComboBox.Value="{Binding SelectedWidgetCollapseBehavior, Mode=TwoWay}" />
-                    <FontIcon Grid.Column="2" FontSize="12" Glyph="&#xE76C;" IsHitTestVisible="False" VerticalAlignment="Center" />
+                        IsEnabled="{Binding WidgetCapsuleModeEnabled}"
+                        ItemsSource="{Binding AvailableWidgetCompactHoverResponseOptions}"
+                        controls:SettingsComboBox.Value="{Binding SelectedWidgetCompactHoverResponse, Mode=TwoWay}" />
+                    <FontIcon
+                        Grid.Column="2"
+                        FontSize="12"
+                        Glyph="&#xE76C;"
+                        IsHitTestVisible="False"
+                        VerticalAlignment="Center"
+                        Visibility="{Binding WidgetCompactHoverResponseCustomVisibility}" />
                 </Grid>
             </Border>
 
-            <Border Style="{StaticResource SettingsGroupStyle}">
+            <Border
+                Style="{StaticResource SettingsGroupStyle}"
+                Visibility="{Binding CapsuleArrangementEntryVisibility}">
                 <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="12" Margin="4">
-                    <Button Grid.Column="0" Click="NestedSettingsButton_Click" IsEnabled="{Binding WidgetCapsuleModeEnabled}" Style="{StaticResource DrillDownRowStyle}" Tag="CapsuleContentSettings">
+                    <Button
+                        Grid.Column="0"
+                        Click="NestedSettingsButton_Click"
+                        IsHitTestVisible="{Binding IsWidgetCapsuleBarEnabled}"
+                        IsTabStop="{Binding IsWidgetCapsuleBarEnabled}"
+                        Style="{StaticResource DrillDownRowStyle}"
+                        Tag="CapsuleArrangementSettings">
                         <Grid ColumnDefinitions="Auto,*" ColumnSpacing="12">
-                            <FontIcon Grid.Column="0" FontSize="18" Glyph="&#xE8A5;" IsHitTestVisible="False" VerticalAlignment="Center" />
+                            <FontIcon Grid.Column="0" FontSize="18" Glyph="&#xE707;" IsHitTestVisible="False" VerticalAlignment="Center" />
                             <StackPanel Grid.Column="1" IsHitTestVisible="False" Spacing="3" VerticalAlignment="Center">
-                                <TextBlock Style="{StaticResource SettingTitleTextStyle}" svc:Localized.Key="Settings.CompactContent.Title" />
-                                <TextBlock Style="{StaticResource SettingDescriptionTextStyle}" Text="{Binding SelectedWidgetCompactContentModeText}" />
+                                <TextBlock Style="{StaticResource SettingTitleTextStyle}" svc:Localized.Key="Settings.Capsule.ArrangementDetails.Title" />
+                                <TextBlock Style="{StaticResource SettingDescriptionTextStyle}" Text="{Binding CapsuleArrangementDetailsSummaryText}" />
                             </StackPanel>
                         </Grid>
                     </Button>
                     <ComboBox
                         Grid.Column="1"
                         MinWidth="{StaticResource SettingsControlMinWidth}"
-                        IsEnabled="{Binding WidgetCapsuleModeEnabled}"
                         VerticalAlignment="Center"
-                        ItemsSource="{Binding AvailableWidgetCompactContentModeOptions}"
-                        controls:SettingsComboBox.Value="{Binding SelectedWidgetCompactContentMode, Mode=TwoWay}" />
+                        IsEnabled="{Binding IsWidgetCapsuleBarEnabled}"
+                        ItemsSource="{Binding AvailableWidgetCapsuleBarPlacementOptions}"
+                        controls:SettingsComboBox.Value="{Binding SelectedWidgetCapsuleBarPlacement, Mode=TwoWay}" />
                     <FontIcon Grid.Column="2" FontSize="12" Glyph="&#xE76C;" IsHitTestVisible="False" VerticalAlignment="Center" />
                 </Grid>
             </Border>
 
             <Border Style="{StaticResource SettingsGroupStyle}">
                 <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="12" Margin="4">
-                    <Button Grid.Column="0" Click="NestedSettingsButton_Click" IsEnabled="{Binding WidgetCapsuleModeEnabled}" Style="{StaticResource DrillDownRowStyle}" Tag="CapsuleAnimationSettings">
+                    <Button
+                        Grid.Column="0"
+                        Click="NestedSettingsButton_Click"
+                        IsHitTestVisible="{Binding CanOpenWidgetCompactAnimationDetails}"
+                        IsTabStop="{Binding CanOpenWidgetCompactAnimationDetails}"
+                        Style="{StaticResource DrillDownRowStyle}"
+                        Tag="CapsuleAnimationSettings">
                         <Grid ColumnDefinitions="Auto,*" ColumnSpacing="12">
                             <FontIcon Grid.Column="0" FontSize="18" Glyph="&#xE7B5;" IsHitTestVisible="False" VerticalAlignment="Center" />
                             <StackPanel Grid.Column="1" IsHitTestVisible="False" Spacing="3" VerticalAlignment="Center">
                                 <TextBlock Style="{StaticResource SettingTitleTextStyle}" svc:Localized.Key="Settings.Capsule.Animation.Title" />
-                                <TextBlock Style="{StaticResource SettingDescriptionTextStyle}" Text="{Binding SelectedWidgetCompactAnimationEffectText}" />
+                                <TextBlock Style="{StaticResource SettingDescriptionTextStyle}" svc:Localized.Key="Settings.Capsule.Animation.Description" />
                             </StackPanel>
                         </Grid>
                     </Button>
                     <ComboBox
                         Grid.Column="1"
                         MinWidth="{StaticResource SettingsControlMinWidth}"
-                        IsEnabled="{Binding WidgetCapsuleModeEnabled}"
                         VerticalAlignment="Center"
+                        IsEnabled="{Binding WidgetCapsuleModeEnabled}"
                         ItemsSource="{Binding AvailableWidgetCompactAnimationEffectOptions}"
                         controls:SettingsComboBox.Value="{Binding SelectedWidgetCompactAnimationEffect, Mode=TwoWay}" />
-                    <FontIcon Grid.Column="2" FontSize="12" Glyph="&#xE76C;" IsHitTestVisible="False" VerticalAlignment="Center" />
+                    <FontIcon
+                        Grid.Column="2"
+                        FontSize="12"
+                        Glyph="&#xE76C;"
+                        IsHitTestVisible="False"
+                        VerticalAlignment="Center"
+                        Visibility="{Binding WidgetCompactAnimationCustomVisibility}" />
                 </Grid>
             </Border>
 
-            <Border Style="{StaticResource SettingsGroupStyle}">
-                <Button Click="NestedSettingsButton_Click" IsEnabled="{Binding WidgetCapsuleModeEnabled}" Style="{StaticResource DrillDownRowStyle}" Tag="CapsuleOverridesSettings">
+            <Border
+                Style="{StaticResource SettingsGroupStyle}"
+                Visibility="{Binding CapsuleOverridesEntryVisibility}">
+                <Button
+                    Click="NestedSettingsButton_Click"
+                    IsHitTestVisible="{Binding WidgetCapsuleModeEnabled}"
+                    IsTabStop="{Binding WidgetCapsuleModeEnabled}"
+                    Style="{StaticResource DrillDownRowStyle}"
+                    Tag="CapsuleOverridesSettings">
                     <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="12">
                         <FontIcon Grid.Column="0" FontSize="18" Glyph="&#xE713;" IsHitTestVisible="False" VerticalAlignment="Center" />
                         <StackPanel Grid.Column="1" IsHitTestVisible="False" Spacing="3" VerticalAlignment="Center">

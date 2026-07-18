@@ -304,8 +304,7 @@ public sealed partial class QuickCaptureWidgetWindow
         }
 
         _isCancellingTitleRename = false;
-        BeginCompactInteraction();
-        App.Current.WidgetManager?.BeginWidgetInteraction("quick-title-rename-opened");
+        BeginInteractionLayer("quick-title-rename-opened");
         var editor = CreateTitleRenameEditor();
         QuickCaptureShell.TitleEditorContent = editor;
         DispatcherQueue.TryEnqueue(() =>
@@ -416,19 +415,14 @@ public sealed partial class QuickCaptureWidgetWindow
         }
 
         QuickCaptureShell.TitleEditorContent = null;
-        App.Current.WidgetManager?.EndWidgetInteraction(reason);
         ReleaseInteractionLayer(reason);
     }
 
     private void ShowFlyoutWithElevation(MenuFlyout flyout, FrameworkElement target, Windows.Foundation.Point? position = null)
     {
-        BeginCompactInteraction();
-        ElevateForInteraction();
-        App.Current.WidgetManager?.BeginWidgetInteraction("quick-flyout-opened");
+        BeginInteractionLayer("quick-flyout-opened");
         flyout.Closed += (_, _) =>
         {
-            EndCompactInteraction();
-            App.Current.WidgetManager?.EndWidgetInteraction("quick-flyout-closed");
             ReleaseInteractionLayer("quick-flyout-closed");
         };
 

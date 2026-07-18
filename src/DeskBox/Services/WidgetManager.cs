@@ -53,9 +53,12 @@ internal interface IDesktopWidgetWindow
     WidgetConfig Config { get; }
     IntPtr WindowHandle { get; }
     bool Visible { get; }
+    bool IsCompactArrangementActive { get; }
     Windows.Foundation.Rect AnimationBounds { get; }
     void ApplyAppearancePreview();
     void RestoreBoundsForCurrentTopology();
+    void ApplyCompactArrangement(Windows.Graphics.RectInt32 bounds, bool constrainSize);
+    void PreviewCompactArrangement(Windows.Graphics.RectInt32 bounds);
     void SetTrayAnimationOffsetOverride(double? offsetX, double? offsetY);
     void PrepareTrayShowAnimation();
     void ShowPreparedAtDesktopLayer(bool persistVisibility = true);
@@ -310,6 +313,7 @@ public sealed partial class WidgetManager
         _recycleManagedFolderDeletes = recycleManagedFolderDeletes;
         _widgetRegistry = WidgetRegistry.Default;
         _sessionManager = new WidgetSessionManager(App.LogVerbose);
+        InitializeCapsuleArrangementState();
         _featureWidgetHandlers = CreateFeatureWidgetHandlers();
         _windowProviders = CreateWindowProviders();
         foreach (var kind in FeatureWidgetSettings.FeatureKinds)
@@ -398,6 +402,7 @@ public sealed partial class WidgetManager
     private void OnSettingsChanged()
     {
         ApplyWidgetLayerModeIfChanged();
+        ApplyCapsuleArrangementIfChanged();
 
         foreach (var kind in FeatureWidgetSettings.FeatureKinds)
         {
@@ -1362,6 +1367,7 @@ public sealed partial class WidgetManager
         _themeService.TrackWindow(window);
         _widgets[config.Id] = (window, viewModel);
         _widgetWindowHandles.Add(window.WindowHandle);
+        ApplyCapsuleArrangementIfChanged(force: true);
 
         window.Closed += (_, _) =>
         {
@@ -1477,6 +1483,7 @@ public sealed partial class WidgetManager
         _themeService.TrackWindow(window);
         _contentWidgets[config.Id] = window;
         _widgetWindowHandles.Add(window.WindowHandle);
+        ApplyCapsuleArrangementIfChanged(force: true);
 
         window.Closed += (_, _) =>
         {

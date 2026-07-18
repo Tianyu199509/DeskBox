@@ -177,6 +177,7 @@ public sealed class DeskBoxDataBackupServiceTests : IDisposable
         {
             Language = "zh-CN",
             WidgetCapsuleModeEnabled = true,
+            WidgetCompactWidthMode = SettingsService.WidgetCompactWidthModeIndependent,
             WidgetCompactContentMode = SettingsService.WidgetCompactContentModeSummary,
             FileStacksEnabled = true,
             FileStackGroupBy = SettingsService.FileStackGroupByCustom,
@@ -291,6 +292,9 @@ public sealed class DeskBoxDataBackupServiceTests : IDisposable
             await File.ReadAllTextAsync(Path.Combine(targetData, "settings.json")),
             new JsonSerializerOptions { PropertyNameCaseInsensitive = true })!;
         Assert.True(restoredSettings.WidgetCapsuleModeEnabled);
+        Assert.Equal(
+            SettingsService.WidgetCompactWidthModeIndependent,
+            restoredSettings.WidgetCompactWidthMode);
         Assert.Equal(SettingsService.WidgetCompactContentModeSummary, restoredSettings.WidgetCompactContentMode);
         Assert.True(restoredSettings.FileStacksEnabled);
         Assert.Equal(SettingsService.FileStackUnmatchedOther, restoredSettings.FileStackUnmatchedBehavior);
