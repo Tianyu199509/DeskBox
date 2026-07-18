@@ -909,6 +909,7 @@ public sealed partial class WidgetManager
         _themeService.TrackWindow(window);
         _quickCaptureWidgets[config.Id] = (window, viewModel);
         _widgetWindowHandles.Add(window.WindowHandle);
+        ApplyCapsuleArrangementIfChanged(force: true);
 
         window.Closed += (_, _) =>
         {

@@ -15,21 +15,22 @@ DeskBox is a lightweight WinUI 3 desktop organizer for Windows 11. It creates na
 
 Download the latest installer from [GitHub Releases](https://github.com/Tianyu199509/DeskBox/releases).
 
-Current release: 1.2.9
+Current release: 1.3.0
 
-- [DeskBox_Setup_1.2.9_x64.exe](https://github.com/Tianyu199509/DeskBox/releases/download/v1.2.9/DeskBox_Setup_1.2.9_x64.exe)
+- [DeskBox_Setup_1.3.0_x64.exe](https://github.com/Tianyu199509/DeskBox/releases/download/v1.3.0/DeskBox_Setup_1.3.0_x64.exe)
 
 The installer checks for .NET 10 Runtime x64 and Windows App Runtime 2.2 x64. If either dependency is missing, the setup flow can download and install it for you.
 
-## What's New In 1.2.9
+## What's New In 1.3.0
 
-- **Todo rebuilt around cards and focused editing**: Tasks now open in a dedicated full-widget detail view. The list uses cleaner cards, eight color filters, up to ten text lines, drag sorting, due dates, reminders, recurrence, attachments, and batch actions from the context menu.
-- **Quick Capture upgraded for notes and images**: Notes use a focused body editor with paper styles, image add/replace/preview/copy actions, pinning, created-time visibility, drag sorting in both normal and pinned views, and batch pin, paper, copy, and delete commands.
-- **Responsive Music and Weather layouts**: Widgets now adapt down to 150 x 150. Music uses centered album-art cropping, compact overlay controls, title marquee, and smoother artwork transitions. Playback spectrum code and settings have been removed.
-- **Native-feeling menus and selection**: File, Todo, and Quick Capture menus close immediately after commands. File widgets support multi-selection actions; Todo and Quick Capture distinguish box selection from normal detail navigation.
-- **Window layer and title interaction fixes**: Tray and hotkey activation now raise all widgets consistently and then return Z-order control to Windows. Widget titles support direct rename, double-click editing, and predictable focus behavior.
-- **Settings and reset semantics clarified**: Global reset preserves language, startup, and feature-widget switches while restoring preferences. Feature-widget reset requires confirmation and clears that widget's data and settings. New installs and reset now use Mica, Thin border, Round corners, segmented Todo/Quick Capture tabs, and hidden Todo footer counts.
-- **Performance and reliability**: Reduced cross-widget refreshes, tightened event and cancellation cleanup, improved music-session and settings-window lifetime handling, and expanded regression coverage for Todo, Quick Capture, Weather, and release defaults.
+- **Capsule mode**: Collapse widgets into compact, information-rich surfaces. Expand by click or title-area hover, choose smart/summary/minimal content, hide sensitive text, and keep compact and expanded widths aligned or independent.
+- **Flexible capsule layouts**: Position capsules freely or combine them into an ordered movable bar with floating or edge placement, automatic direction and adjustable spacing. Screen-aware anchors keep expansion and collapse connected to the compact position.
+- **Automatic file stacks**: Group file-widget items by type or date without moving files, or create prioritized custom extension rules with live previews, thresholds, sorting and an unmatched-file policy.
+- **Todo and Quick Capture attachments**: Associate multiple files, link originals or copy them into DeskBox, include localized paths when copying content, configure visible tabs, drag entries onto tabs, and tune preview lines and Enter-key behavior.
+- **Appearance and Music controls**: Added Mica Alt, Base acrylic, material intensity, border color modes and display-density presets. Music can adapt automatically or force Cover/Controls mode.
+- **Windows-style Settings**: Title-bar search, focused detail pages, clearer hierarchy and important options directly on entry cards make advanced configuration easier to discover without crowding the main pages.
+- **Data safety**: Export and restore integrity-checked backups, manage automatic snapshots, recover resilient JSON stores and scan Todo/Quick Capture attachment health.
+- **Interaction reliability**: Improved capsule/stack transitions, drag-to-expand, title-bar actions, resize guides, Z-order, tray show/hide, multi-monitor bounds restoration and rapid repeated interactions.
 
 See the full [changelog](CHANGELOG.md).
 
@@ -37,21 +38,23 @@ See the full [changelog](CHANGELOG.md).
 
 The Windows desktop has been one of the most-used places on the PC for decades, but for many people it also becomes the easiest place to make a mess. DeskBox exists to keep that familiar desktop useful without turning it into something else. Your desktop stays the Windows desktop, and your files stay normal files; DeskBox simply gives you small, tidy places to collect, map, search, edit, and bring things forward.
 
-The project is intentionally built around native Windows behavior. I like the texture and restraint of WinUI, so DeskBox will keep following native Windows patterns wherever practical: WinUI 3 controls, Windows App SDK, DWM corners, acrylic-style surfaces, tray-first behavior, and conservative dependencies. The installer is larger because it carries the WinUI/Windows App SDK world with it, not because DeskBox is trying to become a heavy all-in-one shell.
+The project is intentionally built around native Windows behavior. I like the texture and restraint of WinUI, so DeskBox will keep following native Windows patterns wherever practical: WinUI 3 controls, Windows App SDK, DWM corners, acrylic-style surfaces, tray-first behavior, and conservative dependencies. The installer stays framework-dependent: it checks .NET and Windows App Runtime on the target PC and downloads only a missing dependency.
 
 ## Features
 
 - **Managed desktop widgets**: create file collection widgets backed by a real folder.
 - **Folder mapping**: display an existing folder as a desktop widget without moving its contents.
-- **Todo widget**: keep desktop tasks with quick input, full-screen editing, custom due times, and native-feeling inline controls.
-- **Quick Capture**: keep reusable text, links, screenshots, and recent clipboard content in an optional local-only feature widget.
+- **Todo widget**: keep desktop tasks with due dates, reminders, recurrence, color markers, multiple attachments, configurable views and batch actions.
+- **Quick Capture**: keep reusable text, links, images and files with pinning, paper styles, multiple attachments and focused detail editing.
 - **Music widget**: control playback, switch playback mode, adjust system volume, and use responsive album-art layouts with optional album-color ambience.
-- **Move into managed storage**: dropped files are moved into the managed widget's real storage folder by default.
+- **Capsule mode**: collapse widgets into compact smart summaries, place them independently or combine them into an ordered desktop bar.
+- **Automatic file stacks**: group related file-widget items by type, date or prioritized custom extension rules without moving the actual files.
+- **Copy into managed storage**: dropped files are copied into the managed widget's real storage folder by default; move remains available in Settings.
 - **Tray controls**: create widgets, map folders, show or hide all widgets, temporarily raise widgets, open managed storage, open Settings, toggle startup launch, and exit.
 - **Global hotkey**: enable a keyboard shortcut for quickly showing, hiding, or raising widgets.
-- **Native file operations**: drag in, drag out, paste, cut, rename, delete, open, reveal in Explorer, and use keyboard shortcuts.
-- **Appearance controls**: tune theme, opacity, DWM corner style, icon size, text size, spacing, filename width, title style, list details, and cover ambience.
-- **Storage maintenance**: change the default managed storage root, pin it to Quick Access, clean orphan folders, and confirm actions that may affect user files.
+- **Native file operations**: drag in, drag out, paste, cut, rename, delete, open, reveal in Explorer, use keyboard shortcuts, and preview through a running QuickLook instance with Space.
+- **Appearance controls**: tune native material, intensity, opacity, border color/style, DWM corners, display density, icon/text size, title style and cover ambience.
+- **Data and storage maintenance**: export or restore backups, inspect automatic snapshots and attachment health, change the managed storage root, pin it to Quick Access, and recover orphan folders.
 
 ## Screenshots
 
@@ -134,7 +137,7 @@ dotnet publish .\src\DeskBox\DeskBox.csproj --configuration Release -p:Platform=
 Installer output:
 
 ```text
-Output\DeskBox_Setup_1.2.9_x64.exe
+Output\DeskBox_Setup_1.3.0_x64.exe
 ```
 
 ## Project Structure

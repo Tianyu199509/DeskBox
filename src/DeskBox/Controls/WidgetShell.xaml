@@ -164,6 +164,7 @@
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="0" />
                 <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
 
@@ -194,10 +195,30 @@
                     Visibility="Collapsed">
                     <Image x:Name="CompactThumbnail" Stretch="UniformToFill" />
                 </Border>
+                <Border
+                    x:Name="CompactIdentityRegionHighlight"
+                    Background="{ThemeResource SubtleFillColorSecondaryBrush}"
+                    BorderBrush="{ThemeResource AccentFillColorDefaultBrush}"
+                    BorderThickness="1"
+                    IsHitTestVisible="False"
+                    Opacity="0" />
             </Grid>
 
-            <Grid x:Name="CompactTextContainer" Grid.Column="1" MinWidth="0" Margin="6,0,7,0" VerticalAlignment="Center">
-                <StackPanel x:Name="CompactTextHost" Orientation="Horizontal" Spacing="6">
+            <Grid
+                x:Name="CompactTextContainer"
+                Grid.Column="1"
+                MinWidth="0"
+                Margin="6,0,7,0"
+                VerticalAlignment="Stretch"
+                Background="Transparent"
+                PointerEntered="CompactTextContainer_PointerEntered"
+                PointerExited="CompactTextContainer_PointerExited">
+                <StackPanel
+                    x:Name="CompactTextHost"
+                    HorizontalAlignment="Left"
+                    VerticalAlignment="Center"
+                    Orientation="Horizontal"
+                    Spacing="6">
                     <StackPanel.RenderTransform>
                         <TranslateTransform x:Name="CompactTextTransform" />
                     </StackPanel.RenderTransform>
@@ -255,12 +276,79 @@
                 </StackPanel>
             </Grid>
 
+            <Border
+                x:Name="CompactActionRegionHighlight"
+                Grid.Column="1"
+                Grid.ColumnSpan="3"
+                Width="24"
+                Margin="0,1,0,1"
+                HorizontalAlignment="Right"
+                Background="{ThemeResource SubtleFillColorSecondaryBrush}"
+                BorderBrush="{ThemeResource AccentFillColorDefaultBrush}"
+                BorderThickness="1"
+                Canvas.ZIndex="40"
+                IsHitTestVisible="False"
+                Opacity="0" />
+
+            <Border
+                x:Name="CompactActionRegionTrigger"
+                Grid.Column="1"
+                Grid.ColumnSpan="3"
+                Width="24"
+                HorizontalAlignment="Right"
+                Background="#01000000"
+                Canvas.ZIndex="41"
+                PointerEntered="CompactActionRegionTrigger_PointerEntered"
+                PointerExited="CompactActionRegionTrigger_PointerExited" />
+
+            <Border
+                x:Name="CompactReorderHandle"
+                Grid.Column="3"
+                Width="18"
+                Height="28"
+                Margin="0,0,2,0"
+                HorizontalAlignment="Center"
+                VerticalAlignment="Center"
+                Background="#01000000"
+                Canvas.ZIndex="44"
+                Opacity="0"
+                PointerEntered="CompactReorderHandle_PointerEntered"
+                PointerExited="CompactReorderHandle_PointerExited"
+                Visibility="Collapsed">
+                <Grid
+                    x:Name="CompactReorderGlyph"
+                    Width="7"
+                    Height="12"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Center"
+                    Opacity="0.58">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="*" />
+                        <RowDefinition Height="*" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <Ellipse Width="2" Height="2" HorizontalAlignment="Center" VerticalAlignment="Center" Fill="{ThemeResource TextFillColorSecondaryBrush}" />
+                    <Ellipse Grid.Column="1" Width="2" Height="2" HorizontalAlignment="Center" VerticalAlignment="Center" Fill="{ThemeResource TextFillColorSecondaryBrush}" />
+                    <Ellipse Grid.Row="1" Width="2" Height="2" HorizontalAlignment="Center" VerticalAlignment="Center" Fill="{ThemeResource TextFillColorSecondaryBrush}" />
+                    <Ellipse Grid.Row="1" Grid.Column="1" Width="2" Height="2" HorizontalAlignment="Center" VerticalAlignment="Center" Fill="{ThemeResource TextFillColorSecondaryBrush}" />
+                    <Ellipse Grid.Row="2" Width="2" Height="2" HorizontalAlignment="Center" VerticalAlignment="Center" Fill="{ThemeResource TextFillColorSecondaryBrush}" />
+                    <Ellipse Grid.Row="2" Grid.Column="1" Width="2" Height="2" HorizontalAlignment="Center" VerticalAlignment="Center" Fill="{ThemeResource TextFillColorSecondaryBrush}" />
+                </Grid>
+            </Border>
+
             <StackPanel
                 x:Name="CompactActionHost"
-                Grid.Column="2"
+                Grid.Column="1"
+                Grid.ColumnSpan="3"
+                Margin="0,0,2,0"
                 HorizontalAlignment="Right"
                 VerticalAlignment="Center"
                 Orientation="Horizontal"
+                Canvas.ZIndex="43"
                 Opacity="0"
                 PointerEntered="CompactActionHost_PointerEntered"
                 PointerExited="CompactActionHost_PointerExited"
@@ -304,7 +392,7 @@
 
             <Grid
                 x:Name="CompactLiveIndicatorHost"
-                Grid.ColumnSpan="3"
+                Grid.ColumnSpan="4"
                 Height="2"
                 Margin="8,0,8,2"
                 VerticalAlignment="Bottom"

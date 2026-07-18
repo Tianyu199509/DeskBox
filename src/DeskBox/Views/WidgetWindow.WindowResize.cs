@@ -145,6 +145,7 @@ public sealed partial class WidgetWindow
 
         var proposed = new Windows.Graphics.RectInt32(newX, newY, newWidth, newHeight);
         var snapped = App.Current.ResizeGuideOverlay.UpdateGuidesAndSnap(proposed, _resizeDirection);
+        snapped = AnchorExpandedResizeBounds(snapped);
         ApplyWindowBounds(snapped.X, snapped.Y, snapped.Width, snapped.Height, persist: false);
         e.Handled = true;
     }
@@ -157,10 +158,10 @@ public sealed partial class WidgetWindow
         }
 
         _isResizing = false;
-        _resizeDirection = string.Empty;
         element.ReleasePointerCapture(e.Pointer);
         App.Current.ResizeGuideOverlay.EndResize();
         PersistCompletedWidgetResize(GetActualWindowBounds());
+        _resizeDirection = string.Empty;
         EndWidgetBoundsInteraction();
         ReleaseInteractionLayer("file-resize-ended");
         _displayChangeWatcher?.ResumeRestore();
@@ -175,10 +176,10 @@ public sealed partial class WidgetWindow
         }
 
         _isResizing = false;
-        _resizeDirection = string.Empty;
         _dragCaptureElement = null;
         App.Current?.ResizeGuideOverlay.EndResize();
         PersistCompletedWidgetResize(GetActualWindowBounds());
+        _resizeDirection = string.Empty;
         EndWidgetBoundsInteraction();
         ReleaseInteractionLayer("file-resize-capture-lost");
         _displayChangeWatcher?.ResumeRestore();

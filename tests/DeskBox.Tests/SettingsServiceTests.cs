@@ -490,6 +490,40 @@ public sealed class SettingsServiceTests : IDisposable
 
     [Theory]
     [InlineData(
+        SettingsService.SensitiveWidgetCompactExpandDelayMs,
+        SettingsService.SensitiveWidgetCompactCollapseDelayMs,
+        SettingsService.WidgetCompactHoverResponseSensitive)]
+    [InlineData(
+        SettingsService.DefaultWidgetCompactExpandDelayMs,
+        SettingsService.DefaultWidgetCompactCollapseDelayMs,
+        SettingsService.WidgetCompactHoverResponseBalanced)]
+    [InlineData(
+        SettingsService.PreventAccidentalWidgetCompactExpandDelayMs,
+        SettingsService.PreventAccidentalWidgetCompactCollapseDelayMs,
+        SettingsService.WidgetCompactHoverResponsePreventAccidental)]
+    [InlineData(275, 735, SettingsService.WidgetCompactHoverResponseCustom)]
+    public void ResolveWidgetCompactHoverResponse_MapsStoredDelaysToPreset(
+        int expandDelayMs,
+        int collapseDelayMs,
+        string expected)
+    {
+        Assert.Equal(
+            expected,
+            SettingsService.ResolveWidgetCompactHoverResponse(expandDelayMs, collapseDelayMs));
+    }
+
+    [Theory]
+    [InlineData(SettingsService.WidgetCompactHoverResponseSensitive)]
+    [InlineData(SettingsService.WidgetCompactHoverResponseBalanced)]
+    [InlineData(SettingsService.WidgetCompactHoverResponsePreventAccidental)]
+    [InlineData(SettingsService.WidgetCompactHoverResponseCustom)]
+    public void NormalizeWidgetCompactHoverResponse_PreservesKnownPreset(string value)
+    {
+        Assert.Equal(value, SettingsService.NormalizeWidgetCompactHoverResponse(value));
+    }
+
+    [Theory]
+    [InlineData(
         SettingsService.WidgetAnimationEffectSlideLeftFade,
         SettingsService.WidgetAnimationSlideDirectionLeft)]
     [InlineData(
@@ -605,6 +639,7 @@ public sealed class SettingsServiceTests : IDisposable
         {
             WidgetAnimationEffect = SettingsService.WidgetAnimationEffectFade,
             WidgetCapsuleModeEnabled = true,
+            WidgetCompactWidthMode = SettingsService.WidgetCompactWidthModeIndependent,
             WidgetCompactAnimationEffect = SettingsService.WidgetCompactAnimationSnappy,
             FileStackThreshold = 5,
             FileStackOrderBy = SettingsService.FileStackOrderByDateModified,
@@ -646,6 +681,8 @@ public sealed class SettingsServiceTests : IDisposable
         Assert.Equal(newUserDefaults.WidgetAnimationEffect, restoredDefaults.WidgetAnimationEffect);
         Assert.False(newUserDefaults.WidgetCapsuleModeEnabled);
         Assert.Equal(newUserDefaults.WidgetCapsuleModeEnabled, restoredDefaults.WidgetCapsuleModeEnabled);
+        Assert.Equal(SettingsService.WidgetCompactWidthModeAligned, newUserDefaults.WidgetCompactWidthMode);
+        Assert.Equal(newUserDefaults.WidgetCompactWidthMode, restoredDefaults.WidgetCompactWidthMode);
         Assert.Equal(SettingsService.WidgetCompactAnimationSmooth, newUserDefaults.WidgetCompactAnimationEffect);
         Assert.Equal(newUserDefaults.WidgetCompactAnimationEffect, restoredDefaults.WidgetCompactAnimationEffect);
         Assert.Equal(SettingsService.DefaultFileStackThreshold, restoredDefaults.FileStackThreshold);

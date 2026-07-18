@@ -156,11 +156,15 @@ public abstract partial class WidgetWindowBase
         RectInt32 initialBounds = GetActualWindowBounds();
         InitialWindowPos = new PointInt32(initialBounds.X, initialBounds.Y);
         InitialWindowSize = new SizeInt32(initialBounds.Width, initialBounds.Height);
+        bool movesCapsuleBar = BeginCompactArrangementDrag();
         DragCaptureElement = captureElement;
         captureElement.CapturePointer(e.Pointer);
         e.Handled = true;
 
-        App.Current?.ResizeGuideOverlay.BeginDrag(HWnd, RootElement);
+        if (!movesCapsuleBar)
+        {
+            App.Current?.ResizeGuideOverlay.BeginDrag(HWnd, RootElement);
+        }
     }
 
     protected void ContinueWindowDragCore(PointerRoutedEventArgs e)
@@ -191,10 +195,17 @@ public abstract partial class WidgetWindowBase
         int newY = InitialWindowPos.Y + deltaY;
 
         var proposedBounds = new RectInt32(newX, newY, InitialWindowSize.Width, InitialWindowSize.Height);
-        var snappedBounds = App.Current?.ResizeGuideOverlay.UpdateGuidesAndSnapForDrag(proposedBounds)
-            ?? proposedBounds;
-
-        ApplyWindowBounds(snappedBounds.X, snappedBounds.Y, snappedBounds.Width, snappedBounds.Height, persist: false);
+        if (!TryMoveCompactArrangement(proposedBounds, out _))
+        {
+            var snappedBounds = App.Current?.ResizeGuideOverlay.UpdateGuidesAndSnapForDrag(proposedBounds)
+                ?? proposedBounds;
+            ApplyWindowBounds(
+                snappedBounds.X,
+                snappedBounds.Y,
+                snappedBounds.Width,
+                snappedBounds.Height,
+                persist: false);
+        }
         e.Handled = true;
     }
 
@@ -212,7 +223,9 @@ public abstract partial class WidgetWindowBase
 
         App.Current?.ResizeGuideOverlay.EndDrag();
 
+        CompleteCompactArrangementDrag();
         RectInt32 finalBounds = GetActualWindowBounds();
+        finalBounds = CompleteExpandedWidgetDrag(finalBounds);
         CapturePositionAnchor(finalBounds.X, finalBounds.Y, finalBounds.Width, finalBounds.Height);
         UpdateConfigBoundsFromPhysical(finalBounds.X, finalBounds.Y, finalBounds.Width, finalBounds.Height, persist: true);
         EndWidgetBoundsInteraction();
@@ -335,6 +348,7 @@ public abstract partial class WidgetWindowBase
 
         var proposed = new RectInt32(newX, newY, newWidth, newHeight);
         var snapped = App.Current.ResizeGuideOverlay.UpdateGuidesAndSnap(proposed, ResizeDirection);
+        snapped = AnchorExpandedResizeBounds(snapped);
         ApplyWindowBounds(snapped.X, snapped.Y, snapped.Width, snapped.Height, persist: false);
         e.Handled = true;
     }
@@ -347,10 +361,10 @@ public abstract partial class WidgetWindowBase
         }
 
         IsResizing = false;
-        ResizeDirection = string.Empty;
         element.ReleasePointerCapture(e.Pointer);
         App.Current.ResizeGuideOverlay.EndResize();
         PersistCompletedWidgetResize(GetActualWindowBounds());
+        ResizeDirection = string.Empty;
         EndWidgetBoundsInteraction();
         OnResizeEnd();
         DisplayChangeWatcher?.ResumeRestore();
@@ -372,10 +386,10 @@ public abstract partial class WidgetWindowBase
         }
 
         IsResizing = false;
-        ResizeDirection = string.Empty;
         DragCaptureElement = null;
         App.Current?.ResizeGuideOverlay.EndResize();
         PersistCompletedWidgetResize(GetActualWindowBounds());
+        ResizeDirection = string.Empty;
         EndWidgetBoundsInteraction();
         OnResizeEnd();
         DisplayChangeWatcher?.ResumeRestore();
@@ -416,7 +430,9 @@ public abstract partial class WidgetWindowBase
         bool hasMoved = HasMovedTitleBarDrag;
         DragCaptureElement = null;
         App.Current?.ResizeGuideOverlay.EndDrag();
+        CompleteCompactArrangementDrag();
         RectInt32 finalBounds = GetActualWindowBounds();
+        finalBounds = CompleteExpandedWidgetDrag(finalBounds);
         CapturePositionAnchor(finalBounds.X, finalBounds.Y, finalBounds.Width, finalBounds.Height);
         UpdateConfigBoundsFromPhysical(finalBounds.X, finalBounds.Y, finalBounds.Width, finalBounds.Height, persist: true);
         EndWidgetBoundsInteraction();

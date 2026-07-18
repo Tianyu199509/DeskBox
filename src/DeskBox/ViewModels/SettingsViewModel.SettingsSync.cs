@@ -77,6 +77,16 @@ public partial class SettingsViewModel
                 : BorderThin;
 
             WidgetCapsuleModeEnabled = settings.WidgetCapsuleModeEnabled;
+            SelectedWidgetCompactWidthMode = SettingsService.NormalizeWidgetCompactWidthMode(
+                settings.WidgetCompactWidthMode);
+            SelectedWidgetCapsuleArrangementMode = SettingsService.NormalizeWidgetCapsuleArrangementMode(
+                settings.WidgetCapsuleArrangementMode);
+            WidgetCapsuleBarSpacing = SettingsService.NormalizeWidgetCapsuleBarSpacing(
+                settings.WidgetCapsuleBarSpacing);
+            SelectedWidgetCapsuleBarPlacement = SettingsService.NormalizeWidgetCapsuleBarPlacement(
+                settings.WidgetCapsuleBarPlacement);
+            SelectedWidgetCapsuleBarDirection = SettingsService.NormalizeWidgetCapsuleBarDirection(
+                settings.WidgetCapsuleBarDirection);
             WidgetCompactHideSensitiveContent = settings.WidgetCompactHideSensitiveContent;
             SelectedWidgetCollapseBehavior = SettingsService.NormalizeWidgetCollapseBehavior(settings.WidgetCollapseBehavior) == SettingsService.WidgetCollapseBehaviorSmart
                 ? SettingsService.WidgetCollapseBehaviorSmart
@@ -86,6 +96,9 @@ public partial class SettingsViewModel
             WidgetCompactAnimationDurationMs = SettingsService.NormalizeWidgetCompactAnimationDurationMs(settings.WidgetCompactAnimationDurationMs);
             WidgetCompactExpandDelayMs = SettingsService.NormalizeWidgetCompactExpandDelayMs(settings.WidgetCompactExpandDelayMs);
             WidgetCompactCollapseDelayMs = SettingsService.NormalizeWidgetCompactCollapseDelayMs(settings.WidgetCompactCollapseDelayMs);
+            SelectedWidgetCompactHoverResponse = SettingsService.ResolveWidgetCompactHoverResponse(
+                settings.WidgetCompactExpandDelayMs,
+                settings.WidgetCompactCollapseDelayMs);
             SelectedWidgetCompactMediaCornerMode = SettingsService.NormalizeWidgetCompactMediaCornerMode(settings.WidgetCompactMediaCornerMode);
 
             SelectedWidgetAnimationEffect = NormalizeWidgetAnimationEffect(settings.WidgetAnimationEffect);
@@ -266,7 +279,12 @@ RefreshWeatherCityPopularCities();
             _cachedWidgetBorderStyleDisplayNames = null;
             _cachedWidgetCollapseBehaviorDisplayNames = null;
             _cachedWidgetCompactContentModeDisplayNames = null;
+            _cachedWidgetCompactWidthModeDisplayNames = null;
+            _cachedWidgetCapsuleArrangementDisplayNames = null;
+            _cachedWidgetCapsuleBarPlacementDisplayNames = null;
+            _cachedWidgetCapsuleBarDirectionDisplayNames = null;
             _cachedWidgetCompactAnimationEffectDisplayNames = null;
+            _cachedWidgetCompactHoverResponseDisplayNames = null;
             _cachedWidgetCompactMediaCornerDisplayNames = null;
             _cachedLayoutDensityDisplayNames = null;
             _cachedAnimationPresetDisplayNames = null;
@@ -300,8 +318,13 @@ RefreshWeatherCityPopularCities();
             OnPropertyChanged(nameof(AvailableWidgetBorderColorModeDisplayNames));
             OnPropertyChanged(nameof(AvailableWidgetBorderStyleDisplayNames));
             OnPropertyChanged(nameof(AvailableWidgetCollapseBehaviorDisplayNames));
+            OnPropertyChanged(nameof(AvailableWidgetCompactWidthModeDisplayNames));
             OnPropertyChanged(nameof(AvailableWidgetCompactContentModeDisplayNames));
+            OnPropertyChanged(nameof(AvailableWidgetCapsuleArrangementDisplayNames));
+            OnPropertyChanged(nameof(AvailableWidgetCapsuleBarPlacementDisplayNames));
+            OnPropertyChanged(nameof(AvailableWidgetCapsuleBarDirectionDisplayNames));
             OnPropertyChanged(nameof(AvailableWidgetCompactAnimationEffectDisplayNames));
+            OnPropertyChanged(nameof(AvailableWidgetCompactHoverResponseDisplayNames));
             OnPropertyChanged(nameof(AvailableWidgetCompactMediaCornerDisplayNames));
             OnPropertyChanged(nameof(AvailableLayoutDensityDisplayNames));
             OnPropertyChanged(nameof(AvailableAnimationPresetDisplayNames));
@@ -343,9 +366,28 @@ RefreshWeatherCityPopularCities();
         OnPropertyChanged(nameof(SelectedWidgetBorderColorModeText));
         OnPropertyChanged(nameof(SelectedWidgetBorderStyleText));
         OnPropertyChanged(nameof(SelectedWidgetCollapseBehaviorText));
+        OnPropertyChanged(nameof(SelectedWidgetCompactWidthModeText));
         OnPropertyChanged(nameof(IsSmartWidgetCollapseBehavior));
+        OnPropertyChanged(nameof(IsSmartWidgetCollapseBehaviorSelected));
+        OnPropertyChanged(nameof(CapsuleHoverResponseEntryVisibility));
+        OnPropertyChanged(nameof(CanOpenWidgetCompactHoverResponseDetails));
+        OnPropertyChanged(nameof(CanOpenWidgetCompactAnimationDetails));
+        OnPropertyChanged(nameof(SelectedWidgetCapsuleArrangementText));
+        OnPropertyChanged(nameof(IsWidgetCapsuleBarSelected));
+        OnPropertyChanged(nameof(IsWidgetCapsuleBarEnabled));
+        OnPropertyChanged(nameof(IsWidgetCapsuleBarSpacingEnabled));
+        OnPropertyChanged(nameof(CapsuleArrangementEntryVisibility));
+        OnPropertyChanged(nameof(WidgetCapsuleBarSpacingText));
+        OnPropertyChanged(nameof(SelectedWidgetCapsuleBarPlacementText));
+        OnPropertyChanged(nameof(SelectedWidgetCapsuleBarDirectionText));
+        OnPropertyChanged(nameof(CapsuleArrangementDetailsSummaryText));
         OnPropertyChanged(nameof(SelectedWidgetCompactContentModeText));
         OnPropertyChanged(nameof(SelectedWidgetCompactAnimationEffectText));
+        OnPropertyChanged(nameof(IsWidgetCompactAnimationCustom));
+        OnPropertyChanged(nameof(WidgetCompactAnimationCustomVisibility));
+        OnPropertyChanged(nameof(SelectedWidgetCompactHoverResponseText));
+        OnPropertyChanged(nameof(IsWidgetCompactHoverResponseCustom));
+        OnPropertyChanged(nameof(WidgetCompactHoverResponseCustomVisibility));
         OnPropertyChanged(nameof(SelectedWidgetCompactMediaCornerText));
         OnPropertyChanged(nameof(SelectedLayoutDensityText));
         OnPropertyChanged(nameof(SelectedAnimationPresetText));

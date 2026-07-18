@@ -273,6 +273,11 @@ public partial class SettingsViewModel
                 return;
             }
 
+            OnPropertyChanged(nameof(SelectedWidgetCollapseBehaviorText));
+            OnPropertyChanged(nameof(IsSmartWidgetCollapseBehavior));
+            OnPropertyChanged(nameof(IsSmartWidgetCollapseBehaviorSelected));
+            OnPropertyChanged(nameof(CapsuleHoverResponseEntryVisibility));
+
             if (_isRestoringDefaults || _isApplyingSettingsSnapshot)
             {
                 return;
@@ -280,8 +285,6 @@ public partial class SettingsViewModel
 
             _settingsService.Settings.WidgetCollapseBehavior = normalized;
             _settingsService.SaveDebounced();
-            OnPropertyChanged(nameof(SelectedWidgetCollapseBehaviorText));
-            OnPropertyChanged(nameof(IsSmartWidgetCollapseBehavior));
         }
     }
 

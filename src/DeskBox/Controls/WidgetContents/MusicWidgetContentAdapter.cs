@@ -6,7 +6,7 @@ using Microsoft.UI.Xaml;
 
 namespace DeskBox.Controls.WidgetContents;
 
-public sealed class MusicWidgetContentAdapter : IWidgetContent, IDisposable
+public sealed class MusicWidgetContentAdapter : IWidgetContent, IWidgetResponsiveLayoutContent, IDisposable
 {
     private readonly Func<MusicWidgetViewModel, FrameworkElement> _viewFactory;
     private FrameworkElement? _view;
@@ -84,6 +84,38 @@ public sealed class MusicWidgetContentAdapter : IWidgetContent, IDisposable
         if (_view is MusicWidgetContent content)
         {
             content.OnWindowVisibilityChanged(visible);
+        }
+    }
+
+    public void BeginResponsiveLayoutTransition(
+        double targetContentWidth,
+        double targetContentHeight,
+        bool isCollapsing)
+    {
+        if (_view is MusicWidgetContent content)
+        {
+            content.BeginResponsiveLayoutTransition(
+                targetContentWidth,
+                targetContentHeight,
+                isCollapsing);
+        }
+    }
+
+    public void CompleteResponsiveLayoutTransition(
+        double finalContentWidth,
+        double finalContentHeight)
+    {
+        if (_view is MusicWidgetContent content)
+        {
+            content.CompleteResponsiveLayoutTransition(finalContentWidth, finalContentHeight);
+        }
+    }
+
+    public void CancelResponsiveLayoutTransition()
+    {
+        if (_view is MusicWidgetContent content)
+        {
+            content.CancelResponsiveLayoutTransition();
         }
     }
 

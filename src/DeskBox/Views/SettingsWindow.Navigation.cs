@@ -38,7 +38,7 @@ public sealed partial class SettingsWindow
             ["AppearanceAnimationSettings"] = AppearanceAnimationSettingsSection,
             ["CapsuleMode"] = CapsuleModeSection,
             ["CapsuleBehaviorSettings"] = CapsuleBehaviorSettingsSection,
-            ["CapsuleContentSettings"] = CapsuleContentSettingsSection,
+            ["CapsuleArrangementSettings"] = CapsuleArrangementSettingsSection,
             ["CapsuleAnimationSettings"] = CapsuleAnimationSettingsSection,
             ["CapsuleOverridesSettings"] = CapsuleOverridesSettingsSection,
             ["AppearanceDetail"] = AppearanceDetailSection,
@@ -513,6 +513,14 @@ public sealed partial class SettingsWindow
         SettingsSectionNavigationRequestedEventArgs e)
     {
         NavigateToSettingsSection(e.SectionTag);
+    }
+
+    private void ResetCapsuleWidgetOverrideButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button { Tag: string widgetId })
+        {
+            ViewModel.ResetCapsuleOverridesForWidget(widgetId);
+        }
     }
 
     private void AddFileStackRuleButton_Click(object sender, RoutedEventArgs e)

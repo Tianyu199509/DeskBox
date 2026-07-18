@@ -41,7 +41,12 @@ public abstract partial class WidgetWindowBase
     private DispatcherQueueTimer? _collapseAnimationWatchdogTimer;
     private RectInt32 _collapseAnimationFrom;
     private RectInt32 _collapseAnimationTo;
+    private WidgetCompactExpansionAnchor? _collapseAnimationAnchor;
+    private PointInt32 _collapseAnimationPivot;
     private RectInt32? _stableCompactBounds;
+    private RectInt32? _expandedInteractionStartBounds;
+    private RectInt32? _compactInteractionStartBounds;
+    private SizeInt32? _compactArrangementSizeOverride;
     private double? _observedCompactWidth;
     private WidgetCompactPlacement? _observedCompactPlacement;
     private long _collapseAnimationStarted;
@@ -55,6 +60,7 @@ public abstract partial class WidgetWindowBase
     private bool _isPointerOverCompactMoveHandle;
     private bool _suppressSmartExpansionUntilPointerExit;
     private bool _isPointerOverWidget;
+    private bool _isPointerOverCompactExpansionZone;
     private bool _isCollapseAnimationRendering;
     private bool _isShellTransitionActive;
     private bool _isBoundsInteractionActive;
@@ -63,7 +69,9 @@ public abstract partial class WidgetWindowBase
     private int _compactInteractionDepth;
     private int _compactBoundsSettleStage;
     private WidgetCompactState _compactState = WidgetCompactState.Expanded;
+    private WidgetCompactViewState _compactViewState = WidgetCompactViewState.Open;
     private WidgetCollapseBehavior _lastEffectiveCollapseBehavior = WidgetCollapseBehavior.System;
+    private WidgetCompactExpansionAnchor? _compactExpansionAnchor;
 
     /// <summary>
     /// True while compact bounds are active or transitioning. Derived windows use this
@@ -75,6 +83,95 @@ public abstract partial class WidgetWindowBase
 
     protected bool IsCompactBoundsStateActive =>
         IsWidgetCollapsedBoundsActive || _targetCollapsed;
+
+    protected bool IsCompactArrangementDragActive { get; private set; }
+
+    internal WidgetCompactViewState CurrentCompactViewState => _compactViewState;
+
+    public bool IsCompactArrangementActive => _collapseInitialized && _targetCollapsed;
+
+    public void ApplyCompactArrangement(RectInt32 bounds, bool constrainSize)
+    {
+        if (!DispatcherQueue.HasThreadAccess)
+        {
+            DispatcherQueue.TryEnqueue(() => ApplyCompactArrangement(bounds, constrainSize));
+            return;
+        }
+
+        if (IsClosing)
+        {
+            return;
+        }
+
+        _stableCompactBounds = bounds;
+        _compactArrangementSizeOverride = constrainSize
+            ? new SizeInt32(bounds.Width, bounds.Height)
+            : null;
+        ObserveCompactOverrides();
+        if (!_collapseInitialized)
+        {
+            return;
+        }
+
+        if (!_targetCollapsed)
+        {
+            ReanchorExpandedToCompact(bounds, preserveAnchor: false);
+            return;
+        }
+
+        ApplyCollapsedStateImmediately(collapsed: true);
+    }
+
+    public void PreviewCompactArrangement(RectInt32 bounds)
+    {
+        if (!DispatcherQueue.HasThreadAccess)
+        {
+            DispatcherQueue.TryEnqueue(() => PreviewCompactArrangement(bounds));
+            return;
+        }
+
+        if (IsClosing || !_collapseInitialized || !_targetCollapsed)
+        {
+            return;
+        }
+
+        _stableCompactBounds = bounds;
+        _compactArrangementSizeOverride = new SizeInt32(bounds.Width, bounds.Height);
+        MoveWindowWithoutPersisting(bounds);
+    }
+
+    protected bool BeginCompactArrangementDrag()
+    {
+        IsCompactArrangementDragActive = IsCompactBoundsStateActive &&
+            App.Current?.WidgetManager?.BeginCapsuleBarDrag(
+                Config.Id,
+                reorderMember: !WidgetShellControl.IsCompactMoveHandlePress) == true;
+        return IsCompactArrangementDragActive;
+    }
+
+    protected bool TryMoveCompactArrangement(
+        RectInt32 proposedBounds,
+        out RectInt32 resolvedBounds)
+    {
+        if (App.Current?.WidgetManager is { } manager)
+        {
+            return manager.TryMoveCapsuleBar(Config.Id, proposedBounds, out resolvedBounds);
+        }
+
+        resolvedBounds = proposedBounds;
+        return false;
+    }
+
+    protected void CompleteCompactArrangementDrag()
+    {
+        if (!IsCompactArrangementDragActive)
+        {
+            return;
+        }
+
+        App.Current?.WidgetManager?.CompleteCapsuleBarDrag(Config.Id);
+        IsCompactArrangementDragActive = false;
+    }
 
     protected WidgetCollapseBehavior EffectiveCollapseBehavior =>
         SettingsService.Settings.WidgetCapsuleModeEnabled
@@ -238,6 +335,7 @@ public abstract partial class WidgetWindowBase
         {
             _compactState = WidgetCompactState.Interacting;
         }
+        UpdateCompactViewState();
     }
 
     protected IDisposable AcquireCompactInteraction(string reason)
@@ -249,6 +347,7 @@ public abstract partial class WidgetWindowBase
     protected void EndCompactInteraction()
     {
         _compactInteractionDepth = Math.Max(0, _compactInteractionDepth - 1);
+        UpdateCompactViewState();
         if (_compactInteractionDepth == 0 &&
             UsesSmartCollapseBehavior() &&
             !_isSmartPinnedOpen &&
@@ -256,6 +355,11 @@ public abstract partial class WidgetWindowBase
             !_isCompactDragInside)
         {
             ScheduleSmartCollapse();
+        }
+
+        if (_compactInteractionDepth == 0)
+        {
+            TryScheduleCompactHoverExpansion();
         }
     }
 
@@ -267,6 +371,7 @@ public abstract partial class WidgetWindowBase
 
     protected void BeginWidgetBoundsInteraction()
     {
+        CaptureExpandedPairInteraction();
         _isBoundsInteractionActive = true;
         BeginCompactInteraction();
         CancelTimer(ref _collapseHoverTimer);
@@ -277,6 +382,9 @@ public abstract partial class WidgetWindowBase
     {
         _isBoundsInteractionActive = false;
         EndCompactInteraction();
+        UpdateCompactViewState();
+        _expandedInteractionStartBounds = null;
+        _compactInteractionStartBounds = null;
     }
 
     protected void InitializeWidgetCollapse()
@@ -289,14 +397,16 @@ public abstract partial class WidgetWindowBase
         _collapseInitialized = true;
         WidgetShellControl.CollapseRequested += WidgetShellControl_CollapseRequested;
         WidgetShellControl.ExpandRequested += WidgetShellControl_ExpandRequested;
+        WidgetShellControl.CompactBodyExpandRequested += WidgetShellControl_CompactBodyExpandRequested;
         WidgetShellControl.CompactPointerEntered += WidgetShellControl_CompactPointerEntered;
         WidgetShellControl.CompactPointerExited += WidgetShellControl_CompactPointerExited;
+        WidgetShellControl.CompactExpansionPointerEntered += WidgetShellControl_CompactExpansionPointerEntered;
+        WidgetShellControl.CompactExpansionPointerExited += WidgetShellControl_CompactExpansionPointerExited;
         WidgetShellControl.CompactPointerPressed += WidgetShellControl_CompactPointerPressed;
         WidgetShellControl.CompactActionPointerEntered += WidgetShellControl_CompactActionPointerEntered;
         WidgetShellControl.CompactActionPointerExited += WidgetShellControl_CompactActionPointerExited;
         WidgetShellControl.CompactMoveHandlePointerEntered += WidgetShellControl_CompactMoveHandlePointerEntered;
         WidgetShellControl.CompactMoveHandlePointerExited += WidgetShellControl_CompactMoveHandlePointerExited;
-        WidgetShellControl.ExpandedInteractionRequested += WidgetShellControl_ExpandedInteractionRequested;
         WidgetShellControl.CompactDragEntered += WidgetShellControl_CompactDragEntered;
         WidgetShellControl.CompactDragLeft += WidgetShellControl_CompactDragLeft;
         WidgetShellControl.CompactDropCompleted += WidgetShellControl_CompactDropCompleted;
@@ -338,14 +448,16 @@ public abstract partial class WidgetWindowBase
 
         WidgetShellControl.CollapseRequested -= WidgetShellControl_CollapseRequested;
         WidgetShellControl.ExpandRequested -= WidgetShellControl_ExpandRequested;
+        WidgetShellControl.CompactBodyExpandRequested -= WidgetShellControl_CompactBodyExpandRequested;
         WidgetShellControl.CompactPointerEntered -= WidgetShellControl_CompactPointerEntered;
         WidgetShellControl.CompactPointerExited -= WidgetShellControl_CompactPointerExited;
+        WidgetShellControl.CompactExpansionPointerEntered -= WidgetShellControl_CompactExpansionPointerEntered;
+        WidgetShellControl.CompactExpansionPointerExited -= WidgetShellControl_CompactExpansionPointerExited;
         WidgetShellControl.CompactPointerPressed -= WidgetShellControl_CompactPointerPressed;
         WidgetShellControl.CompactActionPointerEntered -= WidgetShellControl_CompactActionPointerEntered;
         WidgetShellControl.CompactActionPointerExited -= WidgetShellControl_CompactActionPointerExited;
         WidgetShellControl.CompactMoveHandlePointerEntered -= WidgetShellControl_CompactMoveHandlePointerEntered;
         WidgetShellControl.CompactMoveHandlePointerExited -= WidgetShellControl_CompactMoveHandlePointerExited;
-        WidgetShellControl.ExpandedInteractionRequested -= WidgetShellControl_ExpandedInteractionRequested;
         WidgetShellControl.CompactDragEntered -= WidgetShellControl_CompactDragEntered;
         WidgetShellControl.CompactDragLeft -= WidgetShellControl_CompactDragLeft;
         WidgetShellControl.CompactDropCompleted -= WidgetShellControl_CompactDropCompleted;
@@ -372,6 +484,10 @@ public abstract partial class WidgetWindowBase
     private void ApplyCompactTooltips()
     {
         var localization = App.Current.LocalizationService;
+        bool usesCapsuleBar = SettingsService.Settings.WidgetCapsuleModeEnabled &&
+            SettingsService.NormalizeWidgetCapsuleArrangementMode(
+                SettingsService.Settings.WidgetCapsuleArrangementMode) ==
+            SettingsService.WidgetCapsuleArrangementBar;
         Microsoft.UI.Xaml.Controls.ToolTipService.SetToolTip(
             WidgetShellControl.CollapseActionButton,
             localization.T("Widget.Compact.Collapse"));
@@ -387,10 +503,22 @@ public abstract partial class WidgetWindowBase
                 : "Widget.Compact.MoveOrCollapse"));
         Microsoft.UI.Xaml.Controls.ToolTipService.SetToolTip(
             WidgetShellControl.CompactMoveHandleElement,
-            localization.T("Widget.Compact.Move"));
+            localization.T(usesCapsuleBar ? "Widget.Compact.MoveBar" : "Widget.Compact.Move"));
         Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(
             WidgetShellControl.CompactMoveHandleElement,
-            localization.T("Widget.Compact.Move"));
+            localization.T(usesCapsuleBar ? "Widget.Compact.MoveBar" : "Widget.Compact.Move"));
+        Microsoft.UI.Xaml.Controls.ToolTipService.SetToolTip(
+            WidgetShellControl.CompactBodyElement,
+            localization.T("Widget.Compact.Expand"));
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(
+            WidgetShellControl.CompactBodyElement,
+            localization.T("Widget.Compact.Expand"));
+        Microsoft.UI.Xaml.Controls.ToolTipService.SetToolTip(
+            WidgetShellControl.CompactReorderHandleElement,
+            localization.T("Widget.Compact.Reorder"));
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(
+            WidgetShellControl.CompactReorderHandleElement,
+            localization.T("Widget.Compact.Reorder"));
         Microsoft.UI.Xaml.Controls.ToolTipService.SetToolTip(
             WidgetShellControl.CompactExpandActionButton,
             localization.T("Widget.Compact.Expand"));
@@ -419,6 +547,12 @@ public abstract partial class WidgetWindowBase
         RefreshCompactPresentation();
         ApplyCompactTooltips();
         ApplyEffectiveCollapseBehavior(animate: true);
+        if (!_targetCollapsed && UsesCompactExpansionGeometry())
+        {
+            RectInt32 current = GetCurrentWindowBounds();
+            RectInt32 compact = GetStableCompactBounds(current);
+            ReanchorExpandedToCompact(compact, preserveAnchor: false);
+        }
     }
 
     private bool UsesSmartCollapseBehavior()
@@ -429,14 +563,15 @@ public abstract partial class WidgetWindowBase
     private void ApplyEffectiveCollapseBehavior(bool animate)
     {
         ApplyCollapseBehaviorVisuals();
+        WidgetCollapseBehavior behavior = EffectiveCollapseBehavior;
+        WidgetCompactInteractionSnapshot snapshot = CaptureCompactInteractionSnapshot();
         bool desiredCollapsed = EffectiveCollapseBehavior switch
         {
             WidgetCollapseBehavior.Expanded => false,
             WidgetCollapseBehavior.Click => Config.IsCollapsed,
-            WidgetCollapseBehavior.Smart => !_isSmartPinnedOpen &&
-                !_isCompactDragInside &&
-                (!_isPointerOverWidget || _isPointerOverCompactMoveHandle) &&
-                _compactInteractionDepth == 0,
+            WidgetCollapseBehavior.Smart => _targetCollapsed
+                ? !WidgetCompactInteractionPolicy.CanHoverExpand(behavior, snapshot)
+                : WidgetCompactInteractionPolicy.CanAutoCollapse(behavior, snapshot),
             _ => false
         };
         SetCollapsedState(desiredCollapsed, persistManualState: false, animate: animate);
@@ -452,8 +587,13 @@ public abstract partial class WidgetWindowBase
             _suppressSmartExpansionUntilPointerExit = false;
         }
         bool canCollapse = behavior != WidgetCollapseBehavior.Expanded;
+        bool usesCapsuleBar = SettingsService.Settings.WidgetCapsuleModeEnabled &&
+            SettingsService.NormalizeWidgetCapsuleArrangementMode(
+                SettingsService.Settings.WidgetCapsuleArrangementMode) ==
+            SettingsService.WidgetCapsuleArrangementBar;
         WidgetShellControl.SetCollapseActionAvailable(canCollapse);
         WidgetShellControl.SetCompactInteractionMode(behavior == WidgetCollapseBehavior.Smart);
+        WidgetShellControl.SetCompactReorderEnabled(usesCapsuleBar && canCollapse);
         OnCollapseBehaviorChanged(behavior);
     }
 
@@ -480,6 +620,18 @@ public abstract partial class WidgetWindowBase
             animate: true);
     }
 
+    private void WidgetShellControl_CompactBodyExpandRequested(object? sender, RoutedEventArgs e)
+    {
+        CancelTimer(ref _collapseHoverTimer);
+        CancelTimer(ref _collapseLeaveTimer);
+        _suppressSmartExpansionUntilPointerExit = false;
+        _isSmartPinnedOpen = false;
+        SetCollapsedState(
+            false,
+            persistManualState: EffectiveCollapseBehavior == WidgetCollapseBehavior.Click,
+            animate: true);
+    }
+
     private void WidgetShellControl_CompactPointerEntered(object? sender, EventArgs e)
     {
         _isPointerOverWidget = true;
@@ -490,45 +642,46 @@ public abstract partial class WidgetWindowBase
                 ? WidgetCompactState.ExpandedPinned
                 : WidgetCompactState.ExpandedTransient;
         }
-        if (UsesSmartCollapseBehavior() &&
-            _targetCollapsed &&
-            !_isCompactDragInside &&
-            !_isPointerOverCompactActions &&
-            !_isPointerOverCompactMoveHandle &&
-            !_suppressSmartExpansionUntilPointerExit)
+        UpdateCompactViewState();
+        TryScheduleCompactHoverExpansion();
+    }
+
+    private void WidgetShellControl_CompactExpansionPointerEntered(object? sender, EventArgs e)
+    {
+        // Child-region entry is authoritative. Window resize and asynchronous content
+        // layout can occasionally prevent WinUI from raising the matching outer event.
+        _isPointerOverWidget = true;
+        _isPointerOverCompactExpansionZone = true;
+        _isPointerOverCompactMoveHandle = false;
+        _isPointerOverCompactActions = false;
+        CancelTimer(ref _collapseLeaveTimer);
+        TryScheduleCompactHoverExpansion();
+    }
+
+    private void WidgetShellControl_CompactExpansionPointerExited(object? sender, EventArgs e)
+    {
+        _isPointerOverCompactExpansionZone = false;
+        CancelTimer(ref _collapseHoverTimer);
+        if (_targetCollapsed)
         {
-            _compactState = WidgetCompactState.ExpandPending;
-            ScheduleTimer(
-                ref _collapseHoverTimer,
-                SettingsService.NormalizeWidgetCompactExpandDelayMs(
-                    SettingsService.Settings.WidgetCompactExpandDelayMs),
-                () =>
-                {
-                    if (UsesSmartCollapseBehavior() &&
-                        _targetCollapsed &&
-                        _isPointerOverWidget &&
-                        !_isPointerOverCompactMoveHandle &&
-                        !_isPointerOverCompactActions &&
-                        !_isCompactDragInside &&
-                        !IsDragging &&
-                        !IsResizing)
-                    {
-                        SetCollapsedState(false, persistManualState: false, animate: true);
-                    }
-                });
+            _compactState = WidgetCompactState.Collapsed;
+            UpdateCompactViewState();
         }
     }
 
     private void WidgetShellControl_CompactPointerExited(object? sender, EventArgs e)
     {
         _isPointerOverWidget = false;
+        _isPointerOverCompactExpansionZone = false;
         _isPointerOverCompactMoveHandle = false;
+        _isPointerOverCompactActions = false;
         _suppressSmartExpansionUntilPointerExit = false;
         CancelTimer(ref _collapseHoverTimer);
         if (_targetCollapsed)
         {
             _compactState = WidgetCompactState.Collapsed;
         }
+        UpdateCompactViewState();
         if (UsesSmartCollapseBehavior() && !_isCompactDragInside && !_isSmartPinnedOpen)
         {
             ScheduleSmartCollapse();
@@ -550,15 +703,14 @@ public abstract partial class WidgetWindowBase
     {
         _isPointerOverCompactActions = true;
         CancelTimer(ref _collapseHoverTimer);
+        UpdateCompactViewState();
     }
 
     private void WidgetShellControl_CompactActionPointerExited(object? sender, EventArgs e)
     {
         _isPointerOverCompactActions = false;
-        if (UsesSmartCollapseBehavior() && _targetCollapsed && _isPointerOverWidget)
-        {
-            WidgetShellControl_CompactPointerEntered(sender, EventArgs.Empty);
-        }
+        UpdateCompactViewState();
+        TryScheduleCompactHoverExpansion();
     }
 
     private void WidgetShellControl_CompactMoveHandlePointerEntered(object? sender, EventArgs e)
@@ -569,30 +721,41 @@ public abstract partial class WidgetWindowBase
         {
             _compactState = WidgetCompactState.Collapsed;
         }
+        UpdateCompactViewState();
     }
 
     private void WidgetShellControl_CompactMoveHandlePointerExited(object? sender, EventArgs e)
     {
         _isPointerOverCompactMoveHandle = false;
-        if (UsesSmartCollapseBehavior() &&
-            _targetCollapsed &&
-            _isPointerOverWidget &&
-            !_isPointerOverCompactActions)
-        {
-            WidgetShellControl_CompactPointerEntered(sender, EventArgs.Empty);
-        }
+        UpdateCompactViewState();
+        TryScheduleCompactHoverExpansion();
     }
 
-    private void WidgetShellControl_ExpandedInteractionRequested(object? sender, EventArgs e)
+    private void TryScheduleCompactHoverExpansion()
     {
-        if (!UsesSmartCollapseBehavior() || _targetCollapsed)
+        if (_collapseHoverTimer is not null ||
+            !WidgetCompactInteractionPolicy.CanHoverExpand(
+            EffectiveCollapseBehavior,
+            CaptureCompactInteractionSnapshot()))
         {
             return;
         }
 
-        _isSmartPinnedOpen = true;
-        _compactState = WidgetCompactState.ExpandedPinned;
-        CancelTimer(ref _collapseLeaveTimer);
+        _compactState = WidgetCompactState.ExpandPending;
+        ScheduleTimer(
+            ref _collapseHoverTimer,
+            SettingsService.NormalizeWidgetCompactExpandDelayMs(
+                SettingsService.Settings.WidgetCompactExpandDelayMs),
+            () =>
+            {
+                _collapseHoverTimer = null;
+                if (WidgetCompactInteractionPolicy.CanHoverExpand(
+                    EffectiveCollapseBehavior,
+                    CaptureCompactInteractionSnapshot()))
+                {
+                    SetCollapsedState(false, persistManualState: false, animate: true);
+                }
+            });
     }
 
     private void WidgetShellControl_CompactDragEntered(object? sender, EventArgs e)
@@ -606,6 +769,7 @@ public abstract partial class WidgetWindowBase
         CancelTimer(ref _collapseHoverTimer);
         CancelTimer(ref _collapseLeaveTimer);
         CancelTimer(ref _collapseDragRestoreTimer);
+        UpdateCompactViewState();
 
         if (!_dragExpandedFromCollapsed && (_targetCollapsed || IsWidgetCollapsedBoundsActive))
         {
@@ -624,6 +788,7 @@ public abstract partial class WidgetWindowBase
     private void WidgetShellControl_CompactDragLeft(object? sender, EventArgs e)
     {
         _isCompactDragInside = false;
+        UpdateCompactViewState();
         if (!_dragExpandedFromCollapsed)
         {
             if (UsesSmartCollapseBehavior() && !_isPointerOverWidget && !_isSmartPinnedOpen)
@@ -640,6 +805,7 @@ public abstract partial class WidgetWindowBase
     private void WidgetShellControl_CompactDropCompleted(object? sender, EventArgs e)
     {
         _isCompactDragInside = false;
+        UpdateCompactViewState();
         if (_dragExpandedFromCollapsed)
         {
             ScheduleDragRestore(900);
@@ -686,6 +852,127 @@ public abstract partial class WidgetWindowBase
         });
     }
 
+    protected bool UsesCompactExpansionGeometry()
+    {
+        return SettingsService.Settings.WidgetCapsuleModeEnabled &&
+            EffectiveCollapseBehavior != WidgetCollapseBehavior.Expanded;
+    }
+
+    private WidgetCompactExpansionLayout ResolveCompactExpansionLayout(
+        RectInt32 compactBounds,
+        SizeInt32? requestedSize = null,
+        bool freezeResolvedAnchor = false)
+    {
+        RectInt32 workArea = ResolveCompactWorkArea(compactBounds);
+        SizeInt32 physicalSize = requestedSize ?? ResolveExpandedPhysicalSize(workArea);
+        IReadOnlyList<WidgetCompactExpansionAnchor> anchors =
+            freezeResolvedAnchor && _compactExpansionAnchor is { } activeAnchor
+                ? [activeAnchor]
+                : ResolveCompactExpansionAnchorOrder(compactBounds, workArea);
+        return WidgetCompactExpansionCalculator.Resolve(
+            compactBounds,
+            physicalSize,
+            workArea,
+            anchors);
+    }
+
+    private RectInt32 ResolveCompactWorkArea(RectInt32 compactBounds)
+    {
+        var center = new PointInt32(
+            compactBounds.X + Math.Max(1, compactBounds.Width) / 2,
+            compactBounds.Y + Math.Max(1, compactBounds.Height) / 2);
+        return Microsoft.UI.Windowing.DisplayArea.GetFromPoint(
+            center,
+            Microsoft.UI.Windowing.DisplayAreaFallback.Nearest).WorkArea;
+    }
+
+    private SizeInt32 ResolveExpandedPhysicalSize(RectInt32 workArea)
+    {
+        if (Config.BoundsCoordinateVersion < WidgetConfig.CurrentBoundsCoordinateVersion)
+        {
+            RectInt32 legacy = WidgetPositioningService.ResolveBoundsForCurrentTopology(Config);
+            return new SizeInt32(legacy.Width, legacy.Height);
+        }
+
+        double scale = WidgetPositioningService.GetDpiScale(workArea);
+        double logicalWidth = double.IsFinite(Config.Width)
+            ? Math.Max(SettingsService.MinWidgetWidth, Config.Width)
+            : SettingsService.DefaultWidgetWidth;
+        double logicalHeight = double.IsFinite(Config.Height)
+            ? Math.Max(SettingsService.MinWidgetHeight, Config.Height)
+            : SettingsService.DefaultWidgetHeight;
+        return new SizeInt32(
+            WidgetPositioningService.ToPhysicalPixels(logicalWidth, scale),
+            WidgetPositioningService.ToPhysicalPixels(logicalHeight, scale));
+    }
+
+    private IReadOnlyList<WidgetCompactExpansionAnchor> ResolveCompactExpansionAnchorOrder(
+        RectInt32 compactBounds,
+        RectInt32 workArea)
+    {
+        string arrangement = SettingsService.NormalizeWidgetCapsuleArrangementMode(
+            SettingsService.Settings.WidgetCapsuleArrangementMode);
+        string placement = arrangement == SettingsService.WidgetCapsuleArrangementBar
+            ? SettingsService.NormalizeWidgetCapsuleBarPlacement(
+                SettingsService.Settings.WidgetCapsuleBarPlacement)
+            : SettingsService.WidgetCapsuleBarPlacementFloating;
+        bool preferRightAnchor = compactBounds.X + compactBounds.Width / 2 >=
+            workArea.X + workArea.Width / 2;
+        bool preferBottomAnchor = compactBounds.Y + compactBounds.Height / 2 >=
+            workArea.Y + workArea.Height / 2;
+
+        List<WidgetCompactExpansionAnchor> anchors = placement switch
+        {
+            SettingsService.WidgetCapsuleBarPlacementTop => preferRightAnchor
+                ? [WidgetCompactExpansionAnchor.RightTop, WidgetCompactExpansionAnchor.LeftTop]
+                : [WidgetCompactExpansionAnchor.LeftTop, WidgetCompactExpansionAnchor.RightTop],
+            SettingsService.WidgetCapsuleBarPlacementBottom => preferRightAnchor
+                ? [WidgetCompactExpansionAnchor.RightBottom, WidgetCompactExpansionAnchor.LeftBottom]
+                : [WidgetCompactExpansionAnchor.LeftBottom, WidgetCompactExpansionAnchor.RightBottom],
+            SettingsService.WidgetCapsuleBarPlacementLeft => preferBottomAnchor
+                ? [WidgetCompactExpansionAnchor.LeftBottom, WidgetCompactExpansionAnchor.LeftTop]
+                : [WidgetCompactExpansionAnchor.LeftTop, WidgetCompactExpansionAnchor.LeftBottom],
+            SettingsService.WidgetCapsuleBarPlacementRight => preferBottomAnchor
+                ? [WidgetCompactExpansionAnchor.RightBottom, WidgetCompactExpansionAnchor.RightTop]
+                : [WidgetCompactExpansionAnchor.RightTop, WidgetCompactExpansionAnchor.RightBottom],
+            _ => ResolveFloatingAnchorOrder(preferRightAnchor, preferBottomAnchor)
+        };
+
+        WidgetCompactExpansionAnchor? preferred = _compactExpansionAnchor ??
+            WidgetCompactExpansionCalculator.FromPositionAnchor(
+                Config.CompactPlacement?.PositionAnchor ?? Config.PositionAnchor);
+        if (preferred is { } preferredAnchor && anchors.Remove(preferredAnchor))
+        {
+            anchors.Insert(0, preferredAnchor);
+        }
+
+        return anchors;
+    }
+
+    private static List<WidgetCompactExpansionAnchor> ResolveFloatingAnchorOrder(
+        bool preferRightAnchor,
+        bool preferBottomAnchor)
+    {
+        WidgetCompactExpansionAnchor preferred = (preferRightAnchor, preferBottomAnchor) switch
+        {
+            (true, true) => WidgetCompactExpansionAnchor.RightBottom,
+            (true, false) => WidgetCompactExpansionAnchor.RightTop,
+            (false, true) => WidgetCompactExpansionAnchor.LeftBottom,
+            _ => WidgetCompactExpansionAnchor.LeftTop
+        };
+        return preferred switch
+        {
+            WidgetCompactExpansionAnchor.RightBottom =>
+                [preferred, WidgetCompactExpansionAnchor.RightTop, WidgetCompactExpansionAnchor.LeftBottom, WidgetCompactExpansionAnchor.LeftTop],
+            WidgetCompactExpansionAnchor.RightTop =>
+                [preferred, WidgetCompactExpansionAnchor.RightBottom, WidgetCompactExpansionAnchor.LeftTop, WidgetCompactExpansionAnchor.LeftBottom],
+            WidgetCompactExpansionAnchor.LeftBottom =>
+                [preferred, WidgetCompactExpansionAnchor.LeftTop, WidgetCompactExpansionAnchor.RightBottom, WidgetCompactExpansionAnchor.RightTop],
+            _ =>
+                [preferred, WidgetCompactExpansionAnchor.LeftBottom, WidgetCompactExpansionAnchor.RightTop, WidgetCompactExpansionAnchor.RightBottom]
+        };
+    }
+
     private void ApplyCollapsedStateImmediately(bool collapsed)
     {
         StopCollapseAnimation();
@@ -693,11 +980,21 @@ public abstract partial class WidgetWindowBase
         _targetCollapsed = collapsed;
         IsWidgetCollapsedBoundsActive = collapsed;
         _compactState = collapsed ? WidgetCompactState.Collapsed : WidgetCompactState.Expanded;
+        UpdateCompactViewState();
         WidgetShellControl.SetCollapsed(collapsed, SettingsService.Settings.WidgetCompactContentMode);
         RefreshCompactPresentation();
 
         if (!collapsed)
         {
+            if (UsesCompactExpansionGeometry())
+            {
+                RectInt32 expandedCurrent = GetCurrentWindowBounds();
+                RectInt32 compact = GetStableCompactBounds(expandedCurrent);
+                EnsureCompactPlacement(compact);
+                WidgetCompactExpansionLayout layout = ResolveCompactExpansionLayout(compact);
+                _compactExpansionAnchor = layout.Anchor;
+                MoveWindowWithoutPersisting(layout.ExpandedBounds);
+            }
             return;
         }
 
@@ -801,6 +1098,7 @@ public abstract partial class WidgetWindowBase
                 _compactState = WidgetCompactState.Collapsed;
             }
             WidgetShellControl.SetCollapsed(collapsed, contentMode);
+            UpdateCompactViewState();
             if (collapsed)
             {
                 ApplyCompactSurfaceState();
@@ -822,6 +1120,7 @@ public abstract partial class WidgetWindowBase
             (_targetCollapsed || IsWidgetCollapsedBoundsActive);
         _targetCollapsed = collapsed;
         _compactState = collapsed ? WidgetCompactState.Collapsing : WidgetCompactState.Expanding;
+        UpdateCompactViewState();
         if (!collapsed)
         {
             CancelTimer(ref _compactBoundsSettleTimer);
@@ -829,6 +1128,8 @@ public abstract partial class WidgetWindowBase
         }
         RectInt32 from = GetCurrentWindowBounds();
         RectInt32 to;
+        WidgetCompactExpansionAnchor? transitionAnchor = null;
+        PointInt32 transitionPivot = default;
         if (collapsed)
         {
             IsWidgetCollapsedBoundsActive = true;
@@ -836,6 +1137,19 @@ public abstract partial class WidgetWindowBase
             EnsureCompactPlacement(to);
             to = GetCompactBounds(from);
             _stableCompactBounds = to;
+
+            WidgetCompactExpansionLayout layout = ResolveCompactExpansionLayout(
+                to,
+                new SizeInt32(from.Width, from.Height),
+                freezeResolvedAnchor: _compactExpansionAnchor is not null);
+            _compactExpansionAnchor = layout.Anchor;
+            transitionAnchor = layout.Anchor;
+            transitionPivot = layout.Pivot;
+            if (!BoundsEqual(from, layout.ExpandedBounds))
+            {
+                from = layout.ExpandedBounds;
+                MoveWindowWithoutPersisting(from);
+            }
         }
         else
         {
@@ -844,31 +1158,34 @@ public abstract partial class WidgetWindowBase
                 CaptureCompactPlacement(from, persist: false);
             }
 
-            to = WidgetPositioningService.ResolveBoundsForCurrentTopology(Config);
-            if (UsesSmartCollapseBehavior() || _dragExpandedFromCollapsed)
-            {
-                RectInt32 compactBounds = GetStableCompactBounds(from);
-                RectInt32 workArea = Microsoft.UI.Windowing.DisplayArea.GetFromRect(
-                    compactBounds,
-                    Microsoft.UI.Windowing.DisplayAreaFallback.Nearest).WorkArea;
-                to = WidgetCompactBoundsCalculator.AnchorExpandedBoundsToCompact(
-                    compactBounds,
-                    to,
-                    Config.CompactPlacement?.PositionAnchor ?? Config.PositionAnchor,
-                    workArea);
-            }
+            RectInt32 compactBounds = GetStableCompactBounds(from);
+            WidgetCompactExpansionLayout layout = ResolveCompactExpansionLayout(compactBounds);
+            _compactExpansionAnchor = layout.Anchor;
+            transitionAnchor = layout.Anchor;
+            transitionPivot = layout.Pivot;
+            to = layout.ExpandedBounds;
         }
 
         StartBoundsTransition(
             from,
             to,
             collapsed,
-            animate ? ResolveCompactTransitionDuration(durationMs) : 0);
+            animate ? ResolveCompactTransitionDuration(durationMs) : 0,
+            transitionAnchor,
+            transitionPivot);
     }
 
-    private void StartBoundsTransition(RectInt32 from, RectInt32 to, bool collapsed, int durationMs)
+    private void StartBoundsTransition(
+        RectInt32 from,
+        RectInt32 to,
+        bool collapsed,
+        int durationMs,
+        WidgetCompactExpansionAnchor? expansionAnchor = null,
+        PointInt32 expansionPivot = default)
     {
         StopCollapseAnimation();
+        _collapseAnimationAnchor = expansionAnchor;
+        _collapseAnimationPivot = expansionPivot;
         double dpiScale = Win32Helper.GetDpiScaleForWindow(HWnd, RootElement.XamlRoot);
         WidgetShellControl.BeginResponsiveLayoutTransition(
             collapsed,
@@ -934,7 +1251,14 @@ public abstract partial class WidgetWindowBase
         double eased = effect == SettingsService.WidgetCompactAnimationSnappy
             ? 1 - Math.Pow(1 - progress, 5)
             : 1 - Math.Pow(1 - progress, 3);
-        RectInt32 bounds = InterpolateBounds(_collapseAnimationFrom, _collapseAnimationTo, eased);
+        RectInt32 bounds = _collapseAnimationAnchor is { } expansionAnchor
+            ? WidgetCompactExpansionCalculator.InterpolateAnchoredBounds(
+                _collapseAnimationFrom,
+                _collapseAnimationTo,
+                _collapseAnimationPivot,
+                expansionAnchor,
+                eased)
+            : InterpolateBounds(_collapseAnimationFrom, _collapseAnimationTo, eased);
         MoveWindowWithoutPersisting(bounds);
         WidgetShellControl.SetCompactTransitionProgress(_targetCollapsed, eased);
 
@@ -974,6 +1298,7 @@ public abstract partial class WidgetWindowBase
                             ? WidgetCompactState.ExpandedPinned
                             : WidgetCompactState.ExpandedTransient
                         : WidgetCompactState.Expanded;
+        UpdateCompactViewState();
         ApplyWindowCornerPreference();
         if (collapsed)
         {
@@ -1018,9 +1343,12 @@ public abstract partial class WidgetWindowBase
     protected (int MinWidth, int MaxWidth) GetCompactPhysicalWidthLimits()
     {
         double scale = Win32Helper.GetDpiScaleForWindow(HWnd, RootElement.XamlRoot);
+        double maximumWidth = UsesAlignedCompactWidth()
+            ? WidgetCompactBoundsCalculator.MaxAlignedWidth
+            : WidgetCompactBoundsCalculator.MaxWidth;
         return (
             Math.Max(1, (int)Math.Round(WidgetCompactBoundsCalculator.MinWidth * scale)),
-            Math.Max(1, (int)Math.Round(WidgetCompactBoundsCalculator.MaxWidth * scale)));
+            Math.Max(1, (int)Math.Round(maximumWidth * scale)));
     }
 
     protected void PersistCompletedWidgetResize(RectInt32 bounds)
@@ -1029,12 +1357,33 @@ public abstract partial class WidgetWindowBase
         {
             double scale = Win32Helper.GetDpiScaleForWindow(HWnd, RootElement.XamlRoot);
             double logicalWidth = bounds.Width / Math.Max(scale, 0.01);
-            Config.CompactWidth = WidgetCompactBoundsCalculator.ClampLogicalWidth(logicalWidth);
+            double normalizedWidth = UsesAlignedCompactWidth()
+                ? WidgetCompactBoundsCalculator.ClampAlignedLogicalWidth(logicalWidth)
+                : WidgetCompactBoundsCalculator.ClampLogicalWidth(logicalWidth);
+            if (UsesAlignedCompactWidth())
+            {
+                Config.Width = normalizedWidth;
+                Config.CompactWidth = null;
+            }
+            else
+            {
+                Config.CompactWidth = normalizedWidth;
+            }
             CaptureCompactPlacement(bounds, persist: false);
             SettingsService.UpdateWidget(Config, notifySubscribers: false);
             SettingsService.SaveDebounced(notifySubscribers: false);
+            App.Current?.WidgetManager?.RefreshCapsuleBarLayout();
             return;
         }
+
+        bounds = AnchorExpandedBoundsToCompact(bounds);
+        RectInt32 current = GetCurrentWindowBounds();
+        if (!BoundsEqual(current, bounds))
+        {
+            MoveWindowWithoutPersisting(bounds);
+        }
+
+        SynchronizeAlignedCompactBoundsAfterExpandedResize(bounds);
 
         CapturePositionAnchor(
             bounds.X,
@@ -1048,14 +1397,206 @@ public abstract partial class WidgetWindowBase
             bounds.Width,
             bounds.Height,
             persist: true);
+        App.Current?.WidgetManager?.RefreshCapsuleBarLayout();
+    }
+
+    protected RectInt32 AnchorExpandedResizeBounds(RectInt32 proposedBounds)
+    {
+        if (IsCompactBoundsStateActive)
+        {
+            return proposedBounds;
+        }
+
+        if (UsesAlignedCompactWidth() &&
+            ResizeDirection is "Left" or "Right" &&
+            _expandedInteractionStartBounds is { } expandedStart &&
+            _compactInteractionStartBounds is { } compactStart &&
+            Math.Abs(expandedStart.Width - compactStart.Width) <= 1)
+        {
+            WidgetCompactExpansionAnchor activeAnchor = _compactExpansionAnchor ??
+                WidgetCompactExpansionCalculator.FromPositionAnchor(
+                    Config.CompactPlacement?.PositionAnchor ?? Config.PositionAnchor) ??
+                WidgetCompactExpansionAnchor.LeftTop;
+            _compactExpansionAnchor =
+                WidgetCompactExpansionCalculator.ResolveHorizontalResizeAnchor(
+                    activeAnchor,
+                    ResizeDirection);
+        }
+
+        return AnchorExpandedBoundsToCompact(proposedBounds);
+    }
+
+    private void SynchronizeAlignedCompactBoundsAfterExpandedResize(RectInt32 expandedBounds)
+    {
+        if (!UsesAlignedCompactWidth() ||
+            ResizeDirection is not ("Left" or "Right") ||
+            _compactInteractionStartBounds is not { } compactStart)
+        {
+            return;
+        }
+
+        double scale = Win32Helper.GetDpiScaleForWindow(HWnd, RootElement.XamlRoot);
+        double logicalWidth = WidgetCompactBoundsCalculator.ClampAlignedLogicalWidth(
+            expandedBounds.Width / Math.Max(scale, 0.01));
+        int compactWidth = Math.Max(1, (int)Math.Round(logicalWidth * scale));
+        int compactX = ResizeDirection == "Left"
+            ? compactStart.X + compactStart.Width - compactWidth
+            : compactStart.X;
+        var compactBounds = new RectInt32(
+            compactX,
+            compactStart.Y,
+            compactWidth,
+            compactStart.Height);
+        compactBounds = ClampBoundsIntoWorkArea(
+            compactBounds,
+            ResolveCompactWorkArea(compactBounds));
+        if (_compactArrangementSizeOverride is not null)
+        {
+            _compactArrangementSizeOverride = new SizeInt32(
+                compactBounds.Width,
+                compactBounds.Height);
+        }
+        CaptureCompactPlacement(compactBounds, persist: false);
+    }
+
+    protected RectInt32 CompleteExpandedWidgetDrag(RectInt32 finalBounds)
+    {
+        if (!UsesCompactExpansionGeometry() ||
+            IsCompactBoundsStateActive ||
+            _expandedInteractionStartBounds is not { } expandedStart ||
+            _compactInteractionStartBounds is not { } compactStart)
+        {
+            return finalBounds;
+        }
+
+        int deltaX = finalBounds.X - expandedStart.X;
+        int deltaY = finalBounds.Y - expandedStart.Y;
+        if (deltaX == 0 && deltaY == 0)
+        {
+            return finalBounds;
+        }
+
+        var shiftedCompact = new RectInt32(
+            compactStart.X + deltaX,
+            compactStart.Y + deltaY,
+            compactStart.Width,
+            compactStart.Height);
+        if (App.Current?.WidgetManager?.MoveCapsuleBarFromExpandedWidget(
+                Config.Id,
+                deltaX,
+                deltaY,
+                out RectInt32 arrangedCompact) == true)
+        {
+            shiftedCompact = arrangedCompact;
+        }
+        else
+        {
+            RectInt32 workArea = ResolveCompactWorkArea(shiftedCompact);
+            shiftedCompact = ClampBoundsIntoWorkArea(shiftedCompact, workArea);
+            CaptureCompactPlacement(shiftedCompact, persist: false);
+        }
+        WidgetCompactExpansionLayout layout = ResolveCompactExpansionLayout(
+            shiftedCompact,
+            new SizeInt32(finalBounds.Width, finalBounds.Height),
+            freezeResolvedAnchor: _compactExpansionAnchor is not null);
+        _compactExpansionAnchor = layout.Anchor;
+        if (!BoundsEqual(finalBounds, layout.ExpandedBounds))
+        {
+            MoveWindowWithoutPersisting(layout.ExpandedBounds);
+        }
+        return layout.ExpandedBounds;
+    }
+
+    private void ReanchorExpandedToCompact(RectInt32 compactBounds, bool preserveAnchor)
+    {
+        if (!UsesCompactExpansionGeometry() ||
+            IsCompactBoundsStateActive ||
+            _isBoundsInteractionActive ||
+            _isCollapseAnimationRendering ||
+            IsClosing)
+        {
+            return;
+        }
+
+        RectInt32 current = GetCurrentWindowBounds();
+        WidgetCompactExpansionLayout layout = ResolveCompactExpansionLayout(
+            compactBounds,
+            new SizeInt32(current.Width, current.Height),
+            freezeResolvedAnchor: preserveAnchor && _compactExpansionAnchor is not null);
+        _compactExpansionAnchor = layout.Anchor;
+        if (!BoundsEqual(current, layout.ExpandedBounds))
+        {
+            MoveWindowWithoutPersisting(layout.ExpandedBounds);
+        }
+    }
+
+    private void CaptureExpandedPairInteraction()
+    {
+        _expandedInteractionStartBounds = null;
+        _compactInteractionStartBounds = null;
+        if (!UsesCompactExpansionGeometry() || IsCompactBoundsStateActive)
+        {
+            return;
+        }
+
+        RectInt32 expanded = GetCurrentWindowBounds();
+        RectInt32 compact = GetStableCompactBounds(expanded);
+        WidgetCompactExpansionLayout layout = ResolveCompactExpansionLayout(
+            compact,
+            new SizeInt32(expanded.Width, expanded.Height),
+            freezeResolvedAnchor: _compactExpansionAnchor is not null);
+        _compactExpansionAnchor = layout.Anchor;
+        _expandedInteractionStartBounds = expanded;
+        _compactInteractionStartBounds = compact;
+    }
+
+    private RectInt32 AnchorExpandedBoundsToCompact(RectInt32 expandedBounds)
+    {
+        if (!UsesCompactExpansionGeometry() || IsCompactBoundsStateActive)
+        {
+            return expandedBounds;
+        }
+
+        RectInt32 compact = _compactInteractionStartBounds ??
+            GetStableCompactBounds(expandedBounds);
+        WidgetCompactExpansionLayout layout = ResolveCompactExpansionLayout(
+            compact,
+            new SizeInt32(expandedBounds.Width, expandedBounds.Height),
+            freezeResolvedAnchor: _compactExpansionAnchor is not null);
+        _compactExpansionAnchor = layout.Anchor;
+        return layout.ExpandedBounds;
+    }
+
+    private static RectInt32 ClampBoundsIntoWorkArea(RectInt32 bounds, RectInt32 workArea)
+    {
+        int width = Math.Min(Math.Max(1, bounds.Width), Math.Max(1, workArea.Width));
+        int height = Math.Min(Math.Max(1, bounds.Height), Math.Max(1, workArea.Height));
+        int maxX = workArea.X + workArea.Width - width;
+        int maxY = workArea.Y + workArea.Height - height;
+        return new RectInt32(
+            Math.Clamp(bounds.X, workArea.X, maxX),
+            Math.Clamp(bounds.Y, workArea.Y, maxY),
+            width,
+            height);
     }
 
     protected RectInt32 ResolveWidgetBoundsForCurrentState()
     {
         RectInt32 expanded = WidgetPositioningService.ResolveBoundsForCurrentTopology(Config);
-        return IsCompactBoundsStateActive
-            ? GetCompactBounds(expanded)
-            : expanded;
+        RectInt32 compact = GetCompactBounds(expanded);
+        if (IsCompactBoundsStateActive)
+        {
+            return compact;
+        }
+
+        if (!UsesCompactExpansionGeometry())
+        {
+            return expanded;
+        }
+
+        WidgetCompactExpansionLayout layout = ResolveCompactExpansionLayout(compact);
+        _compactExpansionAnchor = layout.Anchor;
+        return layout.ExpandedBounds;
     }
 
     private RectInt32 GetCompactBounds(RectInt32 expandedOrCurrent)
@@ -1067,7 +1608,16 @@ public abstract partial class WidgetWindowBase
             Config,
             expandedOrCurrent,
             scale,
-            contentMode);
+            contentMode,
+            alignToExpandedWidth: UsesAlignedCompactWidth());
+        if (_compactArrangementSizeOverride is { } arrangedSize)
+        {
+            resolved = new RectInt32(
+                resolved.X,
+                resolved.Y,
+                Math.Max(1, arrangedSize.Width),
+                Math.Max(1, arrangedSize.Height));
+        }
         return _stableCompactBounds is { } stable
             ? WidgetCompactBoundsCalculator.ApplySizeToStablePlacement(
                 stable,
@@ -1153,6 +1703,7 @@ public abstract partial class WidgetWindowBase
         CancelTimer(ref _collapseAnimationWatchdogTimer);
         if (!_isCollapseAnimationRendering && !_isShellTransitionActive)
         {
+            _collapseAnimationAnchor = null;
             return;
         }
 
@@ -1163,7 +1714,13 @@ public abstract partial class WidgetWindowBase
             WidgetShellControl.CancelCompactTransition();
             _isShellTransitionActive = false;
         }
+        _collapseAnimationAnchor = null;
     }
+
+    private bool UsesAlignedCompactWidth() =>
+        SettingsService.NormalizeWidgetCompactWidthMode(
+            SettingsService.Settings.WidgetCompactWidthMode) ==
+        SettingsService.WidgetCompactWidthModeAligned;
 
     private void RaiseForExpandedState()
     {
@@ -1224,27 +1781,64 @@ public abstract partial class WidgetWindowBase
 
             bool pointerInside = IsPointerPhysicallyInsideWindow();
             _isPointerOverWidget = pointerInside;
+            WidgetCompactInteractionSnapshot snapshot = CaptureCompactInteractionSnapshot();
+            if (WidgetCompactInteractionPolicy.CanAutoCollapse(
+                EffectiveCollapseBehavior,
+                snapshot))
+            {
+                SetCollapsedState(true, persistManualState: false, animate: true);
+                return;
+            }
+
             if (pointerInside)
             {
                 _compactState = WidgetCompactState.ExpandedTransient;
+                UpdateCompactViewState();
                 ScheduleSmartCollapse(SmartCollapseProbeMs);
                 return;
             }
 
-            if (_isCompactDragInside ||
-                _isBoundsInteractionActive ||
-                _compactInteractionDepth > 0 ||
-                IsDragging ||
-                IsResizing ||
-                HasBlockingFlyoutOpen())
+            if (snapshot.HasActiveInteraction)
             {
                 _compactState = WidgetCompactState.Interacting;
+                UpdateCompactViewState();
                 ScheduleSmartCollapse(SmartCollapseProbeMs);
                 return;
             }
-
-            SetCollapsedState(true, persistManualState: false, animate: true);
         });
+    }
+
+    private WidgetCompactInteractionSnapshot CaptureCompactInteractionSnapshot()
+    {
+        return new WidgetCompactInteractionSnapshot(
+            IsCollapsed: _targetCollapsed,
+            IsPinned: _isSmartPinnedOpen,
+            IsPointerInside: _isPointerOverWidget,
+            IsExpansionZoneActive: _isPointerOverCompactExpansionZone,
+            IsPointerOverMoveHandle: _isPointerOverCompactMoveHandle,
+            IsPointerOverActions: _isPointerOverCompactActions,
+            IsDropInside: _isCompactDragInside,
+            IsBoundsInteractionActive: _isBoundsInteractionActive,
+            InteractionDepth: _compactInteractionDepth,
+            IsDragging: IsDragging,
+            IsResizing: IsResizing,
+            HasBlockingSurface: HasBlockingFlyoutOpen(),
+            SuppressHoverExpansion: _suppressSmartExpansionUntilPointerExit);
+    }
+
+    private void UpdateCompactViewState()
+    {
+        WidgetCompactViewState next = WidgetCompactInteractionPolicy.ResolveViewState(
+            EffectiveCollapseBehavior,
+            CaptureCompactInteractionSnapshot());
+        if (_compactViewState == next)
+        {
+            return;
+        }
+
+        App.LogVerbose(
+            $"[Compact] View state {Config.Name}#{Config.Id}: {_compactViewState} -> {next}");
+        _compactViewState = next;
     }
 
     private int ResolveCompactTransitionDuration(int? requestedDurationMs)

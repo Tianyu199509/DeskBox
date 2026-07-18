@@ -1,5 +1,37 @@
 # Changelog
 
+## 1.3.0 - 2026-07-18
+
+### English
+
+- **Capsule mode**: Widgets can now collapse into compact desktop surfaces and expand by click or title-area hover. Compact content supports smart highlights, summaries or icon-and-title only, with an optional privacy mode for Todo and Quick Capture text.
+- **Stable compact geometry**: Added aligned and independent width modes, anchored expansion toward the available screen area, separate compact and expanded bounds, resize guides, and per-widget overrides. Dragging content over a compact widget temporarily expands it without permanently moving or resizing either state.
+- **Combined capsule layouts**: Compact widgets can remain independently positioned or form a movable combined bar. The bar supports user-defined order, floating or edge placement, automatic direction, adjustable spacing, and reliable restoration of free-layout positions.
+- **Automatic file stacks**: File widgets can group related items by type or date without moving the underlying files. Custom extension rules support names, priority ordering, live match previews, thresholds, internal sorting and a configurable unmatched-file policy.
+- **Stack interaction and QuickLook compatibility**: Stacks use an in-widget spread/collapse interaction with selection and path-copy commands. When QuickLook is already running, pressing Space on a selected file forwards the preview request without adding settings, startup work or a hard dependency.
+- **Todo and Quick Capture workflows**: Added multiple file attachments with link-or-copy storage, attachment-aware clipboard formatting, configurable tab visibility, drag-to-tab actions, new Todo views for Active, This week and This month, adjustable list preview lines, and configurable Enter/Ctrl+Enter save behavior.
+- **Appearance and responsive content**: Added Mica Alt and Base acrylic, material intensity, neutral/accent/hidden border colors, compact/standard/relaxed/custom density presets, and forced Cover or Controls layouts for Music. Solid material now remains fully opaque.
+- **Windows-style Settings redesign**: Reorganized crowded pages into focused detail pages, moved global search into the title area, improved search matching and result navigation, surfaced important choices directly on entry cards, and made per-page hierarchy and reset behavior more consistent.
+- **Backup, restore and attachment health**: Added integrity-checked ZIP export/restore, automatic and pre-restore snapshots, staged restart-safe restore, resilient JSON recovery, and attachment health scans for missing linked files, missing managed files and orphaned managed attachments.
+- **Window and animation reliability**: Refined show/hide transitions, detail-page transitions, title-bar collapse actions, hover hit regions, Z-order, multi-monitor bounds restoration, resize alignment and tray menu sizing. Rapid capsule and stack interactions now use guarded state transitions to reduce flicker and stuck intermediate states.
+- **Installer upgrades**: The installer now closes a running DeskBox process reliably before replacing application files, avoiding the intermittent Retry / Ignore / Cancel prompt during overwrite installs.
+- **Maintainability and tests**: Split the largest window, widget, settings, Todo, Quick Capture, Music and Weather classes into focused modules. Expanded regression coverage across attachments, backup safety, settings migration/search, compact bounds and privacy, stacks, animation and positioning.
+
+### 中文
+
+- **胶囊模式**：格子现在可以收起为紧凑桌面形态，并通过点击或标题区域悬停展开。收起后可显示关键信息、简要摘要或仅图标和标题，也可隐藏待办与随记正文等敏感内容。
+- **稳定的收起与展开几何逻辑**：新增保持同宽和独立调整两种宽度关系，并根据屏幕可用区域从胶囊锚点向合适方向展开。胶囊与展开状态分别保存位置和尺寸，支持参考线与单格覆盖；内容拖入时会临时展开，操作结束后不会永久改变两种状态。
+- **胶囊组合排列**：胶囊可独立摆放，也可组成能够整体移动的组合栏。组合栏支持自定义顺序、悬浮或贴边位置、自动排列方向、间距调整，并能稳定恢复原来的自由布局位置。
+- **文件自动叠放**：文件格子可按文件类型或日期自动分组，不移动真实文件。自定义格式规则支持叠放名称、优先级、实时命中预览、形成数量、内部排序，以及未匹配文件保持散开或收入“其他”。
+- **叠放交互与 QuickLook 兼容**：叠放在格子内部散开展开和收回，并支持全选内容与复制路径。若 QuickLook 已经运行，在文件上按空格即可转交预览请求，不增加设置项、启动扫描或强制依赖。
+- **待办与随记工作流**：支持一条内容关联多个文件，可选择关联原路径或复制到 DeskBox；复制文本时会按中英文格式附带附件路径。新增标签页显示配置、拖到标签页直接改变状态、待办“进行中/本周/本月”视图、列表预览行数，以及 Enter 与 Ctrl+Enter 保存行为互换。
+- **外观与自适应内容**：新增云母 Alt、标准亚克力、材质浓度、中性/主题色/无边框颜色，显示密度支持紧凑、标准、宽松和自定义。音乐可强制使用封面或控制布局，纯色材质固定保持完全不透明。
+- **Windows 风格设置重构**：将拥挤页面拆为聚焦的三级页面，把全局搜索移入标题栏并改进匹配与结果跳转；三级入口卡片直接提供最重要的选项，页面层级、前置控制和重置语义更加一致。
+- **备份、恢复与附件健康检查**：新增带完整性校验的 ZIP 导出/恢复、自动快照、恢复前快照、重启后安全应用恢复、JSON 损坏回退，以及缺失关联文件、缺失托管附件和孤立附件扫描。
+- **窗口与动画稳定性**：优化全局显示/隐藏、详情页进出、标题栏收起操作、悬停命中区域、窗口层级、多显示器位置恢复、调整大小参考线和托盘菜单高度。快速操作胶囊与叠放时使用受控状态切换，减少闪烁和卡在中间状态的问题。
+- **覆盖安装体验**：安装器现在会在替换应用文件前可靠关闭正在运行的 DeskBox，避免覆盖安装时偶发弹出“重试 / 忽略 / 取消”提示。
+- **可维护性与测试**：拆分体积过大的窗口、格子、设置、待办、随记、音乐和天气类，并扩展附件、备份安全、设置迁移与搜索、胶囊边界与隐私、叠放、动画和窗口定位的回归测试。
+
 ## 1.2.9 - 2026-07-13
 
 ### English
