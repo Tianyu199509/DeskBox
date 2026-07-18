@@ -30,7 +30,7 @@ public partial class App : Application
     private const double TrayMenuVerticalPadding = 4;
     private const double TrayMenuItemMinHeight = 36;
     private const double TrayMenuSeparatorHeight = 12;
-    private const double TrayMenuMinimumHeight = 240;
+    private const double TrayMenuMinimumHeight = 320;
     private const int TrayContextMenuFallbackOffsetPixels = 24;
     private const int TrayContextMenuEstimatedWidth = (int)TrayMenuItemWidth + 16;
     private const int MaxQueuedLogLines = 4096;
