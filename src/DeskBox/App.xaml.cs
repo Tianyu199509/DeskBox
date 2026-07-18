@@ -30,6 +30,7 @@ public partial class App : Application
     private const double TrayMenuVerticalPadding = 4;
     private const double TrayMenuItemMinHeight = 36;
     private const double TrayMenuSeparatorHeight = 12;
+    private const double TrayMenuMinimumHeight = 240;
     private const int TrayContextMenuFallbackOffsetPixels = 24;
     private const int TrayContextMenuEstimatedWidth = (int)TrayMenuItemWidth + 16;
     private const int MaxQueuedLogLines = 4096;
@@ -1853,12 +1854,14 @@ public partial class App : Application
             (visibleCommandCount * TrayMenuItemMinHeight) +
             (visibleSeparatorCount * TrayMenuSeparatorHeight) +
             (TrayMenuVerticalPadding * 2);
+        double presenterHeight = Math.Max(TrayMenuMinimumHeight, fullContentHeight);
 
         var style = new Style(typeof(MenuFlyoutPresenter))
         {
             BasedOn = (Style)Resources[typeof(MenuFlyoutPresenter)]
         };
-        style.Setters.Add(new Setter(FrameworkElement.MinHeightProperty, fullContentHeight));
+        style.Setters.Add(new Setter(FrameworkElement.HeightProperty, presenterHeight));
+        style.Setters.Add(new Setter(FrameworkElement.MinHeightProperty, presenterHeight));
         style.Setters.Add(new Setter(ScrollViewer.VerticalScrollModeProperty, ScrollMode.Disabled));
         style.Setters.Add(new Setter(
             ScrollViewer.VerticalScrollBarVisibilityProperty,

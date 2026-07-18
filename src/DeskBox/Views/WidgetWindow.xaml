@@ -513,13 +513,6 @@
                         </Button>
 
                         <Button
-                            x:Name="CollapseWidgetButton"
-                            Style="{StaticResource WidgetTitleActionButtonStyle}"
-                            Click="CollapseWidgetButton_Click">
-                            <FontIcon x:Name="CollapseWidgetButtonIcon" FontSize="12" Glyph="&#xE70E;" />
-                        </Button>
-
-                        <Button
                             x:Name="MoreButton"
                             Style="{StaticResource WidgetTitleActionButtonStyle}"
                             Click="MoreButton_Click">
@@ -531,6 +524,13 @@
                             Style="{StaticResource WidgetTitleActionButtonStyle}"
                             Click="CloseButton_Click">
                             <Path x:Name="CloseButtonIcon" Data="M8.5 4h3a1.5 1.5 0 0 0-3 0Zm-1 0a2.5 2.5 0 0 1 5 0h5a.5.5 0 0 1 0 1h-1.05l-1.2 10.34A3 3 0 0 1 12.27 18H7.73a3 3 0 0 1-2.98-2.66L3.55 5H2.5a.5.5 0 0 1 0-1h5ZM5.74 15.23A2 2 0 0 0 7.73 17h4.54a2 2 0 0 0 1.99-1.77L15.44 5H4.56l1.18 10.23ZM8.5 7.5c.28 0 .5.22.5.5v6a.5.5 0 0 1-1 0V8c0-.28.22-.5.5-.5ZM12 8a.5.5 0 0 0-1 0v6a.5.5 0 0 0 1 0V8Z" Fill="{Binding Foreground, ElementName=CloseButton}" Stretch="Uniform" />
+                        </Button>
+
+                        <Button
+                            x:Name="CollapseWidgetButton"
+                            Style="{StaticResource WidgetTitleActionButtonStyle}"
+                            Click="CollapseWidgetButton_Click">
+                            <FontIcon x:Name="CollapseWidgetButtonIcon" FontSize="12" Glyph="&#xE70E;" />
                         </Button>
                     </StackPanel>
                 </Grid>
