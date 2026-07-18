@@ -86,4 +86,43 @@ public partial class SettingsViewModel
             _isRestoringDefaults = false;
         }
     }
+
+    public async Task<bool> RestoreCurrentPageDefaultsAsync(string sectionTag)
+    {
+        if (!SettingsService.IsPreferenceSectionResettable(sectionTag))
+        {
+            return false;
+        }
+
+        _isRestoringDefaults = true;
+        SuppressAppearanceNotifications = true;
+        DeferAppearancePersistence = false;
+        try
+        {
+            SettingsService.ApplyDefaultPreferencesForSection(_settingsService.Settings, sectionTag);
+            ApplySettingsSnapshot();
+            IconHelper.ClearAllThumbnailCaches();
+
+            if (App.Current is { } app)
+            {
+                app.ResizeGuideOverlay.IsSnapEnabled = _settingsService.Settings.ResizeSnapEnabled;
+            }
+
+            App.Current?.GlobalHotkeyService?.RefreshRegistration();
+            App.Current?.UpdateTrayIcon();
+            RefreshGlobalHotkeyState();
+            _themeService.RefreshAppearance();
+            RefreshAccentPreview();
+            RefreshLocalizedProperties();
+            await _settingsService.SaveAsync();
+            App.Current?.QuickCaptureClipboardService?.Refresh();
+            _settingsService.NotifyAppearancePreviewNow();
+            return true;
+        }
+        finally
+        {
+            SuppressAppearanceNotifications = false;
+            _isRestoringDefaults = false;
+        }
+    }
 }

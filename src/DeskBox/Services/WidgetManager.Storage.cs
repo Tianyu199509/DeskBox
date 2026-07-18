@@ -691,7 +691,10 @@ public sealed partial class WidgetManager
 
     private bool ShouldMoveManagedItems()
     {
-        return true;
+        return string.Equals(
+            _settingsService.Settings.ManagedDropAction,
+            SettingsService.ManagedDropActionMove,
+            StringComparison.Ordinal);
     }
 
 }

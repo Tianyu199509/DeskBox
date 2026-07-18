@@ -85,6 +85,7 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
     private string _selectedQuickCaptureTabStyle = SettingsService.WidgetTabStyleButton;
     private string _selectedTodoNewTaskPosition = SettingsService.TodoNewTaskPositionTop;
     private string _selectedAttachmentStorageMode = SettingsService.AttachmentStorageModeLink;
+    private string _selectedManagedDropAction = SettingsService.ManagedDropActionCopy;
     private string _selectedTodoDefaultFilter = SettingsService.TodoDefaultFilterAll;
     private string _selectedTodoTabStyle = SettingsService.WidgetTabStyleButton;
     private int _selectedTodoReminderOffsetMinutes = SettingsService.DefaultTodoReminderOffsetMinutes;
@@ -138,6 +139,7 @@ private int _selectedWeatherRefreshInterval = 60;
     private string[]? _cachedQuickCaptureTabStyleDisplayNames;
     private string[]? _cachedTodoNewTaskPositionDisplayNames;
     private string[]? _cachedAttachmentStorageModeDisplayNames;
+    private string[]? _cachedManagedDropActionDisplayNames;
     private string[]? _cachedTodoDefaultFilterDisplayNames;
     private string[]? _cachedTodoTabStyleDisplayNames;
     private string[]? _cachedTodoReminderOffsetDisplayNames;
@@ -307,6 +309,9 @@ private string[]? _cachedWeatherRefreshIntervalDisplayNames;
         _quickCaptureRecentLimit = QuickCaptureService.NormalizeRecentLimit(settings.QuickCaptureRecentLimit);
         _quickCaptureShowCreatedTime = settings.QuickCaptureShowCreatedTime;
         _selectedAttachmentStorageMode = SettingsService.NormalizeAttachmentStorageMode(settings.AttachmentStorageMode);
+        _selectedManagedDropAction = settings.ManagedDropAction == SettingsService.ManagedDropActionMove
+            ? SettingsService.ManagedDropActionMove
+            : SettingsService.ManagedDropActionCopy;
         _selectedQuickCaptureDefaultView = NormalizeQuickCaptureDefaultView(settings.QuickCaptureDefaultView);
         _selectedQuickCaptureTabStyle = SettingsService.NormalizeWidgetTabStyle(settings.QuickCaptureTabStyle);
         _quickCaptureShowTabBar = settings.QuickCaptureShowTabBar;

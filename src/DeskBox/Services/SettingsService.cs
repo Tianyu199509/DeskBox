@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Reflection;
 using System.Runtime.CompilerServices;
 using DeskBox.Helpers;
 using DeskBox.Models;
@@ -145,6 +146,30 @@ public sealed class SettingsService
         WidgetHoverActionMore;
     public const string ManagedDropActionMove = "Move";
     public const string ManagedDropActionCopy = "Copy";
+
+    private static readonly IReadOnlyDictionary<string, string[]> SectionPreferenceProperties =
+        new Dictionary<string, string[]>(StringComparer.Ordinal)
+        {
+            ["Appearance"] = ["Theme", "TrayIconStyle", "AccentColorMode", "CustomAccentColor"],
+            ["AppearanceMaterialSettings"] = ["WidgetMaterialType", "WidgetMaterialIntensity", "WidgetBorderColorMode", "WidgetBorderStyle", "WidgetCornerPreference", "WidgetOpacity"],
+            ["AppearanceDensitySettings"] = ["IconSize", "TextSize", "LayoutDensity", "LayoutDensityScale", "HorizontalSpacingScale", "VerticalSpacingScale", "FileNameWidthScale"],
+            ["AppearanceWindowSettings"] = ["DefaultWidgetWidth", "DefaultWidgetHeight", "DisplayWidgetChromeMode", "InteractiveWidgetChromeMode", "WidgetTitleIconMode"],
+            ["AppearanceAnimationSettings"] = ["WidgetAnimationEffect", "WidgetAnimationSpeed", "WidgetAnimationSlideDirection", "WidgetAnimationEasingIntensity"],
+            ["CapsuleMode"] = ["WidgetCapsuleModeEnabled", "WidgetCollapsedStyle"],
+            ["CapsuleBehaviorSettings"] = ["WidgetCollapseBehavior"],
+            ["CapsuleContentSettings"] = ["WidgetCompactContentMode", "WidgetCompactHideSensitiveContent", "WidgetCompactMediaCornerMode"],
+            ["CapsuleAnimationSettings"] = ["WidgetCompactAnimationEffect", "WidgetCompactAnimationDurationMs", "WidgetCompactExpandDelayMs", "WidgetCompactCollapseDelayMs"],
+            ["FileDisplaySettings"] = ["ShowFileExtensions", "HideShortcutExtensionWhenShowingFileExtensions", "HideShortcutArrowOverlay", "ShowImageFilesAsIcons", "ShowListItemDetails", "ShowFileItemPathTooltips"],
+            ["FileStorageSettings"] = ["AttachmentStorageMode", "ManagedDropAction"],
+            ["FileStackSettings"] = ["FileStacksEnabled", "FileStackGroupBy", "FileStackThreshold", "FileStackOrderBy", "FileStackCustomRules", "FileStackUnmatchedBehavior"],
+            ["QuickCaptureSettings"] = ["QuickCaptureClipboardEnabled", "QuickCaptureImageClipboardEnabled", "QuickCaptureRecentLimit", "QuickCaptureShowCreatedTime", "QuickCaptureItemPreviewLineCount", "QuickCaptureEditorEnterBehavior", "QuickCaptureDefaultView", "QuickCaptureTabStyle", "QuickCaptureShowTabBar", "QuickCaptureShowRecordsTab", "QuickCaptureShowPinnedTab", "QuickCaptureShowRecentTab"],
+            ["TodoSettings"] = ["TodoNewTaskPosition", "TodoTabStyle", "TodoShowTabBar", "TodoShowAllTab", "TodoShowActiveTab", "TodoShowTodayTab", "TodoShowThisWeekTab", "TodoShowThisMonthTab", "TodoShowImportantTab", "TodoShowCompletedTab", "TodoDefaultFilter", "TodoShowCompletedTasks", "TodoItemPreviewLineCount", "TodoEditorEnterBehavior", "TodoShowFooterStats", "TodoShowClearCompletedButton", "TodoConfirmBeforeDelete", "TodoReminderEnabled", "TodoDefaultReminderOffsetMinutes"],
+            ["MusicSettings"] = ["MusicUseArtworkBackdrop", "MusicEnableCoverHoverMotion", "MusicDisplayMode"],
+            ["WeatherSettings"] = ["WeatherAutoLocation", "WeatherCityName", "WeatherLatitude", "WeatherLongitude", "WeatherTemperatureUnit", "WeatherWindSpeedUnit", "WeatherDefaultView", "WeatherSkin", "WeatherShowForecast", "WeatherShowSunrise", "WeatherShowUvIndex", "WeatherShowPrecipitation", "WeatherShowHumidity", "WeatherShowWind", "WeatherShowPressure", "WeatherRefreshIntervalMinutes"],
+            ["InteractionHotkeySettings"] = ["GlobalHotkeyEnabled", "GlobalHotkeyModifiers", "GlobalHotkeyKey"],
+            ["InteractionHoverSettings"] = ["ShowHoverButtons", "WidgetHoverButtonActions"],
+            ["InteractionWindowSettings"] = ["DoubleClickToOpen", "ResizeSnapEnabled", "WidgetLayerMode"]
+        };
     public const string AttachmentStorageModeLink = "Link";
     public const string AttachmentStorageModeCopy = "Copy";
     public const string FileStackGroupByKind = "Kind";
@@ -160,7 +185,10 @@ public sealed class SettingsService
     public const string FileStackOrderByDateModified = "DateModified";
     public const string FileStackUnmatchedKeepLoose = "KeepLoose";
     public const string FileStackUnmatchedOther = "Other";
-    public const int DefaultItemPreviewLineCount = 10;
+    public const int DefaultQuickCaptureItemPreviewLineCount = 3;
+    public const int DefaultTodoItemPreviewLineCount = 2;
+    [Obsolete("Use the feature-specific preview line defaults.")]
+    public const int DefaultItemPreviewLineCount = DefaultQuickCaptureItemPreviewLineCount;
     public const int MinItemPreviewLineCount = 1;
     public const int MaxItemPreviewLineCount = 10;
     public const string EditorEnterBehaviorCtrlEnterSaves = "CtrlEnterSaves";
@@ -324,7 +352,7 @@ public const int WeatherRefreshMaxMinutes = 180;
         settings.QuickCaptureImageClipboardEnabled = false;
         settings.QuickCaptureRecentLimit = QuickCaptureService.DefaultRecentLimit;
         settings.QuickCaptureShowCreatedTime = true;
-        settings.QuickCaptureItemPreviewLineCount = DefaultItemPreviewLineCount;
+        settings.QuickCaptureItemPreviewLineCount = DefaultQuickCaptureItemPreviewLineCount;
         settings.QuickCaptureEditorEnterBehavior = EditorEnterBehaviorCtrlEnterSaves;
         settings.AttachmentStorageMode = AttachmentStorageModeLink;
         settings.QuickCaptureDefaultView = QuickCaptureDefaultViewRecords;
@@ -333,8 +361,8 @@ public const int WeatherRefreshMaxMinutes = 180;
         settings.QuickCaptureShowRecordsTab = true;
         settings.QuickCaptureShowPinnedTab = true;
         settings.QuickCaptureShowRecentTab = true;
-        settings.TodoShowCompletedTasks = true;
-        settings.TodoItemPreviewLineCount = DefaultItemPreviewLineCount;
+        settings.TodoShowCompletedTasks = false;
+        settings.TodoItemPreviewLineCount = DefaultTodoItemPreviewLineCount;
         settings.TodoEditorEnterBehavior = EditorEnterBehaviorCtrlEnterSaves;
         settings.TodoShowFooterStats = false;
         settings.TodoShowClearCompletedButton = true;
@@ -371,7 +399,7 @@ settings.WeatherRefreshIntervalMinutes = 60;
         settings.TodoShowThisMonthTab = false;
         settings.TodoShowImportantTab = true;
         settings.TodoShowCompletedTab = true;
-        settings.ManagedDropAction = ManagedDropActionMove;
+        settings.ManagedDropAction = ManagedDropActionCopy;
         settings.GlobalHotkeyEnabled = DefaultGlobalHotkeyEnabled;
         settings.GlobalHotkeyModifiers = DefaultGlobalHotkeyModifiers;
         settings.GlobalHotkeyKey = DefaultGlobalHotkeyKey;
@@ -382,6 +410,48 @@ settings.ShowListItemDetails = false;
 settings.ShowFileItemPathTooltips = true;
 settings.CustomAccentColor = "#0078D4";
 settings.FocusClickedWidgetOnRaise = false;
+    }
+
+    public static bool IsPreferenceSectionResettable(string sectionTag) =>
+        SectionPreferenceProperties.ContainsKey(sectionTag);
+
+    public static bool ApplyDefaultPreferencesForSection(AppSettings settings, string sectionTag)
+    {
+        ArgumentNullException.ThrowIfNull(settings);
+        if (!SectionPreferenceProperties.TryGetValue(sectionTag, out string[]? propertyNames))
+        {
+            return false;
+        }
+
+        var defaults = new AppSettings();
+        ApplyDefaultPreferences(defaults);
+        Type settingsType = typeof(AppSettings);
+        foreach (string propertyName in propertyNames)
+        {
+            PropertyInfo? property = settingsType.GetProperty(propertyName);
+            if (property is null || !property.CanRead || !property.CanWrite)
+            {
+                throw new InvalidOperationException(
+                    $"Default preference property '{propertyName}' is not writable.");
+            }
+
+            object? defaultValue = property.GetValue(defaults);
+            if (defaultValue is List<FileStackCustomRule> rules)
+            {
+                defaultValue = rules
+                    .Select(rule => new FileStackCustomRule
+                    {
+                        Id = rule.Id,
+                        Name = rule.Name,
+                        Extensions = [.. rule.Extensions]
+                    })
+                    .ToList();
+            }
+
+            property.SetValue(settings, defaultValue);
+        }
+
+        return true;
     }
 
     public SettingsService()
@@ -1550,9 +1620,10 @@ changed |= NormalizeDeletionSettings(_settings);
             changed = true;
         }
 
-        if (!string.Equals(settings.ManagedDropAction, ManagedDropActionMove, StringComparison.Ordinal))
+        if (!string.Equals(settings.ManagedDropAction, ManagedDropActionMove, StringComparison.Ordinal) &&
+            !string.Equals(settings.ManagedDropAction, ManagedDropActionCopy, StringComparison.Ordinal))
         {
-            settings.ManagedDropAction = ManagedDropActionMove;
+            settings.ManagedDropAction = ManagedDropActionCopy;
             changed = true;
         }
 

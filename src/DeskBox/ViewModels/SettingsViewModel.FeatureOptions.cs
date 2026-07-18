@@ -63,6 +63,33 @@ public partial class SettingsViewModel
         AvailableAttachmentStorageModes,
         _selectedAttachmentStorageMode);
 
+    public string SelectedManagedDropAction
+    {
+        get => _selectedManagedDropAction;
+        set
+        {
+            string normalized = value == SettingsService.ManagedDropActionCopy
+                ? SettingsService.ManagedDropActionCopy
+                : SettingsService.ManagedDropActionMove;
+            if (!SetProperty(ref _selectedManagedDropAction, normalized))
+            {
+                return;
+            }
+
+            if (!_isRestoringDefaults && !_isApplyingSettingsSnapshot)
+            {
+                _settingsService.Settings.ManagedDropAction = normalized;
+                _settingsService.SaveDebounced();
+            }
+
+            OnPropertyChanged(nameof(SelectedManagedDropActionIndex));
+        }
+    }
+
+    public int SelectedManagedDropActionIndex => Array.IndexOf(
+        AvailableManagedDropActions,
+        _selectedManagedDropAction);
+
     public string SelectedQuickCaptureDefaultView
     {
         get => _selectedQuickCaptureDefaultView;
@@ -558,7 +585,7 @@ public partial class SettingsViewModel
                     QuickCaptureImageClipboardEnabled = false;
                     QuickCaptureRecentLimit = QuickCaptureService.DefaultRecentLimit;
                     QuickCaptureShowCreatedTime = true;
-                    QuickCaptureItemPreviewLineCount = SettingsService.DefaultItemPreviewLineCount;
+                    QuickCaptureItemPreviewLineCount = SettingsService.DefaultQuickCaptureItemPreviewLineCount;
                     QuickCaptureEditorEnterBehavior = SettingsService.EditorEnterBehaviorCtrlEnterSaves;
                     SelectedQuickCaptureDefaultView = SettingsService.QuickCaptureDefaultViewRecords;
                     SelectedQuickCaptureTabStyle = SettingsService.WidgetTabStyleButton;
@@ -570,7 +597,7 @@ public partial class SettingsViewModel
                     _settingsService.Settings.QuickCaptureImageClipboardEnabled = false;
                     _settingsService.Settings.QuickCaptureRecentLimit = QuickCaptureService.DefaultRecentLimit;
                     _settingsService.Settings.QuickCaptureShowCreatedTime = true;
-                    _settingsService.Settings.QuickCaptureItemPreviewLineCount = SettingsService.DefaultItemPreviewLineCount;
+                    _settingsService.Settings.QuickCaptureItemPreviewLineCount = SettingsService.DefaultQuickCaptureItemPreviewLineCount;
                     _settingsService.Settings.QuickCaptureEditorEnterBehavior = SettingsService.EditorEnterBehaviorCtrlEnterSaves;
                     _settingsService.Settings.QuickCaptureDefaultView = SettingsService.QuickCaptureDefaultViewRecords;
                     _settingsService.Settings.QuickCaptureTabStyle = SettingsService.WidgetTabStyleButton;
@@ -583,8 +610,8 @@ public partial class SettingsViewModel
                     RefreshQuickCaptureClipboardDiagnostics();
                     break;
                 case WidgetKind.Todo:
-                    TodoShowCompletedTasks = true;
-                    TodoItemPreviewLineCount = SettingsService.DefaultItemPreviewLineCount;
+                    TodoShowCompletedTasks = false;
+                    TodoItemPreviewLineCount = SettingsService.DefaultTodoItemPreviewLineCount;
                     TodoEditorEnterBehavior = SettingsService.EditorEnterBehaviorCtrlEnterSaves;
                     TodoShowFooterStats = false;
                     TodoShowClearCompletedButton = true;
@@ -602,8 +629,8 @@ public partial class SettingsViewModel
                     TodoShowThisMonthTab = false;
                     TodoShowImportantTab = true;
                     TodoShowCompletedTab = true;
-                    _settingsService.Settings.TodoShowCompletedTasks = true;
-                    _settingsService.Settings.TodoItemPreviewLineCount = SettingsService.DefaultItemPreviewLineCount;
+                    _settingsService.Settings.TodoShowCompletedTasks = false;
+                    _settingsService.Settings.TodoItemPreviewLineCount = SettingsService.DefaultTodoItemPreviewLineCount;
                     _settingsService.Settings.TodoEditorEnterBehavior = SettingsService.EditorEnterBehaviorCtrlEnterSaves;
                     _settingsService.Settings.TodoShowFooterStats = false;
                     _settingsService.Settings.TodoShowClearCompletedButton = true;
@@ -906,6 +933,22 @@ public partial class SettingsViewModel
     public string[] AvailableAttachmentStorageModeDisplayNames =>
         _cachedAttachmentStorageModeDisplayNames ??=
             AvailableAttachmentStorageModes.Select(GetAttachmentStorageModeDisplayName).ToArray();
+
+    public string[] AvailableManagedDropActions { get; } =
+    [
+        SettingsService.ManagedDropActionCopy,
+        SettingsService.ManagedDropActionMove
+    ];
+
+    public string[] AvailableManagedDropActionDisplayNames =>
+        _cachedManagedDropActionDisplayNames ??= AvailableManagedDropActions
+            .Select(GetManagedDropActionDisplayName)
+            .ToArray();
+
+    public string GetManagedDropActionDisplayName(string action) =>
+        action == SettingsService.ManagedDropActionMove
+            ? _localizationService.T("Settings.DropAction.Move")
+            : _localizationService.T("Settings.DropAction.Copy");
 
     public string GetAttachmentStorageModeDisplayName(string storageMode)
     {
