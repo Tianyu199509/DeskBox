@@ -46,7 +46,6 @@ public string SelectedWeatherTemperatureUnit
     }
 }
 
-public int SelectedWeatherTemperatureUnitIndex => Array.IndexOf(AvailableWeatherTemperatureUnits, _selectedWeatherTemperatureUnit);
 
 public string[] AvailableWeatherWindSpeedUnits { get; } =
 [
@@ -81,7 +80,6 @@ public string SelectedWeatherWindSpeedUnit
     }
 }
 
-public int SelectedWeatherWindSpeedUnitIndex => Array.IndexOf(AvailableWeatherWindSpeedUnits, _selectedWeatherWindSpeedUnit);
 
 public string[] AvailableWeatherDefaultViews { get; } =
 [
@@ -115,7 +113,6 @@ public string SelectedWeatherDefaultView
     }
 }
 
-public int SelectedWeatherDefaultViewIndex => Array.IndexOf(AvailableWeatherDefaultViews, _selectedWeatherDefaultView);
 
 public string[] AvailableWeatherSkins { get; } =
 [
@@ -149,7 +146,6 @@ public string SelectedWeatherSkin
     }
 }
 
-public int SelectedWeatherSkinIndex => Array.IndexOf(AvailableWeatherSkins, _selectedWeatherSkin);
 
 public int[] AvailableWeatherRefreshIntervals { get; } = [15, 30, 60, 180];
 
@@ -177,7 +173,6 @@ public int SelectedWeatherRefreshInterval
     }
 }
 
-public int SelectedWeatherRefreshIntervalIndex => Array.IndexOf(AvailableWeatherRefreshIntervals, _selectedWeatherRefreshInterval);
 
 private string GetWeatherTempUnitDisplayName(string unit) => unit switch
 {

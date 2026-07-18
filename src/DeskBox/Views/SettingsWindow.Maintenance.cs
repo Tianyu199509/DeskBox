@@ -430,33 +430,4 @@ public sealed partial class SettingsWindow
         await ViewModel.RestoreDefaultPreferencesAsync();
     }
 
-    private async void ResetCurrentPageButton_Click(object sender, RoutedEventArgs e)
-    {
-        if (SettingsRoot.XamlRoot is null ||
-            !SettingsService.IsPreferenceSectionResettable(_currentSettingsSection))
-        {
-            return;
-        }
-
-        var dialog = new ContentDialog
-        {
-            XamlRoot = SettingsRoot.XamlRoot,
-            Title = _localizationService.T("Settings.RestoreCurrentPage.ConfirmTitle"),
-            PrimaryButtonText = _localizationService.T("Settings.RestoreCurrentPage.Title"),
-            CloseButtonText = _localizationService.T("Common.Cancel"),
-            DefaultButton = ContentDialogButton.Close,
-            Content = new TextBlock
-            {
-                Text = _localizationService.T("Settings.RestoreCurrentPage.ConfirmBody"),
-                TextWrapping = TextWrapping.Wrap
-            }
-        };
-
-        if (await dialog.ShowAsync() != ContentDialogResult.Primary)
-        {
-            return;
-        }
-
-        await ViewModel.RestoreCurrentPageDefaultsAsync(_currentSettingsSection);
-    }
 }

@@ -562,7 +562,6 @@ _ = RefreshQuickAccessStateAsync();
             nameof(SelectedLayoutDensity)))
         {
             OnPropertyChanged(nameof(SelectedLayoutDensityText));
-            OnPropertyChanged(nameof(SelectedLayoutDensityIndex));
         }
     }
 
@@ -619,7 +618,6 @@ _ = RefreshQuickAccessStateAsync();
         if (SetProperty(ref _selectedAnimationPreset, resolvedPreset, nameof(SelectedAnimationPreset)))
         {
             OnPropertyChanged(nameof(SelectedAnimationPresetText));
-            OnPropertyChanged(nameof(SelectedAnimationPresetIndex));
         }
     }
 

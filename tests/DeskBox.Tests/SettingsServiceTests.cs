@@ -776,32 +776,6 @@ public sealed class SettingsServiceTests : IDisposable
             preserved.Metadata[WidgetFileStackSettings.GroupByOverrideMetadataKey]);
     }
 
-    [Fact]
-    public void ApplyDefaultPreferencesForSection_ResetsOnlyOwnedProperties()
-    {
-        var widget = new WidgetConfig { Id = "keep-me", CompactWidth = 208 };
-        var settings = new AppSettings
-        {
-            Theme = "Light",
-            Language = SettingsService.LanguageEnglish,
-            TextSize = 19,
-            LayoutDensity = SettingsService.LayoutDensityCompact,
-            LayoutDensityScale = 0.9,
-            Widgets = [widget],
-            DefaultManagedStorageRootPath = "C:\\DeskBox"
-        };
-
-        Assert.True(SettingsService.ApplyDefaultPreferencesForSection(settings, "AppearanceDensitySettings"));
-
-        Assert.Equal(SettingsService.DefaultTextSize, settings.TextSize);
-        Assert.Equal(SettingsService.LayoutDensityStandard, settings.LayoutDensity);
-        Assert.Equal(SettingsService.LanguageEnglish, settings.Language);
-        Assert.Equal("Light", settings.Theme);
-        Assert.Same(widget, Assert.Single(settings.Widgets));
-        Assert.Equal("C:\\DeskBox", settings.DefaultManagedStorageRootPath);
-        Assert.False(SettingsService.ApplyDefaultPreferencesForSection(settings, "Interaction"));
-    }
-
     [Theory]
     [InlineData(SettingsService.LayoutDensityCompact)]
     [InlineData(SettingsService.LayoutDensityStandard)]

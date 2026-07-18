@@ -22,18 +22,18 @@ public sealed partial class SettingsWindow
 {
     private void ViewModel_PropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
-        if (e.PropertyName != nameof(SettingsViewModel.FeatureWidgetEntries))
+        if (e.PropertyName == nameof(SettingsViewModel.FeatureWidgetEntries))
         {
+            if (!DispatcherQueue.HasThreadAccess)
+            {
+                DispatcherQueue.TryEnqueue(RefreshFeatureWidgetList);
+                return;
+            }
+
+            RefreshFeatureWidgetList();
             return;
         }
 
-        if (!DispatcherQueue.HasThreadAccess)
-        {
-            DispatcherQueue.TryEnqueue(RefreshFeatureWidgetList);
-            return;
-        }
-
-        RefreshFeatureWidgetList();
     }
 
     private void OnLanguageChanged()
@@ -56,13 +56,6 @@ public sealed partial class SettingsWindow
 
         ApplyLocalizedText();
 
-        // After ItemsSource is replaced with new localized strings, the
-        // ComboBox internally resets SelectedIndex to -1. The OneWay
-        // SelectedIndex binding may not push the value back because the
-        // binding engine still caches the old value. Defer to the next
-        // frame so all binding updates have been processed, then force
-        // each ComboBox to re-select from the ViewModel.
-        DispatcherQueue.TryEnqueue(RefreshComboBoxSelections);
     }
 
     private void ApplyLocalizedText()
@@ -85,81 +78,6 @@ public sealed partial class SettingsWindow
         if (string.Equals(_currentSettingsSection, "BackupRestoreSettings", StringComparison.Ordinal))
         {
             _ = RefreshBackupSnapshotInventoryAsync();
-        }
-    }
-
-    /// <summary>
-    /// Forces every ComboBox in the settings tree to re-apply its
-    /// SelectedIndex from the ViewModel.  After a language change the
-    /// ItemsSource arrays are replaced; the ComboBox internally resets
-    /// SelectedIndex to -1, and the OneWay binding may not push the
-    /// value back because the engine still caches the old value.
-    /// </summary>
-    private void RefreshComboBoxSelections()
-    {
-        if (_isClosed)
-        {
-            return;
-        }
-
-        foreach (var combo in FindDescendants<ComboBox>(SettingsRoot))
-        {
-            if (combo.Tag is not string tag)
-            {
-                continue;
-            }
-
-            int index = tag switch
-            {
-                "Theme" => ViewModel.SelectedThemeIndex,
-                "TrayIconStyle" => ViewModel.SelectedTrayIconStyleIndex,
-                "Language" => ViewModel.SelectedLanguageIndex,
-                "MusicDisplayMode" => ViewModel.SelectedMusicDisplayModeIndex,
-                "FileStackGroupBy" => ViewModel.SelectedFileStackGroupByIndex,
-                "FileStackThreshold" => ViewModel.SelectedFileStackThresholdIndex,
-                "FileStackOrderBy" => ViewModel.SelectedFileStackOrderByIndex,
-                "FileStackUnmatchedBehavior" => ViewModel.SelectedFileStackUnmatchedBehaviorIndex,
-                "WidgetCorner" => ViewModel.SelectedWidgetCornerPreferenceIndex,
-                "WidgetMaterial" => ViewModel.SelectedWidgetMaterialTypeIndex,
-                "WidgetBorderColor" => ViewModel.SelectedWidgetBorderColorModeIndex,
-                "WidgetBorder" => ViewModel.SelectedWidgetBorderStyleIndex,
-                "WidgetCollapseBehavior" => ViewModel.SelectedWidgetCollapseBehaviorIndex,
-                "WidgetCompactContentMode" => ViewModel.SelectedWidgetCompactContentModeIndex,
-                "WidgetCompactAnimationEffect" => ViewModel.SelectedWidgetCompactAnimationEffectIndex,
-                "WidgetCompactMediaCornerMode" => ViewModel.SelectedWidgetCompactMediaCornerIndex,
-                "LayoutDensity" => ViewModel.SelectedLayoutDensityIndex,
-                "AnimationPreset" => ViewModel.SelectedAnimationPresetIndex,
-                "WidgetTitleIconMode" => ViewModel.SelectedWidgetTitleIconModeIndex,
-                "WidgetAnimationEffect" => ViewModel.SelectedWidgetAnimationEffectIndex,
-                "WidgetAnimationSpeed" => ViewModel.SelectedWidgetAnimationSpeedIndex,
-                "WidgetAnimationSlideDirection" => ViewModel.SelectedWidgetAnimationSlideDirectionIndex,
-                "WidgetAnimationEasingIntensity" => ViewModel.SelectedWidgetAnimationEasingIntensityIndex,
-                "DisplayWidgetChromeMode" => ViewModel.SelectedDisplayWidgetChromeModeIndex,
-                "InteractiveWidgetChromeMode" => ViewModel.SelectedInteractiveWidgetChromeModeIndex,
-                "WidgetLayerMode" => ViewModel.SelectedWidgetLayerModeIndex,
-                "QuickCaptureDefaultView" => ViewModel.SelectedQuickCaptureDefaultViewIndex,
-                "QuickCaptureTabStyle" => ViewModel.SelectedQuickCaptureTabStyleIndex,
-                "QuickCapturePreviewLines" => ViewModel.SelectedQuickCaptureItemPreviewLineCountIndex,
-                "QuickCaptureEnterBehavior" => ViewModel.SelectedQuickCaptureEditorEnterBehaviorIndex,
-                "TodoNewTaskPosition" => ViewModel.SelectedTodoNewTaskPositionIndex,
-                "AttachmentStorageMode" => ViewModel.SelectedAttachmentStorageModeIndex,
-                "TodoDefaultFilter" => ViewModel.SelectedTodoDefaultFilterIndex,
-                "TodoTabStyle" => ViewModel.SelectedTodoTabStyleIndex,
-                "TodoPreviewLines" => ViewModel.SelectedTodoItemPreviewLineCountIndex,
-                "TodoEnterBehavior" => ViewModel.SelectedTodoEditorEnterBehaviorIndex,
-                "TodoReminderOffset" => ViewModel.SelectedTodoReminderOffsetMinutesIndex,
-                "WeatherTemperatureUnit" => ViewModel.SelectedWeatherTemperatureUnitIndex,
-                "WeatherWindSpeedUnit" => ViewModel.SelectedWeatherWindSpeedUnitIndex,
-                "WeatherDefaultView" => ViewModel.SelectedWeatherDefaultViewIndex,
-                "WeatherSkin" => ViewModel.SelectedWeatherSkinIndex,
-                "WeatherRefreshInterval" => ViewModel.SelectedWeatherRefreshIntervalIndex,
-                _ => -1
-            };
-
-            if (index >= 0 && combo.SelectedIndex != index)
-            {
-                combo.SelectedIndex = index;
-            }
         }
     }
 

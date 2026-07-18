@@ -37,7 +37,6 @@ public partial class SettingsViewModel
     }
 
     public string SelectedThemeText => GetThemeDisplayName(SelectedTheme);
-    public int SelectedThemeIndex => Array.IndexOf(AvailableThemes, _selectedTheme);
 
     public string SelectedTrayIconStyle
     {
@@ -66,7 +65,6 @@ public partial class SettingsViewModel
     }
 
     public string SelectedTrayIconStyleText => GetTrayIconStyleDisplayName(SelectedTrayIconStyle);
-    public int SelectedTrayIconStyleIndex => Array.IndexOf(AvailableTrayIconStyles, _selectedTrayIconStyle);
 
     public string[] AvailableTrayIconStyles { get; } =
     [
@@ -99,7 +97,6 @@ public partial class SettingsViewModel
     }
 
     public string SelectedLanguageText => _localizationService.GetLanguageDisplayName(SelectedLanguage);
-    public int SelectedLanguageIndex => Array.IndexOf(AvailableLanguages, _selectedLanguage);
 
     public bool UseSystemAccentColor
     {
@@ -149,7 +146,6 @@ public partial class SettingsViewModel
     }
 
     public string SelectedWidgetCornerPreferenceText => GetCornerDisplayName(SelectedWidgetCornerPreference);
-    public int SelectedWidgetCornerPreferenceIndex => Array.IndexOf(AvailableWidgetCornerPreferences, _selectedWidgetCornerPreference);
 
     public string SelectedWidgetMaterialType
     {
@@ -192,7 +188,6 @@ public partial class SettingsViewModel
     }
 
     public string SelectedWidgetMaterialTypeText => GetMaterialTypeDisplayName(SelectedWidgetMaterialType);
-    public int SelectedWidgetMaterialTypeIndex => Array.IndexOf(AvailableWidgetMaterialTypes, _selectedWidgetMaterialType);
 
     public bool IsOpacitySliderEnabled =>
         SettingsService.SupportsWidgetOpacity(_selectedWidgetMaterialType);
@@ -234,8 +229,6 @@ public partial class SettingsViewModel
     public string SelectedWidgetBorderColorModeText =>
         GetBorderColorModeDisplayName(SelectedWidgetBorderColorMode);
 
-    public int SelectedWidgetBorderColorModeIndex =>
-        Array.IndexOf(AvailableWidgetBorderColorModes, _selectedWidgetBorderColorMode);
 
     public bool IsWidgetBorderStyleEnabled =>
         _selectedWidgetBorderColorMode != BorderColorNone;
@@ -264,7 +257,6 @@ public partial class SettingsViewModel
     }
 
     public string SelectedWidgetBorderStyleText => GetBorderStyleDisplayName(SelectedWidgetBorderStyle);
-    public int SelectedWidgetBorderStyleIndex => Array.IndexOf(AvailableWidgetBorderStyles, _selectedWidgetBorderStyle);
 
     public string SelectedWidgetCollapseBehavior
     {
@@ -289,7 +281,6 @@ public partial class SettingsViewModel
             _settingsService.Settings.WidgetCollapseBehavior = normalized;
             _settingsService.SaveDebounced();
             OnPropertyChanged(nameof(SelectedWidgetCollapseBehaviorText));
-            OnPropertyChanged(nameof(SelectedWidgetCollapseBehaviorIndex));
             OnPropertyChanged(nameof(IsSmartWidgetCollapseBehavior));
         }
     }
@@ -297,8 +288,6 @@ public partial class SettingsViewModel
     public string SelectedWidgetCollapseBehaviorText =>
         GetWidgetCollapseBehaviorDisplayName(SelectedWidgetCollapseBehavior);
 
-    public int SelectedWidgetCollapseBehaviorIndex =>
-        Array.IndexOf(AvailableWidgetCollapseBehaviors, _selectedWidgetCollapseBehavior);
 
     public string SelectedWidgetCompactContentMode
     {
@@ -319,15 +308,12 @@ public partial class SettingsViewModel
             _settingsService.Settings.WidgetCompactContentMode = normalized;
             _settingsService.SaveDebounced();
             OnPropertyChanged(nameof(SelectedWidgetCompactContentModeText));
-            OnPropertyChanged(nameof(SelectedWidgetCompactContentModeIndex));
         }
     }
 
     public string SelectedWidgetCompactContentModeText =>
         GetWidgetCompactContentModeDisplayName(SelectedWidgetCompactContentMode);
 
-    public int SelectedWidgetCompactContentModeIndex =>
-        Array.IndexOf(AvailableWidgetCompactContentModes, _selectedWidgetCompactContentMode);
 
     public string SelectedLayoutDensity
     {
@@ -347,7 +333,6 @@ public partial class SettingsViewModel
             }
 
             OnPropertyChanged(nameof(SelectedLayoutDensityText));
-            OnPropertyChanged(nameof(SelectedLayoutDensityIndex));
             if (_isRestoringDefaults || _isApplyingSettingsSnapshot)
             {
                 return;
@@ -365,7 +350,6 @@ public partial class SettingsViewModel
     }
 
     public string SelectedLayoutDensityText => GetLayoutDensityDisplayName(SelectedLayoutDensity);
-    public int SelectedLayoutDensityIndex => Array.IndexOf(AvailableLayoutDensities, _selectedLayoutDensity);
 
     public string SelectedAnimationPreset
     {
@@ -386,7 +370,6 @@ public partial class SettingsViewModel
             }
 
             OnPropertyChanged(nameof(SelectedAnimationPresetText));
-            OnPropertyChanged(nameof(SelectedAnimationPresetIndex));
             if (_isRestoringDefaults || _isApplyingSettingsSnapshot || normalizedValue == AnimationPresetCustom)
             {
                 return;
@@ -397,7 +380,6 @@ public partial class SettingsViewModel
     }
 
     public string SelectedAnimationPresetText => GetAnimationPresetDisplayName(SelectedAnimationPreset);
-    public int SelectedAnimationPresetIndex => Array.IndexOf(AvailableAnimationPresets, _selectedAnimationPreset);
 
     public string SelectedWidgetAnimationEffect
     {
@@ -434,7 +416,6 @@ public partial class SettingsViewModel
     }
 
     public string SelectedWidgetAnimationEffectText => GetWidgetAnimationEffectDisplayName(SelectedWidgetAnimationEffect);
-    public int SelectedWidgetAnimationEffectIndex => Array.IndexOf(AvailableWidgetAnimationEffects, _selectedWidgetAnimationEffect);
 
     public bool IsDirectionEnabled => _selectedWidgetAnimationEffect is
         SettingsService.WidgetAnimationEffectSlideFade or
@@ -470,7 +451,6 @@ public partial class SettingsViewModel
     }
 
     public string SelectedWidgetAnimationSpeedText => GetWidgetAnimationSpeedDisplayName(SelectedWidgetAnimationSpeed);
-    public int SelectedWidgetAnimationSpeedIndex => Array.IndexOf(AvailableWidgetAnimationSpeeds, _selectedWidgetAnimationSpeed);
 
     public string SelectedWidgetAnimationSlideDirection
     {
@@ -493,13 +473,11 @@ public partial class SettingsViewModel
                 _settingsService.SaveDebounced();
             }
             OnPropertyChanged(nameof(SelectedWidgetAnimationSlideDirectionText));
-            OnPropertyChanged(nameof(SelectedWidgetAnimationSlideDirectionIndex));
             SyncAnimationPresetSelection();
         }
     }
 
     public string SelectedWidgetAnimationSlideDirectionText => GetWidgetAnimationSlideDirectionDisplayName(SelectedWidgetAnimationSlideDirection);
-    public int SelectedWidgetAnimationSlideDirectionIndex => Array.IndexOf(AvailableWidgetAnimationSlideDirections, _selectedWidgetAnimationSlideDirection);
 
     public string SelectedWidgetAnimationEasingIntensity
     {
@@ -527,7 +505,6 @@ public partial class SettingsViewModel
     }
 
     public string SelectedWidgetAnimationEasingIntensityText => GetWidgetAnimationEasingIntensityDisplayName(SelectedWidgetAnimationEasingIntensity);
-    public int SelectedWidgetAnimationEasingIntensityIndex => Array.IndexOf(AvailableWidgetAnimationEasingIntensities, _selectedWidgetAnimationEasingIntensity);
 
     public string SelectedDisplayWidgetChromeMode
     {
@@ -551,7 +528,6 @@ public partial class SettingsViewModel
     }
 
     public string SelectedDisplayWidgetChromeModeText => GetWidgetChromeModeDisplayName(SelectedDisplayWidgetChromeMode);
-    public int SelectedDisplayWidgetChromeModeIndex => Array.IndexOf(AvailableDisplayWidgetChromeModes, _selectedDisplayWidgetChromeMode);
 
     public string SelectedInteractiveWidgetChromeMode
     {
@@ -575,7 +551,6 @@ public partial class SettingsViewModel
     }
 
     public string SelectedInteractiveWidgetChromeModeText => GetWidgetChromeModeDisplayName(SelectedInteractiveWidgetChromeMode);
-    public int SelectedInteractiveWidgetChromeModeIndex => Array.IndexOf(AvailableInteractiveWidgetChromeModes, _selectedInteractiveWidgetChromeMode);
 
     public string SelectedWidgetTitleIconMode
     {
@@ -595,12 +570,10 @@ public partial class SettingsViewModel
             _settingsService.Settings.WidgetTitleIconMode = _selectedWidgetTitleIconMode;
             SaveAppearanceChange();
             OnPropertyChanged(nameof(SelectedWidgetTitleIconModeText));
-            OnPropertyChanged(nameof(SelectedWidgetTitleIconModeIndex));
         }
     }
 
     public string SelectedWidgetTitleIconModeText => GetWidgetTitleIconModeDisplayName(SelectedWidgetTitleIconMode);
-    public int SelectedWidgetTitleIconModeIndex => Array.IndexOf(AvailableWidgetTitleIconModes, _selectedWidgetTitleIconMode);
 
     public bool CanToggleHoverActionLockPosition => CanToggleHoverButtonAction(ShowHoverActionLockPosition);
     public bool CanToggleHoverActionLockSize => CanToggleHoverButtonAction(ShowHoverActionLockSize);
@@ -642,12 +615,10 @@ public partial class SettingsViewModel
             _settingsService.SaveDebounced();
             App.Current?.WidgetManager?.RefreshVisibleWidgetDesktopLayers("settings-layer-mode");
             OnPropertyChanged(nameof(SelectedWidgetLayerModeText));
-            OnPropertyChanged(nameof(SelectedWidgetLayerModeIndex));
         }
     }
 
     public string SelectedWidgetLayerModeText => GetWidgetLayerModeDisplayName(SelectedWidgetLayerMode);
-    public int SelectedWidgetLayerModeIndex => Array.IndexOf(AvailableWidgetLayerModes, _selectedWidgetLayerMode);
 
     [RelayCommand]
     public void ResetDisplayWidgetChromeOverrides()
