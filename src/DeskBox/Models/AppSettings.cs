@@ -62,7 +62,7 @@ public class AppSettings
     public bool QuickCaptureShowCreatedTime { get; set; } = true;
 
     /// <summary>Maximum number of text lines shown for each Quick Capture item in the list.</summary>
-    public int QuickCaptureItemPreviewLineCount { get; set; } = 10;
+    public int QuickCaptureItemPreviewLineCount { get; set; } = 3;
 
     /// <summary>Enter-key behavior used by Quick Capture multiline editors.</summary>
     public string QuickCaptureEditorEnterBehavior { get; set; } = "CtrlEnterSaves";
@@ -100,10 +100,10 @@ public class AppSettings
     public string TodoDefaultFilter { get; set; } = "All";
 
     /// <summary>Whether completed Todo tasks remain visible in non-completed views.</summary>
-    public bool TodoShowCompletedTasks { get; set; } = true;
+    public bool TodoShowCompletedTasks { get; set; }
 
     /// <summary>Maximum number of text lines shown for each Todo item in the list.</summary>
-    public int TodoItemPreviewLineCount { get; set; } = 10;
+    public int TodoItemPreviewLineCount { get; set; } = 2;
 
     /// <summary>Enter-key behavior used by Todo multiline editors.</summary>
     public string TodoEditorEnterBehavior { get; set; } = "CtrlEnterSaves";
@@ -344,7 +344,7 @@ public class AppSettings
     /// How files should be handled when dropped into a managed storage widget.
     /// Valid values: <c>"Move"</c>, <c>"Copy"</c>.
     /// </summary>
-    public string ManagedDropAction { get; set; } = "Move";
+    public string ManagedDropAction { get; set; } = "Copy";
 
     /// <summary>
     /// Root folder used by widgets that follow the default managed storage path.

@@ -59,6 +59,19 @@ public sealed class DeskBoxDataBackupService
     public async Task<string?> CreateAutomaticSnapshotIfDueAsync(
         CancellationToken cancellationToken = default)
     {
+        return await CreateAutomaticSnapshotAsync(force: false, cancellationToken);
+    }
+
+    public async Task<string?> CreateAutomaticSnapshotNowAsync(
+        CancellationToken cancellationToken = default)
+    {
+        return await CreateAutomaticSnapshotAsync(force: true, cancellationToken);
+    }
+
+    private async Task<string?> CreateAutomaticSnapshotAsync(
+        bool force,
+        CancellationToken cancellationToken)
+    {
         await _gate.WaitAsync(cancellationToken);
         try
         {
@@ -72,7 +85,7 @@ public sealed class DeskBoxDataBackupService
                 .EnumerateFiles(AutomaticSnapshotDirectory, "DeskBox-Auto-*.zip")
                 .OrderByDescending(File.GetLastWriteTimeUtc)
                 .FirstOrDefault();
-            if (latestSnapshot is not null &&
+            if (!force && latestSnapshot is not null &&
                 DateTime.UtcNow - File.GetLastWriteTimeUtc(latestSnapshot) < AutomaticSnapshotInterval)
             {
                 return null;
@@ -803,6 +816,119 @@ public sealed class DeskBoxDataBackupService
         }
     }
 
+    public async Task<IReadOnlyList<DeskBoxBackupSnapshotInfo>> GetSnapshotInventoryAsync(
+        CancellationToken cancellationToken = default)
+    {
+        await _gate.WaitAsync(cancellationToken);
+        try
+        {
+            var paths = new[]
+                {
+                    (Directory: AutomaticSnapshotDirectory, Kind: "automatic"),
+                    (Directory: PreRestoreBackupDirectory, Kind: "pre-restore")
+                }
+                .Where(item => Directory.Exists(item.Directory))
+                .SelectMany(item => Directory.EnumerateFiles(item.Directory, "*.zip")
+                    .Select(path => (path, item.Kind)))
+                .OrderByDescending(item => File.GetLastWriteTimeUtc(item.path))
+                .ToList();
+
+            var snapshots = new List<DeskBoxBackupSnapshotInfo>(paths.Count);
+            foreach ((string path, string kind) in paths)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                FileInfo file = new(path);
+                SnapshotManifestSummary summary = await ReadSnapshotManifestSummaryAsync(path, cancellationToken);
+                snapshots.Add(new DeskBoxBackupSnapshotInfo(
+                    path,
+                    kind,
+                    summary.CreatedAtUtc ?? file.LastWriteTimeUtc,
+                    file.Length,
+                    summary.IsReadable,
+                    summary.AppVersion,
+                    summary.SchemaVersion));
+            }
+
+            return snapshots;
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    public async Task<bool> DeleteSnapshotAsync(
+        string snapshotPath,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(snapshotPath);
+        snapshotPath = Path.GetFullPath(snapshotPath);
+
+        if (!snapshotPath.EndsWith(".zip", StringComparison.OrdinalIgnoreCase) ||
+            (!IsPathInsideDirectory(snapshotPath, AutomaticSnapshotDirectory) &&
+             !IsPathInsideDirectory(snapshotPath, PreRestoreBackupDirectory)))
+        {
+            throw new InvalidOperationException("The selected backup snapshot is not managed by DeskBox.");
+        }
+
+        await _gate.WaitAsync(cancellationToken);
+        try
+        {
+            if (!File.Exists(snapshotPath))
+            {
+                return false;
+            }
+
+            File.Delete(snapshotPath);
+            App.Log($"[DataBackup] Deleted snapshot '{snapshotPath}'.");
+            return true;
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    private static async Task<SnapshotManifestSummary> ReadSnapshotManifestSummaryAsync(
+        string snapshotPath,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await using var input = new FileStream(
+                snapshotPath,
+                FileMode.Open,
+                FileAccess.Read,
+                FileShare.ReadWrite | FileShare.Delete,
+                bufferSize: 81920,
+                useAsync: true);
+            using var archive = new ZipArchive(input, ZipArchiveMode.Read, leaveOpen: false);
+            ZipArchiveEntry? manifestEntry = archive.Entries.SingleOrDefault(entry =>
+                string.Equals(entry.FullName, "manifest.json", StringComparison.Ordinal));
+            if (manifestEntry is null || manifestEntry.Length > 1024 * 1024)
+            {
+                return SnapshotManifestSummary.Unreadable;
+            }
+
+            await using Stream manifestStream = manifestEntry.Open();
+            DeskBoxBackupManifest? manifest = await JsonSerializer.DeserializeAsync<DeskBoxBackupManifest>(
+                manifestStream,
+                s_jsonOptions,
+                cancellationToken);
+            return manifest is null
+                ? SnapshotManifestSummary.Unreadable
+                : new SnapshotManifestSummary(
+                    true,
+                    manifest.CreatedAtUtc,
+                    manifest.AppVersion,
+                    manifest.SchemaVersion);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException or JsonException)
+        {
+            return SnapshotManifestSummary.Unreadable;
+        }
+    }
+
     private async Task CreateDataSnapshotAsync(
         string snapshotDataDirectory,
         CancellationToken cancellationToken)
@@ -1202,6 +1328,24 @@ public sealed class DeskBoxDataBackupService
         DateTimeOffset PreparedAtUtc,
         DateTimeOffset BackupCreatedAtUtc,
         string AppVersion);
+}
+
+public sealed record DeskBoxBackupSnapshotInfo(
+    string Path,
+    string Kind,
+    DateTimeOffset CreatedAtUtc,
+    long SizeBytes,
+    bool IsReadable,
+    string? AppVersion,
+    int SchemaVersion);
+
+internal sealed record SnapshotManifestSummary(
+    bool IsReadable,
+    DateTimeOffset? CreatedAtUtc,
+    string? AppVersion,
+    int SchemaVersion)
+{
+    public static SnapshotManifestSummary Unreadable { get; } = new(false, null, null, 0);
 }
 
 public sealed record DeskBoxRestorePreparation(

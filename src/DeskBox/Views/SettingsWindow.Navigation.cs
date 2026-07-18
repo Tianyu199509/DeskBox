@@ -45,6 +45,9 @@ public sealed partial class SettingsWindow
             ["MusicSettings"] = MusicSettingsSection,
             ["WeatherSettings"] = WeatherSettingsSection,
             ["Interaction"] = InteractionSection,
+            ["InteractionHotkeySettings"] = InteractionHotkeySettingsSection,
+            ["InteractionHoverSettings"] = InteractionHoverSettingsSection,
+            ["InteractionWindowSettings"] = InteractionWindowSettingsSection,
             ["ManagedStorage"] = ManagedStorageSection,
             ["Maintenance"] = MaintenanceSection,
             ["BackupRestoreSettings"] = BackupRestoreSettingsSection,
@@ -254,10 +257,17 @@ public sealed partial class SettingsWindow
         {
             ViewModel.RefreshDragDropPermissionDiagnostic();
         }
+        if (sectionTag == "BackupRestoreSettings")
+        {
+            _ = RefreshBackupSnapshotInventoryAsync();
+        }
         SettingsNavigationView.IsBackButtonVisible = isNestedSection
             ? NavigationViewBackButtonVisible.Visible
             : NavigationViewBackButtonVisible.Collapsed;
         UpdateBreadcrumb(route);
+        ResetCurrentPageButton.Visibility = SettingsService.IsPreferenceSectionResettable(sectionTag)
+            ? Visibility.Visible
+            : Visibility.Collapsed;
 
         DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
         {
@@ -423,6 +433,9 @@ public sealed partial class SettingsWindow
                 break;
             case "AttachmentStorageMode":
                 ViewModel.SelectedAttachmentStorageMode = ViewModel.AvailableAttachmentStorageModes[combo.SelectedIndex];
+                break;
+            case "ManagedDropAction":
+                ViewModel.SelectedManagedDropAction = ViewModel.AvailableManagedDropActions[combo.SelectedIndex];
                 break;
             case "TodoDefaultFilter":
                 ViewModel.SelectedTodoDefaultFilter = ViewModel.AvailableTodoDefaultFilters[combo.SelectedIndex];

@@ -73,6 +73,7 @@ public sealed partial class SettingsWindow : Window
     private bool _isSyncingNavigationSelection;
     private bool _isSettingsRootLoaded;
     private bool _isSelectingCity;
+    private bool _isRefreshingBackupSnapshots;
     private string _currentSettingsSection = "General";
     private IReadOnlyDictionary<string, FrameworkElement> _settingsSectionElements = null!;
     private IReadOnlyList<SettingsSearchResult> _settingsSearchResults = Array.Empty<SettingsSearchResult>();
@@ -86,6 +87,9 @@ public sealed partial class SettingsWindow : Window
             ["AppearanceDetail"] = new("AppearanceDetail", "Settings.Appearance.DetailTitle", null, "AppearanceDetail"),
             ["FeatureWidgets"] = new("FeatureWidgets", "Settings.Section.FeatureWidgets", null, "FeatureWidgets"),
             ["Interaction"] = new("Interaction", "Settings.Section.Interaction", null, "Interaction"),
+            ["InteractionHotkeySettings"] = new("InteractionHotkeySettings", "Settings.Interaction.Hotkeys.Title", "Interaction", "Interaction"),
+            ["InteractionHoverSettings"] = new("InteractionHoverSettings", "Settings.Interaction.Hover.Title", "Interaction", "Interaction"),
+            ["InteractionWindowSettings"] = new("InteractionWindowSettings", "Settings.Interaction.Window.Title", "Interaction", "Interaction"),
             ["Advanced"] = new("Advanced", "Settings.Section.Advanced", null, "Interaction"),
             ["Maintenance"] = new("Maintenance", "Settings.Section.Maintenance", null, "Maintenance"),
             ["About"] = new("About", "Settings.Nav.About", null, "About"),
@@ -675,4 +679,10 @@ public sealed partial class SettingsWindow : Window
     }
 
     private sealed record SettingsSearchResult(string SectionTag, string Title, string Breadcrumb);
+
+    private sealed record BackupSnapshotListItem(
+        string Path,
+        string Title,
+        string Details,
+        bool CanRestore);
 }

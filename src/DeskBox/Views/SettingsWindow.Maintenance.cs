@@ -138,13 +138,23 @@ public sealed partial class SettingsWindow
             return;
         }
 
+        await RestoreDataBackupFromPathAsync(backupFile.Path);
+    }
+
+    private async Task RestoreDataBackupFromPathAsync(string archivePath)
+    {
+        if (SettingsRoot.XamlRoot is null)
+        {
+            return;
+        }
+
         RestoreDataBackupButton.IsEnabled = false;
         ExportDataBackupButton.IsEnabled = false;
         bool restartScheduled = false;
         try
         {
             DeskBoxRestorePreparation preparation = await App.Current.DataBackupService.PrepareRestoreAsync(
-                backupFile.Path);
+                archivePath);
             string integrityWarning = preparation.HasIntegrityManifest
                 ? string.Empty
                 : $"\n\n{_localizationService.T("Settings.DataBackup.LegacyIntegrityWarning")}";
@@ -210,6 +220,154 @@ public sealed partial class SettingsWindow
         }
     }
 
+    private async void CreateBackupSnapshotButton_Click(object sender, RoutedEventArgs e)
+    {
+        CreateBackupSnapshotButton.IsEnabled = false;
+        RefreshBackupSnapshotsButton.IsEnabled = false;
+        try
+        {
+            await App.Current.SettingsService.SaveAsync(notifySubscribers: false);
+            string? snapshotPath = await App.Current.DataBackupService.CreateAutomaticSnapshotNowAsync();
+            if (snapshotPath is null)
+            {
+                await ShowInfoDialogAsync(
+                    _localizationService.T("Settings.DataBackup.FailedTitle"),
+                    _localizationService.Format(
+                        "Settings.DataBackup.FailedBody",
+                        _localizationService.T("Settings.DataBackup.Snapshots.Empty")));
+                return;
+            }
+
+            await RefreshBackupSnapshotInventoryAsync();
+            Win32Helper.ShowInExplorer(snapshotPath);
+        }
+        catch (Exception ex)
+        {
+            App.Log($"[DataBackup] Immediate snapshot failed: {ex}");
+            await ShowInfoDialogAsync(
+                _localizationService.T("Settings.DataBackup.FailedTitle"),
+                _localizationService.Format("Settings.DataBackup.FailedBody", ex.Message));
+        }
+        finally
+        {
+            CreateBackupSnapshotButton.IsEnabled = true;
+            RefreshBackupSnapshotsButton.IsEnabled = true;
+        }
+    }
+
+    private void OpenBackupFolderButton_Click(object sender, RoutedEventArgs e)
+    {
+        string directory = Path.GetDirectoryName(App.Current.DataBackupService.AutomaticSnapshotDirectory)
+                           ?? App.Current.DataBackupService.AutomaticSnapshotDirectory;
+        Directory.CreateDirectory(directory);
+        Win32Helper.ShowInExplorer(directory);
+    }
+
+    private async void RefreshBackupSnapshotsButton_Click(object sender, RoutedEventArgs e)
+    {
+        await RefreshBackupSnapshotInventoryAsync();
+    }
+
+    private async Task RefreshBackupSnapshotInventoryAsync()
+    {
+        if (_isRefreshingBackupSnapshots || BackupSnapshotsList is null)
+        {
+            return;
+        }
+
+        _isRefreshingBackupSnapshots = true;
+        RefreshBackupSnapshotsButton.IsEnabled = false;
+        try
+        {
+            IReadOnlyList<DeskBoxBackupSnapshotInfo> snapshots =
+                await App.Current.DataBackupService.GetSnapshotInventoryAsync();
+            var rows = snapshots.Select(snapshot =>
+            {
+                string kind = snapshot.Kind == "pre-restore"
+                    ? _localizationService.T("Settings.DataBackup.Snapshots.PreRestore")
+                    : _localizationService.T("Settings.DataBackup.Snapshots.Automatic");
+                string status = snapshot.IsReadable
+                    ? _localizationService.T("Settings.DataBackup.Snapshots.Readable")
+                    : _localizationService.T("Settings.DataBackup.Snapshots.Unreadable");
+                string title = $"{kind} · {snapshot.CreatedAtUtc.ToLocalTime():g}";
+                string details = $"{SettingsViewModel.FormatBytes(snapshot.SizeBytes)} · {status}\n{Path.GetFileName(snapshot.Path)}";
+                return new BackupSnapshotListItem(snapshot.Path, title, details, snapshot.IsReadable);
+            }).ToArray();
+
+            BackupSnapshotsList.ItemsSource = rows;
+            BackupSnapshotSummaryText.Text = rows.Length == 0
+                ? _localizationService.T("Settings.DataBackup.Snapshots.Empty")
+                : _localizationService.Format(
+                    "Settings.DataBackup.Snapshots.Summary",
+                    rows.Length,
+                    SettingsViewModel.FormatBytes(snapshots.Sum(snapshot => snapshot.SizeBytes)),
+                    snapshots[0].CreatedAtUtc.ToLocalTime().ToString("g"));
+        }
+        catch (Exception ex)
+        {
+            App.Log($"[DataBackup] Snapshot inventory failed: {ex}");
+            BackupSnapshotsList.ItemsSource = Array.Empty<BackupSnapshotListItem>();
+            BackupSnapshotSummaryText.Text = _localizationService.Format(
+                "Settings.DataBackup.FailedBody",
+                ex.Message);
+        }
+        finally
+        {
+            RefreshBackupSnapshotsButton.IsEnabled = true;
+            _isRefreshingBackupSnapshots = false;
+        }
+    }
+
+    private async void RestoreSnapshotButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button { DataContext: BackupSnapshotListItem item } && item.CanRestore)
+        {
+            await RestoreDataBackupFromPathAsync(item.Path);
+        }
+    }
+
+    private async void DeleteSnapshotButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (SettingsRoot.XamlRoot is null || sender is not Button { DataContext: BackupSnapshotListItem item })
+        {
+            return;
+        }
+
+        var dialog = new ContentDialog
+        {
+            XamlRoot = SettingsRoot.XamlRoot,
+            Title = _localizationService.T("Settings.DataBackup.Snapshots.DeleteConfirmTitle"),
+            PrimaryButtonText = _localizationService.T("Settings.DataBackup.Snapshots.Delete"),
+            CloseButtonText = _localizationService.T("Common.Cancel"),
+            DefaultButton = ContentDialogButton.Close,
+            Content = new TextBlock
+            {
+                Text = _localizationService.Format(
+                    "Settings.DataBackup.Snapshots.DeleteConfirmBody",
+                    item.Title),
+                TextWrapping = TextWrapping.Wrap
+            }
+        };
+
+        if (await dialog.ShowAsync() != ContentDialogResult.Primary)
+        {
+            return;
+        }
+
+        try
+        {
+            await App.Current.DataBackupService.DeleteSnapshotAsync(item.Path);
+            await RefreshBackupSnapshotInventoryAsync();
+        }
+        catch (Exception ex)
+        {
+            App.Log($"[DataBackup] Snapshot deletion failed: {ex}");
+            await ShowInfoDialogAsync(
+                _localizationService.T("Settings.DataBackup.FailedTitle"),
+                _localizationService.Format("Settings.DataBackup.FailedBody", ex.Message));
+        }
+    }
+
     private async void CheckAttachmentHealthButton_Click(object sender, RoutedEventArgs e)
     {
         CheckAttachmentHealthButton.IsEnabled = false;
@@ -270,5 +428,35 @@ public sealed partial class SettingsWindow
         }
 
         await ViewModel.RestoreDefaultPreferencesAsync();
+    }
+
+    private async void ResetCurrentPageButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (SettingsRoot.XamlRoot is null ||
+            !SettingsService.IsPreferenceSectionResettable(_currentSettingsSection))
+        {
+            return;
+        }
+
+        var dialog = new ContentDialog
+        {
+            XamlRoot = SettingsRoot.XamlRoot,
+            Title = _localizationService.T("Settings.RestoreCurrentPage.ConfirmTitle"),
+            PrimaryButtonText = _localizationService.T("Settings.RestoreCurrentPage.Title"),
+            CloseButtonText = _localizationService.T("Common.Cancel"),
+            DefaultButton = ContentDialogButton.Close,
+            Content = new TextBlock
+            {
+                Text = _localizationService.T("Settings.RestoreCurrentPage.ConfirmBody"),
+                TextWrapping = TextWrapping.Wrap
+            }
+        };
+
+        if (await dialog.ShowAsync() != ContentDialogResult.Primary)
+        {
+            return;
+        }
+
+        await ViewModel.RestoreCurrentPageDefaultsAsync(_currentSettingsSection);
     }
 }

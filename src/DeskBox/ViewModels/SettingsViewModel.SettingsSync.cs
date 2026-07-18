@@ -121,6 +121,9 @@ public partial class SettingsViewModel
             QuickCaptureRecentLimit = QuickCaptureService.NormalizeRecentLimit(settings.QuickCaptureRecentLimit);
             QuickCaptureShowCreatedTime = settings.QuickCaptureShowCreatedTime;
             SelectedAttachmentStorageMode = SettingsService.NormalizeAttachmentStorageMode(settings.AttachmentStorageMode);
+            SelectedManagedDropAction = settings.ManagedDropAction == SettingsService.ManagedDropActionMove
+                ? SettingsService.ManagedDropActionMove
+                : SettingsService.ManagedDropActionCopy;
             SelectedQuickCaptureDefaultView = NormalizeQuickCaptureDefaultView(settings.QuickCaptureDefaultView);
             SelectedQuickCaptureTabStyle = SettingsService.NormalizeWidgetTabStyle(settings.QuickCaptureTabStyle);
             QuickCaptureShowTabBar = settings.QuickCaptureShowTabBar;
@@ -314,6 +317,9 @@ RefreshWeatherCityPopularCities();
         OnPropertyChanged(nameof(AvailableTodoNewTaskPositionDisplayNames));
         OnPropertyChanged(nameof(AvailableAttachmentStorageModeDisplayNames));
         OnPropertyChanged(nameof(SelectedAttachmentStorageModeIndex));
+        _cachedManagedDropActionDisplayNames = null;
+        OnPropertyChanged(nameof(AvailableManagedDropActionDisplayNames));
+        OnPropertyChanged(nameof(SelectedManagedDropActionIndex));
         OnPropertyChanged(nameof(AvailableTodoDefaultFilterDisplayNames));
         OnPropertyChanged(nameof(AvailableTodoTabStyleDisplayNames));
         OnPropertyChanged(nameof(AvailableTodoReminderOffsetDisplayNames));

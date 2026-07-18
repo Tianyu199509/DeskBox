@@ -298,7 +298,8 @@ public sealed class SettingsServiceTests : IDisposable
               "todoReminderEnabled": false,
               "todoDefaultReminderOffsetMinutes": 999,
               "todoItemPreviewLineCount": -4,
-              "todoEditorEnterBehavior": "unexpected"
+              "todoEditorEnterBehavior": "unexpected",
+              "managedDropAction": "Copy"
             }
             """);
 
@@ -317,6 +318,7 @@ public sealed class SettingsServiceTests : IDisposable
         Assert.Equal(
             SettingsService.EditorEnterBehaviorCtrlEnterSaves,
             service.Settings.TodoEditorEnterBehavior);
+        Assert.Equal(SettingsService.ManagedDropActionCopy, service.Settings.ManagedDropAction);
     }
 
     [Theory]
@@ -674,10 +676,13 @@ public sealed class SettingsServiceTests : IDisposable
         Assert.Equal(SettingsService.LayoutDensityStandard, restoredDefaults.LayoutDensity);
         Assert.True(restoredDefaults.QuickCaptureShowCreatedTime);
         Assert.Equal(newUserDefaults.QuickCaptureItemPreviewLineCount, restoredDefaults.QuickCaptureItemPreviewLineCount);
+        Assert.Equal(SettingsService.DefaultQuickCaptureItemPreviewLineCount, newUserDefaults.QuickCaptureItemPreviewLineCount);
         Assert.Equal(newUserDefaults.QuickCaptureEditorEnterBehavior, restoredDefaults.QuickCaptureEditorEnterBehavior);
         Assert.True(restoredDefaults.ResizeSnapEnabled);
         Assert.False(restoredDefaults.TodoShowFooterStats);
         Assert.Equal(newUserDefaults.TodoItemPreviewLineCount, restoredDefaults.TodoItemPreviewLineCount);
+        Assert.Equal(SettingsService.DefaultTodoItemPreviewLineCount, newUserDefaults.TodoItemPreviewLineCount);
+        Assert.False(newUserDefaults.TodoShowCompletedTasks);
         Assert.Equal(newUserDefaults.TodoEditorEnterBehavior, restoredDefaults.TodoEditorEnterBehavior);
         Assert.Equal(SettingsService.LanguageChinese, restoredDefaults.Language);
         Assert.False(restoredDefaults.AutoStart);
@@ -769,6 +774,32 @@ public sealed class SettingsServiceTests : IDisposable
         Assert.Equal(
             SettingsService.FileStackGroupByCustom,
             preserved.Metadata[WidgetFileStackSettings.GroupByOverrideMetadataKey]);
+    }
+
+    [Fact]
+    public void ApplyDefaultPreferencesForSection_ResetsOnlyOwnedProperties()
+    {
+        var widget = new WidgetConfig { Id = "keep-me", CompactWidth = 208 };
+        var settings = new AppSettings
+        {
+            Theme = "Light",
+            Language = SettingsService.LanguageEnglish,
+            TextSize = 19,
+            LayoutDensity = SettingsService.LayoutDensityCompact,
+            LayoutDensityScale = 0.9,
+            Widgets = [widget],
+            DefaultManagedStorageRootPath = "C:\\DeskBox"
+        };
+
+        Assert.True(SettingsService.ApplyDefaultPreferencesForSection(settings, "AppearanceDensitySettings"));
+
+        Assert.Equal(SettingsService.DefaultTextSize, settings.TextSize);
+        Assert.Equal(SettingsService.LayoutDensityStandard, settings.LayoutDensity);
+        Assert.Equal(SettingsService.LanguageEnglish, settings.Language);
+        Assert.Equal("Light", settings.Theme);
+        Assert.Same(widget, Assert.Single(settings.Widgets));
+        Assert.Equal("C:\\DeskBox", settings.DefaultManagedStorageRootPath);
+        Assert.False(SettingsService.ApplyDefaultPreferencesForSection(settings, "Interaction"));
     }
 
     [Theory]

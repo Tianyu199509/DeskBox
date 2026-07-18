@@ -391,21 +391,34 @@
                         MaxWidth="760"
                         HorizontalAlignment="Center"
                         Spacing="24">
-                <BreadcrumbBar
-                    x:Name="SettingsBreadcrumbBar"
-                    Margin="0,0,0,-12"
-                    HorizontalAlignment="Left"
-                    ItemClicked="SettingsBreadcrumbBar_ItemClicked"
-                    Visibility="Collapsed">
-                    <BreadcrumbBar.ItemTemplate>
-                        <DataTemplate>
-                            <TextBlock
-                                Style="{StaticResource BreadcrumbTextStyle}"
-                                Opacity="{Binding Opacity}"
-                                Text="{Binding Title}" />
-                        </DataTemplate>
-                    </BreadcrumbBar.ItemTemplate>
-                </BreadcrumbBar>
+                <Grid Margin="0,0,0,-12">
+                    <BreadcrumbBar
+                        x:Name="SettingsBreadcrumbBar"
+                        HorizontalAlignment="Left"
+                        ItemClicked="SettingsBreadcrumbBar_ItemClicked"
+                        Visibility="Collapsed">
+                        <BreadcrumbBar.ItemTemplate>
+                            <DataTemplate>
+                                <TextBlock
+                                    Style="{StaticResource BreadcrumbTextStyle}"
+                                    Opacity="{Binding Opacity}"
+                                    Text="{Binding Title}" />
+                            </DataTemplate>
+                        </BreadcrumbBar.ItemTemplate>
+                    </BreadcrumbBar>
+                    <Button
+                        x:Name="ResetCurrentPageButton"
+                        HorizontalAlignment="Right"
+                        Click="ResetCurrentPageButton_Click"
+                        Visibility="Collapsed"
+                        Style="{StaticResource ActionButtonStyle}"
+                        svc:Localized.ToolTipKey="Settings.RestoreCurrentPage.Tooltip">
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <SymbolIcon Symbol="Refresh" />
+                            <TextBlock svc:Localized.Key="Settings.RestoreCurrentPage.Title" />
+                        </StackPanel>
+                    </Button>
+                </Grid>
                 <StackPanel
                     x:Name="AppearanceSection"
                     Visibility="Collapsed"
@@ -1245,6 +1258,13 @@ svc:Localized.DescriptionKey="Settings.DefaultWidth.Description"
                         <toolkit:SettingsCard ContentAlignment="Vertical" HorizontalContentAlignment="Stretch" Padding="20,16" svc:Localized.HeaderKey="Settings.Group.FileStorage.Title">
                             <toolkit:SettingsCard.HeaderIcon><FontIcon Glyph="&#xE8B7;" /></toolkit:SettingsCard.HeaderIcon>
                             <StackPanel Spacing="12">
+                                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16">
+                                    <StackPanel Spacing="3" VerticalAlignment="Center">
+                                        <TextBlock Style="{StaticResource SettingTitleTextStyle}" svc:Localized.Key="Settings.DropAction.Title" />
+                                        <TextBlock Style="{StaticResource SettingDescriptionTextStyle}" TextWrapping="Wrap" svc:Localized.Key="Settings.DropAction.Description" />
+                                    </StackPanel>
+                                    <ComboBox Grid.Column="1" MinWidth="176" ItemsSource="{Binding AvailableManagedDropActionDisplayNames}" SelectedIndex="{Binding SelectedManagedDropActionIndex, Mode=OneWay}" SelectionChanged="SettingsComboBox_SelectionChanged" Tag="ManagedDropAction" />
+                                </Grid>
                                 <TextBox IsReadOnly="True" Text="{Binding ManagedStorageRootPath, Mode=OneWay}" TextWrapping="NoWrap" />
                                 <TextBlock Style="{StaticResource SettingDescriptionTextStyle}" Text="{Binding QuickAccessStatusText}" />
                                 <StackPanel x:Name="PathActionsPanel" HorizontalAlignment="Right" Orientation="Horizontal" Spacing="8">
@@ -1473,98 +1493,96 @@ svc:Localized.DescriptionKey="Settings.DefaultWidth.Description"
                     Style="{StaticResource SectionPanelStyle}">
                     <TextBlock Style="{StaticResource SectionTitleTextStyle}" svc:Localized.Key="Settings.Section.Interaction" />
                     <StackPanel Margin="0,8,0,0" Spacing="4">
-                        <toolkit:SettingsExpander
-                            IsExpanded="False"
-                            svc:Localized.DescriptionKey="Settings.Group.HoverActions.Description"
-                            svc:Localized.HeaderKey="Settings.Group.HoverActions.Title">
-                            <toolkit:SettingsExpander.HeaderIcon>
-                                <FontIcon Glyph="&#xE7C9;" />
-                            </toolkit:SettingsExpander.HeaderIcon>
-                            <ToggleSwitch
-                                MinWidth="0"
-                                OffContent=""
-                                OnContent=""
-                                IsOn="{Binding ShowHoverButtons, Mode=TwoWay}" />
-                            <toolkit:SettingsExpander.Items>
-                                <toolkit:SettingsCard
-                                    HorizontalContentAlignment="Right"
-                                    IsEnabled="{Binding ShowHoverButtons}"
-                                    svc:Localized.DescriptionKey="Settings.HoverButtonActions.Description"
-                                    svc:Localized.HeaderKey="Settings.HoverButtonActions.Title">
-                                    <DropDownButton
-                                        MinWidth="176"
-                                        MaxWidth="260"
-                                        HorizontalAlignment="Right"
-                                        Click="HoverButtonActionsDropDown_Click"
-                                        Content="{Binding HoverButtonActionsSummaryText}" />
-                                </toolkit:SettingsCard>
-                            </toolkit:SettingsExpander.Items>
-                        </toolkit:SettingsExpander>
+                        <Border Style="{StaticResource SettingsGroupStyle}">
+                            <Button Click="NestedSettingsButton_Click" Style="{StaticResource DrillDownRowStyle}" Tag="InteractionHotkeySettings">
+                                <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="12">
+                                    <FontIcon Grid.Column="0" FontSize="18" Glyph="&#xE765;" IsHitTestVisible="False" VerticalAlignment="Center" />
+                                    <StackPanel Grid.Column="1" IsHitTestVisible="False" Spacing="3" VerticalAlignment="Center">
+                                        <TextBlock Style="{StaticResource SettingTitleTextStyle}" svc:Localized.Key="Settings.Interaction.Hotkeys.Title" />
+                                        <TextBlock Style="{StaticResource SettingDescriptionTextStyle}" Text="{Binding GlobalHotkeyText}" />
+                                    </StackPanel>
+                                    <FontIcon Grid.Column="2" FontSize="12" Glyph="&#xE76C;" IsHitTestVisible="False" VerticalAlignment="Center" />
+                                </Grid>
+                            </Button>
+                        </Border>
+                        <Border Style="{StaticResource SettingsGroupStyle}">
+                            <Button Click="NestedSettingsButton_Click" Style="{StaticResource DrillDownRowStyle}" Tag="InteractionHoverSettings">
+                                <Grid ColumnDefinitions="Auto,*,Auto,Auto" ColumnSpacing="12">
+                                    <FontIcon Grid.Column="0" FontSize="18" Glyph="&#xE7C9;" IsHitTestVisible="False" VerticalAlignment="Center" />
+                                    <StackPanel Grid.Column="1" IsHitTestVisible="False" Spacing="3" VerticalAlignment="Center">
+                                        <TextBlock Style="{StaticResource SettingTitleTextStyle}" svc:Localized.Key="Settings.Interaction.Hover.Title" />
+                                        <TextBlock Style="{StaticResource SettingDescriptionTextStyle}" svc:Localized.Key="Settings.Interaction.Hover.Description" />
+                                    </StackPanel>
+                                    <ToggleSwitch Grid.Column="2" MinWidth="0" OffContent="" OnContent="" IsHitTestVisible="False" IsOn="{Binding ShowHoverButtons, Mode=OneWay}" />
+                                    <FontIcon Grid.Column="3" FontSize="12" Glyph="&#xE76C;" IsHitTestVisible="False" VerticalAlignment="Center" />
+                                </Grid>
+                            </Button>
+                        </Border>
+                        <Border Style="{StaticResource SettingsGroupStyle}">
+                            <Button Click="NestedSettingsButton_Click" Style="{StaticResource DrillDownRowStyle}" Tag="InteractionWindowSettings">
+                                <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="12">
+                                    <FontIcon Grid.Column="0" FontSize="18" Glyph="&#xE7C9;" IsHitTestVisible="False" VerticalAlignment="Center" />
+                                    <StackPanel Grid.Column="1" IsHitTestVisible="False" Spacing="3" VerticalAlignment="Center">
+                                        <TextBlock Style="{StaticResource SettingTitleTextStyle}" svc:Localized.Key="Settings.Interaction.Window.Title" />
+                                        <TextBlock Style="{StaticResource SettingDescriptionTextStyle}" svc:Localized.Key="Settings.Interaction.Window.Description" />
+                                    </StackPanel>
+                                    <FontIcon Grid.Column="2" FontSize="12" Glyph="&#xE76C;" IsHitTestVisible="False" VerticalAlignment="Center" />
+                                </Grid>
+                            </Button>
+                        </Border>
+                    </StackPanel>
+                </StackPanel>
 
-                        <toolkit:SettingsCard
-                            HorizontalContentAlignment="Right"
-                            Description="{Binding GlobalHotkeyDescription}"
-                            svc:Localized.HeaderKey="Settings.GlobalHotkey.Title">
-                            <toolkit:SettingsCard.HeaderIcon>
-                                <FontIcon Glyph="&#xE765;" />
-                            </toolkit:SettingsCard.HeaderIcon>
-                            <ToggleSwitch
-                                OnContent=""
-                                OffContent=""
-                                MinWidth="0"
-                                IsOn="{Binding GlobalHotkeyEnabled, Mode=TwoWay}" />
+                <StackPanel x:Name="InteractionHotkeySettingsSection" Visibility="Collapsed" Style="{StaticResource SectionPanelStyle}">
+                    <StackPanel Margin="0,8,0,0" Spacing="4">
+                        <toolkit:SettingsCard HorizontalContentAlignment="Right" Description="{Binding GlobalHotkeyDescription}" svc:Localized.HeaderKey="Settings.GlobalHotkey.Title">
+                            <toolkit:SettingsCard.HeaderIcon><FontIcon Glyph="&#xE765;" /></toolkit:SettingsCard.HeaderIcon>
+                            <ToggleSwitch OnContent="" OffContent="" MinWidth="0" IsOn="{Binding GlobalHotkeyEnabled, Mode=TwoWay}" />
                         </toolkit:SettingsCard>
-
-                        <toolkit:SettingsCard
-                            ContentAlignment="Vertical"
-                            HorizontalContentAlignment="Stretch"
-                            svc:Localized.HeaderKey="Settings.GlobalHotkey.CustomTitle">
-                            <toolkit:SettingsCard.HeaderIcon>
-                                <FontIcon Glyph="&#xE765;" />
-                            </toolkit:SettingsCard.HeaderIcon>
+                        <toolkit:SettingsCard ContentAlignment="Vertical" HorizontalContentAlignment="Stretch" svc:Localized.HeaderKey="Settings.GlobalHotkey.CustomTitle">
+                            <toolkit:SettingsCard.HeaderIcon><FontIcon Glyph="&#xE765;" /></toolkit:SettingsCard.HeaderIcon>
                             <Grid RowSpacing="10">
-                                <Grid.RowDefinitions>
-                                    <RowDefinition Height="Auto" />
-                                    <RowDefinition Height="Auto" />
-                                </Grid.RowDefinitions>
-                                <TextBlock
-                                    Grid.Row="0"
-                                    VerticalAlignment="Center"
-                                    Style="{StaticResource SettingDescriptionTextStyle}"
-                                    Text="{Binding GlobalHotkeyStatusText}" />
-                                <Grid
-                                    x:Name="GlobalHotkeyActionsPanel"
-                                    Grid.Row="1"
-                                    MinWidth="252"
-                                    HorizontalAlignment="Right"
-                                    ColumnSpacing="10">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="Auto" />
-                                    </Grid.ColumnDefinitions>
-                                    <Button
-                                        x:Name="GlobalHotkeyCaptureButton"
-                                        Grid.Column="0"
-                                        MinWidth="132"
-                                        HorizontalAlignment="Stretch"
-                                        Click="ChangeGlobalHotkeyButton_Click"
-                                        KeyDown="GlobalHotkeyCaptureButton_KeyDown"
-                                        LostFocus="GlobalHotkeyCaptureButton_LostFocus"
-                                        Style="{StaticResource ActionButtonStyle}"
-                                        svc:Localized.ToolTipKey="Settings.GlobalHotkey.ChangeTooltip" />
-                                    <Button
-                                        x:Name="ResetGlobalHotkeyButton"
-                                        Grid.Column="1"
-                                        Click="ResetGlobalHotkeyButton_Click"
-                                        Style="{StaticResource ActionButtonStyle}"
-                                        svc:Localized.ToolTipKey="Settings.GlobalHotkey.ResetTooltip">
-                                        <StackPanel Orientation="Horizontal" Spacing="8">
-                                            <SymbolIcon Symbol="Refresh" />
-                                            <TextBlock svc:Localized.Key="Common.Restore" />
-                                        </StackPanel>
+                                <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+                                <TextBlock Grid.Row="0" VerticalAlignment="Center" Style="{StaticResource SettingDescriptionTextStyle}" Text="{Binding GlobalHotkeyStatusText}" />
+                                <Grid x:Name="GlobalHotkeyActionsPanel" Grid.Row="1" MinWidth="252" HorizontalAlignment="Right" ColumnSpacing="10">
+                                    <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                    <Button x:Name="GlobalHotkeyCaptureButton" Grid.Column="0" MinWidth="132" HorizontalAlignment="Stretch" Click="ChangeGlobalHotkeyButton_Click" KeyDown="GlobalHotkeyCaptureButton_KeyDown" LostFocus="GlobalHotkeyCaptureButton_LostFocus" Style="{StaticResource ActionButtonStyle}" svc:Localized.ToolTipKey="Settings.GlobalHotkey.ChangeTooltip" />
+                                    <Button x:Name="ResetGlobalHotkeyButton" Grid.Column="1" Click="ResetGlobalHotkeyButton_Click" Style="{StaticResource ActionButtonStyle}" svc:Localized.ToolTipKey="Settings.GlobalHotkey.ResetTooltip">
+                                        <StackPanel Orientation="Horizontal" Spacing="8"><SymbolIcon Symbol="Refresh" /><TextBlock svc:Localized.Key="Common.Restore" /></StackPanel>
                                     </Button>
                                 </Grid>
                             </Grid>
+                        </toolkit:SettingsCard>
+                    </StackPanel>
+                </StackPanel>
+
+                <StackPanel x:Name="InteractionHoverSettingsSection" Visibility="Collapsed" Style="{StaticResource SectionPanelStyle}">
+                    <StackPanel Margin="0,8,0,0" Spacing="4">
+                        <toolkit:SettingsExpander IsExpanded="True" svc:Localized.DescriptionKey="Settings.Group.HoverActions.Description" svc:Localized.HeaderKey="Settings.Group.HoverActions.Title">
+                            <toolkit:SettingsExpander.HeaderIcon><FontIcon Glyph="&#xE7C9;" /></toolkit:SettingsExpander.HeaderIcon>
+                            <ToggleSwitch MinWidth="0" OffContent="" OnContent="" IsOn="{Binding ShowHoverButtons, Mode=TwoWay}" />
+                            <toolkit:SettingsExpander.Items>
+                                <toolkit:SettingsCard HorizontalContentAlignment="Right" IsEnabled="{Binding ShowHoverButtons}" svc:Localized.DescriptionKey="Settings.HoverButtonActions.Description" svc:Localized.HeaderKey="Settings.HoverButtonActions.Title">
+                                    <DropDownButton MinWidth="176" MaxWidth="260" HorizontalAlignment="Right" Click="HoverButtonActionsDropDown_Click" Content="{Binding HoverButtonActionsSummaryText}" />
+                                </toolkit:SettingsCard>
+                            </toolkit:SettingsExpander.Items>
+                        </toolkit:SettingsExpander>
+                    </StackPanel>
+                </StackPanel>
+
+                <StackPanel x:Name="InteractionWindowSettingsSection" Visibility="Collapsed" Style="{StaticResource SectionPanelStyle}">
+                    <StackPanel Margin="0,8,0,0" Spacing="4">
+                        <toolkit:SettingsCard HorizontalContentAlignment="Right" svc:Localized.DescriptionKey="Settings.DoubleClick.Description" svc:Localized.HeaderKey="Settings.DoubleClick.Title">
+                            <toolkit:SettingsCard.HeaderIcon><FontIcon Glyph="&#xE7C9;" /></toolkit:SettingsCard.HeaderIcon>
+                            <ToggleSwitch OnContent="" OffContent="" MinWidth="0" IsOn="{Binding DoubleClickToOpen, Mode=TwoWay}" />
+                        </toolkit:SettingsCard>
+                        <toolkit:SettingsCard HorizontalContentAlignment="Right" svc:Localized.DescriptionKey="Settings.ResizeSnap.Description" svc:Localized.HeaderKey="Settings.ResizeSnap.Title">
+                            <toolkit:SettingsCard.HeaderIcon><FontIcon Glyph="&#xE742;" /></toolkit:SettingsCard.HeaderIcon>
+                            <ToggleSwitch OnContent="" OffContent="" MinWidth="0" IsOn="{Binding ResizeSnapEnabled, Mode=TwoWay}" />
+                        </toolkit:SettingsCard>
+                        <toolkit:SettingsCard HorizontalContentAlignment="Right" svc:Localized.DescriptionKey="Settings.WidgetLayerMode.Description" svc:Localized.HeaderKey="Settings.WidgetLayerMode.Title">
+                            <toolkit:SettingsCard.HeaderIcon><FontIcon Glyph="&#xE81E;" /></toolkit:SettingsCard.HeaderIcon>
+                            <ComboBox MinWidth="176" ItemsSource="{Binding AvailableWidgetLayerModeDisplayNames}" SelectedIndex="{Binding SelectedWidgetLayerModeIndex, Mode=OneWay}" SelectionChanged="SettingsComboBox_SelectionChanged" Tag="WidgetLayerMode" />
                         </toolkit:SettingsCard>
                     </StackPanel>
                 </StackPanel>
@@ -2322,20 +2340,6 @@ svc:Localized.DescriptionKey="Settings.DefaultWidth.Description"
 
                         <toolkit:SettingsCard
                             HorizontalContentAlignment="Right"
-                            svc:Localized.DescriptionKey="Settings.DoubleClick.Description"
-                            svc:Localized.HeaderKey="Settings.DoubleClick.Title">
-                            <toolkit:SettingsCard.HeaderIcon>
-                                <FontIcon Glyph="&#xE7C9;" />
-                            </toolkit:SettingsCard.HeaderIcon>
-                            <ToggleSwitch
-                                OnContent=""
-                                OffContent=""
-                                MinWidth="0"
-                                IsOn="{Binding DoubleClickToOpen, Mode=TwoWay}" />
-                        </toolkit:SettingsCard>
-
-                        <toolkit:SettingsCard
-                            HorizontalContentAlignment="Right"
                             svc:Localized.DescriptionKey="Settings.AttachmentStorageMode.Description"
                             svc:Localized.HeaderKey="Settings.AttachmentStorageMode.Title">
                             <toolkit:SettingsCard.HeaderIcon>
@@ -2347,35 +2351,6 @@ svc:Localized.DescriptionKey="Settings.DefaultWidth.Description"
                                 SelectedIndex="{Binding SelectedAttachmentStorageModeIndex, Mode=OneWay}"
                                 SelectionChanged="SettingsComboBox_SelectionChanged"
                                 Tag="AttachmentStorageMode" />
-                        </toolkit:SettingsCard>
-
-                        <toolkit:SettingsCard
-                            HorizontalContentAlignment="Right"
-                            svc:Localized.DescriptionKey="Settings.ResizeSnap.Description"
-                            svc:Localized.HeaderKey="Settings.ResizeSnap.Title">
-                            <toolkit:SettingsCard.HeaderIcon>
-                                <FontIcon Glyph="&#xE742;" />
-                            </toolkit:SettingsCard.HeaderIcon>
-                            <ToggleSwitch
-                                OnContent=""
-                                OffContent=""
-                                MinWidth="0"
-                                IsOn="{Binding ResizeSnapEnabled, Mode=TwoWay}" />
-                        </toolkit:SettingsCard>
-
-                        <toolkit:SettingsCard
-                            HorizontalContentAlignment="Right"
-                            svc:Localized.DescriptionKey="Settings.WidgetLayerMode.Description"
-                            svc:Localized.HeaderKey="Settings.WidgetLayerMode.Title">
-                            <toolkit:SettingsCard.HeaderIcon>
-                                <FontIcon Glyph="&#xE81E;" />
-                            </toolkit:SettingsCard.HeaderIcon>
-                            <ComboBox
-                                MinWidth="176"
-                                ItemsSource="{Binding AvailableWidgetLayerModeDisplayNames}"
-                                SelectedIndex="{Binding SelectedWidgetLayerModeIndex, Mode=OneWay}"
-                                SelectionChanged="SettingsComboBox_SelectionChanged"
-                                Tag="WidgetLayerMode" />
                         </toolkit:SettingsCard>
 
                         <toolkit:SettingsCard
@@ -2476,33 +2451,56 @@ svc:Localized.DescriptionKey="Settings.DefaultWidth.Description"
                     Style="{StaticResource SectionPanelStyle}">
                     <StackPanel Margin="0,8,0,0" Spacing="4">
                         <toolkit:SettingsCard
-                            HorizontalContentAlignment="Right"
+                            ContentAlignment="Vertical"
+                            HorizontalContentAlignment="Stretch"
                             svc:Localized.DescriptionKey="Settings.DataBackup.Description"
                             svc:Localized.HeaderKey="Settings.DataBackup.Title">
                             <toolkit:SettingsCard.HeaderIcon>
                                 <FontIcon Glyph="&#xE74E;" />
                             </toolkit:SettingsCard.HeaderIcon>
-                            <StackPanel Orientation="Horizontal" Spacing="8">
-                                <Button
-                                    x:Name="RestoreDataBackupButton"
-                                    Click="RestoreDataBackupButton_Click"
-                                    Style="{StaticResource ActionButtonStyle}"
-                                    svc:Localized.ToolTipKey="Settings.DataBackup.RestoreTooltip">
-                                    <StackPanel Orientation="Horizontal" Spacing="8">
-                                        <FontIcon FontSize="14" Glyph="&#xE777;" />
-                                        <TextBlock svc:Localized.Key="Settings.DataBackup.Restore" />
-                                    </StackPanel>
-                                </Button>
-                                <Button
-                                    x:Name="ExportDataBackupButton"
-                                    Click="ExportDataBackupButton_Click"
-                                    Style="{StaticResource ActionButtonStyle}"
-                                    svc:Localized.ToolTipKey="Settings.DataBackup.Tooltip">
-                                    <StackPanel Orientation="Horizontal" Spacing="8">
-                                        <FontIcon FontSize="14" Glyph="&#xE74E;" />
-                                        <TextBlock svc:Localized.Key="Settings.DataBackup.Export" />
-                                    </StackPanel>
-                                </Button>
+                            <StackPanel Spacing="12">
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <Button x:Name="RestoreDataBackupButton" Click="RestoreDataBackupButton_Click" Style="{StaticResource ActionButtonStyle}" svc:Localized.ToolTipKey="Settings.DataBackup.RestoreTooltip">
+                                        <StackPanel Orientation="Horizontal" Spacing="8"><FontIcon FontSize="14" Glyph="&#xE777;" /><TextBlock svc:Localized.Key="Settings.DataBackup.Restore" /></StackPanel>
+                                    </Button>
+                                    <Button x:Name="ExportDataBackupButton" Click="ExportDataBackupButton_Click" Style="{StaticResource ActionButtonStyle}" svc:Localized.ToolTipKey="Settings.DataBackup.Tooltip">
+                                        <StackPanel Orientation="Horizontal" Spacing="8"><FontIcon FontSize="14" Glyph="&#xE74E;" /><TextBlock svc:Localized.Key="Settings.DataBackup.Export" /></StackPanel>
+                                    </Button>
+                                    <Button x:Name="CreateBackupSnapshotButton" Click="CreateBackupSnapshotButton_Click" Style="{StaticResource ActionButtonStyle}" svc:Localized.ToolTipKey="Settings.DataBackup.Snapshots.BackupNowTooltip">
+                                        <StackPanel Orientation="Horizontal" Spacing="8"><FontIcon FontSize="14" Glyph="&#xE74E;" /><TextBlock svc:Localized.Key="Settings.DataBackup.Snapshots.BackupNow" /></StackPanel>
+                                    </Button>
+                                    <Button x:Name="OpenBackupFolderButton" Click="OpenBackupFolderButton_Click" Style="{StaticResource ActionButtonStyle}">
+                                        <StackPanel Orientation="Horizontal" Spacing="8"><SymbolIcon Symbol="OpenFile" /><TextBlock svc:Localized.Key="Settings.DataBackup.Snapshots.OpenFolder" /></StackPanel>
+                                    </Button>
+                                    <Button x:Name="RefreshBackupSnapshotsButton" Click="RefreshBackupSnapshotsButton_Click" Style="{StaticResource ActionButtonStyle}">
+                                        <StackPanel Orientation="Horizontal" Spacing="8"><SymbolIcon Symbol="Refresh" /><TextBlock svc:Localized.Key="Settings.DataBackup.Snapshots.Refresh" /></StackPanel>
+                                    </Button>
+                                </StackPanel>
+                                <StackPanel Spacing="3">
+                                    <TextBlock Style="{StaticResource SettingTitleTextStyle}" svc:Localized.Key="Settings.DataBackup.Snapshots.Title" />
+                                    <TextBlock Style="{StaticResource SettingDescriptionTextStyle}" TextWrapping="Wrap" svc:Localized.Key="Settings.DataBackup.Snapshots.Description" />
+                                </StackPanel>
+                                <TextBlock x:Name="BackupSnapshotSummaryText" Style="{StaticResource SettingDescriptionTextStyle}" TextWrapping="Wrap" />
+                                <ListView x:Name="BackupSnapshotsList" SelectionMode="None" IsItemClickEnabled="False">
+                                    <ListView.ItemTemplate>
+                                        <DataTemplate>
+                                            <Border Padding="10,8" Margin="0,2" Background="{ThemeResource CardBackgroundFillColorSecondaryBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="4">
+                                                <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8">
+                                                    <StackPanel Grid.Column="0" Spacing="2">
+                                                        <TextBlock FontWeight="SemiBold" Text="{Binding Title}" TextTrimming="CharacterEllipsis" />
+                                                        <TextBlock Style="{StaticResource SettingDescriptionTextStyle}" Text="{Binding Details}" TextWrapping="Wrap" />
+                                                    </StackPanel>
+                                                    <Button Grid.Column="1" Click="RestoreSnapshotButton_Click" IsEnabled="{Binding CanRestore}" Style="{StaticResource ActionButtonStyle}">
+                                                        <TextBlock svc:Localized.Key="Settings.DataBackup.Snapshots.Restore" />
+                                                    </Button>
+                                                    <Button Grid.Column="2" Click="DeleteSnapshotButton_Click" Style="{StaticResource ActionButtonStyle}">
+                                                        <TextBlock svc:Localized.Key="Settings.DataBackup.Snapshots.Delete" />
+                                                    </Button>
+                                                </Grid>
+                                            </Border>
+                                        </DataTemplate>
+                                    </ListView.ItemTemplate>
+                                </ListView>
                             </StackPanel>
                         </toolkit:SettingsCard>
                     </StackPanel>

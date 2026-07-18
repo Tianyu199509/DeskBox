@@ -43,12 +43,17 @@ public partial class WidgetViewModel
 
     private string GetManagedActionText()
     {
-        return _localizationService.T("Common.Move");
+        return ShouldMoveManagedItems()
+            ? _localizationService.T("Common.Move")
+            : _localizationService.T("Common.Copy");
     }
 
     private bool ShouldMoveManagedItems()
     {
-        return true;
+        return string.Equals(
+            _settingsService.Settings.ManagedDropAction,
+            SettingsService.ManagedDropActionMove,
+            StringComparison.Ordinal);
     }
 
     private void ApplyLayoutSettings()

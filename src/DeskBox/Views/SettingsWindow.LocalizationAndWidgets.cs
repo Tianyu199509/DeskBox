@@ -82,6 +82,10 @@ public sealed partial class SettingsWindow
         {
             RefreshManagedStorageFolderList();
         }
+        if (string.Equals(_currentSettingsSection, "BackupRestoreSettings", StringComparison.Ordinal))
+        {
+            _ = RefreshBackupSnapshotInventoryAsync();
+        }
     }
 
     /// <summary>

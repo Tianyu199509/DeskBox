@@ -5,9 +5,9 @@ namespace DeskBox.ViewModels;
 
 public partial class SettingsViewModel
 {
-    private int _quickCaptureItemPreviewLineCount = SettingsService.DefaultItemPreviewLineCount;
+    private int _quickCaptureItemPreviewLineCount = SettingsService.DefaultQuickCaptureItemPreviewLineCount;
     private string _quickCaptureEditorEnterBehavior = SettingsService.EditorEnterBehaviorCtrlEnterSaves;
-    private int _todoItemPreviewLineCount = SettingsService.DefaultItemPreviewLineCount;
+    private int _todoItemPreviewLineCount = SettingsService.DefaultTodoItemPreviewLineCount;
     private string _todoEditorEnterBehavior = SettingsService.EditorEnterBehaviorCtrlEnterSaves;
     private string[]? _cachedItemPreviewLineCountDisplayNames;
     private string[]? _cachedEditorEnterBehaviorDisplayNames;

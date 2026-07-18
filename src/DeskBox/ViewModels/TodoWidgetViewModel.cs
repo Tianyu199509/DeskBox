@@ -613,7 +613,7 @@ public sealed partial class TodoWidgetViewModel : ObservableObject, IDisposable
     public double ItemTextLineHeight => Math.Round(TextSize + Lerp(2.5, 6, LayoutDensityScale));
 
     public int ItemPreviewLineCount => _settingsService is null
-        ? SettingsService.DefaultItemPreviewLineCount
+        ? SettingsService.DefaultTodoItemPreviewLineCount
         : SettingsService.NormalizeItemPreviewLineCount(
             _settingsService.Settings.TodoItemPreviewLineCount);
 
