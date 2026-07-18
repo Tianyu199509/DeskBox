@@ -1,0 +1,186 @@
+<?xml version="1.0" encoding="utf-8"?>
+<UserControl
+    x:Class="DeskBox.Views.SettingsSections.AppearanceSettingsSection"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:controls="using:DeskBox.Controls"
+    xmlns:svc="using:DeskBox.Services"
+    xmlns:toolkit="using:CommunityToolkit.WinUI.Controls">
+
+    <UserControl.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="ms-appx:///Styles/SettingsOverviewResources.xaml" />
+            </ResourceDictionary.MergedDictionaries>
+        </ResourceDictionary>
+    </UserControl.Resources>
+
+    <StackPanel Style="{StaticResource SectionPanelStyle}">
+        <TextBlock Style="{StaticResource SectionTitleTextStyle}" svc:Localized.Key="Settings.Section.Appearance" />
+        <StackPanel Margin="0,8,0,0" Spacing="4">
+            <toolkit:SettingsCard
+                HorizontalContentAlignment="Right"
+                svc:Localized.DescriptionKey="Settings.Theme.Description"
+                svc:Localized.HeaderKey="Settings.Theme.Title">
+                <toolkit:SettingsCard.HeaderIcon>
+                    <FontIcon Glyph="&#xE790;" />
+                </toolkit:SettingsCard.HeaderIcon>
+                <ComboBox
+                    MinWidth="{StaticResource SettingsControlMinWidth}"
+                    ItemsSource="{Binding AvailableThemeOptions}"
+                    controls:SettingsComboBox.Value="{Binding SelectedTheme, Mode=TwoWay}" />
+            </toolkit:SettingsCard>
+
+            <toolkit:SettingsCard
+                HorizontalContentAlignment="Right"
+                svc:Localized.DescriptionKey="Settings.TrayIcon.Description"
+                svc:Localized.HeaderKey="Settings.TrayIcon.Title">
+                <toolkit:SettingsCard.HeaderIcon>
+                    <FontIcon Glyph="&#xE713;" />
+                </toolkit:SettingsCard.HeaderIcon>
+                <ComboBox
+                    MinWidth="{StaticResource SettingsControlMinWidth}"
+                    ItemsSource="{Binding AvailableTrayIconStyleOptions}"
+                    controls:SettingsComboBox.Value="{Binding SelectedTrayIconStyle, Mode=TwoWay}" />
+            </toolkit:SettingsCard>
+
+            <toolkit:SettingsExpander
+                IsExpanded="False"
+                svc:Localized.DescriptionKey="Settings.SystemAccent.Description"
+                svc:Localized.HeaderKey="Settings.SystemAccent.Title">
+                <toolkit:SettingsExpander.HeaderIcon>
+                    <FontIcon Glyph="&#xE7E6;" />
+                </toolkit:SettingsExpander.HeaderIcon>
+                <ToggleSwitch
+                    MinWidth="0"
+                    OffContent=""
+                    OnContent=""
+                    IsOn="{Binding UseSystemAccentColor, Mode=TwoWay}" />
+                <toolkit:SettingsExpander.Items>
+                    <toolkit:SettingsCard
+                        Description="{Binding AccentColorDescription}"
+                        HorizontalContentAlignment="Right"
+                        IsEnabled="{Binding CanEditCustomAccent}"
+                        svc:Localized.HeaderKey="Settings.Accent.Title">
+                        <toolkit:SettingsCard.HeaderIcon>
+                            <FontIcon Glyph="&#xE790;" />
+                        </toolkit:SettingsCard.HeaderIcon>
+                        <StackPanel Orientation="Vertical" Spacing="8">
+                            <toolkit:ColorPickerButton
+                                Width="72"
+                                Height="34"
+                                MinWidth="72"
+                                HorizontalAlignment="Right"
+                                SelectedColor="{Binding SelectedAccentColor, Mode=TwoWay}"
+                                svc:Localized.ToolTipKey="Settings.Accent.Tooltip" />
+                            <StackPanel HorizontalAlignment="Right" Orientation="Horizontal" Spacing="6">
+                                <Button Click="AccentPresetButton_Click" Style="{StaticResource AccentSwatchButtonStyle}" Tag="#0078D4" ToolTipService.ToolTip="#0078D4">
+                                    <Border Width="16" Height="16" Background="#0078D4" CornerRadius="8" />
+                                </Button>
+                                <Button Click="AccentPresetButton_Click" Style="{StaticResource AccentSwatchButtonStyle}" Tag="#EF6950" ToolTipService.ToolTip="#EF6950">
+                                    <Border Width="16" Height="16" Background="#EF6950" CornerRadius="8" />
+                                </Button>
+                                <Button Click="AccentPresetButton_Click" Style="{StaticResource AccentSwatchButtonStyle}" Tag="#2D7D46" ToolTipService.ToolTip="#2D7D46">
+                                    <Border Width="16" Height="16" Background="#2D7D46" CornerRadius="8" />
+                                </Button>
+                                <Button Click="AccentPresetButton_Click" Style="{StaticResource AccentSwatchButtonStyle}" Tag="#8764B8" ToolTipService.ToolTip="#8764B8">
+                                    <Border Width="16" Height="16" Background="#8764B8" CornerRadius="8" />
+                                </Button>
+                                <Button Click="AccentPresetButton_Click" Style="{StaticResource AccentSwatchButtonStyle}" Tag="#D83B01" ToolTipService.ToolTip="#D83B01">
+                                    <Border Width="16" Height="16" Background="#D83B01" CornerRadius="8" />
+                                </Button>
+                                <Button Click="AccentPresetButton_Click" Style="{StaticResource AccentSwatchButtonStyle}" Tag="#038387" ToolTipService.ToolTip="#038387">
+                                    <Border Width="16" Height="16" Background="#038387" CornerRadius="8" />
+                                </Button>
+                            </StackPanel>
+                        </StackPanel>
+                    </toolkit:SettingsCard>
+                </toolkit:SettingsExpander.Items>
+            </toolkit:SettingsExpander>
+
+            <Border Style="{StaticResource SettingsGroupStyle}">
+                <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="12" Margin="4">
+                    <Button Grid.Column="0" Click="NestedSettingsButton_Click" Style="{StaticResource DrillDownRowStyle}" Tag="AppearanceMaterialSettings">
+                        <Grid ColumnDefinitions="Auto,*" ColumnSpacing="12">
+                            <FontIcon Grid.Column="0" FontSize="18" Glyph="&#xE790;" IsHitTestVisible="False" VerticalAlignment="Center" />
+                            <StackPanel Grid.Column="1" IsHitTestVisible="False" Spacing="3" VerticalAlignment="Center">
+                                <TextBlock Style="{StaticResource SettingTitleTextStyle}" svc:Localized.Key="Settings.Material.Title" />
+                                <TextBlock Style="{StaticResource SettingDescriptionTextStyle}" Text="{Binding SelectedWidgetMaterialTypeText}" />
+                            </StackPanel>
+                        </Grid>
+                    </Button>
+                    <ComboBox
+                        Grid.Column="1"
+                        MinWidth="{StaticResource SettingsControlMinWidth}"
+                        VerticalAlignment="Center"
+                        ItemsSource="{Binding AvailableWidgetMaterialTypeOptions}"
+                        controls:SettingsComboBox.Value="{Binding SelectedWidgetMaterialType, Mode=TwoWay}" />
+                    <FontIcon Grid.Column="2" FontSize="12" Glyph="&#xE76C;" IsHitTestVisible="False" VerticalAlignment="Center" />
+                </Grid>
+            </Border>
+
+            <Border Style="{StaticResource SettingsGroupStyle}">
+                <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="12" Margin="4">
+                    <Button Grid.Column="0" Click="NestedSettingsButton_Click" Style="{StaticResource DrillDownRowStyle}" Tag="AppearanceDensitySettings">
+                        <Grid ColumnDefinitions="Auto,*" ColumnSpacing="12">
+                            <FontIcon Grid.Column="0" FontSize="18" Glyph="&#xE8A5;" IsHitTestVisible="False" VerticalAlignment="Center" />
+                            <StackPanel Grid.Column="1" IsHitTestVisible="False" Spacing="3" VerticalAlignment="Center">
+                                <TextBlock Style="{StaticResource SettingTitleTextStyle}" svc:Localized.Key="Settings.Density.Title" />
+                                <TextBlock Style="{StaticResource SettingDescriptionTextStyle}" Text="{Binding SelectedLayoutDensityText}" />
+                            </StackPanel>
+                        </Grid>
+                    </Button>
+                    <ComboBox
+                        Grid.Column="1"
+                        MinWidth="{StaticResource SettingsControlMinWidth}"
+                        VerticalAlignment="Center"
+                        ItemsSource="{Binding AvailableLayoutDensityOptions}"
+                        controls:SettingsComboBox.Value="{Binding SelectedLayoutDensity, Mode=TwoWay}" />
+                    <FontIcon Grid.Column="2" FontSize="12" Glyph="&#xE76C;" IsHitTestVisible="False" VerticalAlignment="Center" />
+                </Grid>
+            </Border>
+
+            <Border Style="{StaticResource SettingsGroupStyle}">
+                <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="12" Margin="4">
+                    <Button Grid.Column="0" Click="NestedSettingsButton_Click" Style="{StaticResource DrillDownRowStyle}" Tag="AppearanceWindowSettings">
+                        <Grid ColumnDefinitions="Auto,*" ColumnSpacing="12">
+                            <FontIcon Grid.Column="0" FontSize="18" Glyph="&#xE8B7;" IsHitTestVisible="False" VerticalAlignment="Center" />
+                            <StackPanel Grid.Column="1" IsHitTestVisible="False" Spacing="3" VerticalAlignment="Center">
+                                <TextBlock Style="{StaticResource SettingTitleTextStyle}" svc:Localized.Key="Settings.Group.AppVisual.Title" />
+                                <TextBlock Style="{StaticResource SettingDescriptionTextStyle}" Text="{Binding SelectedDisplayWidgetChromeModeText}" />
+                            </StackPanel>
+                        </Grid>
+                    </Button>
+                    <ComboBox
+                        Grid.Column="1"
+                        MinWidth="{StaticResource SettingsControlMinWidth}"
+                        VerticalAlignment="Center"
+                        ItemsSource="{Binding AvailableDisplayWidgetChromeModeOptions}"
+                        controls:SettingsComboBox.Value="{Binding SelectedDisplayWidgetChromeMode, Mode=TwoWay}" />
+                    <FontIcon Grid.Column="2" FontSize="12" Glyph="&#xE76C;" IsHitTestVisible="False" VerticalAlignment="Center" />
+                </Grid>
+            </Border>
+
+            <Border Style="{StaticResource SettingsGroupStyle}">
+                <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="12" Margin="4">
+                    <Button Grid.Column="0" Click="NestedSettingsButton_Click" Style="{StaticResource DrillDownRowStyle}" Tag="AppearanceAnimationSettings">
+                        <Grid ColumnDefinitions="Auto,*" ColumnSpacing="12">
+                            <FontIcon Grid.Column="0" FontSize="18" Glyph="&#xE7B5;" IsHitTestVisible="False" VerticalAlignment="Center" />
+                            <StackPanel Grid.Column="1" IsHitTestVisible="False" Spacing="3" VerticalAlignment="Center">
+                                <TextBlock Style="{StaticResource SettingTitleTextStyle}" svc:Localized.Key="Settings.Group.Animation.Title" />
+                                <TextBlock Style="{StaticResource SettingDescriptionTextStyle}" Text="{Binding SelectedAnimationPresetText}" />
+                            </StackPanel>
+                        </Grid>
+                    </Button>
+                    <ComboBox
+                        Grid.Column="1"
+                        MinWidth="{StaticResource SettingsControlMinWidth}"
+                        VerticalAlignment="Center"
+                        ItemsSource="{Binding AvailableAnimationPresetOptions}"
+                        controls:SettingsComboBox.Value="{Binding SelectedAnimationPreset, Mode=TwoWay}" />
+                    <FontIcon Grid.Column="2" FontSize="12" Glyph="&#xE76C;" IsHitTestVisible="False" VerticalAlignment="Center" />
+                </Grid>
+            </Border>
+        </StackPanel>
+    </StackPanel>
+</UserControl>

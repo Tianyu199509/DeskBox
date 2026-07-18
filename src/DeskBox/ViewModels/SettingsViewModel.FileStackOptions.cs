@@ -92,7 +92,6 @@ public partial class SettingsViewModel
                 return;
             }
 
-            OnPropertyChanged(nameof(SelectedFileStackGroupByIndex));
             OnPropertyChanged(nameof(FileStackCustomRulesVisibility));
             OnPropertyChanged(nameof(FileStackSettingsSummaryText));
             if (_isRestoringDefaults || _isApplyingSettingsSnapshot)
@@ -116,8 +115,6 @@ public partial class SettingsViewModel
         _cachedFileStackGroupByDisplayNames ??=
             AvailableFileStackGroupBys.Select(GetFileStackGroupByDisplayName).ToArray();
 
-    public int SelectedFileStackGroupByIndex =>
-        Array.IndexOf(AvailableFileStackGroupBys, SelectedFileStackGroupBy);
 
     public int SelectedFileStackThreshold
     {
@@ -130,7 +127,6 @@ public partial class SettingsViewModel
                 return;
             }
 
-            OnPropertyChanged(nameof(SelectedFileStackThresholdIndex));
             if (_isRestoringDefaults || _isApplyingSettingsSnapshot)
             {
                 return;
@@ -151,8 +147,6 @@ public partial class SettingsViewModel
                     value))
                 .ToArray();
 
-    public int SelectedFileStackThresholdIndex =>
-        Array.IndexOf(AvailableFileStackThresholds, SelectedFileStackThreshold);
 
     public string SelectedFileStackOrderBy
     {
@@ -165,7 +159,6 @@ public partial class SettingsViewModel
                 return;
             }
 
-            OnPropertyChanged(nameof(SelectedFileStackOrderByIndex));
             if (_isRestoringDefaults || _isApplyingSettingsSnapshot)
             {
                 return;
@@ -188,8 +181,6 @@ public partial class SettingsViewModel
         _cachedFileStackOrderByDisplayNames ??=
             AvailableFileStackOrderBys.Select(GetFileStackOrderByDisplayName).ToArray();
 
-    public int SelectedFileStackOrderByIndex =>
-        Array.IndexOf(AvailableFileStackOrderBys, SelectedFileStackOrderBy);
 
     public string SelectedFileStackUnmatchedBehavior
     {
@@ -202,7 +193,6 @@ public partial class SettingsViewModel
                 return;
             }
 
-            OnPropertyChanged(nameof(SelectedFileStackUnmatchedBehaviorIndex));
             RefreshFileStackRulePreview();
             if (_isRestoringDefaults || _isApplyingSettingsSnapshot)
             {
@@ -226,10 +216,6 @@ public partial class SettingsViewModel
                 .Select(GetFileStackUnmatchedBehaviorDisplayName)
                 .ToArray();
 
-    public int SelectedFileStackUnmatchedBehaviorIndex =>
-        Array.IndexOf(
-            AvailableFileStackUnmatchedBehaviors,
-            SelectedFileStackUnmatchedBehavior);
 
     public string GetFileStackGroupByDisplayName(string groupBy) =>
         SettingsService.NormalizeFileStackGroupBy(groupBy) switch
@@ -366,13 +352,9 @@ public partial class SettingsViewModel
         _cachedFileStackOrderByDisplayNames = null;
         _cachedFileStackUnmatchedBehaviorDisplayNames = null;
         OnPropertyChanged(nameof(AvailableFileStackGroupByDisplayNames));
-        OnPropertyChanged(nameof(SelectedFileStackGroupByIndex));
         OnPropertyChanged(nameof(AvailableFileStackThresholdDisplayNames));
-        OnPropertyChanged(nameof(SelectedFileStackThresholdIndex));
         OnPropertyChanged(nameof(AvailableFileStackOrderByDisplayNames));
-        OnPropertyChanged(nameof(SelectedFileStackOrderByIndex));
         OnPropertyChanged(nameof(AvailableFileStackUnmatchedBehaviorDisplayNames));
-        OnPropertyChanged(nameof(SelectedFileStackUnmatchedBehaviorIndex));
         OnPropertyChanged(nameof(FileStackSettingsSummaryText));
         UpdateFileStackRulePriorities();
         RefreshFileStackRulePreview();

@@ -27,10 +27,6 @@ namespace DeskBox;
 public partial class App : Application
 {
     private const double TrayMenuItemWidth = 176;
-    private const double TrayMenuVerticalPadding = 4;
-    private const double TrayMenuItemMinHeight = 36;
-    private const double TrayMenuSeparatorHeight = 12;
-    private const double TrayMenuMinimumHeight = 320;
     private const int TrayContextMenuFallbackOffsetPixels = 24;
     private const int TrayContextMenuEstimatedWidth = (int)TrayMenuItemWidth + 16;
     private const int MaxQueuedLogLines = 4096;
@@ -73,6 +69,8 @@ public partial class App : Application
 
     private TaskbarIcon? _trayIcon;
     private Window? _trayWindow;
+    private MenuFlyout? _trayContextMenu;
+    private bool _traySecondWindowSyncLogged;
     private MenuFlyoutItem? _trayMapFolderItem;
     private readonly Dictionary<WidgetKind, MenuFlyoutItem> _trayCreateWidgetItems = [];
     private MenuFlyoutItem? _trayOpenManagedStorageItem;
@@ -1669,18 +1667,6 @@ public partial class App : Application
         };
         exitItem.Click += async (_, _) => await RunTrayMenuActionAsync(contextMenu, ExitApplication);
 
-        contextMenu.Opening += (_, _) =>
-        {
-            bool canCreateWidget = WidgetManager is not null;
-            foreach (var item in _trayCreateWidgetItems.Values)
-            {
-                item.IsEnabled = canCreateWidget;
-            }
-
-            mapFolderItem.IsEnabled = canCreateWidget;
-            contextMenu.MenuFlyoutPresenterStyle = CreateTrayMenuPresenterStyle(contextMenu);
-        };
-
         _trayCreateWidgetItems.Clear();
         foreach (var descriptor in new WidgetContentFactory(LocalizationService).GetCreateEntryDescriptors())
         {
@@ -1703,6 +1689,8 @@ public partial class App : Application
         _trayUpdateItem = updateItem;
         _traySettingsItem = settingsItem;
         _trayExitItem = exitItem;
+        _trayContextMenu = contextMenu;
+        PrepareTrayContextMenu(contextMenu);
 
         _trayWindow = new Window();
         _trayWindow.AppWindow.IsShownInSwitchers = false;
@@ -1726,6 +1714,10 @@ public partial class App : Application
             })
         };
         _trayIcon.ContextFlyout = contextMenu;
+        // H.NotifyIcon creates its private SecondWindow flyout when ContextFlyout
+        // is assigned. Apply the same presenter settings to that actual flyout
+        // immediately, before its first measurement.
+        SynchronizeSecondWindowTrayFlyout(contextMenu);
 
         if (_trayWindow.Content is null)
         {
@@ -1844,29 +1836,92 @@ public partial class App : Application
         }
     }
 
-    private Style CreateTrayMenuPresenterStyle(MenuFlyout contextMenu)
+    private void PrepareTrayContextMenu(MenuFlyout contextMenu)
     {
-        int visibleCommandCount = contextMenu.Items.Count(item =>
-            item is not MenuFlyoutSeparator && item.Visibility == Visibility.Visible);
-        int visibleSeparatorCount = contextMenu.Items.Count(item =>
-            item is MenuFlyoutSeparator && item.Visibility == Visibility.Visible);
-        double fullContentHeight =
-            (visibleCommandCount * TrayMenuItemMinHeight) +
-            (visibleSeparatorCount * TrayMenuSeparatorHeight) +
-            (TrayMenuVerticalPadding * 2);
-        double presenterHeight = Math.Max(TrayMenuMinimumHeight, fullContentHeight);
+        bool canCreateWidget = WidgetManager is not null;
+        foreach (var item in _trayCreateWidgetItems.Values)
+        {
+            item.IsEnabled = canCreateWidget;
+        }
 
+        if (_trayMapFolderItem is not null)
+        {
+            _trayMapFolderItem.IsEnabled = canCreateWidget;
+        }
+
+        contextMenu.MenuFlyoutPresenterStyle = CreateTrayMenuPresenterStyle();
+    }
+
+    private Style CreateTrayMenuPresenterStyle()
+    {
         var style = new Style(typeof(MenuFlyoutPresenter))
         {
             BasedOn = (Style)Resources[typeof(MenuFlyoutPresenter)]
         };
-        style.Setters.Add(new Setter(FrameworkElement.HeightProperty, presenterHeight));
-        style.Setters.Add(new Setter(FrameworkElement.MinHeightProperty, presenterHeight));
         style.Setters.Add(new Setter(ScrollViewer.VerticalScrollModeProperty, ScrollMode.Disabled));
         style.Setters.Add(new Setter(
             ScrollViewer.VerticalScrollBarVisibilityProperty,
             ScrollBarVisibility.Disabled));
         return style;
+    }
+
+    private void SynchronizeSecondWindowTrayFlyout(MenuFlyout contextMenu)
+    {
+        if (_trayIcon is null)
+        {
+            return;
+        }
+
+        Style presenterStyle = contextMenu.MenuFlyoutPresenterStyle ??
+            CreateTrayMenuPresenterStyle();
+        contextMenu.MenuFlyoutPresenterStyle = presenterStyle;
+
+        MenuFlyout? secondWindowFlyout = TryGetSecondWindowContextMenuFlyout(_trayIcon);
+        if (secondWindowFlyout is null)
+        {
+            if (!_traySecondWindowSyncLogged)
+            {
+                Log("[Tray] SecondWindow flyout was not available for presenter synchronization");
+                _traySecondWindowSyncLogged = true;
+            }
+
+            return;
+        }
+
+        secondWindowFlyout.MenuFlyoutPresenterStyle = presenterStyle;
+        secondWindowFlyout.ShouldConstrainToRootBounds = false;
+        if (!_traySecondWindowSyncLogged)
+        {
+            Log("[Tray] Synchronized SecondWindow flyout presenter settings");
+            _traySecondWindowSyncLogged = true;
+        }
+    }
+
+    private static MenuFlyout? TryGetSecondWindowContextMenuFlyout(TaskbarIcon trayIcon)
+    {
+        const System.Reflection.BindingFlags flags =
+            System.Reflection.BindingFlags.Instance |
+            System.Reflection.BindingFlags.Public |
+            System.Reflection.BindingFlags.NonPublic |
+            System.Reflection.BindingFlags.DeclaredOnly;
+
+        try
+        {
+            for (Type? type = trayIcon.GetType(); type is not null; type = type.BaseType)
+            {
+                var property = type.GetProperty("ContextMenuFlyout", flags);
+                if (property?.GetValue(trayIcon) is MenuFlyout flyout)
+                {
+                    return flyout;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Log($"[Tray] Failed to access SecondWindow flyout: {ex.Message}");
+        }
+
+        return null;
     }
 
     private void ShowTrayContextMenuFromTray()
@@ -1875,6 +1930,14 @@ public partial class App : Application
             !Win32Helper.GetCursorPos(out var cursor))
         {
             return;
+        }
+
+        if (_trayContextMenu is not null)
+        {
+            // Visibility, enabled state, and localization must be settled before
+            // H.NotifyIcon measures and resizes its SecondWindow host.
+            PrepareTrayContextMenu(_trayContextMenu);
+            SynchronizeSecondWindowTrayFlyout(_trayContextMenu);
         }
 
         var point = new DrawingPoint(cursor.X, cursor.Y);

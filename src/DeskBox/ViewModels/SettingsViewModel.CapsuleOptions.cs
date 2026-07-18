@@ -91,7 +91,6 @@ public partial class SettingsViewModel
             }
 
             OnPropertyChanged(nameof(SelectedWidgetCompactAnimationEffectText));
-            OnPropertyChanged(nameof(SelectedWidgetCompactAnimationEffectIndex));
             OnPropertyChanged(nameof(IsWidgetCompactAnimationEnabled));
             if (_isRestoringDefaults || _isApplyingSettingsSnapshot)
             {
@@ -125,8 +124,6 @@ public partial class SettingsViewModel
     public string SelectedWidgetCompactAnimationEffectText =>
         GetWidgetCompactAnimationEffectDisplayName(SelectedWidgetCompactAnimationEffect);
 
-    public int SelectedWidgetCompactAnimationEffectIndex =>
-        Array.IndexOf(AvailableWidgetCompactAnimationEffects, _selectedWidgetCompactAnimationEffect);
 
     public bool IsWidgetCompactAnimationEnabled =>
         SelectedWidgetCompactAnimationEffect != SettingsService.WidgetCompactAnimationNone;
@@ -157,7 +154,6 @@ public partial class SettingsViewModel
                     SettingsService.WidgetCompactAnimationCustom;
                 OnPropertyChanged(nameof(SelectedWidgetCompactAnimationEffect));
                 OnPropertyChanged(nameof(SelectedWidgetCompactAnimationEffectText));
-                OnPropertyChanged(nameof(SelectedWidgetCompactAnimationEffectIndex));
                 OnPropertyChanged(nameof(IsWidgetCompactAnimationEnabled));
             }
 
@@ -240,7 +236,6 @@ public partial class SettingsViewModel
             }
 
             OnPropertyChanged(nameof(SelectedWidgetCompactMediaCornerText));
-            OnPropertyChanged(nameof(SelectedWidgetCompactMediaCornerIndex));
             if (_isRestoringDefaults || _isApplyingSettingsSnapshot)
             {
                 return;
@@ -254,8 +249,6 @@ public partial class SettingsViewModel
     public string SelectedWidgetCompactMediaCornerText =>
         GetWidgetCompactMediaCornerDisplayName(SelectedWidgetCompactMediaCornerMode);
 
-    public int SelectedWidgetCompactMediaCornerIndex =>
-        Array.IndexOf(AvailableWidgetCompactMediaCornerModes, _selectedWidgetCompactMediaCornerMode);
 
     public int CapsuleCustomRuleCount => _settingsService.Settings.Widgets.Count(widget =>
         widget.Metadata?.ContainsKey(WidgetCollapseBehaviorNames.MetadataKey) == true);

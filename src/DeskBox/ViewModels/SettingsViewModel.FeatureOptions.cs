@@ -36,7 +36,6 @@ public partial class SettingsViewModel
     }
 
     public string SelectedTodoNewTaskPositionText => GetTodoNewTaskPositionDisplayName(SelectedTodoNewTaskPosition);
-    public int SelectedTodoNewTaskPositionIndex => Array.IndexOf(AvailableTodoNewTaskPositions, _selectedTodoNewTaskPosition);
 
     public string SelectedAttachmentStorageMode
     {
@@ -55,13 +54,9 @@ public partial class SettingsViewModel
                 _settingsService.SaveDebounced();
             }
 
-            OnPropertyChanged(nameof(SelectedAttachmentStorageModeIndex));
         }
     }
 
-    public int SelectedAttachmentStorageModeIndex => Array.IndexOf(
-        AvailableAttachmentStorageModes,
-        _selectedAttachmentStorageMode);
 
     public string SelectedManagedDropAction
     {
@@ -82,13 +77,9 @@ public partial class SettingsViewModel
                 _settingsService.SaveDebounced();
             }
 
-            OnPropertyChanged(nameof(SelectedManagedDropActionIndex));
         }
     }
 
-    public int SelectedManagedDropActionIndex => Array.IndexOf(
-        AvailableManagedDropActions,
-        _selectedManagedDropAction);
 
     public string SelectedQuickCaptureDefaultView
     {
@@ -113,7 +104,6 @@ public partial class SettingsViewModel
     }
 
     public string SelectedQuickCaptureDefaultViewText => GetQuickCaptureDefaultViewDisplayName(SelectedQuickCaptureDefaultView);
-    public int SelectedQuickCaptureDefaultViewIndex => Array.IndexOf(AvailableQuickCaptureDefaultViews, _selectedQuickCaptureDefaultView);
 
     public string SelectedQuickCaptureTabStyle
     {
@@ -133,12 +123,10 @@ public partial class SettingsViewModel
             _settingsService.Settings.QuickCaptureTabStyle = _selectedQuickCaptureTabStyle;
             _settingsService.SaveDebounced();
             OnPropertyChanged(nameof(SelectedQuickCaptureTabStyleText));
-            OnPropertyChanged(nameof(SelectedQuickCaptureTabStyleIndex));
         }
     }
 
     public string SelectedQuickCaptureTabStyleText => GetWidgetTabStyleDisplayName(SelectedQuickCaptureTabStyle);
-    public int SelectedQuickCaptureTabStyleIndex => Array.IndexOf(AvailableWidgetTabStyles, _selectedQuickCaptureTabStyle);
 
     public string SelectedTodoDefaultFilter
     {
@@ -163,7 +151,6 @@ public partial class SettingsViewModel
     }
 
     public string SelectedTodoDefaultFilterText => GetTodoDefaultFilterDisplayName(SelectedTodoDefaultFilter);
-    public int SelectedTodoDefaultFilterIndex => Array.IndexOf(AvailableTodoDefaultFilters, _selectedTodoDefaultFilter);
 
     private void EnsureQuickCaptureTabEnabled(string view)
     {
@@ -227,12 +214,10 @@ public partial class SettingsViewModel
             _settingsService.Settings.TodoTabStyle = _selectedTodoTabStyle;
             _settingsService.SaveDebounced();
             OnPropertyChanged(nameof(SelectedTodoTabStyleText));
-            OnPropertyChanged(nameof(SelectedTodoTabStyleIndex));
         }
     }
 
     public string SelectedTodoTabStyleText => GetWidgetTabStyleDisplayName(SelectedTodoTabStyle);
-    public int SelectedTodoTabStyleIndex => Array.IndexOf(AvailableWidgetTabStyles, _selectedTodoTabStyle);
 
     public int SelectedTodoReminderOffsetMinutes
     {
@@ -257,7 +242,6 @@ public partial class SettingsViewModel
     }
 
     public string SelectedTodoReminderOffsetMinutesText => GetTodoReminderOffsetDisplayName(SelectedTodoReminderOffsetMinutes);
-    public int SelectedTodoReminderOffsetMinutesIndex => Array.IndexOf(AvailableTodoReminderOffsetMinutes, _selectedTodoReminderOffsetMinutes);
 
     public string SelectedMusicDisplayMode
     {
@@ -271,7 +255,6 @@ public partial class SettingsViewModel
             }
 
             OnPropertyChanged(nameof(SelectedMusicDisplayModeText));
-            OnPropertyChanged(nameof(SelectedMusicDisplayModeIndex));
             if (_isRestoringDefaults || _isApplyingSettingsSnapshot)
             {
                 return;
@@ -283,7 +266,6 @@ public partial class SettingsViewModel
     }
 
     public string SelectedMusicDisplayModeText => GetMusicDisplayModeDisplayName(SelectedMusicDisplayMode);
-    public int SelectedMusicDisplayModeIndex => Array.IndexOf(AvailableMusicDisplayModes, _selectedMusicDisplayMode);
 
     public string AccentColorHex
     {
@@ -711,27 +693,17 @@ public partial class SettingsViewModel
                 OnPropertyChanged(nameof(QuickCaptureRecentLimitText));
                 OnPropertyChanged(nameof(QuickCaptureRecentLimitInput));
                 OnPropertyChanged(nameof(SelectedQuickCaptureDefaultViewText));
-                OnPropertyChanged(nameof(SelectedQuickCaptureDefaultViewIndex));
                 OnPropertyChanged(nameof(SelectedQuickCaptureTabStyleText));
-                OnPropertyChanged(nameof(SelectedQuickCaptureTabStyleIndex));
                 break;
             case WidgetKind.Todo:
                 OnPropertyChanged(nameof(TodoEnabled));
                 OnPropertyChanged(nameof(SelectedTodoNewTaskPositionText));
-                OnPropertyChanged(nameof(SelectedTodoNewTaskPositionIndex));
                 OnPropertyChanged(nameof(SelectedTodoDefaultFilterText));
-                OnPropertyChanged(nameof(SelectedTodoDefaultFilterIndex));
                 OnPropertyChanged(nameof(SelectedTodoTabStyleText));
-                OnPropertyChanged(nameof(SelectedTodoTabStyleIndex));
                 break;
             case WidgetKind.Music:
                 break;
             case WidgetKind.Weather:
-                OnPropertyChanged(nameof(SelectedWeatherDefaultViewIndex));
-                OnPropertyChanged(nameof(SelectedWeatherSkinIndex));
-                OnPropertyChanged(nameof(SelectedWeatherTemperatureUnitIndex));
-                OnPropertyChanged(nameof(SelectedWeatherWindSpeedUnitIndex));
-                OnPropertyChanged(nameof(SelectedWeatherRefreshIntervalIndex));
                 break;
         }
     }

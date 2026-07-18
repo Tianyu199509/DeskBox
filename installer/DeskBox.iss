@@ -8,7 +8,9 @@
 #define MyAppPublisher "朱天雨"
 #define MyAppExeName "DeskBox.exe"
 #define MyAppOutputBaseName "DeskBox_Setup"
+#ifndef MyAppReleaseDir
 #define MyAppReleaseDir "..\artifacts\publish\DeskBox\x64"
+#endif
 
 [Setup]
 ; AppId 用于唯一标识同一个应用。

@@ -39,8 +39,9 @@ public sealed partial class SettingsWindow : Window
     private const int MinWindowHeight = 560;
     private const int WindowWorkAreaMargin = 48;
     private const double ContentMaxWidth = 760;
-    private const double SettingsSearchMinWidth = 220;
-    private const double SettingsSearchMaxWidth = 360;
+    private const double SettingsSearchMinWidth = 260;
+    private const double SettingsSearchMaxWidth = 520;
+    private const double SettingsSearchWidthRatio = 0.5;
     private const double PageSidePadding = 20;
     private const double RowStackContentThreshold = 620;
     private const double NarrowTitleThreshold = 560;
@@ -226,6 +227,7 @@ public sealed partial class SettingsWindow : Window
         UpdateResponsiveLayout(GetWindowWidth());
         ApplyToggleSwitchContentVisibility();
         _isSettingsRootLoaded = true;
+        RefreshSettingsSearchResults();
     }
 
     private void SettingsWindow_SizeChanged(object sender, WindowSizeChangedEventArgs args)
@@ -253,6 +255,7 @@ public sealed partial class SettingsWindow : Window
         _resizeSettleTimer.Tick -= ResizeSettleTimer_Tick;
         _sectionLayoutSettleTimer.Stop();
         _sectionLayoutSettleTimer.Tick -= SectionLayoutSettleTimer_Tick;
+        ClearSettingsSearchHighlight();
         Win32Helper.ClearWindowTopMost(_hWnd);
         RemoveMinimumSizeHook();
         _themeService.AppearanceChanged -= OnAppearanceChanged;
@@ -416,11 +419,7 @@ public sealed partial class SettingsWindow : Window
 
         double searchWidth = Math.Min(
             SettingsSearchMaxWidth,
-            Math.Max(SettingsSearchMinWidth, availableContentWidth * 0.55));
-        if (availableContentWidth > 0)
-        {
-            searchWidth = Math.Min(searchWidth, availableContentWidth);
-        }
+            Math.Max(SettingsSearchMinWidth, width * SettingsSearchWidthRatio));
 
         SettingsSearchBox.Width = searchWidth;
 
@@ -459,9 +458,6 @@ public sealed partial class SettingsWindow : Window
         }
 
         TitleTextHost.Visibility = width < NarrowTitleThreshold ? Visibility.Collapsed : Visibility.Visible;
-        AppTitleBar.Padding = width < NarrowTitleThreshold
-            ? new Thickness(12, 0, 88, 0)
-            : new Thickness(18, 0, 128, 0);
     }
 
     private void RestartResizeSettleTimer()
@@ -678,7 +674,20 @@ public sealed partial class SettingsWindow : Window
         }
     }
 
-    private sealed record SettingsSearchResult(string SectionTag, string Title, string Breadcrumb);
+    private sealed record SettingsSearchResult(
+        string SectionTag,
+        string Title,
+        string Breadcrumb,
+        string Description,
+        FrameworkElement? TargetElement)
+    {
+        public bool IsPage => TargetElement is null;
+
+        public override string ToString()
+        {
+            return Title;
+        }
+    }
 
     private sealed record BackupSnapshotListItem(
         string Path,

@@ -10,16 +10,22 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
+using Microsoft.UI.Xaml.Media.Animation;
 using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Shapes;
 using System.Runtime.InteropServices;
 using Windows.System;
 using WinRT.Interop;
+using DeskBox.Views.SettingsSections;
 
 namespace DeskBox.Views;
 
 public sealed partial class SettingsWindow
 {
+    private Storyboard? _settingsSearchHighlightStoryboard;
+    private FrameworkElement? _settingsSearchHighlightTarget;
+    private double _settingsSearchHighlightOriginalOpacity = 1;
+
     private void InitializeSettingsSectionElements()
     {
         _settingsSectionElements = new Dictionary<string, FrameworkElement>(StringComparer.Ordinal)
@@ -82,18 +88,24 @@ public sealed partial class SettingsWindow
 
     private void RefreshSettingsSearchResults()
     {
-        _settingsSearchResults = SectionRoutes.Values
-            .Where(route => route.Tag != "Advanced")
-            .Select(route =>
-            {
-                string title = _localizationService.T(route.TitleKey);
-                string breadcrumb = route.ParentTag is not null &&
-                    TryGetSectionRoute(route.ParentTag, out var parentRoute)
-                    ? $"{_localizationService.T(parentRoute.TitleKey)} / {title}"
-                    : title;
-                return new SettingsSearchResult(route.Tag, title, breadcrumb);
-            })
-            .ToArray();
+        var results = new List<SettingsSearchResult>();
+        foreach (SettingsSectionRoute route in SectionRoutes.Values.Where(route => route.Tag != "Advanced"))
+        {
+            string title = _localizationService.T(route.TitleKey);
+            results.Add(new SettingsSearchResult(
+                route.Tag,
+                title,
+                BuildSettingsRouteBreadcrumb(route),
+                string.Empty,
+                null));
+        }
+
+        if (_isSettingsRootLoaded)
+        {
+            results.AddRange(CreateSettingItemSearchResults());
+        }
+
+        _settingsSearchResults = results;
 
         if (SettingsSearchBox is null)
         {
@@ -119,14 +131,80 @@ public sealed partial class SettingsWindow
             return;
         }
 
-        SettingsSearchResult[] matches = _settingsSearchResults
-            .Where(result =>
-                result.Title.Contains(normalizedQuery, StringComparison.OrdinalIgnoreCase) ||
-                result.Breadcrumb.Contains(normalizedQuery, StringComparison.OrdinalIgnoreCase))
-            .Take(8)
-            .ToArray();
+        SettingsSearchResult[] matches = FindSettingsSearchMatches(normalizedQuery, 10);
         SettingsSearchBox.ItemsSource = matches;
         SettingsSearchBox.IsSuggestionListOpen = matches.Length > 0;
+    }
+
+    private IEnumerable<SettingsSearchResult> CreateSettingItemSearchResults()
+    {
+        foreach ((string sectionTag, FrameworkElement section) in _settingsSectionElements)
+        {
+            if (!TryGetSectionRoute(sectionTag, out SettingsSectionRoute route))
+            {
+                continue;
+            }
+
+            var indexedHeaderKeys = new HashSet<string>(StringComparer.Ordinal);
+            string breadcrumb = BuildSettingsRouteBreadcrumb(route);
+            foreach (FrameworkElement element in FindDescendants<FrameworkElement>(section))
+            {
+                string? headerKey = Localized.GetHeaderKey(element);
+                if (string.IsNullOrWhiteSpace(headerKey) ||
+                    string.Equals(headerKey, route.TitleKey, StringComparison.Ordinal) ||
+                    !indexedHeaderKeys.Add(headerKey))
+                {
+                    continue;
+                }
+
+                string? descriptionKey = Localized.GetDescriptionKey(element);
+                yield return new SettingsSearchResult(
+                    sectionTag,
+                    _localizationService.T(headerKey),
+                    breadcrumb,
+                    string.IsNullOrWhiteSpace(descriptionKey)
+                        ? string.Empty
+                        : _localizationService.T(descriptionKey),
+                    element);
+            }
+        }
+    }
+
+    private string BuildSettingsRouteBreadcrumb(SettingsSectionRoute route)
+    {
+        var titles = new Stack<string>();
+        var visited = new HashSet<string>(StringComparer.Ordinal);
+        SettingsSectionRoute? current = route;
+        while (current is not null && visited.Add(current.Tag))
+        {
+            titles.Push(_localizationService.T(current.TitleKey));
+            current = current.ParentTag is not null && TryGetSectionRoute(current.ParentTag, out var parent)
+                ? parent
+                : null;
+        }
+
+        return string.Join(" / ", titles);
+    }
+
+    private SettingsSearchResult[] FindSettingsSearchMatches(string query, int limit)
+    {
+        return _settingsSearchResults
+            .Select(result => new
+            {
+                Result = result,
+                Score = SettingsSearchMatcher.GetScore(
+                    query,
+                    result.Title,
+                    result.Breadcrumb,
+                    result.Description)
+            })
+            .Where(match => match.Score != SettingsSearchMatcher.NoMatch)
+            .OrderBy(match => match.Score)
+            .ThenBy(match => match.Result.IsPage ? 0 : 1)
+            .ThenBy(match => match.Result.Title.Length)
+            .Take(limit)
+            .Select(match => match.Result)
+            .ToArray();
     }
 
     private void SettingsSearchBox_TextChanged(AutoSuggestBox sender, AutoSuggestBoxTextChangedEventArgs args)
@@ -143,9 +221,7 @@ public sealed partial class SettingsWindow
         if (result is null)
         {
             string query = sender.Text.Trim();
-            result = _settingsSearchResults.FirstOrDefault(item =>
-                item.Title.Contains(query, StringComparison.OrdinalIgnoreCase) ||
-                item.Breadcrumb.Contains(query, StringComparison.OrdinalIgnoreCase));
+            result = FindSettingsSearchMatches(query, 1).FirstOrDefault();
         }
 
         if (result is null)
@@ -154,8 +230,124 @@ public sealed partial class SettingsWindow
         }
 
         NavigateToSettingsSection(result.SectionTag);
+        ScheduleSettingsSearchTarget(result);
         sender.Text = string.Empty;
         UpdateSettingsSearchSuggestions(string.Empty);
+    }
+
+    private void ScheduleSettingsSearchTarget(SettingsSearchResult result)
+    {
+        if (result.TargetElement is not FrameworkElement target)
+        {
+            return;
+        }
+
+        DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
+        {
+            if (_isClosed || target.XamlRoot is null)
+            {
+                return;
+            }
+
+            ExpandSettingsSearchTargetAncestors(target);
+            target.UpdateLayout();
+            DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
+            {
+                if (_isClosed || target.XamlRoot is null)
+                {
+                    return;
+                }
+
+                target.StartBringIntoView(new BringIntoViewOptions
+                {
+                    AnimationDesired = true,
+                    VerticalAlignmentRatio = 0.18
+                });
+                HighlightSettingsSearchTarget(target);
+                FocusSettingsSearchTarget(target);
+            });
+        });
+    }
+
+    private static void ExpandSettingsSearchTargetAncestors(DependencyObject target)
+    {
+        DependencyObject? current = target;
+        while (current is not null)
+        {
+            if (current is CommunityToolkit.WinUI.Controls.SettingsExpander expander)
+            {
+                expander.IsExpanded = true;
+            }
+
+            current = VisualTreeHelper.GetParent(current);
+        }
+    }
+
+    private static void FocusSettingsSearchTarget(FrameworkElement target)
+    {
+        Control? focusTarget = FindDescendants<Control>(target)
+            .FirstOrDefault(control =>
+                control.IsEnabled &&
+                control.IsTabStop &&
+                control.Visibility == Visibility.Visible);
+        if (focusTarget is null &&
+            target is Control targetControl &&
+            targetControl.IsEnabled &&
+            targetControl.IsTabStop)
+        {
+            focusTarget = targetControl;
+        }
+
+        focusTarget?.Focus(FocusState.Programmatic);
+    }
+
+    private void HighlightSettingsSearchTarget(FrameworkElement target)
+    {
+        ClearSettingsSearchHighlight();
+
+        _settingsSearchHighlightTarget = target;
+        _settingsSearchHighlightOriginalOpacity = target.Opacity;
+        target.Opacity = Math.Min(0.68, _settingsSearchHighlightOriginalOpacity);
+
+        var animation = new DoubleAnimation
+        {
+            From = target.Opacity,
+            To = _settingsSearchHighlightOriginalOpacity,
+            Duration = TimeSpan.FromMilliseconds(650),
+            EnableDependentAnimation = true,
+            EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseOut }
+        };
+        Storyboard.SetTarget(animation, target);
+        Storyboard.SetTargetProperty(animation, nameof(UIElement.Opacity));
+
+        var storyboard = new Storyboard();
+        storyboard.Children.Add(animation);
+        storyboard.Completed += (_, _) =>
+        {
+            if (!ReferenceEquals(_settingsSearchHighlightStoryboard, storyboard))
+            {
+                return;
+            }
+
+            target.Opacity = _settingsSearchHighlightOriginalOpacity;
+            _settingsSearchHighlightStoryboard = null;
+            _settingsSearchHighlightTarget = null;
+        };
+        _settingsSearchHighlightStoryboard = storyboard;
+        storyboard.Begin();
+    }
+
+    private void ClearSettingsSearchHighlight()
+    {
+        _settingsSearchHighlightStoryboard?.Stop();
+        if (_settingsSearchHighlightTarget is not null)
+        {
+            _settingsSearchHighlightTarget.Opacity = _settingsSearchHighlightOriginalOpacity;
+        }
+
+        _settingsSearchHighlightStoryboard = null;
+        _settingsSearchHighlightTarget = null;
+        _settingsSearchHighlightOriginalOpacity = 1;
     }
 
     private void SettingsNavigationView_BackRequested(NavigationView sender, NavigationViewBackRequestedEventArgs args)
@@ -265,10 +457,6 @@ public sealed partial class SettingsWindow
             ? NavigationViewBackButtonVisible.Visible
             : NavigationViewBackButtonVisible.Collapsed;
         UpdateBreadcrumb(route);
-        ResetCurrentPageButton.Visibility = SettingsService.IsPreferenceSectionResettable(sectionTag)
-            ? Visibility.Visible
-            : Visibility.Collapsed;
-
         DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
         {
             PageScroller.ChangeView(null, 0, null, disableAnimation: true);
@@ -281,6 +469,7 @@ public sealed partial class SettingsWindow
         if (string.IsNullOrWhiteSpace(route.ParentTag) ||
             !TryGetSectionRoute(route.ParentTag, out var parentRoute))
         {
+            SettingsBreadcrumbHost.Visibility = Visibility.Collapsed;
             SettingsBreadcrumbBar.Visibility = Visibility.Collapsed;
             SettingsBreadcrumbBar.ItemsSource = null;
             return;
@@ -291,6 +480,7 @@ public sealed partial class SettingsWindow
             new SettingsBreadcrumbItem(parentRoute.Tag, _localizationService.T(parentRoute.TitleKey), 0.62),
             new SettingsBreadcrumbItem(route.Tag, _localizationService.T(route.TitleKey), 1.0)
         };
+        SettingsBreadcrumbHost.Visibility = Visibility.Visible;
         SettingsBreadcrumbBar.Visibility = Visibility.Visible;
     }
 
@@ -310,175 +500,19 @@ public sealed partial class SettingsWindow
         return SectionRoutes.TryGetValue(sectionTag, out route!);
     }
 
-    private void AccentPresetButton_Click(object sender, RoutedEventArgs e)
-    {
-        if (sender is not Button { Tag: string hex } ||
-            !AccentColorHelper.TryParseHex(hex, out var color))
-        {
-            return;
-        }
-
-        ViewModel.SetCustomAccentColor(color);
-    }
-
-    private void SettingsComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
-    {
-        if (sender is not ComboBox combo ||
-            combo.Tag is not string menuKind ||
-            combo.SelectedIndex < 0 ||
-            e.AddedItems.Count == 0 ||
-            e.AddedItems[0] is not string displayName)
-        {
-            return;
-        }
-
-        switch (menuKind)
-        {
-            case "Theme":
-                ViewModel.SelectedTheme = ViewModel.AvailableThemes[combo.SelectedIndex];
-                break;
-            case "Language":
-                ViewModel.SelectedLanguage = ViewModel.AvailableLanguages[combo.SelectedIndex];
-                break;
-            case "MusicDisplayMode":
-                ViewModel.SelectedMusicDisplayMode = ViewModel.AvailableMusicDisplayModes[combo.SelectedIndex];
-                break;
-            case "FileStackGroupBy":
-                ViewModel.SelectedFileStackGroupBy = ViewModel.AvailableFileStackGroupBys[combo.SelectedIndex];
-                break;
-            case "FileStackThreshold":
-                ViewModel.SelectedFileStackThreshold = ViewModel.AvailableFileStackThresholds[combo.SelectedIndex];
-                break;
-            case "FileStackOrderBy":
-                ViewModel.SelectedFileStackOrderBy = ViewModel.AvailableFileStackOrderBys[combo.SelectedIndex];
-                break;
-            case "FileStackUnmatchedBehavior":
-                ViewModel.SelectedFileStackUnmatchedBehavior =
-                    ViewModel.AvailableFileStackUnmatchedBehaviors[combo.SelectedIndex];
-                break;
-            case "WidgetCorner":
-                ViewModel.SelectedWidgetCornerPreference = ViewModel.AvailableWidgetCornerPreferences[combo.SelectedIndex];
-                break;
-            case "WidgetMaterial":
-                ViewModel.SelectedWidgetMaterialType = ViewModel.AvailableWidgetMaterialTypes[combo.SelectedIndex];
-                break;
-            case "WidgetBorderColor":
-                ViewModel.SelectedWidgetBorderColorMode = ViewModel.AvailableWidgetBorderColorModes[combo.SelectedIndex];
-                break;
-            case "WidgetBorder":
-                ViewModel.SelectedWidgetBorderStyle = ViewModel.AvailableWidgetBorderStyles[combo.SelectedIndex];
-                break;
-            case "WidgetCollapseBehavior":
-                ViewModel.SelectedWidgetCollapseBehavior = ViewModel.AvailableWidgetCollapseBehaviors[combo.SelectedIndex];
-                break;
-            case "WidgetCompactContentMode":
-                ViewModel.SelectedWidgetCompactContentMode =
-                    ViewModel.AvailableWidgetCompactContentModes[combo.SelectedIndex];
-                break;
-            case "WidgetCompactAnimationEffect":
-                ViewModel.SelectedWidgetCompactAnimationEffect = ViewModel.AvailableWidgetCompactAnimationEffects[combo.SelectedIndex];
-                break;
-            case "WidgetCompactMediaCornerMode":
-                ViewModel.SelectedWidgetCompactMediaCornerMode = ViewModel.AvailableWidgetCompactMediaCornerModes[combo.SelectedIndex];
-                break;
-            case "LayoutDensity":
-                ViewModel.SelectedLayoutDensity = ViewModel.AvailableLayoutDensities[combo.SelectedIndex];
-                break;
-            case "AnimationPreset":
-                ViewModel.SelectedAnimationPreset = ViewModel.AvailableAnimationPresets[combo.SelectedIndex];
-                break;
-            case "WidgetAnimationEffect":
-                ViewModel.SelectedWidgetAnimationEffect = ViewModel.AvailableWidgetAnimationEffects[combo.SelectedIndex];
-                break;
-            case "WidgetAnimationSpeed":
-                ViewModel.SelectedWidgetAnimationSpeed = ViewModel.AvailableWidgetAnimationSpeeds[combo.SelectedIndex];
-                break;
-            case "WidgetAnimationSlideDirection":
-                ViewModel.SelectedWidgetAnimationSlideDirection = ViewModel.AvailableWidgetAnimationSlideDirections[combo.SelectedIndex];
-                break;
-            case "WidgetAnimationEasingIntensity":
-                ViewModel.SelectedWidgetAnimationEasingIntensity = ViewModel.AvailableWidgetAnimationEasingIntensities[combo.SelectedIndex];
-                break;
-            case "DisplayWidgetChromeMode":
-                ViewModel.SelectedDisplayWidgetChromeMode = ViewModel.AvailableDisplayWidgetChromeModes[combo.SelectedIndex];
-                break;
-            case "InteractiveWidgetChromeMode":
-                ViewModel.SelectedInteractiveWidgetChromeMode = ViewModel.AvailableInteractiveWidgetChromeModes[combo.SelectedIndex];
-                break;
-            case "WidgetTitleIconMode":
-                ViewModel.SelectedWidgetTitleIconMode = ViewModel.AvailableWidgetTitleIconModes[combo.SelectedIndex];
-                break;
-            case "WidgetLayerMode":
-                if (!_isSettingsRootLoaded)
-                {
-                    return;
-                }
-
-                ViewModel.SelectedWidgetLayerMode = ViewModel.AvailableWidgetLayerModes[combo.SelectedIndex];
-                break;
-            case "QuickCaptureDefaultView":
-                ViewModel.SelectedQuickCaptureDefaultView = ViewModel.AvailableQuickCaptureDefaultViews[combo.SelectedIndex];
-                break;
-            case "QuickCaptureTabStyle":
-                ViewModel.SelectedQuickCaptureTabStyle = ViewModel.AvailableWidgetTabStyles[combo.SelectedIndex];
-                break;
-            case "QuickCapturePreviewLines":
-                ViewModel.QuickCaptureItemPreviewLineCount = ViewModel.AvailableItemPreviewLineCounts[combo.SelectedIndex];
-                break;
-            case "QuickCaptureEnterBehavior":
-                ViewModel.QuickCaptureEditorEnterBehavior = ViewModel.AvailableEditorEnterBehaviors[combo.SelectedIndex];
-                break;
-            case "TodoNewTaskPosition":
-                ViewModel.SelectedTodoNewTaskPosition = ViewModel.AvailableTodoNewTaskPositions[combo.SelectedIndex];
-                break;
-            case "AttachmentStorageMode":
-                ViewModel.SelectedAttachmentStorageMode = ViewModel.AvailableAttachmentStorageModes[combo.SelectedIndex];
-                break;
-            case "ManagedDropAction":
-                ViewModel.SelectedManagedDropAction = ViewModel.AvailableManagedDropActions[combo.SelectedIndex];
-                break;
-            case "TodoDefaultFilter":
-                ViewModel.SelectedTodoDefaultFilter = ViewModel.AvailableTodoDefaultFilters[combo.SelectedIndex];
-                break;
-            case "TodoTabStyle":
-                ViewModel.SelectedTodoTabStyle = ViewModel.AvailableWidgetTabStyles[combo.SelectedIndex];
-                break;
-            case "TodoPreviewLines":
-                ViewModel.TodoItemPreviewLineCount = ViewModel.AvailableItemPreviewLineCounts[combo.SelectedIndex];
-                break;
-            case "TodoEnterBehavior":
-                ViewModel.TodoEditorEnterBehavior = ViewModel.AvailableEditorEnterBehaviors[combo.SelectedIndex];
-                break;
-            case "TodoReminderOffset":
-                ViewModel.SelectedTodoReminderOffsetMinutes = ViewModel.AvailableTodoReminderOffsetMinutes[combo.SelectedIndex];
-                break;
-case "WeatherTemperatureUnit":
-ViewModel.SelectedWeatherTemperatureUnit = ViewModel.AvailableWeatherTemperatureUnits[combo.SelectedIndex];
-break;
-case "WeatherWindSpeedUnit":
-ViewModel.SelectedWeatherWindSpeedUnit = ViewModel.AvailableWeatherWindSpeedUnits[combo.SelectedIndex];
-break;
-case "WeatherDefaultView":
-ViewModel.SelectedWeatherDefaultView = ViewModel.AvailableWeatherDefaultViews[combo.SelectedIndex];
-break;
-case "WeatherSkin":
-ViewModel.SelectedWeatherSkin = ViewModel.AvailableWeatherSkins[combo.SelectedIndex];
-break;
-case "WeatherRefreshInterval":
-ViewModel.SelectedWeatherRefreshInterval = ViewModel.AvailableWeatherRefreshIntervals[combo.SelectedIndex];
-break;
-            case "TrayIconStyle":
-                ViewModel.SelectedTrayIconStyle = ViewModel.AvailableTrayIconStyles[combo.SelectedIndex];
-                break;
-        }
-    }
-
     private void NestedSettingsButton_Click(object sender, RoutedEventArgs e)
     {
         if (sender is Button { Tag: string sectionTag })
         {
             NavigateToSettingsSection(sectionTag);
         }
+    }
+
+    private void SettingsSection_NavigationRequested(
+        object? sender,
+        SettingsSectionNavigationRequestedEventArgs e)
+    {
+        NavigateToSettingsSection(e.SectionTag);
     }
 
     private void AddFileStackRuleButton_Click(object sender, RoutedEventArgs e)
