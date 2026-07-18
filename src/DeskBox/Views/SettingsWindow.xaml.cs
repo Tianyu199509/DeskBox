@@ -39,6 +39,8 @@ public sealed partial class SettingsWindow : Window
     private const int MinWindowHeight = 560;
     private const int WindowWorkAreaMargin = 48;
     private const double ContentMaxWidth = 760;
+    private const double SettingsSearchMinWidth = 220;
+    private const double SettingsSearchMaxWidth = 360;
     private const double PageSidePadding = 20;
     private const double RowStackContentThreshold = 620;
     private const double NarrowTitleThreshold = 560;
@@ -72,6 +74,8 @@ public sealed partial class SettingsWindow : Window
     private bool _isSettingsRootLoaded;
     private bool _isSelectingCity;
     private string _currentSettingsSection = "General";
+    private IReadOnlyDictionary<string, FrameworkElement> _settingsSectionElements = null!;
+    private IReadOnlyList<SettingsSearchResult> _settingsSearchResults = Array.Empty<SettingsSearchResult>();
 
     private static readonly IReadOnlyDictionary<string, SettingsSectionRoute> SectionRoutes =
         new Dictionary<string, SettingsSectionRoute>(StringComparer.Ordinal)
@@ -85,12 +89,22 @@ public sealed partial class SettingsWindow : Window
             ["Advanced"] = new("Advanced", "Settings.Section.Advanced", null, "Interaction"),
             ["Maintenance"] = new("Maintenance", "Settings.Section.Maintenance", null, "Maintenance"),
             ["About"] = new("About", "Settings.Nav.About", null, "About"),
-            ["ManagedStorage"] = new("ManagedStorage", "Settings.ManagedStorage.PageTitle", "AppearanceDetail", "AppearanceDetail"),
+            ["FileDisplaySettings"] = new("FileDisplaySettings", "Settings.Group.FileLayout.Title", "AppearanceDetail", "AppearanceDetail"),
+            ["FileStorageSettings"] = new("FileStorageSettings", "Settings.Group.FileStorage.Title", "AppearanceDetail", "AppearanceDetail"),
+            ["ManagedStorage"] = new("ManagedStorage", "Settings.ManagedStorage.PageTitle", "FileStorageSettings", "AppearanceDetail"),
             ["FileStackSettings"] = new("FileStackSettings", "Settings.FileStacks.PageTitle", "AppearanceDetail", "AppearanceDetail"),
             ["QuickCaptureSettings"] = new("QuickCaptureSettings", "Settings.QuickCapture.Title", "FeatureWidgets", "FeatureWidgets"),
             ["TodoSettings"] = new("TodoSettings", "Settings.Todo.Title", "FeatureWidgets", "FeatureWidgets"),
             ["MusicSettings"] = new("MusicSettings", "Settings.Music.Title", "FeatureWidgets", "FeatureWidgets"),
             ["WeatherSettings"] = new("WeatherSettings", "Settings.Weather.Title", "FeatureWidgets", "FeatureWidgets"),
+            ["AppearanceMaterialSettings"] = new("AppearanceMaterialSettings", "Settings.Material.Title", "Appearance", "Appearance"),
+            ["AppearanceDensitySettings"] = new("AppearanceDensitySettings", "Settings.Density.Title", "Appearance", "Appearance"),
+            ["AppearanceWindowSettings"] = new("AppearanceWindowSettings", "Settings.Group.AppVisual.Title", "Appearance", "Appearance"),
+            ["AppearanceAnimationSettings"] = new("AppearanceAnimationSettings", "Settings.Group.Animation.Title", "Appearance", "Appearance"),
+            ["CapsuleBehaviorSettings"] = new("CapsuleBehaviorSettings", "Settings.CollapseBehavior.Title", "CapsuleMode", "CapsuleMode"),
+            ["CapsuleContentSettings"] = new("CapsuleContentSettings", "Settings.CompactContent.Title", "CapsuleMode", "CapsuleMode"),
+            ["CapsuleAnimationSettings"] = new("CapsuleAnimationSettings", "Settings.Capsule.Animation.Title", "CapsuleMode", "CapsuleMode"),
+            ["CapsuleOverridesSettings"] = new("CapsuleOverridesSettings", "Settings.Capsule.Overrides.Title", "CapsuleMode", "CapsuleMode"),
             ["BackupRestoreSettings"] = new("BackupRestoreSettings", "Settings.DataBackup.Title", "Maintenance", "Maintenance"),
             ["DataHealthSettings"] = new("DataHealthSettings", "Settings.AttachmentHealth.Title", "Maintenance", "Maintenance"),
             ["CompatibilityDiagnosticsSettings"] = new("CompatibilityDiagnosticsSettings", "Settings.DragDropPermission.Title", "Maintenance", "Maintenance"),
@@ -107,6 +121,8 @@ public sealed partial class SettingsWindow : Window
         _settingsRootPointerPressedHandler = SettingsRoot_PointerPressedHandled;
         _settingsRootPointerReleasedHandler = SettingsRoot_PointerReleasedHandled;
         InitializeComponent();
+        InitializeSettingsSectionElements();
+        RefreshSettingsSearchResults();
 
         SettingsRoot.DataContext = ViewModel;
         SettingsRoot.AddHandler(
@@ -394,6 +410,16 @@ public sealed partial class SettingsWindow : Window
             ? new Thickness(PageSidePadding, 16, PageSidePadding, 34)
             : new Thickness(PageSidePadding, 16, PageSidePadding, 38);
 
+        double searchWidth = Math.Min(
+            SettingsSearchMaxWidth,
+            Math.Max(SettingsSearchMinWidth, availableContentWidth * 0.55));
+        if (availableContentWidth > 0)
+        {
+            searchWidth = Math.Min(searchWidth, availableContentWidth);
+        }
+
+        SettingsSearchBox.Width = searchWidth;
+
         ContentHost.Width = Math.Min(ContentMaxWidth, availableContentWidth);
         ContentHost.MaxWidth = ContentMaxWidth;
         PathActionsPanel.HorizontalAlignment = isNarrow ? HorizontalAlignment.Stretch : HorizontalAlignment.Right;
@@ -647,4 +673,6 @@ public sealed partial class SettingsWindow : Window
             return Title;
         }
     }
+
+    private sealed record SettingsSearchResult(string SectionTag, string Title, string Breadcrumb);
 }

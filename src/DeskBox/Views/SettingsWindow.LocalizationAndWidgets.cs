@@ -69,10 +69,15 @@ public sealed partial class SettingsWindow
     {
         Title = _localizationService.T("Settings.WindowTitle");
         Localized.RefreshAll(_localizationService);
+        RefreshSettingsSearchResults();
         ApplyToggleSwitchContentVisibility();
         RefreshFeatureWidgetList();
         ViewModel.RefreshGlobalHotkeyState();
         RefreshGlobalHotkeyControls();
+        if (TryGetSectionRoute(_currentSettingsSection, out SettingsSectionRoute? route))
+        {
+            UpdateBreadcrumb(route);
+        }
         if (string.Equals(_currentSettingsSection, "ManagedStorage", StringComparison.Ordinal))
         {
             RefreshManagedStorageFolderList();

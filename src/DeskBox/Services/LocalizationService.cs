@@ -333,6 +333,7 @@ public sealed class LocalizationService
 
         ["Settings.WindowTitle"] = "DeskBox 设置",
         ["Settings.Title"] = "设置",
+        ["Settings.Search.Placeholder"] = "搜索设置",
         ["Settings.Nav.General"] = "常规",
         ["Settings.Nav.Appearance"] = "外观",
         ["Settings.Nav.CapsuleMode"] = "胶囊模式",
@@ -1693,6 +1694,7 @@ public sealed class LocalizationService
 
         ["Settings.WindowTitle"] = "DeskBox Settings",
         ["Settings.Title"] = "Settings",
+        ["Settings.Search.Placeholder"] = "Search settings",
         ["Settings.Nav.General"] = "General",
         ["Settings.Nav.Appearance"] = "Appearance",
         ["Settings.Nav.CapsuleMode"] = "Capsule mode",

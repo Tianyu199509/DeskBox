@@ -20,6 +20,50 @@ namespace DeskBox.Views;
 
 public sealed partial class SettingsWindow
 {
+    private void InitializeSettingsSectionElements()
+    {
+        _settingsSectionElements = new Dictionary<string, FrameworkElement>(StringComparer.Ordinal)
+        {
+            ["General"] = GeneralSection,
+            ["Appearance"] = AppearanceSection,
+            ["AppearanceMaterialSettings"] = AppearanceMaterialSettingsSection,
+            ["AppearanceDensitySettings"] = AppearanceDensitySettingsSection,
+            ["AppearanceWindowSettings"] = AppearanceWindowSettingsSection,
+            ["AppearanceAnimationSettings"] = AppearanceAnimationSettingsSection,
+            ["CapsuleMode"] = CapsuleModeSection,
+            ["CapsuleBehaviorSettings"] = CapsuleBehaviorSettingsSection,
+            ["CapsuleContentSettings"] = CapsuleContentSettingsSection,
+            ["CapsuleAnimationSettings"] = CapsuleAnimationSettingsSection,
+            ["CapsuleOverridesSettings"] = CapsuleOverridesSettingsSection,
+            ["AppearanceDetail"] = AppearanceDetailSection,
+            ["FileDisplaySettings"] = FileDisplaySettingsSection,
+            ["FileStorageSettings"] = FileStorageSettingsSection,
+            ["FileStackSettings"] = FileStackSettingsSection,
+            ["FeatureWidgets"] = FeatureWidgetsSection,
+            ["QuickCaptureSettings"] = QuickCaptureSettingsSection,
+            ["TodoSettings"] = TodoSettingsSection,
+            ["MusicSettings"] = MusicSettingsSection,
+            ["WeatherSettings"] = WeatherSettingsSection,
+            ["Interaction"] = InteractionSection,
+            ["ManagedStorage"] = ManagedStorageSection,
+            ["Maintenance"] = MaintenanceSection,
+            ["BackupRestoreSettings"] = BackupRestoreSettingsSection,
+            ["DataHealthSettings"] = DataHealthSettingsSection,
+            ["CompatibilityDiagnosticsSettings"] = CompatibilityDiagnosticsSettingsSection,
+            ["ResetSettings"] = ResetSettingsSection,
+            ["About"] = AboutSection
+        };
+
+        string[] missingRoutes = SectionRoutes.Keys
+            .Where(tag => tag != "Advanced" && !_settingsSectionElements.ContainsKey(tag))
+            .ToArray();
+        if (missingRoutes.Length > 0)
+        {
+            throw new InvalidOperationException(
+                $"Settings sections are not registered: {string.Join(", ", missingRoutes)}");
+        }
+    }
+
     private void SettingsNavigationView_SelectionChanged(NavigationView sender, NavigationViewSelectionChangedEventArgs args)
     {
         if (_isSyncingNavigationSelection)
@@ -31,6 +75,84 @@ public sealed partial class SettingsWindow
         {
             ShowSettingsSection(sectionTag, isNestedSection: false);
         }
+    }
+
+    private void RefreshSettingsSearchResults()
+    {
+        _settingsSearchResults = SectionRoutes.Values
+            .Where(route => route.Tag != "Advanced")
+            .Select(route =>
+            {
+                string title = _localizationService.T(route.TitleKey);
+                string breadcrumb = route.ParentTag is not null &&
+                    TryGetSectionRoute(route.ParentTag, out var parentRoute)
+                    ? $"{_localizationService.T(parentRoute.TitleKey)} / {title}"
+                    : title;
+                return new SettingsSearchResult(route.Tag, title, breadcrumb);
+            })
+            .ToArray();
+
+        if (SettingsSearchBox is null)
+        {
+            return;
+        }
+
+        SettingsSearchBox.PlaceholderText = _localizationService.T("Settings.Search.Placeholder");
+        UpdateSettingsSearchSuggestions(SettingsSearchBox.Text);
+    }
+
+    private void UpdateSettingsSearchSuggestions(string? query)
+    {
+        if (SettingsSearchBox is null)
+        {
+            return;
+        }
+
+        string normalizedQuery = query?.Trim() ?? string.Empty;
+        if (normalizedQuery.Length == 0)
+        {
+            SettingsSearchBox.ItemsSource = Array.Empty<SettingsSearchResult>();
+            SettingsSearchBox.IsSuggestionListOpen = false;
+            return;
+        }
+
+        SettingsSearchResult[] matches = _settingsSearchResults
+            .Where(result =>
+                result.Title.Contains(normalizedQuery, StringComparison.OrdinalIgnoreCase) ||
+                result.Breadcrumb.Contains(normalizedQuery, StringComparison.OrdinalIgnoreCase))
+            .Take(8)
+            .ToArray();
+        SettingsSearchBox.ItemsSource = matches;
+        SettingsSearchBox.IsSuggestionListOpen = matches.Length > 0;
+    }
+
+    private void SettingsSearchBox_TextChanged(AutoSuggestBox sender, AutoSuggestBoxTextChangedEventArgs args)
+    {
+        if (args.Reason == AutoSuggestionBoxTextChangeReason.UserInput)
+        {
+            UpdateSettingsSearchSuggestions(sender.Text);
+        }
+    }
+
+    private void SettingsSearchBox_QuerySubmitted(AutoSuggestBox sender, AutoSuggestBoxQuerySubmittedEventArgs args)
+    {
+        SettingsSearchResult? result = args.ChosenSuggestion as SettingsSearchResult;
+        if (result is null)
+        {
+            string query = sender.Text.Trim();
+            result = _settingsSearchResults.FirstOrDefault(item =>
+                item.Title.Contains(query, StringComparison.OrdinalIgnoreCase) ||
+                item.Breadcrumb.Contains(query, StringComparison.OrdinalIgnoreCase));
+        }
+
+        if (result is null)
+        {
+            return;
+        }
+
+        NavigateToSettingsSection(result.SectionTag);
+        sender.Text = string.Empty;
+        UpdateSettingsSearchSuggestions(string.Empty);
     }
 
     private void SettingsNavigationView_BackRequested(NavigationView sender, NavigationViewBackRequestedEventArgs args)
@@ -99,45 +221,39 @@ public sealed partial class SettingsWindow
 
         isNestedSection = !string.IsNullOrWhiteSpace(route.ParentTag);
         _currentSettingsSection = sectionTag;
-        AppearanceSection.Visibility = sectionTag == "Appearance" ? Visibility.Visible : Visibility.Collapsed;
-        CapsuleModeSection.Visibility = sectionTag == "CapsuleMode" ? Visibility.Visible : Visibility.Collapsed;
-        AppearanceDetailSection.Visibility = sectionTag == "AppearanceDetail" ? Visibility.Visible : Visibility.Collapsed;
-        FileStackSettingsSection.Visibility = sectionTag == "FileStackSettings" ? Visibility.Visible : Visibility.Collapsed;
+        string visibleSectionTag = sectionTag == "Advanced" ? "Interaction" : sectionTag;
+        foreach ((string tag, FrameworkElement sectionElement) in _settingsSectionElements)
+        {
+            sectionElement.Visibility = string.Equals(tag, visibleSectionTag, StringComparison.Ordinal)
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+        }
+
         if (sectionTag == "FileStackSettings")
         {
             _ = ViewModel.RefreshFileStackRulePreviewFromDiskAsync();
         }
-        FeatureWidgetsSection.Visibility = sectionTag == "FeatureWidgets" ? Visibility.Visible : Visibility.Collapsed;
         if (sectionTag == "FeatureWidgets")
         {
             RefreshFeatureWidgetList();
         }
-        QuickCaptureSettingsSection.Visibility = sectionTag == "QuickCaptureSettings" ? Visibility.Visible : Visibility.Collapsed;
         if (sectionTag == "QuickCaptureSettings")
         {
             ViewModel.RefreshQuickCaptureClipboardDiagnostics();
             _ = ViewModel.RefreshQuickCaptureImageCacheInfoAsync();
         }
-        TodoSettingsSection.Visibility = sectionTag == "TodoSettings" ? Visibility.Visible : Visibility.Collapsed;
-        MusicSettingsSection.Visibility = sectionTag == "MusicSettings" ? Visibility.Visible : Visibility.Collapsed;
-WeatherSettingsSection.Visibility = sectionTag == "WeatherSettings" ? Visibility.Visible : Visibility.Collapsed;
-        InteractionSection.Visibility = sectionTag is "Interaction" or "Advanced" ? Visibility.Visible : Visibility.Collapsed;
-        ManagedStorageSection.Visibility = sectionTag == "ManagedStorage" ? Visibility.Visible : Visibility.Collapsed;
         if (sectionTag == "ManagedStorage")
         {
             RefreshManagedStorageFolderList();
         }
-        GeneralSection.Visibility = sectionTag == "General" ? Visibility.Visible : Visibility.Collapsed;
-        MaintenanceSection.Visibility = sectionTag == "Maintenance" ? Visibility.Visible : Visibility.Collapsed;
-        BackupRestoreSettingsSection.Visibility = sectionTag == "BackupRestoreSettings" ? Visibility.Visible : Visibility.Collapsed;
-        DataHealthSettingsSection.Visibility = sectionTag == "DataHealthSettings" ? Visibility.Visible : Visibility.Collapsed;
-        CompatibilityDiagnosticsSettingsSection.Visibility = sectionTag == "CompatibilityDiagnosticsSettings" ? Visibility.Visible : Visibility.Collapsed;
-        ResetSettingsSection.Visibility = sectionTag == "ResetSettings" ? Visibility.Visible : Visibility.Collapsed;
+        else if (sectionTag == "FileStorageSettings")
+        {
+            _ = ViewModel.RefreshQuickAccessStateAsync();
+        }
         if (sectionTag == "CompatibilityDiagnosticsSettings")
         {
             ViewModel.RefreshDragDropPermissionDiagnostic();
         }
-        AboutSection.Visibility = sectionTag == "About" ? Visibility.Visible : Visibility.Collapsed;
         SettingsNavigationView.IsBackButtonVisible = isNestedSection
             ? NavigationViewBackButtonVisible.Visible
             : NavigationViewBackButtonVisible.Collapsed;
