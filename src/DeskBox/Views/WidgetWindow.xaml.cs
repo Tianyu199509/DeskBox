@@ -229,13 +229,22 @@ public sealed partial class WidgetWindow : WidgetWindowBase, IDesktopWidgetWindo
         _windowId = Win32Interop.GetWindowIdFromWindow(HWnd);
         AppWindow = AppWindow.GetFromWindowId(_windowId);
         Diagnostics = new WidgetWindowDiagnostics("File", ViewModel.Config, () => HWnd);
-        TrayAnimation = new WidgetTrayAnimationController(
+        
+        // ⭐ 使用智能适配器创建动画控制器
+        var adapter = WidgetWindowBase.SmartAnimationAdapter;
+        TrayAnimation = adapter?.CreateAnimationController(
             AppWindow,
             RootGrid,
             DispatcherQueue,
             HWnd,
             GetCurrentAnimationBounds,
-            LogTrayWindow);
+            LogTrayWindow) ?? new WidgetTrayAnimationController(
+                AppWindow,
+                RootGrid,
+                DispatcherQueue,
+                HWnd,
+                GetCurrentAnimationBounds,
+                LogTrayWindow);
 
         ConfigureWindow();
         SetupEventHandlers();

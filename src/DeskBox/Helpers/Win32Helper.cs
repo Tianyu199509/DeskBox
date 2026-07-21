@@ -302,6 +302,30 @@ public static partial class Win32Helper
     public const int WM_MBUTTONDOWN = 0x0207;
     public const int WM_XBUTTONDOWN = 0x020B;
 
+    // Window sizing / hit-test messages and codes (borderless window drag + resize).
+    public const int WM_GETMINMAXINFO = 0x0024;
+    public const int WM_NCDESTROY = 0x0082;
+    public const int WM_NCHITTEST = 0x0084;
+    public const int WM_NCLBUTTONDBLCLK = 0x00A3;
+    public const int WM_EXITSIZEMOVE = 0x0232;
+
+    public const int HTCLIENT = 1;
+    public const int HTCAPTION = 2;
+    public const int HTLEFT = 10;
+    public const int HTRIGHT = 11;
+    public const int HTTOP = 12;
+    public const int HTTOPLEFT = 13;
+    public const int HTTOPRIGHT = 14;
+    public const int HTBOTTOM = 15;
+    public const int HTBOTTOMLEFT = 16;
+    public const int HTBOTTOMRIGHT = 17;
+
+    public const int SM_CXSIZEFRAME = 32;
+    public const int SM_CYSIZEFRAME = 33;
+
+    [LibraryImport("user32.dll")]
+    public static partial int GetSystemMetrics(int nIndex);
+
     public delegate IntPtr LowLevelKeyboardProc(int nCode, IntPtr wParam, IntPtr lParam);
     public delegate IntPtr LowLevelMouseProc(int nCode, IntPtr wParam, IntPtr lParam);
 
@@ -361,6 +385,9 @@ public static partial class Win32Helper
         string? lpParameters,
         string? lpDirectory,
         int nShowCmd);
+
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
+    private static extern int SHOpenWithDialog(IntPtr hwndParent, ref OpenAsInfo openAsInfo);
 
     [LibraryImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
@@ -1012,9 +1039,61 @@ public static partial class Win32Helper
     /// <summary>
     /// Open a file or URL using the default associated application.
     /// </summary>
+    public static bool OpenFileOrChooseApp(IntPtr ownerWindow, string path)
+    {
+        var result = ShellExecute(ownerWindow, "open", path, null, null, SW_SHOWNORMAL);
+        if ((long)result > 32)
+        {
+            return true;
+        }
+
+        const long AssociationIncomplete = 27;
+        const long NoAssociation = 31;
+        if ((long)result is not (AssociationIncomplete or NoAssociation))
+        {
+            App.Log($"[OpenFile] ShellExecute failed with code {(long)result} for '{path}'");
+            return false;
+        }
+
+        var openAsInfo = new OpenAsInfo
+        {
+            File = path,
+            Class = null,
+            Flags = OpenAsInfoFlags.AllowRegistration | OpenAsInfoFlags.Execute
+        };
+
+        int hResult = SHOpenWithDialog(ownerWindow, ref openAsInfo);
+        if (hResult < 0)
+        {
+            App.Log($"[OpenFile] ShellExecute failed with code {(long)result}; Open With failed with HRESULT 0x{hResult:X8} for '{path}'");
+            return false;
+        }
+
+        return true;
+    }
+
     public static void OpenFile(string path)
     {
-        ShellExecute(IntPtr.Zero, "open", path, null, null, SW_SHOWNORMAL);
+        _ = OpenFileOrChooseApp(IntPtr.Zero, path);
+    }
+
+    [Flags]
+    private enum OpenAsInfoFlags : uint
+    {
+        AllowRegistration = 0x00000001,
+        Execute = 0x00000004
+    }
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    private struct OpenAsInfo
+    {
+        [MarshalAs(UnmanagedType.LPWStr)]
+        public string File;
+
+        [MarshalAs(UnmanagedType.LPWStr)]
+        public string? Class;
+
+        public OpenAsInfoFlags Flags;
     }
 
     /// <summary>

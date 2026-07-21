@@ -294,9 +294,10 @@ public static class ShellContextMenuHelper
     /// <summary>
     /// Show the native properties dialog for a file.
     /// </summary>
-    public static void ShowProperties(IntPtr hwnd, string filePath)
+    public static bool ShowProperties(IntPtr hwnd, string filePath)
     {
-        SHObjectProperties(hwnd, SHOP_FILEPATH, filePath, null);
+        return !string.IsNullOrWhiteSpace(filePath) &&
+               SHObjectProperties(hwnd, SHOP_FILEPATH, filePath, null);
     }
 
     /// <summary>

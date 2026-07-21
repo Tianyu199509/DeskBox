@@ -216,6 +216,9 @@ public enum WidgetKind
     /// <summary>Reserved for a future system monitor widget.</summary>
     SystemMonitor,
 
+    /// <summary>Global search widget that provides unified file and content search.</summary>
+    Search,
+
     /// <summary>Legacy value kept only for migrating old settings files.</summary>
     Productivity
 }

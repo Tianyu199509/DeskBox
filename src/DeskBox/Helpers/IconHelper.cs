@@ -149,7 +149,7 @@ public static class IconHelper
             _ => LoadBitmapImageAsync(dispatcher, iconSource, cacheKey));
     }
 
-    private static bool IsImageFile(string path)
+    public static bool IsImageFile(string path)
     {
         string ext = Path.GetExtension(path).ToLowerInvariant();
         return ext is ".png" or ".jpg" or ".jpeg" or ".bmp" or ".gif" or ".webp" or ".tiff" or ".tif" or ".heic" or ".heif";

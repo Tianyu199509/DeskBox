@@ -156,7 +156,7 @@ public sealed partial class WeatherWidgetViewModel
     }
 
     /// <summary>
-    /// Called when the widget is resized. Determines the layout mode (Compact/Standard/Detailed).
+    /// Called when the widget is resized. Determines the layout mode (Mini/Compact/Expanded).
     /// </summary>
     public void UpdateAvailableSize(double width, double height)
     {
@@ -216,8 +216,7 @@ public sealed partial class WeatherWidgetViewModel
             LayoutMode = newLayout;
             OnPropertyChanged(nameof(MiniLayoutVisibility));
             OnPropertyChanged(nameof(CompactLayoutVisibility));
-            OnPropertyChanged(nameof(StandardLayoutVisibility));
-            OnPropertyChanged(nameof(DetailedLayoutVisibility));
+            OnPropertyChanged(nameof(ExpandedLayoutVisibility));
             OnPropertyChanged(nameof(CurrentEmojiSize));
             OnPropertyChanged(nameof(ForecastEmojiSize));
             OnPropertyChanged(nameof(TemperatureTextSize));
@@ -228,26 +227,27 @@ public sealed partial class WeatherWidgetViewModel
             OnPropertyChanged(nameof(HourlyCardWidth));
             OnPropertyChanged(nameof(SunriseVisibility));
         }
+
+        // Notify flexible visibility properties that depend on available height
+        OnPropertyChanged(nameof(ExpandedSunriseVisibility));
+        OnPropertyChanged(nameof(ExpandedHourlyPrecipVisibility));
+        OnPropertyChanged(nameof(ExpandedHourlyCardHeight));
     }
 
     /// <summary>
     /// Determines layout mode using hysteresis: once in a higher layout, the
     /// widget stays there until size drops significantly below the upgrade
-    /// threshold. This prevents flickering and the "almost fits" problem where
-    /// a few pixels short would unnecessarily downgrade to a smaller layout.
+    /// threshold. This prevents flickering and the "almost fits" problem.
+    /// Three levels: Mini, Compact, Expanded (merged Standard+Detailed).
     /// </summary>
     internal static string DetermineLayoutMode(double width, double height, string currentLayout)
     {
-        // The content area excludes the standard 46px title row. These thresholds
-        // therefore map a 180x180 widget to Compact while keeping 150x150 in Mini.
+        // The content area excludes the standard 46px title row.
         const double miniUpgradeW = 178, miniUpgradeH = 126;
         const double miniDowngradeW = 168, miniDowngradeH = 116;
 
-        const double compactUpgradeW = 250, compactUpgradeH = 169;
-        const double compactDowngradeW = 230, compactDowngradeH = 154;
-
-        const double detailedUpgradeW = 280, detailedUpgradeH = 234;
-        const double detailedDowngradeW = 260, detailedDowngradeH = 204;
+        const double expandedUpgradeW = 250, expandedUpgradeH = 169;
+        const double expandedDowngradeW = 230, expandedDowngradeH = 154;
 
         // Mini is always forced for very small sizes regardless of hysteresis
         if (width <= miniDowngradeW || height <= miniDowngradeH)
@@ -258,67 +258,47 @@ public sealed partial class WeatherWidgetViewModel
         switch (currentLayout)
         {
             case "Mini":
-                // Upgrade to Compact when enough room
+                // Upgrade to Compact/Expanded when enough room
+                if (width >= expandedUpgradeW && height >= expandedUpgradeH)
+                {
+                    return "Expanded";
+                }
                 if (width >= miniUpgradeW && height >= miniUpgradeH)
                 {
-                    goto CheckCompactUp;
+                    return "Compact";
                 }
                 return "Mini";
 
             case "Compact":
-            CheckCompactUp:
-                // Upgrade to Standard/Detailed when enough room
-                if (width >= compactUpgradeW && height >= compactUpgradeH)
+                // Upgrade to Expanded when enough room
+                if (width >= expandedUpgradeW && height >= expandedUpgradeH)
                 {
-                    // Check if we can go straight to Detailed
-                    if (width >= detailedUpgradeW && height >= detailedUpgradeH)
-                    {
-                        return "Detailed";
-                    }
-                    return "Standard";
+                    return "Expanded";
                 }
-                // Stay in Compact unless we need to downgrade to Mini
+                // Downgrade to Mini if significantly smaller
                 if (width <= miniDowngradeW || height <= miniDowngradeH)
                 {
                     return "Mini";
                 }
                 return "Compact";
 
-            case "Standard":
-                // Upgrade to Detailed if enough room
-                if (width >= detailedUpgradeW && height >= detailedUpgradeH)
+            case "Expanded":
+                // Downgrade to Compact if no longer enough room (with hysteresis)
+                if (width <= expandedDowngradeW || height <= expandedDowngradeH)
                 {
-                    return "Detailed";
-                }
-                // Downgrade to Compact only if significantly smaller
-                if (width <= compactDowngradeW || height <= compactDowngradeH)
-                {
+                    if (width <= miniDowngradeW || height <= miniDowngradeH)
+                    {
+                        return "Mini";
+                    }
                     return "Compact";
                 }
-                return "Standard";
-
-            case "Detailed":
-                // Downgrade to Standard if no longer enough room (with hysteresis)
-                if (width <= detailedDowngradeW || height <= detailedDowngradeH)
-                {
-                    // Further check if we should go to Compact
-                    if (width <= compactDowngradeW || height <= compactDowngradeH)
-                    {
-                        return "Compact";
-                    }
-                    return "Standard";
-                }
-                return "Detailed";
+                return "Expanded";
 
             default:
-                // First-time default: use mid-range thresholds
-                if (width >= detailedUpgradeW && height >= detailedUpgradeH)
+                // First-time default: use upgrade thresholds
+                if (width >= expandedUpgradeW && height >= expandedUpgradeH)
                 {
-                    return "Detailed";
-                }
-                if (width >= compactUpgradeW && height >= compactUpgradeH)
-                {
-                    return "Standard";
+                    return "Expanded";
                 }
                 if (width >= miniUpgradeW && height >= miniUpgradeH)
                 {

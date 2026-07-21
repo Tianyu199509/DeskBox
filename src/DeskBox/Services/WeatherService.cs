@@ -22,7 +22,7 @@ public sealed class WeatherService : IDisposable
 
     private static readonly HttpClient s_httpClient = new()
     {
-        Timeout = TimeSpan.FromSeconds(15)
+        Timeout = TimeSpan.FromSeconds(8)
     };
 
     private WeatherData? _cachedData;

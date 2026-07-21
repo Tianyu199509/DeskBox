@@ -1,4 +1,4 @@
-﻿﻿﻿﻿using DeskBox.Models;
+﻿﻿using DeskBox.Models;
 using DeskBox.Helpers;
 using DeskBox.Controls.WidgetContents;
 using DeskBox.ViewModels;
@@ -349,7 +349,12 @@ public sealed partial class WidgetManager
                 WidgetKind.Weather,
                 async _ => await CreateSingletonContentFeatureWidgetAsync(WidgetKind.Weather),
                 SetWeatherFeatureWidgetEnabledAsync,
-                () => HideAndCloseFeatureWidgetAsync(WidgetKind.Weather))
+                () => HideAndCloseFeatureWidgetAsync(WidgetKind.Weather)),
+            new(
+                WidgetKind.Search,
+                async _ => await CreateSingletonContentFeatureWidgetAsync(WidgetKind.Search),
+                SetSearchFeatureWidgetEnabledAsync,
+                () => HideAndCloseFeatureWidgetAsync(WidgetKind.Search))
         ];
 
         return handlers.ToDictionary(handler => handler.WidgetKind);
@@ -389,6 +394,13 @@ public sealed partial class WidgetManager
                     request.ShowRaisedWhileInitializing)),
             new(
                 WidgetKind.Weather,
+                async request => await CreateContentWidgetFromConfigAsync(
+                    request.Config,
+                    request.KeepPreparedForAnimation,
+                    request.RevealAfterCreate,
+                    request.ShowRaisedWhileInitializing)),
+            new(
+                WidgetKind.Search,
                 async request => await CreateContentWidgetFromConfigAsync(
                     request.Config,
                     request.KeepPreparedForAnimation,
@@ -842,32 +854,41 @@ public sealed partial class WidgetManager
         var hideCandidates = GetLoadedDesktopWindows()
             .Where(window => window.Visible)
             .ToList();
-        ApplyTrayAnimationGroupOffset(hideCandidates);
-        var windowsToHide = new List<IDesktopWidgetWindow>();
-        foreach (var window in hideCandidates)
+        
+        // ⭐ 终极优化：将整个 Prepare + Play 流程都放在 TryEnqueue 中
+        var dispatcher = Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread();
+        dispatcher.TryEnqueue(() =>
         {
-            try
+            ApplyTrayAnimationGroupOffset(hideCandidates);
+            
+            var windowsToHide = new List<IDesktopWidgetWindow>();
+            foreach (var window in hideCandidates)
             {
-                if (window.PrepareTrayHideAnimation(persistVisibility: false))
+                try
                 {
-                    windowsToHide.Add(window);
+                    if (window.PrepareTrayHideAnimation(persistVisibility: false))
+                    {
+                        windowsToHide.Add(window);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    App.Log($"[WidgetManager] Failed to prepare widget hide {FormatHostWindow(window)}: {ex}");
                 }
             }
-            catch (Exception ex)
-            {
-                App.Log($"[WidgetManager] Failed to prepare widget hide {FormatHostWindow(window)}: {ex}");
-            }
-        }
 
-        App.LogVerbose($"[TrayBatch] SetAllVisible preparedHide={windowsToHide.Count}");
-        PlayPreparedTrayHideAnimations(windowsToHide);
+            App.LogVerbose($"[TrayBatch] SetAllVisible preparedHide={windowsToHide.Count}");
+            PlayPreparedTrayHideAnimations(windowsToHide);
 
-        SetWidgetsRaisedFromTray(false);
-        _sessionManager.MarkHidden("set-all-hidden");
-        _trayRaiseBatchGeneration++;
-        StopTrayLayerRestoreMonitor();
-        SaveBatchVisibilityState();
-        App.LogVerbose($"[TrayBatch] SetAllVisible completed visible=false prepared={windowsToHide.Count}");
+            SetWidgetsRaisedFromTray(false);
+            _sessionManager.MarkHidden("set-all-hidden");
+            _trayRaiseBatchGeneration++;
+            StopTrayLayerRestoreMonitor();
+            SaveBatchVisibilityState();
+            App.LogVerbose($"[TrayBatch] SetAllVisible completed visible=false prepared={windowsToHide.Count}");
+        });
+
+        return;
     }
 
     /// <summary>

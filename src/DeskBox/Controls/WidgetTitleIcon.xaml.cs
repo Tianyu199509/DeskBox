@@ -275,6 +275,7 @@ public sealed partial class WidgetTitleIcon : UserControl
         yield return LineMusicPath;
         yield return LineWeatherPath;
         yield return LineTagsPath;
+        yield return LineSearchPath;
         yield return LineSystemMonitorPath;
         yield return FilledDefaultPath;
         yield return FilledManagedStoragePath;
@@ -284,6 +285,7 @@ public sealed partial class WidgetTitleIcon : UserControl
         yield return FilledMusicPath;
         yield return FilledWeatherPath;
         yield return FilledTagsPath;
+        yield return FilledSearchPath;
         yield return FilledSystemMonitorPath;
     }
 
@@ -299,6 +301,7 @@ public sealed partial class WidgetTitleIcon : UserControl
                 WidgetTitleIconKind.Music => FilledMusicPath,
                 WidgetTitleIconKind.Weather => FilledWeatherPath,
                 WidgetTitleIconKind.Tags => FilledTagsPath,
+                WidgetTitleIconKind.Search => FilledSearchPath,
                 WidgetTitleIconKind.SystemMonitor => FilledSystemMonitorPath,
                 _ => FilledDefaultPath
             }
@@ -311,6 +314,7 @@ public sealed partial class WidgetTitleIcon : UserControl
                 WidgetTitleIconKind.Music => LineMusicPath,
                 WidgetTitleIconKind.Weather => LineWeatherPath,
                 WidgetTitleIconKind.Tags => LineTagsPath,
+                WidgetTitleIconKind.Search => LineSearchPath,
                 WidgetTitleIconKind.SystemMonitor => LineSystemMonitorPath,
                 _ => LineDefaultPath
             };
@@ -322,7 +326,8 @@ public sealed partial class WidgetTitleIcon : UserControl
             or WidgetTitleIconKind.MappedFolder
             or WidgetTitleIconKind.QuickCapture
             or WidgetTitleIconKind.Todo
-            or WidgetTitleIconKind.Music;
+            or WidgetTitleIconKind.Music
+            or WidgetTitleIconKind.Search;
     }
 
     private void ApplyLegacyGlyphFallback()

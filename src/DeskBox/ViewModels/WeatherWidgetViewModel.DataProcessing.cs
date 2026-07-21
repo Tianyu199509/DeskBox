@@ -80,6 +80,7 @@ public sealed partial class WeatherWidgetViewModel
         CurrentWeatherCode = current.WeatherCode;
         CurrentCondition = WeatherCodeMapper.GetCondition(current.WeatherCode);
         CurrentEmoji = WeatherCodeMapper.GetEmoji(current.WeatherCode, IsDay);
+        CurrentIconGlyph = WeatherCodeMapper.GetGlyph(current.WeatherCode, IsDay);
         CurrentDescription = isEnglish
             ? WeatherCodeMapper.GetDescriptionEn(current.WeatherCode)
             : WeatherCodeMapper.GetDescriptionZh(current.WeatherCode);
@@ -211,6 +212,19 @@ public sealed partial class WeatherWidgetViewModel
     {
         DailyForecast.Clear();
         int count = Math.Min(daily.Time.Count, 7);
+
+        // First pass: find the overall weekly min/max for the temperature range bar
+        double weekMin = double.MaxValue, weekMax = double.MinValue;
+        for (int i = 0; i < count; i++)
+        {
+            double tMax = i < daily.TemperatureMax.Count ? daily.TemperatureMax[i] : 0;
+            double tMin = i < daily.TemperatureMin.Count ? daily.TemperatureMin[i] : 0;
+            if (tMax > weekMax) weekMax = tMax;
+            if (tMin < weekMin) weekMin = tMin;
+        }
+        double weekRange = weekMax - weekMin;
+        if (weekRange < 1) weekRange = 1; // avoid division by zero
+
         for (int i = 0; i < count; i++)
         {
             string dateStr = i < daily.Time.Count ? daily.Time[i] : string.Empty;
@@ -233,6 +247,11 @@ public sealed partial class WeatherWidgetViewModel
                 dayLabel = ParseDateToDayLabel(dateStr, isEnglish);
             }
 
+            double barOffset = (tempMin - weekMin) / weekRange;
+            double barWidth = (tempMax - tempMin) / weekRange;
+            barOffset = Math.Clamp(barOffset, 0, 1);
+            barWidth = Math.Clamp(barWidth, 0.04, 1); // minimum visible width
+
             DailyForecast.Add(new WeatherDayViewModel
             {
                 DayLabel = dayLabel,
@@ -243,7 +262,9 @@ public sealed partial class WeatherWidgetViewModel
                     : WeatherCodeMapper.GetDescriptionZh(wmoCode),
                 TempMaxText = FormatTemperature(tempMax),
                 TempMinText = FormatTemperature(tempMin),
-                PrecipitationText = $"{(int)precipProb}%"
+                PrecipitationText = $"{(int)precipProb}%",
+                TempBarOffset = barOffset,
+                TempBarWidth = barWidth
             });
         }
     }
@@ -275,7 +296,8 @@ public sealed partial class WeatherWidgetViewModel
                 TemperatureText = FormatTemperature(temp),
                 PrecipitationText = precip > 0 ? $"{(int)precip}%" : "",
                 Emoji = WeatherCodeMapper.GetEmoji(wmoCode, isDaytime),
-                IconGlyph = WeatherCodeMapper.GetGlyph(wmoCode, isDaytime)
+                IconGlyph = WeatherCodeMapper.GetGlyph(wmoCode, isDaytime),
+                IsCurrentHour = i == 0
             });
         }
     }

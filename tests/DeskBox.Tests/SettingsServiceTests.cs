@@ -153,6 +153,23 @@ public sealed class SettingsServiceTests : IDisposable
         Assert.False(service.Settings.QuickCaptureImageClipboardEnabled);
     }
 
+    [Theory]
+    [InlineData("file", "file")]
+    [InlineData(" APP ", "app")]
+    [InlineData("not-a-tab", "all")]
+    public async Task LoadAsync_NormalizesSearchDefaultTab(string storedValue, string expected)
+    {
+        var settings = new AppSettings { SearchDefaultTab = storedValue };
+        await File.WriteAllTextAsync(
+            Path.Combine(_settingsRoot, "settings.json"),
+            JsonSerializer.Serialize(settings, s_jsonOptions));
+
+        var service = new SettingsService(_settingsRoot);
+        await service.LoadAsync();
+
+        Assert.Equal(expected, service.Settings.SearchDefaultTab);
+    }
+
     [Fact]
     public async Task LoadAsync_DisabledQuickCaptureDisablesClipboardRecording()
     {
@@ -958,6 +975,11 @@ public sealed class SettingsServiceTests : IDisposable
         }
 
         if (type == typeof(int))
+        {
+            return (int)(defaultValue ?? 0) + 17;
+        }
+
+        if (type == typeof(int?))
         {
             return (int)(defaultValue ?? 0) + 17;
         }

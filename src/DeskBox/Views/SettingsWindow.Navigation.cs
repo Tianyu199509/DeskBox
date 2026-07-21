@@ -50,6 +50,7 @@ public sealed partial class SettingsWindow
             ["TodoSettings"] = TodoSettingsSection,
             ["MusicSettings"] = MusicSettingsSection,
             ["WeatherSettings"] = WeatherSettingsSection,
+            ["SearchSettings"] = SearchSettingsSection,
             ["Interaction"] = InteractionSection,
             ["InteractionHotkeySettings"] = InteractionHotkeySettingsSection,
             ["InteractionHoverSettings"] = InteractionHoverSettingsSection,
@@ -436,6 +437,10 @@ public sealed partial class SettingsWindow
         {
             ViewModel.RefreshQuickCaptureClipboardDiagnostics();
             _ = ViewModel.RefreshQuickCaptureImageCacheInfoAsync();
+        }
+        if (sectionTag == "SearchSettings")
+        {
+            SearchSettingsSection.RefreshFromSettings();
         }
         if (sectionTag == "ManagedStorage")
         {

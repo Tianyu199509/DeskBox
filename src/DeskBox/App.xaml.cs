@@ -16,6 +16,7 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.Win32;
 using System.Runtime.InteropServices;
 using System.Security.Principal;
+using Microsoft.Extensions.DependencyInjection;
 using DrawingPoint = System.Drawing.Point;
 using WinRT.Interop;
 
@@ -82,6 +83,14 @@ public partial class App : Application
     private NativeAppNotificationService? _nativeNotificationService;
     private TodoReminderService? _todoReminderService;
     private DisplayAreaWatcherService? _displayAreaWatcher;
+    private SearchIndexService? _searchIndexService;
+    private SearchEngineService? _searchEngineService;
+    private UsnJournalIndexService? _usnIndexService;
+    private FileMetaService? _fileMetaService;
+    private SearchHotkeyService? _searchHotkeyService;
+    private SearchPopupWindow? _searchPopupWindow;
+    private SearchHistoryService? _searchHistoryService;
+    private SearchResultActionService? _searchActionService;
     private bool _widgetsRaisedFromTray;
     private bool _hasUpdateAvailable;
     private bool _updateNotificationShown;
@@ -94,19 +103,24 @@ public partial class App : Application
     public bool IsStartupMode { get; set; }
 
     public AppDistributionService DistributionService { get; } = AppDistributionService.Current;
-    public SettingsService SettingsService { get; } = new();
-    public DeskBoxDataBackupService DataBackupService { get; } = new();
-    public DeskBoxAttachmentHealthService AttachmentHealthService { get; } = new();
-    public FileService FileService { get; } = new();
-    public OrganizerService OrganizerService { get; }
-    public IAppUpdateService AppUpdateService { get; } = AppUpdateServiceFactory.Create(AppDistributionService.Current);
-    public QuickCaptureService QuickCaptureService { get; } = new();
+    public ServiceProvider Services { get; private set; } = null!;
+    public SettingsService SettingsService { get; private set; } = null!;
+    public DeskBoxDataBackupService DataBackupService { get; private set; } = null!;
+    public DeskBoxAttachmentHealthService AttachmentHealthService { get; private set; } = null!;
+    public FileService FileService { get; private set; } = null!;
+    public OrganizerService OrganizerService { get; private set; } = null!;
+    public IAppUpdateService AppUpdateService { get; private set; } = null!;
+    public QuickCaptureService QuickCaptureService { get; private set; } = null!;
     public QuickCaptureClipboardService? QuickCaptureClipboardService { get; private set; }
     public LocalizationService LocalizationService { get; private set; } = null!;
     public ThemeService ThemeService { get; private set; } = null!;
     public GlobalHotkeyService? GlobalHotkeyService { get; private set; }
+    public SearchHotkeyService? SearchHotkeyService => _searchHotkeyService;
+    public SearchEngineService? SearchEngineService => _searchEngineService;
+    internal SearchHistoryService? SearchHistoryService => _searchHistoryService;
+        public SearchResultActionService? SearchActionService => _searchActionService;
     public WidgetManager? WidgetManager { get; private set; }
-    public ResizeGuideOverlayService ResizeGuideOverlay { get; } = new();
+    public ResizeGuideOverlayService ResizeGuideOverlay { get; private set; } = null!;
     public NativeAppNotificationService? NativeNotificationService => _nativeNotificationService;
     public DisplayAreaWatcherService? DisplayAreaWatcher => _displayAreaWatcher;
     public TodoReminderService? TodoReminderService => _todoReminderService;
@@ -161,9 +175,23 @@ public partial class App : Application
         }
 
         InitializeComponent();
+
+        // Build DI container and resolve core services
+        var serviceCollection = new ServiceCollection();
+        serviceCollection.AddDeskBoxServices();
+        Services = serviceCollection.BuildServiceProvider();
+
+        SettingsService = Services.GetRequiredService<SettingsService>();
+        DataBackupService = Services.GetRequiredService<DeskBoxDataBackupService>();
+        AttachmentHealthService = Services.GetRequiredService<DeskBoxAttachmentHealthService>();
+        FileService = Services.GetRequiredService<FileService>();
+        OrganizerService = Services.GetRequiredService<OrganizerService>();
+        AppUpdateService = Services.GetRequiredService<IAppUpdateService>();
+        QuickCaptureService = Services.GetRequiredService<QuickCaptureService>();
+        ResizeGuideOverlay = Services.GetRequiredService<ResizeGuideOverlayService>();
+
         StartupService.Configure(StartupServiceFactory.Create(DistributionService));
         DirectStartupService.TryRemoveLegacyStartupShortcutSafe();
-        OrganizerService = new OrganizerService(SettingsService, FileService);
         AppUpdateService.CheckCompleted += OnUpdateCheckCompleted;
         UnhandledException += OnUnhandledException;
         Log($"Distribution channel={DistributionService.ChannelName} packaged={DistributionService.IsPackaged}");
@@ -758,8 +786,8 @@ public partial class App : Application
             ResizeGuideOverlay.IsSnapEnabled = SettingsService.Settings.ResizeSnapEnabled;
 
             // Phase 2: Initialize services that depend on settings (parallel)
-            ThemeService = new ThemeService(SettingsService);
-            LocalizationService = new LocalizationService(SettingsService);
+            ThemeService = Services.GetRequiredService<ThemeService>();
+            LocalizationService = Services.GetRequiredService<LocalizationService>();
             LocalizationService.LanguageChanged += OnLanguageChanged;
 
             var quickCaptureService = QuickCaptureService;
@@ -833,14 +861,16 @@ public partial class App : Application
             }
 
             ScheduleBackgroundUpdateCheck();
-            ScheduleMemoryDiagnostics();
-            SchedulePeriodicMemoryCleanup();
-            StartUiThreadWatchdog();
+            _diagnosticsService = new AppDiagnosticsService(UiDispatcherQueue);
+            _diagnosticsService.StartAll();
 
             // Start display area watcher for hot-plug detection
             _displayAreaWatcher = new DisplayAreaWatcherService(UiDispatcherQueue);
             _displayAreaWatcher.DisplaysChanged += OnDisplaysChanged;
             _displayAreaWatcher.Start();
+
+            // Initialize search services
+            InitializeSearchServices();
 
             // Configure taskbar Jump List with quick actions
             _ = JumpListService.ConfigureAsync(LocalizationService);
@@ -885,145 +915,7 @@ public partial class App : Application
         }
     }
 
-    private Microsoft.UI.Dispatching.DispatcherQueueTimer? _memoryDiagnosticTimer;
-    private CancellationTokenSource? _periodicGcCts;
-    private System.Threading.Timer? _uiWatchdogTimer;
-    private volatile bool _uiHeartbeatReceived;
-    private int _watchdogMissCount;
-
-    /// <summary>
-    /// When perf logging is enabled, samples memory and cache statistics
-    /// every 30 seconds so long-running memory trends can be observed.
-    /// </summary>
-    private void ScheduleMemoryDiagnostics()
-    {
-        if (!PerformanceLogger.IsEnabled)
-        {
-            return;
-        }
-
-        var dq = UiDispatcherQueue;
-        if (dq is null)
-        {
-            return;
-        }
-
-        _memoryDiagnosticTimer = dq.CreateTimer();
-        _memoryDiagnosticTimer.Interval = TimeSpan.FromSeconds(30);
-        _memoryDiagnosticTimer.IsRepeating = true;
-        _memoryDiagnosticTimer.Tick += (_, _) => PerformanceLogger.SampleMemory();
-        _memoryDiagnosticTimer.Start();
-        Log("[Perf] Memory diagnostics timer started (30s interval)");
-    }
-
-    /// <summary>
-    /// Starts a background loop that periodically triggers GC to release
-    /// native Composition/COM resources that the WinUI framework holds via
-    /// finalizable wrappers.  Without this, high-frequency UI updates (e.g.
-    /// media artwork) accumulate native memory that the GC only
-    /// reclaims during gen2 collection, which may not happen for a long time.
-    /// </summary>
-    private void SchedulePeriodicMemoryCleanup()
-    {
-        _periodicGcCts = new CancellationTokenSource();
-        _ = Task.Run(async () =>
-        {
-            try
-            {
-                // Wait for initial startup to settle before first collection.
-                await Task.Delay(TimeSpan.FromMinutes(1), _periodicGcCts.Token);
-
-                while (!_periodicGcCts.Token.IsCancellationRequested)
-                {
-                    // Run on a background thread to avoid blocking the UI.
-                    // Two-pass collection: first pass promotes finalizable
-                    // objects to the freachable queue, second pass reclaims
-                    // them after finalizers have run.
-                    GC.Collect(GC.MaxGeneration, GCCollectionMode.Forced, blocking: false, compacting: false);
-                    GC.WaitForPendingFinalizers();
-                    GC.Collect(GC.MaxGeneration, GCCollectionMode.Forced, blocking: false, compacting: false);
-                    Win32Helper.TrimCurrentProcessWorkingSet();
-
-                    if (PerformanceLogger.IsEnabled)
-                    {
-                        PerformanceLogger.SampleMemory();
-                        App.Log("[Perf] Periodic GC cleanup completed");
-                    }
-
-                    await Task.Delay(TimeSpan.FromMinutes(2), _periodicGcCts.Token);
-                }
-            }
-            catch (OperationCanceledException)
-            {
-                // Expected during shutdown.
-            }
-            catch (Exception ex)
-            {
-                Log($"[Perf] Periodic GC cleanup error: {ex}");
-            }
-        });
-        Log("[Perf] Periodic memory cleanup scheduled (2 min interval)");
-    }
-
-    /// <summary>
-    /// Starts a watchdog that detects when the UI thread is unresponsive.
-    /// A background timer sets a heartbeat flag every 4 seconds; the UI thread
-    /// clears it via DispatcherQueue.TryEnqueue. If the flag is still set on
-    /// the next tick, the UI thread was blocked for >4 seconds.
-    /// Logs diagnostic info including handle count to help identify the cause.
-    /// </summary>
-    private void StartUiThreadWatchdog()
-    {
-        _uiHeartbeatReceived = true;
-
-        _uiWatchdogTimer = new System.Threading.Timer(_ =>
-        {
-            try
-            {
-                if (!_uiHeartbeatReceived)
-                {
-                    int missCount = Interlocked.Increment(ref _watchdogMissCount);
-                    int handleCount = 0;
-                    try
-                    {
-                        using var proc = System.Diagnostics.Process.GetCurrentProcess();
-                        handleCount = proc.HandleCount;
-                    }
-                    catch { }
-
-                    Log($"[Watchdog] UI thread unresponsive (miss #{missCount}), " +
-                        $"handles={handleCount}, " +
-                        $"gen0={GC.CollectionCount(0)}, gen1={GC.CollectionCount(1)}, gen2={GC.CollectionCount(2)}");
-
-                    // After 5 consecutive misses (20+ seconds), force a GC to rule out
-                    // memory pressure as the cause.
-                    if (missCount == 5)
-                    {
-                        Log("[Watchdog] 5 consecutive misses — forcing GC.Collect");
-                        GC.Collect(GC.MaxGeneration, GCCollectionMode.Forced, blocking: false, compacting: false);
-                        GC.WaitForPendingFinalizers();
-                        GC.Collect(GC.MaxGeneration, GCCollectionMode.Forced, blocking: false, compacting: false);
-                    }
-                }
-                else
-                {
-                    if (Interlocked.Exchange(ref _watchdogMissCount, 0) > 0)
-                    {
-                        Log("[Watchdog] UI thread recovered");
-                    }
-                }
-
-                _uiHeartbeatReceived = false;
-                UiDispatcherQueue?.TryEnqueue(() => _uiHeartbeatReceived = true);
-            }
-            catch (Exception ex)
-            {
-                Log($"[Watchdog] Error: {ex.Message}");
-            }
-        }, null, TimeSpan.FromSeconds(4), TimeSpan.FromSeconds(4));
-
-        Log("[Watchdog] UI thread watchdog started (4s interval)");
-    }
+    private AppDiagnosticsService? _diagnosticsService;
 
     private void ScheduleBackgroundUpdateCheck()
     {
@@ -1686,181 +1578,6 @@ public partial class App : Application
         OpenSettings();
     }
 
-    private void CreateTrayIcon()
-    {
-        var localization = LocalizationService;
-        var contextMenu = new MenuFlyout();
-        contextMenu.ShouldConstrainToRootBounds = false;
-        var mapFolderItem = new MenuFlyoutItem
-        {
-            Text = localization.T("Common.NewFolderMapping"),
-            Width = TrayMenuItemWidth,
-            Icon = new SymbolIcon(Symbol.OpenFile)
-        };
-        mapFolderItem.Click += async (_, _) => await RunTrayMenuActionAsync(contextMenu, CreateFolderWidgetFromPickerAsync);
-
-        var settingsItem = new MenuFlyoutItem
-        {
-            Text = localization.T("Tray.Settings"),
-            Width = TrayMenuItemWidth,
-            Icon = new SymbolIcon(Symbol.Setting)
-        };
-        settingsItem.Click += async (_, _) => await RunTrayMenuActionAsync(contextMenu, OpenSettingsFromTray);
-
-        var openManagedStorageItem = new MenuFlyoutItem
-        {
-            Text = localization.T("Tray.OpenManagedStorage"),
-            Width = TrayMenuItemWidth,
-            Icon = new SymbolIcon(Symbol.Folder)
-        };
-        openManagedStorageItem.Click += async (_, _) => await RunTrayMenuActionAsync(contextMenu, OpenManagedStorageFromTray);
-
-        var updateItem = new MenuFlyoutItem
-        {
-            Text = localization.T("Tray.UpdateAvailable"),
-            Width = TrayMenuItemWidth,
-            Icon = new SymbolIcon(Symbol.Download),
-            Visibility = Visibility.Collapsed
-        };
-        updateItem.Click += async (_, _) => await RunTrayMenuActionAsync(contextMenu, OpenAboutSettingsFromTray);
-
-        var exitItem = new MenuFlyoutItem
-        {
-            Text = localization.T("Tray.Exit"),
-            Width = TrayMenuItemWidth,
-            Icon = new SymbolIcon(Symbol.Cancel)
-        };
-        exitItem.Click += async (_, _) => await RunTrayMenuActionAsync(contextMenu, ExitApplication);
-
-        _trayCreateWidgetItems.Clear();
-        foreach (var descriptor in new WidgetContentFactory(LocalizationService).GetCreateEntryDescriptors())
-        {
-            var createItem = CreateTrayCreateWidgetItem(contextMenu, descriptor, localization);
-            _trayCreateWidgetItems[descriptor.WidgetKind] = createItem;
-            contextMenu.Items.Add(createItem);
-        }
-
-        contextMenu.Items.Add(mapFolderItem);
-        contextMenu.Items.Add(new MenuFlyoutSeparator());
-        contextMenu.Items.Add(openManagedStorageItem);
-        contextMenu.Items.Add(new MenuFlyoutSeparator());
-        contextMenu.Items.Add(updateItem);
-        contextMenu.Items.Add(settingsItem);
-        contextMenu.Items.Add(new MenuFlyoutSeparator());
-        contextMenu.Items.Add(exitItem);
-
-        _trayMapFolderItem = mapFolderItem;
-        _trayOpenManagedStorageItem = openManagedStorageItem;
-        _trayUpdateItem = updateItem;
-        _traySettingsItem = settingsItem;
-        _trayExitItem = exitItem;
-        _trayContextMenu = contextMenu;
-        PrepareTrayContextMenu(contextMenu);
-
-        _trayWindow = new Window();
-        _trayWindow.AppWindow.IsShownInSwitchers = false;
-        AppBranding.ApplyWindowIcon(_trayWindow.AppWindow);
-        _trayWindow.AppWindow.Resize(new Windows.Graphics.SizeInt32(1, 1));
-
-        _trayIcon = new TaskbarIcon
-        {
-            Icon = AppBranding.CreateTrayIcon(SettingsService.Settings.TrayIconStyle ?? "System", IsDarkThemeActive()),
-            ToolTipText = localization.T("Tray.Tooltip"),
-            ContextMenuMode = ContextMenuMode.SecondWindow,
-            MenuActivation = PopupActivationMode.None,
-            NoLeftClickDelay = true,
-            RightClickCommand = new RelayCommand(ShowTrayContextMenuFromTray),
-            LeftClickCommand = new RelayCommand(() =>
-            {
-                if (WidgetManager is not null)
-                {
-                    _ = ToggleTrayWidgetsAsync();
-                }
-            })
-        };
-        _trayIcon.ContextFlyout = contextMenu;
-        // H.NotifyIcon creates its private SecondWindow flyout when ContextFlyout
-        // is assigned. Apply the same presenter settings to that actual flyout
-        // immediately, before its first measurement.
-        SynchronizeSecondWindowTrayFlyout(contextMenu);
-
-        if (_trayWindow.Content is null)
-        {
-            _trayWindow.Content = new Grid
-            {
-                Width = 1,
-                Height = 1,
-                MinWidth = 1,
-                MinHeight = 1,
-                Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Transparent)
-            };
-        }
-
-        if (_trayWindow.Content is Panel panel)
-        {
-            panel.Width = 1;
-            panel.Height = 1;
-            panel.MinWidth = 1;
-            panel.MinHeight = 1;
-            panel.Background = new Microsoft.UI.Xaml.Media.SolidColorBrush(Microsoft.UI.Colors.Transparent);
-            panel.Children.Clear();
-            panel.Children.Add(_trayIcon);
-        }
-
-        ThemeService.TrackWindow(_trayWindow);
-        _trayWindow.Activate();
-
-        if (!_trayIcon.IsCreated)
-        {
-            _trayIcon.ForceCreate();
-        }
-
-        try
-        {
-            var trayHwnd = WindowNative.GetWindowHandle(_trayWindow);
-            Log($"[Init] Attaching GlobalHotkeyService to tray hwnd=0x{trayHwnd.ToInt64():X}");
-            GlobalHotkeyService?.Attach(trayHwnd);
-            Log("[Init] GlobalHotkeyService attached");
-        }
-        catch (Exception ex)
-        {
-            Log($"[Init] GlobalHotkeyService attach failed: {ex}");
-        }
-
-        _trayWindow.DispatcherQueue.TryEnqueue(() =>
-        {
-            if (_trayWindow is null)
-            {
-                return;
-            }
-
-            WindowExtensions.Hide(_trayWindow);
-        });
-
-        ThemeService.AppearanceChanged += UpdateTrayIconAppearance;
-    }
-
-    private MenuFlyoutItem CreateTrayCreateWidgetItem(
-        MenuFlyout contextMenu,
-        WidgetContentDescriptor descriptor,
-        LocalizationService localization)
-    {
-        var item = new MenuFlyoutItem
-        {
-            Text = GetCreateEntryText(descriptor, localization),
-            Width = TrayMenuItemWidth,
-            Icon = new FontIcon { Glyph = descriptor.DefaultGlyph }
-        };
-        item.Click += async (_, _) => await RunTrayMenuActionAsync(contextMenu, async () =>
-        {
-            if (WidgetManager is not null)
-            {
-                await WidgetManager.CreateWidgetOfKindAsync(descriptor.WidgetKind);
-            }
-        });
-        return item;
-    }
-
     private void ShowDataRestoreResultNotification(DeskBoxRestoreApplyResult result)
     {
         if (!result.HadPendingRestore)
@@ -1901,383 +1618,6 @@ public partial class App : Application
         }
     }
 
-    private void PrepareTrayContextMenu(MenuFlyout contextMenu)
-    {
-        bool canCreateWidget = WidgetManager is not null;
-        foreach (var item in _trayCreateWidgetItems.Values)
-        {
-            item.IsEnabled = canCreateWidget;
-        }
-
-        if (_trayMapFolderItem is not null)
-        {
-            _trayMapFolderItem.IsEnabled = canCreateWidget;
-        }
-
-        contextMenu.MenuFlyoutPresenterStyle = CreateTrayMenuPresenterStyle();
-    }
-
-    private Style CreateTrayMenuPresenterStyle()
-    {
-        var style = new Style(typeof(MenuFlyoutPresenter))
-        {
-            BasedOn = (Style)Resources[typeof(MenuFlyoutPresenter)]
-        };
-        style.Setters.Add(new Setter(ScrollViewer.VerticalScrollModeProperty, ScrollMode.Disabled));
-        style.Setters.Add(new Setter(
-            ScrollViewer.VerticalScrollBarVisibilityProperty,
-            ScrollBarVisibility.Disabled));
-        return style;
-    }
-
-    private void SynchronizeSecondWindowTrayFlyout(MenuFlyout contextMenu)
-    {
-        if (_trayIcon is null)
-        {
-            return;
-        }
-
-        Style presenterStyle = contextMenu.MenuFlyoutPresenterStyle ??
-            CreateTrayMenuPresenterStyle();
-        contextMenu.MenuFlyoutPresenterStyle = presenterStyle;
-
-        MenuFlyout? secondWindowFlyout = TryGetSecondWindowContextMenuFlyout(_trayIcon);
-        if (secondWindowFlyout is null)
-        {
-            if (!_traySecondWindowSyncLogged)
-            {
-                Log("[Tray] SecondWindow flyout was not available for presenter synchronization");
-                _traySecondWindowSyncLogged = true;
-            }
-
-            return;
-        }
-
-        secondWindowFlyout.MenuFlyoutPresenterStyle = presenterStyle;
-        secondWindowFlyout.ShouldConstrainToRootBounds = false;
-        if (!_traySecondWindowSyncLogged)
-        {
-            Log("[Tray] Synchronized SecondWindow flyout presenter settings");
-            _traySecondWindowSyncLogged = true;
-        }
-    }
-
-    private static MenuFlyout? TryGetSecondWindowContextMenuFlyout(TaskbarIcon trayIcon)
-    {
-        const System.Reflection.BindingFlags flags =
-            System.Reflection.BindingFlags.Instance |
-            System.Reflection.BindingFlags.Public |
-            System.Reflection.BindingFlags.NonPublic |
-            System.Reflection.BindingFlags.DeclaredOnly;
-
-        try
-        {
-            for (Type? type = trayIcon.GetType(); type is not null; type = type.BaseType)
-            {
-                var property = type.GetProperty("ContextMenuFlyout", flags);
-                if (property?.GetValue(trayIcon) is MenuFlyout flyout)
-                {
-                    return flyout;
-                }
-            }
-        }
-        catch (Exception ex)
-        {
-            Log($"[Tray] Failed to access SecondWindow flyout: {ex.Message}");
-        }
-
-        return null;
-    }
-
-    private void ShowTrayContextMenuFromTray()
-    {
-        if (_trayIcon is null ||
-            !Win32Helper.GetCursorPos(out var cursor))
-        {
-            return;
-        }
-
-        if (_trayContextMenu is not null)
-        {
-            // Visibility, enabled state, and localization must be settled before
-            // H.NotifyIcon measures and resizes its SecondWindow host.
-            PrepareTrayContextMenu(_trayContextMenu);
-            SynchronizeSecondWindowTrayFlyout(_trayContextMenu);
-        }
-
-        var point = new DrawingPoint(cursor.X, cursor.Y);
-        try
-        {
-            point = GetTrayContextMenuAnchorPoint(point);
-        }
-        catch (Exception ex)
-        {
-            Log($"[Tray] Failed to calculate tray context menu anchor: {ex}");
-        }
-
-        try
-        {
-            _trayIcon.ShowContextMenu(point);
-        }
-        catch (Exception ex)
-        {
-            Log($"[Tray] Failed to show tray context menu: {ex}");
-        }
-    }
-
-    private DrawingPoint GetTrayContextMenuAnchorPoint(DrawingPoint fallbackPoint)
-    {
-        if (TryGetTrayIconIdentity(out var trayIconWindowHandle, out var trayIconId) &&
-            Win32Helper.TryGetNotifyIconRect(trayIconWindowHandle, trayIconId, out var iconRect) &&
-            IsUsableTrayIconRect(iconRect))
-        {
-            return GetTrayContextMenuAnchorPointFromIconRect(iconRect, fallbackPoint);
-        }
-
-        return GetFallbackTrayContextMenuAnchorPoint(fallbackPoint);
-    }
-
-    private bool TryGetTrayIconIdentity(out IntPtr windowHandle, out Guid id)
-    {
-        windowHandle = IntPtr.Zero;
-        id = Guid.Empty;
-
-        if (_trayIcon is null)
-        {
-            return false;
-        }
-
-        const System.Reflection.BindingFlags flags =
-            System.Reflection.BindingFlags.Instance |
-            System.Reflection.BindingFlags.Public |
-            System.Reflection.BindingFlags.NonPublic;
-
-        var trayIconProperty = _trayIcon.GetType().GetProperty("TrayIcon", flags);
-        object? trayIcon = trayIconProperty?.GetValue(_trayIcon);
-        if (trayIcon is null)
-        {
-            return false;
-        }
-
-        var trayIconType = trayIcon.GetType();
-        object? windowHandleValue = trayIconType.GetProperty("WindowHandle", flags)?.GetValue(trayIcon);
-        object? idValue = trayIconType.GetProperty("Id", flags)?.GetValue(trayIcon);
-
-        windowHandle = windowHandleValue switch
-        {
-            IntPtr ptr => ptr,
-            _ => IntPtr.Zero
-        };
-
-        if (idValue is Guid guid)
-        {
-            id = guid;
-        }
-
-        return windowHandle != IntPtr.Zero && id != Guid.Empty;
-    }
-
-    private static DrawingPoint GetTrayContextMenuAnchorPointFromIconRect(
-        Win32Helper.RECT iconRect,
-        DrawingPoint fallbackPoint)
-    {
-        int centerX = iconRect.Left + ((iconRect.Right - iconRect.Left) / 2);
-        int centerY = iconRect.Top + ((iconRect.Bottom - iconRect.Top) / 2);
-        var anchor = new DrawingPoint(centerX - (TrayContextMenuEstimatedWidth / 2), centerY);
-
-        if (!Win32Helper.TryGetMonitorWorkArea(centerX, centerY, out var monitor, out var workArea))
-        {
-            return anchor;
-        }
-
-        var edge = GetNearestTaskbarEdge(iconRect, monitor, workArea);
-        anchor = edge switch
-        {
-            TaskbarEdge.Bottom => new DrawingPoint(anchor.X, workArea.Bottom - 1),
-            TaskbarEdge.Top => new DrawingPoint(anchor.X, workArea.Top),
-            TaskbarEdge.Right => new DrawingPoint(workArea.Right - 1, centerY),
-            TaskbarEdge.Left => new DrawingPoint(workArea.Left, centerY),
-            _ => GetFallbackTrayContextMenuAnchorPoint(fallbackPoint)
-        };
-
-        return ClampPointToRect(anchor, monitor);
-    }
-
-    private static DrawingPoint GetFallbackTrayContextMenuAnchorPoint(DrawingPoint point)
-    {
-        if (!Win32Helper.TryGetMonitorWorkArea(point.X, point.Y, out var monitor, out var workArea))
-        {
-            return new DrawingPoint(
-                point.X - (TrayContextMenuEstimatedWidth / 2),
-                point.Y - TrayContextMenuFallbackOffsetPixels);
-        }
-
-        int x = point.X - (TrayContextMenuEstimatedWidth / 2);
-        int y = point.Y;
-        bool moved = false;
-
-        if (workArea.Bottom < monitor.Bottom && y >= workArea.Bottom)
-        {
-            y = workArea.Bottom - 1;
-            moved = true;
-        }
-        else if (workArea.Top > monitor.Top && y <= workArea.Top)
-        {
-            y = workArea.Top;
-            moved = true;
-        }
-
-        if (workArea.Right < monitor.Right && x >= workArea.Right)
-        {
-            x = workArea.Right - 1;
-            moved = true;
-        }
-        else if (workArea.Left > monitor.Left && x <= workArea.Left)
-        {
-            x = workArea.Left;
-            moved = true;
-        }
-
-        if (!moved)
-        {
-            int distanceToBottom = Math.Abs(monitor.Bottom - y);
-            int distanceToTop = Math.Abs(y - monitor.Top);
-            int distanceToRight = Math.Abs(monitor.Right - x);
-            int distanceToLeft = Math.Abs(x - monitor.Left);
-            int nearestDistance = Math.Min(
-                Math.Min(distanceToBottom, distanceToTop),
-                Math.Min(distanceToRight, distanceToLeft));
-
-            if (nearestDistance == distanceToBottom)
-            {
-                y -= TrayContextMenuFallbackOffsetPixels;
-            }
-            else if (nearestDistance == distanceToTop)
-            {
-                y += TrayContextMenuFallbackOffsetPixels;
-            }
-            else if (nearestDistance == distanceToRight)
-            {
-                x -= TrayContextMenuFallbackOffsetPixels;
-            }
-            else
-            {
-                x += TrayContextMenuFallbackOffsetPixels;
-            }
-        }
-
-        return ClampPointToRect(new DrawingPoint(x, y), monitor);
-    }
-
-    private static bool IsUsableTrayIconRect(Win32Helper.RECT rect)
-    {
-        return rect.Right > rect.Left && rect.Bottom > rect.Top;
-    }
-
-    private static TaskbarEdge GetNearestTaskbarEdge(
-        Win32Helper.RECT iconRect,
-        Win32Helper.RECT monitor,
-        Win32Helper.RECT workArea)
-    {
-        if (workArea.Bottom < monitor.Bottom &&
-            iconRect.Top >= workArea.Bottom)
-        {
-            return TaskbarEdge.Bottom;
-        }
-
-        if (workArea.Top > monitor.Top &&
-            iconRect.Bottom <= workArea.Top)
-        {
-            return TaskbarEdge.Top;
-        }
-
-        if (workArea.Right < monitor.Right &&
-            iconRect.Left >= workArea.Right)
-        {
-            return TaskbarEdge.Right;
-        }
-
-        if (workArea.Left > monitor.Left &&
-            iconRect.Right <= workArea.Left)
-        {
-            return TaskbarEdge.Left;
-        }
-
-        int distanceToBottom = Math.Abs(monitor.Bottom - iconRect.Bottom);
-        int distanceToTop = Math.Abs(iconRect.Top - monitor.Top);
-        int distanceToRight = Math.Abs(monitor.Right - iconRect.Right);
-        int distanceToLeft = Math.Abs(iconRect.Left - monitor.Left);
-        int nearestDistance = Math.Min(
-            Math.Min(distanceToBottom, distanceToTop),
-            Math.Min(distanceToRight, distanceToLeft));
-
-        if (nearestDistance == distanceToBottom)
-        {
-            return TaskbarEdge.Bottom;
-        }
-
-        if (nearestDistance == distanceToTop)
-        {
-            return TaskbarEdge.Top;
-        }
-
-        return nearestDistance == distanceToRight
-            ? TaskbarEdge.Right
-            : TaskbarEdge.Left;
-    }
-
-    private static DrawingPoint ClampPointToRect(DrawingPoint point, Win32Helper.RECT rect)
-    {
-        return new DrawingPoint(
-            Math.Clamp(point.X, rect.Left, rect.Right - 1),
-            Math.Clamp(point.Y, rect.Top, rect.Bottom - 1));
-    }
-
-    private enum TaskbarEdge
-    {
-        Bottom,
-        Top,
-        Right,
-        Left
-    }
-
-    private async Task RaiseTrayWidgetsAsync()
-    {
-        if (WidgetManager is null)
-        {
-            return;
-        }
-
-        bool? raised = await WidgetManager.RaiseWidgetsFromTrayAsync();
-        if (raised.HasValue)
-        {
-            UpdateTrayLayerStateText(raised.Value);
-        }
-    }
-
-    private async Task ToggleTrayWidgetsAsync()
-    {
-        if (WidgetManager is null)
-        {
-            return;
-        }
-
-        if (WidgetManager.ShouldHideWidgetsForTrayToggle())
-        {
-            await WidgetManager.SetAllWidgetsVisibleAsync(false);
-            UpdateTrayLayerStateText(raised: false);
-            return;
-        }
-
-        await RaiseTrayWidgetsAsync();
-    }
-
-    private void UpdateTrayLayerStateText(bool raised)
-    {
-        _widgetsRaisedFromTray = raised;
-        RefreshTrayToolTipText();
-    }
-
     private void OnLanguageChanged()
     {
         Localized.RefreshAll(LocalizationService);
@@ -2285,113 +1625,10 @@ public partial class App : Application
         RefreshTrayToolTipText();
     }
 
-    private void RefreshTrayMenuText()
-    {
-        if (_trayMapFolderItem is not null)
-        {
-            _trayMapFolderItem.Text = LocalizationService.T("Common.NewFolderMapping");
-        }
-
-        foreach (var (widgetKind, item) in _trayCreateWidgetItems)
-        {
-            var descriptor = new WidgetContentFactory(LocalizationService).GetDescriptor(widgetKind);
-            item.Text = GetCreateEntryText(descriptor, LocalizationService);
-        }
-
-        if (_traySettingsItem is not null)
-        {
-            _traySettingsItem.Text = LocalizationService.T("Tray.Settings");
-        }
-
-        if (_trayUpdateItem is not null)
-        {
-            _trayUpdateItem.Text = string.IsNullOrWhiteSpace(_availableUpdateVersion)
-                ? LocalizationService.T("Tray.UpdateAvailable")
-                : LocalizationService.Format("Tray.UpdateAvailableWithVersion", _availableUpdateVersion);
-            _trayUpdateItem.Visibility = _hasUpdateAvailable ? Visibility.Visible : Visibility.Collapsed;
-        }
-
-        if (_trayOpenManagedStorageItem is not null)
-        {
-            _trayOpenManagedStorageItem.Text = LocalizationService.T("Tray.OpenManagedStorage");
-        }
-
-        if (_trayExitItem is not null)
-        {
-            _trayExitItem.Text = LocalizationService.T("Tray.Exit");
-        }
-    }
-
-    private void RefreshTrayToolTipText()
-    {
-        if (_trayIcon is null)
-        {
-            return;
-        }
-
-        if (_hasUpdateAvailable && !string.IsNullOrWhiteSpace(_availableUpdateVersion))
-        {
-            _trayIcon.ToolTipText = LocalizationService.Format("Tray.TooltipUpdateAvailable", _availableUpdateVersion);
-            return;
-        }
-
-        _trayIcon.ToolTipText = _widgetsRaisedFromTray
-            ? LocalizationService.T("Tray.TooltipRaised")
-            : LocalizationService.T("Tray.Tooltip");
-    }
-
-    private static string GetCreateEntryText(WidgetContentDescriptor descriptor, LocalizationService localization)
-    {
-        return string.IsNullOrWhiteSpace(descriptor.CreateEntryTextKey)
-            ? descriptor.DefaultTitle
-            : localization.T(descriptor.CreateEntryTextKey);
-    }
-
-    private static async Task RunTrayMenuActionAsync(MenuFlyout contextMenu, Action action)
-    {
-        contextMenu.Hide();
-        await Task.Yield();
-        action();
-    }
-
-    private static async Task RunTrayMenuActionAsync(MenuFlyout contextMenu, Func<Task> action)
-    {
-        contextMenu.Hide();
-        await Task.Yield();
-        await action();
-    }
-
-    private async Task CreateFolderWidgetFromPickerAsync()
-    {
-        if (_trayWindow is null || WidgetManager is null)
-        {
-            return;
-        }
-
-        string? folderPath = FolderPickerService.PickFolder(IntPtr.Zero);
-        if (!string.IsNullOrWhiteSpace(folderPath))
-        {
-            await WidgetManager.CreateFolderWidgetAsync(folderPath);
-        }
-    }
-
     private void OpenSettings()
     {
         var settingsWindow = _settingsWindow ?? CreateSettingsWindow();
         settingsWindow.ShowWindow();
-    }
-
-    private void OpenSettingsFromTray()
-    {
-        var settingsWindow = _settingsWindow ?? CreateSettingsWindow();
-        settingsWindow.ShowWindow();
-    }
-
-    private void OpenAboutSettingsFromTray()
-    {
-        var settingsWindow = _settingsWindow ?? CreateSettingsWindow();
-        settingsWindow.ShowWindow();
-        settingsWindow.ShowSection("About");
     }
 
     private SettingsWindow CreateSettingsWindow()
@@ -2414,13 +1651,6 @@ public partial class App : Application
         }
 
         _settingsWindow.RefreshLocalizedContent();
-    }
-
-    private void OpenManagedStorageFromTray()
-    {
-        string path = SettingsService.NormalizeManagedStorageRootPath(SettingsService.Settings.DefaultManagedStorageRootPath);
-        Directory.CreateDirectory(path);
-        Win32Helper.OpenFile(path);
     }
 
     public void ShowSettings()
@@ -2501,16 +1731,15 @@ public partial class App : Application
         _displayAreaWatcher?.Dispose();
         _displayAreaWatcher = null;
 
-        _memoryDiagnosticTimer?.Stop();
-        _memoryDiagnosticTimer = null;
-        _periodicGcCts?.Cancel();
-        _periodicGcCts?.Dispose();
-        _periodicGcCts = null;
+        _diagnosticsService?.Dispose();
+        _diagnosticsService = null;
         await SettingsService.SaveAsync();
         _nativeNotificationService?.Dispose();
         _nativeNotificationService = null;
         _todoReminderService?.Dispose();
         _todoReminderService = null;
+        _usnIndexService?.Dispose();
+        _usnIndexService = null;
         WidgetManager?.CloseAll();
         _trayIcon?.Dispose();
         _trayIcon = null;
@@ -2538,30 +1767,191 @@ public partial class App : Application
         Exit();
     }
 
-    private bool IsDarkThemeActive()
-    {
-        return Win32Helper.IsSystemDarkMode();
-    }
-
-    private void UpdateTrayIconAppearance()
-    {
-        if (_trayIcon is null)
-        {
-            return;
-        }
-
-        string style = SettingsService.Settings.TrayIconStyle ?? "System";
-        _trayIcon.Icon = AppBranding.CreateTrayIcon(style, IsDarkThemeActive());
-    }
-
-    public void UpdateTrayIcon()
-    {
-        UpdateTrayIconAppearance();
-    }
-
     private void OnUnhandledException(object sender, Microsoft.UI.Xaml.UnhandledExceptionEventArgs e)
     {
         Log($"Unhandled exception: {e.Exception}");
         e.Handled = true;
+    }
+
+    // ─── Search Services ─────────────────────────────────────────────
+
+    private void InitializeSearchServices()
+    {
+        try
+        {
+            _searchIndexService = new SearchIndexService(SettingsService);
+            var windowsIndexService = new WindowsIndexSearchService(SettingsService);
+            _usnIndexService = new UsnJournalIndexService();
+            _searchEngineService = new SearchEngineService(SettingsService, LocalizationService, _searchIndexService, windowsIndexService, _usnIndexService);
+            _searchHistoryService = new SearchHistoryService();
+            _searchActionService = new SearchResultActionService(SettingsService);
+
+            // Load the persisted index so search returns results immediately,
+            // before the first background scan completes.
+            _searchIndexService.TryLoadPersistedIndex();
+
+            // Start background indexing if enabled
+            if (SettingsService.Settings.SearchCustomIndexerEnabled)
+            {
+                _searchIndexService.StartIndexing();
+                Log("[Search] File indexer started");
+
+                // USN journal full-disk index (Everything-style). Requires admin;
+                // when unavailable it self-degrades (IsAvailable stays false) and the
+                // search engine falls back to the directory-scan index above.
+                _usnIndexService.StartIndexing();
+                Log("[Search] USN journal indexer started");
+            }
+
+            // Create search hotkey service
+            _searchHotkeyService = new SearchHotkeyService(SettingsService, ToggleSearchPopupAsync);
+            if (_trayWindow is not null)
+            {
+                var trayHwnd = WindowNative.GetWindowHandle(_trayWindow);
+                if (trayHwnd != IntPtr.Zero)
+                {
+                    _searchHotkeyService.Attach(trayHwnd);
+                    Log("[Search] Hotkey service attached");
+                }
+            }
+
+            Log("[Search] Services initialized");
+        }
+        catch (Exception ex)
+        {
+            Log($"[Search] Initialization failed: {ex}");
+        }
+    }
+
+    private Task ToggleSearchPopupAsync()
+    {
+        if (!UiDispatcherQueue.HasThreadAccess)
+        {
+            UiDispatcherQueue.TryEnqueue(() => _ = ToggleSearchPopupAsync());
+            return Task.CompletedTask;
+        }
+
+        if (_searchEngineService is null)
+        {
+            Log("[Search] Engine not initialized");
+            return Task.CompletedTask;
+        }
+
+        if (_searchPopupWindow is null)
+        {
+            _fileMetaService ??= new FileMetaService();
+            var viewModel = new ViewModels.SearchPopupViewModel(
+                _searchEngineService, SettingsService, LocalizationService, _searchHistoryService!, _fileMetaService);
+            _searchPopupWindow = new SearchPopupWindow(viewModel, SettingsService, LocalizationService);
+            _searchPopupWindow.ActionRequested += OnSearchActionRequested;
+            _searchPopupWindow.ContentRequested += OnSearchContentRequested;
+            _searchPopupWindow.Closed += (_, _) =>
+            {
+                _searchPopupWindow = null;
+            };
+            // Set callback to hide popup when item is opened.
+            viewModel.HidePopupCallback = () => _searchPopupWindow?.HidePopup();
+            Log("[Search] Popup window created");
+        }
+
+        _searchPopupWindow.TogglePopup();
+        return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Public entry point used by the search widget (and other callers) to open the popup.
+    /// </summary>
+    public void OpenSearchPopup() => _ = ToggleSearchPopupAsync();
+
+    private void OnSearchActionRequested(object? sender, string actionId)
+    {
+        _ = HandleSearchActionAsync(actionId);
+    }
+
+    private void OnSearchContentRequested(object? sender, Models.SearchResultItem item)
+    {
+        _ = HandleSearchContentAsync(item);
+    }
+
+    private async Task HandleSearchContentAsync(Models.SearchResultItem item)
+    {
+        if (WidgetManager is null)
+        {
+            return;
+        }
+
+        switch (item.Kind)
+        {
+            case Models.SearchResultKind.Todo:
+                await WidgetManager.ShowTodoReminderTargetAsync(
+                    item.TodoWidgetId,
+                    item.TodoItemId,
+                    preferTodayFilter: false);
+                break;
+
+            case Models.SearchResultKind.QuickCapture:
+                var window = await WidgetManager.CreateOrShowQuickCaptureWidgetAsync();
+                await window.RevealItemAsync(item.QuickCaptureItemId);
+                break;
+        }
+    }
+
+    private async Task HandleSearchActionAsync(string actionId)
+    {
+        switch (actionId)
+        {
+            case "new-todo":
+                if (WidgetManager is not null)
+                {
+                    await WidgetManager.CreateTodoWidgetAsync(focusNewInput: true);
+                }
+                break;
+
+            case "new-note":
+                if (WidgetManager is not null)
+                {
+                    await WidgetManager.CreateOrShowQuickCaptureWidgetAsync(focusNewInput: true);
+                }
+                break;
+
+            case "open-settings":
+                ShowSettings();
+                break;
+
+            case "toggle-widgets":
+                await ToggleTrayWidgetsAsync();
+                break;
+
+            case "toggle-theme":
+                ToggleTheme();
+                break;
+
+            case "open-todo":
+                if (WidgetManager is not null)
+                {
+                    await WidgetManager.CreateTodoWidgetAsync();
+                }
+                break;
+
+            case "open-quickcapture":
+                if (WidgetManager is not null)
+                {
+                    await WidgetManager.CreateOrShowQuickCaptureWidgetAsync();
+                }
+                break;
+        }
+    }
+
+    private void ToggleTheme()
+    {
+        var settings = SettingsService.Settings;
+        settings.Theme = settings.Theme switch
+        {
+            "Light" => "Dark",
+            "Dark" => "Light",
+            _ => "Light"
+        };
+        SettingsService.SaveDebounced();
+        ThemeService.RefreshAppearance();
     }
 }

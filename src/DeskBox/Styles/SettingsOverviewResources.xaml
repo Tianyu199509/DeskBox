@@ -39,6 +39,15 @@
         <Setter Property="TextWrapping" Value="Wrap" />
     </Style>
 
+    <Style x:Key="SettingsSubsectionHeaderStyle" TargetType="StackPanel">
+        <Setter Property="Margin" Value="4,14,4,4" />
+        <Setter Property="Spacing" Value="2" />
+    </Style>
+
+    <Style x:Key="SettingsSubsectionTitleTextStyle" TargetType="TextBlock" BasedOn="{StaticResource SettingTitleTextStyle}">
+        <Setter Property="FontSize" Value="15" />
+    </Style>
+
     <Style x:Key="DrillDownRowStyle" TargetType="Button">
         <Setter Property="HorizontalAlignment" Value="Stretch" />
         <Setter Property="HorizontalContentAlignment" Value="Stretch" />
@@ -49,6 +58,14 @@
         <Setter Property="BorderThickness" Value="0" />
         <Setter Property="CornerRadius" Value="{StaticResource SettingsCardCornerRadius}" />
         <Setter Property="VerticalAlignment" Value="Stretch" />
+    </Style>
+
+    <Style x:Key="ActionButtonStyle" TargetType="Button">
+        <Setter Property="MinHeight" Value="34" />
+        <Setter Property="Height" Value="34" />
+        <Setter Property="MinWidth" Value="104" />
+        <Setter Property="Padding" Value="12,0" />
+        <Setter Property="CornerRadius" Value="6" />
     </Style>
 
     <Style x:Key="IconActionButtonStyle" TargetType="Button">

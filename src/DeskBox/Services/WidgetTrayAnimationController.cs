@@ -55,6 +55,19 @@ public sealed class WidgetTrayAnimationController
     private long _contentReadyGeneration;
     private Action? _contentReadyAction;
 
+    // ── 方案 A: 智能帧率节流控制 ──
+    // 目标：减少不必要的渲染帧，降低系统开销
+    private const int MaxFPS_HighPriority = 120;   // 高优先级阶段 FPS（前 50ms）
+    private const int MaxFPS_Normal = 24;          // 正常阶段 FPS
+    private const double HighPriorityDurationMs = 50.0;  // 高优先级持续时长 (ms)
+    
+    private DateTime _lastRenderTime = DateTime.MaxValue;
+    private TimeSpan _elapsedSinceStart;
+    private int _targetFPS = MaxFPS_HighPriority;
+    private double _minFrameIntervalMs = 8.33;     // 120fps 的帧间隔
+    private DateTime _animationStartTime;
+    // ── 方案 A 控制字段结束 ──
+
     private bool _isRendering;
     private Stopwatch? _renderStopwatch;
     private double _renderDurationMs;
@@ -402,7 +415,8 @@ public sealed class WidgetTrayAnimationController
         _renderCompleted = completed;
         _renderStopwatch = Stopwatch.StartNew();
         _isRendering = true;
-
+        _animationStartTime = DateTime.UtcNow;
+        
         // Use the same easing for window position interpolation.
         _renderEasingIntensity = easingIntensity;
 
@@ -424,6 +438,29 @@ public sealed class WidgetTrayAnimationController
             StopRendering();
             return;
         }
+
+        // ── 方案 A: 智能帧率节流控制 ──
+        // 策略：动画初期（前 100ms）用 60fps，之后降为 30fps
+        // 理由：人眼对启动阶段的流畅度更敏感，后续帧差异不明显
+        _elapsedSinceStart = stopwatch.Elapsed;
+        _targetFPS = _elapsedSinceStart.TotalMilliseconds < HighPriorityDurationMs 
+            ? MaxFPS_HighPriority 
+            : MaxFPS_Normal;
+        
+        _minFrameIntervalMs = 1000.0 / _targetFPS;
+        
+        // 计算距离上次渲染经过的时间
+        var timeSinceLastRender = stopwatch.Elapsed - new TimeSpan(_lastRenderTime.Ticks - _animationStartTime.Ticks);
+        
+        // 如果未到达目标帧率的最小间隔，跳过此帧
+        if (timeSinceLastRender.TotalMilliseconds < _minFrameIntervalMs)
+        {
+            return;  // 跳过此帧，减少系统开销
+        }
+        
+        // 更新最后一次渲染时间
+        _lastRenderTime = DateTime.UtcNow;
+        // ── 方案 A 控制结束 ──
 
         double rawProgress = Math.Clamp(stopwatch.Elapsed.TotalMilliseconds / _renderDurationMs, 0.0, 1.0);
         double easedProgress = WidgetAnimationSettings.Ease(rawProgress, _renderEasingIntensity, _renderIsShowing);
@@ -458,6 +495,13 @@ public sealed class WidgetTrayAnimationController
         _isRendering = false;
         _renderStopwatch = null;
         CompositionTarget.Rendering -= OnRenderingFrame;
+        
+        // ── 方案 A: 重置帧率节流状态 ──
+        _lastRenderTime = DateTime.MinValue;
+        _elapsedSinceStart = TimeSpan.Zero;
+        _targetFPS = MaxFPS_HighPriority;  // 重置为默认值
+        _minFrameIntervalMs = 1000.0 / _targetFPS;
+        // ── 方案 A 状态重置结束 ──
     }
 
     public void Stop()

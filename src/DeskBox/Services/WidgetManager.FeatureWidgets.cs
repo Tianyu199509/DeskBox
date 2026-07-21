@@ -55,7 +55,7 @@ public sealed partial class WidgetManager
             TaskContinuationOptions.OnlyOnFaulted);
     }
 
-    public async Task<QuickCaptureWidgetWindow> CreateOrShowQuickCaptureWidgetAsync(bool reveal = true)
+    public async Task<QuickCaptureWidgetWindow> CreateOrShowQuickCaptureWidgetAsync(bool reveal = true, bool focusNewInput = false)
     {
         SetFeatureWidgetEnabledState(WidgetKind.QuickCapture, true);
         RestoreDeletedQuickCaptureConfigs();
@@ -86,10 +86,15 @@ public sealed partial class WidgetManager
             window.RevealFromTray(autoRestore: false);
         }
 
+        if (focusNewInput)
+        {
+            window.FocusInputForNewNote();
+        }
+
         return window;
     }
 
-    public async Task<ContentWidgetWindow> CreateTodoWidgetAsync(string? name = null)
+    public async Task<ContentWidgetWindow> CreateTodoWidgetAsync(string? name = null, bool focusNewInput = false)
     {
         SetFeatureWidgetEnabledState(WidgetKind.Todo, true);
 
@@ -101,6 +106,11 @@ public sealed partial class WidgetManager
             await ShowWidgetAsync(existingConfig.Id, reveal: true, autoRestoreOnReveal: false);
             if (_contentWidgets.TryGetValue(existingConfig.Id, out var existing))
             {
+                if (focusNewInput)
+                {
+                    existing.TriggerAddAction();
+                }
+
                 return existing;
             }
         }
@@ -121,7 +131,13 @@ public sealed partial class WidgetManager
         _settingsService.Settings.Widgets.Add(config);
         await _settingsService.SaveAsync();
 
-        return await CreateContentWidgetFromConfigAsync(config, revealAfterCreate: true);
+        var window = await CreateContentWidgetFromConfigAsync(config, revealAfterCreate: true);
+        if (focusNewInput)
+        {
+            window.TriggerAddAction();
+        }
+
+        return window;
     }
 
     public async Task ShowTodoReminderTargetAsync(string? widgetId, string? itemId, bool preferTodayFilter)
@@ -156,6 +172,7 @@ public sealed partial class WidgetManager
             WidgetKind.Todo => "Todo.Title",
             WidgetKind.Music => "Music.Title",
             WidgetKind.Weather => "Weather.Title",
+            WidgetKind.Search => "Search.Title",
             WidgetKind.Tags => "Tags.Title",
             WidgetKind.SystemMonitor => "SystemMonitor.Title",
             _ => string.Empty
@@ -203,12 +220,14 @@ public sealed partial class WidgetManager
             {
                 WidgetKind.Music => 380,
                 WidgetKind.Weather => 200,
+                WidgetKind.Search => 280,
                 _ => Math.Max(_settingsService.Settings.DefaultWidgetWidth, 320)
             },
             Height = kind switch
             {
                 WidgetKind.Music => 190,
                 WidgetKind.Weather => 200,
+                WidgetKind.Search => 90,
                 _ => Math.Max(_settingsService.Settings.DefaultWidgetHeight, 360)
             }
         };
@@ -801,6 +820,11 @@ public sealed partial class WidgetManager
     private Task SetWeatherFeatureWidgetEnabledAsync(bool enabled, bool reveal)
     {
         return SetContentFeatureWidgetEnabledAsync(WidgetKind.Weather, enabled, reveal);
+    }
+
+    private Task SetSearchFeatureWidgetEnabledAsync(bool enabled, bool reveal)
+    {
+        return SetContentFeatureWidgetEnabledAsync(WidgetKind.Search, enabled, reveal);
     }
 
     private bool GetFeatureWidgetEnabledState(WidgetKind? kind)

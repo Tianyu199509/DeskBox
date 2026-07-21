@@ -61,6 +61,7 @@ public sealed partial class WeatherWidgetViewModel : ObservableObject, IDisposab
     private string _currentTemperatureText = "--\u00B0";
     private string _currentDescription = string.Empty;
     private string _currentEmoji = "\U0001F31E";
+    private string _currentIconGlyph = "\uE706";
     private string _apparentTemperatureText = string.Empty;
     private string _humidityText = string.Empty;
     private string _windText = string.Empty;
@@ -76,7 +77,7 @@ public sealed partial class WeatherWidgetViewModel : ObservableObject, IDisposab
     private WeatherCodeMapper.WeatherCondition _currentCondition = WeatherCodeMapper.WeatherCondition.Unknown;
 
     // Layout
-    private string _layoutMode = "Standard"; // Mini, Compact, Standard, Detailed
+    private string _layoutMode = "Expanded"; // Mini, Compact, Expanded
 
     // View switch button
     private string _viewSwitchTooltip = string.Empty;
@@ -169,6 +170,13 @@ public sealed partial class WeatherWidgetViewModel : ObservableObject, IDisposab
     {
         get => _currentEmoji;
         private set => SetProperty(ref _currentEmoji, value);
+    }
+
+    /// <summary>Segoe Fluent Icons glyph for the current weather condition.</summary>
+    public string CurrentIconGlyph
+    {
+        get => _currentIconGlyph;
+        private set => SetProperty(ref _currentIconGlyph, value);
     }
 
     public string ApparentTemperatureText
@@ -323,20 +331,19 @@ public sealed partial class WeatherWidgetViewModel : ObservableObject, IDisposab
     {
         "Mini" => Math.Min(26, TextSize + 14),
         "Compact" => Math.Min(34, TextSize + 21),
-        "Detailed" => Math.Min(50, TextSize + 30),
-        _ => Math.Min(38, TextSize + 24)
+        _ => Math.Min(44, TextSize + 28)
     };
 
     // Emoji font size scales with layout
-    public double CurrentEmojiSize => _layoutMode == "Mini" ? 26 : _layoutMode == "Compact" ? 30 : _layoutMode == "Detailed" ? 40 : 32;
-    public double ForecastEmojiSize => _layoutMode == "Detailed" ? 18 : 14;
+    public double CurrentEmojiSize => _layoutMode == "Mini" ? 26 : _layoutMode == "Compact" ? 28 : 32;
+    public double ForecastEmojiSize => _layoutMode == "Expanded" ? 18 : 14;
     public double ForecastHourTextSize => Math.Max(9, TextSize - 3);
     public double ForecastTempTextSize => Math.Max(10, TextSize - 1);
     public double WeekDayLabelTextSize => Math.Max(11, TextSize - 1);
-    public double WeekEmojiSize => _layoutMode == "Detailed" ? 20 : 16;
-    public double WeekTempMaxSize => _layoutMode == "Detailed" ? 15 : 13;
-    public double WeekTempMinSize => _layoutMode == "Detailed" ? 12 : 11;
-    public double HourlyCardWidth => _layoutMode == "Detailed" ? 48 : 46;
+    public double WeekEmojiSize => _layoutMode == "Expanded" ? 18 : 16;
+    public double WeekTempMaxSize => _layoutMode == "Expanded" ? 15 : 13;
+    public double WeekTempMinSize => _layoutMode == "Expanded" ? 12 : 11;
+    public double HourlyCardWidth => 52;
 
     // Mini layout supplementary info — multiple chips for richer display
     public string MiniHumidityText => _humidityText;
@@ -354,7 +361,7 @@ public sealed partial class WeatherWidgetViewModel : ObservableObject, IDisposab
     // Visibility helpers for settings-driven content
     public Visibility ForecastVisibility => _showForecast && !_isWeekView ? Visibility.Visible : Visibility.Collapsed;
     public Visibility WeekForecastVisibility => _showForecast && _isWeekView ? Visibility.Visible : Visibility.Collapsed;
-    public Visibility SunriseVisibility => _showSunrise && _layoutMode == "Detailed" ? Visibility.Visible : Visibility.Collapsed;
+    public Visibility SunriseVisibility => _showSunrise && _layoutMode == "Expanded" ? Visibility.Visible : Visibility.Collapsed;
     public Visibility UvIndexVisibility => _showUvIndex ? Visibility.Visible : Visibility.Collapsed;
     public Visibility PrecipitationVisibility => _showPrecipitation ? Visibility.Visible : Visibility.Collapsed;
     public Visibility HumidityVisibility => _showHumidity ? Visibility.Visible : Visibility.Collapsed;
@@ -365,8 +372,18 @@ public sealed partial class WeatherWidgetViewModel : ObservableObject, IDisposab
     public Visibility MiniLocationVisibility => !string.IsNullOrEmpty(_locationDisplay) ? Visibility.Visible : Visibility.Collapsed;
     public Visibility MiniDescriptionVisibility => !string.IsNullOrEmpty(_currentDescription) ? Visibility.Visible : Visibility.Collapsed;
     public Visibility CompactLayoutVisibility => _layoutMode == "Compact" ? Visibility.Visible : Visibility.Collapsed;
-    public Visibility StandardLayoutVisibility => _layoutMode == "Standard" ? Visibility.Visible : Visibility.Collapsed;
-    public Visibility DetailedLayoutVisibility => _layoutMode == "Detailed" ? Visibility.Visible : Visibility.Collapsed;
+    public Visibility ExpandedLayoutVisibility => _layoutMode == "Expanded" ? Visibility.Visible : Visibility.Collapsed;
+
+    // Expanded layout: progressive visibility based on available height
+    public Visibility ExpandedSunriseVisibility =>
+        _layoutMode == "Expanded" && _showSunrise && _lastAvailableHeight >= 260 ? Visibility.Visible : Visibility.Collapsed;
+
+    public Visibility ExpandedHourlyPrecipVisibility =>
+        _layoutMode == "Expanded" && _lastAvailableHeight >= 220 ? Visibility.Visible : Visibility.Collapsed;
+
+    public double ExpandedHourlyCardHeight =>
+        _lastAvailableHeight >= 280 ? 92 : (_lastAvailableHeight >= 220 ? 80 : 72);
+
     public Visibility RichSkinVisibility => _skin == SettingsService.WeatherSkinRich ? Visibility.Visible : Visibility.Collapsed;
 
     /// <summary>
@@ -665,6 +682,12 @@ public sealed partial class WeatherDayViewModel : ObservableObject
     public string TempMaxText { get; set; } = string.Empty;
     public string TempMinText { get; set; } = string.Empty;
     public string PrecipitationText { get; set; } = string.Empty;
+
+    /// <summary>Temperature range bar: left offset as fraction (0..1) of the full weekly range.</summary>
+    public double TempBarOffset { get; set; }
+
+    /// <summary>Temperature range bar: width as fraction (0..1) of the full weekly range.</summary>
+    public double TempBarWidth { get; set; } = 1.0;
 }
 
 /// <summary>
@@ -677,4 +700,7 @@ public sealed partial class WeatherHourViewModel : ObservableObject
     public string PrecipitationText { get; set; } = string.Empty;
     public string Emoji { get; set; } = "\U0001F31E";
     public string IconGlyph { get; set; } = "\uE706";
+
+    /// <summary>Whether this is the current hour (used for highlight).</summary>
+    public bool IsCurrentHour { get; set; }
 }

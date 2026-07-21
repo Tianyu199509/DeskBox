@@ -8,6 +8,7 @@ using Microsoft.UI;
 using Microsoft.UI.Composition;
 using Microsoft.UI.Composition.SystemBackdrops;
 using Microsoft.UI.Dispatching;
+using System.Diagnostics;
 using Microsoft.UI.Input;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
@@ -43,6 +44,14 @@ public abstract partial class WidgetWindowBase : Window
     protected AppWindow AppWindow = null!;
     protected WidgetWindowDiagnostics Diagnostics = null!;
     protected WidgetTrayAnimationController TrayAnimation = null!;
+    
+    // Smart Animation Adapter - for future enhancement
+    private static SmartAnimationAdapter? _smartAdapter;
+    
+    /// <summary>
+    /// 智能动画适配器（静态访问点）
+    /// </summary>
+    public static SmartAnimationAdapter? SmartAnimationAdapter => _smartAdapter;
     internal WidgetDisplayChangeWatcher? DisplayChangeWatcher;
 
     // ── Protected state: backdrop controllers ──────────────────
@@ -90,7 +99,28 @@ public abstract partial class WidgetWindowBase : Window
     /// Derived classes must set the protected fields (SettingsService, HWnd, etc.)
     /// in their own constructors before calling ConfigureWindowCore().
     /// </summary>
-    protected WidgetWindowBase() { }
+    protected WidgetWindowBase()
+    {
+        // 初始化智能动画适配器（只在第一次）
+        if (_smartAdapter is null)
+        {
+            try
+            {
+                _smartAdapter = new SmartAnimationAdapter(
+                    DispatcherQueue.GetForCurrentThread(),
+                    msg => Debug.WriteLine($"[SmartAnimation] {msg}"));
+                
+                var level = _smartAdapter.GetCurrentHardwareLevel();
+                Debug.WriteLine($"[SmartAnimation] Hardware Level: {level}");
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[SmartAnimation] Failed to initialize: {ex.Message}");
+                // 回退到默认模式
+                _smartAdapter = null;
+            }
+        }
+    }
 
     // ── Abstract members: each subclass must provide ───────────
 

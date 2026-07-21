@@ -1,0 +1,190 @@
+<?xml version="1.0" encoding="utf-8"?>
+<UserControl
+    x:Class="DeskBox.Views.SettingsSections.SearchSettingsSection"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:svc="using:DeskBox.Services"
+    xmlns:toolkit="using:CommunityToolkit.WinUI.Controls">
+
+    <UserControl.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="ms-appx:///Styles/SettingsOverviewResources.xaml" />
+            </ResourceDictionary.MergedDictionaries>
+        </ResourceDictionary>
+    </UserControl.Resources>
+
+    <StackPanel Style="{StaticResource SectionPanelStyle}">
+        <TextBlock Style="{StaticResource SectionTitleTextStyle}" svc:Localized.Key="Settings.Search.Title" />
+        <StackPanel Margin="0,8,0,0" Spacing="4">
+
+            <!-- Hotkey enable -->
+            <toolkit:SettingsCard
+                HorizontalContentAlignment="Right"
+                svc:Localized.DescriptionKey="Settings.Search.Hotkey.Description"
+                svc:Localized.HeaderKey="Settings.Search.Hotkey.Title">
+                <toolkit:SettingsCard.HeaderIcon>
+                    <FontIcon Glyph="&#xE765;" />
+                </toolkit:SettingsCard.HeaderIcon>
+                <ToggleSwitch
+                    x:Name="SearchHotkeyToggle"
+                    OnContent=""
+                    OffContent=""
+                    MinWidth="0"
+                    Toggled="SearchHotkeyToggle_Toggled" />
+            </toolkit:SettingsCard>
+
+            <!-- Hotkey capture -->
+            <toolkit:SettingsCard
+                ContentAlignment="Vertical"
+                HorizontalContentAlignment="Stretch"
+                svc:Localized.HeaderKey="Settings.Search.Hotkey.CustomTitle">
+                <toolkit:SettingsCard.HeaderIcon>
+                    <FontIcon Glyph="&#xE765;" />
+                </toolkit:SettingsCard.HeaderIcon>
+                <Grid RowSpacing="10">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+                    <TextBlock
+                        x:Name="SearchHotkeyStatusText"
+                        Grid.Row="0"
+                        VerticalAlignment="Center"
+                        Style="{StaticResource SettingDescriptionTextStyle}" />
+                    <Grid Grid.Row="1" MinWidth="252" HorizontalAlignment="Right" ColumnSpacing="10">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <Button
+                            x:Name="SearchHotkeyCaptureButton"
+                            Grid.Column="0"
+                            MinWidth="132"
+                            HorizontalAlignment="Stretch"
+                            Style="{StaticResource ActionButtonStyle}"
+                            svc:Localized.ToolTipKey="Settings.Search.Hotkey.ChangeTooltip"
+                            Click="SearchHotkeyCaptureButton_Click"
+                            KeyDown="SearchHotkeyCaptureButton_KeyDown"
+                            LostFocus="SearchHotkeyCaptureButton_LostFocus" />
+                        <Button
+                            x:Name="ResetSearchHotkeyButton"
+                            Grid.Column="1"
+                            Style="{StaticResource ActionButtonStyle}"
+                            svc:Localized.ToolTipKey="Settings.Search.Hotkey.ResetTooltip"
+                            Click="ResetSearchHotkeyButton_Click">
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <SymbolIcon Symbol="Refresh" />
+                                <TextBlock svc:Localized.Key="Common.Restore" />
+                            </StackPanel>
+                        </Button>
+                    </Grid>
+                </Grid>
+            </toolkit:SettingsCard>
+
+            <StackPanel Style="{StaticResource SettingsSubsectionHeaderStyle}">
+                <TextBlock Style="{StaticResource SettingsSubsectionTitleTextStyle}" svc:Localized.Key="Settings.Search.Scope.Title" />
+                <TextBlock Style="{StaticResource SettingDescriptionTextStyle}" svc:Localized.Key="Settings.Search.Scope.Description" />
+            </StackPanel>
+
+            <!-- Scope: DeskBox content -->
+            <toolkit:SettingsCard
+                HorizontalContentAlignment="Right"
+                svc:Localized.DescriptionKey="Settings.Search.Scope.DeskBox.Description"
+                svc:Localized.HeaderKey="Settings.Search.Scope.DeskBox">
+                <ToggleSwitch
+                    x:Name="SearchDeskBoxContentToggle"
+                    OnContent=""
+                    OffContent=""
+                    MinWidth="0"
+                    Toggled="SearchScopeToggle_Toggled" />
+            </toolkit:SettingsCard>
+
+            <!-- Scope: System index -->
+            <toolkit:SettingsCard
+                HorizontalContentAlignment="Right"
+                svc:Localized.DescriptionKey="Settings.Search.Scope.SystemIndex.Description"
+                svc:Localized.HeaderKey="Settings.Search.Scope.SystemIndex">
+                <ToggleSwitch
+                    x:Name="SearchSystemIndexToggle"
+                    OnContent=""
+                    OffContent=""
+                    MinWidth="0"
+                    Toggled="SearchScopeToggle_Toggled" />
+            </toolkit:SettingsCard>
+
+            <!-- Scope: Custom indexer -->
+            <toolkit:SettingsCard
+                HorizontalContentAlignment="Stretch"
+                svc:Localized.DescriptionKey="Settings.Search.Scope.CustomIndexer.Description"
+                svc:Localized.HeaderKey="Settings.Search.Scope.CustomIndexer">
+                <Grid ColumnSpacing="12">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock x:Name="SearchIndexStatusText" Grid.Column="0"
+                               VerticalAlignment="Center"
+                               Style="{StaticResource SettingDescriptionTextStyle}" />
+                    <ToggleSwitch
+                        x:Name="SearchCustomIndexerToggle"
+                        Grid.Column="1"
+                        OnContent=""
+                        OffContent=""
+                        MinWidth="0"
+                        Toggled="SearchScopeToggle_Toggled" />
+                </Grid>
+            </toolkit:SettingsCard>
+
+            <!-- Recommendations -->
+            <toolkit:SettingsCard
+                HorizontalContentAlignment="Right"
+                svc:Localized.DescriptionKey="Settings.Search.Recommendations.Description"
+                svc:Localized.HeaderKey="Settings.Search.Recommendations.Title">
+                <toolkit:SettingsCard.HeaderIcon>
+                    <FontIcon Glyph="&#xE8F1;" />
+                </toolkit:SettingsCard.HeaderIcon>
+                <ToggleSwitch
+                    x:Name="SearchRecommendationsToggle"
+                    OnContent=""
+                    OffContent=""
+                    MinWidth="0"
+                    Toggled="SearchRecommendationsToggle_Toggled" />
+            </toolkit:SettingsCard>
+
+            <toolkit:SettingsCard
+                HorizontalContentAlignment="Right"
+                svc:Localized.DescriptionKey="Settings.Search.DefaultTab.Description"
+                svc:Localized.HeaderKey="Settings.Search.DefaultTab.Title">
+                <toolkit:SettingsCard.HeaderIcon>
+                    <FontIcon Glyph="&#xE7C5;" />
+                </toolkit:SettingsCard.HeaderIcon>
+                <ComboBox x:Name="SearchDefaultTabComboBox"
+                          MinWidth="150"
+                          SelectionChanged="SearchDefaultTabComboBox_SelectionChanged">
+                    <ComboBoxItem Tag="all" svc:Localized.Key="Search.Tab.All" />
+                    <ComboBoxItem Tag="app" svc:Localized.Key="Search.Tab.App" />
+                    <ComboBoxItem Tag="file" svc:Localized.Key="Search.Tab.File" />
+                    <ComboBoxItem Tag="deskbox" svc:Localized.Key="Search.Tab.DeskBox" />
+                </ComboBox>
+            </toolkit:SettingsCard>
+
+            <toolkit:SettingsCard
+                HorizontalContentAlignment="Right"
+                svc:Localized.DescriptionKey="Settings.Search.Privacy.Description"
+                svc:Localized.HeaderKey="Settings.Search.Privacy.Title">
+                <toolkit:SettingsCard.HeaderIcon>
+                    <FontIcon Glyph="&#xE72E;" />
+                </toolkit:SettingsCard.HeaderIcon>
+                <Button Click="ClearSearchActivityButton_Click"
+                        Style="{StaticResource ActionButtonStyle}">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <FontIcon Glyph="&#xE74D;" FontSize="12" />
+                        <TextBlock svc:Localized.Key="Settings.Search.Privacy.Clear" />
+                    </StackPanel>
+                </Button>
+            </toolkit:SettingsCard>
+
+        </StackPanel>
+    </StackPanel>
+</UserControl>

@@ -103,12 +103,39 @@ public sealed partial class ContentWidgetWindow
         }
     }
 
-    private async void CloseButton_Click(object sender, RoutedEventArgs e)
+    /// <summary>
+    /// Programmatically triggers the "add new item" action (same as clicking the + button).
+    /// Used by search actions to open the create-detail editor after showing the widget.
+    /// </summary>
+    internal void TriggerAddAction()
+    {
+        DispatcherQueue.TryEnqueue(async () =>
+        {
+            if (_contentHost.CurrentContent is IWidgetAddActionContent addActionContent)
+            {
+                await addActionContent.AddFromTitleButtonAsync();
+            }
+        });
+    }
+
+    private void CloseButton_Click(object sender, RoutedEventArgs e)
     {
         if (FeatureWidgetSettings.IsFeatureWidget(_config.WidgetKind) &&
             App.Current.WidgetManager is { } widgetManager)
         {
-            await widgetManager.SetFeatureWidgetEnabledAsync(_config.WidgetKind, enabled: false, reveal: false);
+            var localization = App.Current.LocalizationService;
+            var flyout = WidgetCompactConfirmationMenuBuilder.CreateDeleteConfirmation(
+                new WidgetCompactConfirmationOptions(
+                    localization.Format("Widget.FeatureWidget.DisableConfirmTitle", _config.Name),
+                    localization.T("Widget.FeatureWidget.Disable"),
+                    async () => await widgetManager.SetFeatureWidgetEnabledAsync(_config.WidgetKind, enabled: false, reveal: false))
+                {
+                    Message = localization.T("Widget.FeatureWidget.DisableConfirmNote"),
+                    MessageGlyph = "\uE946",
+                    IsDangerAction = false,
+                    CancelText = localization.T("Common.Cancel")
+                });
+            ShowFlyoutWithInteraction(flyout, ContentWidgetShell.CloseActionButton);
             return;
         }
 

@@ -1,0 +1,36 @@
+﻿[ControlType.Pane] WinUI Desktop | 600,258,720x540
+  [ControlType.Pane]  | 600,258,720x540
+    [ControlType.Pane]  | 600,258,720x540
+      [ControlType.Edit] 搜索文件、待办、随记... | 659,283,575x32
+      [ControlType.Text] Alt+D | 1254,291,29x15
+      [ControlType.Pane]  | 600,336,720x462
+        [ControlType.Text] 最近搜索 | 622,358,326x16
+        [ControlType.Text] a | 662,392,274x19
+        [ControlType.Text] 系统 | 662,430,274x19
+        [ControlType.Text] Rp | 662,468,274x19
+        [ControlType.Text] Sall | 662,506,274x19
+        [ControlType.Text] Sallo | 662,544,274x19
+        [ControlType.Text] 给麦 | 662,582,274x19
+        [ControlType.Text] 你好 | 662,620,274x19
+        [ControlType.Text] 操作 | 984,350,326x16
+        [ControlType.Button]  | 984,374,314x40
+          [ControlType.Text] 新建待办 | 1023,385,54x18
+        [ControlType.Button]  | 984,422,314x40
+          [ControlType.Text] 新建随记 | 1023,433,54x18
+        [ControlType.Button]  | 984,470,314x40
+          [ControlType.Text] 打开设置 | 1023,481,54x18
+        [ControlType.Text] 最近使用 | 984,530,326x16
+        [ControlType.Text] 你一下就指出了一个**真正的工程问题**，也是我刚才那个方案最大的漏洞。  如果用户真的这样用：  ``` Worksp... | 1026,561,272x19
+        [ControlType.Text] Text | 1026,582,272x16
+        [ControlType.Text] 待办加入日历视图，类似github的格子，标注每一天的结果 快捷方式有时展示不出来，比如steam 待办/随记都要支持文... | 1026,612,272x19
+        [ControlType.Text] Text | 1026,633,272x16
+        [ControlType.Text] 随记和待办需要加一个，可以拖动到对应的tab进行操作。比如随记从最近拖动固定后就直接给内容固定，待办从全部内拖动内容到今... | 1026,663,272x19
+        [ControlType.Text] Text | 1026,684,272x16
+        [ControlType.Text] 未确认 287538.crdownload | 1026,714,272x19
+        [ControlType.Text] C:\Users\simon\Downloads | 1026,735,272x16
+        [ControlType.Text] 未确认 703085.crdownload | 1026,765,272x19
+        [ControlType.ScrollBar] 垂直 | 1307,337,12x460
+          [ControlType.Button] 垂直小幅下降 | 1307,337,12x12
+          [ControlType.Button] 垂直大幅增长 | 1307,599,12x186
+          [ControlType.Button] 垂直小幅增长 | 1307,785,12x12
+

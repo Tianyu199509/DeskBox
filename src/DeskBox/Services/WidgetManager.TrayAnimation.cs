@@ -214,18 +214,40 @@ public sealed partial class WidgetManager
 
     private void PlayPreparedTrayShowAnimations(IReadOnlyList<IDesktopWidgetWindow> windows)
     {
-        ApplyTrayAnimationGroupOffset(windows);
-        foreach (var window in windows)
+        if (windows.Count == 0)
+        {
+            return;
+        }
+
+        App.LogVerbose($"[TrayBatch] Starting batch show for {windows.Count} widgets...");
+        
+        // ⭐ 终极优化：使用 DispatcherQueue 强制同一帧完成偏移量设置和动画播放
+        var dispatcher = Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread();
+        dispatcher.TryEnqueue(() =>
         {
             try
             {
-                window.PlayTrayShowAnimation();
+                // Step 1: 在同一帧内完成所有偏移量设置
+                ApplyTrayAnimationGroupOffset(windows);
+                
+                // Step 2: 然后同时播放所有动画
+                foreach (var window in windows)
+                {
+                    try
+                    {
+                        window.PlayTrayShowAnimation();
+                    }
+                    catch (Exception ex)
+                    {
+                        App.Log($"[WidgetManager] Failed to play widget show animation {window}: {ex}");
+                    }
+                }
             }
             catch (Exception ex)
             {
-                App.Log($"[WidgetManager] Failed to play widget show animation {FormatHostWindow(window)}: {ex}");
+                App.Log($"[TrayBatch] Error during batch animation: {ex}");
             }
-        }
+        });
     }
 
     private void PrepareTrayShowAnimations(IReadOnlyList<IDesktopWidgetWindow> windows)
@@ -246,18 +268,40 @@ public sealed partial class WidgetManager
 
     private void PlayPreparedTrayHideAnimations(IReadOnlyList<IDesktopWidgetWindow> windows)
     {
-        ApplyTrayAnimationGroupOffset(windows);
-        foreach (var window in windows)
+        if (windows.Count == 0)
+        {
+            return;
+        }
+
+        App.LogVerbose($"[TrayBatch] Starting batch hide for {windows.Count} widgets...");
+        
+        // ⭐ 与 PlayPreparedTrayShowAnimations 相同的优化：使用 DispatcherQueue 强制同一帧完成所有操作
+        var dispatcher = Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread();
+        dispatcher.TryEnqueue(() =>
         {
             try
             {
-                window.PlayPreparedTrayHideAnimation();
+                // Step 1: 在同一帧内完成所有偏移量设置
+                ApplyTrayAnimationGroupOffset(windows);
+                
+                // Step 2: 然后同时隐藏所有窗口
+                foreach (var window in windows)
+                {
+                    try
+                    {
+                        window.PlayPreparedTrayHideAnimation();
+                    }
+                    catch (Exception ex)
+                    {
+                        App.Log($"[WidgetManager] Failed to play widget hide animation {FormatHostWindow(window)}: {ex}");
+                    }
+                }
             }
             catch (Exception ex)
             {
-                App.Log($"[WidgetManager] Failed to play widget hide animation {FormatHostWindow(window)}: {ex}");
+                App.Log($"[TrayBatch] Error during batch hide animation: {ex}");
             }
-        }
+        });
     }
 
     private void ApplyTrayAnimationGroupOffset(IReadOnlyList<IDesktopWidgetWindow> windows)

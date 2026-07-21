@@ -280,7 +280,8 @@ public const int WeatherRefreshMaxMinutes = 180;
                 [nameof(AppSettings.DefaultManagedStorageRootPath)] = DefaultPreferencePreservationReason.Storage,
                 [nameof(AppSettings.HasCompletedOnboarding)] = DefaultPreferencePreservationReason.RuntimeState,
                 [nameof(AppSettings.LastQuickCaptureFileWidgetId)] = DefaultPreferencePreservationReason.RuntimeState,
-                [nameof(AppSettings.LastUpdateCheckAt)] = DefaultPreferencePreservationReason.RuntimeState
+                [nameof(AppSettings.LastUpdateCheckAt)] = DefaultPreferencePreservationReason.RuntimeState,
+                [nameof(AppSettings.SchemaVersion)] = DefaultPreferencePreservationReason.RuntimeState
             };
 
     private readonly string _settingsPath;
@@ -397,6 +398,21 @@ settings.WeatherShowHumidity = true;
 settings.WeatherShowWind = true;
 settings.WeatherShowPressure = false;
 settings.WeatherRefreshIntervalMinutes = 60;
+        settings.SearchHotkeyEnabled = true;
+        settings.SearchHotkeyModifiers = (int)HotkeyModifierKeys.Alt;
+        settings.SearchHotkeyKey = 0x44;
+        settings.SearchDisplayMode = "Spotlight";
+        settings.SearchIncludeDeskBoxContent = true;
+        settings.SearchIncludeSystemIndex = true;
+        settings.SearchCustomIndexerEnabled = false;
+        settings.SearchCustomIndexPaths = [];
+        settings.SearchShowRecommendations = true;
+        settings.SearchMaxResults = 50;
+        settings.SearchDefaultTab = "all";
+        settings.SearchPopupCustomX = null;
+        settings.SearchPopupCustomY = null;
+        settings.SearchPopupCustomWidth = null;
+        settings.SearchPopupCustomHeight = null;
         settings.TodoNewTaskPosition = TodoNewTaskPositionTop;
         settings.TodoDefaultFilter = TodoDefaultFilterAll;
         settings.TodoTabStyle = WidgetTabStyleButton;
@@ -471,12 +487,17 @@ settings.FocusClickedWidgetOnRaise = false;
                     ApplyDefaultPreferences(_settings);
                 }
 
-                changed = NormalizePresentationSettings(_settings);
+                // Run schema migrations if the loaded version is older than current
+                var migrationPipeline = new SettingsMigrationPipeline();
+                changed = migrationPipeline.RunMigrations(_settings);
+
+                changed |= NormalizePresentationSettings(_settings);
                 changed |= NormalizeAppearanceSettings(_settings);
                 changed |= NormalizeFeatureWidgetSettings(_settings);
                 changed |= NormalizeWidgetContentSettings(_settings);
                 changed |= NormalizeOrganizerSettings(_settings);
                 changed |= NormalizeHotkeySettings(_settings);
+                changed |= NormalizeSearchSettings(_settings);
                 changed |= NormalizeQuickCaptureSettings(_settings);
                 changed |= NormalizeTodoSettings(_settings);
 changed |= NormalizeWeatherSettings(_settings);
@@ -545,6 +566,7 @@ changed |= NormalizeDeletionSettings(_settings);
                 NormalizeWidgetContentSettings(_settings);
                 NormalizeOrganizerSettings(_settings);
                 NormalizeHotkeySettings(_settings);
+                NormalizeSearchSettings(_settings);
                 NormalizeQuickCaptureSettings(_settings);
                 NormalizeTodoSettings(_settings);
                 NormalizeWeatherSettings(_settings);
@@ -2002,7 +2024,44 @@ changed |= NormalizeDeletionSettings(_settings);
             changed = true;
         }
 
+        // Normalize the search hotkey modifiers.
+        int searchNormalizedModifiers = (int)((Models.HotkeyModifierKeys)settings.SearchHotkeyModifiers &
+            (Models.HotkeyModifierKeys.Alt | Models.HotkeyModifierKeys.Control | Models.HotkeyModifierKeys.Shift));
+        if (settings.SearchHotkeyModifiers != searchNormalizedModifiers)
+        {
+            settings.SearchHotkeyModifiers = searchNormalizedModifiers;
+            changed = true;
+        }
+
+        // Alt+Space is reserved by Windows for the window system menu and cannot be
+        // registered via RegisterHotKey. Reset a saved Alt+Space gesture to the
+        // working default (Alt+D) so the search hotkey functions out of the box.
+        var searchModifiers = (Models.HotkeyModifierKeys)settings.SearchHotkeyModifiers;
+        if (settings.SearchHotkeyKey == 0x20 && searchModifiers == Models.HotkeyModifierKeys.Alt)
+        {
+            settings.SearchHotkeyModifiers = (int)Models.HotkeyModifierKeys.Alt;
+            settings.SearchHotkeyKey = 0x44; // D
+            changed = true;
+        }
+
         return changed;
+    }
+
+    private static bool NormalizeSearchSettings(AppSettings settings)
+    {
+        string normalized = settings.SearchDefaultTab?.Trim().ToLowerInvariant() ?? "all";
+        if (normalized is not ("all" or "app" or "file" or "deskbox"))
+        {
+            normalized = "all";
+        }
+
+        if (string.Equals(settings.SearchDefaultTab, normalized, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        settings.SearchDefaultTab = normalized;
+        return true;
     }
 
     private static bool NormalizeQuickCaptureSettings(AppSettings settings)

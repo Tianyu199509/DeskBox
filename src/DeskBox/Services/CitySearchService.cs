@@ -224,6 +224,7 @@ public sealed class CitySearchService
     private static List<WeatherCitySearchResult> SearchLocal(string query, bool isEn)
     {
         var lower = query.ToLowerInvariant();
+        bool isPinyinInitials = lower.Length >= 2 && lower.All(c => c >= 'a' && c <= 'z');
 
         var matches = Predefined
             .Where(c =>
@@ -235,13 +236,102 @@ public sealed class CitySearchService
                     || c.CountryZh.Contains(query, StringComparison.OrdinalIgnoreCase)
                     || c.CountryEn.Contains(query, StringComparison.OrdinalIgnoreCase)
                     || c.Admin1Zh.Contains(query, StringComparison.OrdinalIgnoreCase)
-                    || c.Admin1En.Contains(query, StringComparison.OrdinalIgnoreCase);
+                    || c.Admin1En.Contains(query, StringComparison.OrdinalIgnoreCase)
+                    || (isPinyinInitials && MatchesPinyinInitials(c.Pinyin, lower));
             })
-            .Take(5)
+            .OrderByDescending(c => GetSearchRelevance(c, query, lower))
+            .Take(8)
             .Select(c => ToSearchResult(c, isEn))
             .ToList();
 
         return matches;
+    }
+
+    /// <summary>
+    /// Matches pinyin initials: "hz" matches "hangzhou", "bj" matches "beijing".
+    /// </summary>
+    private static bool MatchesPinyinInitials(string pinyin, string initials)
+    {
+        if (string.IsNullOrWhiteSpace(pinyin) || initials.Length > pinyin.Length)
+        {
+            return false;
+        }
+
+        // Check if the query matches the first letter of each syllable.
+        // Pinyin is stored as a single word (e.g. "hangzhou"), so we match
+        // the first N characters as a prefix OR try syllable-initial matching.
+        if (pinyin.StartsWith(initials, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        // Syllable initial matching: split pinyin into syllables by common
+        // boundaries and check if initials match first letters.
+        // For compound names like "hangzhou", try matching "h" + "z" = "hz".
+        if (initials.Length >= 2 && initials.Length <= 4)
+        {
+            // Simple heuristic: try splitting at each position and check
+            // if first letters of parts match the initials.
+            for (int splitLen = 1; splitLen < pinyin.Length - 1; splitLen++)
+            {
+                if (pinyin.Length - splitLen < initials.Length - 1)
+                {
+                    break;
+                }
+
+                // Check if first char matches first initial
+                if (char.ToLowerInvariant(pinyin[0]) != initials[0])
+                {
+                    break;
+                }
+
+                // For 2-char initials like "hz": check if there's a 'z' later
+                if (initials.Length == 2)
+                {
+                    for (int j = splitLen; j < pinyin.Length; j++)
+                    {
+                        if (char.ToLowerInvariant(pinyin[j]) == initials[1])
+                        {
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Scores search relevance: exact name match > prefix match > contains > pinyin.
+    /// </summary>
+    private static int GetSearchRelevance(PredefinedCity city, string query, string lower)
+    {
+        if (city.Zh.Equals(query, StringComparison.OrdinalIgnoreCase) ||
+            city.En.Equals(query, StringComparison.OrdinalIgnoreCase))
+        {
+            return 100;
+        }
+
+        if (city.Zh.StartsWith(query, StringComparison.OrdinalIgnoreCase) ||
+            city.En.StartsWith(query, StringComparison.OrdinalIgnoreCase) ||
+            city.Pinyin.StartsWith(lower, StringComparison.OrdinalIgnoreCase))
+        {
+            return 80;
+        }
+
+        if (city.Zh.Contains(query, StringComparison.OrdinalIgnoreCase) ||
+            city.En.Contains(query, StringComparison.OrdinalIgnoreCase))
+        {
+            return 60;
+        }
+
+        if (city.Pinyin.Contains(lower, StringComparison.OrdinalIgnoreCase))
+        {
+            return 40;
+        }
+
+        return 20;
     }
 
     private static WeatherCitySearchResult ToSearchResult(PredefinedCity c, bool isEn)

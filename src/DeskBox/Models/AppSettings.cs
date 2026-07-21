@@ -6,6 +6,12 @@ namespace DeskBox.Models;
 public class AppSettings
 {
     /// <summary>
+    /// Settings schema version for migration purposes.
+    /// Current version is 1. Older settings files without this field are treated as version 0.
+    /// </summary>
+    public int SchemaVersion { get; set; } = 1;
+
+    /// <summary>
     /// Application theme. Valid values: <c>"System"</c>, <c>"Light"</c>, <c>"Dark"</c>.
     /// </summary>
     public string Theme { get; set; } = "System";
@@ -533,4 +539,56 @@ public class AppSettings
     /// Refresh interval in minutes. Valid values: 15, 30, 60, 180.
     /// </summary>
     public int WeatherRefreshIntervalMinutes { get; set; } = 60;
+
+    // ─── Search Settings ───────────────────────────────────────────────
+
+    /// <summary>Whether the search global hotkey is enabled.</summary>
+    public bool SearchHotkeyEnabled { get; set; } = true;
+
+    /// <summary>Search hotkey modifier bit flags.</summary>
+    public int SearchHotkeyModifiers { get; set; } = (int)HotkeyModifierKeys.Alt;
+
+    /// <summary>
+    /// Search hotkey virtual key code. Default: D (0x44).
+    /// Note: Alt+Space is reserved by Windows for the window system menu and
+    /// cannot be registered via RegisterHotKey, so Alt+D is used instead.
+    /// </summary>
+    public int SearchHotkeyKey { get; set; } = 0x44;
+
+    /// <summary>
+    /// Search popup display mode. Valid values: "Spotlight", "Home", "Palette".
+    /// </summary>
+    public string SearchDisplayMode { get; set; } = "Spotlight";
+
+    /// <summary>Whether to include DeskBox internal content (todos, notes, widget files) in search.</summary>
+    public bool SearchIncludeDeskBoxContent { get; set; } = true;
+
+    /// <summary>Whether to include Windows indexed locations in search.</summary>
+    public bool SearchIncludeSystemIndex { get; set; } = true;
+
+    /// <summary>Whether to enable the custom file indexer for broader coverage.</summary>
+    public bool SearchCustomIndexerEnabled { get; set; } = false;
+
+    /// <summary>Additional directories for the custom file indexer to scan.</summary>
+    public List<string> SearchCustomIndexPaths { get; set; } = [];
+
+    /// <summary>Whether to show recommendations when the search popup opens.</summary>
+    public bool SearchShowRecommendations { get; set; } = true;
+
+    /// <summary>Maximum number of search results to display.</summary>
+    public int SearchMaxResults { get; set; } = 50;
+
+    /// <summary>Default result tab for a new query: all, app, file, or deskbox.</summary>
+    public string SearchDefaultTab { get; set; } = "all";
+
+    /// <summary>
+    /// Custom search popup window bounds (physical pixels). When all four are set the
+    /// popup opens at this position/size instead of the default centered, mode-based
+    /// placement. Null means "use default". Double-clicking the popup title area clears
+    /// these back to null.
+    /// </summary>
+    public int? SearchPopupCustomX { get; set; }
+    public int? SearchPopupCustomY { get; set; }
+    public int? SearchPopupCustomWidth { get; set; }
+    public int? SearchPopupCustomHeight { get; set; }
 }

@@ -13,7 +13,8 @@ public static class FeatureWidgetSettings
         WidgetKind.QuickCapture,
         WidgetKind.Todo,
         WidgetKind.Music,
-        WidgetKind.Weather
+        WidgetKind.Weather,
+        WidgetKind.Search
     ];
 
     public static IReadOnlyList<WidgetKind> FeatureKinds => s_featureKinds;
@@ -140,6 +141,7 @@ public static class FeatureWidgetSettings
             WidgetKind.Todo => settings.TodoEnabled,
             WidgetKind.Music => false,
             WidgetKind.Weather => false,
+            WidgetKind.Search => false,
             _ => false
         };
     }

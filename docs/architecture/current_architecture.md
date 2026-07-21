@@ -1,6 +1,6 @@
 # DeskBox Current Architecture
 
-Last updated: 2026-07-03
+Last updated: 2026-07-20
 
 This document describes the current architecture after the 1.2.0 widget foundation work. It is intended as the short, current-state handoff for future maintenance. Historical plans and checkpoints live under the archive folders.
 
@@ -24,10 +24,10 @@ Current production widget categories:
 - `QuickCapture`: the note and clipboard widget, still using a dedicated window.
 - `Todo`: content-type feature widget using `ContentWidgetWindow`.
 - `Music`: content-type feature widget using `ContentWidgetWindow` and Windows media sessions.
+- `Weather`: content-type feature widget using `ContentWidgetWindow`, Open-Meteo API, and adaptive responsive layouts.
 
 Planned placeholder kinds:
 
-- `Weather`
 - `Tags`
 - `SystemMonitor`
 
@@ -83,7 +83,7 @@ Current windows:
 
 - `src/DeskBox/Views/WidgetWindow.xaml.cs`: file widgets.
 - `src/DeskBox/Views/QuickCaptureWidgetWindow.xaml.cs`: QuickCapture / note widget.
-- `src/DeskBox/Views/ContentWidgetWindow.xaml.cs`: Todo, Music, and future content widgets.
+- `src/DeskBox/Views/ContentWidgetWindow.xaml.cs`: Todo, Music, Weather, and future content widgets.
 
 Current Todo implementation:
 
@@ -105,14 +105,26 @@ Current Music implementation:
 - `src/DeskBox/Services/MusicVolumeService.cs`
 - `src/DeskBox/Services/MusicWidgetContentProvider.cs`
 
+Current Weather implementation:
+
+- `src/DeskBox/Controls/WidgetContents/WeatherWidgetContent.xaml`
+- `src/DeskBox/Controls/WidgetContents/WeatherWidgetContent.xaml.cs`
+- `src/DeskBox/Controls/WidgetContents/WeatherWidgetContentAdapter.cs`
+- `src/DeskBox/ViewModels/WeatherWidgetViewModel.cs`
+- `src/DeskBox/ViewModels/WeatherWidgetViewModel.DataProcessing.cs`
+- `src/DeskBox/ViewModels/WeatherWidgetViewModel.RefreshAndLayout.cs`
+- `src/DeskBox/Services/WeatherService.cs`
+- `src/DeskBox/Helpers/WeatherCodeMapper.cs`
+- `src/DeskBox/Helpers/WindowsLocationHelper.cs`
+
 ## WidgetRegistry
 
 `WidgetRegistry` answers whether a kind is known, implemented, creatable, and available in the current session.
 
 Current behavior:
 
-- `File`, `QuickCapture`, `Todo`, and `Music` are creatable/implemented.
-- `Weather`, `Tags`, and `SystemMonitor` are known but not user-creatable.
+- `File`, `QuickCapture`, `Todo`, `Music`, and `Weather` are creatable/implemented.
+- `Tags` and `SystemMonitor` are known but not user-creatable.
 - Feature widget availability is checked through `FeatureWidgetSettings`.
 
 Do not use ad hoc `if` checks in new UI entry points when `WidgetRegistry` can answer the question.
@@ -145,6 +157,7 @@ Current providers:
 
 - `TodoWidgetContentProvider`: creates real Todo content.
 - `MusicWidgetContentProvider`: creates real Music content.
+- `WeatherWidgetContentProvider`: creates real Weather content.
 - `PlaceholderWidgetContentProvider`: creates placeholder content for planned kinds.
 
 Current contract:
@@ -203,14 +216,14 @@ Current shared pieces used by QuickCapture:
 
 `ContentWidgetWindow` is the host for content-type feature widgets.
 
-Current production user:
+Current production users:
 
 - Todo
 - Music
+- Weather
 
 Future likely users:
 
-- Weather
 - SystemMonitor
 - Tags, if it is implemented as a content widget
 
@@ -302,6 +315,7 @@ Current feature kinds:
 - `QuickCapture`
 - `Todo`
 - `Music`
+- `Weather`
 
 Settings are stored in:
 
@@ -326,6 +340,8 @@ Current handlers:
 
 - QuickCapture: dedicated window path.
 - Todo: content window path.
+- Music: content window path.
+- Weather: content window path.
 
 Still intentionally present:
 
@@ -340,8 +356,8 @@ Current state:
 
 - The feature widget list is generated from `SettingsViewModel.FeatureWidgetEntries`.
 - Feature entries are derived from `WidgetContentFactory.GetFeatureWidgetEntryDescriptors()`.
-- Available feature widgets, such as QuickCapture, Todo, and Music, show toggles.
-- Planned feature widgets, such as Weather, Tags, and SystemMonitor, are shown as descriptor-driven read-only rows with status text instead of disabled hand-written UI.
+- Available feature widgets, such as QuickCapture, Todo, Music, and Weather, show toggles.
+- Planned feature widgets, such as Tags and SystemMonitor, are shown as descriptor-driven read-only rows with status text instead of disabled hand-written UI.
 - Toggle state flows through `FeatureWidgetSettings` and `WidgetManager.SetFeatureWidgetEnabledAsync(...)`.
 
 Global appearance settings should contain settings shared by all widgets:
@@ -423,7 +439,7 @@ Recommended sequence:
 
 ## Suggested Feature Order
 
-Lowest-risk next feature widget after 1.2.0:
+Lowest-risk next feature widget after 1.3.0:
 
 - `SystemMonitor` with CPU, memory, and network only.
 
@@ -436,7 +452,6 @@ Reasons:
 
 Then:
 
-- `Weather`: location permission plus manual city selection.
 - `Tags`: internal DeskBox index only, no file metadata writes.
 
 Last:
@@ -478,8 +493,9 @@ Result:
 
 After changes to Shell, windows, manager, settings, or menus, test at least:
 
-- App starts and restores File, QuickCapture, Todo, and Music widgets.
+- App starts and restores File, QuickCapture, Todo, Music, and Weather widgets.
 - Music widget restores, reads Windows media session state, and keeps system volume control usable.
+- Weather widget restores, fetches location data, and displays current/forecast correctly.
 - F7 shows/hides all expected widgets.
 - Tray left-click behavior is correct.
 - Tray right-click menu font is correct.

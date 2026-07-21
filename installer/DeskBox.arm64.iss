@@ -1,0 +1,72 @@
+; DeskBox ARM64 安装脚本
+; 构建命令：
+; dotnet publish ..\src\DeskBox\DeskBox.csproj --configuration Release -p:Platform=ARM64 -p:RuntimeIdentifier=win-arm64 -p:SelfContained=false -p:WindowsAppSDKSelfContained=false -o ..\artifacts\publish\DeskBox\arm64 -v:minimal
+
+#define MyAppName "DeskBox"
+#define MyAppVersion "1.3.1"
+#define MyAppVersionInfo "1.3.1.0"
+#define MyAppPublisher "朱天雨"
+#define MyAppExeName "DeskBox.exe"
+#define MyAppOutputBaseName "DeskBox_Setup"
+#ifndef MyAppReleaseDir
+#define MyAppReleaseDir "..\artifacts\publish\DeskBox\arm64"
+#endif
+
+[Setup]
+AppId={{5E052824-3456-427E-9759-3BCAE078A1D3}
+AppName={#MyAppName}
+AppVersion={#MyAppVersion}
+AppPublisher={#MyAppPublisher}
+AppComments=安装包会按需检测并下载 .NET 10 Runtime 和 Windows App Runtime 2.2。
+UninstallDisplayName={#MyAppName} {#MyAppVersion}
+UninstallDisplayIcon={app}\Assets\deskbox.ico
+ArchitecturesAllowed=arm64
+ArchitecturesInstallIn64BitMode=arm64
+DefaultDirName={localappdata}\Programs\{#MyAppName}
+DisableProgramGroupPage=yes
+DisableDirPage=no
+PrivilegesRequired=lowest
+UsePreviousAppDir=no
+UsePreviousPrivileges=no
+CloseApplications=force
+CloseApplicationsFilter={#MyAppExeName}
+RestartApplications=no
+OutputDir=..\Output
+OutputBaseFilename={#MyAppOutputBaseName}_{#MyAppVersion}_arm64
+SetupIconFile=..\src\DeskBox\Assets\deskbox.ico
+VersionInfoVersion={#MyAppVersionInfo}
+VersionInfoProductVersion={#MyAppVersionInfo}
+VersionInfoTextVersion={#MyAppVersion}
+Compression=lzma
+SolidCompression=yes
+WizardStyle=modern
+
+[Languages]
+Name: "chinesesimplified"; MessagesFile: "Languages\ChineseSimplified.isl"
+
+[Tasks]
+Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
+
+[InstallDelete]
+Type: files; Name: "{userdesktop}\{#MyAppName}.lnk"; Tasks: desktopicon
+Type: filesandordirs; Name: "{app}\Microsoft.WindowsAppRuntime"
+Type: files; Name: "{app}\Microsoft.WinUI.dll"
+Type: files; Name: "{app}\Microsoft.Windows.SDK.NET.dll"
+Type: files; Name: "{app}\DirectML.dll"
+Type: files; Name: "{app}\onnxruntime.dll"
+Type: files; Name: "{userstartup}\{#MyAppName}.lnk"
+
+[Files]
+Source: "{#MyAppReleaseDir}\*"; DestDir: "{app}"; Excludes: "DeskBox.Updater.*"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#MyAppReleaseDir}\DeskBox.Updater.*"; DestDir: "{app}"; Flags: ignoreversion onlyifdoesntexist
+
+[Icons]
+Name: "{userprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\Assets\deskbox.ico"
+Name: "{userdesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\Assets\deskbox.ico"; Tasks: desktopicon
+
+[Run]
+Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent runasoriginaluser
+
+#include "DeskBox.Migration.iss"
+#include "DeskBox.Dependencies.arm64.iss"
+#include "DeskBox.Uninstall.iss"

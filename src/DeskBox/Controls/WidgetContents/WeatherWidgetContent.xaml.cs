@@ -2,6 +2,7 @@ using DeskBox.ViewModels;
 using Microsoft.UI;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Data;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Animation;
 using Microsoft.UI.Xaml.Shapes;
@@ -11,7 +12,7 @@ namespace DeskBox.Controls.WidgetContents;
 
 /// <summary>
 /// Weather widget content view. Adapts its layout based on the available size
-/// (Compact / Standard / Detailed) and supports switching between Today and Week views.
+/// (Mini / Compact / Expanded) and supports switching between Today and Week views.
 /// </summary>
 public sealed partial class WeatherWidgetContent : UserControl
 {
@@ -30,6 +31,12 @@ public sealed partial class WeatherWidgetContent : UserControl
 
     // Track the refresh icon elements across all layouts for rotation animation
     private readonly List<FrameworkElement> _refreshIcons = [];
+
+    // Drag-to-scroll state for the forecast ScrollViewers (hourly horizontal / week vertical)
+    private bool _forecastDragging;
+    private Windows.Foundation.Point _forecastDragStart;
+    private double _forecastDragStartHOffset;
+    private double _forecastDragStartVOffset;
 
     public WeatherWidgetContent(WeatherWidgetViewModel viewModel)
     {
@@ -353,20 +360,93 @@ public sealed partial class WeatherWidgetContent : UserControl
         _ = _viewModel.RefreshAsync(userTriggered: true);
     }
 
+    private static bool IsControlKeyDown()
+    {
+        var state = Microsoft.UI.Input.InputKeyboardSource.GetKeyStateForCurrentThread(Windows.System.VirtualKey.Control);
+        return state.HasFlag(Windows.UI.Core.CoreVirtualKeyStates.Down);
+    }
+
     private void HourlyScroll_PointerWheelChanged(object sender, Microsoft.UI.Xaml.Input.PointerRoutedEventArgs e)
     {
         if (sender is ScrollViewer sv)
         {
-            var delta = e.GetCurrentPoint(sv).Properties.MouseWheelDelta;
-            if (delta != 0)
+            var props = e.GetCurrentPoint(sv).Properties;
+            // Horizontal scroll only while Ctrl is held; plain wheel is left unhandled.
+            if (IsControlKeyDown() && props.MouseWheelDelta != 0)
             {
                 // Natural horizontal scroll: wheel up scrolls left, wheel down scrolls right.
                 // Amplify by 2x for smoother navigation through 24 hours.
-                double offset = sv.HorizontalOffset - delta * 2;
+                double offset = sv.HorizontalOffset - props.MouseWheelDelta * 2;
                 sv.ChangeView(offset, null, null);
                 e.Handled = true;
             }
         }
+    }
+
+    private void WeekScroll_PointerWheelChanged(object sender, Microsoft.UI.Xaml.Input.PointerRoutedEventArgs e)
+    {
+        if (sender is ScrollViewer sv)
+        {
+            var props = e.GetCurrentPoint(sv).Properties;
+            // Vertical scroll only while Ctrl is held; plain wheel is left unhandled.
+            if (IsControlKeyDown() && props.MouseWheelDelta != 0)
+            {
+                double offset = sv.VerticalOffset - props.MouseWheelDelta * 2;
+                sv.ChangeView(null, offset, null);
+                e.Handled = true;
+            }
+        }
+    }
+
+    private void ForecastScroll_PointerPressed(object sender, Microsoft.UI.Xaml.Input.PointerRoutedEventArgs e)
+    {
+        if (sender is ScrollViewer sv)
+        {
+            var point = e.GetCurrentPoint(sv);
+            if (point.Properties.IsLeftButtonPressed)
+            {
+                _forecastDragging = true;
+                _forecastDragStart = point.Position;
+                _forecastDragStartHOffset = sv.HorizontalOffset;
+                _forecastDragStartVOffset = sv.VerticalOffset;
+                sv.CapturePointer(e.Pointer);
+                e.Handled = true;
+            }
+        }
+    }
+
+    private void ForecastScroll_PointerMoved(object sender, Microsoft.UI.Xaml.Input.PointerRoutedEventArgs e)
+    {
+        if (_forecastDragging && sender is ScrollViewer sv)
+        {
+            var pos = e.GetCurrentPoint(sv).Position;
+            if (ReferenceEquals(sv, ExpandedHourlyScroll))
+            {
+                // Horizontal drag: moving the pointer right drags content right (scrolls left).
+                double delta = pos.X - _forecastDragStart.X;
+                sv.ChangeView(_forecastDragStartHOffset - delta, null, null, disableAnimation: true);
+            }
+            else
+            {
+                // Vertical drag: moving the pointer down drags content down (scrolls up).
+                double delta = pos.Y - _forecastDragStart.Y;
+                sv.ChangeView(null, _forecastDragStartVOffset - delta, null, disableAnimation: true);
+            }
+        }
+    }
+
+    private void ForecastScroll_PointerReleased(object sender, Microsoft.UI.Xaml.Input.PointerRoutedEventArgs e)
+    {
+        if (sender is ScrollViewer sv)
+        {
+            _forecastDragging = false;
+            sv.ReleasePointerCapture(e.Pointer);
+        }
+    }
+
+    private void ForecastScroll_PointerCaptureLost(object sender, Microsoft.UI.Xaml.Input.PointerRoutedEventArgs e)
+    {
+        _forecastDragging = false;
     }
 
     private void InitializeRefreshRotation()
@@ -423,4 +503,68 @@ public sealed partial class WeatherWidgetContent : UserControl
             }
         }
     }
+}
+
+/// <summary>
+/// Converts a WeatherDayViewModel to a Thickness for the temperature range bar.
+/// Left = TempBarOffset * BarWidth, Right = (1 - TempBarOffset - TempBarWidth) * BarWidth.
+/// </summary>
+internal sealed class TempBarMarginConverter : IValueConverter
+{
+    public double BarWidth { get; set; } = 80;
+
+    public object Convert(object value, Type targetType, object parameter, string language)
+    {
+        if (value is WeatherDayViewModel vm)
+        {
+            double left = vm.TempBarOffset * BarWidth;
+            double right = (1.0 - vm.TempBarOffset - vm.TempBarWidth) * BarWidth;
+            if (right < 0) right = 0;
+            return new Thickness(left, 0, right, 0);
+        }
+        return new Thickness(0);
+    }
+
+    public object ConvertBack(object value, Type targetType, object parameter, string language)
+        => throw new NotSupportedException();
+}
+
+/// <summary>
+/// Converts a boolean IsCurrentHour to a background brush for hourly card highlight.
+/// Current hour gets a slightly brighter translucent white; others get a very faint white.
+/// </summary>
+internal sealed class CurrentHourBackgroundConverter : IValueConverter
+{
+    public object Convert(object value, Type targetType, object parameter, string language)
+    {
+        bool isCurrent = value is true;
+        return isCurrent
+            ? new SolidColorBrush(Color.FromArgb(0x18, 0xFF, 0xFF, 0xFF))
+            : new SolidColorBrush(Color.FromArgb(0x0A, 0xFF, 0xFF, 0xFF));
+    }
+
+    public object ConvertBack(object value, Type targetType, object parameter, string language)
+        => throw new NotSupportedException();
+}
+
+/// <summary>
+/// Converts a boolean to Visibility. Set Invert to reverse the logic
+/// (true -> Collapsed, false -> Visible).
+/// </summary>
+internal sealed class BoolToVisibilityConverter : IValueConverter
+{
+    public bool Invert { get; set; }
+
+    public object Convert(object value, Type targetType, object parameter, string language)
+    {
+        bool flag = value is true;
+        if (Invert)
+        {
+            flag = !flag;
+        }
+        return flag ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    public object ConvertBack(object value, Type targetType, object parameter, string language)
+        => throw new NotSupportedException();
 }

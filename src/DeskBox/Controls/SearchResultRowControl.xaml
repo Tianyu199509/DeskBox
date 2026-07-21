@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="utf-8"?>
+<UserControl
+    x:Class="DeskBox.Controls.SearchResultRowControl"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    IsTabStop="False"
+    AutomationProperties.Name="{Binding Title}"
+    mc:Ignorable="d">
+
+    <!--
+        Flat result row: selection bar, shell icon (or glyph fallback), title + path,
+        then the sortable size/date columns. Hover and keyboard-selection visuals are
+        owned by the control itself (see code-behind); the shell icon visibility is
+        synced by the popup window via RefreshIconVisuals because the icon arrives
+        lazily and is not observable.
+    -->
+    <Grid x:Name="RowRoot" Padding="2,5,10,5" Margin="2,1" CornerRadius="7" Background="Transparent">
+        <Grid.ChildrenTransitions>
+            <TransitionCollection>
+                <EntranceThemeTransition IsStaggeringEnabled="True" FromVerticalOffset="8"/>
+            </TransitionCollection>
+        </Grid.ChildrenTransitions>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="5"/>
+            <ColumnDefinition Width="34"/>
+            <ColumnDefinition Width="*"/>
+            <ColumnDefinition x:Name="SizeColumn" Width="90"/>
+            <ColumnDefinition x:Name="DateColumn" Width="110"/>
+        </Grid.ColumnDefinitions>
+        <Rectangle x:Name="SelectionBar" Grid.Column="0" Width="3" RadiusX="1.5" RadiusY="1.5"
+                   Fill="{ThemeResource AccentFillColorDefaultBrush}"
+                   Visibility="Collapsed" VerticalAlignment="Stretch"
+                   HorizontalAlignment="Left" Margin="0,7,0,7"/>
+        <Grid Grid.Column="1" VerticalAlignment="Center" Margin="0,0,8,0">
+            <Border x:Name="GlyphBlock" Width="28" Height="28" CornerRadius="7"
+                    Background="{ThemeResource SubtleFillColorSecondaryBrush}"
+                    HorizontalAlignment="Center" VerticalAlignment="Center">
+                <FontIcon Glyph="{Binding Glyph}" FontSize="13"
+                          Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                          HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            </Border>
+            <Image x:Name="FileIcon" Source="{Binding Icon}" Width="26" Height="26"
+                   Visibility="Collapsed"
+                   HorizontalAlignment="Center" VerticalAlignment="Center"/>
+        </Grid>
+        <StackPanel Grid.Column="2" VerticalAlignment="Center">
+            <TextBlock x:Name="TitleText" Text="{Binding Title}" FontSize="14"
+                       Foreground="{ThemeResource TextFillColorPrimaryBrush}"
+                       TextTrimming="CharacterEllipsis"/>
+            <TextBlock x:Name="SubtitleText" Text="{Binding Subtitle}" FontSize="10.5"
+                       Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                       TextTrimming="CharacterEllipsis" Margin="0,2,0,0"/>
+        </StackPanel>
+        <TextBlock x:Name="SizeText" Grid.Column="3" Text="{Binding SizeDisplay}" FontSize="12"
+                   Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                   VerticalAlignment="Center" TextAlignment="Right" Margin="8,0,12,0"/>
+        <TextBlock x:Name="DateText" Grid.Column="4" Text="{Binding DateDisplay}" FontSize="12"
+                   Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                   VerticalAlignment="Center"/>
+    </Grid>
+</UserControl>

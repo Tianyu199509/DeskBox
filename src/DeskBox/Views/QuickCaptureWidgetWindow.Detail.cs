@@ -31,6 +31,42 @@ namespace DeskBox.Views;
 
 public sealed partial class QuickCaptureWidgetWindow
 {
+    /// <summary>
+    /// Focuses the input text box so the user can immediately type a new note.
+    /// Used by search actions after showing the widget.
+    /// </summary>
+    internal void FocusInputForNewNote()
+    {
+        DispatcherQueue.TryEnqueue(() =>
+        {
+            InputTextBox.Focus(FocusState.Programmatic);
+        });
+    }
+
+    /// <summary>Opens the exact saved item requested by global search.</summary>
+    internal async Task RevealItemAsync(string? itemId)
+    {
+        if (string.IsNullOrWhiteSpace(itemId))
+        {
+            return;
+        }
+
+        ViewModel.CollapseSearch();
+        ViewModel.SelectedView = QuickCaptureViewMode.Records;
+        await ViewModel.RefreshItemsAsync();
+
+        var item = ViewModel.Items.FirstOrDefault(candidate =>
+            string.Equals(candidate.Id, itemId, StringComparison.Ordinal));
+        if (item is null)
+        {
+            return;
+        }
+
+        ItemsListView.SelectedItem = item;
+        ItemsListView.ScrollIntoView(item);
+        OpenDetail(item);
+    }
+
     private async void AddButton_Click(object sender, RoutedEventArgs e)
     {
         if (ViewModel.CanAddInput)

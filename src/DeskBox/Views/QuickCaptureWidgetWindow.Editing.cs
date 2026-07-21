@@ -280,11 +280,23 @@ public sealed partial class QuickCaptureWidgetWindow
         return item;
     }
 
-    private async void CloseButton_Click(object sender, RoutedEventArgs e)
+    private void CloseButton_Click(object sender, RoutedEventArgs e)
     {
         if (App.Current.WidgetManager is { } widgetManager)
         {
-            await widgetManager.SetFeatureWidgetEnabledAsync(WidgetKind.QuickCapture, enabled: false, reveal: false);
+            var localization = App.Current.LocalizationService;
+            var flyout = WidgetCompactConfirmationMenuBuilder.CreateDeleteConfirmation(
+                new WidgetCompactConfirmationOptions(
+                    localization.Format("Widget.FeatureWidget.DisableConfirmTitle", ViewModel.Config.Name),
+                    localization.T("Widget.FeatureWidget.Disable"),
+                    async () => await widgetManager.SetFeatureWidgetEnabledAsync(WidgetKind.QuickCapture, enabled: false, reveal: false))
+                {
+                    Message = localization.T("Widget.FeatureWidget.DisableConfirmNote"),
+                    MessageGlyph = "\uE946",
+                    IsDangerAction = false,
+                    CancelText = localization.T("Common.Cancel")
+                });
+            ShowFlyoutWithElevation(flyout, QuickCaptureShell.CloseActionButton);
         }
     }
 
