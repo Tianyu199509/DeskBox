@@ -311,6 +311,29 @@ public static class WidgetLayerService
             return s_cachedDesktopIconView;
         }
 
+        // First: check if a WorkerW already hosts SHELLDLL_DefView. This avoids
+        // sending 0x052C again, which can disrupt DWM composition and cause the
+        // desktop wallpaper to disappear (especially after display/DPI changes).
+        IntPtr existingDefView = IntPtr.Zero;
+        Win32Helper.EnumWindows((hWnd, _) =>
+        {
+            IntPtr defView = FindDesktopIconViewChild(hWnd);
+            if (defView != IntPtr.Zero)
+            {
+                existingDefView = defView;
+                return false; // stop enumeration
+            }
+
+            return true;
+        }, IntPtr.Zero);
+
+        if (existingDefView != IntPtr.Zero)
+        {
+            s_cachedDesktopIconView = existingDefView;
+            return s_cachedDesktopIconView;
+        }
+
+        // No existing WorkerW found: send 0x052C to Progman to spawn one.
         IntPtr progman = Win32Helper.FindWindow("Progman", null);
         if (progman != IntPtr.Zero)
         {
@@ -331,6 +354,7 @@ public static class WidgetLayerService
             }
         }
 
+        // Last resort: enum again after spawning.
         IntPtr workerDefView = IntPtr.Zero;
         Win32Helper.EnumWindows((hWnd, _) =>
         {
