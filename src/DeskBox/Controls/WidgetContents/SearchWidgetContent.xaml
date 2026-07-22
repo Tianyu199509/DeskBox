@@ -8,17 +8,27 @@
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     mc:Ignorable="d">
 
-    <Grid x:Name="RootGrid" Padding="12,10" PointerPressed="RootGrid_PointerPressed">
+    <UserControl.Resources>
+        <!-- Hover style for interactive items in the widget -->
+        <Style x:Key="WidgetItemHoverStyle" TargetType="Grid">
+            <Setter Property="Background" Value="Transparent"/>
+        </Style>
+    </UserControl.Resources>
+
+    <Grid x:Name="RootGrid" Padding="12,10">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
         </Grid.RowDefinitions>
 
-        <!-- Search Bar -->
-        <Grid Grid.Row="0" Padding="10,8" CornerRadius="6"
+        <!-- Search Bar Button -->
+        <Grid Grid.Row="0" x:Name="SearchBarButton" Padding="10,8" CornerRadius="6"
               Background="{ThemeResource ControlFillColorDefaultBrush}"
               BorderBrush="{ThemeResource ControlStrokeColorDefaultBrush}"
-              BorderThickness="1">
+              BorderThickness="1"
+              PointerEntered="SearchBar_PointerEntered"
+              PointerExited="SearchBar_PointerExited"
+              PointerPressed="SearchBar_PointerPressed">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="Auto"/>
                 <ColumnDefinition Width="*"/>
@@ -42,25 +52,60 @@
             </Border>
         </Grid>
 
-        <!-- Recommendation Cards -->
-        <ItemsControl Grid.Row="1" x:Name="RecommendationsList" Margin="0,8,0,0" Visibility="Collapsed">
-            <ItemsControl.ItemTemplate>
-                <DataTemplate>
-                    <Grid Margin="0,1" Padding="6,4" CornerRadius="5"
-                          Background="{ThemeResource SubtleFillColorTransparentBrush}">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="Auto"/>
-                            <ColumnDefinition Width="*"/>
-                        </Grid.ColumnDefinitions>
-                        <FontIcon Grid.Column="0" Glyph="{Binding Glyph}" FontSize="11"
-                                  Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
-                                  VerticalAlignment="Center" Margin="2,0,8,0"/>
-                        <TextBlock Grid.Column="1" Text="{Binding Title}" FontSize="11.5"
-                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                   VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
-                    </Grid>
-                </DataTemplate>
-            </ItemsControl.ItemTemplate>
-        </ItemsControl>
+        <!-- Scrollable content area: history + recommendations -->
+        <ScrollViewer Grid.Row="1" x:Name="ContentScrollViewer"
+                      VerticalScrollBarVisibility="Auto"
+                      VerticalScrollMode="Auto"
+                      HorizontalScrollMode="Disabled"
+                      HorizontalScrollBarVisibility="Disabled"
+                      Margin="0,6,0,0">
+            <StackPanel>
+                <!-- Recent Search History -->
+                <ItemsControl x:Name="HistoryList" Visibility="Collapsed">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <Grid Margin="0,1" Padding="6,5" CornerRadius="5"
+                                  PointerEntered="HistoryItem_PointerEntered"
+                                  PointerExited="HistoryItem_PointerExited"
+                                  PointerPressed="HistoryItem_PointerPressed"
+                                  Tag="{Binding}">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <FontIcon Grid.Column="0" Glyph="&#xE81C;" FontSize="11"
+                                          Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                          VerticalAlignment="Center" Margin="2,0,8,0"/>
+                                <TextBlock Grid.Column="1" Text="{Binding}" FontSize="11.5"
+                                           Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                           VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+                            </Grid>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+
+                <!-- Recommendation Cards -->
+                <ItemsControl x:Name="RecommendationsList" Visibility="Collapsed">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <Grid Margin="0,1" Padding="6,5" CornerRadius="5"
+                                  PointerEntered="RecItem_PointerEntered"
+                                  PointerExited="RecItem_PointerExited">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <FontIcon Grid.Column="0" Glyph="{Binding Glyph}" FontSize="11"
+                                          Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
+                                          VerticalAlignment="Center" Margin="2,0,8,0"/>
+                                <TextBlock Grid.Column="1" Text="{Binding Title}" FontSize="11.5"
+                                           Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                           VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+                            </Grid>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </StackPanel>
+        </ScrollViewer>
     </Grid>
 </UserControl>

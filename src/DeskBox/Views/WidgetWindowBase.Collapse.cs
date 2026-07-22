@@ -1410,14 +1410,21 @@ public abstract partial class WidgetWindowBase
             return;
         }
 
-        bounds = AnchorExpandedBoundsToCompact(bounds);
-        RectInt32 current = GetCurrentWindowBounds();
-        if (!BoundsEqual(current, bounds))
+        if (UsesCompactExpansionGeometry())
         {
-            MoveWindowWithoutPersisting(bounds);
-        }
+            // A completed manual resize is the source of truth: never re-anchor
+            // the panel back to the capsule corner (that used to snap the panel
+            // back to its pre-resize position). Only clamp into the work area,
+            // then let the capsule follow the adjusted panel below.
+            bounds = ClampBoundsIntoWorkArea(bounds, ResolveCompactWorkArea(bounds));
+            RectInt32 current = GetCurrentWindowBounds();
+            if (!BoundsEqual(current, bounds))
+            {
+                MoveWindowWithoutPersisting(bounds);
+            }
 
-        SynchronizeAlignedCompactBoundsAfterExpandedResize(bounds);
+            SynchronizeAlignedCompactBoundsAfterExpandedResize(bounds);
+        }
 
         CapturePositionAnchor(
             bounds.X,
@@ -1425,6 +1432,11 @@ public abstract partial class WidgetWindowBase
             bounds.Width,
             bounds.Height,
             preserveCurrentEdge: true);
+        if (UsesCompactExpansionGeometry())
+        {
+            RecaptureCompactPlacementAfterExpandedResize(bounds);
+        }
+
         UpdateConfigBoundsFromPhysical(
             bounds.X,
             bounds.Y,
@@ -1457,7 +1469,46 @@ public abstract partial class WidgetWindowBase
                     ResizeDirection);
         }
 
+        // During a manual resize the grabbed edge must stay the free edge.
+        // Re-anchoring to the capsule corner here would pin the anchor-side
+        // edges and mirror the drag onto the opposite side, so the user's
+        // proposed bounds are applied as-is. The capsule relationship is
+        // re-established from the final bounds when the resize completes.
+        if (!string.IsNullOrEmpty(ResizeDirection))
+        {
+            return proposedBounds;
+        }
+
         return AnchorExpandedBoundsToCompact(proposedBounds);
+    }
+
+    private void RecaptureCompactPlacementAfterExpandedResize(RectInt32 expandedBounds)
+    {
+        if (Config.CompactPlacement is null)
+        {
+            return;
+        }
+
+        bool aligned = UsesAlignedCompactWidth();
+        double scale = Win32Helper.GetDpiScaleForWindow(HWnd, RootElement.XamlRoot);
+        // In aligned mode the capsule width tracks the panel width. Derive it from
+        // the final physical bounds because Config.Width is only updated later by
+        // UpdateConfigBoundsFromPhysical.
+        double? compactWidth = aligned
+            ? expandedBounds.Width / Math.Max(scale, 0.01)
+            : Config.CompactWidth;
+        RectInt32 compactBounds = WidgetCompactBoundsCalculator.Calculate(
+            expandedBounds,
+            Config.PositionAnchor,
+            scale,
+            ResolveEffectiveCompactContentMode(),
+            Config.WidgetKind,
+            compactWidth,
+            clampCustomWidth: !aligned);
+        CaptureCompactPlacement(compactBounds, persist: false);
+        _compactExpansionAnchor =
+            WidgetCompactExpansionCalculator.FromPositionAnchor(Config.PositionAnchor) ??
+            _compactExpansionAnchor;
     }
 
     private void SynchronizeAlignedCompactBoundsAfterExpandedResize(RectInt32 expandedBounds)

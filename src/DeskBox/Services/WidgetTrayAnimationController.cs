@@ -532,6 +532,23 @@ public sealed class WidgetTrayAnimationController
             (int)Math.Round(bounds.Y));
     }
 
+    /// <summary>
+    /// The bounds the window rests at when no tray-animation offset is applied.
+    /// While a position transition is prepared/running the HWND is physically
+    /// displaced offscreen, so group-offset math must use this resting position
+    /// instead of the displaced physical one.
+    /// </summary>
+    public Windows.Foundation.Rect GetRestingAnimationBounds()
+    {
+        var current = _getAnimationBounds();
+        if (_targetPosition is { } target)
+        {
+            return new Windows.Foundation.Rect(target.X, target.Y, current.Width, current.Height);
+        }
+
+        return current;
+    }
+
     private void OnRenderingFrame(object sender, object e)
     {
         try // ✅ 添加异常保护防止渲染线程崩溃

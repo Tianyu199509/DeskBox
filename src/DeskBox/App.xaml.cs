@@ -1863,6 +1863,41 @@ public partial class App : Application
     /// </summary>
     public void OpenSearchPopup() => _ = ToggleSearchPopupAsync();
 
+    /// <summary>
+    /// Opens the search popup with a pre-filled query and immediately executes the search.
+    /// Used by search history items in the widget.
+    /// </summary>
+    public void OpenSearchPopupWithQuery(string query)
+    {
+        if (!UiDispatcherQueue.HasThreadAccess)
+        {
+            UiDispatcherQueue.TryEnqueue(() => OpenSearchPopupWithQuery(query));
+            return;
+        }
+
+        if (_searchEngineService is null)
+        {
+            return;
+        }
+
+        if (_searchPopupWindow is null)
+        {
+            _fileMetaService ??= new FileMetaService();
+            var viewModel = new ViewModels.SearchPopupViewModel(
+                _searchEngineService, SettingsService, LocalizationService, _searchHistoryService!, _fileMetaService);
+            _searchPopupWindow = new SearchPopupWindow(viewModel, SettingsService, LocalizationService);
+            _searchPopupWindow.ActionRequested += OnSearchActionRequested;
+            _searchPopupWindow.ContentRequested += OnSearchContentRequested;
+            _searchPopupWindow.Closed += (_, _) =>
+            {
+                _searchPopupWindow = null;
+            };
+            viewModel.HidePopupCallback = () => _searchPopupWindow?.HidePopup();
+        }
+
+        _searchPopupWindow.ShowPopupWithQuery(query);
+    }
+
     private void OnSearchActionRequested(object? sender, string actionId)
     {
         _ = HandleSearchActionAsync(actionId);

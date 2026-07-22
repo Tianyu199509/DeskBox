@@ -98,6 +98,7 @@ public sealed partial class WidgetWindow : WidgetWindowBase, IDesktopWidgetWindo
     public override WidgetConfig Config => ViewModel.Config;
 
     public Windows.Foundation.Rect AnimationBounds => GetCurrentAnimationBounds();
+        public Windows.Foundation.Rect RestingAnimationBounds => _trayAnimation.GetRestingAnimationBounds();
 
     // ── WidgetWindowBase abstract overrides ────────────────────
     protected override double WidgetOpacity => ViewModel.WidgetOpacity;

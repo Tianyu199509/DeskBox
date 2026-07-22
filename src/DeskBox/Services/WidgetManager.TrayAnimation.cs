@@ -112,10 +112,14 @@ public sealed partial class WidgetManager
             _suppressTrayLayerRestoreUntilUtc = DateTime.UtcNow.AddMilliseconds(160);
             PlayPreparedTrayShowAnimations(windowsToAnimate);
             SetWidgetsRaisedFromTray(shownWindows.Count > 0);
+            // Release the raised group once the foreground leaves DeskBox (e.g. the
+            // user clicks another app window). Without the monitor the widgets stay
+            // topmost until the next toggle, covering whatever the user clicks.
+            StartTrayLayerRestoreMonitor(shownWindows.Count > 0);
             QueueTrayRaiseTopMostConfirmation(shownWindows);
             ActivateLastRaisedWindow(shownWindows);
             SaveBatchVisibilityState();
-            App.LogVerbose($"[TrayBatch] Raise completed raised={_widgetsRaisedFromTray} prepared={windowsToRaise.Count} shown={shownWindows.Count}");
+            App.LogVerbose($"[TrayBatch] Raise completed raised={_widgetsRaisedFromTray} prepared={windowsToRaise.Count} shown={shownWindows.Count} animated={windowsToAnimate.Count}");
             return _widgetsRaisedFromTray;
         }
         finally
@@ -393,10 +397,13 @@ public sealed partial class WidgetManager
             }
 
             var workArea = GetAnimationWorkArea(groupWindows[0]);
-            double groupLeft = groupWindows.Min(window => window.AnimationBounds.Left);
-            double groupTop = groupWindows.Min(window => window.AnimationBounds.Top);
-            double groupRight = groupWindows.Max(window => window.AnimationBounds.Right);
-            double groupBottom = groupWindows.Max(window => window.AnimationBounds.Bottom);
+            // Use resting bounds: during prepare/play the HWNDs are physically
+            // displaced offscreen, which would collapse the group offset to ~0
+            // and leave windows parked at their final position when uncloaked.
+            double groupLeft = groupWindows.Min(window => window.RestingAnimationBounds.Left);
+            double groupTop = groupWindows.Min(window => window.RestingAnimationBounds.Top);
+            double groupRight = groupWindows.Max(window => window.RestingAnimationBounds.Right);
+            double groupBottom = groupWindows.Max(window => window.RestingAnimationBounds.Bottom);
 
             double offsetX = 0;
             double offsetY = 0;
@@ -436,8 +443,8 @@ public sealed partial class WidgetManager
     private static Windows.Graphics.RectInt32 GetAnimationWorkArea(IDesktopWidgetWindow window)
     {
         var point = new Windows.Graphics.PointInt32(
-            (int)Math.Round(window.AnimationBounds.Left),
-            (int)Math.Round(window.AnimationBounds.Top));
+            (int)Math.Round(window.RestingAnimationBounds.Left),
+            (int)Math.Round(window.RestingAnimationBounds.Top));
         var displayArea = DisplayArea.GetFromPoint(point, DisplayAreaFallback.Primary);
         return displayArea.WorkArea;
     }

@@ -154,6 +154,7 @@ public sealed partial class QuickCaptureWidgetWindow : WidgetWindowBase, IDeskto
     public override WidgetConfig Config => ViewModel.Config;
 
     public Windows.Foundation.Rect AnimationBounds => GetCurrentAnimationBounds();
+        public Windows.Foundation.Rect RestingAnimationBounds => _trayAnimation.GetRestingAnimationBounds();
 
     private bool _isVisibleOnDesktop;
     public new bool Visible

@@ -310,6 +310,26 @@ public static partial class Win32Helper
         return IsKeyDown(virtualKey);
     }
 
+    /// <summary>
+    /// Returns true if any mouse button was pressed since this thread last
+    /// queried that button. Uses the low bit of GetAsyncKeyState, which resets
+    /// per calling thread on every query — call periodically from one thread
+    /// to detect click edges between polls.
+    /// </summary>
+    public static bool HasMouseButtonPressSinceLastQuery()
+    {
+        return HasAsyncKeyPressSinceLastQuery(0x01) ||
+               HasAsyncKeyPressSinceLastQuery(0x02) ||
+               HasAsyncKeyPressSinceLastQuery(0x04) ||
+               HasAsyncKeyPressSinceLastQuery(0x05) ||
+               HasAsyncKeyPressSinceLastQuery(0x06);
+    }
+
+    private static bool HasAsyncKeyPressSinceLastQuery(int virtualKey)
+    {
+        return (GetAsyncKeyState(virtualKey) & 0x0001) != 0;
+    }
+
     // ────────────────────────────────────────────────────────────────
     //  Shell operations
     // ────────────────────────────────────────────────────────────────

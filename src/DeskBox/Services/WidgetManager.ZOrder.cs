@@ -1,4 +1,4 @@
-﻿// Copyright (c) DeskBox. All rights reserved.
+// Copyright (c) DeskBox. All rights reserved.
 
 using DeskBox.Models;
 using DeskBox.Helpers;
@@ -23,6 +23,7 @@ public sealed partial class WidgetManager
     private string _lastWidgetLayerMode;
     private DateTime _lastTrayLayerToggleUtc = DateTime.MinValue;
     private DateTime _suppressTrayLayerRestoreUntilUtc = DateTime.MinValue;
+    private bool _hasDeskBoxForegroundSinceRaise;
 
     public void RestoreRaisedWidgetsToDesktopLayer()
     {
@@ -100,13 +101,39 @@ public sealed partial class WidgetManager
         }
 
         IntPtr foreground = Win32Helper.GetForegroundWindow();
-        if (IsDeskBoxForegroundWindow(foreground) || IsTaskbarWindow(foreground))
+        if (IsDeskBoxForegroundWindow(foreground))
         {
+            _hasDeskBoxForegroundSinceRaise = true;
             App.LogVerbose($"[TrayBatch] RaisedState kept reason={reason} foreground=0x{foreground.ToInt64():X}");
             return;
         }
 
-        App.LogVerbose($"[TrayBatch] RaisedState released reason={reason} foreground=0x{foreground.ToInt64():X}");
+        if (IsTaskbarWindow(foreground))
+        {
+            App.LogVerbose($"[TrayBatch] RaisedState kept reason={reason} foreground=taskbar");
+            return;
+        }
+
+        if (!_hasDeskBoxForegroundSinceRaise)
+        {
+            // The raise happened while a foreign window owned the foreground (e.g.
+            // an elevated app rejects our activation). Releasing the raised state
+            // just because the foreground is not ours would undo the raise within
+            // one tick, so only release when the user explicitly clicks a window
+            // that belongs neither to DeskBox nor to the taskbar.
+            Win32Helper.POINT? cursor = TryGetCursorPosition();
+            if (Win32Helper.HasMouseButtonPressSinceLastQuery() &&
+                !IsPointerOverDeskBoxWindow(cursor) &&
+                !IsPointerOverTaskbar(cursor))
+            {
+                App.Log($"[TrayBatch] RaisedState released reason={reason}-outside-click foreground=0x{foreground.ToInt64():X}");
+                RestoreRaisedWidgetsToDesktopLayer();
+            }
+
+            return;
+        }
+
+        App.Log($"[TrayBatch] RaisedState released reason={reason}-deskbox-leave foreground=0x{foreground.ToInt64():X}");
         RestoreRaisedWidgetsToDesktopLayer();
     }
 
@@ -119,6 +146,7 @@ public sealed partial class WidgetManager
             return;
         }
 
+        _hasDeskBoxForegroundSinceRaise = IsForegroundDeskBoxWindow();
         _trayLayerRestoreTimer ??= App.UiDispatcherQueue.CreateTimer();
         _trayLayerRestoreTimer.Stop();
         _trayLayerRestoreTimer.Interval = TimeSpan.FromMilliseconds(200);

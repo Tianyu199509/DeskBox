@@ -122,6 +122,15 @@ public sealed partial class ContentWidgetWindow : WidgetWindowBase, IDesktopWidg
                     weather.ViewModel.CurrentTemperatureText,
                     weather.ViewModel.CurrentDescription,
                     weather.ViewModel.PrecipitationText)),
+            SearchWidgetContentAdapter => new WidgetCompactPresentation(
+                _titleViewModel.DisplayName,
+                string.Empty,
+                _descriptor.DefaultGlyph,
+                localization.T("Widget.Compact.DropHint"),
+                ShowPrimaryAction: true,
+                PrimaryActionGlyph: "\uE721",
+                EnableMarquee: true,
+                LiveStateKey: _titleViewModel.DisplayName),
             _ => new WidgetCompactPresentation(
                 _titleViewModel.DisplayName,
                 string.Empty,
@@ -317,6 +326,12 @@ public sealed partial class ContentWidgetWindow : WidgetWindowBase, IDesktopWidg
 
     protected override async Task OnCompactPrimaryActionRequestedAsync()
     {
+        if (CurrentContent is SearchWidgetContentAdapter)
+        {
+            App.Current.OpenSearchPopup();
+            return;
+        }
+
         if (CurrentContent is not TodoWidgetContentAdapter todo ||
             GetNextCompactTodoItem(todo) is not { } item)
         {
@@ -444,6 +459,7 @@ public sealed partial class ContentWidgetWindow : WidgetWindowBase, IDesktopWidg
     public IntPtr WindowHandle => HWnd;
     public WidgetWindowIdentity Identity => Diagnostics.Identity;
     public Windows.Foundation.Rect AnimationBounds => GetCurrentAnimationBounds();
+        public Windows.Foundation.Rect RestingAnimationBounds => TrayAnimation.GetRestingAnimationBounds();
 
     public new bool Visible
     {
@@ -859,6 +875,7 @@ IsHideAnimationRunning = true;
                         WidgetKind.Weather => "Weather.Title",
                         WidgetKind.Tags => "Tags.Title",
                         WidgetKind.Music => "Music.Title",
+                        WidgetKind.Search => "Search.Title",
                         WidgetKind.SystemMonitor => "SystemMonitor.Title",
                         _ => ""
                     };

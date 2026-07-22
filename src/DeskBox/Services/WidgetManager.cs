@@ -55,6 +55,7 @@ internal interface IDesktopWidgetWindow
     bool Visible { get; }
     bool IsCompactArrangementActive { get; }
     Windows.Foundation.Rect AnimationBounds { get; }
+    Windows.Foundation.Rect RestingAnimationBounds { get; }
     void ApplyAppearancePreview();
     void RestoreBoundsForCurrentTopology();
     void ApplyCompactArrangement(Windows.Graphics.RectInt32 bounds, bool constrainSize);

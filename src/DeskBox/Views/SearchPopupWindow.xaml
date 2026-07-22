@@ -269,7 +269,7 @@
         </Grid.RowDefinitions>
 
         <!-- ── Row 0: search box with icon, input, keycap badge and focus underline ── -->
-        <Grid x:Name="SearchBoxRow" Grid.Row="0" Padding="16,12,12,10">
+        <Grid x:Name="SearchBoxRow" Grid.Row="0" Padding="12,12,12,8">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*"/>
                 <ColumnDefinition Width="Auto"/>
@@ -355,7 +355,7 @@
         </Grid>
 
         <!-- ── Row 2: tab bar + filter combo on the right ── -->
-        <Grid Grid.Row="2" Margin="0,0,0,0">
+        <Grid Grid.Row="2" Margin="12,0,12,0">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*"/>
                 <ColumnDefinition Width="Auto"/>
@@ -367,7 +367,7 @@
                       ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                       ScrollViewer.VerticalScrollMode="Disabled"
                       ScrollViewer.VerticalScrollBarVisibility="Disabled"
-                      Margin="14,8,0,4"
+                      Margin="0,8,0,4"
                       ItemContainerStyle="{StaticResource TabPillItemStyle}"
                       ItemTemplate="{StaticResource TabPillTemplate}"
                       SelectionChanged="TabsList_SelectionChanged">
@@ -380,7 +380,7 @@
             </ListView>
 
             <Grid x:Name="ResultFilterBar" Grid.Column="1" Visibility="Collapsed"
-                  Margin="8,8,14,4" VerticalAlignment="Center">
+                  Margin="8,8,0,4" VerticalAlignment="Center">
                 <StackPanel Orientation="Horizontal" Spacing="6">
                     <TextBlock x:Name="ResultFilterLabel" FontSize="11.5"
                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
@@ -411,15 +411,14 @@
 
             <!--
                 Sortable column headers, aligned with the result rows below:
-                16px = list padding + row margin + row left padding, 37px = selection
-                bar + icon column, 20px right = row margin + row right padding.
+                43px = row margin + row padding + selection bar + icon column.
             -->
             <Grid x:Name="SortHeaderRow" Grid.Row="1" Visibility="Collapsed"
-                  Margin="16,2,20,2"
+                  Margin="12,2,12,2"
                   Background="{ThemeResource SubtleFillColorSecondaryBrush}"
                   CornerRadius="6" Padding="0,3">
                 <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="37"/>
+                    <ColumnDefinition Width="43"/>
                     <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="75"/>
                     <ColumnDefinition Width="90"/>
@@ -472,13 +471,13 @@
             </Grid>
 
             <TextBlock x:Name="HomeSectionHeader" Grid.Row="1"
-                       Margin="20,5,20,7" FontSize="12.5" FontWeight="SemiBold"
+                       Margin="12,5,12,7" FontSize="12.5" FontWeight="SemiBold"
                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                        Visibility="Collapsed"/>
 
             <!-- Result rows (SearchResultRowControl owns hover/selection visuals) -->
             <ScrollViewer x:Name="ResultsPanel" Grid.Row="2" Visibility="Collapsed"
-                          VerticalScrollBarVisibility="Auto" Padding="8,2,8,12"
+                          VerticalScrollBarVisibility="Auto" Padding="12,2,12,12"
                           KeyDown="ResultsPanel_KeyDown"
                           PointerPressed="ResultsPanel_PointerPressed"
                           PointerMoved="ResultsPanel_PointerMoved"
@@ -553,6 +552,7 @@
                           VerticalScrollBarVisibility="Auto" Padding="12,2,12,12"
                           RightTapped="RecommendedAppsPanel_RightTapped">
                 <ItemsRepeater x:Name="RecommendedAppsRepeater">
+
                     <ItemsRepeater.Layout>
                         <UniformGridLayout MinItemHeight="92"
                                            MinColumnSpacing="6" MinRowSpacing="6"
@@ -560,22 +560,27 @@
                     </ItemsRepeater.Layout>
                     <ItemsRepeater.ItemTemplate>
                         <DataTemplate>
-                            <Button Width="104" Height="92" Padding="8,7" Margin="0"
-                                    Background="Transparent" BorderThickness="0"
-                                    CornerRadius="7" HorizontalContentAlignment="Stretch"
-                                    VerticalContentAlignment="Stretch"
-                                    Click="RecommendedAppButton_Click">
-                                <StackPanel Spacing="7" HorizontalAlignment="Stretch">
-                                    <Grid Width="40" Height="40" HorizontalAlignment="Center">
-                                        <Image Source="{Binding Icon}" Width="36" Height="36"
-                                               Stretch="Uniform"/>
-                                    </Grid>
-                                    <TextBlock Text="{Binding AppDisplayName}" FontSize="12"
-                                               Foreground="{ThemeResource TextFillColorPrimaryBrush}"
-                                               TextAlignment="Center" TextTrimming="CharacterEllipsis"
-                                               MaxLines="1" TextWrapping="NoWrap"/>
-                                </StackPanel>
-                            </Button>
+                            <Grid Width="104" Height="92" Padding="8,7" Margin="0"
+                                  Background="Transparent" CornerRadius="7"
+                                  PointerPressed="RecommendedApp_PointerPressed"
+                                  PointerEntered="RecommendedApp_PointerEntered"
+                                  PointerExited="RecommendedApp_PointerExited"
+                                  DoubleTapped="RecommendedApp_DoubleTapped">
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="*"/>
+                                    <RowDefinition Height="Auto"/>
+                                </Grid.RowDefinitions>
+                                <Grid Grid.Row="0" Width="40" Height="40" HorizontalAlignment="Center">
+                                    <Image Source="{Binding Icon}" Width="36" Height="36"
+                                           Stretch="Uniform"
+                                           ImageOpened="OnAppIcon_ImageOpened"
+                                           ImageFailed="OnAppIcon_ImageFailed"/>
+                                </Grid>
+                                <TextBlock Grid.Row="1" Text="{Binding AppDisplayName}" FontSize="12"
+                                           Foreground="{ThemeResource TextFillColorPrimaryBrush}"
+                                           TextAlignment="Center" TextTrimming="CharacterEllipsis"
+                                           MaxLines="1" TextWrapping="NoWrap"/>
+                            </Grid>
                         </DataTemplate>
                     </ItemsRepeater.ItemTemplate>
                 </ItemsRepeater>
@@ -583,7 +588,7 @@
 
             <!-- Recommendation panel for empty state (history + favorites) -->
             <StackPanel x:Name="RecommendationPanel" Grid.Row="2" Visibility="Collapsed"
-                        Padding="16,8,16,12" HorizontalAlignment="Stretch">
+                        Padding="12,8,12,12" HorizontalAlignment="Stretch">
                 <StackPanel.ChildrenTransitions>
                     <TransitionCollection>
                         <EntranceThemeTransition IsStaggeringEnabled="True"/>
@@ -726,13 +731,6 @@
                     <StackPanel Orientation="Horizontal" Spacing="6">
                         <FontIcon Glyph="&#xE838;" FontSize="12"/>
                         <TextBlock x:Name="OpenLocationLabel"/>
-                    </StackPanel>
-                </Button>
-                <Button x:Name="PreviewSelectedButton" Padding="10,5"
-                        Click="PreviewSelectedButton_Click">
-                    <StackPanel Orientation="Horizontal" Spacing="6">
-                        <FontIcon Glyph="&#xE890;" FontSize="12"/>
-                        <TextBlock x:Name="PreviewSelectedLabel"/>
                     </StackPanel>
                 </Button>
                 <Button x:Name="AttachSelectedButton" Padding="10,5"

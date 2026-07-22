@@ -108,8 +108,12 @@ public sealed class GlobalHotkeyService : IDisposable
         if (Register(_windowHandle, MainHotkeyId, gesture))
         {
             _isRegistered = true;
-            UninstallKeyboardHook();
-            App.Log($"[GlobalHotkey] Registered gesture={CurrentGestureText} hwnd=0x{_windowHandle.ToInt64():X}");
+            // Keep the low-level hook installed as a companion path: Windows does not
+            // deliver WM_HOTKEY to a non-elevated process while an elevated app owns
+            // the foreground (UIPI), but WH_KEYBOARD_LL still receives the keystroke.
+            // The hook suppresses the gesture key, so both paths never double-fire.
+            InstallKeyboardHook();
+            App.Log($"[GlobalHotkey] Registered gesture={CurrentGestureText} hwnd=0x{_windowHandle.ToInt64():X}; hookCompanion=active");
             NotifyRegistrationChanged();
             return;
         }
@@ -410,7 +414,7 @@ public sealed class GlobalHotkeyService : IDisposable
         return value;
     }
 
-    private static bool AreCurrentModifiersPressed(HotkeyModifierKeys modifiers)
+    internal static bool AreCurrentModifiersPressed(HotkeyModifierKeys modifiers)
     {
         bool ctrl = Win32Helper.IsKeyDown((int)VirtualKey.Control) ||
                     Win32Helper.IsKeyDown((int)VirtualKey.LeftControl) ||

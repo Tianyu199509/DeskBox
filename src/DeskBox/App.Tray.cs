@@ -9,6 +9,7 @@ using H.NotifyIcon;
 using H.NotifyIcon.Core;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Controls.Primitives;
 using WinRT.Interop;
 using DrawingPoint = System.Drawing.Point;
 
@@ -218,6 +219,9 @@ public partial class App
         style.Setters.Add(new Setter(
             ScrollViewer.VerticalScrollBarVisibilityProperty,
             ScrollBarVisibility.Disabled));
+        // Remove the default MaxHeight so every menu item is visible without
+        // scrolling — the tray menu is short enough to always fit on screen.
+        style.Setters.Add(new Setter(FrameworkElement.MaxHeightProperty, double.PositiveInfinity));
         return style;
     }
 

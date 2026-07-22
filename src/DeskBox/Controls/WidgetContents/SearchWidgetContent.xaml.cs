@@ -4,18 +4,21 @@ using DeskBox.Services;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
+using Microsoft.UI.Xaml.Media;
 
 namespace DeskBox.Controls.WidgetContents;
 
 /// <summary>
 /// Lightweight search widget content that acts as a desktop entry point
-/// for the search popup. Shows a search bar and a set of recommendation cards.
+/// for the search popup. Shows a search bar, recent search history, and
+/// a set of recommendation cards.
 /// </summary>
 public sealed partial class SearchWidgetContent : UserControl
 {
     private readonly LocalizationService _localizationService;
     private readonly SettingsService? _settingsService;
     private readonly ObservableCollection<SearchRecommendationItem> _widgetRecommendations = [];
+    private readonly ObservableCollection<string> _recentQueries = [];
 
     public SearchWidgetContent(
         LocalizationService localizationService,
@@ -26,7 +29,19 @@ public sealed partial class SearchWidgetContent : UserControl
 
         InitializeComponent();
         RecommendationsList.ItemsSource = _widgetRecommendations;
+        HistoryList.ItemsSource = _recentQueries;
         UpdateContent();
+
+        _localizationService.LanguageChanged += OnLanguageChanged;
+        Unloaded += (_, _) => _localizationService.LanguageChanged -= OnLanguageChanged;
+    }
+
+    private void OnLanguageChanged()
+    {
+        if (DispatcherQueue.HasThreadAccess)
+            UpdateContent();
+        else
+            DispatcherQueue.TryEnqueue(UpdateContent);
     }
 
     /// <summary>
@@ -39,7 +54,32 @@ public sealed partial class SearchWidgetContent : UserControl
         PlaceholderText.Text = _localizationService.T("Search.Placeholder");
         UpdateSearchIcon();
         UpdateHotkeyBadge();
+        UpdateHistoryList();
         _ = LoadRecommendationsAsync();
+    }
+
+    /// <summary>
+    /// Loads recent search queries into the history list.
+    /// </summary>
+    private void UpdateHistoryList()
+    {
+        var historyService = App.Current.SearchHistoryService;
+        if (historyService is null)
+        {
+            HistoryList.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        var queries = historyService.RecentQueries.Take(6).ToList();
+        _recentQueries.Clear();
+        foreach (var query in queries)
+        {
+            _recentQueries.Add(query);
+        }
+
+        HistoryList.Visibility = queries.Count > 0
+            ? Visibility.Visible
+            : Visibility.Collapsed;
     }
 
     /// <summary>
@@ -139,10 +179,74 @@ public sealed partial class SearchWidgetContent : UserControl
         HotkeyBadge.Text = string.Join("+", parts);
     }
 
-    private void RootGrid_PointerPressed(object sender, PointerRoutedEventArgs e)
+    // ── Search bar interactions ──
+
+    private void SearchBar_PointerEntered(object sender, PointerRoutedEventArgs e)
+    {
+        SearchBarButton.Background = ResolveThemeBrush("ControlFillColorSecondaryBrush");
+        SearchBarButton.BorderBrush = ResolveThemeBrush("ControlStrokeColorSecondaryBrush");
+    }
+
+    private void SearchBar_PointerExited(object sender, PointerRoutedEventArgs e)
+    {
+        SearchBarButton.Background = ResolveThemeBrush("ControlFillColorDefaultBrush");
+        SearchBarButton.BorderBrush = ResolveThemeBrush("ControlStrokeColorDefaultBrush");
+    }
+
+    private void SearchBar_PointerPressed(object sender, PointerRoutedEventArgs e)
     {
         SearchRequested?.Invoke(this, EventArgs.Empty);
         App.Current.OpenSearchPopup();
         e.Handled = true;
     }
+
+    // ── History item interactions ──
+
+    private void HistoryItem_PointerEntered(object sender, PointerRoutedEventArgs e)
+    {
+        if (sender is Grid grid)
+        {
+            grid.Background = ResolveThemeBrush("SubtleFillColorSecondaryBrush");
+        }
+    }
+
+    private void HistoryItem_PointerExited(object sender, PointerRoutedEventArgs e)
+    {
+        if (sender is Grid grid)
+        {
+            grid.Background = null;
+        }
+    }
+
+    private void HistoryItem_PointerPressed(object sender, PointerRoutedEventArgs e)
+    {
+        if (sender is FrameworkElement { Tag: string query } && !string.IsNullOrWhiteSpace(query))
+        {
+            App.Current.OpenSearchPopupWithQuery(query);
+            e.Handled = true;
+        }
+    }
+
+    // ── Recommendation item interactions ──
+
+    private void RecItem_PointerEntered(object sender, PointerRoutedEventArgs e)
+    {
+        if (sender is Grid grid)
+        {
+            grid.Background = ResolveThemeBrush("SubtleFillColorSecondaryBrush");
+        }
+    }
+
+    private void RecItem_PointerExited(object sender, PointerRoutedEventArgs e)
+    {
+        if (sender is Grid grid)
+        {
+            grid.Background = null;
+        }
+    }
+
+    private static Brush? ResolveThemeBrush(string key) =>
+        Application.Current.Resources.TryGetValue(key, out object? value)
+            ? value as Brush
+            : null;
 }

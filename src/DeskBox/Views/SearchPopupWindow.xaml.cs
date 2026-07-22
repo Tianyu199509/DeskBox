@@ -6,12 +6,15 @@ using DeskBox.ViewModels;
 using Microsoft.UI;
 using Microsoft.UI.Composition;
 using Microsoft.UI.Composition.SystemBackdrops;
+using Microsoft.UI.Dispatching;
 using Microsoft.UI.Input;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
+using Microsoft.UI.Xaml.Hosting;
 using Microsoft.UI.Xaml.Media;
+using Microsoft.UI.Xaml.Media.Animation;
 using Microsoft.UI.Xaml.Media.Imaging;
 using Windows.Foundation;
 using Windows.ApplicationModel.DataTransfer;
@@ -35,6 +38,7 @@ public sealed partial class SearchPopupWindow : Window
     private readonly SettingsService _settingsService;
     private readonly LocalizationService _localizationService;
     private readonly QuickLookPreviewService _quickLookService = new();
+    private readonly ThemeService? _themeService;
     private DispatcherTimer? _statusHideTimer;
     private AppWindow? _appWindow;
     private IntPtr _hwnd;
@@ -62,6 +66,15 @@ public sealed partial class SearchPopupWindow : Window
     // Keyboard-selected result row. Hover feedback is owned by the row control itself.
     private SearchResultRowControl? _selectedRow;
 
+    // Recommended-apps selection: tracks the currently highlighted app card.
+    private int _selectedAppIndex = -1;
+    private Grid? _selectedAppCard;
+
+    // True after the user presses Up/Down in the search box to navigate results.
+    // While navigating, plain Space triggers QuickLook preview instead of typing.
+    // Cleared whenever the user types a character (TextChanged).
+    private bool _isNavigatingResults;
+
     // Drag state for result rows: distinguishes a click (execute) from a drag
     // (export the file/folder path to another app or widget).
     private SearchResultItem? _dragCandidate;
@@ -83,6 +96,7 @@ public sealed partial class SearchPopupWindow : Window
         _viewModel = viewModel;
         _settingsService = settingsService;
         _localizationService = localizationService;
+        _themeService = (App.Current as App)?.ThemeService;
 
         InitializeComponent();
 
@@ -92,6 +106,7 @@ public sealed partial class SearchPopupWindow : Window
         _appWindow = AppWindow.GetFromWindowId(windowId);
 
         ConfigureWindow();
+        ApplyTheme();
         SetupBindings();
 
         _viewModel.ActionRequested += OnViewModelActionRequested;
@@ -99,9 +114,12 @@ public sealed partial class SearchPopupWindow : Window
         _viewModel.QueryApplied += OnViewModelQueryApplied;
         _viewModel.PropertyChanged += OnViewModelPropertyChanged;
         ResultsRepeater.ElementPrepared += OnResultsElementPrepared;
+        RecommendedAppsRepeater.ElementPrepared += OnRecommendedAppsElementPrepared;
         _settingsService.SettingsChanged += OnAppearanceSettingsChanged;
         _settingsService.AppearancePreviewChanged += OnAppearanceSettingsChanged;
         _localizationService.LanguageChanged += OnLanguageChanged;
+        if (_themeService is not null)
+            _themeService.AppearanceChanged += OnThemeServiceAppearanceChanged;
         Activated += OnWindowActivated;
         Closed += OnWindowClosed;
     }
@@ -120,6 +138,19 @@ public sealed partial class SearchPopupWindow : Window
     /// Shows the popup at the correct position and focuses the search box.
     /// </summary>
     public async void ShowPopup()
+    {
+        await ShowPopupCoreAsync(null);
+    }
+
+    /// <summary>
+    /// Shows the popup with a pre-filled query and immediately executes the search.
+    /// </summary>
+    public async void ShowPopupWithQuery(string query)
+    {
+        await ShowPopupCoreAsync(query);
+    }
+
+    private async Task ShowPopupCoreAsync(string? initialQuery)
     {
         // Cancel any in-flight exit animation (and its pending window hide) so a fast
         // Alt+D re-toggle interrupts the dismissal instead of racing with it.
@@ -153,12 +184,23 @@ public sealed partial class SearchPopupWindow : Window
 
         // Focus immediately; recommendations can continue loading without making the
         // freshly shown window feel inert.
-        SearchTextBox.Text = string.Empty;
+        SearchTextBox.Text = initialQuery ?? string.Empty;
         SearchTextBox.Focus(FocusState.Programmatic);
-        UpdatePanelVisibility();
 
-        await _viewModel.OnPopupOpenedAsync();
-        UpdatePanelVisibility();
+        if (!string.IsNullOrWhiteSpace(initialQuery))
+        {
+            // When opened with a pre-filled query, skip the empty-state recommendations
+            // and directly trigger the search.
+            _viewModel.Query = initialQuery;
+            UpdatePanelVisibility();
+        }
+        else
+        {
+            // Load data first, then update visibility once to avoid triggering the wave
+            // animation on an empty data set (which would hide containers prematurely).
+            await _viewModel.OnPopupOpenedAsync();
+            UpdatePanelVisibility();
+        }
     }
 
     /// <summary>
@@ -276,6 +318,33 @@ public sealed partial class SearchPopupWindow : Window
         {
             DispatcherQueue.TryEnqueue(ApplyAppearance);
         }
+    }
+
+    private void OnThemeServiceAppearanceChanged()
+    {
+        if (DispatcherQueue.HasThreadAccess)
+        {
+            ApplyTheme();
+        }
+        else
+        {
+            DispatcherQueue.TryEnqueue(ApplyTheme);
+        }
+    }
+
+    private void ApplyTheme()
+    {
+        if (_themeService is null)
+            return;
+
+        var theme = _themeService.CurrentTheme;
+        if (theme == ElementTheme.Default)
+            theme = Win32Helper.IsSystemDarkMode() ? ElementTheme.Dark : ElementTheme.Light;
+
+        RootGrid.RequestedTheme = theme;
+
+        // Re-apply material since it reads ActualTheme
+        ApplyMaterialFromSettings();
     }
 
     private void OnWindowActivated(object sender, WindowActivatedEventArgs args)
@@ -1025,7 +1094,6 @@ public sealed partial class SearchPopupWindow : Window
         HomeSectionHeader.Text = _localizationService.T("Search.Section.RecommendedApps");
         OpenSelectedLabel.Text = _localizationService.T("Search.Menu.Open");
         OpenLocationLabel.Text = _localizationService.T("Search.Menu.OpenLocation");
-        PreviewSelectedLabel.Text = _localizationService.T("Search.Menu.Preview");
         AttachSelectedLabel.Text = _localizationService.T("Search.Menu.AttachToTodo");
         SaveSelectedLabel.Text = _localizationService.T("Search.Menu.SaveToNote");
 
@@ -1066,8 +1134,19 @@ public sealed partial class SearchPopupWindow : Window
 
     private void RootGrid_KeyDown(object sender, KeyRoutedEventArgs e)
     {
+        // ── Recommended apps panel takes priority when visible ──
+        bool recommendedVisible = RecommendedAppsPanel.Visibility == Visibility.Visible;
+
+        // Escape: clear recommended app selection first, then hide popup.
         if (e.Key == Windows.System.VirtualKey.Escape)
         {
+            if (_selectedAppIndex >= 0)
+            {
+                ClearRecommendedAppSelection();
+                SearchTextBox.Focus(FocusState.Programmatic);
+                e.Handled = true;
+                return;
+            }
             HidePopup();
             e.Handled = true;
             return;
@@ -1080,12 +1159,119 @@ public sealed partial class SearchPopupWindow : Window
             bool backward = Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Shift);
             _viewModel.CycleTab(backward);
             e.Handled = true;
+            return;
+        }
+
+        // Recommended apps keyboard navigation (arrows, Enter, Space).
+        if (recommendedVisible && HandleRecommendedAppsKey(e))
+        {
+            e.Handled = true;
+            return;
+        }
+
+        // Up/Down from search box → move focus to result list.
+        if (e.Key == Windows.System.VirtualKey.Up || e.Key == Windows.System.VirtualKey.Down)
+        {
+            if (FocusManager.GetFocusedElement() is TextBox)
+            {
+                FocusSelectedResult();
+                e.Handled = true;
+            }
+            return;
+        }
+
+        // Space — QuickLook preview.
+        if (e.Key == Windows.System.VirtualKey.Space)
+        {
+            // If a recommended app is selected, preview it even when focus
+            // is in the search text box.
+            if (_selectedAppIndex >= 0)
+            {
+                TryPreviewSelectedItem();
+                e.Handled = true;
+                return;
+            }
+            // Standard case: preview only when focus is outside the text box.
+            if (FocusManager.GetFocusedElement() is not TextBox)
+            {
+                TryPreviewSelectedItem();
+                e.Handled = true;
+            }
         }
     }
 
     private void ClosePopupButton_Click(object sender, RoutedEventArgs e)
     {
         HidePopup();
+    }
+
+    /// <summary>
+    /// Handles newly realized item containers in the recommended-apps repeater.
+    /// Refreshes the icon image source because SearchResultItem.Icon is populated
+    /// lazily by FileMetaService and is not observable, so XAML binding alone
+    /// cannot track it.
+    /// </summary>
+    private void OnRecommendedAppsElementPrepared(ItemsRepeater sender, ItemsRepeaterElementPreparedEventArgs args)
+    {
+        if (args.Element is Button button &&
+            button.DataContext is SearchResultItem item &&
+            item.Icon is not null)
+        {
+            // Find the Image inside the button template and refresh its source.
+            var image = FindDescendant<Image>(button);
+            if (image is not null && image.Source != item.Icon)
+            {
+                image.Source = item.Icon;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Finds the first descendant of the specified type in the visual tree.
+    /// </summary>
+    private static T? FindDescendant<T>(DependencyObject parent) where T : DependencyObject
+    {
+        int count = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetChildrenCount(parent);
+        for (int i = 0; i < count; i++)
+        {
+            var child = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetChild(parent, i);
+            if (child is T result)
+            {
+                return result;
+            }
+
+            var descendant = FindDescendant<T>(child);
+            if (descendant is not null)
+            {
+                return descendant;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Refreshes icons on all realized containers in the recommended-apps repeater.
+    /// Called after FileMetaService finishes lazy icon enrichment.
+    /// </summary>
+    private void RefreshRecommendedAppIcons()
+    {
+        int index = 0;
+        var itemsSource = RecommendedAppsRepeater.ItemsSource as System.Collections.IEnumerable
+            ?? Array.Empty<object>();
+        foreach (var dataItem in itemsSource)
+        {
+            if (dataItem is SearchResultItem item && item.Icon is not null &&
+                RecommendedAppsRepeater.TryGetElement(index) is Button button)
+            {
+                var image = FindDescendant<Image>(button);
+                if (image is not null && image.Source != item.Icon)
+                {
+                    image.Source = item.Icon;
+                }
+            }
+            index++;
+        }
     }
 
     private void UpdatePanelVisibility()
@@ -1114,9 +1300,23 @@ public sealed partial class SearchPopupWindow : Window
         bool showResultChrome = hasQuery && hasResults && tabSelected;
 
         bool showRecommendedApps = !hasQuery && tabHasItems;
-        RecommendedAppsPanel.Visibility = showRecommendedApps
-            ? Visibility.Visible
-            : Visibility.Collapsed;
+        if (showRecommendedApps)
+        {
+            bool wasHidden = RecommendedAppsPanel.Visibility != Visibility.Visible;
+            RecommendedAppsPanel.Visibility = Visibility.Visible;
+            RefreshRecommendedAppIcons();
+
+            // Smooth fade-in + slide-up when the panel appears.
+            if (wasHidden)
+            {
+                AnimateRecommendedAppsIn();
+            }
+        }
+        else
+        {
+            RecommendedAppsPanel.Visibility = Visibility.Collapsed;
+            ClearRecommendedAppSelection();
+        }
 
         // Sortable header only for file-style tabs (All / extension tabs / File / Folder).
         bool fileSortTab = _viewModel.SelectedTab?.SupportsFileSort == true;
@@ -1142,6 +1342,10 @@ public sealed partial class SearchPopupWindow : Window
 
     private void SearchTextBox_TextChanged(object sender, TextChangedEventArgs e)
     {
+        // Typing a new query clears any recommended-app selection so that
+        // Space/arrow keys switch back to result-list navigation.
+        ClearRecommendedAppSelection();
+        _isNavigatingResults = false;
         _viewModel.Query = SearchTextBox.Text;
         UpdatePanelVisibility();
     }
@@ -1165,11 +1369,15 @@ public sealed partial class SearchPopupWindow : Window
 
             case Windows.System.VirtualKey.Up:
                 _viewModel.MoveSelectionUp();
+                _isNavigatingResults = true;
+                FocusSelectedResult();
                 e.Handled = true;
                 break;
 
             case Windows.System.VirtualKey.Down:
                 _viewModel.MoveSelectionDown();
+                _isNavigatingResults = true;
+                FocusSelectedResult();
                 e.Handled = true;
                 break;
 
@@ -1186,7 +1394,14 @@ public sealed partial class SearchPopupWindow : Window
                 break;
 
             case Windows.System.VirtualKey.Space:
-                if (Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Control))
+                // After Up/Down navigation, plain Space triggers QuickLook preview.
+                // Without navigation, Space types a space character (default behavior).
+                if (_isNavigatingResults && _viewModel.SelectedItem is not null)
+                {
+                    TryPreviewSelectedItem();
+                    e.Handled = true;
+                }
+                else if (Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Control))
                 {
                     TryPreviewSelectedItem();
                     e.Handled = true;
@@ -1250,7 +1465,42 @@ public sealed partial class SearchPopupWindow : Window
                 TryPreviewSelectedItem();
                 e.Handled = true;
                 break;
+
+            default:
+                // Redirect printable characters back to the search text box so the
+                // user can seamlessly continue typing after navigating results.
+                if (TryRedirectCharToSearchBox(e.Key))
+                {
+                    e.Handled = true;
+                }
+                break;
         }
+    }
+
+    /// <summary>
+    /// When focus is in the results panel and the user types a letter/digit,
+    /// move focus back to the search text box and append the character.
+    /// </summary>
+    private bool TryRedirectCharToSearchBox(Windows.System.VirtualKey key)
+    {
+        char? c = key switch
+        {
+            >= Windows.System.VirtualKey.A and <= Windows.System.VirtualKey.Z =>
+                Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Shift)
+                    ? (char)('A' + (key - Windows.System.VirtualKey.A))
+                    : (char)('a' + (key - Windows.System.VirtualKey.A)),
+            >= Windows.System.VirtualKey.Number0 and <= Windows.System.VirtualKey.Number9 =>
+                (char)('0' + (key - Windows.System.VirtualKey.Number0)),
+            _ => null
+        };
+
+        if (c is null) return false;
+
+        SearchTextBox.Focus(FocusState.Programmatic);
+        int caret = SearchTextBox.SelectionStart;
+        SearchTextBox.Text = SearchTextBox.Text.Insert(caret, c.Value.ToString());
+        SearchTextBox.SelectionStart = caret + 1;
+        return true;
     }
 
     /// <summary>
@@ -1285,12 +1535,184 @@ public sealed partial class SearchPopupWindow : Window
         _viewModel.InvokeAction("open-settings");
     }
 
-    private void RecommendedAppButton_Click(object sender, RoutedEventArgs e)
+    // ── Recommended apps: single-click select, double-click open, keyboard nav ──
+
+    private void RecommendedApp_PointerPressed(object sender, PointerRoutedEventArgs e)
     {
-        if (sender is FrameworkElement { DataContext: SearchResultItem item })
+        if (sender is Grid card && card.DataContext is SearchResultItem item)
+        {
+            SelectRecommendedApp(card, item);
+            e.Handled = true;
+        }
+    }
+
+    private void RecommendedApp_PointerEntered(object sender, PointerRoutedEventArgs e)
+    {
+        if (sender is Grid card && !ReferenceEquals(card, _selectedAppCard))
+        {
+            card.Background = ResolveThemeBrush("SubtleFillColorSecondaryBrush");
+        }
+    }
+
+    private void RecommendedApp_PointerExited(object sender, PointerRoutedEventArgs e)
+    {
+        if (sender is Grid card && !ReferenceEquals(card, _selectedAppCard))
+        {
+            card.Background = null;
+        }
+    }
+
+    private void RecommendedApp_DoubleTapped(object sender, DoubleTappedRoutedEventArgs e)
+    {
+        if (sender is Grid { DataContext: SearchResultItem item })
         {
             _viewModel.ExecuteItem(item);
         }
+        e.Handled = true;
+    }
+
+    /// <summary>
+    /// Handles keyboard navigation for the recommended-apps panel.
+    /// Called from RootGrid_KeyDown when the panel is visible.
+    /// Returns true if the key was consumed.
+    /// </summary>
+    private bool HandleRecommendedAppsKey(KeyRoutedEventArgs e)
+    {
+        var itemsSource = RecommendedAppsRepeater.ItemsSource as System.Collections.IList;
+        if (itemsSource is null || itemsSource.Count == 0) return false;
+
+        int count = itemsSource.Count;
+
+        switch (e.Key)
+        {
+            case Windows.System.VirtualKey.Left:
+            case Windows.System.VirtualKey.Right:
+            case Windows.System.VirtualKey.Up:
+            case Windows.System.VirtualKey.Down:
+                if (_selectedAppIndex < 0)
+                {
+                    SelectRecommendedAppByIndex(0);
+                }
+                else
+                {
+                    int columns = Math.Max(1,
+                        (int)Math.Floor((double)RecommendedAppsPanel.ActualWidth / 110));
+                    int newIndex = e.Key switch
+                    {
+                        Windows.System.VirtualKey.Left => Math.Max(0, _selectedAppIndex - 1),
+                        Windows.System.VirtualKey.Right => Math.Min(count - 1, _selectedAppIndex + 1),
+                        Windows.System.VirtualKey.Up => Math.Max(0, _selectedAppIndex - columns),
+                        Windows.System.VirtualKey.Down => Math.Min(count - 1, _selectedAppIndex + columns),
+                        _ => _selectedAppIndex
+                    };
+                    if (newIndex != _selectedAppIndex && newIndex >= 0 && newIndex < count)
+                    {
+                        SelectRecommendedAppByIndex(newIndex);
+                    }
+                }
+                return true;
+
+            case Windows.System.VirtualKey.Enter:
+                if (_selectedAppIndex >= 0 && _selectedAppIndex < count &&
+                    itemsSource[_selectedAppIndex] is SearchResultItem selected)
+                {
+                    _viewModel.ExecuteItem(selected);
+                    return true;
+                }
+                return false; // No selection → let Enter fall through to execute first result.
+
+            case Windows.System.VirtualKey.Space:
+                if (_selectedAppIndex >= 0)
+                {
+                    TryPreviewSelectedItem();
+                }
+                return true; // Always consume Space when panel is visible.
+        }
+        return false;
+    }
+
+    private void SelectRecommendedApp(Grid card, SearchResultItem item)
+    {
+        ClearRecommendedAppSelection();
+        _selectedAppCard = card;
+        card.Background = ResolveThemeBrush("ControlFillColorSecondaryBrush");
+
+        // Sync ViewModel selection for preview/action bar.
+        _viewModel.SelectedItem = item;
+
+        // Find the index for keyboard navigation.
+        var itemsSource = RecommendedAppsRepeater.ItemsSource as System.Collections.IList;
+        if (itemsSource is not null)
+        {
+            _selectedAppIndex = itemsSource.IndexOf(item);
+        }
+    }
+
+    private void SelectRecommendedAppByIndex(int index)
+    {
+        var itemsSource = RecommendedAppsRepeater.ItemsSource as System.Collections.IList;
+        if (itemsSource is null || index < 0 || index >= itemsSource.Count) return;
+
+        if (RecommendedAppsRepeater.TryGetElement(index) is Grid card &&
+            card.DataContext is SearchResultItem item)
+        {
+            SelectRecommendedApp(card, item);
+            card.StartBringIntoView();
+        }
+    }
+
+    private void ClearRecommendedAppSelection()
+    {
+        if (_selectedAppCard is not null)
+        {
+            _selectedAppCard.Background = null;
+            _selectedAppCard = null;
+        }
+        _selectedAppIndex = -1;
+    }
+
+    /// <summary>
+    /// Animates the recommended-apps panel with a smooth fade-in + slide-up.
+    /// Uses Composition API for GPU-accelerated rendering.
+    /// </summary>
+    private void AnimateRecommendedAppsIn()
+    {
+        var visual = ElementCompositionPreview.GetElementVisual(RecommendedAppsPanel);
+        if (visual is null) return;
+
+        ElementCompositionPreview.SetIsTranslationEnabled(RecommendedAppsPanel, true);
+
+        var compositor = visual.Compositor;
+        var easing = compositor.CreateCubicBezierEasingFunction(
+            new System.Numerics.Vector2(0.0f, 0.0f),
+            new System.Numerics.Vector2(0.1f, 1.0f));
+
+        // Fade in: 0 → 1
+        var opacityAnim = compositor.CreateScalarKeyFrameAnimation();
+        opacityAnim.InsertKeyFrame(0f, 0f);
+        opacityAnim.InsertKeyFrame(1f, 1f, easing);
+        opacityAnim.Duration = TimeSpan.FromMilliseconds(250);
+
+        // Slide up: 16px → 0
+        var translateAnim = compositor.CreateScalarKeyFrameAnimation();
+        translateAnim.InsertKeyFrame(0f, 16f);
+        translateAnim.InsertKeyFrame(1f, 0f, easing);
+        translateAnim.Duration = TimeSpan.FromMilliseconds(250);
+
+        visual.StartAnimation("Opacity", opacityAnim);
+        visual.StartAnimation("Translation.Y", translateAnim);
+    }
+
+    private static Microsoft.UI.Xaml.Media.Brush? ResolveThemeBrush(string key) =>
+        Application.Current.Resources.TryGetValue(key, out object? value)
+            ? value as Microsoft.UI.Xaml.Media.Brush
+            : null;
+
+    // ── Legacy: kept for compatibility ──
+
+    private void RecommendedAppButton_Click(object sender, RoutedEventArgs e)
+    {
+        // Replaced by PointerPressed/DoubleTapped handlers.
     }
 
     private void RecommendedAppsPanel_RightTapped(object sender, RightTappedRoutedEventArgs e)
@@ -1304,6 +1726,17 @@ public sealed partial class SearchPopupWindow : Window
         var anchor = (UIElement?)FindItemRow(e.OriginalSource as DependencyObject) ?? RecommendedAppsPanel;
         ShowResultFlyout(item, anchor, e.GetPosition(anchor));
         e.Handled = true;
+    }
+
+    /// <summary>
+    private void OnAppIcon_ImageOpened(object sender, RoutedEventArgs e)
+    {
+        // Icon loaded successfully.
+    }
+
+    private void OnAppIcon_ImageFailed(object sender, ExceptionRoutedEventArgs e)
+    {
+        // Icon failed to load — the glyph fallback handles this.
     }
 
     private void OnLanguageChanged()
@@ -2181,9 +2614,6 @@ public sealed partial class SearchPopupWindow : Window
         bool isFileSystemItem = item.Kind is SearchResultKind.File or SearchResultKind.Folder &&
                                 !string.IsNullOrWhiteSpace(item.DetailPath);
         OpenLocationButton.Visibility = isFileSystemItem ? Visibility.Visible : Visibility.Collapsed;
-        PreviewSelectedButton.Visibility = isFileSystemItem && _quickLookService.CanPreview(item.DetailPath)
-            ? Visibility.Visible
-            : Visibility.Collapsed;
         AttachSelectedButton.Visibility = CanAttachItem(item) ? Visibility.Visible : Visibility.Collapsed;
         SaveSelectedButton.Visibility = CanSaveItem(item) ? Visibility.Visible : Visibility.Collapsed;
     }
@@ -2202,11 +2632,6 @@ public sealed partial class SearchPopupWindow : Window
         {
             HidePopup();
         }
-    }
-
-    private void PreviewSelectedButton_Click(object sender, RoutedEventArgs e)
-    {
-        TryPreviewSelectedItem();
     }
 
     private async void AttachSelectedButton_Click(object sender, RoutedEventArgs e)
@@ -2249,6 +2674,8 @@ public sealed partial class SearchPopupWindow : Window
         _settingsService.SettingsChanged -= OnAppearanceSettingsChanged;
         _settingsService.AppearancePreviewChanged -= OnAppearanceSettingsChanged;
         _localizationService.LanguageChanged -= OnLanguageChanged;
+        if (_themeService is not null)
+            _themeService.AppearanceChanged -= OnThemeServiceAppearanceChanged;
         Activated -= OnWindowActivated;
         DisposeAcrylicController();
         DisposeMicaController();
