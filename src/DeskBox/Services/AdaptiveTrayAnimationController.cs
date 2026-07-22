@@ -43,7 +43,7 @@ public sealed class AdaptiveTrayAnimationController
     private float _preparedScale = WidgetTrayAnimationController.RestingScale;
 
     // ── 智能帧率节流状态 ──
-    private DateTime _lastRenderTime = DateTime.MaxValue;
+    private DateTime _lastRenderTime = DateTime.MinValue;
     private TimeSpan _elapsedSinceStart;
     private int _targetFPS;
     private double _minFrameIntervalMs;
@@ -311,31 +311,38 @@ public sealed class AdaptiveTrayAnimationController
     {
         _log($"[Adaptive] Executing in GPU Turbo Mode (Translation-based animation)");
         
-        // Step 1: 设置窗口到最终物理位置
-        ApplyWindowOffset(toOffsetX, toOffsetY);
-        
-        // Step 2: 启动 Translation Animation（从 offscreen 滑入的视觉效果）
+        // ⭐ 【修复方案】正确实现 Translation Animation
+        // 策略：窗口保持在最终物理位置，Translation Animation 从 offscreen 滑到最终位置
         try
         {
             var visual = GetCachedRootVisual();
             
+            // Step 1: 确保窗口已经移动到最终物理位置
+            ApplyWindowOffset(toOffsetX, toOffsetY);
+            
+            // Step 2: 启用 Translation，但让 Translation 从当前窗口位置滑到 offscreen（视觉反向）
             ElementCompositionPreview.SetIsTranslationEnabled(_rootElement, true);
             
+            // 创建 Translation Animation：从 OFFSCREEN → 当前屏幕位置
+            // 这样视觉效果是：格子从屏幕外滑入到当前位置
             _translationAnimation = GetCachedCompositor(visual).CreateVector3KeyFrameAnimation();
             _translationAnimation.Duration = TimeSpan.FromMilliseconds(durationMs);
             
-            // 初始状态：视觉上显示在 final position
-            _translationAnimation.InsertKeyFrame(0, new Vector3((float)toOffsetX, (float)toOffsetY, 0));
-            // 结束状态：视觉上移动到 offscreen（产生反向滑入效果）
-            _translationAnimation.InsertKeyFrame(1, new Vector3((float)fromOffsetX, (float)fromOffsetY, 0), easing);
+            // 关键点：Translation 的起始值是 -offset（offscreen 偏移量）
+            // 这样视觉上是：从 offscreen 滑到当前物理位置
+            double translationStartX = -(toOffsetX - fromOffsetX);  // 例如：如果 to=0, from=-300，则 start=300
+            double translationStartY = -(toOffsetY - fromOffsetY);
+            
+            _translationAnimation.InsertKeyFrame(0, new Vector3((float)translationStartX, (float)translationStartY, 0));
+            _translationAnimation.InsertKeyFrame(1, new Vector3(0f, 0f, 0), easing);  // 结束在 0 偏移（当前物理位置）
             
             visual.StartAnimation("Translation", _translationAnimation);
             
-            _log("[Adaptive] GPU Translation animation started successfully");
+            _log($"[Adaptive] GPU Translation animation started successfully (startOffset=({translationStartX:F0},{translationStartY:F0})→final={toOffsetX:F0},{toOffsetY:F0}))");
             
-            // Cleanup after completion
+            // 使用更精确的完成回调时机（考虑动画帧对齐）
             var timer = _dispatcherQueue.CreateTimer();
-            timer.Interval = TimeSpan.FromMilliseconds(durationMs + 50);
+            timer.Interval = TimeSpan.FromMilliseconds(durationMs + 16);  // +1 frame for 60Hz sync
             timer.Tick += (s, a) =>
             {
                 CleanupTranslationAnimation();
@@ -379,23 +386,21 @@ public sealed class AdaptiveTrayAnimationController
             return;
         }
 
-        // ── 智能帧率节流控制 ──
+        // ──【强制满帧模式】直接渲染，不跳过任何帧 ──
         _elapsedSinceStart = stopwatch.Elapsed;
-        _targetFPS = _elapsedSinceStart.TotalMilliseconds < _config.HighPriorityDurationMs 
-            ? _config.MaxFPS_HighPriority 
-            : _config.MaxFPS_Normal;
+        _targetFPS = _config.MaxFPS_HighPriority;  // 始终保持最高帧率
         
         _minFrameIntervalMs = 1000.0 / _targetFPS;
         
-        var timeSinceLastRender = stopwatch.Elapsed - new TimeSpan(_lastRenderTime.Ticks - _animationStartTime.Ticks);
-        
-        if (timeSinceLastRender.TotalMilliseconds < _minFrameIntervalMs)
-        {
-            return;
-        }
+        // ⚠️ 关键修改：禁用帧率节流逻辑，允许尽可能快的渲染
+        // var timeSinceLastRender = stopwatch.Elapsed - new TimeSpan(_lastRenderTime.Ticks - _animationStartTime.Ticks);
+        // if (timeSinceLastRender.TotalMilliseconds < _minFrameIntervalMs)
+        // {
+        //     return;
+        // }
         
         _lastRenderTime = DateTime.UtcNow;
-        // ── 帧率控制结束 ──
+        // ── 强制满帧模式结束 ──
 
         double rawProgress = Math.Clamp(stopwatch.Elapsed.TotalMilliseconds / _renderDurationMs, 0.0, 1.0);
         double easedProgress = WidgetAnimationSettings.Ease(rawProgress, _renderEasingIntensity, _renderIsShowing);

@@ -50,6 +50,12 @@ public sealed partial class SearchSettingsSection : UserControl
                     item.Tag as string,
                     settings.SearchDefaultTab,
                     StringComparison.OrdinalIgnoreCase));
+            SearchMaxResultsComboBox.SelectedItem = SearchMaxResultsComboBox.Items
+                .OfType<ComboBoxItem>()
+                .FirstOrDefault(item => string.Equals(
+                    item.Tag as string,
+                    settings.SearchMaxResults.ToString(),
+                    StringComparison.Ordinal));
         }
         finally
         {
@@ -109,6 +115,18 @@ public sealed partial class SearchSettingsSection : UserControl
         }
 
         Settings.Settings.SearchDefaultTab = tabId;
+        Settings.SaveDebounced();
+    }
+
+    private void SearchMaxResultsComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_isLoading || SearchMaxResultsComboBox.SelectedItem is not ComboBoxItem { Tag: string value } ||
+            !int.TryParse(value, out int maxResults))
+        {
+            return;
+        }
+
+        Settings.Settings.SearchMaxResults = maxResults;
         Settings.SaveDebounced();
     }
 

@@ -248,6 +248,10 @@ public sealed partial class QuickCaptureWidgetWindow : WidgetWindowBase, IDeskto
         _chromeDescriptor = new WidgetContentFactory(_localizationService).GetDescriptor(WidgetKind.QuickCapture);
         _chromeModeResolver = new WidgetChromeModeResolver(settingsService);
         InitializeComponent();
+        
+        // ✅ Set localized title
+        this.Title = _localizationService.T("Window.QuickCapture.Title");
+        
         DetailBodyTextBox.AddHandler(
             UIElement.PreviewKeyDownEvent,
             new KeyEventHandler(DetailBodyTextBox_KeyDown),
@@ -411,7 +415,6 @@ _isHideAnimationRunning = false;
         _trayAnimation.RestoreVisualState();
         _trayAnimation.RestoreWindowPosition();
         _trayAnimation.RevealWindowForTrayShow();
-        RestoreNativeBackdropAfterTrayReveal();
     }
 
     public bool PrepareTrayHideAnimation(bool persistVisibility = true)
@@ -424,7 +427,7 @@ _isHideAnimationRunning = false;
 
 _trayAnimation.NextGeneration();
 _trayAnimation.RevealWindowForTrayShow();
-_trayAnimation.StopAndRestoreWindowPosition();
+_trayAnimation.Stop();
 _isHideAnimationRunning = true;
         Visible = false;
         ViewModel.Config.IsVisible = false;
@@ -527,7 +530,6 @@ _isHideAnimationRunning = true;
         StopBackdropRefreshTimer();
         _trayAnimation.Stop();
         _trayAnimation.RevealWindowForTrayShow();
-        RestoreNativeBackdropAfterTrayReveal();
         WidgetLayerService.ReleaseWindow(_hWnd);
         Close();
     }
@@ -734,6 +736,80 @@ _isHideAnimationRunning = true;
         ApplyTitleBarLayout();
     }
 
+    public WidgetTrayBatchAnimationEntry? BeginSharedTrayShowAnimation()
+    {
+        long generation = _trayAnimation.NextGeneration();
+        _trayAnimation.Stop();
+        _isHideAnimationRunning = false;
+
+        var profile = GetTrayAnimationProfile();
+        if (!profile.IsEnabled)
+        {
+            LogTrayWindow($"SharedShow skipped reason=animation-disabled gen={generation}");
+            CompleteTrayShowWithoutAnimation();
+            return null;
+        }
+
+        LogTrayWindow($"SharedShow gen={generation} durationMs={profile.DurationMs}");
+        return _trayAnimation.BeginSharedAnimate(
+            profile.ShowOffsetX,
+            profile.ShowOffsetY,
+            0,
+            0,
+            profile.ShowStartOpacity,
+            WidgetTrayAnimationController.RestingOpacity,
+            profile.ShowStartScale,
+            WidgetTrayAnimationController.RestingScale,
+            profile.DurationMs,
+            true,
+            generation,
+            _settingsService.Settings.WidgetAnimationEasingIntensity,
+            () =>
+            {
+                _trayAnimation.RestoreVisualState();
+                _trayAnimation.RestoreWindowPosition();
+            });
+    }
+
+    public WidgetTrayBatchAnimationEntry? BeginSharedTrayHideAnimation()
+    {
+        if (!_isHideAnimationRunning)
+        {
+            return null;
+        }
+
+        long generation = _trayAnimation.Generation;
+        var profile = GetTrayAnimationProfile();
+        if (!profile.IsEnabled)
+        {
+            LogTrayWindow($"SharedHide skipped reason=animation-disabled gen={generation}");
+            CompleteTrayHideAnimation();
+            return null;
+        }
+
+        LogTrayWindow($"SharedHide gen={generation} durationMs={profile.DurationMs}");
+        return _trayAnimation.BeginSharedAnimate(
+            0,
+            0,
+            profile.HideOffsetX,
+            profile.HideOffsetY,
+            WidgetTrayAnimationController.RestingOpacity,
+            profile.HideEndOpacity,
+            WidgetTrayAnimationController.RestingScale,
+            profile.HideEndScale,
+            profile.DurationMs,
+            false,
+            generation,
+            _settingsService.Settings.WidgetAnimationEasingIntensity,
+            () =>
+            {
+                if (!Visible)
+                {
+                    CompleteTrayHideAnimation();
+                }
+            });
+    }
+
     private void PlayTrayRaiseAnimation()
     {
         long generation = _trayAnimation.NextGeneration();
@@ -766,7 +842,6 @@ _isHideAnimationRunning = true;
             {
                 _trayAnimation.RestoreVisualState();
                 _trayAnimation.RestoreWindowPosition();
-                RestoreNativeBackdropAfterTrayReveal();
             });
     }
 
@@ -822,7 +897,6 @@ _isHideAnimationRunning = true;
 
         _isHideAnimationRunning = false;
         _trayAnimation.Stop();
-        RestoreNativeBackdropAfterTrayReveal();
         WidgetLayerService.ClearTopMost(_hWnd);
         Win32Helper.ShowWindow(_hWnd, Win32Helper.SW_HIDE);
         _appWindow.Hide();

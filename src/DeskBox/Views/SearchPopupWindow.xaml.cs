@@ -101,6 +101,7 @@ public sealed partial class SearchPopupWindow : Window
         ResultsRepeater.ElementPrepared += OnResultsElementPrepared;
         _settingsService.SettingsChanged += OnAppearanceSettingsChanged;
         _settingsService.AppearancePreviewChanged += OnAppearanceSettingsChanged;
+        _localizationService.LanguageChanged += OnLanguageChanged;
         Activated += OnWindowActivated;
         Closed += OnWindowClosed;
     }
@@ -1011,6 +1012,7 @@ public sealed partial class SearchPopupWindow : Window
         OpenSettingsLabel.Text = _localizationService.T("Search.Action.OpenSettings");
 
         SortNameLabel.Text = _localizationService.T("Search.Sort.Name");
+        SortTypeLabel.Text = _localizationService.T("Search.Sort.Type");
         SortSizeLabel.Text = _localizationService.T("Search.Sort.Size");
         SortDateLabel.Text = _localizationService.T("Search.Sort.Date");
         ResultFilterLabel.Text = _localizationService.T("Search.Filter.Label");
@@ -1067,6 +1069,16 @@ public sealed partial class SearchPopupWindow : Window
         if (e.Key == Windows.System.VirtualKey.Escape)
         {
             HidePopup();
+            e.Handled = true;
+            return;
+        }
+
+        // Ctrl+Tab / Ctrl+Shift+Tab — cycle through search tabs
+        if (e.Key == Windows.System.VirtualKey.Tab &&
+            Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Control))
+        {
+            bool backward = Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Shift);
+            _viewModel.CycleTab(backward);
             e.Handled = true;
         }
     }
@@ -1281,6 +1293,31 @@ public sealed partial class SearchPopupWindow : Window
         }
     }
 
+    private void RecommendedAppsPanel_RightTapped(object sender, RightTappedRoutedEventArgs e)
+    {
+        var item = FindDataContext<SearchResultItem>(e.OriginalSource as DependencyObject);
+        if (item is null)
+        {
+            return;
+        }
+
+        var anchor = (UIElement?)FindItemRow(e.OriginalSource as DependencyObject) ?? RecommendedAppsPanel;
+        ShowResultFlyout(item, anchor, e.GetPosition(anchor));
+        e.Handled = true;
+    }
+
+    private void OnLanguageChanged()
+    {
+        if (!DispatcherQueue.TryEnqueue(() =>
+        {
+            SetupBindings();
+            _viewModel.RebuildTabsPublic();
+        }))
+        {
+            // Queue not available (window closing), ignore
+        }
+    }
+
     // 鈹€鈹€ Tab bar 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
     private void TabsList_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -1339,6 +1376,11 @@ public sealed partial class SearchPopupWindow : Window
         _viewModel.ToggleSort(ResultSortColumn.Name);
     }
 
+    private void SortTypeHeader_Click(object sender, RoutedEventArgs e)
+    {
+        _viewModel.ToggleSort(ResultSortColumn.Type);
+    }
+
     private void SortSizeHeader_Click(object sender, RoutedEventArgs e)
     {
         _viewModel.ToggleSort(ResultSortColumn.Size);
@@ -1363,6 +1405,7 @@ public sealed partial class SearchPopupWindow : Window
         var column = _viewModel.SortColumn;
         bool ascending = _viewModel.SortAscending;
         SetSortIndicator(SortNameDirection, column == ResultSortColumn.Name, ascending);
+        SetSortIndicator(SortTypeDirection, column == ResultSortColumn.Type, ascending);
         SetSortIndicator(SortSizeDirection, column == ResultSortColumn.Size, ascending);
         SetSortIndicator(SortDateDirection, column == ResultSortColumn.Date, ascending);
     }
@@ -2205,6 +2248,7 @@ public sealed partial class SearchPopupWindow : Window
         ResultsRepeater.ElementPrepared -= OnResultsElementPrepared;
         _settingsService.SettingsChanged -= OnAppearanceSettingsChanged;
         _settingsService.AppearancePreviewChanged -= OnAppearanceSettingsChanged;
+        _localizationService.LanguageChanged -= OnLanguageChanged;
         Activated -= OnWindowActivated;
         DisposeAcrylicController();
         DisposeMicaController();

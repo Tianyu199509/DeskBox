@@ -9,7 +9,7 @@
 #define MyAppExeName "DeskBox.exe"
 #define MyAppOutputBaseName "DeskBox_Setup"
 #ifndef MyAppReleaseDir
-#define MyAppReleaseDir "..\artifacts\publish\DeskBox\x64"
+#define MyAppReleaseDir "..\\Output\\perf-final-v085"
 #endif
 
 [Setup]

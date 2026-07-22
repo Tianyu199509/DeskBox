@@ -446,14 +446,21 @@ _ = RefreshQuickAccessStateAsync();
         return value.ToString(format, CultureInfo.CurrentCulture);
     }
 
-    public static string FormatBytes(long bytes)
+    public string FormatBytes(long bytes)
     {
         if (bytes < 1024)
         {
-            return string.Format(CultureInfo.CurrentCulture, "{0} B", Math.Max(0, bytes));
+            return string.Format(CultureInfo.CurrentCulture, 
+                $"{Math.Max(0, bytes)} {_localizationService.T("Size.Unit.Bytes")}", 
+                CultureInfo.CurrentCulture);
         }
 
-        string[] units = ["KB", "MB", "GB"];
+        var units = new[] 
+        {
+            _localizationService.T("Size.Unit.KB"),
+            _localizationService.T("Size.Unit.MB"),
+            _localizationService.T("Size.Unit.GB")
+        };
         double value = bytes;
         int unitIndex = -1;
         do
@@ -463,7 +470,9 @@ _ = RefreshQuickAccessStateAsync();
         }
         while (value >= 1024d && unitIndex < units.Length - 1);
 
-        return string.Format(CultureInfo.CurrentCulture, "{0:0.#} {1}", value, units[unitIndex]);
+        return string.Format(CultureInfo.CurrentCulture, 
+            $"{value:0.#} {units[unitIndex]}", 
+            CultureInfo.CurrentCulture);
     }
 
     private void ApplyNumberInput(

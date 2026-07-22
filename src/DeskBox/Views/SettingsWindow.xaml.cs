@@ -127,6 +127,10 @@ public sealed partial class SettingsWindow : Window
         _settingsRootPointerPressedHandler = SettingsRoot_PointerPressedHandled;
         _settingsRootPointerReleasedHandler = SettingsRoot_PointerReleasedHandled;
         InitializeComponent();
+        
+        // ✅ Set localized title
+        this.Title = _localizationService.T("Window.Settings.Title");
+        
         InitializeSettingsSectionElements();
         RefreshSettingsSearchResults();
 

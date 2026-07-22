@@ -220,6 +220,10 @@ public sealed partial class WidgetWindow : WidgetWindowBase, IDesktopWidgetWindo
         _chromeDescriptor = new WidgetContentFactory(_localizationSvc).GetDescriptor(WidgetKind.File);
         _chromeModeResolver = new WidgetChromeModeResolver(settingsService);
         InitializeComponent();
+        
+        // ✅ Set localized title
+        this.Title = _localizationSvc.T("Window.Widget.Title");
+        
         RootGrid.DataContext = ViewModel;
 
         ApplyLocalizedText();

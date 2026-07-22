@@ -172,7 +172,7 @@ public sealed partial class SettingsWindow
                         preparation.BackupCreatedAtUtc.ToLocalTime().ToString("g"),
                         preparation.AppVersion,
                         preparation.FileCount,
-                        SettingsViewModel.FormatBytes(preparation.TotalUncompressedBytes),
+                        ViewModel.FormatBytes(preparation.TotalUncompressedBytes),
                         integrityWarning),
                     TextWrapping = TextWrapping.Wrap
                 }
@@ -290,7 +290,7 @@ public sealed partial class SettingsWindow
                     ? _localizationService.T("Settings.DataBackup.Snapshots.Readable")
                     : _localizationService.T("Settings.DataBackup.Snapshots.Unreadable");
                 string title = $"{kind} · {snapshot.CreatedAtUtc.ToLocalTime():g}";
-                string details = $"{SettingsViewModel.FormatBytes(snapshot.SizeBytes)} · {status}\n{Path.GetFileName(snapshot.Path)}";
+                string details = $"{ViewModel.FormatBytes(snapshot.SizeBytes)} · {status}\n{Path.GetFileName(snapshot.Path)}";
                 return new BackupSnapshotListItem(snapshot.Path, title, details, snapshot.IsReadable);
             }).ToArray();
 
@@ -300,7 +300,7 @@ public sealed partial class SettingsWindow
                 : _localizationService.Format(
                     "Settings.DataBackup.Snapshots.Summary",
                     rows.Length,
-                    SettingsViewModel.FormatBytes(snapshots.Sum(snapshot => snapshot.SizeBytes)),
+                    ViewModel.FormatBytes(snapshots.Sum(snapshot => snapshot.SizeBytes)),
                     snapshots[0].CreatedAtUtc.ToLocalTime().ToString("g"));
         }
         catch (Exception ex)

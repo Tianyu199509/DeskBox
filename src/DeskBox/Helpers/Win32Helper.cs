@@ -57,6 +57,29 @@ public static partial class Win32Helper
         int cy,
         uint uFlags);
 
+    // ── DeferWindowPos: atomic multi-window position batch ──────────
+    // Moving N windows through one HDWP transaction commits all positions
+    // to DWM in a single batch, so grouped widgets slide in lockstep
+    // instead of staggering per-window SetWindowPos calls.
+
+    [LibraryImport("user32.dll", SetLastError = true)]
+    public static partial IntPtr BeginDeferWindowPos(int nNumWindows);
+
+    [LibraryImport("user32.dll", SetLastError = true)]
+    public static partial IntPtr DeferWindowPos(
+        IntPtr hWinPosInfo,
+        IntPtr hWnd,
+        IntPtr hWndInsertAfter,
+        int x,
+        int y,
+        int cx,
+        int cy,
+        uint uFlags);
+
+    [LibraryImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static partial bool EndDeferWindowPos(IntPtr hWinPosInfo);
+
     [LibraryImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static partial bool ShowWindow(IntPtr hWnd, int nCmdShow);

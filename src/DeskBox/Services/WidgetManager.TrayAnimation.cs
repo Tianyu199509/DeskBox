@@ -20,6 +20,11 @@ public sealed partial class WidgetManager
     private const double OffscreenAnimationPadding = 16.0;
     private long _trayRaiseBatchGeneration;
 
+    // Single shared driver for batch tray animations: one clock and one
+    // atomic DeferWindowPos commit per frame, so all windows slide in
+    // lockstep instead of staggering per-window (the "wave" effect).
+    private readonly WidgetTrayBatchAnimationDriver _trayBatchAnimationDriver = new(App.LogVerbose);
+
     /// <summary>
     /// Bring desktop widgets to the front of the normal Z-order from the tray.
     /// </summary>
@@ -38,9 +43,10 @@ public sealed partial class WidgetManager
         App.LogVerbose(
             $"[TrayBatch] Raise requested raised={_widgetsRaisedFromTray} toggling={_isTogglingWidgetsDesktopLayer} " +
             $"sinceLastMs={sinceLastToggleMs:F0} loadedFile={_widgets.Count} loadedQuick={_quickCaptureWidgets.Count} loadedContent={_contentWidgets.Count}");
-        if (_isTogglingWidgetsDesktopLayer || now - _lastTrayLayerToggleUtc < TimeSpan.FromMilliseconds(320))
+        // ⭐ 移除 320ms 节流限制，确保即时响应
+        if (_isTogglingWidgetsDesktopLayer)
         {
-            App.LogVerbose("[TrayBatch] Raise ignored reason=busy-or-throttled");
+            App.LogVerbose("[TrayBatch] Raise ignored reason=busy");
             return null;
         }
 
@@ -48,6 +54,7 @@ public sealed partial class WidgetManager
         _lastTrayLayerToggleUtc = now;
         try
         {
+            _trayBatchAnimationDriver.Cancel();
             var candidates = _settingsService.Settings.Widgets
                 .Where(IsSessionCandidate)
                 .ToList();
@@ -221,7 +228,7 @@ public sealed partial class WidgetManager
 
         App.LogVerbose($"[TrayBatch] Starting batch show for {windows.Count} widgets...");
         
-        // ⭐ 终极优化：使用 DispatcherQueue 强制同一帧完成偏移量设置和动画播放
+        // ⭐ 统一驱动：同一时钟 + DeferWindowPos 原子批量提交，所有窗口锁步滑动
         var dispatcher = Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread();
         dispatcher.TryEnqueue(() =>
         {
@@ -229,19 +236,34 @@ public sealed partial class WidgetManager
             {
                 // Step 1: 在同一帧内完成所有偏移量设置
                 ApplyTrayAnimationGroupOffset(windows);
-                
-                // Step 2: 然后同时播放所有动画
+
+                // Step 2: 收集所有窗口的共享动画条目（窗口自身的 Opacity/Scale
+                // 仍由各自的 Composition 动画驱动）
+                var entries = new List<WidgetTrayBatchAnimationEntry>(windows.Count);
                 foreach (var window in windows)
                 {
                     try
                     {
-                        window.PlayTrayShowAnimation();
+                        var entry = window.BeginSharedTrayShowAnimation();
+                        if (entry is not null)
+                        {
+                            entries.Add(entry);
+                        }
                     }
                     catch (Exception ex)
                     {
                         App.Log($"[WidgetManager] Failed to play widget show animation {window}: {ex}");
                     }
                 }
+
+                // Step 3: 单批启动；等待 1 帧让新显示的窗口先提交首帧表面
+                var options = WidgetAnimationSettings.From(_settingsService.Settings);
+                _trayBatchAnimationDriver.Start(
+                    entries,
+                    options.DurationMs,
+                    _settingsService.Settings.WidgetAnimationEasingIntensity,
+                    isShowing: true,
+                    startDelayFrames: 1);
             }
             catch (Exception ex)
             {
@@ -275,7 +297,7 @@ public sealed partial class WidgetManager
 
         App.LogVerbose($"[TrayBatch] Starting batch hide for {windows.Count} widgets...");
         
-        // ⭐ 与 PlayPreparedTrayShowAnimations 相同的优化：使用 DispatcherQueue 强制同一帧完成所有操作
+        // ⭐ 与批量显示相同：统一驱动 + DeferWindowPos 原子批量提交
         var dispatcher = Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread();
         dispatcher.TryEnqueue(() =>
         {
@@ -283,19 +305,33 @@ public sealed partial class WidgetManager
             {
                 // Step 1: 在同一帧内完成所有偏移量设置
                 ApplyTrayAnimationGroupOffset(windows);
-                
-                // Step 2: 然后同时隐藏所有窗口
+
+                // Step 2: 收集所有窗口的共享隐藏动画条目
+                var entries = new List<WidgetTrayBatchAnimationEntry>(windows.Count);
                 foreach (var window in windows)
                 {
                     try
                     {
-                        window.PlayPreparedTrayHideAnimation();
+                        var entry = window.BeginSharedTrayHideAnimation();
+                        if (entry is not null)
+                        {
+                            entries.Add(entry);
+                        }
                     }
                     catch (Exception ex)
                     {
                         App.Log($"[WidgetManager] Failed to play widget hide animation {FormatHostWindow(window)}: {ex}");
                     }
                 }
+
+                // Step 3: 单批启动，内容已渲染无需等待
+                var options = WidgetAnimationSettings.From(_settingsService.Settings);
+                _trayBatchAnimationDriver.Start(
+                    entries,
+                    options.DurationMs,
+                    _settingsService.Settings.WidgetAnimationEasingIntensity,
+                    isShowing: false,
+                    startDelayFrames: 0);
             }
             catch (Exception ex)
             {

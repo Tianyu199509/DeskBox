@@ -1,4 +1,4 @@
-﻿using System.Globalization;
+﻿﻿using System.Globalization;
 using System.Reflection;
 using System.Text.Json;
 using DeskBox.Models;
@@ -10,6 +10,9 @@ public sealed class LocalizationService
     public const string LanguageSystem = SettingsService.LanguageSystem;
     public const string LanguageChinese = SettingsService.LanguageChinese;
     public const string LanguageEnglish = SettingsService.LanguageEnglish;
+    public const string LanguageJapanese = "ja-JP";
+    public const string LanguageGerman = "de-DE";
+    public const string LanguagePortuguese = "pt-BR";
 
     private readonly SettingsService _settingsService;
 
@@ -42,7 +45,10 @@ public sealed class LocalizationService
     [
         LanguageSystem,
         LanguageChinese,
-        LanguageEnglish
+        LanguageEnglish,
+        LanguageJapanese,
+        LanguageGerman,
+        LanguagePortuguese
     ];
 
     public string GetLanguageDisplayName(string language)
@@ -51,6 +57,9 @@ public sealed class LocalizationService
         {
             LanguageChinese => T("Language.Chinese"),
             LanguageEnglish => T("Language.English"),
+            LanguageJapanese => T("Language.Japanese"),
+            LanguageGerman => T("Language.German"),
+            LanguagePortuguese => T("Language.Portuguese"),
             _ => T("Language.System")
         };
     }
@@ -105,12 +114,20 @@ public sealed class LocalizationService
 
     public string T(string key)
     {
-        var table = IsEnglish ? EnUs : ZhCn;
+        var table = CurrentCultureName switch
+        {
+            LanguageJapanese => JaJp,
+            LanguageGerman => DeDe,
+            LanguagePortuguese => PtBr,
+            _ => IsEnglish ? EnUs : ZhCn
+        };
+        
         if (table.TryGetValue(key, out string? value))
         {
             return value;
         }
 
+        // Fallback to Chinese for all languages
         return ZhCn.TryGetValue(key, out value) ? value : key;
     }
 
@@ -131,7 +148,7 @@ public sealed class LocalizationService
 
     public static string NormalizeLanguageSetting(string? language)
     {
-        return language is LanguageChinese or LanguageEnglish
+        return language is LanguageChinese or LanguageEnglish or LanguageJapanese or LanguageGerman or LanguagePortuguese
             ? language
             : LanguageSystem;
     }
@@ -139,13 +156,22 @@ public sealed class LocalizationService
     private static string ResolveSystemLanguage()
     {
         string name = CultureInfo.CurrentUICulture.Name;
-        return name.StartsWith("zh", StringComparison.OrdinalIgnoreCase)
-            ? LanguageChinese
-            : LanguageEnglish;
+        if (name.StartsWith("zh", StringComparison.OrdinalIgnoreCase))
+            return LanguageChinese;
+        if (name.StartsWith("ja", StringComparison.OrdinalIgnoreCase))
+            return LanguageJapanese;
+        if (name.StartsWith("de", StringComparison.OrdinalIgnoreCase))
+            return LanguageGerman;
+        if (name.StartsWith("pt", StringComparison.OrdinalIgnoreCase))
+            return LanguagePortuguese;
+        return LanguageEnglish;
     }
 
     private static Dictionary<string, string>? _zhCn;
     private static Dictionary<string, string>? _enUs;
+    private static Dictionary<string, string>? _jaJp;
+    private static Dictionary<string, string>? _deDe;
+    private static Dictionary<string, string>? _ptBr;
     private static readonly object s_loadLock = new();
 
     private static Dictionary<string, string> ZhCn
@@ -171,6 +197,45 @@ public sealed class LocalizationService
                 _enUs ??= LoadStringResource("DeskBox.Strings.en-US.json");
             }
             return _enUs;
+        }
+    }
+
+    private static Dictionary<string, string> JaJp
+    {
+        get
+        {
+            if (_jaJp is not null) return _jaJp;
+            lock (s_loadLock)
+            {
+                _jaJp ??= LoadStringResource("DeskBox.Strings.ja-JP.json");
+            }
+            return _jaJp;
+        }
+    }
+
+    private static Dictionary<string, string> DeDe
+    {
+        get
+        {
+            if (_deDe is not null) return _deDe;
+            lock (s_loadLock)
+            {
+                _deDe ??= LoadStringResource("DeskBox.Strings.de-DE.json");
+            }
+            return _deDe;
+        }
+    }
+
+    private static Dictionary<string, string> PtBr
+    {
+        get
+        {
+            if (_ptBr is not null) return _ptBr;
+            lock (s_loadLock)
+            {
+                _ptBr ??= LoadStringResource("DeskBox.Strings.pt-BR.json");
+            }
+            return _ptBr;
         }
     }
 

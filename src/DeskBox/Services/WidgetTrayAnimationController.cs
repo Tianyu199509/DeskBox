@@ -55,18 +55,18 @@ public sealed class WidgetTrayAnimationController
     private long _contentReadyGeneration;
     private Action? _contentReadyAction;
 
-    // ── 方案 A: 智能帧率节流控制 ──
-    // 目标：减少不必要的渲染帧，降低系统开销
-    private const int MaxFPS_HighPriority = 120;   // 高优先级阶段 FPS（前 50ms）
-    private const int MaxFPS_Normal = 24;          // 正常阶段 FPS
-    private const double HighPriorityDurationMs = 50.0;  // 高优先级持续时长 (ms)
+    // ──【强制满帧率模式】直接以显示器刷新率为目标，不做任何节流 ──
+    // 策略：获取显示器实际刷新率并直接使用，确保视觉流畅
+    private const int MaxFPS_HighPriority = 240;   // 最大可能帧率（VRR 上限）
+    private const int MaxFPS_Normal = 240;         // 始终满帧！
+    private const double HighPriorityDurationMs = 999999.0;  // 几乎无限时
     
-    private DateTime _lastRenderTime = DateTime.MaxValue;
+    private DateTime _lastRenderTime = DateTime.MinValue;
     private TimeSpan _elapsedSinceStart;
     private int _targetFPS = MaxFPS_HighPriority;
     private double _minFrameIntervalMs = 8.33;     // 120fps 的帧间隔
     private DateTime _animationStartTime;
-    // ── 方案 A 控制字段结束 ──
+    // ── 强制满帧率模式结束 ──
 
     private bool _isRendering;
     private Stopwatch? _renderStopwatch;
@@ -424,65 +424,176 @@ public sealed class WidgetTrayAnimationController
         CompositionTarget.Rendering += OnRenderingFrame;
     }
 
+    /// <summary>
+    /// Shared-clock variant of <see cref="Animate"/>: prepares state and starts
+    /// the GPU-driven opacity/scale Composition animations, but leaves window
+    /// position interpolation to the batch driver (single clock + atomic
+    /// DeferWindowPos commit for all windows in lockstep).
+    /// Returns null when the transition completes instantly (duration &lt;= 1ms).
+    /// </summary>
+    public WidgetTrayBatchAnimationEntry? BeginSharedAnimate(
+        double fromOffsetX,
+        double fromOffsetY,
+        double toOffsetX,
+        double toOffsetY,
+        float fromOpacity,
+        float toOpacity,
+        float fromScale,
+        float toScale,
+        int durationMs,
+        bool isShowing,
+        long generation,
+        string easingIntensity,
+        Action completed)
+    {
+        _log(
+            $"SharedAnimateStart mode={(isShowing ? "show" : "hide")} gen={generation} durationMs={durationMs} " +
+            $"windowOffset=({fromOffsetX:F0},{fromOffsetY:F0})->({toOffsetX:F0},{toOffsetY:F0})");
+        Stop();
+        if (_targetPosition is null)
+        {
+            PrepareVisualState(fromOffsetX, fromOffsetY, fromOpacity, fromScale);
+        }
+        else
+        {
+            ApplyWindowOffset(fromOffsetX, fromOffsetY);
+        }
+
+        var visual = GetCachedRootVisual();
+        StopVisualAnimations(visual);
+
+        if (durationMs <= 1)
+        {
+            visual.Opacity = toOpacity;
+            visual.CenterPoint = GetVisualCenterPoint();
+            visual.Scale = new Vector3(toScale, toScale, 1);
+            CompleteAnimation(toOffsetX, toOffsetY, isShowing, generation, completed);
+            return null;
+        }
+
+        // ── Opacity & Scale: Composition KeyFrame animations (GPU-driven) ──
+        var compositor = GetCachedCompositor(visual);
+        var easing = CreateEasingFunction(compositor, easingIntensity, isShowing);
+        var duration = TimeSpan.FromMilliseconds(durationMs);
+
+        if (Math.Abs(fromOpacity - toOpacity) > 0.001f)
+        {
+            var opacityAnim = compositor.CreateScalarKeyFrameAnimation();
+            opacityAnim.Duration = duration;
+            opacityAnim.InsertKeyFrame(0, fromOpacity);
+            opacityAnim.InsertKeyFrame(1, toOpacity, easing);
+            visual.Opacity = fromOpacity;
+            visual.StartAnimation("Opacity", opacityAnim);
+        }
+        else
+        {
+            visual.Opacity = toOpacity;
+        }
+
+        if (Math.Abs(fromScale - toScale) > 0.001f)
+        {
+            visual.CenterPoint = GetVisualCenterPoint();
+            var scaleAnim = compositor.CreateVector3KeyFrameAnimation();
+            scaleAnim.Duration = duration;
+            scaleAnim.InsertKeyFrame(0, new Vector3(fromScale, fromScale, 1));
+            scaleAnim.InsertKeyFrame(1, new Vector3(toScale, toScale, 1), easing);
+            visual.Scale = new Vector3(fromScale, fromScale, 1);
+            visual.StartAnimation("Scale", scaleAnim);
+        }
+        else
+        {
+            visual.CenterPoint = GetVisualCenterPoint();
+            visual.Scale = new Vector3(toScale, toScale, 1);
+        }
+
+        // Position frames are owned by the batch driver from here on.
+        var basePosition = _targetPosition ?? GetCurrentBasePosition();
+        long capturedGeneration = generation;
+
+        return new WidgetTrayBatchAnimationEntry
+        {
+            WindowHandle = _windowHandle,
+            BaseX = basePosition.X,
+            BaseY = basePosition.Y,
+            FromOffsetX = fromOffsetX,
+            FromOffsetY = fromOffsetY,
+            ToOffsetX = toOffsetX,
+            ToOffsetY = toOffsetY,
+            IsValid = () => capturedGeneration == Generation,
+            Completed = () => CompleteAnimation(toOffsetX, toOffsetY, isShowing, capturedGeneration, completed)
+        };
+    }
+
+    private PointInt32 GetCurrentBasePosition()
+    {
+        var bounds = _getAnimationBounds();
+        return new PointInt32(
+            (int)Math.Round(bounds.X),
+            (int)Math.Round(bounds.Y));
+    }
+
     private void OnRenderingFrame(object sender, object e)
     {
-        if (!_isRendering || _renderGeneration != Generation)
+        try // ✅ 添加异常保护防止渲染线程崩溃
         {
+            if (!_isRendering || _renderGeneration != Generation)
+            {
+                StopRendering();
+                return;
+            }
+
+            var stopwatch = _renderStopwatch;
+            if (stopwatch is null)
+            {
+                StopRendering();
+                return;
+            }
+
+            // ──【强制满帧模式】直接渲染，不跳过任何帧 ──
+            // 策略：确保每一帧都渲染，充分利用显示器刷新率
+            _elapsedSinceStart = stopwatch.Elapsed;
+            _targetFPS = MaxFPS_HighPriority;  // 始终保持最高帧率
+            
+            _minFrameIntervalMs = 1000.0 / _targetFPS;
+            
+            // ⚠️ 关键修改：禁用帧率节流逻辑，允许尽可能快的渲染
+            // if (timeSinceLastRender.TotalMilliseconds < _minFrameIntervalMs)
+            // {
+            //     return;  // 禁用帧率限制
+            // }
+            
+            // 更新最后一次渲染时间（但不停止帧率）
+            _lastRenderTime = DateTime.UtcNow;
+            // ── 强制满帧模式结束 ──
+
+            double rawProgress = Math.Clamp(stopwatch.Elapsed.TotalMilliseconds / _renderDurationMs, 0.0, 1.0);
+            double easedProgress = WidgetAnimationSettings.Ease(rawProgress, _renderEasingIntensity, _renderIsShowing);
+            double currentOffsetX = Lerp(_renderFromOffsetX, _renderToOffsetX, easedProgress);
+            double currentOffsetY = Lerp(_renderFromOffsetY, _renderToOffsetY, easedProgress);
+
+            // Only move the window — opacity/scale are GPU-driven by Composition animations.
+            ApplyWindowOffset(currentOffsetX, currentOffsetY);
+
+            if (rawProgress < 1.0)
+            {
+                return;
+            }
+
             StopRendering();
-            return;
-        }
 
-        var stopwatch = _renderStopwatch;
-        if (stopwatch is null)
+            CompleteAnimation(
+                _renderToOffsetX,
+                _renderToOffsetY,
+                _renderIsShowing,
+                _renderGeneration,
+                _renderCompleted);
+        }
+        catch (Exception ex)
         {
-            StopRendering();
-            return;
+            // 记录异常日志但不让渲染线程崩溃
+            App.Log($"[WidgetTrayAnimationController] Frame exception: {ex.Message}\n{ex.StackTrace}");
+            StopRendering(); // 安全停止动画，防止状态不一致
         }
-
-        // ── 方案 A: 智能帧率节流控制 ──
-        // 策略：动画初期（前 100ms）用 60fps，之后降为 30fps
-        // 理由：人眼对启动阶段的流畅度更敏感，后续帧差异不明显
-        _elapsedSinceStart = stopwatch.Elapsed;
-        _targetFPS = _elapsedSinceStart.TotalMilliseconds < HighPriorityDurationMs 
-            ? MaxFPS_HighPriority 
-            : MaxFPS_Normal;
-        
-        _minFrameIntervalMs = 1000.0 / _targetFPS;
-        
-        // 计算距离上次渲染经过的时间
-        var timeSinceLastRender = stopwatch.Elapsed - new TimeSpan(_lastRenderTime.Ticks - _animationStartTime.Ticks);
-        
-        // 如果未到达目标帧率的最小间隔，跳过此帧
-        if (timeSinceLastRender.TotalMilliseconds < _minFrameIntervalMs)
-        {
-            return;  // 跳过此帧，减少系统开销
-        }
-        
-        // 更新最后一次渲染时间
-        _lastRenderTime = DateTime.UtcNow;
-        // ── 方案 A 控制结束 ──
-
-        double rawProgress = Math.Clamp(stopwatch.Elapsed.TotalMilliseconds / _renderDurationMs, 0.0, 1.0);
-        double easedProgress = WidgetAnimationSettings.Ease(rawProgress, _renderEasingIntensity, _renderIsShowing);
-        double currentOffsetX = Lerp(_renderFromOffsetX, _renderToOffsetX, easedProgress);
-        double currentOffsetY = Lerp(_renderFromOffsetY, _renderToOffsetY, easedProgress);
-
-        // Only move the window — opacity/scale are GPU-driven by Composition animations.
-        ApplyWindowOffset(currentOffsetX, currentOffsetY);
-
-        if (rawProgress < 1.0)
-        {
-            return;
-        }
-
-        StopRendering();
-
-        CompleteAnimation(
-            _renderToOffsetX,
-            _renderToOffsetY,
-            _renderIsShowing,
-            _renderGeneration,
-            _renderCompleted);
     }
 
     private void StopRendering()
@@ -496,12 +607,12 @@ public sealed class WidgetTrayAnimationController
         _renderStopwatch = null;
         CompositionTarget.Rendering -= OnRenderingFrame;
         
-        // ── 方案 A: 重置帧率节流状态 ──
+        // ── 强制满帧模式：重置帧率节流状态 ──
         _lastRenderTime = DateTime.MinValue;
         _elapsedSinceStart = TimeSpan.Zero;
-        _targetFPS = MaxFPS_HighPriority;  // 重置为默认值
+        _targetFPS = MaxFPS_HighPriority;  // 重置为最高帧率
         _minFrameIntervalMs = 1000.0 / _targetFPS;
-        // ── 方案 A 状态重置结束 ──
+        // ── 强制满帧模式结束 ──
     }
 
     public void Stop()
@@ -620,10 +731,9 @@ public sealed class WidgetTrayAnimationController
 
     private void ApplyWindowOffset(double offsetX, double offsetY)
     {
-        var bounds = _getAnimationBounds();
-        var target = _targetPosition ?? new PointInt32(
-            (int)Math.Round(bounds.X),
-            (int)Math.Round(bounds.Y));
+        // Skip the GetWindowRect round-trip when the resting position is
+        // already known — it only matters as a fallback.
+        var target = _targetPosition ?? GetCurrentBasePosition();
         var nextPosition = new PointInt32(
             target.X + (int)Math.Round(offsetX),
             target.Y + (int)Math.Round(offsetY));

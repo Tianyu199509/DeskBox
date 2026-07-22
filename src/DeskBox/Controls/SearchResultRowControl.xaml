@@ -26,6 +26,7 @@
             <ColumnDefinition Width="5"/>
             <ColumnDefinition Width="34"/>
             <ColumnDefinition Width="*"/>
+            <ColumnDefinition x:Name="TypeColumn" Width="75"/>
             <ColumnDefinition x:Name="SizeColumn" Width="90"/>
             <ColumnDefinition x:Name="DateColumn" Width="110"/>
         </Grid.ColumnDefinitions>
@@ -53,10 +54,14 @@
                        Foreground="{ThemeResource TextFillColorTertiaryBrush}"
                        TextTrimming="CharacterEllipsis" Margin="0,2,0,0"/>
         </StackPanel>
-        <TextBlock x:Name="SizeText" Grid.Column="3" Text="{Binding SizeDisplay}" FontSize="12"
+        <TextBlock x:Name="TypeText" Grid.Column="3" Text="{Binding TypeDisplay}" FontSize="11.5"
+                   Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                   VerticalAlignment="Center" Margin="4,0,6,0"
+                   TextTrimming="CharacterEllipsis"/>
+        <TextBlock x:Name="SizeText" Grid.Column="4" Text="{Binding SizeDisplay}" FontSize="12"
                    Foreground="{ThemeResource TextFillColorTertiaryBrush}"
                    VerticalAlignment="Center" TextAlignment="Right" Margin="8,0,12,0"/>
-        <TextBlock x:Name="DateText" Grid.Column="4" Text="{Binding DateDisplay}" FontSize="12"
+        <TextBlock x:Name="DateText" Grid.Column="5" Text="{Binding DateDisplay}" FontSize="12"
                    Foreground="{ThemeResource TextFillColorTertiaryBrush}"
                    VerticalAlignment="Center"/>
     </Grid>

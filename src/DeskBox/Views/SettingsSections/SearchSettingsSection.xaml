@@ -169,6 +169,23 @@
                 </ComboBox>
             </toolkit:SettingsCard>
 
+            <!-- Max results -->
+            <toolkit:SettingsCard
+                HorizontalContentAlignment="Right"
+                svc:Localized.DescriptionKey="Settings.Search.MaxResults.Description"
+                svc:Localized.HeaderKey="Settings.Search.MaxResults.Title">
+                <toolkit:SettingsCard.HeaderIcon>
+                    <FontIcon Glyph="&#xE8FD;" />
+                </toolkit:SettingsCard.HeaderIcon>
+                <ComboBox x:Name="SearchMaxResultsComboBox"
+                          MinWidth="100"
+                          SelectionChanged="SearchMaxResultsComboBox_SelectionChanged">
+                    <ComboBoxItem Tag="50" Content="50" />
+                    <ComboBoxItem Tag="100" Content="100" />
+                    <ComboBoxItem Tag="200" Content="200" />
+                </ComboBox>
+            </toolkit:SettingsCard>
+
             <toolkit:SettingsCard
                 HorizontalContentAlignment="Right"
                 svc:Localized.DescriptionKey="Settings.Search.Privacy.Description"

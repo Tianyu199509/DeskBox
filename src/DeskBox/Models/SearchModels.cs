@@ -42,7 +42,8 @@ public enum ResultSortColumn
     Relevance,
     Name,
     Size,
-    Date
+    Date,
+    Type
 }
 
 /// <summary>
@@ -145,6 +146,9 @@ public sealed class SearchResultItem
 
     /// <summary>Formatted creation date for display.</summary>
     public string? DateDisplay { get; set; }
+
+    /// <summary>Localized type label for display and sort (e.g., "App", "File", "Folder").</summary>
+    public string? TypeDisplay { get; set; }
 
     /// <summary>
     /// For Todo results: the widget ID and item ID for direct actions.

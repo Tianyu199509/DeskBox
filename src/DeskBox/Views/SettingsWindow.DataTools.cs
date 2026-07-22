@@ -126,7 +126,7 @@ public sealed partial class SettingsWindow
                 Text = _localizationService.Format(
                     "Settings.QuickCapture.ImageCacheCleanupDescription",
                     result.DeletedFileCount,
-                    SettingsViewModel.FormatBytes(result.DeletedBytes)),
+                    ViewModel.FormatBytes(result.DeletedBytes)),
                 TextWrapping = TextWrapping.Wrap
             }
         };

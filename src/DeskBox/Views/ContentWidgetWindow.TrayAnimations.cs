@@ -22,6 +22,81 @@ namespace DeskBox.Views;
 
 public sealed partial class ContentWidgetWindow
 {
+    public WidgetTrayBatchAnimationEntry? BeginSharedTrayShowAnimation()
+    {
+        long generation = TrayAnimation.NextGeneration();
+        TrayAnimation.Stop();
+        IsHideAnimationRunning = false;
+        _isHidePrepared = false;
+
+        var profile = GetTrayAnimationProfile();
+        if (!profile.IsEnabled)
+        {
+            LogTrayWindow($"SharedShow skipped reason=animation-disabled gen={generation}");
+            CompleteTrayShowWithoutAnimation();
+            return null;
+        }
+
+        LogTrayWindow($"SharedShow gen={generation} durationMs={profile.DurationMs}");
+        return TrayAnimation.BeginSharedAnimate(
+            profile.ShowOffsetX,
+            profile.ShowOffsetY,
+            0,
+            0,
+            profile.ShowStartOpacity,
+            WidgetTrayAnimationController.RestingOpacity,
+            profile.ShowStartScale,
+            WidgetTrayAnimationController.RestingScale,
+            profile.DurationMs,
+            true,
+            generation,
+            SettingsService.Settings.WidgetAnimationEasingIntensity,
+            () =>
+            {
+                TrayAnimation.RestoreVisualState();
+                TrayAnimation.RestoreWindowPosition();
+            });
+    }
+
+    public WidgetTrayBatchAnimationEntry? BeginSharedTrayHideAnimation()
+    {
+        if (!_isHidePrepared || !IsHideAnimationRunning)
+        {
+            return null;
+        }
+
+        long generation = TrayAnimation.Generation;
+        var profile = GetTrayAnimationProfile();
+        if (!profile.IsEnabled)
+        {
+            LogTrayWindow($"SharedHide skipped reason=animation-disabled gen={generation}");
+            CompleteTrayHideAnimation();
+            return null;
+        }
+
+        LogTrayWindow($"SharedHide gen={generation} durationMs={profile.DurationMs}");
+        return TrayAnimation.BeginSharedAnimate(
+            0,
+            0,
+            profile.HideOffsetX,
+            profile.HideOffsetY,
+            WidgetTrayAnimationController.RestingOpacity,
+            profile.HideEndOpacity,
+            WidgetTrayAnimationController.RestingScale,
+            profile.HideEndScale,
+            profile.DurationMs,
+            false,
+            generation,
+            SettingsService.Settings.WidgetAnimationEasingIntensity,
+            () =>
+            {
+                if (!Visible)
+                {
+                    CompleteTrayHideAnimation();
+                }
+            });
+    }
+
     private void PlayTrayRaiseAnimation()
     {
         long generation = TrayAnimation.NextGeneration();
@@ -55,7 +130,6 @@ public sealed partial class ContentWidgetWindow
             {
                 TrayAnimation.RestoreVisualState();
                 TrayAnimation.RestoreWindowPosition();
-                RestoreNativeBackdropAfterTrayReveal();
             });
     }
 
@@ -112,7 +186,6 @@ public sealed partial class ContentWidgetWindow
         IsHideAnimationRunning = false;
         _isHidePrepared = false;
         TrayAnimation.Stop();
-        RestoreNativeBackdropAfterTrayReveal();
         WidgetLayerService.ClearTopMost(HWnd);
         Win32Helper.ShowWindow(HWnd, Win32Helper.SW_HIDE);
         AppWindow.Hide();

@@ -21,9 +21,9 @@ public class AppSettings
     /// </summary>
     public string TrayIconStyle { get; set; } = "Colorful";
 
-    /// <summary>
-    /// Display language. Valid values: <c>"System"</c>, <c>"zh-CN"</c>, <c>"en-US"</c>.
-    /// </summary>
+/// <summary>
+/// Display language. Valid values: <c>"System"</c>, <c>"zh-CN"</c>, <c>"en-US"</c>, <c>"ja-JP"</c>, <c>"de-DE"</c>, <c>"pt-BR"</c>.
+/// </summary>
     public string Language { get; set; } = "System";
 
     /// <summary>
@@ -576,7 +576,7 @@ public class AppSettings
     public bool SearchShowRecommendations { get; set; } = true;
 
     /// <summary>Maximum number of search results to display.</summary>
-    public int SearchMaxResults { get; set; } = 50;
+    public int SearchMaxResults { get; set; } = 200;
 
     /// <summary>Default result tab for a new query: all, app, file, or deskbox.</summary>
     public string SearchDefaultTab { get; set; } = "all";

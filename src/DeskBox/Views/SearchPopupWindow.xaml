@@ -124,65 +124,66 @@
                 <Setter Property="Template">
                     <Setter.Value>
                         <ControlTemplate TargetType="ListViewItem">
-                            <Border x:Name="TabSurface"
-                                    Background="{TemplateBinding Background}"
-                                    CornerRadius="6"
-                                    Padding="{TemplateBinding Padding}">
-                                <Grid>
-                                    <VisualStateManager.VisualStateGroups>
-                                        <VisualStateGroup x:Name="CommonStates">
-                                            <VisualState x:Name="Normal"/>
-                                            <VisualState x:Name="PointerOver">
-                                                <Storyboard>
-                                                    <ObjectAnimationUsingKeyFrames Storyboard.TargetName="TabSurface" Storyboard.TargetProperty="Background">
-                                                        <DiscreteObjectKeyFrame KeyTime="0" Value="{ThemeResource SubtleFillColorSecondaryBrush}"/>
-                                                    </ObjectAnimationUsingKeyFrames>
-                                                </Storyboard>
-                                            </VisualState>
-                                            <VisualState x:Name="Pressed">
-                                                <Storyboard>
-                                                    <ObjectAnimationUsingKeyFrames Storyboard.TargetName="TabSurface" Storyboard.TargetProperty="Background">
-                                                        <DiscreteObjectKeyFrame KeyTime="0" Value="{ThemeResource SubtleFillColorTertiaryBrush}"/>
-                                                    </ObjectAnimationUsingKeyFrames>
-                                                </Storyboard>
-                                            </VisualState>
-                                            <VisualState x:Name="Selected">
-                                                <Storyboard>
-                                                    <ObjectAnimationUsingKeyFrames Storyboard.TargetName="TabSurface" Storyboard.TargetProperty="Background">
-                                                        <DiscreteObjectKeyFrame KeyTime="0" Value="{ThemeResource ControlFillColorSecondaryBrush}"/>
-                                                    </ObjectAnimationUsingKeyFrames>
-                                                    <DoubleAnimation Storyboard.TargetName="TabSelectionIndicator" Storyboard.TargetProperty="Opacity" To="1" Duration="0"/>
-                                                </Storyboard>
-                                            </VisualState>
-                                            <VisualState x:Name="PointerOverSelected">
-                                                <Storyboard>
-                                                    <ObjectAnimationUsingKeyFrames Storyboard.TargetName="TabSurface" Storyboard.TargetProperty="Background">
-                                                        <DiscreteObjectKeyFrame KeyTime="0" Value="{ThemeResource ControlFillColorTertiaryBrush}"/>
-                                                    </ObjectAnimationUsingKeyFrames>
-                                                    <DoubleAnimation Storyboard.TargetName="TabSelectionIndicator" Storyboard.TargetProperty="Opacity" To="1" Duration="0"/>
-                                                </Storyboard>
-                                            </VisualState>
-                                            <VisualState x:Name="PressedSelected">
-                                                <Storyboard>
-                                                    <ObjectAnimationUsingKeyFrames Storyboard.TargetName="TabSurface" Storyboard.TargetProperty="Background">
-                                                        <DiscreteObjectKeyFrame KeyTime="0" Value="{ThemeResource SubtleFillColorTertiaryBrush}"/>
-                                                    </ObjectAnimationUsingKeyFrames>
-                                                    <DoubleAnimation Storyboard.TargetName="TabSelectionIndicator" Storyboard.TargetProperty="Opacity" To="1" Duration="0"/>
-                                                </Storyboard>
-                                            </VisualState>
-                                        </VisualStateGroup>
-                                    </VisualStateManager.VisualStateGroups>
+                            <Grid>
+                                <VisualStateManager.VisualStateGroups>
+                                    <VisualStateGroup x:Name="CommonStates">
+                                        <VisualState x:Name="Normal"/>
+                                        <VisualState x:Name="PointerOver">
+                                            <Storyboard>
+                                                <ObjectAnimationUsingKeyFrames Storyboard.TargetName="TabSurface" Storyboard.TargetProperty="Background">
+                                                    <DiscreteObjectKeyFrame KeyTime="0" Value="{ThemeResource SubtleFillColorSecondaryBrush}"/>
+                                                </ObjectAnimationUsingKeyFrames>
+                                            </Storyboard>
+                                        </VisualState>
+                                        <VisualState x:Name="Pressed">
+                                            <Storyboard>
+                                                <ObjectAnimationUsingKeyFrames Storyboard.TargetName="TabSurface" Storyboard.TargetProperty="Background">
+                                                    <DiscreteObjectKeyFrame KeyTime="0" Value="{ThemeResource SubtleFillColorTertiaryBrush}"/>
+                                                </ObjectAnimationUsingKeyFrames>
+                                            </Storyboard>
+                                        </VisualState>
+                                        <VisualState x:Name="Selected">
+                                            <Storyboard>
+                                                <ObjectAnimationUsingKeyFrames Storyboard.TargetName="TabSurface" Storyboard.TargetProperty="Background">
+                                                    <DiscreteObjectKeyFrame KeyTime="0" Value="{ThemeResource ControlFillColorSecondaryBrush}"/>
+                                                </ObjectAnimationUsingKeyFrames>
+                                                <DoubleAnimation Storyboard.TargetName="TabSelectionIndicator" Storyboard.TargetProperty="Opacity" To="1" Duration="0"/>
+                                            </Storyboard>
+                                        </VisualState>
+                                        <VisualState x:Name="PointerOverSelected">
+                                            <Storyboard>
+                                                <ObjectAnimationUsingKeyFrames Storyboard.TargetName="TabSurface" Storyboard.TargetProperty="Background">
+                                                    <DiscreteObjectKeyFrame KeyTime="0" Value="{ThemeResource ControlFillColorTertiaryBrush}"/>
+                                                </ObjectAnimationUsingKeyFrames>
+                                                <DoubleAnimation Storyboard.TargetName="TabSelectionIndicator" Storyboard.TargetProperty="Opacity" To="1" Duration="0"/>
+                                            </Storyboard>
+                                        </VisualState>
+                                        <VisualState x:Name="PressedSelected">
+                                            <Storyboard>
+                                                <ObjectAnimationUsingKeyFrames Storyboard.TargetName="TabSurface" Storyboard.TargetProperty="Background">
+                                                    <DiscreteObjectKeyFrame KeyTime="0" Value="{ThemeResource SubtleFillColorTertiaryBrush}"/>
+                                                </ObjectAnimationUsingKeyFrames>
+                                                <DoubleAnimation Storyboard.TargetName="TabSelectionIndicator" Storyboard.TargetProperty="Opacity" To="1" Duration="0"/>
+                                            </Storyboard>
+                                        </VisualState>
+                                    </VisualStateGroup>
+                                </VisualStateManager.VisualStateGroups>
+                                <Border x:Name="TabSurface"
+                                        Background="{TemplateBinding Background}"
+                                        CornerRadius="6"
+                                        Padding="{TemplateBinding Padding}">
                                     <ContentPresenter Content="{TemplateBinding Content}"
                                                       ContentTemplate="{TemplateBinding ContentTemplate}"
                                                       HorizontalContentAlignment="{TemplateBinding HorizontalContentAlignment}"
                                                       VerticalContentAlignment="{TemplateBinding VerticalContentAlignment}"/>
-                                    <Border x:Name="TabSelectionIndicator" Height="2" Width="18"
-                                            CornerRadius="1" Opacity="0"
-                                            Background="{ThemeResource AccentFillColorDefaultBrush}"
-                                            HorizontalAlignment="Center" VerticalAlignment="Bottom"
-                                            Margin="0,0,0,-4"/>
-                                </Grid>
-                            </Border>
+                                </Border>
+                                <!-- Accent indicator bar below the tab pill, outside the Border so it is never clipped -->
+                                <Border x:Name="TabSelectionIndicator" Height="2.5" Width="20"
+                                        CornerRadius="1.25" Opacity="0"
+                                        Background="{ThemeResource AccentFillColorDefaultBrush}"
+                                        HorizontalAlignment="Center" VerticalAlignment="Bottom"
+                                        Margin="0,0,0,1"/>
+                            </Grid>
                         </ControlTemplate>
                     </Setter.Value>
                 </Setter>
@@ -353,40 +354,38 @@
                          IsIndeterminate="True" Visibility="Collapsed"/>
         </Grid>
 
-        <!-- ── Row 2: dynamic tab bar (wraps to multiple rows when needed) ── -->
-        <ListView x:Name="TabsList" Grid.Row="2"
-                  SelectionMode="Single" IsTabStop="False"
-                  ScrollViewer.HorizontalScrollMode="Disabled"
-                  ScrollViewer.HorizontalScrollBarVisibility="Disabled"
-                  ScrollViewer.VerticalScrollMode="Disabled"
-                  ScrollViewer.VerticalScrollBarVisibility="Disabled"
-                  Margin="14,8,14,4"
-                  ItemContainerStyle="{StaticResource TabPillItemStyle}"
-                  ItemTemplate="{StaticResource TabPillTemplate}"
-                  SelectionChanged="TabsList_SelectionChanged">
-            <ListView.ItemsPanel>
-                <ItemsPanelTemplate>
-                    <toolkit:WrapPanel Orientation="Horizontal"
-                                       HorizontalSpacing="0" VerticalSpacing="0"/>
-                </ItemsPanelTemplate>
-            </ListView.ItemsPanel>
-        </ListView>
+        <!-- ── Row 2: tab bar + filter combo on the right ── -->
+        <Grid Grid.Row="2" Margin="0,0,0,0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
 
-        <!-- ── Row 3: results area (sort header + list + empty states) ── -->
-        <Grid Grid.Row="3" MinHeight="80">
-            <Grid.RowDefinitions>
-                <RowDefinition Height="Auto"/>
-                <RowDefinition Height="Auto"/>
-                <RowDefinition Height="*"/>
-            </Grid.RowDefinitions>
+            <ListView x:Name="TabsList" Grid.Column="0"
+                      SelectionMode="Single" IsTabStop="False"
+                      ScrollViewer.HorizontalScrollMode="Disabled"
+                      ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                      ScrollViewer.VerticalScrollMode="Disabled"
+                      ScrollViewer.VerticalScrollBarVisibility="Disabled"
+                      Margin="14,8,0,4"
+                      ItemContainerStyle="{StaticResource TabPillItemStyle}"
+                      ItemTemplate="{StaticResource TabPillTemplate}"
+                      SelectionChanged="TabsList_SelectionChanged">
+                <ListView.ItemsPanel>
+                    <ItemsPanelTemplate>
+                        <toolkit:WrapPanel Orientation="Horizontal"
+                                           HorizontalSpacing="0" VerticalSpacing="0"/>
+                    </ItemsPanelTemplate>
+                </ListView.ItemsPanel>
+            </ListView>
 
-            <Grid x:Name="ResultFilterBar" Grid.Row="0" Visibility="Collapsed"
-                  Margin="18,1,18,3">
-                <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right">
+            <Grid x:Name="ResultFilterBar" Grid.Column="1" Visibility="Collapsed"
+                  Margin="8,8,14,4" VerticalAlignment="Center">
+                <StackPanel Orientation="Horizontal" Spacing="6">
                     <TextBlock x:Name="ResultFilterLabel" FontSize="11.5"
                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                                VerticalAlignment="Center"/>
-                    <ComboBox x:Name="ResultFilterComboBox" MinWidth="142" Height="30"
+                    <ComboBox x:Name="ResultFilterComboBox" MinWidth="130" Height="30"
                               FontSize="12" SelectedIndex="0"
                               SelectionChanged="ResultFilterComboBox_SelectionChanged">
                         <ComboBoxItem x:Name="FilterAllItem" Tag="All"/>
@@ -398,6 +397,17 @@
                     </ComboBox>
                 </StackPanel>
             </Grid>
+        </Grid>
+
+        <!-- ── Row 3: results area (sort header + list + empty states) ── -->
+        <Grid Grid.Row="3" MinHeight="80">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="*"/>
+            </Grid.RowDefinitions>
+
+            <!-- ResultFilterBar moved to tab bar row (Row 2) -->
 
             <!--
                 Sortable column headers, aligned with the result rows below:
@@ -405,10 +415,13 @@
                 bar + icon column, 20px right = row margin + row right padding.
             -->
             <Grid x:Name="SortHeaderRow" Grid.Row="1" Visibility="Collapsed"
-                  Margin="16,2,20,2">
+                  Margin="16,2,20,2"
+                  Background="{ThemeResource SubtleFillColorSecondaryBrush}"
+                  CornerRadius="6" Padding="0,3">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="37"/>
                     <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="75"/>
                     <ColumnDefinition Width="90"/>
                     <ColumnDefinition Width="110"/>
                 </Grid.ColumnDefinitions>
@@ -424,7 +437,18 @@
                     </StackPanel>
                 </Button>
 
-                <Button x:Name="SortSizeHeader" Grid.Column="2"
+                <Button x:Name="SortTypeHeader" Grid.Column="2"
+                        Style="{StaticResource SortHeaderButtonStyle}" Click="SortTypeHeader_Click">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock x:Name="SortTypeLabel" FontSize="12" FontWeight="SemiBold"
+                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
+                        <FontIcon x:Name="SortTypeDirection" Glyph="&#xE74B;" FontSize="9"
+                                  Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                  Margin="5,0,0,0" Visibility="Collapsed" VerticalAlignment="Center"/>
+                    </StackPanel>
+                </Button>
+
+                <Button x:Name="SortSizeHeader" Grid.Column="3"
                         Style="{StaticResource SortHeaderButtonStyle}" Click="SortSizeHeader_Click">
                     <StackPanel Orientation="Horizontal">
                         <TextBlock x:Name="SortSizeLabel" FontSize="12" FontWeight="SemiBold"
@@ -435,7 +459,7 @@
                     </StackPanel>
                 </Button>
 
-                <Button x:Name="SortDateHeader" Grid.Column="3"
+                <Button x:Name="SortDateHeader" Grid.Column="4"
                         Style="{StaticResource SortHeaderButtonStyle}" Click="SortDateHeader_Click">
                     <StackPanel Orientation="Horizontal">
                         <TextBlock x:Name="SortDateLabel" FontSize="12" FontWeight="SemiBold"
@@ -526,34 +550,30 @@
 
             <!-- Empty-query application launcher. It intentionally does not reuse file rows. -->
             <ScrollViewer x:Name="RecommendedAppsPanel" Grid.Row="2" Visibility="Collapsed"
-                          VerticalScrollBarVisibility="Auto" Padding="12,2,12,12">
+                          VerticalScrollBarVisibility="Auto" Padding="12,2,12,12"
+                          RightTapped="RecommendedAppsPanel_RightTapped">
                 <ItemsRepeater x:Name="RecommendedAppsRepeater">
                     <ItemsRepeater.Layout>
-                        <UniformGridLayout MinItemWidth="104" MinItemHeight="92"
+                        <UniformGridLayout MinItemHeight="92"
                                            MinColumnSpacing="6" MinRowSpacing="6"
                                            ItemsJustification="Start"/>
                     </ItemsRepeater.Layout>
                     <ItemsRepeater.ItemTemplate>
                         <DataTemplate>
-                            <Button Height="92" Padding="8,7" Margin="0"
+                            <Button Width="104" Height="92" Padding="8,7" Margin="0"
                                     Background="Transparent" BorderThickness="0"
                                     CornerRadius="7" HorizontalContentAlignment="Stretch"
                                     VerticalContentAlignment="Stretch"
                                     Click="RecommendedAppButton_Click">
                                 <StackPanel Spacing="7" HorizontalAlignment="Stretch">
                                     <Grid Width="40" Height="40" HorizontalAlignment="Center">
-                                        <Border CornerRadius="8"
-                                                Background="{ThemeResource SubtleFillColorSecondaryBrush}">
-                                            <FontIcon Glyph="&#xE7AC;" FontSize="17"
-                                                      Foreground="{ThemeResource TextFillColorSecondaryBrush}"/>
-                                        </Border>
                                         <Image Source="{Binding Icon}" Width="36" Height="36"
                                                Stretch="Uniform"/>
                                     </Grid>
                                     <TextBlock Text="{Binding AppDisplayName}" FontSize="12"
                                                Foreground="{ThemeResource TextFillColorPrimaryBrush}"
                                                TextAlignment="Center" TextTrimming="CharacterEllipsis"
-                                               MaxLines="2" TextWrapping="WrapWholeWords"/>
+                                               MaxLines="1" TextWrapping="NoWrap"/>
                                 </StackPanel>
                             </Button>
                         </DataTemplate>

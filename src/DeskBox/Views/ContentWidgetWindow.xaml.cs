@@ -78,6 +78,10 @@ public sealed partial class ContentWidgetWindow : WidgetWindowBase, IDesktopWidg
         ConfigureWindowCore();
         ApplyTitleBarLayout();
         SetupEventHandlers();
+        
+        // ✅ Set initial title
+        this.Title = App.Current.LocalizationService.T("Window.ContentWidget.Title");
+        
         _ = LoadContentAsync(content);
 
         App.Current.LocalizationService.LanguageChanged += OnLanguageChanged;
@@ -523,7 +527,6 @@ IsHideAnimationRunning = false;
         TrayAnimation.RestoreVisualState();
         TrayAnimation.RestoreWindowPosition();
         TrayAnimation.RevealWindowForTrayShow();
-        RestoreNativeBackdropAfterTrayReveal();
     }
 
     public bool PrepareTrayHideAnimation(bool persistVisibility = true)
@@ -536,7 +539,7 @@ IsHideAnimationRunning = false;
 
 TrayAnimation.NextGeneration();
 TrayAnimation.RevealWindowForTrayShow();
-TrayAnimation.StopAndRestoreWindowPosition();
+TrayAnimation.Stop();
 IsHideAnimationRunning = true;
         _isHidePrepared = true;
         Visible = false;
@@ -608,7 +611,6 @@ IsHideAnimationRunning = true;
     {
         TrayAnimation.Stop();
         TrayAnimation.RevealWindowForTrayShow();
-        RestoreNativeBackdropAfterTrayReveal();
         IsHideAnimationRunning = false;
         _isHidePrepared = false;
         Visible = false;
@@ -638,7 +640,6 @@ IsHideAnimationRunning = true;
 
         IsClosing = true;
         TrayAnimation.RevealWindowForTrayShow();
-        RestoreNativeBackdropAfterTrayReveal();
         WidgetLayerService.ReleaseWindow(HWnd);
         Close();
     }

@@ -104,8 +104,10 @@ public sealed partial class SearchResultRowControl : UserControl
 
     public void SetFileColumnsVisible(bool visible)
     {
+        TypeColumn.Width = visible ? new GridLength(75) : new GridLength(0);
         SizeColumn.Width = visible ? new GridLength(90) : new GridLength(0);
         DateColumn.Width = visible ? new GridLength(110) : new GridLength(0);
+        TypeText.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
         SizeText.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
         DateText.Visibility = visible ? Visibility.Visible : Visibility.Collapsed;
     }

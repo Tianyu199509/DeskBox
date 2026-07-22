@@ -67,6 +67,8 @@ internal interface IDesktopWidgetWindow
     void CompleteTrayShowWithoutAnimation();
     bool PrepareTrayHideAnimation(bool persistVisibility = true);
     void PlayPreparedTrayHideAnimation();
+    WidgetTrayBatchAnimationEntry? BeginSharedTrayShowAnimation();
+    WidgetTrayBatchAnimationEntry? BeginSharedTrayHideAnimation();
     void ActivateRaisedFromTrayBatch();
     void EnsureRaisedFromTrayTopMost();
     void ForceRestoreDesktopLayerFromManager();
@@ -793,6 +795,7 @@ public sealed partial class WidgetManager
         App.LogVerbose(
             $"[TrayBatch] SetAllVisible requested visible={visible} raised={_widgetsRaisedFromTray} " +
             $"loadedFile={_widgets.Count} loadedQuick={_quickCaptureWidgets.Count} loadedContent={_contentWidgets.Count}");
+        _trayBatchAnimationDriver.Cancel();
         if (visible)
         {
             var candidates = _settingsService.Settings.Widgets

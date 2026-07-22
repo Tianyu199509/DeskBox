@@ -198,6 +198,9 @@ public sealed class SettingsService
     public const string LanguageSystem = "System";
     public const string LanguageChinese = "zh-CN";
     public const string LanguageEnglish = "en-US";
+    public const string LanguageJapanese = "ja-JP";
+    public const string LanguageGerman = "de-DE";
+    public const string LanguagePortuguese = "pt-BR";
     public const double DefaultWidgetWidth = 280;
     public const double DefaultWidgetHeight = 400;
     public const bool DefaultGlobalHotkeyEnabled = true;
@@ -407,7 +410,7 @@ settings.WeatherRefreshIntervalMinutes = 60;
         settings.SearchCustomIndexerEnabled = false;
         settings.SearchCustomIndexPaths = [];
         settings.SearchShowRecommendations = true;
-        settings.SearchMaxResults = 50;
+        settings.SearchMaxResults = 200;
         settings.SearchDefaultTab = "all";
         settings.SearchPopupCustomX = null;
         settings.SearchPopupCustomY = null;
@@ -1574,7 +1577,7 @@ changed |= NormalizeDeletionSettings(_settings);
             changed = true;
         }
 
-        if (settings.Language is not (LanguageSystem or LanguageChinese or LanguageEnglish))
+        if (settings.Language is not (LanguageSystem or LanguageChinese or LanguageEnglish or LanguageJapanese or LanguageGerman or LanguagePortuguese))
         {
             settings.Language = LanguageSystem;
             changed = true;
@@ -2049,19 +2052,28 @@ changed |= NormalizeDeletionSettings(_settings);
 
     private static bool NormalizeSearchSettings(AppSettings settings)
     {
+        bool changed = false;
+
         string normalized = settings.SearchDefaultTab?.Trim().ToLowerInvariant() ?? "all";
         if (normalized is not ("all" or "app" or "file" or "deskbox"))
         {
             normalized = "all";
         }
 
-        if (string.Equals(settings.SearchDefaultTab, normalized, StringComparison.Ordinal))
+        if (!string.Equals(settings.SearchDefaultTab, normalized, StringComparison.Ordinal))
         {
-            return false;
+            settings.SearchDefaultTab = normalized;
+            changed = true;
         }
 
-        settings.SearchDefaultTab = normalized;
-        return true;
+        // Migrate legacy default (50) to new default (200)
+        if (settings.SearchMaxResults is > 0 and < 200)
+        {
+            settings.SearchMaxResults = 200;
+            changed = true;
+        }
+
+        return changed;
     }
 
     private static bool NormalizeQuickCaptureSettings(AppSettings settings)

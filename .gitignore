@@ -71,3 +71,5 @@ docs/wechat/*.webp
 /*.jpg
 /*.jpeg
 
+
+.tmp_*

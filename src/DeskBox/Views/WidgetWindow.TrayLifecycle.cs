@@ -184,9 +184,87 @@ public sealed partial class WidgetWindow
         _trayAnimation.RestoreVisualState();
         _trayAnimation.RestoreWindowPosition();
         _trayAnimation.RevealWindowForTrayShow();
-        RestoreNativeBackdropAfterTrayReveal();
 
         QueueItemContainerTransitionRestore(animationGeneration);
+    }
+
+    public WidgetTrayBatchAnimationEntry? BeginSharedTrayShowAnimation()
+    {
+        var animationGeneration = _trayAnimation.NextGeneration();
+        _trayAnimation.Stop();
+        RestoreItemContainerTransitions();
+        SuppressItemContainerTransitions();
+        _isHideAnimationRunning = false;
+
+        var animationProfile = GetTrayAnimationProfile();
+        if (!animationProfile.IsEnabled)
+        {
+            LogTrayWindow($"SharedShow skipped reason=animation-disabled gen={animationGeneration}");
+            CompleteTrayShowWithoutAnimation();
+            return null;
+        }
+
+        LogTrayWindow($"SharedShow gen={animationGeneration} durationMs={animationProfile.DurationMs}");
+        return _trayAnimation.BeginSharedAnimate(
+            animationProfile.ShowOffsetX,
+            animationProfile.ShowOffsetY,
+            0,
+            0,
+            animationProfile.ShowStartOpacity,
+            WidgetTrayAnimationController.RestingOpacity,
+            animationProfile.ShowStartScale,
+            WidgetTrayAnimationController.RestingScale,
+            animationProfile.DurationMs,
+            true,
+            animationGeneration,
+            _settingsService.Settings.WidgetAnimationEasingIntensity,
+            () =>
+            {
+                _trayAnimation.RestoreVisualState();
+                _trayAnimation.RestoreWindowPosition();
+                QueueItemContainerTransitionRestore(animationGeneration);
+            });
+    }
+
+    public WidgetTrayBatchAnimationEntry? BeginSharedTrayHideAnimation()
+    {
+        if (!_isHideAnimationRunning)
+        {
+            return null;
+        }
+
+        var animationGeneration = _trayAnimation.Generation;
+        var animationProfile = GetTrayAnimationProfile();
+        if (!animationProfile.IsEnabled)
+        {
+            LogTrayWindow($"SharedHide skipped reason=animation-disabled gen={animationGeneration}");
+            CompleteTrayHideAnimation();
+            return null;
+        }
+
+        LogTrayWindow($"SharedHide gen={animationGeneration} durationMs={animationProfile.DurationMs}");
+        return _trayAnimation.BeginSharedAnimate(
+            0,
+            0,
+            animationProfile.HideOffsetX,
+            animationProfile.HideOffsetY,
+            WidgetTrayAnimationController.RestingOpacity,
+            animationProfile.HideEndOpacity,
+            WidgetTrayAnimationController.RestingScale,
+            animationProfile.HideEndScale,
+            animationProfile.DurationMs,
+            false,
+            animationGeneration,
+            _settingsService.Settings.WidgetAnimationEasingIntensity,
+            () =>
+            {
+                if (Visible)
+                {
+                    return;
+                }
+
+                CompleteTrayHideAnimation();
+            });
     }
 
     private void PlayTrayRaiseAnimation()
@@ -223,7 +301,6 @@ public sealed partial class WidgetWindow
         {
             _trayAnimation.RestoreVisualState();
             _trayAnimation.RestoreWindowPosition();
-            RestoreNativeBackdropAfterTrayReveal();
             QueueItemContainerTransitionRestore(animationGeneration);
         });
     }
@@ -246,7 +323,13 @@ public sealed partial class WidgetWindow
 
         _trayAnimation.NextGeneration();
         _trayAnimation.RevealWindowForTrayShow();
-        _trayAnimation.StopAndRestoreWindowPosition();
+        // Stop any in-flight animation but do NOT snap the HWND back to
+        // _targetPosition: when the widget is expanded via capsule mode the
+        // current bounds differ from _targetPosition (stale compact bounds),
+        // and restoring would cause a visible position jump before the hide
+        // animation begins. PrepareVisualState below will set _targetPosition
+        // from the actual current bounds.
+        _trayAnimation.Stop();
         RestoreItemContainerTransitions();
         SuppressItemContainerTransitions();
 
@@ -352,7 +435,6 @@ public sealed partial class WidgetWindow
 
         _isHideAnimationRunning = false;
         _trayAnimation.Stop();
-        RestoreNativeBackdropAfterTrayReveal();
         WidgetLayerService.ClearTopMost(_hWnd);
         Win32Helper.ShowWindow(_hWnd, Win32Helper.SW_HIDE);
         _appWindow.Hide();
@@ -422,7 +504,6 @@ public sealed partial class WidgetWindow
 public void CloseWindow()
 {
 _trayAnimation.RevealWindowForTrayShow();
-RestoreNativeBackdropAfterTrayReveal();
 WidgetLayerService.ReleaseWindow(_hWnd);
 Close();
 }

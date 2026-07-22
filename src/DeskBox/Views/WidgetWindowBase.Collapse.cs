@@ -62,6 +62,11 @@ public abstract partial class WidgetWindowBase
     private bool _isPointerOverWidget;
     private bool _isPointerOverCompactExpansionZone;
     private bool _isCollapseAnimationRendering;
+    // When > 0, counts down rendering frames before applying the native
+    // backdrop on first expand. Defers the expensive Acrylic/Mica controller
+    // attach to the 3rd frame so the initial frame budget is freed for XAML
+    // layout and animation setup (eliminates first-expand stutter).
+    private int _deferredExpandBackdropFrames;
     private bool _isShellTransitionActive;
     private bool _isBoundsInteractionActive;
     private bool _isRaisedForExpandedState;
@@ -1193,12 +1198,23 @@ public abstract partial class WidgetWindowBase
             to.Height / Math.Max(0.01, dpiScale));
         if (!collapsed)
         {
-            ApplyBackdropPreference();
+            // Defer backdrop application by 2 rendering frames so the first
+            // frame budget is freed for XAML layout and animation setup.
+            // The frosted plate / existing backdrop keeps the widget visually
+            // opaque during the delay.
+            _deferredExpandBackdropFrames = 2;
         }
         long generation = ++_collapseAnimationGeneration;
 
         if (durationMs <= 0 || BoundsEqual(from, to))
         {
+            // Instant transition: no rendering frames will fire, so apply
+            // the backdrop synchronously (no animation to stutter).
+            _deferredExpandBackdropFrames = 0;
+            if (!collapsed)
+            {
+                ApplyBackdropPreference();
+            }
             MoveWindowWithoutPersisting(to);
             CompleteBoundsTransition(collapsed, generation);
             return;
@@ -1244,6 +1260,24 @@ public abstract partial class WidgetWindowBase
 
     private void CollapseAnimationRendering(object? sender, object args)
     {
+        // Apply deferred backdrop after the initial frames have committed
+        // the animation surface (avoids first-expand stutter).
+        if (_deferredExpandBackdropFrames > 0)
+        {
+            _deferredExpandBackdropFrames--;
+            if (_deferredExpandBackdropFrames == 0)
+            {
+                try
+                {
+                    ApplyBackdropPreference();
+                }
+                catch (Exception ex)
+                {
+                    App.Log($"[Compact] Deferred backdrop apply failed: {ex.Message}");
+                }
+            }
+        }
+
         double elapsedMs = Stopwatch.GetElapsedTime(_collapseAnimationStarted).TotalMilliseconds;
         double progress = Math.Clamp(elapsedMs / Math.Max(1, _collapseAnimationDurationMs), 0, 1);
         string effect = SettingsService.NormalizeWidgetCompactAnimationEffect(
@@ -1708,6 +1742,7 @@ public abstract partial class WidgetWindowBase
         }
 
         _isCollapseAnimationRendering = false;
+        _deferredExpandBackdropFrames = 0;
         CompositionTarget.Rendering -= CollapseAnimationRendering;
         if (_isShellTransitionActive)
         {

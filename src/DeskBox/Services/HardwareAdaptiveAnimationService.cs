@@ -2,6 +2,8 @@
 
 using System.Diagnostics;
 using Microsoft.UI.Dispatching;
+using Windows.Graphics.Display;
+using System.Runtime.InteropServices;
 
 namespace DeskBox.Services;
 
@@ -16,7 +18,7 @@ public enum HardwarePerformanceLevel
 }
 
 /// <summary>
-/// 智能动画配置 - 根据硬件性能和场景自适应
+/// 智能动画配置 - 根据硬件性能、屏幕刷新率和场景自适应
 /// </summary>
 public sealed record AdaptiveAnimationConfig(
     int MaxFPS_HighPriority,
@@ -25,7 +27,12 @@ public sealed record AdaptiveAnimationConfig(
     bool UseBatchGrouping,
     int BatchGroupDelayMs,
     bool EnableGPUTurboMode,
-    string Reasoning
+    string Reasoning,
+    
+    // 新增：屏幕相关配置
+    int SourceRefreshRate,        // 源屏幕刷新率
+    int TargetRefreshRate,        // 目标屏幕刷新率
+    bool IsCrossScreenAnimation   // 是否跨屏动画
 );
 
 /// <summary>
@@ -35,6 +42,13 @@ public sealed class HardwareAdaptiveAnimationService
 {
     private const int MeasurementWindowMs = 500;
     private const int MinFrameCountForAccurateMeasurement = 30;
+    
+    // VRR 支持检测
+    private bool _supportsVRR;
+    
+    // 性能阈值配置
+    private const double CpuThresholdHigh = 0.15;
+    private const double CpuThresholdMedium = 0.40;
 
     private readonly DispatcherQueue _dispatcherQueue;
     private readonly Action<string>? _logger;
@@ -43,6 +57,11 @@ public sealed class HardwareAdaptiveAnimationService
     private double _measuredRenderDuration;
     private HardwarePerformanceLevel _cachedLevel;
     private bool _isMeasuring;
+    
+    // 新增：屏幕感知相关
+    private static readonly Dictionary<IntPtr, int> s_screenCache = new(); // windowHandle -> refreshRate
+    private static readonly object s_cacheLock = new();
+    private const int s_cacheExpirationMs = 5000; // 5 秒有效期
 
     public HardwarePerformanceLevel CurrentLevel => _cachedLevel;
 
@@ -66,18 +85,18 @@ public sealed class HardwareAdaptiveAnimationService
     }
 
     /// <summary>
-    /// 停止性能测量并返回配置建议（简化版）
+    /// 停止性能测量并返回配置建议（带屏幕感知）
     /// </summary>
-    public AdaptiveAnimationConfig StopAndGetConfiguration()
+    public AdaptiveAnimationConfig StopAndGetConfiguration(IntPtr? windowHandle = null)
     {
-        // 简化：直接基于 CPU 使用率判断，不依赖 CompositionTarget
+        // 1. 获取硬件级别
         var cpuUsage = MeasureCpuUsage();
         
-        if (cpuUsage < 0.15)
+        if (cpuUsage < CpuThresholdHigh)
         {
             _cachedLevel = HardwarePerformanceLevel.High;
         }
-        else if (cpuUsage < 0.4)
+        else if (cpuUsage < CpuThresholdMedium)
         {
             _cachedLevel = HardwarePerformanceLevel.Medium;
         }
@@ -86,8 +105,19 @@ public sealed class HardwareAdaptiveAnimationService
             _cachedLevel = HardwarePerformanceLevel.Low;
         }
         
-        var config = GenerateAdaptiveConfig(_cachedLevel);
-        _logger?.Invoke($"[HardwareAdaptive] CPU={cpuUsage:P0}, Level: {_cachedLevel}");
+        // 2. 获取屏幕信息
+        int sourceRefreshRate = GetScreenRefreshRate(windowHandle);
+        int targetRefreshRate = sourceRefreshRate; // 简化版：假设同屏
+        bool isCrossScreen = false;
+        
+        // 3. VRR 检测
+        _supportsVRR = CheckVRRSupport();
+        
+        // 4. 根据屏幕刷新率和硬件级别生成配置
+        var config = GenerateAdaptiveConfig(_cachedLevel, sourceRefreshRate, targetRefreshRate, isCrossScreen);
+        
+        _logger?.Invoke($"[HardwareAdaptive] CPU={cpuUsage:P0}, Level={_cachedLevel}, " +
+                       $"SourceFPS={sourceRefreshRate}Hz, TargetFPS={targetRefreshRate}Hz, VRR={_supportsVRR}");
         
         return config;
     }
@@ -123,43 +153,65 @@ public sealed class HardwareAdaptiveAnimationService
     }
 
     /// <summary>
-    /// 生成自适应配置
+    /// 生成自适应配置（带屏幕感知）
     /// </summary>
-    private AdaptiveAnimationConfig GenerateAdaptiveConfig(HardwarePerformanceLevel level)
+    private AdaptiveAnimationConfig GenerateAdaptiveConfig(HardwarePerformanceLevel level, 
+                                                           int sourceRefreshRate,
+                                                           int targetRefreshRate,
+                                                           bool isCrossScreen)
     {
+        // ⭐【强制模式】直接以显示器刷新率为目标，不做任何节流
+        // 不管性能如何，确保动画帧率与显示器同步
+        var baseFPS = sourceRefreshRate;  // 直接使用显示器刷新率
+        
+        if (isCrossScreen)
+        {
+            // 跨屏时取较高者
+            baseFPS = Math.Max(sourceRefreshRate, targetRefreshRate);
+        }
+        
         return level switch
         {
-            // 高性能：激进策略，充分利用 GPU
+            // ⭐【强制模式】所有硬件都使用显示器最大刷新率
             HardwarePerformanceLevel.High => new AdaptiveAnimationConfig(
-                MaxFPS_HighPriority: 120,     // 超高优先级
-                MaxFPS_Normal: 60,             // 正常阶段也保持流畅
-                HighPriorityDurationMs: 80.0,  // 延长高优先级时间
-                UseBatchGrouping: true,        // 启用批次分组
-                BatchGroupDelayMs: 3,          // 极短的组间延迟
-                EnableGPUTurboMode: true,      // 开启 GPU Turbo 模式
-                Reasoning: "High-end hardware detected: max performance mode enabled"
+                MaxFPS_HighPriority: baseFPS,           // 直接使用显示器刷新率
+                MaxFPS_Normal: baseFPS,                 // 始终以满帧运行
+                HighPriorityDurationMs: 999999.0,       // 无限时高优先级阶段
+                UseBatchGrouping: true,                  // 启用批次分组
+                BatchGroupDelayMs: 5,                    // 适中延迟保证流畅
+                EnableGPUTurboMode: false,               // 禁用 GPU Turbo（不稳定）
+                SourceRefreshRate: sourceRefreshRate,
+                TargetRefreshRate: targetRefreshRate,
+                IsCrossScreenAnimation: isCrossScreen,
+                Reasoning: $"MAX_PERFORMANCE_MODE: RefreshRate={baseFPS}Hz, VRR={_supportsVRR}, no throttling applied"
             ),
 
-            // 中等性能：平衡策略
+            // ⭐【强制模式】中等性能也拉满
             HardwarePerformanceLevel.Medium => new AdaptiveAnimationConfig(
-                MaxFPS_HighPriority: 120,      // 启动时仍然高帧率
-                MaxFPS_Normal: 30,             // 之后降为适中帧率
-                HighPriorityDurationMs: 50.0,  // 标准优先级持续时间
-                UseBatchGrouping: true,        // 启用批次分组
-                BatchGroupDelayMs: 5,          // 适中延迟
-                EnableGPUTurboMode: false,     // 不使用 GPU Turbo
-                Reasoning: "Balanced performance: good smoothness with moderate resource usage"
+                MaxFPS_HighPriority: baseFPS,           // 直接使用显示器刷新率
+                MaxFPS_Normal: baseFPS,                 // 始终满帧
+                HighPriorityDurationMs: 999999.0,       // 无降级
+                UseBatchGrouping: true,                  // 启用批次分组
+                BatchGroupDelayMs: 5,                    // 适中延迟保证流畅
+                EnableGPUTurboMode: false,               // 禁用 GPU Turbo
+                SourceRefreshRate: sourceRefreshRate,
+                TargetRefreshRate: targetRefreshRate,
+                IsCrossScreenAnimation: isCrossScreen,
+                Reasoning: $"MAX_PERFORMANCE_MODE: RefreshRate={baseFPS}Hz, no performance degradation"
             ),
 
-            // 低性能：节能策略
+            // ⭐【强制模式】低性能同样拉满
             HardwarePerformanceLevel.Low => new AdaptiveAnimationConfig(
-                MaxFPS_HighPriority: 60,       // 降低高优先级帧率
-                MaxFPS_Normal: 16,             // 进一步降低以保持流畅
-                HighPriorityDurationMs: 30.0,  // 缩短高优先级时间
-                UseBatchGrouping: true,        // 必须启用批次分组
-                BatchGroupDelayMs: 10,         // 较长延迟避免卡顿
-                EnableGPUTurboMode: false,     // 禁用 GPU Turbo
-                Reasoning: "Low-end hardware detected: prioritize stability over frame rate"
+                MaxFPS_HighPriority: baseFPS,           // 直接使用显示器刷新率
+                MaxFPS_Normal: baseFPS,                 // 不降帧！
+                HighPriorityDurationMs: 999999.0,       // 持续高帧率
+                UseBatchGrouping: true,                  // 必须启用批次分组
+                BatchGroupDelayMs: 8,                    // 稍大延迟防止卡顿
+                EnableGPUTurboMode: false,               // 禁用 GPU Turbo
+                SourceRefreshRate: sourceRefreshRate,
+                TargetRefreshRate: targetRefreshRate,
+                IsCrossScreenAnimation: isCrossScreen,
+                Reasoning: $"MAX_PERFORMANCE_MODE: RefreshRate={baseFPS}Hz, stability prioritized but no FPS drop"
             ),
 
             _ => throw new ArgumentOutOfRangeException(nameof(level))
@@ -169,9 +221,9 @@ public sealed class HardwareAdaptiveAnimationService
     /// <summary>
     /// 基于已知硬件级别的配置生成（避免测量开销）
     /// </summary>
-    public AdaptiveAnimationConfig GetConfigForKnownLevel(HardwarePerformanceLevel level)
+    public AdaptiveAnimationConfig GetConfigForKnownLevel(HardwarePerformanceLevel level, int sourceRefreshRate = 60, int targetRefreshRate = 60, bool isCrossScreen = false)
     {
-        return GenerateAdaptiveConfig(level);
+        return GenerateAdaptiveConfig(level, sourceRefreshRate, targetRefreshRate, isCrossScreen);
     }
 
     private static double MeasureCpuUsage()
@@ -188,5 +240,52 @@ public sealed class HardwareAdaptiveAnimationService
         {
             return 0.5; // Default to medium
         }
+    }
+    
+    /// <summary>
+    /// 获取窗口所在屏幕的刷新率
+    /// </summary>
+    private int GetScreenRefreshRate(IntPtr? windowHandle)
+    {
+        if (windowHandle == null || windowHandle.Value == IntPtr.Zero)
+            return 60; // 默认值
+        
+        try
+        {
+            // 简化版：暂时返回默认值
+            // TODO: 后续使用 Windows.Graphics.Display 命名空间的 API 获取实际刷新率
+            
+            return 60; // TODO: 完善刷新率获取逻辑
+        }
+        catch
+        {
+            return 60; // 失败时返回默认值
+        }
+    }
+    
+    /// <summary>
+    /// 检查 VRR 支持（G-Sync/FreeSync）
+    /// </summary>
+    private bool CheckVRRSupport()
+    {
+        try
+        {
+            // 通过注册表检查 NVIDIA G-Sync 或 AMD FreeSync 支持
+            var registryKey = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(
+                @"SYSTEM\CurrentControlSet\Control\GraphicsDrivers\Technology");
+            
+            if (registryKey != null)
+            {
+                var technology = registryKey.GetValue(null)?.ToString();
+                return technology?.Contains("NVIDIA") == true || 
+                       technology?.Contains("AMD") == true;
+            }
+        }
+        catch
+        {
+            // 忽略错误
+        }
+        
+        return false;
     }
 }

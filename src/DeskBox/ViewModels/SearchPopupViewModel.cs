@@ -318,6 +318,12 @@ public sealed partial class SearchPopupViewModel : ObservableObject, IDisposable
             _allResults = response.RankedItems.Count > 0
                 ? response.RankedItems.ToList()
                 : response.Groups.SelectMany(g => g.Items).ToList();
+
+            // Stamp each result with a localized type label once (cheap, no I/O).
+            foreach (var item in _allResults)
+            {
+                item.TypeDisplay = GetTypeDisplay(item);
+            }
             IsQueryActive = true;
             HasResults = _allResults.Count > 0;
             StatusText = string.Format(
@@ -417,6 +423,44 @@ public sealed partial class SearchPopupViewModel : ObservableObject, IDisposable
         }
     }
 
+    /// <summary>Public entry point for language-change refresh.</summary>
+    public void RebuildTabsPublic() => RebuildTabs();
+
+    /// <summary>Cycles the selected tab forward (or backward when <paramref name="backward"/> is true).</summary>
+    public void CycleTab(bool backward)
+    {
+        if (Tabs.Count == 0)
+        {
+            return;
+        }
+
+        int idx = SelectedTab is null ? 0 : Tabs.IndexOf(SelectedTab);
+        idx = backward
+            ? (idx - 1 + Tabs.Count) % Tabs.Count
+            : (idx + 1) % Tabs.Count;
+        SelectedTab = Tabs[idx];
+    }
+
+    /// <summary>Returns a localized type label for a search result.</summary>
+    private string GetTypeDisplay(SearchResultItem item) => item.Kind switch
+    {
+        SearchResultKind.Folder => _localizationService.T("Search.Type.Folder"),
+        SearchResultKind.Todo => _localizationService.T("Search.Type.Todo"),
+        SearchResultKind.QuickCapture => _localizationService.T("Search.Type.Note"),
+        SearchResultKind.Action => _localizationService.T("Search.Type.Action"),
+        SearchResultKind.File => FileCategoryHelper.Categorize(item.Title) switch
+        {
+            FileCategory.App => _localizationService.T("Search.Type.App"),
+            FileCategory.Image => _localizationService.T("Search.Type.Image"),
+            FileCategory.Document => _localizationService.T("Search.Type.Document"),
+            FileCategory.Video => _localizationService.T("Search.Type.Video"),
+            FileCategory.Music => _localizationService.T("Search.Type.Music"),
+            FileCategory.Archive => _localizationService.T("Search.Type.Archive"),
+            _ => _localizationService.T("Search.Type.File"),
+        },
+        _ => string.Empty,
+    };
+
     private void AddTab(
         string id,
         string nameKey,
@@ -504,6 +548,9 @@ public sealed partial class SearchPopupViewModel : ObservableObject, IDisposable
             ResultSortColumn.Date => SortAscending
                 ? items.OrderBy(i => i.CreatedAt ?? DateTimeOffset.MaxValue).ToList()
                 : items.OrderByDescending(i => i.CreatedAt ?? DateTimeOffset.MinValue).ToList(),
+            ResultSortColumn.Type => SortAscending
+                ? items.OrderBy(i => i.TypeDisplay ?? string.Empty, StringComparer.OrdinalIgnoreCase).ToList()
+                : items.OrderByDescending(i => i.TypeDisplay ?? string.Empty, StringComparer.OrdinalIgnoreCase).ToList(),
             _ => items.ToList()
         };
     }
@@ -547,6 +594,7 @@ public sealed partial class SearchPopupViewModel : ObservableObject, IDisposable
             ResultSortColumn.Name => true,
             ResultSortColumn.Size => false,
             ResultSortColumn.Date => false,
+            ResultSortColumn.Type => true,
             _ => true
         };
     }
