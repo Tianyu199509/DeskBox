@@ -58,6 +58,25 @@ backups/
 # Local Microsoft Store listing artboards
 store-assets-html/
 
+# Development debug screenshots and scripts
+shots/
+
+# Auto-generated code audit reports
+docs/audit/
+
+# Internal analysis documents
+docs/analysis/
+
+# Archived planning/checkpoint documents
+docs/architecture/archive/
+docs/images/archive/
+
+# SEO content (not code-related)
+docs/seo-content.md
+
+# Debug output files
+wins*.txt
+
 # Local WeChat article drafts
 docs/wechat/*.md
 docs/wechat/*_wechat.html
