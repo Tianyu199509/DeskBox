@@ -281,3 +281,27 @@ function ShouldSkipPage(PageID: Integer): Boolean;
 begin
   Result := IsMigrationAdminCleanupMode;
 end;
+
+function PrepareToInstall(var NeedsRestart: Boolean): string;
+var
+  ResultCode: Integer;
+begin
+  Result := '';
+
+  // Explicitly terminate DeskBox before file copy. Restart Manager alone
+  // cannot always close a tray-first app with multiple top-level windows,
+  // causing the "close applications" dialog to hang and eventually timeout.
+  Exec(
+    ExpandConstant('{sys}\taskkill.exe'),
+    '/IM DeskBox.exe /T /F',
+    '',
+    SW_HIDE,
+    ewWaitUntilTerminated,
+    ResultCode);
+  Log('DeskBox taskkill exit code: ' + IntToStr(ResultCode));
+
+  // Give the process time to fully exit before Restart Manager runs.
+  Sleep(2000);
+
+  Log('DeskBox process termination completed.');
+end;

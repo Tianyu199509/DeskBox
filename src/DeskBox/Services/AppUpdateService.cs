@@ -13,7 +13,7 @@ public sealed class AppUpdateService : IAppUpdateService
 {
     public const string DefaultManifestUrl = "https://deskbox.fun/update/stable.json";
     public const string DefaultGitHubLatestReleaseApiUrl = "https://api.github.com/repos/Tianyu199509/DeskBox/releases/latest";
-    public const string DefaultManualDownloadUrl = "https://pan.quark.cn/s/f7a6769cdaf3";
+    public const string DefaultManualDownloadUrl = "https://deskbox.fun/download";
 
     private static readonly JsonSerializerOptions s_jsonOptions = new(JsonSerializerDefaults.Web)
     {
@@ -281,9 +281,33 @@ public sealed class AppUpdateService : IAppUpdateService
             return sourceHelperPath;
         }
 
+        string helperRoot = Path.Combine(updateRootPath, "helper");
+
+        // Clean up stale helper directories from previous updates.
+        try
+        {
+            if (Directory.Exists(helperRoot))
+            {
+                foreach (var oldDir in Directory.GetDirectories(helperRoot))
+                {
+                    try
+                    {
+                        Directory.Delete(oldDir, recursive: true);
+                    }
+                    catch (Exception ex)
+                    {
+                        App.Log($"[Update] Failed to clean old helper directory '{oldDir}': {ex.Message}");
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            App.Log($"[Update] Failed to enumerate helper directories: {ex.Message}");
+        }
+
         string helperDirectory = Path.Combine(
-            updateRootPath,
-            "helper",
+            helperRoot,
             $"{DateTimeOffset.UtcNow:yyyyMMddHHmmss}-{Environment.ProcessId.ToString(CultureInfo.InvariantCulture)}");
         Directory.CreateDirectory(helperDirectory);
 

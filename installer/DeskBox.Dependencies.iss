@@ -137,7 +137,7 @@ begin
   try
     if ShouldInstallDotNetRuntime then
     begin
-      DependencyDownloadPage.Msg1Label.Caption := 'Downloading .NET 10 Runtime x64...';
+      DependencyDownloadPage.Msg1Label.Caption := ExpandConstant('{cm:DownloadingDotNet}');
       if not DownloadDependencyWithProgress(
         '.NET 10 Runtime x64',
         DotNetRuntimeUrl,
@@ -153,7 +153,7 @@ begin
 
     if ShouldInstallWindowsAppRuntime then
     begin
-      DependencyDownloadPage.Msg1Label.Caption := 'Downloading Windows App Runtime 2.2 x64...';
+      DependencyDownloadPage.Msg1Label.Caption := ExpandConstant('{cm:DownloadingWinAppRuntime}');
       if not DownloadDependencyWithProgress(
         'Windows App Runtime 2.2 x64',
         WindowsAppRuntimeUrl,
@@ -187,8 +187,8 @@ begin
 
   DependencyInstallPage.SetProgress(Step - 1, StepCount);
   DependencyInstallPage.SetText(
-    'Installing ' + DisplayName + '...',
-    'This may take a few minutes. Please do not close this window.');
+    Format(ExpandConstant('{cm:InstallingDependency}'), [DisplayName]),
+    '');
 
   if not ShellExec('runas', InstallerPath, Parameters, '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then
   begin
@@ -276,9 +276,9 @@ end;
 
 procedure InitializeWizard;
 begin
-  DependencyDownloadPage := CreateDownloadPage('Preparing DeskBox runtime', 'Downloading missing runtime dependencies.', nil);
+  DependencyDownloadPage := CreateDownloadPage(ExpandConstant('{cm:DependencyDownloadTitle}'), ExpandConstant('{cm:DependencyDownloadSubtitle}'), nil);
   DependencyDownloadPage.ShowBaseNameInsteadOfUrl := True;
-  DependencyInstallPage := CreateOutputProgressPage('Preparing DeskBox runtime', 'Installing missing runtime dependencies.');
+  DependencyInstallPage := CreateOutputProgressPage(ExpandConstant('{cm:DependencyInstallTitle}'), ExpandConstant('{cm:DependencyInstallSubtitle}'));
 end;
 
 function NextButtonClick(CurPageID: Integer): Boolean;
@@ -309,7 +309,7 @@ begin
 
   if NeedsRestart then
   begin
-    SuppressibleMsgBox('Runtime dependencies were installed, but Windows needs to restart. Restart your PC, then run DeskBox setup again.', mbInformation, MB_OK, IDOK);
+    SuppressibleMsgBox(ExpandConstant('{cm:NeedsRestart}'), mbInformation, MB_OK, IDOK);
     Result := False;
   end;
 end;

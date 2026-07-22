@@ -153,23 +153,23 @@ begin
           if DisplayedCount < 12 then
           begin
             if (FindRec.Attributes and FILE_ATTRIBUTE_DIRECTORY) <> 0 then
-              ItemLine := '  [文件夹] ' + FindRec.Name
+              ItemLine := '  ' + ExpandConstant('{cm:FolderItem}') + ' ' + FindRec.Name
             else
-              ItemLine := '  [文件] ' + FindRec.Name;
+              ItemLine := '  ' + ExpandConstant('{cm:FileItem}') + ' ' + FindRec.Name;
 
             Result := Result + ItemLine + #13#10;
           end;
 
           DisplayedCount := DisplayedCount + 1;
         end;
-      until not FindNext(FindRec);
+      until FindNext(FindRec) = False;
     finally
       FindClose(FindRec);
     end;
   end;
 
   if DisplayedCount > 12 then
-    Result := Result + '  ...还有 ' + IntToStr(DisplayedCount - 12) + ' 项未显示' + #13#10;
+    Result := Result + '  ' + Format(ExpandConstant('{cm:MoreItems}'), [DisplayedCount - 12]) + #13#10;
 end;
 
 function ConfirmManagedStoragePreserved: Boolean;
@@ -191,12 +191,11 @@ begin
 
   Summary := BuildManagedStorageSummary(FolderPath);
   MessageText :=
-    '检测到 DeskBox 收纳目录中仍有内容：' + #13#10 +
+    ExpandConstant('{cm:ConfirmStorageTitle}') + ':' + #13#10 +
     FolderPath + #13#10#13#10 +
-    '当前包含 ' + IntToStr(FolderCount) + ' 个文件夹、' + IntToStr(FileCount) + ' 个文件。' + #13#10#13#10 +
+    Format(ExpandConstant('{cm:ConfirmStorageBody}'), [FolderCount, FileCount]) + #13#10#13#10 +
     Summary +
-    '卸载 DeskBox 不会删除这个目录，也不会删除里面的用户文件。' + #13#10 +
-    '请确认你已经知道这些文件的位置。是否继续卸载？';
+    ExpandConstant('{cm:ConfirmStorageFooter}');
 
   Result := MsgBox(MessageText, mbConfirmation, MB_YESNO) = IDYES;
 end;
@@ -213,10 +212,7 @@ begin
     Exit;
 
   MessageText :=
-    '是否同时删除 DeskBox 应用数据？' + #13#10#13#10 +
-    '这些数据包含设置、格子布局、随记图片缓存和日志：' + #13#10 +
-    AppDataRoot + #13#10#13#10 +
-    '选择“否”会保留这些数据，之后重新安装 DeskBox 时仍可继续使用。';
+    Format(ExpandConstant('{cm:ConfirmRemoveAppData}'), [AppDataRoot]);
 
   Result := MsgBox(MessageText, mbConfirmation, MB_YESNO or MB_DEFBUTTON2) = IDYES;
 end;
