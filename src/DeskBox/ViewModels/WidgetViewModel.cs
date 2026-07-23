@@ -345,9 +345,11 @@ public partial class WidgetViewModel : ObservableObject, IDisposable
 
         _folderWatcher = new FolderWatcherService(dispatcherQueue);
         _folderWatcher.FolderChanged += OnFolderChanged;
+        _folderWatcher.FolderIconChanged += OnFolderIconChanged;
 
         _publicFolderWatcher = new FolderWatcherService(dispatcherQueue);
         _publicFolderWatcher.FolderChanged += OnFolderChanged;
+        _publicFolderWatcher.FolderIconChanged += OnFolderIconChanged;
 
         _settingsService.SettingsChanged += OnSettingsChanged;
         _localizationService.LanguageChanged += OnLanguageChanged;

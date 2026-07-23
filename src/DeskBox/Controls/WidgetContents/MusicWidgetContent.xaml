@@ -679,6 +679,517 @@
             </StackPanel>
         </Grid>
 
+        <!-- Record mode: centered rotating vinyl + track info below. -->
+        <Grid
+            x:Name="RecordLayout"
+            Padding="12"
+            RowSpacing="6"
+            VerticalAlignment="Center"
+            Visibility="Collapsed">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="*" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+
+            <Grid
+                x:Name="RecordVinylHost"
+                Grid.Row="0"
+                Width="160"
+                Height="160"
+                HorizontalAlignment="Center"
+                VerticalAlignment="Center"
+                RenderTransformOrigin="0.5,0.5">
+                <Grid.RenderTransform>
+                    <RotateTransform x:Name="RecordVinylRotateTransform" Angle="0" />
+                </Grid.RenderTransform>
+                <!-- Fixed 160x160 coordinate space, scaled by Viewbox to the host size. -->
+                <Viewbox>
+                    <Grid Width="160" Height="160">
+                        <!-- warm outer rim glow -->
+                        <Ellipse Fill="#40000000" Opacity="0.32" Margin="-1,5,-1,-1" />
+                        <!-- disc body -->
+                        <Ellipse Fill="#080808" />
+                        <!-- dense concentric grooves -->
+                        <Ellipse Stroke="#1A1A1A" StrokeThickness="0.7" Margin="3" />
+                        <Ellipse Stroke="#222222" StrokeThickness="0.6" Margin="6" />
+                        <Ellipse Stroke="#1B1B1B" StrokeThickness="0.5" Margin="9" />
+                        <Ellipse Stroke="#262626" StrokeThickness="0.5" Margin="13" />
+                        <Ellipse Stroke="#1D1D1D" StrokeThickness="0.45" Margin="17" />
+                        <Ellipse Stroke="#242424" StrokeThickness="0.4" Margin="21" />
+                        <Ellipse Stroke="#1A1A1A" StrokeThickness="0.4" Margin="25" />
+                        <Ellipse Stroke="#222222" StrokeThickness="0.35" Margin="30" />
+                        <Ellipse Stroke="#1B1B1B" StrokeThickness="0.35" Margin="35" />
+                        <!-- subtle highlight sheen -->
+                        <Ellipse>
+                            <Ellipse.Fill>
+                                <RadialGradientBrush GradientOrigin="0.30,0.24" Center="0.5,0.5" RadiusX="0.55" RadiusY="0.55">
+                                    <GradientStop Offset="0" Color="#70FFFFFF" />
+                                    <GradientStop Offset="0.35" Color="#10FFFFFF" />
+                                    <GradientStop Offset="1" Color="#00000000" />
+                                </RadialGradientBrush>
+                            </Ellipse.Fill>
+                        </Ellipse>
+                        <!-- center label ring -->
+                        <Ellipse Stroke="#000000" StrokeThickness="1" Margin="31" />
+                        <!-- center label = album cover (large) -->
+                        <Ellipse x:Name="RecordVinylLabel" Margin="32">
+                            <Ellipse.Fill>
+                                <ImageBrush ImageSource="{Binding ThumbnailImage}" Stretch="UniformToFill" />
+                            </Ellipse.Fill>
+                        </Ellipse>
+                        <!-- spindle -->
+                        <Ellipse Width="9" Height="9" HorizontalAlignment="Center" VerticalAlignment="Center" Stroke="#50000000" StrokeThickness="0.8">
+                            <Ellipse.Fill>
+                                <RadialGradientBrush GradientOrigin="0.32,0.28" Center="0.5,0.5" RadiusX="0.62" RadiusY="0.62">
+                                    <GradientStop Offset="0" Color="#FFF3F3F6" />
+                                    <GradientStop Offset="0.7" Color="#FFB6B6BE" />
+                                    <GradientStop Offset="1" Color="#FF7E7E86" />
+                                </RadialGradientBrush>
+                            </Ellipse.Fill>
+                        </Ellipse>
+                        <Ellipse Width="3" Height="3" HorizontalAlignment="Center" VerticalAlignment="Center" Fill="#CC1A1A1E" />
+                    </Grid>
+                </Viewbox>
+            </Grid>
+
+            <!-- Tonearm overlaid on the vinyl (rotates between play/pause) -->
+            <Grid
+                x:Name="RecordTonearm"
+                Grid.Row="0"
+                Width="67"
+                Height="80"
+                HorizontalAlignment="Center"
+                VerticalAlignment="Center"
+                Margin="115,-48,0,0">
+                <!-- Fixed 100x120 design space; pivot at (50,20), scaled with the disc from code. -->
+                <Viewbox Stretch="Uniform">
+                    <Grid Width="100" Height="120">
+                        <!-- counterweight stem + weight (behind the pivot) -->
+                        <Line
+                            X1="50" Y1="20" X2="57" Y2="7"
+                            Stroke="#9A9AA2"
+                            StrokeThickness="2.6"
+                            StrokeStartLineCap="Round"
+                            StrokeEndLineCap="Round" />
+                        <Ellipse
+                            Width="12" Height="12"
+                            HorizontalAlignment="Left" VerticalAlignment="Top"
+                            Margin="51,1,0,0"
+                            Stroke="#55555D"
+                            StrokeThickness="0.6">
+                            <Ellipse.Fill>
+                                <RadialGradientBrush GradientOrigin="0.32,0.28" Center="0.5,0.5" RadiusX="0.6" RadiusY="0.6">
+                                    <GradientStop Offset="0" Color="#FFEDEDF1" />
+                                    <GradientStop Offset="0.65" Color="#FF9C9CA4" />
+                                    <GradientStop Offset="1" Color="#FF6F6F77" />
+                                </RadialGradientBrush>
+                            </Ellipse.Fill>
+                        </Ellipse>
+                        <!-- arm tube with highlight -->
+                        <Path
+                            Data="M 50,20 C 45,46 39,70 33,92"
+                            Stroke="#D4D4DA"
+                            StrokeThickness="3.2"
+                            StrokeStartLineCap="Round"
+                            StrokeEndLineCap="Round" />
+                        <Path
+                            Data="M 49.2,20 C 44.2,46 38.2,70 32.2,92"
+                            Stroke="#FFFFFF"
+                            StrokeThickness="0.8"
+                            Opacity="0.55"
+                            StrokeStartLineCap="Round"
+                            StrokeEndLineCap="Round" />
+                        <!-- pivot bearing -->
+                        <Ellipse
+                            Width="17" Height="17"
+                            HorizontalAlignment="Left" VerticalAlignment="Top"
+                            Margin="41.5,11.5,0,0"
+                            Stroke="#66666E"
+                            StrokeThickness="0.6">
+                            <Ellipse.Fill>
+                                <RadialGradientBrush GradientOrigin="0.32,0.28" Center="0.5,0.5" RadiusX="0.62" RadiusY="0.62">
+                                    <GradientStop Offset="0" Color="#FFF6F6F9" />
+                                    <GradientStop Offset="0.6" Color="#FFC4C4CC" />
+                                    <GradientStop Offset="1" Color="#FF8F8F97" />
+                                </RadialGradientBrush>
+                            </Ellipse.Fill>
+                        </Ellipse>
+                        <Ellipse
+                            Width="6" Height="6"
+                            HorizontalAlignment="Left" VerticalAlignment="Top"
+                            Margin="47,17,0,0"
+                            Fill="#5A5A62" />
+                        <!-- headshell (tilted to follow the arm) -->
+                        <Border
+                            Width="9" Height="17"
+                            CornerRadius="4"
+                            HorizontalAlignment="Left" VerticalAlignment="Top"
+                            Margin="28.5,90,0,0"
+                            BorderBrush="#70707A"
+                            BorderThickness="0.6"
+                            RenderTransformOrigin="0.5,0.1">
+                            <Border.RenderTransform>
+                                <RotateTransform Angle="-15" />
+                            </Border.RenderTransform>
+                            <Border.Background>
+                                <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
+                                    <GradientStop Offset="0" Color="#FFEDEDF1" />
+                                    <GradientStop Offset="1" Color="#FFBEBEC6" />
+                                </LinearGradientBrush>
+                            </Border.Background>
+                        </Border>
+                        <!-- stylus -->
+                        <Line
+                            X1="31" Y1="106" X2="27.5" Y2="111"
+                            Stroke="#55555D"
+                            StrokeThickness="1.3"
+                            StrokeEndLineCap="Round" />
+                    </Grid>
+                </Viewbox>
+            </Grid>
+
+            <StackPanel
+                Grid.Row="1"
+                HorizontalAlignment="Center"
+                Spacing="1"
+                Margin="0,4,0,0">
+                <TextBlock
+                    x:Name="RecordTitleText"
+                    MaxLines="1"
+                    HorizontalAlignment="Center"
+                    FontSize="17"
+                    FontWeight="SemiBold"
+                    Text="{Binding Title}"
+                    TextTrimming="CharacterEllipsis" />
+                <TextBlock
+                    x:Name="RecordArtistText"
+                    MaxLines="1"
+                    HorizontalAlignment="Center"
+                    FontSize="13"
+                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                    Text="{Binding Artist}"
+                    TextTrimming="CharacterEllipsis" />
+            </StackPanel>
+
+            <Grid
+                Grid.Row="2"
+                Margin="0,2,0,0"
+                HorizontalAlignment="Stretch"
+                MaxWidth="280"
+                ColumnSpacing="6">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <TextBlock
+                    Grid.Column="0"
+                    VerticalAlignment="Center"
+                    FontSize="11"
+                    Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                    Text="{Binding PositionText}" />
+                <Grid
+                    x:Name="RecordProgressHost"
+                    Grid.Column="1"
+                    Height="4"
+                    MinWidth="80"
+                    VerticalAlignment="Center">
+                    <Border
+                        x:Name="RecordProgressTrack"
+                        Height="4"
+                        Background="{ThemeResource ControlStrongStrokeColorDefaultBrush}"
+                        CornerRadius="2"
+                        Opacity="0.36" />
+                    <Border
+                        x:Name="RecordProgressFill"
+                        Height="4"
+                        Width="0"
+                        HorizontalAlignment="Left"
+                        Background="{Binding MusicAccentBrush}"
+                        CornerRadius="2" />
+                </Grid>
+                <TextBlock
+                    Grid.Column="2"
+                    VerticalAlignment="Center"
+                    FontSize="11"
+                    Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                    Text="{Binding DurationText}" />
+            </Grid>
+
+            <StackPanel
+                x:Name="RecordControlsPanel"
+                Grid.Row="3"
+                Margin="0,4,0,0"
+                HorizontalAlignment="Center"
+                Orientation="Horizontal"
+                Spacing="10">
+                <Button
+                    x:Name="RecordPlaybackModeButton"
+                    Click="PlaybackModeButton_Click"
+                    IsEnabled="{Binding CanChangePlaybackMode}"
+                    Opacity="{Binding PlaybackModeOpacity}"
+                    Style="{StaticResource MusicIconButtonStyle}"
+                    ToolTipService.ToolTip="{Binding PlaybackModeTooltip}">
+                    <FontIcon FontSize="14" Glyph="{Binding PlaybackModeGlyph}" />
+                </Button>
+                <Button
+                    x:Name="RecordPreviousButton"
+                    Click="PreviousButton_Click"
+                    IsEnabled="{Binding CanGoPrevious}"
+                    Style="{StaticResource MusicIconButtonStyle}"
+                    ToolTipService.ToolTip="{Binding PreviousTooltip}">
+                    <Viewbox Width="20" Height="20">
+                        <Canvas Width="20" Height="20">
+                            <Border Canvas.Left="1.4" Canvas.Top="2.5" Width="2.4" Height="15" Background="{ThemeResource TextFillColorPrimaryBrush}" CornerRadius="1.2" />
+                            <Path Data="M 16.5,2.8 C 17.05,2.46 17.45,2.84 17.45,3.52 L 17.45,16.48 C 17.45,17.16 17.05,17.54 16.5,17.2 L 6.8,10.7 C 6.1,10.28 6.1,9.72 6.8,9.3 Z" Fill="{ThemeResource TextFillColorPrimaryBrush}" />
+                        </Canvas>
+                    </Viewbox>
+                </Button>
+                <Button
+                    x:Name="RecordPlayPauseButton"
+                    Click="PlayPauseButton_Click"
+                    IsEnabled="{Binding CanPlayPause}"
+                    Style="{StaticResource MusicIconButtonStyle}"
+                    ToolTipService.ToolTip="{Binding PlayPauseTooltip}">
+                    <Grid Width="20" Height="20">
+                        <Viewbox Width="20" Height="20" Visibility="{Binding PlayIconVisibility}">
+                            <Canvas Width="20" Height="20">
+                                <Path Data="M 4,2.5 C 3.4,2.13 2.9,2.55 2.9,3.3 L 2.9,16.7 C 2.9,17.45 3.4,17.87 4,17.5 L 17,10.75 C 17.75,10.32 17.75,9.68 17,9.25 Z" Fill="{ThemeResource TextFillColorPrimaryBrush}" />
+                            </Canvas>
+                        </Viewbox>
+                        <Viewbox Width="20" Height="20" Visibility="{Binding PauseIconVisibility}">
+                            <Canvas Width="20" Height="20">
+                                <Border Canvas.Left="3.5" Canvas.Top="2.5" Width="4" Height="15" Background="{ThemeResource TextFillColorPrimaryBrush}" CornerRadius="0.75" />
+                                <Border Canvas.Left="12.5" Canvas.Top="2.5" Width="4" Height="15" Background="{ThemeResource TextFillColorPrimaryBrush}" CornerRadius="0.75" />
+                            </Canvas>
+                        </Viewbox>
+                    </Grid>
+                </Button>
+                <Button
+                    x:Name="RecordNextButton"
+                    Click="NextButton_Click"
+                    IsEnabled="{Binding CanGoNext}"
+                    Style="{StaticResource MusicIconButtonStyle}"
+                    ToolTipService.ToolTip="{Binding NextTooltip}">
+                    <Viewbox Width="20" Height="20">
+                        <Canvas Width="20" Height="20">
+                            <Path Data="M 3.5,2.8 C 2.95,2.46 2.55,2.84 2.55,3.52 L 2.55,16.48 C 2.55,17.16 2.95,17.54 3.5,17.2 L 13.2,10.7 C 13.9,10.28 13.9,9.72 13.2,9.3 Z" Fill="{ThemeResource TextFillColorPrimaryBrush}" />
+                            <Border Canvas.Left="16.2" Canvas.Top="2.5" Width="2.4" Height="15" Background="{ThemeResource TextFillColorPrimaryBrush}" CornerRadius="1.2" />
+                        </Canvas>
+                    </Viewbox>
+                </Button>
+                <Button
+                    x:Name="RecordVolumeButton"
+                    Click="VolumeButton_Click"
+                    Style="{StaticResource MusicIconButtonStyle}"
+                    ToolTipService.ToolTip="{Binding VolumeTooltip}">
+                    <FontIcon FontSize="15" Glyph="&#xE767;" />
+                </Button>
+            </StackPanel>
+        </Grid>
+
+        <!-- Record mode: Horizontal - vinyl left, info right. -->
+        <Grid
+            x:Name="RecordHorizontalLayout"
+            Padding="12"
+            ColumnSpacing="12"
+            VerticalAlignment="Center"
+            Visibility="Collapsed">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" MinWidth="0" />
+            </Grid.ColumnDefinitions>
+
+            <!-- Vinyl (left) -->
+            <Grid
+                x:Name="RecordHorizontalVinylHost"
+                Grid.Column="0"
+                Width="110"
+                Height="110"
+                HorizontalAlignment="Center"
+                VerticalAlignment="Center"
+                RenderTransformOrigin="0.5,0.5">
+                <Grid.RenderTransform>
+                    <RotateTransform x:Name="RecordHorizontalVinylRotateTransform" Angle="0" />
+                </Grid.RenderTransform>
+                <Viewbox>
+                    <Grid Width="160" Height="160">
+                        <Ellipse Fill="#40000000" Opacity="0.32" Margin="-1,5,-1,-1" />
+                        <Ellipse Fill="#080808" />
+                        <Ellipse Stroke="#1A1A1A" StrokeThickness="0.7" Margin="3" />
+                        <Ellipse Stroke="#222222" StrokeThickness="0.6" Margin="6" />
+                        <Ellipse Stroke="#1B1B1B" StrokeThickness="0.5" Margin="9" />
+                        <Ellipse Stroke="#262626" StrokeThickness="0.5" Margin="13" />
+                        <Ellipse Stroke="#1D1D1D" StrokeThickness="0.45" Margin="17" />
+                        <Ellipse Stroke="#242424" StrokeThickness="0.4" Margin="21" />
+                        <Ellipse Stroke="#1A1A1A" StrokeThickness="0.4" Margin="25" />
+                        <Ellipse Stroke="#222222" StrokeThickness="0.35" Margin="30" />
+                        <Ellipse Stroke="#1B1B1B" StrokeThickness="0.35" Margin="35" />
+                        <Ellipse>
+                            <Ellipse.Fill>
+                                <RadialGradientBrush GradientOrigin="0.30,0.24" Center="0.5,0.5" RadiusX="0.55" RadiusY="0.55">
+                                    <GradientStop Offset="0" Color="#70FFFFFF" />
+                                    <GradientStop Offset="0.35" Color="#10FFFFFF" />
+                                    <GradientStop Offset="1" Color="#00000000" />
+                                </RadialGradientBrush>
+                            </Ellipse.Fill>
+                        </Ellipse>
+                        <Ellipse Stroke="#000000" StrokeThickness="1" Margin="31" />
+                        <Ellipse x:Name="RecordHorizontalVinylLabel" Margin="32">
+                            <Ellipse.Fill>
+                                <ImageBrush ImageSource="{Binding ThumbnailImage}" Stretch="UniformToFill" />
+                            </Ellipse.Fill>
+                        </Ellipse>
+                        <Ellipse Width="9" Height="9" HorizontalAlignment="Center" VerticalAlignment="Center" Stroke="#50000000" StrokeThickness="0.8">
+                            <Ellipse.Fill>
+                                <RadialGradientBrush GradientOrigin="0.32,0.28" Center="0.5,0.5" RadiusX="0.62" RadiusY="0.62">
+                                    <GradientStop Offset="0" Color="#FFF3F3F6" />
+                                    <GradientStop Offset="0.7" Color="#FFB6B6BE" />
+                                    <GradientStop Offset="1" Color="#FF7E7E86" />
+                                </RadialGradientBrush>
+                            </Ellipse.Fill>
+                        </Ellipse>
+                        <Ellipse Width="3" Height="3" HorizontalAlignment="Center" VerticalAlignment="Center" Fill="#CC1A1A1E" />
+                    </Grid>
+                </Viewbox>
+            </Grid>
+
+            <!-- Info (right) -->
+            <Grid Grid.Column="1" RowSpacing="6" VerticalAlignment="Center">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+                <StackPanel Grid.Row="0" Spacing="1">
+                    <TextBlock
+                        x:Name="RecordHorizontalTitleText"
+                        MaxLines="1"
+                        FontSize="15"
+                        FontWeight="SemiBold"
+                        Text="{Binding Title}"
+                        TextTrimming="CharacterEllipsis" />
+                    <TextBlock
+                        x:Name="RecordHorizontalArtistText"
+                        MaxLines="1"
+                        FontSize="12"
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        Text="{Binding Artist}"
+                        TextTrimming="CharacterEllipsis" />
+                </StackPanel>
+                <Grid Grid.Row="1" Margin="0,2,0,0" ColumnSpacing="6">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock
+                        Grid.Column="0"
+                        VerticalAlignment="Center"
+                        FontSize="11"
+                        Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                        Text="{Binding PositionText}" />
+                    <Grid
+                        x:Name="RecordHorizontalProgressHost"
+                        Grid.Column="1"
+                        Height="4"
+                        MinWidth="60"
+                        VerticalAlignment="Center">
+                        <Border
+                            x:Name="RecordHorizontalProgressTrack"
+                            Height="4"
+                            Background="{ThemeResource ControlStrongStrokeColorDefaultBrush}"
+                            CornerRadius="2"
+                            Opacity="0.36" />
+                        <Border
+                            x:Name="RecordHorizontalProgressFill"
+                            Height="4"
+                            Width="0"
+                            HorizontalAlignment="Left"
+                            Background="{Binding MusicAccentBrush}"
+                            CornerRadius="2" />
+                    </Grid>
+                    <TextBlock
+                        Grid.Column="2"
+                        VerticalAlignment="Center"
+                        FontSize="11"
+                        Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                        Text="{Binding DurationText}" />
+                </Grid>
+                <StackPanel
+                    x:Name="RecordHorizontalControlsPanel"
+                    Grid.Row="2"
+                    Margin="0,2,0,0"
+                    Orientation="Horizontal"
+                    Spacing="8">
+                    <Button
+                        x:Name="RecordHorizontalPlaybackModeButton"
+                        Click="PlaybackModeButton_Click"
+                        IsEnabled="{Binding CanChangePlaybackMode}"
+                        Opacity="{Binding PlaybackModeOpacity}"
+                        Style="{StaticResource MusicIconButtonStyle}"
+                        ToolTipService.ToolTip="{Binding PlaybackModeTooltip}">
+                        <FontIcon FontSize="14" Glyph="{Binding PlaybackModeGlyph}" />
+                    </Button>
+                    <Button
+                        x:Name="RecordHorizontalPreviousButton"
+                        Click="PreviousButton_Click"
+                        IsEnabled="{Binding CanGoPrevious}"
+                        Style="{StaticResource MusicIconButtonStyle}"
+                        ToolTipService.ToolTip="{Binding PreviousTooltip}">
+                        <Viewbox Width="20" Height="20">
+                            <Canvas Width="20" Height="20">
+                                <Border Canvas.Left="1.4" Canvas.Top="2.5" Width="2.4" Height="15" Background="{ThemeResource TextFillColorPrimaryBrush}" CornerRadius="1.2" />
+                                <Path Data="M 16.5,2.8 C 17.05,2.46 17.45,2.84 17.45,3.52 L 17.45,16.48 C 17.45,17.16 17.05,17.54 16.5,17.2 L 6.8,10.7 C 6.1,10.28 6.1,9.72 6.8,9.3 Z" Fill="{ThemeResource TextFillColorPrimaryBrush}" />
+                            </Canvas>
+                        </Viewbox>
+                    </Button>
+                    <Button
+                        x:Name="RecordHorizontalPlayPauseButton"
+                        Click="PlayPauseButton_Click"
+                        IsEnabled="{Binding CanPlayPause}"
+                        Style="{StaticResource MusicIconButtonStyle}"
+                        ToolTipService.ToolTip="{Binding PlayPauseTooltip}">
+                        <Grid Width="20" Height="20">
+                            <Viewbox Width="20" Height="20" Visibility="{Binding PlayIconVisibility}">
+                                <Canvas Width="20" Height="20">
+                                    <Path Data="M 4,2.5 C 3.4,2.13 2.9,2.55 2.9,3.3 L 2.9,16.7 C 2.9,17.45 3.4,17.87 4,17.5 L 17,10.75 C 17.75,10.32 17.75,9.68 17,9.25 Z" Fill="{ThemeResource TextFillColorPrimaryBrush}" />
+                                </Canvas>
+                            </Viewbox>
+                            <Viewbox Width="20" Height="20" Visibility="{Binding PauseIconVisibility}">
+                                <Canvas Width="20" Height="20">
+                                    <Border Canvas.Left="3.5" Canvas.Top="2.5" Width="4" Height="15" Background="{ThemeResource TextFillColorPrimaryBrush}" CornerRadius="0.75" />
+                                    <Border Canvas.Left="12.5" Canvas.Top="2.5" Width="4" Height="15" Background="{ThemeResource TextFillColorPrimaryBrush}" CornerRadius="0.75" />
+                                </Canvas>
+                            </Viewbox>
+                        </Grid>
+                    </Button>
+                    <Button
+                        x:Name="RecordHorizontalNextButton"
+                        Click="NextButton_Click"
+                        IsEnabled="{Binding CanGoNext}"
+                        Style="{StaticResource MusicIconButtonStyle}"
+                        ToolTipService.ToolTip="{Binding NextTooltip}">
+                        <Viewbox Width="20" Height="20">
+                            <Canvas Width="20" Height="20">
+                                <Path Data="M 3.5,2.8 C 2.95,2.46 2.55,2.84 2.55,3.52 L 2.55,16.48 C 2.55,17.16 2.95,17.54 3.5,17.2 L 13.2,10.7 C 13.9,10.28 13.9,9.72 13.2,9.3 Z" Fill="{ThemeResource TextFillColorPrimaryBrush}" />
+                                <Border Canvas.Left="16.2" Canvas.Top="2.5" Width="2.4" Height="15" Background="{ThemeResource TextFillColorPrimaryBrush}" CornerRadius="1.2" />
+                            </Canvas>
+                        </Viewbox>
+                    </Button>
+                    <Button
+                        x:Name="RecordHorizontalVolumeButton"
+                        Click="VolumeButton_Click"
+                        Style="{StaticResource MusicIconButtonStyle}"
+                        ToolTipService.ToolTip="{Binding VolumeTooltip}">
+                        <FontIcon FontSize="15" Glyph="&#xE767;" />
+                    </Button>
+                </StackPanel>
+            </Grid>
+        </Grid>
+
         <Border
             x:Name="InlineVolumePanel"
             Width="238"

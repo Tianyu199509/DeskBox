@@ -18,19 +18,19 @@ namespace DeskBox.Views;
 
 public sealed partial class OnboardingWindow
 {
-    private void SetupStep2()
+    private void SetupStep4Storage()
     {
         string path = SettingsService.NormalizeManagedStorageRootPath(_settingsService.Settings.DefaultManagedStorageRootPath);
-        Step2PathText.Text = path;
+        Step4PathText.Text = path;
 
         var pinState = ExplorerQuickAccessHelper.GetQuickAccessPinState(path, out _);
         bool isPinned = pinState == QuickAccessPinState.Pinned;
-        Step2PinToggle.Toggled -= Step2PinToggle_Toggled;
-        Step2PinToggle.IsOn = isPinned;
-        Step2PinToggle.Toggled += Step2PinToggle_Toggled;
+        Step4PinToggle.Toggled -= Step4PinToggle_Toggled;
+        Step4PinToggle.IsOn = isPinned;
+        Step4PinToggle.Toggled += Step4PinToggle_Toggled;
     }
 
-    private void Step2ChangePath_Click(object sender, RoutedEventArgs e)
+    private void Step4ChangePath_Click(object sender, RoutedEventArgs e)
     {
         _ = ChangeStoragePathAsync();
     }
@@ -107,10 +107,10 @@ public sealed partial class OnboardingWindow
 
         _settingsService.Settings.DefaultManagedStorageRootPath = normalizedPath;
         _settingsService.SaveDebounced();
-        Step2PathText.Text = normalizedPath;
+        Step4PathText.Text = normalizedPath;
     }
 
-    private async void Step2PinToggle_Toggled(object sender, RoutedEventArgs e)
+    private async void Step4PinToggle_Toggled(object sender, RoutedEventArgs e)
     {
         if (sender is not ToggleSwitch toggle)
         {
@@ -127,12 +127,12 @@ public sealed partial class OnboardingWindow
                 var dialog = new ContentDialog
                 {
                     XamlRoot = RootGrid.XamlRoot,
-                    Title = _localizationService.T("Onboarding.Step2.PinTitle"),
+                    Title = _localizationService.T("Onboarding.Step4.PinTitle"),
                     CloseButtonText = _localizationService.T("Common.Ok"),
                     DefaultButton = ContentDialogButton.Close,
                     Content = new TextBlock
                     {
-                        Text = _localizationService.T("Onboarding.Step2.PinDescription"),
+                        Text = _localizationService.T("Onboarding.Step4.PinFailedBody"),
                         TextWrapping = TextWrapping.Wrap
                     }
                 };
@@ -146,6 +146,6 @@ public sealed partial class OnboardingWindow
     }
 
     // ════════════════════════════════════════════════════════════
-    //  Step 3: Appearance
+    //  Step 5: Ready Summary
     // ════════════════════════════════════════════════════════════
 }

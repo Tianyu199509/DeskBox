@@ -1,5 +1,147 @@
 # Changelog
 
+## 1.3.2 - 2026-07-23
+
+### English
+
+#### Search System (New)
+
+- **Full-text desktop search**: Added a complete search infrastructure with a dedicated search popup window, global hotkey activation, and instant result display. Supports searching files, folders, applications, and settings from a single entry point.
+- **USN Journal indexing**: Added `UsnJournalIndexService` that reads the NTFS USN change journal for fast, low-overhead file discovery without walking the directory tree.
+- **Windows Index integration**: Added `WindowsIndexSearchService` that queries the Windows Indexing Service for content-searchable results including document metadata.
+- **Search result ranking**: Added `SearchResultRanker` with a weighted scoring algorithm considering name match position, file type priority, recency, and path depth.
+- **Search history**: Added `SearchHistoryService` with recent-search persistence, quick re-execution, and history clearing.
+- **Recommended apps panel**: The search popup shows a recommended-apps panel with keyboard navigation (arrow keys + Enter to launch, Space to preview via QuickLook).
+- **Type sort and filter**: Search results can be sorted and filtered by type (files, folders, apps, settings).
+- **Search widget content**: Added `SearchWidgetContent` and `SearchWidgetContentAdapter` so search can be embedded as a widget content type.
+- **Search settings section**: Added a dedicated Search settings page with hotkey configuration, index scope, result count, and recommendation toggles.
+
+#### Multi-Language Expansion
+
+- **Three new languages**: Added Japanese (ja-JP), German (de-DE), and Brazilian Portuguese (pt-BR) localization with 1500+ translated strings each, covering all widgets, settings, onboarding, search, tray menus, dialogs, and status messages.
+- **Localization architecture rewrite**: Replaced the legacy `.resw` resource system with a JSON-based `LocalizationService` that loads embedded `Strings/{locale}.json` files at runtime, enabling easier community translation contributions and hot-reload during development.
+
+#### Onboarding Redesign
+
+- **Five-step focused flow**: Rebuilt the first-run guide from the previous multi-panel layout into a focused five-step flow: Welcome, Feature Overview, Storage Setup, Hotkey Configuration, and Completion.
+- **Refined layout and animations**: Each step uses purpose-built entrance animations, consistent spacing, and localized content in all five supported languages.
+
+#### Adaptive Tray Animation System
+
+- **Hardware-adaptive controller**: Added `AdaptiveTrayAnimationController` and `HardwareAdaptiveAnimationService` that detect GPU capability and adjust animation complexity accordingly — full composition animations on discrete GPUs, simplified fallbacks on integrated graphics.
+- **Batch animation driver**: Added `WidgetTrayBatchAnimationDriver` for synchronized multi-widget tray show/hide, eliminating per-widget timing drift.
+- **Smart animation adapter**: Added `SmartAnimationAdapter` that bridges the adaptive controller with existing widget animation paths.
+- **Synchronized scheduling**: Replaced fire-and-forget `DispatcherQueue.TryEnqueue` calls with synchronized scheduling, reducing animation tearing on rapid tray toggles.
+
+#### Weather Improvements
+
+- **City database expansion**: Expanded the offline `cities.json` database from ~500 to 5000+ entries covering significantly more small and medium cities worldwide.
+- **Improved city search**: `CitySearchService` now uses prefix + fuzzy matching with CJK-aware tokenization for better results in Chinese, Japanese, and other non-Latin scripts.
+- **Location service refinement**: Improved `WindowsLocationHelper` with better timeout handling, fallback to last-known position, and clearer error reporting.
+- **Weather layout improvements**: Refined `WeatherWidgetContent` layouts for all four size modes with better spacing, icon alignment, and forecast list scrolling.
+
+#### Installer and Updater
+
+- **ARM64 installer**: Added `DeskBox.arm64.iss` and `DeskBox.Dependencies.arm64.iss` for native ARM64 Windows builds.
+- **Reliable process kill**: Installer now uses a robust process-termination sequence before overwrite, avoiding file-lock failures.
+- **Force-update enforcement**: `AppUpdateService` now enforces mandatory updates when the server flags a version as critical.
+- **Helper cleanup**: Stale update-helper directories under `%LocalAppData%\DeskBox\update-helper` are cleaned up automatically.
+- **Official download URLs**: Switched all download links to the official GitHub Releases channel.
+- **Migration support**: Added `DeskBox.Migration.iss` for handling data migration during major version upgrades.
+- **English installer language**: Added `Languages/English.isl` for proper English installer UI on non-Chinese systems.
+- **Installer language selection**: The installer now shows a language-selection dialog (Chinese, English, Japanese, German, Brazilian Portuguese) pre-selected to the system locale. The chosen language is written to `HKCU\Software\DeskBox\InstallLanguage`, and DeskBox uses it as the default app language on first run (a manual in-app change still wins).
+- **Search popup polish**: The result-list header now aligns with the data rows; the sort header carries a subtle background and shares the menu-bar margins.
+- **Weather capsule fix**: Removed a duplicate title icon so capsule mode shows only the weather emoji.
+- **Capsule hover mask**: Hidden the semi-transparent right-edge hover mask in capsule mode (interaction unchanged).
+
+#### Architecture and Maintainability
+
+- **App.Tray extraction**: Extracted `App.Tray.cs` (704 lines) from `App.xaml.cs`, consolidating all tray icon, menu, and lifecycle logic.
+- **ServiceRegistry**: Added `ServiceRegistry` for centralized service location, reducing constructor parameter explosion.
+- **SettingsMigrationService**: Added `SettingsMigrationService` for versioned settings schema migrations.
+- **FileMetaService**: Added `FileMetaService` (332 lines) for unified file metadata extraction (icon, type name, size formatting).
+- **AppDiagnosticsService**: Added `AppDiagnosticsService` for runtime diagnostics including handle counts, memory pressure, and UI thread responsiveness.
+- **User guide**: Added a 10-chapter user guide under `docs/user-guide/` covering getting started, file widgets, todo, quick capture, capsule mode, stacks & QuickLook, appearance, backup, advanced workflows, and troubleshooting.
+
+#### Fixes
+
+- **QuickLook compatibility (critical)**: Fixed a critical issue where DeskBox could crash QuickLook's single-threaded named-pipe server by connecting without sending data (pipe probe in `CanPreview` and raw `CreateFile` fallback). Availability checks now use process enumeration only; the pipe is touched exclusively when sending a Toggle message.
+- **Wallpaper loss**: Prevented desktop wallpaper loss caused by repeated `WorkerW` window spawns during widget layer operations in `WidgetLayerService`.
+- **Capsule mode defaults**: Aligned `AppSettings` initial values with `ApplyDefaultPreferences` so new installs and global reset produce identical capsule behavior.
+- **Tray menu height**: Fixed tray right-click menu height display issue.
+- **Dead shortcut cleanup**: Added detection and removal of invalid `.lnk` and `.url` shortcuts (e.g. uninstalled Steam games) that previously showed broken icons in file widgets.
+- **Weather code mapping**: Expanded `WeatherCodeMapper` with additional WMO weather codes for more accurate condition descriptions.
+
+### 中文
+
+#### 搜索系统（全新）
+
+- **全文桌面搜索**：新增完整的搜索基础设施，包括专用搜索弹窗、全局快捷键唤起和即时结果展示。支持从单一入口搜索文件、文件夹、应用和设置。
+- **USN 日志索引**：新增 `UsnJournalIndexService`，通过读取 NTFS USN 变更日志实现快速、低开销的文件发现，无需遍历目录树。
+- **Windows 索引集成**：新增 `WindowsIndexSearchService`，查询 Windows 索引服务获取可内容搜索的结果（包括文档元数据）。
+- **搜索结果排序**：新增 `SearchResultRanker`，使用加权评分算法，综合考虑名称匹配位置、文件类型优先级、时间新近度和路径深度。
+- **搜索历史**：新增 `SearchHistoryService`，支持最近搜索持久化、快速重新执行和历史清除。
+- **推荐应用面板**：搜索弹窗展示推荐应用面板，支持键盘导航（方向键 + Enter 启动，Space 通过 QuickLook 预览）。
+- **类型排序和筛选**：搜索结果可按类型（文件、文件夹、应用、设置）排序和筛选。
+- **搜索格子内容**：新增 `SearchWidgetContent` 和 `SearchWidgetContentAdapter`，搜索可作为格子内容类型嵌入。
+- **搜索设置分区**：新增独立的搜索设置页，支持快捷键配置、索引范围、结果数量和推荐开关。
+
+#### 多语言扩展
+
+- **三种新语言**：新增日语（ja-JP）、德语（de-DE）和巴西葡萄牙语（pt-BR）本地化，每种语言 1500+ 翻译条目，覆盖所有格子、设置、引导、搜索、托盘菜单、对话框和状态消息。
+- **本地化架构重写**：将旧的 `.resw` 资源系统替换为基于 JSON 的 `LocalizationService`，运行时加载嵌入的 `Strings/{locale}.json` 文件，便于社区翻译贡献和开发时热重载。
+
+#### 新用户引导重构
+
+- **五步聚焦流程**：将首次启动引导从之前的多面板布局重建为聚焦的五步流程：欢迎、功能概览、收纳设置、快捷键配置和完成。
+- **精炼布局与动画**：每步使用专门的入场动画、一致的间距和全部五种支持语言的本地化内容。
+
+#### 自适应托盘动画系统
+
+- **硬件自适应控制器**：新增 `AdaptiveTrayAnimationController` 和 `HardwareAdaptiveAnimationService`，检测 GPU 能力并相应调整动画复杂度——独立显卡使用完整组合动画，集成显卡使用简化回退。
+- **批量动画驱动器**：新增 `WidgetTrayBatchAnimationDriver`，用于同步多格子托盘显示/隐藏，消除单格子计时漂移。
+- **智能动画适配器**：新增 `SmartAnimationAdapter`，将自适应控制器与现有格子动画路径桥接。
+- **同步调度**：将即发即弃的 `DispatcherQueue.TryEnqueue` 调用替换为同步调度，减少快速切换托盘时的动画撕裂。
+
+#### 天气改进
+
+- **城市数据库扩展**：离线 `cities.json` 数据库从约 500 条扩展到 5000+ 条，覆盖更多中小城市。
+- **改进城市搜索**：`CitySearchService` 现在使用前缀 + 模糊匹配，并支持 CJK 感知的分词，在中文、日文等非拉丁文字下搜索效果更好。
+- **定位服务优化**：改进 `WindowsLocationHelper` 的超时处理、回退到上次已知位置，以及更清晰的错误报告。
+- **天气布局改进**：优化 `WeatherWidgetContent` 四种尺寸模式的布局，改善间距、图标对齐和预报列表滚动。
+
+#### 安装器与更新器
+
+- **ARM64 安装器**：新增 `DeskBox.arm64.iss` 和 `DeskBox.Dependencies.arm64.iss`，支持原生 ARM64 Windows 构建。
+- **可靠进程关闭**：安装器现在使用健壮的进程终止序列，避免覆盖安装时的文件锁定失败。
+- **强制更新机制**：`AppUpdateService` 现在在服务器标记版本为关键时强制执行更新。
+- **缓存清理**：自动清理 `%LocalAppData%\DeskBox\update-helper` 下的残留更新缓存目录。
+- **正式下载地址**：所有下载链接切换到正式 GitHub Releases 渠道。
+- **迁移支持**：新增 `DeskBox.Migration.iss` 处理大版本升级时的数据迁移。
+- **英文安装器语言**：新增 `Languages/English.isl`，非中文系统显示英文安装界面。
+- **安装器语言选择**：安装器现在提供语言选择对话框（中文、英文、日语、德语、巴西葡萄牙语），默认按系统区域预选。所选语言写入 `HKCU\Software\DeskBox\InstallLanguage`，DeskBox 首次启动会默认使用该语言（手动在应用内切换仍优先）。
+- **搜索弹窗打磨**：结果列表表头与数据行现已左对齐；排序表头增加半透明底，并与上方菜单栏左右对齐。
+- **天气胶囊修复**：移除了重复的标题图标，胶囊模式下只显示天气 emoji。
+- **胶囊悬停遮罩**：隐藏胶囊右侧边缘的半透明悬停遮罩（交互行为不变）。
+
+#### 架构与可维护性
+
+- **App.Tray 提取**：从 `App.xaml.cs` 提取 `App.Tray.cs`（704 行），统一托盘图标、菜单和生命周期逻辑。
+- **ServiceRegistry**：新增 `ServiceRegistry` 用于集中服务定位，减少构造函数参数爆炸。
+- **SettingsMigrationService**：新增 `SettingsMigrationService` 用于版本化设置架构迁移。
+- **FileMetaService**：新增 `FileMetaService`（332 行），统一文件元数据提取（图标、类型名称、大小格式化）。
+- **AppDiagnosticsService**：新增 `AppDiagnosticsService` 用于运行时诊断，包括句柄数、内存压力和 UI 线程响应性。
+- **用户指南**：在 `docs/user-guide/` 下新增 10 章用户指南，涵盖快速开始、文件格子、待办、随记、胶囊模式、叠放与 QuickLook、外观、备份、高级工作流和故障排除。
+
+#### 修复
+
+- **QuickLook 兼容性（严重）**：修复 DeskBox 可能因空连接（连接后不发送数据）导致 QuickLook 单线程命名管道服务器崩溃的严重问题（`CanPreview` 中的管道探测和 raw `CreateFile` 回退）。可用性检查现在仅使用进程枚举；管道仅在发送 Toggle 消息时才连接。
+- **壁纸丢失**：防止 `WidgetLayerService` 格子层级操作期间反复生成 `WorkerW` 窗口导致桌面壁纸丢失。
+- **胶囊模式默认值**：将 `AppSettings` 初始值与 `ApplyDefaultPreferences` 对齐，确保新安装和全局重置产生一致的胶囊行为。
+- **托盘菜单高度**：修复托盘右键菜单高度显示问题。
+- **死快捷方式清理**：新增检测和移除无效 `.lnk` 和 `.url` 快捷方式（如已卸载的 Steam 游戏），此前这些快捷方式会在文件格子中显示损坏图标。
+- **天气代码映射**：扩展 `WeatherCodeMapper` 支持更多 WMO 天气代码，提供更准确的天气状况描述。
+
 ## 1.3.1 - 2026-07-20
 
 ### English

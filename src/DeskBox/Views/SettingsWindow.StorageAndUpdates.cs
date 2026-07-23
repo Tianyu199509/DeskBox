@@ -199,22 +199,44 @@ public sealed partial class SettingsWindow
         Win32Helper.OpenFile(ViewModel.OfficialWebsiteLink);
     }
 
-    private async void CheckUpdateButton_Click(object sender, RoutedEventArgs e)
+    private async void OneClickUpdateButton_Click(object sender, RoutedEventArgs e)
     {
-        await ViewModel.CheckForUpdatesAsync();
-    }
-
-    private async void DownloadUpdateButton_Click(object sender, RoutedEventArgs e)
-    {
-        await ViewModel.DownloadAvailableUpdateAsync();
-    }
-
-    private void OpenUpdateReleaseNotesButton_Click(object sender, RoutedEventArgs e)
-    {
-        if (!string.IsNullOrWhiteSpace(ViewModel.AvailableUpdateReleaseNotesUrl))
+        // If update is already downloaded, show install confirmation dialog.
+        if (ViewModel.IsUpdateDownloaded)
         {
-            Win32Helper.OpenFile(ViewModel.AvailableUpdateReleaseNotesUrl);
+            if (SettingsRoot.XamlRoot is null) return;
+
+            var dialog = new ContentDialog
+            {
+                XamlRoot = SettingsRoot.XamlRoot,
+                Title = _localizationService.T("Settings.Update.InstallConfirmTitle"),
+                Content = new TextBlock
+                {
+                    Text = _localizationService.T("Settings.Update.InstallConfirmBody"),
+                    TextWrapping = TextWrapping.Wrap
+                },
+                PrimaryButtonText = _localizationService.T("Settings.Update.OneClick.Install"),
+                CloseButtonText = _localizationService.T("Common.Cancel"),
+                DefaultButton = ContentDialogButton.Primary
+            };
+
+            if (await dialog.ShowAsync() != ContentDialogResult.Primary) return;
+
+            var result = ViewModel.StartDownloadedUpdateInstall();
+            if (!result.Success)
+            {
+                await ShowInfoDialogAsync(
+                    _localizationService.T("Settings.Update.InstallStartFailedTitle"),
+                    result.ErrorMessage ?? _localizationService.T("Settings.Update.InstallStartFailedBody"));
+                return;
+            }
+
+            await App.Current.ShutdownForUpdateAsync();
+            return;
         }
+
+        // Otherwise, trigger one-click check → download flow.
+        await ViewModel.OneClickUpdateActionAsync();
     }
 
     private void OpenManualUpdateDownloadButton_Click(object sender, RoutedEventArgs e)
@@ -223,43 +245,5 @@ public sealed partial class SettingsWindow
         {
             Win32Helper.OpenFile(ViewModel.UpdateFallbackUrl);
         }
-    }
-
-    private async void InstallUpdateButton_Click(object sender, RoutedEventArgs e)
-    {
-        if (SettingsRoot.XamlRoot is null)
-        {
-            return;
-        }
-
-        var dialog = new ContentDialog
-        {
-            XamlRoot = SettingsRoot.XamlRoot,
-            Title = _localizationService.T("Settings.Update.InstallConfirmTitle"),
-            Content = new TextBlock
-            {
-                Text = _localizationService.T("Settings.Update.InstallConfirmBody"),
-                TextWrapping = TextWrapping.Wrap
-            },
-            PrimaryButtonText = _localizationService.T("Settings.Update.Install"),
-            CloseButtonText = _localizationService.T("Common.Cancel"),
-            DefaultButton = ContentDialogButton.Primary
-        };
-
-        if (await dialog.ShowAsync() != ContentDialogResult.Primary)
-        {
-            return;
-        }
-
-        var result = ViewModel.StartDownloadedUpdateInstall();
-        if (!result.Success)
-        {
-            await ShowInfoDialogAsync(
-                _localizationService.T("Settings.Update.InstallStartFailedTitle"),
-                result.ErrorMessage ?? _localizationService.T("Settings.Update.InstallStartFailedBody"));
-            return;
-        }
-
-        await App.Current.ShutdownForUpdateAsync();
     }
 }

@@ -218,9 +218,78 @@ partial void OnWeatherAutoLocationChanged(bool value)
     _settingsService.Settings.WeatherAutoLocation = value;
     _settingsService.SaveDebounced();
     OnPropertyChanged(nameof(WeatherCityNameVisibility));
+    OnPropertyChanged(nameof(WeatherLocationStatusVisibility));
+
+    if (value)
+    {
+        _ = RefreshWeatherLocationStatusAsync();
+    }
 }
 
-public Visibility WeatherCityNameVisibility => WeatherAutoLocation ? Visibility.Collapsed : Visibility.Visible;
+// P2-2: Search box is always visible — user can manually override even in auto mode.
+public Visibility WeatherCityNameVisibility => Visibility.Visible;
+
+// ─── P0-1: Location status feedback ───
+
+private string _weatherLocationStatusText = string.Empty;
+public string WeatherLocationStatusText
+{
+    get => _weatherLocationStatusText;
+    private set => SetProperty(ref _weatherLocationStatusText, value);
+}
+
+private bool _weatherLocationStatusIsError;
+public bool WeatherLocationStatusIsError
+{
+    get => _weatherLocationStatusIsError;
+    private set => SetProperty(ref _weatherLocationStatusIsError, value);
+}
+
+public Visibility WeatherLocationStatusVisibility =>
+    WeatherAutoLocation && !string.IsNullOrEmpty(WeatherLocationStatusText)
+        ? Visibility.Visible
+        : Visibility.Collapsed;
+
+/// <summary>
+/// Refreshes the location status text shown below the auto-location toggle.
+/// </summary>
+public async Task RefreshWeatherLocationStatusAsync()
+{
+    if (!WeatherAutoLocation)
+    {
+        WeatherLocationStatusText = string.Empty;
+        OnPropertyChanged(nameof(WeatherLocationStatusVisibility));
+        return;
+    }
+
+    WeatherLocationStatusText = _localizationService.T("Settings.Weather.AutoLocation.Locating");
+    WeatherLocationStatusIsError = false;
+    OnPropertyChanged(nameof(WeatherLocationStatusVisibility));
+
+    try
+    {
+        var result = await WindowsLocationHelper.GetLocationAsync(_localizationService);
+        if (result is not null)
+        {
+            WeatherLocationStatusText = _localizationService.Format(
+                "Settings.Weather.AutoLocation.LocatedAt", result.Value.Name);
+            WeatherLocationStatusIsError = false;
+        }
+        else
+        {
+            WeatherLocationStatusText = _localizationService.T("Settings.Weather.AutoLocation.Failed");
+            WeatherLocationStatusIsError = true;
+        }
+    }
+    catch (Exception ex)
+    {
+        App.Log($"[SettingsViewModel] Location status refresh failed: {ex.Message}");
+        WeatherLocationStatusText = _localizationService.T("Settings.Weather.AutoLocation.Failed");
+        WeatherLocationStatusIsError = true;
+    }
+
+    OnPropertyChanged(nameof(WeatherLocationStatusVisibility));
+}
 
 partial void OnWeatherCityNameChanged(string value)
 {
@@ -308,8 +377,10 @@ public async Task UpdateWeatherCitySuggestionsAsync(string query)
         return;
     }
 
-    // Non-empty but too short → clear and wait
-    if (query.Length < 2)
+    // Non-empty but too short → clear and wait.
+    // P1-1: Single CJK character is valid (e.g. "京" → 北京).
+    bool hasCjk = query.Any(c => c >= '\u4e00' && c <= '\u9fff');
+    if (!hasCjk && query.Length < 2)
     {
         WeatherCitySuggestions.Clear();
         HasNoCitySearchResults = false;
@@ -328,8 +399,9 @@ public async Task UpdateWeatherCitySuggestionsAsync(string query)
         }
 
         _citySearchService ??= new CitySearchService();
-        var language = _localizationService.IsEnglish ? "en" : "zh";
-        var results = await _citySearchService.SearchAsync(query, language, ct);
+        var language = _localizationService.ApiLanguageCode;
+        var results = await _citySearchService.SearchAsync(
+            query, language, _cachedLocationLat, _cachedLocationLon, ct);
 
         if (ct.IsCancellationRequested || _isWeatherCitySearchUpdating)
         {
@@ -367,15 +439,18 @@ private async Task PopulateNearbyPopularCitiesAsync(CancellationToken cancellati
     try
     {
         _citySearchService ??= new CitySearchService();
-        var language = _localizationService.IsEnglish ? "en" : "zh";
+        var language = _localizationService.ApiLanguageCode;
 
         // Try to get user location (cached after first call)
         if (!_locationInitialized)
         {
-            var (lat, lon, _) = await WindowsLocationHelper.GetLocationAsync(_localizationService);
+            var locResult = await WindowsLocationHelper.GetLocationAsync(_localizationService);
             cancellationToken.ThrowIfCancellationRequested();
-            _cachedLocationLat = lat;
-            _cachedLocationLon = lon;
+            if (locResult is not null)
+            {
+                _cachedLocationLat = locResult.Value.Lat;
+                _cachedLocationLon = locResult.Value.Lon;
+            }
             _locationInitialized = true;
         }
 
@@ -422,6 +497,13 @@ public void SelectWeatherCity(WeatherCitySearchResult result)
     _isWeatherCitySearchUpdating = true;
     try
     {
+        // P2-2: If user manually picks a city while auto-location is on,
+        // switch to manual mode so the selection sticks.
+        if (WeatherAutoLocation)
+        {
+            WeatherAutoLocation = false; // triggers OnWeatherAutoLocationChanged
+        }
+
         _settingsService.Settings.WeatherCityName = result.DisplayName;
         _settingsService.Settings.WeatherLatitude = result.Latitude;
         _settingsService.Settings.WeatherLongitude = result.Longitude;

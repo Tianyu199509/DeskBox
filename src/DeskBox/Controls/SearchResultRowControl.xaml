@@ -17,11 +17,6 @@
         lazily and is not observable.
     -->
     <Grid x:Name="RowRoot" Padding="2,5,10,5" Margin="2,1" CornerRadius="7" Background="Transparent">
-        <Grid.ChildrenTransitions>
-            <TransitionCollection>
-                <EntranceThemeTransition IsStaggeringEnabled="True" FromVerticalOffset="8"/>
-            </TransitionCollection>
-        </Grid.ChildrenTransitions>
         <Grid.ColumnDefinitions>
             <ColumnDefinition Width="5"/>
             <ColumnDefinition Width="34"/>
@@ -60,7 +55,7 @@
                    TextTrimming="CharacterEllipsis"/>
         <TextBlock x:Name="SizeText" Grid.Column="4" Text="{Binding SizeDisplay}" FontSize="12"
                    Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                   VerticalAlignment="Center" TextAlignment="Right" Margin="8,0,12,0"/>
+                   VerticalAlignment="Center" Margin="6,0,6,0"/>
         <TextBlock x:Name="DateText" Grid.Column="5" Text="{Binding DateDisplay}" FontSize="12"
                    Foreground="{ThemeResource TextFillColorTertiaryBrush}"
                    VerticalAlignment="Center"/>

@@ -29,9 +29,11 @@ public sealed class SearchEngineService : IDisposable
         _windowsIndexService = windowsIndexService;
         _usnIndexService = usnIndexService;
         _indexService.IndexUpdated += OnIndexUpdated;
+        _indexService.ProgressChanged += OnIndexProgressChanged;
         if (_usnIndexService is not null)
         {
             _usnIndexService.IndexUpdated += OnIndexUpdated;
+            _usnIndexService.ProgressChanged += OnIndexProgressChanged;
         }
     }
 
@@ -44,9 +46,23 @@ public sealed class SearchEngineService : IDisposable
     public bool IsCustomIndexing => _indexService.IsScanning ||
                                     _usnIndexService is { IsScanning: true };
 
+    public bool IsIndexPaused => _indexService.IsPaused ||
+                                 _usnIndexService is { IsPaused: true };
+
+    public DateTime? LastScanTime => _indexService.LastScanTime;
+
     public event Action? IndexUpdated;
 
+    /// <summary>Raised periodically during indexing with the current total entry count.</summary>
+    public event Action<int>? IndexProgressChanged;
+
     private void OnIndexUpdated() => IndexUpdated?.Invoke();
+
+    private void OnIndexProgressChanged(int _)
+    {
+        // Aggregate both services' counts and forward to subscribers.
+        IndexProgressChanged?.Invoke(IndexedItemCount);
+    }
 
     public void SetCustomIndexingEnabled(bool enabled)
     {
@@ -61,6 +77,35 @@ public sealed class SearchEngineService : IDisposable
             _usnIndexService?.StopIndexing();
         }
     }
+
+    /// <summary>Pauses all in-progress indexing.</summary>
+    public void PauseIndexing()
+    {
+        _indexService.PauseIndexing();
+        _usnIndexService?.PauseIndexing();
+    }
+
+    /// <summary>Resumes paused indexing.</summary>
+    public void ResumeIndexing()
+    {
+        _indexService.ResumeIndexing();
+        _usnIndexService?.ResumeIndexing();
+    }
+
+    /// <summary>Clears and rebuilds the index from scratch.</summary>
+    public void RebuildIndex()
+    {
+        _indexService.RebuildIndex();
+        // USN journal index is ephemeral (no disk persistence); just restart it.
+        if (_usnIndexService is not null)
+        {
+            _usnIndexService.StopIndexing();
+            _usnIndexService.StartIndexing();
+        }
+    }
+
+    /// <summary>Returns the on-disk storage size (bytes) of the persisted index.</summary>
+    public long GetIndexStorageBytes() => _indexService.GetIndexStorageBytes();
 
     /// <summary>
     /// Performs a unified search across all enabled layers.

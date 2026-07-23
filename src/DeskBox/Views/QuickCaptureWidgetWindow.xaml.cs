@@ -173,24 +173,40 @@ public sealed partial class QuickCaptureWidgetWindow : WidgetWindowBase, IDeskto
     protected override WidgetCompactPresentation CreateCompactPresentation()
     {
         string contentMode = ResolveEffectiveCompactContentMode();
+        var latestItem = ViewModel.Items.FirstOrDefault();
         string summary = contentMode switch
         {
             SettingsService.WidgetCompactContentModeMinimal => string.Empty,
             SettingsService.WidgetCompactContentModeSmart
                 when !_settingsService.Settings.WidgetCompactHideSensitiveContent =>
-                ViewModel.Items.FirstOrDefault()?.DisplayText?.ReplaceLineEndings(" ").Trim() ??
+                latestItem?.DisplayText?.ReplaceLineEndings(" ").Trim() ??
                 _localizationService.Format("Widget.Compact.QuickCaptureCount", ViewModel.RecordCount),
             _ => _localizationService.Format("Widget.Compact.QuickCaptureCount", ViewModel.RecordCount)
         };
+
+        Microsoft.UI.Xaml.Media.ImageSource? thumbnail = null;
+        if (!_settingsService.Settings.WidgetCompactHideSensitiveContent &&
+            latestItem?.Type == Models.QuickCaptureItemType.Image &&
+            !string.IsNullOrWhiteSpace(latestItem.ImagePath))
+        {
+            try
+            {
+                thumbnail = new Microsoft.UI.Xaml.Media.Imaging.BitmapImage(
+                    new Uri(latestItem.ImagePath));
+            }
+            catch { /* invalid path, skip thumbnail */ }
+        }
 
         return new WidgetCompactPresentation(
             ViewModel.DisplayName,
             summary,
             "\uE70F",
             _localizationService.T("Widget.Compact.QuickCaptureDropHint"),
+            thumbnail,
             UseStackedText: contentMode == SettingsService.WidgetCompactContentModeSmart &&
                 !_settingsService.Settings.WidgetCompactHideSensitiveContent,
-            LiveStateKey: $"{ViewModel.RecordCount}|{summary}");
+            LiveStateKey: $"{ViewModel.RecordCount}|{summary}",
+            EnableBounceOnUpdate: true);
     }
 
     protected override void OnElevated()

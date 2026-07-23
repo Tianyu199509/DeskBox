@@ -40,6 +40,18 @@ public sealed partial class ContentWidgetWindow : WidgetWindowBase, IDesktopWidg
     private INotifyPropertyChanged? _compactPresentationSource;
 
     private bool _isVisibleOnDesktop;
+    private bool _searchHistorySubscribed;
+
+    // Safety-net timer that re-evaluates the music compact presentation every
+    // 500 ms while the music widget is active. The music ViewModel only raises
+    // PropertyChanged when Position / Duration / IsPlaying actually change, so
+    // if a player keeps Position at 0 for tens of seconds (very common at
+    // song-start) and never reports a Duration change, the capsule can stay
+    // stuck on a stale Progress=0 / ScaleX=0 render and look completely empty.
+    // A forced refresh on a timer guarantees IsProgressIndeterminate is
+    // re-evaluated continuously so the sweeping+pulsing bar keeps showing
+    // during that window.
+    private DispatcherTimer? _musicProgressRefreshTimer;
 
     public ContentWidgetWindow(
         WidgetConfig config,
@@ -106,31 +118,8 @@ public sealed partial class ContentWidgetWindow : WidgetWindowBase, IDesktopWidg
             TodoWidgetContentAdapter todo => CreateTodoCompactPresentation(todo, contentMode, localization),
             MusicWidgetContentAdapter music =>
                 CreateMusicCompactPresentation(music, contentMode),
-            WeatherWidgetContentAdapter weather => new WidgetCompactPresentation(
-                string.IsNullOrWhiteSpace(weather.ViewModel.CurrentTemperatureText)
-                    ? _titleViewModel.DisplayName
-                    : weather.ViewModel.CurrentTemperatureText,
-                BuildWeatherCompactSummary(weather, contentMode),
-                _descriptor.DefaultGlyph,
-                string.Empty,
-                UseStackedText: contentMode == SettingsService.WidgetCompactContentModeSmart,
-                EnableMarquee: true,
-                Progress: IsCompactWeatherAttentionRequired(weather) ? 1 : null,
-                IsAttention: IsCompactWeatherAttentionRequired(weather),
-                LiveStateKey: string.Join(
-                    "|",
-                    weather.ViewModel.CurrentTemperatureText,
-                    weather.ViewModel.CurrentDescription,
-                    weather.ViewModel.PrecipitationText)),
-            SearchWidgetContentAdapter => new WidgetCompactPresentation(
-                _titleViewModel.DisplayName,
-                string.Empty,
-                _descriptor.DefaultGlyph,
-                localization.T("Widget.Compact.DropHint"),
-                ShowPrimaryAction: true,
-                PrimaryActionGlyph: "\uE721",
-                EnableMarquee: true,
-                LiveStateKey: _titleViewModel.DisplayName),
+            WeatherWidgetContentAdapter weather => CreateWeatherCompactPresentation(weather, contentMode),
+            SearchWidgetContentAdapter => CreateSearchCompactPresentation(contentMode, localization),
             _ => new WidgetCompactPresentation(
                 _titleViewModel.DisplayName,
                 string.Empty,
@@ -139,6 +128,46 @@ public sealed partial class ContentWidgetWindow : WidgetWindowBase, IDesktopWidg
                 EnableMarquee: true,
                 LiveStateKey: _titleViewModel.DisplayName)
         };
+    }
+
+    private WidgetCompactPresentation CreateSearchCompactPresentation(
+        string contentMode,
+        LocalizationService localization)
+    {
+        // Smart mode gets a dynamic subtitle so the search capsule matches the
+        // height/style of the weather/quick-capture capsules instead of looking
+        // bare. The subtitle shows the most recent query ("最近：xxx"); when there
+        // is no history (or history is disabled / sensitive content is hidden) it
+        // falls back to a static hint so the line never appears empty.
+        bool stacked = contentMode == SettingsService.WidgetCompactContentModeSmart;
+
+        string summary = string.Empty;
+        string recentKey = string.Empty;
+        if (stacked)
+        {
+            string? recent = null;
+            if (SettingsService.Settings.SearchSaveHistory &&
+                !SettingsService.Settings.WidgetCompactHideSensitiveContent)
+            {
+                recent = App.Current.SearchHistoryService?.RecentQueries.FirstOrDefault();
+            }
+
+            summary = string.IsNullOrWhiteSpace(recent)
+                ? localization.T("Search.Compact.Hint")
+                : localization.Format("Search.Compact.Recent", recent);
+            recentKey = recent ?? string.Empty;
+        }
+
+        return new WidgetCompactPresentation(
+            _titleViewModel.DisplayName,
+            summary,
+            _descriptor.DefaultGlyph,
+            localization.T("Widget.Compact.DropHint"),
+            ShowPrimaryAction: true,
+            PrimaryActionGlyph: "\uE721",
+            UseStackedText: stacked,
+            EnableMarquee: true,
+            LiveStateKey: string.Join("|", _titleViewModel.DisplayName, recentKey));
     }
 
     private WidgetCompactPresentation CreateMusicCompactPresentation(
@@ -157,6 +186,23 @@ public sealed partial class ContentWidgetWindow : WidgetWindowBase, IDesktopWidg
                 ? music.ViewModel.StatusText
                 : music.ViewModel.Artist;
 
+        // Plain, determinate progress shown below the artist name inside the
+        // capsule. Mirrors the EXPANDED music view: the track is always
+        // visible while a session exists, and the fill grows from 0. Uses
+        // SeekValue/SeekMaximum (same source as the expanded view), so when
+        // the player hasn't reported a duration yet (common for streaming in
+        // the first ~40 s) SeekMaximum falls back to 1 and the fill reads 0
+        // — i.e. an empty-but-visible track, identical to the expanded view.
+        // Only when there is no session at all do we pass null (hide the bar).
+        double? musicProgress = null;
+        if (music.ViewModel.HasSession)
+        {
+            double max = music.ViewModel.SeekMaximum;
+            musicProgress = max > 0
+                ? Math.Clamp(music.ViewModel.SeekValue / max, 0, 1)
+                : 0;
+        }
+
         return new WidgetCompactPresentation(
             title,
             summary,
@@ -169,7 +215,10 @@ public sealed partial class ContentWidgetWindow : WidgetWindowBase, IDesktopWidg
             CanGoNext: music.ViewModel.CanGoNext,
             UseStackedText: contentMode == SettingsService.WidgetCompactContentModeSmart,
             EnableMarquee: !hidesSensitiveContent,
-            Progress: GetMusicCompactProgress(music),
+            Progress: null,
+            IsProgressIndeterminate: false,
+            UseFullBleedBackground: !hidesSensitiveContent,
+            ShowSpectrum: !hidesSensitiveContent,
             LiveStateKey: hidesSensitiveContent
                 ? string.Join(
                     "|",
@@ -180,7 +229,69 @@ public sealed partial class ContentWidgetWindow : WidgetWindowBase, IDesktopWidg
                     music.ViewModel.Title,
                     music.ViewModel.Artist,
                     music.ViewModel.PlaybackState,
-                    music.ViewModel.Duration.Ticks));
+                    music.ViewModel.Duration.Ticks),
+            ShowVinyl: !hidesSensitiveContent,
+            MusicProgress: musicProgress);
+    }
+
+    private WidgetCompactPresentation CreateWeatherCompactPresentation(
+        WeatherWidgetContentAdapter weather,
+        string contentMode)
+    {
+        var condition = weather.ViewModel.CurrentCondition;
+        bool isDay = weather.ViewModel.IsDay;
+        bool isAttention = IsCompactWeatherAttentionRequired(weather);
+
+        // Color field based on weather condition
+        var (colorStart, colorEnd) = condition switch
+        {
+            Helpers.WeatherCodeMapper.WeatherCondition.Clear => isDay
+                ? (Windows.UI.Color.FromArgb(0xFF, 0xF5, 0x9E, 0x0B), Windows.UI.Color.FromArgb(0xFF, 0xF9, 0x73, 0x16))
+                : (Windows.UI.Color.FromArgb(0xFF, 0x1E, 0x3A, 0x5F), Windows.UI.Color.FromArgb(0xFF, 0x0F, 0x17, 0x2A)),
+            Helpers.WeatherCodeMapper.WeatherCondition.Cloudy or
+            Helpers.WeatherCodeMapper.WeatherCondition.Fog =>
+                (Windows.UI.Color.FromArgb(0xFF, 0x64, 0x74, 0x8B), Windows.UI.Color.FromArgb(0xFF, 0x47, 0x55, 0x69)),
+            Helpers.WeatherCodeMapper.WeatherCondition.Rain or
+            Helpers.WeatherCodeMapper.WeatherCondition.Drizzle =>
+                (Windows.UI.Color.FromArgb(0xFF, 0x1E, 0x40, 0xAF), Windows.UI.Color.FromArgb(0xFF, 0x1E, 0x3A, 0x5F)),
+            Helpers.WeatherCodeMapper.WeatherCondition.Snow =>
+                (Windows.UI.Color.FromArgb(0xFF, 0x93, 0xC5, 0xFD), Windows.UI.Color.FromArgb(0xFF, 0xBF, 0xDB, 0xFE)),
+            Helpers.WeatherCodeMapper.WeatherCondition.Thunderstorm =>
+                (Windows.UI.Color.FromArgb(0xFF, 0x4C, 0x1D, 0x95), Windows.UI.Color.FromArgb(0xFF, 0x1E, 0x1B, 0x4B)),
+            _ => ((Windows.UI.Color?)null, (Windows.UI.Color?)null)
+        };
+
+        // Particles based on condition
+        var particleKind = condition switch
+        {
+            Helpers.WeatherCodeMapper.WeatherCondition.Rain or
+            Helpers.WeatherCodeMapper.WeatherCondition.Drizzle or
+            Helpers.WeatherCodeMapper.WeatherCondition.Thunderstorm => CompactParticleKind.Rain,
+            Helpers.WeatherCodeMapper.WeatherCondition.Snow => CompactParticleKind.Snow,
+            _ => CompactParticleKind.None
+        };
+
+        return new WidgetCompactPresentation(
+            string.IsNullOrWhiteSpace(weather.ViewModel.CurrentTemperatureText)
+                ? _titleViewModel.DisplayName
+                : weather.ViewModel.CurrentTemperatureText,
+            BuildWeatherCompactSummary(weather, contentMode),
+            _descriptor.DefaultGlyph,
+            string.Empty,
+            UseStackedText: contentMode == SettingsService.WidgetCompactContentModeSmart,
+            EnableMarquee: true,
+            Progress: isAttention ? 1 : null,
+            IsAttention: isAttention,
+            EmojiIcon: Helpers.WeatherCodeMapper.GetEmoji(
+                weather.ViewModel.CurrentWeatherCode, isDay),
+            BackgroundColorStart: colorStart,
+            BackgroundColorEnd: colorEnd,
+            ParticleKind: particleKind,
+            LiveStateKey: string.Join(
+                "|",
+                weather.ViewModel.CurrentTemperatureText,
+                weather.ViewModel.CurrentDescription,
+                weather.ViewModel.PrecipitationText));
     }
 
     private WidgetCompactPresentation CreateTodoCompactPresentation(
@@ -223,18 +334,20 @@ public sealed partial class ContentWidgetWindow : WidgetWindowBase, IDesktopWidg
         };
 
         int totalCount = todo.ViewModel.Items.Count;
+        int completedCount = todo.ViewModel.CompletedCount;
+
         return presentation with
         {
             EnableMarquee = true,
             Progress = totalCount > 0
-                ? todo.ViewModel.CompletedCount / (double)totalCount
+                ? completedCount / (double)totalCount
                 : null,
             IsAttention = overdueCount > 0,
             LiveStateKey = string.Join(
                 "|",
                 nextItem?.Id ?? string.Empty,
                 nextItem?.Text ?? string.Empty,
-                todo.ViewModel.CompletedCount,
+                completedCount,
                 totalCount,
                 overdueCount)
         };
@@ -243,9 +356,13 @@ public sealed partial class ContentWidgetWindow : WidgetWindowBase, IDesktopWidg
     private static double? GetMusicCompactProgress(MusicWidgetContentAdapter music)
     {
         double duration = music.ViewModel.Duration.TotalSeconds;
+        // Return 0 (not null) when Duration is unknown so the determinate branch
+        // keeps the track visible — matching the expanded view, which always
+        // shows the track even at 0% fill. Returning null would hit the hide
+        // branch and make the whole bar disappear until Duration arrives.
         return duration > 0
             ? Math.Clamp(music.ViewModel.Position.TotalSeconds / duration, 0, 1)
-            : null;
+            : 0;
     }
 
     private static bool IsCompactWeatherAttentionRequired(WeatherWidgetContentAdapter weather)
@@ -696,6 +813,68 @@ IsHideAnimationRunning = true;
         {
             _compactPresentationSource.PropertyChanged += CompactPresentationSource_PropertyChanged;
         }
+
+        // Start (or restart) the music progress refresh timer whenever a music
+        // widget becomes the active compact source. It ticks at 500 ms and just
+        // calls RefreshCompactPresentation, which is a no-op cost-wise if the
+        // presentation is already up to date but guarantees the indeterminate
+        // branch is re-evaluated every tick during the song-start window.
+        if (content is MusicWidgetContentAdapter)
+        {
+            _musicProgressRefreshTimer ??= new DispatcherTimer
+            {
+                Interval = TimeSpan.FromMilliseconds(500)
+            };
+            _musicProgressRefreshTimer.Tick -= OnMusicProgressRefreshTick;
+            _musicProgressRefreshTimer.Tick += OnMusicProgressRefreshTick;
+            _musicProgressRefreshTimer.Start();
+        }
+        else
+        {
+            StopMusicProgressRefreshTimer();
+        }
+
+        // The search capsule's dynamic subtitle ("最近：xxx") tracks the recent-query
+        // list, which has no INotifyPropertyChanged surface, so subscribe to the
+        // history service's change event to refresh the compact presentation live.
+        if (content is SearchWidgetContentAdapter &&
+            !_searchHistorySubscribed &&
+            App.Current.SearchHistoryService is { } historyService)
+        {
+            historyService.RecentQueriesChanged += OnRecentQueriesChanged;
+            _searchHistorySubscribed = true;
+        }
+    }
+
+    private void OnRecentQueriesChanged()
+    {
+        if (!DispatcherQueue.HasThreadAccess)
+        {
+            DispatcherQueue.TryEnqueue(RefreshCompactPresentation);
+            return;
+        }
+
+        RefreshCompactPresentation();
+    }
+
+    private void OnMusicProgressRefreshTick(object? sender, object e)
+    {
+        if (!DispatcherQueue.HasThreadAccess)
+        {
+            DispatcherQueue.TryEnqueue(RefreshCompactPresentation);
+            return;
+        }
+
+        RefreshCompactPresentation();
+    }
+
+    private void StopMusicProgressRefreshTimer()
+    {
+        if (_musicProgressRefreshTimer is not null)
+        {
+            _musicProgressRefreshTimer.Stop();
+            _musicProgressRefreshTimer.Tick -= OnMusicProgressRefreshTick;
+        }
     }
 
     private void CompactPresentationSource_PropertyChanged(object? sender, PropertyChangedEventArgs e)
@@ -754,6 +933,12 @@ IsHideAnimationRunning = true;
                 _compactPresentationSource.PropertyChanged -= CompactPresentationSource_PropertyChanged;
                 _compactPresentationSource = null;
             }
+            if (_searchHistorySubscribed && App.Current.SearchHistoryService is { } historyService)
+            {
+                historyService.RecentQueriesChanged -= OnRecentQueriesChanged;
+                _searchHistorySubscribed = false;
+            }
+            StopMusicProgressRefreshTimer();
             try { TrayAnimation.RevealWindowForTrayShow(); } catch { }
             try { CleanupBase(); } catch (Exception ex) { App.Log($"[ContentWidget] CleanupBase failed during close: {ex.Message}"); }
             try { _contentHost.DisposeContent(); } catch (Exception ex) { App.Log($"[ContentWidget] DisposeContent failed during close: {ex.Message}"); }
@@ -783,6 +968,12 @@ IsHideAnimationRunning = true;
         ContentWidgetShell.ShowHoverButtons = SettingsService.Settings.ShowHoverButtons;
         _titleViewModel.RefreshMetrics();
         ApplyAppearancePreview();
+
+        // Search capsule subtitle depends on SearchSaveHistory / hide-sensitive flags.
+        if (CurrentContent is SearchWidgetContentAdapter)
+        {
+            RefreshCompactPresentation();
+        }
     }
 
     // ── Drag handlers (delegate to base) ───────────────────────

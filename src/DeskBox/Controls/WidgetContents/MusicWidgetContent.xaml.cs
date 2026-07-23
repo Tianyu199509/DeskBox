@@ -8,6 +8,7 @@ using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Hosting;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
+using Microsoft.UI.Xaml.Media.Animation;
 namespace DeskBox.Controls.WidgetContents;
 
 public sealed partial class MusicWidgetContent : UserControl, IDisposable
@@ -40,7 +41,14 @@ public sealed partial class MusicWidgetContent : UserControl, IDisposable
     private int _artworkTransitionVersion;
     private bool _isDisposed;
     private bool _isMinimalLayout;
+    private bool _isRecordLayout;
+    private Storyboard? _recordVinylRotationStoryboard;
+    private bool _isRecordVinylRotating;
+    private bool _isRecordHorizontalLayout;
+    private Storyboard? _recordHorizontalVinylRotationStoryboard;
+    private bool _isRecordHorizontalVinylRotating;
     private bool _isResponsiveLayoutTransitionActive;
+    private Button? _volumeAnchorButton;
 
     public MusicWidgetContent()
     {
@@ -131,6 +139,7 @@ public sealed partial class MusicWidgetContent : UserControl, IDisposable
                 return;
             }
 
+            _volumeAnchorButton = sender as Button ?? VolumeButton;
             PositionInlineVolumePanel();
             InlineVolumePanel.Visibility = Visibility.Visible;
             await RefreshInlineVolumeAsync();
@@ -151,7 +160,7 @@ public sealed partial class MusicWidgetContent : UserControl, IDisposable
 
         FrameworkElement? sourceElement = e.OriginalSource as FrameworkElement;
         if (IsElementInside(sourceElement, InlineVolumePanel) ||
-            IsElementInside(sourceElement, VolumeButton))
+            IsElementInside(sourceElement, _volumeAnchorButton ?? VolumeButton))
         {
             return;
         }
@@ -375,15 +384,51 @@ public sealed partial class MusicWidgetContent : UserControl, IDisposable
             return;
         }
 
-        bool useMinimalLayout = ShouldUseMinimalLayout(width, height, ViewModel?.DisplayMode);
-        if (_isMinimalLayout != useMinimalLayout)
+        string normalizedMode = SettingsService.NormalizeMusicDisplayMode(ViewModel?.DisplayMode);
+        bool isRecordVertical = normalizedMode == SettingsService.MusicDisplayModeRecordVertical;
+        bool isRecordHorizontal = normalizedMode == SettingsService.MusicDisplayModeRecordHorizontal;
+        bool isRecord = isRecordVertical || isRecordHorizontal;
+        bool useMinimalLayout = !isRecord && ShouldUseMinimalLayout(width, height, ViewModel?.DisplayMode);
+        if ((_isMinimalLayout != useMinimalLayout) || (_isRecordLayout != isRecordVertical) || (_isRecordHorizontalLayout != isRecordHorizontal))
         {
             _isMinimalLayout = useMinimalLayout;
-            MinimalLayout.Visibility = useMinimalLayout ? Visibility.Visible : Visibility.Collapsed;
-            ContentGrid.Visibility = useMinimalLayout ? Visibility.Collapsed : Visibility.Visible;
+            _isRecordLayout = isRecordVertical;
+            _isRecordHorizontalLayout = isRecordHorizontal;
+            MinimalLayout.Visibility = (!isRecord && useMinimalLayout) ? Visibility.Visible : Visibility.Collapsed;
+            ContentGrid.Visibility = (!isRecord && !useMinimalLayout) ? Visibility.Visible : Visibility.Collapsed;
+            RecordLayout.Visibility = isRecordVertical ? Visibility.Visible : Visibility.Collapsed;
+            RecordHorizontalLayout.Visibility = isRecordHorizontal ? Visibility.Visible : Visibility.Collapsed;
+            RecordTonearm.Visibility = isRecordVertical ? Visibility.Visible : Visibility.Collapsed;
             InlineVolumePanel.Visibility = Visibility.Collapsed;
             ResetAlbumArtMotion();
             StopTitleMarquee();
+            if (!isRecordVertical)
+            {
+                StopRecordVinylRotation();
+            }
+            if (!isRecordHorizontal)
+            {
+                StopRecordHorizontalVinylRotation();
+            }
+        }
+
+        if (isRecordVertical)
+        {
+            ApplyRecordLayoutSizing(width, height);
+            UpdateRecordVinylRotation();
+            AnimateTonearmForState();
+            QueueTitleMarqueeUpdate();
+            DispatcherQueue.TryEnqueue(UpdateProgressVisuals);
+            return;
+        }
+
+        if (isRecordHorizontal)
+        {
+            ApplyRecordHorizontalSizing(width, height);
+            UpdateRecordHorizontalVinylRotation();
+            QueueTitleMarqueeUpdate();
+            DispatcherQueue.TryEnqueue(UpdateProgressVisuals);
+            return;
         }
 
         if (useMinimalLayout)
@@ -456,6 +501,238 @@ public sealed partial class MusicWidgetContent : UserControl, IDisposable
         };
     }
 
+    private void ApplyRecordLayoutSizing(double width, double height)
+    {
+        // Reuse the Controls-mode button sizing so both modes stay consistent.
+        double widthRatio = Math.Clamp(
+            (width - MinimumResponsiveWidth) / (WideResponsiveWidth - MinimumResponsiveWidth),
+            0.0,
+            1.0);
+        double iconButtonSize = Math.Round(Lerp(CompactIconButtonSize, WideIconButtonSize, widthRatio));
+        double primaryButtonSize = Math.Round(Lerp(CompactPrimaryButtonSize, WidePrimaryButtonSize, widthRatio));
+
+        SetButtonSize(RecordPlaybackModeButton, iconButtonSize);
+        SetButtonSize(RecordPreviousButton, primaryButtonSize);
+        SetButtonSize(RecordPlayPauseButton, primaryButtonSize);
+        SetButtonSize(RecordNextButton, primaryButtonSize);
+        SetButtonSize(RecordVolumeButton, iconButtonSize);
+        RecordControlsPanel.Spacing = Math.Round(Lerp(4, 10, widthRatio));
+
+        // On narrow grids drop the playback-mode button first; volume stays.
+        RecordPlaybackModeButton.Visibility = width < 190 ? Visibility.Collapsed : Visibility.Visible;
+
+        // Reserve room for the title/artist/progress/controls rows below the disc.
+        double reserved = 108 + primaryButtonSize;
+        double vinylSize = Math.Clamp(Math.Min(width - 24, height - reserved), 64, 230);
+        RecordVinylHost.Width = vinylSize;
+        RecordVinylHost.Height = vinylSize;
+
+        bool small = vinylSize < 110;
+        RecordLayout.Padding = new Thickness(small ? 8 : 12);
+        RecordLayout.RowSpacing = small ? 4 : 6;
+        RecordTitleText.FontSize = small ? 12.5 : 14;
+        RecordArtistText.FontSize = small ? 10.5 : 11.5;
+        UpdateTonearmLayout(vinylSize, small);
+    }
+
+    private void UpdateTonearmLayout(double vinylSize, bool small)
+    {
+        // The tonearm only reads well on a reasonably large disc.
+        if (small || !_isRecordLayout)
+        {
+            RecordTonearm.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        RecordTonearm.Visibility = Visibility.Visible;
+
+        // Scale the tonearm with the disc; pivot sits just off the platter's top-right edge.
+        double armWidth = Math.Round(vinylSize * 0.42);
+        double armHeight = Math.Round(armWidth * 1.2);
+        RecordTonearm.Width = armWidth;
+        RecordTonearm.Height = armHeight;
+        RecordTonearm.Margin = new Thickness(
+            Math.Round(vinylSize * 0.72), Math.Round(-vinylSize * 0.30), 0, 0);
+
+        var visual = ElementCompositionPreview.GetElementVisual(RecordTonearm);
+        if (visual is not null)
+        {
+            // Design space is 100x120 with the bearing at (50, 20) -> (0.5 W, H/6).
+            visual.CenterPoint = new Vector3((float)(armWidth * 0.5), (float)(armHeight / 6.0), 0f);
+        }
+    }
+
+    private void EnsureRecordVinylRotationStoryboard()
+    {
+        if (_recordVinylRotationStoryboard is not null)
+        {
+            return;
+        }
+
+        _recordVinylRotationStoryboard = new Storyboard
+        {
+            RepeatBehavior = RepeatBehavior.Forever
+        };
+        var rotate = new DoubleAnimation
+        {
+            From = 0,
+            To = 360,
+            Duration = new Duration(TimeSpan.FromSeconds(5.0)),
+            RepeatBehavior = RepeatBehavior.Forever
+        };
+        Storyboard.SetTarget(rotate, RecordVinylRotateTransform);
+        Storyboard.SetTargetProperty(rotate, "(RotateTransform.Angle)");
+        _recordVinylRotationStoryboard.Children.Add(rotate);
+    }
+
+    private void UpdateRecordVinylRotation()
+    {
+        bool shouldRotate = RecordLayout.Visibility == Visibility.Visible &&
+            ViewModel?.IsPlaying == true;
+        if (shouldRotate == _isRecordVinylRotating)
+        {
+            return;
+        }
+
+        _isRecordVinylRotating = shouldRotate;
+        EnsureRecordVinylRotationStoryboard();
+        if (shouldRotate)
+        {
+            _recordVinylRotationStoryboard.Begin();
+        }
+        else
+        {
+            _recordVinylRotationStoryboard.Stop();
+        }
+    }
+
+    private void StopRecordVinylRotation()
+    {
+        if (!_isRecordVinylRotating)
+        {
+            return;
+        }
+
+        _isRecordVinylRotating = false;
+        _recordVinylRotationStoryboard?.Stop();
+    }
+
+    private void ApplyRecordHorizontalSizing(double width, double height)
+    {
+        // Reuse the Controls-mode button sizing so both modes stay consistent.
+        double widthRatio = Math.Clamp(
+            (width - MinimumResponsiveWidth) / (WideResponsiveWidth - MinimumResponsiveWidth),
+            0.0,
+            1.0);
+        double iconButtonSize = Math.Round(Lerp(CompactIconButtonSize, WideIconButtonSize, widthRatio));
+        double primaryButtonSize = Math.Round(Lerp(CompactPrimaryButtonSize, WidePrimaryButtonSize, widthRatio));
+
+        SetButtonSize(RecordHorizontalPlaybackModeButton, iconButtonSize);
+        SetButtonSize(RecordHorizontalPreviousButton, primaryButtonSize);
+        SetButtonSize(RecordHorizontalPlayPauseButton, primaryButtonSize);
+        SetButtonSize(RecordHorizontalNextButton, primaryButtonSize);
+        SetButtonSize(RecordHorizontalVolumeButton, iconButtonSize);
+        double controlsSpacing = Math.Round(Lerp(3, 8, widthRatio));
+        RecordHorizontalControlsPanel.Spacing = controlsSpacing;
+
+        // On narrow grids drop the playback-mode button first; volume stays.
+        bool small = width < 250;
+        bool showPlaybackMode = !small;
+        RecordHorizontalPlaybackModeButton.Visibility = showPlaybackMode ? Visibility.Visible : Visibility.Collapsed;
+
+        double padding = small ? 8 : 12;
+        double columnSpacing = small ? 8 : 12;
+        RecordHorizontalLayout.Padding = new Thickness(padding);
+        RecordHorizontalLayout.ColumnSpacing = columnSpacing;
+        RecordHorizontalTitleText.FontSize = small ? 13.5 : 15;
+        RecordHorizontalArtistText.FontSize = small ? 11 : 12;
+
+        // Never let the vinyl squeeze the controls: budget the buttons' width first.
+        int buttonCount = showPlaybackMode ? 5 : 4;
+        double buttonsWidth = 3 * primaryButtonSize + (buttonCount - 3) * iconButtonSize +
+            (buttonCount - 1) * controlsSpacing;
+        double vinylBudget = width - buttonsWidth - padding * 2 - columnSpacing;
+        double vinylSize = Math.Clamp(
+            Math.Min(height - 2 * padding, Math.Min(vinylBudget, width * 0.45)), 56, 180);
+        RecordHorizontalVinylHost.Width = vinylSize;
+        RecordHorizontalVinylHost.Height = vinylSize;
+    }
+
+    private void EnsureRecordHorizontalVinylRotationStoryboard()
+    {
+        if (_recordHorizontalVinylRotationStoryboard is not null)
+        {
+            return;
+        }
+
+        _recordHorizontalVinylRotationStoryboard = new Storyboard
+        {
+            RepeatBehavior = RepeatBehavior.Forever
+        };
+        var rotate = new DoubleAnimation
+        {
+            From = 0,
+            To = 360,
+            Duration = new Duration(TimeSpan.FromSeconds(5.0)),
+            RepeatBehavior = RepeatBehavior.Forever
+        };
+        Storyboard.SetTarget(rotate, RecordHorizontalVinylRotateTransform);
+        Storyboard.SetTargetProperty(rotate, "(RotateTransform.Angle)");
+        _recordHorizontalVinylRotationStoryboard.Children.Add(rotate);
+    }
+
+    private void UpdateRecordHorizontalVinylRotation()
+    {
+        bool shouldRotate = RecordHorizontalLayout.Visibility == Visibility.Visible &&
+            ViewModel?.IsPlaying == true;
+        if (shouldRotate == _isRecordHorizontalVinylRotating)
+        {
+            return;
+        }
+
+        _isRecordHorizontalVinylRotating = shouldRotate;
+        EnsureRecordHorizontalVinylRotationStoryboard();
+        if (shouldRotate)
+        {
+            _recordHorizontalVinylRotationStoryboard.Begin();
+        }
+        else
+        {
+            _recordHorizontalVinylRotationStoryboard.Stop();
+        }
+    }
+
+    private void StopRecordHorizontalVinylRotation()
+    {
+        if (!_isRecordHorizontalVinylRotating)
+        {
+            return;
+        }
+
+        _isRecordHorizontalVinylRotating = false;
+        _recordHorizontalVinylRotationStoryboard?.Stop();
+    }
+
+    private void AnimateTonearmForState()
+    {
+        bool isPlaying = ViewModel?.IsPlaying == true;
+        float targetAngle = isPlaying ? 0f : 22f;
+
+        var visual = ElementCompositionPreview.GetElementVisual(RecordTonearm);
+        if (visual is null)
+        {
+            return;
+        }
+
+        var compositor = visual.Compositor;
+        var easing = compositor.CreateCubicBezierEasingFunction(new Vector2(0.2f, 0f), new Vector2(0f, 1f));
+        var anim = compositor.CreateScalarKeyFrameAnimation();
+        anim.InsertKeyFrame(0f, visual.RotationAngleInDegrees);
+        anim.InsertKeyFrame(1f, targetAngle, easing);
+        anim.Duration = TimeSpan.FromMilliseconds(420);
+        visual.StartAnimation("RotationAngleInDegrees", anim);
+    }
+
     private void SetAlbumArtSize(double size)
     {
         AlbumArtShadow.Width = size;
@@ -484,16 +761,17 @@ public sealed partial class MusicWidgetContent : UserControl, IDisposable
 
     private void PositionInlineVolumePanel()
     {
-        if (VolumeButton.ActualWidth <= 0 || VolumeButton.ActualHeight <= 0)
+        Button anchor = _volumeAnchorButton ?? VolumeButton;
+        if (anchor.ActualWidth <= 0 || anchor.ActualHeight <= 0)
         {
             return;
         }
 
-        var buttonOrigin = VolumeButton.TransformToVisual(RootGrid)
+        var buttonOrigin = anchor.TransformToVisual(RootGrid)
             .TransformPoint(new Windows.Foundation.Point(0, 0));
         double panelWidth = InlineVolumePanel.Width > 0 ? InlineVolumePanel.Width : InlineVolumePanel.ActualWidth;
         double panelHeight = InlineVolumePanel.Height > 0 ? InlineVolumePanel.Height : InlineVolumePanel.ActualHeight;
-        double left = buttonOrigin.X + VolumeButton.ActualWidth - panelWidth;
+        double left = buttonOrigin.X + anchor.ActualWidth - panelWidth;
         double top = buttonOrigin.Y - panelHeight - 7;
 
         if (RootGrid.ActualWidth > 0)
@@ -589,6 +867,16 @@ public sealed partial class MusicWidgetContent : UserControl, IDisposable
         if (e.PropertyName == nameof(MusicWidgetViewModel.DisplayMode))
         {
             ApplyResponsiveLayout();
+        }
+
+        if (e.PropertyName is nameof(MusicWidgetViewModel.IsPlaying) or
+            nameof(MusicWidgetViewModel.PlaybackState))
+        {
+            UpdateRecordHorizontalVinylRotation();
+            if (RecordTonearm.Visibility == Visibility.Visible)
+            {
+                AnimateTonearmForState();
+            }
         }
 
     }
@@ -844,20 +1132,50 @@ public sealed partial class MusicWidgetContent : UserControl, IDisposable
 
     private void UpdateProgressVisuals()
     {
-        if (ViewModel is null || ProgressHost.ActualWidth <= 0)
+        if (ViewModel is null)
         {
             ProgressFill.Width = 0;
+            RecordProgressFill.Width = 0;
             ProgressThumb.Opacity = 0;
             return;
         }
 
         double maximum = Math.Max(1, ViewModel.SeekMaximum);
         double ratio = Math.Clamp(ViewModel.SeekValue / maximum, 0.0, 1.0);
-        double width = Math.Max(0, ProgressHost.ActualWidth * ratio);
-        ProgressFill.Width = width;
-        ProgressThumb.Margin = new Thickness(width, 0, 0, 0);
-        bool canInteract = ViewModel.CanInteractWithProgress;
-        ProgressThumb.Opacity = canInteract && (_isProgressHovering || _isProgressDragging) ? 1 : 0;
-        ProgressTrack.Opacity = ViewModel.HasSeekableTimeline ? 0.36 : 0.2;
+
+        if (ProgressHost.ActualWidth > 0)
+        {
+            double width = Math.Max(0, ProgressHost.ActualWidth * ratio);
+            ProgressFill.Width = width;
+            ProgressThumb.Margin = new Thickness(width, 0, 0, 0);
+            bool canInteract = ViewModel.CanInteractWithProgress;
+            ProgressThumb.Opacity = canInteract && (_isProgressHovering || _isProgressDragging) ? 1 : 0;
+            ProgressTrack.Opacity = ViewModel.HasSeekableTimeline ? 0.36 : 0.2;
+        }
+        else
+        {
+            ProgressFill.Width = 0;
+            ProgressThumb.Opacity = 0;
+        }
+
+        if (RecordProgressHost.ActualWidth > 0)
+        {
+            RecordProgressFill.Width = Math.Max(0, RecordProgressHost.ActualWidth * ratio);
+            RecordProgressTrack.Opacity = ViewModel.HasSeekableTimeline ? 0.36 : 0.2;
+        }
+        else
+        {
+            RecordProgressFill.Width = 0;
+        }
+
+        if (RecordHorizontalProgressHost.ActualWidth > 0)
+        {
+            RecordHorizontalProgressFill.Width = Math.Max(0, RecordHorizontalProgressHost.ActualWidth * ratio);
+            RecordHorizontalProgressTrack.Opacity = ViewModel.HasSeekableTimeline ? 0.36 : 0.2;
+        }
+        else
+        {
+            RecordHorizontalProgressFill.Width = 0;
+        }
     }
 }

@@ -30,6 +30,20 @@ public sealed partial class SearchWidgetContent : UserControl
         InitializeComponent();
         RecommendationsList.ItemsSource = _widgetRecommendations;
         HistoryList.ItemsSource = _recentQueries;
+
+        // The empty-state hint defaults to Visible in XAML so the user sees a
+        // prompt the moment the widget mounts, even before any service is ready.
+        // The Loaded event below is a second safety net for the case where
+        // services weren't available during construction (so UpdateHistoryList
+        // / LoadRecommendationsAsync short-circuited without ever calling
+        // UpdateEmptyStateHint).
+        EmptyStateHintText.Text = _localizationService.T("Widget.Search.EmptyHint");
+        Loaded += (_, _) =>
+        {
+            UpdateContent();
+            UpdateEmptyStateHint();
+        };
+
         UpdateContent();
 
         _localizationService.LanguageChanged += OnLanguageChanged;
@@ -80,6 +94,7 @@ public sealed partial class SearchWidgetContent : UserControl
         HistoryList.Visibility = queries.Count > 0
             ? Visibility.Visible
             : Visibility.Collapsed;
+        UpdateEmptyStateHint();
     }
 
     /// <summary>
@@ -125,6 +140,19 @@ public sealed partial class SearchWidgetContent : UserControl
         {
             RecommendationsList.Visibility = Visibility.Collapsed;
         }
+        UpdateEmptyStateHint();
+    }
+
+    private void UpdateEmptyStateHint()
+    {
+        // Show the empty-state prompt whenever there is no search history. This is
+        // independent of recommendations: the user explicitly asked for a hint
+        // when "搜索记录为空". The XAML default is Visible so the prompt is
+        // already showing before this method is ever called; this method only
+        // ever needs to *hide* the prompt (when there IS history).
+        bool hasNoHistory = HistoryList.Visibility == Visibility.Collapsed;
+        EmptyStateHint.Visibility = hasNoHistory ? Visibility.Visible : Visibility.Collapsed;
+        EmptyStateHintText.Text = _localizationService.T("Widget.Search.EmptyHint");
     }
 
     public void ApplyAppearance()

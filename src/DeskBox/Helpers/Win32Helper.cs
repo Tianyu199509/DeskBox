@@ -1,3 +1,6 @@
+using System.ComponentModel;
+using System.Diagnostics;
+using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
 
@@ -102,6 +105,14 @@ public static partial class Win32Helper
     [LibraryImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static partial bool IsWindowVisible(IntPtr hWnd);
+
+    [LibraryImport("user32.dll")]
+    public static partial IntPtr GetWindow(IntPtr hWnd, uint uCmd);
+
+    public const uint GW_HWNDFIRST = 0;
+    public const uint GW_HWNDLAST = 1;
+    public const uint GW_HWNDNEXT = 2;
+    public const uint GW_HWNDPREV = 3;
 
     [LibraryImport("user32.dll")]
     public static partial IntPtr GetForegroundWindow();
@@ -1082,42 +1093,105 @@ public static partial class Win32Helper
     /// <summary>
     /// Open a file or URL using the default associated application.
     /// </summary>
+    /// <remarks>
+    /// Launches via <see cref="Process.Start(ProcessStartInfo)"/> with
+    /// <see cref="ProcessStartInfo.UseShellExecute"/> = true, which internally calls
+    /// ShellExecuteEx — the same modern path Explorer uses. This resolves associations
+    /// (including packaged/UWP handlers and per-user UserChoice) the same way
+    /// double-clicking in Explorer does, avoiding the silent failures the legacy
+    /// ShellExecuteW P/Invoke produced for certain file types (e.g. .md whose handler is
+    /// a Store app or whose UserChoice hash is fragile). <paramref name="ownerWindow"/>
+    /// is forwarded to the "Open With" fallback so any system dialog has a real parent
+    /// and is not hidden behind a topmost widget.
+    /// </remarks>
     public static bool OpenFileOrChooseApp(IntPtr ownerWindow, string path)
     {
-        var result = ShellExecute(ownerWindow, "open", path, null, null, SW_SHOWNORMAL);
-        if ((long)result > 32)
-        {
-            return true;
-        }
+        App.Log($"[DIAG] OpenFileOrChooseApp enter owner=0x{ownerWindow.ToInt64():X} path='{path}'");
+        // Win32 ERROR_NO_ASSOCIATION: "No application is associated with the specified
+        // file for this operation." ShellExecuteEx surfaces this (1155) rather than the
+        // legacy SE_ERR_NOASSOC (31) that raw ShellExecute returns.
+        const int ErrorNoAssociation = 1155;
 
-        const long AssociationIncomplete = 27;
-        const long NoAssociation = 31;
-        if ((long)result is not (AssociationIncomplete or NoAssociation))
+        string? directory = Path.GetDirectoryName(path);
+        var startInfo = new ProcessStartInfo
         {
-            App.Log($"[OpenFile] ShellExecute failed with code {(long)result} for '{path}'");
-            return false;
-        }
-
-        var openAsInfo = new OpenAsInfo
-        {
-            File = path,
-            Class = null,
-            Flags = OpenAsInfoFlags.AllowRegistration | OpenAsInfoFlags.Execute
+            FileName = path,
+            UseShellExecute = true,
+            Verb = "open",
+            WorkingDirectory = string.IsNullOrEmpty(directory) ? string.Empty : directory
         };
 
-        int hResult = SHOpenWithDialog(ownerWindow, ref openAsInfo);
-        if (hResult < 0)
+        // ELECTRON_RUN_AS_NODE=1 makes any Electron-based default handler (MarkText,
+        // VS Code, Obsidian, ...) run as a plain Node.js process and crash trying to
+        // execute the target file as a script. Explorer doesn't carry this variable, so
+        // double-clicking there works; a process launched from developer tooling that
+        // sets it (e.g., an Electron-based host shell) would otherwise break opening
+        // such files. UseShellExecute=true cannot set a custom env block, so temporarily
+        // clear it from this process's environment around the launch and restore it
+        // afterwards, so the child behaves like it does from Explorer.
+        string? savedElectronRunAsNode = Environment.GetEnvironmentVariable("ELECTRON_RUN_AS_NODE");
+        if (savedElectronRunAsNode is not null)
         {
-            App.Log($"[OpenFile] ShellExecute failed with code {(long)result}; Open With failed with HRESULT 0x{hResult:X8} for '{path}'");
-            return false;
+            Environment.SetEnvironmentVariable("ELECTRON_RUN_AS_NODE", null);
         }
 
-        return true;
+        try
+        {
+            Process.Start(startInfo);
+            App.Log($"[DIAG] Process.Start OK path='{path}' electronVarStripped={savedElectronRunAsNode is not null}");
+            return true;
+        }
+        catch (Win32Exception ex) when (ex.NativeErrorCode == ErrorNoAssociation)
+        {
+            // No default handler registered (or the UserChoice association is broken).
+            // Offer the system "Open With" dialog with the real owner window so the user
+            // can pick an app instead of getting a silent no-op.
+            App.Log($"[OpenFile] No association for '{path}' (ERROR_NO_ASSOCIATION). Falling back to Open With.");
+
+            var openAsInfo = new OpenAsInfo
+            {
+                File = path,
+                Class = null,
+                Flags = OpenAsInfoFlags.AllowRegistration | OpenAsInfoFlags.Execute
+            };
+
+            int hResult = SHOpenWithDialog(ownerWindow, ref openAsInfo);
+            if (hResult < 0)
+            {
+                App.Log($"[OpenFile] Open With failed with HRESULT 0x{hResult:X8} for '{path}'");
+                return false;
+            }
+
+            return true;
+        }
+        catch (Exception ex)
+        {
+            App.Log($"[OpenFile] Failed to open '{path}': {ex.Message}");
+            return false;
+        }
+        finally
+        {
+            if (savedElectronRunAsNode is not null)
+            {
+                Environment.SetEnvironmentVariable("ELECTRON_RUN_AS_NODE", savedElectronRunAsNode);
+            }
+        }
     }
 
     public static void OpenFile(string path)
     {
         _ = OpenFileOrChooseApp(IntPtr.Zero, path);
+    }
+
+    /// <summary>
+    /// Open a file or URL using the default associated application, forwarding a real
+    /// owner window handle so any system UI (Open With, UAC) is parented correctly
+    /// instead of being left behind a topmost widget. Returns false on failure rather
+    /// than swallowing it.
+    /// </summary>
+    public static bool OpenFile(IntPtr ownerWindow, string path)
+    {
+        return OpenFileOrChooseApp(ownerWindow, path);
     }
 
     [Flags]

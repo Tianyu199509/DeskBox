@@ -38,6 +38,9 @@ public sealed class SearchHistoryService
         Load();
     }
 
+    /// <summary>Raised whenever the recent-query list changes (record/clear).</summary>
+    public event Action? RecentQueriesChanged;
+
     /// <summary>Most recent queries, newest first.</summary>
     public IReadOnlyList<string> RecentQueries
     {
@@ -94,6 +97,7 @@ public sealed class SearchHistoryService
         if (changed)
         {
             Save();
+            RecentQueriesChanged?.Invoke();
         }
     }
 
@@ -188,6 +192,7 @@ public sealed class SearchHistoryService
         }
 
         Save();
+        RecentQueriesChanged?.Invoke();
     }
 
     public void ClearAllHistory()
@@ -200,6 +205,7 @@ public sealed class SearchHistoryService
         }
 
         Save();
+        RecentQueriesChanged?.Invoke();
     }
 
     private void Load()

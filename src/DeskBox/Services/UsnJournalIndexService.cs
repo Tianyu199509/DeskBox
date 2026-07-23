@@ -86,9 +86,11 @@ public sealed partial class UsnJournalIndexService : IDisposable
     ];
 
     private readonly ConcurrentDictionary<string, UsnEntry> _index = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ManualResetEventSlim _pauseGate = new(true);
     private CancellationTokenSource? _scanCts;
     private Task? _scanTask;
     private int _isScanning;
+    private int _isPaused;
     private volatile bool _isAvailable;
     private bool _isDisposed;
 
@@ -97,11 +99,36 @@ public sealed partial class UsnJournalIndexService : IDisposable
 
     public bool IsScanning => Volatile.Read(ref _isScanning) == 1;
 
+    public bool IsPaused => Volatile.Read(ref _isPaused) == 1;
+
     public int EntryCount => _index.Count;
 
     public int IndexedCount => _index.Count;
 
     public event Action? IndexUpdated;
+
+    /// <summary>Raised periodically during indexing with the current entry count.</summary>
+    public event Action<int>? ProgressChanged;
+
+    /// <summary>Pauses an in-progress scan.</summary>
+    public void PauseIndexing()
+    {
+        if (IsScanning && !IsPaused)
+        {
+            Volatile.Write(ref _isPaused, 1);
+            _pauseGate.Reset();
+        }
+    }
+
+    /// <summary>Resumes a paused scan.</summary>
+    public void ResumeIndexing()
+    {
+        if (IsPaused)
+        {
+            Volatile.Write(ref _isPaused, 0);
+            _pauseGate.Set();
+        }
+    }
 
     /// <summary>Starts background enumeration of every fixed NTFS volume.</summary>
     public void StartIndexing()
@@ -238,6 +265,8 @@ public sealed partial class UsnJournalIndexService : IDisposable
         finally
         {
             Interlocked.Exchange(ref _isScanning, 0);
+            Volatile.Write(ref _isPaused, 0);
+            _pauseGate.Set();
         }
     }
 
@@ -453,6 +482,12 @@ public sealed partial class UsnJournalIndexService : IDisposable
                 fullPath,
                 record.IsDir,
                 TimestampToDateTime(record.Timestamp));
+
+            // Report progress every 5000 entries.
+            if (_index.Count % 5000 == 0)
+            {
+                ProgressChanged?.Invoke(_index.Count);
+            }
         }
     }
 
@@ -495,6 +530,7 @@ public sealed partial class UsnJournalIndexService : IDisposable
         _isDisposed = true;
         _scanCts?.Cancel();
         _scanCts?.Dispose();
+        _pauseGate.Dispose();
         _index.Clear();
     }
 }

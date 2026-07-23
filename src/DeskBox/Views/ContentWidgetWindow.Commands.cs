@@ -162,7 +162,14 @@ public sealed partial class ContentWidgetWindow
 
     private void TitleBarGrid_RightTapped(object sender, RightTappedRoutedEventArgs e)
     {
-        ShowFlyoutWithInteraction(CreateMoreFlyout(), ContentWidgetShell.TitleBar, e.GetPosition(ContentWidgetShell.TitleBar));
+        if (ContentWidgetShell.IsCollapsed)
+        {
+            ShowFlyoutWithInteraction(CreateMoreFlyout(), ContentWidgetShell, e.GetPosition(ContentWidgetShell));
+        }
+        else
+        {
+            ShowFlyoutWithInteraction(CreateMoreFlyout(), ContentWidgetShell.TitleBar, e.GetPosition(ContentWidgetShell.TitleBar));
+        }
         e.Handled = true;
     }
 

@@ -210,7 +210,7 @@ public sealed partial class OnboardingWindow : Window
     //  Step Navigation
     // ════════════════════════════════════════════════════════════
 
-    private static readonly int StepCount = 6;
+    private static readonly int StepCount = 5;
 
     private FrameworkElement GetStepPanel(int index) => index switch
     {
@@ -219,7 +219,6 @@ public sealed partial class OnboardingWindow : Window
         2 => Step3Panel,
         3 => Step4Panel,
         4 => Step5Panel,
-        5 => Step6Panel,
         _ => Step1Panel
     };
 
@@ -389,10 +388,10 @@ public sealed partial class OnboardingWindow : Window
         switch (_stepIndex)
         {
             case 0:
-                // Step 1 has no dynamic content
+                if (animate) StartStep1CardAnimation();
                 break;
             case 1:
-                SetupStep2();
+                SetupStep2Features();
                 break;
             case 2:
                 SetupStep3();
@@ -402,9 +401,6 @@ public sealed partial class OnboardingWindow : Window
                 break;
             case 4:
                 SetupStep5();
-                break;
-            case 5:
-                SetupStep6();
                 break;
         }
     }
@@ -416,6 +412,123 @@ public sealed partial class OnboardingWindow : Window
         _hotkeyDemoCts?.Cancel();
         _hotkeyDemoCts?.Dispose();
         _hotkeyDemoCts = null;
+        _searchDemoCts?.Cancel();
+        _searchDemoCts?.Dispose();
+        _searchDemoCts = null;
+    }
+
+    // ════════════════════════════════════════════════════════════
+    //  Step 1: Value Card Stagger Animation
+    // ════════════════════════════════════════════════════════════
+
+    private void StartStep1CardAnimation()
+    {
+        Border[] cards = [Step1Card1, Step1Card2, Step1Card3];
+        for (int i = 0; i < cards.Length; i++)
+        {
+            var card = cards[i];
+            var transform = GetElementTransform(card);
+            transform.TranslateY = 14;
+            card.Opacity = 0;
+
+            var storyboard = new Storyboard();
+            var easing = new CubicEase { EasingMode = EasingMode.EaseOut };
+            int delay = 100 + i * 120;
+
+            var opacityAnim = new DoubleAnimation
+            {
+                From = 0,
+                To = 1,
+                Duration = new Duration(TimeSpan.FromMilliseconds(360)),
+                BeginTime = TimeSpan.FromMilliseconds(delay),
+                EasingFunction = easing
+            };
+            Storyboard.SetTarget(opacityAnim, card);
+            Storyboard.SetTargetProperty(opacityAnim, "Opacity");
+            storyboard.Children.Add(opacityAnim);
+
+            var translateAnim = new DoubleAnimation
+            {
+                From = 14,
+                To = 0,
+                Duration = new Duration(TimeSpan.FromMilliseconds(420)),
+                BeginTime = TimeSpan.FromMilliseconds(delay),
+                EasingFunction = easing
+            };
+            Storyboard.SetTarget(translateAnim, transform);
+            Storyboard.SetTargetProperty(translateAnim, "TranslateY");
+            storyboard.Children.Add(translateAnim);
+
+            storyboard.Begin();
+        }
+    }
+
+    // ════════════════════════════════════════════════════════════
+    //  Step 5: Search Demo Typewriter Animation
+    // ════════════════════════════════════════════════════════════
+
+    private System.Threading.CancellationTokenSource? _searchDemoCts;
+
+    private void StartSearchDemoAnimation()
+    {
+        _searchDemoCts?.Cancel();
+        _searchDemoCts?.Dispose();
+        var cts = new System.Threading.CancellationTokenSource();
+        _searchDemoCts = cts;
+        _ = RunSearchDemoAsync(cts.Token);
+    }
+
+    private async Task RunSearchDemoAsync(System.Threading.CancellationToken ct)
+    {
+        try
+        {
+            string demoText = "\u5468\u62a5.docx";
+            Step5SearchDemoText.Text = "";
+            Step5SearchResults.Opacity = 0;
+
+            await Task.Delay(600, ct);
+
+            // Typewriter effect
+            for (int i = 0; i < demoText.Length; i++)
+            {
+                ct.ThrowIfCancellationRequested();
+                Step5SearchDemoText.Text = demoText[..(i + 1)];
+                await Task.Delay(110, ct);
+            }
+
+            await Task.Delay(400, ct);
+
+            // Fade in results
+            var transform = GetElementTransform(Step5SearchResults);
+            transform.TranslateY = 8;
+            var storyboard = new Storyboard();
+            var easing = new CubicEase { EasingMode = EasingMode.EaseOut };
+
+            var opacityAnim = new DoubleAnimation
+            {
+                From = 0,
+                To = 1,
+                Duration = new Duration(TimeSpan.FromMilliseconds(380)),
+                EasingFunction = easing
+            };
+            Storyboard.SetTarget(opacityAnim, Step5SearchResults);
+            Storyboard.SetTargetProperty(opacityAnim, "Opacity");
+            storyboard.Children.Add(opacityAnim);
+
+            var translateAnim = new DoubleAnimation
+            {
+                From = 8,
+                To = 0,
+                Duration = new Duration(TimeSpan.FromMilliseconds(420)),
+                EasingFunction = easing
+            };
+            Storyboard.SetTarget(translateAnim, transform);
+            Storyboard.SetTargetProperty(translateAnim, "TranslateY");
+            storyboard.Children.Add(translateAnim);
+
+            storyboard.Begin();
+        }
+        catch (OperationCanceledException) { }
     }
 
     /// <summary>
@@ -425,12 +538,19 @@ public sealed partial class OnboardingWindow : Window
     {
         switch (step)
         {
-            case 4:
-                // Step 5: Start keycap pulse if hotkey is enabled
-                if (Step5HotkeyToggle.IsOn)
+            case 0:
+                StartStep1CardAnimation();
+                break;
+            case 3:
+                // Step 4: Start keycap pulse if hotkey is enabled
+                if (Step4HotkeyToggle.IsOn)
                 {
                     StartKeycapPulse();
                 }
+                break;
+            case 4:
+                // Step 5: Start search demo animation
+                StartSearchDemoAnimation();
                 break;
         }
     }

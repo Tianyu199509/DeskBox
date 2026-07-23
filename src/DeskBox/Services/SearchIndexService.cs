@@ -31,12 +31,16 @@ public sealed class SearchIndexService : IDisposable
     private readonly ConcurrentDictionary<string, IndexedFileEntry> _index = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<FileSystemWatcher> _watchers = [];
     private readonly string _storePath;
+    private readonly ManualResetEventSlim _pauseGate = new(true);
     private CancellationTokenSource? _scanCts;
     private CancellationTokenSource? _saveCts;
     private Task? _scanTask;
     private bool _isDisposed;
     private int _isScanning;
+    private int _isPaused;
     private bool _hasLoadedPersistedIndex;
+    private int _scannedCount;
+    private DateTime? _lastScanTime;
 
     public SearchIndexService(SettingsService settingsService)
         : this(
@@ -57,9 +61,66 @@ public sealed class SearchIndexService : IDisposable
 
     public bool IsScanning => Volatile.Read(ref _isScanning) == 1;
 
+    public bool IsPaused => Volatile.Read(ref _isPaused) == 1;
+
     public int EntryCount => _index.Count;
     public int IndexedCount => _index.Count;
+
+    /// <summary>Number of items scanned during the current/last scan pass.</summary>
+    public int ScannedCount => Volatile.Read(ref _scannedCount);
+
+    /// <summary>When the last full scan completed.</summary>
+    public DateTime? LastScanTime => _lastScanTime;
+
     public event Action? IndexUpdated;
+
+    /// <summary>Raised periodically during scanning with the current scanned count.</summary>
+    public event Action<int>? ProgressChanged;
+
+    /// <summary>
+    /// Pauses an in-progress scan. The scan thread blocks until <see cref="ResumeIndexing"/> is called.
+    /// </summary>
+    public void PauseIndexing()
+    {
+        if (IsScanning && !IsPaused)
+        {
+            Volatile.Write(ref _isPaused, 1);
+            _pauseGate.Reset();
+        }
+    }
+
+    /// <summary>Resumes a paused scan.</summary>
+    public void ResumeIndexing()
+    {
+        if (IsPaused)
+        {
+            Volatile.Write(ref _isPaused, 0);
+            _pauseGate.Set();
+        }
+    }
+
+    /// <summary>Clears the index and starts a fresh full scan.</summary>
+    public void RebuildIndex()
+    {
+        StopIndexing();
+        _index.Clear();
+        Volatile.Write(ref _scannedCount, 0);
+        _lastScanTime = null;
+        StartIndexing();
+    }
+
+    /// <summary>Returns the on-disk size (bytes) of the persisted index file, or 0 if absent.</summary>
+    public long GetIndexStorageBytes()
+    {
+        try
+        {
+            return File.Exists(_storePath) ? new FileInfo(_storePath).Length : 0;
+        }
+        catch
+        {
+            return 0;
+        }
+    }
 
     /// <summary>
     /// Loads the persisted index from disk (if present) so search returns results
@@ -335,6 +396,8 @@ public sealed class SearchIndexService : IDisposable
             return;
         }
 
+        Volatile.Write(ref _scannedCount, 0);
+
         try
         {
             var (userDirs, driveRoots) = GetScanDirectories();
@@ -382,6 +445,7 @@ public sealed class SearchIndexService : IDisposable
                 ReconcileIndex(allRoots, seenPaths);
                 SetupWatchers(userDirs); // Only watch user directories (drive roots generate too many events)
                 SaveIndex();
+                _lastScanTime = DateTime.Now;
                 IndexUpdated?.Invoke();
                 App.Log($"[SearchIndex] Indexing complete. {_index.Count} entries.");
             }
@@ -397,6 +461,8 @@ public sealed class SearchIndexService : IDisposable
         finally
         {
             Interlocked.Exchange(ref _isScanning, 0);
+            Volatile.Write(ref _isPaused, 0);
+            _pauseGate.Set();
         }
     }
 
@@ -440,6 +506,7 @@ public sealed class SearchIndexService : IDisposable
     {
         var queue = new Queue<(string Path, int Depth)>();
         queue.Enqueue((rootPath, 0));
+        int progressCounter = 0;
 
         var skipDirectories = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
@@ -457,6 +524,9 @@ public sealed class SearchIndexService : IDisposable
                 return;
             }
 
+            // Honor pause: block until resumed or cancelled.
+            _pauseGate.Wait(token);
+
             var (current, depth) = queue.Dequeue();
 
             try
@@ -469,6 +539,13 @@ public sealed class SearchIndexService : IDisposable
                     }
 
                     TryAddEntry(file, isDirectory: false, seenPaths);
+
+                    // Report progress every 200 files to avoid flooding the UI thread.
+                    if (++progressCounter % 200 == 0)
+                    {
+                        Volatile.Write(ref _scannedCount, _index.Count);
+                        ProgressChanged?.Invoke(_index.Count);
+                    }
                 }
 
                 // Only recurse into subdirectories if we haven't hit the depth limit.
@@ -710,6 +787,7 @@ public sealed class SearchIndexService : IDisposable
         _saveCts?.Cancel();
         _saveCts?.Dispose();
         _scanCts?.Dispose();
+        _pauseGate.Dispose();
         _index.Clear();
     }
 

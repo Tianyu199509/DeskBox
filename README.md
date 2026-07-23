@@ -15,22 +15,29 @@ DeskBox is a lightweight WinUI 3 desktop organizer for Windows 11. It creates na
 
 Download the latest installer from [GitHub Releases](https://github.com/Tianyu199509/DeskBox/releases).
 
-Current release: 1.3.1
+Current release: 1.3.2
 
-- [DeskBox_Setup_1.3.1_x64.exe](https://github.com/Tianyu199509/DeskBox/releases/download/v1.3.1/DeskBox_Setup_1.3.1_x64.exe)
+- [DeskBox_Setup_1.3.2_x64.exe](https://github.com/Tianyu199509/DeskBox/releases/download/v1.3.2/DeskBox_Setup_1.3.2_x64.exe)
+- [DeskBox_Setup_1.3.2_arm64.exe](https://github.com/Tianyu199509/DeskBox/releases/download/v1.3.2/DeskBox_Setup_1.3.2_arm64.exe) (Surface, Snapdragon, and other ARM64 PCs)
 
-The installer checks for .NET 10 Runtime x64 and Windows App Runtime 2.2 x64. If either dependency is missing, the setup flow can download and install it for you.
+The x64 installer checks for .NET 10 Runtime x64 and Windows App Runtime 2.2 x64; the ARM64 installer checks for the ARM64 variants. If a dependency is missing, the setup flow can download and install it for you.
 
-## What's New In 1.3.1
+## What's New In 1.3.2
 
-- **High-DPI icon clarity**: File and shortcut icons now extract at 256×256 (Jumbo) or 48×48 (Extra Large) instead of 32×32, matching desktop icon clarity on high-DPI displays.
-- **Steam shortcut icons**: Resolved `.url` shortcut icons not displaying by parsing comma-separated icon indices and searching for Steam via registry and common paths.
-- **Animation performance**: Switched opacity/scale animations to GPU Composition KeyFrame animations and direct `SetWindowPos` P/Invoke, eliminating stutter on lower-end GPUs.
-- **Black screen transition fix**: Material backdrop now stays consistent throughout tray show/hide animations.
-- **Music artwork corner radius**: Fixed asymmetric corner radius on music widget album art.
-- **Duplicate startup entries**: Unified to a single registry `Run` key with automatic legacy shortcut cleanup.
-- **Capsule mode defaults**: New installs now default to hover auto-expand, sensitive hover response, and relaxed animation.
-- **Freeze diagnostics**: Added UI thread watchdog and fixed a sync-over-async deadlock in Store startup.
+- **Search system (new)**: Full-text desktop search with USN Journal indexing, Windows Index integration, result ranking, search history, type sort/filter, recommended-apps panel, global hotkey, and a dedicated search settings page.
+- **Multi-language expansion**: Added Japanese, German, and Brazilian Portuguese (1500+ strings each). Rewrote localization from `.resw` to embedded JSON for easier community translation.
+- **Onboarding redesign**: Rebuilt as a focused five-step flow with entrance animations and full five-language support.
+- **Adaptive tray animation**: Hardware-adaptive controller adjusts animation complexity by GPU capability; batch driver synchronizes multi-widget show/hide.
+- **Weather improvements**: City database expanded from ~500 to 5000+ with CJK-aware fuzzy search; improved location service and widget layouts.
+- **ARM64 installer**: Native ARM64 Windows build support.
+- **QuickLook compatibility fix (critical)**: Fixed pipe server crash caused by empty connections. Availability checks no longer touch the named pipe.
+- **Wallpaper loss fix**: Prevented `WorkerW` spawn from destroying the desktop wallpaper.
+- **Installer/updater reliability**: Process-kill logic, force-update enforcement, helper cleanup, official download URLs, English installer language.
+- **Architecture**: Extracted `App.Tray.cs`, added `ServiceRegistry`, `SettingsMigrationService`, `FileMetaService`, `AppDiagnosticsService`, and a 10-chapter user guide.
+- **Installer language selection**: The installer now shows a language picker (Chinese, English, Japanese, German, Brazilian Portuguese) pre-selected to your system locale. The chosen language is recorded at install time so DeskBox can default to it on first run.
+- **Search popup polish**: The result-list header now aligns with the data rows; the sort header carries a subtle background and shares the menu-bar margins.
+- **Weather capsule fix**: Removed a duplicate title icon so capsule mode shows only the weather emoji.
+- **Capsule hover mask**: The semi-transparent right-edge hover mask in capsule mode is now hidden (interaction is unchanged).
 
 See the full [changelog](CHANGELOG.md).
 
@@ -137,7 +144,7 @@ dotnet publish .\src\DeskBox\DeskBox.csproj --configuration Release -p:Platform=
 Installer output:
 
 ```text
-Output\DeskBox_Setup_1.3.1_x64.exe
+Output\DeskBox_Setup_1.3.2_x64.exe
 ```
 
 ## Project Structure

@@ -262,8 +262,6 @@ public sealed partial class WidgetWindow
     {
         var flyout = new MenuFlyout();
 
-        AddCurrentWidgetContentActions(flyout);
-
         var pasteItem = new MenuFlyoutItem
         {
             Text = _localizationService.T("Common.Paste"),
@@ -302,6 +300,17 @@ public sealed partial class WidgetWindow
             };
             openFolderItem.Click += (_, _) => Win32Helper.OpenFile(ViewModel.MappedFolderPath);
             flyout.Items.Add(openFolderItem);
+
+            if (!ViewModel.FollowsDefaultStoragePath)
+            {
+                var changeMappedPathItem = new MenuFlyoutItem
+                {
+                    Text = _localizationService.T("Widget.ChangeMappedPath"),
+                    Icon = new FontIcon { Glyph = "\uE8B7" }
+                };
+                changeMappedPathItem.Click += async (_, _) => await PickAndApplyMappedFolderAsync();
+                flyout.Items.Add(changeMappedPathItem);
+            }
         }
 
         flyout.Items.Add(new MenuFlyoutSeparator());
@@ -323,19 +332,6 @@ public sealed partial class WidgetWindow
         flyout.Items.Add(listView);
 
         flyout.Items.Add(CreateStackSettingsMenu());
-
-        flyout.Items.Add(new MenuFlyoutSeparator());
-
-        flyout.Items.Add(WidgetChromeMenuBuilder.Create(
-            ViewModel.Config,
-            _chromeDescriptor,
-            _localizationService,
-            SetChromeModeOverride));
-        flyout.Items.Add(WidgetCollapseMenuBuilder.Create(
-            ViewModel.Config,
-            _localizationService,
-            SetCollapseBehaviorOverride,
-            ResetCompactWidthOverride));
 
         flyout.Items.Add(new MenuFlyoutSeparator());
 
@@ -408,13 +404,9 @@ public sealed partial class WidgetWindow
 
     // ── More flyout ────────────────────────────────────────────
 
-    private MenuFlyout CreateMoreFlyout()
+        private MenuFlyout CreateMoreFlyout()
     {
         var flyout = new MenuFlyout();
-
-        AddCreateWidgetItems(flyout);
-
-        flyout.Items.Add(new MenuFlyoutSeparator());
 
         var positionLock = new ToggleMenuFlyoutItem
         {
@@ -449,35 +441,6 @@ public sealed partial class WidgetWindow
 
         flyout.Items.Add(new MenuFlyoutSeparator());
 
-        if (!ViewModel.FollowsDefaultStoragePath &&
-            !string.IsNullOrWhiteSpace(ViewModel.MappedFolderPath))
-        {
-            var openFolder = new MenuFlyoutItem
-            {
-                Text = _localizationService.T("Widget.OpenCurrentFolder"),
-                Icon = new FontIcon { Glyph = "\uE838" }
-            };
-            openFolder.Click += (_, _) =>
-            {
-                if (!string.IsNullOrWhiteSpace(ViewModel.MappedFolderPath))
-                {
-                    Win32Helper.OpenFile(ViewModel.MappedFolderPath);
-                }
-            };
-            flyout.Items.Add(openFolder);
-        }
-
-        if (!ViewModel.FollowsDefaultStoragePath)
-        {
-            var changeMappedPathItem = new MenuFlyoutItem
-            {
-                Text = _localizationService.T("Widget.ChangeMappedPath"),
-                Icon = new FontIcon { Glyph = "\uE8B7" }
-            };
-            changeMappedPathItem.Click += async (_, _) => await PickAndApplyMappedFolderAsync();
-            flyout.Items.Add(changeMappedPathItem);
-        }
-
         var rename = new MenuFlyoutItem
         {
             Text = _localizationService.T("Common.Rename"),
@@ -493,14 +456,6 @@ public sealed partial class WidgetWindow
             }
         };
         flyout.Items.Add(rename);
-
-        var settingsItem = new MenuFlyoutItem
-        {
-            Text = _localizationService.T("Settings.Appearance.DetailTitle"),
-            Icon = new FontIcon { Glyph = "\uE713" }
-        };
-        settingsItem.Click += (_, _) => App.Current.ShowSettings("AppearanceDetail");
-        flyout.Items.Add(settingsItem);
 
         flyout.Items.Add(new MenuFlyoutSeparator());
 

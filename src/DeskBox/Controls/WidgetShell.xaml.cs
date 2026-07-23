@@ -153,6 +153,8 @@ public sealed partial class WidgetShell : UserControl
     private bool _isDragHandlePressed;
     private bool _isCompactMoveHandlePress;
     private bool _isCompactReorderEnabled;
+    private Storyboard? _compactVinylRotationStoryboard;
+    private bool _isCompactVinylRotating;
     private bool _isPointerOverDragHandle;
     private DragHandleClickAction _pendingDragHandleClickAction;
     private bool _hasDragHandlePressMoved;
@@ -223,8 +225,10 @@ public sealed partial class WidgetShell : UserControl
         {
             ApplyChromeMode();
             ApplyCompactAdaptiveLayout();
+            ApplyFullBleedOverlayTheme();
             QueueCompactMarquee();
         };
+        ActualThemeChanged += (_, _) => ApplyFullBleedOverlayTheme();
         Unloaded += (_, _) =>
         {
             StopCompactMarquee();
@@ -447,6 +451,10 @@ public sealed partial class WidgetShell : UserControl
         else
         {
             StopCompactMarquee();
+            StopParticles();
+            StopBottomGlow();
+            StopBreathBorder();
+            StopEdgeGlowPulse();
         }
     }
 
@@ -521,6 +529,32 @@ public sealed partial class WidgetShell : UserControl
             _transitionOuterCornerRadiusFrom,
             _transitionOuterCornerRadiusTo,
             value));
+
+        // Full-bleed background: fade out earlier during expand, fade in later during collapse
+        bool hasFullBleed = _compactPresentation?.UseFullBleedBackground == true &&
+            _compactPresentation.Thumbnail is not null;
+        if (hasFullBleed)
+        {
+            double fullBleedOpacity;
+            double fullBleedScale;
+            if (collapsed)
+            {
+                // Collapsing: fade in after compact layer is partially visible
+                fullBleedOpacity = SmoothStep(Math.Clamp((value - 0.5) / 0.5, 0, 1));
+                fullBleedScale = Lerp(0.9, 1.0, fullBleedOpacity);
+            }
+            else
+            {
+                // Expanding: fade out faster than compact layer, shrink slightly
+                fullBleedOpacity = 1 - SmoothStep(Math.Clamp(value / 0.35, 0, 1));
+                fullBleedScale = Lerp(1.0, 1.15, 1 - fullBleedOpacity);
+            }
+
+            CompactFullBleedBackground.Opacity = fullBleedOpacity;
+            CompactFullBleedOverlay.Opacity = fullBleedOpacity;
+            FullBleedScaleTransform.ScaleX = fullBleedScale;
+            FullBleedScaleTransform.ScaleY = fullBleedScale;
+        }
     }
 
     private static double SmoothStep(double value) => value * value * (3 - (2 * value));
@@ -554,6 +588,8 @@ public sealed partial class WidgetShell : UserControl
         ShellContentPresenter.Opacity = 1;
         CollapsedChromeLayer.Opacity = 1;
         CollapsedChromeLayer.IsHitTestVisible = true;
+        FullBleedScaleTransform.ScaleX = 1;
+        FullBleedScaleTransform.ScaleY = 1;
     }
 
     public void SetCompactPresentation(WidgetCompactPresentation presentation)
@@ -569,6 +605,8 @@ public sealed partial class WidgetShell : UserControl
             previous.ShowPrimaryAction != presentation.ShowPrimaryAction ||
             previous.ShowMediaControls != presentation.ShowMediaControls ||
             previous.UseStackedText != presentation.UseStackedText ||
+            previous.UseFullBleedBackground != presentation.UseFullBleedBackground ||
+            !string.IsNullOrWhiteSpace(previous.EmojiIcon) != !string.IsNullOrWhiteSpace(presentation.EmojiIcon) ||
             string.IsNullOrWhiteSpace(previous.Summary) != string.IsNullOrWhiteSpace(presentation.Summary);
 
         _compactPresentation = presentation;
@@ -578,20 +616,109 @@ public sealed partial class WidgetShell : UserControl
         CompactSummaryMarqueeClone.Text = presentation.Summary;
         CompactTitleIcon.Glyph = presentation.Glyph;
         CompactTitleIcon.LabelText = presentation.Title;
-        CompactThumbnail.Source = presentation.Thumbnail;
-        CompactThumbnailHost.Visibility = presentation.Thumbnail is null
-            ? Visibility.Collapsed
-            : Visibility.Visible;
-        CompactTitleIcon.Visibility = presentation.Thumbnail is null
+
+        bool useFullBleed = presentation.UseFullBleedBackground && presentation.Thumbnail is not null;
+        CompactFullBleedBackground.Source = useFullBleed ? presentation.Thumbnail : null;
+        ApplyFullBleedOverlayTheme();
+        ApplyFullBleedVisibility(useFullBleed);
+
+        // Paused dim overlay: show when full-bleed but not playing
+        CompactPausedDim.Visibility = useFullBleed && !presentation.IsPlaying
             ? Visibility.Visible
             : Visibility.Collapsed;
+
+        CompactThumbnail.Source = useFullBleed ? null : presentation.Thumbnail;
+        CompactThumbnailHost.Visibility = !useFullBleed && presentation.Thumbnail is not null
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        // White border for thumbnail (quick capture)
+        if (!useFullBleed && presentation.Thumbnail is not null)
+        {
+            CompactThumbnailHost.BorderBrush = new SolidColorBrush(Windows.UI.Color.FromArgb(0x99, 0xFF, 0xFF, 0xFF));
+            CompactThumbnailHost.BorderThickness = new Thickness(1);
+        }
+        else
+        {
+            CompactThumbnailHost.ClearValue(Border.BorderBrushProperty);
+            CompactThumbnailHost.ClearValue(Border.BorderThicknessProperty);
+        }
+
+        // Rotating vinyl disc (music capsule). Label reuses the album cover.
+        bool showVinyl = presentation.ShowVinyl && presentation.Thumbnail is not null;
+        CompactVinylHost.Visibility = showVinyl ? Visibility.Visible : Visibility.Collapsed;
+        CompactVinylLabelBrush.ImageSource = showVinyl ? presentation.Thumbnail : null;
+
+        bool hasEmoji = !string.IsNullOrWhiteSpace(presentation.EmojiIcon);
+        CompactEmojiIcon.Text = presentation.EmojiIcon;
+        CompactEmojiIcon.Visibility = hasEmoji ? Visibility.Visible : Visibility.Collapsed;
+
+        // When an emoji (e.g. weather) is shown, the default widget glyph must be
+        // hidden. We cannot just set CompactTitleIcon.Visibility = Collapsed, because
+        // WidgetTitleIcon re-applies Visibility = Visible on its own Loaded /
+        // ActualThemeChanged and whenever an appearance property changes. So the hide
+        // has to go through the control's own Mode = Hidden, which makes it keep
+        // itself Collapsed and survive its internal re-show logic.
+        //
+        // The Mode is driven DIRECTLY here (not via the former x:Bind to the
+        // WidgetShell.TitleIconMode DP): the content-widget appearance path
+        // (ContentWidgetWindow) resets that DP to the global setting on every
+        // theme/appearance refresh, which would re-show the glyph on top of the
+        // emoji. Setting the target property directly is immune to that reset.
+        // When the icon should be visible we honor the user's global icon-mode
+        // preference so the compact glyph still respects their setting.
+        bool showTitleIcon = !hasEmoji && !useFullBleed && presentation.Thumbnail is null && !showVinyl;
+        CompactTitleIcon.Visibility = showTitleIcon ? Visibility.Visible : Visibility.Collapsed;
+        // When the icon is visible we honor the user's global icon-mode
+        // preference so the compact glyph still respects their setting; fall back
+        // to Color if the service isn't ready yet.
+        string visibleIconMode = WidgetTitleIconModeNames.Color;
+        if (App.Current?.SettingsService?.Settings is { } settings &&
+            !string.IsNullOrWhiteSpace(settings.WidgetTitleIconMode))
+        {
+            visibleIconMode = settings.WidgetTitleIconMode;
+        }
+        CompactTitleIcon.Mode = showTitleIcon
+            ? visibleIconMode
+            : WidgetTitleIconModeNames.Hidden;
+
+        // Per-widget icon color override (e.g. file type color)
+        if (presentation.IconColor is not null)
+        {
+            CompactTitleIcon.AccentColor = presentation.IconColor.Value;
+        }
+        else
+        {
+            CompactTitleIcon.ClearValue(WidgetTitleIcon.AccentColorProperty);
+        }
 
         CompactPrimaryActionIcon.Glyph = presentation.PrimaryActionGlyph;
         CompactPreviousButton.IsEnabled = presentation.CanGoPrevious;
         CompactNextButton.IsEnabled = presentation.CanGoNext;
         CompactPlayPauseIcon.Glyph = presentation.IsPlaying ? "\uE769" : "\uE102";
         ApplyCompactActionLabels(presentation.IsPlaying);
+        UpdateCompactVinylRotation(showVinyl && presentation.IsPlaying);
+
+        // Badge
+        bool hasBadge = !string.IsNullOrWhiteSpace(presentation.BadgeText);
+        CompactBadge.Visibility = hasBadge ? Visibility.Visible : Visibility.Collapsed;
+        if (hasBadge)
+        {
+            CompactBadgeText.Text = presentation.BadgeText;
+            CompactBadge.Background = presentation.BadgeIsWarning
+                ? new SolidColorBrush(Windows.UI.Color.FromArgb(0xE6, 0xD8, 0x3B, 0x01))
+                : (Brush)Microsoft.UI.Xaml.Application.Current.Resources["AccentFillColorDefaultBrush"];
+        }
+
+        // Visual effects
+        ApplyColorField(presentation);
+        ApplyEdgeGlow(presentation);
+        ApplyParticles(presentation);
+        ApplySpectrum(presentation);
+        ApplyShimmer(presentation);
+        ApplyConditionalAnimations(presentation);
+
         ApplyCompactLiveState();
+        ApplyCompactMusicProgress();
 
         if (structureChanged)
         {
@@ -634,16 +761,36 @@ public sealed partial class WidgetShell : UserControl
             ? (_usesStackedCompactText ? 1 : 6)
             : 0;
 
-        double identityVisualSize = _compactWidthTier switch
+        bool useFullBleed = _compactPresentation.UseFullBleedBackground &&
+            _compactPresentation.Thumbnail is not null;
+        bool showVinyl = _compactPresentation.ShowVinyl &&
+            _compactPresentation.Thumbnail is not null;
+        double identityVisualSize;
+        double identityHitSize;
+        if (showVinyl)
         {
-            WidgetCompactWidthTier.Narrow => 24,
-            WidgetCompactWidthTier.Wide when _usesStackedCompactText => 36,
-            _ when _usesStackedCompactText => 34,
-            _ => 28
-        };
-        double identityHitSize = _compactWidthTier == WidgetCompactWidthTier.Narrow ? 34 : 40;
+            identityVisualSize = _compactWidthTier == WidgetCompactWidthTier.Narrow ? 22 : 26;
+            identityHitSize = identityVisualSize;
+        }
+        else if (useFullBleed)
+        {
+            identityVisualSize = 10;
+            identityHitSize = 10;
+        }
+        else
+        {
+            identityVisualSize = _compactWidthTier switch
+            {
+                WidgetCompactWidthTier.Narrow => 24,
+                WidgetCompactWidthTier.Wide when _usesStackedCompactText => 36,
+                _ when _usesStackedCompactText => 34,
+                _ => 28
+            };
+            identityHitSize = _compactWidthTier == WidgetCompactWidthTier.Narrow ? 34 : 40;
+        }
         CompactIdentityHost.Width = Math.Max(identityVisualSize, identityHitSize);
         CompactIdentityHost.Height = Math.Max(identityVisualSize, identityHitSize);
+        CompactIdentityHost.Opacity = (showVinyl || !useFullBleed) ? 1 : 0;
         CompactThumbnailHost.Width = identityVisualSize;
         CompactThumbnailHost.Height = identityVisualSize;
         CompactTitleIcon.IconSize = _compactWidthTier == WidgetCompactWidthTier.Narrow
@@ -675,6 +822,52 @@ public sealed partial class WidgetShell : UserControl
         UpdateCompactActionRegionWidth();
         ApplyCompactTextVisibility();
         DispatcherQueue.TryEnqueue(UpdateCompactTextViewportWidths);
+    }
+
+    private void EnsureCompactVinylRotationStoryboard()
+    {
+        if (_compactVinylRotationStoryboard is not null)
+        {
+            return;
+        }
+
+        _compactVinylRotationStoryboard = new Storyboard
+        {
+            RepeatBehavior = RepeatBehavior.Forever
+        };
+        var rotate = new DoubleAnimation
+        {
+            From = 0,
+            To = 360,
+            Duration = new Duration(TimeSpan.FromSeconds(4.0)),
+            RepeatBehavior = RepeatBehavior.Forever
+        };
+        Storyboard.SetTarget(rotate, CompactVinylRotateTransform);
+        Storyboard.SetTargetProperty(rotate, "(RotateTransform.Angle)");
+        _compactVinylRotationStoryboard.Children.Add(rotate);
+    }
+
+    private void UpdateCompactVinylRotation(bool isPlaying)
+    {
+        // Idempotent: ApplyCompactPresentation is invoked on every progress/state tick,
+        // so calling Begin() each time would restart the rotation from 0 and make it
+        // stutter. Only start/stop when the desired rotating state actually changes.
+        bool shouldRotate = CompactVinylHost.Visibility == Visibility.Visible && isPlaying;
+        if (shouldRotate == _isCompactVinylRotating)
+        {
+            return;
+        }
+
+        _isCompactVinylRotating = shouldRotate;
+        EnsureCompactVinylRotationStoryboard();
+        if (shouldRotate)
+        {
+            _compactVinylRotationStoryboard.Begin();
+        }
+        else
+        {
+            _compactVinylRotationStoryboard.Stop();
+        }
     }
 
     private void UpdateCompactActionRegionWidth()
@@ -807,6 +1000,15 @@ public sealed partial class WidgetShell : UserControl
         CompactIdentityRegionHighlight.CornerRadius = new CornerRadius(_compactInnerCornerRadius);
         CompactActionRegionHighlight.CornerRadius = new CornerRadius(_compactInnerCornerRadius);
 
+        // Full-bleed layers follow outer radius
+        var outerCR = new CornerRadius(_compactOuterCornerRadius);
+        CompactFullBleedClip.CornerRadius = outerCR;
+        CompactPausedDim.CornerRadius = outerCR;
+        CompactEdgeGlow.CornerRadius = outerCR;
+        CompactColorField.CornerRadius = outerCR;
+        CompactFullBleedOverlay.CornerRadius = outerCR;
+        CompactShimmer.CornerRadius = outerCR;
+
         foreach (var button in new[]
         {
             CompactPrimaryActionButton,
@@ -835,22 +1037,572 @@ public sealed partial class WidgetShell : UserControl
 
     private void ApplyCompactLiveState()
     {
-        if (_compactPresentation?.Progress is not { } progress || !double.IsFinite(progress))
+        // Determinate progress (duration known): show the real fraction bar.
+        if (_compactPresentation?.Progress is { } progress && double.IsFinite(progress))
         {
-            CompactLiveTrack.Visibility = Visibility.Collapsed;
-            CompactLiveProgress.Visibility = Visibility.Collapsed;
-            CompactLiveTrack.Opacity = 0;
-            CompactLiveProgress.Opacity = 0;
-            CompactLiveProgressTransform.ScaleX = 0;
+            StopCompactLiveIndeterminate();
+            CompactLiveProgressTransform.TranslateX = 0;
+
+            double value = Math.Clamp(progress, 0, 1);
+            CompactLiveTrack.Visibility = Visibility.Visible;
+            CompactLiveProgress.Visibility = Visibility.Visible;
+            bool isPlaying = _compactPresentation?.IsPlaying == true;
+            bool isAttention = _compactPresentation?.IsAttention == true;
+            bool isFullBleed = _compactPresentation?.UseFullBleedBackground == true;
+
+            // Full-bleed mode: white progress bar, thicker, more visible
+            if (isFullBleed)
+            {
+                CompactLiveIndicatorHost.Height = 3;
+                CompactLiveTrack.Background = new SolidColorBrush(Windows.UI.Color.FromArgb(0x40, 0xFF, 0xFF, 0xFF));
+                CompactLiveTrack.Opacity = 1;
+                CompactLiveProgress.Background = new SolidColorBrush(Windows.UI.Color.FromArgb(0xE6, 0xFF, 0xFF, 0xFF));
+            }
+            else
+            {
+                CompactLiveIndicatorHost.Height = 2;
+                CompactLiveTrack.ClearValue(Border.BackgroundProperty);
+                CompactLiveTrack.Opacity = isAttention ? 0.3 : 0.16;
+                CompactLiveProgress.ClearValue(Border.BackgroundProperty);
+            }
+
+            CompactLiveProgressTransform.ScaleX = value;
+
+            // Todo progress: overdue=orange, normal=accent→green gradient
+            if (!isPlaying && !isFullBleed)
+            {
+                if (isAttention)
+                {
+                    // Overdue: orange
+                    CompactLiveProgress.Background = new SolidColorBrush(Windows.UI.Color.FromArgb(0xFF, 0xF9, 0x73, 0x16));
+                }
+                else
+                {
+                    // Normal: accent → green based on completion
+                    var accent = (Windows.UI.Color)Microsoft.UI.Xaml.Application.Current.Resources["SystemAccentColor"];
+                    byte r = (byte)(accent.R + (0x22 - accent.R) * value);
+                    byte g = (byte)(accent.G + (0xC5 - accent.G) * value);
+                    byte b = (byte)(accent.B + (0x5E - accent.B) * value);
+                    CompactLiveProgress.Background = new SolidColorBrush(Windows.UI.Color.FromArgb(0xFF, r, g, b));
+                }
+            }
+            else if (!isFullBleed)
+            {
+                CompactLiveProgress.ClearValue(Border.BackgroundProperty);
+            }
+
+            if (isPlaying)
+            {
+                CompactLiveProgress.Opacity = isFullBleed ? 0.95 : 0.7;
+            }
+            else
+            {
+                CompactLiveProgress.Opacity = isAttention ? 1 : (isPlaying ? (isFullBleed ? 0.95 : 0.7) : 0.4);
+            }
+
             return;
         }
 
-        double value = Math.Clamp(progress, 0, 1);
-        CompactLiveTrack.Visibility = Visibility.Visible;
-        CompactLiveProgress.Visibility = Visibility.Visible;
-        CompactLiveTrack.Opacity = _compactPresentation.IsAttention ? 0.3 : 0.16;
-        CompactLiveProgress.Opacity = _compactPresentation.IsAttention ? 1 : 0.82;
-        CompactLiveProgressTransform.ScaleX = value;
+        // Duration unknown but playing: many media apps (esp. streaming/live or
+        // at the very start of a track) report EndTime only tens of seconds into
+        // playback. Rather than hiding the bar entirely, show a sweeping
+        // indeterminate segment so the capsule still reflects live activity.
+        if (_compactPresentation is { IsProgressIndeterminate: true })
+        {
+            CompactLiveTrack.Visibility = Visibility.Visible;
+            CompactLiveProgress.Visibility = Visibility.Visible;
+            bool isFullBleed = _compactPresentation?.UseFullBleedBackground == true;
+            if (isFullBleed)
+            {
+                CompactLiveIndicatorHost.Height = 3;
+                CompactLiveTrack.Background = new SolidColorBrush(Windows.UI.Color.FromArgb(0x40, 0xFF, 0xFF, 0xFF));
+                CompactLiveTrack.Opacity = 1;
+                CompactLiveProgress.Background = new SolidColorBrush(Windows.UI.Color.FromArgb(0xE6, 0xFF, 0xFF, 0xFF));
+                CompactLiveProgress.Opacity = 0.9;
+            }
+            else
+            {
+                CompactLiveIndicatorHost.Height = 2;
+                CompactLiveTrack.ClearValue(Border.BackgroundProperty);
+                CompactLiveTrack.Opacity = 0.18;
+                CompactLiveProgress.ClearValue(Border.BackgroundProperty);
+                CompactLiveProgress.Opacity = 0.7;
+            }
+
+            if (_compactLiveIndeterminateTimer is null)
+            {
+                StartCompactLiveIndeterminate(isFullBleed);
+            }
+
+            return;
+        }
+
+        // No progress and not indeterminate: hide.
+        StopCompactLiveIndeterminate();
+        CompactLiveTrack.Visibility = Visibility.Collapsed;
+        CompactLiveProgress.Visibility = Visibility.Collapsed;
+        CompactLiveTrack.Opacity = 0;
+        CompactLiveProgress.Opacity = 0;
+        CompactLiveProgressTransform.ScaleX = 0;
+        CompactLiveProgressTransform.TranslateX = 0;
+    }
+
+    /// <summary>
+    /// Shows a plain, determinate progress bar inside the music capsule, below the
+    /// artist name. Driven by the presentation's MusicProgress ratio (0–1). The
+    /// fill is the theme accent color (white when the capsule uses a full-bleed
+    /// cover background), so it matches the rest of the UI. No timestamps.
+    /// </summary>
+    private void ApplyCompactMusicProgress()
+    {
+        WidgetCompactPresentation? p = _compactPresentation;
+        if (p is null || !p.MusicProgress.HasValue)
+        {
+            CompactMusicProgressHost.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        CompactMusicProgressHost.Visibility = Visibility.Visible;
+        double value = Math.Clamp(p.MusicProgress.Value, 0, 1);
+        CompactMusicProgressTransform.ScaleX = value;
+
+        bool isFullBleed = p.UseFullBleedBackground && p.Thumbnail is not null;
+        if (isFullBleed)
+        {
+            // On a cover-art background, invert to white so the bar stays visible.
+            CompactMusicProgressFill.Background = new SolidColorBrush(
+                Windows.UI.Color.FromArgb(0xE6, 0xFF, 0xFF, 0xFF));
+            CompactMusicProgressTrack.Background = new SolidColorBrush(
+                Windows.UI.Color.FromArgb(0x40, 0xFF, 0xFF, 0xFF));
+        }
+        else
+        {
+            CompactMusicProgressFill.ClearValue(Border.BackgroundProperty);
+            CompactMusicProgressTrack.ClearValue(Border.BackgroundProperty);
+        }
+    }
+
+    private void StartCompactLiveIndeterminate(bool isFullBleed)
+    {
+        StopCompactLiveIndeterminate();
+
+        _compactLiveIndeterminatePhase = 0;
+        double segment = isFullBleed ? 0.22 : 0.30;
+
+        // Show the segment right away so the bar is visible from the very first
+        // frame, even before the timer fires its first tick.
+        CompactLiveProgressTransform.ScaleX = segment;
+        CompactLiveProgressTransform.TranslateX = 0;
+
+        // Drive the sweep directly with a DispatcherQueue timer. This is not a
+        // XAML Storyboard, so it is not affected by the OS "Show animations"
+        // setting — it keeps running whether or not the user has system
+        // animations enabled. This fixes the symptom where, with animations
+        // disabled, the bar would freeze at a static semi-transparent segment
+        // for the entire Duration-unknown window (e.g. music first ~40 s).
+        _compactLiveIndeterminateTimer = DispatcherQueue.CreateTimer();
+        _compactLiveIndeterminateTimer.Interval = TimeSpan.FromMilliseconds(40);
+        _compactLiveIndeterminateTimer.Tick += (_, _) =>
+        {
+            _compactLiveIndeterminatePhase += 0.035;
+            if (_compactLiveIndeterminatePhase > 1)
+            {
+                _compactLiveIndeterminatePhase -= 1;
+            }
+
+            double trackWidth = CompactLiveTrack.ActualWidth;
+            double maxTranslate = Math.Max(0, trackWidth * (1 - segment));
+            CompactLiveProgressTransform.ScaleX = segment;
+            CompactLiveProgressTransform.TranslateX = _compactLiveIndeterminatePhase * maxTranslate;
+
+            // Opacity pulse guarantees visible "live" motion even if the track has
+            // not been laid out yet (ActualWidth == 0 → TranslateX stays 0). The
+            // pulse is layout-independent, so the bar never looks frozen during the
+            // Duration-unknown window.
+            CompactLiveProgress.Opacity = 0.4 + 0.4 * (0.5 + 0.5 * Math.Sin(_compactLiveIndeterminatePhase * Math.PI * 2));
+        };
+        _compactLiveIndeterminateTimer.Start();
+    }
+
+    private void StopCompactLiveIndeterminate()
+    {
+        if (_compactLiveIndeterminateTimer is not null)
+        {
+            _compactLiveIndeterminateTimer.Stop();
+            _compactLiveIndeterminateTimer = null;
+        }
+    }
+
+    private DispatcherQueueTimer? _compactLiveBreathingTimer;
+    private DispatcherQueueTimer? _compactLiveIndeterminateTimer;
+    private double _compactLiveIndeterminatePhase;
+
+    private void StartCompactLiveBreathing()
+    {
+        StopCompactLiveBreathing();
+        if (!SystemAnimationsEnabled())
+        {
+            return;
+        }
+
+        _compactLiveBreathingTimer = DispatcherQueue.CreateTimer();
+        _compactLiveBreathingTimer.Interval = TimeSpan.FromMilliseconds(50);
+        double phase = 0;
+        _compactLiveBreathingTimer.Tick += (_, _) =>
+        {
+            phase += 0.06;
+            CompactLiveProgress.Opacity = 0.6 + 0.2 * Math.Sin(phase);
+        };
+        _compactLiveBreathingTimer.Start();
+    }
+
+    private void StopCompactLiveBreathing()
+    {
+        _compactLiveBreathingTimer?.Stop();
+        _compactLiveBreathingTimer = null;
+    }
+
+    private void ApplyFullBleedVisibility(bool visible)
+    {
+        double targetBgOpacity = visible ? 1 : 0;
+        double targetOverlayOpacity = visible ? 1 : 0;
+
+        if (!SystemAnimationsEnabled())
+        {
+            CompactFullBleedBackground.Opacity = targetBgOpacity;
+            CompactFullBleedOverlay.Opacity = targetOverlayOpacity;
+            return;
+        }
+
+        var duration = TimeSpan.FromMilliseconds(250);
+        var easing = new CubicEase { EasingMode = EasingMode.EaseOut };
+        var storyboard = new Storyboard();
+
+        var bgAnim = new DoubleAnimation
+        {
+            To = targetBgOpacity,
+            Duration = new Duration(duration),
+            EasingFunction = easing
+        };
+        Storyboard.SetTarget(bgAnim, CompactFullBleedBackground);
+        Storyboard.SetTargetProperty(bgAnim, "Opacity");
+        storyboard.Children.Add(bgAnim);
+
+        var overlayAnim = new DoubleAnimation
+        {
+            To = targetOverlayOpacity,
+            Duration = new Duration(duration),
+            EasingFunction = easing
+        };
+        Storyboard.SetTarget(overlayAnim, CompactFullBleedOverlay);
+        Storyboard.SetTargetProperty(overlayAnim, "Opacity");
+        storyboard.Children.Add(overlayAnim);
+
+        storyboard.Begin();
+    }
+
+    private static readonly Brush s_fullBleedTitleBrush = new SolidColorBrush(Microsoft.UI.Colors.White);
+    private static readonly Brush s_fullBleedSummaryBrush = new SolidColorBrush(
+        Windows.UI.Color.FromArgb(0xCC, 0xFF, 0xFF, 0xFF));
+
+    // Full-bleed capsule text uses theme-adaptive foreground colors (dark text in
+    // light theme, light text in dark theme). Match the readability scrim to the
+    // theme so the text always stays legible: dark scrim in dark theme, white
+    // scrim in light theme.
+    private void ApplyFullBleedOverlayTheme()
+    {
+        bool isDark = ActualTheme == ElementTheme.Dark ||
+            (ActualTheme == ElementTheme.Default && Application.Current.RequestedTheme == ApplicationTheme.Dark);
+
+        byte channel = isDark ? (byte)0x00 : (byte)0xFF;
+        CompactFullBleedStop0.Color = Color.FromArgb(0xD9, channel, channel, channel);
+        CompactFullBleedStop1.Color = Color.FromArgb(0x8C, channel, channel, channel);
+        CompactFullBleedStop2.Color = Color.FromArgb(0x40, channel, channel, channel);
+
+        // Paused dim overlay: darken in dark theme, lighten (brighten) in light theme.
+        CompactPausedDim.Background = new SolidColorBrush(isDark
+            ? Color.FromArgb(0x1A, 0x00, 0x00, 0x00)
+            : Color.FromArgb(0x40, 0xFF, 0xFF, 0xFF));
+    }
+
+    // ── Visual Effects ─────────────────────────────────────────
+
+    private void ApplyColorField(WidgetCompactPresentation p)
+    {
+        bool hasColorField = p.BackgroundColorStart is not null && p.BackgroundColorEnd is not null;
+        if (hasColorField)
+        {
+            ColorFieldStop1.Color = p.BackgroundColorStart!.Value;
+            ColorFieldStop2.Color = p.BackgroundColorEnd!.Value;
+            CompactColorField.Opacity = 1;
+        }
+        else
+        {
+            CompactColorField.Opacity = 0;
+        }
+    }
+
+    private void ApplyEdgeGlow(WidgetCompactPresentation p)
+    {
+        if (p.EdgeGlowColor is not null)
+        {
+            CompactEdgeGlowBrush.Color = p.EdgeGlowColor.Value;
+            CompactEdgeGlow.BorderThickness = new Thickness(1.5);
+            CompactEdgeGlow.Opacity = 0.7;
+            StartEdgeGlowPulse();
+        }
+        else
+        {
+            StopEdgeGlowPulse();
+            CompactEdgeGlow.Opacity = 0;
+        }
+    }
+
+    private DispatcherQueueTimer? _edgeGlowPulseTimer;
+
+    private void StartEdgeGlowPulse()
+    {
+        StopEdgeGlowPulse();
+        if (!SystemAnimationsEnabled()) return;
+        _edgeGlowPulseTimer = DispatcherQueue.CreateTimer();
+        _edgeGlowPulseTimer.Interval = TimeSpan.FromMilliseconds(50);
+        double phase = 0;
+        _edgeGlowPulseTimer.Tick += (_, _) =>
+        {
+            phase += 0.04;
+            CompactEdgeGlow.Opacity = 0.5 + 0.25 * Math.Sin(phase);
+        };
+        _edgeGlowPulseTimer.Start();
+    }
+
+    private void StopEdgeGlowPulse()
+    {
+        _edgeGlowPulseTimer?.Stop();
+        _edgeGlowPulseTimer = null;
+    }
+
+    // ── Particles (rain / snow) ────────────────────────────────
+
+    private DispatcherQueueTimer? _particleTimer;
+    private readonly List<(Microsoft.UI.Xaml.Shapes.Shape Shape, double Speed, double Drift)> _particles = [];
+    private CompactParticleKind _activeParticleKind = CompactParticleKind.None;
+
+    private void ApplyParticles(WidgetCompactPresentation p)
+    {
+        if (p.ParticleKind == _activeParticleKind && p.ParticleKind != CompactParticleKind.None)
+        {
+            return; // already running same kind
+        }
+
+        StopParticles();
+        _activeParticleKind = p.ParticleKind;
+        if (p.ParticleKind == CompactParticleKind.None || !SystemAnimationsEnabled())
+        {
+            return;
+        }
+
+        double canvasW = 400, canvasH = 40;
+        var rng = new Random();
+
+        if (p.ParticleKind == CompactParticleKind.Rain)
+        {
+            for (int i = 0; i < 10; i++)
+            {
+                var line = new Microsoft.UI.Xaml.Shapes.Line
+                {
+                    X1 = 0, Y1 = 0, X2 = -2, Y2 = 6,
+                    Stroke = new SolidColorBrush(Windows.UI.Color.FromArgb(0x44, 0xFF, 0xFF, 0xFF)),
+                    StrokeThickness = 1
+                };
+                Canvas.SetLeft(line, rng.NextDouble() * canvasW);
+                Canvas.SetTop(line, rng.NextDouble() * canvasH);
+                CompactParticleCanvas.Children.Add(line);
+                _particles.Add((line, 0.5 + rng.NextDouble() * 0.4, -0.2));
+            }
+        }
+        else // Snow
+        {
+            for (int i = 0; i < 10; i++)
+            {
+                var dot = new Microsoft.UI.Xaml.Shapes.Ellipse
+                {
+                    Width = 2, Height = 2,
+                    Fill = new SolidColorBrush(Windows.UI.Color.FromArgb(0x55, 0xFF, 0xFF, 0xFF))
+                };
+                Canvas.SetLeft(dot, rng.NextDouble() * canvasW);
+                Canvas.SetTop(dot, rng.NextDouble() * canvasH);
+                CompactParticleCanvas.Children.Add(dot);
+                _particles.Add((dot, 0.15 + rng.NextDouble() * 0.15, 0.08 + rng.NextDouble() * 0.06));
+            }
+        }
+
+        _particleTimer = DispatcherQueue.CreateTimer();
+        _particleTimer.Interval = TimeSpan.FromMilliseconds(50);
+        _particleTimer.Tick += (_, _) =>
+        {
+            foreach (var (shape, speed, drift) in _particles)
+            {
+                double top = Canvas.GetTop(shape) + speed;
+                double left = Canvas.GetLeft(shape) + drift;
+                if (top > canvasH + 10)
+                {
+                    top = -10;
+                    left = new Random().NextDouble() * canvasW;
+                }
+                if (left < -10) left = canvasW + 5;
+                if (left > canvasW + 10) left = -5;
+                Canvas.SetTop(shape, top);
+                Canvas.SetLeft(shape, left);
+            }
+        };
+        _particleTimer.Start();
+    }
+
+    private void StopParticles()
+    {
+        _particleTimer?.Stop();
+        _particleTimer = null;
+        CompactParticleCanvas.Children.Clear();
+        _particles.Clear();
+        _activeParticleKind = CompactParticleKind.None;
+    }
+
+    // ── Bottom glow (music playback) ─────────────────────────
+
+    private DispatcherQueueTimer? _bottomGlowTimer;
+
+    private void ApplySpectrum(WidgetCompactPresentation p)
+    {
+        // Bottom glow removed - progress bar is sufficient
+        CompactBottomGlow.Visibility = Visibility.Collapsed;
+        StopBottomGlow();
+    }
+
+    private void StartBottomGlow()
+    {
+        StopBottomGlow();
+        if (!SystemAnimationsEnabled()) { CompactBottomGlow.Opacity = 0.6; return; }
+        _bottomGlowTimer = DispatcherQueue.CreateTimer();
+        _bottomGlowTimer.Interval = TimeSpan.FromMilliseconds(50);
+        double phase = 0;
+        _bottomGlowTimer.Tick += (_, _) =>
+        {
+            phase += 0.035;
+            CompactBottomGlow.Opacity = 0.35 + 0.3 * Math.Sin(phase);
+        };
+        _bottomGlowTimer.Start();
+    }
+
+    private void StopBottomGlow()
+    {
+        _bottomGlowTimer?.Stop();
+        _bottomGlowTimer = null;
+    }
+
+    // ── Breathing border (search) ──────────────────────────────
+
+    private DispatcherQueueTimer? _breathBorderTimer;
+
+    private void ApplyShimmer(WidgetCompactPresentation p)
+    {
+        CompactShimmer.Opacity = 0;
+        StopBreathBorder();
+    }
+
+    private void StartBreathBorder()
+    {
+        StopBreathBorder();
+        if (!SystemAnimationsEnabled()) { CompactEdgeGlow.Opacity = 0.35; return; }
+        _breathBorderTimer = DispatcherQueue.CreateTimer();
+        _breathBorderTimer.Interval = TimeSpan.FromMilliseconds(50);
+        double phase = 0;
+        _breathBorderTimer.Tick += (_, _) =>
+        {
+            phase += 0.03;
+            CompactEdgeGlow.Opacity = 0.35 + 0.15 * Math.Sin(phase);
+        };
+        _breathBorderTimer.Start();
+    }
+
+    private void StopBreathBorder()
+    {
+        _breathBorderTimer?.Stop();
+        _breathBorderTimer = null;
+    }
+
+    // ── Conditional animations (todo flash, capture bounce) ────
+
+    private string? _lastTodoLiveKey;
+    private string? _lastCaptureLiveKey;
+
+    private void ApplyConditionalAnimations(WidgetCompactPresentation p)
+    {
+        // Todo: all-complete flash
+        if (p.EdgeGlowColor is not null && p.EdgeGlowColor.Value.G > 150 && p.EdgeGlowColor.Value.R < 100)
+        {
+            // Green glow = all complete
+            if (_lastTodoLiveKey is not null && _lastTodoLiveKey != p.LiveStateKey)
+            {
+                TriggerEdgeGlowFlash();
+            }
+            _lastTodoLiveKey = p.LiveStateKey;
+        }
+        else
+        {
+            _lastTodoLiveKey = null;
+        }
+
+        // Quick capture: new record bounce
+        if (p.EnableBounceOnUpdate && _lastCaptureLiveKey is not null && _lastCaptureLiveKey != p.LiveStateKey)
+        {
+            TriggerCapsuleBounce();
+        }
+        if (p.EnableBounceOnUpdate)
+        {
+            _lastCaptureLiveKey = p.LiveStateKey;
+        }
+        else
+        {
+            _lastCaptureLiveKey = null;
+        }
+    }
+
+    private void TriggerEdgeGlowFlash()
+    {
+        if (!SystemAnimationsEnabled()) return;
+        var sb = new Storyboard();
+        var anim = new DoubleAnimation
+        {
+            From = 1.0, To = 0.5, Duration = TimeSpan.FromMilliseconds(150),
+            AutoReverse = true, EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseOut }
+        };
+        Storyboard.SetTarget(anim, CompactEdgeGlow);
+        Storyboard.SetTargetProperty(anim, "Opacity");
+        sb.Children.Add(anim);
+        sb.Begin();
+    }
+
+    private void TriggerCapsuleBounce()
+    {
+        if (!SystemAnimationsEnabled()) return;
+        var sb = new Storyboard();
+        var animX = new DoubleAnimation
+        {
+            From = 1.0, To = 1.03, Duration = TimeSpan.FromMilliseconds(100),
+            AutoReverse = true, EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseOut }
+        };
+        var animY = new DoubleAnimation
+        {
+            From = 1.0, To = 1.03, Duration = TimeSpan.FromMilliseconds(100),
+            AutoReverse = true, EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseOut }
+        };
+        Storyboard.SetTarget(animX, ShellRootScale);
+        Storyboard.SetTargetProperty(animX, "ScaleX");
+        Storyboard.SetTarget(animY, ShellRootScale);
+        Storyboard.SetTargetProperty(animY, "ScaleY");
+        sb.Children.Add(animX);
+        sb.Children.Add(animY);
+        sb.Begin();
     }
 
     private void AnimateCompactLiveChange()
@@ -1430,22 +2182,36 @@ public sealed partial class WidgetShell : UserControl
         if (!animate || !SystemAnimationsEnabled())
         {
             CompactActionHost.Opacity = visible ? 1 : 0;
+            CompactActionHostTransform.X = visible ? 0 : 16;
             return;
         }
 
-        var animation = new DoubleAnimation
+        var duration = TimeSpan.FromMilliseconds(visible ? 200 : 150);
+        var easing = new CubicEase
+        {
+            EasingMode = visible ? EasingMode.EaseOut : EasingMode.EaseIn
+        };
+
+        var opacityAnim = new DoubleAnimation
         {
             To = visible ? 1 : 0,
-            Duration = new Duration(TimeSpan.FromMilliseconds(visible ? 150 : 120)),
-            EasingFunction = new CubicEase
-            {
-                EasingMode = visible ? EasingMode.EaseOut : EasingMode.EaseIn
-            }
+            Duration = new Duration(duration),
+            EasingFunction = easing
         };
+        var slideAnim = new DoubleAnimation
+        {
+            To = visible ? 0 : 16,
+            Duration = new Duration(duration),
+            EasingFunction = easing
+        };
+
         var storyboard = new Storyboard();
-        Storyboard.SetTarget(animation, CompactActionHost);
-        Storyboard.SetTargetProperty(animation, "Opacity");
-        storyboard.Children.Add(animation);
+        storyboard.Children.Add(opacityAnim);
+        storyboard.Children.Add(slideAnim);
+        Storyboard.SetTarget(opacityAnim, CompactActionHost);
+        Storyboard.SetTargetProperty(opacityAnim, "Opacity");
+        Storyboard.SetTarget(slideAnim, CompactActionHostTransform);
+        Storyboard.SetTargetProperty(slideAnim, "X");
         storyboard.Begin();
     }
 
@@ -1531,6 +2297,7 @@ public sealed partial class WidgetShell : UserControl
         _isPointerOverCompactIdentity = true;
         UpdateCompactInteractionRegionHighlights();
         StopCompactMarquee();
+        AnimateDragGripIndicator(true);
         CompactMoveHandlePointerEntered?.Invoke(this, EventArgs.Empty);
     }
 
@@ -1543,11 +2310,36 @@ public sealed partial class WidgetShell : UserControl
 
         _isPointerOverCompactIdentity = false;
         UpdateCompactInteractionRegionHighlights();
+        AnimateDragGripIndicator(false);
         CompactMoveHandlePointerExited?.Invoke(this, EventArgs.Empty);
         if (_isPointerOverShell)
         {
             QueueCompactMarquee(650);
         }
+    }
+
+    private void AnimateDragGripIndicator(bool show)
+    {
+        if (!SystemAnimationsEnabled())
+        {
+            CompactDragGripIndicator.Opacity = show ? 0.7 : 0;
+            return;
+        }
+
+        var animation = new DoubleAnimation
+        {
+            To = show ? 0.7 : 0,
+            Duration = new Duration(TimeSpan.FromMilliseconds(show ? 150 : 100)),
+            EasingFunction = new CubicEase
+            {
+                EasingMode = show ? EasingMode.EaseOut : EasingMode.EaseIn
+            }
+        };
+        var storyboard = new Storyboard();
+        Storyboard.SetTarget(animation, CompactDragGripIndicator);
+        Storyboard.SetTargetProperty(animation, "Opacity");
+        storyboard.Children.Add(animation);
+        storyboard.Begin();
     }
 
     private void CompactReorderHandle_PointerEntered(object sender, PointerRoutedEventArgs e)
@@ -1591,6 +2383,7 @@ public sealed partial class WidgetShell : UserControl
         _isPointerOverCompactActionTrigger = false;
         _isPointerOverCompactReorderHandle = false;
         CompactReorderGlyph.Opacity = 0.58;
+        AnimateDragGripIndicator(false);
         if (identityWasActive)
         {
             CompactMoveHandlePointerExited?.Invoke(this, EventArgs.Empty);
@@ -1602,6 +2395,7 @@ public sealed partial class WidgetShell : UserControl
 
         _isPointerOverCompactExpansionZone = true;
         UpdateCompactInteractionRegionHighlights();
+        AnimateTextHoverBackground(true);
         ApplyCompactActionVisibility();
         CompactExpansionPointerEntered?.Invoke(this, EventArgs.Empty);
     }
@@ -1628,6 +2422,7 @@ public sealed partial class WidgetShell : UserControl
 
     private void CompactTextContainer_PointerExited(object sender, PointerRoutedEventArgs e)
     {
+        AnimateTextHoverBackground(false);
         if (!_isPointerOverCompactExpansionZone)
         {
             return;
@@ -1637,16 +2432,53 @@ public sealed partial class WidgetShell : UserControl
         CompactExpansionPointerExited?.Invoke(this, EventArgs.Empty);
     }
 
+    private void AnimateTextHoverBackground(bool show)
+    {
+        double targetOpacity = show ? 0.5 : 0;
+        if (!SystemAnimationsEnabled())
+        {
+            CompactTextHoverBackground.Opacity = targetOpacity;
+            return;
+        }
+
+        var animation = new DoubleAnimation
+        {
+            To = targetOpacity,
+            Duration = new Duration(TimeSpan.FromMilliseconds(show ? 120 : 150)),
+            EasingFunction = new CubicEase
+            {
+                EasingMode = show ? EasingMode.EaseOut : EasingMode.EaseIn
+            }
+        };
+        var storyboard = new Storyboard();
+        Storyboard.SetTarget(animation, CompactTextHoverBackground);
+        Storyboard.SetTargetProperty(animation, "Opacity");
+        storyboard.Children.Add(animation);
+        storyboard.Begin();
+    }
+
     private void UpdateCompactInteractionRegionHighlights()
     {
-        CompactIdentityRegionHighlight.Opacity =
-            _isCollapsed && _isPointerOverCompactIdentity
-                ? 1
-                : 0;
-        CompactActionRegionHighlight.Opacity =
-            _isCollapsed && IsPointerOverCompactActionRegion()
-                ? 1
-                : 0;
+        double identityTarget = _isCollapsed && _isPointerOverCompactIdentity ? 1 : 0;
+        double actionTarget = _isCollapsed && IsPointerOverCompactActionRegion() ? 1 : 0;
+        AnimateOpacity(CompactIdentityRegionHighlight, identityTarget);
+        AnimateOpacity(CompactActionRegionHighlight, actionTarget);
+    }
+
+    private void AnimateOpacity(UIElement element, double target)
+    {
+        if (Math.Abs(element.Opacity - target) < 0.01) return;
+        var sb = new Storyboard();
+        var anim = new DoubleAnimation
+        {
+            To = target,
+            Duration = TimeSpan.FromMilliseconds(100),
+            EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseOut }
+        };
+        Storyboard.SetTarget(anim, element);
+        Storyboard.SetTargetProperty(anim, "Opacity");
+        sb.Children.Add(anim);
+        sb.Begin();
     }
 
     private void ResetCompactInteractionRegions()
@@ -1714,6 +2546,12 @@ public sealed partial class WidgetShell : UserControl
     {
         _isCompactKeyboardFocused = true;
         ApplyCompactActionVisibility();
+    }
+
+    private void CollapsedChromeLayer_RightTapped(object sender, RightTappedRoutedEventArgs e)
+    {
+        // Forward to the same event as title bar right-click → widget windows show their context menu
+        TitleRightTapped?.Invoke(this, e);
     }
 
     private void CollapsedChromeLayer_LostFocus(object sender, RoutedEventArgs e)
@@ -1843,6 +2681,9 @@ public sealed partial class WidgetShell : UserControl
         {
             StopCompactMarquee();
             CompactPointerPressed?.Invoke(this, EventArgs.Empty);
+            // Pressed state: reduce hover mask opacity
+            CompactIdentityRegionHighlight.Opacity *= 0.5;
+            CompactActionRegionHighlight.Opacity *= 0.5;
             bool pressedMoveHandle = e.OriginalSource is DependencyObject moveSource &&
                 IsWithin(moveSource, CompactIdentityHost);
             bool pressedReorderHandle = _isCompactReorderEnabled &&
@@ -1897,6 +2738,11 @@ public sealed partial class WidgetShell : UserControl
 
     private void OverlayDragHandle_PointerReleased(object sender, PointerRoutedEventArgs e)
     {
+        // Restore pressed state
+        if (_isCollapsed)
+        {
+            UpdateCompactInteractionRegionHighlights();
+        }
         DragHandleClickAction clickAction = _hasDragHandlePressMoved
             ? DragHandleClickAction.None
             : _pendingDragHandleClickAction;

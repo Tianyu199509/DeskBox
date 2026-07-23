@@ -242,6 +242,24 @@ public partial class WidgetViewModel
         }
     }
 
+    /// <summary>
+    /// Handles a shell icon change for a direct child folder (e.g. after a
+    /// tool like Folder Painter rewrites its desktop.ini).  Clears the cached
+    /// icon and re-hydrates just that item.
+    /// </summary>
+    private void OnFolderIconChanged(string folderPath)
+    {
+        int index = FindItemIndexByPath(folderPath);
+        if (index < 0)
+        {
+            return;
+        }
+
+        Items[index].Icon = null;
+        _fileService.ClearIconCache(folderPath, _hideShortcutArrowOverlay, _showImageFilesAsIcons);
+        StartItemHydration();
+    }
+
     private bool ShouldUseFullReload(FolderChangeBatch changeBatch, string mappedFolderPath)
     {
         if (changeBatch.RequiresFullReload || changeBatch.Changes.Count == 0 || changeBatch.Changes.Count > IncrementalRefreshBatchThreshold)

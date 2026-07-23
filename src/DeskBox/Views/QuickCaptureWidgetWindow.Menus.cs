@@ -44,7 +44,14 @@ public sealed partial class QuickCaptureWidgetWindow
             return;
         }
 
-        ShowFlyoutWithElevation(CreateMoreFlyout(), TitleBarGrid, e.GetPosition(TitleBarGrid));
+        if (QuickCaptureShell.IsCollapsed)
+        {
+            ShowFlyoutWithElevation(CreateMoreFlyout(), QuickCaptureShell, e.GetPosition(QuickCaptureShell));
+        }
+        else
+        {
+            ShowFlyoutWithElevation(CreateMoreFlyout(), TitleBarGrid, e.GetPosition(TitleBarGrid));
+        }
         e.Handled = true;
     }
 

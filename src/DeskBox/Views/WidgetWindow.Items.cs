@@ -138,8 +138,12 @@ public sealed partial class WidgetWindow
 
     private void ItemsView_DoubleTapped(object sender, DoubleTappedRoutedEventArgs e)
     {
+        var diagSrc = e.OriginalSource as FrameworkElement;
+        App.Log($"[DIAG] ItemsView_DoubleTapped srcType={e.OriginalSource?.GetType().Name} dcType={diagSrc?.DataContext?.GetType().Name ?? "null"} doubleClickToOpen={_settingsService.Settings.DoubleClickToOpen}");
+
         if (e.OriginalSource is FrameworkElement { DataContext: WidgetStackItem })
         {
+            App.Log("[DIAG] ItemsView_DoubleTapped -> WidgetStackItem branch (no open)");
             e.Handled = true;
             return;
         }
@@ -151,13 +155,37 @@ public sealed partial class WidgetWindow
             OpenItem(item);
             e.Handled = true;
         }
+        else
+        {
+            App.Log("[DIAG] ItemsView_DoubleTapped -> no matching WidgetItem DataContext (no open)");
+        }
     }
 
     private void OpenItem(WidgetItem item)
     {
-        ViewModel.OpenItem(item, _hWnd);
+        App.Log($"[DIAG] OpenItem path='{item.Path}' target='{item.TargetPath}' isShortcut={item.IsShortcut} isFolder={item.IsFolder}");
+        var result = ViewModel.OpenItem(item, _hWnd);
+        if (result == FileService.OpenItemResult.Failed)
+        {
+            NotifyOpenFailed();
+        }
+
         ClearRemovedCutPaths();
         UpdateEmptyState();
+    }
+
+    private static void NotifyOpenFailed()
+    {
+        var app = App.Current;
+        if (app is null)
+        {
+            return;
+        }
+
+        var loc = app.LocalizationService;
+        app.NativeNotificationService?.TryShow(
+            loc.T("Widget.Open"),
+            loc.T("Widget.OpenItemFailed"));
     }
 
     private void ItemsView_RightTapped(object sender, RightTappedRoutedEventArgs e)
@@ -201,6 +229,16 @@ public sealed partial class WidgetWindow
 
         var flyout = new MenuFlyout();
 
+        var openItem = CreateFileContextCommand("Widget.Open", "\uE8E5");
+        openItem.Click += (_, _) =>
+        {
+            flyout.Hide();
+            OpenItem(item);
+        };
+        flyout.Items.Add(openItem);
+
+        flyout.Items.Add(new MenuFlyoutSeparator());
+
         var cutItem = CreateFileContextCommand("Common.Cut", "\uE8C6");
         cutItem.Click += async (_, _) =>
         {
@@ -225,32 +263,7 @@ public sealed partial class WidgetWindow
         };
         flyout.Items.Add(renameItem);
 
-        var deleteItem = CreateFileContextCommand("Common.Delete", "\uE74D");
-        deleteItem.Click += async (_, _) =>
-        {
-            flyout.Hide();
-            await DeleteSelectedItemsAsync();
-        };
         flyout.Items.Add(new MenuFlyoutSeparator());
-
-        var openItem = CreateFileContextCommand("Widget.Open", "\uE8E5");
-        openItem.Click += (_, _) =>
-        {
-            flyout.Hide();
-            OpenItem(item);
-        };
-        flyout.Items.Add(openItem);
-
-        if (CanCopyImageText(item))
-        {
-            var copyImageTextItem = CreateFileContextCommand("Widget.CopyImageText", "\uE8C8");
-            copyImageTextItem.Click += async (_, _) =>
-            {
-                flyout.Hide();
-                await CopyImageTextAsync(item);
-            };
-            flyout.Items.Add(copyImageTextItem);
-        }
 
         var copyPathItem = CreateFileContextCommand("Widget.CopyPath", "\uE8C8");
         copyPathItem.Click += (_, _) =>
@@ -268,16 +281,9 @@ public sealed partial class WidgetWindow
         };
         flyout.Items.Add(showItem);
 
-        var propItem = CreateFileContextCommand("Common.Properties", "\uE946");
-        propItem.Click += (_, _) =>
-        {
-            flyout.Hide();
-            ShellContextMenuHelper.ShowProperties(_hWnd, item.Path);
-        };
-        flyout.Items.Add(propItem);
-
         if (CanMoveItemsBackToDesktop())
         {
+            flyout.Items.Add(new MenuFlyoutSeparator());
             var moveBackToDesktopItem = CreateFileContextCommand("Widget.MoveBackToDesktop", "\uE74A");
             moveBackToDesktopItem.Click += async (_, _) =>
             {
@@ -297,6 +303,12 @@ public sealed partial class WidgetWindow
             flyout.Items.Add(moveBackToDesktopItem);
         }
 
+        var deleteItem = CreateFileContextCommand("Common.Delete", "\uE74D");
+        deleteItem.Click += async (_, _) =>
+        {
+            flyout.Hide();
+            await DeleteSelectedItemsAsync();
+        };
         flyout.Items.Add(new MenuFlyoutSeparator());
         flyout.Items.Add(deleteItem);
 
@@ -325,13 +337,33 @@ public sealed partial class WidgetWindow
 
     private async Task HandleItemsKeyDownAsync(KeyRoutedEventArgs e)
     {
-        if (e.Handled || _isMigrationBusy)
+        if (_isMigrationBusy)
         {
             return;
         }
 
         if (e.OriginalSource is DependencyObject source &&
             HasAncestorOfType<TextBox>(source))
+        {
+            return;
+        }
+
+        // Space (QuickLook preview): handle even when e.Handled is already true.
+        // The ListView may handle Space internally for selection toggle and set
+        // e.Handled, which would prevent our preview from ever firing.
+        if (e.Key == Windows.System.VirtualKey.Space &&
+            ListViewNotCollapsedAndHasSelection())
+        {
+            e.Handled = true;
+            if (GetPrimarySelectedItem() is { } spaceItem &&
+                s_quickLookPreviewService.CanPreview(spaceItem.Path))
+            {
+                await s_quickLookPreviewService.TryToggleAsync(spaceItem.Path);
+            }
+            return;
+        }
+
+        if (e.Handled)
         {
             return;
         }
@@ -498,13 +530,34 @@ public sealed partial class WidgetWindow
             OpenItem(item);
             e.Handled = true;
         }
-        else if (e.Key == Windows.System.VirtualKey.Space &&
-                 GetPrimarySelectedItem() is { } previewItem &&
-                 s_quickLookPreviewService.CanPreview(previewItem.Path))
+        // Space is handled at the top of HandleItemsKeyDownAsync (before the e.Handled check)
+        // to prevent the ListView's internal selection toggle from swallowing the key.
+    }
+
+    /// <summary>
+    /// Returns true when the widget is expanded and has a non-stack item selected
+    /// (stack items use Space for expand/collapse toggle, not QuickLook preview).
+    /// </summary>
+    private bool ListViewNotCollapsedAndHasSelection()
+    {
+        if (IsWidgetCollapsed)
         {
-            e.Handled = true;
-            await s_quickLookPreviewService.TryToggleAsync(previewItem.Path);
+            return false;
         }
+
+        var lv = GetActiveItemsView();
+        if (lv is null)
+        {
+            return false;
+        }
+
+        // If a stack is selected, Space toggles it — not a preview.
+        if (lv.SelectedItems.OfType<WidgetStackItem>().Any())
+        {
+            return false;
+        }
+
+        return GetPrimarySelectedItem() is not null;
     }
 
     private static bool IsImageFile(string path)

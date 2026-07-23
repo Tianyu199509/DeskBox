@@ -384,7 +384,7 @@ public class AppSettings
     /// How files should be handled when dropped into a managed storage widget.
     /// Valid values: <c>"Move"</c>, <c>"Copy"</c>.
     /// </summary>
-    public string ManagedDropAction { get; set; } = "Copy";
+    public string ManagedDropAction { get; set; } = "Move";
 
     /// <summary>
     /// Root folder used by widgets that follow the default managed storage path.
@@ -575,11 +575,25 @@ public class AppSettings
     /// <summary>Whether to show recommendations when the search popup opens.</summary>
     public bool SearchShowRecommendations { get; set; } = true;
 
+    /// <summary>
+    /// Whether the search popup records and shows search history (recent queries
+    /// and pinned favorites). When false, searches are not saved and the empty
+    /// state hint is shown instead of prior records.
+    /// </summary>
+    public bool SearchSaveHistory { get; set; } = true;
+
     /// <summary>Maximum number of search results to display.</summary>
     public int SearchMaxResults { get; set; } = 200;
 
     /// <summary>Default result tab for a new query: all, app, file, or deskbox.</summary>
     public string SearchDefaultTab { get; set; } = "all";
+
+    /// <summary>
+    /// Icon entrance animation style for the recommended-apps grid.
+    /// 0 = Staggered fade + scale (Win11), 1 = Staggered fade + rise (Spotlight),
+    /// 2 = Wave cascade, 3 = Soft bounce.
+    /// </summary>
+    public int SearchAppIconAnimation { get; set; } = 0;
 
     /// <summary>
     /// Custom search popup window bounds (physical pixels). When all four are set the

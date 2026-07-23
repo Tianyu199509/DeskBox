@@ -1,5 +1,6 @@
-﻿﻿using System.Globalization;
+﻿﻿﻿﻿using System.Globalization;
 using System.Reflection;
+using Microsoft.Win32;
 using System.Text.Json;
 using DeskBox.Models;
 
@@ -32,7 +33,7 @@ public sealed class LocalizationService
             string language = LanguageSetting;
             if (language == LanguageSystem)
             {
-                language = ResolveSystemLanguage();
+                language = ResolveDefaultLanguage();
             }
 
             return language;
@@ -40,6 +41,19 @@ public sealed class LocalizationService
     }
 
     public bool IsEnglish => string.Equals(CurrentCultureName, LanguageEnglish, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Returns a 2-letter language code ("en", "zh", "ja", "de", "pt")
+    /// suitable for passing to weather and location APIs.
+    /// </summary>
+    public string ApiLanguageCode => CurrentCultureName switch
+    {
+        LanguageChinese => "zh",
+        LanguageJapanese => "ja",
+        LanguageGerman => "de",
+        LanguagePortuguese => "pt",
+        _ => "en"
+    };
 
     public IReadOnlyList<string> AvailableLanguageSettings { get; } =
     [
@@ -165,6 +179,40 @@ public sealed class LocalizationService
         if (name.StartsWith("pt", StringComparison.OrdinalIgnoreCase))
             return LanguagePortuguese;
         return LanguageEnglish;
+    }
+
+    /// <summary>
+    /// Resolves the default language used when the user has not explicitly
+    /// picked one in the app. Honors the language chosen at install time
+    /// (the Inno Setup installer writes it to
+    /// HKCU\Software\DeskBox\InstallLanguage), falling back to the OS UI
+    /// culture when that value is absent or unrecognized.
+    /// </summary>
+    private static string ResolveDefaultLanguage()
+    {
+        try
+        {
+            var value = Registry.GetValue(
+                @"HKEY_CURRENT_USER\Software\DeskBox",
+                "InstallLanguage",
+                null) as string;
+            if (!string.IsNullOrWhiteSpace(value)
+                && (value == LanguageChinese
+                    || value == LanguageEnglish
+                    || value == LanguageJapanese
+                    || value == LanguageGerman
+                    || value == LanguagePortuguese))
+            {
+                return value;
+            }
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine(
+                $"[LocalizationService] Failed reading InstallLanguage registry key: {ex.Message}");
+        }
+
+        return ResolveSystemLanguage();
     }
 
     private static Dictionary<string, string>? _zhCn;

@@ -47,9 +47,15 @@ public sealed partial class WeatherWidgetContent : UserControl
         _viewModel.PropertyChanged += ViewModel_PropertyChanged;
         Loaded += WeatherWidgetContent_Loaded;
         Unloaded += WeatherWidgetContent_Unloaded;
+        ActualThemeChanged += WeatherWidgetContent_ActualThemeChanged;
 
         // Collect all refresh icon FontIcons after template is applied
         FindRefreshIcons();
+    }
+
+    private void WeatherWidgetContent_ActualThemeChanged(FrameworkElement sender, object args)
+    {
+        UpdateRichSkinTextTheme();
     }
 
     private void FindRefreshIcons()
@@ -143,9 +149,9 @@ public sealed partial class WeatherWidgetContent : UserControl
 
     private void UpdateRichSkinTextTheme()
     {
-        // When the rich skin background is dark (night, storms, etc.),
-        // force the RootGrid to Dark theme so all ThemeResource text brushes
-        // resolve to light colors — even when the app is in Light mode.
+        // When the rich skin gradient is dark (night, storms, etc.), force Dark theme
+        // so theme-aware text reads as light. Otherwise inherit the app theme so
+        // light gradients stay light and dark gradients stay dark.
         RootGrid.RequestedTheme = _viewModel.RichSkinUsesLightText
             ? ElementTheme.Dark
             : ElementTheme.Default;
@@ -357,7 +363,38 @@ public sealed partial class WeatherWidgetContent : UserControl
 
     private void RefreshButton_Click(object sender, RoutedEventArgs e)
     {
+        if (sender is Button btn)
+        {
+            SpinRefreshIcon(btn);
+        }
         _ = _viewModel.RefreshAsync(userTriggered: true);
+    }
+
+    private void SpinRefreshIcon(Button button)
+    {
+        // Find the FontIcon child
+        if (button.Content is not FontIcon icon) return;
+
+        // Ensure RenderTransform exists
+        if (icon.RenderTransform is not RotateTransform rotate)
+        {
+            rotate = new RotateTransform { Angle = 0 };
+            icon.RenderTransform = rotate;
+            icon.RenderTransformOrigin = new Windows.Foundation.Point(0.5, 0.5);
+        }
+
+        var sb = new Storyboard();
+        var anim = new DoubleAnimation
+        {
+            From = 0,
+            To = 360,
+            Duration = TimeSpan.FromMilliseconds(600),
+            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut }
+        };
+        Storyboard.SetTarget(anim, rotate);
+        Storyboard.SetTargetProperty(anim, "Angle");
+        sb.Children.Add(anim);
+        sb.Begin();
     }
 
     private static bool IsControlKeyDown()

@@ -59,9 +59,18 @@ public sealed partial class WidgetWindow
             return;
         }
 
-        var position = e.GetPosition(TitleBarGrid);
-        TrackMoreFlyoutAnchor(TitleBarGrid, position);
-        ShowFlyoutWithElevation(CreateMoreFlyout(), TitleBarGrid, position);
+        if (FileWidgetShell.IsCollapsed)
+        {
+            var pos = e.GetPosition(FileWidgetShell);
+            TrackMoreFlyoutAnchor(FileWidgetShell, pos);
+            ShowFlyoutWithElevation(CreateMoreFlyout(), FileWidgetShell, pos);
+        }
+        else
+        {
+            var position = e.GetPosition(TitleBarGrid);
+            TrackMoreFlyoutAnchor(TitleBarGrid, position);
+            ShowFlyoutWithElevation(CreateMoreFlyout(), TitleBarGrid, position);
+        }
         e.Handled = true;
     }
 

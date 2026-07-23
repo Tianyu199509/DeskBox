@@ -216,6 +216,20 @@ public sealed partial class SettingsWindow
         }
     }
 
+    private void SettingsSearchBox_GotFocus(object sender, RoutedEventArgs e)
+    {
+        // Dim the search icon when typing
+        SettingsSearchIcon.Foreground = (Microsoft.UI.Xaml.Media.Brush)
+            Microsoft.UI.Xaml.Application.Current.Resources["TextFillColorTertiaryBrush"];
+    }
+
+    private void SettingsSearchBox_LostFocus(object sender, RoutedEventArgs e)
+    {
+        // Restore icon color
+        SettingsSearchIcon.Foreground = (Microsoft.UI.Xaml.Media.Brush)
+            Microsoft.UI.Xaml.Application.Current.Resources["TextFillColorSecondaryBrush"];
+    }
+
     private void SettingsSearchBox_QuerySubmitted(AutoSuggestBox sender, AutoSuggestBoxQuerySubmittedEventArgs args)
     {
         SettingsSearchResult? result = args.ChosenSuggestion as SettingsSearchResult;

@@ -48,6 +48,7 @@ public sealed class AppUpdateService : IAppUpdateService
     }
 
     public AppUpdateCheckResult? LastCheckResult { get; private set; }
+    public DateTime? LastCheckTimeUtc { get; private set; }
     public event Action<AppUpdateCheckResult>? CheckCompleted;
 
     public string ManifestUrl => _manifestUrl;
@@ -436,6 +437,7 @@ public sealed class AppUpdateService : IAppUpdateService
     private AppUpdateCheckResult SetLastCheckResult(AppUpdateCheckResult result)
     {
         LastCheckResult = result;
+        LastCheckTimeUtc = DateTime.UtcNow;
         CheckCompleted?.Invoke(result);
         return result;
     }

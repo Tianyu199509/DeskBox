@@ -24,6 +24,11 @@ public sealed partial class OnboardingWindow
         BuildAccentSelector();
         BuildMaterialSelector();
         UpdateAppearancePreview();
+
+        // Capsule mode toggle
+        Step3CapsuleToggle.Toggled -= Step3CapsuleToggle_Toggled;
+        Step3CapsuleToggle.IsOn = _settingsService.Settings.WidgetCapsuleModeEnabled;
+        Step3CapsuleToggle.Toggled += Step3CapsuleToggle_Toggled;
     }
 
     private void BuildThemeSelector()

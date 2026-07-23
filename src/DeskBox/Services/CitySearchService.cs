@@ -98,22 +98,64 @@ public sealed class CitySearchService
     }
 
     /// <summary>
+    /// P2-1: Reverse-geocode coordinates to the nearest known city name
+    /// from the local database. Returns null if no city is within maxDistanceKm.
+    /// Used to normalize IP-location city names to match the local database.
+    /// </summary>
+    public static string? GetNearestCityName(
+        double lat, double lon, string language = "zh", double maxDistanceKm = 80)
+    {
+        bool isEn = language is "en" or "en-US";
+        PredefinedCity? best = null;
+        double bestDist = double.MaxValue;
+
+        foreach (var c in Predefined)
+        {
+            double d = HaversineDistance(lat, lon, c.Lat, c.Lon);
+            if (d < bestDist)
+            {
+                bestDist = d;
+                best = c;
+            }
+        }
+
+        if (best is null || bestDist > maxDistanceKm)
+        {
+            return null;
+        }
+
+        return isEn ? best.En : best.Zh;
+    }
+
+    /// <summary>
     /// Search cities by query string.
     /// Returns merged results from the local pre-defined list (instant)
     /// and the Open-Meteo geocoding API (broader coverage).
     /// Results are deduplicated by coordinate proximity.
+    /// When userLat/userLon are provided, results are sorted by distance.
     /// </summary>
     public async Task<List<WeatherCitySearchResult>> SearchAsync(
         string query,
         string language = "zh",
+        double? userLat = null,
+        double? userLon = null,
         CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrWhiteSpace(query) || query.Length < 2)
+        if (string.IsNullOrWhiteSpace(query))
         {
             return [];
         }
 
         query = query.Trim();
+
+        // P1-1: Allow single CJK character search (e.g. "京" → 北京).
+        // Latin queries still require at least 2 characters.
+        bool hasCjk = query.Any(c => c >= '\u4e00' && c <= '\u9fff');
+        if (!hasCjk && query.Length < 2)
+        {
+            return [];
+        }
+
         bool isEn = language is "en" or "en-US";
 
         // 1. Search local predefined cities (instant, no network)
@@ -168,6 +210,14 @@ public sealed class CitySearchService
                     });
                 }
             }
+        }
+
+        // P1-2: Sort by distance to user location when available.
+        if (userLat.HasValue && userLon.HasValue)
+        {
+            merged = merged
+                .OrderBy(r => HaversineDistance(userLat.Value, userLon.Value, r.Latitude, r.Longitude))
+                .ToList();
         }
 
         return merged.Take(10).ToList();

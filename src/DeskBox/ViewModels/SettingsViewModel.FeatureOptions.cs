@@ -794,7 +794,9 @@ set => WidgetOpacity = Math.Clamp(1.0 - value / 100d, SettingsService.MinWidgetO
     [
         SettingsService.MusicDisplayModeAuto,
         SettingsService.MusicDisplayModeCover,
-        SettingsService.MusicDisplayModeControls
+        SettingsService.MusicDisplayModeControls,
+        SettingsService.MusicDisplayModeRecordVertical,
+        SettingsService.MusicDisplayModeRecordHorizontal
     ];
     public string[] AvailableMusicDisplayModeDisplayNames =>
         _cachedMusicDisplayModeDisplayNames ??= AvailableMusicDisplayModes.Select(GetMusicDisplayModeDisplayName).ToArray();

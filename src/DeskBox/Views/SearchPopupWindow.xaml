@@ -410,22 +410,44 @@
             <!-- ResultFilterBar moved to tab bar row (Row 2) -->
 
             <!--
-                Sortable column headers, aligned with the result rows below:
-                43px = row margin + row padding + selection bar + icon column.
+                Sortable column headers, aligned with the result rows below.
+                Column structure MUST mirror SearchResultRowControl exactly so
+                the header text and data text share the same left edge:
+                  col 0  Width 5   = selection bar gutter
+                  col 1  Width 34  = icon column
+                  col 2  Width *   = name (Title)
+                  col 3  Width 75  = type
+                  col 4  Width 90  = size
+                  col 5  Width 110 = date
             -->
+
+            <!--
+                Semi-transparent background bar behind the header. Aligned L/R
+                (Margin 12) with the tab/menu bar and filter buttons above so the
+                bar's left & right edges line up with them. Color matches the
+                subtle semi-transparent fill used by the tabs / hotkey badge
+                (SubtleFillColorSecondaryBrush) so it reads as the same surface.
+            -->
+            <Border x:Name="SortHeaderBackground" Grid.Row="1" Visibility="Collapsed"
+                    Margin="12,2,12,2" CornerRadius="6"
+                    Background="{ThemeResource SubtleFillColorSecondaryBrush}"/>
+
             <Grid x:Name="SortHeaderRow" Grid.Row="1" Visibility="Collapsed"
-                  Margin="12,2,12,2"
-                  Background="{ThemeResource SubtleFillColorSecondaryBrush}"
-                  CornerRadius="6" Padding="0,3">
+                  Margin="16,2,16,2"
+                  BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}"
+                  BorderThickness="0,0,0,1"
+                  Padding="0,4,0,5">
                 <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="43"/>
+                    <ColumnDefinition Width="5"/>
+                    <ColumnDefinition Width="34"/>
                     <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="75"/>
                     <ColumnDefinition Width="90"/>
                     <ColumnDefinition Width="110"/>
                 </Grid.ColumnDefinitions>
 
-                <Button x:Name="SortNameHeader" Grid.Column="1"
+                <Button x:Name="SortNameHeader" Grid.Column="2"
+                        Padding="0,6,0,6" HorizontalContentAlignment="Left"
                         Style="{StaticResource SortHeaderButtonStyle}" Click="SortNameHeader_Click">
                     <StackPanel Orientation="Horizontal">
                         <TextBlock x:Name="SortNameLabel" FontSize="12" FontWeight="SemiBold"
@@ -436,7 +458,9 @@
                     </StackPanel>
                 </Button>
 
-                <Button x:Name="SortTypeHeader" Grid.Column="2"
+                <Button x:Name="SortTypeHeader" Grid.Column="3"
+                        Margin="-12,0,0,0"
+                        Padding="4,6,6,6" HorizontalContentAlignment="Left"
                         Style="{StaticResource SortHeaderButtonStyle}" Click="SortTypeHeader_Click">
                     <StackPanel Orientation="Horizontal">
                         <TextBlock x:Name="SortTypeLabel" FontSize="12" FontWeight="SemiBold"
@@ -447,7 +471,9 @@
                     </StackPanel>
                 </Button>
 
-                <Button x:Name="SortSizeHeader" Grid.Column="3"
+                <Button x:Name="SortSizeHeader" Grid.Column="4"
+                        Margin="-12,0,0,0"
+                        Padding="6,6,6,6" HorizontalContentAlignment="Left"
                         Style="{StaticResource SortHeaderButtonStyle}" Click="SortSizeHeader_Click">
                     <StackPanel Orientation="Horizontal">
                         <TextBlock x:Name="SortSizeLabel" FontSize="12" FontWeight="SemiBold"
@@ -458,7 +484,9 @@
                     </StackPanel>
                 </Button>
 
-                <Button x:Name="SortDateHeader" Grid.Column="4"
+                <Button x:Name="SortDateHeader" Grid.Column="5"
+                        Margin="-12,0,0,0"
+                        Padding="0,6,0,6" HorizontalContentAlignment="Left"
                         Style="{StaticResource SortHeaderButtonStyle}" Click="SortDateHeader_Click">
                     <StackPanel Orientation="Horizontal">
                         <TextBlock x:Name="SortDateLabel" FontSize="12" FontWeight="SemiBold"
@@ -546,6 +574,34 @@
                 <Border Height="46" CornerRadius="7" Background="{ThemeResource SubtleFillColorSecondaryBrush}" Opacity="0.64"/>
                 <Border Height="46" CornerRadius="7" Background="{ThemeResource SubtleFillColorSecondaryBrush}" Opacity="0.46"/>
             </StackPanel>
+
+            <!-- Skeleton placeholder shown while app icons are loading -->
+            <ScrollViewer x:Name="AppsSkeletonPanel" Grid.Row="2" Visibility="Collapsed"
+                          VerticalScrollBarVisibility="Disabled" Padding="12,2,12,12">
+                <ItemsRepeater x:Name="AppsSkeletonRepeater">
+                    <ItemsRepeater.Layout>
+                        <UniformGridLayout MinItemHeight="92"
+                                           MinColumnSpacing="6" MinRowSpacing="6"
+                                           ItemsJustification="Start"/>
+                    </ItemsRepeater.Layout>
+                    <ItemsRepeater.ItemTemplate>
+                        <DataTemplate>
+                            <Grid Width="104" Height="92" Padding="8,7" CornerRadius="7">
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="*"/>
+                                    <RowDefinition Height="Auto"/>
+                                </Grid.RowDefinitions>
+                                <Border Grid.Row="0" Width="36" Height="36" CornerRadius="8"
+                                        HorizontalAlignment="Center"
+                                        Background="{ThemeResource ControlFillColorSecondaryBrush}"/>
+                                <Border Grid.Row="1" Width="56" Height="10" CornerRadius="5"
+                                        HorizontalAlignment="Center" Margin="0,8,0,0"
+                                        Background="{ThemeResource ControlFillColorSecondaryBrush}"/>
+                            </Grid>
+                        </DataTemplate>
+                    </ItemsRepeater.ItemTemplate>
+                </ItemsRepeater>
+            </ScrollViewer>
 
             <!-- Empty-query application launcher. It intentionally does not reuse file rows. -->
             <ScrollViewer x:Name="RecommendedAppsPanel" Grid.Row="2" Visibility="Collapsed"
@@ -775,10 +831,15 @@
         <Border x:Name="PopupBorderOverlay" Grid.RowSpan="5"
                 IsHitTestVisible="False" CornerRadius="8"/>
 
-        <Grid x:Name="TopDragHotZone" Grid.RowSpan="5"
-              Width="96" Height="14"
-              HorizontalAlignment="Center" VerticalAlignment="Top"
-              Background="Transparent" Canvas.ZIndex="21"
+        <!--
+            Drag hot zone is intentionally limited to a thin strip at the very top of
+            the window so it no longer overlaps the search input box. The search box
+            (SearchTextBox) lives inside SearchBoxRow (Grid.Row=0) below this strip and
+            must remain fully clickable for text input. Only the top edge is draggable.
+        -->
+        <Grid x:Name="TopDragHotZone" Grid.Row="0"
+              HorizontalAlignment="Stretch" VerticalAlignment="Top" Height="14"
+              Background="Transparent"
               PointerEntered="TopDragHotZone_PointerEntered"
               PointerExited="TopDragHotZone_PointerExited"
               PointerPressed="TopDragHotZone_PointerPressed"
@@ -787,7 +848,7 @@
               PointerCaptureLost="WindowInteraction_PointerCaptureLost"
               DoubleTapped="TopDragHotZone_DoubleTapped">
             <Border x:Name="TopDragHandle" Width="44" Height="4" CornerRadius="2"
-                    HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,4,0,0"
+                    HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,5,0,0"
                     Background="{ThemeResource TextFillColorSecondaryBrush}"
                     Opacity="0" IsHitTestVisible="False"/>
         </Grid>

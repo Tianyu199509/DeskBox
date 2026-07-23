@@ -31,6 +31,16 @@ public sealed partial class SearchPopupViewModel : ObservableObject, IDisposable
     /// <summary>Recommended applications cached between empty-state rebuilds.</summary>
     private readonly List<SearchResultItem> _recentContentItems = [];
 
+    /// <summary>
+    /// Wall-clock time of the last successful recommendation load. Used to skip
+    /// the 1-second skeleton reload when the popup re-opens within a short window
+    /// — the user sees the icons immediately.
+    /// </summary>
+    private DateTime _lastRecommendationLoadUtc = DateTime.MinValue;
+
+    /// <summary>Cache TTL: if the last load is within this window, reuse the cached data.</summary>
+    private static readonly TimeSpan RecommendationCacheTtl = TimeSpan.FromSeconds(60);
+
     public SearchPopupViewModel(
         Services.SearchEngineService searchEngine,
         Services.SettingsService settingsService,
@@ -109,6 +119,27 @@ public sealed partial class SearchPopupViewModel : ObservableObject, IDisposable
 
     /// <summary>True if there's any history or recommendations to display.</summary>
     public bool HasHistoryOrRecommendations => _recentContentItems.Any();
+
+    /// <summary>
+    /// Whether search history (recent queries + favorites) is currently being
+    /// recorded and shown. Driven by the <see cref="AppSettings.SearchSaveHistory"/> flag.
+    /// </summary>
+    public bool SaveSearchHistory => _settingsService.Settings.SearchSaveHistory;
+
+    /// <summary>
+    /// Enables or disables search-history recording and persists the change.
+    /// </summary>
+    public void SetSaveSearchHistory(bool enabled)
+    {
+        if (_settingsService.Settings.SearchSaveHistory == enabled)
+        {
+            return;
+        }
+
+        _settingsService.Settings.SearchSaveHistory = enabled;
+        _settingsService.SaveDebounced();
+        OnPropertyChanged(nameof(SaveSearchHistory));
+    }
 
     /// <summary>Home mode: a roomier dashboard.</summary>
     public bool IsHomeMode => string.Equals(DisplayMode, "Home", StringComparison.OrdinalIgnoreCase);
@@ -229,13 +260,18 @@ public sealed partial class SearchPopupViewModel : ObservableObject, IDisposable
         RebuildEmptyStateItems();
 
         // Shortcut and executable recommendations use their real app icons.
+        // Await enrichment so the UI can show icons together with text (no pop-in).
         if (_recentContentItems.Count > 0)
         {
-            _ = EnrichResultsAsync(
+            await EnrichResultsAsync(
                 _recentContentItems,
                 CancellationToken.None,
                 hideShortcutArrowOverlay: true);
         }
+
+        // Mark the cache timestamp so subsequent popup opens can skip the load
+        // and display icons immediately.
+        _lastRecommendationLoadUtc = DateTime.UtcNow;
     }
 
     /// <summary>
@@ -385,10 +421,39 @@ public sealed partial class SearchPopupViewModel : ObservableObject, IDisposable
     /// <summary>
     /// Rebuilds a stable, intentionally small set of top-level scopes. File media
     /// categories belong in secondary filtering rather than competing with File.
+    /// When the tab structure has not changed, only counts are updated in-place to
+    /// avoid the visual flicker caused by Clear + re-Add on the ObservableCollection.
     /// </summary>
     private void RebuildTabs()
     {
         string? previousTabId = SelectedTab?.Id;
+
+        // Determine the expected tab IDs for the current state.
+        string[] expectedIds = IsQueryActive
+            ? ["all", "app", "file", "deskbox"]
+            : ["home"];
+
+        // If the structure matches, update counts in-place (no flicker).
+        bool structureMatches = Tabs.Count == expectedIds.Length &&
+            Tabs.Select((t, i) => t.Id == expectedIds[i]).All(x => x);
+
+        if (structureMatches && Tabs.Count > 0)
+        {
+            // Only refresh counts; skip Clear/Add to avoid ListView re-render flash.
+            foreach (var tab in Tabs)
+            {
+                tab.Count = ActivePool.Count(tab.Predicate);
+            }
+
+            // Ensure selection is still valid.
+            if (SelectedTab is null)
+            {
+                SelectedTab = Tabs.FirstOrDefault();
+            }
+            return;
+        }
+
+        // Full rebuild (structure changed or first build).
         Tabs.Clear();
 
         if (IsQueryActive)
@@ -650,6 +715,7 @@ public sealed partial class SearchPopupViewModel : ObservableObject, IDisposable
         switch (item.Kind)
         {
             case SearchResultKind.File:
+                App.Log($"[DIAG] ExecuteItem.File detailPath='{item.DetailPath}'");
                 if (!string.IsNullOrWhiteSpace(item.DetailPath))
                 {
                     if (DeskBox.Helpers.Win32Helper.OpenFileOrChooseApp(OwnerWindowHandle, item.DetailPath))
@@ -742,10 +808,13 @@ public sealed partial class SearchPopupViewModel : ObservableObject, IDisposable
 
     private void CommitExecution(SearchResultItem item, bool recordResult = true)
     {
-        _historyService.RecordQuery(Query);
-        if (recordResult)
+        if (_settingsService.Settings.SearchSaveHistory)
         {
-            _historyService.RecordResult(item);
+            _historyService.RecordQuery(Query);
+            if (recordResult)
+            {
+                _historyService.RecordResult(item);
+            }
         }
 
         OnPropertyChanged(nameof(IsCurrentQueryFavorite));
@@ -832,8 +901,26 @@ public sealed partial class SearchPopupViewModel : ObservableObject, IDisposable
     public async Task OnPopupOpenedAsync()
     {
         ClearSearch();
+        // If the recommendations were loaded recently (within the cache TTL),
+        // reuse them so the popup shows icons immediately without a skeleton.
+        // Otherwise reload in the background.
+        if (HasFreshRecommendationCache)
+        {
+            RebuildEmptyStateItems();
+            return;
+        }
+
         await LoadRecommendationsAsync();
     }
+
+    /// <summary>
+    /// True when the recommendation pool was loaded recently enough to reuse
+    /// without a network/enrichment pass. The View uses this to decide whether
+    /// to show the skeleton screen on popup open.
+    /// </summary>
+    public bool HasFreshRecommendationCache =>
+        _recentContentItems.Count > 0
+        && (DateTime.UtcNow - _lastRecommendationLoadUtc) < RecommendationCacheTtl;
 
     private void ExecuteAction(string? actionId)
     {

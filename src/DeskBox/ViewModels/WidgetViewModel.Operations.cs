@@ -94,12 +94,15 @@ await ConfigureFolderWatchersAsync(MappedFolderPath);
         FileService.OpenItem(item);
     }
 
-    public void OpenItem(WidgetItem item, IntPtr ownerHwnd)
+    public FileService.OpenItemResult OpenItem(WidgetItem item, IntPtr ownerHwnd)
     {
-        if (FileService.OpenItem(item, ownerHwnd) == FileService.OpenItemResult.ShortcutDeleted)
+        var result = FileService.OpenItem(item, ownerHwnd);
+        if (result == FileService.OpenItemResult.ShortcutDeleted)
         {
             RemoveItemByPath(item.Path);
         }
+
+        return result;
     }
 
     /// <summary>

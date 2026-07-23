@@ -116,6 +116,15 @@ public static class IconHelper
 
     private const uint ILD_TRANSPARENT = 0x00000001;
 
+    // Shell change notification for invalidating the icon cache.
+    private const int SHCNE_ASSOCCHANGED = 0x08000000;
+    private const uint SHCNF_IDLIST = 0x0000;
+    private const long ShellInvalidateThrottleMs = 500;
+    private static long s_lastShellInvalidateMs;
+
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
+    private static extern void SHChangeNotify(int wEventId, uint uFlags, IntPtr dwItem1, IntPtr dwItem2);
+
     /// <summary>
     /// Asynchronously retrieve the native Windows shell icon for the given path.
     /// For image files, returns an actual thumbnail preview instead of the generic icon.
@@ -438,6 +447,35 @@ public static class IconHelper
         s_bitmapImageCache.TryRemove(cacheKey, out _);
         s_iconBytesCache.TryRemove(cacheKey, out _);
         PerformanceLogger.IconCacheCount = s_iconBytesCache.Count;
+
+        // For directories, also invalidate the Windows shell icon cache.
+        // Tools like Folder Painter modify desktop.ini to change folder icons,
+        // but SHGetFileInfo/SHGetImageList return stale icons from the shell's
+        // internal cache unless SHChangeNotify is called.
+        if (Directory.Exists(iconSource.Path))
+        {
+            InvalidateShellIconCache();
+        }
+    }
+
+    /// <summary>
+    /// Notifies the shell that file associations (and therefore folder icons)
+    /// have changed, forcing it to discard its cached icons and re-read
+    /// desktop.ini on the next SHGetFileInfo call.
+    /// Throttled: tools like Folder Painter often rewrite several folders in
+    /// quick succession, and each broadcast makes Explorer flush its icon cache.
+    /// </summary>
+    private static void InvalidateShellIconCache()
+    {
+        long now = Environment.TickCount64;
+        long last = Interlocked.Read(ref s_lastShellInvalidateMs);
+        if (now - last < ShellInvalidateThrottleMs ||
+            Interlocked.CompareExchange(ref s_lastShellInvalidateMs, now, last) != last)
+        {
+            return;
+        }
+
+        SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, IntPtr.Zero, IntPtr.Zero);
     }
 
     /// <summary>

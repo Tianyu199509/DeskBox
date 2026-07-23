@@ -131,7 +131,41 @@ public sealed partial class WidgetWindow : WidgetWindowBase, IDesktopWidgetWindo
             _localizationService.T("Widget.Compact.FileDropHint"),
             LiveStateKey: hidesSensitiveContent
                 ? ViewModel.Items.Count.ToString()
-                : $"{ViewModel.Items.Count}|{recentItem?.Path ?? string.Empty}");
+                : $"{ViewModel.Items.Count}|{recentItem?.Path ?? string.Empty}",
+            IconColor: recentItem is not null ? GetFileTypeColor(recentItem.Path) : null);
+    }
+
+    private static Windows.UI.Color? GetFileTypeColor(string path)
+    {
+        string ext = System.IO.Path.GetExtension(path).ToLowerInvariant();
+        return ext switch
+        {
+            // Documents - blue
+            ".doc" or ".docx" or ".pdf" or ".txt" or ".rtf" or ".odt"
+                => Windows.UI.Color.FromArgb(0xFF, 0x3B, 0x82, 0xF6),
+            // Spreadsheets - green
+            ".xls" or ".xlsx" or ".csv" or ".ods"
+                => Windows.UI.Color.FromArgb(0xFF, 0x22, 0xC5, 0x5E),
+            // Presentations - orange
+            ".ppt" or ".pptx" or ".odp"
+                => Windows.UI.Color.FromArgb(0xFF, 0xF9, 0x73, 0x16),
+            // Images - purple
+            ".png" or ".jpg" or ".jpeg" or ".gif" or ".bmp" or ".svg" or ".webp" or ".ico"
+                => Windows.UI.Color.FromArgb(0xFF, 0xA8, 0x55, 0xF7),
+            // Audio/Video - pink
+            ".mp3" or ".wav" or ".flac" or ".mp4" or ".mkv" or ".avi" or ".mov"
+                => Windows.UI.Color.FromArgb(0xFF, 0xEC, 0x48, 0x99),
+            // Archives - yellow
+            ".zip" or ".rar" or ".7z" or ".tar" or ".gz"
+                => Windows.UI.Color.FromArgb(0xFF, 0xEA, 0xB3, 0x08),
+            // Code - cyan
+            ".cs" or ".js" or ".ts" or ".py" or ".java" or ".cpp" or ".html" or ".json" or ".xml"
+                => Windows.UI.Color.FromArgb(0xFF, 0x06, 0xB6, 0xD4),
+            // Executables - gray
+            ".exe" or ".msi" or ".bat" or ".cmd" or ".ps1"
+                => Windows.UI.Color.FromArgb(0xFF, 0x6B, 0x72, 0x80),
+            _ => null
+        };
     }
 
     private string BuildSmartFileCompactSummary(string itemCount)

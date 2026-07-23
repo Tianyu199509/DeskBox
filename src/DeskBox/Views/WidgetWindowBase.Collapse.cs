@@ -1826,12 +1826,71 @@ public abstract partial class WidgetWindowBase
             return;
         }
 
+        // The widget may physically sit above application windows even though
+        // the tray-raised state was already released: the release only clears
+        // TopMost and leaves the windows in place (e.g. the user opened and
+        // closed another window after the raise).  Marking it for desktop-layer
+        // restoration here would push it to HWND_BOTTOM on collapse — below the
+        // app window — while its siblings stay on top.  Detect the physical
+        // Z-order instead and keep the collapse a pure visual change.
+        if (!IsPhysicallyAtDesktopBottom())
+        {
+            App.LogVerbose($"[ZOrder] RaiseForExpandedState: widget floats above app window, skip desktop-restore mark hwnd=0x{HWnd.ToInt64():X}");
+            WidgetLayerService.BringAbovePeerWidgets(HWnd);
+            return;
+        }
+
         _isRaisedForExpandedState = true;
         IsAtDesktopLayer = false;
         KeepRaisedUntilDeactivate = true;
         RestoreDesktopLayerWhenIdle = false;
         LastElevateForInteractionUtc = DateTime.UtcNow;
         WidgetLayerService.BringAbovePeerWidgets(HWnd);
+    }
+
+    /// <summary>
+    /// Walks the Z-order below this window and reports whether it physically
+    /// rests at the desktop layer: the first visible non-DeskBox window below
+    /// it must be a desktop shell window (Progman/WorkerW).  When the first
+    /// foreign window below is a normal app window, this window is currently
+    /// floating above that app (e.g. after a released tray raise).
+    /// </summary>
+    private bool IsPhysicallyAtDesktopBottom()
+    {
+        IntPtr current = Win32Helper.GetWindow(HWnd, Win32Helper.GW_HWNDNEXT);
+        while (current != IntPtr.Zero)
+        {
+            if (Win32Helper.IsWindowVisible(current) &&
+                !App.Current.IsDeskBoxWindow(current))
+            {
+                return WindowHasShellClass(current, ["Progman", "WorkerW"]);
+            }
+
+            current = Win32Helper.GetWindow(current, Win32Helper.GW_HWNDNEXT);
+        }
+
+        return true;
+    }
+
+    private static bool WindowHasShellClass(IntPtr hWnd, string[] classNames)
+    {
+        var buffer = new System.Text.StringBuilder(256);
+        int length = Win32Helper.GetClassName(hWnd, buffer, buffer.Capacity);
+        if (length <= 0)
+        {
+            return false;
+        }
+
+        string actual = buffer.ToString();
+        foreach (string className in classNames)
+        {
+            if (string.Equals(actual, className, StringComparison.Ordinal))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private void RestoreLayerAfterExpandedState()

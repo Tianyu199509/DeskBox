@@ -24,6 +24,7 @@ public sealed partial class WidgetManager
     private DateTime _lastTrayLayerToggleUtc = DateTime.MinValue;
     private DateTime _suppressTrayLayerRestoreUntilUtc = DateTime.MinValue;
     private bool _hasDeskBoxForegroundSinceRaise;
+    private IntPtr _foregroundAtRaiseTime;
 
     public void RestoreRaisedWidgetsToDesktopLayer()
     {
@@ -119,8 +120,21 @@ public sealed partial class WidgetManager
             // The raise happened while a foreign window owned the foreground (e.g.
             // an elevated app rejects our activation). Releasing the raised state
             // just because the foreground is not ours would undo the raise within
-            // one tick, so only release when the user explicitly clicks a window
-            // that belongs neither to DeskBox nor to the taskbar.
+            // one tick, so we need evidence that the user actively switched away.
+            //
+            // Primary signal: the foreground window CHANGED to a different non-DeskBox
+            // window since the raise. This is reliable because it does not depend on
+            // GetAsyncKeyState (which only sees presses posted to our own thread).
+            if (foreground != _foregroundAtRaiseTime && foreground != IntPtr.Zero)
+            {
+                App.Log($"[TrayBatch] RaisedState released reason={reason}-foreground-changed from=0x{_foregroundAtRaiseTime.ToInt64():X} to=0x{foreground.ToInt64():X}");
+                RestoreRaisedWidgetsToDesktopLayer();
+                return;
+            }
+
+            // Fallback: the foreground is still the same window as at raise time.
+            // Use the legacy mouse-press detection for the case where the user
+            // clicks on the same app window (e.g. clicks within the same editor).
             Win32Helper.POINT? cursor = TryGetCursorPosition();
             if (Win32Helper.HasMouseButtonPressSinceLastQuery() &&
                 !IsPointerOverDeskBoxWindow(cursor) &&

@@ -18,126 +18,138 @@ namespace DeskBox.Views;
 
 public sealed partial class OnboardingWindow
 {
-    private void SetupStep4()
+    private void SetupStep2Features()
     {
-        Step4TodoToggle.Toggled -= Step4Toggle_Toggled;
-        Step4QuickCaptureToggle.Toggled -= Step4Toggle_Toggled;
-        Step4MusicToggle.Toggled -= Step4Toggle_Toggled;
-        Step4WeatherToggle.Toggled -= Step4Toggle_Toggled;
+        Step2TodoToggle.Toggled -= Step2Toggle_Toggled;
+        Step2QuickCaptureToggle.Toggled -= Step2Toggle_Toggled;
+        Step2MusicToggle.Toggled -= Step2Toggle_Toggled;
+        Step2WeatherToggle.Toggled -= Step2Toggle_Toggled;
+        Step2SearchToggle.Toggled -= Step2Toggle_Toggled;
 
-        Step4TodoToggle.IsOn = FeatureWidgetSettings.IsEnabled(_settingsService.Settings, WidgetKind.Todo);
-        Step4QuickCaptureToggle.IsOn = FeatureWidgetSettings.IsEnabled(_settingsService.Settings, WidgetKind.QuickCapture);
-        Step4MusicToggle.IsOn = FeatureWidgetSettings.IsEnabled(_settingsService.Settings, WidgetKind.Music);
-        Step4WeatherToggle.IsOn = FeatureWidgetSettings.IsEnabled(_settingsService.Settings, WidgetKind.Weather);
+        Step2TodoToggle.IsOn = FeatureWidgetSettings.IsEnabled(_settingsService.Settings, WidgetKind.Todo);
+        Step2QuickCaptureToggle.IsOn = FeatureWidgetSettings.IsEnabled(_settingsService.Settings, WidgetKind.QuickCapture);
+        Step2MusicToggle.IsOn = FeatureWidgetSettings.IsEnabled(_settingsService.Settings, WidgetKind.Music);
+        Step2WeatherToggle.IsOn = FeatureWidgetSettings.IsEnabled(_settingsService.Settings, WidgetKind.Weather);
+        Step2SearchToggle.IsOn = _settingsService.Settings.SearchHotkeyEnabled;
 
-        Step4TodoToggle.Toggled += Step4Toggle_Toggled;
-        Step4QuickCaptureToggle.Toggled += Step4Toggle_Toggled;
-        Step4MusicToggle.Toggled += Step4Toggle_Toggled;
-        Step4WeatherToggle.Toggled += Step4Toggle_Toggled;
+        Step2TodoToggle.Toggled += Step2Toggle_Toggled;
+        Step2QuickCaptureToggle.Toggled += Step2Toggle_Toggled;
+        Step2MusicToggle.Toggled += Step2Toggle_Toggled;
+        Step2WeatherToggle.Toggled += Step2Toggle_Toggled;
+        Step2SearchToggle.Toggled += Step2Toggle_Toggled;
 
-        UpdateFeatureCardHighlight(Step4TodoCard, Step4TodoToggle.IsOn);
-        UpdateFeatureCardHighlight(Step4QuickCaptureCard, Step4QuickCaptureToggle.IsOn);
-        UpdateFeatureCardHighlight(Step4MusicCard, Step4MusicToggle.IsOn);
-        UpdateFeatureCardHighlight(Step4WeatherCard, Step4WeatherToggle.IsOn);
+        UpdateFeatureCardHighlight(Step2TodoCard, Step2TodoToggle.IsOn);
+        UpdateFeatureCardHighlight(Step2QuickCaptureCard, Step2QuickCaptureToggle.IsOn);
+        UpdateFeatureCardHighlight(Step2MusicCard, Step2MusicToggle.IsOn);
+        UpdateFeatureCardHighlight(Step2WeatherCard, Step2WeatherToggle.IsOn);
+        UpdateFeatureCardHighlight(Step2SearchCard, Step2SearchToggle.IsOn);
     }
 
-    private void Step4Toggle_Toggled(object sender, RoutedEventArgs e)
+    private void Step2Toggle_Toggled(object sender, RoutedEventArgs e)
     {
         if (sender is not ToggleSwitch toggle)
         {
             return;
         }
 
-        WidgetKind kind;
         Border card;
-        if (toggle == Step4TodoToggle)
+        if (toggle == Step2TodoToggle)
         {
-            kind = WidgetKind.Todo;
-            card = Step4TodoCard;
+            FeatureWidgetSettings.SetEnabled(_settingsService.Settings, WidgetKind.Todo, toggle.IsOn);
+            card = Step2TodoCard;
         }
-        else if (toggle == Step4QuickCaptureToggle)
+        else if (toggle == Step2QuickCaptureToggle)
         {
-            kind = WidgetKind.QuickCapture;
-            card = Step4QuickCaptureCard;
+            FeatureWidgetSettings.SetEnabled(_settingsService.Settings, WidgetKind.QuickCapture, toggle.IsOn);
+            card = Step2QuickCaptureCard;
         }
-        else if (toggle == Step4MusicToggle)
+        else if (toggle == Step2MusicToggle)
         {
-            kind = WidgetKind.Music;
-            card = Step4MusicCard;
+            FeatureWidgetSettings.SetEnabled(_settingsService.Settings, WidgetKind.Music, toggle.IsOn);
+            card = Step2MusicCard;
         }
-        else if (toggle == Step4WeatherToggle)
+        else if (toggle == Step2WeatherToggle)
         {
-            kind = WidgetKind.Weather;
-            card = Step4WeatherCard;
+            FeatureWidgetSettings.SetEnabled(_settingsService.Settings, WidgetKind.Weather, toggle.IsOn);
+            card = Step2WeatherCard;
+        }
+        else if (toggle == Step2SearchToggle)
+        {
+            _settingsService.Settings.SearchHotkeyEnabled = toggle.IsOn;
+            card = Step2SearchCard;
         }
         else
         {
             return;
         }
 
-        FeatureWidgetSettings.SetEnabled(_settingsService.Settings, kind, toggle.IsOn);
         _settingsService.SaveDebounced();
         UpdateFeatureCardHighlight(card, toggle.IsOn);
 
         // Play a subtle scale bounce on the card
         if (toggle.IsOn)
         {
-            try
-            {
-                var transform = GetElementTransform(card);
-                var storyboard = new Storyboard();
-                var easing = new CubicEase { EasingMode = EasingMode.EaseOut };
-
-                var scaleXUp = new DoubleAnimation
-                {
-                    From = 1,
-                    To = 1.04,
-                    Duration = new Duration(TimeSpan.FromMilliseconds(160)),
-                    EasingFunction = easing
-                };
-                Storyboard.SetTarget(scaleXUp, transform);
-                Storyboard.SetTargetProperty(scaleXUp, "ScaleX");
-                storyboard.Children.Add(scaleXUp);
-
-                var scaleYUp = new DoubleAnimation
-                {
-                    From = 1,
-                    To = 1.04,
-                    Duration = new Duration(TimeSpan.FromMilliseconds(160)),
-                    EasingFunction = easing
-                };
-                Storyboard.SetTarget(scaleYUp, transform);
-                Storyboard.SetTargetProperty(scaleYUp, "ScaleY");
-                storyboard.Children.Add(scaleYUp);
-
-                var scaleXDown = new DoubleAnimation
-                {
-                    From = 1.04,
-                    To = 1,
-                    Duration = new Duration(TimeSpan.FromMilliseconds(260)),
-                    BeginTime = TimeSpan.FromMilliseconds(160),
-                    EasingFunction = easing
-                };
-                Storyboard.SetTarget(scaleXDown, transform);
-                Storyboard.SetTargetProperty(scaleXDown, "ScaleX");
-                storyboard.Children.Add(scaleXDown);
-
-                var scaleYDown = new DoubleAnimation
-                {
-                    From = 1.04,
-                    To = 1,
-                    Duration = new Duration(TimeSpan.FromMilliseconds(260)),
-                    BeginTime = TimeSpan.FromMilliseconds(160),
-                    EasingFunction = easing
-                };
-                Storyboard.SetTarget(scaleYDown, transform);
-                Storyboard.SetTargetProperty(scaleYDown, "ScaleY");
-                storyboard.Children.Add(scaleYDown);
-
-                storyboard.Begin();
-            }
-            catch { }
+            PlayCardBounce(card);
         }
+    }
+
+    private void PlayCardBounce(Border card)
+    {
+        try
+        {
+            var transform = GetElementTransform(card);
+            var storyboard = new Storyboard();
+            var easing = new CubicEase { EasingMode = EasingMode.EaseOut };
+
+            var scaleXUp = new DoubleAnimation
+            {
+                From = 1,
+                To = 1.03,
+                Duration = new Duration(TimeSpan.FromMilliseconds(150)),
+                EasingFunction = easing
+            };
+            Storyboard.SetTarget(scaleXUp, transform);
+            Storyboard.SetTargetProperty(scaleXUp, "ScaleX");
+            storyboard.Children.Add(scaleXUp);
+
+            var scaleYUp = new DoubleAnimation
+            {
+                From = 1,
+                To = 1.03,
+                Duration = new Duration(TimeSpan.FromMilliseconds(150)),
+                EasingFunction = easing
+            };
+            Storyboard.SetTarget(scaleYUp, transform);
+            Storyboard.SetTargetProperty(scaleYUp, "ScaleY");
+            storyboard.Children.Add(scaleYUp);
+
+            var scaleXDown = new DoubleAnimation
+            {
+                From = 1.03,
+                To = 1,
+                Duration = new Duration(TimeSpan.FromMilliseconds(280)),
+                BeginTime = TimeSpan.FromMilliseconds(150),
+                EasingFunction = new BackEase { Amplitude = 0.3, EasingMode = EasingMode.EaseOut }
+            };
+            Storyboard.SetTarget(scaleXDown, transform);
+            Storyboard.SetTargetProperty(scaleXDown, "ScaleX");
+            storyboard.Children.Add(scaleXDown);
+
+            var scaleYDown = new DoubleAnimation
+            {
+                From = 1.03,
+                To = 1,
+                Duration = new Duration(TimeSpan.FromMilliseconds(280)),
+                BeginTime = TimeSpan.FromMilliseconds(150),
+                EasingFunction = new BackEase { Amplitude = 0.3, EasingMode = EasingMode.EaseOut }
+            };
+            Storyboard.SetTarget(scaleYDown, transform);
+            Storyboard.SetTargetProperty(scaleYDown, "ScaleY");
+            storyboard.Children.Add(scaleYDown);
+
+            storyboard.Begin();
+        }
+        catch { }
     }
 
     private void UpdateFeatureCardHighlight(Border card, bool isOn)
@@ -155,6 +167,17 @@ public sealed partial class OnboardingWindow
     }
 
     // ════════════════════════════════════════════════════════════
-    //  Step 5: Daily Use
+    //  Step 3: Appearance (capsule toggle handler)
     // ════════════════════════════════════════════════════════════
+
+    private void Step3CapsuleToggle_Toggled(object sender, RoutedEventArgs e)
+    {
+        if (sender is not ToggleSwitch toggle)
+        {
+            return;
+        }
+
+        _settingsService.Settings.WidgetCapsuleModeEnabled = toggle.IsOn;
+        _settingsService.SaveDebounced();
+    }
 }

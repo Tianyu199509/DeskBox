@@ -115,25 +115,74 @@
 
             <!-- Scope: Custom indexer -->
             <toolkit:SettingsCard
-                HorizontalContentAlignment="Stretch"
+                HorizontalContentAlignment="Right"
                 svc:Localized.DescriptionKey="Settings.Search.Scope.CustomIndexer.Description"
                 svc:Localized.HeaderKey="Settings.Search.Scope.CustomIndexer">
-                <Grid ColumnSpacing="12">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="Auto" />
-                    </Grid.ColumnDefinitions>
-                    <TextBlock x:Name="SearchIndexStatusText" Grid.Column="0"
-                               VerticalAlignment="Center"
-                               Style="{StaticResource SettingDescriptionTextStyle}" />
-                    <ToggleSwitch
-                        x:Name="SearchCustomIndexerToggle"
-                        Grid.Column="1"
-                        OnContent=""
-                        OffContent=""
-                        MinWidth="0"
-                        Toggled="SearchScopeToggle_Toggled" />
-                </Grid>
+                <ToggleSwitch
+                    x:Name="SearchCustomIndexerToggle"
+                    OnContent=""
+                    OffContent=""
+                    MinWidth="0"
+                    Toggled="SearchScopeToggle_Toggled" />
+            </toolkit:SettingsCard>
+
+            <!-- Index status dashboard (visible when custom indexer is enabled) -->
+            <toolkit:SettingsCard
+                x:Name="IndexDashboardCard"
+                ContentAlignment="Vertical"
+                HorizontalContentAlignment="Stretch"
+                svc:Localized.HeaderKey="Settings.Search.Index.Dashboard.Title">
+                <toolkit:SettingsCard.HeaderIcon>
+                    <FontIcon Glyph="&#xE945;" />
+                </toolkit:SettingsCard.HeaderIcon>
+                <StackPanel Spacing="10" Margin="0,4,0,4">
+                    <!-- Status row -->
+                    <Grid ColumnSpacing="12">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock x:Name="SearchIndexStatusText" Grid.Column="0"
+                                   VerticalAlignment="Center"
+                                   Style="{StaticResource SettingDescriptionTextStyle}" />
+                        <TextBlock x:Name="SearchIndexCountText" Grid.Column="1"
+                                   VerticalAlignment="Center"
+                                   Style="{StaticResource SettingDescriptionTextStyle}"
+                                   Opacity="0.7" />
+                    </Grid>
+
+                    <!-- Progress bar (indeterminate, visible while scanning) -->
+                    <ProgressBar x:Name="IndexProgressBar"
+                                 IsIndeterminate="True"
+                                 Visibility="Collapsed" />
+
+                    <!-- Storage + last scan info -->
+                    <TextBlock x:Name="SearchIndexStorageText"
+                               Style="{StaticResource SettingDescriptionTextStyle}"
+                               Opacity="0.7" />
+
+                    <!-- Action buttons -->
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <Button x:Name="IndexPauseResumeButton"
+                                Style="{StaticResource ActionButtonStyle}"
+                                Click="IndexPauseResumeButton_Click"
+                                IsEnabled="False">
+                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                <FontIcon x:Name="IndexPauseResumeIcon" Glyph="&#xE769;" FontSize="12" />
+                                <TextBlock x:Name="IndexPauseResumeLabel" />
+                            </StackPanel>
+                        </Button>
+                        <Button x:Name="IndexRebuildButton"
+                                Style="{StaticResource ActionButtonStyle}"
+                                svc:Localized.ToolTipKey="Settings.Search.Index.Rebuild.Tooltip"
+                                Click="IndexRebuildButton_Click">
+                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                <SymbolIcon Symbol="Refresh" />
+                                <TextBlock svc:Localized.Key="Settings.Search.Index.Rebuild" />
+                            </StackPanel>
+                        </Button>
+                    </StackPanel>
+                </StackPanel>
             </toolkit:SettingsCard>
 
             <!-- Recommendations -->
@@ -162,10 +211,18 @@
                 <ComboBox x:Name="SearchDefaultTabComboBox"
                           MinWidth="150"
                           SelectionChanged="SearchDefaultTabComboBox_SelectionChanged">
-                    <ComboBoxItem Tag="all" svc:Localized.Key="Search.Tab.All" />
-                    <ComboBoxItem Tag="app" svc:Localized.Key="Search.Tab.App" />
-                    <ComboBoxItem Tag="file" svc:Localized.Key="Search.Tab.File" />
-                    <ComboBoxItem Tag="deskbox" svc:Localized.Key="Search.Tab.DeskBox" />
+                    <ComboBoxItem Tag="all">
+                        <TextBlock svc:Localized.Key="Search.Tab.All" />
+                    </ComboBoxItem>
+                    <ComboBoxItem Tag="app">
+                        <TextBlock svc:Localized.Key="Search.Tab.App" />
+                    </ComboBoxItem>
+                    <ComboBoxItem Tag="file">
+                        <TextBlock svc:Localized.Key="Search.Tab.File" />
+                    </ComboBoxItem>
+                    <ComboBoxItem Tag="deskbox">
+                        <TextBlock svc:Localized.Key="Search.Tab.DeskBox" />
+                    </ComboBoxItem>
                 </ComboBox>
             </toolkit:SettingsCard>
 
@@ -183,6 +240,32 @@
                     <ComboBoxItem Tag="50" Content="50" />
                     <ComboBoxItem Tag="100" Content="100" />
                     <ComboBoxItem Tag="200" Content="200" />
+                </ComboBox>
+            </toolkit:SettingsCard>
+
+            <!-- Icon animation style -->
+            <toolkit:SettingsCard
+                HorizontalContentAlignment="Right"
+                svc:Localized.DescriptionKey="Settings.Search.IconAnimation.Description"
+                svc:Localized.HeaderKey="Settings.Search.IconAnimation.Title">
+                <toolkit:SettingsCard.HeaderIcon>
+                    <FontIcon Glyph="&#xE945;" />
+                </toolkit:SettingsCard.HeaderIcon>
+                <ComboBox x:Name="SearchIconAnimationComboBox"
+                          MinWidth="130"
+                          SelectionChanged="SearchIconAnimationComboBox_SelectionChanged">
+                    <ComboBoxItem Tag="0">
+                        <TextBlock svc:Localized.Key="Settings.Search.IconAnimation.Style0" />
+                    </ComboBoxItem>
+                    <ComboBoxItem Tag="1">
+                        <TextBlock svc:Localized.Key="Settings.Search.IconAnimation.Style1" />
+                    </ComboBoxItem>
+                    <ComboBoxItem Tag="2">
+                        <TextBlock svc:Localized.Key="Settings.Search.IconAnimation.Style2" />
+                    </ComboBoxItem>
+                    <ComboBoxItem Tag="3">
+                        <TextBlock svc:Localized.Key="Settings.Search.IconAnimation.Style3" />
+                    </ComboBoxItem>
                 </ComboBox>
             </toolkit:SettingsCard>
 

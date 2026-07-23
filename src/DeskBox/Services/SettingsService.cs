@@ -229,6 +229,8 @@ public sealed class SettingsService
     public const string MusicDisplayModeAuto = "Auto";
     public const string MusicDisplayModeCover = "Cover";
     public const string MusicDisplayModeControls = "Controls";
+    public const string MusicDisplayModeRecordVertical = "RecordVertical";
+    public const string MusicDisplayModeRecordHorizontal = "RecordHorizontal";
     public const int MaxRecentOrganizationHistoryCount = 24;
     public const string TodoNewTaskPositionTop = "Top";
     public const string TodoNewTaskPositionBottom = "Bottom";
@@ -427,7 +429,7 @@ settings.WeatherRefreshIntervalMinutes = 60;
         settings.TodoShowThisMonthTab = false;
         settings.TodoShowImportantTab = true;
         settings.TodoShowCompletedTab = true;
-        settings.ManagedDropAction = ManagedDropActionCopy;
+        settings.ManagedDropAction = ManagedDropActionMove;
         settings.GlobalHotkeyEnabled = DefaultGlobalHotkeyEnabled;
         settings.GlobalHotkeyModifiers = DefaultGlobalHotkeyModifiers;
         settings.GlobalHotkeyKey = DefaultGlobalHotkeyKey;
@@ -1259,6 +1261,8 @@ changed |= NormalizeDeletionSettings(_settings);
         {
             MusicDisplayModeCover => MusicDisplayModeCover,
             MusicDisplayModeControls => MusicDisplayModeControls,
+            MusicDisplayModeRecordVertical => MusicDisplayModeRecordVertical,
+            MusicDisplayModeRecordHorizontal => MusicDisplayModeRecordHorizontal,
             _ => MusicDisplayModeAuto
         };
     }
@@ -1807,7 +1811,7 @@ changed |= NormalizeDeletionSettings(_settings);
         if (!string.Equals(settings.ManagedDropAction, ManagedDropActionMove, StringComparison.Ordinal) &&
             !string.Equals(settings.ManagedDropAction, ManagedDropActionCopy, StringComparison.Ordinal))
         {
-            settings.ManagedDropAction = ManagedDropActionCopy;
+            settings.ManagedDropAction = ManagedDropActionMove;
             changed = true;
         }
 

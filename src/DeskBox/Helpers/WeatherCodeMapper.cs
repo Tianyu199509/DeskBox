@@ -199,4 +199,127 @@ public static class WeatherCodeMapper
             _ => "Unknown"
         };
     }
+
+    /// <summary>
+    /// Returns the localized description for the given WMO weather code.
+    /// </summary>
+    public static string GetDescription(int code, string language)
+    {
+        return language switch
+        {
+            "zh-CN" => GetDescriptionZh(code),
+            "ja-JP" => GetDescriptionJa(code),
+            "de-DE" => GetDescriptionDe(code),
+            "pt-BR" => GetDescriptionPt(code),
+            _ => GetDescriptionEn(code)
+        };
+    }
+
+    private static string GetDescriptionJa(int code)
+    {
+        return code switch
+        {
+            0 => "晴天",
+            1 => "ほぼ晴れ",
+            2 => "曇りがち",
+            3 => "曇り",
+            45 => "霧",
+            48 => "着氷霧",
+            51 => "弱い雨",
+            53 => "弱い雨",
+            55 => "雨",
+            56 => "着氷雨",
+            57 => "着氷雨",
+            61 => "弱い雨",
+            63 => "雨",
+            65 => "強い雨",
+            66 => "着氷雨",
+            67 => "着氷雨",
+            71 => "弱い雪",
+            73 => "雪",
+            75 => "強い雪",
+            77 => "霧雪",
+            80 => "にわか雨",
+            81 => "にわか雨",
+            82 => "強いにわか雨",
+            85 => "にわか雪",
+            86 => "強いにわか雪",
+            95 => "雷雨",
+            96 => "雹を伴う雷雨",
+            99 => "激しい雹を伴う雷雨",
+            _ => "不明"
+        };
+    }
+
+    private static string GetDescriptionDe(int code)
+    {
+        return code switch
+        {
+            0 => "Klar",
+            1 => "Überwiegend klar",
+            2 => "Teilweise bewölkt",
+            3 => "Bedeckt",
+            45 => "Nebel",
+            48 => "Reifnebel",
+            51 => "Leichter Regen",
+            53 => "Leichter Regen",
+            55 => "Mäßiger Regen",
+            56 => "Gefrierender Regen",
+            57 => "Gefrierender Regen",
+            61 => "Leichter Regen",
+            63 => "Mäßiger Regen",
+            65 => "Starker Regen",
+            66 => "Gefrierender Regen",
+            67 => "Gefrierender Regen",
+            71 => "Leichter Schnee",
+            73 => "Mäßiger Schnee",
+            75 => "Starker Schnee",
+            77 => "Schneegriesel",
+            80 => "Regenschauer",
+            81 => "Regenschauer",
+            82 => "Starke Regenschauer",
+            85 => "Schneeschauer",
+            86 => "Starke Schneeschauer",
+            95 => "Gewitter",
+            96 => "Gewitter mit Hagel",
+            99 => "Gewitter mit starkem Hagel",
+            _ => "Unbekannt"
+        };
+    }
+
+    private static string GetDescriptionPt(int code)
+    {
+        return code switch
+        {
+            0 => "Céu limpo",
+            1 => "Predominantemente limpo",
+            2 => "Parcialmente nublado",
+            3 => "Nublado",
+            45 => "Nevoeiro",
+            48 => "Nevoeiro com geada",
+            51 => "Chuva fraca",
+            53 => "Chuva fraca",
+            55 => "Chuva moderada",
+            56 => "Chuva congelante",
+            57 => "Chuva congelante",
+            61 => "Chuva fraca",
+            63 => "Chuva moderada",
+            65 => "Chuva forte",
+            66 => "Chuva congelante",
+            67 => "Chuva congelante",
+            71 => "Neve fraca",
+            73 => "Neve moderada",
+            75 => "Neve forte",
+            77 => "Grãos de neve",
+            80 => "Pancadas de chuva",
+            81 => "Pancadas de chuva",
+            82 => "Pancadas de chuva fortes",
+            85 => "Pancadas de neve",
+            86 => "Pancadas de neve fortes",
+            95 => "Trovoada",
+            96 => "Trovoada com granizo",
+            99 => "Trovoada com granizo forte",
+            _ => "Desconhecido"
+        };
+    }
 }

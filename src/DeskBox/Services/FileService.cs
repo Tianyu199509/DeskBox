@@ -285,6 +285,13 @@ public sealed class FileService
             return null;
         }
 
+        // Filter out dead Steam game shortcuts (game uninstalled but .url remains).
+        if (Path.GetExtension(path).Equals(".url", StringComparison.OrdinalIgnoreCase) &&
+            IsDeadSteamShortcut(path))
+        {
+            return null;
+        }
+
         bool isFolder = Directory.Exists(path);
         bool isShortcut = ShortcutHelper.IsShortcutPath(path);
         string name = isFolder
@@ -1259,12 +1266,18 @@ public sealed class FileService
         }
 
         var pathToOpen = item.IsShortcut ? item.Path : item.TargetPath;
-        if (!string.IsNullOrEmpty(pathToOpen))
+        if (string.IsNullOrEmpty(pathToOpen))
         {
-            Win32Helper.OpenFile(pathToOpen);
+            return OpenItemResult.Failed;
         }
 
-        return OpenItemResult.OpenedOrHandled;
+        // Forward the real owner hwnd so any system UI (Open With / UAC) is parented to
+        // the widget instead of IntPtr.Zero, which previously left dialogs hidden behind
+        // the topmost widget. Returns Failed instead of swallowing the result so the
+        // caller can surface the failure to the user.
+        return Win32Helper.OpenFile(ownerHwnd, pathToOpen)
+            ? OpenItemResult.OpenedOrHandled
+            : OpenItemResult.Failed;
     }
 
     private static bool IsBrokenShortcut(WidgetItem item)
@@ -1297,7 +1310,8 @@ public sealed class FileService
     public enum OpenItemResult
     {
         OpenedOrHandled,
-        ShortcutDeleted
+        ShortcutDeleted,
+        Failed
     }
 
     /// <summary>
@@ -1375,4 +1389,146 @@ public sealed class FileService
 
     [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
     private static extern int SHFileOperation(ref ShFileOperation fileOperation);
+
+    // ─── Steam dead-shortcut detection ───────────────────────────────────
+
+    private static readonly object s_steamLibLock = new();
+    private static string[]? s_steamLibraryPaths;
+    private static DateTime s_steamLibCacheTime;
+    private static readonly TimeSpan SteamLibCacheDuration = TimeSpan.FromMinutes(5);
+
+    /// <summary>
+    /// Checks whether a .url file is a Steam game shortcut whose game is no longer installed.
+    /// Returns true if the shortcut should be filtered out (dead link).
+    /// </summary>
+    private static bool IsDeadSteamShortcut(string urlFilePath)
+    {
+        try
+        {
+            // Quick read: only parse if the file contains "steam://rungameid/"
+            string content = File.ReadAllText(urlFilePath);
+            int idx = content.IndexOf("steam://rungameid/", StringComparison.OrdinalIgnoreCase);
+            if (idx < 0)
+            {
+                return false; // Not a Steam game shortcut
+            }
+
+            // Extract the app ID
+            int idStart = idx + "steam://rungameid/".Length;
+            int idEnd = idStart;
+            while (idEnd < content.Length && char.IsDigit(content[idEnd]))
+            {
+                idEnd++;
+            }
+
+            if (idEnd == idStart)
+            {
+                return false; // No valid app ID found
+            }
+
+            string appId = content[idStart..idEnd];
+            return !IsSteamGameInstalled(appId);
+        }
+        catch
+        {
+            return false; // On any error, keep the shortcut visible
+        }
+    }
+
+    /// <summary>
+    /// Checks if a Steam game is installed by looking for its appmanifest file
+    /// in all known Steam library folders.
+    /// </summary>
+    private static bool IsSteamGameInstalled(string appId)
+    {
+        var libraryPaths = GetSteamLibraryPaths();
+        if (libraryPaths.Length == 0)
+        {
+            return true; // Can't determine Steam location, assume installed
+        }
+
+        foreach (var libPath in libraryPaths)
+        {
+            string manifestPath = Path.Combine(libPath, "steamapps", $"appmanifest_{appId}.acf");
+            if (File.Exists(manifestPath))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Gets all Steam library folder paths (cached for 5 minutes).
+    /// Reads from the registry and libraryfolders.vdf.
+    /// </summary>
+    private static string[] GetSteamLibraryPaths()
+    {
+        lock (s_steamLibLock)
+        {
+            if (s_steamLibraryPaths is not null &&
+                DateTime.UtcNow - s_steamLibCacheTime < SteamLibCacheDuration)
+            {
+                return s_steamLibraryPaths;
+            }
+
+            var paths = new List<string>();
+
+            try
+            {
+                // Get Steam install path from registry
+                string? steamPath = null;
+                using var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(@"Software\Valve\Steam");
+                if (key?.GetValue("SteamPath") is string sp)
+                {
+                    steamPath = sp.Replace('/', '\\');
+                }
+
+                if (string.IsNullOrEmpty(steamPath) || !Directory.Exists(steamPath))
+                {
+                    s_steamLibraryPaths = [];
+                    s_steamLibCacheTime = DateTime.UtcNow;
+                    return s_steamLibraryPaths;
+                }
+
+                // The default library is always the Steam install directory
+                paths.Add(steamPath);
+
+                // Parse libraryfolders.vdf for additional library folders
+                string vdfPath = Path.Combine(steamPath, "steamapps", "libraryfolders.vdf");
+                if (File.Exists(vdfPath))
+                {
+                    foreach (string line in File.ReadLines(vdfPath))
+                    {
+                        string trimmed = line.Trim();
+                        // Look for "path" entries: "path" "D:\\SteamLibrary"
+                        if (trimmed.StartsWith("\"path\"", StringComparison.OrdinalIgnoreCase))
+                        {
+                            int firstQuote = trimmed.IndexOf('"', 7);
+                            int secondQuote = trimmed.IndexOf('"', firstQuote + 1);
+                            if (firstQuote >= 0 && secondQuote > firstQuote)
+                            {
+                                string libPath = trimmed[(firstQuote + 1)..secondQuote]
+                                    .Replace("\\\\", "\\");
+                                if (Directory.Exists(libPath) &&
+                                    !paths.Contains(libPath, StringComparer.OrdinalIgnoreCase))
+                                {
+                                    paths.Add(libPath);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                App.Log($"[FileService] Failed to enumerate Steam libraries: {ex.Message}");
+            }
+
+            s_steamLibraryPaths = paths.ToArray();
+            s_steamLibCacheTime = DateTime.UtcNow;
+            return s_steamLibraryPaths;
+        }
+    }
 }

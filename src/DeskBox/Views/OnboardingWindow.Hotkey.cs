@@ -18,21 +18,31 @@ namespace DeskBox.Views;
 
 public sealed partial class OnboardingWindow
 {
-    private void SetupStep5()
+    private void SetupStep4()
     {
-        Step5HotkeyToggle.Toggled -= Step5HotkeyToggle_Toggled;
-        Step5StartupToggle.Toggled -= Step5StartupToggle_Toggled;
+        // Hotkey toggle
+        Step4HotkeyToggle.Toggled -= Step4HotkeyToggle_Toggled;
+        Step4HotkeyToggle.IsOn = _settingsService.Settings.GlobalHotkeyEnabled;
+        Step4HotkeyToggle.Toggled += Step4HotkeyToggle_Toggled;
 
-        Step5HotkeyToggle.IsOn = _settingsService.Settings.GlobalHotkeyEnabled;
-        Step5StartupToggle.IsOn = StartupService.IsEnabled();
+        // Search hotkey toggle
+        Step4SearchHotkeyToggle.Toggled -= Step4SearchHotkeyToggle_Toggled;
+        Step4SearchHotkeyToggle.IsOn = _settingsService.Settings.SearchHotkeyEnabled;
+        Step4SearchHotkeyToggle.Toggled += Step4SearchHotkeyToggle_Toggled;
+        RefreshSearchHotkeyText();
 
-        Step5HotkeyToggle.Toggled += Step5HotkeyToggle_Toggled;
-        Step5StartupToggle.Toggled += Step5StartupToggle_Toggled;
+        // Startup toggle
+        Step4StartupToggle.Toggled -= Step4StartupToggle_Toggled;
+        Step4StartupToggle.IsOn = StartupService.IsEnabled();
+        Step4StartupToggle.Toggled += Step4StartupToggle_Toggled;
+
+        // Storage path & pin
+        SetupStep4Storage();
 
         RefreshHotkeyChangeButton();
-        Step5HotkeyChangeButton.IsEnabled = Step5HotkeyToggle.IsOn;
+        Step4HotkeyChangeButton.IsEnabled = Step4HotkeyToggle.IsOn;
 
-        if (Step5HotkeyToggle.IsOn && !_isAnimating)
+        if (Step4HotkeyToggle.IsOn && !_isAnimating)
         {
             StartKeycapPulse();
         }
@@ -51,11 +61,21 @@ public sealed partial class OnboardingWindow
                 _settingsService.Settings.GlobalHotkeyKey),
             _localizationService);
 
-        Step5KeycapText.Text = hotkeyText;
-        Step5HotkeyChangeButton.Content = hotkeyText;
+        Step4KeycapText.Text = hotkeyText;
+        Step4HotkeyChangeButton.Content = hotkeyText;
     }
 
-    private void Step5HotkeyChange_Click(object sender, RoutedEventArgs e)
+    private void RefreshSearchHotkeyText()
+    {
+        string searchText = GlobalHotkeyService.FormatGesture(
+            new GlobalHotkeyGesture(
+                (HotkeyModifierKeys)_settingsService.Settings.SearchHotkeyModifiers,
+                _settingsService.Settings.SearchHotkeyKey),
+            _localizationService);
+        Step4SearchHotkeyText.Text = searchText;
+    }
+
+    private void Step4HotkeyChange_Click(object sender, RoutedEventArgs e)
     {
         BeginHotkeyRecording();
     }
@@ -63,8 +83,8 @@ public sealed partial class OnboardingWindow
     private void BeginHotkeyRecording()
     {
         _isRecordingHotkey = true;
-        Step5HotkeyChangeButton.Content = _localizationService.T("Onboarding.Step5.HotkeyRecording");
-        Step5HotkeyChangeButton.Focus(FocusState.Programmatic);
+        Step4HotkeyChangeButton.Content = _localizationService.T("Onboarding.Step4.HotkeyRecording");
+        Step4HotkeyChangeButton.Focus(FocusState.Programmatic);
     }
 
     private void EndHotkeyRecording()
@@ -160,7 +180,7 @@ public sealed partial class OnboardingWindow
         _ = ApplyRecordedHotkeyAsync(gesture);
     }
 
-    private void Step5HotkeyToggle_Toggled(object sender, RoutedEventArgs e)
+    private void Step4HotkeyToggle_Toggled(object sender, RoutedEventArgs e)
     {
         if (sender is not ToggleSwitch toggle)
         {
@@ -176,7 +196,7 @@ public sealed partial class OnboardingWindow
             _settingsService.Settings.GlobalHotkeyEnabled = toggle.IsOn;
             _settingsService.SaveDebounced();
         }
-        Step5HotkeyChangeButton.IsEnabled = toggle.IsOn;
+        Step4HotkeyChangeButton.IsEnabled = toggle.IsOn;
 
         if (toggle.IsOn)
         {
@@ -186,11 +206,22 @@ public sealed partial class OnboardingWindow
         {
             _keycapPulseStoryboard?.Stop();
             _keycapPulseStoryboard = null;
-            SetElementTransform(Step5Keycap);
+            SetElementTransform(Step4Keycap);
         }
     }
 
-    private void Step5StartupToggle_Toggled(object sender, RoutedEventArgs e)
+    private void Step4SearchHotkeyToggle_Toggled(object sender, RoutedEventArgs e)
+    {
+        if (sender is not ToggleSwitch toggle)
+        {
+            return;
+        }
+
+        _settingsService.Settings.SearchHotkeyEnabled = toggle.IsOn;
+        _settingsService.SaveDebounced();
+    }
+
+    private void Step4StartupToggle_Toggled(object sender, RoutedEventArgs e)
     {
         if (sender is not ToggleSwitch toggle)
         {
@@ -206,7 +237,7 @@ public sealed partial class OnboardingWindow
     {
         _keycapPulseStoryboard?.Stop();
 
-        var transform = GetElementTransform(Step5Keycap);
+        var transform = GetElementTransform(Step4Keycap);
         var storyboard = new Storyboard
         {
             RepeatBehavior = RepeatBehavior.Forever,
@@ -216,8 +247,8 @@ public sealed partial class OnboardingWindow
         var scaleUpX = new DoubleAnimation
         {
             From = 1,
-            To = 1.06,
-            Duration = new Duration(TimeSpan.FromMilliseconds(700)),
+            To = 1.05,
+            Duration = new Duration(TimeSpan.FromMilliseconds(750)),
             EasingFunction = new CubicEase { EasingMode = EasingMode.EaseInOut }
         };
         Storyboard.SetTarget(scaleUpX, transform);
@@ -227,8 +258,8 @@ public sealed partial class OnboardingWindow
         var scaleUpY = new DoubleAnimation
         {
             From = 1,
-            To = 1.06,
-            Duration = new Duration(TimeSpan.FromMilliseconds(700)),
+            To = 1.05,
+            Duration = new Duration(TimeSpan.FromMilliseconds(750)),
             EasingFunction = new CubicEase { EasingMode = EasingMode.EaseInOut }
         };
         Storyboard.SetTarget(scaleUpY, transform);
@@ -240,6 +271,6 @@ public sealed partial class OnboardingWindow
     }
 
     // ════════════════════════════════════════════════════════════
-    //  Step 6: Ready Summary
+    //  Step 5: Ready Summary
     // ════════════════════════════════════════════════════════════
 }

@@ -233,6 +233,26 @@ public sealed partial class WeatherWidgetViewModel : ObservableObject, IDisposab
         private set => SetProperty(ref _locationDisplay, value);
     }
 
+    // P0-2: Indicates the widget is showing a fallback city (not the user's real location).
+    private bool _isUsingFallbackLocation;
+    public bool IsUsingFallbackLocation
+    {
+        get => _isUsingFallbackLocation;
+        private set
+        {
+            if (SetProperty(ref _isUsingFallbackLocation, value))
+            {
+                OnPropertyChanged(nameof(LocationFallbackVisibility));
+            }
+        }
+    }
+
+    public Visibility LocationFallbackVisibility =>
+        _isUsingFallbackLocation ? Visibility.Visible : Visibility.Collapsed;
+
+    public string LocationFallbackTooltip =>
+        _localizationService.T("Weather.LocationFallback");
+
     public bool IsDay
     {
         get => _isDay;

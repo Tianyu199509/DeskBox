@@ -105,6 +105,20 @@
                         </DataTemplate>
                     </ItemsControl.ItemTemplate>
                 </ItemsControl>
+
+                <!-- Empty state hint -->
+                <StackPanel x:Name="EmptyStateHint"
+                            Margin="8,18"
+                            Visibility="Visible">
+                    <FontIcon Glyph="&#xE721;" FontSize="22"
+                              Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                              HorizontalAlignment="Center" Margin="0,0,0,8"/>
+                    <TextBlock x:Name="EmptyStateHintText"
+                               FontSize="11.5"
+                               Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                               TextAlignment="Center"
+                               TextWrapping="Wrap"/>
+                </StackPanel>
             </StackPanel>
         </ScrollViewer>
     </Grid>

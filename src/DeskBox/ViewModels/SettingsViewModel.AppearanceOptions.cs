@@ -584,7 +584,7 @@ public partial class SettingsViewModel
     public bool CanToggleHoverActionMore => CanToggleHoverButtonAction(ShowHoverActionMore);
     public bool CanToggleHoverActionDelete => CanToggleHoverButtonAction(ShowHoverActionDelete);
     public string HoverButtonActionsSummaryText => string.Join(
-        _localizationService.IsEnglish ? ", " : "、",
+        _localizationService.ApiLanguageCode == "zh" ? "、" : ", ",
         AvailableWidgetHoverButtonActions
             .Where(IsHoverButtonActionSelected)
             .Select(GetHoverButtonActionDisplayName));

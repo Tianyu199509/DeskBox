@@ -16,6 +16,7 @@ public sealed class StoreAppUpdateService : IAppUpdateService
     private IReadOnlyList<StorePackageUpdate> _pendingUpdates = [];
 
     public AppUpdateCheckResult? LastCheckResult { get; private set; }
+    public DateTime? LastCheckTimeUtc { get; private set; }
     public event Action<AppUpdateCheckResult>? CheckCompleted;
     public string ManifestUrl => string.Empty;
     public AppUpdateDeliveryKind DeliveryKind => AppUpdateDeliveryKind.MicrosoftStore;
@@ -152,6 +153,7 @@ public sealed class StoreAppUpdateService : IAppUpdateService
     private AppUpdateCheckResult SetLastCheckResult(AppUpdateCheckResult result)
     {
         LastCheckResult = result;
+        LastCheckTimeUtc = DateTime.UtcNow;
         CheckCompleted?.Invoke(result);
         return result;
     }

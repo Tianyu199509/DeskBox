@@ -111,7 +111,8 @@ public sealed class WidgetContentFactory
             "WidgetContent.Search.StatusLabel",
             "WidgetContent.Search.StatusDescription",
             HasSettingsPage: true,
-            SettingsSectionTag: "SearchSettings")
+            SettingsSectionTag: "SearchSettings",
+            DefaultChromeMode: WidgetChromeMode.Overlay)
     ];
 
     private static readonly IReadOnlyDictionary<WidgetKind, WidgetContentDescriptor> Descriptors =

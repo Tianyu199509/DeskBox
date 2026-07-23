@@ -124,15 +124,25 @@
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
-                <TextBlock
+                <StackPanel
                     Grid.Column="0"
-                    FontSize="{Binding CaptionTextSize}"
-                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                    Text="{Binding LocationDisplay}"
-                    TextTrimming="CharacterEllipsis"
-                    TextWrapping="NoWrap"
+                    Orientation="Horizontal"
+                    Spacing="4"
                     VerticalAlignment="Center"
-                    Visibility="{Binding MiniLocationVisibility}" />
+                    Visibility="{Binding MiniLocationVisibility}">
+                    <TextBlock
+                        FontSize="{Binding CaptionTextSize}"
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        Text="{Binding LocationDisplay}"
+                        TextTrimming="CharacterEllipsis"
+                        TextWrapping="NoWrap" />
+                    <FontIcon
+                        FontSize="10"
+                        Glyph="&#xE7BA;"
+                        Foreground="{ThemeResource SystemFillColorCautionBrush}"
+                        Visibility="{Binding LocationFallbackVisibility}"
+                        ToolTipService.ToolTip="{Binding LocationFallbackTooltip}" />
+                </StackPanel>
                 <Button
                     Grid.Column="1"
                     Click="RefreshButton_Click"
@@ -361,6 +371,13 @@
                         Text="{Binding LocationDisplay}"
                         TextTrimming="CharacterEllipsis"
                         TextWrapping="NoWrap" />
+                    <!-- P0-2: Fallback location warning -->
+                    <FontIcon
+                        FontSize="12"
+                        Glyph="&#xE7BA;"
+                        Foreground="{ThemeResource SystemFillColorCautionBrush}"
+                        Visibility="{Binding LocationFallbackVisibility}"
+                        ToolTipService.ToolTip="{Binding LocationFallbackTooltip}" />
                 </StackPanel>
                 <Button
                     Grid.Column="1"
@@ -430,35 +447,35 @@
                     Orientation="Horizontal"
                     Spacing="14">
                     <StackPanel Orientation="Horizontal" Spacing="4" Visibility="{Binding HumidityVisibility}">
-                        <FontIcon FontSize="11" Glyph="&#xE798;" Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
+                        <TextBlock FontSize="11" Text="💧" Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
                         <TextBlock
                             FontSize="{Binding CaptionTextSize}"
                             Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                             Text="{Binding HumidityText}" />
                     </StackPanel>
                     <StackPanel Orientation="Horizontal" Spacing="4" Visibility="{Binding WindVisibility}">
-                        <FontIcon FontSize="11" Glyph="&#xE8BD;" Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
+                        <TextBlock FontSize="11" Text="🌬️" Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
                         <TextBlock
                             FontSize="{Binding CaptionTextSize}"
                             Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                             Text="{Binding WindText}" />
                     </StackPanel>
                     <StackPanel Orientation="Horizontal" Spacing="4" Visibility="{Binding PrecipitationVisibility}">
-                        <FontIcon FontSize="11" Glyph="&#xE755;" Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
+                        <TextBlock FontSize="11" Text="🌧️" Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
                         <TextBlock
                             FontSize="{Binding CaptionTextSize}"
                             Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                             Text="{Binding PrecipitationText}" />
                     </StackPanel>
                     <StackPanel Orientation="Horizontal" Spacing="4" Visibility="{Binding UvIndexVisibility}">
-                        <FontIcon FontSize="11" Glyph="&#xE706;" Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
+                        <TextBlock FontSize="11" Text="☀️" Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
                         <TextBlock
                             FontSize="{Binding CaptionTextSize}"
                             Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                             Text="{Binding UvIndexText}" />
                     </StackPanel>
                     <StackPanel Orientation="Horizontal" Spacing="4" Visibility="{Binding PressureVisibility}">
-                        <FontIcon FontSize="11" Glyph="&#xE9D2;" Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
+                        <TextBlock FontSize="11" Text="📊" Foreground="{ThemeResource TextFillColorTertiaryBrush}" />
                         <TextBlock
                             FontSize="{Binding CaptionTextSize}"
                             Foreground="{ThemeResource TextFillColorSecondaryBrush}"

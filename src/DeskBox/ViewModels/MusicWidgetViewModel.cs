@@ -16,7 +16,7 @@ namespace DeskBox.ViewModels;
 public sealed partial class MusicWidgetViewModel : ObservableObject, IDisposable
 {
     private const int MaxTransientEmptyInfoRetries = 4;
-    private const int ProgressRefreshMs = 1000;
+    private const int ProgressRefreshMs = 500;
 
     private readonly MusicSessionService _musicSessionService;
     private readonly MusicVolumeService _musicVolumeService;
@@ -190,15 +190,30 @@ public sealed partial class MusicWidgetViewModel : ObservableObject, IDisposable
         get => _playbackState;
         private set
         {
-            if (SetProperty(ref _playbackState, value))
+        if (SetProperty(ref _playbackState, value))
+        {
+            OnPropertyChanged(nameof(IsPlaying));
+            OnPropertyChanged(nameof(PlayPauseGlyph));
+            OnPropertyChanged(nameof(PlayIconVisibility));
+            OnPropertyChanged(nameof(PauseIconVisibility));
+            OnPropertyChanged(nameof(PlayPauseTooltip));
+            OnPropertyChanged(nameof(StatusText));
+
+            // Start or stop the progress timer based on playback state.
+            // Also start for Unknown — many players report "Changing" (buffering)
+            // at song start, which maps to Unknown. The audio is already playing
+            // during this window, so the progress bar should keep moving.
+            if (value is MusicPlaybackState.Playing or MusicPlaybackState.Unknown
+                && _isWindowVisible)
             {
-                OnPropertyChanged(nameof(IsPlaying));
-                OnPropertyChanged(nameof(PlayPauseGlyph));
-                OnPropertyChanged(nameof(PlayIconVisibility));
-                OnPropertyChanged(nameof(PauseIconVisibility));
-                OnPropertyChanged(nameof(PlayPauseTooltip));
-                OnPropertyChanged(nameof(StatusText));
+                _progressTimer?.Start();
             }
+            else
+            {
+                _progressTimer?.Stop();
+            }
+            UpdateMusicTimerDiagnostics();
+        }
         }
     }
 
@@ -588,10 +603,37 @@ public sealed partial class MusicWidgetViewModel : ObservableObject, IDisposable
     /// <summary>
     /// Full refresh: reloads everything including cover art.
     /// Triggered by session list changes or media property changes (song change).
+    /// Debounced: SMTC can fire MediaPropertiesChanged multiple times in quick
+    /// succession during a song transition. We coalesce them into a single refresh
+    /// to prevent the title/artist from flickering.
     /// </summary>
+    private int _mediaPropertiesPendingGeneration;
     private void OnSessionsChanged(object? sender, EventArgs e) => ScheduleFullRefresh();
     private void OnCurrentSessionChanged(object? sender, EventArgs e) => ScheduleFullRefresh();
-    private void OnMediaPropertiesChanged(object? sender, EventArgs e) => ScheduleFullRefresh();
+    private void OnMediaPropertiesChanged(object? sender, EventArgs e)
+    {
+        if (_isDisposed) return;
+
+        // Debounce: wait 60ms before refreshing. If another MediaPropertiesChanged
+        // arrives within that window, the previous refresh is superseded.
+        int gen = ++_mediaPropertiesPendingGeneration;
+        if (_dispatcherQueue is not null && !_dispatcherQueue.HasThreadAccess)
+        {
+            _dispatcherQueue.TryEnqueue(() => ScheduleDebouncedMediaRefresh(gen));
+            return;
+        }
+        ScheduleDebouncedMediaRefresh(gen);
+    }
+
+    private async void ScheduleDebouncedMediaRefresh(int generation)
+    {
+        await Task.Delay(60);
+        if (_isDisposed || generation != _mediaPropertiesPendingGeneration)
+        {
+            return;
+        }
+        _ = RefreshAsync();
+    }
 
     /// <summary>
     /// Lightweight refresh: only updates position/duration without reloading cover.
@@ -704,12 +746,22 @@ public sealed partial class MusicWidgetViewModel : ObservableObject, IDisposable
             return;
         }
 
-        if (IsPlaying && Duration > TimeSpan.Zero && !_isSeeking)
+        if (PlaybackState is MusicPlaybackState.Playing or MusicPlaybackState.Unknown &&
+            Duration > TimeSpan.Zero && !_isSeeking)
         {
-            // Extrapolate from the last SMTC-synced position to avoid fighting with SMTC updates
+            // Extrapolate from the last SMTC-synced position so the progress bar
+            // grows smoothly from zero. This also covers the buffering/Changing
+            // window (mapped to Unknown) where the player is actually outputting
+            // audio but SMTC hasn't reported Playing yet.
             double elapsedSinceSync = (DateTimeOffset.UtcNow - _lastPositionSyncAt).TotalSeconds;
             double newPosition = Math.Min(Duration.TotalSeconds, _lastSyncedPosition.TotalSeconds + elapsedSinceSync);
             Position = TimeSpan.FromSeconds(newPosition);
+        }
+        else if (!IsPlaying && Duration > TimeSpan.Zero && !_isSeeking)
+        {
+            // When paused, keep the progress bar synced with the actual SMTC position
+            // by scheduling a lightweight timeline refresh.
+            _ = RefreshTimelineAsync();
         }
     }
 

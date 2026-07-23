@@ -22,11 +22,14 @@ public sealed class FolderWatcherService : IDisposable
     private const int MaxBufferedChangesBeforeReload = 64;
 
     private FileSystemWatcher? _legacyWatcher;
+    private FileSystemWatcher? _desktopIniWatcher;
     private StorageFileQueryResult? _queryWatcher;
     private readonly DispatcherQueueTimer _debounceTimer;
+    private readonly DispatcherQueueTimer _iconDebounceTimer;
     private readonly DispatcherQueue _dispatcherQueue;
     private readonly object _lock = new();
     private readonly List<FolderChange> _pendingChanges = [];
+    private readonly HashSet<string> _pendingIconPaths = new(StringComparer.OrdinalIgnoreCase);
     private bool _requiresFullReload;
 
     /// <summary>
@@ -34,6 +37,13 @@ public sealed class FolderWatcherService : IDisposable
     /// Always raised on the UI thread.
     /// </summary>
     public event Action<FolderChangeBatch>? FolderChanged;
+
+    /// <summary>
+    /// Fired when a direct child folder's desktop.ini changes, which means
+    /// its shell icon may have been customized (e.g. via Folder Painter).
+    /// The argument is the child folder path.  Always raised on the UI thread.
+    /// </summary>
+    public event Action<string>? FolderIconChanged;
 
     /// <summary>
     /// The folder path currently being watched.
@@ -47,6 +57,11 @@ public sealed class FolderWatcherService : IDisposable
         _debounceTimer.Interval = TimeSpan.FromMilliseconds(DebounceDelayMs);
         _debounceTimer.IsRepeating = false;
         _debounceTimer.Tick += DebounceTimer_Tick;
+
+        _iconDebounceTimer = dispatcherQueue.CreateTimer();
+        _iconDebounceTimer.Interval = TimeSpan.FromMilliseconds(DebounceDelayMs);
+        _iconDebounceTimer.IsRepeating = false;
+        _iconDebounceTimer.Tick += IconDebounceTimer_Tick;
     }
 
     /// <summary>
@@ -59,6 +74,8 @@ public sealed class FolderWatcherService : IDisposable
         if (!Directory.Exists(folderPath)) return;
 
         WatchedPath = folderPath;
+
+        StartDesktopIniWatcher(folderPath);
 
         if (await TryStartQueryWatcherAsync(folderPath))
         {
@@ -110,6 +127,71 @@ public sealed class FolderWatcherService : IDisposable
         QueueFullReload();
     }
 
+    /// <summary>
+    /// Starts a recursive watcher that only reports desktop.ini changes.
+    /// A child folder's shell icon is driven by its own desktop.ini, so this
+    /// detects icon customization tools (e.g. Folder Painter) which the
+    /// shallow content watcher above cannot see.
+    /// </summary>
+    private void StartDesktopIniWatcher(string folderPath)
+    {
+        try
+        {
+            _desktopIniWatcher = new FileSystemWatcher
+            {
+                Path = folderPath,
+                Filter = "desktop.ini",
+                NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.FileName |
+                               NotifyFilters.CreationTime,
+                IncludeSubdirectories = true,
+                EnableRaisingEvents = true
+            };
+            _desktopIniWatcher.Created += OnDesktopIniChanged;
+            _desktopIniWatcher.Changed += OnDesktopIniChanged;
+            _desktopIniWatcher.Renamed += OnDesktopIniChanged;
+            _desktopIniWatcher.Error += OnDesktopIniWatcherError;
+        }
+        catch (Exception ex)
+        {
+            App.LogVerbose($"[FolderWatcher] desktop.ini watcher failed for '{folderPath}': {ex.Message}");
+            _desktopIniWatcher = null;
+        }
+    }
+
+    private void OnDesktopIniChanged(object sender, FileSystemEventArgs e)
+    {
+        // Only direct child folders' icons are displayed — ignore deeper
+        // nesting and a desktop.ini sitting at the watched root itself.
+        string? childDir = Path.GetDirectoryName(e.FullPath);
+        if (string.IsNullOrEmpty(childDir))
+        {
+            return;
+        }
+
+        string? parent = Path.GetDirectoryName(childDir);
+        if (!string.Equals(parent, WatchedPath, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        lock (_lock)
+        {
+            if (string.IsNullOrWhiteSpace(WatchedPath))
+            {
+                return;
+            }
+
+            _pendingIconPaths.Add(childDir);
+        }
+
+        _dispatcherQueue.TryEnqueue(() => _iconDebounceTimer.Start());
+    }
+
+    private void OnDesktopIniWatcherError(object sender, ErrorEventArgs e)
+    {
+        App.Log($"[FolderWatcher] desktop.ini watcher error: {e.GetException()}");
+    }
+
     private void StartLegacyWatcher(string folderPath)
     {
         _legacyWatcher = new FileSystemWatcher
@@ -135,10 +217,12 @@ public sealed class FolderWatcherService : IDisposable
     public void Stop()
     {
         _debounceTimer.Stop();
+        _iconDebounceTimer.Stop();
 
         lock (_lock)
         {
             _pendingChanges.Clear();
+            _pendingIconPaths.Clear();
             _requiresFullReload = false;
         }
 
@@ -152,6 +236,17 @@ public sealed class FolderWatcherService : IDisposable
             try { System.Runtime.InteropServices.Marshal.ReleaseComObject(_queryWatcher); }
             catch { }
             _queryWatcher = null;
+        }
+
+        if (_desktopIniWatcher is not null)
+        {
+            _desktopIniWatcher.EnableRaisingEvents = false;
+            _desktopIniWatcher.Created -= OnDesktopIniChanged;
+            _desktopIniWatcher.Changed -= OnDesktopIniChanged;
+            _desktopIniWatcher.Renamed -= OnDesktopIniChanged;
+            _desktopIniWatcher.Error -= OnDesktopIniWatcherError;
+            _desktopIniWatcher.Dispose();
+            _desktopIniWatcher = null;
         }
 
         if (_legacyWatcher is not null)
@@ -240,10 +335,32 @@ public sealed class FolderWatcherService : IDisposable
         FolderChanged?.Invoke(batch);
     }
 
+    private void IconDebounceTimer_Tick(DispatcherQueueTimer sender, object args)
+    {
+        List<string> iconPaths;
+        lock (_lock)
+        {
+            if (string.IsNullOrWhiteSpace(WatchedPath))
+            {
+                return;
+            }
+
+            iconPaths = _pendingIconPaths.ToList();
+            _pendingIconPaths.Clear();
+        }
+
+        foreach (var path in iconPaths)
+        {
+            FolderIconChanged?.Invoke(path);
+        }
+    }
+
     public void Dispose()
     {
         Stop();
         _debounceTimer.Stop();
         _debounceTimer.Tick -= DebounceTimer_Tick;
+        _iconDebounceTimer.Stop();
+        _iconDebounceTimer.Tick -= IconDebounceTimer_Tick;
     }
 }

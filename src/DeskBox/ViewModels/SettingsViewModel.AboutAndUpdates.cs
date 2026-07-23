@@ -42,11 +42,15 @@ public partial class SettingsViewModel
     public string UpdateFallbackUrl => RepositoryUrl + "/releases";
 
     public string ManualUpdateDownloadUrl => GetManualUpdateDownloadUrl(_availableUpdateManifest);
+    public Visibility UpdateAutoCheckVisibility => Visibility.Visible;
     public Visibility UpdateProgressVisibility => IsDownloadingUpdate ? Visibility.Visible : Visibility.Collapsed;
     public Visibility UpdateProgressTextVisibility => IsDownloadingUpdate ? Visibility.Visible : Visibility.Collapsed;
     public Visibility UpdateReleaseNotesVisibility =>
         string.IsNullOrWhiteSpace(AvailableUpdateReleaseNotesUrl) ? Visibility.Collapsed : Visibility.Visible;
     public Visibility ManualUpdateFallbackVisibility => CanOpenManualUpdateDownload ? Visibility.Visible : Visibility.Collapsed;
+    // Aliases for XAML binding compatibility
+    public Visibility UpdateFallbackVisibility => ManualUpdateFallbackVisibility;
+    public bool CanOpenUpdateFallback => CanOpenManualUpdateDownload;
     public Visibility InstallUpdateButtonVisibility => IsDirectInstallerUpdateDelivery ? Visibility.Visible : Visibility.Collapsed;
     public Visibility UpdateReminderBadgeVisibility =>
         _availableUpdateManifest is not null ? Visibility.Visible : Visibility.Collapsed;
@@ -68,12 +72,77 @@ public partial class SettingsViewModel
     public string UpdateFallbackActionText => _localizationService.T("Settings.Update.ManualDownload");
     public string UpdateProgressText => $"{Math.Clamp(UpdateProgressValue, 0, 100):0}%";
 
+    // One-click update properties
+    public string UpdateSummaryText =>
+        _availableUpdateManifest?.GetLocalizedSummary(_localizationService.CurrentCultureName) ?? string.Empty;
+    public Visibility UpdateSummaryVisibility =>
+        _availableUpdateManifest is not null && !string.IsNullOrWhiteSpace(UpdateSummaryText)
+            ? Visibility.Visible : Visibility.Collapsed;
+    public bool HasUpdateAvailable => _availableUpdateManifest is not null;
+    public bool IsUpdateDownloaded =>
+        !string.IsNullOrWhiteSpace(_downloadedUpdateInstallerPath) &&
+        File.Exists(_downloadedUpdateInstallerPath);
+    public Visibility UpdateCardVisibility =>
+        _availableUpdateManifest is not null || _showManualUpdateFallback
+            ? Visibility.Visible : Visibility.Collapsed;
+    public string OneClickActionButtonText
+    {
+        get
+        {
+            if (IsCheckingForUpdates)
+                return _localizationService.T("Settings.Update.Status.Checking");
+            if (IsDownloadingUpdate)
+                return _localizationService.Format("Settings.Update.Status.Downloading", _availableUpdateManifest?.Version ?? "");
+            if (IsUpdateDownloaded)
+                return _localizationService.T("Settings.Update.OneClick.Install");
+            if (_availableUpdateManifest is not null)
+                return _localizationService.Format("Settings.Update.OneClick.UpdateTo", _availableUpdateManifest.Version);
+            return _localizationService.T("Settings.Update.Check");
+        }
+    }
+    public bool IsOneClickActionEnabled => !IsCheckingForUpdates && !IsDownloadingUpdate;
+
     private bool IsStoreUpdateDelivery => _appUpdateService.DeliveryKind == AppUpdateDeliveryKind.MicrosoftStore;
     private bool IsDirectInstallerUpdateDelivery => _appUpdateService.DeliveryKind == AppUpdateDeliveryKind.DirectInstaller;
 
     public void RefreshCachedUpdateState()
     {
         ApplyCachedUpdateResult();
+    }
+
+    /// <summary>
+    /// One-click update action: check → download → ready to install.
+    /// The caller (XAML click handler) is responsible for showing the
+    /// install confirmation dialog when <see cref="IsUpdateDownloaded"/> becomes true.
+    /// </summary>
+    public async Task OneClickUpdateActionAsync()
+    {
+        if (IsCheckingForUpdates || IsDownloadingUpdate)
+        {
+            return;
+        }
+
+        // If already downloaded, the caller should handle install confirmation.
+        if (IsUpdateDownloaded)
+        {
+            return;
+        }
+
+        // If update is available but not yet downloaded, start downloading.
+        if (_availableUpdateManifest is not null)
+        {
+            await DownloadAvailableUpdateAsync();
+            return;
+        }
+
+        // Otherwise, check for updates first.
+        await CheckForUpdatesAsync();
+
+        // If check found an update, auto-start download.
+        if (_availableUpdateManifest is not null && !IsUpdateDownloaded)
+        {
+            await DownloadAvailableUpdateAsync();
+        }
     }
 
     public async Task CheckForUpdatesAsync()
@@ -212,7 +281,7 @@ public partial class SettingsViewModel
             _downloadedUpdateInstallerPath = null;
             _showManualUpdateFallback = false;
             UpdateStatusText = _localizationService.T("Settings.Update.Status.UpToDate");
-            UpdateDetailText = _localizationService.T("Settings.Update.Detail.UpToDate");
+            UpdateDetailText = BuildUpToDateDetailText(result);
         }
         else if (result.Status == AppUpdateCheckStatus.InvalidManifest)
         {
@@ -350,6 +419,14 @@ public partial class SettingsViewModel
         OnPropertyChanged(nameof(ManualUpdateFallbackVisibility));
         OnPropertyChanged(nameof(UpdateReminderBadgeVisibility));
         OnPropertyChanged(nameof(UpdateProgressText));
+        // One-click update properties
+        OnPropertyChanged(nameof(UpdateSummaryText));
+        OnPropertyChanged(nameof(UpdateSummaryVisibility));
+        OnPropertyChanged(nameof(HasUpdateAvailable));
+        OnPropertyChanged(nameof(IsUpdateDownloaded));
+        OnPropertyChanged(nameof(UpdateCardVisibility));
+        OnPropertyChanged(nameof(OneClickActionButtonText));
+        OnPropertyChanged(nameof(IsOneClickActionEnabled));
     }
 
     private string GetReadyUpdateDetailText()
@@ -357,5 +434,40 @@ public partial class SettingsViewModel
         return _localizationService.T(IsStoreUpdateDelivery
             ? "Settings.Update.Detail.StoreReady"
             : "Settings.Update.Detail.Ready");
+    }
+
+    /// <summary>
+    /// Builds the detail line shown under "当前已是最新版本". Replaces the
+    /// old redundant "暂时没有发现可用的新版本" with metadata that actually
+    /// carries information: current version, last check time, distribution channel.
+    /// </summary>
+    private string BuildUpToDateDetailText(AppUpdateCheckResult result)
+    {
+        string version = string.IsNullOrWhiteSpace(result.CurrentVersion) ? AppVersion : result.CurrentVersion;
+        string checkedAt = FormatCheckTime(_appUpdateService.LastCheckTimeUtc);
+        string channel = DistributionChannelText;
+        return _localizationService.Format("Settings.Update.Detail.CurrentVersion", version, checkedAt, channel);
+    }
+
+    private string FormatCheckTime(DateTime? utc)
+    {
+        if (utc is null)
+        {
+            return "—";
+        }
+
+        DateTime local = utc.Value.ToLocalTime();
+        DateTime now = DateTime.Now;
+        if (local.Date == now.Date)
+        {
+            return local.ToString("HH:mm");
+        }
+
+        if (local.Year == now.Year)
+        {
+            return local.ToString("MM-dd HH:mm");
+        }
+
+        return local.ToString("yyyy-MM-dd HH:mm");
     }
 }

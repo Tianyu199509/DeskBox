@@ -13,22 +13,64 @@ public sealed partial class WeatherWidgetViewModel
 {
     private async Task EnsureLocationAsync()
     {
+        IsUsingFallbackLocation = false;
+        string lang = _localizationService.ApiLanguageCode;
+
         if (_settingsService is null)
         {
-            _latitude = 39.9042;
-            _longitude = 116.4074;
-            _locationName = "Beijing";
+            // No settings service: try auto-detect, fall back to a well-known default.
+            var autoLoc = await WindowsLocationHelper.GetLocationAsync(_localizationService);
+            if (autoLoc is not null)
+            {
+                _latitude = autoLoc.Value.Lat;
+                _longitude = autoLoc.Value.Lon;
+                _locationName = RefineLocationName(autoLoc.Value.Lat, autoLoc.Value.Lon, autoLoc.Value.Name, lang);
+            }
+            else
+            {
+                _latitude = 39.9042;
+                _longitude = 116.4074;
+                _locationName = _localizationService.ApiLanguageCode switch { "zh" => "北京", "ja" => "北京", "de" => "Peking", "pt" => "Pequim", _ => "Beijing" };
+                IsUsingFallbackLocation = true;
+            }
             return;
         }
-
+    
         var settings = _settingsService.Settings;
         if (settings.WeatherAutoLocation)
         {
-            // Try Windows location API first
-            var (lat, lon, name) = await WindowsLocationHelper.GetLocationAsync(_localizationService);
-            _latitude = lat;
-            _longitude = lon;
-            _locationName = name;
+            // Try Windows location API + multi-source IP fallback
+            var result = await WindowsLocationHelper.GetLocationAsync(_localizationService);
+            if (result is not null)
+            {
+                _latitude = result.Value.Lat;
+                _longitude = result.Value.Lon;
+                _locationName = RefineLocationName(result.Value.Lat, result.Value.Lon, result.Value.Name, lang);
+                return;
+            }
+    
+            // Auto-location failed: if user has a saved city, use it.
+            // Otherwise fall back to a well-known default so the widget still shows data.
+            App.Log("[Weather] Auto-location failed, using saved city or default");
+            if (!string.IsNullOrWhiteSpace(settings.WeatherCityName))
+            {
+                var item = await _weatherService.ResolveCityAsync(
+                    settings.WeatherCityName,
+                    _localizationService.ApiLanguageCode);
+                if (item is not null)
+                {
+                    _latitude = item.Latitude;
+                    _longitude = item.Longitude;
+                    _locationName = item.DisplayName;
+                    return;
+                }
+            }
+    
+            // Last resort: use a neutral default so the widget renders something.
+            _latitude = 39.9042;
+            _longitude = 116.4074;
+            _locationName = _localizationService.ApiLanguageCode switch { "zh" => "北京", "ja" => "北京", "de" => "Peking", "pt" => "Pequim", _ => "Beijing" };
+            IsUsingFallbackLocation = true;
         }
         else
         {
@@ -45,7 +87,7 @@ public sealed partial class WeatherWidgetViewModel
                 {
                     var item = await _weatherService.ResolveCityAsync(
                         settings.WeatherCityName,
-                        _localizationService.IsEnglish ? "en" : "zh");
+                        _localizationService.ApiLanguageCode);
                     if (item is not null)
                     {
                         _latitude = item.Latitude;
@@ -60,7 +102,8 @@ public sealed partial class WeatherWidgetViewModel
                 {
                     _latitude = 39.9042;
                     _longitude = 116.4074;
-                    _locationName = _localizationService.IsEnglish ? "Beijing" : "\u5317\u4EAC";
+                    _locationName = _localizationService.ApiLanguageCode switch { "zh" => "北京", "ja" => "北京", "de" => "Peking", "pt" => "Pequim", _ => "Beijing" };
+                    IsUsingFallbackLocation = true;
                 }
             }
         }
@@ -74,55 +117,42 @@ public sealed partial class WeatherWidgetViewModel
         }
 
         var current = data.Current;
-        bool isEnglish = _localizationService.IsEnglish;
-
+        
         IsDay = current.IsDay == 1;
         CurrentWeatherCode = current.WeatherCode;
         CurrentCondition = WeatherCodeMapper.GetCondition(current.WeatherCode);
         CurrentEmoji = WeatherCodeMapper.GetEmoji(current.WeatherCode, IsDay);
         CurrentIconGlyph = WeatherCodeMapper.GetGlyph(current.WeatherCode, IsDay);
-        CurrentDescription = isEnglish
-            ? WeatherCodeMapper.GetDescriptionEn(current.WeatherCode)
-            : WeatherCodeMapper.GetDescriptionZh(current.WeatherCode);
+        CurrentDescription = WeatherCodeMapper.GetDescription(current.WeatherCode, _localizationService.CurrentCultureName);
         CurrentTemperatureText = FormatTemperature(current.Temperature);
-
-        ApparentTemperatureText = isEnglish
-            ? $"Feels {FormatTemperature(current.ApparentTemperature)}"
-            : $"\u4F53\u611F {FormatTemperature(current.ApparentTemperature)}";
-
-        HumidityText = isEnglish
-            ? $"{(int)current.Humidity}%"
-            : $"\u6E7F\u5EA6 {(int)current.Humidity}%";
-
-        WindText = isEnglish
-            ? $"{FormatWindSpeed(current.WindSpeed)} {GetWindDirectionText(current.WindDirection, isEnglish)}"
-            : $"{FormatWindSpeed(current.WindSpeed)} {GetWindDirectionText(current.WindDirection, isEnglish)}";
-
-        PressureText = isEnglish
-            ? $"{(int)current.Pressure} hPa"
-            : $"\u6C14\u538B {(int)current.Pressure} hPa";
-
+        
+        ApparentTemperatureText = _localizationService.Format("Weather.FeelsLike", FormatTemperature(current.ApparentTemperature));
+        
+        HumidityText = _localizationService.Format("Weather.HumidityLabel", $"{(int)current.Humidity}%");
+        
+        WindText = $"{FormatWindSpeed(current.WindSpeed)} {GetWindDirectionText(current.WindDirection)}";
+        
+        PressureText = _localizationService.Format("Weather.PressureLabel", $"{(int)current.Pressure} hPa");
+        
         LocationDisplay = string.IsNullOrWhiteSpace(data.LocationName)
             ? _locationName
             : data.LocationName;
-
+        
         // Daily forecast
         if (data.Daily is not null)
         {
-            PopulateDailyForecast(data.Daily, isEnglish);
-
+            PopulateDailyForecast(data.Daily);
+        
             if (data.Daily.UvIndexMax.Count > 0)
             {
                 double uv = data.Daily.UvIndexMax[0];
-                UvIndexText = isEnglish ? $"UV {uv:0}" : $"\u7D2B\u5916 {uv:0}";
+                UvIndexText = _localizationService.Format("Weather.UVLabel", $"{uv:0}");
             }
-
+        
             if (data.Daily.PrecipitationProbabilityMax.Count > 0)
             {
                 double precip = data.Daily.PrecipitationProbabilityMax[0];
-                PrecipitationText = isEnglish
-                    ? $"{(int)precip}% rain"
-                    : $"\u964D\u6C34\u6982\u7387 {(int)precip}%";
+                PrecipitationText = _localizationService.Format("Weather.PrecipChance", $"{(int)precip}%");
             }
 
             if (data.Daily.Sunrise.Count > 0)
@@ -208,11 +238,11 @@ public sealed partial class WeatherWidgetViewModel
         OnPropertyChanged(nameof(RichBackdropBottomColor));
     }
 
-    private void PopulateDailyForecast(WeatherDaily daily, bool isEnglish)
+    private void PopulateDailyForecast(WeatherDaily daily)
     {
         DailyForecast.Clear();
         int count = Math.Min(daily.Time.Count, 7);
-
+    
         // First pass: find the overall weekly min/max for the temperature range bar
         double weekMin = double.MaxValue, weekMax = double.MinValue;
         for (int i = 0; i < count; i++)
@@ -224,7 +254,8 @@ public sealed partial class WeatherWidgetViewModel
         }
         double weekRange = weekMax - weekMin;
         if (weekRange < 1) weekRange = 1; // avoid division by zero
-
+    
+        string lang = _localizationService.CurrentCultureName;
         for (int i = 0; i < count; i++)
         {
             string dateStr = i < daily.Time.Count ? daily.Time[i] : string.Empty;
@@ -232,34 +263,32 @@ public sealed partial class WeatherWidgetViewModel
             double tempMax = i < daily.TemperatureMax.Count ? daily.TemperatureMax[i] : 0;
             double tempMin = i < daily.TemperatureMin.Count ? daily.TemperatureMin[i] : 0;
             double precipProb = i < daily.PrecipitationProbabilityMax.Count ? daily.PrecipitationProbabilityMax[i] : 0;
-
+    
             string dayLabel;
             if (i == 0)
             {
-                dayLabel = isEnglish ? "Today" : "\u4ECA\u5929";
+                dayLabel = _localizationService.T("Weather.Today");
             }
             else if (i == 1)
             {
-                dayLabel = isEnglish ? "Tomorrow" : "\u660E\u5929";
+                dayLabel = _localizationService.T("Weather.Tomorrow");
             }
             else
             {
-                dayLabel = ParseDateToDayLabel(dateStr, isEnglish);
+                dayLabel = ParseDateToDayLabel(dateStr, lang);
             }
-
+    
             double barOffset = (tempMin - weekMin) / weekRange;
             double barWidth = (tempMax - tempMin) / weekRange;
             barOffset = Math.Clamp(barOffset, 0, 1);
             barWidth = Math.Clamp(barWidth, 0.04, 1); // minimum visible width
-
+    
             DailyForecast.Add(new WeatherDayViewModel
             {
                 DayLabel = dayLabel,
                 Emoji = WeatherCodeMapper.GetEmoji(wmoCode, isDay: true),
                 IconGlyph = WeatherCodeMapper.GetGlyph(wmoCode, isDay: true),
-                Description = isEnglish
-                    ? WeatherCodeMapper.GetDescriptionEn(wmoCode)
-                    : WeatherCodeMapper.GetDescriptionZh(wmoCode),
+                Description = WeatherCodeMapper.GetDescription(wmoCode, lang),
                 TempMaxText = FormatTemperature(tempMax),
                 TempMinText = FormatTemperature(tempMin),
                 PrecipitationText = $"{(int)precipProb}%",
@@ -360,15 +389,20 @@ public sealed partial class WeatherWidgetViewModel
         }
     }
 
-    private static string ParseDateToDayLabel(string dateStr, bool isEnglish)
+    private static string ParseDateToDayLabel(string dateStr, string language)
     {
         try
         {
             var dt = DateTimeOffset.Parse(dateStr);
-            string[] zhDays = ["\u5468\u65E5", "\u5468\u4E00", "\u5468\u4E8C", "\u5468\u4E09", "\u5468\u56DB", "\u5468\u4E94", "\u5468\u516D"];
-            string[] enDays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-            int dayOfWeek = ((int)dt.DayOfWeek + 6) % 7;
-            return isEnglish ? enDays[dayOfWeek] : zhDays[dayOfWeek];
+            var culture = language switch
+            {
+                "zh-CN" => new System.Globalization.CultureInfo("zh-CN"),
+                "ja-JP" => new System.Globalization.CultureInfo("ja-JP"),
+                "de-DE" => new System.Globalization.CultureInfo("de-DE"),
+                "pt-BR" => new System.Globalization.CultureInfo("pt-BR"),
+                _ => new System.Globalization.CultureInfo("en-US")
+            };
+            return dt.ToString("ddd", culture);
         }
         catch
         {
@@ -408,11 +442,34 @@ public sealed partial class WeatherWidgetViewModel
         return $"{Math.Round(value, 1)} {unit}";
     }
 
-    private static string GetWindDirectionText(double direction, bool isEnglish)
+    private string GetWindDirectionText(double direction)
     {
-        string[] zhDirs = ["\u5317", "\u4E1C\u5317", "\u4E1C", "\u4E1C\u5357", "\u5357", "\u897F\u5357", "\u897F", "\u897F\u5317"];
-        string[] enDirs = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
+        string[] keys = ["Weather.Wind.N", "Weather.Wind.NE", "Weather.Wind.E", "Weather.Wind.SE", "Weather.Wind.S", "Weather.Wind.SW", "Weather.Wind.W", "Weather.Wind.NW"];
         int index = (int)Math.Round(direction / 45) % 8;
-        return isEnglish ? enDirs[index] : zhDirs[index];
+        return _localizationService.T(keys[index]);
+    }
+
+    /// <summary>
+    /// P2-1: Refines the IP-location city name by looking up the nearest city
+    /// in the local database. If a close match is found (within 80 km),
+    /// returns the localized database name; otherwise keeps the original.
+    /// </summary>
+    private static string RefineLocationName(double lat, double lon, string originalName, string language)
+    {
+        try
+        {
+            var nearest = Services.CitySearchService.GetNearestCityName(lat, lon, language);
+            if (!string.IsNullOrEmpty(nearest))
+            {
+                App.Log($"[Weather] Refined location name: '{originalName}' → '{nearest}'");
+                return nearest;
+            }
+        }
+        catch (Exception ex)
+        {
+            App.Log($"[Weather] RefineLocationName failed: {ex.Message}");
+        }
+
+        return originalName;
     }
 }

@@ -2,7 +2,9 @@ namespace DeskBox.Models;
 
 using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.IO;
+using System.Runtime.CompilerServices;
 using Microsoft.UI.Xaml.Media;
 
 /// <summary>
@@ -223,7 +225,7 @@ public sealed class SearchRecommendationItem
 /// extension-semantic tabs (Apps/Documents/...) when a query is active, Kind-semantic
 /// tabs (Todo/Note/File/Folder) plus recent-content tabs in the empty state.
 /// </summary>
-public sealed class SearchTabItem
+public sealed class SearchTabItem : INotifyPropertyChanged
 {
     public required string Id { get; init; }
     public required string DisplayName { get; init; }
@@ -235,6 +237,15 @@ public sealed class SearchTabItem
     /// <summary>Whether this tab shows the sortable file columns (size/date).</summary>
     public bool SupportsFileSort { get; init; }
 
+    private int _count;
     /// <summary>Number of results currently in this tab (shown as a badge).</summary>
-    public int Count { get; set; }
+    public int Count
+    {
+        get => _count;
+        set { if (_count != value) { _count = value; OnPropertyChanged(); } }
+    }
+
+    public event PropertyChangedEventHandler? PropertyChanged;
+    private void OnPropertyChanged([CallerMemberName] string? name = null)
+        => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
 }

@@ -11,6 +11,7 @@ public enum AppUpdateDeliveryKind
 public interface IAppUpdateService
 {
     AppUpdateCheckResult? LastCheckResult { get; }
+    DateTime? LastCheckTimeUtc { get; }
     event Action<AppUpdateCheckResult>? CheckCompleted;
     string ManifestUrl { get; }
     AppUpdateDeliveryKind DeliveryKind { get; }
