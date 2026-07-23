@@ -414,6 +414,7 @@ settings.WeatherRefreshIntervalMinutes = 60;
         settings.SearchShowRecommendations = true;
         settings.SearchMaxResults = 200;
         settings.SearchDefaultTab = "all";
+        settings.SearchSaveHistory = true;
         settings.SearchPopupCustomX = null;
         settings.SearchPopupCustomY = null;
         settings.SearchPopupCustomWidth = null;

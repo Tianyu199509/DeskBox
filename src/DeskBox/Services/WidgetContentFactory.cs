@@ -112,7 +112,7 @@ public sealed class WidgetContentFactory
             "WidgetContent.Search.StatusDescription",
             HasSettingsPage: true,
             SettingsSectionTag: "SearchSettings",
-            DefaultChromeMode: WidgetChromeMode.Overlay)
+            DefaultChromeMode: WidgetChromeMode.Standard)
     ];
 
     private static readonly IReadOnlyDictionary<WidgetKind, WidgetContentDescriptor> Descriptors =
