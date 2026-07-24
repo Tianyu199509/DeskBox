@@ -4,6 +4,7 @@ using DeskBox.Helpers;
 using DeskBox.Models;
 using DeskBox.Services;
 using Microsoft.UI;
+using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
@@ -39,11 +40,74 @@ public sealed partial class WidgetWindow
     // ── Real-time reorder state ──
     private bool _isReorderDragActive;
     private string[] _reorderDragPaths = [];
+    private DataPackageView? _pendingDropDataView;
 
-    private void RootGrid_DragOver(object sender, DragEventArgs e)
+    // ── Drop poll (compensates for WinUI 3 Drop not firing) ──
+    // WinUI 3's managed Drop event sometimes fails to fire for non-Chromium
+    // OLE drag sources (e.g., WeChat chat files). DragOver only fires on
+    // mouse movement, and DispatcherQueueTimer doesn't fire during OLE's
+    // modal message loop, so neither can detect release when the mouse is
+    // stationary. A dedicated background thread polls GetAsyncKeyState
+    // (VK_LBUTTON) independently of the message pump and marshals the result
+    // back to the UI thread.
+    //
+    // Key insight: the DataPackageView becomes invalid AFTER the OLE drag
+    // ends. So the poll thread can't read it. Instead, we pre-cache paths
+    // during DragOver (when data is still valid) and the poll thread uses
+    // the cached paths.
+    private CancellationTokenSource? _dropPollCts;
+    private bool _isManualDropInProgress;
+    private string[]? _cachedDropPaths;
+    private bool _isCachingDropPaths;
+
+    private async void RootGrid_DragOver(object sender, DragEventArgs e)
     {
         e.Handled = true;
         ClearFolderDropTarget();
+
+        // WORKAROUND: WinUI 3's Drop event sometimes fails to fire for non-Chromium
+        // OLE drag sources (e.g., WeChat chat files). Detect mouse-button release
+        // inside DragOver and process the drop manually when that happens.
+        // The poll timer (_dropPollTimer) also monitors for release in case
+        // DragOver doesn't fire again after the button is released.
+        bool isLeftButtonReleased = !Win32Helper.IsKeyDown(0x01);
+        if (isLeftButtonReleased && _pendingDropDataView is not null && !_isManualDropInProgress)
+        {
+            var capturedView = _pendingDropDataView;
+            _pendingDropDataView = null;
+            _isManualDropInProgress = true;
+            StopDropPoll();
+            StopDragHighlight();
+
+            App.Log("[DropDiagnostic] Detected mouse release in DragOver — processing drop manually");
+            try
+            {
+                var paths = await GetDropPathsAsync(capturedView);
+                App.Log($"[DropDiagnostic] Manual drop pathCount={paths.Length} paths=[{string.Join("|", paths)}]");
+                if (paths.Length > 0)
+                {
+                    await ProcessManualDropAsync(paths);
+                }
+            }
+            catch (Exception ex)
+            {
+                App.Log($"[DropDiagnostic] Manual drop failed: {ex}");
+            }
+            finally
+            {
+                _isManualDropInProgress = false;
+            }
+            return;
+        }
+
+        _pendingDropDataView = e.DataView;
+        EnsureDropPoll();
+
+        // Pre-cache drop paths while the DataPackageView is still valid
+        // (during DragOver, inside the OLE modal loop). The poll thread
+        // will use these cached paths when it detects mouse release,
+        // because by then the DataPackageView will be invalid.
+        TryCacheDropPaths(e.DataView);
 
         if (_isMigrationBusy)
         {
@@ -100,6 +164,13 @@ private void RootGrid_DragEnter(object sender, DragEventArgs e)
 {
 LogDropDiagnostic("RootDragEnter", e.DataView, e.AcceptedOperation, !string.IsNullOrEmpty(ViewModel.MappedFolderPath));
 StartDragHighlight();
+_cachedDropPaths = null;
+_isCachingDropPaths = false;
+_pendingDropDataView = e.DataView;
+EnsureDropPoll();
+
+// Pre-cache drop paths while data is still valid.
+TryCacheDropPaths(e.DataView);
 }
 
     private string GetRootFolderDropCaptionKey()
@@ -149,24 +220,34 @@ StartDragHighlight();
 
 private void RootGrid_DragLeave(object sender, DragEventArgs e)
 {
-e.Handled = true;
-ClearFolderDropTarget();
-StopDragHighlight();
-_lastRootDragDiagnosticSignature = null;
+    e.Handled = true;
+    App.Log("[DropDiagnostic] RootGrid_DragLeave fired");
+    // DON'T clear _pendingDropDataView or stop the poll here.
+    // When the OLE drag ends (button released), WinUI 3 may fire DragLeave
+    // instead of Drop (the bug). If we clear the data now, the background
+    // poll thread can't process the drop. Instead, let the poll thread detect
+    // the release and process it. The poll thread will clean up itself.
+    ClearFolderDropTarget();
+    StopDragHighlight();
+    _lastRootDragDiagnosticSignature = null;
 
-// Persist any real-time reordering that was done during DragOver.
-if (_isReorderDragActive)
-{
-_isReorderDragActive = false;
-_reorderDragPaths = [];
-ViewModel.PersistManualOrder();
-}
+    // Persist any real-time reordering that was done during DragOver.
+    if (_isReorderDragActive)
+    {
+        _isReorderDragActive = false;
+        _reorderDragPaths = [];
+        ViewModel.PersistManualOrder();
+    }
 }
 
 private async void RootGrid_Drop(object sender, DragEventArgs e)
 {
-e.Handled = true;
-ClearFolderDropTarget();
+    e.Handled = true;
+    _pendingDropDataView = null;
+    _cachedDropPaths = null;
+    _isCachingDropPaths = false;
+    StopDropPoll();
+    ClearFolderDropTarget();
 StopDragHighlight();
         _lastRootDragDiagnosticSignature = null;
 
@@ -582,6 +663,243 @@ StopDragHighlight();
         }
 
         ViewModel.MoveItemForReorder(draggedItem, targetIndex);
+    }
+
+    // ── Drop poll (background thread) ─────────────────────────
+
+    /// <summary>
+    /// Starts a background thread that polls GetAsyncKeyState(VK_LBUTTON)
+    /// to detect mouse-button release during an OLE drag. The DispatcherQueue
+    /// timer approach doesn't work because OLE's modal message loop prevents
+    /// it from firing. A background thread is independent of the message pump.
+    /// </summary>
+    private void EnsureDropPoll()
+    {
+        if (_dropPollCts is not null)
+        {
+            return; // Already polling
+        }
+
+        _dropPollCts = new CancellationTokenSource();
+        var token = _dropPollCts.Token;
+        App.Log("[DropDiagnostic] Drop poll thread starting (v2-background)");
+
+        Task.Run(async () =>
+        {
+            try
+            {
+                // Safety timeout: stop after 5 seconds to avoid orphan threads
+                // and minimize interference with Z-order's GetAsyncKeyState usage.
+                var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(token);
+                timeoutCts.CancelAfter(TimeSpan.FromSeconds(5));
+
+                while (!timeoutCts.Token.IsCancellationRequested)
+                {
+                    await Task.Delay(30, timeoutCts.Token);
+
+                    // Button still held — keep polling.
+                    if (Win32Helper.IsKeyDown(0x01))
+                    {
+                        continue;
+                    }
+
+                    // Button released! Marshal to UI thread.
+                    App.Log("[DropDiagnostic] Poll thread detected button release, marshaling to UI");
+                    DispatcherQueue.TryEnqueue(OnDropPollDetectedRelease);
+                    return;
+                }
+
+                // Timed out — clean up silently.
+                if (!token.IsCancellationRequested)
+                {
+                    App.Log("[DropDiagnostic] Drop poll thread timed out after 30s");
+                    DispatcherQueue.TryEnqueue(() =>
+                    {
+                        _pendingDropDataView = null;
+                        StopDropPoll();
+                    });
+                }
+            }
+            catch (TaskCanceledException)
+            {
+                // Normal — drag left / completed normally.
+            }
+            catch (Exception ex)
+            {
+                App.Log($"[DropDiagnostic] Drop poll thread crashed: {ex.Message}");
+            }
+        }, token);
+    }
+
+    /// <summary>
+    /// Stops the background drop poll if running.
+    /// </summary>
+    private void StopDropPoll()
+    {
+        if (_dropPollCts is null)
+        {
+            return;
+        }
+
+        App.Log("[DropDiagnostic] StopDropPoll called");
+        try
+        {
+            _dropPollCts.Cancel();
+        }
+        catch
+        {
+        }
+        _dropPollCts = null;
+    }
+
+    /// <summary>
+    /// Called on the UI thread when the background poll detects that the
+    /// left mouse button was released during an active drag-over.
+    /// Uses pre-cached paths (extracted during DragOver when data was valid)
+    /// because the DataPackageView is already invalid by this point.
+    /// </summary>
+    private async void OnDropPollDetectedRelease()
+    {
+        // Grace period: let the normal Drop event fire first.
+        // For sources where WinUI 3's Drop works (browser, Explorer), the
+        // Drop handler will clear _pendingDropDataView within this window.
+        await Task.Delay(80);
+
+        if (_pendingDropDataView is null || _isManualDropInProgress)
+        {
+            // Normal Drop event already handled it.
+            return;
+        }
+
+        _pendingDropDataView = null;
+        _isManualDropInProgress = true;
+        StopDropPoll();
+        StopDragHighlight();
+        ClearFolderDropTarget();
+        _lastRootDragDiagnosticSignature = null;
+
+        if (_isMigrationBusy)
+        {
+            App.Log("[DropDiagnostic] Mouse release detected via poll but migration busy — ignoring");
+            _isManualDropInProgress = false;
+            return;
+        }
+
+        // Use cached paths — the DataPackageView is invalid by now.
+        var paths = _cachedDropPaths ?? [];
+        _cachedDropPaths = null;
+        App.Log($"[DropDiagnostic] Detected mouse release via poll thread — using cached paths count={paths.Length}");
+        if (paths.Length > 0)
+        {
+            try
+            {
+                await ProcessManualDropAsync(paths);
+            }
+            catch (Exception ex)
+            {
+                App.Log($"[DropDiagnostic] Poll-based manual drop failed: {ex}");
+            }
+        }
+        else
+        {
+            App.Log("[DropDiagnostic] Poll-based manual drop: no cached paths available");
+        }
+        _isManualDropInProgress = false;
+    }
+
+    /// <summary>
+    /// Pre-extracts file paths from the DataPackageView during DragOver,
+    /// while the data is still valid (inside the OLE modal loop).
+    /// The result is stored in _cachedDropPaths for later use by the
+    /// poll thread when it detects mouse release.
+    /// </summary>
+    private void TryCacheDropPaths(DataPackageView dataView)
+    {
+        if (_cachedDropPaths is not null || _isCachingDropPaths)
+        {
+            return;
+        }
+
+        if (!HasPathDropData(dataView))
+        {
+            return;
+        }
+
+        _isCachingDropPaths = true;
+        // Capture the view and extract paths asynchronously.
+        var capturedView = dataView;
+        Task.Run(async () =>
+        {
+            string[]? result = null;
+            try
+            {
+                result = await GetDropPathsAsync(capturedView);
+                App.Log($"[DropDiagnostic] Pre-cache extracted paths count={result.Length}");
+            }
+            catch (Exception ex)
+            {
+                App.Log($"[DropDiagnostic] Pre-cache failed: {ex.Message}");
+            }
+
+            _cachedDropPaths = result ?? [];
+            _isCachingDropPaths = false;
+        });
+    }
+
+    /// <summary>
+    /// Processes a manual drop (from the DragOver workaround or the poll timer).
+    /// If the cursor is over a folder item, transfers files into that folder;
+    /// otherwise imports into the widget root.
+    /// </summary>
+    private async Task ProcessManualDropAsync(IReadOnlyList<string> paths)
+    {
+        // Check if the cursor is over a folder item — if so, transfer into it
+        // (mirrors OnNativeDrop's folder-drop logic).
+        if (Win32Helper.GetCursorPos(out var cursor) &&
+            TryGetFolderItemAtScreenPoint(cursor.X, cursor.Y, out _, out var folderItem))
+        {
+            App.Log($"[DropDiagnostic] Manual drop → folder='{folderItem.Name}' path='{folderItem.Path}'");
+            bool showOverlay = ShouldShowImportOverlay(paths);
+            if (showOverlay)
+            {
+                SetImportBusy(true);
+            }
+            try
+            {
+                bool move = ShouldMoveForAcceptedOperation(
+                    NormalizePathDropOperation(DataPackageOperation.Copy | DataPackageOperation.Move, movesIntoFolder: true));
+                App.Log($"[DropDiagnostic] Manual folder drop move={move} sourceCount={paths.Count}");
+                var results = await App.Current.FileService.TransferItemsWithResultAsync(
+                    paths, folderItem.Path, move);
+                App.Log($"[DropDiagnostic] Manual folder drop results.Count={results.Count}");
+
+                if (!string.IsNullOrWhiteSpace(ViewModel.MappedFolderPath))
+                {
+                    await ViewModel.RefreshFromConfigAsync();
+                }
+
+                ShowStatusToast(_localizationService.Format(
+                    move ? "Widget.MovedToFolder" : "Widget.CopiedToFolder",
+                    folderItem.Name,
+                    results.Count));
+            }
+            catch (Exception ex)
+            {
+                App.Log($"[DropDiagnostic] Manual folder drop failed: {ex}");
+            }
+            finally
+            {
+                if (showOverlay)
+                {
+                    SetImportBusy(false);
+                }
+            }
+            return;
+        }
+
+        // Not over a folder — import into the widget root.
+        App.Log($"[DropDiagnostic] Manual drop → root import, mapped='{ViewModel.MappedFolderPath}'");
+        await ImportNativeDropPathsAsync(paths);
     }
 
     /// <summary>

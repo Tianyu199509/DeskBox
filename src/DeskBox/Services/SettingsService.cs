@@ -258,6 +258,8 @@ public const string WeatherDefaultViewToday = "Today";
 public const string WeatherDefaultViewWeek = "Week";
 public const string WeatherSkinStandard = "Standard";
 public const string WeatherSkinRich = "Rich";
+public const string WeatherDataSourceMsn = "MSN";
+public const string WeatherDataSourceOpenMeteo = "OpenMeteo";
 public const int WeatherRefreshMinMinutes = 15;
 public const int WeatherRefreshMaxMinutes = 180;
 

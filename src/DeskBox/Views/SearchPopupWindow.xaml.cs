@@ -1402,9 +1402,7 @@ public sealed partial class SearchPopupWindow : Window
             ? Visibility.Visible
             : Visibility.Collapsed;
 
-        HomeSectionHeader.Visibility = showRecommendedApps
-            ? Visibility.Visible
-            : Visibility.Collapsed;
+        HomeSectionHeader.Visibility = Visibility.Collapsed;
 
         RecommendationPanel.Visibility = Visibility.Collapsed;
 

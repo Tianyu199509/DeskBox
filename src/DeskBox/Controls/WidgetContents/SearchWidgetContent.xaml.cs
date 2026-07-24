@@ -47,7 +47,23 @@ public sealed partial class SearchWidgetContent : UserControl
         UpdateContent();
 
         _localizationService.LanguageChanged += OnLanguageChanged;
-        Unloaded += (_, _) => _localizationService.LanguageChanged -= OnLanguageChanged;
+
+        // Live-sync with search history: when the popup records a new query (or clears
+        // history), refresh this widget so the user sees it without re-opening.
+        var historyService = App.Current.SearchHistoryService;
+        if (historyService is not null)
+        {
+            historyService.RecentQueriesChanged += OnHistoryChanged;
+        }
+
+        Unloaded += (_, _) =>
+        {
+            _localizationService.LanguageChanged -= OnLanguageChanged;
+            if (historyService is not null)
+            {
+                historyService.RecentQueriesChanged -= OnHistoryChanged;
+            }
+        };
     }
 
     private void OnLanguageChanged()
@@ -66,6 +82,7 @@ public sealed partial class SearchWidgetContent : UserControl
     public void UpdateContent()
     {
         PlaceholderText.Text = _localizationService.T("Search.Placeholder");
+        ClearHistoryLabel.Text = _localizationService.T("Widget.Search.Clear");
         UpdateSearchIcon();
         UpdateHotkeyBadge();
         UpdateHistoryList();
@@ -94,31 +111,25 @@ public sealed partial class SearchWidgetContent : UserControl
         HistoryList.Visibility = queries.Count > 0
             ? Visibility.Visible
             : Visibility.Collapsed;
+        UpdateClearButtonVisibility();
         UpdateEmptyStateHint();
     }
 
     /// <summary>
-    /// Loads a compact set of recommendation cards into the widget body.
+    /// Loads a compact set of recently-opened result cards into the widget body.
     /// </summary>
     public async Task LoadRecommendationsAsync()
     {
         try
         {
-            var engine = App.Current.SearchEngineService;
-            if (engine is null)
-            {
-                RecommendationsList.Visibility = Visibility.Collapsed;
-                return;
-            }
-
-            var recommendations = await engine.GetRecommendationsAsync();
-
-            // Actual usage comes first; generated suggestions only fill the remaining
-            // compact preview slots.
+            // The widget body shows ONLY items the user actually opened (recent
+            // results). Auto-generated Start Menu app shortcuts (.lnk) are NOT shown
+            // here: they reappear on every refresh and the user perceived them as
+            // un-clearable "garbage". App recommendations remain available in the
+            // search popup, which is the right place for discovery.
             var recent = App.Current.SearchHistoryService?.RecentResults
                 ?? Array.Empty<SearchRecommendationItem>();
             var preview = recent
-                .Concat(recommendations)
                 .Where(r => r.Kind != SearchResultKind.Action)
                 .GroupBy(r => $"{r.Kind}:{r.DetailPath}:{r.TodoItemId}:{r.QuickCaptureItemId}:{r.Title}",
                     StringComparer.OrdinalIgnoreCase)
@@ -140,19 +151,46 @@ public sealed partial class SearchWidgetContent : UserControl
         {
             RecommendationsList.Visibility = Visibility.Collapsed;
         }
+        UpdateClearButtonVisibility();
         UpdateEmptyStateHint();
     }
 
     private void UpdateEmptyStateHint()
     {
-        // Show the empty-state prompt whenever there is no search history. This is
-        // independent of recommendations: the user explicitly asked for a hint
-        // when "搜索记录为空". The XAML default is Visible so the prompt is
-        // already showing before this method is ever called; this method only
-        // ever needs to *hide* the prompt (when there IS history).
-        bool hasNoHistory = HistoryList.Visibility == Visibility.Collapsed;
-        EmptyStateHint.Visibility = hasNoHistory ? Visibility.Visible : Visibility.Collapsed;
+        // Hide the empty-state prompt whenever there is ANY content to show — either
+        // recent search history or result cards. Showing the "type a keyword" hint
+        // alongside real entries is confusing.
+        bool hasContent = HistoryList.Visibility == Visibility.Visible ||
+                          RecommendationsList.Visibility == Visibility.Visible;
+        EmptyStateHint.Visibility = hasContent ? Visibility.Collapsed : Visibility.Visible;
         EmptyStateHintText.Text = _localizationService.T("Widget.Search.EmptyHint");
+    }
+
+    /// <summary>
+    /// Shows the clear-history footer button whenever there is anything to clear:
+    /// recent query history OR recommendation/result cards. Hidden only when the
+    /// widget body is completely empty, so it never sits alone under the search bar.
+    /// </summary>
+    private void UpdateClearButtonVisibility()
+    {
+        ClearHistoryButton.Visibility =
+            (HistoryList.Visibility == Visibility.Visible ||
+             RecommendationsList.Visibility == Visibility.Visible)
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+    }
+
+    /// <summary>
+    /// Called when SearchHistoryService reports a change (query recorded or history
+    /// cleared) — typically because the user searched in the popup. Marshals back to
+    /// the UI thread and refreshes history + recommendations so the widget stays live.
+    /// </summary>
+    private void OnHistoryChanged()
+    {
+        if (DispatcherQueue.HasThreadAccess)
+            UpdateContent();
+        else
+            DispatcherQueue.TryEnqueue(UpdateContent);
     }
 
     public void ApplyAppearance()
@@ -253,6 +291,17 @@ public sealed partial class SearchWidgetContent : UserControl
             App.Current.OpenSearchPopupWithQuery(query);
             e.Handled = true;
         }
+    }
+
+    private void ClearHistoryButton_Click(object sender, RoutedEventArgs e)
+    {
+        // Clear both recent queries and the cached recent-result cards shown in the
+        // widget body (the "garbage" entries that aren't the user's search text).
+        // Favorites are preserved — they are explicitly pinned, not auto-recorded.
+        App.Current.SearchHistoryService?.ClearHistoryAndResults();
+        // The RecentQueriesChanged subscription refreshes the widget, but call
+        // UpdateContent directly too so the UI feels instant even if the event races.
+        UpdateContent();
     }
 
     // ── Recommendation item interactions ──

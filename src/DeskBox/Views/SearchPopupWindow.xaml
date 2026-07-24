@@ -605,7 +605,7 @@
 
             <!-- Empty-query application launcher. It intentionally does not reuse file rows. -->
             <ScrollViewer x:Name="RecommendedAppsPanel" Grid.Row="2" Visibility="Collapsed"
-                          VerticalScrollBarVisibility="Auto" Padding="12,2,12,12"
+                          VerticalScrollBarVisibility="Auto" Padding="12,0,12,12"
                           RightTapped="RecommendedAppsPanel_RightTapped">
                 <ItemsRepeater x:Name="RecommendedAppsRepeater">
 

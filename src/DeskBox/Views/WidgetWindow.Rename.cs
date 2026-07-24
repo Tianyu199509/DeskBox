@@ -218,12 +218,26 @@ public sealed partial class WidgetWindow
         if (e.Key == Windows.System.VirtualKey.Enter)
         {
             e.Handled = true;
-            await CommitItemRenameAsync();
+            if (_stackRenameTarget is not null)
+            {
+                await CommitStackRenameAsync();
+            }
+            else
+            {
+                await CommitItemRenameAsync();
+            }
         }
         else if (e.Key == Windows.System.VirtualKey.Escape)
         {
             e.Handled = true;
-            CancelItemRename();
+            if (_stackRenameTarget is not null)
+            {
+                CancelStackRename();
+            }
+            else
+            {
+                CancelItemRename();
+            }
         }
     }
 
@@ -232,6 +246,12 @@ public sealed partial class WidgetWindow
         if (_isCancellingItemRename)
         {
             _isCancellingItemRename = false;
+            return;
+        }
+
+        if (_stackRenameTarget is not null)
+        {
+            await CommitStackRenameAsync();
             return;
         }
 

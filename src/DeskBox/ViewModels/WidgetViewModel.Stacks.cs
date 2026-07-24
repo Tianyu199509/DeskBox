@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.Collections.Specialized;
+using System.Linq;
 using DeskBox.Models;
 using DeskBox.Services;
 using Microsoft.UI.Dispatching;
@@ -17,6 +18,9 @@ public partial class WidgetViewModel
     private string? _expandedStackKey;
     private bool _stackRebuildQueued;
     private DispatcherQueueTimer? _stackDateBoundaryTimer;
+    private HashSet<string> _disabledStacks = new(StringComparer.Ordinal);
+    private Dictionary<string, string> _stackNameOverrides = new(StringComparer.Ordinal);
+    private List<string> _stackOrder = [];
 
     public IEnumerable<WidgetItem> VisibleItems => FileStacksEnabled
         ? _stackDisplayItems
@@ -45,6 +49,10 @@ public partial class WidgetViewModel
         get => _fileStackOrderBy;
         private set => SetProperty(ref _fileStackOrderBy, value);
     }
+
+    public bool IsStackDisabled(string stackKey) => _disabledStacks.Contains(stackKey);
+
+    public bool HasDisabledStacks => _disabledStacks.Count > 0;
 
     public bool FileStacksFollowGlobalDefaults =>
         WidgetFileStackSettings.FollowsGlobalDefaults(Config);
@@ -123,6 +131,69 @@ public partial class WidgetViewModel
         PersistStackOverrides();
     }
 
+    public void SetStackDisabled(string stackKey, bool disabled)
+    {
+        if (disabled)
+        {
+            _disabledStacks.Add(stackKey);
+        }
+        else
+        {
+            _disabledStacks.Remove(stackKey);
+        }
+        WidgetFileStackSettings.SetDisabledStacks(Config, _disabledStacks);
+        PersistStackOverrides();
+        QueueStackDisplayRebuild();
+    }
+
+    public void SetStackNameOverride(string stackKey, string? name)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            _stackNameOverrides.Remove(stackKey);
+        }
+        else
+        {
+            _stackNameOverrides[stackKey] = name.Trim();
+        }
+        WidgetFileStackSettings.SetStackNameOverrides(Config, _stackNameOverrides);
+        PersistStackOverrides();
+        QueueStackDisplayRebuild();
+    }
+
+    public void SetStackOrder(List<string> order)
+    {
+        _stackOrder = order.ToList();
+        WidgetFileStackSettings.SetStackOrder(Config, _stackOrder);
+        PersistStackOverrides();
+        QueueStackDisplayRebuild();
+    }
+
+    public void MoveStackUp(string stackKey)
+    {
+        var order = GetOrCreateOrder();
+        int idx = order.IndexOf(stackKey);
+        if (idx <= 0) return;
+        (order[idx - 1], order[idx]) = (order[idx], order[idx - 1]);
+        SetStackOrder(order);
+    }
+
+    public void MoveStackDown(string stackKey)
+    {
+        var order = GetOrCreateOrder();
+        int idx = order.IndexOf(stackKey);
+        if (idx < 0 || idx >= order.Count - 1) return;
+        (order[idx + 1], order[idx]) = (order[idx], order[idx + 1]);
+        SetStackOrder(order);
+    }
+
+    private List<string> GetOrCreateOrder()
+    {
+        if (_stackOrder.Count > 0) return _stackOrder;
+        _stackOrder = VisibleItems.OfType<WidgetStackItem>().Select(s => s.StackKey).ToList();
+        return _stackOrder;
+    }
+
     private void PersistStackOverrides()
     {
         _settingsService.UpdateWidget(Config, notifySubscribers: false);
@@ -148,6 +219,9 @@ public partial class WidgetViewModel
         _fileStackOrderBy = WidgetFileStackSettings.ResolveOrderBy(
             Config,
             _settingsService.Settings.FileStackOrderBy);
+        _disabledStacks = WidgetFileStackSettings.GetDisabledStacks(Config);
+        _stackNameOverrides = WidgetFileStackSettings.GetStackNameOverrides(Config);
+        _stackOrder = WidgetFileStackSettings.GetStackOrder(Config);
         Items.CollectionChanged += StackSourceItems_CollectionChanged;
         ScheduleStackDateBoundaryRefresh();
         QueueStackDisplayRebuild();
@@ -198,11 +272,17 @@ public partial class WidgetViewModel
         string orderBy = WidgetFileStackSettings.ResolveOrderBy(
             Config,
             _settingsService.Settings.FileStackOrderBy);
+        var disabledStacks = WidgetFileStackSettings.GetDisabledStacks(Config);
+        var nameOverrides = WidgetFileStackSettings.GetStackNameOverrides(Config);
+        var stackOrder = WidgetFileStackSettings.GetStackOrder(Config);
         bool sourceChanged = FileStacksEnabled != enabled;
         FileStacksEnabled = enabled;
         FileStackGroupBy = groupBy;
         FileStackThreshold = threshold;
         FileStackOrderBy = orderBy;
+        _disabledStacks = disabledStacks;
+        _stackNameOverrides = nameOverrides;
+        _stackOrder = stackOrder;
         if (!enabled)
         {
             _expandedStackKey = null;
@@ -220,6 +300,7 @@ public partial class WidgetViewModel
         OnPropertyChanged(nameof(FileStackGroupByFollowsGlobal));
         OnPropertyChanged(nameof(FileStackThresholdFollowsGlobal));
         OnPropertyChanged(nameof(FileStackOrderByFollowsGlobal));
+        OnPropertyChanged(nameof(HasDisabledStacks));
     }
 
     private void RebuildStackDisplayItems()
@@ -244,6 +325,7 @@ public partial class WidgetViewModel
         if (_expandedStackKey is not null &&
             !groups.Any(group =>
                 group.CanStack &&
+                !_disabledStacks.Contains(group.EffectiveKey) &&
                 group.Items.Count >= FileStackThreshold &&
                 group.EffectiveKey == _expandedStackKey))
         {
@@ -251,9 +333,10 @@ public partial class WidgetViewModel
         }
 
         var projected = new List<WidgetItem>();
-        foreach (var group in groups)
+        foreach (var group in OrderGroups(groups))
         {
-            if (!group.CanStack || group.Items.Count < FileStackThreshold)
+            bool isDisabled = _disabledStacks.Contains(group.EffectiveKey);
+            if (!group.CanStack || isDisabled || group.Items.Count < FileStackThreshold)
             {
                 projected.AddRange(group.Items);
                 continue;
@@ -277,10 +360,46 @@ public partial class WidgetViewModel
         ReconcileStackDisplayItems(projected);
     }
 
+    private List<WidgetStackGroup> OrderGroups(IReadOnlyList<WidgetStackGroup> groups)
+    {
+        if (_stackOrder.Count == 0)
+        {
+            return groups.ToList();
+        }
+
+        var ordered = new List<WidgetStackGroup>();
+        var known = new HashSet<string>(StringComparer.Ordinal);
+
+        foreach (var key in _stackOrder)
+        {
+            var group = groups.FirstOrDefault(g =>
+                string.Equals(g.EffectiveKey, key, StringComparison.Ordinal));
+            if (group is not null)
+            {
+                ordered.Add(group);
+                known.Add(key);
+            }
+        }
+
+        foreach (var group in groups)
+        {
+            if (!known.Contains(group.EffectiveKey))
+            {
+                ordered.Add(group);
+            }
+        }
+
+        return ordered;
+    }
+
     private WidgetStackItem CreateStackItem(WidgetStackGroup group, bool expanded)
     {
         string key = group.EffectiveKey;
         string name = group.DisplayName ?? GetStackCategoryName(group.Category);
+        if (_stackNameOverrides.TryGetValue(key, out string? customName) && !string.IsNullOrWhiteSpace(customName))
+        {
+            name = customName;
+        }
         if (!_stackItems.TryGetValue(key, out var stack))
         {
             stack = new WidgetStackItem

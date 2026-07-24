@@ -491,6 +491,11 @@ public class AppSettings
     public string WeatherWindSpeedUnit { get; set; } = "kmh";
 
     /// <summary>
+    /// Weather data source. Valid values: <c>"MSN"</c>, <c>"OpenMeteo"</c>.
+    /// </summary>
+    public string WeatherDataSource { get; set; } = "MSN";
+
+    /// <summary>
     /// Default view mode for the weather widget. Valid values: <c>"Today"</c>, <c>"Week"</c>.
     /// </summary>
     public string WeatherDefaultView { get; set; } = "Today";

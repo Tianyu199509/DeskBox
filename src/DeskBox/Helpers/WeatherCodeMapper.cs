@@ -79,6 +79,141 @@ public static class WeatherCodeMapper
         };
     }
 
+    // ── Reverse mapping: MSN weather description text → WMO code ──
+
+    /// <summary>
+    /// Maps a weather description string (as returned by MSN Weather API's "cap" field)
+    /// to the closest WMO weather interpretation code.
+    /// This allows MSN-sourced data to reuse the existing emoji/glyph/animation system
+    /// that is keyed on WMO codes.
+    /// </summary>
+    public static int DescriptionToWmoCode(string description)
+    {
+        if (string.IsNullOrWhiteSpace(description))
+        {
+            return -1;
+        }
+
+        // Normalize: trim, lowercase for comparison
+        string d = description.Trim();
+
+        // Chinese descriptions (MSN returns these when locale is zh-CN)
+        return d switch
+        {
+            // Clear / Sunny
+            "晴" or "Sunny" or "Clear" or "Clear sky" => 0,
+            "晴间多云" or "Mostly sunny" or "Mainly clear" => 1,
+            "多云" or "Partly cloudy" or "Partly Sunny" => 2,
+            "阴" or "Overcast" or "Cloudy" or "Mostly cloudy" or "Mostly Cloudy" => 3,
+
+            // Fog
+            "雾" or "Fog" or "Foggy" => 45,
+            "冻雾" or "Freezing fog" => 48,
+            "薄雾" or "Mist" or "Haze" => 45,
+
+            // Drizzle
+            "小雨" or "Light rain" or "Light drizzle" or "Drizzle" => 51,
+            "毛毛雨" or "Drizzle" => 51,
+
+            // Rain
+            "中雨" or "Moderate rain" => 63,
+            "大雨" or "Heavy rain" => 65,
+            "暴雨" or "Torrential rain" or "Very heavy rain" => 65,
+            "阵雨" or "Rain showers" or "Showers" or "Scattered showers" => 80,
+            "强阵雨" or "Heavy rain showers" or "Heavy showers" => 82,
+
+            // Freezing rain
+            "冻雨" or "Freezing rain" or "Ice rain" => 66,
+
+            // Snow
+            "小雪" or "Light snow" => 71,
+            "中雪" or "Moderate snow" => 73,
+            "大雪" or "Heavy snow" => 75,
+            "阵雪" or "Snow showers" => 85,
+            "强阵雪" or "Heavy snow showers" => 86,
+            "雨夹雪" or "Sleet" or "Rain and snow" => 77,
+            "米雪" or "Snow grains" => 77,
+
+            // Thunderstorm
+            "雷阵雨" or "Thundershowers" or "Thunderstorm" or "Thundershower" => 95,
+            "雷阵雨伴冰雹" or "Thunderstorm with hail" => 96,
+            "雷阵雨伴大冰雹" or "Thunderstorm with heavy hail" => 99,
+            "雷暴" or "Thunder" => 95,
+
+            // Mixed / other
+            "沙尘暴" or "Sandstorm" => 45,
+            "浮尘" or "Dust" => 45,
+            "扬沙" or "Sand" => 45,
+
+            // English MSN variants (for non-zh-CN locales)
+            "Mostly clear" => 1,
+            "Partly Cloudy" => 2,
+            "Scattered clouds" => 2,
+            "Light Rain" => 61,
+            "Moderate Rain" => 63,
+            "Heavy Rain" => 65,
+            "Light Snow" => 71,
+            "Moderate Snow" => 73,
+            "Heavy Snow" => 75,
+
+            _ => -1
+        };
+    }
+
+    /// <summary>
+    /// Returns the best-effort WMO code from an MSN description, falling back to the
+    /// MSN icon code mapping if description matching fails.
+    /// MSN icon codes loosely map to WMO: 1=clear, 2-4=cloudy, 5-11=rain, 13-14=snow, etc.
+    /// </summary>
+    public static int MsnDescriptionOrIconToWmoCode(string description, int msnIcon)
+    {
+        int fromDesc = DescriptionToWmoCode(description);
+        if (fromDesc >= 0)
+        {
+            return fromDesc;
+        }
+
+        // Fallback: MSN icon code → approximate WMO code
+        return msnIcon switch
+        {
+            1 => 0,       // Sunny
+            2 => 1,       // Mostly sunny
+            3 => 2,       // Partly cloudy
+            4 => 3,       // Cloudy / Overcast
+            5 => 45,      // Fog
+            6 => 45,      // Haze / Smoke
+            7 => 51,      // Light rain
+            8 => 63,      // Rain
+            9 => 65,      // Heavy rain
+            10 => 66,     // Freezing rain
+            11 => 80,     // Rain showers
+            12 => 71,     // Light snow
+            13 => 73,     // Snow
+            14 => 75,     // Heavy snow
+            15 => 77,     // Sleet
+            16 => 85,     // Snow showers
+            17 => 95,     // Thunderstorm
+            18 => 96,     // Thunderstorm with hail
+            19 => 45,     // Blowing snow / dust
+            20 => 45,     // Dust
+            21 => 51,     // Mist / drizzle
+            22 => 45,     // Smoke
+            23 => 63,     // Windy rain
+            24 => 3,      // Mostly cloudy
+            25 => 45,     // Fog
+            26 => 2,      // Partly cloudy (night)
+            27 => 0,      // Clear (night)
+            28 => 1,      // Mostly clear (night)
+            29 => 29,     // Pass through for night-specific
+            30 => 2,      // Partly cloudy night
+            31 => 0,      // Clear night
+            32 => 1,      // Mostly clear night
+            33 => 2,      // Partly cloudy night
+            34 => 3,      // Mostly cloudy night
+            _ => -1
+        };
+    }
+
     // ── Legacy glyph support (kept for backward compatibility) ──
 
     /// <summary>

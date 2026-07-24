@@ -1,4 +1,4 @@
-﻿// Copyright (c) DeskBox. All rights reserved.
+﻿﻿// Copyright (c) DeskBox. All rights reserved.
 
 using DeskBox.Models;
 using DeskBox.Helpers;
@@ -108,7 +108,6 @@ public sealed partial class WidgetManager
                 }
             }
 
-            _ = Win32Helper.HasMouseButtonActivity();
             _foregroundAtRaiseTime = Win32Helper.GetForegroundWindow();
             _suppressTrayLayerRestoreUntilUtc = DateTime.UtcNow.AddMilliseconds(160);
             PlayPreparedTrayShowAnimations(windowsToAnimate);

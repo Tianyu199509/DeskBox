@@ -19,6 +19,7 @@
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
         <!-- Search Bar Button -->
@@ -121,5 +122,29 @@
                 </StackPanel>
             </StackPanel>
         </ScrollViewer>
+
+        <!-- Footer: clear history (compact, right-aligned). Only visible when
+             there is recent search history to clear. -->
+        <Grid Grid.Row="2" Margin="0,6,0,0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+            <Button x:Name="ClearHistoryButton" Grid.Column="1"
+                    Padding="8,4" MinHeight="0"
+                    Background="Transparent" BorderThickness="0"
+                    VerticalAlignment="Center" HorizontalAlignment="Right"
+                    Click="ClearHistoryButton_Click"
+                    Visibility="Collapsed">
+                <StackPanel Orientation="Horizontal" Spacing="5">
+                    <FontIcon Glyph="&#xE74D;" FontSize="11"
+                              Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                              VerticalAlignment="Center"/>
+                    <TextBlock x:Name="ClearHistoryLabel" FontSize="11.5"
+                               Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                               VerticalAlignment="Center"/>
+                </StackPanel>
+            </Button>
+        </Grid>
     </Grid>
 </UserControl>

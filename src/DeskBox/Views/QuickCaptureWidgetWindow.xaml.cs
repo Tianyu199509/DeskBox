@@ -397,7 +397,12 @@ public sealed partial class QuickCaptureWidgetWindow : WidgetWindowBase, IDeskto
 
         HoldTemporaryTopMost();
         base.Activate();
-        Win32Helper.SetForegroundWindow(_hWnd);
+        bool foregroundSet = Win32Helper.SetForegroundWindow(_hWnd);
+        if (!foregroundSet)
+        {
+            App.Log($"[ZOrder] QuickCapture ActivateRaisedFromTrayBatch: SetForegroundWindow FAILED hwnd=0x{_hWnd.ToInt64():X} (raised-state release will rely on click detection)");
+        }
+
         RootGrid.Focus(FocusState.Programmatic);
     }
 

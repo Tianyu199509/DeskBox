@@ -135,6 +135,9 @@ public partial class SettingsViewModel
     public IReadOnlyList<SettingsOption> AvailableWeatherSkinOptions =>
         CreateSelectionOptions(AvailableWeatherSkins, AvailableWeatherSkinDisplayNames);
 
+    public IReadOnlyList<SettingsOption> AvailableWeatherDataSourceOptions =>
+        CreateSelectionOptions(AvailableWeatherDataSources, AvailableWeatherDataSourceDisplayNames);
+
     public IReadOnlyList<SettingsOption> AvailableWeatherRefreshIntervalOptions =>
         CreateSelectionOptions(AvailableWeatherRefreshIntervals, AvailableWeatherRefreshIntervalDisplayNames);
 
@@ -211,6 +214,7 @@ public partial class SettingsViewModel
         OnPropertyChanged(nameof(AvailableWeatherWindSpeedUnitOptions));
         OnPropertyChanged(nameof(AvailableWeatherDefaultViewOptions));
         OnPropertyChanged(nameof(AvailableWeatherSkinOptions));
+        OnPropertyChanged(nameof(AvailableWeatherDataSourceOptions));
         OnPropertyChanged(nameof(AvailableWeatherRefreshIntervalOptions));
         OnPropertyChanged(nameof(AvailableFileStackGroupByOptions));
         OnPropertyChanged(nameof(AvailableFileStackThresholdOptions));

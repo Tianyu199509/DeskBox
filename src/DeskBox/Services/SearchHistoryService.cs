@@ -208,6 +208,24 @@ public sealed class SearchHistoryService
         RecentQueriesChanged?.Invoke();
     }
 
+    /// <summary>
+    /// Clears recent search queries AND cached recent-result cards (the items shown
+    /// in the search widget body), while preserving user-pinned favorites. Used by
+    /// the search widget's clear button so the user can wipe auto-recorded data
+    /// without losing deliberately pinned queries.
+    /// </summary>
+    public void ClearHistoryAndResults()
+    {
+        lock (_gate)
+        {
+            _data.Recent.Clear();
+            _data.RecentResults.Clear();
+        }
+
+        Save();
+        RecentQueriesChanged?.Invoke();
+    }
+
     private void Load()
     {
         try

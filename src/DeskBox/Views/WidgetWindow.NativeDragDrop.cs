@@ -1,4 +1,4 @@
-﻿// Copyright (c) DeskBox. All rights reserved.
+﻿﻿// Copyright (c) DeskBox. All rights reserved.
 
 using DeskBox.Helpers;
 using DeskBox.Models;
@@ -103,8 +103,10 @@ public sealed partial class WidgetWindow
         IReadOnlyList<string> paths,
         bool cleanupTemporaryFiles = false)
     {
+        App.Log($"[DropDiagnostic] ImportNativeDropPathsAsync enter count={paths.Count} migrationBusy={_isMigrationBusy} paths=[{string.Join("|", paths)}]");
         if (_isMigrationBusy || paths.Count == 0)
         {
+            App.Log($"[DropDiagnostic] ImportNativeDropPathsAsync skipping: migrationBusy={_isMigrationBusy} count={paths.Count}");
             return;
         }
 
@@ -139,7 +141,9 @@ public sealed partial class WidgetWindow
         }
         try
         {
+            App.Log($"[DropDiagnostic] ImportNativeDropPathsAsync calling ImportPathsAsync moveWhenMapped={moveWhenMapped} useShellProgress={moveWhenMapped == true}");
             await ViewModel.ImportPathsAsync(paths, moveWhenMapped, useShellProgress: moveWhenMapped == true);
+            App.Log("[DropDiagnostic] ImportNativeDropPathsAsync ImportPathsAsync completed successfully");
             ClearCutState();
         }
         catch (Exception ex)

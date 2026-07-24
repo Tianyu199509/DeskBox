@@ -147,6 +147,45 @@ public string SelectedWeatherSkin
 }
 
 
+public string[] AvailableWeatherDataSources { get; } =
+[
+    SettingsService.WeatherDataSourceMsn,
+    SettingsService.WeatherDataSourceOpenMeteo
+];
+
+public string[] AvailableWeatherDataSourceDisplayNames =>
+    _cachedWeatherDataSourceDisplayNames ??= AvailableWeatherDataSources.Select(GetWeatherDataSourceDisplayName).ToArray();
+
+public string SelectedWeatherDataSource
+{
+    get => _selectedWeatherDataSource;
+    set
+    {
+        string normalized = value == SettingsService.WeatherDataSourceOpenMeteo
+            ? SettingsService.WeatherDataSourceOpenMeteo
+            : SettingsService.WeatherDataSourceMsn;
+        if (!SetProperty(ref _selectedWeatherDataSource, normalized))
+        {
+            return;
+        }
+
+        if (_isRestoringDefaults || _isApplyingSettingsSnapshot)
+        {
+            return;
+        }
+
+        _settingsService.Settings.WeatherDataSource = _selectedWeatherDataSource;
+        _settingsService.SaveDebounced();
+    }
+}
+
+private string GetWeatherDataSourceDisplayName(string source) => source switch
+{
+    SettingsService.WeatherDataSourceOpenMeteo => _localizationService.T("Weather.DataSource.OpenMeteo"),
+    _ => _localizationService.T("Weather.DataSource.MSN")
+};
+
+
 public int[] AvailableWeatherRefreshIntervals { get; } = [15, 30, 60, 180];
 
 public string[] AvailableWeatherRefreshIntervalDisplayNames =>

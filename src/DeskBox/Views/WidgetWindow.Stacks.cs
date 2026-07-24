@@ -1,5 +1,6 @@
 using System.Numerics;
 using System.Runtime.CompilerServices;
+using DeskBox.Helpers;
 using DeskBox.Models;
 using DeskBox.Services;
 using DeskBox.ViewModels;
@@ -1400,6 +1401,39 @@ public sealed partial class WidgetWindow
             await SetStackExpandedWithAnimationAsync(stack, !stack.IsExpanded);
         flyout.Items.Add(toggleItem);
 
+        var renameItem = new MenuFlyoutItem
+        {
+            Text = _localizationService.T("Widget.Stack.Rename"),
+            Icon = new FontIcon { Glyph = "\uE8AC" }
+        };
+        renameItem.Click += async (_, _) => await RenameStackAsync(stack);
+        flyout.Items.Add(renameItem);
+
+        flyout.Items.Add(new MenuFlyoutSeparator());
+        var moveUpItem = new MenuFlyoutItem
+        {
+            Text = _localizationService.T("Widget.Stack.MoveUp"),
+            Icon = new FontIcon { Glyph = "\uE74A" }
+        };
+        moveUpItem.Click += (_, _) => ViewModel.MoveStackUp(stack.StackKey);
+        flyout.Items.Add(moveUpItem);
+
+        var moveDownItem = new MenuFlyoutItem
+        {
+            Text = _localizationService.T("Widget.Stack.MoveDown"),
+            Icon = new FontIcon { Glyph = "\uE74B" }
+        };
+        moveDownItem.Click += (_, _) => ViewModel.MoveStackDown(stack.StackKey);
+        flyout.Items.Add(moveDownItem);
+
+        var disableItem = new MenuFlyoutItem
+        {
+            Text = _localizationService.T("Widget.Stack.DisableGroup"),
+            Icon = new FontIcon { Glyph = "\uE748" }
+        };
+        disableItem.Click += (_, _) => ViewModel.SetStackDisabled(stack.StackKey, true);
+        flyout.Items.Add(disableItem);
+
         flyout.Items.Add(new MenuFlyoutSeparator());
         var selectContentsItem = new MenuFlyoutItem
         {
@@ -1421,6 +1455,144 @@ public sealed partial class WidgetWindow
         };
         flyout.Items.Add(copyPathsItem);
         return flyout;
+    }
+
+    private async Task RenameStackAsync(WidgetStackItem stack)
+    {
+        var border = _stackSurfaces.FirstOrDefault(b =>
+            b.DataContext is WidgetStackItem s && ReferenceEquals(s, stack));
+        if (border is null)
+        {
+            return;
+        }
+
+        var nameText = FindStackNameTextBlock(border);
+        var contentHost = SelectionOverlay.Parent as UIElement;
+        if (nameText is null || contentHost is null)
+        {
+            return;
+        }
+
+        _isCancellingItemRename = false;
+        _itemRenameTarget = null;
+        _stackRenameTarget = stack;
+        ItemRenameTextBox.Text = stack.Name;
+
+        {
+            _stackRenameNameText = nameText;
+            nameText.Visibility = Visibility.Collapsed;
+            ItemRenameTextBox.FontSize = nameText.FontSize > 0 ? nameText.FontSize : 14;
+            ItemRenameTextBox.TextAlignment = TextAlignment.Center;
+            ItemRenameTextBox.HorizontalContentAlignment = HorizontalAlignment.Center;
+            ItemRenameTextBox.TextWrapping = TextWrapping.NoWrap;
+        }
+
+        PositionStackRenameTextBox(nameText, contentHost);
+        ItemRenameTextBox.Visibility = Visibility.Visible;
+        ItemRenameTextBox.IsHitTestVisible = true;
+        BeginInteractionLayer("stack-rename-opened");
+        HoldTemporaryTopMost();
+        _appWindow.Show();
+        base.Activate();
+        Win32Helper.SetForegroundWindow(_hWnd);
+        ItemRenameTextBox.Focus(FocusState.Programmatic);
+        ItemRenameTextBox.SelectAll();
+        await Task.CompletedTask;
+    }
+
+    private void PositionStackRenameTextBox(TextBlock nameText, UIElement contentHost)
+    {
+        var textTopLeft = nameText.TransformToVisual(contentHost)
+            .TransformPoint(new Windows.Foundation.Point(0, 0));
+
+        const double borderThickness = 1.0;
+        double offsetX = textTopLeft.X - borderThickness - 21.0;
+        double offsetY = textTopLeft.Y - borderThickness - 6.0;
+
+        double width = Math.Max(nameText.ActualWidth + 2 * borderThickness + 2.0, 60);
+        double height = Math.Max(nameText.ActualHeight + 2 * borderThickness, 20);
+
+        ItemRenameTextBox.Width = width;
+        ItemRenameTextBox.Height = height;
+        ItemRenameTextBox.Margin = new Thickness(offsetX, offsetY, 0, 0);
+    }
+
+    private TextBlock? FindStackNameTextBlock(Border border)
+    {
+        try
+        {
+            var stack = (WidgetStackItem)border.DataContext!;
+            return FindVisualChild<TextBlock>(border, tb => tb.Text == stack.Name);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static T? FindVisualChild<T>(DependencyObject parent, Func<T, bool>? predicate = null)
+        where T : DependencyObject
+    {
+        int childCount = VisualTreeHelper.GetChildrenCount(parent);
+        for (int i = 0; i < childCount; i++)
+        {
+            var child = VisualTreeHelper.GetChild(parent, i);
+            if (child is T typed && (predicate is null || predicate(typed)))
+            {
+                return typed;
+            }
+
+            var result = FindVisualChild(child, predicate);
+            if (result is not null)
+            {
+                return result;
+            }
+        }
+
+        return null;
+    }
+
+    private WidgetStackItem? _stackRenameTarget;
+    private TextBlock? _stackRenameNameText;
+
+    private async Task CommitStackRenameAsync()
+    {
+        if (_stackRenameTarget is null ||
+            ItemRenameTextBox.Visibility != Visibility.Visible)
+        {
+            return;
+        }
+
+        string newName = ItemRenameTextBox.Text.Trim();
+        var target = _stackRenameTarget;
+        CompleteStackRename();
+
+        if (!string.IsNullOrEmpty(newName))
+        {
+            ViewModel.SetStackNameOverride(target.StackKey, newName);
+        }
+    }
+
+    private void CancelStackRename()
+    {
+        _isCancellingItemRename = true;
+        CompleteStackRename();
+    }
+
+    private void CompleteStackRename()
+    {
+        ItemRenameTextBox.Visibility = Visibility.Collapsed;
+        ItemRenameTextBox.IsHitTestVisible = false;
+        ItemRenameTextBox.Text = string.Empty;
+
+        if (_stackRenameNameText is not null)
+        {
+            _stackRenameNameText.Visibility = Visibility.Visible;
+            _stackRenameNameText = null;
+        }
+
+        _stackRenameTarget = null;
+        ReleaseInteractionLayer("stack-rename-closed");
     }
 
     private async Task SelectStackMembersAsync(WidgetStackItem stack)
@@ -1500,6 +1672,43 @@ public sealed partial class WidgetWindow
         stackMenu.Items.Add(new MenuFlyoutSeparator());
         stackMenu.Items.Add(CreateStackThresholdMenu());
         stackMenu.Items.Add(CreateStackOrderMenu());
+
+        if (ViewModel.HasDisabledStacks)
+        {
+            stackMenu.Items.Add(new MenuFlyoutSeparator());
+            var restoreItem = new MenuFlyoutSubItem
+            {
+                Text = _localizationService.T("Widget.Stack.RestoreGroups"),
+                Icon = new FontIcon { Glyph = "\uE8EE" }
+            };
+            foreach (var key in WidgetFileStackSettings.GetDisabledStacks(ViewModel.Config))
+            {
+                string label;
+                var nameOverrides = WidgetFileStackSettings.GetStackNameOverrides(ViewModel.Config);
+                if (nameOverrides.TryGetValue(key, out var customName) && !string.IsNullOrWhiteSpace(customName))
+                {
+                    label = customName;
+                }
+                else if (key.StartsWith("Custom:", StringComparison.Ordinal))
+                {
+                    label = key["Custom:".Length..];
+                }
+                else
+                {
+                    label = _localizationService.T($"Widget.Stack.Category.{key}");
+                }
+
+                var item = new MenuFlyoutItem
+                {
+                    Text = label,
+                    Tag = key
+                };
+                item.Click += (_, _) => ViewModel.SetStackDisabled(key, false);
+                restoreItem.Items.Add(item);
+            }
+            stackMenu.Items.Add(restoreItem);
+        }
+
         return stackMenu;
     }
 

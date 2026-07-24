@@ -1,5 +1,6 @@
-﻿// Copyright (c) DeskBox. All rights reserved.
+﻿﻿// Copyright (c) DeskBox. All rights reserved.
 
+using System.Net.Http;
 using DeskBox.Helpers;
 using DeskBox.Models;
 using DeskBox.Services;
@@ -301,13 +302,70 @@ public sealed partial class WidgetWindow
         }
 
         string text = await dataView.GetTextAsync();
-        return text
-            .Split(["\r\n", "\n"], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Select(candidate => TryNormalizeDroppedPath(candidate, out string normalizedPath) ? normalizedPath : null)
-            .Where(path => !string.IsNullOrWhiteSpace(path))
-            .Select(path => path!)
+        var pathList = new List<string>();
+        foreach (var candidate in text.Split(["\r\n", "\n"], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            if (TryNormalizeDroppedPath(candidate, out string normalizedPath))
+            {
+                pathList.Add(normalizedPath);
+            }
+            else if (TryNormalizeUrl(candidate, out string downloadedPath))
+            {
+                pathList.Add(downloadedPath);
+            }
+        }
+        return pathList
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
+    }
+
+    /// <summary>
+    /// If the candidate is an HTTP(S) URL, downloads it to a temp file
+    /// and returns the path. Used for browser drag-drop of images/files
+    /// that don't have local file paths.
+    /// </summary>
+    private static bool TryNormalizeUrl(string candidate, out string downloadedPath)
+    {
+        downloadedPath = string.Empty;
+        string trimmed = candidate.Trim().Trim('"');
+
+        if (!Uri.TryCreate(trimmed, UriKind.Absolute, out var uri))
+        {
+            return false;
+        }
+
+        if (uri.Scheme is not ("http" or "https"))
+        {
+            return false;
+        }
+
+        try
+        {
+            string fileName = Path.GetFileName(uri.LocalPath);
+            if (string.IsNullOrWhiteSpace(fileName))
+            {
+                fileName = "download";
+            }
+            fileName = FileService.SanitizeFileSystemName(fileName);
+
+            string tempDir = Path.Combine(Path.GetTempPath(), "DeskBox", "VirtualDrops", Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(tempDir);
+            string destPath = FileService.GetAvailablePath(Path.Combine(tempDir, fileName));
+
+            using var httpClient = new HttpClient();
+            httpClient.Timeout = TimeSpan.FromSeconds(30);
+            var bytes = httpClient.GetByteArrayAsync(uri).GetAwaiter().GetResult();
+            File.WriteAllBytes(destPath, bytes);
+
+            App.Log($"[DropDiagnostic] Downloaded url='{uri}' -> '{destPath}' ({bytes.Length} bytes)");
+            downloadedPath = destPath;
+            return true;
+        }
+        catch (Exception ex)
+        {
+            App.Log($"[DropDiagnostic] URL download failed for '{uri}': {ex.Message}");
+            return false;
+        }
     }
 
     private static bool TryNormalizeDroppedPath(string candidate, out string normalizedPath)

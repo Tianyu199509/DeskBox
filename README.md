@@ -15,29 +15,22 @@ DeskBox is a lightweight WinUI 3 desktop organizer for Windows 11. It creates na
 
 Download the latest installer from [GitHub Releases](https://github.com/Tianyu199509/DeskBox/releases).
 
-Current release: 1.3.2
+Current release: 1.3.3
 
-- [DeskBox_Setup_1.3.2_x64.exe](https://github.com/Tianyu199509/DeskBox/releases/download/v1.3.2/DeskBox_Setup_1.3.2_x64.exe)
-- [DeskBox_Setup_1.3.2_arm64.exe](https://github.com/Tianyu199509/DeskBox/releases/download/v1.3.2/DeskBox_Setup_1.3.2_arm64.exe) (Surface, Snapdragon, and other ARM64 PCs)
+- [DeskBox_Setup_1.3.3_x64.exe](https://github.com/Tianyu199509/DeskBox/releases/download/v1.3.3/DeskBox_Setup_1.3.3_x64.exe)
+- [DeskBox_Setup_1.3.3_arm64.exe](https://github.com/Tianyu199509/DeskBox/releases/download/v1.3.3/DeskBox_Setup_1.3.3_arm64.exe) (Surface, Snapdragon, and other ARM64 PCs)
 
 The x64 installer checks for .NET 10 Runtime x64 and Windows App Runtime 2.2 x64; the ARM64 installer checks for the ARM64 variants. If a dependency is missing, the setup flow can download and install it for you.
 
-## What's New In 1.3.2
+## What's New In 1.3.3
 
-- **Search system (new)**: Full-text desktop search with USN Journal indexing, Windows Index integration, result ranking, search history, type sort/filter, recommended-apps panel, global hotkey, and a dedicated search settings page.
-- **Multi-language expansion**: Added Japanese, German, and Brazilian Portuguese (1500+ strings each). Rewrote localization from `.resw` to embedded JSON for easier community translation.
-- **Onboarding redesign**: Rebuilt as a focused five-step flow with entrance animations and full five-language support.
-- **Adaptive tray animation**: Hardware-adaptive controller adjusts animation complexity by GPU capability; batch driver synchronizes multi-widget show/hide.
-- **Weather improvements**: City database expanded from ~500 to 5000+ with CJK-aware fuzzy search; improved location service and widget layouts.
-- **ARM64 installer**: Native ARM64 Windows build support.
-- **QuickLook compatibility fix (critical)**: Fixed pipe server crash caused by empty connections. Availability checks no longer touch the named pipe.
-- **Wallpaper loss fix**: Prevented `WorkerW` spawn from destroying the desktop wallpaper.
-- **Installer/updater reliability**: Process-kill logic, force-update enforcement, helper cleanup, official download URLs, English installer language.
-- **Architecture**: Extracted `App.Tray.cs`, added `ServiceRegistry`, `SettingsMigrationService`, `FileMetaService`, `AppDiagnosticsService`, and a 10-chapter user guide.
-- **Installer language selection**: The installer now shows a language picker (Chinese, English, Japanese, German, Brazilian Portuguese) pre-selected to your system locale. The chosen language is recorded at install time so DeskBox can default to it on first run.
-- **Search popup polish**: The result-list header now aligns with the data rows; the sort header carries a subtle background and shares the menu-bar margins.
-- **Weather capsule fix**: Removed a duplicate title icon so capsule mode shows only the weather emoji.
-- **Capsule hover mask**: The semi-transparent right-edge hover mask in capsule mode is now hidden (interaction is unchanged).
+- **Drag & drop (WeChat + browser)**: Drag files and images directly from WeChat chat windows into grid items. Browser URL drops (images, file links) are automatically downloaded and imported. Files dropped onto folder items transfer into the folder.
+- **Stack group management**: Rename stack groups, reorder them (move up/down), and disable/restore stacking per group — all from the right-click context menu.
+- **Weather data source**: Added MSN Weather (same source as the Windows weather widget) as the default data source, with automatic fallback to Open-Meteo. Selectable in Settings → Weather.
+- **F7 Z-order reliability fix**: Fixed silent restore (state changed but visual didn't) and unreliable cross-process click detection that caused widgets to stay on top or flicker without collapsing.
+- **Search widget refinements**: Added clear-history button; widget now shows only user-opened results (no auto-generated Start Menu shortcuts); live-syncs with search popup.
+- **UI polish**: Fixed swapped tray icon labels (Black/White); hidden collapsed-preview chevron; simplified search placeholder.
+- **Localization**: New strings for all features across zh-CN, en-US, ja-JP, de-DE, pt-BR.
 
 See the full [changelog](CHANGELOG.md).
 
@@ -144,7 +137,7 @@ dotnet publish .\src\DeskBox\DeskBox.csproj --configuration Release -p:Platform=
 Installer output:
 
 ```text
-Output\DeskBox_Setup_1.3.2_x64.exe
+Output\DeskBox_Setup_1.3.3_x64.exe
 ```
 
 ## Project Structure

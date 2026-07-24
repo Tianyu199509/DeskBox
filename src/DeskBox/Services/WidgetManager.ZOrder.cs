@@ -18,6 +18,7 @@ public sealed partial class WidgetManager
 {
 
     private DispatcherQueueTimer? _trayLayerRestoreTimer;
+    private DispatcherQueueTimer? _trayMouseSamplerTimer;
     private bool _widgetsRaisedFromTray;
     private bool _isTogglingWidgetsDesktopLayer;
     private string _lastWidgetLayerMode;
@@ -25,6 +26,16 @@ public sealed partial class WidgetManager
     private DateTime _suppressTrayLayerRestoreUntilUtc = DateTime.MinValue;
     private bool _hasDeskBoxForegroundSinceRaise;
     private IntPtr _foregroundAtRaiseTime;
+
+    // ── 50ms mouse sampler (方案 B) ──
+    // Uses the HIGH bit of GetAsyncKeyState (global physical state) instead of
+    // the low bit ("since last query") which is unreliable for cross-process
+    // clicks. We poll every 50ms, detect up→down edges, and check the cursor
+    // position at the moment of pressing. If the press is outside DeskBox /
+    // taskbar, we set _outsideMousePressObserved for the 200ms restore monitor
+    // to consume.
+    private bool _lastMouseButtonsDown;
+    private bool _outsideMousePressObserved;
 
     public void RestoreRaisedWidgetsToDesktopLayer()
     {
@@ -133,13 +144,13 @@ public sealed partial class WidgetManager
             }
 
             // Fallback: the foreground is still the same window as at raise time.
-            // Use the legacy mouse-press detection for the case where the user
-            // clicks on the same app window (e.g. clicks within the same editor).
-            Win32Helper.POINT? cursor = TryGetCursorPosition();
-            if (Win32Helper.HasMouseButtonPressSinceLastQuery() &&
-                !IsPointerOverDeskBoxWindow(cursor) &&
-                !IsPointerOverTaskbar(cursor))
+            // Use the 50ms mouse sampler's edge-detected _outsideMousePressObserved
+            // flag (high-bit GetAsyncKeyState, reliable across processes) instead
+            // of the legacy low-bit HasMouseButtonPressSinceLastQuery which fails
+            // for clicks delivered to foreign windows.
+            if (_outsideMousePressObserved)
             {
+                _outsideMousePressObserved = false;
                 App.Log($"[TrayBatch] RaisedState released reason={reason}-outside-click foreground=0x{foreground.ToInt64():X}");
                 RestoreRaisedWidgetsToDesktopLayer();
             }
@@ -168,18 +179,76 @@ public sealed partial class WidgetManager
         _trayLayerRestoreTimer.Tick += TrayLayerRestoreTimer_Tick;
         _trayLayerRestoreTimer.Start();
         App.LogVerbose("[TrayBatch] RaisedStateMonitor started intervalMs=200");
+
+        StartTrayMouseSampler();
     }
 
     private void StopTrayLayerRestoreMonitor()
     {
-        if (_trayLayerRestoreTimer is null)
+        if (_trayLayerRestoreTimer is not null)
+        {
+            _trayLayerRestoreTimer.Stop();
+            _trayLayerRestoreTimer.Tick -= TrayLayerRestoreTimer_Tick;
+            App.LogVerbose("[TrayBatch] RaisedStateMonitor stopped");
+        }
+
+        StopTrayMouseSampler();
+    }
+
+    // ── 50ms mouse sampler (方案 B) ──────────────────────────
+
+    private void StartTrayMouseSampler()
+    {
+        // Pre-charge current button state so the press that triggered F7
+        // (via keyboard hook) isn't mistaken for a new outside click.
+        _lastMouseButtonsDown = Win32Helper.IsAnyMouseButtonDown();
+        _outsideMousePressObserved = false;
+
+        _trayMouseSamplerTimer ??= App.UiDispatcherQueue.CreateTimer();
+        _trayMouseSamplerTimer.Stop();
+        _trayMouseSamplerTimer.Interval = TimeSpan.FromMilliseconds(50);
+        _trayMouseSamplerTimer.Tick -= TrayMouseSamplerTimer_Tick;
+        _trayMouseSamplerTimer.Tick += TrayMouseSamplerTimer_Tick;
+        _trayMouseSamplerTimer.Start();
+        App.LogVerbose("[TrayBatch] MouseSampler started intervalMs=50");
+    }
+
+    private void StopTrayMouseSampler()
+    {
+        if (_trayMouseSamplerTimer is null)
         {
             return;
         }
 
-        _trayLayerRestoreTimer.Stop();
-        _trayLayerRestoreTimer.Tick -= TrayLayerRestoreTimer_Tick;
-        App.LogVerbose("[TrayBatch] RaisedStateMonitor stopped");
+        _trayMouseSamplerTimer.Stop();
+        _trayMouseSamplerTimer.Tick -= TrayMouseSamplerTimer_Tick;
+        App.LogVerbose("[TrayBatch] MouseSampler stopped");
+    }
+
+    private void TrayMouseSamplerTimer_Tick(DispatcherQueueTimer sender, object args)
+    {
+        if (!_widgetsRaisedFromTray)
+        {
+            StopTrayMouseSampler();
+            return;
+        }
+
+        bool isDown = Win32Helper.IsAnyMouseButtonDown();
+
+        // Detect up→down edge (new press).
+        if (isDown && !_lastMouseButtonsDown)
+        {
+            // Check cursor position at the moment of pressing.
+            Win32Helper.POINT? cursor = TryGetCursorPosition();
+            if (!IsPointerOverDeskBoxWindow(cursor) &&
+                !IsPointerOverTaskbar(cursor))
+            {
+                _outsideMousePressObserved = true;
+                App.LogVerbose($"[TrayBatch] MouseSampler detected outside-press at={FormatPoint(cursor)}");
+            }
+        }
+
+        _lastMouseButtonsDown = isDown;
     }
 
     private void TrayLayerRestoreTimer_Tick(DispatcherQueueTimer sender, object args)

@@ -15,29 +15,22 @@ DeskBox 是一个基于 WinUI 3 的 Windows 11 桌面整理工具。它用轻量
 
 可以在 [GitHub Releases](https://github.com/Tianyu199509/DeskBox/releases) 下载最新版安装包。
 
-当前版本：1.3.2
+当前版本：1.3.3
 
-- [DeskBox_Setup_1.3.2_x64.exe](https://github.com/Tianyu199509/DeskBox/releases/download/v1.3.2/DeskBox_Setup_1.3.2_x64.exe)
-- [DeskBox_Setup_1.3.2_arm64.exe](https://github.com/Tianyu199509/DeskBox/releases/download/v1.3.2/DeskBox_Setup_1.3.2_arm64.exe)（Surface、骁龙及其他 ARM64 设备）
+- [DeskBox_Setup_1.3.3_x64.exe](https://github.com/Tianyu199509/DeskBox/releases/download/v1.3.3/DeskBox_Setup_1.3.3_x64.exe)
+- [DeskBox_Setup_1.3.3_arm64.exe](https://github.com/Tianyu199509/DeskBox/releases/download/v1.3.3/DeskBox_Setup_1.3.3_arm64.exe)（Surface、骁龙及其他 ARM64 设备）
 
 x64 安装器检测 .NET 10 Runtime x64 与 Windows App Runtime 2.2 x64；ARM64 安装器检测对应的 ARM64 版本。若目标电脑缺少运行时依赖，安装流程可以联网下载并安装。
 
 ## 最新更新
 
-- **搜索系统（全新）**：全文桌面搜索，USN 日志索引 + Windows 索引集成，加权结果排序、搜索历史、类型排序/筛选、推荐应用面板、全局快捷键和独立搜索设置页。
-- **多语言扩展**：新增日语、德语、巴西葡萄牙语（每种 1500+ 条目）。本地化架构从 `.resw` 重写为 JSON 嵌入式资源。
-- **新用户引导重构**：五步聚焦流程，入场动画 + 五语言支持。
-- **自适应托盘动画**：硬件自适应控制器根据 GPU 能力调整动画复杂度；批量驱动器同步多格子显示/隐藏。
-- **天气改进**：城市数据库 500 → 5000+，CJK 模糊搜索；定位服务和布局优化。
-- **ARM64 安装器**：支持原生 ARM64 Windows 构建。
-- **QuickLook 兼容性修复（严重）**：修复空连接导致管道服务器崩溃，可用性检查不再触碰管道。
-- **壁纸丢失修复**：防止 `WorkerW` 窗口生成破坏桌面壁纸。
-- **安装器/更新器可靠性**：进程关闭逻辑、强制更新、缓存清理、正式下载地址、英文安装界面。
-- **架构**：提取 `App.Tray.cs`，新增 `ServiceRegistry`、`SettingsMigrationService`、`FileMetaService`、`AppDiagnosticsService` 和 10 章用户指南。
-- **安装器语言选择**：安装器现在提供语言选择（中文、英文、日语、德语、巴西葡萄牙语），默认按系统区域预选。所选语言会在安装时记录，DeskBox 首次启动会默认使用该语言。
-- **搜索弹窗打磨**：结果列表表头与数据行现已左对齐；排序表头增加半透明底，并与上方菜单栏左右对齐。
-- **天气胶囊修复**：移除了重复的标题图标，胶囊模式下只显示天气 emoji。
-- **胶囊悬停遮罩**：胶囊右侧边缘的半透明悬停遮罩现已隐藏（交互行为不变）。
+- **拖拽（微信 + 浏览器）**：可直接从微信聊天窗口拖拽文件和图片到格子内；浏览器拖拽的图片和文件链接自动下载并导入；拖拽文件到文件夹项目上可直接传入文件夹。
+- **叠放组管理**：右键叠放组可重命名、上移/下移排序、取消折叠/恢复折叠。
+- **天气数据源**：新增 MSN 天气（与 Windows 天气小组件同源）作为默认数据源，主源失败自动切换 Open-Meteo。可在设置 → 天气中手动选择。
+- **F7 层级可靠性修复**：修复静默回落（状态变了但画面没变）和跨进程点击检测不可靠导致格子不回落/闪烁不收起的问题。
+- **搜索格子改进**：新增清空历史按钮；格子主体只显示用户打开过的结果（不再自动生成开始菜单快捷方式）；与搜索弹窗实时同步。
+- **界面打磨**：修复托盘图标标签颠倒（黑色/白色）；隐藏折叠预览箭头；简化搜索占位符。
+- **本地化**：全部五种语言新增天气数据源、叠放组管理、搜索清空等翻译字符串。
 
 完整更新记录见 [CHANGELOG.md](CHANGELOG.md)。
 
@@ -142,7 +135,7 @@ dotnet publish .\src\DeskBox\DeskBox.csproj --configuration Release -p:Platform=
 安装包输出：
 
 ```text
-Output\DeskBox_Setup_1.3.2_x64.exe
+Output\DeskBox_Setup_1.3.3_x64.exe
 ```
 
 ## 项目结构

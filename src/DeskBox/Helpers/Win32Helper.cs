@@ -300,7 +300,7 @@ public static partial class Win32Helper
     public static partial short GetKeyState(int nVirtKey);
 
     [LibraryImport("user32.dll")]
-    private static partial short GetAsyncKeyState(int vKey);
+    internal static partial short GetAsyncKeyState(int vKey);
 
     public static bool IsKeyDown(int virtualKey)
     {
@@ -334,6 +334,22 @@ public static partial class Win32Helper
                HasAsyncKeyPressSinceLastQuery(0x04) ||
                HasAsyncKeyPressSinceLastQuery(0x05) ||
                HasAsyncKeyPressSinceLastQuery(0x06);
+    }
+
+    /// <summary>
+    /// Returns true while any mouse button is physically held down. Uses the
+    /// high bit of GetAsyncKeyState — the global physical state, which stays
+    /// accurate regardless of which process received the click (unlike the
+    /// low "since last query" bit). Sample this periodically and watch for an
+    /// up→down transition to reliably detect clicks delivered to foreign windows.
+    /// </summary>
+    public static bool IsAnyMouseButtonDown()
+    {
+        return IsKeyDown(0x01) ||
+               IsKeyDown(0x02) ||
+               IsKeyDown(0x04) ||
+               IsKeyDown(0x05) ||
+               IsKeyDown(0x06);
     }
 
     private static bool HasAsyncKeyPressSinceLastQuery(int virtualKey)

@@ -183,6 +183,9 @@ public partial class SettingsViewModel
             SelectedWeatherSkin = settings.WeatherSkin == SettingsService.WeatherSkinRich
                 ? SettingsService.WeatherSkinRich
                 : SettingsService.WeatherSkinStandard;
+            SelectedWeatherDataSource = settings.WeatherDataSource == SettingsService.WeatherDataSourceOpenMeteo
+                ? SettingsService.WeatherDataSourceOpenMeteo
+                : SettingsService.WeatherDataSourceMsn;
             WeatherShowForecast = settings.WeatherShowForecast;
             WeatherShowSunrise = settings.WeatherShowSunrise;
             WeatherShowUvIndex = settings.WeatherShowUvIndex;

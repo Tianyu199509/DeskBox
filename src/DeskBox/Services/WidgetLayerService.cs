@@ -41,13 +41,15 @@ public static class WidgetLayerService
 
         IntPtr foreground = Win32Helper.GetForegroundWindow();
         DetachFromDesktopIconLayerIfNeeded(windowHandle);
-        bool wasTopMost = Win32Helper.IsWindowTopMost(windowHandle);
-        if (wasTopMost)
-        {
-            Win32Helper.ClearWindowTopMost(windowHandle);
-        }
 
-        if (wasTopMost && foreground != IntPtr.Zero && foreground != windowHandle)
+        // Always clear TopMost and bring the foreground window to front.
+        // Previously this was gated by `wasTopMost`, but raised widgets use
+        // BringWindowTemporarilyToFront (TOPMOST→NOTOPMOST) so they are never
+        // persistently TopMost by the time restore runs — the gate was always
+        // false, causing a "silent restore" (state changed, visual didn't).
+        Win32Helper.ClearWindowTopMost(windowHandle);
+
+        if (foreground != IntPtr.Zero && foreground != windowHandle)
         {
             Win32Helper.BringWindowToFront(foreground);
         }

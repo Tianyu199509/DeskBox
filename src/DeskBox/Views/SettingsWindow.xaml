@@ -1728,6 +1728,19 @@ svc:Localized.DescriptionKey="Settings.DefaultWidth.Description"
 
                         <toolkit:SettingsCard
                             HorizontalContentAlignment="Right"
+                            svc:Localized.DescriptionKey="Settings.Weather.DataSource.Description"
+                            svc:Localized.HeaderKey="Settings.Weather.DataSource.Title">
+                            <toolkit:SettingsCard.HeaderIcon>
+                                <FontIcon Glyph="&#xE787;" />
+                            </toolkit:SettingsCard.HeaderIcon>
+                            <ComboBox
+                                MinWidth="180"
+                                ItemsSource="{Binding AvailableWeatherDataSourceOptions}"
+                                controls:SettingsComboBox.Value="{Binding SelectedWeatherDataSource, Mode=TwoWay}" />
+                        </toolkit:SettingsCard>
+
+                        <toolkit:SettingsCard
+                            HorizontalContentAlignment="Right"
                             svc:Localized.DescriptionKey="Settings.Weather.TemperatureUnit.Description"
                             svc:Localized.HeaderKey="Settings.Weather.TemperatureUnit.Title">
                             <toolkit:SettingsCard.HeaderIcon>

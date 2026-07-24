@@ -256,7 +256,7 @@
                                     FontSize="9"
                                     Foreground="{ThemeResource TextFillColorTertiaryBrush}"
                                     Glyph="{Binding ChevronGlyph}"
-                                    Visibility="{Binding CollapsedPreviewVisibility}" />
+                                    Visibility="Collapsed" />
                             </Grid>
                         </StackPanel>
                     </Border>
@@ -379,7 +379,7 @@
                             <TextBlock FontSize="11" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="{Binding Summary}" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" />
                         </StackPanel>
 
-                        <FontIcon Grid.Column="2" Margin="8,0,2,0" VerticalAlignment="Center" FontSize="11" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Glyph="{Binding ChevronGlyph}" Visibility="{Binding CollapsedPreviewVisibility}" />
+                        <FontIcon Grid.Column="2" Margin="8,0,2,0" VerticalAlignment="Center" FontSize="11" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Glyph="{Binding ChevronGlyph}" Visibility="Collapsed" />
                     </Grid>
                 </Border>
             </DataTemplate>

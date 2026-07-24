@@ -33,6 +33,10 @@ public sealed class WeatherData
     /// <summary>Whether this payload is stale data returned after a failed refresh.</summary>
     [JsonIgnore]
     public bool IsStale { get; set; }
+
+    /// <summary>Whether this payload was fetched from the fallback data source.</summary>
+    [JsonIgnore]
+    public bool IsFallback { get; set; }
 }
 
 public sealed class WeatherCurrent

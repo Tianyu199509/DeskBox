@@ -205,7 +205,7 @@ public sealed class NativeDropTarget : IDisposable
         {
             RegisterDragDrop(_hwnd, _comObject);
             _registered = true;
-            App.LogVerbose($"[DropTarget] Registered IDropTarget for hwnd=0x{_hwnd.ToInt64():X}");
+            App.Log($"[DropTarget] Registered IDropTarget for hwnd=0x{_hwnd.ToInt64():X}");
         }
         catch (Exception ex)
         {
@@ -287,6 +287,10 @@ public sealed class NativeDropTarget : IDisposable
             var (paths, containsTemporaryFiles) = _owner.TryExtractFilePaths(pDataObj);
             _owner.HasFileData = false;
             _owner.HasVirtualFileData = false;
+
+            // Always log so we can tell whether the native OLE drop target receives
+            // CF_HDROP drops (WeChat / Explorer) at all, and what it extracted.
+            App.Log($"[DropTarget] NativeDrop received count={paths.Count} temp={containsTemporaryFiles}");
 
             if (paths.Count > 0)
             {
@@ -564,34 +568,67 @@ public sealed class NativeDropTarget : IDisposable
         int index,
         string destinationPath)
     {
-        var contentsFormat = new FORMATETC
+        // Try TYMED_ISTREAM first — FileContents from browser drag sources
+        // (Chrome / Edge / Firefox) is strictly an IStream. Asking for the
+        // combined mask TYMED_ISTREAM | TYMED_HGLOBAL in one FORMATETC is
+        // unreliable across OLE sources: some reject the combined mask
+        // outright (returning DV_E_FORMATETC), which made the widget silently
+        // ignore browser drops even though DragEnter/Drop fired. Fall back to
+        // TYMED_HGLOBAL for sources that provide the contents as a memory blob.
+        STGMEDIUM contentsMedium = default;
+        uint actualTymed = 0;
+        IntPtr actualMedium = IntPtr.Zero;
+        foreach (uint tymed in new uint[] { TYMED_ISTREAM, TYMED_HGLOBAL })
         {
-            cfFormat = s_fileContentsFormat,
-            ptd = IntPtr.Zero,
-            dwAspect = DVASPECT_CONTENT,
-            lindex = index,
-            tymed = TYMED_ISTREAM | TYMED_HGLOBAL,
-        };
-        if (dataObj.GetData(ref contentsFormat, out STGMEDIUM contentsMedium) != S_OK ||
-            contentsMedium.unionMember == IntPtr.Zero)
+            var contentsFormat = new FORMATETC
+            {
+                cfFormat = s_fileContentsFormat,
+                ptd = IntPtr.Zero,
+                dwAspect = DVASPECT_CONTENT,
+                lindex = index,
+                tymed = tymed,
+            };
+            int hr = dataObj.GetData(ref contentsFormat, out contentsMedium);
+            if (hr == S_OK && contentsMedium.unionMember != IntPtr.Zero)
+            {
+                actualTymed = contentsMedium.tymed;
+                actualMedium = contentsMedium.unionMember;
+                break;
+            }
+            // Release any partially populated medium before retrying with a
+            // different tymed (GetData may have set unionMember on failure).
+            if (contentsMedium.unionMember != IntPtr.Zero)
+            {
+                ReleaseStgMedium(ref contentsMedium);
+                contentsMedium = default;
+            }
+        }
+
+        if (actualMedium == IntPtr.Zero)
         {
+            App.Log(
+                $"[DropTarget] No FileContents payload for virtual file index={index} " +
+                $"destination='{destinationPath}' (browser may not have provided a stream)");
             return false;
         }
 
         try
         {
-            if ((contentsMedium.tymed & TYMED_ISTREAM) != 0)
+            if ((actualTymed & TYMED_ISTREAM) != 0)
             {
-                SaveComStream(contentsMedium.unionMember, destinationPath);
+                SaveComStream(actualMedium, destinationPath);
                 return true;
             }
 
-            if ((contentsMedium.tymed & TYMED_HGLOBAL) != 0)
+            if ((actualTymed & TYMED_HGLOBAL) != 0)
             {
-                SaveGlobalMemory(contentsMedium.unionMember, destinationPath);
+                SaveGlobalMemory(actualMedium, destinationPath);
                 return true;
             }
 
+            App.Log(
+                $"[DropTarget] Unexpected FileContents tymed=0x{actualTymed:X} " +
+                $"for index={index}");
             return false;
         }
         catch (Exception ex)

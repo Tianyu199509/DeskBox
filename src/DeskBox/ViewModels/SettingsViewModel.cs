@@ -94,6 +94,7 @@ private string _selectedWeatherTemperatureUnit = SettingsService.WeatherTemperat
 private string _selectedWeatherWindSpeedUnit = SettingsService.WeatherWindSpeedUnitKmh;
 private string _selectedWeatherDefaultView = SettingsService.WeatherDefaultViewToday;
 private string _selectedWeatherSkin = SettingsService.WeatherSkinStandard;
+private string _selectedWeatherDataSource = SettingsService.WeatherDataSourceMsn;
 private int _selectedWeatherRefreshInterval = 60;
     private bool _useSystemAccentColor;
     private string _accentColorHex = AccentColorHelper.DefaultAccentColorHex;
@@ -148,6 +149,7 @@ private string[]? _cachedWeatherTempUnitDisplayNames;
 private string[]? _cachedWeatherWindUnitDisplayNames;
 private string[]? _cachedWeatherDefaultViewDisplayNames;
 private string[]? _cachedWeatherSkinDisplayNames;
+private string[]? _cachedWeatherDataSourceDisplayNames;
 private string[]? _cachedWeatherRefreshIntervalDisplayNames;
 
     [ObservableProperty] private bool _autoStart;

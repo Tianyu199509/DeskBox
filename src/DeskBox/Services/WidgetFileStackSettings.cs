@@ -1,4 +1,5 @@
 using DeskBox.Models;
+using System.Text.Json;
 
 namespace DeskBox.Services;
 
@@ -8,6 +9,9 @@ public static class WidgetFileStackSettings
     public const string GroupByOverrideMetadataKey = "FileStackGroupBy";
     public const string ThresholdOverrideMetadataKey = "FileStackThreshold";
     public const string OrderByOverrideMetadataKey = "FileStackOrderBy";
+    public const string DisabledStacksMetadataKey = "FileStackDisabledGroups";
+    public const string StackNameOverridesMetadataKey = "FileStackNameOverrides";
+    public const string StackOrderMetadataKey = "FileStackGroupOrder";
 
     public static bool? GetEnabledOverride(WidgetConfig config)
     {
@@ -154,6 +158,106 @@ public static class WidgetFileStackSettings
         config.Metadata?.Remove(GroupByOverrideMetadataKey);
         config.Metadata?.Remove(ThresholdOverrideMetadataKey);
         config.Metadata?.Remove(OrderByOverrideMetadataKey);
+    }
+
+    // ── Stack customizations (rename / unstack / manual group order) ──
+
+    /// <summary>
+    /// Group keys whose stacks the user explicitly dissolved ("don't stack this
+    /// group"). Members of these groups are always projected as loose items.
+    /// </summary>
+    public static HashSet<string> GetDisabledStacks(WidgetConfig config) =>
+        ReadStringCollection(config, DisabledStacksMetadataKey);
+
+    public static void SetDisabledStacks(WidgetConfig config, IEnumerable<string> stackKeys) =>
+        WriteStringCollection(config, DisabledStacksMetadataKey, stackKeys);
+
+    /// <summary>User-assigned display names per stack group key.</summary>
+    public static Dictionary<string, string> GetStackNameOverrides(WidgetConfig config)
+    {
+        if (config.Metadata is null ||
+            !config.Metadata.TryGetValue(StackNameOverridesMetadataKey, out string? json) ||
+            string.IsNullOrWhiteSpace(json))
+        {
+            return new Dictionary<string, string>(StringComparer.Ordinal);
+        }
+
+        try
+        {
+            return JsonSerializer.Deserialize<Dictionary<string, string>>(json) ??
+                new Dictionary<string, string>(StringComparer.Ordinal);
+        }
+        catch (JsonException)
+        {
+            return new Dictionary<string, string>(StringComparer.Ordinal);
+        }
+    }
+
+    public static void SetStackNameOverrides(WidgetConfig config, IReadOnlyDictionary<string, string> overrides)
+    {
+        config.Metadata ??= [];
+        if (overrides.Count == 0)
+        {
+            config.Metadata.Remove(StackNameOverridesMetadataKey);
+            return;
+        }
+
+        config.Metadata[StackNameOverridesMetadataKey] = JsonSerializer.Serialize(overrides);
+    }
+
+    /// <summary>
+    /// Manual group order (group keys in display order). Keys that no longer exist
+    /// are ignored at merge time; new groups append in default order.
+    /// </summary>
+    public static List<string> GetStackOrder(WidgetConfig config) =>
+        [.. ReadStringCollection(config, StackOrderMetadataKey)];
+
+    public static void SetStackOrder(WidgetConfig config, IEnumerable<string>? stackKeys)
+    {
+        if (stackKeys is null)
+        {
+            config.Metadata?.Remove(StackOrderMetadataKey);
+            return;
+        }
+
+        WriteStringCollection(config, StackOrderMetadataKey, stackKeys);
+    }
+
+    private static HashSet<string> ReadStringCollection(WidgetConfig config, string key)
+    {
+        if (config.Metadata is null ||
+            !config.Metadata.TryGetValue(key, out string? json) ||
+            string.IsNullOrWhiteSpace(json))
+        {
+            return new HashSet<string>(StringComparer.Ordinal);
+        }
+
+        try
+        {
+            return JsonSerializer.Deserialize<List<string>>(json) is { } list
+                ? new HashSet<string>(list, StringComparer.Ordinal)
+                : new HashSet<string>(StringComparer.Ordinal);
+        }
+        catch (JsonException)
+        {
+            return new HashSet<string>(StringComparer.Ordinal);
+        }
+    }
+
+    private static void WriteStringCollection(WidgetConfig config, string key, IEnumerable<string> values)
+    {
+        config.Metadata ??= [];
+        var list = values
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+        if (list.Count == 0)
+        {
+            config.Metadata.Remove(key);
+            return;
+        }
+
+        config.Metadata[key] = JsonSerializer.Serialize(list);
     }
 
     public static bool NormalizeOverrides(WidgetConfig config)

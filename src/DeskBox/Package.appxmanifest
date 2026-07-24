@@ -12,7 +12,7 @@
   <Identity
     Name="D1FC332A.DeskBoxWidgets"
     Publisher="CN=3B75AA4A-2433-4F71-9CC1-B644B26F474A"
-    Version="1.3.1.0" />
+    Version="1.3.3.0" />
 
   <mp:PhoneIdentity PhoneProductId="7bb59608-421d-4fd4-8f12-8929f87d086a" PhonePublisherId="00000000-0000-0000-0000-000000000000" />
 
