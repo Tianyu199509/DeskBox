@@ -397,6 +397,7 @@ settings.WeatherTemperatureUnit = WeatherTemperatureUnitCelsius;
 settings.WeatherWindSpeedUnit = WeatherWindSpeedUnitKmh;
 settings.WeatherDefaultView = WeatherDefaultViewToday;
 settings.WeatherSkin = WeatherSkinStandard;
+settings.WeatherDataSource = WeatherDataSourceMsn;
 settings.WeatherShowForecast = true;
 settings.WeatherShowSunrise = true;
 settings.WeatherShowUvIndex = true;
@@ -2358,6 +2359,15 @@ changed |= NormalizeDeletionSettings(_settings);
         if (!string.Equals(settings.WeatherSkin, normalizedSkin, StringComparison.Ordinal))
         {
             settings.WeatherSkin = normalizedSkin;
+            changed = true;
+        }
+
+        string normalizedDataSource = settings.WeatherDataSource is WeatherDataSourceOpenMeteo
+            ? WeatherDataSourceOpenMeteo
+            : WeatherDataSourceMsn;
+        if (!string.Equals(settings.WeatherDataSource, normalizedDataSource, StringComparison.Ordinal))
+        {
+            settings.WeatherDataSource = normalizedDataSource;
             changed = true;
         }
 
