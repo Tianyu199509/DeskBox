@@ -6,10 +6,10 @@
     <!-- Keep the compile-time SDK modern while declaring the supported Win10 floor explicitly. -->
     <SupportedOSPlatformVersion>10.0.19044.0</SupportedOSPlatformVersion>
     <RootNamespace>DeskBox</RootNamespace>
-    <Version>1.4.5</Version>
-    <AssemblyVersion>1.4.5.0</AssemblyVersion>
-    <FileVersion>1.4.5.0</FileVersion>
-    <InformationalVersion>1.4.5</InformationalVersion>
+    <Version>1.4.6</Version>
+    <AssemblyVersion>1.4.6.0</AssemblyVersion>
+    <FileVersion>1.4.6.0</FileVersion>
+    <InformationalVersion>1.4.6</InformationalVersion>
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
     <Platforms>x64;ARM64</Platforms>
     <RuntimeIdentifiers>win-x64;win-arm64</RuntimeIdentifiers>
@@ -92,7 +92,7 @@
       Text="DeskBox Native AOT stage 7A requires a matching Platform/RuntimeIdentifier pair: x64/win-x64 or ARM64/win-arm64." />
     <Error
       Condition="'$(DeskBoxRustNative)' != 'true'"
-      Text="DeskBox Native AOT stage 5B-4C3B2B2B requires DeskBoxRustNative=true so the Rust-only shortcut, music-volume, Explorer-shell, Quick Access, and exact Recycle Bin recovery paths cannot be published without deskbox_native.dll; completed gates retained by this profile include the shortcut AOT-to-Rust smoke, Explorer and Quick Access read-only, Quick Access pin/unpin, music-volume read-only smoke, system master-volume setter, session-volume recovery, the 5B-4A basic managed UI matrix, the 5B-4B1 deep settings matrix, the 5B-4B2A settings/widget persistence restart matrix, the 5B-4B2B1 Quick Capture content-store persistence restart/delete matrix, the 5B-4B2B2A Todo core task/title/notes/completion/delete persistence restart matrix, the 5B-4B2B2B1 Todo steps create/edit/complete/reload/delete persistence restart matrix, the 5B-4B2B2B2 Todo managed attachments import/project/reload/delete persistence restart matrix, the 5B-4B2C1 Glance owned-local-image/preferences/reload/restore/postflight matrix, the 5B-4B2C2A Weather local settings/view-mode/reload/restore/postflight matrix, the 5B-4B2C2B deterministic non-empty WeatherData/current/hourly/week/skin/unit/view-mode/reload/restore/postflight real-surface matrix, the 5B-4C1A owned local-file surface/navigation/watcher/copy/move/rename/conflict/reload/restore/postflight matrix, the 5B-4C1B1 real single/multi File Widget menu deletion, watcher/UI removal, cross-process exact Recycle Bin query, Rust recovery, content-hash, compensation and postflight matrix, the 5B-4C1B2A real Move Back to Desktop menu, propagated owner HWND, actual SHFileOperationW, deterministic partial/cancel/late-return, persisted history, content-hash, compensation and postflight matrix, the 5B-4C1B2B real File Properties menu, exact owned target, propagated host HWND, actual SHObjectProperties dialog, owner-chain observation, controlled WM_CLOSE, content-hash, natural-exit and isolation matrix, the 5B-4C1C1 modern FileOpenPicker owner, real cancel/select dialog, isolated file import, file/folder StorageItems DataPackage parsing, restart, hash, postflight, natural-exit and no-global-clipboard-mutation matrix, the 5B-4C1C2A registered generated IDropTarget CCW, HDROP callback, native pointer/leave cleanup, copy/move, large-file progress-card layering/acrylic, restart and postflight matrix, the 5B-4C2A standard global/search RegisterHotKey dispatch, conflict rollback, disable/re-enable, reserved-hook lifecycle and cross-process release matrix, the 5B-4C3A deterministic Todo due-candidate, reminder-control, snooze, recurrence generation, completion, cross-process dismissal, restore and postflight matrix, the 5B-4C3B1 three-process Todo native-notification registration, single/aggregate payload, real display, cross-process history, exact tag/group cleanup, unregister and postflight matrix, the 5B-4C3B2A deterministic semicolon/ampersand activation grammar, body/open, complete, four snooze choices, legacy snooze10, invalid-input no-mutation, cross-process persistence/clear and postflight matrix, the 5B-4C3B2B1 source-generated typed activation envelope, atomic multi-entry spool, duplicate/corrupt/legacy handling, startup-ready drain, full UserInput preservation, cold-start recovery, real second-process single-instance forwarding, natural-exit and isolation matrix, the 5B-4C3B2B2A content-ready Todo body target plus Complete/Snooze visible-refresh real-surface matrix, and the 5B-4C3B2B2B genuine Notification Center body/Complete/Snooze running-process and cold-start click provenance matrix; physical Explorer mouse drag/drop, global clipboard session mutation, physical standard/Win+Space keyboard input and Settings/Onboarding recorder validation, real Windows notification click provenance is now covered for running and cold-start paths, while remaining target-device notification delivery variations, real Weather network/location, and online Glance images remain deferred; tray reflection, search-history XAML WMC1506, twenty-two prior leaf compiled bindings, fourteen typed DataTemplate bindings, five typed ViewModel bridge bindings, eight compiled search-result row bindings, and subsequent narrow generated ViewModel bridges are resolved in managed code, while AOT preview data-root isolation, normal application shutdown, owned-root cleanup, deterministic fixture-only Weather service injection, real Weather and File Widget HWND/XamlRoot and DataTemplate projection, independent owned-file hashing, exact recovery identity, system-dialog ownership and close gates, deferred-path log exclusion, and production-data fingerprint gates are enforced by the preview tooling." />
+      Text="DeskBox Native AOT stage 5B-4C3B2B2B requires DeskBoxRustNative=true so the Rust-only shortcut, music-volume, Explorer-shell, Quick Access, and exact Recycle Bin recovery paths cannot be published without deskbox_native.dll; completed gates retained by this profile include the shortcut AOT-to-Rust smoke, Explorer and Quick Access read-only, Quick Access pin/unpin, music-volume read-only smoke, system master-volume setter, session-volume recovery, the 5B-4A basic managed UI matrix, the 5B-4B1 deep settings matrix, the 5B-4B2A settings/widget persistence restart matrix, the 5B-4B2B1 Quick Capture content-store persistence restart/delete matrix, the 5B-4B2B2A Todo core task/title/notes/completion/delete persistence restart matrix, the 5B-4B2B2B1 Todo steps create/edit/complete/reload/delete persistence restart matrix, the 5B-4B2B2B2 Todo managed attachments import/project/reload/delete persistence restart matrix, the 5B-4B2C1 Glance owned-local-image/preferences/reload/restore/postflight matrix, the 5B-4B2C2A Weather local settings/view-mode/reload/restore/postflight matrix, the 5B-4B2C2B deterministic non-empty WeatherData/current/hourly/week/skin/unit/view-mode/reload/restore/postflight real-surface matrix, the 5B-4C1A owned local-file surface/navigation/watcher/copy/move/rename/conflict/reload/restore/postflight matrix, the 5B-4C1B1 real single/multi File Widget menu deletion, watcher/UI removal, cross-process exact Recycle Bin query, Rust recovery, content-hash, compensation and postflight matrix, the 5B-4C1B2A real Move Back to Desktop menu, propagated owner HWND, actual SHFileOperationW, deterministic partial/cancel/late-return, persisted history, content-hash, compensation and postflight matrix, the 5B-4C1B2B real File Properties menu, exact owned target, propagated host HWND, actual SHObjectProperties dialog, owner-chain observation, controlled WM_CLOSE, content-hash, natural-exit and isolation matrix, the 5B-4C1C1 modern FileOpenPicker owner, real cancel/select dialog, isolated file import, file/folder StorageItems DataPackage parsing, restart, hash, postflight, natural-exit and no-global-clipboard-mutation matrix, the 5B-4C1C2A registered generated IDropTarget CCW, HDROP callback, native pointer/leave cleanup, copy/move, large-file progress-card layering/acrylic, restart and postflight matrix, the 5B-4C2A standard global/search RegisterHotKey dispatch, conflict rollback, disable/re-enable, reserved-hook lifecycle and cross-process release matrix, the 5B-4C3A deterministic Todo due-candidate, reminder-control, snooze, recurrence generation, completion, cross-process dismissal, restore and postflight matrix, the 5B-4C3B1 three-process Todo native-notification registration, single/aggregate payload, real display, cross-process history, exact tag/group cleanup, unregister and postflight matrix, the 5B-4C3B2A deterministic semicolon/ampersand activation grammar, body/open, complete, four snooze choices, legacy snooze10, invalid-input no-mutation, cross-process persistence/clear and postflight matrix, the 5B-4C3B2B1 source-generated typed activation envelope, atomic multi-entry spool, duplicate/corrupt/legacy handling, startup-ready drain, full UserInput preservation, cold-start recovery, real second-process single-instance forwarding, natural-exit and isolation matrix, the 5B-4C3B2B2A content-ready Todo body target plus Complete/Snooze visible-refresh real-surface matrix, and the 5B-4C3B2B2B genuine Notification Center body/Complete/Snooze running-process and cold-start click provenance matrix; physical Explorer mouse drag/drop, global clipboard session mutation, physical standard/Win+Space keyboard input and Settings/Onboarding recorder validation, real Windows notification click provenance is now covered for running and cold-start paths, while remaining target-device notification delivery variations, real Weather network/location, and online Glance images remain deferred; tray reflection, search-history XAML WMC1506, twenty-two prior leaf compiled bindings, fourteen typed DataTemplate bindings, four typed ViewModel bridge bindings, eight compiled search-result row bindings, and subsequent narrow generated ViewModel bridges are resolved in managed code, while AOT preview data-root isolation, normal application shutdown, owned-root cleanup, deterministic fixture-only Weather service injection, real Weather and File Widget HWND/XamlRoot and DataTemplate projection, independent owned-file hashing, exact recovery identity, system-dialog ownership and close gates, deferred-path log exclusion, and production-data fingerprint gates are enforced by the preview tooling." />
     <Error
       Condition="'$(DeskBoxAotSmokeHarness)' == 'true' and '$(DeskBoxAotAudit)' != 'true'"
       Text="DeskBoxAotSmokeHarness=true is reserved for explicit DeskBoxAotAudit builds and must not be enabled for retail publishing." />
@@ -187,12 +187,6 @@
     <PackageReference Include="Markdig" Version="1.3.2" />
   </ItemGroup>
 
-  <!-- Command API contract: shared, reflection-free DTOs and framing for the
-       named-pipe JSON-RPC host (App) and the DeskBox.Cli client. -->
-  <ItemGroup>
-    <ProjectReference Include="..\DeskBox.Protocol\DeskBox.Protocol.csproj" />
-  </ItemGroup>
-
   <ItemGroup>
     <None Remove="ThirdParty\Everything\Everything64.dll" />
     <None Remove="ThirdParty\Everything\EverythingARM64.dll" />
@@ -225,6 +219,14 @@
   </Target>
 
   <ItemGroup>
+    <!--
+      Microsoft.WinUI.props adds every file below Assets as Content before this
+      project is evaluated. Remove the Direct-only support images first, then
+      opt them back in only for Direct builds so Store packaging cannot inherit
+      them through the SDK wildcard.
+    -->
+    <Content Remove="Assets\wechat-qrcode.jpg" />
+    <Content Remove="Assets\Support\*.png" />
     <Content Include="Assets\deskbox.ico">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </Content>
@@ -253,7 +255,10 @@
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </Content>
     <Content Include="Assets\Store\*.png" />
-    <Content Include="Assets\Support\*.png" Condition="'$(DeskBoxDistribution)' != 'Store'" />
+    <Content Include="Assets\Support\*.png" Condition="'$(DeskBoxDistribution)' != 'Store'">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+      <CopyToPublishDirectory>Always</CopyToPublishDirectory>
+    </Content>
     <EmbeddedResource Include="Assets\Cities\cities.json" />
 <EmbeddedResource Include="Strings\zh-CN.json" />
 <EmbeddedResource Include="Strings\zh-TW.json" />

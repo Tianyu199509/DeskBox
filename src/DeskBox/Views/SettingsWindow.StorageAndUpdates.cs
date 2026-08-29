@@ -118,7 +118,7 @@ public sealed partial class SettingsWindow
         {
             warnings.Add(_localizationService.T("Onboarding.Task.Step2.Warning.CloudSync"));
         }
-        if (assessment.DriveType == DriveType.Removable)
+        if (assessment.DriveType == DriveType.Removable || assessment.IsTransientBusDrive)
         {
             warnings.Add(_localizationService.T("Onboarding.Task.Step2.Warning.Removable"));
         }
@@ -136,8 +136,18 @@ public sealed partial class SettingsWindow
     private void OpenManagedStoragePathButton_Click(object sender, RoutedEventArgs e)
     {
         string path = ViewModel.ManagedStorageRootPath;
-        Directory.CreateDirectory(path);
-        Win32Helper.OpenFile(path);
+        try
+        {
+            Directory.CreateDirectory(path);
+            Win32Helper.OpenFile(path);
+        }
+        catch (Exception ex)
+        {
+            App.Log($"[SettingsWindow] Failed to open managed storage root '{path}': {ex.Message}");
+            _ = ShowInfoDialogAsync(
+                _localizationService.T("Settings.Dialog.OpenStorageFailedTitle"),
+                _localizationService.Format("Settings.Dialog.OpenStorageFailedBody", ex.Message));
+        }
     }
 
     private async void PinManagedStorageToQuickAccessButton_Click(object sender, RoutedEventArgs e)

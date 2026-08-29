@@ -9,11 +9,64 @@ namespace DeskBox.Services;
 /// </summary>
 public static class WidgetLayerService
 {
-    private const uint SpawnWorkerWMessage = 0x052C;
+    internal const int StartupDesktopReadyRequiredStableSamples = 5;
+    internal const int StartupDesktopReadyMaxProbeAttempts = 48;
+    internal static readonly TimeSpan StartupDesktopReadyProbeInterval =
+        TimeSpan.FromMilliseconds(250);
 
     private static readonly object s_desktopLayerLock = new();
     private static readonly Dictionary<IntPtr, DesktopLayerAttachment> s_desktopLayerAttachments = [];
     private static IntPtr s_cachedDesktopIconView;
+    private static bool s_startupDesktopLayerAttachmentDeferred;
+
+    internal static void BeginStartupDesktopLayerAttachmentDeferral()
+    {
+        Volatile.Write(ref s_startupDesktopLayerAttachmentDeferred, true);
+        InvalidateDesktopIconViewCache();
+        App.Log("[Startup] Explorer desktop-layer attachment deferred without delaying widget restore");
+    }
+
+    internal static void EndStartupDesktopLayerAttachmentDeferral()
+    {
+        Volatile.Write(ref s_startupDesktopLayerAttachmentDeferred, false);
+    }
+
+    /// <summary>
+    /// Waits until Explorer's existing desktop icon host has remained stable long
+    /// enough for login-time icon restoration to finish. This is intentionally
+    /// used only for startup launches; normal launches should remain immediate.
+    /// </summary>
+    internal static async Task<bool> WaitForDesktopIconViewReadyAsync(
+        CancellationToken cancellationToken = default)
+    {
+        var stabilityTracker = new DesktopIconViewStabilityTracker(
+            StartupDesktopReadyRequiredStableSamples);
+
+        for (int attempt = 1; attempt <= StartupDesktopReadyMaxProbeAttempts; attempt++)
+        {
+            IntPtr desktopIconView = FindDesktopIconView();
+            if (stabilityTracker.Observe(desktopIconView))
+            {
+                App.Log(
+                    $"[Startup] Explorer desktop layer stable after {attempt} probes " +
+                    $"hwnd=0x{desktopIconView.ToInt64():X}");
+                return true;
+            }
+
+            if (attempt < StartupDesktopReadyMaxProbeAttempts)
+            {
+                await Task.Delay(StartupDesktopReadyProbeInterval, cancellationToken);
+            }
+        }
+
+        double maximumWaitMilliseconds =
+            StartupDesktopReadyProbeInterval.TotalMilliseconds *
+            (StartupDesktopReadyMaxProbeAttempts - 1);
+        App.Log(
+            $"[Startup] Explorer desktop layer was not stable within " +
+            $"{maximumWaitMilliseconds:0}ms; restoring widgets with the safe fallback layer");
+        return false;
+    }
 
     public static void MoveToDesktopBottom(
         IntPtr windowHandle,
@@ -801,6 +854,13 @@ public static class WidgetLayerService
             return false;
         }
 
+        if (Volatile.Read(ref s_startupDesktopLayerAttachmentDeferred))
+        {
+            App.LogVerbose(
+                $"[Startup] Desktop-layer attach deferred hwnd=0x{windowHandle.ToInt64():X}");
+            return false;
+        }
+
         IntPtr desktopIconView = FindDesktopIconView();
         if (desktopIconView == IntPtr.Zero)
         {
@@ -928,9 +988,11 @@ public static class WidgetLayerService
             return s_cachedDesktopIconView;
         }
 
-        // First: check if a WorkerW already hosts SHELLDLL_DefView. This avoids
-        // sending 0x052C again, which can disrupt DWM composition and cause the
-        // desktop wallpaper to disappear (especially after display/DPI changes).
+        s_cachedDesktopIconView = IntPtr.Zero;
+
+        // Only use a SHELLDLL_DefView that Explorer has already created. Never
+        // force WorkerW creation here: doing so during login can race Explorer's
+        // icon-layout restoration and leave the user's desktop icons rearranged.
         IntPtr existingDefView = IntPtr.Zero;
         Win32Helper.EnumWindows((hWnd, _) =>
         {
@@ -950,43 +1012,9 @@ public static class WidgetLayerService
             return s_cachedDesktopIconView;
         }
 
-        // No existing WorkerW found: send 0x052C to Progman to spawn one.
-        IntPtr progman = Win32Helper.FindWindow("Progman", null);
-        if (progman != IntPtr.Zero)
-        {
-            _ = Win32Helper.SendMessageTimeout(
-                progman,
-                SpawnWorkerWMessage,
-                UIntPtr.Zero,
-                IntPtr.Zero,
-                Win32Helper.SMTO_NORMAL,
-                1000,
-                out _);
-
-            IntPtr progmanDefView = FindDesktopIconViewChild(progman);
-            if (progmanDefView != IntPtr.Zero)
-            {
-                s_cachedDesktopIconView = progmanDefView;
-                return s_cachedDesktopIconView;
-            }
-        }
-
-        // Last resort: enum again after spawning.
-        IntPtr workerDefView = IntPtr.Zero;
-        Win32Helper.EnumWindows((hWnd, _) =>
-        {
-            IntPtr defView = FindDesktopIconViewChild(hWnd);
-            if (defView != IntPtr.Zero)
-            {
-                workerDefView = defView;
-                return false;
-            }
-
-            return true;
-        }, IntPtr.Zero);
-
-        s_cachedDesktopIconView = workerDefView;
-        return s_cachedDesktopIconView;
+        // The caller already has a bottom-of-desktop fallback and can retry on a
+        // later layer operation after Explorer finishes initializing.
+        return IntPtr.Zero;
     }
 
     private static IntPtr FindHighestPeer(IReadOnlyCollection<IntPtr> handles)
@@ -1036,6 +1064,40 @@ public static class WidgetLayerService
     }
 
     private sealed record DesktopLayerAttachment(IntPtr OriginalOwner);
+}
+
+internal sealed class DesktopIconViewStabilityTracker
+{
+    private readonly int _requiredStableSamples;
+    private IntPtr _candidate;
+    private int _stableSampleCount;
+
+    public DesktopIconViewStabilityTracker(int requiredStableSamples)
+    {
+        _requiredStableSamples = Math.Max(1, requiredStableSamples);
+    }
+
+    public bool Observe(IntPtr desktopIconView)
+    {
+        if (desktopIconView == IntPtr.Zero)
+        {
+            _candidate = IntPtr.Zero;
+            _stableSampleCount = 0;
+            return false;
+        }
+
+        if (desktopIconView != _candidate)
+        {
+            _candidate = desktopIconView;
+            _stableSampleCount = 1;
+        }
+        else
+        {
+            _stableSampleCount++;
+        }
+
+        return _stableSampleCount >= _requiredStableSamples;
+    }
 }
 
 internal static class WidgetLayerPointerActivationPolicy

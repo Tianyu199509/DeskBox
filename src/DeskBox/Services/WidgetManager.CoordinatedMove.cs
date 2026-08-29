@@ -138,6 +138,7 @@ public sealed partial class WidgetManager
             }
         }
 
+        NoteWidgetWindowsMoved();
         session.LastAppliedDelta = delta;
         return true;
     }

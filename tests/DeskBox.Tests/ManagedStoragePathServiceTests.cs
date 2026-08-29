@@ -1,3 +1,5 @@
+using System.IO;
+using DeskBox.Helpers;
 using DeskBox.Services;
 
 namespace DeskBox.Tests;
@@ -5,43 +7,67 @@ namespace DeskBox.Tests;
 public sealed class ManagedStoragePathServiceTests
 {
     [Fact]
-    public void SelectRecommendedPath_UsesLargestSuitableNonSystemFixedDrive()
+    public void GetRecommendedPath_AlwaysStaysUnderUserProfile()
     {
-        ManagedStorageDriveCandidate[] drives =
-        [
-            new(@"C:\", DriveType.Fixed, true, 500L * 1024 * 1024 * 1024),
-            new(@"D:\", DriveType.Fixed, true, 20L * 1024 * 1024 * 1024),
-            new(@"E:\", DriveType.Fixed, true, 80L * 1024 * 1024 * 1024),
-            new(@"F:\", DriveType.Removable, true, 200L * 1024 * 1024 * 1024)
-        ];
+        // The default for new profiles must not depend on whatever hardware
+        // happens to be attached at first launch (e.g. a USB drive).
+        string expected = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+            "DeskBox");
 
-        string selected = ManagedStoragePathService.SelectRecommendedPath(
-            @"C:\Users\Simon",
-            "Simon",
-            @"C:\",
-            drives);
-
-        Assert.Equal(@"E:\DeskBox\Simon", selected);
+        Assert.Equal(expected, ManagedStoragePathService.GetRecommendedPath());
     }
 
     [Fact]
-    public void SelectRecommendedPath_IgnoresLowSpaceUnavailableAndNetworkDrives()
+    public void SelectSuitableNonSystemDrive_PrefersLargestInternalNonSystemDrive()
     {
         ManagedStorageDriveCandidate[] drives =
         [
-            new(@"C:\", DriveType.Fixed, true, 100L * 1024 * 1024 * 1024),
-            new(@"D:\", DriveType.Fixed, true, ManagedStoragePathService.MinimumRecommendedFreeSpaceBytes - 1),
-            new(@"E:\", DriveType.Fixed, false, 100L * 1024 * 1024 * 1024),
-            new(@"Z:\", DriveType.Network, true, 100L * 1024 * 1024 * 1024)
+            new(@"C:\", DriveType.Fixed, true, 500L * 1024 * 1024 * 1024, false),
+            new(@"D:\", DriveType.Fixed, true, 20L * 1024 * 1024 * 1024, false),
+            new(@"E:\", DriveType.Fixed, true, 80L * 1024 * 1024 * 1024, false),
+            // A large USB drive reporting as fixed must lose to internal drives.
+            new(@"F:\", DriveType.Fixed, true, 200L * 1024 * 1024 * 1024, true),
+            new(@"G:\", DriveType.Removable, true, 100L * 1024 * 1024 * 1024, true)
         ];
 
-        string selected = ManagedStoragePathService.SelectRecommendedPath(
-            @"C:\Users\Simon",
-            "Simon",
+        ManagedStorageDriveCandidate? selected = ManagedStoragePathService.SelectSuitableNonSystemDrive(
             @"C:\",
             drives);
 
-        Assert.Equal(@"C:\Users\Simon\DeskBox", selected);
+        Assert.Equal(@"E:\", selected?.RootPath);
+    }
+
+    [Fact]
+    public void SelectSuitableNonSystemDrive_ReturnsNullWithoutInternalCandidates()
+    {
+        ManagedStorageDriveCandidate[] drives =
+        [
+            new(@"C:\", DriveType.Fixed, true, 100L * 1024 * 1024 * 1024, false),
+            new(@"D:\", DriveType.Fixed, true, ManagedStoragePathService.MinimumRecommendedFreeSpaceBytes - 1, false),
+            new(@"E:\", DriveType.Fixed, false, 100L * 1024 * 1024 * 1024, false),
+            new(@"F:\", DriveType.Fixed, true, 100L * 1024 * 1024 * 1024, true),
+            new(@"Z:\", DriveType.Network, true, 100L * 1024 * 1024 * 1024, true)
+        ];
+
+        Assert.Null(ManagedStoragePathService.SelectSuitableNonSystemDrive(@"C:\", drives));
+    }
+
+    [Theory]
+    [InlineData(StorageBusTypeHelper.BusTypeUsb, true)]
+    [InlineData(StorageBusTypeHelper.BusType1394, true)]
+    [InlineData(StorageBusTypeHelper.BusTypeSd, true)]
+    [InlineData(StorageBusTypeHelper.BusTypeMmc, true)]
+    [InlineData(StorageBusTypeHelper.BusTypeVirtual, true)]
+    [InlineData(StorageBusTypeHelper.BusTypeFileBackedVirtual, true)]
+    [InlineData(0x01, false)] // Scsi
+    [InlineData(0x03, false)] // Ata
+    [InlineData(0x0B, false)] // Sata
+    [InlineData(0x11, false)] // Nvme
+    [InlineData(null, false)]
+    public void IsTransientBus_ClassifiesDetachableBuses(int? busType, bool expected)
+    {
+        Assert.Equal(expected, StorageBusTypeHelper.IsTransientBus(busType));
     }
 
     [Theory]

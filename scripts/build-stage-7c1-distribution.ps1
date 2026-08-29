@@ -255,7 +255,11 @@ $installerVersionMatch = [regex]::Match(
 if (-not $installerBaseNameMatch.Success -or -not $installerVersionMatch.Success) {
     throw "The Inno script does not expose MyAppOutputBaseName and MyAppVersion definitions."
 }
-$installerOutputBaseName = "{0}_{1}_{2}_NativeAot" -f `
+# Keep the DeskBox_Setup_<version>_<arch>.exe shape: every released updater
+# (1.4.3 and later) only accepts assets and manifest URLs ending in
+# "_x64.exe"/"_arm64.exe", and the distribution workflow publishes this exact
+# name to GitHub Releases and stable.json. Flavor suffixes break that contract.
+$installerOutputBaseName = "{0}_{1}_{2}" -f `
     $installerBaseNameMatch.Groups[1].Value,
     $installerVersionMatch.Groups[1].Value,
     $platformSegment
@@ -278,8 +282,8 @@ if ($LASTEXITCODE -ne 0) {
 $installer = Get-ChildItem -LiteralPath $installerOutputDirectory -Filter *.exe -File |
     Sort-Object LastWriteTime -Descending |
     Select-Object -First 1
-if ($null -eq $installer -or $installer.Name -notmatch 'NativeAot') {
-    throw "The Native AOT Inno installer was not produced with the expected suffix."
+if ($null -eq $installer -or $installer.Name -ne "$installerOutputBaseName.exe") {
+    throw "The Native AOT Inno installer was not produced with the expected name '$installerOutputBaseName.exe'."
 }
 
 $storeOutputDirectory = Join-Path $OutputDirectory "store"

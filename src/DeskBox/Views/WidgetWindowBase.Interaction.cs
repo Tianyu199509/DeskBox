@@ -233,6 +233,7 @@ public abstract partial class WidgetWindowBase
         BeginWidgetBoundsInteraction();
         IsDragging = true;
         _deferTitleBarDragConfigUpdates = true;
+        SimplifyBackdropForInteraction();
         HasMovedTitleBarDrag = false;
         DisplayChangeWatcher?.SuppressRestore();
         Win32Helper.GetCursorPos(out InitialCursorPt);
@@ -404,6 +405,7 @@ public abstract partial class WidgetWindowBase
 
         DisplayChangeWatcher?.ResumeRestore();
         HasMovedTitleBarDrag = false;
+        RestoreBackdropAfterInteraction();
         QueueBackdropRefresh();
         App.Current?.WidgetManager?.RestoreTemporarilyRaisedWidgetsToDesktopLayer(
             "drag-ended");
@@ -414,7 +416,7 @@ public abstract partial class WidgetWindowBase
 
     protected void ResizeBorder_PointerPressedCore(object sender, PointerRoutedEventArgs e)
     {
-        if (IsSizeLocked || sender is not FrameworkElement element)
+        if (IsSizeLocked || IsResizing || sender is not FrameworkElement element)
         {
             return;
         }
@@ -435,6 +437,10 @@ public abstract partial class WidgetWindowBase
 
         BeginWidgetBoundsInteraction();
         IsResizing = true;
+        // Per-commit config sync from AppWindow.Changed would fight the
+        // frame-coordinator cadence; the final bounds are persisted once in
+        // ResizeBorder_PointerReleasedCore instead.
+        _deferInteractiveResizeConfigUpdates = true;
         ResizeDirection = direction;
         DisplayChangeWatcher?.SuppressRestore();
         OnResizeStart();
@@ -448,6 +454,7 @@ public abstract partial class WidgetWindowBase
             initialBounds.Width,
             initialBounds.Height);
         BeginInteractiveResizePerformanceSession();
+        SimplifyBackdropForInteraction();
         element.CapturePointer(e.Pointer);
         App.Current.ResizeGuideOverlay.BeginResize(HWnd, RootElement);
         e.Handled = true;
@@ -525,6 +532,30 @@ public abstract partial class WidgetWindowBase
         e.Handled = true;
     }
 
+    private void CommitInteractiveResizeBounds()
+    {
+        // Keep the resize guard active while the final coalesced frame is
+        // committed. In particular, compact-bound settlement must not restore
+        // the pre-drag capsule width before Win10 has exposed the final HWND
+        // rectangle to GetWindowRect.
+        FlushPendingInteractiveResizeBounds();
+        RectInt32 finalBounds = GetActualWindowBounds();
+
+        // Capture-lost can be raised synchronously when pointer capture is
+        // released below. Mark the gesture complete first, but keep AppWindow
+        // config synchronization deferred until the authoritative bounds have
+        // been persisted and any capsule-bar constraint has been refreshed.
+        IsResizing = false;
+        try
+        {
+            PersistCompletedWidgetResize(finalBounds);
+        }
+        finally
+        {
+            _deferInteractiveResizeConfigUpdates = false;
+        }
+    }
+
     protected void ResizeBorder_PointerReleasedCore(object sender, PointerRoutedEventArgs e)
     {
         if (!IsResizing || sender is not FrameworkElement element)
@@ -532,16 +563,15 @@ public abstract partial class WidgetWindowBase
             return;
         }
 
-        IsResizing = false;
-        FlushPendingInteractiveResizeBounds();
+        CommitInteractiveResizeBounds();
         element.ReleasePointerCapture(e.Pointer);
         App.Current.ResizeGuideOverlay.EndResize();
-        PersistCompletedWidgetResize(GetActualWindowBounds());
         ResizeDirection = string.Empty;
         EndWidgetBoundsInteraction();
         OnResizeEnd();
         EndInteractiveResizePerformanceSession();
         DisplayChangeWatcher?.ResumeRestore();
+        RestoreBackdropAfterInteraction();
         QueueBackdropRefresh();
         e.Handled = true;
     }
@@ -559,16 +589,15 @@ public abstract partial class WidgetWindowBase
             return;
         }
 
-        IsResizing = false;
-        FlushPendingInteractiveResizeBounds();
+        CommitInteractiveResizeBounds();
         DragCaptureElement = null;
         App.Current?.ResizeGuideOverlay.EndResize();
-        PersistCompletedWidgetResize(GetActualWindowBounds());
         ResizeDirection = string.Empty;
         EndWidgetBoundsInteraction();
         OnResizeEnd();
         EndInteractiveResizePerformanceSession();
         DisplayChangeWatcher?.ResumeRestore();
+        RestoreBackdropAfterInteraction();
         QueueBackdropRefresh();
         e.Handled = true;
     }
@@ -642,6 +671,7 @@ public abstract partial class WidgetWindowBase
         }
         DisplayChangeWatcher?.ResumeRestore();
         HasMovedTitleBarDrag = false;
+        RestoreBackdropAfterInteraction();
         QueueBackdropRefresh();
         App.Current?.WidgetManager?.RestoreTemporarilyRaisedWidgetsToDesktopLayer(
             "drag-capture-lost");

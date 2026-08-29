@@ -1,4 +1,4 @@
-using DeskBox.Helpers;
+﻿using DeskBox.Helpers;
 using DeskBox.Models;
 using DeskBox.Services;
 using DeskBox.ViewModels;
@@ -415,7 +415,7 @@ public sealed partial class FileSurfaceContent
             _ => MoveSelectedItemsBackToDesktopAsync(),
             items => DeleteItemsAsync(items),
             GetSelectedItems,
-            CanCreateManualStack: true,
+            CanCreateManualStack: ViewModel.FileStacksEnabled,
             items =>
             {
                 if (TryBlockTransferMutation(items))

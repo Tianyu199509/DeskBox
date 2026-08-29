@@ -1,4 +1,4 @@
-namespace DeskBox.Services;
+﻿namespace DeskBox.Services;
 
 internal readonly record struct StackPopoverLayout(
     double Width,
@@ -259,8 +259,10 @@ internal static class StackPopoverLayoutCalculator
                 Math.Clamp(contentColumns, 1, maximumColumns));
 
         int totalRows = (int)Math.Ceiling(count / (double)columns);
+        // A fixed layout like 3x3 caps the grid shape; it must not pad empty
+        // rows. With only 3 files the popover should size to 3x1, not 3x3.
         int desiredRows = fixedVisibleRows is { } fixedRowCount
-            ? fixedRowCount
+            ? Math.Min(fixedRowCount, totalRows)
             : Math.Min(5, totalRows);
         double maximumHeight = Math.Min(720, availableHeight);
         int rowsThatFit = Math.Max(

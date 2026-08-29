@@ -95,7 +95,7 @@ public sealed class InstallerUninstallContractTests
         string migration = ReadRepositoryFile("installer/DeskBox.Migration.iss");
 
         Assert.Contains("PrivilegesRequired=admin", installer, StringComparison.Ordinal);
-        Assert.Contains("PrivilegesRequiredOverridesAllowed=dialog", installer, StringComparison.Ordinal);
+        Assert.Contains("PrivilegesRequiredOverridesAllowed=dialog commandline", installer, StringComparison.Ordinal);
         Assert.Contains("UsePreviousPrivileges=yes", installer, StringComparison.Ordinal);
         Assert.Contains("{autoprograms}", installer, StringComparison.Ordinal);
         Assert.Contains("{autodesktop}", installer, StringComparison.Ordinal);

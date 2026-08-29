@@ -1,4 +1,4 @@
-using DeskBox.Services;
+﻿using DeskBox.Services;
 
 namespace DeskBox.Tests;
 
@@ -236,7 +236,9 @@ public sealed class StackPopoverLayoutCalculatorTests
             layoutMode: SettingsService.FileStackPopoverLayoutGrid5);
 
         Assert.Equal(4, layout.Columns);
-        Assert.Equal(5, layout.VisibleRows);
+        // Fixed grid modes cap the shape; rows shrink to the content that
+        // actually exists (4 files / 4 columns = 1 row, not 5 empty rows).
+        Assert.Equal(1, layout.VisibleRows);
         Assert.False(layout.HasVerticalOverflow);
     }
 

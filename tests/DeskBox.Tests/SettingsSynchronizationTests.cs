@@ -30,10 +30,10 @@ public sealed class SettingsSynchronizationTests
     {
         using var scope = new TempSettingsScope();
         var settingsService = new SettingsService(scope.RootPath);
+        await settingsService.LoadAsync();
         bool settingsChanged = false;
         settingsService.SettingsChanged += () => settingsChanged = true;
 
-        settingsService.Settings.WidgetCapsuleModeEnabled = true;
         settingsService.Settings.WidgetCollapseBehavior =
             SettingsService.WidgetCollapseBehaviorSmart;
         settingsService.Settings.WidgetCompactWidthMode =
@@ -65,7 +65,6 @@ public sealed class SettingsSynchronizationTests
         var reloadedService = new SettingsService(scope.RootPath);
         await reloadedService.LoadAsync();
 
-        Assert.True(reloadedService.Settings.WidgetCapsuleModeEnabled);
         Assert.Equal(
             SettingsService.WidgetCollapseBehaviorSmart,
             reloadedService.Settings.WidgetCollapseBehavior);

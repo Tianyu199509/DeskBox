@@ -52,8 +52,19 @@ public sealed partial class QuickCaptureWidgetWindow
         ShowStatusToast(_localizationService.T("QuickCapture.BodyTruncated"));
     }
 
-    private void ResponsiveContentGrid_SizeChanged(object sender, SizeChangedEventArgs e) =>
+    private void ResponsiveContentGrid_SizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        if (_isInteractiveResizeActive)
+        {
+            // Live column sizing still tracks the HWND through normal XAML
+            // layout; only the single<->dual pane policy switch waits for the
+            // resize to finish.
+            _needsResponsiveDetailRelayoutAfterResize = true;
+            return;
+        }
+
         ApplyResponsiveDetailLayout();
+    }
 
     private void ApplyResponsiveDetailLayout()
     {

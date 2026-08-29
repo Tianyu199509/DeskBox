@@ -17,7 +17,7 @@ public sealed class NonAdminExecutionContractTests
         string installer = File.ReadAllText(TestPaths.FromRepository("installer/DeskBox.iss"));
 
         Assert.Contains("PrivilegesRequired=admin", installer, StringComparison.Ordinal);
-        Assert.Contains("PrivilegesRequiredOverridesAllowed=dialog", installer, StringComparison.Ordinal);
+        Assert.Contains("PrivilegesRequiredOverridesAllowed=dialog commandline", installer, StringComparison.Ordinal);
         Assert.Contains("UsePreviousPrivileges=yes", installer, StringComparison.Ordinal);
         Assert.Contains("runasoriginaluser", installer, StringComparison.OrdinalIgnoreCase);
     }

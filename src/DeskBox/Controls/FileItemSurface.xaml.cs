@@ -106,18 +106,24 @@ public sealed partial class FileItemSurface : UserControl, INotifyPropertyChange
     public HorizontalAlignment SurfaceHorizontalAlignment =>
         Mode == FileItemSurfaceMode.List
             ? HorizontalAlignment.Left
-            : HorizontalAlignment.Center;
+            : HorizontalAlignment.Stretch;
 
-    public double SurfaceMaxWidth =>
-        Mode == FileItemSurfaceMode.Icon && LayoutContext is not null
-            ? Math.Max(LayoutContext.IconImageSize + 18, LayoutContext.IconLabelMaxWidth + 12)
-            : double.PositiveInfinity;
+    public double SurfaceMaxWidth => double.PositiveInfinity;
 
     public Thickness SurfaceMargin
     {
         get
         {
-            if (Mode != FileItemSurfaceMode.List || LayoutContext is null)
+            if (Mode == FileItemSurfaceMode.Icon)
+            {
+                // Match the Windows desktop selection footprint: occupy the
+                // full icon column while retaining a narrow visual gutter.
+                // Height remains content-driven so hidden, one-line, and
+                // two-line labels keep their natural vertical spacing.
+                return new Thickness(1, 0, 1, 0);
+            }
+
+            if (LayoutContext is null)
             {
                 return new Thickness(0);
             }
@@ -163,7 +169,8 @@ public sealed partial class FileItemSurface : UserControl, INotifyPropertyChange
             : Visibility.Collapsed;
 
     public bool ToolTipEnabled =>
-        IsTransferActive || PathTooltipVisibility == Visibility.Visible;
+        TransferStatusVisibility == Visibility.Visible ||
+        PathTooltipVisibility == Visibility.Visible;
 
     public Border InteractiveBorder => SurfaceBorder;
 

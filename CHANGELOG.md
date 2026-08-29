@@ -1,64 +1,174 @@
 ﻿# Changelog
 
-## 1.4.5 - Unreleased
+## 1.4.6 - 2026-08-28
+
+紧急修复了部分系统下，格子间拖动 `.lnk` 快捷方式会被误删除并进入回收站的严重问题。
 
 ### English
 
-#### Command API: CLI and AI control
+DeskBox 1.4.6 is a major feature, performance, and runtime update. The notes below cover everything added or changed since 1.4.3.
 
-- DeskBox now hosts a local command API (JSON-RPC 2.0 over a same-user named pipe) so the CLI, scripts, and AI agents can inspect and drive a running app. Every call is audited to `CommandApi.audit.log`, mutating commands honor a read-only switch, and destructive commands stay disabled by default.
-- New `DeskBox.Cli` console app: `deskbox ping|info|schema|settings get|widgets list`, quick capture list/add, todo list/add, plus `deskbox mcp` which speaks Model Context Protocol over stdio for MCP hosts such as Claude Desktop and Cursor. `deskbox schema` is served from the command registry, so documented commands can never drift from implemented ones.
-- New `DeskBox.Protocol` project holds the reflection-free (NativeAOT-safe) envelope, framing codec, and schema records shared by the app and the CLI.
-- Added commands: `server/ping`, `server/info`, `server/schema`, `settings/get`, `quickcapture/list`, `quickcapture/add`, `todo/list`, `todo/add`, `widgets/list`; full details in `docs/architecture/command-api-v1.md`.
-- The pipe name is derived from the existing per-data-root instance scope, so development, preview, and retail instances never expose each other's command API.
+#### Important before updating
 
-### 中文
+- DeskBox now uses Windows App SDK and Windows App Runtime 2.4 instead of 2.2. A PC that only has the 2.2 runtime will download and install 2.4 once during a Direct-installer update; this is expected and does not remove the older shared runtime used by other applications.
+- The installer downloads Windows App Runtime 2.4 only when it is missing. A restart may be requested after runtime installation. For a fully offline update, install the matching x64 or ARM64 Windows App Runtime 2.4 first.
+- GitHub Direct builds now use Native AOT and no longer download or require a separate .NET 10 runtime.
+- Normal in-place updates keep the existing DeskBox settings, widget layouts, Todo, Quick Capture, and managed files. The updater also pins the current-user or all-users install scope so a silent update cannot switch scope unexpectedly.
+- The minimum supported system remains Windows 10 21H2 (build 19044), and the Direct installer now enforces that requirement.
 
-#### Command API：CLI 与 AI 控制
+#### Performance and resource use
 
-- DeskBox 现在内置本地命令 API（基于同用户命名管道的 JSON-RPC 2.0），CLI、脚本和 AI 智能体可以查看并操作运行中的应用。每次调用都会写入 `CommandApi.audit.log` 审计日志；写入类命令遵循只读开关；破坏性命令默认关闭。
-- 新增 `DeskBox.Cli` 控制台程序：`deskbox ping|info|schema|settings get|widgets list`、随记列表/新增、待办列表/新增，以及 `deskbox mcp`——通过 stdio 提供 Model Context Protocol 服务，可直接接入 Claude Desktop、Cursor 等 MCP 宿主。`deskbox schema` 由命令注册表直接生成，文档中的命令与实际实现永不漂移。
-- 新增 `DeskBox.Protocol` 项目，承载应用与 CLI 共享的无反射（NativeAOT 安全）信封、帧编解码与 schema 记录。
-- 新增命令：`server/ping`、`server/info`、`server/schema`、`settings/get`、`quickcapture/list`、`quickcapture/add`、`todo/list`、`todo/add`、`widgets/list`；完整说明见 `docs/architecture/command-api-v1.md`。
-- 管道名沿用既有的按数据根实例作用域，开发、预览与正式实例之间永远不会互访对方的命令 API。
+- Added Balanced, Resource saver, and Custom performance modes under Settings > General > Performance and resources.
+- Custom mode can control hidden-widget cache cleanup, visible-idle cleanup, transient-window release, icon/thumbnail/image cache budget, and individual continuous animations such as text marquee, vinyl rotation, Glance image rotation, and capsule effects.
+- Hidden and inactive widgets now release recreatable UI surfaces, decoded images, icons, and thumbnails according to the selected policy. Search and other temporary windows can also release their visual trees after remaining hidden.
+- Reused process-wide WinRT settings objects, shared brushes, cached window factories, batched background work, and targeted stack updates reduce repeated allocations, redundant settings fan-out, and full list rebuilds.
+- File widgets, Music, and other surfaces avoid unnecessary refreshes when their data is still current, reducing idle CPU and background work without delaying real changes.
+- Window animation pacing adapts to the refresh rate of the current display, with additional frame-pacing and backdrop safeguards for Windows 10.
+
+#### Multi-display layouts, movement, and reveal
+
+- DeskBox now stores a separate widget layout for each known monitor topology. Reconnecting a previous display arrangement restores the positions, sizes, group surfaces, and capsule placement saved for that arrangement.
+- Display hot-plug, work-area, and DPI changes are stabilized before restore, and layout writes are paused during the transition so temporary coordinates do not overwrite a known layout.
+- A replacement or differently scaled monitor receives a proportional in-bounds layout instead of leaving widgets off-screen.
+- Hold Ctrl while dragging a widget title to move all eligible widgets on the current display as one bounded group.
+- Widget snapping now works while moving as well as resizing, supports a configurable gap, and keeps screen-edge placement inside the usable work area.
+- Added a Quick Reveal layer for temporarily showing widgets above other windows without permanently changing their desktop-layer behavior.
+
+#### Hotkeys and desktop activation
+
+- Global activation now provides ready-made choices for F7 (default), double Ctrl, Alt+Space, Win+Space, and a standalone Win-key tap, while retaining custom shortcut recording.
+- Reserved Windows combinations show their system-side effects before they are enabled; modifier chords and incomplete taps are rejected so they do not trigger DeskBox accidentally.
+- Added an optional double-click on a blank desktop area to show or hide all widgets. Icon clicks and distant or slow clicks are excluded.
+- Quick Reveal preserves the first activating click and dismisses only for the matching desktop action, reducing lost clicks and unexpected hides.
+
+#### File stacking 2.0 and capsule interaction
+
+- File stacking now separates the master switch from automatic grouping. Manual stacks remain available when automatic grouping is off, and automatic stacking is off by default for new users.
+- A stack can open inline or in a separate popover. Popovers support Adaptive, 3×3, and 5×5 layouts, vertical overflow scrolling, and either the widget material or a neutral acrylic style.
+- Popover placement follows the source stack and current work area, adapts to item count and file-widget layout, and stays within screen edges.
+- Stack popovers now share the file grid's icon size, density, filename, selection, and Ctrl+mouse-wheel sizing behavior.
+- Interacting with a popover, context menu, drag operation, title editor, or close confirmation keeps a hover-expand capsule or widget group open until the interaction is finished and the pointer has left.
+- Switching between stacks no longer reveals the previous stack on the first frame. Reused popover windows bind and compose the new content while hidden before being shown.
+- Fixed Native AOT popovers collapsing into one clipped column, repeated opening/closing retaining excess memory, duplicate item activation, and stale first-frame content.
+- Capsule settings now use the expansion behavior as the main control. New widgets expand downward by default, the Sensitive hover preset uses 100 ms expand / 200 ms collapse delays, and the Relaxed animation preset consistently uses 360 ms.
+- Fixed collapsed-capsule width changes reverting after pointer release on Windows 10, and kept group close confirmations operable while a group is collapsed or hover-expanded.
+
+#### File widgets and Windows integration
+
+- File and stack-popover selection now follows the Windows desktop shape more closely: the highlight fills the available row or column width with a narrow horizontal gap and adapts vertically to the icon and filename.
+- File names can now be hidden in icon view in addition to the existing one-line and two-line choices. Each file widget can also override the global icon size, and widgets can be resized down to 50×50.
+- Dragging files can follow the Windows default copy/move decision, including cross-volume behavior and modifier-key shortcut creation. Native drop images and target descriptions are used for Explorer, folders, stacks, and file widgets.
+- Shell copy and move operations show per-item progress badges while keeping source, destination, and receiving folders protected from conflicting mutations.
+- Added Create shortcut, Permanently delete with confirmation and partial-result reporting, and Run as administrator for supported executable targets. DeskBox itself remains at normal user privilege.
+- The More menu opens near the originating mouse pointer, with a stable button fallback for keyboard or touch. More system operations uses a Windows 10-compatible native Shell path and reports invocation failures instead of silently succeeding.
+- Folder and case-only renames are committed atomically, shortcut icons resolve through Shell PIDLs, and the duplicate full-path tooltip line was removed.
 
 #### Search powered by Everything
 
-- File search now runs on the Everything engine (free third-party utility): instant results from Everything's existing index over local IPC, merged with DeskBox content (notes, todos, settings) in the same popup.
-- The legacy self-maintained index — USN journal tracking, Windows Index integration, and the native search core — was removed; leftover index data is cleaned up automatically on first launch.
-- File search requires Everything to be installed and running (www.voidtools.com). Everything is not bundled with DeskBox.
+- File search now reads Everything's existing index over local IPC and merges file and folder results with DeskBox notes, todos, and settings in the same search window.
+- Settings can detect or launch Everything, choose its executable, show connection and permission status, opt into advanced Everything syntax, and filter low-value system/cache paths.
+- DeskBox includes the IPC integration component but does not bundle or install the Everything application. File search requires Everything to be installed, running, and explicitly allowed in DeskBox.
+- The legacy DeskBox-maintained file index, USN tracking, Windows Index integration, and native search core were removed. DeskBox-owned leftover index data is cleaned automatically, eliminating a duplicate background index.
 
-#### Native AOT compatibility and interaction
+#### Appearance, media, and everyday details
 
-- Restored settings values and interaction paths for Glance, Music, file stacks, Quick Capture, and Todo in Native AOT builds.
-- Multiple Glance widgets can now be switched safely in Settings, and a newly created Glance widget can be closed from its context menu.
-- Quick Capture and Todo now retain their projected lists in Native AOT. Image attachments use typed thumbnail bindings in both compact and full views.
-- The final retained Native AOT audit baseline for 1.4.5 is 1,213 `WMC1510` warnings, synchronized across every audit and smoke-test consumer.
+- Widget foregrounds can follow the app theme or use light, dark, or custom text and monochrome-control colors, with an optional text edge treatment and per-widget overrides.
+- Glance adds independent background-image transparency, while Music can switch between available media sessions or follow the system-selected source.
+- Todo manual reordering, notification actions, Quick Capture attachments, Glance switching, and feature-widget settings were hardened for Native AOT builds.
+- Desktop organization can optionally include retained folders, large files, and items beyond the quick batch, and now explains access-denied, in-use, changed, unavailable, or failed transfers separately.
+- Onboarding can recommend a suitable internal non-system drive for managed files. If the selected storage drive is temporarily disconnected, widgets remain intact and recover after the drive returns.
+- Weather startup uses fresh cached forecasts immediately, preserves manual locations, bounds automatic retries, and keeps refresh work off the interaction path.
 
-#### Persistence reliability
+#### Startup, persistence, and packaging reliability
 
-- Fixed a Microsoft Store persistence failure that could cause settings and widget data to restart from an earlier state after reopening DeskBox.
-- When Windows cannot remove the destination during an atomic file replacement, DeskBox retries and then uses a verified backup before safely writing through the existing file.
+- Startup no longer forces Explorer to create a desktop host while Windows is restoring desktop icon positions. Widget restoration proceeds immediately, while desktop-layer attachment waits for Explorer's existing icon host to stabilize.
+- Auto-start now uses the per-user Run entry and appears in Windows Startup apps. Legacy task registrations are migrated when safe, and disabling DeskBox from Windows is reflected by the in-app switch.
+- Fixed a Microsoft Store persistence failure that could restore settings and widget data from an older state after reopening DeskBox. Atomic replacement now retries and uses a verified backup/write-through fallback when Windows temporarily blocks destination removal.
+- Native AOT compatibility fixes restore settings dropdowns, file stacks, Glance, Music, Todo, Quick Capture, image attachments, support QR images, and multiple-widget switching in Direct builds.
+- Installer filenames remain `DeskBox_Setup_<version>_<arch>.exe`, preserving the update contract used by 1.4.3. Direct installers continue to be produced for x64 and ARM64.
 
 ### 中文
 
-#### 搜索改用 Everything 引擎
+DeskBox 1.4.6 是一次大型功能、性能与运行环境更新。以下内容为相对 1.4.3 的全部主要变化。
 
-- 文件搜索改由 Everything 引擎驱动（免费第三方工具）：通过本机 IPC 即时读取 Everything 已有索引，并与 DeskBox 内容（随记、待办、设置）合并在同一弹窗。
-- 旧的自建索引——USN 日志跟踪、Windows 索引集成与原生搜索核心——已移除；残留索引数据会在首次启动时自动清理。
-- 文件搜索需要安装并运行 Everything（www.voidtools.com）。DeskBox 不捆绑 Everything。
+#### 更新前必读
 
-#### Native AOT 兼容性与交互
+- DeskBox 使用的 Windows App SDK 与 Windows App Runtime 已从 2.2 升级到 2.4。如果电脑只有 2.2，使用官网下载的直发安装包更新时会额外下载并安装一次 2.4；这是正常升级流程，也不会删除其他应用仍在使用的旧版共享运行时。
+- 安装器只在缺少 2.4 时下载。安装运行时后，少数电脑可能需要重启。完全离线更新时，请先手动安装与电脑架构一致的 x64 或 ARM64 Windows App Runtime 2.4。
+- GitHub 直发版改为 Native AOT 构建，不再需要也不再下载单独的 .NET 10 运行时。
+- 正常覆盖更新会沿用现有 DeskBox 设置、格子布局、待办、随记和收纳文件。更新器会固定当前用户或所有用户安装范围，避免静默更新时意外切换安装位置。
+- 最低支持系统仍为 Windows 10 21H2（build 19044），直发安装器现在会明确执行这项检查。
 
-- 修复 Native AOT 版本中时光、音乐、文件叠放、随记和待办的设置显示与交互路径。
-- 设置中可以安全切换多个时光格子，新建的时光格子也可以通过右键菜单正常关闭。
-- 随记和待办在 Native AOT 下会保留列表投影，紧凑视图与完整视图中的图片附件均改用类型化缩略图绑定。
-- 1.4.5 最终保留的 Native AOT 审计基线为 1,213 条 `WMC1510` 警告，并已同步到全部审计与冒烟测试消费者。
+#### 性能与资源占用
 
-#### 数据保存可靠性
+- 设置 > 常规新增“性能与资源”，提供“均衡”“节省资源”和“自定义”三种性能模式。
+- 自定义模式可分别控制格子隐藏后的缓存回收、可见但闲置时的缓存回收、临时窗口释放、图标/缩略图/解码图片缓存容量，以及文字跑马灯、唱片旋转、时光图片切换、胶囊光效与粒子等持续动画。
+- 隐藏和非活动格子会按所选策略释放可重建的界面、解码图片、图标和缩略图；搜索等临时窗口长期隐藏后也可释放界面树。
+- 复用进程级 WinRT 设置对象、共享画刷、缓存窗口工厂、批处理后台任务，并让叠放只更新实际变化的条目，减少重复分配、设置广播和整表重建。
+- 文件格子、音乐等界面会跳过数据仍然有效时的重复刷新，降低闲置 CPU 和后台工作，同时仍会及时响应真实变化。
+- 窗口动画会按当前显示器刷新率调整节拍，并为 Windows 10 增加帧节奏和背景材质保护。
 
-- 修复 Microsoft Store 版本可能无法保存设置和格子数据，导致重新打开 DeskBox 后恢复到旧状态的问题。
-- Windows 无法在原子替换时删除目标文件时，DeskBox 会先重试，并在校验备份后通过现有文件安全写入。
+#### 多显示器、布局移动与快捷唤起
+
+- DeskBox 会为不同的显示器拓扑分别保存格子布局。重新接入使用过的屏幕组合后，会恢复该组合对应的位置、尺寸、格子组表面和胶囊位置。
+- 显示器热插拔、工作区变化和 DPI 变化会先等待状态稳定再恢复；切换期间暂停写入布局，避免临时坐标覆盖已经保存的布局。
+- 更换显示器或缩放比例变化时，会按可用工作区比例映射布局，并把格子限制在屏幕范围内，减少格子跑到屏幕外。
+- 按住 Ctrl 拖动格子标题，可以把当前显示器上的可移动格子作为一个整体移动，并确保整体不越出工作区。
+- 格子吸附同时支持移动和调整尺寸，可设置相邻格子间距，并保证贴近屏幕边缘时仍在可用工作区内。
+- 新增“快捷唤起层”，可临时把格子显示在其他窗口上方，不会永久改变其桌面层级行为。
+
+#### 快捷键与桌面唤起
+
+- 全局唤起新增 F7（默认）、双击 Ctrl、Alt+Space、Win+Space、单独按 Win 等预设，同时保留自定义快捷键录制。
+- 启用会占用 Windows 行为的组合前会显示明确提示；修饰键组合、未完成按键和系统掩码会被正确排除，减少误触发。
+- 新增可选的“双击桌面空白区域显示或隐藏全部格子”，点击桌面图标、间距过远或超时的两次点击不会触发。
+- 快捷唤起会保留第一次用于操作格子的点击，只响应匹配的桌面动作进行收起，减少点击丢失和意外隐藏。
+
+#### 文件叠放 2.0 与胶囊交互
+
+- 文件叠放拆分为叠放总开关与自动叠放开关。关闭自动归组后仍可使用手动叠放；新用户默认保留叠放功能，但不会自动把文件归组。
+- 点击叠放可选择“当前布局内展开”或“弹出式展开”。弹窗提供自适应、3×3、5×5 布局，内容超出后纵向滚动，并可选择跟随格子材质或使用中性亚克力样式。
+- 叠放弹窗会根据来源位置、当前屏幕工作区、文件数量和格子布局自适应尺寸与位置，并保持在屏幕边缘以内。
+- 叠放弹窗与文件格子共用图标大小、密度、文件名、选中状态和 Ctrl+鼠标滚轮缩放逻辑。
+- 操作叠放弹窗、右键菜单、拖放、标题编辑或关闭确认时，悬停展开的胶囊和格子组会保持展开；交互结束且鼠标移出后才会收起。
+- 在不同叠放间切换时，不再在首帧闪现上一次打开的内容。复用窗口会在隐藏状态下完成新内容绑定和合成后再显示。
+- 修复 Native AOT 下叠放弹窗退化为单列并裁切内容、反复开关保留过多内存、同一项目重复触发以及复用窗口首帧残留等问题。
+- 胶囊设置改为以“展开方式”为主控制项。新格子默认向下展开，“灵敏”悬停预设改为展开 100 ms / 收起 200 ms，“舒缓”动画统一为 360 ms。
+- 修复 Windows 10 上收起状态调整胶囊宽度后松手回弹，以及格子组收起或悬停展开时无法操作关闭确认的问题。
+
+#### 文件格子与 Windows 操作
+
+- 文件格子和叠放弹窗的选中区域更接近 Windows 桌面：横向铺满可用列宽并保留窄间距，纵向根据图标和文件名高度自适应。
+- 图标视图的文件名除了单行、双行外，还可选择隐藏。每个文件格子可以单独覆盖全局图标大小，格子最小可调整到 50×50。
+- 拖入文件可选择“跟随 Windows 默认”，正确处理跨磁盘复制以及修饰键创建快捷方式；资源管理器、文件夹、叠放和文件格子使用原生拖放图像与目标说明。
+- Windows Shell 复制和移动会显示逐项进度标记，并在传输期间保护来源、目标和接收文件夹，减少互相冲突的操作。
+- 新增“创建快捷方式”“永久删除”和“使用管理员身份打开”。永久删除带二次确认和部分失败结果；管理员权限只用于所选目标，DeskBox 本身继续以普通用户权限运行。
+- “更多”菜单会优先出现在本次点击位置附近，键盘或触控操作则回退到按钮锚点。“更多系统操作”改用兼容 Windows 10 的原生 Shell 路径，并在调用失败时报告错误。
+- 文件夹重命名和仅修改大小写的重命名改为原子提交，快捷方式图标通过 Shell PIDL 解析，完整路径悬浮提示的重复行也已移除。
+
+#### 搜索改用 Everything
+
+- 文件搜索通过本机 IPC 读取 Everything 已有索引，并把文件、文件夹结果与 DeskBox 的随记、待办和设置合并在同一搜索窗口。
+- 设置页可以检测或启动 Everything、手动选择程序、查看连接与权限状态、选择是否允许高级 Everything 语法，并过滤低价值系统与缓存路径。
+- DeskBox 随包提供 IPC 集成组件，但不会捆绑或安装 Everything 应用。使用文件搜索需要自行安装并运行 Everything，并在 DeskBox 中明确授权。
+- 旧的 DeskBox 自建文件索引、USN 跟踪、Windows 索引集成和原生搜索核心已移除；DeskBox 自己留下的旧索引数据会自动清理，不再维护第二份后台索引。
+
+#### 外观、媒体与日常细节
+
+- 格子文字和单色控件可跟随应用主题，也可选择浅色、深色或自定义颜色，并支持文字边缘效果和单个格子独立覆盖。
+- 时光新增独立的背景图片透明度；音乐可在可用媒体会话之间切换，也可跟随系统当前选择的播放源。
+- 待办手动排序与通知操作、随记附件、时光切换和功能格子设置在 Native AOT 版本下完成兼容加固。
+- 桌面整理可自行选择是否包含文件夹、大文件和超出快速批次的项目，并分别说明无权限、占用中、预览后变化、暂不可用或传输失败等保留原因。
+- 新手引导可以推荐合适的内部非系统磁盘存放收纳文件。所选存储盘临时断开时，格子保持原样，磁盘重新连接后自动恢复。
+- 天气启动时优先使用仍有效的本地缓存，保留手动位置，并限制自动重试频率，刷新过程不会阻塞主要交互。
+
+#### 启动、数据保存与安装可靠性
+
+- 开机启动时不再强制 Explorer 创建桌面宿主，避免与 Windows 恢复桌面图标位置发生竞争。格子本身会正常恢复，桌面层挂接则等待 Explorer 已有的图标宿主稳定后再完成。
+- 开机自启改用用户级 Run 项，并显示在 Windows“启动应用”中；旧计划任务会在安全时迁移，在系统中关闭 DeskBox 后应用内开关也会同步。
+- 修复 Microsoft Store 版本可能在重启后恢复旧设置和旧格子数据的问题。原子替换遇到 Windows 暂时阻止删除目标文件时，会重试并使用经过校验的备份与原位写入兜底。
+- Native AOT 兼容修复覆盖设置下拉框、文件叠放、时光、音乐、待办、随记、图片附件、支持二维码和多个功能格子切换。
+- 安装包继续使用 `DeskBox_Setup_<版本>_<架构>.exe` 命名，保持 1.4.3 使用的更新契约；直发安装器继续提供 x64 与 ARM64 架构。
 
 ## 1.4.3 - 2026-08-19
 

@@ -1,4 +1,4 @@
-// Copyright (c) DeskBox. All rights reserved.
+﻿// Copyright (c) DeskBox. All rights reserved.
 
 using DeskBox.Models;
 using DeskBox.Helpers;
@@ -429,6 +429,61 @@ public sealed partial class WidgetManager
         App.LogVerbose($"[ZOrder] TitleActivatedAll active=0x{activeHwnd.ToInt64():X}");
     }
 
+    /// <summary>
+    /// Keeps a tray-raised widget group contiguous after one DeskBox window
+    /// or one of its transient owned windows takes activation. Windows can
+    /// otherwise insert the previously foreground application between the
+    /// active widget and its peers, making the other widgets appear to fall
+    /// behind that application.
+    /// </summary>
+    private DateTime _suppressRaisedGroupReassertUntilUtc = DateTime.MinValue;
+
+    internal void SuppressRaisedGroupReassertBriefly()
+    {
+        // The popover is permanently topmost (set once at construction), so
+        // its open/close no longer performs any band migration. The reassert
+        // suppression is kept as a cheap safety net for the activation
+        // hand-off that still accompanies a popover close.
+        _suppressRaisedGroupReassertUntilUtc =
+            DateTime.UtcNow + TimeSpan.FromMilliseconds(400);
+    }
+
+    internal bool ReassertRaisedWidgetGroupAfterDeskBoxActivation(
+        IntPtr activeWidgetHandle,
+        string reason)
+    {
+        if (!_widgetsRaisedFromTray ||
+            WidgetLayerService.UsesDesktopPinnedMode() ||
+            activeWidgetHandle == IntPtr.Zero ||
+            !Win32Helper.IsWindow(activeWidgetHandle) ||
+            !IsForegroundDeskBoxWindow() ||
+            DateTime.UtcNow < _suppressRaisedGroupReassertUntilUtc)
+        {
+            return false;
+        }
+
+        IReadOnlyList<IDesktopWidgetWindow> visibleWindows =
+            GetWindowsInIdleHighestFirstOrder(
+                GetLoadedDesktopWindows().Where(window => window.Visible));
+        if (!visibleWindows.Any(window =>
+                window.WindowHandle == activeWidgetHandle))
+        {
+            return false;
+        }
+
+        List<IntPtr> handles = [activeWidgetHandle];
+        handles.AddRange(visibleWindows
+            .Select(window => window.WindowHandle)
+            .Where(handle => handle != activeWidgetHandle));
+        bool applied =
+            WidgetLayerService.ApplyPeerOrderHighestToLowest(handles);
+        App.LogVerbose(
+            $"[ZOrder] Raised group reasserted reason={reason} " +
+            $"active=0x{activeWidgetHandle.ToInt64():X} " +
+            $"count={handles.Count} applied={applied}");
+        return applied;
+    }
+
     public bool RequestRestoreRaisedWidgetsToDesktopLayer(string reason = "interaction-ended")
     {
         if (!_widgetsRaisedFromTray)
@@ -469,6 +524,15 @@ public sealed partial class WidgetManager
         }
 
         IntPtr foreground = Win32Helper.GetForegroundWindow();
+        if (foreground == IntPtr.Zero)
+        {
+            // Activation is mid-transition — for example an owned popover
+            // hid itself while its owner widget is being activated, leaving
+            // the foreground briefly unassigned. Treat the gap as "still
+            // ours" instead of reading it as a DeskBox leave.
+            return;
+        }
+
         if (IsDeskBoxForegroundWindow(foreground))
         {
             _hasDeskBoxForegroundSinceRaise = true;

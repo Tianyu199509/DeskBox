@@ -16,8 +16,7 @@ updated: "2026-07-19"
 推荐环境
 
 - Windows 10 64 位（21H2 / build 19044 或更高）或 Windows 11 22H2+
-- .NET 10 Desktop Runtime x64
-- Windows App Runtime 2.2 x64
+- Windows App Runtime 2.4 x64（Native AOT 版本无需单独安装 .NET 运行时）
 - 普通 Windows 用户权限
 
 DeskBox 围绕 WinUI 3 的窗口、材质、圆角、拖放、通知与媒体会话能力设计。Windows 10 会将系统不支持的材质、圆角和部分动画降级为兼容表现；文件同步、拖放和核心格子操作仍按 build 19044+ 验证。
@@ -42,7 +41,7 @@ Microsoft Store 渠道由商店负责安装和更新。两个渠道的核心功�
 
 ## 安装过程
 
-安装器不会把 .NET 10 和 Windows App Runtime 2.2 的完整安装程序打进 DeskBox 安装包。它会先检查目标电脑
+安装器不会把 Windows App Runtime 2.4 的完整安装程序打进 DeskBox 安装包（Native AOT 版不再需要单独的 .NET 运行时）。它会先检查目标电脑
 
 - 依赖已经存在，直接跳过。
 - 缺少依赖，联网下载对应运行时。

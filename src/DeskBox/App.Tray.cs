@@ -809,6 +809,7 @@ public partial class App
 
     private void OpenSettingsFromTray()
     {
+        Log("[Tray] Settings selected in primary instance");
         CancelBackgroundMemoryCleanup();
         var settingsWindow = _settingsWindow ?? CreateSettingsWindow();
         settingsWindow.ShowWindow();

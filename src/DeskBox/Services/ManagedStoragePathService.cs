@@ -1,4 +1,5 @@
 using System.IO;
+using DeskBox.Helpers;
 
 namespace DeskBox.Services;
 
@@ -6,55 +7,65 @@ internal readonly record struct ManagedStorageDriveCandidate(
     string RootPath,
     DriveType DriveType,
     bool IsReady,
-    long AvailableFreeSpace);
+    long AvailableFreeSpace,
+    bool IsTransientBus);
 
 internal readonly record struct ManagedStoragePathAssessment(
     bool IsSystemDrive,
     bool IsCloudSynced,
     DriveType? DriveType,
     long? AvailableFreeSpace,
-    bool HasSuitableNonSystemDrive);
+    bool HasSuitableNonSystemDrive,
+    string? SuitableNonSystemDrivePath,
+    bool IsTransientBusDrive);
 
 internal static class ManagedStoragePathService
 {
     internal const long MinimumRecommendedFreeSpaceBytes = 10L * 1024 * 1024 * 1024;
 
+    /// <summary>
+    /// The default storage root for new profiles. It must never depend on the
+    /// hardware that happens to be attached at first launch: drives reporting
+    /// as fixed (portable SSDs, UASP enclosures) can vanish later and take the
+    /// managed storage with them. Suitable non-system drives are only offered
+    /// as an explicit suggestion during onboarding.
+    /// </summary>
     public static string GetRecommendedPath()
     {
         string userProfilePath = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-        string userName = Environment.UserName;
-        string systemDriveRoot = GetSystemDriveRoot(userProfilePath);
-
-        return SelectRecommendedPath(
-            userProfilePath,
-            userName,
-            systemDriveRoot,
-            EnumerateDriveCandidates());
+        return Path.Combine(userProfilePath, "DeskBox");
     }
 
-    internal static string SelectRecommendedPath(
-        string userProfilePath,
-        string userName,
+    /// <summary>
+    /// Picks the best internal non-system drive for an opt-in migration
+    /// suggestion, or null when no such drive exists. Detachable buses that
+    /// report as fixed disks are excluded.
+    /// </summary>
+    internal static ManagedStorageDriveCandidate? SelectSuitableNonSystemDrive(
         string systemDriveRoot,
         IEnumerable<ManagedStorageDriveCandidate> drives)
     {
-        string fallbackPath = Path.Combine(userProfilePath, "DeskBox");
-        ManagedStorageDriveCandidate? selected = drives
-            .Where(drive =>
-                drive.IsReady &&
-                drive.DriveType == DriveType.Fixed &&
-                drive.AvailableFreeSpace >= MinimumRecommendedFreeSpaceBytes &&
-                !SameDriveRoot(drive.RootPath, systemDriveRoot))
+        return drives
+            .Where(drive => IsSuitableNonSystemCandidate(drive, systemDriveRoot))
             .OrderByDescending(drive => drive.AvailableFreeSpace)
             .ThenBy(drive => drive.RootPath, StringComparer.OrdinalIgnoreCase)
             .Select(drive => (ManagedStorageDriveCandidate?)drive)
             .FirstOrDefault();
+    }
 
-        if (selected is null)
-        {
-            return fallbackPath;
-        }
+    internal static bool IsSuitableNonSystemCandidate(
+        ManagedStorageDriveCandidate drive,
+        string systemDriveRoot)
+    {
+        return drive.IsReady &&
+               drive.DriveType == DriveType.Fixed &&
+               !drive.IsTransientBus &&
+               drive.AvailableFreeSpace >= MinimumRecommendedFreeSpaceBytes &&
+               !SameDriveRoot(drive.RootPath, systemDriveRoot);
+    }
 
+    internal static string BuildAccountSubfolder(string userProfilePath, string userName)
+    {
         string accountFolder = SanitizePathSegment(userName);
         if (string.IsNullOrWhiteSpace(accountFolder))
         {
@@ -66,7 +77,7 @@ internal static class ManagedStoragePathService
             accountFolder = "User";
         }
 
-        return Path.Combine(selected.Value.RootPath, "DeskBox", accountFolder);
+        return accountFolder;
     }
 
     public static ManagedStoragePathAssessment AssessPath(string path)
@@ -84,12 +95,14 @@ internal static class ManagedStoragePathService
         string userProfilePath = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         string systemDriveRoot = GetSystemDriveRoot(userProfilePath);
         string? pathRoot = TryGetPathRoot(normalizedPath);
+        bool isUncPath = normalizedPath.StartsWith(@"\\", StringComparison.Ordinal);
         bool isSystemDrive = pathRoot is not null && SameDriveRoot(pathRoot, systemDriveRoot);
         bool isCloudSynced = GetCloudSyncRoots().Any(root => IsSameOrDescendant(normalizedPath, root));
 
         DriveType? driveType = null;
         long? availableFreeSpace = null;
-        if (normalizedPath.StartsWith(@"\\", StringComparison.Ordinal))
+        bool isTransientBusDrive = false;
+        if (isUncPath)
         {
             driveType = DriveType.Network;
         }
@@ -109,20 +122,30 @@ internal static class ManagedStoragePathService
                 // The path can still be selected. The onboarding UI will label
                 // its storage details as unknown instead of blocking the user.
             }
+
+            // DriveType misses detachable disks that report as fixed; the bus
+            // type is what actually tells them apart.
+            isTransientBusDrive = StorageBusTypeHelper.IsTransientBus(
+                StorageBusTypeHelper.TryGetBusType(pathRoot));
         }
 
-        bool hasSuitableNonSystemDrive = EnumerateDriveCandidates().Any(drive =>
-            drive.IsReady &&
-            drive.DriveType == DriveType.Fixed &&
-            drive.AvailableFreeSpace >= MinimumRecommendedFreeSpaceBytes &&
-            !SameDriveRoot(drive.RootPath, systemDriveRoot));
+        ManagedStorageDriveCandidate? suitableNonSystemDrive =
+            SelectSuitableNonSystemDrive(systemDriveRoot, EnumerateDriveCandidates());
+        string? suitableNonSystemDrivePath = suitableNonSystemDrive is null
+            ? null
+            : Path.Combine(
+                suitableNonSystemDrive.Value.RootPath,
+                "DeskBox",
+                BuildAccountSubfolder(userProfilePath, Environment.UserName));
 
         return new ManagedStoragePathAssessment(
             isSystemDrive,
             isCloudSynced,
             driveType,
             availableFreeSpace,
-            hasSuitableNonSystemDrive);
+            suitableNonSystemDrive is not null,
+            suitableNonSystemDrivePath,
+            isTransientBusDrive);
     }
 
     internal static bool IsSameOrDescendant(string path, string directory)
@@ -177,11 +200,16 @@ internal static class ManagedStoragePathService
                 availableFreeSpace = 0;
             }
 
+            bool isTransientBus = drive.DriveType != DriveType.Fixed ||
+                                  StorageBusTypeHelper.IsTransientBus(
+                                      StorageBusTypeHelper.TryGetBusType(drive.Name));
+
             yield return new ManagedStorageDriveCandidate(
                 drive.Name,
                 drive.DriveType,
                 isReady,
-                availableFreeSpace);
+                availableFreeSpace,
+                isTransientBus);
         }
     }
 

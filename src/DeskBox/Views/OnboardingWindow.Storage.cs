@@ -18,10 +18,13 @@ namespace DeskBox.Views;
 
 public sealed partial class OnboardingWindow
 {
+    private string? _step4SuggestedStoragePath;
+
     private void SetupStep4Storage()
     {
         string path = SettingsService.NormalizeManagedStorageRootPath(_settingsService.Settings.DefaultManagedStorageRootPath);
         Step4PathText.Text = path;
+        RefreshStep4StorageAssessment();
 
         var pinState = ExplorerQuickAccessHelper.GetQuickAccessPinState(path, out _);
         bool isPinned = pinState == QuickAccessPinState.Pinned;
@@ -30,9 +33,64 @@ public sealed partial class OnboardingWindow
         Step4PinToggle.Toggled += Step4PinToggle_Toggled;
     }
 
+    private void RefreshStep4StorageAssessment()
+    {
+        string path = SettingsService.NormalizeManagedStorageRootPath(_settingsService.Settings.DefaultManagedStorageRootPath);
+        ManagedStoragePathAssessment assessment = ManagedStoragePathService.AssessPath(path);
+
+        var warnings = new List<string>();
+        if (assessment.IsSystemDrive)
+        {
+            warnings.Add(_localizationService.T(assessment.HasSuitableNonSystemDrive
+                ? "Onboarding.Task.Step2.Warning.SystemDrive"
+                : "Onboarding.Task.Step2.Warning.SystemDriveOnly"));
+        }
+        if (assessment.IsCloudSynced)
+        {
+            warnings.Add(_localizationService.T("Onboarding.Task.Step2.Warning.CloudSync"));
+        }
+        if (assessment.DriveType == DriveType.Removable || assessment.IsTransientBusDrive)
+        {
+            warnings.Add(_localizationService.T("Onboarding.Task.Step2.Warning.Removable"));
+        }
+        else if (assessment.DriveType == DriveType.Network)
+        {
+            warnings.Add(_localizationService.T("Onboarding.Task.Step2.Warning.Network"));
+        }
+
+        Step4StorageWarningText.Text = string.Join(Environment.NewLine, warnings);
+        Step4StorageWarningBorder.Visibility = warnings.Count > 0
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+
+        _step4SuggestedStoragePath = assessment.IsSystemDrive &&
+                                     !string.IsNullOrWhiteSpace(assessment.SuitableNonSystemDrivePath)
+            ? assessment.SuitableNonSystemDrivePath
+            : null;
+        Step4SuggestedDriveButton.Visibility = _step4SuggestedStoragePath is null
+            ? Visibility.Collapsed
+            : Visibility.Visible;
+        if (_step4SuggestedStoragePath is not null)
+        {
+            Step4SuggestedDriveButton.Content = _localizationService.Format(
+                "Onboarding.Step4.MoveToSuggestedDriveButton",
+                _step4SuggestedStoragePath);
+        }
+    }
+
     private void Step4ChangePath_Click(object sender, RoutedEventArgs e)
     {
         _ = ChangeStoragePathAsync();
+    }
+
+    private void Step4SuggestedDrive_Click(object sender, RoutedEventArgs e)
+    {
+        if (_step4SuggestedStoragePath is null)
+        {
+            return;
+        }
+
+        _ = ChangeStoragePathToAsync(_step4SuggestedStoragePath);
     }
 
     private async Task<bool> ChangeStoragePathAsync()
@@ -43,6 +101,11 @@ public sealed partial class OnboardingWindow
             return false;
         }
 
+        return await ChangeStoragePathToAsync(folderPath);
+    }
+
+    private async Task<bool> ChangeStoragePathToAsync(string folderPath)
+    {
         string normalizedPath = SettingsService.NormalizeManagedStorageRootPath(folderPath);
         string currentPath = SettingsService.NormalizeManagedStorageRootPath(_settingsService.Settings.DefaultManagedStorageRootPath);
         if (string.Equals(normalizedPath, currentPath, StringComparison.OrdinalIgnoreCase))
@@ -108,6 +171,7 @@ public sealed partial class OnboardingWindow
         _settingsService.Settings.DefaultManagedStorageRootPath = normalizedPath;
         _settingsService.SaveDebounced();
         Step4PathText.Text = normalizedPath;
+        RefreshStep4StorageAssessment();
         InvalidateDesktopOrganizationPlan();
         return true;
     }

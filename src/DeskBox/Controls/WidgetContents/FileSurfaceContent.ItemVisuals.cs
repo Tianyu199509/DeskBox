@@ -253,6 +253,9 @@ public sealed partial class FileSurfaceContent
         }
 
         e.Handled = true;
+        // DragOver may have advertised Move. Do not complete the drag with that
+        // result until the destination transfer has actually succeeded.
+        e.AcceptedOperation = DataPackageOperation.None;
         ClearFolderDropTarget();
         PersistSurfaceReorder();
         ApplyDropVisual(FileDropVisualState.None);
@@ -336,18 +339,11 @@ public sealed partial class FileSurfaceContent
                 return;
             }
 
-            e.AcceptedOperation = operation;
             bool move = operation == DataPackageOperation.Move;
             bool createShortcuts = resolvedIntent == FileDropIntent.Shortcut;
             string? sourceWidgetId = TryGetString(
                 e.DataView.Properties,
                 DeskBoxDragData.SourceWidgetIdProperty);
-
-            // All DataPackageView values have been captured. Completing now
-            // dismisses the shell drag glyph while the filesystem operation
-            // continues under DeskBox's own progress overlay when necessary.
-            deferral.Complete();
-            deferral = null;
 
             EnsureTrackedImportStarted();
             IProgress<FileService.FileTransferProgress> progress =
@@ -422,6 +418,12 @@ public sealed partial class FileSurfaceContent
                         movedSourcePaths);
                 }
 
+                e.AcceptedOperation = ResolveSafeDropCompletionOperation(
+                    operation,
+                    payload.IsDeskBoxFileDrag,
+                    regularPaths.Length,
+                    movedSourcePaths.Length);
+
                 if (move)
                 {
                     _cutClipboardPaths = [];
@@ -459,6 +461,7 @@ public sealed partial class FileSurfaceContent
         }
         catch (OperationCanceledException)
         {
+            e.AcceptedOperation = DataPackageOperation.None;
             App.Log($"[WidgetSurface] Folder drop canceled id={WidgetId}");
             await RefreshAfterInterruptedFolderImportAsync();
             if (_activeImportCancellation is not null)
@@ -469,6 +472,7 @@ public sealed partial class FileSurfaceContent
         }
         catch (Exception ex)
         {
+            e.AcceptedOperation = DataPackageOperation.None;
             App.Log($"[WidgetSurface] Folder drop failed id={WidgetId}: {ex}");
             await RefreshAfterInterruptedFolderImportAsync();
             ShowFeedback(new(
@@ -488,7 +492,7 @@ public sealed partial class FileSurfaceContent
                 CancelAndResetTrackedImport();
             }
             ResetDragPayloadCache();
-            deferral?.Complete();
+            deferral.Complete();
         }
     }
 

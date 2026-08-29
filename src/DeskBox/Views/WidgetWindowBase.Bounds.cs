@@ -576,6 +576,7 @@ public abstract partial class WidgetWindowBase
         if (IsApplyingBounds ||
             TrayAnimation.IsApplyingBounds ||
             _deferTitleBarDragConfigUpdates ||
+            _deferInteractiveResizeConfigUpdates ||
             (!IsDragging && !IsResizing))
         {
             return;

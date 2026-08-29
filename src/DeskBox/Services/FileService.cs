@@ -1120,11 +1120,21 @@ public sealed partial class FileService
             // The staged Native AOT profile still uses the validated legacy
             // move bridge. Copy operations fall through to the safe managed
             // engine until a source-generated/native Shell bridge is gated.
-            if (move)
+            if (move && CanUseLegacyShellMove(operations.Select(operation =>
+                    new FileTransferPlan(
+                        operation.SourcePath,
+                        operation.DestinationPath))))
             {
                 return await ExecuteShellMovePlanAsync(
                     operations,
                     ownerWindowHandle);
+            }
+
+            if (move)
+            {
+                App.Log(
+                    "[FileTransfer] Legacy Shell move bypassed because one or " +
+                    "more items cross filesystem roots.");
             }
 #endif
         }

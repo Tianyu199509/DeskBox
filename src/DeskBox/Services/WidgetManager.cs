@@ -82,6 +82,8 @@ internal interface IDesktopWidgetWindow
     void PlayPreparedTrayHideAnimation();
     WidgetTrayBatchAnimationEntry? BeginSharedTrayShowAnimation();
     WidgetTrayBatchAnimationEntry? BeginSharedTrayHideAnimation();
+    void SimplifyBackdropForInteraction();
+    void RestoreBackdropAfterInteraction();
     void ActivateRaisedFromTrayBatch();
     void EnsureRaisedFromTrayTopMost();
     void RaiseTemporarilyFromManager();
@@ -1183,6 +1185,7 @@ public sealed partial class WidgetManager
             {
                 if (window.PrepareTrayHideAnimation(persistVisibility: false))
                 {
+                    window.SimplifyBackdropForInteraction();
                     windowsToHide.Add(window);
                 }
             }

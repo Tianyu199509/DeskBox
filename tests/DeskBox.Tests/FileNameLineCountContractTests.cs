@@ -3,7 +3,7 @@ namespace DeskBox.Tests;
 public class FileNameLineCountContractTests
 {
     [Fact]
-    public void AppearanceDensitySettings_ExposesSingleAndDoubleLineSelection()
+    public void AppearanceDensitySettings_ExposesHiddenSingleAndDoubleSelection()
     {
         string root = FindRepositoryRoot();
         string settingsXaml = File.ReadAllText(Path.Combine(root, "src/DeskBox/Views/SettingsWindow.xaml"));
@@ -11,6 +11,7 @@ public class FileNameLineCountContractTests
 
         Assert.Contains("Settings.FileNameLines.Title", settingsXaml, StringComparison.Ordinal);
         Assert.Contains("AvailableFileNameLineCountOptions", settingsXaml, StringComparison.Ordinal);
+        Assert.Contains("Settings.FileNameLines.Hidden", selectionOptions, StringComparison.Ordinal);
         Assert.Contains("Settings.FileNameLines.Single", selectionOptions, StringComparison.Ordinal);
         Assert.Contains("Settings.FileNameLines.Double", selectionOptions, StringComparison.Ordinal);
     }
@@ -24,6 +25,8 @@ public class FileNameLineCountContractTests
 
         Assert.Contains("LayoutContext.IconLabelMaxLines", itemSurface, StringComparison.Ordinal);
         Assert.Contains("DataContext.IconLabelMaxLines", fileSurface, StringComparison.Ordinal);
+        Assert.Contains("LayoutContext.IconLabelVisibility", itemSurface, StringComparison.Ordinal);
+        Assert.Contains("DataContext.IconLabelVisibility", fileSurface, StringComparison.Ordinal);
     }
 
     private static string FindRepositoryRoot()

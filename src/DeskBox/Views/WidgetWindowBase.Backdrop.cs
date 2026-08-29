@@ -117,11 +117,9 @@ public abstract partial class WidgetWindowBase
                     DisposeMicaController();
                     SystemBackdrop = null;
                 }
-                LegacyAccentBackdropActive = Win32Helper.ApplyAccentBlur(
-                    HWnd,
+                LegacyAccentBackdropActive = ApplyLegacyAccentBackdrop(
                     tintColor,
-                    accentOpacity,
-                    true);
+                    accentOpacity);
                 if (!LegacyAccentBackdropActive)
                 {
                     App.Log(
@@ -173,20 +171,95 @@ public abstract partial class WidgetWindowBase
                         surfaceOpacity,
                         SettingsService.Settings.WidgetMaterialIntensity)
                     : Math.Min(surfaceOpacity, 0.52);
-                LegacyAccentBackdropActive = Win32Helper.ApplyAccentBlur(
-                    HWnd,
+                LegacyAccentBackdropActive = ApplyLegacyAccentBackdrop(
                     tintColor,
-                    fallbackOpacity,
-                    true);
+                    fallbackOpacity);
             }
         }
 
         ApplySurfaceStyle();
     }
 
-    private bool CanReuseAppliedBackdrop(BackdropSignature signature)
+    private bool ApplyLegacyAccentBackdrop(Windows.UI.Color tintColor, double opacity)
     {
-        if (_lastAppliedBackdropSignature != signature)
+        _lastLegacyAccentTintColor = tintColor;
+        _lastLegacyAccentOpacity = opacity;
+        // A full preference application always restores the blurred accent
+        // policy, so any interaction-time simplification ends here.
+        _isInteractionBackdropDowngraded = false;
+        return Win32Helper.ApplyAccentBlur(HWnd, tintColor, opacity, enabled: true);
+    }
+
+    /// <summary>
+    /// Win10-only: temporarily switches the legacy acrylic accent policy to a
+    /// tint without DWM blur while the window is being moved/resized/animated,
+    /// so DWM stops re-sampling the blur on every frame. Keeps the frosted
+    /// glass by default — the simplification only runs after recent frame
+    /// ticks kept missing their budget (or in ResourceSaver mode).
+    /// </summary>
+    public void SimplifyBackdropForInteraction()
+    {
+        if (_isInteractionBackdropDowngraded ||
+            !LegacyAccentBackdropActive ||
+            !WindowsCompatibilityService.UsesLegacyWindowAcrylic ||
+            HWnd == IntPtr.Zero)
+        {
+            return;
+        }
+
+        if (!InteractionBackdropSimplificationPolicy.ShouldSimplify(
+                WidgetCompactAnimationCoordinator.RecentFrameOverrunMask,
+                SettingsService.Settings.PerformanceMode))
+        {
+            return;
+        }
+
+        bool applied = Win32Helper.ApplyAccentBlur(
+            HWnd,
+            _lastLegacyAccentTintColor,
+            _lastLegacyAccentOpacity,
+            enabled: true,
+            blurEnabled: false);
+        if (!applied)
+        {
+            return;
+        }
+
+        _isInteractionBackdropDowngraded = true;
+        App.LogVerbose(
+            $"[Backdrop.Win10] hwnd=0x{HWnd.ToInt64():X} interaction tint-only accent applied " +
+            $"(recent overrun bits={System.Numerics.BitOperations.PopCount((ulong)WidgetCompactAnimationCoordinator.RecentFrameOverrunMask)})");
+    }
+
+    /// <summary>
+    /// Restores the full blurred legacy acrylic after an interaction ends.
+    /// Deliberately does not go through the signature reuse check — the
+    /// signature never changed, so ApplyBackdropPreference would short-circuit
+    /// and leave the tint-only policy in place.
+    /// </summary>
+    public void RestoreBackdropAfterInteraction()
+    {
+        if (!_isInteractionBackdropDowngraded)
+        {
+            return;
+        }
+
+        _isInteractionBackdropDowngraded = false;
+        if (!LegacyAccentBackdropActive || HWnd == IntPtr.Zero)
+        {
+            return;
+        }
+
+        Win32Helper.ApplyAccentBlur(
+            HWnd,
+            _lastLegacyAccentTintColor,
+            _lastLegacyAccentOpacity,
+            enabled: true,
+            blurEnabled: true);
+    }
+
+    private bool CanReuseAppliedBackdrop(BackdropSignature signature)
+    {        if (_lastAppliedBackdropSignature != signature)
         {
             return false;
         }

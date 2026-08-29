@@ -1,11 +1,11 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 
 namespace DeskBox.Tests;
 
 public sealed class SettingsCopyAndHierarchyTests
 {
     [Fact]
-    public void CapsuleModeAndWidgetGroups_AreNestedUnderAppearance()
+    public void CapsuleModeIsTopLevelAndWidgetGroupsRemainUnderAppearance()
     {
         string root = FindRepositoryRoot();
         string windowXaml = File.ReadAllText(Path.Combine(
@@ -20,6 +20,10 @@ public sealed class SettingsCopyAndHierarchyTests
         string capsuleXaml = File.ReadAllText(Path.Combine(
             root,
             "src/DeskBox/Views/SettingsSections/CapsuleModeSettingsSection.xaml"));
+        System.Xml.Linq.XDocument capsuleIcon = System.Xml.Linq.XDocument.Load(
+            Path.Combine(
+                root,
+                "src/DeskBox/Assets/SettingsNavIcons/capsule-mode.svg"));
         string routes = File.ReadAllText(Path.Combine(
             root,
             "src/DeskBox/Views/SettingsWindow.xaml.cs"));
@@ -34,20 +38,27 @@ public sealed class SettingsCopyAndHierarchyTests
         Assert.True(menuStart >= 0 && menuEnd > menuStart);
         string primaryMenu = windowXaml[menuStart..menuEnd];
 
-        Assert.DoesNotContain("Tag=\"CapsuleMode\"", primaryMenu, StringComparison.Ordinal);
+        Assert.Contains("Tag=\"CapsuleMode\"", primaryMenu, StringComparison.Ordinal);
+        Assert.Contains("capsule-mode.svg", primaryMenu, StringComparison.Ordinal);
+        System.Xml.Linq.XNamespace svg = "http://www.w3.org/2000/svg";
+        Assert.Equal(5, capsuleIcon.Descendants(svg + "path").Count());
+        Assert.Equal(
+            5,
+            capsuleIcon.Descendants().Count(element =>
+                element.Name == svg + "linearGradient" ||
+                element.Name == svg + "radialGradient"));
+        // Capsule mode is now a top-level page: the Appearance section must
+        // not reference it at all anymore.
+        Assert.DoesNotContain("CapsuleMode", appearanceXaml, StringComparison.Ordinal);
         Assert.DoesNotContain("Tag=\"WidgetGroups\"", primaryMenu, StringComparison.Ordinal);
-        Assert.Contains("Tag=\"CapsuleMode\"", appearanceXaml, StringComparison.Ordinal);
+        Assert.Contains("Tag=\"WidgetGroups\"", appearanceXaml, StringComparison.Ordinal);
         Assert.DoesNotContain("WidgetCapsuleModeEnabled", appearanceXaml, StringComparison.Ordinal);
-        Assert.Contains(
+        Assert.DoesNotContain(
             "ItemsSource=\"{Binding AvailableWidgetCollapseBehaviorOptions}\"",
             appearanceXaml,
             StringComparison.Ordinal);
-        Assert.Contains(
-            "controls:SettingsComboBox.Value=\"{Binding SelectedWidgetCollapseBehavior, Mode=TwoWay}\"",
-            appearanceXaml,
-            StringComparison.Ordinal);
-        Assert.DoesNotContain("WidgetCapsuleModeEnabled", capsuleXaml, StringComparison.Ordinal);
         Assert.DoesNotContain("Settings.Capsule.Enabled.Title", capsuleXaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("WidgetCapsuleModeEnabled", capsuleXaml, StringComparison.Ordinal);
         Assert.Contains(
             "controls:SettingsComboBox.Value=\"{Binding SelectedWidgetCollapseBehavior, Mode=TwoWay}\"",
             capsuleXaml,
@@ -67,21 +78,25 @@ public sealed class SettingsCopyAndHierarchyTests
         Assert.Contains("ExistingWidgetGroupItems", windowXaml, StringComparison.Ordinal);
         Assert.DoesNotContain("Settings.WidgetGroups.Existing.Name.Title", windowXaml, StringComparison.Ordinal);
         Assert.DoesNotContain("WidgetGroupNameTextBox_LostFocus", windowXaml, StringComparison.Ordinal);
-        Assert.DoesNotContain("Settings.Section.CapsuleMode", capsuleXaml, StringComparison.Ordinal);
+        Assert.Contains(
+            "Style=\"{StaticResource SectionTitleTextStyle}\"",
+            capsuleXaml,
+            StringComparison.Ordinal);
+        Assert.Contains("Settings.Section.CapsuleMode", capsuleXaml, StringComparison.Ordinal);
+        Assert.Contains("Margin=\"0,8,0,0\"", capsuleXaml, StringComparison.Ordinal);
         Assert.DoesNotContain("Settings.WidgetGroups.PageDescription", windowXaml, StringComparison.Ordinal);
         Assert.DoesNotContain("Settings.WidgetGroups.Default.Title", windowXaml, StringComparison.Ordinal);
         Assert.DoesNotContain("Settings.WidgetGroups.Default.Description", windowXaml, StringComparison.Ordinal);
         Assert.Contains("WidgetGroupNavigationComboBox_SelectionChanged", windowXaml, StringComparison.Ordinal);
         Assert.Contains("DissolveWidgetGroupButton_Click", windowXaml, StringComparison.Ordinal);
         int accentColor = appearanceXaml.IndexOf("Settings.Accent.Source.Title", StringComparison.Ordinal);
-        int capsuleMode = appearanceXaml.IndexOf("Tag=\"CapsuleMode\"", StringComparison.Ordinal);
         int widgetGroups = appearanceXaml.IndexOf("Tag=\"WidgetGroups\"", StringComparison.Ordinal);
         int material = appearanceXaml.IndexOf("Tag=\"AppearanceMaterialSettings\"", StringComparison.Ordinal);
-        Assert.True(accentColor < capsuleMode);
-        Assert.True(capsuleMode < widgetGroups);
+        Assert.True(accentColor >= 0 && widgetGroups > accentColor);
         Assert.True(widgetGroups < material);
+        // Capsule mode is a top-level page now.
         Assert.Contains(
-            "[\"CapsuleMode\"] = new(\"CapsuleMode\", \"Settings.Section.CapsuleMode\", \"Appearance\", \"Appearance\")",
+            "[\"CapsuleMode\"] = new(\"CapsuleMode\", \"Settings.Section.CapsuleMode\", null, \"CapsuleMode\")",
             routes,
             StringComparison.Ordinal);
         Assert.Contains(
@@ -103,6 +118,9 @@ public sealed class SettingsCopyAndHierarchyTests
         string fileWidgetXaml = File.ReadAllText(Path.Combine(
             root,
             "src/DeskBox/Views/SettingsSections/FileWidgetSettingsSection.xaml"));
+        string appSettings = File.ReadAllText(Path.Combine(
+            root,
+            "src/DeskBox/Models/AppSettings.cs"));
         string routes = File.ReadAllText(Path.Combine(
             root,
             "src/DeskBox/Views/SettingsWindow.xaml.cs"));
@@ -120,6 +138,20 @@ public sealed class SettingsCopyAndHierarchyTests
         // File stacking is redesigned around an explicit master switch plus
         // an automatic-grouping sub-switch, so the plain dropdown is gone.
         Assert.Contains("IsOn=\"{x:Bind ViewModel.FileStacksEnabled, Mode=TwoWay}\"", fileWidgetXaml, StringComparison.Ordinal);
+        Assert.Contains("Settings.FileStacks.Mode.Title", windowXaml, StringComparison.Ordinal);
+        Assert.Contains("Settings.FileStacks.Mode.Description", windowXaml, StringComparison.Ordinal);
+        Assert.Contains(
+            "IsOn=\"{Binding FileStacksEnabled, Mode=TwoWay}\"",
+            windowXaml,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "public bool FileStacksEnabled { get; set; } = true;",
+            appSettings,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "public bool WidgetCapsuleModeEnabled",
+            appSettings,
+            StringComparison.Ordinal);
         Assert.Contains("IsOn=\"{Binding FileStackAutoStacking, Mode=TwoWay}\"", windowXaml, StringComparison.Ordinal);
         Assert.Contains(
             "SelectedFileWidgetFolderOpenBehavior",
@@ -151,7 +183,7 @@ public sealed class SettingsCopyAndHierarchyTests
             ["Settings.Nav.CapsuleMode"] = "胶囊模式",
             ["Settings.CollapseBehavior.Title"] = "默认显示方式",
             ["Settings.CollapseBehavior.Expanded"] = "始终展开",
-            ["Widget.CollapseBehavior.Title"] = "显示方式",
+            ["Widget.CollapseBehavior.Title"] = "展开方式",
             ["Widget.CollapseBehavior.System"] = "跟随默认",
             ["Widget.CollapseBehavior.Click"] = "点击展开",
             ["Widget.CollapseBehavior.Smart"] = "悬停自动展开",
@@ -204,6 +236,8 @@ public sealed class SettingsCopyAndHierarchyTests
             ["Settings.Onboarding.Description"] = "重新查看格子创建、文件收纳、功能格子、外观和快捷键说明",
             ["Settings.Weather.LocationMode.Title"] = "位置来源",
             ["Settings.FileStacks.Title"] = "文件叠放",
+            ["Settings.FileStacks.Mode.Title"] = "叠放模式",
+            ["Settings.FileStacks.Mode.Description"] = "开启手动叠放和自动叠放；关闭后隐藏所有叠放",
             ["Settings.FileStacks.Auto.Title"] = "自动叠放",
             ["Settings.FileStacks.Status.Manual"] = "仅手动叠放",
             ["Settings.HoverButtonActions.None"] = "不显示"
@@ -308,7 +342,7 @@ public sealed class SettingsCopyAndHierarchyTests
         }
 
         Assert.Equal(
-            6,
+            5,
             CountOccurrences(
                 appearanceXaml,
                 "Style=\"{StaticResource SettingCardIdentityGridStyle}\""));

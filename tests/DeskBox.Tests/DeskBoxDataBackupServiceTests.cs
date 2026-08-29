@@ -214,7 +214,7 @@ public sealed class DeskBoxDataBackupServiceTests : IDisposable
         var sourceSettings = new AppSettings
         {
             Language = "zh-CN",
-            WidgetCapsuleModeEnabled = true,
+            WidgetCollapseBehavior = SettingsService.WidgetCollapseBehaviorClick,
             WidgetCompactWidthMode = SettingsService.WidgetCompactWidthModeIndependent,
             WidgetCompactContentMode = SettingsService.WidgetCompactContentModeSummary,
             FileStacksEnabled = true,
@@ -329,7 +329,9 @@ public sealed class DeskBoxDataBackupServiceTests : IDisposable
         AppSettings restoredSettings = JsonSerializer.Deserialize<AppSettings>(
             await File.ReadAllTextAsync(Path.Combine(targetData, "settings.json")),
             new JsonSerializerOptions { PropertyNameCaseInsensitive = true })!;
-        Assert.True(restoredSettings.WidgetCapsuleModeEnabled);
+        Assert.Equal(
+            SettingsService.WidgetCollapseBehaviorClick,
+            restoredSettings.WidgetCollapseBehavior);
         Assert.Equal(
             SettingsService.WidgetCompactWidthModeIndependent,
             restoredSettings.WidgetCompactWidthMode);

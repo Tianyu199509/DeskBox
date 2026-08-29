@@ -13,20 +13,21 @@ public partial class SettingsViewModel
         AccentColorHelper.FromHex(WidgetForegroundSettings.DefaultCustomColorHex);
 
     public IReadOnlyList<SettingsOption> AvailableWidgetForegroundModeOptions =>
-    [
-        new(
-            WidgetForegroundSettings.ModeFollowTheme,
-            _localizationService.T("Settings.WidgetForeground.FollowTheme")),
-        new(
-            WidgetForegroundSettings.ModeLight,
-            _localizationService.T("Settings.WidgetForeground.Light")),
-        new(
-            WidgetForegroundSettings.ModeDark,
-            _localizationService.T("Settings.WidgetForeground.Dark")),
-        new(
-            WidgetForegroundSettings.ModeCustom,
-            _localizationService.T("Settings.WidgetForeground.Custom"))
-    ];
+        WrapOptions(
+        [
+            new(
+                WidgetForegroundSettings.ModeFollowTheme,
+                _localizationService.T("Settings.WidgetForeground.FollowTheme")),
+            new(
+                WidgetForegroundSettings.ModeLight,
+                _localizationService.T("Settings.WidgetForeground.Light")),
+            new(
+                WidgetForegroundSettings.ModeDark,
+                _localizationService.T("Settings.WidgetForeground.Dark")),
+            new(
+                WidgetForegroundSettings.ModeCustom,
+                _localizationService.T("Settings.WidgetForeground.Custom"))
+        ]);
 
     public string SelectedWidgetForegroundMode
     {

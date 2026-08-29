@@ -32,6 +32,29 @@ public sealed class FileItemMultiDragTests
                 fromStackPopover));
     }
 
+    [Theory]
+    [InlineData(DataPackageOperation.Move, true, 1, 1, DataPackageOperation.None)]
+    [InlineData(DataPackageOperation.Move, false, 1, 1, DataPackageOperation.Move)]
+    [InlineData(DataPackageOperation.Move, false, 1, 0, DataPackageOperation.None)]
+    [InlineData(DataPackageOperation.Move, false, 2, 1, DataPackageOperation.None)]
+    [InlineData(DataPackageOperation.Copy, true, 1, 0, DataPackageOperation.Copy)]
+    [InlineData(DataPackageOperation.Link, true, 1, 0, DataPackageOperation.Link)]
+    public void ResolveSafeDropCompletionOperation_PreventsSourceCleanupBeforeMove(
+        DataPackageOperation requestedOperation,
+        bool isDeskBoxFileDrag,
+        int requestedMoveCount,
+        int completedMoveCount,
+        DataPackageOperation expected)
+    {
+        Assert.Equal(
+            expected,
+            FileSurfaceContent.ResolveSafeDropCompletionOperation(
+                requestedOperation,
+                isDeskBoxFileDrag,
+                requestedMoveCount,
+                completedMoveCount));
+    }
+
     [Fact]
     public void TryMoveStackMemberOverride_ReordersPersistedManualMembers()
     {

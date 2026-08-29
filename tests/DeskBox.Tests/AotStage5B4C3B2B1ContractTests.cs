@@ -162,10 +162,10 @@ public sealed class AotStage5B4C3B2B1ContractTests
             "tests/DeskBox.Tests/JsonSerializationBaselineContractTests.cs");
         string rust = Read("native/deskbox-native/src/lib.rs");
 
-        Assert.Contains("TwentyNineFilesAndSixtyFiveCalls", baseline, StringComparison.Ordinal);
-        Assert.Contains("Assert.Equal(29, actual.Count)", baseline, StringComparison.Ordinal);
-        Assert.Contains("Assert.Equal(65, actual.Values.Sum())", baseline, StringComparison.Ordinal);
-        Assert.Contains("Assert.Equal(33, actualContextOwners.Length)", baseline, StringComparison.Ordinal);
+        Assert.Contains("TwentyEightFilesAndSixtyFourCalls", baseline, StringComparison.Ordinal);
+        Assert.Contains("Assert.Equal(28, actual.Count)", baseline, StringComparison.Ordinal);
+        Assert.Contains("Assert.Equal(64, actual.Values.Sum())", baseline, StringComparison.Ordinal);
+        Assert.Contains("Assert.Equal(26, actualContextOwners.Length)", baseline, StringComparison.Ordinal);
         Assert.Contains(
             "App.AotTodoNotificationForwardingSmoke.cs\"] = 1",
             baseline,

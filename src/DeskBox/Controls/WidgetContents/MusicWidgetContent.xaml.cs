@@ -1,4 +1,4 @@
-using System.Numerics;
+﻿using System.Numerics;
 using System.ComponentModel;
 using DeskBox.Models;
 using DeskBox.Services;
@@ -669,11 +669,19 @@ public sealed partial class MusicWidgetContent : UserControl, IDisposable
         // On narrow grids drop the playback-mode button first; volume stays.
         RecordPlaybackModeButton.Visibility = width < 190 ? Visibility.Collapsed : Visibility.Visible;
 
-        // Reserve room for the title/artist/progress/controls rows below the disc.
-        double reserved = 108 + transportButtonSize;
+        // Reserve room for the title/artist/progress/controls rows below the
+        // disc. The extra 24 accounts for the RecordLayout's top+bottom
+        // padding, which the previous fixed reservation missed — that gap
+        // made the disc clip at the top and bottom on shorter grids.
+        double reserved = 108 + transportButtonSize + 24;
         double vinylSize = Math.Clamp(Math.Min(width - 24, height - reserved), 64, 230);
-        RecordVinylHost.Width = vinylSize;
-        RecordVinylHost.Height = vinylSize;
+        // Use Max constraints instead of fixed sizes: the star-sized row can
+        // still shrink below the computed value on tight grids, and the
+        // Viewbox then scales the disc down instead of clipping it.
+        RecordVinylHost.MaxWidth = vinylSize;
+        RecordVinylHost.MaxHeight = vinylSize;
+        RecordVinylHost.Width = double.NaN;
+        RecordVinylHost.Height = double.NaN;
 
         bool small = vinylSize < 110;
         RecordLayout.Padding = new Thickness(small ? 8 : 12);

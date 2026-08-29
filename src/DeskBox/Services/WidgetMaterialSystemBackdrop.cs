@@ -23,7 +23,7 @@ internal readonly record struct WidgetMaterialBackdropAppearance(
 /// strength, so this controller-backed implementation uses the same visual
 /// calculator as the owning widget window.
 /// </summary>
-internal sealed class WidgetMaterialSystemBackdrop : SystemBackdrop
+internal sealed partial class WidgetMaterialSystemBackdrop : SystemBackdrop
 {
     private WidgetMaterialBackdropAppearance _appearance;
     private ICompositionSupportsSystemBackdrop? _target;

@@ -180,7 +180,7 @@ public sealed class AotStage5B4C3B2B2BContractTests
                      "stage5B4C3B2B2BRustAbiUnchanged",
                      "stage5B4C3B2B2BScenarioJsonSerializeCallCount",
                      "stage5B4C3B2B2BManagedUiJsonSerializeCallCount",
-                     "stage5B4C3B2B2BExpectedWmc1510Count = 1213"
+                     "stage5B4C3B2B2BExpectedWmc1510Count = 1241"
                  })
         {
             Assert.Contains(token, audit, StringComparison.Ordinal);

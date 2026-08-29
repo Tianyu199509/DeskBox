@@ -291,6 +291,7 @@ public sealed partial class WidgetManager
                     _settingsService.Settings.WidgetAnimationEasingIntensity,
                     isShowing: true,
                     startDelayFrames: 1);
+                _ = RestoreInteractionBackdropsWhenIdleAsync(windows);
         }
         catch (Exception ex)
         {
@@ -306,6 +307,7 @@ public sealed partial class WidgetManager
             try
             {
                 window.PrepareTrayShowAnimation();
+                window.SimplifyBackdropForInteraction();
             }
             catch (Exception ex)
             {
@@ -355,10 +357,41 @@ public sealed partial class WidgetManager
                     _settingsService.Settings.WidgetAnimationEasingIntensity,
                     isShowing: false,
                     startDelayFrames: 0);
+                _ = RestoreInteractionBackdropsWhenIdleAsync(windows);
         }
         catch (Exception ex)
         {
-            App.Log($"[TrayBatch] Error during batch hide animation: {ex}");
+            App.Log($"[TrayBatch] Error during batch animation: {ex}");
+        }
+    }
+
+    /// <summary>
+    /// Restores each window's full blurred legacy acrylic once the batch slide
+    /// finishes, so Win10 interaction simplification never outlives the tray
+    /// animation. No-op for windows that were never simplified.
+    /// </summary>
+    private async Task RestoreInteractionBackdropsWhenIdleAsync(
+        IReadOnlyList<IDesktopWidgetWindow> windows)
+    {
+        try
+        {
+            await _trayBatchAnimationDriver.WaitForIdleAsync();
+        }
+        catch (Exception ex)
+        {
+            App.Log($"[TrayBatch] Backdrop restore idle wait failed: {ex}");
+        }
+
+        foreach (var window in windows)
+        {
+            try
+            {
+                window.RestoreBackdropAfterInteraction();
+            }
+            catch (Exception ex)
+            {
+                App.Log($"[TrayBatch] Failed to restore backdrop {FormatHostWindow(window)}: {ex}");
+            }
         }
     }
 

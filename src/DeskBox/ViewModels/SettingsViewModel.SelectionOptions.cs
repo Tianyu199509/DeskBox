@@ -70,10 +70,12 @@ public partial class SettingsViewModel
         CreateSelectionOptions(AvailableLayoutDensities, AvailableLayoutDensityDisplayNames);
 
     public IReadOnlyList<SettingsOption> AvailableFileNameLineCountOptions =>
-    [
-        new(SettingsService.MinFileNameLineCount, _localizationService.T("Settings.FileNameLines.Single")),
-        new(SettingsService.MaxFileNameLineCount, _localizationService.T("Settings.FileNameLines.Double"))
-    ];
+        WrapOptions(
+        [
+            new(SettingsService.HiddenFileNameLineCount, _localizationService.T("Settings.FileNameLines.Hidden")),
+            new(SettingsService.MinFileNameLineCount, _localizationService.T("Settings.FileNameLines.Single")),
+            new(SettingsService.MaxFileNameLineCount, _localizationService.T("Settings.FileNameLines.Double"))
+        ]);
 
     public IReadOnlyList<SettingsOption> AvailableAnimationPresetOptions =>
         CreateSelectionOptions(AvailableAnimationPresets, AvailableAnimationPresetDisplayNames);
@@ -194,6 +196,15 @@ public partial class SettingsViewModel
 
         return options;
     }
+
+    /// <summary>
+    /// A collection expression whose target is IReadOnlyList&lt;T&gt; compiles to the
+    /// hidden &lt;&gt;z__ReadOnlyArray type, which CsWinRT cannot marshal across the
+    /// WinRT ABI in Native AOT builds, leaving every {Binding} ItemsSource built
+    /// this way empty. Routing the literal through an array parameter produces a
+    /// real SettingsOption[] that projects correctly in JIT and AOT alike.
+    /// </summary>
+    internal static IReadOnlyList<SettingsOption> WrapOptions(SettingsOption[] options) => options;
 
     private void NotifySelectionOptionsChanged()
     {

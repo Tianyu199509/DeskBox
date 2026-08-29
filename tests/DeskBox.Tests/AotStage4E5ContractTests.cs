@@ -186,8 +186,8 @@ public sealed class AotStage4E5ContractTests
         string audit = ReadRepositoryFile("scripts/publish-aot-audit.ps1");
         string project = ReadRepositoryFile("src/DeskBox/DeskBox.csproj");
 
-        Assert.Contains("$stage4E4MaximumWmc1510Count = 1224", audit, StringComparison.Ordinal);
-        Assert.Contains("$stage4E5ExpectedWmc1510Count = 1213", audit, StringComparison.Ordinal);
+        Assert.Contains("$stage4E4MaximumWmc1510Count = 1241", audit, StringComparison.Ordinal);
+        Assert.Contains("$stage4E5ExpectedWmc1510Count = 1241", audit, StringComparison.Ordinal);
         Assert.Contains("Stage 4E-5 WMC1510 count changed", audit, StringComparison.Ordinal);
         Assert.Contains("Native AOT stage 5B-4C3B2B1", project, StringComparison.Ordinal);
         Assert.Contains("eight compiled search-result row bindings", project, StringComparison.OrdinalIgnoreCase);

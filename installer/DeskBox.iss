@@ -1,10 +1,13 @@
 ; DeskBox 安装脚本
-; 构建命令：
-; dotnet publish ..\src\DeskBox\DeskBox.csproj --configuration Release -p:Platform=x64 -p:RuntimeIdentifier=win-x64 -p:DeskBoxRustNative=true -p:SelfContained=false -p:WindowsAppSDKSelfContained=false -o ..\artifacts\publish\DeskBox\x64 -v:minimal
+; 零售安装包由 scripts\build-stage-7c1-distribution.ps1 产出（Native AOT 载荷，/DDeskBoxNativeAot=1）。
+; 手动产出载荷示例（JIT + Rust 原生模块的组合）：
+; dotnet publish ..\src\DeskBox\DeskBox.csproj --configuration Release -p:Platform=x64 -p:RuntimeIdentifier=win-x64 -p:DeskBoxRustNative=true -p:SelfContained=false -p:WindowsAppSDKSelfContained=false -o <publish 目录> -v:minimal
+; 手动编译安装器示例：
+; ISCC /DDeskBoxNativeAot=1 /DMyAppReleaseDir=<publish 目录> DeskBox.iss
 
 #define MyAppName "DeskBox"
-#define MyAppVersion "1.4.5"
-#define MyAppVersionInfo "1.4.5.0"
+#define MyAppVersion "1.4.6"
+#define MyAppVersionInfo "1.4.6.0"
 #define MyAppPublisher "朱天雨"
 #define MyAppExeName "DeskBox.exe"
 #define MyAppOutputBaseName "DeskBox_Setup"
@@ -47,7 +50,10 @@ DisableDirPage=no
 ; allowing an unelevated current-user install. Registered upgrades retain their
 ; previous install mode and path.
 PrivilegesRequired=admin
-PrivilegesRequiredOverridesAllowed=dialog
+; "commandline" lets DeskBox.Updater pin the install scope with
+; /CURRENTUSER or /ALLUSERS so its post-install consistency check cannot
+; disagree with the scope the installer actually used.
+PrivilegesRequiredOverridesAllowed=dialog commandline
 ; Upgrade paths are resolved and locked by DeskBox.Installation.iss before the
 ; directory page is shown.
 ; Directory reuse is handled exclusively by DeskBox.Installation.iss. Leaving

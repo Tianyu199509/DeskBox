@@ -32,6 +32,9 @@ public sealed class SettingsServiceTests : IDisposable
 
         Assert.Equal(SettingsLoadRecoveryState.DefaultsForMissingFile, service.LastLoadRecoveryState);
         Assert.False(service.Settings.HasResolvedInitialFileWidgetSetup);
+        Assert.Equal(SettingsMigrationPipeline.CurrentSchemaVersion, service.Settings.SchemaVersion);
+        Assert.True(service.Settings.FileStacksEnabled);
+        Assert.False(service.Settings.FileStackAutoStacking);
         Assert.Equal(
             SettingsService.NormalizeManagedStorageRootPath(
                 SettingsService.GetRecommendedManagedStorageRootPath()),
@@ -847,7 +850,7 @@ public sealed class SettingsServiceTests : IDisposable
     {
         var settings = new AppSettings
         {
-            WidgetCapsuleModeEnabled = legacyEnabled,
+            LegacyWidgetCapsuleModeEnabled = legacyEnabled,
             WidgetCollapseBehavior = SettingsService.WidgetCollapseBehaviorSmart,
             WidgetCompactSettingsVersion = 1
         };
@@ -859,20 +862,18 @@ public sealed class SettingsServiceTests : IDisposable
         await service.LoadAsync();
 
         Assert.Equal(expectedBehavior, service.Settings.WidgetCollapseBehavior);
-        Assert.Equal(
-            expectedBehavior != SettingsService.WidgetCollapseBehaviorExpanded,
-            service.Settings.WidgetCapsuleModeEnabled);
+        Assert.Null(service.Settings.LegacyWidgetCapsuleModeEnabled);
         Assert.Equal(
             SettingsService.CurrentWidgetCompactSettingsVersion,
             service.Settings.WidgetCompactSettingsVersion);
     }
 
     [Fact]
-    public async Task LoadAsync_CurrentThreeStateDefaultIsAuthoritativeOverLegacyFlag()
+    public async Task LoadAsync_CurrentProfileDropsLegacyCapsuleGateWithoutChangingBehavior()
     {
         var settings = new AppSettings
         {
-            WidgetCapsuleModeEnabled = false,
+            LegacyWidgetCapsuleModeEnabled = false,
             WidgetCollapseBehavior = SettingsService.WidgetCollapseBehaviorSmart,
             WidgetCompactSettingsVersion = SettingsService.CurrentWidgetCompactSettingsVersion
         };
@@ -886,7 +887,32 @@ public sealed class SettingsServiceTests : IDisposable
         Assert.Equal(
             SettingsService.WidgetCollapseBehaviorSmart,
             service.Settings.WidgetCollapseBehavior);
-        Assert.True(service.Settings.WidgetCapsuleModeEnabled);
+        Assert.Null(service.Settings.LegacyWidgetCapsuleModeEnabled);
+    }
+
+    [Fact]
+    public async Task LoadAsync_VersionTwoProfileDropsLegacyCapsuleGate()
+    {
+        var settings = new AppSettings
+        {
+            LegacyWidgetCapsuleModeEnabled = false,
+            WidgetCollapseBehavior = SettingsService.WidgetCollapseBehaviorExpanded,
+            WidgetCompactSettingsVersion = 2
+        };
+        await File.WriteAllTextAsync(
+            Path.Combine(_settingsRoot, "settings.json"),
+            JsonSerializer.Serialize(settings, s_jsonOptions));
+
+        var service = new SettingsService(_settingsRoot);
+        await service.LoadAsync();
+
+        Assert.Null(service.Settings.LegacyWidgetCapsuleModeEnabled);
+        Assert.Equal(
+            SettingsService.WidgetCollapseBehaviorExpanded,
+            service.Settings.WidgetCollapseBehavior);
+        Assert.Equal(
+            SettingsService.CurrentWidgetCompactSettingsVersion,
+            service.Settings.WidgetCompactSettingsVersion);
     }
 
     [Theory]
@@ -1062,7 +1088,7 @@ public sealed class SettingsServiceTests : IDisposable
         var restoredDefaults = new AppSettings
         {
             WidgetAnimationEffect = SettingsService.WidgetAnimationEffectFade,
-            WidgetCapsuleModeEnabled = true,
+            LegacyWidgetCapsuleModeEnabled = true,
             WidgetCompactWidthMode = SettingsService.WidgetCompactWidthModeIndependent,
             WidgetCompactExpansionDirection = SettingsService.WidgetCompactExpansionDirectionUp,
             WidgetCompactAnimationEffect = SettingsService.WidgetCompactAnimationSnappy,
@@ -1106,21 +1132,27 @@ public sealed class SettingsServiceTests : IDisposable
 
         Assert.Equal(SettingsService.WidgetAnimationEffectSlideFade, newUserDefaults.WidgetAnimationEffect);
         Assert.Equal(newUserDefaults.WidgetAnimationEffect, restoredDefaults.WidgetAnimationEffect);
-        Assert.False(newUserDefaults.WidgetCapsuleModeEnabled);
-        Assert.Equal(newUserDefaults.WidgetCapsuleModeEnabled, restoredDefaults.WidgetCapsuleModeEnabled);
+        Assert.Null(newUserDefaults.LegacyWidgetCapsuleModeEnabled);
+        Assert.Null(restoredDefaults.LegacyWidgetCapsuleModeEnabled);
         Assert.True(newUserDefaults.WidgetGroupsEnabled);
         Assert.False(newUserDefaults.SearchHotkeyEnabled);
         Assert.Equal(newUserDefaults.SearchHotkeyEnabled, restoredDefaults.SearchHotkeyEnabled);
         Assert.Equal(SettingsService.WidgetCompactWidthModeAligned, newUserDefaults.WidgetCompactWidthMode);
         Assert.Equal(newUserDefaults.WidgetCompactWidthMode, restoredDefaults.WidgetCompactWidthMode);
         Assert.Equal(
-            SettingsService.WidgetCompactExpansionDirectionAuto,
+            SettingsService.WidgetCompactExpansionDirectionDown,
             newUserDefaults.WidgetCompactExpansionDirection);
         Assert.Equal(
             newUserDefaults.WidgetCompactExpansionDirection,
             restoredDefaults.WidgetCompactExpansionDirection);
         Assert.Equal(SettingsService.WidgetCompactAnimationSlow, newUserDefaults.WidgetCompactAnimationEffect);
         Assert.Equal(newUserDefaults.WidgetCompactAnimationEffect, restoredDefaults.WidgetCompactAnimationEffect);
+        Assert.Equal(
+            SettingsService.SlowWidgetCompactAnimationDurationMs,
+            newUserDefaults.WidgetCompactAnimationDurationMs);
+        Assert.Equal(
+            newUserDefaults.WidgetCompactAnimationDurationMs,
+            restoredDefaults.WidgetCompactAnimationDurationMs);
         Assert.Equal(SettingsService.WidgetCollapseBehaviorExpanded, newUserDefaults.WidgetCollapseBehavior);
         Assert.Equal(newUserDefaults.WidgetCollapseBehavior, restoredDefaults.WidgetCollapseBehavior);
         Assert.Equal(SettingsService.SensitiveWidgetCompactExpandDelayMs, newUserDefaults.WidgetCompactExpandDelayMs);
@@ -1314,11 +1346,11 @@ public sealed class SettingsServiceTests : IDisposable
     }
 
     [Theory]
+    [InlineData(0, 0)]
     [InlineData(1, 1)]
     [InlineData(2, 2)]
-    [InlineData(0, 2)]
     [InlineData(3, 2)]
-    public void NormalizeFileNameLineCount_AllowsOneOrTwoAndDefaultsToTwo(int value, int expected)
+    public void NormalizeFileNameLineCount_AllowsHiddenOneOrTwoAndDefaultsToTwo(int value, int expected)
     {
         Assert.Equal(expected, SettingsService.NormalizeFileNameLineCount(value));
     }
@@ -1328,6 +1360,13 @@ public sealed class SettingsServiceTests : IDisposable
     {
         Assert.Equal(SettingsService.DefaultFileNameLineCount, new AppSettings().FileNameLineCount);
         Assert.Equal(2, SettingsService.DefaultFileNameLineCount);
+    }
+
+    [Fact]
+    public void WidgetResizeMinimum_IsFiftyByFifty()
+    {
+        Assert.Equal(50, SettingsService.MinWidgetWidth);
+        Assert.Equal(50, SettingsService.MinWidgetHeight);
     }
 
     [Theory]
@@ -1496,6 +1535,11 @@ public sealed class SettingsServiceTests : IDisposable
         if (type == typeof(bool))
         {
             return !(bool)(defaultValue ?? false);
+        }
+
+        if (type == typeof(bool?))
+        {
+            return defaultValue is null ? true : !(bool)defaultValue;
         }
 
         if (type == typeof(int))

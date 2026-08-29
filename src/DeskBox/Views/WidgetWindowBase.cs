@@ -61,6 +61,9 @@ public abstract partial class WidgetWindowBase : Window
     protected bool AcrylicControllerAttached;
     protected bool MicaControllerAttached;
     protected bool LegacyAccentBackdropActive;
+    private bool _isInteractionBackdropDowngraded;
+    private Windows.UI.Color _lastLegacyAccentTintColor;
+    private double _lastLegacyAccentOpacity;
     private bool? _acrylicControllerUsesBase;
     private bool? _micaControllerUsesAlt;
     private BackdropSignature? _lastAppliedBackdropSignature;
@@ -88,12 +91,11 @@ public abstract partial class WidgetWindowBase : Window
     protected FrameworkElement? DragCaptureElement;
     private bool _isCoordinatedMoveDrag;
     private bool _deferTitleBarDragConfigUpdates;
+    private bool _deferInteractiveResizeConfigUpdates;
     private PendingTitleBarDragFrame? _pendingTitleBarDragFrame;
     private IDisposable? _titleBarDragFrameRegistration;
     private RectInt32? _pendingInteractiveResizeBounds;
     private IDisposable? _interactiveResizeFrameRegistration;
-    private bool _interactiveResizeCommitQueued;
-    private long _lastInteractiveResizeCommitTimestamp;
     private IDisposable? _interactiveResizeClockBoostLease;
     private SizeInt32 _interactiveResizeMinimumSize;
     private bool _isDisplayTopologyTransitionActive;
@@ -339,42 +341,14 @@ public abstract partial class WidgetWindowBase : Window
     private void QueueInteractiveResizeBounds(RectInt32 bounds)
     {
         _pendingInteractiveResizeBounds = bounds;
-        if (WindowsCompatibilityService.IsWindows11OrLater)
-        {
-            _interactiveResizeFrameRegistration ??=
-                WidgetCompactAnimationCoordinator.Register(ApplyPendingInteractiveResizeBounds);
-            return;
-        }
-
-        // The first ordinary Win10 move goes straight to the real HWND. Only
-        // pointer bursts closer than 8ms are coalesced, keeping input latency
-        // low without issuing redundant DWM resizes.
-        if (_interactiveResizeCommitQueued)
-        {
-            return;
-        }
-
-        long now = Stopwatch.GetTimestamp();
-        if (_lastInteractiveResizeCommitTimestamp == 0 ||
-            Stopwatch.GetElapsedTime(_lastInteractiveResizeCommitTimestamp, now).TotalMilliseconds >= 8)
-        {
-            ApplyPendingInteractiveResizeBounds();
-            return;
-        }
-
-        _interactiveResizeCommitQueued = true;
-        bool queued = DispatcherQueue.TryEnqueue(
-            DispatcherQueuePriority.High,
-            () =>
-            {
-                _interactiveResizeCommitQueued = false;
-                ApplyPendingInteractiveResizeBounds();
-            });
-        if (!queued)
-        {
-            _interactiveResizeCommitQueued = false;
-            ApplyPendingInteractiveResizeBounds();
-        }
+        // Both Win11 and Win10 commit through the shared frame coordinator so
+        // resize follows the same present-aligned cadence as drag and capsule
+        // transitions. On Win10 this replaces the legacy 8ms burst commits,
+        // which could reach ~125Hz of full XAML re-layout on pointer-move
+        // bursts; the coordinator consumes only the newest pending bounds per
+        // tick, keeping first-commit latency within a single frame.
+        _interactiveResizeFrameRegistration ??=
+            WidgetCompactAnimationCoordinator.Register(ApplyPendingInteractiveResizeBounds);
     }
 
     private void ApplyPendingInteractiveResizeBounds()
@@ -393,7 +367,6 @@ public abstract partial class WidgetWindowBase : Window
             bounds.Height,
             persist: false,
             updateConfig: false);
-        _lastInteractiveResizeCommitTimestamp = Stopwatch.GetTimestamp();
     }
 
     private void FlushPendingInteractiveResizeBounds()
@@ -422,7 +395,6 @@ public abstract partial class WidgetWindowBase : Window
 
     private void BeginInteractiveResizePerformanceSession()
     {
-        _lastInteractiveResizeCommitTimestamp = 0;
         _interactiveResizeClockBoostLease ??= CompositorClockBoostCoordinator.Acquire();
     }
 
@@ -430,7 +402,6 @@ public abstract partial class WidgetWindowBase : Window
     {
         _interactiveResizeClockBoostLease?.Dispose();
         _interactiveResizeClockBoostLease = null;
-        _lastInteractiveResizeCommitTimestamp = 0;
         _interactiveResizeMinimumSize = default;
     }
 

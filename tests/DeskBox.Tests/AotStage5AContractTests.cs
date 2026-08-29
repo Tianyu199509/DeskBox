@@ -140,7 +140,7 @@ public sealed class AotStage5AContractTests
         Assert.Contains("stage5AMissingDataPathPatterns", audit, StringComparison.Ordinal);
         Assert.Contains("stage5AMissingLauncherPatterns", audit, StringComparison.Ordinal);
         Assert.Contains("stage5AUnsafeLauncherPatterns", audit, StringComparison.Ordinal);
-        Assert.Contains("stage5AExpectedWmc1510Count = 1213", audit, StringComparison.Ordinal);
+        Assert.Contains("stage5AExpectedWmc1510Count = 1241", audit, StringComparison.Ordinal);
         Assert.Contains("Native AOT stage 5B-4C3B2B1", project, StringComparison.Ordinal);
         Assert.Contains("AOT preview data-root isolation", project, StringComparison.OrdinalIgnoreCase);
     }

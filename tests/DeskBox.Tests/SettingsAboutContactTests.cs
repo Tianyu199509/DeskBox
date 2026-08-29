@@ -1,4 +1,4 @@
-namespace DeskBox.Tests;
+﻿namespace DeskBox.Tests;
 
 public sealed class SettingsAboutContactTests
 {
@@ -81,15 +81,15 @@ public sealed class SettingsAboutContactTests
         Assert.Equal(1, CountOccurrences(xaml, "ms-appx:///Assets/wechat-qrcode.jpg"));
         Assert.Contains("StoreSupportCardVisibility", xaml, StringComparison.Ordinal);
         Assert.Contains("x:Name=\"SupportDeskBoxDialog\"", xaml, StringComparison.Ordinal);
-        Assert.Equal("500", supportDialogContent.Attribute("Width")?.Value);
-        Assert.Equal("500", supportDialogContent.Attribute("MaxWidth")?.Value);
+        Assert.Equal("480", supportDialogContent.Attribute("Width")?.Value);
+        Assert.Equal("480", supportDialogContent.Attribute("MaxWidth")?.Value);
         Assert.Equal(2, supportQrContainers.Length);
         Assert.All(supportQrContainers, container =>
         {
-            Assert.Equal("152", container.Attribute("Width")?.Value);
-            Assert.Equal("152", container.Attribute("Height")?.Value);
+            Assert.Equal("108", container.Attribute("Width")?.Value);
+            Assert.Equal("108", container.Attribute("Height")?.Value);
         });
-        Assert.Equal("168", supportStoreButton.Attribute("MinWidth")?.Value);
+        Assert.Equal("12,5,12,7", supportStoreButton.Attribute("Padding")?.Value);
         Assert.Equal("Right", supportStoreButton.Attribute("HorizontalAlignment")?.Value);
         Assert.Equal("Center", supportStoreButton.Attribute("VerticalAlignment")?.Value);
         Assert.Contains("ShowStoreSupportDialogButton_Click", xaml, StringComparison.Ordinal);

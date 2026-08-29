@@ -363,6 +363,36 @@ public sealed class FileServiceTests : IDisposable
     }
 
     [Fact]
+    public void CanUseLegacyShellMove_RejectsCrossVolumeAndMixedBatches()
+    {
+        Assert.True(FileService.CanUseLegacyShellMove(
+        [
+            new FileService.FileTransferPlan(
+                @"E:\source-a.bin",
+                @"E:\folder\source-a.bin"),
+            new FileService.FileTransferPlan(
+                @"E:\source-b.bin",
+                @"E:\folder\source-b.bin")
+        ]));
+        Assert.False(FileService.CanUseLegacyShellMove(
+        [
+            new FileService.FileTransferPlan(
+                @"E:\source.bin",
+                @"F:\folder\source.bin")
+        ]));
+        Assert.False(FileService.CanUseLegacyShellMove(
+        [
+            new FileService.FileTransferPlan(
+                @"E:\source-a.bin",
+                @"E:\folder\source-a.bin"),
+            new FileService.FileTransferPlan(
+                @"E:\source-b.bin",
+                @"F:\folder\source-b.bin")
+        ]));
+        Assert.False(FileService.CanUseLegacyShellMove([]));
+    }
+
+    [Fact]
     public void FileTransferProgress_UnknownTotalBeforeFirstCompletionIsIndeterminate()
     {
         var progress = new FileService.FileTransferProgress(

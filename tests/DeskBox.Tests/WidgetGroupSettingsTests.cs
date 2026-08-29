@@ -267,10 +267,10 @@ public sealed class WidgetGroupSettingsTests
 
         Assert.True(WidgetGroupSettings.Normalize(settings));
         Assert.Equal(
-            WidgetGroupNavigationStyles.Auto,
+            WidgetGroupNavigationStyles.Stack,
             settings.WidgetGroupDefaultNavigationStyle);
         Assert.Equal(
-            WidgetGroupNavigationStyles.Auto,
+            WidgetGroupNavigationStyles.Stack,
             settings.WidgetGroups[0].NavigationStyle);
         Assert.Equal(
             WidgetGroupNavigationStyles.FollowDefault,
@@ -351,7 +351,6 @@ public sealed class WidgetGroupSettingsTests
     }
 
     [Theory]
-    [InlineData(WidgetGroupNavigationStyles.Auto)]
     [InlineData(WidgetGroupNavigationStyles.Tabs)]
     [InlineData(WidgetGroupNavigationStyles.Stack)]
     public void Resolve_FollowDefaultUsesNormalizedGlobalChoice(string defaultStyle)
@@ -361,6 +360,14 @@ public sealed class WidgetGroupSettingsTests
             WidgetGroupNavigationStyles.Resolve(
                 WidgetGroupNavigationStyles.FollowDefault,
                 defaultStyle));
+    }
+
+    [Fact]
+    public void Normalize_LegacyAutoUsesStackNavigation()
+    {
+        Assert.Equal(
+            WidgetGroupNavigationStyles.Stack,
+            WidgetGroupNavigationStyles.Normalize("Auto", allowFollowDefault: false));
     }
 
     private static WidgetConfig CreateWidget(string id)

@@ -102,12 +102,21 @@ public abstract partial class WidgetWindowBase
     private bool _isPointerOverWidget;
     private bool _isPointerOverCompactExpansionZone;
     private bool _isCollapseAnimationRendering;
-    // Adaptive frame-skip: caps the per-frame HWND resize at ~60fps while
-    // keeping the effective rate a clean sub-multiple of the display refresh
-    // rate (avoids judder on 120/144/240Hz panels). Frame index increments on
-    // every compositor tick; only ticks where (index % skip) == 0 perform work.
+    // Adaptive frame-skip: animations start at the display's native rate and
+    // only step down (native -> ~60fps -> ~30fps) when coordinator ticks keep
+    // overrunning the frame budget, so clean sub-multiples of the refresh rate
+    // are preserved and high-refresh panels animate at full rate. The achieved
+    // level is remembered for the session so saturated machines pay the
+    // adaptation cost at most once.
+    private static int s_compactSessionFrameSkipLevel = WidgetCompactFrameSkipPolicy.FullRateLevel;
+    private int _collapseAnimationFrameSkipLevel = WidgetCompactFrameSkipPolicy.FullRateLevel;
     private int _collapseAnimationFrameSkip = 1;
     private int _collapseAnimationFrameIndex;
+    private int _collapseAnimationRefreshRateHz;
+    private double _collapseAnimationFrameBudgetMs;
+    private int _collapseAnimationOverrunTicks;
+    private int _collapseAnimationSampledTicks;
+    private long _collapseAnimationLastTickTimestamp;
     private bool _isShellTransitionActive;
     private bool _isBoundsInteractionActive;
     private bool _isRaisedForExpandedState;
@@ -677,6 +686,7 @@ public abstract partial class WidgetWindowBase
         WidgetShellControl.CompactPlayPauseRequested += WidgetShellControl_CompactPlayPauseRequested;
         WidgetShellControl.CompactNextRequested += WidgetShellControl_CompactNextRequested;
         SettingsService.SettingsChanged += CollapseSettingsChanged;
+        App.MemoryCleanupEpochAdvanced += App_MemoryCleanupEpochAdvanced;
         App.Current.LocalizationService.LanguageChanged += CollapseLanguageChanged;
 
         RefreshCompactPresentation();
@@ -739,7 +749,23 @@ public abstract partial class WidgetWindowBase
         WidgetShellControl.CompactPlayPauseRequested -= WidgetShellControl_CompactPlayPauseRequested;
         WidgetShellControl.CompactNextRequested -= WidgetShellControl_CompactNextRequested;
         SettingsService.SettingsChanged -= CollapseSettingsChanged;
+        App.MemoryCleanupEpochAdvanced -= App_MemoryCleanupEpochAdvanced;
         App.Current.LocalizationService.LanguageChanged -= CollapseLanguageChanged;
+    }
+
+    private void App_MemoryCleanupEpochAdvanced()
+    {
+        if (!DispatcherQueue.HasThreadAccess)
+        {
+            DispatcherQueue.TryEnqueue(App_MemoryCleanupEpochAdvanced);
+            return;
+        }
+
+        // A working-set trim made the primed expansion layout cold again
+        // (IsCompactExpansionReady now fails the epoch check). Re-arm the
+        // background warm-up so the next hover expand does not hit the
+        // readiness deadline; the slice still defers to application idle.
+        QueueCompactExpansionWarmup();
     }
 
     private void QueueCompactExpansionWarmup(bool urgent = false)
@@ -2944,10 +2970,17 @@ public abstract partial class WidgetWindowBase
         _collapseAnimationDurationMs = durationMs;
         _collapseAnimationStarted = Stopwatch.GetTimestamp();
         int refreshRateHz = Win32Helper.GetDisplayRefreshRateForWindow(HWnd);
-        _collapseAnimationFrameSkip = Math.Max(
-            1,
-            (int)Math.Round(Math.Max(1, refreshRateHz) / 60.0));
+        _collapseAnimationFrameSkipLevel = WidgetCompactFrameSkipPolicy.ClampLevel(
+            s_compactSessionFrameSkipLevel);
+        _collapseAnimationFrameSkip = WidgetCompactFrameSkipPolicy.ResolveSkip(
+            refreshRateHz,
+            _collapseAnimationFrameSkipLevel);
         _collapseAnimationFrameIndex = 0;
+        _collapseAnimationRefreshRateHz = refreshRateHz;
+        _collapseAnimationFrameBudgetMs = 1000.0 / Math.Max(1, refreshRateHz);
+        _collapseAnimationOverrunTicks = 0;
+        _collapseAnimationSampledTicks = 0;
+        _collapseAnimationLastTickTimestamp = _collapseAnimationStarted;
         _compactAnimationFrameTracker = new WidgetCompactAnimationFrameTracker(
             _collapseAnimationStarted,
             refreshRateHz);
@@ -2970,6 +3003,7 @@ public abstract partial class WidgetWindowBase
         _collapseAnimationFrameRegistration?.Dispose();
         _collapseAnimationFrameRegistration =
             WidgetCompactAnimationCoordinator.RegisterBoundsTransition(CollapseAnimationRendering);
+        SimplifyBackdropForInteraction();
         ScheduleTimer(
             ref _collapseAnimationWatchdogTimer,
             Math.Max(300, durationMs + 320),
@@ -2995,12 +3029,15 @@ public abstract partial class WidgetWindowBase
     {
         long frameTimestamp = Stopwatch.GetTimestamp();
         _compactAnimationFrameTracker?.RecordFrame(frameTimestamp);
+        RecordCollapseAnimationTickCadence(frameTimestamp);
 
-        // Adaptive frame-skip: advance the HWND resize only every N-th compositor
-        // tick so the per-frame SetWindowPos + DWM material re-sample cost stays
-        // at ~60fps regardless of the display refresh rate. Progress is time-based,
-        // so duration and easing are unchanged; the boundary updates on a coarser,
-        // judder-free cadence (N is a clean divisor of the refresh rate).
+        // Adaptive frame-skip: advance the HWND resize only every N-th
+        // coordinator tick. The level starts at the display's native rate and
+        // escalates only while ticks keep missing the frame budget (see
+        // RecordCollapseAnimationTickCadence). Progress is time-based, so
+        // duration and easing are unchanged; the boundary updates on a
+        // coarser, judder-free cadence (N stays a clean divisor-ish of the
+        // refresh rate).
         _collapseAnimationFrameIndex++;
         if (_collapseAnimationFrameIndex % _collapseAnimationFrameSkip != 0)
         {
@@ -3033,8 +3070,57 @@ public abstract partial class WidgetWindowBase
         CompleteBoundsTransition(collapsed, generation);
     }
 
+    /// <summary>
+    /// Samples the coordinator tick cadence during the transition and lowers
+    /// the HWND resize rate one level when ticks keep missing the frame
+    /// budget. The achieved level is sticky for the session so saturated
+    /// machines pay the adaptation cost at most once, while machines with
+    /// headroom keep animating at the display's native rate.
+    /// </summary>
+    private void RecordCollapseAnimationTickCadence(long frameTimestamp)
+    {
+        double intervalMs = Stopwatch
+            .GetElapsedTime(_collapseAnimationLastTickTimestamp, frameTimestamp)
+            .TotalMilliseconds;
+        _collapseAnimationLastTickTimestamp = frameTimestamp;
+        if (intervalMs <= 0)
+        {
+            return;
+        }
+
+        _collapseAnimationSampledTicks++;
+        if (WidgetCompactFrameSkipPolicy.IsOverrun(
+                intervalMs,
+                _collapseAnimationFrameBudgetMs))
+        {
+            _collapseAnimationOverrunTicks++;
+        }
+
+        if (_collapseAnimationFrameSkipLevel >= WidgetCompactFrameSkipPolicy.ThirtyFpsLevel ||
+            !WidgetCompactFrameSkipPolicy.ShouldEscalate(
+                _collapseAnimationOverrunTicks,
+                _collapseAnimationSampledTicks))
+        {
+            return;
+        }
+
+        _collapseAnimationFrameSkipLevel = WidgetCompactFrameSkipPolicy.Escalate(
+            _collapseAnimationFrameSkipLevel);
+        s_compactSessionFrameSkipLevel = _collapseAnimationFrameSkipLevel;
+        _collapseAnimationFrameSkip = WidgetCompactFrameSkipPolicy.ResolveSkip(
+            _collapseAnimationRefreshRateHz,
+            _collapseAnimationFrameSkipLevel);
+        _collapseAnimationOverrunTicks = 0;
+        _collapseAnimationSampledTicks = 0;
+        App.LogVerbose(
+            $"[Compact] Frame budget misses persisted; HWND resize cadence " +
+            $"level={_collapseAnimationFrameSkipLevel} skip={_collapseAnimationFrameSkip} " +
+            $"refreshHz={_collapseAnimationRefreshRateHz}");
+    }
+
     private void CompleteBoundsTransition(bool collapsed, long generation)
     {
+        RestoreBackdropAfterInteraction();
         if (generation != _collapseAnimationGeneration || collapsed != _targetCollapsed)
         {
             return;
@@ -3126,6 +3212,20 @@ public abstract partial class WidgetWindowBase
 
         if (IsCompactBoundsStateActive)
         {
+            bool hadArrangementSizeConstraint =
+                _compactArrangementSizeOverride is not null;
+            if (hadArrangementSizeConstraint)
+            {
+                // A capsule-bar arrangement stores a physical size override.
+                // If it keeps the pre-drag width until the manager refreshes,
+                // compact-bound settlement can visibly snap a Win10 HWND back
+                // on pointer release. Make the just-resized size authoritative
+                // for that hand-off window.
+                _compactArrangementSizeOverride = new SizeInt32(
+                    bounds.Width,
+                    bounds.Height);
+            }
+
             double scale = Win32Helper.GetDpiScaleForWindow(HWnd, RootElement.XamlRoot);
             double logicalWidth = bounds.Width / Math.Max(scale, 0.01);
             double normalizedWidth = UsesAlignedCompactWidth()
@@ -3145,6 +3245,11 @@ public abstract partial class WidgetWindowBase
             SettingsService.SaveDebounced(notifySubscribers: false);
             SynchronizeWidgetGroupLayout();
             App.Current?.WidgetManager?.RefreshCapsuleBarLayout();
+            App.Log(
+                $"[Resize] Compact width committed kind={Config.WidgetKind} " +
+                $"id={Config.Id} hwnd=0x{HWnd.ToInt64():X} " +
+                $"physical={bounds.Width} logical={normalizedWidth:0.##} " +
+                $"arranged={hadArrangementSizeConstraint}");
             return;
         }
 

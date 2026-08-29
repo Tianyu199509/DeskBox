@@ -27,7 +27,7 @@ DeskBox 使用贴近 Windows 原生体验的材质，同时保留普通桌面文
 | | |
 | --- | --- |
 | **支持平台** | Windows 10/11，x64 与 ARM64 |
-| **技术栈** | C#、WinUI 3、.NET 10、Windows App SDK 2.2 |
+| **技术栈** | C#、WinUI 3、.NET 10、Windows App SDK 2.4 |
 | **数据方式** | 本地优先；文件、随记、待办、设置与布局保存在电脑上 |
 | **界面语言** | 简体中文、繁體中文、English、日本語、Deutsch、Português do Brasil、हिन्दी、Español、Français、العربية、বাংলা、Русский |
 | **开源协议** | GPL-3.0-only |
@@ -149,7 +149,7 @@ DeskBox 不要求注册账号，也不依赖云同步。格子配置、待办、
 
 - Windows 10 21H2（build 19044）或更高版本；Windows 11 22H2 或更高版本可获得完整视觉效果。
 - 与安装包匹配的 x64 或 ARM64 处理器。
-- .NET 10 Runtime 与 Windows App Runtime 2.2；缺少时可由安装程序自动安装。
+- Windows App Runtime 2.4；缺少时可由安装程序自动安装。Native AOT 版本不再需要单独的 .NET 10 运行时。
 
 Windows 10 会自动降级不受系统支持的材质、圆角和部分动画；文件同步、拖放与格子核心功能仍按兼容基线验证。
 
@@ -180,7 +180,7 @@ DeskBox 使用 Inno Setup 安装器，默认安装到当前用户目录。覆盖
 
 ### 为什么安装时可能需要联网？
 
-正式安装包不内置 .NET 10 和 Windows App Runtime 2.2。安装器会先检查电脑，只下载当前架构缺少的依赖。
+正式安装包不内置 Windows App Runtime 2.4（Native AOT 版不再需要单独的 .NET 运行时）。安装器会先检查电脑，只下载当前架构缺少的依赖；完全离线的电脑请先手动安装 Windows App Runtime 2.4 再运行安装器。
 
 ### 关闭功能格子会删除内容吗？
 

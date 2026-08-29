@@ -27,7 +27,7 @@ DeskBox uses native-feeling Windows materials and keeps ordinary desktop files a
 | | |
 | --- | --- |
 | **Platform** | Windows 10/11, x64 and ARM64 |
-| **Technology** | C#, WinUI 3, .NET 10, Windows App SDK 2.2 |
+| **Technology** | C#, WinUI 3, .NET 10, Windows App SDK 2.4 |
 | **Storage model** | Local-first; files, notes, tasks, settings, and layouts remain on the PC |
 | **Languages** | English, Simplified Chinese, Traditional Chinese, Japanese, German, Brazilian Portuguese, Hindi, Spanish, French, Arabic, Bengali, Russian |
 | **License** | GPL-3.0-only |
@@ -149,7 +149,7 @@ Capsule privacy mode hides selected text in the collapsed presentation; it is a 
 
 - Windows 10 version 21H2 (build 19044) or later; Windows 11 version 22H2 or later for the full visual treatment.
 - x64 or ARM64 processor matching the installer.
-- .NET 10 Runtime and Windows App Runtime 2.2; setup can install either dependency when missing.
+- Windows App Runtime 2.4; setup installs it when missing. The Native AOT build no longer requires a separate .NET 10 runtime.
 
 On Windows 10, unsupported materials, rounded corners, and some animations automatically fall back to compatible visuals; file sync, drag-and-drop, and core widget behavior are validated against the compatibility floor.
 

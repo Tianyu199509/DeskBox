@@ -332,6 +332,18 @@ Text="DeskBox" />
                     </NavigationViewItem.Icon>
                 </NavigationViewItem>
                 <NavigationViewItem
+                    x:Name="CapsuleModeNavItem"
+                    Tag="CapsuleMode"
+                    svc:Localized.Key="Settings.Nav.CapsuleMode">
+                    <NavigationViewItem.Icon>
+                        <ImageIcon Style="{StaticResource SettingsNavImageIconStyle}">
+                            <ImageIcon.Source>
+                                <media:SvgImageSource UriSource="ms-appx:///Assets/SettingsNavIcons/capsule-mode.svg" />
+                            </ImageIcon.Source>
+                        </ImageIcon>
+                    </NavigationViewItem.Icon>
+                </NavigationViewItem>
+                <NavigationViewItem
                     x:Name="FileWidgetNavItem"
                     Tag="AppearanceDetail"
                     svc:Localized.Key="Settings.Nav.FileWidget">
@@ -1177,8 +1189,8 @@ svc:Localized.DescriptionKey="Settings.DefaultWidth.Description"
                     <StackPanel Margin="0,8,0,0" Spacing="4">
                         <toolkit:SettingsCard
                             HorizontalContentAlignment="Right"
-                            svc:Localized.DescriptionKey="Settings.FileStacks.Enable.Description"
-                            svc:Localized.HeaderKey="Settings.FileStacks.Title">
+                            svc:Localized.DescriptionKey="Settings.FileStacks.Mode.Description"
+                            svc:Localized.HeaderKey="Settings.FileStacks.Mode.Title">
                             <toolkit:SettingsCard.HeaderIcon>
                                 <FontIcon Glyph="&#xE81E;" />
                             </toolkit:SettingsCard.HeaderIcon>
@@ -1198,7 +1210,7 @@ svc:Localized.DescriptionKey="Settings.DefaultWidth.Description"
 
                         <toolkit:SettingsCard
                             HorizontalContentAlignment="Right"
-                            IsEnabled="{Binding FileStackAutoStacking}"
+                            IsEnabled="{Binding FileStacksEnabled}"
                             svc:Localized.DescriptionKey="Settings.FileStacks.GroupBy.Description"
                             svc:Localized.HeaderKey="Settings.FileStacks.GroupBy.Title">
                             <toolkit:SettingsCard.HeaderIcon>
@@ -1211,6 +1223,7 @@ svc:Localized.DescriptionKey="Settings.DefaultWidth.Description"
                         </toolkit:SettingsCard>
 
                         <toolkit:SettingsCard
+                            IsEnabled="{Binding FileStacksEnabled}"
                             HorizontalContentAlignment="Right"
                             svc:Localized.DescriptionKey="Settings.FileStacks.OpenMode.Description"
                             svc:Localized.HeaderKey="Settings.FileStacks.OpenMode.Title">
@@ -1253,7 +1266,7 @@ svc:Localized.DescriptionKey="Settings.DefaultWidth.Description"
 
                         <toolkit:SettingsCard
                             HorizontalContentAlignment="Right"
-                            IsEnabled="{Binding FileStackAutoStacking}"
+                            IsEnabled="{Binding FileStacksEnabled}"
                             svc:Localized.DescriptionKey="Settings.FileStacks.Threshold.Description"
                             svc:Localized.HeaderKey="Settings.FileStacks.Threshold.Title">
                             <ComboBox
@@ -1264,7 +1277,7 @@ svc:Localized.DescriptionKey="Settings.DefaultWidth.Description"
 
                         <toolkit:SettingsCard
                             HorizontalContentAlignment="Right"
-                            IsEnabled="{Binding FileStackAutoStacking}"
+                            IsEnabled="{Binding FileStacksEnabled}"
                             svc:Localized.DescriptionKey="Settings.FileStacks.OrderBy.Description"
                             svc:Localized.HeaderKey="Settings.FileStacks.OrderBy.Title">
                             <ComboBox
@@ -1278,7 +1291,7 @@ svc:Localized.DescriptionKey="Settings.DefaultWidth.Description"
                             Visibility="{Binding FileStackCustomRulesVisibility}">
                             <toolkit:SettingsCard
                                 HorizontalContentAlignment="Right"
-                                IsEnabled="{Binding FileStackAutoStacking}"
+                                IsEnabled="{Binding FileStacksEnabled}"
                                 svc:Localized.DescriptionKey="Settings.FileStacks.Unmatched.Description"
                                 svc:Localized.HeaderKey="Settings.FileStacks.Unmatched.Title">
                                 <ComboBox
@@ -3116,130 +3129,134 @@ svc:Localized.DescriptionKey="Settings.DefaultWidth.Description"
                 VerticalScrollMode="Auto">
                 <StackPanel
                     x:Name="SupportDialogContent"
-                    Width="500"
-                    MaxWidth="500"
-                    Spacing="16">
-                    <StackPanel Spacing="10">
-                        <TextBlock
-                            LineHeight="23"
-                            TextWrapping="WrapWholeWords"
-                            svc:Localized.Key="Settings.Dialog.SupportP1" />
-                        <TextBlock
-                            LineHeight="23"
-                            TextWrapping="WrapWholeWords"
-                            svc:Localized.Key="Settings.Dialog.SupportP2" />
-                    </StackPanel>
+                    Width="480"
+                    MaxWidth="480"
+                    Spacing="14">
+                        <StackPanel Spacing="8">
+                            <TextBlock
+                                LineHeight="22"
+                                TextWrapping="WrapWholeWords"
+                                svc:Localized.Key="Settings.Dialog.SupportP1" />
+                            <TextBlock
+                                LineHeight="22"
+                                TextWrapping="WrapWholeWords"
+                                svc:Localized.Key="Settings.Dialog.SupportP2" />
+                        </StackPanel>
 
-                    <Border
-                        Padding="14"
-                        Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
-                        BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                        BorderThickness="1"
-                        CornerRadius="8">
-                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16">
-                            <StackPanel VerticalAlignment="Center" Spacing="5">
-                                <TextBlock
-                                    FontSize="15"
-                                    FontWeight="SemiBold"
-                                    svc:Localized.Key="Settings.About.Channel.Store" />
-                                <TextBlock
-                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                    LineHeight="21"
-                                    TextWrapping="WrapWholeWords"
-                                    svc:Localized.Key="Settings.Dialog.SupportStoreDescription" />
-                            </StackPanel>
-                            <Button
-                                Grid.Column="1"
-                                Click="OpenMicrosoftStoreButton_Click"
-                                MinWidth="168"
-                                HorizontalAlignment="Right"
-                                Style="{StaticResource ActionButtonStyle}"
-                                ToolTipService.ToolTip="{Binding MicrosoftStoreLink}"
-                                VerticalAlignment="Center">
-                                <StackPanel Orientation="Horizontal" Spacing="8">
-                                    <FontIcon FontSize="14" Glyph="&#xE719;" />
-                                    <TextBlock svc:Localized.Key="Settings.Dialog.SupportStoreButton" />
+                        <InfoBar
+                            IsClosable="False"
+                            IsOpen="True"
+                            IsIconVisible="True"
+                            Severity="Informational">
+                            <InfoBar.Content>
+                                <Grid
+                                    Margin="4,10,14,10"
+                                    ColumnDefinitions="*,Auto"
+                                    ColumnSpacing="12">
+                                    <StackPanel VerticalAlignment="Center" Spacing="2">
+                                        <TextBlock
+                                            FontSize="14"
+                                            FontWeight="SemiBold"
+                                            svc:Localized.Key="Settings.About.Channel.Store" />
+                                        <TextBlock
+                                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                            FontSize="12"
+                                            TextWrapping="WrapWholeWords"
+                                            svc:Localized.Key="Settings.Dialog.SupportStoreDescription" />
+                                    </StackPanel>
+                                    <Button
+                                        Grid.Column="1"
+                                        Click="OpenMicrosoftStoreButton_Click"
+                                        Padding="12,5,12,7"
+                                        HorizontalAlignment="Right"
+                                        VerticalAlignment="Center"
+                                        Style="{StaticResource ActionButtonStyle}"
+                                        ToolTipService.ToolTip="{Binding MicrosoftStoreLink}">
+                                        <StackPanel Orientation="Horizontal" Spacing="6">
+                                            <FontIcon FontSize="13" Glyph="&#xE719;" />
+                                            <TextBlock FontSize="13" svc:Localized.Key="Settings.Dialog.SupportStoreButton" />
+                                        </StackPanel>
+                                    </Button>
+                                </Grid>
+                            </InfoBar.Content>
+                        </InfoBar>
+
+                        <Grid ColumnDefinitions="*,*" ColumnSpacing="12">
+                            <Border
+                                Padding="8"
+                                Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                                BorderThickness="1"
+                                CornerRadius="8">
+                                <StackPanel HorizontalAlignment="Center" Spacing="6">
+                                    <Border
+                                        Visibility="{Binding DonationQrCodeVisibility}"
+                                        x:Name="WechatSupportQrContainer"
+                                        Width="108"
+                                        Height="108"
+                                        Padding="4"
+                                        Background="White"
+                                        CornerRadius="4">
+                                        <Image
+                                            AutomationProperties.LabeledBy="{Binding ElementName=WechatSupportLabel}"
+                                            Source="ms-appx:///Assets/Support/support-wechat.png"
+                                            Stretch="Uniform" />
+                                    </Border>
+                                    <TextBlock
+                                        x:Name="WechatSupportLabel"
+                                        HorizontalAlignment="Center"
+                                        FontSize="12"
+                                        FontWeight="SemiBold"
+                                        svc:Localized.Key="Settings.Dialog.SupportWechat" />
                                 </StackPanel>
-                            </Button>
+                            </Border>
+                            <Border
+                                Grid.Column="1"
+                                Padding="8"
+                                Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                                BorderThickness="1"
+                                CornerRadius="8">
+                                <StackPanel HorizontalAlignment="Center" Spacing="6">
+                                    <Border
+                                        Visibility="{Binding DonationQrCodeVisibility}"
+                                        x:Name="AlipaySupportQrContainer"
+                                        Width="108"
+                                        Height="108"
+                                        Padding="4"
+                                        Background="White"
+                                        CornerRadius="4">
+                                        <Image
+                                            AutomationProperties.LabeledBy="{Binding ElementName=AlipaySupportLabel}"
+                                            Source="ms-appx:///Assets/Support/support-alipay.png"
+                                            Stretch="Uniform" />
+                                    </Border>
+                                    <TextBlock
+                                        x:Name="AlipaySupportLabel"
+                                        HorizontalAlignment="Center"
+                                        FontSize="12"
+                                        FontWeight="SemiBold"
+                                        svc:Localized.Key="Settings.Dialog.SupportAlipay" />
+                                </StackPanel>
+                            </Border>
                         </Grid>
-                    </Border>
 
-                    <StackPanel Spacing="5">
-                        <TextBlock
-                            FontSize="15"
-                            FontWeight="SemiBold"
-                            svc:Localized.Key="Settings.Dialog.SupportQrTitle" />
-                        <TextBlock
-                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                            LineHeight="21"
-                            TextWrapping="WrapWholeWords"
-                            svc:Localized.Key="Settings.Dialog.SupportQrDescription" />
+                        <StackPanel Spacing="4">
+                            <TextBlock
+                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                FontSize="12"
+                                LineHeight="18"
+                                TextWrapping="WrapWholeWords"
+                                svc:Localized.Key="Settings.Dialog.SupportQrDescription" />
+                            <TextBlock
+                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                FontSize="12"
+                                LineHeight="18"
+                                TextWrapping="WrapWholeWords"
+                                svc:Localized.Key="Settings.Dialog.SupportP3" />
+                        </StackPanel>
+
                     </StackPanel>
-
-                    <Grid ColumnDefinitions="*,*" ColumnSpacing="12">
-                        <Border
-                            Padding="12"
-                            Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
-                            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                            BorderThickness="1"
-                            CornerRadius="8">
-                            <StackPanel HorizontalAlignment="Center" Spacing="8">
-                                <Border
-                                    Visibility="{Binding DonationQrCodeVisibility}"
-                                    x:Name="WechatSupportQrContainer"
-                                    Width="152"
-                                    Height="152"
-                                    Padding="6"
-                                    Background="White"
-                                    CornerRadius="6">
-                                    <Image
-                                        AutomationProperties.LabeledBy="{Binding ElementName=WechatSupportLabel}"
-                                        Source="ms-appx:///Assets/Support/support-wechat.png"
-                                        Stretch="Uniform" />
-                                </Border>
-                                <TextBlock
-                                    x:Name="WechatSupportLabel"
-                                    HorizontalAlignment="Center"
-                                    FontWeight="SemiBold"
-                                    svc:Localized.Key="Settings.Dialog.SupportWechat" />
-                            </StackPanel>
-                        </Border>
-                        <Border
-                            Grid.Column="1"
-                            Padding="12"
-                            Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
-                            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                            BorderThickness="1"
-                            CornerRadius="8">
-                            <StackPanel HorizontalAlignment="Center" Spacing="8">
-                                <Border
-                                    Visibility="{Binding DonationQrCodeVisibility}"
-                                    x:Name="AlipaySupportQrContainer"
-                                    Width="152"
-                                    Height="152"
-                                    Padding="6"
-                                    Background="White"
-                                    CornerRadius="6">
-                                    <Image
-                                        AutomationProperties.LabeledBy="{Binding ElementName=AlipaySupportLabel}"
-                                        Source="ms-appx:///Assets/Support/support-alipay.png"
-                                        Stretch="Uniform" />
-                                </Border>
-                                <TextBlock
-                                    x:Name="AlipaySupportLabel"
-                                    HorizontalAlignment="Center"
-                                    FontWeight="SemiBold"
-                                    svc:Localized.Key="Settings.Dialog.SupportAlipay" />
-                            </StackPanel>
-                        </Border>
-                    </Grid>
-
-                    <TextBlock
-                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                        LineHeight="21"
-                        TextWrapping="WrapWholeWords"
-                        svc:Localized.Key="Settings.Dialog.SupportP3" />
-                </StackPanel>
             </ScrollViewer>
         </ContentDialog>
     </Grid>

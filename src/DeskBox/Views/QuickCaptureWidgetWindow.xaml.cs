@@ -132,6 +132,8 @@ public sealed partial class QuickCaptureWidgetWindow :
     private bool _isDetailEditing;
     private bool _showDetailInSinglePane;
     private bool _isDualPane;
+    private bool _isInteractiveResizeActive;
+    private bool _needsResponsiveDetailRelayoutAfterResize;
     private bool _suppressDetailEditorChanges;
     private bool _detailHasUnsavedChanges;
     private readonly SemaphoreSlim _detailSaveGate = new(1, 1);
@@ -294,6 +296,26 @@ public sealed partial class QuickCaptureWidgetWindow :
     protected override void OnResizeStart()
     {
         ElevateForInteraction();
+        // Defer the responsive master/detail relayout while the HWND is being
+        // dragged: every per-tick SizeChanged would re-resolve the layout
+        // policy and rewrite column widths (parity with the hosted surface
+        // content's interactive-resize deferral).
+        _isInteractiveResizeActive = true;
+    }
+
+    protected override void OnResizeEnd()
+    {
+        if (!_isInteractiveResizeActive)
+        {
+            return;
+        }
+
+        _isInteractiveResizeActive = false;
+        if (_needsResponsiveDetailRelayoutAfterResize)
+        {
+            _needsResponsiveDetailRelayoutAfterResize = false;
+            ApplyResponsiveDetailLayout();
+        }
     }
 
     public QuickCaptureWidgetWindow(

@@ -113,6 +113,13 @@ public sealed partial class ContentWidgetWindow : WidgetWindowBase, IDesktopWidg
     protected override bool IsCompactExpansionWarmupContentReady =>
         _contentHost.CurrentContent is not null;
 
+    protected override bool HasBlockingFlyoutOpen() =>
+        base.HasBlockingFlyoutOpen() ||
+        CurrentContent is FileSurfaceContent
+        {
+            IsStackPopoverBlockingSurfaceOpen: true
+        };
+
     protected override void OnResizeStart()
     {
         if (CurrentContent is IWidgetInteractiveResizeContent resizeContent)

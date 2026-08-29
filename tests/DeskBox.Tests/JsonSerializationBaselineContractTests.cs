@@ -13,7 +13,7 @@ public sealed class JsonSerializationBaselineContractTests : IDisposable
         Guid.NewGuid().ToString("N"));
 
     [Fact]
-    public void ProductionInventory_IsFrozenAtTwentyNineFilesAndSixtyFiveCalls()
+    public void ProductionInventory_IsFrozenAtTwentyEightFilesAndSixtyFourCalls()
     {
         var expected = new Dictionary<string, int>(StringComparer.Ordinal)
         {
@@ -31,7 +31,6 @@ public sealed class JsonSerializationBaselineContractTests : IDisposable
             ["src/DeskBox/App.AotTodoNotificationForwardingSmoke.cs"] = 1,
             ["src/DeskBox/Services/AppUpdateService.cs"] = 2,
             ["src/DeskBox/Services/CitySearchService.cs"] = 1,
-            ["src/DeskBox/Services/CommandApi/PipeRpcServer.cs"] = 1,
             ["src/DeskBox/Services/DeskBoxAttachmentHealthService.cs"] = 1,
             ["src/DeskBox/Services/DeskBoxDataBackupService.cs"] = 11,
             ["src/DeskBox/Services/DeskBoxDiagnosticsBundleService.cs"] = 1,
@@ -65,8 +64,8 @@ public sealed class JsonSerializationBaselineContractTests : IDisposable
             Assert.Equal(expectedCount, actual[path]);
         }
 
-        Assert.Equal(29, actual.Count);
-        Assert.Equal(65, actual.Values.Sum());
+        Assert.Equal(28, actual.Count);
+        Assert.Equal(64, actual.Values.Sum());
 
         string[] expectedContextOwners =
         [
@@ -83,13 +82,6 @@ public sealed class JsonSerializationBaselineContractTests : IDisposable
             "src/DeskBox/App.AotTodoNotificationLifecycleSmoke.cs",
             "src/DeskBox/App.AotTodoRecurrenceReminderSmoke.cs",
             "src/DeskBox/Services/AppUpdateService.cs",
-            "src/DeskBox/Services/CommandApi/Handlers/QuickCaptureHandlers.cs",
-            "src/DeskBox/Services/CommandApi/Handlers/ServerHandlers.cs",
-            "src/DeskBox/Services/CommandApi/Handlers/ServerSchemaHandler.cs",
-            "src/DeskBox/Services/CommandApi/Handlers/SettingsGetHandler.cs",
-            "src/DeskBox/Services/CommandApi/Handlers/TodoHandlers.cs",
-            "src/DeskBox/Services/CommandApi/Handlers/WidgetsListHandler.cs",
-            "src/DeskBox/Services/CommandApi/PipeRpcServer.cs",
             "src/DeskBox/Services/DeskBoxDataBackupService.cs",
             "src/DeskBox/Services/DeskBoxDiagnosticsBundleService.cs",
             "src/DeskBox/Services/DesktopOrganizationRecoveryStore.cs",
@@ -112,7 +104,7 @@ public sealed class JsonSerializationBaselineContractTests : IDisposable
             .Order()
             .ToArray();
 
-        Assert.Equal(33, actualContextOwners.Length);
+        Assert.Equal(26, actualContextOwners.Length);
         Assert.Equal(expectedContextOwners, actualContextOwners);
     }
 

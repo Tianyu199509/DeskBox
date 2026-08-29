@@ -28,10 +28,27 @@ public sealed partial class WidgetManager
         SyncMappedWidgetShortcut(config);
     }
 
-    public void SyncStorageFolderEntries()
+    /// <summary>
+    /// Recreates the managed storage root and syncs mapped-widget shortcuts.
+    /// Returns false when the root cannot be created (e.g. its drive is
+    /// currently detached); callers must treat that as non-fatal so widget
+    /// restoration continues without the root.
+    /// </summary>
+    public bool SyncStorageFolderEntries()
     {
         string rootPath = GetManagedStorageRootPath();
-        Directory.CreateDirectory(rootPath);
+        try
+        {
+            Directory.CreateDirectory(rootPath);
+        }
+        catch (Exception ex)
+        {
+            // A detached drive must not abort the rest of startup: widgets
+            // restore with unavailable folders and reconnect when the drive
+            // returns.
+            App.Log($"[WidgetManager] Managed storage root is unavailable ('{rootPath}'): {ex.Message}");
+            return false;
+        }
 
         var activeWidgetIds = _settingsService.Settings.Widgets
             .Where(widget => widget.WidgetKind == WidgetKind.File && !IsDeleted(widget.Id))
@@ -51,6 +68,8 @@ public sealed partial class WidgetManager
 
             SyncMappedWidgetShortcut(config);
         }
+
+        return true;
     }
 
     public bool CanCleanupManagedStorageForWidget(string widgetId)

@@ -109,7 +109,8 @@ public sealed class SolidColorBackdropTests
         Assert.Contains("ApplyAcrylicController", backdrop, StringComparison.Ordinal);
         Assert.Contains("WindowsCompatibilityService.SupportsDesktopAcrylic", backdrop, StringComparison.Ordinal);
         Assert.Contains("CalculateLegacyAcrylicOpacity", backdrop, StringComparison.Ordinal);
-        Assert.Contains("LegacyAccentBackdropActive = Win32Helper.ApplyAccentBlur", backdrop, StringComparison.Ordinal);
+        Assert.Contains("LegacyAccentBackdropActive = ApplyLegacyAccentBackdrop", backdrop, StringComparison.Ordinal);
+        Assert.Contains("return Win32Helper.ApplyAccentBlur(HWnd, tintColor, opacity, enabled: true)", backdrop, StringComparison.Ordinal);
         Assert.Contains("SystemBackdrop = null", backdrop, StringComparison.Ordinal);
         Assert.DoesNotContain("!WindowsCompatibilityService.UsesLegacyWindowAcrylic)", backdrop, StringComparison.Ordinal);
         Assert.Contains("DesktopAcrylicController.IsSupported()", compatibility, StringComparison.Ordinal);

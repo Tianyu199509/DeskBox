@@ -193,8 +193,8 @@ public sealed class SettingsService
     public const string WidgetCompactHoverResponseBalanced = "Balanced";
     public const string WidgetCompactHoverResponsePreventAccidental = "PreventAccidental";
     public const string WidgetCompactHoverResponseCustom = "Custom";
-    public const int SensitiveWidgetCompactExpandDelayMs = 180;
-    public const int SensitiveWidgetCompactCollapseDelayMs = 420;
+    public const int SensitiveWidgetCompactExpandDelayMs = 100;
+    public const int SensitiveWidgetCompactCollapseDelayMs = 200;
     public const int PreventAccidentalWidgetCompactExpandDelayMs = 620;
     public const int PreventAccidentalWidgetCompactCollapseDelayMs = 900;
     public const string WidgetTitleIconModeFilledMono = WidgetTitleIconModeNames.FilledMono;
@@ -274,8 +274,8 @@ public sealed class SettingsService
         Models.HotkeyActivationKind.Chord;
     public const int DefaultGlobalHotkeyModifiers = (int)Models.HotkeyModifierKeys.None;
     public const int DefaultGlobalHotkeyKey = (int)Windows.System.VirtualKey.F7;
-    public const double MinWidgetWidth = 150;
-    public const double MinWidgetHeight = 150;
+    public const double MinWidgetWidth = 50;
+    public const double MinWidgetHeight = 50;
     public const double DefaultIconSize = 30;
     public const double MinIconSize = 24;
     public const double MaxIconSize = 56;
@@ -288,6 +288,7 @@ public sealed class SettingsService
     public const double DefaultHorizontalSpacingScale = 0.40;
     public const double DefaultVerticalSpacingScale = 0.60;
     public const double DefaultFileNameWidthScale = 0.36;
+    public const int HiddenFileNameLineCount = 0;
     public const int DefaultFileNameLineCount = 2;
     public const int MinFileNameLineCount = 1;
     public const int MaxFileNameLineCount = 2;
@@ -458,15 +459,15 @@ public const int DefaultSearchMaxResults = 100;
         settings.InteractiveWidgetChromeMode = WidgetChromeModeStandard;
         settings.WidgetCollapseBehavior = WidgetCollapseBehaviorExpanded;
         settings.WidgetGroupDefaultNavigationStyle =
-            WidgetGroupNavigationStyles.Auto;
+            WidgetGroupNavigationStyles.Stack;
         settings.WidgetGroupDefaultTitleDisplayMode =
             WidgetGroupTitleDisplayModes.IconAndText;
         settings.WidgetGroupWheelSwitchEnabled = true;
         settings.WidgetGroupHoverSwitchEnabled = false;
         settings.WidgetGroupsEnabled = true;
-        settings.WidgetCapsuleModeEnabled = false;
+        settings.LegacyWidgetCapsuleModeEnabled = null;
         settings.WidgetCompactWidthMode = WidgetCompactWidthModeAligned;
-        settings.WidgetCompactExpansionDirection = WidgetCompactExpansionDirectionAuto;
+        settings.WidgetCompactExpansionDirection = WidgetCompactExpansionDirectionDown;
         settings.WidgetCapsuleArrangementMode = WidgetCapsuleArrangementFree;
         settings.WidgetCapsuleBarSpacing = DefaultWidgetCapsuleBarSpacing;
         settings.WidgetCapsuleBarPlacement = WidgetCapsuleBarPlacementFloating;
@@ -476,7 +477,7 @@ public const int DefaultSearchMaxResults = 100;
         settings.WidgetCompactHideSensitiveContent = false;
         settings.WidgetCompactSettingsVersion = CurrentWidgetCompactSettingsVersion;
         settings.WidgetCompactAnimationEffect = WidgetCompactAnimationSlow;
-        settings.WidgetCompactAnimationDurationMs = DefaultWidgetCompactAnimationDurationMs;
+        settings.WidgetCompactAnimationDurationMs = SlowWidgetCompactAnimationDurationMs;
         settings.WidgetCompactExpandDelayMs = SensitiveWidgetCompactExpandDelayMs;
         settings.WidgetCompactCollapseDelayMs = SensitiveWidgetCompactCollapseDelayMs;
         settings.WidgetCompactMediaCornerMode = WidgetCompactMediaCornerFollowWidget;
@@ -506,9 +507,6 @@ public const int DefaultSearchMaxResults = 100;
         settings.ShowHoverButtons = true;
         settings.WidgetHoverButtonActions = DefaultWidgetHoverButtonActions;
         settings.AutoCheckForUpdates = true;
-        settings.EnableCommandApi = true;
-        settings.CommandApiReadOnly = false;
-        settings.AllowDestructiveCommands = false;
         settings.QuickCaptureClipboardEnabled = false;
         settings.QuickCaptureImageClipboardEnabled = false;
         settings.QuickCaptureRecentLimit = QuickCaptureService.DefaultRecentLimit;
@@ -657,6 +655,14 @@ settings.FocusClickedWidgetOnRaise = false;
                 if (!loadedFromDisk)
                 {
                     ApplyDefaultPreferences(_settings);
+                    if (_settings.SchemaVersion != SettingsMigrationPipeline.CurrentSchemaVersion)
+                    {
+                        // A newly created or recovery-default profile already
+                        // contains current defaults. Historical migrations are
+                        // only for settings that were actually loaded from disk.
+                        _settings.SchemaVersion = SettingsMigrationPipeline.CurrentSchemaVersion;
+                        changed = true;
+                    }
                     if (string.IsNullOrWhiteSpace(_settings.DefaultManagedStorageRootPath))
                     {
                         _settings.DefaultManagedStorageRootPath =
@@ -1346,7 +1352,7 @@ settings.FocusClickedWidgetOnRaise = false;
             // Before version 2, the enable switch was the real gate and the
             // stored behavior was ignored while it was off. Fold that legacy
             // combination into the new single three-state default.
-            normalizedCollapseBehavior = settings.WidgetCapsuleModeEnabled
+            normalizedCollapseBehavior = settings.LegacyWidgetCapsuleModeEnabled.GetValueOrDefault()
                 ? normalizedCollapseBehavior == WidgetCollapseBehaviorExpanded
                     ? WidgetCollapseBehaviorClick
                     : normalizedCollapseBehavior
@@ -1358,10 +1364,9 @@ settings.FocusClickedWidgetOnRaise = false;
             changed = true;
         }
 
-        bool legacyCapsuleEnabled = normalizedCollapseBehavior != WidgetCollapseBehaviorExpanded;
-        if (settings.WidgetCapsuleModeEnabled != legacyCapsuleEnabled)
+        if (settings.LegacyWidgetCapsuleModeEnabled is not null)
         {
-            settings.WidgetCapsuleModeEnabled = legacyCapsuleEnabled;
+            settings.LegacyWidgetCapsuleModeEnabled = null;
             changed = true;
         }
 
@@ -1784,7 +1789,7 @@ settings.FocusClickedWidgetOnRaise = false;
         Math.Abs(left - right) <= 0.0001;
 
     public static int NormalizeFileNameLineCount(int value) =>
-        value is MinFileNameLineCount or MaxFileNameLineCount
+        value is HiddenFileNameLineCount or MinFileNameLineCount or MaxFileNameLineCount
             ? value
             : DefaultFileNameLineCount;
 

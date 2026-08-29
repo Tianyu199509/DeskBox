@@ -195,6 +195,10 @@ https://deskbox.fun/update/stable.json
 
 如果该清单不可用，客户端会兜底读取 GitHub 最新 Release API。官网清单仍然是主通道，因为它可以控制稳定版本、国内网盘入口、SHA-256、灰度和回滚；GitHub 兜底只用于防止清单漏发时完全无法检查更新。
 
+产物命名契约：所有已发布版本的更新器（1.4.3 起）只接受以 `_x64.exe`/`_arm64.exe` 结尾的资产名与清单 URL，因此 `build-stage-7c1-distribution.ps1` 产出的安装包名保持 `DeskBox_Setup_<版本>_<架构>.exe`，发布时**不得追加** `_NativeAot` 等风味后缀。若清单 `downloadUrl` 使用不以 `DeskBox_Setup_` 开头的重定向地址，客户端会放行（用于网盘/CDN 中转）。
+
+离线安装说明：1.4.5 直发安装包为 Native AOT 构建，不再需要 .NET 10 运行时；唯一外部依赖是 Windows App Runtime 2.4，安装器在缺失时联网下载。完全离线的电脑需要先手动安装 Windows App Runtime 2.4，再运行安装包。1.4.3 时期的 `_Full` 离线完整包不再产出。
+
 每次发布 Direct 版本时必须执行：
 
 1. 发布 GitHub Release，并上传：

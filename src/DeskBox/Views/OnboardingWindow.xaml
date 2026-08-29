@@ -1243,6 +1243,34 @@
                                     svc:Localized.Key="Onboarding.Storage.ChangePath"/>
                             </Grid>
                             <TextBlock FontSize="11.5" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" svc:Localized.Key="Onboarding.Step4.StorageBody"/>
+                            <Border
+                                x:Name="Step4StorageWarningBorder"
+                                Padding="10,8"
+                                BorderBrush="#66FFB900"
+                                BorderThickness="1"
+                                CornerRadius="6"
+                                Visibility="Collapsed">
+                                <Grid ColumnSpacing="8">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <FontIcon FontSize="13" Foreground="#FFFFB900" Glyph="&#xE7BA;" VerticalAlignment="Top"/>
+                                    <TextBlock
+                                        x:Name="Step4StorageWarningText"
+                                        Grid.Column="1"
+                                        FontSize="11.5"
+                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                        TextWrapping="Wrap"/>
+                                </Grid>
+                            </Border>
+                            <HyperlinkButton
+                                x:Name="Step4SuggestedDriveButton"
+                                Margin="0,-4,0,0"
+                                Padding="4,2"
+                                FontSize="11.5"
+                                Visibility="Collapsed"
+                                Click="Step4SuggestedDrive_Click"/>
                             <!-- Pin to Quick Access -->
                             <Grid ColumnSpacing="10" Margin="0,2,0,0">
                                 <Grid.ColumnDefinitions>

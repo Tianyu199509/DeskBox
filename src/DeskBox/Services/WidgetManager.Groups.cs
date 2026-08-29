@@ -31,7 +31,7 @@ public sealed partial class WidgetManager
     private WidgetDetachPlacementPreviewWindow? _widgetDetachPlacementPreview;
     private readonly Dictionary<string, WidgetGroupTransientState> _widgetGroupTransientStates = [];
     private string _lastWidgetGroupDefaultNavigationStyle =
-        WidgetGroupNavigationStyles.Auto;
+        WidgetGroupNavigationStyles.Stack;
     private string _lastWidgetGroupDefaultTitleDisplayMode =
         WidgetGroupTitleDisplayModes.IconAndText;
     private bool _lastWidgetGroupWheelSwitchEnabled = true;

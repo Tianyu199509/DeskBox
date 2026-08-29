@@ -279,6 +279,7 @@ public sealed partial class WidgetManager
             }
         }
 
+        NoteWidgetWindowsMoved();
         resolvedActiveBounds = _lastCapsuleBarBounds[widgetId];
         return true;
     }
@@ -327,6 +328,8 @@ public sealed partial class WidgetManager
                     window.PreviewCompactArrangement(target);
                 }
             }
+
+            NoteWidgetWindowsMoved();
         }
 
         resolvedActiveBounds = _lastCapsuleBarBounds.TryGetValue(
@@ -365,6 +368,7 @@ public sealed partial class WidgetManager
             SynchronizeGroupLayoutFromMember(config);
         }
 
+        NoteWidgetWindowsMoved();
         _settingsService.SaveDebounced(notifySubscribers: false);
     }
 
@@ -450,6 +454,7 @@ public sealed partial class WidgetManager
             FindLoadedWindow(id)?.ApplyCompactArrangement(target, constrainSize: true);
         }
 
+        NoteWidgetWindowsMoved();
         activeBounds = _lastCapsuleBarBounds[widgetId];
         _settingsService.SaveDebounced(notifySubscribers: false);
         return true;
@@ -469,7 +474,9 @@ public sealed partial class WidgetManager
                 !config.IsDisabled &&
                 WidgetGroupSettings.IsActiveMember(settings, config.Id) &&
                 _widgetRegistry.IsAvailableForSession(config, settings) &&
-                WidgetCollapseBehaviorNames.Resolve(config, settings.WidgetCollapseBehavior) !=
+                WidgetCollapseBehaviorNames.Resolve(
+                    config,
+                    settings.WidgetCollapseBehavior) !=
                     WidgetCollapseBehavior.Expanded)
             .ToList();
     }
@@ -629,6 +636,11 @@ public sealed partial class WidgetManager
             }
         }
 
+        if (changed)
+        {
+            NoteWidgetWindowsMoved();
+        }
+
         return changed;
     }
 
@@ -656,6 +668,11 @@ public sealed partial class WidgetManager
         {
             settings.WidgetCapsuleFreePlacements.Clear();
             changed = true;
+        }
+
+        if (changed)
+        {
+            NoteWidgetWindowsMoved();
         }
 
         return changed;

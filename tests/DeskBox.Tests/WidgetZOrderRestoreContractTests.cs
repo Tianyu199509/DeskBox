@@ -18,6 +18,34 @@ public sealed class WidgetZOrderRestoreContractTests
     }
 
     [Fact]
+    public void TransientDeskBoxActivation_ReassertsTheWholeRaisedGroupWithoutEndingSession()
+    {
+        string manager = File.ReadAllText(TestPaths.FromRepository(
+            "src/DeskBox/Services/WidgetManager.ZOrder.cs"));
+        string method = SliceMethod(
+            manager,
+            "internal bool ReassertRaisedWidgetGroupAfterDeskBoxActivation",
+            "public bool RequestRestoreRaisedWidgetsToDesktopLayer");
+        string contentWindow = File.ReadAllText(TestPaths.FromRepository(
+            "src/DeskBox/Views/ContentWidgetWindow.WindowInteraction.cs"));
+        string stackPopover = File.ReadAllText(TestPaths.FromRepository(
+            "src/DeskBox/Controls/WidgetContents/FileSurfaceContent.StackPopover.cs"));
+
+        Assert.Contains("_widgetsRaisedFromTray", method, StringComparison.Ordinal);
+        Assert.Contains("IsForegroundDeskBoxWindow()", method, StringComparison.Ordinal);
+        Assert.Contains("ApplyPeerOrderHighestToLowest", method, StringComparison.Ordinal);
+        Assert.DoesNotContain("RestoreRaisedWidgetsToDesktopLayer", method, StringComparison.Ordinal);
+        Assert.Contains(
+            "ReassertRaisedWidgetGroupAfterDeskBoxActivation",
+            contentWindow,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "ReassertRaisedWidgetGroupAfterDeskBoxActivation",
+            stackPopover,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void RaisedSessionRestore_ReanchorsTheCompleteGroupBehindForeground()
     {
         string manager = File.ReadAllText(TestPaths.FromRepository(

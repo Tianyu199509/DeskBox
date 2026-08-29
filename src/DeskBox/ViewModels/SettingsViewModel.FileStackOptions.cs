@@ -1,4 +1,4 @@
-using System.Collections.ObjectModel;
+﻿using System.Collections.ObjectModel;
 using System.Collections.Specialized;
 using System.ComponentModel;
 using DeskBox.Models;
@@ -71,7 +71,9 @@ public partial class SettingsViewModel
                     FileStackCustomRules.Count);
             }
 
-            return GetFileStackGroupByDisplayName(SelectedFileStackGroupBy);
+            // A stable capability summary; the previous group-by display name
+            // ("文件类型") read like a stray description on the entry row.
+            return _localizationService.T("Settings.FileStacks.Status.On");
         }
     }
 

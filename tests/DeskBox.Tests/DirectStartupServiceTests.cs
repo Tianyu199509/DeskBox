@@ -79,56 +79,126 @@ public sealed class DirectStartupServiceTests
     }
 
     [Fact]
-    public void Migration_DeletesLegacyRunOnlyAfterTaskRegistrationSucceeds()
+    public void Migration_MovesOwnedTaskToTheRunEntry()
     {
-        var taskBackend = new FakeTaskBackend { RegisterResult = true };
-        var runStore = new FakeRunEntryStore
-        {
-            Value = $"\"{ExecutablePath}\" --startup"
-        };
-        var service = CreateService(taskBackend, runStore);
-
-        service.TryMigrateLegacyRegistration();
-
-        Assert.Equal(1, taskBackend.RegisterCount);
-        Assert.Equal(1, runStore.DeleteCount);
-        Assert.Null(runStore.Value);
-        Assert.True(service.IsEnabled());
-    }
-
-    [Fact]
-    public void Migration_PreservesLegacyRunWhenTaskRegistrationFails()
-    {
-        string legacyCommand = $"\"{ExecutablePath}\" --startup";
         var taskBackend = new FakeTaskBackend
         {
-            RegisterResult = false,
-            Error = "Task Scheduler unavailable"
+            Registration = CreatePreferredRegistration(ExecutablePath)
         };
-        var runStore = new FakeRunEntryStore { Value = legacyCommand };
+        var runStore = new FakeRunEntryStore();
         var service = CreateService(taskBackend, runStore);
 
         service.TryMigrateLegacyRegistration();
 
-        Assert.Equal(1, taskBackend.RegisterCount);
-        Assert.Equal(0, runStore.DeleteCount);
-        Assert.Equal(legacyCommand, runStore.Value);
+        Assert.Equal(0, taskBackend.RegisterCount);
+        Assert.Equal(1, taskBackend.DeleteCount);
+        Assert.Equal($"\"{ExecutablePath}\" --startup", runStore.Value);
         Assert.True(service.IsEnabled());
     }
 
     [Fact]
-    public void Enable_FallsBackToPerUserRunWhenTaskRegistrationFails()
+    public void Migration_KeepsOwnedTaskWhenTheRunEntryIsBlocked()
     {
-        var taskBackend = new FakeTaskBackend { RegisterResult = false };
+        // A live foreign Run entry (target exists on disk) must not be
+        // overwritten, so the owned scheduled task stays as the registration.
+        string foreignCommand = $"\"{Environment.SystemDirectory}\\cmd.exe\" /c exit";
+        var taskBackend = new FakeTaskBackend
+        {
+            Registration = CreatePreferredRegistration(ExecutablePath)
+        };
+        var runStore = new FakeRunEntryStore { Value = foreignCommand };
+        var service = CreateService(taskBackend, runStore);
+
+        service.TryMigrateLegacyRegistration();
+
+        Assert.Equal(0, taskBackend.RegisterCount);
+        Assert.Equal(0, taskBackend.DeleteCount);
+        Assert.Equal(foreignCommand, runStore.Value);
+        Assert.True(service.IsEnabled());
+    }
+
+    [Fact]
+    public void Enable_UsesRunEntryWithoutTouchingTheScheduler()
+    {
+        var taskBackend = new FakeTaskBackend();
         var runStore = new FakeRunEntryStore();
         var service = CreateService(taskBackend, runStore);
 
         service.Enable();
 
-        Assert.Equal(1, taskBackend.RegisterCount);
+        Assert.Equal(0, taskBackend.RegisterCount);
         Assert.Equal($"\"{ExecutablePath}\" --startup", runStore.Value);
         Assert.Equal(1, runStore.WriteCount);
         Assert.True(service.IsEnabled());
+    }
+
+    [Fact]
+    public void Enable_RemovesTheOwnedSupersededTask()
+    {
+        var taskBackend = new FakeTaskBackend
+        {
+            Registration = CreatePreferredRegistration(ExecutablePath)
+        };
+        var runStore = new FakeRunEntryStore();
+        var service = CreateService(taskBackend, runStore);
+
+        service.Enable();
+
+        Assert.Equal(1, taskBackend.DeleteCount);
+        Assert.Null(taskBackend.Registration);
+        Assert.Equal($"\"{ExecutablePath}\" --startup", runStore.Value);
+        Assert.True(service.IsEnabled());
+    }
+
+    [Fact]
+    public void Enable_FallsBackToTheScheduledTaskWhenRunEntryIsBlocked()
+    {
+        var taskBackend = new FakeTaskBackend { RegisterResult = true };
+        var runStore = new FakeRunEntryStore
+        {
+            Value = $"\"{Environment.SystemDirectory}\\cmd.exe\" /c exit"
+        };
+        var service = CreateService(taskBackend, runStore);
+
+        service.Enable();
+
+        Assert.Equal(1, taskBackend.RegisterCount);
+        Assert.Equal(0, runStore.WriteCount);
+        Assert.Equal(
+            $"\"{Environment.SystemDirectory}\\cmd.exe\" /c exit",
+            runStore.Value);
+        Assert.True(service.IsEnabled());
+    }
+
+    [Fact]
+    public void Enable_TakesOverOrphanedRunEntryPointingAtMissingTarget()
+    {
+        var runStore = new FakeRunEntryStore
+        {
+            Value = "\"D:\\RemovedInstallation\\DeskBox.exe\" --startup"
+        };
+        var taskBackend = new FakeTaskBackend();
+        var service = CreateService(taskBackend, runStore);
+
+        service.Enable();
+
+        Assert.Equal($"\"{ExecutablePath}\" --startup", runStore.Value);
+        Assert.True(service.IsEnabled());
+    }
+
+    [Fact]
+    public void IsEnabled_FalseWhenStartupAppsDisablesTheRunEntry()
+    {
+        var runStore = new FakeRunEntryStore
+        {
+            Value = $"\"{ExecutablePath}\" --startup"
+        };
+        var service = CreateService(
+            new FakeTaskBackend(),
+            runStore,
+            runEntryApproved: false);
+
+        Assert.False(service.IsEnabled());
     }
 
     [Fact]
@@ -176,12 +246,14 @@ public sealed class DirectStartupServiceTests
 
     private static DirectStartupService CreateService(
         IDirectStartupTaskBackend taskBackend,
-        IDirectStartupRunEntryStore runStore) =>
+        IDirectStartupRunEntryStore runStore,
+        bool runEntryApproved = true) =>
         new(
             taskBackend,
             runStore,
             () => ExecutablePath,
-            logger: _ => { });
+            logger: _ => { },
+            runEntryApprovedProvider: () => runEntryApproved);
 
     private static DirectStartupTaskRegistration CreatePreferredRegistration(
         string executablePath) =>

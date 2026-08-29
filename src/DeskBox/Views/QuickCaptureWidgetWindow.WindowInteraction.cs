@@ -162,6 +162,10 @@ public sealed partial class QuickCaptureWidgetWindow
             return;
         }
 
+        App.Current.WidgetManager?.ReassertRaisedWidgetGroupAfterDeskBoxActivation(
+            _hWnd,
+            "quick-capture-window-activated");
+
         if (args.WindowActivationState != WindowActivationState.PointerActivated ||
             !Visible ||
             !_isAtDesktopLayer ||

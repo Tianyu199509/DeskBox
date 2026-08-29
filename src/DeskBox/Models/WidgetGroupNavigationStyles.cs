@@ -3,9 +3,9 @@ namespace DeskBox.Models;
 public static class WidgetGroupNavigationStyles
 {
     public const string FollowDefault = "FollowDefault";
-    public const string Auto = "Auto";
     public const string Tabs = "Tabs";
     public const string Stack = "Stack";
+    private const string LegacyAuto = "Auto";
 
     public static string Normalize(string? value, bool allowFollowDefault)
     {
@@ -14,7 +14,8 @@ public static class WidgetGroupNavigationStyles
             FollowDefault when allowFollowDefault => FollowDefault,
             Tabs => Tabs,
             Stack => Stack,
-            _ => Auto
+            LegacyAuto => Stack,
+            _ => Stack
         };
     }
 
