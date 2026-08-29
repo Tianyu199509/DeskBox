@@ -2276,6 +2276,8 @@ svc:Localized.DescriptionKey="Settings.DefaultWidth.Description"
 
                 <sections:SearchSettingsSection x:Name="SearchSettingsSection" Visibility="Collapsed" />
 
+                <sections:CommandApiSettingsSection x:Name="CommandApiSettingsSection" Visibility="Collapsed" />
+
                 <StackPanel
                     x:Name="GeneralSection"
                     Style="{StaticResource SectionPanelStyle}">
@@ -2345,6 +2347,25 @@ svc:Localized.DescriptionKey="Settings.DefaultWidth.Description"
                                 MinWidth="0"
                                 IsOn="{Binding AutoStart, Mode=TwoWay}" />
                         </toolkit:SettingsCard>
+
+                        <Border Style="{StaticResource SettingsGroupStyle}">
+                            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12" Margin="4">
+                                <Button
+                                    Grid.Column="0"
+                                    Click="NestedSettingsButton_Click"
+                                    Style="{StaticResource DrillDownRowStyle}"
+                                    Tag="CommandApiSettings">
+                                    <Grid ColumnDefinitions="Auto,*" Style="{StaticResource SettingCardIdentityGridStyle}">
+                                        <FontIcon Grid.Column="0" FontSize="18" Glyph="&#xE756;" IsHitTestVisible="False" VerticalAlignment="Center" />
+                                        <StackPanel Grid.Column="1" IsHitTestVisible="False" Spacing="3" VerticalAlignment="Center">
+                                            <TextBlock Style="{StaticResource SettingTitleTextStyle}" svc:Localized.Key="Settings.CommandApi.Title" />
+                                            <TextBlock Style="{StaticResource SettingDescriptionTextStyle}" TextWrapping="Wrap" svc:Localized.Key="Settings.CommandApi.Description" />
+                                        </StackPanel>
+                                    </Grid>
+                                </Button>
+                                <FontIcon Grid.Column="1" FontSize="12" Glyph="&#xE76C;" IsHitTestVisible="False" VerticalAlignment="Center" />
+                            </Grid>
+                        </Border>
 
                         <toolkit:SettingsCard
                             HorizontalContentAlignment="Right"

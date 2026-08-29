@@ -1,0 +1,125 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<UserControl
+    x:Class="DeskBox.Views.SettingsSections.CommandApiSettingsSection"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:svc="using:DeskBox.Services"
+    xmlns:toolkit="using:CommunityToolkit.WinUI.Controls">
+
+    <UserControl.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="ms-appx:///Styles/SettingsOverviewResources.xaml" />
+            </ResourceDictionary.MergedDictionaries>
+        </ResourceDictionary>
+    </UserControl.Resources>
+
+    <StackPanel Style="{StaticResource SectionPanelStyle}">
+        <StackPanel Margin="0,8,0,0" Spacing="4">
+
+            <toolkit:SettingsCard
+                ContentAlignment="Vertical"
+                HorizontalContentAlignment="Stretch"
+                svc:Localized.HeaderKey="Settings.CommandApi.Overview.Title">
+                <toolkit:SettingsCard.HeaderIcon>
+                    <FontIcon Glyph="&#xE756;" />
+                </toolkit:SettingsCard.HeaderIcon>
+                <StackPanel Margin="0,4,0,4" Spacing="10">
+                    <TextBlock
+                        Style="{StaticResource SettingDescriptionTextStyle}"
+                        TextWrapping="Wrap"
+                        svc:Localized.Key="Settings.CommandApi.Overview.Description" />
+                    <Grid ColumnSpacing="12">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <StackPanel Grid.Column="0" Spacing="2">
+                            <TextBlock svc:Localized.Key="Settings.CommandApi.Audit.Title" />
+                            <TextBlock
+                                x:Name="AuditLogPathText"
+                                Opacity="0.7"
+                                Style="{StaticResource SettingDescriptionTextStyle}"
+                                TextWrapping="Wrap" />
+                        </StackPanel>
+                    </Grid>
+                    <TextBlock
+                        Style="{StaticResource SettingDescriptionTextStyle}"
+                        TextWrapping="Wrap"
+                        svc:Localized.Key="Settings.CommandApi.RestartNotice" />
+                </StackPanel>
+            </toolkit:SettingsCard>
+
+            <toolkit:SettingsCard
+                HorizontalContentAlignment="Right"
+                svc:Localized.DescriptionKey="Settings.CommandApi.Enable.Description"
+                svc:Localized.HeaderKey="Settings.CommandApi.Enable.Title">
+                <toolkit:SettingsCard.HeaderIcon>
+                    <FontIcon Glyph="&#xE8E5;" />
+                </toolkit:SettingsCard.HeaderIcon>
+                <ToggleSwitch
+                    x:Name="EnableApiToggle"
+                    MinWidth="0"
+                    OffContent=""
+                    OnContent=""
+                    Toggled="EnableApiToggle_Toggled" />
+            </toolkit:SettingsCard>
+
+            <toolkit:SettingsCard
+                HorizontalContentAlignment="Right"
+                svc:Localized.DescriptionKey="Settings.CommandApi.ReadOnly.Description"
+                svc:Localized.HeaderKey="Settings.CommandApi.ReadOnly.Title">
+                <toolkit:SettingsCard.HeaderIcon>
+                    <FontIcon Glyph="&#xE72E;" />
+                </toolkit:SettingsCard.HeaderIcon>
+                <ToggleSwitch
+                    x:Name="ReadOnlyToggle"
+                    MinWidth="0"
+                    OffContent=""
+                    OnContent=""
+                    Toggled="ReadOnlyToggle_Toggled" />
+            </toolkit:SettingsCard>
+
+            <toolkit:SettingsCard
+                HorizontalContentAlignment="Right"
+                svc:Localized.DescriptionKey="Settings.CommandApi.Destructive.Description"
+                svc:Localized.HeaderKey="Settings.CommandApi.Destructive.Title">
+                <toolkit:SettingsCard.HeaderIcon>
+                    <FontIcon Glyph="&#xE74D;" />
+                </toolkit:SettingsCard.HeaderIcon>
+                <ToggleSwitch
+                    x:Name="AllowDestructiveToggle"
+                    MinWidth="0"
+                    OffContent=""
+                    OnContent=""
+                    Toggled="AllowDestructiveToggle_Toggled" />
+            </toolkit:SettingsCard>
+
+            <toolkit:SettingsCard
+                ContentAlignment="Vertical"
+                HorizontalContentAlignment="Stretch"
+                svc:Localized.HeaderKey="Settings.CommandApi.Usage.Title">
+                <toolkit:SettingsCard.HeaderIcon>
+                    <FontIcon Glyph="&#xE943;" />
+                </toolkit:SettingsCard.HeaderIcon>
+                <StackPanel Margin="0,4,0,4" Spacing="6">
+                    <TextBlock
+                        Style="{StaticResource SettingDescriptionTextStyle}"
+                        TextWrapping="Wrap"
+                        svc:Localized.Key="Settings.CommandApi.Usage.Description" />
+                    <Border
+                        Padding="10,8"
+                        Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                        CornerRadius="6">
+                        <TextBlock
+                            FontFamily="Consolas"
+                            FontSize="12"
+                            IsTextSelectionEnabled="True"
+                            Text="deskbox ping&#x0A;deskbox info&#x0A;deskbox schema&#x0A;deskbox quickcapture add &quot;…&quot;" />
+                    </Border>
+                </StackPanel>
+            </toolkit:SettingsCard>
+
+        </StackPanel>
+    </StackPanel>
+</UserControl>

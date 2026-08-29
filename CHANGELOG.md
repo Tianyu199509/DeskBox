@@ -11,6 +11,7 @@
 - New `DeskBox.Protocol` project holds the reflection-free (NativeAOT-safe) envelope, framing codec, and schema records shared by the app and the CLI.
 - Added commands: `server/ping`, `server/info`, `server/schema`, `settings/get`, `quickcapture/list`, `quickcapture/add`, `todo/list`, `todo/add`, `widgets/list`; full details in `docs/architecture/command-api-v1.md`.
 - The pipe name is derived from the existing per-data-root instance scope, so development, preview, and retail instances never expose each other's command API.
+- New "Command API" section in Settings → General: enable/disable the API, toggle read-only mode, and gate destructive commands, with the audit log path and CLI usage shown inline. Read-only and destructive switches apply immediately; the master switch applies at next launch.
 
 ### 中文
 
@@ -21,6 +22,7 @@
 - 新增 `DeskBox.Protocol` 项目，承载应用与 CLI 共享的无反射（NativeAOT 安全）信封、帧编解码与 schema 记录。
 - 新增命令：`server/ping`、`server/info`、`server/schema`、`settings/get`、`quickcapture/list`、`quickcapture/add`、`todo/list`、`todo/add`、`widgets/list`；完整说明见 `docs/architecture/command-api-v1.md`。
 - 管道名沿用既有的按数据根实例作用域，开发、预览与正式实例之间永远不会互访对方的命令 API。
+- 设置 → 常规中新增"命令 API"分节：可启用/停用 API、切换只读模式、放行破坏性命令，并内联显示审计日志路径与 CLI 用法。只读与破坏性开关立即生效；总开关在下次启动时生效。
 
 ## 1.4.6 - 2026-08-28
 

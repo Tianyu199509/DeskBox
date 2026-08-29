@@ -90,6 +90,7 @@ public sealed partial class SettingsWindow : Window
         {
             ["General"] = new("General", "Settings.Section.General", null, "General"),
             ["PerformanceSettings"] = new("PerformanceSettings", "Settings.Performance.Title", "General", "General"),
+            ["CommandApiSettings"] = new("CommandApiSettings", "Settings.CommandApi.Title", "General", "General"),
             ["Appearance"] = new("Appearance", "Settings.Section.Appearance", null, "Appearance"),
             ["CapsuleMode"] = new("CapsuleMode", "Settings.Section.CapsuleMode", null, "CapsuleMode"),
             ["WidgetGroups"] = new("WidgetGroups", "Settings.Section.WidgetGroups", "Appearance", "Appearance"),

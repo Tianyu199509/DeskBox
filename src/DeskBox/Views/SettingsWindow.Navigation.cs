@@ -60,6 +60,7 @@ public sealed partial class SettingsWindow
             ["WeatherSettings"] = WeatherSettingsSection,
             ["GlanceSettings"] = GlanceSettingsSection,
             ["SearchSettings"] = SearchSettingsSection,
+            ["CommandApiSettings"] = CommandApiSettingsSection,
             ["Interaction"] = InteractionSection,
             ["InteractionWindowSettings"] = InteractionWindowSettingsSection,
             ["ManagedStorage"] = ManagedStorageSection,
@@ -533,6 +534,10 @@ public sealed partial class SettingsWindow
         if (sectionTag == "SearchSettings")
         {
             SearchSettingsSection.RefreshFromSettings();
+        }
+        if (sectionTag == "CommandApiSettings")
+        {
+            CommandApiSettingsSection.RefreshFromSettings();
         }
         if (sectionTag == "GlanceSettings")
         {
