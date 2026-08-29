@@ -1123,14 +1123,14 @@ public static partial class Win32Helper
         return false;
     }
 
-    private static string GetWindowTitle(IntPtr hWnd)
+    public static string GetWindowTitle(IntPtr hWnd)
     {
         var builder = new StringBuilder(256);
         int length = GetWindowText(hWnd, builder, builder.Capacity);
         return length > 0 ? builder.ToString(0, length) : string.Empty;
     }
 
-    private static string GetWindowClassName(IntPtr hWnd)
+    public static string GetWindowClassName(IntPtr hWnd)
     {
         var builder = new StringBuilder(256);
         int length = GetClassName(hWnd, builder, builder.Capacity);

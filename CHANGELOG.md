@@ -1,5 +1,27 @@
 ﻿# Changelog
 
+## 1.4.7 - Unreleased
+
+### English
+
+#### Command API: CLI and AI control
+
+- DeskBox now hosts a local command API (JSON-RPC 2.0 over a same-user named pipe) so the CLI, scripts, and AI agents can inspect and drive a running app. Every call is audited to `CommandApi.audit.log`, mutating commands honor a read-only switch, and destructive commands stay disabled by default.
+- New `DeskBox.Cli` console app: `deskbox ping|info|schema|settings get|widgets list`, quick capture list/add, todo list/add, plus `deskbox mcp` which speaks Model Context Protocol over stdio for MCP hosts such as Claude Desktop and Cursor. `deskbox schema` is served from the command registry, so documented commands can never drift from implemented ones.
+- New `DeskBox.Protocol` project holds the reflection-free (NativeAOT-safe) envelope, framing codec, and schema records shared by the app and the CLI.
+- Added commands: `server/ping`, `server/info`, `server/schema`, `settings/get`, `quickcapture/list`, `quickcapture/add`, `todo/list`, `todo/add`, `widgets/list`; full details in `docs/architecture/command-api-v1.md`.
+- The pipe name is derived from the existing per-data-root instance scope, so development, preview, and retail instances never expose each other's command API.
+
+### 中文
+
+#### Command API：CLI 与 AI 控制
+
+- DeskBox 现在内置本地命令 API（基于同用户命名管道的 JSON-RPC 2.0），CLI、脚本和 AI 智能体可以查看并操作运行中的应用。每次调用都会写入 `CommandApi.audit.log` 审计日志；写入类命令遵循只读开关；破坏性命令默认关闭。
+- 新增 `DeskBox.Cli` 控制台程序：`deskbox ping|info|schema|settings get|widgets list`、随记列表/新增、待办列表/新增，以及 `deskbox mcp`——通过 stdio 提供 Model Context Protocol 服务，可直接接入 Claude Desktop、Cursor 等 MCP 宿主。`deskbox schema` 由命令注册表直接生成，文档中的命令与实际实现永不漂移。
+- 新增 `DeskBox.Protocol` 项目，承载应用与 CLI 共享的无反射（NativeAOT 安全）信封、帧编解码与 schema 记录。
+- 新增命令：`server/ping`、`server/info`、`server/schema`、`settings/get`、`quickcapture/list`、`quickcapture/add`、`todo/list`、`todo/add`、`widgets/list`；完整说明见 `docs/architecture/command-api-v1.md`。
+- 管道名沿用既有的按数据根实例作用域，开发、预览与正式实例之间永远不会互访对方的命令 API。
+
 ## 1.4.6 - 2026-08-28
 
 紧急修复了部分系统下，格子间拖动 `.lnk` 快捷方式会被误删除并进入回收站的严重问题。

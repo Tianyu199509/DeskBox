@@ -187,6 +187,12 @@
     <PackageReference Include="Markdig" Version="1.3.2" />
   </ItemGroup>
 
+  <!-- Command API contract: shared, reflection-free DTOs and framing for the
+       named-pipe JSON-RPC host (App) and the DeskBox.Cli client. -->
+  <ItemGroup>
+    <ProjectReference Include="..\DeskBox.Protocol\DeskBox.Protocol.csproj" />
+  </ItemGroup>
+
   <ItemGroup>
     <None Remove="ThirdParty\Everything\Everything64.dll" />
     <None Remove="ThirdParty\Everything\EverythingARM64.dll" />

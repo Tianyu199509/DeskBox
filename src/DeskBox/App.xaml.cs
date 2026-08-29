@@ -1055,6 +1055,8 @@ public partial class App : Application
                 _settingsWindow?.QueueUpdateInstallResultDialog(updateInstallOutcome);
             }
 
+            StartCommandApi();
+
             Log("OnLaunched completed successfully");
 #if DESKBOX_NATIVE_AOT && DESKBOX_AOT_SMOKE_HARNESS
             StartAotShortcutSmokeIfRequested();
@@ -3601,6 +3603,10 @@ public partial class App : Application
     private async Task ShutdownApplicationAsync()
     {
         StopVisibleIdleMemoryMaintenance();
+
+        // Stop the command API before widgets close so no late CLI request
+        // can observe half-torn-down state.
+        StopCommandApi();
 
         // Stop the display area watcher FIRST, before closing any widgets,
         // so that no DisplaysChanged callback can fire during teardown

@@ -41,6 +41,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\DeskBox\DeskBox.csproj" />
+    <ProjectReference Include="..\..\src\DeskBox.Cli\DeskBox.Cli.csproj" />
     <ProjectReference Include="..\..\src\DeskBox.Updater\DeskBox.Updater.csproj" />
   </ItemGroup>
 

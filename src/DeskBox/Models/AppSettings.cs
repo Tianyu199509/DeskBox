@@ -75,6 +75,19 @@ public class AppSettings
     /// <summary>Whether DeskBox should check for updates in the background.</summary>
     public bool AutoCheckForUpdates { get; set; } = true;
 
+    /// <summary>
+    /// Whether the local command API (named-pipe JSON-RPC server used by the
+    /// DeskBox CLI and MCP clients) is listening. The pipe is restricted to
+    /// the current user; every call is written to the command API audit log.
+    /// </summary>
+    public bool EnableCommandApi { get; set; } = true;
+
+    /// <summary>When true, command API methods that mutate state are rejected.</summary>
+    public bool CommandApiReadOnly { get; set; }
+
+    /// <summary>When true, command API methods flagged destructive may run.</summary>
+    public bool AllowDestructiveCommands { get; set; }
+
     /// <summary>Last time DeskBox successfully attempted an update check.</summary>
     public DateTimeOffset? LastUpdateCheckAt { get; set; }
 
