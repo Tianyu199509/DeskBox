@@ -341,6 +341,79 @@ public static class ToolRegistry
         },
         new
         {
+            name = "complete_todo",
+            description = "Mark one todo item completed (recurring items generate their next occurrence).",
+            inputSchema = new
+            {
+                type = "object",
+                properties = new
+                {
+                    widgetId = new { type = "string", description = "Todo widget id." },
+                    itemId = new { type = "string", description = "Item id from list_todos." },
+                    isCompleted = new { type = "boolean", description = "Target state (default true)." },
+                },
+                required = new[] { "widgetId", "itemId" },
+            },
+        },
+        new
+        {
+            name = "delete_todos",
+            description = "Delete one or more todo items by id.",
+            inputSchema = new
+            {
+                type = "object",
+                properties = new
+                {
+                    widgetId = new { type = "string", description = "Todo widget id." },
+                    itemIds = new { type = "array", items = new { type = "string" }, description = "Item ids to delete." },
+                },
+                required = new[] { "widgetId", "itemIds" },
+            },
+        },
+        new
+        {
+            name = "list_widget_files",
+            description = "List the file/folder entries currently shown in one file widget.",
+            inputSchema = new
+            {
+                type = "object",
+                properties = new { widgetId = new { type = "string", description = "File widget id." } },
+                required = new[] { "widgetId" },
+            },
+        },
+        new
+        {
+            name = "add_files_to_widget",
+            description = "Import (copy or move) files/folders into one file widget's mapped folder.",
+            inputSchema = new
+            {
+                type = "object",
+                properties = new
+                {
+                    widgetId = new { type = "string", description = "File widget id." },
+                    paths = new { type = "array", items = new { type = "string" }, description = "Absolute source paths." },
+                    move = new { type = "boolean", description = "true = move sources; false = copy; omit to follow the app setting." },
+                },
+                required = new[] { "widgetId", "paths" },
+            },
+        },
+        new
+        {
+            name = "create_widget",
+            description = "Create a widget: file (managed storage), folder (maps an existing path), or a feature widget (todo|glance|music|weather|search).",
+            inputSchema = new
+            {
+                type = "object",
+                properties = new
+                {
+                    kind = new { type = "string", description = "file|folder|todo|glance|music|weather|search" },
+                    path = new { type = "string", description = "Folder path (required for kind=folder)." },
+                },
+                required = new[] { "kind" },
+            },
+        },
+        new
+        {
             name = "get_settings",
             description = "Read an allowlisted snapshot of DeskBox settings.",
             inputSchema = new { type = "object", properties = new { }, required = Array.Empty<string>() },
@@ -366,6 +439,16 @@ public static class ToolRegistry
                 return ("todo/list", arguments);
             case "add_todo":
                 return ("todo/add", arguments);
+            case "complete_todo":
+                return ("todo/set-completed", arguments);
+            case "delete_todos":
+                return ("todo/delete", arguments);
+            case "list_widget_files":
+                return ("files/list", arguments);
+            case "add_files_to_widget":
+                return ("files/add", arguments);
+            case "create_widget":
+                return ("widgets/create", arguments);
             default:
                 return (string.Empty, arguments);
         }

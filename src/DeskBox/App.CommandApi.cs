@@ -3,6 +3,7 @@ using DeskBox.Protocol;
 using DeskBox.Services;
 using DeskBox.Services.CommandApi;
 using DeskBox.Services.CommandApi.Handlers;
+using DeskBox.ViewModels;
 using Microsoft.UI.Dispatching;
 
 namespace DeskBox;
@@ -113,13 +114,50 @@ public partial class App
             new SettingsGetHandler(() => SettingsService.Settings),
             new QuickCaptureListHandler(() => QuickCaptureService),
             new QuickCaptureAddHandler(() => QuickCaptureService),
+            new QuickCapturePinHandler(() => QuickCaptureService),
+            new QuickCaptureUpdateHandler(() => QuickCaptureService),
+            new QuickCaptureDeleteHandler(() => QuickCaptureService),
             new TodoListHandler(),
             new TodoAddHandler(),
+            new TodoSetCompletedHandler(ResolveTodoViewModel),
+            new TodoDeleteHandler(ResolveTodoViewModel),
+            new TodoEditHandler(ResolveTodoViewModel),
+            new TodoSetDueDateHandler(ResolveTodoViewModel),
+            new TodoClearCompletedHandler(ResolveTodoViewModel),
             new WidgetsListHandler(() => WidgetManager),
+            new WidgetsCreateHandler(() => WidgetManager),
+            new WidgetsRemoveHandler(() => WidgetManager),
+            new WidgetsShowHandler(() => WidgetManager),
+            new WidgetsHideHandler(() => WidgetManager),
+            new WidgetsRenameHandler(() => WidgetManager),
+            new FilesListHandler(ResolveFileViewModel),
+            new FilesAddHandler(ResolveFileViewModel),
         ];
 
         registry = new CommandRegistry(handlers);
         return registry;
+    }
+
+    private TodoWidgetViewModel? ResolveTodoViewModel(string widgetId)
+    {
+        if (WidgetManager is not null
+            && WidgetManager.TryGetTodoWidgetViewModel(widgetId, out TodoWidgetViewModel? viewModel))
+        {
+            return viewModel;
+        }
+
+        return null;
+    }
+
+    private WidgetViewModel? ResolveFileViewModel(string widgetId)
+    {
+        if (WidgetManager is not null
+            && WidgetManager.TryGetFileWidgetViewModel(widgetId, out WidgetViewModel? viewModel))
+        {
+            return viewModel;
+        }
+
+        return null;
     }
 
     /// <summary>Bridges the dispatcher-agnostic command API to the WinUI DispatcherQueue.</summary>

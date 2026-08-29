@@ -16,15 +16,31 @@ public static class HelpPrinter
               ping                          Check that DeskBox is running and reachable.
               info                          Server version, uptime, capabilities, policy.
               schema                        Full machine-readable command schema (for AI self-discovery).
-              widgets list                  List live widget windows (ids, titles, rectangles).
+              widgets list                  List widgets (ids, kinds, names, rectangles, mapped paths).
+              widgets create <kind> [--path <folder>]
+                                            Create a widget: file|folder|todo|glance|music|weather|search.
+              widgets show <id> | hide <id> | rename <id> <name>
+                                            Control one widget.
+              widgets remove <id> --yes     Remove a widget (folder contents stay on disk).
+              files list <id>               List entries shown in one file widget.
+              files add --widget <id> <path> [more...] [--move|--copy]
+                                            Import files/folders into a file widget's mapped folder.
               settings get                  Allowlisted settings snapshot.
               quickcapture list [--limit N] List quick capture notes.
               quickcapture add <body> [--title T] [--pin] [--dry-run]
                                             Add a quick capture note.
+              quickcapture pin <itemId> [--unpin] | update <itemId> <body> | delete <itemId> [more...]
+                                            Manage quick capture items (delete is permanent).
               todo list --widget <id> [--limit N]
                                             List one todo widget's items.
               todo add --widget <id> <text> [--important] [--color <marker>] [--dry-run]
                                             Add a todo item to one todo widget.
+              todo done|reopen --widget <id> <itemId>
+                                            Mark one item completed / not completed.
+              todo edit --widget <id> <itemId> <text> | set-due --widget <id> <itemId> [--due <iso>]
+                                            Edit text or set/clear a due date.
+              todo delete --widget <id> <itemId> [more...] | clear-completed --widget <id>
+                                            Delete items or clear completed ones.
               mcp                           Run a Model Context Protocol server on stdio
                                             (for Claude Desktop, Cursor, and other MCP hosts).
 

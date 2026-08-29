@@ -1,19 +1,21 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using DeskBox.Helpers;
+using DeskBox.Models;
 using DeskBox.Protocol;
 
 namespace DeskBox.Services.CommandApi.Handlers;
 
 public sealed record WidgetListItem(
-    long Hwnd,
-    string Title,
-    string ClassName,
+    string Id,
+    string Kind,
+    string Name,
     int X,
     int Y,
     int Width,
     int Height,
-    bool Visible);
+    bool Visible,
+    bool Disabled,
+    string? MappedFolderPath);
 
 public sealed record WidgetListResult(int Count, IReadOnlyList<WidgetListItem> Widgets);
 
@@ -27,10 +29,11 @@ internal sealed partial class WidgetsListJsonContext : JsonSerializerContext
 }
 
 /// <summary>
-/// Enumerates live widget windows via the <see cref="WidgetManager"/>. Runs
-/// on the UI thread (declared UiThread affinity) because widget window
-/// state is UI-bound; the dispatcher applies its short UI timeout so an AI
-/// polling loop can never hold the UI thread hostage.
+/// Enumerates every configured widget — including ones whose window is not
+/// currently loaded — by widget id, kind, name, rectangle, and mapped path.
+/// The id reported here is the handle all other widget commands require.
+/// Runs on the UI thread because the settings widget collection is mutated
+/// there.
 /// </summary>
 public sealed class WidgetsListHandler : ICommandHandler
 {
@@ -47,10 +50,10 @@ public sealed class WidgetsListHandler : ICommandHandler
         Capability: CommandApiProtocol.Capabilities.LayoutRead,
         MutatesState: false,
         Destructive: false,
-        Summary: "Lists live widget windows with hwnd, title, class name, and on-screen rectangle.",
+        Summary: "Lists every configured widget with id, kind, name, rectangle, visibility, and mapped folder path.",
         Arguments: [],
         ExampleRequestJson: """{"jsonrpc":"2.0","id":8,"method":"widgets/list","params":{"protocolVersion":1,"clientName":"deskbox-cli"}}""",
-        ExampleResponseJson: """{"result":{"data":{"count":1,"widgets":[{"hwnd":123,"title":"Todo","className":"DeskBox_Widget"}]}}}""");
+        ExampleResponseJson: """{"result":{"data":{"count":1,"widgets":[{"id":"3f2a","kind":"Todo","name":"Todo","x":100,"y":80,"width":280,"height":400,"visible":true}]}}}""");
 
     public Task<JsonElement> ExecuteAsync(
         JsonElement arguments,
@@ -64,21 +67,21 @@ public sealed class WidgetsListHandler : ICommandHandler
             return Task.FromResult(JsonSerializer.SerializeToElement(notReady, WidgetsListJsonContext.Default.WidgetListResult));
         }
 
-        IReadOnlyList<IntPtr> handles = widgetManager.GetAllWidgetWindowHandles();
-        List<WidgetListItem> widgets = new(handles.Count);
-        foreach (IntPtr hwnd in handles)
+        IReadOnlyList<WidgetConfig> configs = widgetManager.GetWidgetConfigSnapshot();
+        List<WidgetListItem> widgets = new(configs.Count);
+        foreach (WidgetConfig config in configs)
         {
-            Win32Helper.RECT rect = default;
-            bool hasRect = Win32Helper.GetWindowRect(hwnd, out rect);
             widgets.Add(new WidgetListItem(
-                Hwnd: hwnd.ToInt64(),
-                Title: Win32Helper.GetWindowTitle(hwnd),
-                ClassName: Win32Helper.GetWindowClassName(hwnd),
-                X: hasRect ? rect.Left : 0,
-                Y: hasRect ? rect.Top : 0,
-                Width: hasRect ? Math.Max(0, rect.Right - rect.Left) : 0,
-                Height: hasRect ? Math.Max(0, rect.Bottom - rect.Top) : 0,
-                Visible: Win32Helper.IsWindowVisible(hwnd)));
+                Id: config.Id,
+                Kind: config.WidgetKind.ToString(),
+                Name: config.Name,
+                X: (int)config.X,
+                Y: (int)config.Y,
+                Width: (int)config.Width,
+                Height: (int)config.Height,
+                Visible: config.IsVisible,
+                Disabled: config.IsDisabled,
+                MappedFolderPath: config.MappedFolderPath));
         }
 
         WidgetListResult result = new(widgets.Count, widgets);

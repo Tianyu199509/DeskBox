@@ -125,11 +125,33 @@ Settings that control the gates (AppSettings):
 | `settings/get` | `settings.read` | no | any | Allowlisted settings snapshot. |
 | `quickcapture/list` | `quickcapture.read` | no | any | Items (args: `limit` 1-200). |
 | `quickcapture/add` | `quickcapture.write` | yes | any | Add text note (args: `body`, `title?`, `pin?`). |
+| `quickcapture/pin` | `quickcapture.write` | yes | any | Pin/unpin one item (args: `itemId`, `pinned`). |
+| `quickcapture/update` | `quickcapture.write` | yes | any | Replace body text (args: `itemId`, `body`). |
+| `quickcapture/delete` | `quickcapture.write` | yes | any | Permanently delete items (args: `itemIds[]`). |
 | `todo/list` | `todo.read` | no | any | Items of one widget (args: `widgetId`, `limit?`). |
 | `todo/add` | `todo.write` | yes | any | Add item (args: `widgetId`, `text`, `important?`, `colorMarker?`). |
-| `widgets/list` | `layout.read` | no | ui-thread | Live widget windows with rects. |
+| `todo/set-completed` | `todo.write` | yes | ui-thread | Complete/reopen one item (args: `widgetId`, `itemId`, `isCompleted`). |
+| `todo/edit` | `todo.write` | yes | ui-thread | Replace item text (args: `widgetId`, `itemId`, `text`). |
+| `todo/set-due` | `todo.write` | yes | ui-thread | Set/clear due date (args: `widgetId`, `itemId`, `dueDate?` ISO 8601). |
+| `todo/delete` | `todo.write` | yes | ui-thread | Delete items (args: `widgetId`, `itemIds[]`). |
+| `todo/clear-completed` | `todo.write` | yes | ui-thread | Delete all completed items (args: `widgetId`). |
+| `widgets/list` | `layout.read` | no | ui-thread | Config snapshot: id, kind, name, rect, visibility, mapped path. |
+| `widgets/create` | `widgets.write` | yes | ui-thread | Create widget (args: `kind`, `path?` for folder). |
+| `widgets/remove` | `widgets.write` | yes | ui-thread | **Destructive.** Remove widget (args: `widgetId`); folder contents stay on disk. |
+| `widgets/show` | `widgets.write` | yes | ui-thread | Show widget, enabling feature widgets and lazily creating windows. |
+| `widgets/hide` | `widgets.write` | yes | ui-thread | Hide a loaded widget (args: `widgetId`). |
+| `widgets/rename` | `widgets.write` | yes | ui-thread | Rename widget (args: `widgetId`, `name`). |
+| `files/list` | `files.read` | no | ui-thread | Entries shown in one file widget (args: `widgetId`). |
+| `files/add` | `files.write` | yes | ui-thread | Import files/folders (args: `widgetId`, `paths[]`, `move?`). |
 
 Authoritative argument details live in `server/schema` output.
+
+Mutating todo/file-widget commands run on the UI thread through the live
+view models, so recurrence generation, undo history, and the open widget's
+display stay consistent; they fail with `widget_not_loaded` (hint: call
+`widgets/show` first) when the target widget's window is not loaded.
+QuickCapture mutations run headless — the service serializes operations and
+raises `Changed`, refreshing the open widget automatically.
 
 ## 6. CLI
 

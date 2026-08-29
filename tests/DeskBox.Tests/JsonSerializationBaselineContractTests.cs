@@ -83,11 +83,15 @@ public sealed class JsonSerializationBaselineContractTests : IDisposable
             "src/DeskBox/App.AotTodoNotificationLifecycleSmoke.cs",
             "src/DeskBox/App.AotTodoRecurrenceReminderSmoke.cs",
             "src/DeskBox/Services/AppUpdateService.cs",
+            "src/DeskBox/Services/CommandApi/Handlers/FileWidgetHandlers.cs",
             "src/DeskBox/Services/CommandApi/Handlers/QuickCaptureHandlers.cs",
+            "src/DeskBox/Services/CommandApi/Handlers/QuickCaptureMutationHandlers.cs",
             "src/DeskBox/Services/CommandApi/Handlers/ServerHandlers.cs",
             "src/DeskBox/Services/CommandApi/Handlers/ServerSchemaHandler.cs",
             "src/DeskBox/Services/CommandApi/Handlers/SettingsGetHandler.cs",
             "src/DeskBox/Services/CommandApi/Handlers/TodoHandlers.cs",
+            "src/DeskBox/Services/CommandApi/Handlers/TodoMutationHandlers.cs",
+            "src/DeskBox/Services/CommandApi/Handlers/WidgetLifecycleHandlers.cs",
             "src/DeskBox/Services/CommandApi/Handlers/WidgetsListHandler.cs",
             "src/DeskBox/Services/CommandApi/PipeRpcServer.cs",
             "src/DeskBox/Services/DeskBoxDataBackupService.cs",
@@ -112,7 +116,7 @@ public sealed class JsonSerializationBaselineContractTests : IDisposable
             .Order()
             .ToArray();
 
-        Assert.Equal(33, actualContextOwners.Length);
+        Assert.Equal(37, actualContextOwners.Length);
         Assert.Equal(expectedContextOwners, actualContextOwners);
     }
 

@@ -127,4 +127,30 @@ public static class CommandArguments
         value = property.GetBoolean();
         return true;
     }
+
+    /// <summary>Reads an optional array of non-empty strings; missing property yields an empty list.</summary>
+    public static bool TryGetStringArray(JsonElement arguments, string name, out List<string> values)
+    {
+        values = [];
+        if (arguments.ValueKind != JsonValueKind.Object
+            || !arguments.TryGetProperty(name, out JsonElement property))
+        {
+            return true;
+        }
+
+        if (property.ValueKind != JsonValueKind.Array)
+        {
+            return false;
+        }
+
+        foreach (JsonElement item in property.EnumerateArray())
+        {
+            if (item.ValueKind == JsonValueKind.String && !string.IsNullOrWhiteSpace(item.GetString()))
+            {
+                values.Add(item.GetString()!);
+            }
+        }
+
+        return true;
+    }
 }

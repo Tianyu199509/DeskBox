@@ -12,6 +12,10 @@
 - Added commands: `server/ping`, `server/info`, `server/schema`, `settings/get`, `quickcapture/list`, `quickcapture/add`, `todo/list`, `todo/add`, `widgets/list`; full details in `docs/architecture/command-api-v1.md`.
 - The pipe name is derived from the existing per-data-root instance scope, so development, preview, and retail instances never expose each other's command API.
 - New "Command API" section in Settings → General: enable/disable the API, toggle read-only mode, and gate destructive commands, with the audit log path and CLI usage shown inline. Read-only and destructive switches apply immediately; the master switch applies at next launch.
+- Full todo control from the CLI and MCP: `todo/set-completed`, `todo/edit`, `todo/set-due`, `todo/delete`, `todo/clear-completed` run through the live view model, so recurring items generate their next occurrence and the open widget updates instantly.
+- Full quick capture control: `quickcapture/pin`, `quickcapture/update`, `quickcapture/delete` (headless, auto-refreshes the widget).
+- File widget control: `files/list` and `files/add` drive the managed-folder import pipeline (move/copy semantics, organization history) for the requested widget.
+- Widget lifecycle control: `widgets/create`, `widgets/show`, `widgets/hide`, `widgets/rename`, and `widgets/remove` (destructive-gated; folder contents always stay on disk). `widgets/list` now reports every configured widget by id, kind, name, rectangle, and mapped folder path — the id required by all per-widget commands.
 
 ### 中文
 
@@ -23,6 +27,11 @@
 - 新增命令：`server/ping`、`server/info`、`server/schema`、`settings/get`、`quickcapture/list`、`quickcapture/add`、`todo/list`、`todo/add`、`widgets/list`；完整说明见 `docs/architecture/command-api-v1.md`。
 - 管道名沿用既有的按数据根实例作用域，开发、预览与正式实例之间永远不会互访对方的命令 API。
 - 设置 → 常规中新增"命令 API"分节：可启用/停用 API、切换只读模式、放行破坏性命令，并内联显示审计日志路径与 CLI 用法。只读与破坏性开关立即生效；总开关在下次启动时生效。
+- 待办可由 CLI 与 MCP 全量控制：`todo/set-completed`、`todo/edit`、`todo/set-due`、`todo/delete`、`todo/clear-completed` 经活动视图模型执行，循环待办会自动生成下一期，打开的格子即时更新。
+- 随记可全量控制：`quickcapture/pin`、`quickcapture/update`、`quickcapture/delete`（无头执行，格子自动刷新）。
+- 文件格子控制：`files/list` 与 `files/add` 驱动受管文件夹导入管线（移动/复制语义、整理历史）。
+- 格子生命周期控制：`widgets/create`、`widgets/show`、`widgets/hide`、`widgets/rename`、`widgets/remove`（受破坏性门禁；文件夹内容始终保留在磁盘上）。`widgets/list` 现在按 id、类型、名称、矩形与映射路径列出全部格子——这是所有按格子命令所需的句柄。
+
 ## 1.4.8 - 2026-08-29
 
 ### English

@@ -42,6 +42,7 @@ public static class CommandApiProtocol
         public const string DestructiveDisabled = "destructive_disabled";
         public const string ValidationFailed = "validation_failed";
         public const string UiBusy = "ui_busy";
+        public const string WidgetNotLoaded = "widget_not_loaded";
         public const string Timeout = "timeout";
         public const string InternalError = "internal_error";
     }
@@ -61,6 +62,9 @@ public static class CommandApiProtocol
         public const string TodoRead = "todo.read";
         public const string TodoWrite = "todo.write";
         public const string LayoutRead = "layout.read";
+        public const string WidgetsWrite = "widgets.write";
+        public const string FilesRead = "files.read";
+        public const string FilesWrite = "files.write";
     }
 
     /// <summary>Builds the full pipe name for the given instance scope.</summary>

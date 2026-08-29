@@ -1989,6 +1989,73 @@ public sealed partial class WidgetManager
         }
     }
 
+    /// <summary>
+    /// Command API facade: resolves a loaded file widget's view model so
+    /// handlers can drive imports/queries. Callers must run on the UI
+    /// thread; returns false when the widget exists in configuration but
+    /// its window is not currently loaded.
+    /// </summary>
+    public bool TryGetFileWidgetViewModel(string widgetId, out WidgetViewModel? viewModel)
+    {
+        if (_fileWidgets.TryGetValue(widgetId, out var fileEntry))
+        {
+            viewModel = fileEntry.ViewModel;
+            return true;
+        }
+
+        ContentWidgetWindow? contentWindow = _contentWidgets.Values
+            .Distinct()
+            .FirstOrDefault(window =>
+                window.CurrentContent is FileSurfaceContent surface &&
+                string.Equals(surface.WidgetId, widgetId, StringComparison.Ordinal));
+        if (contentWindow?.CurrentContent is FileSurfaceContent fileSurface)
+        {
+            viewModel = fileSurface.ViewModel;
+            return true;
+        }
+
+        viewModel = null;
+        return false;
+    }
+
+    /// <summary>
+    /// Command API facade: resolves a loaded todo widget's view model.
+    /// Callers must run on the UI thread. Going through the view model keeps
+    /// recurrence generation, undo history, and live UI updates intact —
+    /// writing the store directly would leave the open widget stale.
+    /// </summary>
+    public bool TryGetTodoWidgetViewModel(string widgetId, out TodoWidgetViewModel? viewModel)
+    {
+        ContentWidgetWindow? contentWindow = _contentWidgets.Values
+            .Distinct()
+            .FirstOrDefault(window =>
+                window.CurrentContent is TodoWidgetContentAdapter adapter &&
+                string.Equals(adapter.WidgetId, widgetId, StringComparison.Ordinal));
+        if (contentWindow?.CurrentContent is TodoWidgetContentAdapter adapter)
+        {
+            viewModel = adapter.ViewModel;
+            return true;
+        }
+
+        string loaded = string.Join(
+            ",",
+            _contentWidgets.Select(pair => $"{pair.Key}:{pair.Value.CurrentContent?.GetType().Name ?? "null"}"));
+        App.Log($"[CommandApi] Todo view model miss widget={widgetId} loadedContent=[{loaded}]");
+        viewModel = null;
+        return false;
+    }
+
+    /// <summary>
+    /// Command API facade: snapshot of every configured widget for
+    /// widgets/list. Callers must run on the UI thread (the settings
+    /// collection is mutated there). Includes widgets whose windows are not
+    /// currently loaded — the id is the handle every other command needs.
+    /// </summary>
+    public IReadOnlyList<WidgetConfig> GetWidgetConfigSnapshot()
+        => _settingsService.Settings.Widgets
+            .Where(config => !IsDeleted(config.Id))
+            .ToList();
+
     public void SetDesktopOrganizationBusy(
         IEnumerable<string> widgetIds,
         bool isBusy)
