@@ -58,6 +58,23 @@ if (pipeName.Length == 0)
 
 PipeRpcClient client = new(pipeName, timeoutMilliseconds, trace: null);
 
+// MCP mode: serve a Model Context Protocol stdio server so MCP hosts
+// (Claude Desktop, Cursor, ...) can drive DeskBox through native tools.
+// It consumes stdin until the host closes the stream.
+if (positional[0].Equals("mcp", StringComparison.OrdinalIgnoreCase))
+{
+    try
+    {
+        await new McpServer(client, clientVersion).RunAsync(CancellationToken.None).ConfigureAwait(false);
+        return (int)CliExitCode.Ok;
+    }
+    catch (Exception ex)
+    {
+        Console.Error.WriteLine($"mcp server error: {ex.Message}");
+        return (int)CliExitCode.UnexpectedError;
+    }
+}
+
 try
 {
     return await CommandRouter.RunAsync(
