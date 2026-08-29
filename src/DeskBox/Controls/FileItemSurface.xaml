@@ -49,15 +49,15 @@
         <ToolTipService.ToolTip>
             <!-- PathTooltipVisibility is derived from LayoutContext.ShowFileItemPathTooltips. -->
             <ToolTip
-                IsEnabled="{x:Bind ToolTipEnabled, Mode=OneWay}">
+                IsEnabled="{Binding ToolTipEnabled, ElementName=SurfaceRoot}">
                 <StackPanel Spacing="2">
                     <TextBlock
                         FontWeight="SemiBold"
-                        Text="{x:Bind TransferStatusText, Mode=OneWay}"
-                        Visibility="{x:Bind TransferStatusVisibility, Mode=OneWay}" />
+                        Text="{Binding TransferStatusText, ElementName=SurfaceRoot}"
+                        Visibility="{Binding TransferStatusVisibility, ElementName=SurfaceRoot}" />
                     <TextBlock
                         Text="{Binding FullPath}"
-                        Visibility="{x:Bind PathTooltipVisibility, Mode=OneWay}" />
+                        Visibility="{Binding PathTooltipVisibility, ElementName=SurfaceRoot}" />
                 </StackPanel>
             </ToolTip>
         </ToolTipService.ToolTip>
@@ -109,8 +109,7 @@
                 Text="{Binding Name}"
                 TextAlignment="Center"
                 TextTrimming="CharacterEllipsis"
-                TextWrapping="Wrap"
-                Visibility="{Binding LayoutContext.IconLabelVisibility, ElementName=SurfaceRoot}" />
+                TextWrapping="Wrap" />
         </StackPanel>
 
         <Grid

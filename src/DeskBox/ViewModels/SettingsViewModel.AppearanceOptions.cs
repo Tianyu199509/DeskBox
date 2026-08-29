@@ -136,11 +136,10 @@ public partial class SettingsViewModel
     }
 
     public IReadOnlyList<SettingsOption> AvailableAccentColorSourceOptions =>
-        WrapOptions(
-        [
-            new(ThemeService.AccentModeSystem, _localizationService.T("Settings.Accent.Source.System")),
-            new(ThemeService.AccentModeCustom, _localizationService.T("Settings.Accent.Source.Custom"))
-        ]);
+    [
+        new(ThemeService.AccentModeSystem, _localizationService.T("Settings.Accent.Source.System")),
+        new(ThemeService.AccentModeCustom, _localizationService.T("Settings.Accent.Source.Custom"))
+    ];
 
     public string SelectedWidgetCornerPreference
     {
@@ -304,6 +303,8 @@ public partial class SettingsViewModel
             }
 
             _settingsService.Settings.WidgetCollapseBehavior = normalized;
+            _settingsService.Settings.WidgetCapsuleModeEnabled =
+                normalized != SettingsService.WidgetCollapseBehaviorExpanded;
             _settingsService.SaveDebounced();
         }
     }

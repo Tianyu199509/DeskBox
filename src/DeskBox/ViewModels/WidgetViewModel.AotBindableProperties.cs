@@ -14,7 +14,6 @@ namespace DeskBox.ViewModels;
     nameof(IconLabelFontSize),
     nameof(IconLabelMaxLines),
     nameof(IconLabelMaxWidth),
-    nameof(IconLabelVisibility),
     nameof(IconTileHeight),
     nameof(IconTileMargin),
     nameof(IconTileWidth),

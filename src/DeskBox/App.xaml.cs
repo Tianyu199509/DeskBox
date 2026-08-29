@@ -120,7 +120,6 @@ public partial class App : Application
     private bool _externalActivationReady;
     private bool _externalActivationRequestedWhileBusy;
     private bool _externalActivationHandling;
-    private DateTimeOffset? _lastBareExternalActivationAtUtc;
     private readonly bool _processStartupLaunchDetected;
 
     public static new App Current => (App)Application.Current;
@@ -186,23 +185,6 @@ public partial class App : Application
             out bool createdNew);
         if (!createdNew)
         {
-            string? jumpListArg = nativeNotificationActivation is null &&
-                !_processStartupLaunchDetected
-                    ? JumpListService.TryGetJumpListArgument(
-                        string.Join(' ', Environment.GetCommandLineArgs()))
-                    : null;
-            string activationKind = nativeNotificationActivation is not null
-                ? "notification"
-                : _processStartupLaunchDetected
-                    ? "startup"
-                    : jumpListArg is not null
-                        ? $"jump-list:{jumpListArg}"
-                        : "bare";
-            Log(
-                $"[Activation] Secondary instance kind={activationKind} " +
-                $"argumentCount={Math.Max(0, Environment.GetCommandLineArgs().Length - 1)} " +
-                $"{GetParentProcessReport()}");
-
             if (nativeNotificationActivation is not null)
             {
                 NativeNotificationActivationEnvelopeWriteResult writeResult =
@@ -221,6 +203,9 @@ public partial class App : Application
             }
             else
             {
+                // Check for Jump List activation arguments from command line
+                string? jumpListArg = JumpListService.TryGetJumpListArgument(
+                    string.Join(' ', Environment.GetCommandLineArgs()));
                 if (jumpListArg is not null)
                 {
                     StorePendingJumpListArgument(jumpListArg);
@@ -966,37 +951,8 @@ public partial class App : Application
             {
                 Log($"[DesktopOrganization] Recovered {recoveredDesktopItems} items from an interrupted transaction.");
             }
-            // A detached storage drive must not abort widget restoration.
-            bool managedStorageRootUnavailable = !WidgetManager.SyncStorageFolderEntries();
-            Task<bool>? startupDesktopLayerReadinessTask = null;
-            if (IsStartupMode)
-            {
-                WidgetLayerService.BeginStartupDesktopLayerAttachmentDeferral();
-                startupDesktopLayerReadinessTask =
-                    WidgetLayerService.WaitForDesktopIconViewReadyAsync();
-            }
-
-            try
-            {
-                await WidgetManager.RestoreWidgetsAsync();
-            }
-            catch
-            {
-                if (startupDesktopLayerReadinessTask is not null)
-                {
-                    WidgetLayerService.EndStartupDesktopLayerAttachmentDeferral();
-                }
-
-                throw;
-            }
-
-            if (startupDesktopLayerReadinessTask is not null)
-            {
-                _ = CompleteStartupDesktopLayerInitializationAsync(
-                    startupDesktopLayerReadinessTask,
-                    WidgetManager);
-            }
-
+            WidgetManager.SyncStorageFolderEntries();
+            await WidgetManager.RestoreWidgetsAsync();
             InitializeGlobalHotkeyService(localizationService);
 
             RefreshTodoReminderService();
@@ -1004,10 +960,6 @@ public partial class App : Application
             await CompleteExternalActivationInitializationAsync();
             ShowDataRestoreResultNotification(restoreResult);
             ShowSettingsLoadRecoveryNotification();
-            if (managedStorageRootUnavailable)
-            {
-                ShowManagedStorageUnavailableNotification();
-            }
             if (!hadSettingsBeforeStartup ||
                 SettingsService.LastLoadRecoveryState == SettingsLoadRecoveryState.DefaultsAfterFailure)
             {
@@ -1055,6 +1007,8 @@ public partial class App : Application
                 _settingsWindow?.QueueUpdateInstallResultDialog(updateInstallOutcome);
             }
 
+            StartCommandApi();
+
             Log("OnLaunched completed successfully");
 #if DESKBOX_NATIVE_AOT && DESKBOX_AOT_SMOKE_HARNESS
             StartAotShortcutSmokeIfRequested();
@@ -1077,40 +1031,6 @@ public partial class App : Application
         {
             Log($"Exception in OnLaunched: {ex}");
         }
-    }
-
-    private async Task CompleteStartupDesktopLayerInitializationAsync(
-        Task<bool> readinessTask,
-        WidgetManager widgetManager)
-    {
-        bool explorerDesktopReady = false;
-        try
-        {
-            // Widget startup already has a 2.3-second temporary presentation.
-            // Let that finish independently while the read-only Explorer probe runs.
-            Task widgetPresentationSettled = Task.Delay(TimeSpan.FromMilliseconds(2400));
-            explorerDesktopReady = await readinessTask;
-            await widgetPresentationSettled;
-        }
-        catch (Exception ex)
-        {
-            Log($"[Startup] Explorer desktop readiness probe failed: {ex}");
-        }
-        finally
-        {
-            WidgetLayerService.EndStartupDesktopLayerAttachmentDeferral();
-        }
-
-        if (!ReferenceEquals(WidgetManager, widgetManager))
-        {
-            return;
-        }
-
-        Log(
-            $"[Startup] Applying deferred widget desktop layer " +
-            $"explorerReady={explorerDesktopReady}");
-        widgetManager.RefreshVisibleWidgetDesktopLayers(
-            "startup-explorer-desktop-ready");
     }
 
     private void InitializeGlobalHotkeyService(LocalizationService localizationService)
@@ -2108,23 +2028,6 @@ public partial class App : Application
                     continue;
                 }
 
-                DateTimeOffset activationAtUtc = DateTimeOffset.UtcNow;
-                bool settingsWindowOpen = _settingsWindow is not null;
-                bool coalesceBareActivation =
-                    ExternalActivationPolicy.ShouldCoalesceBareActivation(
-                        _lastBareExternalActivationAtUtc,
-                        activationAtUtc,
-                        settingsWindowOpen);
-                _lastBareExternalActivationAtUtc = activationAtUtc;
-                if (coalesceBareActivation)
-                {
-                    Log(
-                        "[Activation] Coalesced duplicate bare activation " +
-                        $"windowMs={ExternalActivationPolicy.BareActivationDuplicateWindow.TotalMilliseconds:F0} " +
-                        "settingsOpen=true");
-                    continue;
-                }
-
                 await EnsureInitialFileWidgetSetupAsync(isInteractiveLaunch: true);
                 if (await EnsureOnboardingAsync(isInteractiveLaunch: true))
                 {
@@ -2138,20 +2041,22 @@ public partial class App : Application
                         !widget.IsDisabled &&
                         !SettingsService.Settings.DeletedWidgetIds.Contains(widget.Id));
                     bool anyLoadedVisible = WidgetManager.HasVisibleFileWidgets;
-                    BareExternalActivationAction fallbackAction =
-                        ExternalActivationPolicy.DecideBareActivation(
-                            new BareExternalActivationContext(
-                                hasConfiguredWidgets,
-                                anyLoadedVisible));
-                    Log(
-                        $"[Activation] Bare fallback action={fallbackAction} " +
-                        $"configuredFileWidgets={hasConfiguredWidgets} " +
-                        $"visibleFileWidgets={anyLoadedVisible}");
 
-                    if (fallbackAction ==
-                        BareExternalActivationAction.RestoreAllWidgetsAndOpenSettings)
+                    if (hasConfiguredWidgets && !anyLoadedVisible)
                     {
                         await WidgetManager.SetAllWidgetsVisibleAsync(true);
+                    }
+                    else
+                    {
+                        WidgetConfig? firstWidget = SettingsService.Settings.Widgets
+                            .FirstOrDefault(widget =>
+                                widget.WidgetKind == WidgetKind.File &&
+                                !widget.IsDisabled &&
+                                !SettingsService.Settings.DeletedWidgetIds.Contains(widget.Id));
+                        if (firstWidget is not null)
+                        {
+                            await WidgetManager.ShowWidgetAsync(firstWidget.Id);
+                        }
                     }
                 }
 
@@ -2366,39 +2271,6 @@ public partial class App : Application
         catch (Exception ex)
         {
             Log($"[SettingsService] Persistence notification failed: {ex.Message}");
-        }
-    }
-
-    private void ShowManagedStorageUnavailableNotification()
-    {
-        if (LocalizationService is null)
-        {
-            return;
-        }
-
-        string title = LocalizationService.T("Settings.ManagedPath.UnavailableTitle");
-        string message = LocalizationService.T("Settings.ManagedPath.UnavailableBody");
-        if (_nativeNotificationService?.TryShow(title, message) == true || _trayIcon is null)
-        {
-            return;
-        }
-
-        try
-        {
-            _trayIcon.ShowNotification(
-                title,
-                message,
-                NotificationIcon.Warning,
-                customIconHandle: null,
-                largeIcon: false,
-                sound: false,
-                respectQuietTime: true,
-                realtime: false,
-                timeout: TimeSpan.FromSeconds(10));
-        }
-        catch (Exception ex)
-        {
-            Log($"[WidgetManager] Managed storage unavailable notification failed: {ex.Message}");
         }
     }
 
@@ -2737,35 +2609,12 @@ public partial class App : Application
     /// </summary>
     internal static long MemoryCleanupEpoch => Volatile.Read(ref s_memoryCleanupEpoch);
 
-    /// <summary>
-    /// Raised (possibly from a background thread) after a working-set trim
-    /// invalidated warmed state. Observers must marshal to their own threads.
-    /// </summary>
-    internal static event Action? MemoryCleanupEpochAdvanced;
-
     private static void AdvanceMemoryCleanupEpoch(string reason)
     {
         long cleanupEpoch = Interlocked.Increment(ref s_memoryCleanupEpoch);
         PerformanceLogger.Mark(
             "MemoryCleanupEpochAdvanced",
             $"epoch={cleanupEpoch} reason={reason}");
-        Action? handlers = MemoryCleanupEpochAdvanced;
-        if (handlers is null)
-        {
-            return;
-        }
-
-        foreach (Action handler in handlers.GetInvocationList().Cast<Action>())
-        {
-            try
-            {
-                handler();
-            }
-            catch (Exception ex)
-            {
-                Log($"[MemoryCleanup] Epoch observer failed: {ex.Message}");
-            }
-        }
     }
 
     private void StartVisibleIdleMemoryMaintenance()
@@ -3601,6 +3450,10 @@ public partial class App : Application
     private async Task ShutdownApplicationAsync()
     {
         StopVisibleIdleMemoryMaintenance();
+
+        // Stop the command API before widgets close so no late CLI request
+        // can observe half-torn-down state.
+        StopCommandApi();
 
         // Stop the display area watcher FIRST, before closing any widgets,
         // so that no DisplaysChanged callback can fire during teardown

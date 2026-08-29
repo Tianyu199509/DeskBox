@@ -5,17 +5,20 @@ namespace DeskBox.Tests;
 public sealed class WidgetGroupNavigationInteractionPolicyTests
 {
     [Theory]
-    [InlineData(null)]
-    [InlineData("Auto")]
-    [InlineData("invalid")]
-    public void RemovedAutoAndInvalidStyles_ResolveToStack(string? style)
+    [InlineData(2, 239, WidgetGroupNavigationStyles.Stack)]
+    [InlineData(3, 240, WidgetGroupNavigationStyles.Tabs)]
+    [InlineData(4, 500, WidgetGroupNavigationStyles.Stack)]
+    public void Auto_ResolvesFromMemberCountAndAvailableWidth(
+        int memberCount,
+        double width,
+        string expected)
     {
         Assert.Equal(
-            WidgetGroupNavigationStyles.Stack,
+            expected,
             WidgetGroupNavigationInteractionPolicy.ResolveEffectiveStyle(
-                style,
-                memberCount: 3,
-                availableWidth: 500));
+                WidgetGroupNavigationStyles.Auto,
+                memberCount,
+                width));
     }
 
     [Theory]

@@ -349,11 +349,10 @@ public string SelectedWeatherLocationMode
 }
 
 public IReadOnlyList<SettingsOption> AvailableWeatherLocationModeOptions =>
-    WrapOptions(
-    [
-        new(WeatherLocationModeAuto, _localizationService.T("Settings.Weather.LocationMode.Auto")),
-        new(WeatherLocationModeManual, _localizationService.T("Settings.Weather.LocationMode.Manual"))
-    ]);
+[
+    new(WeatherLocationModeAuto, _localizationService.T("Settings.Weather.LocationMode.Auto")),
+    new(WeatherLocationModeManual, _localizationService.T("Settings.Weather.LocationMode.Manual"))
+];
 
 // P2-2: Search box is always visible — user can manually override even in auto mode.
 public Visibility WeatherCityNameVisibility => Visibility.Visible;

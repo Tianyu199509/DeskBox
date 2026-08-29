@@ -1123,14 +1123,14 @@ public static partial class Win32Helper
         return false;
     }
 
-    private static string GetWindowTitle(IntPtr hWnd)
+    public static string GetWindowTitle(IntPtr hWnd)
     {
         var builder = new StringBuilder(256);
         int length = GetWindowText(hWnd, builder, builder.Capacity);
         return length > 0 ? builder.ToString(0, length) : string.Empty;
     }
 
-    private static string GetWindowClassName(IntPtr hWnd)
+    public static string GetWindowClassName(IntPtr hWnd)
     {
         var builder = new StringBuilder(256);
         int length = GetClassName(hWnd, builder, builder.Capacity);
@@ -1151,27 +1151,6 @@ public static partial class Win32Helper
 
     [LibraryImport("dwmapi.dll")]
     public static partial int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int pvAttribute, int cbAttribute);
-
-    [LibraryImport("dwmapi.dll")]
-    public static partial int DwmFlush();
-
-    /// <summary>
-    /// Blocks until the next DWM composition pass completes. Used as the Win10
-    /// present-aligned pacing source; returns false when dwmapi is unavailable
-    /// so the caller can fall back to a refresh-derived timer.
-    /// </summary>
-    public static bool TryDwmFlush()
-    {
-        try
-        {
-            return DwmFlush() == 0;
-        }
-        catch (Exception ex) when (
-            ex is DllNotFoundException or EntryPointNotFoundException or BadImageFormatException)
-        {
-            return false;
-        }
-    }
 
     /// <summary>
     /// Version-safe DWM attribute entry point.  Attributes 33, 34 and 38 are
@@ -1253,48 +1232,29 @@ public static partial class Win32Helper
         TrySetDwmWindowAttribute(hWnd, DWMWA_BORDER_COLOR, ref colorRef);
     }
 
-    /// <summary>
-    /// Pure accent-state selection so interaction-time simplification (keep the
-    /// tint, drop the DWM blur) stays unit-testable.
-    /// </summary>
-    internal static int ResolveAccentState(bool enabled, bool blurEnabled, double opacity)
-    {
-        if (enabled)
-        {
-            if (!blurEnabled)
-            {
-                return ACCENT_ENABLE_TRANSPARENTGRADIENT;
-            }
-
-            return opacity <= 0.01
-                ? ACCENT_ENABLE_BLURBEHIND
-                : ACCENT_ENABLE_ACRYLICBLURBEHIND;
-        }
-
-        if (opacity <= 0.001)
-        {
-            return ACCENT_DISABLED;
-        }
-
-        return ACCENT_ENABLE_GRADIENT;
-    }
-
-    public static bool ApplyAccentBlur(
-        IntPtr hWnd,
-        Windows.UI.Color tintColor,
-        double opacity,
-        bool enabled,
-        bool blurEnabled = true)
+    public static bool ApplyAccentBlur(IntPtr hWnd, Windows.UI.Color tintColor, double opacity, bool enabled)
     {
         opacity = Math.Clamp(opacity, 0.0, 1.0);
 
-        int accentState = ResolveAccentState(enabled, blurEnabled, opacity);
+        int accentState;
         int accentFlags = 2;
         uint gradientColor = ToAbgr(ApplyAlpha(tintColor, opacity));
-        if (accentState == ACCENT_DISABLED)
+
+        if (enabled)
         {
+            accentState = opacity <= 0.01
+                ? ACCENT_ENABLE_BLURBEHIND
+                : ACCENT_ENABLE_ACRYLICBLURBEHIND;
+        }
+        else if (opacity <= 0.001)
+        {
+            accentState = ACCENT_DISABLED;
             accentFlags = 0;
             gradientColor = 0;
+        }
+        else
+        {
+            accentState = ACCENT_ENABLE_GRADIENT;
         }
 
         var accent = new AccentPolicy
@@ -1505,7 +1465,6 @@ public static partial class Win32Helper
     public static partial bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
 
     public const uint MONITOR_DEFAULTTONEAREST = 2;
-    public const uint MONITOR_DEFAULTTOPRIMARY = 1;
     private const int EnumCurrentSettings = -1;
 
     [LibraryImport("user32.dll")]
@@ -1642,48 +1601,6 @@ public static partial class Win32Helper
         try
         {
             IntPtr monitor = MonitorFromWindow(hWnd, MONITOR_DEFAULTTONEAREST);
-            if (monitor == IntPtr.Zero)
-            {
-                return WidgetDisplayRefreshRatePolicy.DefaultRefreshRateHz;
-            }
-
-            var monitorInfo = new MONITORINFOEX
-            {
-                cbSize = Marshal.SizeOf<MONITORINFOEX>(),
-                szDevice = string.Empty
-            };
-            if (!GetMonitorInfoEx(monitor, ref monitorInfo) ||
-                string.IsNullOrWhiteSpace(monitorInfo.szDevice))
-            {
-                return WidgetDisplayRefreshRatePolicy.DefaultRefreshRateHz;
-            }
-
-            var mode = new DEVMODE
-            {
-                dmDeviceName = string.Empty,
-                dmFormName = string.Empty,
-                dmSize = (short)Marshal.SizeOf<DEVMODE>()
-            };
-            return EnumDisplaySettings(monitorInfo.szDevice, EnumCurrentSettings, ref mode)
-                ? WidgetDisplayRefreshRatePolicy.Normalize((uint)Math.Max(0, mode.dmDisplayFrequency))
-                : WidgetDisplayRefreshRatePolicy.DefaultRefreshRateHz;
-        }
-        catch (Exception ex) when (
-            ex is DllNotFoundException or EntryPointNotFoundException or BadImageFormatException)
-        {
-            return WidgetDisplayRefreshRatePolicy.DefaultRefreshRateHz;
-        }
-    }
-
-    /// <summary>
-    /// Returns the refresh rate of the primary monitor for windowless pacing
-    /// consumers. Invalid driver values safely normalize to 60 Hz.
-    /// </summary>
-    public static int GetPrimaryDisplayRefreshRate()
-    {
-        try
-        {
-            IntPtr monitor = MonitorFromPoint(default, MONITOR_DEFAULTTOPRIMARY);
             if (monitor == IntPtr.Zero)
             {
                 return WidgetDisplayRefreshRatePolicy.DefaultRefreshRateHz;

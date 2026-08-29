@@ -153,17 +153,16 @@ public partial class SettingsViewModel
 
     public IReadOnlyList<SettingsOption>
         AvailableFileWidgetFolderOpenBehaviorOptions =>
-        WrapOptions(
-        [
-            new(
-                FileWidgetFolderOpenBehaviorNames.Explorer,
-                _localizationService.T(
-                    "Settings.FileWidget.FolderOpenBehavior.Explorer")),
-            new(
-                FileWidgetFolderOpenBehaviorNames.Embedded,
-                _localizationService.T(
-                    "Settings.FileWidget.FolderOpenBehavior.Embedded"))
-        ]);
+    [
+        new(
+            FileWidgetFolderOpenBehaviorNames.Explorer,
+            _localizationService.T(
+                "Settings.FileWidget.FolderOpenBehavior.Explorer")),
+        new(
+            FileWidgetFolderOpenBehaviorNames.Embedded,
+            _localizationService.T(
+                "Settings.FileWidget.FolderOpenBehavior.Embedded"))
+    ];
 
     public object[] AvailableFileWidgetFolderOpenBehaviorOptionItems =>
         AvailableFileWidgetFolderOpenBehaviorOptions.Cast<object>().ToArray();

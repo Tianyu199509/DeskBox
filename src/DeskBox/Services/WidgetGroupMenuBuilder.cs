@@ -80,6 +80,9 @@ internal static class WidgetGroupMenuBuilder
             FormatFollowDefault(GetNavigationName(
                 widgetManager.GetWidgetGroupDefaultNavigationStyle())));
         AddNavigationItem(
+            WidgetGroupNavigationStyles.Auto,
+            GetNavigationName(WidgetGroupNavigationStyles.Auto));
+        AddNavigationItem(
             WidgetGroupNavigationStyles.Tabs,
             GetNavigationName(WidgetGroupNavigationStyles.Tabs));
         AddNavigationItem(
@@ -250,7 +253,7 @@ internal static class WidgetGroupMenuBuilder
                     localizationService.T("Widget.Group.Navigation.Tabs"),
                 WidgetGroupNavigationStyles.Stack =>
                     localizationService.T("Widget.Group.Navigation.Stack"),
-                _ => localizationService.T("Widget.Group.Navigation.Stack")
+                _ => localizationService.T("Widget.Group.Navigation.Auto")
             };
 
         string GetTitleName(string style) =>

@@ -54,11 +54,11 @@ public partial class SettingsViewModel
     }
 
     public IReadOnlyList<SettingsOption> AvailableWidgetGroupNavigationStyleOptions =>
-        WrapOptions(
-        [
-            new(WidgetGroupNavigationStyles.Tabs, T("Settings.WidgetGroupNavigation.Tabs")),
-            new(WidgetGroupNavigationStyles.Stack, T("Settings.WidgetGroupNavigation.Stack"))
-        ]);
+    [
+        new(WidgetGroupNavigationStyles.Auto, T("Settings.WidgetGroupNavigation.Auto")),
+        new(WidgetGroupNavigationStyles.Tabs, T("Settings.WidgetGroupNavigation.Tabs")),
+        new(WidgetGroupNavigationStyles.Stack, T("Settings.WidgetGroupNavigation.Stack"))
+    ];
 
     public string SelectedWidgetGroupDefaultTitleDisplayMode
     {
@@ -85,12 +85,11 @@ public partial class SettingsViewModel
     }
 
     public IReadOnlyList<SettingsOption> AvailableWidgetGroupTitleDisplayModeOptions =>
-        WrapOptions(
-        [
-            new(WidgetGroupTitleDisplayModes.IconAndText, T("Settings.WidgetGroupTitle.IconAndText")),
-            new(WidgetGroupTitleDisplayModes.IconOnly, T("Settings.WidgetGroupTitle.IconOnly")),
-            new(WidgetGroupTitleDisplayModes.TextOnly, T("Settings.WidgetGroupTitle.TextOnly"))
-        ]);
+    [
+        new(WidgetGroupTitleDisplayModes.IconAndText, T("Settings.WidgetGroupTitle.IconAndText")),
+        new(WidgetGroupTitleDisplayModes.IconOnly, T("Settings.WidgetGroupTitle.IconOnly")),
+        new(WidgetGroupTitleDisplayModes.TextOnly, T("Settings.WidgetGroupTitle.TextOnly"))
+    ];
 
     public bool IsWidgetGroupWheelSwitchEnabled
     {
@@ -451,44 +450,42 @@ public partial class SettingsViewModel
     }
 
     private IReadOnlyList<SettingsOption> CreateGroupNavigationOptions() =>
-        WrapOptions(
-        [
-            new(
-                WidgetGroupNavigationStyles.FollowDefault,
-                FormatFollowDefault(GetWidgetGroupNavigationDisplayName(
-                    SelectedWidgetGroupDefaultNavigationStyle))),
-            new(WidgetGroupNavigationStyles.Tabs, T("Settings.WidgetGroupNavigation.Tabs")),
-            new(WidgetGroupNavigationStyles.Stack, T("Settings.WidgetGroupNavigation.Stack"))
-        ]);
+    [
+        new(
+            WidgetGroupNavigationStyles.FollowDefault,
+            FormatFollowDefault(GetWidgetGroupNavigationDisplayName(
+                SelectedWidgetGroupDefaultNavigationStyle))),
+        new(WidgetGroupNavigationStyles.Auto, T("Settings.WidgetGroupNavigation.Auto")),
+        new(WidgetGroupNavigationStyles.Tabs, T("Settings.WidgetGroupNavigation.Tabs")),
+        new(WidgetGroupNavigationStyles.Stack, T("Settings.WidgetGroupNavigation.Stack"))
+    ];
 
     private IReadOnlyList<SettingsOption> CreateGroupTitleOptions() =>
-        WrapOptions(
-        [
-            new(
-                WidgetGroupTitleDisplayModes.FollowDefault,
-                FormatFollowDefault(GetWidgetGroupTitleDisplayName(
-                    SelectedWidgetGroupDefaultTitleDisplayMode))),
-            new(WidgetGroupTitleDisplayModes.IconAndText, T("Settings.WidgetGroupTitle.IconAndText")),
-            new(WidgetGroupTitleDisplayModes.IconOnly, T("Settings.WidgetGroupTitle.IconOnly")),
-            new(WidgetGroupTitleDisplayModes.TextOnly, T("Settings.WidgetGroupTitle.TextOnly"))
-        ]);
+    [
+        new(
+            WidgetGroupTitleDisplayModes.FollowDefault,
+            FormatFollowDefault(GetWidgetGroupTitleDisplayName(
+                SelectedWidgetGroupDefaultTitleDisplayMode))),
+        new(WidgetGroupTitleDisplayModes.IconAndText, T("Settings.WidgetGroupTitle.IconAndText")),
+        new(WidgetGroupTitleDisplayModes.IconOnly, T("Settings.WidgetGroupTitle.IconOnly")),
+        new(WidgetGroupTitleDisplayModes.TextOnly, T("Settings.WidgetGroupTitle.TextOnly"))
+    ];
 
     private IReadOnlyList<SettingsOption> CreateGroupBooleanOptions(bool defaultValue) =>
-        WrapOptions(
-        [
-            new(
-                GroupBooleanFollowDefault,
-                FormatFollowDefault(T(defaultValue ? "Common.On" : "Common.Off"))),
-            new(GroupBooleanOn, T("Common.On")),
-            new(GroupBooleanOff, T("Common.Off"))
-        ]);
+    [
+        new(
+            GroupBooleanFollowDefault,
+            FormatFollowDefault(T(defaultValue ? "Common.On" : "Common.Off"))),
+        new(GroupBooleanOn, T("Common.On")),
+        new(GroupBooleanOff, T("Common.Off"))
+    ];
 
     private IReadOnlyList<SettingsOption> CreateGroupCollapseOptions()
     {
         string defaultBehavior = WidgetCollapseBehaviorNames.ToSettingValue(
             WidgetCollapseBehaviorNames.Normalize(
                 _settingsService.Settings.WidgetCollapseBehavior));
-        return WrapOptions(
+        return
         [
             new(
                 WidgetCollapseBehaviorNames.System,
@@ -502,15 +499,14 @@ public partial class SettingsViewModel
             new(
                 WidgetCollapseBehaviorNames.Smart,
                 GetWidgetCollapseBehaviorDisplayName(WidgetCollapseBehaviorNames.Smart))
-        ]);
+        ];
     }
 
     private IReadOnlyList<SettingsOption> CreateGroupChromeOptions() =>
-        WrapOptions(
-        [
-            new(WidgetChromeModeNames.Standard, T("Settings.WidgetChrome.Standard")),
-            new(WidgetChromeModeNames.Compact, T("Settings.WidgetChrome.Compact"))
-        ]);
+    [
+        new(WidgetChromeModeNames.Standard, T("Settings.WidgetChrome.Standard")),
+        new(WidgetChromeModeNames.Compact, T("Settings.WidgetChrome.Compact"))
+    ];
 
     private string FormatFollowDefault(string currentValue) =>
         _localizationService.Format(
@@ -555,7 +551,7 @@ public partial class SettingsViewModel
                 T("Settings.WidgetGroupNavigation.Tabs"),
             WidgetGroupNavigationStyles.Stack =>
                 T("Settings.WidgetGroupNavigation.Stack"),
-            _ => T("Settings.WidgetGroupNavigation.Stack")
+            _ => T("Settings.WidgetGroupNavigation.Auto")
         };
 
     private string GetWidgetGroupTitleDisplayName(string style) =>

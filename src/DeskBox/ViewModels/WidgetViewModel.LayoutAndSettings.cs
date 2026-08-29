@@ -121,17 +121,9 @@ public partial class WidgetViewModel
         IconLabelMaxWidth = labelMaxWidth;
         IconTileWidth = Math.Max(iconSize + Lerp(6, 28, horizontalT), labelMaxWidth + Lerp(4, 16, horizontalT));
         double twoLineTileHeight = iconSize + Lerp(24, 70, verticalT);
-        double oneLineTileHeight = Math.Max(
-            iconSize + textSize + 8,
-            twoLineTileHeight - textSize - 3);
-        IconTileHeight = fileNameLineCount switch
-        {
-            SettingsService.HiddenFileNameLineCount => Math.Max(
-                iconSize + 8,
-                oneLineTileHeight - textSize - 3),
-            SettingsService.MinFileNameLineCount => oneLineTileHeight,
-            _ => twoLineTileHeight
-        };
+        IconTileHeight = fileNameLineCount == SettingsService.MinFileNameLineCount
+            ? Math.Max(iconSize + textSize + 8, twoLineTileHeight - textSize - 3)
+            : twoLineTileHeight;
         IconTileMargin = new Thickness(
             Lerp(0, 2, horizontalT),
             Lerp(0, 2, verticalT),
@@ -145,10 +137,7 @@ public partial class WidgetViewModel
         IconContentSpacing = Lerp(1, 7, verticalT);
         IconImageSize = iconSize;
         IconLabelFontSize = textSize;
-        IconLabelMaxLines = Math.Max(SettingsService.MinFileNameLineCount, fileNameLineCount);
-        IconLabelVisibility = fileNameLineCount == SettingsService.HiddenFileNameLineCount
-            ? Visibility.Collapsed
-            : Visibility.Visible;
+        IconLabelMaxLines = fileNameLineCount;
         _iconDecodePixelWidth = ResolveIconDecodePixelWidth(iconSize);
 
         double listScale = Lerp(0.68, 0.90, densityT);

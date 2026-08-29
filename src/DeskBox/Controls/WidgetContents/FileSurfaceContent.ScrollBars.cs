@@ -71,12 +71,6 @@ public sealed partial class FileSurfaceContent
         StopScrollBarHideTimer();
         SetVerticalScrollBarVisibility(ItemsGrid, ScrollBarVisibility.Hidden);
         SetVerticalScrollBarVisibility(ItemsList, ScrollBarVisibility.Hidden);
-        if (_stackPopoverItemsView is { } stackPopoverItemsView)
-        {
-            SetVerticalScrollBarVisibility(
-                stackPopoverItemsView,
-                ScrollBarVisibility.Hidden);
-        }
     }
 
     private void StopScrollBarHideTimer()

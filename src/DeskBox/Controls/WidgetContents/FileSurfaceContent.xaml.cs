@@ -1,4 +1,4 @@
-﻿using System.Collections.Specialized;
+using System.Collections.Specialized;
 using DeskBox.Controls;
 using DeskBox.Contracts;
 using DeskBox.Helpers;
@@ -394,47 +394,6 @@ public sealed partial class FileSurfaceContent :
         // rather than foreground activation. Desktop-layer groups intentionally
         // use SW_SHOWNOACTIVATE, so treating their initial inactive state as a
         // deactivation would cancel the first icon hydration pass.
-        //
-        // Selection, however, is an interaction-scoped state: leaving DeskBox
-        // (another app or the desktop takes the foreground) ends the selection
-        // gesture, so stale highlights do not survive a round trip.
-        ClearItemSelectionIfInteractionIdle();
-    }
-
-    public void OnCompactStateChanged(bool collapsed)
-    {
-        // Collapsing a widget hides its items; keeping hidden selection state
-        // would resurrect stale highlights on the next expand.
-        if (collapsed)
-        {
-            ClearItemSelectionIfInteractionIdle();
-        }
-    }
-
-    private void ClearItemSelectionIfInteractionIdle()
-    {
-        // Active gestures own their selection: the stack popover, its drag
-        // and title editing, an inline item rename, or an outbound drag all
-        // read the current selection and must not observe a surprise reset
-        // triggered by their own window activations.
-        if (IsStackPopoverInteractionActive ||
-            _stackPopoverDragActive ||
-            _stackPopoverTitleEditing ||
-            _itemRenameTarget is not null ||
-            _pendingPointerDragItems.Length > 0)
-        {
-            return;
-        }
-
-        if (ItemsGrid.SelectedItems.Count == 0 &&
-            ItemsList.SelectedItems.Count == 0 &&
-            !_isBoxSelecting)
-        {
-            return;
-        }
-
-        ResetBoxSelectionState();
-        ClearItemSelection();
     }
 
     public object? CaptureTransientState()
@@ -2032,7 +1991,6 @@ public sealed partial class FileSurfaceContent :
         if (_isImportBusy ||
             HasTransferConflict(payload.Paths, ViewModel.CurrentFolderPath))
         {
-            e.AcceptedOperation = DataPackageOperation.None;
             App.LogVerbose(
                 $"[WidgetSurface] Ignored overlapping file drop id={WidgetId} " +
                 "stage=before-read");
@@ -2084,7 +2042,6 @@ public sealed partial class FileSurfaceContent :
             HandleSurfaceFinalReorder(
                 payload.Paths,
                 e.GetPosition(GetActiveItemsView()));
-            e.AcceptedOperation = DataPackageOperation.Link;
             PersistSurfaceReorder();
             ResetDragPayloadCache();
             return;
@@ -2094,9 +2051,6 @@ public sealed partial class FileSurfaceContent :
         App.Log(
             $"[DropOperation] operation={dropOperationId} widget={WidgetId} " +
             "stage=Received");
-        // DragOver may have left Move on the event. Keep the completion result
-        // non-destructive until the filesystem transfer has actually finished.
-        e.AcceptedOperation = DataPackageOperation.None;
         var deferral = e.GetDeferral();
         // Start visible feedback before asking the source application for its
         // StorageItems. Explorer, cloud providers and virtual-file sources can
@@ -2152,6 +2106,16 @@ public sealed partial class FileSurfaceContent :
                     e.DataView.Properties,
                     "DeskBoxSourceWidgetId");
 
+                // The data package has been fully materialized and every value
+                // needed below is now local. Release the shell drag before the
+                // potentially long filesystem transfer so Explorer's drag image
+                // does not remain layered over DeskBox's progress UI.
+                e.AcceptedOperation = accepted;
+                deferral.Complete();
+                deferral = null;
+                App.Log(
+                    $"[DropOperation] operation={dropOperationId} widget={WidgetId} " +
+                    "stage=DeferralReleased");
                 IReadOnlyList<string> completedSourcePaths =
                     await ImportDroppedFilesAsync(
                         droppedFiles,
@@ -2171,35 +2135,18 @@ public sealed partial class FileSurfaceContent :
                         completedSourcePaths);
                 }
 
-                int requestedMoveCount = droppedFiles.Count(file =>
-                    !file.ForceManagedCopy);
-                e.AcceptedOperation = ResolveSafeDropCompletionOperation(
-                    accepted,
-                    payload.IsDeskBoxFileDrag,
-                    requestedMoveCount,
-                    completedSourcePaths.Count);
-
-                int completedCount = moveWhenMapped == true
-                    ? completedSourcePaths.Count
-                    : droppedFiles.Count;
-                ShowFeedback(moveWhenMapped == true && completedCount == 0
-                    ? new(
-                        T("Widget.NoItemsMoved"),
-                        WidgetFeedbackSeverity.Warning,
-                        "file-drop-empty")
-                    : new(
-                        _localizationService.Format(
-                            moveWhenMapped == true
-                                ? "Widget.MovedCount"
-                                : "Widget.PastedCount",
-                            completedCount),
-                        WidgetFeedbackSeverity.Success,
-                        "file-drop"));
+                ShowFeedback(new(
+                    _localizationService.Format(
+                        moveWhenMapped == true
+                            ? "Widget.MovedCount"
+                            : "Widget.PastedCount",
+                        droppedFiles.Count),
+                    WidgetFeedbackSeverity.Success,
+                    "file-drop"));
             }
         }
         catch (OperationCanceledException)
         {
-            e.AcceptedOperation = DataPackageOperation.None;
             App.Log(
                 $"[DropOperation] operation={dropOperationId} widget={WidgetId} " +
                 "stage=Canceled");
@@ -2211,7 +2158,6 @@ public sealed partial class FileSurfaceContent :
         }
         catch (Exception ex)
         {
-            e.AcceptedOperation = DataPackageOperation.None;
             App.Log(
                 $"[DropOperation] operation={dropOperationId} widget={WidgetId} " +
                 $"stage=Failed error={ex}");
@@ -2235,10 +2181,13 @@ public sealed partial class FileSurfaceContent :
             }
             ApplyDropVisual(FileDropVisualState.None);
             ResetDragPayloadCache();
-            deferral.Complete();
-            App.Log(
-                $"[DropOperation] operation={dropOperationId} widget={WidgetId} " +
-                "stage=DeferralReleased");
+            if (deferral is not null)
+            {
+                deferral?.Complete();
+                App.Log(
+                    $"[DropOperation] operation={dropOperationId} widget={WidgetId} " +
+                    "stage=DeferralReleasedInFinally");
+            }
         }
     }
 
@@ -2606,33 +2555,6 @@ public sealed partial class FileSurfaceContent :
     {
         return ToDataPackageOperation(
             ResolveSurfaceDropIntent(dataView, forceCopy));
-    }
-
-    internal static DataPackageOperation ResolveSafeDropCompletionOperation(
-        DataPackageOperation requestedOperation,
-        bool isDeskBoxFileDrag,
-        int requestedMoveCount,
-        int completedMoveCount)
-    {
-        if (requestedOperation != DataPackageOperation.Move)
-        {
-            return requestedOperation;
-        }
-
-        if (requestedMoveCount <= 0 ||
-            completedMoveCount != requestedMoveCount)
-        {
-            return DataPackageOperation.None;
-        }
-
-        // DeskBox already performs the filesystem move and explicitly tells the
-        // source widget which paths completed. Returning Move to its native Shell
-        // data object would ask Shell to clean the source a second time; when the
-        // target released the deferral before importing, that cleanup sent the
-        // original shortcuts to the Recycle Bin before they could be transferred.
-        return isDeskBoxFileDrag
-            ? DataPackageOperation.None
-            : DataPackageOperation.Move;
     }
 
     private static async Task<DroppedFileBatch> GetSurfaceDropFilesAsync(
@@ -3293,10 +3215,9 @@ public sealed partial class FileSurfaceContent :
 
         if (e.Key == VirtualKey.Escape)
         {
-            if (_stackPopoverPopupOpen ||
-                _stackPopoverHostWindow?.IsVisible == true)
+            if (_stackPopoverPopup is not null)
             {
-                CloseStackPopover();
+                CloseStackPopover(releaseImmediately: true);
                 e.Handled = true;
                 return;
             }

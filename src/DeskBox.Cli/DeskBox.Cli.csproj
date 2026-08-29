@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>DeskBox.Cli</RootNamespace>
+    <Version>1.4.5</Version>
+    <AssemblyVersion>1.4.5.0</AssemblyVersion>
+    <FileVersion>1.4.5.0</FileVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <IsPackable>false</IsPackable>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <!-- The CLI is a thin client over the named-pipe command API; it must
+         stay dependency-free so it stays trivially shippable beside the app. -->
+    <EnableAotAnalyzer>true</EnableAotAnalyzer>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\DeskBox.Protocol\DeskBox.Protocol.csproj" />
+  </ItemGroup>
+
+</Project>

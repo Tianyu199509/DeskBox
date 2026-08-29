@@ -114,11 +114,10 @@ public partial class SettingsViewModel
     }
 
     public IReadOnlyList<SettingsOption> AvailableFileOpenMethodOptions =>
-        WrapOptions(
-        [
-            new(FileOpenMethodSingleClick, _localizationService.T("Settings.OpenMethod.SingleClick")),
-            new(FileOpenMethodDoubleClick, _localizationService.T("Settings.OpenMethod.DoubleClick"))
-        ]);
+    [
+        new(FileOpenMethodSingleClick, _localizationService.T("Settings.OpenMethod.SingleClick")),
+        new(FileOpenMethodDoubleClick, _localizationService.T("Settings.OpenMethod.DoubleClick"))
+    ];
 
     public string SelectedShowDesktopBehavior
     {
@@ -132,11 +131,10 @@ public partial class SettingsViewModel
     }
 
     public IReadOnlyList<SettingsOption> AvailableShowDesktopBehaviorOptions =>
-        WrapOptions(
-        [
-            new(ShowDesktopBehaviorKeepVisible, _localizationService.T("Settings.ShowDesktopBehavior.KeepVisible")),
-            new(ShowDesktopBehaviorHideWithWindows, _localizationService.T("Settings.ShowDesktopBehavior.HideWithWindows"))
-        ]);
+    [
+        new(ShowDesktopBehaviorKeepVisible, _localizationService.T("Settings.ShowDesktopBehavior.KeepVisible")),
+        new(ShowDesktopBehaviorHideWithWindows, _localizationService.T("Settings.ShowDesktopBehavior.HideWithWindows"))
+    ];
 
     partial void OnDefaultWidthChanged(double value)
     {

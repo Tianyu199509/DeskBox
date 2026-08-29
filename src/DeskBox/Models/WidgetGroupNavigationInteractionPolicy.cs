@@ -23,9 +23,17 @@ public static class WidgetGroupNavigationInteractionPolicy
         int memberCount,
         double availableWidth)
     {
-        return WidgetGroupNavigationStyles.Normalize(
+        string requested = WidgetGroupNavigationStyles.Normalize(
             requestedStyle,
             allowFollowDefault: false);
+        if (requested != WidgetGroupNavigationStyles.Auto)
+        {
+            return requested;
+        }
+
+        return memberCount <= 3 && availableWidth >= 240
+            ? WidgetGroupNavigationStyles.Tabs
+            : WidgetGroupNavigationStyles.Stack;
     }
 
     public static bool ShouldLockVertical(double deltaX, double deltaY)

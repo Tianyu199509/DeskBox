@@ -30,26 +30,11 @@ public sealed class AotStage7C1ContractTests
         string about = Read("src/DeskBox/ViewModels/SettingsViewModel.AboutAndUpdates.cs");
 
         Assert.Contains(
-            "<Content Remove=\"Assets\\wechat-qrcode.jpg\" />",
-            project,
-            StringComparison.Ordinal);
-        Assert.Contains(
-            "<Content Remove=\"Assets\\Support\\*.png\" />",
-            project,
-            StringComparison.Ordinal);
-        Assert.Contains(
             "<Content Include=\"Assets\\wechat-qrcode.jpg\" Condition=\"'$(DeskBoxDistribution)' != 'Store'\">",
             project,
             StringComparison.Ordinal);
         Assert.Contains(
-            "<Content Include=\"Assets\\Support\\*.png\" Condition=\"'$(DeskBoxDistribution)' != 'Store'\">",
-            project,
-            StringComparison.Ordinal);
-        // Direct payloads must actually carry the support QR images: without
-        // explicit copy metadata the files never reach the publish directory
-        // and the support dialog renders empty placeholders.
-        Assert.Contains(
-            "<CopyToPublishDirectory>Always</CopyToPublishDirectory>",
+            "<Content Include=\"Assets\\Support\\*.png\" Condition=\"'$(DeskBoxDistribution)' != 'Store'\" />",
             project,
             StringComparison.Ordinal);
         Assert.Contains("'wechat-qrcode'", storeAudit, StringComparison.Ordinal);

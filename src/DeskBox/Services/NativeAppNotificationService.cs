@@ -47,15 +47,14 @@ public sealed record NativeAppNotificationSnapshot(
 
 public sealed class NativeAppNotificationService : IDisposable
 {
-    // Registration failures are retried at most once per window; every failed
-    // attempt costs a COM activation and a log line, and TryShow is called for
-    // each reminder/notification burst.
-    private static readonly TimeSpan s_registerRetryInterval = TimeSpan.FromMinutes(5);
-
     private readonly Action<NativeAppNotificationActivation> _activated;
     private bool _isRegistered;
     private bool _isDisposed;
-    private DateTimeOffset _lastRegisterAttemptAtUtc = DateTimeOffset.MinValue;
+
+    public NativeAppNotificationService(Action<string> activated)
+        : this(activation => activated(activation.Arguments))
+    {
+    }
 
     public NativeAppNotificationService(Action<NativeAppNotificationActivation> activated)
     {
@@ -64,7 +63,7 @@ public sealed class NativeAppNotificationService : IDisposable
 
     public bool IsRegistered => _isRegistered;
 
-    public bool Register(bool forceRetry = false)
+    public bool Register()
     {
         if (_isDisposed)
         {
@@ -76,13 +75,6 @@ public sealed class NativeAppNotificationService : IDisposable
             return true;
         }
 
-        if (!forceRetry &&
-            DateTimeOffset.UtcNow - _lastRegisterAttemptAtUtc < s_registerRetryInterval)
-        {
-            return false;
-        }
-
-        _lastRegisterAttemptAtUtc = DateTimeOffset.UtcNow;
         try
         {
             AppNotificationManager.Default.NotificationInvoked += OnNotificationInvoked;
@@ -94,40 +86,8 @@ public sealed class NativeAppNotificationService : IDisposable
         catch (Exception ex)
         {
             AppNotificationManager.Default.NotificationInvoked -= OnNotificationInvoked;
-            App.Log(
-                $"[Notification] Native app notification registration failed: {ex}");
-            LogNotificationPlatformEnvironment();
+            App.Log($"[Notification] Native app notification registration failed: {ex}");
             return false;
-        }
-    }
-
-    /// <summary>
-    /// Records the state of the OS notification platform next to a registration
-    /// failure. REGDB_E_CLASSNOTREG (0x80040154) almost always means the
-    /// Windows Push Notifications service or the user-level toast switch was
-    /// disabled system-wide, which no app-side retry can recover from.
-    /// </summary>
-    private static void LogNotificationPlatformEnvironment()
-    {
-        try
-        {
-            object? wpnStart = Microsoft.Win32.Registry.GetValue(
-                @"HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\WpnService",
-                "Start",
-                null);
-            object? toastEnabled = Microsoft.Win32.Registry.GetValue(
-                @"HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion\PushNotifications",
-                "ToastEnabled",
-                null);
-            App.Log(
-                "[Notification] Platform probe: " +
-                $"WpnService.Start={wpnStart?.ToString() ?? "unknown"} " +
-                $"(4=disabled) ToastEnabled={toastEnabled?.ToString() ?? "unknown"} " +
-                $"os={Environment.OSVersion.Version}");
-        }
-        catch (Exception probeEx)
-        {
-            App.Log($"[Notification] Platform probe failed: {probeEx.Message}");
         }
     }
 

@@ -8,21 +8,6 @@ public sealed partial class WidgetManager
 {
     private string? _groupDragCandidateSourceId;
     private WidgetGroupDragCandidate[] _groupDragCandidates = [];
-    private int _widgetWindowsMovedVersion;
-    private int _groupDragCandidateBoundsVersion = -1;
-    private Windows.Graphics.RectInt32?[] _groupDragCandidateBounds = [];
-    private bool[] _groupDragCandidateBoundsFetched = [];
-
-    /// <summary>
-    /// Called by manager paths that physically move windows (capsule-bar
-    /// previews, arrangement applies, coordinated moves). Cached candidate
-    /// bounds are re-fetched afterwards so merge hit-testing never reads a
-    /// stale position.
-    /// </summary>
-    private void NoteWidgetWindowsMoved()
-    {
-        _widgetWindowsMovedVersion++;
-    }
 
     private WidgetGroupDragCandidate? FindWidgetGroupDragCandidateAtPoint(
         string sourceWidgetId,
@@ -30,30 +15,18 @@ public sealed partial class WidgetManager
         int screenY)
     {
         EnsureWidgetGroupDragCandidateCache(sourceWidgetId);
-        RefreshWidgetGroupDragCandidateBoundsCacheIfStale();
 
         WidgetGroupDragCandidate? best = null;
         long bestArea = long.MaxValue;
-        for (int index = 0; index < _groupDragCandidates.Length; index++)
+        foreach (WidgetGroupDragCandidate candidate in _groupDragCandidates)
         {
-            WidgetGroupDragCandidate candidate = _groupDragCandidates[index];
             if (!candidate.Window.Visible)
             {
                 continue;
             }
 
-            // This hit-test runs on every drag frame; each uncached fetch
-            // costs a visual-tree transform plus an AppWindow query per
-            // candidate. Cache after the first fetch of the current
-            // movement version.
-            Windows.Graphics.RectInt32? bounds = _groupDragCandidateBounds[index];
-            if (!_groupDragCandidateBoundsFetched[index])
-            {
-                bounds = candidate.Window.GetGroupMergeTitleScreenBounds();
-                _groupDragCandidateBounds[index] = bounds;
-                _groupDragCandidateBoundsFetched[index] = true;
-            }
-
+            Windows.Graphics.RectInt32? bounds =
+                candidate.Window.GetGroupMergeTitleScreenBounds();
             if (!WidgetGroupDropHitTestPolicy.Contains(bounds, screenX, screenY))
             {
                 continue;
@@ -68,19 +41,6 @@ public sealed partial class WidgetManager
         }
 
         return best;
-    }
-
-    private void RefreshWidgetGroupDragCandidateBoundsCacheIfStale()
-    {
-        if (_groupDragCandidateBoundsVersion == _widgetWindowsMovedVersion &&
-            _groupDragCandidateBounds.Length == _groupDragCandidates.Length)
-        {
-            return;
-        }
-
-        _groupDragCandidateBounds = new Windows.Graphics.RectInt32?[_groupDragCandidates.Length];
-        _groupDragCandidateBoundsFetched = new bool[_groupDragCandidates.Length];
-        _groupDragCandidateBoundsVersion = _widgetWindowsMovedVersion;
     }
 
     private void EnsureWidgetGroupDragCandidateCache(string sourceWidgetId)
@@ -123,9 +83,6 @@ public sealed partial class WidgetManager
     {
         _groupDragCandidateSourceId = null;
         _groupDragCandidates = [];
-        _groupDragCandidateBounds = [];
-        _groupDragCandidateBoundsFetched = [];
-        _groupDragCandidateBoundsVersion = -1;
     }
 
     private readonly record struct WidgetGroupDragCandidate(

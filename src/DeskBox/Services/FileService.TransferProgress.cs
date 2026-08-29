@@ -446,24 +446,6 @@ public sealed partial class FileService
         }
     }
 
-    internal static bool CanUseLegacyShellMove(
-        IEnumerable<FileTransferPlan> plans)
-    {
-        ArgumentNullException.ThrowIfNull(plans);
-
-        bool hasPlan = false;
-        foreach (FileTransferPlan plan in plans)
-        {
-            hasPlan = true;
-            if (!CanUseAtomicMove(plan.SourcePath, plan.DestinationPath))
-            {
-                return false;
-            }
-        }
-
-        return hasPlan;
-    }
-
     private static string? GetComparableVolumeRoot(
         string path,
         bool useParentPath)

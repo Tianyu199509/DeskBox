@@ -92,12 +92,7 @@
 
         <!-- Explicit virtualizing panels keep the cached stack popup bounded to
              its viewport instead of allowing a default panel to retain every
-             realized member after source changes. Under Native AOT these
-             template resources cross back into managed code as the base
-             FrameworkTemplate type; the popover code then leaves the control
-             defaults in place (GridView wraps horizontally, ListView stacks
-             vertically) instead of assigning null and falling back to a plain
-             StackPanel. -->
+             realized member after source changes. -->
         <ItemsPanelTemplate x:Key="StackPopoverIconItemsPanelTemplate">
             <ItemsWrapGrid Orientation="Horizontal" />
         </ItemsPanelTemplate>
@@ -117,7 +112,7 @@
                     Mode="Icon"
                     LayoutContext="{Binding DataContext, ElementName=ItemsGrid}"
                     UseStackChildIndent="True"
-                    HorizontalAlignment="Stretch"
+                    HorizontalAlignment="Center"
                     VerticalAlignment="Top"
                     AllowDrop="True"
                     Loaded="ItemSurface_Loaded"
@@ -263,8 +258,7 @@
                         Text="{Binding Name}"
                         TextAlignment="Center"
                         TextTrimming="CharacterEllipsis"
-                        TextWrapping="Wrap"
-                        Visibility="{Binding DataContext.IconLabelVisibility, ElementName=ItemsGrid}" />
+                        TextWrapping="Wrap" />
                 </StackPanel>
             </Border>
         </DataTemplate>
@@ -291,7 +285,7 @@
             <controls:FileItemSurface
                 Mode="Icon"
                 UseStackChildIndent="False"
-                HorizontalAlignment="Stretch"
+                HorizontalAlignment="Center"
                 VerticalAlignment="Top"
                 AllowDrop="True"
                 Loaded="ItemSurface_Loaded"

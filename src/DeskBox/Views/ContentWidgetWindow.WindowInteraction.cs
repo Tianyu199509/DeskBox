@@ -1,4 +1,4 @@
-﻿using DeskBox.Contracts;
+using DeskBox.Contracts;
 using DeskBox.Controls;
 using DeskBox.Controls.WidgetContents;
 using DeskBox.Helpers;
@@ -347,9 +347,6 @@ public sealed partial class ContentWidgetWindow
         }
 
         _contentHost.OnActivated();
-        App.Current.WidgetManager?.ReassertRaisedWidgetGroupAfterDeskBoxActivation(
-            HWnd,
-            "content-window-activated");
     }
 
     private void QueueRestoreDesktopLayerIfForegroundLeavesDeskBox()
@@ -367,11 +364,8 @@ public sealed partial class ContentWidgetWindow
             }
 
             IntPtr foregroundWindow = Win32Helper.GetForegroundWindow();
-            if (foregroundWindow == IntPtr.Zero ||
-                App.Current.IsDeskBoxWindow(foregroundWindow))
+            if (App.Current.IsDeskBoxWindow(foregroundWindow))
             {
-                // Zero means activation is mid-transition (owned popover
-                // hand-off); do not read the gap as a DeskBox leave.
                 RestoreDesktopLayerWhenIdle = false;
                 return;
             }

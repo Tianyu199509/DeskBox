@@ -299,7 +299,6 @@ public sealed partial class ContentWidgetWindow
         };
         bool startRenameWhenClosed = false;
         bool showCloseWhenClosed = false;
-        IDisposable? closeWidgetFlyoutHandoff = null;
         bool showForegroundColorPickerWhenClosed = false;
         rename.Click += (_, _) => startRenameWhenClosed = true;
         flyout.Closed += (_, _) =>
@@ -310,8 +309,8 @@ public sealed partial class ContentWidgetWindow
             }
             else if (showCloseWhenClosed)
             {
-                QueueCloseWidgetFlyout(closeWidgetFlyoutHandoff);
-                closeWidgetFlyoutHandoff = null;
+                DispatcherQueue.TryEnqueue(() =>
+                    ShowCloseWidgetFlyout(ContentWidgetShell));
             }
             else if (showForegroundColorPickerWhenClosed)
             {
@@ -373,12 +372,7 @@ public sealed partial class ContentWidgetWindow
             Icon = new FontIcon { Glyph = "\uE7E8" }
         };
         WidgetDangerActionStyle.Apply(disableWidget);
-        disableWidget.Click += (_, _) =>
-        {
-            showCloseWhenClosed = true;
-            closeWidgetFlyoutHandoff ??=
-                AcquireCloseWidgetFlyoutHandoff();
-        };
+        disableWidget.Click += (_, _) => showCloseWhenClosed = true;
         flyout.Items.Add(disableWidget);
 
         return flyout;
@@ -408,25 +402,19 @@ public sealed partial class ContentWidgetWindow
             SetChromeModeOverride);
 
         bool showCloseWhenClosed = false;
-        IDisposable? closeWidgetFlyoutHandoff = null;
         var closeWidget = new MenuFlyoutItem
         {
             Text = GetFeatureWidgetCloseMenuText(),
             Icon = new FontIcon { Glyph = "\uE7E8" }
         };
         WidgetDangerActionStyle.Apply(closeWidget);
-        closeWidget.Click += (_, _) =>
-        {
-            showCloseWhenClosed = true;
-            closeWidgetFlyoutHandoff ??=
-                AcquireCloseWidgetFlyoutHandoff();
-        };
+        closeWidget.Click += (_, _) => showCloseWhenClosed = true;
         e.Menu.Closed += (_, _) =>
         {
             if (showCloseWhenClosed)
             {
-                QueueCloseWidgetFlyout(closeWidgetFlyoutHandoff);
-                closeWidgetFlyoutHandoff = null;
+                DispatcherQueue.TryEnqueue(() =>
+                    ShowCloseWidgetFlyout(ContentWidgetShell));
             }
         };
         e.CloseWidgetItem = closeWidget;
@@ -461,38 +449,6 @@ public sealed partial class ContentWidgetWindow
         ShowFlyoutWithInteraction(
             flyout,
             target);
-    }
-
-    private IDisposable AcquireCloseWidgetFlyoutHandoff()
-    {
-        BeginCompactInteraction();
-        WidgetManager? widgetManager = App.Current.WidgetManager;
-        widgetManager?.BeginWidgetInteraction(
-            "content-close-confirmation-handoff");
-        return new CloseWidgetFlyoutHandoff(this, widgetManager);
-    }
-
-    private void QueueCloseWidgetFlyout(IDisposable? interactionHandoff)
-    {
-        if (DispatcherQueue.TryEnqueue(() =>
-        {
-            try
-            {
-                // ShowFlyoutWithInteraction acquires the confirmation flyout's
-                // own interaction before this handoff is released, so a grouped
-                // Smart capsule cannot collapse between the two MenuFlyouts.
-                ShowCloseWidgetFlyout(ContentWidgetShell);
-            }
-            finally
-            {
-                interactionHandoff?.Dispose();
-            }
-        }))
-        {
-            return;
-        }
-
-        interactionHandoff?.Dispose();
     }
 
     private MenuFlyout CreateFeatureWidgetCloseFlyout(
@@ -993,36 +949,6 @@ public sealed partial class ContentWidgetWindow
         else
         {
             flyout.ShowAt(target);
-        }
-    }
-
-    private sealed class CloseWidgetFlyoutHandoff : IDisposable
-    {
-        private ContentWidgetWindow? _owner;
-        private WidgetManager? _widgetManager;
-
-        public CloseWidgetFlyoutHandoff(
-            ContentWidgetWindow owner,
-            WidgetManager? widgetManager)
-        {
-            _owner = owner;
-            _widgetManager = widgetManager;
-        }
-
-        public void Dispose()
-        {
-            ContentWidgetWindow? owner = Interlocked.Exchange(ref _owner, null);
-            WidgetManager? widgetManager = Interlocked.Exchange(
-                ref _widgetManager,
-                null);
-            if (owner is null)
-            {
-                return;
-            }
-
-            owner.EndCompactInteraction();
-            widgetManager?.EndWidgetInteraction(
-                "content-close-confirmation-handoff-completed");
         }
     }
 
