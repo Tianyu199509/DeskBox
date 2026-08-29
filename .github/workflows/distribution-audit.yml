@@ -15,7 +15,7 @@ concurrency:
 
 jobs:
   distribution:
-    name: ${{ matrix.platform }} Direct and Store AOT distribution
+    name: ${{ matrix.platform }} Direct Full and Store AOT distribution
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 120
     strategy:
@@ -98,7 +98,7 @@ jobs:
           -p:RuntimeIdentifier=${{ matrix.rid }}
           --verbosity minimal
 
-      - name: Build and audit Direct installer and Store upload
+      - name: Build and audit Direct Full installer and Store upload
         shell: pwsh
         run: >-
           .\scripts\build-stage-7c1-distribution.ps1

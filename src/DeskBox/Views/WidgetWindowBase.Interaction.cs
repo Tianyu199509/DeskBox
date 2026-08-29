@@ -28,6 +28,18 @@ public abstract partial class WidgetWindowBase
             return;
         }
 
+        // While an expanded capsule lease is held, the expand flow already
+        // owns this window's layer (band top below app windows, or band
+        // bottom in pinned mode until collapse). The TOPMOST interaction
+        // pulse would make it jump above application windows — and in
+        // pinned mode would bury it — for the pulse duration.
+        if (_expandedWidgetLayerLeaseGeneration != 0)
+        {
+            LastElevateForInteractionUtc = DateTime.UtcNow;
+            OnElevated();
+            return;
+        }
+
         LastElevateForInteractionUtc = DateTime.UtcNow;
         HoldTemporaryTopMost();
         OnElevated();

@@ -915,7 +915,9 @@ public sealed partial class MusicWidgetViewModel : ObservableObject, IDisposable
 
     private double GetArtworkBackdropCornerRadius()
     {
-        return _settingsService?.Settings.WidgetCornerPreference switch
+        string preference = WindowsCompatibilityService.ResolveEffectiveWidgetCornerPreference(
+            _settingsService?.Settings.WidgetCornerPreference);
+        return preference switch
         {
             SettingsService.WidgetCornerPreferenceSquare => 0,
             SettingsService.WidgetCornerPreferenceSmall => 6,

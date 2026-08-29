@@ -70,9 +70,8 @@ public partial class SettingsViewModel
             WidgetOpacity = settings.WidgetOpacity;
             WidgetMaterialIntensity = settings.WidgetMaterialIntensity;
             ApplyWidgetForegroundSettingsSnapshot(settings);
-            SelectedWidgetCornerPreference = settings.WidgetCornerPreference is CornerSquare or CornerSmall or CornerRound
-                ? settings.WidgetCornerPreference
-                : CornerRound;
+            SelectedWidgetCornerPreference = WindowsCompatibilityService.ResolveEffectiveWidgetCornerPreference(
+                settings.WidgetCornerPreference);
             SelectedWidgetMaterialType = WindowsCompatibilityService.ResolveWidgetMaterialType(
                 settings.WidgetMaterialType);
             SelectedWidgetBorderColorMode = settings.WidgetBorderColorMode is BorderColorNeutral or BorderColorAccent or BorderColorNone
@@ -217,6 +216,7 @@ public partial class SettingsViewModel
                 SettingsService.WeatherRefreshMaxMinutes);
 
             ManagedStorageRootPath = SettingsService.NormalizeManagedStorageRootPath(settings.DefaultManagedStorageRootPath);
+            ManagedStorageDesktopShortcutEnabled = settings.ManagedStorageDesktopShortcutEnabled;
             GlobalHotkeyEnabled = settings.GlobalHotkeyEnabled;
         }
         finally

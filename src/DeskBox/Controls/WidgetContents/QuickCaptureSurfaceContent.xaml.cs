@@ -1306,8 +1306,12 @@ public sealed partial class QuickCaptureSurfaceContent :
         {
             _isSavingDetail = false;
             _detailSaveGate.Release();
-            if (_detailHasUnsavedChanges && _isDetailEditing && !_isCreatingDetail)
+            if (_detailHasUnsavedChanges && _isDetailEditing && !_isCreatingDetail &&
+                !string.IsNullOrWhiteSpace(DetailMarkdownEditor.Text))
             {
+                // An emptied body fails validation on every attempt; re-arming
+                // the auto-save here would toast "content cannot be empty"
+                // forever. Typing re-arms the timer via ScheduleDetailAutoSave.
                 _detailAutoSaveTimer?.Start();
             }
         }

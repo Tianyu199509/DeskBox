@@ -70,6 +70,8 @@ public sealed partial class WidgetManager
 
         _isTogglingWidgetsDesktopLayer = true;
         _lastTrayLayerToggleUtc = now;
+        _lastRaiseOriginatedFromTrayIcon =
+            string.Equals(source, "tray-icon", StringComparison.Ordinal);
         try
         {
             CancelActiveTrayAnimationsAndRestorePositions();

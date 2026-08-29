@@ -152,7 +152,7 @@ public sealed class AotStage7C1ContractTests
     }
 
     [Fact]
-    public void DirectInstallers_UseNativeAotModeAndSkipOnlyDotNetRuntime()
+    public void InstallerSources_SupportNativeAotFallbackAndBundledRuntimeModes()
     {
         foreach (string relativePath in new[]
                  {
@@ -161,10 +161,19 @@ public sealed class AotStage7C1ContractTests
                  })
         {
             string installer = Read(relativePath);
+            Assert.Contains("#define DeskBoxBundledRuntime 0", installer, StringComparison.Ordinal);
             Assert.Contains("#define DeskBoxNativeAot 0", installer, StringComparison.Ordinal);
+            Assert.Contains("#if DeskBoxBundledRuntime", installer, StringComparison.Ordinal);
             Assert.Contains("#elif DeskBoxNativeAot", installer, StringComparison.Ordinal);
             Assert.Contains("deskbox_native.dll", installer, StringComparison.Ordinal);
+            Assert.Contains("DeskBox.InstallManifest.txt", installer, StringComparison.Ordinal);
+            Assert.Contains("CleanupDeskBoxInstall", installer, StringComparison.Ordinal);
+            Assert.Contains("DeskBox.LegacyBundledRuntimeFiles.txt", installer, StringComparison.Ordinal);
+            Assert.Contains("Flags: dontcopy", installer, StringComparison.Ordinal);
         }
+
+        string migration = Read("installer/DeskBox.Migration.iss");
+        Assert.Contains("if not DirectInstallUpgrade", migration, StringComparison.Ordinal);
 
         foreach (string relativePath in new[]
                  {
@@ -256,9 +265,12 @@ public sealed class AotStage7C1ContractTests
                      "publish-aot-audit.ps1",
                      "publish-arm64-aot-static-audit.ps1",
                      "DeskBoxNativeAot=1",
+                     "DeskBoxBundledRuntime=1",
                      @"Programs\Inno Setup 6\ISCC.exe",
                      "/DMyAppReleaseDir=$directPublishDirectory",
                      "/F$installerOutputBaseName",
+                     "DeskBox.InstallManifest.txt",
+                     "windowsAppRuntimeDependencySkipped = $true",
                      "$storeBuildArguments = @{",
                      "PackageBuildMode = \"StoreUpload\"",
                      "installerInstallationExecuted = $false",

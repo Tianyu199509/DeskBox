@@ -438,7 +438,7 @@ public sealed partial class FileSurfaceContent
                     _ = ViewModel.RemoveItemFromStack(item));
             },
             ClearSelection,
-            ShowSystemContextMenu,
+            ShowSystemContextMenuAsync,
             ElevatedFileLauncher.CanRunAsAdministrator,
             RunAsAdministratorAsync);
     }
@@ -461,27 +461,60 @@ public sealed partial class FileSurfaceContent
         }
     }
 
-    private void ShowSystemContextMenu(WidgetItem item)
+    private async Task ShowSystemContextMenuAsync(WidgetItem item)
     {
         if (TryBlockTransferOpen(item))
         {
             return;
         }
 
-        (int screenX, int screenY) = GetContextMenuScreenPoint(item);
-        _lastItemContextScreenPoint = null;
-        ShellContextMenuHelper.NativeMenuResult result =
-            ShellContextMenuHelper.ShowContextMenu(
-                _hostWindowHandle,
-                item.Path,
-                screenX,
-                screenY);
-        if (result == ShellContextMenuHelper.NativeMenuResult.Failed)
+        bool fromStackPopover = _stackPopoverItemsView?.Items
+            .OfType<WidgetItem>()
+            .Any(candidate => ReferenceEquals(candidate, item)) == true;
+        if (fromStackPopover)
         {
+            // The WinUI flyout closes before the native proxy menu opens. Keep
+            // the stack host alive while focus temporarily belongs to the
+            // proxy-owned HWND.
+            _stackPopoverContextMenuOpen = true;
+            _stackPopoverSystemContextMenuOpen = true;
+        }
+
+        try
+        {
+            (int screenX, int screenY) = GetContextMenuScreenPoint(item);
+            _lastItemContextScreenPoint = null;
+            ShellContextMenuProxy.MenuResult result =
+                await ShellContextMenuProxy.ShowAsync(
+                    item.Path,
+                    screenX,
+                    screenY);
+            if (result == ShellContextMenuProxy.MenuResult.Failed)
+            {
+                ShowFeedback(new WidgetFeedbackRequest(
+                    T("Widget.Error.OperationIncomplete"),
+                    WidgetFeedbackSeverity.Warning,
+                    "system-context-menu"));
+            }
+        }
+        catch (Exception ex)
+        {
+            App.Log(
+                $"[ShellContextMenuProxy] Product call failed " +
+                $"widget={WidgetId}: {ex}");
             ShowFeedback(new WidgetFeedbackRequest(
                 T("Widget.Error.OperationIncomplete"),
                 WidgetFeedbackSeverity.Warning,
                 "system-context-menu"));
+        }
+        finally
+        {
+            _lastItemContextScreenPoint = null;
+            if (fromStackPopover)
+            {
+                _stackPopoverSystemContextMenuOpen = false;
+                CompleteStackPopoverContextMenu();
+            }
         }
     }
 
@@ -626,7 +659,16 @@ public sealed partial class FileSurfaceContent
             flyout.Hide();
             if (hasMappedFolder && mappedFolderPath is not null)
             {
-                Win32Helper.OpenFile(mappedFolderPath);
+                // Keep the configured junction/symlink path for persistence,
+                // but hand Explorer the physical target. RedirectionGuard can
+                // reject ShellExecute's traversal of a user-created mount
+                // point even though the target itself is accessible.
+                string pathToOpen = FileService.TryResolveExistingPathForTraversal(
+                        mappedFolderPath,
+                        out string resolvedPath)
+                    ? resolvedPath
+                    : mappedFolderPath;
+                Win32Helper.OpenFile(pathToOpen);
             }
         };
         flyout.Items.Add(openFolder);

@@ -26,6 +26,15 @@ public class WidgetConfig
     public double Y { get; set; } = 100;
 
     /// <summary>
+    /// Set at creation when no usable display work area existed (broken or
+    /// virtualized display topology, e.g. a cloud-gaming virtual adapter as
+    /// the primary display). A single consumer re-places the widget through
+    /// the initial-placement policy once a usable display appears, then
+    /// clears this flag. Normal creations never set it.
+    /// </summary>
+    public bool NeedsInitialPlacement { get; set; }
+
+    /// <summary>
     /// Corner used to keep this widget stable when display resolution or monitor topology changes.
     /// Values are "LeftTop", "RightTop", "LeftBottom", or "RightBottom".
     /// </summary>

@@ -4,6 +4,54 @@ const
 
 function PrepareDeskBoxDependencies(var NeedsRestart: Boolean): string; forward;
 
+#if DeskBoxBundledRuntime
+function QuoteDeskBoxCleanupArgument(Value: string): string;
+begin
+  Result := '"' + Value + '"';
+end;
+
+procedure CleanupDeskBoxInstall;
+var
+  PowerShellPath: string;
+  CleanupScriptPath: string;
+  CurrentManifestPath: string;
+  LegacyManifestPath: string;
+  PreviousManifestPath: string;
+  Parameters: string;
+  ResultCode: Integer;
+begin
+  if not DirectInstallUpgrade then
+  begin
+    Log('DeskBox first-install path detected; stale install cleanup skipped.');
+    Exit;
+  end;
+
+  ExtractTemporaryFile('cleanup-deskbox-install.ps1');
+  ExtractTemporaryFile('DeskBox.LegacyBundledRuntimeFiles.txt');
+
+  PowerShellPath := ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe');
+  CleanupScriptPath := ExpandConstant('{tmp}\cleanup-deskbox-install.ps1');
+  CurrentManifestPath := ExpandConstant('{tmp}\DeskBox.InstallManifest.current.txt');
+  LegacyManifestPath := ExpandConstant('{tmp}\DeskBox.LegacyBundledRuntimeFiles.txt');
+  PreviousManifestPath := AddBackslash(WizardDirValue) + 'DeskBox.InstallManifest.txt';
+  Parameters :=
+    '-NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File ' +
+    QuoteDeskBoxCleanupArgument(CleanupScriptPath) +
+    ' -InstallRoot ' + QuoteDeskBoxCleanupArgument(WizardDirValue) +
+    ' -CurrentManifestPath ' + QuoteDeskBoxCleanupArgument(CurrentManifestPath) +
+    ' -LegacyManifestPath ' + QuoteDeskBoxCleanupArgument(LegacyManifestPath) +
+    ' -PreviousManifestPath ' + QuoteDeskBoxCleanupArgument(PreviousManifestPath);
+
+  if not Exec(PowerShellPath, Parameters, '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then
+    RaiseException('DeskBox could not start the install cleanup process.');
+
+  if ResultCode <> 0 then
+    RaiseException(Format('DeskBox install cleanup failed with exit code %d.', [ResultCode]));
+
+  Log('DeskBox stale install-file cleanup completed successfully.');
+end;
+#endif
+
 procedure DeleteAppCompatLayerValue(RootKey: Integer; ExePath: string);
 var
   Value: string;

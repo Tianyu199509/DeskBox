@@ -14,6 +14,8 @@ const
   DeskBoxNotificationSettingsRegistryKey = 'Software\Microsoft\Windows\CurrentVersion\Notifications\Settings';
   DeskBoxClassesClsidRegistryKey = 'Software\Classes\CLSID';
   DeskBoxPurgeUserDataParameter = '/PURGEUSERDATA';
+  DeskBoxManagedStorageShortcutFileName = 'DeskBox Files.lnk';
+  DeskBoxManagedStorageShortcutDescription = 'DeskBox managed storage';
 
 var
   PurgeDeskBoxAppData: Boolean;
@@ -21,6 +23,48 @@ var
 function TrimString(Value: string): string;
 begin
   Result := Trim(Value);
+end;
+
+function TryReadJsonBooleanValue(Json: string; PropertyName: string; var Value: Boolean): Boolean;
+var
+  Key: string;
+  KeyPosition: Integer;
+  ColonPosition: Integer;
+  StartPosition: Integer;
+  ValueText: string;
+begin
+  Result := False;
+  Key := '"' + PropertyName + '"';
+  KeyPosition := Pos(Key, Json);
+  if KeyPosition = 0 then
+    Exit;
+
+  ColonPosition := KeyPosition + Length(Key);
+  while (ColonPosition <= Length(Json)) and (Copy(Json, ColonPosition, 1) <> ':') do
+    ColonPosition := ColonPosition + 1;
+
+  if ColonPosition > Length(Json) then
+    Exit;
+
+  StartPosition := ColonPosition + 1;
+  while (StartPosition <= Length(Json)) and
+        ((Copy(Json, StartPosition, 1) = ' ') or
+         (Copy(Json, StartPosition, 1) = #9) or
+         (Copy(Json, StartPosition, 1) = #10) or
+         (Copy(Json, StartPosition, 1) = #13)) do
+    StartPosition := StartPosition + 1;
+
+  ValueText := Lowercase(Copy(Json, StartPosition, 5));
+  if Copy(ValueText, 1, 4) = 'true' then
+  begin
+    Value := True;
+    Result := True;
+  end
+  else if ValueText = 'false' then
+  begin
+    Value := False;
+    Result := True;
+  end;
 end;
 
 function UnescapeJsonString(Value: string): string;
@@ -112,6 +156,217 @@ begin
     if ConfiguredPath <> '' then
       Result := ConfiguredPath;
   end;
+end;
+
+procedure GetManagedStorageShortcutSettings(
+  var ShortcutEnabled: Boolean;
+  var ShortcutPath: string);
+var
+  SettingsPath: string;
+  Json: AnsiString;
+  ConfiguredEnabled: Boolean;
+  ConfiguredPath: string;
+begin
+  ShortcutEnabled := True;
+  ShortcutPath := '';
+  SettingsPath := ExpandConstant(DeskBoxDataSettingsPath);
+
+  if not FileExists(SettingsPath) then
+    Exit;
+
+  if not LoadStringFromFile(SettingsPath, Json) then
+    Exit;
+
+  if TryReadJsonBooleanValue(Json, 'managedStorageDesktopShortcutEnabled', ConfiguredEnabled) then
+    ShortcutEnabled := ConfiguredEnabled;
+
+  if TryReadJsonStringValue(Json, 'managedStorageDesktopShortcutPath', ConfiguredPath) then
+    ShortcutPath := TrimString(ConfiguredPath);
+end;
+
+function IsSafeDesktopShortcutPath(ShortcutPath: string): Boolean;
+begin
+  Result :=
+    (ShortcutPath <> '') and
+    (CompareText(ExtractFileExt(ShortcutPath), '.lnk') = 0) and
+    SameInstallPath(ExtractFileDir(ShortcutPath), ExpandConstant('{userdesktop}'));
+end;
+
+function ShortcutTargetsManagedStorage(
+  ShortcutPath: string;
+  FolderPath: string): Boolean;
+var
+  TargetPath: string;
+begin
+  Result :=
+    IsSafeDesktopShortcutPath(ShortcutPath) and
+    TryReadShortcutTarget(ShortcutPath, TargetPath) and
+    SameInstallPath(TargetPath, FolderPath);
+end;
+
+function FindManagedStorageShortcut(
+  FolderPath: string;
+  ConfiguredShortcutPath: string;
+  var ShortcutPath: string): Boolean;
+var
+  CandidatePath: string;
+  CandidateName: string;
+  Number: Integer;
+begin
+  Result := False;
+  ShortcutPath := '';
+
+  if ShortcutTargetsManagedStorage(ConfiguredShortcutPath, FolderPath) then
+  begin
+    ShortcutPath := ConfiguredShortcutPath;
+    Result := True;
+    Exit;
+  end;
+
+  for Number := 1 to 99 do
+  begin
+    if Number = 1 then
+      CandidateName := DeskBoxManagedStorageShortcutFileName
+    else
+      CandidateName := 'DeskBox Files (' + IntToStr(Number) + ').lnk';
+
+    CandidatePath := AddBackslash(ExpandConstant('{userdesktop}')) + CandidateName;
+    if ShortcutTargetsManagedStorage(CandidatePath, FolderPath) then
+    begin
+      ShortcutPath := CandidatePath;
+      Result := True;
+      Exit;
+    end;
+  end;
+end;
+
+function GetAvailableManagedStorageShortcutPath(
+  ConfiguredShortcutPath: string): string;
+var
+  CandidatePath: string;
+  CandidateName: string;
+  Number: Integer;
+begin
+  Result := '';
+  if IsSafeDesktopShortcutPath(ConfiguredShortcutPath) and
+     (not FileExists(ConfiguredShortcutPath)) and
+     (not DirExists(ConfiguredShortcutPath)) then
+  begin
+    Result := ConfiguredShortcutPath;
+    Exit;
+  end;
+
+  for Number := 1 to 99 do
+  begin
+    if Number = 1 then
+      CandidateName := DeskBoxManagedStorageShortcutFileName
+    else
+      CandidateName := 'DeskBox Files (' + IntToStr(Number) + ').lnk';
+
+    CandidatePath := AddBackslash(ExpandConstant('{userdesktop}')) + CandidateName;
+    if (not FileExists(CandidatePath)) and (not DirExists(CandidatePath)) then
+    begin
+      Result := CandidatePath;
+      Exit;
+    end;
+  end;
+end;
+
+function CreateManagedStorageShortcut(
+  ShortcutPath: string;
+  FolderPath: string): Boolean;
+var
+  ShellObject: Variant;
+  ShortcutObject: Variant;
+begin
+  Result := False;
+  if (ShortcutPath = '') or (not DirExists(FolderPath)) then
+    Exit;
+
+  try
+    ShellObject := CreateOleObject('WScript.Shell');
+    ShortcutObject := ShellObject.CreateShortcut(ShortcutPath);
+    ShortcutObject.TargetPath := FolderPath;
+    ShortcutObject.WorkingDirectory := FolderPath;
+    ShortcutObject.Description := DeskBoxManagedStorageShortcutDescription;
+    ShortcutObject.Save;
+    Result := FileExists(ShortcutPath);
+  except
+    Log('DeskBox uninstall could not create the managed storage shortcut: ' + ShortcutPath);
+  end;
+end;
+
+function FolderContainsManagedStorageItems(FolderPath: string): Boolean;
+var
+  FindRec: TFindRec;
+begin
+  Result := False;
+  if not DirExists(FolderPath) then
+    Exit;
+
+  if FindFirst(AddBackslash(FolderPath) + '*', FindRec) then
+  begin
+    try
+      repeat
+        if (FindRec.Name <> '.') and (FindRec.Name <> '..') then
+        begin
+          Result := True;
+          Exit;
+        end;
+      until not FindNext(FindRec);
+    finally
+      FindClose(FindRec);
+    end;
+  end;
+end;
+
+procedure OfferManagedStorageShortcut;
+var
+  FolderPath: string;
+  ConfiguredShortcutPath: string;
+  ExistingShortcutPath: string;
+  NewShortcutPath: string;
+  ShortcutEnabled: Boolean;
+begin
+  FolderPath := GetManagedStorageRootPath;
+  if not FolderContainsManagedStorageItems(FolderPath) then
+    Exit;
+
+  GetManagedStorageShortcutSettings(ShortcutEnabled, ConfiguredShortcutPath);
+  if not ShortcutEnabled then
+  begin
+    Log('DeskBox uninstall respected the disabled managed storage desktop shortcut setting.');
+    Exit;
+  end;
+
+  if FindManagedStorageShortcut(
+       FolderPath,
+       ConfiguredShortcutPath,
+       ExistingShortcutPath) then
+  begin
+    Log('DeskBox managed storage shortcut already exists: ' + ExistingShortcutPath);
+    Exit;
+  end;
+
+  if SuppressibleMsgBox(
+       FmtMessage(ExpandConstant('{cm:ManagedStorageShortcutPrompt}'), [FolderPath]),
+       mbConfirmation,
+       MB_YESNO or MB_DEFBUTTON1,
+       IDYES) <> IDYES then
+  begin
+    Log('DeskBox managed storage shortcut creation was declined.');
+    Exit;
+  end;
+
+  NewShortcutPath := GetAvailableManagedStorageShortcutPath(ConfiguredShortcutPath);
+  if CreateManagedStorageShortcut(NewShortcutPath, FolderPath) then
+    Log('DeskBox uninstall created managed storage shortcut: ' + NewShortcutPath)
+  else
+    SuppressibleMsgBox(
+      FmtMessage(ExpandConstant('{cm:ManagedStorageShortcutCreateFailed}'), [FolderPath]),
+      mbError,
+      MB_OK,
+      IDOK);
 end;
 
 function CountFolderContents(FolderPath: string; var FileCount: Integer; var FolderCount: Integer): Boolean;
@@ -569,6 +824,8 @@ begin
   else
   begin
     Result := ConfirmManagedStoragePreserved;
+    if Result then
+      OfferManagedStorageShortcut;
     if Result then
       Result := ChooseAppDataRemoval;
   end;

@@ -1,5 +1,7 @@
 {
     "Settings.Performance.Title": "Rendimiento y recursos",
+    "Display.VirtualAdapter.Warning.Title": "Pantalla virtual detectada",
+    "Display.VirtualAdapter.Warning.Body": "Tu monitor principal usa un adaptador gráfico virtual. Si los widgets se apilan en una esquina, se congelan o la app se cierra, prueba con una pantalla física. Todo lo demás sigue funcionando.",
     "Settings.Performance.Description": "Equilibra la calidad visual y el uso de recursos, y controla la limpieza de caché tras ocultar los widgets",
     "Settings.Performance.Mode.Title": "Modo de rendimiento",
     "Settings.Performance.Mode.Description": "Elige un preajuste. Al cambiar un ajuste detallado se activa Personalizado",
@@ -2536,5 +2538,7 @@
   "Widget.RunAsAdministrator.AlreadyRunning": "Esta aplicación ya se está ejecutando sin privilegios de administrador. Ciérrela por completo e inténtelo de nuevo.",
   "Widget.RunAsAdministrator.NotElevated": "Windows no pudo crear un proceso de administrador. Compruebe la configuración de UAC e inténtelo de nuevo.",
   "Widget.CreateShortcut": "Crear acceso directo",
-  "Widget.MoreSystemOperations": "Más operaciones del sistema"
+  "Widget.MoreSystemOperations": "Más operaciones del sistema",
+  "Settings.ManagedPath.DesktopShortcut.Title": "Mantener un acceso directo al almacenamiento en el escritorio",
+  "Settings.ManagedPath.DesktopShortcut.Description": "Abre directamente la carpeta de almacenamiento actual y sigue funcionando después de desinstalar DeskBox"
 }

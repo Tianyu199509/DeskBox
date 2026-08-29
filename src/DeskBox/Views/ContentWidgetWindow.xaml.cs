@@ -938,7 +938,17 @@ IsHideAnimationRunning = true;
 
     public void ForceRestoreDesktopLayerFromManager()
     {
-        RestoreDesktopLayerFromManager();
+        if (!Visible)
+        {
+            return;
+        }
+
+        // Manager teardown always wins over an expanded capsule lease: the
+        // whole group is returning to its resting layer, so ending the lease
+        // here keeps later interaction elevates working after the teardown.
+        EndExpandedWidgetLayerLease();
+        RestoreDesktopLayer(force: true);
+        _contentHost.OnDeactivated();
     }
 
     public void RestoreDesktopLayerFromManager()
@@ -948,7 +958,14 @@ IsHideAnimationRunning = true;
             return;
         }
 
-        RestoreDesktopLayer(force: true);
+        // An expanded capsule lease owns this window's layer until its
+        // collapse; a forced demote here would bury it beneath sibling
+        // widgets the moment a flyout closes mid-use.
+        if (!HasExpandedWidgetLayerLease)
+        {
+            RestoreDesktopLayer(force: true);
+        }
+
         _contentHost.OnDeactivated();
     }
 

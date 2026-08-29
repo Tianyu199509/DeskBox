@@ -553,6 +553,19 @@ public class AppSettings
     public string DefaultManagedStorageRootPath { get; set; } = string.Empty;
 
     /// <summary>
+    /// Whether DeskBox maintains a desktop shortcut that opens the current
+    /// managed storage root. The shortcut is intentionally independent of the
+    /// application executable so it remains useful after uninstalling.
+    /// </summary>
+    public bool ManagedStorageDesktopShortcutEnabled { get; set; } = true;
+
+    /// <summary>
+    /// Absolute path of the desktop shortcut created by DeskBox. Tracking the
+    /// exact path lets DeskBox avoid overwriting or deleting unrelated links.
+    /// </summary>
+    public string ManagedStorageDesktopShortcutPath { get; set; } = string.Empty;
+
+    /// <summary>
     /// Recent organization history used for undo and quick review.
     /// </summary>
     public List<OrganizationHistoryEntry> RecentOrganizationHistory { get; set; } = [];
@@ -735,7 +748,7 @@ public class AppSettings
     /// <summary>
     /// Weather widget skin/theme. Valid values: <c>"Standard"</c>, <c>"Rich"</c>.
     /// </summary>
-    public string WeatherSkin { get; set; } = "Rich";
+    public string WeatherSkin { get; set; } = "Standard";
 
     /// <summary>
     /// Whether to show the 7-day forecast in the widget.

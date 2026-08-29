@@ -1179,6 +1179,16 @@ svc:Localized.DescriptionKey="Settings.DefaultWidth.Description"
                                 </StackPanel>
                             </StackPanel>
                         </toolkit:SettingsCard>
+                        <toolkit:SettingsCard
+                            HorizontalContentAlignment="Right"
+                            svc:Localized.DescriptionKey="Settings.ManagedPath.DesktopShortcut.Description"
+                            svc:Localized.HeaderKey="Settings.ManagedPath.DesktopShortcut.Title">
+                            <ToggleSwitch
+                                MinWidth="0"
+                                OffContent=""
+                                OnContent=""
+                                IsOn="{Binding ManagedStorageDesktopShortcutEnabled, Mode=TwoWay}" />
+                        </toolkit:SettingsCard>
                     </StackPanel>
                 </StackPanel>
 

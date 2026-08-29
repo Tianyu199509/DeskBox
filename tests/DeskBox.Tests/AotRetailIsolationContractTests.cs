@@ -89,7 +89,11 @@ public sealed class AotRetailIsolationContractTests
 
         Assert.Contains("-p:DeskBoxAotSmokeHarness=false", storeBuild, StringComparison.Ordinal);
         Assert.Contains("-p:DeskBoxAotSmokeHarness=false", retailPublish, StringComparison.Ordinal);
+        Assert.Contains("-p:SelfContained=true", retailPublish, StringComparison.Ordinal);
+        Assert.Contains("-p:WindowsAppSDKSelfContained=true", retailPublish, StringComparison.Ordinal);
         Assert.Contains("productProfile = \"retail\"", retailPublish, StringComparison.Ordinal);
+        Assert.Contains("deploymentProfile = \"full\"", retailPublish, StringComparison.Ordinal);
+        Assert.Contains("installManifestFileCount", retailPublish, StringComparison.Ordinal);
         Assert.Contains("smokeHarnessEnabled = $false", retailPublish, StringComparison.Ordinal);
         Assert.Contains("smokeHarnessBinaryMatches", retailPublish, StringComparison.Ordinal);
         Assert.Contains(
@@ -106,6 +110,10 @@ public sealed class AotRetailIsolationContractTests
             StringComparison.Ordinal);
         Assert.Contains(
             "Platform = $Platform",
+            distribution,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "\"/DDeskBoxBundledRuntime=1\"",
             distribution,
             StringComparison.Ordinal);
         Assert.DoesNotContain(

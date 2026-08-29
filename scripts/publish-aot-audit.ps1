@@ -1298,7 +1298,7 @@ $stage4E3RequiredCompiledBindings = @(
     [PSCustomObject]@{
         sourceFile = $stage4E3SourceFiles[3]
         pattern = "{x:Bind Glyph, Mode=OneTime}"
-        expectedCount = 1
+        expectedCount = 0
     },
     [PSCustomObject]@{
         sourceFile = $stage4E3SourceFiles[3]

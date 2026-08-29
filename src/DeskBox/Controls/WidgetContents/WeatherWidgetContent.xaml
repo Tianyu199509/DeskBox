@@ -50,7 +50,6 @@
         -->
         <Border
             x:Name="RichBackdrop"
-            CornerRadius="{StaticResource WidgetCornerRadiusLarge}"
             IsHitTestVisible="False"
             Visibility="{Binding RichSkinVisibility}">
             <Border.Background>
@@ -892,7 +891,6 @@
         <Grid
             x:Name="LoadingOverlay"
             Background="{ThemeResource LayerFillColorDefaultBrush}"
-            CornerRadius="{StaticResource WidgetCornerRadiusLarge}"
             IsHitTestVisible="False"
             Visibility="{Binding LoadingVisibility}">
             <StackPanel

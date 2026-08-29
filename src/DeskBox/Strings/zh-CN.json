@@ -1,5 +1,7 @@
 {
     "Settings.Performance.Title": "性能与资源",
+    "Display.VirtualAdapter.Warning.Title": "检测到虚拟显示器",
+    "Display.VirtualAdapter.Warning.Body": "你的主显示器来自虚拟显卡。如果出现格子堆叠在角落、无响应或闪退，请尝试切换到物理显示器。其余功能不受影响。",
     "Settings.Performance.Description": "在视觉效果与资源占用之间选择，并控制格子隐藏后的缓存回收",
     "Settings.Performance.Mode.Title": "性能模式",
     "Settings.Performance.Mode.Description": "选择预设；修改下方详细设置后将自动切换为自定义",
@@ -2536,5 +2538,7 @@
   "Widget.RunAsAdministrator.AlreadyRunning": "该程序正在以普通权限运行，请完全退出后再使用管理员身份打开。",
   "Widget.RunAsAdministrator.NotElevated": "Windows 未能创建管理员进程，请检查 UAC 设置后重试。",
   "Widget.CreateShortcut": "创建快捷方式",
-  "Widget.MoreSystemOperations": "更多系统操作"
+  "Widget.MoreSystemOperations": "更多系统操作",
+  "Settings.ManagedPath.DesktopShortcut.Title": "在桌面保留收纳文件入口",
+  "Settings.ManagedPath.DesktopShortcut.Description": "直接打开当前收纳目录，卸载 DeskBox 后仍可继续使用"
 }

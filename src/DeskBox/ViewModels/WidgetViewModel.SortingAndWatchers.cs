@@ -230,7 +230,19 @@ public partial class WidgetViewModel
 
         try
         {
-            await _folderWatcher.StartAsync(folderPath).WaitAsync(cancellationToken);
+            string watcherPath = folderPath;
+            if (!string.IsNullOrWhiteSpace(MappedFolderPath) &&
+                PathsEqual(
+                    folderPath,
+                    _mappedFolderTraversalPath ?? MappedFolderPath))
+            {
+                // Retain the logical mapping path inside the watcher so a
+                // retargeted junction can be resolved on reconnect. The
+                // watcher's public WatchedPath remains the physical target.
+                watcherPath = MappedFolderPath;
+            }
+
+            await _folderWatcher.StartAsync(watcherPath).WaitAsync(cancellationToken);
             cancellationToken.ThrowIfCancellationRequested();
 
             var (userDesktop, publicDesktop) = FileService.GetDesktopPaths();

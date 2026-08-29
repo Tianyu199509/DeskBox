@@ -391,6 +391,30 @@ public partial class SettingsViewModel
         private set => SetProperty(ref _managedStorageRootPath, value);
     }
 
+    public bool ManagedStorageDesktopShortcutEnabled
+    {
+        get => _managedStorageDesktopShortcutEnabled;
+        set
+        {
+            if (!SetProperty(ref _managedStorageDesktopShortcutEnabled, value))
+            {
+                return;
+            }
+
+            if (_isRestoringDefaults || _isApplyingSettingsSnapshot)
+            {
+                return;
+            }
+
+            _settingsService.Settings.ManagedStorageDesktopShortcutEnabled = value;
+            _settingsService.SaveDebounced();
+            if (App.Current?.ManagedStorageDesktopShortcutService is { } shortcutService)
+            {
+                _ = shortcutService.SyncAsync();
+            }
+        }
+    }
+
     public QuickAccessPinState ManagedStorageQuickAccessPinState
     {
         get => _quickAccessPinState;

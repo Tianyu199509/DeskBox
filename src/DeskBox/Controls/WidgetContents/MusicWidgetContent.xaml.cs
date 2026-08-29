@@ -917,7 +917,14 @@ public sealed partial class MusicWidgetContent : UserControl, IDisposable
         AlbumArtShadow.Height = size;
         AlbumArtSurface.Width = size;
         AlbumArtSurface.Height = size;
-        double cornerRadius = Math.Max(8, size * 0.12);
+        ApplyAlbumArtCornerRadius();
+    }
+
+    private void ApplyAlbumArtCornerRadius()
+    {
+        double cornerRadius = ViewModel is { } viewModel
+            ? viewModel.ArtworkBackdropCornerRadius.TopLeft
+            : 8;
         AlbumArtShadow.CornerRadius = new CornerRadius(cornerRadius);
         AlbumArtSurface.CornerRadius = new CornerRadius(cornerRadius);
         AlbumArtInnerBorder.CornerRadius = new CornerRadius(Math.Max(0, cornerRadius - 1));
@@ -1189,6 +1196,11 @@ public sealed partial class MusicWidgetContent : UserControl, IDisposable
         if (e.PropertyName == nameof(MusicWidgetViewModel.ThumbnailImage))
         {
             QueueArtworkTransition();
+        }
+
+        if (e.PropertyName == nameof(MusicWidgetViewModel.ArtworkBackdropCornerRadius))
+        {
+            ApplyAlbumArtCornerRadius();
         }
 
         if (e.PropertyName == nameof(MusicWidgetViewModel.DisplayMode))

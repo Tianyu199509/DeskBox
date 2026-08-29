@@ -67,8 +67,8 @@ public sealed class AotStage5B4C1B1ContractTests
         Assert.Contains("items => DeleteItemsAsync(items)", surface, StringComparison.Ordinal);
         Assert.Contains("bool permanently = false", surfaceOperations, StringComparison.Ordinal);
         Assert.Contains("public async Task<FileDeleteBatchResult> DeleteItemsAsync", viewModel, StringComparison.Ordinal);
-        Assert.Contains("_fileService.DeleteEntryAsync(item.Path, recycle)", viewModel, StringComparison.Ordinal);
-        Assert.Contains("DeleteEntryToRecycleBin(normalizedPath)", fileService, StringComparison.Ordinal);
+        Assert.Contains("_fileService.DeleteEntryAsync(", viewModel, StringComparison.Ordinal);
+        Assert.Contains("DeleteEntryWithShell(normalizedPath, ownerHandle, allowUndo: true)", fileService, StringComparison.Ordinal);
         Assert.Contains("SHFileOperation(ref operation)", fileService, StringComparison.Ordinal);
         Assert.Contains("FofAllowUndo", fileService, StringComparison.Ordinal);
     }

@@ -1,5 +1,7 @@
 {
     "Settings.Performance.Title": "Desempenho e recursos",
+    "Display.VirtualAdapter.Warning.Title": "Tela virtual detectada",
+    "Display.VirtualAdapter.Warning.Body": "Seu monitor principal usa um adaptador de vídeo virtual. Se os widgets empilharem num canto, travarem ou o app fechar sozinho, tente uma tela física. Todo o restante continua funcionando.",
     "Settings.Performance.Description": "Equilibre a qualidade visual e o uso de recursos e controle a limpeza do cache após ocultar os widgets",
     "Settings.Performance.Mode.Title": "Modo de desempenho",
     "Settings.Performance.Mode.Description": "Escolha uma predefinição. Alterar uma configuração detalhada ativa o modo Personalizado",
@@ -2536,5 +2538,7 @@
   "Widget.RunAsAdministrator.AlreadyRunning": "Este aplicativo já está em execução sem privilégios de administrador. Feche-o completamente e tente novamente.",
   "Widget.RunAsAdministrator.NotElevated": "O Windows não conseguiu criar um processo de administrador. Verifique as configurações do UAC e tente novamente.",
   "Widget.CreateShortcut": "Criar atalho",
-  "Widget.MoreSystemOperations": "Mais operações do sistema"
+  "Widget.MoreSystemOperations": "Mais operações do sistema",
+  "Settings.ManagedPath.DesktopShortcut.Title": "Manter um atalho do armazenamento na área de trabalho",
+  "Settings.ManagedPath.DesktopShortcut.Description": "Abre diretamente a pasta de armazenamento atual e continua funcionando após desinstalar o DeskBox"
 }

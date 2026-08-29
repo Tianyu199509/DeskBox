@@ -1500,6 +1500,66 @@ public static partial class Win32Helper
         bool IsPrimary,
         double DpiScale);
 
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    private struct DISPLAY_DEVICEW
+    {
+        public int cb;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)]
+        public string DeviceName;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)]
+        public string DeviceString;
+        public uint StateFlags;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)]
+        public string DeviceID;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)]
+        public string DeviceKey;
+    }
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool EnumDisplayDevicesW(
+        string? lpDevice,
+        uint iDevNum,
+        ref DISPLAY_DEVICEW lpDisplayDevice,
+        uint dwFlags);
+
+    /// <summary>
+    /// Returns the display adapter (PNP device id and description) backing the
+    /// primary monitor. Virtual display drivers enumerate under the ROOT
+    /// device tree, which lets callers recognize cloud-gaming/indirect
+    /// adapters that WinUI 3 handles poorly.
+    /// </summary>
+    public static bool TryGetPrimaryDisplayAdapter(
+        out string deviceId,
+        out string deviceString)
+    {
+        deviceId = string.Empty;
+        deviceString = string.Empty;
+
+        foreach (MonitorWorkAreaInfo monitor in GetMonitorWorkAreaInfos())
+        {
+            if (!monitor.IsPrimary || string.IsNullOrWhiteSpace(monitor.DeviceName))
+            {
+                continue;
+            }
+
+            var adapter = new DISPLAY_DEVICEW
+            {
+                cb = Marshal.SizeOf<DISPLAY_DEVICEW>()
+            };
+            if (!EnumDisplayDevicesW(monitor.DeviceName, 0, ref adapter, 0))
+            {
+                return false;
+            }
+
+            deviceId = adapter.DeviceID ?? string.Empty;
+            deviceString = adapter.DeviceString ?? string.Empty;
+            return true;
+        }
+
+        return false;
+    }
+
     [LibraryImport("user32.dll")]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static partial bool GetWindowRect(IntPtr hWnd, out RECT lpRect);

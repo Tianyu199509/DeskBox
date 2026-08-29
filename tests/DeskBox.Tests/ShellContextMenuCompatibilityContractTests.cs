@@ -1,172 +1,234 @@
 using DeskBox.Helpers;
+using System.Diagnostics;
+using System.Runtime.InteropServices;
 
 namespace DeskBox.Tests;
 
 public sealed class ShellContextMenuCompatibilityContractTests
 {
     [Fact]
-    public void NativeContextMenu_UsesRawShellComAbiWithoutRuntimeCallableWrappers()
+    public void ProductPath_UsesAsyncOutOfProcessProxyWithoutInProcessFallback()
     {
-        string helper = ReadRepositoryFile(
-            "src/DeskBox/Helpers/ShellContextMenuHelper.cs");
-
-        Assert.Contains(
-            "public static unsafe class ShellContextMenuHelper",
-            helper,
-            StringComparison.Ordinal);
-        Assert.Contains(
-            "ShellFolderGetUiObjectOfSlot = 10",
-            helper,
-            StringComparison.Ordinal);
-        Assert.Contains(
-            "ContextMenuQuerySlot = 3",
-            helper,
-            StringComparison.Ordinal);
-        Assert.Contains(
-            "ContextMenuInvokeSlot = 4",
-            helper,
-            StringComparison.Ordinal);
-        Assert.Contains(
-            "ContextMenu2HandleMenuMessageSlot = 6",
-            helper,
-            StringComparison.Ordinal);
-        Assert.Contains(
-            "ContextMenu3HandleMenuMessage2Slot = 7",
-            helper,
-            StringComparison.Ordinal);
-        Assert.Contains(
-            "delegate* unmanaged[Stdcall]",
-            helper,
-            StringComparison.Ordinal);
-
-        Assert.DoesNotContain("[ComImport]", helper, StringComparison.Ordinal);
-        Assert.DoesNotContain(
-            "Marshal.GetObjectForIUnknown(",
-            helper,
-            StringComparison.Ordinal);
-        Assert.DoesNotContain(
-            "Marshal.ReleaseComObject",
-            helper,
-            StringComparison.Ordinal);
-        Assert.DoesNotContain(
-            "Marshal.QueryInterface",
-            helper,
-            StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void InvokeCommand_UsesCompleteNativeStructureAndChecksFailure()
-    {
-        string helper = ReadRepositoryFile(
-            "src/DeskBox/Helpers/ShellContextMenuHelper.cs");
-
-        Assert.Contains(
-            "public uint dwHotKey;",
-            helper,
-            StringComparison.Ordinal);
-        Assert.Contains(
-            "public IntPtr hIcon;",
-            helper,
-            StringComparison.Ordinal);
-        Assert.Contains(
-            "cbSize = (uint)sizeof(CMINVOKECOMMANDINFO)",
-            helper,
-            StringComparison.Ordinal);
-        Assert.Contains(
-            "int invokeResult = InvokeCommand(",
-            helper,
-            StringComparison.Ordinal);
-        Assert.Contains(
-            "if (invokeResult < 0)",
-            helper,
-            StringComparison.Ordinal);
-        Assert.Contains(
-            "InvokeCommand failed: hr=0x",
-            helper,
-            StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void NativeContextMenu_ForwardsOnlySupportedMenuMessages()
-    {
-        Assert.Equal(
-            ShellContextMenuHelper.ContextMenuMessageTarget.ContextMenu2,
-            ShellContextMenuHelper.GetContextMenuMessageTarget(
-                0x0117,
-                UIntPtr.Zero));
-        Assert.Equal(
-            ShellContextMenuHelper.ContextMenuMessageTarget.ContextMenu2,
-            ShellContextMenuHelper.GetContextMenuMessageTarget(
-                0x002B,
-                UIntPtr.Zero));
-        Assert.Equal(
-            ShellContextMenuHelper.ContextMenuMessageTarget.ContextMenu2,
-            ShellContextMenuHelper.GetContextMenuMessageTarget(
-                0x002C,
-                UIntPtr.Zero));
-        Assert.Equal(
-            ShellContextMenuHelper.ContextMenuMessageTarget.ContextMenu3,
-            ShellContextMenuHelper.GetContextMenuMessageTarget(
-                0x0120,
-                UIntPtr.Zero));
-
-        Assert.Equal(
-            ShellContextMenuHelper.ContextMenuMessageTarget.None,
-            ShellContextMenuHelper.GetContextMenuMessageTarget(
-                0x002B,
-                new UIntPtr(1)));
-        Assert.Equal(
-            ShellContextMenuHelper.ContextMenuMessageTarget.None,
-            ShellContextMenuHelper.GetContextMenuMessageTarget(
-                0x002C,
-                new UIntPtr(1)));
-        Assert.Equal(
-            ShellContextMenuHelper.ContextMenuMessageTarget.None,
-            ShellContextMenuHelper.GetContextMenuMessageTarget(
-                0x0200,
-                UIntPtr.Zero));
-    }
-
-    [Fact]
-    public void NativeContextMenu_SuppressesDuplicateNotificationsAndLogsNativeStages()
-    {
-        string helper = ReadRepositoryFile(
-            "src/DeskBox/Helpers/ShellContextMenuHelper.cs");
-
-        Assert.Contains("TPM_NONOTIFY = 0x0080", helper, StringComparison.Ordinal);
-        Assert.Contains(
-            "TPM_RETURNCMD | TPM_NONOTIFY",
-            helper,
-            StringComparison.Ordinal);
-        Assert.Contains(
-            "_contextMenu2 = contextMenu2 != IntPtr.Zero",
-            helper,
-            StringComparison.Ordinal);
-        Assert.Contains("stage=query-begin", helper, StringComparison.Ordinal);
-        Assert.Contains("stage=track-begin", helper, StringComparison.Ordinal);
-        Assert.Contains("stage=invoke-begin", helper, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public void ProductPath_PreservesOwnerPathAndPointerCoordinates()
-    {
-        string menu = ReadRepositoryFile(
+        string surface = ReadRepositoryFile(
             "src/DeskBox/Controls/WidgetContents/FileSurfaceContent.SelectionAndMenus.cs");
+        string menuBuilder = ReadRepositoryFile(
+            "src/DeskBox/Controls/FileItemMenuBuilder.cs");
+        string helper = ReadRepositoryFile(
+            "src/DeskBox/Helpers/ShellContextMenuHelper.cs");
 
         Assert.Contains(
-            "ShellContextMenuHelper.ShowContextMenu(",
-            menu,
+            "private async Task ShowSystemContextMenuAsync(WidgetItem item)",
+            surface,
             StringComparison.Ordinal);
-        Assert.Contains("_hostWindowHandle,", menu, StringComparison.Ordinal);
-        Assert.Contains("item.Path,", menu, StringComparison.Ordinal);
-        Assert.Contains("screenX,", menu, StringComparison.Ordinal);
-        Assert.Contains("screenY);", menu, StringComparison.Ordinal);
         Assert.Contains(
-            "if (result == ShellContextMenuHelper.NativeMenuResult.Failed)",
-            menu,
+            "await ShellContextMenuProxy.ShowAsync(",
+            surface,
+            StringComparison.Ordinal);
+        Assert.Contains("item.Path,", surface, StringComparison.Ordinal);
+        Assert.Contains("screenX,", surface, StringComparison.Ordinal);
+        Assert.Contains("screenY);", surface, StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "ShellContextMenuHelper.ShowContextMenu(",
+            surface,
+            StringComparison.Ordinal);
+
+        Assert.Contains(
+            "Func<WidgetItem, Task>? ShowSystemContextMenuAsync",
+            menuBuilder,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "await actions.ShowSystemContextMenuAsync(item);",
+            menuBuilder,
+            StringComparison.Ordinal);
+
+        Assert.DoesNotContain("IContextMenu", helper, StringComparison.Ordinal);
+        Assert.DoesNotContain("QueryContextMenu", helper, StringComparison.Ordinal);
+        Assert.DoesNotContain("TrackPopupMenuEx", helper, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ManagedProxy_UsesExistingNativeExecutableHandshakeAndBoundedWaits()
+    {
+        string proxy = ReadRepositoryFile(
+            "src/DeskBox/Helpers/ShellContextMenuProxy.cs");
+
+        Assert.Contains(
+            "ShellThumbnailProxy.ExecutableName",
+            proxy,
+            StringComparison.Ordinal);
+        Assert.Contains("UseShellExecute = false", proxy, StringComparison.Ordinal);
+        Assert.Contains("RedirectStandardOutput = true", proxy, StringComparison.Ordinal);
+        Assert.Contains("ArgumentList.Add(\"--context-menu\")", proxy, StringComparison.Ordinal);
+        Assert.Contains("ReadyMessage = \"ready\"", proxy, StringComparison.Ordinal);
+        Assert.Contains("TimeSpan.FromSeconds(15)", proxy, StringComparison.Ordinal);
+        Assert.Contains("TimeSpan.FromMinutes(10)", proxy, StringComparison.Ordinal);
+        Assert.Contains("TryKill(process)", proxy, StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "ShellContextMenuHelper.ShowContextMenu(",
+            proxy,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ManagedProxy_MapsCancellationAndNativeFailuresWithoutThrowingIntoProductPath()
+    {
+        Assert.Equal(
+            ShellContextMenuProxy.MenuResult.Invoked,
+            ShellContextMenuProxy.MapExitCode(
+                ShellContextMenuProxy.InvokedExitCode));
+        Assert.Equal(
+            ShellContextMenuProxy.MenuResult.Cancelled,
+            ShellContextMenuProxy.MapExitCode(
+                ShellContextMenuProxy.CancelledExitCode));
+        Assert.Equal(
+            ShellContextMenuProxy.MenuResult.Failed,
+            ShellContextMenuProxy.MapExitCode(
+                ShellContextMenuProxy.FailedExitCode));
+        Assert.Equal(
+            ShellContextMenuProxy.MenuResult.Failed,
+            ShellContextMenuProxy.MapExitCode(
+                unchecked((int)0xC0000005)));
+    }
+
+    [Fact]
+    public async Task NativeProxy_InvalidContextMenuRequestFailsInChildProcess()
+    {
+        string proxyPath = GetBuiltProxyPath();
+        Assert.True(File.Exists(proxyPath), $"Proxy not found: {proxyPath}");
+        string missingPath = Path.Combine(
+            Path.GetTempPath(),
+            $"DeskBox-missing-context-menu-{Guid.NewGuid():N}");
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = proxyPath,
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            CreateNoWindow = true
+        };
+        startInfo.ArgumentList.Add("--context-menu");
+        startInfo.ArgumentList.Add(missingPath);
+        startInfo.ArgumentList.Add("0");
+        startInfo.ArgumentList.Add("0");
+
+        using var process = Process.Start(startInfo);
+        Assert.NotNull(process);
+        Task<string> outputTask = process.StandardOutput.ReadToEndAsync();
+        Task<string> errorTask = process.StandardError.ReadToEndAsync();
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        await process.WaitForExitAsync(timeout.Token);
+
+        Assert.Equal(ShellContextMenuProxy.FailedExitCode, process.ExitCode);
+        Assert.DoesNotContain("ready", await outputTask, StringComparison.Ordinal);
+        Assert.Contains(
+            "Shell context menu source does not exist",
+            await errorTask,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void NativeProxy_OwnsStaWindowAndForwardsShellMenuMessages()
+    {
+        string native = ReadRepositoryFile(
+            "native/deskbox-thumbnail-proxy/src/main.rs");
+        string manifest = ReadRepositoryFile(
+            "native/deskbox-thumbnail-proxy/Cargo.toml");
+
+        Assert.Contains("\"--context-menu\"", native, StringComparison.Ordinal);
+        Assert.Contains("COINIT_APARTMENTTHREADED", native, StringComparison.Ordinal);
+        Assert.Contains("create_context_menu_window", native, StringComparison.Ordinal);
+        Assert.Contains("SHParseDisplayName", native, StringComparison.Ordinal);
+        Assert.Contains("SHBindToParent", native, StringComparison.Ordinal);
+        Assert.Contains("GetUIObjectOf", native, StringComparison.Ordinal);
+        Assert.Contains("IContextMenu3", native, StringComparison.Ordinal);
+        Assert.Contains("HandleMenuMsg2", native, StringComparison.Ordinal);
+        Assert.Contains("TrackPopupMenuEx", native, StringComparison.Ordinal);
+        Assert.Contains("InvokeCommand", native, StringComparison.Ordinal);
+        Assert.Contains("write_stdout(b\"ready\\n\")", native, StringComparison.Ordinal);
+        Assert.Contains(
+            "CONTEXT_MENU_EXIT_CANCELLED: i32 = 2",
+            native,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "CONTEXT_MENU_EXIT_FAILED: i32 = 3",
+            native,
+            StringComparison.Ordinal);
+
+        Assert.Contains(
+            "\"Win32_UI_Shell_Common\"",
+            manifest,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "\"Win32_UI_WindowsAndMessaging\"",
+            manifest,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void StackPopover_RemainsAliveUntilProxyMenuCompletes()
+    {
+        string surface = ReadRepositoryFile(
+            "src/DeskBox/Controls/WidgetContents/FileSurfaceContent.SelectionAndMenus.cs");
+        string rightClickHost = ReadRepositoryFile(
+            "src/DeskBox/Controls/WidgetContents/FileSurfaceContent.xaml.cs");
+
+        Assert.Contains(
+            "bool fromStackPopover = _stackPopoverItemsView?.Items",
+            surface,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "_stackPopoverContextMenuOpen = true;",
+            surface,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "_stackPopoverSystemContextMenuOpen = true;",
+            surface,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "if (!_stackPopoverSystemContextMenuOpen)",
+            rightClickHost,
+            StringComparison.Ordinal);
+        Assert.Contains("finally", surface, StringComparison.Ordinal);
+        Assert.Contains(
+            "CompleteStackPopoverContextMenu();",
+            surface,
             StringComparison.Ordinal);
     }
 
     private static string ReadRepositoryFile(string relativePath) =>
         File.ReadAllText(TestPaths.FromRepository(relativePath));
+
+    private static string GetBuiltProxyPath()
+    {
+        string configuration =
+#if DEBUG
+            "Debug";
+#else
+            "Release";
+#endif
+        string platform = RuntimeInformation.ProcessArchitecture == Architecture.Arm64
+            ? "ARM64"
+            : "x64";
+        string outputRoot = Path.Combine(
+            "src",
+            "DeskBox",
+            "bin",
+            platform,
+            configuration,
+            "net10.0-windows10.0.22621.0");
+        string canonicalPath = TestPaths.FromRepository(Path.Combine(
+            outputRoot,
+            ShellThumbnailProxy.ExecutableName));
+        if (File.Exists(canonicalPath))
+        {
+            return canonicalPath;
+        }
+
+        return TestPaths.FromRepository(Path.Combine(
+            outputRoot,
+            RuntimeInformation.ProcessArchitecture == Architecture.Arm64
+                ? "win-arm64"
+                : "win-x64",
+            ShellThumbnailProxy.ExecutableName));
+    }
 }

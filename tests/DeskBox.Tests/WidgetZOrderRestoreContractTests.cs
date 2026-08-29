@@ -149,7 +149,7 @@ public sealed class WidgetZOrderRestoreContractTests
     }
 
     [Fact]
-    public void DesktopPinnedInteraction_ReassertsBottomWithoutAcquiringExpandedLayer()
+    public void DesktopPinnedInteraction_RestoresBottomWhileExpandedCapsuleRaisesAbovePeers()
     {
         string bounds = File.ReadAllText(TestPaths.FromRepository(
             "src/DeskBox/Views/WidgetWindowBase.Bounds.cs"));
@@ -179,27 +179,70 @@ public sealed class WidgetZOrderRestoreContractTests
             "WindowActivationState.Deactivated",
             activated,
             StringComparison.Ordinal);
-        Assert.Contains("WidgetLayerService.MoveToDesktopBottom(HWnd)", restore, StringComparison.Ordinal);
+        Assert.Contains(
+            "WidgetLayerService.MoveToDesktopBottom(HWnd, showWindow: false)",
+            restore,
+            StringComparison.Ordinal);
         Assert.Contains("TopMostSafetyTimer?.Stop()", restore, StringComparison.Ordinal);
 
-        int fixedMode = expand.IndexOf(
+        // The expanded capsule must not be flattened to the desktop bottom:
+        // plain interaction reasserts the bottom, but an expand raises the
+        // window to the top of the widget band through the shared helpers.
+        Assert.DoesNotContain(
             "WidgetLayerService.UsesDesktopPinnedMode()",
+            expand,
             StringComparison.Ordinal);
-        int fixedReturn = expand.IndexOf("return;", fixedMode, StringComparison.Ordinal);
-        int firstRaise = expand.IndexOf(
+        Assert.DoesNotContain("MoveToDesktopBottom", expand, StringComparison.Ordinal);
+        Assert.Contains(
             "TryBringAbovePeerWidgetsAtDesktopLayer",
+            expand,
             StringComparison.Ordinal);
-        Assert.InRange(fixedMode, 0, fixedReturn - 1);
-        Assert.InRange(fixedReturn, fixedMode + 1, firstRaise - 1);
-        Assert.Contains("WidgetLayerService.MoveToDesktopBottom(HWnd)", expand, StringComparison.Ordinal);
+        Assert.Contains(
+            "AcquireExpandedWidgetLayerLease(\"expanded-state-desktop\")",
+            expand,
+            StringComparison.Ordinal);
 
-        Assert.Contains("WidgetLayerService.UsesDesktopPinnedMode()", acquire, StringComparison.Ordinal);
-        Assert.Contains("WidgetLayerService.MoveToDesktopBottom(windowHandle)", acquire, StringComparison.Ordinal);
-        Assert.Contains("return 0;", acquire, StringComparison.Ordinal);
+        // The expanded-layer lease applies in desktop-pinned mode too: the
+        // acquire path must order the capsule above its peers without ever
+        // moving it to the desktop bottom.
+        Assert.Contains(
+            "WidgetExpandedLayerLeasePolicy.Acquire(",
+            acquire,
+            StringComparison.Ordinal);
+        Assert.Contains("EnsurePeerOrderHighestToLowest", acquire, StringComparison.Ordinal);
+        Assert.DoesNotContain("MoveToDesktopBottom", acquire, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void DesktopPinnedPeerRaiseEntryPoints_AreConvertedToBottomPlacement()
+    public void DesktopPinnedActivationRestore_CannotReshowHiddenWindow()
+    {
+        string bounds = File.ReadAllText(TestPaths.FromRepository(
+            "src/DeskBox/Views/WidgetWindowBase.Bounds.cs"));
+        string restore = SliceMethod(
+            bounds,
+            "private void RestoreDesktopPinnedBottomState",
+            "private IntPtr DesktopPinnedActivationSubclassProc");
+
+        int visibilityGuard = restore.IndexOf(
+            "WidgetTemporaryRaiseLeasePolicy.CanRestoreDesktopLayer(",
+            StringComparison.Ordinal);
+        int layerRepair = restore.IndexOf(
+            "WidgetLayerService.MoveToDesktopBottom(HWnd, showWindow: false)",
+            StringComparison.Ordinal);
+
+        Assert.InRange(visibilityGuard, 0, layerRepair - 1);
+        Assert.Contains("Visible,", restore, StringComparison.Ordinal);
+        Assert.Contains("IsHideAnimationRunning,", restore, StringComparison.Ordinal);
+        Assert.Contains("IsClosing", restore, StringComparison.Ordinal);
+        Assert.Contains("CancelPendingDesktopLayerRestore();", restore, StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "WidgetLayerService.MoveToDesktopBottom(HWnd);",
+            restore,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void DesktopPinnedPeerRaiseEntryPoints_SplitTrayRaiseBottomFromCapsuleBandTop()
     {
         string layerService = File.ReadAllText(TestPaths.FromRepository(
             "src/DeskBox/Services/WidgetLayerService.cs"));
@@ -212,19 +255,22 @@ public sealed class WidgetZOrderRestoreContractTests
             "public static bool TryBringAbovePeerWidgetsAtDesktopLayer",
             "public static bool EnsurePeerOrderHighestToLowest");
 
+        // Tray-raise keeps desktop-pinned widgets resting at the band bottom.
         string pinnedBring = bring[..bring.IndexOf(
             "DetachFromDesktopIconLayerIfNeeded",
             StringComparison.Ordinal)];
-        int pinnedMode = tryBring.IndexOf(
-            "if (UsesDesktopPinnedMode())",
-            StringComparison.Ordinal);
-        int pinnedReturn = tryBring.IndexOf("return true;", pinnedMode, StringComparison.Ordinal);
-        string pinnedTryBring = tryBring[pinnedMode..(pinnedReturn + "return true;".Length)];
-
         Assert.Contains("MoveToDesktopBottom(windowHandle)", pinnedBring, StringComparison.Ordinal);
         Assert.DoesNotContain("HWND_TOP", pinnedBring, StringComparison.Ordinal);
-        Assert.Contains("MoveToDesktopBottom(windowHandle)", pinnedTryBring, StringComparison.Ordinal);
-        Assert.DoesNotContain("HWND_TOP", pinnedTryBring, StringComparison.Ordinal);
+
+        // The capsule expand raise must stay inside the desktop band while
+        // taking the top of it: attach without bottom placement, then HWND_TOP.
+        Assert.DoesNotContain(
+            "UsesDesktopPinnedMode()",
+            tryBring,
+            StringComparison.Ordinal);
+        Assert.Contains("placeAtBottom: false", tryBring, StringComparison.Ordinal);
+        Assert.Contains("HWND_TOP", tryBring, StringComparison.Ordinal);
+        Assert.DoesNotContain("MoveToDesktopBottom", tryBring, StringComparison.Ordinal);
     }
 
     private static string SliceMethod(string source, string startMarker, string endMarker)

@@ -1,5 +1,7 @@
 {
     "Settings.Performance.Title": "效能與資源",
+    "Display.VirtualAdapter.Warning.Title": "偵測到虛擬顯示器",
+    "Display.VirtualAdapter.Warning.Body": "你的主顯示器來自虛擬顯示卡。如果出現格子堆疊在角落、無回應或閃退，請嘗試切換到實體顯示器。其餘功能不受影響。",
     "Settings.Performance.Description": "在視覺效果與資源占用之間選擇，並控制方格隱藏後的快取回收",
     "Settings.Performance.Mode.Title": "效能模式",
     "Settings.Performance.Mode.Description": "選擇預設；修改下方詳細設定後將自動切換為自訂",
@@ -2536,5 +2538,7 @@
   "Widget.RunAsAdministrator.AlreadyRunning": "此程式正以一般權限執行，請完全結束後再以系統管理員身分開啟。",
   "Widget.RunAsAdministrator.NotElevated": "Windows 無法建立系統管理員程序，請檢查 UAC 設定後再試。",
   "Widget.CreateShortcut": "建立捷徑",
-  "Widget.MoreSystemOperations": "更多系統操作"
+  "Widget.MoreSystemOperations": "更多系統操作",
+  "Settings.ManagedPath.DesktopShortcut.Title": "在桌面保留收納檔案入口",
+  "Settings.ManagedPath.DesktopShortcut.Description": "直接開啟目前的收納資料夾，解除安裝 DeskBox 後仍可繼續使用"
 }

@@ -21,6 +21,7 @@ public static class ServiceRegistry
         services.AddSingleton<DeskBoxDiagnosticsBundleService>();
         services.AddSingleton<FileService>();
         services.AddSingleton<ResizeGuideOverlayService>();
+        services.AddSingleton<ManagedStorageDesktopShortcutService>();
 
         // ── Feature services ─────────────────────────────────────────────
         services.AddSingleton<OrganizerService>(sp =>

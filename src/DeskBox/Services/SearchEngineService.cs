@@ -340,17 +340,29 @@ public sealed class SearchEngineService : IDisposable
         bool recursive,
         CancellationToken cancellationToken)
     {
-        if (!Directory.Exists(root))
+        if (!FileService.TryResolveExistingPathForTraversal(
+                root,
+                out string resolvedRoot))
         {
             yield break;
         }
 
         var pending = new Stack<string>();
-        pending.Push(root);
+        pending.Push(resolvedRoot);
+        var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         while (pending.Count > 0 && !cancellationToken.IsCancellationRequested)
         {
             string current = pending.Pop();
+            if (!FileService.TryResolveExistingPathForTraversal(
+                    current,
+                    out string resolvedCurrent) ||
+                !visited.Add(resolvedCurrent))
+            {
+                continue;
+            }
+
+            current = resolvedCurrent;
             string[] files;
             try
             {

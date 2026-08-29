@@ -816,7 +816,12 @@ public sealed partial class FileSurfaceContent :
         {
             _stackPopoverContextMenuOpen = true;
             flyout.Closed += (_, _) =>
-                CompleteStackPopoverContextMenu();
+            {
+                if (!_stackPopoverSystemContextMenuOpen)
+                {
+                    CompleteStackPopoverContextMenu();
+                }
+            };
         }
         if (item is WidgetStackItem)
         {
@@ -3892,19 +3897,29 @@ public sealed partial class FileSurfaceContent :
         IReadOnlyList<WidgetItem> items,
         bool permanently = false)
     {
-        if (items.Count == 0 ||
-            TryBlockTransferMutation(items) ||
-            permanently && !await ConfirmPermanentDeleteAsync(items))
+        if (items.Count == 0 || TryBlockTransferMutation(items))
         {
             return;
         }
 
+        // Confirmation is delegated to the Windows Shell (per the user's own
+        // Explorer confirmation settings): recycle deletes ask "move to the
+        // recycle bin?", permanent deletes ask "permanently delete?". No
+        // DeskBox dialog is stacked on top.
         FileDeleteBatchResult result = await ViewModel.DeleteItemsAsync(
             items,
-            recycle: !permanently);
+            recycle: !permanently,
+            ownerHandle: _hostWindowHandle);
         UpdateEmptyState();
         if (result.Failures.Count == 0)
         {
+            if (result.DeletedCount == 0)
+            {
+                // The Shell confirmation was declined for every item; not an
+                // outcome worth a feedback toast.
+                return;
+            }
+
             ShowFeedback(new WidgetFeedbackRequest(
                 _localizationService.Format(
                     permanently
@@ -3926,32 +3941,6 @@ public sealed partial class FileSurfaceContent :
                 ? WidgetFeedbackSeverity.Warning
                 : WidgetFeedbackSeverity.Error,
             permanently ? "file-permanent-delete-partial" : "file-delete-partial"));
-    }
-
-    private async Task<bool> ConfirmPermanentDeleteAsync(
-        IReadOnlyList<WidgetItem> items)
-    {
-        if (XamlRoot is null)
-        {
-            return false;
-        }
-
-        var dialog = new ContentDialog
-        {
-            XamlRoot = XamlRoot,
-            Title = T("Widget.PermanentDelete.Title"),
-            Content = new TextBlock
-            {
-                Text = _localizationService.Format(
-                    "Widget.PermanentDelete.Body",
-                    items.Count),
-                TextWrapping = TextWrapping.Wrap
-            },
-            PrimaryButtonText = T("Widget.PermanentDelete.Confirm"),
-            CloseButtonText = T("Common.Cancel"),
-            DefaultButton = ContentDialogButton.Close
-        };
-        return await dialog.ShowAsync() == ContentDialogResult.Primary;
     }
 
     private void ApplyCutState()

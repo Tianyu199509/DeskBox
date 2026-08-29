@@ -345,15 +345,9 @@ public static class WidgetLayerService
     /// </summary>
     public static bool TryBringAbovePeerWidgetsAtDesktopLayer(IntPtr windowHandle)
     {
-        if (UsesDesktopPinnedMode())
-        {
-            // Fixed-layer widgets never acquire an interaction-time peer raise.
-            // Keeping the active HWND at the desktop bottom is more important
-            // than letting an expanded capsule cover another fixed widget.
-            MoveToDesktopBottom(windowHandle);
-            return true;
-        }
-
+        // Desktop-pinned widgets are owner-attached to Explorer's desktop icon
+        // layer, so HWND_TOP lifts them above sibling widgets only; the band
+        // itself stays beneath every application window and Win+D.
         if (!ShouldAttachRestingWindowToDesktop() ||
             !TryAttachToDesktopIconLayer(windowHandle, placeAtBottom: false))
         {

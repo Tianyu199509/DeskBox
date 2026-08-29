@@ -1,11 +1,12 @@
 ; DeskBox ARM64 安装脚本
-; 零售安装包由 scripts\build-stage-7c1-distribution.ps1 -Platform ARM64 产出（Native AOT 载荷，/DDeskBoxNativeAot=1）。
-; 手动编译示例（载荷需先 publish 到独立目录）：
-; ISCC /DDeskBoxNativeAot=1 /DMyAppReleaseDir=<publish 目录> DeskBox.arm64.iss
+; 零售安装包由 scripts\build-stage-7c1-distribution.ps1 -Platform ARM64 产出（Full Native AOT 载荷）。
+; 载荷必须由 ..\scripts\publish-aot-retail.ps1 -Platform ARM64 生成，
+; 以便同时生成 DeskBox.InstallManifest.txt。手动编译示例：
+; ISCC /DDeskBoxNativeAot=1 /DDeskBoxBundledRuntime=1 /DMyAppReleaseDir=<publish 目录> DeskBox.arm64.iss
 
 #define MyAppName "DeskBox"
-#define MyAppVersion "1.4.6"
-#define MyAppVersionInfo "1.4.6.0"
+#define MyAppVersion "1.4.8"
+#define MyAppVersionInfo "1.4.8.0"
 #define MyAppPublisher "朱天雨"
 #define MyAppExeName "DeskBox.exe"
 #define MyAppOutputBaseName "DeskBox_Setup"
@@ -29,7 +30,7 @@ AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 AppPublisher={#MyAppPublisher}
 #if DeskBoxBundledRuntime
-AppComments=Includes private .NET and Windows App Runtime components for offline installation.
+AppComments=Native AOT build with private Windows App Runtime components for offline installation.
 #elif DeskBoxNativeAot
 AppComments=Native AOT build; Windows App Runtime is installed when missing.
 #else
@@ -62,7 +63,11 @@ CloseApplications=force
 CloseApplicationsFilter={#MyAppExeName}
 RestartApplications=no
 OutputDir=..\Output
+#if DeskBoxBundledRuntime
+OutputBaseFilename={#MyAppOutputBaseName}_{#MyAppVersion}_arm64
+#else
 OutputBaseFilename={#MyAppOutputBaseName}_{#MyAppVersion}_arm64{#MyAppPackageSuffix}
+#endif
 SetupIconFile=..\src\DeskBox\Assets\deskbox.ico
 VersionInfoVersion={#MyAppVersionInfo}
 VersionInfoProductVersion={#MyAppVersionInfo}
@@ -212,6 +217,7 @@ brazilianportuguese.NeedsRestart=As dependências de runtime foram instaladas, m
 brazilianportuguese.DependencyVerificationFailed=O ambiente de execução necessário ainda não foi detectado após a instalação das dependências. O DeskBox ainda não foi instalado. Instale o .NET 10 Runtime estável e o Windows App Runtime 2.4 e execute o instalador novamente.
 
 #include "DeskBox.NewLanguageCustomMessages.iss"
+#include "DeskBox.UninstallCustomMessages.iss"
 #include "DeskBox.DependencyCustomMessages.iss"
 
 [Tasks]
@@ -219,19 +225,26 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 
 [InstallDelete]
 Type: files; Name: "{autodesktop}\{#MyAppName}.lnk"; Tasks: desktopicon
-Type: filesandordirs; Name: "{app}\Microsoft.WindowsAppRuntime"
-Type: files; Name: "{app}\Microsoft.WinUI.dll"
-Type: files; Name: "{app}\Microsoft.Windows.SDK.NET.dll"
-Type: files; Name: "{app}\DirectML.dll"
-Type: files; Name: "{app}\onnxruntime.dll"
 Type: files; Name: "{autostartup}\{#MyAppName}.lnk"
 
 [Files]
+#if DeskBoxBundledRuntime
+Source: "..\scripts\cleanup-deskbox-install.ps1"; Flags: dontcopy
+Source: "DeskBox.LegacyBundledRuntimeFiles.txt"; Flags: dontcopy
+Source: "{#MyAppReleaseDir}\DeskBox.InstallManifest.txt"; DestDir: "{tmp}"; DestName: "DeskBox.InstallManifest.current.txt"; Flags: ignoreversion deleteafterinstall
+Source: "{#MyAppReleaseDir}\*"; DestDir: "{app}"; Excludes: "DeskBox.Updater.*,deskbox_native.dll,deskbox_native.pdb,DeskBox.InstallManifest.txt"; Flags: ignoreversion recursesubdirs createallsubdirs
+#if DeskBoxNativeAot
+Source: "{#MyAppReleaseDir}\deskbox_native.dll"; DestDir: "{app}"; Flags: ignoreversion
+#endif
+Source: "{#MyAppReleaseDir}\DeskBox.Updater.*"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#MyAppReleaseDir}\DeskBox.InstallManifest.txt"; DestDir: "{app}"; Flags: ignoreversion; BeforeInstall: CleanupDeskBoxInstall
+#else
 Source: "{#MyAppReleaseDir}\*"; DestDir: "{app}"; Excludes: "DeskBox.Updater.*,deskbox_native.dll,deskbox_native.pdb"; Flags: ignoreversion recursesubdirs createallsubdirs
 #if DeskBoxNativeAot
 Source: "{#MyAppReleaseDir}\deskbox_native.dll"; DestDir: "{app}"; Flags: ignoreversion
 #endif
 Source: "{#MyAppReleaseDir}\DeskBox.Updater.*"; DestDir: "{app}"; Flags: ignoreversion
+#endif
 
 [Icons]
 Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\Assets\deskbox.ico"

@@ -30,7 +30,8 @@ public partial class WidgetViewModel
             EnsureFolderBackedConfig();
             cancellationToken.ThrowIfCancellationRequested();
             MappedFolderPath = Config.MappedFolderPath;
-            SetCurrentFolderPath(MappedFolderPath);
+            _mappedFolderTraversalPath = ResolveMappedFolderTraversalPath();
+            SetCurrentFolderPath(_mappedFolderTraversalPath);
             await ConfigureFolderWatchersAsync(CurrentFolderPath, cancellationToken);
             await ReloadFolderContentsAsync(
                 CurrentFolderPath!,
@@ -75,7 +76,12 @@ public partial class WidgetViewModel
         MappedFolderPath = Config.MappedFolderPath;
         if (string.IsNullOrWhiteSpace(CurrentFolderPath))
         {
-            SetCurrentFolderPath(MappedFolderPath);
+            _mappedFolderTraversalPath = ResolveMappedFolderTraversalPath();
+            SetCurrentFolderPath(_mappedFolderTraversalPath);
+        }
+        else
+        {
+            await RefreshMappedRootTraversalPathAsync(cancellationToken);
         }
 
         string destinationFolderPath = CurrentFolderPath!;
@@ -322,7 +328,13 @@ public partial class WidgetViewModel
             return;
         }
 
-        await ReloadFolderContentsAsync(CurrentFolderPath);
+        string? refreshPath = await RefreshMappedRootTraversalPathAsync();
+        if (string.IsNullOrWhiteSpace(refreshPath))
+        {
+            return;
+        }
+
+        await ReloadFolderContentsAsync(refreshPath);
         if (!_isDisposed)
         {
             UpdateDependentProperties();
@@ -394,7 +406,17 @@ public partial class WidgetViewModel
             }
         }
 
-        Directory.CreateDirectory(normalizedPath);
+        if (!FileService.TryResolveExistingPathForTraversal(
+                normalizedPath,
+                out string traversalPath))
+        {
+            Directory.CreateDirectory(normalizedPath);
+            traversalPath = FileService.TryResolveExistingPathForTraversal(
+                normalizedPath,
+                out string createdTraversalPath)
+                ? createdTraversalPath
+                : normalizedPath;
+        }
 
         Config.WidgetKind = WidgetKind.File;
         Config.IsDisabled = false;
@@ -404,7 +426,8 @@ public partial class WidgetViewModel
         Config.Items.Clear();
         ResetAddedAtTracking();
         MappedFolderPath = normalizedPath;
-        SetCurrentFolderPath(normalizedPath);
+        _mappedFolderTraversalPath = traversalPath;
+        SetCurrentFolderPath(traversalPath);
         OnPropertyChanged(nameof(FollowsDefaultStoragePath));
 
         if (App.Current?.WidgetManager is { } widgetManager)
@@ -413,8 +436,8 @@ public partial class WidgetViewModel
         }
 
         _settingsService.UpdateWidget(Config);
-        await ConfigureFolderWatchersAsync(normalizedPath);
-        await ReloadFolderContentsAsync(normalizedPath);
+        await ConfigureFolderWatchersAsync(traversalPath);
+        await ReloadFolderContentsAsync(traversalPath);
         UpdateDependentProperties();
     }
 
@@ -542,7 +565,8 @@ public partial class WidgetViewModel
 
     public async Task<FileDeleteBatchResult> DeleteItemsAsync(
         IEnumerable<WidgetItem> items,
-        bool recycle = true)
+        bool recycle = true,
+        IntPtr ownerHandle = default)
     {
         var targets = items
             .Where(item => item is not null)
@@ -556,21 +580,92 @@ public partial class WidgetViewModel
 
         int deletedCount = 0;
         var failures = new List<FileDeleteFailure>();
+        var successfulPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        if (ownerHandle != IntPtr.Zero)
+        {
+            try
+            {
+                IReadOnlySet<string> deletedPaths =
+                    await _fileService.DeleteEntriesWithShellAsync(
+                        targets.Select(item => item.Path),
+                        recycle,
+                        ownerHandle);
+
+                foreach (WidgetItem item in targets)
+                {
+                    string normalizedPath = Path.GetFullPath(item.Path);
+                    if (!deletedPaths.Contains(normalizedPath))
+                    {
+                        continue;
+                    }
+
+                    Items.Remove(item);
+                    RemoveFileAddedAt(item.Path);
+                    successfulPaths.Add(normalizedPath);
+                    deletedCount++;
+                }
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                // A Shell failure can happen after a subset of a batch has
+                // completed. Keep the model in sync with the filesystem and
+                // report only entries that still exist as failures.
+                foreach (WidgetItem item in targets)
+                {
+                    string normalizedPath = Path.GetFullPath(item.Path);
+                    if (!File.Exists(normalizedPath) &&
+                        !Directory.Exists(normalizedPath))
+                    {
+                        Items.Remove(item);
+                        RemoveFileAddedAt(item.Path);
+                        successfulPaths.Add(normalizedPath);
+                        deletedCount++;
+                        continue;
+                    }
+
+                    failures.Add(new FileDeleteFailure(
+                        item.Path,
+                        item.Name,
+                        ex.Message));
+                }
+            }
+
+            NormalizeSortOrder();
+            RemoveStackMemberOverridePaths(
+                targets
+                    .Where(item => successfulPaths.Contains(Path.GetFullPath(item.Path)))
+                    .Select(item => item.Path));
+            return new FileDeleteBatchResult(deletedCount, failures);
+        }
+
         foreach (var item in targets)
         {
             if (!File.Exists(item.Path) && !Directory.Exists(item.Path))
             {
                 Items.Remove(item);
                 RemoveFileAddedAt(item.Path);
+                successfulPaths.Add(Path.GetFullPath(item.Path));
                 deletedCount++;
                 continue;
             }
 
             try
             {
-                await _fileService.DeleteEntryAsync(item.Path, recycle);
+                bool deleted = await _fileService.DeleteEntryAsync(
+                    item.Path,
+                    recycle,
+                    ownerHandle);
+                if (!deleted)
+                {
+                    // The user answered "No" to the Shell confirmation; keep
+                    // the item and do not count it as deleted or failed.
+                    continue;
+                }
+
                 Items.Remove(item);
                 RemoveFileAddedAt(item.Path);
+                successfulPaths.Add(Path.GetFullPath(item.Path));
                 deletedCount++;
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
@@ -585,11 +680,7 @@ public partial class WidgetViewModel
         NormalizeSortOrder();
         RemoveStackMemberOverridePaths(
             targets
-                .Where(item => failures.All(failure =>
-                    !string.Equals(
-                        failure.Path,
-                        item.Path,
-                        StringComparison.OrdinalIgnoreCase)))
+                .Where(item => successfulPaths.Contains(Path.GetFullPath(item.Path)))
                 .Select(item => item.Path));
         return new FileDeleteBatchResult(deletedCount, failures);
     }

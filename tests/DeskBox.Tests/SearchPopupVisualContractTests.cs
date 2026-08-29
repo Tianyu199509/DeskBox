@@ -148,6 +148,78 @@ public sealed class SearchPopupVisualContractTests
         Assert.Contains("OnRubberBandAutoScrollTick", searchInteractions, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void Tabs_KeepIndicatorWithLabelAndDoNotStealKeyboardFocus()
+    {
+        string root = FindRepositoryRoot();
+        string popupXaml = File.ReadAllText(Path.Combine(
+            root,
+            "src/DeskBox/Views/SearchPopupWindow.xaml"));
+        string popupCode = File.ReadAllText(Path.Combine(
+            root,
+            "src/DeskBox/Views/SearchPopupWindow.xaml.cs"));
+        string models = File.ReadAllText(Path.Combine(
+            root,
+            "src/DeskBox/Models/SearchModels.cs"));
+
+        Assert.Contains(
+            "PreviewKeyDown=\"RootGrid_PreviewKeyDown\"",
+            popupXaml,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "AllowFocusOnInteraction=\"False\"",
+            popupXaml,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "<Setter Property=\"HorizontalContentAlignment\" Value=\"Left\"/>",
+            popupXaml,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "<Setter Property=\"MinWidth\" Value=\"0\"/>",
+            popupXaml,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "<Setter Property=\"Padding\" Value=\"14,4\"/>",
+            popupXaml,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "<RowDefinition Height=\"8\"/>",
+            popupXaml,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "Glyph=\"{x:Bind Glyph, Mode=OneTime}\"",
+            popupXaml,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "Visibility=\"{x:Bind SelectionIndicatorVisibility, Mode=OneWay}\"",
+            popupXaml,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "x:Name=\"TabSelectionIndicator\"",
+            popupXaml,
+            StringComparison.Ordinal);
+        Assert.Contains("RootGrid_PreviewKeyDown", popupCode, StringComparison.Ordinal);
+        Assert.Contains("TryMoveResultSelection", popupCode, StringComparison.Ordinal);
+        Assert.Contains("QueueTabSelectionRefreshAndFocus", popupCode, StringComparison.Ordinal);
+        Assert.Contains("DispatcherQueuePriority.Low", popupCode, StringComparison.Ordinal);
+        Assert.Contains("SelectionIndicatorVisibility", models, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ResultNavigation_PreservesFilterKeysAndRefreshesSameIdentitySelection()
+    {
+        string root = FindRepositoryRoot();
+        string popup = File.ReadAllText(Path.Combine(
+            root,
+            "src/DeskBox/Views/SearchPopupWindow.xaml.cs"));
+
+        Assert.Contains("FindVisualAncestor<TextBox>(focusedObject)", popup, StringComparison.Ordinal);
+        Assert.Contains("IsVisualDescendantOf(focusedObject, ResultFilterComboBox)", popup, StringComparison.Ordinal);
+        Assert.Contains("ReferenceEquals(previousSelection, _viewModel.SelectedItem)", popup, StringComparison.Ordinal);
+        Assert.Contains("UpdateSelectionHighlight();", popup, StringComparison.Ordinal);
+        Assert.Contains("FocusSelectedResult();", popup, StringComparison.Ordinal);
+    }
+
     private static string FindRepositoryRoot()
     {
         DirectoryInfo? current = new(AppContext.BaseDirectory);

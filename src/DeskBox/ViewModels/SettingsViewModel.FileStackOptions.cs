@@ -779,9 +779,11 @@ public partial class SettingsViewModel
             IEnumerable<string> paths = widget.Items.Select(item => item.Path);
             if (includeMappedFolders &&
                 !string.IsNullOrWhiteSpace(widget.MappedFolderPath) &&
-                Directory.Exists(widget.MappedFolderPath))
+                FileService.TryResolveExistingPathForTraversal(
+                    widget.MappedFolderPath,
+                    out string mappedFolderTraversalPath))
             {
-                paths = EnumerateFileStackPreviewPaths(widget.MappedFolderPath);
+                paths = EnumerateFileStackPreviewPaths(mappedFolderTraversalPath);
             }
 
             foreach (string path in paths

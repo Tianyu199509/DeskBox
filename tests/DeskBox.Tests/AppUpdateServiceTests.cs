@@ -20,6 +20,8 @@ public sealed class AppUpdateServiceTests : IDisposable
         Assert.True(AppUpdateService.IsInstallerAssetName("DeskBox_Setup_1.2.4_x64.exe", "x64"));
         Assert.False(AppUpdateService.IsInstallerAssetName("DeskBox_Setup_1.2.4_arm64.exe", "x64"));
         Assert.True(AppUpdateService.IsInstallerAssetName("DeskBox_Setup_1.2.4_arm64.exe", "arm64"));
+        Assert.True(AppUpdateService.IsInstallerAssetName("DeskBox_Setup_1.4.8_x64.exe", "x64"));
+        Assert.True(AppUpdateService.IsInstallerAssetName("DeskBox_Setup_1.4.8_arm64.exe", "arm64"));
         Assert.False(AppUpdateService.IsInstallerAssetName("DeskBox_Setup_1.4.3_x64_Full.exe", "x64"));
         Assert.False(AppUpdateService.IsInstallerAssetName("DeskBox_Setup_1.4.3_arm64_Full.exe", "arm64"));
         Assert.True(AppUpdateService.IsInstallerDownloadCompatibleWithArchitecture(

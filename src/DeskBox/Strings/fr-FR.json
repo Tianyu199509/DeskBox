@@ -1,5 +1,7 @@
 {
     "Settings.Performance.Title": "Performances et ressources",
+    "Display.VirtualAdapter.Warning.Title": "Écran virtuel détecté",
+    "Display.VirtualAdapter.Warning.Body": "Votre écran principal est fourni par une carte graphique virtuelle. Si les widgets s'empilent dans un coin, se figent ou que l'application plante, essayez un écran physique. Le reste fonctionne normalement.",
     "Settings.Performance.Description": "Équilibrez la qualité visuelle et l’utilisation des ressources, et réglez le nettoyage du cache après masquage",
     "Settings.Performance.Mode.Title": "Mode de performances",
     "Settings.Performance.Mode.Description": "Choisissez un préréglage. Modifier un réglage détaillé active le mode Personnalisé",
@@ -2536,5 +2538,7 @@
   "Widget.RunAsAdministrator.AlreadyRunning": "Cette application s’exécute déjà sans droits d’administrateur. Fermez-la complètement, puis réessayez.",
   "Widget.RunAsAdministrator.NotElevated": "Windows n’a pas pu créer de processus administrateur. Vérifiez les paramètres UAC et réessayez.",
   "Widget.CreateShortcut": "Créer un raccourci",
-  "Widget.MoreSystemOperations": "Autres opérations système"
+  "Widget.MoreSystemOperations": "Autres opérations système",
+  "Settings.ManagedPath.DesktopShortcut.Title": "Conserver un raccourci de stockage sur le bureau",
+  "Settings.ManagedPath.DesktopShortcut.Description": "Ouvre directement le dossier de stockage actuel et reste utilisable après la désinstallation de DeskBox"
 }

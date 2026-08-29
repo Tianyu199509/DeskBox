@@ -11,6 +11,8 @@ internal readonly record struct WidgetBorderVisuals(
 /// </summary>
 internal static class WidgetBorderVisualCalculator
 {
+    internal const double MaximumThickness = 1.6;
+
     public static WidgetBorderVisuals Resolve(
         string? borderStyle,
         string? colorMode,
@@ -20,7 +22,8 @@ internal static class WidgetBorderVisualCalculator
         var (thickness, alpha) = borderStyle switch
         {
             SettingsService.WidgetBorderStyleMedium => (1.2d, (byte)0x30),
-            SettingsService.WidgetBorderStyleThick => (1.6d, (byte)0x48),
+            SettingsService.WidgetBorderStyleThick =>
+                (MaximumThickness, (byte)0x48),
             SettingsService.WidgetBorderStyleNone => (0d, (byte)0),
             _ => (0.8d, (byte)0x18)
         };

@@ -157,7 +157,7 @@ $commonProperties = @(
     "-p:JsonSerializerIsReflectionEnabledByDefault=false",
     "-p:IlcUseEnvironmentalTools=true",
     "-p:SelfContained=true",
-    "-p:WindowsAppSDKSelfContained=false"
+    "-p:WindowsAppSDKSelfContained=true"
 )
 
 $previousCliLanguage = [Environment]::GetEnvironmentVariable("DOTNET_CLI_UI_LANGUAGE", "Process")
@@ -232,6 +232,27 @@ foreach ($pdb in $pdbFiles) {
     Move-Item -LiteralPath $pdb.FullName -Destination $destination -Force
 }
 
+$installManifestName = "DeskBox.InstallManifest.txt"
+$installManifestPath = Join-Path $publishDir $installManifestName
+$installManifestEntries = [System.Collections.Generic.List[string]]::new()
+foreach ($publishedFile in Get-ChildItem -LiteralPath $publishDir -File -Recurse) {
+    if ($publishedFile.FullName.Equals(
+            $installManifestPath,
+            [System.StringComparison]::OrdinalIgnoreCase)) {
+        continue
+    }
+
+    $relativePath = $publishedFile.FullName.Substring(
+        $publishDir.TrimEnd('\', '/').Length + 1).Replace('\', '/')
+    $installManifestEntries.Add($relativePath)
+}
+$installManifestEntries.Add($installManifestName)
+$installManifestEntries = @($installManifestEntries | Sort-Object -Unique)
+[System.IO.File]::WriteAllLines(
+    $installManifestPath,
+    $installManifestEntries,
+    [System.Text.UTF8Encoding]::new($false))
+
 $requiredFiles = @(
     "DeskBox.exe",
     "DeskBox.Updater.exe",
@@ -239,6 +260,10 @@ $requiredFiles = @(
     "DeskBox.pri",
     "deskbox_native.dll",
     "EverythingSdk.dll",
+    "Microsoft.UI.Input.dll",
+    "Microsoft.ui.xaml.dll",
+    "Microsoft.WindowsAppRuntime.dll",
+    $installManifestName,
     "ThirdParty/Everything/LICENSE.txt"
 )
 foreach ($requiredFile in $requiredFiles) {
@@ -360,7 +385,10 @@ $summary = [ordered]@{
     generatedAtUtc = [DateTime]::UtcNow.ToString("O")
     durationMilliseconds = $stopwatch.ElapsedMilliseconds
     productProfile = "retail"
+    deploymentProfile = "full"
     smokeHarnessEnabled = $false
+    selfContained = $true
+    windowsAppSdkSelfContained = $true
     gitCommit = $sourceSnapshotBefore.GitCommit
     gitDirty = $sourceSnapshotBefore.GitDirty
     gitStatusEntries = $sourceSnapshotBefore.StatusEntries
@@ -373,6 +401,8 @@ $summary = [ordered]@{
     runtimeIdentifier = $runtimeIdentifier
     publishDirectory = $publishDir
     symbolsDirectory = $symbolsDir
+    installManifest = $installManifestPath
+    installManifestFileCount = $installManifestEntries.Count
     publishFileCount = $publishedFiles.Count
     publishBytes = ($publishedFiles | Measure-Object -Property Length -Sum).Sum
     symbolFileCount = $symbolFiles.Count

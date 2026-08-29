@@ -1213,7 +1213,7 @@ public sealed class SettingsServiceTests : IDisposable
         Assert.Equal(newUserDefaults.ShowFileItemPathTooltips, restoredDefaults.ShowFileItemPathTooltips);
         Assert.Equal(SettingsService.DefaultWidgetHoverButtonActions, newUserDefaults.WidgetHoverButtonActions);
         Assert.Equal(newUserDefaults.WidgetHoverButtonActions, restoredDefaults.WidgetHoverButtonActions);
-        Assert.Equal(SettingsService.WeatherSkinRich, newUserDefaults.WeatherSkin);
+        Assert.Equal(SettingsService.WeatherSkinStandard, newUserDefaults.WeatherSkin);
         Assert.Equal(newUserDefaults.WeatherSkin, restoredDefaults.WeatherSkin);
         Assert.Equal(SettingsService.DefaultSearchMaxResults, newUserDefaults.SearchMaxResults);
         Assert.Equal(newUserDefaults.SearchMaxResults, restoredDefaults.SearchMaxResults);

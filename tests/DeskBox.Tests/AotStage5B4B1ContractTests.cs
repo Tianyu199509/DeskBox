@@ -191,7 +191,7 @@ public sealed class AotStage5B4B1ContractTests
             "ItemsSource=\"{x:Bind ViewModel.FileStackCustomRules, Mode=OneWay}\"",
             xaml,
             StringComparison.Ordinal);
-        Assert.Equal(305, CountOccurrences(bindableViewModel, "nameof("));
+        Assert.Equal(306, CountOccurrences(bindableViewModel, "nameof("));
         Assert.DoesNotContain("nameof(WidgetCapsuleModeEnabled)", bindableViewModel, StringComparison.Ordinal);
         Assert.Contains("nameof(SelectedWidgetCapsuleBarPlacement)", bindableViewModel, StringComparison.Ordinal);
         Assert.DoesNotContain("nameof(ResetAllCapsuleOverridesCommand)", bindableViewModel, StringComparison.Ordinal);

@@ -58,7 +58,7 @@ public sealed partial class WeatherWidgetViewModel : ObservableObject, IDisposab
     private bool _hasViewModeOverride;
     private string _temperatureUnit = SettingsService.WeatherTemperatureUnitCelsius;
     private string _windSpeedUnit = SettingsService.WeatherWindSpeedUnitKmh;
-    private string _skin = SettingsService.WeatherSkinRich;
+    private string _skin = SettingsService.WeatherSkinStandard;
     private bool _showForecast = true;
     private bool _showSunrise = true;
     private bool _showUvIndex = true;
@@ -478,6 +478,10 @@ public sealed partial class WeatherWidgetViewModel : ObservableObject, IDisposab
 
     public bool UsesRichSkin => _skin == SettingsService.WeatherSkinRich;
     public Visibility RichSkinVisibility => UsesRichSkin ? Visibility.Visible : Visibility.Collapsed;
+    public CornerRadius WidgetCornerRadius => new(
+        WidgetCompactBoundsCalculator.ResolveOuterCornerRadius(
+            WindowsCompatibilityService.ResolveEffectiveWidgetCornerPreference(
+                _settingsService?.Settings.WidgetCornerPreference)));
 
     /// <summary>
     /// Selects the foreground theme that provides the stronger worst-case
@@ -665,6 +669,8 @@ public sealed partial class WeatherWidgetViewModel : ObservableObject, IDisposab
             // Re-evaluate light text need when skin changes
             UpdateRichSkinColors();
         }
+
+        OnPropertyChanged(nameof(WidgetCornerRadius));
 
         _showForecast = settings.WeatherShowForecast;
         _showSunrise = settings.WeatherShowSunrise;

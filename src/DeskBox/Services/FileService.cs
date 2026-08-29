@@ -180,12 +180,16 @@ public sealed partial class FileService
         using var perfScope = PerformanceLogger.Measure("FileService.EnumerateDirectory", $"path={directoryPath}");
         var items = new List<WidgetItem>();
 
-        if (!Directory.Exists(directoryPath))
+        if (!TryResolveExistingPathForTraversal(
+                directoryPath,
+                out string normalizedDirectoryPath))
         {
             return items;
         }
 
-        var entries = await Task.Run(() => EnumerateEntrySnapshots(directoryPath, loadFolderItemCounts));
+        var entries = await Task.Run(() => EnumerateEntrySnapshots(
+            normalizedDirectoryPath,
+            loadFolderItemCounts));
 
         int sortOrder = 0;
         foreach (var entry in entries)
@@ -291,7 +295,15 @@ public sealed partial class FileService
         {
             try
             {
-                string normalizedRoot = Path.GetFullPath(directoryPath);
+                if (!TryResolveExistingPathForTraversal(
+                        directoryPath,
+                        out string normalizedRoot))
+                {
+                    return new FolderPathSnapshot(
+                        FolderSnapshotStatus.Unavailable,
+                        new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+                }
+
                 var paths = Directory.EnumerateFileSystemEntries(normalizedRoot)
                     .Select(Path.GetFullPath)
                     .ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -436,7 +448,10 @@ public sealed partial class FileService
 
         if (loadIcon)
         {
-            item.Icon = await GetIconAsync(entry.Path, hideShortcutArrowOverlay, showImageFilesAsIcons);
+            item.Icon = await GetIconAsync(
+                entry.Path,
+                hideShortcutArrowOverlay,
+                showImageFilesAsIcons);
         }
 
         return item;
@@ -558,15 +573,17 @@ public sealed partial class FileService
         }
         else if (isFolder)
         {
+            string folderAccessPath = path;
+            _ = TryResolveExistingPathForTraversal(path, out folderAccessPath);
             try
             {
                 if (loadFolderItemCount)
                 {
-                    folderItemCount = CountVisibleChildren(path);
+                    folderItemCount = CountVisibleChildren(folderAccessPath);
                 }
 
-                createdAt = Directory.GetCreationTime(path);
-                lastModified = Directory.GetLastWriteTime(path);
+                createdAt = Directory.GetCreationTime(folderAccessPath);
+                lastModified = Directory.GetLastWriteTime(folderAccessPath);
             }
             catch
             {
@@ -612,8 +629,15 @@ public sealed partial class FileService
         bool showImageFilesAsIcons = false,
         int decodePixelWidth = 0)
     {
+        string iconPath = path;
+        if (!ShortcutHelper.IsShortcutPath(path) &&
+            TryResolveExistingPathForTraversal(path, out string resolvedPath))
+        {
+            iconPath = resolvedPath;
+        }
+
         return IconHelper.GetIconAsync(
-            path,
+            iconPath,
             hideShortcutArrowOverlay,
             showImageFilesAsIcons,
             decodePixelWidth);
@@ -625,6 +649,15 @@ public sealed partial class FileService
         bool showImageFilesAsIcons = false)
     {
         IconHelper.ClearIconCache(path, hideShortcutArrowOverlay, showImageFilesAsIcons);
+        if (!ShortcutHelper.IsShortcutPath(path) &&
+            TryResolveExistingPathForTraversal(path, out string resolvedPath) &&
+            !string.Equals(path, resolvedPath, StringComparison.OrdinalIgnoreCase))
+        {
+            IconHelper.ClearIconCache(
+                resolvedPath,
+                hideShortcutArrowOverlay,
+                showImageFilesAsIcons);
+        }
     }
 
     public async Task<string> GetStoredShortcutTargetAsync(string shortcutPath)
@@ -664,6 +697,12 @@ public sealed partial class FileService
         if (string.IsNullOrWhiteSpace(path))
         {
             return string.Empty;
+        }
+
+        if (!item.IsShortcut &&
+            TryResolveExistingPathForTraversal(path, out string resolvedPath))
+        {
+            path = resolvedPath;
         }
 
         if (await Task.Run(() => Directory.Exists(path)))
@@ -740,7 +779,14 @@ public sealed partial class FileService
 
     private static int CountVisibleChildren(string folderPath)
     {
-        return Directory.EnumerateFileSystemEntries(folderPath)
+        if (!TryResolveExistingPathForTraversal(
+                folderPath,
+                out string resolvedFolderPath))
+        {
+            throw new DirectoryNotFoundException(folderPath);
+        }
+
+        return Directory.EnumerateFileSystemEntries(resolvedFolderPath)
             .Count(ShouldDisplayEntry);
     }
 
@@ -748,7 +794,12 @@ public sealed partial class FileService
     {
         try
         {
-            item.LastModified = Directory.GetLastWriteTime(path);
+            string accessPath = TryResolveExistingPathForTraversal(
+                    path,
+                    out string resolvedPath)
+                ? resolvedPath
+                : path;
+            item.LastModified = Directory.GetLastWriteTime(accessPath);
         }
         catch
         {
@@ -766,17 +817,18 @@ public sealed partial class FileService
         {
             try
             {
-                if (Directory.Exists(path))
+                string accessPath = ResolveStorageAccessPath(path);
+                if (Directory.Exists(accessPath))
                 {
-                    var folder = await TryGetStorageFolderAsync(path);
+                    var folder = await TryGetStorageFolderAsync(accessPath);
                     if (folder is not null)
                     {
                         items.Add(folder);
                     }
                 }
-                else if (File.Exists(path))
+                else if (File.Exists(accessPath))
                 {
-                    var file = await TryGetStorageFileAsync(path);
+                    var file = await TryGetStorageFileAsync(accessPath);
                     if (file is not null)
                     {
                         items.Add(file);
@@ -803,17 +855,18 @@ public sealed partial class FileService
         {
             try
             {
-                if (Directory.Exists(path))
+                string accessPath = ResolveStorageAccessPath(path);
+                if (Directory.Exists(accessPath))
                 {
-                    var folder = TryGetStorageFolder(path);
+                    var folder = TryGetStorageFolder(accessPath);
                     if (folder is not null)
                     {
                         items.Add(folder);
                     }
                 }
-                else if (File.Exists(path))
+                else if (File.Exists(accessPath))
                 {
-                    var file = TryGetStorageFile(path);
+                    var file = TryGetStorageFile(accessPath);
                     if (file is not null)
                     {
                         items.Add(file);
@@ -827,6 +880,17 @@ public sealed partial class FileService
         }
 
         return items;
+    }
+
+    private static string ResolveStorageAccessPath(string path)
+    {
+        if (!ShortcutHelper.IsShortcutPath(path) &&
+            TryResolveExistingPathForTraversal(path, out string resolvedPath))
+        {
+            return resolvedPath;
+        }
+
+        return path;
     }
 
     /// <summary>
@@ -1407,52 +1471,165 @@ public sealed partial class FileService
         await MoveEntryAtomicallyAsync(normalizedSource, normalizedDestination);
     }
 
-    public async Task DeleteEntryAsync(string path, bool recycle = true)
+    /// <summary>
+    /// Deletes a file or directory. Interactive callers pass an owner window
+    /// handle so the Windows Shell owns confirmation and progress UI, following
+    /// the user's own Explorer settings; headless callers (rollback, storage
+    /// cleanup) keep the handle zeroed and stay silent.
+    /// Returns false when the user cancelled the Shell confirmation.
+    /// </summary>
+    public async Task<bool> DeleteEntryAsync(
+        string path,
+        bool recycle = true,
+        IntPtr ownerHandle = default)
     {
         string normalizedPath = Path.GetFullPath(path);
         if (!File.Exists(normalizedPath) && !Directory.Exists(normalizedPath))
         {
-            return;
+            return true;
         }
 
         if (!recycle)
         {
+            if (ownerHandle != IntPtr.Zero)
+            {
+                // Let the Shell ask "permanently delete?" according to the
+                // user's own confirmation settings instead of a DeskBox dialog.
+                return await Task.Run(() =>
+                    DeleteEntryWithShell(normalizedPath, ownerHandle, allowUndo: false));
+            }
+
             await DeleteEntryAsync(normalizedPath);
-            return;
+            return true;
         }
 
-        await Task.Run(() =>
-        {
-            DeleteEntryToRecycleBin(normalizedPath);
-        });
+        return await Task.Run(() =>
+            DeleteEntryWithShell(normalizedPath, ownerHandle, allowUndo: true));
     }
 
-    private static void DeleteEntryToRecycleBin(string path)
+    /// <summary>
+    /// Deletes multiple interactive items in one Shell operation so the user
+    /// receives one confirmation dialog for the batch, matching Explorer's
+    /// multi-selection behavior. The returned paths are the entries that no
+    /// longer exist after the Shell returns; a partial user cancellation is
+    /// therefore represented without turning the remaining entries into
+    /// failures.
+    /// </summary>
+    public async Task<IReadOnlySet<string>> DeleteEntriesWithShellAsync(
+        IEnumerable<string> paths,
+        bool recycle,
+        IntPtr ownerHandle)
     {
-        if (!File.Exists(path) && !Directory.Exists(path))
+        ArgumentNullException.ThrowIfNull(paths);
+        if (ownerHandle == IntPtr.Zero)
         {
-            return;
+            throw new ArgumentException(
+                "An owner window handle is required for an interactive Shell batch.",
+                nameof(ownerHandle));
         }
 
-        string from = path + "\0\0";
+        string[] normalizedPaths = paths
+            .Where(path => !string.IsNullOrWhiteSpace(path))
+            .Select(Path.GetFullPath)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        if (normalizedPaths.Length == 0)
+        {
+            return new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        }
+
+        return await Task.Run(() =>
+            DeleteEntriesWithShell(normalizedPaths, ownerHandle, allowUndo: recycle));
+    }
+
+    private static bool DeleteEntryWithShell(
+        string path,
+        IntPtr ownerHandle,
+        bool allowUndo)
+    {
+        IReadOnlySet<string> deletedPaths = DeleteEntriesWithShell(
+            [path],
+            ownerHandle,
+            allowUndo);
+        return deletedPaths.Contains(path);
+    }
+
+    private static IReadOnlySet<string> DeleteEntriesWithShell(
+        IReadOnlyList<string> paths,
+        IntPtr ownerHandle,
+        bool allowUndo)
+    {
+        var completedPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        string[] existingPaths = paths
+            .Where(path =>
+                File.Exists(path) ||
+                Directory.Exists(path))
+            .ToArray();
+        foreach (string path in paths)
+        {
+            if (!existingPaths.Contains(path, StringComparer.OrdinalIgnoreCase))
+            {
+                completedPaths.Add(path);
+            }
+        }
+
+        if (existingPaths.Length == 0)
+        {
+            return completedPaths;
+        }
+
+        // The confirmation dialog is a Shell feature governed by
+        // FofNoConfirmation: interactive callers omit that flag so the native
+        // dialog (recycle or permanent, per the user's Explorer settings)
+        // appears; headless callers keep it suppressed.
+        bool interactive = ownerHandle != IntPtr.Zero;
+        ushort flags = FofNoErrorUi | FofSilent;
+        if (allowUndo)
+        {
+            flags |= FofAllowUndo;
+        }
+
+        if (!interactive)
+        {
+            flags |= FofNoConfirmation;
+        }
+
+        string from = string.Join('\0', existingPaths) + "\0\0";
         unsafe
         {
             fixed (char* fromPointer = from)
             {
                 var operation = new ShFileOperation
                 {
-                    WindowHandle = IntPtr.Zero,
+                    WindowHandle = ownerHandle,
                     Function = FoDelete,
                     From = fromPointer,
                     To = null,
-                    Flags = FofAllowUndo | FofNoConfirmation | FofNoErrorUi | FofSilent
+                    Flags = flags
                 };
 
                 int result = SHFileOperation(ref operation);
-                if (result != 0 && result is not 2 and not 3 and not 1223)
+                foreach (string existingPath in existingPaths)
+                {
+                    if (!File.Exists(existingPath) &&
+                        !Directory.Exists(existingPath))
+                    {
+                        completedPaths.Add(existingPath);
+                    }
+                }
+
+                if (result == 1223 || operation.AnyOperationsAborted != 0)
+                {
+                    // The user answered "No" (or cancelled) the confirmation.
+                    return completedPaths;
+                }
+
+                if (result != 0 && result is not 2 and not 3)
                 {
                     throw new Win32Exception(result);
                 }
+
+                return completedPaths;
             }
         }
     }
@@ -1483,8 +1660,11 @@ public sealed partial class FileService
                         Function = FoMove,
                         From = fromPointer,
                         To = toPointer,
+                        // Omitting the confirmation-suppression flag lets the
+                        // Shell own the name-conflict dialog (Replace/Keep
+                        // both) instead of silently overwriting on a
+                        // plan/execute race.
                         Flags = FofNoConfirmMkDir |
-                                FofNoConfirmation |
                                 FofNoErrorUi
                     };
 
@@ -1541,8 +1721,8 @@ public sealed partial class FileService
                     Function = FoMove,
                     From = fromPointer,
                     To = toPointer,
+                    // Same as above: keep the Shell conflict dialog available.
                     Flags = FofNoConfirmMkDir |
-                            FofNoConfirmation |
                             FofNoErrorUi
                 };
 
@@ -1736,94 +1916,23 @@ public sealed partial class FileService
 
     /// <summary>
     /// Resolves existing junctions and symbolic-link directories before doing
-    /// overlap checks.  A lexical comparison alone treats a junction target as
-    /// unrelated, which can let a mapped widget point into another mapped
-    /// widget and recreate the recursive nesting bug.
-    /// <para>
-    /// The final destination may not exist yet, so only existing path segments
-    /// are resolved; the non-existing suffix is preserved for the normal
-    /// separator-aware comparison.
-    /// </para>
+    /// overlap checks. The final destination may not exist yet, so only the
+    /// existing prefix is resolved and the missing suffix is preserved.
     /// </summary>
     private static bool TryResolvePathIdentity(string path, out string resolvedPath)
     {
-        resolvedPath = string.Empty;
-        string fullPath;
-        try
-        {
-            fullPath = Path.TrimEndingDirectorySeparator(Path.GetFullPath(path));
-        }
-        catch (Exception ex) when (ex is ArgumentException or NotSupportedException)
+        if (!TryResolvePathWithMissingSuffix(path, out resolvedPath))
         {
             return false;
         }
 
-        if ((Directory.Exists(fullPath) || File.Exists(fullPath)) &&
-            Win32Helper.TryGetFinalPath(fullPath, out string finalPath))
+        if ((Directory.Exists(resolvedPath) || File.Exists(resolvedPath)) &&
+            Win32Helper.TryGetFinalPath(resolvedPath, out string finalPath))
         {
-            resolvedPath = Path.TrimEndingDirectorySeparator(Path.GetFullPath(finalPath));
-            return true;
+            resolvedPath = Path.TrimEndingDirectorySeparator(
+                Path.GetFullPath(finalPath));
         }
 
-        string? root = Path.GetPathRoot(fullPath);
-        if (string.IsNullOrWhiteSpace(root))
-        {
-            return false;
-        }
-
-        string current = root;
-        string remainder = fullPath[root.Length..];
-        string[] segments = remainder.Split(
-            [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar],
-            StringSplitOptions.RemoveEmptyEntries);
-        for (int index = 0; index < segments.Length; index++)
-        {
-            string candidate = Path.Combine(current, segments[index]);
-            bool exists = Directory.Exists(candidate) || File.Exists(candidate);
-            if (!exists)
-            {
-                // The rest is a not-yet-created destination suffix.  The
-                // existing prefix has already had every reparse point
-                // resolved, so appending the suffix is identity-safe.
-                for (int suffixIndex = index; suffixIndex < segments.Length; suffixIndex++)
-                {
-                    current = Path.Combine(current, segments[suffixIndex]);
-                }
-
-                resolvedPath = Path.TrimEndingDirectorySeparator(
-                    Path.GetFullPath(current));
-                return true;
-            }
-
-            try
-            {
-                FileSystemInfo info = Directory.Exists(candidate)
-                    ? new DirectoryInfo(candidate)
-                    : new FileInfo(candidate);
-                if ((info.Attributes & System.IO.FileAttributes.ReparsePoint) != 0)
-                {
-                    FileSystemInfo? target = info.ResolveLinkTarget(returnFinalTarget: true);
-                    if (target is null)
-                    {
-                        return false;
-                    }
-
-                    current = target.FullName;
-                }
-                else
-                {
-                    current = candidate;
-                }
-            }
-            catch (Exception ex) when (
-                ex is IOException or UnauthorizedAccessException or
-                PlatformNotSupportedException)
-            {
-                return false;
-            }
-        }
-
-        resolvedPath = Path.TrimEndingDirectorySeparator(Path.GetFullPath(current));
         return true;
     }
 
@@ -2038,6 +2147,14 @@ public sealed partial class FileService
             if (string.IsNullOrEmpty(pathToOpen))
             {
                 return OpenItemResult.Failed;
+            }
+
+            if (!item.IsShortcut &&
+                TryResolveExistingPathForTraversal(
+                    pathToOpen,
+                    out string traversalPath))
+            {
+                pathToOpen = traversalPath;
             }
 
             // Forward the real owner hwnd so any system UI (Open With / UAC) is parented to

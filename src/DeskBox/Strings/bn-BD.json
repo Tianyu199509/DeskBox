@@ -1,5 +1,7 @@
 {
     "Settings.Performance.Title": "কর্মক্ষমতা ও রিসোর্স",
+    "Display.VirtualAdapter.Warning.Title": "ভার্চুয়াল ডিসপ্লে শনাক্ত হয়েছে",
+    "Display.VirtualAdapter.Warning.Body": "আপনার প্রধান মনিটর একটি ভার্চুয়াল গ্রাফিক্স অ্যাডাপ্টার থেকে আসছে। উইজেটগুলো কোণায় জমা হলে, আটকে গেলে বা অ্যাপ বন্ধ হলে ফিজিক্যাল মনিটরে স্যুইচ করুন। বাকি সব স্বাভাবিক চলবে।",
     "Settings.Performance.Description": "দৃশ্যমান মান ও রিসোর্স ব্যবহারের ভারসাম্য এবং উইজেট লুকানোর পর ক্যাশ পরিষ্কার নিয়ন্ত্রণ করুন",
     "Settings.Performance.Mode.Title": "কর্মক্ষমতা মোড",
     "Settings.Performance.Mode.Description": "একটি প্রিসেট বেছে নিন। নিচের বিস্তারিত সেটিং বদলালে কাস্টম মোড চালু হবে",
@@ -2536,5 +2538,7 @@
   "Widget.RunAsAdministrator.AlreadyRunning": "এই অ্যাপটি ইতিমধ্যে প্রশাসক অনুমতি ছাড়া চলছে। এটি সম্পূর্ণ বন্ধ করে আবার চেষ্টা করুন।",
   "Widget.RunAsAdministrator.NotElevated": "Windows প্রশাসক প্রক্রিয়া তৈরি করতে পারেনি। UAC সেটিং পরীক্ষা করে আবার চেষ্টা করুন।",
   "Widget.CreateShortcut": "শর্টকাট তৈরি করুন",
-  "Widget.MoreSystemOperations": "আরও সিস্টেম অপারেশন"
+  "Widget.MoreSystemOperations": "আরও সিস্টেম অপারেশন",
+  "Settings.ManagedPath.DesktopShortcut.Title": "ডেস্কটপে স্টোরেজ শর্টকাট রাখুন",
+  "Settings.ManagedPath.DesktopShortcut.Description": "বর্তমান স্টোরেজ ফোল্ডার সরাসরি খোলে এবং DeskBox আনইনস্টল করার পরেও ব্যবহার করা যায়"
 }

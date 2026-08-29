@@ -27,6 +27,12 @@ public sealed class InstallerUninstallContractTests
         "AppDataCleanupFailed"
     ];
 
+    private static readonly string[] ManagedStorageShortcutMessages =
+    [
+        "ManagedStorageShortcutPrompt",
+        "ManagedStorageShortcutCreateFailed"
+    ];
+
     private static readonly string[] DependencyMessages =
     [
         "DependencyDownloadCancelled",
@@ -55,6 +61,12 @@ public sealed class InstallerUninstallContractTests
         Assert.Contains("if ActivatorId <> '' then", code, StringComparison.Ordinal);
         Assert.DoesNotContain("Format(ExpandConstant('{cm:", code, StringComparison.Ordinal);
         Assert.DoesNotContain("DelTree(GetManagedStorageRootPath", code, StringComparison.Ordinal);
+        Assert.Contains("OfferManagedStorageShortcut", code, StringComparison.Ordinal);
+        Assert.Contains("managedStorageDesktopShortcutEnabled", code, StringComparison.Ordinal);
+        Assert.Contains("managedStorageDesktopShortcutPath", code, StringComparison.Ordinal);
+        Assert.Contains("CreateOleObject('WScript.Shell')", code, StringComparison.Ordinal);
+        Assert.Contains("ShortcutObject.TargetPath := FolderPath", code, StringComparison.Ordinal);
+        Assert.Contains("MB_YESNO or MB_DEFBUTTON1", code, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -157,14 +169,34 @@ public sealed class InstallerUninstallContractTests
     }
 
     [Fact]
-    public void BundledRuntimeInstallers_SkipExternalDependencySetupAndUseDistinctNames()
+    public void FullRetailInstallers_SkipExternalDependenciesAndKeepStandardNames()
     {
         foreach (string script in new[] { "installer/DeskBox.iss", "installer/DeskBox.arm64.iss" })
         {
             string content = ReadRepositoryFile(script);
             Assert.Contains("#ifndef DeskBoxBundledRuntime", content, StringComparison.Ordinal);
+            Assert.Contains("#define MyAppPackageSuffix \"\"", content, StringComparison.Ordinal);
             Assert.Contains("{#MyAppPackageSuffix}", content, StringComparison.Ordinal);
+            Assert.Contains("DeskBox.InstallManifest.txt", content, StringComparison.Ordinal);
+            Assert.Contains("BeforeInstall: CleanupDeskBoxInstall", content, StringComparison.Ordinal);
+            Assert.Contains(
+                $"OutputBaseFilename={{#MyAppOutputBaseName}}_{{#MyAppVersion}}_{(script.EndsWith("arm64.iss", StringComparison.Ordinal) ? "arm64" : "x64")}",
+                content,
+                StringComparison.Ordinal);
+            Assert.DoesNotContain("Type: filesandordirs; Name: \"{app}\\Microsoft.WindowsAppRuntime\"", content, StringComparison.Ordinal);
+            Assert.DoesNotContain(
+                "#define MyAppPackageSuffix \"_Full\"",
+                content,
+                StringComparison.Ordinal);
         }
+
+        string distribution = ReadRepositoryFile("scripts/build-stage-7c1-distribution.ps1");
+        Assert.Contains("\"/DDeskBoxBundledRuntime=1\"", distribution, StringComparison.Ordinal);
+        Assert.Contains(
+            "$installerOutputBaseName = \"{0}_{1}_{2}\"",
+            distribution,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("_Full.exe", distribution, StringComparison.Ordinal);
 
         foreach (string dependencyScript in new[]
                  {
@@ -183,19 +215,36 @@ public sealed class InstallerUninstallContractTests
     {
         string x64 = ReadRepositoryFile("installer/DeskBox.iss");
         string arm64 = ReadRepositoryFile("installer/DeskBox.arm64.iss");
+        string retailPublish = ReadRepositoryFile("scripts/publish-aot-retail.ps1");
         const string nativeSource =
             "Source: \"{#MyAppReleaseDir}\\deskbox_native.dll\"; DestDir: \"{app}\"; Flags: ignoreversion";
         const string nativeExclusions =
             "Excludes: \"DeskBox.Updater.*,deskbox_native.dll,deskbox_native.pdb\"";
 
-        Assert.Contains("-p:DeskBoxRustNative=true", x64, StringComparison.Ordinal);
+        Assert.Contains("-p:DeskBoxRustNative=true", retailPublish, StringComparison.Ordinal);
         Assert.Contains(nativeExclusions, x64, StringComparison.Ordinal);
         Assert.Contains(nativeSource, x64, StringComparison.Ordinal);
 
         Assert.Contains(nativeExclusions, arm64, StringComparison.Ordinal);
         Assert.Contains("#if DeskBoxNativeAot", arm64, StringComparison.Ordinal);
         Assert.Contains(nativeSource, arm64, StringComparison.Ordinal);
-        Assert.DoesNotContain("-p:DeskBoxRustNative=true", arm64, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ManagedStorageShortcutPrompt_IsLocalizedForEveryInstallerLanguage()
+    {
+        string messages = ReadRepositoryFile("installer/DeskBox.UninstallCustomMessages.iss");
+
+        foreach (string language in InstallerLanguages)
+        {
+            foreach (string message in ManagedStorageShortcutMessages)
+            {
+                Assert.Contains(
+                    $"{language}.{message}=",
+                    messages,
+                    StringComparison.Ordinal);
+            }
+        }
     }
 
     [Fact]
@@ -205,6 +254,7 @@ public sealed class InstallerUninstallContractTests
             Environment.NewLine,
             ReadRepositoryFile("installer/DeskBox.iss"),
             ReadRepositoryFile("installer/DeskBox.NewLanguageCustomMessages.iss"),
+            ReadRepositoryFile("installer/DeskBox.UninstallCustomMessages.iss"),
             ReadRepositoryFile("installer/DeskBox.DependencyCustomMessages.iss"));
         var tables = InstallerLanguages.ToDictionary(
             language => language,

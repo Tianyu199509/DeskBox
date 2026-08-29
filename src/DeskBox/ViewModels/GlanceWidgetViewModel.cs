@@ -228,7 +228,8 @@ public sealed partial class GlanceWidgetViewModel : ObservableObject, IDisposabl
             HasTraditionalCalendar);
     public CornerRadius CalendarCornerRadius => new(
         WidgetCompactBoundsCalculator.ResolveOuterCornerRadius(
-            _settingsService?.Settings.WidgetCornerPreference));
+            WindowsCompatibilityService.ResolveEffectiveWidgetCornerPreference(
+                _settingsService?.Settings.WidgetCornerPreference)));
     public string CalendarMaterialType =>
         WindowsCompatibilityService.ResolveWidgetMaterialType(
             _settingsService?.Settings.WidgetMaterialType ??

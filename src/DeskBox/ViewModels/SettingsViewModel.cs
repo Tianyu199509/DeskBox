@@ -114,6 +114,7 @@ private int _selectedWeatherRefreshInterval = 60;
     private bool _useSystemAccentColor;
     private string _accentColorHex = AccentColorHelper.DefaultAccentColorHex;
     private string _managedStorageRootPath = SettingsService.GetDefaultManagedStorageRootPath();
+    private bool _managedStorageDesktopShortcutEnabled = true;
     private QuickAccessPinState _quickAccessPinState = QuickAccessPinState.Unknown;
     private bool _isQuickAccessBusy;
     private bool _globalHotkeyEnabled;
@@ -289,9 +290,8 @@ private string[]? _cachedWeatherRefreshIntervalDisplayNames;
         WidgetMaterialIntensity = settings.WidgetMaterialIntensity;
         InitializeWidgetForegroundSettings(settings);
         InitializePerformanceSettings(settings);
-        _selectedWidgetCornerPreference = settings.WidgetCornerPreference is CornerSquare or CornerSmall or CornerRound
-            ? settings.WidgetCornerPreference
-            : CornerRound;
+        _selectedWidgetCornerPreference = WindowsCompatibilityService.ResolveEffectiveWidgetCornerPreference(
+            settings.WidgetCornerPreference);
         _selectedWidgetMaterialType = WindowsCompatibilityService.ResolveWidgetMaterialType(
             settings.WidgetMaterialType);
         _selectedWidgetBorderColorMode = settings.WidgetBorderColorMode is
@@ -419,6 +419,7 @@ _selectedWeatherRefreshInterval = Math.Clamp(
         _selectedTodoTabStyle = SettingsService.NormalizeWidgetTabStyle(settings.TodoTabStyle);
         _selectedTodoReminderOffsetMinutes = SettingsService.NormalizeTodoReminderOffsetMinutes(settings.TodoDefaultReminderOffsetMinutes);
         _managedStorageRootPath = settings.DefaultManagedStorageRootPath;
+        _managedStorageDesktopShortcutEnabled = settings.ManagedStorageDesktopShortcutEnabled;
 
         ApplyCachedUpdateResult();
         RefreshAccentPreview();

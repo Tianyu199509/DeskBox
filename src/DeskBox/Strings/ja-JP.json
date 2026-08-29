@@ -1,5 +1,7 @@
 {
     "Settings.Performance.Title": "パフォーマンスとリソース",
+    "Display.VirtualAdapter.Warning.Title": "仮想ディスプレイを検出しました",
+    "Display.VirtualAdapter.Warning.Body": "メインモニターが仮想グラフィックアダプター経由で接続されています。ウィジェットが隅に重なったり、応答しなくなったり、クラッシュする場合は、物理モニターへの切り替えをお試しください。その他の機能には影響ありません。",
     "Settings.Performance.Description": "表示品質とリソース使用量のバランス、およびウィジェット非表示後のキャッシュ解放を設定します",
     "Settings.Performance.Mode.Title": "パフォーマンス モード",
     "Settings.Performance.Mode.Description": "プリセットを選択します。下の詳細設定を変更するとカスタムに切り替わります",
@@ -2536,5 +2538,7 @@
   "Widget.RunAsAdministrator.AlreadyRunning": "このアプリは通常の権限ですでに実行中です。完全に終了してから、もう一度お試しください。",
   "Widget.RunAsAdministrator.NotElevated": "Windows は管理者プロセスを作成できませんでした。UAC の設定を確認して、もう一度お試しください。",
   "Widget.CreateShortcut": "ショートカットを作成",
-  "Widget.MoreSystemOperations": "その他のシステム操作"
+  "Widget.MoreSystemOperations": "その他のシステム操作",
+  "Settings.ManagedPath.DesktopShortcut.Title": "デスクトップに保存フォルダーのショートカットを残す",
+  "Settings.ManagedPath.DesktopShortcut.Description": "現在の保存フォルダーを直接開き、DeskBox のアンインストール後も使用できます"
 }

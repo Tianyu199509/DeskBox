@@ -313,8 +313,28 @@ public sealed partial class WidgetManager
                     return;
                 }
 
+                // The down-press of this very tray-icon click can dismiss an
+                // active session milliseconds before its up event toggles;
+                // raising again would make one click flash hide-then-show.
+                if (ShouldSuppressQuickRevealTrayRaise(source))
+                {
+                    App.LogVerbose(
+                        $"[TrayToggle] Raise suppressed source={source} " +
+                        "reason=taskbar-press-dismiss-cooldown");
+                    return;
+                }
+
                 await RaiseWidgetsFromTrayCoreAsync(source);
             }));
+    }
+
+    private bool ShouldSuppressQuickRevealTrayRaise(string source)
+    {
+        return QuickRevealTrayRaisePolicy.ShouldSuppressTrayRaise(
+            WidgetLayerService.UsesQuickRevealMode(),
+            string.Equals(source, "tray-icon", StringComparison.Ordinal),
+            _lastQuickRevealDismissTaskbarOrigin,
+            (DateTime.UtcNow - _lastQuickRevealDismissUtc).TotalMilliseconds);
     }
 
     private async Task ExecuteTrayVisibilityOperationAsync(
@@ -740,6 +760,8 @@ public sealed partial class WidgetManager
 
         QueueDeferredStartupWidgetBoundsReconciliation();
 
+        PlacePendingInitialWidgets();
+
         if (configs.Count > 0 && WidgetLayerService.UsesQuickRevealMode())
         {
             await SetAllWidgetsVisibleCoreAsync(false);
@@ -798,10 +820,26 @@ public sealed partial class WidgetManager
             var workArea = DisplayArea.GetFromPoint(
                 pointerPosition,
                 DisplayAreaFallback.Primary).WorkArea;
-            InitialFileWidgetPlacementPolicy.Apply(
-                config,
-                workArea,
-                WidgetPositioningService.GetDpiScale(workArea));
+            if (workArea.Width <= 0 || workArea.Height <= 0)
+            {
+                // A broken or virtualized display topology must not persist
+                // fallback coordinates as if the user had placed the widget.
+                config.NeedsInitialPlacement = true;
+                App.Log(
+                    "[WidgetManager] Display work area is unusable; deferring " +
+                    "initial placement for the new file widget.");
+            }
+            else
+            {
+                InitialFileWidgetPlacementPolicy.Apply(
+                    config,
+                    workArea,
+                    WidgetPositioningService.GetDpiScale(workArea));
+            }
+        }
+        else if (!HasUsableWorkArea())
+        {
+            config.NeedsInitialPlacement = true;
         }
 
         _settingsService.Settings.Widgets.Add(config);
@@ -876,6 +914,7 @@ public sealed partial class WidgetManager
             Height = _settingsService.Settings.DefaultWidgetHeight
         };
 
+        MarkNeedsInitialPlacementIfDisplayUnusable(config);
         _settingsService.Settings.Widgets.Add(config);
         SyncMappedWidgetShortcut(config);
         await _settingsService.SaveAsync();
@@ -1277,7 +1316,95 @@ public sealed partial class WidgetManager
 
         await Task.Yield();
         QueueIdleWidgetZOrderNormalization("display-topology-restored");
+        PlacePendingInitialWidgets();
         return allRestored;
+    }
+
+    private static bool HasUsableWorkArea()
+    {
+        try
+        {
+            Windows.Graphics.RectInt32 workArea = DisplayArea.Primary.WorkArea;
+            return workArea.Width > 0 && workArea.Height > 0;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private void MarkNeedsInitialPlacementIfDisplayUnusable(WidgetConfig config)
+    {
+        if (!HasUsableWorkArea())
+        {
+            config.NeedsInitialPlacement = true;
+        }
+    }
+
+    /// <summary>
+    /// Re-places widgets that were created while no usable display work area
+    /// existed. Consumes the <see cref="WidgetConfig.NeedsInitialPlacement"/>
+    /// flag exactly once per widget; safe to call on every topology change
+    /// because it no-ops when the display is still unusable or nothing is
+    /// pending.
+    /// </summary>
+    public void PlacePendingInitialWidgets()
+    {
+        if (!HasUsableWorkArea())
+        {
+            return;
+        }
+
+        List<WidgetConfig> pending = _settingsService.Settings.Widgets
+            .Where(widget => widget.NeedsInitialPlacement && !IsDeleted(widget.Id))
+            .ToList();
+        if (pending.Count == 0)
+        {
+            return;
+        }
+
+        try
+        {
+            Windows.Graphics.RectInt32 workArea = DisplayArea.Primary.WorkArea;
+            double dpiScale = WidgetPositioningService.GetDpiScale(workArea);
+            int cascadeIndex = 0;
+            foreach (WidgetConfig config in pending)
+            {
+                Windows.Graphics.RectInt32 bounds =
+                    InitialFileWidgetPlacementPolicy.CalculateRightAlignedBounds(
+                        workArea,
+                        config.Width,
+                        config.Height,
+                        dpiScale);
+                int cascadeOffset = Math.Clamp(cascadeIndex, 0, 8) * 24;
+                bounds = new Windows.Graphics.RectInt32(
+                    bounds.X - cascadeOffset,
+                    bounds.Y + cascadeOffset,
+                    bounds.Width,
+                    bounds.Height);
+                WidgetPositioningService.UpdateConfigFromPhysicalBounds(config, bounds, workArea);
+                WidgetPositioningService.CaptureAnchor(config, bounds, workArea);
+                config.NeedsInitialPlacement = false;
+                cascadeIndex++;
+            }
+
+            _settingsService.SaveDebounced();
+            foreach (WidgetConfig config in pending)
+            {
+                if (_contentWidgets.TryGetValue(config.Id, out ContentWidgetWindow? window))
+                {
+                    _ = window.TryRestoreBoundsForDisplayTopology();
+                }
+            }
+
+            App.Log(
+                $"[WidgetManager] Placed {pending.Count} widget(s) that were " +
+                "waiting for a usable display.");
+        }
+        catch (Exception ex)
+        {
+            App.Log($"[WidgetManager] Failed to place pending initial widgets: {ex.Message}");
+        }
     }
 
     internal void CaptureCurrentTopologyLayout(WidgetConfig config)

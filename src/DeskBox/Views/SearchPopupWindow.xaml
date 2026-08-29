@@ -16,7 +16,9 @@
         rounding is applied at the OS level via DWM (see code-behind), which clips the
         backdrop itself rather than faking it with a CornerRadius.
     -->
-    <Grid x:Name="RootGrid" IsTabStop="True" KeyDown="RootGrid_KeyDown"
+    <Grid x:Name="RootGrid" IsTabStop="True"
+          PreviewKeyDown="RootGrid_PreviewKeyDown"
+          KeyDown="RootGrid_KeyDown"
           RenderTransformOrigin="0.5,0.5">
         <Grid.RenderTransform>
             <TranslateTransform x:Name="PopupTranslateTransform"/>
@@ -115,12 +117,22 @@
 
             <!-- Explicit rounded selection surface keeps every tab state inside the pill. -->
             <Style x:Key="TabPillItemStyle" TargetType="ListViewItem">
+                <Setter Property="HorizontalAlignment" Value="Left"/>
                 <Setter Property="Margin" Value="0,0,5,5"/>
                 <Setter Property="MinHeight" Value="32"/>
-                <Setter Property="Padding" Value="9,4"/>
+                <!-- WinUI's default ListViewItem has a non-zero MinWidth.  That
+                     leaves a large empty tail after short localized labels and
+                     makes the indicator look detached from its tab. -->
+                <Setter Property="MinWidth" Value="0"/>
+                <!-- With iconography removed, give the label a little more air on
+                     both sides while retaining content-sized tab containers. -->
+                <Setter Property="Padding" Value="14,4"/>
                 <Setter Property="Background" Value="Transparent"/>
                 <Setter Property="IsTabStop" Value="False"/>
-                <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+                <!-- Keep the content presenter tight to the label.  The selection
+                     indicator is rendered by the data template directly beneath
+                     the text, so centering against a stretched item would shift it. -->
+                <Setter Property="HorizontalContentAlignment" Value="Left"/>
                 <Setter Property="VerticalContentAlignment" Value="Center"/>
                 <Setter Property="Template">
                     <Setter.Value>
@@ -148,7 +160,6 @@
                                                 <ObjectAnimationUsingKeyFrames Storyboard.TargetName="TabSurface" Storyboard.TargetProperty="Background">
                                                     <DiscreteObjectKeyFrame KeyTime="0" Value="{ThemeResource ControlFillColorSecondaryBrush}"/>
                                                 </ObjectAnimationUsingKeyFrames>
-                                                <DoubleAnimation Storyboard.TargetName="TabSelectionIndicator" Storyboard.TargetProperty="Opacity" To="1" Duration="0"/>
                                             </Storyboard>
                                         </VisualState>
                                         <VisualState x:Name="PointerOverSelected">
@@ -156,7 +167,6 @@
                                                 <ObjectAnimationUsingKeyFrames Storyboard.TargetName="TabSurface" Storyboard.TargetProperty="Background">
                                                     <DiscreteObjectKeyFrame KeyTime="0" Value="{ThemeResource ControlFillColorTertiaryBrush}"/>
                                                 </ObjectAnimationUsingKeyFrames>
-                                                <DoubleAnimation Storyboard.TargetName="TabSelectionIndicator" Storyboard.TargetProperty="Opacity" To="1" Duration="0"/>
                                             </Storyboard>
                                         </VisualState>
                                         <VisualState x:Name="PressedSelected">
@@ -164,7 +174,6 @@
                                                 <ObjectAnimationUsingKeyFrames Storyboard.TargetName="TabSurface" Storyboard.TargetProperty="Background">
                                                     <DiscreteObjectKeyFrame KeyTime="0" Value="{ThemeResource SubtleFillColorTertiaryBrush}"/>
                                                 </ObjectAnimationUsingKeyFrames>
-                                                <DoubleAnimation Storyboard.TargetName="TabSelectionIndicator" Storyboard.TargetProperty="Opacity" To="1" Duration="0"/>
                                             </Storyboard>
                                         </VisualState>
                                     </VisualStateGroup>
@@ -178,12 +187,6 @@
                                                       HorizontalContentAlignment="{TemplateBinding HorizontalContentAlignment}"
                                                       VerticalContentAlignment="{TemplateBinding VerticalContentAlignment}"/>
                                 </Border>
-                                <!-- Accent indicator bar below the tab pill, outside the Border so it is never clipped -->
-                                <Border x:Name="TabSelectionIndicator" Height="2.5" Width="20"
-                                        CornerRadius="1.25" Opacity="0"
-                                        Background="{ThemeResource AccentFillColorDefaultBrush}"
-                                        HorizontalAlignment="Center" VerticalAlignment="Bottom"
-                                        Margin="0,0,0,1"/>
                             </Grid>
                         </ControlTemplate>
                     </Setter.Value>
@@ -193,14 +196,28 @@
             <!-- Counts are intentionally omitted: Everything pages continuously, so a
                  loaded-row count would look like a total-result cap. -->
             <DataTemplate x:Key="TabPillTemplate" x:DataType="models:SearchTabItem">
-                <StackPanel Orientation="Horizontal">
-                    <FontIcon Glyph="{x:Bind Glyph, Mode=OneTime}" FontSize="12"
-                              Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                              VerticalAlignment="Center"/>
-                    <TextBlock Text="{x:Bind DisplayName, Mode=OneTime}" FontSize="12.5"
-                               Foreground="{ThemeResource TextFillColorPrimaryBrush}"
-                               VerticalAlignment="Center" Margin="6,0,0,0"/>
-                </StackPanel>
+                <Grid>
+                    <!-- The label owns both the text and its indicator. Keeping
+                         this surface text-only avoids a leading icon changing the
+                         visual alignment between localized tabs. -->
+                    <Grid Margin="0">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <!-- Reserve a small optical gap between the label and
+                                 the accent bar while keeping the pill compact. -->
+                            <RowDefinition Height="8"/>
+                        </Grid.RowDefinitions>
+                        <TextBlock Grid.Row="0" Text="{x:Bind DisplayName, Mode=OneTime}" FontSize="12.5"
+                                   Foreground="{ThemeResource TextFillColorPrimaryBrush}"
+                                   VerticalAlignment="Center"/>
+                        <Border Grid.Row="1" Height="3" Width="20"
+                                CornerRadius="1.25"
+                                Background="{ThemeResource AccentFillColorDefaultBrush}"
+                                HorizontalAlignment="Center" VerticalAlignment="Bottom"
+                                Margin="0,0,0,1"
+                                Visibility="{x:Bind SelectionIndicatorVisibility, Mode=OneWay}"/>
+                    </Grid>
+                </Grid>
             </DataTemplate>
 
             <!--
@@ -374,6 +391,7 @@
 
             <ListView x:Name="TabsList" Grid.Column="0"
                       SelectionMode="Single" IsTabStop="False"
+                      AllowFocusOnInteraction="False"
                       ScrollViewer.HorizontalScrollMode="Disabled"
                       ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                       ScrollViewer.VerticalScrollMode="Disabled"

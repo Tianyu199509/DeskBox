@@ -186,12 +186,24 @@ public sealed partial class SearchPopupViewModel : ObservableObject, IDisposable
 
     partial void OnQueryChanged(string value)
     {
+        // A fresh query re-scopes every provider; carrying a stale All-tab
+        // type filter across queries silently hides non-matching results.
+        ResultFilter = SearchResultFilter.All;
         _ = SearchAsync(value, SearchRefreshKind.UserQuery);
     }
 
     partial void OnSelectedTabChanged(SearchTabItem? value)
     {
+        UpdateTabSelectionState(value);
         RebuildCurrentResults();
+    }
+
+    private void UpdateTabSelectionState(SearchTabItem? selectedTab)
+    {
+        foreach (SearchTabItem tab in Tabs)
+        {
+            tab.IsSelected = ReferenceEquals(tab, selectedTab);
+        }
     }
 
     partial void OnSortColumnChanged(ResultSortColumn value)
@@ -805,7 +817,7 @@ public sealed partial class SearchPopupViewModel : ObservableObject, IDisposable
 
         // Determine the expected tab IDs for the current state.
         string[] expectedIds = IsQueryActive
-            ? ["all", "app", "file", "deskbox"]
+            ? ["all", "app", "file", "image", "document", "deskbox"]
             : ["home"];
 
         // If the structure matches, update counts in-place (no flicker).
@@ -825,6 +837,13 @@ public sealed partial class SearchPopupViewModel : ObservableObject, IDisposable
             {
                 SelectedTab = Tabs.FirstOrDefault();
             }
+            else
+            {
+                // The selected instance did not change, so the generated
+                // property callback is not raised. Keep the template's
+                // indicator state synchronized explicitly in that case.
+                UpdateTabSelectionState(SelectedTab);
+            }
             return;
         }
 
@@ -841,6 +860,14 @@ public sealed partial class SearchPopupViewModel : ObservableObject, IDisposable
             AddTab("file", "Search.Tab.File", "\uE8E5",
                 item => item.Kind is SearchResultKind.File or SearchResultKind.Folder,
                 supportsFileSort: true);
+            AddTab("image", "Search.Filter.Images", "\uE8B9",
+                item => item.Kind == SearchResultKind.File &&
+                        FileCategoryHelper.Categorize(item.Title) == FileCategory.Image,
+                supportsFileSort: true);
+            AddTab("document", "Search.Filter.Documents", "\uE8A5",
+                item => item.Kind == SearchResultKind.File &&
+                        FileCategoryHelper.Categorize(item.Title) == FileCategory.Document,
+                supportsFileSort: true);
             AddTab("deskbox", "Search.Tab.DeskBox", "\uE80F",
                 item => item.Kind is SearchResultKind.Todo or SearchResultKind.QuickCapture or SearchResultKind.Action,
                 supportsFileSort: false);
@@ -854,6 +881,7 @@ public sealed partial class SearchPopupViewModel : ObservableObject, IDisposable
             ? NormalizeDefaultTab(_settingsService.Settings.SearchDefaultTab)
             : previousTabId ?? string.Empty;
         SelectedTab = Tabs.FirstOrDefault(t => t.Id == preferredTabId) ?? Tabs.FirstOrDefault();
+        UpdateTabSelectionState(SelectedTab);
         if (SelectedTab is null)
         {
             Services.SearchResultCollectionReconciler.Reconcile(CurrentResults, []);
@@ -1321,6 +1349,9 @@ public sealed partial class SearchPopupViewModel : ObservableObject, IDisposable
     /// </summary>
     public async Task OnPopupOpenedAsync()
     {
+        // The type filter picker is only visible on the All tab; a stale
+        // filter from an earlier session would silently empty that tab.
+        ResultFilter = SearchResultFilter.All;
         ClearSearch();
         // If the recommendations were loaded recently (within the cache TTL),
         // reuse them so the popup shows icons immediately without a skeleton.

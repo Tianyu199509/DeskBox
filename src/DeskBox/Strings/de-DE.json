@@ -1,5 +1,7 @@
 {
     "Settings.Performance.Title": "Leistung und Ressourcen",
+    "Display.VirtualAdapter.Warning.Title": "Virtueller Bildschirm erkannt",
+    "Display.VirtualAdapter.Warning.Body": "Dein primärer Bildschirm wird von einem virtuellen Grafikadapter gesteuert. Wenn Widgets in einer Ecke stapeln, einfrieren oder die App abstürzt, wechsle zu einem physischen Bildschirm. Alles andere funktioniert weiterhin.",
     "Settings.Performance.Description": "Visuelle Qualität und Ressourcenverbrauch abwägen und die Cache-Freigabe nach dem Ausblenden steuern",
     "Settings.Performance.Mode.Title": "Leistungsmodus",
     "Settings.Performance.Mode.Description": "Wählen Sie eine Voreinstellung. Änderungen an den Details wechseln zu Benutzerdefiniert",
@@ -2536,5 +2538,7 @@
   "Widget.RunAsAdministrator.AlreadyRunning": "Diese App wird bereits ohne Administratorrechte ausgeführt. Beenden Sie sie vollständig und versuchen Sie es erneut.",
   "Widget.RunAsAdministrator.NotElevated": "Windows konnte keinen Administratorprozess erstellen. Prüfen Sie die UAC-Einstellungen und versuchen Sie es erneut.",
   "Widget.CreateShortcut": "Verknüpfung erstellen",
-  "Widget.MoreSystemOperations": "Weitere Systemaktionen"
+  "Widget.MoreSystemOperations": "Weitere Systemaktionen",
+  "Settings.ManagedPath.DesktopShortcut.Title": "Speicherverknüpfung auf dem Desktop behalten",
+  "Settings.ManagedPath.DesktopShortcut.Description": "Öffnet den aktuellen Speicherordner direkt und bleibt nach der Deinstallation von DeskBox verwendbar"
 }

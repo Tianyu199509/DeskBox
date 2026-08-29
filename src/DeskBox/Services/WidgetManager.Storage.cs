@@ -289,6 +289,10 @@ public sealed partial class WidgetManager
 
             await _settingsService.SaveAsync();
             SyncStorageFolderEntries(oldRootPath);
+            if (App.Current?.ManagedStorageDesktopShortcutService is { } shortcutService)
+            {
+                await shortcutService.SyncAsync(oldRootPath);
+            }
 
             foreach (var widgetPlan in affectedWidgets)
             {

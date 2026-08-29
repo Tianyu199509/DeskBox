@@ -127,6 +127,9 @@ public partial class WidgetViewModel : ObservableObject, IDisposable
         {
             if (SetProperty(ref _mappedFolderPath, value))
             {
+                // The runtime target is derived from the logical mapping path
+                // and must be recomputed whenever the mapping changes.
+                _mappedFolderTraversalPath = null;
                 UpdateDependentProperties();
             }
         }

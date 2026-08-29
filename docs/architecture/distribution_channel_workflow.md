@@ -166,14 +166,14 @@ dotnet test .\DeskBox.sln `
 
 ### 3.2 Direct 官网版打包
 
-Direct 版继续走现有 Inno 链路。
+Direct 官网版继续使用现有 Inno 链路，但零售载荷统一采用 Full Native AOT。
 
 关键要求：
 
 - `DeskBoxDistribution` 保持默认 `Direct`。
 - 需要构建并复制 `DeskBox.Updater.exe`。
-- 安装器需要检测 `.NET 10` 和 Windows App Runtime 2.4。
-- 应用内更新 manifest 指向 Direct 安装包。
+- 安装器携带匹配架构的 Windows App Runtime，不再下载 `.NET 10` 或 Windows App Runtime。
+- 应用内更新 manifest 指向标准命名的 Full Native AOT Direct 安装包。
 - 关于页保留官网、GitHub、捐赠等入口。
 
 验收清单：
@@ -181,7 +181,7 @@ Direct 版继续走现有 Inno 链路。
 - 干净机器能安装并启动。
 - 覆盖安装旧版本后数据保留。
 - 应用内检查更新、下载、安装、重启链路正常。
-- 缺少运行时时，安装器提示和引导正确。
+- 完全离线机器能安装并启动；升级清理只删除历史载荷清单中的旧程序文件。
 - 开机自启开关有效。
 - 托盘、快捷键、多屏/DPI、文件拖拽、系统音量等底层能力正常。
 
@@ -197,7 +197,7 @@ https://deskbox.fun/update/stable.json
 
 产物命名契约：所有已发布版本的更新器（1.4.3 起）只接受以 `_x64.exe`/`_arm64.exe` 结尾的资产名与清单 URL，因此 `build-stage-7c1-distribution.ps1` 产出的安装包名保持 `DeskBox_Setup_<版本>_<架构>.exe`，发布时**不得追加** `_NativeAot` 等风味后缀。若清单 `downloadUrl` 使用不以 `DeskBox_Setup_` 开头的重定向地址，客户端会放行（用于网盘/CDN 中转）。
 
-离线安装说明：1.4.5 直发安装包为 Native AOT 构建，不再需要 .NET 10 运行时；唯一外部依赖是 Windows App Runtime 2.4，安装器在缺失时联网下载。完全离线的电脑需要先手动安装 Windows App Runtime 2.4，再运行安装包。1.4.3 时期的 `_Full` 离线完整包不再产出。
+离线安装说明：从 1.4.8 起，直发安装包统一为 Full Native AOT，内置匹配架构的 Windows App Runtime 组件，不再下载 .NET 10 或 Windows App Runtime。文件名仍保持 `DeskBox_Setup_<version>_x64.exe` 与 `DeskBox_Setup_<version>_arm64.exe`，不再维护 `_Full` 变体。发布载荷包含 `DeskBox.InstallManifest.txt`；覆盖升级时安装器只删除“上一版清单存在、当前清单不存在”的旧程序文件。对没有清单的历史 Direct/Full 安装，只使用仓库中的精确兼容清单清理已知旧载荷文件，不扫描或删除未知文件。
 
 每次发布 Direct 版本时必须执行：
 

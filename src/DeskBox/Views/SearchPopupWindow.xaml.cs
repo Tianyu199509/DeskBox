@@ -77,6 +77,9 @@ public sealed partial class SearchPopupWindow : Window
 
     // Keyboard-selected result row. Hover feedback is owned by the row control itself.
     private SearchResultRowControl? _selectedRow;
+    private double? _measuredResultRowHeight;
+    private int _selectedRowHighlightGeneration;
+    private int _tabFocusRestoreGeneration;
 
     // Recommended-apps selection: tracks the currently highlighted app card.
     private int _selectedAppIndex = -1;
@@ -756,7 +759,9 @@ public sealed partial class SearchPopupWindow : Window
     /// </summary>
     private void ApplyWindowCornerPreference()
     {
-        int cornerPreference = _settingsService.Settings.WidgetCornerPreference switch
+        string effectivePreference = WindowsCompatibilityService.ResolveEffectiveWidgetCornerPreference(
+            _settingsService.Settings.WidgetCornerPreference);
+        int cornerPreference = effectivePreference switch
         {
             SettingsService.WidgetCornerPreferenceSquare => Win32Helper.DWMWCP_DONOTROUND,
             SettingsService.WidgetCornerPreferenceSmall => Win32Helper.DWMWCP_ROUNDSMALL,
@@ -1322,6 +1327,45 @@ public sealed partial class SearchPopupWindow : Window
             : Visibility.Visible;
     }
 
+    private void RootGrid_PreviewKeyDown(object sender, KeyRoutedEventArgs e)
+    {
+        if (e.Handled)
+        {
+            return;
+        }
+
+        // Intercept tab cycling before ListView/ScrollViewer keyboard handling.
+        // Otherwise a tab click can leave focus in their internal presenters and
+        // the next arrow key scrolls the view without changing SelectedItem.
+        if (e.Key == Windows.System.VirtualKey.Tab &&
+            Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Control))
+        {
+            bool backward = Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Shift);
+            _viewModel.CycleTab(backward);
+            e.Handled = true;
+            return;
+        }
+
+        if (e.Key is not (Windows.System.VirtualKey.Up or Windows.System.VirtualKey.Down))
+        {
+            return;
+        }
+
+        if (RecommendedAppsPanel.Visibility == Visibility.Visible)
+        {
+            if (HandleRecommendedAppsKey(e))
+            {
+                e.Handled = true;
+            }
+            return;
+        }
+
+        if (TryMoveResultSelection(e.Key))
+        {
+            e.Handled = true;
+        }
+    }
+
     private void RootGrid_KeyDown(object sender, KeyRoutedEventArgs e)
     {
         // ── Recommended apps panel takes priority when visible ──
@@ -1359,12 +1403,12 @@ public sealed partial class SearchPopupWindow : Window
             return;
         }
 
-        // Up/Down from search box → move focus to result list.
+        // PreviewKeyDown normally owns result navigation. Keep this bubbling
+        // fallback for controls that do not participate in the preview route.
         if (e.Key == Windows.System.VirtualKey.Up || e.Key == Windows.System.VirtualKey.Down)
         {
-            if (FocusManager.GetFocusedElement() is TextBox)
+            if (TryMoveResultSelection(e.Key))
             {
-                FocusSelectedResult();
                 e.Handled = true;
             }
             return;
@@ -1388,6 +1432,95 @@ public sealed partial class SearchPopupWindow : Window
                 e.Handled = true;
             }
         }
+    }
+
+    private bool TryMoveResultSelection(Windows.System.VirtualKey key)
+    {
+        if (key is not (Windows.System.VirtualKey.Up or Windows.System.VirtualKey.Down) ||
+            !_viewModel.IsQueryActive ||
+            !_viewModel.HasCurrentResults)
+        {
+            return false;
+        }
+
+        object? focusedElement = FocusManager.GetFocusedElement();
+        DependencyObject? focusedObject = focusedElement as DependencyObject;
+        TextBox? focusedTextBox = FindVisualAncestor<TextBox>(focusedObject);
+        bool searchInputFocused = ReferenceEquals(focusedTextBox, SearchTextBox);
+        if (focusedTextBox is not null && !searchInputFocused)
+        {
+            // Do not take arrow keys from rename/dialog text editors.
+            return false;
+        }
+
+        if (focusedObject is not null &&
+            IsVisualDescendantOf(focusedObject, ResultFilterComboBox))
+        {
+            // The filter picker owns its arrow keys while it is focused.
+            return false;
+        }
+
+        SearchResultItem? previousSelection = _viewModel.SelectedItem;
+        if (key == Windows.System.VirtualKey.Up)
+        {
+            _viewModel.MoveSelectionUp();
+        }
+        else
+        {
+            _viewModel.MoveSelectionDown();
+        }
+
+        _isNavigatingResults = true;
+
+        // Moving at a boundary or switching to a tab whose first item has the
+        // same identity does not raise SelectedItem again. Explicitly refresh in
+        // that case so a recycled row cannot remain visually unselected.
+        if (ReferenceEquals(previousSelection, _viewModel.SelectedItem))
+        {
+            UpdateSelectionHighlight();
+        }
+
+        if (!searchInputFocused)
+        {
+            FocusSelectedResult();
+        }
+
+        return true;
+    }
+
+    private static bool IsVisualDescendantOf(
+        DependencyObject element,
+        DependencyObject ancestor)
+    {
+        DependencyObject? current = element;
+        while (current is not null)
+        {
+            if (ReferenceEquals(current, ancestor))
+            {
+                return true;
+            }
+
+            current = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetParent(current);
+        }
+
+        return false;
+    }
+
+    private static T? FindVisualAncestor<T>(DependencyObject? element)
+        where T : DependencyObject
+    {
+        DependencyObject? current = element;
+        while (current is not null)
+        {
+            if (current is T match)
+            {
+                return match;
+            }
+
+            current = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetParent(current);
+        }
+
+        return null;
     }
 
     private void ClosePopupButton_Click(object sender, RoutedEventArgs e)
@@ -1610,15 +1743,11 @@ public sealed partial class SearchPopupWindow : Window
                 break;
 
             case Windows.System.VirtualKey.Up:
-                _viewModel.MoveSelectionUp();
-                _isNavigatingResults = true;
-                e.Handled = true;
+                e.Handled = TryMoveResultSelection(e.Key);
                 break;
 
             case Windows.System.VirtualKey.Down:
-                _viewModel.MoveSelectionDown();
-                _isNavigatingResults = true;
-                e.Handled = true;
+                e.Handled = TryMoveResultSelection(e.Key);
                 break;
 
             case Windows.System.VirtualKey.Enter:
@@ -1679,15 +1808,11 @@ public sealed partial class SearchPopupWindow : Window
                 break;
 
             case Windows.System.VirtualKey.Up:
-                _viewModel.MoveSelectionUp();
-                FocusSelectedResult();
-                e.Handled = true;
+                e.Handled = TryMoveResultSelection(e.Key);
                 break;
 
             case Windows.System.VirtualKey.Down:
-                _viewModel.MoveSelectionDown();
-                FocusSelectedResult();
-                e.Handled = true;
+                e.Handled = TryMoveResultSelection(e.Key);
                 break;
 
             case Windows.System.VirtualKey.Enter:
@@ -2367,6 +2492,17 @@ public sealed partial class SearchPopupWindow : Window
         ClearMultiSelection();
     }
 
+    private void SyncResultFilterCombo()
+    {
+        int index = (int)_viewModel.ResultFilter;
+        if (ResultFilterComboBox.SelectedIndex != index)
+        {
+            // Assigning the same value the view model already holds would
+            // re-enter SelectionChanged without changing state.
+            ResultFilterComboBox.SelectedIndex = index;
+        }
+    }
+
     /// <summary>
     /// Clear history button clicked - confirms via flyout and clears appropriate data.
     /// </summary>
@@ -2766,9 +2902,24 @@ public sealed partial class SearchPopupWindow : Window
                 break;
 
             case nameof(SearchPopupViewModel.SelectedTab):
+                // Tab switches reconcile the results in place, which preserves
+                // the previous vertical offset; return to the top so the
+                // default first-row selection is visible where expected.
+                ResultsPanel.ChangeView(null, 0, null, disableAnimation: true);
+                _measuredResultRowHeight = null;
                 SyncTabSelection();
                 RefreshPreparedResultRows();
                 UpdatePanelVisibility();
+                // SelectedItem can remain the same object across All/File-style
+                // tabs, so its property notification is not guaranteed. Re-run
+                // selection synchronization explicitly, then repeat it after the
+                // ItemsRepeater has processed its collection changes.
+                UpdateSelectionHighlight();
+                QueueTabSelectionRefreshAndFocus();
+                break;
+
+            case nameof(SearchPopupViewModel.ResultFilter):
+                SyncResultFilterCombo();
                 break;
 
             case nameof(SearchPopupViewModel.SortColumn):
@@ -2782,11 +2933,31 @@ public sealed partial class SearchPopupWindow : Window
         }
     }
 
+    private void QueueTabSelectionRefreshAndFocus()
+    {
+        int generation = ++_tabFocusRestoreGeneration;
+        DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, () =>
+        {
+            if (generation != _tabFocusRestoreGeneration || !IsPopupVisible)
+            {
+                return;
+            }
+
+            UpdateSelectionHighlight();
+
+            // SelectionChanged runs inside ListView pointer handling. Restoring
+            // focus synchronously can be overwritten when that pointer route
+            // finishes, so perform it on the next low-priority dispatcher pass.
+            SearchTextBox.Focus(FocusState.Programmatic);
+        });
+    }
+
     /// <summary>
     /// Highlights the row for the keyboard-selected result and brings it into view.
     /// </summary>
     private void UpdateSelectionHighlight()
     {
+        ++_selectedRowHighlightGeneration;
         if (_selectedRow is not null)
         {
             _selectedRow.IsSelected = false;
@@ -2801,17 +2972,79 @@ public sealed partial class SearchPopupWindow : Window
 
         if (FindRowByDataContext(ResultsRepeater, selected) is { } row)
         {
-            _selectedRow = row;
-            row.IsSelected = true;
-            row.IsTabStop = true;
-            row.StartBringIntoView();
+            SetSelectedRow(row);
+            EnsureSelectedRowVisible(row);
         }
         else if (_viewModel.SelectedIndex >= 0)
         {
             // Element not realized (off-screen). Scroll the ScrollViewer
-            // to bring it into the viewport so the ItemsRepeater realizes it.
+            // so the ItemsRepeater realizes it, then keep retrying the
+            // highlight — realization completes asynchronously.
             ScrollToSelectedIndex();
+            ScheduleSelectedRowHighlight();
         }
+    }
+
+    private void EnsureSelectedRowVisible(SearchResultRowControl row)
+    {
+        // Use the row's real viewport-relative position: arithmetic from a
+        // cached row height drifts once heights vary or virtualization
+        // realizes past the viewport, which made navigation skip rows.
+        Windows.Foundation.Rect bounds = row.TransformToVisual(ResultsPanel)
+            .TransformBounds(new Windows.Foundation.Rect(0, 0, row.ActualWidth, row.ActualHeight));
+        double viewportHeight = ResultsPanel.ViewportHeight;
+
+        if (bounds.Y >= 0 && (bounds.Y + bounds.Height) <= viewportHeight)
+        {
+            // Fully visible: keyboard moves must not scroll the list.
+            return;
+        }
+
+        double scrollTarget = bounds.Y < 0
+            ? Math.Max(0, ResultsPanel.VerticalOffset + bounds.Y)
+            : ResultsPanel.VerticalOffset + bounds.Y + bounds.Height - viewportHeight;
+        ResultsPanel.ChangeView(null, scrollTarget, null, disableAnimation: true);
+    }
+
+    private void SetSelectedRow(SearchResultRowControl row)
+    {
+        _selectedRow = row;
+        row.IsSelected = true;
+        row.IsTabStop = true;
+        _measuredResultRowHeight = row.ActualHeight > 0
+            ? row.ActualHeight + row.Margin.Top + row.Margin.Bottom
+            : _measuredResultRowHeight;
+    }
+
+    private void ScheduleSelectedRowHighlight()
+    {
+        int generation = ++_selectedRowHighlightGeneration;
+        App.UiDispatcherQueue?.TryEnqueue(async () =>
+        {
+            // Virtualization realizes the selected row a few frames after the
+            // scroll lands; retry until it appears or the selection moves on.
+            for (int attempt = 0; attempt < 8; attempt++)
+            {
+                await Task.Delay(24);
+                if (generation != _selectedRowHighlightGeneration ||
+                    _viewModel.SelectedItem is not { } selected)
+                {
+                    return;
+                }
+
+                if (FindRowByDataContext(ResultsRepeater, selected) is { } row)
+                {
+                    if (_selectedRow is null)
+                    {
+                        SetSelectedRow(row);
+                    }
+
+                    EnsureSelectedRowVisible(row);
+
+                    return;
+                }
+            }
+        });
     }
 
     /// <summary>
@@ -2826,53 +3059,48 @@ public sealed partial class SearchPopupWindow : Window
             return;
         }
 
-        double rowHeight = EstimateRowHeight();
+        double rowHeight = GetMeasuredResultRowHeight();
         double targetTop = index * rowHeight;
         double targetBottom = targetTop + rowHeight;
         double viewTop = ResultsPanel.VerticalOffset;
         double viewBottom = viewTop + ResultsPanel.ViewportHeight;
 
-        double? scrollTarget = null;
-        if (targetTop < viewTop)
+        if (targetTop >= viewTop && targetBottom <= viewBottom)
         {
-            scrollTarget = Math.Max(0, targetTop - rowHeight);
-        }
-        else if (targetBottom > viewBottom)
-        {
-            scrollTarget = targetBottom - ResultsPanel.ViewportHeight + rowHeight;
+            // Already inside the viewport: scrolling would make the list jump.
+            // Realization is handled by the highlight retry.
+            return;
         }
 
-        if (scrollTarget is not null)
-        {
-            ResultsPanel.ChangeView(null, scrollTarget, null, disableAnimation: true);
-            // After scrolling, try to find and highlight the row on the next layout pass.
-            DispatcherQueue.TryEnqueue(() =>
-            {
-                if (_viewModel.SelectedItem is { } selected &&
-                    FindRowByDataContext(ResultsRepeater, selected) is { } row &&
-                    _selectedRow is null)
-                {
-                    _selectedRow = row;
-                    row.IsSelected = true;
-                    row.IsTabStop = true;
-                }
-            });
-        }
+        // Selection moves one row at a time, so align the row's edge with the
+        // matching viewport edge — exactly one row of travel per keypress.
+        double scrollTarget = targetTop < viewTop
+            ? Math.Max(0, targetTop)
+            : targetBottom - ResultsPanel.ViewportHeight;
+
+        ResultsPanel.ChangeView(null, scrollTarget, null, disableAnimation: true);
     }
 
-    private double EstimateRowHeight()
+    private double GetMeasuredResultRowHeight()
     {
-        // Measure a realized element to get the actual row height.
+        if (_measuredResultRowHeight is { } cached && cached > 0)
+        {
+            return cached;
+        }
+
         if (ResultsRepeater.ItemsSource is System.Collections.ICollection coll)
         {
             for (int i = 0; i < Math.Min(coll.Count, 5); i++)
             {
                 if (ResultsRepeater.TryGetElement(i) is FrameworkElement fe && fe.ActualHeight > 0)
                 {
-                    return fe.ActualHeight + fe.Margin.Top + fe.Margin.Bottom;
+                    double measured = fe.ActualHeight + fe.Margin.Top + fe.Margin.Bottom;
+                    _measuredResultRowHeight = measured;
+                    return measured;
                 }
             }
         }
+
         return 48; // Fallback estimate
     }
 
@@ -3135,6 +3363,13 @@ public sealed partial class SearchPopupWindow : Window
 
     private void ResultsPanel_ViewChanged(object sender, ScrollViewerViewChangedEventArgs e)
     {
+        // The keyboard-selected row may finish realizing a frame after the
+        // scroll lands; re-check the highlight whenever the view settles.
+        if (_selectedRow is null && _viewModel.SelectedItem is not null)
+        {
+            ScheduleSelectedRowHighlight();
+        }
+
         if (_isRubberBanding || !_viewModel.HasMoreResults || _viewModel.IsLoadingMore)
         {
             return;

@@ -292,7 +292,33 @@ public abstract partial class WidgetWindowBase
 
     private void RestoreDesktopPinnedBottomState(string reason)
     {
-        WidgetLayerService.MoveToDesktopBottom(HWnd);
+        if (_expandedWidgetLayerLeaseGeneration != 0)
+        {
+            // The expanded capsule owns the top of the desktop band until its
+            // collapse re-beds the window; a bottom reassert here would bury
+            // it beneath sibling widgets mid-use.
+            return;
+        }
+
+        if (!WidgetTemporaryRaiseLeasePolicy.CanRestoreDesktopLayer(
+                Visible,
+                IsHideAnimationRunning,
+                IsClosing))
+        {
+            CancelPendingDesktopLayerRestore();
+            App.LogVerbose(
+                $"[ZOrder] {LogPrefix} fixed-layer bottom reassert skipped " +
+                $"reason={reason} visible={Visible} " +
+                $"hideRunning={IsHideAnimationRunning} closing={IsClosing} " +
+                $"hwnd=0x{HWnd.ToInt64():X}");
+            return;
+        }
+
+        // This path only repairs owner/Z-order state for an already visible
+        // widget. Never let that repair carry SWP_SHOWWINDOW: Explorer can
+        // deliver activation changes while a desktop drag is in progress, and
+        // a hidden desktop-owned widget must stay hidden.
+        WidgetLayerService.MoveToDesktopBottom(HWnd, showWindow: false);
         IsAtDesktopLayer = true;
         IsRaisedFromManager = false;
         KeepRaisedUntilDeactivate = false;
@@ -594,7 +620,9 @@ public abstract partial class WidgetWindowBase
 
     protected void ApplyWindowCornerPreference()
     {
-        int cornerPreference = SettingsService.Settings.WidgetCornerPreference switch
+        string effectivePreference = WindowsCompatibilityService.ResolveEffectiveWidgetCornerPreference(
+            SettingsService.Settings.WidgetCornerPreference);
+        int cornerPreference = effectivePreference switch
         {
             SettingsService.WidgetCornerPreferenceSquare => Win32Helper.DWMWCP_DONOTROUND,
             SettingsService.WidgetCornerPreferenceSmall => Win32Helper.DWMWCP_ROUNDSMALL,
@@ -614,8 +642,10 @@ public abstract partial class WidgetWindowBase
 
     protected double GetCornerRadiusFromPreference()
     {
-        return WidgetCompactBoundsCalculator.ResolveOuterCornerRadius(
+        string effectivePreference = WindowsCompatibilityService.ResolveEffectiveWidgetCornerPreference(
             SettingsService.Settings.WidgetCornerPreference);
+        return WidgetCompactBoundsCalculator.ResolveOuterCornerRadius(
+            effectivePreference);
     }
 
     protected double GetCurrentSurfaceCornerRadius()
@@ -627,7 +657,8 @@ public abstract partial class WidgetWindowBase
 
         return IsWidgetCollapsedBoundsActive
             ? WidgetCompactBoundsCalculator.ResolveOuterCornerRadius(
-                SettingsService.Settings.WidgetCornerPreference)
+                WindowsCompatibilityService.ResolveEffectiveWidgetCornerPreference(
+                    SettingsService.Settings.WidgetCornerPreference))
             : GetCornerRadiusFromPreference();
     }
 

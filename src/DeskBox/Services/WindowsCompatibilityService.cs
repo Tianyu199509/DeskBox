@@ -53,6 +53,53 @@ public static class WindowsCompatibilityService
         return ResolveWidgetMaterialTypeForBuild(requestedMaterialType, OsBuild);
     }
 
+    /// <summary>
+    /// Resolves the corner preference that can actually be rendered on the
+    /// current platform. The persisted setting remains the user's requested
+    /// value so a Win10 profile can regain its preference after moving to
+    /// Windows 11.
+    /// </summary>
+    public static string ResolveEffectiveWidgetCornerPreference(string? requestedPreference)
+    {
+        return ResolveEffectiveWidgetCornerPreferenceForBuild(requestedPreference, OsBuild);
+    }
+
+    internal static string ResolveEffectiveWidgetCornerPreferenceForBuild(
+        string? requestedPreference,
+        int osBuild)
+    {
+        string normalized = requestedPreference is
+            SettingsService.WidgetCornerPreferenceSquare or
+            SettingsService.WidgetCornerPreferenceSmall or
+            SettingsService.WidgetCornerPreferenceRound
+                ? requestedPreference
+                : SettingsService.WidgetCornerPreferenceRound;
+
+        return osBuild < Windows11Build
+            ? SettingsService.WidgetCornerPreferenceSquare
+            : normalized;
+    }
+
+    /// <summary>
+    /// Resolves the compact media corner mode that can actually be rendered
+    /// on the current platform. Win10 keeps all capsule media surfaces square,
+    /// while Win11 continues to honor the explicit media preference.
+    /// </summary>
+    public static string ResolveEffectiveWidgetCompactMediaCornerMode(string? requestedMode)
+    {
+        return ResolveEffectiveWidgetCompactMediaCornerModeForBuild(requestedMode, OsBuild);
+    }
+
+    internal static string ResolveEffectiveWidgetCompactMediaCornerModeForBuild(
+        string? requestedMode,
+        int osBuild)
+    {
+        string normalized = SettingsService.NormalizeWidgetCompactMediaCornerMode(requestedMode);
+        return osBuild < Windows11Build
+            ? SettingsService.WidgetCompactMediaCornerSquare
+            : normalized;
+    }
+
     internal static string ResolveWidgetMaterialTypeForBuild(
         string? requestedMaterialType,
         int osBuild)

@@ -27,6 +27,26 @@ public sealed class StackPopoverInteractionContractTests
             popover,
             StringComparison.Ordinal);
         Assert.Contains(
+            "itemsView.XamlRoot?.RasterizationScale ?? 1",
+            popover,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "wrap.ItemWidth = StackPopoverPixelCalculator.ToContainedLogicalSize(",
+            popover,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "wrap.ItemHeight = StackPopoverPixelCalculator.ToContainedLogicalSize(",
+            popover,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "wrap.MaximumRowsOrColumns = Math.Max(1, layout.Columns);",
+            popover,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "StackPopoverPixelCalculator.ToCoveringPhysicalPixels(",
+            popover,
+            StringComparison.Ordinal);
+        Assert.Contains(
             "_stackPopoverHostWindow.UpdateBounds(bounds);",
             popover,
             StringComparison.Ordinal);

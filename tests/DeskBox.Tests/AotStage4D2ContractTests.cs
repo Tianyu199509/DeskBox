@@ -19,7 +19,7 @@ public sealed class AotStage4D2ContractTests
         string fileService = ReadRepositoryFile("src/DeskBox/Services/FileService.cs");
 
         Assert.Contains("ExecuteShellMovePlanAsync(", fileService, StringComparison.Ordinal);
-        Assert.Contains("DeleteEntryToRecycleBin(", fileService, StringComparison.Ordinal);
+        Assert.Contains("DeleteEntryWithShell(", fileService, StringComparison.Ordinal);
         Assert.Contains("MoveEntriesWithShellProgress(", fileService, StringComparison.Ordinal);
         Assert.Contains("SHFileOperation(ref", fileService, StringComparison.Ordinal);
 

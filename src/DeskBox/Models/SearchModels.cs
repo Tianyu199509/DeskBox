@@ -5,6 +5,7 @@ using System.Collections.Generic;
 using System.ComponentModel;
 using System.IO;
 using System.Runtime.CompilerServices;
+using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Media;
 
 /// <summary>
@@ -267,6 +268,31 @@ public sealed class SearchTabItem : INotifyPropertyChanged
     public required string Id { get; init; }
     public required string DisplayName { get; init; }
     public string? Glyph { get; init; }
+
+    /// <summary>
+    /// Whether this tab is currently selected.  The popup binds the selection
+    /// indicator inside the tab's label column to this state so the indicator
+    /// follows the text instead of being positioned relative to the whole item.
+    /// </summary>
+    private bool _isSelected;
+    public bool IsSelected
+    {
+        get => _isSelected;
+        internal set
+        {
+            if (_isSelected == value)
+            {
+                return;
+            }
+
+            _isSelected = value;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(SelectionIndicatorVisibility));
+        }
+    }
+
+    public Visibility SelectionIndicatorVisibility =>
+        _isSelected ? Visibility.Visible : Visibility.Collapsed;
 
     /// <summary>Predicate that decides whether a result belongs to this tab.</summary>
     public required Func<SearchResultItem, bool> Predicate { get; init; }

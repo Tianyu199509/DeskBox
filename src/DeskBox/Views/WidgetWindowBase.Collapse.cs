@@ -84,6 +84,24 @@ public abstract partial class WidgetWindowBase
     private long _collapseAnimationGeneration;
     private long _compactLayerRestoreGeneration;
     private long _expandedWidgetLayerLeaseGeneration;
+
+    /// <summary>
+    /// True while an expanded capsule lease owns this window's layer; derived
+    /// hosts must not force-demote the window until the collapse re-beds it.
+    /// </summary>
+    protected bool HasExpandedWidgetLayerLease => _expandedWidgetLayerLeaseGeneration != 0;
+
+    /// <summary>
+    /// Ends the expanded capsule lease without touching the layer. Manager
+    /// teardown uses this: the whole group returns to its resting layer even
+    /// while a capsule is expanded, so the lease must not outlive the session.
+    /// </summary>
+    protected void EndExpandedWidgetLayerLease()
+    {
+        _expandedWidgetLayerLeaseGeneration = 0;
+        _isRaisedForExpandedState = false;
+        _restoreDesktopLayerAfterExpandedState = false;
+    }
     private long _compactExpansionRequestGeneration;
     private PendingCompactExpansion? _pendingCompactExpansion;
     private WidgetCompactAnimationFrameTracker? _compactAnimationFrameTracker;
@@ -1024,7 +1042,10 @@ public abstract partial class WidgetWindowBase
             RectInt32 compactBounds = GetStableCompactBounds(current);
             WidgetCompactExpansionLayout layout = ResolveCompactExpansionLayout(compactBounds);
             double dpiScale = Win32Helper.GetDpiScaleForWindow(HWnd, RootElement.XamlRoot);
-            string cornerPreference = SettingsService.Settings.WidgetCornerPreference;
+            string cornerPreference = WindowsCompatibilityService.ResolveEffectiveWidgetCornerPreference(
+                SettingsService.Settings.WidgetCornerPreference);
+            string mediaCornerMode = WindowsCompatibilityService.ResolveEffectiveWidgetCompactMediaCornerMode(
+                SettingsService.Settings.WidgetCompactMediaCornerMode);
 
             // Prime the small WinRT/accessibility setup work as well as the full
             // expanded XAML layout. Neither call changes the native window bounds.
@@ -1037,7 +1058,7 @@ public abstract partial class WidgetWindowBase
                 WidgetCompactBoundsCalculator.ResolveOuterCornerRadius(cornerPreference),
                 WidgetCompactBoundsCalculator.ResolveInnerCornerRadius(cornerPreference),
                 WidgetCompactBoundsCalculator.ResolveMediaCornerRadius(
-                    SettingsService.Settings.WidgetCompactMediaCornerMode,
+                    mediaCornerMode,
                     cornerPreference),
                 SettingsService.Settings.WidgetCompactContentMode,
                 layout.Anchor);
@@ -2984,7 +3005,10 @@ public abstract partial class WidgetWindowBase
         _compactAnimationFrameTracker = new WidgetCompactAnimationFrameTracker(
             _collapseAnimationStarted,
             refreshRateHz);
-        string cornerPreference = SettingsService.Settings.WidgetCornerPreference;
+        string cornerPreference = WindowsCompatibilityService.ResolveEffectiveWidgetCornerPreference(
+            SettingsService.Settings.WidgetCornerPreference);
+        string mediaCornerMode = WindowsCompatibilityService.ResolveEffectiveWidgetCompactMediaCornerMode(
+            SettingsService.Settings.WidgetCompactMediaCornerMode);
         ApplyCompactBorderVisuals();
         _collapseAnimationVisualProfile = WidgetCompactTransitionVisualProfile.Resolve(
             SettingsService.Settings.WidgetCompactAnimationEffect,
@@ -2996,7 +3020,7 @@ public abstract partial class WidgetWindowBase
             WidgetCompactBoundsCalculator.ResolveOuterCornerRadius(cornerPreference),
             WidgetCompactBoundsCalculator.ResolveInnerCornerRadius(cornerPreference),
             WidgetCompactBoundsCalculator.ResolveMediaCornerRadius(
-                SettingsService.Settings.WidgetCompactMediaCornerMode,
+                mediaCornerMode,
                 cornerPreference),
             _collapseAnimationVisualProfile);
         _isCollapseAnimationRendering = true;
@@ -3173,13 +3197,16 @@ public abstract partial class WidgetWindowBase
     {
         ApplyBackdropPreference();
         ApplyCompactBorderVisuals();
-        string preference = SettingsService.Settings.WidgetCornerPreference;
+        string preference = WindowsCompatibilityService.ResolveEffectiveWidgetCornerPreference(
+            SettingsService.Settings.WidgetCornerPreference);
+        string mediaCornerMode = WindowsCompatibilityService.ResolveEffectiveWidgetCompactMediaCornerMode(
+            SettingsService.Settings.WidgetCompactMediaCornerMode);
         double outerRadius = WidgetCompactBoundsCalculator.ResolveOuterCornerRadius(preference);
         WidgetShellControl.SetCompactCornerRadii(
             outerRadius,
             WidgetCompactBoundsCalculator.ResolveInnerCornerRadius(preference),
             WidgetCompactBoundsCalculator.ResolveMediaCornerRadius(
-                SettingsService.Settings.WidgetCompactMediaCornerMode,
+                mediaCornerMode,
                 preference));
 
     }
@@ -3752,21 +3779,6 @@ public abstract partial class WidgetWindowBase
     private void RaiseForExpandedState()
     {
         CancelDeferredExpandedLayerRestore();
-        if (WidgetLayerService.UsesDesktopPinnedMode())
-        {
-            // Expanding or interacting with a fixed-layer widget must not
-            // acquire either a global or peer-only Z-order raise.
-            _isRaisedForExpandedState = false;
-            _restoreDesktopLayerAfterExpandedState = false;
-            CancelPendingDesktopLayerRestore();
-            _ = ReleaseExpandedWidgetLayerLease("fixed-layer-expanded");
-            WidgetLayerService.MoveToDesktopBottom(HWnd);
-            App.LogVerbose(
-                $"[ZOrder] RaiseForExpandedState skipped fixed-layer " +
-                $"hwnd=0x{HWnd.ToInt64():X}");
-            return;
-        }
-
         if (_isRaisedForExpandedState)
         {
             if (!WidgetLayerService.TryBringAbovePeerWidgetsAtDesktopLayer(HWnd))

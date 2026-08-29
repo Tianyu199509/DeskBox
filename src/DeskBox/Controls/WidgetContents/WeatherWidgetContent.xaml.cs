@@ -86,6 +86,7 @@ public sealed partial class WeatherWidgetContent : UserControl
 
         InitializeRefreshRotation();
         UpdateRichSkinTextTheme();
+        ApplyRichSkinCornerRadius();
         UpdateWeatherPalette();
         UpdateWeatherViewSelection();
         App.Current.ThemeService.AppearanceChanged -= OnThemeAppearanceChanged;
@@ -176,6 +177,10 @@ public sealed partial class WeatherWidgetContent : UserControl
             UpdateRichSkinTextTheme();
             UpdateWeatherPalette();
         }
+        else if (e.PropertyName == nameof(WeatherWidgetViewModel.WidgetCornerRadius))
+        {
+            ApplyRichSkinCornerRadius();
+        }
         else if (e.PropertyName == nameof(WeatherWidgetViewModel.IsWeekView))
         {
             UpdateWeatherViewSelection();
@@ -191,6 +196,16 @@ public sealed partial class WeatherWidgetContent : UserControl
         // Sync the gradient stop colors from the ViewModel
         RichBackdropTop.Color = _viewModel.RichBackdropTopColor;
         RichBackdropBottom.Color = _viewModel.RichBackdropBottomColor;
+    }
+
+    private void ApplyRichSkinCornerRadius()
+    {
+        CornerRadius cornerRadius = _viewModel.WidgetCornerRadius;
+        RichBackdrop.CornerRadius = cornerRadius;
+        LoadingOverlay.CornerRadius = cornerRadius;
+
+        double radius = Math.Max(0, cornerRadius.TopLeft);
+        RichGlossOverlay.CornerRadius = new CornerRadius(radius, radius, 0, 0);
     }
 
     private void UpdateRichSkinTextTheme()

@@ -47,6 +47,13 @@ public sealed class FolderWatcherService : IDisposable
     private const int MaxBufferedChangesBeforeReload = 64;
     private const int MaxReconnectAttempts = 8;
     private const int ReconnectBaseDelaySeconds = 2;
+    // A persistent per-subtree AccessDenied makes the native watcher error,
+    // restart, and error again as fast as events allow. Rate-limiting the
+    // restarts and plateauing the reconnect backoff keeps the recovery loop
+    // (an ACL fix must self-heal) without flooding the log.
+    private const int ReconnectPlateauSeconds = 180;
+    private const int LegacyWatcherRestartMinIntervalSeconds = 30;
+    private const int DesktopIniRestartMaxAttempts = 3;
     internal const int NativeBufferSizeBytes = 32 * 1024;
     internal const NotifyFilters NativeNotifyFilter =
         NotifyFilters.FileName |
@@ -69,8 +76,13 @@ public sealed class FolderWatcherService : IDisposable
     private int _pendingGeneration;
     private bool _requiresFullReload;
     private bool _legacyRestartQueued;
+    private DateTimeOffset _lastLegacyRestartAtUtc = DateTimeOffset.MinValue;
+    private bool _legacyErrorAnnounced;
+    private int _desktopIniRestartCount;
+    private bool _desktopIniErrorAnnounced;
     private int _watchGeneration;
     private string? _reconnectPath;
+    private string? _requestedPath;
     private int _reconnectAttempt;
     private int _reconnectCount;
     private bool _isDisposed;
@@ -161,7 +173,26 @@ public sealed class FolderWatcherService : IDisposable
             return;
         }
 
+        string requestedPath = folderPath;
+        // Watch the physical target rather than asking FileSystemWatcher and
+        // StorageFolder to traverse a user-created mount point. The logical
+        // junction path remains in widget configuration; only this runtime
+        // watcher path is resolved.
+        if (FileService.TryResolveExistingPathForTraversal(
+                folderPath,
+                out string traversalPath))
+        {
+            folderPath = traversalPath;
+        }
+
         Stop();
+        lock (_lock)
+        {
+            // Keep the logical path for reconnects. A version-manager junction
+            // (for example Scoop's "current") can retarget while the app is
+            // running; retrying the old physical target would never recover.
+            _requestedPath = requestedPath;
+        }
         _lastError = null;
         int startGeneration;
         lock (_lock)
@@ -424,12 +455,43 @@ public sealed class FolderWatcherService : IDisposable
         }
 
         _lastError = e.GetException()?.Message;
-        _health = FolderWatcherHealth.Degraded;
-        App.Log($"[FolderWatcher] desktop.ini watcher error: {e.GetException()}");
-        if (!string.IsNullOrWhiteSpace(WatchedPath))
+        // The desktop.ini watcher only refreshes folder icons. Its failure
+        // must not degrade the whole folder's health: the main watcher and
+        // the item-query channel keep the listing accurate. Restart the aux
+        // watcher a bounded number of times and leave global health alone.
+        if (_desktopIniErrorAnnounced)
         {
-            BeginReconnect(WatchedPath);
+            App.LogVerbose(
+                $"[FolderWatcher] desktop.ini watcher error: {e.GetException()?.Message}");
         }
+        else
+        {
+            _desktopIniErrorAnnounced = true;
+            App.Log($"[FolderWatcher] desktop.ini watcher error: {e.GetException()}");
+        }
+
+        if (_desktopIniRestartCount >= DesktopIniRestartMaxAttempts)
+        {
+            // Persistent (typically a denied subtree). Stay stopped until the
+            // next full reconfiguration recreates it with a fresh budget.
+            return;
+        }
+
+        _desktopIniRestartCount++;
+        string? path;
+        lock (_lock)
+        {
+            path = WatchedPath;
+        }
+
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return;
+        }
+
+        _desktopIniWatcher?.Dispose();
+        _desktopIniWatcher = null;
+        StartDesktopIniWatcher(path);
     }
 
     private bool TryStartLegacyWatcher(string folderPath)
@@ -480,7 +542,9 @@ public sealed class FolderWatcherService : IDisposable
             _requiresFullReload = false;
             _legacyRestartQueued = false;
             _reconnectPath = null;
+            _requestedPath = null;
             _reconnectAttempt = 0;
+            _desktopIniRestartCount = 0;
         }
 
         if (_queryWatcher is not null)
@@ -595,7 +659,18 @@ public sealed class FolderWatcherService : IDisposable
 
         _lastError = e.GetException()?.Message;
         _health = FolderWatcherHealth.Degraded;
-        App.Log($"[FolderWatcher] Watcher error: {e.GetException()}");
+        if (_legacyErrorAnnounced)
+        {
+            // A denied subtree keeps tripping the watcher every cycle; after
+            // the first announcement only verbose logging is warranted.
+            App.LogVerbose($"[FolderWatcher] Watcher error: {e.GetException()?.Message}");
+        }
+        else
+        {
+            _legacyErrorAnnounced = true;
+            App.Log($"[FolderWatcher] Watcher error: {e.GetException()}");
+        }
+
         QueueFullReload(generation);
 
         string? path;
@@ -620,6 +695,24 @@ public sealed class FolderWatcherService : IDisposable
     {
         try
         {
+            // A denied subdirectory makes the probe pass (the root lists fine)
+            // while the watch loop keeps failing. Restarting at event speed
+            // would spin forever; fall back to the backed-off reconnect loop,
+            // which both spaces attempts out and preserves self-healing once
+            // the ACL or drive returns to normal.
+            TimeSpan sinceLastRestart = DateTimeOffset.UtcNow - _lastLegacyRestartAtUtc;
+            if (sinceLastRestart < TimeSpan.FromSeconds(LegacyWatcherRestartMinIntervalSeconds))
+            {
+                lock (_lock)
+                {
+                    _legacyRestartQueued = false;
+                }
+
+                BeginReconnect(path);
+                return;
+            }
+
+            _lastLegacyRestartAtUtc = DateTimeOffset.UtcNow;
             FolderWatcherHealth availability = await ProbeFolderAccessAsync(path);
             lock (_lock)
             {
@@ -702,7 +795,9 @@ public sealed class FolderWatcherService : IDisposable
 
         _reconnectTimer.Stop();
         _reconnectTimer.Interval = TimeSpan.FromSeconds(
-            Math.Min(30, ReconnectBaseDelaySeconds * Math.Pow(2, attempt - 1)));
+            Math.Min(
+                ReconnectPlateauSeconds,
+                ReconnectBaseDelaySeconds * Math.Pow(2, attempt - 1)));
         _reconnectTimer.Start();
     }
 
@@ -712,9 +807,11 @@ public sealed class FolderWatcherService : IDisposable
         {
             _reconnectTimer.Stop();
             string? path;
+            string? requestedPath;
             lock (_lock)
             {
                 path = _reconnectPath;
+                requestedPath = _requestedPath;
             }
 
             if (_isDisposed || string.IsNullOrWhiteSpace(path))
@@ -722,7 +819,16 @@ public sealed class FolderWatcherService : IDisposable
                 return;
             }
 
-            FolderWatcherHealth availability = await ProbeFolderAccessAsync(path);
+            string probePath = path;
+            if (!string.IsNullOrWhiteSpace(requestedPath) &&
+                FileService.TryResolveExistingPathForTraversal(
+                    requestedPath,
+                    out string refreshedPath))
+            {
+                probePath = refreshedPath;
+            }
+
+            FolderWatcherHealth availability = await ProbeFolderAccessAsync(probePath);
             if (availability != FolderWatcherHealth.Watching)
             {
                 _health = availability;
@@ -731,11 +837,11 @@ public sealed class FolderWatcherService : IDisposable
             }
 
             Interlocked.Increment(ref _reconnectCount);
-            await StartAsync(path);
+            await StartAsync(requestedPath ?? path);
             if (!_isDisposed && IsWatching)
             {
                 QueueFullReload();
-                App.Log($"[FolderWatcher] Reconnected to '{path}'");
+                App.Log($"[FolderWatcher] Reconnected to '{WatchedPath ?? probePath}'");
             }
         }
         catch (Exception ex)

@@ -339,10 +339,10 @@ public sealed class StackPopoverLayoutCalculatorTests
 
         Assert.Equal(3, layout.Columns);
         Assert.Equal(3, layout.VisibleRows);
-        Assert.Equal(240, layout.ItemsWidth);
-        Assert.Equal(258, layout.ItemsHeight);
-        Assert.Equal(256, layout.Width);
-        Assert.Equal(310, layout.Height);
+        Assert.Equal(244, layout.ItemsWidth);
+        Assert.Equal(262, layout.ItemsHeight);
+        Assert.Equal(263.2, layout.Width, precision: 3);
+        Assert.Equal(317.2, layout.Height, precision: 3);
     }
 
     [Fact]
@@ -359,10 +359,80 @@ public sealed class StackPopoverLayoutCalculatorTests
 
         Assert.Equal(2, layout.Columns);
         Assert.Equal(2, layout.VisibleRows);
-        Assert.Equal(160, layout.ItemsWidth);
-        Assert.Equal(172, layout.ItemsHeight);
+        Assert.Equal(163, layout.ItemsWidth);
+        Assert.Equal(175, layout.ItemsHeight);
+        // The +2 reserve is absorbed by the minimum-width floor here; the
+        // interior still fits the reserved 2x2 grid.
         Assert.Equal(184, layout.Width);
-        Assert.Equal(224, layout.Height);
+        Assert.Equal(230.2, layout.Height, precision: 3);
+    }
+
+    [Fact]
+    public void Grid3_FiveFractionalItemsKeepsAViewportFitGuard()
+    {
+        StackPopoverLayout layout = StackPopoverLayoutCalculator.Calculate(
+            isListMode: false,
+            itemCount: 5,
+            widgetWidth: 420,
+            workAreaWidth: 2560,
+            workAreaHeight: 1440,
+            itemWidth: 71.47,
+            itemHeight: 81.6,
+            layoutMode: SettingsService.FileStackPopoverLayoutGrid3);
+
+        Assert.Equal(3, layout.Columns);
+        Assert.Equal(2, layout.VisibleRows);
+        // The reserve scales with the grid shape: one DIP per column on top
+        // of the fixed guard, covering per-item physical-pixel rounding at
+        // fractional DPI scales.
+        Assert.Equal(
+            StackPopoverLayoutCalculator.ItemsViewportFitGuard + layout.Columns,
+            layout.ItemsWidth - (layout.Columns * layout.CellWidth),
+            precision: 6);
+    }
+
+    [Theory]
+    [InlineData(1.0)]
+    [InlineData(1.25)]
+    [InlineData(1.5)]
+    [InlineData(1.75)]
+    [InlineData(2.0)]
+    public void PixelSizing_CoversFractionalLogicalSizeAtCommonDpiScales(
+        double scale)
+    {
+        const double logicalSize = 258.61;
+
+        int physicalPixels =
+            StackPopoverPixelCalculator.ToCoveringPhysicalPixels(
+                logicalSize,
+                scale);
+
+        Assert.True(physicalPixels / scale >= logicalSize);
+        Assert.True((physicalPixels - 1) / scale < logicalSize);
+    }
+
+    [Theory]
+    [InlineData(1.0)]
+    [InlineData(1.25)]
+    [InlineData(1.5)]
+    [InlineData(1.75)]
+    [InlineData(2.0)]
+    public void ItemSizing_StaysInsideLogicalSlotAtCommonDpiScales(
+        double scale)
+    {
+        const double logicalSize = 79.47;
+
+        double snappedSize =
+            StackPopoverPixelCalculator.ToContainedLogicalSize(
+                logicalSize,
+                scale);
+
+        Assert.True(snappedSize <= logicalSize);
+        Assert.True(logicalSize - snappedSize < 1 / scale);
+        Assert.Equal(
+            Math.Floor(logicalSize * scale),
+            snappedSize * scale,
+            precision: 6);
     }
 
     [Theory]

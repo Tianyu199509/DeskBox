@@ -85,7 +85,7 @@ public sealed class AotStage4E3ContractTests
     {
         string xaml = ReadRepositoryFile("src/DeskBox/Views/SearchPopupWindow.xaml");
 
-        Assert.Equal(1, CountOccurrences(xaml, "{x:Bind Glyph, Mode=OneTime}"));
+        Assert.Equal(0, CountOccurrences(xaml, "{x:Bind Glyph, Mode=OneTime}"));
         Assert.Equal(1, CountOccurrences(xaml, "{x:Bind DisplayName, Mode=OneTime}"));
         Assert.Equal(0, CountOccurrences(xaml, "{x:Bind Count, Mode=OneWay}"));
         Assert.Equal(1, CountOccurrences(xaml, "{x:Bind Icon, Mode=OneTime}"));

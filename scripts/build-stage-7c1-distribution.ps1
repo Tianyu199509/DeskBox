@@ -130,7 +130,7 @@ $retailPublishArguments = @{
 if (-not [string]::IsNullOrWhiteSpace($DotNetPath)) {
     $retailPublishArguments.DotNetPath = [System.IO.Path]::GetFullPath($DotNetPath)
 }
-Write-Host "Publishing the smoke-free Direct Native AOT retail payload for $Platform..." `
+Write-Host "Publishing the smoke-free Full Native AOT retail payload for $Platform..." `
     -ForegroundColor Cyan
 & $retailPublishScript @retailPublishArguments | Out-Host
 
@@ -144,8 +144,11 @@ if (-not (Test-Path -LiteralPath $directRetailSummaryPath -PathType Leaf) -or
 $directRetailSummary = Get-Content -LiteralPath $directRetailSummaryPath -Raw |
     ConvertFrom-Json
 if ($directRetailSummary.productProfile -ne "retail" -or
+    $directRetailSummary.deploymentProfile -ne "full" -or
+    -not [bool]$directRetailSummary.selfContained -or
+    -not [bool]$directRetailSummary.windowsAppSdkSelfContained -or
     [bool]$directRetailSummary.smokeHarnessEnabled) {
-    throw "The Direct installer payload is not a smoke-free retail AOT build."
+    throw "The Direct installer payload is not a smoke-free Full Native AOT retail build."
 }
 Copy-Item -LiteralPath $directRetailSummaryPath `
     -Destination (Join-Path $OutputDirectory "direct-aot-retail-summary.json") -Force
@@ -166,8 +169,12 @@ $directRequiredFiles = @(
     "DeskBox.ThumbnailProxy.exe",
     "deskbox_native.dll",
     "EverythingSdk.dll",
+    "Microsoft.UI.Input.dll",
+    "Microsoft.ui.xaml.dll",
+    "Microsoft.WindowsAppRuntime.dll",
     "ThirdParty/Everything/LICENSE.txt",
-    "DeskBox.pri"
+    "DeskBox.pri",
+    "DeskBox.InstallManifest.txt"
 )
 $missingDirectFiles = @($directRequiredFiles | Where-Object { $directFiles -notcontains $_ })
 $directForbiddenPatterns = @(
@@ -268,12 +275,13 @@ $innoLogPath = Join-Path $OutputDirectory "inno-compile.log"
 $innoArguments = @(
     "/Qp",
     "/DDeskBoxNativeAot=1",
+    "/DDeskBoxBundledRuntime=1",
     "/DMyAppReleaseDir=$directPublishDirectory",
     "/F$installerOutputBaseName",
     "/O$installerOutputDirectory",
     $installerScript
 )
-Write-Host "Compiling the Direct Native AOT installer with '$innoCompiler'..." -ForegroundColor Cyan
+Write-Host "Compiling the Direct Full Native AOT installer with '$innoCompiler'..." -ForegroundColor Cyan
 & $innoCompiler @innoArguments 2>&1 | Tee-Object -FilePath $innoLogPath | Out-Host
 if ($LASTEXITCODE -ne 0) {
     throw "ISCC failed for $Platform (exit $LASTEXITCODE). See '$innoLogPath'."
@@ -372,8 +380,13 @@ $summary = [ordered]@{
             sha256 = Get-FileSha256 -Path $installer.FullName
             signatureStatus = $installerSignature.Status.ToString()
             nativeAotDefine = $true
+            bundledRuntimeDefine = $true
+            selfContained = $true
+            windowsAppSdkSelfContained = $true
             dotNetRuntimeDependencySkipped = $true
-            windowsAppRuntimeDependencyRetained = $true
+            windowsAppRuntimeDependencySkipped = $true
+            installManifest = $directRetailSummary.installManifest
+            staleRuntimeCleanup = "manifest-difference"
         }
     }
     store = [ordered]@{

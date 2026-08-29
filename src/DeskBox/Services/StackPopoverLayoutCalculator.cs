@@ -27,6 +27,44 @@ internal readonly record struct StackPopoverPosition(
     bool IsHorizontallyClamped,
     bool IsVerticallyClamped);
 
+internal static class StackPopoverPixelCalculator
+{
+    internal static double ToContainedLogicalSize(
+        double logicalSize,
+        double rasterizationScale)
+    {
+        double normalizedSize = double.IsFinite(logicalSize)
+            ? Math.Max(1, logicalSize)
+            : 1;
+        double normalizedScale =
+            double.IsFinite(rasterizationScale) && rasterizationScale > 0
+                ? rasterizationScale
+                : 1;
+        double physicalPixels = Math.Max(
+            1,
+            Math.Floor(normalizedSize * normalizedScale));
+        return Math.Min(
+            normalizedSize,
+            physicalPixels / normalizedScale);
+    }
+
+    internal static int ToCoveringPhysicalPixels(
+        double logicalSize,
+        double rasterizationScale)
+    {
+        double normalizedSize = double.IsFinite(logicalSize)
+            ? Math.Max(1, logicalSize)
+            : 1;
+        double normalizedScale =
+            double.IsFinite(rasterizationScale) && rasterizationScale > 0
+                ? rasterizationScale
+                : 1;
+        return Math.Max(
+            1,
+            (int)Math.Ceiling(normalizedSize * normalizedScale));
+    }
+}
+
 /// <summary>
 /// Centers the popover over the stack-folder icon and only moves it when an
 /// edge of the monitor work area would otherwise be crossed.
@@ -159,12 +197,19 @@ internal static class StackPopoverLayoutCalculator
     internal const double TitleEditorHeight = 28;
     // Reserved space for the close button docked at the title row's right.
     internal const double TitleTrailingButtonWidth = 30;
+    // The viewport must remain slightly larger than the exact sum of its cells.
+    // WinUI rounds the HWND, viewport and item containers at different stages;
+    // an exact fit can otherwise turn a requested 3-column grid into 2+2+1.
+    internal const double ItemsViewportFitGuard = 1;
 
     private const double WorkAreaMargin = 40;
-    private const double HorizontalPadding = SurfacePadding * 2;
-    // Surface padding plus the enlarged title row and its bottom gap.
+    // Border is drawn inside the fixed surface bounds. Reserve the maximum
+    // supported thickness so appearance changes cannot reduce the viewport.
+    private const double HorizontalChromeWidth =
+        (SurfacePadding + WidgetBorderVisualCalculator.MaximumThickness) * 2;
+    // Surface padding, maximum border, title row and its bottom gap.
     private const double BaseChromeHeight =
-        (SurfacePadding * 2) + TitleHeight + TitleBottomSpacing;
+        HorizontalChromeWidth + TitleHeight + TitleBottomSpacing;
     private const double IconHorizontalSpacing = 8;
     private const double IconVerticalSpacing = 4;
 
@@ -239,7 +284,11 @@ internal static class StackPopoverLayoutCalculator
         double minimumWidth = Math.Min(184, maximumWidth);
         int maximumColumns = Math.Clamp(
             (int)Math.Floor(
-                Math.Max(cellWidth, maximumWidth - HorizontalPadding) /
+                Math.Max(
+                    cellWidth,
+                    maximumWidth -
+                        HorizontalChromeWidth -
+                        ItemsViewportFitGuard) /
                 cellWidth),
             1,
             6);
@@ -268,16 +317,29 @@ internal static class StackPopoverLayoutCalculator
         int rowsThatFit = Math.Max(
             1,
             (int)Math.Floor(
-                Math.Max(cellHeight, maximumHeight - chromeHeight) /
+                Math.Max(
+                    cellHeight,
+                    maximumHeight -
+                        chromeHeight -
+                        ItemsViewportFitGuard) /
                 cellHeight));
         int visibleRows = Math.Min(desiredRows, rowsThatFit);
-        double itemsWidth = columns * cellWidth;
+        // Fractional DPI scales round every item container outward to whole
+        // physical pixels, costing up to 1 DIP per slot in a row (and per row
+        // in a column). A fixed 1 DIP reserve cannot absorb that at 125%/150%,
+        // which turned 3-column grids into 2+1 wraps — the reserve now scales
+        // with the grid shape.
+        double itemsWidth =
+            (columns * cellWidth) + ItemsViewportFitGuard + columns;
         double width = ClampToAvailable(
-            Math.Max(minimumWidth, itemsWidth + HorizontalPadding),
+            Math.Max(minimumWidth, itemsWidth + HorizontalChromeWidth),
             minimumWidth,
             maximumWidth);
-        itemsWidth = Math.Min(itemsWidth, Math.Max(cellWidth, width - HorizontalPadding));
-        double itemsHeight = visibleRows * cellHeight;
+        itemsWidth = Math.Min(
+            itemsWidth,
+            Math.Max(cellWidth, width - HorizontalChromeWidth));
+        double itemsHeight =
+            (visibleRows * cellHeight) + ItemsViewportFitGuard + visibleRows;
         double height = Math.Min(
             maximumHeight,
             chromeHeight + itemsHeight);
@@ -316,14 +378,19 @@ internal static class StackPopoverLayoutCalculator
         int rowsThatFit = Math.Max(
             1,
             (int)Math.Floor(
-                Math.Max(rowHeight, maximumHeight - chromeHeight) /
+                Math.Max(
+                    rowHeight,
+                    maximumHeight -
+                        chromeHeight -
+                        ItemsViewportFitGuard) /
                 rowHeight));
         int desiredRows = fixedVisibleRows is { } fixedRowCount
             ? fixedRowCount
             : Math.Min(8, count);
         int visibleRows = Math.Min(desiredRows, rowsThatFit);
-        double itemsWidth = Math.Max(1, width - HorizontalPadding);
-        double itemsHeight = visibleRows * rowHeight;
+        double itemsWidth = Math.Max(1, width - HorizontalChromeWidth);
+        double itemsHeight =
+            (visibleRows * rowHeight) + ItemsViewportFitGuard;
         double height = Math.Min(
             maximumHeight,
             chromeHeight + itemsHeight);

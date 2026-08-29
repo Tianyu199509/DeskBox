@@ -67,6 +67,7 @@ namespace DeskBox.ViewModels;
     nameof(WeekTempMinSize),
     nameof(WeekViewShortText),
     nameof(WeekViewText),
+    nameof(WidgetCornerRadius),
     nameof(WindLabel),
     nameof(WindText),
     nameof(WindValueText),

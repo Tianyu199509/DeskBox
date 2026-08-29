@@ -1,5 +1,7 @@
 {
     "Settings.Performance.Title": "Performance & resources",
+    "Display.VirtualAdapter.Warning.Title": "Virtual display detected",
+    "Display.VirtualAdapter.Warning.Body": "Your primary monitor is backed by a virtual display adapter. If widgets stack in a corner, freeze, or the app crashes, try switching to a physical display. Everything else keeps working.",
     "Settings.Performance.Description": "Balance visual quality and resource usage, and control cache cleanup after widgets are hidden",
     "Settings.Performance.Mode.Title": "Performance mode",
     "Settings.Performance.Mode.Description": "Choose a preset; changing a detailed setting below switches to Custom",
@@ -2536,5 +2538,7 @@
   "Widget.RunAsAdministrator.AlreadyRunning": "This app is already running without administrator privileges. Close it completely, then try again.",
   "Widget.RunAsAdministrator.NotElevated": "Windows could not create an administrator process. Check UAC settings and try again.",
   "Widget.CreateShortcut": "Create shortcut",
-  "Widget.MoreSystemOperations": "More system operations"
+  "Widget.MoreSystemOperations": "More system operations",
+  "Settings.ManagedPath.DesktopShortcut.Title": "Keep a storage shortcut on the desktop",
+  "Settings.ManagedPath.DesktopShortcut.Description": "Opens the current storage folder directly and remains usable after DeskBox is uninstalled"
 }

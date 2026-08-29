@@ -1,5 +1,7 @@
 {
     "Settings.Performance.Title": "प्रदर्शन और संसाधन",
+    "Display.VirtualAdapter.Warning.Title": "वर्चुअल डिस्प्ले का पता चला",
+    "Display.VirtualAdapter.Warning.Body": "आपका मुख्य मॉनिटर वर्चुअल ग्राफ़िक्स एडाप्टर से जुड़ा है। यदि विजेट कोने में ढेर हों, जम जाएँ या ऐप बंद हो जाए, तो भौतिक मॉनिटर पर स्विच करें। बाकी सब सामान्य चलता रहेगा।",
     "Settings.Performance.Description": "दृश्य गुणवत्ता और संसाधन उपयोग में संतुलन चुनें तथा विजेट छिपने के बाद कैश सफ़ाई नियंत्रित करें",
     "Settings.Performance.Mode.Title": "प्रदर्शन मोड",
     "Settings.Performance.Mode.Description": "कोई प्रीसेट चुनें। नीचे की विस्तृत सेटिंग बदलने पर कस्टम मोड सक्रिय होगा",
@@ -2536,5 +2538,7 @@
   "Widget.RunAsAdministrator.AlreadyRunning": "यह ऐप पहले से बिना व्यवस्थापक अधिकारों के चल रहा है। इसे पूरी तरह बंद करके फिर प्रयास करें।",
   "Widget.RunAsAdministrator.NotElevated": "Windows व्यवस्थापक प्रक्रिया नहीं बना सका। UAC सेटिंग जाँचकर फिर प्रयास करें।",
   "Widget.CreateShortcut": "शॉर्टकट बनाएँ",
-  "Widget.MoreSystemOperations": "अधिक सिस्टम संचालन"
+  "Widget.MoreSystemOperations": "अधिक सिस्टम संचालन",
+  "Settings.ManagedPath.DesktopShortcut.Title": "डेस्कटॉप पर स्टोरेज शॉर्टकट रखें",
+  "Settings.ManagedPath.DesktopShortcut.Description": "मौजूदा स्टोरेज फ़ोल्डर सीधे खोलता है और DeskBox अनइंस्टॉल होने के बाद भी काम करता है"
 }

@@ -136,6 +136,7 @@ public partial class App : Application
     public DeskBoxAttachmentHealthService AttachmentHealthService { get; private set; } = null!;
     public FileService FileService { get; private set; } = null!;
     public OrganizerService OrganizerService { get; private set; } = null!;
+    public ManagedStorageDesktopShortcutService ManagedStorageDesktopShortcutService { get; private set; } = null!;
     public IAppUpdateService AppUpdateService { get; private set; } = null!;
     public QuickCaptureService QuickCaptureService { get; private set; } = null!;
     public QuickCaptureClipboardService? QuickCaptureClipboardService { get; private set; }
@@ -255,6 +256,8 @@ public partial class App : Application
         DiagnosticsBundleService = Services.GetRequiredService<DeskBoxDiagnosticsBundleService>();
         FileService = Services.GetRequiredService<FileService>();
         OrganizerService = Services.GetRequiredService<OrganizerService>();
+        ManagedStorageDesktopShortcutService =
+            Services.GetRequiredService<ManagedStorageDesktopShortcutService>();
         AppUpdateService = Services.GetRequiredService<IAppUpdateService>();
         QuickCaptureService = Services.GetRequiredService<QuickCaptureService>();
         ResizeGuideOverlay = Services.GetRequiredService<ResizeGuideOverlayService>();
@@ -910,6 +913,14 @@ public partial class App : Application
 
             // Phase 1: Load settings (must complete first)
             await SettingsService.LoadAsync();
+            string requestedCornerPreference = SettingsService.Settings.WidgetCornerPreference;
+            string effectiveCornerPreference =
+                WindowsCompatibilityService.ResolveEffectiveWidgetCornerPreference(
+                    requestedCornerPreference);
+            Log(
+                $"[Appearance] OS build={WindowsCompatibilityService.OsBuild}, " +
+                $"requested corners={requestedCornerPreference}, " +
+                $"effective corners={effectiveCornerPreference}");
 
             // Sync widget move/resize snap settings.
             ResizeGuideOverlay.IsSnapEnabled = SettingsService.Settings.ResizeSnapEnabled;
@@ -1016,6 +1027,7 @@ public partial class App : Application
             }
 
             await EnsureInitialFileWidgetSetupAsync(isInteractiveLaunch: !IsStartupMode);
+            await ManagedStorageDesktopShortcutService.SyncAsync();
 
             DesktopAutoOrganizationWatcher = new DesktopAutoOrganizationWatcher(
                 SettingsService,
@@ -1034,6 +1046,11 @@ public partial class App : Application
             _displayAreaWatcher = new DisplayAreaWatcherService(UiDispatcherQueue);
             _displayAreaWatcher.DisplaysChanged += OnDisplaysChanged;
             _displayAreaWatcher.Start();
+            VirtualDisplayAdvisor.WarnIfPrimaryDisplayIsVirtual(
+                (titleKey, bodyKey) => ShowSettingsNotification(
+                    titleKey,
+                    bodyKey,
+                    NotificationIcon.Warning));
 
             // Configure taskbar Jump List with quick actions
             _ = JumpListService.ConfigureAsync(LocalizationService);
@@ -1169,6 +1186,11 @@ public partial class App : Application
             WidgetLayerService.InvalidateDesktopIconViewCache();
 
             RequestDisplayTopologyRestore("display-area-watcher");
+            VirtualDisplayAdvisor.WarnIfPrimaryDisplayIsVirtual(
+                (titleKey, bodyKey) => ShowSettingsNotification(
+                    titleKey,
+                    bodyKey,
+                    NotificationIcon.Warning));
         }
         catch (Exception ex)
         {

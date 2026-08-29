@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using DeskBox.Helpers;
+using DeskBox.Models;
 using DeskBox.Services;
 
 namespace DeskBox.Tests;
@@ -200,6 +201,69 @@ public sealed class FileServiceTests : IDisposable
         Assert.False(siblingIsUnderRoot);
     }
 
+    [Fact]
+    public async Task DirectoryJunction_IsResolvedForTraversalAndFolderMetadata()
+    {
+        string target = Directory.CreateDirectory(
+            Path.Combine(_tempRoot, "ditto", "current-version")).FullName;
+        string childPath = Path.Combine(target, "readme.txt");
+        await File.WriteAllTextAsync(childPath, "junction target");
+        string junction = Path.Combine(_tempRoot, "current");
+
+        Assert.True(
+            TryCreateDirectoryJunction(junction, target),
+            "The Windows test host must support creating a directory junction.");
+        try
+        {
+            Assert.True(FileService.IsFileSystemLink(junction));
+            Assert.True(FileService.TryResolveExistingPathForTraversal(
+                junction,
+                out string resolvedPath));
+            Assert.Equal(
+                Path.GetFullPath(target),
+                resolvedPath,
+                ignoreCase: true);
+
+            FolderPathSnapshot snapshot =
+                await FileService.CaptureDirectChildSnapshotAsync(junction);
+            Assert.Equal(FolderSnapshotStatus.SuccessWithItems, snapshot.Status);
+            Assert.Contains(
+                snapshot.Paths,
+                path => string.Equals(
+                    path,
+                    childPath,
+                    StringComparison.OrdinalIgnoreCase));
+
+            var service = new FileService();
+            List<WidgetItem> items = await service.EnumerateDirectoryAsync(
+                junction,
+                loadIcons: false,
+                loadFolderItemCounts: false);
+            WidgetItem item = Assert.Single(items);
+            Assert.Equal("readme", item.Name);
+            Assert.Equal(
+                childPath,
+                item.Path,
+                ignoreCase: true);
+            Assert.Equal(1, await service.CountVisibleChildrenAsync(junction));
+
+            string nestedTarget = Directory.CreateDirectory(
+                Path.Combine(target, "nested")).FullName;
+            string nestedLinkPath = Path.Combine(junction, "nested");
+            Assert.True(FileService.TryResolveExistingPathForTraversal(
+                nestedLinkPath,
+                out string resolvedNestedPath));
+            Assert.Equal(
+                nestedTarget,
+                resolvedNestedPath,
+                ignoreCase: true);
+        }
+        finally
+        {
+            TryDeleteDirectoryJunction(junction);
+        }
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -360,6 +424,41 @@ public sealed class FileServiceTests : IDisposable
         Assert.Equal(
             expected,
             FileService.CanUseAtomicMove(sourcePath, destinationPath));
+    }
+
+    private static bool TryCreateDirectoryJunction(string junction, string target)
+    {
+        try
+        {
+            using var process = Process.Start(new ProcessStartInfo
+            {
+                FileName = "cmd.exe",
+                Arguments = $"/d /c mklink /J \"{junction}\" \"{target}\"",
+                CreateNoWindow = true,
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true
+            });
+            process?.WaitForExit();
+            return process?.ExitCode == 0 && Directory.Exists(junction);
+        }
+        catch (Exception ex) when (
+            ex is IOException or UnauthorizedAccessException or
+            System.ComponentModel.Win32Exception)
+        {
+            return false;
+        }
+    }
+
+    private static void TryDeleteDirectoryJunction(string junction)
+    {
+        try
+        {
+            Directory.Delete(junction, recursive: false);
+        }
+        catch
+        {
+        }
     }
 
     [Fact]

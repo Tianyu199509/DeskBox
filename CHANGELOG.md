@@ -1,6 +1,6 @@
 ﻿# Changelog
 
-## 1.4.7 - Unreleased
+## 1.4.9 - Unreleased
 
 ### English
 
@@ -23,6 +23,53 @@
 - 新增命令：`server/ping`、`server/info`、`server/schema`、`settings/get`、`quickcapture/list`、`quickcapture/add`、`todo/list`、`todo/add`、`widgets/list`；完整说明见 `docs/architecture/command-api-v1.md`。
 - 管道名沿用既有的按数据根实例作用域，开发、预览与正式实例之间永远不会互访对方的命令 API。
 - 设置 → 常规中新增"命令 API"分节：可启用/停用 API、切换只读模式、放行破坏性命令，并内联显示审计日志路径与 CLI 用法。只读与破坏性开关立即生效；总开关在下次启动时生效。
+## 1.4.8 - 2026-08-29
+
+### English
+
+- Unified Direct releases on standard-named Full Native AOT installers that bundle the matching Windows App Runtime. In-place upgrades now remove only files owned by an older DeskBox payload, preventing obsolete private runtime DLLs from surviving across installer variants (issue #137).
+- Resolved mapped folder junctions and symbolic links to their physical traversal paths at runtime while preserving the configured logical path, avoiding Windows RedirectionGuard failures and following junction retargets during refresh and watcher reconnects.
+- Interactive file deletions now delegate confirmation to the Windows Shell, following each user's Explorer settings instead of a DeskBox dialog (issue #86). Permanent deletes use the native prompt, and Native AOT moves surface the system name-conflict dialog instead of silently overwriting. Background cleanup and rollback remain silent.
+- Folder watchers that hit a persistent access-denied subtree (broken ACLs on a nested folder) now back off on a long interval with a single warning in the log, instead of restarting and erroring every few seconds. Recovery after fixing permissions or reconnecting a drive still happens automatically.
+- A failing icon-only desktop.ini watcher no longer marks the whole folder as degraded; the listing and the main watcher keep working.
+- Widgets created while no usable display work area existed (for example with a cloud-gaming virtual adapter as the primary display) are re-placed automatically once a usable display appears, instead of permanently stacking at default coordinates.
+- DeskBox shows a one-time informational toast when the primary monitor is backed by a virtual display adapter; certain virtual GPU drivers are known to break WinUI 3 rendering and layout.
+- Stack popovers keep their requested column count at fractional DPI scales (125%, 150%, …): the viewport reserve now scales with the grid shape, because per-item physical-pixel rounding adds up to one DIP per column and a fixed one-DIP reserve still wrapped 3-column grids into 2+1 rows.
+- DeskBox maintains an independent `DeskBox Files.lnk` entry for the managed storage folder. Existing users keep the default-on behavior, the path follows a storage migration, and uninstall offers to create a collision-safe shortcut when managed files remain.
+- Windows 10 now forces square widget and capsule-media corners at render time while preserving the user's saved preference for a later Windows 11 upgrade. Windows 11 continues to apply the selected corner mode to the outer window and embedded media surfaces.
+- New installations and restored defaults now use the Standard weather skin, while the Rich skin remains available as an explicit choice.
+- Search keyboard navigation now keeps the selected row and highlight synchronized after arrow-key movement and Ctrl+Tab tab cycling. Search tabs are text-only, content-sized, and use a taller, better-spaced selection indicator.
+
+### 中文
+
+- 直发版统一采用标准文件名的 Full Native AOT 安装包，并内置匹配架构的 Windows App Runtime。覆盖升级只清理由旧版 DeskBox 载荷拥有、且新版不再包含的文件，避免不同安装包形态切换后残留旧的专用运行时 DLL（issue #137）。
+- 文件夹映射在运行时会将目录联接和符号链接解析到物理访问路径，同时保留用户配置的逻辑路径，避免 Windows RedirectionGuard 拒绝访问，并在刷新或监视器重连时跟随联接目标变化。
+- 交互文件删除的确认交由 Windows Shell 原生对话框承担（issue #86），并跟随用户的资源管理器设置；永久删除使用系统提示，Native AOT 移动遇到同名冲突时显示系统处理界面而不再静默覆盖。后台清理和回滚仍保持静默。
+- 文件夹监视器命中持久性拒绝访问的子目录（嵌套文件夹 ACL 损坏）时，按较长间隔退避并只记录一次警告，不再每几秒重启报错。修复权限或重新连接磁盘后仍会自动恢复。
+- 仅用于刷新图标的 desktop.ini 监视器失败不再把整个文件夹标记为降级；列表和主监视器照常工作。
+- 在没有可用显示器工作区时创建的格子（例如云游戏虚拟显卡作为主显示器），会在可用显示器出现后自动重新放置，不再永久堆叠在默认坐标。
+- 当主显示器由虚拟显卡提供时，DeskBox 会给出一次性信息提示；已知部分虚拟 GPU 驱动会破坏 WinUI 3 的渲染与布局。
+- 分数缩放（125%、150% 等）下叠放弹窗保持请求的列数：视口余量改为随网格形状伸缩——每列的逐项物理像素取整最多累积 1 DIP，固定的 1 DIP 余量仍会把 3 列网格挤成 2+1 换行。
+- DeskBox 会维护一个独立的 `DeskBox Files.lnk` 快捷方式，指向当前收纳目录；老用户默认启用，收纳路径迁移后会跟随更新，卸载时发现仍有收纳文件则询问是否创建不会覆盖其他文件的快捷方式。
+- Windows 10 在实际渲染时强制使用直角外框和胶囊媒体内图，同时保留用户保存的圆角偏好，之后升级到 Windows 11 可继续使用；Windows 11 会按所选圆角设置应用到窗口和媒体内图。
+- 新安装和恢复默认设置时，天气默认使用简洁的标准样式，丰富样式仍可手动选择。
+- 搜索上下键移动和 Ctrl+Tab 切换 Tab 后，选中文件与高亮保持同步；搜索 Tab 只保留文字，宽度按内容适配，指示条更高且与文字留有更舒适的间距。
+
+## 1.4.7 - 2026-08-29
+
+### English
+
+- Moved extended Windows Shell context menus into an isolated helper process, so a faulty third-party Shell extension can no longer terminate the DeskBox process.
+- Fixed 3x3 stack popovers wrapping five items as 2+2+1 at fractional DPI scales; the layout now reserves a physical-pixel-safe viewport and pins the requested row/column geometry explicitly.
+- Kept hidden desktop-layer widgets hidden during Explorer drag and activation transitions, while preserving the expected peer order for expanded capsules.
+- Restored Native AOT binding metadata for Glance calendar day decorations.
+
+### 中文
+
+- 将“更多系统操作”菜单移入独立辅助进程，第三方 Shell 扩展异常时不再连带结束 DeskBox 主进程。
+- 修复 3x3 叠放弹窗在部分 2K、高 DPI 电脑上将五个项目错误排成 2+2+1 的问题；布局会预留覆盖物理像素舍入的视口空间，并明确固定行列尺寸。
+- 修复在资源管理器桌面拖拽与激活状态切换期间，隐藏的桌面层格子偶发重新显示的问题，同时保持展开胶囊之间的正确层级。
+- 补齐时光日历日期装饰数据的 Native AOT 绑定元数据。
 
 ## 1.4.6 - 2026-08-28
 

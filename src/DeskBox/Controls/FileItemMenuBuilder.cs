@@ -25,7 +25,7 @@ public sealed record FileItemMenuActions(
     Func<WidgetItem, bool> CanRemoveFromStack,
     Action<WidgetItem> RemoveFromStack,
     Action ClearSelection,
-    Action<WidgetItem>? ShowSystemContextMenu = null,
+    Func<WidgetItem, Task>? ShowSystemContextMenuAsync = null,
     Func<WidgetItem, bool>? CanRunAsAdministrator = null,
     Func<WidgetItem, Task>? RunAsAdministratorAsync = null);
 
@@ -120,15 +120,15 @@ public static class FileItemMenuBuilder
         };
         flyout.Items.Add(properties);
 
-        if (actions.ShowSystemContextMenu is not null)
+        if (actions.ShowSystemContextMenuAsync is not null)
         {
             MenuFlyoutItem moreSystemOperations = actions.CreateMenuItem(
                 "Widget.MoreSystemOperations",
                 "\uE712");
-            moreSystemOperations.Click += (_, _) =>
+            moreSystemOperations.Click += async (_, _) =>
             {
                 flyout.Hide();
-                actions.ShowSystemContextMenu(item);
+                await actions.ShowSystemContextMenuAsync(item);
             };
             flyout.Items.Add(moreSystemOperations);
         }

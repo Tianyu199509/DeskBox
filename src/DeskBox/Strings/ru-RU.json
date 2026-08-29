@@ -1,5 +1,7 @@
 {
     "Settings.Performance.Title": "Производительность и ресурсы",
+    "Display.VirtualAdapter.Warning.Title": "Обнаружен виртуальный дисплей",
+    "Display.VirtualAdapter.Warning.Body": "Ваш основной монитор работает через виртуальный видеоадаптер. Если виджеты скапливаются в углу, зависают или приложение падает — переключитесь на физический монитор. Всё остальное работает как обычно.",
     "Settings.Performance.Description": "Настройте баланс качества изображения и потребления ресурсов, а также очистку кэша после скрытия виджетов",
     "Settings.Performance.Mode.Title": "Режим производительности",
     "Settings.Performance.Mode.Description": "Выберите предустановку. Изменение подробных параметров включает пользовательский режим",
@@ -2536,5 +2538,7 @@
   "Widget.RunAsAdministrator.AlreadyRunning": "Это приложение уже запущено без прав администратора. Полностью закройте его и повторите попытку.",
   "Widget.RunAsAdministrator.NotElevated": "Windows не удалось создать процесс с правами администратора. Проверьте параметры UAC и повторите попытку.",
   "Widget.CreateShortcut": "Создать ярлык",
-  "Widget.MoreSystemOperations": "Дополнительные системные операции"
+  "Widget.MoreSystemOperations": "Дополнительные системные операции",
+  "Settings.ManagedPath.DesktopShortcut.Title": "Сохранять ярлык хранилища на рабочем столе",
+  "Settings.ManagedPath.DesktopShortcut.Description": "Открывает текущую папку хранилища напрямую и продолжает работать после удаления DeskBox"
 }

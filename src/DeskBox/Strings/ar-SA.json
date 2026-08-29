@@ -1,5 +1,7 @@
 {
     "Settings.Performance.Title": "الأداء والموارد",
+    "Display.VirtualAdapter.Warning.Title": "تم اكتشاف شاشة افتراضية",
+    "Display.VirtualAdapter.Warning.Body": "شاشتك الأساسية تعمل عبر محرك رسوميات افتراضي. إذا تكدست الأدوات في زاوية، أو توقفت عن الاستجابة، أو تعطل التطبيق، فجرّب التبديل إلى شاشة فعلية. كل شيء آخر يعمل بشكل طبيعي.",
     "Settings.Performance.Description": "وازن بين الجودة المرئية واستخدام الموارد وتحكم في تنظيف ذاكرة التخزين المؤقت بعد إخفاء الأدوات",
     "Settings.Performance.Mode.Title": "وضع الأداء",
     "Settings.Performance.Mode.Description": "اختر إعدادًا مسبقًا. يؤدي تغيير إعداد تفصيلي إلى التبديل إلى الوضع المخصص",
@@ -2536,5 +2538,7 @@
   "Widget.RunAsAdministrator.AlreadyRunning": "هذا التطبيق قيد التشغيل بالفعل دون صلاحيات المسؤول. أغلقه بالكامل ثم حاول مرة أخرى.",
   "Widget.RunAsAdministrator.NotElevated": "تعذر على Windows إنشاء عملية بصلاحيات المسؤول. تحقق من إعدادات UAC وحاول مرة أخرى.",
   "Widget.CreateShortcut": "إنشاء اختصار",
-  "Widget.MoreSystemOperations": "المزيد من عمليات النظام"
+  "Widget.MoreSystemOperations": "المزيد من عمليات النظام",
+  "Settings.ManagedPath.DesktopShortcut.Title": "الاحتفاظ باختصار التخزين على سطح المكتب",
+  "Settings.ManagedPath.DesktopShortcut.Description": "يفتح مجلد التخزين الحالي مباشرة ويظل قابلاً للاستخدام بعد إزالة DeskBox"
 }

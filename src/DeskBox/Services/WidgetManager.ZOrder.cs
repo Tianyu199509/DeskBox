@@ -26,6 +26,9 @@ public sealed partial class WidgetManager
     private DateTime _suppressTrayLayerRestoreUntilUtc = DateTime.MinValue;
     private bool _hasDeskBoxForegroundSinceRaise;
     private IntPtr _foregroundAtRaiseTime;
+    private bool _lastRaiseOriginatedFromTrayIcon;
+    private DateTime _lastQuickRevealDismissUtc = DateTime.MinValue;
+    private bool _lastQuickRevealDismissTaskbarOrigin;
     private long _idlePeerOrderGeneration;
     private WidgetTemporaryRaiseLease _temporaryRaiseLease;
 
@@ -47,15 +50,6 @@ public sealed partial class WidgetManager
     {
         if (windowHandle == IntPtr.Zero || !Win32Helper.IsWindow(windowHandle))
         {
-            return 0;
-        }
-
-        if (WidgetLayerService.UsesDesktopPinnedMode())
-        {
-            WidgetLayerService.MoveToDesktopBottom(windowHandle);
-            App.LogVerbose(
-                $"[ZOrder] Expanded lease skipped fixed-layer reason={reason} " +
-                $"owner=0x{windowHandle.ToInt64():X}");
             return 0;
         }
 
@@ -542,9 +536,22 @@ public sealed partial class WidgetManager
 
         if (IsTaskbarWindow(foreground))
         {
+            if (QuickRevealTrayRaisePolicy.KeepsRaisedStateOnTaskbarForeground(
+                    WidgetLayerService.UsesQuickRevealMode(),
+                    _lastRaiseOriginatedFromTrayIcon))
+            {
+                App.LogVerbose(
+                    $"[TrayBatch] RaisedState kept reason={reason} " +
+                    "foreground=taskbar raiseSource=tray-icon");
+                return;
+            }
+
             if (WidgetLayerService.UsesQuickRevealMode())
             {
-                QueueQuickRevealDismiss($"{reason}-taskbar", outsideInteraction: true);
+                QueueQuickRevealDismiss(
+                    $"{reason}-taskbar",
+                    outsideInteraction: true,
+                    taskbarOrigin: true);
                 return;
             }
 
@@ -607,13 +614,18 @@ public sealed partial class WidgetManager
         RestoreRaisedWidgetsToDesktopLayer();
     }
 
-    private void QueueQuickRevealDismiss(string reason, bool outsideInteraction)
+    private void QueueQuickRevealDismiss(
+        string reason,
+        bool outsideInteraction,
+        bool taskbarOrigin = false)
     {
         if (_quickRevealDismissQueued || !HasVisibleWidgets)
         {
             return;
         }
 
+        _lastQuickRevealDismissUtc = DateTime.UtcNow;
+        _lastQuickRevealDismissTaskbarOrigin = taskbarOrigin;
         _quickRevealDismissQueued = true;
         if (outsideInteraction)
         {
@@ -749,15 +761,17 @@ public sealed partial class WidgetManager
         {
             // Check cursor position at the moment of pressing.
             Win32Helper.POINT? cursor = TryGetCursorPosition();
+            bool pressOverTaskbar = IsPointerOverTaskbar(cursor);
             if (!IsPointerOverDeskBoxWindow(cursor) &&
-                (!IsPointerOverTaskbar(cursor) || WidgetLayerService.UsesQuickRevealMode()))
+                (!pressOverTaskbar || WidgetLayerService.UsesQuickRevealMode()))
             {
                 if (WidgetLayerService.UsesQuickRevealMode())
                 {
                     _lastMouseButtonsDown = isDown;
                     QueueQuickRevealDismiss(
                         "mouse-sampler-outside-click",
-                        outsideInteraction: true);
+                        outsideInteraction: true,
+                        taskbarOrigin: pressOverTaskbar);
                     return;
                 }
 

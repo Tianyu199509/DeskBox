@@ -9,6 +9,7 @@ public partial class WidgetViewModel
     private readonly SemaphoreSlim _folderNavigationGate = new(1, 1);
     private CancellationTokenSource? _folderNavigationCancellation;
     private string? _currentFolderPath;
+    private string? _mappedFolderTraversalPath;
 
     public string? CurrentFolderPath => _currentFolderPath ?? MappedFolderPath;
 
@@ -21,7 +22,9 @@ public partial class WidgetViewModel
             StringComparison.Ordinal);
 
     public bool IsAtMappedRoot =>
-        PathsEqual(CurrentFolderPath, MappedFolderPath);
+        PathsEqual(
+            CurrentFolderPath,
+            _mappedFolderTraversalPath ?? MappedFolderPath);
 
     public bool CanNavigateUp =>
         IsEmbeddedFolderNavigationEnabled && !IsAtMappedRoot;
@@ -31,8 +34,9 @@ public partial class WidgetViewModel
             ? Visibility.Visible
             : Visibility.Collapsed;
 
-    public string CurrentFolderDisplayName =>
-        GetFolderDisplayName(CurrentFolderPath);
+    public string CurrentFolderDisplayName => IsAtMappedRoot
+        ? GetFolderDisplayName(MappedFolderPath)
+        : GetFolderDisplayName(CurrentFolderPath);
 
     public string CurrentFolderRelativePath
     {
@@ -46,12 +50,13 @@ public partial class WidgetViewModel
 
             try
             {
+                string rootPath = _mappedFolderTraversalPath ?? MappedFolderPath;
                 string relative = Path.GetRelativePath(
-                    MappedFolderPath,
+                    rootPath,
                     CurrentFolderPath);
                 if (relative == ".")
                 {
-                    return CurrentFolderDisplayName;
+                    return GetFolderDisplayName(MappedFolderPath);
                 }
 
                 return string.Join(
@@ -89,7 +94,7 @@ public partial class WidgetViewModel
             return Task.FromResult(false);
         }
 
-        string rootPath = Path.GetFullPath(MappedFolderPath);
+        string rootPath = GetMappedFolderTraversalPath();
         DirectoryInfo? parent = Directory.GetParent(
             Path.GetFullPath(CurrentFolderPath));
         if (parent is null ||
@@ -139,12 +144,29 @@ public partial class WidgetViewModel
             return false;
         }
 
+        string requestedPath;
         string rootPath;
         string targetPath;
+        bool mappedRootRequested;
         try
         {
-            rootPath = Path.GetFullPath(MappedFolderPath);
-            targetPath = Path.GetFullPath(folderPath);
+            requestedPath = Path.GetFullPath(folderPath);
+            mappedRootRequested = PathsEqual(
+                requestedPath,
+                MappedFolderPath);
+            rootPath = mappedRootRequested
+                ? ResolveMappedFolderTraversalPath()
+                : GetMappedFolderTraversalPath();
+            if (mappedRootRequested)
+            {
+                targetPath = rootPath;
+            }
+            else if (!FileService.TryResolveExistingPathForTraversal(
+                         requestedPath,
+                         out targetPath))
+            {
+                return false;
+            }
         }
         catch
         {
@@ -163,6 +185,12 @@ public partial class WidgetViewModel
 
         if (PathsEqual(CurrentFolderPath, targetPath))
         {
+            if (PathsEqual(requestedPath, MappedFolderPath))
+            {
+                _mappedFolderTraversalPath = rootPath;
+                UpdateFolderNavigationPresentation();
+            }
+
             return true;
         }
 
@@ -175,11 +203,20 @@ public partial class WidgetViewModel
 
         bool gateEntered = false;
         string previousPath = CurrentFolderPath ?? rootPath;
+        string? previousMappedTraversalPath = _mappedFolderTraversalPath;
         try
         {
             await _folderNavigationGate.WaitAsync(cancellation.Token);
             gateEntered = true;
             cancellation.Token.ThrowIfCancellationRequested();
+
+            if (mappedRootRequested)
+            {
+                // ConfigureFolderWatchersAsync will pass the logical path to
+                // FolderWatcherService, allowing a future reconnect to follow
+                // a newly selected version of the junction.
+                _mappedFolderTraversalPath = rootPath;
+            }
 
             await ConfigureFolderWatchersAsync(
                 targetPath,
@@ -190,11 +227,17 @@ public partial class WidgetViewModel
                 beforeItemsReplaced: () =>
                 {
                     beforeItemsReplaced?.Invoke();
+                    if (PathsEqual(requestedPath, MappedFolderPath))
+                    {
+                        _mappedFolderTraversalPath = rootPath;
+                    }
+
                     SetCurrentFolderPath(targetPath);
                 },
                 allowFolderPathTransition: true);
             if (!loaded)
             {
+                _mappedFolderTraversalPath = previousMappedTraversalPath;
                 await ConfigureFolderWatchersAsync(previousPath);
                 return false;
             }
@@ -207,6 +250,7 @@ public partial class WidgetViewModel
             if (!_isDisposed &&
                 ReferenceEquals(_folderNavigationCancellation, cancellation))
             {
+                _mappedFolderTraversalPath = previousMappedTraversalPath;
                 SetCurrentFolderPath(previousPath);
                 try
                 {
@@ -224,6 +268,7 @@ public partial class WidgetViewModel
             App.Log(
                 $"[FolderNavigation] Failed widget={Config.Id} " +
                 $"target='{targetPath}': {ex}");
+            _mappedFolderTraversalPath = previousMappedTraversalPath;
             SetCurrentFolderPath(previousPath);
             try
             {
@@ -257,7 +302,28 @@ public partial class WidgetViewModel
             return string.Empty;
         }
 
-        string rootPath = Path.GetFullPath(MappedFolderPath);
+        bool wasAtMappedRoot = PathsEqual(
+            _currentFolderPath,
+            _mappedFolderTraversalPath ?? MappedFolderPath);
+        string rootPath;
+        if (TryResolveMappedFolderTraversalPath(out string resolvedRootPath))
+        {
+            rootPath = resolvedRootPath;
+            _mappedFolderTraversalPath = rootPath;
+        }
+        else
+        {
+            // Keep a previously resolved target during a transient provider
+            // failure. Falling back to the logical junction here would make
+            // the subsequent watcher/read attempt hit RedirectionGuard again.
+            rootPath = _mappedFolderTraversalPath ?? Path.GetFullPath(MappedFolderPath);
+        }
+
+        if (wasAtMappedRoot)
+        {
+            return rootPath;
+        }
+
         if (!string.IsNullOrWhiteSpace(_currentFolderPath) &&
             Directory.Exists(_currentFolderPath) &&
             FileService.TryIsPathUnderDirectoryResolved(
@@ -270,6 +336,85 @@ public partial class WidgetViewModel
         }
 
         return rootPath;
+    }
+
+    private string ResolveMappedFolderTraversalPath()
+    {
+        if (string.IsNullOrWhiteSpace(MappedFolderPath))
+        {
+            return string.Empty;
+        }
+
+        string logicalPath = Path.GetFullPath(MappedFolderPath);
+        return TryResolveMappedFolderTraversalPath(out string traversalPath)
+            ? traversalPath
+            : logicalPath;
+    }
+
+    private bool TryResolveMappedFolderTraversalPath(
+        out string traversalPath)
+    {
+        traversalPath = string.Empty;
+        if (string.IsNullOrWhiteSpace(MappedFolderPath))
+        {
+            return false;
+        }
+
+        try
+        {
+            return FileService.TryResolveExistingPathForTraversal(
+                Path.GetFullPath(MappedFolderPath),
+                out traversalPath);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private string GetMappedFolderTraversalPath()
+    {
+        if (!string.IsNullOrWhiteSpace(_mappedFolderTraversalPath))
+        {
+            return _mappedFolderTraversalPath;
+        }
+
+        _mappedFolderTraversalPath = ResolveMappedFolderTraversalPath();
+        return _mappedFolderTraversalPath;
+    }
+
+    private async Task<string?> RefreshMappedRootTraversalPathAsync(
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(CurrentFolderPath) || !IsAtMappedRoot)
+        {
+            return CurrentFolderPath;
+        }
+
+        if (!TryResolveMappedFolderTraversalPath(out string refreshedRoot))
+        {
+            // A transient ACL/offline failure must not replace a still usable
+            // physical target with the logical junction path and reintroduce
+            // the guarded traversal on the next refresh.
+            App.LogVerbose(
+                $"[FolderNavigation] Mapped root could not be resolved; retaining '{CurrentFolderPath}'");
+            return CurrentFolderPath;
+        }
+
+        _mappedFolderTraversalPath = refreshedRoot;
+        if (!PathsEqual(CurrentFolderPath, refreshedRoot))
+        {
+            SetCurrentFolderPath(refreshedRoot);
+            await ConfigureFolderWatchersAsync(
+                refreshedRoot,
+                cancellationToken);
+        }
+        else
+        {
+            UpdateFolderNavigationPresentation();
+        }
+
+        return CurrentFolderPath;
     }
 
     private void SetCurrentFolderPath(string? folderPath)

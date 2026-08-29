@@ -153,6 +153,7 @@ public sealed partial class WidgetManager
             Height = Math.Max(_settingsService.Settings.DefaultWidgetHeight, 420)
         };
 
+        MarkNeedsInitialPlacementIfDisplayUnusable(config);
         _settingsService.Settings.Widgets.Add(config);
         await _settingsService.SaveAsync();
         await SeedTodoGuideAsync(config);
@@ -398,6 +399,7 @@ public sealed partial class WidgetManager
         };
         ApplyDefaultFeatureWidgetChromeMode(config, kind);
 
+        MarkNeedsInitialPlacementIfDisplayUnusable(config);
         _settingsService.Settings.Widgets.Add(config);
         await _settingsService.SaveAsync();
 
@@ -466,6 +468,7 @@ public sealed partial class WidgetManager
             : await GlanceWidgetStore.ForWidget(sourceConfig.Id).LoadAsync();
         await GlanceWidgetStore.ForWidget(config.Id).SaveAsync(data);
 
+        MarkNeedsInitialPlacementIfDisplayUnusable(config);
         _settingsService.Settings.Widgets.Add(config);
         await _settingsService.SaveAsync();
 

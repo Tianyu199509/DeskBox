@@ -138,6 +138,7 @@ namespace DeskBox.ViewModels;
     nameof(IsWindows10VisualCompatibilityMode),
     nameof(LayoutDensityScale),
     nameof(LayoutDensityValueText),
+    nameof(ManagedStorageDesktopShortcutEnabled),
     nameof(ManagedStorageRootPath),
     nameof(MaterialIntensityVisibility),
     nameof(MicrosoftStoreLink),

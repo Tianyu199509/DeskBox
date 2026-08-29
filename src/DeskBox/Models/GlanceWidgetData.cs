@@ -183,7 +183,10 @@ public sealed record GlanceCalendarDay(
     public bool HasSecondaryText => HasFestival || HasTraditionalText;
 }
 
-public sealed record GlanceCalendarDayDecoration(
+// Bound from the calendar day-item template via {Binding Tag.*}; Native AOT
+// resolves those bindings through this generated provider, reflection cannot.
+[WinRT.GeneratedBindableCustomProperty]
+public sealed partial record GlanceCalendarDayDecoration(
     string DayText,
     string SecondaryText,
     bool HasSecondaryText,

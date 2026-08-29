@@ -55,12 +55,12 @@ public sealed class AotStage4D1BContractTests
 
         IReadOnlyDictionary<string, int> usages = ReadLocalizedXamlUsages();
         Assert.Equal(5, usages.Count);
-        Assert.Equal(162, usages["toolkit:SettingsCard|HeaderKey"]);
-        Assert.Equal(133, usages["toolkit:SettingsCard|DescriptionKey"]);
+        Assert.Equal(163, usages["toolkit:SettingsCard|HeaderKey"]);
+        Assert.Equal(134, usages["toolkit:SettingsCard|DescriptionKey"]);
         Assert.Equal(20, usages["toolkit:SettingsExpander|HeaderKey"]);
         Assert.Equal(7, usages["toolkit:SettingsExpander|DescriptionKey"]);
         Assert.Equal(2, usages["TextBox|HeaderKey"]);
-        Assert.Equal(324, usages.Values.Sum());
+        Assert.Equal(326, usages.Values.Sum());
     }
 
     [Fact]
