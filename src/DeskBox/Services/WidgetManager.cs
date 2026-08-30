@@ -2090,6 +2090,15 @@ public sealed partial class WidgetManager
     }
 
     /// <summary>
+    /// Command API facade: enables a feature widget's session-level switch.
+    /// Some Create* flows (glance) do not enable the feature themselves, so
+    /// a show/create for a disabled feature would produce a window that
+    /// closes immediately. Safe to call repeatedly.
+    /// </summary>
+    public void EnsureFeatureWidgetEnabled(WidgetKind kind)
+        => SetFeatureWidgetEnabledState(kind, true);
+
+    /// <summary>
     /// Command API facade: snapshot of every configured widget for
     /// widgets/list. Callers must run on the UI thread (the settings
     /// collection is mutated there). Includes widgets whose windows are not

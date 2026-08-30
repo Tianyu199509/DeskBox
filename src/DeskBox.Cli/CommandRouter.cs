@@ -55,6 +55,16 @@ public static class CommandRouter
             ("organize", "apply") => BuildOrganizeApplyCall(tokens),
             ("organize", "undo") => BuildOrganizeUndoCall(tokens),
             ("settings", "set") => BuildSettingsSetCall(tokens),
+            ("music", "status") => ("music/status", BuildWidgetIdOnlyArgs(tokens), false),
+            ("music", "toggle") => BuildWidgetIdOnlyCall(tokens, "music/toggle"),
+            ("music", "next") => BuildWidgetIdOnlyCall(tokens, "music/next"),
+            ("music", "previous") => BuildWidgetIdOnlyCall(tokens, "music/previous"),
+            ("music", "volume") => BuildMusicVolumeCall(tokens),
+            ("weather", "get") => ("weather/get", BuildWeatherGetArgs(tokens), false),
+            ("weather", "set-city") => BuildWeatherSetCityCall(tokens),
+            ("glance", "get") => ("glance/get", BuildWidgetIdOnlyArgs(tokens), false),
+            ("glance", "next") => BuildWidgetIdOnlyCall(tokens, "glance/next"),
+            ("glance", "toggle-pause") => BuildWidgetIdOnlyCall(tokens, "glance/toggle-pause"),
             _ => throw new CliException(
                 CliExitCode.UsageError,
                 $"Unknown command '{verb}{(sub.Length > 0 ? " " + sub : string.Empty)}'. Run 'deskbox --help' for usage."),
@@ -787,6 +797,119 @@ public static class CommandRouter
         return ("settings/set", JsonDocument.Parse(buffer.ToArray()).RootElement.Clone(), false);
     }
 
+    private static JsonElement BuildWidgetIdOnlyArgs(IReadOnlyList<string> tokens)
+    {
+        string? widgetId = tokens.Skip(2).FirstOrDefault(token => !token.StartsWith('-'));
+        if (string.IsNullOrWhiteSpace(widgetId))
+        {
+            throw new CliException(
+                CliExitCode.UsageError,
+                "Usage: pass <widgetId>. Find ids with 'deskbox widgets list'.");
+        }
+
+        using MemoryStream buffer = new();
+        using Utf8JsonWriter writer = new(buffer);
+        writer.WriteStartObject();
+        writer.WriteString("widgetId", widgetId);
+        writer.WriteEndObject();
+        writer.Flush();
+        return JsonDocument.Parse(buffer.ToArray()).RootElement.Clone();
+    }
+
+    private static (string Method, JsonElement Arguments, bool DryRun) BuildWidgetIdOnlyCall(
+        IReadOnlyList<string> tokens, string method)
+    {
+        string? widgetId = tokens.Skip(2).FirstOrDefault(token => !token.StartsWith('-'));
+        if (string.IsNullOrWhiteSpace(widgetId))
+        {
+            throw new CliException(
+                CliExitCode.UsageError,
+                $"Usage: deskbox {method.Replace('/', ' ')} <widgetId>. Find ids with 'deskbox widgets list'.");
+        }
+
+        using MemoryStream buffer = new();
+        using Utf8JsonWriter writer = new(buffer);
+        writer.WriteStartObject();
+        writer.WriteString("widgetId", widgetId);
+        writer.WriteEndObject();
+        writer.Flush();
+        return (method, JsonDocument.Parse(buffer.ToArray()).RootElement.Clone(), false);
+    }
+
+    private static (string Method, JsonElement Arguments, bool DryRun) BuildMusicVolumeCall(
+        IReadOnlyList<string> tokens)
+    {
+        string? widgetId = null;
+        int? volume = null;
+        for (int i = 2; i < tokens.Count; i++)
+        {
+            if (tokens[i] == "--volume" && i + 1 < tokens.Count)
+            {
+                volume = int.TryParse(tokens[i + 1], out int parsed) ? parsed : null;
+                i++;
+            }
+            else if (!tokens[i].StartsWith('-') && widgetId is null)
+            {
+                widgetId = tokens[i];
+            }
+            else if (!tokens[i].StartsWith('-') && volume is null && int.TryParse(tokens[i], out int maybeVolume))
+            {
+                volume = maybeVolume;
+            }
+        }
+
+        if (string.IsNullOrWhiteSpace(widgetId) || !volume.HasValue || volume < 0 || volume > 100)
+        {
+            throw new CliException(
+                CliExitCode.UsageError,
+                "Usage: deskbox music volume <widgetId> <0-100>");
+        }
+
+        using MemoryStream buffer2 = new();
+        using Utf8JsonWriter writer2 = new(buffer2);
+        writer2.WriteStartObject();
+        writer2.WriteString("widgetId", widgetId);
+        writer2.WriteNumber("volume", volume.Value);
+        writer2.WriteEndObject();
+        writer2.Flush();
+        return ("music/volume", JsonDocument.Parse(buffer2.ToArray()).RootElement.Clone(), false);
+    }
+
+    private static JsonElement BuildWeatherGetArgs(IReadOnlyList<string> tokens)
+    {
+        bool force = tokens.Contains("--force", StringComparer.Ordinal);
+        using MemoryStream buffer = new();
+        using Utf8JsonWriter writer = new(buffer);
+        writer.WriteStartObject();
+        if (force)
+        {
+            writer.WriteBoolean("forceRefresh", true);
+        }
+
+        writer.WriteEndObject();
+        writer.Flush();
+        return JsonDocument.Parse(buffer.ToArray()).RootElement.Clone();
+    }
+
+    private static (string Method, JsonElement Arguments, bool DryRun) BuildWeatherSetCityCall(
+        IReadOnlyList<string> tokens)
+    {
+        string city = string.Join(' ', tokens.Skip(2).Where(token => !token.StartsWith('-')));
+        if (string.IsNullOrWhiteSpace(city))
+        {
+            throw new CliException(
+                CliExitCode.UsageError,
+                "Usage: deskbox weather set-city <city name>");
+        }
+
+        using MemoryStream buffer = new();
+        using Utf8JsonWriter writer = new(buffer);
+        writer.WriteStartObject();
+        writer.WriteString("city", city);
+        writer.WriteEndObject();
+        writer.Flush();
+        return ("weather/set-city", JsonDocument.Parse(buffer.ToArray()).RootElement.Clone(), false);
+    }
     private static (string Method, JsonElement Arguments, bool DryRun) BuildTodoAddCall(
         IReadOnlyList<string> tokens)
     {
@@ -936,6 +1059,24 @@ public static class HumanFormatter
             case "organize/undo":
                 stdout.WriteLine($"Undone ✓  (history {GetString(result.Data.GetValueOrDefault(), "historyId")})");
                 return;
+            case "music/status":
+                stdout.WriteLine($"Now: \"{GetString(result.Data.GetValueOrDefault(), "title")}\" — {GetString(result.Data.GetValueOrDefault(), "artist")}  [{GetString(result.Data.GetValueOrDefault(), "playbackState")}]  vol {GetInt(result.Data.GetValueOrDefault(), "systemVolumePercent")}%");
+                break;
+            case "music/toggle" or "music/next" or "music/previous" or "music/volume":
+                stdout.WriteLine($"{GetString(result.Data.GetValueOrDefault(), "action")} ✓  (widget {GetString(result.Data.GetValueOrDefault(), "widgetId")}, ok={GetBool(result.Data.GetValueOrDefault(), "ok")})");
+                break;
+            case "weather/get":
+                stdout.WriteLine($"{GetString(result.Data.GetValueOrDefault(), "locationName")}: {GetDouble(result.Data.GetValueOrDefault(), "temperature"):0.#}°  (stale={GetBool(result.Data.GetValueOrDefault(), "stale")}, fallback={GetBool(result.Data.GetValueOrDefault(), "fallback")})");
+                break;
+            case "weather/set-city":
+                stdout.WriteLine($"City set ✓  {GetString(result.Data.GetValueOrDefault(), "city")} ({GetDouble(result.Data.GetValueOrDefault(), "latitude"):0.##}, {GetDouble(result.Data.GetValueOrDefault(), "longitude"):0.##})");
+                break;
+            case "glance/get":
+                stdout.WriteLine($"Glance {GetString(result.Data.GetValueOrDefault(), "widgetId")}: {GetString(result.Data.GetValueOrDefault(), "layout")}/{GetString(result.Data.GetValueOrDefault(), "transition")}  {GetInt(result.Data.GetValueOrDefault(), "localImageCount")} local image(s), rotation {GetDouble(result.Data.GetValueOrDefault(), "rotationIntervalMinutes"):0.#}min, random={GetBool(result.Data.GetValueOrDefault(), "randomOrder")}");
+                break;
+            case "glance/next" or "glance/toggle-pause":
+                stdout.WriteLine($"{GetString(result.Data.GetValueOrDefault(), "action")} ✓  (widget {GetString(result.Data.GetValueOrDefault(), "widgetId")})");
+                break;
             case "settings/set":
                 stdout.WriteLine($"Set ✓  {GetString(result.Data.GetValueOrDefault(), "key")} = {GetString(result.Data.GetValueOrDefault(), "value")}");
                 return;
@@ -1080,4 +1221,11 @@ public static class HumanFormatter
         => element.ValueKind == JsonValueKind.Object
             && element.TryGetProperty(property, out JsonElement value)
             && value.ValueKind == JsonValueKind.True;
+
+    private static double GetDouble(JsonElement element, string property)
+        => element.ValueKind == JsonValueKind.Object
+            && element.TryGetProperty(property, out JsonElement value)
+            && value.ValueKind == JsonValueKind.Number
+            ? value.GetDouble()
+            : 0;
 }

@@ -33,6 +33,15 @@ public static class HelpPrinter
                                             Import files/folders into a file widget's mapped folder.
               settings get                  Allowlisted settings snapshot.
               settings set <key> <value>    Set theme (System|Light|Dark) or language.
+              music status <id>             Read SMTC snapshot (title, artist, state, volume).
+              music toggle|next|previous <id>
+                                            Toggle play/pause, previous, or next track.
+              music volume <id> <0-100>     Set the system volume (0-100).
+              weather get [--force]         Fetch weather for the configured location.
+              weather set-city <name>       Geocode and switch the weather location.
+              glance get <id>               Read a glance widget's settings.
+              glance next <id> | toggle-pause <id>
+                                            Advance the carousel or toggle auto-rotation pause.
               quickcapture list [--limit N] List quick capture notes.
               quickcapture add <body> [--title T] [--pin] [--dry-run]
                                             Add a quick capture note.

@@ -460,6 +460,59 @@ public static class ToolRegistry
         },
         new
         {
+            name = "music_control",
+            description = "Control the system media session through the music widget (SMTC): read status, toggle play/pause, next/previous track, set system volume.",
+            inputSchema = new
+            {
+                type = "object",
+                properties = new
+                {
+                    action = new { type = "string", description = "status|toggle|next|previous|volume" },
+                    widgetId = new { type = "string", description = "Music widget id (from list_widgets)." },
+                    volume = new { type = "integer", description = "System volume percent 0-100 (for action=volume)." },
+                },
+                required = new[] { "action", "widgetId" },
+            },
+        },
+        new
+        {
+            name = "get_weather",
+            description = "Fetch current weather for the configured location (MSN with Open-Meteo fallback).",
+            inputSchema = new
+            {
+                type = "object",
+                properties = new { forceRefresh = new { type = "boolean", description = "Bypass the 30-minute cache." } },
+                required = Array.Empty<string>(),
+            },
+        },
+        new
+        {
+            name = "set_weather_city",
+            description = "Geocode a city name and switch the weather location (all weather widgets refresh).",
+            inputSchema = new
+            {
+                type = "object",
+                properties = new { city = new { type = "string", description = "City name." } },
+                required = new[] { "city" },
+            },
+        },
+        new
+        {
+            name = "glance_control",
+            description = "Control a glance photo widget: read its settings, advance to the next image, or toggle auto-rotation pause.",
+            inputSchema = new
+            {
+                type = "object",
+                properties = new
+                {
+                    action = new { type = "string", description = "get|next|toggle-pause" },
+                    widgetId = new { type = "string", description = "Glance widget id (from list_widgets)." },
+                },
+                required = new[] { "action", "widgetId" },
+            },
+        },
+        new
+        {
             name = "get_settings",
             description = "Read an allowlisted snapshot of DeskBox settings.",
             inputSchema = new { type = "object", properties = new { }, required = Array.Empty<string>() },
@@ -514,6 +567,42 @@ public static class ToolRegistry
             }
             case "set_appearance":
                 return ("settings/set", arguments);
+            case "music_control":
+            {
+                string action = arguments.ValueKind == JsonValueKind.Object
+                    && arguments.TryGetProperty("action", out JsonElement musicAction)
+                    && musicAction.ValueKind == JsonValueKind.String
+                    ? musicAction.GetString() ?? string.Empty
+                    : string.Empty;
+                return action switch
+                {
+                    "status" => ("music/status", arguments),
+                    "toggle" => ("music/toggle", arguments),
+                    "next" => ("music/next", arguments),
+                    "previous" => ("music/previous", arguments),
+                    "volume" => ("music/volume", arguments),
+                    _ => (string.Empty, arguments),
+                };
+            }
+            case "get_weather":
+                return ("weather/get", arguments);
+            case "set_weather_city":
+                return ("weather/set-city", arguments);
+            case "glance_control":
+            {
+                string action = arguments.ValueKind == JsonValueKind.Object
+                    && arguments.TryGetProperty("action", out JsonElement glanceAction)
+                    && glanceAction.ValueKind == JsonValueKind.String
+                    ? glanceAction.GetString() ?? string.Empty
+                    : string.Empty;
+                return action switch
+                {
+                    "get" => ("glance/get", arguments),
+                    "next" => ("glance/next", arguments),
+                    "toggle-pause" => ("glance/toggle-pause", arguments),
+                    _ => (string.Empty, arguments),
+                };
+            }
             default:
                 return (string.Empty, arguments);
         }

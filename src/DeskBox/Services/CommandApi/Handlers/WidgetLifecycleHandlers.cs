@@ -125,6 +125,7 @@ public sealed class WidgetsCreateHandler : ICommandHandler
         }
         else if (Enum.TryParse(kind, ignoreCase: true, out WidgetKind widgetKind))
         {
+            widgetManager.EnsureFeatureWidgetEnabled(widgetKind);
             await widgetManager.CreateWidgetOfKindAsync(widgetKind).ConfigureAwait(true);
         }
         else
@@ -274,6 +275,7 @@ public sealed class WidgetsShowHandler : ICommandHandler
                     "Call widgets/list to inspect the widget.");
             }
 
+            widgetManager.EnsureFeatureWidgetEnabled(parsedKind);
             await widgetManager.CreateWidgetOfKindAsync(parsedKind).ConfigureAwait(true);
             shown = true;
         }
