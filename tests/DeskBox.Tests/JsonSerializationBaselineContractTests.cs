@@ -87,7 +87,9 @@ public sealed class JsonSerializationBaselineContractTests : IDisposable
             "src/DeskBox/App.AotTodoRecurrenceReminderSmoke.cs",
             "src/DeskBox/Services/AppUpdateService.cs",
             "src/DeskBox/Services/CommandApi/Handlers/FileWidgetHandlers.cs",
+            "src/DeskBox/Services/CommandApi/Handlers/GlanceHandlers.cs",
             "src/DeskBox/Services/CommandApi/Handlers/GroupHandlers.cs",
+            "src/DeskBox/Services/CommandApi/Handlers/MusicHandlers.cs",
             "src/DeskBox/Services/CommandApi/Handlers/QuickCaptureHandlers.cs",
             "src/DeskBox/Services/CommandApi/Handlers/QuickCaptureMutationHandlers.cs",
             "src/DeskBox/Services/CommandApi/Handlers/OrganizeHandlers.cs",
@@ -98,6 +100,7 @@ public sealed class JsonSerializationBaselineContractTests : IDisposable
             "src/DeskBox/Services/CommandApi/Handlers/SettingsSetHandler.cs",
             "src/DeskBox/Services/CommandApi/Handlers/TodoHandlers.cs",
             "src/DeskBox/Services/CommandApi/Handlers/TodoMutationHandlers.cs",
+            "src/DeskBox/Services/CommandApi/Handlers/WeatherHandlers.cs",
             "src/DeskBox/Services/CommandApi/Handlers/WidgetLifecycleHandlers.cs",
             "src/DeskBox/Services/CommandApi/Handlers/WidgetsListHandler.cs",
             "src/DeskBox/Services/CommandApi/PipeRpcServer.cs",
@@ -123,7 +126,7 @@ public sealed class JsonSerializationBaselineContractTests : IDisposable
             .Order(StringComparer.Ordinal)
             .ToArray();
 
-        Assert.Equal(41, actualContextOwners.Length);
+        Assert.Equal(44, actualContextOwners.Length);
         Assert.Equal(
             expectedContextOwners.Order(StringComparer.Ordinal).ToArray(),
             actualContextOwners);
