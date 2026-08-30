@@ -16,7 +16,7 @@ public sealed record GlanceInfoResult(
     string Layout,
     string Transition,
     int LocalImageCount,
-    int RotationIntervalMinutes,
+    double RotationIntervalMinutes,
     bool RandomOrder);
 
 [JsonSourceGenerationOptions(

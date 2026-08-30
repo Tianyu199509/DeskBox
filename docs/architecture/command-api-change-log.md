@@ -244,7 +244,20 @@ CLI、MCP 或原始 JSON-RPC 安全地查看并操作运行中的 DeskBox。
 MCP 新工具：`music_control`、`get_weather`、`glance_control`。
 **尚未写入 CommandRouter/McpServer/HelpPrinter**（被 R3.4 阻塞，避免半接线状态堆积）。
 
-## R3.4 当前阻塞：STJ 源生成器整体未运行（构建失败）
+## R3.4 【已解决】构建阻塞：STJ 源生成器整体未运行
+
+**最终根因**：`WeatherHandlers.cs` 新声明的 `WeatherJsonContext` 与
+`WeatherService.cs` 既有同名 partial 类冲突 → 生成器 hintName 重复
+（CS8785 warning 给出确切证据：`WeatherJsonContext.Boolean.g.cs` 必须唯一）→
+生成器放弃全部输出 → 160 个 CS0534 连锁。
+**修复**：改名 `WeatherCommandJsonContext`（一行）。此前"火绒拦截"假设不成立——
+实时防护提示为生成器异常路径的巧合；clean/删 obj/关编译服务等措施均非必需。
+**教训**：CS8785 warning 是源生成器崩溃的权威信号，应第一时间全量日志检索，
+而非先怀疑环境。
+
+---
+
+（以下为当时的诊断记录，保留备查）
 
 **现象**：全项目 160 个 CS0534（"X 不实现 JsonSerializerContext 抽象成员"），
 覆盖**所有** `JsonSerializerContext`——包括此前一直正常生成的既有上下文
@@ -256,9 +269,7 @@ MCP 新工具：`music_control`、`get_weather`、`glance_control`。
 - 无 SYSLIB 源生成器诊断输出；
 - XAML 生成器正常产出 .g.cs（37 个），**STJ 生成器零输出**。
 
-**结论（待验证）**：STJ 源生成器进程被外部因素终止/拦截——时间点与火绒
-（Huorong）行为监控拦截测试宿主进程同期，疑似同一拦截源作用于
-Roslyn IsolatedAnalyzer/源生成器进程；亦不排除生成器对某个新输入崩溃但诊断被吞。
+**当时推测**：疑似外部因素终止生成器进程（后被证伪，见上方最终根因）。
 
 **恢复指引（下次会话按序执行）**：
 1. 向火绒添加排除项：`F:\DeskBox\工作\`、`C:\Users\Administrator\.dotnet\`、

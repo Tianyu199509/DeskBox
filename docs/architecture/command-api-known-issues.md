@@ -6,7 +6,17 @@
 
 ---
 
-## P0-1（阻塞）STJ 源生成器整体未运行，主程序无法编译
+## P0-1（已解决 2026-08-30）STJ 源生成器整体未运行，主程序无法编译
+
+**根因（已确认并修复）**：新增 `WeatherHandlers.cs` 中声明的 JSON 上下文类名
+`WeatherJsonContext` 与 `WeatherService.cs` 里**既有的同名 partial 类冲突**。
+两个同名 partial 合并后，STJ 生成器为重复的 hintName
+（`WeatherJsonContext.Boolean.g.cs` 等）抛 ArgumentException（以 warning CS8785
+呈现），随后**放弃整个程序集的全部源生成输出**——160 个 CS0534 全部为连锁症状。
+与火绒无关（实时防护提示出现于生成器异常路径，属巧合）。
+**修复**：新文件中的类改名 `WeatherCommandJsonContext`，一行改名即恢复编译。
+**防御措施**：已在 change-log §9 维护指南中固化"新上下文类名必须全仓库唯一"
+检查项。
 
 **现象**
 - `dotnet build src/DeskBox -c Debug -p:Platform=x64` 报 **160 个 CS0534**：

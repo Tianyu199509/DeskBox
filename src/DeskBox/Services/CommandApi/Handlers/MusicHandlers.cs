@@ -160,13 +160,25 @@ public sealed class MusicTransportHandler : ICommandHandler
         string widgetId = CommandArguments.RequireWidgetId(arguments);
         MusicWidgetViewModel viewModel = MusicAccess.RequireViewModel(_resolver, widgetId);
 
-        bool ok = _action switch
+        // SMTC transport methods are void: a true result means the command
+        // was dispatched; whether the player honors it is reflected in
+        // music/status afterwards.
+        bool ok = true;
+        switch (_action)
         {
-            "toggle" => await viewModel.TogglePlayPauseAsync().ConfigureAwait(true),
-            "previous" => await viewModel.PreviousAsync().ConfigureAwait(true),
-            "next" => await viewModel.NextAsync().ConfigureAwait(true),
-            _ => false,
-        };
+            case "toggle":
+                await viewModel.TogglePlayPauseAsync().ConfigureAwait(true);
+                break;
+            case "previous":
+                await viewModel.PreviousAsync().ConfigureAwait(true);
+                break;
+            case "next":
+                await viewModel.NextAsync().ConfigureAwait(true);
+                break;
+            default:
+                ok = false;
+                break;
+        }
 
         MusicCommandResult result = new(widgetId, _action, ok);
         return JsonSerializer.SerializeToElement(result, MusicCommandJsonContext.Default.MusicCommandResult);

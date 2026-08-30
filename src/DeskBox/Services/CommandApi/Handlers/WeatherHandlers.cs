@@ -24,7 +24,7 @@ public sealed record WeatherGetResult(
     PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
 [JsonSerializable(typeof(WeatherGetResult), TypeInfoPropertyName = "WeatherGetResult")]
 [JsonSerializable(typeof(WeatherSetCityResult), TypeInfoPropertyName = "WeatherSetCityResult")]
-internal sealed partial class WeatherJsonContext : JsonSerializerContext
+internal sealed partial class WeatherCommandJsonContext : JsonSerializerContext
 {
 }
 
@@ -89,7 +89,7 @@ public sealed class WeatherGetHandler : ICommandHandler
             data.Current.WeatherCode.ToString(),
             data.IsStale,
             data.IsFallback);
-        return JsonSerializer.SerializeToElement(result, WeatherJsonContext.Default.WeatherGetResult);
+        return JsonSerializer.SerializeToElement(result, WeatherCommandJsonContext.Default.WeatherGetResult);
     }
 }
 
@@ -161,8 +161,8 @@ public sealed class WeatherSetCityHandler : ICommandHandler
             });
         }
 
-        await App.Current.SettingsService.SaveDebounced().ConfigureAwait(true);
+        App.Current.SettingsService.SaveDebounced();
         WeatherSetCityResult result = new(match.Name, match.Latitude, match.Longitude, true);
-        return JsonSerializer.SerializeToElement(result, WeatherJsonContext.Default.WeatherSetCityResult);
+        return JsonSerializer.SerializeToElement(result, WeatherCommandJsonContext.Default.WeatherSetCityResult);
     }
 }

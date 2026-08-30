@@ -4,6 +4,7 @@ using DeskBox.Services;
 using DeskBox.Services.CommandApi;
 using DeskBox.Services.CommandApi.Handlers;
 using DeskBox.ViewModels;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.UI.Dispatching;
 
 namespace DeskBox;
