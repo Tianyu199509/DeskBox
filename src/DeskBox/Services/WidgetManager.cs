@@ -2046,6 +2046,50 @@ public sealed partial class WidgetManager
     }
 
     /// <summary>
+    /// Command API facade: resolves a loaded music widget's view model.
+    /// Callers must run on the UI thread (playback state and volume are
+    /// UI-bound observable properties).
+    /// </summary>
+    public bool TryGetMusicWidgetViewModel(string widgetId, out MusicWidgetViewModel? viewModel)
+    {
+        ContentWidgetWindow? contentWindow = _contentWidgets.Values
+            .Distinct()
+            .FirstOrDefault(window =>
+                window.CurrentContent is MusicWidgetContentAdapter adapter &&
+                string.Equals(adapter.WidgetId, widgetId, StringComparison.Ordinal));
+        if (contentWindow?.CurrentContent is MusicWidgetContentAdapter musicAdapter)
+        {
+            viewModel = musicAdapter.ViewModel;
+            return true;
+        }
+
+        viewModel = null;
+        return false;
+    }
+
+    /// <summary>
+    /// Command API facade: resolves a loaded glance widget's view model.
+    /// Callers must run on the UI thread (current image index and pause
+    /// state are runtime-only, UI-bound).
+    /// </summary>
+    public bool TryGetGlanceWidgetViewModel(string widgetId, out GlanceWidgetViewModel? viewModel)
+    {
+        ContentWidgetWindow? contentWindow = _contentWidgets.Values
+            .Distinct()
+            .FirstOrDefault(window =>
+                window.CurrentContent is GlanceWidgetContentAdapter adapter &&
+                string.Equals(adapter.WidgetId, widgetId, StringComparison.Ordinal));
+        if (contentWindow?.CurrentContent is GlanceWidgetContentAdapter glanceAdapter)
+        {
+            viewModel = glanceAdapter.ViewModel;
+            return true;
+        }
+
+        viewModel = null;
+        return false;
+    }
+
+    /// <summary>
     /// Command API facade: snapshot of every configured widget for
     /// widgets/list. Callers must run on the UI thread (the settings
     /// collection is mutated there). Includes widgets whose windows are not

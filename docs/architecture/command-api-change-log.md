@@ -199,3 +199,79 @@ CLI、MCP 或原始 JSON-RPC 安全地查看并操作运行中的 DeskBox。
   `command-api-v1.md` 命令表与 CLI/MCP 表面 → CHANGELOG 双语条目。
 - 破坏性命令：注册时 `Destructive: true` 即自动纳入服务端门禁；CLI 侧需 `--yes`。
 - schema 测试：`deskbox schema` 的输出由注册表生成，禁止手改 golden。
+
+---
+
+# 第 3 轮开发记录：音乐 / 天气 / Glance（进行中 → 构建阻塞）
+
+## R3.1 侦察结论（3 个并行智能体，全部完成）
+
+- **音乐**：DeskBox 无自带播放器，经 SMTC 控制外部播放器。控制面在
+  `MusicWidgetViewModel`（`TogglePlayPauseAsync`:180 / `PreviousAsync`:201 /
+  `NextAsync`:212 / `SetSystemVolumeAsync(double 0-1)`:307，**无独立 Play/Pause 方法**）。
+  widgetId → `MusicWidgetContentAdapter.ViewModel`。状态读 Title/Artist/PlaybackState/IsPlaying。
+- **天气**：`WeatherService` 全无头（静态 HttpClient 6s 超时，MSN 主源 + Open-Meteo 回退，
+  缓存 `data/weather-cache.json`）；城市/坐标存全局 AppSettings
+  （WeatherCityName/Latitude/Longitude）；换城链路 =
+  CitySearchService.SearchAsync → WeatherSettingsPolicy.TrySetManualLocation(internal static)
+  → SaveDebounced → SettingsChanged 自动刷 UI。
+- **Glance**：`GlanceWidgetStore.ForWidget(id).LoadAsync()` 无头可读（Layout/Transition/
+  LocalImagePaths/RotationIntervalMinutes/RandomOrder，**无 CurrentIndex/IsPaused——纯运行时态**）；
+  Store.Changed 事件使无头写自动刷 UI；换图/暂停必须走 VM（UI 线程），
+  widgetId → `GlanceWidgetContentAdapter.ViewModel`。
+
+## R3.2 已完成的实施（代码已写入，编译被阻塞，见 R3.4）
+
+| 文件 | 内容 |
+|---|---|
+| `WidgetManager.cs` | +`TryGetMusicWidgetViewModel` / `TryGetGlanceWidgetViewModel` facade |
+| `Handlers/MusicHandlers.cs`（新） | `music/status`（SMTC 快照：曲名/艺术家/播放态/系统音量%）、`music/toggle|previous|next`（SMTC 播放控制）、`music/volume`（系统主音量 0-100，Core Audio 后端）。全 UI 线程经 ViewModel；ok 反映播放器确认结果 |
+| `Handlers/WeatherHandlers.cs`（新） | `weather/get`（无头，设置坐标强制/缓存取数，MSN+回退）、`weather/set-city`（地理编码 → TrySetManualLocation → SaveDebounced，UI 线程，格子自动刷新） |
+| `Handlers/GlanceHandlers.cs`（新） | `glance/get`（无头读 store：布局/过渡/本地图数/轮播设置）、`glance/next`、`glance/toggle-pause`（UI 线程 VM） |
+| `Protocol/CommandApiProtocol.cs` | +能力位 music.read/music.write/weather.read/glance.read/glance.write |
+| `App.CommandApi.cs` | +11 个 handler 注册（音乐 5、天气 2、Glance 3——weather 服务经 DI `Services.GetService<T>()`）+ 2 个 ViewModel 解析器 |
+
+设计取舍记录：
+- music/play、music/pause 未实现——VM 无独立方法，仅 `TogglePlayPauseAsync`（SMTC 语义）。
+- music/seek 未实现——`CommitSeekAsync` 有 `_isSeeking` 私有门槛，需先给 VM 加公开
+  `SeekToAsync`（记录为待办）。
+- weather/refresh 未实现独立命令——`weather/get` 的 `forceRefresh:true` 已覆盖强制取数。
+
+## R3.3 CLI / MCP 扩充（待接线）
+
+规划中的 CLI 子命令：`music status|toggle|next|previous|volume <id>`、
+`weather get [--force]`、`weather set-city <name>`、`glance get|next|toggle-pause <id>`；
+MCP 新工具：`music_control`、`get_weather`、`glance_control`。
+**尚未写入 CommandRouter/McpServer/HelpPrinter**（被 R3.4 阻塞，避免半接线状态堆积）。
+
+## R3.4 当前阻塞：STJ 源生成器整体未运行（构建失败）
+
+**现象**：全项目 160 个 CS0534（"X 不实现 JsonSerializerContext 抽象成员"），
+覆盖**所有** `JsonSerializerContext`——包括此前一直正常生成的既有上下文
+（AppUpdateJsonContext 等）。删除 obj/bin、`--no-incremental`、
+`dotnet build-server shutdown`、`-p:UseSharedCompilation=false` 均无效。
+
+**诊断已排除**：
+- 源代码无语法错误（160 个错误全部为 CS0534，无任何 CS1xxx/CS9xxx）；
+- 无 SYSLIB 源生成器诊断输出；
+- XAML 生成器正常产出 .g.cs（37 个），**STJ 生成器零输出**。
+
+**结论（待验证）**：STJ 源生成器进程被外部因素终止/拦截——时间点与火绒
+（Huorong）行为监控拦截测试宿主进程同期，疑似同一拦截源作用于
+Roslyn IsolatedAnalyzer/源生成器进程；亦不排除生成器对某个新输入崩溃但诊断被吞。
+
+**恢复指引（下次会话按序执行）**：
+1. 向火绒添加排除项：`F:\DeskBox\工作\`、`C:\Users\Administrator\.dotnet\`、
+   `%TEMP%`（或临时退出火绒）；
+2. `dotnet build-server shutdown` 后重建；
+3. 若仍失败：用 `dotnet build -bl:msbuild.binlog` + MSBuild Structured Log Viewer
+   查看生成器诊断；或临时将 `MusicHandlers.cs` 等 5 个新 handler 文件移出编译
+   （确认是否某个具体文件触发生成器崩溃）；
+4. 恢复后从 R3.3 的 CLI/MCP 接线继续，然后按 §7 矩阵补真机 e2e
+   （music 需要外部播放器在播；weather 需网络；glance 需先 widgets/create glance）。
+
+## R3.5 本轮验证状态
+
+- 主程序构建：**阻塞**（R3.4）
+- CLI 构建：通过（本轮未触及 CLI 新命令）
+- e2e：未开始（依赖 R3.4 恢复）

@@ -68,6 +68,11 @@ public static class CommandApiProtocol
         public const string SearchRead = "search.read";
         public const string OrganizeWrite = "organize.write";
         public const string SettingsWrite = "settings.write";
+        public const string MusicRead = "music.read";
+        public const string MusicWrite = "music.write";
+        public const string WeatherRead = "weather.read";
+        public const string GlanceRead = "glance.read";
+        public const string GlanceWrite = "glance.write";
     }
 
     /// <summary>Builds the full pipe name for the given instance scope.</summary>

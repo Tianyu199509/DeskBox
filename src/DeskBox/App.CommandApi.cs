@@ -139,12 +139,46 @@ public partial class App
             new OrganizeApplyHandler(ResolveOrganizationCoordinator),
             new OrganizeUndoHandler(ResolveOrganizationCoordinator),
             new SettingsSetHandler(() => ThemeService, () => LocalizationService),
+            new MusicStatusHandler(ResolveMusicViewModel),
+            MusicTransportHandler.Toggle(ResolveMusicViewModel),
+            MusicTransportHandler.Previous(ResolveMusicViewModel),
+            MusicTransportHandler.Next(ResolveMusicViewModel),
+            new MusicVolumeHandler(ResolveMusicViewModel),
+            new WeatherGetHandler(() => Services.GetService<WeatherService>()),
+            new WeatherSetCityHandler(
+                () => Services.GetService<WeatherService>(),
+                () => Services.GetService<CitySearchService>()),
+            new GlanceGetHandler(),
+            new GlanceNextHandler(ResolveGlanceViewModel),
+            new GlanceTogglePauseHandler(ResolveGlanceViewModel),
         ];
 
         registry = new CommandRegistry(handlers);
         return registry;
     }
 
+
+    private MusicWidgetViewModel? ResolveMusicViewModel(string widgetId)
+    {
+        if (WidgetManager is not null
+            && WidgetManager.TryGetMusicWidgetViewModel(widgetId, out MusicWidgetViewModel? viewModel))
+        {
+            return viewModel;
+        }
+
+        return null;
+    }
+
+    private GlanceWidgetViewModel? ResolveGlanceViewModel(string widgetId)
+    {
+        if (WidgetManager is not null
+            && WidgetManager.TryGetGlanceWidgetViewModel(widgetId, out GlanceWidgetViewModel? viewModel))
+        {
+            return viewModel;
+        }
+
+        return null;
+    }
     private DesktopOrganizationCoordinator? ResolveOrganizationCoordinator()
     {
         if (WidgetManager is null)
