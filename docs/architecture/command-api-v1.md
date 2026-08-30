@@ -123,6 +123,7 @@ Settings that control the gates (AppSettings):
 | `server/info` | `server.info` | no | any | Version, uptime, capabilities, policy. |
 | `server/schema` | `server.info` | no | any | Full machine-readable schema. |
 | `settings/get` | `settings.read` | no | any | Allowlisted settings snapshot. |
+| `settings/set` | `settings.write` | yes | ui-thread | Set an allowlisted setting: theme (System\|Light\|Dark) or language. |
 | `quickcapture/list` | `quickcapture.read` | no | any | Items (args: `limit` 1-200). |
 | `quickcapture/add` | `quickcapture.write` | yes | any | Add text note (args: `body`, `title?`, `pin?`). |
 | `quickcapture/pin` | `quickcapture.write` | yes | any | Pin/unpin one item (args: `itemId`, `pinned`). |
@@ -143,6 +144,22 @@ Settings that control the gates (AppSettings):
 | `widgets/rename` | `widgets.write` | yes | ui-thread | Rename widget (args: `widgetId`, `name`). |
 | `files/list` | `files.read` | no | ui-thread | Entries shown in one file widget (args: `widgetId`). |
 | `files/add` | `files.write` | yes | ui-thread | Import files/folders (args: `widgetId`, `paths[]`, `move?`). |
+| `search/query` | `search.read` | no | ui-thread | Search files (via Everything) and DeskBox content (args: `query`, `limit?`). |
+| `groups/merge` | `widgets.write` | yes | any | Merge one widget into another, forming (or joining) a widget group. |
+| `groups/dissolve` | `widgets.write` | yes | any | Dissolve a widget group; members become standalone. |
+| `organize/plan` | `organize.write` | no | any | Scan the desktop and return a preview plan; nothing moves. |
+| `organize/apply` | `organize.write` | yes | ui-thread | Execute a cached plan (files move into managed folders; undoable). |
+| `organize/undo` | `organize.write` | yes | ui-thread | Undo one completed organization run by `historyId`. |
+| `music/status` | `music.read` | no | ui-thread | Music widget's SMTC snapshot (title, artist, state, volume). |
+| `music/toggle` | `music.write` | yes | ui-thread | Toggle play/pause on the current SMTC media session. |
+| `music/next` | `music.write` | yes | ui-thread | Next track on the current SMTC media session. |
+| `music/previous` | `music.write` | yes | ui-thread | Previous track on the current SMTC media session. |
+| `music/volume` | `music.write` | yes | ui-thread | Set system master volume (args: `widgetId`, `volume` 0-100). |
+| `weather/get` | `weather.read` | no | any | Current weather for the configured location (args: `forceRefresh?`). |
+| `weather/set-city` | `weather.write` | yes | ui-thread | Geocode and persist a new weather location (args: `city`). |
+| `glance/get` | `glance.read` | no | any | One glance widget's persisted settings (layout, transition, rotation). |
+| `glance/next` | `glance.write` | yes | ui-thread | Advance the glance widget to its next image. |
+| `glance/toggle-pause` | `glance.write` | yes | ui-thread | Toggle the glance widget's auto-rotation pause. |
 
 Authoritative argument details live in `server/schema` output.
 
@@ -156,11 +173,22 @@ raises `Changed`, refreshing the open widget automatically.
 ## 6. CLI
 
 ```
-deskbox ping | info | schema | settings get | widgets list
-deskbox quickcapture list [--limit N] | quickcapture add <body> [--title T] [--pin] [--dry-run]
-deskbox todo list --widget <id> | todo add --widget <id> <text> [--important] [--color m] [--dry-run]
+deskbox ping | info | schema | settings get | settings set <key> <value>
+deskbox widgets list | create <kind> [--path <folder>] | show <id> | hide <id> | rename <id> <name> | remove <id> --yes
+deskbox quickcapture list [--limit N] | add <body> [--title T] [--pin] [--dry-run] | pin <itemId> | update <itemId> <body> | delete <itemId> [more...]
+deskbox todo list --widget <id> | add --widget <id> <text> | done|reopen --widget <id> <itemId> | edit | set-due | delete | clear-completed
+deskbox files list <id> | add --widget <id> <path> [more...] [--move|--copy]
+deskbox search query <text> [--limit N]
+deskbox groups merge <src> <target> | dissolve <id>
+deskbox organize plan [--include-slow] | apply <planId> | undo <historyId>
+deskbox music status <id> | toggle|next|previous <id> | volume <id> <0-100>
+deskbox weather get [--force] | set-city <name>
+deskbox glance get <id> | next <id> | toggle-pause <id>
 deskbox mcp                       # MCP server on stdio
 ```
+
+Run `deskbox --help` for the full, up-to-date surface; the CLI mirrors
+`server/schema` and never drifts from it.
 
 Global flags: `--json`, `--timeout <ms>`, `--pipe <name>`.
 Exit codes: `0` ok, `1` unexpected, `2` usage, `3` app not running,
@@ -168,10 +196,13 @@ Exit codes: `0` ok, `1` unexpected, `2` usage, `3` app not running,
 
 ## 7. MCP integration
 
-`deskbox mcp` speaks MCP `2024-11-05` over stdio and exposes coarse-grained
-tools: `deskbox_status`, `list_widgets`, `list_quick_capture`,
-`add_quick_capture`, `list_todos`, `add_todo`, `get_settings`. Register it
-in an MCP host with:
+`deskbox mcp` speaks MCP `2024-11-05` over stdio and exposes 19
+coarse-grained tools: `deskbox_status`, `list_widgets`, `list_quick_capture`,
+`add_quick_capture`, `list_todos`, `add_todo`, `complete_todo`,
+`delete_todos`, `list_widget_files`, `add_files_to_widget`, `create_widget`,
+`search_desktop`, `organize_desktop`, `set_appearance`, `music_control`,
+`get_weather`, `set_weather_city`, `glance_control`, `get_settings`. Register
+it in an MCP host with:
 
 ```json
 {

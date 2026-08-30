@@ -16,6 +16,13 @@
 - Full quick capture control: `quickcapture/pin`, `quickcapture/update`, `quickcapture/delete` (headless, auto-refreshes the widget).
 - File widget control: `files/list` and `files/add` drive the managed-folder import pipeline (move/copy semantics, organization history) for the requested widget.
 - Widget lifecycle control: `widgets/create`, `widgets/show`, `widgets/hide`, `widgets/rename`, and `widgets/remove` (destructive-gated; folder contents always stay on disk). `widgets/list` now reports every configured widget by id, kind, name, rectangle, and mapped folder path — the id required by all per-widget commands.
+- Desktop search: `search/query` runs a live search across files (via Everything) and DeskBox content (notes, todos, widget titles) with configurable limits.
+- Widget groups: `groups/merge` and `groups/dissolve` form and break up widget groups without touching backing folders.
+- Desktop organization: `organize/plan` returns a preview plan (nothing moves), `organize/apply` executes a cached plan into managed folders, and `organize/undo` rolls back a completed run by history id.
+- Music control: `music/status`, `music/toggle`, `music/next`, `music/previous`, and `music/volume` drive the current SMTC media session (title, artist, playback state, system volume) through the live music widget.
+- Weather: `weather/get` fetches current conditions for the configured location (MSN with Open-Meteo fallback) and `weather/set-city` geocodes and persists a new location; all weather widgets refresh automatically.
+- Glance photo widget: `glance/get` reads one widget's persisted layout/transition/rotation, while `glance/next` and `glance/toggle-pause` advance the carousel and toggle auto-rotation.
+- Appearance: `settings/set` switches theme (System|Light|Dark) or language through the same allowlist used by the settings panel.
 
 ### 中文
 
