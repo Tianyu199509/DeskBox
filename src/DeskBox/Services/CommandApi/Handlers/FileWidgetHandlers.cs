@@ -87,7 +87,7 @@ public sealed class FilesListHandler : ICommandHandler
         CommandExecutionContext context,
         CancellationToken cancellationToken)
     {
-        string widgetId = WidgetLifecycle.RequireWidgetId(arguments);
+        string widgetId = CommandArguments.RequireWidgetId(arguments);
         WidgetViewModel viewModel = FileWidgetAccess.RequireViewModel(_resolver, widgetId);
 
         List<WidgetFileItem> items = viewModel.Items
@@ -153,7 +153,7 @@ public sealed class FilesAddHandler : ICommandHandler
         CommandExecutionContext context,
         CancellationToken cancellationToken)
     {
-        string widgetId = WidgetLifecycle.RequireWidgetId(arguments);
+        string widgetId = CommandArguments.RequireWidgetId(arguments);
         WidgetViewModel viewModel = FileWidgetAccess.RequireViewModel(_resolver, widgetId);
         if (!CommandArguments.TryGetStringArray(arguments, "paths", out List<string> paths)
             || paths.Count == 0)

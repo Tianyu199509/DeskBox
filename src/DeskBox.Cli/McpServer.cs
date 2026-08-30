@@ -414,6 +414,52 @@ public static class ToolRegistry
         },
         new
         {
+            name = "search_desktop",
+            description = "Search files (via Everything) and DeskBox content (notes, todos, widget titles).",
+            inputSchema = new
+            {
+                type = "object",
+                properties = new
+                {
+                    query = new { type = "string", description = "Search text." },
+                    limit = new { type = "integer", description = "Max results (1-50, default 20)." },
+                },
+                required = new[] { "query" },
+            },
+        },
+        new
+        {
+            name = "organize_desktop",
+            description = "Desktop organization. action=plan returns a preview (nothing moves); action=apply executes a returned planId; action=undo rolls back a historyId.",
+            inputSchema = new
+            {
+                type = "object",
+                properties = new
+                {
+                    action = new { type = "string", description = "plan|apply|undo", enumValues = new[] { "plan", "apply", "undo" } },
+                    planId = new { type = "string", description = "Required for apply." },
+                    historyId = new { type = "string", description = "Required for undo." },
+                },
+                required = new[] { "action" },
+            },
+        },
+        new
+        {
+            name = "set_appearance",
+            description = "Set an allowlisted appearance setting: theme (System|Light|Dark) or language.",
+            inputSchema = new
+            {
+                type = "object",
+                properties = new
+                {
+                    key = new { type = "string", description = "theme|language" },
+                    value = new { type = "string", description = "New value, e.g. Dark or en-US." },
+                },
+                required = new[] { "key", "value" },
+            },
+        },
+        new
+        {
             name = "get_settings",
             description = "Read an allowlisted snapshot of DeskBox settings.",
             inputSchema = new { type = "object", properties = new { }, required = Array.Empty<string>() },
@@ -449,6 +495,25 @@ public static class ToolRegistry
                 return ("files/add", arguments);
             case "create_widget":
                 return ("widgets/create", arguments);
+            case "search_desktop":
+                return ("search/query", arguments);
+            case "organize_desktop":
+            {
+                string action = arguments.ValueKind == JsonValueKind.Object
+                    && arguments.TryGetProperty("action", out JsonElement actionElement)
+                    && actionElement.ValueKind == JsonValueKind.String
+                    ? actionElement.GetString() ?? string.Empty
+                    : string.Empty;
+                return action switch
+                {
+                    "plan" => ("organize/plan", JsonSerializer.SerializeToElement(new { })),
+                    "apply" => ("organize/apply", arguments),
+                    "undo" => ("organize/undo", arguments),
+                    _ => (string.Empty, arguments),
+                };
+            }
+            case "set_appearance":
+                return ("settings/set", arguments);
             default:
                 return (string.Empty, arguments);
         }

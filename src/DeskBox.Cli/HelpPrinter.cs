@@ -22,10 +22,17 @@ public static class HelpPrinter
               widgets show <id> | hide <id> | rename <id> <name>
                                             Control one widget.
               widgets remove <id> --yes     Remove a widget (folder contents stay on disk).
+              search query <text> [--limit N]
+                                            Search files (Everything) and DeskBox content.
+              groups merge <src> <target> | dissolve <id>
+                                            Merge widgets into a group / dissolve it.
+              organize plan [--include-slow] | apply <planId> | undo <historyId>
+                                            Two-phase desktop organization (plan is preview-only).
               files list <id>               List entries shown in one file widget.
               files add --widget <id> <path> [more...] [--move|--copy]
                                             Import files/folders into a file widget's mapped folder.
               settings get                  Allowlisted settings snapshot.
+              settings set <key> <value>    Set theme (System|Light|Dark) or language.
               quickcapture list [--limit N] List quick capture notes.
               quickcapture add <body> [--title T] [--pin] [--dry-run]
                                             Add a quick capture note.

@@ -39,7 +39,7 @@ internal static class WidgetLifecycle
     }
 }
 
-public sealed record WidgetCreatedResult(string WidgetId, string Kind);
+public sealed record WidgetCreatedResult(string WidgetId, string Kind, bool Created);
 
 public sealed record WidgetMutatedResult(string WidgetId, bool Ok, string Action);
 
@@ -98,6 +98,8 @@ public sealed class WidgetsCreateHandler : ICommandHandler
         }
 
         string before = SerializeWidgetIds(widgetManager);
+        bool isFeatureKind = !kind.Equals("folder", StringComparison.OrdinalIgnoreCase)
+            && !kind.Equals("file", StringComparison.OrdinalIgnoreCase);
         if (kind.Equals("folder", StringComparison.OrdinalIgnoreCase))
         {
             if (!CommandArguments.TryGetString(arguments, "path", out string folderPath)
@@ -132,23 +134,44 @@ public sealed class WidgetsCreateHandler : ICommandHandler
                 "Use one of: file, folder, todo, glance, music, weather, search.");
         }
 
-        string after = SerializeWidgetIds(widgetManager);
-        string newId = ExtractNewWidgetId(before, after)
-            ?? throw WidgetLifecycle.Validation(
+        // Single-instance feature widgets (todo, glance, music, …) show the
+        // existing instance instead of creating a second one; report that id
+        // with created=false so clients can tell the two apart.
+        HashSet<string> beforeIds = before.Split('|', StringSplitOptions.RemoveEmptyEntries).ToHashSet(StringComparer.Ordinal);
+        WidgetCreatedResult result;
+        string? newId = widgetManager.GetWidgetConfigSnapshot()
+            .Select(config => config.Id)
+            .FirstOrDefault(id => !beforeIds.Contains(id));
+        if (newId is not null)
+        {
+            result = new WidgetCreatedResult(newId, kind, Created: true);
+        }
+        else if (isFeatureKind)
+        {
+            string? existingId = widgetManager.GetWidgetConfigSnapshot()
+                .FirstOrDefault(config => config.WidgetKind.ToString().Equals(kind, StringComparison.OrdinalIgnoreCase))
+                ?.Id;
+            if (existingId is null)
+            {
+                throw WidgetLifecycle.Validation(
+                    "Widget creation reported success but no widget appeared.",
+                    "Call widgets/list to inspect the current widgets and retry if needed.");
+            }
+
+            result = new WidgetCreatedResult(existingId, kind, Created: false);
+        }
+        else
+        {
+            throw WidgetLifecycle.Validation(
                 "Widget creation reported success but no new widget id appeared.",
                 "Call widgets/list to inspect the current widgets and retry if needed.");
+        }
 
-        WidgetCreatedResult result = new(newId, kind);
         return JsonSerializer.SerializeToElement(result, WidgetLifecycleJsonContext.Default.WidgetCreatedResult);
     }
 
     private static string SerializeWidgetIds(WidgetManager widgetManager)
         => string.Join("|", widgetManager.GetWidgetConfigSnapshot().Select(config => config.Id).Order(StringComparer.Ordinal));
-
-    private static string? ExtractNewWidgetId(string before, string after)
-        => after.Split('|', StringSplitOptions.RemoveEmptyEntries)
-            .Except(before.Split('|', StringSplitOptions.RemoveEmptyEntries), StringComparer.Ordinal)
-            .FirstOrDefault();
 }
 
 /// <summary>
@@ -188,7 +211,7 @@ public sealed class WidgetsRemoveHandler : ICommandHandler
     {
         WidgetManager? widgetManager = _widgetManager()
             ?? throw WidgetLifecycle.NotLoaded("widget-manager", "DeskBox is still starting; retry shortly.");
-        string widgetId = WidgetLifecycle.RequireWidgetId(arguments);
+        string widgetId = CommandArguments.RequireWidgetId(arguments);
 
         await widgetManager.RemoveWidgetAsync(
             widgetId,
@@ -230,7 +253,7 @@ public sealed class WidgetsShowHandler : ICommandHandler
     {
         WidgetManager? widgetManager = _widgetManager()
             ?? throw WidgetLifecycle.NotLoaded("widget-manager", "DeskBox is still starting; retry shortly.");
-        string widgetId = WidgetLifecycle.RequireWidgetId(arguments);
+        string widgetId = CommandArguments.RequireWidgetId(arguments);
 
         // Feature widgets (todo/glance/music/weather/search) are gated by a
         // session-level enabled flag; showing one through the generic path
@@ -295,7 +318,7 @@ public sealed class WidgetsHideHandler : ICommandHandler
     {
         WidgetManager? widgetManager = _widgetManager()
             ?? throw WidgetLifecycle.NotLoaded("widget-manager", "DeskBox is still starting; retry shortly.");
-        string widgetId = WidgetLifecycle.RequireWidgetId(arguments);
+        string widgetId = CommandArguments.RequireWidgetId(arguments);
 
         bool hidden = widgetManager.HideWidget(widgetId);
         var result = new WidgetMutatedResult(widgetId, true, "hidden");
@@ -336,7 +359,7 @@ public sealed class WidgetsRenameHandler : ICommandHandler
     {
         WidgetManager? widgetManager = _widgetManager()
             ?? throw WidgetLifecycle.NotLoaded("widget-manager", "DeskBox is still starting; retry shortly.");
-        string widgetId = WidgetLifecycle.RequireWidgetId(arguments);
+        string widgetId = CommandArguments.RequireWidgetId(arguments);
         if (!CommandArguments.TryGetString(arguments, "name", out string name)
             || string.IsNullOrWhiteSpace(name))
         {

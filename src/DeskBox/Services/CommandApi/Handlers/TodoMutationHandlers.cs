@@ -88,7 +88,7 @@ public sealed class TodoSetCompletedHandler : ICommandHandler
         CommandExecutionContext context,
         CancellationToken cancellationToken)
     {
-        string widgetId = TodoListHandler.RequireWidgetId(arguments);
+        string widgetId = CommandArguments.RequireWidgetId(arguments);
         TodoWidgetViewModel viewModel = TodoMutations.RequireViewModel(_resolver, widgetId);
         string itemId = TodoMutations.RequireItemId(arguments);
         if (!CommandArguments.TryGetBool(arguments, "isCompleted", out bool isCompleted))
@@ -135,7 +135,7 @@ public sealed class TodoDeleteHandler : ICommandHandler
         CommandExecutionContext context,
         CancellationToken cancellationToken)
     {
-        string widgetId = TodoListHandler.RequireWidgetId(arguments);
+        string widgetId = CommandArguments.RequireWidgetId(arguments);
         TodoWidgetViewModel viewModel = TodoMutations.RequireViewModel(_resolver, widgetId);
         if (!CommandArguments.TryGetStringArray(arguments, "itemIds", out List<string> itemIds)
             || itemIds.Count == 0)
@@ -182,7 +182,7 @@ public sealed class TodoEditHandler : ICommandHandler
         CommandExecutionContext context,
         CancellationToken cancellationToken)
     {
-        string widgetId = TodoListHandler.RequireWidgetId(arguments);
+        string widgetId = CommandArguments.RequireWidgetId(arguments);
         TodoWidgetViewModel viewModel = TodoMutations.RequireViewModel(_resolver, widgetId);
         string itemId = TodoMutations.RequireItemId(arguments);
         if (!CommandArguments.TryGetString(arguments, "text", out string text)
@@ -231,7 +231,7 @@ public sealed class TodoSetDueDateHandler : ICommandHandler
         CommandExecutionContext context,
         CancellationToken cancellationToken)
     {
-        string widgetId = TodoListHandler.RequireWidgetId(arguments);
+        string widgetId = CommandArguments.RequireWidgetId(arguments);
         TodoWidgetViewModel viewModel = TodoMutations.RequireViewModel(_resolver, widgetId);
         string itemId = TodoMutations.RequireItemId(arguments);
 
@@ -285,7 +285,7 @@ public sealed class TodoClearCompletedHandler : ICommandHandler
         CommandExecutionContext context,
         CancellationToken cancellationToken)
     {
-        string widgetId = TodoListHandler.RequireWidgetId(arguments);
+        string widgetId = CommandArguments.RequireWidgetId(arguments);
         TodoWidgetViewModel viewModel = TodoMutations.RequireViewModel(_resolver, widgetId);
         int deleted = await viewModel.ClearCompletedAsync().ConfigureAwait(true);
         TodoMutationResult result = new(widgetId, deleted > 0, "clear-completed", deleted);

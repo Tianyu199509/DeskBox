@@ -118,7 +118,7 @@ public partial class App
             new QuickCaptureUpdateHandler(() => QuickCaptureService),
             new QuickCaptureDeleteHandler(() => QuickCaptureService),
             new TodoListHandler(),
-            new TodoAddHandler(),
+            new TodoAddHandler(() => WidgetManager),
             new TodoSetCompletedHandler(ResolveTodoViewModel),
             new TodoDeleteHandler(ResolveTodoViewModel),
             new TodoEditHandler(ResolveTodoViewModel),
@@ -132,10 +132,32 @@ public partial class App
             new WidgetsRenameHandler(() => WidgetManager),
             new FilesListHandler(ResolveFileViewModel),
             new FilesAddHandler(ResolveFileViewModel),
+            new SearchQueryHandler(),
+            new GroupsMergeHandler(() => WidgetManager),
+            new GroupsDissolveHandler(() => WidgetManager),
+            new OrganizePlanHandler(ResolveOrganizationCoordinator),
+            new OrganizeApplyHandler(ResolveOrganizationCoordinator),
+            new OrganizeUndoHandler(ResolveOrganizationCoordinator),
+            new SettingsSetHandler(() => ThemeService, () => LocalizationService),
         ];
 
         registry = new CommandRegistry(handlers);
         return registry;
+    }
+
+    private DesktopOrganizationCoordinator? ResolveOrganizationCoordinator()
+    {
+        if (WidgetManager is null)
+        {
+            return null;
+        }
+
+        return new DesktopOrganizationCoordinator(
+            SettingsService,
+            FileService,
+            WidgetManager,
+            OrganizerService,
+            LocalizationService);
     }
 
     private TodoWidgetViewModel? ResolveTodoViewModel(string widgetId)

@@ -68,6 +68,9 @@ public sealed class JsonSerializationBaselineContractTests : IDisposable
         Assert.Equal(29, actual.Count);
         Assert.Equal(65, actual.Values.Sum());
 
+        // Membership is the contract; ordering is applied with the same
+        // comparer as the actual scan, so culture-specific collation can
+        // never break this test again.
         string[] expectedContextOwners =
         [
             "src/DeskBox/App.AotHotkeySmoke.cs",
@@ -84,11 +87,15 @@ public sealed class JsonSerializationBaselineContractTests : IDisposable
             "src/DeskBox/App.AotTodoRecurrenceReminderSmoke.cs",
             "src/DeskBox/Services/AppUpdateService.cs",
             "src/DeskBox/Services/CommandApi/Handlers/FileWidgetHandlers.cs",
+            "src/DeskBox/Services/CommandApi/Handlers/GroupHandlers.cs",
             "src/DeskBox/Services/CommandApi/Handlers/QuickCaptureHandlers.cs",
             "src/DeskBox/Services/CommandApi/Handlers/QuickCaptureMutationHandlers.cs",
+            "src/DeskBox/Services/CommandApi/Handlers/OrganizeHandlers.cs",
+            "src/DeskBox/Services/CommandApi/Handlers/SearchQueryHandler.cs",
             "src/DeskBox/Services/CommandApi/Handlers/ServerHandlers.cs",
             "src/DeskBox/Services/CommandApi/Handlers/ServerSchemaHandler.cs",
             "src/DeskBox/Services/CommandApi/Handlers/SettingsGetHandler.cs",
+            "src/DeskBox/Services/CommandApi/Handlers/SettingsSetHandler.cs",
             "src/DeskBox/Services/CommandApi/Handlers/TodoHandlers.cs",
             "src/DeskBox/Services/CommandApi/Handlers/TodoMutationHandlers.cs",
             "src/DeskBox/Services/CommandApi/Handlers/WidgetLifecycleHandlers.cs",
@@ -113,11 +120,13 @@ public sealed class JsonSerializationBaselineContractTests : IDisposable
                 "JsonSerializerContext",
                 StringComparison.Ordinal))
             .Select(RepositoryRelativePath)
-            .Order()
+            .Order(StringComparer.Ordinal)
             .ToArray();
 
-        Assert.Equal(37, actualContextOwners.Length);
-        Assert.Equal(expectedContextOwners, actualContextOwners);
+        Assert.Equal(41, actualContextOwners.Length);
+        Assert.Equal(
+            expectedContextOwners.Order(StringComparer.Ordinal).ToArray(),
+            actualContextOwners);
     }
 
     [Fact]
@@ -127,7 +136,7 @@ public sealed class JsonSerializationBaselineContractTests : IDisposable
         string[] actualOwners = ProductionSourceFiles()
             .Where(path => converterPattern.IsMatch(File.ReadAllText(path)))
             .Select(RepositoryRelativePath)
-            .Order()
+            .Order(StringComparer.Ordinal)
             .ToArray();
         int converterCount = ProductionSourceFiles()
             .Sum(path => converterPattern.Matches(File.ReadAllText(path)).Count);

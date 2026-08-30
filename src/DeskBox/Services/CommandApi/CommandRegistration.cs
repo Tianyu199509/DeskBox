@@ -153,4 +153,22 @@ public static class CommandArguments
 
         return true;
     }
+
+    /// <summary>
+    /// Reads a required, non-empty widgetId argument. The single shared
+    /// implementation keeps the error contract identical across every
+    /// per-widget command.
+    /// </summary>
+    public static string RequireWidgetId(JsonElement arguments)
+    {
+        if (!TryGetString(arguments, "widgetId", out string widgetId)
+            || string.IsNullOrWhiteSpace(widgetId))
+        {
+            throw CommandValidationException.ValidationFailed(
+                "The 'widgetId' argument is required.",
+                "Call widgets/list first and pass the id of the target widget.");
+        }
+
+        return widgetId;
+    }
 }

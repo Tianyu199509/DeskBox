@@ -48,6 +48,13 @@ public static class CommandRouter
             ("todo", "clear-completed") => BuildTodoClearCompletedCall(tokens),
             ("files", "list") => ("files/list", BuildFilesListArgs(tokens), false),
             ("files", "add") => BuildFilesAddCall(tokens),
+            ("search", "query") or ("search", "q") => ("search/query", BuildSearchQueryArgs(tokens), false),
+            ("groups", "merge") => BuildGroupsMergeCall(tokens),
+            ("groups", "dissolve") => BuildGroupsDissolveCall(tokens),
+            ("organize", "plan") => ("organize/plan", BuildOrganizePlanArgs(tokens), false),
+            ("organize", "apply") => BuildOrganizeApplyCall(tokens),
+            ("organize", "undo") => BuildOrganizeUndoCall(tokens),
+            ("settings", "set") => BuildSettingsSetCall(tokens),
             _ => throw new CliException(
                 CliExitCode.UsageError,
                 $"Unknown command '{verb}{(sub.Length > 0 ? " " + sub : string.Empty)}'. Run 'deskbox --help' for usage."),
@@ -606,6 +613,180 @@ public static class CommandRouter
         return ("files/add", JsonDocument.Parse(buffer.ToArray()).RootElement.Clone(), false);
     }
 
+    private static JsonElement BuildSearchQueryArgs(IReadOnlyList<string> tokens)
+    {
+        string? query = null;
+        int? limit = null;
+        for (int i = 2; i < tokens.Count; i++)
+        {
+            if (tokens[i] == "--limit" && i + 1 < tokens.Count)
+            {
+                limit = int.TryParse(tokens[i + 1], out int parsed) ? parsed : null;
+                i++;
+            }
+            else if (!tokens[i].StartsWith('-'))
+            {
+                query = query is null ? tokens[i] : query + " " + tokens[i];
+            }
+        }
+
+        if (string.IsNullOrWhiteSpace(query))
+        {
+            throw new CliException(
+                CliExitCode.UsageError,
+                "Usage: deskbox search query <text> [--limit N]");
+        }
+
+        using MemoryStream buffer = new();
+        using Utf8JsonWriter writer = new(buffer);
+        writer.WriteStartObject();
+        writer.WriteString("query", query);
+        if (limit.HasValue)
+        {
+            writer.WriteNumber("limit", limit.Value);
+        }
+
+        writer.WriteEndObject();
+        writer.Flush();
+        return JsonDocument.Parse(buffer.ToArray()).RootElement.Clone();
+    }
+
+    private static (string Method, JsonElement Arguments, bool DryRun) BuildGroupsMergeCall(
+        IReadOnlyList<string> tokens)
+    {
+        List<string> ids = tokens.Skip(2).Where(token => !token.StartsWith('-')).ToList();
+        if (ids.Count != 2)
+        {
+            throw new CliException(
+                CliExitCode.UsageError,
+                "Usage: deskbox groups merge <sourceWidgetId> <targetWidgetId>");
+        }
+
+        using MemoryStream buffer = new();
+        using Utf8JsonWriter writer = new(buffer);
+        writer.WriteStartObject();
+        writer.WriteString("sourceWidgetId", ids[0]);
+        writer.WriteString("targetWidgetId", ids[1]);
+        writer.WriteEndObject();
+        writer.Flush();
+        return ("groups/merge", JsonDocument.Parse(buffer.ToArray()).RootElement.Clone(), false);
+    }
+
+    private static (string Method, JsonElement Arguments, bool DryRun) BuildGroupsDissolveCall(
+        IReadOnlyList<string> tokens)
+    {
+        string? widgetId = tokens.Skip(2).FirstOrDefault(token => !token.StartsWith('-'));
+        if (string.IsNullOrWhiteSpace(widgetId))
+        {
+            throw new CliException(
+                CliExitCode.UsageError,
+                "Usage: deskbox groups dissolve <widgetId inside the group>");
+        }
+
+        using MemoryStream buffer = new();
+        using Utf8JsonWriter writer = new(buffer);
+        writer.WriteStartObject();
+        writer.WriteString("widgetId", widgetId);
+        writer.WriteEndObject();
+        writer.Flush();
+        return ("groups/dissolve", JsonDocument.Parse(buffer.ToArray()).RootElement.Clone(), false);
+    }
+
+    private static JsonElement BuildOrganizePlanArgs(IReadOnlyList<string> tokens)
+    {
+        bool includeSlow = tokens.Contains("--include-slow", StringComparer.Ordinal);
+        using MemoryStream buffer = new();
+        using Utf8JsonWriter writer = new(buffer);
+        writer.WriteStartObject();
+        if (includeSlow)
+        {
+            writer.WriteBoolean("includeSlowItems", true);
+        }
+
+        writer.WriteEndObject();
+        writer.Flush();
+        return JsonDocument.Parse(buffer.ToArray()).RootElement.Clone();
+    }
+
+    private static (string Method, JsonElement Arguments, bool DryRun) BuildOrganizeApplyCall(
+        IReadOnlyList<string> tokens)
+    {
+        string? planId = tokens.Skip(2).FirstOrDefault(token => !token.StartsWith('-'));
+        if (string.IsNullOrWhiteSpace(planId))
+        {
+            throw new CliException(
+                CliExitCode.UsageError,
+                "Usage: deskbox organize apply <planId> (run organize plan first)");
+        }
+
+        using MemoryStream buffer = new();
+        using Utf8JsonWriter writer = new(buffer);
+        writer.WriteStartObject();
+        writer.WriteString("planId", planId);
+        writer.WriteEndObject();
+        writer.Flush();
+        return ("organize/apply", JsonDocument.Parse(buffer.ToArray()).RootElement.Clone(), false);
+    }
+
+    private static (string Method, JsonElement Arguments, bool DryRun) BuildOrganizeUndoCall(
+        IReadOnlyList<string> tokens)
+    {
+        string? historyId = tokens.Skip(2).FirstOrDefault(token => !token.StartsWith('-'));
+        if (string.IsNullOrWhiteSpace(historyId))
+        {
+            throw new CliException(
+                CliExitCode.UsageError,
+                "Usage: deskbox organize undo <historyId> (returned by organize apply)");
+        }
+
+        using MemoryStream buffer = new();
+        using Utf8JsonWriter writer = new(buffer);
+        writer.WriteStartObject();
+        writer.WriteString("historyId", historyId);
+        writer.WriteEndObject();
+        writer.Flush();
+        return ("organize/undo", JsonDocument.Parse(buffer.ToArray()).RootElement.Clone(), false);
+    }
+
+    private static (string Method, JsonElement Arguments, bool DryRun) BuildSettingsSetCall(
+        IReadOnlyList<string> tokens)
+    {
+        string? key = null;
+        string? value = null;
+        for (int i = 2; i < tokens.Count; i++)
+        {
+            if (tokens[i].StartsWith('-'))
+            {
+                continue;
+            }
+
+            if (key is null)
+            {
+                key = tokens[i];
+            }
+            else if (value is null)
+            {
+                value = tokens[i];
+            }
+        }
+
+        if (string.IsNullOrWhiteSpace(key) || string.IsNullOrWhiteSpace(value))
+        {
+            throw new CliException(
+                CliExitCode.UsageError,
+                "Usage: deskbox settings set <key> <value> — keys: theme, language");
+        }
+
+        using MemoryStream buffer = new();
+        using Utf8JsonWriter writer = new(buffer);
+        writer.WriteStartObject();
+        writer.WriteString("key", key);
+        writer.WriteString("value", value);
+        writer.WriteEndObject();
+        writer.Flush();
+        return ("settings/set", JsonDocument.Parse(buffer.ToArray()).RootElement.Clone(), false);
+    }
+
     private static (string Method, JsonElement Arguments, bool DryRun) BuildTodoAddCall(
         IReadOnlyList<string> tokens)
     {
@@ -724,6 +905,40 @@ public static class HumanFormatter
             case "files/add":
                 stdout.WriteLine($"Imported ✓  ({GetInt(result.Data.GetValueOrDefault(), "importedCount")} items into widget {GetString(result.Data.GetValueOrDefault(), "widgetId")}, moved={GetBool(result.Data.GetValueOrDefault(), "moved")})");
                 break;
+            case "search/query":
+                stdout.WriteLine($"{GetInt(result.Data.GetValueOrDefault(), "totalResultCount")} result(s) for \"{GetString(result.Data.GetValueOrDefault(), "query")}\":");
+                foreach (JsonElement item in Enumerate(result.Data.GetValueOrDefault(), "items"))
+                {
+                    string detail = item.TryGetProperty("detailPath", out JsonElement detailElement) && detailElement.ValueKind == JsonValueKind.String
+                        ? $"  ({detailElement.GetString()})"
+                        : string.Empty;
+                    stdout.WriteLine($"  [{item.GetProperty("kind").GetString()}] {item.GetProperty("title").GetString()}{detail}");
+                }
+                break;
+            case "groups/merge" or "groups/dissolve":
+                stdout.WriteLine($"{GetString(result.Data.GetValueOrDefault(), "action")} {(GetBool(result.Data.GetValueOrDefault(), "ok") ? "✓" : "✗ rejected")}  (widget {GetString(result.Data.GetValueOrDefault(), "sourceWidgetId")})");
+                return;
+            case "organize/plan":
+                stdout.WriteLine($"Plan {GetString(result.Data.GetValueOrDefault(), "planId")} — {GetInt(result.Data.GetValueOrDefault(), "targetCount")} target(s), {GetInt(result.Data.GetValueOrDefault(), "totalItemCount")} item(s):");
+                foreach (JsonElement target in Enumerate(result.Data.GetValueOrDefault(), "targets"))
+                {
+                    stdout.WriteLine(
+                        $"  [{target.GetProperty("categoryId").GetString()}] → {target.GetProperty("targetDirectoryPath").GetString()}  " +
+                        $"{target.GetProperty("itemCount").GetInt32()} item(s)" +
+                        (target.GetProperty("createsWidget").GetBoolean() ? "  (creates new widget)" : string.Empty));
+                }
+
+                stdout.WriteLine("Nothing moved yet — run: deskbox organize apply <planId>");
+                return;
+            case "organize/apply":
+                stdout.WriteLine($"Organized ✓  (history {GetString(result.Data.GetValueOrDefault(), "historyId")}, created {GetInt(result.Data.GetValueOrDefault(), "createdWidgetCount")} widget(s), retained {GetInt(result.Data.GetValueOrDefault(), "retainedItemCount")})");
+                return;
+            case "organize/undo":
+                stdout.WriteLine($"Undone ✓  (history {GetString(result.Data.GetValueOrDefault(), "historyId")})");
+                return;
+            case "settings/set":
+                stdout.WriteLine($"Set ✓  {GetString(result.Data.GetValueOrDefault(), "key")} = {GetString(result.Data.GetValueOrDefault(), "value")}");
+                return;
             default:
                 stdout.WriteLine(result.Data.GetValueOrDefault().ToString());
                 break;

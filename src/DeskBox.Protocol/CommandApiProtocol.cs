@@ -65,6 +65,9 @@ public static class CommandApiProtocol
         public const string WidgetsWrite = "widgets.write";
         public const string FilesRead = "files.read";
         public const string FilesWrite = "files.write";
+        public const string SearchRead = "search.read";
+        public const string OrganizeWrite = "organize.write";
+        public const string SettingsWrite = "settings.write";
     }
 
     /// <summary>Builds the full pipe name for the given instance scope.</summary>

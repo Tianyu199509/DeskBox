@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using DeskBox.Models;
+using DeskBox.ViewModels;
 using DeskBox.Protocol;
 
 namespace DeskBox.Services.CommandApi.Handlers;
@@ -58,7 +59,7 @@ public sealed class TodoListHandler : ICommandHandler
         CommandExecutionContext context,
         CancellationToken cancellationToken)
     {
-        string widgetId = RequireWidgetId(arguments);
+        string widgetId = CommandArguments.RequireWidgetId(arguments);
         int limit = DefaultLimit;
         if (arguments.ValueKind == JsonValueKind.Object
             && arguments.TryGetProperty("limit", out JsonElement limitProperty))
@@ -95,18 +96,6 @@ public sealed class TodoListHandler : ICommandHandler
             item.DueDate,
             item.Notes);
 
-    internal static string RequireWidgetId(JsonElement arguments)
-    {
-        if (!CommandArguments.TryGetString(arguments, "widgetId", out string widgetId)
-            || string.IsNullOrWhiteSpace(widgetId))
-        {
-            throw CommandValidationException.ValidationFailed(
-                "The 'widgetId' argument is required.",
-                "Call widgets/list first and pass the id of a todo widget.");
-        }
-
-        return widgetId;
-    }
 }
 
 public sealed record TodoAddResult(string WidgetId, string ItemId, int ItemCount, bool Saved);
@@ -120,19 +109,26 @@ internal sealed partial class TodoAddJsonContext : JsonSerializerContext
 }
 
 /// <summary>
-/// Appends one todo item to a widget store. The running widget UI reloads
-/// from the store on change notifications; items written here appear in the
-/// widget on its next load. Honors DryRun.
+/// Appends one todo item through the live view model on the UI thread, so
+/// the open widget updates instantly and later mutations (set-completed,
+/// edit, delete) see the same item. Honors DryRun.
 /// </summary>
 public sealed class TodoAddHandler : ICommandHandler
 {
+    private readonly Func<WidgetManager?> _widgetManager;
+
+    public TodoAddHandler(Func<WidgetManager?> widgetManager)
+    {
+        _widgetManager = widgetManager;
+    }
+
     public CommandRegistration Registration { get; } = new(
         Method: "todo/add",
-        ThreadAffinity: CommandThreadAffinity.Any,
+        ThreadAffinity: CommandThreadAffinity.UiThread,
         Capability: CommandApiProtocol.Capabilities.TodoWrite,
         MutatesState: true,
         Destructive: false,
-        Summary: "Adds one todo item to a todo widget store.",
+        Summary: "Adds one todo item to a todo widget (requires the widget window to be loaded).",
         Arguments:
         [
             new CommandArgumentDescriptor("widgetId", "string", true,
@@ -150,7 +146,7 @@ public sealed class TodoAddHandler : ICommandHandler
         CommandExecutionContext context,
         CancellationToken cancellationToken)
     {
-        string widgetId = TodoListHandler.RequireWidgetId(arguments);
+        string widgetId = CommandArguments.RequireWidgetId(arguments);
         if (!CommandArguments.TryGetString(arguments, "text", out string text) || string.IsNullOrWhiteSpace(text))
         {
             throw CommandValidationException.ValidationFailed(
@@ -174,24 +170,38 @@ public sealed class TodoAddHandler : ICommandHandler
 
         bool important = CommandArguments.TryGetBool(arguments, "important", out bool importantValue) && importantValue;
 
-        TodoWidgetStore store = new(widgetId);
-        TodoWidgetData data = await store.LoadAsync().ConfigureAwait(false);
-        int existingCount = data.Items.Count;
+        // All todo mutations go through the live view model on the UI
+        // thread: that keeps the open widget, its undo stack, and the store
+        // in a single consistent data flow. A store-direct write here would
+        // be invisible to set-completed/delete until the widget reloads.
+        if (!_widgetManager().TryGetTodoWidgetViewModel(widgetId, out TodoWidgetViewModel? viewModel)
+            || viewModel is null)
+        {
+            throw new CommandValidationException(new CommandErrorPayload
+            {
+                Code = CommandApiProtocol.ErrorCodes.WidgetNotLoaded,
+                Phase = "execute",
+                Message = $"Todo widget '{widgetId}' is configured but not currently loaded.",
+                Hint = "Call widgets/show with this widgetId first, then retry.",
+            });
+        }
+
+        int countBefore = viewModel.Items.Count;
         if (context.DryRun)
         {
-            TodoAddResult dryRunResult = new(widgetId, "dry-run", existingCount + 1, Saved: false);
+            TodoAddResult dryRunResult = new(widgetId, "dry-run", countBefore + 1, Saved: false);
             return JsonSerializer.SerializeToElement(dryRunResult, TodoAddJsonContext.Default.TodoAddResult);
         }
 
-        TodoItem item = new()
+        TodoItemViewModel? added = await viewModel
+            .AddItemAsync(text, important)
+            .ConfigureAwait(true);
+        if (added is not null && !string.IsNullOrWhiteSpace(colorMarker))
         {
-            Text = text,
-            IsImportant = important,
-            ColorMarker = colorMarker,
-        };
-        data.Items.Add(item);
-        await store.SaveAsync(data).ConfigureAwait(false);
-        TodoAddResult result = new(widgetId, item.Id, data.Items.Count, Saved: true);
+            await viewModel.SetColorMarkerAsync(added.Id, colorMarker).ConfigureAwait(true);
+        }
+
+        TodoAddResult result = new(widgetId, added?.Id ?? string.Empty, viewModel.Items.Count, Saved: added is not null);
         return JsonSerializer.SerializeToElement(result, TodoAddJsonContext.Default.TodoAddResult);
     }
 }
