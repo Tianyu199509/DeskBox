@@ -82,6 +82,8 @@ public sealed class McpServer
         switch (method)
         {
             case "initialize":
+            {
+                string serverVersion = await ResolveServerVersionAsync(cancellationToken).ConfigureAwait(false);
                 await WriteResultAsync(id, new
                 {
                     protocolVersion = McpProtocolVersion,
@@ -92,13 +94,14 @@ public sealed class McpServer
                     serverInfo = new
                     {
                         name = ServerName,
-                        version = _clientVersion,
+                        version = serverVersion,
                         instructions = "Controls a running DeskBox desktop-organization app on this machine. "
                             + "Call deskbox_status first to discover capabilities. "
                             + "Organize/list tools are read-only; add tools mutate local data.",
                     },
                 }).ConfigureAwait(false);
                 break;
+            }
 
             case "tools/list":
                 await WriteResultAsync(id, new { tools = ToolRegistry.BuildTools() }).ConfigureAwait(false);
@@ -116,6 +119,38 @@ public sealed class McpServer
                 await WriteErrorAsync(id, JsonRpcErrorCodes.MethodNotFound, $"MCP method '{method}' is not supported.").ConfigureAwait(false);
                 break;
         }
+    }
+
+    private async Task<string> ResolveServerVersionAsync(CancellationToken cancellationToken)
+    {
+        // serverInfo.version must reflect the running app, not the CLI's own
+        // assembly version. Query server/info once; fall back to the CLI
+        // version when the app is not (yet) reachable so initialize still
+        // succeeds and the host can report the connection state.
+        try
+        {
+            JsonRpcResponse response = await _client
+                .SendAsync(
+                    "server/info",
+                    JsonDocument.Parse("{}").RootElement.Clone(),
+                    _clientVersion,
+                    cancellationToken: cancellationToken)
+                .ConfigureAwait(false);
+            if (response.Error is null && response.Result is { } result)
+            {
+                string? serverVersion = result.ServerVersion;
+                if (!string.IsNullOrWhiteSpace(serverVersion))
+                {
+                    return serverVersion;
+                }
+            }
+        }
+        catch (CliException)
+        {
+            // App not running or unreachable; fall through to the CLI version.
+        }
+
+        return _clientVersion;
     }
 
     private async Task CallToolAsync(JsonElement id, JsonElement message, CancellationToken cancellationToken)
