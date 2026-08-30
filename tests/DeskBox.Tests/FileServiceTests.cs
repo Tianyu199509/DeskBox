@@ -1137,10 +1137,10 @@ public sealed class FileServiceTests : IDisposable
     public async Task EnumerateDirectoryAsync_RecognizesInternetShortcutAndHidesExtension()
     {
         var service = new FileService();
-        string shortcutFile = Path.Combine(_tempRoot, "Steam.url");
+        string shortcutFile = Path.Combine(_tempRoot, "Docs.url");
         await File.WriteAllTextAsync(
             shortcutFile,
-            "[InternetShortcut]\nURL=steam://rungameid/123\nIconFile=%ProgramFiles%\\Steam\\steam.exe\nIconIndex=0\n");
+            "[InternetShortcut]\nURL=https://example.com/docs\n");
 
         var items = await service.EnumerateDirectoryAsync(
             _tempRoot,
@@ -1149,8 +1149,8 @@ public sealed class FileServiceTests : IDisposable
 
         var item = Assert.Single(items);
         Assert.True(item.IsShortcut);
-        Assert.Equal("Steam", item.Name);
-        Assert.Equal("steam://rungameid/123", item.TargetPath);
+        Assert.Equal("Docs", item.Name);
+        Assert.Equal("https://example.com/docs", item.TargetPath);
     }
 
     [Fact]
