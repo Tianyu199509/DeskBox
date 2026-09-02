@@ -669,6 +669,7 @@ public sealed class ShortcutNativeDifferentialTests : IDisposable
 
         Assert.Equal(firstTarget, first?.TargetPath);
         Assert.Equal("--first", first?.Arguments);
+        Assert.Equal(string.Empty, first?.IconLocation);
         Assert.Equal(secondTarget, second?.TargetPath);
         Assert.Equal("--other", second?.Arguments);
     }

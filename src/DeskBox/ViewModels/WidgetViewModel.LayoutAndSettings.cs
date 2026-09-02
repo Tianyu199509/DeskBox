@@ -86,6 +86,8 @@ public partial class WidgetViewModel
                 _localizationService.T("Common.Move"),
             SettingsService.ManagedDropActionFollowWindows =>
                 _localizationService.T("Settings.DropAction.System"),
+            SettingsService.ManagedDropActionShortcutOutsideDesktop =>
+                _localizationService.T("Settings.DropAction.ShortcutOutsideDesktop"),
             _ => _localizationService.T("Common.Copy")
         };
     }
@@ -101,6 +103,22 @@ public partial class WidgetViewModel
                 StringComparison.Ordinal))
         {
             return true;
+        }
+
+        if (string.Equals(
+                action,
+                SettingsService.ManagedDropActionShortcutOutsideDesktop,
+                StringComparison.Ordinal))
+        {
+            if (sourcePaths is null)
+            {
+                return false;
+            }
+
+            var (userDesktop, publicDesktop) = FileService.GetDesktopPaths();
+            return FileDropIntentPolicy.AreAllUnderDirectories(
+                sourcePaths,
+                [userDesktop, publicDesktop]);
         }
 
         if (!string.Equals(

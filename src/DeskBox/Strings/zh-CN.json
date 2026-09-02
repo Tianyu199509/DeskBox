@@ -400,6 +400,7 @@
     "Weather.Refresh.Minute": "{0} 分钟",
     "Settings.WidgetTitleIcon.Title": "格子标题图标",
     "Settings.DropAction.Copy": "复制",
+    "Settings.DropAction.ShortcutOutsideDesktop": "桌面文件移动，其他建快捷方式",
     "Settings.Capsule.Overrides.Empty.Title": "所有格子均跟随全局设置",
     "Settings.ShowImageFilesAsIcons.Title": "图片和视频只显示图标",
     "Settings.Update.Install": "立即安装",

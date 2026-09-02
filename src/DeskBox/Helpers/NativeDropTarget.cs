@@ -134,6 +134,7 @@ public sealed class NativeDropTarget : IDisposable
     private readonly NativeDropTargetComObject _comObject;
     private readonly Func<bool> _defaultMoveProvider;
     private readonly Func<bool>? _followWindowsProvider;
+    private readonly Func<bool>? _shortcutOutsideDesktopProvider;
     private readonly Func<uint, NativeDropDescriptionText?>? _dropDescriptionProvider;
     private readonly Func<bool>? _useShellVisualProvider;
     private readonly NativeDropImageManager? _dropImageManager;
@@ -145,6 +146,11 @@ public sealed class NativeDropTarget : IDisposable
     private bool _registered;
     private bool _rightButtonDragActive;
     private IReadOnlyList<string> _dragPathHints = [];
+
+    // Physical CF_HDROP paths peeked during the drag so the feedback effect
+    // can reflect the "shortcut outside the desktop" default without staging
+    // virtual payloads or forcing delayed rendering.
+    private IReadOnlyList<string> _peekedDropPaths = [];
 
     private sealed record ShellApplicationDropItem(
         string AppUserModelId,
@@ -225,11 +231,13 @@ public sealed class NativeDropTarget : IDisposable
         Func<bool>? defaultMoveProvider,
         Func<uint, NativeDropDescriptionText?>? dropDescriptionProvider,
         Func<bool>? useShellVisualProvider = null,
-        Func<bool>? followWindowsProvider = null)
+        Func<bool>? followWindowsProvider = null,
+        Func<bool>? shortcutOutsideDesktopProvider = null)
     {
         _hwnd = hwnd;
         _defaultMoveProvider = defaultMoveProvider ?? (() => true);
         _followWindowsProvider = followWindowsProvider;
+        _shortcutOutsideDesktopProvider = shortcutOutsideDesktopProvider;
         _dropDescriptionProvider = dropDescriptionProvider;
         _useShellVisualProvider = useShellVisualProvider;
         _comObject = new NativeDropTargetComObject(this);
@@ -306,6 +314,7 @@ public sealed class NativeDropTarget : IDisposable
             NativeDropEffectPolicy.IsRightButtonDrag(keyState);
         uint allowedEffects = effect;
         InspectDragData(dataObject);
+        PeekDropPaths(dataObject);
         _dragPathHints = HasFileData && !HasVirtualFileData
             ? TryExtractHDropPathHints(dataObject)
             : [];
@@ -318,7 +327,9 @@ public sealed class NativeDropTarget : IDisposable
             allowedEffects,
             HasShellApplicationData,
             _defaultMoveProvider(),
-            followWindows: GetFollowWindowsSetting());
+            followWindows: GetFollowWindowsSetting(),
+            shortcutOutsideDesktop: GetShortcutOutsideDesktopSetting(),
+            sourcesOnDesktop: ResolveSourcesOnDesktop(_peekedDropPaths));
         if (HasFileData)
         {
             RetainActiveDataObject(dataObject);
@@ -344,7 +355,9 @@ public sealed class NativeDropTarget : IDisposable
             allowedEffects,
             HasShellApplicationData,
             _defaultMoveProvider(),
-            followWindows: GetFollowWindowsSetting());
+            followWindows: GetFollowWindowsSetting(),
+            shortcutOutsideDesktop: GetShortcutOutsideDesktopSetting(),
+            sourcesOnDesktop: ResolveSourcesOnDesktop(_peekedDropPaths));
         UpdateShellVisual(point, effect);
         return S_OK;
     }
@@ -378,7 +391,9 @@ public sealed class NativeDropTarget : IDisposable
             allowedEffects,
             shellApplicationDrop,
             defaultMove,
-            followWindows: followWindows);
+            followWindows: followWindows,
+            shortcutOutsideDesktop: GetShortcutOutsideDesktopSetting(),
+            sourcesOnDesktop: ResolveSourcesOnDesktop(_peekedDropPaths));
         IReadOnlyList<string> paths = shellApplicationDrop
             ? TryExtractShellApplicationShortcuts(dataObject)
             : [];
@@ -388,15 +403,21 @@ public sealed class NativeDropTarget : IDisposable
         {
             (paths, containsTemporaryFiles) = TryExtractFilePaths(dataObject);
         }
+        bool shortcutOutsideDesktop = GetShortcutOutsideDesktopSetting();
+        bool sourcesOnDesktop = ResolveSourcesOnDesktop(paths);
         bool copyRequested = NativeDropEffectPolicy.ShouldCopyMappedTransfer(
             containsTemporaryFiles,
             keyState,
             defaultMove,
-            followWindows: followWindows);
+            followWindows: followWindows,
+            shortcutOutsideDesktop: shortcutOutsideDesktop,
+            sourcesOnDesktop: sourcesOnDesktop);
         bool shortcutRequested = createdShellApplicationLinks ||
             NativeDropEffectPolicy.ShouldCreateMappedShortcut(
                 containsTemporaryFiles,
-                keyState);
+                keyState,
+                shortcutOutsideDesktop: shortcutOutsideDesktop,
+                sourcesOnDesktop: sourcesOnDesktop);
         if (_shellVisualActive)
         {
             _dropImageManager?.Drop(
@@ -461,6 +482,97 @@ public sealed class NativeDropTarget : IDisposable
         }
     }
 
+    private bool GetShortcutOutsideDesktopSetting()
+    {
+        try
+        {
+            return _shortcutOutsideDesktopProvider?.Invoke() == true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Lightweight HDROP-only peek at the drop payload. Unlike
+    /// <see cref="TryExtractFilePaths"/> this never stages virtual files; it
+    /// only reads physical CF_HDROP paths so the caller can determine whether
+    /// the source lives on the desktop for the "shortcut outside the desktop"
+    /// default. Cached internally until the drag session ends. Skipped entirely
+    /// when the feature is disabled so the default Move/Copy paths pay no OLE
+    /// GetData cost.
+    /// </summary>
+    private void PeekDropPaths(nint dataObject)
+    {
+        _peekedDropPaths = [];
+        if (!GetShortcutOutsideDesktopSetting() ||
+            dataObject == IntPtr.Zero ||
+            HasVirtualFileData ||
+            HasShellApplicationData)
+        {
+            return;
+        }
+
+        try
+        {
+            var oleDataObject = new NativeOleDataObject(dataObject);
+            var format = new NativeFormatEtc
+            {
+                ClipboardFormat = (ushort)CF_HDROP,
+                TargetDevice = IntPtr.Zero,
+                Aspect = DVASPECT_CONTENT,
+                Index = -1,
+                MediumType = TYMED_HGLOBAL,
+            };
+            if (oleDataObject.GetData(
+                    ref format,
+                    out NativeStorageMedium medium) != S_OK ||
+                medium.Content == IntPtr.Zero)
+            {
+                return;
+            }
+
+            try
+            {
+                _peekedDropPaths = GetDroppedFiles(medium.Content);
+            }
+            finally
+            {
+                ReleaseStgMedium(ref medium);
+            }
+        }
+        catch
+        {
+            // Delayed-rendering or an inaccessible data object is treated as
+            // an unknown payload, which falls back to the desktop-resident
+            // default (preserves the existing move behaviour).
+        }
+    }
+
+    /// <summary>
+    /// Whether the given authoritative paths (or the cached peek when the
+    /// authoritative list is empty) all live under the user or public desktop.
+    /// A completely unknown payload resolves as desktop-resident so the
+    /// existing move default is preserved.
+    /// </summary>
+    private bool ResolveSourcesOnDesktop(IReadOnlyList<string> paths)
+    {
+        IReadOnlyList<string> effectivePaths = paths.Count > 0
+            ? paths
+            : _peekedDropPaths;
+        if (effectivePaths.Count == 0)
+        {
+            return true;
+        }
+
+        (string userDesktop, string publicDesktop) =
+            FileService.GetDesktopPaths();
+        return FileDropIntentPolicy.AreAllUnderDirectories(
+            effectivePaths,
+            [userDesktop, publicDesktop]);
+    }
+
     private void InspectDragData(nint dataObject)
     {
         bool hasHDropData = TryHasHDropData(dataObject);
@@ -479,6 +591,7 @@ public sealed class NativeDropTarget : IDisposable
         HasFileData = false;
         HasVirtualFileData = false;
         HasShellApplicationData = false;
+        _peekedDropPaths = [];
         _dragPathHints = [];
     }
 

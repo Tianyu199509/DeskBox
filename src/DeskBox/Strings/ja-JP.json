@@ -688,6 +688,7 @@
     "Settings.DropAction.Description": "ドロップ時にファイルをコピーするか、管理ウィジェットに移動するかを選択します",
     "Settings.DropAction.Move": "移動",
     "Settings.DropAction.Copy": "コピー",
+    "Settings.DropAction.ShortcutOutsideDesktop": "デスクトップのファイルは移動、その他はショートカットを作成",
     "Settings.AttachmentStorageMode.Title": "添付ファイルの保存方法",
     "Settings.AttachmentStorageMode.Description": "リンクは元のファイルを使用し、コピーは DeskBox 内に複製を保存します",
     "Settings.AttachmentStorageMode.Link": "元のファイルをリンク",

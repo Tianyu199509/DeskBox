@@ -702,6 +702,7 @@
   "Settings.DropAction.Description": "ড্রপ ফাইল কপি বা একটি পরিচালিত উইজেটে মূল সরান কিনা চয়ন করুন",
   "Settings.DropAction.Move": "সরান",
   "Settings.DropAction.Copy": "কপি",
+  "Settings.DropAction.ShortcutOutsideDesktop": "ডেস্কটপ ফাইল সরান, বাকিগুলির জন্য শর্টকাট তৈরি করুন",
   "Settings.AttachmentStorageMode.Title": "সংযুক্তি সংরক্ষণের উপায়",
   "Settings.AttachmentStorageMode.Description": "লিঙ্ক মূল ফাইল ব্যবহার করে; কপি DeskBox-এ আলাদা একটি অনুলিপি রাখে",
   "Settings.AttachmentStorageMode.Link": "মূল ফাইল লিঙ্ক করুন",

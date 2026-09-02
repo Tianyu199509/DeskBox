@@ -32,7 +32,9 @@ internal static class NativeDropEffectPolicy
         bool hasShellApplicationData = false,
         bool defaultMove = true,
         bool followWindows = false,
-        bool sameVolume = true)
+        bool sameVolume = true,
+        bool shortcutOutsideDesktop = false,
+        bool sourcesOnDesktop = true)
     {
         if (hasShellApplicationData)
         {
@@ -66,7 +68,9 @@ internal static class NativeDropEffectPolicy
             // The native source may omit DROPEFFECT_LINK even though DeskBox
             // can safely create a local .lnk from the extracted path. The
             // visual still falls back to Copy when Link is not advertised.
-            canLink: true);
+            canLink: true,
+            shortcutOutsideDesktop: shortcutOutsideDesktop,
+            sourcesOnDesktop: sourcesOnDesktop);
         return intent switch
         {
             FileDropIntent.Copy => Copy,
@@ -83,7 +87,9 @@ internal static class NativeDropEffectPolicy
         uint keyState,
         bool defaultMove,
         bool followWindows = false,
-        bool sameVolume = true)
+        bool sameVolume = true,
+        bool shortcutOutsideDesktop = false,
+        bool sourcesOnDesktop = true)
     {
         FileDropIntent intent = FileDropIntentPolicy.ResolveMappedTransfer(
             hasMappedFolder: true,
@@ -93,18 +99,40 @@ internal static class NativeDropEffectPolicy
             defaultMove: defaultMove,
             altDown: (keyState & AltKeyState) != 0,
             followWindows: followWindows,
-            sameVolume: sameVolume);
+            sameVolume: sameVolume,
+            shortcutOutsideDesktop: shortcutOutsideDesktop,
+            sourcesOnDesktop: sourcesOnDesktop);
         return intent != FileDropIntent.Move;
     }
 
     public static bool ShouldCreateMappedShortcut(
         bool containsTemporaryFiles,
-        uint keyState)
+        uint keyState,
+        bool shortcutOutsideDesktop = false,
+        bool sourcesOnDesktop = true)
     {
-        return !containsTemporaryFiles &&
-               ((keyState & AltKeyState) != 0 ||
-                (keyState & (ControlKeyState | ShiftKeyState)) ==
-                    (ControlKeyState | ShiftKeyState));
+        if (containsTemporaryFiles)
+        {
+            return false;
+        }
+
+        bool altDown = (keyState & AltKeyState) != 0;
+        bool controlDown = (keyState & ControlKeyState) != 0;
+        bool shiftDown = (keyState & ShiftKeyState) != 0;
+        if (altDown || (controlDown && shiftDown))
+        {
+            return true;
+        }
+
+        // Explicit Ctrl=copy and Shift=move gestures must win over the
+        // desktop-based shortcut default so the completion matches the
+        // feedback cursor shown to the user.
+        if (controlDown || shiftDown)
+        {
+            return false;
+        }
+
+        return shortcutOutsideDesktop && !sourcesOnDesktop;
     }
 
     public static bool IsRightButtonDrag(uint keyState)

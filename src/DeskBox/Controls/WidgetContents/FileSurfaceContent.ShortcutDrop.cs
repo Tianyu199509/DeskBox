@@ -32,6 +32,21 @@ public sealed partial class FileSurfaceContent
             action,
             SettingsService.ManagedDropActionFollowWindows,
             StringComparison.Ordinal);
+        // DeskBox's own file drags (same-widget reorder and cross-widget
+        // moves) must keep their existing move semantics even though their
+        // sources usually live outside the desktop. The desktop-based shortcut
+        // default applies to external shell payloads only.
+        bool isDeskBoxFileDrag = sourcePaths.Length > 0 &&
+            string.Equals(
+                TryGetString(
+                    dataView.Properties,
+                    DeskBoxDragData.InternalFileDragTokenProperty),
+                DeskBoxDragData.InternalFileDragToken,
+                StringComparison.Ordinal) &&
+            !string.IsNullOrWhiteSpace(
+                TryGetString(
+                    dataView.Properties,
+                    DeskBoxDragData.SourceWidgetIdProperty));
 
         return FileDropIntentPolicy.ResolveMappedTransfer(
             hasMappedFolder: !string.IsNullOrWhiteSpace(ViewModel.MappedFolderPath),
@@ -50,7 +65,32 @@ public sealed partial class FileSurfaceContent
             sameVolume,
             // The source may not advertise Link even though an extracted
             // filesystem path is sufficient for DeskBox to create a shortcut.
-            canLink: true);
+            canLink: true,
+            shortcutOutsideDesktop:
+                !isDeskBoxFileDrag &&
+                string.Equals(
+                    action,
+                    SettingsService.ManagedDropActionShortcutOutsideDesktop,
+                    StringComparison.Ordinal),
+            sourcesOnDesktop: ResolveSourcesOnDesktop(sourcePaths));
+    }
+
+    private static bool ResolveSourcesOnDesktop(
+        IEnumerable<string> sourcePaths)
+    {
+        string[] paths = sourcePaths
+            .Where(path => !string.IsNullOrWhiteSpace(path))
+            .ToArray();
+        if (paths.Length == 0)
+        {
+            return true;
+        }
+
+        (string userDesktop, string publicDesktop) =
+            FileService.GetDesktopPaths();
+        return FileDropIntentPolicy.AreAllUnderDirectories(
+            paths,
+            [userDesktop, publicDesktop]);
     }
 
     private static DataPackageOperation ToDataPackageOperation(

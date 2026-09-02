@@ -149,6 +149,8 @@ public partial class SettingsViewModel
                     SettingsService.ManagedDropActionMove,
                 SettingsService.ManagedDropActionFollowWindows =>
                     SettingsService.ManagedDropActionFollowWindows,
+                SettingsService.ManagedDropActionShortcutOutsideDesktop =>
+                    SettingsService.ManagedDropActionShortcutOutsideDesktop,
                 _ => SettingsService.ManagedDropActionCopy
             };
             SelectedQuickCaptureDefaultView = NormalizeQuickCaptureDefaultView(settings.QuickCaptureDefaultView);

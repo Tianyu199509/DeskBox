@@ -657,6 +657,21 @@ public sealed class SettingsServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task LoadAsync_PreservesShortcutOutsideDesktopDropAction()
+    {
+        await File.WriteAllTextAsync(
+            Path.Combine(_settingsRoot, "settings.json"),
+            "{\"managedDropAction\":\"ShortcutOutsideDesktop\"}");
+
+        var service = new SettingsService(_settingsRoot);
+        await service.LoadAsync();
+
+        Assert.Equal(
+            SettingsService.ManagedDropActionShortcutOutsideDesktop,
+            service.Settings.ManagedDropAction);
+    }
+
+    [Fact]
     public async Task LoadAsync_MigratesLegacyDisabledWideDetailToSinglePane()
     {
         await File.WriteAllTextAsync(

@@ -688,6 +688,7 @@
     "Settings.DropAction.Description": "Escolha se ao soltar copiará arquivos ou moverá o original para um Widget gerenciado",
     "Settings.DropAction.Move": "Mover",
     "Settings.DropAction.Copy": "Copiar",
+    "Settings.DropAction.ShortcutOutsideDesktop": "Mover arquivos da área de trabalho, criar atalhos para os demais",
     "Settings.AttachmentStorageMode.Title": "Armazenamento de anexos",
     "Settings.AttachmentStorageMode.Description": "Vincular usa o arquivo original; Copiar salva uma cópia separada no DeskBox",
     "Settings.AttachmentStorageMode.Link": "Link para o arquivo original",

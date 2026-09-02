@@ -702,6 +702,7 @@
   "Settings.DropAction.Description": "اختر ما إذا كنت تريد إسقاط الملفات أو نقل النسخة الأصلية إلى عنصر واجهة مستخدم مُدار",
   "Settings.DropAction.Move": "تحرك",
   "Settings.DropAction.Copy": "نسخ",
+  "Settings.DropAction.ShortcutOutsideDesktop": "نقل ملفات سطح المكتب وإنشاء اختصارات للبقية",
   "Settings.AttachmentStorageMode.Title": "طريقة حفظ المرفقات",
   "Settings.AttachmentStorageMode.Description": "يستخدم الربط الملف الأصلي؛ ويحفظ النسخ نسخة منفصلة داخل DeskBox",
   "Settings.AttachmentStorageMode.Link": "ربط الملف الأصلي",

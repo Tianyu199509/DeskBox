@@ -702,6 +702,7 @@
   "Settings.DropAction.Description": "Choisissez si vous supprimez les fichiers de copie ou déplacez l'original dans un widget géré",
   "Settings.DropAction.Move": "Déplacer",
   "Settings.DropAction.Copy": "Copier",
+  "Settings.DropAction.ShortcutOutsideDesktop": "Déplacer les fichiers du bureau, créer des raccourcis pour les autres",
   "Settings.AttachmentStorageMode.Title": "Stockage des pièces jointes",
   "Settings.AttachmentStorageMode.Description": "Le lien utilise le fichier d’origine; la copie enregistre un exemplaire distinct dans DeskBox",
   "Settings.AttachmentStorageMode.Link": "Lier le fichier d'origine",

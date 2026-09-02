@@ -702,6 +702,7 @@
   "Settings.DropAction.Description": "चुनें कि क्या प्रतिलिपि फ़ाइलें हटा दी जाएंगी या मूल को प्रबंधित विजेट में ले जाया जाएगा",
   "Settings.DropAction.Move": "हटो",
   "Settings.DropAction.Copy": "प्रतिलिपि",
+  "Settings.DropAction.ShortcutOutsideDesktop": "डेस्कटॉप फ़ाइलें ले जाएँ, बाकी के लिए शॉर्टकट बनाएँ",
   "Settings.AttachmentStorageMode.Title": "अटैचमेंट सहेजने का तरीका",
   "Settings.AttachmentStorageMode.Description": "लिंक मूल फ़ाइल का उपयोग करता है; कॉपी DeskBox में अलग प्रति सहेजती है",
   "Settings.AttachmentStorageMode.Link": "मूल फ़ाइल लिंक करें",

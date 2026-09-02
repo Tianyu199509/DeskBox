@@ -386,6 +386,8 @@ private string[]? _cachedWeatherRefreshIntervalDisplayNames;
                 SettingsService.ManagedDropActionMove,
             SettingsService.ManagedDropActionFollowWindows =>
                 SettingsService.ManagedDropActionFollowWindows,
+            SettingsService.ManagedDropActionShortcutOutsideDesktop =>
+                SettingsService.ManagedDropActionShortcutOutsideDesktop,
             _ => SettingsService.ManagedDropActionCopy
         };
         _selectedQuickCaptureDefaultView = NormalizeQuickCaptureDefaultView(settings.QuickCaptureDefaultView);

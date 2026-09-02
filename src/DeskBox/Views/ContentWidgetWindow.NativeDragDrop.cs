@@ -95,7 +95,8 @@ public sealed partial class ContentWidgetWindow
                     ShouldDefaultNativeFileDropToMove,
                     CreateNativeFileDropDescription,
                     ShouldUseNativeFileDropVisual,
-                    ShouldFollowWindowsNativeFileDrop);
+                    ShouldFollowWindowsNativeFileDrop,
+                    ShouldShortcutOutsideDesktopNativeFileDrop);
                 target.DragEnterEvent += NativeFileDropTarget_DragEnterEvent;
                 target.DragOverEvent += NativeFileDropTarget_DragOverEvent;
                 target.DragLeaveEvent += NativeFileDropTarget_DragLeaveEvent;
@@ -239,6 +240,14 @@ public sealed partial class ContentWidgetWindow
         return string.Equals(
             App.Current.SettingsService.Settings.ManagedDropAction,
             SettingsService.ManagedDropActionFollowWindows,
+            StringComparison.Ordinal);
+    }
+
+    private bool ShouldShortcutOutsideDesktopNativeFileDrop()
+    {
+        return string.Equals(
+            App.Current.SettingsService.Settings.ManagedDropAction,
+            SettingsService.ManagedDropActionShortcutOutsideDesktop,
             StringComparison.Ordinal);
     }
 

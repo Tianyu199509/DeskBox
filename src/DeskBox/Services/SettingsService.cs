@@ -221,6 +221,8 @@ public sealed class SettingsService
     public const string ManagedDropActionMove = "Move";
     public const string ManagedDropActionCopy = "Copy";
     public const string ManagedDropActionFollowWindows = "FollowWindows";
+    public const string ManagedDropActionShortcutOutsideDesktop =
+        "ShortcutOutsideDesktop";
 
     public const string AttachmentStorageModeLink = "Link";
     public const string AttachmentStorageModeCopy = "Copy";
@@ -2410,7 +2412,8 @@ settings.FocusClickedWidgetOnRaise = false;
 
         if (!string.Equals(settings.ManagedDropAction, ManagedDropActionMove, StringComparison.Ordinal) &&
             !string.Equals(settings.ManagedDropAction, ManagedDropActionCopy, StringComparison.Ordinal) &&
-            !string.Equals(settings.ManagedDropAction, ManagedDropActionFollowWindows, StringComparison.Ordinal))
+            !string.Equals(settings.ManagedDropAction, ManagedDropActionFollowWindows, StringComparison.Ordinal) &&
+            !string.Equals(settings.ManagedDropAction, ManagedDropActionShortcutOutsideDesktop, StringComparison.Ordinal))
         {
             settings.ManagedDropAction = ManagedDropActionMove;
             changed = true;

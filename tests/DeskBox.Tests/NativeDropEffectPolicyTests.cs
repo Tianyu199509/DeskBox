@@ -254,4 +254,137 @@ public sealed class NativeDropEffectPolicyTests
                 allowedEffects: NativeDropEffectPolicy.Move,
                 hasShellApplicationData: true));
     }
+
+    [Fact]
+    public void ShortcutOutsideDesktop_RequestsShortcutForNonDesktopSources()
+    {
+        Assert.True(
+            NativeDropEffectPolicy.ShouldCreateMappedShortcut(
+                containsTemporaryFiles: false,
+                keyState: 0,
+                shortcutOutsideDesktop: true,
+                sourcesOnDesktop: false));
+        Assert.True(
+            NativeDropEffectPolicy.ShouldCopyMappedTransfer(
+                containsTemporaryFiles: false,
+                keyState: 0,
+                defaultMove: true,
+                shortcutOutsideDesktop: true,
+                sourcesOnDesktop: false));
+    }
+
+    [Fact]
+    public void ShortcutOutsideDesktop_ModifierGesturesStillWin()
+    {
+        const uint controlKeyState = 0x0008;
+        const uint shiftKeyState = 0x0004;
+
+        // Ctrl=copy and Shift=move must beat the desktop-based shortcut
+        // default so the completed operation matches the feedback cursor.
+        Assert.False(
+            NativeDropEffectPolicy.ShouldCreateMappedShortcut(
+                containsTemporaryFiles: false,
+                keyState: controlKeyState,
+                shortcutOutsideDesktop: true,
+                sourcesOnDesktop: false));
+        Assert.False(
+            NativeDropEffectPolicy.ShouldCreateMappedShortcut(
+                containsTemporaryFiles: false,
+                keyState: shiftKeyState,
+                shortcutOutsideDesktop: true,
+                sourcesOnDesktop: false));
+        // Alt and Ctrl+Shift remain explicit shortcut gestures.
+        Assert.True(
+            NativeDropEffectPolicy.ShouldCreateMappedShortcut(
+                containsTemporaryFiles: false,
+                keyState: NativeDropEffectPolicy.AltKeyState,
+                shortcutOutsideDesktop: true,
+                sourcesOnDesktop: true));
+        Assert.True(
+            NativeDropEffectPolicy.ShouldCreateMappedShortcut(
+                containsTemporaryFiles: false,
+                keyState: controlKeyState | shiftKeyState,
+                shortcutOutsideDesktop: true,
+                sourcesOnDesktop: true));
+    }
+
+    [Fact]
+    public void ShortcutOutsideDesktop_KeepsMoveForDesktopSources()
+    {
+        Assert.False(
+            NativeDropEffectPolicy.ShouldCreateMappedShortcut(
+                containsTemporaryFiles: false,
+                keyState: 0,
+                shortcutOutsideDesktop: true,
+                sourcesOnDesktop: true));
+        Assert.False(
+            NativeDropEffectPolicy.ShouldCopyMappedTransfer(
+                containsTemporaryFiles: false,
+                keyState: 0,
+                defaultMove: true,
+                shortcutOutsideDesktop: true,
+                sourcesOnDesktop: true));
+    }
+
+    [Fact]
+    public void ShortcutOutsideDesktop_NeverAppliesToTemporaryPayloads()
+    {
+        Assert.False(
+            NativeDropEffectPolicy.ShouldCreateMappedShortcut(
+                containsTemporaryFiles: true,
+                keyState: 0,
+                shortcutOutsideDesktop: true,
+                sourcesOnDesktop: false));
+        Assert.True(
+            NativeDropEffectPolicy.ShouldCopyMappedTransfer(
+                containsTemporaryFiles: true,
+                keyState: 0,
+                defaultMove: true,
+                shortcutOutsideDesktop: true,
+                sourcesOnDesktop: false));
+    }
+
+    [Fact]
+    public void ShortcutOutsideDesktop_FeedbackUsesLinkWhenAllowed()
+    {
+        uint allowed = NativeDropEffectPolicy.Copy |
+                       NativeDropEffectPolicy.Move |
+                       NativeDropEffectPolicy.Link;
+
+        Assert.Equal(
+            NativeDropEffectPolicy.Link,
+            NativeDropEffectPolicy.ResolveFeedbackEffect(
+                hasFileData: true,
+                hasVirtualFileData: false,
+                keyState: 0,
+                allowedEffects: allowed,
+                shortcutOutsideDesktop: true,
+                sourcesOnDesktop: false));
+        Assert.Equal(
+            NativeDropEffectPolicy.Move,
+            NativeDropEffectPolicy.ResolveFeedbackEffect(
+                hasFileData: true,
+                hasVirtualFileData: false,
+                keyState: 0,
+                allowedEffects: allowed,
+                shortcutOutsideDesktop: true,
+                sourcesOnDesktop: true));
+    }
+
+    [Fact]
+    public void ShortcutOutsideDesktop_FeedbackFallsBackToCopyWithoutLink()
+    {
+        uint allowed = NativeDropEffectPolicy.Copy |
+                       NativeDropEffectPolicy.Move;
+
+        Assert.Equal(
+            NativeDropEffectPolicy.Copy,
+            NativeDropEffectPolicy.ResolveFeedbackEffect(
+                hasFileData: true,
+                hasVirtualFileData: false,
+                keyState: 0,
+                allowedEffects: allowed,
+                shortcutOutsideDesktop: true,
+                sourcesOnDesktop: false));
+    }
 }

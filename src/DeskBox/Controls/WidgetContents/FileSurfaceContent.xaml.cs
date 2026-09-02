@@ -3067,7 +3067,13 @@ public sealed partial class FileSurfaceContent :
                             StringComparison.Ordinal),
                         altDown: Win32Helper.IsKeyPressed(VirtualKey.Menu),
                         followWindows: false,
-                        sameVolume: sameVolume)
+                        sameVolume: sameVolume,
+                        shortcutOutsideDesktop: string.Equals(
+                            _settingsService.Settings.ManagedDropAction,
+                            SettingsService.ManagedDropActionShortcutOutsideDesktop,
+                            StringComparison.Ordinal),
+                        sourcesOnDesktop: ResolveSourcesOnDesktop(
+                            droppedFiles.Select(file => file.Path)))
                 });
         bool? moveWhenMapped = mapped
             ? intent == FileDropIntent.Move

@@ -686,7 +686,10 @@ public static class DragDropPermissionService
         }
 
         string workingDirectory = Path.GetDirectoryName(targetPath) ?? AppContext.BaseDirectory;
-        string iconPath = Path.Combine(AppContext.BaseDirectory, "Assets", "deskbox.ico");
+        // An empty icon location lets the shell resolve the source file's own
+        // icon (embedded icon for executables, type association for documents)
+        // instead of stamping every shortcut with the DeskBox branding.
+        string iconPath = string.Empty;
 #if DESKBOX_NATIVE_AOT
         var metadata = new ShortcutInfo(
             targetPath,
@@ -752,7 +755,11 @@ public static class DragDropPermissionService
         shellLink.SetPath(targetPath);
         shellLink.SetArguments(arguments);
         shellLink.SetWorkingDirectory(workingDirectory);
-        shellLink.SetIconLocation(iconPath, 0);
+        if (!string.IsNullOrEmpty(iconPath))
+        {
+            shellLink.SetIconLocation(iconPath, 0);
+        }
+
         var persistFile = (System.Runtime.InteropServices.ComTypes.IPersistFile)shellLink;
         persistFile.Save(shortcutPath, true);
     }

@@ -702,6 +702,7 @@
     "Settings.DropAction.Description": "Choose whether drops copy files, move the original, or follow the Windows default",
     "Settings.DropAction.Move": "Move",
     "Settings.DropAction.Copy": "Copy",
+    "Settings.DropAction.ShortcutOutsideDesktop": "Move desktop files, create shortcuts for others",
     "Settings.AttachmentStorageMode.Title": "Attachment storage",
     "Settings.AttachmentStorageMode.Description": "Link uses the original file; Copy saves a separate copy in DeskBox",
     "Settings.AttachmentStorageMode.Link": "Link original file",

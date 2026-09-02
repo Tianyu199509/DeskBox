@@ -541,7 +541,8 @@ public class AppSettings
 
     /// <summary>
     /// How files should be handled when dropped into a managed storage widget.
-    /// Valid values: <c>"Move"</c>, <c>"Copy"</c>, <c>"FollowWindows"</c>.
+    /// Valid values: <c>"Move"</c>, <c>"Copy"</c>, <c>"FollowWindows"</c>,
+    /// <c>"ShortcutOutsideDesktop"</c>.
     /// </summary>
     public string ManagedDropAction { get; set; } = "Move";
 

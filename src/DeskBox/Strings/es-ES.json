@@ -702,6 +702,7 @@
   "Settings.DropAction.Description": "Elija si descarta copiar archivos o mover el original a un widget administrado",
   "Settings.DropAction.Move": "Mover",
   "Settings.DropAction.Copy": "Copiar",
+  "Settings.DropAction.ShortcutOutsideDesktop": "Mover archivos del escritorio, crear accesos directos para el resto",
   "Settings.AttachmentStorageMode.Title": "Almacenamiento de archivos adjuntos",
   "Settings.AttachmentStorageMode.Description": "Vincular usa el archivo original; Copiar guarda una copia separada en DeskBox",
   "Settings.AttachmentStorageMode.Link": "Vincular archivo original",

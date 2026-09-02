@@ -702,6 +702,7 @@
   "Settings.DropAction.Description": "Выберите, следует ли удалять файлы копирования или перемещать оригинал в управляемый виджет.",
   "Settings.DropAction.Move": "Переместить",
   "Settings.DropAction.Copy": "Копировать",
+  "Settings.DropAction.ShortcutOutsideDesktop": "Перемещать файлы с рабочего стола, создавать ярлыки для остальных",
   "Settings.AttachmentStorageMode.Title": "Хранение вложений",
   "Settings.AttachmentStorageMode.Description": "Ссылка использует исходный файл; копирование сохраняет отдельную копию в DeskBox",
   "Settings.AttachmentStorageMode.Link": "Ссылка на исходный файл",

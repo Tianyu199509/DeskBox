@@ -93,6 +93,132 @@ public sealed class FileInteractionPolicyTests
     }
 
     [Fact]
+    public void DropIntent_ShortcutOutsideDesktop_MovesDesktopResidentSources()
+    {
+        Assert.Equal(
+            FileDropIntent.Move,
+            FileDropIntentPolicy.ResolveMappedTransfer(
+                hasMappedFolder: true,
+                forceCopy: false,
+                controlDown: false,
+                shiftDown: false,
+                defaultMove: true,
+                shortcutOutsideDesktop: true,
+                sourcesOnDesktop: true));
+    }
+
+    [Fact]
+    public void DropIntent_ShortcutOutsideDesktop_LinksNonDesktopSources()
+    {
+        Assert.Equal(
+            FileDropIntent.Shortcut,
+            FileDropIntentPolicy.ResolveMappedTransfer(
+                hasMappedFolder: true,
+                forceCopy: false,
+                controlDown: false,
+                shiftDown: false,
+                defaultMove: true,
+                shortcutOutsideDesktop: true,
+                sourcesOnDesktop: false,
+                canLink: true));
+    }
+
+    [Fact]
+    public void DropIntent_ShortcutOutsideDesktop_ModifierGesturesStillWin()
+    {
+        Assert.Equal(
+            FileDropIntent.Copy,
+            FileDropIntentPolicy.ResolveMappedTransfer(
+                hasMappedFolder: true,
+                forceCopy: false,
+                controlDown: true,
+                shiftDown: false,
+                defaultMove: true,
+                shortcutOutsideDesktop: true,
+                sourcesOnDesktop: false));
+        Assert.Equal(
+            FileDropIntent.Shortcut,
+            FileDropIntentPolicy.ResolveMappedTransfer(
+                hasMappedFolder: true,
+                forceCopy: false,
+                controlDown: false,
+                shiftDown: false,
+                defaultMove: true,
+                altDown: true,
+                canLink: true,
+                shortcutOutsideDesktop: true,
+                sourcesOnDesktop: true));
+    }
+
+    [Fact]
+    public void DropIntent_ShortcutOutsideDesktop_PreservesDefaultWhenDisabled()
+    {
+        Assert.Equal(
+            FileDropIntent.Move,
+            FileDropIntentPolicy.ResolveMappedTransfer(
+                hasMappedFolder: true,
+                forceCopy: false,
+                controlDown: false,
+                shiftDown: false,
+                defaultMove: true,
+                shortcutOutsideDesktop: false,
+                sourcesOnDesktop: false));
+    }
+
+    [Fact]
+    public void DropIntent_ShortcutOutsideDesktop_ForceCopyStillWins()
+    {
+        Assert.Equal(
+            FileDropIntent.Copy,
+            FileDropIntentPolicy.ResolveMappedTransfer(
+                hasMappedFolder: true,
+                forceCopy: true,
+                controlDown: false,
+                shiftDown: false,
+                defaultMove: true,
+                shortcutOutsideDesktop: true,
+                sourcesOnDesktop: false));
+    }
+
+    [Theory]
+    [InlineData(@"C:\Users\Me\Desktop\file.txt", @"C:\Users\Me\Desktop", true)]
+    [InlineData(@"C:\Users\Me\Desktop", @"C:\Users\Me\Desktop", true)]
+    [InlineData(@"C:\Users\Me\DesktopBackup\file.txt", @"C:\Users\Me\Desktop", false)]
+    [InlineData(@"C:\Users\Me\Downloads\file.txt", @"C:\Users\Me\Desktop", false)]
+    public void IsUnderDirectory_TreatsBoundariesAndSiblingsCorrectly(
+        string path,
+        string directory,
+        bool expected)
+    {
+        Assert.Equal(expected, FileDropIntentPolicy.IsUnderDirectory(path, directory));
+    }
+
+    [Fact]
+    public void AreAllUnderDirectories_RequiresEverySourceUnderARoot()
+    {
+        var roots = new[]
+        {
+            @"C:\Users\Me\Desktop",
+            @"C:\Users\Public\Desktop"
+        };
+
+        Assert.True(FileDropIntentPolicy.AreAllUnderDirectories(
+            [@"C:\Users\Me\Desktop\a.txt", @"C:\Users\Public\Desktop\b.txt"],
+            roots));
+        Assert.False(FileDropIntentPolicy.AreAllUnderDirectories(
+            [@"C:\Users\Me\Desktop\a.txt", @"C:\Users\Me\Downloads\b.txt"],
+            roots));
+    }
+
+    [Fact]
+    public void AreAllUnderDirectories_UnknownPayloadCountsAsDesktopResident()
+    {
+        Assert.True(FileDropIntentPolicy.AreAllUnderDirectories(
+            [],
+            [@"C:\Users\Me\Desktop"]));
+    }
+
+    [Fact]
     public void WidgetIconSizeOverride_RoundTripsWithoutChangingTheGlobalSetting()
     {
         var config = new WidgetConfig { IconSizeOverride = 48 };

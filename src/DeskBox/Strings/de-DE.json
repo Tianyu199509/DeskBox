@@ -688,6 +688,7 @@
     "Settings.DropAction.Description": "Wählen, ob Drops Dateien kopieren oder das Original in ein verwaltetes Widget verschieben",
     "Settings.DropAction.Move": "Verschieben",
     "Settings.DropAction.Copy": "Kopieren",
+    "Settings.DropAction.ShortcutOutsideDesktop": "Desktop-Dateien verschieben, für andere Verknüpfungen erstellen",
     "Settings.AttachmentStorageMode.Title": "Speicherort für Anhänge",
     "Settings.AttachmentStorageMode.Description": "Verknüpfen nutzt die Originaldatei; Kopieren speichert eine separate Kopie in DeskBox",
     "Settings.AttachmentStorageMode.Link": "Originaldatei verknüpfen",
