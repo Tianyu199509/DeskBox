@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 20 20">
+  <defs>
+    <linearGradient id="tomato" x1="4" y1="4" x2="16" y2="17" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FF786A" />
+      <stop offset="1" stop-color="#D94236" />
+    </linearGradient>
+    <linearGradient id="leaf" x1="7" y1="2" x2="13" y2="7" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#79C98D" />
+      <stop offset="1" stop-color="#2F8B63" />
+    </linearGradient>
+  </defs>
+  <path d="M10 5.1c4.35 0 7.35 2.64 7.35 6.2 0 3.72-3.2 6.2-7.35 6.2s-7.35-2.48-7.35-6.2c0-3.56 3-6.2 7.35-6.2Z" fill="url(#tomato)" />
+  <path d="M10 5.7 7.05 4.3l2.18-.55L10 1.9l.77 1.85 2.18.55L10 5.7Z" fill="url(#leaf)" stroke="#267351" stroke-width=".35" stroke-linejoin="round" />
+  <circle cx="10" cy="11.25" r="3.55" fill="#FFFFFF" fill-opacity=".16" stroke="#FFFFFF" stroke-opacity=".92" stroke-width="1.05" />
+  <path d="M10 8.8v2.65l1.8 1.15" fill="none" stroke="#FFFFFF" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round" />
+</svg>

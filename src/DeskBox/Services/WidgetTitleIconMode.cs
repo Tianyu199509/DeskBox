@@ -57,7 +57,8 @@ public enum WidgetTitleIconKind
     Glance,
     Tags,
     Search,
-    SystemMonitor
+    SystemMonitor,
+    Pomodoro
 }
 
 public static class WidgetTitleIconKindNames
@@ -73,6 +74,7 @@ public static class WidgetTitleIconKindNames
     public const string Tags = nameof(WidgetTitleIconKind.Tags);
     public const string Search = nameof(WidgetTitleIconKind.Search);
     public const string SystemMonitor = nameof(WidgetTitleIconKind.SystemMonitor);
+    public const string Pomodoro = nameof(WidgetTitleIconKind.Pomodoro);
 
     public static WidgetTitleIconKind NormalizeKind(string? value)
     {
@@ -95,6 +97,7 @@ public static class WidgetTitleIconKindNames
             WidgetTitleIconKind.Tags => Tags,
             WidgetTitleIconKind.Search => Search,
             WidgetTitleIconKind.SystemMonitor => SystemMonitor,
+            WidgetTitleIconKind.Pomodoro => Pomodoro,
             _ => Default
         };
     }
@@ -117,6 +120,7 @@ public static class WidgetTitleIconKindNames
             WidgetKind.Tags => Tags,
             WidgetKind.Search => Search,
             WidgetKind.SystemMonitor => SystemMonitor,
+            WidgetKind.Pomodoro => Pomodoro,
             _ => Default
         };
     }
@@ -134,6 +138,7 @@ public static class WidgetTitleIconKindNames
             "\uE8EC" => Tags,
             "\uE721" => Search,
             "\uE9D9" => SystemMonitor,
+            "\uE916" => Pomodoro,
             _ => Default
         };
     }
@@ -152,6 +157,7 @@ public static class WidgetTitleIconKindNames
             WidgetTitleIconKind.Tags => "WidgetTitleIcon.Label.Tags",
             WidgetTitleIconKind.Search => "WidgetTitleIcon.Label.Search",
             WidgetTitleIconKind.SystemMonitor => "WidgetTitleIcon.Label.SystemMonitor",
+            WidgetTitleIconKind.Pomodoro => "WidgetTitleIcon.Label.Pomodoro",
             _ => "WidgetTitleIcon.Label.Default"
         };
     }
@@ -170,6 +176,7 @@ public static class WidgetTitleIconKindNames
             WidgetTitleIconKind.Tags => "tags",
             WidgetTitleIconKind.Search => "search",
             WidgetTitleIconKind.SystemMonitor => "system-monitor",
+            WidgetTitleIconKind.Pomodoro => "pomodoro",
             _ => "default"
         };
     }

@@ -2544,5 +2544,18 @@
   "Settings.ManagedPath.DesktopShortcut.Description": "現在の保存フォルダーへのショートカットを作成します。削除した場合、DeskBox が再作成することはありません。",
   "Settings.ManagedPath.DesktopShortcut.StatusCreated": "デスクトップ ショートカットを作成済み",
   "Settings.ManagedPath.DesktopShortcut.StatusNotCreated": "デスクトップ ショートカットはありません",
-  "Settings.ManagedPath.DesktopShortcut.Remove": "削除"
+  "Settings.ManagedPath.DesktopShortcut.Remove": "削除",
+  "Pomodoro.Title": "ポモドーロ",
+  "Pomodoro.Phase.Focus": "集中",
+  "Pomodoro.Phase.Break": "休憩",
+  "Pomodoro.Action.Start": "開始",
+  "Pomodoro.Action.Pause": "一時停止",
+  "Pomodoro.Action.Reset": "リセット",
+  "Pomodoro.Action.Skip": "スキップ",
+  "Pomodoro.RoundSummary": "ラウンド {0}/4",
+  "Pomodoro.Focus.Description": "一度に一つのことへ集中しましょう。",
+  "Pomodoro.Break.Description": "少し画面から離れて、集中力を回復しましょう。",
+  "WidgetContent.Pomodoro.StatusLabel": "実装済み",
+  "WidgetContent.Pomodoro.StatusDescription": "25分の集中と5分の休憩を繰り返すタイマー",
+  "WidgetTitleIcon.Label.Pomodoro": "ポモドーロ"
 }

@@ -2544,5 +2544,18 @@
   "Settings.ManagedPath.DesktopShortcut.Description": "建立後可直接開啟目前的收納資料夾；手動刪除後，DeskBox 不會再次建立",
   "Settings.ManagedPath.DesktopShortcut.StatusCreated": "已建立桌面捷徑",
   "Settings.ManagedPath.DesktopShortcut.StatusNotCreated": "尚未建立桌面捷徑",
-  "Settings.ManagedPath.DesktopShortcut.Remove": "移除"
+  "Settings.ManagedPath.DesktopShortcut.Remove": "移除",
+  "Pomodoro.Title": "番茄鐘",
+  "Pomodoro.Phase.Focus": "專注",
+  "Pomodoro.Phase.Break": "休息",
+  "Pomodoro.Action.Start": "開始",
+  "Pomodoro.Action.Pause": "暫停",
+  "Pomodoro.Action.Reset": "重設",
+  "Pomodoro.Action.Skip": "跳過",
+  "Pomodoro.RoundSummary": "第 {0}/4 輪",
+  "Pomodoro.Focus.Description": "一次只做一件事，讓這顆番茄慢慢成熟。",
+  "Pomodoro.Break.Description": "暫時離開螢幕，讓注意力恢復一下。",
+  "WidgetContent.Pomodoro.StatusLabel": "已實現",
+  "WidgetContent.Pomodoro.StatusDescription": "25 分鐘專注與 5 分鐘休息的循環計時器",
+  "WidgetTitleIcon.Label.Pomodoro": "番茄鐘"
 }

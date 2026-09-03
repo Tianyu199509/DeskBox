@@ -2254,7 +2254,7 @@ public sealed partial class WidgetShell : UserControl
         CompactPlayPauseIcon.Kind = presentation.IsPlaying
             ? MusicTransportIconKind.Pause
             : MusicTransportIconKind.Play;
-        ApplyCompactActionLabels(presentation.IsPlaying);
+        ApplyCompactActionLabels(presentation);
         UpdateCompactVinylRotation(showVinyl && presentation.IsPlaying);
         ApplyCompactForegroundTheme(presentation);
 
@@ -2548,14 +2548,17 @@ public sealed partial class WidgetShell : UserControl
         textBlock.TextTrimming = TextTrimming.CharacterEllipsis;
     }
 
-    private void ApplyCompactActionLabels(bool isPlaying)
+    private void ApplyCompactActionLabels(WidgetCompactPresentation presentation)
     {
         var localization = App.Current.LocalizationService;
-        SetAccessibleLabel(CompactPrimaryActionButton, localization.T("Todo.Menu.MarkCompleted"));
+        string primaryActionLabel = string.IsNullOrWhiteSpace(presentation.PrimaryActionLabel)
+            ? localization.T("Todo.Menu.MarkCompleted")
+            : presentation.PrimaryActionLabel;
+        SetAccessibleLabel(CompactPrimaryActionButton, primaryActionLabel);
         SetAccessibleLabel(CompactPreviousButton, localization.T("Music.Control.Previous"));
         SetAccessibleLabel(
             CompactPlayPauseButton,
-            localization.T(isPlaying ? "Music.Control.Pause" : "Music.Control.Play"));
+            localization.T(presentation.IsPlaying ? "Music.Control.Pause" : "Music.Control.Play"));
         SetAccessibleLabel(CompactNextButton, localization.T("Music.Control.Next"));
         SetAccessibleLabel(CompactExpandButton, localization.T("Widget.Compact.Expand"));
     }

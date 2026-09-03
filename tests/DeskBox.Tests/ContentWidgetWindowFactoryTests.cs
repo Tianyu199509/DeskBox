@@ -45,6 +45,21 @@ public sealed class ContentWidgetWindowFactoryTests : IDisposable
         Assert.True(WidgetRegistry.Default.CanCreateWindow(WidgetKind.Music));
     }
 
+    [Fact]
+    public void CreateContentWindowPlan_ReturnsPomodoroAdapterForCreatablePomodoroKind()
+    {
+        var config = CreateConfig("pomodoro-window", WidgetKind.Pomodoro);
+        var factory = CreateFactory();
+
+        var plan = factory.CreateContentWindowPlan(config);
+
+        Assert.Equal(config, plan.Config);
+        Assert.Equal(WidgetKind.Pomodoro, plan.Descriptor.WidgetKind);
+        Assert.IsType<PomodoroWidgetContentAdapter>(plan.Content);
+        Assert.True(factory.CanCreateContentWindow(WidgetKind.Pomodoro));
+        Assert.True(WidgetRegistry.Default.CanCreateWindow(WidgetKind.Pomodoro));
+    }
+
     [Theory]
     [InlineData(WidgetKind.Tags)]
     [InlineData(WidgetKind.SystemMonitor)]

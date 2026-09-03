@@ -2544,5 +2544,18 @@
   "Settings.ManagedPath.DesktopShortcut.Description": "Creates a shortcut to the current storage folder. If you delete it, DeskBox will not create it again.",
   "Settings.ManagedPath.DesktopShortcut.StatusCreated": "Desktop shortcut created",
   "Settings.ManagedPath.DesktopShortcut.StatusNotCreated": "No desktop shortcut",
-  "Settings.ManagedPath.DesktopShortcut.Remove": "Remove"
+  "Settings.ManagedPath.DesktopShortcut.Remove": "Remove",
+  "Pomodoro.Title": "Pomodoro",
+  "Pomodoro.Phase.Focus": "Focus",
+  "Pomodoro.Phase.Break": "Break",
+  "Pomodoro.Action.Start": "Start",
+  "Pomodoro.Action.Pause": "Pause",
+  "Pomodoro.Action.Reset": "Reset",
+  "Pomodoro.Action.Skip": "Skip",
+  "Pomodoro.RoundSummary": "Round {0} of 4",
+  "Pomodoro.Focus.Description": "Focus on one task at a time and let the tomato ripen.",
+  "Pomodoro.Break.Description": "Step away from the screen for a moment and let your focus recover.",
+  "WidgetContent.Pomodoro.StatusLabel": "Implemented",
+  "WidgetContent.Pomodoro.StatusDescription": "Focus timer with guided breaks",
+  "WidgetTitleIcon.Label.Pomodoro": "Pomodoro"
 }

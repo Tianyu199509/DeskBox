@@ -240,13 +240,24 @@ public sealed partial class OnboardingWindow : Window
         ApplyTwoColumnTaskLayout(TaskStep4Layout, TaskStep4VisualStage, compact);
         ApplyTwoColumnTaskLayout(TaskStep2Layout, TaskStep2VisualStage, compact);
 
+        Border[] cards =
+        [
+            TaskStep5TodoCard,
+            TaskStep5QuickCaptureCard,
+            TaskStep5SearchCard,
+            TaskStep5WeatherCard,
+            TaskStep5MusicCard,
+            TaskStep5GlanceCard,
+            TaskStep5PomodoroCard
+        ];
+
         TaskStep5FeatureGrid.ColumnDefinitions.Clear();
         TaskStep5FeatureGrid.RowDefinitions.Clear();
         TaskStep5FeatureSection.Width = compact
             ? Math.Min(720, Math.Max(520, availableWidth - 56))
             : 720;
         int columnCount = compact ? 2 : 3;
-        int rowCount = compact ? 3 : 2;
+        int rowCount = (cards.Length + columnCount - 1) / columnCount;
         for (int index = 0; index < columnCount; index++)
         {
             TaskStep5FeatureGrid.ColumnDefinitions.Add(new ColumnDefinition
@@ -263,15 +274,6 @@ public sealed partial class OnboardingWindow : Window
             });
         }
 
-        Border[] cards =
-        [
-            TaskStep5TodoCard,
-            TaskStep5QuickCaptureCard,
-            TaskStep5SearchCard,
-            TaskStep5WeatherCard,
-            TaskStep5MusicCard,
-            TaskStep5GlanceCard
-        ];
         for (int index = 0; index < cards.Length; index++)
         {
             Grid.SetRow(cards[index], index / columnCount);
@@ -355,6 +357,7 @@ public sealed partial class OnboardingWindow : Window
         TaskStep5WeatherToggle.IsEnabled = false;
         TaskStep5MusicToggle.IsEnabled = false;
         TaskStep5GlanceToggle.IsEnabled = false;
+        TaskStep5PomodoroToggle.IsEnabled = false;
         NextButton.IsEnabled = false;
         BackButton.IsEnabled = false;
         await _featureWidgetSelectionUpdateTask;
@@ -802,6 +805,7 @@ public sealed partial class OnboardingWindow : Window
             TaskStep5WeatherCard,
             TaskStep5MusicCard,
             TaskStep5GlanceCard,
+            TaskStep5PomodoroCard,
             TaskStep5OptionalHint
         ];
         for (int index = 0; index < cards.Length; index++)

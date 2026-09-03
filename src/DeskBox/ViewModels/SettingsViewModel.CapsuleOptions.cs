@@ -892,6 +892,7 @@ public partial class SettingsViewModel
         WidgetKind.Todo => _localizationService.T("WidgetTitleIcon.Label.Todo"),
         WidgetKind.Music => _localizationService.T("WidgetTitleIcon.Label.Music"),
         WidgetKind.Weather => _localizationService.T("WidgetTitleIcon.Label.Weather"),
+        WidgetKind.Pomodoro => _localizationService.T("WidgetTitleIcon.Label.Pomodoro"),
         WidgetKind.Tags => _localizationService.T("WidgetTitleIcon.Label.Tags"),
         WidgetKind.SystemMonitor => _localizationService.T("WidgetTitleIcon.Label.SystemMonitor"),
         _ => _localizationService.T("WidgetTitleIcon.Label.Default")
@@ -903,6 +904,7 @@ public partial class SettingsViewModel
         WidgetKind.Todo => "\uE73E",
         WidgetKind.Music => "\uE8D6",
         WidgetKind.Weather => "\uE706",
+        WidgetKind.Pomodoro => "\uE916",
         _ => "\uE8A5"
     };
 

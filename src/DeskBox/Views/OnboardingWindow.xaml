@@ -748,7 +748,7 @@
                             x:Name="TaskStep5FeatureGrid"
                             ColumnDefinitions="*,*,*"
                             ColumnSpacing="12"
-                            RowDefinitions="Auto,Auto"
+                            RowDefinitions="Auto,Auto,Auto"
                             RowSpacing="12">
                             <Border x:Name="TaskStep5TodoCard" Style="{StaticResource FeatureChoiceCard}">
                             <Grid RowDefinitions="Auto,Auto">
@@ -820,6 +820,18 @@
                                         <ToggleSwitch Grid.Column="1" x:Name="TaskStep5GlanceToggle" Width="40" MinWidth="0" HorizontalAlignment="Right" VerticalAlignment="Center" OnContent="" OffContent="" Tag="Glance" Toggled="TaskStep5FeatureToggle_Toggled"/>
                                     </Grid>
                                     <TextBlock Grid.Row="1" Margin="0,8,0,0" FontSize="11.5" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" svc:Localized.Key="WidgetContent.Glance.StatusDescription"/>
+                                </Grid>
+                            </Border>
+                            <Border x:Name="TaskStep5PomodoroCard" Grid.Row="2" Style="{StaticResource FeatureChoiceCard}">
+                                <Grid RowDefinitions="Auto,Auto">
+                                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                                        <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                                            <controls:WidgetTitleIcon IconKind="Pomodoro" Mode="Color" IconSize="16"/>
+                                            <TextBlock VerticalAlignment="Center" FontSize="14" FontWeight="SemiBold" svc:Localized.Key="Pomodoro.Title"/>
+                                        </StackPanel>
+                                        <ToggleSwitch Grid.Column="1" x:Name="TaskStep5PomodoroToggle" Width="40" MinWidth="0" HorizontalAlignment="Right" VerticalAlignment="Center" OnContent="" OffContent="" Tag="Pomodoro" Toggled="TaskStep5FeatureToggle_Toggled"/>
+                                    </Grid>
+                                    <TextBlock Grid.Row="1" Margin="0,8,0,0" FontSize="11.5" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" svc:Localized.Key="WidgetContent.Pomodoro.StatusDescription"/>
                                 </Grid>
                             </Border>
                         </Grid>

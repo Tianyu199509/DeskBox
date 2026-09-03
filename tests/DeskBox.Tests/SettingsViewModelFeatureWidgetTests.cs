@@ -24,7 +24,8 @@ public sealed class FeatureWidgetEntryFactoryTests
             WidgetKind.Music,
             WidgetKind.Weather,
             WidgetKind.Search,
-            WidgetKind.Glance
+            WidgetKind.Glance,
+            WidgetKind.Pomodoro
         ], entries.Select(entry => entry.Kind));
         Assert.All(entries, entry =>
         {

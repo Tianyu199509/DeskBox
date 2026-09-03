@@ -73,6 +73,7 @@ public sealed class ContentWidgetWindowFactorySurfaceTests
     [InlineData(WidgetKind.Music)]
     [InlineData(WidgetKind.Weather)]
     [InlineData(WidgetKind.Search)]
+    [InlineData(WidgetKind.Pomodoro)]
     public void EveryCurrentlyAvailableKind_HasUnifiedSurfaceContent(
         WidgetKind kind)
     {

@@ -125,7 +125,18 @@ public sealed class WidgetContentFactory
             HasSettingsPage: true,
             SettingsSectionTag: "GlanceSettings",
             ChromeCategory: WidgetChromeCategory.Display,
-            DefaultChromeMode: WidgetChromeMode.Overlay)
+            DefaultChromeMode: WidgetChromeMode.Overlay),
+        new(
+            WidgetKind.Pomodoro,
+            "Pomodoro",
+            "\uE916",
+            WidgetContentStage.Implemented,
+            CanShowInCreateEntry: false,
+            WidgetContentAvailability.Available,
+            "WidgetContent.Pomodoro.StatusLabel",
+            "WidgetContent.Pomodoro.StatusDescription",
+            ChromeCategory: WidgetChromeCategory.Interactive,
+            DefaultChromeMode: WidgetChromeMode.Standard)
     ];
 
     private static readonly IReadOnlyDictionary<WidgetKind, WidgetContentDescriptor> Descriptors =
@@ -268,6 +279,7 @@ public sealed class WidgetContentFactory
             new WeatherWidgetContentProvider(),
             new GlanceWidgetContentProvider(),
             new SearchWidgetContentProvider(),
+            new PomodoroWidgetContentProvider(),
             new PlaceholderWidgetContentProvider(WidgetKind.Tags),
             new PlaceholderWidgetContentProvider(WidgetKind.SystemMonitor)
         ];

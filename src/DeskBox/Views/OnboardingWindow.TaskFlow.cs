@@ -305,6 +305,9 @@ public sealed partial class OnboardingWindow
             TaskStep5GlanceToggle.IsOn = FeatureWidgetSettings.IsEnabled(
                 _settingsService.Settings,
                 WidgetKind.Glance);
+            TaskStep5PomodoroToggle.IsOn = FeatureWidgetSettings.IsEnabled(
+                _settingsService.Settings,
+                WidgetKind.Pomodoro);
             _hasInitializedFeatureToggles = true;
         }
         finally

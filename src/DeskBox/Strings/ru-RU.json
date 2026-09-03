@@ -2544,5 +2544,18 @@
   "Settings.ManagedPath.DesktopShortcut.Description": "Создаёт ярлык текущей папки хранилища. Если удалить его, DeskBox не будет создавать его заново.",
   "Settings.ManagedPath.DesktopShortcut.StatusCreated": "Ярлык на рабочем столе создан",
   "Settings.ManagedPath.DesktopShortcut.StatusNotCreated": "Ярлыка на рабочем столе нет",
-  "Settings.ManagedPath.DesktopShortcut.Remove": "Удалить"
+  "Settings.ManagedPath.DesktopShortcut.Remove": "Удалить",
+  "Pomodoro.Title": "Помодоро",
+  "Pomodoro.Phase.Focus": "Фокус",
+  "Pomodoro.Phase.Break": "Перерыв",
+  "Pomodoro.Action.Start": "Начать",
+  "Pomodoro.Action.Pause": "Пауза",
+  "Pomodoro.Action.Reset": "Сбросить",
+  "Pomodoro.Action.Skip": "Пропустить",
+  "Pomodoro.RoundSummary": "Раунд {0} из 4",
+  "Pomodoro.Focus.Description": "Сосредоточьтесь на одной задаче и дайте помидору созреть.",
+  "Pomodoro.Break.Description": "Ненадолго отойдите от экрана и восстановите концентрацию.",
+  "WidgetContent.Pomodoro.StatusLabel": "Реализовано",
+  "WidgetContent.Pomodoro.StatusDescription": "Таймер фокусировки с чередованием перерывов",
+  "WidgetTitleIcon.Label.Pomodoro": "Помодоро"
 }

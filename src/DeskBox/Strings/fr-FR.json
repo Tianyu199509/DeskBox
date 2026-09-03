@@ -2544,5 +2544,18 @@
   "Settings.ManagedPath.DesktopShortcut.Description": "Crée un raccourci vers le dossier de stockage actuel. Si vous le supprimez, DeskBox ne le recréera pas.",
   "Settings.ManagedPath.DesktopShortcut.StatusCreated": "Raccourci du bureau créé",
   "Settings.ManagedPath.DesktopShortcut.StatusNotCreated": "Aucun raccourci sur le bureau",
-  "Settings.ManagedPath.DesktopShortcut.Remove": "Retirer"
+  "Settings.ManagedPath.DesktopShortcut.Remove": "Retirer",
+  "Pomodoro.Title": "Pomodoro",
+  "Pomodoro.Phase.Focus": "Concentration",
+  "Pomodoro.Phase.Break": "Pause",
+  "Pomodoro.Action.Start": "Démarrer",
+  "Pomodoro.Action.Pause": "Mettre en pause",
+  "Pomodoro.Action.Reset": "Réinitialiser",
+  "Pomodoro.Action.Skip": "Passer",
+  "Pomodoro.RoundSummary": "Cycle {0} sur 4",
+  "Pomodoro.Focus.Description": "Concentrez-vous sur une seule tâche et laissez mûrir la tomate.",
+  "Pomodoro.Break.Description": "Éloignez-vous un instant de l’écran pour retrouver votre concentration.",
+  "WidgetContent.Pomodoro.StatusLabel": "Mis en œuvre",
+  "WidgetContent.Pomodoro.StatusDescription": "Minuteur de concentration avec pauses guidées",
+  "WidgetTitleIcon.Label.Pomodoro": "Pomodoro"
 }

@@ -50,4 +50,26 @@ public sealed class WidgetTitleIconModeTests
         Assert.Contains("#2764E7", glance, StringComparison.Ordinal);
         Assert.DoesNotContain("id=\"sky\"", glance, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public void PomodoroWidget_UsesDedicatedTomatoTimerIconFamily()
+    {
+        string pomodoro = File.ReadAllText(TestPaths.FromRepository(
+            "src/DeskBox/Assets/WidgetTitleIcons/pomodoro.svg"));
+
+        Assert.Equal(
+            WidgetTitleIconKindNames.Pomodoro,
+            WidgetTitleIconKindNames.FromWidgetKind(WidgetKind.Pomodoro));
+        Assert.Equal(
+            WidgetTitleIconKindNames.Pomodoro,
+            WidgetTitleIconKindNames.FromLegacyGlyph("\uE916"));
+        Assert.Equal(
+            "pomodoro",
+            WidgetTitleIconKindNames.GetColorAssetName(WidgetTitleIconKind.Pomodoro));
+        Assert.Equal(
+            "WidgetTitleIcon.Label.Pomodoro",
+            WidgetTitleIconKindNames.GetLocalizationKey(WidgetTitleIconKind.Pomodoro));
+        Assert.Contains("#FF786A", pomodoro, StringComparison.Ordinal);
+        Assert.Contains("#2F8B63", pomodoro, StringComparison.Ordinal);
+    }
 }

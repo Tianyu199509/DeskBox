@@ -39,6 +39,7 @@ public sealed class GlanceWidgetInstanceManagementTests
         Assert.False(WidgetManager.RequiresSingletonFeatureWidgetConfig(WidgetKind.File));
         Assert.True(WidgetManager.RequiresSingletonFeatureWidgetConfig(WidgetKind.Weather));
         Assert.True(WidgetManager.RequiresSingletonFeatureWidgetConfig(WidgetKind.Music));
+        Assert.True(WidgetManager.RequiresSingletonFeatureWidgetConfig(WidgetKind.Pomodoro));
     }
 
     [Fact]

@@ -2544,5 +2544,18 @@
   "Settings.ManagedPath.DesktopShortcut.Description": "Cria um atalho para a pasta de armazenamento atual. Se você o excluir, o DeskBox não o criará novamente.",
   "Settings.ManagedPath.DesktopShortcut.StatusCreated": "Atalho da área de trabalho criado",
   "Settings.ManagedPath.DesktopShortcut.StatusNotCreated": "Nenhum atalho na área de trabalho",
-  "Settings.ManagedPath.DesktopShortcut.Remove": "Remover"
+  "Settings.ManagedPath.DesktopShortcut.Remove": "Remover",
+  "Pomodoro.Title": "Pomodoro",
+  "Pomodoro.Phase.Focus": "Foco",
+  "Pomodoro.Phase.Break": "Pausa",
+  "Pomodoro.Action.Start": "Iniciar",
+  "Pomodoro.Action.Pause": "Pausar",
+  "Pomodoro.Action.Reset": "Reiniciar",
+  "Pomodoro.Action.Skip": "Pular",
+  "Pomodoro.RoundSummary": "Rodada {0} de 4",
+  "Pomodoro.Focus.Description": "Concentre-se em uma tarefa de cada vez.",
+  "Pomodoro.Break.Description": "Afaste-se da tela por um momento e recupere o foco.",
+  "WidgetContent.Pomodoro.StatusLabel": "Implementado",
+  "WidgetContent.Pomodoro.StatusDescription": "Temporizador de foco com pausas guiadas",
+  "WidgetTitleIcon.Label.Pomodoro": "Pomodoro"
 }

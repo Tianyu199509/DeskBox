@@ -242,7 +242,10 @@ public enum WidgetKind
     Productivity,
 
     /// <summary>At-a-glance background, time and date widget.</summary>
-    Glance
+    Glance,
+
+    /// <summary>用于专注与休息循环的番茄钟功能格子。</summary>
+    Pomodoro
 }
 
 public sealed class WidgetKindJsonConverter : JsonConverter<WidgetKind>

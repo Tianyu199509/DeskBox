@@ -16,6 +16,7 @@ public sealed class WidgetRegistryTests
         Assert.True(registry.CanCreateWindow(WidgetKind.QuickCapture));
         Assert.True(registry.CanCreateWindow(WidgetKind.Todo));
         Assert.True(registry.CanCreateWindow(WidgetKind.Music));
+        Assert.True(registry.CanCreateWindow(WidgetKind.Pomodoro));
     }
 
     [Fact]
@@ -107,5 +108,22 @@ public sealed class WidgetRegistryTests
         FeatureWidgetSettings.SetEnabled(settings, WidgetKind.Music, true);
 
         Assert.True(registry.IsAvailableForSession(musicWidget, settings));
+    }
+
+    [Fact]
+    public void IsAvailableForSession_RespectsPomodoroFeatureWidgetState()
+    {
+        var registry = WidgetRegistry.Default;
+        var pomodoroWidget = new WidgetConfig
+        {
+            WidgetKind = WidgetKind.Pomodoro
+        };
+        var settings = new AppSettings();
+
+        Assert.False(registry.IsAvailableForSession(pomodoroWidget, settings));
+
+        FeatureWidgetSettings.SetEnabled(settings, WidgetKind.Pomodoro, true);
+
+        Assert.True(registry.IsAvailableForSession(pomodoroWidget, settings));
     }
 }

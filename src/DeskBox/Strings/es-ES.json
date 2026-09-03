@@ -2544,5 +2544,18 @@
   "Settings.ManagedPath.DesktopShortcut.Description": "Crea un acceso directo a la carpeta de almacenamiento actual. Si lo eliminas, DeskBox no volverá a crearlo.",
   "Settings.ManagedPath.DesktopShortcut.StatusCreated": "Acceso directo del escritorio creado",
   "Settings.ManagedPath.DesktopShortcut.StatusNotCreated": "No hay acceso directo en el escritorio",
-  "Settings.ManagedPath.DesktopShortcut.Remove": "Quitar"
+  "Settings.ManagedPath.DesktopShortcut.Remove": "Quitar",
+  "Pomodoro.Title": "Pomodoro",
+  "Pomodoro.Phase.Focus": "Concentración",
+  "Pomodoro.Phase.Break": "Descanso",
+  "Pomodoro.Action.Start": "Iniciar",
+  "Pomodoro.Action.Pause": "Pausar",
+  "Pomodoro.Action.Reset": "Reiniciar",
+  "Pomodoro.Action.Skip": "Omitir",
+  "Pomodoro.RoundSummary": "Ronda {0} de 4",
+  "Pomodoro.Focus.Description": "Concéntrate en una sola tarea y deja madurar el tomate.",
+  "Pomodoro.Break.Description": "Aléjate un momento de la pantalla y recupera la concentración.",
+  "WidgetContent.Pomodoro.StatusLabel": "Implementado",
+  "WidgetContent.Pomodoro.StatusDescription": "Temporizador de concentración con descansos guiados",
+  "WidgetTitleIcon.Label.Pomodoro": "Pomodoro"
 }

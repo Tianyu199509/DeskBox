@@ -15,7 +15,8 @@ public static class FeatureWidgetSettings
         WidgetKind.Music,
         WidgetKind.Weather,
         WidgetKind.Search,
-        WidgetKind.Glance
+        WidgetKind.Glance,
+        WidgetKind.Pomodoro
     ];
 
     public static IReadOnlyList<WidgetKind> FeatureKinds => s_featureKinds;
@@ -144,6 +145,7 @@ public static class FeatureWidgetSettings
             WidgetKind.Weather => false,
             WidgetKind.Search => false,
             WidgetKind.Glance => false,
+            WidgetKind.Pomodoro => false,
             _ => false
         };
     }

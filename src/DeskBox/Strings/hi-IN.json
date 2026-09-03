@@ -2544,5 +2544,18 @@
   "Settings.ManagedPath.DesktopShortcut.Description": "मौजूदा स्टोरेज फ़ोल्डर का शॉर्टकट बनाता है। इसे हटाने पर DeskBox इसे दोबारा नहीं बनाएगा।",
   "Settings.ManagedPath.DesktopShortcut.StatusCreated": "डेस्कटॉप शॉर्टकट बनाया गया",
   "Settings.ManagedPath.DesktopShortcut.StatusNotCreated": "कोई डेस्कटॉप शॉर्टकट नहीं",
-  "Settings.ManagedPath.DesktopShortcut.Remove": "हटाएँ"
+  "Settings.ManagedPath.DesktopShortcut.Remove": "हटाएँ",
+  "Pomodoro.Title": "पोमोडोरो",
+  "Pomodoro.Phase.Focus": "फ़ोकस",
+  "Pomodoro.Phase.Break": "विराम",
+  "Pomodoro.Action.Start": "शुरू करें",
+  "Pomodoro.Action.Pause": "रोकें",
+  "Pomodoro.Action.Reset": "रीसेट करें",
+  "Pomodoro.Action.Skip": "छोड़ें",
+  "Pomodoro.RoundSummary": "चरण {0}/4",
+  "Pomodoro.Focus.Description": "एक समय में केवल एक काम पर ध्यान दें।",
+  "Pomodoro.Break.Description": "थोड़ी देर स्क्रीन से दूर रहें और ध्यान को तरोताज़ा होने दें।",
+  "WidgetContent.Pomodoro.StatusLabel": "क्रियान्वित किया गया",
+  "WidgetContent.Pomodoro.StatusDescription": "निर्देशित विरामों वाला फ़ोकस टाइमर",
+  "WidgetTitleIcon.Label.Pomodoro": "पोमोडोरो"
 }

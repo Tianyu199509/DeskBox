@@ -364,11 +364,14 @@ public sealed partial class ContentWidgetWindow
             App.Current.WidgetManager,
             App.Current.LocalizationService);
 
-        flyout.Items.Add(WidgetSettingsMenuHelper.CreateMenuItem(
-            _config.WidgetKind,
-            App.Current.LocalizationService,
-            beforeClick: flyout.Hide,
-            widgetId: _config.Id));
+        if (_descriptor.HasSettingsPage)
+        {
+            flyout.Items.Add(WidgetSettingsMenuHelper.CreateMenuItem(
+                _config.WidgetKind,
+                App.Current.LocalizationService,
+                beforeClick: flyout.Hide,
+                widgetId: _config.Id));
+        }
 
         flyout.Items.Add(new MenuFlyoutSeparator());
         var disableWidget = new MenuFlyoutItem

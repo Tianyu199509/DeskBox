@@ -24,6 +24,7 @@ public sealed class WidgetSettingsMenuHelperTests
     [InlineData(WidgetKind.Tags)]
     [InlineData(WidgetKind.SystemMonitor)]
     [InlineData(WidgetKind.Productivity)]
+    [InlineData(WidgetKind.Pomodoro)]
     public void GetSettingsSectionTag_Returns_Null_For_Unmapped_Kinds(WidgetKind kind)
     {
         Assert.Null(WidgetSettingsMenuHelper.GetSettingsSectionTag(kind));

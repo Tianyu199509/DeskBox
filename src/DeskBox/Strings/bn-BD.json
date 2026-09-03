@@ -2544,5 +2544,18 @@
   "Settings.ManagedPath.DesktopShortcut.Description": "বর্তমান স্টোরেজ ফোল্ডারের একটি শর্টকাট তৈরি করে। আপনি এটি মুছে দিলে DeskBox আবার তৈরি করবে না।",
   "Settings.ManagedPath.DesktopShortcut.StatusCreated": "ডেস্কটপ শর্টকাট তৈরি করা হয়েছে",
   "Settings.ManagedPath.DesktopShortcut.StatusNotCreated": "কোনো ডেস্কটপ শর্টকাট নেই",
-  "Settings.ManagedPath.DesktopShortcut.Remove": "সরান"
+  "Settings.ManagedPath.DesktopShortcut.Remove": "সরান",
+  "Pomodoro.Title": "পোমোডোরো",
+  "Pomodoro.Phase.Focus": "মনোযোগ",
+  "Pomodoro.Phase.Break": "বিরতি",
+  "Pomodoro.Action.Start": "শুরু করুন",
+  "Pomodoro.Action.Pause": "বিরতি দিন",
+  "Pomodoro.Action.Reset": "রিসেট করুন",
+  "Pomodoro.Action.Skip": "এড়িয়ে যান",
+  "Pomodoro.RoundSummary": "পর্ব {0}/4",
+  "Pomodoro.Focus.Description": "এক সময়ে একটি কাজেই মন দিন।",
+  "Pomodoro.Break.Description": "কিছুক্ষণ পর্দা থেকে দূরে থেকে মনোযোগ ফিরিয়ে আনুন।",
+  "WidgetContent.Pomodoro.StatusLabel": "বাস্তবায়িত",
+  "WidgetContent.Pomodoro.StatusDescription": "নির্দেশিত বিরতিসহ মনোযোগের টাইমার",
+  "WidgetTitleIcon.Label.Pomodoro": "পোমোডোরো"
 }

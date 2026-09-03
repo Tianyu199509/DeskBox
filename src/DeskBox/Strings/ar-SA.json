@@ -2544,5 +2544,18 @@
   "Settings.ManagedPath.DesktopShortcut.Description": "ينشئ اختصارًا لمجلد التخزين الحالي. إذا حذفته، فلن يعيد DeskBox إنشاءه.",
   "Settings.ManagedPath.DesktopShortcut.StatusCreated": "تم إنشاء اختصار سطح المكتب",
   "Settings.ManagedPath.DesktopShortcut.StatusNotCreated": "لا يوجد اختصار على سطح المكتب",
-  "Settings.ManagedPath.DesktopShortcut.Remove": "إزالة"
+  "Settings.ManagedPath.DesktopShortcut.Remove": "إزالة",
+  "Pomodoro.Title": "بومودورو",
+  "Pomodoro.Phase.Focus": "تركيز",
+  "Pomodoro.Phase.Break": "استراحة",
+  "Pomodoro.Action.Start": "بدء",
+  "Pomodoro.Action.Pause": "إيقاف مؤقت",
+  "Pomodoro.Action.Reset": "إعادة ضبط",
+  "Pomodoro.Action.Skip": "تخطي",
+  "Pomodoro.RoundSummary": "الجولة {0} من 4",
+  "Pomodoro.Focus.Description": "ركّز على مهمة واحدة في كل مرة ودع حبة الطماطم تنضج.",
+  "Pomodoro.Break.Description": "ابتعد عن الشاشة قليلًا واستعد تركيزك.",
+  "WidgetContent.Pomodoro.StatusLabel": "تم التنفيذ",
+  "WidgetContent.Pomodoro.StatusDescription": "مؤقت تركيز مع فترات استراحة موجهة",
+  "WidgetTitleIcon.Label.Pomodoro": "بومودورو"
 }

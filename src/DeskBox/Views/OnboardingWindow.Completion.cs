@@ -38,6 +38,10 @@ public sealed partial class OnboardingWindow
         {
             enabledWidgets.Add(_localizationService.T("Onboarding.Step2.WeatherTitle"));
         }
+        if (FeatureWidgetSettings.IsEnabled(_settingsService.Settings, WidgetKind.Pomodoro))
+        {
+            enabledWidgets.Add(_localizationService.T("Pomodoro.Title"));
+        }
         if (_settingsService.Settings.SearchHotkeyEnabled)
         {
             enabledWidgets.Add(_localizationService.T("Onboarding.Step2.SearchTitle"));

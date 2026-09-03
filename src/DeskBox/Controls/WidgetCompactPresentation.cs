@@ -58,4 +58,7 @@ public sealed record WidgetCompactPresentation(
     bool UseUniformFullBleedOverlay = false,
     // Multiplies only the full-bleed image. Text, controls, readability masks,
     // and compact transition animations remain on independent layers.
-    double FullBleedBackgroundOpacity = 1.0);
+    double FullBleedBackgroundOpacity = 1.0,
+    // Optional accessible name for the capsule's primary action. The legacy
+    // fallback remains the todo completion label for existing presentations.
+    string PrimaryActionLabel = "");

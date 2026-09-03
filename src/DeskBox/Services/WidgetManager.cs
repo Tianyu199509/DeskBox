@@ -549,7 +549,12 @@ public sealed partial class WidgetManager
                 WidgetKind.Glance,
                 CreateOrShowGlanceWidgetsAsync,
                 SetGlanceFeatureWidgetEnabledAsync,
-                () => CloseLoadedFeatureWidgetWindows(WidgetKind.Glance))
+                () => CloseLoadedFeatureWidgetWindows(WidgetKind.Glance)),
+            new(
+                WidgetKind.Pomodoro,
+                async _ => await CreateSingletonContentFeatureWidgetAsync(WidgetKind.Pomodoro),
+                SetPomodoroFeatureWidgetEnabledAsync,
+                () => HideAndCloseFeatureWidgetAsync(WidgetKind.Pomodoro))
         ];
 
         return handlers.ToDictionary(handler => handler.WidgetKind);
@@ -609,6 +614,14 @@ public sealed partial class WidgetManager
                     request.CancellationToken)),
             new(
                 WidgetKind.Glance,
+                async request => await CreateContentWidgetFromConfigAsync(
+                    request.Config,
+                    request.KeepPreparedForAnimation,
+                    request.RevealAfterCreate,
+                    request.ShowRaisedWhileInitializing,
+                    request.CancellationToken)),
+            new(
+                WidgetKind.Pomodoro,
                 async request => await CreateContentWidgetFromConfigAsync(
                     request.Config,
                     request.KeepPreparedForAnimation,
@@ -2161,6 +2174,7 @@ public sealed partial class WidgetManager
             WidgetKind.Music => (380, 190),
             WidgetKind.Weather => (200, 200),
             WidgetKind.Glance => (360, 260),
+            WidgetKind.Pomodoro => (300, 330),
             _ => (
                 _settingsService.Settings.DefaultWidgetWidth,
                 _settingsService.Settings.DefaultWidgetHeight)

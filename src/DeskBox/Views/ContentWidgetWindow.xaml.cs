@@ -148,6 +148,8 @@ public sealed partial class ContentWidgetWindow : WidgetWindowBase, IDesktopWidg
                 CreateQuickCaptureCompactPresentation(quickCapture, contentMode),
             WeatherWidgetContentAdapter weather => CreateWeatherCompactPresentation(weather, contentMode),
             SearchWidgetContentAdapter => CreateSearchCompactPresentation(contentMode, localization),
+            PomodoroWidgetContentAdapter pomodoro =>
+                CreatePomodoroCompactPresentation(pomodoro, contentMode),
             _ => new WidgetCompactPresentation(
                 _titleViewModel.DisplayName,
                 string.Empty,
@@ -254,9 +256,54 @@ public sealed partial class ContentWidgetWindow : WidgetWindowBase, IDesktopWidg
             localization.T("Widget.Compact.DropHint"),
             ShowPrimaryAction: true,
             PrimaryActionGlyph: "\uE721",
+            PrimaryActionLabel: localization.T("Search.Title"),
             UseStackedText: stacked,
             EnableMarquee: true,
             LiveStateKey: string.Join("|", _titleViewModel.DisplayName, recentKey));
+    }
+
+    private WidgetCompactPresentation CreatePomodoroCompactPresentation(
+        PomodoroWidgetContentAdapter pomodoro,
+        string contentMode)
+    {
+        PomodoroWidgetViewModel viewModel = pomodoro.ViewModel;
+        bool showSummary = contentMode != SettingsService.WidgetCompactContentModeMinimal;
+        Windows.UI.Color accent = viewModel.IsFocusPhase
+            ? Windows.UI.Color.FromArgb(255, 233, 91, 77)
+            : Windows.UI.Color.FromArgb(255, 79, 157, 131);
+
+        return new WidgetCompactPresentation(
+            viewModel.CountdownText,
+            showSummary
+                ? $"{viewModel.PhaseText} · {viewModel.RoundSummaryText}"
+                : string.Empty,
+            _descriptor.DefaultGlyph,
+            string.Empty,
+            ShowPrimaryAction: true,
+            PrimaryActionGlyph: viewModel.PrimaryActionGlyph,
+            PrimaryActionLabel: viewModel.PrimaryActionText,
+            IsPlaying: viewModel.IsRunning,
+            UseStackedText: showSummary,
+            Progress: viewModel.Progress,
+            LiveStateKey: string.Join(
+                "|",
+                viewModel.CountdownText,
+                viewModel.IsFocusPhase,
+                viewModel.IsRunning,
+                viewModel.CompletedFocusRounds),
+            BadgeText: showSummary ? $"{viewModel.RoundNumber}/4" : string.Empty,
+            BackgroundColorStart: Windows.UI.Color.FromArgb(
+                34,
+                accent.R,
+                accent.G,
+                accent.B),
+            BackgroundColorEnd: Windows.UI.Color.FromArgb(
+                8,
+                accent.R,
+                accent.G,
+                accent.B),
+            EdgeGlowColor: accent,
+            IconColor: accent);
     }
 
     private WidgetCompactPresentation CreateMusicCompactPresentation(
@@ -513,6 +560,12 @@ public sealed partial class ContentWidgetWindow : WidgetWindowBase, IDesktopWidg
 
     protected override async Task OnCompactPrimaryActionRequestedAsync()
     {
+        if (CurrentContent is PomodoroWidgetContentAdapter pomodoro)
+        {
+            pomodoro.ViewModel.StartPause();
+            return;
+        }
+
         if (CurrentContent is SearchWidgetContentAdapter)
         {
             App.Current.OpenSearchPopup();
@@ -1099,6 +1152,7 @@ IsHideAnimationRunning = true;
             MusicWidgetContentAdapter music => music.ViewModel,
             WeatherWidgetContentAdapter weather => weather.ViewModel,
             QuickCaptureSurfaceContent quickCapture => quickCapture.ViewModel,
+            PomodoroWidgetContentAdapter pomodoro => pomodoro.ViewModel,
             _ => null
         };
 
@@ -1372,6 +1426,7 @@ IsHideAnimationRunning = true;
                         WidgetKind.Music => "Music.Title",
                         WidgetKind.Glance => "Glance.Title",
                         WidgetKind.Search => "Search.Title",
+                        WidgetKind.Pomodoro => "Pomodoro.Title",
                         WidgetKind.SystemMonitor => "SystemMonitor.Title",
                         _ => ""
                     };

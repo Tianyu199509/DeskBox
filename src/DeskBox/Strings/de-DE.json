@@ -2544,5 +2544,18 @@
   "Settings.ManagedPath.DesktopShortcut.Description": "Erstellt eine Verknüpfung zum aktuellen Speicherordner. Wenn Sie sie löschen, erstellt DeskBox sie nicht erneut.",
   "Settings.ManagedPath.DesktopShortcut.StatusCreated": "Desktop-Verknüpfung erstellt",
   "Settings.ManagedPath.DesktopShortcut.StatusNotCreated": "Keine Desktop-Verknüpfung",
-  "Settings.ManagedPath.DesktopShortcut.Remove": "Entfernen"
+  "Settings.ManagedPath.DesktopShortcut.Remove": "Entfernen",
+  "Pomodoro.Title": "Pomodoro",
+  "Pomodoro.Phase.Focus": "Fokus",
+  "Pomodoro.Phase.Break": "Pause",
+  "Pomodoro.Action.Start": "Starten",
+  "Pomodoro.Action.Pause": "Pausieren",
+  "Pomodoro.Action.Reset": "Zurücksetzen",
+  "Pomodoro.Action.Skip": "Überspringen",
+  "Pomodoro.RoundSummary": "Runde {0} von 4",
+  "Pomodoro.Focus.Description": "Konzentriere dich auf eine Aufgabe und lass die Tomate reifen.",
+  "Pomodoro.Break.Description": "Geh kurz vom Bildschirm weg und tanke neue Konzentration.",
+  "WidgetContent.Pomodoro.StatusLabel": "Implementiert",
+  "WidgetContent.Pomodoro.StatusDescription": "Fokustimer mit geführten Pausen",
+  "WidgetTitleIcon.Label.Pomodoro": "Pomodoro"
 }

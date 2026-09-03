@@ -337,6 +337,7 @@ public sealed partial class WidgetManager
             WidgetKind.Weather => "Weather.Title",
             WidgetKind.Search => "Search.Title",
             WidgetKind.Glance => "Glance.Title",
+            WidgetKind.Pomodoro => "Pomodoro.Title",
             WidgetKind.Tags => "Tags.Title",
             WidgetKind.SystemMonitor => "SystemMonitor.Title",
             _ => string.Empty
@@ -386,6 +387,7 @@ public sealed partial class WidgetManager
                 WidgetKind.Weather => 200,
                 WidgetKind.Search => 280,
                 WidgetKind.Glance => 360,
+                WidgetKind.Pomodoro => 300,
                 _ => Math.Max(_settingsService.Settings.DefaultWidgetWidth, 320)
             },
             Height = kind switch
@@ -394,6 +396,7 @@ public sealed partial class WidgetManager
                 WidgetKind.Weather => 200,
                 WidgetKind.Search => 90,
                 WidgetKind.Glance => 260,
+                WidgetKind.Pomodoro => 330,
                 _ => Math.Max(_settingsService.Settings.DefaultWidgetHeight, 360)
             }
         };
@@ -1269,6 +1272,11 @@ public sealed partial class WidgetManager
     private Task SetSearchFeatureWidgetEnabledAsync(bool enabled, bool reveal)
     {
         return SetContentFeatureWidgetEnabledAsync(WidgetKind.Search, enabled, reveal);
+    }
+
+    private Task SetPomodoroFeatureWidgetEnabledAsync(bool enabled, bool reveal)
+    {
+        return SetContentFeatureWidgetEnabledAsync(WidgetKind.Pomodoro, enabled, reveal);
     }
 
     private Task SetGlanceFeatureWidgetEnabledAsync(bool enabled, bool reveal)
