@@ -401,26 +401,32 @@ public sealed partial class WidgetManager
             $"handles={string.Join(',', windows.Select(window => $"0x{window.WindowHandle.ToInt64():X}"))}");
     }
 
-    public void ActivateAllVisibleWidgetsFromTitle(IntPtr activeHwnd)
+    /// <summary>
+    /// 激活标题栏所属的单个格子。
+    ///
+    /// 托盘唤起会话已经由管理器统一维护整组层级，此处不能再次改写
+    /// 其中某个窗口的 TOPMOST 状态；桌面固定层也交由原有激活守卫处理。
+    /// </summary>
+    public void ActivateWidgetFromTitle(IntPtr activeHwnd)
     {
-        if (WidgetLayerService.UsesDesktopPinnedMode())
+        if (WidgetLayerService.UsesDesktopPinnedMode() ||
+            WidgetsRaisedFromTray ||
+            !IsWidgetWindow(activeHwnd) ||
+            !Win32Helper.IsWindow(activeHwnd) ||
+            !Win32Helper.IsWindowVisible(activeHwnd))
         {
             return;
         }
 
-        var handles = GetLoadedDesktopWindows()
-            .Where(window => window.Visible)
-            .Select(window => window.WindowHandle)
-            .ToList();
         long generation = TrackTemporarilyRaisedWidgets(
-            handles,
-            "title-activated-all");
-        WidgetLayerService.BringGroupTemporarilyToFront(handles, activeHwnd);
+            [activeHwnd],
+            "title-activated");
+        WidgetLayerService.ActivateWindowFromTitle(activeHwnd);
         QueueTemporaryRaisedWidgetRestore(
-            "title-activated-all-fallback",
+            "title-activated-fallback",
             generation,
             TimeSpan.FromMilliseconds(2300));
-        App.LogVerbose($"[ZOrder] TitleActivatedAll active=0x{activeHwnd.ToInt64():X}");
+        App.LogVerbose($"[ZOrder] TitleActivated active=0x{activeHwnd.ToInt64():X}");
     }
 
     /// <summary>

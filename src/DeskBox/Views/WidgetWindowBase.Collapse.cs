@@ -4187,6 +4187,13 @@ public abstract partial class WidgetWindowBase
 
         KeepRaisedUntilDeactivate = false;
         RestoreDesktopLayerWhenIdle = false;
+        if (Config.IsAlwaysOnTop)
+        {
+            ApplyAlwaysOnTopPreference();
+            ReleaseExpandedWidgetLayerLease("expanded-state-topmost-preserved");
+            return;
+        }
+
         IsAtDesktopLayer = true;
         WidgetLayerService.MoveToDesktopBottom(HWnd);
         ReleaseExpandedWidgetLayerLease("expanded-state-restored");

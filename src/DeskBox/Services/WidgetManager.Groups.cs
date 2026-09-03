@@ -1834,6 +1834,7 @@ public sealed partial class WidgetManager
             Height = source.Height,
             IsPositionLocked = source.IsPositionLocked,
             IsSizeLocked = source.IsSizeLocked,
+            IsAlwaysOnTop = source.IsAlwaysOnTop,
             IsCollapsed = source.IsCollapsed,
             CompactPlacement = CloneCompactPlacement(source.CompactPlacement),
             CompactWidth = source.CompactWidth,
@@ -1861,6 +1862,7 @@ public sealed partial class WidgetManager
         group.Height = member.Height;
         group.IsPositionLocked = member.IsPositionLocked;
         group.IsSizeLocked = member.IsSizeLocked;
+        group.IsAlwaysOnTop = member.IsAlwaysOnTop;
         group.IsCollapsed = member.IsCollapsed;
         group.CompactPlacement = CloneCompactPlacement(member.CompactPlacement);
         group.CompactWidth = member.CompactWidth;
@@ -1892,6 +1894,7 @@ public sealed partial class WidgetManager
         member.Height = group.Height;
         member.IsPositionLocked = group.IsPositionLocked;
         member.IsSizeLocked = group.IsSizeLocked;
+        member.IsAlwaysOnTop = group.IsAlwaysOnTop;
         member.IsCollapsed = group.IsCollapsed;
         member.CompactPlacement = CloneCompactPlacement(group.CompactPlacement);
         member.CompactWidth = group.CompactWidth;
@@ -2665,6 +2668,7 @@ public sealed partial class WidgetManager
             private readonly bool _isVisible;
             private readonly bool _isPositionLocked;
             private readonly bool _isSizeLocked;
+            private readonly bool _isAlwaysOnTop;
             private readonly bool _isCollapsed;
             private readonly WidgetCompactPlacement? _compactPlacement;
             private readonly double? _compactWidth;
@@ -2687,6 +2691,7 @@ public sealed partial class WidgetManager
                 _isVisible = config.IsVisible;
                 _isPositionLocked = config.IsPositionLocked;
                 _isSizeLocked = config.IsSizeLocked;
+                _isAlwaysOnTop = config.IsAlwaysOnTop;
                 _isCollapsed = config.IsCollapsed;
                 _compactPlacement = CloneCompactPlacement(config.CompactPlacement);
                 _compactWidth = config.CompactWidth;
@@ -2711,6 +2716,7 @@ public sealed partial class WidgetManager
                 _config.IsVisible = _isVisible;
                 _config.IsPositionLocked = _isPositionLocked;
                 _config.IsSizeLocked = _isSizeLocked;
+                _config.IsAlwaysOnTop = _isAlwaysOnTop;
                 _config.IsCollapsed = _isCollapsed;
                 _config.CompactPlacement = CloneCompactPlacement(_compactPlacement);
                 _config.CompactWidth = _compactWidth;

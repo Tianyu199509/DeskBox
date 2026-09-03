@@ -1128,6 +1128,7 @@ public sealed partial class WidgetManager
         config.IsDisabled = kind == WidgetKind.Glance && !isEnabled;
         config.IsPositionLocked = false;
         config.IsSizeLocked = false;
+        config.IsAlwaysOnTop = false;
         config.Metadata ??= [];
         config.Metadata.Clear();
         ApplyDefaultFeatureWidgetChromeMode(config, kind);

@@ -52,6 +52,8 @@ public sealed class WidgetGroupConfig
 
     public bool IsSizeLocked { get; set; }
 
+    public bool IsAlwaysOnTop { get; set; }
+
     public bool IsCollapsed { get; set; }
 
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]

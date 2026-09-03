@@ -2064,6 +2064,7 @@
   "Window.QuickCapture.Title": "Capture rapide de DeskBox",
   "Window.Settings.Title": "Paramètres de la DeskBox",
   "Window.Widget.Title": "Widget DeskBox",
+  "Widget.AlwaysOnTop": "Toujours au premier plan",
   "Widget.Stack.Start": "Commencez à empiler",
   "Widget.Stack.ManualDefaultName": "Pile",
   "Widget.Stack.DragCaption.Add": "Ajouter à « {0} »",

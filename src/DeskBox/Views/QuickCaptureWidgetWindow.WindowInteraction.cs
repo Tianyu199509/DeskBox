@@ -48,7 +48,7 @@ public sealed partial class QuickCaptureWidgetWindow
             ShouldOpenTitleBarFlyout(e.OriginalSource) &&
             !Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Control))
         {
-            App.Current.WidgetManager?.ActivateAllVisibleWidgetsFromTitle(_hWnd);
+            App.Current.WidgetManager?.ActivateWidgetFromTitle(_hWnd);
         }
 
         BeginTitleBarClickCollapse(e, ShouldOpenTitleBarFlyout(e.OriginalSource));

@@ -2064,6 +2064,7 @@
   "Window.QuickCapture.Title": "DeskBox التقاط سريع",
   "Window.Settings.Title": "إعدادات ديسك بوكس",
   "Window.Widget.Title": "القطعة DeskBox",
+  "Widget.AlwaysOnTop": "دائمًا في المقدمة",
   "Widget.Stack.Start": "ابدأ في التراص",
   "Widget.Stack.ManualDefaultName": "كومة",
   "Widget.Stack.DragCaption.Add": "أضف إلى \"{0}\"",

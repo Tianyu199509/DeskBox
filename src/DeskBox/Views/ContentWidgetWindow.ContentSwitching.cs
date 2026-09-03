@@ -73,8 +73,13 @@ public sealed partial class ContentWidgetWindow
         bool forward = true)
     {
         ContentWidgetShell.ClearFeedback();
+        bool alwaysOnTopChanged = _config.IsAlwaysOnTop != config.IsAlwaysOnTop;
         _config = config;
         _descriptor = descriptor;
+        if (alwaysOnTopChanged)
+        {
+            ApplyAlwaysOnTopPreference();
+        }
         Diagnostics.SetWidgetContext(config);
         _titleViewModel.SetConfig(config);
         ContentWidgetShell.TitleGlyph = descriptor.DefaultGlyph;

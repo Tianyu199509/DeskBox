@@ -16,6 +16,7 @@ public static class WidgetLayerService
 
     private static readonly object s_desktopLayerLock = new();
     private static readonly Dictionary<IntPtr, DesktopLayerAttachment> s_desktopLayerAttachments = [];
+    private static readonly HashSet<IntPtr> s_alwaysOnTopWindows = [];
     private static IntPtr s_cachedDesktopIconView;
     private static bool s_startupDesktopLayerAttachmentDeferred;
 
@@ -72,6 +73,12 @@ public static class WidgetLayerService
         IntPtr windowHandle,
         bool showWindow = true)
     {
+        if (IsAlwaysOnTop(windowHandle))
+        {
+            ApplyAlwaysOnTop(windowHandle, showWindow);
+            return;
+        }
+
         ApplyDesktopPinnedActivationStyle(windowHandle);
 
         // Desktop-pinned mode always rests inside Explorer. Dynamic mode uses
@@ -91,6 +98,12 @@ public static class WidgetLayerService
 
     public static IntPtr ClearTopMostPreservingForeground(IntPtr windowHandle)
     {
+        if (IsAlwaysOnTop(windowHandle))
+        {
+            ApplyAlwaysOnTop(windowHandle, showWindow: false);
+            return Win32Helper.GetForegroundWindow();
+        }
+
         ApplyDesktopPinnedActivationStyle(windowHandle);
 
         if (UsesDesktopPinnedMode())
@@ -152,10 +165,26 @@ public static class WidgetLayerService
         IReadOnlyList<IntPtr> windowHandles,
         string reason)
     {
-        List<IntPtr> handles = windowHandles
+        List<IntPtr> allHandles = windowHandles
             .Where(handle => handle != IntPtr.Zero && Win32Helper.IsWindow(handle))
             .Distinct()
             .ToList();
+        if (allHandles.Count == 0)
+        {
+            return true;
+        }
+
+        List<IntPtr> handles = allHandles
+            .Where(handle => !IsAlwaysOnTop(handle))
+            .ToList();
+        List<IntPtr> alwaysOnTopHandles = allHandles
+            .Where(IsAlwaysOnTop)
+            .ToList();
+        foreach (IntPtr handle in alwaysOnTopHandles)
+        {
+            ApplyAlwaysOnTop(handle, showWindow: false);
+        }
+
         if (handles.Count == 0)
         {
             return true;
@@ -236,6 +265,12 @@ public static class WidgetLayerService
 
     public static void ClearTopMost(IntPtr windowHandle)
     {
+        if (IsAlwaysOnTop(windowHandle))
+        {
+            ApplyAlwaysOnTop(windowHandle, showWindow: false);
+            return;
+        }
+
         ApplyDesktopPinnedActivationStyle(windowHandle);
 
         if (UsesDesktopPinnedMode())
@@ -255,6 +290,14 @@ public static class WidgetLayerService
         IntPtr windowHandle,
         bool showWindow = true)
     {
+        if (IsAlwaysOnTop(windowHandle))
+        {
+            // 永久置顶窗口不能执行 TOPMOST→NOTOPMOST 脉冲，否则会丢失
+            // 用户明确设置的持久置顶状态。
+            ApplyAlwaysOnTop(windowHandle, showWindow);
+            return;
+        }
+
         ApplyDesktopPinnedActivationStyle(windowHandle);
 
         if (UsesDesktopPinnedMode())
@@ -291,6 +334,12 @@ public static class WidgetLayerService
         for (int index = handles.Count - 1; index >= 0; index--)
         {
             IntPtr handle = handles[index];
+            if (IsAlwaysOnTop(handle))
+            {
+                ApplyAlwaysOnTop(handle, showWindow: true);
+                continue;
+            }
+
             ApplyDesktopPinnedActivationStyle(handle);
             DetachFromDesktopIconLayerIfNeeded(handle);
             Win32Helper.SetWindowTopMost(handle);
@@ -302,6 +351,12 @@ public static class WidgetLayerService
 
     public static void BringToFront(IntPtr windowHandle)
     {
+        if (IsAlwaysOnTop(windowHandle))
+        {
+            ApplyAlwaysOnTop(windowHandle, showWindow: true);
+            return;
+        }
+
         ApplyDesktopPinnedActivationStyle(windowHandle);
 
         if (UsesDesktopPinnedMode())
@@ -319,12 +374,51 @@ public static class WidgetLayerService
     }
 
     /// <summary>
+    /// 激活标题栏对应的单个窗口，不触碰其他格子的层级。
+    /// </summary>
+    public static void ActivateWindowFromTitle(IntPtr windowHandle)
+    {
+        if (UsesDesktopPinnedMode() ||
+            windowHandle == IntPtr.Zero ||
+            !Win32Helper.IsWindow(windowHandle))
+        {
+            return;
+        }
+
+        ApplyDesktopPinnedActivationStyle(windowHandle);
+        if (IsAlwaysOnTop(windowHandle))
+        {
+            // 永久置顶窗口不能经过 NOTOPMOST，否则会丢失用户设置。
+            ApplyAlwaysOnTop(windowHandle, showWindow: true);
+        }
+        else
+        {
+            DetachFromDesktopIconLayerIfNeeded(windowHandle);
+            Win32Helper.BringWindowTemporarilyToFront(windowHandle);
+        }
+
+        // 临时 TOPMOST 脉冲结束后再次确认普通层级顺序，并只把当前窗口
+        // 设为前台；其他窗口完全不参与这次标题栏交互。
+        Win32Helper.BringWindowToFront(windowHandle);
+        bool foregroundSet = Win32Helper.SetForegroundWindow(windowHandle);
+        App.LogVerbose(
+            $"[ZOrder] Title window activated hwnd=0x{windowHandle.ToInt64():X} " +
+            $"foregroundSet={foregroundSet} persistent={IsAlwaysOnTop(windowHandle)}");
+    }
+
+    /// <summary>
     /// Raises one widget above its peers without activating it. In desktop-pinned
     /// mode the window remains attached to the desktop icon layer and only its
     /// sibling order changes.
     /// </summary>
     public static void BringAbovePeerWidgets(IntPtr windowHandle)
     {
+        if (IsAlwaysOnTop(windowHandle))
+        {
+            ApplyAlwaysOnTop(windowHandle, showWindow: true);
+            return;
+        }
+
         if (UsesDesktopPinnedMode())
         {
             MoveToDesktopBottom(windowHandle);
@@ -345,6 +439,12 @@ public static class WidgetLayerService
     /// </summary>
     public static bool TryBringAbovePeerWidgetsAtDesktopLayer(IntPtr windowHandle)
     {
+        if (IsAlwaysOnTop(windowHandle))
+        {
+            ApplyAlwaysOnTop(windowHandle, showWindow: true);
+            return true;
+        }
+
         // Desktop-pinned widgets are owner-attached to Explorer's desktop icon
         // layer, so HWND_TOP lifts them above sibling widgets only; the band
         // itself stays beneath every application window and Win+D.
@@ -386,6 +486,12 @@ public static class WidgetLayerService
         }
 
         IntPtr activeWindow = handles[0];
+        if (IsAlwaysOnTop(activeWindow))
+        {
+            ApplyAlwaysOnTop(activeWindow, showWindow: true);
+            return true;
+        }
+
         _ = ApplyPeerOrderHighestToLowest(handles);
         if (IsHighestPeer(activeWindow, handles))
         {
@@ -446,6 +552,12 @@ public static class WidgetLayerService
     /// </returns>
     public static bool TryBringAbovePeerWidgetsBehindForeground(IntPtr windowHandle)
     {
+        if (IsAlwaysOnTop(windowHandle))
+        {
+            ApplyAlwaysOnTop(windowHandle, showWindow: true);
+            return true;
+        }
+
         if (UsesDesktopPinnedMode() ||
             windowHandle == IntPtr.Zero ||
             !Win32Helper.IsWindow(windowHandle))
@@ -557,13 +669,19 @@ public static class WidgetLayerService
 
         foreach (IntPtr handle in handles.Where(handle => handle != activeWindowHandle))
         {
-            Win32Helper.ClearWindowTopMost(handle);
+            if (!IsAlwaysOnTop(handle))
+            {
+                Win32Helper.ClearWindowTopMost(handle);
+            }
         }
 
         IntPtr activeHandle = handles.Contains(activeWindowHandle)
             ? activeWindowHandle
             : handles[^1];
-        Win32Helper.ClearWindowTopMost(activeHandle);
+        if (!IsAlwaysOnTop(activeHandle))
+        {
+            Win32Helper.ClearWindowTopMost(activeHandle);
+        }
         Win32Helper.BringWindowToFront(activeHandle);
         Win32Helper.SetForegroundWindow(activeHandle);
     }
@@ -579,6 +697,7 @@ public static class WidgetLayerService
     {
         List<IntPtr> handles = windowHandles
             .Where(handle => handle != IntPtr.Zero && Win32Helper.IsWindow(handle))
+            .Where(handle => !IsAlwaysOnTop(handle))
             .Distinct()
             .ToList();
         if (handles.Count < 2)
@@ -672,7 +791,72 @@ public static class WidgetLayerService
 
     public static void ReleaseWindow(IntPtr windowHandle)
     {
+        lock (s_desktopLayerLock)
+        {
+            s_alwaysOnTopWindows.Remove(windowHandle);
+        }
+
         DetachFromDesktopIconLayerIfNeeded(windowHandle);
+    }
+
+    public static void SetAlwaysOnTop(
+        IntPtr windowHandle,
+        bool enabled,
+        bool showWindow = false)
+    {
+        if (windowHandle == IntPtr.Zero || !Win32Helper.IsWindow(windowHandle))
+        {
+            return;
+        }
+
+        lock (s_desktopLayerLock)
+        {
+            if (enabled)
+            {
+                s_alwaysOnTopWindows.Add(windowHandle);
+            }
+            else
+            {
+                s_alwaysOnTopWindows.Remove(windowHandle);
+            }
+        }
+
+        if (enabled)
+        {
+            ApplyAlwaysOnTop(windowHandle, showWindow);
+        }
+        else
+        {
+            MoveToDesktopBottom(windowHandle, showWindow);
+        }
+
+        App.LogVerbose(
+            $"[ZOrder] Persistent topmost hwnd=0x{windowHandle.ToInt64():X} enabled={enabled}");
+    }
+
+    internal static bool IsAlwaysOnTop(IntPtr windowHandle)
+    {
+        lock (s_desktopLayerLock)
+        {
+            return s_alwaysOnTopWindows.Contains(windowHandle);
+        }
+    }
+
+    private static void ApplyAlwaysOnTop(IntPtr windowHandle, bool showWindow)
+    {
+        SetWindowNoActivate(windowHandle, enabled: false);
+        DetachFromDesktopIconLayerIfNeeded(windowHandle);
+        _ = Win32Helper.SetWindowPos(
+            windowHandle,
+            Win32Helper.HWND_TOPMOST,
+            0,
+            0,
+            0,
+            0,
+            Win32Helper.SWP_NOMOVE |
+                Win32Helper.SWP_NOSIZE |
+                Win32Helper.SWP_NOACTIVATE |
+                (showWindow ? Win32Helper.SWP_SHOWWINDOW : 0));
     }
 
     public static void InvalidateDesktopIconViewCache()

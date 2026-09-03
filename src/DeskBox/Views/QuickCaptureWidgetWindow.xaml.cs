@@ -406,6 +406,12 @@ public sealed partial class QuickCaptureWidgetWindow :
 
     public void PushToBottom(bool showWindow = true)
     {
+        if (Config.IsAlwaysOnTop)
+        {
+            ApplyAlwaysOnTopPreference();
+            return;
+        }
+
         _isAtDesktopLayer = true;
         WidgetLayerService.MoveToDesktopBottom(_hWnd, showWindow);
         App.LogVerbose($"[ZOrder] QuickCapture PushToBottom hwnd=0x{_hWnd.ToInt64():X}");

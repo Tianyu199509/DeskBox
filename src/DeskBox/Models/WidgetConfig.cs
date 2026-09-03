@@ -91,6 +91,9 @@ public class WidgetConfig
     /// <summary>Whether resizing this widget is locked.</summary>
     public bool IsSizeLocked { get; set; }
 
+    /// <summary>Whether this widget stays above other application windows.</summary>
+    public bool IsAlwaysOnTop { get; set; }
+
     /// <summary>Whether this widget was manually left in its compact state.</summary>
     public bool IsCollapsed { get; set; }
 

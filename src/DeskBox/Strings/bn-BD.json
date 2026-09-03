@@ -2064,6 +2064,7 @@
   "Window.QuickCapture.Title": "ডেস্কবক্স দ্রুত ক্যাপচার",
   "Window.Settings.Title": "ডেস্কবক্স সেটিংস",
   "Window.Widget.Title": "ডেস্কবক্স উইজেট",
+  "Widget.AlwaysOnTop": "সবসময় উপরে রাখুন",
   "Widget.Stack.Start": "স্ট্যাকিং শুরু করুন",
   "Widget.Stack.ManualDefaultName": "স্ট্যাক",
   "Widget.Stack.DragCaption.Add": "\"{0}\" এ যোগ করুন",

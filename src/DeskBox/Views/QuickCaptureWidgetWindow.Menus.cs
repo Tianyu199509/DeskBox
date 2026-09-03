@@ -121,6 +121,10 @@ public sealed partial class QuickCaptureWidgetWindow
             ViewModel.Config.IsSizeLocked,
             SetPositionLocked,
             SetSizeLocked));
+        flyout.Items.Add(WidgetAlwaysOnTopMenuBuilder.Create(
+            _localizationService,
+            ViewModel.Config.IsAlwaysOnTop,
+            SetAlwaysOnTop));
         flyout.Items.Add(WidgetForegroundMenuBuilder.Create(
             ViewModel.Config,
             _localizationService,

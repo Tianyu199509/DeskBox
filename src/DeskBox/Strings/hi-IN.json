@@ -2064,6 +2064,7 @@
   "Window.QuickCapture.Title": "डेस्कबॉक्स त्वरित कैप्चर",
   "Window.Settings.Title": "डेस्कबॉक्स सेटिंग्स",
   "Window.Widget.Title": "डेस्कबॉक्स विजेट",
+  "Widget.AlwaysOnTop": "हमेशा ऊपर रखें",
   "Widget.Stack.Start": "ढेर लगाना शुरू करें",
   "Widget.Stack.ManualDefaultName": "ढेर",
   "Widget.Stack.DragCaption.Add": "\"{0}\" में जोड़ें",

@@ -47,6 +47,12 @@ public abstract partial class WidgetWindowBase
 
     protected void HoldTemporaryTopMost(bool showWindow = true)
     {
+        if (Config.IsAlwaysOnTop)
+        {
+            ApplyAlwaysOnTopPreference();
+            return;
+        }
+
         if (WidgetLayerService.UsesDesktopPinnedMode())
         {
             IsAtDesktopLayer = true;
@@ -230,6 +236,25 @@ public abstract partial class WidgetWindowBase
     protected void ClearTopMostOnly()
     {
         IsRaisedFromManager = false;
+
+        if (Config.IsAlwaysOnTop)
+        {
+            // 恢复临时交互层时，永久置顶窗口仍应留在 TOPMOST，且逻辑状态
+            // 不能被误标记为桌面层，否则后续安全计时器会再次降级它。
+            WidgetLayerService.SetAlwaysOnTop(
+                HWnd,
+                enabled: true,
+                showWindow: false);
+            IsAtDesktopLayer = false;
+            KeepRaisedUntilDeactivate = true;
+            RestoreDesktopLayerWhenIdle = false;
+            TopMostSafetyTimer?.Stop();
+            App.LogVerbose(
+                $"[ZOrder] {LogPrefix} persistent topmost preserved " +
+                $"hwnd=0x{HWnd.ToInt64():X}");
+            return;
+        }
+
         IsAtDesktopLayer = true;
         IntPtr foreground = WidgetLayerService.ClearTopMostPreservingForeground(HWnd);
         App.LogVerbose($"[ZOrder] {LogPrefix} ClearTopMostOnly hwnd=0x{HWnd.ToInt64():X} fg=0x{foreground.ToInt64():X}");

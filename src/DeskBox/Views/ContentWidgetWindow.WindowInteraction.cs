@@ -176,7 +176,7 @@ public sealed partial class ContentWidgetWindow
         if (ShouldOpenTitleBarFlyout(e.OriginalSource) &&
             !Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Control))
         {
-            App.Current.WidgetManager?.ActivateAllVisibleWidgetsFromTitle(HWnd);
+            App.Current.WidgetManager?.ActivateWidgetFromTitle(HWnd);
         }
         if (_config.IsPositionLocked) return;
         BeginWindowDragCore(e, ContentWidgetShell.TitleBar);
@@ -476,6 +476,12 @@ public sealed partial class ContentWidgetWindow
 
     private void PushToBottom(bool showWindow = true)
     {
+        if (Config.IsAlwaysOnTop)
+        {
+            ApplyAlwaysOnTopPreference();
+            return;
+        }
+
         IsRaisedFromManager = false;
         IsAtDesktopLayer = true;
         WidgetLayerService.MoveToDesktopBottom(HWnd, showWindow);

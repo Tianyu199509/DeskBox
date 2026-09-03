@@ -339,6 +339,10 @@ public sealed partial class ContentWidgetWindow
             _config.IsSizeLocked,
             SetPositionLocked,
             SetSizeLocked));
+        flyout.Items.Add(WidgetAlwaysOnTopMenuBuilder.Create(
+            App.Current.LocalizationService,
+            _config.IsAlwaysOnTop,
+            SetAlwaysOnTop));
         flyout.Items.Add(WidgetForegroundMenuBuilder.Create(
             _config,
             App.Current.LocalizationService,

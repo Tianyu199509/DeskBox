@@ -88,6 +88,10 @@ public abstract partial class WidgetWindowBase
         ApplyBackdropPreference();
         InitializeWidgetCollapse();
         InitializeWidgetGrouping();
+        if (Config.IsAlwaysOnTop)
+        {
+            ApplyAlwaysOnTopPreference();
+        }
         WidgetShellControl.HostedContentChanged -= WidgetShellControl_HostedContentChanged;
         WidgetShellControl.HostedContentChanged += WidgetShellControl_HostedContentChanged;
 
@@ -110,6 +114,29 @@ public abstract partial class WidgetWindowBase
             ApplyBackdropPreference();
             OnRootElementThemeChanged();
         };
+    }
+
+    protected void SetAlwaysOnTop(bool value)
+    {
+        if (Config.IsAlwaysOnTop == value)
+        {
+            return;
+        }
+
+        Config.IsAlwaysOnTop = value;
+        SettingsService.UpdateWidget(Config);
+        SynchronizeWidgetGroupLayout();
+        ApplyAlwaysOnTopPreference();
+    }
+
+    protected void ApplyAlwaysOnTopPreference()
+    {
+        CancelPendingDesktopLayerRestore();
+        WidgetLayerService.SetAlwaysOnTop(HWnd, Config.IsAlwaysOnTop);
+        IsAtDesktopLayer = !Config.IsAlwaysOnTop;
+        IsRaisedFromManager = false;
+        KeepRaisedUntilDeactivate = Config.IsAlwaysOnTop;
+        RestoreDesktopLayerWhenIdle = false;
     }
 
     private void InstallDesktopPinnedActivationGuard()
@@ -297,6 +324,25 @@ public abstract partial class WidgetWindowBase
             // The expanded capsule owns the top of the desktop band until its
             // collapse re-beds the window; a bottom reassert here would bury
             // it beneath sibling widgets mid-use.
+            return;
+        }
+
+        if (Config.IsAlwaysOnTop)
+        {
+            // 永久置顶是独立于桌面固定层的用户选择。固定层激活守卫触发
+            // 时只需重新确认 TOPMOST，不能把窗口的逻辑状态降回桌面层。
+            WidgetLayerService.SetAlwaysOnTop(
+                HWnd,
+                enabled: true,
+                showWindow: false);
+            IsAtDesktopLayer = false;
+            IsRaisedFromManager = false;
+            KeepRaisedUntilDeactivate = true;
+            RestoreDesktopLayerWhenIdle = false;
+            TopMostSafetyTimer?.Stop();
+            App.LogVerbose(
+                $"[ZOrder] {LogPrefix} persistent topmost preserved " +
+                $"reason={reason} hwnd=0x{HWnd.ToInt64():X}");
             return;
         }
 

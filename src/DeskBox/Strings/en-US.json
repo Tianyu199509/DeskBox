@@ -2064,6 +2064,7 @@
     "Window.QuickCapture.Title": "DeskBox Quick Capture",
     "Window.Settings.Title": "DeskBox Settings",
     "Window.Widget.Title": "DeskBox Widget",
+    "Widget.AlwaysOnTop": "Always on top",
     "Widget.Stack.Start": "Start stacking",
     "Widget.Stack.ManualDefaultName": "Stack",
     "Widget.Stack.DragCaption.Add": "Add to “{0}”",

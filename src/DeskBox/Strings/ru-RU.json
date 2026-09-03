@@ -2064,6 +2064,7 @@
   "Window.QuickCapture.Title": "Быстрый захват DeskBox",
   "Window.Settings.Title": "Настройки DeskBox",
   "Window.Widget.Title": "Виджет DeskBox",
+  "Widget.AlwaysOnTop": "Поверх всех окон",
   "Widget.Stack.Start": "Начать штабелирование",
   "Widget.Stack.ManualDefaultName": "Стек",
   "Widget.Stack.DragCaption.Add": "Добавить в «{0}»",

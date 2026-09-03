@@ -2064,6 +2064,7 @@
     "Window.QuickCapture.Title": "DeskBox 随记",
     "Window.Settings.Title": "DeskBox 设置",
     "Window.Widget.Title": "DeskBox 格子",
+    "Widget.AlwaysOnTop": "置顶",
     "Widget.Stack.Start": "开始叠放",
     "Widget.Stack.ManualDefaultName": "叠放",
     "Widget.Stack.DragCaption.Add": "收入“{0}”",

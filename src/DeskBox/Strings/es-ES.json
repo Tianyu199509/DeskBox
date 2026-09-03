@@ -2064,6 +2064,7 @@
   "Window.QuickCapture.Title": "Captura rápida de DeskBox",
   "Window.Settings.Title": "Configuración de DeskBox",
   "Window.Widget.Title": "Widget de caja de escritorio",
+  "Widget.AlwaysOnTop": "Siempre visible",
   "Widget.Stack.Start": "Empezar a apilar",
   "Widget.Stack.ManualDefaultName": "pila",
   "Widget.Stack.DragCaption.Add": "Añadir a “{0}”",
