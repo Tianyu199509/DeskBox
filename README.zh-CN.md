@@ -9,6 +9,8 @@
 [![Windows 10/11](https://img.shields.io/badge/Windows-10%2F11-0078D4.svg)](#环境要求)
 [![x64 and ARM64](https://img.shields.io/badge/architecture-x64%20%7C%20ARM64-5C2D91.svg)](#下载)
 [![License: GPL v3](https://img.shields.io/badge/license-GPLv3-blue.svg)](LICENSE)
+[![GitHub stars](https://img.shields.io/github/stars/Tianyu199509/DeskBox?style=flat&color=yellow)](https://github.com/Tianyu199509/DeskBox/stargazers)
+[![Downloads](https://img.shields.io/github/downloads/Tianyu199509/DeskBox/total?style=flat&color=brightgreen)](https://github.com/Tianyu199509/DeskBox/releases)
 
 ![DeskBox Windows 桌面整理工具，包含文件、待办、搜索、天气和音乐格子](docs/images/brand/readme-hero-1-3-7-dark-zh-cn.png)
 
@@ -121,6 +123,15 @@ DeskBox 使用贴近 Windows 原生体验的材质，同时保留普通桌面文
 - 支持设置备份与恢复，并可导出经过隐私过滤的一键诊断包用于排查问题。
 - 设置使用可恢复快照，退出时刷新待保存内容；保存失败会明确记录和提示，不再静默恢复默认配置。
 
+## 1.4.9 更新亮点
+
+- **Windows 10 和 Windows 11 的拖拽更加可靠。** 拖拽现在声明唯一的首选操作，Windows 10 上不再弹出复制、移动或创建快捷方式的选择菜单，同时不减少 DeskBox 支持的拖放目标。
+- **快捷方式不再被误移入回收站。** 内部排序的悬停反馈与文件系统操作结果分开处理，`.lnk` 快捷方式在格子或叠放内调整顺序时不会再被当作已完成的文件移动。
+- **两种叠放展示模式的拖放能力一致。** 格子内展开和弹窗展开都支持内部排序、叠放移回上级格子、格子移入叠放、移动到其他格子、桌面和文件资源管理器。
+- **补齐 Windows 10 Native AOT 发布内容。** Direct 安装包包含 Windows App Runtime Insights 所需资源，Native AOT 审计会检查对应的绑定和拖拽契约。
+- **设置窗口不再泄漏内存。** 设置窗口改为复用，反复打开和关闭不会不断保留新的原生 XAML 树；空闲深度清理与内存压缩恢复稳定。
+- **文件操作更加安全。** 文件打开增加拦截与日志，重命名导致扩展名变化时会先确认，叠放弹窗支持就地重命名。
+
 ## 1.4.8 更新亮点
 
 - **更安全的收纳文件交接。** DeskBox 可以在桌面保留独立的 `DeskBox Files.lnk` 快捷方式，卸载时如果仍有收纳文件，安装程序会询问是否创建或保留这条入口。
@@ -144,7 +155,7 @@ DeskBox 使用贴近 Windows 原生体验的材质，同时保留普通桌面文
 - **Everything 文件搜索。** 直接读取 Everything 已有索引并与 DeskBox 内容合并，删除了重复的自建索引；Everything 需单独安装。
 - **Native AOT 直发包。** GitHub 包不再需要单独的 .NET 10 运行时，Windows App Runtime 升级到 2.4。
 
-完整内容见 [更新日志](CHANGELOG.md) 和 [1.4.8 发布说明](docs/releases/v1.4.8.md)。
+完整内容见 [更新日志](CHANGELOG.md) 和 [1.4.9 发布说明](docs/releases/v1.4.9.md)。
 
 ## 当前界面
 
@@ -263,7 +274,7 @@ tests\DeskBox.Tests         服务、策略与 AOT 契约测试
 scripts                     构建、发布、审计与内存测量脚本
 installer                   x64/ARM64 Inno Setup 脚本
 docs\architecture           当前架构、原生 ABI 契约与 AOT 阶段记录
-docs\user-guide             产品使用说明
+docs\articles              功能文章与使用教程
 docs\images                 README 与发布图片
 docs\releases               版本发布文案和测试清单
 .github\workflows           CI、ARM64 运行时与分发包审计
@@ -283,4 +294,10 @@ DeskBox 目前由个人独立开发和维护。为了保持架构一致性与后
 - 项目地址：<https://github.com/Tianyu199509/DeskBox>
 - 开源协议：[GPL-3.0-only](LICENSE)
 
-早期已按 MIT 协议发布的 DeskBox 版本继续保持原许可，协议变更不追溯历史版本；详情见 [LICENSE_CHANGE.md](LICENSE_CHANGE.md)。
+早期已按 MIT 协议发布的 DeskBox 版本继续保持原许可，协议变更不追溯历史版本。
+
+## Star 趋势
+
+如果 DeskBox 对你有帮助，欢迎点一个 Star ⭐，这是对这个独立项目最大的鼓励。
+
+[![Star History Chart](https://api.star-history.com/svg?repos=Tianyu199509/DeskBox&type=Date)](https://star-history.com/#Tianyu199509/DeskBox&Date)

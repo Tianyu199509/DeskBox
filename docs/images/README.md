@@ -17,27 +17,14 @@ screenshots/en-us/           English UI screenshots
 - Descriptive localized filenames are allowed when they match the corresponding settings section.
 - Remove replaced and throwaway captures once the current README assets are verified.
 
-## Current 1.3.4 Assets
+## Current Assets (1.3.7 hero series)
 
 ```text
-brand/readme-hero-1-3-4-option-c-mica.png
+brand/readme-hero-1-3-7-dark-en.png
+brand/readme-hero-1-3-7-dark-zh-cn.png
 brand/logo-200.png
-screenshots/zh-cn/云母材质.png
-screenshots/zh-cn/亚克力材质.png
-screenshots/zh-cn/常规.png
-screenshots/zh-cn/外观.png
-screenshots/zh-cn/胶囊模式.png
-screenshots/zh-cn/文件格子.png
-screenshots/zh-cn/功能格子.png
-screenshots/zh-cn/快捷与交互.png
-screenshots/en-us/云母材质.png
-screenshots/en-us/亚克力材质.png
-screenshots/en-us/常规.png
-screenshots/en-us/外观.png
-screenshots/en-us/胶囊模式.png
-screenshots/en-us/文件格子.png
-screenshots/en-us/功能格子.png
-screenshots/en-us/快捷与交互.png
+screenshots/zh-cn/… (one file per settings section)
+screenshots/en-us/… (one file per settings section)
 ```
 
-The selected `option-c-mica` banner is an AI-generated brand illustration and is not presented as a literal UI screenshot. Files under `screenshots/` are captures from the running DeskBox 1.3.4 build in both supported README languages.
+The `readme-hero-1-3-7-dark-*` banners are AI-generated brand illustrations and are not presented as literal UI screenshots. Files under `screenshots/` are captures from the running DeskBox build in both supported README languages. The five 1.3.4 hero candidates were removed on 2026-09-06 after the 1.3.7 banners were adopted; check git history if an old candidate is ever needed.

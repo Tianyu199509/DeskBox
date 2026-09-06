@@ -8,7 +8,7 @@ keywords:
   - Windows 效率工具
 article_type: "index"
 product_scope: "current-worktree"
-updated: "2026-08-03"
+updated: "2026-09-06"
 ---
 
 # DeskBox 中文功能文章与使用教程
@@ -17,6 +17,7 @@ updated: "2026-08-03"
 
 ## 先读哪一篇？
 
+- 刚下载或准备安装：阅读[安装与首次配置指南](15-getting-started.md)。
 - 想知道 DeskBox 到底解决什么问题：阅读[DeskBox 是什么：把 Windows 桌面变成工作入口](00-overview.md)。
 - 想先把桌面文件整理好：阅读[文件格子与桌面收纳](01-file-widgets.md)和[桌面一键整理与自动整理](02-desktop-organization.md)。
 - 想把聊天、浏览器和临时信息接到桌面上：阅读[全局唤醒与跨应用拖放](05-global-wake-and-drag-drop.md)和[随记格子](04-quick-capture.md)。
@@ -58,8 +59,8 @@ updated: "2026-08-03"
 
 ## 相关文章
 
-- [安装与首次配置](../user-guide/01-getting-started.md)
-- [常见问题与故障排查](../user-guide/10-troubleshooting.md)
+- [安装与首次配置指南](15-getting-started.md)
+- [常见问题与故障排查](16-troubleshooting.md)
 - [进阶工作流：从桌面收件箱到项目驾驶舱](14-workflows.md)
 
 > [图片占位：展示完整 DeskBox 桌面：文件格子、待办、随记、天气和音乐以不同尺寸分布在桌面上]

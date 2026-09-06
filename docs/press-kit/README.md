@@ -26,12 +26,12 @@ Tianyu Zhu is a product designer and solo maker building native-feeling Windows 
 
 | Field | Fact |
 | --- | --- |
-| Current launch release | DeskBox 1.3.8 |
+| Current launch release | DeskBox 1.4.9 |
 | Platform | Windows 10 21H2 or later; Windows 11 recommended |
 | Architectures | x64 and ARM64 |
-| Technology | C#, WinUI 3, .NET 10, Windows App SDK 2.2 |
+| Technology | C#, WinUI 3, .NET 10, Windows App SDK 2.4 |
 | Storage model | Local-first; ordinary files and folders; no account required |
-| Interface languages | English, Simplified Chinese, Japanese, German, Brazilian Portuguese, Hindi, Spanish, French, Arabic, Bengali, Russian. The six newer language packs prioritize core file-widget and onboarding flows; some detailed settings remain in English while translation continues. |
+| Interface languages | English, Simplified Chinese, Traditional Chinese, Japanese, German, Brazilian Portuguese, Hindi, Spanish, French, Arabic, Bengali, Russian. Several newer language packs prioritize core file-widget and onboarding flows; some detailed settings remain in English while translation continues. |
 | License | GPL-3.0-only |
 | Source and releases | <https://github.com/Tianyu199509/DeskBox> |
 | Official website | <https://deskbox.fun/en/> |
