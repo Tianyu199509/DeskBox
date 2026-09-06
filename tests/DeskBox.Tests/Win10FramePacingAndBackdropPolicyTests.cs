@@ -12,7 +12,10 @@ public sealed class Win10FramePacingAndBackdropPolicyTests
     [InlineData(144, 6.94)]
     [InlineData(165, 6.06)]
     [InlineData(240, 4.17)]
-    [InlineData(360, 4.0)]
+    [InlineData(360, 2.78)]
+    [InlineData(500, 2.0)]
+    [InlineData(30, 33.33)]
+    [InlineData(24, 41.67)]
     [InlineData(0, 16.67)]
     [InlineData(-5, 16.67)]
     public void ResolveFrameTickInterval_MatchesNativeRefreshCadence(
@@ -24,11 +27,12 @@ public sealed class Win10FramePacingAndBackdropPolicyTests
     }
 
     [Fact]
-    public void ResolveFrameTickInterval_ClampsToMinimumTickForHighRefresh()
+    public void ResolveFrameTickInterval_PreservesFractionalRefreshRate()
     {
-        TimeSpan interval = WidgetDisplayRefreshRatePolicy.ResolveFrameTickInterval(500);
+        double refreshRate = WidgetDisplayRefreshRatePolicy.ResolveRationalRate(60000, 1001);
+        TimeSpan interval = WidgetDisplayRefreshRatePolicy.ResolveFrameTickInterval(refreshRate);
         Assert.Equal(
-            WidgetDisplayRefreshRatePolicy.MinimumFrameTickMs,
+            1001d / 60,
             interval.TotalMilliseconds,
             precision: 3);
     }

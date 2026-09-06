@@ -43,8 +43,8 @@ public partial class SettingsViewModel
     /// separate from the available-update manifest so release notes remain
     /// accessible when the current build is already up to date.
     /// </summary>
-    public AppUpdateManifest? LatestUpdateManifest => _latestUpdateManifest;
-    public bool CanViewReleaseNotes => _latestUpdateManifest?.HasReleaseNotesOrUrl == true;
+    public AppUpdateManifest? LatestUpdateManifest => _availableUpdateManifest ?? _latestUpdateManifest;
+    public bool CanViewReleaseNotes => LatestUpdateManifest?.HasReleaseNotesOrUrl == true;
     public Visibility ReleaseNotesButtonVisibility =>
         CanViewReleaseNotes ? Visibility.Visible : Visibility.Collapsed;
     public string ViewReleaseNotesButtonText => _localizationService.T("Settings.Update.ViewReleaseNotes");
@@ -84,7 +84,7 @@ public partial class SettingsViewModel
 
     // One-click update properties
     public string UpdateSummaryText =>
-        _availableUpdateManifest?.GetLocalizedSummary(_localizationService.CurrentCultureName) ?? string.Empty;
+        GetUpdateSummaryPreview(_availableUpdateManifest?.GetLocalizedSummary(_localizationService.CurrentCultureName));
     public Visibility UpdateSummaryVisibility =>
         _availableUpdateManifest is not null &&
         !IsDownloadingUpdate &&
@@ -415,17 +415,16 @@ public partial class SettingsViewModel
 
     internal static string GetManualUpdateDownloadUrl(AppUpdateManifest? manifest)
     {
-        if (AppUpdateManifest.IsSafeWebUrl(manifest?.ManualDownloadUrl))
-        {
-            return manifest!.ManualDownloadUrl;
-        }
-
-        if (AppUpdateManifest.IsSafeWebUrl(manifest?.MirrorUrl))
-        {
-            return manifest!.MirrorUrl;
-        }
-
+        // This action is labelled "Official download". Older manifests may
+        // carry a direct cloud-drive link; let the website offer those mirrors.
         return AppUpdateService.DefaultManualDownloadUrl;
+    }
+
+    internal static string GetUpdateSummaryPreview(string? summary)
+    {
+        return string.Join(" ", SimpleMarkdownRenderer.Parse(summary)
+            .Select(block => string.Concat(block.Inlines.Select(inline => inline.Text)))
+            .Where(text => !string.IsNullOrWhiteSpace(text)));
     }
 
     private static bool HasManifestManualDownloadUrl(AppUpdateManifest? manifest)
@@ -468,6 +467,8 @@ public partial class SettingsViewModel
         OnPropertyChanged(nameof(ManualUpdateDownloadUrl));
         OnPropertyChanged(nameof(CanOpenManualUpdateDownload));
         OnPropertyChanged(nameof(ManualUpdateFallbackVisibility));
+        OnPropertyChanged(nameof(CanOpenUpdateFallback));
+        OnPropertyChanged(nameof(UpdateFallbackVisibility));
         OnPropertyChanged(nameof(UpdateReminderBadgeVisibility));
         OnPropertyChanged(nameof(UpdateProgressText));
         // One-click update properties

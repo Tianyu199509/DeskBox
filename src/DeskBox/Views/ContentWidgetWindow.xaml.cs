@@ -42,6 +42,7 @@ public sealed partial class ContentWidgetWindow : WidgetWindowBase, IDesktopWidg
     private bool _isHidePrepared;
     private bool _isCommittingTitleRename;
     private bool _isCancellingTitleRename;
+    private long _titleRenameOpenedAtTick;
     private bool _compactPresentationRefreshQueued;
     private INotifyPropertyChanged? _compactPresentationSource;
     private IWidgetFeedbackSource? _feedbackSource;
@@ -408,7 +409,8 @@ public sealed partial class ContentWidgetWindow : WidgetWindowBase, IDesktopWidg
 
         return presentation with
         {
-            EnableMarquee = true,
+            // Todo text can be arbitrarily long; the capsule stays static
+            // instead of marqueeing (same policy as QuickCapture).
             Progress = totalCount > 0
                 ? completedCount / (double)totalCount
                 : null,
@@ -689,9 +691,14 @@ public sealed partial class ContentWidgetWindow : WidgetWindowBase, IDesktopWidg
 
     public void ApplyAppearancePreview()
     {
+        ApplyAppearancePreview(invalidateContent: true);
+    }
+
+    private void ApplyAppearancePreview(bool invalidateContent)
+    {
         if (!DispatcherQueue.HasThreadAccess)
         {
-            DispatcherQueue.TryEnqueue(ApplyAppearancePreview);
+            DispatcherQueue.TryEnqueue(() => ApplyAppearancePreview(invalidateContent));
             return;
         }
 
@@ -705,7 +712,7 @@ public sealed partial class ContentWidgetWindow : WidgetWindowBase, IDesktopWidg
         ApplyBackdropPreference();
         ContentWidgetShell.ShowHoverButtons = SettingsService.Settings.ShowHoverButtons;
         ApplyTitleBarLayout();
-        _contentHost.ApplyAppearance();
+        _contentHost.ApplyAppearance(invalidate: invalidateContent);
     }
 
     public void SetTrayAnimationOffsetOverride(double? offsetX, double? offsetY)
@@ -745,31 +752,36 @@ return PrepareTrayShowAnimationCore(restoreBoundsForCurrentTopology: true);
 
 private bool PrepareTrayShowAnimationCore(bool restoreBoundsForCurrentTopology)
 {
-SetTrayHideInputSuppressed(false);
-TrayAnimation.NextGeneration();
-TrayAnimation.StopAndRestoreWindowPosition();
-TrayAnimation.CloakWindowForTrayShow();
-_isHidePrepared = false;
-IsHideAnimationRunning = false;
+        bool boundsRestored = false;
+        bool prepared = WidgetTrayAnimationPreparation.TryPrepare(() =>
+        {
+            SetTrayHideInputSuppressed(false);
+            TrayAnimation.NextGeneration();
+            TrayAnimation.StopAndRestoreWindowPosition();
+            TrayAnimation.CloakWindowForTrayShow();
+            _isHidePrepared = false;
+            IsHideAnimationRunning = false;
 
-        // A group detach changes this persistent HWND's topology identity.
-        // Retarget it only after DWM cloak is active and before preparing the
-        // animation offset; otherwise TryRestoreBounds sees an active position
-        // transition and intentionally skips the move.
-        bool boundsRestored = !restoreBoundsForCurrentTopology ||
-            TryRestoreBoundsForCurrentTopology(allowHidden: true);
+            // A group detach changes this persistent HWND's topology identity.
+            // Retarget it only after DWM cloak is active and before preparing the
+            // animation offset; otherwise TryRestoreBounds sees an active position
+            // transition and intentionally skips the move.
+            boundsRestored = !restoreBoundsForCurrentTopology ||
+                TryRestoreBoundsForCurrentTopology(allowHidden: true);
 
-        var profile = GetTrayAnimationProfile();
-        LogTrayWindow(
-            $"PrepareShow gen={TrayAnimation.Generation} topologyRetarget={restoreBoundsForCurrentTopology} " +
-            $"boundsRestored={boundsRestored} effect={SettingsService.Settings.WidgetAnimationEffect} " +
-            $"speed={SettingsService.Settings.WidgetAnimationSpeed} enabled={profile.IsEnabled} durationMs={profile.DurationMs}");
-        TrayAnimation.PrepareVisualState(
-            profile.ShowOffsetX,
-            profile.ShowOffsetY,
-            profile.ShowStartOpacity,
-            profile.ShowStartScale);
-        return boundsRestored;
+            var profile = GetTrayAnimationProfile();
+            LogTrayWindow(
+                $"PrepareShow gen={TrayAnimation.Generation} topologyRetarget={restoreBoundsForCurrentTopology} " +
+                $"boundsRestored={boundsRestored} effect={SettingsService.Settings.WidgetAnimationEffect} " +
+                $"speed={SettingsService.Settings.WidgetAnimationSpeed} enabled={profile.IsEnabled} durationMs={profile.DurationMs}");
+            TrayAnimation.PrepareVisualState(
+                profile.ShowOffsetX,
+                profile.ShowOffsetY,
+                profile.ShowStartOpacity,
+                profile.ShowStartScale);
+        }, CompleteTrayShowWithoutAnimation,
+            ex => LogTrayWindow($"PrepareShow failed: {ex.Message}"));
+        return prepared && boundsRestored;
     }
 
     public void ShowPreparedAtDesktopLayer(bool persistVisibility = true)
@@ -795,14 +807,19 @@ IsHideAnimationRunning = false;
 
     public void CompleteTrayShowWithoutAnimation()
     {
+        IsHideAnimationRunning = false;
+        _isHidePrepared = false;
+        SetTrayHideInputSuppressed(false);
         TrayAnimation.NextGeneration();
         LogTrayWindow($"CompleteShowWithoutAnimation gen={TrayAnimation.Generation}");
         TrayAnimation.Stop();
         SetTrayAnimationOffsetOverride(null, null);
         TrayAnimation.RestoreVisualState();
-        TrayAnimation.RestoreWindowPosition();
-        TrayAnimation.RevealWindowForTrayShow();
-        NotifyVisibleContentRevealCompleted();
+        WidgetTrayAnimationPreparation.CompleteShow(
+            TrayAnimation.RestoreWindowPosition,
+            TrayAnimation.RevealWindowForTrayShow,
+            NotifyVisibleContentRevealCompleted,
+            ex => LogTrayWindow($"CompleteShowWithoutAnimation cleanup failed: {ex.Message}"));
     }
 
     public void RevealFromTray(bool autoRestore = true)
@@ -892,8 +909,10 @@ IsHideAnimationRunning = true;
         UpdatePersistedVisibility(isVisible: false, persistVisibility);
 
         LogTrayWindow($"PrepareHide gen={TrayAnimation.Generation}");
-        TrayAnimation.PrepareVisualState(0, 0, WidgetTrayAnimationController.RestingOpacity, WidgetTrayAnimationController.RestingScale);
-        return true;
+        return WidgetTrayAnimationPreparation.TryPrepare(
+            () => TrayAnimation.PrepareVisualState(0, 0, WidgetTrayAnimationController.RestingOpacity, WidgetTrayAnimationController.RestingScale),
+            CompleteTrayHideAnimation,
+            ex => LogTrayWindow($"PrepareHide failed: {ex.Message}"));
     }
 
     public void PlayPreparedTrayHideAnimation()

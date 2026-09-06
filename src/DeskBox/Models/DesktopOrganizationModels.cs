@@ -52,6 +52,12 @@ public sealed class DesktopOrganizationRule
     public List<string> ExcludedExtensions { get; set; } = [];
 }
 
+public enum DesktopOrganizationSourceScope
+{
+    Personal,
+    Public
+}
+
 public enum DesktopOrganizationExclusionReason
 {
     None,
@@ -64,7 +70,8 @@ public enum DesktopOrganizationExclusionReason
     Unavailable,
     SlowItem,
     BatchLimit,
-    UserChoice
+    UserChoice,
+    SourceNotSelected
 }
 
 public sealed record DesktopOrganizationFileSnapshot(
@@ -76,7 +83,8 @@ public sealed record DesktopOrganizationFileSnapshot(
     string CategoryId,
     string? SubtypeId,
     DesktopOrganizationExclusionReason ExclusionReason,
-    bool IsDirectory = false)
+    bool IsDirectory = false,
+    DesktopOrganizationSourceScope SourceScope = DesktopOrganizationSourceScope.Personal)
 {
     public bool IsEligible => ExclusionReason == DesktopOrganizationExclusionReason.None;
 
@@ -89,6 +97,10 @@ public sealed record DesktopOrganizationFileSnapshot(
 public sealed class DesktopOrganizationScanResult
 {
     public string DesktopPath { get; init; } = string.Empty;
+
+    public string PublicDesktopPath { get; init; } = string.Empty;
+
+    public bool PublicDesktopUnavailable { get; init; }
 
     public List<DesktopOrganizationFileSnapshot> Items { get; init; } = [];
 
@@ -175,6 +187,16 @@ public sealed class DesktopOrganizationPlan
 
     public string DesktopPath { get; init; } = string.Empty;
 
+    public string PublicDesktopPath { get; init; } = string.Empty;
+
+    public bool PublicDesktopUnavailable { get; init; }
+
+    public bool IncludePersonalDesktop { get; init; } = true;
+
+    public bool IncludePublicDesktop { get; init; }
+
+    public List<DesktopOrganizationFileSnapshot> SourceItems { get; init; } = [];
+
     public string StorageRootPath { get; init; } = string.Empty;
 
     public List<DesktopOrganizationTargetPlan> Targets { get; init; } = [];
@@ -207,6 +229,8 @@ public readonly record struct DesktopOrganizationRect(
 
 public sealed class DesktopOrganizationRecoveryJournal
 {
+    public bool IsUndo { get; set; }
+
     public string TransactionId { get; set; } = string.Empty;
 
     public DateTimeOffset StartedAt { get; set; } = DateTimeOffset.UtcNow;
@@ -218,6 +242,14 @@ public sealed class DesktopOrganizationRecoveryJournal
 
 public sealed class DesktopOrganizationRecoveryItem
 {
+    public string? RestorePath { get; set; }
+
+    public DesktopOrganizationSourceScope SourceScope { get; set; }
+
+    public long? Size { get; set; }
+
+    public DateTime? LastWriteTimeUtc { get; set; }
+
     public string SourcePath { get; set; } = string.Empty;
 
     public string DestinationPath { get; set; } = string.Empty;
@@ -242,17 +274,20 @@ public enum DesktopOrganizationRetentionReason
     InUse,
     AccessDenied,
     Unavailable,
-    TransferFailed
+    TransferFailed,
+    Canceled
 }
 
 public sealed record DesktopOrganizationRetainedItem(
     string SourcePath,
     string Name,
     DesktopOrganizationRetentionReason Reason,
-    string Detail);
+    string Detail,
+    DesktopOrganizationSourceScope SourceScope = DesktopOrganizationSourceScope.Personal);
 
 public sealed record DesktopOrganizationProgress(
     int CompletedCount,
     int TotalCount,
     string TargetWidgetId,
-    string TargetDisplayName);
+    string TargetDisplayName,
+    DesktopOrganizationSourceScope SourceScope = DesktopOrganizationSourceScope.Personal);

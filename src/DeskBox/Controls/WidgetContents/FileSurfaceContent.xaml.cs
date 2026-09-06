@@ -47,6 +47,7 @@ public sealed partial class FileSurfaceContent :
     private TextBlock? _itemRenameNameText;
     private bool _isCommittingItemRename;
     private bool _isCancellingItemRename;
+    private long _itemRenameOpenedAtTick;
     private bool _isSurfaceReorderDragActive;
     private string[] _surfaceReorderPaths = [];
     private string? _surfaceReorderStackKey;
@@ -410,13 +411,13 @@ public sealed partial class FileSurfaceContent :
         ResetOpenItemStateForReuse();
         CloseStackPopover(releaseImmediately: true);
         // A group member can stay detached while its source items or settings
-        // change. Clear recycled selector state first, then rebuild the stack
-        // projection before the cached surface is attached again.
+        // change. Clear recycled selector state first, then consume any pending
+        // stack projection update before the cached surface is attached again.
         ResetSelectionForStackProjectionChange();
         ResetStackInteractionVisuals();
         PersistSurfaceReorder();
         ResetDragPayloadCache();
-        ViewModel.StabilizeStackDisplay();
+        ViewModel.PrepareStackDisplayForReuse();
     }
 
     public void OnDeactivated()
@@ -837,6 +838,17 @@ public sealed partial class FileSurfaceContent :
         {
             activeView.SelectedItems.Clear();
             activeView.SelectedItems.Add(item);
+        }
+
+        if (_settingsService.Settings.FileItemSystemContextMenuEnabled &&
+            item is not WidgetStackItem &&
+            GetSelectedItems().Count == 1)
+        {
+            // The native Shell menu only supports a single item, and stack
+            // tiles have no file-system path; both keep the built-in flyout.
+            _ = ShowSystemContextMenuAsync(item);
+            e.Handled = true;
+            return;
         }
 
         MenuFlyout flyout = item is WidgetStackItem stack
@@ -1419,21 +1431,13 @@ public sealed partial class FileSurfaceContent :
         PositionItemRenameTextBox(target, contentHost);
         ItemRenameTextBox.Visibility = Visibility.Visible;
         ItemRenameTextBox.IsHitTestVisible = true;
+        _itemRenameOpenedAtTick = Environment.TickCount64;
         App.Current?.WidgetManager?.BeginWidgetInteraction(
             "surface-file-item-rename-opened");
 
         SelectItemNameForRename(
             ItemRenameTextBox,
             renameItem is WidgetStackItem || renameItem.IsFolder);
-        DispatcherQueue.TryEnqueue(() =>
-        {
-            if (ReferenceEquals(_itemRenameTarget, renameItem))
-            {
-                SelectItemNameForRename(
-                    ItemRenameTextBox,
-                    renameItem is WidgetStackItem || renameItem.IsFolder);
-            }
-        });
 
         await Task.CompletedTask;
     }
@@ -1461,6 +1465,13 @@ public sealed partial class FileSurfaceContent :
         if (_isCancellingItemRename)
         {
             _isCancellingItemRename = false;
+            return;
+        }
+
+        if (InlineEditorFocus.TryRecoverFocusWithinGrace(
+                _itemRenameOpenedAtTick,
+                sender as TextBox))
+        {
             return;
         }
 
@@ -1771,27 +1782,35 @@ public sealed partial class FileSurfaceContent :
         return completion.Task;
     }
 
-    private static void SelectItemNameForRename(
+    private void SelectItemNameForRename(
         TextBox textBox,
         bool isFolder)
     {
-        textBox.Focus(FocusState.Programmatic);
-        string text = textBox.Text;
-        if (isFolder)
+        void ApplyRenameSelection(TextBox focused)
         {
-            textBox.SelectAll();
-            return;
+            string text = focused.Text;
+            if (isFolder)
+            {
+                focused.SelectAll();
+                return;
+            }
+
+            int dotIndex = text.LastIndexOf('.');
+            if (dotIndex > 0 && text.Length - dotIndex - 1 <= 8)
+            {
+                focused.Select(0, dotIndex);
+            }
+            else
+            {
+                focused.SelectAll();
+            }
         }
 
-        int dotIndex = text.LastIndexOf('.');
-        if (dotIndex > 0 && text.Length - dotIndex - 1 <= 8)
-        {
-            textBox.Select(0, dotIndex);
-        }
-        else
-        {
-            textBox.SelectAll();
-        }
+        InlineEditorFocus.FocusWhenLoaded(
+            textBox,
+            ApplyRenameSelection,
+            DispatcherQueue,
+            "FileItemRename");
     }
 
     private async Task DeleteItemAsync(WidgetItem item)
@@ -2166,6 +2185,14 @@ public sealed partial class FileSurfaceContent :
             "same-directory-drop"));
     }
 
+    private void ShowUnsafeDirectoryDropFeedback()
+    {
+        ShowFeedback(new WidgetFeedbackRequest(
+            T("Widget.Error.UnsafeFolderTransfer"),
+            WidgetFeedbackSeverity.Warning,
+            "unsafe-directory-drop"));
+    }
+
     private void Root_DragEnter(object sender, DragEventArgs e)
     {
         _pendingNativeDropInsertionIndex = null;
@@ -2336,6 +2363,14 @@ public sealed partial class FileSurfaceContent :
                         ? sourceState
                         : _fileService.TransferSessions.GetState(
                             ViewModel.CurrentFolderPath));
+                return;
+            }
+            if (await Task.Run(() => FileService.IsUnsafeDirectoryTransfer(
+                    paths,
+                    ViewModel.CurrentFolderPath)))
+            {
+                e.AcceptedOperation = DataPackageOperation.None;
+                ShowUnsafeDirectoryDropFeedback();
                 return;
             }
             if (await AreAllSourcesAlreadyInDestinationResolvedAsync(
@@ -3505,6 +3540,13 @@ public sealed partial class FileSurfaceContent :
                 destinationPath))
         {
             ShowSameDirectoryDropFeedback();
+            return false;
+        }
+        if (await Task.Run(() => FileService.IsUnsafeDirectoryTransfer(
+                droppedFiles.Select(file => file.Path),
+                destinationPath)))
+        {
+            ShowUnsafeDirectoryDropFeedback();
             return false;
         }
         bool sameVolume = FileDropIntentPolicy.AreAllOnSameVolume(

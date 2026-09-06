@@ -93,6 +93,17 @@ public partial class SettingsViewModel
         _settingsService.SaveDebounced();
     }
 
+    partial void OnFileItemSystemContextMenuEnabledChanged(bool value)
+    {
+        if (_isRestoringDefaults)
+        {
+            return;
+        }
+
+        _settingsService.Settings.FileItemSystemContextMenuEnabled = value;
+        _settingsService.SaveDebounced();
+    }
+
     partial void OnResizeSnapEnabledChanged(bool value)
     {
         if (_isRestoringDefaults)

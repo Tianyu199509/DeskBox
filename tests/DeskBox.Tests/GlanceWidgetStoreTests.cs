@@ -26,6 +26,7 @@ public sealed class GlanceWidgetStoreTests : IDisposable
         Assert.Equal(GlanceLayoutMode.Centered, data.Layout);
         Assert.Equal(GlanceBackgroundSource.Bing, data.BackgroundSource);
         Assert.Equal(GlanceOnlineImageCategory.Featured, data.OnlineImageCategory);
+        Assert.Equal(GlanceTimeFormatMode.FollowSystem, data.TimeFormat);
         Assert.Equal(30d, data.RotationIntervalMinutes);
         Assert.Equal(GlanceTransitionMode.CrossFade, data.Transition);
         Assert.Equal(0, data.BackgroundImageTransparency);
@@ -55,6 +56,20 @@ public sealed class GlanceWidgetStoreTests : IDisposable
         GlanceWidgetData withoutDate = await store.LoadAsync();
         Assert.False(withoutDate.ShowDate);
         Assert.False(withoutDate.ShowYear);
+    }
+
+    [Fact]
+    public async Task SaveAsync_NormalizesUnknownTimeFormat()
+    {
+        var store = new GlanceWidgetStore(_tempRoot);
+        await store.SaveAsync(new GlanceWidgetData
+        {
+            TimeFormat = (GlanceTimeFormatMode)999
+        });
+
+        GlanceWidgetData reloaded = await store.LoadAsync();
+
+        Assert.Equal(GlanceTimeFormatMode.FollowSystem, reloaded.TimeFormat);
     }
 
     [Fact]

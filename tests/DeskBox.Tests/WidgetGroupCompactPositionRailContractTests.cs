@@ -38,8 +38,15 @@ public sealed class WidgetGroupCompactPositionRailContractTests
             "presentation?.NavigationStyle ??",
             shellCode,
             StringComparison.Ordinal);
-        Assert.Contains(
-            "show = show && _groupPresentation is null;",
+        // The generic six-dot drag affordance was removed; the OS move cursor
+        // on the drag hit region is the affordance, while the position rail
+        // keeps its group-specific role.
+        Assert.DoesNotContain(
+            "CompactDragGripIndicator",
+            shellXaml,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "CompactDragGripIndicator",
             shellCode,
             StringComparison.Ordinal);
     }

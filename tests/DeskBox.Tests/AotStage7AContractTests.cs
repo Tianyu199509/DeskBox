@@ -124,7 +124,7 @@ public sealed class AotStage7AContractTests
     [Fact]
     public void Documentation_SeparatesArm64StaticEvidenceFromStage7BDeviceEvidence()
     {
-        string report = Read("docs/architecture/rust-stage-7a-arm64-static-report.md");
+        string report = Read("docs/architecture/stage-reports/rust-stage-7a-arm64-static-report.md");
         string roadmap = Read("docs/architecture/rust-native-aot-roadmap.md");
         string nativeReadme = Read("native/README.md");
 

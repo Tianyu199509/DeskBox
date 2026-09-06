@@ -560,14 +560,14 @@
                 Opacity="0.72" />
             <TextBlock
                 HorizontalAlignment="Center"
-                FontSize="{Binding TitleTextSize}"
+                FontSize="{Binding ContentTitleTextSize}"
                 FontWeight="SemiBold"
                 Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                 Text="{Binding WideDetailEmptyTitle}"
                 TextAlignment="Center" />
             <TextBlock
                 HorizontalAlignment="Center"
-                FontSize="{Binding SecondaryTextSize}"
+                FontSize="{Binding ContentSecondaryTextSize}"
                 Foreground="{ThemeResource TextFillColorTertiaryBrush}"
                 Text="{Binding WideDetailEmptyText}"
                 TextAlignment="Center"
@@ -689,7 +689,7 @@
                             MinHeight="56"
                             MaxHeight="240"
                             AcceptsReturn="True"
-                            FontSize="{Binding ElementName=RootGrid, Path=DataContext.TextSize}"
+                            FontSize="{Binding ElementName=RootGrid, Path=DataContext.ContentTextSize}"
                             FontWeight="Normal"
                             LostFocus="DetailTitleTextBox_LostFocus"
                             MaxLength="2000"
@@ -747,21 +747,21 @@
                             <Button x:Name="DetailDueDateMetadataButton" Grid.Column="0" AutomationProperties.Name="{Binding MetadataDueDateText}" Click="MetadataDueDate_Click" Style="{StaticResource TodoDetailToolbarButtonStyle}" ToolTipService.ToolTip="{Binding MetadataDueDateText}">
                                 <StackPanel Orientation="Horizontal" Spacing="6">
                                     <FontIcon FontSize="{Binding ElementName=RootGrid, Path=DataContext.SmallIconSize}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Glyph="&#xE787;" />
-                                    <TextBlock VerticalAlignment="Center" FontSize="{Binding ElementName=RootGrid, Path=DataContext.SecondaryTextSize}" MaxLines="1" Text="{Binding MetadataDueDateText}" TextTrimming="CharacterEllipsis" />
+                                    <TextBlock VerticalAlignment="Center" FontSize="{Binding ElementName=RootGrid, Path=DataContext.ContentSecondaryTextSize}" MaxLines="1" Text="{Binding MetadataDueDateText}" TextTrimming="CharacterEllipsis" />
                                 </StackPanel>
                             </Button>
 
                             <Button x:Name="DetailReminderMetadataButton" Grid.Column="1" AutomationProperties.Name="{Binding MetadataReminderText}" Click="MetadataReminder_Click" IsEnabled="{Binding HasDueDate}" Style="{StaticResource TodoDetailToolbarButtonStyle}" ToolTipService.ToolTip="{Binding MetadataReminderText}">
                                 <StackPanel Orientation="Horizontal" Spacing="6">
                                     <FontIcon FontSize="{Binding ElementName=RootGrid, Path=DataContext.SmallIconSize}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Glyph="&#xEA8F;" />
-                                    <TextBlock VerticalAlignment="Center" FontSize="{Binding ElementName=RootGrid, Path=DataContext.SecondaryTextSize}" MaxLines="1" Text="{Binding MetadataReminderText}" TextTrimming="CharacterEllipsis" />
+                                    <TextBlock VerticalAlignment="Center" FontSize="{Binding ElementName=RootGrid, Path=DataContext.ContentSecondaryTextSize}" MaxLines="1" Text="{Binding MetadataReminderText}" TextTrimming="CharacterEllipsis" />
                                 </StackPanel>
                             </Button>
 
                             <Button x:Name="DetailRecurrenceMetadataButton" Grid.Row="1" Grid.Column="0" AutomationProperties.Name="{Binding MetadataRecurrenceText}" Click="MetadataRecurrence_Click" IsEnabled="{Binding HasDueDate}" Style="{StaticResource TodoDetailToolbarButtonStyle}" ToolTipService.ToolTip="{Binding MetadataRecurrenceText}">
                                 <StackPanel Orientation="Horizontal" Spacing="6">
                                     <FontIcon FontSize="{Binding ElementName=RootGrid, Path=DataContext.SmallIconSize}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Glyph="&#xE823;" />
-                                    <TextBlock VerticalAlignment="Center" FontSize="{Binding ElementName=RootGrid, Path=DataContext.SecondaryTextSize}" MaxLines="1" Text="{Binding MetadataRecurrenceText}" TextTrimming="CharacterEllipsis" />
+                                    <TextBlock VerticalAlignment="Center" FontSize="{Binding ElementName=RootGrid, Path=DataContext.ContentSecondaryTextSize}" MaxLines="1" Text="{Binding MetadataRecurrenceText}" TextTrimming="CharacterEllipsis" />
                                 </StackPanel>
                             </Button>
 
@@ -771,7 +771,7 @@
                                         <FontIcon HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="{Binding ElementName=RootGrid, Path=DataContext.SmallIconSize}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Glyph="&#xE790;" />
                                         <Border Width="9" Height="2" HorizontalAlignment="Center" VerticalAlignment="Bottom" Background="{Binding ColorMarkerBrush}" CornerRadius="1" Visibility="{Binding ColorMarkerVisibility}" />
                                     </Grid>
-                                    <TextBlock VerticalAlignment="Center" FontSize="{Binding ElementName=RootGrid, Path=DataContext.SecondaryTextSize}" MaxLines="1" Text="{Binding MetadataColorText}" TextTrimming="CharacterEllipsis" />
+                                    <TextBlock VerticalAlignment="Center" FontSize="{Binding ElementName=RootGrid, Path=DataContext.ContentSecondaryTextSize}" MaxLines="1" Text="{Binding MetadataColorText}" TextTrimming="CharacterEllipsis" />
                                 </StackPanel>
                             </Button>
                         </Grid>
@@ -781,13 +781,13 @@
                         <Grid MinHeight="28">
                             <TextBlock
                                 VerticalAlignment="Center"
-                                FontSize="{Binding ElementName=RootGrid, Path=DataContext.TextSize}"
+                                FontSize="{Binding ElementName=RootGrid, Path=DataContext.ContentTextSize}"
                                 FontWeight="SemiBold"
                                 Text="{Binding ElementName=RootGrid, Path=DataContext.DetailStepsText}" />
                             <TextBlock
                                 HorizontalAlignment="Right"
                                 VerticalAlignment="Center"
-                                FontSize="{Binding ElementName=RootGrid, Path=DataContext.SecondaryTextSize}"
+                                FontSize="{Binding ElementName=RootGrid, Path=DataContext.ContentSecondaryTextSize}"
                                 Foreground="{ThemeResource TextFillColorTertiaryBrush}"
                                 Text="{Binding StepProgressText}"
                                 Visibility="{Binding StepProgressVisibility}" />
@@ -818,7 +818,7 @@
                                             VerticalAlignment="Center"
                                             Background="Transparent"
                                             BorderThickness="0"
-                                            FontSize="{Binding ElementName=RootGrid, Path=DataContext.TextSize}"
+                                            FontSize="{Binding ElementName=RootGrid, Path=DataContext.ContentTextSize}"
                                             KeyDown="DetailStepTextBox_KeyDown"
                                             LostFocus="DetailStepTextBox_LostFocus"
                                             Opacity="{Binding ContentOpacity}"
@@ -853,7 +853,7 @@
                                 Padding="8,4"
                                 Background="{ThemeResource SubtleFillColorTransparentBrush}"
                                 BorderThickness="0"
-                                FontSize="{Binding ElementName=RootGrid, Path=DataContext.TextSize}"
+                                FontSize="{Binding ElementName=RootGrid, Path=DataContext.ContentTextSize}"
                                 KeyDown="DetailNewStepTextBox_KeyDown"
                                 PlaceholderText="{Binding ElementName=RootGrid, Path=DataContext.DetailAddStepText}" />
                             <Button
@@ -875,7 +875,7 @@
                         <Grid MinHeight="30">
                             <TextBlock
                                 VerticalAlignment="Center"
-                                FontSize="{Binding ElementName=RootGrid, Path=DataContext.TextSize}"
+                                FontSize="{Binding ElementName=RootGrid, Path=DataContext.ContentTextSize}"
                                 FontWeight="SemiBold"
                                 Text="{Binding ElementName=RootGrid, Path=DataContext.DetailNotesText}" />
                             <StackPanel HorizontalAlignment="Right" Orientation="Horizontal" Spacing="2">
@@ -912,14 +912,14 @@
                                 <controls:MarkdownDocumentView
                                     x:Name="DetailNotesView"
                                     AreTaskListsInteractive="True"
-                                    FontSize="{Binding ElementName=RootGrid, Path=DataContext.TextSize}"
+                                    FontSize="{Binding ElementName=RootGrid, Path=DataContext.ContentTextSize}"
                                     Foreground="{ThemeResource TextFillColorPrimaryBrush}"
                                     Markdown="{Binding Notes}"
                                     TaskToggleRequested="DetailNotesView_TaskToggleRequested"
                                     UseInternalScrollViewer="False" />
                                 <TextBlock
                                     VerticalAlignment="Top"
-                                    FontSize="{Binding ElementName=RootGrid, Path=DataContext.TextSize}"
+                                    FontSize="{Binding ElementName=RootGrid, Path=DataContext.ContentTextSize}"
                                     Foreground="{ThemeResource TextFillColorTertiaryBrush}"
                                     IsHitTestVisible="False"
                                     Text="{Binding ElementName=RootGrid, Path=DataContext.DetailNotesPlaceholderText}"
@@ -933,7 +933,7 @@
                             MaxHeight="360"
                             CancelRequested="DetailNotesEditor_CancelRequested"
                             CommitRequested="DetailNotesEditor_CommitRequested"
-                            EditorFontSize="{Binding ElementName=RootGrid, Path=DataContext.TextSize}"
+                            EditorFontSize="{Binding ElementName=RootGrid, Path=DataContext.ContentTextSize}"
                             EditorEnterBehavior="{Binding ElementName=RootGrid, Path=DataContext.EditorEnterBehavior}"
                             EditorTextChanged="DetailNotesEditor_EditorTextChanged"
                             PlaceholderText="{Binding ElementName=RootGrid, Path=DataContext.DetailNotesPlaceholderText}"
@@ -950,7 +950,7 @@
                             </Grid.ColumnDefinitions>
                             <TextBlock
                                 VerticalAlignment="Center"
-                                FontSize="{Binding ElementName=RootGrid, Path=DataContext.SecondaryTextSize}"
+                                FontSize="{Binding ElementName=RootGrid, Path=DataContext.ContentSecondaryTextSize}"
                                 Foreground="{ThemeResource SystemFillColorCriticalBrush}"
                                 Text="{Binding ElementName=RootGrid, Path=DataContext.DetailNotesSaveFailedText}"
                                 TextWrapping="Wrap" />
@@ -978,7 +978,7 @@
                                 <Grid ColumnSpacing="6">
                                     <Grid.ColumnDefinitions><ColumnDefinition Width="22" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
                                     <FontIcon Grid.Column="0" FontSize="{Binding ElementName=RootGrid, Path=DataContext.StandardIconSize}" Glyph="&#xE723;" />
-                                    <TextBlock Grid.Column="1" VerticalAlignment="Center" FontSize="{Binding ElementName=RootGrid, Path=DataContext.TextSize}" Text="{Binding ElementName=RootGrid, Path=DataContext.DetailAddFileText}" />
+                                    <TextBlock Grid.Column="1" VerticalAlignment="Center" FontSize="{Binding ElementName=RootGrid, Path=DataContext.ContentTextSize}" Text="{Binding ElementName=RootGrid, Path=DataContext.DetailAddFileText}" />
                                 </Grid>
                             </Button>
                         </StackPanel>
@@ -992,7 +992,7 @@
                 Margin="8,0,8,4"
                 HorizontalAlignment="Left"
                 VerticalAlignment="Center"
-                FontSize="{Binding ElementName=RootGrid, Path=DataContext.SecondaryTextSize}"
+                FontSize="{Binding ElementName=RootGrid, Path=DataContext.ContentSecondaryTextSize}"
                 Foreground="{ThemeResource TextFillColorTertiaryBrush}"
                 Text="{Binding CreatedText}"
                 TextTrimming="CharacterEllipsis" />

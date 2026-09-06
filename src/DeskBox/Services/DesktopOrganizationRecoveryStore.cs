@@ -41,19 +41,20 @@ public sealed class DesktopOrganizationRecoveryStore
             DesktopRecoveryJsonContext.Default.RecoveryJournal);
     }
 
-    public async Task SaveAsync(DesktopOrganizationRecoveryJournal journal)
+    public Task SaveAsync(DesktopOrganizationRecoveryJournal journal) => Task.Run(() => Save(journal));
+
+    // Called on the Shell STA between items so a resolved collision name is
+    // durable before the next move. No UI dispatcher is involved.
+    public void Save(DesktopOrganizationRecoveryJournal journal)
     {
         string? directory = Path.GetDirectoryName(_journalPath);
-        if (!string.IsNullOrWhiteSpace(directory))
-        {
-            Directory.CreateDirectory(directory);
-        }
-
+        if (!string.IsNullOrWhiteSpace(directory)) Directory.CreateDirectory(directory);
         string temporaryPath = $"{_journalPath}.tmp";
-        string json = JsonSerializer.Serialize(
-            journal,
-            DesktopRecoveryJsonContext.Default.RecoveryJournal);
-        await File.WriteAllTextAsync(temporaryPath, json);
+        using (var stream = new FileStream(temporaryPath, FileMode.Create, FileAccess.Write, FileShare.None))
+        {
+            JsonSerializer.Serialize(stream, journal, DesktopRecoveryJsonContext.Default.RecoveryJournal);
+            stream.Flush(flushToDisk: true);
+        }
         File.Move(temporaryPath, _journalPath, overwrite: true);
     }
 

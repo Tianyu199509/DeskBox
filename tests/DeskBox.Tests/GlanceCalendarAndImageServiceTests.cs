@@ -499,6 +499,44 @@ public sealed class GlanceCalendarAndImageServiceTests : IDisposable
     }
 
     [Fact]
+    public void TimeFormat_FollowSystemUsesTheSystemShortTimePattern()
+    {
+        DateTime date = new(2026, 8, 19, 17, 5, 0);
+        CultureInfo displayCulture = new("en-US");
+        CultureInfo systemCulture = new("en-US");
+        systemCulture.DateTimeFormat.ShortTimePattern = "h:mm tt";
+
+        string actual = GlanceWidgetViewModel.FormatTimeText(
+            date,
+            GlanceTimeFormatMode.FollowSystem,
+            displayCulture,
+            systemCulture);
+
+        Assert.Equal("5:05", actual);
+    }
+
+    [Theory]
+    [InlineData(GlanceTimeFormatMode.Hour24, "17:05")]
+    [InlineData(GlanceTimeFormatMode.Hour12, "5:05")]
+    public void TimeFormat_ExplicitModesOverrideTheSystemPattern(
+        GlanceTimeFormatMode mode,
+        string expected)
+    {
+        DateTime date = new(2026, 8, 19, 17, 5, 0);
+        CultureInfo displayCulture = new("en-US");
+        CultureInfo systemCulture = new("en-US");
+        systemCulture.DateTimeFormat.ShortTimePattern = "HH:mm";
+
+        string actual = GlanceWidgetViewModel.FormatTimeText(
+            date,
+            mode,
+            displayCulture,
+            systemCulture);
+
+        Assert.Equal(expected, actual);
+    }
+
+    [Fact]
     public void CalendarNavigation_ResolvesTheMonthOwningMostVisibleDays()
     {
         DateOnly[] augustGrid = Enumerable.Range(0, 42)

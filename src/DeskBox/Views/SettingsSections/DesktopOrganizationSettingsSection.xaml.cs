@@ -205,11 +205,22 @@ public sealed partial class DesktopOrganizationSettingsSection : UserControl
                 widgetManager,
                 app.OrganizerService,
                 app.LocalizationService);
-            await coordinator.UndoAsync(historyId);
+            nint owner = app.SettingsWindowInstance is { } window
+                ? WinRT.Interop.WindowNative.GetWindowHandle(window) : 0;
+            await coordinator.UndoAsync(historyId, owner);
             RuleStatusInfo.ActionButton = null;
             RuleStatusInfo.Severity = InfoBarSeverity.Success;
             RuleStatusInfo.Title = T("DesktopOrganization.Undo.Success");
             RuleStatusInfo.Message = string.Empty;
+            RuleStatusInfo.IsOpen = true;
+            Refresh();
+        }
+        catch (DesktopOrganizationIncompleteUndoException ex)
+        {
+            RuleStatusInfo.ActionButton = null;
+            RuleStatusInfo.Severity = InfoBarSeverity.Warning;
+            RuleStatusInfo.Title = T("DesktopOrganization.Public.UndoPendingTitle");
+            RuleStatusInfo.Message = Format("DesktopOrganization.Public.UndoPending", ex.RestoredCount, ex.RemainingCount);
             RuleStatusInfo.IsOpen = true;
             Refresh();
         }

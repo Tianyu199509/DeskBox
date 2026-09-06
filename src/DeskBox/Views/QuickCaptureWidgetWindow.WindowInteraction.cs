@@ -33,7 +33,6 @@ public sealed partial class QuickCaptureWidgetWindow
 {
     private void TitleBarGrid_PointerPressed(object sender, PointerRoutedEventArgs e)
     {
-        CancelPendingTitleBarClickCollapse();
         bool isLeftButtonPressed = e.GetCurrentPoint(TitleBarGrid).Properties.IsLeftButtonPressed;
         if (isLeftButtonPressed &&
             QuickCaptureShell.TitleEditorContent is TextBox &&
@@ -51,7 +50,6 @@ public sealed partial class QuickCaptureWidgetWindow
             App.Current.WidgetManager?.ActivateAllVisibleWidgetsFromTitle(_hWnd);
         }
 
-        BeginTitleBarClickCollapse(e, ShouldOpenTitleBarFlyout(e.OriginalSource));
         BeginWindowDrag(e, TitleBarGrid, focusWhenClicked: true);
     }
 
@@ -62,7 +60,6 @@ public sealed partial class QuickCaptureWidgetWindow
 
     private void TitleBarGrid_PointerReleased(object sender, PointerRoutedEventArgs e)
     {
-        CompleteTitleBarClickCollapse(e, _hasMovedTitleBarDrag);
         EndWindowDrag(e);
         App.Current.WidgetManager?.RestoreTemporarilyRaisedWidgetsToDesktopLayer(
             "quick-title-released");

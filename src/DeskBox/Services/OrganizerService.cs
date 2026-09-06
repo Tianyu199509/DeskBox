@@ -345,7 +345,7 @@ public sealed class OrganizerService
         return true;
     }
 
-    public async Task UndoAsync(string historyEntryId)
+    public async Task UndoAsync(string historyEntryId, IntPtr ownerWindowHandle = default)
     {
         var historyEntry = _settingsService.Settings.RecentOrganizationHistory
             .FirstOrDefault(entry => string.Equals(entry.Id, historyEntryId, StringComparison.Ordinal));
@@ -353,6 +353,16 @@ public sealed class OrganizerService
         if (historyEntry is null || !historyEntry.CanUndo || historyEntry.IsUndone || historyEntry.IsFailed)
         {
             throw new InvalidOperationException("The selected history entry cannot be undone.");
+        }
+
+        if (historyEntry.ActionType == OrganizationActionType.DesktopOrganization)
+        {
+            var transaction = new DesktopOrganizationTransaction(_settingsService, _fileService)
+            {
+                AutoOrganizationSuppressions = _autoOrganizationSuppressions
+            };
+            await transaction.UndoAsync(historyEntryId, ownerWindowHandle);
+            return;
         }
 
         var reservedPaths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);

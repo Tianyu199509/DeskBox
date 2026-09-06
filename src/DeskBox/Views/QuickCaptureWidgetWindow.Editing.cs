@@ -311,7 +311,6 @@ public sealed partial class QuickCaptureWidgetWindow
 
     private void QuickCaptureShell_TitleDoubleTapped(object? sender, DoubleTappedRoutedEventArgs e)
     {
-        CancelPendingTitleBarClickCollapse();
         e.Handled = true;
         DispatcherQueue.TryEnqueue(StartTitleRename);
     }
@@ -326,14 +325,31 @@ public sealed partial class QuickCaptureWidgetWindow
         }
 
         _isCancellingTitleRename = false;
+        _titleRenameOpenedAtTick = Environment.TickCount64;
         BeginInteractionLayer("quick-title-rename-opened");
         var editor = CreateTitleRenameEditor();
         QuickCaptureShell.TitleEditorContent = editor;
-        DispatcherQueue.TryEnqueue(() =>
+        ActivateForTitleRename();
+        InlineEditorFocus.FocusWhenLoaded(
+            editor,
+            static focused => focused.SelectAll(),
+            DispatcherQueue,
+            "QuickCaptureTitleRename");
+    }
+
+    private void ActivateForTitleRename()
+    {
+        if (WidgetLayerService.UsesDesktopPinnedMode())
         {
-            editor.Focus(FocusState.Programmatic);
-            editor.SelectAll();
-        });
+            // Resting desktop-pinned widgets carry WS_EX_NOACTIVATE; strip it
+            // before the explicit activation so the editor window can take
+            // keyboard focus without waiting for the GotFocus routing.
+            WidgetLayerService.PrepareForDesktopPinnedKeyboardInput(HWnd);
+        }
+
+        AppWindow.Show();
+        base.Activate();
+        Win32Helper.SetForegroundWindow(HWnd);
     }
 
     private TextBox CreateTitleRenameEditor()
@@ -371,6 +387,13 @@ public sealed partial class QuickCaptureWidgetWindow
         if (_isCancellingTitleRename)
         {
             _isCancellingTitleRename = false;
+            return;
+        }
+
+        if (InlineEditorFocus.TryRecoverFocusWithinGrace(
+                _titleRenameOpenedAtTick,
+                sender as TextBox))
+        {
             return;
         }
 
@@ -414,8 +437,11 @@ public sealed partial class QuickCaptureWidgetWindow
         {
             App.Log($"[QuickCapture] Title rename failed: {ex}");
             ShowStatusToast(_localizationService.T("Common.OperationFailedRetry"));
-            editor.Focus(FocusState.Programmatic);
-            editor.SelectAll();
+            InlineEditorFocus.FocusWhenLoaded(
+                editor,
+                static focused => focused.SelectAll(),
+                DispatcherQueue,
+                "QuickCaptureTitleRename");
         }
         finally
         {

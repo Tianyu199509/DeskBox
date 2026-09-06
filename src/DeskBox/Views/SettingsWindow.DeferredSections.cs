@@ -123,6 +123,12 @@ public sealed partial class SettingsWindow
                 }
             }
         }
+        if (root is Expander { Content: DependencyObject expanderContent } nativeExpander &&
+            FindSettingsSearchTarget(expanderContent, headerKey, visited) is { } expanderTarget)
+        {
+            nativeExpander.IsExpanded = true;
+            return expanderTarget;
+        }
         if (root is ContentControl { Content: DependencyObject content } &&
             FindSettingsSearchTarget(content, headerKey, visited) is { } contentTarget)
         {

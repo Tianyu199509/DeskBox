@@ -182,13 +182,21 @@ public sealed partial class QuickCaptureWidgetWindow
         };
     }
 
+    private WidgetChromeMode ResolveTitleBarChromeMode() =>
+        App.Current.WidgetManager?.ResolveWidgetChromeMode(ViewModel.Config, _chromeDescriptor) ??
+        _chromeModeResolver.Resolve(ViewModel.Config, _chromeDescriptor);
+
+    protected override void OnWidgetGroupPresentationChanged(WidgetGroupPresentation? presentation)
+    {
+        if (!_isClosing && QuickCaptureShell.ChromeMode != ResolveTitleBarChromeMode())
+        {
+            ApplyTitleBarLayout();
+        }
+    }
+
     private void ApplyTitleBarLayout()
     {
-        WidgetChromeMode chromeMode =
-            App.Current.WidgetManager?.ResolveWidgetChromeMode(
-                ViewModel.Config,
-                _chromeDescriptor) ??
-            _chromeModeResolver.Resolve(ViewModel.Config, _chromeDescriptor);
+        WidgetChromeMode chromeMode = ResolveTitleBarChromeMode();
         double titleTextSize = chromeMode == WidgetChromeMode.Compact
             ? ViewModel.TextSize
             : ViewModel.TitleTextSize;
@@ -198,29 +206,12 @@ public sealed partial class QuickCaptureWidgetWindow
             includeInnerPadding: true,
             chromeMode);
 
-        QuickCaptureShell.ChromeMode = chromeMode;
-        QuickCaptureShell.SetTitleBarPadding(WidgetTitleBarMetricsCalculator.CreateOuterPadding(chromeMode));
-        TitleIcon.IconSize = metrics.TitleIconSize;
-        TitleText.FontSize = metrics.TitleTextSize;
+        QuickCaptureShell.ApplyTitleBarMetrics(metrics, chromeMode);
         ApplyTitleActionButtonConfiguration();
         ApplyLockActionIconState();
 
-        WidgetTitleBarMetricsCalculator.ApplyActionButton(PositionLockButton, metrics);
-        WidgetTitleBarMetricsCalculator.ApplyActionButton(SizeLockButton, metrics);
-        WidgetTitleBarMetricsCalculator.ApplyActionButton(AddButton, metrics);
-        WidgetTitleBarMetricsCalculator.ApplyActionButton(MoreButton, metrics);
-        WidgetTitleBarMetricsCalculator.ApplyActionButton(CloseButton, metrics);
-
-        WidgetActionIconHelper.ApplyPairSize(PositionLockButtonIcon, PositionLockButtonFilledIcon, metrics);
-        WidgetActionIconHelper.ApplyPairSize(SizeLockButtonIcon, SizeLockButtonFilledIcon, metrics);
-        WidgetTitleBarMetricsCalculator.ApplyActionIcon(AddButtonIcon, metrics);
-        WidgetTitleBarMetricsCalculator.ApplyActionIcon(MoreButtonIcon, metrics);
-        WidgetTitleBarMetricsCalculator.ApplyActionIcon(CloseButtonIcon, metrics);
-
         RootGrid.RowDefinitions[0].MinHeight = metrics.RowHeight.Value;
         RootGrid.RowDefinitions[0].Height = GridLength.Auto;
-        QuickCaptureShell.SetTitleBarRowHeight(metrics.RowHeight);
-        TitleBarGrid.Padding = metrics.InnerTitlePadding;
     }
 
     private void ApplyTitleActionButtonConfiguration()

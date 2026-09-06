@@ -10,7 +10,7 @@ namespace DeskBox.Services;
 /// Lightweight opt-in timing logs for performance baseline work.
 /// Enable by setting DESKBOX_PERF_LOG=1 before launching DeskBox.
 /// </summary>
-public static class PerformanceLogger
+public static partial class PerformanceLogger
 {
     public const string EnabledEnvironmentVariable = "DESKBOX_PERF_LOG";
 
@@ -31,6 +31,8 @@ public static class PerformanceLogger
     public static long LastManagedHeap { get; private set; }
 
     public static long LastGcHeapSize { get; private set; }
+
+    public static long LastGcCommittedBytes { get; private set; }
 
     public static long LastGcFragmentedBytes { get; private set; }
 
@@ -302,6 +304,7 @@ public static class PerformanceLogger
             LastManagedHeap = GC.GetTotalMemory(forceFullCollection: false);
             GCMemoryInfo gcInfo = GC.GetGCMemoryInfo();
             LastGcHeapSize = gcInfo.HeapSizeBytes;
+            LastGcCommittedBytes = gcInfo.TotalCommittedBytes;
             LastGcFragmentedBytes = gcInfo.FragmentedBytes;
             LastGcMemoryLoad = gcInfo.MemoryLoadBytes;
             LastPrivateMinusGcHeapEstimate = Math.Max(
@@ -354,6 +357,15 @@ public static class PerformanceLogger
                 $"privateMB={LastPrivateMemory / (1024.0 * 1024):F1} " +
                 $"managedHeapMB={LastManagedHeap / (1024.0 * 1024):F1} " +
                 $"gcHeapMB={LastGcHeapSize / (1024.0 * 1024):F1} " +
+                $"gcCommittedMB={LastGcCommittedBytes / (1024.0 * 1024):F1} " +
+                $"gcIndex={gcInfo.Index} " +
+                $"ownedCompositionCreated={OwnedCompositionResourcesCreated} " +
+                $"ownedCompositionReleased={OwnedCompositionResourcesReleased} " +
+                $"ownedCompositionOutstanding={OwnedCompositionResourcesOutstanding} " +
+                $"contentAppearanceApplied={ContentAppearanceApplied} " +
+                $"contentAppearanceSkipped={ContentAppearanceSkipped} " +
+                $"stackProjectionRebuilds={StackProjectionRebuilds} " +
+                $"stackProjectionReuseSkips={StackProjectionReuseSkips} " +
                 $"privateMinusGcHeapEstimateMB={LastPrivateMinusGcHeapEstimate / (1024.0 * 1024):F1} " +
                 $"gcFragmentedMB={LastGcFragmentedBytes / (1024.0 * 1024):F1} " +
                 $"lohMB={lohSizeBytes / (1024.0 * 1024):F1} " +

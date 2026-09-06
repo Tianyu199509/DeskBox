@@ -20,14 +20,20 @@ public sealed class DesktopOrganizationPlanner
         string storageRootPath,
         IReadOnlyCollection<WidgetConfig> widgets,
         IReadOnlyCollection<DesktopOrganizationRule> rules,
-        Func<string, string>? categoryDisplayNameResolver = null)
+        Func<string, string>? categoryDisplayNameResolver = null,
+        bool includePersonalDesktop = true,
+        bool includePublicDesktop = false)
     {
         string normalizedRoot = Path.GetFullPath(storageRootPath);
         categoryDisplayNameResolver ??= categoryId => categoryId;
         var targets = new Dictionary<string, MutableTarget>(StringComparer.Ordinal);
         var pendingByCategory = new Dictionary<string, List<DesktopOrganizationFileSnapshot>>(StringComparer.Ordinal);
+        var selectedItems = scan.Items.Select(item =>
+            (item.SourceScope == DesktopOrganizationSourceScope.Public ? includePublicDesktop : includePersonalDesktop)
+                ? item
+                : item with { ExclusionReason = DesktopOrganizationExclusionReason.SourceNotSelected }).ToList();
 
-        foreach (DesktopOrganizationFileSnapshot item in scan.Items.Where(item => item.IsEligible))
+        foreach (DesktopOrganizationFileSnapshot item in selectedItems.Where(item => item.IsEligible))
         {
             DesktopOrganizationRule? rule = _ruleResolver.Resolve(item, rules, widgets);
             WidgetConfig? widget = rule is null
@@ -94,11 +100,16 @@ public sealed class DesktopOrganizationPlanner
         return new DesktopOrganizationPlan
         {
             DesktopPath = scan.DesktopPath,
+            PublicDesktopPath = scan.PublicDesktopPath,
+            PublicDesktopUnavailable = scan.PublicDesktopUnavailable,
+            IncludePersonalDesktop = includePersonalDesktop,
+            IncludePublicDesktop = includePublicDesktop,
+            SourceItems = scan.Items.ToList(),
             StorageRootPath = normalizedRoot,
             Targets = targets.Values
                 .Select(target => target.ToPlan())
                 .ToList(),
-            ExcludedItems = scan.Items.Where(item => !item.IsEligible).ToList()
+            ExcludedItems = selectedItems.Where(item => !item.IsEligible).ToList()
         };
     }
 
@@ -140,6 +151,27 @@ public sealed class DesktopOrganizationPlanner
         {
             categories.Remove(DesktopOrganizationCategoryIds.Other);
         }
+    }
+
+    public static DesktopOrganizationPlan CreateRetryPlan(
+        DesktopOrganizationPlan previous, IReadOnlySet<string> remainingPaths, IReadOnlyCollection<WidgetConfig> widgets)
+    {
+        return new DesktopOrganizationPlan
+        {
+            Id = previous.Id,
+            DesktopPath = previous.DesktopPath,
+            PublicDesktopPath = previous.PublicDesktopPath,
+            IncludePersonalDesktop = previous.IncludePersonalDesktop,
+            IncludePublicDesktop = previous.IncludePublicDesktop,
+            StorageRootPath = previous.StorageRootPath,
+            SourceItems = previous.SourceItems,
+            ExcludedItems = previous.ExcludedItems,
+            Targets = previous.Targets.Select(target => target.CloneWith(target.TargetWidgetId,
+                target.SuggestedDisplayName, target.TargetDirectoryPath,
+                target.CreatesWidget && !widgets.Any(widget => widget.Id == target.TargetWidgetId),
+                target.Items.Where(item => remainingPaths.Contains(item.SourcePath))))
+                .Where(target => target.Items.Count > 0).ToList()
+        };
     }
 
     private static int GetCategoryOrder(string categoryId)

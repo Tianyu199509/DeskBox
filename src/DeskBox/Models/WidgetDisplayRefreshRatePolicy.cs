@@ -12,8 +12,8 @@ public static class WidgetDisplayRefreshRatePolicy
     // High-refresh displays need commit ticks at their native frame period;
     // a coarse floor reintroduces the beat-pattern judder this interval exists
     // to remove. The ceiling keeps sub-60Hz panels from ticking needlessly fast.
-    public const double MinimumFrameTickMs = 4.0;
-    public const double MaximumFrameTickMs = 16.67;
+    public const double MinimumFrameTickMs = 1.0;
+    public const double MaximumFrameTickMs = 1000.0 / 24.0;
 
     public static int Normalize(uint refreshRateHz, int fallbackHz = DefaultRefreshRateHz)
     {
@@ -32,8 +32,11 @@ public static class WidgetDisplayRefreshRatePolicy
     /// the compositor.
     /// </summary>
     public static TimeSpan ResolveFrameTickInterval(int refreshRateHz)
+        => ResolveFrameTickInterval((double)refreshRateHz);
+
+    public static TimeSpan ResolveFrameTickInterval(double refreshRateHz)
     {
-        int normalized = refreshRateHz is >= 24 and <= 1000
+        double normalized = double.IsFinite(refreshRateHz) && refreshRateHz is >= 24 and <= 1000
             ? refreshRateHz
             : DefaultRefreshRateHz;
         double intervalMs = Math.Clamp(
@@ -41,5 +44,13 @@ public static class WidgetDisplayRefreshRatePolicy
             MinimumFrameTickMs,
             MaximumFrameTickMs);
         return TimeSpan.FromMilliseconds(intervalMs);
+    }
+
+    internal static double ResolveRationalRate(uint numerator, uint denominator, double fallbackHz = DefaultRefreshRateHz)
+    {
+        double rate = denominator == 0 ? 0 : (double)numerator / denominator;
+        return double.IsFinite(rate) && rate is >= 24 and <= 1000
+            ? rate
+            : double.IsFinite(fallbackHz) && fallbackHz is >= 24 and <= 1000 ? fallbackHz : DefaultRefreshRateHz;
     }
 }

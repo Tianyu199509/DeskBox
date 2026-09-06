@@ -60,11 +60,13 @@ internal static class WidgetCompactInteractionPolicy
         WidgetCompactInteractionSnapshot snapshot,
         bool allowInteractionRegionDwell = false)
     {
-        bool hasEligibleHoverIntent = allowInteractionRegionDwell
-            ? snapshot.IsPointerInside
-            : snapshot.IsExpansionZoneActive &&
-                !snapshot.IsPointerOverMoveHandle &&
-                !snapshot.IsPointerOverActions;
+        // The left identity strip is a move/drag affordance. Keep it excluded
+        // even when the caller allows the longer interaction-region dwell used
+        // by trailing actions; only the middle body may trigger expansion.
+        bool hasEligibleHoverIntent = snapshot.IsPointerInside &&
+            !snapshot.IsPointerOverMoveHandle &&
+            (allowInteractionRegionDwell ||
+                (snapshot.IsExpansionZoneActive && !snapshot.IsPointerOverActions));
 
         return behavior == WidgetCollapseBehavior.Smart &&
             snapshot.IsCollapsed &&

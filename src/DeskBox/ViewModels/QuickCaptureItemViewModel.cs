@@ -17,6 +17,7 @@ public sealed partial class QuickCaptureItemViewModel : ObservableObject
     private bool _isCopySelected;
     private bool _isDetailSelected;
     private double _textSize;
+    private double _contentTextSize;
     private double _iconSize;
     private string _searchText;
     private string? _displayText;
@@ -28,6 +29,7 @@ public sealed partial class QuickCaptureItemViewModel : ObservableObject
         double textSize,
         double iconSize,
         string? searchText,
+        double? contentTextSize = null,
         bool showPinnedSortControls = false,
         bool canMovePinnedUp = false,
         bool canMovePinnedDown = false)
@@ -35,6 +37,7 @@ public sealed partial class QuickCaptureItemViewModel : ObservableObject
         _model = model;
         _localizationService = localizationService;
         _textSize = textSize;
+        _contentTextSize = contentTextSize ?? textSize;
         _iconSize = iconSize;
         _searchText = NormalizeSearchText(searchText);
         _showPinnedSortControls = showPinnedSortControls;
@@ -187,6 +190,14 @@ public sealed partial class QuickCaptureItemViewModel : ObservableObject
 
     public double TextSize => _textSize;
 
+    public double ContentTextSize => _contentTextSize;
+
+    public double ContentSecondaryTextSize => Math.Max(SettingsService.MinTextSize, _contentTextSize - 1.5);
+
+    public double ContentDetailHeaderTextSize => Math.Max(SettingsService.MinTextSize, _contentTextSize - 1);
+
+    public double ContentTitleTextSize => Math.Min(SettingsService.MaxTextSize + 2, _contentTextSize + 3);
+
     public double SecondaryTextSize => Math.Max(SettingsService.MinTextSize - 1, _textSize - 2);
 
     public double IconSize => _iconSize;
@@ -334,18 +345,25 @@ public sealed partial class QuickCaptureItemViewModel : ObservableObject
         OnPropertyChanged(nameof(HighlightVisibility));
     }
 
-    public void UpdateAppearance(double textSize, double iconSize)
+    public void UpdateAppearance(double textSize, double iconSize, double? contentTextSize = null)
     {
+        double nextContentTextSize = contentTextSize ?? textSize;
         if (Math.Abs(_textSize - textSize) < 0.01 &&
-            Math.Abs(_iconSize - iconSize) < 0.01)
+            Math.Abs(_iconSize - iconSize) < 0.01 &&
+            Math.Abs(_contentTextSize - nextContentTextSize) < 0.01)
         {
             return;
         }
 
         _textSize = textSize;
         _iconSize = iconSize;
+        _contentTextSize = nextContentTextSize;
         OnPropertyChanged(nameof(TextSize));
         OnPropertyChanged(nameof(SecondaryTextSize));
+        OnPropertyChanged(nameof(ContentTextSize));
+        OnPropertyChanged(nameof(ContentSecondaryTextSize));
+        OnPropertyChanged(nameof(ContentDetailHeaderTextSize));
+        OnPropertyChanged(nameof(ContentTitleTextSize));
         OnPropertyChanged(nameof(IconSize));
         OnPropertyChanged(nameof(TypeIconSize));
         OnPropertyChanged(nameof(ActionIconSize));

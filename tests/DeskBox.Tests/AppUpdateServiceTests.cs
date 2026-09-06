@@ -97,24 +97,31 @@ public sealed class AppUpdateServiceTests : IDisposable
         Assert.Equal("繁體摘要", manifest.GetLocalizedSummary("zh-MO"));
     }
 
-    [Fact]
-    public void ManualUpdateDownloadUrl_UsesOnlyHttpsCandidates()
+    [Theory]
+    [InlineData("https://pan.quark.cn/s/version-specific", "https://mirror.example.com/deskbox")]
+    [InlineData("javascript:alert('unsafe')", "http://mirror.example.com/deskbox")]
+    [InlineData("", "")]
+    public void ManualUpdateDownloadUrl_AlwaysOpensOfficialDownloadPage(string manualUrl, string mirrorUrl)
     {
         var manifest = new AppUpdateManifest
         {
-            ManualDownloadUrl = "javascript:alert('unsafe')",
-            MirrorUrl = "https://mirror.example.com/deskbox"
+            ManualDownloadUrl = manualUrl,
+            MirrorUrl = mirrorUrl
         };
 
-        Assert.False(AppUpdateManifest.IsSafeWebUrl(manifest.ManualDownloadUrl));
         Assert.Equal(
-            manifest.MirrorUrl,
+            "https://deskbox.fun/download",
             SettingsViewModel.GetManualUpdateDownloadUrl(manifest));
+        Assert.Equal("https://deskbox.fun/download", SettingsViewModel.GetManualUpdateDownloadUrl(null));
+    }
 
-        manifest.MirrorUrl = "http://mirror.example.com/deskbox";
-        Assert.Equal(
-            AppUpdateService.DefaultManualDownloadUrl,
-            SettingsViewModel.GetManualUpdateDownloadUrl(manifest));
+    [Theory]
+    [InlineData("**拖拽更加可靠。** 使用 `RequestedOperation`。", "拖拽更加可靠。 使用 RequestedOperation。")]
+    [InlineData("## Highlights\n- Read [details](https://deskbox.fun/download)\n- Fixed alignment", "Highlights Read details Fixed alignment")]
+    [InlineData(null, "")]
+    public void UpdateSummaryPreview_ShowsReadableText(string? markdown, string expected)
+    {
+        Assert.Equal(expected, SettingsViewModel.GetUpdateSummaryPreview(markdown));
     }
 
     [Theory]

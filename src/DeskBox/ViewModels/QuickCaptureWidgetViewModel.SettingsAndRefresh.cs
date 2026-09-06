@@ -116,7 +116,10 @@ public sealed partial class QuickCaptureWidgetViewModel
         var settings = _settingsService.Settings;
         WidgetOpacity = settings.WidgetOpacity;
         TabStyle = settings.QuickCaptureTabStyle;
-        TextSize = SettingsService.NormalizeTextSize(settings.TextSize);
+        TextSize = SettingsService.NormalizeTextSize(
+            (settings.QuickCaptureListTextSize > 0 ? settings.QuickCaptureListTextSize : settings.TextSize));
+        ContentTextSize = SettingsService.NormalizeTextSize(
+            (settings.QuickCaptureContentTextSize > 0 ? settings.QuickCaptureContentTextSize : settings.TextSize));
         IconSize = SettingsService.NormalizeIconSize(settings.IconSize);
         LayoutDensityScale = NormalizeDensity(settings.LayoutDensityScale);
         OnPropertyChanged(nameof(TitleIconSize));
@@ -125,7 +128,7 @@ public sealed partial class QuickCaptureWidgetViewModel
 
         foreach (var item in Items)
         {
-            item.UpdateAppearance(TextSize, IconSize);
+            item.UpdateAppearance(TextSize, IconSize, ContentTextSize);
             item.UpdateSearchText(SearchText);
         }
     }

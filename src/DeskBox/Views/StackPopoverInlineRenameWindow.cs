@@ -192,7 +192,6 @@ internal sealed class StackPopoverInlineRenameWindow : Window
                 Activate();
                 bool queuedForegroundSet =
                     Win32Helper.SetForegroundWindow(WindowHandle);
-                FocusEditor();
                 App.LogVerbose(
                     $"[FileStack] Title editor focus pass hwnd=0x{WindowHandle.ToInt64():X} " +
                     $"foreground=0x{Win32Helper.GetForegroundWindow().ToInt64():X} " +
@@ -214,9 +213,10 @@ internal sealed class StackPopoverInlineRenameWindow : Window
         Close();
     }
 
-    private void FocusEditor()
-    {
-        Editor.Focus(FocusState.Programmatic);
-        Editor.SelectAll();
-    }
+    private void FocusEditor() =>
+        InlineEditorFocus.FocusWhenLoaded(
+            Editor,
+            static editor => editor.SelectAll(),
+            DispatcherQueue,
+            "StackPopoverTitleRename");
 }

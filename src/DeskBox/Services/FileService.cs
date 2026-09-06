@@ -1160,7 +1160,9 @@ public sealed partial class FileService
         bool useShellProgress = false,
         IntPtr ownerWindowHandle = default,
         IProgress<FileTransferProgress>? progress = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        bool allowShellElevation = false,
+        Action<FileTransferResult>? itemCompleted = null)
     {
         var operations = await Task.Run(() =>
         {
@@ -1191,6 +1193,15 @@ public sealed partial class FileService
                     operation.DestinationPath,
                     operation.SourceIsDirectory)),
                 move);
+
+        if (allowShellElevation)
+        {
+            if (ownerWindowHandle == IntPtr.Zero)
+                throw new InvalidOperationException("Interactive desktop transfers require an owner window.");
+            return await ExecuteModernShellTransferPlanAsync(
+                operations, move, ownerWindowHandle, progress, cancellationToken,
+                keepBoth: true, itemCompleted: itemCompleted);
+        }
 
         if (useShellProgress)
         {
@@ -2008,6 +2019,60 @@ public sealed partial class FileService
         }
     }
 
+    /// <summary>
+    /// Returns whether any source directory contains the destination directory
+    /// after resolving junctions, symbolic links and filesystem aliases.
+    /// Transfers matching this condition must be rejected before a Shell
+    /// operation is started.
+    /// </summary>
+    internal static bool IsUnsafeDirectoryTransfer(
+        IEnumerable<string> sourcePaths,
+        string? destinationPath)
+    {
+        if (string.IsNullOrWhiteSpace(destinationPath))
+        {
+            return false;
+        }
+
+        string normalizedDestination;
+        try
+        {
+            normalizedDestination = Path.GetFullPath(destinationPath);
+        }
+        catch
+        {
+            return false;
+        }
+
+        foreach (string sourcePath in sourcePaths)
+        {
+            if (string.IsNullOrWhiteSpace(sourcePath))
+            {
+                continue;
+            }
+
+            string normalizedSource;
+            try
+            {
+                normalizedSource = Path.GetFullPath(sourcePath);
+            }
+            catch
+            {
+                continue;
+            }
+
+            if (Directory.Exists(normalizedSource) &&
+                IsPathUnderDirectoryResolved(
+                    normalizedDestination,
+                    normalizedSource))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     public static bool IsPathUnderDirectoryResolved(string candidatePath, string directoryPath)
     {
         if (!TryResolvePathIdentity(candidatePath, out string candidate) ||
@@ -2295,31 +2360,6 @@ public sealed partial class FileService
         }
 
         return result;
-    }
-
-    private static bool IsBrokenShortcut(string shortcutPath, string targetPath)
-    {
-        if (!File.Exists(shortcutPath))
-        {
-            return true;
-        }
-
-        if (string.IsNullOrWhiteSpace(targetPath))
-        {
-            // Advertised MSI shortcuts and shell-namespace links may not expose a
-            // filesystem target through IShellLink.GetPath. ShellExecute can still
-            // open them, so an empty target is not enough evidence that the link is
-            // broken.
-            return false;
-        }
-
-        string expandedTarget = Environment.ExpandEnvironmentVariables(targetPath);
-        if (!Path.IsPathFullyQualified(expandedTarget))
-        {
-            return false;
-        }
-
-        return !File.Exists(expandedTarget) && !Directory.Exists(expandedTarget);
     }
 
     /// <summary>

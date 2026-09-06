@@ -60,31 +60,47 @@ public sealed class DesktopOrganizationScanner
         string publicDesktopPath = NormalizeOptionalPath(_publicDesktopPathProvider());
         var items = new List<DesktopOrganizationFileSnapshot>();
 
-        if (!Directory.Exists(desktopPath))
+        ScanSource(desktopPath, DesktopOrganizationSourceScope.Personal);
+        bool publicUnavailable = string.IsNullOrWhiteSpace(publicDesktopPath);
+        if (!publicUnavailable && !string.Equals(
+                Path.TrimEndingDirectorySeparator(desktopPath),
+                Path.TrimEndingDirectorySeparator(publicDesktopPath),
+                StringComparison.OrdinalIgnoreCase))
         {
-            return new DesktopOrganizationScanResult
+            try
             {
-                DesktopPath = desktopPath,
-                Items = items
-            };
-        }
-
-        foreach (string path in Directory.EnumerateFileSystemEntries(desktopPath, "*", SearchOption.TopDirectoryOnly))
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            items.Add(CreateSnapshot(path, publicDesktopPath, includeSlowItems));
-        }
-
-        if (!includeSlowItems)
-        {
-            ApplyQuickBatchLimit(items);
+                publicUnavailable = !Directory.Exists(publicDesktopPath);
+                ScanSource(publicDesktopPath, DesktopOrganizationSourceScope.Public);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                publicUnavailable = true;
+                App.Log($"[DesktopOrganization] Public desktop scan unavailable: {ex.Message}");
+            }
         }
 
         return new DesktopOrganizationScanResult
         {
             DesktopPath = desktopPath,
+            PublicDesktopPath = publicDesktopPath,
+            PublicDesktopUnavailable = publicUnavailable,
             Items = items
         };
+
+        void ScanSource(string root, DesktopOrganizationSourceScope scope)
+        {
+            if (!Directory.Exists(root)) return;
+            var sourceItems = new List<DesktopOrganizationFileSnapshot>();
+            foreach (string path in Directory.EnumerateFileSystemEntries(root, "*", SearchOption.TopDirectoryOnly))
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                // Manual scanning can opt into public items. Auto organization
+                // continues to pass the public root to CreateSnapshot and excludes it.
+                sourceItems.Add(CreateSnapshot(path, string.Empty, includeSlowItems) with { SourceScope = scope });
+            }
+            if (!includeSlowItems) ApplyQuickBatchLimit(sourceItems);
+            items.AddRange(sourceItems);
+        }
     }
 
     private static void ApplyQuickBatchLimit(

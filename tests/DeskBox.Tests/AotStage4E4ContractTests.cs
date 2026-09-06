@@ -74,7 +74,7 @@ public sealed class AotStage4E4ContractTests
             "src/DeskBox/Views/SettingsSections/FileWidgetSettingsSection.xaml");
 
         Assert.DoesNotContain("{Binding ", xaml, StringComparison.Ordinal);
-        Assert.Equal(4, CountOccurrences(xaml, "{x:Bind ViewModel."));
+        Assert.Equal(5, CountOccurrences(xaml, "{x:Bind ViewModel."));
     }
 
     [Fact]

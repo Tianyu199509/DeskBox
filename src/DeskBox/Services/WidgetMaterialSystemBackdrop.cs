@@ -2,6 +2,7 @@ using Microsoft.UI.Composition;
 using Microsoft.UI.Composition.SystemBackdrops;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Media;
+using WinRT;
 
 namespace DeskBox.Services;
 
@@ -23,18 +24,23 @@ internal readonly record struct WidgetMaterialBackdropAppearance(
 /// strength, so this controller-backed implementation uses the same visual
 /// calculator as the owning widget window.
 /// </summary>
-internal sealed partial class WidgetMaterialSystemBackdrop : SystemBackdrop
+internal sealed partial class WidgetMaterialSystemBackdrop : SystemBackdrop, IDisposable
 {
     private WidgetMaterialBackdropAppearance _appearance;
     private ICompositionSupportsSystemBackdrop? _target;
     private SystemBackdropConfiguration? _configuration;
     private MicaController? _micaController;
     private DesktopAcrylicController? _acrylicController;
+    private bool _isSuspended;
+    private bool _isDisposed;
+    private readonly bool _closeElementTargetOnDisconnect;
 
     internal WidgetMaterialSystemBackdrop(
-        WidgetMaterialBackdropAppearance appearance)
+        WidgetMaterialBackdropAppearance appearance,
+        bool closeElementTargetOnDisconnect = false)
     {
         _appearance = appearance;
+        _closeElementTargetOnDisconnect = closeElementTargetOnDisconnect;
     }
 
     internal static bool IsSupported(string materialType) =>
@@ -46,12 +52,13 @@ internal sealed partial class WidgetMaterialSystemBackdrop : SystemBackdrop
     internal void UpdateAppearance(
         WidgetMaterialBackdropAppearance appearance)
     {
-        if (_appearance == appearance)
+        if (_isDisposed || (_appearance == appearance && !_isSuspended))
         {
             return;
         }
 
         _appearance = appearance;
+        _isSuspended = false;
         if (_target is not null && _configuration is not null)
         {
             ApplyController();
@@ -85,14 +92,49 @@ internal sealed partial class WidgetMaterialSystemBackdrop : SystemBackdrop
     protected override void OnTargetDisconnected(
         ICompositionSupportsSystemBackdrop disconnectedTarget)
     {
+        try
+        {
+            base.OnTargetDisconnected(disconnectedTarget);
+        }
+        finally
+        {
+            DisposeControllers();
+            // SystemBackdropElement drops its native backdrop link after this
+            // callback. Close it on its owning UI thread before C#/WinRT releases
+            // the remaining projection references from the finalizer thread.
+            // Window targets are owned by their windows and must not be closed here.
+            if (_closeElementTargetOnDisconnect)
+            {
+                try { disconnectedTarget.As<IDisposable>().Dispose(); }
+                catch (Exception ex)
+                {
+                    App.Log($"[WidgetMaterialBackdrop] Element target close failed: {ex}");
+                }
+            }
+            _target = null;
+            _configuration = null;
+        }
+    }
+
+    // SystemBackdropElement targets wrap thread-affine native links. Keep the
+    // projection rooted until XAML disconnects the element itself; clearing the
+    // element's SystemBackdrop during teardown can leave that link to finalization.
+    internal void Suspend()
+    {
+        _isSuspended = true;
         DisposeControllers();
-        _target = null;
-        _configuration = null;
-        base.OnTargetDisconnected(disconnectedTarget);
+    }
+
+    public void Dispose()
+    {
+        if (_isDisposed) return;
+        _isDisposed = true;
+        Suspend();
     }
 
     private void ApplyController()
     {
+        if (_isDisposed || _isSuspended) return;
         try
         {
             if (SettingsService.IsMicaMaterial(_appearance.MaterialType))
@@ -207,7 +249,7 @@ internal sealed partial class WidgetMaterialSystemBackdrop : SystemBackdrop
 
     private void ApplyConfiguration()
     {
-        if (_configuration is null)
+        if (_configuration is null || _isDisposed || _isSuspended)
         {
             return;
         }

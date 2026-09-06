@@ -24,6 +24,7 @@ public partial class WidgetViewModel
     private string _fileStackOpenMode = SettingsService.FileStackOpenModeInline;
     private string? _expandedStackKey;
     private bool _stackRebuildQueued;
+    private bool _hasBuiltStackDisplay;
     private bool _legacyStackMigrationQueued;
     private DispatcherQueueTimer? _stackDateBoundaryTimer;
     private HashSet<string> _disabledStacks = new(StringComparer.Ordinal);
@@ -749,6 +750,23 @@ public partial class WidgetViewModel
     internal void StabilizeStackDisplay()
     {
         RebuildStackDisplayItems();
+        foreach (var stack in _stackItems.Values)
+        {
+            stack.RefreshPresentationState();
+        }
+    }
+
+    internal void PrepareStackDisplayForReuse()
+    {
+        if (!_hasBuiltStackDisplay || _stackRebuildQueued)
+        {
+            StabilizeStackDisplay();
+            return;
+        }
+
+        // Source changes and settings already rebuild (or queue a rebuild of)
+        // this projection while detached. Keep its stable items on a warm switch.
+        PerformanceLogger.RecordStackProjectionReuseSkip();
         foreach (var stack in _stackItems.Values)
         {
             stack.RefreshPresentationState();
@@ -1488,6 +1506,7 @@ public partial class WidgetViewModel
 
     private void QueueStackDisplayRebuild()
     {
+        _hasBuiltStackDisplay = false;
         if (_stackRebuildQueued)
         {
             return;
@@ -1496,8 +1515,10 @@ public partial class WidgetViewModel
         _stackRebuildQueued = true;
         if (!_dispatcherQueue.TryEnqueue(() =>
         {
-            _stackRebuildQueued = false;
-            RebuildStackDisplayItems();
+            if (_stackRebuildQueued)
+            {
+                RebuildStackDisplayItems();
+            }
         }))
         {
             _stackRebuildQueued = false;
@@ -1637,6 +1658,11 @@ public partial class WidgetViewModel
 
     private void RebuildStackDisplayItems()
     {
+        // A synchronous rebuild also consumes any queued source changes, so the
+        // dispatcher callback does not repeat the same work after a group switch.
+        _stackRebuildQueued = false;
+        _hasBuiltStackDisplay = false;
+        PerformanceLogger.RecordStackProjectionRebuild();
         foreach (var item in Items)
         {
             item.IsStackChild = false;
@@ -1645,6 +1671,7 @@ public partial class WidgetViewModel
         if (!UsesStackProjection)
         {
             _stackDisplayItems.Clear();
+            _hasBuiltStackDisplay = true;
             return;
         }
 
@@ -1715,6 +1742,7 @@ public partial class WidgetViewModel
         }
 
         QueueLegacyAutomaticStackMigration(projected);
+        _hasBuiltStackDisplay = true;
     }
 
     private void QueueLegacyAutomaticStackMigration(

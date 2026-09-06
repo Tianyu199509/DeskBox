@@ -123,6 +123,7 @@ public sealed partial class QuickCaptureWidgetWindow :
     private bool _isClearingData;
     private bool _isCommittingTitleRename;
     private bool _isCancellingTitleRename;
+    private long _titleRenameOpenedAtTick;
     private QuickCaptureItemViewModel? _editingItem;
     private bool _isExpandingInput;
     private QuickCaptureItemViewModel? _detailItem;
@@ -528,20 +529,24 @@ public sealed partial class QuickCaptureWidgetWindow :
 
 public void PrepareTrayShowAnimation()
 {
-SetTrayHideInputSuppressed(false);
-_trayAnimation.NextGeneration();
-_trayAnimation.StopAndRestoreWindowPosition();
-_trayAnimation.CloakWindowForTrayShow();
-_isHideAnimationRunning = false;
-        var profile = GetTrayAnimationProfile();
-        LogTrayWindow(
-            $"PrepareShow gen={_trayAnimation.Generation} effect={_settingsService.Settings.WidgetAnimationEffect} " +
-            $"speed={_settingsService.Settings.WidgetAnimationSpeed} enabled={profile.IsEnabled} durationMs={profile.DurationMs}");
-        _trayAnimation.PrepareVisualState(
-            profile.ShowOffsetX,
-            profile.ShowOffsetY,
-            profile.ShowStartOpacity,
-            profile.ShowStartScale);
+        WidgetTrayAnimationPreparation.TryPrepare(() =>
+        {
+            SetTrayHideInputSuppressed(false);
+            _trayAnimation.NextGeneration();
+            _trayAnimation.StopAndRestoreWindowPosition();
+            _trayAnimation.CloakWindowForTrayShow();
+            _isHideAnimationRunning = false;
+            var profile = GetTrayAnimationProfile();
+            LogTrayWindow(
+                $"PrepareShow gen={_trayAnimation.Generation} effect={_settingsService.Settings.WidgetAnimationEffect} " +
+                $"speed={_settingsService.Settings.WidgetAnimationSpeed} enabled={profile.IsEnabled} durationMs={profile.DurationMs}");
+            _trayAnimation.PrepareVisualState(
+                profile.ShowOffsetX,
+                profile.ShowOffsetY,
+                profile.ShowStartOpacity,
+                profile.ShowStartScale);
+        }, CompleteTrayShowWithoutAnimation,
+            ex => LogTrayWindow($"PrepareShow failed: {ex.Message}"));
     }
 
     public void PlayTrayShowAnimation()
@@ -551,14 +556,18 @@ _isHideAnimationRunning = false;
 
     public void CompleteTrayShowWithoutAnimation()
     {
+        _isHideAnimationRunning = false;
+        SetTrayHideInputSuppressed(false);
         _trayAnimation.NextGeneration();
         LogTrayWindow($"CompleteShowWithoutAnimation gen={_trayAnimation.Generation}");
         _trayAnimation.Stop();
         SetTrayAnimationOffsetOverride(null, null);
         _trayAnimation.RestoreVisualState();
-        _trayAnimation.RestoreWindowPosition();
-        _trayAnimation.RevealWindowForTrayShow();
-        NotifyVisibleContentRevealCompleted();
+        WidgetTrayAnimationPreparation.CompleteShow(
+            _trayAnimation.RestoreWindowPosition,
+            _trayAnimation.RevealWindowForTrayShow,
+            NotifyVisibleContentRevealCompleted,
+            ex => LogTrayWindow($"CompleteShowWithoutAnimation cleanup failed: {ex.Message}"));
     }
 
     public bool PrepareTrayHideAnimation(bool persistVisibility = true)
@@ -595,8 +604,10 @@ _isHideAnimationRunning = true;
         }
 
         LogTrayWindow($"PrepareHide gen={_trayAnimation.Generation}");
-        _trayAnimation.PrepareVisualState(0, 0, WidgetTrayAnimationController.RestingOpacity, WidgetTrayAnimationController.RestingScale);
-        return true;
+        return WidgetTrayAnimationPreparation.TryPrepare(
+            () => _trayAnimation.PrepareVisualState(0, 0, WidgetTrayAnimationController.RestingOpacity, WidgetTrayAnimationController.RestingScale),
+            CompleteTrayHideAnimation,
+            ex => LogTrayWindow($"PrepareHide failed: {ex.Message}"));
     }
 
     public void PlayPreparedTrayHideAnimation()
@@ -969,7 +980,8 @@ _isHideAnimationRunning = true;
                 _trayAnimation.RestoreVisualState();
                 _trayAnimation.RestoreWindowPosition();
                 NotifyVisibleContentRevealCompleted();
-            });
+            },
+            failed: NotifyVisibleContentRevealCompleted);
     }
 
     public WidgetTrayBatchAnimationEntry? BeginSharedTrayHideAnimation()
@@ -1008,7 +1020,8 @@ _isHideAnimationRunning = true;
                 {
                     CompleteTrayHideAnimation();
                 }
-            });
+            },
+            failed: CompleteTrayHideAnimation);
     }
 
     private void PlayTrayRaiseAnimation()
@@ -1044,7 +1057,8 @@ _isHideAnimationRunning = true;
                 _trayAnimation.RestoreVisualState();
                 _trayAnimation.RestoreWindowPosition();
                 NotifyVisibleContentRevealCompleted();
-            });
+            },
+            failed: NotifyVisibleContentRevealCompleted);
     }
 
     private void PlayTrayRaiseAnimationAfterFirstFrame()
@@ -1086,7 +1100,8 @@ _isHideAnimationRunning = true;
                 {
                     completed();
                 }
-            });
+            },
+            failed: CompleteTrayHideAnimation);
     }
 
     private void CompleteTrayHideAnimation()
@@ -1108,7 +1123,8 @@ _isHideAnimationRunning = true;
         NotifyCompactHostVisibilityChanged(false);
         _trayAnimation.RevealWindowForTrayShow();
         _trayAnimation.RestoreVisualState();
-        _trayAnimation.RestoreWindowPosition();
+        try { _trayAnimation.RestoreWindowPosition(); }
+        catch (Exception ex) { LogTrayWindow($"CompleteHide position restore failed: {ex.Message}"); }
         LogTrayWindow("CompleteHide");
     }
 

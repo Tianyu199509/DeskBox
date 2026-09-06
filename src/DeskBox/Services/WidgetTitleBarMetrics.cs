@@ -9,10 +9,13 @@ public sealed record WidgetTitleBarMetrics(
     double ActionButtonSize,
     double ActionIconSize,
     GridLength RowHeight,
-    Thickness InnerTitlePadding);
+    Thickness InnerTitlePadding,
+    bool IsCompact);
 
 public static class WidgetTitleBarMetricsCalculator
 {
+    public const double MinimumTitleContentHeight = 32;
+
     private const double FluentActionIconNativeSize = 20;
     private const double FluentActionIconVisualScale = 0.7;
     private const double CompactActionIconVisualScale = 0.7;
@@ -37,9 +40,14 @@ public static class WidgetTitleBarMetricsCalculator
         double actionIconSize = compact
             ? Math.Clamp(titleIconSize - 2, 9, 13)
             : Math.Clamp(titleIconSize - 3, 10, 15);
-        var rowHeight = compact
-            ? new GridLength(Math.Clamp(titleIconSize + 22, 30, 36))
-            : new GridLength(Math.Clamp(titleIconSize + 28, 36, 50));
+        Thickness outerPadding = CreateOuterPadding(chromeMode);
+        // Reserve one caption line plus the native tab's vertical padding and
+        // stroke, so changing navigation style cannot enlarge an Auto row.
+        double contentHeight = Math.Max(
+            MinimumTitleContentHeight,
+            Math.Ceiling(titleTextSize * 1.5) + 8);
+        var rowHeight = new GridLength(
+            Math.Max(contentHeight, buttonSize) + outerPadding.Top + outerPadding.Bottom);
         var innerPadding = includeInnerPadding
             ? CreateInnerPadding(titleIconSize, compact)
             : new Thickness(0);
@@ -50,7 +58,8 @@ public static class WidgetTitleBarMetricsCalculator
             buttonSize,
             actionIconSize,
             rowHeight,
-            innerPadding);
+            innerPadding,
+            compact);
     }
 
     public static void ApplyActionButton(Button button, WidgetTitleBarMetrics metrics)
@@ -63,8 +72,8 @@ public static class WidgetTitleBarMetricsCalculator
 
     public static void ApplyActionIcon(FrameworkElement icon, WidgetTitleBarMetrics metrics)
     {
-        bool compact = metrics.RowHeight.Value <= 36;
-                double visualScale = compact
+        bool compact = metrics.IsCompact;
+        double visualScale = compact
             ? FluentActionIconVisualScale * CompactActionIconVisualScale
             : FluentActionIconVisualScale * 0.9;
         double targetSize = Math.Clamp(
@@ -98,8 +107,8 @@ public static class WidgetTitleBarMetricsCalculator
     public static Thickness CreateOuterPadding(WidgetChromeMode chromeMode)
     {
         return chromeMode == WidgetChromeMode.Compact
-            ? new Thickness(12, 4, 10, 4)
-            : new Thickness(14, 7, 12, 5);
+            ? new Thickness(12, 2, 10, 2)
+            : new Thickness(14, 4, 12, 4);
     }
 
     private static Thickness CreateInnerPadding(double titleIconSize, bool compact)

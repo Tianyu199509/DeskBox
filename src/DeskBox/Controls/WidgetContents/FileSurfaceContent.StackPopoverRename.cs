@@ -1,3 +1,4 @@
+using DeskBox.Helpers;
 using DeskBox.Models;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
@@ -17,6 +18,7 @@ public sealed partial class FileSurfaceContent
         Visibility.Visible;
     private bool _stackPopoverItemRenameCommitInProgress;
     private bool _stackPopoverItemRenameCancelling;
+    private long _stackPopoverItemRenameOpenedAtTick;
 
     private bool IsStackPopoverItemRenameEditing =>
         _stackPopoverItemRenameTarget is not null;
@@ -152,20 +154,10 @@ public sealed partial class FileSurfaceContent
             ViewModel.IsListMode);
         editor.Visibility = Visibility.Visible;
         editor.IsHitTestVisible = true;
+        _stackPopoverItemRenameOpenedAtTick = Environment.TickCount64;
         App.Current?.WidgetManager?.BeginWidgetInteraction(
             "surface-stack-popover-item-rename-opened");
         SelectItemNameForRename(editor, renameItem.IsFolder);
-
-        DispatcherQueue.TryEnqueue(() =>
-        {
-            if (ReferenceEquals(
-                    _stackPopoverItemRenameTarget,
-                    renameItem) &&
-                ReferenceEquals(_stackPopoverItemRenameEditor, editor))
-            {
-                SelectItemNameForRename(editor, renameItem.IsFolder);
-            }
-        });
     }
 
     private double ResolveStackPopoverRenameFontSize() =>
@@ -277,6 +269,13 @@ public sealed partial class FileSurfaceContent
         if (_stackPopoverItemRenameCancelling)
         {
             _stackPopoverItemRenameCancelling = false;
+            return;
+        }
+
+        if (InlineEditorFocus.TryRecoverFocusWithinGrace(
+                _stackPopoverItemRenameOpenedAtTick,
+                sender as TextBox))
+        {
             return;
         }
 

@@ -66,7 +66,7 @@ public sealed class DpiAdaptiveLayoutContractTests
             "src/DeskBox/Views/QuickCaptureWidgetWindow.Appearance.cs"));
 
         Assert.Equal("Auto", (string?)titleRow.Attribute("Height"));
-        Assert.Equal("46", (string?)titleRow.Attribute("MinHeight"));
+        Assert.Equal("40", (string?)titleRow.Attribute("MinHeight"));
         Assert.Contains("TitleBarGrid.DesiredSize.Height", shellCode, StringComparison.Ordinal);
         Assert.Contains("ShellRoot.RowDefinitions[0].MinHeight", shellCode, StringComparison.Ordinal);
         Assert.Contains("MinHeight=\"32\"", switcher, StringComparison.Ordinal);

@@ -438,7 +438,8 @@ public sealed class WidgetVisualActivityContractTests
         Assert.Contains("midpoint: 0.6f, amplitude: 0.2f", compactLive, StringComparison.Ordinal);
         Assert.Contains("!SystemAnimationsEnabled()", compactLive, StringComparison.Ordinal);
         Assert.Contains("CompactLiveProgressTransform.ScaleX = 1", compactLive, StringComparison.Ordinal);
-        Assert.Contains("CreateScalarKeyFrameAnimation()", compactLive, StringComparison.Ordinal);
+        Assert.Contains("WidgetAnimationTemplate.CompactLiveTranslation", compactLive, StringComparison.Ordinal);
+        Assert.Contains("WidgetAnimationTemplate.CompactLiveOpacity", compactLive, StringComparison.Ordinal);
         Assert.DoesNotContain("CreateTimer()", compactLive, StringComparison.Ordinal);
 
         Assert.Contains("midpoint: 0.48f, amplitude: 0.1f", edgeGlow, StringComparison.Ordinal);

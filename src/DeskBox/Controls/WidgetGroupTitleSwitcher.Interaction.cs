@@ -45,7 +45,7 @@ public sealed partial class WidgetGroupTitleSwitcher
                 return;
             }
 
-            OpenPicker(SelectorButton);
+            OpenPicker();
             args.Handled = true;
         };
         KeyboardAccelerators.Add(openPicker);
@@ -73,13 +73,18 @@ public sealed partial class WidgetGroupTitleSwitcher
 
     internal bool TryHandleKeyboardNavigation(KeyRoutedEventArgs e)
     {
-        if (e.Key != VirtualKey.Tab ||
+        if (e.Handled || e.Key != VirtualKey.Tab ||
             !IsVirtualKeyDown(VirtualKey.Control) ||
             _presentation is null ||
             _presentation.Members.Count < 2 ||
             _pickerOpen)
         {
             return false;
+        }
+
+        if (IsTabInteractionBusy || _draggingMemberId is not null)
+        {
+            return true;
         }
 
         return SwitchRelative(
@@ -179,7 +184,7 @@ public sealed partial class WidgetGroupTitleSwitcher
 
     private bool ProcessWheelDelta(double delta)
     {
-        if (!WheelSwitchEnabled ||
+        if (!WheelSwitchEnabled || IsTabInteractionBusy || _draggingMemberId is not null ||
             _pickerOpen ||
             _presentation is null ||
             _presentation.Members.Count < 2 ||
@@ -394,6 +399,11 @@ public sealed partial class WidgetGroupTitleSwitcher
         StopAndClearStoryboard(ref _interactionChromeStoryboard);
         StopScrollSurfaceStoryboard();
 
+        if (UsesTabs)
+        {
+            return;
+        }
+
         double restingOpacity = ResolveInteractionSurfaceOpacity();
         if (!AreSystemAnimationsEnabled() || XamlRoot is null)
         {
@@ -560,7 +570,8 @@ public sealed partial class WidgetGroupTitleSwitcher
         int delta,
         WidgetGroupSwitchOrigin origin)
     {
-        if (_presentation is null || delta == 0 || _pickerOpen)
+        if (_presentation is null || delta == 0 || _pickerOpen ||
+            IsTabInteractionBusy || _draggingMemberId is not null)
         {
             return false;
         }
@@ -618,8 +629,14 @@ public sealed partial class WidgetGroupTitleSwitcher
 
     internal void NotifyMemberInvocationCompleted(
         string widgetId,
-        bool succeeded)
+        bool succeeded,
+        long? tabSelectionRequestVersion = null)
     {
+        if (tabSelectionRequestVersion is { } version)
+        {
+            CompleteTabInvocation(widgetId, succeeded, version);
+        }
+
         if (!string.Equals(
                 _pendingWheelTargetId,
                 widgetId,
@@ -981,6 +998,11 @@ public sealed partial class WidgetGroupTitleSwitcher
 
     private double ResolveInteractionSurfaceOpacity()
     {
+        if (UsesTabs)
+        {
+            return 0;
+        }
+
         return _pickerOpen
             ? 0.34
             : _isSelectorPressed

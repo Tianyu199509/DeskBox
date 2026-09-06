@@ -256,6 +256,9 @@ public sealed class GlanceWidgetStore
         data.TimeFontFamily = string.IsNullOrWhiteSpace(data.TimeFontFamily)
             ? null
             : data.TimeFontFamily.Trim();
+        data.TimeFormat = Enum.IsDefined(data.TimeFormat)
+            ? data.TimeFormat
+            : GlanceTimeFormatMode.FollowSystem;
         data.Layout = Enum.IsDefined(data.Layout) ? data.Layout : GlanceLayoutMode.Centered;
         data.BackgroundSource = Enum.IsDefined(data.BackgroundSource)
             ? data.BackgroundSource

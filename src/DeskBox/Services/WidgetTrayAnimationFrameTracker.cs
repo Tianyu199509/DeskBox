@@ -1,5 +1,6 @@
 // Copyright (c) DeskBox. All rights reserved.
 
+using System.Diagnostics;
 using DeskBox.Models;
 
 namespace DeskBox.Services;
@@ -13,16 +14,21 @@ public readonly record struct WidgetTrayAnimationFrameSummary(
     double ElapsedMilliseconds)
 {
     public double FrameBudgetMilliseconds => 1000d / Math.Max(1, RefreshRateHz);
+    public int PositionSubmissionCount { get; init; }
+    public int PositionSubmissionTickCount { get; init; }
+    public double MaximumPositionSubmissionIntervalMilliseconds { get; init; }
 }
 
 /// <summary>
 /// Measures one shared tray animation against every refresh-rate group taking
 /// part in the batch. A 60 Hz and a 144 Hz display therefore receive separate
-/// frame-budget results even though their HWND positions share one clock.
+/// callback-budget results even though their HWND positions share one clock.
+/// Native position submissions are counted separately. Neither counter is a
+/// DWM Present or an observed scan-out frame count.
 /// </summary>
 public sealed class WidgetTrayAnimationFrameTracker
 {
-    private readonly IReadOnlyList<RefreshRateGroup> _groups;
+    private readonly List<RefreshRateGroup> _groups;
 
     public WidgetTrayAnimationFrameTracker(
         long startedTimestamp,
@@ -57,6 +63,28 @@ public sealed class WidgetTrayAnimationFrameTracker
         }
     }
 
+    public void RecordPositionSubmission(long timestamp, int refreshRateHz)
+    {
+        int rate = WidgetDisplayRefreshRatePolicy.Normalize((uint)Math.Max(0, refreshRateHz));
+        RefreshRateGroup? group = null;
+        foreach (var candidate in _groups)
+        {
+            if (candidate.RefreshRateHz == rate)
+            {
+                group = candidate;
+                break;
+            }
+        }
+        if (group is null)
+        {
+            // A mode/monitor change may introduce a new budget during a run.
+            group = new RefreshRateGroup(rate, 0,
+                new WidgetCompactAnimationFrameTracker(timestamp, rate));
+            _groups.Add(group);
+        }
+        group.RecordPositionSubmission(timestamp);
+    }
+
     public IReadOnlyList<WidgetTrayAnimationFrameSummary> Complete(long timestamp)
     {
         return _groups
@@ -70,15 +98,46 @@ public sealed class WidgetTrayAnimationFrameTracker
                     summary.FrameCount,
                     summary.EstimatedDroppedFrames,
                     summary.MaximumFrameIntervalMilliseconds,
-                    summary.ElapsedMilliseconds);
+                    summary.ElapsedMilliseconds)
+                {
+                    PositionSubmissionCount = group.PositionSubmissionCount,
+                    PositionSubmissionTickCount = group.PositionSubmissionTickCount,
+                    MaximumPositionSubmissionIntervalMilliseconds = group.MaximumPositionSubmissionIntervalMilliseconds
+                };
             })
             .ToList();
     }
 
-    private sealed record RefreshRateGroup(
-        int RefreshRateHz,
-        int ParticipantCount,
-        WidgetCompactAnimationFrameTracker Tracker);
+    private sealed class RefreshRateGroup(
+        int refreshRateHz,
+        int participantCount,
+        WidgetCompactAnimationFrameTracker tracker)
+    {
+        private long? _lastPositionSubmissionTimestamp;
+        public int RefreshRateHz { get; } = refreshRateHz;
+        public int ParticipantCount { get; } = participantCount;
+        public WidgetCompactAnimationFrameTracker Tracker { get; } = tracker;
+        public int PositionSubmissionCount { get; private set; }
+        public int PositionSubmissionTickCount { get; private set; }
+        public double MaximumPositionSubmissionIntervalMilliseconds { get; private set; }
+
+        public void RecordPositionSubmission(long timestamp)
+        {
+            PositionSubmissionCount++;
+            if (_lastPositionSubmissionTimestamp is { } previous)
+            {
+                if (timestamp <= previous)
+                {
+                    return;
+                }
+                MaximumPositionSubmissionIntervalMilliseconds = Math.Max(
+                    MaximumPositionSubmissionIntervalMilliseconds,
+                    Stopwatch.GetElapsedTime(previous, timestamp).TotalMilliseconds);
+            }
+            _lastPositionSubmissionTimestamp = timestamp;
+            PositionSubmissionTickCount++;
+        }
+    }
 }
 
 internal static class WidgetTrayAnimationDiagnostics
@@ -101,9 +160,12 @@ internal static class WidgetTrayAnimationDiagnostics
             string details =
                 $"scope={scope} mode={(isShowing ? "show" : "hide")} " +
                 $"outcome={outcome} refreshHz={summary.RefreshRateHz} " +
-                $"participants={summary.ParticipantCount} frames={summary.FrameCount} " +
-                $"dropped={summary.EstimatedDroppedFrames} " +
-                $"maxFrameMs={summary.MaximumFrameIntervalMilliseconds:F1} " +
+                $"participantsAtStart={summary.ParticipantCount} cpuCallbacks={summary.FrameCount} " +
+                $"estimatedCallbackGaps={summary.EstimatedDroppedFrames} " +
+                $"maxCallbackMs={summary.MaximumFrameIntervalMilliseconds:F1} " +
+                $"nativePositionCommits={summary.PositionSubmissionCount} " +
+                $"nativeCommitTicks={summary.PositionSubmissionTickCount} " +
+                $"maxNativeCommitIntervalMs={summary.MaximumPositionSubmissionIntervalMilliseconds:F1} " +
                 $"budgetMs={summary.FrameBudgetMilliseconds:F1} " +
                 $"elapsedMs={summary.ElapsedMilliseconds:F1}";
             PerformanceLogger.Mark("TrayAnimation", details);

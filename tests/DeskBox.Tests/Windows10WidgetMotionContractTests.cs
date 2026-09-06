@@ -21,7 +21,7 @@ public sealed class Windows10WidgetMotionContractTests
         Assert.Contains("_pendingTitleBarDragFrame", baseWindow, StringComparison.Ordinal);
         Assert.Contains("QueueTitleBarDragFrame(deltaX, deltaY);", interaction, StringComparison.Ordinal);
         Assert.Contains(
-            "WidgetCompactAnimationCoordinator.Register(ApplyPendingTitleBarDragFrame)",
+            "WidgetCompactAnimationCoordinator.Register(ApplyPendingTitleBarDragFrame, HWnd, paceToDisplay: true)",
             interaction,
             StringComparison.Ordinal);
         Assert.Contains("FlushPendingTitleBarDragFrame();", interaction, StringComparison.Ordinal);
@@ -84,10 +84,10 @@ public sealed class Windows10WidgetMotionContractTests
             "src/DeskBox/Views/ContentWidgetWindow.xaml.cs"));
 
         Assert.Contains(
-            "WidgetCompactAnimationCoordinator.Register(ApplyPendingInteractiveResizeBounds)",
+            "WidgetCompactAnimationCoordinator.Register(ApplyPendingInteractiveResizeBounds, HWnd, paceToDisplay: true)",
             baseWindow,
             StringComparison.Ordinal);
-        Assert.Contains("_pendingInteractiveResizeBounds", baseWindow, StringComparison.Ordinal);
+        Assert.Contains("_pendingInteractiveResizePointer", baseWindow, StringComparison.Ordinal);
         Assert.Contains("_deferInteractiveResizeConfigUpdates", baseWindow, StringComparison.Ordinal);
         Assert.Contains("_deferInteractiveResizeConfigUpdates", bounds, StringComparison.Ordinal);
         // The legacy 8ms burst commits (up to ~125Hz of full XAML re-layout) must
@@ -175,9 +175,10 @@ public sealed class Windows10WidgetMotionContractTests
             "src/DeskBox/Services/WidgetCompactAnimationCoordinator.cs"));
 
         Assert.DoesNotContain("_collapseAnimationUsesVisualOnlyBounds", collapse, StringComparison.Ordinal);
-        Assert.Contains("MoveWindowWithoutPersisting(bounds, suppressRedraw: true);", collapse, StringComparison.Ordinal);
+        Assert.Contains("CommitCollapseAnimationBounds", collapse, StringComparison.Ordinal);
+        Assert.Contains("suppressRedraw: completed is null", collapse, StringComparison.Ordinal);
         Assert.Contains("WidgetCompactAnimationCoordinator.TryQueueBoundsMove", collapse, StringComparison.Ordinal);
-        Assert.Contains("internal const int MaximumConcurrentBoundsTransitions = 4", coordinator, StringComparison.Ordinal);
+        Assert.Contains("internal const int MaximumConcurrentBoundsTransitions = int.MaxValue", coordinator, StringComparison.Ordinal);
         Assert.Contains("Win32Helper.BeginDeferWindowPos", coordinator, StringComparison.Ordinal);
         Assert.Contains("Win32Helper.DeferWindowPos", coordinator, StringComparison.Ordinal);
         Assert.Contains("Win32Helper.EndDeferWindowPos", coordinator, StringComparison.Ordinal);
@@ -193,13 +194,13 @@ public sealed class Windows10WidgetMotionContractTests
             "src/DeskBox/Views/WidgetWindowBase.Collapse.cs"));
 
         Assert.Contains("StartCompactOpacityAnimation", shell, StringComparison.Ordinal);
-        Assert.Contains("!WindowsCompatibilityService.IsWindows11OrLater", shell, StringComparison.Ordinal);
+        Assert.Contains("StartCompactTranslationAnimation", shell, StringComparison.Ordinal);
         Assert.Contains("ScalarKeyFrameAnimation", shell, StringComparison.Ordinal);
-        Assert.Contains("MoveWindowWithoutPersisting(bounds, suppressRedraw: true);", collapse, StringComparison.Ordinal);
+        Assert.Contains("CommitCollapseAnimationBounds", collapse, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void Win10AnimationClocks_UsePresentAlignedFlushWithRefreshDerivedFallback()
+    public void AnimationClocks_ShareDwmPacingWithDisplayDerivedFallback()
     {
         string coordinator = File.ReadAllText(TestPaths.FromRepository(
             "src/DeskBox/Services/WidgetCompactAnimationCoordinator.cs"));
@@ -210,36 +211,72 @@ public sealed class Windows10WidgetMotionContractTests
         string refreshPolicy = File.ReadAllText(TestPaths.FromRepository(
             "src/DeskBox/Models/WidgetDisplayRefreshRatePolicy.cs"));
 
-        // Primary Win10 clock: DwmFlush paces one coalesced tick per DWM
-        // composition pass (native refresh rate, no fixed-interval beat).
+        // DWM completion is a pacing hint; it is not a per-display present counter.
         Assert.Contains("Win32Helper.TryDwmFlush", coordinator, StringComparison.Ordinal);
         Assert.Contains("DispatchWindows10FlushTick", coordinator, StringComparison.Ordinal);
         // Fallback clock: timer interval derived from the measured refresh rate.
         Assert.Contains("DispatcherQueueTimer", coordinator, StringComparison.Ordinal);
-        Assert.Contains("ResolveFrameTickInterval", coordinator, StringComparison.Ordinal);
+        Assert.Contains("RefreshFrameBudgets", coordinator, StringComparison.Ordinal);
+        Assert.DoesNotContain("GetPrimaryDisplayRefreshRate", coordinator, StringComparison.Ordinal);
         Assert.DoesNotContain("TimeSpan.FromMilliseconds(15)", coordinator, StringComparison.Ordinal);
         Assert.Contains("ResolveFrameTickInterval(int refreshRateHz)", refreshPolicy, StringComparison.Ordinal);
         Assert.Contains("Win32Helper.DeferWindowPos", coordinator, StringComparison.Ordinal);
-        Assert.Contains("DispatcherQueueTimer", trayDriver, StringComparison.Ordinal);
+        Assert.DoesNotContain("DispatcherQueueTimer", trayDriver, StringComparison.Ordinal);
+        Assert.Contains("WidgetCompactAnimationCoordinator.Register", trayDriver, StringComparison.Ordinal);
         Assert.Contains("MoveEntriesFrameCore", trayDriver, StringComparison.Ordinal);
         Assert.Contains("Win32Helper.DeferWindowPos", trayDriver, StringComparison.Ordinal);
         Assert.Contains("TrySetHighResolutionTimer", clockBoost, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void CapsuleAnimation_AdaptsFrameSkipFromMeasuredBudgetInsteadOfHardCap()
+    public void CapsuleAnimation_UsesRecoverableSubmissionDeadlinesWithoutSessionDowngrade()
     {
         string collapse = File.ReadAllText(TestPaths.FromRepository(
             "src/DeskBox/Views/WidgetWindowBase.Collapse.cs"));
         string frameSkipPolicy = File.ReadAllText(TestPaths.FromRepository(
-            "src/DeskBox/Services/WidgetCompactFrameSkipPolicy.cs"));
+            "src/DeskBox/Services/WidgetAnimationFramePacingPolicy.cs"));
 
-        Assert.Contains("WidgetCompactFrameSkipPolicy.ResolveSkip", collapse, StringComparison.Ordinal);
-        Assert.Contains("RecordCollapseAnimationTickCadence", collapse, StringComparison.Ordinal);
-        Assert.Contains("s_compactSessionFrameSkipLevel", collapse, StringComparison.Ordinal);
+        Assert.Contains("WidgetAnimationFramePacingPolicy", collapse, StringComparison.Ordinal);
+        Assert.Contains("GetFrameBudgetMilliseconds(HWnd)", collapse, StringComparison.Ordinal);
+        Assert.DoesNotContain("s_compactSessionFrameSkipLevel", collapse, StringComparison.Ordinal);
         Assert.DoesNotContain("(int)Math.Round(Math.Max(1, refreshRateHz) / 60.0)", collapse, StringComparison.Ordinal);
-        Assert.Contains("ShouldEscalate", frameSkipPolicy, StringComparison.Ordinal);
-        Assert.Contains("Escalate", frameSkipPolicy, StringComparison.Ordinal);
+        Assert.Contains("ShouldSubmit", frameSkipPolicy, StringComparison.Ordinal);
+        Assert.Contains("RecoverySamples", frameSkipPolicy, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void CompactTransitionCleanup_RestoresImageScrimFromCurrentPresentation()
+    {
+        string shell = File.ReadAllText(TestPaths.FromRepository(
+            "src/DeskBox/Controls/WidgetShell.xaml.cs"));
+        int start = shell.IndexOf("private void StopCompactCompositionTransitionAnimations(", StringComparison.Ordinal);
+        int end = shell.IndexOf("public void CompleteCompactTransition(", start, StringComparison.Ordinal);
+        string cleanup = shell[start..end];
+
+        // Search/Todo capsules have no full-bleed image. Their separate gradient
+        // scrim must stay hidden after completion, cancellation and forced cleanup.
+        Assert.Contains("_compactPresentation?.UseFullBleedBackground == true &&", cleanup, StringComparison.Ordinal);
+        Assert.Contains("_compactPresentation.Thumbnail is not null", cleanup, StringComparison.Ordinal);
+        Assert.Contains("restoredOpacity = hasFullBleed ? 1 : 0;", cleanup, StringComparison.Ordinal);
+        Assert.Contains("restoredOpacity = hasFullBleed ? ResolveFullBleedOverlayOpacity() : 0;", cleanup, StringComparison.Ordinal);
+        Assert.DoesNotContain("visual.Opacity = 1;", cleanup, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void CompactTransitionCleanup_SynchronizesXamlAndCompositionAfterStoppingStoryboard()
+    {
+        string shell = File.ReadAllText(TestPaths.FromRepository(
+            "src/DeskBox/Controls/WidgetShell.xaml.cs"));
+        int start = shell.IndexOf("private void StopCompactCompositionTransitionAnimations(", StringComparison.Ordinal);
+        int end = shell.IndexOf("public void CompleteCompactTransition(", start, StringComparison.Ordinal);
+        string cleanup = shell[start..end];
+
+        // XAML may still report zero after a direct Visual write. Reassigning
+        // that same XAML value cannot be relied on to repair the backing visual.
+        Assert.Equal(2, CountOccurrences(cleanup, "element.Opacity = restoredOpacity;"));
+        Assert.Contains("visual.Opacity = (float)restoredOpacity;", cleanup, StringComparison.Ordinal);
+        int stop = cleanup.IndexOf("_compactFullBleedVisibilityStoryboard.StopAndClear();", StringComparison.Ordinal);
+        Assert.InRange(stop, 0, cleanup.IndexOf("element.Opacity = restoredOpacity;", StringComparison.Ordinal) - 1);
     }
 
     [Fact]

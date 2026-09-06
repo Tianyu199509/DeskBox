@@ -45,6 +45,13 @@ public enum GlanceDisplayElement
     Calendar
 }
 
+public enum GlanceTimeFormatMode
+{
+    FollowSystem,
+    Hour24,
+    Hour12
+}
+
 public enum GlanceTransitionMode
 {
     None,
@@ -110,7 +117,7 @@ public enum GlanceImageFocus
 /// </summary>
 public sealed class GlanceWidgetData
 {
-    public const int CurrentVersion = 9;
+    public const int CurrentVersion = 10;
 
     public int Version { get; set; } = CurrentVersion;
     public bool ShowTime { get; set; } = true;
@@ -118,6 +125,7 @@ public sealed class GlanceWidgetData
     public bool ShowYear { get; set; }
     public bool ShowWeekday { get; set; } = true;
     public bool ShowCalendar { get; set; }
+    public GlanceTimeFormatMode TimeFormat { get; set; } = GlanceTimeFormatMode.FollowSystem;
     public GlanceLayoutMode Layout { get; set; } = GlanceLayoutMode.Centered;
     public GlanceBackgroundSource BackgroundSource { get; set; } = GlanceBackgroundSource.Bing;
     public GlanceOnlineImageCategory OnlineImageCategory { get; set; } =

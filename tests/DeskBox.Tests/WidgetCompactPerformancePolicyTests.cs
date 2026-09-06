@@ -140,6 +140,40 @@ public sealed class WidgetCompactPerformancePolicyTests
     }
 
     [Fact]
+    public void FrameTracker_DistinguishesClockTicksFromChangedNativeBoundsSubmissions()
+    {
+        long started = Stopwatch.GetTimestamp();
+        var tracker = new WidgetCompactAnimationFrameTracker(started, 144);
+        long timestamp = started;
+        for (int tick = 1; tick <= 12; tick++)
+        {
+            timestamp = started + MillisecondsToStopwatchTicks(tick * 1000d / 144);
+            tracker.RecordTick(timestamp, 1000d / 144);
+            if (tick % 3 == 0)
+            {
+                tracker.RecordBoundsUpdate(timestamp, workMilliseconds: 2.5);
+            }
+        }
+
+        WidgetCompactAnimationFrameSummary summary = tracker.Complete(timestamp);
+        Assert.Equal(12, summary.FrameCount);
+        Assert.Equal(4, summary.BoundsUpdateCount);
+        Assert.Equal(0, summary.EstimatedDroppedFrames);
+        Assert.InRange(summary.MaximumBoundsUpdateIntervalMilliseconds, 20.8, 20.9);
+        Assert.Equal(2.5, summary.MaximumSubmissionWorkMilliseconds);
+    }
+
+    [Fact]
+    public void FrameTracker_UsesCurrentBudgetAfterDisplayModeChanges()
+    {
+        long started = Stopwatch.GetTimestamp();
+        var tracker = new WidgetCompactAnimationFrameTracker(started, 144);
+        long timestamp = started + MillisecondsToStopwatchTicks(1000d / 60);
+        tracker.RecordTick(timestamp, 1000d / 60);
+        Assert.Equal(0, tracker.Complete(timestamp).EstimatedDroppedFrames);
+    }
+
+    [Fact]
     public void TrayFrameTracker_SeparatesMixedRefreshRateBudgets()
     {
         long started = Stopwatch.GetTimestamp();

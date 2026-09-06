@@ -10,9 +10,8 @@ using Windows.Graphics;
 namespace DeskBox.Services;
 
 /// <summary>
-/// Shares one compositor-paced Rendering subscription across every capsule
-/// transition. Rendering follows the active display/DRR cadence; elapsed time,
-/// rather than an assumed frame rate, remains the source of animation progress.
+/// Shares an active-only frame clock across dragging, resizing, capsule and tray
+/// animations. Display timing is a budget; callbacks are not proof of presentation.
 /// </summary>
 internal static class WidgetCompactAnimationCoordinator
 {
@@ -22,9 +21,10 @@ internal static class WidgetCompactAnimationCoordinator
     // dropping a capsule's animation when the slot is occupied. First-frame
     // commit pressure is absorbed by the expansion warm-up instead of by
     // serializing transitions.
-    internal const int MaximumConcurrentBoundsTransitions = 4;
+    internal const int MaximumConcurrentBoundsTransitions = int.MaxValue;
 
     private static readonly Dictionary<long, Action> FrameCallbacks = [];
+    private static readonly Dictionary<long, FrameTarget> FrameTargets = [];
     private static KeyValuePair<long, Action>[] s_frameCallbackSnapshot = [];
     private static bool s_frameCallbackSnapshotDirty;
     private static readonly HashSet<long> BoundsTransitionRegistrations = [];
@@ -35,11 +35,7 @@ internal static class WidgetCompactAnimationCoordinator
     private static IDisposable? s_clockBoostLease;
     private static DispatcherQueue? s_windows10FrameDispatcher;
     private static DispatcherQueueTimer? s_windows10FrameTimer;
-    private static Thread? s_windows10DwmFlushThread;
-    private static volatile bool s_windows10DwmFlushThreadRunning;
-    private static int s_windows10PendingFlushTick;
-    private static int s_windows10InstantFlushCount;
-    private static bool s_windows10UseTimerFallback;
+    private static Windows10ClockRun? s_windows10ClockRun;
 
     // Session-level tick health, sampled on the UI thread from every frame
     // dispatch. The recent overrun bitmask feeds the interaction-time backdrop
@@ -59,17 +55,57 @@ internal static class WidgetCompactAnimationCoordinator
     private static Windows10FrameClockSource s_windows10ClockSource =
         Windows10FrameClockSource.None;
 
+    private sealed class Windows10ClockRun(DispatcherQueue dispatcher)
+    {
+        internal readonly DispatcherQueue Dispatcher = dispatcher;
+        internal volatile bool IsActive = true;
+        internal int PendingTick;
+        internal int InstantFlushCount;
+        internal double TargetIntervalMilliseconds;
+        internal readonly WidgetFrameClockHealthPolicy Health = new();
+    }
+
+    private sealed class FrameTarget(IntPtr windowHandle, Func<IEnumerable<IntPtr>>? windows, bool paceToDisplay,
+        Func<double>? frameBudget = null)
+    {
+        internal readonly IntPtr WindowHandle = windowHandle;
+        internal readonly Func<IEnumerable<IntPtr>>? Windows = windows;
+        internal readonly bool PaceToDisplay = paceToDisplay;
+        internal readonly Func<double>? FrameBudget = frameBudget;
+        internal readonly WidgetAnimationFramePacingPolicy Pacing = new();
+        internal bool Initialized;
+        internal double BudgetMilliseconds = 1000d / 60;
+    }
+
     private readonly record struct PendingBoundsMove(
         IntPtr WindowHandle,
         RectInt32 Bounds,
         uint Flags,
         Action BeforeCommit,
-        Action AfterCommit,
+        Action<bool> AfterCommit,
         Action Fallback);
 
-    public static IDisposable Register(Action frameCallback)
+    public static IDisposable Register(Action frameCallback, IntPtr windowHandle = default, bool paceToDisplay = false)
     {
-        return RegisterCore(frameCallback, isBoundsTransition: false);
+        return RegisterCore(frameCallback, false, new FrameTarget(windowHandle, null, paceToDisplay));
+    }
+
+    public static IDisposable Register(Action frameCallback, Func<IEnumerable<IntPtr>> windowHandles)
+    {
+        ArgumentNullException.ThrowIfNull(windowHandles);
+        return RegisterCore(frameCallback, false, new FrameTarget(IntPtr.Zero, windowHandles, false));
+    }
+
+    public static double GetFrameBudgetMilliseconds(IntPtr windowHandle) =>
+        WidgetAnimationDisplayTiming.GetFrameBudgetMilliseconds(windowHandle);
+
+    public static double GetFrameBudgetMillisecondsForPoint(int screenX, int screenY) =>
+        WidgetAnimationDisplayTiming.GetFrameBudgetMillisecondsForPoint(screenX, screenY);
+
+    public static IDisposable Register(Action frameCallback, Func<double> frameBudgetMilliseconds)
+    {
+        ArgumentNullException.ThrowIfNull(frameBudgetMilliseconds);
+        return RegisterCore(frameCallback, false, new FrameTarget(IntPtr.Zero, null, false, frameBudgetMilliseconds));
     }
 
     public static bool HasBoundsTransitionCapacity =>
@@ -81,14 +117,14 @@ internal static class WidgetCompactAnimationCoordinator
 
     internal static long RecentFrameOverrunMask => s_recentOverrunMask;
 
-    public static IDisposable RegisterBoundsTransition(Action frameCallback)
+    public static IDisposable RegisterBoundsTransition(Action frameCallback, IntPtr windowHandle = default)
     {
         if (!HasBoundsTransitionCapacity)
         {
             throw new InvalidOperationException("No compact bounds-transition animation slot is available.");
         }
 
-        return RegisterCore(frameCallback, isBoundsTransition: true);
+        return RegisterCore(frameCallback, true, new FrameTarget(windowHandle, null, false));
     }
 
     /// <summary>
@@ -102,7 +138,7 @@ internal static class WidgetCompactAnimationCoordinator
         RectInt32 bounds,
         uint flags,
         Action beforeCommit,
-        Action afterCommit,
+        Action<bool> afterCommit,
         Action fallback)
     {
         if (!s_isDispatchingFrame || windowHandle == IntPtr.Zero)
@@ -120,12 +156,13 @@ internal static class WidgetCompactAnimationCoordinator
         return true;
     }
 
-    private static IDisposable RegisterCore(Action frameCallback, bool isBoundsTransition)
+    private static IDisposable RegisterCore(Action frameCallback, bool isBoundsTransition, FrameTarget target)
     {
         ArgumentNullException.ThrowIfNull(frameCallback);
 
         long registrationId = ++s_nextRegistrationId;
         FrameCallbacks.Add(registrationId, frameCallback);
+        FrameTargets.Add(registrationId, target);
         s_frameCallbackSnapshotDirty = true;
         if (isBoundsTransition)
         {
@@ -159,51 +196,39 @@ internal static class WidgetCompactAnimationCoordinator
         }
 
         s_windows10FrameDispatcher = dispatcherQueue;
-        if (s_windows10UseTimerFallback)
-        {
-            StartWindows10RefreshTimer(dispatcherQueue);
-        }
-        else
-        {
-            StartWindows10DwmFlushClock();
-        }
+        StartWindows10DwmFlushClock();
     }
 
     /// <summary>
-    /// Preferred Win10 clock: a background thread blocks on DwmFlush, which
-    /// returns after every DWM composition pass, and enqueues one coalesced
-    /// tick per pass. Commits therefore follow the display's native present
-    /// cadence (120/144/165/240Hz alike) with no fixed-interval beat against
-    /// the compositor.
+    /// Uses the application's DWM flush completion as a pacing hint on Win10.
+    /// Each run owns its cancellation and queued tick: a stopped run cannot
+    /// dispatch into a later interaction. This is not a per-output vblank API.
     /// </summary>
     private static void StartWindows10DwmFlushClock()
     {
-        s_windows10PendingFlushTick = 0;
-        s_windows10InstantFlushCount = 0;
-        s_windows10DwmFlushThreadRunning = true;
+        var run = new Windows10ClockRun(s_windows10FrameDispatcher!);
+        s_windows10ClockRun = run;
         s_windows10ClockSource = Windows10FrameClockSource.DwmFlushThread;
-        ResetFrameTickBudget(
-            WidgetDisplayRefreshRatePolicy.ResolveFrameTickInterval(
-                Win32Helper.GetPrimaryDisplayRefreshRate()));
-        s_windows10DwmFlushThread = new Thread(Windows10DwmFlushLoop)
+        RefreshFrameBudgets();
+        s_lastFrameTickTimestamp = 0;
+        var thread = new Thread(() => Windows10DwmFlushLoop(run))
         {
             IsBackground = true,
             Name = "DeskBoxWin10FramePacer",
             Priority = ThreadPriority.AboveNormal
         };
-        s_windows10DwmFlushThread.Start();
-        App.LogVerbose("[AnimationClock] compact source=DwmFlush present-aligned");
+        thread.Start();
+        App.LogVerbose("[AnimationClock] shared source=DwmFlush");
     }
 
     /// <summary>
-    /// Fallback Win10 clock: a repeating timer derived from the primary
-    /// display's refresh rate. Used when DwmFlush cannot actually pace the
-    /// composition (or dwmapi is unavailable) for the rest of the session.
+    /// Fallback clock tracks the fastest participating display, including mode
+    /// changes. DwmFlush is retried on the next active run, not disabled forever.
     /// </summary>
     private static void StartWindows10RefreshTimer(DispatcherQueue dispatcherQueue)
     {
-        int refreshRateHz = Win32Helper.GetPrimaryDisplayRefreshRate();
-        TimeSpan interval = WidgetDisplayRefreshRatePolicy.ResolveFrameTickInterval(refreshRateHz);
+        RefreshFrameBudgets();
+        TimeSpan interval = TimeSpan.FromMilliseconds(s_frameTickBudgetMs);
         s_windows10ClockSource = Windows10FrameClockSource.RefreshTimer;
         ResetFrameTickBudget(interval);
         s_windows10FrameTimer = dispatcherQueue.CreateTimer();
@@ -212,87 +237,109 @@ internal static class WidgetCompactAnimationCoordinator
         s_windows10FrameTimer.Tick += OnWindows10FrameTimerTick;
         s_windows10FrameTimer.Start();
         App.LogVerbose(
-            $"[AnimationClock] compact source=DispatcherQueueTimer " +
-            $"intervalMs={interval.TotalMilliseconds:F1} refreshHz={refreshRateHz}");
+            $"[AnimationClock] shared source=DispatcherQueueTimer " +
+            $"intervalMs={interval.TotalMilliseconds:F3} refreshHz={1000d / s_frameTickBudgetMs:F3}");
     }
 
-    private static void Windows10DwmFlushLoop()
+    private static void Windows10DwmFlushLoop(Windows10ClockRun run)
     {
-        // Each DwmFlush returns after one DWM composition pass, so enqueueing
-        // one coalesced tick per pass paces commits to the display's native
-        // cadence. If dwmapi fails or returns instantly (some remote/composited
-        // sessions), switch permanently to the refresh-derived timer instead
-        // of busy-spinning.
-        while (s_windows10DwmFlushThreadRunning)
+        while (run.IsActive)
         {
             long started = Stopwatch.GetTimestamp();
             if (!Win32Helper.TryDwmFlush())
             {
-                SwitchToWindows10TimerFallback("dwmapi-unavailable");
+                SwitchToWindows10TimerFallback(run, "dwmapi-unavailable");
                 return;
             }
 
             double elapsedMs = Stopwatch.GetElapsedTime(started).TotalMilliseconds;
+            if (run.Health.RecordWait(elapsedMs, Volatile.Read(ref run.TargetIntervalMilliseconds)))
+            {
+                // Some mixed-output stacks pace this application to the slower
+                // output. Do not let that clock cap a faster participating screen.
+                SwitchToWindows10TimerFallback(run, "flush-slower-than-active-display");
+                return;
+            }
             if (elapsedMs < 0.5)
             {
-                if (Interlocked.Increment(ref s_windows10InstantFlushCount) >= 30)
+                if (++run.InstantFlushCount >= 30)
                 {
-                    SwitchToWindows10TimerFallback("dwmflush-not-pacing");
+                    SwitchToWindows10TimerFallback(run, "dwmflush-not-pacing");
                     return;
                 }
             }
             else
             {
-                Interlocked.Exchange(ref s_windows10InstantFlushCount, 0);
+                run.InstantFlushCount = 0;
             }
 
-            if (Interlocked.CompareExchange(ref s_windows10PendingFlushTick, 1, 0) == 0)
+            if (run.IsActive && Interlocked.CompareExchange(ref run.PendingTick, 1, 0) == 0)
             {
-                DispatcherQueue? dispatcherQueue = s_windows10FrameDispatcher;
-                if (dispatcherQueue is null ||
-                    !dispatcherQueue.TryEnqueue(DispatchWindows10FlushTick))
+                if (!run.Dispatcher.TryEnqueue(() => DispatchWindows10FlushTick(run)))
                 {
-                    SwitchToWindows10TimerFallback("enqueue-failed");
+                    run.IsActive = false; // Dispatcher shutdown; never enqueue a replacement clock.
                     return;
                 }
             }
         }
     }
 
-    private static void DispatchWindows10FlushTick()
+    private static void DispatchWindows10FlushTick(Windows10ClockRun run)
     {
-        Interlocked.Exchange(ref s_windows10PendingFlushTick, 0);
+        Interlocked.Exchange(ref run.PendingTick, 0);
+        if (!run.IsActive || !ReferenceEquals(s_windows10ClockRun, run)) return;
         OnRendering(sender: null, args: EventArgs.Empty);
     }
 
-    private static void SwitchToWindows10TimerFallback(string reason)
+    private static void SwitchToWindows10TimerFallback(Windows10ClockRun run, string reason)
     {
-        // Runs on the flush thread. The loop exits through the caller's return
-        // and the actual timer must start on the UI thread (DispatcherQueueTimer
-        // creation is thread-affine), so marshal it and re-check that
-        // registrations are still active once it runs.
-        DispatcherQueue? dispatcherQueue = s_windows10FrameDispatcher;
-        s_windows10DwmFlushThreadRunning = false;
-        s_windows10UseTimerFallback = true;
-        s_windows10ClockSource = Windows10FrameClockSource.None;
-        App.Log(
-            $"[AnimationClock] compact DwmFlush pacing unavailable ({reason}); " +
-            "using refresh-derived timer for this session");
-        dispatcherQueue?.TryEnqueue(() =>
+        run.IsActive = false;
+        run.Dispatcher.TryEnqueue(() =>
         {
-            if (!s_isRenderingSubscribed ||
-                s_windows10ClockSource is not Windows10FrameClockSource.None)
-            {
-                return;
-            }
-
-            StartWindows10RefreshTimer(dispatcherQueue);
+            if (!s_isRenderingSubscribed || !ReferenceEquals(s_windows10ClockRun, run)) return;
+            s_windows10ClockRun = null;
+            App.LogVerbose($"[AnimationClock] shared DwmFlush unavailable ({reason}); display timer for this run");
+            StartWindows10RefreshTimer(run.Dispatcher);
         });
     }
 
     private static void OnWindows10FrameTimerTick(DispatcherQueueTimer sender, object args)
     {
+        if (!ReferenceEquals(sender, s_windows10FrameTimer) || !s_isRenderingSubscribed) return;
         OnRendering(sender, args);
+    }
+
+    private static void RefreshFrameBudgets()
+    {
+        double fastestBudget = double.PositiveInfinity;
+        foreach (FrameTarget target in FrameTargets.Values)
+        {
+            double budget = double.PositiveInfinity;
+            if (target.FrameBudget is not null)
+            {
+                double provided = target.FrameBudget();
+                budget = double.IsFinite(provided) && provided > 0 ? provided : 1000d / 60;
+            }
+            else if (target.WindowHandle != IntPtr.Zero)
+                budget = GetFrameBudgetMilliseconds(target.WindowHandle);
+            else if (target.Windows is not null)
+                foreach (IntPtr window in target.Windows())
+                    if (window != IntPtr.Zero) budget = Math.Min(budget, GetFrameBudgetMilliseconds(window));
+            target.BudgetMilliseconds = budget;
+            fastestBudget = Math.Min(fastestBudget, budget);
+        }
+        if (!double.IsFinite(fastestBudget)) fastestBudget = GetFrameBudgetMilliseconds(IntPtr.Zero);
+        if (s_windows10ClockRun is { } run) Volatile.Write(ref run.TargetIntervalMilliseconds, fastestBudget);
+        foreach (FrameTarget target in FrameTargets.Values)
+            if (!double.IsFinite(target.BudgetMilliseconds)) target.BudgetMilliseconds = fastestBudget;
+        if (Math.Abs(s_frameTickBudgetMs - fastestBudget) > 0.01)
+        {
+            ResetFrameTickBudget(TimeSpan.FromMilliseconds(fastestBudget));
+            s_recentOverrunMask = 0;
+        }
+        if (s_windows10FrameTimer is not null &&
+            Math.Abs(s_windows10FrameTimer.Interval.TotalMilliseconds - fastestBudget) > 0.01)
+            s_windows10FrameTimer.Interval = TimeSpan.FromMilliseconds(fastestBudget);
     }
 
     /// <summary>
@@ -326,6 +373,8 @@ internal static class WidgetCompactAnimationCoordinator
 
     private static void OnRendering(object? sender, object args)
     {
+        if (!s_isRenderingSubscribed || s_isDispatchingFrame) return;
+        RefreshFrameBudgets();
         RecordFrameTickCadence();
         PendingBoundsMoves.Clear();
         s_isDispatchingFrame = true;
@@ -343,6 +392,20 @@ internal static class WidgetCompactAnimationCoordinator
 
                 try
                 {
+                    FrameTarget target = FrameTargets[registrationId];
+                    double timestampMs = Stopwatch.GetTimestamp() * 1000d / Stopwatch.Frequency;
+                    if (target.PaceToDisplay)
+                    {
+                        if (!target.Initialized)
+                        {
+                            target.Pacing.Reset(timestampMs, target.BudgetMilliseconds);
+                            target.Initialized = true;
+                        }
+                        if (!target.Pacing.ShouldSubmit(timestampMs, target.BudgetMilliseconds)) continue;
+                        // Direct manipulation follows the latest input, never an artificial
+                        // load-dependent lag. Only the target display period limits its work.
+                        target.Pacing.RecordSubmission(timestampMs, 0);
+                    }
                     callback();
                 }
                 catch (Exception ex)
@@ -380,39 +443,39 @@ internal static class WidgetCompactAnimationCoordinator
         PendingBoundsMove[] moves = PendingBoundsMoves.Values.ToArray();
         PendingBoundsMoves.Clear();
         long started = Stopwatch.GetTimestamp();
-
-        foreach (PendingBoundsMove move in moves)
-        {
-            move.BeforeCommit();
-        }
+        var succeeded = new bool[moves.Length];
 
         try
         {
+            foreach (PendingBoundsMove move in moves) move.BeforeCommit();
             bool committed = TryCommitBatch(moves);
-            if (!committed)
+            if (committed)
             {
-                foreach (PendingBoundsMove move in moves)
+                Array.Fill(succeeded, true);
+            }
+            else
+            {
+                for (int i = 0; i < moves.Length; i++)
                 {
-                    bool moved = Win32Helper.SetWindowPos(
-                        move.WindowHandle,
-                        IntPtr.Zero,
-                        move.Bounds.X,
-                        move.Bounds.Y,
-                        move.Bounds.Width,
-                        move.Bounds.Height,
-                        move.Flags);
-                    if (!moved)
+                    PendingBoundsMove move = moves[i];
+                    try
                     {
-                        move.Fallback();
+                        bool moved = Win32Helper.SetWindowPos(
+                            move.WindowHandle, IntPtr.Zero, move.Bounds.X, move.Bounds.Y,
+                            move.Bounds.Width, move.Bounds.Height, move.Flags);
+                        if (!moved) move.Fallback();
+                        succeeded[i] = true;
                     }
+                    catch (Exception ex) { App.Log($"[CompactBoundsBatch] Window commit failed: {ex.Message}"); }
                 }
             }
         }
         finally
         {
-            foreach (PendingBoundsMove move in moves)
+            for (int i = 0; i < moves.Length; i++)
             {
-                move.AfterCommit();
+                try { moves[i].AfterCommit(succeeded[i]); }
+                catch (Exception ex) { App.Log($"[CompactBoundsBatch] Completion failed: {ex.Message}"); }
             }
 
             double elapsedMs = Stopwatch.GetElapsedTime(started).TotalMilliseconds;
@@ -463,6 +526,7 @@ internal static class WidgetCompactAnimationCoordinator
         {
             s_frameCallbackSnapshotDirty = true;
         }
+        FrameTargets.Remove(registrationId);
         BoundsTransitionRegistrations.Remove(registrationId);
         if (FrameCallbacks.Count != 0 || !s_isRenderingSubscribed)
         {
@@ -475,6 +539,8 @@ internal static class WidgetCompactAnimationCoordinator
         s_frameCallbackSnapshotDirty = false;
         s_clockBoostLease?.Dispose();
         s_clockBoostLease = null;
+        WidgetAnimationDisplayTiming.Clear();
+        s_lastFrameTickTimestamp = 0;
     }
 
     private static void StopFrameClock()
@@ -482,8 +548,8 @@ internal static class WidgetCompactAnimationCoordinator
         switch (s_windows10ClockSource)
         {
             case Windows10FrameClockSource.DwmFlushThread:
-                s_windows10DwmFlushThreadRunning = false;
-                s_windows10DwmFlushThread = null;
+                if (s_windows10ClockRun is { } run) run.IsActive = false;
+                s_windows10ClockRun = null;
                 s_windows10FrameDispatcher = null;
                 break;
             case Windows10FrameClockSource.RefreshTimer:
