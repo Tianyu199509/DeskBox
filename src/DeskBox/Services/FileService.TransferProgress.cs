@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text;
+using DeskBox.Helpers;
 
 namespace DeskBox.Services;
 
@@ -120,6 +121,7 @@ public sealed partial class FileService
                 $"[FileTransfer] Managed completed count={operations.Count} " +
                 $"move={move} bytes={reporter.BytesTransferred} " +
                 $"elapsedMs={reporter.ElapsedMilliseconds}");
+            NotifyShellDirectoriesUpdated(completedOperations, move);
 
             return completedOperations
                 .Select(operation => new FileTransferResult(
@@ -147,6 +149,46 @@ public sealed partial class FileService
             reporter.Report(FileTransferPhase.Failed, force: true);
             await RollbackTransfersAsync(completedOperations, move);
             throw;
+        }
+    }
+
+    private static void NotifyShellDirectoriesUpdated(
+        IReadOnlyList<TransferOperation> operations,
+        bool move)
+    {
+        // Raw file APIs plus per-item rename notifications still leave
+        // OneDrive-backed folder views (typically redirected desktops)
+        // showing stale entries. Forcing one re-enumeration per affected
+        // directory is the programmatic equivalent of the user pressing F5.
+        var directories = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (TransferOperation operation in operations)
+        {
+            if (move)
+            {
+                AddParentDirectory(directories, operation.SourcePath);
+            }
+
+            AddParentDirectory(directories, operation.DestinationPath);
+        }
+
+        foreach (string directory in directories)
+        {
+            Win32Helper.NotifyShellDirectoryUpdated(directory);
+        }
+
+        static void AddParentDirectory(ISet<string> target, string path)
+        {
+            try
+            {
+                string? parent = Path.GetDirectoryName(path);
+                if (!string.IsNullOrWhiteSpace(parent))
+                {
+                    target.Add(parent);
+                }
+            }
+            catch (ArgumentException)
+            {
+            }
         }
     }
 
@@ -359,6 +401,7 @@ public sealed partial class FileService
                     () => File.Move(sourceFilePath, destinationFilePath),
                     cancellationToken);
                 reporter.AddBytes(sourceLength, sourceInfo.Name, force: true);
+                Win32Helper.NotifyShellItemMoved(sourceFilePath, destinationFilePath);
                 return;
             }
         }
@@ -389,6 +432,8 @@ public sealed partial class FileService
             TryDeletePartialFile(destinationFilePath);
             throw;
         }
+
+        Win32Helper.NotifyShellItemMoved(sourceFilePath, destinationFilePath);
     }
 
     internal static void DeleteSourceFileAfterCopy(
@@ -602,6 +647,7 @@ public sealed partial class FileService
                     work.Bytes,
                     Path.GetFileName(sourceDirectory),
                     force: true);
+                Win32Helper.NotifyShellItemMoved(sourceDirectory, destinationDirectory);
                 return;
             }
         }
@@ -653,6 +699,8 @@ public sealed partial class FileService
                 destinationDirectory,
                 ex);
         }
+
+        Win32Helper.NotifyShellItemMoved(sourceDirectory, destinationDirectory);
     }
 
     private static void CopyFileMetadata(

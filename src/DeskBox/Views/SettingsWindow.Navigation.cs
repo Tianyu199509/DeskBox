@@ -575,6 +575,7 @@ public sealed partial class SettingsWindow
         }
         if (sectionTag == "BackupRestoreSettings")
         {
+            ViewModel.RefreshAutomaticBackupStatus();
             _ = RefreshBackupSnapshotInventoryAsync();
         }
         SettingsNavigationView.IsBackButtonVisible = isNestedSection

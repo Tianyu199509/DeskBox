@@ -1,6 +1,6 @@
-#if !DESKBOX_NATIVE_AOT
 using System.Diagnostics;
 using System.Runtime.InteropServices;
+using System.Runtime.InteropServices.Marshalling;
 
 namespace DeskBox.Services;
 
@@ -24,7 +24,9 @@ public sealed partial class FileService
             bool move,
             IntPtr ownerWindowHandle,
             IProgress<FileTransferProgress>? progress,
-            CancellationToken cancellationToken)
+            CancellationToken cancellationToken,
+            bool keepBoth = false,
+            Action<FileTransferResult>? itemCompleted = null)
     {
         if (operations.Count == 0)
         {
@@ -64,7 +66,7 @@ public sealed partial class FileService
                 operations,
                 move,
                 ownerWindowHandle,
-                cancellationToken);
+                cancellationToken, keepBoth, itemCompleted);
         }
         catch (OperationCanceledException)
         {
@@ -179,6 +181,7 @@ public sealed partial class FileService
             StringComparer.OrdinalIgnoreCase);
         foreach (FileTransferResult result in reportedResults)
         {
+            if (move && !IsCompletedShellMove(result.SourcePath, result.DestinationPath)) continue;
             results[result.SourcePath] = result;
         }
 
@@ -237,7 +240,9 @@ public sealed partial class FileService
         IReadOnlyList<TransferOperation> operations,
         bool move,
         IntPtr ownerWindowHandle,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool keepBoth,
+        Action<FileTransferResult>? itemCompleted)
     {
         var completion = new TaskCompletionSource<ShellTransferOutcome>(
             TaskCreationOptions.RunContinuationsAsynchronously);
@@ -249,7 +254,7 @@ public sealed partial class FileService
                     operations,
                     move,
                     ownerWindowHandle,
-                    cancellationToken));
+                    cancellationToken, keepBoth, itemCompleted));
             }
             catch (OperationCanceledException ex)
             {
@@ -273,7 +278,9 @@ public sealed partial class FileService
         IReadOnlyList<TransferOperation> operations,
         bool move,
         IntPtr ownerWindowHandle,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool keepBoth,
+        Action<FileTransferResult>? itemCompleted)
     {
         cancellationToken.ThrowIfCancellationRequested();
         int initializeResult = CoInitializeEx(
@@ -282,11 +289,11 @@ public sealed partial class FileService
         ThrowForShellHResult(initializeResult, cancellationToken);
         bool uninitialize = initializeResult >= 0;
         IFileOperationNative? fileOperation = null;
-        var retainedShellItems = new List<object>(operations.Count * 2);
+        var retainedShellItems = new List<IntPtr>(operations.Count * 2);
         uint adviseCookie = 0;
         var sink = new ShellFileOperationProgressSink(
             operations,
-            cancellationToken);
+            cancellationToken, itemCompleted, move);
         try
         {
             Guid classId = s_fileOperationClassId;
@@ -297,15 +304,17 @@ public sealed partial class FileService
                     IntPtr.Zero,
                     ClsContextInProcessServer,
                     ref interfaceId,
-                    out fileOperation),
+                    out IntPtr operationPointer),
                 cancellationToken);
 
+            fileOperation = new IFileOperationNative(operationPointer);
             ThrowForShellHResult(
                 fileOperation.Advise(sink, out adviseCookie),
                 cancellationToken);
             ThrowForShellHResult(
                 fileOperation.SetOperationFlags(
-                    ShellFileOperationNoConfirmMakeDirectory),
+                    ShellFileOperationNoConfirmMakeDirectory |
+                    (keepBoth ? 0x00240008u : 0u)),
                 cancellationToken);
             if (ownerWindowHandle != IntPtr.Zero)
             {
@@ -317,10 +326,10 @@ public sealed partial class FileService
             foreach (TransferOperation operation in operations)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                IShellItemNative sourceItem = CreateShellItem(
+                IntPtr sourceItem = CreateShellItem(
                     operation.SourcePath,
                     cancellationToken);
-                IShellItemNative destinationFolderItem = CreateShellItem(
+                IntPtr destinationFolderItem = CreateShellItem(
                     Path.GetDirectoryName(operation.DestinationPath)!,
                     cancellationToken);
                 retainedShellItems.Add(sourceItem);
@@ -370,14 +379,14 @@ public sealed partial class FileService
                 }
             }
 
-            foreach (object shellItem in retainedShellItems)
+            foreach (IntPtr shellItem in retainedShellItems)
             {
-                ReleaseComObject(shellItem);
+                Marshal.Release(shellItem);
             }
 
             if (fileOperation is not null)
             {
-                ReleaseComObject(fileOperation);
+                fileOperation.Dispose();
             }
 
             GC.KeepAlive(sink);
@@ -388,7 +397,7 @@ public sealed partial class FileService
         }
     }
 
-    private static IShellItemNative CreateShellItem(
+    private static IntPtr CreateShellItem(
         string path,
         CancellationToken cancellationToken)
     {
@@ -398,7 +407,7 @@ public sealed partial class FileService
                 path,
                 IntPtr.Zero,
                 ref interfaceId,
-                out IShellItemNative shellItem),
+                out IntPtr shellItem),
             cancellationToken);
         return shellItem;
     }
@@ -421,23 +430,9 @@ public sealed partial class FileService
         Marshal.ThrowExceptionForHR(hresult);
     }
 
-    private static void ReleaseComObject(object value)
+    private static string? TryGetShellItemPath(IntPtr item)
     {
-        try
-        {
-            if (Marshal.IsComObject(value))
-            {
-                _ = Marshal.ReleaseComObject(value);
-            }
-        }
-        catch
-        {
-        }
-    }
-
-    private static string? TryGetShellItemPath(IShellItemNative? item)
-    {
-        if (item is null)
+        if (item == IntPtr.Zero)
         {
             return null;
         }
@@ -445,7 +440,7 @@ public sealed partial class FileService
         IntPtr pathPointer = IntPtr.Zero;
         try
         {
-            int result = item.GetDisplayName(
+            int result = IFileOperationNative.GetDisplayName(item,
                 ShellDisplayNameFileSystemPath,
                 out pathPointer);
             return result >= 0 && pathPointer != IntPtr.Zero
@@ -473,21 +468,27 @@ public sealed partial class FileService
         int FailedItemCount,
         int FirstFailedItemHResult);
 
-    [ComVisible(true)]
-    [ClassInterface(ClassInterfaceType.None)]
-    private sealed class ShellFileOperationProgressSink :
+    [GeneratedComClass]
+    private sealed partial class ShellFileOperationProgressSink :
         IFileOperationProgressSinkNative
     {
         private const int SuccessHResult = 0;
         private readonly IReadOnlyList<TransferOperation> _operations;
         private readonly CancellationToken _cancellationToken;
+        private readonly Action<FileTransferResult>? _itemCompleted;
+        private int _receiptError;
+        private readonly bool _move;
         private readonly Dictionary<string, FileTransferResult> _completed =
             new(StringComparer.OrdinalIgnoreCase);
 
         internal ShellFileOperationProgressSink(
             IReadOnlyList<TransferOperation> operations,
-            CancellationToken cancellationToken)
+            CancellationToken cancellationToken,
+            Action<FileTransferResult>? itemCompleted,
+            bool move)
         {
+            _move = move;
+            _itemCompleted = itemCompleted;
             _operations = operations;
             _cancellationToken = cancellationToken;
         }
@@ -517,29 +518,29 @@ public sealed partial class FileService
 
         public int PreRenameItem(
             uint flags,
-            IShellItemNative item,
-            string? newName) => CancellationResult();
+            IntPtr item,
+            IntPtr newName) => CancellationResult();
 
         public int PostRenameItem(
             uint flags,
-            IShellItemNative item,
-            string? newName,
+            IntPtr item,
+            IntPtr newName,
             int renameResult,
-            IShellItemNative? newlyCreatedItem) => SuccessHResult;
+            IntPtr newlyCreatedItem) => SuccessHResult;
 
         public int PreMoveItem(
             uint flags,
-            IShellItemNative item,
-            IShellItemNative destinationFolder,
-            string? newName) => CancellationResult();
+            IntPtr item,
+            IntPtr destinationFolder,
+            IntPtr newName) => CancellationResult();
 
         public int PostMoveItem(
             uint flags,
-            IShellItemNative item,
-            IShellItemNative destinationFolder,
-            string? newName,
+            IntPtr item,
+            IntPtr destinationFolder,
+            IntPtr newName,
             int moveResult,
-            IShellItemNative? newlyCreatedItem)
+            IntPtr newlyCreatedItem)
         {
             RecordTransferResult(item, newlyCreatedItem, moveResult);
             return CancellationResult();
@@ -547,44 +548,44 @@ public sealed partial class FileService
 
         public int PreCopyItem(
             uint flags,
-            IShellItemNative item,
-            IShellItemNative destinationFolder,
-            string? newName) => CancellationResult();
+            IntPtr item,
+            IntPtr destinationFolder,
+            IntPtr newName) => CancellationResult();
 
         public int PostCopyItem(
             uint flags,
-            IShellItemNative item,
-            IShellItemNative destinationFolder,
-            string? newName,
+            IntPtr item,
+            IntPtr destinationFolder,
+            IntPtr newName,
             int copyResult,
-            IShellItemNative? newlyCreatedItem)
+            IntPtr newlyCreatedItem)
         {
             RecordTransferResult(item, newlyCreatedItem, copyResult);
             return CancellationResult();
         }
 
-        public int PreDeleteItem(uint flags, IShellItemNative item) =>
+        public int PreDeleteItem(uint flags, IntPtr item) =>
             CancellationResult();
 
         public int PostDeleteItem(
             uint flags,
-            IShellItemNative item,
+            IntPtr item,
             int deleteResult,
-            IShellItemNative? newlyCreatedItem) => SuccessHResult;
+            IntPtr newlyCreatedItem) => SuccessHResult;
 
         public int PreNewItem(
             uint flags,
-            IShellItemNative destinationFolder,
-            string? newName) => CancellationResult();
+            IntPtr destinationFolder,
+            IntPtr newName) => CancellationResult();
 
         public int PostNewItem(
             uint flags,
-            IShellItemNative destinationFolder,
-            string? newName,
-            string? templateName,
+            IntPtr destinationFolder,
+            IntPtr newName,
+            IntPtr templateName,
             uint fileAttributes,
             int newItemResult,
-            IShellItemNative? newItem) => SuccessHResult;
+            IntPtr newItem) => SuccessHResult;
 
         public int UpdateProgress(uint totalWork, uint completedWork) =>
             CancellationResult();
@@ -597,14 +598,14 @@ public sealed partial class FileService
 
         private int CancellationResult()
         {
-            return _cancellationToken.IsCancellationRequested
+            return _receiptError != 0 ? _receiptError : _cancellationToken.IsCancellationRequested
                 ? ErrorCancelledHResult
                 : SuccessHResult;
         }
 
         private void RecordTransferResult(
-            IShellItemNative sourceItem,
-            IShellItemNative? newlyCreatedItem,
+            IntPtr sourceItem,
+            IntPtr newlyCreatedItem,
             int operationResult)
         {
             if (operationResult < 0)
@@ -636,7 +637,8 @@ public sealed partial class FileService
                         StringComparison.OrdinalIgnoreCase));
             }
 
-            if (operation is null)
+            if (operation is null || destinationPath is null ||
+                (_move && !IsCompletedShellMove(operation.SourcePath, destinationPath)))
             {
                 return;
             }
@@ -644,13 +646,25 @@ public sealed partial class FileService
             _completed[operation.SourcePath] = new FileTransferResult(
                 operation.SourcePath,
                 destinationPath ?? operation.DestinationPath);
+            try
+            {
+                _itemCompleted?.Invoke(_completed[operation.SourcePath]);
+            }
+            catch (Exception ex)
+            {
+                // Never let a managed exception escape a COM callback. Stop
+                // before another item if the durable receipt cannot be saved.
+                _receiptError = ex.HResult < 0 ? ex.HResult : unchecked((int)0x80004005);
+                FailedItemCount++;
+                FirstFailedItemHResult = _receiptError;
+            }
         }
     }
 
-    [ComVisible(true)]
+    [GeneratedComInterface(Options = ComInterfaceOptions.ManagedObjectWrapper)]
     [Guid("04B0F1A7-9490-44BC-96E1-4296A31252E2")]
     [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-    private interface IFileOperationProgressSinkNative
+    internal partial interface IFileOperationProgressSinkNative
     {
         [PreserveSig]
         int StartOperations();
@@ -661,74 +675,74 @@ public sealed partial class FileService
         [PreserveSig]
         int PreRenameItem(
             uint flags,
-            IShellItemNative item,
-            [MarshalAs(UnmanagedType.LPWStr)] string? newName);
+            IntPtr item,
+            IntPtr newName);
 
         [PreserveSig]
         int PostRenameItem(
             uint flags,
-            IShellItemNative item,
-            [MarshalAs(UnmanagedType.LPWStr)] string? newName,
+            IntPtr item,
+            IntPtr newName,
             int renameResult,
-            IShellItemNative? newlyCreatedItem);
+            IntPtr newlyCreatedItem);
 
         [PreserveSig]
         int PreMoveItem(
             uint flags,
-            IShellItemNative item,
-            IShellItemNative destinationFolder,
-            [MarshalAs(UnmanagedType.LPWStr)] string? newName);
+            IntPtr item,
+            IntPtr destinationFolder,
+            IntPtr newName);
 
         [PreserveSig]
         int PostMoveItem(
             uint flags,
-            IShellItemNative item,
-            IShellItemNative destinationFolder,
-            [MarshalAs(UnmanagedType.LPWStr)] string? newName,
+            IntPtr item,
+            IntPtr destinationFolder,
+            IntPtr newName,
             int moveResult,
-            IShellItemNative? newlyCreatedItem);
+            IntPtr newlyCreatedItem);
 
         [PreserveSig]
         int PreCopyItem(
             uint flags,
-            IShellItemNative item,
-            IShellItemNative destinationFolder,
-            [MarshalAs(UnmanagedType.LPWStr)] string? newName);
+            IntPtr item,
+            IntPtr destinationFolder,
+            IntPtr newName);
 
         [PreserveSig]
         int PostCopyItem(
             uint flags,
-            IShellItemNative item,
-            IShellItemNative destinationFolder,
-            [MarshalAs(UnmanagedType.LPWStr)] string? newName,
+            IntPtr item,
+            IntPtr destinationFolder,
+            IntPtr newName,
             int copyResult,
-            IShellItemNative? newlyCreatedItem);
+            IntPtr newlyCreatedItem);
 
         [PreserveSig]
-        int PreDeleteItem(uint flags, IShellItemNative item);
+        int PreDeleteItem(uint flags, IntPtr item);
 
         [PreserveSig]
         int PostDeleteItem(
             uint flags,
-            IShellItemNative item,
+            IntPtr item,
             int deleteResult,
-            IShellItemNative? newlyCreatedItem);
+            IntPtr newlyCreatedItem);
 
         [PreserveSig]
         int PreNewItem(
             uint flags,
-            IShellItemNative destinationFolder,
-            [MarshalAs(UnmanagedType.LPWStr)] string? newName);
+            IntPtr destinationFolder,
+            IntPtr newName);
 
         [PreserveSig]
         int PostNewItem(
             uint flags,
-            IShellItemNative destinationFolder,
-            [MarshalAs(UnmanagedType.LPWStr)] string? newName,
-            [MarshalAs(UnmanagedType.LPWStr)] string? templateName,
+            IntPtr destinationFolder,
+            IntPtr newName,
+            IntPtr templateName,
             uint fileAttributes,
             int newItemResult,
-            IShellItemNative? newItem);
+            IntPtr newItem);
 
         [PreserveSig]
         int UpdateProgress(uint totalWork, uint completedWork);
@@ -743,144 +757,56 @@ public sealed partial class FileService
         int ResumeTimer();
     }
 
-    [ComImport]
-    [Guid("947AAB5F-0A5C-4C13-B4D6-4BF7836FC9F8")]
-    [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-    private interface IFileOperationNative
+    // A small owned native wrapper avoids RCWs and works in Native AOT too.
+    private sealed unsafe class IFileOperationNative(IntPtr pointer) : IDisposable
     {
-        [PreserveSig]
-        int Advise(IFileOperationProgressSinkNative progressSink, out uint cookie);
-
-        [PreserveSig]
-        int Unadvise(uint cookie);
-
-        [PreserveSig]
-        int SetOperationFlags(uint operationFlags);
-
-        [PreserveSig]
-        int SetProgressMessage(
-            [MarshalAs(UnmanagedType.LPWStr)] string message);
-
-        [PreserveSig]
-        int SetProgressDialog(IntPtr progressDialog);
-
-        [PreserveSig]
-        int SetProperties(IntPtr propertyChangeArray);
-
-        [PreserveSig]
-        int SetOwnerWindow(IntPtr ownerWindowHandle);
-
-        [PreserveSig]
-        int ApplyPropertiesToItem(IShellItemNative item);
-
-        [PreserveSig]
-        int ApplyPropertiesToItems(IntPtr items);
-
-        [PreserveSig]
-        int RenameItem(
-            IShellItemNative item,
-            [MarshalAs(UnmanagedType.LPWStr)] string newName,
-            IntPtr progressSink);
-
-        [PreserveSig]
-        int RenameItems(
-            IntPtr items,
-            [MarshalAs(UnmanagedType.LPWStr)] string newName);
-
-        [PreserveSig]
-        int MoveItem(
-            IShellItemNative item,
-            IShellItemNative destinationFolder,
-            [MarshalAs(UnmanagedType.LPWStr)] string? newName,
-            IntPtr progressSink);
-
-        [PreserveSig]
-        int MoveItems(IntPtr items, IShellItemNative destinationFolder);
-
-        [PreserveSig]
-        int CopyItem(
-            IShellItemNative item,
-            IShellItemNative destinationFolder,
-            [MarshalAs(UnmanagedType.LPWStr)] string? copyName,
-            IntPtr progressSink);
-
-        [PreserveSig]
-        int CopyItems(IntPtr items, IShellItemNative destinationFolder);
-
-        [PreserveSig]
-        int DeleteItem(IShellItemNative item, IntPtr progressSink);
-
-        [PreserveSig]
-        int DeleteItems(IntPtr items);
-
-        [PreserveSig]
-        int NewItem(
-            IShellItemNative destinationFolder,
-            uint fileAttributes,
-            [MarshalAs(UnmanagedType.LPWStr)] string name,
-            [MarshalAs(UnmanagedType.LPWStr)] string? templateName,
-            IntPtr progressSink);
-
-        [PreserveSig]
-        int PerformOperations();
-
-        [PreserveSig]
-        int GetAnyOperationsAborted(
-            [MarshalAs(UnmanagedType.Bool)] out bool anyOperationsAborted);
+        private IntPtr _sinkPointer;
+        private void** Table => *(void***)pointer;
+        public int Advise(IFileOperationProgressSinkNative sink, out uint cookie)
+        {
+            _sinkPointer = (IntPtr)ComInterfaceMarshaller<IFileOperationProgressSinkNative>.ConvertToUnmanaged(sink);
+            fixed (uint* value = &cookie)
+                return ((delegate* unmanaged[Stdcall]<IntPtr, IntPtr, uint*, int>)Table[3])(pointer, _sinkPointer, value);
+        }
+        public int Unadvise(uint cookie) => ((delegate* unmanaged[Stdcall]<IntPtr, uint, int>)Table[4])(pointer, cookie);
+        public int SetOperationFlags(uint flags) => ((delegate* unmanaged[Stdcall]<IntPtr, uint, int>)Table[5])(pointer, flags);
+        public int SetOwnerWindow(IntPtr owner) => ((delegate* unmanaged[Stdcall]<IntPtr, IntPtr, int>)Table[9])(pointer, owner);
+        public int MoveItem(IntPtr source, IntPtr folder, string name, IntPtr sink) => Queue(14, source, folder, name, sink);
+        public int CopyItem(IntPtr source, IntPtr folder, string name, IntPtr sink) => Queue(16, source, folder, name, sink);
+        private int Queue(int slot, IntPtr source, IntPtr folder, string name, IntPtr sink)
+        {
+            fixed (char* text = name)
+                return ((delegate* unmanaged[Stdcall]<IntPtr, IntPtr, IntPtr, char*, IntPtr, int>)Table[slot])(pointer, source, folder, text, sink);
+        }
+        public int PerformOperations() => ((delegate* unmanaged[Stdcall]<IntPtr, int>)Table[21])(pointer);
+        public int GetAnyOperationsAborted(out bool aborted)
+        {
+            int value = 0;
+            int hr = ((delegate* unmanaged[Stdcall]<IntPtr, int*, int>)Table[22])(pointer, &value);
+            aborted = value != 0;
+            return hr;
+        }
+        public static int GetDisplayName(IntPtr item, uint kind, out IntPtr name)
+        {
+            fixed (IntPtr* value = &name)
+                return ((delegate* unmanaged[Stdcall]<IntPtr, uint, IntPtr*, int>)(*(void***)item)[5])(item, kind, value);
+        }
+        public void Dispose()
+        {
+            Marshal.Release(pointer);
+            if (_sinkPointer != IntPtr.Zero)
+                ComInterfaceMarshaller<IFileOperationProgressSinkNative>.Free((void*)_sinkPointer);
+        }
     }
 
-    [ComImport]
-    [Guid("43826D1E-E718-42EE-BC55-A1E261C37BFE")]
-    [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-    private interface IShellItemNative
-    {
-        [PreserveSig]
-        int BindToHandler(
-            IntPtr bindContext,
-            ref Guid handlerId,
-            ref Guid interfaceId,
-            out IntPtr result);
-
-        [PreserveSig]
-        int GetParent(out IShellItemNative parent);
-
-        [PreserveSig]
-        int GetDisplayName(uint displayNameType, out IntPtr name);
-
-        [PreserveSig]
-        int GetAttributes(uint mask, out uint attributes);
-
-        [PreserveSig]
-        int Compare(IShellItemNative other, uint hint, out int order);
-    }
-
-    [DllImport("ole32.dll")]
-    private static extern int CoInitializeEx(
-        IntPtr reserved,
-        uint coInitialize);
-
-    [DllImport("ole32.dll")]
-    private static extern void CoUninitialize();
-
-    [DllImport("ole32.dll", PreserveSig = true)]
-    private static extern int CoCreateInstance(
-        ref Guid classId,
-        IntPtr outerUnknown,
-        uint classContext,
-        ref Guid interfaceId,
-        [MarshalAs(UnmanagedType.Interface)] out IFileOperationNative fileOperation);
-
-    [DllImport(
-        "shell32.dll",
-        CharSet = CharSet.Unicode,
-        PreserveSig = true)]
-    private static extern int SHCreateItemFromParsingName(
-        [MarshalAs(UnmanagedType.LPWStr)] string path,
-        IntPtr bindContext,
-        ref Guid interfaceId,
-        [MarshalAs(UnmanagedType.Interface)] out IShellItemNative shellItem);
-
-    [DllImport("ole32.dll")]
-    private static extern void CoTaskMemFree(IntPtr memory);
+    [LibraryImport("ole32.dll")]
+    private static partial int CoInitializeEx(IntPtr reserved, uint coInitialize);
+    [LibraryImport("ole32.dll")]
+    private static partial void CoUninitialize();
+    [LibraryImport("ole32.dll")]
+    private static partial int CoCreateInstance(ref Guid classId, IntPtr outerUnknown, uint classContext, ref Guid interfaceId, out IntPtr fileOperation);
+    [LibraryImport("shell32.dll", StringMarshalling = StringMarshalling.Utf16)]
+    private static partial int SHCreateItemFromParsingName(string path, IntPtr bindContext, ref Guid interfaceId, out IntPtr shellItem);
+    [LibraryImport("ole32.dll")]
+    private static partial void CoTaskMemFree(IntPtr memory);
 }
-#endif

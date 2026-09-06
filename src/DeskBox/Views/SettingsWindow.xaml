@@ -1889,6 +1889,18 @@ svc:Localized.DescriptionKey="Settings.DefaultWidth.Description"
                                     <FontIcon Glyph="&#xE70F;" />
                                 </toolkit:SettingsExpander.HeaderIcon>
                                 <toolkit:SettingsExpander.Items>
+                                    <toolkit:SettingsCard HorizontalContentAlignment="Right" svc:Localized.HeaderKey="Settings.Feature.ListTextSize.Title" svc:Localized.DescriptionKey="Settings.Feature.ListTextSize.Description">
+                                        <StackPanel VerticalAlignment="Center" Orientation="Horizontal" Spacing="8">
+                                            <TextBlock Style="{StaticResource SliderSettingValueTextStyle}" Text="{Binding QuickCaptureListTextSizeValueText}" />
+                                            <Slider Maximum="16" Minimum="10" StepFrequency="0.5" Style="{StaticResource InlineMetricSliderStyle}" Value="{Binding QuickCaptureListTextSize, Mode=TwoWay}" ManipulationMode="TranslateX" ManipulationStarted="AppearanceSlider_ManipulationStarted" ManipulationCompleted="AppearanceSlider_ManipulationCompleted" ValueChanged="AppearanceSlider_ValueChanged" PointerPressed="AppearanceSlider_PointerPressed" PointerReleased="AppearanceSlider_PointerReleased" LostFocus="AppearanceSlider_LostFocus" />
+                                        </StackPanel>
+                                    </toolkit:SettingsCard>
+                                    <toolkit:SettingsCard HorizontalContentAlignment="Right" svc:Localized.HeaderKey="Settings.Feature.ContentTextSize.Title" svc:Localized.DescriptionKey="Settings.Feature.ContentTextSize.Description">
+                                        <StackPanel VerticalAlignment="Center" Orientation="Horizontal" Spacing="8">
+                                            <TextBlock Style="{StaticResource SliderSettingValueTextStyle}" Text="{Binding QuickCaptureContentTextSizeValueText}" />
+                                            <Slider Maximum="16" Minimum="10" StepFrequency="0.5" Style="{StaticResource InlineMetricSliderStyle}" Value="{Binding QuickCaptureContentTextSize, Mode=TwoWay}" ManipulationMode="TranslateX" ManipulationStarted="AppearanceSlider_ManipulationStarted" ManipulationCompleted="AppearanceSlider_ManipulationCompleted" ValueChanged="AppearanceSlider_ValueChanged" PointerPressed="AppearanceSlider_PointerPressed" PointerReleased="AppearanceSlider_PointerReleased" LostFocus="AppearanceSlider_LostFocus" />
+                                        </StackPanel>
+                                    </toolkit:SettingsCard>
                                     <toolkit:SettingsCard HorizontalContentAlignment="Right" svc:Localized.DescriptionKey="Settings.ContentEditor.PreviewLines.Description" svc:Localized.HeaderKey="Settings.ContentEditor.PreviewLines.Title">
                                         <ComboBox MinWidth="220" ItemsSource="{Binding AvailableItemPreviewLineCountOptions}" controls:SettingsComboBox.Value="{Binding QuickCaptureItemPreviewLineCount, Mode=TwoWay}" />
                                     </toolkit:SettingsCard>
@@ -2032,6 +2044,18 @@ svc:Localized.DescriptionKey="Settings.DefaultWidth.Description"
                                     <FontIcon Glyph="&#xE70F;" />
                                 </toolkit:SettingsExpander.HeaderIcon>
                                 <toolkit:SettingsExpander.Items>
+                                    <toolkit:SettingsCard HorizontalContentAlignment="Right" svc:Localized.HeaderKey="Settings.Feature.ListTextSize.Title" svc:Localized.DescriptionKey="Settings.Feature.ListTextSize.Description">
+                                        <StackPanel VerticalAlignment="Center" Orientation="Horizontal" Spacing="8">
+                                            <TextBlock Style="{StaticResource SliderSettingValueTextStyle}" Text="{Binding TodoListTextSizeValueText}" />
+                                            <Slider Maximum="16" Minimum="10" StepFrequency="0.5" Style="{StaticResource InlineMetricSliderStyle}" Value="{Binding TodoListTextSize, Mode=TwoWay}" ManipulationMode="TranslateX" ManipulationStarted="AppearanceSlider_ManipulationStarted" ManipulationCompleted="AppearanceSlider_ManipulationCompleted" ValueChanged="AppearanceSlider_ValueChanged" PointerPressed="AppearanceSlider_PointerPressed" PointerReleased="AppearanceSlider_PointerReleased" LostFocus="AppearanceSlider_LostFocus" />
+                                        </StackPanel>
+                                    </toolkit:SettingsCard>
+                                    <toolkit:SettingsCard HorizontalContentAlignment="Right" svc:Localized.HeaderKey="Settings.Feature.ContentTextSize.Title" svc:Localized.DescriptionKey="Settings.Feature.ContentTextSize.Description">
+                                        <StackPanel VerticalAlignment="Center" Orientation="Horizontal" Spacing="8">
+                                            <TextBlock Style="{StaticResource SliderSettingValueTextStyle}" Text="{Binding TodoContentTextSizeValueText}" />
+                                            <Slider Maximum="16" Minimum="10" StepFrequency="0.5" Style="{StaticResource InlineMetricSliderStyle}" Value="{Binding TodoContentTextSize, Mode=TwoWay}" ManipulationMode="TranslateX" ManipulationStarted="AppearanceSlider_ManipulationStarted" ManipulationCompleted="AppearanceSlider_ManipulationCompleted" ValueChanged="AppearanceSlider_ValueChanged" PointerPressed="AppearanceSlider_PointerPressed" PointerReleased="AppearanceSlider_PointerReleased" LostFocus="AppearanceSlider_LostFocus" />
+                                        </StackPanel>
+                                    </toolkit:SettingsCard>
                                     <toolkit:SettingsCard HorizontalContentAlignment="Right" svc:Localized.DescriptionKey="Settings.ContentEditor.PreviewLines.Description" svc:Localized.HeaderKey="Settings.ContentEditor.PreviewLines.Title">
                                         <ComboBox MinWidth="220" ItemsSource="{Binding AvailableItemPreviewLineCountOptions}" controls:SettingsComboBox.Value="{Binding TodoItemPreviewLineCount, Mode=TwoWay}" />
                                     </toolkit:SettingsCard>
@@ -2493,6 +2517,83 @@ svc:Localized.DescriptionKey="Settings.DefaultWidth.Description"
                     Style="{StaticResource SectionPanelStyle}">
                     <StackPanel Margin="0,8,0,0" Spacing="4">
                         <toolkit:SettingsCard
+                            HorizontalContentAlignment="Right"
+                            svc:Localized.DescriptionKey="Settings.DataBackup.AutomaticBackup.Description"
+                            svc:Localized.HeaderKey="Settings.DataBackup.AutomaticBackup.Title">
+                            <toolkit:SettingsCard.HeaderIcon>
+                                <FontIcon Glyph="&#xE823;" />
+                            </toolkit:SettingsCard.HeaderIcon>
+                            <ToggleSwitch OnContent="" OffContent="" MinWidth="0" IsOn="{Binding AutomaticBackupEnabled, Mode=TwoWay}" />
+                        </toolkit:SettingsCard>
+
+                        <toolkit:SettingsCard
+                            HorizontalContentAlignment="Right"
+                            svc:Localized.DescriptionKey="Settings.DataBackup.AutomaticBackupInterval.Description"
+                            svc:Localized.HeaderKey="Settings.DataBackup.AutomaticBackupInterval.Title">
+                            <toolkit:SettingsCard.HeaderIcon>
+                                <FontIcon Glyph="&#xE823;" />
+                            </toolkit:SettingsCard.HeaderIcon>
+                            <ComboBox
+                                MinWidth="150"
+                                IsEnabled="{Binding AutomaticBackupEnabled}"
+                                ItemsSource="{Binding AvailableAutomaticBackupIntervalOptions}"
+                                controls:SettingsComboBox.Value="{Binding SelectedAutomaticBackupIntervalMinutes, Mode=TwoWay}" />
+                        </toolkit:SettingsCard>
+
+                        <toolkit:SettingsCard
+                            HorizontalContentAlignment="Right"
+                            svc:Localized.DescriptionKey="Settings.DataBackup.AutomaticBackupRetention.Description"
+                            svc:Localized.HeaderKey="Settings.DataBackup.AutomaticBackupRetention.Title">
+                            <toolkit:SettingsCard.HeaderIcon>
+                                <FontIcon Glyph="&#xE823;" />
+                            </toolkit:SettingsCard.HeaderIcon>
+                            <ComboBox
+                                MinWidth="150"
+                                IsEnabled="{Binding AutomaticBackupEnabled}"
+                                ItemsSource="{Binding AvailableAutomaticBackupRetentionOptions}"
+                                controls:SettingsComboBox.Value="{Binding SelectedAutomaticBackupRetentionCount, Mode=TwoWay}" />
+                        </toolkit:SettingsCard>
+
+                        <toolkit:SettingsCard
+                            ContentAlignment="Vertical"
+                            HorizontalContentAlignment="Stretch"
+                            svc:Localized.DescriptionKey="Settings.DataBackup.AutomaticBackupDirectory.Description"
+                            svc:Localized.HeaderKey="Settings.DataBackup.AutomaticBackupDirectory.Title">
+                            <toolkit:SettingsCard.HeaderIcon>
+                                <FontIcon Glyph="&#xE8B7;" />
+                            </toolkit:SettingsCard.HeaderIcon>
+                            <StackPanel Spacing="8">
+                                <InfoBar
+                                    x:Name="AutomaticBackupFallbackInfoBar"
+                                    IsClosable="False"
+                                    IsOpen="True"
+                                    Severity="Warning"
+                                    Message="{Binding AutomaticBackupFallbackWarningText}"
+                                    Visibility="{Binding AutomaticBackupFallbackWarningVisibility}" />
+                                <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8">
+                                    <TextBox
+                                        Grid.Column="0"
+                                        IsReadOnly="True"
+                                        Text="{Binding AutomaticBackupDirectoryDisplayText, Mode=OneWay}" />
+                                    <Button
+                                        x:Name="ChangeAutomaticBackupDirectoryButton"
+                                        Grid.Column="1"
+                                        Click="ChangeAutomaticBackupDirectoryButton_Click"
+                                        Style="{StaticResource ActionButtonStyle}">
+                                        <TextBlock svc:Localized.Key="Settings.DataBackup.AutomaticBackupDirectory.Change" />
+                                    </Button>
+                                    <Button
+                                        x:Name="ResetAutomaticBackupDirectoryButton"
+                                        Grid.Column="2"
+                                        Click="ResetAutomaticBackupDirectoryButton_Click"
+                                        Style="{StaticResource ActionButtonStyle}">
+                                        <TextBlock svc:Localized.Key="Settings.DataBackup.AutomaticBackupDirectory.Reset" />
+                                    </Button>
+                                </Grid>
+                            </StackPanel>
+                        </toolkit:SettingsCard>
+
+                        <toolkit:SettingsCard
                             ContentAlignment="Vertical"
                             HorizontalContentAlignment="Stretch"
                             svc:Localized.DescriptionKey="Settings.DataBackup.Description"
@@ -2831,138 +2932,156 @@ svc:Localized.DescriptionKey="Settings.DefaultWidth.Description"
                             </StackPanel>
                         </toolkit:SettingsCard>
 
-                        <toolkit:SettingsExpander
+                        <Expander
+                            HorizontalAlignment="Stretch"
                             HorizontalContentAlignment="Stretch"
                             IsExpanded="True"
                             svc:Localized.DescriptionKey="Settings.Update.Description"
                             svc:Localized.HeaderKey="Settings.Update.Title">
-                            <toolkit:SettingsExpander.HeaderIcon>
-                                <FontIcon Glyph="&#xE895;" />
-                            </toolkit:SettingsExpander.HeaderIcon>
-                            <toolkit:SettingsExpander.Items>
-                                <toolkit:SettingsCard
-                                    HorizontalContentAlignment="Right"
+                            <Expander.Header>
+                                <Grid ColumnDefinitions="24,*" ColumnSpacing="16" MinHeight="44">
+                                    <FontIcon Glyph="&#xE895;" FontSize="24" VerticalAlignment="Center" />
+                                    <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                        <TextBlock svc:Localized.Key="Settings.Update.Title" TextWrapping="Wrap" />
+                                        <TextBlock
+                                            Style="{StaticResource SettingDescriptionTextStyle}"
+                                            svc:Localized.Key="Settings.Update.Description" />
+                                    </StackPanel>
+                                </Grid>
+                            </Expander.Header>
+                            <StackPanel Spacing="0">
+                                <Grid
+                                    Padding="40,10,0,10"
+                                    MinHeight="52"
+                                    ColumnDefinitions="*,Auto"
+                                    ColumnSpacing="16"
                                     svc:Localized.DescriptionKey="Settings.Update.AutoCheckDescription"
                                     svc:Localized.HeaderKey="Settings.Update.AutoCheck"
                                     Visibility="{Binding UpdateAutoCheckVisibility}">
+                                    <StackPanel VerticalAlignment="Center">
+                                        <TextBlock x:Name="UpdateAutoCheckLabel" svc:Localized.Key="Settings.Update.AutoCheck" TextWrapping="Wrap" />
+                                        <TextBlock
+                                            Style="{StaticResource SettingDescriptionTextStyle}"
+                                            svc:Localized.Key="Settings.Update.AutoCheckDescription" />
+                                    </StackPanel>
                                     <ToggleSwitch
+                                        Grid.Column="1"
+                                        VerticalAlignment="Center"
                                         OnContent=""
                                         OffContent=""
                                         MinWidth="0"
+                                        AutomationProperties.LabeledBy="{Binding ElementName=UpdateAutoCheckLabel}"
                                         IsOn="{Binding AutoCheckForUpdates, Mode=TwoWay}" />
-                                </toolkit:SettingsCard>
+                                </Grid>
 
-                                <toolkit:SettingsCard
-                                    HorizontalContentAlignment="Right"
+                                <Border Height="1" Background="{ThemeResource CardStrokeColorDefaultBrush}" />
+                                <Grid
+                                    Padding="40,10,0,10"
+                                    MinHeight="52"
+                                    ColumnDefinitions="*,Auto"
+                                    ColumnSpacing="16"
                                     svc:Localized.HeaderKey="Settings.Update.Status">
-                                    <StackPanel HorizontalAlignment="Right" Orientation="Horizontal" Spacing="12">
+                                    <StackPanel VerticalAlignment="Center" Spacing="2">
+                                        <TextBlock svc:Localized.Key="Settings.Update.Status" TextWrapping="Wrap" />
                                         <TextBlock
-                                            VerticalAlignment="Center"
                                             Style="{StaticResource SettingValueTextStyle}"
                                             Text="{Binding UpdateStatusText}"
-                                            TextWrapping="NoWrap" />
+                                            TextWrapping="Wrap" />
+                                    </StackPanel>
+                                    <Button
+                                        x:Name="OneClickUpdateButton"
+                                        Grid.Column="1"
+                                        VerticalAlignment="Center"
+                                        Click="OneClickUpdateButton_Click"
+                                        IsEnabled="{Binding IsOneClickActionEnabled}"
+                                        Style="{StaticResource ActionButtonStyle}">
+                                        <StackPanel Orientation="Horizontal" Spacing="8">
+                                            <FontIcon FontSize="14" Glyph="&#xE895;" />
+                                            <TextBlock Text="{Binding OneClickActionButtonText}" />
+                                        </StackPanel>
+                                    </Button>
+                                </Grid>
+
+                                <Border Height="1" Background="{ThemeResource CardStrokeColorDefaultBrush}" />
+                                <StackPanel Padding="40,10,0,0" Spacing="10" svc:Localized.HeaderKey="Settings.Update.Details">
+                                    <!-- A bounded native grid keeps the notes action reachable in every update state. -->
+                                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="16" MinHeight="34">
+                                        <TextBlock
+                                            svc:Localized.Key="Settings.Update.Details"
+                                            TextWrapping="Wrap"
+                                            VerticalAlignment="Center" />
                                         <Button
-                                            x:Name="OneClickUpdateButton"
-                                            Click="OneClickUpdateButton_Click"
-                                            IsEnabled="{Binding IsOneClickActionEnabled}"
-                                            Style="{StaticResource ActionButtonStyle}">
+                                            x:Name="ViewReleaseNotesButton"
+                                            Grid.Column="1"
+                                            Click="ViewReleaseNotesButton_Click"
+                                            IsEnabled="{Binding CanViewReleaseNotes}"
+                                            Style="{StaticResource ActionButtonStyle}"
+                                            Visibility="{Binding ReleaseNotesButtonVisibility}"
+                                            VerticalAlignment="Center">
                                             <StackPanel Orientation="Horizontal" Spacing="8">
-                                                <FontIcon FontSize="14" Glyph="&#xE895;" />
-                                                <TextBlock Text="{Binding OneClickActionButtonText}" />
+                                                <FontIcon FontSize="14" Glyph="&#xE8A5;" />
+                                                <TextBlock Text="{Binding ViewReleaseNotesButtonText}" TextWrapping="NoWrap" />
+                                            </StackPanel>
+                                        </Button>
+                                    </Grid>
+                                    <TextBlock
+                                        Style="{StaticResource SettingDescriptionTextStyle}"
+                                        Text="{Binding UpdateDetailText}"
+                                        TextWrapping="Wrap" />
+
+                                    <Button
+                                        HorizontalAlignment="Stretch"
+                                        HorizontalContentAlignment="Stretch"
+                                        Padding="14,10"
+                                        Click="ViewReleaseNotesButton_Click"
+                                        IsEnabled="{Binding CanViewReleaseNotes}"
+                                        AutomationProperties.Name="{Binding ViewReleaseNotesButtonText}"
+                                        Visibility="{Binding UpdateSummaryVisibility}">
+                                        <TextBlock
+                                            FontSize="13"
+                                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                            MaxLines="2"
+                                            Text="{Binding UpdateSummaryText}"
+                                            TextTrimming="CharacterEllipsis"
+                                            TextWrapping="Wrap" />
+                                    </Button>
+
+                                    <StackPanel Spacing="6" Visibility="{Binding UpdateProgressVisibility}">
+                                        <ProgressBar
+                                            Height="4"
+                                            Minimum="0"
+                                            Maximum="100"
+                                            IsIndeterminate="{Binding UpdateProgressIsIndeterminate}"
+                                            Value="{Binding UpdateProgressValue}" />
+                                        <TextBlock
+                                            HorizontalAlignment="Right"
+                                            Style="{StaticResource SettingDescriptionTextStyle}"
+                                            Text="{Binding UpdateProgressText}"
+                                            TextAlignment="Right"
+                                            TextWrapping="Wrap" />
+                                    </StackPanel>
+
+                                    <StackPanel
+                                        x:Name="UpdateActionsPanel"
+                                        HorizontalAlignment="Right"
+                                        Orientation="Horizontal"
+                                        Spacing="8"
+                                        Visibility="{Binding UpdateFallbackVisibility}">
+                                        <Button
+                                            x:Name="OpenManualUpdateDownloadButton"
+                                            Click="OpenManualUpdateDownloadButton_Click"
+                                            IsEnabled="{Binding CanOpenUpdateFallback}"
+                                            Style="{StaticResource ActionButtonStyle}"
+                                            ToolTipService.ToolTip="{Binding ManualUpdateDownloadUrl}">
+                                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                                <FontIcon FontSize="14" Glyph="&#xE774;" />
+                                                <TextBlock Text="{Binding UpdateFallbackActionText}" />
                                             </StackPanel>
                                         </Button>
                                     </StackPanel>
-                                </toolkit:SettingsCard>
-
-                                <toolkit:SettingsCard
-                                    HorizontalContentAlignment="Stretch"
-                                    svc:Localized.HeaderKey="Settings.Update.Details">
-                                    <StackPanel HorizontalAlignment="Stretch" Spacing="12">
-                                        <!-- Detail text (version · check time · channel) -->
-                                        <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
-                                            <TextBlock
-                                                Style="{StaticResource SettingDescriptionTextStyle}"
-                                                Text="{Binding UpdateDetailText}"
-                                                TextWrapping="Wrap"
-                                                VerticalAlignment="Center" />
-                                            <Button
-                                                x:Name="ViewReleaseNotesButton"
-                                                Grid.Column="1"
-                                                Click="ViewReleaseNotesButton_Click"
-                                                IsEnabled="{Binding CanViewReleaseNotes}"
-                                                Style="{StaticResource ActionButtonStyle}"
-                                                Visibility="{Binding ReleaseNotesButtonVisibility}"
-                                                VerticalAlignment="Center">
-                                                <StackPanel Orientation="Horizontal" Spacing="8">
-                                                    <FontIcon FontSize="14" Glyph="&#xE8A5;" />
-                                                    <TextBlock Text="{Binding ViewReleaseNotesButtonText}" TextWrapping="NoWrap" />
-                                                </StackPanel>
-                                            </Button>
-                                        </Grid>
-
-                                        <!-- Compact summary preview; full notes live in ReleaseNotesWindow. -->
-                                        <Border
-                                            Margin="0"
-                                            Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
-                                            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                                            BorderThickness="1"
-                                            CornerRadius="8"
-                                            Padding="14,10"
-                                            Visibility="{Binding UpdateSummaryVisibility}">
-                                            <TextBlock
-                                                FontSize="13"
-                                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                                MaxLines="2"
-                                                Text="{Binding UpdateSummaryText}"
-                                                TextTrimming="CharacterEllipsis"
-                                                TextWrapping="Wrap" />
-                                        </Border>
-
-                                        <!-- Progress bar -->
-                                        <Grid
-                                            MinWidth="220"
-                                            ColumnDefinitions="*,Auto"
-                                            ColumnSpacing="10"
-                                            Margin="0"
-                                            Visibility="{Binding UpdateProgressVisibility}">
-                                            <ProgressBar
-                                                Height="4"
-                                                Minimum="0"
-                                                Maximum="100"
-                                                IsIndeterminate="{Binding UpdateProgressIsIndeterminate}"
-                                                Value="{Binding UpdateProgressValue}" />
-                                            <TextBlock
-                                                Grid.Column="1"
-                                                MinWidth="128"
-                                                HorizontalAlignment="Right"
-                                                Style="{StaticResource SettingDescriptionTextStyle}"
-                                                Text="{Binding UpdateProgressText}"
-                                                TextAlignment="Right"
-                                                VerticalAlignment="Center" />
-                                        </Grid>
-
-                                        <!-- Fallback manual download (shown alongside progress or summary) -->
-                                        <StackPanel
-                                            x:Name="UpdateActionsPanel"
-                                            HorizontalAlignment="Right"
-                                            Orientation="Horizontal"
-                                            Spacing="8">
-                                            <Button
-                                                x:Name="OpenManualUpdateDownloadButton"
-                                                Click="OpenManualUpdateDownloadButton_Click"
-                                                IsEnabled="{Binding CanOpenUpdateFallback}"
-                                                Style="{StaticResource ActionButtonStyle}"
-                                                Visibility="{Binding UpdateFallbackVisibility}">
-                                                <StackPanel Orientation="Horizontal" Spacing="8">
-                                                    <FontIcon FontSize="14" Glyph="&#xE896;" />
-                                                    <TextBlock Text="{Binding UpdateFallbackActionText}" />
-                                                </StackPanel>
-                                            </Button>
-                                        </StackPanel>
-                                    </StackPanel>
-                                </toolkit:SettingsCard>
-                            </toolkit:SettingsExpander.Items>
-                        </toolkit:SettingsExpander>
+                                </StackPanel>
+                            </StackPanel>
+                        </Expander>
 
                         <toolkit:SettingsCard
                             HorizontalContentAlignment="Right"

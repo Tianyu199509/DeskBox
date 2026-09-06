@@ -1,0 +1,131 @@
+<?xml version="1.0" encoding="utf-8"?>
+<UserControl
+    x:Class="DeskBox.Controls.DesktopOrganizationPreviewCard"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <UserControl.Resources>
+        <Style x:Key="PreviewFileToggleStyle" TargetType="ToggleButton">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+            <Setter Property="VerticalContentAlignment" Value="Top" />
+            <Setter Property="UseSystemFocusVisuals" Value="True" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ToggleButton">
+                        <Border x:Name="TileBorder" Background="{TemplateBinding Background}"
+                                BorderBrush="Transparent" BorderThickness="1"
+                                CornerRadius="6">
+                            <VisualStateManager.VisualStateGroups>
+                                <VisualStateGroup x:Name="CommonStates">
+                                    <VisualState x:Name="Normal" />
+                                    <VisualState x:Name="PointerOver">
+                                        <VisualState.Setters>
+                                            <Setter Target="TileBorder.Background" Value="{ThemeResource SubtleFillColorSecondaryBrush}" />
+                                        </VisualState.Setters>
+                                    </VisualState>
+                                    <VisualState x:Name="Pressed">
+                                        <VisualState.Setters>
+                                            <Setter Target="TileBorder.Background" Value="{ThemeResource SubtleFillColorTertiaryBrush}" />
+                                        </VisualState.Setters>
+                                    </VisualState>
+                                    <VisualState x:Name="Disabled" />
+                                </VisualStateGroup>
+                            </VisualStateManager.VisualStateGroups>
+                            <ContentPresenter Content="{TemplateBinding Content}" />
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style x:Key="GroupSelectionToggleStyle" TargetType="CheckBox">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+            <Setter Property="UseSystemFocusVisuals" Value="True" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="CheckBox">
+                        <Grid ColumnDefinitions="Auto,*">
+                            <Border x:Name="SelectionBox" Width="20" Height="20" CornerRadius="4"
+                                    BorderBrush="{ThemeResource ControlStrokeColorDefaultBrush}" BorderThickness="1"
+                                    Background="Transparent">
+                                <FontIcon x:Name="CheckIcon" Glyph="&#xE73E;" FontSize="11"
+                                          HorizontalAlignment="Center" VerticalAlignment="Center"
+                                          Visibility="Collapsed" Foreground="{ThemeResource TextOnAccentFillColorPrimaryBrush}" />
+                            </Border>
+                            <ContentPresenter Grid.Column="1" Margin="8,0,0,0"
+                                              VerticalAlignment="Center"
+                                              HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                              Content="{TemplateBinding Content}" />
+                            <VisualStateManager.VisualStateGroups>
+                                <VisualStateGroup x:Name="CheckStates">
+                                    <VisualState x:Name="Unchecked" />
+                                    <VisualState x:Name="Checked">
+                                        <VisualState.Setters>
+                                            <Setter Target="SelectionBox.Background" Value="{ThemeResource AccentFillColorDefaultBrush}" />
+                                            <Setter Target="CheckIcon.Visibility" Value="Visible" />
+                                        </VisualState.Setters>
+                                    </VisualState>
+                                    <VisualState x:Name="Indeterminate">
+                                        <VisualState.Setters>
+                                            <Setter Target="SelectionBox.Background" Value="{ThemeResource AccentFillColorDefaultBrush}" />
+                                            <Setter Target="CheckIcon.Visibility" Value="Visible" />
+                                            <Setter Target="CheckIcon.Opacity" Value="0.6" />
+                                        </VisualState.Setters>
+                                    </VisualState>
+                                </VisualStateGroup>
+                            </VisualStateManager.VisualStateGroups>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </UserControl.Resources>
+    <Grid>
+        <SystemBackdropElement x:Name="MaterialSurface" IsHitTestVisible="False" />
+        <Border x:Name="FallbackSurface" IsHitTestVisible="False" />
+        <Border x:Name="CardOutline" Height="360"
+                Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1">
+            <Grid RowDefinitions="Auto,*,Auto">
+                <Border x:Name="HeaderDivider" BorderThickness="0,0,0,1" Padding="12,8">
+                    <Grid RowDefinitions="Auto,Auto" RowSpacing="6" ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                        <Grid Grid.Row="0" ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                            <TextBlock x:Name="ReadOnlyTitleText" VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
+                                       FontWeight="SemiBold" Visibility="Collapsed" />
+                            <CheckBox x:Name="GroupCheckBox" MinWidth="0" HorizontalAlignment="Stretch"
+                                      Style="{StaticResource GroupSelectionToggleStyle}"
+                                      Checked="GroupCheckBox_Changed" Unchecked="GroupCheckBox_Changed">
+                                <TextBlock x:Name="TitleText" TextTrimming="CharacterEllipsis" />
+                            </CheckBox>
+                        </Grid>
+                        <Border Grid.Row="0" Grid.Column="1" Background="{ThemeResource SubtleFillColorSecondaryBrush}"
+                                CornerRadius="10" Padding="8,2" VerticalAlignment="Center">
+                            <TextBlock x:Name="CountText" FontSize="12" VerticalAlignment="Center" />
+                        </Border>
+                        <Button x:Name="DestinationButton" Grid.Row="1" Grid.ColumnSpan="2" MaxWidth="260" MinWidth="0" MinHeight="32"
+                                FontSize="12" HorizontalAlignment="Left" HorizontalContentAlignment="Stretch">
+                            <TextBlock x:Name="DestinationText" TextTrimming="CharacterEllipsis" />
+                            <Button.Flyout>
+                                <MenuFlyout x:Name="DestinationFlyout" Placement="Bottom" />
+                            </Button.Flyout>
+                        </Button>
+                        <TextBlock x:Name="GroupDescriptionText" Grid.Row="1" Grid.ColumnSpan="2" FontSize="12" TextWrapping="Wrap"
+                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}" Visibility="Collapsed" />
+                    </Grid>
+                </Border>
+                <ScrollViewer x:Name="ItemsScrollViewer" Grid.Row="1" Margin="8,6"
+                              HorizontalScrollBarVisibility="Disabled"
+                              VerticalScrollBarVisibility="Auto" VerticalScrollMode="Auto"
+                              HorizontalContentAlignment="Stretch" Padding="2,0,2,0">
+                    <Grid x:Name="ItemsPanel" Margin="2,4" SizeChanged="ItemsPanel_SizeChanged" />
+                </ScrollViewer>
+                <Button x:Name="ExpandButton" Grid.Row="2" HorizontalAlignment="Stretch"
+                        Background="Transparent" BorderThickness="0" FontSize="12"
+                        Click="ExpandButton_Click" Visibility="Collapsed" />
+            </Grid>
+        </Border>
+    </Grid>
+</UserControl>

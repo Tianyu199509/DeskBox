@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.Globalization;
+using System.Text;
 using System.Text.RegularExpressions;
 using CommunityToolkit.Mvvm.ComponentModel;
 using DeskBox.Contracts;
@@ -770,11 +771,75 @@ public sealed partial class GlanceWidgetViewModel : ObservableObject, IDisposabl
     {
         CultureInfo culture = GetCulture();
         DateTime now = DateTime.Now;
-        bool uses24Hour = culture.DateTimeFormat.ShortTimePattern.Contains('H');
-        TimeText = now.ToString(uses24Hour ? "HH:mm" : "h:mm", culture);
+        TimeText = FormatTimeText(now, _settings.TimeFormat, culture);
         DateText = FormatDateText(now, culture, _settings.ShowYear);
         CompactCalendarDateText = FormatCompactCalendarDateText(now, culture);
         WeekdayText = now.ToString("dddd", culture);
+    }
+
+    internal static string FormatTimeText(
+        DateTime date,
+        GlanceTimeFormatMode mode,
+        CultureInfo displayCulture,
+        CultureInfo? systemCulture = null)
+    {
+        ArgumentNullException.ThrowIfNull(displayCulture);
+        CultureInfo timeCulture = mode == GlanceTimeFormatMode.FollowSystem
+            ? systemCulture ?? CultureInfo.CurrentCulture
+            : displayCulture;
+        string pattern = mode switch
+        {
+            GlanceTimeFormatMode.FollowSystem => RemoveAmPmDesignator(
+                timeCulture.DateTimeFormat.ShortTimePattern),
+            GlanceTimeFormatMode.Hour24 => "HH:mm",
+            GlanceTimeFormatMode.Hour12 => "h:mm",
+            _ => RemoveAmPmDesignator(
+                CultureInfo.CurrentCulture.DateTimeFormat.ShortTimePattern)
+        };
+        return date.ToString(pattern, timeCulture);
+    }
+
+    private static string RemoveAmPmDesignator(string pattern)
+    {
+        StringBuilder result = new(pattern.Length);
+        for (int index = 0; index < pattern.Length; index++)
+        {
+            char current = pattern[index];
+            if (current is '\'' or '"')
+            {
+                char quote = current;
+                result.Append(current);
+                while (++index < pattern.Length)
+                {
+                    result.Append(pattern[index]);
+                    if (pattern[index] == quote)
+                    {
+                        break;
+                    }
+                }
+                continue;
+            }
+
+            if (current == '\\' && index + 1 < pattern.Length)
+            {
+                result.Append(current);
+                result.Append(pattern[++index]);
+                continue;
+            }
+
+            if (current == 't')
+            {
+                while (index + 1 < pattern.Length && pattern[index + 1] == 't')
+                {
+                    index++;
+                }
+                continue;
+            }
+
+            result.Append(current);
+        }
+
+        return result.ToString().Trim();
     }
 
     internal static string FormatCompactCalendarDateText(

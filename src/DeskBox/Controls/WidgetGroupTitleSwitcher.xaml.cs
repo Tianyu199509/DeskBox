@@ -14,9 +14,9 @@ using Windows.UI;
 namespace DeskBox.Controls;
 
 /// <summary>
-/// A title-bar-local selector for a widget group's committed active member.
-/// The host owns switching and calls <see cref="SetPresentation"/> only after
-/// the content commit, so the title can never get ahead of the visible member.
+/// A title-bar-local selector for a widget group. The host owns content commits;
+/// native tabs retain the requested selection until it commits or fails, while
+/// the stacked title follows the committed <see cref="SetPresentation"/>.
 /// </summary>
 public sealed partial class WidgetGroupTitleSwitcher : UserControl
 {
@@ -26,6 +26,7 @@ public sealed partial class WidgetGroupTitleSwitcher : UserControl
     private const double DetachLongPressMovementTolerance = 12;
     private const double MaximumTitleWidth = 132;
     private const double IdentitySpacing = 5;
+    private double _titleBarContentHeight = WidgetTitleBarMetricsCalculator.MinimumTitleContentHeight;
 
     private WidgetGroupPresentation? _presentation;
     private IdentitySnapshot? _displayedIdentity;
@@ -33,7 +34,6 @@ public sealed partial class WidgetGroupTitleSwitcher : UserControl
     private long _tabHoverSwitchGeneration;
     private string? _hoveredTabMemberId;
     private CancellationTokenSource? _tabHoverSwitchCancellation;
-    private bool _isRebuildingTabs;
     private string? _draggingMemberId;
     private string? _pendingDetachMemberId;
     private UIElement? _detachLongPressSource;
@@ -106,6 +106,7 @@ public sealed partial class WidgetGroupTitleSwitcher : UserControl
     {
         InitializeComponent();
         RegisterSelectorPointerHandlers();
+        RegisterTabPointerHandlers();
         RegisterKeyboardAccelerators();
         ApplyWheelFeedbackAccent();
         CurrentTitle.RegisterPropertyChangedCallback(
@@ -117,10 +118,16 @@ public sealed partial class WidgetGroupTitleSwitcher : UserControl
                 {
                     UpdateIdentityViewportWidth(identity);
                 }
+                SynchronizeTabs();
             });
         ApplyDisplayMode();
         ApplyNavigationStyle();
-        Unloaded += (_, _) => CancelDetachLongPress();
+        Unloaded += (_, _) =>
+        {
+            CancelDetachLongPress();
+            CancelTabInteraction();
+            CancelAllHoverSwitches();
+        };
         Visibility = Visibility.Collapsed;
     }
 
@@ -215,6 +222,34 @@ public sealed partial class WidgetGroupTitleSwitcher : UserControl
     /// <paramref name="animateIdentity"/> only when the host has atomically
     /// committed the corresponding content.
     /// </summary>
+    internal void ApplyTitleBarMetrics(double contentHeight, double titleFontSize)
+    {
+        CurrentTitle.FontSize = titleFontSize;
+        OutgoingTitle.FontSize = titleFontSize;
+        foreach (GroupTab row in _tabs.Values)
+        {
+            row.Title.FontSize = titleFontSize;
+        }
+        if (_titleBarContentHeight == contentHeight)
+        {
+            return;
+        }
+
+        _titleBarContentHeight = contentHeight;
+        Root.MinHeight = contentHeight;
+        SelectorButton.MinHeight = contentHeight;
+        TabsView.MinHeight = contentHeight;
+        foreach (GroupTab row in _tabs.Values)
+        {
+            row.Tab.MinHeight = contentHeight;
+        }
+    }
+
+    internal void SetTabStripMargin(Thickness margin)
+    {
+        TabsView.Margin = margin;
+    }
+
     public void SetPresentation(
         WidgetGroupPresentation? presentation,
         bool animateIdentity = false,
@@ -240,7 +275,7 @@ public sealed partial class WidgetGroupTitleSwitcher : UserControl
                 OutgoingIcon,
                 OutgoingTitle,
                 null);
-            TabsPanel.Children.Clear();
+            ClearTabs();
             SetPositionRail(CurrentPositionRailLayer, null);
             SetPositionRail(OutgoingPositionRailLayer, null);
             PositionRailViewport.Visibility = Visibility.Collapsed;
@@ -308,11 +343,12 @@ public sealed partial class WidgetGroupTitleSwitcher : UserControl
 
         MenuFlyout flyout = CreateMembersFlyout();
         _openFlyout = flyout;
-        flyout.ShowAt(anchor ?? SelectorButton);
+        flyout.ShowAt(anchor ?? (UsesTabs ? TabsView : SelectorButton));
     }
 
     public void SetMemberLoading(string? widgetId, bool isLoading)
     {
+        SetTabLoading(widgetId, isLoading);
         if (!isLoading ||
             string.IsNullOrWhiteSpace(widgetId) ||
             _presentation is null)
@@ -350,7 +386,7 @@ public sealed partial class WidgetGroupTitleSwitcher : UserControl
         if (dependencyObject is WidgetGroupTitleSwitcher switcher)
         {
             switcher.ApplyDisplayMode();
-            switcher.RebuildTabs();
+            switcher.SynchronizeTabs();
         }
     }
 
@@ -372,7 +408,7 @@ public sealed partial class WidgetGroupTitleSwitcher : UserControl
         {
             switcher.ApplyWheelFeedbackAccent();
             switcher.ApplyDisplayMode();
-            switcher.RebuildTabs();
+            switcher.SynchronizeTabs();
         }
     }
 
@@ -393,19 +429,28 @@ public sealed partial class WidgetGroupTitleSwitcher : UserControl
                 allowFollowDefault: false),
             WidgetGroupNavigationStyles.Tabs,
             StringComparison.Ordinal);
-        SelectorButton.Visibility = Visibility.Visible;
+        SelectorButton.Visibility = useTabs ? Visibility.Collapsed : Visibility.Visible;
         // Detach drags are started explicitly after the long-press threshold;
         // leaving native CanDrag enabled would reintroduce eager drag starts.
         SelectorButton.CanDrag = false;
         CapsuleSurface.Visibility = useTabs
             ? Visibility.Collapsed
             : Visibility.Visible;
-        TabsPanel.Visibility = useTabs && _presentation is not null
+        TabsView.Visibility = useTabs && _presentation is not null
             ? Visibility.Visible
             : Visibility.Collapsed;
+        TitleInteractionChrome.Visibility = useTabs
+            ? Visibility.Collapsed
+            : Visibility.Visible;
+        UpdateInteractionChrome(animate: false);
         if (useTabs)
         {
-            RebuildTabs();
+            CancelDetachLongPress();
+            SynchronizeTabs();
+        }
+        else
+        {
+            CancelTabInteraction();
         }
     }
 
@@ -534,190 +579,9 @@ public sealed partial class WidgetGroupTitleSwitcher : UserControl
         }
     }
 
-    private void RebuildTabs()
-    {
-        _isRebuildingTabs = true;
-        TabsPanel.Children.Clear();
-        if (_presentation is null ||
-            !string.Equals(
-                WidgetGroupNavigationStyles.Normalize(
-                    NavigationStyle,
-                    allowFollowDefault: false),
-                WidgetGroupNavigationStyles.Tabs,
-                StringComparison.Ordinal))
-        {
-            CancelAllHoverSwitches();
-            _isRebuildingTabs = false;
-            return;
-        }
-
-        string displayMode = WidgetGroupTitleDisplayModes.Normalize(
-            DisplayMode,
-            allowFollowDefault: false);
-        bool wantsIcon = displayMode is
-            WidgetGroupTitleDisplayModes.IconAndText or
-            WidgetGroupTitleDisplayModes.IconOnly;
-        bool showIcon =
-            wantsIcon &&
-            WidgetTitleIconModeNames.NormalizeMode(TitleIconMode) is not
-                WidgetTitleIconMode.Hidden;
-        bool showText = displayMode is
-            WidgetGroupTitleDisplayModes.IconAndText or
-            WidgetGroupTitleDisplayModes.TextOnly ||
-            (displayMode == WidgetGroupTitleDisplayModes.IconOnly &&
-             !showIcon);
-
-        foreach (WidgetGroupMemberPresentation member in
-                 _presentation.Members)
-        {
-            bool active = string.Equals(
-                member.WidgetId,
-                _presentation.ActiveMemberId,
-                StringComparison.Ordinal);
-            var identity = new StackPanel
-            {
-                Orientation = Orientation.Horizontal,
-                Spacing = 5,
-                VerticalAlignment = VerticalAlignment.Center
-            };
-            if (showIcon)
-            {
-                identity.Children.Add(new WidgetTitleIcon
-                {
-                    Glyph = member.Glyph,
-                    IconKind = member.IconKind,
-                    Mode = TitleIconMode,
-                    AccentColor = TitleIconAccentColor,
-                    IconSize = IconSize,
-                    IsHitTestVisible = false
-                });
-            }
-            if (showText)
-            {
-                identity.Children.Add(new TextBlock
-                {
-                    Text = member.Name,
-                    MaxWidth = 84,
-                    FontSize = CurrentTitle.FontSize,
-                    FontWeight = Microsoft.UI.Text.FontWeights.Normal,
-                    TextTrimming = TextTrimming.CharacterEllipsis,
-                    VerticalAlignment = VerticalAlignment.Center,
-                    IsHitTestVisible = false
-                });
-            }
-
-            var indicator = new Border
-            {
-                Height = 2,
-                Width = 10,
-                Margin = new Thickness(0, 0, 0, 1),
-                HorizontalAlignment = HorizontalAlignment.Center,
-                VerticalAlignment = VerticalAlignment.Bottom,
-                Background = active
-                    ? CreateAccentBrush()
-                    : new SolidColorBrush(Colors.Transparent),
-                CornerRadius = new CornerRadius(1),
-                IsHitTestVisible = false
-            };
-            var content = new Grid
-            {
-                MinWidth = showText ? 44 : 30,
-                MinHeight = 28,
-                Padding = new Thickness(7, 0, 7, 1)
-            };
-            content.Children.Add(identity);
-            content.Children.Add(indicator);
-
-            var surface = new Border
-            {
-                Background = new SolidColorBrush(Colors.Transparent),
-                CornerRadius = new CornerRadius(7),
-                Child = content
-            };
-            var tab = new Button
-            {
-                MinWidth = 0,
-                CanDrag = false,
-                Padding = new Thickness(0),
-                Background = new SolidColorBrush(Colors.Transparent),
-                BorderThickness = new Thickness(0),
-                Content = surface,
-                Tag = member.WidgetId,
-                Style = (Style)Resources[
-                    "GroupTitleSelectorButtonStyle"]
-            };
-            tab.DragStarting += GroupTitle_DragStarting;
-            tab.DropCompleted += GroupTitle_DropCompleted;
-            tab.AddHandler(
-                UIElement.PointerPressedEvent,
-                new PointerEventHandler(GroupTitle_PointerPressed),
-                handledEventsToo: true);
-            tab.AddHandler(
-                UIElement.PointerMovedEvent,
-                new PointerEventHandler(GroupTitle_PointerMoved),
-                handledEventsToo: true);
-            tab.AddHandler(
-                UIElement.PointerReleasedEvent,
-                new PointerEventHandler(GroupTitle_PointerReleased),
-                handledEventsToo: true);
-            tab.AddHandler(
-                UIElement.PointerCanceledEvent,
-                new PointerEventHandler(GroupTitle_PointerCanceled),
-                handledEventsToo: true);
-            tab.AddHandler(
-                UIElement.PointerCaptureLostEvent,
-                new PointerEventHandler(GroupTitle_PointerCaptureLost),
-                handledEventsToo: true);
-            string memberId = member.WidgetId;
-            tab.Click += (_, _) =>
-            {
-                if (!active &&
-                    DateTimeOffset.UtcNow >
-                    _suppressGroupTitleClickUntil)
-                {
-                    MemberInvoked?.Invoke(
-                        this,
-                        new WidgetGroupMemberEventArgs(
-                            memberId,
-                            WidgetGroupSwitchOrigin.Picker));
-                }
-            };
-            tab.PointerEntered += (_, _) =>
-            {
-                if (!TabsPanel.Children.Contains(tab))
-                {
-                    return;
-                }
-
-                surface.Opacity = active ? 1 : 0.78;
-                if (!active && HoverSwitchEnabled)
-                {
-                    BeginTabHoverSwitch(memberId);
-                }
-            };
-            tab.PointerExited += (_, _) =>
-            {
-                if (!TabsPanel.Children.Contains(tab))
-                {
-                    return;
-                }
-
-                surface.Opacity = 1;
-                if (!_isRebuildingTabs)
-                {
-                    CancelTabHoverSwitch(memberId);
-                }
-            };
-            ToolTipService.SetToolTip(tab, member.Name);
-            TabsPanel.Children.Add(tab);
-        }
-
-        _isRebuildingTabs = false;
-    }
-
     private async void BeginTabHoverSwitch(string memberId)
     {
-        if (_draggingMemberId is not null)
+        if (_draggingMemberId is not null || IsTabInteractionBusy)
         {
             return;
         }
@@ -737,6 +601,7 @@ public sealed partial class WidgetGroupTitleSwitcher : UserControl
         }
 
         if (generation != _tabHoverSwitchGeneration ||
+            IsTabInteractionBusy ||
             !HoverSwitchEnabled ||
             !string.Equals(
                 _hoveredTabMemberId,
@@ -911,7 +776,7 @@ public sealed partial class WidgetGroupTitleSwitcher : UserControl
         string? memberId =
             (source as FrameworkElement)?.Tag as string ??
             _presentation?.ActiveMemberId;
-        if (!point.Properties.IsLeftButtonPressed ||
+        if (UsesTabs || !point.Properties.IsLeftButtonPressed ||
             _isStartingDetachDrag ||
             _presentation is null ||
             _presentation.Members.Count < 2 ||

@@ -56,7 +56,8 @@ public sealed partial class ContentWidgetWindow
                 TrayAnimation.RestoreVisualState();
                 TrayAnimation.RestoreWindowPosition();
                 NotifyVisibleContentRevealCompleted();
-            });
+            },
+            failed: NotifyVisibleContentRevealCompleted);
     }
 
     public WidgetTrayBatchAnimationEntry? BeginSharedTrayHideAnimation()
@@ -95,7 +96,8 @@ public sealed partial class ContentWidgetWindow
                 {
                     CompleteTrayHideAnimation();
                 }
-            });
+            },
+            failed: CompleteTrayHideAnimation);
     }
 
     private void PlayTrayRaiseAnimation()
@@ -132,7 +134,8 @@ public sealed partial class ContentWidgetWindow
                 TrayAnimation.RestoreVisualState();
                 TrayAnimation.RestoreWindowPosition();
                 NotifyVisibleContentRevealCompleted();
-            });
+            },
+            failed: NotifyVisibleContentRevealCompleted);
     }
 
     private void PlayTrayRaiseAnimationAfterFirstFrame()
@@ -174,7 +177,8 @@ public sealed partial class ContentWidgetWindow
                 {
                     completed();
                 }
-            });
+            },
+            failed: CompleteTrayHideAnimation);
     }
 
     private void CompleteTrayHideAnimation()
@@ -196,7 +200,8 @@ public sealed partial class ContentWidgetWindow
         NotifyCompactHostVisibilityChanged(false);
         TrayAnimation.RevealWindowForTrayShow();
         TrayAnimation.RestoreVisualState();
-        TrayAnimation.RestoreWindowPosition();
+        try { TrayAnimation.RestoreWindowPosition(); }
+        catch (Exception ex) { LogTrayWindow($"CompleteHide position restore failed: {ex.Message}"); }
         _contentHost.OnDeactivated();
         NotifyVisibleContentSuspended();
         LogTrayWindow("CompleteHide");

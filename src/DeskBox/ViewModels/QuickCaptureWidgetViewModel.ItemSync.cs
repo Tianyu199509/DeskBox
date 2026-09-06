@@ -187,6 +187,7 @@ public sealed partial class QuickCaptureWidgetViewModel
                 TextSize,
                 IconSize,
                 SearchText,
+                contentTextSize: ContentTextSize,
                 showPinnedSortControls: canShowPinnedSortControls,
                 canMovePinnedUp: canMoveUp,
                 canMovePinnedDown: canMoveDown);
@@ -194,7 +195,7 @@ public sealed partial class QuickCaptureWidgetViewModel
         }
 
         viewModel.Update(model);
-        viewModel.UpdateAppearance(TextSize, IconSize);
+        viewModel.UpdateAppearance(TextSize, IconSize, ContentTextSize);
         viewModel.UpdateSearchText(SearchText);
         viewModel.UpdatePinnedSortState(canShowPinnedSortControls, canMoveUp, canMoveDown);
         return viewModel;

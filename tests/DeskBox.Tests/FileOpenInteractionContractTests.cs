@@ -6,6 +6,63 @@ namespace DeskBox.Tests;
 public sealed class FileOpenInteractionContractTests
 {
     [Fact]
+    public void ShortcutTargetProbe_TreatsUncHostRootAsUnverifiable()
+    {
+        string shortcutPath = Path.Combine(
+            Path.GetTempPath(),
+            $"DeskBox.Tests-{Guid.NewGuid():N}.lnk");
+        File.WriteAllText(shortcutPath, "placeholder");
+        try
+        {
+            ShortcutTargetProbeResult result = ShortcutTargetProbe.Probe(
+                shortcutPath,
+                @"\\10.0.10.8");
+
+            Assert.Equal(ShortcutTargetKind.Unc, result.Kind);
+            Assert.Equal(ShortcutTargetStatus.Unverifiable, result.Status);
+            Assert.False(result.IsBroken);
+        }
+        finally
+        {
+            File.Delete(shortcutPath);
+        }
+    }
+
+    [Fact]
+    public void ShortcutTargetProbe_OnlyMarksMissingLocalTargetsAsBroken()
+    {
+        string shortcutPath = Path.Combine(
+            Path.GetTempPath(),
+            $"DeskBox.Tests-{Guid.NewGuid():N}.lnk");
+        File.WriteAllText(shortcutPath, "placeholder");
+        try
+        {
+            ShortcutTargetProbeResult result = ShortcutTargetProbe.Probe(
+                shortcutPath,
+                Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N")));
+
+            Assert.Equal(ShortcutTargetKind.LocalFileSystem, result.Kind);
+            Assert.Equal(ShortcutTargetStatus.Missing, result.Status);
+            Assert.True(result.IsBroken);
+        }
+        finally
+        {
+            File.Delete(shortcutPath);
+        }
+    }
+
+    [Fact]
+    public void ShortcutTargetProbe_ExpandsEnvironmentVariablesBeforeClassification()
+    {
+        string target = Environment.GetEnvironmentVariable("TEMP") ??
+            Path.GetTempPath();
+        ShortcutTargetKind kind = ShortcutTargetProbe.Classify("%TEMP%");
+
+        Assert.Equal(ShortcutTargetKind.LocalFileSystem, kind);
+        Assert.True(Path.IsPathFullyQualified(target));
+    }
+
+    [Fact]
     public async Task OpenItemAsync_EmptyTargetReturnsFailureWithoutShellDispatch()
     {
         var item = new WidgetItem
@@ -56,6 +113,35 @@ public sealed class FileOpenInteractionContractTests
         Assert.Contains("Widget.OpenItemDispatched", opening, StringComparison.Ordinal);
         Assert.Contains("OpenItem.DuplicateSuppressed", opening, StringComparison.Ordinal);
         Assert.Contains("await Task.Yield()", opening, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void FolderShortcutNavigation_ClosesStackPopoverOnlyBeforeRealReplacement()
+    {
+        string navigation = File.ReadAllText(TestPaths.FromRepository(
+            "src/DeskBox/Controls/WidgetContents/FileSurfaceContent.Navigation.cs"));
+
+        int close = navigation.IndexOf(
+            "CloseStackPopover();",
+            StringComparison.Ordinal);
+        int callback = navigation.IndexOf(
+            "beforeItemsReplaced: () =>",
+            StringComparison.Ordinal);
+
+        Assert.True(callback >= 0);
+        Assert.True(close > callback);
+        Assert.Contains(
+            "external or unverifiable",
+            navigation,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "!isExternalFolderShortcut",
+            navigation,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "ShortcutTargetKind.NetworkDrive",
+            navigation,
+            StringComparison.Ordinal);
     }
 
     [Fact]

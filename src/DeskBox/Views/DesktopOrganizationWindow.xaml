@@ -8,7 +8,7 @@
 
     <Grid
         x:Name="RootGrid"
-        Background="Transparent"
+        Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"
         KeyDown="RootGrid_KeyDown">
         <Grid.RowDefinitions>
             <RowDefinition Height="48" />
@@ -32,7 +32,9 @@
         </Grid>
 
         <Border
+            x:Name="ContentLayer"
             Grid.Row="1"
+            Background="{ThemeResource LayerFillColorDefaultBrush}"
             BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
             BorderThickness="0,1,0,0">
             <controls:DesktopOrganizationTaskView x:Name="TaskView">

@@ -41,8 +41,17 @@ public sealed partial class FileSurfaceContent
         bool isStackPopoverItem = IsItemInStackPopover(item);
         bool isFolderShortcut =
             FolderNavigationPathPolicy.IsFolderShortcutCandidate(item);
+        bool isExternalFolderShortcut =
+            isFolderShortcut &&
+            !string.IsNullOrWhiteSpace(item.TargetPath) &&
+            ShortcutTargetProbe.Classify(item.TargetPath) is
+                ShortcutTargetKind.Unc or
+                ShortcutTargetKind.NetworkDrive or
+                ShortcutTargetKind.UriOrShellNamespace or
+                ShortcutTargetKind.Unknown;
         bool shouldNavigateInside =
             ViewModel.IsEmbeddedFolderNavigationEnabled &&
+            !isExternalFolderShortcut &&
             (isFolderShortcut || (!isStackPopoverItem && item.IsFolder));
         if (!shouldNavigateInside)
         {
@@ -55,19 +64,24 @@ public sealed partial class FileSurfaceContent
             return;
         }
 
-        if (isStackPopoverItem && isFolderShortcut)
-        {
-            // The upcoming item replacement belongs to the main surface. Hide
-            // the independent popover host before its member source changes.
-            CloseStackPopover();
-        }
-
         string? previousFolderPath = ViewModel.CurrentFolderPath;
         bool navigated = await RunFolderNavigationOperationAsync(
             beforeItemsReplaced => isFolderShortcut
                 ? ViewModel.NavigateIntoFolderShortcutAsync(
                     item,
-                    beforeItemsReplaced)
+                    beforeItemsReplaced: () =>
+                    {
+                        if (isStackPopoverItem)
+                        {
+                            // Only hide the independent popover when the
+                            // embedded navigation is about to replace the
+                            // main surface. An external or unverifiable
+                            // shortcut remains a normal Shell-open item.
+                            CloseStackPopover();
+                        }
+
+                        beforeItemsReplaced();
+                    })
                 : ViewModel.NavigateIntoFolderAsync(
                     item,
                     beforeItemsReplaced),

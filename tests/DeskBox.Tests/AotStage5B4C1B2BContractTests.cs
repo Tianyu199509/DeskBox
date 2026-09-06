@@ -213,7 +213,7 @@ public sealed class AotStage5B4C1B2BContractTests
     public void ReportAndRoadmap_RecordCompletedBoundaryAndNextPickerStage()
     {
         string report = ReadRepositoryFile(
-            "docs/architecture/aot-stage-5b-4c1b2b-report.md");
+            "docs/architecture/stage-reports/aot-stage-5b-4c1b2b-report.md");
         string roadmap = ReadRepositoryFile(
             "docs/architecture/rust-native-aot-roadmap.md");
 

@@ -42,11 +42,10 @@ public sealed class FolderPickerModernizationContractTests
         var expectedCalls = new Dictionary<string, int>
         {
             ["src/DeskBox/App.Tray.cs"] = 1,
-            ["src/DeskBox/Controls/DesktopOrganizationTaskView.Actions.cs"] = 1,
             ["src/DeskBox/Services/JumpListService.cs"] = 1,
             ["src/DeskBox/Views/OnboardingWindow.Storage.cs"] = 1,
             ["src/DeskBox/Views/SettingsSections/GlanceWidgetSettingsSection.xaml.cs"] = 1,
-            ["src/DeskBox/Views/SettingsWindow.Maintenance.cs"] = 2,
+            ["src/DeskBox/Views/SettingsWindow.Maintenance.cs"] = 3,
             ["src/DeskBox/Views/SettingsWindow.StorageAndUpdates.cs"] = 1
         };
 

@@ -53,7 +53,7 @@ public sealed class JsonSerializationBaselineContractTests : IDisposable
                 Path = RepositoryRelativePath(path),
                 Count = Regex.Matches(
                     File.ReadAllText(path),
-                    @"JsonSerializer\.(?:Serialize|Deserialize)(?:Async)?\b").Count
+                    @"JsonSerializer\.(?:SerializeToUtf8Bytes|Serialize|Deserialize)(?:Async)?\b").Count
             })
             .Where(item => item.Count > 0)
             .ToDictionary(item => item.Path, item => item.Count, StringComparer.Ordinal);

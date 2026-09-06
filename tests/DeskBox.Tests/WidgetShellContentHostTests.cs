@@ -256,7 +256,6 @@ public sealed class WidgetShellContentHostTests
             "appearance:second",
             "deactivate:second",
             "rollback:first",
-            "appearance:first",
             "dispose:second"
         ], calls);
     }

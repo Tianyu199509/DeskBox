@@ -237,7 +237,7 @@ public sealed class OnboardingExperienceTests
             "src/DeskBox/Models/AppSettings.cs"));
         string userGuide = File.ReadAllText(Path.Combine(
             root,
-            "docs/user-guide/01-getting-started.md"));
+            "docs/articles/15-getting-started.md"));
 
         Assert.Contains("ManagedDropAction { get; set; } = \"Move\"", settingsModel, StringComparison.Ordinal);
         Assert.Contains("默认拖入行为是移动", userGuide, StringComparison.Ordinal);

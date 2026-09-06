@@ -119,6 +119,7 @@ public partial class App : Application
     private bool _externalActivationHandling;
     private DateTimeOffset? _lastBareExternalActivationAtUtc;
     private readonly bool _processStartupLaunchDetected;
+    private Microsoft.UI.Xaml.DispatcherTimer? _automaticBackupTimer;
 
     public static new App Current => (App)Application.Current;
 
@@ -247,8 +248,9 @@ public partial class App : Application
 
         SettingsService = Services.GetRequiredService<SettingsService>();
         SettingsService.PersistenceFailed += OnSettingsPersistenceFailed;
-        _ = LegacySearchIndexCleanupService.TryCleanup();
         DataBackupService = Services.GetRequiredService<DeskBoxDataBackupService>();
+        DataBackupService.AutomaticSnapshotFallbackDetected += OnAutomaticBackupFallbackDetected;
+        _ = LegacySearchIndexCleanupService.TryCleanup();
         AttachmentHealthService = Services.GetRequiredService<DeskBoxAttachmentHealthService>();
         DiagnosticsBundleService = Services.GetRequiredService<DeskBoxDiagnosticsBundleService>();
         FileService = Services.GetRequiredService<FileService>();
@@ -888,11 +890,20 @@ public partial class App : Application
                 DeskBoxDataPathService.Current.DataDirectory,
                 "settings.json"));
 
-            // Capture the previous session's data before any startup normalization writes.
+            // Capture the previous session's data before any startup normalization
+            // writes. Settings are not loaded yet, so the backup schedule and folder
+            // are read from the raw settings file; unreadable values fall back to
+            // the defaults, matching the pre-setting behavior.
+            DataBackupService.UpdateAutomaticBackupOptions(
+                DataBackupSettingsPolicy.ReadStartupOptions(
+                    Path.Combine(DeskBoxDataPathService.Current.DataDirectory, "settings.json")));
             await DataBackupService.CreateAutomaticSnapshotIfDueAsync();
 
             // Phase 1: Load settings (must complete first)
             await SettingsService.LoadAsync();
+            RefreshAutomaticBackupOptionsFromSettings();
+            SettingsService.SettingsChanged += OnBackupSettingsChanged;
+            StartAutomaticBackupTimer();
             string requestedCornerPreference = SettingsService.Settings.WidgetCornerPreference;
             string effectiveCornerPreference =
                 WindowsCompatibilityService.ResolveEffectiveWidgetCornerPreference(
@@ -2332,6 +2343,65 @@ public partial class App : Application
         ShowSettingsNotification(
             "Settings.Persistence.SaveFailedTitle",
             "Settings.Persistence.SaveFailedBody",
+            NotificationIcon.Warning);
+    }
+
+    private void RefreshAutomaticBackupOptionsFromSettings()
+    {
+        DataBackupService.UpdateAutomaticBackupOptions(
+            DataBackupSettingsPolicy.GetOptions(SettingsService.Settings));
+    }
+
+    private void OnBackupSettingsChanged()
+    {
+        RefreshAutomaticBackupOptionsFromSettings();
+        if (DataBackupService.AutomaticBackupOptions.IsEnabled)
+        {
+            _ = RunAutomaticSnapshotIfDueAsync();
+        }
+    }
+
+    private void StartAutomaticBackupTimer()
+    {
+        // The shortest supported interval is 5 minutes; a 1-minute tick keeps
+        // every preset honest without a per-interval timer rebuild.
+        _automaticBackupTimer = new Microsoft.UI.Xaml.DispatcherTimer
+        {
+            Interval = TimeSpan.FromMinutes(1)
+        };
+        _automaticBackupTimer.Tick += (_, _) =>
+        {
+            if (DataBackupService.AutomaticBackupOptions.IsEnabled)
+            {
+                _ = RunAutomaticSnapshotIfDueAsync();
+            }
+        };
+        _automaticBackupTimer.Start();
+    }
+
+    private async Task RunAutomaticSnapshotIfDueAsync()
+    {
+        try
+        {
+            await DataBackupService.CreateAutomaticSnapshotIfDueAsync();
+        }
+        catch (Exception ex)
+        {
+            Log($"[DataBackup] Periodic snapshot check failed: {ex}");
+        }
+    }
+
+    private void OnAutomaticBackupFallbackDetected()
+    {
+        if (UiDispatcherQueue is { HasThreadAccess: false } dispatcher)
+        {
+            dispatcher.TryEnqueue(OnAutomaticBackupFallbackDetected);
+            return;
+        }
+
+        ShowSettingsNotification(
+            "Settings.DataBackup.AutomaticBackupDirectory.FallbackTitle",
+            "Settings.DataBackup.AutomaticBackupDirectory.FallbackBody",
             NotificationIcon.Warning);
     }
 

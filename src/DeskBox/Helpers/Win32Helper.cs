@@ -4,6 +4,7 @@ using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
 using DeskBox.Models;
+using DeskBox.Services;
 using Microsoft.Win32.SafeHandles;
 
 namespace DeskBox.Helpers;
@@ -881,6 +882,56 @@ public static partial class Win32Helper
 
     [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
     private static extern int SHOpenWithDialog(IntPtr hwndParent, ref OpenAsInfo openAsInfo);
+
+    private const int ShcneRenameItem = 0x00000001;
+    private const int ShcneUpdateDir = 0x00001000;
+    private const uint ShcnfPathW = 0x0005;
+
+    [LibraryImport("shell32.dll", EntryPoint = "SHChangeNotify", StringMarshalling = StringMarshalling.Utf16)]
+    private static partial void SHChangeNotify(
+        int wEventId,
+        uint uFlags,
+        string? dwItem1,
+        string? dwItem2);
+
+    /// <summary>
+    /// Notifies the Shell that an entry moved so Explorer folder views
+    /// (including the desktop) drop stale icons. Raw file APIs used by the
+    /// managed transfer engine do not post this notification themselves.
+    /// </summary>
+    internal static void NotifyShellItemMoved(string oldPath, string newPath)
+    {
+        try
+        {
+            SHChangeNotify(ShcneRenameItem, ShcnfPathW, oldPath, newPath);
+        }
+        catch (Exception ex)
+        {
+            App.Log(
+                $"[ShellNotify] Move notification failed source='{oldPath}': " +
+                ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// Asks shell folder views (including OneDrive-backed desktops) to
+    /// re-enumerate a directory. This is the programmatic equivalent of the
+    /// user pressing F5 and reliably clears entries left behind by raw file
+    /// operations on views that ignore per-item notifications.
+    /// </summary>
+    internal static void NotifyShellDirectoryUpdated(string directory)
+    {
+        try
+        {
+            SHChangeNotify(ShcneUpdateDir, ShcnfPathW, directory, null);
+        }
+        catch (Exception ex)
+        {
+            App.Log(
+                $"[ShellNotify] Directory update notification failed " +
+                $"directory='{directory}': {ex.Message}");
+        }
+    }
 
     [LibraryImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
@@ -1943,6 +1994,12 @@ public static partial class Win32Helper
         catch (Win32Exception ex) when (ex.NativeErrorCode == ErrorNoAssociation)
         {
             // No default handler registered (or the UserChoice association is broken).
+            if (ShortcutTargetProbe.IsUncPath(path) &&
+                TryOpenUncWithExplorer(ownerWindow, path))
+            {
+                return true;
+            }
+
             // Offer the system "Open With" dialog with the real owner window so the user
             // can pick an app instead of getting a silent no-op.
             App.Log($"[OpenFile] No association for '{path}' (ERROR_NO_ASSOCIATION). Falling back to Open With.");
@@ -1965,6 +2022,12 @@ public static partial class Win32Helper
         }
         catch (Exception ex)
         {
+            if (ShortcutTargetProbe.IsUncPath(path) &&
+                TryOpenUncWithExplorer(ownerWindow, path))
+            {
+                return true;
+            }
+
             App.Log($"[OpenFile] Failed to open '{path}': {ex.Message}");
             return false;
         }
@@ -1985,6 +2048,37 @@ public static partial class Win32Helper
         }
 
         return Path.GetDirectoryName(path) ?? string.Empty;
+    }
+
+    private static bool TryOpenUncWithExplorer(IntPtr ownerWindow, string path)
+    {
+        try
+        {
+            IntPtr result = ShellExecute(
+                ownerWindow,
+                "open",
+                "explorer.exe",
+                $"\"{path}\"",
+                null,
+                SW_SHOWNORMAL);
+            long errorCode = (long)result;
+            if (errorCode <= 32)
+            {
+                App.Log(
+                    $"[OpenFile] UNC Explorer fallback failed for '{path}', " +
+                    $"error code={errorCode}");
+                return false;
+            }
+
+            App.Log($"[OpenFile] UNC Explorer fallback dispatched for '{path}'");
+            return true;
+        }
+        catch (Exception ex)
+        {
+            App.Log(
+                $"[OpenFile] UNC Explorer fallback threw for '{path}': {ex.Message}");
+            return false;
+        }
     }
 
     public static void OpenFile(string path)

@@ -180,6 +180,14 @@
                 <toolkit:SettingsExpander.Items>
                     <toolkit:SettingsCard
                         HorizontalContentAlignment="Right"
+                        svc:Localized.HeaderKey="Glance.Typography.TimeFormat">
+                        <ComboBox
+                            x:Name="TimeFormatComboBox"
+                            Width="220"
+                            SelectionChanged="TimeFormatComboBox_SelectionChanged" />
+                    </toolkit:SettingsCard>
+                    <toolkit:SettingsCard
+                        HorizontalContentAlignment="Right"
                         svc:Localized.HeaderKey="Glance.Typography.Title">
                         <Slider
                             x:Name="TimeScaleSlider"

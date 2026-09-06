@@ -11,13 +11,11 @@ public sealed partial class DeskBoxDataBackupService
 {
     private const int BackupSchemaVersion = 2;
     private const int MinimumSupportedBackupSchemaVersion = 1;
-    private const int MaxAutomaticSnapshotCount = 7;
     private const int MaxPreRestoreBackupCount = 5;
     private const int MaxRestoreFileCount = 100_000;
     private const long MaxRestoreFileSizeBytes = 4L * 1024 * 1024 * 1024;
     private const long MaxRestoreTotalSizeBytes = 16L * 1024 * 1024 * 1024;
     private const int MaxSnapshotCopyAttempts = 4;
-    private static readonly TimeSpan AutomaticSnapshotInterval = TimeSpan.FromDays(1);
     private static readonly SettingsJsonContext s_settingsDataJsonContext =
         new(CreateDataJsonOptions());
     private static readonly QuickCaptureJsonContext s_quickCaptureDataJsonContext =
@@ -28,6 +26,38 @@ public sealed partial class DeskBoxDataBackupService
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly string _rootPath;
     private readonly string _recoveryRootPath;
+    private volatile AutomaticBackupOptions _automaticBackupOptions = AutomaticBackupOptions.Default;
+    private volatile string? _lastAutomaticSnapshotFallbackMessage;
+
+    /// <summary>
+    /// Current automatic-backup schedule and folder policy. Updated from live
+    /// settings; the default matches the pre-setting behavior (daily, 7 kept,
+    /// default recovery folder).
+    /// </summary>
+    public AutomaticBackupOptions AutomaticBackupOptions => _automaticBackupOptions;
+
+    /// <summary>
+    /// Set when the most recent automatic snapshot had to fall back from the
+    /// configured custom directory to the default recovery directory; cleared
+    /// once a snapshot succeeds in the configured directory again.
+    /// </summary>
+    public string? LastAutomaticSnapshotFallbackMessage => _lastAutomaticSnapshotFallbackMessage;
+
+    /// <summary>
+    /// Raised once per fallback streak when an automatic snapshot falls back
+    /// from the configured custom directory to the default recovery directory.
+    /// </summary>
+    public event Action? AutomaticSnapshotFallbackDetected;
+
+    public void UpdateAutomaticBackupOptions(AutomaticBackupOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        _automaticBackupOptions = options;
+        if (options.CustomDirectory is null)
+        {
+            _lastAutomaticSnapshotFallbackMessage = null;
+        }
+    }
 
     public DeskBoxDataBackupService()
         : this(
@@ -53,6 +83,108 @@ public sealed partial class DeskBoxDataBackupService
     /// survive normal uninstall and can be restored after reinstall.
     /// </summary>
     internal string AutomaticSnapshotDirectory => Path.Combine(_recoveryRootPath, "automatic");
+
+    /// <summary>
+    /// Directory the next automatic snapshot will be written to: the
+    /// configured custom directory when it is usable, otherwise the default
+    /// recovery directory. Only the directory shape is validated here; write
+    /// access is probed when a snapshot is actually created.
+    /// </summary>
+    public string EffectiveAutomaticSnapshotDirectory =>
+        ResolveAutomaticSnapshotTarget(probeWriteAccess: false).Directory;
+
+    /// <summary>
+    /// Folder status for the settings UI: which custom directory is configured
+    /// and whether it would be used right now. Missing directories are still
+    /// reported as active because they are created on demand.
+    /// </summary>
+    public AutomaticBackupDirectoryStatus GetAutomaticBackupDirectoryStatus()
+    {
+        AutomaticSnapshotTarget target = ResolveAutomaticSnapshotTarget(probeWriteAccess: false);
+        return new AutomaticBackupDirectoryStatus(
+            _automaticBackupOptions.CustomDirectory,
+            target.Directory,
+            target.Directory != AutomaticSnapshotDirectory);
+    }
+
+    /// <summary>
+    /// Validates a user-selected folder for automatic snapshots. Folders inside
+    /// the app-data root are rejected because snapshots would then back up the
+    /// recovery copies of previous snapshots.
+    /// </summary>
+    public bool IsValidCustomAutomaticBackupDirectory(string path, out string? rejectionReasonKey)
+    {
+        rejectionReasonKey = null;
+        try
+        {
+            string fullPath = Path.GetFullPath(path);
+            if (IsPathInsideDirectory(fullPath, _rootPath))
+            {
+                rejectionReasonKey = "Settings.DataBackup.AutomaticBackupDirectory.InvalidInsideDataRoot";
+                return false;
+            }
+
+            return true;
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            rejectionReasonKey = "Settings.DataBackup.AutomaticBackupDirectory.InvalidPath";
+            return false;
+        }
+    }
+
+    private readonly record struct AutomaticSnapshotTarget(string Directory, bool UsedFallback);
+
+    private AutomaticSnapshotTarget ResolveAutomaticSnapshotTarget(bool probeWriteAccess)
+    {
+        string? customDirectory = _automaticBackupOptions.CustomDirectory;
+        if (string.IsNullOrWhiteSpace(customDirectory))
+        {
+            return new AutomaticSnapshotTarget(AutomaticSnapshotDirectory, UsedFallback: false);
+        }
+
+        try
+        {
+            string fullPath = Path.GetFullPath(customDirectory.Trim());
+            if (IsPathInsideDirectory(fullPath, _rootPath))
+            {
+                App.Log(
+                    $"[DataBackup] Custom backup directory '{fullPath}' is inside the DeskBox data root; " +
+                    "using the default recovery directory instead.");
+                return new AutomaticSnapshotTarget(AutomaticSnapshotDirectory, UsedFallback: true);
+            }
+
+            // A file occupying the path can never become the snapshot directory.
+            if (File.Exists(fullPath))
+            {
+                App.Log(
+                    $"[DataBackup] Custom backup directory '{fullPath}' is a file; " +
+                    "using the default recovery directory instead.");
+                return new AutomaticSnapshotTarget(AutomaticSnapshotDirectory, UsedFallback: true);
+            }
+
+            if (probeWriteAccess)
+            {
+                Directory.CreateDirectory(fullPath);
+                // Probe write access so read-only locations fall back to the
+                // default directory instead of failing every snapshot attempt.
+                string probePath = Path.Combine(
+                    fullPath,
+                    $".deskbox-backup-probe-{Guid.NewGuid():N}");
+                File.WriteAllText(probePath, string.Empty);
+                TryDeleteFile(probePath);
+            }
+
+            return new AutomaticSnapshotTarget(fullPath, UsedFallback: false);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            App.Log(
+                $"[DataBackup] Custom backup directory '{customDirectory}' is not usable ({ex.Message}); " +
+                "using the default recovery directory instead.");
+            return new AutomaticSnapshotTarget(AutomaticSnapshotDirectory, UsedFallback: true);
+        }
+    }
 
     // Keep snapshots written by builds released before recovery isolation
     // visible and restorable during the transition.
@@ -85,27 +217,53 @@ public sealed partial class DeskBoxDataBackupService
         await _gate.WaitAsync(cancellationToken);
         try
         {
+            AutomaticBackupOptions options = _automaticBackupOptions;
+            // "Back up now" (force) stays available even when the schedule is off.
+            if (!options.IsEnabled && !force)
+            {
+                return null;
+            }
+
             if (!HasBackupSourceData())
             {
                 return null;
             }
 
-            Directory.CreateDirectory(AutomaticSnapshotDirectory);
+            AutomaticSnapshotTarget target = ResolveAutomaticSnapshotTarget(probeWriteAccess: true);
+            Directory.CreateDirectory(target.Directory);
             string? latestSnapshot = Directory
-                .EnumerateFiles(AutomaticSnapshotDirectory, "DeskBox-Auto-*.zip")
+                .EnumerateFiles(target.Directory, "DeskBox-Auto-*.zip")
                 .OrderByDescending(File.GetLastWriteTimeUtc)
                 .FirstOrDefault();
             if (!force && latestSnapshot is not null &&
-                DateTime.UtcNow - File.GetLastWriteTimeUtc(latestSnapshot) < AutomaticSnapshotInterval)
+                DateTime.UtcNow - File.GetLastWriteTimeUtc(latestSnapshot) <
+                    TimeSpan.FromMinutes(Math.Max(1, options.IntervalMinutes)))
             {
                 return null;
             }
 
             string snapshotPath = GetAvailableArchivePath(
-                AutomaticSnapshotDirectory,
+                target.Directory,
                 $"DeskBox-Auto-{DateTime.Now:yyyyMMdd-HHmmss}.zip");
             await CreateArchiveCoreAsync(snapshotPath, "automatic", cancellationToken);
-            PruneAutomaticSnapshots();
+            PruneAutomaticSnapshots(target.Directory, options.RetentionCount);
+            if (target.UsedFallback)
+            {
+                string fallbackMessage =
+                    $"Custom backup directory '{options.CustomDirectory}' was unavailable; " +
+                    $"snapshot saved to '{target.Directory}'.";
+                bool firstFallbackInStreak = _lastAutomaticSnapshotFallbackMessage is null;
+                _lastAutomaticSnapshotFallbackMessage = fallbackMessage;
+                if (firstFallbackInStreak)
+                {
+                    AutomaticSnapshotFallbackDetected?.Invoke();
+                }
+            }
+            else
+            {
+                _lastAutomaticSnapshotFallbackMessage = null;
+            }
+
             App.Log($"[DataBackup] Created automatic snapshot '{snapshotPath}'.");
             return snapshotPath;
         }
@@ -853,13 +1011,18 @@ public sealed partial class DeskBoxDataBackupService
         await _gate.WaitAsync(cancellationToken);
         try
         {
+            // Snapshots are intentionally not migrated when the custom folder
+            // changes, so both the configured and the default directories can
+            // hold restorable copies at the same time.
             var paths = new[]
                 {
+                    (Directory: EffectiveAutomaticSnapshotDirectory, Kind: "automatic"),
                     (Directory: AutomaticSnapshotDirectory, Kind: "automatic"),
                     (Directory: LegacyAutomaticSnapshotDirectory, Kind: "automatic"),
                     (Directory: PreRestoreBackupDirectory, Kind: "pre-restore")
                 }
                 .Where(item => Directory.Exists(item.Directory))
+                .DistinctBy(item => item.Directory, StringComparer.OrdinalIgnoreCase)
                 .SelectMany(item => Directory.EnumerateFiles(item.Directory, "*.zip")
                     .Select(path => (path, item.Kind)))
                 .OrderByDescending(item => File.GetLastWriteTimeUtc(item.path))
@@ -943,7 +1106,8 @@ public sealed partial class DeskBoxDataBackupService
         snapshotPath = Path.GetFullPath(snapshotPath);
 
         if (!snapshotPath.EndsWith(".zip", StringComparison.OrdinalIgnoreCase) ||
-            (!IsPathInsideDirectory(snapshotPath, AutomaticSnapshotDirectory) &&
+            (!IsPathInsideDirectory(snapshotPath, EffectiveAutomaticSnapshotDirectory) &&
+             !IsPathInsideDirectory(snapshotPath, AutomaticSnapshotDirectory) &&
              !IsPathInsideDirectory(snapshotPath, LegacyAutomaticSnapshotDirectory) &&
              !IsPathInsideDirectory(snapshotPath, PreRestoreBackupDirectory)))
         {
@@ -1180,12 +1344,17 @@ public sealed partial class DeskBoxDataBackupService
         throw new IOException($"DeskBox data file changed while creating a backup snapshot: '{sourcePath}'.");
     }
 
-    private void PruneAutomaticSnapshots()
+    private void PruneAutomaticSnapshots(string directory, int retentionCount)
     {
+        if (!Directory.Exists(directory))
+        {
+            return;
+        }
+
         foreach (string obsoletePath in Directory
-                     .EnumerateFiles(AutomaticSnapshotDirectory, "DeskBox-Auto-*.zip")
+                     .EnumerateFiles(directory, "DeskBox-Auto-*.zip")
                      .OrderByDescending(File.GetLastWriteTimeUtc)
-                     .Skip(MaxAutomaticSnapshotCount))
+                     .Skip(Math.Max(1, retentionCount)))
         {
             TryDeleteFile(obsoletePath);
         }
@@ -1434,6 +1603,16 @@ public sealed record DeskBoxBackupSnapshotInfo(
     bool IsReadable,
     string? AppVersion,
     int SchemaVersion);
+
+/// <summary>
+/// Effective automatic-snapshot folder state for the settings UI. A configured
+/// directory that is not active means snapshots currently fall back to the
+/// default recovery directory.
+/// </summary>
+public sealed record AutomaticBackupDirectoryStatus(
+    string? ConfiguredDirectory,
+    string EffectiveDirectory,
+    bool IsCustomDirectoryActive);
 
 internal sealed record SnapshotManifestSummary(
     bool IsReadable,

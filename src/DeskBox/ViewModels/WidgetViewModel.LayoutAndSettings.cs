@@ -139,51 +139,28 @@ public partial class WidgetViewModel
             settings.VerticalSpacingScale,
             SettingsService.MinSpacingScale,
             SettingsService.MaxSpacingScale);
-        double fileNameWidthScale = Math.Clamp(
-            settings.FileNameWidthScale,
-            SettingsService.MinSpacingScale,
-            SettingsService.MaxSpacingScale);
-        int fileNameLineCount = SettingsService.NormalizeFileNameLineCount(settings.FileNameLineCount);
-
         double horizontalT = NormalizeScale(horizontalScale, SettingsService.MinSpacingScale, SettingsService.MaxSpacingScale);
         double verticalT = NormalizeScale(verticalScale, SettingsService.MinSpacingScale, SettingsService.MaxSpacingScale);
-        double nameWidthT = NormalizeScale(fileNameWidthScale, SettingsService.MinSpacingScale, SettingsService.MaxSpacingScale);
         double densityT = NormalizeScale(
             densityScale,
             SettingsService.MinLayoutDensityScale,
             SettingsService.MaxLayoutDensityScale);
 
-        double labelMaxWidth = Math.Max(iconSize, Lerp(iconSize, textSize * 10.5, nameWidthT));
-        IconLabelMaxWidth = labelMaxWidth;
-        IconTileWidth = Math.Max(iconSize + Lerp(6, 28, horizontalT), labelMaxWidth + Lerp(4, 16, horizontalT));
-        IconTileMargin = new Thickness(
-            Lerp(0, 2, horizontalT),
-            Lerp(0, 2, verticalT),
-            Lerp(0, 2, horizontalT),
-            Lerp(0, 2, verticalT));
-        IconTilePadding = new Thickness(
-            Lerp(1, 5, horizontalT),
-            Lerp(1, 6, verticalT),
-            Lerp(1, 5, horizontalT),
-            Lerp(1, 6, verticalT));
-        IconContentSpacing = Lerp(1, 7, verticalT);
-        IconImageSize = iconSize;
-        IconLabelFontSize = textSize;
-        IconLabelMaxLines = Math.Max(SettingsService.MinFileNameLineCount, fileNameLineCount);
-        IconLabelVisibility = fileNameLineCount == SettingsService.HiddenFileNameLineCount
-            ? Visibility.Collapsed
-            : Visibility.Visible;
-        IconTileHeight = ResolveIconTileHeight(
-            iconSize,
-            textSize,
-            fileNameLineCount,
-            verticalT,
-            _systemTextScaleFactor);
-        IconCellWidth = Math.Ceiling(
-            IconTileWidth + IconTileMargin.Left + IconTileMargin.Right);
-        IconCellHeight = Math.Ceiling(
-            IconTileHeight + IconTileMargin.Top + IconTileMargin.Bottom);
-        _iconDecodePixelWidth = ResolveIconDecodePixelWidth(iconSize);
+        FileWidgetIconLayout iconLayout = FileWidgetIconLayout.Calculate(
+            settings, Config.IconSizeOverride, _systemTextScaleFactor);
+        IconLabelMaxWidth = iconLayout.LabelMaxWidth;
+        IconTileWidth = iconLayout.TileWidth;
+        IconTileMargin = iconLayout.TileMargin;
+        IconTilePadding = iconLayout.TilePadding;
+        IconContentSpacing = iconLayout.ContentSpacing;
+        IconImageSize = iconLayout.ImageSize;
+        IconLabelFontSize = iconLayout.LabelFontSize;
+        IconLabelMaxLines = iconLayout.LabelMaxLines;
+        IconLabelVisibility = iconLayout.ShowLabel ? Visibility.Visible : Visibility.Collapsed;
+        IconTileHeight = iconLayout.TileHeight;
+        IconCellWidth = iconLayout.CellWidth;
+        IconCellHeight = iconLayout.CellHeight;
+        _iconDecodePixelWidth = iconLayout.DecodePixelWidth;
 
         double listScale = Lerp(0.68, 0.90, densityT);
         double listItemMarginY = Lerp(0, 2, verticalT);
@@ -214,63 +191,11 @@ public partial class WidgetViewModel
         double textSize,
         int fileNameLineCount,
         double verticalScale,
-        double systemTextScaleFactor)
-    {
-        int normalizedLineCount =
-            SettingsService.NormalizeFileNameLineCount(fileNameLineCount);
-        double normalizedVerticalScale = Math.Clamp(verticalScale, 0, 1);
-        double normalizedTextScale =
-            WindowsCompatibilityService.NormalizeSystemTextScaleFactor(
-                systemTextScaleFactor);
+        double systemTextScaleFactor) => FileWidgetIconLayout.ResolveTileHeight(
+            iconSize, textSize, fileNameLineCount, verticalScale, systemTextScaleFactor);
 
-        // Keep the established density curve as the visual minimum, then
-        // reserve the actual configured number of text lines. The latter is
-        // what allows Windows' 100-225% text-size accessibility setting to
-        // grow without being clipped by an old fixed tile height.
-        double twoLineVisualMinimum =
-            iconSize + Lerp(24, 70, normalizedVerticalScale);
-        double oneLineVisualMinimum = Math.Max(
-            iconSize + textSize + 8,
-            twoLineVisualMinimum - textSize - 3);
-        double visualMinimum = normalizedLineCount switch
-        {
-            SettingsService.HiddenFileNameLineCount => Math.Max(
-                iconSize + 8,
-                oneLineVisualMinimum - textSize - 3),
-            SettingsService.MinFileNameLineCount => oneLineVisualMinimum,
-            _ => twoLineVisualMinimum
-        };
-
-        double verticalPadding = Lerp(1, 6, normalizedVerticalScale) * 2;
-        double contentSpacing = normalizedLineCount ==
-            SettingsService.HiddenFileNameLineCount
-                ? 0
-                : Lerp(1, 7, normalizedVerticalScale);
-        double reservedLabelHeight = normalizedLineCount ==
-            SettingsService.HiddenFileNameLineCount
-                ? 0
-                : Math.Ceiling(textSize * 1.4 * normalizedTextScale) *
-                  normalizedLineCount;
-        double measuredContentMinimum =
-            verticalPadding +
-            iconSize +
-            contentSpacing +
-            reservedLabelHeight +
-            2;
-
-        return Math.Ceiling(Math.Max(visualMinimum, measuredContentMinimum));
-    }
-
-    private static int ResolveIconDecodePixelWidth(double iconSize)
-    {
-        return iconSize switch
-        {
-            <= 28 => 48,
-            <= 34 => 64,
-            <= 42 => 80,
-            _ => 128
-        };
-    }
+    private static int ResolveIconDecodePixelWidth(double iconSize) =>
+        FileWidgetIconLayout.ResolveDecodePixelWidth(iconSize);
 
     public double EffectiveIconSize => SettingsService.NormalizeIconSize(
         Config.IconSizeOverride ?? _settingsService.Settings.IconSize);

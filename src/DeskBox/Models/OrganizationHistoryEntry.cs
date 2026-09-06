@@ -21,6 +21,9 @@ public class OrganizationHistoryEntry
 
     public bool IsUndone { get; set; }
 
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool UndoStarted { get; set; }
+
     public string? ErrorMessage { get; set; }
 
     public List<OrganizationHistoryItem> Items { get; set; } = [];
@@ -126,6 +129,21 @@ public class OrganizationHistoryEntry
 
 public class OrganizationHistoryItem
 {
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public DesktopOrganizationSourceScope SourceScope { get; set; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool IsRestored { get; set; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? RestoredPath { get; set; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public long? Size { get; set; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public DateTime? LastWriteTimeUtc { get; set; }
+
     public string Name { get; set; } = string.Empty;
 
     public string SourcePath { get; set; } = string.Empty;

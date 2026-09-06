@@ -54,6 +54,7 @@ public sealed partial class TodoWidgetViewModel : ObservableObject, IDisposable
     private TodoColorFilter _selectedColorFilter = TodoColorFilter.All;
     private string _inputText = string.Empty;
     private double _textSize = SettingsService.DefaultTextSize;
+    private double _contentTextSize = SettingsService.DefaultTextSize;
     private double _layoutDensityScale = SettingsService.DefaultLayoutDensityScale;
     private string _newTaskPosition = SettingsService.TodoNewTaskPositionTop;
     private string _tabStyle = SettingsService.WidgetTabStyleButton;
@@ -89,7 +90,10 @@ public sealed partial class TodoWidgetViewModel : ObservableObject, IDisposable
         _settingsService = settingsService;
         if (_settingsService is not null)
         {
-            _textSize = SettingsService.NormalizeTextSize(_settingsService.Settings.TextSize);
+            _textSize = SettingsService.NormalizeTextSize(
+                (_settingsService.Settings.TodoListTextSize > 0 ? _settingsService.Settings.TodoListTextSize : _settingsService.Settings.TextSize));
+            _contentTextSize = SettingsService.NormalizeTextSize(
+                (_settingsService.Settings.TodoContentTextSize > 0 ? _settingsService.Settings.TodoContentTextSize : _settingsService.Settings.TextSize));
             _layoutDensityScale = NormalizeDensity(_settingsService.Settings.LayoutDensityScale);
             ApplyTodoSettings(_settingsService.Settings, updateFilter: false);
         }
@@ -621,6 +625,20 @@ public sealed partial class TodoWidgetViewModel : ObservableObject, IDisposable
         }
     }
 
+    public double ContentTextSize
+    {
+        get => _contentTextSize;
+        private set
+        {
+            if (SetProperty(ref _contentTextSize, value))
+            {
+                OnPropertyChanged(nameof(ContentSecondaryTextSize));
+                OnPropertyChanged(nameof(ContentDetailHeaderTextSize));
+                OnPropertyChanged(nameof(ContentTitleTextSize));
+            }
+        }
+    }
+
     public double LayoutDensityScale
     {
         get => _layoutDensityScale;
@@ -649,6 +667,12 @@ public sealed partial class TodoWidgetViewModel : ObservableObject, IDisposable
     public double DetailHeaderTextSize => Math.Max(SettingsService.MinTextSize, TextSize - 1);
 
     public double TitleTextSize => Math.Min(SettingsService.MaxTextSize + 1, TextSize + 1);
+
+    public double ContentSecondaryTextSize => Math.Max(SettingsService.MinTextSize, ContentTextSize - 1);
+
+    public double ContentDetailHeaderTextSize => Math.Max(SettingsService.MinTextSize, ContentTextSize - 1);
+
+    public double ContentTitleTextSize => Math.Min(SettingsService.MaxTextSize + 1, ContentTextSize + 1);
 
     public double FilterTextSize => Math.Max(SettingsService.MinTextSize, TextSize);
 

@@ -1560,12 +1560,15 @@ public sealed partial class WidgetManager
 
     public async Task<bool> ReorderWidgetGroupMemberAsync(
         string sourceWidgetId,
-        string targetWidgetId)
+        string targetWidgetId,
+        string? expectedGroupId = null,
+        IReadOnlyList<string>? expectedMemberIds = null)
     {
         if (!HasUiThreadAccess())
         {
             return await RunOnUiThreadAsync(
-                () => ReorderWidgetGroupMemberAsync(sourceWidgetId, targetWidgetId));
+                () => ReorderWidgetGroupMemberAsync(
+                    sourceWidgetId, targetWidgetId, expectedGroupId, expectedMemberIds));
         }
 
         await _widgetGroupGate.WaitAsync();
@@ -1576,7 +1579,10 @@ public sealed partial class WidgetManager
                 sourceWidgetId);
             if (group is null ||
                 !group.MemberIds.Contains(targetWidgetId, StringComparer.Ordinal) ||
-                string.Equals(sourceWidgetId, targetWidgetId, StringComparison.Ordinal))
+                string.Equals(sourceWidgetId, targetWidgetId, StringComparison.Ordinal) ||
+                (expectedGroupId is not null && group.Id != expectedGroupId) ||
+                (expectedMemberIds is not null &&
+                 !group.MemberIds.SequenceEqual(expectedMemberIds, StringComparer.Ordinal)))
             {
                 return false;
             }
@@ -1584,16 +1590,18 @@ public sealed partial class WidgetManager
             // Move the source into the target's original slot. This makes
             // adjacent keyboard/menu moves symmetric in both directions and
             // gives drag/drop a stable, deterministic destination.
-            if (!WidgetGroupOrder.MoveToTargetSlot(
+            try
+            {
+                return await WidgetGroupOrder.MoveAndSaveAsync(
                     group.MemberIds,
                     sourceWidgetId,
-                    targetWidgetId))
-            {
-                return false;
+                    targetWidgetId,
+                    () => _settingsService.SaveCheckedAsync());
             }
-            await _settingsService.SaveAsync();
-            RaiseWidgetGroupsChanged();
-            return true;
+            finally
+            {
+                RaiseWidgetGroupsChanged();
+            }
         }
         finally
         {

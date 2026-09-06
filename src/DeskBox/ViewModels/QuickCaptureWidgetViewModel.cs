@@ -36,6 +36,7 @@ public sealed partial class QuickCaptureWidgetViewModel : ObservableObject, IDis
     private bool _showRecentTab = true;
     private double _widgetOpacity;
     private double _textSize;
+    private double _contentTextSize;
     private double _iconSize;
     private double _layoutDensityScale = SettingsService.DefaultLayoutDensityScale;
     private Visibility _emptyStateVisibility = Visibility.Collapsed;
@@ -91,7 +92,14 @@ public sealed partial class QuickCaptureWidgetViewModel : ObservableObject, IDis
         _viewSwitchRefreshTimer.Tick += ViewSwitchRefreshTimer_Tick;
         _widgetOpacity = settingsService.Settings.WidgetOpacity;
         _tabStyle = SettingsService.NormalizeWidgetTabStyle(settingsService.Settings.QuickCaptureTabStyle);
-        _textSize = SettingsService.NormalizeTextSize(settingsService.Settings.TextSize);
+        _textSize = SettingsService.NormalizeTextSize(
+            settingsService.Settings.QuickCaptureListTextSize > 0
+                ? settingsService.Settings.QuickCaptureListTextSize
+                : settingsService.Settings.TextSize);
+        _contentTextSize = SettingsService.NormalizeTextSize(
+            settingsService.Settings.QuickCaptureContentTextSize > 0
+                ? settingsService.Settings.QuickCaptureContentTextSize
+                : settingsService.Settings.TextSize);
         _iconSize = SettingsService.NormalizeIconSize(settingsService.Settings.IconSize);
         _layoutDensityScale = NormalizeDensity(settingsService.Settings.LayoutDensityScale);
         Name = config.Name;
@@ -314,6 +322,20 @@ public sealed partial class QuickCaptureWidgetViewModel : ObservableObject, IDis
         }
     }
 
+    public double ContentTextSize
+    {
+        get => _contentTextSize;
+        private set
+        {
+            if (SetProperty(ref _contentTextSize, value))
+            {
+                OnPropertyChanged(nameof(ContentTitleTextSize));
+                OnPropertyChanged(nameof(ContentSecondaryTextSize));
+                OnPropertyChanged(nameof(ContentDetailHeaderTextSize));
+            }
+        }
+    }
+
     public double LayoutDensityScale
     {
         get => _layoutDensityScale;
@@ -343,6 +365,12 @@ public sealed partial class QuickCaptureWidgetViewModel : ObservableObject, IDis
     public double DetailHeaderTextSize => Math.Max(SettingsService.MinTextSize, TextSize - 1);
 
     public double CaptionTextSize => Math.Max(SettingsService.MinTextSize, TextSize);
+
+    public double ContentTitleTextSize => Math.Min(SettingsService.MaxTextSize + 2, ContentTextSize + 3);
+
+    public double ContentSecondaryTextSize => Math.Max(SettingsService.MinTextSize, ContentTextSize - 1.5);
+
+    public double ContentDetailHeaderTextSize => Math.Max(SettingsService.MinTextSize, ContentTextSize - 1);
 
     public double SegmentTextSize => WidgetSegmentedMetrics.Create(TextSize).TextSize;
 

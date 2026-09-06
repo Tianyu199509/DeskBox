@@ -16,6 +16,7 @@ public abstract partial class WidgetWindowBase
     private CancellationTokenSource? _groupDetachPreviewCancellation;
     private WidgetDetachPlacementPreviewWindow? _groupDetachPlacementPreview;
     private bool _groupDetachCommitInProgress;
+    private volatile bool _groupDetachDragCanceled;
     private bool _groupDetachPreviewWarmupQueued;
     private Win32Helper.SubclassProc? _groupWheelSubclassProc;
     private bool _isGroupWheelSubclassInstalled;
@@ -352,7 +353,8 @@ public abstract partial class WidgetWindowBase
         {
             WidgetShellControl.NotifyGroupMemberInvocationCompleted(
                 e.WidgetId,
-                succeeded);
+                succeeded,
+                e.TabSelectionRequestVersion);
         }
     }
 
@@ -377,6 +379,15 @@ public abstract partial class WidgetWindowBase
         object? sender,
         WidgetGroupMemberEventArgs e)
     {
+        // None is also the native result for Esc/canceled drags. Only a
+        // normal release outside the whole window may separate a member.
+        if (_groupDetachDragCanceled || Win32Helper.IsKeyDown(0x1B) ||
+            Win32Helper.IsAnyMouseButtonDown())
+        {
+            ClearGroupDetachDragAnchor();
+            CloseGroupDetachPlacementPreview();
+            return;
+        }
         if (!Win32Helper.GetCursorPos(out Win32Helper.POINT cursor))
         {
             ClearGroupDetachDragAnchor();
@@ -434,6 +445,8 @@ public abstract partial class WidgetWindowBase
         object? sender,
         WidgetGroupMemberEventArgs e)
     {
+        _groupDetachDragCanceled = false;
+        App.Current?.WidgetManager?.CancelWidgetSurfaceSwitch(Config.Id);
         if (!Win32Helper.GetCursorPos(out Win32Helper.POINT cursor))
         {
             ClearGroupDetachDragAnchor();
@@ -453,6 +466,7 @@ public abstract partial class WidgetWindowBase
     {
         if (!_groupDetachCommitInProgress)
         {
+            ClearGroupDetachDragAnchor();
             CloseGroupDetachPlacementPreview();
         }
     }
@@ -504,6 +518,10 @@ public abstract partial class WidgetWindowBase
             {
                 while (!token.IsCancellationRequested)
                 {
+                    if (Win32Helper.IsKeyDown(0x1B))
+                    {
+                        _groupDetachDragCanceled = true;
+                    }
                     if (Win32Helper.GetCursorPos(out Win32Helper.POINT point))
                     {
                         const int releaseMargin = 8;
@@ -520,7 +538,7 @@ public abstract partial class WidgetWindowBase
                                 point.Y - offsetY,
                                 sourceSize.Width,
                                 sourceSize.Height),
-                            outside);
+                            outside && !_groupDetachDragCanceled);
                     }
 
                     await Task.Delay(16, token);
@@ -629,20 +647,31 @@ public abstract partial class WidgetWindowBase
         object? sender,
         WidgetGroupReorderEventArgs e)
     {
-        if (App.Current?.WidgetManager is { } manager)
+        bool succeeded = false;
+        try
         {
-            try
+            if (App.Current?.WidgetManager is { } manager)
             {
-                await manager.ReorderWidgetGroupMemberAsync(
+                succeeded = await manager.ReorderWidgetGroupMemberAsync(
                     e.SourceWidgetId,
-                    e.TargetWidgetId);
+                    e.TargetWidgetId,
+                    e.ExpectedGroupId,
+                    e.ExpectedMemberIds);
+                if (!IsClosing)
+                {
+                    RefreshWidgetGroupPresentation();
+                }
             }
-            catch (Exception ex)
-            {
-                App.Log(
-                    $"[WidgetGroup] Reorder failed source={e.SourceWidgetId} " +
-                    $"target={e.TargetWidgetId}: {ex}");
-            }
+        }
+        catch (Exception ex)
+        {
+            App.Log(
+                $"[WidgetGroup] Reorder failed source={e.SourceWidgetId} " +
+                $"target={e.TargetWidgetId}: {ex}");
+        }
+        finally
+        {
+            e.Complete(succeeded);
         }
     }
 

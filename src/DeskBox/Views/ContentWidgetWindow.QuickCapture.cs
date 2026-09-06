@@ -35,7 +35,8 @@ public sealed partial class ContentWidgetWindow
             UseStackedText:
                 contentMode == DeskBox.Services.SettingsService.WidgetCompactContentModeSmart &&
                 !hidesSensitiveContent,
-            EnableMarquee: true,
+            // Note bodies can be arbitrarily long; the capsule stays static
+            // instead of marqueeing (same policy as Todo).
             LiveStateKey: string.Join(
                 "|",
                 quickCapture.ViewModel.RecordCount,

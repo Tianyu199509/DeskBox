@@ -29,6 +29,8 @@ public abstract partial class WidgetWindowBase
             highContrast);
 
         ApplyForegroundBrushes(palette);
+        WidgetShellControl.SetGroupTitleForegroundColors(
+            palette.Primary, palette.Secondary, palette.Disabled, highContrast);
     }
 
     protected void SetWidgetForegroundModeOverride(string? mode)

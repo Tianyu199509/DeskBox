@@ -1,5 +1,95 @@
 ﻿# Changelog
 
+## 1.5.0 - 2026-09-06
+
+### English
+
+#### New features
+
+- Added automatic data snapshots with a configurable schedule: enable or disable backups (on by default), choose the interval from every 5 minutes to every 5 days (daily by default), keep between 3 and 30 snapshots (7 by default), and optionally store them in a custom directory. Invalid values hand-edited into the configuration file are normalized to the nearest preset, and a custom directory that becomes unavailable falls back to the default recovery folder with a single notification per degradation cycle.
+- Redesigned Organize Desktop around a desktop preview card: tile selection is expressed through clear selected/unselected opacity, re-scanning keeps your previous selections (newly appearing files start unchecked), and the entry action is now "Preview organize". The source picker can optionally include the shared Public Desktop; moving its files may request administrator approval, a canceled approval keeps the completed personal-desktop work, and interrupted operations can be resumed or recovered at the next startup.
+- Folder shortcuts (`.lnk`) that point inside the widget's own managed tree now open the folder inside the file widget instead of File Explorer; external, broken, or unverifiable shortcuts keep the default system behavior.
+- Quick Capture and Todo each gained independent list and content text-size sliders in Settings; when left unset they keep following the global appearance text size.
+- Added a Glance clock time-format setting: follow system (default, without AM/PM markers), 24-hour, or 12-hour.
+- Added an optional setting to show the native Windows context menu when right-clicking a single file tile (off by default); stacks and multi-selection keep the built-in menu.
+- File, folder, and `desktop.ini` custom icons are now fetched as 256-px high-resolution Shell icons with shortcut overlays preserved, and internet shortcuts (`.url`) resolve their icons through the Shell, so covers and per-user associations (for example Steam) display correctly.
+- Added an experimental performance setting that trims the working set immediately after all widgets finish their hide animation (pairs with "Compress memory when idle").
+
+#### Fixes
+
+- Stabilized internal drag completion: a pointer release no longer rebuilds the file list before the Shell drop completes, and entering a drop revokes any provisional Move acceptance, so internal reorders can no longer trigger Shell shortcut cleanup.
+- Inline rename fields now reliably receive keyboard focus across every entry point (group title, file item, stack popover, Quick Capture item), and a popup stealing focus within 300 ms is reclaimed instead of treated as a commit.
+- Steam shortcuts are no longer treated as uninstalled when the Steam library sits on an unavailable removable or network drive; the probe reports "unknown" and keeps the item visible.
+- Dropping files into the directory they already occupy — including junction- and symlink-resolved paths, the grid root, and stack popovers — is rejected up front with clear feedback instead of performing a duplicate transfer.
+- Recursive folder copies now detect junction and symbolic-link cycles, and moving a folder into itself (including through a link) is refused.
+- Shortcut health checks no longer mark network-share roots or environment-variable targets as broken; only a locally missing target is reported.
+- Opening a file no longer leaves press or hover highlight on the item, and returning to the parent folder no longer reselects the folder you just exited.
+- File icons refresh correctly after a file is moved out and back into a managed path, because watcher events now clear every cached icon variant, including failed lookups.
+- File-widget mapping validation rejects paths that overlap the managed storage root or another widget's mapped directory.
+- Settings and data files save more robustly: when atomic replacement fails, a verified in-place write is used, and a corrupt primary file can be recovered from the automatic backup.
+- Group-tab drag reordering rolls back to the previous order when saving fails, and no longer writes when nothing changed.
+- The in-app updater's official-download action opens the website instead of a mirror direct link, and update notes render as plain text.
+- Fixed visual residue that could remain after a widget finished its compact-transition animation.
+- Dragging files into a grid across volumes now posts Shell change notifications (per-item rename plus a forced directory refresh), so Explorer views — including OneDrive-backed desktops — no longer keep stale icons of moved files until a manual refresh.
+- Quick Capture and Todo compact capsules show a static, ellipsized preview instead of a scrolling marquee, which previously displayed only a truncated fragment of long content.
+
+#### Performance and memory
+
+- Settings sections are now created on demand when first navigated to, so the Settings window opens faster and keeps a smaller resident tree; the settings search index is generated from localization keys, so search finds settings in sections that have not been created yet.
+- Thumbnail and icon proxy payloads are read directly into their final buffer without growth-buffer copies.
+- File items instantiate only the active layout (icon or list) instead of both, and widget title icons load their geometry lazily.
+- High-resolution Shell icon requests are throttled through a bounded queue, keeping the icon proxy responsive while many icons load at once.
+
+#### Interface
+
+- Widget title bars are more compact (40-px minimum row with tightened padding).
+- Group tabs use a native TabView appearance with a translucent selected background and content-sized labels.
+- The Settings update section was rebuilt as a detail flow with clearer progress and action layout.
+
+### 中文
+
+#### 新功能
+
+- 新增数据自动快照备份：可开关（默认开启）、可选备份间隔（5 分钟到 5 天共 6 档，默认每天）、保留份数（3~30 份，默认 7 份），并支持自定义备份目录。手工编辑配置文件写出的非法值会自动归一化到最接近的预设；自定义目录不可用时自动降级到默认恢复目录，并在每轮降级中只提醒一次。
+- 整理桌面围绕桌面预览卡重新设计：瓦片选中状态用明确的透明度区分，重新扫描会保留之前的选择（新出现的文件默认不勾选），入口动作改为「预览整理」。来源选择可选择纳入公共桌面；移动公共桌面文件可能弹出管理员授权，取消授权时个人桌面已完成的部分保留，被中断的操作可继续恢复，下次启动也会提示处理挂起的恢复。
+- 指向格子自身收纳目录内的文件夹快捷方式（`.lnk`）现在直接在文件格子内展开，不再跳转资源管理器；指向外部、损坏或无法验证目标的快捷方式仍按系统默认方式打开。
+- 快捷捕捉和待办各自新增「列表文字大小」「内容文字大小」滑杆设置；未设置时继续跟随全局外观字号。
+- 时光时钟新增时间格式设置：跟随系统（默认，不带上午/下午标记）、24 小时制或 12 小时制。
+- 新增可选设置：右键单个文件格子时弹出 Windows 原生菜单（默认关闭）；叠放与多选仍使用内置菜单。
+- 文件、文件夹及 `desktop.ini` 自定义图标改用 256px 高分辨率 Shell 图标，快捷方式小箭头等叠加层保持正确；网址快捷方式（`.url`）图标改由 Shell 解析，Steam 封面和按用户关联的图标可正确显示。
+- 新增实验性性能设置：全部格子隐藏动画结束后立即裁剪工作集（需与「空闲时压缩内存占用」配合使用）。
+
+#### 修复
+
+- 稳定内部拖拽的完成顺序：鼠标释放不再在系统 Drop 完成前重建文件列表，进入放置时会先撤销临时接受的移动操作，内部排序不会再触发 Shell 对快捷方式的清理。
+- 内联重命名框在所有入口（小组标题、文件项、叠放弹窗、快捷捕捉条目）都能可靠获得键盘焦点；打开后 300 毫秒内被弹窗抢走的焦点会自动夺回，不再被误判为提交。
+- Steam 库位于不可用的可移动盘或网络盘时，Steam 快捷方式不再被判定为「已卸载」而隐藏；探测结果归为「未知」并保留条目。
+- 把文件放到它已经所在的目录——包括经过 junction/符号链接解析的路径、格子根目录和叠放弹窗——会提前拒绝并给出明确反馈，不再执行无意义的重复传输。
+- 递归复制文件夹时检测 junction 与符号链接循环；把文件夹移动进自身（含经链接）会被拒绝。
+- 快捷方式健康检查不再把网络共享根目录或含环境变量的目标误标为损坏；只有本地目标确实缺失才报告。
+- 打开文件后不再残留按压或悬停高亮；返回上级文件夹不再重新选中刚退出的文件夹。
+- 文件移出又移回收纳路径后图标正确刷新：目录监视事件现在清除全部图标缓存变体，包括失败的记录。
+- 文件格子的路径校验会拒绝与收纳存储根或其他格子映射目录重叠的路径。
+- 设置与数据文件保存更健壮：原子替换失败时改用经过验证的就地写入；主文件损坏时可从自动备份恢复。
+- 小组标签拖拽排序在保存失败时回滚到原顺序，顺序没有变化时不再写设置。
+- 应用内更新的「官方下载」改为跳转官网而非云盘直链，更新说明以纯文本呈现。
+- 修复格子完成收纳（压缩）过渡动画后可能残留的视觉残影。
+- 跨盘把文件拖入格子后，资源管理器视图（包括 OneDrive 同步的桌面）不再残留已移走文件的图标：托管移动现在补发 Shell 变更通知（逐项改名加强制目录刷新），无需手动刷新。
+- 快捷捕捉与待办的胶囊改为静态省略号预览，不再滚动长文本——此前跑马灯只能显示被截断的片段。
+
+#### 性能与内存
+
+- 设置分区改为导航到时才创建，设置窗口打开更快、常驻界面树更小；设置搜索索引由本地化键生成，未创建的分区里的设置项也能被搜到。
+- 缩略图与图标代理的载荷直接读入最终缓冲区，去除增长缓冲的整块拷贝。
+- 文件项只实例化当前使用的布局（图标或列表二者其一），小组件标题图标按需加载几何。
+- 高分辨率 Shell 图标请求经有界队列限流，大量图标同时加载时代理仍保持响应。
+
+#### 界面
+
+- 小组件标题栏更紧凑（最小行高 40，内边距收紧）。
+- 小组标签改用原生 TabView 外观，选中背景半透明、标签宽度按内容自适应。
+- 设置的更新分区重构为详情流，进度与操作按钮排版更清晰。
+
 ## 1.4.9 - 2026-09-01
 
 ### English

@@ -74,6 +74,32 @@ public sealed class FileServiceTests : IDisposable
     }
 
     [Fact]
+    public void IsUnsafeDirectoryTransfer_RejectsDestinationInsideSource()
+    {
+        string source = Directory.CreateDirectory(
+            Path.Combine(_tempRoot, "source-root")).FullName;
+        string destination = Directory.CreateDirectory(
+            Path.Combine(source, "deskbox")).FullName;
+
+        Assert.True(FileService.IsUnsafeDirectoryTransfer([source], destination));
+        Assert.True(FileService.IsUnsafeDirectoryTransfer([destination], destination));
+    }
+
+    [Fact]
+    public void IsUnsafeDirectoryTransfer_AllowsSiblingDestinationAndFiles()
+    {
+        string source = Directory.CreateDirectory(
+            Path.Combine(_tempRoot, "source-sibling")).FullName;
+        string destination = Directory.CreateDirectory(
+            Path.Combine(_tempRoot, "destination-sibling")).FullName;
+        string file = Path.Combine(source, "note.txt");
+        File.WriteAllText(file, "content");
+
+        Assert.False(FileService.IsUnsafeDirectoryTransfer([source], destination));
+        Assert.False(FileService.IsUnsafeDirectoryTransfer([file], destination));
+    }
+
+    [Fact]
     public void PathsOverlap_MatchesEqualAndAncestorPathsButNotSiblings()
     {
         string root = Path.Combine(_tempRoot, "root");
@@ -691,6 +717,58 @@ public sealed class FileServiceTests : IDisposable
         FileService.DeleteSourceFileAfterCopy(sourcePath, attributes);
 
         Assert.False(File.Exists(sourcePath));
+    }
+
+    [Fact]
+    public void ManagedMoveEngine_PostsShellRenameNotificationsForRawMoves()
+    {
+        string transferSource = File.ReadAllText(TestPaths.FromRepository(
+            "src/DeskBox/Services/FileService.TransferProgress.cs"));
+        string win32Source = File.ReadAllText(TestPaths.FromRepository(
+            "src/DeskBox/Helpers/Win32Helper.cs"));
+
+        // Raw File.Move/Directory.Move/File.Delete leave Explorer views
+        // (including the desktop) with stale icons because they post no
+        // shell change notifications. Every managed move completion must
+        // report the rename: file atomic, file chunked, directory atomic,
+        // directory chunked.
+        Assert.Equal(
+            4,
+            transferSource.Split(
+                "NotifyShellItemMoved(",
+                StringSplitOptions.None).Length - 1);
+        Assert.Contains(
+            "Win32Helper.NotifyShellItemMoved(sourceFilePath, destinationFilePath)",
+            transferSource,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "Win32Helper.NotifyShellItemMoved(sourceDirectory, destinationDirectory)",
+            transferSource,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "NotifyShellDirectoriesUpdated(completedOperations, move);",
+            transferSource,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "Win32Helper.NotifyShellDirectoryUpdated(directory)",
+            transferSource,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "internal static void NotifyShellItemMoved",
+            win32Source,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "internal static void NotifyShellDirectoryUpdated",
+            win32Source,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "ShcneRenameItem",
+            win32Source,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "ShcneUpdateDir",
+            win32Source,
+            StringComparison.Ordinal);
     }
 
     [Fact]

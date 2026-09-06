@@ -92,9 +92,11 @@ public abstract partial class WidgetWindowBase : Window
     private bool _deferInteractiveResizeConfigUpdates;
     private PendingTitleBarDragFrame? _pendingTitleBarDragFrame;
     private IDisposable? _titleBarDragFrameRegistration;
-    private RectInt32? _pendingInteractiveResizeBounds;
+    private BoundsInteractionFrameMetrics? _titleBarDragFrameMetrics;
+    private PointInt32? _pendingInteractiveResizePointer;
     private IDisposable? _interactiveResizeFrameRegistration;
     private IDisposable? _interactiveResizeClockBoostLease;
+    private BoundsInteractionFrameMetrics? _interactiveResizeFrameMetrics;
     private SizeInt32 _interactiveResizeMinimumSize;
     private bool _isDisplayTopologyTransitionActive;
     private long _displayTopologyTransitionGeneration;
@@ -315,13 +317,18 @@ public abstract partial class WidgetWindowBase : Window
     protected void CleanupBase()
     {
         CancelPendingTitleBarDragFrame();
+        CompleteBoundsInteractionFrameMetrics(ref _titleBarDragFrameMetrics, "drag", "closed");
         CancelPendingInteractiveResizeFrame();
-        EndInteractiveResizePerformanceSession();
+        EndInteractiveResizePerformanceSession("closed");
         RemoveDesktopPinnedPointerRouting();
         RemoveDesktopPinnedActivationGuard();
         WidgetShellControl.HostedContentChanged -= WidgetShellControl_HostedContentChanged;
         CleanupWidgetGrouping();
         CleanupWidgetCollapse();
+        try { TrayAnimation?.Dispose(); }
+        catch (Exception ex) { App.LogVerbose($"[Composition] Tray cleanup failed: {ex.Message}"); }
+        try { WidgetShellControl.ReleaseOwnedCompositionResources(); }
+        catch (Exception ex) { App.LogVerbose($"[Composition] Shell cleanup failed: {ex.Message}"); }
         StopBackdropRefreshTimer();
         StopInactiveBackdropCleanupTimer();
         ReleaseTopMostSafetyTimer();
@@ -336,42 +343,35 @@ public abstract partial class WidgetWindowBase : Window
         TrackWindowClosedForDiagnostics();
     }
 
-    private void QueueInteractiveResizeBounds(RectInt32 bounds)
+    private void QueueInteractiveResizePointer(PointInt32 pointer)
     {
-        _pendingInteractiveResizeBounds = bounds;
-        // Both Win11 and Win10 commit through the shared frame coordinator so
-        // resize follows the same present-aligned cadence as drag and capsule
-        // transitions. On Win10 this replaces the legacy 8ms burst commits,
-        // which could reach ~125Hz of full XAML re-layout on pointer-move
-        // bursts; the coordinator consumes only the newest pending bounds per
-        // tick, keeping first-commit latency within a single frame.
+        _pendingInteractiveResizePointer = pointer;
+        _interactiveResizeFrameMetrics?.RecordPointerSample();
+        // Coalesce input before calculating size, snapping or updating guides.
+        // The owning display sets the cadence for this direct manipulation;
+        // intermediate mouse reports never trigger extra layout or snap work.
         _interactiveResizeFrameRegistration ??=
-            WidgetCompactAnimationCoordinator.Register(ApplyPendingInteractiveResizeBounds);
+            WidgetCompactAnimationCoordinator.Register(ApplyPendingInteractiveResizeBounds, HWnd, paceToDisplay: true);
     }
 
     private void ApplyPendingInteractiveResizeBounds()
     {
-        if (!IsResizing || _pendingInteractiveResizeBounds is not { } bounds)
+        if (!IsResizing)
         {
             CancelPendingInteractiveResizeFrame();
             return;
         }
 
-        _pendingInteractiveResizeBounds = null;
-        ApplyWindowBounds(
-            bounds.X,
-            bounds.Y,
-            bounds.Width,
-            bounds.Height,
-            persist: false,
-            updateConfig: false);
-    }
-
-    private void FlushPendingInteractiveResizeBounds()
-    {
-        if (_pendingInteractiveResizeBounds is { } bounds)
+        if (_pendingInteractiveResizePointer is not { } pointer)
         {
-            _pendingInteractiveResizeBounds = null;
+            return;
+        }
+
+        _pendingInteractiveResizePointer = null;
+        long started = Stopwatch.GetTimestamp();
+        try
+        {
+            RectInt32 bounds = ResolveInteractiveResizeBounds(pointer);
             ApplyWindowBounds(
                 bounds.X,
                 bounds.Y,
@@ -380,27 +380,99 @@ public abstract partial class WidgetWindowBase : Window
                 persist: false,
                 updateConfig: false);
         }
+        finally
+        {
+            _interactiveResizeFrameMetrics?.RecordUpdate(
+                Stopwatch.GetElapsedTime(started).TotalMilliseconds,
+                WidgetCompactAnimationCoordinator.GetFrameBudgetMilliseconds(HWnd));
+        }
+    }
 
+    private void FlushPendingInteractiveResizeBounds()
+    {
+        ApplyPendingInteractiveResizeBounds();
         CancelPendingInteractiveResizeFrame();
     }
 
     private void CancelPendingInteractiveResizeFrame()
     {
-        _pendingInteractiveResizeBounds = null;
+        _pendingInteractiveResizePointer = null;
         _interactiveResizeFrameRegistration?.Dispose();
         _interactiveResizeFrameRegistration = null;
     }
 
     private void BeginInteractiveResizePerformanceSession()
     {
+        CancelPendingInteractiveResizeFrame();
+        _interactiveResizeFrameMetrics = new BoundsInteractionFrameMetrics();
         _interactiveResizeClockBoostLease ??= CompositorClockBoostCoordinator.Acquire();
     }
 
-    private void EndInteractiveResizePerformanceSession()
+    private void EndInteractiveResizePerformanceSession(string outcome = "completed")
     {
+        CompleteBoundsInteractionFrameMetrics(ref _interactiveResizeFrameMetrics, "resize", outcome);
         _interactiveResizeClockBoostLease?.Dispose();
         _interactiveResizeClockBoostLease = null;
         _interactiveResizeMinimumSize = default;
+    }
+
+    private void CompleteBoundsInteractionFrameMetrics(
+        ref BoundsInteractionFrameMetrics? session,
+        string interaction,
+        string outcome = "completed")
+    {
+        BoundsInteractionFrameMetrics? metrics = session;
+        session = null;
+        if (metrics is null || metrics.PointerSamples == 0)
+        {
+            return;
+        }
+
+        string details = $"interaction={interaction} outcome={outcome} " +
+            $"hwnd=0x{HWnd.ToInt64():X} pointerSamples={metrics.PointerSamples} " +
+            $"frameUpdates={metrics.Updates} coalescedSamples={Math.Max(0, metrics.PointerSamples - metrics.Updates)} " +
+            $"maxInputToUpdateMs={metrics.MaximumInputToUpdateMilliseconds:F2} " +
+            $"maxUpdateWorkMs={metrics.MaximumUpdateMilliseconds:F2} " +
+            $"overBudgetUpdates={metrics.OverBudgetUpdates} latestBudgetMs={metrics.LatestFrameBudgetMilliseconds:F2}";
+        // These measure UI callbacks, not actual presentation. Capsule-bar
+        // batches can finish their native commit after the callback returns.
+        PerformanceLogger.Mark("WidgetBoundsInteraction", details);
+        App.LogVerbose($"[WidgetBoundsInteraction] {details}");
+    }
+
+    private sealed class BoundsInteractionFrameMetrics
+    {
+        private long _lastPointerTimestamp;
+
+        public int PointerSamples { get; private set; }
+        public int Updates { get; private set; }
+        public int OverBudgetUpdates { get; private set; }
+        public double MaximumInputToUpdateMilliseconds { get; private set; }
+        public double MaximumUpdateMilliseconds { get; private set; }
+        public double LatestFrameBudgetMilliseconds { get; private set; }
+
+        public void RecordPointerSample()
+        {
+            PointerSamples++;
+            _lastPointerTimestamp = Stopwatch.GetTimestamp();
+        }
+
+        public void RecordUpdate(double updateMilliseconds, double frameBudgetMilliseconds)
+        {
+            Updates++;
+            LatestFrameBudgetMilliseconds = frameBudgetMilliseconds;
+            MaximumUpdateMilliseconds = Math.Max(MaximumUpdateMilliseconds, updateMilliseconds);
+            if (_lastPointerTimestamp != 0)
+            {
+                MaximumInputToUpdateMilliseconds = Math.Max(
+                    MaximumInputToUpdateMilliseconds,
+                    Stopwatch.GetElapsedTime(_lastPointerTimestamp).TotalMilliseconds);
+            }
+            if (updateMilliseconds > frameBudgetMilliseconds)
+            {
+                OverBudgetUpdates++;
+            }
+        }
     }
 
     private readonly record struct PendingTitleBarDragFrame(

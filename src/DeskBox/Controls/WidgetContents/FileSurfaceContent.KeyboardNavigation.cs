@@ -94,6 +94,16 @@ public sealed partial class FileSurfaceContent
     private void ShowKeyboardContextMenu()
     {
         IReadOnlyList<WidgetItem> selectedItems = GetSelectedItems();
+        if (_settingsService.Settings.FileItemSystemContextMenuEnabled &&
+            selectedItems.Count == 1 &&
+            selectedItems[0] is not WidgetStackItem)
+        {
+            // Same single-item limitation as the right-tap path: the native
+            // Shell menu cannot host stacks or multi-selection.
+            _ = ShowSystemContextMenuAsync(selectedItems[0]);
+            return;
+        }
+
         MenuFlyout flyout = selectedItems.Count switch
         {
             0 => CreateContentAreaFlyout(),

@@ -179,6 +179,16 @@ public partial class SettingsViewModel
     public IReadOnlyList<SettingsOption> AvailableFileStackUnmatchedBehaviorOptions =>
         CreateSelectionOptions(AvailableFileStackUnmatchedBehaviors, AvailableFileStackUnmatchedBehaviorDisplayNames);
 
+    public IReadOnlyList<SettingsOption> AvailableAutomaticBackupIntervalOptions =>
+        CreateSelectionOptions(
+            AvailableAutomaticBackupIntervals,
+            AvailableAutomaticBackupIntervalDisplayNames);
+
+    public IReadOnlyList<SettingsOption> AvailableAutomaticBackupRetentionOptions =>
+        CreateSelectionOptions(
+            AvailableAutomaticBackupRetentionCounts,
+            AvailableAutomaticBackupRetentionDisplayNames);
+
     internal static IReadOnlyList<SettingsOption> CreateSelectionOptions<T>(
         IReadOnlyList<T> values,
         IReadOnlyList<string> displayNames)
@@ -267,5 +277,7 @@ public partial class SettingsViewModel
         OnPropertyChanged(nameof(AvailableFileStackThresholdOptions));
         OnPropertyChanged(nameof(AvailableFileStackOrderByOptions));
         OnPropertyChanged(nameof(AvailableFileStackUnmatchedBehaviorOptions));
+        OnPropertyChanged(nameof(AvailableAutomaticBackupIntervalOptions));
+        OnPropertyChanged(nameof(AvailableAutomaticBackupRetentionOptions));
     }
 }

@@ -36,7 +36,12 @@ public sealed partial class DesktopOrganizationWindow : Window
     {
         InitializeComponent();
         Title = App.Current.LocalizationService.T("DesktopOrganization.Window.Title");
-        WindowsCompatibilityService.ApplySafeBackdrop(this);
+        // The XAML solid background is the no-material fallback; clear it so
+        // Mica/Acrylic shows and the layered content border reads as a layer.
+        if (WindowsCompatibilityService.ApplySafeBackdrop(this) != "Solid")
+        {
+            RootGrid.Background = null;
+        }
         ExtendsContentIntoTitleBar = true;
         SetTitleBar(AppTitleBar);
 

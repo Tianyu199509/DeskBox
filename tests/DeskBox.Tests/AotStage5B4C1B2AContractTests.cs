@@ -203,7 +203,7 @@ public sealed class AotStage5B4C1B2AContractTests
         string launcher = ReadRepositoryFile("scripts/start-aot-preview.ps1");
         string project = ReadRepositoryFile("src/DeskBox/DeskBox.csproj");
         string report = ReadRepositoryFile(
-            "docs/architecture/aot-stage-5b-4c1b2a-report.md");
+            "docs/architecture/stage-reports/aot-stage-5b-4c1b2a-report.md");
         string roadmap = ReadRepositoryFile(
             "docs/architecture/rust-native-aot-roadmap.md");
 

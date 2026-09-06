@@ -15,7 +15,10 @@ public sealed partial class TodoWidgetViewModel
             return;
         }
 
-        TextSize = SettingsService.NormalizeTextSize(_settingsService.Settings.TextSize);
+        TextSize = SettingsService.NormalizeTextSize(
+            (_settingsService.Settings.TodoListTextSize > 0 ? _settingsService.Settings.TodoListTextSize : _settingsService.Settings.TextSize));
+        ContentTextSize = SettingsService.NormalizeTextSize(
+            (_settingsService.Settings.TodoContentTextSize > 0 ? _settingsService.Settings.TodoContentTextSize : _settingsService.Settings.TextSize));
         LayoutDensityScale = NormalizeDensity(_settingsService.Settings.LayoutDensityScale);
         ApplySettings(updateFilter: false);
     }

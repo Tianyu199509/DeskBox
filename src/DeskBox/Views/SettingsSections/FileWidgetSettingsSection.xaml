@@ -106,6 +106,29 @@
                 </Grid>
             </Border>
 
+            <Border Style="{StaticResource SettingsGroupStyle}">
+                <Grid
+                    MinHeight="{StaticResource SettingsRowMinHeight}"
+                    Padding="{StaticResource SettingsRowPadding}"
+                    ColumnDefinitions="*,Auto"
+                    ColumnSpacing="12">
+                    <Grid Grid.Column="0" ColumnDefinitions="Auto,*" Style="{StaticResource SettingCardIdentityGridStyle}">
+                        <FontIcon Grid.Column="0" FontSize="18" Glyph="&#xE712;" IsHitTestVisible="False" VerticalAlignment="Center" />
+                        <StackPanel Grid.Column="1" IsHitTestVisible="False" Spacing="3" VerticalAlignment="Center">
+                            <TextBlock Style="{StaticResource SettingTitleTextStyle}" svc:Localized.Key="Settings.FileWidget.SystemContextMenu.Title" />
+                            <TextBlock Style="{StaticResource SettingDescriptionTextStyle}" svc:Localized.Key="Settings.FileWidget.SystemContextMenu.Description" />
+                        </StackPanel>
+                    </Grid>
+                    <ToggleSwitch
+                        Grid.Column="1"
+                        MinWidth="0"
+                        VerticalAlignment="Center"
+                        OnContent=""
+                        OffContent=""
+                        IsOn="{x:Bind ViewModel.FileItemSystemContextMenuEnabled, Mode=TwoWay}" />
+                </Grid>
+            </Border>
+
         </StackPanel>
     </StackPanel>
 </UserControl>

@@ -11,7 +11,7 @@ public sealed partial class DesktopOrganizationTaskView
 
     private async void ExecuteButton_Click(object sender, RoutedEventArgs e)
     {
-        if (_isExecuting || _plan is not { EligibleItemCount: > 0 } previewPlan)
+        if (!_isPreviewReady || _isScanning || _isExecuting || _hasCompletedExecution || !ExecuteButton.IsEnabled || _plan is not { EligibleItemCount: > 0 } previewPlan)
         {
             return;
         }
@@ -19,9 +19,9 @@ public sealed partial class DesktopOrganizationTaskView
         DesktopOrganizationPlan plan;
         try
         {
-            plan = CreateCoordinator().CreateExecutionPlan(
+            plan = Coordinator.CreateExecutionPlan(
                 previewPlan,
-                _targetSelections.Values.ToList());
+                _targetSelections.Values.ToList(), _excludedSourcePaths);
             if (plan.EligibleItemCount == 0)
             {
                 ResultInfo.Severity = InfoBarSeverity.Warning;
@@ -41,10 +41,26 @@ public sealed partial class DesktopOrganizationTaskView
             return;
         }
 
+        _lastExecutionPlan = plan;
+        await RunPlanAsync(plan);
+    }
+
+    private async Task RunPlanAsync(DesktopOrganizationPlan plan)
+    {
         _executionCts?.Dispose();
         var cts = new CancellationTokenSource();
         _executionCts = cts;
         _isExecuting = true;
+        SelectionFeedbackInfo.IsOpen = false;
+        RetainedSelectionToolbar.IsEnabled = false;
+        PreviewContent.IsEnabled = false;
+        MoreButton.IsEnabled = false;
+        SourceSelectionHost.IsEnabled = false;
+        TargetSelectionHost.IsEnabled = false;
+        RetryPublicButton.IsEnabled = false;
+        UndoButton.IsEnabled = false;
+        DoneButton.IsEnabled = false;
+        ExcludedItemsButton.IsEnabled = false;
         RefreshButton.IsEnabled = false;
         ChangePathButton.IsEnabled = false;
         CancelButton.IsEnabled = false;
@@ -62,14 +78,16 @@ public sealed partial class DesktopOrganizationTaskView
                     "DesktopOrganization.Preview.Progress",
                     value.CompletedCount,
                     value.TotalCount,
-                    value.TargetDisplayName);
+                    T(value.SourceScope == DesktopOrganizationSourceScope.Public
+                        ? "DesktopOrganization.Public.SharedLabel" : "DesktopOrganization.Public.PersonalLabel") +
+                    (string.IsNullOrWhiteSpace(value.TargetDisplayName) ? string.Empty : " · " + value.TargetDisplayName));
             });
             DesktopOrganizationExecutionResult result =
-                await CreateCoordinator().ExecuteAsync(plan, progress, cts.Token);
-            int organizedCount = result.History.Items.Count;
-            int retainedCount = plan.ExcludedItems.Count + result.RetainedItems.Count;
-            _runtimeRetainedItems.Clear();
+                await Coordinator.ExecuteAsync(plan, progress, cts.Token, OwnerWindowHandle);
+            var attempted = plan.Targets.SelectMany(target => target.Items).Select(item => item.SourcePath).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            _runtimeRetainedItems.RemoveAll(item => attempted.Contains(item.SourcePath));
             _runtimeRetainedItems.AddRange(result.RetainedItems);
+            int retainedCount = _runtimeRetainedItems.Count;
             _lastHistoryId = result.History.CanUndo
                 ? result.History.Id
                 : null;
@@ -77,42 +95,29 @@ public sealed partial class DesktopOrganizationTaskView
                 ? InfoBarSeverity.Warning
                 : InfoBarSeverity.Success;
             ResultInfo.Title = retainedCount > 0
-                ? T("DesktopOrganization.Result.PartialTitle")
+                ? Format("DesktopOrganization.Layout.PartialResult", result.History.Items.Count(item => !item.IsRestored), retainedCount)
                 : T("DesktopOrganization.Result.SuccessTitle");
-            ResultInfo.Message = retainedCount > 0
-                ? Format(
-                    "DesktopOrganization.Result.PartialBody",
-                    organizedCount,
-                    retainedCount)
-                : Format(
-                    "DesktopOrganization.Result.SuccessBody",
-                    organizedCount,
-                    result.History.Targets.Count);
+            ResultInfo.Message = string.Join("\n", new[]
+            {
+                BuildSourceResult(result.History, DesktopOrganizationSourceScope.Personal),
+                BuildSourceResult(result.History, DesktopOrganizationSourceScope.Public)
+            }.Where(text => !string.IsNullOrWhiteSpace(text)));
             ResultInfo.IsOpen = true;
             ExecutionProgressPanel.Visibility = Visibility.Collapsed;
-            RenderExcludedItems(plan);
-            if (organizedCount == 0)
-            {
-                ExecuteButton.IsEnabled = true;
-                return;
-            }
-
             _hasCompletedExecution = true;
-            _basePlan = new DesktopOrganizationPlan
-            {
-                DesktopPath = plan.DesktopPath,
-                StorageRootPath = plan.StorageRootPath,
-                ExcludedItems = plan.ExcludedItems.ToList()
-            };
             _optionalIncludedPaths.Clear();
-            RenderExcludedItems(plan);
-            RefreshButton.Visibility = Visibility.Collapsed;
+            RenderExecutionResult(result.History);
+            RetryPublicButton.Visibility = _runtimeRetainedItems.Any(item => item.Reason != DesktopOrganizationRetentionReason.SourceChanged)
+                ? Visibility.Visible : Visibility.Collapsed;
+            RefreshButton.Visibility = Visibility.Visible;
             CancelButton.Visibility = Visibility.Collapsed;
             ExecuteButton.Visibility = Visibility.Collapsed;
             UndoButton.Visibility = result.History.CanUndo
                 ? Visibility.Visible
                 : Visibility.Collapsed;
             DoneButton.Visibility = Visibility.Visible;
+            DoneButton.Style = RetryPublicButton.Visibility == Visibility.Visible
+                ? null : (Style)Application.Current.Resources["AccentButtonStyle"];
             OrganizationCompleted?.Invoke(this, EventArgs.Empty);
         }
         catch (OperationCanceledException)
@@ -138,9 +143,20 @@ public sealed partial class DesktopOrganizationTaskView
         finally
         {
             _isExecuting = false;
+            RetainedSelectionToolbar.IsEnabled = true;
+            PreviewContent.IsEnabled = true;
+            MoreButton.IsEnabled = true;
             RefreshButton.IsEnabled = true;
-            ChangePathButton.IsEnabled = true;
+            ChangePathButton.IsEnabled = !_hasCompletedExecution;
+            SourceSelectionHost.IsEnabled = !_hasCompletedExecution;
+            TargetSelectionHost.IsEnabled = !_hasCompletedExecution;
+            RetryPublicButton.IsEnabled = true;
+            UndoButton.IsEnabled = true;
+            DoneButton.IsEnabled = true;
+            ExcludedItemsButton.IsEnabled = true;
             CancelButton.IsEnabled = true;
+            UpdateRecoveryState();
+            UpdateSummary(_plan);
             if (_closeAfterExecutionStops)
             {
                 _closeAfterExecutionStops = false;
@@ -158,10 +174,16 @@ public sealed partial class DesktopOrganizationTaskView
 
         _isExecuting = true;
         UndoButton.IsEnabled = false;
+        SourceSelectionHost.IsEnabled = false;
+        TargetSelectionHost.IsEnabled = false;
+        ExecuteButton.IsEnabled = false;
+        ChangePathButton.IsEnabled = false;
         DoneButton.IsEnabled = false;
+        RetryPublicButton.IsEnabled = false;
+        RefreshButton.IsEnabled = false;
         try
         {
-            await CreateCoordinator().UndoAsync(_lastHistoryId);
+            await Coordinator.UndoAsync(_lastHistoryId, OwnerWindowHandle);
             ResultInfo.Severity = InfoBarSeverity.Success;
             ResultInfo.Title = T("DesktopOrganization.Undo.Success");
             ResultInfo.Message = string.Empty;
@@ -173,6 +195,20 @@ public sealed partial class DesktopOrganizationTaskView
             UndoButton.Visibility = Visibility.Collapsed;
             DoneButton.Visibility = Visibility.Collapsed;
             await ScanAsync();
+        }
+        catch (DesktopOrganizationIncompleteUndoException ex)
+        {
+            ResultInfo.Severity = InfoBarSeverity.Warning;
+            ResultInfo.Title = T("DesktopOrganization.Public.UndoPendingTitle");
+            ResultInfo.Message = Format("DesktopOrganization.Public.UndoPending", ex.RestoredCount, ex.RemainingCount);
+            ResultInfo.IsOpen = true;
+            // An undo attempt ends forward retries. Only the remaining undo
+            // items can be continued, using their persisted receipts.
+            RetryPublicButton.Visibility = Visibility.Collapsed;
+            UndoButton.Content = T("DesktopOrganization.Public.ContinueUndo");
+            var history = App.Current.SettingsService.Settings.RecentOrganizationHistory
+                .FirstOrDefault(entry => entry.Id == _lastHistoryId);
+            if (_hasCompletedExecution && history is not null) RenderExecutionResult(history);
         }
         catch (Exception ex)
         {
@@ -187,82 +223,55 @@ public sealed partial class DesktopOrganizationTaskView
             _isExecuting = false;
             UndoButton.IsEnabled = true;
             DoneButton.IsEnabled = true;
+            RetryPublicButton.IsEnabled = true;
+            RefreshButton.IsEnabled = true;
+            SourceSelectionHost.IsEnabled = !_hasCompletedExecution;
+            TargetSelectionHost.IsEnabled = !_hasCompletedExecution;
+            ChangePathButton.IsEnabled = !_hasCompletedExecution;
+            // An interrupted undo can leave a recovery journal behind; refresh
+            // the cached hint so the banner and execute button reflect it.
+            UpdateRecoveryState();
+            UpdateSummary(_plan);
         }
     }
 
-    private async void ChangePathButton_Click(object sender, RoutedEventArgs e)
+    private void ChangePathButton_Click(object sender, RoutedEventArgs e)
     {
-        if (_isExecuting)
-        {
-            return;
-        }
+        LocationsFlyout.Hide();
+        if (_isExecuting || _isScanning) return;
+        App.Current.ShowSettings("FileStorageSettings");
+    }
 
-        string? folderPath = await FolderPickerService.PickFolderAsync(OwnerWindowHandle);
-        if (string.IsNullOrWhiteSpace(folderPath))
-        {
-            return;
-        }
+    private async void RefreshButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (!_isExecuting && !_isScanning) await ScanAsync(preserveSelection: true);
+    }
 
-        string normalizedPath = SettingsService.NormalizeManagedStorageRootPath(folderPath);
-        string currentPath = SettingsService.NormalizeManagedStorageRootPath(
-            App.Current.SettingsService.Settings.DefaultManagedStorageRootPath);
-        if (string.Equals(normalizedPath, currentPath, StringComparison.OrdinalIgnoreCase))
-        {
-            return;
-        }
-
-        int affectedCount = App.Current.WidgetManager?.GetDefaultManagedStorageWidgetCount() ?? 0;
-        if (affectedCount > 0 && XamlRoot is not null)
-        {
-            var dialog = new ContentDialog
-            {
-                XamlRoot = XamlRoot,
-                Title = T("Settings.Dialog.MigrateTitle"),
-                PrimaryButtonText = T("Settings.Dialog.MigrateButton"),
-                CloseButtonText = T("Common.Cancel"),
-                DefaultButton = ContentDialogButton.Primary,
-                Content = new TextBlock
-                {
-                    Text = Format(
-                        "Settings.Dialog.MigrateBody",
-                        affectedCount,
-                        currentPath,
-                        normalizedPath),
-                    TextWrapping = TextWrapping.Wrap
-                }
-            };
-            if (await dialog.ShowAsync() != ContentDialogResult.Primary)
-            {
-                return;
-            }
-        }
-
-        ChangePathButton.IsEnabled = false;
-        RefreshButton.IsEnabled = false;
+    private void ResetSelectionMenuItem_Click(object sender, RoutedEventArgs e)
+    {
+        if (_isExecuting || _isScanning || _hasCompletedExecution || _basePlan is null || _plan is null) return;
         try
         {
-            if (App.Current.WidgetManager is not null)
-            {
-                await App.Current.WidgetManager.UpdateDefaultManagedStorageRootAsync(normalizedPath);
-            }
-
-            App.Current.SettingsService.Settings.DefaultManagedStorageRootPath = normalizedPath;
-            await App.Current.SettingsService.SaveAsync();
-            BeginScan();
+            var plan = Coordinator.CreatePreviewPlanWithOptionalItems(_basePlan, [],
+                _plan.IncludePersonalDesktop, _plan.IncludePublicDesktop);
+            _excludedSourcePaths.Clear();
+            _optionalIncludedPaths.Clear();
+            _retainedSelection.Clear();
+            _targetSelections.Clear();
+            _newPaths.Clear();
+            _plan = plan;
+            RenderPlan(plan);
+            ShowSelectionFeedback(T("DesktopOrganization.Layout.ResetDone"), showPendingLink: false);
         }
         catch (Exception ex)
         {
-            App.Log($"[DesktopOrganization] Failed to change storage path: {ex}");
+            App.Log($"[DesktopOrganization] Reset preview failed: {ex}");
             ResultInfo.Severity = InfoBarSeverity.Error;
-            ResultInfo.Title = T("DesktopOrganization.Window.ChangePathError");
+            ResultInfo.Title = T("DesktopOrganization.Result.FailedTitle");
             ResultInfo.Message = T("DesktopOrganization.Result.FailedBody");
             ResultInfo.IsOpen = true;
-            ChangePathButton.IsEnabled = true;
-            RefreshButton.IsEnabled = true;
         }
     }
-
-    private void RefreshButton_Click(object sender, RoutedEventArgs e) => BeginScan();
 
     private void CancelButton_Click(object sender, RoutedEventArgs e) =>
         CloseRequested?.Invoke(this, EventArgs.Empty);

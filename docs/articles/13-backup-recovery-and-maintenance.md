@@ -172,5 +172,5 @@ DeskBox 在内部附件目录保存托管副本。它更稳定，但占用应用
 - [文件格子与桌面收纳](01-file-widgets.md)
 - [随记格子](04-quick-capture.md)
 - [桌面一键整理与自动整理](02-desktop-organization.md)
-- [安装与首次配置](../user-guide/01-getting-started.md)
-- [常见问题与故障排查](../user-guide/10-troubleshooting.md)
+- [安装与首次配置指南](15-getting-started.md)
+- [常见问题与故障排查](16-troubleshooting.md)

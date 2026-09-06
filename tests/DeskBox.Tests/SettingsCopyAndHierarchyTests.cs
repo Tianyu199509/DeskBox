@@ -157,6 +157,14 @@ public sealed class SettingsCopyAndHierarchyTests
             "SelectedFileWidgetFolderOpenBehavior",
             fileWidgetXaml,
             StringComparison.Ordinal);
+        Assert.Contains(
+            "IsOn=\"{x:Bind ViewModel.FileItemSystemContextMenuEnabled, Mode=TwoWay}\"",
+            fileWidgetXaml,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "public bool FileItemSystemContextMenuEnabled { get; set; }",
+            appSettings,
+            StringComparison.Ordinal);
 
         Assert.Contains("HoverButtonActionsSummaryText", windowXaml, StringComparison.Ordinal);
         Assert.Contains("Click=\"HoverButtonActionsDropDown_Click\"", windowXaml, StringComparison.Ordinal);
@@ -347,7 +355,7 @@ public sealed class SettingsCopyAndHierarchyTests
                 appearanceXaml,
                 "Style=\"{StaticResource SettingCardIdentityGridStyle}\""));
         Assert.Equal(
-            4,
+            5,
             CountOccurrences(
                 fileWidgetXaml,
                 "Style=\"{StaticResource SettingCardIdentityGridStyle}\""));

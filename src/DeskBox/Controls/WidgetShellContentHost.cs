@@ -1,4 +1,5 @@
 using DeskBox.Contracts;
+using DeskBox.Services;
 
 namespace DeskBox.Controls;
 
@@ -18,6 +19,15 @@ public sealed class WidgetShellContentHost
         IWidgetContent,
         object> _disposedContents = new();
     private readonly object _disposedContentGate = new();
+    private readonly System.Runtime.CompilerServices.ConditionalWeakTable<
+        IWidgetContent, AppearanceStamp> _appliedAppearances = new();
+    private long _appearanceVersion;
+
+    private sealed class AppearanceStamp
+    {
+        internal long Version = -1;
+    }
+
     private IWidgetContent? _pendingContent;
     private Task? _pendingInitializationTask;
     private WidgetShellPreparedContent? _preparedContent;
@@ -202,7 +212,7 @@ public sealed class WidgetShellContentHost
                 _beginTransition(outgoingContent, content);
             }
 
-            content.ApplyAppearance();
+            ApplyContentAppearance(content);
             content.OnWindowVisibilityChanged(_isWindowVisible);
             if (_isWindowVisible && _isWindowRevealCompleted)
             {
@@ -247,9 +257,33 @@ public sealed class WidgetShellContentHost
         return CurrentContent?.RefreshAsync() ?? Task.CompletedTask;
     }
 
-    public void ApplyAppearance()
+    public void ApplyAppearance(bool invalidate = true)
     {
-        CurrentContent?.ApplyAppearance();
+        if (invalidate)
+        {
+            ++_appearanceVersion;
+        }
+        if (CurrentContent is { } content)
+        {
+            ApplyContentAppearance(content);
+        }
+    }
+
+    private void ApplyContentAppearance(IWidgetContent content)
+    {
+        AppearanceStamp stamp = _appliedAppearances.GetValue(
+            content, static _ => new AppearanceStamp());
+        long version = _appearanceVersion;
+        if (stamp.Version == version)
+        {
+            PerformanceLogger.RecordContentAppearanceSkipped();
+            return;
+        }
+
+        content.ApplyAppearance();
+        // A failed or reentrant update must not mark a newer appearance as applied.
+        stamp.Version = version;
+        PerformanceLogger.RecordContentAppearanceApplied();
     }
 
     public void OnActivated()
@@ -406,7 +440,7 @@ public sealed class WidgetShellContentHost
         {
             _rollbackTransition(outgoingContent);
             CurrentContent = outgoingContent;
-            outgoingContent.ApplyAppearance();
+            ApplyContentAppearance(outgoingContent);
             outgoingContent.OnWindowVisibilityChanged(_isWindowVisible);
             if (_isWindowVisible && _isWindowRevealCompleted)
             {

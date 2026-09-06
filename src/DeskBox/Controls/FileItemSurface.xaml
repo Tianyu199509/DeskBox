@@ -183,7 +183,11 @@
                         Text="{x:Bind ActivityStatusText, Mode=OneWay}"
                         Visibility="{x:Bind ActivityStatusVisibility, Mode=OneWay}" />
                     <TextBlock
+                        MaxWidth="360"
+                        MaxLines="2"
                         Text="{Binding FullPath}"
+                        TextTrimming="CharacterEllipsis"
+                        TextWrapping="Wrap"
                         Visibility="{x:Bind PathTooltipVisibility, Mode=OneWay}" />
                 </StackPanel>
             </ToolTip>

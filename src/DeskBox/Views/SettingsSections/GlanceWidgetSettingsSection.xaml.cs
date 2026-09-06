@@ -319,6 +319,11 @@ public sealed partial class GlanceWidgetSettingsSection : UserControl
             .. _fontCatalogService.GetFontFamilies().Select(name => (name, (object)name))
         ];
         SetOptions(FontComboBox, fonts);
+        SetOptions(
+            TimeFormatComboBox,
+            (Localization.T("Glance.Typography.FollowSystem"), GlanceTimeFormatMode.FollowSystem),
+            (Localization.T("Glance.Typography.Hour24"), GlanceTimeFormatMode.Hour24),
+            (Localization.T("Glance.Typography.Hour12"), GlanceTimeFormatMode.Hour12));
     }
 
     private void EnsureOptionsPopulated()
@@ -335,7 +340,8 @@ public sealed partial class GlanceWidgetSettingsSection : UserControl
             ReadabilityComboBox.Items.Count > 0 &&
             CalendarMaterialComboBox.Items.Count > 0 &&
             TraditionalCalendarComboBox.Items.Count > 0 &&
-            FontComboBox.Items.Count > 0;
+            FontComboBox.Items.Count > 0 &&
+            TimeFormatComboBox.Items.Count > 0;
         if (optionsArePopulated &&
             string.Equals(
                 _optionsLocalizationSignature,
@@ -477,6 +483,7 @@ public sealed partial class GlanceWidgetSettingsSection : UserControl
             SelectOption(CalendarMaterialComboBox, _settings.CalendarMaterialMode);
             SelectOption(TraditionalCalendarComboBox, _settings.TraditionalCalendarMode);
             SelectOption(FontComboBox, _settings.TimeFontFamily ?? string.Empty);
+            SelectOption(TimeFormatComboBox, _settings.TimeFormat);
             RandomOrderToggle.IsOn = _settings.RandomOrder;
             TimeScaleSlider.Value = _settings.TimeScale;
             BackgroundImageTransparencySlider.Value = _settings.BackgroundImageTransparency;
@@ -896,6 +903,19 @@ public sealed partial class GlanceWidgetSettingsSection : UserControl
         if (FontComboBox.SelectedItem is SelectionItem { Value: string font })
         {
             await SaveAsync(settings => settings.TimeFontFamily = string.IsNullOrWhiteSpace(font) ? null : font);
+        }
+    }
+
+    private async void TimeFormatComboBox_SelectionChanged(
+        object sender,
+        SelectionChangedEventArgs e)
+    {
+        if (TimeFormatComboBox.SelectedItem is SelectionItem
+            {
+                Value: GlanceTimeFormatMode timeFormat
+            })
+        {
+            await SaveAsync(settings => settings.TimeFormat = timeFormat);
         }
     }
 

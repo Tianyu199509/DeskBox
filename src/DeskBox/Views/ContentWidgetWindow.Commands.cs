@@ -24,13 +24,21 @@ public sealed partial class ContentWidgetWindow
 {
     private bool _isCloseWidgetPending;
 
+    private WidgetChromeMode ResolveTitleBarChromeMode() =>
+        App.Current.WidgetManager?.ResolveWidgetChromeMode(_config, _descriptor) ??
+        _chromeModeResolver.Resolve(_config, _descriptor);
+
+    protected override void OnWidgetGroupPresentationChanged(WidgetGroupPresentation? presentation)
+    {
+        if (!IsClosing && ContentWidgetShell.ChromeMode != ResolveTitleBarChromeMode())
+        {
+            ApplyTitleBarLayout();
+        }
+    }
+
     private void ApplyTitleBarLayout()
     {
-        WidgetChromeMode chromeMode =
-            App.Current.WidgetManager?.ResolveWidgetChromeMode(
-                _config,
-                _descriptor) ??
-            _chromeModeResolver.Resolve(_config, _descriptor);
+        WidgetChromeMode chromeMode = ResolveTitleBarChromeMode();
         double titleTextSize = chromeMode == WidgetChromeMode.Compact
             ? SettingsService.NormalizeTextSize(SettingsService.Settings.TextSize)
             : _titleViewModel.TitleTextSize;
@@ -40,32 +48,9 @@ public sealed partial class ContentWidgetWindow
             includeInnerPadding: false,
             chromeMode);
 
-        ContentWidgetShell.ChromeMode = chromeMode;
-        ContentWidgetShell.TitleIconElement.IconSize = metrics.TitleIconSize;
-        ContentWidgetShell.TitleTextElement.FontSize = metrics.TitleTextSize;
+        ContentWidgetShell.ApplyTitleBarMetrics(metrics, chromeMode);
         ApplyTitleActionButtonConfiguration();
         ApplyLockActionIconState();
-
-        WidgetTitleBarMetricsCalculator.ApplyActionButton(ContentWidgetShell.PositionLockActionButton, metrics);
-        WidgetTitleBarMetricsCalculator.ApplyActionButton(ContentWidgetShell.SizeLockActionButton, metrics);
-        WidgetTitleBarMetricsCalculator.ApplyActionButton(ContentWidgetShell.AddActionButton, metrics);
-        WidgetTitleBarMetricsCalculator.ApplyActionButton(ContentWidgetShell.MoreActionButton, metrics);
-        WidgetTitleBarMetricsCalculator.ApplyActionButton(ContentWidgetShell.CloseActionButton, metrics);
-
-        WidgetActionIconHelper.ApplyPairSize(
-            ContentWidgetShell.PositionLockActionIcon,
-            ContentWidgetShell.PositionLockFilledActionIcon,
-            metrics);
-        WidgetActionIconHelper.ApplyPairSize(
-            ContentWidgetShell.SizeLockActionIcon,
-            ContentWidgetShell.SizeLockFilledActionIcon,
-            metrics);
-        WidgetTitleBarMetricsCalculator.ApplyActionIcon(ContentWidgetShell.AddActionIcon, metrics);
-        WidgetTitleBarMetricsCalculator.ApplyActionIcon(ContentWidgetShell.MoreActionIcon, metrics);
-        WidgetTitleBarMetricsCalculator.ApplyActionIcon(ContentWidgetShell.CloseActionIcon, metrics);
-
-        ContentWidgetShell.SetTitleBarRowHeight(metrics.RowHeight);
-        ContentWidgetShell.SetTitleBarPadding(WidgetTitleBarMetricsCalculator.CreateOuterPadding(chromeMode));
     }
 
     private void ApplyTitleActionButtonConfiguration()
@@ -265,7 +250,6 @@ public sealed partial class ContentWidgetWindow
 
     private void ContentWidgetShell_TitleDoubleTapped(object? sender, DoubleTappedRoutedEventArgs e)
     {
-        CancelPendingTitleBarClickCollapse();
         e.Handled = true;
         DispatcherQueue.TryEnqueue(() =>
         {
@@ -811,30 +795,40 @@ public sealed partial class ContentWidgetWindow
         }
 
         _isCancellingTitleRename = false;
+        _titleRenameOpenedAtTick = Environment.TickCount64;
         BeginCompactInteraction();
         App.Current.WidgetManager?.BeginWidgetInteraction("content-title-rename-opened");
         var editor = CreateTitleRenameEditor();
         ContentWidgetShell.TitleEditorContent = editor;
         HoldTemporaryTopMost();
-        AppWindow.Show();
-        base.Activate();
-        Win32Helper.SetForegroundWindow(HWnd);
-        FocusTitleRenameEditor(editor);
+        ActivateForTitleRename();
         DispatcherQueue.TryEnqueue(() =>
         {
             if (ReferenceEquals(ContentWidgetShell.TitleEditorContent, editor))
             {
-                base.Activate();
-                Win32Helper.SetForegroundWindow(HWnd);
-                FocusTitleRenameEditor(editor);
+                ActivateForTitleRename();
             }
         });
+        InlineEditorFocus.FocusWhenLoaded(
+            editor,
+            static focused => focused.SelectAll(),
+            DispatcherQueue,
+            "ContentTitleRename");
     }
 
-    private static void FocusTitleRenameEditor(TextBox editor)
+    private void ActivateForTitleRename()
     {
-        editor.Focus(FocusState.Programmatic);
-        editor.SelectAll();
+        if (WidgetLayerService.UsesDesktopPinnedMode())
+        {
+            // Resting desktop-pinned widgets carry WS_EX_NOACTIVATE; strip it
+            // before the explicit activation so the editor window can take
+            // keyboard focus without waiting for the GotFocus routing.
+            WidgetLayerService.PrepareForDesktopPinnedKeyboardInput(HWnd);
+        }
+
+        AppWindow.Show();
+        base.Activate();
+        Win32Helper.SetForegroundWindow(HWnd);
     }
 
     private TextBox CreateTitleRenameEditor()
@@ -873,6 +867,13 @@ public sealed partial class ContentWidgetWindow
         if (_isCancellingTitleRename)
         {
             _isCancellingTitleRename = false;
+            return;
+        }
+
+        if (InlineEditorFocus.TryRecoverFocusWithinGrace(
+                _titleRenameOpenedAtTick,
+                sender as TextBox))
+        {
             return;
         }
 
@@ -916,8 +917,11 @@ public sealed partial class ContentWidgetWindow
         catch (Exception ex)
         {
             await ShowErrorDialogAsync(App.Current.LocalizationService.T("Widget.RenameFailed"), ex.Message);
-            editor.Focus(FocusState.Programmatic);
-            editor.SelectAll();
+            InlineEditorFocus.FocusWhenLoaded(
+                editor,
+                static focused => focused.SelectAll(),
+                DispatcherQueue,
+                "ContentTitleRename");
         }
         finally
         {

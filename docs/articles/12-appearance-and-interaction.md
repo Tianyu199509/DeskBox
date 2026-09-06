@@ -143,4 +143,4 @@ DeskBox 的外观设置把材质、信息密度和交互方式分开，让你可
 - [全局唤醒与跨应用拖放](05-global-wake-and-drag-drop.md)
 - [胶囊模式](09-capsule-mode.md)
 - [格子组](10-widget-groups.md)
-- [常见问题与故障排查](../user-guide/10-troubleshooting.md)
+- [常见问题与故障排查](16-troubleshooting.md)

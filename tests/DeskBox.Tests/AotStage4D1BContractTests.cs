@@ -53,14 +53,23 @@ public sealed class AotStage4D1BContractTests
         Assert.DoesNotContain("SetObjectProperty", source, StringComparison.Ordinal);
         Assert.DoesNotContain("GetType().GetProperty", source, StringComparison.Ordinal);
 
+        // Combos such as Grid|HeaderKey or StackPanel|HeaderKey are intentional
+        // search-catalog markers (indexed by update-settings-search-catalog.ps1);
+        // Localized.cs deliberately ignores them at runtime because those
+        // containers have no Header/Description property.
         IReadOnlyDictionary<string, int> usages = ReadLocalizedXamlUsages();
-        Assert.Equal(5, usages.Count);
-        Assert.Equal(164, usages["toolkit:SettingsCard|HeaderKey"]);
-        Assert.Equal(135, usages["toolkit:SettingsCard|DescriptionKey"]);
-        Assert.Equal(21, usages["toolkit:SettingsExpander|HeaderKey"]);
-        Assert.Equal(8, usages["toolkit:SettingsExpander|DescriptionKey"]);
+        Assert.Equal(10, usages.Count);
+        Assert.Equal(170, usages["toolkit:SettingsCard|HeaderKey"]);
+        Assert.Equal(142, usages["toolkit:SettingsCard|DescriptionKey"]);
+        Assert.Equal(20, usages["toolkit:SettingsExpander|HeaderKey"]);
+        Assert.Equal(7, usages["toolkit:SettingsExpander|DescriptionKey"]);
         Assert.Equal(2, usages["TextBox|HeaderKey"]);
-        Assert.Equal(330, usages.Values.Sum());
+        Assert.Equal(2, usages["Grid|HeaderKey"]);
+        Assert.Equal(1, usages["Grid|DescriptionKey"]);
+        Assert.Equal(1, usages["StackPanel|HeaderKey"]);
+        Assert.Equal(1, usages["Expander|HeaderKey"]);
+        Assert.Equal(1, usages["Expander|DescriptionKey"]);
+        Assert.Equal(347, usages.Values.Sum());
     }
 
     [Fact]

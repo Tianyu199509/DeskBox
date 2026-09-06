@@ -10,6 +10,19 @@
     Foreground="{ThemeResource TextFillColorPrimaryBrush}"
     mc:Ignorable="d">
 
+    <UserControl.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.ThemeDictionaries>
+                <ResourceDictionary x:Key="Default">
+                    <SolidColorBrush x:Key="WidgetGroupTabStripBorderBrush" Color="{ThemeResource TextFillColorPrimary}" Opacity="0.10" />
+                </ResourceDictionary>
+                <ResourceDictionary x:Key="HighContrast">
+                    <SolidColorBrush x:Key="WidgetGroupTabStripBorderBrush" Color="{ThemeResource SystemColorHighlightColor}" />
+                </ResourceDictionary>
+            </ResourceDictionary.ThemeDictionaries>
+        </ResourceDictionary>
+    </UserControl.Resources>
+
     <Grid
         x:Name="ShellRoot"
         AllowDrop="True"
@@ -21,7 +34,7 @@
             <ScaleTransform x:Name="ShellRootScale" ScaleX="1" ScaleY="1" />
         </Grid.RenderTransform>
         <Grid.RowDefinitions>
-            <RowDefinition Height="Auto" MinHeight="46" />
+            <RowDefinition Height="Auto" MinHeight="40" />
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
@@ -34,7 +47,7 @@
         <Grid
             x:Name="TitleBarGrid"
             Grid.Row="0"
-            Padding="14,7,12,5"
+            Padding="14,4,12,4"
             HorizontalAlignment="Stretch"
             Background="Transparent"
             PointerMoved="TitleBarGrid_PointerMoved"
@@ -94,63 +107,77 @@
                     VerticalAlignment="Center"
                     Visibility="Collapsed" />
 
-                <StackPanel
-                    x:Name="RightActionButtons"
+                <!-- Continue the native tab baseline across the action area.
+                     The standard header divider is hidden only for group tabs. -->
+                <Border
+                    x:Name="TabActionsDivider"
                     Grid.Column="1"
-                    Orientation="Horizontal"
-                    Spacing="2"
-                    Opacity="0"
+                    Height="1"
+                    VerticalAlignment="Bottom"
+                    Background="{ThemeResource WidgetGroupTabStripBorderBrush}"
+                    IsHitTestVisible="False"
+                    Visibility="Collapsed" />
+                <Grid
+                    x:Name="RightActionButtonsHost"
+                    Grid.Column="1"
                     VerticalAlignment="Center">
                     <StackPanel
-                        x:Name="HoverActionButtons"
+                        x:Name="RightActionButtons"
                         Orientation="Horizontal"
-                        Spacing="2">
+                        Spacing="2"
+                        Opacity="0"
+                        VerticalAlignment="Center">
+                        <StackPanel
+                            x:Name="HoverActionButtons"
+                            Orientation="Horizontal"
+                            Spacing="2">
+                            <Button
+                                x:Name="PositionLockButton"
+                                Click="PositionLockButton_Click"
+                                Style="{StaticResource WidgetTitleActionButtonStyle}">
+                                <Grid>
+                                    <Path x:Name="PositionLockButtonIcon" Data="M10.12 3.14a2 2 0 0 1 3.2-.52l4.06 4.05a2 2 0 0 1-.52 3.2l-3.46 1.74a1.5 1.5 0 0 0-.72.78L11.25 16a1 1 0 0 1-1.64.33L7 13.7 3.7 17H3v-.7L6.3 13l-2.62-2.61a1 1 0 0 1 .34-1.64L7.6 7.32c.34-.14.62-.4.78-.72l1.73-3.46Zm2.5.18a1 1 0 0 0-1.6.26L9.29 7.04a2.5 2.5 0 0 1-1.31 1.2L4.39 9.69l5.93 5.93 1.43-3.59a2.5 2.5 0 0 1 1.2-1.3l3.46-1.74a1 1 0 0 0 .26-1.6l-4.05-4.06Z" Fill="{Binding Foreground, ElementName=PositionLockButton}" Stretch="Uniform" />
+                                    <Path x:Name="PositionLockButtonFilledIcon" Visibility="Collapsed" Data="M13.33 2.62a2 2 0 0 0-3.2.52L8.38 6.6a1.5 1.5 0 0 1-.78.72L4 8.75a1 1 0 0 0-.33 1.64l2.61 2.6L3 16.3v.7h.7L7 13.72l2.61 2.6a1 1 0 0 0 1.64-.33l1.43-3.59c.14-.34.4-.62.72-.78l3.46-1.73a2 2 0 0 0 .52-3.2l-4.05-4.06Z" Fill="{Binding Foreground, ElementName=PositionLockButton}" Stretch="Uniform" />
+                                </Grid>
+                            </Button>
+                            <Button
+                                x:Name="SizeLockButton"
+                                Click="SizeLockButton_Click"
+                                Style="{StaticResource WidgetTitleActionButtonStyle}">
+                                <Grid>
+                                    <Path x:Name="SizeLockButtonIcon" Data="M10 1a4 4 0 0 1 4 4v2.05a2.5 2.5 0 0 1 2 2.45v6a2.5 2.5 0 0 1-2.5 2.5h-7A2.5 2.5 0 0 1 4 15.5v-6c0-1.2.86-2.22 2-2.45V5a4 4 0 0 1 4-4ZM6.5 8C5.67 8 5 8.67 5 9.5v6c0 .83.67 1.5 1.5 1.5h7c.83 0 1.5-.67 1.5-1.5v-6c0-.83-.67-1.5-1.5-1.5h-7Zm3.5 3.5a1 1 0 1 1 0 2 1 1 0 0 1 0-2ZM10 2a3 3 0 0 0-3 3v2h6V5a3 3 0 0 0-3-3Z" Fill="{Binding Foreground, ElementName=SizeLockButton}" Stretch="Uniform" />
+                                    <Path x:Name="SizeLockButtonFilledIcon" Visibility="Collapsed" Data="M10 1a4 4 0 0 1 4 4v2.05a2.5 2.5 0 0 1 2 2.45v6a2.5 2.5 0 0 1-2.5 2.5h-7A2.5 2.5 0 0 1 4 15.5v-6c0-1.2.86-2.22 2-2.45V5a4 4 0 0 1 4-4Zm0 10.5a1 1 0 1 0 0 2 1 1 0 0 0 0-2ZM10 2a3 3 0 0 0-3 3v2h6V5a3 3 0 0 0-3-3Z" Fill="{Binding Foreground, ElementName=SizeLockButton}" Stretch="Uniform" />
+                                </Grid>
+                            </Button>
+                            <Button
+                                x:Name="AddButton"
+                                Click="AddButton_Click"
+                                Style="{StaticResource WidgetTitleActionButtonStyle}"
+                                Visibility="{x:Bind AddButtonVisibility, Mode=OneWay}">
+                                <Path x:Name="AddButtonIcon" Data="M6 10c0-.28.22-.5.5-.5h3v-3a.5.5 0 0 1 1 0v3h3a.5.5 0 0 1 0 1h-3v3a.5.5 0 0 1-1 0v-3h-3A.5.5 0 0 1 6 10Zm4 8a8 8 0 1 0 0-16 8 8 0 0 0 0 16Zm0-1a7 7 0 1 1 0-14 7 7 0 0 1 0 14Z" Fill="{Binding Foreground, ElementName=AddButton}" Stretch="Uniform" />
+                            </Button>
+                            <Button
+                                x:Name="MoreButton"
+                                Click="MoreButton_Click"
+                                Style="{StaticResource WidgetTitleActionButtonStyle}">
+                                <Path x:Name="MoreButtonIcon" Data="M5 9a1 1 0 1 0 0 2 1 1 0 0 0 0-2Zm5 0a1 1 0 1 0 0 2 1 1 0 0 0 0-2Zm5 0a1 1 0 1 0 0 2 1 1 0 0 0 0-2Z" Fill="{Binding Foreground, ElementName=MoreButton}" Stretch="Uniform" />
+                            </Button>
+                            <Button
+                                x:Name="CloseButton"
+                                Click="CloseButton_Click"
+                                Foreground="{ThemeResource SystemFillColorCriticalBrush}"
+                                Style="{StaticResource WidgetTitleActionButtonStyle}">
+                                <Path x:Name="CloseButtonIcon" Data="M8.5 4h3a1.5 1.5 0 0 0-3 0Zm-1 0a2.5 2.5 0 0 1 5 0h5a.5.5 0 0 1 0 1h-1.05l-1.2 10.34A3 3 0 0 1 12.27 18H7.73a3 3 0 0 1-2.98-2.66L3.55 5H2.5a.5.5 0 0 1 0-1h5ZM5.74 15.23A2 2 0 0 0 7.73 17h4.54a2 2 0 0 0 1.99-1.77L15.44 5H4.56l1.18 10.23ZM8.5 7.5c.28 0 .5.22.5.5v6a.5.5 0 0 1-1 0V8c0-.28.22-.5.5-.5ZM12 8a.5.5 0 0 0-1 0v6a.5.5 0 0 0 1 0V8Z" Fill="{Binding Foreground, ElementName=CloseButton}" Stretch="Uniform" />
+                            </Button>
+                        </StackPanel>
                         <Button
-                            x:Name="PositionLockButton"
-                            Click="PositionLockButton_Click"
+                            x:Name="CollapseButton"
+                            Click="CollapseButton_Click"
                             Style="{StaticResource WidgetTitleActionButtonStyle}">
-                            <Grid>
-                                <Path x:Name="PositionLockButtonIcon" Data="M10.12 3.14a2 2 0 0 1 3.2-.52l4.06 4.05a2 2 0 0 1-.52 3.2l-3.46 1.74a1.5 1.5 0 0 0-.72.78L11.25 16a1 1 0 0 1-1.64.33L7 13.7 3.7 17H3v-.7L6.3 13l-2.62-2.61a1 1 0 0 1 .34-1.64L7.6 7.32c.34-.14.62-.4.78-.72l1.73-3.46Zm2.5.18a1 1 0 0 0-1.6.26L9.29 7.04a2.5 2.5 0 0 1-1.31 1.2L4.39 9.69l5.93 5.93 1.43-3.59a2.5 2.5 0 0 1 1.2-1.3l3.46-1.74a1 1 0 0 0 .26-1.6l-4.05-4.06Z" Fill="{Binding Foreground, ElementName=PositionLockButton}" Stretch="Uniform" />
-                                <Path x:Name="PositionLockButtonFilledIcon" Visibility="Collapsed" Data="M13.33 2.62a2 2 0 0 0-3.2.52L8.38 6.6a1.5 1.5 0 0 1-.78.72L4 8.75a1 1 0 0 0-.33 1.64l2.61 2.6L3 16.3v.7h.7L7 13.72l2.61 2.6a1 1 0 0 0 1.64-.33l1.43-3.59c.14-.34.4-.62.72-.78l3.46-1.73a2 2 0 0 0 .52-3.2l-4.05-4.06Z" Fill="{Binding Foreground, ElementName=PositionLockButton}" Stretch="Uniform" />
-                            </Grid>
-                        </Button>
-                        <Button
-                            x:Name="SizeLockButton"
-                            Click="SizeLockButton_Click"
-                            Style="{StaticResource WidgetTitleActionButtonStyle}">
-                            <Grid>
-                                <Path x:Name="SizeLockButtonIcon" Data="M10 1a4 4 0 0 1 4 4v2.05a2.5 2.5 0 0 1 2 2.45v6a2.5 2.5 0 0 1-2.5 2.5h-7A2.5 2.5 0 0 1 4 15.5v-6c0-1.2.86-2.22 2-2.45V5a4 4 0 0 1 4-4ZM6.5 8C5.67 8 5 8.67 5 9.5v6c0 .83.67 1.5 1.5 1.5h7c.83 0 1.5-.67 1.5-1.5v-6c0-.83-.67-1.5-1.5-1.5h-7Zm3.5 3.5a1 1 0 1 1 0 2 1 1 0 0 1 0-2ZM10 2a3 3 0 0 0-3 3v2h6V5a3 3 0 0 0-3-3Z" Fill="{Binding Foreground, ElementName=SizeLockButton}" Stretch="Uniform" />
-                                <Path x:Name="SizeLockButtonFilledIcon" Visibility="Collapsed" Data="M10 1a4 4 0 0 1 4 4v2.05a2.5 2.5 0 0 1 2 2.45v6a2.5 2.5 0 0 1-2.5 2.5h-7A2.5 2.5 0 0 1 4 15.5v-6c0-1.2.86-2.22 2-2.45V5a4 4 0 0 1 4-4Zm0 10.5a1 1 0 1 0 0 2 1 1 0 0 0 0-2ZM10 2a3 3 0 0 0-3 3v2h6V5a3 3 0 0 0-3-3Z" Fill="{Binding Foreground, ElementName=SizeLockButton}" Stretch="Uniform" />
-                            </Grid>
-                        </Button>
-                        <Button
-                            x:Name="AddButton"
-                            Click="AddButton_Click"
-                            Style="{StaticResource WidgetTitleActionButtonStyle}"
-                            Visibility="{x:Bind AddButtonVisibility, Mode=OneWay}">
-                            <Path x:Name="AddButtonIcon" Data="M6 10c0-.28.22-.5.5-.5h3v-3a.5.5 0 0 1 1 0v3h3a.5.5 0 0 1 0 1h-3v3a.5.5 0 0 1-1 0v-3h-3A.5.5 0 0 1 6 10Zm4 8a8 8 0 1 0 0-16 8 8 0 0 0 0 16Zm0-1a7 7 0 1 1 0-14 7 7 0 0 1 0 14Z" Fill="{Binding Foreground, ElementName=AddButton}" Stretch="Uniform" />
-                        </Button>
-                        <Button
-                            x:Name="MoreButton"
-                            Click="MoreButton_Click"
-                            Style="{StaticResource WidgetTitleActionButtonStyle}">
-                            <Path x:Name="MoreButtonIcon" Data="M5 9a1 1 0 1 0 0 2 1 1 0 0 0 0-2Zm5 0a1 1 0 1 0 0 2 1 1 0 0 0 0-2Zm5 0a1 1 0 1 0 0 2 1 1 0 0 0 0-2Z" Fill="{Binding Foreground, ElementName=MoreButton}" Stretch="Uniform" />
-                        </Button>
-                        <Button
-                            x:Name="CloseButton"
-                            Click="CloseButton_Click"
-                            Foreground="{ThemeResource SystemFillColorCriticalBrush}"
-                            Style="{StaticResource WidgetTitleActionButtonStyle}">
-                            <Path x:Name="CloseButtonIcon" Data="M8.5 4h3a1.5 1.5 0 0 0-3 0Zm-1 0a2.5 2.5 0 0 1 5 0h5a.5.5 0 0 1 0 1h-1.05l-1.2 10.34A3 3 0 0 1 12.27 18H7.73a3 3 0 0 1-2.98-2.66L3.55 5H2.5a.5.5 0 0 1 0-1h5ZM5.74 15.23A2 2 0 0 0 7.73 17h4.54a2 2 0 0 0 1.99-1.77L15.44 5H4.56l1.18 10.23ZM8.5 7.5c.28 0 .5.22.5.5v6a.5.5 0 0 1-1 0V8c0-.28.22-.5.5-.5ZM12 8a.5.5 0 0 0-1 0v6a.5.5 0 0 0 1 0V8Z" Fill="{Binding Foreground, ElementName=CloseButton}" Stretch="Uniform" />
+                            <FontIcon FontSize="12" Glyph="&#xE70E;" />
                         </Button>
                     </StackPanel>
-                    <Button
-                        x:Name="CollapseButton"
-                        Click="CollapseButton_Click"
-                        Style="{StaticResource WidgetTitleActionButtonStyle}">
-                        <FontIcon FontSize="12" Glyph="&#xE70E;" />
-                    </Button>
-                </StackPanel>
+                </Grid>
             </Grid>
         </Grid>
 
@@ -158,7 +185,7 @@
             x:Name="HeaderDivider"
             Grid.Row="0"
             Height="1"
-            Margin="12,0"
+            Margin="12,0,12,4"
             Opacity="0.62"
             VerticalAlignment="Bottom" />
 
@@ -412,43 +439,49 @@
                         <Ellipse Width="1.6" Height="1.6" HorizontalAlignment="Center" VerticalAlignment="Center" Fill="#000000" />
                     </Grid>
                 </Grid>
-                <Border
-                    x:Name="CompactIdentityRegionHighlight"
-                    Grid.ColumnSpan="2"
-                    Margin="-8,0,0,0"
-                    Background="{ThemeResource SubtleFillColorSecondaryBrush}"
-                    CornerRadius="14,6,6,14"
-                    IsHitTestVisible="False"
-                    Opacity="0" />
             </Grid>
 
-            <!-- Drag grip dots (outside IdentityHost so full-bleed opacity doesn't hide them) -->
-            <Grid
-                x:Name="CompactDragGripIndicator"
-                Width="6"
-                Height="12"
+            <!-- Stable left-side drag hit zone. It intentionally overlaps only
+                 the leading edge of the text column so moving into the middle
+                 body still switches to the expand interaction. The OS move
+                 cursor set on this element is the drag affordance. -->
+            <Border
+                x:Name="CompactMoveHitRegion"
+                Grid.Column="0"
+                Grid.ColumnSpan="2"
+                Width="48"
+                Height="34"
                 HorizontalAlignment="Left"
                 VerticalAlignment="Center"
-                Margin="2,0,0,0"
-                Opacity="0"
-                Canvas.ZIndex="46"
-                IsHitTestVisible="False">
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="*" />
-                    <RowDefinition Height="*" />
-                    <RowDefinition Height="*" />
-                </Grid.RowDefinitions>
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="*" />
-                </Grid.ColumnDefinitions>
-                <Ellipse Width="2" Height="2" HorizontalAlignment="Center" VerticalAlignment="Center" Fill="{ThemeResource TextFillColorSecondaryBrush}" />
-                <Ellipse Grid.Column="1" Width="2" Height="2" HorizontalAlignment="Center" VerticalAlignment="Center" Fill="{ThemeResource TextFillColorSecondaryBrush}" />
-                <Ellipse Grid.Row="1" Width="2" Height="2" HorizontalAlignment="Center" VerticalAlignment="Center" Fill="{ThemeResource TextFillColorSecondaryBrush}" />
-                <Ellipse Grid.Row="1" Grid.Column="1" Width="2" Height="2" HorizontalAlignment="Center" VerticalAlignment="Center" Fill="{ThemeResource TextFillColorSecondaryBrush}" />
-                <Ellipse Grid.Row="2" Width="2" Height="2" HorizontalAlignment="Center" VerticalAlignment="Center" Fill="{ThemeResource TextFillColorSecondaryBrush}" />
-                <Ellipse Grid.Row="2" Grid.Column="1" Width="2" Height="2" HorizontalAlignment="Center" VerticalAlignment="Center" Fill="{ThemeResource TextFillColorSecondaryBrush}" />
-            </Grid>
+                Background="#01000000"
+                Canvas.ZIndex="47"
+                PointerEntered="CompactMoveHitRegion_PointerEntered"
+                PointerExited="CompactMoveHitRegion_PointerExited" />
+
+            <!-- Compact interaction hint. This is an in-tree visual rather than a
+                 ToolTip popup, so WinUI cannot dismiss it while the pointer stays
+                 in the capsule. It never participates in hit testing. -->
+            <Border
+                x:Name="CompactHintPresenter"
+                Grid.Column="0"
+                Grid.ColumnSpan="2"
+                HorizontalAlignment="Left"
+                VerticalAlignment="Top"
+                Margin="2,-34,0,0"
+                Padding="8,5"
+                Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"
+                BorderBrush="{ThemeResource SurfaceStrokeColorDefaultBrush}"
+                BorderThickness="1"
+                CornerRadius="6"
+                Canvas.ZIndex="120"
+                IsHitTestVisible="False"
+                Visibility="Collapsed">
+                <TextBlock
+                    x:Name="CompactHintText"
+                    FontSize="12"
+                    Foreground="{ThemeResource TextFillColorPrimaryBrush}"
+                    TextTrimming="CharacterEllipsis" />
+            </Border>
 
             <Grid
                 x:Name="CompactTextContainer"
@@ -481,9 +514,10 @@
                         <TranslateTransform x:Name="CompactTextTransform" />
                     </StackPanel.RenderTransform>
                     <Grid x:Name="CompactTitleViewport" Height="18">
-                        <Canvas x:Name="CompactTitleMarqueeCanvas">
+                        <Grid x:Name="CompactTitleMarqueeTrack">
                             <TextBlock
                                 x:Name="CompactTitleText"
+                                HorizontalAlignment="Left"
                                 VerticalAlignment="Center"
                                 FontSize="12.5"
                                 FontWeight="SemiBold"
@@ -492,6 +526,7 @@
                                 TextTrimming="CharacterEllipsis" />
                             <TextBlock
                                 x:Name="CompactTitleMarqueeClone"
+                                HorizontalAlignment="Left"
                                 VerticalAlignment="Center"
                                 FontSize="12.5"
                                 FontWeight="SemiBold"
@@ -499,7 +534,7 @@
                                 TextWrapping="NoWrap"
                                 TextTrimming="Clip"
                                 Visibility="Collapsed" />
-                        </Canvas>
+                        </Grid>
                     </Grid>
                     <Border
                         x:Name="CompactTextSeparator"
@@ -509,10 +544,11 @@
                         Background="{ThemeResource TextFillColorTertiaryBrush}"
                         CornerRadius="2" />
                     <Grid x:Name="CompactSummaryViewport" Height="17">
-                        <Canvas x:Name="CompactSummaryMarqueeCanvas">
+                        <Grid x:Name="CompactSummaryMarqueeTrack">
                             <TextBlock
                                 x:Name="CompactSummaryText"
                                 MinWidth="0"
+                                HorizontalAlignment="Left"
                                 VerticalAlignment="Center"
                                 FontSize="11.5"
                                 Foreground="{ThemeResource TextFillColorSecondaryBrush}"
@@ -522,6 +558,7 @@
                             <TextBlock
                                 x:Name="CompactSummaryMarqueeClone"
                                 MinWidth="0"
+                                HorizontalAlignment="Left"
                                 VerticalAlignment="Center"
                                 FontSize="11.5"
                                 Foreground="{ThemeResource TextFillColorSecondaryBrush}"
@@ -529,7 +566,7 @@
                                 TextWrapping="NoWrap"
                                 TextTrimming="Clip"
                                 Visibility="Collapsed" />
-                        </Canvas>
+                        </Grid>
                     </Grid>
             </StackPanel>
             <Grid

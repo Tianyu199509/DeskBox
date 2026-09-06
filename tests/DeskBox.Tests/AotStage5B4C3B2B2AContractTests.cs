@@ -132,7 +132,7 @@ public sealed class AotStage5B4C3B2B2AContractTests
         string audit = Read("scripts/publish-aot-audit.ps1");
         string project = Read("src/DeskBox/DeskBox.csproj");
         string report = Read(
-            "docs/architecture/aot-stage-5b-4c3b2b2a-report.md");
+            "docs/architecture/stage-reports/aot-stage-5b-4c3b2b2a-report.md");
         string roadmap = Read("docs/architecture/rust-native-aot-roadmap.md");
 
         Assert.Contains("$auditProfileVersion = 58", audit, StringComparison.Ordinal);

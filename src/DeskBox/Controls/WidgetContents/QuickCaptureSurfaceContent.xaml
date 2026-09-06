@@ -436,7 +436,7 @@
                             Style="{StaticResource SubtleButtonStyle}">
                             <StackPanel Orientation="Horizontal" Spacing="7">
                                 <FontIcon FontSize="12" Glyph="&#xE723;" />
-                                <TextBlock VerticalAlignment="Center" FontSize="{Binding TextSize}" Text="{Binding AddFileText}" />
+                                <TextBlock VerticalAlignment="Center" FontSize="{Binding ContentTextSize}" Text="{Binding AddFileText}" />
                             </StackPanel>
                         </Button>
                         <Grid
@@ -480,7 +480,7 @@
                                 Grid.Row="1"
                                 MinHeight="80"
                                 Margin="8,4,0,6"
-                                FontSize="{Binding TextSize}"
+                                FontSize="{Binding ContentTextSize}"
                                 Foreground="{ThemeResource TextFillColorPrimaryBrush}"
                                 TaskToggleRequested="DetailMarkdownView_TaskToggleRequested"
                                 Visibility="Collapsed" />
@@ -488,7 +488,7 @@
                                 x:Name="DetailMarkdownEditor"
                                 Grid.Row="1"
                                 MinHeight="80"
-                                EditorFontSize="{Binding TextSize}"
+                                EditorFontSize="{Binding ContentTextSize}"
                                 EditorEnterBehavior="{Binding EditorEnterBehavior}"
                                 EnableCtrlSSaveShortcut="True"
                                 PlaceholderText="{Binding DetailBodyPlaceholderText}"
@@ -510,7 +510,7 @@
                     Margin="8,0,4,0"
                     HorizontalAlignment="Left"
                     VerticalAlignment="Center"
-                    FontSize="{Binding DetailHeaderTextSize}"
+                    FontSize="{Binding ContentDetailHeaderTextSize}"
                     Foreground="{ThemeResource TextFillColorTertiaryBrush}"
                     MaxLines="1"
                     TextTrimming="CharacterEllipsis"
@@ -531,14 +531,14 @@
                         Opacity="0.72" />
                     <TextBlock
                         HorizontalAlignment="Center"
-                        FontSize="{Binding TitleTextSize}"
+                        FontSize="{Binding ContentTitleTextSize}"
                         FontWeight="SemiBold"
                         Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                         Text="{Binding EmptyStateTitle}"
                         TextAlignment="Center" />
                     <TextBlock
                         HorizontalAlignment="Center"
-                        FontSize="{Binding SecondaryTextSize}"
+                        FontSize="{Binding ContentSecondaryTextSize}"
                         Foreground="{ThemeResource TextFillColorTertiaryBrush}"
                         Text="{Binding EmptyStateText}"
                         TextAlignment="Center"

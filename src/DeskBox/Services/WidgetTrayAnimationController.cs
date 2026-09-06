@@ -1,5 +1,7 @@
 using System.Diagnostics;
+using System.ComponentModel;
 using System.Numerics;
+using System.Runtime.InteropServices;
 using DeskBox.Helpers;
 using DeskBox.Models;
 using Microsoft.UI;
@@ -25,7 +27,7 @@ public sealed record WidgetTrayAnimationProfile(
     int DurationMs,
     bool IsEnabled);
 
-public sealed class WidgetTrayAnimationController
+public sealed class WidgetTrayAnimationController : IDisposable
 {
     public const float RestingOpacity = 1.0f;
     public const float SoftOpacity = 0.0f;
@@ -52,6 +54,8 @@ public sealed class WidgetTrayAnimationController
     private float _preparedOpacity = RestingOpacity;
     private float _preparedScale = RestingScale;
     private int _preparedRefreshRateHz = WidgetDisplayRefreshRatePolicy.DefaultRefreshRateHz;
+    private int _preparedRefreshAnchorX;
+    private int _preparedRefreshAnchorY;
     private EventHandler<object>? _contentReadyRenderingHandler;
     private int _contentReadyFrameCount;
     private long _contentReadyGeneration;
@@ -68,9 +72,13 @@ public sealed class WidgetTrayAnimationController
     private long _renderGeneration;
     private string _renderEasingIntensity = string.Empty;
     private Action? _renderCompleted;
-    private IDisposable? _renderClockBoostLease;
+    private Action? _renderFailed;
+    private IDisposable? _renderFrameRegistration;
+    private readonly WidgetAnimationFramePacingPolicy _renderPacing = new();
+    private PointInt32? _lastCommittedPosition;
     private WidgetTrayAnimationFrameTracker? _renderFrameTracker;
     private Microsoft.UI.Composition.Compositor? _cachedCompositor;
+    private readonly WidgetCompositionResources _compositionResources = new();
 
     public WidgetTrayAnimationController(
         AppWindow appWindow,
@@ -297,6 +305,7 @@ public sealed class WidgetTrayAnimationController
 
     public void PrepareVisualState(double offsetX, double offsetY, float opacity, float scale)
     {
+        _lastCommittedPosition = null;
         // Capture the destination monitor while the HWND still rests there.
         // Show animations move the native window off-screen during preparation,
         // where a later monitor lookup could otherwise return the wrong display.
@@ -306,6 +315,8 @@ public sealed class WidgetTrayAnimationController
         _preparedOpacity = opacity;
         _preparedScale = scale;
         var bounds = _getAnimationBounds();
+        _preparedRefreshAnchorX = (int)Math.Round(bounds.X + bounds.Width / 2);
+        _preparedRefreshAnchorY = (int)Math.Round(bounds.Y + bounds.Height / 2);
         _targetPosition = new PointInt32(
             (int)Math.Round(bounds.X),
             (int)Math.Round(bounds.Y));
@@ -358,8 +369,11 @@ public sealed class WidgetTrayAnimationController
         bool isShowing,
         long generation,
         string easingIntensity,
-        Action completed)
+        Action completed,
+        Action? failed = null)
     {
+        try
+        {
         _log(
             $"AnimateStart mode={(isShowing ? "show" : "hide")} gen={generation} durationMs={durationMs} " +
             $"windowOffset=({fromOffsetX:F0},{fromOffsetY:F0})->({toOffsetX:F0},{toOffsetY:F0}) " +
@@ -390,13 +404,13 @@ public sealed class WidgetTrayAnimationController
 
         // ── Opacity & Scale: Composition KeyFrame animations (GPU-driven) ──
         var compositor = GetCachedCompositor(visual);
-        var easing = CreateEasingFunction(compositor, easingIntensity, isShowing);
+        var easing = _compositionResources.GetTrayEasing(compositor, easingIntensity, isShowing);
         var duration = TimeSpan.FromMilliseconds(durationMs);
 
         // Opacity animation
         if (Math.Abs(fromOpacity - toOpacity) > 0.001f)
         {
-            var opacityAnim = compositor.CreateScalarKeyFrameAnimation();
+            var opacityAnim = _compositionResources.GetScalar(compositor, WidgetAnimationTemplate.TrayOpacity);
             opacityAnim.Duration = duration;
             opacityAnim.InsertKeyFrame(0, fromOpacity);
             opacityAnim.InsertKeyFrame(1, toOpacity, easing);
@@ -412,7 +426,7 @@ public sealed class WidgetTrayAnimationController
         if (Math.Abs(fromScale - toScale) > 0.001f)
         {
             visual.CenterPoint = GetVisualCenterPoint();
-            var scaleAnim = compositor.CreateVector3KeyFrameAnimation();
+            var scaleAnim = _compositionResources.GetVector3(compositor, WidgetAnimationTemplate.TrayScale);
             scaleAnim.Duration = duration;
             scaleAnim.InsertKeyFrame(0, new Vector3(fromScale, fromScale, 1));
             scaleAnim.InsertKeyFrame(1, new Vector3(toScale, toScale, 1), easing);
@@ -425,9 +439,8 @@ public sealed class WidgetTrayAnimationController
             visual.Scale = new Vector3(toScale, toScale, 1);
         }
 
-        // ── Window offset: still CPU-driven via AppWindow.Move() ──
-        // Only the position needs CompositionTarget.Rendering; opacity/scale
-        // are now GPU-driven and don't need per-frame CPU updates.
+        // Native movement shares the interaction clock; opacity/scale remain
+        // compositor animations and do not require CPU property updates.
         _renderFromOffsetX = fromOffsetX;
         _renderFromOffsetY = fromOffsetY;
         _renderToOffsetX = toOffsetX;
@@ -436,19 +449,27 @@ public sealed class WidgetTrayAnimationController
         _renderIsShowing = isShowing;
         _renderGeneration = generation;
         _renderCompleted = completed;
+        _renderFailed = failed;
         _renderStopwatch = Stopwatch.StartNew();
         _isRendering = true;
         long startedTimestamp = Stopwatch.GetTimestamp();
         _renderFrameTracker = new WidgetTrayAnimationFrameTracker(
             startedTimestamp,
             [_preparedRefreshRateHz]);
-        _renderClockBoostLease = CompositorClockBoostCoordinator.Acquire();
+        _renderPacing.Reset(0, GetAnimationFrameBudgetMilliseconds());
 
         // Use the same easing for window position interpolation.
         _renderEasingIntensity = easingIntensity;
 
-        CompositionTarget.Rendering -= OnRenderingFrame;
-        CompositionTarget.Rendering += OnRenderingFrame;
+        _renderFrameRegistration = WidgetCompactAnimationCoordinator.Register(
+            OnRenderingFrame, GetAnimationFrameBudgetMilliseconds);
+        }
+        catch (Exception ex)
+        {
+            _log($"Animation start failed: {ex.Message}");
+            try { AbortPositionAnimation(generation, failed); }
+            catch (Exception cleanupError) { _log($"Animation failure cleanup: {cleanupError.Message}"); }
+        }
     }
 
     /// <summary>
@@ -471,8 +492,11 @@ public sealed class WidgetTrayAnimationController
         bool isShowing,
         long generation,
         string easingIntensity,
-        Action completed)
+        Action completed,
+        Action? failed = null)
     {
+        try
+        {
         _log(
             $"SharedAnimateStart mode={(isShowing ? "show" : "hide")} gen={generation} durationMs={durationMs} " +
             $"windowOffset=({fromOffsetX:F0},{fromOffsetY:F0})->({toOffsetX:F0},{toOffsetY:F0})");
@@ -500,12 +524,12 @@ public sealed class WidgetTrayAnimationController
 
         // ── Opacity & Scale: Composition KeyFrame animations (GPU-driven) ──
         var compositor = GetCachedCompositor(visual);
-        var easing = CreateEasingFunction(compositor, easingIntensity, isShowing);
+        var easing = _compositionResources.GetTrayEasing(compositor, easingIntensity, isShowing);
         var duration = TimeSpan.FromMilliseconds(durationMs);
 
         if (Math.Abs(fromOpacity - toOpacity) > 0.001f)
         {
-            var opacityAnim = compositor.CreateScalarKeyFrameAnimation();
+            var opacityAnim = _compositionResources.GetScalar(compositor, WidgetAnimationTemplate.TrayOpacity);
             opacityAnim.Duration = duration;
             opacityAnim.InsertKeyFrame(0, fromOpacity);
             opacityAnim.InsertKeyFrame(1, toOpacity, easing);
@@ -520,7 +544,7 @@ public sealed class WidgetTrayAnimationController
         if (Math.Abs(fromScale - toScale) > 0.001f)
         {
             visual.CenterPoint = GetVisualCenterPoint();
-            var scaleAnim = compositor.CreateVector3KeyFrameAnimation();
+            var scaleAnim = _compositionResources.GetVector3(compositor, WidgetAnimationTemplate.TrayScale);
             scaleAnim.Duration = duration;
             scaleAnim.InsertKeyFrame(0, new Vector3(fromScale, fromScale, 1));
             scaleAnim.InsertKeyFrame(1, new Vector3(toScale, toScale, 1), easing);
@@ -547,9 +571,20 @@ public sealed class WidgetTrayAnimationController
             ToOffsetX = toOffsetX,
             ToOffsetY = toOffsetY,
             RefreshRateHz = _preparedRefreshRateHz,
+            RefreshAnchorX = _preparedRefreshAnchorX,
+            RefreshAnchorY = _preparedRefreshAnchorY,
             IsValid = () => capturedGeneration == Generation,
-            Completed = () => CompleteAnimation(toOffsetX, toOffsetY, isShowing, capturedGeneration, completed)
+            Completed = () => CompleteAnimation(toOffsetX, toOffsetY, isShowing, capturedGeneration, completed,
+                positionAlreadyCommitted: true),
+            Failed = () => AbortPositionAnimation(capturedGeneration, failed)
         };
+        }
+        catch
+        {
+            try { AbortPositionAnimation(generation, failed); }
+            catch (Exception cleanupError) { _log($"Animation failure cleanup: {cleanupError.Message}"); }
+            throw;
+        }
     }
 
     private PointInt32 GetCurrentBasePosition()
@@ -577,7 +612,7 @@ public sealed class WidgetTrayAnimationController
         return current;
     }
 
-    private void OnRenderingFrame(object? sender, object e)
+    private void OnRenderingFrame()
     {
         try // ✅ 添加异常保护防止渲染线程崩溃
         {
@@ -594,18 +629,30 @@ public sealed class WidgetTrayAnimationController
                 return;
             }
 
-            // Rendering is the compositor-paced clock. Do not impose a 60 Hz
-            // timer or a synthetic FPS cap; record every callback against the
-            // destination display's real frame budget instead.
-            _renderFrameTracker?.RecordFrame(Stopwatch.GetTimestamp());
+            long timestamp = Stopwatch.GetTimestamp();
+            _renderFrameTracker?.RecordFrame(timestamp);
 
-            double rawProgress = Math.Clamp(stopwatch.Elapsed.TotalMilliseconds / _renderDurationMs, 0.0, 1.0);
+            double nowMs = stopwatch.Elapsed.TotalMilliseconds;
+            double rawProgress = Math.Clamp(nowMs / _renderDurationMs, 0.0, 1.0);
+            bool finalFrame = rawProgress >= 1.0;
+            double budgetMs = GetAnimationFrameBudgetMilliseconds();
+            if (!_renderPacing.ShouldSubmit(nowMs, budgetMs, force: finalFrame))
+            {
+                return;
+            }
             double easedProgress = WidgetAnimationSettings.Ease(rawProgress, _renderEasingIntensity, _renderIsShowing);
             double currentOffsetX = Lerp(_renderFromOffsetX, _renderToOffsetX, easedProgress);
             double currentOffsetY = Lerp(_renderFromOffsetY, _renderToOffsetY, easedProgress);
 
             // Only move the window — opacity/scale are GPU-driven by Composition animations.
-            ApplyWindowOffset(currentOffsetX, currentOffsetY);
+            long started = Stopwatch.GetTimestamp();
+            bool submitted = ApplyWindowOffset(currentOffsetX, currentOffsetY, force: finalFrame);
+            if (submitted)
+            {
+                _renderPacing.RecordSubmission(nowMs, Stopwatch.GetElapsedTime(started).TotalMilliseconds);
+                _renderFrameTracker?.RecordPositionSubmission(timestamp,
+                    (int)Math.Round(1000.0 / Math.Max(0.1, budgetMs)));
+            }
 
             if (rawProgress < 1.0)
             {
@@ -619,13 +666,16 @@ public sealed class WidgetTrayAnimationController
                 _renderToOffsetY,
                 _renderIsShowing,
                 _renderGeneration,
-                _renderCompleted);
+                _renderCompleted,
+                positionAlreadyCommitted: true);
         }
         catch (Exception ex)
         {
             // 记录异常日志但不让渲染线程崩溃
             App.Log($"[WidgetTrayAnimationController] Frame exception: {ex.Message}\n{ex.StackTrace}");
-            StopRendering("failed"); // 安全停止动画，防止状态不一致
+            StopRendering("failed");
+            try { AbortPositionAnimation(_renderGeneration, _renderFailed); }
+            catch (Exception cleanupError) { _log($"Animation failure cleanup: {cleanupError.Message}"); }
         }
     }
 
@@ -638,7 +688,8 @@ public sealed class WidgetTrayAnimationController
 
         _isRendering = false;
         _renderStopwatch = null;
-        CompositionTarget.Rendering -= OnRenderingFrame;
+        _renderFrameRegistration?.Dispose();
+        _renderFrameRegistration = null;
         WidgetTrayAnimationFrameTracker? tracker = _renderFrameTracker;
         _renderFrameTracker = null;
         WidgetTrayAnimationDiagnostics.Report(
@@ -648,14 +699,13 @@ public sealed class WidgetTrayAnimationController
             outcome,
             $"window:0x{_windowHandle.ToInt64():X}",
             _log);
-        _renderClockBoostLease?.Dispose();
-        _renderClockBoostLease = null;
     }
 
     public void Stop()
     {
         CancelContentReadyCallback();
         StopRendering();
+        _lastCommittedPosition = null;
         RestoreDwmTransitions();
 
         if (_cachedRootVisual is { } visual)
@@ -710,6 +760,25 @@ public sealed class WidgetTrayAnimationController
         RestoreWindowPosition();
     }
 
+    private double GetAnimationFrameBudgetMilliseconds() =>
+        WidgetCompactAnimationCoordinator.GetFrameBudgetMillisecondsForPoint(
+            _preparedRefreshAnchorX, _preparedRefreshAnchorY);
+
+    public void Dispose()
+    {
+        NextGeneration();
+        try
+        {
+            Stop();
+        }
+        finally
+        {
+            _compositionResources.Dispose();
+            _cachedRootVisual = null;
+            _cachedCompositor = null;
+        }
+    }
+
     public void RestoreVisualState()
     {
         try
@@ -736,7 +805,11 @@ public sealed class WidgetTrayAnimationController
             IsApplyingBounds = true;
             try
             {
-                MoveNativeWindow(target);
+                if (_lastCommittedPosition is not { } committed ||
+                    committed.X != target.X || committed.Y != target.Y)
+                {
+                    MoveNativeWindow(target);
+                }
             }
             finally
             {
@@ -745,6 +818,31 @@ public sealed class WidgetTrayAnimationController
         }
 
         _targetPosition = null;
+        _lastCommittedPosition = null;
+    }
+
+    private void AbortPositionAnimation(long generation, Action? failed)
+    {
+        if (generation != Generation)
+        {
+            return;
+        }
+        try
+        {
+            Stop();
+            SetOffsetOverride(null, null);
+            RestoreWindowPosition();
+        }
+        catch (Exception ex)
+        {
+            _log($"Animation failure position restore: {ex.Message}");
+        }
+        finally
+        {
+            RestoreVisualState();
+            try { RevealWindowForTrayShow(); }
+            finally { failed?.Invoke(); }
+        }
     }
 
     private void CompleteAnimation(
@@ -752,21 +850,32 @@ public sealed class WidgetTrayAnimationController
         double finalOffsetY,
         bool isShowing,
         long generation,
-        Action? completed)
+        Action? completed,
+        bool positionAlreadyCommitted = false)
     {
         if (generation != Generation)
         {
             return;
         }
 
-        ApplyWindowOffset(finalOffsetX, finalOffsetY);
+        if (!positionAlreadyCommitted)
+        {
+            ApplyWindowOffset(finalOffsetX, finalOffsetY, force: true);
+        }
+        else
+        {
+            var target = _targetPosition ?? GetCurrentBasePosition();
+            _lastCommittedPosition = new PointInt32(
+                target.X + (int)Math.Round(finalOffsetX),
+                target.Y + (int)Math.Round(finalOffsetY));
+        }
         SetOffsetOverride(null, null);
         RestoreDwmTransitions();
         _log($"AnimateCompleted mode={(isShowing ? "show" : "hide")} gen={generation}");
         completed?.Invoke();
     }
 
-    private void ApplyWindowOffset(double offsetX, double offsetY)
+    private bool ApplyWindowOffset(double offsetX, double offsetY, bool force = false)
     {
         // Skip the GetWindowRect round-trip when the resting position is
         // already known — it only matters as a fallback.
@@ -775,62 +884,44 @@ public sealed class WidgetTrayAnimationController
             target.X + (int)Math.Round(offsetX),
             target.Y + (int)Math.Round(offsetY));
 
+        if (!force && _lastCommittedPosition is { } previous &&
+            previous.X == nextPosition.X && previous.Y == nextPosition.Y)
+        {
+            return false;
+        }
+
         IsApplyingBounds = true;
         try
         {
             MoveNativeWindow(nextPosition);
+            _lastCommittedPosition = nextPosition;
         }
         finally
         {
             IsApplyingBounds = false;
         }
+        return true;
     }
 
     private void MoveNativeWindow(PointInt32 position)
     {
         // Direct P/Invoke SetWindowPos — bypasses AppWindow.Move() WinRT
         // marshalling overhead for lower per-frame latency.
-        Win32Helper.SetWindowPos(
+        if (!Win32Helper.SetWindowPos(
             _windowHandle,
             IntPtr.Zero,
             position.X,
             position.Y,
             0, 0,
-            Win32Helper.SWP_NOSIZE | Win32Helper.SWP_NOZORDER | Win32Helper.SWP_NOACTIVATE);
+            Win32Helper.SWP_NOSIZE | Win32Helper.SWP_NOZORDER | Win32Helper.SWP_NOACTIVATE))
+        {
+            throw new Win32Exception(Marshal.GetLastWin32Error(), "Could not commit tray animation window position.");
+        }
     }
 
     private Microsoft.UI.Composition.Compositor GetCachedCompositor(Microsoft.UI.Composition.Visual visual)
     {
         return _cachedCompositor ??= visual.Compositor;
-    }
-
-    private static Microsoft.UI.Composition.CompositionEasingFunction CreateEasingFunction(
-        Microsoft.UI.Composition.Compositor compositor,
-        string easingIntensity,
-        bool isShowing)
-    {
-        string intensity = WidgetAnimationSettings.NormalizeEasingIntensity(easingIntensity);
-        if (intensity == SettingsService.WidgetAnimationEasingNone)
-        {
-            return compositor.CreateLinearEasingFunction();
-        }
-
-        if (isShowing)
-        {
-            return intensity switch
-            {
-                SettingsService.WidgetAnimationEasingLight => compositor.CreateCubicBezierEasingFunction(new Vector2(0.25f, 0.9f), new Vector2(0.25f, 1.0f)),
-                SettingsService.WidgetAnimationEasingStrong => compositor.CreateCubicBezierEasingFunction(new Vector2(0.05f, 1.1f), new Vector2(0.15f, 1.0f)),
-                _ => compositor.CreateCubicBezierEasingFunction(new Vector2(0.16f, 1.0f), new Vector2(0.3f, 1.0f))
-            };
-        }
-
-        return intensity switch
-        {
-            SettingsService.WidgetAnimationEasingLight => compositor.CreateCubicBezierEasingFunction(new Vector2(0.6f, 0.1f), new Vector2(0.9f, 0.3f)),
-            SettingsService.WidgetAnimationEasingStrong => compositor.CreateCubicBezierEasingFunction(new Vector2(0.7f, 0.0f), new Vector2(0.95f, -0.1f)),
-            _ => compositor.CreateCubicBezierEasingFunction(new Vector2(0.7f, 0.0f), new Vector2(0.84f, 0.0f))
-        };
     }
 
     private (double Left, double Right, double Up, double Down) GetOffscreenSlideOffsets()

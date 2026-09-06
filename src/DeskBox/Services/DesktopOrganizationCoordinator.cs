@@ -28,7 +28,10 @@ public sealed class DesktopOrganizationCoordinator
         var classifier = new DesktopOrganizationClassifier();
         _scanner = new DesktopOrganizationScanner(classifier);
         _planner = new DesktopOrganizationPlanner(new DesktopOrganizationRuleResolver());
-        _transaction = new DesktopOrganizationTransaction(settingsService, fileService);
+        _transaction = new DesktopOrganizationTransaction(settingsService, fileService)
+        {
+            AutoOrganizationSuppressions = organizerService.AutoOrganizationSuppressions
+        };
     }
 
     public async Task<DesktopOrganizationPlan> BuildPlanAsync(
@@ -57,7 +60,8 @@ public sealed class DesktopOrganizationCoordinator
     /// </summary>
     public DesktopOrganizationPlan CreateExecutionPlan(
         DesktopOrganizationPlan previewPlan,
-        IReadOnlyCollection<DesktopOrganizationTargetSelection> selections)
+        IReadOnlyCollection<DesktopOrganizationTargetSelection> selections,
+        IReadOnlySet<string>? excludedSourcePaths = null)
     {
         var selectionByBucket = selections
             .Where(selection => !string.IsNullOrWhiteSpace(selection.SourceBucketId))
@@ -83,7 +87,11 @@ public sealed class DesktopOrganizationCoordinator
                 continue;
             }
 
-            DesktopOrganizationTargetPlan target = source;
+            var includedItems = source.Items.Where(item => excludedSourcePaths?.Contains(item.SourcePath) != true).ToList();
+            retainedByChoice.AddRange(source.Items.Where(item => excludedSourcePaths?.Contains(item.SourcePath) == true)
+                .Select(item => item with { ExclusionReason = DesktopOrganizationExclusionReason.UserChoice }));
+            DesktopOrganizationTargetPlan target = source.CloneWith(source.TargetWidgetId,
+                source.SuggestedDisplayName, source.TargetDirectoryPath, source.CreatesWidget, includedItems);
             bool shouldResolveExistingDestination =
                 selection?.DestinationMode == DesktopOrganizationDestinationMode.ExistingWidget ||
                 !source.CreatesWidget;
@@ -105,7 +113,7 @@ public sealed class DesktopOrganizationCoordinator
                     widget.Name,
                     Path.GetFullPath(widget.MappedFolderPath),
                     createsWidget: false,
-                    source.Items);
+                    includedItems);
             }
 
             if (targetsByDestination.TryGetValue(target.TargetWidgetId, out DesktopOrganizationTargetPlan? merged))
@@ -127,6 +135,11 @@ public sealed class DesktopOrganizationCoordinator
         {
             Id = Guid.NewGuid().ToString("N"),
             DesktopPath = previewPlan.DesktopPath,
+            PublicDesktopPath = previewPlan.PublicDesktopPath,
+            IncludePersonalDesktop = previewPlan.IncludePersonalDesktop,
+            IncludePublicDesktop = previewPlan.IncludePublicDesktop,
+            SourceItems = previewPlan.SourceItems,
+            PublicDesktopUnavailable = previewPlan.PublicDesktopUnavailable,
             StorageRootPath = previewPlan.StorageRootPath,
             Targets = targetsByDestination.Values
                 .Where(target => target.Items.Count > 0)
@@ -142,15 +155,17 @@ public sealed class DesktopOrganizationCoordinator
 
     public DesktopOrganizationPlan CreatePreviewPlanWithOptionalItems(
         DesktopOrganizationPlan basePlan,
-        IReadOnlyCollection<string> includedSourcePaths)
+        IReadOnlyCollection<string> includedSourcePaths,
+        bool? includePersonalDesktop = null,
+        bool? includePublicDesktop = null)
     {
         var included = includedSourcePaths
             .Where(path => !string.IsNullOrWhiteSpace(path))
             .Select(Path.GetFullPath)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
-        DesktopOrganizationFileSnapshot[] allItems = basePlan.Targets
-            .SelectMany(target => target.Items)
-            .Concat(basePlan.ExcludedItems)
+        DesktopOrganizationFileSnapshot[] allItems = (basePlan.SourceItems.Count > 0
+                ? basePlan.SourceItems
+                : basePlan.Targets.SelectMany(target => target.Items).Concat(basePlan.ExcludedItems))
             .GroupBy(item => item.SourcePath, StringComparer.OrdinalIgnoreCase)
             .Select(group => group.First())
             .Select(item => item.CanOptIn && included.Contains(item.SourcePath)
@@ -160,6 +175,8 @@ public sealed class DesktopOrganizationCoordinator
         var scan = new DesktopOrganizationScanResult
         {
             DesktopPath = basePlan.DesktopPath,
+            PublicDesktopPath = basePlan.PublicDesktopPath,
+            PublicDesktopUnavailable = basePlan.PublicDesktopUnavailable,
             Items = allItems.ToList()
         };
         DesktopOrganizationPlan plan = _planner.CreatePlan(
@@ -167,7 +184,9 @@ public sealed class DesktopOrganizationCoordinator
             basePlan.StorageRootPath,
             _settingsService.Settings.Widgets,
             _settingsService.Settings.DesktopOrganizationRules,
-            ResolveCategoryName);
+            ResolveCategoryName,
+            includePersonalDesktop ?? basePlan.IncludePersonalDesktop,
+            includePublicDesktop ?? basePlan.IncludePublicDesktop);
         AssignNonOverlappingBounds(plan);
         return plan;
     }
@@ -198,7 +217,8 @@ public sealed class DesktopOrganizationCoordinator
     public async Task<DesktopOrganizationExecutionResult> ExecuteAsync(
         DesktopOrganizationPlan plan,
         IProgress<DesktopOrganizationProgress>? progress,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        IntPtr ownerWindowHandle = default)
     {
         string[] existingTargetIds = plan.Targets
             .Where(target => !target.CreatesWidget)
@@ -208,7 +228,7 @@ public sealed class DesktopOrganizationCoordinator
         DesktopOrganizationExecutionResult result;
         try
         {
-            result = await _transaction.ExecuteAsync(plan, progress, cancellationToken);
+            result = await _transaction.ExecuteAsync(plan, progress, cancellationToken, ownerWindowHandle);
         }
         finally
         {
@@ -231,28 +251,34 @@ public sealed class DesktopOrganizationCoordinator
 
             return result;
         }
-        catch
+        catch (Exception ex)
         {
-            foreach (string widgetId in shownWidgetIds)
-            {
-                await _widgetManager.RemoveWidgetAsync(widgetId, WidgetRemovalAction.RemoveWidgetOnly);
-            }
-
-            await _organizerService.UndoAsync(result.History.Id);
-            _settingsService.Settings.DesktopOrganizationRules.RemoveAll(rule =>
-                result.CreatedWidgets.Any(widget =>
-                    string.Equals(widget.Id, rule.TargetWidgetId, StringComparison.Ordinal)));
-            _settingsService.Settings.Widgets.RemoveAll(widget =>
-                result.CreatedWidgets.Any(created =>
-                    string.Equals(created.Id, widget.Id, StringComparison.Ordinal)));
-            await _settingsService.SaveAsync(notifySubscribers: false);
-            throw;
+            // The file transaction is already committed. A window failure must
+            // never erase its history or initiate an unsolicited public undo.
+            App.Log($"[DesktopOrganization] Could not reveal an organized widget: {ex}");
+            return result;
         }
     }
 
-    public Task<int> RecoverPendingAsync() => _transaction.RecoverPendingAsync();
+    public bool HasPendingRecovery => _transaction.HasPendingRecovery;
 
-    public async Task UndoAsync(string historyId)
+    public Task<int> RecoverPendingAsync(IntPtr ownerWindowHandle = default) => _transaction.RecoverPendingAsync(ownerWindowHandle);
+
+    public DesktopOrganizationPlan CreateRetryPlan(DesktopOrganizationPlan previous, IReadOnlySet<string> remainingPaths)
+    {
+        var plan = DesktopOrganizationPlanner.CreateRetryPlan(previous, remainingPaths, _settingsService.Settings.Widgets);
+        foreach (var target in plan.Targets.Where(target => !target.CreatesWidget))
+        {
+            if (!_settingsService.Settings.Widgets.Any(widget => widget.Id == target.TargetWidgetId &&
+                !widget.IsDisabled && widget.WidgetKind == WidgetKind.File &&
+                string.Equals(widget.MappedFolderPath, target.TargetDirectoryPath, StringComparison.OrdinalIgnoreCase)))
+                throw new InvalidOperationException(_localizationService.T("DesktopOrganization.Error.TargetUnavailable"));
+        }
+        AssignNonOverlappingBounds(plan);
+        return plan;
+    }
+
+    public async Task UndoAsync(string historyId, IntPtr ownerWindowHandle = default)
     {
         OrganizationHistoryEntry? history = _settingsService.Settings.RecentOrganizationHistory
             .FirstOrDefault(entry =>
@@ -262,10 +288,11 @@ public sealed class DesktopOrganizationCoordinator
             throw new InvalidOperationException("The organization history entry no longer exists.");
         }
 
-        await _organizerService.UndoAsync(historyId);
+        await _organizerService.UndoAsync(historyId, ownerWindowHandle);
         foreach (OrganizationHistoryTarget target in history.Targets)
         {
-            if (target.WasCreated)
+            if (target.WasCreated && (!Directory.Exists(target.DirectoryPath) ||
+                !Directory.EnumerateFileSystemEntries(target.DirectoryPath).Any()))
             {
                 await _widgetManager.RemoveWidgetAsync(
                     target.WidgetId,

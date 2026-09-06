@@ -155,7 +155,7 @@ public sealed class WidgetCompactInteractionPolicyTests
         Assert.False(WidgetCompactInteractionPolicy.CanHoverExpand(
             WidgetCollapseBehavior.Smart,
             moveHandle));
-        Assert.True(WidgetCompactInteractionPolicy.CanHoverExpand(
+        Assert.False(WidgetCompactInteractionPolicy.CanHoverExpand(
             WidgetCollapseBehavior.Smart,
             moveHandle,
             allowInteractionRegionDwell: true));

@@ -1,5 +1,3 @@
-using System.Text;
-
 namespace DeskBox.Services;
 
 internal enum ResilientJsonLoadSource
@@ -127,14 +125,45 @@ internal static class ResilientJsonStore
             Task.Delay);
     }
 
-    internal static async Task SaveAsync(
+    public static Task SaveAsync(string storePath, ReadOnlyMemory<byte> utf8Json)
+    {
+        return SaveAsync(
+            storePath,
+            utf8Json,
+            static (sourcePath, destinationPath, backupPath, ignoreMetadataErrors) =>
+                File.Replace(
+                    sourcePath,
+                    destinationPath,
+                    backupPath,
+                    ignoreMetadataErrors),
+            Task.Delay);
+    }
+
+    internal static Task SaveAsync(
         string storePath,
         string json,
         Action<string, string, string?, bool> replaceFile,
         Func<TimeSpan, Task> delayAsync)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(storePath);
         ArgumentNullException.ThrowIfNull(json);
+        return SaveCoreAsync(storePath, json, default, replaceFile, delayAsync);
+    }
+
+    internal static Task SaveAsync(
+        string storePath,
+        ReadOnlyMemory<byte> utf8Json,
+        Action<string, string, string?, bool> replaceFile,
+        Func<TimeSpan, Task> delayAsync) =>
+        SaveCoreAsync(storePath, null, utf8Json, replaceFile, delayAsync);
+
+    private static async Task SaveCoreAsync(
+        string storePath,
+        string? json,
+        ReadOnlyMemory<byte> utf8Json,
+        Action<string, string, string?, bool> replaceFile,
+        Func<TimeSpan, Task> delayAsync)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(storePath);
         ArgumentNullException.ThrowIfNull(replaceFile);
         ArgumentNullException.ThrowIfNull(delayAsync);
 
@@ -142,14 +171,20 @@ internal static class ResilientJsonStore
         string tempPath = $"{storePath}.{Guid.NewGuid():N}.tmp";
         try
         {
-            await File.WriteAllTextAsync(tempPath, json);
+            if (json is not null)
+            {
+                await File.WriteAllTextAsync(tempPath, json);
+            }
+            else
+            {
+                await File.WriteAllBytesAsync(tempPath, utf8Json);
+            }
             if (File.Exists(storePath))
             {
                 await ReplaceOrFallbackAsync(
                     tempPath,
                     storePath,
                     GetBackupPath(storePath),
-                    json,
                     replaceFile,
                     delayAsync);
             }
@@ -168,7 +203,6 @@ internal static class ResilientJsonStore
         string tempPath,
         string storePath,
         string backupPath,
-        string json,
         Action<string, string, string?, bool> replaceFile,
         Func<TimeSpan, Task> delayAsync)
     {
@@ -214,7 +248,7 @@ internal static class ResilientJsonStore
                 await SaveInPlaceWithVerifiedBackupAsync(
                     storePath,
                     backupPath,
-                    json);
+                    tempPath);
                 return;
             }
         }
@@ -226,13 +260,15 @@ internal static class ResilientJsonStore
     private static async Task SaveInPlaceWithVerifiedBackupAsync(
         string storePath,
         string backupPath,
-        string json)
+        string tempPath)
     {
+        // Use the already encoded pending file for either caller. This path is
+        // exceptional; normal saves do not read or copy the UTF-8 payload again.
+        byte[] updatedBytes = await File.ReadAllBytesAsync(tempPath);
         byte[] originalBytes = await File.ReadAllBytesAsync(storePath);
         await WriteAllBytesInPlaceAsync(backupPath, originalBytes);
         await VerifyFileContentsAsync(backupPath, originalBytes, "backup");
 
-        byte[] updatedBytes = Encoding.UTF8.GetBytes(json);
         await WriteAllBytesInPlaceAsync(storePath, updatedBytes);
         await VerifyFileContentsAsync(storePath, updatedBytes, "primary store");
     }

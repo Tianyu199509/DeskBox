@@ -7,6 +7,14 @@ namespace DeskBox.Services;
 
 public static class Localized
 {
+    // Runtime application of HeaderKey/DescriptionKey only targets controls
+    // with real Header/Description properties (SettingsCard, SettingsExpander,
+    // TextBox). On plain containers (Grid, StackPanel, Expander) these keys are
+    // intentional search-catalog markers: update-settings-search-catalog.ps1
+    // indexes them while the visible text is rendered by an inner TextBlock
+    // bound to the same key via Localized.Key. Unsupported targets are ignored
+    // at runtime by design.
+
     public static readonly DependencyProperty KeyProperty =
         DependencyProperty.RegisterAttached(
             "Key",

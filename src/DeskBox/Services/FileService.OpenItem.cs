@@ -84,7 +84,17 @@ public sealed partial class FileService
                 trace?.Mark("shortcut-metadata-end");
             }
 
-            if (shellLink && IsBrokenShortcut(itemPath, targetPath))
+            ShortcutTargetProbeResult shortcutProbe = shellLink
+                ? ShortcutTargetProbe.Probe(itemPath, targetPath)
+                : default;
+            if (shellLink)
+            {
+                trace?.Mark(
+                    "shortcut-target",
+                    $"kind={shortcutProbe.Kind} status={shortcutProbe.Status}");
+            }
+
+            if (shellLink && shortcutProbe.IsBroken)
             {
                 using (PerformanceLogger.Measure(
                            "FileService.OpenItem.BrokenShortcutUi",

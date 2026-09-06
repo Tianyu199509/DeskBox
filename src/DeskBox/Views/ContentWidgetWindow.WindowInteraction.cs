@@ -161,7 +161,10 @@ public sealed partial class ContentWidgetWindow
 
     private void TitleBarGrid_PointerPressed(object sender, PointerRoutedEventArgs e)
     {
-        CancelPendingTitleBarClickCollapse();
+        if (IsGroupNavigationInput(e.OriginalSource))
+        {
+            return;
+        }
         var properties = e.GetCurrentPoint(ContentWidgetShell.TitleBar).Properties;
         if (!properties.IsLeftButtonPressed) return;
         if (ContentWidgetShell.TitleEditorContent is TextBox &&
@@ -172,13 +175,12 @@ public sealed partial class ContentWidgetWindow
             return;
         }
 
-        BeginTitleBarClickCollapse(e, ShouldOpenTitleBarFlyout(e.OriginalSource));
         if (ShouldOpenTitleBarFlyout(e.OriginalSource) &&
             !Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Control))
         {
             App.Current.WidgetManager?.ActivateAllVisibleWidgetsFromTitle(HWnd);
         }
-        if (_config.IsPositionLocked) return;
+        if (_config.IsPositionLocked || IsCompactTransitionActive) return;
         BeginWindowDragCore(e, ContentWidgetShell.TitleBar);
     }
 
@@ -189,13 +191,19 @@ public sealed partial class ContentWidgetWindow
             return true;
         }
 
-        return !IsWithin(source, ContentWidgetShell.PositionLockActionButton) &&
+        return !IsGroupNavigationInput(source) &&
+               !IsWithin(source, ContentWidgetShell.PositionLockActionButton) &&
                !IsWithin(source, ContentWidgetShell.SizeLockActionButton) &&
                !IsWithin(source, ContentWidgetShell.AddActionButton) &&
                !IsWithin(source, ContentWidgetShell.MoreActionButton) &&
                !IsWithin(source, ContentWidgetShell.CloseActionButton) &&
                !HasAncestorOfType<TextBox>(source);
     }
+
+    private bool IsGroupNavigationInput(object? source) =>
+        source is DependencyObject element &&
+        IsWithin(element, ContentWidgetShell.GroupNavigationElement) &&
+        (HasAncestorOfType<TabViewItem>(element) || HasAncestorOfType<ButtonBase>(element));
 
     private static bool IsWithin(DependencyObject source, DependencyObject target)
     {
@@ -230,7 +238,6 @@ public sealed partial class ContentWidgetWindow
 
     private void TitleBarGrid_PointerReleased(object sender, PointerRoutedEventArgs e)
     {
-        CompleteTitleBarClickCollapse(e, HasMovedTitleBarDrag);
         EndWindowDragCore(e);
         App.Current.WidgetManager?.RestoreTemporarilyRaisedWidgetsToDesktopLayer(
             "content-title-released");

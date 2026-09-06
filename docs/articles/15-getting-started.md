@@ -1,11 +1,16 @@
 ---
-title: "DeskBox 安装与首次配置"
-description: "介绍 DeskBox 1.3.0 的系统要求、安装渠道、运行时依赖、首次启动引导、推荐初始设置和覆盖升级注意事项。"
-version: "1.3.0"
-updated: "2026-07-19"
+title: "DeskBox 安装与首次配置指南"
+description: "DeskBox 的系统要求、下载渠道、安装过程、运行时依赖、首次启动引导、推荐初始设置和覆盖升级注意事项。"
+keywords:
+  - DeskBox 安装
+  - DeskBox 下载
+  - Windows 桌面整理工具
+  - 桌面收纳格子
+article_type: "feature"
+product_scope: "current-worktree"
 ---
 
-# DeskBox 安装与首次配置
+# DeskBox 安装与首次配置指南
 
 本指南帮助新用户从下载安装到创建第一个格子。完成后，你应该能够用 F7 显示或隐藏全部格子，并理解收纳目录、收纳格子和映射文件夹的区别。
 
@@ -16,7 +21,8 @@ updated: "2026-07-19"
 推荐环境
 
 - Windows 10 64 位（21H2 / build 19044 或更高）或 Windows 11 22H2+
-- Windows App Runtime 2.4 x64（Native AOT 版本无需单独安装 .NET 运行时）
+- x64 或 ARM64 处理器
+- Windows App Runtime 2.4（Direct 安装包已内置，无需单独安装）
 - 普通 Windows 用户权限
 
 DeskBox 围绕 WinUI 3 的窗口、材质、圆角、拖放、通知与媒体会话能力设计。Windows 10 会将系统不支持的材质、圆角和部分动画降级为兼容表现；文件同步、拖放和核心格子操作仍按 build 19044+ 验证。
@@ -28,23 +34,18 @@ DeskBox 不需要以管理员身份运行。不要在快捷方式兼容性设置
 Direct 安装包可以从官网或 GitHub Release 获取。
 
 - 官网：<https://deskbox.fun>
-- GitHub Release：<https://github.com/Tianyu199509/DeskBox/releases/tag/v1.3.0>
-- 文件名：`DeskBox_Setup_1.3.0_x64.exe`
+- GitHub Release：<https://github.com/Tianyu199509/DeskBox/releases/latest>
+- 文件名：`DeskBox_Setup_<版本>_x64.exe`（Intel / AMD）或 `DeskBox_Setup_<版本>_arm64.exe`（骁龙、Surface Pro X 等 Windows on ARM 设备）
 
 Microsoft Store 渠道由商店负责安装和更新。两个渠道的核心功能一致，但更新方式和部分渠道展示内容可能不同。
 
-从 GitHub 下载时，可以同时下载 `.sha256` 校验文件。DeskBox 1.3.0 x64 正式安装包的 SHA-256 为
-
-```text
-9AD3AC78829DD5A5500B6F6C57537F17C87451A440AD861C82F11EA3ADE10AF8
-```
+从 GitHub 下载时，发布页同时提供 `.sha256` 校验文件，可在安装前核对安装包完整性。
 
 ## 安装过程
 
-安装器不会把 Windows App Runtime 2.4 的完整安装程序打进 DeskBox 安装包（Native AOT 版不再需要单独的 .NET 运行时）。它会先检查目标电脑
+Direct 安装包是 Full Native AOT 构建，内置匹配架构的私有 Windows App Runtime，不需要联网下载 .NET 10 或 Windows App Runtime。安装器仍会先检查目标电脑
 
-- 依赖已经存在，直接跳过。
-- 缺少依赖，联网下载对应运行时。
+- 依赖已经存在，直接跳过，避免重复安装。
 - DeskBox 正在运行，先关闭进程，再替换文件。
 
 这种方式可以控制安装包体积，也避免每次升级重复安装相同运行时。
@@ -140,6 +141,6 @@ Microsoft Store 渠道由商店负责安装和更新。两个渠道的核心功�
 
 ## 下一步
 
-- 了解两种文件格子：[文件格子与桌面整理](02-file-widgets.md)
-- 开始记录任务：[待办格子使用指南](03-todo.md)
-- 保存临时内容：[随记格子使用指南](04-quick-capture.md)
+- 了解两种文件格子：[文件格子与桌面收纳](01-file-widgets.md)
+- 开始记录任务：[待办格子](03-todo-widget.md)
+- 保存临时内容：[随记格子](04-quick-capture.md)

@@ -2,181 +2,172 @@
 <UserControl
     x:Class="DeskBox.Controls.DesktopOrganizationTaskView"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-    xmlns:svc="using:DeskBox.Services">
-
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
     <UserControl.Resources>
-        <Style x:Key="DesktopOrganizationTargetCardStyle" TargetType="Border">
-            <Setter Property="Background" Value="{ThemeResource CardBackgroundFillColorDefaultBrush}" />
-            <Setter Property="BorderBrush" Value="{ThemeResource CardStrokeColorDefaultBrush}" />
-            <Setter Property="BorderThickness" Value="1" />
-            <Setter Property="CornerRadius" Value="8" />
-            <Setter Property="Padding" Value="12" />
-        </Style>
         <Style x:Key="DesktopOrganizationSecondaryTextStyle" TargetType="TextBlock">
             <Setter Property="Foreground" Value="{ThemeResource TextFillColorSecondaryBrush}" />
         </Style>
-    </UserControl.Resources>
-
-    <Grid Padding="28,16,12,24" RowSpacing="14">
-        <Grid.RowDefinitions>
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="*" />
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="Auto" />
-        </Grid.RowDefinitions>
-
-        <InfoBar x:Name="ResultInfo" IsClosable="True" IsOpen="False" />
-
-        <Grid
-            x:Name="PreviewViewport"
-            Grid.Row="1"
-            SizeChanged="PreviewViewport_SizeChanged">
-            <ScrollViewer
-                x:Name="PreviewScrollViewer"
-                HorizontalScrollBarVisibility="Disabled"
-                VerticalScrollBarVisibility="Auto"
-                VerticalScrollMode="Auto"
-                SizeChanged="PreviewScrollViewer_SizeChanged">
-                <StackPanel x:Name="PreviewContent" Spacing="14">
-                    <Grid ColumnSpacing="12">
-                        <StackPanel Spacing="4">
-                            <TextBlock
-                                x:Name="SummaryTitle"
-                                FontSize="22"
-                                FontWeight="SemiBold"
-                                TextWrapping="Wrap" />
-                            <TextBlock
-                                x:Name="SummaryDescription"
-                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                TextWrapping="Wrap" />
-                        </StackPanel>
-                    </Grid>
-
-                    <InfoBar
-                        x:Name="ExcludedItemsInfo"
-                        IsClosable="False"
-                        IsOpen="False"
-                        Severity="Warning">
-                        <InfoBar.ActionButton>
-                            <Button
-                                x:Name="ExcludedItemsButton"
-                                Padding="10,6"
-                                FontSize="13"
-                                Click="ExcludedItemsButton_Click" />
-                        </InfoBar.ActionButton>
-                    </InfoBar>
-
-                    <Grid
-                        x:Name="TargetRows"
-                        ColumnSpacing="12"
-                        RowSpacing="12"
-                        Padding="0,0,8,0"
-                        SizeChanged="TargetRows_SizeChanged" />
-
-                    <Grid x:Name="BottomInfoGrid">
-                        <StackPanel Spacing="8">
-                            <StackPanel Spacing="2">
-                                <TextBlock
-                                    x:Name="StorageSectionTitleText"
-                                    FontSize="16"
-                                    FontWeight="SemiBold" />
-                                <TextBlock
-                                    x:Name="StorageSectionDescriptionText"
-                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                    TextWrapping="Wrap" />
-                            </StackPanel>
-                            <Border
-                                x:Name="StoragePathCard"
-                                Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
-                                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                                BorderThickness="1"
-                                CornerRadius="8"
-                                Padding="14,12">
-                                <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="12">
-                                    <FontIcon FontSize="18" Glyph="&#xE8B7;" VerticalAlignment="Center" />
-                                    <StackPanel Grid.Column="1" Spacing="2" VerticalAlignment="Center">
-                                        <TextBlock
-                                            x:Name="PathTitleText"
-                                            FontWeight="SemiBold"
-                                            />
-                                        <TextBlock
-                                            x:Name="StoragePathText"
-                                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                            TextTrimming="CharacterEllipsis"
-                                            ToolTipService.ToolTip="{x:Bind StoragePathText.Text, Mode=OneWay}" />
-                                    </StackPanel>
-                                    <Button
-                                        x:Name="ChangePathButton"
-                                        Grid.Column="2"
-                                        Click="ChangePathButton_Click" />
-                                </Grid>
+        <Style x:Key="NeutralSourceCheckBoxStyle" TargetType="CheckBox">
+            <Setter Property="Foreground" Value="{ThemeResource TextFillColorPrimaryBrush}" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="CheckBox">
+                        <Grid Background="Transparent" ColumnDefinitions="Auto,*">
+                            <Border x:Name="SelectionBox" Width="20" Height="20" CornerRadius="4"
+                                    BorderBrush="{ThemeResource ControlStrokeColorDefaultBrush}" BorderThickness="1">
+                                <FontIcon x:Name="CheckIcon" Glyph="&#xE73E;" FontSize="11"
+                                          HorizontalAlignment="Center" VerticalAlignment="Center"
+                                          Visibility="Collapsed" Foreground="{ThemeResource TextOnAccentFillColorPrimaryBrush}" />
                             </Border>
+                            <ContentPresenter Grid.Column="1" Margin="8,0,0,0" VerticalAlignment="Center"
+                                              Content="{TemplateBinding Content}" />
+                            <VisualStateManager.VisualStateGroups>
+                                <VisualStateGroup x:Name="CheckStates">
+                                    <VisualState x:Name="Unchecked" />
+                                    <VisualState x:Name="Checked">
+                                        <VisualState.Setters>
+                                            <Setter Target="SelectionBox.Background" Value="{ThemeResource AccentFillColorDefaultBrush}" />
+                                            <Setter Target="CheckIcon.Visibility" Value="Visible" />
+                                        </VisualState.Setters>
+                                    </VisualState>
+                                    <VisualState x:Name="Indeterminate">
+                                        <VisualState.Setters>
+                                            <Setter Target="SelectionBox.Background" Value="{ThemeResource AccentFillColorDefaultBrush}" />
+                                            <Setter Target="CheckIcon.Visibility" Value="Visible" />
+                                            <Setter Target="CheckIcon.Opacity" Value="0.6" />
+                                        </VisualState.Setters>
+                                    </VisualState>
+                                </VisualStateGroup>
+                            </VisualStateManager.VisualStateGroups>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </UserControl.Resources>
+    <Grid Padding="20,8,20,16" RowSpacing="10" RowDefinitions="Auto,Auto,*,Auto,Auto">
+        <Border Background="{ThemeResource SubtleFillColorSecondaryBrush}" CornerRadius="8" Padding="12,3">
+          <Grid ColumnDefinitions="Auto,*,Auto,Auto,Auto,Auto" ColumnSpacing="4">
+            <SelectorBar x:Name="PreviewSections" SelectionChanged="PreviewSections_SelectionChanged"
+                         VerticalAlignment="Center">
+                <SelectorBarItem x:Name="SummaryTitle" IsSelected="True" />
+                <SelectorBarItem x:Name="ExcludedItemsButton" />
+            </SelectorBar>
+            <TextBlock x:Name="SummaryDescription" Grid.Column="1" FontSize="12" Margin="12,0,0,0"
+                       VerticalAlignment="Center" HorizontalAlignment="Right" TextTrimming="CharacterEllipsis"
+                       Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+            <ContentControl x:Name="SourceSelectionHost" Grid.Column="2" VerticalAlignment="Center"
+                            HorizontalContentAlignment="Stretch">
+                <DropDownButton MinWidth="0" Height="32" Padding="10,0">
+                    <TextBlock x:Name="SourceScopeText" />
+                    <DropDownButton.Flyout>
+                        <Flyout Placement="Bottom">
+                            <StackPanel Spacing="12" MinWidth="220">
+                                <CheckBox x:Name="PersonalDesktopSourceButton" MinWidth="0" MaxWidth="260" Style="{StaticResource NeutralSourceCheckBoxStyle}" IsChecked="True"
+                                          Checked="SourceSelection_Changed" Unchecked="SourceSelection_Changed">
+                                    <TextBlock x:Name="PersonalSourceText" TextWrapping="Wrap" />
+                                </CheckBox>
+                                <CheckBox x:Name="PublicDesktopSourceButton" MinWidth="0" MaxWidth="260" Style="{StaticResource NeutralSourceCheckBoxStyle}" IsChecked="False"
+                                          Checked="SourceSelection_Changed" Unchecked="SourceSelection_Changed">
+                                    <TextBlock x:Name="PublicSourceText" TextWrapping="Wrap" />
+                                </CheckBox>
+                            </StackPanel>
+                        </Flyout>
+                    </DropDownButton.Flyout>
+                </DropDownButton>
+            </ContentControl>
+            <Button x:Name="RefreshButton" Grid.Column="3" Height="32" Padding="10,0" Click="RefreshButton_Click" />
+            <Button x:Name="LocationsButton" Grid.Column="4" Height="32" Padding="10,0">
+                <Button.Flyout>
+                    <Flyout x:Name="LocationsFlyout">
+                        <StackPanel Spacing="8" MaxWidth="400">
+                            <TextBlock x:Name="SourcePathsTitle" FontWeight="SemiBold" />
+                            <TextBlock x:Name="PersonalDesktopPathText" FontSize="12" TextWrapping="Wrap" />
+                            <TextBlock x:Name="PublicDesktopPathText" FontSize="12" TextWrapping="Wrap" />
+                            <TextBlock x:Name="StorageSectionTitleText" FontWeight="SemiBold" Margin="0,8,0,0" />
+                            <TextBlock x:Name="StorageSectionDescriptionText" TextWrapping="Wrap" FontSize="12" />
+                            <TextBlock x:Name="PathTitleText" Visibility="Collapsed" />
+                            <TextBlock x:Name="StoragePathText" TextWrapping="Wrap" FontSize="12"
+                                       ToolTipService.ToolTip="{x:Bind StoragePathText.Text, Mode=OneWay}" />
+                            <StackPanel x:Name="DestinationPathsPanel" Spacing="6" />
+                            <Button x:Name="ChangePathButton" Click="ChangePathButton_Click" />
                         </StackPanel>
-                    </Grid>
+                    </Flyout>
+                </Button.Flyout>
+            </Button>
+            <Button x:Name="MoreButton" Grid.Column="5" Height="32" Padding="8,0">
+                <FontIcon Glyph="&#xE712;" FontSize="16" />
+                <Button.Flyout>
+                    <MenuFlyout>
+                        <MenuFlyoutItem x:Name="ResetSelectionMenuItem" Click="ResetSelectionMenuItem_Click" />
+                    </MenuFlyout>
+                </Button.Flyout>
+            </Button>
+          </Grid>
+        </Border>
+        <StackPanel Grid.Row="1" Spacing="6">
+            <InfoBar x:Name="SelectionFeedbackInfo" IsClosable="True" IsOpen="False">
+                <InfoBar.ActionButton>
+                    <Button x:Name="ViewPendingButton" Click="ViewPendingButton_Click" />
+                </InfoBar.ActionButton>
+            </InfoBar>
+            <InfoBar x:Name="ResultInfo" IsClosable="True" IsOpen="False" />
+            <InfoBar x:Name="RecoveryInfo" IsClosable="False" Severity="Warning" IsOpen="False">
+                <InfoBar.ActionButton>
+                    <Button x:Name="RecoverButton" Click="RecoverButton_Click" />
+                </InfoBar.ActionButton>
+            </InfoBar>
+            <ContentControl x:Name="RetainedSelectionToolbar" Visibility="Collapsed">
+                <StackPanel Orientation="Horizontal" Spacing="12">
+                    <TextBlock x:Name="RetainedSelectionText" VerticalAlignment="Center" FontSize="12" />
+                    <Button x:Name="IncludeSelectedButton" Click="IncludeSelectedButton_Click" IsEnabled="False" />
                 </StackPanel>
+            </ContentControl>
+        </StackPanel>
+        <Grid x:Name="PreviewViewport" Grid.Row="2" SizeChanged="PreviewViewport_SizeChanged">
+            <ScrollViewer x:Name="PreviewScrollViewer" HorizontalScrollBarVisibility="Disabled"
+                          VerticalScrollBarVisibility="Auto" VerticalScrollMode="Auto"
+                          SizeChanged="PreviewScrollViewer_SizeChanged">
+                <ContentControl x:Name="PreviewContent" HorizontalContentAlignment="Stretch">
+                  <StackPanel Spacing="10">
+                    <ContentControl x:Name="TargetSelectionHost" HorizontalContentAlignment="Stretch">
+                        <Grid x:Name="TargetRows" ColumnSpacing="12" RowSpacing="12" Padding="0,0,4,0"
+                              SizeChanged="TargetRows_SizeChanged" />
+                    </ContentControl>
+                    <TextBlock x:Name="EmptyPreviewText" TextWrapping="Wrap" Visibility="Collapsed"
+                               Margin="8,24" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                    <StackPanel x:Name="RetainedItemsPanel" Spacing="10" Visibility="Collapsed">
+                        <Grid x:Name="RetainedRows" ColumnSpacing="12" RowSpacing="12" Padding="0,0,4,0" />
+                        <TextBlock x:Name="RetainedEmptyText" TextWrapping="Wrap" Visibility="Collapsed"
+                                   Margin="8,24" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                    </StackPanel>
+                    <Grid x:Name="CompletedItemsPanel" ColumnSpacing="12" RowSpacing="12" Padding="0,0,4,0" Visibility="Collapsed" />
+                  </StackPanel>
+                </ContentControl>
             </ScrollViewer>
-
-            <StackPanel
-                x:Name="ScanBusyPanel"
-                HorizontalAlignment="Center"
-                VerticalAlignment="Center"
-                Spacing="10">
+            <StackPanel x:Name="ScanBusyPanel" HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="10">
                 <ProgressRing Width="30" Height="30" IsActive="True" />
-                <TextBlock
-                    x:Name="ScanBusyText"
-                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                    />
+                <TextBlock x:Name="ScanBusyText" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
             </StackPanel>
         </Grid>
-
-        <StackPanel
-            x:Name="ExecutionProgressPanel"
-            Grid.Row="2"
-            Spacing="7"
-            Visibility="Collapsed">
+        <StackPanel x:Name="ExecutionProgressPanel" Grid.Row="3" Spacing="8" Visibility="Collapsed">
             <ProgressBar x:Name="ExecutionProgressBar" Maximum="1" Minimum="0" Value="0" />
-            <TextBlock
-                x:Name="ExecutionProgressText"
-                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                TextWrapping="Wrap" />
+            <TextBlock x:Name="ExecutionProgressText" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
         </StackPanel>
-
-        <Grid x:Name="FooterCommandSurface" Grid.Row="3">
-            <Border
-                x:Name="FooterAcrylicSurface"
-                Background="{ThemeResource SystemControlAcrylicElementBrush}"
-                BorderBrush="{ThemeResource SurfaceStrokeColorDefaultBrush}"
-                BorderThickness="1"
-                CornerRadius="10"
-                IsHitTestVisible="False"
-                Opacity="0.5" />
-            <Grid Padding="12,9" ColumnDefinitions="*,Auto,Auto,Auto" ColumnSpacing="8">
-                <Button
-                    x:Name="RefreshButton"
-                    Click="RefreshButton_Click" />
-                <Button
-                    x:Name="UndoButton"
-                    Grid.Column="1"
-                    Click="UndoButton_Click"
-                    Visibility="Collapsed" />
-                <Button
-                    x:Name="CancelButton"
-                    Grid.Column="2"
-                    Click="CancelButton_Click" />
-                <Button
-                    x:Name="DoneButton"
-                    Grid.Column="2"
-                    Click="DoneButton_Click"
-                    Style="{StaticResource AccentButtonStyle}"
-                    Visibility="Collapsed" />
-                <Button
-                    x:Name="ExecuteButton"
-                    Grid.Column="3"
-                    Click="ExecuteButton_Click"
-                    IsEnabled="False"
-                    Style="{StaticResource AccentButtonStyle}" />
+        <Border Grid.Row="4" BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}" BorderThickness="0,1,0,0" Padding="0,10,0,0">
+            <Grid ColumnDefinitions="*,Auto,Auto,Auto" ColumnSpacing="8">
+                <TextBlock x:Name="FooterSummaryText" VerticalAlignment="Center" TextWrapping="Wrap"
+                           Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                <Button x:Name="UndoButton" Grid.Column="1" Click="UndoButton_Click" Visibility="Collapsed" />
+                <Button x:Name="CancelButton" Grid.Column="2" Click="CancelButton_Click" />
+                <Button x:Name="DoneButton" Grid.Column="2" Click="DoneButton_Click"
+                        Style="{StaticResource AccentButtonStyle}" Visibility="Collapsed" />
+                <Button x:Name="RetryPublicButton" Grid.Column="3" Click="RetryPublicButton_Click"
+                        Style="{StaticResource AccentButtonStyle}" Visibility="Collapsed" />
+                <Button x:Name="ExecuteButton" Grid.Column="3" Click="ExecuteButton_Click"
+                        IsEnabled="False" Style="{StaticResource AccentButtonStyle}" />
             </Grid>
-        </Grid>
+        </Border>
     </Grid>
 </UserControl>

@@ -9,6 +9,8 @@ English | [简体中文](README.zh-CN.md)
 [![Windows 10/11](https://img.shields.io/badge/Windows-10%2F11-0078D4.svg)](#system-requirements)
 [![x64 and ARM64](https://img.shields.io/badge/architecture-x64%20%7C%20ARM64-5C2D91.svg)](#download)
 [![License: GPL v3](https://img.shields.io/badge/license-GPLv3-blue.svg)](LICENSE)
+[![GitHub stars](https://img.shields.io/github/stars/Tianyu199509/DeskBox?style=flat&color=yellow)](https://github.com/Tianyu199509/DeskBox/stargazers)
+[![Downloads](https://img.shields.io/github/downloads/Tianyu199509/DeskBox/total?style=flat&color=brightgreen)](https://github.com/Tianyu199509/DeskBox/releases)
 
 ![DeskBox Windows desktop organizer with file, todo, search, weather, and music widgets](docs/images/brand/readme-hero-1-3-7-dark-en.png)
 
@@ -121,6 +123,25 @@ Every release also publishes a matching `.sha256` sidecar for each installer. Th
 - Back up and restore settings, and export a privacy-filtered diagnostics package for troubleshooting.
 - Recover settings from resilient snapshots, flush pending changes during shutdown, and report save failures instead of silently reverting to defaults.
 
+## What's new in 1.5.0
+
+- **Automatic data snapshots.** Backups now run on a configurable schedule (every 5 minutes to every 5 days) with 3–30 retained snapshots and an optional custom directory that falls back safely with a notification when unavailable.
+- **Redesigned Organize Desktop with Public Desktop support.** A desktop preview card with clear per-file selection, re-scans that keep your choices, resumable interrupted operations, and an optional shared Public Desktop source.
+- **Folder shortcuts navigate in place.** A `.lnk` pointing inside the widget's own tree opens inside the file widget instead of File Explorer.
+- **Sharper, correct icons.** Files, folders, and `desktop.ini` custom icons use 256-px Shell icons with overlays; `.url` icons (including Steam covers) resolve through the Shell.
+- **More control over text and menus.** Independent list/content text sizes for Quick Capture and Todo, a Glance clock 12/24-hour format option, and an optional native Windows context menu for single file tiles.
+- **Reliable rename and drag completion.** Inline rename fields receive typing reliably in every entry point, and internal reorders can no longer trigger Shell shortcut cleanup.
+- **Lower memory, faster Settings.** Settings sections load on demand and search works before sections are created; thumbnail payloads read zero-copy, and widget title bars are more compact.
+
+## What's new in 1.4.9
+
+- **Reliable drag operations on Windows 10 and Windows 11.** A drag now advertises one preferred shell operation through `RequestedOperation`, avoiding the Windows 10 Copy/Move/Create-shortcut chooser without narrowing the destinations DeskBox supports.
+- **No more misplaced shortcuts.** Internal reorder feedback is separated from filesystem completion, so `.lnk` items can no longer be moved to the Recycle Bin during an in-grid or in-stack reorder.
+- **Explicit stack routes in both display modes.** Inline stacks and stack popovers support reorder, stack-to-parent-grid, grid-to-stack, other-grid, desktop, and File Explorer routes.
+- **Windows 10 Native AOT packaging is complete.** Direct packages include the required Windows App Runtime Insights resource, and the Native AOT audit verifies the retained binding and drag-surface contracts.
+- **Settings window no longer leaks.** The Settings window is reused, so repeated open/close cycles do not retain native XAML trees; idle deep cleanup and memory compression are reliable again.
+- **Safer file interactions.** File opening is gated and traced, extension-changing renames require confirmation, and stack popovers support in-place rename.
+
 ## What's new in 1.4.8
 
 - **Safer managed-storage handoff.** DeskBox can keep a standalone `DeskBox Files.lnk` shortcut to the managed storage folder, and the uninstaller offers to create one for older users when managed files remain.
@@ -144,7 +165,7 @@ Every release also publishes a matching `.sha256` sidecar for each installer. Th
 - **Everything-powered file search.** DeskBox reads Everything's existing index over local IPC and merges it with notes, todos, and settings in one window, replacing the duplicate DeskBox-maintained index. Everything is not bundled.
 - **Native AOT Direct builds.** GitHub packages no longer need a separate .NET 10 runtime; Windows App Runtime moved to 2.4.
 
-Read the complete [changelog](CHANGELOG.md) or the [1.4.8 release notes](docs/releases/v1.4.8.md).
+Read the complete [changelog](CHANGELOG.md) or the [1.4.9 release notes](docs/releases/v1.4.9.md).
 
 ## Current interface
 
@@ -265,7 +286,7 @@ tests\DeskBox.Tests         service, policy, and AOT contract tests
 scripts                     build, publish, audit, and memory measurement scripts
 installer                   x64/ARM64 Inno Setup scripts
 docs\architecture           current architecture, native ABI contracts, AOT stages
-docs\user-guide             product documentation
+docs\articles              product articles and tutorials
 docs\images                 README and release imagery
 docs\releases               release copy and test checklists
 .github\workflows           CI, ARM64 runtime, and distribution audits
@@ -285,4 +306,10 @@ You can also visit [deskbox.fun](https://deskbox.fun) or use the contact informa
 - Repository: <https://github.com/Tianyu199509/DeskBox>
 - License: [GPL-3.0-only](LICENSE)
 
-Earlier DeskBox versions already published under the MIT License remain available under that license. The change is not retroactive; see [LICENSE_CHANGE.md](LICENSE_CHANGE.md).
+Earlier DeskBox versions already published under the MIT License remain available under that license. The change is not retroactive.
+
+## Star history
+
+If DeskBox helps you, a star ⭐ is a big encouragement for this solo project.
+
+[![Star History Chart](https://api.star-history.com/svg?repos=Tianyu199509/DeskBox&type=Date)](https://star-history.com/#Tianyu199509/DeskBox&Date)
