@@ -123,6 +123,16 @@ Every release also publishes a matching `.sha256` sidecar for each installer. Th
 - Back up and restore settings, and export a privacy-filtered diagnostics package for troubleshooting.
 - Recover settings from resilient snapshots, flush pending changes during shutdown, and report save failures instead of silently reverting to defaults.
 
+## What's new in 1.5.0
+
+- **Automatic data snapshots.** Backups now run on a configurable schedule (every 5 minutes to every 5 days) with 3–30 retained snapshots and an optional custom directory that falls back safely with a notification when unavailable.
+- **Redesigned Organize Desktop with Public Desktop support.** A desktop preview card with clear per-file selection, re-scans that keep your choices, resumable interrupted operations, and an optional shared Public Desktop source.
+- **Folder shortcuts navigate in place.** A `.lnk` pointing inside the widget's own tree opens inside the file widget instead of File Explorer.
+- **Sharper, correct icons.** Files, folders, and `desktop.ini` custom icons use 256-px Shell icons with overlays; `.url` icons (including Steam covers) resolve through the Shell.
+- **More control over text and menus.** Independent list/content text sizes for Quick Capture and Todo, a Glance clock 12/24-hour format option, and an optional native Windows context menu for single file tiles.
+- **Reliable rename and drag completion.** Inline rename fields receive typing reliably in every entry point, and internal reorders can no longer trigger Shell shortcut cleanup.
+- **Lower memory, faster Settings.** Settings sections load on demand and search works before sections are created; thumbnail payloads read zero-copy, and widget title bars are more compact.
+
 ## What's new in 1.4.9
 
 - **Reliable drag operations on Windows 10 and Windows 11.** A drag now advertises one preferred shell operation through `RequestedOperation`, avoiding the Windows 10 Copy/Move/Create-shortcut chooser without narrowing the destinations DeskBox supports.
