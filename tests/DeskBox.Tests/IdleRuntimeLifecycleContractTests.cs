@@ -50,6 +50,13 @@ public sealed class IdleRuntimeLifecycleContractTests
             "internal TodoReminderService? RefreshTodoReminderService(bool checkNow = false)",
             "private void StartTodoReminderService()");
         string manager = Read("src/DeskBox/Services/WidgetManager.FeatureWidgets.cs");
+        // Stage 3b wiring: the manager raises the feature-state event; the
+        // App-side subscriber owns the service refreshes (same behavior as
+        // the old App.Current switch).
+        string stateHandler = Slice(
+            app,
+            "private void OnFeatureStateChanged(FeatureStateChangedEventArgs e)",
+            "internal void SetSearchFeatureEnabled");
 
         Assert.Contains("RefreshQuickCaptureClipboardService();", launch, StringComparison.Ordinal);
         Assert.Contains("RefreshTodoReminderService();", launch, StringComparison.Ordinal);
@@ -66,8 +73,10 @@ public sealed class IdleRuntimeLifecycleContractTests
         Assert.Contains("_todoReminderService.Dispose();", reminder, StringComparison.Ordinal);
         Assert.Contains("_todoReminderService = null;", reminder, StringComparison.Ordinal);
 
-        Assert.Contains("App.Current.RefreshQuickCaptureClipboardService();", manager, StringComparison.Ordinal);
-        Assert.Contains("App.Current.RefreshTodoReminderService();", manager, StringComparison.Ordinal);
+        Assert.Contains("RaiseFeatureStateChanged(featureId, enabled);", manager, StringComparison.Ordinal);
+        Assert.Contains("SetSearchFeatureEnabled(e.Enabled);", stateHandler, StringComparison.Ordinal);
+        Assert.Contains("RefreshQuickCaptureClipboardService();", stateHandler, StringComparison.Ordinal);
+        Assert.Contains("RefreshTodoReminderService();", stateHandler, StringComparison.Ordinal);
     }
 
     private static string Slice(string source, string startMarker, string endMarker)

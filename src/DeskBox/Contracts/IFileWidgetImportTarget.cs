@@ -21,10 +21,23 @@ namespace DeskBox.Contracts;
 public interface IFileWidgetImportTarget
 {
     /// <summary>
+    /// Lists the file widgets that are valid import targets right now
+    /// (enabled, not deleted, with a resolvable writable backing folder).
+    /// </summary>
+    IReadOnlyList<FileWidgetImportTarget> GetImportTargets();
+
+    /// <summary>
+    /// The most recently used import target, or null when none was used yet
+    /// or the stored target is no longer valid.
+    /// </summary>
+    FileWidgetImportTarget? GetLastImportTarget();
+
+    /// <summary>
     /// Imports a file already materialized on disk into the target file
     /// widget's backing folder. Returns the destination path, or null when
     /// the target is invalid, disabled, or the folder is not accessible.
-    /// Implementations honor cancellation for large transfers.
+    /// Implementations honor cancellation for large transfers (streaming
+    /// copy, not a start-only token check).
     /// </summary>
     Task<string?> TryImportFileAsync(
         string sourceFilePath,
@@ -42,3 +55,9 @@ public interface IFileWidgetImportTarget
         string targetWidgetId,
         CancellationToken cancellationToken = default);
 }
+
+/// <summary>An importable file widget: id, display name, backing folder.</summary>
+public sealed record FileWidgetImportTarget(
+    string WidgetId,
+    string Name,
+    string FolderPath);

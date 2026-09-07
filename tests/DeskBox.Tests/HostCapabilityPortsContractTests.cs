@@ -99,4 +99,57 @@ public sealed class HostCapabilityPortsContractTests
         Assert.Contains("先接线", readme, StringComparison.Ordinal);
         Assert.Contains("零变化", readme, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public void Stage3B_CallersDependOnPortsNotManagerInternals()
+    {
+        string app = File.ReadAllText(TestPaths.SourceFile("src/DeskBox/App.xaml.cs"));
+        string menus = File.ReadAllText(TestPaths.SourceFile(
+            "src/DeskBox/Views/QuickCaptureWidgetWindow.Menus.cs"));
+        string featureWidgets = File.ReadAllText(TestPaths.SourceFile(
+            "src/DeskBox/Services/WidgetManager.FeatureWidgets.cs"));
+        string manager = File.ReadAllText(TestPaths.SourceFile(
+            "src/DeskBox/Services/WidgetManager.cs"));
+        string quickCaptureService = File.ReadAllText(TestPaths.SourceFile(
+            "src/DeskBox/Services/QuickCaptureService.cs"));
+
+        // Cut 1 - Todo presenter: App goes through the port; the rich
+        // HWND/Visible/XamlRoot diagnostics log lives in the implementation.
+        Assert.DoesNotContain("ShowTodoReminderTargetAsync", app, StringComparison.Ordinal);
+        Assert.Contains("TodoReminderPresenter", app, StringComparison.Ordinal);
+        Assert.Contains("PresentReminderTargetAsync", app, StringComparison.Ordinal);
+        Assert.Contains("[Notification] Todo target presentation", featureWidgets, StringComparison.Ordinal);
+
+        // Cut 2 - file import: the import surface goes through the port (the
+        // menus keep other, unrelated manager uses). The pre-wiring manager
+        // method names must not come back; the producer-side item
+        // translation lives in QuickCaptureService, not in widget-manager
+        // internals.
+        Assert.DoesNotContain("GetQuickCaptureFileWidgetTargets", menus, StringComparison.Ordinal);
+        Assert.DoesNotContain("GetLastQuickCaptureFileWidgetTarget", menus, StringComparison.Ordinal);
+        Assert.Contains("App.Current.FileWidgetImport", menus, StringComparison.Ordinal);
+        Assert.Contains("TryImportFileAsync", menus, StringComparison.Ordinal);
+        Assert.Contains("TryImportTextAsync", menus, StringComparison.Ordinal);
+        Assert.Contains("BuildFileImportPlan", menus, StringComparison.Ordinal);
+        Assert.Contains("BuildQuickCaptureContentFileName", quickCaptureService, StringComparison.Ordinal);
+        Assert.DoesNotContain("BuildQuickCaptureContentFileName", featureWidgets, StringComparison.Ordinal);
+        Assert.Contains("TryResolveImportTarget", featureWidgets, StringComparison.Ordinal);
+
+        // Cut 3 - feature state events: the App.Current service switch is
+        // gone from the manager; the App subscribes through the port event
+        // and owns its three service refreshes.
+        Assert.DoesNotContain("App.Current.SetSearchFeatureEnabled", featureWidgets, StringComparison.Ordinal);
+        Assert.DoesNotContain("App.Current.RefreshQuickCaptureClipboardService", featureWidgets, StringComparison.Ordinal);
+        Assert.DoesNotContain("App.Current.RefreshTodoReminderService", featureWidgets, StringComparison.Ordinal);
+        Assert.Contains("RaiseFeatureStateChanged", featureWidgets, StringComparison.Ordinal);
+        Assert.Contains("FeatureStateChanged += OnFeatureStateChanged;", app, StringComparison.Ordinal);
+        Assert.Contains("private void OnFeatureStateChanged(FeatureStateChangedEventArgs e)", app, StringComparison.Ordinal);
+
+        // The manager declares all three ports; the import-target record is
+        // port vocabulary now.
+        Assert.Contains("ITodoReminderPresenter,", manager, StringComparison.Ordinal);
+        Assert.Contains("IFileWidgetImportTarget,", manager, StringComparison.Ordinal);
+        Assert.Contains("IFeatureStateEvents", manager, StringComparison.Ordinal);
+        Assert.DoesNotContain("QuickCaptureFileWidgetTarget", manager, StringComparison.Ordinal);
+    }
 }

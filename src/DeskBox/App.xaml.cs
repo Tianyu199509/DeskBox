@@ -1,6 +1,7 @@
 // Copyright (c) DeskBox. All rights reserved.
 
 using CommunityToolkit.Mvvm.Input;
+using DeskBox.Contracts;
 using DeskBox.Controls.WidgetContents;
 using DeskBox.Helpers;
 using DeskBox.Models;
@@ -154,6 +155,15 @@ public partial class App : Application
         _everythingSearchService?.CurrentSnapshot.State == EverythingConnectionState.Connected;
     internal int SearchMetaCacheCount => _fileMetaService?.CachedIconCount ?? 0;
     public WidgetManager? WidgetManager { get; private set; }
+
+    /// <summary>
+    /// Stage 3b capability-port views of the widget manager: callers depend
+    /// on these port types instead of the concrete manager (pluginization
+    /// roadmap stage 3, wire-first).
+    /// </summary>
+    public ITodoReminderPresenter? TodoReminderPresenter => WidgetManager;
+    public IFileWidgetImportTarget? FileWidgetImport => WidgetManager;
+
     public ResizeGuideOverlayService ResizeGuideOverlay { get; private set; } = null!;
     public NativeAppNotificationService? NativeNotificationService => _nativeNotificationService;
     public DisplayAreaWatcherService? DisplayAreaWatcher => _displayAreaWatcher;
@@ -949,6 +959,11 @@ public partial class App : Application
 
             WidgetManager = new WidgetManager(SettingsService, FileService, OrganizerService, themeService, quickCaptureService, localizationService);
             WidgetManager.TrayLayerStateChanged += UpdateTrayLayerStateText;
+            // Stage 3b, cut point 3: the App owns its services and reacts to
+            // feature enable-state changes through the port event instead of
+            // the manager reaching back into App.Current (host-lifetime
+            // subscription; the manager is created exactly once).
+            WidgetManager.FeatureStateChanged += OnFeatureStateChanged;
             DesktopDoubleClickActivationService = new DesktopDoubleClickActivationService(
                 SettingsService,
                 ToggleWidgetsFromDesktopDoubleClickAsync);
@@ -1635,22 +1650,15 @@ public partial class App : Application
         string? itemId = null,
         bool preferTodayFilter = false)
     {
-        if (WidgetManager is null)
+        if (TodoReminderPresenter is not { } presenter)
         {
             return false;
         }
 
-        TodoReminderTargetPresentationResult presentation =
-            await WidgetManager.ShowTodoReminderTargetAsync(
-                widgetId,
-                itemId,
-                preferTodayFilter);
-        Log(
-            $"[Notification] Todo target presentation widget={presentation.WidgetId} " +
-            $"item={presentation.ItemId ?? "none"} hwnd={presentation.WindowHandle} " +
-            $"visible={presentation.Visible} xamlRoot={presentation.HasXamlRoot} " +
-            $"itemPresented={presentation.ItemPresented} " +
-            $"targetPresented={presentation.TargetPresented}");
+        TodoReminderPresentationResult presentation = await presenter.PresentReminderTargetAsync(
+            widgetId,
+            itemId,
+            preferTodayFilter);
         return presentation.TargetPresented;
     }
 
@@ -4349,6 +4357,27 @@ public partial class App : Application
         return _searchEngineService;
     }
 
+    /// <summary>
+    /// Stage 3b, cut point 3: reacts to feature enable-state changes raised
+    /// through IFeatureStateEvents. Mirrors the service refreshes that the
+    /// WidgetManager used to call directly via App.Current.
+    /// </summary>
+    private void OnFeatureStateChanged(FeatureStateChangedEventArgs e)
+    {
+        if (e.FeatureId == DeskBoxFeatureIds.Search)
+        {
+            SetSearchFeatureEnabled(e.Enabled);
+        }
+        else if (e.FeatureId == DeskBoxFeatureIds.QuickCapture)
+        {
+            RefreshQuickCaptureClipboardService();
+        }
+        else if (e.FeatureId == DeskBoxFeatureIds.Todo)
+        {
+            RefreshTodoReminderService();
+        }
+    }
+
     internal void SetSearchFeatureEnabled(bool enabled)
     {
         if (!UiDispatcherQueue.HasThreadAccess)
@@ -4559,7 +4588,7 @@ public partial class App : Application
 
     private async Task HandleSearchContentAsync(Models.SearchResultItem item)
     {
-        if (WidgetManager is null)
+        if (WidgetManager is null || TodoReminderPresenter is not { } presenter)
         {
             return;
         }
@@ -4567,7 +4596,7 @@ public partial class App : Application
         switch (item.Kind)
         {
             case Models.SearchResultKind.Todo:
-                await WidgetManager.ShowTodoReminderTargetAsync(
+                await presenter.PresentReminderTargetAsync(
                     item.TodoWidgetId,
                     item.TodoItemId,
                     preferTodayFilter: false);

@@ -25,6 +25,19 @@ public sealed record QuickCaptureWriteResult(
     bool WasTruncated,
     QuickCaptureItem? Item);
 
+/// <summary>
+/// Producer-side translation of a captured item into a file-widget import
+/// (pluginization roadmap stage 3b, cut point 2): QuickCapture owns its
+/// item types, naming, and the .url InternetShortcut format; the
+/// File-widget import port owns folders and writes. Exactly one of
+/// SourceFilePath / Text is set; BuildFileImportPlan returns null when the
+/// item has nothing importable (missing image file, empty body).
+/// </summary>
+internal sealed record QuickCaptureFileImportPlan(
+    string? SourceFilePath,
+    string? Text,
+    string FileName);
+
 public sealed class QuickCaptureService
 {
     public const int DefaultRecentLimit = 30;
@@ -1830,6 +1843,98 @@ public sealed class QuickCaptureService
 
         string extension = NormalizeImageExtension(sourceImagePath);
         return $"{prefix} {timestamp.ToLocalTime():yyyy-MM-dd HH-mm-ss}{extension}";
+    }
+
+    /// <summary>
+    /// Producer-side translation of a captured item into a file-widget
+    /// import (pluginization roadmap stage 3b, cut point 2): QuickCapture
+    /// owns its item types, naming, and the .url InternetShortcut format;
+    /// the File-widget import port owns folders and writes. Exactly one of
+    /// SourceFilePath / Text is set. BuildFileImportPlan returns null when
+    /// the item has nothing importable (missing image file, empty body).
+    /// </summary>
+    internal static QuickCaptureFileImportPlan? BuildFileImportPlan(
+        QuickCaptureItem item,
+        string? imageFileNamePrefix,
+        string? textFileNamePrefix,
+        string? linkFileNamePrefix)
+    {
+        switch (item.Type)
+        {
+            case QuickCaptureItemType.Image:
+                if (string.IsNullOrWhiteSpace(item.ImagePath) || !File.Exists(item.ImagePath))
+                {
+                    return null;
+                }
+
+                return new QuickCaptureFileImportPlan(
+                    item.ImagePath,
+                    Text: null,
+                    BuildImageExportFileName(
+                        imageFileNamePrefix,
+                        item.UpdatedAt == default ? item.CreatedAt : item.UpdatedAt,
+                        item.ImagePath));
+
+            case QuickCaptureItemType.Link:
+                string url = string.IsNullOrWhiteSpace(item.Url)
+                    ? item.Body?.Trim() ?? string.Empty
+                    : item.Url.Trim();
+                if (Uri.TryCreate(url, UriKind.Absolute, out Uri? uri))
+                {
+                    string baseText = string.IsNullOrWhiteSpace(uri.Host) ? uri.AbsoluteUri : uri.Host;
+                    return new QuickCaptureFileImportPlan(
+                        SourceFilePath: null,
+                        Text: $"[InternetShortcut]{Environment.NewLine}URL={uri.AbsoluteUri}{Environment.NewLine}",
+                        BuildQuickCaptureContentFileName(baseText, linkFileNamePrefix, ".url"));
+                }
+
+                return BuildTextImportPlan(item, textFileNamePrefix);
+
+            default:
+                return BuildTextImportPlan(item, textFileNamePrefix);
+        }
+    }
+
+    private static QuickCaptureFileImportPlan? BuildTextImportPlan(
+        QuickCaptureItem item,
+        string? textFileNamePrefix)
+    {
+        string body = item.Body?.Trim() ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(body))
+        {
+            return null;
+        }
+
+        return new QuickCaptureFileImportPlan(
+            SourceFilePath: null,
+            Text: body,
+            BuildQuickCaptureContentFileName(body, textFileNamePrefix, ".txt"));
+    }
+
+    private static string BuildQuickCaptureContentFileName(string? body, string? fallbackName, string extension)
+    {
+        string firstLine = body?
+            .Split(["\r\n", "\n"], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .FirstOrDefault() ?? string.Empty;
+        string baseName = FileService.SanitizeFileSystemName(firstLine);
+        if (baseName.Length > 36)
+        {
+            baseName = baseName[..36].Trim().TrimEnd('.');
+        }
+
+        if (string.IsNullOrWhiteSpace(baseName))
+        {
+            baseName = FileService.SanitizeFileSystemName(fallbackName);
+        }
+
+        if (string.IsNullOrWhiteSpace(baseName))
+        {
+            baseName = "Quick Capture";
+        }
+
+        return baseName.EndsWith(extension, StringComparison.OrdinalIgnoreCase)
+            ? baseName
+            : baseName + extension;
     }
 
     private void CleanupOldExportFiles()
