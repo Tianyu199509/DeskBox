@@ -80,5 +80,5 @@ public sealed class IdleRuntimeLifecycleContractTests
     }
 
     private static string Read(string relativePath) =>
-        File.ReadAllText(TestPaths.FromRepository(relativePath));
+        File.ReadAllText(TestPaths.SourceFile(relativePath));
 }

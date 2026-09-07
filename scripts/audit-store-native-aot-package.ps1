@@ -224,6 +224,7 @@ $forbiddenPatterns = @(
     '(^|/)DeskBox\.dll$',
     '(^|/)DeskBox\.deps\.json$',
     '(^|/)DeskBox\.runtimeconfig\.json$',
+    '(^|/)DeskBox\.Abstractions\.dll$',
     '(^|/)DeskBox\.Updater(?:\.|/|$)',
     '(^|/)deskbox_search_core(?:\.|$)',
     '\.pdb$',

@@ -1,3 +1,5 @@
+using System.Text.RegularExpressions;
+
 namespace DeskBox.Tests;
 
 /// <summary>
@@ -80,6 +82,26 @@ public sealed class ArchitectureContractTests
             ["src/DeskBox/ViewModels/QuickCaptureWidgetViewModel.Operations.cs"] = 1,
         };
 
+    // Feature files that still declare inside a DeskBox.Views* namespace. They
+    // predate the boundary guard and are re-homed by roadmap stage 2 (settings
+    // sections become feature-owned UserControls). No new entries are allowed.
+    private static readonly string[] GrandfatheredHostViewNamespaceFiles =
+    [
+        "src/DeskBox/Views/SettingsSections/GlanceWidgetSettingsSection.xaml.cs",
+        "src/DeskBox/Views/SettingsSections/SearchSettingsSection.xaml.cs",
+        "src/DeskBox/Views/SearchPopupWindow.xaml.cs",
+    ];
+
+    // Subdirectories of the search directories that are themselves registered
+    // search directories (their files are already enumerated and deduped).
+    // Any other subdirectory containing .cs files trips the directory-tree test.
+    private static readonly Dictionary<string, string[]> RegisteredSubdirectories =
+        new(StringComparer.Ordinal)
+        {
+            ["src/DeskBox/Views"] = ["SettingsSections"],
+            ["src/DeskBox/Controls"] = ["WidgetContents"],
+        };
+
     [Fact]
     public void FeatureFileInventory_MatchesFrozenCounts()
     {
@@ -112,6 +134,115 @@ public sealed class ArchitectureContractTests
                         "and a deliberate allow-list update).");
                 }
             }
+        }
+    }
+
+    [Fact]
+    public void FeatureSources_DoNotUseRootUsingStaticAliasOrFullyQualifiedHostReferences()
+    {
+        foreach (FeatureSpec feature in Features)
+        {
+            foreach (string file in EnumerateFeatureFiles(feature))
+            {
+                int lineNumber = 0;
+                foreach (string line in File.ReadLines(file))
+                {
+                    lineNumber++;
+                    string trimmed = line.TrimStart();
+
+                    if (trimmed.StartsWith("using ", StringComparison.Ordinal))
+                    {
+                        Assert.False(
+                            trimmed.Equals("using DeskBox;", StringComparison.OrdinalIgnoreCase) ||
+                            trimmed.Equals("using DeskBox ;", StringComparison.OrdinalIgnoreCase),
+                            $"{file}:{lineNumber}: 'using DeskBox;' is not allowed in feature code; it " +
+                            "imports the host root namespace (App and friends) without tripping the " +
+                            "using allow list.");
+                        Assert.False(
+                            trimmed.StartsWith("using static DeskBox.", StringComparison.Ordinal),
+                            $"{file}:{lineNumber}: 'using static DeskBox.*' is not allowed in feature code.");
+                        Assert.False(
+                            Regex.IsMatch(trimmed, @"^using\s+[A-Za-z_][A-Za-z0-9_]*\s*=\s*DeskBox\."),
+                            $"{file}:{lineNumber}: namespace aliases for DeskBox.* are not allowed in " +
+                            "feature code.");
+                        continue;
+                    }
+
+                    if (trimmed.StartsWith("//", StringComparison.Ordinal) ||
+                        trimmed.StartsWith("*", StringComparison.Ordinal) ||
+                        trimmed.StartsWith("namespace ", StringComparison.Ordinal))
+                    {
+                        continue;
+                    }
+
+                    Assert.False(
+                        trimmed.Contains("DeskBox.Views.", StringComparison.Ordinal) ||
+                        trimmed.Contains("DeskBox.Views;", StringComparison.Ordinal),
+                        $"{file}:{lineNumber}: fully-qualified DeskBox.Views references bypass the using " +
+                        "allow list; move the dependency behind a contract instead.");
+                    Assert.False(
+                        trimmed.Contains("global::DeskBox.", StringComparison.Ordinal),
+                        $"{file}:{lineNumber}: global::DeskBox.* references bypass the using allow list.");
+                }
+            }
+        }
+    }
+
+    [Fact]
+    public void FeatureSources_DeclareOnlyFeatureOrContractNamespaces()
+    {
+        foreach (FeatureSpec feature in Features)
+        {
+            foreach (string file in EnumerateFeatureFiles(feature))
+            {
+                string relative = RepositoryRelative(file);
+                if (GrandfatheredHostViewNamespaceFiles.Contains(relative, StringComparer.Ordinal))
+                {
+                    continue;
+                }
+
+                string? declaredNamespace = ExtractNamespaceDeclaration(file);
+                Assert.NotNull(declaredNamespace);
+                Assert.False(
+                    declaredNamespace.StartsWith("DeskBox.Views", StringComparison.Ordinal),
+                    $"{file}: feature code declares '{declaredNamespace}'. Declaring inside a host " +
+                    "namespace makes host types visible without using directives, bypassing the " +
+                    "allow list. Re-home the file (see roadmap stage 2).");
+            }
+        }
+    }
+
+    [Fact]
+    public void FeatureSearchDirectories_HaveNoUnregisteredSubdirectories()
+    {
+        foreach (string directory in SearchDirectories)
+        {
+            string directoryPath = TestPaths.FromRepository(directory);
+            if (!Directory.Exists(directoryPath))
+            {
+                continue;
+            }
+
+            string[] registered = RegisteredSubdirectories.GetValueOrDefault(directory, []);
+                string[] unregisteredSubdirectoryFiles = Directory
+                    .EnumerateFiles(directoryPath, "*.cs", SearchOption.AllDirectories)
+                    .Where(path =>
+                    {
+                        string relative = Path.GetRelativePath(directoryPath, path);
+                        string? subdirectory = Path.GetDirectoryName(relative);
+                        return !string.IsNullOrEmpty(subdirectory) &&
+                               !registered.Contains(
+                                   subdirectory.Replace(Path.DirectorySeparatorChar, '/'),
+                                   StringComparer.Ordinal);
+                    })
+                    .ToArray();
+
+            Assert.True(
+                unregisteredSubdirectoryFiles.Length == 0,
+                $"{directory}: unregistered subdirectories contain source files:\n" +
+                string.Join('\n', unregisteredSubdirectoryFiles) +
+                "\nRegister the subdirectory in ArchitectureContractTests or move the files; " +
+                "unregistered trees are invisible to the feature boundary guards.");
         }
     }
 
@@ -169,6 +300,7 @@ public sealed class ArchitectureContractTests
 
     private static IEnumerable<string> EnumerateFeatureFiles(FeatureSpec feature)
     {
+        var files = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (string directory in SearchDirectories)
         {
             string directoryPath = TestPaths.FromRepository(directory);
@@ -177,8 +309,23 @@ public sealed class ArchitectureContractTests
                 continue;
             }
 
-            foreach (string path in Directory.EnumerateFiles(directoryPath, "*.cs"))
+            // Recursive so future feature subdirectories stay under boundary
+            // guards; the HashSet dedupes directories that are nested inside
+            // other registered directories (Views/SettingsSections, Controls/
+            // WidgetContents).
+            foreach (string path in Directory.EnumerateFiles(
+                         directoryPath,
+                         "*.cs",
+                         SearchOption.AllDirectories))
             {
+                string relative = Path.GetRelativePath(directoryPath, path)
+                    .Replace(Path.DirectorySeparatorChar, '/');
+                if (relative.StartsWith("bin/", StringComparison.OrdinalIgnoreCase) ||
+                    relative.StartsWith("obj/", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
                 string fileName = Path.GetFileName(path);
                 if (IsExcludedFileName(fileName))
                 {
@@ -191,9 +338,14 @@ public sealed class ArchitectureContractTests
                     fileName.Contains(token, StringComparison.Ordinal));
                 if (matches && !excluded)
                 {
-                    yield return path;
+                    files.Add(Path.GetFullPath(path));
                 }
             }
+        }
+
+        foreach (string file in files)
+        {
+            yield return file;
         }
 
         foreach (string extra in feature.ExtraFiles)
@@ -202,6 +354,22 @@ public sealed class ArchitectureContractTests
             Assert.True(File.Exists(path), $"Missing declared feature file: {extra}");
             yield return path;
         }
+    }
+
+    private static string? ExtractNamespaceDeclaration(string file)
+    {
+        foreach (string line in File.ReadLines(file))
+        {
+            string trimmed = line.TrimStart();
+            if (trimmed.StartsWith("namespace ", StringComparison.Ordinal))
+            {
+                string declaration = trimmed["namespace ".Length..].Trim();
+                int terminator = declaration.IndexOfAny([';', '{']);
+                return terminator > 0 ? declaration[..terminator].Trim() : declaration;
+            }
+        }
+
+        return null;
     }
 
     private static bool IsExcludedFileName(string fileName) =>

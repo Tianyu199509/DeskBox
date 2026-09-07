@@ -71,7 +71,7 @@ public sealed class GlanceWidgetInstanceManagementTests
     {
         string windowCommands = File.ReadAllText(TestPaths.FromRepository(
             "src/DeskBox/Views/ContentWidgetWindow.Commands.cs"));
-        string featureWidgets = File.ReadAllText(TestPaths.FromRepository(
+        string featureWidgets = File.ReadAllText(TestPaths.SourceFile(
             "src/DeskBox/Services/WidgetManager.FeatureWidgets.cs"));
         using JsonDocument chineseStrings = JsonDocument.Parse(File.ReadAllText(
             TestPaths.FromRepository("src/DeskBox/Strings/zh-CN.json")));

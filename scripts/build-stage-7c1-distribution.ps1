@@ -184,6 +184,7 @@ $directForbiddenPatterns = @(
     '(^|/)DeskBox\.dll$',
     '(^|/)DeskBox\.deps\.json$',
     '(^|/)DeskBox\.runtimeconfig\.json$',
+    '(^|/)DeskBox\.Abstractions\.dll$',
     '(^|/)(?:coreclr|clrjit|hostfxr|hostpolicy)\.dll$',
     '(^|/)Assets/Store/',
     'store-assets-html'

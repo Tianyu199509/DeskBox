@@ -55,10 +55,9 @@ Use this path for future content-type widgets whenever possible.
 
 Core widget foundation:
 
-- `src/DeskBox/Models/WidgetKind.cs`
-- `src/DeskBox/Models/WidgetConfig.cs`
+- `src/DeskBox.Abstractions/Models/WidgetConfig.cs` (includes `WidgetKind`)
 - `src/DeskBox/Services/WidgetRegistry.cs`
-- `src/DeskBox/Services/WidgetContentDescriptor.cs`
+- `src/DeskBox.Abstractions/Services/WidgetContentDescriptor.cs`
 - `src/DeskBox/Services/WidgetContentFactory.cs`
 - `src/DeskBox/Services/IWidgetContentProvider.cs`
 - `src/DeskBox/Services/ContentWidgetWindowFactory.cs`

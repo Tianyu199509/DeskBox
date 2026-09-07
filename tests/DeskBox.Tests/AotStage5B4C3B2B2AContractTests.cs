@@ -157,5 +157,5 @@ public sealed class AotStage5B4C3B2B2AContractTests
     }
 
     private static string Read(string relativePath) =>
-        File.ReadAllText(TestPaths.FromRepository(relativePath));
+        File.ReadAllText(TestPaths.SourceFile(relativePath));
 }

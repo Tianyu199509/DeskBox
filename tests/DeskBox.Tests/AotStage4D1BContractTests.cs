@@ -90,8 +90,6 @@ public sealed class AotStage4D1BContractTests
 
     private static IReadOnlyDictionary<string, int> ReadLocalizedXamlUsages()
     {
-        string projectDirectory = TestPaths.FromRepository("src/DeskBox");
-        string separator = Path.DirectorySeparatorChar.ToString();
         var tagRegex = new Regex(
             @"<(?<tag>[A-Za-z_][A-Za-z0-9_.:-]*)\b(?:(?!>).)*svc:Localized\.(?:HeaderKey|DescriptionKey)(?:(?!>).)*>",
             RegexOptions.CultureInvariant | RegexOptions.Singleline);
@@ -100,17 +98,8 @@ public sealed class AotStage4D1BContractTests
             RegexOptions.CultureInvariant);
         var usages = new Dictionary<string, int>(StringComparer.Ordinal);
 
-        foreach (string path in Directory.EnumerateFiles(
-                     projectDirectory,
-                     "*.xaml",
-                     SearchOption.AllDirectories))
+        foreach (string path in TestPaths.EnumerateProductionXamlFiles())
         {
-            if (path.Contains($"{separator}bin{separator}", StringComparison.OrdinalIgnoreCase) ||
-                path.Contains($"{separator}obj{separator}", StringComparison.OrdinalIgnoreCase))
-            {
-                continue;
-            }
-
             string xaml = File.ReadAllText(path);
             foreach (Match tagMatch in tagRegex.Matches(xaml))
             {

@@ -428,8 +428,7 @@ public sealed class OnboardingExperienceTests
         string manager = File.ReadAllText(Path.Combine(
             root,
             "src/DeskBox/Services/WidgetManager.cs"));
-        string featureManager = File.ReadAllText(Path.Combine(
-            root,
+        string featureManager = File.ReadAllText(TestPaths.SourceFile(
             "src/DeskBox/Services/WidgetManager.FeatureWidgets.cs"));
         string settingsCallbacks = File.ReadAllText(Path.Combine(
             root,

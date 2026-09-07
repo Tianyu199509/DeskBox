@@ -1,9 +1,9 @@
 # DeskBox 模块化与插件平台架构方案
 
-- 方案日期：2026-09-07；v1.1（外部评审 16 条+代码复盘）；v1.2（开源全景调研，§13）；v1.3（Protocol First 收敛，§14）；**v1.4（第三轮外部评审 12 条全部采纳收口，§14 末清单）——架构 Baseline 版本，调研终止**
-- 代码基线：main `94d0e99f`（DeskBox 1.5.0）
-- 评审记录：见第 12 节（v1.0 → v1.1）、第 13 节（v1.1 → v1.2）
-- 当前状态：**待拍板**。决策点见第 11 节；拍板后按第 7 节路线图动工
+- 方案日期：2026-09-07；v1.1（外部评审 16 条+代码复盘）；v1.2（开源全景调研，§13）；v1.3（Protocol First 收敛，§14）；v1.4（第三轮评审 12 条收口=架构 Baseline）；**v1.5（复盘修订：阶段 2 选型 Music 试点/阶段 3 改写为三切点剥离/新增阶段 2.5 schema v0/Broker 落点定案/依赖边修正+护栏补洞清单，§16）**
+- 代码基线：main `94d0e99f`（DeskBox 1.5.0）；执行进度：阶段 0/1/1.5 已落地（`6c7d2827`/`ee35bf32`，3376/3376 绿）
+- 评审记录：见第 12 节（v1.0 → v1.1）、第 13 节（v1.1 → v1.2）、第 16 节（v1.5）
+- 当前状态：**执行中**。阶段 2（批次 C 数据卫生 → Music 试点）待开工
 
 ---
 
@@ -38,7 +38,7 @@
 
 **分层**：`DeskBox.sln` 仅 3 项目（主程序、Updater、Tests），所有功能/契约/XAML/设置页在 `src/DeskBox` 单程序集内。
 
-**widget 体系**（现状抽象质量好，是拆分的接缝）：`Contracts/IWidgetContent.cs` 生命周期+能力接口族（public）；`IWidgetContentProvider`/`Context`（internal，Context 携带具体类型）；`WidgetContentFactory`/`WidgetRegistry`/`FeatureWidgetSettings` 三处重复注册；`WidgetManager` 约 1.2 万行 partial 群；`WidgetShellContentHost` 纯接口生命周期事务。
+**widget 体系**（现状抽象质量好，是拆分的接缝）：`IWidgetContent` 生命周期+能力接口族（public，**Step 1 已迁入 `src/DeskBox.Abstractions/Contracts/`**）；`IWidgetContentProvider`/`Context`（internal，Context 携带具体类型，留守宿主）；`WidgetContentFactory`/`WidgetRegistry`/`FeatureWidgetSettings` 三处重复注册；`WidgetManager` 约 1.2 万行 partial 群；`WidgetShellContentHost` 纯接口生命周期事务。
 
 **主要耦合点**（难→易）：单体 csproj；`WidgetManager.FeatureWidgets.cs`（1392 行：Todo reminder 穿透、Glance 多实例、QuickCapture×File 落盘 140 行、App 级回调）；File 双注册表不变式；FileSurfaceContent 20 处 ambient 环；AppSettings 横向贯穿；ContentWidgetWindow 25+ 处 `is` 强转；App.xaml 单体字典；QuickCaptureWidgetWindow 6400 行死代码。
 
@@ -131,9 +131,10 @@
 | **0（前置）** | 测试/审计护栏改造：路径常量化、JSON 基线多项目扫描、audit restore 循环参数化、WMC1510 计数重校准机制化 | 单独 PR；此后结构变更有安全回归网 |
 | **1** | Abstractions 变体 A（Contracts 6 文件 + WidgetConfig + WidgetFeedback + Descriptor + chrome 枚举，保 namespace 全 public，唯一切码处 GlanceWidgetData.cs） | 零引用改动，冻结测试全绿。**v1.1：这是唯一的"多程序集"试点**——用它验证多项目能否活过 AOT 门禁，观察 1-2 个版本的成本信号（锁文件冲突、audit 重校准频率、CI 时长），再决定是否拆 Feature 程序集 |
 | **1.5（2026-09-07 已落地）** | **边界纪律（零拆分方案，ratchet 形态）**：新增 `ArchitectureContractTests`（4 测试）——①六功能文件清单冻结（Weather 16/Todo 36/Music 13/Glance 19/Search 20/QuickCapture 22，增删改名须有意更新快照）；②功能源 using 白名单冻结（7 个宿主命名空间，禁 `DeskBox.Views` 等新依赖）；③ambient `App.Current.WidgetManager` 棘轮（Glance 设置节 9 + QuickCapture VM 1，只许减）；④Abstractions 纯度（契约程序集禁依赖宿主命名空间，防环）。**执行决策：`Features/{Xxx}/` 物理目录搬迁推迟**——147 个路径式测试重校准的成本 vs 零运行时收益，棘轮测试已提供边界看守；真正搬迁时走 TestPaths 重定位映射按功能逐个做 | 六功能边界有测试看守，无程序集工程税 |
-| **2** | 设置重组 + 数据卫生：per-kind 设置 store（Glance 样板）；四个内联设置模板抽 UserControl；**修 Todo 孤儿数据（RemoveWidgetAsync 加清理钩子，与 Glance 对称）；Metadata key 常量收敛单注册表；备份排除 cache/ 与 weather-cache.json** | 一个官方功能设置走 per-kind store；三处数据卫生修复合入 |
-| **3** | Capability Broker v1（进程内）：grids./files./storage./associations.(轻模型)/events. 接口 + 权限/scope 判定 + 审计；`WidgetManager.FeatureWidgets.cs` 解体（Todo reminder→能力接口、QuickCapture 落盘→broker+事件、App 回调→事件） | 一个官方功能完全经 broker 消费能力 |
-| **3.5（并行，v1.3 改为对比性三路 spike）** | **同一个 GitHub-Stats 插件实现三份实测对比**：① 声明式（六模板+manifest，预期半天）；② TS 外部进程（JSON-RPC over stdio，宿主进程治理复用 ThumbnailProxy 模式）；③ Rust/TS→WASM（Rust 嵌 Wasmtime 组件模型 + wit-bindgen `deskbox:plugin` world + fuel/epoch/ResourceLimiter，**WASM 宿主第一候选=Rust**——.NET 侧 embedding 无组件模型是已核实事实，wasmtime-dotnet #324 挂 26 个月未动）。统一测：冷启动/内存/IPC 延迟/开发代码量/打包大小/调试体验/**AI 一次生成成功率**/升级兼容/权限强制/Crash 恢复。Extism（1 天 AOT 冒烟）与 wasmtime-dotnet（0.5 天，定位宿主内置信任脚本引擎）降为可选补充腿 | 实测数据表拍板"代码插件默认 Runtime"；协议/权限/manifest 的投入无论结果如何全部复用 |
+| **2** | 设置重组 + 数据卫生（v1.5 修订：**试点改 Music**——3 个 AppSettings 字段成本是 Weather 的零头；Weather 17 字段/803 行 VM partial 留给模式验证后做，若做必须拆 3 个 PR 跨 3 个发布=UI 搬迁/SchemaVersion 10 数据分区/字段清理）：①数据卫生先行——**Todo 孤儿修复挂两处**（RemoveWidgetAsync + ResetFeatureWidgetAsync 重复实例分支，只挂一处留漏）+ 可选存量孤儿目录清扫（PruneOrphanedManualStackMetadata 模式）；备份排除 cache/ 与 weather-cache.json（恢复后首屏天气回退定位流程，PR 里明说）；Metadata key 收敛=**宿主侧 const 别名聚合类**（勿进 Abstractions，文件名避开功能 token）。②Music per-kind store。③四个内联模板（Weather/Todo/Music/QuickCapture 的 SettingsWindow 内联 DataTemplate）抽 UserControl——新 section 禁止新增 ambient（棘轮只认减） | Music 设置走 per-kind store；三处数据卫生修复合入 |
+| **2.5（v1.5 新增）** | **manifest/能力 JSON Schema v0 草案**：权限声明子集 + 六模板 payload + version/fallback 条款骨架——3.5 三腿、阶段 6 CLI validate、阶段 7 规范三方共同依赖，先于 spike 定稿（语义草案与 schema 同 PR） | schema v0 入库，spike 的"AI 生成成功率"有靶子 |
+| **3** | Capability Broker v1（进程内）（v1.5 修订）：grids./files./storage./associations.(轻模型)/events. 接口 + 权限/scope 判定 + 审计；**接口命名空间=DeskBox.Contracts、物理落宿主 src/DeskBox/Contracts/（已搬空正好复用），不进 Abstractions**（保试点纯度）；FeatureWidgets.cs 改造=**三个切点剥离（~340 行/24%）**：Todo reminder 穿透→能力接口、QuickCapture 落盘→broker+事件、App 回调→事件；**前置：先把 5 处 FeatureWidgets 钉住测试接线 SourceFile（已完成于批次 A），搬迁时每文件加一条重定位映射**；per-plugin 数据根目录约定（plugins/{publisher.plugin}/...）归本阶段 storage.* 交付 | 一个官方功能完全经 broker 消费能力；Todo CRUD 能力面就位（阶段 5 依赖） |
+| **3.5（v1.5：与阶段 3 并行；前置=阶段 2.5 schema v0，§11 旧排期表述以本行为准）** | **同一个 GitHub-Stats 插件实现三份实测对比**：① 声明式（六模板+manifest v0，预期半天）；② TS 外部进程（JSON-RPC over stdio，宿主进程治理复用 ThumbnailProxy 模式）；③ Rust/TS→WASM（**用独立 crate `native/deskbox-wasm-spike`，勿给 deskbox-native 加 wasmtime feature**——那会把 spike 依赖拖进 app 构建/audit/零售脚本；Rust 嵌 Wasmtime 组件模型 + wit-bindgen `deskbox:plugin` world + fuel/epoch/ResourceLimiter，**WASM 宿主第一候选=Rust**——.NET 侧 embedding 无组件模型是已核实事实，wasmtime-dotnet #324 挂 26 个月未动）。统一测：冷启动/内存/IPC 延迟/开发代码量/打包大小/调试体验/**AI 一次生成成功率**/升级兼容/权限强制/Crash 恢复。Extism（1 天 AOT 冒烟）与 wasmtime-dotnet（0.5 天，定位宿主内置信任脚本引擎）降为可选补充腿 | 实测数据表拍板"代码插件默认 Runtime"；协议/权限/manifest 的投入无论结果如何全部复用 |
 | **4** | 插件运行时抽象 + 权限/生命周期/激活事件/资源预算的运行时落地（epoch+ResourceLimiter+熔断泛化） | 官方示例插件跑在完整生命周期+预算内 |
 | **5** | **MCP server 作为 Broker 的第一个外部 Adapter**（v1.1 调序；v1.4 修正：MCP 工具清单**不硬编码具体功能**——核心域工具由宿主贡献（grids/files/search），Todo 等功能工具由各 Feature 经 **AI Tool Contribution**（`todo.list/create/complete`）注入 ContributionRegistry，MCP Adapter 只做聚合。这样将来 GitHub 插件能贡献 `github.getIssues` 而无需改宿主 MCP server，MCP 与插件体系形成闭环） | 外部 AI 客户端可列格子/读文件/搜索；Todo 工具由 Todo Feature 贡献 |
 | **6（v1.1 升级）** | **插件 CLI/Validator**：`DeskBox.Cli.exe` 伴随程序（完全照抄 Updater 的无头 AOT exe 模式：Main+args+退出码，csproj 构建/复制 target 已模板化）；先做 init/validate/pack（纯文件操作，校验 manifest/权限/UI 模板 schema）；dev/test 待运行时就绪；install 复用 pending-command 文件+激活事件转发通道（现成 jump-list/通知封包同构模式，注意单向无回执限制） | AI 循环可跑：生成→validate→失败→修复→打包 |
@@ -340,11 +341,33 @@ P0：§6 重写为 Runtime 矩阵（删除 A→B→C 旧结论，与 §14 唯一
 
 撑得住的四个早期决策：包=内容寻址签名产物（商业与包解耦）；发布者=密钥身份（先于账号）；Broker 唯一执行点（entitlement 可插任意档）；数据按可同步性分层（同步后补）。**致命反例**：无签名文件夹拖放式插件（无法收钱/追责）；身份绑死单一平台账号；`ai.*` 第一天就要求登录（破坏本地优先）；entitlement 检查埋进插件运行时（各插件自实现=灾难）。
 
+## 16. v1.5 修订记录（2026-09-07 四路复盘后）
+
+复盘结论：Step 1 本身零高危；发现的护栏漏洞与计划偏差在本批次（"批次 A 护栏补洞"）同步修复，计划调整如下。
+
+### 16.1 护栏补洞（已落地，全部测试/脚本/文档层）
+
+1. **SourceFile 接线**：5 处 FeatureWidgets 钉住测试（Onboarding/GlanceInstance/AotStage5B4C3B2B2A/IdleRuntime/MarkdownAndSplitter）改走 `TestPaths.SourceFile` + 采用率护栏（≥5 文件）——重定位映射从零调用者变为实际生效。
+2. **棘轮堵漏三件**：①功能文件禁声明 `DeskBox.Views*` 命名空间（grandfather=Glance/Search 设置节+SearchPopupWindow 三文件，Step 2 迁移）；②禁 `using DeskBox;`/`using static DeskBox.*`/命名空间别名/全限定 `DeskBox.Views.`/`global::DeskBox.`（namespace 声明行与注释除外）；③目录发现改递归+去重，加"无未登记子目录"绊线（Views 允许 SettingsSections、Controls 允许 WidgetContents）。
+3. **编译覆盖**：`dotnet build` 解决方案带 RID 被 SDK 拒绝（NETSDK1134）→ ci.yml 维持宿主 csproj 构建，改加"每个 src 项目必须被宿主/测试引用图覆盖"契约测试 + sln 成员绊线。
+4. **发布禁令**：retail/7C1/store 审计三处禁令清单补 `DeskBox.Abstractions.dll`（JIT 产物泄漏检测）；audit 脚本同款补条目推迟到下次动它（需 58→59+46 测试文件同步）。
+5. **多根化收尾**：AotStage4D1B（XAML 计数）与 AotStage4D2（全树扫）改走 `EnumerateProductionXamlFiles`/`EnumerateProductionSourceFiles`，消灭第二套枚举实现。
+6. **杂项**：Abstractions csproj 补 Version 1.5.0 + IncludeSourceRevisionInInformationalVersion=false（发布证据哈希确定性；锁文件零漂移已验证）。
+
+### 16.2 计划调整
+
+1. **阶段 2 选型**：试点 Weather→**Music**（3 字段 vs Weather 的 17 字段+803 行 VM partial+15 消费文件+2 个搬不走的 AOT smoke 重写；§8/§9 的"Weather 16 字段"笔误统一为 17）。Weather 若做必须拆 3-PR/3-发布。
+2. **阶段 3 改写**："解体"→"三个切点剥离（~340 行/24%）"；Broker 接口落 `DeskBox.Contracts` 命名空间+宿主 Contracts 目录；per-plugin 数据根约定归阶段 3；Todo CRUD 能力面进阶段 3 判据（阶段 5 依赖）。
+3. **新增阶段 2.5**：manifest/能力 JSON Schema v0（3.5/6/7 三方共同前置）。
+4. **依赖边修正**：spike 排期统一为"与阶段 3 并行、前置 schema v0"（取代 §11 旧表述）；Rust spike 用独立 crate。
+5. **数据卫生细化**：Todo 孤儿挂两处+可选存量清扫；Metadata 注册表=宿主侧 const 别名聚合（勿进 Abstractions）。
+6. **过时表述**（§2.2 等）：JSON 基线扫描已多项目化；"30-40% 工作量"基于阶段 0 之前状态，搬迁税现按"SourceFile 已接线+每文件一条映射"重估。
+
 ## 附录 A：关键证据文件索引
 
 | 主题 | 文件 |
 |---|---|
-| 契约族 | `src/DeskBox/Contracts/IWidgetContent.cs` |
+| 契约族 | `src/DeskBox.Abstractions/Contracts/IWidgetContent.cs`（Step 1 已迁入；Provider/Context 留守 `src/DeskBox/Services/IWidgetContentProvider.cs`） |
 | Provider（internal + 具体类型 Context） | `src/DeskBox/Services/IWidgetContentProvider.cs` |
 | WidgetManager 主体/partial 群 | `src/DeskBox/Services/WidgetManager.cs`（+20 partial） |
 | 功能格启停/穿透点 | `src/DeskBox/Services/WidgetManager.FeatureWidgets.cs:224,257,290,673-815,1322-1338` |

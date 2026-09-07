@@ -23,19 +23,12 @@ public sealed class AotStage4D2ContractTests
         Assert.Contains("MoveEntriesWithShellProgress(", fileService, StringComparison.Ordinal);
         Assert.Contains("SHFileOperation(ref", fileService, StringComparison.Ordinal);
 
-        string projectDirectory = TestPaths.FromRepository("src/DeskBox");
-        string separator = Path.DirectorySeparatorChar.ToString();
-        string[] remainingReferences = Directory.EnumerateFiles(
-                projectDirectory,
-                "*.cs",
-                SearchOption.AllDirectories)
-            .Where(path =>
-                !path.Contains($"{separator}bin{separator}", StringComparison.OrdinalIgnoreCase) &&
-                !path.Contains($"{separator}obj{separator}", StringComparison.OrdinalIgnoreCase))
+        string repositoryRoot = TestPaths.FromRepository(".");
+        string[] remainingReferences = TestPaths.EnumerateProductionSourceFiles()
             .Where(path => File.ReadAllText(path).Contains(
                 "FileOperationHelper",
                 StringComparison.Ordinal))
-            .Select(path => Path.GetRelativePath(projectDirectory, path))
+            .Select(path => Path.GetRelativePath(repositoryRoot, path))
             .ToArray();
 
         Assert.Empty(remainingReferences);

@@ -103,6 +103,34 @@ internal static class TestPaths
         }
     }
 
+    /// <summary>
+    /// Enumerates production .xaml files across all <see cref="ProductionSourceRoots"/>,
+    /// excluding build outputs (bin/obj/AppPackages) inside each root.
+    /// </summary>
+    public static IEnumerable<string> EnumerateProductionXamlFiles()
+    {
+        foreach (string root in ProductionSourceRoots())
+        {
+            string rootPath = FromRepository(root);
+            foreach (string path in Directory.EnumerateFiles(
+                         rootPath,
+                         "*.xaml",
+                         SearchOption.AllDirectories))
+            {
+                string relative = Path.GetRelativePath(rootPath, path)
+                    .Replace(Path.DirectorySeparatorChar, '/');
+                if (relative.StartsWith("bin/", StringComparison.OrdinalIgnoreCase) ||
+                    relative.StartsWith("obj/", StringComparison.OrdinalIgnoreCase) ||
+                    relative.StartsWith("AppPackages/", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                yield return path;
+            }
+        }
+    }
+
     private static string FindRepositoryRoot()
     {
         DirectoryInfo? directory = new(AppContext.BaseDirectory);
