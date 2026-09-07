@@ -98,12 +98,195 @@ public sealed class MusicSettingsStoreTests : IDisposable
     }
 
     [Fact]
+    public async Task Load_RecoversFromOrphanedBackupWhenPrimaryIsMissing()
+    {
+        var store = CreateStore();
+        await store.SaveAsync(new MusicWidgetSettings
+        {
+            UseArtworkBackdrop = false,
+            DisplayMode = "Cover"
+        });
+        await store.SaveAsync(new MusicWidgetSettings
+        {
+            UseArtworkBackdrop = true,
+            DisplayMode = "Auto"
+        });
+        File.Delete(store.StorePath);
+
+        // The .bak is one generation behind (File.Replace semantics): losing
+        // only the primary must recover that generation, not reset to defaults.
+        var recovered = new MusicSettingsStore(
+            Path.Combine(_tempRoot, "store", "music")).Load();
+
+        Assert.False(recovered.UseArtworkBackdrop);
+        Assert.Equal("Cover", recovered.DisplayMode);
+        Assert.True(File.Exists(store.StorePath), "Load must restore the primary from the backup.");
+    }
+
+    [Fact]
+    public async Task Load_QuarantinesCorruptPrimaryAndReadsBackup()
+    {
+        var store = CreateStore();
+        await store.SaveAsync(new MusicWidgetSettings
+        {
+            UseArtworkBackdrop = false,
+            DisplayMode = "Cover"
+        });
+        await store.SaveAsync(new MusicWidgetSettings
+        {
+            UseArtworkBackdrop = true,
+            DisplayMode = "Auto"
+        });
+        File.WriteAllText(store.StorePath, "{ not valid json");
+
+        var recovered = new MusicSettingsStore(
+            Path.Combine(_tempRoot, "store", "music")).Load();
+
+        Assert.False(recovered.UseArtworkBackdrop);
+        Assert.Equal("Cover", recovered.DisplayMode);
+        Assert.NotEmpty(Directory.GetFiles(
+            Path.GetDirectoryName(store.StorePath)!,
+            "settings.json.corrupt-*"));
+        string restoredPrimary = File.ReadAllText(store.StorePath);
+        Assert.Contains("Cover", restoredPrimary, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task SaveSynchronously_WritesThroughAtomicReplaceAndThrowsOnFailure()
+    {
+        var store = CreateStore();
+        await store.SaveAsync(new MusicWidgetSettings
+        {
+            UseArtworkBackdrop = false,
+            DisplayMode = "Cover"
+        });
+
+        store.SaveSynchronously(new MusicWidgetSettings
+        {
+            UseArtworkBackdrop = true,
+            DisplayMode = "Auto"
+        });
+
+        Assert.Contains("Auto", File.ReadAllText(store.StorePath), StringComparison.Ordinal);
+        Assert.Contains(
+            "Cover",
+            File.ReadAllText(ResilientJsonStore.GetBackupPath(store.StorePath)),
+            StringComparison.Ordinal);
+
+        // A primary that cannot be replaced must throw so the migration
+        // pipeline can stop instead of stamping the schema version.
+        File.Delete(store.StorePath);
+        Directory.CreateDirectory(store.StorePath);
+        Assert.Throws<IOException>(() =>
+            store.SaveSynchronously(new MusicWidgetSettings()));
+        Directory.Delete(store.StorePath);
+    }
+
+    [Fact]
+    public void Pipeline_LeavesVersionAtLastSuccessWhenAMigrationFails()
+    {
+        var settings = new AppSettings { SchemaVersion = 5 };
+
+        bool applied = new SettingsMigrationPipeline(
+        [
+            new FakeMigration(5, succeeded: true),
+            new FakeMigration(6, succeeded: false),
+            new FakeMigration(7, succeeded: true)
+        ]).RunMigrations(settings);
+
+        // Partial progress is kept (so it is saved and not redone), the
+        // failed step is retried next launch, and later steps never run.
+        Assert.True(applied);
+        Assert.Equal(6, settings.SchemaVersion);
+    }
+
+    [Fact]
+    public void Pipeline_StampsCurrentVersionWhenAllMigrationsSucceed()
+    {
+        var settings = new AppSettings { SchemaVersion = 9 };
+
+        bool applied = new SettingsMigrationPipeline(
+        [
+            new FakeMigration(9, succeeded: true)
+        ]).RunMigrations(settings);
+
+        Assert.True(applied);
+        Assert.Equal(SettingsMigrationPipeline.CurrentSchemaVersion, settings.SchemaVersion);
+    }
+
+    [Fact]
+    public void Migration_9_To_10_PropagatesExternalWriteFailures()
+    {
+        string dataDirectory = Path.Combine(_tempRoot, "blocked-data");
+        Directory.CreateDirectory(dataDirectory);
+        // A file named "music" makes the store's directory creation throw -
+        // exactly a failed external write during migration 9-to-10. The
+        // migration must let it propagate so the pipeline can stop.
+        File.WriteAllText(Path.Combine(dataDirectory, "music"), "blocker");
+
+        Assert.ThrowsAny<Exception>(() =>
+            Migration_9_To_10.Migrate(new AppSettings(), dataDirectory));
+    }
+
+    private sealed class FakeMigration(int fromVersion, bool succeeded) : ISettingsMigration
+    {
+        public int FromVersion { get; } = fromVersion;
+
+        public void Migrate(AppSettings settings)
+        {
+            if (!succeeded)
+            {
+                throw new InvalidOperationException("Injected migration failure.");
+            }
+        }
+    }
+
+    [Fact]
     public void Pipeline_RegistersTheMusicMigration()
     {
         string pipelineSource = File.ReadAllText(TestPaths.SourceFile(
             "src/DeskBox/Services/SettingsMigrationService.cs"));
-        Assert.Contains("_migrations.Add(new Migration_9_To_10());", pipelineSource, StringComparison.Ordinal);
+        Assert.Contains("new Migration_9_To_10()", pipelineSource, StringComparison.Ordinal);
         Assert.Contains("CurrentSchemaVersion = 10", pipelineSource, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Consumers_UseTheProcessWideSingletonAndSerializedWritePath()
+    {
+        string storeSource = File.ReadAllText(TestPaths.SourceFile(
+            "src/DeskBox/Services/MusicSettingsStore.cs"));
+        string migrationSource = File.ReadAllText(TestPaths.SourceFile(
+            "src/DeskBox/Services/SettingsMigrationService.cs"));
+        string settingsVmSource = File.ReadAllText(TestPaths.SourceFile(
+            "src/DeskBox/ViewModels/SettingsViewModel.cs"));
+        string widgetVmSource = File.ReadAllText(TestPaths.SourceFile(
+            "src/DeskBox/ViewModels/MusicWidgetViewModel.cs"));
+
+        // Singleton: two independently constructed stores would each pin a
+        // private cache forever and the widget would never see settings-page
+        // updates (the live-sync regression this pins shut).
+        Assert.Contains(
+            "private readonly MusicSettingsStore _musicSettingsStore = MusicSettingsStore.Current;",
+            settingsVmSource,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "private readonly MusicSettingsStore _musicSettingsStore = MusicSettingsStore.Current;",
+            widgetVmSource,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("new MusicSettingsStore()", settingsVmSource, StringComparison.Ordinal);
+        Assert.DoesNotContain("new MusicSettingsStore()", widgetVmSource, StringComparison.Ordinal);
+
+        // Persistence: writes go through the serialized chain enqueued under
+        // the cache lock (disk order == update order), never a free-running
+        // fire-and-forget task.
+        Assert.Contains("EnqueuePersist(Clone(_cached));", storeSource, StringComparison.Ordinal);
+        Assert.DoesNotContain("_ = PersistAsync(", storeSource, StringComparison.Ordinal);
+
+        // Migration: synchronous failure-propagating write, never a blocking
+        // wait on an async continuation (UI-thread startup deadlock).
+        Assert.Contains("store.SaveSynchronously(migrated);", migrationSource, StringComparison.Ordinal);
+        Assert.DoesNotContain("GetAwaiter().GetResult()", migrationSource, StringComparison.Ordinal);
+        Assert.Contains("settings.SchemaVersion = version;", migrationSource, StringComparison.Ordinal);
     }
 
     private MusicSettingsStore CreateStore() =>
