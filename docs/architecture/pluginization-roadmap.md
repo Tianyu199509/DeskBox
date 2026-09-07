@@ -1,9 +1,9 @@
 # DeskBox 模块化与插件平台架构方案
 
-- 方案日期：2026-09-07；v1.1-v1.5（评审收敛+复盘修订）；v1.6/v1.7（评审纪律入册）；**批次 E（第三轮评审：Music 写入加固+Schema v0.1）已合入**
-- 代码基线：main `15546fc4`；执行进度：阶段 0/1/1.5 + 批次 A/B/C/D/E 已合入（3394/3394 绿，audit profile 61，schema v0.1）
-- 评审记录：§12（v1.0→v1.1）、§13（v1.1→v1.2）、§16（v1.5-v1.7）
-- 当前状态：**阶段 3 Capability Broker v1 开工中**
+- 方案日期：2026-09-07；v1.1-v1.5（评审收敛+复盘修订）；v1.6/v1.7（评审纪律入册）；v1.8（第四轮评审吸收，§16.7/16.8）
+- 代码基线：main `2709d7f0`（阶段 3a 能力端口合入）；第四轮评审修复批次=PR #245（store 一致性+迁移事务性）/#246（schema v0.2）/#247（端口语义修正）
+- 评审记录：§12（v1.0→v1.1）、§13（v1.1→v1.2）、§16（v1.5-v1.8）
+- 当前状态：**阶段 3b（依赖倒置接线）准备中**——已落地的是 host 内部能力端口（capability ports），**不是 Capability Broker**（registry/权限判定/调度/审计/运行时 adapter 均未开始）；进度自述基准见 §16.8 末
 
 ---
 
@@ -133,7 +133,7 @@
 | **1.5（2026-09-07 已落地）** | **边界纪律（零拆分方案，ratchet 形态）**：新增 `ArchitectureContractTests`（4 测试）——①六功能文件清单冻结（Weather 16/Todo 36/Music 13/Glance 19/Search 20/QuickCapture 22，增删改名须有意更新快照）；②功能源 using 白名单冻结（7 个宿主命名空间，禁 `DeskBox.Views` 等新依赖）；③ambient `App.Current.WidgetManager` 棘轮（Glance 设置节 9 + QuickCapture VM 1，只许减）；④Abstractions 纯度（契约程序集禁依赖宿主命名空间，防环）。**执行决策：`Features/{Xxx}/` 物理目录搬迁推迟**——147 个路径式测试重校准的成本 vs 零运行时收益，棘轮测试已提供边界看守；真正搬迁时走 TestPaths 重定位映射按功能逐个做 | 六功能边界有测试看守，无程序集工程税 |
 | **2** | 设置重组 + 数据卫生（v1.5 修订：**试点改 Music**——3 个 AppSettings 字段成本是 Weather 的零头；Weather 17 字段/803 行 VM partial 留给模式验证后做，若做必须拆 3 个 PR 跨 3 个发布=UI 搬迁/SchemaVersion 10 数据分区/字段清理）：①数据卫生先行——**Todo 孤儿修复挂两处**（RemoveWidgetAsync + ResetFeatureWidgetAsync 重复实例分支，只挂一处留漏）+ 可选存量孤儿目录清扫（PruneOrphanedManualStackMetadata 模式）；备份排除 cache/ 与 weather-cache.json（恢复后首屏天气回退定位流程，PR 里明说）；Metadata key 收敛=**宿主侧 const 别名聚合类**（勿进 Abstractions，文件名避开功能 token）。②Music per-kind store。③四个内联模板（Weather/Todo/Music/QuickCapture 的 SettingsWindow 内联 DataTemplate）抽 UserControl——新 section 禁止新增 ambient（棘轮只认减） | Music 设置走 per-kind store；三处数据卫生修复合入 |
 | **2.5（v1.5 新增）** | **manifest/能力 JSON Schema v0 草案**：权限声明子集 + 六模板 payload + version/fallback 条款骨架——3.5 三腿、阶段 6 CLI validate、阶段 7 规范三方共同依赖，先于 spike 定稿（语义草案与 schema 同 PR） | schema v0 入库，spike 的"AI 生成成功率"有靶子 |
-| **3** | Capability Broker v1（进程内）（v1.5 修订）：grids./files./storage./associations.(轻模型)/events. 接口 + 权限/scope 判定 + 审计；**接口命名空间=DeskBox.Contracts、物理落宿主 src/DeskBox/Contracts/（已搬空正好复用），不进 Abstractions**（保试点纯度）；FeatureWidgets.cs 改造=**三个切点剥离（~340 行/24%）**：Todo reminder 穿透→能力接口、QuickCapture 落盘→broker+事件、App 回调→事件；**前置：先把 5 处 FeatureWidgets 钉住测试接线 SourceFile（已完成于批次 A），搬迁时每文件加一条重定位映射**；per-plugin 数据根目录约定（plugins/{publisher.plugin}/...）归本阶段 storage.* 交付 | 一个官方功能完全经 broker 消费能力；Todo CRUD 能力面就位（阶段 5 依赖） |
+| **3** | Capability Broker v1（进程内）（v1.5 修订）：grids./files./storage./associations.(轻模型)/events. 接口 + 权限/scope 判定 + 审计；**接口命名空间=DeskBox.Contracts、物理落宿主 src/DeskBox/Contracts/（已搬空正好复用），不进 Abstractions**（保试点纯度）；FeatureWidgets.cs 改造=**三个切点剥离（~340 行/24%）**：Todo reminder 穿透→能力接口、QuickCapture 落盘→broker+事件、App 回调→事件；**前置：先把 5 处 FeatureWidgets 钉住测试接线 SourceFile（已完成于批次 A），搬迁时每文件加一条重定位映射**；per-plugin 数据根目录约定（plugins/{publisher.plugin}/...）归本阶段 storage.* 交付；**v1.8 执行顺序（第四轮评审采纳）：先修存量一致性（store 单例/串行化持久化/迁移事务性=PR #245）→端口语义修正（PR #247）→WidgetManager 就地实现/委托接口+App/功能调用方全部改依赖接口（功能行为零变化）→依赖集稳定后再决定实现是否物理搬移；若搬移需要给 WidgetManager 暴露一批 internal getter/dictionary，先不搬** | 一个官方功能完全经 broker 消费能力；Todo CRUD 能力面就位（阶段 5 依赖） |
 | **3.5（v1.5：与阶段 3 并行；前置=阶段 2.5 schema v0，§11 旧排期表述以本行为准）** | **同一个 GitHub-Stats 插件实现三份实测对比**：① 声明式（六模板+manifest v0，预期半天）；② TS 外部进程（JSON-RPC over stdio，宿主进程治理复用 ThumbnailProxy 模式）；③ Rust/TS→WASM（**用独立 crate `native/deskbox-wasm-spike`，勿给 deskbox-native 加 wasmtime feature**——那会把 spike 依赖拖进 app 构建/audit/零售脚本；Rust 嵌 Wasmtime 组件模型 + wit-bindgen `deskbox:plugin` world + fuel/epoch/ResourceLimiter，**WASM 宿主第一候选=Rust**——.NET 侧 embedding 无组件模型是已核实事实，wasmtime-dotnet #324 挂 26 个月未动）。统一测：冷启动/内存/IPC 延迟/开发代码量/打包大小/调试体验/**AI 一次生成成功率**/升级兼容/权限强制/Crash 恢复。Extism（1 天 AOT 冒烟）与 wasmtime-dotnet（0.5 天，定位宿主内置信任脚本引擎）降为可选补充腿 | 实测数据表拍板"代码插件默认 Runtime"；协议/权限/manifest 的投入无论结果如何全部复用 |
 | **4** | 插件运行时抽象 + 权限/生命周期/激活事件/资源预算的运行时落地（epoch+ResourceLimiter+熔断泛化） | 官方示例插件跑在完整生命周期+预算内 |
 | **5** | **MCP server 作为 Broker 的第一个外部 Adapter**（v1.1 调序；v1.4 修正：MCP 工具清单**不硬编码具体功能**——核心域工具由宿主贡献（grids/files/search），Todo 等功能工具由各 Feature 经 **AI Tool Contribution**（`todo.list/create/complete`）注入 ContributionRegistry，MCP Adapter 只做聚合。这样将来 GitHub 插件能贡献 `github.getIssues` 而无需改宿主 MCP server，MCP 与插件体系形成闭环） | 外部 AI 客户端可列格子/读文件/搜索；Todo 工具由 Todo Feature 贡献 |
@@ -404,6 +404,22 @@ P0：§6 重写为 Runtime 矩阵（删除 A→B→C 旧结论，与 §14 唯一
 评审对下一批（Music）的观察点与我们 §16.5.5 升级后的验收一致：字段出 AppSettings、UI 自持、ambient 只减不增、观察 Feature 生命周期第三重复的出现时机。
 
 **Why:** 两轮外部评审与内部审计三方收敛，纪律条款是防止后续批次倒退的护栏。
+
+### 16.7 第三轮外部评审吸收补记（v1.7 期，落地=PR #240/#241）
+
+第三轮评审（Music 写入三主张全成立+Schema 五模型问题）的吸收当时未单列 roadmap 小节：写入加固（monitor lock/Update API/SaveDebounced 恢复/widget 改读 store）= PR #240；能力接口落地 = PR #241；Schema v0.1 修订明细在 `plugin-schema-v0-notes.md`（其"roadmap 16.7"引用即指本节）。第四轮评审证实 #240 仍遗留双实例缓存不一致与迁移事务性缺口，由 §16.8 批次收口。
+
+### 16.8 第四轮外部评审吸收（v1.8，2026-09-07，基线 2709d7f0）
+
+评审对 #240/#241/main 逐条核验，~20 条主张绝大部分成立。落地三批：
+
+1. **PR #245（P0×2+P1×2，store/迁移）**：①MusicSettingsStore 双实例缓存不一致——两个 VM 各 `new()` 一个 store 且 `Load()` 首载后永不重读磁盘，live widget 收不到设置页改动（阶段 2 试点引入的真回归）→ 进程级 `Current` 单例；②乱序持久化——锁外自由并发的 fire-and-forget 写+File.Replace 重试环会放大"内存=B/磁盘=A"→ 锁内入队单一持久化链；③迁移事务性——`RunMigrations` 吞异常后无条件推版本号+迁移内部 SaveAsync 吞异常（双重不可见失败）→ stop-on-failure+版本停在最后成功步+`SaveSynchronously` 同步失败传播 seam（顺带消灭 UI 线程 GetResult 死锁隐患）；④备份回退弱化——primary 缺失时 .bak 被跳过直接回默认 → LoadFromDisk 镜像 ResilientJsonStore 决策树（隔离损坏+恢复 primary）。
+2. **PR #246（schema v0.2）**：widget 贡献必填收紧+`additionalProperties:false`（$defs 结构）；signature 块存在即必须完整；根级必填 `publisherPublicKey`（指纹不能验签，无账号阶段包自带公钥，`publisher==sha256(publisherPublicKey)`）；哈希规则钉死 JCS(RFC 8785)+`package.integrity` 清单（废弃口述式"排序键无空白"）。
+3. **PR #247（端口语义修正，本批）**：`ITodoReminderPresenter` 结果改 `{WidgetId, ItemPresented, TargetPresented}` 并如实记录"无匹配则创建 widget"（零行为变化；TargetPresented 保留 AOT 轮"真展示成功"语义）；`IFileDropTarget`→`IFileWidgetImportTarget`（非 drag/drop、backing folder 措辞、加 CancellationToken）；`IFeatureLifecycleEvents`→`IFeatureStateEvents`（避开三条 lifecycle 命名冲突；UI 线程 raise/订阅者异常隔离/退订自理入契约注释）；新增 `FeatureId` 强类型+`DeskBoxFeatureIds`（enum→stable id 桥，宿主聚合，永不进 Abstractions/3P）；Contracts/README 边界声明。
+
+**进度自述修正（评审第二部分采纳）**：当前成果=host 内部能力端口/依赖倒置缝，非 Capability Broker v1。分层进度：Phase 0/1/1.5 ✅；Phase 2 数据卫生+Music 试点 ✅（store 一致性由 #245 补齐）；Phase 2.5 schema v0.1≈v0.2 ✅；Phase 3a 内部端口 ✅（语义修正=#247）；Phase 3b 依赖倒置接线未开始（下一步，先接线后搬移）；真 Broker 未开始。
+
+**Why:** 第四轮评审抓到的双实例缓存/迁移事务性是数据层真风险，在复制 store 模式到 Weather/Todo 前修掉成本最低；端口语义趁零调用者修正免费。
 
 ## 附录 A：关键证据文件索引
 
