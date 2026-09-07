@@ -4,8 +4,10 @@
 
 简体中文 | [English](README.md)
 
+> 目前暂不接受外部 PR 合并——欢迎通过 Issue / Discussion 提交 Bug、功能建议与技术讨论，详见 [CONTRIBUTING.md](CONTRIBUTING.md)。
+
 [![CI](https://github.com/Tianyu199509/DeskBox/actions/workflows/ci.yml/badge.svg)](https://github.com/Tianyu199509/DeskBox/actions/workflows/ci.yml)
-[![最新版本](https://img.shields.io/badge/release-1.4.9-2563EB.svg)](https://github.com/Tianyu199509/DeskBox/releases/tag/v1.4.9)
+[![最新版本](https://img.shields.io/badge/release-1.5.0-2563EB.svg)](https://github.com/Tianyu199509/DeskBox/releases/tag/v1.5.0)
 [![Windows 10/11](https://img.shields.io/badge/Windows-10%2F11-0078D4.svg)](#环境要求)
 [![x64 and ARM64](https://img.shields.io/badge/architecture-x64%20%7C%20ARM64-5C2D91.svg)](#下载)
 [![License: GPL v3](https://img.shields.io/badge/license-GPLv3-blue.svg)](LICENSE)
