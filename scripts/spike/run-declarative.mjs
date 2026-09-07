@@ -35,8 +35,7 @@
 import http from 'node:http';
 import path from 'node:path';
 import { validatePackage } from './validate-lib.mjs';
-
-const MAX_RESPONSE_BYTES = 2 * 1024 * 1024; // host hard limit, packages cannot raise it
+import { PolicyRefused, createCapabilityGate, fetchHttpJson } from './host-capabilities.mjs';
 
 const args = process.argv.slice(2);
 const pkgDir = path.resolve(args[0] ?? 'spikes/github-stats-live');
@@ -47,8 +46,6 @@ const measure = args.includes('--measure');
 const grants = args
   .filter(a => a.startsWith('--grant='))
   .map(a => a.slice('--grant='.length));
-
-class PolicyRefused extends Error {}
 
 const timings = { validateMs: 0, fetchMs: 0, bindMs: 0 };
 let mockServer = null;
@@ -89,28 +86,10 @@ async function run() {
   // ---------- host policy gate ----------
   // Requested (manifest) vs granted (host). A capability needs all three:
   // declared permission + URL host inside the declared scope + a grant.
+  // Shared with the process leg so both enforce identical semantics.
   const permissions = manifest.permissions ?? [];
-  const permissionIds = new Set(permissions.map(p => p.id));
-  const allows = id => permissions.find(p => p.id === id)?.scope?.allow ?? [];
-  const grantedHosts = id =>
-    grants.filter(g => g.startsWith(`${id}=`)).map(g => g.slice(id.length + 1).toLowerCase());
-  const hostname = url => new URL(url).hostname.toLowerCase();
-
-  const hostAllowed = (url, permissionId) => {
-    if (!permissionIds.has(permissionId)) {
-      throw new PolicyRefused(`capability '${permissionId}' is not declared by the package`);
-    }
-    const host = hostname(url);
-    if (!allows(permissionId).some(entry => entry.toLowerCase() === host)) {
-      throw new PolicyRefused(
-        `url '${url}' is outside the declared ${permissionId} scope`);
-    }
-    if (!grantedHosts(permissionId).includes(host)) {
-      throw new PolicyRefused(
-        `url host '${host}' has no granted ${permissionId} capability (requested != granted)`);
-    }
-    return true;
-  };
+  const gate = createCapabilityGate(permissions, grants);
+  const hostAllowed = (url, permissionId) => gate.requireAllowed(url, permissionId);
 
   const dataSources = manifest.dataSources ?? {};
   const actions = manifest.actions ?? {};
@@ -134,7 +113,8 @@ async function run() {
     hostAllowed(url, 'network.fetch'); // policy failures refuse before any bytes move
 
     try {
-      fetched[id] = await fetchHttpJson(url);
+      const result = await fetchHttpJson(url);
+      fetched[id] = result.json;
     } catch (error) {
       if (error instanceof PolicyRefused) {
         throw error; // redirect-attempt is a policy refusal, not a data failure
@@ -216,49 +196,9 @@ function resolveAction(actionId, actions, hostAllowed) {
   return { actionId, type: action.type, url: action.url };
 }
 
-async function fetchHttpJson(url) {
-  // Redirects are NOT followed (v0.3): a 3xx would move the request to a
-  // host that never passed the capability gate. Refuse instead.
-  const response = await fetch(url, {
-    headers: { 'User-Agent': 'DeskBox-spike-leg1B', Accept: 'application/json' },
-    redirect: 'manual',
-    signal: AbortSignal.timeout(10_000)
-  });
-  if (response.type === 'opaqueredirect' || (response.status >= 300 && response.status < 400)) {
-    throw new PolicyRefused(
-      `url '${url}' attempted a redirect; redirects are refused in v0.3 instead of followed`);
-  }
-  if (!response.ok) {
-    throw new Error(`HTTP ${response.status}`);
-  }
+// The shared hardened fetcher lives in host-capabilities.mjs (identical
+// semantics for the process leg).
 
-  const declaredLength = Number(response.headers.get('content-length') ?? 0);
-  if (declaredLength > MAX_RESPONSE_BYTES) {
-    throw new Error(`response exceeds the ${MAX_RESPONSE_BYTES}-byte host limit (${declaredLength} declared)`);
-  }
-
-  // Stream the body with a hard cap so a hostile server cannot balloon
-  // memory with an unbounded "JSON" payload.
-  const reader = response.body.getReader();
-  const chunks = [];
-  let total = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    total += value.byteLength;
-    if (total > MAX_RESPONSE_BYTES) {
-      await reader.cancel();
-      throw new Error(`response exceeds the ${MAX_RESPONSE_BYTES}-byte host limit`);
-    }
-    chunks.push(value);
-  }
-  const text = Buffer.concat(chunks).toString('utf8');
-  try {
-    return JSON.parse(text);
-  } catch {
-    throw new Error('response is not valid JSON');
-  }
-}
 
 function evaluateJsonPath(value, pathExpression) {
   if (value === undefined || value === null) return undefined;

@@ -17,7 +17,7 @@ export function validatePackage(pkgDir) {
   for (const key of rootRequired) {
     if (!(key in manifest)) fail(`root: missing required '${key}'`);
   }
-  const rootClosed = new Set([...rootRequired, 'permissions', 'data', 'signature', 'fallback', 'dataSources', 'actions']);
+  const rootClosed = new Set([...rootRequired, 'permissions', 'data', 'signature', 'fallback', 'dataSources', 'actions', 'entry']);
   for (const key of Object.keys(manifest)) {
     if (!rootClosed.has(key)) fail(`root: unknown property '${key}'`);
   }
@@ -25,6 +25,25 @@ export function validatePackage(pkgDir) {
   if (!/^[a-z0-9][a-z0-9-]*(\.[a-z0-9][a-z0-9-]*)+$/.test(manifest.id ?? '')) fail('id pattern');
   if (!/^\d+\.\d+\.\d+$/.test(manifest.version ?? '')) fail('version pattern');
   if (!['none', 'wasm', 'process'].includes(manifest.runtime)) fail('runtime enum');
+  if (manifest.runtime !== 'none' && manifest.entry === undefined) {
+    fail(`runtime '${manifest.runtime}' requires an entry point`);
+  }
+  if (manifest.entry !== undefined) {
+    if (manifest.runtime === 'none') fail('runtime:none packages must not declare an entry point');
+    if (typeof manifest.entry?.main !== 'string' || manifest.entry.main === '') {
+      fail('entry.main must be a non-empty string');
+    }
+    for (const key of Object.keys(manifest.entry ?? {})) {
+      if (key !== 'main') fail(`entry: unknown property '${key}'`);
+    }
+    if (typeof manifest.entry?.main === 'string') {
+      const violation = packagePathViolation(manifest.entry.main);
+      if (violation) fail(`entry.main violates the package path grammar (${violation})`);
+      else if (!fs.existsSync(path.join(pkgDir, manifest.entry.main))) {
+        fail(`entry.main file not found in package: ${manifest.entry.main}`);
+      }
+    }
+  }
   if (manifest.publisher === undefined || manifest.publisher === '') fail('publisher missing');
   if (typeof manifest.publisherPublicKey !== 'string' || manifest.publisherPublicKey === '') fail('publisherPublicKey missing');
 

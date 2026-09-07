@@ -213,6 +213,95 @@ public sealed class DeclarativePackageSpikeTests : IDisposable
             StringComparison.Ordinal);
     }
 
+    // ----- spike leg 2: external TS-process runtime (same behavior and the
+    // same permission semantics as the declarative leg, but the logic is
+    // third-party code in its own process calling host capabilities) -----
+
+    [Fact]
+    public void ProcessPackage_ExecutesTheSameBehaviorThroughCapabilityCalls()
+    {
+        ProcessResult result = RunProcessHarness(
+            TestPaths.FromRepository("spikes/github-stats-process"),
+            "--self-test=ok",
+            "--grant=network.fetch=127.0.0.1",
+            "--grant=shell.open=github.com",
+            "--invoke-widget=live-stars");
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Contains("\"value\": 1284", result.StandardOutput, StringComparison.Ordinal);
+        Assert.Contains("\"method\": \"network.fetch\"", result.StandardOutput, StringComparison.Ordinal);
+        Assert.Contains("\"type\": \"open-url\"", result.StandardOutput, StringComparison.Ordinal);
+        Assert.Contains("https://github.com/Tianyu199509/DeskBox", result.StandardOutput, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ProcessPackage_UngrantedCapabilityCallIsRefusedAndPluginDegrades()
+    {
+        // Without a host-side grant the capability CALL is refused (the
+        // plugin asked properly, so it is not killed); the plugin degrades
+        // to the fallback payload and keeps rendering.
+        ProcessResult result = RunProcessHarness(
+            TestPaths.FromRepository("spikes/github-stats-process"),
+            "--self-test=ok");
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Contains("\"value\": \"…\"", result.StandardOutput, StringComparison.Ordinal);
+        Assert.Contains(
+            "has no granted network.fetch capability (requested != granted)",
+            result.StandardOutput,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ProcessPackage_OutOfScopeAskFromHostileCodeIsRefused()
+    {
+        // The ask itself is out of scope: the gate must refuse the call
+        // host-side - process isolation does not mean trust.
+        ProcessResult result = RunProcessHarness(
+            TestPaths.FromRepository("spikes/github-stats-process"),
+            "--self-test=evil-ask",
+            "--grant=network.fetch=api.github.com");
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Contains("\"value\": \"…\"", result.StandardOutput, StringComparison.Ordinal);
+        Assert.Contains(
+            "outside the declared network.fetch scope",
+            result.StandardOutput,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ProcessPackage_RedirectAttemptIsRefusedAndPluginDegrades()
+    {
+        ProcessResult result = RunProcessHarness(
+            TestPaths.FromRepository("spikes/github-stats-process"),
+            "--self-test=redirect",
+            "--grant=network.fetch=127.0.0.1");
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Contains("\"value\": \"…\"", result.StandardOutput, StringComparison.Ordinal);
+        Assert.Contains(
+            "attempted a redirect; redirects are refused in v0.3",
+            result.StandardOutput,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ProcessPackage_PluginCrashIsSurfacedByProcessGovernance()
+    {
+        // A crashed plugin must never be swallowed as success.
+        ProcessResult result = RunProcessHarness(
+            TestPaths.FromRepository("spikes/github-stats-process"),
+            "--self-test=crash",
+            "--grant=network.fetch=api.github.com");
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains(
+            "plugin process exited with code 3",
+            result.StandardError,
+            StringComparison.Ordinal);
+    }
+
     private static void CopyDirectory(string source, string destination)
     {
         foreach (string file in Directory.GetFiles(source, "*", SearchOption.AllDirectories))
@@ -235,6 +324,13 @@ public sealed class DeclarativePackageSpikeTests : IDisposable
     {
         return RunNode(
             TestPaths.FromRepository("scripts/spike/run-declarative.mjs"),
+            [packageDirectory, .. harnessArgs]);
+    }
+
+    private static ProcessResult RunProcessHarness(string packageDirectory, params string[] harnessArgs)
+    {
+        return RunNode(
+            TestPaths.FromRepository("scripts/spike/run-process.mjs"),
             [packageDirectory, .. harnessArgs]);
     }
 

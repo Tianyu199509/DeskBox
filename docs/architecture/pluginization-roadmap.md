@@ -3,7 +3,7 @@
 - 方案日期：2026-09-07；v1.1-v1.5（评审收敛+复盘修订）；v1.6/v1.7（评审纪律入册）；v1.8（第四轮评审吸收，§16.7/16.8）
 - 代码基线：main `2709d7f0`（阶段 3a 能力端口合入）；第四轮评审修复批次=PR #245（store 一致性+迁移事务性）/#246（schema v0.2）/#247（端口语义修正）
 - 评审记录：§12（v1.0→v1.1）、§13（v1.1→v1.2）、§16（v1.5-v1.8）
-- 当前状态：**阶段 3b（依赖倒置接线）已落地**（三切点调用方全部改走 `DeskBox.Contracts` 端口，零行为变化；物理搬移 3c 后置）。**阶段 3.5 腿①（声明式）全通且安全语义补齐（第七轮）**：①A 包样本 + ①B 执行闭环——**requested≠granted 权限分离**（manifest 只请求、授予归宿主、无授予 fail-closed）、redirect 拒绝不跟随、2MB 响应硬上限、数据失败→payload 回退（策略失败才 REFUSED）、payload.primaryActionId 组件级动作链，五场景测试钉死，真实 GitHub 链路已验证；**腿②③未开始，但必须实现同一行为与同一权限语义**。已落地的是 host 内部能力端口，**不是 Capability Broker**（registry/权限判定/调度/审计/运行时 adapter 均未开始）。**安全 backlog**：network.fetch/network.local 拆分（默认禁 loopback/私网/link-local/元数据，防 DNS 重绑定 SSRF）、File Widget 枚举过滤 `.import-*.tmp`
+- 当前状态：**阶段 3b（依赖倒置接线）已落地**（三切点调用方全部改走 `DeskBox.Contracts` 端口，零行为变化；物理搬移 3c 后置）。**阶段 3.5 腿①（声明式）全通且安全语义补齐（第七轮）**：①A 包样本 + ①B 执行闭环——requested≠granted 权限分离、redirect 拒绝、2MB 硬上限、数据失败回退、primaryActionId 动作链，真实 GitHub 链路验证。**腿②（TS 外部进程）已完成**：`spikes/github-stats-process`（runtime:process + **`entry.main` 入口字段提案**）+ ndjson JSON-RPC over stdio + `host-capabilities.mjs` **共享能力门库**（与腿①零策略漂移）+ 进程治理（deadline/kill/退出码传播，首状态后崩溃不吞成功），敌意越界/未授予/redirect/崩溃五场景测试钉死，真实链路验证（3503 stars）。**腿③ WASM 未开始**。已落地的是 host 内部能力端口，**不是 Capability Broker**（registry/权限判定/调度/审计/运行时 adapter 均未开始）。**安全 backlog**：network.fetch/network.local 拆分（默认禁 loopback/私网/link-local/元数据，防 DNS 重绑定 SSRF）、File Widget 枚举过滤 `.import-*.tmp`
 
 ---
 

@@ -13,10 +13,17 @@
 |---|---|---|
 | ①A 声明式包样本 | 六模板 + manifest v0.2 + 完整验签链 + 路径文法 | ✅ 已完成 |
 | ①B 声明式执行闭环 | http-json 数据源 + JSON path 绑定 + open-url 动作 + 宿主权限门（schema v0.3） | ✅ 已完成 |
-| ② TS 外部进程 | JSON-RPC over stdio，进程治理复用 ThumbnailProxy 模式 | ⬜ 未开始 |
+| ② TS 外部进程 | ndjson JSON-RPC over stdio + 同款三层能力门 + 进程治理（deadline/kill/退出码传播） | ✅ 已完成（schema 增 `entry` 入口字段） |
 | ③ Rust/TS→WASM | 独立 crate `native/deskbox-wasm-spike`（勿给 deskbox-native 加 wasmtime feature）；Wasmtime 组件模型 + wit-bindgen `deskbox:plugin` world + fuel/epoch/ResourceLimiter | ⬜ 未开始 |
 
 可选补充腿（降级）：Extism（1 天 AOT 冒烟）、wasmtime-dotnet（0.5 天，宿主内置信任脚本引擎定位）。
+
+## 腿② 交付物
+
+- `github-stats-process/`：进程腿样本包——`runtime: "process"` + **`entry.main`（spike 提案的入口字段，普通 integrity 清单内负载文件；runtime:none 禁止 entry，process/wasm 必填）** + 与腿①相同的 metric 贡献/回退 payload/双权限。
+- `plugin/main.mjs`：**第三方代码本体**——ndjson JSON-RPC over stdio（宿主↔插件：`activate`/`action.invoke` 通知；插件→宿主：`network.fetch`/`shell.open` 能力请求+`widget.update` 状态推送）。插件**从不直接碰网络/Shell**，一切经宿主能力调用；能力被拒/数据失败→回退 payload 继续渲染（与声明式腿同一韧性契约）。
+- `../scripts/spike/run-process.mjs`：进程宿主 harness——spawn（node 子进程）→ 15s 总 deadline+kill、stderr 捕获、**退出码传播（首状态后崩溃也报 FAILED，不吞成功）**；能力调用经 **`host-capabilities.mjs` 共享库**（与腿①完全同款三层门/redirect 拒绝/2MB 上限——两腿零策略漂移）；`--self-test=ok|redirect|server-error|evil-ask|crash` 五模式（evil-ask=模拟敌意插件请求范围外 URL，门必须拒绝该调用）。
+- 真实链路已验证：GitHub 实拉（2026-09-08 实测 3503 stars）经插件→宿主能力调用→绑定；五个场景（happy/未授予/敌意越界/redirect/崩溃）全部测试钉死。
 
 ## 腿①A 交付物
 
@@ -36,16 +43,16 @@
 
 | 维度 | ① 声明式 | ② TS 进程 | ③ WASM |
 |---|---|---|---|
-| 冷启动（包校验+首帧状态） | validate 3ms + bind 0ms | | |
-| 稳态内存增量 | 峰值堆 ~9.0MB（含 Node 运行时本身；宿主内嵌渲染器将远低于此——此数是 harness 上界，非插件成本） | | |
-| 数据源刷新→绑定延迟（p50） | 32ms（mock；真实 GitHub 数百 ms，网络主导） | | |
-| 开发代码量（行） | harness ~350 行（权限门+绑定求值器+mock） | | |
-| 打包大小 | manifest+integrity ≈ 4.6KB | | |
-| 调试体验 | 纯声明式 JSON，validator 逐条失败原因 | | |
-| AI 一次生成成功率 | 待三腿同题测试 | | |
-| 升级兼容 | payload per-element fallback + 绑定失败回退=设计内置 | | |
-| 权限强制点 | 请求∧scope∧授予三层门先于 fetch；redirect 拒绝；2MB 上限（五场景测试钉死） | | |
-| Crash 恢复 | 无第三方代码可崩（模型固有优势） | | |
+| 冷启动（包校验+首帧状态） | validate 3ms + bind 0ms | spawn 43ms + activate→首状态 50ms（mock） | |
+| 稳态内存增量 | 峰值堆 ~9.0MB（含 Node 运行时本身；宿主内嵌渲染器将远低于此——此数是 harness 上界，非插件成本） | 宿主 ~9.2MB + 子进程 Node 运行时（子进程 RSS 待正式测量轮统一采） | |
+| 数据源刷新→绑定延迟（p50） | 32ms（mock；真实 GitHub 数百 ms，网络主导） | 50ms（mock，含 stdio 往返；真实 GitHub 700ms 网络主导） | |
+| 开发代码量（行） | harness ~350 行（权限门+绑定求值器+mock） | 插件 ~120 行 + harness ~290 行（共享能力库两腿复用） | |
+| 打包大小 | manifest+integrity ≈ 4.6KB | manifest+integrity+plugin ≈ 5.7KB | |
+| 调试体验 | 纯声明式 JSON，validator 逐条失败原因 | 独立进程可断点/打日志，stderr 由宿主捕获转发 | |
+| AI 一次生成成功率 | 待三腿同题测试 | 待三腿同题测试 | |
+| 升级兼容 | payload per-element fallback + 绑定失败回退=设计内置 | 协议版本化待定（ndjson JSON-RPC 为 spike 选择） | |
+| 权限强制点 | 请求∧scope∧授予三层门先于 fetch；redirect 拒绝；2MB 上限（五场景测试钉死） | **同一共享库同一语义**（未授予/敌意越界/redirect 调用级拒绝+回退，测试钉死） | |
+| Crash 恢复 | 无第三方代码可崩（模型固有优势） | 进程崩溃→宿主检出（退出码传播，首状态后崩溃不吞成功） | |
 
 测量方法学（第七轮修订）：**上表腿①数字是 scaffolding observation（Node 脚手架观察值），不能与腿②③直接横向定胜负**——产品形态下声明式执行器内嵌在 DeskBox C# 宿主里，Node 堆/启动数与产品无对应关系。正式对比拆两层：**Runtime intrinsic**（activation/协议/绑定延迟、增量内存，排除网络）与 **E2E**（从"宿主要求激活"到"首个绑定状态就绪"，统一包含 process spawn / WASM instantiate / declarative parse，三腿测量边界完全一致）。腿①正式数等最小 C# 宿主执行器就绪后再填。
 
