@@ -3520,8 +3520,7 @@ $stage5B4B1RequiredProjectionPatterns = @(
     '[WinRT.GeneratedBindableCustomProperty]',
     'private sealed partial record SettingsBreadcrumbItem',
     'private sealed partial record SettingsSearchResult',
-    'private sealed partial record BackupSnapshotListItem',
-    'CapsuleModeSection.ViewModel = ViewModel'
+    'private sealed partial record BackupSnapshotListItem'
 )
 $stage5B4B1MissingProjectionPatterns = @(
     foreach ($pattern in $stage5B4B1RequiredProjectionPatterns) {
@@ -3529,6 +3528,21 @@ $stage5B4B1MissingProjectionPatterns = @(
                 $pattern,
                 [StringComparison]::Ordinal) -lt 0) {
             "$($stage5B4B1SourceFiles[5])::$pattern"
+        }
+    }
+)
+# 0a496114 moved the eager per-section ViewModel assignments into lazy
+# section creation; the capsule section contract now pins the deferred
+# assignment instead of the removed SettingsWindow.xaml.cs eager bridge.
+$stage5B4B1RequiredDeferredSectionPatterns = @(
+    'fileSettings.ViewModel = ViewModel;',
+    'capsuleSettings.ViewModel = ViewModel;'
+)
+$stage5B4B1MissingDeferredSectionPatterns = @(
+    foreach ($pattern in $stage5B4B1RequiredDeferredSectionPatterns) {
+        $deferredSource = Get-Content -LiteralPath (Join-Path $repoRoot "src/DeskBox/Views/SettingsWindow.DeferredSections.cs") -Raw
+        if ($deferredSource.IndexOf($pattern, [StringComparison]::Ordinal) -lt 0) {
+            "src/DeskBox/Views/SettingsWindow.DeferredSections.cs::$pattern"
         }
     }
 )
@@ -3597,7 +3611,7 @@ $stage5B4B1MissingBindableTypePatterns = @(
         }
     }
 )
-$stage5B4B1ExpectedBindableViewModelPropertyCount = 309
+$stage5B4B1ExpectedBindableViewModelPropertyCount = 327
 $stage5B4B1ActualBindableViewModelPropertyCount = [regex]::Matches(
     $stage5B4B1Sources[$stage5B4B1SourceFiles[9]],
     [regex]::Escape('nameof(')).Count
@@ -3616,12 +3630,12 @@ $stage5B4B1UnsafeBindableViewModelPatterns = @(
     }
 )
 $stage5B4B1RequiredFileStackXamlPatterns = @(
-    'ItemsSource="{x:Bind ViewModel.FileStackCustomRules, Mode=OneWay}"'
+    'ItemsSource="{x:Bind FileStackCustomRules, Mode=OneWay}"'
 )
 $stage5B4B1RequiredCommandXamlPatterns = @(
-    'Command="{x:Bind ViewModel.ResetDisplayWidgetChromeOverridesCommand, Mode=OneWay}"',
-    'Command="{x:Bind ViewModel.ResetInteractiveWidgetChromeOverridesCommand, Mode=OneWay}"',
-    'Command="{x:Bind ViewModel.ResetAllCapsuleOverridesCommand, Mode=OneWay}"'
+    'Command="{x:Bind ResetDisplayWidgetChromeOverridesCommand, Mode=OneWay}"',
+    'Command="{x:Bind ResetInteractiveWidgetChromeOverridesCommand, Mode=OneWay}"',
+    'Command="{x:Bind ResetAllCapsuleOverridesCommand, Mode=OneWay}"'
 )
 $stage5B4B1MissingCommandXamlPatterns = @(
     foreach ($pattern in $stage5B4B1RequiredCommandXamlPatterns) {
@@ -3705,6 +3719,9 @@ $stage5B4B1MissingFileWidgetProjectionPatterns = @(
 )
 $stage5B4B1RequiredWeatherProjectionPatterns = @(
     [ordered]@{
+        # 0a496114 moved the weather-city suggestion machinery out of the
+        # settings-window smoke partial into the WeatherOptions view model
+        # partial below; the deep-smoke no longer declares these types.
         file = $stage5B4B1SourceFiles[20]
         patterns = @(
             'ObservableCollection<WeatherCitySearchResult> WeatherCitySuggestions',
@@ -9763,6 +9780,7 @@ if ($stage5B4B1MissingRunnerPatterns.Count -gt 0) {
 if ($stage5B4B1MissingSettingsPatterns.Count -gt 0 -or
     $stage5B4B1MissingNavigationPatterns.Count -gt 0 -or
     $stage5B4B1MissingProjectionPatterns.Count -gt 0 -or
+    $stage5B4B1MissingDeferredSectionPatterns.Count -gt 0 -or
     $stage5B4B1MissingInventoryPatterns.Count -gt 0 -or
     $stage5B4B1MissingBindableTypePatterns.Count -gt 0 -or
     $stage5B4B1MissingFileStackXamlPatterns.Count -gt 0 -or
