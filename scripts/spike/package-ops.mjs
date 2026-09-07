@@ -3,9 +3,39 @@
 // v0.2 hash/signature chain end to end. The stage-6 CLI validator will be
 // a .NET AOT exe with a full JCS implementation; anything here must be
 // treated as scaffolding, not the reference implementation.
-import { createHash, createPublicKey } from 'node:crypto';
+import { createHash, createPrivateKey, createPublicKey } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+
+// Package path grammar (platform protocol, pinned early against zip-slip):
+// relative, forward slashes only, no . / .. segments, no drive prefix, no
+// colon (NTFS ADS), no empty segments.
+export function packagePathViolation(rel) {
+  if (rel.startsWith('/') || rel.includes('\\') || rel.includes(':')) {
+    return 'rooted path, backslash, or colon';
+  }
+  const segments = rel.split('/');
+  if (segments.some(seg => seg === '' || seg === '.' || seg === '..')) {
+    return 'empty, ".", or ".." segment';
+  }
+  return null;
+}
+
+// Builds the spike dev private key from the committed 32-byte seed hex.
+// A seed text file (clearly a test vector) is preferred over a PEM-shaped
+// private key blob, which secret scanners reliably flag as a finding.
+export function devPrivateKey(keysDir) {
+  const seedHex = fs.readFileSync(path.join(keysDir, 'dev-ed25519-seed.txt'), 'utf8').trim();
+  const seed = Buffer.from(seedHex, 'hex');
+  if (seed.length !== 32) {
+    throw new Error(`dev seed must be 32 bytes, got ${seed.length}`);
+  }
+  const pkcs8 = Buffer.concat([
+    Buffer.from('302e020100300506032b657004220420', 'hex'),
+    seed
+  ]);
+  return createPrivateKey({ key: pkcs8, format: 'der', type: 'pkcs8' });
+}
 
 // DER SPKI header for a raw Ed25519 public key (12 bytes + 32 raw).
 const ED25519_SPKI_PREFIX = Buffer.from([

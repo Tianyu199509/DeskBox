@@ -3,7 +3,7 @@
 - 方案日期：2026-09-07；v1.1-v1.5（评审收敛+复盘修订）；v1.6/v1.7（评审纪律入册）；v1.8（第四轮评审吸收，§16.7/16.8）
 - 代码基线：main `2709d7f0`（阶段 3a 能力端口合入）；第四轮评审修复批次=PR #245（store 一致性+迁移事务性）/#246（schema v0.2）/#247（端口语义修正）
 - 评审记录：§12（v1.0→v1.1）、§13（v1.1→v1.2）、§16（v1.5-v1.8）
-- 当前状态：**阶段 3b（依赖倒置接线）已落地**——三切点调用方（App 两处 Todo 路径/QuickCapture 三处落盘/App 回调 switch）全部改走 `DeskBox.Contracts` 端口，WidgetManager 就地实现三接口，功能行为零变化；物理搬移（3c）按依赖集观察后置。**阶段 3.5 腿①（声明式）已落地**：`spikes/github-stats` 样本包（六模板+manifest v0.2+完整验签链）+ `scripts/spike` 工具链 + 篡改检测钉扎；腿②③未开始。已落地的是 host 内部能力端口（capability ports），**不是 Capability Broker**（registry/权限判定/调度/审计/运行时 adapter 均未开始）
+- 当前状态：**阶段 3b（依赖倒置接线）已落地**——三切点调用方（App 两处 Todo 路径/QuickCapture 三处落盘/App 回调 switch）全部改走 `DeskBox.Contracts` 端口，WidgetManager 就地实现三接口，功能行为零变化；物理搬移（3c）按依赖集观察后置。**阶段 3.5 腿①A（声明式包/schema/模板样本）已落地**：`spikes/github-stats` 样本包+验签工具链+路径文法；**腿①B（声明式执行最小闭环：http-json 数据源+JSON path 绑定+open-url 动作，需 schema v0.3 增补执行词汇）与腿②③未开始**——第六轮评审裁定：三腿必须做同一件事（真实 GitHub 数据流）才有比较价值。已落地的是 host 内部能力端口（capability ports），**不是 Capability Broker**（registry/权限判定/调度/审计/运行时 adapter 均未开始）
 
 ---
 

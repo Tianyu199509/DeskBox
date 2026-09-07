@@ -59,6 +59,27 @@ public sealed class DeclarativePackageSpikeTests : IDisposable
             StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void TraversalPathInIntegrityList_ViolatesThePackagePathGrammar()
+    {
+        // The integrity path grammar is platform protocol (zip-slip
+        // defense): relative forward-slash paths only, no .. segments, no
+        // backslashes, no drive prefixes/colons, no case collisions.
+        string tampered = Path.Combine(_tempRoot, "github-stats");
+        CopyDirectory(TestPaths.FromRepository("spikes/github-stats"), tampered);
+        File.AppendAllText(
+            Path.Combine(tampered, "package.integrity"),
+            $"{new string('a', 64)}  ../../evil.txt\n");
+
+        ProcessResult result = RunValidator(tampered);
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains(
+            "path violates the package path grammar: ../../evil.txt",
+            result.StandardError,
+            StringComparison.Ordinal);
+    }
+
     private static void CopyDirectory(string source, string destination)
     {
         foreach (string file in Directory.GetFiles(source, "*", SearchOption.AllDirectories))

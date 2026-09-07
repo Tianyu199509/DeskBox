@@ -85,11 +85,32 @@ const integrityText = fs.existsSync(integrityPath)
   : null;
 const listed = new Map();
 if (integrityText !== null) {
+  const seenNormalized = new Map();
   for (const line of integrityText.split('\n')) {
     if (line === '') continue;
     const m = line.match(/^([0-9a-f]{64})  (.+)$/);
     if (!m) { fail(`package.integrity: malformed line '${line.slice(0, 40)}'`); continue; }
-    listed.set(m[2], m[1]);
+    // Package path grammar: the path is part of the platform protocol, so
+    // it is pinned now (zip-slip / traversal defense): relative,
+    // forward-slash only, no . / .. segments, no drive prefix, no colon
+    // (NTFS ADS), no empty segments, and no case-insensitive collisions
+    // (NTFS is case-insensitive - two lines that differ only by case may
+    // denote the same file).
+    const rel = m[2];
+    if (rel.startsWith('/') ||
+        rel.includes('\\') ||
+        rel.includes(':') ||
+        rel.split('/').some(seg => seg === '' || seg === '.' || seg === '..')) {
+      fail(`package.integrity: path violates the package path grammar: ${rel}`);
+      continue;
+    }
+    const normalized = rel.toLowerCase();
+    if (seenNormalized.has(normalized)) {
+      fail(`package.integrity: case-insensitive path collision: ${rel} vs ${seenNormalized.get(normalized)}`);
+      continue;
+    }
+    seenNormalized.set(normalized, rel);
+    listed.set(rel, m[1]);
   }
 } else {
   fail('package.integrity missing');
