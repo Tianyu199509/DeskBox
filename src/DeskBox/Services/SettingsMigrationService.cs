@@ -25,23 +25,41 @@ public sealed class SettingsMigrationPipeline
     private readonly List<ISettingsMigration> _migrations = [];
 
     public SettingsMigrationPipeline()
+        : this(
+        [
+            new Migration_0_To_1(),
+            new Migration_1_To_2(),
+            new Migration_2_To_3(),
+            new Migration_3_To_4(),
+            new Migration_4_To_5(),
+            new Migration_5_To_6(),
+            new Migration_6_To_7(),
+            new Migration_7_To_8(),
+            new Migration_8_To_9(),
+            new Migration_9_To_10()
+        ])
     {
-        // Register migrations in order
-        _migrations.Add(new Migration_0_To_1());
-        _migrations.Add(new Migration_1_To_2());
-        _migrations.Add(new Migration_2_To_3());
-        _migrations.Add(new Migration_3_To_4());
-        _migrations.Add(new Migration_4_To_5());
-        _migrations.Add(new Migration_5_To_6());
-        _migrations.Add(new Migration_6_To_7());
-        _migrations.Add(new Migration_7_To_8());
-        _migrations.Add(new Migration_8_To_9());
-        _migrations.Add(new Migration_9_To_10());
+    }
+
+    /// <summary>
+    /// Test seam: runs an explicit migration list against isolated state so
+    /// pipeline semantics (stop-on-failure, version bookkeeping) can be
+    /// verified without touching the production data root.
+    /// </summary>
+    internal SettingsMigrationPipeline(IEnumerable<ISettingsMigration> migrations)
+    {
+        _migrations.AddRange(migrations);
     }
 
     /// <summary>
     /// Runs all necessary migrations to bring the settings from their current
     /// schema version up to <see cref="CurrentSchemaVersion"/>.
+    /// A migration that throws stops the pipeline: the schema version stays
+    /// at the last successful step (never stamped past a failed step) so the
+    /// failed migration is retried on the next launch. Migrations that write
+    /// external stores (Migration_9_To_10 creating data/music/settings.json)
+    /// depend on this - stamping the version past a failed file write would
+    /// strand the user's data in the legacy fields forever.
     /// Returns true if any migration was applied.
     /// </summary>
     public bool RunMigrations(AppSettings settings)
@@ -61,14 +79,19 @@ public sealed class SettingsMigrationPipeline
                 try
                 {
                     migration.Migrate(settings);
-                    version = migration.FromVersion + 1;
-                    anyApplied = true;
-                    App.Log($"[SettingsMigration] Applied migration from version {migration.FromVersion} to {version}");
                 }
                 catch (Exception ex)
                 {
-                    App.Log($"[SettingsMigration] Migration from {migration.FromVersion} failed: {ex.Message}");
+                    App.Log(
+                        $"[SettingsMigration] Migration from version {migration.FromVersion} FAILED " +
+                        $"and will retry on next launch: {ex.Message}");
+                    settings.SchemaVersion = version;
+                    return anyApplied;
                 }
+
+                version = migration.FromVersion + 1;
+                anyApplied = true;
+                App.Log($"[SettingsMigration] Applied migration from version {migration.FromVersion} to {version}");
             }
         }
 
@@ -334,7 +357,12 @@ internal sealed class Migration_9_To_10 : ISettingsMigration
         migrated.UseArtworkBackdrop = settings.MusicUseArtworkBackdrop;
         migrated.EnableCoverHoverMotion = settings.MusicEnableCoverHoverMotion;
         migrated.DisplayMode = SettingsService.NormalizeMusicDisplayMode(settings.MusicDisplayMode);
-        store.SaveAsync(migrated).GetAwaiter().GetResult();
+        // Synchronous write that THROWS on failure: a swallowed write error
+        // here would let the pipeline stamp SchemaVersion=10 while the store
+        // was never created, permanently stranding the legacy values. It
+        // must also never block on an async continuation (UI-thread startup
+        // deadlock), hence the synchronous save path.
+        store.SaveSynchronously(migrated);
     }
 }
 

@@ -66,7 +66,7 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
     // Per-kind settings store for the Music pilot (roadmap stage 2); the
     // legacy AppSettings fields are an inert compatibility source after the
     // version-10 copy migration.
-    private readonly MusicSettingsStore _musicSettingsStore = new();
+    private readonly MusicSettingsStore _musicSettingsStore = MusicSettingsStore.Current;
     private readonly CancellationTokenSource _lifetimeCts = new();
     private bool _isDisposed;
     private CancellationTokenSource? _updateOperationCts;

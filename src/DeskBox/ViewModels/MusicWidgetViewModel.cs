@@ -86,7 +86,7 @@ public sealed partial class MusicWidgetViewModel : ObservableObject, IDisposable
     // Per-kind store (roadmap stage 2 pilot): the widget reads music settings
     // from the same store the settings page writes to, so both surfaces stay
     // in sync even if the legacy AppSettings mirror lags behind.
-    private readonly MusicSettingsStore _musicSettingsStore = new();
+    private readonly MusicSettingsStore _musicSettingsStore = MusicSettingsStore.Current;
     private MusicPlaybackMode _playbackMode = MusicPlaybackMode.Normal;
 
     public MusicWidgetViewModel(
