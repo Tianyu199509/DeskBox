@@ -26,9 +26,13 @@ function Get-SearchEntries([System.Xml.Linq.XElement]$Element, [string]$SectionT
         }
     }
 
-    if ($Element.Name.NamespaceName -eq $sectionNamespace) {
-        $sectionDocument = [System.Xml.Linq.XDocument]::Load(
-            (Join-Path $viewsRoot "SettingsSections/$typeName.xaml"))
+    # Section references expand by type name: the section file lives in
+    # SettingsSections regardless of the namespace its code-behind declares
+    # (MusicSettingsSection uses DeskBox.Controls.WidgetContents per the
+    # pluginization roadmap 16.4 decision).
+    $sectionFilePath = Join-Path $viewsRoot "SettingsSections/$typeName.xaml"
+    if (Test-Path -LiteralPath $sectionFilePath) {
+        $sectionDocument = [System.Xml.Linq.XDocument]::Load($sectionFilePath)
         Get-SearchEntries $sectionDocument.Root $SectionTag
     }
     foreach ($child in $Element.Elements()) {

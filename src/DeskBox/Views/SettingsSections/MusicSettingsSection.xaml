@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="utf-8"?>
+<UserControl
+    x:Class="DeskBox.Controls.WidgetContents.MusicSettingsSection"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:controls="using:DeskBox.Controls"
+    xmlns:svc="using:DeskBox.Services"
+    xmlns:toolkit="using:CommunityToolkit.WinUI.Controls">
+
+    <UserControl.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="ms-appx:///Styles/SettingsOverviewResources.xaml" />
+            </ResourceDictionary.MergedDictionaries>
+        </ResourceDictionary>
+    </UserControl.Resources>
+
+    <StackPanel
+        Style="{StaticResource SectionPanelStyle}">
+        <StackPanel Margin="0,8,0,0" Spacing="4">
+            <toolkit:SettingsCard
+                HorizontalContentAlignment="Right"
+                svc:Localized.DescriptionKey="Settings.Music.DisplayMode.Description"
+                svc:Localized.HeaderKey="Settings.Music.DisplayMode.Title">
+                <toolkit:SettingsCard.HeaderIcon>
+                    <FontIcon Glyph="&#xE8B9;" />
+                </toolkit:SettingsCard.HeaderIcon>
+                <ComboBox
+                    MinWidth="{StaticResource SettingsControlMinWidth}"
+                    ItemsSource="{Binding AvailableMusicDisplayModeOptions}"
+                    controls:SettingsComboBox.Value="{Binding SelectedMusicDisplayMode, Mode=TwoWay}" />
+            </toolkit:SettingsCard>
+
+            <toolkit:SettingsCard
+                HorizontalContentAlignment="Right"
+                svc:Localized.DescriptionKey="Settings.Music.ArtworkBackdrop.Description"
+                svc:Localized.HeaderKey="Settings.Music.ArtworkBackdrop.Title">
+                <toolkit:SettingsCard.HeaderIcon>
+                    <FontIcon Glyph="&#xEB9F;" />
+                </toolkit:SettingsCard.HeaderIcon>
+                <ToggleSwitch
+                    OnContent=""
+                    OffContent=""
+                    MinWidth="0"
+                    IsOn="{Binding MusicUseArtworkBackdrop, Mode=TwoWay}" />
+            </toolkit:SettingsCard>
+
+            <toolkit:SettingsCard
+                HorizontalContentAlignment="Right"
+                svc:Localized.DescriptionKey="Settings.Music.CoverHoverMotion.Description"
+                svc:Localized.HeaderKey="Settings.Music.CoverHoverMotion.Title">
+                <toolkit:SettingsCard.HeaderIcon>
+                    <FontIcon Glyph="&#xE7F8;" />
+                </toolkit:SettingsCard.HeaderIcon>
+                <ToggleSwitch
+                    OnContent=""
+                    OffContent=""
+                    MinWidth="0"
+                    IsOn="{Binding MusicEnableCoverHoverMotion, Mode=TwoWay}" />
+            </toolkit:SettingsCard>
+        </StackPanel>
+    </StackPanel>
+</UserControl>

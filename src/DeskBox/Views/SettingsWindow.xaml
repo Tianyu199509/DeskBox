@@ -6,6 +6,7 @@
     xmlns:media="using:Microsoft.UI.Xaml.Media.Imaging"
     xmlns:controls="using:DeskBox.Controls"
     xmlns:sections="using:DeskBox.Views.SettingsSections"
+    xmlns:contents="using:DeskBox.Controls.WidgetContents"
     xmlns:viewModels="using:DeskBox.ViewModels"
     xmlns:svc="using:DeskBox.Services"
     xmlns:toolkit="using:CommunityToolkit.WinUI.Controls"
@@ -2110,53 +2111,7 @@ svc:Localized.DescriptionKey="Settings.DefaultWidth.Description"
                 </StackPanel>
                     </DataTemplate>
                     <DataTemplate x:Key="MusicSettingsSectionTemplate" x:DataType="viewModels:SettingsViewModel">
-                        <StackPanel
-                    x:Name="MusicSettingsSection"
-                    Visibility="Collapsed"
-                    Style="{StaticResource SectionPanelStyle}">
-                    <StackPanel Margin="0,8,0,0" Spacing="4">
-                        <toolkit:SettingsCard
-                            HorizontalContentAlignment="Right"
-                            svc:Localized.DescriptionKey="Settings.Music.DisplayMode.Description"
-                            svc:Localized.HeaderKey="Settings.Music.DisplayMode.Title">
-                            <toolkit:SettingsCard.HeaderIcon>
-                                <FontIcon Glyph="&#xE8B9;" />
-                            </toolkit:SettingsCard.HeaderIcon>
-                            <ComboBox
-                                MinWidth="{StaticResource SettingsControlMinWidth}"
-                                ItemsSource="{Binding AvailableMusicDisplayModeOptions}"
-                                controls:SettingsComboBox.Value="{Binding SelectedMusicDisplayMode, Mode=TwoWay}" />
-                        </toolkit:SettingsCard>
-
-                        <toolkit:SettingsCard
-                            HorizontalContentAlignment="Right"
-                            svc:Localized.DescriptionKey="Settings.Music.ArtworkBackdrop.Description"
-                            svc:Localized.HeaderKey="Settings.Music.ArtworkBackdrop.Title">
-                            <toolkit:SettingsCard.HeaderIcon>
-                                <FontIcon Glyph="&#xEB9F;" />
-                            </toolkit:SettingsCard.HeaderIcon>
-                            <ToggleSwitch
-                                OnContent=""
-                                OffContent=""
-                                MinWidth="0"
-                                IsOn="{Binding MusicUseArtworkBackdrop, Mode=TwoWay}" />
-                        </toolkit:SettingsCard>
-
-                        <toolkit:SettingsCard
-                            HorizontalContentAlignment="Right"
-                            svc:Localized.DescriptionKey="Settings.Music.CoverHoverMotion.Description"
-                            svc:Localized.HeaderKey="Settings.Music.CoverHoverMotion.Title">
-                            <toolkit:SettingsCard.HeaderIcon>
-                                <FontIcon Glyph="&#xE7F8;" />
-                            </toolkit:SettingsCard.HeaderIcon>
-                            <ToggleSwitch
-                                OnContent=""
-                                OffContent=""
-                                MinWidth="0"
-                                IsOn="{Binding MusicEnableCoverHoverMotion, Mode=TwoWay}" />
-                        </toolkit:SettingsCard>
-                    </StackPanel>
-                </StackPanel>
+                        <contents:MusicSettingsSection x:Name="MusicSettingsSection" Visibility="Collapsed" />
                     </DataTemplate>
                     <DataTemplate x:Key="WeatherSettingsSectionTemplate" x:DataType="viewModels:SettingsViewModel">
                         <StackPanel
