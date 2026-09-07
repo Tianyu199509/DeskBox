@@ -188,13 +188,26 @@
   </ItemGroup>
 
   <!--
+    Retail bundles the Windows App Runtime. WindowsAppSDKSelfContained must
+    stay project-local: as a command-line global it flows into every project
+    of the graph and the WindowsAppSDK targets reject it on the
+    DeskBox.Abstractions class library. The retail script passes the
+    DeskBoxRetailBundle marker global instead.
+  -->
+  <PropertyGroup Condition="'$(WindowsAppSDKSelfContained)' == '' and '$(DeskBoxRetailBundle)' == 'true'">
+    <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
+  </PropertyGroup>
+
+  <!--
     Shared widget contracts (IWidgetContent family, WidgetConfig, descriptors,
     chrome enums) live in the Abstractions assembly; namespaces are unchanged
     so all consumers compile without using-directive edits (pluginization
-    roadmap section 7, stage 1).
+    roadmap section 7, stage 1). GlobalPropertyToRemove stops the retail
+    WindowsAppSDKSelfContained=true global property from flowing into the
+    class library, which the WindowsAppSDK targets reject.
   -->
   <ItemGroup>
-    <ProjectReference Include="..\DeskBox.Abstractions\DeskBox.Abstractions.csproj" />
+    <ProjectReference Include="..\DeskBox.Abstractions\DeskBox.Abstractions.csproj" GlobalPropertyToRemove="WindowsAppSDKSelfContained" />
   </ItemGroup>
 
   <ItemGroup>

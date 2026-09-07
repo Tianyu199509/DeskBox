@@ -268,7 +268,11 @@ $commonProperties = @(
     "-p:JsonSerializerIsReflectionEnabledByDefault=false",
     "-p:IlcUseEnvironmentalTools=true",
     "-p:SelfContained=true",
-    "-p:WindowsAppSDKSelfContained=true"
+    # WindowsAppSDKSelfContained must NOT be a global property: it flows into
+    # every project in the graph and the WindowsAppSDK targets reject it on
+    # the DeskBox.Abstractions class library. The DeskBoxRetailBundle marker
+    # lets DeskBox.csproj set it project-locally instead.
+    "-p:DeskBoxRetailBundle=true"
 )
 
 $previousCliLanguage = [Environment]::GetEnvironmentVariable("DOTNET_CLI_UI_LANGUAGE", "Process")

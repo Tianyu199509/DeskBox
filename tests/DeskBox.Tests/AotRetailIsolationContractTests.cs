@@ -88,7 +88,11 @@ public sealed class AotRetailIsolationContractTests
         Assert.Contains("-p:DeskBoxAotSmokeHarness=false", storeBuild, StringComparison.Ordinal);
         Assert.Contains("-p:DeskBoxAotSmokeHarness=false", retailPublish, StringComparison.Ordinal);
         Assert.Contains("-p:SelfContained=true", retailPublish, StringComparison.Ordinal);
-        Assert.Contains("-p:WindowsAppSDKSelfContained=true", retailPublish, StringComparison.Ordinal);
+        Assert.Contains("-p:DeskBoxRetailBundle=true", retailPublish, StringComparison.Ordinal);
+        Assert.Contains(
+            "<WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>",
+            File.ReadAllText(TestPaths.SourceFile("src/DeskBox/DeskBox.csproj")),
+            StringComparison.Ordinal);
         Assert.Contains("productProfile = \"retail\"", retailPublish, StringComparison.Ordinal);
         Assert.Contains("deploymentProfile = \"full\"", retailPublish, StringComparison.Ordinal);
         Assert.Contains("installManifestFileCount", retailPublish, StringComparison.Ordinal);
