@@ -53,7 +53,6 @@ public sealed partial class QuickCaptureWidgetWindow :
     private const int ItemsViewTransitionOffsetPx = 6;
     private const int DetailAutoSaveDelayMs = 600;
     private const int RevealCompletedBackgroundDelayMs = 240;
-    private const string MasterPaneWidthMetadataKey = "QuickCaptureMasterPaneWidth";
     private static readonly string QuickCaptureTextPreviewDirectory = Path.Combine(
         DeskBoxDataPathService.Current.RootPath,
         "QuickCapture",

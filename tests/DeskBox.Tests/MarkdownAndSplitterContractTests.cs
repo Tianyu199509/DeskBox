@@ -418,7 +418,7 @@ public sealed class MarkdownAndSplitterContractTests
         Assert.Contains("x:Name=\"DetailAddFileButton\"\n                            Grid.Row=\"2\"", xaml.ReplaceLineEndings("\n"), StringComparison.Ordinal);
         Assert.Contains("x:Name=\"DetailMarkdownEditor\"", xaml, StringComparison.Ordinal);
         Assert.Contains("RightTapped=\"QuickCaptureItem_RightTapped\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("MasterPaneWidthMetadataKey", surface, StringComparison.Ordinal);
+        Assert.Contains("WidgetMetadataKeys.QuickCaptureMasterPaneWidth", surface, StringComparison.Ordinal);
         Assert.Contains("IWidgetAddActionContent", surface, StringComparison.Ordinal);
         Assert.Contains("DetailMarkdownView_TaskToggleRequested", surface, StringComparison.Ordinal);
         Assert.Contains("TimeSpan.FromMilliseconds(DetailAutoSaveDelayMs)", surface, StringComparison.Ordinal);
@@ -450,7 +450,7 @@ public sealed class MarkdownAndSplitterContractTests
         Assert.Contains("QuickCaptureWideLayoutDualPane", code, StringComparison.Ordinal);
         Assert.Contains("WidgetSegmentedStyleHelper.Apply", code, StringComparison.Ordinal);
         Assert.Contains("ViewModel.TabStyle", code, StringComparison.Ordinal);
-        Assert.Contains("Config.Metadata[MasterPaneWidthMetadataKey]", code, StringComparison.Ordinal);
+        Assert.Contains("Config.Metadata[WidgetMetadataKeys.QuickCaptureMasterPaneWidth]", code, StringComparison.Ordinal);
         Assert.Contains("IWidgetResponsiveLayoutContent", code, StringComparison.Ordinal);
         Assert.Contains("IWidgetHostViewportContent", code, StringComparison.Ordinal);
         Assert.Contains("OnHostViewportSizeChanged", code, StringComparison.Ordinal);

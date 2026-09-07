@@ -38,7 +38,6 @@ public sealed partial class QuickCaptureSurfaceContent :
     IWidgetGroupContentCacheable,
     IDisposable
 {
-    private const string MasterPaneWidthMetadataKey = "QuickCaptureMasterPaneWidth";
     private const int DetailAutoSaveDelayMs = 600;
     private const int DetailImageDecodePixelWidth = 1200;
     private readonly LocalizationService _localizationService;
@@ -128,7 +127,7 @@ public sealed partial class QuickCaptureSurfaceContent :
         }
         ResponsiveContentGrid.DataContext = ViewModel;
         ViewModel.PropertyChanged += ViewModel_PropertyChanged;
-        if (config.Metadata.TryGetValue(MasterPaneWidthMetadataKey, out string? persisted) &&
+        if (config.Metadata.TryGetValue(WidgetMetadataKeys.QuickCaptureMasterPaneWidth, out string? persisted) &&
             double.TryParse(persisted, NumberStyles.Float, CultureInfo.InvariantCulture, out double width))
         {
             _persistedMasterPaneWidth = _masterDetailLayoutPolicy.NormalizePersistedMasterWidth(width);
@@ -626,7 +625,7 @@ public sealed partial class QuickCaptureSurfaceContent :
 
         _persistedMasterPaneWidth =
             _masterDetailLayoutPolicy.NormalizePersistedMasterWidth(masterWidth);
-        Config.Metadata[MasterPaneWidthMetadataKey] =
+        Config.Metadata[WidgetMetadataKeys.QuickCaptureMasterPaneWidth] =
             _persistedMasterPaneWidth.Value.ToString(
                 "0.###",
                 CultureInfo.InvariantCulture);
