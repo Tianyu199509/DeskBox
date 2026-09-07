@@ -660,19 +660,8 @@ public sealed class JsonSerializationBaselineContractTests : IDisposable
             .Order()
             .ToArray();
 
-    private static IEnumerable<string> ProductionSourceFiles()
-    {
-        string projectDirectory = TestPaths.FromRepository("src/DeskBox");
-        return Directory.EnumerateFiles(projectDirectory, "*.cs", SearchOption.AllDirectories)
-            .Where(path =>
-            {
-                string relative = Path.GetRelativePath(projectDirectory, path)
-                    .Replace(Path.DirectorySeparatorChar, '/');
-                return !relative.StartsWith("bin/", StringComparison.OrdinalIgnoreCase) &&
-                       !relative.StartsWith("obj/", StringComparison.OrdinalIgnoreCase) &&
-                       !relative.StartsWith("AppPackages/", StringComparison.OrdinalIgnoreCase);
-            });
-    }
+    private static IEnumerable<string> ProductionSourceFiles() =>
+        TestPaths.EnumerateProductionSourceFiles();
 
     private static string RepositoryRelativePath(string path) =>
         Path.GetRelativePath(TestPaths.FromRepository("."), path)

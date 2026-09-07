@@ -51,6 +51,7 @@ public sealed class AotPublishContractTests
         foreach (string projectPath in new[]
                  {
                      "src/DeskBox/DeskBox.csproj",
+                     "src/DeskBox.Abstractions/DeskBox.Abstractions.csproj",
                      "src/DeskBox.Updater/DeskBox.Updater.csproj"
                  })
         {

@@ -177,19 +177,10 @@ public sealed class GlanceImageInfo
     public bool IsOnline => !string.IsNullOrWhiteSpace(SourcePageUrl);
 }
 
-public sealed record GlanceCalendarDay(
-    DateOnly Date,
-    string DayText,
-    bool IsCurrentMonth,
-    bool IsToday,
-    string TraditionalText = "",
-    string FestivalText = "")
-{
-    public bool HasTraditionalText => !string.IsNullOrWhiteSpace(TraditionalText);
-    public bool HasFestival => !string.IsNullOrWhiteSpace(FestivalText);
-    public bool HasTraditionalTextOnly => HasTraditionalText && !HasFestival;
-    public bool HasSecondaryText => HasFestival || HasTraditionalText;
-}
+// GlanceCalendarDay / GlanceCalendarMonth / GlanceCalendarEvent moved to
+// src/DeskBox.Abstractions/Models/GlanceCalendarModels.cs (contract closure of
+// ICalendarPresentationSource). GlanceCalendarDayDecoration stays here because
+// its generated bindable provider is bound from widget XAML.
 
 // Bound from the calendar day-item template via {Binding Tag.*}; Native AOT
 // resolves those bindings through this generated provider, reflection cannot.
@@ -202,20 +193,3 @@ public sealed partial record GlanceCalendarDayDecoration(
     bool IsFestival,
     double PrimaryOpacity,
     double SecondaryOpacity);
-
-public sealed record GlanceCalendarMonth(
-    DateOnly Month,
-    IReadOnlyList<string> WeekdayHeaders,
-    IReadOnlyList<GlanceCalendarDay> Days,
-    string TraditionalTitle = "")
-{
-    public bool HasTraditionalTitle => !string.IsNullOrWhiteSpace(TraditionalTitle);
-}
-
-public sealed record GlanceCalendarEvent(
-    string Id,
-    string Title,
-    DateTimeOffset StartsAt,
-    DateTimeOffset EndsAt,
-    bool IsAllDay,
-    string? CalendarColor = null);

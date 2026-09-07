@@ -41,9 +41,7 @@ public sealed class AotRetailIsolationContractTests
             ["**\\*.Aot*Smoke.cs", "Services\\Aot*Fixture.cs"],
             removedPatterns);
 
-        string sourceRoot = TestPaths.FromRepository("src/DeskBox");
-        string[] harnessSources = Directory
-            .EnumerateFiles(sourceRoot, "*.cs", SearchOption.AllDirectories)
+        string[] harnessSources = TestPaths.EnumerateProductionSourceFiles()
             .Where(IsSmokeHarnessSource)
             .ToArray();
         Assert.Equal(61, harnessSources.Length);

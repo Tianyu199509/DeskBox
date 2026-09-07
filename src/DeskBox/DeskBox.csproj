@@ -187,6 +187,16 @@
     <PackageReference Include="Markdig" Version="1.3.2" />
   </ItemGroup>
 
+  <!--
+    Shared widget contracts (IWidgetContent family, WidgetConfig, descriptors,
+    chrome enums) live in the Abstractions assembly; namespaces are unchanged
+    so all consumers compile without using-directive edits (pluginization
+    roadmap section 7, stage 1).
+  -->
+  <ItemGroup>
+    <ProjectReference Include="..\DeskBox.Abstractions\DeskBox.Abstractions.csproj" />
+  </ItemGroup>
+
   <ItemGroup>
     <None Remove="ThirdParty\Everything\Everything64.dll" />
     <None Remove="ThirdParty\Everything\EverythingARM64.dll" />
