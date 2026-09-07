@@ -215,6 +215,39 @@ public sealed class MusicSettingsStoreTests : IDisposable
     }
 
     [Fact]
+    public void Pipeline_StopsWhenARegistryGapIsDetected()
+    {
+        // Registry missing the 6->7 step: the old >= comparison ran 7->8
+        // directly and silently skipped it; exact-step matching must stop.
+        var settings = new AppSettings { SchemaVersion = 5 };
+
+        bool applied = new SettingsMigrationPipeline(
+        [
+            new FakeMigration(5, succeeded: true),
+            new FakeMigration(7, succeeded: true)
+        ]).RunMigrations(settings);
+
+        Assert.True(applied);
+        Assert.Equal(6, settings.SchemaVersion);
+    }
+
+    [Fact]
+    public void Pipeline_NeverRunsStepsBeyondTheCurrentVersion()
+    {
+        // A step registered for a future schema version must never execute.
+        var settings = new AppSettings { SchemaVersion = 9 };
+
+        bool applied = new SettingsMigrationPipeline(
+        [
+            new FakeMigration(9, succeeded: true),
+            new FakeMigration(10, succeeded: true)
+        ]).RunMigrations(settings);
+
+        Assert.True(applied);
+        Assert.Equal(SettingsMigrationPipeline.CurrentSchemaVersion, settings.SchemaVersion);
+    }
+
+    [Fact]
     public void Migration_9_To_10_PropagatesExternalWriteFailures()
     {
         string dataDirectory = Path.Combine(_tempRoot, "blocked-data");
@@ -281,6 +314,12 @@ public sealed class MusicSettingsStoreTests : IDisposable
         // fire-and-forget task.
         Assert.Contains("EnqueuePersist(Clone(_cached));", storeSource, StringComparison.Ordinal);
         Assert.DoesNotContain("_ = PersistAsync(", storeSource, StringComparison.Ordinal);
+
+        // Round 5: Current is explicitly transitional (static service
+        // locator, not the final per-kind store model) so the pattern is
+        // not copied to Weather/Todo/QuickCapture stores.
+        Assert.Contains("LIFECYCLE NOTE", storeSource, StringComparison.Ordinal);
+        Assert.Contains("do not copy", storeSource, StringComparison.Ordinal);
 
         // Migration: synchronous failure-propagating write, never a blocking
         // wait on an async continuation (UI-thread startup deadlock).

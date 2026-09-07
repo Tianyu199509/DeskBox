@@ -21,6 +21,12 @@
    若搬移需要给 `WidgetManager` 暴露一批 internal getter/dictionary，就先
    不搬——那只是把 God Class 变成 God Class + friend class。
 
+**验收标准**：不是 FeatureWidgets.cs 少了多少行，而是调用方（App /
+QuickCapture / Todo）不再知道 `TodoWidgetContent`、`FileSurfaceContent`、
+`WidgetManager` 内部字典、`App.Current` 服务——只依赖能力端口。实现侧
+`IFileWidgetImportTarget` 的 CancellationToken 必须真兑现（流式
+`CopyToAsync(token)`，不是开始前查一次）。
+
 ## 现有端口
 
 | 端口 | 切点 | 语义要点 |
