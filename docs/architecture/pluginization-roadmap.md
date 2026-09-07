@@ -27,7 +27,7 @@
 ## 2. 硬约束（技术事实，已核实）
 
 1. **NativeAOT 禁止动态程序集加载**：`Assembly.Load`/运行时代码生成均不可用（dotnet/runtime #117470）。**DeskBox 不做运行时 .NET 程序集加载**；对于第三方可执行代码，优先评估 **WASM 组件**（进程内沙箱）与**进程外 Runtime**两条路线（理论上还存在内嵌脚本引擎/DSL 解释器等路线，当前不评估）；声明式资源包独立于代码 Runtime。
-2. **测试与审计体系按"文件路径 + 计数"冻结**：147 个路径式源码扫描契约测试（24 个文件含 52 处硬编码 `WidgetManager.*.cs` 路径）；`JsonSerializationBaselineContractTests` 冻结 28 文件/64 调用/26 context 且只扫 `src/DeskBox`；`AotStage4D1BContractTests` 冻结 XAML 计数 347 项；`scripts/publish-aot-audit.ps1` 含 227 处硬编码路径、`auditProfileVersion=58`、约 20 处 WMC1510 计数。**任何搬移必须先改造护栏**，估算占拆分工作量 30-40%。另有 63 个测试文件直接断言 DeskBox.csproj 内容——"项目结构"本身是被测试冻结的一级接口。
+2. **测试与审计体系按"文件路径 + 计数"冻结**：147 个路径式源码扫描契约测试（24 个文件含 52 处硬编码 `WidgetManager.*.cs` 路径）；`JsonSerializationBaselineContractTests` 冻结 28 文件/64 调用/26 context（**v1.5 起已多项目扫描**）；`AotStage4D1BContractTests` 冻结 XAML 计数 347 项；`scripts/publish-aot-audit.ps1` 含 227 处硬编码路径、`auditProfileVersion`（批次 B 起=59，动脚本须 bump 并同步全部钉版测试）、**31 处 WMC1510 等值断言（=863）+4 处 ceiling**。护栏改造已在阶段 0/批次 A/B 落地（SourceFile 重定位接线/多根扫描/audit 全管线重对齐），后续搬迁税按"每文件一条映射+触碰点同步"重估。另有 63 个测试文件直接断言 DeskBox.csproj 内容——"项目结构"本身是被测试冻结的一级接口。
 3. **本地化资源经 `Assembly.GetExecutingAssembly()` 读取**（LocalizationService.cs:471；CitySearchService.cs:72 的 cities.json 同模式）：代码搬到子程序集后静默回落。本地化留宿主 + 资源加载器抽象。
 4. **设置系统**：`AppSettings` 约 200 字段单一类、684 处直接读写、14 个 Normalize 双向全量执行；`SchemaVersion=9` + 10 级迁移链；备份服务强制含 settings.json。
 5. **AOT 红线**：OneTime x:Bind 模式不改回；`SearchResultRowControl.Item` 保持 internal；`*.AotBindableProperties.cs` 必须随 ViewModel 同程序集；**`App.Aot*Smoke.cs`/`WidgetManager.Aot*Smoke.cs` 是宿主类 partial，物理上搬不走**——每个功能的 AOT 证据链天然横跨两个程序集（v1.1 新增：这是反对多程序集拆分的结构性论据）；每新程序集必须复制 retail smoke 排除 ItemGroup、提交双锁文件、加 IVT。
@@ -362,6 +362,22 @@ P0：§6 重写为 Runtime 矩阵（删除 A→B→C 旧结论，与 §14 唯一
 4. **依赖边修正**：spike 排期统一为"与阶段 3 并行、前置 schema v0"（取代 §11 旧表述）；Rust spike 用独立 crate。
 5. **数据卫生细化**：Todo 孤儿挂两处+可选存量清扫；Metadata 注册表=宿主侧 const 别名聚合（勿进 Abstractions）。
 6. **过时表述**（§2.2 等）：JSON 基线扫描已多项目化；"30-40% 工作量"基于阶段 0 之前状态，搬迁税现按"SourceFile 已接线+每文件一条映射"重估。
+
+### 16.3 批次 B 补记（2026-09-07 audit 全管线重对齐，commits 6823325/54f02be0/2fa47fce）
+
+本地冒烟六轮排障，audit 端到端全绿（profile 59/schema 55/源码全程稳定）：①主项目 packages.aot.lock.json 补 deskbox.abstractions 条目（仅 AOT 变体 restore 生成——新 csproj 变更后必须重跑两种 restore 并提交双锁，此纪律已写入 AGENTS.md）；②4E-4 桥契约重对齐惰性装载机制（0a496114）；③WMC1510 期望 1235→863×31 处（1.5.0 XAML 批次合法移除 372 个编译绑定；**retail 管线无数值断言故漂移漏网——动 XAML 后必须重跑 audit**）；④5B4B1 四处模式重对齐+可绑定属性计数 309→327；⑤profile 58→59 全仓 58 文件同步（含 smoke runner 小写变体链）。**结构性教训：契约测试只钉变量名不钉值是漂移根因**——批次 B 修的是结果不是机制，后续以"数值必同步测试"的宅例对冲（见 16.4 台账）。
+
+### 16.4 延迟项台账（第二轮复盘入册）
+
+| # | 事项 | 状态 |
+|---|---|---|
+| 1 | audit 禁令补 DeskBox.Abstractions.dll + WMC1510 抛错指路 + ceiling 收紧 | **profile-60 合并包执行中** |
+| 2 | JIT（非 AOT）Store MSIX 中 Abstractions.dll 为合法 payload 的存在性断言 | 未做，非主路径，暂缓 |
+| 3 | QuickCaptureWidgetWindow 死代码（6420 行，被 25 个测试钉住） | 排阶段 2（删=重校准 25 文件，与设置节同批） |
+| 4 | 陈旧 worktree wingezi-glance-memory-20260905 + 分支 | 可删（0a496114 已在 main） |
+| 5 | Features/ 物理搬迁 / grandfather 三文件迁移 | 维持推迟至阶段 2/3 |
+
+**批次 D 前置决策（已定）**：MusicSettingsSection 命名空间落 `DeskBox.Controls.WidgetContents`（文件仍在 Views/SettingsSections/，命名空间≠目录是 C# 合法形态，且该命名空间已在功能 using 白名单内零扰动）；实现纪律=保持 `{Binding}` 不改 x:Bind（保 327 计数）、保 `x:Name="MusicSettingsSection"`（Slice 断言端点）、Music 文件计数 13→15 有意更新。
 
 ## 附录 A：关键证据文件索引
 
