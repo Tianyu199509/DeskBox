@@ -1632,6 +1632,20 @@ public sealed partial class WidgetManager
                     SetFeatureWidgetEnabledState(WidgetKind.Glance, false);
                 }
             }
+            else if (config.WidgetKind == WidgetKind.Todo)
+            {
+                // Todo widgets can coexist; deleting one removes its store and
+                // attachments, and only disables the feature when the last
+                // instance goes away (mirroring the Glance branch above).
+                await TodoWidgetStore.DeleteForWidgetAsync(config.Id);
+                bool hasRemainingTodoWidget = _settingsService.Settings.Widgets.Any(widget =>
+                    widget.WidgetKind == WidgetKind.Todo &&
+                    !IsDeleted(widget.Id));
+                if (!hasRemainingTodoWidget)
+                {
+                    SetFeatureWidgetEnabledState(WidgetKind.Todo, false);
+                }
+            }
             else
             {
                 SetFeatureWidgetEnabledState(config.WidgetKind, false);

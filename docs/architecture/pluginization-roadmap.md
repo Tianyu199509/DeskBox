@@ -379,6 +379,19 @@ P0：§6 重写为 Runtime 矩阵（删除 A→B→C 旧结论，与 §14 唯一
 
 **批次 D 前置决策（已定）**：MusicSettingsSection 命名空间落 `DeskBox.Controls.WidgetContents`（文件仍在 Views/SettingsSections/，命名空间≠目录是 C# 合法形态，且该命名空间已在功能 using 白名单内零扰动）；实现纪律=保持 `{Binding}` 不改 x:Bind（保 327 计数）、保 `x:Name="MusicSettingsSection"`（Slice 断言端点）、Music 文件计数 13→15 有意更新。
 
+### 16.5 中期外部评审吸收（v1.6，2026-09-07，PR #231 合并后）
+
+外部评审对 PR #231 的裁定（8.5/10、方向正确、无需回滚）与我方指纹级自审一致。吸收六条入册：
+
+1. **两层概念显式化**：`DeskBox.Abstractions` = **Host Abstractions**（1P 内建功能与宿主的共享契约，含 WidgetConfig 持久化模型与 FrameworkElement 依赖），**不是未来 Extension SDK**。未来 3P/AI 层是独立的 **Extension Model**（PackageId/Contribution/Capability DTO，"完全不知道 File Widget 是什么"，§14 图的语义契约层）。已在 Abstractions 加 README 声明。
+2. **WidgetConfig 禁扩令**：它是 legacy 宿主持久化模型（宿主公共态+File 专属态混装），不得扩成万能插件配置；未来按"核心实例状态 + 插件 payload"拆分（与 §5 三层 ID、per-plugin 存储同向）。
+3. **ArchitectureContractTests 定位=迁移期棘轮**：不得膨胀为半成品 Roslyn 分析器（正则/文件名启发式的边界是弱的）；**退役条件**=Feature 边界由类型系统/API shape 物理化之时，届时删除 FrozenFeatureFileCounts——但 Music/设置节搬迁完成前它仍是必要的绊线，不提前删。
+4. **ExtensionModel 硬约束**（未来创建时）：禁 WinAppSDK/WinUI/WidgetManager/AppSettings/Windows API，目标 TFM 尽量纯 net10.0（不带 -windows）——它是语言无关协议的 .NET 投影，不是内部 DTO 包。
+5. **Music dogfood 验收条件**（升级阶段 2/D 判据）：Music 只能见 host contracts + feature context + 自有服务，**不得**见 WidgetManager 内部/App.Current/SettingsService 整体/其他功能类型；且 Register→Contribute→Enable→Activate→Disable→Dispose 全生命周期链路真实跑通——这才证明阶段 1 的接缝成立。
+6. **搬迁原则**："遇到真实依赖才最小接口进入"，禁止"以后插件可能用所以先扔进去"。
+
+评审的偏差记录（不影响吸收）：其字段分类有误（ViewMode 实为共享，File 专属是 MappedFolderPath/Items 等）；其两条"建议"（broker 不进 Abstractions、三 Runtime 并存）本路线图已先行决策；其评审未覆盖本批工程量大头（audit 六轮重对齐、retail SelfContained 修复）。
+
 ## 附录 A：关键证据文件索引
 
 | 主题 | 文件 |
