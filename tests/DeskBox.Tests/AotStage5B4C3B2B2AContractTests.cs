@@ -79,7 +79,7 @@ public sealed class AotStage5B4C3B2B2AContractTests
 
         foreach (string token in new[]
                  {
-                     "$requiredAuditProfileVersion = 59",
+                     "$requiredAuditProfileVersion = 60",
                      "$requiredSummarySchemaVersion = 55",
                      "[Guid]::NewGuid().ToString(\"N\")",
                      "-AllowEarlyExit",
@@ -135,7 +135,7 @@ public sealed class AotStage5B4C3B2B2AContractTests
             "docs/architecture/stage-reports/aot-stage-5b-4c3b2b2a-report.md");
         string roadmap = Read("docs/architecture/rust-native-aot-roadmap.md");
 
-        Assert.Contains("$auditProfileVersion = 59", audit, StringComparison.Ordinal);
+        Assert.Contains("$auditProfileVersion = 60", audit, StringComparison.Ordinal);
         Assert.Contains("schemaVersion = 55", audit, StringComparison.Ordinal);
         Assert.Contains("stage5B4C3B2B2AMissingScenarioPatterns", audit, StringComparison.Ordinal);
         Assert.Contains("stage5B4C3B2B2AMissingProductPatterns", audit, StringComparison.Ordinal);

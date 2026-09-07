@@ -150,29 +150,43 @@ public sealed class ArchitectureContractTests
                     lineNumber++;
                     string trimmed = line.TrimStart();
 
-                    if (trimmed.StartsWith("using ", StringComparison.Ordinal))
-                    {
-                        Assert.False(
-                            trimmed.Equals("using DeskBox;", StringComparison.OrdinalIgnoreCase) ||
-                            trimmed.Equals("using DeskBox ;", StringComparison.OrdinalIgnoreCase),
-                            $"{file}:{lineNumber}: 'using DeskBox;' is not allowed in feature code; it " +
-                            "imports the host root namespace (App and friends) without tripping the " +
-                            "using allow list.");
-                        Assert.False(
-                            trimmed.StartsWith("using static DeskBox.", StringComparison.Ordinal),
-                            $"{file}:{lineNumber}: 'using static DeskBox.*' is not allowed in feature code.");
-                        Assert.False(
-                            Regex.IsMatch(trimmed, @"^using\s+[A-Za-z_][A-Za-z0-9_]*\s*=\s*DeskBox\."),
-                            $"{file}:{lineNumber}: namespace aliases for DeskBox.* are not allowed in " +
-                            "feature code.");
-                        continue;
-                    }
-
                     if (trimmed.StartsWith("//", StringComparison.Ordinal) ||
                         trimmed.StartsWith("*", StringComparison.Ordinal) ||
                         trimmed.StartsWith("namespace ", StringComparison.Ordinal))
                     {
                         continue;
+                    }
+
+                    if (trimmed.StartsWith("using ", StringComparison.Ordinal))
+                    {
+                        // Strip trailing comments before matching the directive so
+                        // "using DeskBox; // rationale" cannot slip past the checks.
+                        string statement = trimmed;
+                        int commentIndex = statement.IndexOf("//", StringComparison.Ordinal);
+                        if (commentIndex >= 0)
+                        {
+                            statement = statement[..commentIndex].TrimEnd();
+                        }
+
+                        Assert.False(
+                            Regex.IsMatch(statement, @"^using\s+DeskBox\s*;$", RegexOptions.IgnoreCase),
+                            $"{file}:{lineNumber}: 'using DeskBox;' is not allowed in feature code; it " +
+                            "imports the host root namespace (App and friends) without tripping the " +
+                            "using allow list.");
+                        Assert.False(
+                            Regex.IsMatch(statement, @"^using\s+static\s+DeskBox\.", RegexOptions.IgnoreCase),
+                            $"{file}:{lineNumber}: 'using static DeskBox.*' is not allowed in feature code.");
+                        Assert.False(
+                            Regex.IsMatch(
+                                statement,
+                                @"^using\s+(?:static\s+)?[A-Za-z_][A-Za-z0-9_]*\s*=\s*(?:global\s*::\s*)?DeskBox\s*\.",
+                                RegexOptions.IgnoreCase),
+                            $"{file}:{lineNumber}: namespace aliases for DeskBox.* are not allowed in " +
+                            "feature code.");
+
+                        // Deliberately no continue: using lines must also pass the
+                        // fully-qualified token checks below ("using global::DeskBox.Views;"
+                        // and "using DeskBox.Views;" are caught by the token scan).
                     }
 
                     Assert.False(
@@ -186,6 +200,12 @@ public sealed class ArchitectureContractTests
                 }
             }
         }
+    }
+
+    [Fact]
+    public void GrandfatheredHostViewNamespaceList_MustShrinkToZeroByStageTwo()
+    {
+        Assert.Equal(3, GrandfatheredHostViewNamespaceFiles.Length);
     }
 
     [Fact]
@@ -224,18 +244,25 @@ public sealed class ArchitectureContractTests
             }
 
             string[] registered = RegisteredSubdirectories.GetValueOrDefault(directory, []);
-                string[] unregisteredSubdirectoryFiles = Directory
-                    .EnumerateFiles(directoryPath, "*.cs", SearchOption.AllDirectories)
-                    .Where(path =>
+            string[] unregisteredSubdirectoryFiles = Directory
+                .EnumerateFiles(directoryPath, "*.cs", SearchOption.AllDirectories)
+                .Where(path =>
+                {
+                    string relative = Path.GetRelativePath(directoryPath, path)
+                        .Replace(Path.DirectorySeparatorChar, '/');
+                    if (relative.StartsWith("bin/", StringComparison.OrdinalIgnoreCase) ||
+                        relative.StartsWith("obj/", StringComparison.OrdinalIgnoreCase))
                     {
-                        string relative = Path.GetRelativePath(directoryPath, path);
-                        string? subdirectory = Path.GetDirectoryName(relative);
-                        return !string.IsNullOrEmpty(subdirectory) &&
-                               !registered.Contains(
-                                   subdirectory.Replace(Path.DirectorySeparatorChar, '/'),
-                                   StringComparer.Ordinal);
-                    })
-                    .ToArray();
+                        return false;
+                    }
+
+                    string? subdirectory = Path.GetDirectoryName(relative);
+                    return !string.IsNullOrEmpty(subdirectory) &&
+                           !registered.Contains(
+                               subdirectory.Replace(Path.DirectorySeparatorChar, '/'),
+                               StringComparer.Ordinal);
+                })
+                .ToArray();
 
             Assert.True(
                 unregisteredSubdirectoryFiles.Length == 0,
@@ -352,6 +379,9 @@ public sealed class ArchitectureContractTests
         {
             string path = TestPaths.FromRepository(extra);
             Assert.True(File.Exists(path), $"Missing declared feature file: {extra}");
+            Assert.True(
+                !files.Contains(Path.GetFullPath(path), StringComparer.OrdinalIgnoreCase),
+                $"{extra} is both a glob match and an ExtraFiles entry; remove one of the two.");
             yield return path;
         }
     }
@@ -387,15 +417,22 @@ public sealed class ArchitectureContractTests
         foreach (string line in File.ReadLines(file))
         {
             string trimmed = line.TrimStart();
-            if (!trimmed.StartsWith("using DeskBox.", StringComparison.Ordinal))
+            if (!trimmed.StartsWith("using ", StringComparison.Ordinal))
             {
                 continue;
             }
 
-            int end = trimmed.IndexOf(';');
-            if (end > 0)
+            // Space-tolerant ("using DeskBox .Views;"), global::-prefixed and
+            // static-import forms are all normalized to canonical dotted names
+            // so the allow list cannot be bypassed by token separation alone.
+            Match match = Regex.Match(
+                trimmed,
+                @"^using\s+(?:static\s+)?(?:global\s*::\s*)?(DeskBox(?:\s*\.\s*[A-Za-z_][A-Za-z0-9_]*)+)\s*;",
+                RegexOptions.IgnoreCase);
+            if (match.Success)
             {
-                yield return trimmed["using ".Length..end];
+                string canonical = Regex.Replace(match.Groups[1].Value, @"\s*", string.Empty);
+                yield return canonical;
             }
         }
     }

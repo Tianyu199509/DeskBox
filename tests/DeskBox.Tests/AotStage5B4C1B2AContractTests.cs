@@ -207,10 +207,10 @@ public sealed class AotStage5B4C1B2AContractTests
         string roadmap = ReadRepositoryFile(
             "docs/architecture/rust-native-aot-roadmap.md");
 
-        Assert.Contains("$auditProfileVersion = 59", audit, StringComparison.Ordinal);
+        Assert.Contains("$auditProfileVersion = 60", audit, StringComparison.Ordinal);
         Assert.Contains("schemaVersion = 55", audit, StringComparison.Ordinal);
         Assert.Contains("stage5B4C1B2A", audit, StringComparison.Ordinal);
-        Assert.Contains("$RequiredAuditProfileVersion = 59", launcher, StringComparison.Ordinal);
+        Assert.Contains("$RequiredAuditProfileVersion = 60", launcher, StringComparison.Ordinal);
         Assert.Contains("$RequiredSummarySchemaVersion = 55", launcher, StringComparison.Ordinal);
         Assert.Contains("$RequiredRustCapabilities = 511", launcher, StringComparison.Ordinal);
         Assert.Contains("$RequiredRustExportCount = 10", launcher, StringComparison.Ordinal);

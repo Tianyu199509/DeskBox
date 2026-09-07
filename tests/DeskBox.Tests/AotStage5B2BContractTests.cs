@@ -192,14 +192,14 @@ public sealed class AotStage5B2BContractTests
         string launcher = ReadRepositoryFile("scripts/start-aot-preview.ps1");
         string project = ReadRepositoryFile("src/DeskBox/DeskBox.csproj");
 
-        Assert.Contains("$auditProfileVersion = 59", audit, StringComparison.Ordinal);
+        Assert.Contains("$auditProfileVersion = 60", audit, StringComparison.Ordinal);
         Assert.Contains("schemaVersion = 55", audit, StringComparison.Ordinal);
         Assert.Contains("stage5B2BSourceFiles", audit, StringComparison.Ordinal);
         Assert.Contains("stage5B2BMissingRunnerPatterns", audit, StringComparison.Ordinal);
         Assert.Contains("stage5B2BMissingSmokeScriptPatterns", audit, StringComparison.Ordinal);
         Assert.Contains("stage5B2BUnsafeRunnerPatterns", audit, StringComparison.Ordinal);
         Assert.Contains("stage5B2BExpectedWmc1510Count = 863", audit, StringComparison.Ordinal);
-        Assert.Contains("$RequiredAuditProfileVersion = 59", launcher, StringComparison.Ordinal);
+        Assert.Contains("$RequiredAuditProfileVersion = 60", launcher, StringComparison.Ordinal);
         Assert.Contains("$RequiredSummarySchemaVersion = 55", launcher, StringComparison.Ordinal);
         Assert.Contains("Native AOT stage 5B-4C3B2B1", project, StringComparison.Ordinal);
         Assert.Contains("Quick Access pin/unpin", project, StringComparison.OrdinalIgnoreCase);

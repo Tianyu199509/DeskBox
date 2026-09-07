@@ -106,12 +106,12 @@ public sealed class AotStage5B4C3B1ContractTests
         string project = Read("src/DeskBox/DeskBox.csproj");
         string rust = Read("native/deskbox-native/src/lib.rs");
 
-        Assert.Contains("$auditProfileVersion = 59", audit, StringComparison.Ordinal);
+        Assert.Contains("$auditProfileVersion = 60", audit, StringComparison.Ordinal);
         Assert.Contains("schemaVersion = 55", audit, StringComparison.Ordinal);
         Assert.Contains("stage5B4C3B1RequiredScenarioPatterns", audit, StringComparison.Ordinal);
         Assert.Contains("stage5B4C3B1MissingSmokeScriptPatterns", audit, StringComparison.Ordinal);
         Assert.Contains("stage5B4C3B1RustAbiUnchanged", audit, StringComparison.Ordinal);
-        Assert.Contains("$RequiredAuditProfileVersion = 59", launcher, StringComparison.Ordinal);
+        Assert.Contains("$RequiredAuditProfileVersion = 60", launcher, StringComparison.Ordinal);
         Assert.Contains("$RequiredSummarySchemaVersion = 55", launcher, StringComparison.Ordinal);
         Assert.Contains("Native AOT stage 5B-4C3B2B1", project, StringComparison.Ordinal);
         Assert.Contains("assert_eq!(deskbox_native_capabilities(), 511);", rust, StringComparison.Ordinal);
