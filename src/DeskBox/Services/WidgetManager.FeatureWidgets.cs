@@ -714,15 +714,12 @@ public sealed partial class WidgetManager
         string? preferredFileName = null,
         CancellationToken cancellationToken = default)
     {
-        if (!TryResolveImportTarget(targetWidgetId, out string targetFolderPath))
-        {
-            return null;
-        }
-
-        if (!TryResolveImportDestination(
+        if (!TryResolveImportTarget(targetWidgetId, out string targetFolderPath) ||
+            !TryResolveImportDestination(
                 targetFolderPath,
                 preferredFileName ?? Path.GetFileName(sourceFilePath),
-                out string destinationPath))
+                out string destinationPath,
+                out string baseCandidatePath))
         {
             return null;
         }
@@ -739,7 +736,7 @@ public sealed partial class WidgetManager
                 await source.CopyToAsync(temp, cancellationToken);
             }
 
-            File.Move(tempPath, destinationPath, overwrite: true);
+            destinationPath = MoveImportIntoPlace(tempPath, baseCandidatePath, destinationPath);
         }
         catch
         {
@@ -750,8 +747,7 @@ public sealed partial class WidgetManager
         return await FinalizeImportAsync(targetWidgetId, destinationPath);
     }
 
-    public async Task<string?> TryImportTextAsync(
-        string text,
+    public async Task<string?> TryImportTextAsync(        string text,
         string fileName,
         string targetWidgetId,
         CancellationToken cancellationToken = default)
@@ -762,7 +758,11 @@ public sealed partial class WidgetManager
         }
 
         if (!TryResolveImportTarget(targetWidgetId, out string targetFolderPath) ||
-            !TryResolveImportDestination(targetFolderPath, fileName, out string destinationPath))
+            !TryResolveImportDestination(
+                targetFolderPath,
+                fileName,
+                out string destinationPath,
+                out string baseCandidatePath))
         {
             return null;
         }
@@ -772,7 +772,7 @@ public sealed partial class WidgetManager
         try
         {
             await File.WriteAllTextAsync(tempPath, text, cancellationToken);
-            File.Move(tempPath, destinationPath, overwrite: true);
+            destinationPath = MoveImportIntoPlace(tempPath, baseCandidatePath, destinationPath);
         }
         catch
         {
@@ -788,15 +788,18 @@ public sealed partial class WidgetManager
     /// with any path structure (separators, rooted segments, ..-traversal,
     /// absolute paths) is REJECTED as unusable input rather than silently
     /// reinterpreted - producers cannot be trusted to sanitize, and a
-    /// reduced name would mask the producer bug. The final destination is
-    /// additionally verified to sit inside the widget folder.
+    /// reduced name would mask the producer bug. Containment is checked via
+    /// GetRelativePath so drive-root and share-root mapped folders (where
+    /// folder + separator can never prefix-match a child) stay importable.
     /// </summary>
-    private static bool TryResolveImportDestination(
+    internal static bool TryResolveImportDestination(
         string targetFolderPath,
         string? fileName,
-        out string destinationPath)
+        out string destinationPath,
+        out string baseCandidatePath)
     {
         destinationPath = string.Empty;
+        baseCandidatePath = string.Empty;
         string? candidate = fileName?.Trim();
         if (string.IsNullOrWhiteSpace(candidate) ||
             candidate is "." or ".." ||
@@ -808,22 +811,54 @@ public sealed partial class WidgetManager
         try
         {
             string normalizedFolder = Path.GetFullPath(targetFolderPath);
-            string candidatePath = Path.GetFullPath(Path.Combine(normalizedFolder, candidate));
-            if (!candidatePath.StartsWith(
-                    normalizedFolder + Path.DirectorySeparatorChar,
-                    StringComparison.OrdinalIgnoreCase))
+            baseCandidatePath = Path.GetFullPath(Path.Combine(normalizedFolder, candidate));
+            string relative = Path.GetRelativePath(normalizedFolder, baseCandidatePath);
+            if (relative.Length == 0 ||
+                relative == ".." ||
+                relative.StartsWith($"..{Path.DirectorySeparatorChar}", StringComparison.Ordinal) ||
+                Path.IsPathRooted(relative))
             {
+                baseCandidatePath = string.Empty;
                 return false;
             }
 
-            destinationPath = FileService.GetAvailablePath(candidatePath);
+            destinationPath = FileService.GetAvailablePath(baseCandidatePath);
             return true;
         }
         catch (Exception)
         {
             // Pathologically malformed names (invalid chars, ADS-shaped)
             // are unusable input, not an I/O failure.
+            baseCandidatePath = string.Empty;
             return false;
+        }
+    }
+
+    /// <summary>
+    /// Moves the completed temp file into place WITHOUT ever overwriting:
+    /// an auto-generated import path must never clobber a file someone
+    /// else created between GetAvailablePath and the rename (a real race on
+    /// OneDrive/NAS/shared folders). On a destination collision the next
+    /// available name is computed from the base candidate and the rename
+    /// retried. Returns the path the file actually landed on (callers must
+    /// reveal/remember THIS path, not the initially proposed one).
+    /// </summary>
+    internal static string MoveImportIntoPlace(string tempPath, string baseCandidatePath, string destinationPath)
+    {
+        string finalPath = destinationPath;
+        for (int attempt = 0; ; attempt++)
+        {
+            try
+            {
+                File.Move(tempPath, finalPath);
+                return finalPath;
+            }
+            catch (IOException) when (attempt < 3 && File.Exists(finalPath))
+            {
+                // The destination was taken after GetAvailablePath picked
+                // it; take the next free variant instead of clobbering.
+                finalPath = FileService.GetAvailablePath(baseCandidatePath);
+            }
         }
     }
 

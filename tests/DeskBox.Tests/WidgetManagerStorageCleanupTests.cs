@@ -642,6 +642,43 @@ public sealed class WidgetManagerStorageCleanupTests : IDisposable
         Assert.Empty(Directory.GetFiles(managedFolder, ".import-*.tmp"));
     }
 
+    [Fact]
+    public void ImportDestination_DriveRootMappedFolderStaysImportable()
+    {
+        // A File widget mapped to a drive root used to be wrongly rejected:
+        // folder + separator ("C:\" + "\") can never prefix-match a child
+        // ("C:\abc.txt"). GetRelativePath-based containment handles roots.
+        bool resolved = WidgetManager.TryResolveImportDestination(
+            @"C:\",
+            "abc.txt",
+            out string destinationPath,
+            out string baseCandidatePath);
+
+        Assert.True(resolved);
+        Assert.Equal(Path.GetFullPath(@"C:\abc.txt"), baseCandidatePath);
+        Assert.Equal(baseCandidatePath, destinationPath);
+    }
+
+    [Fact]
+    public void Import_NeverOverwritesAFileCreatedAfterPathResolution()
+    {
+        // The destination was taken between GetAvailablePath and the rename:
+        // the import must land on the next free variant, never clobber.
+        string folder = Directory.CreateDirectory(Path.Combine(_tempRoot, "NoClobber")).FullName;
+        string baseCandidate = Path.Combine(folder, "race.txt");
+        string occupied = Path.Combine(folder, "race.txt");
+        File.WriteAllText(occupied, "someone else");
+        string tempPath = Path.Combine(folder, ".import-test.tmp");
+        File.WriteAllText(tempPath, "mine");
+
+        string finalPath = WidgetManager.MoveImportIntoPlace(tempPath, baseCandidate, occupied);
+
+        Assert.NotEqual(occupied, finalPath);
+        Assert.Equal("someone else", File.ReadAllText(occupied));
+        Assert.Equal("mine", File.ReadAllText(finalPath));
+        Assert.StartsWith("race", Path.GetFileName(finalPath), StringComparison.Ordinal);
+    }
+
     private static WidgetConfig CreateManagedWidget(string name, string folderPath)
     {
         return new WidgetConfig
