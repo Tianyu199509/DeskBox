@@ -292,10 +292,10 @@ public sealed class AotStage5B4B2C2BContractTests
         string launcher = ReadRepositoryFile("scripts/start-aot-preview.ps1");
         string project = ReadRepositoryFile("src/DeskBox/DeskBox.csproj");
 
-        Assert.Contains("$auditProfileVersion = 60", audit, StringComparison.Ordinal);
+        Assert.Contains("$auditProfileVersion = 61", audit, StringComparison.Ordinal);
         Assert.Contains("schemaVersion = 55", audit, StringComparison.Ordinal);
         Assert.Contains("stage5B4B2C2B", audit, StringComparison.Ordinal);
-        Assert.Contains("$RequiredAuditProfileVersion = 60", launcher, StringComparison.Ordinal);
+        Assert.Contains("$RequiredAuditProfileVersion = 61", launcher, StringComparison.Ordinal);
         Assert.Contains("$RequiredSummarySchemaVersion = 55", launcher, StringComparison.Ordinal);
         Assert.Contains("stage 5B-4C3B2B1", project, StringComparison.Ordinal);
         Assert.Contains("deterministic non-empty WeatherData", project, StringComparison.Ordinal);
