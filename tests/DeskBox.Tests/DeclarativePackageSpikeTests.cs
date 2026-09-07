@@ -302,6 +302,107 @@ public sealed class DeclarativePackageSpikeTests : IDisposable
             StringComparison.Ordinal);
     }
 
+    // ----- spike leg 3: WASM component runtime (source-scan pins only -
+    // building the Rust crate is NOT a CI prerequisite; the red line is
+    // that the app build never references the spike crate) -----
+
+    [Fact]
+    public void WasmSpike_PackageValidatesAndCarriesTheComponent()
+    {
+        // The committed artifact's integrity chain must verify; this also
+        // fails loudly if someone rebuilds the .wasm without refreshing the
+        // package (wasm builds are not byte-reproducible).
+        string packageDir = TestPaths.FromRepository("spikes/github-stats-wasm");
+        Assert.True(File.Exists(Path.Combine(packageDir, "plugin", "plugin.wasm")));
+        byte[] header = File.ReadAllBytes(Path.Combine(packageDir, "plugin", "plugin.wasm"))[0..8];
+        Assert.True(
+            header[4] == 0x0d && header[6] == 0x01 && header[7] == 0x00,
+            "artifact must be a WASM component (version 0x0d header)");
+
+        ProcessResult result = RunValidator(packageDir);
+        Assert.Equal(0, result.ExitCode);
+        Assert.Contains("VERIFIED", result.StandardOutput, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void WasmSpike_WitWorldPinsTheCapabilityBoundary()
+    {
+        string wit = File.ReadAllText(TestPaths.FromRepository(
+            "native/deskbox-wasm-spike/wit/deskbox-plugin.wit"));
+
+        Assert.Contains("package deskbox:plugin@0.1.0", wit, StringComparison.Ordinal);
+        Assert.Contains("world plugin-world", wit, StringComparison.Ordinal);
+        // The guest gets capabilities ONLY as host imports - the boundary
+        // every leg shares.
+        Assert.Contains("import capabilities;", wit, StringComparison.Ordinal);
+        Assert.Contains("network-fetch: func", wit, StringComparison.Ordinal);
+        Assert.Contains("shell-open: func", wit, StringComparison.Ordinal);
+        Assert.Contains("widget-update: func", wit, StringComparison.Ordinal);
+        Assert.Contains("export activate: func", wit, StringComparison.Ordinal);
+        Assert.Contains("export invoke-action: func", wit, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void WasmSpike_HostEnforcesGateSemanticsAndGovernance()
+    {
+        string host = File.ReadAllText(TestPaths.FromRepository(
+            "native/deskbox-wasm-spike/host/src/main.rs"));
+
+        // Same permission semantics as the other legs.
+        Assert.Contains("requested != granted", host, StringComparison.Ordinal);
+        Assert.Contains("outside the declared", host, StringComparison.Ordinal);
+        Assert.Contains("redirects are refused in v0.3", host, StringComparison.Ordinal);
+        Assert.Contains("MAX_RESPONSE_BYTES", host, StringComparison.Ordinal);
+
+        // Governance: deterministic fuel budget, epoch deadline, memory cap.
+        Assert.Contains("consume_fuel(true)", host, StringComparison.Ordinal);
+        Assert.Contains("epoch_interruption(true)", host, StringComparison.Ordinal);
+        Assert.Contains("ResourceLimiter", host, StringComparison.Ordinal);
+        Assert.Contains("FUEL_LIMIT", host, StringComparison.Ordinal);
+        Assert.Contains("exhausted its fuel budget", host, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void WasmSpike_RedLine_SpikeCrateStaysOutOfTheAppBuild()
+    {
+        // Roadmap red line: the spike crate must never leak into the app
+        // build, the AOT audit, or the retail pipeline (it would drag
+        // wasmtime into the shipped app).
+        string[] guardedFiles =
+        [
+            "src/DeskBox/DeskBox.csproj",
+            "scripts/publish-aot-audit.ps1",
+            "scripts/publish-aot-retail.ps1",
+            "scripts/publish-arm64-aot-static-audit.ps1",
+            "src/DeskBox.Updater/DeskBox.Updater.csproj"
+        ];
+        foreach (string file in guardedFiles)
+        {
+            string fullPath = TestPaths.FromRepository(file);
+            if (!File.Exists(fullPath))
+            {
+                continue;
+            }
+            Assert.DoesNotContain(
+                "deskbox-wasm-spike",
+                File.ReadAllText(fullPath),
+                StringComparison.OrdinalIgnoreCase);
+        }
+
+        // And the native crate stays standalone: no reference FROM the app
+        // project files anywhere under src/.
+        foreach (string project in Directory.GetFiles(
+                     TestPaths.FromRepository("src"),
+                     "*.csproj",
+                     SearchOption.AllDirectories))
+        {
+            Assert.DoesNotContain(
+                "deskbox-wasm-spike",
+                File.ReadAllText(project),
+                StringComparison.OrdinalIgnoreCase);
+        }
+    }
+
     private static void CopyDirectory(string source, string destination)
     {
         foreach (string file in Directory.GetFiles(source, "*", SearchOption.AllDirectories))
