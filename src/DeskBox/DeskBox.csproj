@@ -192,9 +192,10 @@
     stay project-local: as a command-line global it flows into every project
     of the graph and the WindowsAppSDK targets reject it on the
     DeskBox.Abstractions class library. The retail script passes the
-    DeskBoxRetailBundle marker global instead.
+    DeskBoxRetailBundle marker global instead; this group sits after the
+    audit group so the marker wins over its framework-dependent default.
   -->
-  <PropertyGroup Condition="'$(WindowsAppSDKSelfContained)' == '' and '$(DeskBoxRetailBundle)' == 'true'">
+  <PropertyGroup Condition="'$(DeskBoxRetailBundle)' == 'true'">
     <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
   </PropertyGroup>
 
