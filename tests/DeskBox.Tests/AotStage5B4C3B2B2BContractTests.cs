@@ -109,7 +109,7 @@ public sealed class AotStage5B4C3B2B2BContractTests
 
         foreach (string token in new[]
                  {
-                     "$requiredAuditProfileVersion = 58",
+                     "$requiredAuditProfileVersion = 59",
                      "$requiredSummarySchemaVersion = 55",
                      "[switch]$IncludeColdStart",
                      "-AllowEarlyExit",
@@ -171,7 +171,7 @@ public sealed class AotStage5B4C3B2B2BContractTests
 
         foreach (string token in new[]
                  {
-                     "$auditProfileVersion = 58",
+                     "$auditProfileVersion = 59",
                      "schemaVersion = 55",
                      "stage5B4C3B2B2BMissingScenarioPatterns",
                      "stage5B4C3B2B2BMissingProductPatterns",
