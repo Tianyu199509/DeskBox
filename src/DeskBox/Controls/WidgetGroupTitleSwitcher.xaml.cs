@@ -984,7 +984,8 @@ public sealed partial class WidgetGroupTitleSwitcher : UserControl
         DetachScaleTransform.ScaleY = 1;
     }
 
-    private Brush CreateAccentBrush() => new SolidColorBrush(TitleIconAccentColor);
+    private Brush CreateAccentBrush() =>
+        SharedBrushCache.GetOrCreate(TitleIconAccentColor);
 
     private static Brush ResolveThemeBrush(
         string resourceKey,

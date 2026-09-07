@@ -34,7 +34,7 @@ public sealed class AotStage5AContractTests
     {
         string launcher = ReadRepositoryFile("scripts/start-aot-preview.ps1");
 
-        Assert.Contains("$RequiredAuditProfileVersion = 58", launcher, StringComparison.Ordinal);
+        Assert.Contains("$RequiredAuditProfileVersion = 60", launcher, StringComparison.Ordinal);
         Assert.Contains("$RequiredSummarySchemaVersion = 55", launcher, StringComparison.Ordinal);
         Assert.Contains("sourceStableDuringAudit", launcher, StringComparison.Ordinal);
         Assert.Contains("runtimeIdentifier", launcher, StringComparison.Ordinal);
@@ -134,13 +134,13 @@ public sealed class AotStage5AContractTests
         string audit = ReadRepositoryFile("scripts/publish-aot-audit.ps1");
         string project = ReadRepositoryFile("src/DeskBox/DeskBox.csproj");
 
-        Assert.Contains("$auditProfileVersion = 58", audit, StringComparison.Ordinal);
+        Assert.Contains("$auditProfileVersion = 60", audit, StringComparison.Ordinal);
         Assert.Contains("schemaVersion = 55", audit, StringComparison.Ordinal);
         Assert.Contains("stage5ASourceFiles", audit, StringComparison.Ordinal);
         Assert.Contains("stage5AMissingDataPathPatterns", audit, StringComparison.Ordinal);
         Assert.Contains("stage5AMissingLauncherPatterns", audit, StringComparison.Ordinal);
         Assert.Contains("stage5AUnsafeLauncherPatterns", audit, StringComparison.Ordinal);
-        Assert.Contains("stage5AExpectedWmc1510Count = 1235", audit, StringComparison.Ordinal);
+        Assert.Contains("stage5AExpectedWmc1510Count = 863", audit, StringComparison.Ordinal);
         Assert.Contains("Native AOT stage 5B-4C3B2B1", project, StringComparison.Ordinal);
         Assert.Contains("AOT preview data-root isolation", project, StringComparison.OrdinalIgnoreCase);
     }

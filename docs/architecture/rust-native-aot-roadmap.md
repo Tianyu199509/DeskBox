@@ -40,6 +40,12 @@
 > publish、Inno 安装器、Store MSIX/appxsym/msixupload 与包内容/哈希审计；Store AOT 明确包含静态
 > `deskbox_native.dll`，不包含 Updater、SearchCore、managed runtime 元数据或 PDB。该结果不包含签名、
 > WACK、安装、覆盖升级或实体设备。原始目标加权约 98%；下一阶段为 7C2 合并 Store 上传包和外部发布证据。
+>
+> 2026-09-07 profile 59 修正：本地复跑 x64 audit 暴露 4E-4 契约与 0a496114（设置节惰性装载）漂移——
+> 旧的 `AppearanceDetailSection.ViewModel = ViewModel;` 急切赋值已不存在；契约改为钉住
+> `Bindings.Initialize()`/`Bindings.StopTracking()` 与空守卫清理时序，auditProfileVersion 58→59
+> 全仓同步（schema 55 不变）。同批暴露并修复：DeskBox.Abstractions 引入后主项目
+> packages.aot.lock.json 未再生成（audit restore 已补齐）。
 
 ## 1. 结论摘要
 

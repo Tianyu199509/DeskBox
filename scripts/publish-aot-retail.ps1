@@ -268,7 +268,11 @@ $commonProperties = @(
     "-p:JsonSerializerIsReflectionEnabledByDefault=false",
     "-p:IlcUseEnvironmentalTools=true",
     "-p:SelfContained=true",
-    "-p:WindowsAppSDKSelfContained=true"
+    # WindowsAppSDKSelfContained must NOT be a global property: it flows into
+    # every project in the graph and the WindowsAppSDK targets reject it on
+    # the DeskBox.Abstractions class library. The DeskBoxRetailBundle marker
+    # lets DeskBox.csproj set it project-locally instead.
+    "-p:DeskBoxRetailBundle=true"
 )
 
 $previousCliLanguage = [Environment]::GetEnvironmentVariable("DOTNET_CLI_UI_LANGUAGE", "Process")
@@ -278,7 +282,16 @@ try {
     [Environment]::SetEnvironmentVariable("DOTNET_CLI_UI_LANGUAGE", "en-US", "Process")
     [Environment]::SetEnvironmentVariable("DOTNET_NOLOGO", "1", "Process")
 
-    foreach ($restoreProject in @($project, $updaterProject)) {
+    # Discover every project directly under src/ so newly added assemblies
+    # (pluginization Step 1+) are restored automatically instead of requiring
+    # manual edits to a hardcoded project array.
+    $restoreProjects = @(
+        Get-ChildItem -Path (Join-Path $repoRoot "src") -Directory |
+            ForEach-Object { Get-ChildItem -Path $_.FullName -Filter "*.csproj" -File } |
+            Sort-Object Name |
+            ForEach-Object { $_.FullName })
+
+    foreach ($restoreProject in $restoreProjects) {
         $restoreArguments = @(
             "restore",
             $restoreProject,
@@ -411,6 +424,7 @@ $forbiddenNames = @(
     "DeskBox.dll",
     "DeskBox.deps.json",
     "DeskBox.runtimeconfig.json",
+    "DeskBox.Abstractions.dll",
     "DeskBox.Updater.dll",
     "DeskBox.Updater.deps.json",
     "DeskBox.Updater.runtimeconfig.json"

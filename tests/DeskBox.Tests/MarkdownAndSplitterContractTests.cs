@@ -403,7 +403,7 @@ public sealed class MarkdownAndSplitterContractTests
             "src/DeskBox/Controls/WidgetContents/QuickCaptureSurfaceContent.xaml.cs"));
         string manager = File.ReadAllText(TestPaths.FromRepository(
             "src/DeskBox/Services/WidgetManager.cs"));
-        string features = File.ReadAllText(TestPaths.FromRepository(
+        string features = File.ReadAllText(TestPaths.SourceFile(
             "src/DeskBox/Services/WidgetManager.FeatureWidgets.cs"));
         string transientState = File.ReadAllText(TestPaths.FromRepository(
             "src/DeskBox/Models/WidgetMemberTransientStates.cs"));

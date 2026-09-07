@@ -109,7 +109,7 @@ public sealed class AotStage5B4C3B2B2BContractTests
 
         foreach (string token in new[]
                  {
-                     "$requiredAuditProfileVersion = 58",
+                     "$requiredAuditProfileVersion = 60",
                      "$requiredSummarySchemaVersion = 55",
                      "[switch]$IncludeColdStart",
                      "-AllowEarlyExit",
@@ -171,7 +171,7 @@ public sealed class AotStage5B4C3B2B2BContractTests
 
         foreach (string token in new[]
                  {
-                     "$auditProfileVersion = 58",
+                     "$auditProfileVersion = 60",
                      "schemaVersion = 55",
                      "stage5B4C3B2B2BMissingScenarioPatterns",
                      "stage5B4C3B2B2BMissingProductPatterns",
@@ -180,7 +180,7 @@ public sealed class AotStage5B4C3B2B2BContractTests
                      "stage5B4C3B2B2BRustAbiUnchanged",
                      "stage5B4C3B2B2BScenarioJsonSerializeCallCount",
                      "stage5B4C3B2B2BManagedUiJsonSerializeCallCount",
-                     "stage5B4C3B2B2BExpectedWmc1510Count = 1235"
+                     "stage5B4C3B2B2BExpectedWmc1510Count = 863"
                  })
         {
             Assert.Contains(token, audit, StringComparison.Ordinal);

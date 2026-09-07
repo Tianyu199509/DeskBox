@@ -56,6 +56,7 @@ public sealed partial class MarkdownDocumentView : UserControl
     private double _lastRenderedWidth = double.NaN;
     private MarkdownRenderState _lastRenderedState;
     private bool _hasRenderedState;
+    private int _renderParseGeneration;
     private string _renderInvalidationReason = "initial";
 
     public MarkdownDocumentView()
@@ -354,7 +355,35 @@ public sealed partial class MarkdownDocumentView : UserControl
             return;
         }
 
-        MarkdownParseResult document = _markdownService.Parse(source);
+        // Markdig parsing is pure CPU with no UI dependency; run it off the UI
+        // thread so opening a long document does not block interaction.
+        int generation = ++_renderParseGeneration;
+        _ = RenderParsedMarkdownAsync(source, verticalOffset, generation);
+    }
+
+    private async Task RenderParsedMarkdownAsync(
+        string source,
+        double verticalOffset,
+        int generation)
+    {
+        MarkdownParseResult document;
+        try
+        {
+            document = await Task.Run(() => _markdownService.Parse(source));
+        }
+        catch (Exception ex)
+        {
+            App.Log($"[MarkdownDocumentView] Background parse failed: {ex.Message}");
+            return;
+        }
+
+        if (generation != _renderParseGeneration ||
+            !_isLoaded ||
+            Visibility != Visibility.Visible)
+        {
+            return;
+        }
+
         WasTruncated = document.WasTruncated;
         foreach (MdBlock block in document.Document)
         {
@@ -363,6 +392,12 @@ public sealed partial class MarkdownDocumentView : UserControl
 
         RestoreScrollOffset(source, verticalOffset);
         CompleteRender();
+        if (_renderInvalidated)
+        {
+            // An invalidation arrived while parsing; make sure a re-render is
+            // queued instead of being swallowed by CompleteRender's flag reset.
+            QueueInvalidatedRender();
+        }
     }
 
     private void CompleteRender()

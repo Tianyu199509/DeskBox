@@ -41,9 +41,7 @@ public sealed class AotRetailIsolationContractTests
             ["**\\*.Aot*Smoke.cs", "Services\\Aot*Fixture.cs"],
             removedPatterns);
 
-        string sourceRoot = TestPaths.FromRepository("src/DeskBox");
-        string[] harnessSources = Directory
-            .EnumerateFiles(sourceRoot, "*.cs", SearchOption.AllDirectories)
+        string[] harnessSources = TestPaths.EnumerateProductionSourceFiles()
             .Where(IsSmokeHarnessSource)
             .ToArray();
         Assert.Equal(61, harnessSources.Length);
@@ -90,7 +88,11 @@ public sealed class AotRetailIsolationContractTests
         Assert.Contains("-p:DeskBoxAotSmokeHarness=false", storeBuild, StringComparison.Ordinal);
         Assert.Contains("-p:DeskBoxAotSmokeHarness=false", retailPublish, StringComparison.Ordinal);
         Assert.Contains("-p:SelfContained=true", retailPublish, StringComparison.Ordinal);
-        Assert.Contains("-p:WindowsAppSDKSelfContained=true", retailPublish, StringComparison.Ordinal);
+        Assert.Contains("-p:DeskBoxRetailBundle=true", retailPublish, StringComparison.Ordinal);
+        Assert.Contains(
+            "<WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>",
+            File.ReadAllText(TestPaths.SourceFile("src/DeskBox/DeskBox.csproj")),
+            StringComparison.Ordinal);
         Assert.Contains("productProfile = \"retail\"", retailPublish, StringComparison.Ordinal);
         Assert.Contains("deploymentProfile = \"full\"", retailPublish, StringComparison.Ordinal);
         Assert.Contains("installManifestFileCount", retailPublish, StringComparison.Ordinal);
