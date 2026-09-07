@@ -63,9 +63,14 @@ public sealed class SettingsDeferredSectionsTests
             yield return new(tag, header,
                 (string?)element.Attribute(Services + "Localized.DescriptionKey"));
         }
-        if (element.Name.NamespaceName == "using:DeskBox.Views.SettingsSections")
+        // Section references expand by type name: the section file lives in
+        // SettingsSections regardless of the namespace its code-behind
+        // declares (MusicSettingsSection uses DeskBox.Controls.WidgetContents
+        // per the pluginization roadmap 16.4 decision).
+        string sectionFilePath = Path.Combine(viewsRoot, "SettingsSections", name + ".xaml");
+        if (File.Exists(sectionFilePath))
         {
-            XElement nested = XDocument.Load(Path.Combine(viewsRoot, "SettingsSections", name + ".xaml")).Root!;
+            XElement nested = XDocument.Load(sectionFilePath).Root!;
             foreach (var entry in ReadEntries(nested, tag, viewsRoot))
             {
                 yield return entry;
