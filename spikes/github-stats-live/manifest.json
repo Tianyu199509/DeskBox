@@ -26,7 +26,8 @@
         "version": 1,
         "label": "Stars",
         "value": "…",
-        "caption": "Tianyu199509/DeskBox"
+        "caption": "Tianyu199509/DeskBox",
+        "primaryActionId": "open-repo"
       },
       "bindings": {
         "value": {
@@ -63,7 +64,7 @@
     }
   ],
   "signature": {
-    "contentHash": "ea8ffa6688648c46000d2ca158b338bf112ba40f49226f8edaf39a95159fc6d1",
-    "publisherSignature": "+8IqOMtrc5z37lxb+053jEZ/xUnrrIUvJDTH2ejmzJ9AhOSRrUBUXIUh5wt0XJtA9TKqAVL1eEp+xYGci5gOAA=="
+    "contentHash": "3550cf4adb8778dc0103d8a4ae0b70e136d1fbf9a34e0a8f3c074fd5d70a0d7b",
+    "publisherSignature": "NNA+yyuQe5/tKEekCTqtmGd3o5RcfiEnSLWSUpm+jUd/YKtkJt/joYxOPTJrqdKe/do5EgHR6IN4UGCWBWcJBw=="
   }
 }

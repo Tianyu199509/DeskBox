@@ -155,6 +155,7 @@
     },
     "permissions": {
       "type": "array",
+      "description": "REQUESTED permissions (v0.3 round-7 clarification): the manifest never grants anything - grants are the host's install-time decision and live host-side; the runtime gate checks requested AND url-in-scope AND granted. Each id appears at most once per package (multiple hosts go inside one scope.allow) so grant/scope lookup is never implementation-defined.",
       "items": {
         "type": "object",
         "required": ["id"],
@@ -210,13 +211,15 @@
     },
     "dataSources": {
       "type": "object",
+      "propertyNames": { "pattern": "^[a-z0-9][a-z0-9-]*$", "description": "Data source ids use the same local-id pattern as contributions." },
       "additionalProperties": { "$ref": "#/$defs/dataSource" },
-      "description": "Named data sources the HOST fetches on the package's behalf (v0.3: http-json only). Every http-json source consumes the network.fetch permission: it must be declared and its URL host must fall inside a granted scope, checked at install time and again at runtime. runtime:none packages execute no third-party code - the host executes governed capabilities for them."
+      "description": "Named data sources the HOST fetches on the package's behalf (v0.3: http-json only). Every http-json source consumes the network.fetch permission: REQUESTED here, granted only by the host's install-time decision - the runtime checks requested AND in-scope AND granted. Redirects are refused (not followed) so a 3xx can never move a request to a host that never passed the gate; responses are capped by a host hard limit the package cannot raise."
     },
     "actions": {
       "type": "object",
+      "propertyNames": { "pattern": "^[a-z0-9][a-z0-9-]*$", "description": "Action ids use the same local-id pattern as contributions." },
       "additionalProperties": { "$ref": "#/$defs/packageAction" },
-      "description": "Package-scoped actions referenced by payload actionIds (v0.3: open-url only). Every action consumes the shell.open permission: it must be declared and its URL host must fall inside a granted scope. When the actions map is present, payload actionId references must resolve to it."
+      "description": "Package-scoped actions referenced by payload actionIds and payload.primaryActionId (v0.3: open-url only). Every action consumes the shell.open permission (requested here, granted host-side). When the actions map is present, payload action references must resolve to it."
     },
     "fallback": {
       "type": "object",

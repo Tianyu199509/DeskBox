@@ -38,6 +38,13 @@ export function validatePackage(pkgDir) {
   const templates = ['metric', 'list', 'status', 'gallery', 'action-list', 'simple-form'];
   const dataSources = manifest.dataSources ?? {};
   const actions = manifest.actions ?? {};
+  const localIdPattern = /^[a-z0-9][a-z0-9-]*$/;
+  for (const key of Object.keys(dataSources)) {
+    if (!localIdPattern.test(key)) fail(`dataSources: key '${key}' must use the local id pattern (^[a-z0-9][a-z0-9-]*$)`);
+  }
+  for (const key of Object.keys(actions)) {
+    if (!localIdPattern.test(key)) fail(`actions: key '${key}' must use the local id pattern (^[a-z0-9][a-z0-9-]*$)`);
+  }
   (contributions ?? []).forEach((c, i) => {
     const where = `contributions[${i}]`;
     for (const key of ['type', 'id', 'displayName', 'template']) {
@@ -112,6 +119,7 @@ export function validatePackage(pkgDir) {
   if (Object.keys(actions).length > 0) {
     const referenced = new Set();
     for (const c of contributions ?? []) {
+      if (typeof c.payload?.primaryActionId === 'string') referenced.add(c.payload.primaryActionId);
       for (const value of Object.values(c.payload ?? {})) {
         if (Array.isArray(value)) {
           for (const entry of value) {
@@ -128,13 +136,21 @@ export function validatePackage(pkgDir) {
   }
 
   const permissions = manifest.permissions ?? [];
+  const seenPermissionIds = new Set();
   permissions.forEach((p, i) => {
     if (!/^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(p.id ?? '')) fail(`permissions[${i}]: id pattern`);
+    if (seenPermissionIds.has(p.id)) {
+      // Duplicate ids with different scopes would make grant/scope lookup
+      // implementation-defined (first match? merge?) across the three
+      // future runtimes - one entry per id, multiple hosts inside it.
+      fail(`permissions: duplicate id '${p.id}' (use one entry with multiple scope.allow hosts)`);
+    }
+    seenPermissionIds.add(p.id);
     for (const key of Object.keys(p)) {
       if (!['id', 'required', 'scope'].includes(key)) fail(`permissions[${i}]: unknown property '${key}'`);
     }
   });
-  const permissionIds = new Set(permissions.map(p => p.id));
+  const permissionIds = seenPermissionIds;
   const scopeAllows = id => {
     const found = permissions.find(p => p.id === id);
     return found?.scope?.allow ?? [];

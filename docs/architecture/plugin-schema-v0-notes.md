@@ -13,6 +13,14 @@
 
 **为什么现在做**：三路 spike 要公平比较，三腿必须做同一件事（真实 GitHub 数据流）；没有数据源/绑定/动作词汇，Declarative 腿只有静态数据，冷启动/延迟/AI 生成率等维度无从测起（第六轮评审裁定）。
 
+**v0.3 执行语义补钉（第七轮评审）**：
+- **Requested ≠ Granted**：manifest 的 permissions 只是**请求**；授予是宿主 install 期决策、存宿主侧。运行期能力门=请求 ∧ URL host 在请求 scope 内 ∧ 已授予。无授予=全部拒绝（fail-closed）。腿②③ 必须实现同一语义。
+- **Redirect 拒绝**：http-json 取数不跟随 3xx（redirect:manual）——跟随等于把请求移到从未过门的 host；v0.3 直接拒绝，将来若开放则每跳重新过门（HTTPS+scope+私网策略）。
+- **错误二分**：策略失败（未声明/超 scope/未授予/redirect）=REFUSED 整能力不跑；**数据失败**（离线/超时/HTTP 5xx/JSON 坏/超限）=数据源标记失败，绑定回退 payload 值，widget 继续渲染——这是 Declarative 的核心优势之一。
+- **宿主硬限制**：http-json 响应体上限 2MB（流式读取+Content-Length 预检），包不能提高；后续可加每包并发数/最大数据源数等。
+- **ID 钉死**：dataSources/actions 的 map key 用与贡献一致的 local id pattern；permission id 每包最多一条（多条 scope 并进一个 allow——避免三实现对重复 id 各取第一/合并/最后）。
+- **组件级动作**：payload 增加 `primaryActionId` 字段（metric 等模板的主点击动作），actions 映射存在时必须可解析——"点击 widget→动作"链路由此闭合。
+
 ## v0.1 → v0.2 变更（第四轮外部评审吸收）
 
 | 变更 | 原因 |
