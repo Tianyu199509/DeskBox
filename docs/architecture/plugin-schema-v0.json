@@ -1,10 +1,10 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://deskbox.fun/schemas/plugin-manifest-v0.json",
-  "title": "DeskBox Plugin Manifest (schema v0 draft)",
-  "description": "Draft manifest vocabulary for the DeskBox extension system. v0 exists to give the three-way runtime spike, the plugin CLI validator and the store specification one shared target; it will iterate and is intentionally lightly pinned by tests (existence + vocabulary, not field-by-field freezing). Design decisions: roadmap sections 13.2 (permissions), 13.4 (protocol skeleton), 13.5 (declarative UI), 14 (Extension Model) and 15 (store/commerce).",
+  "title": "DeskBox Plugin Manifest (schema v0.1 draft)",
+  "description": "Draft manifest vocabulary for the DeskBox extension system. v0.1 incorporates the third review round: contributions[] replaces widgets[]; the runtime field describes execution technology; the signature block avoids self-reference by excluding itself from the hash domain. Design decisions: roadmap sections 13.2, 13.4, 13.5, 14, 15 and 16.7.",
   "type": "object",
-  "required": ["schemaVersion", "id", "version", "publisher", "category", "hostApi", "widgets", "signature"],
+  "required": ["schemaVersion", "id", "version", "publisher", "runtime", "hostApi", "contributions"],
   "additionalProperties": false,
   "properties": {
     "schemaVersion": {
@@ -14,7 +14,7 @@
     "id": {
       "type": "string",
       "pattern": "^[a-z0-9][a-z0-9-]*(\\.[a-z0-9][a-z0-9-]*)+$",
-      "description": "Package id, reverse-DNS style (e.g. com.github.stats). Package id != widget type id != widget instance id (three-level separation)."
+      "description": "Package id, reverse-DNS style (e.g. com.github.stats)."
     },
     "version": {
       "type": "string",
@@ -24,11 +24,11 @@
     "publisher": {
       "type": "string",
       "minLength": 1,
-      "description": "Publisher identity. In the pre-account phase this is the Ed25519 publisher key fingerprint; later it binds to a registered account."
+      "description": "Publisher identity. In the pre-account phase this is the Ed25519 public key fingerprint; later it binds to a registered account."
     },
-    "category": {
-      "enum": ["resource-pack", "wasm", "out-of-proc"],
-      "description": "resource-pack: declarative-only, no code executes, store launch category. wasm: sandboxed component. out-of-proc: full-trust process (Windows code signing channel required, L1 review)."
+    "runtime": {
+      "enum": ["none", "wasm", "process"],
+      "description": "Execution technology for this package. none = declarative-only (resource-pack class; no code executes). wasm = sandboxed component (in-process, WIT-based). process = full-trust executable (requires Windows code signing, L1 store review, Store/WinGet channel). A package has exactly one runtime; its declarative contributions (UI etc.) are always host-rendered regardless of runtime."
     },
     "hostApi": {
       "type": "object",
@@ -40,88 +40,86 @@
       },
       "description": "Install-time half of the version double-gate; the runtime handshake protocolVersion is the other half (roadmap 13.4)."
     },
-    "widgets": {
+    "contributions": {
       "type": "array",
       "minItems": 1,
+      "description": "Things this package contributes to the host. Each entry has a type discriminator; v0.1 defines only the widget type - command, ai-tool, settings and other types will be added without changing the package-level structure.",
       "items": {
         "type": "object",
-        "required": ["typeId", "displayName", "template"],
-        "additionalProperties": false,
-        "properties": {
-          "typeId": {
-            "type": "string",
-            "pattern": "^[a-z0-9][a-z0-9-]*$",
-            "description": "Widget type id, unique within the package; conventionally prefixed by the package id."
-          },
-          "displayName": { "type": "string", "minLength": 1 },
-          "template": {
-            "enum": ["metric", "list", "status", "gallery", "action-list", "simple-form"],
-            "description": "Host-rendered declarative template (roadmap 13.5). v0 deliberately has no free-form layout primitives."
-          },
-          "payload": {
-            "type": "object",
-            "required": ["version"],
+        "required": ["type", "id"],
+        "oneOf": [
+          {
             "properties": {
-              "version": {
-                "type": "integer",
-                "minimum": 1,
-                "description": "Payload schema version; the host picks the parser by version, strict within a known version, unknown elements fall back per-element then drop."
+              "type": { "const": "widget" },
+              "id": {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9-]*$",
+                "description": "Local contribution id, unique within the package (e.g. 'overview'). The host derives the canonical contribution id as {package-id}/{local-id} (e.g. com.github.stats/overview). This is distinct from the package id and from runtime widget instance ids (three-level separation)."
+              },
+              "displayName": { "type": "string", "minLength": 1 },
+              "template": {
+                "enum": ["metric", "list", "status", "gallery", "action-list", "simple-form"],
+                "description": "Host-rendered declarative template (roadmap 13.5). v0 deliberately has no free-form layout primitives."
+              },
+              "payload": {
+                "type": "object",
+                "required": ["version"],
+                "properties": {
+                  "version": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": "Payload schema version; the host picks the parser by version, strict within a known version, unknown elements fall back per-element then drop."
+                  }
+                },
+                "additionalProperties": true,
+                "description": "Template payload data + bindings. HostConfig owns theming; the payload never carries style."
+              },
+              "defaultSize": {
+                "type": "object",
+                "properties": { "width": { "type": "number" }, "height": { "type": "number" } },
+                "additionalProperties": false
+              },
+              "activationEvents": {
+                "type": "array",
+                "items": {
+                  "enum": ["onStartupFinished", "onWidgetOpen", "onCommand", "onSchedule", "onFileAssociation", "onEvent"]
+                },
+                "description": "Declarative activation events (roadmap 5.8): widgets restore their window/layout always; these decide when the plugin runtime starts."
               }
-            },
-            "additionalProperties": true,
-            "description": "Template payload data + bindings. HostConfig owns theming; the payload never carries style."
-          },
-          "defaultSize": {
-            "type": "object",
-            "properties": { "width": { "type": "number" }, "height": { "type": "number" } },
-            "additionalProperties": false
-          },
-          "activationEvents": {
-            "type": "array",
-            "items": {
-              "enum": ["onStartupFinished", "onWidgetOpen", "onCommand", "onSchedule", "onFileAssociation", "onEvent"]
-            },
-            "description": "Declarative activation events (roadmap 5.8): widgets restore their window/layout always; these decide when the plugin runtime starts."
+            }
           }
-        }
+        ]
       }
     },
     "permissions": {
       "type": "array",
       "items": {
-        "type": "string",
-        "pattern": "^[a-z0-9-]+:[a-z0-9-]+$",
-        "description": "Tauri-style identifier plugin-name:permission-name referencing a capability declaration. Granting happens through capabilities, not by listing here."
-      },
-      "default": []
-    },
-    "scopes": {
-      "type": "array",
-      "items": {
         "type": "object",
-        "required": ["permission"],
+        "required": ["id"],
         "properties": {
-          "permission": { "type": "string" },
-          "allow": { "type": "array", "items": { "type": "string" }, "description": "e.g. directory globs (Downloads/**), URL filters (api.github.com), quotas (100/day)." },
-          "deny": { "type": "array", "items": { "type": "string" }, "description": "Deny always wins over allow (Tauri rule); the host additionally maintains defensive default-denies (own config/credential dirs)." }
+          "id": {
+            "type": "string",
+            "pattern": "^[a-z0-9-]+(\\.[a-z0-9-]+)+$",
+            "description": "Permission identifier referencing the host's permission registry (e.g. network.fetch, files.read). Third-party packages cannot invent new permission ids; unknown ids are rejected at validation time."
+          },
+          "required": {
+            "type": "boolean",
+            "default": true,
+            "description": "Whether the package needs this permission to function. Optional permissions can be declined by the user at install."
+          },
+          "scope": {
+            "type": "object",
+            "properties": {
+              "allow": { "type": "array", "items": { "type": "string" }, "description": "e.g. directory globs (Downloads/**), URL filters (api.github.com), quotas (100/day)." },
+              "deny": { "type": "array", "items": { "type": "string" }, "description": "Deny always wins over allow; the host additionally maintains defensive default-denies (own config/credential dirs)." }
+            },
+            "additionalProperties": false
+          }
         },
         "additionalProperties": false
       },
-      "default": []
-    },
-    "capabilities": {
-      "type": "array",
-      "items": {
-        "type": "object",
-        "required": ["permission"],
-        "properties": {
-          "permission": { "type": "string" },
-          "context": { "type": "string", "description": "Which plugin context (package / widget type) receives the grant." },
-          "defaultSet": { "type": "boolean", "default": false, "description": "Granted automatically at install with explicit UI notice (Tauri default.toml semantics)." }
-        },
-        "additionalProperties": false
-      },
-      "default": []
+      "default": [],
+      "description": "Permission requests. The host policy engine (not the package) decides whether a permission is auto-granted, prompted, or denied - a package cannot self-grant via manifest fields."
     },
     "data": {
       "type": "object",
@@ -134,10 +132,16 @@
     },
     "signature": {
       "type": "object",
-      "required": ["contentHash", "publisherKey"],
+      "description": "OPTIONAL in dev mode; REQUIRED for store-distributed packages. The contentHash covers every file in the package EXCEPT this signature block itself (the manifest is canonicalized with the signature field set to null before hashing). The publisherSignature is the Ed25519 signature over the contentHash. Full-trust executables additionally require Windows code signing (tier 3) and ship through Store/WinGet channels.",
       "properties": {
-        "contentHash": { "type": "string", "description": "SHA-256 of the package contents (integrity, tier 1 of the three-tier signing model)." },
-        "publisherKey": { "type": "string", "description": "Ed25519 signature over the content hash (publisher identity, tier 2). Full-trust executables additionally require Windows code signing (tier 3) and ship through Store/WinGet channels." }
+        "contentHash": {
+          "type": "string",
+          "description": "SHA-256 of the package contents excluding this signature block. The manifest is canonicalized (signature = null, sorted keys, no whitespace) before being included in the hash input."
+        },
+        "publisherSignature": {
+          "type": "string",
+          "description": "Ed25519 signature over the contentHash, made with the publisher's private key. The corresponding public key fingerprint is the top-level publisher field."
+        }
       },
       "additionalProperties": false
     },

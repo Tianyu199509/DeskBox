@@ -250,7 +250,7 @@ public sealed class AotStage5B4B2B1ContractTests
             "tests/DeskBox.Tests/JsonSerializationBaselineContractTests.cs");
 
         Assert.Contains("Assert.Equal(29, actual.Count);", baseline, StringComparison.Ordinal);
-        Assert.Contains("Assert.Equal(66, actual.Values.Sum());", baseline, StringComparison.Ordinal);
+        Assert.Contains("Assert.Equal(67, actual.Values.Sum());", baseline, StringComparison.Ordinal);
         Assert.Contains("Assert.Equal(27, actualContextOwners.Length);", baseline, StringComparison.Ordinal);
     }
 
