@@ -141,14 +141,16 @@ public sealed class PluginSchemaContractTests
 
         // v0.2: a fingerprint alone cannot verify an Ed25519 signature; the
         // pre-account package carries the public key itself and the
-        // publisher field must equal sha256(publisherPublicKey).
+        // publisher field must equal the fingerprint of the RAW key bytes.
         Assert.Contains(
             "publisherPublicKey",
             required.EnumerateArray().Select(v => v.GetString()));
 
         string schemaText = File.ReadAllText(
             TestPaths.FromRepository("docs/architecture/plugin-schema-v0.json"));
-        Assert.Contains("sha256(publisherPublicKey)", schemaText, StringComparison.Ordinal);
+        Assert.Contains("sha256(raw key bytes)", schemaText, StringComparison.Ordinal);
+        Assert.Contains("raw 32-byte", schemaText, StringComparison.Ordinal);
+        Assert.Contains("lowercase hex", schemaText, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -167,6 +169,14 @@ public sealed class PluginSchemaContractTests
         Assert.Contains("RFC 8785", notes, StringComparison.Ordinal);
         Assert.Contains("package.integrity", notes, StringComparison.Ordinal);
         Assert.Contains("publisherPublicKey", notes, StringComparison.Ordinal);
+
+        // Round 5: the integrity manifest never lists itself (self-reference
+        // has no fixed point; its integrity is covered transitively), and
+        // hash/signature inputs are pinned to raw bytes so three independent
+        // implementations cannot each pick a different reading.
+        Assert.Contains("NEVER listed", schemaText, StringComparison.Ordinal);
+        Assert.Contains("永不列入", notes, StringComparison.Ordinal);
+        Assert.Contains("raw 32 字节", notes, StringComparison.Ordinal);
     }
 
     [Fact]

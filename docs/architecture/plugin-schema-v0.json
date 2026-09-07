@@ -69,12 +69,12 @@
     "publisher": {
       "type": "string",
       "minLength": 1,
-      "description": "Publisher identity: the hex-encoded SHA-256 fingerprint of publisherPublicKey (derivable, kept as the pinning/trust-display handle). In the account phase this additionally binds to a registered account."
+      "description": "Publisher identity: the lowercase-hex SHA-256 of the RAW 32-byte Ed25519 public key (base64-decode publisherPublicKey first, then hash the decoded bytes - not the base64 text). Derivable, kept as the pinning/trust-display handle. In the account phase this additionally binds to a registered account."
     },
     "publisherPublicKey": {
       "type": "string",
       "minLength": 1,
-      "description": "Ed25519 public key, base64 (raw 32-byte form). Verification material for signature.publisherSignature: a fingerprint alone cannot verify a signature, so the package carries the key itself (pre-account option A). Validation must check publisher == sha256(publisherPublicKey)."
+      "description": "Ed25519 public key, base64 of the raw 32-byte key. Verification material for signature.publisherSignature: a fingerprint alone cannot verify a signature, so the pre-account package carries the key itself (review option A). Validation must check publisher == sha256(raw key bytes) as lowercase hex."
     },
     "runtime": {
       "enum": ["none", "wasm", "process"],
@@ -142,15 +142,15 @@
     "signature": {
       "type": "object",
       "required": ["contentHash", "publisherSignature"],
-      "description": "OPTIONAL in dev mode; REQUIRED for store-distributed packages. When present it must be complete: contentHash + publisherSignature are both required. The contentHash is the SHA-256 of package.integrity (see contentHash). The publisherSignature is the Ed25519 signature over the contentHash, verified with the top-level publisherPublicKey. Full-trust executables additionally require Windows code signing (tier 3) and ship through Store/WinGet channels.",
+      "description": "OPTIONAL in dev mode; REQUIRED for store-distributed packages. When present it must be complete: contentHash + publisherSignature are both required. The contentHash is the SHA-256 of package.integrity (see contentHash). The publisherSignature is the Ed25519 signature over the RAW 32-byte contentHash digest (not the hex string), verified with the top-level publisherPublicKey. Full-trust executables additionally require Windows code signing (tier 3) and ship through Store/WinGet channels.",
       "properties": {
         "contentHash": {
           "type": "string",
-          "description": "SHA-256 of package.integrity: a file listing every package file as 'sha256  <path>' lines (forward slashes, ordinal sort by path). manifest.json participates as its JCS (RFC 8785) canonicalization with the signature field set to null, which keeps the hash domain free of self-reference without inventing an ad-hoc sorted-keys rule (number formatting, escapes, and nested key order are all pinned by JCS)."
+          "description": "SHA-256 of the package.integrity file bytes, stored as lowercase hex. package.integrity lists every package payload file plus manifest.json (participating as its JCS/RFC 8785 canonicalization with the signature field set to null, which keeps the hash domain free of self-reference without inventing an ad-hoc sorted-keys rule - number formatting, escapes, and nested key order are all pinned by JCS). package.integrity itself is NEVER listed in package.integrity: its own integrity is covered transitively, because contentHash hashes it and the publisher signature covers contentHash. Lines are 'sha256  <path>' (two spaces), forward slashes, ordinal sort by path."
         },
         "publisherSignature": {
           "type": "string",
-          "description": "Ed25519 signature over the contentHash bytes, made with the publisher's private key. Verified with the top-level publisherPublicKey; the publisher field must equal sha256(publisherPublicKey)."
+          "description": "Ed25519 signature over the raw 32-byte contentHash digest (not the hex string), made with the publisher's private key, base64-encoded. Verified with the top-level publisherPublicKey; the publisher field must equal the lowercase-hex SHA-256 of the raw public key bytes."
         }
       },
       "additionalProperties": false

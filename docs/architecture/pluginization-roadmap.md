@@ -421,6 +421,16 @@ P0：§6 重写为 Runtime 矩阵（删除 A→B→C 旧结论，与 §14 唯一
 
 **Why:** 第四轮评审抓到的双实例缓存/迁移事务性是数据层真风险，在复制 store 模式到 Weather/Todo 前修掉成本最低；端口语义趁零调用者修正免费。
 
+### 16.9 第五轮外部评审吸收（v1.8 补遗，2026-09-07，评审 9.2/10 判定可进 3b）
+
+评审确认 #245/#246/#247 方向全对、路线不变，补三件小事（本批落地）：
+
+1. **迁移管线 exact-step + gap 检测**：`FromVersion >= version` 改为逐步精确匹配——注册表缺一步（删/漏 migration）时旧行为会静默跳过缺失步骤直接跑后面的，现在 gap 即停（版本停在缺口处+日志显式报 GAP），与失败迁移同语义。生产注册表当前连续，属防未来回归的加固。
+2. **Schema v0.2 编码钉死**：①`package.integrity` 自身**永不列入**自身清单（自引用无解；其完整性由传递闭包覆盖=contentHash 哈希它+签名覆盖 contentHash）；②指纹=对 base64 **解码后的 raw 32 字节公钥**做 sha256、小写 hex（不是对 base64 文本哈希）；③publisherSignature 签 contentHash 的 **raw 32 字节摘要**（非 hex 字符串）——TS CLI/C# 安装器/Rust 运行时三套实现必须同一理解。
+3. **`MusicSettingsStore.Current` 过渡性声明**：Current 是修复双实例缓存回归的最小改动=static service locator，**不是 per-kind store 最终形态**；Weather/Todo/QuickCapture store 不复制 static Current，Feature 拥有 context 时改为 context 注入单例（store 类头已加 LIFECYCLE 注释）。
+
+**3b 验收标准（评审改述采纳）**：不是"FeatureWidgets.cs 少多少行"，而是**调用方（App/QuickCapture/Todo）不再知道 TodoWidgetContent/FileSurfaceContent/WidgetManager 内部字典/App.Current 服务**，只依赖能力端口；观察实现真实依赖集，需要十几个 internal getter 才能搬=不该搬，留在 WidgetManager 经接口暴露。**3b 实现注意：IFileWidgetImportTarget 的取消要真兑现**（File.Copy/Task.Run 改 FileStream.CopyToAsync(token)，不是开始前查一次 token）。
+
 ## 附录 A：关键证据文件索引
 
 | 主题 | 文件 |

@@ -35,6 +35,13 @@ internal sealed partial class MusicSettingsJsonContext : JsonSerializerContext
 /// state, or a second instance would pin its own stale cache forever. The
 /// legacy AppSettings mirror is persisted through the global SaveDebounced
 /// by the caller so both stores converge.
+///
+/// LIFECYCLE NOTE: <see cref="Current"/> is a transitional shared instance
+/// (the minimal fix for the two-instance stale-cache regression). It is a
+/// static service locator, NOT the final per-kind store model - do not copy
+/// this pattern to Weather/Todo/QuickCapture stores. When features gain
+/// their own context, the store is injected as a singleton through the
+/// feature/host context instead.
 /// </summary>
 public sealed class MusicSettingsStore
 {

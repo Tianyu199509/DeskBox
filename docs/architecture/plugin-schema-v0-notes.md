@@ -11,15 +11,28 @@
 | 新增根级必填 `publisherPublicKey`（Ed25519 公钥，raw 32 字节 base64），`publisher` 语义改为 `sha256(publisherPublicKey)` 的十六进制指纹 | 只有指纹**不能验签**（指纹是身份句柄不是验证材料）；无账号阶段（GitHub manifest 仓库运营）包必须自带公钥（评审方案 A）。校验器必须检查 `publisher == sha256(publisherPublicKey)` |
 | 哈希规则钉死为 **JCS (RFC 8785) + package.integrity 清单**，废弃"排序键+无空白"的口述规范化 | 自发明的规范化在数字格式/转义/嵌套键序/ZIP 顺序/路径分隔符上都会产生逻辑等价但字节不同的哈希；JCS 是有测试向量的正式标准。包内容枚举同样需要确定性：`package.integrity` 文件按 `sha256  <path>` 行、路径正斜杠、ordinal 排序，`contentHash = sha256(package.integrity)` |
 
-### 验签流程（v0.2 语义，validator/安装器实现于阶段 6）
+### 验签流程（v0.2 语义，validator/安装器实现于阶段 6；编码细则=第五轮评审钉死）
+
+**哈希域**：`package.integrity` 列出全部 payload 文件 + `manifest.json`（以 JCS 规范形参与，signature 置 null）；**`package.integrity` 自身永不列入清单**——它自己的完整性由传递闭包覆盖（contentHash 哈希它、publisher 签名覆盖 contentHash），列入则自引用无解。清单行格式 `sha256␣␣<path>`（两个空格，sha256 为小写 hex，路径正斜杠、ordinal 排序）。
 
 1. 读 manifest，canonicalize（signature 字段置 null，JCS/RFC 8785）→ 得到 manifest 规范形；
-2. 读 `package.integrity`，找到 manifest.json 对应行，比对 `sha256(manifest 规范形)` ——防"清单与 manifest 不一致"；
-3. `contentHash = sha256(package.integrity 全文)`，与 `signature.contentHash` 比对；
-4. 用 `publisherPublicKey` 验 Ed25519 `publisherSignature`（签的是 contentHash）；
-5. 检查 `publisher == sha256(publisherPublicKey)`（十六进制）；指纹同时是首次安装时的信任锚（用户批准的就是这个指纹，升级必须一致）。
+2. 读 `package.integrity`，找到 manifest.json 对应行，比对 `sha256(manifest 规范形)`——防"清单与 manifest 不一致"；
+3. `contentHash = sha256(package.integrity 文件字节)`，与 `signature.contentHash`（小写 hex 表示）比对；
+4. 用 `publisherPublicKey`（base64，先解码为 raw 32 字节公钥）验 Ed25519 `publisherSignature`——**签名输入是 contentHash 的 raw 32 字节摘要，不是 hex 字符串**；
+5. 检查 `publisher == lowercase-hex(sha256(raw 公钥 32 字节))`——**哈希对象是解码后的公钥字节，不是 base64 文本**；指纹同时是首次安装时的信任锚（用户批准的就是这个指纹，升级必须一致）。
 
 无签名的 dev 包跳过 3-4，但 1-2 的哈希一致性仍然检查（防手改文件后清单对不上）。
+
+> 编码细则（哈希对象、hex/base64、大小写、行格式）一旦 TS CLI、C# 安装器、Rust 运行时三套实现各自理解一套就全线失配，故在 schema 描述与本节双重钉死。
+
+## v0.2 补充钉死（第五轮外部评审）
+
+| 钉死项 | 内容 |
+|---|---|
+| integrity 自引用排除 | `package.integrity` 不进入自身清单（传递闭包覆盖），哈希域=payload+JCS(manifest) |
+| 指纹推导 | `sha256(raw 32 字节公钥)`，先 base64 解码再哈希，小写 hex——不是对 base64 文本哈希 |
+| 签名输入 | `publisherSignature` 签 contentHash 的 raw 32 字节摘要，非 hex 字符串 |
+| contentHash 表示 | 小写 hex 存储；清单行 `sha256␣␣<path>` 两空格分隔 |
 
 ## v0 → v0.1 变更（第三轮外部评审吸收，roadmap 16.7）
 

@@ -53,13 +53,14 @@ public sealed class SettingsMigrationPipeline
 
     /// <summary>
     /// Runs all necessary migrations to bring the settings from their current
-    /// schema version up to <see cref="CurrentSchemaVersion"/>.
-    /// A migration that throws stops the pipeline: the schema version stays
-    /// at the last successful step (never stamped past a failed step) so the
-    /// failed migration is retried on the next launch. Migrations that write
-    /// external stores (Migration_9_To_10 creating data/music/settings.json)
-    /// depend on this - stamping the version past a failed file write would
-    /// strand the user's data in the legacy fields forever.
+    /// schema version up to <see cref="CurrentSchemaVersion"/>. Migrations
+    /// advance one exact step at a time; a migration that throws OR a gap in
+    /// the registered steps (a step removed/never added) stops the pipeline:
+    /// the schema version stays at the last successful step (never stamped
+    /// past a failed or missing step) so the failed migration is retried on
+    /// the next launch and the registry gap is visible in the log instead of
+    /// silently skipping a step. Migrations that write external stores
+    /// (Migration_9_To_10 creating data/music/settings.json) depend on this.
     /// Returns true if any migration was applied.
     /// </summary>
     public bool RunMigrations(AppSettings settings)
@@ -74,25 +75,48 @@ public sealed class SettingsMigrationPipeline
 
         foreach (var migration in _migrations.OrderBy(m => m.FromVersion))
         {
-            if (migration.FromVersion >= version && migration.FromVersion < CurrentSchemaVersion)
+            if (version >= CurrentSchemaVersion)
             {
-                try
-                {
-                    migration.Migrate(settings);
-                }
-                catch (Exception ex)
-                {
-                    App.Log(
-                        $"[SettingsMigration] Migration from version {migration.FromVersion} FAILED " +
-                        $"and will retry on next launch: {ex.Message}");
-                    settings.SchemaVersion = version;
-                    return anyApplied;
-                }
-
-                version = migration.FromVersion + 1;
-                anyApplied = true;
-                App.Log($"[SettingsMigration] Applied migration from version {migration.FromVersion} to {version}");
+                break;
             }
+
+            if (migration.FromVersion < version)
+            {
+                // Applied on an earlier launch; skip.
+                continue;
+            }
+
+            if (migration.FromVersion > version)
+            {
+                // Registry gap: a step is missing (removed or never added).
+                // The old >= comparison would have run later steps here,
+                // silently skipping the missing one. Stop exactly like a
+                // failing migration - the version stays put and the
+                // misconfigured registry becomes visible in the log.
+                App.Log(
+                    $"[SettingsMigration] Migration registry GAP at version {version}: " +
+                    $"the next registered step starts at {migration.FromVersion}. " +
+                    "Stopping so no migration is silently skipped.");
+                settings.SchemaVersion = version;
+                return anyApplied;
+            }
+
+            try
+            {
+                migration.Migrate(settings);
+            }
+            catch (Exception ex)
+            {
+                App.Log(
+                    $"[SettingsMigration] Migration from version {migration.FromVersion} FAILED " +
+                    $"and will retry on next launch: {ex.Message}");
+                settings.SchemaVersion = version;
+                return anyApplied;
+            }
+
+            version = migration.FromVersion + 1;
+            anyApplied = true;
+            App.Log($"[SettingsMigration] Applied migration from version {migration.FromVersion} to {version}");
         }
 
         settings.SchemaVersion = CurrentSchemaVersion;
