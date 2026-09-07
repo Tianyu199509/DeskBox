@@ -16,7 +16,8 @@
 ## 接线顺序（v1.8 修订：先接线，后搬移）
 
 1. `WidgetManager` 就地实现/委托这三个接口，App 与功能调用方全部改成只
-   依赖接口——**功能行为必须零变化**。
+   依赖接口——**功能行为必须零变化**。**（3b 已完成：App 两处 Todo 路径、
+   QuickCapture 三处落盘、App 回调 switch 全部改走端口。）**
 2. 依赖集稳定后（adapter 只需少量稳定宿主能力）再决定是否物理搬移实现。
    若搬移需要给 `WidgetManager` 暴露一批 internal getter/dictionary，就先
    不搬——那只是把 God Class 变成 God Class + friend class。

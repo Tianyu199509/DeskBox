@@ -430,7 +430,7 @@ public sealed partial class QuickCaptureWidgetWindow
             Icon = new FontIcon { Glyph = "\uE8B7" }
         };
 
-        var targets = App.Current.WidgetManager?.GetQuickCaptureFileWidgetTargets() ?? [];
+        var targets = App.Current.FileWidgetImport?.GetImportTargets() ?? [];
         if (targets.Count == 0)
         {
             subItem.Items.Add(new MenuFlyoutItem
@@ -460,7 +460,7 @@ public sealed partial class QuickCaptureWidgetWindow
 
     private MenuFlyoutItem? CreateSaveToLastFileWidgetItem(QuickCaptureItemViewModel item)
     {
-        var target = App.Current.WidgetManager?.GetLastQuickCaptureFileWidgetTarget();
+        var target = App.Current.FileWidgetImport?.GetLastImportTarget();
         if (target is null)
         {
             return null;
@@ -477,15 +477,31 @@ public sealed partial class QuickCaptureWidgetWindow
 
     private async Task SaveQuickCaptureItemToFileWidgetAsync(QuickCaptureItemViewModel item, string targetWidgetId)
     {
-        if (App.Current.WidgetManager is null)
+        // Stage 3b, cut point 2: the producer translates its own item into
+        // a file or text import (naming, .url format are QuickCapture
+        // knowledge) and hands it to the File-widget import port.
+        if (App.Current.FileWidgetImport is not { } import)
         {
             return;
         }
 
-        string? savedPath = await App.Current.WidgetManager.SaveQuickCaptureItemToFileWidgetAsync(
+        QuickCaptureFileImportPlan? plan = QuickCaptureService.BuildFileImportPlan(
             item.ToModel(),
-            targetWidgetId,
-            _localizationService.T("QuickCapture.ImageExportFileNamePrefix"));
+            _localizationService.T("QuickCapture.ImageExportFileNamePrefix"),
+            _localizationService.T("QuickCapture.TextFileNamePrefix"),
+            _localizationService.T("QuickCapture.LinkFileNamePrefix"));
+        string? savedPath = plan switch
+        {
+            { SourceFilePath: not null } => await import.TryImportFileAsync(
+                plan.SourceFilePath,
+                targetWidgetId,
+                plan.FileName),
+            { Text: not null } => await import.TryImportTextAsync(
+                plan.Text,
+                plan.FileName,
+                targetWidgetId),
+            _ => null
+        };
         ShowStatusToast(string.IsNullOrWhiteSpace(savedPath)
             ? _localizationService.T("QuickCapture.SaveToFileWidgetFailed")
             : _localizationService.T("QuickCapture.SavedToFileWidget"));

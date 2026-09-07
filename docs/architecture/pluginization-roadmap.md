@@ -3,7 +3,7 @@
 - 方案日期：2026-09-07；v1.1-v1.5（评审收敛+复盘修订）；v1.6/v1.7（评审纪律入册）；v1.8（第四轮评审吸收，§16.7/16.8）
 - 代码基线：main `2709d7f0`（阶段 3a 能力端口合入）；第四轮评审修复批次=PR #245（store 一致性+迁移事务性）/#246（schema v0.2）/#247（端口语义修正）
 - 评审记录：§12（v1.0→v1.1）、§13（v1.1→v1.2）、§16（v1.5-v1.8）
-- 当前状态：**阶段 3b（依赖倒置接线）准备中**——已落地的是 host 内部能力端口（capability ports），**不是 Capability Broker**（registry/权限判定/调度/审计/运行时 adapter 均未开始）；进度自述基准见 §16.8 末
+- 当前状态：**阶段 3b（依赖倒置接线）已落地**——三切点调用方（App 两处 Todo 路径/QuickCapture 三处落盘/App 回调 switch）全部改走 `DeskBox.Contracts` 端口，WidgetManager 就地实现三接口，功能行为零变化；物理搬移（3c）按依赖集观察后置。已落地的是 host 内部能力端口（capability ports），**不是 Capability Broker**（registry/权限判定/调度/审计/运行时 adapter 均未开始）
 
 ---
 
@@ -430,6 +430,8 @@ P0：§6 重写为 Runtime 矩阵（删除 A→B→C 旧结论，与 §14 唯一
 3. **`MusicSettingsStore.Current` 过渡性声明**：Current 是修复双实例缓存回归的最小改动=static service locator，**不是 per-kind store 最终形态**；Weather/Todo/QuickCapture store 不复制 static Current，Feature 拥有 context 时改为 context 注入单例（store 类头已加 LIFECYCLE 注释）。
 
 **3b 验收标准（评审改述采纳）**：不是"FeatureWidgets.cs 少多少行"，而是**调用方（App/QuickCapture/Todo）不再知道 TodoWidgetContent/FileSurfaceContent/WidgetManager 内部字典/App.Current 服务**，只依赖能力端口；观察实现真实依赖集，需要十几个 internal getter 才能搬=不该搬，留在 WidgetManager 经接口暴露。**3b 实现注意：IFileWidgetImportTarget 的取消要真兑现**（File.Copy/Task.Run 改 FileStream.CopyToAsync(token)，不是开始前查一次 token）。
+
+**2026-09-07 3b 接线完工（同日）**：WidgetManager 声明实现三端口；切点 1=`PresentReminderTargetAsync` 包装现有流程+富诊断日志（HWND/Visible/XamlRoot）移入实现侧、App 两处调用改走 `TodoReminderPresenter` 端口属性；切点 2=QuickCapture 的 item→file 翻译（命名/.url 格式）归 `QuickCaptureService.BuildFileImportPlan`（生产者自有知识），File-widget 内部（目标校验/文件夹解析/写入+取消/刷新+Reveal）归 `TryImportFileAsync/TryImportTextAsync`（流式 CopyToAsync 真兑现取消），`QuickCaptureFileWidgetTarget`→`FileWidgetImportTarget` 移入 Contracts，Menus 三处改走 `App.Current.FileWidgetImport`；切点 3=`SetFeatureWidgetEnabledState` 的 App.Current switch 替换为 `FeatureStateChanged` 事件（按订阅者异常隔离 raise，UI 线程），App 侧 `OnFeatureStateChanged` 自持三个服务刷新。行为测试迁移至端口路径+新增接线契约测试与 plan 边界测试。
 
 ## 附录 A：关键证据文件索引
 

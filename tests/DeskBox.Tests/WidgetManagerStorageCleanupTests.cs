@@ -488,34 +488,46 @@ public sealed class WidgetManagerStorageCleanupTests : IDisposable
     }
 
     [Fact]
-    public async Task SaveQuickCaptureItemToFileWidgetAsync_WritesRealFiles()
+    public async Task FileImport_GoesThroughThePortAndWritesRealFiles()
     {
         string managedFolder = Directory.CreateDirectory(Path.Combine(_storageRoot, "Target")).FullName;
         var widget = CreateManagedWidget("Target", managedFolder);
         _settingsService.Settings.Widgets.Add(widget);
 
-        string? textPath = await _widgetManager.SaveQuickCaptureItemToFileWidgetAsync(
-            new QuickCaptureItem
-            {
-                Type = QuickCaptureItemType.Text,
-                Body = "hello world"
-            },
-            widget.Id,
-            "Capture");
+        // Stage 3b wiring: the producer-side translation (QuickCaptureService)
+        // plans the import; the IFileWidgetImportTarget implementation owns
+        // folders and writes. Same flow production uses.
+        var textPlan = QuickCaptureService.BuildFileImportPlan(
+            new QuickCaptureItem { Type = QuickCaptureItemType.Text, Body = "hello world" },
+            imageFileNamePrefix: "Capture",
+            textFileNamePrefix: "Capture",
+            linkFileNamePrefix: "Capture");
+        Assert.NotNull(textPlan);
+        Assert.Null(textPlan.SourceFilePath);
+        string? textPath = await _widgetManager.TryImportTextAsync(
+            textPlan.Text!,
+            textPlan.FileName,
+            widget.Id);
 
-        string? linkPath = await _widgetManager.SaveQuickCaptureItemToFileWidgetAsync(
+        var linkPlan = QuickCaptureService.BuildFileImportPlan(
             new QuickCaptureItem
             {
                 Type = QuickCaptureItemType.Link,
                 Body = "https://example.com/docs",
                 Url = "https://example.com/docs"
             },
-            widget.Id,
-            "Capture");
+            imageFileNamePrefix: "Capture",
+            textFileNamePrefix: "Capture",
+            linkFileNamePrefix: "Capture");
+        Assert.NotNull(linkPlan);
+        string? linkPath = await _widgetManager.TryImportTextAsync(
+            linkPlan.Text!,
+            linkPlan.FileName,
+            widget.Id);
 
         string sourceImagePath = Path.Combine(_tempRoot, "source.png");
         await File.WriteAllBytesAsync(sourceImagePath, [1, 2, 3, 4]);
-        string? imagePath = await _widgetManager.SaveQuickCaptureItemToFileWidgetAsync(
+        var imagePlan = QuickCaptureService.BuildFileImportPlan(
             new QuickCaptureItem
             {
                 Type = QuickCaptureItemType.Image,
@@ -523,8 +535,15 @@ public sealed class WidgetManagerStorageCleanupTests : IDisposable
                 ImagePath = sourceImagePath,
                 UpdatedAt = new DateTimeOffset(2026, 6, 21, 14, 32, 0, TimeSpan.Zero)
             },
+            imageFileNamePrefix: "Capture",
+            textFileNamePrefix: "Capture",
+            linkFileNamePrefix: "Capture");
+        Assert.NotNull(imagePlan);
+        Assert.Null(imagePlan.Text);
+        string? imagePath = await _widgetManager.TryImportFileAsync(
+            imagePlan.SourceFilePath!,
             widget.Id,
-            "Capture");
+            imagePlan.FileName);
 
         Assert.NotNull(textPath);
         Assert.Equal("hello world", await File.ReadAllTextAsync(textPath));
@@ -539,14 +558,47 @@ public sealed class WidgetManagerStorageCleanupTests : IDisposable
         Assert.StartsWith("Capture ", Path.GetFileName(imagePath), StringComparison.Ordinal);
         Assert.EndsWith(".png", imagePath, StringComparison.OrdinalIgnoreCase);
 
-        var target = Assert.Single(_widgetManager.GetQuickCaptureFileWidgetTargets());
+        var target = Assert.Single(_widgetManager.GetImportTargets());
         Assert.Equal(widget.Id, target.WidgetId);
         Assert.Equal(managedFolder, target.FolderPath);
         Assert.Equal(widget.Id, _settingsService.Settings.LastQuickCaptureFileWidgetId);
 
-        var lastTarget = _widgetManager.GetLastQuickCaptureFileWidgetTarget();
+        var lastTarget = _widgetManager.GetLastImportTarget();
         Assert.NotNull(lastTarget);
         Assert.Equal(widget.Id, lastTarget.WidgetId);
+    }
+
+    [Fact]
+    public void BuildFileImportPlan_ReturnsNullForNothingImportable()
+    {
+        // An image whose file vanished plans nothing (import returns null,
+        // matching the pre-wiring behavior).
+        Assert.Null(QuickCaptureService.BuildFileImportPlan(
+            new QuickCaptureItem
+            {
+                Type = QuickCaptureItemType.Image,
+                ImagePath = Path.Combine(_tempRoot, "missing.png")
+            },
+            imageFileNamePrefix: "Capture",
+            textFileNamePrefix: "Capture",
+            linkFileNamePrefix: "Capture"));
+
+        // Empty body text plans nothing.
+        Assert.Null(QuickCaptureService.BuildFileImportPlan(
+            new QuickCaptureItem { Type = QuickCaptureItemType.Text, Body = "   " },
+            imageFileNamePrefix: "Capture",
+            textFileNamePrefix: "Capture",
+            linkFileNamePrefix: "Capture"));
+
+        // A link whose URL is not absolute falls back to the text plan.
+        var fallbackPlan = QuickCaptureService.BuildFileImportPlan(
+            new QuickCaptureItem { Type = QuickCaptureItemType.Link, Body = "not a url" },
+            imageFileNamePrefix: "Capture",
+            textFileNamePrefix: "Capture",
+            linkFileNamePrefix: "Capture");
+        Assert.NotNull(fallbackPlan);
+        Assert.Equal("not a url", fallbackPlan.Text);
+        Assert.EndsWith(".txt", fallbackPlan.FileName, StringComparison.OrdinalIgnoreCase);
     }
 
     private static WidgetConfig CreateManagedWidget(string name, string folderPath)
