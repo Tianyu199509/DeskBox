@@ -20,7 +20,7 @@ public interface ISettingsMigration
 public sealed class SettingsMigrationPipeline
 {
     /// <summary>The current schema version that the application expects.</summary>
-    public const int CurrentSchemaVersion = 9;
+    public const int CurrentSchemaVersion = 10;
 
     private readonly List<ISettingsMigration> _migrations = [];
 
@@ -36,6 +36,7 @@ public sealed class SettingsMigrationPipeline
         _migrations.Add(new Migration_6_To_7());
         _migrations.Add(new Migration_7_To_8());
         _migrations.Add(new Migration_8_To_9());
+        _migrations.Add(new Migration_9_To_10());
     }
 
     /// <summary>
@@ -302,3 +303,38 @@ internal sealed class Migration_7_To_8 : ISettingsMigration
                 settings.TransientWindowReleaseDelaySeconds);
     }
 }
+
+/// <summary>
+/// Copies the three Music feature fields out of the global AppSettings into
+/// the per-kind MusicSettingsStore (pluginization roadmap stage 2, the
+/// per-kind store pilot). Copy-style: the AppSettings fields are left in
+/// place as an inert compatibility source until the N+2 cleanup release
+/// removes them, so a downgrade within the window keeps working. The store
+/// is created only when it does not exist yet - re-running the migration
+/// never overwrites user changes made after the first cutover.
+/// </summary>
+internal sealed class Migration_9_To_10 : ISettingsMigration
+{
+    public int FromVersion => 9;
+
+    public void Migrate(AppSettings settings) =>
+        Migrate(settings, DeskBoxDataPathService.Current.DataDirectory);
+
+    internal static void Migrate(AppSettings settings, string dataDirectory)
+    {
+        string musicDataDirectory = Path.Combine(dataDirectory, "music");
+        string storePath = Path.Combine(musicDataDirectory, "settings.json");
+        if (File.Exists(storePath))
+        {
+            return;
+        }
+
+        var store = new MusicSettingsStore(musicDataDirectory);
+        var migrated = store.Load();
+        migrated.UseArtworkBackdrop = settings.MusicUseArtworkBackdrop;
+        migrated.EnableCoverHoverMotion = settings.MusicEnableCoverHoverMotion;
+        migrated.DisplayMode = SettingsService.NormalizeMusicDisplayMode(settings.MusicDisplayMode);
+        store.SaveAsync(migrated).GetAwaiter().GetResult();
+    }
+}
+

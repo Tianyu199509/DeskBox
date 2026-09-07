@@ -192,9 +192,10 @@ public partial class SettingsViewModel
             SelectedTodoReminderOffsetMinutes = SettingsService.NormalizeTodoReminderOffsetMinutes(
                 settings.TodoDefaultReminderOffsetMinutes);
 
-            MusicUseArtworkBackdrop = settings.MusicUseArtworkBackdrop;
-            MusicEnableCoverHoverMotion = settings.MusicEnableCoverHoverMotion;
-            SelectedMusicDisplayMode = SettingsService.NormalizeMusicDisplayMode(settings.MusicDisplayMode);
+            var musicSettingsSnapshot = _musicSettingsStore.Load();
+            MusicUseArtworkBackdrop = musicSettingsSnapshot.UseArtworkBackdrop;
+            MusicEnableCoverHoverMotion = musicSettingsSnapshot.EnableCoverHoverMotion;
+            SelectedMusicDisplayMode = SettingsService.NormalizeMusicDisplayMode(musicSettingsSnapshot.DisplayMode);
 
             WeatherAutoLocation = settings.WeatherAutoLocation;
             WeatherCityName = settings.WeatherCityName;

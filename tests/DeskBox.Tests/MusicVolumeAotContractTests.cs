@@ -144,7 +144,7 @@ public sealed class MusicVolumeAotContractTests
         string script = File.ReadAllText(
             TestPaths.FromRepository("scripts/publish-aot-audit.ps1"));
 
-        Assert.Contains("auditProfileVersion = 60", script, StringComparison.Ordinal);
+        Assert.Contains("auditProfileVersion = 61", script, StringComparison.Ordinal);
         Assert.Contains("schemaVersion = 55", script, StringComparison.Ordinal);
         Assert.Contains("musicVolumeAlwaysThrowMessages", script, StringComparison.Ordinal);
         Assert.Contains("musicVolumeBackendPolicy", script, StringComparison.Ordinal);

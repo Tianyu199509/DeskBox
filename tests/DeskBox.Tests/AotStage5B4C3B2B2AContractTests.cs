@@ -79,7 +79,7 @@ public sealed class AotStage5B4C3B2B2AContractTests
 
         foreach (string token in new[]
                  {
-                     "$requiredAuditProfileVersion = 60",
+                     "$requiredAuditProfileVersion = 61",
                      "$requiredSummarySchemaVersion = 55",
                      "[Guid]::NewGuid().ToString(\"N\")",
                      "-AllowEarlyExit",
@@ -118,10 +118,10 @@ public sealed class AotStage5B4C3B2B2AContractTests
             "AotTodoNotificationSurfaceEvidence? TodoNotificationSurface",
             managed,
             StringComparison.Ordinal);
-        Assert.Contains("Assert.Equal(28, actual.Count)", baseline, StringComparison.Ordinal);
-        Assert.Contains("Assert.Equal(64, actual.Values.Sum())", baseline, StringComparison.Ordinal);
+        Assert.Contains("Assert.Equal(29, actual.Count)", baseline, StringComparison.Ordinal);
+        Assert.Contains("Assert.Equal(66, actual.Values.Sum())", baseline, StringComparison.Ordinal);
         Assert.Contains(
-            "Assert.Equal(26, actualContextOwners.Length)",
+            "Assert.Equal(27, actualContextOwners.Length)",
             baseline,
             StringComparison.Ordinal);
     }
@@ -135,7 +135,7 @@ public sealed class AotStage5B4C3B2B2AContractTests
             "docs/architecture/stage-reports/aot-stage-5b-4c3b2b2a-report.md");
         string roadmap = Read("docs/architecture/rust-native-aot-roadmap.md");
 
-        Assert.Contains("$auditProfileVersion = 60", audit, StringComparison.Ordinal);
+        Assert.Contains("$auditProfileVersion = 61", audit, StringComparison.Ordinal);
         Assert.Contains("schemaVersion = 55", audit, StringComparison.Ordinal);
         Assert.Contains("stage5B4C3B2B2AMissingScenarioPatterns", audit, StringComparison.Ordinal);
         Assert.Contains("stage5B4C3B2B2AMissingProductPatterns", audit, StringComparison.Ordinal);

@@ -20,7 +20,7 @@ $auditStopwatch = [System.Diagnostics.Stopwatch]::StartNew()
 # scripts/start-aot-preview.ps1 and the lowercase requiredAuditProfileVersion
 # chain in the run-aot-*-smoke.ps1 runners, and update every contract test
 # pinning "= <previous version>" (grep: auditProfileVersion).
-$auditProfileVersion = 60
+$auditProfileVersion = 61
 
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $project = Join-Path $repoRoot "src\DeskBox\DeskBox.csproj"
@@ -2042,7 +2042,7 @@ $stage4E5SourceWarningMessages = @(
         ForEach-Object { $_.Trim() } |
         Sort-Object -Unique
 )
-$stage4E5ExpectedWmc1510Count = 863
+$stage4E5ExpectedWmc1510Count = 867
 $stage4E5ActualWmc1510Count = @(
     $warningMatches | Where-Object { $_ -ieq "WMC1510" }
 ).Count
@@ -2074,7 +2074,7 @@ $stage5AMissingDataPathPatterns = @(
     }
 )
 $stage5ARequiredLauncherPatterns = @(
-    '$RequiredAuditProfileVersion = 60',
+    '$RequiredAuditProfileVersion = 61',
     '$RequiredSummarySchemaVersion = 55',
     'Test-PathEqualOrInside',
     'Get-DirectoryStateFingerprint',
@@ -2122,7 +2122,7 @@ $stage5ASourceWarningMessages = @(
         ForEach-Object { $_.Trim() } |
         Sort-Object -Unique
 )
-$stage5AExpectedWmc1510Count = 863
+$stage5AExpectedWmc1510Count = 867
 $stage5AActualWmc1510Count = @(
     $warningMatches | Where-Object { $_ -ieq "WMC1510" }
 ).Count
@@ -2241,7 +2241,7 @@ $stage5B1SourceWarningMessages = @(
         ForEach-Object { $_.Trim() } |
         Sort-Object -Unique
 )
-$stage5B1ExpectedWmc1510Count = 863
+$stage5B1ExpectedWmc1510Count = 867
 $stage5B1ActualWmc1510Count = @(
     $warningMatches | Where-Object { $_ -ieq "WMC1510" }
 ).Count
@@ -2401,7 +2401,7 @@ $stage5B2ASourceWarningMessages = @(
         ForEach-Object { $_.Trim() } |
         Sort-Object -Unique
 )
-$stage5B2AExpectedWmc1510Count = 863
+$stage5B2AExpectedWmc1510Count = 867
 $stage5B2AActualWmc1510Count = @(
     $warningMatches | Where-Object { $_ -ieq "WMC1510" }
 ).Count
@@ -2564,7 +2564,7 @@ $stage5B2BSourceWarningMessages = @(
         ForEach-Object { $_.Trim() } |
         Sort-Object -Unique
 )
-$stage5B2BExpectedWmc1510Count = 863
+$stage5B2BExpectedWmc1510Count = 867
 $stage5B2BActualWmc1510Count = @(
     $warningMatches | Where-Object { $_ -ieq "WMC1510" }
 ).Count
@@ -2722,7 +2722,7 @@ $stage5B3ASourceWarningMessages = @(
         ForEach-Object { $_.Trim() } |
         Sort-Object -Unique
 )
-$stage5B3AExpectedWmc1510Count = 863
+$stage5B3AExpectedWmc1510Count = 867
 $stage5B3AActualWmc1510Count = @(
     $warningMatches | Where-Object { $_ -ieq "WMC1510" }
 ).Count
@@ -2907,7 +2907,7 @@ $stage5B3BSourceWarningMessages = @(
         ForEach-Object { $_.Trim() } |
         Sort-Object -Unique
 )
-$stage5B3BExpectedWmc1510Count = 863
+$stage5B3BExpectedWmc1510Count = 867
 $stage5B3BActualWmc1510Count = @(
     $warningMatches | Where-Object { $_ -ieq "WMC1510" }
 ).Count
@@ -3156,7 +3156,7 @@ $stage5B3CSourceWarningMessages = @(
         ForEach-Object { $_.Trim() } |
         Sort-Object -Unique
 )
-$stage5B3CExpectedWmc1510Count = 863
+$stage5B3CExpectedWmc1510Count = 867
 $stage5B3CActualWmc1510Count = @(
     $warningMatches | Where-Object { $_ -ieq "WMC1510" }
 ).Count
@@ -3426,7 +3426,7 @@ $stage5B4ASourceWarningMessages = @(
         ForEach-Object { $_.Trim() } |
         Sort-Object -Unique
 )
-$stage5B4AExpectedWmc1510Count = 863
+$stage5B4AExpectedWmc1510Count = 867
 $stage5B4AActualWmc1510Count = @(
     $warningMatches | Where-Object { $_ -ieq "WMC1510" }
 ).Count
@@ -3851,7 +3851,7 @@ $stage5B4B1SourceWarningMessages = @(
         ForEach-Object { $_.Trim() } |
         Sort-Object -Unique
 )
-$stage5B4B1ExpectedWmc1510Count = 863
+$stage5B4B1ExpectedWmc1510Count = 867
 $stage5B4B1ActualWmc1510Count = @(
     $warningMatches | Where-Object { $_ -ieq "WMC1510" }
 ).Count
@@ -4030,7 +4030,7 @@ $stage5B4B2ASourceWarningMessages = @(
         ForEach-Object { $_.Trim() } |
         Sort-Object -Unique
 )
-$stage5B4B2AExpectedWmc1510Count = 863
+$stage5B4B2AExpectedWmc1510Count = 867
 $stage5B4B2AActualWmc1510Count = @(
     $warningMatches | Where-Object { $_ -ieq "WMC1510" }
 ).Count
@@ -4220,7 +4220,7 @@ $stage5B4B2B1SourceWarningMessages = @(
         ForEach-Object { $_.Trim() } |
         Sort-Object -Unique
 )
-$stage5B4B2B1ExpectedWmc1510Count = 863
+$stage5B4B2B1ExpectedWmc1510Count = 867
 $stage5B4B2B1ActualWmc1510Count = @(
     $warningMatches | Where-Object { $_ -ieq "WMC1510" }
 ).Count
@@ -4444,7 +4444,7 @@ $stage5B4B2B2ASourceWarningMessages = @(
         ForEach-Object { $_.Trim() } |
         Sort-Object -Unique
 )
-$stage5B4B2B2AExpectedWmc1510Count = 863
+$stage5B4B2B2AExpectedWmc1510Count = 867
 $stage5B4B2B2AActualWmc1510Count = @(
     $warningMatches | Where-Object { $_ -ieq "WMC1510" }
 ).Count
@@ -4668,7 +4668,7 @@ $stage5B4B2B2B1SourceWarningMessages = @(
         ForEach-Object { $_.Trim() } |
         Sort-Object -Unique
 )
-$stage5B4B2B2B1ExpectedWmc1510Count = 863
+$stage5B4B2B2B1ExpectedWmc1510Count = 867
 $stage5B4B2B2B1ActualWmc1510Count = @(
     $warningMatches | Where-Object { $_ -ieq "WMC1510" }
 ).Count
@@ -4926,7 +4926,7 @@ $stage5B4B2B2B2SourceWarningMessages = @(
         ForEach-Object { $_.Trim() } |
         Sort-Object -Unique
 )
-$stage5B4B2B2B2ExpectedWmc1510Count = 863
+$stage5B4B2B2B2ExpectedWmc1510Count = 867
 $stage5B4B2B2B2ActualWmc1510Count = @(
     $warningMatches | Where-Object { $_ -ieq "WMC1510" }
 ).Count
@@ -5171,7 +5171,7 @@ $stage5B4B2C1SourceWarningMessages = @(
         ForEach-Object { $_.Trim() } |
         Sort-Object -Unique
 )
-$stage5B4B2C1ExpectedWmc1510Count = 863
+$stage5B4B2C1ExpectedWmc1510Count = 867
 $stage5B4B2C1ActualWmc1510Count = @(
     $warningMatches | Where-Object { $_ -ieq "WMC1510" }
 ).Count
@@ -5361,7 +5361,7 @@ $stage5B4B2C2ASourceWarningMessages = @(
         ForEach-Object { $_.Trim() } |
         Sort-Object -Unique
 )
-$stage5B4B2C2AExpectedWmc1510Count = 863
+$stage5B4B2C2AExpectedWmc1510Count = 867
 $stage5B4B2C2AActualWmc1510Count = @(
     $warningMatches | Where-Object { $_ -ieq "WMC1510" }
 ).Count
@@ -5613,7 +5613,7 @@ $stage5B4B2C2BSourceWarningMessages = @(
         ForEach-Object { $_.Trim() } |
         Sort-Object -Unique
 )
-$stage5B4B2C2BExpectedWmc1510Count = 863
+$stage5B4B2C2BExpectedWmc1510Count = 867
 $stage5B4B2C2BActualWmc1510Count = @(
     $warningMatches | Where-Object { $_ -ieq "WMC1510" }
 ).Count
@@ -5868,7 +5868,7 @@ $stage5B4C1ASourceWarningMessages = @(
         ForEach-Object { $_.Trim() } |
         Sort-Object -Unique
 )
-$stage5B4C1AExpectedWmc1510Count = 863
+$stage5B4C1AExpectedWmc1510Count = 867
 $stage5B4C1AActualWmc1510Count = @(
     $warningMatches | Where-Object { $_ -ieq "WMC1510" }
 ).Count
@@ -6149,7 +6149,7 @@ $stage5B4C1B1SourceWarningMessages = @(
         ForEach-Object { $_.Trim() } |
         Sort-Object -Unique
 )
-$stage5B4C1B1ExpectedWmc1510Count = 863
+$stage5B4C1B1ExpectedWmc1510Count = 867
 $stage5B4C1B1ActualWmc1510Count = @(
     $warningMatches | Where-Object { $_ -ieq "WMC1510" }
 ).Count
@@ -6399,7 +6399,7 @@ $stage5B4C1B2ASourceWarningMessages = @(
         ForEach-Object { $_.Trim() } |
         Sort-Object -Unique
 )
-$stage5B4C1B2AExpectedWmc1510Count = 863
+$stage5B4C1B2AExpectedWmc1510Count = 867
 $stage5B4C1B2AActualWmc1510Count = @(
     $warningMatches | Where-Object { $_ -ieq "WMC1510" }
 ).Count
@@ -6639,7 +6639,7 @@ $stage5B4C1B2BSourceWarningMessages = @(
         ForEach-Object { $_.Trim() } |
         Sort-Object -Unique
 )
-$stage5B4C1B2BExpectedWmc1510Count = 863
+$stage5B4C1B2BExpectedWmc1510Count = 867
 $stage5B4C1B2BActualWmc1510Count = @(
     $warningMatches | Where-Object { $_ -ieq "WMC1510" }
 ).Count
@@ -6873,7 +6873,7 @@ $stage5B4C1C1SourceWarningMessages = @(
         ForEach-Object { $_.Trim() } |
         Sort-Object -Unique
 )
-$stage5B4C1C1ExpectedWmc1510Count = 863
+$stage5B4C1C1ExpectedWmc1510Count = 867
 $stage5B4C1C1ActualWmc1510Count = @(
     $warningMatches | Where-Object { $_ -ieq "WMC1510" }
 ).Count
@@ -7141,7 +7141,7 @@ $stage5B4C1C2ASourceWarningMessages = @(
         ForEach-Object { $_.Trim() } |
         Sort-Object -Unique
 )
-$stage5B4C1C2AExpectedWmc1510Count = 863
+$stage5B4C1C2AExpectedWmc1510Count = 867
 $stage5B4C1C2AActualWmc1510Count = @(
     $warningMatches | Where-Object { $_ -ieq "WMC1510" }
 ).Count
@@ -7312,7 +7312,7 @@ $stage5B4C2ASourceWarningMessages = @(
         ForEach-Object { $_.Trim() } |
         Sort-Object -Unique
 )
-$stage5B4C2AExpectedWmc1510Count = 863
+$stage5B4C2AExpectedWmc1510Count = 867
 $stage5B4C2AActualWmc1510Count = @(
     $warningMatches | Where-Object { $_ -ieq "WMC1510" }
 ).Count
@@ -7484,7 +7484,7 @@ $stage5B4C3ASourceWarningMessages = @(
         ForEach-Object { $_.Trim() } |
         Sort-Object -Unique
 )
-$stage5B4C3AExpectedWmc1510Count = 863
+$stage5B4C3AExpectedWmc1510Count = 867
 $stage5B4C3AActualWmc1510Count = @(
     $warningMatches | Where-Object { $_ -ieq "WMC1510" }
 ).Count
@@ -7664,7 +7664,7 @@ $stage5B4C3B1SourceWarningMessages = @(
         ForEach-Object { $_.Trim() } |
         Sort-Object -Unique
 )
-$stage5B4C3B1ExpectedWmc1510Count = 863
+$stage5B4C3B1ExpectedWmc1510Count = 867
 $stage5B4C3B1ActualWmc1510Count = @(
     $warningMatches | Where-Object { $_ -ieq "WMC1510" }
 ).Count
@@ -7848,7 +7848,7 @@ $stage5B4C3B2ASourceWarningMessages = @(
         ForEach-Object { $_.Trim() } |
         Sort-Object -Unique
 )
-$stage5B4C3B2AExpectedWmc1510Count = 863
+$stage5B4C3B2AExpectedWmc1510Count = 867
 $stage5B4C3B2AActualWmc1510Count = @(
     $warningMatches | Where-Object { $_ -ieq "WMC1510" }
 ).Count
@@ -7966,7 +7966,7 @@ $stage5B4C3B2B1RunnerSource =
 $stage5B4C3B2B1RequiredSmokeScriptPatterns = @(
     'TodoNotificationEnvelopeForwarding',
     'run-aot-todo-notification-forwarding-smoke.ps1',
-    '$requiredAuditProfileVersion = 60',
+    '$requiredAuditProfileVersion = 61',
     '$requiredSummarySchemaVersion = 55',
     '-NoStop',
     '-ExpectExistingInstance',
@@ -8040,7 +8040,7 @@ $stage5B4C3B2B1SourceWarningMessages = @(
         ForEach-Object { $_.Trim() } |
         Sort-Object -Unique
 )
-$stage5B4C3B2B1ExpectedWmc1510Count = 863
+$stage5B4C3B2B1ExpectedWmc1510Count = 867
 $stage5B4C3B2B1ActualWmc1510Count = @(
     $warningMatches | Where-Object { $_ -ieq "WMC1510" }
 ).Count
@@ -8136,7 +8136,7 @@ $stage5B4C3B2B2ARunnerSource =
 $stage5B4C3B2B2ARequiredSmokeScriptPatterns = @(
     'TodoNotificationSurfaceRouting',
     'run-aot-todo-notification-surface-smoke.ps1',
-    '$requiredAuditProfileVersion = 60',
+    '$requiredAuditProfileVersion = 61',
     '$requiredSummarySchemaVersion = 55',
     '-AllowEarlyExit',
     '-StartupWaitSeconds 1',
@@ -8201,7 +8201,7 @@ $stage5B4C3B2B2ASourceWarningMessages = @(
         ForEach-Object { $_.Trim() } |
         Sort-Object -Unique
 )
-$stage5B4C3B2B2AExpectedWmc1510Count = 863
+$stage5B4C3B2B2AExpectedWmc1510Count = 867
 $stage5B4C3B2B2AActualWmc1510Count = @(
     $warningMatches | Where-Object { $_ -ieq "WMC1510" }
 ).Count
@@ -8306,7 +8306,7 @@ $stage5B4C3B2B2BRunnerSource =
     $stage5B4C3B2B2BSources[$stage5B4C3B2B2BSourceFiles[10]]
 $stage5B4C3B2B2BRequiredSmokeScriptPatterns = @(
     'RealWindowsNotificationUserClick',
-    '$requiredAuditProfileVersion = 60',
+    '$requiredAuditProfileVersion = 61',
     '$requiredSummarySchemaVersion = 55',
     '[switch]$IncludeColdStart',
     '-AllowEarlyExit',
@@ -8382,7 +8382,7 @@ $stage5B4C3B2B2BSourceWarningMessages = @(
         ForEach-Object { $_.Trim() } |
         Sort-Object -Unique
 )
-$stage5B4C3B2B2BExpectedWmc1510Count = 863
+$stage5B4C3B2B2BExpectedWmc1510Count = 867
 $stage5B4C3B2B2BActualWmc1510Count = @(
     $warningMatches | Where-Object { $_ -ieq "WMC1510" }
 ).Count

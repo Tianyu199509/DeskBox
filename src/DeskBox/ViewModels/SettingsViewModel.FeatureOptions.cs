@@ -358,8 +358,11 @@ public partial class SettingsViewModel
                 return;
             }
 
-            _settingsService.Settings.MusicDisplayMode = normalizedValue;
-            _settingsService.SaveDebounced();
+            UpdateMusicSettings(store =>
+            {
+                store.DisplayMode = normalizedValue;
+                _settingsService.Settings.MusicDisplayMode = normalizedValue;
+            });
         }
     }
 
@@ -791,6 +794,12 @@ set => WidgetOpacity = Math.Clamp(1.0 - value / 100d, SettingsService.MinWidgetO
                     _settingsService.Settings.MusicUseArtworkBackdrop = true;
                     _settingsService.Settings.MusicEnableCoverHoverMotion = true;
                     _settingsService.Settings.MusicDisplayMode = SettingsService.MusicDisplayModeAuto;
+                    UpdateMusicSettings(store =>
+                    {
+                        store.UseArtworkBackdrop = true;
+                        store.EnableCoverHoverMotion = true;
+                        store.DisplayMode = SettingsService.MusicDisplayModeAuto;
+                    });
                     break;
                 case WidgetKind.Weather:
                     WeatherAutoLocation = true;

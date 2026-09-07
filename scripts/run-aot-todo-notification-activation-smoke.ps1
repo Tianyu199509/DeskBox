@@ -552,7 +552,7 @@ try {
         generatedAtUtc = [DateTime]::UtcNow.ToString("O")
         runId = $runId
         scenario = $scenario
-        auditProfileVersion = 60
+        auditProfileVersion = 61
         auditSummarySchemaVersion = 55
         dataRoot = $DataRoot
         previewRootCleaned = $previewRootCleaned
