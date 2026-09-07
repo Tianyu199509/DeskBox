@@ -1,10 +1,55 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://deskbox.fun/schemas/plugin-manifest-v0.json",
-  "title": "DeskBox Plugin Manifest (schema v0.1 draft)",
-  "description": "Draft manifest vocabulary for the DeskBox extension system. v0.1 incorporates the third review round: contributions[] replaces widgets[]; the runtime field describes execution technology; the signature block avoids self-reference by excluding itself from the hash domain. Design decisions: roadmap sections 13.2, 13.4, 13.5, 14, 15 and 16.7.",
+  "title": "DeskBox Plugin Manifest (schema v0.2 draft)",
+  "description": "Draft manifest vocabulary for the DeskBox extension system. v0.1 incorporated the third review round (contributions[] replaces widgets[]; runtime describes execution technology; the signature block avoids self-reference). v0.2 incorporates the fourth review round: widget contributions must be complete (displayName/template required, no additional properties), the signature block must be complete when present, packages carry the Ed25519 publisherPublicKey (fingerprint-only publishers cannot be verified), and hashing is pinned to JCS (RFC 8785) canonicalization + a package.integrity manifest. Design decisions: roadmap sections 13.2, 13.4, 13.5, 14, 15 and 16.7.",
   "type": "object",
-  "required": ["schemaVersion", "id", "version", "publisher", "runtime", "hostApi", "contributions"],
+  "required": ["schemaVersion", "id", "version", "publisher", "publisherPublicKey", "runtime", "hostApi", "contributions"],
+  "$defs": {
+    "widgetContribution": {
+      "type": "object",
+      "required": ["type", "id", "displayName", "template"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "const": "widget" },
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]*$",
+          "description": "Local contribution id, unique within the package (e.g. 'overview'). The host derives the canonical contribution id as {package-id}/{local-id} (e.g. com.github.stats/overview). This is distinct from the package id and from runtime widget instance ids (three-level separation)."
+        },
+        "displayName": { "type": "string", "minLength": 1 },
+        "template": {
+          "enum": ["metric", "list", "status", "gallery", "action-list", "simple-form"],
+          "description": "Host-rendered declarative template (roadmap 13.5). v0 deliberately has no free-form layout primitives."
+        },
+        "payload": {
+          "type": "object",
+          "required": ["version"],
+          "properties": {
+            "version": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "Payload schema version; the host picks the parser by version, strict within a known version, unknown elements fall back per-element then drop."
+            }
+          },
+          "additionalProperties": true,
+          "description": "Template payload data + bindings. HostConfig owns theming; the payload never carries style."
+        },
+        "defaultSize": {
+          "type": "object",
+          "properties": { "width": { "type": "number" }, "height": { "type": "number" } },
+          "additionalProperties": false
+        },
+        "activationEvents": {
+          "type": "array",
+          "items": {
+            "enum": ["onStartupFinished", "onWidgetOpen", "onCommand", "onSchedule", "onFileAssociation", "onEvent"]
+          },
+          "description": "Declarative activation events (roadmap 5.8): widgets restore their window/layout always; these decide when the plugin runtime starts."
+        }
+      }
+    }
+  },
   "additionalProperties": false,
   "properties": {
     "schemaVersion": {
@@ -24,7 +69,12 @@
     "publisher": {
       "type": "string",
       "minLength": 1,
-      "description": "Publisher identity. In the pre-account phase this is the Ed25519 public key fingerprint; later it binds to a registered account."
+      "description": "Publisher identity: the hex-encoded SHA-256 fingerprint of publisherPublicKey (derivable, kept as the pinning/trust-display handle). In the account phase this additionally binds to a registered account."
+    },
+    "publisherPublicKey": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Ed25519 public key, base64 (raw 32-byte form). Verification material for signature.publisherSignature: a fingerprint alone cannot verify a signature, so the package carries the key itself (pre-account option A). Validation must check publisher == sha256(publisherPublicKey)."
     },
     "runtime": {
       "enum": ["none", "wasm", "process"],
@@ -43,51 +93,10 @@
     "contributions": {
       "type": "array",
       "minItems": 1,
-      "description": "Things this package contributes to the host. Each entry has a type discriminator; v0.1 defines only the widget type - command, ai-tool, settings and other types will be added without changing the package-level structure.",
+      "description": "Things this package contributes to the host. Each entry has a type discriminator; v0.2 defines only the widget type under $defs - command, ai-tool, settings and other types will be added as further $defs entries without changing the package-level structure.",
       "items": {
-        "type": "object",
-        "required": ["type", "id"],
         "oneOf": [
-          {
-            "properties": {
-              "type": { "const": "widget" },
-              "id": {
-                "type": "string",
-                "pattern": "^[a-z0-9][a-z0-9-]*$",
-                "description": "Local contribution id, unique within the package (e.g. 'overview'). The host derives the canonical contribution id as {package-id}/{local-id} (e.g. com.github.stats/overview). This is distinct from the package id and from runtime widget instance ids (three-level separation)."
-              },
-              "displayName": { "type": "string", "minLength": 1 },
-              "template": {
-                "enum": ["metric", "list", "status", "gallery", "action-list", "simple-form"],
-                "description": "Host-rendered declarative template (roadmap 13.5). v0 deliberately has no free-form layout primitives."
-              },
-              "payload": {
-                "type": "object",
-                "required": ["version"],
-                "properties": {
-                  "version": {
-                    "type": "integer",
-                    "minimum": 1,
-                    "description": "Payload schema version; the host picks the parser by version, strict within a known version, unknown elements fall back per-element then drop."
-                  }
-                },
-                "additionalProperties": true,
-                "description": "Template payload data + bindings. HostConfig owns theming; the payload never carries style."
-              },
-              "defaultSize": {
-                "type": "object",
-                "properties": { "width": { "type": "number" }, "height": { "type": "number" } },
-                "additionalProperties": false
-              },
-              "activationEvents": {
-                "type": "array",
-                "items": {
-                  "enum": ["onStartupFinished", "onWidgetOpen", "onCommand", "onSchedule", "onFileAssociation", "onEvent"]
-                },
-                "description": "Declarative activation events (roadmap 5.8): widgets restore their window/layout always; these decide when the plugin runtime starts."
-              }
-            }
-          }
+          { "$ref": "#/$defs/widgetContribution" }
         ]
       }
     },
@@ -132,15 +141,16 @@
     },
     "signature": {
       "type": "object",
-      "description": "OPTIONAL in dev mode; REQUIRED for store-distributed packages. The contentHash covers every file in the package EXCEPT this signature block itself (the manifest is canonicalized with the signature field set to null before hashing). The publisherSignature is the Ed25519 signature over the contentHash. Full-trust executables additionally require Windows code signing (tier 3) and ship through Store/WinGet channels.",
+      "required": ["contentHash", "publisherSignature"],
+      "description": "OPTIONAL in dev mode; REQUIRED for store-distributed packages. When present it must be complete: contentHash + publisherSignature are both required. The contentHash is the SHA-256 of package.integrity (see contentHash). The publisherSignature is the Ed25519 signature over the contentHash, verified with the top-level publisherPublicKey. Full-trust executables additionally require Windows code signing (tier 3) and ship through Store/WinGet channels.",
       "properties": {
         "contentHash": {
           "type": "string",
-          "description": "SHA-256 of the package contents excluding this signature block. The manifest is canonicalized (signature = null, sorted keys, no whitespace) before being included in the hash input."
+          "description": "SHA-256 of package.integrity: a file listing every package file as 'sha256  <path>' lines (forward slashes, ordinal sort by path). manifest.json participates as its JCS (RFC 8785) canonicalization with the signature field set to null, which keeps the hash domain free of self-reference without inventing an ad-hoc sorted-keys rule (number formatting, escapes, and nested key order are all pinned by JCS)."
         },
         "publisherSignature": {
           "type": "string",
-          "description": "Ed25519 signature over the contentHash, made with the publisher's private key. The corresponding public key fingerprint is the top-level publisher field."
+          "description": "Ed25519 signature over the contentHash bytes, made with the publisher's private key. Verified with the top-level publisherPublicKey; the publisher field must equal sha256(publisherPublicKey)."
         }
       },
       "additionalProperties": false
