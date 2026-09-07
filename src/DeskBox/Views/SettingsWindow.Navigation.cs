@@ -312,7 +312,6 @@ public sealed partial class SettingsWindow
             From = target.Opacity,
             To = _settingsSearchHighlightOriginalOpacity,
             Duration = TimeSpan.FromMilliseconds(650),
-            EnableDependentAnimation = true,
             EasingFunction = new QuadraticEase { EasingMode = EasingMode.EaseOut }
         };
         Storyboard.SetTarget(animation, target);

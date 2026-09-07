@@ -113,9 +113,11 @@ public sealed class AppDiagnosticsService : IDisposable
 
     /// <summary>
     /// Starts a watchdog that detects when the UI thread is unresponsive.
-    /// A background timer sets a heartbeat flag every 4 seconds; the UI thread
+    /// A background timer sets a heartbeat flag every 15 seconds; the UI thread
     /// clears it via DispatcherQueue.TryEnqueue. If the flag is still set on
-    /// the next tick, the UI thread was blocked for more than 4 seconds.
+    /// the next tick, the UI thread was blocked for more than 15 seconds.
+    /// The interval trades wake-up cost against forensic granularity: the
+    /// watchdog is diagnostic-only and no recovery action depends on it.
     /// </summary>
     private void StartUiThreadWatchdog()
     {
@@ -164,9 +166,9 @@ public sealed class AppDiagnosticsService : IDisposable
             {
                 App.Log($"[Watchdog] Error: {ex.Message}");
             }
-        }, null, TimeSpan.FromSeconds(4), TimeSpan.FromSeconds(4));
+        }, null, TimeSpan.FromSeconds(15), TimeSpan.FromSeconds(15));
 
-        App.Log("[Watchdog] UI thread watchdog started (4s interval)");
+        App.Log("[Watchdog] UI thread watchdog started (15s interval)");
     }
 
     public void Dispose()

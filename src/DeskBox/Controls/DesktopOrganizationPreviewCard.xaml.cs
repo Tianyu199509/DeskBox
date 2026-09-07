@@ -331,8 +331,9 @@ public sealed partial class DesktopOrganizationPreviewCard : UserControl, IDispo
         ToolTipService.SetToolTip(button, tooltip);
         if (!_canSelectItems)
         {
-            FlyoutBase.SetAttachedFlyout(button, CreateItemDetails(item, description));
-            button.Click += (_, _) => FlyoutBase.ShowAttachedFlyout(button);
+            // Build the details flyout lazily on click; pre-attaching one per
+            // tile made preview-card memory scale with desktop file count.
+            button.Click += (_, _) => CreateItemDetails(item, description).ShowAt(button);
         }
         var contextMenu = new MenuFlyout();
         var detailsItem = new MenuFlyoutItem { Text = T("DesktopOrganization.Layout.Details") };
