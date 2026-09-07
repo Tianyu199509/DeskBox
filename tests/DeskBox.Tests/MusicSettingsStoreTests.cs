@@ -232,6 +232,23 @@ public sealed class MusicSettingsStoreTests : IDisposable
     }
 
     [Fact]
+    public void Pipeline_StopsWhenTrailingMigrationIsMissing()
+    {
+        // Registry simply ends before reaching the current version: the
+        // loop previously stamped CurrentSchemaVersion anyway, marking
+        // steps that were never registered as applied.
+        var settings = new AppSettings { SchemaVersion = 8 };
+
+        bool applied = new SettingsMigrationPipeline(
+        [
+            new FakeMigration(8, succeeded: true)
+        ]).RunMigrations(settings);
+
+        Assert.True(applied);
+        Assert.Equal(9, settings.SchemaVersion);
+    }
+
+    [Fact]
     public void Pipeline_NeverRunsStepsBeyondTheCurrentVersion()
     {
         // A step registered for a future schema version must never execute.
