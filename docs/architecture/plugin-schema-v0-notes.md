@@ -13,7 +13,7 @@
 
 ### 验签流程（v0.2 语义，validator/安装器实现于阶段 6；编码细则=第五轮评审钉死）
 
-**哈希域**：`package.integrity` 列出全部 payload 文件 + `manifest.json`（以 JCS 规范形参与，signature 置 null）；**`package.integrity` 自身永不列入清单**——它自己的完整性由传递闭包覆盖（contentHash 哈希它、publisher 签名覆盖 contentHash），列入则自引用无解。清单行格式 `sha256␣␣<path>`（两个空格，sha256 为小写 hex，路径正斜杠、ordinal 排序）。
+**哈希域**：`package.integrity` 列出全部 payload 文件 + `manifest.json`（以 JCS 规范形参与，signature 置 null）；**`package.integrity` 自身永不列入清单**——它自己的完整性由传递闭包覆盖（contentHash 哈希它、publisher 签名覆盖 contentHash），列入则自引用无解。清单行格式 `<sha256 小写 hex>␣␣<path>`（摘要+恰好两个空格+正斜杠相对路径），LF 行尾，按路径 ordinal 排序。
 
 1. 读 manifest，canonicalize（signature 字段置 null，JCS/RFC 8785）→ 得到 manifest 规范形；
 2. 读 `package.integrity`，找到 manifest.json 对应行，比对 `sha256(manifest 规范形)`——防"清单与 manifest 不一致"；
@@ -32,7 +32,7 @@
 | integrity 自引用排除 | `package.integrity` 不进入自身清单（传递闭包覆盖），哈希域=payload+JCS(manifest) |
 | 指纹推导 | `sha256(raw 32 字节公钥)`，先 base64 解码再哈希，小写 hex——不是对 base64 文本哈希 |
 | 签名输入 | `publisherSignature` 签 contentHash 的 raw 32 字节摘要，非 hex 字符串 |
-| contentHash 表示 | 小写 hex 存储；清单行 `sha256␣␣<path>` 两空格分隔 |
+| contentHash 表示 | 小写 hex 存储；清单行 `<sha256 小写 hex>␣␣<path>`（摘要+两空格+路径），LF 行尾 ordinal 排序 |
 
 ## v0 → v0.1 变更（第三轮外部评审吸收，roadmap 16.7）
 

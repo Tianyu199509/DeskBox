@@ -1,0 +1,6 @@
+# Hashed spike package files: any EOL conversion changes the file BYTES and
+# breaks the package.integrity chain (contentHash hashes raw bytes). Disable
+# all text conversion for spike packages, keys, and the Node tooling.
+spikes/github-stats/** -text
+spikes/keys/** -text
+scripts/spike/** -text
