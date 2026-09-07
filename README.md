@@ -4,8 +4,10 @@
 
 English | [简体中文](README.zh-CN.md)
 
+> External pull requests are not being merged at this time — bug reports, ideas, and discussions are very welcome via Issues / Discussions. See [CONTRIBUTING.md](CONTRIBUTING.md).
+
 [![CI](https://github.com/Tianyu199509/DeskBox/actions/workflows/ci.yml/badge.svg)](https://github.com/Tianyu199509/DeskBox/actions/workflows/ci.yml)
-[![Latest release](https://img.shields.io/badge/release-1.4.9-2563EB.svg)](https://github.com/Tianyu199509/DeskBox/releases/tag/v1.4.9)
+[![Latest release](https://img.shields.io/badge/release-1.5.0-2563EB.svg)](https://github.com/Tianyu199509/DeskBox/releases/tag/v1.5.0)
 [![Windows 10/11](https://img.shields.io/badge/Windows-10%2F11-0078D4.svg)](#system-requirements)
 [![x64 and ARM64](https://img.shields.io/badge/architecture-x64%20%7C%20ARM64-5C2D91.svg)](#download)
 [![License: GPL v3](https://img.shields.io/badge/license-GPLv3-blue.svg)](LICENSE)
