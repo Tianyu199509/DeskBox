@@ -16,6 +16,13 @@ namespace DeskBox.Services;
 /// the shared WidgetConfig.Metadata dictionary; see the roadmap section on
 /// per-kind settings stores for the long-term direction of moving feature
 /// state out of the shared dictionary.
+///
+/// LIFECYCLE (roadmap 16.6): this is a migration-period inventory, not a
+/// permanent global feature registry. It must SHRINK over time - host-owned
+/// keys stay, feature-owned keys move to per-kind stores / instance payloads,
+/// third-party plugins own their payload schemas outright and never register
+/// here. If this file grows past the current 19 entries, treat that as
+/// architecture regression, not progress.
 /// </summary>
 public static class WidgetMetadataKeys
 {

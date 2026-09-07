@@ -392,6 +392,19 @@ P0：§6 重写为 Runtime 矩阵（删除 A→B→C 旧结论，与 §14 唯一
 
 评审的偏差记录（不影响吸收）：其字段分类有误（ViewMode 实为共享，File 专属是 MappedFolderPath/Items 等）；其两条"建议"（broker 不进 Abstractions、三 Runtime 并存）本路线图已先行决策；其评审未覆盖本批工程量大头（audit 六轮重对齐、retail SelfContained 修复）。
 
+### 16.6 第二轮外部评审吸收（v1.7，2026-09-07，PR #232/#233 合并后）
+
+评审裁定 #232=8.5/10、#233=8/10、整体 8.8/10（"节奏控制健康"）。四条纪律入册：
+
+1. **删除分支的第三次法则**：RemoveWidgetAsync/ResetFeatureWidgetAsync 的 `else if (WidgetKind.X)` 清理分支现有 Glance+Todo 两例，**禁止加第三例**——第三个功能出现 instance cleanup 需求时，抽 `IWidgetInstanceLifecycle.DeleteAsync(widgetId)`（WidgetManager 只找 owner 通知删除，不知数据实现），与阶段 3 broker 切点合并做。
+2. **实例删除的语义债**：当前 DeleteForWidgetAsync 的 catch-log-continue=best-effort 非 guaranteed（附件被占用仍可能留孤儿）。插件数据生命周期（阶段 4/7）做结果模型（Success/PartialFailure/RetryPending）+ 启动期 pending-cleanup 清扫；卸载插件与删 Widget 的语义届时统一。
+3. **WidgetMetadataKeys 是迁移期清单**（已写入类头 LIFECYCLE 注释）：**必须随时间收缩**——宿主键留下、功能键迁 per-kind store/instance payload、3P 插件自有 payload schema 永不注册。超过 19 个键=架构倒退信号。注册表测试只证明"别名未消失"不证明"无绕过"（新字面量仍可绕开），这是接受的局限，不为此造 regex analyzer。
+4. **ambient 依赖不复制**：TodoWidgetStore 里的 `App.Log` 是现存 ambient 宿主依赖（留守宿主时无害），功能真正模块化时不得复制此写法，用 ILogger/最小能力接口替代。
+
+评审对下一批（Music）的观察点与我们 §16.5.5 升级后的验收一致：字段出 AppSettings、UI 自持、ambient 只减不增、观察 Feature 生命周期第三重复的出现时机。
+
+**Why:** 两轮外部评审与内部审计三方收敛，纪律条款是防止后续批次倒退的护栏。
+
 ## 附录 A：关键证据文件索引
 
 | 主题 | 文件 |
