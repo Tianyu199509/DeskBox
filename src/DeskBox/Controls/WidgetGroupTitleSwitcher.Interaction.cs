@@ -985,8 +985,7 @@ public sealed partial class WidgetGroupTitleSwitcher
             var animation = new DoubleAnimation
             {
                 To = opacity,
-                Duration = duration,
-                EnableDependentAnimation = true
+                Duration = duration
             };
             Storyboard.SetTarget(animation, target);
             Storyboard.SetTargetProperty(

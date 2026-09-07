@@ -3975,6 +3975,8 @@ public partial class App : Application
             $"workingSetBeforeMB={before.WorkingSetBytes / (1024.0 * 1024):F1} " +
             $"workingSetAfterMB={after.WorkingSetBytes / (1024.0 * 1024):F1} " +
             $"releasedHeapMB={reclaimResult.ReleasedHeapBytes / (1024.0 * 1024):F1} " +
+            $"reclaimPrivateBeforeMB={reclaimResult.PrivateBeforeBytes / (1024.0 * 1024):F1} " +
+            $"reclaimPrivateAfterMB={reclaimResult.PrivateAfterBytes / (1024.0 * 1024):F1} " +
             $"reason={triggerReason} " +
             $"workingSetTrimmed={workingSetTrimmed} fullViewRebuilds=0");
         PerformanceLogger.Mark(
@@ -3982,6 +3984,7 @@ public partial class App : Application
             $"status={reclaimResult.Status} " +
             $"durationMs={reclaimResult.DurationMilliseconds} " +
             $"releasedHeapMB={reclaimResult.ReleasedHeapBytes / (1024.0 * 1024):F1} " +
+            $"releasedPrivateMB={reclaimResult.ReleasedPrivateBytes / (1024.0 * 1024):F1} " +
             $"reason={triggerReason}");
 
         // A cooldown or in-progress veto must not consume the deep stage: the
@@ -4091,12 +4094,14 @@ public partial class App : Application
             $"workingSetBeforeMB={before.WorkingSetBytes / (1024.0 * 1024):F1} " +
             $"workingSetAfterMB={after.WorkingSetBytes / (1024.0 * 1024):F1} " +
             $"releasedHeapMB={reclaimResult.ReleasedHeapBytes / (1024.0 * 1024):F1} " +
+            $"releasedPrivateMB={reclaimResult.ReleasedPrivateBytes / (1024.0 * 1024):F1} " +
             $"reason={reason} workingSetTrimmed=false fullViewRebuilds=0");
         PerformanceLogger.Mark(
             "HeavyOperationDeepMemoryCleanupCompleted",
             $"status={reclaimResult.Status} " +
             $"durationMs={reclaimResult.DurationMilliseconds} " +
             $"releasedHeapMB={reclaimResult.ReleasedHeapBytes / (1024.0 * 1024):F1} " +
+            $"releasedPrivateMB={reclaimResult.ReleasedPrivateBytes / (1024.0 * 1024):F1} " +
             $"reason={reason}");
     }
 

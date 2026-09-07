@@ -18,12 +18,18 @@ namespace DeskBox.Views;
 /// </summary>
 internal sealed class WidgetTextShadowManager : IDisposable
 {
+    // LayoutUpdated fires per frame during drag/resize; reconcile at most ~30Hz
+    // with a trailing pass so the final layout is always reconciled.
+    private const int MinReconcileIntervalMs = 32;
+
     private readonly FrameworkElement _root;
     private readonly FrameworkElement _host;
     private readonly DispatcherQueue _dispatcherQueue;
     private readonly ContainerVisual _container;
     private readonly Dictionary<TextBlock, ShadowEntry> _entries =
         new(ReferenceEqualityComparer.Instance);
+    private DispatcherQueueTimer? _reconcileTimer;
+    private long _lastReconcileTick;
     private bool _reconcileQueued;
     private bool _disposed;
     private string _edgeMode = WidgetForegroundSettings.EdgeOff;
@@ -68,6 +74,7 @@ internal sealed class WidgetTextShadowManager : IDisposable
 
         _disposed = true;
         _root.LayoutUpdated -= Root_LayoutUpdated;
+        ReleaseReconcileTimer();
         ElementCompositionPreview.SetElementChildVisual(_host, null);
         foreach (ShadowEntry entry in _entries.Values)
         {
@@ -87,6 +94,48 @@ internal sealed class WidgetTextShadowManager : IDisposable
             return;
         }
 
+        long delay = MinReconcileIntervalMs -
+            (Environment.TickCount64 - _lastReconcileTick);
+        if (delay <= 0)
+        {
+            EnqueueReconcile();
+            return;
+        }
+
+        _reconcileQueued = true;
+        _reconcileTimer ??= CreateReconcileTimer();
+        _reconcileTimer.Interval = TimeSpan.FromMilliseconds(delay);
+        _reconcileTimer.Start();
+    }
+
+    private DispatcherQueueTimer CreateReconcileTimer()
+    {
+        DispatcherQueueTimer timer = _dispatcherQueue.CreateTimer();
+        timer.IsRepeating = false;
+        timer.Tick += (_, _) => EnqueueReconcile();
+        PerformanceLogger.RecordTransientUiTimerCreated();
+        return timer;
+    }
+
+    private void ReleaseReconcileTimer()
+    {
+        if (_reconcileTimer is null)
+        {
+            return;
+        }
+
+        _reconcileTimer.Stop();
+        _reconcileTimer = null;
+        PerformanceLogger.RecordTransientUiTimerReleased();
+    }
+
+    private void EnqueueReconcile()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
         _reconcileQueued = true;
         if (!_dispatcherQueue.TryEnqueue(
                 DispatcherQueuePriority.Low,
@@ -99,6 +148,7 @@ internal sealed class WidgetTextShadowManager : IDisposable
     private void ReconcileVisibleText()
     {
         _reconcileQueued = false;
+        _lastReconcileTick = Environment.TickCount64;
         if (_disposed)
         {
             return;

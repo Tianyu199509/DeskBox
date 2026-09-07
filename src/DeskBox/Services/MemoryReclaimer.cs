@@ -22,6 +22,8 @@ internal readonly record struct MemoryReclaimResult(
     int CollectionsAfter,
     long HeapBeforeBytes,
     long HeapAfterBytes,
+    long PrivateBeforeBytes,
+    long PrivateAfterBytes,
     long DurationMilliseconds,
     string Detail)
 {
@@ -30,6 +32,13 @@ internal readonly record struct MemoryReclaimResult(
     internal long ReleasedHeapBytes => Math.Max(
         0,
         HeapBeforeBytes - HeapAfterBytes);
+
+    // Native allocations (WinRT/composition wrappers) are invisible to
+    // HeapSizeBytes; the private-bytes delta is what makes a reclaim's real
+    // effect on the native heap observable.
+    internal long ReleasedPrivateBytes => Math.Max(
+        0,
+        PrivateBeforeBytes - PrivateAfterBytes);
 }
 
 internal static class MemoryReclaimer
@@ -73,6 +82,7 @@ internal static class MemoryReclaimer
 
             int collectionsBefore = GC.CollectionCount(GC.MaxGeneration);
             long heapBeforeBytes = GetHeapSizeBytes();
+            long privateBeforeBytes = GetPrivateBytes();
 
             // The first pass makes unreachable wrapper graphs eligible for
             // finalization. Waiting here is deliberate: releasing the native
@@ -97,12 +107,15 @@ internal static class MemoryReclaimer
                 Stopwatch.GetTimestamp());
             int collectionsAfter = GC.CollectionCount(GC.MaxGeneration);
             long heapAfterBytes = GetHeapSizeBytes();
+            long privateAfterBytes = GetPrivateBytes();
             return new MemoryReclaimResult(
                 MemoryReclaimStatus.Completed,
                 collectionsBefore,
                 collectionsAfter,
                 heapBeforeBytes,
                 heapAfterBytes,
+                privateBeforeBytes,
+                privateAfterBytes,
                 GetElapsedMilliseconds(startedTimestamp),
                 reason);
         }
@@ -110,6 +123,8 @@ internal static class MemoryReclaimer
         {
             return new MemoryReclaimResult(
                 MemoryReclaimStatus.Failed,
+                0,
+                0,
                 0,
                 0,
                 0,
@@ -128,12 +143,15 @@ internal static class MemoryReclaimer
         long startedTimestamp,
         string detail)
     {
+        long heapSizeBytes = GetHeapSizeBytes();
         return new MemoryReclaimResult(
             status,
             GC.CollectionCount(GC.MaxGeneration),
             GC.CollectionCount(GC.MaxGeneration),
-            GetHeapSizeBytes(),
-            GetHeapSizeBytes(),
+            heapSizeBytes,
+            heapSizeBytes,
+            GetPrivateBytes(),
+            GetPrivateBytes(),
             GetElapsedMilliseconds(startedTimestamp),
             detail);
     }
@@ -143,6 +161,20 @@ internal static class MemoryReclaimer
         try
         {
             return GC.GetGCMemoryInfo().HeapSizeBytes;
+        }
+        catch
+        {
+            return 0;
+        }
+    }
+
+    private static long GetPrivateBytes()
+    {
+        try
+        {
+            using Process process = Process.GetCurrentProcess();
+            process.Refresh();
+            return process.PrivateMemorySize64;
         }
         catch
         {

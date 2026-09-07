@@ -204,8 +204,7 @@ public sealed partial class WidgetFeedbackPresenter : UserControl
         {
             From = from,
             To = to,
-            Duration = TimeSpan.FromMilliseconds(durationMilliseconds),
-            EnableDependentAnimation = true
+            Duration = TimeSpan.FromMilliseconds(durationMilliseconds)
         };
         Storyboard.SetTarget(animation, target);
         Storyboard.SetTargetProperty(animation, property);
