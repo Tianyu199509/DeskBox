@@ -83,6 +83,10 @@ public sealed partial class MusicWidgetViewModel : ObservableObject, IDisposable
     private string _displayMode = SettingsService.MusicDisplayModeAuto;
     private Color _artworkColor = AccentColorHelper.DefaultAccentColor;
     private bool _hasArtworkColor;
+    // Per-kind store (roadmap stage 2 pilot): the widget reads music settings
+    // from the same store the settings page writes to, so both surfaces stay
+    // in sync even if the legacy AppSettings mirror lags behind.
+    private readonly MusicSettingsStore _musicSettingsStore = new();
     private MusicPlaybackMode _playbackMode = MusicPlaybackMode.Normal;
 
     public MusicWidgetViewModel(
@@ -907,9 +911,14 @@ public sealed partial class MusicWidgetViewModel : ObservableObject, IDisposable
 
     private void ApplyMusicSettings(AppSettings settings)
     {
-        UseArtworkBackdrop = settings.MusicUseArtworkBackdrop;
-        EnableCoverHoverMotion = settings.MusicEnableCoverHoverMotion;
-        DisplayMode = settings.MusicDisplayMode;
+        // The per-kind store is the authoritative source; the legacy
+        // AppSettings fields are a mirror that the global debounce persists.
+        // Reading from the store keeps this widget in sync with the settings
+        // page even when the mirror has not yet been flushed to disk.
+        MusicWidgetSettings musicSettings = _musicSettingsStore.Load();
+        UseArtworkBackdrop = musicSettings.UseArtworkBackdrop;
+        EnableCoverHoverMotion = musicSettings.EnableCoverHoverMotion;
+        DisplayMode = musicSettings.DisplayMode;
         OnPropertyChanged(nameof(ArtworkBackdropCornerRadius));
     }
 

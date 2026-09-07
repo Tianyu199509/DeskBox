@@ -304,11 +304,9 @@ public partial class SettingsViewModel
             return;
         }
 
-        UpdateMusicSettings(store =>
-        {
-            store.UseArtworkBackdrop = value;
-            _settingsService.Settings.MusicUseArtworkBackdrop = value;
-        });
+        _settingsService.Settings.MusicUseArtworkBackdrop = value;
+        _musicSettingsStore.Update(store => store.UseArtworkBackdrop = value);
+        _settingsService.SaveDebounced();
     }
 
     partial void OnMusicEnableCoverHoverMotionChanged(bool value)
@@ -318,31 +316,9 @@ public partial class SettingsViewModel
             return;
         }
 
-        UpdateMusicSettings(store =>
-        {
-            store.EnableCoverHoverMotion = value;
-            _settingsService.Settings.MusicEnableCoverHoverMotion = value;
-        });
-    }
-
-    /// <summary>
-    /// Music writes go to the per-kind store (fire-and-forget save, matching
-    /// the debounced global-settings behavior) and mirror into the legacy
-    /// AppSettings fields, which stay as an inert compatibility source until
-    /// the N+2 cleanup release removes them (roadmap stage 2 pilot).
-    /// </summary>
-    private void UpdateMusicSettings(Action<MusicWidgetSettings> update)
-    {
-        try
-        {
-            MusicWidgetSettings settings = _musicSettingsStore.Load();
-            update(settings);
-            _ = _musicSettingsStore.SaveAsync(settings);
-        }
-        catch (Exception ex)
-        {
-            App.Log($"[SettingsViewModel] Music settings store update failed: {ex.Message}");
-        }
+        _settingsService.Settings.MusicEnableCoverHoverMotion = value;
+        _musicSettingsStore.Update(store => store.EnableCoverHoverMotion = value);
+        _settingsService.SaveDebounced();
     }
 
     private async Task SyncTodoEnabledAsync(bool enabled)
