@@ -146,7 +146,7 @@
       "properties": {
         "contentHash": {
           "type": "string",
-          "description": "SHA-256 of the package.integrity file bytes, stored as lowercase hex. package.integrity lists every package payload file plus manifest.json (participating as its JCS/RFC 8785 canonicalization with the signature field set to null, which keeps the hash domain free of self-reference without inventing an ad-hoc sorted-keys rule - number formatting, escapes, and nested key order are all pinned by JCS). package.integrity itself is NEVER listed in package.integrity: its own integrity is covered transitively, because contentHash hashes it and the publisher signature covers contentHash. Lines are 'sha256  <path>' (two spaces), forward slashes, ordinal sort by path."
+          "description": "SHA-256 of the package.integrity file bytes, stored as lowercase hex. package.integrity lists every package payload file plus manifest.json (participating as its JCS/RFC 8785 canonicalization with the signature field set to null, which keeps the hash domain free of self-reference without inventing an ad-hoc sorted-keys rule - number formatting, escapes, and nested key order are all pinned by JCS). package.integrity itself is NEVER listed in package.integrity: its own integrity is covered transitively, because contentHash hashes it and the publisher signature covers contentHash. Each line is '<sha256-lowercase-hex>  <path>' (digest, exactly two spaces, forward-slash relative path), lines LF-terminated and ordinal-sorted by path."
         },
         "publisherSignature": {
           "type": "string",

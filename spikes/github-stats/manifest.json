@@ -1,0 +1,137 @@
+{
+  "schemaVersion": 0,
+  "id": "com.github.stats",
+  "version": "0.1.0",
+  "publisher": "1bc4f2db8438d2fd296bd48074088ccc726c265712125abbae975063ba719ea4",
+  "publisherPublicKey": "R/C3TWwBQNgtms2UI1i/yAWr9HnObV2lK0LQfjcPbZA=",
+  "runtime": "none",
+  "hostApi": {
+    "min": "1.0.0",
+    "max": "1.0.0"
+  },
+  "contributions": [
+    {
+      "type": "widget",
+      "id": "overview",
+      "displayName": "GitHub Stats",
+      "template": "metric",
+      "payload": {
+        "version": 1,
+        "label": "Stars",
+        "value": "1284",
+        "caption": "Tianyu199509/DeskBox",
+        "iconPath": "files/icon.svg"
+      }
+    },
+    {
+      "type": "widget",
+      "id": "top-repos",
+      "displayName": "Top Repositories",
+      "template": "list",
+      "payload": {
+        "version": 1,
+        "items": [
+          {
+            "primary": "DeskBox",
+            "secondary": "1.2k stars · C#"
+          },
+          {
+            "primary": "wingezi-lab",
+            "secondary": "84 stars · Rust"
+          },
+          {
+            "primary": "docs-hub",
+            "secondary": "17 stars · MDX"
+          }
+        ]
+      }
+    },
+    {
+      "type": "widget",
+      "id": "ci-status",
+      "displayName": "CI Status",
+      "template": "status",
+      "payload": {
+        "version": 1,
+        "state": "ok",
+        "text": "Build and test passed (6m 17s)"
+      }
+    },
+    {
+      "type": "widget",
+      "id": "contributors",
+      "displayName": "Contributors",
+      "template": "gallery",
+      "payload": {
+        "version": 1,
+        "tiles": [
+          {
+            "initials": "TY",
+            "caption": "Tianyu"
+          },
+          {
+            "initials": "S",
+            "caption": "Simon"
+          }
+        ]
+      }
+    },
+    {
+      "type": "widget",
+      "id": "quick-links",
+      "displayName": "Quick Links",
+      "template": "action-list",
+      "payload": {
+        "version": 1,
+        "actions": [
+          {
+            "label": "Open repository",
+            "actionId": "open-repo"
+          },
+          {
+            "label": "Open releases",
+            "actionId": "open-releases"
+          },
+          {
+            "label": "Report issue",
+            "actionId": "open-issues"
+          }
+        ]
+      }
+    },
+    {
+      "type": "widget",
+      "id": "user-lookup",
+      "displayName": "User Lookup",
+      "template": "simple-form",
+      "payload": {
+        "version": 1,
+        "fields": [
+          {
+            "name": "username",
+            "label": "GitHub username",
+            "input": "text",
+            "required": true
+          }
+        ],
+        "submitLabel": "Look up",
+        "actionId": "lookup-user"
+      }
+    }
+  ],
+  "permissions": [
+    {
+      "id": "network.fetch",
+      "required": true,
+      "scope": {
+        "allow": [
+          "api.github.com"
+        ]
+      }
+    }
+  ],
+  "signature": {
+    "contentHash": "735295c349d1210e8478047dbf45a74f0cf34504f84f4db0ad8bd7cc8099d564",
+    "publisherSignature": "P0i6SZAgKbrEBSEosdtEytWX28NLwQjO57vF0TYtGL/Px1UORrv3YsyMC2PtWoOG5lZm4JszXs7Na0flt9gADQ=="
+  }
+}
