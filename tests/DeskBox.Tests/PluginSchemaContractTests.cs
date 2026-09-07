@@ -3,15 +3,16 @@ using System.Text.Json;
 namespace DeskBox.Tests;
 
 /// <summary>
-/// Light pin for the plugin manifest schema v0.1 draft (roadmap stage 2.5).
-/// Deliberately pins existence and vocabulary only - the draft will iterate
-/// with the runtime spike, so field-by-field freezing is explicitly avoided
-/// (see plugin-schema-v0-notes.md).
+/// Light pin for the plugin manifest schema v0.2 draft (roadmap stage 2.5).
+/// Deliberately pins existence, vocabulary and the key validation semantics
+/// tightened in v0.2 - the draft will still iterate with the runtime spike,
+/// so field-by-field freezing is explicitly avoided (see
+/// plugin-schema-v0-notes.md).
 /// </summary>
 public sealed class PluginSchemaContractTests
 {
     [Fact]
-    public void SchemaV01_ExistsAndParses()
+    public void Schema_ExistsAndParses()
     {
         string schemaPath = TestPaths.FromRepository(
             "docs/architecture/plugin-schema-v0.json");
@@ -27,7 +28,7 @@ public sealed class PluginSchemaContractTests
     }
 
     [Fact]
-    public void SchemaV01_RuntimeVocabulary_MatchesThreeRuntimes()
+    public void Schema_RuntimeVocabulary_MatchesThreeRuntimes()
     {
         using JsonDocument schema = JsonDocument.Parse(File.ReadAllText(
             TestPaths.FromRepository("docs/architecture/plugin-schema-v0.json")));
@@ -42,7 +43,7 @@ public sealed class PluginSchemaContractTests
     }
 
     [Fact]
-    public void SchemaV01_ContributionsReplaceWidgets()
+    public void Schema_ContributionsReplaceWidgets()
     {
         using JsonDocument schema = JsonDocument.Parse(File.ReadAllText(
             TestPaths.FromRepository("docs/architecture/plugin-schema-v0.json")));
@@ -59,7 +60,7 @@ public sealed class PluginSchemaContractTests
     }
 
     [Fact]
-    public void SchemaV01_TemplateVocabulary_MatchesSixTemplateDecision()
+    public void Schema_TemplateVocabulary_MatchesSixTemplateDecision()
     {
         using JsonDocument schema = JsonDocument.Parse(File.ReadAllText(
             TestPaths.FromRepository("docs/architecture/plugin-schema-v0.json")));
@@ -76,7 +77,7 @@ public sealed class PluginSchemaContractTests
     }
 
     [Fact]
-    public void SchemaV01_SignatureIsOptionalAndCorrectlyNamed()
+    public void Schema_SignatureIsOptionalButCompleteWhenPresent()
     {
         using JsonDocument schema = JsonDocument.Parse(File.ReadAllText(
             TestPaths.FromRepository("docs/architecture/plugin-schema-v0.json")));
@@ -85,15 +86,91 @@ public sealed class PluginSchemaContractTests
         // Signature must NOT be required (dev mode); dev packages ship without it.
         Assert.False(required.EnumerateArray().Any(v => v.GetString() == "signature"));
 
+        // v0.2: when present it must be complete - an empty or half-filled
+        // signature block used to validate.
+        JsonElement signature = schema.RootElement.GetProperty("properties")
+            .GetProperty("signature");
+        string[] signatureRequired = signature.GetProperty("required")
+            .EnumerateArray()
+            .Select(v => v.GetString()!)
+            .Order()
+            .ToArray();
+        Assert.Equal(["contentHash", "publisherSignature"], signatureRequired);
+
         string schemaText = File.ReadAllText(
             TestPaths.FromRepository("docs/architecture/plugin-schema-v0.json"));
         Assert.Contains("publisherSignature", schemaText, StringComparison.Ordinal);
-        Assert.DoesNotContain("publisherKey", schemaText, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"publisherKey\"", schemaText, StringComparison.Ordinal);
         Assert.DoesNotContain("defaultSet", schemaText, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void SchemaV01_Notes_ExistAndCoverV01Changes()
+    public void Schema_WidgetContribution_MustBeCompleteAndClosed()
+    {
+        using JsonDocument schema = JsonDocument.Parse(File.ReadAllText(
+            TestPaths.FromRepository("docs/architecture/plugin-schema-v0.json")));
+        JsonElement widget = schema.RootElement.GetProperty("$defs")
+            .GetProperty("widgetContribution");
+
+        // v0.2: displayName/template are required per contribution (the
+        // shared [type, id] required let stub widgets through) and unknown
+        // properties are rejected instead of ignored.
+        string[] required = widget.GetProperty("required")
+            .EnumerateArray()
+            .Select(v => v.GetString()!)
+            .Order()
+            .ToArray();
+        Assert.Equal(["displayName", "id", "template", "type"], required);
+        Assert.False(widget.GetProperty("additionalProperties").GetBoolean());
+
+        // contributions items dispatch through the $defs entry so later
+        // contribution types (command/ai-tool/settings) extend the oneOf.
+        JsonElement items = schema.RootElement.GetProperty("properties")
+            .GetProperty("contributions").GetProperty("items");
+        Assert.Equal(
+            "#/$defs/widgetContribution",
+            items.GetProperty("oneOf")[0].GetProperty("$ref").GetString());
+    }
+
+    [Fact]
+    public void Schema_PublisherPublicKey_IsRequiredForVerification()
+    {
+        using JsonDocument schema = JsonDocument.Parse(File.ReadAllText(
+            TestPaths.FromRepository("docs/architecture/plugin-schema-v0.json")));
+        JsonElement required = schema.RootElement.GetProperty("required");
+
+        // v0.2: a fingerprint alone cannot verify an Ed25519 signature; the
+        // pre-account package carries the public key itself and the
+        // publisher field must equal sha256(publisherPublicKey).
+        Assert.Contains(
+            "publisherPublicKey",
+            required.EnumerateArray().Select(v => v.GetString()));
+
+        string schemaText = File.ReadAllText(
+            TestPaths.FromRepository("docs/architecture/plugin-schema-v0.json"));
+        Assert.Contains("sha256(publisherPublicKey)", schemaText, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SchemaAndNotes_PinJcsCanonicalizationAndIntegrityManifest()
+    {
+        string schemaText = File.ReadAllText(
+            TestPaths.FromRepository("docs/architecture/plugin-schema-v0.json"));
+        string notes = File.ReadAllText(TestPaths.FromRepository(
+            "docs/architecture/plugin-schema-v0-notes.md"));
+
+        // v0.2: canonicalization is pinned to the formal standard (not an
+        // ad-hoc sorted-keys rule) and package contents hash through a
+        // deterministic package.integrity manifest.
+        Assert.Contains("RFC 8785", schemaText, StringComparison.Ordinal);
+        Assert.Contains("package.integrity", schemaText, StringComparison.Ordinal);
+        Assert.Contains("RFC 8785", notes, StringComparison.Ordinal);
+        Assert.Contains("package.integrity", notes, StringComparison.Ordinal);
+        Assert.Contains("publisherPublicKey", notes, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Schema_Notes_ExistAndCoverVocabulary()
     {
         string notes = File.ReadAllText(TestPaths.FromRepository(
             "docs/architecture/plugin-schema-v0-notes.md"));

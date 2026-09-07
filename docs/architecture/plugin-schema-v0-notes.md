@@ -1,6 +1,25 @@
-# DeskBox Plugin Schema v0.1 — 语义注记
+# DeskBox Plugin Schema v0.2 — 语义注记
 
-配套 `plugin-schema-v0.json`。v0.1 是草案：给三路 spike（roadmap 阶段 3.5）、CLI validator（阶段 6）、商店规范（阶段 7）一个共同靶子，会迭代；契约测试只轻钉存在性与词汇，不逐字段冻结。
+配套 `plugin-schema-v0.json`。v0.x 是草案：给三路 spike（roadmap 阶段 3.5）、CLI validator（阶段 6）、商店规范（阶段 7）一个共同靶子，会迭代；契约测试只轻钉存在性与词汇+关键校验语义，不逐字段冻结。
+
+## v0.1 → v0.2 变更（第四轮外部评审吸收）
+
+| 变更 | 原因 |
+|---|---|
+| widget 贡献收进 `$defs/widgetContribution`，`required: [type, id, displayName, template]` + `additionalProperties: false` | v0.1 只有共享 `required: [type, id]`，`{"type":"widget","id":"x"}` 这种残缺贡献能过校验，多余字段也不报错；后续 command/ai-tool/settings 类型作为新增 `$defs` 条目加入，不改包级结构 |
+| `signature` 块内部 `required: [contentHash, publisherSignature]` | 块整体可选（dev 模式）但**一旦存在必须完整**——v0.1 里 `"signature": {}` 是合法的 |
+| 新增根级必填 `publisherPublicKey`（Ed25519 公钥，raw 32 字节 base64），`publisher` 语义改为 `sha256(publisherPublicKey)` 的十六进制指纹 | 只有指纹**不能验签**（指纹是身份句柄不是验证材料）；无账号阶段（GitHub manifest 仓库运营）包必须自带公钥（评审方案 A）。校验器必须检查 `publisher == sha256(publisherPublicKey)` |
+| 哈希规则钉死为 **JCS (RFC 8785) + package.integrity 清单**，废弃"排序键+无空白"的口述规范化 | 自发明的规范化在数字格式/转义/嵌套键序/ZIP 顺序/路径分隔符上都会产生逻辑等价但字节不同的哈希；JCS 是有测试向量的正式标准。包内容枚举同样需要确定性：`package.integrity` 文件按 `sha256  <path>` 行、路径正斜杠、ordinal 排序，`contentHash = sha256(package.integrity)` |
+
+### 验签流程（v0.2 语义，validator/安装器实现于阶段 6）
+
+1. 读 manifest，canonicalize（signature 字段置 null，JCS/RFC 8785）→ 得到 manifest 规范形；
+2. 读 `package.integrity`，找到 manifest.json 对应行，比对 `sha256(manifest 规范形)` ——防"清单与 manifest 不一致"；
+3. `contentHash = sha256(package.integrity 全文)`，与 `signature.contentHash` 比对；
+4. 用 `publisherPublicKey` 验 Ed25519 `publisherSignature`（签的是 contentHash）；
+5. 检查 `publisher == sha256(publisherPublicKey)`（十六进制）；指纹同时是首次安装时的信任锚（用户批准的就是这个指纹，升级必须一致）。
+
+无签名的 dev 包跳过 3-4，但 1-2 的哈希一致性仍然检查（防手改文件后清单对不上）。
 
 ## v0 → v0.1 变更（第三轮外部评审吸收，roadmap 16.7）
 
@@ -34,7 +53,7 @@
 - **Lifecycle/Event**（宿主→插件，typed event，白名单）
 - **任意宿主函数 invoke**——禁止
 
-## v0.1 明确不包含（防止提前冻结）
+## v0.2 明确不包含（防止提前冻结）
 
 - 声明式 UI payload 的字段级 schema（六模板各自的 payload 结构留给 spike 输出后定 v1）；
 - `contributions[]` 的 command/ai-tool/settings 类型定义（v0.1 只有 widget；加新类型不改包级结构）；
