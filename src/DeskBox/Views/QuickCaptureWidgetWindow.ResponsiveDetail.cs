@@ -14,7 +14,7 @@ public sealed partial class QuickCaptureWidgetWindow
 {
     private void InitializeResponsiveDetail()
     {
-        if (ViewModel.Config.Metadata.TryGetValue(MasterPaneWidthMetadataKey, out string? persisted) &&
+        if (ViewModel.Config.Metadata.TryGetValue(WidgetMetadataKeys.QuickCaptureMasterPaneWidth, out string? persisted) &&
             double.TryParse(persisted, NumberStyles.Float, CultureInfo.InvariantCulture, out double width))
         {
             _persistedMasterPaneWidth = _masterDetailLayoutPolicy.NormalizePersistedMasterWidth(width);
@@ -184,7 +184,7 @@ public sealed partial class QuickCaptureWidgetWindow
         double normalized = _masterDetailLayoutPolicy.NormalizePersistedMasterWidth(
             MasterColumn.ActualWidth);
         _persistedMasterPaneWidth = normalized;
-        ViewModel.Config.Metadata[MasterPaneWidthMetadataKey] = normalized.ToString(
+        ViewModel.Config.Metadata[WidgetMetadataKeys.QuickCaptureMasterPaneWidth] = normalized.ToString(
             "0.###",
             CultureInfo.InvariantCulture);
         _settingsService.SaveDebounced();
