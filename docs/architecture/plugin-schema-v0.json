@@ -1,0 +1,154 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://deskbox.fun/schemas/plugin-manifest-v0.json",
+  "title": "DeskBox Plugin Manifest (schema v0 draft)",
+  "description": "Draft manifest vocabulary for the DeskBox extension system. v0 exists to give the three-way runtime spike, the plugin CLI validator and the store specification one shared target; it will iterate and is intentionally lightly pinned by tests (existence + vocabulary, not field-by-field freezing). Design decisions: roadmap sections 13.2 (permissions), 13.4 (protocol skeleton), 13.5 (declarative UI), 14 (Extension Model) and 15 (store/commerce).",
+  "type": "object",
+  "required": ["schemaVersion", "id", "version", "publisher", "category", "hostApi", "widgets", "signature"],
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "const": 0,
+      "description": "Manifest schema version. Unknown future versions must be rejected at install time (install-gate), not silently tolerated."
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]*(\\.[a-z0-9][a-z0-9-]*)+$",
+      "description": "Package id, reverse-DNS style (e.g. com.github.stats). Package id != widget type id != widget instance id (three-level separation)."
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+$",
+      "description": "Package semver. Must increase on every store upload or the installer refuses (Rainmeter discipline)."
+    },
+    "publisher": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Publisher identity. In the pre-account phase this is the Ed25519 publisher key fingerprint; later it binds to a registered account."
+    },
+    "category": {
+      "enum": ["resource-pack", "wasm", "out-of-proc"],
+      "description": "resource-pack: declarative-only, no code executes, store launch category. wasm: sandboxed component. out-of-proc: full-trust process (Windows code signing channel required, L1 review)."
+    },
+    "hostApi": {
+      "type": "object",
+      "required": ["min", "max"],
+      "additionalProperties": false,
+      "properties": {
+        "min": { "type": "string", "description": "Minimum host API version (install gate)." },
+        "max": { "type": "string", "description": "Maximum tested host API version; hosts above this may refuse or warn." }
+      },
+      "description": "Install-time half of the version double-gate; the runtime handshake protocolVersion is the other half (roadmap 13.4)."
+    },
+    "widgets": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["typeId", "displayName", "template"],
+        "additionalProperties": false,
+        "properties": {
+          "typeId": {
+            "type": "string",
+            "pattern": "^[a-z0-9][a-z0-9-]*$",
+            "description": "Widget type id, unique within the package; conventionally prefixed by the package id."
+          },
+          "displayName": { "type": "string", "minLength": 1 },
+          "template": {
+            "enum": ["metric", "list", "status", "gallery", "action-list", "simple-form"],
+            "description": "Host-rendered declarative template (roadmap 13.5). v0 deliberately has no free-form layout primitives."
+          },
+          "payload": {
+            "type": "object",
+            "required": ["version"],
+            "properties": {
+              "version": {
+                "type": "integer",
+                "minimum": 1,
+                "description": "Payload schema version; the host picks the parser by version, strict within a known version, unknown elements fall back per-element then drop."
+              }
+            },
+            "additionalProperties": true,
+            "description": "Template payload data + bindings. HostConfig owns theming; the payload never carries style."
+          },
+          "defaultSize": {
+            "type": "object",
+            "properties": { "width": { "type": "number" }, "height": { "type": "number" } },
+            "additionalProperties": false
+          },
+          "activationEvents": {
+            "type": "array",
+            "items": {
+              "enum": ["onStartupFinished", "onWidgetOpen", "onCommand", "onSchedule", "onFileAssociation", "onEvent"]
+            },
+            "description": "Declarative activation events (roadmap 5.8): widgets restore their window/layout always; these decide when the plugin runtime starts."
+          }
+        }
+      }
+    },
+    "permissions": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z0-9-]+:[a-z0-9-]+$",
+        "description": "Tauri-style identifier plugin-name:permission-name referencing a capability declaration. Granting happens through capabilities, not by listing here."
+      },
+      "default": []
+    },
+    "scopes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["permission"],
+        "properties": {
+          "permission": { "type": "string" },
+          "allow": { "type": "array", "items": { "type": "string" }, "description": "e.g. directory globs (Downloads/**), URL filters (api.github.com), quotas (100/day)." },
+          "deny": { "type": "array", "items": { "type": "string" }, "description": "Deny always wins over allow (Tauri rule); the host additionally maintains defensive default-denies (own config/credential dirs)." }
+        },
+        "additionalProperties": false
+      },
+      "default": []
+    },
+    "capabilities": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["permission"],
+        "properties": {
+          "permission": { "type": "string" },
+          "context": { "type": "string", "description": "Which plugin context (package / widget type) receives the grant." },
+          "defaultSet": { "type": "boolean", "default": false, "description": "Granted automatically at install with explicit UI notice (Tauri default.toml semantics)." }
+        },
+        "additionalProperties": false
+      },
+      "default": []
+    },
+    "data": {
+      "type": "object",
+      "properties": {
+        "settingsSchemaVersion": { "type": "integer", "minimum": 1 },
+        "dataSchemaVersion": { "type": "integer", "minimum": 1 }
+      },
+      "additionalProperties": false,
+      "description": "Plugin-declared schema versions; the host runs backup -> migrate -> verify -> commit/rollback on updates (roadmap section 9 plugin schema migration clause)."
+    },
+    "signature": {
+      "type": "object",
+      "required": ["contentHash", "publisherKey"],
+      "properties": {
+        "contentHash": { "type": "string", "description": "SHA-256 of the package contents (integrity, tier 1 of the three-tier signing model)." },
+        "publisherKey": { "type": "string", "description": "Ed25519 signature over the content hash (publisher identity, tier 2). Full-trust executables additionally require Windows code signing (tier 3) and ship through Store/WinGet channels." }
+      },
+      "additionalProperties": false
+    },
+    "fallback": {
+      "type": "object",
+      "properties": {
+        "unknownElement": { "enum": ["fallback", "drop", "reject"], "default": "drop" },
+        "missingTemplate": { "enum": ["placeholder", "reject"], "default": "placeholder" }
+      },
+      "additionalProperties": false,
+      "description": "UI payload degradation policy per roadmap 13.5 layer split: manifest strict / RPC envelope lenient / payload versioned-strict with per-element fallback."
+    }
+  }
+}
