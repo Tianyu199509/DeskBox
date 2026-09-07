@@ -677,11 +677,7 @@ public sealed partial class WidgetManager
                              !widget.IsDisabled &&
                              !IsDeleted(widget.Id) &&
                              TryGetFileWidgetFolderPath(widget, out _))
-            .Select(widget =>
-            {
-                TryGetFileWidgetFolderPath(widget, out string folderPath);
-                return new FileWidgetImportTarget(widget.Id, widget.Name, folderPath);
-            })
+            .Select(widget => new FileWidgetImportTarget(widget.Id, widget.Name))
             .ToList();
     }
 
@@ -704,6 +700,13 @@ public sealed partial class WidgetManager
     /// producer side (QuickCaptureService.BuildFileImportPlan); this side
     /// owns the File-widget internals: target validation, folder
     /// resolution, the write itself, and the post-import refresh/reveal.
+    /// Sink discipline: a producer may pass an arbitrary file name, so the
+    /// sink itself confines writes - the name is reduced to its final path
+    /// segment and the destination is verified to sit inside the widget's
+    /// backing folder. Writes go through a temp file moved into place so a
+    /// cancellation or I/O failure never leaves a partial destination.
+    /// Returns null only for an invalid target or unusable input; I/O
+    /// failures and cancellation propagate as exceptions.
     /// </summary>
     public async Task<string?> TryImportFileAsync(
         string sourceFilePath,
@@ -716,17 +719,32 @@ public sealed partial class WidgetManager
             return null;
         }
 
-        Directory.CreateDirectory(targetFolderPath);
-        string fileName = string.IsNullOrWhiteSpace(preferredFileName)
-            ? Path.GetFileName(sourceFilePath)
-            : preferredFileName;
-        string destinationPath = FileService.GetAvailablePath(Path.Combine(targetFolderPath, fileName));
-        await using (FileStream source = File.OpenRead(sourceFilePath))
-        await using (FileStream destination = File.Create(destinationPath))
+        if (!TryResolveImportDestination(
+                targetFolderPath,
+                preferredFileName ?? Path.GetFileName(sourceFilePath),
+                out string destinationPath))
         {
-            // Streaming copy so cancellation is honored mid-transfer, unlike
-            // File.Copy/Task.Run (round-5 review requirement).
-            await source.CopyToAsync(destination, cancellationToken);
+            return null;
+        }
+
+        Directory.CreateDirectory(targetFolderPath);
+        string tempPath = Path.Combine(targetFolderPath, $".import-{Guid.NewGuid():N}.tmp");
+        try
+        {
+            await using (FileStream source = File.OpenRead(sourceFilePath))
+            await using (FileStream temp = File.Create(tempPath))
+            {
+                // Streaming copy so cancellation is honored mid-transfer,
+                // unlike File.Copy/Task.Run (round-5 review requirement).
+                await source.CopyToAsync(temp, cancellationToken);
+            }
+
+            File.Move(tempPath, destinationPath, overwrite: true);
+        }
+        catch
+        {
+            TryDeleteFile(tempPath);
+            throw;
         }
 
         return await FinalizeImportAsync(targetWidgetId, destinationPath);
@@ -743,15 +761,84 @@ public sealed partial class WidgetManager
             return null;
         }
 
-        if (!TryResolveImportTarget(targetWidgetId, out string targetFolderPath))
+        if (!TryResolveImportTarget(targetWidgetId, out string targetFolderPath) ||
+            !TryResolveImportDestination(targetFolderPath, fileName, out string destinationPath))
         {
             return null;
         }
 
         Directory.CreateDirectory(targetFolderPath);
-        string destinationPath = FileService.GetAvailablePath(Path.Combine(targetFolderPath, fileName));
-        await File.WriteAllTextAsync(destinationPath, text, cancellationToken);
+        string tempPath = Path.Combine(targetFolderPath, $".import-{Guid.NewGuid():N}.tmp");
+        try
+        {
+            await File.WriteAllTextAsync(tempPath, text, cancellationToken);
+            File.Move(tempPath, destinationPath, overwrite: true);
+        }
+        catch
+        {
+            TryDeleteFile(tempPath);
+            throw;
+        }
+
         return await FinalizeImportAsync(targetWidgetId, destinationPath);
+    }
+
+    /// <summary>
+    /// Confines a producer-supplied file name to the widget folder: a name
+    /// with any path structure (separators, rooted segments, ..-traversal,
+    /// absolute paths) is REJECTED as unusable input rather than silently
+    /// reinterpreted - producers cannot be trusted to sanitize, and a
+    /// reduced name would mask the producer bug. The final destination is
+    /// additionally verified to sit inside the widget folder.
+    /// </summary>
+    private static bool TryResolveImportDestination(
+        string targetFolderPath,
+        string? fileName,
+        out string destinationPath)
+    {
+        destinationPath = string.Empty;
+        string? candidate = fileName?.Trim();
+        if (string.IsNullOrWhiteSpace(candidate) ||
+            candidate is "." or ".." ||
+            !string.Equals(candidate, Path.GetFileName(candidate), StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        try
+        {
+            string normalizedFolder = Path.GetFullPath(targetFolderPath);
+            string candidatePath = Path.GetFullPath(Path.Combine(normalizedFolder, candidate));
+            if (!candidatePath.StartsWith(
+                    normalizedFolder + Path.DirectorySeparatorChar,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            destinationPath = FileService.GetAvailablePath(candidatePath);
+            return true;
+        }
+        catch (Exception)
+        {
+            // Pathologically malformed names (invalid chars, ADS-shaped)
+            // are unusable input, not an I/O failure.
+            return false;
+        }
+    }
+
+    private static void TryDeleteFile(string path)
+    {
+        try
+        {
+            if (File.Exists(path))
+            {
+                File.Delete(path);
+            }
+        }
+        catch
+        {
+        }
     }
 
     private bool TryResolveImportTarget(string targetWidgetId, out string targetFolderPath)
@@ -1348,6 +1435,19 @@ public sealed partial class WidgetManager
 
     private void RaiseFeatureStateChanged(FeatureId featureId, bool enabled)
     {
+        // The port contract promises UI-thread delivery. Current call sites
+        // are UI-thread, but a future background caller must not silently
+        // break the contract - marshal instead.
+        if (!HasUiThreadAccess())
+        {
+            _ = RunOnUiThreadAsync(() =>
+            {
+                RaiseFeatureStateChanged(featureId, enabled);
+                return Task.CompletedTask;
+            });
+            return;
+        }
+
         if (FeatureStateChanged is null)
         {
             return;

@@ -119,6 +119,21 @@ public sealed class SettingsMigrationPipeline
             App.Log($"[SettingsMigration] Applied migration from version {migration.FromVersion} to {version}");
         }
 
+        // Tail gap: the registry ran out of steps before reaching Current.
+        // Stamping the current version anyway would mark migrations that
+        // were never registered as applied (the mirror image of the mid-
+        // registry gap caught above). Keep the version at the last
+        // successful step so the misconfiguration is visible in the log.
+        if (version != CurrentSchemaVersion)
+        {
+            App.Log(
+                $"[SettingsMigration] Migration registry TAIL GAP: reached version {version} " +
+                $"but the current schema version is {CurrentSchemaVersion}. " +
+                "Stopping so unregistered steps are never marked as applied.");
+            settings.SchemaVersion = version;
+            return anyApplied;
+        }
+
         settings.SchemaVersion = CurrentSchemaVersion;
         return anyApplied;
     }

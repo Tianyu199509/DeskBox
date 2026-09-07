@@ -560,7 +560,7 @@ public sealed class WidgetManagerStorageCleanupTests : IDisposable
 
         var target = Assert.Single(_widgetManager.GetImportTargets());
         Assert.Equal(widget.Id, target.WidgetId);
-        Assert.Equal(managedFolder, target.FolderPath);
+        Assert.Equal(widget.Name, target.Name);
         Assert.Equal(widget.Id, _settingsService.Settings.LastQuickCaptureFileWidgetId);
 
         var lastTarget = _widgetManager.GetLastImportTarget();
@@ -599,6 +599,47 @@ public sealed class WidgetManagerStorageCleanupTests : IDisposable
         Assert.NotNull(fallbackPlan);
         Assert.Equal("not a url", fallbackPlan.Text);
         Assert.EndsWith(".txt", fallbackPlan.FileName, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task ImportSink_ConfinesProducerSuppliedFileNamesToTheWidgetFolder()
+    {
+        // Producers cannot be trusted to sanitize: traversal, rooted and
+        // absolute-path names must be reduced to a harmless in-folder name
+        // (or rejected), never escape the sink.
+        string managedFolder = Directory.CreateDirectory(Path.Combine(_storageRoot, "Confined")).FullName;
+        var widget = CreateManagedWidget("Confined", managedFolder);
+        _settingsService.Settings.Widgets.Add(widget);
+
+        Assert.Null(await _widgetManager.TryImportTextAsync(
+            "escape", "..\\..\\escaped.txt", widget.Id));
+        Assert.Null(await _widgetManager.TryImportTextAsync(
+            "escape", "../escaped.txt", widget.Id));
+        Assert.Null(await _widgetManager.TryImportTextAsync(
+            "escape", Path.Combine(_tempRoot, "absolute-escape.txt"), widget.Id));
+
+        Assert.False(File.Exists(Path.Combine(_storageRoot, "escaped.txt")));
+        Assert.False(File.Exists(Path.Combine(_tempRoot, "absolute-escape.txt")));
+        Assert.Empty(Directory.GetFiles(managedFolder));
+    }
+
+    [Fact]
+    public async Task ImportSink_LeavesNoPartialFileWhenCancelledOrFailed()
+    {
+        string managedFolder = Directory.CreateDirectory(Path.Combine(_storageRoot, "Atomic")).FullName;
+        var widget = CreateManagedWidget("Atomic", managedFolder);
+        _settingsService.Settings.Widgets.Add(widget);
+
+        string sourcePath = Path.Combine(_tempRoot, "cancel-source.bin");
+        await File.WriteAllBytesAsync(sourcePath, new byte[64 * 1024]);
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            _widgetManager.TryImportFileAsync(sourcePath, widget.Id, "partial.bin", cts.Token));
+
+        Assert.False(File.Exists(Path.Combine(managedFolder, "partial.bin")));
+        Assert.Empty(Directory.GetFiles(managedFolder, ".import-*.tmp"));
     }
 
     private static WidgetConfig CreateManagedWidget(string name, string folderPath)

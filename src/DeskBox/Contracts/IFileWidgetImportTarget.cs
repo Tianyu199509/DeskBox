@@ -23,6 +23,10 @@ public interface IFileWidgetImportTarget
     /// <summary>
     /// Lists the file widgets that are valid import targets right now
     /// (enabled, not deleted, with a resolvable writable backing folder).
+    /// The record deliberately carries no raw folder path: a producer that
+    /// learned the backing folder could bypass this port and write there
+    /// directly. UI that needs to show a location gets display text, not a
+    /// usable path capability.
     /// </summary>
     IReadOnlyList<FileWidgetImportTarget> GetImportTargets();
 
@@ -35,9 +39,14 @@ public interface IFileWidgetImportTarget
     /// <summary>
     /// Imports a file already materialized on disk into the target file
     /// widget's backing folder. Returns the destination path, or null when
-    /// the target is invalid, disabled, or the folder is not accessible.
-    /// Implementations honor cancellation for large transfers (streaming
-    /// copy, not a start-only token check).
+    /// the target widget is invalid or the input is unusable - which
+    /// includes file names with path structure (separators, rooted
+    /// segments, ..-traversal), which are rejected rather than
+    /// reinterpreted. I/O failures (access denied, disk full) and
+    /// cancellation propagate as exceptions. The sink confines every write
+    /// inside the widget folder, writes through a temp file, and leaves no
+    /// partial destination on failure. Cancellation is honored mid-transfer
+    /// (streaming copy, not a start-only token check).
     /// </summary>
     Task<string?> TryImportFileAsync(
         string sourceFilePath,
@@ -47,7 +56,11 @@ public interface IFileWidgetImportTarget
 
     /// <summary>
     /// Imports inline text content as a file into the target file widget's
-    /// backing folder. Returns the destination path or null on failure.
+    /// backing folder. Returns the destination path, or null when the
+    /// target widget is invalid or the input is unusable; I/O failures and
+    /// cancellation propagate as exceptions. Same sink discipline as
+    /// <see cref="TryImportFileAsync"/>: the file name is confined to the
+    /// widget folder and the write is atomic.
     /// </summary>
     Task<string?> TryImportTextAsync(
         string text,
@@ -56,8 +69,7 @@ public interface IFileWidgetImportTarget
         CancellationToken cancellationToken = default);
 }
 
-/// <summary>An importable file widget: id, display name, backing folder.</summary>
+/// <summary>An importable file widget: id and display name (no raw paths).</summary>
 public sealed record FileWidgetImportTarget(
     string WidgetId,
-    string Name,
-    string FolderPath);
+    string Name);
