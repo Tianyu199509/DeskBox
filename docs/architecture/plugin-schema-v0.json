@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://deskbox.fun/schemas/plugin-manifest-v0.json",
-  "title": "DeskBox Plugin Manifest (schema v0.2 draft)",
-  "description": "Draft manifest vocabulary for the DeskBox extension system. v0.1 incorporated the third review round (contributions[] replaces widgets[]; runtime describes execution technology; the signature block avoids self-reference). v0.2 incorporates the fourth review round: widget contributions must be complete (displayName/template required, no additional properties), the signature block must be complete when present, packages carry the Ed25519 publisherPublicKey (fingerprint-only publishers cannot be verified), and hashing is pinned to JCS (RFC 8785) canonicalization + a package.integrity manifest. Design decisions: roadmap sections 13.2, 13.4, 13.5, 14, 15 and 16.7.",
+  "title": "DeskBox Plugin Manifest (schema v0.3 draft)",
+  "description": "Draft manifest vocabulary for the DeskBox extension system. v0.1 incorporated the third review round (contributions[] replaces widgets[]; runtime describes execution technology; the signature block avoids self-reference). v0.2 incorporated the fourth round (widget contributions must be complete; signature blocks must be complete; packages carry the Ed25519 publisherPublicKey; hashing is pinned to JCS + a package.integrity manifest). v0.3 adds the declarative execution vocabulary (round 6): dataSources (http-json fetched by the HOST under the network.fetch permission), bindings (JSON-path overrides of payload fields), and actions (open-url under the shell.open permission) - runtime:none packages execute no third-party code, but the host executes governed capabilities on their behalf. Design decisions: roadmap sections 13.2, 13.4, 13.5, 14, 15, 16.7 and 16.10.",
   "type": "object",
   "required": ["schemaVersion", "id", "version", "publisher", "publisherPublicKey", "runtime", "hostApi", "contributions"],
   "$defs": {
@@ -33,7 +33,12 @@
             }
           },
           "additionalProperties": true,
-          "description": "Template payload data + bindings. HostConfig owns theming; the payload never carries style."
+          "description": "Template payload data. Payload fields are the static/fallback values; bindings override them with live data. HostConfig owns theming; the payload never carries style."
+        },
+        "bindings": {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/$defs/fieldBinding" },
+          "description": "Live-data overrides for payload fields (keys are payload field names). Minimal v0.3 semantics: JSON path into an http-json data source; a failed fetch or missing path keeps the payload fallback value (per-element fallback, roadmap 13.5)."
         },
         "defaultSize": {
           "type": "object",
@@ -46,6 +51,54 @@
             "enum": ["onStartupFinished", "onWidgetOpen", "onCommand", "onSchedule", "onFileAssociation", "onEvent"]
           },
           "description": "Declarative activation events (roadmap 5.8): widgets restore their window/layout always; these decide when the plugin runtime starts."
+        }
+      }
+    },
+    "fieldBinding": {
+      "type": "object",
+      "required": ["source", "path"],
+      "additionalProperties": false,
+      "properties": {
+        "source": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Id of a root-level dataSources entry."
+        },
+        "path": {
+          "type": "string",
+          "pattern": "^\\$\\.[A-Za-z0-9_\\[\\].]*$",
+          "description": "Minimal JSON path into the data source response, e.g. $.stargazers_count or $.items[0].name. A missing path keeps the payload fallback value."
+        }
+      }
+    },
+    "dataSource": {
+      "type": "object",
+      "required": ["type", "url", "refreshSeconds"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "const": "http-json" },
+        "url": {
+          "type": "string",
+          "pattern": "^https://",
+          "description": "HTTPS-only: a declarative fetcher must not be redirectable over plaintext. The HOST performs the fetch; the URL host must fall inside a granted network.fetch scope (checked at install time and again at runtime)."
+        },
+        "refreshSeconds": {
+          "type": "integer",
+          "minimum": 10,
+          "description": "Minimum refresh interval; the host may stretch it (its scheduler owns the actual cadence)."
+        }
+      }
+    },
+    "packageAction": {
+      "type": "object",
+      "required": ["type", "url"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "const": "open-url" },
+        "url": {
+          "type": "string",
+          "pattern": "^https://",
+          "description": "Literal HTTPS URL for v0.3 (no templating yet). Executed host-side via the shell open; requires a granted shell.open permission whose scope covers the URL host - declarative does not mean harmless (roadmap 14)."
         }
       }
     }
@@ -154,6 +207,16 @@
         }
       },
       "additionalProperties": false
+    },
+    "dataSources": {
+      "type": "object",
+      "additionalProperties": { "$ref": "#/$defs/dataSource" },
+      "description": "Named data sources the HOST fetches on the package's behalf (v0.3: http-json only). Every http-json source consumes the network.fetch permission: it must be declared and its URL host must fall inside a granted scope, checked at install time and again at runtime. runtime:none packages execute no third-party code - the host executes governed capabilities for them."
+    },
+    "actions": {
+      "type": "object",
+      "additionalProperties": { "$ref": "#/$defs/packageAction" },
+      "description": "Package-scoped actions referenced by payload actionIds (v0.3: open-url only). Every action consumes the shell.open permission: it must be declared and its URL host must fall inside a granted scope. When the actions map is present, payload actionId references must resolve to it."
     },
     "fallback": {
       "type": "object",

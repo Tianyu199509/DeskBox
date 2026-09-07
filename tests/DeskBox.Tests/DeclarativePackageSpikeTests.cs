@@ -80,6 +80,40 @@ public sealed class DeclarativePackageSpikeTests : IDisposable
             StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void LivePackage_ValidatesAndExecutesTheDeclarativeLoop()
+    {
+        // Leg 1B: validation -> permission gate -> HOST-side fetch (mock) ->
+        // JSON-path binding -> payload fallback semantics -> action
+        // resolution, all in one harness run.
+        ProcessResult result = RunHarness(
+            TestPaths.FromRepository("spikes/github-stats-live"),
+            "--self-test=ok",
+            "--invoke=open-repo");
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Contains("\"value\": 1284", result.StandardOutput, StringComparison.Ordinal);
+        Assert.Contains("\"bound\": {", result.StandardOutput, StringComparison.Ordinal);
+        Assert.Contains("\"type\": \"open-url\"", result.StandardOutput, StringComparison.Ordinal);
+        Assert.Contains("https://github.com/Tianyu199509/DeskBox", result.StandardOutput, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void LivePackage_FetchOutsideDeclaredScopeIsRefused()
+    {
+        // The host policy gate must refuse BEFORE any bytes move when the
+        // data source URL host is not inside the granted network.fetch scope.
+        ProcessResult result = RunHarness(
+            TestPaths.FromRepository("spikes/github-stats-live"),
+            "--self-test=out-of-scope");
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains(
+            "outside the declared network.fetch scope",
+            result.StandardError,
+            StringComparison.Ordinal);
+    }
+
     private static void CopyDirectory(string source, string destination)
     {
         foreach (string file in Directory.GetFiles(source, "*", SearchOption.AllDirectories))
@@ -93,6 +127,20 @@ public sealed class DeclarativePackageSpikeTests : IDisposable
 
     private static ProcessResult RunValidator(string packageDirectory)
     {
+        return RunNode(
+            TestPaths.FromRepository("scripts/spike/validate-package.mjs"),
+            packageDirectory);
+    }
+
+    private static ProcessResult RunHarness(string packageDirectory, params string[] harnessArgs)
+    {
+        return RunNode(
+            TestPaths.FromRepository("scripts/spike/run-declarative.mjs"),
+            [packageDirectory, .. harnessArgs]);
+    }
+
+    private static ProcessResult RunNode(string scriptPath, params string[] scriptArgs)
+    {
         string nodePath = ResolveNodeExecutablePath();
         var startInfo = new System.Diagnostics.ProcessStartInfo(nodePath)
         {
@@ -102,9 +150,11 @@ public sealed class DeclarativePackageSpikeTests : IDisposable
             CreateNoWindow = true,
             WorkingDirectory = TestPaths.FromRepository(".")
         };
-        startInfo.ArgumentList.Add(TestPaths.FromRepository(
-            "scripts/spike/validate-package.mjs"));
-        startInfo.ArgumentList.Add(packageDirectory);
+        startInfo.ArgumentList.Add(scriptPath);
+        foreach (string argument in scriptArgs)
+        {
+            startInfo.ArgumentList.Add(argument);
+        }
 
         using var process = System.Diagnostics.Process.Start(startInfo)
             ?? throw new InvalidOperationException("Unable to start the Node runtime.");
