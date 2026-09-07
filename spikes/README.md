@@ -26,11 +26,11 @@
 - `../scripts/spike/validate-package.mjs`（逻辑在 `validate-lib.mjs`，供 harness 复用）：结构校验 + v0.3 词汇 + 路径文法 + 权限消耗清单 + 五步验签链（通过=exit 0 + VERIFIED）。
 - 行为钉扎：`tests/DeskBox.Tests/DeclarativePackageSpikeTests.cs`。
 
-## 腿①B 交付物
+## 腿①B 交付物（第七轮安全语义已补齐）
 
-- `github-stats-live/`：schema v0.3 声明式 live 包——`dataSources.github-repo`（http-json，`https://api.github.com/repos/Tianyu199509/DeskBox`，refreshSeconds 300）+ metric 贡献的 `bindings.value ← $.stargazers_count`（payload 回退值 `…`）+ `actions.open-repo`（open-url → `https://github.com/Tianyu199509/DeskBox`）+ 双权限：`network.fetch`（scope: api.github.com）与 `shell.open`（scope: github.com）。
-- `../scripts/spike/run-declarative.mjs`：声明式执行 harness——包校验（复用 validate-lib）→ **宿主策略门**（权限已声明且 URL host 落在 scope.allow 内才放行，host 精确小写匹配；install 期与运行期同规则）→ **宿主代取** http-json（HTTPS-only）→ JSON path 绑定求值（拉取失败/路径缺失=保持 payload 回退值）→ open-url 动作解析（打印宿主 ShellOpen 意图，spike 不真开浏览器）。`--self-test=ok|out-of-scope` 用本地 mock 服务器做确定性测试（ok=同步授予 mock host 走通全链路；out-of-scope=保留原 scope，策略门必须在**任何字节移动之前**拒绝）；`--measure` 输出分段耗时+堆。
-- 真实链路已验证：GitHub API 实拉（2026-09-07 实测 3500 stars）→ 绑定生效 → 动作解析。
+- `github-stats-live/`：schema v0.3 声明式 live 包——`dataSources.github-repo`（http-json，`https://api.github.com/repos/Tianyu199509/DeskBox`，refreshSeconds 300）+ metric 贡献的 `bindings.value ← $.stargazers_count`（payload 回退值 `…`）+ `payload.primaryActionId: "open-repo"`（"点击 widget→动作"链路）+ `actions.open-repo`（open-url）+ 双权限：`network.fetch`（scope: api.github.com）与 `shell.open`（scope: github.com）。
+- `../scripts/spike/run-declarative.mjs`：声明式执行 harness——包校验（复用 validate-lib）→ **三层能力门**（manifest 声明 ∧ URL host 在请求 scope 内 ∧ **宿主已授予**；`--grant=<id>=<host>` 重复传参，**无授予=全部拒绝**（fail-closed），requested≠granted 模型与腿②③共享）→ **宿主代取** http-json（HTTPS-only、**redirect 不跟随直接拒绝**、**响应体 2MB 硬上限**流式执行）→ JSON path 绑定求值（**数据失败≠致命**：源标记失败+绑定回退 payload，widget 照常产出状态；策略失败=REFUSED exit 1）→ 动作解析（`--invoke-widget=<贡献id>` 经 primaryActionId 走通点击链路；`--invoke=<actionId>` 解析根动作；打印 ShellOpen 意图不真开）。`--self-test=ok|out-of-scope|redirect|server-error|huge` 五模式本地 mock；`--measure` 输出分段耗时+堆。
+- 真实链路已验证：GitHub API 实拉（2026-09-07 实测 3500 stars）→ 绑定生效 → 动作解析；五个安全/回退场景（无授予/超 scope/redirect/5xx/超限）全部有测试钉死。
 
 ## 统一测量矩阵（三腿跑齐后填表拍板；腿①=2026-09-07 开发机初步值，mock 取 3 次中位）
 
@@ -39,14 +39,16 @@
 | 冷启动（包校验+首帧状态） | validate 3ms + bind 0ms | | |
 | 稳态内存增量 | 峰值堆 ~9.0MB（含 Node 运行时本身；宿主内嵌渲染器将远低于此——此数是 harness 上界，非插件成本） | | |
 | 数据源刷新→绑定延迟（p50） | 32ms（mock；真实 GitHub 数百 ms，网络主导） | | |
-| 开发代码量（行） | harness ~260 行（策略门+绑定求值器+mock） | | |
-| 打包大小 | manifest+integrity ≈ 4.4KB | | |
+| 开发代码量（行） | harness ~350 行（权限门+绑定求值器+mock） | | |
+| 打包大小 | manifest+integrity ≈ 4.6KB | | |
 | 调试体验 | 纯声明式 JSON，validator 逐条失败原因 | | |
 | AI 一次生成成功率 | 待三腿同题测试 | | |
 | 升级兼容 | payload per-element fallback + 绑定失败回退=设计内置 | | |
-| 权限强制点 | 策略门先于 fetch（out-of-scope 拒绝已被测试钉死） | | |
+| 权限强制点 | 请求∧scope∧授予三层门先于 fetch；redirect 拒绝；2MB 上限（五场景测试钉死） | | |
 | Crash 恢复 | 无第三方代码可崩（模型固有优势） | | |
 
-测量方法学：进程腿内存=私有提交（非工作集，见 memory 惯例）；每腿同机同电源策略跑 3 次取中位。
+测量方法学（第七轮修订）：**上表腿①数字是 scaffolding observation（Node 脚手架观察值），不能与腿②③直接横向定胜负**——产品形态下声明式执行器内嵌在 DeskBox C# 宿主里，Node 堆/启动数与产品无对应关系。正式对比拆两层：**Runtime intrinsic**（activation/协议/绑定延迟、增量内存，排除网络）与 **E2E**（从"宿主要求激活"到"首个绑定状态就绪"，统一包含 process spawn / WASM instantiate / declarative parse，三腿测量边界完全一致）。腿①正式数等最小 C# 宿主执行器就绪后再填。
+
+**Backlog（不阻塞腿②③）**：①File Widget 枚举/watch 过滤 `.import-*.tmp`（大文件导入期间避免视觉噪音）；②`network.fetch` 与 `network.local` 拆分——默认禁 loopback/私网/link-local/元数据地址（DNS 重绑定类 SSRF 防御，归 Capability Broker 安全 backlog）。
 
 **SPIKE-GRADE 声明**：Node 工具链零依赖、JCS 为子集实现（整数 only、排序键、无空白；小数/代理对未按 RFC 8785 全覆盖）。阶段 6 CLI（.NET AOT）必须用完整 JCS 实现并**替换掉 Node 依赖**（当前 dotnet test 需要 node.exe 是 spike 期过渡，不是长期构建前提）；本目录工具只是脚手架不是参考实现。

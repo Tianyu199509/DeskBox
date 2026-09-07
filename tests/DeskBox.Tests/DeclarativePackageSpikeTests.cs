@@ -83,17 +83,19 @@ public sealed class DeclarativePackageSpikeTests : IDisposable
     [Fact]
     public void LivePackage_ValidatesAndExecutesTheDeclarativeLoop()
     {
-        // Leg 1B: validation -> permission gate -> HOST-side fetch (mock) ->
-        // JSON-path binding -> payload fallback semantics -> action
-        // resolution, all in one harness run.
+        // Leg 1B: validation -> requested/granted permission gate -> HOST-
+        // side fetch (mock) -> JSON-path binding -> widget primaryActionId
+        // -> open-url resolution, all in one harness run.
         ProcessResult result = RunHarness(
             TestPaths.FromRepository("spikes/github-stats-live"),
             "--self-test=ok",
-            "--invoke=open-repo");
+            "--grant=network.fetch=127.0.0.1",
+            "--grant=shell.open=github.com",
+            "--invoke-widget=live-stars");
 
         Assert.Equal(0, result.ExitCode);
         Assert.Contains("\"value\": 1284", result.StandardOutput, StringComparison.Ordinal);
-        Assert.Contains("\"bound\": {", result.StandardOutput, StringComparison.Ordinal);
+        Assert.Contains("\"primaryActionId\": \"open-repo\"", result.StandardOutput, StringComparison.Ordinal);
         Assert.Contains("\"type\": \"open-url\"", result.StandardOutput, StringComparison.Ordinal);
         Assert.Contains("https://github.com/Tianyu199509/DeskBox", result.StandardOutput, StringComparison.Ordinal);
     }
@@ -102,14 +104,111 @@ public sealed class DeclarativePackageSpikeTests : IDisposable
     public void LivePackage_FetchOutsideDeclaredScopeIsRefused()
     {
         // The host policy gate must refuse BEFORE any bytes move when the
-        // data source URL host is not inside the granted network.fetch scope.
+        // data source URL host is not inside the declared network.fetch scope.
         ProcessResult result = RunHarness(
             TestPaths.FromRepository("spikes/github-stats-live"),
-            "--self-test=out-of-scope");
+            "--self-test=out-of-scope",
+            "--grant=network.fetch=127.0.0.1");
 
         Assert.Equal(1, result.ExitCode);
         Assert.Contains(
             "outside the declared network.fetch scope",
+            result.StandardError,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void LivePackage_RequestedPermissionIsNotGrantedByDefault()
+    {
+        // Round 7: manifest permissions are REQUESTS. Without a host-side
+        // grant nothing runs (fail closed) - legs 2/3 must copy this split.
+        ProcessResult result = RunHarness(
+            TestPaths.FromRepository("spikes/github-stats-live"),
+            "--self-test=ok",
+            "--invoke-widget=live-stars");
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains(
+            "has no granted network.fetch capability (requested != granted)",
+            result.StandardError,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void LivePackage_RedirectAttemptIsRefusedNotFollowed()
+    {
+        // A 3xx would move the request to a host that never passed the
+        // gate; v0.3 refuses instead of following (the redirect target
+        // receives nothing because redirects are never followed).
+        ProcessResult result = RunHarness(
+            TestPaths.FromRepository("spikes/github-stats-live"),
+            "--self-test=redirect",
+            "--grant=network.fetch=127.0.0.1",
+            "--grant=shell.open=github.com");
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains(
+            "attempted a redirect; redirects are refused in v0.3",
+            result.StandardError,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void LivePackage_FetchFailureUsesPayloadFallback()
+    {
+        // Data failures (HTTP 5xx) are not fatal: the source is marked
+        // failed, its bindings keep the payload fallback, widget state is
+        // still produced.
+        ProcessResult result = RunHarness(
+            TestPaths.FromRepository("spikes/github-stats-live"),
+            "--self-test=server-error",
+            "--grant=network.fetch=127.0.0.1");
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Contains("\"value\": \"…\"", result.StandardOutput, StringComparison.Ordinal);
+        Assert.Contains("fallback (HTTP 500)", result.StandardOutput, StringComparison.Ordinal);
+        Assert.Contains("\"github-repo\": \"HTTP 500\"", result.StandardOutput, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void LivePackage_OversizedResponseIsCappedAndFallsBack()
+    {
+        // Host hard limit: a 3MB "JSON" body exceeds the 2MB cap; the
+        // source fails, bindings fall back, the run still succeeds.
+        ProcessResult result = RunHarness(
+            TestPaths.FromRepository("spikes/github-stats-live"),
+            "--self-test=huge",
+            "--grant=network.fetch=127.0.0.1");
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Contains(
+            "response exceeds the 2097152-byte host limit",
+            result.StandardOutput,
+            StringComparison.Ordinal);
+        Assert.Contains("\"value\": \"…\"", result.StandardOutput, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Validator_RejectsDuplicatePermissionIds()
+    {
+        // One entry per permission id: duplicate ids with different scopes
+        // would make grant/scope lookup implementation-defined across the
+        // three future runtimes. (The manifest edit also breaks integrity,
+        // which is expected - both failures are listed.)
+        string tampered = Path.Combine(_tempRoot, "github-stats-live");
+        CopyDirectory(TestPaths.FromRepository("spikes/github-stats-live"), tampered);
+        string manifestPath = Path.Combine(tampered, "manifest.json");
+        File.WriteAllText(
+            manifestPath,
+            File.ReadAllText(manifestPath).Replace(
+                "\"id\": \"shell.open\"",
+                "\"id\": \"network.fetch\""));
+
+        ProcessResult result = RunValidator(tampered);
+
+        Assert.Equal(1, result.ExitCode);
+        Assert.Contains(
+            "duplicate id 'network.fetch'",
             result.StandardError,
             StringComparison.Ordinal);
     }
@@ -148,7 +247,11 @@ public sealed class DeclarativePackageSpikeTests : IDisposable
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             CreateNoWindow = true,
-            WorkingDirectory = TestPaths.FromRepository(".")
+            WorkingDirectory = TestPaths.FromRepository("."),
+            // Node always writes UTF-8; without this the redirected stream
+            // decodes with the system code page and non-ASCII output breaks.
+            StandardOutputEncoding = System.Text.Encoding.UTF8,
+            StandardErrorEncoding = System.Text.Encoding.UTF8
         };
         startInfo.ArgumentList.Add(scriptPath);
         foreach (string argument in scriptArgs)
