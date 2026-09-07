@@ -1,0 +1,10 @@
+[workspace]
+resolver = "2"
+members = ["host", "guest"]
+
+[workspace.package]
+edition = "2021"
+
+[profile.release]
+opt-level = "s"
+lto = true

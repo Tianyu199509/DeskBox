@@ -14,9 +14,19 @@
 | ①A 声明式包样本 | 六模板 + manifest v0.2 + 完整验签链 + 路径文法 | ✅ 已完成 |
 | ①B 声明式执行闭环 | http-json 数据源 + JSON path 绑定 + open-url 动作 + 宿主权限门（schema v0.3） | ✅ 已完成 |
 | ② TS 外部进程 | ndjson JSON-RPC over stdio + 同款三层能力门 + 进程治理（deadline/kill/退出码传播） | ✅ 已完成（schema 增 `entry` 入口字段） |
-| ③ Rust/TS→WASM | 独立 crate `native/deskbox-wasm-spike`（勿给 deskbox-native 加 wasmtime feature）；Wasmtime 组件模型 + wit-bindgen `deskbox:plugin` world + fuel/epoch/ResourceLimiter | ⬜ 未开始 |
+| ③ Rust→WASM | 独立 crate `native/deskbox-wasm-spike`（红线：不进 app 构建）；Wasmtime 48 组件模型 + wit-bindgen 0.61 `deskbox:plugin` world + **fuel/epoch/ResourceLimiter** | ✅ 已完成 |
 
 可选补充腿（降级）：Extism（1 天 AOT 冒烟）、wasmtime-dotnet（0.5 天，宿主内置信任脚本引擎定位）。
+
+## 腿③ 交付物
+
+- `native/deskbox-wasm-spike/`（**独立 workspace，红线钉死：app csproj/audit/retail 脚本永不引用，有测试钉扎**）：
+  - `wit/deskbox-plugin.wit`：`deskbox:plugin@0.1.0` world——能力只有 host import（`network-fetch`/`shell-open`/`widget-update`），guest 导出 `activate`/`invoke-action`；三腿共享的能力边界在类型层成文。
+  - `guest/`：**no_std（core+alloc）纯组件，零 WASI 导入**——`wasm32-unknown-unknown` 构建 + `wasm-tools component embed/new` 包装（37.9KB）。无 WASI 依赖=宿主纯同步嵌入，不挂 wasmtime-wasi；敌意 guest 的 `spin` 分支用于 fuel 治理测试。
+  - `host/`：Wasmtime 48 嵌入——**fuel 2M（确定性预算）+ epoch 挂钟后备 + ResourceLimiter 内存 64MB 上限**三层治理；ureq 取数（redirects(0)+显式 3xx 拒绝+2MB 流式上限）；手写 mock HTTP 服务器（无依赖五模式）；Rust 版同一三层能力门（声明∧scope∧授予，与 Node 腿语义逐条对齐，消息文本一致）。
+- `spikes/github-stats-wasm/`：`runtime:"wasm"` 包——`entry.main=plugin/plugin.wasm`（37.9KB 组件产物入库，integrity+签名覆盖）。
+- `../scripts/spike/build-wasm-spike.ps1`：一键构建+包装+重签（wasm 非字节可重现，重构建必须走脚本刷新 integrity 链）。
+- 真实链路已验证（GitHub 实拉 3505 stars 经 WASM guest→host 能力往返）；七场景（happy/未授予/敌意越界/redirect/5xx/spin-fuel 耗尽/真实网络）全部手动验证。**WASM 场景运行不进 dotnet test**（CI 无 Rust 工具链；C# 侧钉扎=包验签+组件头+WIT world+宿主治理标记+红线）。
 
 ## 腿② 交付物
 
@@ -43,16 +53,18 @@
 
 | 维度 | ① 声明式 | ② TS 进程 | ③ WASM |
 |---|---|---|---|
-| 冷启动（包校验+首帧状态） | validate 3ms + bind 0ms | spawn 43ms + activate→首状态 50ms（mock） | |
-| 稳态内存增量 | 峰值堆 ~9.0MB（含 Node 运行时本身；宿主内嵌渲染器将远低于此——此数是 harness 上界，非插件成本） | 宿主 ~9.2MB + 子进程 Node 运行时（子进程 RSS 待正式测量轮统一采） | |
-| 数据源刷新→绑定延迟（p50） | 32ms（mock；真实 GitHub 数百 ms，网络主导） | 50ms（mock，含 stdio 往返；真实 GitHub 700ms 网络主导） | |
-| 开发代码量（行） | harness ~350 行（权限门+绑定求值器+mock） | 插件 ~120 行 + harness ~290 行（共享能力库两腿复用） | |
-| 打包大小 | manifest+integrity ≈ 4.6KB | manifest+integrity+plugin ≈ 5.7KB | |
-| 调试体验 | 纯声明式 JSON，validator 逐条失败原因 | 独立进程可断点/打日志，stderr 由宿主捕获转发 | |
-| AI 一次生成成功率 | 待三腿同题测试 | 待三腿同题测试 | |
-| 升级兼容 | payload per-element fallback + 绑定失败回退=设计内置 | 协议版本化待定（ndjson JSON-RPC 为 spike 选择） | |
-| 权限强制点 | 请求∧scope∧授予三层门先于 fetch；redirect 拒绝；2MB 上限（五场景测试钉死） | **同一共享库同一语义**（未授予/敌意越界/redirect 调用级拒绝+回退，测试钉死） | |
-| Crash 恢复 | 无第三方代码可崩（模型固有优势） | 进程崩溃→宿主检出（退出码传播，首状态后崩溃不吞成功） | |
+| 冷启动（包校验+首帧状态） | validate 3ms + bind 0ms | spawn 43ms + activate→首状态 50ms（mock） | **instantiate ~0ms + activate 1-2ms（mock，含完整 fetch+绑定+guest 逻辑）** |
+| 稳态内存增量 | 峰值堆 ~9.0MB（含 Node 运行时本身；宿主内嵌渲染器将远低于此——此数是 harness 上界，非插件成本） | 宿主 ~9.2MB + 子进程 Node 运行时（子进程 RSS 待正式测量轮统一采） | 插件本体 37.9KB 组件 + store 按需（内存 64MB 硬顶）；宿主 exe 12.7MB（含 Wasmtime） |
+| 数据源刷新→绑定延迟（p50） | 32ms（mock；真实 GitHub 数百 ms，网络主导） | 50ms（mock，含 stdio 往返；真实 GitHub 700ms 网络主导） | 1-2ms（mock，含能力往返+guest 解析；真实 GitHub 641ms 网络主导） |
+| 开发代码量（行） | harness ~350 行（权限门+绑定求值器+mock） | 插件 ~120 行 + harness ~290 行（共享能力库两腿复用） | WIT ~25 行 + guest ~95 行 + host ~400 行（三腿唯一需要 WIT 的） |
+| 打包大小 | manifest+integrity ≈ 4.6KB | manifest+integrity+plugin ≈ 5.7KB | manifest+integrity+**组件 37.9KB** |
+| 调试体验 | 纯声明式 JSON，validator 逐条失败原因 | 独立进程可断点/打日志，stderr 由宿主捕获转发 | fuel 确定性消耗计数；trap 分类（fuel/epoch/其他）；断点需 wasm DWARF 支持 |
+| AI 一次生成成功率 | 待三腿同题测试 | 待三腿同题测试 | 待三腿同题测试 |
+| 升级兼容 | payload per-element fallback + 绑定失败回退=设计内置 | 协议版本化待定（ndjson JSON-RPC 为 spike 选择） | 组件模型版本化+WIT world 版本化（`deskbox:plugin@0.1.0`） |
+| 权限强制点 | 请求∧scope∧授予三层门先于 fetch；redirect 拒绝；2MB 上限（五场景测试钉死） | **同一共享库同一语义**（未授予/敌意越界/redirect 调用级拒绝+回退，测试钉死） | **同一语义 Rust 实现**（七场景手动验证+源码钉扎） |
+| Crash 恢复 | 无第三方代码可崩（模型固有优势） | 进程崩溃→宿主检出（退出码传播，首状态后崩溃不吞成功） | **最强：trap 隔离（fuel 耗尽/epoch 超时→宿主存活报错）+内存 64MB 硬顶+确定性 fuel 计数** |
+
+**三腿初步读数（正式对比仍按下方方法学，等最小 C# 宿主执行器再定论）**：WASM 腿在本机读数上全面占优（激活 1-2ms vs 进程 50ms vs 声明式 3ms+绑定；崩溃隔离最强制；唯一代价=37.9KB 组件产物+Rust 宿主工具链+WIT 学习面）。AI 可生成性与真实集成成本待三腿同题实测——这正是拍板"代码插件默认 Runtime"前最后的坑。
 
 测量方法学（第七轮修订）：**上表腿①数字是 scaffolding observation（Node 脚手架观察值），不能与腿②③直接横向定胜负**——产品形态下声明式执行器内嵌在 DeskBox C# 宿主里，Node 堆/启动数与产品无对应关系。正式对比拆两层：**Runtime intrinsic**（activation/协议/绑定延迟、增量内存，排除网络）与 **E2E**（从"宿主要求激活"到"首个绑定状态就绪"，统一包含 process spawn / WASM instantiate / declarative parse，三腿测量边界完全一致）。腿①正式数等最小 C# 宿主执行器就绪后再填。
 

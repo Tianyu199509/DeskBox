@@ -1,0 +1,21 @@
+// deskbox:plugin world (roadmap stage 3.5, leg 3). The same capability
+// semantics as the declarative and process legs: the guest never touches
+// the network or shell directly - every capability is a host import gated
+// host-side by requested AND in-scope AND granted permissions.
+package deskbox:plugin@0.1.0;
+
+interface capabilities {
+    record fetch-result {
+        status: u16,
+        body: string,
+    }
+    network-fetch: func(url: string) -> result<fetch-result, string>;
+    shell-open: func(url: string) -> result<bool, string>;
+    widget-update: func(contribution-id: string, value: string, note: option<string>);
+}
+
+world plugin-world {
+    import capabilities;
+    export activate: func(reason: string);
+    export invoke-action: func(action-id: string);
+}
