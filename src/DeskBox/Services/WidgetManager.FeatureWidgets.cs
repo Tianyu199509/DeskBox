@@ -1050,6 +1050,13 @@ public sealed partial class WidgetManager
                 {
                     await GlanceWidgetStore.DeleteForWidgetAsync(duplicate.Id);
                 }
+                else if (kind == WidgetKind.Todo)
+                {
+                    // Duplicate todo instances keep their own stores and
+                    // attachments; dropping the config alone used to orphan
+                    // them under data/widgets/{id}/.
+                    await TodoWidgetStore.DeleteForWidgetAsync(duplicate.Id);
+                }
                 if (!_settingsService.Settings.DeletedWidgetIds.Contains(duplicate.Id))
                 {
                     _settingsService.Settings.DeletedWidgetIds.Add(duplicate.Id);

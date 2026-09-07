@@ -1454,8 +1454,14 @@ public sealed partial class DeskBoxDataBackupService
             return false;
         }
 
+        // cache/ (widget image caches) and weather-cache.json are disposable:
+        // they regenerate on next use, so backups skip them. Restoring a
+        // backup without them only means the first weather render falls back
+        // to the location flow and glance images redownload.
         return !relativePath.StartsWith("quick-capture/thumbnails/", StringComparison.OrdinalIgnoreCase) &&
-               !relativePath.StartsWith("quick-capture/exports/", StringComparison.OrdinalIgnoreCase);
+               !relativePath.StartsWith("quick-capture/exports/", StringComparison.OrdinalIgnoreCase) &&
+               !relativePath.StartsWith("cache/", StringComparison.OrdinalIgnoreCase) &&
+               !string.Equals(relativePath, "weather-cache.json", StringComparison.OrdinalIgnoreCase);
     }
 
     private static async Task<(long Length, string Sha256)> CopyAndHashAsync(
