@@ -34,6 +34,12 @@ public sealed class DeskBoxDataBackupServiceTests : IDisposable
             Path.Combine(dataDirectory, "quick-capture", "exports")).FullName;
         await File.WriteAllBytesAsync(Path.Combine(thumbnailDirectory, "cached.png"), [4, 5, 6]);
         await File.WriteAllTextAsync(Path.Combine(exportDirectory, "temporary.txt"), "temporary");
+        string glanceCacheDirectory = Directory.CreateDirectory(
+            Path.Combine(dataDirectory, "cache", "glance", "images")).FullName;
+        await File.WriteAllBytesAsync(Path.Combine(glanceCacheDirectory, "wallpaper.jpg"), [7, 8, 9]);
+        await File.WriteAllTextAsync(
+            Path.Combine(dataDirectory, "weather-cache.json"),
+            "{\"schemaVersion\":2}");
         var service = new DeskBoxDataBackupService(_appDataRoot);
 
         string backupPath = await service.ExportBackupAsync(_exportRoot);
@@ -45,6 +51,8 @@ public sealed class DeskBoxDataBackupServiceTests : IDisposable
         Assert.Null(archive.GetEntry("data/ignored.tmp"));
         Assert.Null(archive.GetEntry("data/quick-capture/thumbnails/cached.png"));
         Assert.Null(archive.GetEntry("data/quick-capture/exports/temporary.txt"));
+        Assert.Null(archive.GetEntry("data/cache/glance/images/wallpaper.jpg"));
+        Assert.Null(archive.GetEntry("data/weather-cache.json"));
         ZipArchiveEntry manifestEntry = Assert.IsType<ZipArchiveEntry>(archive.GetEntry("manifest.json"));
         string manifestJson;
         using (var reader = new StreamReader(manifestEntry.Open()))

@@ -28,6 +28,48 @@ public sealed class TodoWidgetStoreTests : IDisposable
     }
 
     [Fact]
+    public async Task DeleteForWidgetAsync_RemovesStoreBackupAttachmentsAndEmptyDirectory()
+    {
+        var store = CreateStore("todo-widget");
+        await store.SaveAsync(CreateData("item-1", "buy milk"));
+        // Force a resilient backup next to the store file.
+        string backupPath = ResilientJsonStore.GetBackupPath(store.StorePath);
+        await File.WriteAllTextAsync(backupPath, "{}");
+        Directory.CreateDirectory(store.AttachmentDirectory);
+        await File.WriteAllBytesAsync(
+            Path.Combine(store.AttachmentDirectory, "spec.pdf"),
+            [1, 2, 3]);
+        string widgetDirectory = Path.GetDirectoryName(store.StorePath)!;
+
+        await TodoWidgetStore.DeleteForWidgetAsync(_widgetsDataRoot, "todo-widget");
+
+        Assert.False(File.Exists(store.StorePath));
+        Assert.False(File.Exists(backupPath));
+        Assert.False(Directory.Exists(store.AttachmentDirectory));
+        Assert.False(Directory.Exists(widgetDirectory));
+    }
+
+    [Fact]
+    public async Task DeleteForWidgetAsync_IsIdempotentAndKeepsSiblingWidgetData()
+    {
+        var removed = CreateStore("todo-a");
+        var sibling = CreateStore("todo-b");
+        await removed.SaveAsync(CreateData("item-1", "removed"));
+        await sibling.SaveAsync(CreateData("item-2", "kept"));
+        Directory.CreateDirectory(sibling.AttachmentDirectory);
+        await File.WriteAllBytesAsync(
+            Path.Combine(sibling.AttachmentDirectory, "keep.pdf"),
+            [4, 5, 6]);
+
+        await TodoWidgetStore.DeleteForWidgetAsync(_widgetsDataRoot, "todo-a");
+        await TodoWidgetStore.DeleteForWidgetAsync(_widgetsDataRoot, "todo-a");
+
+        Assert.False(File.Exists(removed.StorePath));
+        Assert.True(File.Exists(sibling.StorePath));
+        Assert.True(File.Exists(Path.Combine(sibling.AttachmentDirectory, "keep.pdf")));
+    }
+
+    [Fact]
     public async Task SaveAsync_PersistsAndReloadsItems()
     {
         var store = CreateStore("todo-widget");
