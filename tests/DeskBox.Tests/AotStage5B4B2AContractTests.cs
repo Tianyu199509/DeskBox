@@ -192,7 +192,7 @@ public sealed class AotStage5B4B2AContractTests
         Assert.Contains("stage5B4B2AForbiddenScopePatterns", audit, StringComparison.Ordinal);
         Assert.Contains("stage5B4B2AJsonSerializeCallCount", audit, StringComparison.Ordinal);
         Assert.Contains("stage5B4B2ASourceWarningMessages", audit, StringComparison.Ordinal);
-        Assert.Contains("stage5B4B2AExpectedWmc1510Count = 1235", audit, StringComparison.Ordinal);
+        Assert.Contains("stage5B4B2AExpectedWmc1510Count = 863", audit, StringComparison.Ordinal);
     }
 
     private static int CountOccurrences(string value, string token)
