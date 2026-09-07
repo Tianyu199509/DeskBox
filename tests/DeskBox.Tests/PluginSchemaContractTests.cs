@@ -154,6 +154,37 @@ public sealed class PluginSchemaContractTests
     }
 
     [Fact]
+    public void Schema_DeclarativeExecutionVocabulary_MatchesV03()
+    {
+        using JsonDocument schema = JsonDocument.Parse(File.ReadAllText(
+            TestPaths.FromRepository("docs/architecture/plugin-schema-v0.json")));
+        JsonElement defs = schema.RootElement.GetProperty("$defs");
+        JsonElement properties = schema.RootElement.GetProperty("properties");
+        string schemaText = schema.RootElement.GetRawText();
+
+        // v0.3 (round 6, spike leg 1B prerequisite): dataSources (http-json
+        // fetched by the HOST), bindings (JSON-path payload overrides), and
+        // actions (open-url) - runtime:none packages execute no third-party
+        // code, but the host executes governed capabilities for them.
+        Assert.True(defs.TryGetProperty("dataSource", out _));
+        Assert.True(defs.TryGetProperty("fieldBinding", out _));
+        Assert.True(defs.TryGetProperty("packageAction", out _));
+        Assert.True(properties.TryGetProperty("dataSources", out _));
+        Assert.True(properties.TryGetProperty("actions", out _));
+
+        Assert.Contains("http-json", schemaText, StringComparison.Ordinal);
+        Assert.Contains("open-url", schemaText, StringComparison.Ordinal);
+        Assert.Contains("shell.open", schemaText, StringComparison.Ordinal);
+        // HTTPS-only for declarative fetch and open (no plaintext redirects).
+        Assert.Contains("^https://", schemaText, StringComparison.Ordinal);
+
+        string notes = File.ReadAllText(TestPaths.FromRepository(
+            "docs/architecture/plugin-schema-v0-notes.md"));
+        Assert.Contains("声明式≠无害", notes, StringComparison.Ordinal);
+        Assert.Contains("per-element fallback", notes, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void SchemaAndNotes_PinJcsCanonicalizationAndIntegrityManifest()
     {
         string schemaText = File.ReadAllText(

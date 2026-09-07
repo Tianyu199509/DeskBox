@@ -1,6 +1,17 @@
-# DeskBox Plugin Schema v0.2 — 语义注记
+# DeskBox Plugin Schema v0.3 — 语义注记
 
 配套 `plugin-schema-v0.json`。v0.x 是草案：给三路 spike（roadmap 阶段 3.5）、CLI validator（阶段 6）、商店规范（阶段 7）一个共同靶子，会迭代；契约测试只轻钉存在性与词汇+关键校验语义，不逐字段冻结。
+
+## v0.2 → v0.3 变更（第六轮评审：声明式执行词汇，腿 1B 前置）
+
+| 变更 | 内容 |
+|---|---|
+| 根级 `dataSources` | v0.3 仅 `http-json`：`{type, url, refreshSeconds≥10}`。**HTTPS-only**（声明式 fetcher 不得被引到明文）；**宿主代取**（runtime:none 包不执行第三方代码，宿主替它执行受控能力）；`network.fetch` 权限必须声明且 URL host 落在 scope.allow 内——install 期与运行期**双查** |
+| 贡献级 `bindings` | payload 字段名 → `{source, path}`；path=最小 JSON path（`$.a.b[0].c`）。**拉取失败/路径缺失=保持 payload 回退值**（与 §13.5 per-element fallback 一致）——声明式 UI 永远有东西可渲染 |
+| 根级 `actions` | v0.3 仅 `open-url`：`{type, url}`，字面量 HTTPS（模板化留 v1）。payload 里引用的 actionId 在 actions 映射存在时必须可解析（v0.2 老包无 actions 映射不追溯）。**消耗 `shell.open` 权限**（新权限词汇）且 URL host 须在 scope 内——roadmap §14"声明式≠无害"条款落地 |
+| 权限消耗清单 | validator/安装器检查：http-json 数据源→network.fetch 声明+scope 容纳；open-url 动作→shell.open 声明+scope 容纳。**scope 匹配=host 精确匹配（小写）**，子域/通配符留 v1 |
+
+**为什么现在做**：三路 spike 要公平比较，三腿必须做同一件事（真实 GitHub 数据流）；没有数据源/绑定/动作词汇，Declarative 腿只有静态数据，冷启动/延迟/AI 生成率等维度无从测起（第六轮评审裁定）。
 
 ## v0.1 → v0.2 变更（第四轮外部评审吸收）
 

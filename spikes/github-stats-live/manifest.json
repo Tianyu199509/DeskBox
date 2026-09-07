@@ -1,0 +1,69 @@
+{
+  "schemaVersion": 0,
+  "id": "com.github.stats.live",
+  "version": "0.1.0",
+  "publisher": "1bc4f2db8438d2fd296bd48074088ccc726c265712125abbae975063ba719ea4",
+  "publisherPublicKey": "R/C3TWwBQNgtms2UI1i/yAWr9HnObV2lK0LQfjcPbZA=",
+  "runtime": "none",
+  "hostApi": {
+    "min": "1.0.0",
+    "max": "1.0.0"
+  },
+  "dataSources": {
+    "github-repo": {
+      "type": "http-json",
+      "url": "https://api.github.com/repos/Tianyu199509/DeskBox",
+      "refreshSeconds": 300
+    }
+  },
+  "contributions": [
+    {
+      "type": "widget",
+      "id": "live-stars",
+      "displayName": "DeskBox Stars (live)",
+      "template": "metric",
+      "payload": {
+        "version": 1,
+        "label": "Stars",
+        "value": "…",
+        "caption": "Tianyu199509/DeskBox"
+      },
+      "bindings": {
+        "value": {
+          "source": "github-repo",
+          "path": "$.stargazers_count"
+        }
+      }
+    }
+  ],
+  "actions": {
+    "open-repo": {
+      "type": "open-url",
+      "url": "https://github.com/Tianyu199509/DeskBox"
+    }
+  },
+  "permissions": [
+    {
+      "id": "network.fetch",
+      "required": true,
+      "scope": {
+        "allow": [
+          "api.github.com"
+        ]
+      }
+    },
+    {
+      "id": "shell.open",
+      "required": true,
+      "scope": {
+        "allow": [
+          "github.com"
+        ]
+      }
+    }
+  ],
+  "signature": {
+    "contentHash": "ea8ffa6688648c46000d2ca158b338bf112ba40f49226f8edaf39a95159fc6d1",
+    "publisherSignature": "+8IqOMtrc5z37lxb+053jEZ/xUnrrIUvJDTH2ejmzJ9AhOSRrUBUXIUh5wt0XJtA9TKqAVL1eEp+xYGci5gOAA=="
+  }
+}
