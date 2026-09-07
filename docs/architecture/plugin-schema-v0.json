@@ -221,6 +221,19 @@
       "additionalProperties": { "$ref": "#/$defs/packageAction" },
       "description": "Package-scoped actions referenced by payload actionIds and payload.primaryActionId (v0.3: open-url only). Every action consumes the shell.open permission (requested here, granted host-side). When the actions map is present, payload action references must resolve to it."
     },
+    "entry": {
+      "type": "object",
+      "required": ["main"],
+      "additionalProperties": false,
+      "properties": {
+        "main": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Path to the runtime entry artifact inside the package (process: script path such as plugin/main.mjs; wasm: module path - final vocabulary per roadmap stage 4). Required for runtime wasm/process; the artifact is an ordinary integrity-listed payload file. Spike-proposed field name (leg 2)."
+        }
+      },
+      "description": "Runtime entry point for code-bearing packages. runtime:none packages have no entry."
+    },
     "fallback": {
       "type": "object",
       "properties": {
