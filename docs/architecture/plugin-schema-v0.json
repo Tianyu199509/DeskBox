@@ -173,8 +173,7 @@
           "scope": {
             "type": "object",
             "properties": {
-              "allow": { "type": "array", "items": { "type": "string" }, "description": "e.g. directory globs (Downloads/**), URL filters (api.github.com), quotas (100/day)." },
-              "deny": { "type": "array", "items": { "type": "string" }, "description": "Deny always wins over allow; the host additionally maintains defensive default-denies (own config/credential dirs)." }
+              "allow": { "type": "array", "items": { "type": "string" }, "description": "e.g. directory globs (Downloads/**), URL hosts (api.github.com), quotas (100/day). v0.3: exact-host allow lists only." }
             },
             "additionalProperties": false
           }

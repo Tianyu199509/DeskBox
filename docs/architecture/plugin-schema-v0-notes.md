@@ -53,6 +53,11 @@
 | 签名输入 | `publisherSignature` 签 contentHash 的 raw 32 字节摘要，非 hex 字符串 |
 | contentHash 表示 | 小写 hex 存储；清单行 `<sha256 小写 hex>␣␣<path>`（摘要+两空格+路径），LF 行尾 ordinal 排序 |
 | **manifest 数字整数化（第九轮）** | **manifest 全部数字字段=integer**（v0.3 `defaultSize.width/height` 同改 integer）——Node `JSON.stringify` 会重排 `1.0`→`1` 而 C# 原样保留 token，跨平台漂移无解，禁浮点最便宜；C# 验证器结构期对全树拒绝 `./e/E` 数字 token，Node 工具链同步（v1 若真需要浮点再实现完整 RFC 8785 数字规范化） |
+| **safe-integer+去 -0（第十轮）** | 整数限定 **JSON 安全范围 ±(2^53-1)**（`9007199254740993` 在 Node IEEE-754 parse 下变 `...992`）；**`-0` 拒绝**（Node canonicalize 成 `0` 而 C# raw token 不同）；canonicalizer 不再透传 raw token，**parse 后重写十进制** |
+| **重复 JSON key 拒绝（第十轮）** | 任意 object 内重复属性名=invalid（解析器对 last/first-wins 各行其是；签名 manifest 零保留价值），C# 验证器全树扫描 |
+| **权限注册表（第十轮）** | v0 恰好两个权限 id：`network.fetch`/`shell.open`；未知 id install 期直接拒绝（不做"先入库后议"） |
+| **scope 去 deny（第十轮）** | v0.3 只有 exact-host allow list——`deny` 从 schema 删除（实现漂移：产品门从未实现 deny；等 files.read 类真需要 deny 语义再加） |
+| **Windows 路径文法（第十轮）** | 追加拒绝：DOS 保留设备名（CON/PRN/AUX/NUL/COM1-9/LPT1-9，含带扩展名形态）、段尾空格/句点、控制字符——integrity 字符串与文件系统对象必须同指 |
 
 ## v0 → v0.1 变更（第三轮外部评审吸收，roadmap 16.7）
 

@@ -10,13 +10,36 @@ import path from 'node:path';
 // Package path grammar (platform protocol, pinned early against zip-slip):
 // relative, forward slashes only, no . / .. segments, no drive prefix, no
 // colon (NTFS ADS), no empty segments.
+// Windows-safe path grammar (mirrors the C# verifier; round 10): relative
+// forward-slash paths only, no .. / . / empty / backslash / colon / control
+// chars, no trailing dot/space, no reserved DOS device names (incl. with
+// extensions) - the filesystem and the integrity strings must denote the
+// same object.
+const RESERVED_DEVICE_NAMES = new Set([
+  'CON', 'PRN', 'AUX', 'NUL',
+  'COM1', 'COM2', 'COM3', 'COM4', 'COM5', 'COM6', 'COM7', 'COM8', 'COM9',
+  'LPT1', 'LPT2', 'LPT3', 'LPT4', 'LPT5', 'LPT6', 'LPT7', 'LPT8', 'LPT9'
+]);
+
 export function packagePathViolation(rel) {
   if (rel.startsWith('/') || rel.includes('\\') || rel.includes(':')) {
     return 'rooted path, backslash, or colon';
   }
   const segments = rel.split('/');
-  if (segments.some(seg => seg === '' || seg === '.' || seg === '..')) {
-    return 'empty, ".", or ".." segment';
+  for (const seg of segments) {
+    if (seg === '' || seg === '.' || seg === '..') {
+      return "empty, '.', or '..' segment";
+    }
+    if (/[ .]$/.test(seg)) {
+      return 'segment ending in space or dot';
+    }
+    if (/[\x00-\x1f]/.test(seg)) {
+      return 'control character in segment';
+    }
+    const base = seg.split('.')[0].toUpperCase();
+    if (RESERVED_DEVICE_NAMES.has(base)) {
+      return `reserved Windows device name '${base}'`;
+    }
   }
   return null;
 }

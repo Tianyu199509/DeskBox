@@ -458,6 +458,21 @@ B1a 进入产品安全边界后标准升级；五项全部落地（本批）：
 
 **优先级调整（评审采纳）**：DNS 重绑定（hostname 解析到私网 IP）从 backlog **升格为 B2 blocker**——Declarative Executor 发出第一个产品网络请求前必须实现"解析后 IP 复检"；**installer 输入预算**归 B1b（manifest/integrity 体积上限、文件数、单文件大小、路径长度——恶意包不该能在验签失败前耗尽资源）。执行坑：手抄 base64 常量两次抄错——**测试向量一律 hex/程序生成，永不手抄**。
 
+### 16.12 第十轮评审吸收（2026-09-08，B1a 硬化二）
+
+三 P0+四 P1 全核实全修（本批）；核心教训=**连续三轮（方程符号→identity 伪造→[4]P 冒充 [8]P）证明自研密码学实现会持续产出此类 bug**：
+
+1. **[8]P 实为 [4]P（P0）**：`Add(2P,2P)=4P`，真 order-8 点漏过——修正为 p2/p4/p8 三跳；补**真 order-8 向量**（`c7176a70…`，独立 BigInt 实现算 [L]generic-point 得到，恰为业界知名小阶向量）+order-2 向量。**Trust root 迁 Rust `ed25519-dalek` verify_strict 从"store GA 前"提前为 B1b/B2 期间执行**（C# BigInteger 降级为 transition/test oracle）。
+2. **reparse point 穿越拒绝（P0）**：`SearchOption.AllDirectories` 跟随 symlink/junction——恶意包可读包外文件或构造循环耗尽资源；显式 walk 树，**任何 reparse point=包 invalid**（不是跳过——link 也不该存在于 integrity 清单），符号链接行为测试（无开发者模式时降级源码钉扎）。
+3. **IPv4-mapped IPv6 绕过（P0）**：`[::ffff:127.0.0.1]` 走 v6 分支漏过私网拒绝——`IsIPv4MappedToIPv6→MapToIPv4` 解包后统一分类；顺带拒绝 unspecified(0.0.0.0/::)/multicast(≥224)——语义模型收敛为"**network.fetch 只允许 globally-routable 目的**，network.local 未来单独授权"。
+4. **DNS rebinding 半步补全**：roadmap 措辞从"resolve→check"升格为"**resolve→validate 全部候选 IP→连接 pin 到已验证 IP**（`SocketsHttpHandler.ConnectCallback`，TLS SNI 仍用原 hostname）"——否则 HttpClient 二次解析仍可被重绑。
+5. **safe-integer+去 -0（P1）**：`9007199254740993`（Node IEEE-754 变 ...992）与 `-0`（Node 变 0）都是跨平台 canonicalization 漂移——整数限 ±(2^53-1)、拒绝 -0、canonicalizer 改 **parse 后重写十进制**（不再透传 raw token）。
+6. **重复 JSON key 拒绝+类型洞补齐+权限注册表（P1）**：重复属性名全树拒绝；displayName/payload/bindings/dataSources 根/actions 根/permissions 根的类型洞补上；v0 权限注册表=恰好 `network.fetch`+`shell.open`，未知 id install 期拒绝；**长期方向（评审 P2 采纳）：结构校验从手写 if 迁往 schema 驱动+跨实现 conformance fixtures 同批喂三实现**（B1b 评估）。
+7. **scope 去 deny（P1）**：v0 只有 exact-host allow——deny 从 schema 删除（产品门从未实现它=语义漂移；真需要 files.read 类 deny 语义再加）。
+8. **Windows 路径文法（P1）**：DOS 保留设备名（CON/NUL/COM1-9…含带扩展名）/段尾空格句点/控制字符拒绝（C#+Node 双侧镜像）。
+
+**B1b 契约追加（评审建议直接入册）**：①Verifier 自带输入预算（`PluginVerificationLimits`：manifest/integrity 字节、文件数、总展开体积、单文件、树深、路径长）——不靠调用方记得检查；②大文件流式哈希（弃 `ReadAllBytes`）；③**验证后产出 typed `VerifiedInstalledPackage` 语义模型**（PackageId/Version/Publisher/Runtime/Permissions/Contributions/ContentHash/InstalledPath）——下游不再重复解析 raw manifest；④**更新 pin publisher**（同 packageId 的后续更新必须同 publisher 指纹）+**版本单调递增**（防 store index 被篡改后的降级/接管攻击）。**B1b 定性（评审结语采纳）：它不是"PackageManager+存授权"，是整个不可信包进入 DeskBox 的 quarantine/validation/immutable-commit 管线。**
+
 ## 附录 A：关键证据文件索引
 
 | 主题 | 文件 |
