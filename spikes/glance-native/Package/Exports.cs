@@ -107,9 +107,76 @@ public static unsafe class Exports
             return error.HResult;
         }
     }
+
+    // Unified package ABI (batch C shape) so the product pilot loader can drive
+    // this package: get_abi_version / activate(3 roots) / create / destroy /
+    // shutdown. Legacy glance_probe_* exports remain for the spike harness.
+    [UnmanagedCallersOnly(EntryPoint = "deskbox_package_get_abi_version", CallConvs = [typeof(CallConvCdecl)])]
+    public static int GetUnifiedAbiVersion() => 1;
+
+    [UnmanagedCallersOnly(EntryPoint = "deskbox_package_activate", CallConvs = [typeof(CallConvCdecl)])]
+    public static unsafe int UnifiedActivate(char* packageRoot, int packageRootLength, char* dataRoot, int dataRootLength, char* instanceId, int instanceIdLength)
+    {
+        if (packageRoot is null || dataRoot is null || instanceId is null) return -1;
+        UnifiedSession.PackageRoot = new string(packageRoot, 0, packageRootLength);
+        UnifiedSession.DataRoot = new string(dataRoot, 0, dataRootLength);
+        UnifiedSession.InstanceId = new string(instanceId, 0, instanceIdLength);
+        try
+        {
+            Directory.CreateDirectory(UnifiedSession.DataRoot);
+            return 0;
+        }
+        catch (Exception error)
+        {
+            return error.HResult;
+        }
+    }
+
+    [UnmanagedCallersOnly(EntryPoint = "deskbox_widget_create", CallConvs = [typeof(CallConvCdecl)])]
+    public static unsafe int UnifiedCreateWidget(char* widgetId, int widgetIdLength, nint* view)
+    {
+        if (view is null) return -1;
+        *view = 0;
+        try
+        {
+            FrameworkElement content = RealGlanceView.Create(UnifiedSession.PackageRoot);
+            *view = WinRT.MarshalInspectable<FrameworkElement>.FromManaged(content);
+            return 0;
+        }
+        catch (Exception error)
+        {
+            File.WriteAllText(Path.Combine(UnifiedSession.DataRoot, "unified-activation-error.txt"), error.ToString());
+            return error.HResult;
+        }
+    }
+
+    [UnmanagedCallersOnly(EntryPoint = "deskbox_widget_destroy", CallConvs = [typeof(CallConvCdecl)])]
+    public static unsafe int UnifiedDestroyWidget(char* widgetId, int widgetIdLength) => 0;
+
+    [UnmanagedCallersOnly(EntryPoint = "deskbox_package_shutdown", CallConvs = [typeof(CallConvCdecl)])]
+    public static int UnifiedShutdown()
+    {
+        try
+        {
+            File.WriteAllText(Path.Combine(UnifiedSession.DataRoot, "unified-session.txt"),
+                $"instance={UnifiedSession.InstanceId} shutdown={DateTime.Now:O}");
+            return 0;
+        }
+        catch
+        {
+            return 0;
+        }
+    }
 }
 
-    [WinRT.GeneratedBindableCustomProperty]
+internal static class UnifiedSession
+{
+    public static string PackageRoot = "";
+    public static string DataRoot = "";
+    public static string InstanceId = "";
+}
+
+[WinRT.GeneratedBindableCustomProperty]
 public sealed partial class GlancePresentation
 {
     public string Title { get; init; } = "";
