@@ -36,6 +36,10 @@ v2 的结论不变：宿主 `RuntimeFeature.IsDynamicCodeSupported`=false，输�
 
 包体积变化：v1-v3 ≈ 6.18MB/个（编译控件+PRIResource 加入后，此前 4.55MB），todo 包 4.26MB。
 
+### 第四轮：完整 Glance 切片（图片/交互/设置/持久化）
+
+第四轮（2026-09-08 深夜）补齐完整 Glance 代表性切片（`full-glance.xaml` + `FullGlanceView.cs`）：背景图片 A/B 交叉淡入轮播（包目录 `backgrounds/` 本地图，3s 定时器，Unloaded 停表）、生产结构操作栏（暂停/下一张，真实 Click 处理器）、代码构建右键 MenuFlyout（运行时 XAML 无法接线处理器）、XAML 名字域内设置面板（节日/传统历法 ToggleSwitch）经程序化 `IsOn` 驱动同一 Toggled 路径重建月份、设置持久化到 `glance-settings.json`。实测链：定时轮播推进（索引 1）→ automation peer 真实点击下一张（索引回绕 0，2 张图模运算）→ 关节日开关（festivalDayCount 42 格→0，月份数据实时重建）→ 销毁重建（设置保留、轮播重置）。在线图片源（Bing/在线目录）不在本切片范围，归批次 D 的生产 GlanceImageService 迁移。
+
 两轮所有场景的断言（业务值、实际布局、绑定、退出码、截图、宿主哈希一致）由 `scripts/spike/run-glance-native.ps1` 自动判定；本地证据在 `.artifacts/glance-native/runs/<timestamp>-x64/summary.json`，截图在各 `result-*/view.png`。二进制和运行证据不入库。
 
 ## 复现

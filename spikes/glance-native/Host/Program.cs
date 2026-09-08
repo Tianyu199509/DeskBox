@@ -17,6 +17,7 @@ internal enum Scenario
     Simple,
     RealGlance,
     CompiledGlance,
+    FullGlance,
     Lifecycle,
     MultiPackage,
     TodoEdit,
@@ -40,6 +41,9 @@ internal static class Program
                 break;
             case ["--compiled-package", string package, string outDir]:
                 (scenario, packages, output) = (Scenario.CompiledGlance, [package], outDir);
+                break;
+            case ["--full-package", string package, string outDir]:
+                (scenario, packages, output) = (Scenario.FullGlance, [package], outDir);
                 break;
             case ["--lifecycle-package", string package, string outDir]:
                 (scenario, packages, output) = (Scenario.Lifecycle, [package], outDir);
@@ -148,6 +152,7 @@ public sealed partial class ProbeApplication : Application
             case Scenario.Simple: RunSimple(); break;
             case Scenario.RealGlance: RunReal(); break;
             case Scenario.CompiledGlance: RunCompiled(); break;
+            case Scenario.FullGlance: RunFull(); break;
             case Scenario.Lifecycle: RunLifecycle(); break;
             case Scenario.MultiPackage: RunMulti(); break;
             case Scenario.TodoEdit: RunTodo(); break;
@@ -311,6 +316,104 @@ public sealed partial class ProbeApplication : Application
         }
         catch (Exception error) { File.WriteAllText(Path.Combine(_output, "error.txt"), error.ToString()); }
         finally { _window?.Close(); Exit(); }
+    }
+
+    private unsafe void RunFull()
+    {
+        nint module = LoadModule(_packages[0], "DeskBox.Glance.NativePackage.dll", _output);
+        FrameworkElement content = CreateView(module, "glance_probe_create_full_view", _packages[0], _output);
+        content.Width = 440;
+        content.Height = 560;
+        _window = new Window { Title = "Glance full slice probe", Content = content };
+        _window.AppWindow.Resize(new Windows.Graphics.SizeInt32(460, 610));
+        content.Loaded += (sender, args) => _ = FinishFull(module, content);
+        _window.Activate();
+    }
+
+    private async Task FinishFull(nint module, FrameworkElement first)
+    {
+        try
+        {
+            // Stage 1: the package's own rotation timer advances the background.
+            await Task.Delay(4000);
+            JsonDocument stage1 = await ReadSummary("full-summary.json");
+            int rotationIndex = stage1.RootElement.GetProperty("currentImageIndex").GetInt32();
+            int revision1 = stage1.RootElement.GetProperty("revision").GetInt32();
+
+            // Stage 2: a real click on the action bar's next button; wait for the
+            // package's summary revision to advance so the read is not stale.
+            var nextButton = first.FindName("NextButton").As<Button>();
+            new Microsoft.UI.Xaml.Automation.Peers.ButtonAutomationPeer(nextButton).Invoke();
+            JsonDocument stage2 = await ReadSummaryAfterRevision(revision1);
+            int clickedIndex = stage2.RootElement.GetProperty("currentImageIndex").GetInt32();
+
+            // Stage 3: programmatic toggle drives the package's Toggled handler.
+            int revision2 = stage2.RootElement.GetProperty("revision").GetInt32();
+            var festivalToggle = first.FindName("FestivalToggle").As<ToggleSwitch>();
+            festivalToggle.IsOn = false;
+            JsonDocument stage3 = await ReadSummaryAfterRevision(revision2);
+
+            // Stage 4: destroy and recreate; settings must persist.
+            var firstUnloaded = new TaskCompletionSource();
+            first.Unloaded += (_, _) => firstUnloaded.TrySetResult();
+            _window!.Content = null;
+            await firstUnloaded.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            FrameworkElement second = CreateView(module, "glance_probe_create_full_view", _packages[0], _output);
+            second.Width = 440;
+            second.Height = 560;
+            _window.Content = second;
+            await WhenLoadedAsync(second);
+            await Task.Delay(600);
+            JsonDocument stage4 = await ReadSummary("full-summary.json");
+            await CaptureAsync(second, "view.png");
+
+            WriteResult(result =>
+            {
+                result.WriteBoolean("dynamicCodeSupported", RuntimeFeature.IsDynamicCodeSupported);
+                result.WriteNumber("rotationIndexAfterTimer", rotationIndex);
+                result.WriteNumber("indexAfterNextClick", clickedIndex);
+                result.WritePropertyName("afterFestivalOff");
+                stage3.RootElement.WriteTo(result);
+                result.WritePropertyName("afterRecreate");
+                stage4.RootElement.WriteTo(result);
+            });
+        }
+        catch (Exception error) { File.WriteAllText(Path.Combine(_output, "error.txt"), error.ToString()); }
+        finally { _window?.Close(); Exit(); }
+    }
+
+    private async Task<JsonDocument> ReadSummaryAfterRevision(int previousRevision)
+    {
+        for (int attempt = 0; attempt < 40; attempt++)
+        {
+            JsonDocument document = await ReadSummary("full-summary.json");
+            if (document.RootElement.TryGetProperty("revision", out JsonElement revision) &&
+                revision.GetInt32() > previousRevision)
+            {
+                return document;
+            }
+            await Task.Delay(100);
+        }
+        throw new InvalidOperationException("summary revision did not advance");
+    }
+
+    private async Task<JsonDocument> ReadSummary(string fileName)
+    {
+        for (int attempt = 0; attempt < 20; attempt++)
+        {
+            try
+            {
+                string path = Path.Combine(_packages[0], fileName);
+                if (File.Exists(path))
+                {
+                    using FileStream stream = File.OpenRead(path);
+                    return await JsonDocument.ParseAsync(stream);
+                }
+            }
+            catch (IOException) { }
+            await Task.Delay(100);
+        }
+        throw new InvalidOperationException($"summary not available: {fileName}");
     }
 
     private unsafe void RunLifecycle()

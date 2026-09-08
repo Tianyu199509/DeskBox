@@ -150,7 +150,9 @@ internal static class RealGlanceView
     nameof(TimeFontFamily),
     nameof(TimeText),
     nameof(TraditionalCalendarTitle),
-    nameof(WeekdayText)
+    nameof(WeekdayText),
+    nameof(PlayIconVisibility),
+    nameof(PauseIconVisibility)
 ], [])]
 public sealed partial class RealGlancePresentation
 {
@@ -178,6 +180,8 @@ public sealed partial class RealGlancePresentation
     public bool IsCalendarLayout { get; init; }
     public bool IsCompactCalendarPresentation { get; init; }
     public bool IsExpandedCalendarPresentation { get; init; }
+    public Visibility PlayIconVisibility { get; set; }
+    public Visibility PauseIconVisibility { get; set; }
 }
 
 // Package-local mirror of the production GlanceCalendarDayDecoration contract:

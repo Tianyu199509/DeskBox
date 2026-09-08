@@ -126,6 +126,39 @@ try {
         }
         $results += [pscustomobject]@{ scenario = "compiled-xaml-pinned-negative"; result = $result; evidence = $evidence }
 
+        # Full Glance slice: rotation timer, action-bar click, settings toggle,
+        # destroy/recreate persistence. Backgrounds are generated (no binaries in
+        # the repository); settings file cleared for a deterministic first run.
+        $backgrounds = Join-Path $packageOutputs[3] "backgrounds"
+        New-Item -ItemType Directory -Path $backgrounds -Force | Out-Null
+        Add-Type -AssemblyName System.Drawing
+        foreach ($pair in @(@("bg-1.png", "40, 70, 130"), @("bg-2.png", "130, 55, 45"))) {
+            $bitmap = New-Object System.Drawing.Bitmap(440, 560)
+            $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+            $channels = $pair[1].Split(",") | ForEach-Object { [int]$_.Trim() }
+            $graphics.Clear([System.Drawing.Color]::FromArgb($channels[0], $channels[1], $channels[2]))
+            $graphics.Dispose()
+            $bitmap.Save((Join-Path $backgrounds $pair[0]), [System.Drawing.Imaging.ImageFormat]::Png)
+            $bitmap.Dispose()
+        }
+        Remove-Item -LiteralPath (Join-Path $packageOutputs[3] "glance-settings.json") -ErrorAction SilentlyContinue
+        $evidence = Join-Path $runRoot "result-full"
+        $result = Invoke-Probe -Exe $hostExe -WorkingDirectory $hostOutput -Evidence $evidence -Arguments @(
+            "--full-package", ('"{0}"' -f $packageOutputs[3]), ('"{0}"' -f $evidence))
+        if ($result.dynamicCodeSupported -or
+            $result.rotationIndexAfterTimer -lt 1 -or
+            $result.indexAfterNextClick -eq $result.rotationIndexAfterTimer -or
+            $result.afterFestivalOff.showFestivals -or
+            $result.afterFestivalOff.festivalDayCount -ne 0 -or
+            $result.afterRecreate.showFestivals -or
+            $result.afterRecreate.festivalDayCount -ne 0 -or
+            $result.afterRecreate.currentImageIndex -ne 0 -or
+            $result.afterRecreate.traditionalTextDayCount -ne 42) {
+            throw "Full-Glance slice assertion failed: $evidence"
+        }
+        if (-not (Test-Path -LiteralPath (Join-Path $evidence "view.png"))) { throw "Missing rendered view: $evidence" }
+        $results += [pscustomobject]@{ scenario = "full-glance"; result = $result; evidence = $evidence }
+
         # Lifecycle: destroy and recreate the view within one process.
         $evidence = Join-Path $runRoot "result-lifecycle"
         $result = Invoke-Probe -Exe $hostExe -WorkingDirectory $hostOutput -Evidence $evidence -Arguments @(
