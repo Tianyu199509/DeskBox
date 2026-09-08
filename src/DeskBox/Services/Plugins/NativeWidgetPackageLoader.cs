@@ -1,18 +1,281 @@
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using System.Text;
 
 namespace DeskBox.Services.Plugins;
 
 /// <summary>
-/// Development-only pilot loader for native widget packages (batch C wiring).
-/// Gated by DESKBOX_DEV_NATIVE_GLANCE pointing at a package directory that
-/// contains a native package DLL; never active by default. The full product
-/// path (B1 PackageManager verification bound to module open) lands in batch C.
+/// Stable package identity for the native runtime (batch C1). Data roots are
+/// keyed by publisher fingerprint + package id - NEVER by install directory
+/// names, whose leaf segments are content hashes that change on every update.
 /// </summary>
+internal readonly record struct NativePackageIdentity(string PublisherFingerprint, string PackageId)
+{
+    public string Key => $"{PublisherFingerprint}/{PackageId}";
+
+    public string ResolvePackageDataRoot(string dataDirectory) =>
+        Path.Combine(dataDirectory, "packages", PublisherFingerprint, PackageId);
+
+    public string ResolveInstanceDataRoot(string dataDirectory, string instanceId) =>
+        Path.Combine(ResolvePackageDataRoot(dataDirectory), "instances", instanceId);
+}
+
+/// <summary>Everything needed to activate a native package at a concrete location.</summary>
+internal sealed record NativePackageDescriptor(
+    string PublisherFingerprint,
+    string PackageId,
+    string PackageRoot)
+{
+    public NativePackageIdentity Identity => new(PublisherFingerprint, PackageId);
+}
+
+[StructLayout(LayoutKind.Sequential)]
+internal struct NativeHostApiV1
+{
+    public nint Log;
+}
+
+/// <summary>Host-side callbacks exposed to native packages via the HostApi table.</summary>
+internal static unsafe class NativeHostApiBridge
+{
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    internal static void Log(byte* utf8, int length)
+    {
+        try
+        {
+            App.LogVerbose("[NativePackage:guest] " + Encoding.UTF8.GetString(utf8, length));
+        }
+        catch
+        {
+            // Never fail a package->host log callback.
+        }
+    }
+}
+
+/// <summary>
+/// Batch C1 runtime contract (ABI v2): one session per package identity,
+/// activated exactly once; widget instances are created per (contribution,
+/// instance) pair and destroyed by opaque handle; the last destroy shuts the
+/// package down. NativeAOT modules stay loaded for process lifetime by design.
+/// UI thread only.
+/// </summary>
+internal static class NativeWidgetRuntimeManager
+{
+    public const int RequiredAbiVersion = 2;
+    private static readonly object Gate = new();
+    private static readonly Dictionary<string, NativePackageSession> Sessions = [];
+
+    public static bool TryCreateInstance(
+        NativePackageDescriptor descriptor,
+        string contributionId,
+        string instanceId,
+        string dataDirectory,
+        out NativeWidgetLease? lease)
+    {
+        lease = null;
+        NativePackageSession session;
+        lock (Gate)
+        {
+            if (!Sessions.TryGetValue(descriptor.Identity.Key, out session!))
+            {
+                session = NativeWidgetPackageLoader.TryOpenSession(descriptor, dataDirectory);
+                if (session is null) return false;
+                Sessions[descriptor.Identity.Key] = session;
+            }
+        }
+        NativeWidgetLease? created = session.CreateInstance(contributionId, instanceId);
+        if (created is null) return false;
+        lease = created;
+        return true;
+    }
+
+    /// <summary>
+    /// Product entry point: only a B1-verified installed package may activate.
+    /// EntryMain marks a native package; the runtime-type schema extension for
+    /// native packages lands with the batch C package-format freeze.
+    /// </summary>
+    public static bool TryCreateFromVerified(
+        VerifiedPluginPackage package,
+        string installDirectory,
+        string contributionId,
+        string instanceId,
+        string dataDirectory,
+        out NativeWidgetLease? lease)
+    {
+        lease = null;
+        if (string.IsNullOrEmpty(package.EntryMain))
+        {
+            App.LogVerbose("[NativePackage] verified package has no native entry; refusing to activate");
+            return false;
+        }
+        return TryCreateInstance(
+            new NativePackageDescriptor(package.PublisherFingerprint, package.PackageId, installDirectory),
+            contributionId,
+            instanceId,
+            dataDirectory,
+            out lease);
+    }
+
+    internal static void Release(NativeWidgetLease lease)
+    {
+        lock (Gate)
+        {
+            if (!lease.TryRelease()) return;
+            if (lease.Session.LiveInstanceCount == 0)
+            {
+                lease.Session.Shutdown();
+                Sessions.Remove(lease.Session.Identity.Key);
+            }
+        }
+    }
+}
+
+/// <summary>One live widget instance; Dispose routes to the manager's release path.</summary>
+internal sealed class NativeWidgetLease : IDisposable
+{
+    private NativePackageSession _session = null!;
+    private nint _handle;
+    private bool _released;
+
+    internal Microsoft.UI.Xaml.FrameworkElement View { get; private set; } = null!;
+
+    internal NativePackageSession Session => _session;
+
+    internal static NativeWidgetLease Create(NativePackageSession session, nint handle, Microsoft.UI.Xaml.FrameworkElement view) => new()
+    {
+        _session = session,
+        _handle = handle,
+        View = view,
+    };
+
+    /// <summary>Idempotent release; returns true when this call performed the destroy.</summary>
+    internal bool TryRelease()
+    {
+        if (_released) return false;
+        _released = true;
+        _session.DestroyWidget(_handle);
+        return true;
+    }
+
+    void IDisposable.Dispose() => NativeWidgetRuntimeManager.Release(this);
+}
+
+internal sealed unsafe class NativePackageSession
+{
+    private readonly nint _activateExport;
+    private readonly nint _createExport;
+    private readonly nint _destroyExport;
+    private readonly nint _shutdownExport;
+    private readonly HashSet<nint> _liveHandles = [];
+
+    internal NativePackageSession(
+        NativePackageIdentity identity,
+        string packageRoot,
+        string packageDataRoot,
+        nint activateExport,
+        nint createExport,
+        nint destroyExport,
+        nint shutdownExport)
+    {
+        Identity = identity;
+        PackageRoot = packageRoot;
+        PackageDataRoot = packageDataRoot;
+        _activateExport = activateExport;
+        _createExport = createExport;
+        _destroyExport = destroyExport;
+        _shutdownExport = shutdownExport;
+    }
+
+    internal NativePackageIdentity Identity { get; }
+    internal string PackageRoot { get; }
+    internal string PackageDataRoot { get; }
+    internal int LiveInstanceCount { get { lock (_liveHandles) return _liveHandles.Count; } }
+
+    internal static void Activate(NativePackageSession session)
+    {
+        var activate = (delegate* unmanaged[Cdecl]<char*, int, char*, int, NativeHostApiV1*, int>)session._activateExport;
+        var hostApi = new NativeHostApiV1
+        {
+            Log = (nint)(delegate* unmanaged[Cdecl]<byte*, int, void>)&NativeHostApiBridge.Log,
+        };
+        int status;
+        fixed (char* package = session.PackageRoot)
+        fixed (char* data = session.PackageDataRoot)
+        {
+            NativeHostApiV1* api = &hostApi;
+            status = activate(package, session.PackageRoot.Length, data, session.PackageDataRoot.Length, api);
+        }
+        if (status != 0)
+        {
+            throw new InvalidOperationException($"[NativePackage] activate failed for {session.Identity.Key}: 0x{status:X8}");
+        }
+        App.Log($"[NativePackage] session active: {session.Identity.Key}");
+    }
+
+    internal NativeWidgetLease? CreateInstance(string contributionId, string instanceId)
+    {
+        string instanceDataRoot = Path.Combine(PackageDataRoot, "instances", instanceId);
+        var create = (delegate* unmanaged[Cdecl]<char*, int, char*, int, char*, int, nint*, nint*, int>)_createExport;
+        nint handle = 0, viewAbi = 0;
+        int status;
+        fixed (char* contribution = contributionId)
+        fixed (char* instance = instanceId)
+        fixed (char* dataRoot = instanceDataRoot)
+        {
+            status = create(contribution, contributionId.Length, instance, instanceId.Length, dataRoot, instanceDataRoot.Length, &handle, &viewAbi);
+        }
+        if (status != 0 || handle == 0 || viewAbi == 0)
+        {
+            App.Log($"[NativePackage] create {contributionId}/{instanceId} failed: 0x{status:X8}");
+            return null;
+        }
+        Microsoft.UI.Xaml.FrameworkElement view;
+        try
+        {
+            view = WinRT.MarshalInspectable<Microsoft.UI.Xaml.FrameworkElement>.FromAbi(viewAbi);
+            view.HorizontalAlignment = Microsoft.UI.Xaml.HorizontalAlignment.Stretch;
+            view.VerticalAlignment = Microsoft.UI.Xaml.VerticalAlignment.Stretch;
+        }
+        catch (Exception error)
+        {
+            WinRT.MarshalInspectable<Microsoft.UI.Xaml.FrameworkElement>.DisposeAbi(viewAbi);
+            App.Log($"[NativePackage] view projection failed: {error.Message}");
+            return null;
+        }
+        finally
+        {
+            WinRT.MarshalInspectable<Microsoft.UI.Xaml.FrameworkElement>.DisposeAbi(viewAbi);
+        }
+        lock (_liveHandles) _liveHandles.Add(handle);
+        return NativeWidgetLease.Create(this, handle, view);
+    }
+
+    internal void DestroyWidget(nint handle)
+    {
+        lock (_liveHandles) _liveHandles.Remove(handle);
+        ((delegate* unmanaged[Cdecl]<nint, int>)_destroyExport)(handle);
+    }
+
+    internal void Shutdown()
+    {
+        try
+        {
+            ((delegate* unmanaged[Cdecl]<int>)_shutdownExport)();
+            App.Log($"[NativePackage] session shut down: {Identity.Key}");
+        }
+        catch (Exception error)
+        {
+            App.Log($"[NativePackage] shutdown failed for {Identity.Key}: {error.Message}");
+        }
+    }
+}
+
+/// <summary>Module loading + ABI resolution for the runtime manager (ABI v2).</summary>
 internal static class NativeWidgetPackageLoader
 {
     public const string DevelopmentPackageEnvironmentVariable = "DESKBOX_DEV_NATIVE_GLANCE";
     public const string PackageDllFileName = "DeskBox.Glance.NativePackage.dll";
-    public const int RequiredAbiVersion = 1;
+    public const string DevelopmentPublisherFingerprint = "dev-pilot";
 
     /// <summary>Path validation only - no module loading (unit-testable).</summary>
     public static string? TryGetDevelopmentPackageRoot()
@@ -31,45 +294,37 @@ internal static class NativeWidgetPackageLoader
         }
     }
 
-    public static string ResolveDataRoot(string packageRoot, string dataDirectory)
-    {
-        string packageName = new DirectoryInfo(packageRoot).Name;
-        return Path.Combine(dataDirectory, "native-packages", packageName);
-    }
-
-    /// <summary>Loads the module once per process (NativeAOT DLLs are never unloaded) and resolves the unified package ABI.</summary>
-    public static NativeWidgetPackage? TryActivate(string packageRoot, string dataRoot, string instanceId)
+    internal static unsafe NativePackageSession? TryOpenSession(NativePackageDescriptor descriptor, string dataDirectory)
     {
         try
         {
-            nint module = NativeLibrary.Load(Path.Combine(packageRoot, PackageDllFileName));
+            string packageDataRoot = descriptor.Identity.ResolvePackageDataRoot(dataDirectory);
+            Directory.CreateDirectory(packageDataRoot);
+            nint module = NativeLibrary.Load(Path.Combine(descriptor.PackageRoot, PackageDllFileName));
             if (!TryGetExport(module, "deskbox_package_get_abi_version", out nint versionExport) ||
                 !TryGetExport(module, "deskbox_package_activate", out nint activateExport) ||
                 !TryGetExport(module, "deskbox_widget_create", out nint createExport) ||
                 !TryGetExport(module, "deskbox_widget_destroy", out nint destroyExport) ||
                 !TryGetExport(module, "deskbox_package_shutdown", out nint shutdownExport))
             {
-                App.LogVerbose("[NativePackage] unified ABI exports missing; pilot disabled");
+                App.LogVerbose("[NativePackage] unified ABI v2 exports missing");
                 return null;
             }
-            var package = new NativeWidgetPackage(module, versionExport, activateExport, createExport, destroyExport, shutdownExport);
-            if (package.AbiVersion != RequiredAbiVersion)
+            int version = ((delegate* unmanaged[Cdecl]<int>)versionExport)();
+            if (version != NativeWidgetRuntimeManager.RequiredAbiVersion)
             {
-                App.Log($"[NativePackage] ABI version {package.AbiVersion} != {RequiredAbiVersion}; pilot disabled");
+                App.Log($"[NativePackage] ABI version {version} != {NativeWidgetRuntimeManager.RequiredAbiVersion}");
                 return null;
             }
-            int status = package.Activate(packageRoot, dataRoot, instanceId);
-            if (status != 0)
-            {
-                App.Log($"[NativePackage] activate failed 0x{status:X8}; pilot disabled");
-                return null;
-            }
-            App.Log($"[NativePackage] pilot package active: {Path.GetFileName(packageRoot)} (instance {instanceId})");
-            return package;
+            var session = new NativePackageSession(
+                descriptor.Identity, descriptor.PackageRoot, packageDataRoot,
+                activateExport, createExport, destroyExport, shutdownExport);
+            NativePackageSession.Activate(session);
+            return session;
         }
         catch (Exception error)
         {
-            App.Log($"[NativePackage] load failed: {error.Message}");
+            App.Log($"[NativePackage] session open failed for {descriptor.Identity.Key}: {error.Message}");
             return null;
         }
     }
@@ -86,83 +341,5 @@ internal static class NativeWidgetPackageLoader
             export = 0;
             return false;
         }
-    }
-}
-
-/// <summary>Wrapper over the unified native package ABI. UI thread only.</summary>
-internal sealed unsafe class NativeWidgetPackage
-{
-    private readonly nint _module;
-    private readonly nint _versionExport;
-    private readonly nint _activateExport;
-    private readonly nint _createExport;
-    private readonly nint _destroyExport;
-    private readonly nint _shutdownExport;
-
-    internal NativeWidgetPackage(nint module, nint versionExport, nint activateExport, nint createExport, nint destroyExport, nint shutdownExport)
-    {
-        _module = module;
-        _versionExport = versionExport;
-        _activateExport = activateExport;
-        _createExport = createExport;
-        _destroyExport = destroyExport;
-        _shutdownExport = shutdownExport;
-    }
-
-    public int AbiVersion => ((delegate* unmanaged[Cdecl]<int>)_versionExport)();
-
-    public int Activate(string packageRoot, string dataRoot, string instanceId)
-    {
-        var activate = (delegate* unmanaged[Cdecl]<char*, int, char*, int, char*, int, int>)_activateExport;
-        fixed (char* package = packageRoot)
-        fixed (char* data = dataRoot)
-        fixed (char* instance = instanceId)
-        {
-            return activate(package, packageRoot.Length, data, dataRoot.Length, instance, instanceId.Length);
-        }
-    }
-
-    public Microsoft.UI.Xaml.FrameworkElement? TryCreateWidget(string widgetId)
-    {
-        var create = (delegate* unmanaged[Cdecl]<char*, int, nint*, int>)_createExport;
-        nint abi = 0;
-        int status;
-        fixed (char* id = widgetId)
-        {
-            status = create(id, widgetId.Length, &abi);
-        }
-        if (status != 0 || abi == 0)
-        {
-            App.Log($"[NativePackage] create widget failed 0x{status:X8}");
-            return null;
-        }
-        try
-        {
-            var view = WinRT.MarshalInspectable<Microsoft.UI.Xaml.FrameworkElement>.FromAbi(abi);
-            view.HorizontalAlignment = Microsoft.UI.Xaml.HorizontalAlignment.Stretch;
-            view.VerticalAlignment = Microsoft.UI.Xaml.VerticalAlignment.Stretch;
-            return view;
-        }
-        catch (Exception error)
-        {
-            App.Log($"[NativePackage] widget projection failed: {error.Message}");
-            return null;
-        }
-        finally
-        {
-            WinRT.MarshalInspectable<Microsoft.UI.Xaml.FrameworkElement>.DisposeAbi(abi);
-        }
-    }
-
-    public void DestroyWidget(string widgetId)
-    {
-        var destroy = (delegate* unmanaged[Cdecl]<char*, int, int>)_destroyExport;
-        fixed (char* id = widgetId) destroy(id, widgetId.Length);
-    }
-
-    public void Shutdown()
-    {
-        ((delegate* unmanaged[Cdecl]<int>)_shutdownExport)();
-        _ = _module; // Module stays loaded for process lifetime by design.
     }
 }

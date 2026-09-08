@@ -108,22 +108,26 @@ public static unsafe class Exports
         }
     }
 
-    // Unified package ABI (batch C shape) so the product pilot loader can drive
-    // this package: get_abi_version / activate(3 roots) / create / destroy /
-    // shutdown. Legacy glance_probe_* exports remain for the spike harness.
+    // Unified package ABI v2 (batch C1 runtime contract): package lifecycle
+    // (activate/shutdown) separated from widget-instance lifecycle (create/
+    // destroy by opaque handle). Legacy glance_probe_* exports remain for the
+    // spike harness.
     [UnmanagedCallersOnly(EntryPoint = "deskbox_package_get_abi_version", CallConvs = [typeof(CallConvCdecl)])]
-    public static int GetUnifiedAbiVersion() => 1;
+    public static int GetUnifiedAbiVersion() => 2;
 
     [UnmanagedCallersOnly(EntryPoint = "deskbox_package_activate", CallConvs = [typeof(CallConvCdecl)])]
-    public static unsafe int UnifiedActivate(char* packageRoot, int packageRootLength, char* dataRoot, int dataRootLength, char* instanceId, int instanceIdLength)
+    public static unsafe int UnifiedActivate(char* packageRoot, int packageRootLength, char* packageDataRoot, int packageDataRootLength, UnifiedHostApi* hostApi)
     {
-        if (packageRoot is null || dataRoot is null || instanceId is null) return -1;
+        if (packageRoot is null || packageDataRoot is null) return -1;
         UnifiedSession.PackageRoot = new string(packageRoot, 0, packageRootLength);
-        UnifiedSession.DataRoot = new string(dataRoot, 0, dataRootLength);
-        UnifiedSession.InstanceId = new string(instanceId, 0, instanceIdLength);
+        UnifiedSession.DataRoot = new string(packageDataRoot, 0, packageDataRootLength);
+        UnifiedSession.HostLog = hostApi is not null && hostApi->Log != 0
+            ? (delegate* unmanaged[Cdecl]<byte*, int, void>)hostApi->Log
+            : null;
         try
         {
             Directory.CreateDirectory(UnifiedSession.DataRoot);
+            UnifiedSession.HostLogSafe("glance package activated (abi 2)");
             return 0;
         }
         catch (Exception error)
@@ -133,14 +137,20 @@ public static unsafe class Exports
     }
 
     [UnmanagedCallersOnly(EntryPoint = "deskbox_widget_create", CallConvs = [typeof(CallConvCdecl)])]
-    public static unsafe int UnifiedCreateWidget(char* widgetId, int widgetIdLength, nint* view)
+    public static unsafe int UnifiedCreateWidget(char* contributionId, int contributionIdLength, char* instanceId, int instanceIdLength, char* instanceDataRoot, int instanceDataRootLength, nint* widgetHandle, nint* view)
     {
-        if (view is null) return -1;
+        if (widgetHandle is null || view is null) return -1;
+        *widgetHandle = 0;
         *view = 0;
         try
         {
+            Directory.CreateDirectory(new string(instanceDataRoot, 0, instanceDataRootLength));
             FrameworkElement content = RealGlanceView.Create(UnifiedSession.PackageRoot);
+            nint handle = ++UnifiedSession.NextHandle;
+            UnifiedSession.LiveInstances.Add(handle);
+            *widgetHandle = handle;
             *view = WinRT.MarshalInspectable<FrameworkElement>.FromManaged(content);
+            UnifiedSession.HostLogSafe($"glance widget created: {new string(contributionId, 0, contributionIdLength)}/{new string(instanceId, 0, instanceIdLength)}");
             return 0;
         }
         catch (Exception error)
@@ -151,15 +161,17 @@ public static unsafe class Exports
     }
 
     [UnmanagedCallersOnly(EntryPoint = "deskbox_widget_destroy", CallConvs = [typeof(CallConvCdecl)])]
-    public static unsafe int UnifiedDestroyWidget(char* widgetId, int widgetIdLength) => 0;
+    public static int UnifiedDestroyWidget(nint widgetHandle) => UnifiedSession.LiveInstances.Remove(widgetHandle) ? 0 : 0;
 
     [UnmanagedCallersOnly(EntryPoint = "deskbox_package_shutdown", CallConvs = [typeof(CallConvCdecl)])]
     public static int UnifiedShutdown()
     {
         try
         {
+            UnifiedSession.ShutdownCalls++;
             File.WriteAllText(Path.Combine(UnifiedSession.DataRoot, "unified-session.txt"),
-                $"instance={UnifiedSession.InstanceId} shutdown={DateTime.Now:O}");
+                $"instancesRemaining={UnifiedSession.LiveInstances.Count} shutdowns={UnifiedSession.ShutdownCalls} time={DateTime.Now:O}");
+            UnifiedSession.HostLogSafe("glance package shutdown");
             return 0;
         }
         catch
@@ -169,11 +181,27 @@ public static unsafe class Exports
     }
 }
 
-internal static class UnifiedSession
+[StructLayout(LayoutKind.Sequential)]
+public struct UnifiedHostApi
+{
+    public nint Log;
+}
+
+internal unsafe static class UnifiedSession
 {
     public static string PackageRoot = "";
     public static string DataRoot = "";
-    public static string InstanceId = "";
+    public static nint NextHandle;
+    public static int ShutdownCalls;
+    public static readonly HashSet<nint> LiveInstances = [];
+    public static delegate* unmanaged[Cdecl]<byte*, int, void> HostLog;
+
+    public static unsafe void HostLogSafe(string message)
+    {
+        if (HostLog is null) return;
+        byte[] utf8 = System.Text.Encoding.UTF8.GetBytes(message);
+        fixed (byte* pointer = utf8) HostLog(pointer, utf8.Length);
+    }
 }
 
 [WinRT.GeneratedBindableCustomProperty]

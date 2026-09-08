@@ -177,18 +177,21 @@ try {
         $evidence = Join-Path $runRoot "result-interaction"
         $result = Invoke-Probe -Exe $hostExe -WorkingDirectory $hostOutput -Evidence $evidence -Arguments @(
             "--interaction-package", ('"{0}"' -f $interactionOutput), ('"{0}"' -f $evidence)) -TimeoutSeconds 45
-        if (-not $result.hostControlResolved -or
+        if ($result.abiVersion -ne 2 -or
+            -not $result.hostControlResolved -or
             -not $result.toolkitControlResolved -or
-            $result.itemsAfterFirstEdit -ne 1 -or
-            $result.itemsAfterRecreate -ne 1 -or
+            -not $result.dataIsolated -or
+            -not $result.bSurvivedADestroy -or
             -not $result.packageRootUntouched -or
-            -not $result.packageSummary.themeTokenApplied -or
-            $result.packageSummary.eventWiringCount -lt 2 -or
-            $result.packageSummary.destroyCalls -lt 1) {
-            throw "Interaction probe assertion failed: $evidence"
+            $result.hostLogCalls -lt 3 -or
+            $result.packageSummary.activateCalls -ne 1 -or
+            $result.packageSummary.shutdownCalls -ne 1 -or
+            $result.packageSummary.instancesCreatedTotal -ne 2 -or
+            $result.packageSummary.liveInstancesAfterShutdown -ne 0) {
+            throw "Runtime-contract probe assertion failed: $evidence"
         }
         if (-not (Test-Path -LiteralPath (Join-Path $evidence "view.png"))) { throw "Missing rendered view: $evidence" }
-        $results += [pscustomobject]@{ scenario = "interaction-probe"; result = $result; evidence = $evidence }
+        $results += [pscustomobject]@{ scenario = "runtime-contract"; result = $result; evidence = $evidence }
 
         # Lifecycle: destroy and recreate the view within one process.
         $evidence = Join-Path $runRoot "result-lifecycle"

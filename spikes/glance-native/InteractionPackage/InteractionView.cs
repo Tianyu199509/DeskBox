@@ -1,5 +1,6 @@
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using System.Text;
 using System.Text.Json;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -9,180 +10,204 @@ using WinRT;
 
 namespace DeskBox.Interaction.NativePackage;
 
+/// <summary>
+/// Batch C1 runtime contract (ABI v2): package lifecycle (activate/shutdown)
+/// strictly separated from widget-instance lifecycle (create/destroy by opaque
+/// handle). Each instance owns its state and persists exclusively under its
+/// instance data root; nothing is ever written to the package root.
+/// </summary>
 public static unsafe class Exports
 {
-    // Batch C unified ABI shape: get_abi_version / activate(3 roots) /
-    // create_widget / destroy_widget / shutdown. Data never touches packageRoot.
-    [UnmanagedCallersOnly(EntryPoint = "interaction_get_abi_version", CallConvs = [typeof(CallConvCdecl)])]
-    public static int GetAbiVersion() => InteractionState.AbiVersion;
+    private static readonly Dictionary<nint, InteractionInstance> Instances = [];
+    private static nint _nextHandle = 0x1000;
+    private static string _packageRoot = "";
+    private static string _packageDataRoot = "";
+    private static int _activateCalls;
+    private static int _shutdownCalls;
+    private static int _hostLogCalls;
+    private static delegate* unmanaged[Cdecl]<byte*, int, void> _hostLog;
 
-    [UnmanagedCallersOnly(EntryPoint = "interaction_activate", CallConvs = [typeof(CallConvCdecl)])]
-    public static int Activate(char* packageRoot, int packageRootLength, char* dataRoot, int dataRootLength, char* instanceId, int instanceIdLength)
+    [UnmanagedCallersOnly(EntryPoint = "deskbox_package_get_abi_version", CallConvs = [typeof(CallConvCdecl)])]
+    public static int GetAbiVersion() => 2;
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct HostApiV1
     {
-        if (packageRoot is null || dataRoot is null || instanceId is null) return -1;
-        try
-        {
-            InteractionState.PackageRoot = new string(packageRoot, 0, packageRootLength);
-            InteractionState.DataRoot = new string(dataRoot, 0, dataRootLength);
-            InteractionState.InstanceId = new string(instanceId, 0, instanceIdLength);
-            Directory.CreateDirectory(InteractionState.DataRoot);
-            return 0;
-        }
-        catch (Exception error) { InteractionState.Fail(error); return error.HResult; }
+        public nint Log;
     }
 
-    [UnmanagedCallersOnly(EntryPoint = "interaction_create_widget", CallConvs = [typeof(CallConvCdecl)])]
-    public static int CreateWidget(char* widgetId, int widgetIdLength, nint* view)
+    [UnmanagedCallersOnly(EntryPoint = "deskbox_package_activate", CallConvs = [typeof(CallConvCdecl)])]
+    public static int Activate(char* packageRoot, int packageRootLength, char* packageDataRoot, int packageDataRootLength, HostApiV1* hostApi)
     {
-        if (widgetId is null || view is null) return -1;
+        try
+        {
+            _packageRoot = new string(packageRoot, 0, packageRootLength);
+            _packageDataRoot = new string(packageDataRoot, 0, packageDataRootLength);
+            Directory.CreateDirectory(_packageDataRoot);
+            if (hostApi is not null && hostApi->Log != 0)
+            {
+                _hostLog = (delegate* unmanaged[Cdecl]<byte*, int, void>)hostApi->Log;
+                HostLog("interaction package activated (abi 2)");
+            }
+            _activateCalls++;
+            return 0;
+        }
+        catch (Exception error)
+        {
+            WriteDiagnostics("activate-error.txt", error.ToString());
+            return error.HResult;
+        }
+    }
+
+    [UnmanagedCallersOnly(EntryPoint = "deskbox_widget_create", CallConvs = [typeof(CallConvCdecl)])]
+    public static int CreateWidget(char* contributionId, int contributionIdLength, char* instanceId, int instanceIdLength, char* instanceDataRoot, int instanceDataRootLength, nint* widgetHandle, nint* view)
+    {
+        if (widgetHandle is null || view is null) return -1;
+        *widgetHandle = 0;
         *view = 0;
         try
         {
-            FrameworkElement content = InteractionView.Create(new string(widgetId, 0, widgetIdLength));
-            *view = WinRT.MarshalInspectable<FrameworkElement>.FromManaged(content);
+            string contribution = new(contributionId, 0, contributionIdLength);
+            string instance = new(instanceId, 0, instanceIdLength);
+            string dataRoot = new(instanceDataRoot, 0, instanceDataRootLength);
+            var created = InteractionInstance.Create(_packageRoot, contribution, instance, dataRoot);
+            nint handle = ++_nextHandle;
+            Instances[handle] = created;
+            *widgetHandle = handle;
+            *view = WinRT.MarshalInspectable<FrameworkElement>.FromManaged(created.BuildView());
+            HostLog($"widget created: {contribution}/{instance}");
             return 0;
         }
-        catch (Exception error) { InteractionState.Fail(error); return error.HResult; }
+        catch (Exception error)
+        {
+            WriteDiagnostics("create-error.txt", error.ToString());
+            return error.HResult;
+        }
     }
 
-    [UnmanagedCallersOnly(EntryPoint = "interaction_destroy_widget", CallConvs = [typeof(CallConvCdecl)])]
-    public static int DestroyWidget(char* widgetId, int widgetIdLength)
+    [UnmanagedCallersOnly(EntryPoint = "deskbox_widget_destroy", CallConvs = [typeof(CallConvCdecl)])]
+    public static int DestroyWidget(nint widgetHandle)
     {
-        InteractionState.DestroyCalls++;
+        if (Instances.Remove(widgetHandle))
+        {
+            HostLog($"widget destroyed: 0x{widgetHandle:X}");
+        }
         return 0;
     }
 
-    [UnmanagedCallersOnly(EntryPoint = "interaction_shutdown", CallConvs = [typeof(CallConvCdecl)])]
+    [UnmanagedCallersOnly(EntryPoint = "deskbox_package_shutdown", CallConvs = [typeof(CallConvCdecl)])]
     public static int Shutdown()
+    {
+        _shutdownCalls++;
+        try
+        {
+            using var stream = File.Create(Path.Combine(_packageDataRoot, "runtime-contract-summary.json"));
+            using var writer = new Utf8JsonWriter(stream);
+            writer.WriteStartObject();
+            writer.WriteNumber("abiVersion", 2);
+            writer.WriteNumber("activateCalls", _activateCalls);
+            writer.WriteNumber("shutdownCalls", _shutdownCalls);
+            writer.WriteNumber("hostLogCalls", _hostLogCalls);
+            writer.WriteNumber("instancesCreatedTotal", _nextHandle - 0x1000);
+            writer.WriteNumber("liveInstancesAfterShutdown", Instances.Count);
+            writer.WriteEndObject();
+            HostLog("interaction package shutdown");
+            return 0;
+        }
+        catch
+        {
+            return 0;
+        }
+    }
+
+    private static void HostLog(string message)
+    {
+        if (_hostLog is null) return;
+        byte[] utf8 = Encoding.UTF8.GetBytes(message);
+        fixed (byte* pointer = utf8) _hostLog(pointer, utf8.Length);
+        _hostLogCalls++;
+    }
+
+    private static void WriteDiagnostics(string fileName, string content)
     {
         try
         {
-            InteractionState.WriteSummary();
-            return 0;
+            string root = string.IsNullOrEmpty(_packageDataRoot) ? Path.GetTempPath() : _packageDataRoot;
+            File.WriteAllText(Path.Combine(root, fileName), content);
         }
-        catch (Exception error) { InteractionState.Fail(error); return error.HResult; }
+        catch
+        {
+            // Diagnostics only; never fail an export for logging.
+        }
     }
 }
 
-internal static class InteractionState
+/// <summary>Per-instance state; persistence is confined to the instance data root.</summary>
+internal sealed class InteractionInstance
 {
-    public const int AbiVersion = 1;
-    public static string PackageRoot = "";
-    public static string DataRoot = "";
-    public static string InstanceId = "";
-    public static int DestroyCalls;
-    public static int EventWiringCount;
-    public static int AddClicks;
-    public static int SelectionChanges;
-    public static bool ThemeTokenApplied;
+    private readonly string _packageRoot;
+    private readonly string _instanceDataRoot;
+    private readonly List<string> _items;
 
-    public static void Fail(Exception error) =>
-        File.WriteAllText(Path.Combine(string.IsNullOrEmpty(DataRoot) ? Path.GetTempPath() : DataRoot, "activation-error.txt"), error.ToString());
+    public string ContributionId { get; }
+    public string InstanceId { get; }
+    public int AddClicks;
 
-    public static void WriteSummary()
+    private InteractionInstance(string packageRoot, string contributionId, string instanceId, string instanceDataRoot, List<string> items)
     {
-        using var stream = File.Create(Path.Combine(DataRoot, "interaction-summary.json"));
-        using var writer = new Utf8JsonWriter(stream);
-        writer.WriteStartObject();
-        writer.WriteNumber("abiVersion", AbiVersion);
-        writer.WriteString("instanceId", InstanceId);
-        writer.WriteNumber("eventWiringCount", EventWiringCount);
-        writer.WriteNumber("addClicks", AddClicks);
-        writer.WriteNumber("selectionChanges", SelectionChanges);
-        writer.WriteNumber("destroyCalls", DestroyCalls);
-        writer.WriteBoolean("themeTokenApplied", ThemeTokenApplied);
-        writer.WriteBoolean("hostControlResolved", true);
-        writer.WriteEndObject();
+        _packageRoot = packageRoot;
+        ContributionId = contributionId;
+        InstanceId = instanceId;
+        _instanceDataRoot = instanceDataRoot;
+        _items = items;
     }
-}
 
-internal static class InteractionView
-{
-    public static FrameworkElement Create(string widgetId)
+    public static InteractionInstance Create(string packageRoot, string contributionId, string instanceId, string instanceDataRoot)
+    {
+        Directory.CreateDirectory(instanceDataRoot);
+        return new InteractionInstance(packageRoot, contributionId, instanceId, instanceDataRoot, LoadItems(instanceDataRoot));
+    }
+
+    public FrameworkElement BuildView()
     {
         FrameworkElement content = (FrameworkElement)XamlReader.Load(
-            File.ReadAllText(Path.Combine(InteractionState.PackageRoot, "interaction.xaml")));
-        if (content is null) throw new InvalidOperationException("interaction.xaml failed to parse");
-
-        // Theme token contract: host writes theme-tokens.json into the DATA
-        // root; the package maps tokens onto a local resource dictionary
-        // (local dictionaries resolve in runtime XAML - proven in round 2).
-        var tokens = new ResourceDictionary();
-        string tokenPath = Path.Combine(InteractionState.DataRoot, "theme-tokens.json");
-        if (File.Exists(tokenPath))
-        {
-            using JsonDocument document = JsonDocument.Parse(File.ReadAllText(tokenPath));
-            string accent = document.RootElement.GetProperty("accent").GetString() ?? "#FF4CC2FF";
-            tokens["ProbeAccentBrush"] = new SolidColorBrush(Parse(accent));
-            InteractionState.ThemeTokenApplied = true;
-        }
-        else
-        {
-            tokens["ProbeAccentBrush"] = new SolidColorBrush(Parse("#FF4CC2FF"));
-        }
-        content.Resources = tokens;
-
+            File.ReadAllText(Path.Combine(_packageRoot, "interaction.xaml")));
         var input = content.FindName("InputBox").As<TextBox>();
         var addButton = content.FindName("AddButton").As<Button>();
         var list = content.FindName("ItemsList").As<ListView>();
         var status = content.FindName("StatusText").As<TextBlock>();
-        var segmented = content.FindName("FilterSegmented").As<object>();
-
-        List<string> items = LoadItems();
-        foreach (string item in items) list.Items.Add(item);
-        status.Text = items.Count == 0 ? "no stored items" : $"{items.Count} stored item(s) reloaded";
-
+        foreach (string item in _items) list.Items.Add(item);
+        status.Text = _items.Count == 0 ? "no stored items" : $"{_items.Count} stored item(s) reloaded";
         addButton.Click += (_, _) =>
         {
             string text = input.Text.Trim();
             if (text.Length == 0) { status.Text = "empty input ignored"; return; }
-            items.Add(text);
+            _items.Add(text);
             list.Items.Add(text);
             input.Text = string.Empty;
-            SaveItems(items);
-            InteractionState.AddClicks++;
-            status.Text = $"saved {items.Count} item(s)";
+            Save();
+            AddClicks++;
+            status.Text = $"{ContributionId}/{InstanceId}: saved {_items.Count} item(s)";
         };
-        InteractionState.EventWiringCount++;
-
-        // Toolkit control interaction via its common interface surface.
-        var selector = segmented as Microsoft.UI.Xaml.Controls.Primitives.Selector;
-        if (selector is not null)
-        {
-            selector.SelectionChanged += (_, _) => InteractionState.SelectionChanges++;
-            InteractionState.EventWiringCount++;
-        }
-        content.Tag = widgetId;
         return content;
     }
 
-    private static Windows.UI.Color Parse(string hex)
+    private static List<string> LoadItems(string instanceDataRoot)
     {
-        return new Windows.UI.Color
-        {
-            A = Convert.ToByte(hex.Substring(1, 2), 16),
-            R = Convert.ToByte(hex.Substring(3, 2), 16),
-            G = Convert.ToByte(hex.Substring(5, 2), 16),
-            B = Convert.ToByte(hex.Substring(7, 2), 16),
-        };
-    }
-
-    private static List<string> LoadItems()
-    {
-        string path = Path.Combine(InteractionState.DataRoot, "interaction-items.json");
+        string path = Path.Combine(instanceDataRoot, "items.json");
         if (!File.Exists(path)) return [];
         using JsonDocument document = JsonDocument.Parse(File.ReadAllText(path));
         return document.RootElement.GetProperty("items").EnumerateArray()
             .Select(element => element.GetString() ?? "").ToList();
     }
 
-    private static void SaveItems(List<string> items)
+    private void Save()
     {
-        using var stream = File.Create(Path.Combine(InteractionState.DataRoot, "interaction-items.json"));
+        using var stream = File.Create(Path.Combine(_instanceDataRoot, "items.json"));
         using var writer = new Utf8JsonWriter(stream);
         writer.WriteStartObject();
         writer.WriteStartArray("items");
-        foreach (string item in items) writer.WriteStringValue(item);
+        foreach (string item in _items) writer.WriteStringValue(item);
         writer.WriteEndArray();
         writer.WriteEndObject();
     }
