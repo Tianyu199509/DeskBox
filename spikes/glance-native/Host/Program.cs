@@ -526,6 +526,8 @@ public sealed partial class ProbeApplication : Application
     [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
     internal struct ContractHostApi
     {
+        public uint Size;
+        public uint Version;
         public nint Log;
     }
 
@@ -553,7 +555,12 @@ public sealed partial class ProbeApplication : Application
         var shutdown = (delegate* unmanaged[Cdecl]<int>)NativeLibrary.GetExport(module, "deskbox_package_shutdown");
         var version = (delegate* unmanaged[Cdecl]<int>)NativeLibrary.GetExport(module, "deskbox_package_get_abi_version");
         int abiVersion = version();
-        var hostApi = new ContractHostApi { Log = (nint)(delegate* unmanaged[Cdecl]<byte*, int, void>)&ContractHostLog };
+        var hostApi = new ContractHostApi
+        {
+            Size = (uint)System.Runtime.InteropServices.Marshal.SizeOf<ContractHostApi>(),
+            Version = 1,
+            Log = (nint)(delegate* unmanaged[Cdecl]<byte*, int, void>)&ContractHostLog,
+        };
 
         string rootA = Path.Combine(packageDataRoot, "instances", "instance-a");
         string rootB = Path.Combine(packageDataRoot, "instances", "instance-b");

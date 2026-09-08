@@ -19,13 +19,8 @@ internal static class NativeWidgetPilot
         content = null;
         string? packageRoot = NativeWidgetPackageLoader.TryGetDevelopmentPackageRoot();
         if (packageRoot is null) return false;
-        string packageId = new DirectoryInfo(packageRoot).Name;
-        var descriptor = new NativePackageDescriptor(
-            NativeWidgetPackageLoader.DevelopmentPublisherFingerprint,
-            packageId,
-            packageRoot);
         if (!NativeWidgetRuntimeManager.TryCreateInstance(
-                descriptor,
+                NativeWidgetPackageLoader.CreateDevelopmentDescriptor(packageRoot),
                 contributionId: "main",
                 instanceId: config.Id,
                 dataDirectory: DeskBoxDataPathService.Current.DataDirectory,
@@ -38,7 +33,7 @@ internal static class NativeWidgetPilot
     }
 }
 
-internal sealed class NativeWidgetPilotContent : IWidgetContent
+internal sealed class NativeWidgetPilotContent : IWidgetContent, IDisposable
 {
     private readonly NativeWidgetLease _lease;
 
