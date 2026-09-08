@@ -1,5 +1,7 @@
 # Plugin Runtime Spike（roadmap 阶段 3.5）
 
+2026-09-08：官方六功能包的当前执行依据见 [首发执行计划](../docs/architecture/official-widget-packages-plan.md)，原生界面试点见 [Glance NativeAOT](glance-native/README.md)。本页保留声明式、Process 和 WASM 样本的历史结果。
+
 同一个 GitHub-Stats 插件实现三份实测对比，用数据拍板"代码插件默认 Runtime"。
 协议/权限/manifest 的投入无论结果如何全部复用（roadmap §7 阶段 3.5）。
 
