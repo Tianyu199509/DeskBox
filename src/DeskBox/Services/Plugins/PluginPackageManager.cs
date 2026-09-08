@@ -3,40 +3,32 @@ using System.Text.Json;
 namespace DeskBox.Services.Plugins;
 
 /// <summary>
-/// The untrusted-package pipeline (roadmap 16.12): quarantine/stage ->
-/// VERIFY (full chain + input budgets) -> content-addressed immutable
-/// commit -> InstalledPackageHandle. The runtime consumes ONLY handles
-/// from here - never an arbitrary folder path - which closes the
-/// verify-then-swap TOCTOU window, and the handle's ContentHash is
-/// re-verifiable before any activation.
-/// Update discipline: same packageId must present the SAME publisher
-/// fingerprint, and a strictly INCREASING version (store-index tampering
-/// must not enable downgrade or publisher takeover).
+/// Takes a bounded snapshot before verification, commits it to a unique version
+/// directory, then atomically switches the registry. ReadOnly is accidental-write
+/// protection, not an OS sandbox. Find revalidates content before returning a record.
 /// </summary>
 public sealed class PluginPackageManager
 {
     private readonly string _pluginsRoot;
-    private readonly object _lock = new();
+    private readonly object _lock;
+    private readonly HashSet<string> _trustedPublishers;
 
-    public PluginPackageManager()
-        : this(Path.Combine(
-            DeskBoxDataPathService.Current.DataDirectory,
-            "plugins"))
-    {
-    }
+    // No production publisher key has been provisioned yet. An empty trust set
+    // refuses Store installs; the public spike key must never become a trust root.
+    public PluginPackageManager() : this(
+        Path.Combine(DeskBoxDataPathService.Current.DataDirectory, "plugins"), []) { }
 
-    internal PluginPackageManager(string pluginsRoot)
+    internal PluginPackageManager(string pluginsRoot, IEnumerable<string>? trustedPublishers = null)
     {
-        Directory.CreateDirectory(pluginsRoot);
-        _pluginsRoot = pluginsRoot;
+        _pluginsRoot = Path.GetFullPath(pluginsRoot);
+        Directory.CreateDirectory(_pluginsRoot);
+        PluginPackageStorage.RejectReparsePoint(_pluginsRoot);
+        _lock = PluginPackageStorage.Gate(_pluginsRoot);
+        _trustedPublishers = new HashSet<string>(trustedPublishers ?? [], StringComparer.Ordinal);
     }
 
     private string RegistryPath => Path.Combine(_pluginsRoot, "installed.json");
 
-    /// <summary>
-    /// Stages, verifies, and commits a package directory into the
-    /// content-addressed install store; returns the typed verified model.
-    /// </summary>
     public PluginInstallResult Install(
         string sourceDirectory,
         PluginPackageVerificationPolicy policy = PluginPackageVerificationPolicy.Store)
@@ -44,102 +36,107 @@ public sealed class PluginPackageManager
         ArgumentException.ThrowIfNullOrWhiteSpace(sourceDirectory);
         lock (_lock)
         {
-            PluginPackageVerifier.VerificationResult verification = PluginPackageVerifier.Verify(
-                sourceDirectory,
-                policy,
-                PluginVerificationLimits.Default);
-            if (!verification.IsValid || verification.ManifestJson is null)
+            string? staging = null;
+            string? uncommitted = null;
+            try
             {
-                return PluginInstallResult.Failed(verification.Failures);
-            }
+                // A damaged existing registry must not erase identity/version pins.
+                List<InstalledPackageRecord> registry = LoadRegistry();
+                string source = Path.TrimEndingDirectorySeparator(Path.GetFullPath(sourceDirectory));
+                if (_pluginsRoot.Equals(source, StringComparison.OrdinalIgnoreCase) ||
+                    _pluginsRoot.StartsWith(source + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+                    return PluginInstallResult.Failed(["source must not contain the install store"]);
 
-            using JsonDocument document = JsonDocument.Parse(verification.ManifestJson!);
-            VerifiedPluginPackage? model = BuildVerifiedModel(document.RootElement);
-            if (model is null)
+                string stagingRoot = Path.Combine(_pluginsRoot, ".staging");
+                Directory.CreateDirectory(stagingRoot);
+                PluginPackageStorage.RejectReparsePoint(stagingRoot);
+                staging = Path.Combine(stagingRoot, Guid.NewGuid().ToString("N"));
+                Directory.CreateDirectory(staging);
+                PluginPackageStorage.CopySnapshot(source, staging, PluginVerificationLimits.Default);
+
+                var verification = PluginPackageVerifier.Verify(staging, policy);
+                if (!verification.IsValid || verification.ManifestJson is null)
+                    return PluginInstallResult.Failed(verification.Failures);
+                using JsonDocument document = JsonDocument.Parse(verification.ManifestJson);
+                VerifiedPluginPackage? package = BuildVerifiedModel(document.RootElement,
+                    PluginPackageVerifier.Sha256HexFile(Path.Combine(staging, "package.integrity")));
+                if (package is null)
+                    return PluginInstallResult.Failed(["failed to build the typed verified model"]);
+
+                if (policy == PluginPackageVerificationPolicy.Store && !_trustedPublishers.Contains(package.PublisherFingerprint))
+                    return PluginInstallResult.Failed(["publisher is not trusted by the host; a valid signature alone is insufficient"]);
+                if (!IsCompatible(package))
+                    return PluginInstallResult.Failed(["package hostApi range does not include host API 1.0.0"]);
+
+                InstalledPackageRecord? existing = registry.FirstOrDefault(r => r.PackageId == package.PackageId);
+                if (existing is not null)
+                {
+                    if (existing.PublisherFingerprint != package.PublisherFingerprint)
+                        return PluginInstallResult.Failed(["publisher takeover blocked: package is pinned to another publisher"]);
+                    int comparison = Version.Parse(package.Version).CompareTo(Version.Parse(existing.Version));
+                    if (comparison < 0)
+                        return PluginInstallResult.Failed(["update rejected: version must not decrease"]);
+                    if (existing.ContentHash == package.ContentHash && IsRecordIntact(existing))
+                        return PluginInstallResult.Ok(package, ResolveInstallPath(existing));
+                    if (comparison == 0 && existing.ContentHash != package.ContentHash)
+                        return PluginInstallResult.Failed(["update rejected: version must strictly increase for new content"]);
+                }
+
+                string packageRoot = PluginPackageStorage.UnderRoot(_pluginsRoot, MakeSafeDirectoryName(package.PackageId));
+                Directory.CreateDirectory(packageRoot);
+                PluginPackageStorage.RejectReparsePoint(packageRoot);
+                // A repair gets a fresh location too, so a locked/corrupt installation
+                // is never removed before a working replacement is registered.
+                string installDirectory = Path.Combine(packageRoot, package.ContentHash + "-" + Guid.NewGuid().ToString("N"));
+                Directory.Move(staging, installDirectory);
+                staging = null;
+                uncommitted = installDirectory;
+                foreach (string file in PluginPackageVerifier.WalkPackageTree(installDirectory).Files)
+                    File.SetAttributes(file, File.GetAttributes(file) | FileAttributes.ReadOnly);
+
+                registry.RemoveAll(r => r.PackageId == package.PackageId);
+                registry.Add(new InstalledPackageRecord(package.PackageId, package.Version,
+                    package.PublisherFingerprint, package.Runtime, package.ContentHash,
+                    Path.GetRelativePath(_pluginsRoot, installDirectory).Replace('\\', '/'),
+                    DateTimeOffset.UtcNow, policy == PluginPackageVerificationPolicy.Development));
+                SaveRegistry(registry);
+                uncommitted = null;
+                return PluginInstallResult.Ok(package, installDirectory);
+            }
+            catch (Exception error) when (IsStorageFailure(error))
             {
-                return PluginInstallResult.Failed(["failed to build the typed verified model"]);
+                return PluginInstallResult.Failed([error.Message]);
             }
-            VerifiedPluginPackage package = model;
-
-            List<InstalledPackageRecord> registry = LoadRegistry();
-            InstalledPackageRecord? existing = registry.FirstOrDefault(r => r.PackageId == package.PackageId);
-            if (existing is not null)
+            finally
             {
-                if (!string.Equals(existing.PublisherFingerprint, package.PublisherFingerprint, StringComparison.Ordinal))
-                {
-                    return PluginInstallResult.Failed(
-                    [
-                        $"update rejected: package '{package.PackageId}' is pinned to publisher " +
-                        $"'{existing.PublisherFingerprint[..12]}…' but the update presents " +
-                        $"'{package.PublisherFingerprint[..12]}…' (publisher takeover blocked)"
-                    ]);
-                }
-                if (Version.Parse(package.Version) < Version.Parse(existing.Version))
-                {
-                    return PluginInstallResult.Failed(
-                    [
-                        $"update rejected: version must not decrease " +
-                        $"(installed {existing.Version}, presented {package.Version})"
-                    ]);
-                }
-                if (string.Equals(existing.ContentHash, package.ContentHash, StringComparison.Ordinal))
-                {
-                    // Same content re-install: idempotent success, no rewrite.
-                    return PluginInstallResult.Ok(package, Path.Combine(_pluginsRoot, existing.InstallRelativePath));
-                }
-                if (Version.Parse(package.Version) == Version.Parse(existing.Version))
-                {
-                    return PluginInstallResult.Failed(
-                    [
-                        $"update rejected: version must strictly increase for new content " +
-                        $"(installed {existing.Version}, presented {package.Version})"
-                    ]);
-                }
+                CleanupUncommitted(staging);
+                CleanupUncommitted(uncommitted);
             }
-
-            string installDirectory = Path.Combine(
-                _pluginsRoot,
-                MakeSafeDirectoryName(package.PackageId),
-                package.ContentHash[..16]);
-            if (Directory.Exists(installDirectory))
-            {
-                // Same content re-install: idempotent commit (files are
-                // content-addressed, so identical hash = identical bytes).
-                TryDeleteDirectory(installDirectory);
-            }
-            CommitFiles(sourceDirectory, installDirectory);
-
-            registry.RemoveAll(r => r.PackageId == package.PackageId);
-            registry.Add(new InstalledPackageRecord(
-                package.PackageId,
-                package.Version,
-                package.PublisherFingerprint,
-                package.Runtime,
-                package.ContentHash,
-                MakeRelativeInstallPath(installDirectory),
-                DateTimeOffset.UtcNow));
-            SaveRegistry(registry);
-
-            return PluginInstallResult.Ok(
-                package with { },
-                installDirectory);
         }
     }
 
-    public IReadOnlyList<InstalledPackageRecord> GetInstalled()
+    public PluginInstalledState GetInstalledState()
     {
         lock (_lock)
         {
-            return LoadRegistry();
+            try { return new(true, LoadRegistry(), []); }
+            catch (Exception error) when (IsStorageFailure(error)) { return new(false, [], [error.Message]); }
         }
     }
 
-    /// <summary>Resolves a handle for activation: the install directory must still hash to the recorded content hash.</summary>
+    public IReadOnlyList<InstalledPackageRecord> GetInstalled() => GetInstalledState().Packages;
+
+    /// <summary>Missing, corrupt or incompatible content cannot be activated.</summary>
     public InstalledPackageRecord? Find(string packageId)
     {
         lock (_lock)
         {
-            return LoadRegistry().FirstOrDefault(r => r.PackageId == packageId);
+            try
+            {
+                InstalledPackageRecord? record = LoadRegistry().FirstOrDefault(r => r.PackageId == packageId);
+                return record is not null && IsRecordIntact(record) ? record : null;
+            }
+            catch (Exception error) when (IsStorageFailure(error)) { return null; }
         }
     }
 
@@ -148,29 +145,59 @@ public sealed class PluginPackageManager
         ArgumentException.ThrowIfNullOrWhiteSpace(packageId);
         lock (_lock)
         {
-            List<InstalledPackageRecord> registry = LoadRegistry();
-            InstalledPackageRecord? record = registry.FirstOrDefault(r => r.PackageId == packageId);
-            if (record is null)
+            try
             {
-                return false;
+                List<InstalledPackageRecord> registry = LoadRegistry();
+                if (!registry.Any(r => r.PackageId == packageId)) return false;
+                // Only the package's binary subtree is removed, including old versions.
+                // If a file is locked, report incomplete and retain the registry entry.
+                PluginPackageStorage.DeleteDirectory(_pluginsRoot,
+                    PluginPackageStorage.UnderRoot(_pluginsRoot, MakeSafeDirectoryName(packageId)));
+                new PluginGrantStore(_pluginsRoot).RemovePackage(packageId);
+                registry.RemoveAll(r => r.PackageId == packageId);
+                SaveRegistry(registry);
+                return true;
             }
-            string installDirectory = Path.Combine(_pluginsRoot, record.InstallRelativePath);
-            TryDeleteDirectory(installDirectory);
-            // Best-effort parent cleanup when other versions are absent.
-            string? parent = Path.GetDirectoryName(installDirectory);
-            if (parent is not null && Directory.Exists(parent) && !Directory.EnumerateFileSystemEntries(parent).Any())
-            {
-                try { Directory.Delete(parent); } catch { }
-            }
-            registry.RemoveAll(r => r.PackageId == packageId);
-            SaveRegistry(registry);
-            new PluginGrantStore(_pluginsRoot).RemovePackage(packageId);
-            return true;
+            catch (Exception error) when (IsStorageFailure(error)) { return false; }
         }
     }
 
+    private bool IsRecordIntact(InstalledPackageRecord record)
+    {
+        var policy = record.IsDevelopment ? PluginPackageVerificationPolicy.Development : PluginPackageVerificationPolicy.Store;
+        if (!record.IsDevelopment && !_trustedPublishers.Contains(record.PublisherFingerprint)) return false;
+        string path = ResolveInstallPath(record);
+        var verification = PluginPackageVerifier.Verify(path, policy);
+        if (!verification.IsValid || verification.ManifestJson is null) return false;
+        using JsonDocument document = JsonDocument.Parse(verification.ManifestJson);
+        VerifiedPluginPackage? package = BuildVerifiedModel(document.RootElement,
+            PluginPackageVerifier.Sha256HexFile(Path.Combine(path, "package.integrity")));
+        return package is not null && IsCompatible(package) && package.PackageId == record.PackageId &&
+            package.PublisherFingerprint == record.PublisherFingerprint && package.ContentHash == record.ContentHash &&
+            package.Version == record.Version && package.Runtime == record.Runtime;
+    }
+
+    private static bool IsCompatible(VerifiedPluginPackage package) =>
+        Version.TryParse(package.HostApiMinimum, out Version? minimum) &&
+        Version.TryParse(package.HostApiMaximum, out Version? maximum) &&
+        minimum <= new Version(1, 0, 0) && maximum >= new Version(1, 0, 0);
+
+    private string ResolveInstallPath(InstalledPackageRecord record) =>
+        PluginPackageStorage.UnderRoot(_pluginsRoot, record.InstallRelativePath);
+
+    private void CleanupUncommitted(string? path)
+    {
+        if (path is null) return;
+        try { PluginPackageStorage.DeleteDirectory(_pluginsRoot, path); }
+        catch (Exception error) when (IsStorageFailure(error)) { /* Orphaned content is never registered or activated. */ }
+    }
+
+    private static bool IsStorageFailure(Exception error) =>
+        error is IOException or InvalidDataException or UnauthorizedAccessException or JsonException or
+            InvalidOperationException or ArgumentException or FormatException or KeyNotFoundException;
+
     // ---------- typed model construction (single parse, downstream contract) ----------
-    internal static VerifiedPluginPackage? BuildVerifiedModel(JsonElement root)
+    internal static VerifiedPluginPackage? BuildVerifiedModel(JsonElement root, string? verifiedContentHash = null)
     {
         if (root.ValueKind != JsonValueKind.Object)
         {
@@ -189,7 +216,8 @@ public sealed class PluginPackageManager
                         scope.TryGetProperty("allow", out JsonElement allow) &&
                         allow.ValueKind == JsonValueKind.Array
                             ? allow.EnumerateArray().Select(entry => entry.GetString()!).ToList()
-                            : []));
+                            : [],
+                        !permission.TryGetProperty("required", out JsonElement required) || required.GetBoolean()));
                 }
             }
 
@@ -244,7 +272,14 @@ public sealed class PluginPackageManager
                     contribution.GetProperty("displayName").GetString()!,
                     contribution.GetProperty("template").GetString()!,
                     payloadFields,
-                    bindings));
+                    bindings)
+                {
+                    Payload = contribution.TryGetProperty("payload", out JsonElement structuredPayload) ? structuredPayload.Clone() : default,
+                    DefaultSize = contribution.TryGetProperty("defaultSize", out JsonElement size)
+                        ? new VerifiedWidgetSize(size.GetProperty("width").GetInt32(), size.GetProperty("height").GetInt32()) : null,
+                    ActivationEvents = contribution.TryGetProperty("activationEvents", out JsonElement activation)
+                        ? activation.EnumerateArray().Select(e => e.GetString()!).ToArray() : []
+                });
             }
 
             return new VerifiedPluginPackage
@@ -253,7 +288,11 @@ public sealed class PluginPackageManager
                 Version = root.GetProperty("version").GetString()!,
                 PublisherFingerprint = root.GetProperty("publisher").GetString()!,
                 Runtime = root.GetProperty("runtime").GetString()!,
-                ContentHash = root.GetProperty("signature").GetProperty("contentHash").GetString()!,
+                ContentHash = verifiedContentHash ?? root.GetProperty("signature").GetProperty("contentHash").GetString()!,
+                HostApiMinimum = root.GetProperty("hostApi").GetProperty("min").GetString()!,
+                HostApiMaximum = root.GetProperty("hostApi").GetProperty("max").GetString()!,
+                Fallback = root.TryGetProperty("fallback", out JsonElement fallback) ? fallback.Clone() : default,
+                DataSchema = root.TryGetProperty("data", out JsonElement data) ? data.Clone() : default,
                 ManifestRelativePath = "manifest.json",
                 Permissions = permissions,
                 Contributions = contributions,
@@ -272,80 +311,51 @@ public sealed class PluginPackageManager
         }
     }
 
-    // ---------- immutable commit ----------
-    private static void CommitFiles(string sourceDirectory, string installDirectory)
-    {
-        Directory.CreateDirectory(installDirectory);
-        foreach (string file in Directory.EnumerateFiles(sourceDirectory, "*", SearchOption.AllDirectories))
-        {
-            string relative = Path.GetRelativePath(sourceDirectory, file);
-            string destination = Path.Combine(installDirectory, relative);
-            Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
-            File.Copy(file, destination, overwrite: true);
-            // Content-addressed immutability: read-only unless a commit is
-            // replacing the whole version directory.
-            File.SetAttributes(destination, File.GetAttributes(destination) | FileAttributes.ReadOnly);
-        }
-    }
-
-    private static void TryDeleteDirectory(string directory)
-    {
-        try
-        {
-            foreach (string file in Directory.EnumerateFiles(directory, "*", SearchOption.AllDirectories))
-            {
-                File.SetAttributes(file, FileAttributes.Normal);
-            }
-            Directory.Delete(directory, recursive: true);
-        }
-        catch (Exception)
-        {
-            // A locked file must not make uninstall/install crash; the
-            // next commit overwrites the version directory anyway.
-        }
-    }
-
     private static string MakeSafeDirectoryName(string packageId)
     {
-        foreach (char character in packageId)
-        {
-            if (!char.IsAsciiLetterOrDigit(character) && character is not '.' and not '-')
-            {
-                throw new ArgumentException($"package id contains an unsafe character: '{character}'");
-            }
-        }
+        if (string.IsNullOrEmpty(packageId) || !char.IsAsciiLetterOrDigit(packageId[0]) ||
+            packageId.Any(c => !char.IsAsciiLetterOrDigit(c) && c is not '.' and not '-') ||
+            packageId.Contains("..", StringComparison.Ordinal) || packageId.EndsWith('.'))
+            throw new InvalidDataException("unsafe package id");
         return packageId;
     }
 
-    private string MakeRelativeInstallPath(string installDirectory) =>
-        Path.GetRelativePath(_pluginsRoot, installDirectory).Replace('\\', '/');
-
-    // ---------- registry (hand-rolled JSON, frozen baseline untouched) ----------
     private List<InstalledPackageRecord> LoadRegistry()
     {
-        if (!File.Exists(RegistryPath))
-        {
-            return [];
-        }
+        if (!File.Exists(RegistryPath)) return [];
         try
         {
-            using JsonDocument document = JsonDocument.Parse(File.ReadAllText(RegistryPath));
-            return document.RootElement.EnumerateArray()
-                .Select(record => new InstalledPackageRecord(
-                    record.GetProperty("packageId").GetString()!,
-                    record.GetProperty("version").GetString()!,
-                    record.GetProperty("publisherFingerprint").GetString()!,
-                    record.GetProperty("runtime").GetString()!,
-                    record.GetProperty("contentHash").GetString()!,
-                    record.GetProperty("installRelativePath").GetString()!,
-                    record.GetProperty("installedAtUtc").GetDateTimeOffset()))
-                .ToList();
+            using JsonDocument document = JsonDocument.Parse(PluginPackageStorage.ReadText(RegistryPath, 4 * 1024 * 1024));
+            var records = new List<InstalledPackageRecord>();
+            foreach (JsonElement item in document.RootElement.EnumerateArray())
+            {
+                var record = new InstalledPackageRecord(
+                    item.GetProperty("packageId").GetString()!, item.GetProperty("version").GetString()!,
+                    item.GetProperty("publisherFingerprint").GetString()!, item.GetProperty("runtime").GetString()!,
+                    item.GetProperty("contentHash").GetString()!, item.GetProperty("installRelativePath").GetString()!,
+                    item.GetProperty("installedAtUtc").GetDateTimeOffset(),
+                    item.TryGetProperty("isDevelopment", out JsonElement development) && development.GetBoolean());
+                MakeSafeDirectoryName(record.PackageId);
+                bool IsHash(string? value) => value is { Length: 64 } && value.All(c => c is >= '0' and <= '9' or >= 'a' and <= 'f');
+                if (!PluginPackageVerifier.IsValidVersion(record.Version) ||
+                    !IsHash(record.PublisherFingerprint) || !IsHash(record.ContentHash) ||
+                    record.Runtime is not ("none" or "wasm" or "process") ||
+                    string.IsNullOrEmpty(record.InstallRelativePath) ||
+                    PluginPackageVerifier.PackagePathViolation(record.InstallRelativePath) is not null)
+                    throw new InvalidDataException("invalid installed package fields");
+                string[] parts = record.InstallRelativePath.Split('/');
+                if (parts.Length != 2 || parts[0] != record.PackageId ||
+                    !parts[1].StartsWith(record.ContentHash[..16], StringComparison.Ordinal) ||
+                    records.Any(r => r.PackageId == record.PackageId))
+                    throw new InvalidDataException("invalid or duplicate installed package path");
+                ResolveInstallPath(record);
+                records.Add(record);
+            }
+            return records;
         }
-        catch (JsonException)
+        catch (Exception error) when (IsStorageFailure(error))
         {
-            // Corrupt registry = empty registry (fail closed); installing
-            // again repairs it.
-            return [];
+            throw new InvalidDataException("installed package registry is damaged; installation is blocked until it is recovered", error);
         }
     }
 
@@ -365,35 +375,24 @@ public sealed class PluginPackageManager
                 writer.WriteString("contentHash", record.ContentHash);
                 writer.WriteString("installRelativePath", record.InstallRelativePath);
                 writer.WriteString("installedAtUtc", record.InstalledAtUtc);
+                writer.WriteBoolean("isDevelopment", record.IsDevelopment);
                 writer.WriteEndObject();
             }
             writer.WriteEndArray();
         }
-        string temporaryPath = RegistryPath + ".tmp";
-        File.WriteAllBytes(temporaryPath, output.ToArray());
-        File.Move(temporaryPath, RegistryPath, overwrite: true);
+        PluginPackageStorage.WriteAtomically(RegistryPath, output.ToArray());
     }
 }
 
-/// <summary>An installed package handle: the runtime-facing record.</summary>
+public sealed record PluginInstalledState(bool IsHealthy, IReadOnlyList<InstalledPackageRecord> Packages, IReadOnlyList<string> Failures);
+
 public sealed record InstalledPackageRecord(
-    string PackageId,
-    string Version,
-    string PublisherFingerprint,
-    string Runtime,
-    string ContentHash,
-    string InstallRelativePath,
-    DateTimeOffset InstalledAtUtc);
+    string PackageId, string Version, string PublisherFingerprint, string Runtime,
+    string ContentHash, string InstallRelativePath, DateTimeOffset InstalledAtUtc, bool IsDevelopment = false);
 
 public sealed record PluginInstallResult(
-    bool Succeeded,
-    VerifiedPluginPackage? Package,
-    string? InstallDirectory,
-    IReadOnlyList<string> Failures)
+    bool Succeeded, VerifiedPluginPackage? Package, string? InstallDirectory, IReadOnlyList<string> Failures)
 {
-    public static PluginInstallResult Ok(VerifiedPluginPackage package, string installDirectory) =>
-        new(true, package, installDirectory, []);
-
-    public static PluginInstallResult Failed(IReadOnlyList<string> failures) =>
-        new(false, null, null, failures);
+    public static PluginInstallResult Ok(VerifiedPluginPackage package, string installDirectory) => new(true, package, installDirectory, []);
+    public static PluginInstallResult Failed(IReadOnlyList<string> failures) => new(false, null, null, failures);
 }

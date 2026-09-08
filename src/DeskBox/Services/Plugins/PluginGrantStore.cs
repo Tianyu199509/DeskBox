@@ -2,138 +2,123 @@ using System.Text.Json;
 
 namespace DeskBox.Services.Plugins;
 
-/// <summary>
-/// Persists host-side grants (requested != granted, roadmap 16.10):
-/// packageId -> permissionId -> granted hosts. Install UI writes grants
-/// after the user approves; the capability gate consumes them at runtime.
-/// Hand-rolled JsonDocument/Utf8JsonWriter persistence - the frozen
-/// JsonSerializer baseline stays untouched.
-/// </summary>
+/// <summary>Host grants are bound to both package ID and publisher. Legacy unbound grants are never inherited.</summary>
 public sealed class PluginGrantStore
 {
     private readonly string _grantsPath;
-    private readonly object _lock = new();
+    private readonly object _lock;
+    private sealed record GrantRecord(string Publisher, Dictionary<string, List<string>> Permissions);
 
-    public PluginGrantStore()
-        : this(Path.Combine(
-            DeskBoxDataPathService.Current.DataDirectory,
-            "plugins"))
-    {
-    }
+    public PluginGrantStore() : this(Path.Combine(DeskBoxDataPathService.Current.DataDirectory, "plugins")) { }
 
     internal PluginGrantStore(string pluginsRoot)
     {
         Directory.CreateDirectory(pluginsRoot);
         _grantsPath = Path.Combine(pluginsRoot, "grants.json");
+        _lock = PluginPackageStorage.Gate(pluginsRoot);
     }
 
-    /// <summary>Sets the granted hosts for one package+permission (replaces prior hosts).</summary>
-    public void SetGrants(string packageId, string permissionId, IEnumerable<string> hosts)
+    public void SetGrants(string packageId, string publisherFingerprint, string permissionId, IEnumerable<string> hosts)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(packageId);
         ArgumentException.ThrowIfNullOrWhiteSpace(permissionId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(publisherFingerprint);
+        if (publisherFingerprint.Length != 64 || publisherFingerprint.Any(c => c is not (>= '0' and <= '9' or >= 'a' and <= 'f')))
+            throw new ArgumentException("publisher must be a lowercase SHA-256 fingerprint", nameof(publisherFingerprint));
         lock (_lock)
         {
-            Dictionary<string, Dictionary<string, List<string>>> all = Load();
-            Dictionary<string, List<string>> packageGrants =
-                all.TryGetValue(packageId, out Dictionary<string, List<string>>? existing)
-                    ? existing
-                    : [];
-            packageGrants[permissionId] = hosts.Select(h => h.ToLowerInvariant()).Distinct().ToList();
-            all[packageId] = packageGrants;
+            Dictionary<string, GrantRecord> all = Load();
+            Dictionary<string, List<string>> permissions =
+                all.TryGetValue(packageId, out GrantRecord? previous) && previous.Publisher == publisherFingerprint
+                    ? previous.Permissions : [];
+            permissions[permissionId] = hosts.Select(h => h.ToLowerInvariant()).Distinct(StringComparer.Ordinal).ToList();
+            all[packageId] = new(publisherFingerprint, permissions);
             Save(all);
         }
     }
 
-    public IReadOnlyDictionary<string, IReadOnlyList<string>> GetGrants(string packageId)
+    public IReadOnlyDictionary<string, IReadOnlyList<string>> GetGrants(string packageId, string publisherFingerprint)
     {
         lock (_lock)
         {
-            Dictionary<string, Dictionary<string, List<string>>> all = Load();
-            if (!all.TryGetValue(packageId, out Dictionary<string, List<string>>? packageGrants))
-            {
-                return new Dictionary<string, IReadOnlyList<string>>();
-            }
-            return packageGrants.ToDictionary(
-                pair => pair.Key,
-                pair => (IReadOnlyList<string>)pair.Value);
+            Dictionary<string, GrantRecord> all = Load();
+            return all.TryGetValue(packageId, out GrantRecord? package) && package.Publisher == publisherFingerprint
+                ? package.Permissions.ToDictionary(p => p.Key, p => (IReadOnlyList<string>)p.Value)
+                : new Dictionary<string, IReadOnlyList<string>>();
         }
     }
 
-    /// <summary>Builds the gate input for a package: permissionId -> granted hosts.</summary>
-    public IReadOnlyDictionary<string, IReadOnlyList<string>> GetGateGrants(string packageId) => GetGrants(packageId);
+    public IReadOnlyDictionary<string, IReadOnlyList<string>> GetGateGrants(VerifiedPluginPackage package) =>
+        GetGrants(package.PackageId, package.PublisherFingerprint);
 
     public void RemovePackage(string packageId)
     {
         lock (_lock)
         {
-            Dictionary<string, Dictionary<string, List<string>>> all = Load();
-            if (all.Remove(packageId))
-            {
-                Save(all);
-            }
+            Dictionary<string, GrantRecord> all = Load();
+            if (all.Remove(packageId)) Save(all);
         }
     }
 
-    private Dictionary<string, Dictionary<string, List<string>>> Load()
+    private Dictionary<string, GrantRecord> Load()
     {
-        if (!File.Exists(_grantsPath))
-        {
-            return [];
-        }
+        if (!File.Exists(_grantsPath)) return [];
         try
         {
-            using JsonDocument document = JsonDocument.Parse(File.ReadAllText(_grantsPath));
-            var result = new Dictionary<string, Dictionary<string, List<string>>>();
-            foreach (JsonProperty packageProperty in document.RootElement.EnumerateObject())
+            using JsonDocument document = JsonDocument.Parse(PluginPackageStorage.ReadText(_grantsPath, 4 * 1024 * 1024));
+            var all = new Dictionary<string, GrantRecord>();
+            foreach (JsonProperty item in document.RootElement.EnumerateObject())
             {
+                string publisher = item.Value.GetProperty("publisherFingerprint").GetString()!;
+                if (publisher is not { Length: 64 } || publisher.Any(c => c is not (>= '0' and <= '9' or >= 'a' and <= 'f')))
+                    return [];
                 var permissions = new Dictionary<string, List<string>>();
-                foreach (JsonProperty permissionProperty in packageProperty.Value.EnumerateObject())
+                foreach (JsonProperty permission in item.Value.GetProperty("permissions").EnumerateObject())
                 {
-                    permissions[permissionProperty.Name] = permissionProperty.Value
-                        .EnumerateArray()
-                        .Where(host => host.ValueKind == JsonValueKind.String)
-                        .Select(host => host.GetString()!)
-                        .ToList();
+                    var hosts = new List<string>();
+                    foreach (JsonElement host in permission.Value.EnumerateArray())
+                    {
+                        if (host.ValueKind != JsonValueKind.String) return [];
+                        hosts.Add(host.GetString()!);
+                    }
+                    if (!permissions.TryAdd(permission.Name, hosts)) return [];
                 }
-                result[packageProperty.Name] = permissions;
+                if (!all.TryAdd(item.Name, new(publisher, permissions))) return [];
             }
-            return result;
+            return all;
         }
-        catch (JsonException)
+        catch (Exception error) when (error is JsonException or IOException or InvalidDataException or UnauthorizedAccessException or
+                                      InvalidOperationException or KeyNotFoundException or FormatException)
         {
-            // Corrupt grants file = no grants (fail closed); a fresh write
-            // replaces it.
             return [];
         }
     }
 
-    private void Save(Dictionary<string, Dictionary<string, List<string>>> grants)
+    private void Save(Dictionary<string, GrantRecord> grants)
     {
         using var output = new MemoryStream();
         using (var writer = new Utf8JsonWriter(output, new JsonWriterOptions { Indented = true }))
         {
             writer.WriteStartObject();
-            foreach (KeyValuePair<string, Dictionary<string, List<string>>> packagePair in grants.OrderBy(p => p.Key, StringComparer.Ordinal))
+            foreach (var package in grants.OrderBy(p => p.Key, StringComparer.Ordinal))
             {
-                writer.WritePropertyName(packagePair.Key);
+                writer.WritePropertyName(package.Key);
                 writer.WriteStartObject();
-                foreach (KeyValuePair<string, List<string>> permissionPair in packagePair.Value.OrderBy(p => p.Key, StringComparer.Ordinal))
+                writer.WriteString("publisherFingerprint", package.Value.Publisher);
+                writer.WritePropertyName("permissions");
+                writer.WriteStartObject();
+                foreach (var permission in package.Value.Permissions.OrderBy(p => p.Key, StringComparer.Ordinal))
                 {
-                    writer.WritePropertyName(permissionPair.Key);
+                    writer.WritePropertyName(permission.Key);
                     writer.WriteStartArray();
-                    foreach (string host in permissionPair.Value.OrderBy(h => h, StringComparer.Ordinal))
-                    {
-                        writer.WriteStringValue(host);
-                    }
+                    foreach (string host in permission.Value.OrderBy(h => h, StringComparer.Ordinal)) writer.WriteStringValue(host);
                     writer.WriteEndArray();
                 }
+                writer.WriteEndObject();
                 writer.WriteEndObject();
             }
             writer.WriteEndObject();
         }
-        string temporaryPath = _grantsPath + ".tmp";
-        File.WriteAllBytes(temporaryPath, output.ToArray());
-        File.Move(temporaryPath, _grantsPath, overwrite: true);
+        PluginPackageStorage.WriteAtomically(_grantsPath, output.ToArray());
     }
 }

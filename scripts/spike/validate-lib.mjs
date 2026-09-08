@@ -7,6 +7,18 @@ import path from 'node:path';
 import { canonicalize, sha256Hex, listPayloadFiles, readManifest, fingerprintOf, ed25519PublicKey, packagePathViolation } from './package-ops.mjs';
 import { verify as cryptoVerify } from 'node:crypto';
 
+export function isPackageVersion(value) {
+  return typeof value === 'string' && value.length <= 32 && /^[0-9]+\.[0-9]+\.[0-9]+$/.test(value) &&
+    value.split('.').every(part => Number(part) <= 2147483647);
+}
+
+export function isMinimalJsonPath(value) {
+  if (typeof value !== 'string' || value.length > 512 ||
+      !/^\$\.[A-Za-z0-9_]+(?:\[[0-9]+\])*(?:\.[A-Za-z0-9_]+(?:\[[0-9]+\])*)*$/.test(value)) return false;
+  const tokens = [...value.slice(2).matchAll(/([A-Za-z0-9_]+)|\[([0-9]+)\]/g)];
+  return tokens.length <= 64 && tokens.every(token => token[2] === undefined || Number(token[2]) <= 2147483647);
+}
+
 export function validatePackage(pkgDir) {
   const failures = [];
   const fail = msg => failures.push(msg);
@@ -23,7 +35,7 @@ export function validatePackage(pkgDir) {
   }
   if (manifest.schemaVersion !== 0) fail('schemaVersion must be 0');
   if (!/^[a-z0-9][a-z0-9-]*(\.[a-z0-9][a-z0-9-]*)+$/.test(manifest.id ?? '')) fail('id pattern');
-  if (!/^\d+\.\d+\.\d+$/.test(manifest.version ?? '')) fail('version pattern');
+  if (!isPackageVersion(manifest.version)) fail('version pattern or bounded version range');
   if (!['none', 'wasm', 'process'].includes(manifest.runtime)) fail('runtime enum');
   if (manifest.runtime !== 'none' && manifest.entry === undefined) {
     fail(`runtime '${manifest.runtime}' requires an entry point`);
@@ -48,7 +60,12 @@ export function validatePackage(pkgDir) {
   if (typeof manifest.publisherPublicKey !== 'string' || manifest.publisherPublicKey === '') fail('publisherPublicKey missing');
 
   const hostApi = manifest.hostApi ?? {};
-  if (typeof hostApi.min !== 'string' || typeof hostApi.max !== 'string') fail('hostApi.min/max required');
+  if (!isPackageVersion(hostApi.min) || !isPackageVersion(hostApi.max)) fail('hostApi.min/max bounded versions required');
+  else {
+    const minimum = hostApi.min.split('.').map(Number), maximum = hostApi.max.split('.').map(Number);
+    const firstDifference = minimum.findIndex((part, i) => part !== maximum[i]);
+    if (firstDifference >= 0 && minimum[firstDifference] > maximum[firstDifference]) fail('hostApi.min must not exceed max');
+  }
   if (Object.keys(hostApi).some(k => !['min', 'max'].includes(k))) fail('hostApi closed');
 
   const contributions = manifest.contributions;
@@ -76,6 +93,16 @@ export function validatePackage(pkgDir) {
     if (c.id !== undefined && !/^[a-z0-9][a-z0-9-]*$/.test(c.id)) fail(`${where}: id pattern`);
     if (c.displayName !== undefined && c.displayName === '') fail(`${where}: displayName minLength 1`);
     if (c.template !== undefined && !templates.includes(c.template)) fail(`${where}: template enum`);
+    if (c.defaultSize !== undefined) {
+      const size = c.defaultSize;
+      if (!size || typeof size !== 'object' || Array.isArray(size) ||
+          !['width', 'height'].every(k => Number.isInteger(size[k]) && size[k] > 0 && size[k] <= 2147483647) ||
+          Object.keys(size).some(k => !['width', 'height'].includes(k))) fail(`${where}: invalid defaultSize`);
+    }
+    if (c.activationEvents !== undefined && (!Array.isArray(c.activationEvents) ||
+        c.activationEvents.some(e => !['onStartupFinished', 'onWidgetOpen', 'onCommand', 'onSchedule', 'onFileAssociation', 'onEvent'].includes(e)))) {
+      fail(`${where}: invalid activationEvents`);
+    }
     if (c.payload !== undefined) {
       if (!(typeof c.payload.version === 'number' && Number.isInteger(c.payload.version) && c.payload.version >= 1)) {
         fail(`${where}.payload.version >= 1 required`);
@@ -93,7 +120,7 @@ export function validatePackage(pkgDir) {
         if (binding?.source !== undefined && !(binding.source in dataSources)) {
           fail(`${bWhere}: unknown data source '${binding.source}'`);
         }
-        if (binding?.path !== undefined && !/^\$\.[A-Za-z0-9_\[\].]*$/.test(binding.path)) {
+        if (binding?.path !== undefined && !isMinimalJsonPath(binding.path)) {
           fail(`${bWhere}: path must be a minimal JSON path like $.a.b[0].c`);
         }
         if (c.payload !== undefined && !(field in c.payload)) {

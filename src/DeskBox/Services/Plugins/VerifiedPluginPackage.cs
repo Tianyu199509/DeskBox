@@ -1,3 +1,5 @@
+using System.Text.Json;
+
 namespace DeskBox.Services.Plugins;
 
 /// <summary>
@@ -34,18 +36,32 @@ public sealed record VerifiedPluginPackage
         new Dictionary<string, VerifiedAction>();
 
     public string? EntryMain { get; init; }
+
+    public string HostApiMinimum { get; init; } = "1.0.0";
+    public string HostApiMaximum { get; init; } = "1.0.0";
+    public JsonElement Fallback { get; init; }
+    public JsonElement DataSchema { get; init; }
 }
 
 public sealed record PluginRequestedPermission(
     string Id,
-    IReadOnlyList<string> AllowHosts);
+    IReadOnlyList<string> AllowHosts,
+    bool Required = true);
 
 public sealed record VerifiedContribution(
     string Id,
     string DisplayName,
     string Template,
     IReadOnlyDictionary<string, string> PayloadStringFields,
-    IReadOnlyDictionary<string, VerifiedBinding> Bindings);
+    IReadOnlyDictionary<string, VerifiedBinding> Bindings)
+{
+    /// <summary>Owned structured JSON; arrays, objects and scalar types survive document disposal.</summary>
+    public JsonElement Payload { get; init; }
+    public VerifiedWidgetSize? DefaultSize { get; init; }
+    public IReadOnlyList<string> ActivationEvents { get; init; } = [];
+}
+
+public sealed record VerifiedWidgetSize(int Width, int Height);
 
 public sealed record VerifiedBinding(string Source, string Path);
 
