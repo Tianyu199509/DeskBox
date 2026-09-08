@@ -1107,6 +1107,13 @@ public static class IconHelper
                     includeOverlays: !hideShortcutArrowOverlay);
                 if (bytes is { Length: > 0 })
                 {
+                    // Steam and other .url shortcuts frequently carry a 32/48 px
+                    // IconFile that Shell centres inside the 256 px canvas.
+                    bytes = ShellThumbnailProxy.NormalizeIconPayload(bytes);
+                }
+
+                if (bytes is { Length: > 0 })
+                {
                     App.LogVerbose(
                         $"[IconHelper] Loaded Internet shortcut icon through " +
                         $"Shell proxy path={originalSourcePath} " +
@@ -1136,6 +1143,11 @@ public static class IconHelper
                 // path below as the compatibility fallback.
                 bytes = await TryLoadHighResolutionShellItemIconAsync(
                     originalSourcePath);
+                if (bytes is { Length: > 0 })
+                {
+                    bytes = ShellThumbnailProxy.NormalizeIconPayload(bytes);
+                }
+
                 if (bytes is { Length: > 0 })
                 {
                     App.LogVerbose(
@@ -1202,10 +1214,10 @@ public static class IconHelper
                 }
             }
 
-            bool rejectPaddedShortcutIcon =
-                isShortcutPath &&
-                (loadIconSource.UsesShellItemIcon ||
-                 ShortcutHelper.IsShortcutPath(loadIconSource.Path));
+            // Apply the padded-canvas check to every icon source, not only
+            // shortcuts: SHGetImageList's Jumbo slot can hand back a small glyph
+            // centred in a 256 px canvas for plain files and executables too.
+            bool rejectPaddedShortcutIcon = true;
 
             if (bytes is not { Length: > 0 } &&
                 !IsRecentTimeout(s_iconBytesTimeouts, iconBytesCacheKey))
