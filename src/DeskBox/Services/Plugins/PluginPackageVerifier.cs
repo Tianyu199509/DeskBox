@@ -7,6 +7,20 @@ using System.Text.RegularExpressions;
 namespace DeskBox.Services.Plugins;
 
 /// <summary>
+/// Verification policy (round 9): the store path requires a publisher
+/// signature; unsigned packages verify only under an explicit Development
+/// policy so a caller can never "forget" the extra UnsignedPackage check.
+/// </summary>
+public enum PluginPackageVerificationPolicy
+{
+    /// <summary>Signature mandatory - the default for product install flows.</summary>
+    Store,
+
+    /// <summary>Unsigned packages allowed (dev tooling / local iteration only).</summary>
+    Development,
+}
+
+/// <summary>
 /// Verifies a plugin package directory against the manifest schema v0.3
 /// semantics: structural rules, the package path grammar, the
 /// package.integrity chain, and the Ed25519 publisher signature. This is
@@ -14,8 +28,14 @@ namespace DeskBox.Services.Plugins;
 /// and the install-time gate for the product plugin pipeline (roadmap
 /// 16.10); cross-implementation parity is enforced by tests that run this
 /// verifier over packages built and signed by the Node tooling.
-/// Uses JsonDocument (arbitrary plugin data, no reflection) so the frozen
-/// JsonSerializer baseline is untouched.
+///
+/// Security posture (round 9): the input is FULLY UNTRUSTED, so Verify is
+/// a fail-closed total function - any bytes yield Valid=false with
+/// diagnostics, never an unhandled exception - and phases stop on first
+/// failure (structure, then integrity, then signature). Manifest numbers
+/// must be integers (no float canonicalization ambiguity across
+/// platforms). Uses JsonDocument (arbitrary plugin data, no reflection)
+/// so the frozen JsonSerializer baseline is untouched.
 /// </summary>
 public static partial class PluginPackageVerifier
 {
@@ -55,7 +75,27 @@ public static partial class PluginPackageVerifier
     private static readonly string[] Templates =
         ["metric", "list", "status", "gallery", "action-list", "simple-form"];
 
-    public static VerificationResult Verify(string packageDirectory)
+    public static VerificationResult Verify(
+        string packageDirectory,
+        PluginPackageVerificationPolicy policy = PluginPackageVerificationPolicy.Store)
+    {
+        try
+        {
+            return VerifyCore(packageDirectory, policy);
+        }
+        catch (Exception error)
+        {
+            // Total function: package-controlled input must never surface
+            // as an unhandled exception to the host - always a result.
+            return new VerificationResult(
+                false,
+                [$"verifier internal error (treated as invalid): {error.GetType().Name}: {error.Message}"],
+                false,
+                null);
+        }
+    }
+
+    private static VerificationResult VerifyCore(string packageDirectory, PluginPackageVerificationPolicy policy)
     {
         var failures = new List<string>();
         string manifestPath = Path.Combine(packageDirectory, "manifest.json");
@@ -85,22 +125,45 @@ public static partial class PluginPackageVerifier
             bool unsigned = !root.TryGetProperty("signature", out JsonElement signature) ||
                             signature.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined;
 
-            ValidateStructure(root, failures);
-            VerifyIntegrityChain(packageDirectory, root, manifestJson, failures);
-
-            if (!unsigned)
+            // ---------- Phase B: strict structure (STOP on failure) ----------
+            ValidateStructure(root, packageDirectory, failures);
+            if (failures.Count > 0)
             {
-                VerifySignature(packageDirectory, signature, failures);
+                return Result(failures, unsigned, manifestJson);
             }
 
-            return new VerificationResult(failures.Count == 0, failures, unsigned, manifestJson);
+            // ---------- Phase C: integrity chain (STOP on failure) ----------
+            VerifyIntegrityChain(packageDirectory, root, manifestJson, failures);
+            if (failures.Count > 0)
+            {
+                return Result(failures, unsigned, manifestJson);
+            }
+
+            // ---------- Phase D: signature ----------
+            if (policy == PluginPackageVerificationPolicy.Store && unsigned)
+            {
+                failures.Add("signature required for store packages (unsigned is Development-policy only)");
+                return Result(failures, unsigned, manifestJson);
+            }
+            if (!unsigned)
+            {
+                VerifySignature(packageDirectory, root, signature, failures);
+            }
+
+            return Result(failures, unsigned, manifestJson);
         }
     }
 
+    private static VerificationResult Result(List<string> failures, bool unsigned, string manifestJson) =>
+        new(failures.Count == 0, failures, unsigned, manifestJson);
+
     // ---------- structural rules (schema v0.3, mirrors validate-lib.mjs) ----------
-    private static void ValidateStructure(JsonElement root, List<string> failures)
+    // Every check FAILS CLOSED on wrong types: "required property present"
+    // never silently substitutes for "property has the right type".
+    private static void ValidateStructure(JsonElement root, string packageDirectory, List<string> failures)
     {
         void Fail(string message) => failures.Add(message);
+
         foreach (string key in RootRequired)
         {
             if (!root.TryGetProperty(key, out _))
@@ -116,39 +179,52 @@ public static partial class PluginPackageVerifier
             }
         }
 
-        if (StringEquals(root, "schemaVersion", out string? schemaVersion) && schemaVersion != "0")
+        RequireInteger(root, "schemaVersion", value => value == 0, "schemaVersion must be the integer 0", Fail);
+        if (StringValue(root, "id") is null)
         {
-            Fail("schemaVersion must be 0");
+            Fail("id must be a string");
         }
-        if (StringEquals(root, "id", out string? id) && !PackageIdPattern().IsMatch(id))
+        else if (!PackageIdPattern().IsMatch(StringValue(root, "id")!))
         {
             Fail("id pattern");
         }
-        if (StringEquals(root, "version", out string? version) && !VersionPattern().IsMatch(version))
+        if (StringValue(root, "version") is null)
+        {
+            Fail("version must be a string");
+        }
+        else if (!VersionPattern().IsMatch(StringValue(root, "version")!))
         {
             Fail("version pattern");
         }
-        if (StringEquals(root, "runtime", out string? runtime) && runtime is not ("none" or "wasm" or "process"))
+        string? runtime = StringValue(root, "runtime");
+        if (runtime is null)
+        {
+            Fail("runtime must be a string");
+        }
+        else if (runtime is not ("none" or "wasm" or "process"))
         {
             Fail("runtime enum");
         }
+        if (StringValue(root, "publisher") is not { Length: > 0 })
+        {
+            Fail("publisher must be a non-empty string");
+        }
+        if (StringValue(root, "publisherPublicKey") is not { Length: > 0 })
+        {
+            Fail("publisherPublicKey must be a non-empty string");
+        }
 
         bool hasEntry = root.TryGetProperty("entry", out JsonElement entry) && entry.ValueKind == JsonValueKind.Object;
-        if (runtime == "none" && hasEntry)
+        if (runtime is "none" && hasEntry)
         {
             Fail("runtime:none packages must not declare an entry point");
         }
-        if (runtime != "none" && !hasEntry)
+        if (runtime is "wasm" or "process" && !hasEntry)
         {
             Fail($"runtime '{runtime}' requires an entry point");
         }
         if (hasEntry)
         {
-            string? entryMain = StringEquals(entry, "main", out string? main) ? main : null;
-            if (entryMain is null || entryMain.Length == 0)
-            {
-                Fail("entry.main must be a non-empty string");
-            }
             foreach (JsonProperty property in entry.EnumerateObject())
             {
                 if (property.Name != "main")
@@ -156,21 +232,49 @@ public static partial class PluginPackageVerifier
                     Fail($"entry: unknown property '{property.Name}'");
                 }
             }
-            // The manifest path is verified against the package later; the
-            // grammar itself is directory-independent so it runs here.
-            if (entryMain is not null && PackagePathViolation(entryMain) is { } entryViolation)
+            if (StringValue(entry, "main") is not { } entryMain || entryMain.Length == 0)
             {
-                Fail($"entry.main violates the package path grammar ({entryViolation})");
+                Fail("entry.main must be a non-empty string");
+            }
+            else
+            {
+                if (PackagePathViolation(entryMain) is { } entryViolation)
+                {
+                    Fail($"entry.main violates the package path grammar ({entryViolation})");
+                }
+                else if (!File.Exists(Path.Combine(packageDirectory, entryMain)))
+                {
+                    Fail($"entry.main file not found in package: {entryMain}");
+                }
             }
         }
 
-        if (!root.TryGetProperty("contributions", out JsonElement contributions) ||
-            contributions.ValueKind != JsonValueKind.Array ||
-            contributions.GetArrayLength() == 0)
+        if (!root.TryGetProperty("hostApi", out JsonElement hostApi) || hostApi.ValueKind != JsonValueKind.Object)
         {
-            Fail("contributions: minItems 1");
-            return;
+            Fail("hostApi must be an object with string min/max");
         }
+        else
+        {
+            foreach (string key in new[] { "min", "max" })
+            {
+                if (StringValue(hostApi, key) is not { Length: > 0 })
+                {
+                    Fail($"hostApi.{key} must be a non-empty string");
+                }
+            }
+            foreach (JsonProperty property in hostApi.EnumerateObject())
+            {
+                if (property.Name is not ("min" or "max"))
+                {
+                    Fail($"hostApi: unknown property '{property.Name}'");
+                }
+            }
+        }
+
+        // Manifest numbers are integer-only (round 9): floats are rejected
+        // before they can create cross-platform canonicalization drift
+        // (Node JSON.stringify re-formats numbers; raw tokens differ).
+        RejectNonIntegerNumbers(root, "manifest", Fail);
 
         Dictionary<string, JsonElement> dataSources = MapOf(root, "dataSources");
         Dictionary<string, JsonElement> actions = MapOf(root, "actions");
@@ -180,6 +284,14 @@ public static partial class PluginPackageVerifier
             {
                 Fail($"map key '{key}' must use the local id pattern (^[a-z0-9][a-z0-9-]*$)");
             }
+        }
+
+        if (!root.TryGetProperty("contributions", out JsonElement contributions) ||
+            contributions.ValueKind != JsonValueKind.Array ||
+            contributions.GetArrayLength() == 0)
+        {
+            Fail("contributions: minItems 1");
+            return;
         }
 
         var contributionIds = new HashSet<string>();
@@ -207,11 +319,15 @@ public static partial class PluginPackageVerifier
                     Fail($"{where}: unknown property '{property.Name}'");
                 }
             }
-            if (StringEquals(contribution, "type", out string? type) && type != "widget")
+            if (StringValue(contribution, "type") is not { } type || type != "widget")
             {
                 Fail($"{where}: unknown contribution type");
             }
-            if (StringEquals(contribution, "id", out string? contributionId))
+            if (StringValue(contribution, "id") is not { } contributionId)
+            {
+                Fail($"{where}: id must be a string");
+            }
+            else
             {
                 if (!LocalIdPattern().IsMatch(contributionId))
                 {
@@ -222,17 +338,20 @@ public static partial class PluginPackageVerifier
                     Fail("contribution ids must be unique within the package");
                 }
             }
-            if (StringEquals(contribution, "displayName", out string? displayName) && displayName.Length == 0)
+            if (StringValue(contribution, "displayName", out string? displayName) && displayName!.Length == 0)
             {
                 Fail($"{where}: displayName minLength 1");
             }
-            if (StringEquals(contribution, "template", out string? template) && !Templates.Contains(template))
+            if (StringValue(contribution, "template") is not { } template || !Templates.Contains(template))
             {
                 Fail($"{where}: template enum");
             }
 
-            if (contribution.TryGetProperty("payload", out JsonElement payload) &&
-                payload.ValueKind == JsonValueKind.Object)
+            JsonElement payload = contribution.TryGetProperty("payload", out JsonElement payloadElement) &&
+                                  payloadElement.ValueKind == JsonValueKind.Object
+                ? payloadElement
+                : default;
+            if (payload.ValueKind == JsonValueKind.Object)
             {
                 if (!payload.TryGetProperty("version", out JsonElement payloadVersion) ||
                     !payloadVersion.TryGetInt32(out int payloadVersionValue) ||
@@ -240,7 +359,8 @@ public static partial class PluginPackageVerifier
                 {
                     Fail($"{where}.payload.version >= 1 required");
                 }
-                if (StringEquals(payload, "primaryActionId", out string? primaryActionId))
+                if (StringValue(payload, "primaryActionId", out string? primaryActionId) &&
+                    primaryActionId!.Length > 0)
                 {
                     referencedActionIds.Add(primaryActionId);
                 }
@@ -265,21 +385,27 @@ public static partial class PluginPackageVerifier
                             Fail($"{bindingWhere}: unknown property '{property.Name}'");
                         }
                     }
-                    if (!StringEquals(binding, "source", out string? source) || source.Length == 0)
+                    if (StringValue(binding, "source", out string? source) && source!.Length > 0)
                     {
-                        Fail($"{bindingWhere}: 'source' required");
+                        if (!dataSources.ContainsKey(source))
+                        {
+                            Fail($"{bindingWhere}: unknown data source '{source}'");
+                        }
                     }
-                    else if (!dataSources.ContainsKey(source))
+                    else
                     {
-                        Fail($"{bindingWhere}: unknown data source '{source}'");
+                        Fail($"{bindingWhere}: 'source' must be a non-empty string");
                     }
-                    if (!StringEquals(binding, "path", out string? path) || path.Length == 0)
+                    if (StringValue(binding, "path", out string? path) && path!.Length > 0)
                     {
-                        Fail($"{bindingWhere}: 'path' required");
+                        if (!JsonPathPattern().IsMatch(path))
+                        {
+                            Fail($"{bindingWhere}: path must be a minimal JSON path like $.a.b[0].c");
+                        }
                     }
-                    else if (!JsonPathPattern().IsMatch(path))
+                    else
                     {
-                        Fail($"{bindingWhere}: path must be a minimal JSON path like $.a.b[0].c");
+                        Fail($"{bindingWhere}: 'path' must be a non-empty string");
                     }
                     if (payload.ValueKind == JsonValueKind.Object && !payload.TryGetProperty(bindingProperty.Name, out _))
                     {
@@ -294,6 +420,11 @@ public static partial class PluginPackageVerifier
         {
             string where = $"dataSources['{pair.Key}']";
             JsonElement source = pair.Value;
+            if (source.ValueKind != JsonValueKind.Object)
+            {
+                Fail($"{where}: must be an object");
+                continue;
+            }
             foreach (string key in new[] { "type", "url", "refreshSeconds" })
             {
                 if (!source.TryGetProperty(key, out _))
@@ -308,13 +439,20 @@ public static partial class PluginPackageVerifier
                     Fail($"{where}: unknown property '{property.Name}'");
                 }
             }
-            if (StringEquals(source, "type", out string? sourceType) && sourceType != "http-json")
+            if (StringValue(source, "type") is not { } sourceType || sourceType != "http-json")
             {
                 Fail($"{where}: v0.3 supports type http-json only");
             }
-            if (StringEquals(source, "url", out string? url) && !url.StartsWith("https://", StringComparison.Ordinal))
+            if (StringValue(source, "url", out string? url) && url!.Length > 0)
             {
-                Fail($"{where}: url must be HTTPS");
+                if (!url.StartsWith("https://", StringComparison.Ordinal))
+                {
+                    Fail($"{where}: url must be HTTPS");
+                }
+            }
+            else
+            {
+                Fail($"{where}: url must be a non-empty string");
             }
             if (source.TryGetProperty("refreshSeconds", out JsonElement refresh) &&
                 (!refresh.TryGetInt32(out int refreshValue) || refreshValue < 10))
@@ -328,6 +466,11 @@ public static partial class PluginPackageVerifier
         {
             string where = $"actions['{pair.Key}']";
             JsonElement action = pair.Value;
+            if (action.ValueKind != JsonValueKind.Object)
+            {
+                Fail($"{where}: must be an object");
+                continue;
+            }
             foreach (string key in new[] { "type", "url" })
             {
                 if (!action.TryGetProperty(key, out _))
@@ -342,13 +485,20 @@ public static partial class PluginPackageVerifier
                     Fail($"{where}: unknown property '{property.Name}'");
                 }
             }
-            if (StringEquals(action, "type", out string? actionType) && actionType != "open-url")
+            if (StringValue(action, "type") is not { } actionType || actionType != "open-url")
             {
                 Fail($"{where}: v0.3 supports type open-url only");
             }
-            if (StringEquals(action, "url", out string? actionUrl) && !actionUrl.StartsWith("https://", StringComparison.Ordinal))
+            if (StringValue(action, "url", out string? actionUrl) && actionUrl!.Length > 0)
             {
-                Fail($"{where}: url must be HTTPS");
+                if (!actionUrl.StartsWith("https://", StringComparison.Ordinal))
+                {
+                    Fail($"{where}: url must be HTTPS");
+                }
+            }
+            else
+            {
+                Fail($"{where}: url must be a non-empty string");
             }
         }
         if (actions.Count > 0)
@@ -357,12 +507,12 @@ public static partial class PluginPackageVerifier
             // primaryActionId references were collected above.
             foreach (JsonElement contribution in contributions.EnumerateArray())
             {
-                if (!contribution.TryGetProperty("payload", out JsonElement payload) ||
-                    payload.ValueKind != JsonValueKind.Object)
+                if (!contribution.TryGetProperty("payload", out JsonElement payloadElement) ||
+                    payloadElement.ValueKind != JsonValueKind.Object)
                 {
                     continue;
                 }
-                foreach (JsonProperty property in payload.EnumerateObject())
+                foreach (JsonProperty property in payloadElement.EnumerateObject())
                 {
                     CollectActionId(property.Value, referencedActionIds);
                 }
@@ -376,7 +526,7 @@ public static partial class PluginPackageVerifier
             }
         }
 
-        // Permissions: shape, unique ids, then consumption rules.
+        // Permissions: shape (fail-closed on types), unique ids, consumption rules.
         List<JsonElement> permissions = root.TryGetProperty("permissions", out JsonElement permissionsElement) &&
                                         permissionsElement.ValueKind == JsonValueKind.Array
             ? permissionsElement.EnumerateArray().ToList()
@@ -385,35 +535,88 @@ public static partial class PluginPackageVerifier
         for (int i = 0; i < permissions.Count; i++)
         {
             JsonElement permission = permissions[i];
-            if (!StringEquals(permission, "id", out string? permissionId) || !PermissionIdPattern().IsMatch(permissionId))
+            string where = $"permissions[{i}]";
+            if (permission.ValueKind != JsonValueKind.Object)
             {
-                Fail($"permissions[{i}]: id pattern");
-            }
-            else if (!permissionIds.Add(permissionId))
-            {
-                // Duplicate ids with different scopes would make grant/scope
-                // lookup implementation-defined across runtimes.
-                Fail($"permissions: duplicate id '{permissionId}' (use one entry with multiple scope.allow hosts)");
+                Fail($"{where}: must be an object");
+                continue;
             }
             foreach (JsonProperty property in permission.EnumerateObject())
             {
                 if (property.Name is not ("id" or "required" or "scope"))
                 {
-                    Fail($"permissions[{i}]: unknown property '{property.Name}'");
+                    Fail($"{where}: unknown property '{property.Name}'");
+                }
+            }
+            if (StringValue(permission, "id", out string? permissionId) && permissionId!.Length > 0)
+            {
+                if (!PermissionIdPattern().IsMatch(permissionId))
+                {
+                    Fail($"{where}: id pattern");
+                }
+                else if (!permissionIds.Add(permissionId))
+                {
+                    // Duplicate ids with different scopes would make grant/scope
+                    // lookup implementation-defined across runtimes.
+                    Fail($"permissions: duplicate id '{permissionId}' (use one entry with multiple scope.allow hosts)");
+                }
+            }
+            else
+            {
+                Fail($"{where}: id must be a non-empty string");
+            }
+            if (permission.TryGetProperty("required", out JsonElement required) &&
+                required.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
+            {
+                Fail($"{where}: required must be a boolean");
+            }
+            if (permission.TryGetProperty("scope", out JsonElement scope))
+            {
+                if (scope.ValueKind != JsonValueKind.Object)
+                {
+                    Fail($"{where}: scope must be an object");
+                }
+                else
+                {
+                    foreach (JsonProperty scopeProperty in scope.EnumerateObject())
+                    {
+                        if (scopeProperty.Name is not ("allow" or "deny"))
+                        {
+                            Fail($"{where}.scope: unknown property '{scopeProperty.Name}'");
+                        }
+                    }
+                    if (scope.TryGetProperty("allow", out JsonElement allow))
+                    {
+                        if (allow.ValueKind != JsonValueKind.Array)
+                        {
+                            Fail($"{where}.scope.allow must be an array");
+                        }
+                        else
+                        {
+                            foreach (JsonElement allowEntry in allow.EnumerateArray())
+                            {
+                                if (allowEntry.ValueKind != JsonValueKind.String)
+                                {
+                                    Fail($"{where}.scope.allow entries must be strings");
+                                    break;
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
 
         foreach (KeyValuePair<string, JsonElement> pair in dataSources)
         {
-            if (StringEquals(pair.Value, "type", out string? type) && type == "http-json")
+            if (StringValue(pair.Value, "type", out string? type) && type == "http-json")
             {
                 if (!permissionIds.Contains("network.fetch"))
                 {
                     Fail($"dataSources['{pair.Key}']: http-json requires the network.fetch permission");
                 }
-                else if (StringEquals(pair.Value, "url", out string? url) &&
-                         !HostInScope(url, permissions, "network.fetch"))
+                else if (StringValue(pair.Value, "url", out string? url) &&
+                         !HostInScope(url!, permissions, "network.fetch"))
                 {
                     Fail($"dataSources['{pair.Key}']: url host is outside the declared network.fetch scope");
                 }
@@ -421,18 +624,46 @@ public static partial class PluginPackageVerifier
         }
         foreach (KeyValuePair<string, JsonElement> pair in actions)
         {
-            if (StringEquals(pair.Value, "type", out string? type) && type == "open-url")
+            if (StringValue(pair.Value, "type", out string? type) && type == "open-url")
             {
                 if (!permissionIds.Contains("shell.open"))
                 {
                     Fail($"actions['{pair.Key}']: open-url requires the shell.open permission");
                 }
-                else if (StringEquals(pair.Value, "url", out string? url) &&
-                         !HostInScope(url, permissions, "shell.open"))
+                else if (StringValue(pair.Value, "url", out string? url) &&
+                         !HostInScope(url!, permissions, "shell.open"))
                 {
                     Fail($"actions['{pair.Key}']: url host is outside the declared shell.open scope");
                 }
             }
+        }
+    }
+
+    /// <summary>Walks the tree and fails on any non-integer number token.</summary>
+    private static void RejectNonIntegerNumbers(JsonElement element, string where, Action<string> fail)
+    {
+        switch (element.ValueKind)
+        {
+            case JsonValueKind.Object:
+                foreach (JsonProperty property in element.EnumerateObject())
+                {
+                    RejectNonIntegerNumbers(property.Value, $"{where}.{property.Name}", fail);
+                }
+                break;
+            case JsonValueKind.Array:
+                int index = 0;
+                foreach (JsonElement item in element.EnumerateArray())
+                {
+                    RejectNonIntegerNumbers(item, $"{where}[{index++}]", fail);
+                }
+                break;
+            case JsonValueKind.Number:
+                string raw = element.GetRawText();
+                if (raw.Contains('.') || raw.Contains('e') || raw.Contains('E'))
+                {
+                    fail($"{where}: manifest numbers must be integers (floats are rejected to avoid cross-platform canonicalization drift)");
+                }
+                break;
         }
     }
 
@@ -459,7 +690,7 @@ public static partial class PluginPackageVerifier
         {
             string host = new Uri(url).Host.ToLowerInvariant();
             return permissions
-                .Where(p => StringEquals(p, "id", out string? id) && id == permissionId)
+                .Where(p => StringValue(p, "id", out string? id) && id == permissionId)
                 .SelectMany(p => p.TryGetProperty("scope", out JsonElement scope) &&
                                  scope.TryGetProperty("allow", out JsonElement allow) &&
                                  allow.ValueKind == JsonValueKind.Array
@@ -487,17 +718,41 @@ public static partial class PluginPackageVerifier
         return result;
     }
 
-    private static bool StringEquals(JsonElement element, string property, out string? value)
+    /// <summary>The string value when the property exists and is a string; null otherwise.</summary>
+    private static string? StringValue(JsonElement element, string property)
     {
-        value = null;
-        if (element.ValueKind == JsonValueKind.Object &&
-            element.TryGetProperty(property, out JsonElement node) &&
-            node.ValueKind == JsonValueKind.String)
+        return element.ValueKind == JsonValueKind.Object &&
+               element.TryGetProperty(property, out JsonElement node) &&
+               node.ValueKind == JsonValueKind.String
+            ? node.GetString()
+            : null;
+    }
+
+    private static bool StringValue(JsonElement element, string property, out string? value)
+    {
+        value = StringValue(element, property);
+        return value is not null;
+    }
+
+    private static void RequireInteger(
+        JsonElement element,
+        string property,
+        Func<int, bool> predicate,
+        string message,
+        Action<string> fail)
+    {
+        if (!element.TryGetProperty(property, out JsonElement node))
         {
-            value = node.GetString();
-            return true;
+            return; // missing already reported by the required scan
         }
-        return false;
+        if (node.ValueKind != JsonValueKind.Number || !node.TryGetInt32(out int value))
+        {
+            fail($"{property} must be an integer");
+        }
+        else if (!predicate(value))
+        {
+            fail(message);
+        }
     }
 
     // ---------- package path grammar (zip-slip defense, shared with the Node tooling) ----------
@@ -562,7 +817,16 @@ public static partial class PluginPackageVerifier
 
         // Step 1: the manifest's canonical form (signature = null) must match
         // its integrity line - catches a manifest edited after the build.
-        string canonicalManifestHash = Sha256Hex(CanonicalizeManifest(root));
+        string canonicalManifestHash;
+        try
+        {
+            canonicalManifestHash = Sha256Hex(CanonicalizeManifest(root));
+        }
+        catch (Exception error)
+        {
+            Fail($"manifest canonicalization failed: {error.Message}");
+            return;
+        }
         if (!listed.TryGetValue("manifest.json", out string? manifestLine) ||
             !string.Equals(manifestLine, canonicalManifestHash, StringComparison.Ordinal))
         {
@@ -599,15 +863,17 @@ public static partial class PluginPackageVerifier
         }
     }
 
-    private static void VerifySignature(string packageDirectory, JsonElement signature, List<string> failures)
+    private static void VerifySignature(string packageDirectory, JsonElement root, JsonElement signature, List<string> failures)
     {
         void Fail(string message) => failures.Add(message);
+        if (signature.ValueKind != JsonValueKind.Object)
+        {
+            Fail("signature must be an object when present");
+            return;
+        }
         foreach (string key in new[] { "contentHash", "publisherSignature" })
         {
-            if (signature.ValueKind != JsonValueKind.Object ||
-                !signature.TryGetProperty(key, out JsonElement node) ||
-                node.ValueKind != JsonValueKind.String ||
-                node.GetString()!.Length == 0)
+            if (!StringValue(signature, key, out string? value) || value!.Length == 0)
             {
                 Fail($"signature: '{key}' required when the block is present");
                 return;
@@ -620,10 +886,6 @@ public static partial class PluginPackageVerifier
                 Fail($"signature: unknown property '{property.Name}'");
             }
         }
-
-        string manifestJson = File.ReadAllText(Path.Combine(packageDirectory, "manifest.json"));
-        using JsonDocument document = JsonDocument.Parse(manifestJson);
-        JsonElement root = document.RootElement;
 
         string integrityPath = Path.Combine(packageDirectory, "package.integrity");
         if (!File.Exists(integrityPath))
@@ -640,17 +902,43 @@ public static partial class PluginPackageVerifier
         }
 
         // Step 5 first (cheap): publisher == sha256(raw key bytes).
-        byte[] publicKey = Convert.FromBase64String(root.GetProperty("publisherPublicKey").GetString()!);
+        if (StringValue(root, "publisherPublicKey") is not { } publicKeyText)
+        {
+            return; // already failed structurally
+        }
+        byte[] publicKey;
+        try
+        {
+            publicKey = Convert.FromBase64String(publicKeyText);
+        }
+        catch (FormatException)
+        {
+            Fail("publisherPublicKey is not valid base64");
+            return;
+        }
+        if (publicKey.Length != 32)
+        {
+            Fail($"publisherPublicKey must decode to 32 raw bytes, got {publicKey.Length}");
+            return;
+        }
         string fingerprint = Sha256Hex(publicKey);
-        if (!string.Equals(root.GetProperty("publisher").GetString(), fingerprint, StringComparison.Ordinal))
+        if (!string.Equals(StringValue(root, "publisher"), fingerprint, StringComparison.Ordinal))
         {
             Fail("publisher does not equal sha256(raw publisherPublicKey bytes)");
         }
 
         // Step 4: Ed25519 over the RAW 32-byte digest.
-        byte[] signatureBytes = Convert.FromBase64String(signature.GetProperty("publisherSignature").GetString()!);
-        byte[] digest = Convert.FromHexString(contentHash);
-        if (!PluginEd25519.Verify(signatureBytes, digest, publicKey))
+        byte[] signatureBytes;
+        try
+        {
+            signatureBytes = Convert.FromBase64String(signature.GetProperty("publisherSignature").GetString()!);
+        }
+        catch (FormatException)
+        {
+            Fail("publisherSignature is not valid base64");
+            return;
+        }
+        if (!PluginEd25519.Verify(signatureBytes, Convert.FromHexString(contentHash), publicKey))
         {
             Fail("publisherSignature verification failed");
         }
@@ -670,10 +958,11 @@ public static partial class PluginPackageVerifier
     /// JCS-subset canonicalization (parity with the Node tooling): object
     /// keys ordinal-sorted (UTF-16 code units, same as JS default sort), no
     /// whitespace, minimal string escaping, number tokens preserved verbatim
-    /// (spike manifests are integer-only). The signature property is forced
-    /// to null (written as an explicit null at its sorted position, exactly
-    /// like the Node tooling's {...manifest, signature: null}) so the hash
-    /// domain is self-reference free and byte-identical across platforms.
+    /// - valid because manifests are integer-only (enforced structurally).
+    /// The signature property is forced to null (written as an explicit null
+    /// at its sorted position, exactly like the Node tooling's
+    /// {...manifest, signature: null}) so the hash domain is self-reference
+    /// free and byte-identical across platforms.
     /// </summary>
     internal static byte[] CanonicalizeManifest(JsonElement root)
     {
@@ -729,8 +1018,8 @@ public static partial class PluginPackageVerifier
                 writer.WriteStringValue(element.GetString());
                 break;
             case JsonValueKind.Number:
-                // RawValue preserves the original token text (no float
-                // reformatting; the manifests are integer-only).
+                // RawValue preserves the original token text (integer-only,
+                // enforced by the structural pass).
                 writer.WriteRawValue(element.GetRawText(), skipInputValidation: true);
                 break;
             case JsonValueKind.True:
