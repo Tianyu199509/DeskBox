@@ -20,7 +20,7 @@ $auditStopwatch = [System.Diagnostics.Stopwatch]::StartNew()
 # scripts/start-aot-preview.ps1 and the lowercase requiredAuditProfileVersion
 # chain in the run-aot-*-smoke.ps1 runners, and update every contract test
 # pinning "= <previous version>" (grep: auditProfileVersion).
-$auditProfileVersion = 61
+$auditProfileVersion = 62
 
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $project = Join-Path $repoRoot "src\DeskBox\DeskBox.csproj"
@@ -2074,7 +2074,7 @@ $stage5AMissingDataPathPatterns = @(
     }
 )
 $stage5ARequiredLauncherPatterns = @(
-    '$RequiredAuditProfileVersion = 61',
+    '$RequiredAuditProfileVersion = 62',
     '$RequiredSummarySchemaVersion = 55',
     'Test-PathEqualOrInside',
     'Get-DirectoryStateFingerprint',
@@ -6010,7 +6010,7 @@ $stage5B4C1B1RequiredNativePatterns = @(
     'DESKBOX_RECYCLE_BIN_REQUEST_V1_SIZE_64',
     'DESKBOX_RECYCLE_BIN_RESULT_V1_SIZE_64',
     'deskbox_recycle_bin_v1',
-    'assert_eq!(deskbox_native_capabilities(), 511);',
+    'assert_eq!(deskbox_native_capabilities(), 1023);',
     'RecycleBinCapability = 1UL << 8',
     'NativeLibrary.TryGetExport',
     'result.Reserved5 != 0',
@@ -6022,7 +6022,7 @@ $stage5B4C1B1RequiredNativePatterns = @(
     'if result.matched_count != 1',
     'const RESTORE_VERB: &str = "undelete"',
     'item.InvokeVerb(&verb)',
-    'expected 511'
+    'expected 1023'
 )
 $stage5B4C1B1MissingNativePatterns = @(
     foreach ($pattern in $stage5B4C1B1RequiredNativePatterns) {
@@ -6381,7 +6381,7 @@ $stage5B4C1B2AForbiddenScopePatterns = @(
 )
 $stage5B4C1B2ARustAbiUnchanged =
     $stage5B4C1B2ASources[$stage5B4C1B2ASourceFiles[13]].Contains(
-        'assert_eq!(deskbox_native_capabilities(), 511);') -and
+        'assert_eq!(deskbox_native_capabilities(), 1023);') -and
     [regex]::Matches(
         $stage5B4C1B2ASources[$stage5B4C1B2ASourceFiles[13]],
         [regex]::Escape('#[unsafe(no_mangle)]')).Count -eq 10
@@ -6621,7 +6621,7 @@ $stage5B4C1B2BForbiddenScopePatterns = @(
 )
 $stage5B4C1B2BRustAbiUnchanged =
     $stage5B4C1B2BSources[$stage5B4C1B2BSourceFiles[11]].Contains(
-        'assert_eq!(deskbox_native_capabilities(), 511);') -and
+        'assert_eq!(deskbox_native_capabilities(), 1023);') -and
     [regex]::Matches(
         $stage5B4C1B2BSources[$stage5B4C1B2BSourceFiles[11]],
         [regex]::Escape('#[unsafe(no_mangle)]')).Count -eq 10
@@ -6855,7 +6855,7 @@ $stage5B4C1C1ForbiddenScopePatterns = @(
 )
 $stage5B4C1C1RustAbiUnchanged =
     $stage5B4C1C1Sources[$stage5B4C1C1SourceFiles[11]].Contains(
-        'assert_eq!(deskbox_native_capabilities(), 511);') -and
+        'assert_eq!(deskbox_native_capabilities(), 1023);') -and
     [regex]::Matches(
         $stage5B4C1C1Sources[$stage5B4C1C1SourceFiles[11]],
         [regex]::Escape('#[unsafe(no_mangle)]')).Count -eq 10
@@ -7123,7 +7123,7 @@ $stage5B4C1C2AForbiddenScopePatterns = @(
 )
 $stage5B4C1C2ARustAbiUnchanged =
     $stage5B4C1C2ASources[$stage5B4C1C2ASourceFiles[15]].Contains(
-        'assert_eq!(deskbox_native_capabilities(), 511);') -and
+        'assert_eq!(deskbox_native_capabilities(), 1023);') -and
     [regex]::Matches(
         $stage5B4C1C2ASources[$stage5B4C1C2ASourceFiles[15]],
         [regex]::Escape('#[unsafe(no_mangle)]')).Count -eq 10
@@ -7294,7 +7294,7 @@ $stage5B4C2AForbiddenScopePatterns = @(
 )
 $stage5B4C2ARustAbiUnchanged =
     $stage5B4C2ASources[$stage5B4C2ASourceFiles[8]].Contains(
-        'assert_eq!(deskbox_native_capabilities(), 511);') -and
+        'assert_eq!(deskbox_native_capabilities(), 1023);') -and
     [regex]::Matches(
         $stage5B4C2ASources[$stage5B4C2ASourceFiles[8]],
         [regex]::Escape('#[unsafe(no_mangle)]')).Count -eq 10
@@ -7466,7 +7466,7 @@ $stage5B4C3AForbiddenScopePatterns = @(
 )
 $stage5B4C3ARustAbiUnchanged =
     $stage5B4C3ASources[$stage5B4C3ASourceFiles[13]].Contains(
-        'assert_eq!(deskbox_native_capabilities(), 511);') -and
+        'assert_eq!(deskbox_native_capabilities(), 1023);') -and
     [regex]::Matches(
         $stage5B4C3ASources[$stage5B4C3ASourceFiles[13]],
         [regex]::Escape('#[unsafe(no_mangle)]')).Count -eq 10
@@ -7646,7 +7646,7 @@ $stage5B4C3B1ForbiddenScopePatterns = @(
 )
 $stage5B4C3B1RustAbiUnchanged =
     $stage5B4C3B1Sources[$stage5B4C3B1SourceFiles[6]].Contains(
-        'assert_eq!(deskbox_native_capabilities(), 511);') -and
+        'assert_eq!(deskbox_native_capabilities(), 1023);') -and
     [regex]::Matches(
         $stage5B4C3B1Sources[$stage5B4C3B1SourceFiles[6]],
         [regex]::Escape('#[unsafe(no_mangle)]')).Count -eq 10
@@ -7830,7 +7830,7 @@ $stage5B4C3B2AForbiddenScopePatterns = @(
 )
 $stage5B4C3B2ARustAbiUnchanged =
     $stage5B4C3B2ASources[$stage5B4C3B2ASourceFiles[7]].Contains(
-        'assert_eq!(deskbox_native_capabilities(), 511);') -and
+        'assert_eq!(deskbox_native_capabilities(), 1023);') -and
     [regex]::Matches(
         $stage5B4C3B2ASources[$stage5B4C3B2ASourceFiles[7]],
         [regex]::Escape('#[unsafe(no_mangle)]')).Count -eq 10
@@ -7966,7 +7966,7 @@ $stage5B4C3B2B1RunnerSource =
 $stage5B4C3B2B1RequiredSmokeScriptPatterns = @(
     'TodoNotificationEnvelopeForwarding',
     'run-aot-todo-notification-forwarding-smoke.ps1',
-    '$requiredAuditProfileVersion = 61',
+    '$requiredAuditProfileVersion = 62',
     '$requiredSummarySchemaVersion = 55',
     '-NoStop',
     '-ExpectExistingInstance',
@@ -8019,7 +8019,7 @@ $stage5B4C3B2B1ForbiddenScopePatterns = @(
 )
 $stage5B4C3B2B1RustAbiUnchanged =
     $stage5B4C3B2B1Sources[$stage5B4C3B2B1SourceFiles[9]].Contains(
-        'assert_eq!(deskbox_native_capabilities(), 511);') -and
+        'assert_eq!(deskbox_native_capabilities(), 1023);') -and
     [regex]::Matches(
         $stage5B4C3B2B1Sources[$stage5B4C3B2B1SourceFiles[9]],
         [regex]::Escape('#[unsafe(no_mangle)]')).Count -eq 10
@@ -8136,7 +8136,7 @@ $stage5B4C3B2B2ARunnerSource =
 $stage5B4C3B2B2ARequiredSmokeScriptPatterns = @(
     'TodoNotificationSurfaceRouting',
     'run-aot-todo-notification-surface-smoke.ps1',
-    '$requiredAuditProfileVersion = 61',
+    '$requiredAuditProfileVersion = 62',
     '$requiredSummarySchemaVersion = 55',
     '-AllowEarlyExit',
     '-StartupWaitSeconds 1',
@@ -8180,7 +8180,7 @@ $stage5B4C3B2B2AForbiddenScopePatterns = @(
 )
 $stage5B4C3B2B2ARustAbiUnchanged =
     $stage5B4C3B2B2ASources[$stage5B4C3B2B2ASourceFiles[9]].Contains(
-        'assert_eq!(deskbox_native_capabilities(), 511);') -and
+        'assert_eq!(deskbox_native_capabilities(), 1023);') -and
     [regex]::Matches(
         $stage5B4C3B2B2ASources[$stage5B4C3B2B2ASourceFiles[9]],
         [regex]::Escape('#[unsafe(no_mangle)]')).Count -eq 10
@@ -8306,7 +8306,7 @@ $stage5B4C3B2B2BRunnerSource =
     $stage5B4C3B2B2BSources[$stage5B4C3B2B2BSourceFiles[10]]
 $stage5B4C3B2B2BRequiredSmokeScriptPatterns = @(
     'RealWindowsNotificationUserClick',
-    '$requiredAuditProfileVersion = 61',
+    '$requiredAuditProfileVersion = 62',
     '$requiredSummarySchemaVersion = 55',
     '[switch]$IncludeColdStart',
     '-AllowEarlyExit',
@@ -8361,7 +8361,7 @@ $stage5B4C3B2B2BForbiddenScopePatterns = @(
 )
 $stage5B4C3B2B2BRustAbiUnchanged =
     $stage5B4C3B2B2BSources[$stage5B4C3B2B2BSourceFiles[9]].Contains(
-        'assert_eq!(deskbox_native_capabilities(), 511);') -and
+        'assert_eq!(deskbox_native_capabilities(), 1023);') -and
     [regex]::Matches(
         $stage5B4C3B2B2BSources[$stage5B4C3B2B2BSourceFiles[9]],
         [regex]::Escape('#[unsafe(no_mangle)]')).Count -eq 10
@@ -10139,7 +10139,7 @@ if ($stage5B4C1B2AForbiddenScopePatterns.Count -gt 0) {
 }
 
 if (-not $stage5B4C1B2ARustAbiUnchanged) {
-    throw "Stage 5B-4C1B2A changed the frozen Rust ABI 2 / capability 511 / ten-export surface. See '$summaryPath'."
+    throw "Stage 5B-4C1B2A changed the frozen Rust ABI 2 / capability 1023 / eleven-export surface. See '$summaryPath'."
 }
 
 if ($stage5B4C1B2AJsonSerializeCallCount -ne 1) {
@@ -10171,7 +10171,7 @@ if ($stage5B4C1B2BForbiddenScopePatterns.Count -gt 0) {
 }
 
 if (-not $stage5B4C1B2BRustAbiUnchanged) {
-    throw "Stage 5B-4C1B2B changed the frozen Rust ABI 2 / capability 511 / ten-export surface. See '$summaryPath'."
+    throw "Stage 5B-4C1B2B changed the frozen Rust ABI 2 / capability 1023 / eleven-export surface. See '$summaryPath'."
 }
 
 if ($stage5B4C1B2BJsonSerializeCallCount -ne 1) {
@@ -10203,7 +10203,7 @@ if ($stage5B4C1C1ForbiddenScopePatterns.Count -gt 0) {
 }
 
 if (-not $stage5B4C1C1RustAbiUnchanged) {
-    throw "Stage 5B-4C1C1 changed the frozen Rust ABI 2 / capability 511 / ten-export surface. See '$summaryPath'."
+    throw "Stage 5B-4C1C1 changed the frozen Rust ABI 2 / capability 1023 / eleven-export surface. See '$summaryPath'."
 }
 
 if ($stage5B4C1C1JsonSerializeCallCount -ne 1) {
@@ -10236,7 +10236,7 @@ if ($stage5B4C1C2AForbiddenScopePatterns.Count -gt 0) {
 }
 
 if (-not $stage5B4C1C2ARustAbiUnchanged) {
-    throw "Stage 5B-4C1C2A changed the frozen Rust ABI 2 / capability 511 / ten-export surface. See '$summaryPath'."
+    throw "Stage 5B-4C1C2A changed the frozen Rust ABI 2 / capability 1023 / eleven-export surface. See '$summaryPath'."
 }
 
 if ($stage5B4C1C2AJsonSerializeCallCount -ne 1) {
@@ -10266,7 +10266,7 @@ if ($stage5B4C2AForbiddenScopePatterns.Count -gt 0) {
 }
 
 if (-not $stage5B4C2ARustAbiUnchanged) {
-    throw "Stage 5B-4C2A changed the frozen Rust ABI 2 / capability 511 / ten-export surface. See '$summaryPath'."
+    throw "Stage 5B-4C2A changed the frozen Rust ABI 2 / capability 1023 / eleven-export surface. See '$summaryPath'."
 }
 
 if ($stage5B4C2AJsonSerializeCallCount -ne 1) {
@@ -10295,7 +10295,7 @@ if ($stage5B4C3AForbiddenScopePatterns.Count -gt 0) {
 }
 
 if (-not $stage5B4C3ARustAbiUnchanged) {
-    throw "Stage 5B-4C3A changed the frozen Rust ABI 2 / capability 511 / ten-export surface. See '$summaryPath'."
+    throw "Stage 5B-4C3A changed the frozen Rust ABI 2 / capability 1023 / eleven-export surface. See '$summaryPath'."
 }
 
 if ($stage5B4C3AJsonSerializeCallCount -ne 1) {
@@ -10324,7 +10324,7 @@ if ($stage5B4C3B1ForbiddenScopePatterns.Count -gt 0) {
 }
 
 if (-not $stage5B4C3B1RustAbiUnchanged) {
-    throw "Stage 5B-4C3B1 changed the frozen Rust ABI 2 / capability 511 / ten-export surface. See '$summaryPath'."
+    throw "Stage 5B-4C3B1 changed the frozen Rust ABI 2 / capability 1023 / eleven-export surface. See '$summaryPath'."
 }
 
 if ($stage5B4C3B1JsonSerializeCallCount -ne 1) {
@@ -10353,7 +10353,7 @@ if ($stage5B4C3B2AForbiddenScopePatterns.Count -gt 0) {
 }
 
 if (-not $stage5B4C3B2ARustAbiUnchanged) {
-    throw "Stage 5B-4C3B2A changed the frozen Rust ABI 2 / capability 511 / ten-export surface. See '$summaryPath'."
+    throw "Stage 5B-4C3B2A changed the frozen Rust ABI 2 / capability 1023 / eleven-export surface. See '$summaryPath'."
 }
 
 if ($stage5B4C3B2AJsonSerializeCallCount -ne 1) {
@@ -10382,7 +10382,7 @@ if ($stage5B4C3B2B1ForbiddenScopePatterns.Count -gt 0) {
 }
 
 if (-not $stage5B4C3B2B1RustAbiUnchanged) {
-    throw "Stage 5B-4C3B2B1 changed the frozen Rust ABI 2 / capability 511 / ten-export surface. See '$summaryPath'."
+    throw "Stage 5B-4C3B2B1 changed the frozen Rust ABI 2 / capability 1023 / eleven-export surface. See '$summaryPath'."
 }
 
 if ($stage5B4C3B2B1ScenarioJsonSerializeCallCount -ne 1 -or
@@ -10412,7 +10412,7 @@ if ($stage5B4C3B2B2AForbiddenScopePatterns.Count -gt 0) {
 }
 
 if (-not $stage5B4C3B2B2ARustAbiUnchanged) {
-    throw "Stage 5B-4C3B2B2A changed the frozen Rust ABI 2 / capability 511 / ten-export surface. See '$summaryPath'."
+    throw "Stage 5B-4C3B2B2A changed the frozen Rust ABI 2 / capability 1023 / eleven-export surface. See '$summaryPath'."
 }
 
 if ($stage5B4C3B2B2AScenarioJsonSerializeCallCount -ne 0 -or
@@ -10442,7 +10442,7 @@ if ($stage5B4C3B2B2BForbiddenScopePatterns.Count -gt 0) {
 }
 
 if (-not $stage5B4C3B2B2BRustAbiUnchanged) {
-    throw "Stage 5B-4C3B2B2B changed the frozen Rust ABI 2 / capability 511 / ten-export surface. See '$summaryPath'."
+    throw "Stage 5B-4C3B2B2B changed the frozen Rust ABI 2 / capability 1023 / eleven-export surface. See '$summaryPath'."
 }
 
 if ($stage5B4C3B2B2BScenarioJsonSerializeCallCount -ne 0 -or

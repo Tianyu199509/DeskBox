@@ -20,12 +20,16 @@ public sealed class PluginDeclarativeExecutor
 
     private readonly PluginCapabilityGate _outerGate;
     private readonly PluginPinnedHttpClientFactoryDelegate _httpClientFactory;
+    private readonly TimeSpan _sourceTimeout;
 
     public PluginDeclarativeExecutor(
         PluginCapabilityGate gate,
-        PluginPinnedHttpClientFactoryDelegate? httpClientFactory = null)
+        PluginPinnedHttpClientFactoryDelegate? httpClientFactory = null,
+        TimeSpan? sourceTimeout = null)
     {
         _outerGate = gate;
+        _sourceTimeout = sourceTimeout ?? TimeSpan.FromSeconds(10);
+        if (_sourceTimeout <= TimeSpan.Zero) throw new ArgumentOutOfRangeException(nameof(sourceTimeout));
         _httpClientFactory = httpClientFactory ?? new PluginPinnedHttpClientFactoryDelegate(
             PluginPinnedHttpClientFactory.CreateForHost);
     }
@@ -53,10 +57,14 @@ public sealed class PluginDeclarativeExecutor
         var dataSourceErrors = new Dictionary<string, string>();
         foreach (KeyValuePair<string, VerifiedDataSource> source in package.DataSources)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             string url = source.Value.Url;
+            using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            deadline.CancelAfter(_sourceTimeout);
             try
             {
                 packageGate.RequireAllowed(new Uri(url), "network.fetch");
+                _outerGate.RequireAllowed(new Uri(url), "network.fetch");
 
                 HttpClient? client = _httpClientFactory(new Uri(url).Host);
                 if (client is null)
@@ -65,10 +73,24 @@ public sealed class PluginDeclarativeExecutor
                     continue;
                 }
                 using (client)
-                await using (Stream stream = await client.GetStreamAsync(url, cancellationToken))
+                using (var request = new HttpRequestMessage(HttpMethod.Get, url))
                 {
-                    fetched[source.Key] = await ReadCappedJsonAsync(stream, cancellationToken);
+                    request.Headers.UserAgent.ParseAdd("DeskBox-Plugins/1.0");
+                    request.Headers.Accept.ParseAdd("application/json");
+                    using HttpResponseMessage response = await client.SendAsync(
+                        request, HttpCompletionOption.ResponseHeadersRead, deadline.Token);
+                    response.EnsureSuccessStatusCode();
+                    if ((int)response.StatusCode is >= 300 and < 400)
+                        throw new HttpRequestException("plugin data source redirects are refused");
+                    if (response.Content.Headers.ContentLength > MaxResponseBytes)
+                        throw new IOException("response exceeds the host limit");
+                    await using Stream stream = await response.Content.ReadAsStreamAsync(deadline.Token);
+                    fetched[source.Key] = await ReadCappedJsonAsync(stream, deadline.Token);
                 }
+            }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+            {
+                dataSourceErrors[source.Key] = "data source timed out";
             }
             catch (PluginCapabilityRefusedException refused)
             {
@@ -83,10 +105,14 @@ public sealed class PluginDeclarativeExecutor
             }
         }
 
+        cancellationToken.ThrowIfCancellationRequested();
         var states = new Dictionary<string, PluginContributionState>();
         foreach (VerifiedContribution contribution in package.Contributions)
         {
             var effective = new Dictionary<string, string>(contribution.PayloadStringFields);
+            var effectivePayload = contribution.Payload.ValueKind == JsonValueKind.Object
+                ? contribution.Payload.EnumerateObject().ToDictionary(p => p.Name, p => p.Value.Clone())
+                : new Dictionary<string, JsonElement>();
             var notes = new List<string>();
             foreach (KeyValuePair<string, VerifiedBinding> binding in contribution.Bindings)
             {
@@ -96,17 +122,18 @@ public sealed class PluginDeclarativeExecutor
                     continue;
                 }
                 if (!fetched.TryGetValue(binding.Value.Source, out JsonElement document) ||
-                    TryEvaluateJsonPath(document, binding.Value.Path) is not { } value)
+                    !PluginJsonPath.TryResolve(document, binding.Value.Path, out JsonElement value))
                 {
                     notes.Add($"{binding.Key}: fallback (path {binding.Value.Path} missing)");
                     continue;
                 }
-                effective[binding.Key] = value;
+                effectivePayload[binding.Key] = value.Clone();
+                if (PluginJsonPath.ScalarText(value) is { } text) effective[binding.Key] = text;
             }
             states[contribution.Id] = new PluginContributionState(
                 contribution.Id,
                 effective,
-                notes);
+                notes) { EffectivePayload = effectivePayload };
         }
 
         return new PluginWidgetStateResult(package.PackageId, states, dataSourceErrors);
@@ -133,49 +160,9 @@ public sealed class PluginDeclarativeExecutor
     }
 
     /// <summary>Minimal JSON path ($.a.b[0].c) with null on any miss - same semantics as the spike harness.</summary>
-    internal static string? TryEvaluateJsonPath(JsonElement document, string pathExpression)
-    {
-        if (!pathExpression.StartsWith("$.", StringComparison.Ordinal))
-        {
-            return null;
-        }
-        JsonElement current = document;
-        foreach (string segment in pathExpression[2..].Split('.'))
-        {
-            System.Text.RegularExpressions.Match match =
-                System.Text.RegularExpressions.Regex.Match(segment, @"^([A-Za-z0-9_]+)((?:\[\d+\])*)$");
-            if (!match.Success)
-            {
-                return null;
-            }
-            if (match.Groups[1].Length > 0)
-            {
-                if (current.ValueKind != JsonValueKind.Object ||
-                    !current.TryGetProperty(match.Groups[1].Value, out current))
-                {
-                    return null;
-                }
-            }
-            foreach (System.Text.RegularExpressions.Match index in
-                     System.Text.RegularExpressions.Regex.Matches(match.Groups[2].Value, @"\[(\d+)\]"))
-            {
-                int arrayIndex = int.Parse(index.Groups[1].Value);
-                if (current.ValueKind != JsonValueKind.Array || arrayIndex >= current.GetArrayLength())
-                {
-                    return null;
-                }
-                current = current[arrayIndex];
-            }
-        }
-        return current.ValueKind switch
-        {
-            JsonValueKind.String => current.GetString(),
-            JsonValueKind.Number => current.GetRawText(),
-            JsonValueKind.True => "true",
-            JsonValueKind.False => "false",
-            _ => null
-        };
-    }
+    internal static string? TryEvaluateJsonPath(JsonElement document, string pathExpression) =>
+        PluginJsonPath.TryResolve(document, pathExpression, out JsonElement value) ? PluginJsonPath.ScalarText(value) : null;
+
 }
 
 public delegate HttpClient? PluginPinnedHttpClientFactoryDelegate(string hostname);
@@ -188,4 +175,8 @@ public sealed record PluginWidgetStateResult(
 public sealed record PluginContributionState(
     string ContributionId,
     IReadOnlyDictionary<string, string> EffectiveFields,
-    IReadOnlyList<string> Notes);
+    IReadOnlyList<string> Notes)
+{
+    public IReadOnlyDictionary<string, JsonElement> EffectivePayload { get; init; } =
+        new Dictionary<string, JsonElement>();
+}

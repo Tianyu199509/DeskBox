@@ -30,7 +30,7 @@ public sealed class Arm64NativeRuntimeGateTests
         Assert.True(native.Success, $"{native.Failure}: {native.Detail}");
         Assert.NotNull(native.Module);
         Assert.Equal(2U, native.Module.ProbeAbiVersion());
-        Assert.Equal(511UL, native.Module.ProbeCapabilities());
+        Assert.Equal(1023UL, native.Module.ProbeCapabilities());
 
     }
 }

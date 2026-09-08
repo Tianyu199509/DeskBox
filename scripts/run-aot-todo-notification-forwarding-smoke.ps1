@@ -11,7 +11,7 @@ param(
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
-$requiredAuditProfileVersion = 61
+$requiredAuditProfileVersion = 62
 $requiredSummarySchemaVersion = 55
 $scenario = "EnvelopeAndSingleInstance"
 $smokeEnvironmentVariable =
@@ -444,7 +444,7 @@ if ([int]$auditSummary.auditProfileVersion -ne $requiredAuditProfileVersion -or
     [string]$auditSummary.platform -cne "x64" -or
     [string]$auditSummary.runtimeIdentifier -cne "win-x64" -or
     [int]$auditSummary.rustNative.abiVersion -ne 2 -or
-    [int]$auditSummary.rustNative.capabilities -ne 511) {
+    [int]$auditSummary.rustNative.capabilities -ne 1023) {
     throw (
         "Todo notification forwarding smoke requires profile " +
         "$requiredAuditProfileVersion / schema $requiredSummarySchemaVersion.")

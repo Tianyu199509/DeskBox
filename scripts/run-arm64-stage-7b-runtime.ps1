@@ -159,7 +159,7 @@ try {
         $nativeResult.VcRuntimeImports.Count -ne 0) {
         throw "ARM64 build completed without the required runtime ABI plus static PE validation."
     }
-    if ($nativeResult.AbiVersion -ne 2 -or $nativeResult.Capabilities -ne 511) {
+    if ($nativeResult.AbiVersion -ne 2 -or $nativeResult.Capabilities -ne 1023) {
         throw "deskbox_native.dll returned an unexpected ABI or capability mask."
     }
     $previousGate = [Environment]::GetEnvironmentVariable(

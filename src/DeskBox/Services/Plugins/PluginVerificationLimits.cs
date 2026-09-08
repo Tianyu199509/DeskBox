@@ -12,7 +12,8 @@ public sealed record PluginVerificationLimits(
     long MaxSingleFileBytes = 128 * 1024 * 1024,
     long MaxTotalExpandedBytes = 512 * 1024 * 1024,
     int MaxRelativePathLength = 200,
-    int MaxTreeDepth = 16)
+    int MaxTreeDepth = 16,
+    int MaxDirectoryCount = 2_000)
 {
     public static PluginVerificationLimits Default { get; } = new();
 }

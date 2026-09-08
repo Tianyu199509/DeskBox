@@ -80,8 +80,8 @@ public sealed class ShortcutNativeDifferentialTests : IDisposable
     public void LoaderReadsCurrentAbiAndAllStage3C2Capabilities()
     {
         Assert.Equal(2u, Native.ProbeAbiVersion());
-        Assert.Equal(511ul, Native.ProbeCapabilities());
-        Assert.Equal(511ul, Native.Capabilities);
+        Assert.Equal(1023ul, Native.ProbeCapabilities());
+        Assert.Equal(1023ul, Native.Capabilities);
         Assert.NotEqual(0, Native.ModuleHandle);
         Assert.Equal(
             Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, ShortcutNativeModule.DllName)),

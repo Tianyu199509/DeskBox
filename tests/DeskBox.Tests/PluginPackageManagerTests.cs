@@ -14,12 +14,14 @@ public sealed class PluginPackageManagerTests : IDisposable
         Path.Combine(Path.GetTempPath(), "DeskBox.Tests", Guid.NewGuid().ToString("N")))
         .FullName;
 
+    private const string Publisher = "1bc4f2db8438d2fd296bd48074088ccc726c265712125abbae975063ba719ea4";
+
     private string PluginsRoot => Path.Combine(_tempRoot, "plugins");
 
     [Fact]
     public void Install_CommitsContentAddressedImmutableCopy()
     {
-        var manager = new PluginPackageManager(PluginsRoot);
+        var manager = new PluginPackageManager(PluginsRoot, [Publisher]);
         string source = TestPaths.FromRepository("spikes/github-stats-live");
 
         PluginInstallResult result = manager.Install(source);
@@ -55,7 +57,7 @@ public sealed class PluginPackageManagerTests : IDisposable
     [Fact]
     public void ReinstallSameContent_IsIdempotent()
     {
-        var manager = new PluginPackageManager(PluginsRoot);
+        var manager = new PluginPackageManager(PluginsRoot, [Publisher]);
         string source = TestPaths.FromRepository("spikes/github-stats-live");
 
         Assert.True(manager.Install(source).Succeeded);
@@ -67,23 +69,23 @@ public sealed class PluginPackageManagerTests : IDisposable
     [Fact]
     public void Uninstall_RemovesFilesRegistryAndGrants()
     {
-        var manager = new PluginPackageManager(PluginsRoot);
+        var manager = new PluginPackageManager(PluginsRoot, [Publisher]);
         var grants = new PluginGrantStore(PluginsRoot);
         Assert.True(manager.Install(TestPaths.FromRepository("spikes/github-stats-live")).Succeeded);
-        grants.SetGrants("com.github.stats.live", "network.fetch", ["api.github.com"]);
+        grants.SetGrants("com.github.stats.live", Publisher, "network.fetch", ["api.github.com"]);
 
         Assert.True(manager.Uninstall("com.github.stats.live"));
 
         Assert.Empty(manager.GetInstalled());
         Assert.False(Directory.Exists(Path.Combine(PluginsRoot, "com.github.stats.live")));
-        Assert.Empty(grants.GetGrants("com.github.stats.live"));
+        Assert.Empty(grants.GetGrants("com.github.stats.live", Publisher));
         Assert.False(manager.Uninstall("com.github.stats.live"));
     }
 
     [Fact]
     public void Update_WithDifferentPublisher_IsRejected()
     {
-        var manager = new PluginPackageManager(PluginsRoot);
+        var manager = new PluginPackageManager(PluginsRoot, [Publisher]);
         Assert.True(manager.Install(TestPaths.FromRepository("spikes/github-stats-live")).Succeeded);
 
         // Simulate the package having been pinned to a DIFFERENT publisher
@@ -100,7 +102,7 @@ public sealed class PluginPackageManagerTests : IDisposable
     [Fact]
     public void Update_WithLowerVersionContent_IsRejected()
     {
-        var manager = new PluginPackageManager(PluginsRoot);
+        var manager = new PluginPackageManager(PluginsRoot, [Publisher]);
         Assert.True(manager.Install(TestPaths.FromRepository("spikes/github-stats-live")).Succeeded);
 
         // Same publisher, but the recorded version is newer: the incoming
@@ -135,7 +137,7 @@ public sealed class PluginPackageManagerTests : IDisposable
     [Fact]
     public void Install_InvalidPackage_FailsWithoutSideEffects()
     {
-        var manager = new PluginPackageManager(PluginsRoot);
+        var manager = new PluginPackageManager(PluginsRoot, [Publisher]);
         string tampered = CopyPackage("spikes/github-stats");
         File.AppendAllText(Path.Combine(tampered, "files", "icon.svg"), "<!--tamper-->");
 
@@ -201,12 +203,12 @@ public sealed class PluginPackageManagerTests : IDisposable
     {
         var grants = new PluginGrantStore(PluginsRoot);
 
-        Assert.Empty(grants.GetGrants("com.example.x"));
+        Assert.Empty(grants.GetGrants("com.example.x", Publisher));
 
-        grants.SetGrants("com.example.x", "network.fetch", ["API.GitHub.com", "api.github.com", "example.org"]);
-        grants.SetGrants("com.example.x", "shell.open", ["github.com"]);
+        grants.SetGrants("com.example.x", Publisher, "network.fetch", ["API.GitHub.com", "api.github.com", "example.org"]);
+        grants.SetGrants("com.example.x", Publisher, "shell.open", ["github.com"]);
 
-        IReadOnlyDictionary<string, IReadOnlyList<string>> stored = grants.GetGrants("com.example.x");
+        IReadOnlyDictionary<string, IReadOnlyList<string>> stored = grants.GetGrants("com.example.x", Publisher);
         Assert.Equal(["api.github.com", "example.org"], stored["network.fetch"].OrderBy(h => h));
         Assert.Equal(["github.com"], stored["shell.open"]);
 
@@ -215,7 +217,7 @@ public sealed class PluginPackageManagerTests : IDisposable
             Path.Combine(PluginsRoot, "grants.json"),
             "{ not valid json");
         var reloaded = new PluginGrantStore(PluginsRoot);
-        Assert.Empty(reloaded.GetGrants("com.example.x"));
+        Assert.Empty(reloaded.GetGrants("com.example.x", Publisher));
     }
 
     private string CopyPackage(string relativePackagePath)

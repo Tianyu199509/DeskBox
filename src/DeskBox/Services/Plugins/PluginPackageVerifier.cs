@@ -57,9 +57,6 @@ public static partial class PluginPackageVerifier
     [GeneratedRegex(@"^[a-z0-9-]+(\.[a-z0-9-]+)+$")]
     private static partial Regex PermissionIdPattern();
 
-    [GeneratedRegex(@"^\$\.[A-Za-z0-9_\[\].]*$")]
-    private static partial Regex JsonPathPattern();
-
     [GeneratedRegex(@"^([0-9a-f]{64})  (.+)$")]
     private static partial Regex IntegrityLinePattern();
 
@@ -129,7 +126,12 @@ public static partial class PluginPackageVerifier
                 null);
         }
 
-        string manifestJson = File.ReadAllText(manifestPath);
+        (List<string> _, List<string> treeFailures) = WalkPackageTree(packageDirectory, limits);
+        if (treeFailures.Count != 0)
+        {
+            return new VerificationResult(false, treeFailures, false, null);
+        }
+        string manifestJson = PluginPackageStorage.ReadText(manifestPath, limits.MaxManifestBytes);
         JsonDocument parsed;
         try
         {
@@ -217,7 +219,7 @@ public static partial class PluginPackageVerifier
         {
             Fail("version must be a string");
         }
-        else if (!VersionPattern().IsMatch(StringValue(root, "version")!))
+        else if (!IsValidVersion(StringValue(root, "version")))
         {
             Fail("version pattern");
         }
@@ -286,6 +288,10 @@ public static partial class PluginPackageVerifier
                 {
                     Fail($"hostApi.{key} must be a non-empty string");
                 }
+                else if (!IsValidVersion(StringValue(hostApi, key)))
+                {
+                    Fail($"hostApi.{key} must be a supported three-part version");
+                }
             }
             foreach (JsonProperty property in hostApi.EnumerateObject())
             {
@@ -293,6 +299,11 @@ public static partial class PluginPackageVerifier
                 {
                     Fail($"hostApi: unknown property '{property.Name}'");
                 }
+            }
+            if (Version.TryParse(StringValue(hostApi, "min"), out Version? minimum) &&
+                Version.TryParse(StringValue(hostApi, "max"), out Version? maximum) && minimum > maximum)
+            {
+                Fail("hostApi.min must not exceed hostApi.max");
             }
         }
 
@@ -382,6 +393,35 @@ public static partial class PluginPackageVerifier
                 Fail($"{where}: template enum");
             }
 
+            if (contribution.TryGetProperty("defaultSize", out JsonElement size))
+            {
+                if (size.ValueKind != JsonValueKind.Object)
+                {
+                    Fail($"{where}.defaultSize must be an object");
+                }
+                else
+                {
+                    foreach (string dimension in new[] { "width", "height" })
+                    {
+                        if (!size.TryGetProperty(dimension, out _))
+                            Fail($"{where}.defaultSize.{dimension} is required");
+                        RequireInteger(size, dimension, value => value > 0 && value <= int.MaxValue,
+                            $"{where}.defaultSize.{dimension} must be a positive 32-bit integer", Fail);
+                    }
+                    if (size.EnumerateObject().Any(p => p.Name is not ("width" or "height")))
+                        Fail($"{where}.defaultSize has unknown properties");
+                }
+            }
+            if (contribution.TryGetProperty("activationEvents", out JsonElement activation))
+            {
+                string[] known = ["onStartupFinished", "onWidgetOpen", "onCommand", "onSchedule", "onFileAssociation", "onEvent"];
+                if (activation.ValueKind != JsonValueKind.Array ||
+                    activation.EnumerateArray().Any(e => e.ValueKind != JsonValueKind.String ||
+                        !known.Contains(e.GetString(), StringComparer.Ordinal)))
+                {
+                    Fail($"{where}.activationEvents must contain only known activation events");
+                }
+            }
             if (contribution.TryGetProperty("payload", out JsonElement payloadProperty) &&
                 payloadProperty.ValueKind != JsonValueKind.Object)
             {
@@ -442,7 +482,7 @@ public static partial class PluginPackageVerifier
                     }
                     if (StringValue(binding, "path", out string? path) && path!.Length > 0)
                     {
-                        if (!JsonPathPattern().IsMatch(path))
+                        if (!PluginJsonPath.IsValid(path))
                         {
                             Fail($"{bindingWhere}: path must be a minimal JSON path like $.a.b[0].c");
                         }
@@ -889,7 +929,7 @@ public static partial class PluginPackageVerifier
 
         var listed = new Dictionary<string, string>();
         var seenNormalized = new Dictionary<string, string>();
-        foreach (string rawLine in File.ReadAllText(integrityPath).Split('\n'))
+        foreach (string rawLine in PluginPackageStorage.ReadText(integrityPath, limits.MaxIntegrityBytes).Split('\n'))
         {
             string line = rawLine.TrimEnd('\r');
             if (line.Length == 0)
@@ -942,11 +982,12 @@ public static partial class PluginPackageVerifier
         // is itself a failure (round 10). File-level budgets (count, size,
         // path length) are enforced DURING the walk so a hostile package
         // cannot exhaust resources before its lines even get checked.
-        (List<string> payloadFiles, List<string> walkFailures) = WalkPackageTree(packageDirectory);
+        (List<string> payloadFiles, List<string> walkFailures) = WalkPackageTree(packageDirectory, limits);
         foreach (string walkFailure in walkFailures)
         {
             Fail(walkFailure);
         }
+        if (walkFailures.Count != 0) return;
         long totalBytes = 0;
         if (payloadFiles.Count > limits.MaxFileCount)
         {
@@ -1098,37 +1139,81 @@ public static partial class PluginPackageVerifier
     /// reparse point in the package tree is a FAILURE, not an invisible
     /// skip - a symlink would also be absent from the integrity inventory.
     /// </summary>
-    internal static (List<string> Files, List<string> Failures) WalkPackageTree(string packageDirectory)
+    internal static (List<string> Files, List<string> Failures) WalkPackageTree(
+        string packageDirectory, PluginVerificationLimits? inputLimits = null)
     {
+        PluginVerificationLimits limits = inputLimits ?? PluginVerificationLimits.Default;
         var files = new List<string>();
         var failures = new List<string>();
-        var queue = new Queue<string>();
-        queue.Enqueue(packageDirectory);
-        while (queue.Count > 0)
+        var queue = new Queue<(string Path, int Depth)>();
+        queue.Enqueue((packageDirectory, 0));
+        int directories = 0;
+        long totalBytes = 0;
+        while (queue.Count > 0 && failures.Count == 0)
         {
-            string directory = queue.Dequeue();
+            (string directory, int depth) = queue.Dequeue();
+            PluginPackageStorage.RejectReparsePoint(directory);
             foreach (string entry in Directory.EnumerateFileSystemEntries(directory))
             {
+                string relative = Path.GetRelativePath(packageDirectory, entry).Replace('\\', '/');
+                if (relative.Length > limits.MaxRelativePathLength)
+                {
+                    failures.Add($"payload path exceeds the {limits.MaxRelativePathLength}-character budget");
+                    break;
+                }
+                if (PackagePathViolation(relative) is { } violation)
+                {
+                    failures.Add($"payload path violates the package path grammar ({violation}): {relative}");
+                    break;
+                }
                 FileAttributes attributes = File.GetAttributes(entry);
                 if ((attributes & FileAttributes.ReparsePoint) != 0)
                 {
                     failures.Add(
                         $"package tree contains a reparse point (symlink/junction/mount): " +
                         Path.GetRelativePath(packageDirectory, entry).Replace('\\', '/'));
-                    continue;
+                    break;
                 }
                 if ((attributes & FileAttributes.Directory) != 0)
                 {
-                    queue.Enqueue(entry);
+                    if (depth + 1 > limits.MaxTreeDepth || ++directories > limits.MaxDirectoryCount)
+                    {
+                        failures.Add("package exceeds the tree-depth or directory-count budget");
+                        break;
+                    }
+                    queue.Enqueue((entry, depth + 1));
                 }
                 else
                 {
+                    if (files.Count >= limits.MaxFileCount)
+                    {
+                        failures.Add("package exceeds the file-count budget");
+                        break;
+                    }
+                    long length = new FileInfo(entry).Length;
+                    long maximum = relative == "manifest.json" ? limits.MaxManifestBytes :
+                        relative == "package.integrity" ? limits.MaxIntegrityBytes : limits.MaxSingleFileBytes;
+                    if (length > maximum)
+                    {
+                        failures.Add($"payload file exceeds the single-file input budget: {relative}");
+                        break;
+                    }
+                    if (length > limits.MaxTotalExpandedBytes - totalBytes)
+                    {
+                        failures.Add("package exceeds the total-expanded budget");
+                        break;
+                    }
+                    totalBytes += length;
                     files.Add(entry);
                 }
             }
         }
         return (files, failures);
     }
+
+    internal static bool IsValidVersion(string? value) =>
+        value is { Length: <= 32 } && VersionPattern().IsMatch(value) &&
+        Version.TryParse(value, out Version? version) && version.Build >= 0 && version.Revision == -1;
 
     /// <summary>
     /// JCS-subset canonicalization (parity with the Node tooling): object

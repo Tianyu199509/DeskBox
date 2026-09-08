@@ -37,7 +37,7 @@ $productionDataRoot = [System.IO.Path]::GetFullPath(
     (Join-Path $env:LOCALAPPDATA "DeskBox"))
 $ownedMarkerName = ".deskbox-aot-todo-notification-user-click-owned.json"
 $ownedMarkerKind = "DeskBox.Aot.TodoNotificationUserClickSmoke.v1"
-$requiredAuditProfileVersion = 61
+$requiredAuditProfileVersion = 62
 $requiredSummarySchemaVersion = 55
 
 function Test-PathEqual {

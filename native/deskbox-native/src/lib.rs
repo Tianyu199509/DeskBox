@@ -8,6 +8,7 @@ use std::mem::size_of;
 
 mod explorer_shell_launch;
 mod music_volume;
+mod plugin_signature;
 mod quick_access;
 mod recycle_bin;
 mod shortcut;
@@ -28,6 +29,7 @@ pub const DESKBOX_NATIVE_CAPABILITY_MUSIC_VOLUME_V1: u64 = 1 << 5;
 pub const DESKBOX_NATIVE_CAPABILITY_EXPLORER_SHELL_LAUNCH_V1: u64 = 1 << 6;
 pub const DESKBOX_NATIVE_CAPABILITY_QUICK_ACCESS_V1: u64 = 1 << 7;
 pub const DESKBOX_NATIVE_CAPABILITY_RECYCLE_BIN_V1: u64 = 1 << 8;
+pub const DESKBOX_NATIVE_CAPABILITY_PLUGIN_SIGNATURE_V1: u64 = 1 << 9;
 
 /// Stage 4D-4B enables every prior operation plus the Quick Access boundary.
 pub const DESKBOX_NATIVE_CAPABILITIES: u64 = DESKBOX_NATIVE_CAPABILITY_SHORTCUT_READ_STORED_RAW_V2
@@ -38,7 +40,8 @@ pub const DESKBOX_NATIVE_CAPABILITIES: u64 = DESKBOX_NATIVE_CAPABILITY_SHORTCUT_
     | DESKBOX_NATIVE_CAPABILITY_MUSIC_VOLUME_V1
     | DESKBOX_NATIVE_CAPABILITY_EXPLORER_SHELL_LAUNCH_V1
     | DESKBOX_NATIVE_CAPABILITY_QUICK_ACCESS_V1
-    | DESKBOX_NATIVE_CAPABILITY_RECYCLE_BIN_V1;
+    | DESKBOX_NATIVE_CAPABILITY_RECYCLE_BIN_V1
+    | DESKBOX_NATIVE_CAPABILITY_PLUGIN_SIGNATURE_V1;
 
 pub const DESKBOX_NATIVE_STATUS_OK: u32 = 0;
 pub const DESKBOX_NATIVE_STATUS_INVALID_ARGUMENT: u32 = 1;
@@ -1898,7 +1901,7 @@ mod tests {
     #[test]
     fn exported_contract_matches_abi_v2() {
         assert_eq!(deskbox_native_abi_version(), 2);
-        assert_eq!(deskbox_native_capabilities(), 511);
+        assert_eq!(deskbox_native_capabilities(), 1023);
     }
 
     #[test]

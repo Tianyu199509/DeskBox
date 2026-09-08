@@ -25,9 +25,9 @@
     <DeskBoxAotAudit Condition="'$(DeskBoxAotAudit)' == ''">false</DeskBoxAotAudit>
     <!-- Native AOT smoke scenarios are a test harness, never a retail default. -->
     <DeskBoxAotSmokeHarness Condition="'$(DeskBoxAotSmokeHarness)' == ''">false</DeskBoxAotSmokeHarness>
-    <!-- Build/package the selected native module for explicit JIT/AOT use;
-         ordinary JIT feature backends still default to C#. -->
-    <DeskBoxRustNative Condition="'$(DeskBoxRustNative)' == ''">false</DeskBoxRustNative>
+    <!-- Package signature verification requires the native crypto module in
+         both JIT and AOT builds. Feature backend selection remains separate. -->
+    <DeskBoxRustNative Condition="'$(DeskBoxRustNative)' == ''">true</DeskBoxRustNative>
     <!-- Stage 7C0 keeps CRT linkage explicit so A/B outputs cannot be reused
          across incompatible native dependency policies. -->
     <DeskBoxRustCrtLinkage Condition="'$(DeskBoxRustCrtLinkage)' == ''">Static</DeskBoxRustCrtLinkage>
@@ -228,6 +228,10 @@
     </Content>
     <None Update="ThirdParty\Everything\LICENSE.txt">
       <TargetPath>ThirdParty\Everything\LICENSE.txt</TargetPath>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </None>
+    <None Update="ThirdParty\PluginCrypto\NOTICES.txt">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
     </None>

@@ -42,7 +42,7 @@
         },
         "defaultSize": {
           "type": "object",
-          "properties": { "width": { "type": "integer" }, "height": { "type": "integer" } },
+          "properties": { "width": { "type": "integer", "minimum": 1, "maximum": 2147483647 }, "height": { "type": "integer", "minimum": 1, "maximum": 2147483647 } },
           "additionalProperties": false
         },
         "activationEvents": {
@@ -66,7 +66,8 @@
         },
         "path": {
           "type": "string",
-          "pattern": "^\\$\\.[A-Za-z0-9_\\[\\].]*$",
+          "pattern": "^\\$\\.[A-Za-z0-9_]+(?:\\[[0-9]+\\])*(?:\\.[A-Za-z0-9_]+(?:\\[[0-9]+\\])*)*$",
+          "maxLength": 512,
           "description": "Minimal JSON path into the data source response, e.g. $.stargazers_count or $.items[0].name. A missing path keeps the payload fallback value."
         }
       }
@@ -117,7 +118,8 @@
     "version": {
       "type": "string",
       "pattern": "^\\d+\\.\\d+\\.\\d+$",
-      "description": "Package semver. Must increase on every store upload or the installer refuses (Rainmeter discipline)."
+      "maxLength": 32,
+      "description": "Three decimal version components, each at most 2147483647. New content must increase the version; identical content may be reinstalled to repair damaged files."
     },
     "publisher": {
       "type": "string",

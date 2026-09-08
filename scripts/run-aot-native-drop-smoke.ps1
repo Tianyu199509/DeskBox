@@ -374,7 +374,7 @@ if ([int]$auditSummary.auditProfileVersion -ne 54 -or
     [int]$auditSummary.warningCodeCounts.WMC1510 -ne 1213 -or
     @($auditSummary.alwaysThrowMessages).Count -ne 0 -or
     [int]$auditSummary.rustNative.abiVersion -ne 2 -or
-    [int]$auditSummary.rustNative.capabilities -ne 511) {
+    [int]$auditSummary.rustNative.capabilities -ne 1023) {
     throw "Native-drop smoke requires a successful profile 56 / schema 53 audit."
 }
 

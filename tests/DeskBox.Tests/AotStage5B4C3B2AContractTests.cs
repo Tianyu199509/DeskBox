@@ -119,16 +119,16 @@ public sealed class AotStage5B4C3B2AContractTests
         string report = Read("docs/architecture/stage-reports/aot-stage-5b-4c3b2a-report.md");
         string roadmap = Read("docs/architecture/rust-native-aot-roadmap.md");
 
-        Assert.Contains("$auditProfileVersion = 61", audit, StringComparison.Ordinal);
+        Assert.Contains("$auditProfileVersion = 62", audit, StringComparison.Ordinal);
         Assert.Contains("schemaVersion = 55", audit, StringComparison.Ordinal);
         Assert.Contains("stage5B4C3B2ARequiredScenarioPatterns", audit, StringComparison.Ordinal);
         Assert.Contains("stage5B4C3B2AMissingSmokeScriptPatterns", audit, StringComparison.Ordinal);
         Assert.Contains("stage5B4C3B2ARustAbiUnchanged", audit, StringComparison.Ordinal);
-        Assert.Contains("$RequiredAuditProfileVersion = 61", launcher, StringComparison.Ordinal);
+        Assert.Contains("$RequiredAuditProfileVersion = 62", launcher, StringComparison.Ordinal);
         Assert.Contains("$RequiredSummarySchemaVersion = 55", launcher, StringComparison.Ordinal);
         Assert.Contains("Native AOT stage 5B-4C3B2B2A", project, StringComparison.Ordinal);
         Assert.Contains("real Windows notification click provenance", project, StringComparison.Ordinal);
-        Assert.Contains("assert_eq!(deskbox_native_capabilities(), 511);", rust, StringComparison.Ordinal);
+        Assert.Contains("assert_eq!(deskbox_native_capabilities(), 1023);", rust, StringComparison.Ordinal);
         Assert.Equal(10, Count(rust, "#[unsafe(no_mangle)]"));
         Assert.Contains("profile 55 / schema 52", report, StringComparison.Ordinal);
         Assert.Contains("2520cacfa69c4024b7210bc8629330dd", report, StringComparison.Ordinal);

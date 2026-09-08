@@ -1,0 +1,13 @@
+<Grid
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    Background="{ThemeResource ApplicationPageBackgroundThemeBrush}" Padding="24">
+  <StackPanel Spacing="16">
+    <TextBlock x:Name="Heading" Text="{Binding Title}" FontSize="22" FontWeight="SemiBold" />
+    <TextBlock Text="Glance calendar · NativeAOT module" Opacity="0.7" />
+    <CalendarView x:Name="Calendar" Height="{Binding PanelHeight}"
+        FirstDayOfWeek="Monday" IsTodayHighlighted="True" SelectionMode="Single"
+        HorizontalAlignment="Stretch" />
+    <TextBox Header="Input and focus probe" PlaceholderText="输入文字" />
+  </StackPanel>
+</Grid>

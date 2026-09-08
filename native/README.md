@@ -4,11 +4,12 @@ This workspace contains narrowly scoped native modules used by DeskBox.
 
 ## Current stage
 
-The production `deskbox-native` module remains frozen at ABI 2, capability mask
-`511`, and ten exports. Supported x64 Native AOT builds use it for shortcut,
+The production `deskbox-native` module uses ABI 2, capability mask
+`1023`, and eleven exports. Supported x64 Native AOT builds use it for shortcut,
 Explorer-hosted launch, Quick Access, music-volume, and exact Recycle Bin
 recovery boundaries. Ordinary JIT runs keep the established C# implementations
-as their default oracle.
+as their default oracle. Both JIT and AOT builds include the module for plugin
+signature verification using `ed25519-dalek` 2.2.0 `verify_strict`.
 
 The workspace also contains `deskbox-audio-session-fixture`, a test-only binary
 used by the Stage 5B-3C smoke script. It loops a generated all-zero PCM WAV to
@@ -19,10 +20,10 @@ of the production ABI, capability mask, or export list.
 ## Contract
 
 - Production module ABI version: `2`
-- Capability mask: `511` (`STORED_RAW`,
+- Capability mask: `1023` (`STORED_RAW`,
   `EFFECTIVE_DIAGNOSTIC`, `RESOLVE_NO_UI`, `WRITE`, `RESOLVE_WITH_UI`, and
   `MUSIC_VOLUME_V1`, `EXPLORER_SHELL_LAUNCH_V1`, `QUICK_ACCESS_V1`, and
-  `RECYCLE_BIN_V1`)
+  `RECYCLE_BIN_V1`, `PLUGIN_SIGNATURE_V1`)
 - Targets: `x86_64-pc-windows-msvc` and `aarch64-pc-windows-msvc`
 - Library type: `cdylib`
 - Public header: `include/deskbox_native.h`
@@ -54,10 +55,15 @@ The required exports are:
 - `deskbox_explorer_shell_launch_v1`
 - `deskbox_quick_access_v1`
 - `deskbox_recycle_bin_v1`
+- `deskbox_plugin_verify_ed25519_v1`
 
 The presence of an export does not by itself mean the operation is implemented.
 Callers check ABI version, all required exports, and the operation capability
-before every operation class. Stage 5B-4C1B1 enables all nine current capabilities.
+before every operation class. The tenth capability adds strict Ed25519 verification
+without changing the existing nine operation contracts. Its inputs are a 64-byte
+signature, a message of at most 1 MiB, and a 32-byte public key. A caller-owned
+`uint32_t` receives 0 or 1; no keys or buffers are retained. Invalid arguments
+return `INVALID_ARGUMENT`; a rejected signature returns `OK` with result 0.
 
 The read implementation is synchronous and stateless. Each call initializes or
 reuses COM on the calling thread, creates and releases its own Shell Link
@@ -115,8 +121,8 @@ are logged and do not fall back to C#. Native AOT defines
 Rust. Both architecture audit scripts pass `DeskBoxRustNative=true`.
 The current MSBuild guard accepts only complete x64/win-x64 or ARM64/win-arm64
 pairs, and every Native AOT build requires `DeskBoxRustNative=true`.
-Omitting the Rust property now fails before compilation instead of producing an
-incomplete publish. Diagnostic bundle capture does not initialize the lazy
+The Rust property defaults to true; explicitly disabling it for an AOT publish
+fails before compilation. Diagnostic bundle capture does not initialize the lazy
 native loader and records no absolute module path. Stage 7A cross-publishes ARM64
 without executing target code on the x64 host; real ARM64 runtime evidence is a
 separate Stage 7B gate.

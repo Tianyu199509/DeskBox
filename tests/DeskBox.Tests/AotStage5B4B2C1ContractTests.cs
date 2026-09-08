@@ -232,7 +232,7 @@ public sealed class AotStage5B4B2C1ContractTests
 
         Assert.Contains("DESKBOX_NATIVE_ABI_VERSION: u32 = 2", native, StringComparison.Ordinal);
         Assert.Contains("DESKBOX_NATIVE_CAPABILITY_QUICK_ACCESS_V1: u64 = 1 << 7", native, StringComparison.Ordinal);
-        Assert.Equal(9, CountOccurrences(native, "pub const DESKBOX_NATIVE_CAPABILITY_"));
+        Assert.Equal(10, CountOccurrences(native, "pub const DESKBOX_NATIVE_CAPABILITY_"));
         Assert.Equal(10, CountOccurrences(native, "#[unsafe(no_mangle)]"));
         Assert.DoesNotContain("glance", header, StringComparison.OrdinalIgnoreCase);
     }
@@ -244,10 +244,10 @@ public sealed class AotStage5B4B2C1ContractTests
         string launcher = ReadRepositoryFile("scripts/start-aot-preview.ps1");
         string project = ReadRepositoryFile("src/DeskBox/DeskBox.csproj");
 
-        Assert.Contains("$auditProfileVersion = 61", audit, StringComparison.Ordinal);
+        Assert.Contains("$auditProfileVersion = 62", audit, StringComparison.Ordinal);
         Assert.Contains("schemaVersion = 55", audit, StringComparison.Ordinal);
         Assert.Contains("stage5B4B2C1", audit, StringComparison.Ordinal);
-        Assert.Contains("$RequiredAuditProfileVersion = 61", launcher, StringComparison.Ordinal);
+        Assert.Contains("$RequiredAuditProfileVersion = 62", launcher, StringComparison.Ordinal);
         Assert.Contains("$RequiredSummarySchemaVersion = 55", launcher, StringComparison.Ordinal);
         Assert.Contains("stage 5B-4C3B2B1", project, StringComparison.Ordinal);
         Assert.Contains("Glance owned-local-image/preferences/reload/restore/postflight", project, StringComparison.Ordinal);

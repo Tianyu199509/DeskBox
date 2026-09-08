@@ -49,7 +49,8 @@ $requiredExportNames = @(
     "deskbox_music_volume_v1",
     "deskbox_explorer_shell_launch_v1",
     "deskbox_quick_access_v1",
-    "deskbox_recycle_bin_v1"
+    "deskbox_recycle_bin_v1",
+    "deskbox_plugin_verify_ed25519_v1"
 )
 $peContractScript = Join-Path $PSScriptRoot "native-pe-contract.ps1"
 $arm64EnvironmentScript = Join-Path $PSScriptRoot "rust-arm64-msvc-environment.ps1"
@@ -195,7 +196,8 @@ public static class DeskBoxNativeContractProbe
         "deskbox_music_volume_v1",
         "deskbox_explorer_shell_launch_v1",
         "deskbox_quick_access_v1",
-        "deskbox_recycle_bin_v1"
+        "deskbox_recycle_bin_v1",
+        "deskbox_plugin_verify_ed25519_v1"
     };
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
@@ -310,7 +312,7 @@ else {
     $rustSource = Get-Content -LiteralPath (Join-Path $repoRoot "native\deskbox-native\src\lib.rs") -Raw
     foreach ($token in @(
             "#define DESKBOX_NATIVE_ABI_VERSION 2u",
-            "#define DESKBOX_NATIVE_CAPABILITIES DESKBOX_NATIVE_CAPABILITIES_STAGE_5B4C1B1")) {
+            "#define DESKBOX_NATIVE_CAPABILITIES DESKBOX_NATIVE_CAPABILITIES_PLUGIN_V1")) {
         if ($header.IndexOf($token, [System.StringComparison]::Ordinal) -lt 0) {
             throw "Rust native frozen header contract is missing '$token'."
         }
@@ -324,15 +326,15 @@ else {
     }
 
     $abiVersion = 2
-    $capabilities = 511
+    $capabilities = 1023
     $requiredExports = @($peContract.RequiredExports)
 }
 if ($abiVersion -ne 2) {
     throw "Rust native ABI mismatch: expected 2, found $abiVersion."
 }
 
-if ($capabilities -ne 511) {
-    throw "Rust native Stage 5B-4C1B2B capability mismatch: expected 511, found 0x$($capabilities.ToString('X16'))."
+if ($capabilities -ne 1023) {
+    throw "Rust native Stage 5B-4C1B2B capability mismatch: expected 1023, found 0x$($capabilities.ToString('X16'))."
 }
 
 [PSCustomObject]@{

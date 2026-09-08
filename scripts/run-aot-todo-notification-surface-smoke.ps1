@@ -14,7 +14,7 @@ Set-StrictMode -Version Latest
 $scenario = "TodoNotificationSurfaceRouting"
 $smokeEnvironmentVariable =
     "DESKBOX_AOT_TODO_NOTIFICATION_SURFACE_SMOKE"
-$requiredAuditProfileVersion = 61
+$requiredAuditProfileVersion = 62
 $requiredSummarySchemaVersion = 55
 $runId = [Guid]::NewGuid().ToString("N")
 $repoRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot ".."))

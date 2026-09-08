@@ -250,7 +250,7 @@ function Invoke-DeskBoxCrtMemoryProbe {
             }
             $sample = $jsonLine[0].ToString() | ConvertFrom-Json
             if ($sample.nativeAbi -ne 2 -or
-                $sample.capabilities -ne 511 -or
+                $sample.capabilities -ne 1023 -or
                 $sample.processArchitecture -ne $processArchitecture) {
                 throw "Isolated CRT memory probe round $round returned an invalid runtime contract."
             }

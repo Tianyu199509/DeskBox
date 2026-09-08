@@ -298,7 +298,7 @@ public sealed class AotPublishContractTests
         Assert.Contains("#define DESKBOX_NATIVE_CAPABILITIES_STAGE_4D4B", header, StringComparison.Ordinal);
         Assert.Contains("#define DESKBOX_NATIVE_CAPABILITIES_STAGE_5B4C1B1", header, StringComparison.Ordinal);
         Assert.Contains("DESKBOX_NATIVE_CAPABILITY_RECYCLE_BIN_V1", header, StringComparison.Ordinal);
-        Assert.Contains("DESKBOX_NATIVE_CAPABILITIES DESKBOX_NATIVE_CAPABILITIES_STAGE_5B4C1B1", header, StringComparison.Ordinal);
+        Assert.Contains("DESKBOX_NATIVE_CAPABILITIES DESKBOX_NATIVE_CAPABILITIES_PLUGIN_V1", header, StringComparison.Ordinal);
         Assert.Contains("DESKBOX_SHORTCUT_READ_REQUEST_V2_SIZE_64 144u", header, StringComparison.Ordinal);
         Assert.Contains("DESKBOX_SHORTCUT_READ_RESULT_V2_SIZE_64 136u", header, StringComparison.Ordinal);
         Assert.Contains("DESKBOX_SHORTCUT_RESOLVE_REQUEST_V2_SIZE_64 192u", header, StringComparison.Ordinal);
@@ -323,7 +323,7 @@ public sealed class AotPublishContractTests
         Assert.Contains("x86_64-pc-windows-msvc", buildScript, StringComparison.Ordinal);
         Assert.Contains("ReadContract", buildScript, StringComparison.Ordinal);
         Assert.Contains("Rust native ABI mismatch", buildScript, StringComparison.Ordinal);
-        Assert.Contains("Rust native Stage 5B-4C1B2B capability mismatch: expected 511", buildScript, StringComparison.Ordinal);
+        Assert.Contains("Rust native Stage 5B-4C1B2B capability mismatch: expected 1023", buildScript, StringComparison.Ordinal);
         Assert.Contains("deskbox_shortcut_read_v2", buildScript, StringComparison.Ordinal);
         Assert.Contains("deskbox_shortcut_resolve_no_ui_v2", buildScript, StringComparison.Ordinal);
         Assert.Contains("deskbox_shortcut_write_v2", buildScript, StringComparison.Ordinal);
@@ -459,14 +459,14 @@ public sealed class AotPublishContractTests
     }
 
     [Fact]
-    public void RustNativeStage7A_RemainsOptInAndCopiesTheSelectedArchitectureModule()
+    public void RustNative_DefaultsOnForPackageVerificationAndCopiesTheSelectedArchitectureModule()
     {
         XDocument project = XDocument.Load(TestPaths.FromRepository("src/DeskBox/DeskBox.csproj"));
 
         XElement defaultRustProperty = project
             .Descendants("DeskBoxRustNative")
             .Single(element => element.Attribute("Condition") is not null);
-        Assert.Equal("false", defaultRustProperty.Value);
+        Assert.Equal("true", defaultRustProperty.Value);
 
         XElement buildTarget = project
             .Descendants("Target")
@@ -519,7 +519,7 @@ public sealed class AotPublishContractTests
         Assert.Contains("exactly one root-level deskbox_native.dll", script, StringComparison.Ordinal);
         Assert.DoesNotContain("deskbox_search_core.dll", script, StringComparison.Ordinal);
         Assert.Contains("schemaVersion = 55", script, StringComparison.Ordinal);
-        Assert.Contains("auditProfileVersion = 61", script, StringComparison.Ordinal);
+        Assert.Contains("auditProfileVersion = 62", script, StringComparison.Ordinal);
         Assert.Contains("warningCodeCounts", script, StringComparison.Ordinal);
         Assert.Contains("targetedWarningCounts", script, StringComparison.Ordinal);
         Assert.Contains("workingTreeFingerprintBefore", script, StringComparison.Ordinal);
