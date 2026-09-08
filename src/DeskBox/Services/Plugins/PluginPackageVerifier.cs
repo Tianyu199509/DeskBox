@@ -172,6 +172,13 @@ public static partial class PluginPackageVerifier
                 failures.Add("signature required for store packages (unsigned is Development-policy only)");
                 return Result(failures, unsigned, manifestJson);
             }
+            // runtime:native is in-process full-trust code; unsigned native
+            // packages are never valid regardless of the caller's policy.
+            if (StringValue(root, "runtime") == "native" && unsigned)
+            {
+                failures.Add("runtime:native requires a signature; unsigned native packages are never valid");
+                return Result(failures, unsigned, manifestJson);
+            }
             if (!unsigned)
             {
                 VerifySignature(packageDirectory, root, signature, failures);
@@ -228,7 +235,7 @@ public static partial class PluginPackageVerifier
         {
             Fail("runtime must be a string");
         }
-        else if (runtime is not ("none" or "wasm" or "process"))
+        else if (runtime is not ("none" or "wasm" or "process" or "native"))
         {
             Fail("runtime enum");
         }
@@ -246,7 +253,7 @@ public static partial class PluginPackageVerifier
         {
             Fail("runtime:none packages must not declare an entry point");
         }
-        if (runtime is "wasm" or "process" && !hasEntry)
+        if (runtime is "wasm" or "process" or "native" && !hasEntry)
         {
             Fail($"runtime '{runtime}' requires an entry point");
         }

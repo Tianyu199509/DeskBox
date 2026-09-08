@@ -352,7 +352,7 @@ public sealed class PluginPackageManager
                 bool IsHash(string? value) => value is { Length: 64 } && value.All(c => c is >= '0' and <= '9' or >= 'a' and <= 'f');
                 if (!PluginPackageVerifier.IsValidVersion(record.Version) ||
                     !IsHash(record.PublisherFingerprint) || !IsHash(record.ContentHash) ||
-                    record.Runtime is not ("none" or "wasm" or "process") ||
+                    record.Runtime is not ("none" or "wasm" or "process" or "native") ||
                     string.IsNullOrEmpty(record.InstallRelativePath) ||
                     PluginPackageVerifier.PackagePathViolation(record.InstallRelativePath) is not null)
                     throw new InvalidDataException("invalid installed package fields");
