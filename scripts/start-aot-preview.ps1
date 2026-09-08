@@ -17,11 +17,11 @@ param(
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
-$RequiredAuditProfileVersion = 61
+$RequiredAuditProfileVersion = 62
 $RequiredSummarySchemaVersion = 55
 $RequiredRustAbiVersion = 2
-$RequiredRustCapabilities = 511
-$RequiredRustExportCount = 10
+$RequiredRustCapabilities = 1023
+$RequiredRustExportCount = 11
 
 $repoRootPath = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $auditRunRoot = [System.IO.Path]::GetFullPath(

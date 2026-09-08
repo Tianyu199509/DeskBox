@@ -192,7 +192,7 @@ public sealed class AotStage5B4C1B2AContractTests
         Assert.DoesNotContain("NativeDrop", combined, StringComparison.Ordinal);
         Assert.DoesNotContain("ShowFileProperties", combined, StringComparison.Ordinal);
         Assert.DoesNotContain("IFileOperation", combined, StringComparison.Ordinal);
-        Assert.Contains("assert_eq!(deskbox_native_capabilities(), 511);", rust, StringComparison.Ordinal);
+        Assert.Contains("assert_eq!(deskbox_native_capabilities(), 1023);", rust, StringComparison.Ordinal);
         Assert.Equal(10, CountOccurrences(rust, "#[unsafe(no_mangle)]"));
     }
 
@@ -207,13 +207,13 @@ public sealed class AotStage5B4C1B2AContractTests
         string roadmap = ReadRepositoryFile(
             "docs/architecture/rust-native-aot-roadmap.md");
 
-        Assert.Contains("$auditProfileVersion = 61", audit, StringComparison.Ordinal);
+        Assert.Contains("$auditProfileVersion = 62", audit, StringComparison.Ordinal);
         Assert.Contains("schemaVersion = 55", audit, StringComparison.Ordinal);
         Assert.Contains("stage5B4C1B2A", audit, StringComparison.Ordinal);
-        Assert.Contains("$RequiredAuditProfileVersion = 61", launcher, StringComparison.Ordinal);
+        Assert.Contains("$RequiredAuditProfileVersion = 62", launcher, StringComparison.Ordinal);
         Assert.Contains("$RequiredSummarySchemaVersion = 55", launcher, StringComparison.Ordinal);
-        Assert.Contains("$RequiredRustCapabilities = 511", launcher, StringComparison.Ordinal);
-        Assert.Contains("$RequiredRustExportCount = 10", launcher, StringComparison.Ordinal);
+        Assert.Contains("$RequiredRustCapabilities = 1023", launcher, StringComparison.Ordinal);
+        Assert.Contains("$RequiredRustExportCount = 11", launcher, StringComparison.Ordinal);
         Assert.Contains("stage 5B-4C3B2B1", project, StringComparison.Ordinal);
         Assert.Contains("5B-4C1B2A 已完成", report, StringComparison.Ordinal);
         Assert.Contains("真实 owner HWND", report, StringComparison.Ordinal);

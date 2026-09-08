@@ -109,7 +109,7 @@ public sealed class AotStage5B4C3B2B2BContractTests
 
         foreach (string token in new[]
                  {
-                     "$requiredAuditProfileVersion = 61",
+                     "$requiredAuditProfileVersion = 62",
                      "$requiredSummarySchemaVersion = 55",
                      "[switch]$IncludeColdStart",
                      "-AllowEarlyExit",
@@ -155,7 +155,7 @@ public sealed class AotStage5B4C3B2B2BContractTests
             managed,
             StringComparison.Ordinal);
         Assert.Contains(
-            "assert_eq!(deskbox_native_capabilities(), 511);",
+            "assert_eq!(deskbox_native_capabilities(), 1023);",
             rust,
             StringComparison.Ordinal);
         Assert.Equal(
@@ -171,7 +171,7 @@ public sealed class AotStage5B4C3B2B2BContractTests
 
         foreach (string token in new[]
                  {
-                     "$auditProfileVersion = 61",
+                     "$auditProfileVersion = 62",
                      "schemaVersion = 55",
                      "stage5B4C3B2B2BMissingScenarioPatterns",
                      "stage5B4C3B2B2BMissingProductPatterns",

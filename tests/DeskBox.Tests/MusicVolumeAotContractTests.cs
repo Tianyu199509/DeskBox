@@ -135,7 +135,7 @@ public sealed class MusicVolumeAotContractTests
         Assert.Contains("typedef struct DeskBoxMusicVolumeResultV1", header, StringComparison.Ordinal);
         Assert.Contains("deskbox_music_volume_v1(", header, StringComparison.Ordinal);
         Assert.Contains("deskbox_music_volume_v1", buildScript, StringComparison.Ordinal);
-        Assert.Contains("capability mismatch: expected 511", buildScript, StringComparison.Ordinal);
+        Assert.Contains("capability mismatch: expected 1023", buildScript, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -144,7 +144,7 @@ public sealed class MusicVolumeAotContractTests
         string script = File.ReadAllText(
             TestPaths.FromRepository("scripts/publish-aot-audit.ps1"));
 
-        Assert.Contains("auditProfileVersion = 61", script, StringComparison.Ordinal);
+        Assert.Contains("auditProfileVersion = 62", script, StringComparison.Ordinal);
         Assert.Contains("schemaVersion = 55", script, StringComparison.Ordinal);
         Assert.Contains("musicVolumeAlwaysThrowMessages", script, StringComparison.Ordinal);
         Assert.Contains("musicVolumeBackendPolicy", script, StringComparison.Ordinal);

@@ -131,7 +131,7 @@ public sealed class AotStage5B4C3B2B1ContractTests
             "scripts/run-aot-todo-notification-forwarding-smoke.ps1");
         string managedRunner = Read("scripts/run-aot-managed-ui-smoke.ps1");
 
-        Assert.Contains("$requiredAuditProfileVersion = 61", runner, StringComparison.Ordinal);
+        Assert.Contains("$requiredAuditProfileVersion = 62", runner, StringComparison.Ordinal);
         Assert.Contains("$requiredSummarySchemaVersion = 55", runner, StringComparison.Ordinal);
         Assert.Contains("-NoStop", runner, StringComparison.Ordinal);
         Assert.Contains("-ExpectExistingInstance", runner, StringComparison.Ordinal);
@@ -174,7 +174,7 @@ public sealed class AotStage5B4C3B2B1ContractTests
             "NativeNotificationActivationEnvelopeStore.cs\"] = 2",
             baseline,
             StringComparison.Ordinal);
-        Assert.Contains("assert_eq!(deskbox_native_capabilities(), 511);", rust, StringComparison.Ordinal);
+        Assert.Contains("assert_eq!(deskbox_native_capabilities(), 1023);", rust, StringComparison.Ordinal);
         Assert.Equal(10, Count(rust, "#[unsafe(no_mangle)]"));
     }
 
@@ -187,12 +187,12 @@ public sealed class AotStage5B4C3B2B1ContractTests
         string report = Read("docs/architecture/stage-reports/aot-stage-5b-4c3b2b1-report.md");
         string roadmap = Read("docs/architecture/rust-native-aot-roadmap.md");
 
-        Assert.Contains("$auditProfileVersion = 61", audit, StringComparison.Ordinal);
+        Assert.Contains("$auditProfileVersion = 62", audit, StringComparison.Ordinal);
         Assert.Contains("schemaVersion = 55", audit, StringComparison.Ordinal);
         Assert.Contains("stage5B4C3B2B1RequiredScenarioPatterns", audit, StringComparison.Ordinal);
         Assert.Contains("stage5B4C3B2B1MissingSmokeScriptPatterns", audit, StringComparison.Ordinal);
         Assert.Contains("stage5B4C3B2B1RustAbiUnchanged", audit, StringComparison.Ordinal);
-        Assert.Contains("$RequiredAuditProfileVersion = 61", launcher, StringComparison.Ordinal);
+        Assert.Contains("$RequiredAuditProfileVersion = 62", launcher, StringComparison.Ordinal);
         Assert.Contains("$RequiredSummarySchemaVersion = 55", launcher, StringComparison.Ordinal);
         Assert.Contains("Native AOT stage 5B-4C3B2B2A", project, StringComparison.Ordinal);
         Assert.Contains("real Windows notification click", project, StringComparison.Ordinal);

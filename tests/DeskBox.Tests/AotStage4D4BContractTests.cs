@@ -75,7 +75,7 @@ public sealed class AotStage4D4BContractTests
 
         Assert.Contains("mod quick_access;", rust, StringComparison.Ordinal);
         Assert.Contains("deskbox_quick_access_v1(", rust, StringComparison.Ordinal);
-        Assert.Contains("assert_eq!(deskbox_native_capabilities(), 511);", rust, StringComparison.Ordinal);
+        Assert.Contains("assert_eq!(deskbox_native_capabilities(), 1023);", rust, StringComparison.Ordinal);
 
         string implementation = ReadRepositoryFile(
             "native/deskbox-native/src/quick_access.rs");
@@ -138,9 +138,9 @@ public sealed class AotStage4D4BContractTests
         string auditScript = ReadRepositoryFile("scripts/publish-aot-audit.ps1");
 
         Assert.Contains("deskbox_quick_access_v1", buildScript, StringComparison.Ordinal);
-        Assert.Contains("Rust native Stage 5B-4C1B2B capability mismatch: expected 511", buildScript, StringComparison.Ordinal);
+        Assert.Contains("Rust native Stage 5B-4C1B2B capability mismatch: expected 1023", buildScript, StringComparison.Ordinal);
 
-        Assert.Contains("$auditProfileVersion = 61", auditScript, StringComparison.Ordinal);
+        Assert.Contains("$auditProfileVersion = 62", auditScript, StringComparison.Ordinal);
         Assert.Contains("schemaVersion = 55", auditScript, StringComparison.Ordinal);
         Assert.Contains("stage4D4BWarningMessages", auditScript, StringComparison.Ordinal);
         Assert.Contains("QuickAccessNativeBackend.cs", auditScript, StringComparison.Ordinal);

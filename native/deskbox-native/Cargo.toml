@@ -9,6 +9,9 @@ publish = false
 name = "deskbox_native"
 crate-type = ["cdylib"]
 
+[dependencies]
+ed25519-dalek = { version = "=2.2.0", default-features = false, features = ["std"] }
+
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.62.2", default-features = false, features = [
     "Win32_Foundation",

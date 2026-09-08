@@ -218,7 +218,7 @@ public sealed class AotStage5B4C1C1ContractTests
         Assert.DoesNotContain("deskbox_native_", combined, StringComparison.Ordinal);
         Assert.DoesNotContain("Clipboard.SetContent", combined, StringComparison.Ordinal);
         Assert.DoesNotContain("Clipboard.GetContent", combined, StringComparison.Ordinal);
-        Assert.Contains("assert_eq!(deskbox_native_capabilities(), 511);", rust, StringComparison.Ordinal);
+        Assert.Contains("assert_eq!(deskbox_native_capabilities(), 1023);", rust, StringComparison.Ordinal);
         Assert.Equal(10, CountOccurrences(rust, "#[unsafe(no_mangle)]"));
     }
 
@@ -229,14 +229,14 @@ public sealed class AotStage5B4C1C1ContractTests
         string launcher = ReadRepositoryFile("scripts/start-aot-preview.ps1");
         string project = ReadRepositoryFile("src/DeskBox/DeskBox.csproj");
 
-        Assert.Contains("$auditProfileVersion = 61", audit, StringComparison.Ordinal);
+        Assert.Contains("$auditProfileVersion = 62", audit, StringComparison.Ordinal);
         Assert.Contains("schemaVersion = 55", audit, StringComparison.Ordinal);
         Assert.Contains("stage5B4C1C1MissingRunnerPatterns", audit, StringComparison.Ordinal);
         Assert.Contains("stage5B4C1C1MissingSmokeScriptPatterns", audit, StringComparison.Ordinal);
         Assert.Contains("stage5B4C1C1ForbiddenScopePatterns", audit, StringComparison.Ordinal);
         Assert.Contains("stage5B4C1C1RustAbiUnchanged", audit, StringComparison.Ordinal);
         Assert.Contains("stage5B4C1C1ExpectedWmc1510Count = 867", audit, StringComparison.Ordinal);
-        Assert.Contains("$RequiredAuditProfileVersion = 61", launcher, StringComparison.Ordinal);
+        Assert.Contains("$RequiredAuditProfileVersion = 62", launcher, StringComparison.Ordinal);
         Assert.Contains("$RequiredSummarySchemaVersion = 55", launcher, StringComparison.Ordinal);
         Assert.Contains("stage 5B-4C3B2B1", project, StringComparison.Ordinal);
         Assert.Contains("no-global-clipboard-mutation matrix", project, StringComparison.Ordinal);
