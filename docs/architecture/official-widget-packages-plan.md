@@ -64,4 +64,5 @@ Store 路径在批次 B 前期就核对，不能等发布前才验证。动态�
 - 自动验证：插件专项 115/115，全量 x64 测试 3541/3541；原生验签 FFI 测试 2/2；四份现有 Node 插件样本全部通过更新后的校验器。主应用完整 AOT 审计输出位于 `.artifacts/aot-audit/win-x64/summary.json`，与真实设备交互和渠道验收分别记录。
 - 批次 B：第一项 x64 ABI/UI 探针通过。相同 AOT 宿主哈希，替换独立 DLL 后，实际 CalendarView 高度和业务结果均由 244 变为 268，标题绑定同步更新；详见 [可复现实验及边界](../../spikes/glance-native/README.md)。完整 Glance、待办切片、资源/生命周期/渠道仍待完成，B 尚未验收。
 - 批次 B 第二轮（2026-09-08 晚）：真实 Glance 切片（生产 XAML 移植 + 生产服务源码链接：本地月源/传统历法/节日/布局/装饰记录；固定 2026-09 实测 42/42 农历文本、中秋节日、真实传统历法标题）；同一进程销毁重建；双 DLL 单进程并存渲染；待办编辑/持久化切片（automation peer 真实点击路径 + 包目录 JSON 持久化 + 重建恢复）。六场景断言全绿，证据与批次 C 契约发现（包 XAML 无转换器、ThemeResource 需资源自含、元数据聚合待设计）见 [试点 README](../../spikes/glance-native/README.md)。尚未验收项：编译 XBF/PRI/本地化/自定义 WinRT 激活、物理输入/IME、完整 Glance 与其余五功能、ARM64 运行、系统化测量、叠放合并容器、渠道。
+- 批次 B 第三轮（2026-09-08 深夜）：编译 XAML/PRI/WinRT 激活三问全部实测为**当前不可行**，已钉进回归断言（XBF 在动态 AOT DLL 中无法定位——无类型最简控件同样失败，问题在定位层；AOT DLL 不导出 DllGetActivationFactory——C 导出是唯一 ABI；类库发布不产独立 PRI 且 MrtCore 无文件级加载——包本地化需自带字符串机制）。**运行时文本 XAML + 预计算可绑定属性确认为正式渲染路径**；`Application.ResourceManagerRequested` 记为未来逃逸口（未实验）。七场景全绿。
 - 批次 C–E：尚未实施。六功能仍保留在现有应用中；正式包格式、商店界面和升级迁移未在本批次提前切换。

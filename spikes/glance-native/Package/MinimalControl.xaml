@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Minimal compiled-XAML control with no package-local types: discriminates
+     XBF-locator failures from XAML-type-resolution failures. -->
+<UserControl
+    x:Class="DeskBox.Glance.NativePackage.MinimalControl"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    Padding="12">
+    <StackPanel Spacing="6">
+        <TextBlock x:Name="MinimalText" FontSize="14" Text="compiled minimal control" />
+    </StackPanel>
+</UserControl>
