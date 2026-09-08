@@ -14,9 +14,29 @@ namespace DeskBox.Services.Plugins;
 /// </summary>
 internal static class NativeWidgetPilot
 {
+    // 1. Installed path (batch D): B1 pipeline → native handle → runtime manager.
+    //    The manager is created lazily; it reads the B1 registry from the
+    //    standard plugins root under the host data directory.
+    private static PluginPackageManager? _installedPackageManager;
+    private static PluginPackageManager InstalledPackageManager => _installedPackageManager ??= new PluginPackageManager(
+        Path.Combine(DeskBoxDataPathService.Current.DataDirectory, "plugins"));
     public static bool TryCreate(WidgetConfig config, out IWidgetContent? content)
     {
         content = null;
+
+        // 1. Installed path (batch D): B1 pipeline → native handle → runtime manager.
+        NativeInstalledPackageHandle? handle = InstalledPackageManager.TryCreateNativeHandle("deskbox.glance");
+        if (handle is not null &&
+            NativeWidgetRuntimeManager.TryCreateFromInstalled(
+                handle!, "glance", config.Id,
+                DeskBoxDataPathService.Current.DataDirectory,
+                out NativeWidgetLease? installedLease))
+        {
+            content = new NativeWidgetPilotContent(config, installedLease!);
+            return true;
+        }
+
+        // 2. Development path (batch C spike): env-var gated, directory package.
         string? packageRoot = NativeWidgetPackageLoader.TryGetDevelopmentPackageRoot();
         if (packageRoot is null) return false;
         if (!NativeWidgetRuntimeManager.TryCreateInstance(

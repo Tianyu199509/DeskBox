@@ -36,7 +36,7 @@ export function validatePackage(pkgDir) {
   if (manifest.schemaVersion !== 0) fail('schemaVersion must be 0');
   if (!/^[a-z0-9][a-z0-9-]*(\.[a-z0-9][a-z0-9-]*)+$/.test(manifest.id ?? '')) fail('id pattern');
   if (!isPackageVersion(manifest.version)) fail('version pattern or bounded version range');
-  if (!['none', 'wasm', 'process'].includes(manifest.runtime)) fail('runtime enum');
+  if (!['none', 'wasm', 'process', 'native'].includes(manifest.runtime)) fail('runtime enum');
   if (manifest.runtime !== 'none' && manifest.entry === undefined) {
     fail(`runtime '${manifest.runtime}' requires an entry point`);
   }
