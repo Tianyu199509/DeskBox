@@ -79,7 +79,10 @@ async function run() {
   }
 
   const permissions = manifest.permissions ?? [];
-  const gate = createCapabilityGate(permissions, grants);
+  const selfTestUsesMock = ['ok', 'redirect', 'server-error'].includes(selfTest);
+  const gate = createCapabilityGate(permissions, grants, {
+    allowInsecureLoopback: selfTestUsesMock
+  });
 
   if (selfTest === 'ok' || selfTest === 'redirect' || selfTest === 'server-error') {
     const server = await startMockServer(selfTest);
@@ -209,6 +212,10 @@ async function handlePluginMessage(child, message, session, gate, activateStart)
           url = mockFetchUrl;
         } else if (selfTest === 'evil-ask') {
           url = 'https://evil.example/secret';
+        } else if (selfTest === 'downgrade') {
+          // Same host, wrong scheme: the gate must refuse http even when
+          // the host is in scope AND granted (round-8 scheme enforcement).
+          url = url.replace('https://', 'http://');
         }
         gate.requireAllowed(url, 'network.fetch');
         const result = await fetchHttpJson(url);

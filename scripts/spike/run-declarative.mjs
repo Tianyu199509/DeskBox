@@ -86,9 +86,13 @@ async function run() {
   // ---------- host policy gate ----------
   // Requested (manifest) vs granted (host). A capability needs all three:
   // declared permission + URL host inside the declared scope + a grant.
-  // Shared with the process leg so both enforce identical semantics.
+  // Shared with the process leg so both enforce identical semantics. The
+  // loopback exemption exists only for the self-test mock server.
   const permissions = manifest.permissions ?? [];
-  const gate = createCapabilityGate(permissions, grants);
+  const selfTestUsesMock = ['ok', 'redirect', 'server-error', 'huge', 'out-of-scope'].includes(selfTest);
+  const gate = createCapabilityGate(permissions, grants, {
+    allowInsecureLoopback: selfTestUsesMock
+  });
   const hostAllowed = (url, permissionId) => gate.requireAllowed(url, permissionId);
 
   const dataSources = manifest.dataSources ?? {};

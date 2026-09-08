@@ -287,6 +287,25 @@ public sealed class DeclarativePackageSpikeTests : IDisposable
     }
 
     [Fact]
+    public void ProcessPackage_DowngradedHttpSchemeIsRefused()
+    {
+        // Round 8: the gate must enforce https even when the host is in
+        // scope AND granted - http://<granted-host> is a scheme downgrade,
+        // not an allowed request.
+        ProcessResult result = RunProcessHarness(
+            TestPaths.FromRepository("spikes/github-stats-process"),
+            "--self-test=downgrade",
+            "--grant=network.fetch=api.github.com");
+
+        Assert.Equal(0, result.ExitCode);
+        Assert.Contains("\"value\": \"…\"", result.StandardOutput, StringComparison.Ordinal);
+        Assert.Contains(
+            "must use https (scheme enforcement; http requests are refused)",
+            result.StandardOutput,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void ProcessPackage_PluginCrashIsSurfacedByProcessGovernance()
     {
         // A crashed plugin must never be swallowed as success.
@@ -353,6 +372,12 @@ public sealed class DeclarativePackageSpikeTests : IDisposable
         Assert.Contains("outside the declared", host, StringComparison.Ordinal);
         Assert.Contains("redirects are refused in v0.3", host, StringComparison.Ordinal);
         Assert.Contains("MAX_RESPONSE_BYTES", host, StringComparison.Ordinal);
+
+        // Round 8: https scheme enforcement and a real URL parser - never a
+        // hand-rolled split in a security boundary.
+        Assert.Contains("must use https (scheme enforcement", host, StringComparison.Ordinal);
+        Assert.Contains("url::Url::parse", host, StringComparison.Ordinal);
+        Assert.DoesNotContain("split(\"://\")", host, StringComparison.Ordinal);
 
         // Governance: deterministic fuel budget, epoch deadline, memory cap.
         Assert.Contains("consume_fuel(true)", host, StringComparison.Ordinal);

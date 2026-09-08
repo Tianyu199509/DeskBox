@@ -11,7 +11,11 @@ export const MAX_RESPONSE_BYTES = 2 * 1024 * 1024; // host hard limit, packages 
 // permissions: the manifest's REQUESTED permission list (mutated by
 // self-test modes to scope the mock host). grants: host-side grant
 // strings like "network.fetch=api.github.com".
-export function createCapabilityGate(permissions, grants) {
+// options.allowInsecureLoopback: harness-only escape hatch for the local
+// mock server (http://127.0.0.1) in --self-test modes. Production policy
+// is HTTPS-only - a guest asking for http://<granted-host> must refuse.
+export function createCapabilityGate(permissions, grants, options = {}) {
+  const allowInsecureLoopback = options.allowInsecureLoopback === true;
   const permissionIds = new Set(permissions.map(p => p.id));
   const allows = id => permissions.find(p => p.id === id)?.scope?.allow ?? [];
   const grantedHosts = id =>
@@ -22,7 +26,15 @@ export function createCapabilityGate(permissions, grants) {
       if (!permissionIds.has(permissionId)) {
         throw new PolicyRefused(`capability '${permissionId}' is not declared by the package`);
       }
-      const host = new URL(url).hostname.toLowerCase();
+      const parsed = new URL(url);
+      const host = parsed.hostname.toLowerCase();
+      const loopbackMock = allowInsecureLoopback &&
+        parsed.protocol === 'http:' &&
+        (host === '127.0.0.1' || host === 'localhost' || host === '[::1]' || host === '::1');
+      if (parsed.protocol !== 'https:' && !loopbackMock) {
+        throw new PolicyRefused(
+          `url '${url}' must use https (scheme enforcement; http requests are refused)`);
+      }
       if (!allows(permissionId).some(entry => entry.toLowerCase() === host)) {
         throw new PolicyRefused(`url '${url}' is outside the declared ${permissionId} scope`);
       }

@@ -402,6 +402,7 @@ dependencies = [
  "serde",
  "serde_json",
  "ureq",
+ "url",
  "wasmtime",
  "wasmtime-wasi",
 ]

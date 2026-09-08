@@ -53,7 +53,7 @@
 
 | 维度 | ① 声明式 | ② TS 进程 | ③ WASM |
 |---|---|---|---|
-| 冷启动（包校验+首帧状态） | validate 3ms + bind 0ms | spawn 43ms + activate→首状态 50ms（mock） | **instantiate ~0ms + activate 1-2ms（mock，含完整 fetch+绑定+guest 逻辑）** |
+| 冷启动（包校验+首帧状态） | validate 3ms + bind 0ms | spawn 43ms + activate→首状态 50ms（mock） | **compile 14ms + instantiate ~0ms + activate 1ms ≈ 真实冷启动 15ms**（此前"instantiate 0ms"是排除 `Component::new` 编译的暖启动读数，第八轮修正计时边界；真实产品可用安装期预编译+缓存序列化组件把冷启动压回 deserialize+instantiate） |
 | 稳态内存增量 | 峰值堆 ~9.0MB（含 Node 运行时本身；宿主内嵌渲染器将远低于此——此数是 harness 上界，非插件成本） | 宿主 ~9.2MB + 子进程 Node 运行时（子进程 RSS 待正式测量轮统一采） | 插件本体 37.9KB 组件 + store 按需（内存 64MB 硬顶）；宿主 exe 12.7MB（含 Wasmtime） |
 | 数据源刷新→绑定延迟（p50） | 32ms（mock；真实 GitHub 数百 ms，网络主导） | 50ms（mock，含 stdio 往返；真实 GitHub 700ms 网络主导） | 1-2ms（mock，含能力往返+guest 解析；真实 GitHub 641ms 网络主导） |
 | 开发代码量（行） | harness ~350 行（权限门+绑定求值器+mock） | 插件 ~120 行 + harness ~290 行（共享能力库两腿复用） | WIT ~25 行 + guest ~95 行 + host ~400 行（三腿唯一需要 WIT 的） |
@@ -62,9 +62,11 @@
 | AI 一次生成成功率 | 待三腿同题测试 | 待三腿同题测试 | 待三腿同题测试 |
 | 升级兼容 | payload per-element fallback + 绑定失败回退=设计内置 | 协议版本化待定（ndjson JSON-RPC 为 spike 选择） | 组件模型版本化+WIT world 版本化（`deskbox:plugin@0.1.0`） |
 | 权限强制点 | 请求∧scope∧授予三层门先于 fetch；redirect 拒绝；2MB 上限（五场景测试钉死） | **同一共享库同一语义**（未授予/敌意越界/redirect 调用级拒绝+回退，测试钉死） | **同一语义 Rust 实现**（七场景手动验证+源码钉扎） |
-| Crash 恢复 | 无第三方代码可崩（模型固有优势） | 进程崩溃→宿主检出（退出码传播，首状态后崩溃不吞成功） | **最强：trap 隔离（fuel 耗尽/epoch 超时→宿主存活报错）+内存 64MB 硬顶+确定性 fuel 计数** |
+| Crash 恢复 | 无第三方代码可崩（模型固有优势） | 进程崩溃→宿主检出（退出码传播，首状态后崩溃不吞成功） | **最强：trap 隔离（fuel 耗尽/epoch 超时→宿主存活报错）+内存 64MB 硬顶+确定性 fuel 计数**（验证精度：**fuel=行为已验证**；epoch/内存=机制已接入、行为场景待补——见第八轮注） |
 
-**三腿初步读数（正式对比仍按下方方法学，等最小 C# 宿主执行器再定论）**：WASM 腿在本机读数上全面占优（激活 1-2ms vs 进程 50ms vs 声明式 3ms+绑定；崩溃隔离最强制；唯一代价=37.9KB 组件产物+Rust 宿主工具链+WIT 学习面）。AI 可生成性与真实集成成本待三腿同题实测——这正是拍板"代码插件默认 Runtime"前最后的坑。
+**三方安全定位（第八轮钉死）**：**声明式/WASM=真实技术强制**（声明式一切经宿主；WASM 无 WASI 导入、网络/文件/Shell 天然不可见）；**Process=Full Trust**——子进程拥有 OS 用户全部权限，可以完全绕过 broker，Capability Broker 对它只是**推荐 API/UX/审计/兼容边界，不是 OS 安全边界**（schema 的 `process = full-trust executable` 一直是这么写的；商店走 L1 人工审核+Windows 代码签名通道）。据此的定位收敛：声明式=安全默认/AI 与普通用户；WASM=沙箱代码第一候选（社区商店）；Process=Full Trust 扩展（专业/重型/原生集成）——"WASM 是否默认代码 Runtime"仍等 AI 同题实验+公平基准再拍板。
+
+**三腿初步读数（正式对比仍按下方方法学，等最小 C# 宿主执行器再定论）**：WASM 修正后仍占优（真实冷启动 ~15ms vs 进程 spawn+激活 ~93ms；崩溃隔离最强制；代价=37.9KB 产物+Rust 宿主工具链+WIT 面）。AI 可生成性与真实集成成本待三腿同题实测——这是拍板前最后的坑。宿主 exe 12.7MB 是**磁盘体积不是内存数据**，不能与 Node RSS 比较。
 
 测量方法学（第七轮修订）：**上表腿①数字是 scaffolding observation（Node 脚手架观察值），不能与腿②③直接横向定胜负**——产品形态下声明式执行器内嵌在 DeskBox C# 宿主里，Node 堆/启动数与产品无对应关系。正式对比拆两层：**Runtime intrinsic**（activation/协议/绑定延迟、增量内存，排除网络）与 **E2E**（从"宿主要求激活"到"首个绑定状态就绪"，统一包含 process spawn / WASM instantiate / declarative parse，三腿测量边界完全一致）。腿①正式数等最小 C# 宿主执行器就绪后再填。
 
