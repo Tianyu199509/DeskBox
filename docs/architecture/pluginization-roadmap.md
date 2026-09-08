@@ -446,6 +446,18 @@ WIT world 与 ndjson JSON-RPC 维持 **Spike World** 身份不冻结（widget-up
 
 **3.5 收官后路线（Simon 拍板 2026-09-08）**：AI 同题实验等未做功能后置；先做**"基础完整版"（Declarative-only 跑道）**——B1 C# 包安装/验证/授权存储 → B2 格子拆分（C# 声明式执行器+六模板渲染+贡献→真实格子 widget 生命周期+插件管理面）→ B3 商店基础功能（GitHub 索引+列表+安装流程权限授予+更新检查）→ B4 发布（store 规范 v0+1.4.3→新版直跳实测）。期间冻结 schema 于 v10。
 
+### 16.11 第九轮评审吸收（2026-09-08，B1a 硬化，"安全根标准"）
+
+B1a 进入产品安全边界后标准升级；五项全部落地（本批）：
+
+1. **Ed25519 弱公钥伪造（P0，实证成立后修复）**：identity 公钥（01 00…00）下 `S=1, R=B` 的伪造签名对任意消息通过——先写对抗测试在旧代码上实证攻击成立，再修：**TryDecodeStrict=A/R 双侧规范编码校验（重编码逐字节比对，顺带拒 y≥p）+8-torsion 拒绝（[8]P=identity ⟺ 小阶点）**；对抗向量（identity 伪造/0xff 全满/带符号位 y=0/小阶 R）+**RFC 8032 §7.1 官方向量四条（含 1023 字节消息）**全部通过——独立于 Node 生成向量的第二基准真值。长期：**trust root 迁移到 Rust `ed25519-dalek`（经 deskbox-native ABI 暴露 verify）列为 store GA 前置**（自研 BigInteger 仅作过渡，理由=常备曲线验证语义债不值得背）。
+2. **验证器 fail-closed 全函数（P0）**：任意字节输入 → 永远 Valid/Invalid+诊断、绝不抛未处理异常（顶层 catch 兜底+签名路径 base64/hex 全 try/catch）；**分阶段停机**（结构→integrity→签名，前阶段失败后阶段不跑——旧实现结构失败后继续跑验签是攻击面）。
+3. **类型严格化（P1）**：旧 helper"类型不对→静默跳过"=`schemaVersion:"zero"`/999 都漏检；现在每字段先查类型再查值（id/version/runtime/publisher/hostApi.min/max/permissions[].required/scope.allow 元素/dataSources map key），结构期还做**全树浮点拒绝**。
+4. **manifest 数字整数化（P1，选方案 B）**：Node 会把 `1.0` 重排成 `1` 而 C# 原样保留 token——跨平台哈希漂移无解，**schema v0.3 数字字段全 integer（defaultSize 同步）**，浮点留给 v1 配完整 RFC 8785 数字规范化。
+5. **VerificationPolicy（P1）**：`Verify(path)` 默认 **Store=签名必填**；unsigned 只在显式 `Development` 策略下有效——调用方"忘了查 UnsignedPackage"不再可能构成漏洞。B1b PackageManager 一律走 Store。
+
+**优先级调整（评审采纳）**：DNS 重绑定（hostname 解析到私网 IP）从 backlog **升格为 B2 blocker**——Declarative Executor 发出第一个产品网络请求前必须实现"解析后 IP 复检"；**installer 输入预算**归 B1b（manifest/integrity 体积上限、文件数、单文件大小、路径长度——恶意包不该能在验签失败前耗尽资源）。执行坑：手抄 base64 常量两次抄错——**测试向量一律 hex/程序生成，永不手抄**。
+
 ## 附录 A：关键证据文件索引
 
 | 主题 | 文件 |

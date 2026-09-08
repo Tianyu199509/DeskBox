@@ -52,6 +52,7 @@
 | 指纹推导 | `sha256(raw 32 字节公钥)`，先 base64 解码再哈希，小写 hex——不是对 base64 文本哈希 |
 | 签名输入 | `publisherSignature` 签 contentHash 的 raw 32 字节摘要，非 hex 字符串 |
 | contentHash 表示 | 小写 hex 存储；清单行 `<sha256 小写 hex>␣␣<path>`（摘要+两空格+路径），LF 行尾 ordinal 排序 |
+| **manifest 数字整数化（第九轮）** | **manifest 全部数字字段=integer**（v0.3 `defaultSize.width/height` 同改 integer）——Node `JSON.stringify` 会重排 `1.0`→`1` 而 C# 原样保留 token，跨平台漂移无解，禁浮点最便宜；C# 验证器结构期对全树拒绝 `./e/E` 数字 token，Node 工具链同步（v1 若真需要浮点再实现完整 RFC 8785 数字规范化） |
 
 ## v0 → v0.1 变更（第三轮外部评审吸收，roadmap 16.7）
 

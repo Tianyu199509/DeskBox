@@ -42,7 +42,7 @@
         },
         "defaultSize": {
           "type": "object",
-          "properties": { "width": { "type": "number" }, "height": { "type": "number" } },
+          "properties": { "width": { "type": "integer" }, "height": { "type": "integer" } },
           "additionalProperties": false
         },
         "activationEvents": {

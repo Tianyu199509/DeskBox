@@ -131,10 +131,133 @@ public sealed class PluginPackageVerifierTests : IDisposable
             Path.Combine(package, "package.integrity"),
             $"{digest}  manifest.json\n");
 
+        PluginPackageVerifier.VerificationResult devResult = PluginPackageVerifier.Verify(
+            package, PluginPackageVerificationPolicy.Development);
+
+        Assert.True(devResult.IsValid, string.Join("; ", devResult.Failures));
+        Assert.True(devResult.UnsignedPackage);
+
+        PluginPackageVerifier.VerificationResult storeResult = PluginPackageVerifier.Verify(
+            package, PluginPackageVerificationPolicy.Store);
+
+        Assert.False(storeResult.IsValid);
+        Assert.Contains(storeResult.Failures, f =>
+            f.Contains("signature required for store packages", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void MalformedPackage_NeverThrows_AllFailuresAreResults()
+    {
+        // Fail-closed total function (round 9): wrong types, invalid
+        // base64, garbage - every byte input yields a result, never an
+        // unhandled exception, and structural failures stop the phases.
+        string package = Path.Combine(_tempRoot, "malformed-pkg");
+        Directory.CreateDirectory(package);
+        File.WriteAllText(
+            Path.Combine(package, "manifest.json"),
+            """
+            {
+              "schemaVersion": "zero",
+              "id": [],
+              "version": 1.5,
+              "publisher": {},
+              "publisherPublicKey": "!!!!not-base64!!!!",
+              "runtime": 7,
+              "hostApi": { "min": 3 },
+              "contributions": "nope",
+              "permissions": [ { "id": "bad", "required": "yes", "scope": { "allow": [ 42 ] } } ],
+              "dataSources": { "UPPER": { "type": "http-json", "url": "http://x/", "refreshSeconds": 1.5 } },
+              "entry": { "main": 5 }
+            }
+            """);
+        File.WriteAllText(Path.Combine(package, "package.integrity"), "garbage\n");
+
         PluginPackageVerifier.VerificationResult result = PluginPackageVerifier.Verify(package);
 
-        Assert.True(result.IsValid, string.Join("; ", result.Failures));
-        Assert.True(result.UnsignedPackage);
+        Assert.False(result.IsValid);
+        Assert.NotEmpty(result.Failures);
+        // Structural phase must report the type violations it is designed
+        // to catch (wrong types now FAIL instead of silently skipping).
+        Assert.Contains(result.Failures, f => f.Contains("schemaVersion must be an integer", StringComparison.Ordinal));
+        Assert.Contains(result.Failures, f => f.Contains("id must be a string", StringComparison.Ordinal));
+        Assert.Contains(result.Failures, f => f.Contains("runtime must be a string", StringComparison.Ordinal));
+        Assert.Contains(result.Failures, f => f.Contains("hostApi.min must be a non-empty string", StringComparison.Ordinal));
+        Assert.Contains(result.Failures, f => f.Contains("manifest numbers must be integers", StringComparison.Ordinal));
+        Assert.Contains(result.Failures, f => f.Contains("map key 'UPPER' must use the local id pattern", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void FloatNumbers_AreRejectedInSignedPackagesToo()
+    {
+        // Floats would break cross-platform canonicalization: even a
+        // structurally-plausible float must fail (integer-only manifests).
+        string copy = CopyPackage("spikes/github-stats");
+        string manifestPath = Path.Combine(copy, "manifest.json");
+        File.WriteAllText(
+            manifestPath,
+            File.ReadAllText(manifestPath).Replace("\"version\": 1", "\"version\": 1", StringComparison.Ordinal));
+
+        // Inject a float into a payload field (payload allows extra fields).
+        File.WriteAllText(
+            manifestPath,
+            File.ReadAllText(manifestPath).Replace("\"value\": \"1284\"", "\"value\": \"1284\", \"rating\": 4.5"));
+
+        PluginPackageVerifier.VerificationResult result = PluginPackageVerifier.Verify(
+            copy, PluginPackageVerificationPolicy.Development);
+
+        Assert.False(result.IsValid);
+        Assert.Contains(result.Failures, f => f.Contains("manifest numbers must be integers", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void ValidBase64ButWrongLengthKey_IsRejectedWithoutThrowing()
+    {
+        string package = Path.Combine(_tempRoot, "badkey-pkg");
+        Directory.CreateDirectory(package);
+        string manifest = """
+        {
+          "schemaVersion": 0,
+          "id": "com.example.bad",
+          "version": "0.1.0",
+          "publisher": "PUB",
+          "publisherPublicKey": "QUJD",
+          "runtime": "none",
+          "hostApi": { "min": "1.0.0", "max": "1.0.0" },
+          "contributions": [
+            { "type": "widget", "id": "x", "displayName": "X", "template": "metric", "payload": { "version": 1 } }
+          ],
+          "signature": { "contentHash": "PLACEHOLDER", "publisherSignature": "!!!" }
+        }
+        """
+        .Replace("\"publisher\": \"PUB\"", "\"publisher\": \"" + new string('a', 64) + "\"");
+        string manifestPath = Path.Combine(package, "manifest.json");
+        File.WriteAllText(manifestPath, manifest);
+
+        // Integrity line covers the manifest's canonical form (signature
+        // forced null, so the placeholder contentHash is excluded); the
+        // real contentHash is then back-filled into the manifest without
+        // changing the canonical hash.
+        using (JsonDocument document = JsonDocument.Parse(manifest))
+        {
+            string digest = Convert.ToHexString(
+                System.Security.Cryptography.SHA256.HashData(PluginPackageVerifier.CanonicalizeManifest(document.RootElement)))
+                .ToLowerInvariant();
+            File.WriteAllText(
+                Path.Combine(package, "package.integrity"),
+                $"{digest}  manifest.json\n");
+        }
+        string integrityHash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
+            File.ReadAllBytes(Path.Combine(package, "package.integrity")))).ToLowerInvariant();
+        File.WriteAllText(manifestPath, manifest.Replace("\"PLACEHOLDER\"", $"\"{integrityHash}\""));
+
+        PluginPackageVerifier.VerificationResult result = PluginPackageVerifier.Verify(package);
+
+        Assert.False(result.IsValid);
+        // Short key ("QUJB" = 3 bytes) / invalid signature base64 are
+        // reported as failures, never thrown.
+        Assert.Contains(result.Failures, f =>
+            f.Contains("must decode to 32 raw bytes", StringComparison.Ordinal) ||
+            f.Contains("not valid base64", StringComparison.Ordinal));
     }
 
     private string CopyPackage(string relativePackagePath)

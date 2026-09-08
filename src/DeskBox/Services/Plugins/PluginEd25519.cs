@@ -43,11 +43,16 @@ internal static class PluginEd25519
             return false;
         }
 
-        if (!TryDecompress(publicKey, out EdwardsPoint a))
+        // Strict decoding (round 9): non-canonical encodings and
+        // small-order points are rejected for BOTH the public key and R.
+        // Without this, a malicious publisherPublicKey (e.g. the identity
+        // point) makes h*A collapse, and forged signatures verify for any
+        // message with no private key at all.
+        if (!TryDecodeStrict(publicKey, out EdwardsPoint a))
         {
             return false;
         }
-        if (!TryDecompress(signature[..32], out EdwardsPoint r))
+        if (!TryDecodeStrict(signature[..32], out EdwardsPoint r))
         {
             return false;
         }
@@ -68,6 +73,34 @@ internal static class PluginEd25519
         left.Encode(leftEncoded);
         right.Encode(rightEncoded);
         return leftEncoded.SequenceEqual(rightEncoded);
+    }
+
+    /// <summary>
+    /// Strict point decoding: canonical encoding only (the re-encoded
+    /// point must be byte-identical, which also rejects y >= p and unused
+    /// high bits), and the point must NOT be in the 8-torsion subgroup
+    /// ([8]P = identity) - the small-order set used by weak-key forges.
+    /// </summary>
+    private static bool TryDecodeStrict(ReadOnlySpan<byte> encoded, out EdwardsPoint point)
+    {
+        if (!TryDecompress(encoded, out point))
+        {
+            return false;
+        }
+        Span<byte> canonical = stackalloc byte[32];
+        point.Encode(canonical);
+        if (!canonical.SequenceEqual(encoded))
+        {
+            return false;
+        }
+        EdwardsPoint times8 = Add(Add(point, point), Add(point, point));
+        return !IsIdentity(times8);
+    }
+
+    private static bool IsIdentity(EdwardsPoint point)
+    {
+        // Projective identity: X = 0, Y = Z (any Z != 0).
+        return point.X.IsZero && point.Y == point.Z;
     }
 
     private readonly struct EdwardsPoint(BigInteger x, BigInteger y, BigInteger z, BigInteger t)
