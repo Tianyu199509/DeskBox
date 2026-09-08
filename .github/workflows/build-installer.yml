@@ -1,0 +1,65 @@
+name: Build x64 installer (icon fix)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main, master, fix/icon-padding ]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-2025-vs2026
+    timeout-minutes: 120
+    env:
+      DOTNET_CLI_TELEMETRY_OPTOUT: 1
+      DOTNET_NOLOGO: 1
+      RestoreLockedMode: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.303
+
+      - name: Verify toolchain (same checks as the official distribution gate)
+        shell: pwsh
+        run: |
+          dotnet --info
+          rustc -vV
+          cargo --version
+
+      - name: Restore
+        shell: pwsh
+        run: dotnet restore .\DeskBox.sln --locked-mode -p:Platform=x64 -p:RuntimeIdentifier=win-x64 --verbosity minimal
+
+      # NOTE: no "dotnet test" here on purpose. Running tests before publish
+      # builds DeskBox with different global properties into the same obj/
+      # folder, and the Native AOT publish can then pick up stale outputs,
+      # producing an exe that dies silently right after OnLaunched.
+
+      - name: Publish Native AOT + Rust native (official retail script)
+        shell: pwsh
+        run: .\scripts\publish-aot-retail.ps1 -Platform x64
+
+      - name: Show publish summary
+        shell: pwsh
+        run: |
+          Get-Content .\.artifacts\aot-retail\win-x64\summary.json
+          Get-ChildItem .\.artifacts\aot-retail\win-x64\publish | Select-Object Name, Length
+
+      - name: Compile Inno Setup installer
+        shell: pwsh
+        run: |
+          $iscc = (Get-Command ISCC.exe -ErrorAction SilentlyContinue).Source
+          if (-not $iscc) { $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" }
+          & $iscc /Qp /DDeskBoxNativeAot=1 /DDeskBoxBundledRuntime=1 "/DMyAppReleaseDir=$PWD\.artifacts\aot-retail\win-x64\publish" /O"$PWD\Output" .\installer\DeskBox.iss
+          if ($LASTEXITCODE -ne 0) { throw "ISCC failed" }
+          Get-ChildItem .\Output
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: DeskBox_Setup_x64_icon-fix
+          path: Output/*.exe
+          if-no-files-found: error
