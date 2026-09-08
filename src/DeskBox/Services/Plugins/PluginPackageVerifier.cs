@@ -77,11 +77,12 @@ public static partial class PluginPackageVerifier
 
     public static VerificationResult Verify(
         string packageDirectory,
-        PluginPackageVerificationPolicy policy = PluginPackageVerificationPolicy.Store)
+        PluginPackageVerificationPolicy policy = PluginPackageVerificationPolicy.Store,
+        PluginVerificationLimits? limits = null)
     {
         try
         {
-            return VerifyCore(packageDirectory, policy);
+            return VerifyCore(packageDirectory, policy, limits ?? PluginVerificationLimits.Default);
         }
         catch (Exception error)
         {
@@ -95,13 +96,37 @@ public static partial class PluginPackageVerifier
         }
     }
 
-    private static VerificationResult VerifyCore(string packageDirectory, PluginPackageVerificationPolicy policy)
+    private static VerificationResult VerifyCore(
+        string packageDirectory,
+        PluginPackageVerificationPolicy policy,
+        PluginVerificationLimits limits)
     {
         var failures = new List<string>();
         string manifestPath = Path.Combine(packageDirectory, "manifest.json");
         if (!File.Exists(manifestPath))
         {
             return new VerificationResult(false, ["manifest.json missing"], false, null);
+        }
+
+        // Input budgets FIRST (roadmap 16.12): a hostile package must not
+        // burn memory reading a giant manifest before anything else runs.
+        var manifestInfo = new FileInfo(manifestPath);
+        if (manifestInfo.Length > limits.MaxManifestBytes)
+        {
+            return new VerificationResult(
+                false,
+                [$"manifest.json exceeds the {limits.MaxManifestBytes}-byte input budget ({manifestInfo.Length} bytes)"],
+                false,
+                null);
+        }
+        string integrityPath = Path.Combine(packageDirectory, "package.integrity");
+        if (File.Exists(integrityPath) && new FileInfo(integrityPath).Length > limits.MaxIntegrityBytes)
+        {
+            return new VerificationResult(
+                false,
+                [$"package.integrity exceeds the {limits.MaxIntegrityBytes}-byte input budget"],
+                false,
+                null);
         }
 
         string manifestJson = File.ReadAllText(manifestPath);
@@ -133,7 +158,7 @@ public static partial class PluginPackageVerifier
             }
 
             // ---------- Phase C: integrity chain (STOP on failure) ----------
-            VerifyIntegrityChain(packageDirectory, root, manifestJson, failures);
+            VerifyIntegrityChain(packageDirectory, root, manifestJson, failures, limits);
             if (failures.Count > 0)
             {
                 return Result(failures, unsigned, manifestJson);
@@ -847,7 +872,12 @@ public static partial class PluginPackageVerifier
     }
 
     // ---------- integrity + signature chain (notes walkthrough steps 1-5) ----------
-    private static void VerifyIntegrityChain(string packageDirectory, JsonElement root, string manifestJson, List<string> failures)
+    private static void VerifyIntegrityChain(
+        string packageDirectory,
+        JsonElement root,
+        string manifestJson,
+        List<string> failures,
+        PluginVerificationLimits limits)
     {
         void Fail(string message) => failures.Add(message);
         string integrityPath = Path.Combine(packageDirectory, "package.integrity");
@@ -909,11 +939,18 @@ public static partial class PluginPackageVerifier
 
         // Step 2: every payload file hashes to its line and is listed. The
         // walk never follows reparse points; any reparse point in the tree
-        // is itself a failure (round 10).
+        // is itself a failure (round 10). File-level budgets (count, size,
+        // path length) are enforced DURING the walk so a hostile package
+        // cannot exhaust resources before its lines even get checked.
         (List<string> payloadFiles, List<string> walkFailures) = WalkPackageTree(packageDirectory);
         foreach (string walkFailure in walkFailures)
         {
             Fail(walkFailure);
+        }
+        long totalBytes = 0;
+        if (payloadFiles.Count > limits.MaxFileCount)
+        {
+            Fail($"package exceeds the file-count budget ({payloadFiles.Count} > {limits.MaxFileCount})");
         }
         foreach (string file in payloadFiles)
         {
@@ -922,14 +959,28 @@ public static partial class PluginPackageVerifier
             {
                 continue;
             }
+            if (relative.Length > limits.MaxRelativePathLength)
+            {
+                Fail($"payload path exceeds the {limits.MaxRelativePathLength}-character budget: {Truncate(relative, 40)}…");
+                continue;
+            }
             if (PackagePathViolation(relative) is { } violation)
             {
                 Fail($"payload file violates the package path grammar ({violation}): {relative}");
                 continue;
             }
-            string digest = relative == "manifest.json"
-                ? canonicalManifestHash
-                : Sha256Hex(File.ReadAllBytes(file));
+            if (relative == "manifest.json")
+            {
+                continue;
+            }
+            long fileLength = new FileInfo(file).Length;
+            totalBytes += fileLength;
+            if (fileLength > limits.MaxSingleFileBytes)
+            {
+                Fail($"payload file exceeds the single-file budget ({fileLength} > {limits.MaxSingleFileBytes} bytes): {relative}");
+                continue;
+            }
+            string digest = Sha256HexFile(file);
             if (!listed.TryGetValue(relative, out string? line))
             {
                 Fail($"payload file not listed in package.integrity: {relative}");
@@ -939,6 +990,10 @@ public static partial class PluginPackageVerifier
                 Fail($"integrity mismatch for {relative}");
             }
         }
+        if (totalBytes > limits.MaxTotalExpandedBytes)
+        {
+            Fail($"package exceeds the total-expanded budget ({totalBytes} > {limits.MaxTotalExpandedBytes} bytes)");
+        }
         foreach (string relative in listed.Keys)
         {
             if (relative != "manifest.json" && !File.Exists(Path.Combine(packageDirectory, relative)))
@@ -946,6 +1001,13 @@ public static partial class PluginPackageVerifier
                 Fail($"package.integrity lists a missing file: {relative}");
             }
         }
+    }
+
+    /// <summary>Streaming hash (roadmap 16.12): payload assets hash without a full in-memory copy.</summary>
+    internal static string Sha256HexFile(string path)
+    {
+        using FileStream stream = File.OpenRead(path);
+        return Convert.ToHexString(SHA256.HashData(stream)).ToLowerInvariant();
     }
 
     private static void VerifySignature(string packageDirectory, JsonElement root, JsonElement signature, List<string> failures)
