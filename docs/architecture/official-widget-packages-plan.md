@@ -65,7 +65,18 @@ Store 路径在批次 B 前期就核对，不能等发布前才验证。动态�
 
 **渠道决策**：Direct/GitHub 渠道（现行安装器+release）不受上述约束，功能包按 B1 管线从 GitHub 索引下载；**Store 渠道的功能包交付=捆绑进主包或 Store add-ons，不做 Store 版外部下载**。因此批次 C 的原生包格式必须同时支撑两种交付形态（同一包内容，两种分发通道），批次 E 按渠道分别验收。
 
+### 批次 C 输入（2026-09-08 外部二次审计吸收，逐条对码核实）
+
+- **P0 存储三根拆分**：PackageRoot（只读，二进制/XAML/资源）／PackageDataRoot（可写，包级持久数据）／InstanceDataRoot（可写，实例级数据）；激活 ABI 从单一 `directory` 改为 `packageRoot + dataRoot + widgetInstanceId`。Spike 把数据写进包目录是被否决的反模式（与只读内容寻址安装/更新换目录/卸载清理直接冲突）。
+- **宿主类型/主题/本地化契约**：先做 QuickCapture/Todo 综合 probe（它们比 Glance 难：CommunityToolkit 控件、拖放、KeyDown、宿主自定义控件 `WidgetTitleIcon`、局部转换器——均已对码核实）；宿主元数据提供器覆盖宿主类型（84 处命中）→"包文本 XAML 能否解析宿主自定义控件/工具包控件"是最高价值未验证项。主题走 HostThemeContract token（host→package 激活时注入，package 映射为本地 ResourceDictionary——本地字典解析已被 spike 证明可行）；本地化走包内 strings/*.json+展示层预本地化，不用 x:Uid/PRI。
+- **事件接线约定**：运行时 XAML 无 code-behind，XAML 只描述结构、包代码 FindName 显式订阅；迁移成本必须在 probe 中量化（复杂视图的接线数量）。
+- **正式 ABI 收敛**：统一小面（get_abi_version/activate/widget_create/widget_destroy/package_shutdown）+ HostApi 函数表回调；钉死引用计数/销毁时机/缓存/线程要求。
+- **内存硬数据**：Host only / +1 / +3 / +6 包加载，及"全部视图销毁但 DLL 常驻"的长期占用（Private WS/Commit/mapped image），批次 D 前必须有数。
+- **批次 D 退出条件补充**：迁移完成后源码归包所有，宿主不再编译同一 .cs（禁止长期 dual ownership）。
+
 ## 执行记录
+
+
 
 - 2026-09-08：用户授权按复评建议开始实施，工作区干净；创建本地分支 `codex/official-widget-packages`，从 `527f63d8` 开始。
 - 已建立本执行计划，历史路线保留并指向此处。

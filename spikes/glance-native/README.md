@@ -24,14 +24,14 @@ v2 的结论不变：宿主 `RuntimeFeature.IsDynamicCodeSupported`=false，输�
 
 - **销毁重建**（lifecycle 场景）：同一进程内创建→卸载（Unloaded 事件确认）→再创建，第二个视图正常渲染（业务值 244 + 标题绑定恢复）。
 - **多包并存**（multi-package 场景）：同一宿主进程同时加载 v2（简单切片）与 v3（真实切片）两个原生 DLL，两个模块句柄不同、两个视图同时渲染（v2 高度 268 + v3 农历标题），宿主哈希不变。
-- **待办编辑/持久化**（todo-package 场景，`TodoPackage/`）：宿主通过投影设置包内 TextBox 文本、直接构造 `ButtonAutomationPeer` 触发真实点击路径，包代码将条目写入包目录 `todo-items.json`；销毁视图后重建，条目从文件恢复（1→1，内容一致）。数据所有权按"包目录"划分。
+- **待办编辑/持久化**（todo-package 场景，`TodoPackage/`）：宿主通过投影设置包内 TextBox 文本、直接构造 `ButtonAutomationPeer` 触发真实点击路径，包代码将条目写入包目录 `todo-items.json`；销毁视图后重建，条目从文件恢复（1→1，内容一致）。**注意：数据写入包目录是 spike 简化，不是契约**——与 B1 的只读内容寻址安装目录/更新换目录模型冲突（更新后数据悬空、卸载误删、ReadOnly 无法写入），批次 C 必须拆分 PackageRoot（只读）/PackageDataRoot（可写）/InstanceDataRoot（实例级），激活 ABI 传 packageRoot+dataRoot+widgetInstanceId 三参。
 
 ### 第三轮：编译 XAML / PRI / WinRT 激活（钉住的负结论）
 
 第三轮（2026-09-08 深夜）用可复现探针回答了三个悬而未决的问题，全部为**当前不可行**，已作为回归断言钉进脚本（`compiled-xaml-pinned-negative` 场景；若未来 Windows App SDK 行为翻转，断言会失败并强制重评契约）：
 
 1. **编译 XAML（XBF）在动态加载的 AOT DLL 中无法定位。** 包项目为 `RealGlanceControl.xaml` 正常走完 XAML 编译（生成 XBF + XamlMetaDataProvider），但运行时 `Application.LoadComponent`（`ComponentResourceLocation.Nested`，`ms-appx:///DeskBox.Glance.NativePackage/...`）抛 XamlParseException。判别实验：**无任何包内自定义类型的最小编译控件同样失败**——问题在 XBF 定位层而非类型解析。把 XBF 按 ms-appx 布局拷到宿主目录子路径也不行（已试）。宿主自己的 XBF 无磁盘文件且 exe 内无明文名，说明解包应用的 XBF 解析内嵌在宿主 exe 的资源体系里，动态 DLL 借不到。**运行时文本 XAML + 预计算可绑定属性（第二轮）仍是已验证路径。** 若未来必须编译 XAML：`Application.ResourceManagerRequested` 提供自定义 `IResourceManager` 是候选逃逸口（未实验）。
-2. **AOT DLL 不导出 `DllGetActivationFactory`。** C#/WinRT 组件激活路径对 NativeAOT 包不可用，原生 C 导出（`UnmanagedCallersOnly`）是唯一 ABI。
+2. **本试点的 AOT DLL 产物不导出 `DllGetActivationFactory`。** 当前 C# NativeAOT 动态类库配置中，raw C 导出（`UnmanagedCallersOnly`）是唯一**已验证可工作**的 ABI；C#/WinRT 本身仍支持组件激活/registration-free activation 等机制，本试点未验证，不构成平台定律。
 3. **独立 PRI 不随类库发布产生，MrtCore 无文件级加载。** `PRIResource`（resw）进了编译但发布输出没有 `.pri` 文件；MrtCore `ResourceManager` 两个构造路径均抛 COMException（找不到元素）；UWP 遗留 `LoadPriFiles` 因无文件可载而跳过。**包本地化需要自带字符串文件机制（或批次 C 重新决策布局）。**
 
 包体积变化：v1-v3 ≈ 6.18MB/个（编译控件+PRIResource 加入后，此前 4.55MB），todo 包 4.26MB。
