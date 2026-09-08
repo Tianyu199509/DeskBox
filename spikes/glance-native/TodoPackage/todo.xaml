@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Batch B todo slice: minimal editor whose items persist to a package-owned
+     JSON file so a destroy/recreate round trip proves data ownership. -->
+<StackPanel
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    x:Name="RootPanel"
+    Padding="16"
+    Spacing="10">
+
+    <TextBlock
+        x:Name="Heading"
+        FontSize="16"
+        FontWeight="SemiBold"
+        Foreground="White"
+        Text="DeskBox.Todo.NativePackage" />
+
+    <TextBox
+        x:Name="InputBox"
+        Header="待办"
+        PlaceholderText="输入后点添加" />
+
+    <Button
+        x:Name="AddButton"
+        Content="添加" />
+
+    <ListView x:Name="ItemsList" />
+
+    <TextBlock
+        x:Name="StatusText"
+        FontSize="11"
+        Foreground="#C5FFFFFF"
+        Text="ready" />
+</StackPanel>

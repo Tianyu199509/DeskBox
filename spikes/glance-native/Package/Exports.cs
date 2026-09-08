@@ -44,6 +44,24 @@ public static unsafe class Exports
             return error.HResult;
         }
     }
+    [UnmanagedCallersOnly(EntryPoint = "glance_probe_create_real_view", CallConvs = [typeof(CallConvCdecl)])]
+    public static int CreateRealView(char* directory, int length, nint* view)
+    {
+        if (directory is null || length is <= 0 or > 32767 || view is null) return -1;
+        *view = 0;
+        string root = new(directory, 0, length);
+        try
+        {
+            FrameworkElement content = RealGlanceView.Create(root);
+            *view = WinRT.MarshalInspectable<FrameworkElement>.FromManaged(content);
+            return 0;
+        }
+        catch (Exception error)
+        {
+            File.WriteAllText(Path.Combine(root, "activation-error.txt"), error.ToString());
+            return error.HResult;
+        }
+    }
 }
 
 [WinRT.GeneratedBindableCustomProperty]

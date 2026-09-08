@@ -1,4 +1,4 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
     [ValidateSet("x64", "ARM64")][string]$Platform = "x64",
     [switch]$BuildOnly
@@ -12,6 +12,7 @@ $rid = if ($Platform -eq "ARM64") { "win-arm64" } else { "win-x64" }
 $runRoot = Join-Path $repoRoot (".artifacts\glance-native\runs\" + (Get-Date -Format "yyyyMMdd-HHmmss-fff") + "-" + $Platform)
 New-Item -ItemType Directory -Path $runRoot -Force | Out-Null
 $packageProject = Join-Path $repoRoot "spikes\glance-native\Package\Glance.NativePackage.csproj"
+$todoProject = Join-Path $repoRoot "spikes\glance-native\TodoPackage\Todo.NativePackage.csproj"
 $hostProject = Join-Path $repoRoot "spikes\glance-native\Host\Glance.NativeHost.csproj"
 $common = @("-c", "Release", "-p:Platform=$Platform", "-p:RuntimeIdentifier=$rid",
     "-p:PublishAot=true", "-p:SelfContained=true", "-p:WindowsAppSDKSelfContained=false",
@@ -20,8 +21,23 @@ function Invoke-DotNet([string[]]$CommandArguments) {
     & dotnet @CommandArguments
     if ($LASTEXITCODE -ne 0) { throw "dotnet failed with exit code $LASTEXITCODE" }
 }
+function Invoke-Probe {
+    param([string]$Exe, [string]$WorkingDirectory, [string[]]$Arguments, [string]$Evidence, [int]$TimeoutSeconds = 30)
+    New-Item -ItemType Directory -Path $Evidence -Force | Out-Null
+    $process = Start-Process -FilePath $Exe -WorkingDirectory $WorkingDirectory -WindowStyle Hidden -PassThru -ArgumentList $Arguments
+    if (-not $process.WaitForExit($TimeoutSeconds * 1000)) {
+        Stop-Process -Id $process.Id
+        throw "Probe timed out. Evidence: $Evidence"
+    }
+    $resultFile = Join-Path $Evidence "result.json"
+    if (-not (Test-Path -LiteralPath $resultFile)) {
+        throw "Probe did not produce a result. Evidence: $Evidence"
+    }
+    if ($process.ExitCode -ne 0) { throw "Probe exited with $($process.ExitCode). Evidence: $Evidence" }
+    return (Get-Content -LiteralPath $resultFile -Raw -Encoding UTF8 | ConvertFrom-Json)
+}
 try {
-    foreach ($project in @($packageProject, $hostProject)) {
+    foreach ($project in @($packageProject, $todoProject, $hostProject)) {
         Invoke-DotNet -CommandArguments @("restore", $project, "-p:Platform=$Platform", "-p:RuntimeIdentifier=$rid", "-p:PublishAot=false")
         Invoke-DotNet -CommandArguments @("restore", $project, "-p:Platform=$Platform", "-p:RuntimeIdentifier=$rid", "-p:PublishAot=true")
     }
@@ -34,53 +50,121 @@ try {
     $source = [IO.File]::ReadAllText($originalLayout)
     if (-not $source.Contains("CompactCalendarThreshold = 320")) { throw "Glance source threshold changed; update the probe deliberately." }
     [IO.File]::WriteAllText($variantLayout, $source.Replace("CompactCalendarThreshold = 320", "CompactCalendarThreshold = 360"))
-    $results = @()
-    foreach ($version in @(1, 2)) {
+
+    $packageOutputs = @{}
+    foreach ($version in @(1, 2, 3)) {
         $packageOutput = Join-Path $runRoot "package-v$version"
-        $layout = if ($version -eq 1) { $originalLayout } else { $variantLayout }
+        $layout = if ($version -eq 2) { $variantLayout } else { $originalLayout }
         Invoke-DotNet -CommandArguments (@("publish", $packageProject, "--no-restore") + $common +
             @("-p:GlancePackageVersion=$version", "-p:GlanceLayoutSource=$layout", "-o", $packageOutput))
-        $dll = Join-Path $packageOutput "DeskBox.Glance.NativePackage.dll"
-        $record = [ordered]@{
-            version = $version
-            packageDll = $dll
-            packageSha256 = (Get-FileHash -LiteralPath $dll -Algorithm SHA256).Hash
-            packageDllBytes = (Get-Item -LiteralPath $dll).Length
-            hostSha256 = $originalHostHash
-            runtimeExecuted = $false
+        $packageOutputs[$version] = $packageOutput
+    }
+    $todoOutput = Join-Path $runRoot "todo-package"
+    Invoke-DotNet -CommandArguments (@("publish", $todoProject, "--no-restore") + $common + @("-o", $todoOutput))
+
+    $packageDllHashes = @{}
+    foreach ($version in @(1, 2, 3)) {
+        $dll = Join-Path $packageOutputs[$version] "DeskBox.Glance.NativePackage.dll"
+        $packageDllHashes[$version] = [ordered]@{
+            path = $dll
+            sha256 = (Get-FileHash -LiteralPath $dll -Algorithm SHA256).Hash
+            bytes = (Get-Item -LiteralPath $dll).Length
         }
-        if (-not $BuildOnly -and $Platform -eq "x64") {
+    }
+    if ($packageDllHashes[1].sha256 -eq $packageDllHashes[2].sha256) { throw "Packages v1/v2 must differ." }
+    if ($packageDllHashes[2].sha256 -eq $packageDllHashes[3].sha256) { throw "Packages v2/v3 must differ." }
+
+    $results = @()
+    $canExecute = -not $BuildOnly -and $Platform -eq "x64"
+    if ($canExecute) {
+        foreach ($version in @(1, 2)) {
             $evidence = Join-Path $runRoot "result-v$version"
-            New-Item -ItemType Directory -Path $evidence -Force | Out-Null
-            $process = Start-Process -FilePath $hostExe -WorkingDirectory $hostOutput -WindowStyle Hidden -PassThru -ArgumentList @(
-                "--development-package", ('"{0}"' -f $packageOutput), ('"{0}"' -f $evidence))
-            if (-not $process.WaitForExit(30000)) {
-                Stop-Process -Id $process.Id
-                throw "Glance probe timed out. Evidence: $evidence"
-            }
-            $resultFile = Join-Path $evidence "result.json"
-            if (-not (Test-Path -LiteralPath $resultFile)) {
-                throw "Glance probe did not produce a result. Evidence: $evidence; package: $packageOutput"
-            }
-            $result = Get-Content -LiteralPath $resultFile -Raw | ConvertFrom-Json
+            $result = Invoke-Probe -Exe $hostExe -WorkingDirectory $hostOutput -Evidence $evidence -Arguments @(
+                "--development-package", ('"{0}"' -f $packageOutputs[$version]), ('"{0}"' -f $evidence))
             $expectedHeight = if ($version -eq 1) { 244 } else { 268 }
             if ($result.dynamicCodeSupported -or $result.packageVersion -ne $version -or
                 $result.panelHeightFor340 -ne $expectedHeight -or $result.calendarActualHeight -ne $expectedHeight -or
-                $result.heading -ne "Glance native package v$version" -or $process.ExitCode -ne 0) {
-                throw "AOT/module version/business behavior assertion failed: $resultFile"
+                $result.heading -ne "Glance native package v$version") {
+                throw "AOT/module version/business behavior assertion failed: $evidence"
             }
-            if ((Get-FileHash -LiteralPath $hostExe -Algorithm SHA256).Hash -ne $originalHostHash) {
-                throw "Host changed while switching packages."
-            }
-            $record.runtimeExecuted = $true
-            $record.result = $result
-            $record.screenshot = Join-Path $evidence "view.png"
-            if (-not (Test-Path -LiteralPath $record.screenshot)) { throw "Missing rendered view: $evidence" }
+            if (-not (Test-Path -LiteralPath (Join-Path $evidence "view.png"))) { throw "Missing rendered view: $evidence" }
+            $results += [pscustomobject]@{ scenario = "simple-v$version"; result = $result; evidence = $evidence }
         }
-        $results += [pscustomobject]$record
+
+        # Real Glance slice: production XAML + production services in the package.
+        $evidence = Join-Path $runRoot "result-real"
+        $result = Invoke-Probe -Exe $hostExe -WorkingDirectory $hostOutput -Evidence $evidence -Arguments @(
+            "--real-package", ('"{0}"' -f $packageOutputs[3]), ('"{0}"' -f $evidence))
+        $festivalDays = @($result.packageSummary.festivalDays)
+        if ($result.dynamicCodeSupported -or
+            [string]::IsNullOrWhiteSpace($result.traditionalTitle) -or
+            $result.traditionalTitle -ne $result.packageSummary.traditionalTitle -or
+            $result.packageSummary.traditionalTextDayCount -lt 28 -or
+            $result.packageSummary.decoratedDayCount -lt 35 -or
+            $festivalDays.Count -lt 1 -or
+            $result.calendarActualHeight -le 200) {
+            throw "Real-Glance slice assertion failed: $evidence"
+        }
+        if (-not (Test-Path -LiteralPath (Join-Path $evidence "view.png"))) { throw "Missing rendered view: $evidence" }
+        $results += [pscustomobject]@{ scenario = "real-glance"; result = $result; evidence = $evidence }
+
+        # Lifecycle: destroy and recreate the view within one process.
+        $evidence = Join-Path $runRoot "result-lifecycle"
+        $result = Invoke-Probe -Exe $hostExe -WorkingDirectory $hostOutput -Evidence $evidence -Arguments @(
+            "--lifecycle-package", ('"{0}"' -f $packageOutputs[1]), ('"{0}"' -f $evidence))
+        if (-not $result.firstLoaded -or -not $result.firstUnloaded -or -not $result.secondLoaded -or
+            $result.secondCalendarActualHeight -ne 244 -or $result.secondHeading -ne "Glance native package v1") {
+            throw "Lifecycle assertion failed: $evidence"
+        }
+        if (-not (Test-Path -LiteralPath (Join-Path $evidence "view.png"))) { throw "Missing rendered view: $evidence" }
+        $results += [pscustomobject]@{ scenario = "lifecycle"; result = $result; evidence = $evidence }
+
+        # Multi-package: two native DLLs loaded side by side in one host process.
+        $evidence = Join-Path $runRoot "result-multi"
+        $result = Invoke-Probe -Exe $hostExe -WorkingDirectory $hostOutput -Evidence $evidence -Arguments @(
+            "--multi-package", ('"{0}"' -f $packageOutputs[2]), ('"{0}"' -f $packageOutputs[3]), ('"{0}"' -f $evidence))
+        if ($result.simplePackageVersion -ne 2 -or $result.simpleCalendarActualHeight -ne 268 -or
+            [string]::IsNullOrWhiteSpace($result.realTraditionalTitle)) {
+            throw "Multi-package assertion failed: $evidence"
+        }
+        if (-not (Test-Path -LiteralPath (Join-Path $evidence "view.png"))) { throw "Missing rendered view: $evidence" }
+        $results += [pscustomobject]@{ scenario = "multi-package"; result = $result; evidence = $evidence }
+
+        # Todo slice: edit through the projected control, persist, recreate, reload.
+        $storedItems = Join-Path $todoOutput "todo-items.json"
+        if (Test-Path -LiteralPath $storedItems) { Remove-Item -LiteralPath $storedItems -Force }
+        $evidence = Join-Path $runRoot "result-todo"
+        $result = Invoke-Probe -Exe $hostExe -WorkingDirectory $hostOutput -Evidence $evidence -Arguments @(
+            "--todo-package", ('"{0}"' -f $todoOutput), ('"{0}"' -f $evidence))
+        if ($result.itemsAfterFirstEdit -ne 1 -or $result.itemsAfterRecreate -ne 1 -or
+            -not $result.persistedItem.Contains("采购牛奶")) {
+            throw "Todo edit/persistence assertion failed: $evidence"
+        }
+        if (-not (Test-Path -LiteralPath (Join-Path $evidence "view.png"))) { throw "Missing rendered view: $evidence" }
+        $results += [pscustomobject]@{ scenario = "todo-edit-persist"; result = $result; evidence = $evidence }
+
+        if ((Get-FileHash -LiteralPath $hostExe -Algorithm SHA256).Hash -ne $originalHostHash) {
+            throw "Host changed while switching packages."
+        }
     }
-    if ($results[0].packageSha256 -eq $results[1].packageSha256) { throw "The two native packages must differ." }
-    $summary = [ordered]@{ platform = $Platform; runRoot = $runRoot; hostExe = $hostExe; results = $results }
+
+    # ConvertTo-Json rejects non-string hashtable keys; re-key with "v<version>".
+    $packageSummary = [ordered]@{}
+    foreach ($version in @(1, 2, 3)) { $packageSummary["v$version"] = $packageDllHashes[$version] }
+    $summary = [ordered]@{
+        platform = $Platform
+        runRoot = $runRoot
+        hostExe = $hostExe
+        hostSha256 = $originalHostHash
+        packages = $packageSummary
+        todoPackage = [ordered]@{
+            path = (Join-Path $todoOutput "DeskBox.Todo.NativePackage.dll")
+            sha256 = (Get-FileHash -LiteralPath (Join-Path $todoOutput "DeskBox.Todo.NativePackage.dll") -Algorithm SHA256).Hash
+            bytes = (Get-Item -LiteralPath (Join-Path $todoOutput "DeskBox.Todo.NativePackage.dll")).Length
+        }
+        executed = $canExecute
+        results = $results
+    }
     $summary | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $runRoot "summary.json") -Encoding UTF8
     $summary | ConvertTo-Json -Depth 8
 }
