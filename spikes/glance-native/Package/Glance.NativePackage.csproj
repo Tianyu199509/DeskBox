@@ -38,6 +38,8 @@
     <None Update="calendar.xaml" CopyToOutputDirectory="PreserveNewest" />
     <Page Remove="glance-real.xaml" />
     <None Update="glance-real.xaml" CopyToOutputDirectory="PreserveNewest" />
+    <Page Remove="full-glance.xaml" />
+    <None Update="full-glance.xaml" CopyToOutputDirectory="PreserveNewest" />
     <!-- RealGlanceControl.xaml stays a compiled Page (XBF + XamlMetaDataProvider). -->
     <PRIResource Include="Strings\zh-CN\Resources.resw" />
     <PRIResource Include="Strings\en-US\Resources.resw" />

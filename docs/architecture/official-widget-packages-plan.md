@@ -44,7 +44,7 @@ NativeAOT DLL 不支持 FreeLibrary 卸载，首发按重启应用新版本设�
 - 内容哈希路径和 ReadOnly 属性只防误写，不构成对同一 OS 用户的权限隔离。执行前重新验证实际包；未来原生激活必须把验证与打开模块的生命周期绑定。
 - 注册表存在但损坏时拒绝新安装覆盖，不当作首次安装。授权同时绑定包和发布者，旧的无发布者授权格式不能自动继承。
 - Store 安装额外验证宿主配置的可信发布者；仓库公开开发密钥只用于显式测试/Development。正式发布密钥、撤销和轮换记录必须在上线前配置，不把有效自签名当作官方身份。
-- 包元数据约束版本、哈希、架构和宿主兼容范围。下载托管可使用 GitHub，可信更新索引与密钥治理独立建设，可参考 [TUF](https://theupdateframework.github.io/specification/latest/)。
+- 包元数据约束版本、哈希、架构和宿主兼容范围。**Windows App SDK 版本对齐**：包引用的 WinAppSDK 不得超过宿主（跨大版本无 ABI 保证），宿主兼容范围必须涵盖 WinAppSDK 版本并实测"旧宿主拒载新包"。下载托管可使用 GitHub，可信更新索引与密钥治理独立建设，可参考 [TUF](https://theupdateframework.github.io/specification/latest/)。
 - 包二进制、用户数据、实例设置、授权和缓存的存储/备份边界分别定义。卸载清理所有包版本，文件被占用时如实报告未完成，不删除用户业务数据。
 - 二进制回退必须配套兼容数据或一致快照，不能只切换目录后承诺恢复。
 
@@ -56,6 +56,15 @@ NativeAOT DLL 不支持 FreeLibrary 卸载，首发按重启应用新版本设�
 
 Store 路径在批次 B 前期就核对，不能等发布前才验证。动态代码、依赖披露及实际提交类型需对应 [当前 Store 政策](https://learn.microsoft.com/en-us/windows/apps/publish/store-policies#102-security)。MSIX optional code package 的 related set/许可要求及旧 UWP 示例不能直接推导当前 NativeAOT 方案可行。
 
+### Store 政策核对结论（2026-09-08，政策版本 7.19 原文）
+
+- **10.1.5**：产品在初始下载后获取"发布者自己的其他产品"，前提是那些产品**也经 Microsoft Store 分发且获取经 Store 完成**。→ **Store 版宿主的应用内功能包下载不得从 GitHub 等外部源拉取原生 DLL**。
+- **10.2.2**：动态包含代码不是一刀切禁止，禁止的是"以与描述不一致的方式执行"。→ Store listing 必须明确描述功能包/插件能力；功能包内容不得超出描述范围。
+- **10.2.9**：直链安装器不能是 downloader stub（对我们的 Inno 安装器无影响，它是完整独立安装器）。
+- **10.2.7**：干净卸载——现有三清卸载（文件+注册表+授权）符合。
+
+**渠道决策**：Direct/GitHub 渠道（现行安装器+release）不受上述约束，功能包按 B1 管线从 GitHub 索引下载；**Store 渠道的功能包交付=捆绑进主包或 Store add-ons，不做 Store 版外部下载**。因此批次 C 的原生包格式必须同时支撑两种交付形态（同一包内容，两种分发通道），批次 E 按渠道分别验收。
+
 ## 执行记录
 
 - 2026-09-08：用户授权按复评建议开始实施，工作区干净；创建本地分支 `codex/official-widget-packages`，从 `527f63d8` 开始。
@@ -65,4 +74,5 @@ Store 路径在批次 B 前期就核对，不能等发布前才验证。动态�
 - 批次 B：第一项 x64 ABI/UI 探针通过。相同 AOT 宿主哈希，替换独立 DLL 后，实际 CalendarView 高度和业务结果均由 244 变为 268，标题绑定同步更新；详见 [可复现实验及边界](../../spikes/glance-native/README.md)。完整 Glance、待办切片、资源/生命周期/渠道仍待完成，B 尚未验收。
 - 批次 B 第二轮（2026-09-08 晚）：真实 Glance 切片（生产 XAML 移植 + 生产服务源码链接：本地月源/传统历法/节日/布局/装饰记录；固定 2026-09 实测 42/42 农历文本、中秋节日、真实传统历法标题）；同一进程销毁重建；双 DLL 单进程并存渲染；待办编辑/持久化切片（automation peer 真实点击路径 + 包目录 JSON 持久化 + 重建恢复）。六场景断言全绿，证据与批次 C 契约发现（包 XAML 无转换器、ThemeResource 需资源自含、元数据聚合待设计）见 [试点 README](../../spikes/glance-native/README.md)。尚未验收项：编译 XBF/PRI/本地化/自定义 WinRT 激活、物理输入/IME、完整 Glance 与其余五功能、ARM64 运行、系统化测量、叠放合并容器、渠道。
 - 批次 B 第三轮（2026-09-08 深夜）：编译 XAML/PRI/WinRT 激活三问全部实测为**当前不可行**，已钉进回归断言（XBF 在动态 AOT DLL 中无法定位——无类型最简控件同样失败，问题在定位层；AOT DLL 不导出 DllGetActivationFactory——C 导出是唯一 ABI；类库发布不产独立 PRI 且 MrtCore 无文件级加载——包本地化需自带字符串机制）。**运行时文本 XAML + 预计算可绑定属性确认为正式渲染路径**；`Application.ResourceManagerRequested` 记为未来逃逸口（未实验）。七场景全绿。
+- 批次 B 第四轮（2026-09-08 深夜）：完整 Glance 代表切片全绿（八场景）——背景轮播+操作栏真实点击+右键菜单+设置面板（程序化 Toggled 驱动月份数据实时重建）+设置持久化+销毁重建恢复；Store 政策结论（10.1.5/10.2.2 原文）与 WinAppSDK 版本对齐要求写入本计划。在线图片源归批次 D。
 - 批次 C–E：尚未实施。六功能仍保留在现有应用中；正式包格式、商店界面和升级迁移未在本批次提前切换。

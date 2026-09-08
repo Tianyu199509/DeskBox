@@ -24,7 +24,11 @@ internal static class RealGlanceModel
 
     public static CultureInfo Culture { get; } = CultureInfo.GetCultureInfo("zh-CN");
 
-    public static (GlanceCalendarMonth Month, bool IsCompact, double PanelHeight, double PanelWidth, double DayItemHeight, bool ShowSecondaryText) Build()
+    public static (GlanceCalendarMonth Month, bool IsCompact, double PanelHeight, double PanelWidth, double DayItemHeight, bool ShowSecondaryText) Build() =>
+        Build(showTraditional: true, showFestivals: true);
+
+    public static (GlanceCalendarMonth Month, bool IsCompact, double PanelHeight, double PanelWidth, double DayItemHeight, bool ShowSecondaryText) Build(
+        bool showTraditional, bool showFestivals)
     {
         DateOnly month = new(PinnedYear, PinnedMonth, 1);
         DateOnly today = DateOnly.FromDateTime(DateTime.Today);
@@ -32,10 +36,13 @@ internal static class RealGlanceModel
         GlanceCalendarMonth calendarMonth = new LocalCalendarPresentationSource()
             .GetMonthAsync(month, Culture).GetAwaiter().GetResult();
         DateOnly titleDate = month == new DateOnly(today.Year, today.Month, 1) ? today : month.AddDays(14);
+        GlanceTraditionalCalendarMode mode = showTraditional
+            ? GlanceTraditionalCalendarMode.ChineseLunar
+            : GlanceTraditionalCalendarMode.None;
         calendarMonth = new GlanceTraditionalCalendarService().Apply(
-            calendarMonth, GlanceTraditionalCalendarMode.ChineseLunar, Culture, titleDate);
+            calendarMonth, mode, Culture, titleDate);
         calendarMonth = new GlanceFestivalService().Apply(
-            calendarMonth, showChineseFestivals: true, GlanceTraditionalCalendarMode.ChineseLunar, Culture);
+            calendarMonth, showChineseFestivals: showFestivals && showTraditional, mode, Culture);
 
         bool isCompact = GlanceCalendarLayoutCalculator.IsCompact(AvailableHeight);
         double panelHeight = GlanceCalendarLayoutCalculator.CalculatePanelHeight(AvailableHeight, isCompact, true);
