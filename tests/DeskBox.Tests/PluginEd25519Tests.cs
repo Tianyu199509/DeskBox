@@ -103,6 +103,12 @@ public sealed class PluginEd25519Tests
     {
         // identity (order 1)
         "0100000000000000000000000000000000000000000000000000000000000000",
+        // genuine order-8 point (independently computed as [L] of a generic
+        // curve point; also the well-known small-order vector) - this is
+        // the case the [4]P-vs-[8]P bug let through (round 10)
+        "c7176a703d4dd84fba3c0b760d10670f2a2053fa2c39ccc64ec7fd7792ac037a",
+        // order-2 point: y = p-1, x = 0
+        "ecffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f",
         // 0xff * 32: non-canonical y >= p
         "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
         // y = 0 with the sign bit set: non-canonical

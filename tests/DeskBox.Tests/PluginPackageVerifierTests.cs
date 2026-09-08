@@ -187,6 +187,147 @@ public sealed class PluginPackageVerifierTests : IDisposable
     }
 
     [Fact]
+    public void DuplicateJsonKeys_AreRejected()
+    {
+        // Round 10: parsers disagree on last-vs-first-wins for duplicate
+        // members; signed manifests have zero use for them.
+        string package = Path.Combine(_tempRoot, "dup-key-pkg");
+        Directory.CreateDirectory(package);
+        string manifest = """
+        {
+          "schemaVersion": 0,
+          "schemaVersion": 0,
+          "id": "com.example.dup",
+          "version": "0.1.0",
+          "publisher": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "publisherPublicKey": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
+          "runtime": "none",
+          "hostApi": { "min": "1.0.0", "max": "1.0.0" },
+          "contributions": [
+            { "type": "widget", "id": "x", "displayName": "X", "template": "metric", "payload": { "version": 1 } }
+          ],
+          "signature": null
+        }
+        """;
+        File.WriteAllText(Path.Combine(package, "manifest.json"), manifest);
+
+        PluginPackageVerifier.VerificationResult result = PluginPackageVerifier.Verify(
+            package, PluginPackageVerificationPolicy.Development);
+
+        Assert.False(result.IsValid);
+        Assert.Contains(result.Failures, f =>
+            f.Contains("duplicate property 'schemaVersion'", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void UnsafeIntegersAndNegativeZero_AreRejected()
+    {
+        // Round 10: integers beyond ±(2^53-1) re-round in Node's IEEE-754
+        // parse; "-0" canonicalizes to "0" in Node but not in C# raw text.
+        string package = Path.Combine(_tempRoot, "unsafe-int-pkg");
+        Directory.CreateDirectory(package);
+        string manifest = """
+        {
+          "schemaVersion": 0,
+          "id": "com.example.unsafe",
+          "version": "0.1.0",
+          "publisher": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "publisherPublicKey": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
+          "runtime": "none",
+          "hostApi": { "min": "1.0.0", "max": "1.0.0" },
+          "contributions": [
+            { "type": "widget", "id": "x", "displayName": "X", "template": "metric",
+              "payload": { "version": 1, "big": 9007199254740993, "neg": -0 } }
+          ],
+          "signature": null
+        }
+        """;
+        File.WriteAllText(Path.Combine(package, "manifest.json"), manifest);
+
+        PluginPackageVerifier.VerificationResult result = PluginPackageVerifier.Verify(
+            package, PluginPackageVerificationPolicy.Development);
+
+        Assert.False(result.IsValid);
+        Assert.Contains(result.Failures, f => f.Contains("JSON safe range", StringComparison.Ordinal));
+        Assert.Contains(result.Failures, f => f.Contains("-0 is rejected", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void UnknownPermissionIds_AreRejected()
+    {
+        // Round 10: the v0 registry has exactly network.fetch and
+        // shell.open; "evil.super-admin" must not pass a format check.
+        string copy = CopyPackage("spikes/github-stats");
+        string manifestPath = Path.Combine(copy, "manifest.json");
+        File.WriteAllText(
+            manifestPath,
+            File.ReadAllText(manifestPath).Replace(
+                "\"id\": \"network.fetch\"",
+                "\"id\": \"evil.super-admin\""));
+
+        PluginPackageVerifier.VerificationResult result = PluginPackageVerifier.Verify(
+            copy, PluginPackageVerificationPolicy.Development);
+
+        Assert.False(result.IsValid);
+        Assert.Contains(result.Failures, f =>
+            f.Contains("unknown permission id 'evil.super-admin'", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void WindowsReservedNamesInPaths_AreRejected()
+    {
+        // Round 10: CON/NUL/COM1... (also with extensions), trailing dots
+        // and spaces are filesystem-level aliases the integrity grammar
+        // must not allow.
+        Assert.Equal(
+            "reserved Windows device name 'NUL'",
+            PluginPackageVerifier.PackagePathViolation("files/NUL.txt"));
+        Assert.Equal(
+            "reserved Windows device name 'CON'",
+            PluginPackageVerifier.PackagePathViolation("con"));
+        Assert.Equal(
+            "segment ending in space or dot",
+            PluginPackageVerifier.PackagePathViolation("files/foo."));
+        Assert.Equal(
+            "segment ending in space or dot",
+            PluginPackageVerifier.PackagePathViolation("files/bar "));
+        Assert.Null(PluginPackageVerifier.PackagePathViolation("files/normal.txt"));
+    }
+
+    [Fact]
+    public void ReparsePointsInPackageTree_AreRejected()
+    {
+        // Round 10: a symlink inside the package would let the verifier
+        // read outside the package (SearchOption.AllDirectories follows
+        // reparse points) or loop forever. The walk must FAIL the package.
+        string copy = CopyPackage("spikes/github-stats");
+        string linkPath = Path.Combine(copy, "files", "escape-link");
+        string outsideDirectory = Directory.CreateDirectory(Path.Combine(_tempRoot, "outside-target")).FullName;
+        try
+        {
+            Directory.CreateSymbolicLink(linkPath, outsideDirectory);
+        }
+        catch (Exception)
+        {
+            // Symbolic link creation needs developer mode/admin - when
+            // unavailable (some CI/local configurations), the behavioral
+            // test degrades to the source pin below.
+            string verifierSource = File.ReadAllText(TestPaths.SourceFile(
+                "src/DeskBox/Services/Plugins/PluginPackageVerifier.cs"));
+            Assert.Contains("WalkPackageTree", verifierSource, StringComparison.Ordinal);
+            Assert.Contains("FileAttributes.ReparsePoint", verifierSource, StringComparison.Ordinal);
+            return;
+        }
+
+        PluginPackageVerifier.VerificationResult result = PluginPackageVerifier.Verify(
+            copy, PluginPackageVerificationPolicy.Development);
+
+        Assert.False(result.IsValid);
+        Assert.Contains(result.Failures, f =>
+            f.Contains("reparse point", StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void FloatNumbers_AreRejectedInSignedPackagesToo()
     {
         // Floats would break cross-platform canonicalization: even a

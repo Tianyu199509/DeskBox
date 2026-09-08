@@ -93,8 +93,10 @@ internal static class PluginEd25519
         {
             return false;
         }
-        EdwardsPoint times8 = Add(Add(point, point), Add(point, point));
-        return !IsIdentity(times8);
+        EdwardsPoint p2 = Add(point, point);
+        EdwardsPoint p4 = Add(p2, p2);
+        EdwardsPoint p8 = Add(p4, p4);
+        return !IsIdentity(p8);
     }
 
     private static bool IsIdentity(EdwardsPoint point)

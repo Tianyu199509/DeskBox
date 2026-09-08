@@ -271,11 +271,21 @@ public static partial class PluginPackageVerifier
             }
         }
 
-        // Manifest numbers are integer-only (round 9): floats are rejected
-        // before they can create cross-platform canonicalization drift
-        // (Node JSON.stringify re-formats numbers; raw tokens differ).
-        RejectNonIntegerNumbers(root, "manifest", Fail);
+        // Manifest numbers are integer-only within the JSON safe range and
+        // duplicate keys are rejected (round 10): both are parser-drift
+        // hazards between Node's IEEE-754/last-wins semantics and C#.
+        RejectAmbiguousNumbersAndKeys(root, "manifest", Fail);
 
+        if (root.TryGetProperty("dataSources", out JsonElement dataSourcesElement) &&
+            dataSourcesElement.ValueKind != JsonValueKind.Object)
+        {
+            Fail("dataSources must be an object map");
+        }
+        if (root.TryGetProperty("actions", out JsonElement actionsElement) &&
+            actionsElement.ValueKind != JsonValueKind.Object)
+        {
+            Fail("actions must be an object map");
+        }
         Dictionary<string, JsonElement> dataSources = MapOf(root, "dataSources");
         Dictionary<string, JsonElement> actions = MapOf(root, "actions");
         foreach (string key in dataSources.Keys.Concat(actions.Keys))
@@ -338,15 +348,20 @@ public static partial class PluginPackageVerifier
                     Fail("contribution ids must be unique within the package");
                 }
             }
-            if (StringValue(contribution, "displayName", out string? displayName) && displayName!.Length == 0)
+            if (StringValue(contribution, "displayName") is not { Length: > 0 })
             {
-                Fail($"{where}: displayName minLength 1");
+                Fail($"{where}: displayName must be a non-empty string");
             }
             if (StringValue(contribution, "template") is not { } template || !Templates.Contains(template))
             {
                 Fail($"{where}: template enum");
             }
 
+            if (contribution.TryGetProperty("payload", out JsonElement payloadProperty) &&
+                payloadProperty.ValueKind != JsonValueKind.Object)
+            {
+                Fail($"{where}: payload must be an object");
+            }
             JsonElement payload = contribution.TryGetProperty("payload", out JsonElement payloadElement) &&
                                   payloadElement.ValueKind == JsonValueKind.Object
                 ? payloadElement
@@ -366,9 +381,13 @@ public static partial class PluginPackageVerifier
                 }
             }
 
-            if (contribution.TryGetProperty("bindings", out JsonElement bindings) &&
-                bindings.ValueKind == JsonValueKind.Object)
+            if (contribution.TryGetProperty("bindings", out JsonElement bindings))
             {
+                if (bindings.ValueKind != JsonValueKind.Object)
+                {
+                    Fail($"{where}: bindings must be an object");
+                }
+                else
                 foreach (JsonProperty bindingProperty in bindings.EnumerateObject())
                 {
                     string bindingWhere = $"{where}.bindings['{bindingProperty.Name}']";
@@ -527,6 +546,11 @@ public static partial class PluginPackageVerifier
         }
 
         // Permissions: shape (fail-closed on types), unique ids, consumption rules.
+        if (root.TryGetProperty("permissions", out JsonElement permissionsProperty) &&
+            permissionsProperty.ValueKind != JsonValueKind.Array)
+        {
+            Fail("permissions must be an array");
+        }
         List<JsonElement> permissions = root.TryGetProperty("permissions", out JsonElement permissionsElement) &&
                                         permissionsElement.ValueKind == JsonValueKind.Array
             ? permissionsElement.EnumerateArray().ToList()
@@ -554,6 +578,10 @@ public static partial class PluginPackageVerifier
                 {
                     Fail($"{where}: id pattern");
                 }
+                else if (!KnownPermissionIds.Contains(permissionId))
+                {
+                    Fail($"{where}: unknown permission id '{permissionId}' (registry: {string.Join(", ", KnownPermissionIds)})");
+                }
                 else if (!permissionIds.Add(permissionId))
                 {
                     // Duplicate ids with different scopes would make grant/scope
@@ -580,7 +608,7 @@ public static partial class PluginPackageVerifier
                 {
                     foreach (JsonProperty scopeProperty in scope.EnumerateObject())
                     {
-                        if (scopeProperty.Name is not ("allow" or "deny"))
+                        if (scopeProperty.Name != "allow")
                         {
                             Fail($"{where}.scope: unknown property '{scopeProperty.Name}'");
                         }
@@ -639,22 +667,33 @@ public static partial class PluginPackageVerifier
         }
     }
 
-    /// <summary>Walks the tree and fails on any non-integer number token.</summary>
-    private static void RejectNonIntegerNumbers(JsonElement element, string where, Action<string> fail)
+    /// <summary>
+    /// Walks the tree and rejects duplicate JSON property names (parsers
+    /// disagree on last-vs-first-wins; a signed manifest has zero use for
+    /// them), non-integer numbers, values beyond the JSON safe-integer
+    /// range ±(2^53-1) (Node re-rounds them via IEEE-754), and "-0"
+    /// (Node canonicalizes to "0", C# raw tokens differ).
+    /// </summary>
+    private static void RejectAmbiguousNumbersAndKeys(JsonElement element, string where, Action<string> fail)
     {
         switch (element.ValueKind)
         {
             case JsonValueKind.Object:
+                var seen = new HashSet<string>(StringComparer.Ordinal);
                 foreach (JsonProperty property in element.EnumerateObject())
                 {
-                    RejectNonIntegerNumbers(property.Value, $"{where}.{property.Name}", fail);
+                    if (!seen.Add(property.Name))
+                    {
+                        fail($"{where}: duplicate property '{property.Name}' (parser-ambiguous, rejected)");
+                    }
+                    RejectAmbiguousNumbersAndKeys(property.Value, $"{where}.{property.Name}", fail);
                 }
                 break;
             case JsonValueKind.Array:
                 int index = 0;
                 foreach (JsonElement item in element.EnumerateArray())
                 {
-                    RejectNonIntegerNumbers(item, $"{where}[{index++}]", fail);
+                    RejectAmbiguousNumbersAndKeys(item, $"{where}[{index++}]", fail);
                 }
                 break;
             case JsonValueKind.Number:
@@ -662,6 +701,15 @@ public static partial class PluginPackageVerifier
                 if (raw.Contains('.') || raw.Contains('e') || raw.Contains('E'))
                 {
                     fail($"{where}: manifest numbers must be integers (floats are rejected to avoid cross-platform canonicalization drift)");
+                }
+                else if (raw == "-0")
+                {
+                    fail($"{where}: -0 is rejected (Node canonicalizes it to 0; raw tokens differ)");
+                }
+                else if (!element.TryGetInt64(out long value) ||
+                         value is > 9007199254740991 or < -9007199254740991)
+                {
+                    fail($"{where}: manifest integers must be within the JSON safe range ±(2^53-1) (Node re-rounds larger values via IEEE-754)");
                 }
                 break;
         }
@@ -755,6 +803,18 @@ public static partial class PluginPackageVerifier
         }
     }
 
+    // The v0 permission registry (round 10): exactly two capabilities
+    // exist; unknown ids are rejected at install time - "register it into
+    // the database and decide later" is not allowed.
+    private static readonly string[] KnownPermissionIds = ["network.fetch", "shell.open"];
+
+    // Windows-safe path grammar (round 10): besides the zip-slip rules,
+    // reject DOS device names (CON/NUL/COM1... incl. with extensions),
+    // trailing dots/spaces, and control characters - the filesystem and
+    // the integrity strings must denote the same object.
+    private static readonly string[] ReservedDeviceNames =
+        ["CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9"];
+
     // ---------- package path grammar (zip-slip defense, shared with the Node tooling) ----------
     internal static string? PackagePathViolation(string relativePath)
     {
@@ -767,6 +827,20 @@ public static partial class PluginPackageVerifier
             if (segment is "" or "." or "..")
             {
                 return "empty, '.', or '..' segment";
+            }
+            if (segment.EndsWith(' ') || segment.EndsWith('.'))
+            {
+                return "segment ending in space or dot";
+            }
+            if (segment.Any(ch => char.IsControl(ch)))
+            {
+                return "control character in segment";
+            }
+            string baseName = segment.Split('.')[0];
+            if (ReservedDeviceNames.FirstOrDefault(name =>
+                    string.Equals(name, baseName, StringComparison.OrdinalIgnoreCase)) is { } reserved)
+            {
+                return $"reserved Windows device name '{reserved}'";
             }
         }
         return null;
@@ -833,10 +907,21 @@ public static partial class PluginPackageVerifier
             Fail("manifest.json integrity line does not match its canonicalization (signature=null)");
         }
 
-        // Step 2: every payload file hashes to its line and is listed.
-        foreach (string file in EnumeratePayloadFiles(packageDirectory))
+        // Step 2: every payload file hashes to its line and is listed. The
+        // walk never follows reparse points; any reparse point in the tree
+        // is itself a failure (round 10).
+        (List<string> payloadFiles, List<string> walkFailures) = WalkPackageTree(packageDirectory);
+        foreach (string walkFailure in walkFailures)
+        {
+            Fail(walkFailure);
+        }
+        foreach (string file in payloadFiles)
         {
             string relative = Path.GetRelativePath(packageDirectory, file).Replace('\\', '/');
+            if (relative == "package.integrity")
+            {
+                continue;
+            }
             if (PackagePathViolation(relative) is { } violation)
             {
                 Fail($"payload file violates the package path grammar ({violation}): {relative}");
@@ -944,14 +1029,43 @@ public static partial class PluginPackageVerifier
         }
     }
 
-    internal static IEnumerable<string> EnumeratePayloadFiles(string packageDirectory)
+    /// <summary>
+    /// Explicit tree walk that NEVER follows reparse points (round 10):
+    /// SearchOption.AllDirectories follows symlinks/junctions, letting a
+    /// hostile package read outside its directory or loop forever. Any
+    /// reparse point in the package tree is a FAILURE, not an invisible
+    /// skip - a symlink would also be absent from the integrity inventory.
+    /// </summary>
+    internal static (List<string> Files, List<string> Failures) WalkPackageTree(string packageDirectory)
     {
-        return Directory.EnumerateFiles(packageDirectory, "*", SearchOption.AllDirectories)
-            .Where(path =>
+        var files = new List<string>();
+        var failures = new List<string>();
+        var queue = new Queue<string>();
+        queue.Enqueue(packageDirectory);
+        while (queue.Count > 0)
+        {
+            string directory = queue.Dequeue();
+            foreach (string entry in Directory.EnumerateFileSystemEntries(directory))
             {
-                string relative = Path.GetRelativePath(packageDirectory, path).Replace('\\', '/');
-                return relative != "package.integrity";
-            });
+                FileAttributes attributes = File.GetAttributes(entry);
+                if ((attributes & FileAttributes.ReparsePoint) != 0)
+                {
+                    failures.Add(
+                        $"package tree contains a reparse point (symlink/junction/mount): " +
+                        Path.GetRelativePath(packageDirectory, entry).Replace('\\', '/'));
+                    continue;
+                }
+                if ((attributes & FileAttributes.Directory) != 0)
+                {
+                    queue.Enqueue(entry);
+                }
+                else
+                {
+                    files.Add(entry);
+                }
+            }
+        }
+        return (files, failures);
     }
 
     /// <summary>
@@ -1018,9 +1132,11 @@ public static partial class PluginPackageVerifier
                 writer.WriteStringValue(element.GetString());
                 break;
             case JsonValueKind.Number:
-                // RawValue preserves the original token text (integer-only,
-                // enforced by the structural pass).
-                writer.WriteRawValue(element.GetRawText(), skipInputValidation: true);
+                // Parsed-and-rewritten decimal (round 10), NOT the raw
+                // token: integers are safe-range only (enforced by the
+                // structural pass), so the rewrite is byte-stable with the
+                // Node canonicalization.
+                writer.WriteNumberValue(element.GetInt64());
                 break;
             case JsonValueKind.True:
                 writer.WriteBooleanValue(true);

@@ -101,10 +101,21 @@ public sealed class PluginCapabilityGateConformanceTests
     [InlineData("https://192.168.1.1/x")]
     [InlineData("https://169.254.169.254/latest/meta-data")]
     [InlineData("https://[fd12::1]/x")]
+    // Round 10: IPv4-mapped IPv6 must classify as the IPv4 it is.
+    [InlineData("https://[::ffff:127.0.0.1]/x")]
+    [InlineData("https://[::ffff:10.1.2.3]/x")]
+    [InlineData("https://[::ffff:192.168.1.1]/x")]
+    // Round 10: unspecified and multicast are not globally routable.
+    [InlineData("https://0.0.0.0/x")]
+    [InlineData("https://[::]/x")]
+    [InlineData("https://224.0.0.1/x")]
     public void LocalNetwork_IsRefusedByDefault(string url)
     {
-        string refusal = Refusal(url, ["127.0.0.1", "localhost", "::1", "10.1.2.3", "169.254.169.254", "fd12::1"],
-            ["127.0.0.1", "localhost", "::1", "10.1.2.3", "169.254.169.254", "fd12::1"]);
+        string refusal = Refusal(url,
+            ["127.0.0.1", "localhost", "::1", "10.1.2.3", "169.254.169.254", "fd12::1",
+             "::ffff:127.0.0.1", "::ffff:10.1.2.3", "::ffff:192.168.1.1", "0.0.0.0", "224.0.0.1"],
+            ["127.0.0.1", "localhost", "::1", "10.1.2.3", "169.254.169.254", "fd12::1",
+             "::ffff:127.0.0.1", "::ffff:10.1.2.3", "::ffff:192.168.1.1", "0.0.0.0", "224.0.0.1"]);
 
         Assert.Contains("local-network", refusal, StringComparison.Ordinal);
     }
