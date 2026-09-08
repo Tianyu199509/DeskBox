@@ -40,6 +40,17 @@ v2 的结论不变：宿主 `RuntimeFeature.IsDynamicCodeSupported`=false，输�
 
 第四轮（2026-09-08 深夜）补齐完整 Glance 代表性切片（`full-glance.xaml` + `FullGlanceView.cs`）：背景图片 A/B 交叉淡入轮播（包目录 `backgrounds/` 本地图，3s 定时器，Unloaded 停表）、生产结构操作栏（暂停/下一张，真实 Click 处理器）、代码构建右键 MenuFlyout（运行时 XAML 无法接线处理器）、XAML 名字域内设置面板（节日/传统历法 ToggleSwitch）经程序化 `IsOn` 驱动同一 Toggled 路径重建月份、设置持久化到 `glance-settings.json`。实测链：定时轮播推进（索引 1）→ automation peer 真实点击下一张（索引回绕 0，2 张图模运算）→ 关节日开关（festivalDayCount 42 格→0，月份数据实时重建）→ 销毁重建（设置保留、轮播重置）。在线图片源（Bing/在线目录）不在本切片范围，归批次 D 的生产 GlanceImageService 迁移。
 
+### 第五轮：批次 C 综合 probe（宿主控件/工具包/三根 ABI/主题 token）
+
+第五轮（2026-09-08 末，`InteractionPackage/` + 宿主 `HostBadge`）回答了外部二次审计的最高价值问题：
+
+1. **宿主自定义控件与 toolkit 控件都能在包运行时文本 XAML 中解析并实例化**——`<host:HostBadge />`（宿主编译 UserControl）与 `<toolkit:Segmented>`（CommunityToolkit，经宿主 XamlTypeInfo 提供器）双双通过。判别实验：宿主代码直接 `new HostBadge()` 曾同样失败（"Cannot locate resource ms-appx:///HostBadge.xaml"）→ 问题不在包 XAML，在宿主发布布局。
+2. **宿主 Page XBF 必须随宿主安装目录落盘**：publish 不携带 Page XBF（App.xaml 的 ApplicationDefinition 走内嵌，Page 不走），`ms-appx` 文件级解析要求 XBF 在 exe 旁。脚本已显式拷贝——**产品宿主的安装布局必须包含 Page XBF，这是批次 C 契约条目**。
+3. **三根 ABI 落地**：`interaction_get_abi_version/activate(packageRoot,dataRoot,instanceId)/create_widget(widgetId)/destroy_widget/shutdown`；数据只写 DataRoot（断言验证包目录零写入），重建后从 DataRoot 恢复。
+4. **主题 token 注入可用**：宿主写 `theme-tokens.json` 进 DataRoot，包激活时映射为本地资源字典（解析期默认值 + 代码替换的双层模式；运行时文本 XAML 的 ThemeResource 在解析期已定值，动态重着色需另行设计）。
+5. **事件接线**：包代码 FindName 订阅，计数入 summary；**注意 toolkit Segmented 的 SelectionChanged 需订阅控件自身事件**（经基类 `Selector` 订阅接不到——`selectionChanges=0` 实测记录），迁移时按控件类型逐个确认事件归属。
+6. 事件计数 2、destroy 调用 1、真实点击添加 1→重建恢复 1，全部断言通过。
+
 两轮所有场景的断言（业务值、实际布局、绑定、退出码、截图、宿主哈希一致）由 `scripts/spike/run-glance-native.ps1` 自动判定；本地证据在 `.artifacts/glance-native/runs/<timestamp>-x64/summary.json`，截图在各 `result-*/view.png`。二进制和运行证据不入库。
 
 ## 复现

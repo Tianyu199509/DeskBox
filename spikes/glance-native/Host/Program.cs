@@ -21,6 +21,7 @@ internal enum Scenario
     Lifecycle,
     MultiPackage,
     TodoEdit,
+    Interaction,
 }
 
 internal static class Program
@@ -53,6 +54,9 @@ internal static class Program
                 break;
             case ["--todo-package", string package, string outDir]:
                 (scenario, packages, output) = (Scenario.TodoEdit, [package], outDir);
+                break;
+            case ["--interaction-package", string package, string outDir]:
+                (scenario, packages, output) = (Scenario.Interaction, [package], outDir);
                 break;
             default:
                 return;
@@ -156,6 +160,7 @@ public sealed partial class ProbeApplication : Application
             case Scenario.Lifecycle: RunLifecycle(); break;
             case Scenario.MultiPackage: RunMulti(); break;
             case Scenario.TodoEdit: RunTodo(); break;
+            case Scenario.Interaction: RunInteraction(); break;
         }
     }
 
@@ -516,6 +521,134 @@ public sealed partial class ProbeApplication : Application
         }
         catch (Exception error) { File.WriteAllText(Path.Combine(_output, "error.txt"), error.ToString()); }
         finally { _window?.Close(); Exit(); }
+    }
+
+    private string? _widgetId;
+    private nint _destroyWidget;
+    private nint _shutdownPackage;
+
+    private unsafe void RunInteraction()
+    {
+        nint module = LoadModule(_packages[0], "DeskBox.Interaction.NativePackage.dll", _output);
+        string dataRoot = Path.Combine(_output, "data");
+        Directory.CreateDirectory(dataRoot);
+        File.WriteAllText(Path.Combine(dataRoot, "theme-tokens.json"), "{\"accent\":\"#FF60CDFF\",\"cornerSmall\":8}");
+        var activate = (delegate* unmanaged[Cdecl]<char*, int, char*, int, char*, int, int>)NativeLibrary.GetExport(module, "interaction_activate");
+        var create = (delegate* unmanaged[Cdecl]<char*, int, nint*, int>)NativeLibrary.GetExport(module, "interaction_create_widget");
+        var destroy = (delegate* unmanaged[Cdecl]<char*, int, int>)NativeLibrary.GetExport(module, "interaction_destroy_widget");
+        var shutdown = (delegate* unmanaged[Cdecl]<int>)NativeLibrary.GetExport(module, "interaction_shutdown");
+        _widgetId = "widget-1";
+        _destroyWidget = (nint)destroy;
+        _shutdownPackage = (nint)shutdown;
+        // Discriminating experiment: instantiate the host Page control directly
+        // (no package XAML involved) to separate host-side XBF infrastructure
+        // issues from package-XAML-specific instantiation problems.
+        try
+        {
+            var badge = new HostBadge();
+            badge.Label = "direct";
+            File.AppendAllText(Path.Combine(_output, "stages.txt"), "host direct HostBadge: ok\n");
+        }
+        catch (Exception error)
+        {
+            File.AppendAllText(Path.Combine(_output, "stages.txt"), $"host direct HostBadge: FAILED {error.Message}\n");
+        }
+        FrameworkElement content;
+        nint abi = 0;
+        int status;
+        fixed (char* package = _packages[0])
+        fixed (char* data = dataRoot)
+        fixed (char* instance = _widgetId)
+        fixed (char* id = _widgetId)
+        {
+            status = activate(package, _packages[0].Length, data, dataRoot.Length, instance, _widgetId.Length);
+            if (status != 0) throw new InvalidOperationException($"activate failed: 0x{status:X8}");
+            status = create(id, _widgetId.Length, &abi);
+            if (status != 0 || abi == 0) throw new InvalidOperationException($"create failed: 0x{status:X8}");
+        }
+        try { content = WinRT.MarshalInspectable<FrameworkElement>.FromAbi(abi); }
+        finally { WinRT.MarshalInspectable<FrameworkElement>.DisposeAbi(abi); }
+        content.Width = 420;
+        content.Height = 460;
+        _window = new Window { Title = "Interaction probe", Content = content };
+        _window.AppWindow.Resize(new Windows.Graphics.SizeInt32(440, 510));
+        content.Loaded += (sender, args) => _ = FinishInteraction(module, content, dataRoot);
+        _window.Activate();
+    }
+
+    private async Task FinishInteraction(nint module, FrameworkElement first, string dataRoot)
+    {
+        try
+        {
+            await WhenLoadedAsync(first);
+            // Host-owned custom control + toolkit control resolved inside package text XAML.
+            object badge = first.FindName("HostBadgeSlot");
+            var segmented = first.FindName("FilterSegmented").As<Microsoft.UI.Xaml.Controls.Primitives.Selector>();
+            bool hostControlResolved = badge is not null;
+            bool toolkitControlResolved = segmented is not null;
+            // Real interactions: type, click through automation, select through projection.
+            var input = first.FindName("InputBox").As<TextBox>();
+            var addButton = first.FindName("AddButton").As<Button>();
+            var list = first.FindName("ItemsList").As<ListView>();
+            input.Text = "综合探针条目";
+            new Microsoft.UI.Xaml.Automation.Peers.ButtonAutomationPeer(addButton).Invoke();
+            segmented.SelectedIndex = 1;
+            await Task.Delay(400);
+            int firstCount = list.Items.Count;
+
+            // Destroy and recreate: data must come back from the DATA root.
+            InvokeDestroy(_destroyWidget, _widgetId!);            var firstUnloaded = new TaskCompletionSource();
+            first.Unloaded += (_, _) => firstUnloaded.TrySetResult();
+            _window!.Content = null;
+            await firstUnloaded.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            FrameworkElement second = CreateWidget(module, "interaction_create_widget", _widgetId!, _packages[0], _output);
+            second.Width = 420;
+            second.Height = 460;
+            _window.Content = second;
+            await WhenLoadedAsync(second);
+            await Task.Delay(400);
+            int secondCount = second.FindName("ItemsList").As<ListView>().Items.Count;
+            await CaptureAsync(second, "view.png");
+            InvokeShutdown(_shutdownPackage);
+            JsonDocument summary = JsonDocument.Parse(
+                await File.ReadAllTextAsync(Path.Combine(dataRoot, "interaction-summary.json")));
+            bool packageRootUntouched = !File.Exists(Path.Combine(_packages[0], "interaction-items.json"));
+            WriteResult(result =>
+            {
+                result.WriteBoolean("hostControlResolved", hostControlResolved);
+                result.WriteBoolean("toolkitControlResolved", toolkitControlResolved);
+                result.WriteNumber("itemsAfterFirstEdit", firstCount);
+                result.WriteNumber("itemsAfterRecreate", secondCount);
+                result.WriteBoolean("packageRootUntouched", packageRootUntouched);
+                result.WritePropertyName("packageSummary");
+                summary.RootElement.WriteTo(result);
+            });
+        }
+        catch (Exception error) { File.WriteAllText(Path.Combine(_output, "error.txt"), error.ToString()); }
+        finally { _window?.Close(); Exit(); }
+    }
+
+    private static unsafe void InvokeDestroy(nint destroyExport, string widgetId)
+    {
+        var destroy = (delegate* unmanaged[Cdecl]<char*, int, int>)destroyExport;
+        fixed (char* id = widgetId) destroy(id, widgetId.Length);
+    }
+
+    private static unsafe void InvokeShutdown(nint shutdownExport)
+    {
+        ((delegate* unmanaged[Cdecl]<int>)shutdownExport)();
+    }
+
+    private static unsafe FrameworkElement CreateWidget(nint module, string export, string widgetId, string package, string output)
+    {
+        var create = (delegate* unmanaged[Cdecl]<char*, int, nint*, int>)NativeLibrary.GetExport(module, export);
+        nint abi = 0;
+        int status;
+        fixed (char* id = widgetId) status = create(id, widgetId.Length, &abi);
+        File.AppendAllText(Path.Combine(output, "stages.txt"), $"{export} status {status:X8}\n");
+        if (status != 0 || abi == 0) throw new InvalidOperationException($"{export} failed: 0x{status:X8}");
+        try { return WinRT.MarshalInspectable<FrameworkElement>.FromAbi(abi); }
+        finally { WinRT.MarshalInspectable<FrameworkElement>.DisposeAbi(abi); }
     }
 
     private void RunTodo()
