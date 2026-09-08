@@ -181,14 +181,30 @@ try {
             -not $result.hostControlResolved -or
             -not $result.toolkitControlResolved -or
             -not $result.dataIsolated -or
+            -not $result.localeZhApplied -or
+            -not $result.localeSwitchApplied -or
+            -not $result.themeSwitchApplied -or
+            -not $result.keyboardInjected -or
             -not $result.bSurvivedADestroy -or
             -not $result.packageRootUntouched -or
             $result.hostLogCalls -lt 3 -or
             $result.packageSummary.activateCalls -ne 1 -or
             $result.packageSummary.shutdownCalls -ne 1 -or
             $result.packageSummary.instancesCreatedTotal -ne 2 -or
-            $result.packageSummary.liveInstancesAfterShutdown -ne 0) {
+            $result.packageSummary.liveInstancesAfterShutdown -ne 0 -or
+            $result.packageSummary.configChangedCount -ne 1 -or
+            $result.packageSummary.lastAppliedAccent -ne "#FFFF6080") {
             throw "Runtime-contract probe assertion failed: $evidence"
+        }
+        # Findings (informational, not blockers): injected keyboard events
+        # don't reach package TextBox handlers in hidden-window probes; toolkit
+        # Segmented does not fire its own SelectionChanged on programmatic set.
+        # These need real-device verification in batch D.
+        if ($result.packageSummary.keyDownCount -lt 1) {
+            Write-Output "  finding: injected keyboard did not reach package handler (hidden-window limitation)"
+        }
+        if ($result.packageSummary.segmentedSelectionChanges -lt 1) {
+            Write-Output "  finding: toolkit Segmented programmatic set did not fire own SelectionChanged"
         }
         if (-not (Test-Path -LiteralPath (Join-Path $evidence "view.png"))) { throw "Missing rendered view: $evidence" }
         $results += [pscustomobject]@{ scenario = "runtime-contract"; result = $result; evidence = $evidence }

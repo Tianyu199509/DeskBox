@@ -19,6 +19,8 @@
 
     <host:HostBadge x:Name="HostBadgeSlot" />
 
+    <TextBlock x:Name="TitleText" FontSize="14" FontWeight="SemiBold" Foreground="White" Text="DeskBox" />
+
     <toolkit:Segmented x:Name="FilterSegmented">
         <toolkit:SegmentedItem Content="全部" />
         <toolkit:SegmentedItem Content="未完成" />
@@ -28,5 +30,5 @@
     <Button x:Name="AddButton" Content="添加" />
     <ListView x:Name="ItemsList" />
     <TextBlock x:Name="StatusText" FontSize="11" Foreground="#C5FFFFFF" Text="ready" />
-    <Border x:Name="ThemeProbe" Height="12" CornerRadius="6" Background="{ThemeResource ProbeAccentBrush}" />
+    <Border x:Name="ThemeProbe" Height="12" CornerRadius="6" Background="#FF4CC2FF" />
 </StackPanel>

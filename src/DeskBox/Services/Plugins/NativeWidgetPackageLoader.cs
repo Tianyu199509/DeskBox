@@ -64,19 +64,56 @@ internal struct NativeHostApiV1
     public uint Size;
     public uint Version;
     public nint Log;
+    public nint GetConfigJson;
+    public nint SetConfigChangedHandler;
 }
 
 /// <summary>Host-side callbacks exposed to native packages via the HostApi table.</summary>
 internal static unsafe class NativeHostApiBridge
 {
-    internal const uint CurrentVersion = 1;
+    internal const uint CurrentVersion = 2;
 
     internal static NativeHostApiV1 Create() => new()
     {
         Size = (uint)sizeof(NativeHostApiV1),
         Version = CurrentVersion,
         Log = (nint)(delegate* unmanaged[Cdecl]<byte*, int, void>)&Log,
+        GetConfigJson = (nint)(delegate* unmanaged[Cdecl]<byte*, int, int>)&GetConfigJson,
+        SetConfigChangedHandler = (nint)(delegate* unmanaged[Cdecl]<nint, int>)&SetConfigChangedHandler,
     };
+
+    /// <summary>Config payload: locale + accent theme tokens (batch C2 contract).</summary>
+    internal static string BuildConfigJson(string locale, string accent) =>
+        $$"""{"locale":"{{locale}}","accent":"{{accent}}"}""";
+
+    private static readonly string CurrentConfig = BuildConfigJson(
+        System.Globalization.CultureInfo.CurrentUICulture.Name,
+        "#FF4CC2FF");
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static int GetConfigJson(byte* buffer, int bufferLength)
+    {
+        try
+        {
+            byte[] utf8 = Encoding.UTF8.GetBytes(CurrentConfig);
+            if (utf8.Length > bufferLength) return utf8.Length;
+            for (int index = 0; index < utf8.Length; index++) buffer[index] = utf8[index];
+            return utf8.Length;
+        }
+        catch
+        {
+            return 0;
+        }
+    }
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static int SetConfigChangedHandler(nint handler)
+    {
+        // Package-side subscription recorded; the product notification source
+        // (theme/locale change events) wires up during batch D migration.
+        App.LogVerbose($"[NativePackage] config-changed handler registered: 0x{handler:X}");
+        return 0;
+    }
 
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
     private static void Log(byte* utf8, int length)

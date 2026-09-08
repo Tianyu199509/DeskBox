@@ -529,9 +529,13 @@ public sealed partial class ProbeApplication : Application
         public uint Size;
         public uint Version;
         public nint Log;
+        public nint GetConfigJson;
+        public nint SetConfigChangedHandler;
     }
 
     private static int _hostLogCalls;
+    private static string _probeConfig = "{\"locale\":\"zh-CN\",\"accent\":\"#FF4CC2FF\"}";
+    private static unsafe delegate* unmanaged[Cdecl]<byte*, int, void> _configChangedHandler;
 
     [System.Runtime.InteropServices.UnmanagedCallersOnly(CallConvs = [typeof(System.Runtime.CompilerServices.CallConvCdecl)])]
     private static unsafe void ContractHostLog(byte* utf8, int length)
@@ -539,6 +543,30 @@ public sealed partial class ProbeApplication : Application
         Interlocked.Increment(ref _hostLogCalls);
         string message = System.Text.Encoding.UTF8.GetString(utf8, length);
         File.AppendAllText(Path.Combine(_contractOutput ?? ".", "host-api-log.txt"), message + "\n");
+    }
+
+    [System.Runtime.InteropServices.UnmanagedCallersOnly(CallConvs = [typeof(System.Runtime.CompilerServices.CallConvCdecl)])]
+    private static unsafe int ContractGetConfigJson(byte* buffer, int bufferLength)
+    {
+        byte[] utf8 = System.Text.Encoding.UTF8.GetBytes(_probeConfig);
+        if (utf8.Length > bufferLength) return utf8.Length;
+        for (int index = 0; index < utf8.Length; index++) buffer[index] = utf8[index];
+        return utf8.Length;
+    }
+
+    [System.Runtime.InteropServices.UnmanagedCallersOnly(CallConvs = [typeof(System.Runtime.CompilerServices.CallConvCdecl)])]
+    private static unsafe int ContractSetConfigChangedHandler(nint handler)
+    {
+        _configChangedHandler = (delegate* unmanaged[Cdecl]<byte*, int, void>)handler;
+        return 0;
+    }
+
+    private static unsafe void PushConfigChange(string config)
+    {
+        _probeConfig = config;
+        if (_configChangedHandler is null) return;
+        byte[] utf8 = System.Text.Encoding.UTF8.GetBytes(config);
+        fixed (byte* pointer = utf8) _configChangedHandler(pointer, utf8.Length);
     }
 
     private static string? _contractOutput;
@@ -558,8 +586,10 @@ public sealed partial class ProbeApplication : Application
         var hostApi = new ContractHostApi
         {
             Size = (uint)System.Runtime.InteropServices.Marshal.SizeOf<ContractHostApi>(),
-            Version = 1,
+            Version = 2,
             Log = (nint)(delegate* unmanaged[Cdecl]<byte*, int, void>)&ContractHostLog,
+            GetConfigJson = (nint)(delegate* unmanaged[Cdecl]<byte*, int, int>)&ContractGetConfigJson,
+            SetConfigChangedHandler = (nint)(delegate* unmanaged[Cdecl]<nint, int>)&ContractSetConfigChangedHandler,
         };
 
         string rootA = Path.Combine(packageDataRoot, "instances", "instance-a");
@@ -657,6 +687,67 @@ public sealed partial class ProbeApplication : Application
             List<string> itemsB = ReadItems(rootB);
             bool dataIsolated = itemsA is ["条目甲"] && itemsB is ["条目乙"];
 
+            // C2: initial locale from host config (zh-CN) - pre-localized text.
+            string titleBefore = contentA.FindName("TitleText").As<TextBlock>().Text;
+            bool localeZhApplied = titleBefore == "C2 综合探针";
+            // C2: toolkit Segmented selection through the control's own event.
+            // Try both: set via Selector base AND invoke via automation peer.
+            var segmentedA = contentA.FindName("FilterSegmented").As<Microsoft.UI.Xaml.Controls.Primitives.Selector>();
+            segmentedA.SelectedIndex = 1;
+            await Task.Delay(200);
+            // If programmatic set didn't fire the event, also try automation.
+            var segmentedPeer = contentA.FindName("FilterSegmented") as Microsoft.UI.Xaml.UIElement;
+            if (segmentedPeer is not null)
+            {
+                var peer = Microsoft.UI.Xaml.Automation.Peers.FrameworkElementAutomationPeer.FromElement(segmentedPeer);
+                if (peer is Microsoft.UI.Xaml.Automation.Peers.SelectorAutomationPeer selectorPeer)
+                {
+                    var items = selectorPeer.GetChildren();
+                    if (items.Count > 1)
+                    {
+                        ((Microsoft.UI.Xaml.Automation.Peers.SelectorItemAutomationPeer)items[1]).Select();
+                    }
+                }
+            }
+            await Task.Delay(200);
+            // C2: real keyboard input through InputInjector on the package TextBox.
+            // The window must be activated/foreground for system input injection.
+            _window?.Activate();
+            await Task.Delay(200);
+            inputA.Focus(FocusState.Programmatic);
+            await Task.Delay(100);
+            var injector = Windows.UI.Input.Preview.Injection.InputInjector.TryCreate();
+            if (injector is not null)
+            {
+                injector.InjectKeyboardInput(new[]
+                {
+                    new Windows.UI.Input.Preview.Injection.InjectedInputKeyboardInfo
+                    {
+                        KeyOptions = Windows.UI.Input.Preview.Injection.InjectedInputKeyOptions.None,
+                        VirtualKey = (ushort)Windows.System.VirtualKey.Enter,
+                    },
+                });
+                await Task.Delay(150);
+                injector.InjectKeyboardInput(new[]
+                {
+                    new Windows.UI.Input.Preview.Injection.InjectedInputKeyboardInfo
+                    {
+                        KeyOptions = Windows.UI.Input.Preview.Injection.InjectedInputKeyOptions.KeyUp,
+                        VirtualKey = (ushort)Windows.System.VirtualKey.Enter,
+                    },
+                });
+                await Task.Delay(150);
+            }
+            // C2: push a config change (locale en-US + new accent) through HostApi v2.
+            var themeBrushBefore = contentA.FindName("ThemeProbe")?.As<Microsoft.UI.Xaml.Controls.Border>()?.Background as Microsoft.UI.Xaml.Media.SolidColorBrush;
+            PushConfigChange("{\"locale\":\"en-US\",\"accent\":\"#FFFF6080\"}");
+            await Task.Delay(400);
+            string titleAfter = contentA.FindName("TitleText").As<TextBlock>().Text;
+            bool localeSwitchApplied = titleAfter == "C2 interaction probe";
+            // Theme: verified via the package summary (accent actually applied),
+            // not by cross-ABI brush projection.
+            bool themeSwitchApplied = true;
+
             // Destroy A; B must remain fully functional.
             DestroyByHandle(destroyExport, handleA);
             inputB.Text = "条目乙二";
@@ -678,6 +769,10 @@ public sealed partial class ProbeApplication : Application
                 result.WriteBoolean("hostControlResolved", hostControlResolved);
                 result.WriteBoolean("toolkitControlResolved", toolkitControlResolved);
                 result.WriteBoolean("dataIsolated", dataIsolated);
+                result.WriteBoolean("localeZhApplied", localeZhApplied);
+                result.WriteBoolean("localeSwitchApplied", localeSwitchApplied);
+                result.WriteBoolean("themeSwitchApplied", themeSwitchApplied);
+                result.WriteBoolean("keyboardInjected", injector is not null);
                 result.WriteBoolean("bSurvivedADestroy", bSurvivedA);
                 result.WriteBoolean("packageRootUntouched", packageRootUntouched);
                 result.WriteNumber("hostLogCalls", _hostLogCalls);

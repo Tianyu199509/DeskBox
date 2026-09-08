@@ -19,7 +19,9 @@
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.WindowsAppSDK" Version="2.4.0" />
+    <PackageReference Include="CommunityToolkit.WinUI.Controls.Segmented" Version="8.2.251219" />
     <Page Remove="interaction.xaml" />
     <None Update="interaction.xaml" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="strings\*.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>
