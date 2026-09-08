@@ -35,11 +35,28 @@ public class NativeWidgetPackagePilotTests
     }
 
     [Fact]
-    public void DataRootIsPackageScopedUnderNativePackages()
+    public void PackageDataRootIsStableAcrossInstallPathChanges()
     {
-        string dataRoot = DeskBox.Services.Plugins.NativeWidgetPackageLoader.ResolveDataRoot(
-            @"C:\plugins\deskbox-glance-dev", @"D:\DeskBoxData\data");
-        Assert.Equal(@"D:\DeskBoxData\data\native-packages\deskbox-glance-dev", dataRoot);
+        // Batch C1 contract: roots key on publisher+packageId, never on install
+        // directory names (B1 leaf dirs are content hashes that rotate on update).
+        var identity = new DeskBox.Services.Plugins.NativePackageIdentity(
+            "a".PadLeft(64, '0'), "com.deskbox.glance");
+        string v1 = identity.ResolvePackageDataRoot(@"D:\Data\data");
+        string v2 = identity.ResolvePackageDataRoot(@"D:\Data\data");
+        Assert.Equal(v1, v2);
+        Assert.Equal(
+            Path.Combine(@"D:\Data\data", "packages", "a".PadLeft(64, '0'), "com.deskbox.glance"),
+            v1);
+
+        // Different publisher fingerprints (takeover guard) never share a root.
+        var other = new DeskBox.Services.Plugins.NativePackageIdentity(
+            "b".PadLeft(64, '0'), "com.deskbox.glance");
+        Assert.NotEqual(v1, other.ResolvePackageDataRoot(@"D:\Data\data"));
+
+        // Instance roots hang off the stable package root.
+        Assert.Equal(
+            Path.Combine(v1, "instances", "widget-42"),
+            identity.ResolveInstanceDataRoot(@"D:\Data\data", "widget-42"));
     }
 
     [Fact]

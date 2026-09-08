@@ -8,54 +8,50 @@ namespace DeskBox.Services.Plugins;
 /// Development pilot: widget content served by a native package when the
 /// DESKBOX_DEV_NATIVE_GLANCE environment variable points at a valid package
 /// directory. Default off; any failure falls back to the built-in provider
-/// path - the pilot can never break the affected widget kind.
+/// path - the pilot can never break the affected widget kind. Runs entirely
+/// through the batch C1 runtime contract (session per identity, instance
+/// leases, handle-based destroy, shutdown on last release).
 /// </summary>
 internal static class NativeWidgetPilot
 {
-    // Interim session cache (audit round 11): one activation per package root
-    // per process - re-activating per widget would overwrite the package's
-    // static session state and pair the wrong instance id. The full
-    // NativePackageSession/instance model lands in batch C1.
-    private static NativeWidgetPackage? _activePackage;
-    private static string? _activePackageRoot;
-
     public static bool TryCreate(WidgetConfig config, out IWidgetContent? content)
     {
         content = null;
         string? packageRoot = NativeWidgetPackageLoader.TryGetDevelopmentPackageRoot();
         if (packageRoot is null) return false;
-        NativeWidgetPackage? package = _activePackageRoot == packageRoot
-            ? _activePackage
-            : NativeWidgetPackageLoader.TryActivate(
-                packageRoot,
-                NativeWidgetPackageLoader.ResolveDataRoot(packageRoot, DeskBoxDataPathService.Current.DataDirectory),
-                "pilot-session");
-        if (package is null) return false;
-        _activePackage = package;
-        _activePackageRoot = packageRoot;
-        FrameworkElement? view = package.TryCreateWidget(config.Id);
-        if (view is null) return false;
-        content = new NativeWidgetPilotContent(config, package, view);
+        string packageId = new DirectoryInfo(packageRoot).Name;
+        var descriptor = new NativePackageDescriptor(
+            NativeWidgetPackageLoader.DevelopmentPublisherFingerprint,
+            packageId,
+            packageRoot);
+        if (!NativeWidgetRuntimeManager.TryCreateInstance(
+                descriptor,
+                contributionId: "main",
+                instanceId: config.Id,
+                dataDirectory: DeskBoxDataPathService.Current.DataDirectory,
+                out NativeWidgetLease? lease))
+        {
+            return false;
+        }
+        content = new NativeWidgetPilotContent(config, lease!);
         return true;
     }
 }
 
-internal sealed class NativeWidgetPilotContent : IWidgetContent, IDisposable
+internal sealed class NativeWidgetPilotContent : IWidgetContent
 {
-    private readonly NativeWidgetPackage _package;
-    private bool _disposed;
+    private readonly NativeWidgetLease _lease;
 
-    internal NativeWidgetPilotContent(WidgetConfig config, NativeWidgetPackage package, FrameworkElement view)
+    internal NativeWidgetPilotContent(WidgetConfig config, NativeWidgetLease lease)
     {
         Config = config;
-        _package = package;
-        View = view;
+        _lease = lease;
     }
 
     public WidgetConfig Config { get; }
     public string WidgetId => Config.Id;
     public WidgetKind WidgetKind => Config.WidgetKind;
-    public FrameworkElement View { get; }
+    public FrameworkElement View => _lease.View;
 
     public Task InitializeAsync()
     {
@@ -69,22 +65,9 @@ internal sealed class NativeWidgetPilotContent : IWidgetContent, IDisposable
     public void OnDeactivated() { }
 
     /// <summary>
-    /// The host disposes widget content via IDisposable (WidgetManager); route
-    /// that to the package's instance destroy. Package shutdown intentionally
-    /// NOT triggered here - other widget instances may still use the session.
+    /// The host disposes widget content via IDisposable (WidgetManager); the
+    /// lease routes that to handle-based destroy, and the runtime manager
+    /// shuts the package down when this was the last live instance.
     /// </summary>
-    public void Dispose()
-    {
-        if (_disposed) return;
-        _disposed = true;
-        try
-        {
-            _package.DestroyWidget(WidgetId);
-            App.LogVerbose($"[NativePackage] pilot widget destroyed: {WidgetId}");
-        }
-        catch (Exception error)
-        {
-            App.Log($"[NativePackage] destroy failed for {WidgetId}: {error.Message}");
-        }
-    }
+    public void Dispose() => ((IDisposable)_lease).Dispose();
 }

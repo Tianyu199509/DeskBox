@@ -523,103 +523,157 @@ public sealed partial class ProbeApplication : Application
         finally { _window?.Close(); Exit(); }
     }
 
-    private string? _widgetId;
-    private nint _destroyWidget;
-    private nint _shutdownPackage;
+    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
+    internal struct ContractHostApi
+    {
+        public nint Log;
+    }
+
+    private static int _hostLogCalls;
+
+    [System.Runtime.InteropServices.UnmanagedCallersOnly(CallConvs = [typeof(System.Runtime.CompilerServices.CallConvCdecl)])]
+    private static unsafe void ContractHostLog(byte* utf8, int length)
+    {
+        Interlocked.Increment(ref _hostLogCalls);
+        string message = System.Text.Encoding.UTF8.GetString(utf8, length);
+        File.AppendAllText(Path.Combine(_contractOutput ?? ".", "host-api-log.txt"), message + "\n");
+    }
+
+    private static string? _contractOutput;
 
     private unsafe void RunInteraction()
     {
         nint module = LoadModule(_packages[0], "DeskBox.Interaction.NativePackage.dll", _output);
-        string dataRoot = Path.Combine(_output, "data");
-        Directory.CreateDirectory(dataRoot);
-        File.WriteAllText(Path.Combine(dataRoot, "theme-tokens.json"), "{\"accent\":\"#FF60CDFF\",\"cornerSmall\":8}");
-        var activate = (delegate* unmanaged[Cdecl]<char*, int, char*, int, char*, int, int>)NativeLibrary.GetExport(module, "interaction_activate");
-        var create = (delegate* unmanaged[Cdecl]<char*, int, nint*, int>)NativeLibrary.GetExport(module, "interaction_create_widget");
-        var destroy = (delegate* unmanaged[Cdecl]<char*, int, int>)NativeLibrary.GetExport(module, "interaction_destroy_widget");
-        var shutdown = (delegate* unmanaged[Cdecl]<int>)NativeLibrary.GetExport(module, "interaction_shutdown");
-        _widgetId = "widget-1";
-        _destroyWidget = (nint)destroy;
-        _shutdownPackage = (nint)shutdown;
-        // Discriminating experiment: instantiate the host Page control directly
-        // (no package XAML involved) to separate host-side XBF infrastructure
-        // issues from package-XAML-specific instantiation problems.
-        try
-        {
-            var badge = new HostBadge();
-            badge.Label = "direct";
-            File.AppendAllText(Path.Combine(_output, "stages.txt"), "host direct HostBadge: ok\n");
-        }
-        catch (Exception error)
-        {
-            File.AppendAllText(Path.Combine(_output, "stages.txt"), $"host direct HostBadge: FAILED {error.Message}\n");
-        }
-        FrameworkElement content;
-        nint abi = 0;
+        _contractOutput = _output;
+        string packageDataRoot = Path.Combine(_output, "package-data");
+        Directory.CreateDirectory(packageDataRoot);
+        var activate = (delegate* unmanaged[Cdecl]<char*, int, char*, int, ContractHostApi*, int>)NativeLibrary.GetExport(module, "deskbox_package_activate");
+        var create = (delegate* unmanaged[Cdecl]<char*, int, char*, int, char*, int, nint*, nint*, int>)NativeLibrary.GetExport(module, "deskbox_widget_create");
+        var destroy = (delegate* unmanaged[Cdecl]<nint, int>)NativeLibrary.GetExport(module, "deskbox_widget_destroy");
+        var shutdown = (delegate* unmanaged[Cdecl]<int>)NativeLibrary.GetExport(module, "deskbox_package_shutdown");
+        var version = (delegate* unmanaged[Cdecl]<int>)NativeLibrary.GetExport(module, "deskbox_package_get_abi_version");
+        int abiVersion = version();
+        var hostApi = new ContractHostApi { Log = (nint)(delegate* unmanaged[Cdecl]<byte*, int, void>)&ContractHostLog };
+
+        string rootA = Path.Combine(packageDataRoot, "instances", "instance-a");
+        string rootB = Path.Combine(packageDataRoot, "instances", "instance-b");
+        nint handleA = 0, handleB = 0, viewA = 0, viewB = 0;
         int status;
         fixed (char* package = _packages[0])
-        fixed (char* data = dataRoot)
-        fixed (char* instance = _widgetId)
-        fixed (char* id = _widgetId)
+        fixed (char* data = packageDataRoot)
         {
-            status = activate(package, _packages[0].Length, data, dataRoot.Length, instance, _widgetId.Length);
+            ContractHostApi* api = &hostApi;
+            status = activate(package, _packages[0].Length, data, packageDataRoot.Length, api);
             if (status != 0) throw new InvalidOperationException($"activate failed: 0x{status:X8}");
-            status = create(id, _widgetId.Length, &abi);
-            if (status != 0 || abi == 0) throw new InvalidOperationException($"create failed: 0x{status:X8}");
         }
-        try { content = WinRT.MarshalInspectable<FrameworkElement>.FromAbi(abi); }
-        finally { WinRT.MarshalInspectable<FrameworkElement>.DisposeAbi(abi); }
-        content.Width = 420;
-        content.Height = 460;
-        _window = new Window { Title = "Interaction probe", Content = content };
-        _window.AppWindow.Resize(new Windows.Graphics.SizeInt32(440, 510));
-        content.Loaded += (sender, args) => _ = FinishInteraction(module, content, dataRoot);
+        fixed (char* contribution = "main")
+        fixed (char* instanceA = "instance-a")
+        fixed (char* instanceB = "instance-b")
+        fixed (char* dataA = rootA)
+        fixed (char* dataB = rootB)
+        {
+            status = create(contribution, 4, instanceA, 10, dataA, rootA.Length, &handleA, &viewA);
+            if (status != 0) throw new InvalidOperationException($"create A failed: 0x{status:X8}");
+            status = create(contribution, 4, instanceB, 10, dataB, rootB.Length, &handleB, &viewB);
+            if (status != 0) throw new InvalidOperationException($"create B failed: 0x{status:X8}");
+        }
+        FrameworkElement contentA = Project(viewA);
+        FrameworkElement contentB = Project(viewB);
+        nint capturedHandleA = handleA;
+        nint capturedHandleB = handleB;
+        contentA.Width = 420;
+        contentA.Height = 230;
+        contentB.Width = 420;
+        contentB.Height = 230;
+        var panel = new StackPanel { Spacing = 10 };
+        panel.Children.Add(contentA);
+        panel.Children.Add(contentB);
+        _window = new Window { Title = "Runtime contract probe", Content = panel };
+        _window.AppWindow.Resize(new Windows.Graphics.SizeInt32(440, 520));
+        panel.Loaded += (sender, args) => _ = FinishInteraction((nint)destroy, (nint)shutdown, contentA, contentB, capturedHandleA, capturedHandleB, packageDataRoot, rootA, rootB, abiVersion);
         _window.Activate();
     }
 
-    private async Task FinishInteraction(nint module, FrameworkElement first, string dataRoot)
+    private static FrameworkElement Project(nint abi)
+    {
+        try { return WinRT.MarshalInspectable<FrameworkElement>.FromAbi(abi); }
+        finally { WinRT.MarshalInspectable<FrameworkElement>.DisposeAbi(abi); }
+    }
+
+    private static List<string> ReadItems(string instanceRoot)
+    {
+        string path = Path.Combine(instanceRoot, "items.json");
+        if (!File.Exists(path)) return [];
+        using JsonDocument document = JsonDocument.Parse(File.ReadAllText(path));
+        return document.RootElement.GetProperty("items").EnumerateArray()
+            .Select(element => element.GetString() ?? "").ToList();
+    }
+
+    private static unsafe void DestroyByHandle(nint destroyExport, nint handle) =>
+        ((delegate* unmanaged[Cdecl]<nint, int>)destroyExport)(handle);
+
+    private static unsafe void ShutdownPackage(nint shutdownExport) =>
+        ((delegate* unmanaged[Cdecl]<int>)shutdownExport)();
+
+    private async Task FinishInteraction(
+        nint destroyExport,
+        nint shutdownExport,
+        FrameworkElement contentA,
+        FrameworkElement contentB,
+        nint handleA,
+        nint handleB,
+        string packageDataRoot,
+        string rootA,
+        string rootB,
+        int abiVersion)
     {
         try
         {
-            await WhenLoadedAsync(first);
-            // Host-owned custom control + toolkit control resolved inside package text XAML.
-            object badge = first.FindName("HostBadgeSlot");
-            var segmented = first.FindName("FilterSegmented").As<Microsoft.UI.Xaml.Controls.Primitives.Selector>();
-            bool hostControlResolved = badge is not null;
-            bool toolkitControlResolved = segmented is not null;
-            // Real interactions: type, click through automation, select through projection.
-            var input = first.FindName("InputBox").As<TextBox>();
-            var addButton = first.FindName("AddButton").As<Button>();
-            var list = first.FindName("ItemsList").As<ListView>();
-            input.Text = "综合探针条目";
-            new Microsoft.UI.Xaml.Automation.Peers.ButtonAutomationPeer(addButton).Invoke();
-            segmented.SelectedIndex = 1;
-            await Task.Delay(400);
-            int firstCount = list.Items.Count;
+            await WhenLoadedAsync(contentA);
+            await WhenLoadedAsync(contentB);
+            // Kept from the batch C probe: host custom control + toolkit control
+            // must still resolve inside package runtime text XAML.
+            bool hostControlResolved = contentA.FindName("HostBadgeSlot") is not null;
+            bool toolkitControlResolved = contentA.FindName("FilterSegmented") is not null;
 
-            // Destroy and recreate: data must come back from the DATA root.
-            InvokeDestroy(_destroyWidget, _widgetId!);            var firstUnloaded = new TaskCompletionSource();
-            first.Unloaded += (_, _) => firstUnloaded.TrySetResult();
-            _window!.Content = null;
-            await firstUnloaded.Task.WaitAsync(TimeSpan.FromSeconds(10));
-            FrameworkElement second = CreateWidget(module, "interaction_create_widget", _widgetId!, _packages[0], _output);
-            second.Width = 420;
-            second.Height = 460;
-            _window.Content = second;
-            await WhenLoadedAsync(second);
+            // Instance A and instance B each add one item through real clicks paths.
+            var inputA = contentA.FindName("InputBox").As<TextBox>();
+            var addA = contentA.FindName("AddButton").As<Button>();
+            inputA.Text = "条目甲";
+            new Microsoft.UI.Xaml.Automation.Peers.ButtonAutomationPeer(addA).Invoke();
+            var inputB = contentB.FindName("InputBox").As<TextBox>();
+            var addB = contentB.FindName("AddButton").As<Button>();
+            inputB.Text = "条目乙";
+            new Microsoft.UI.Xaml.Automation.Peers.ButtonAutomationPeer(addB).Invoke();
             await Task.Delay(400);
-            int secondCount = second.FindName("ItemsList").As<ListView>().Items.Count;
-            await CaptureAsync(second, "view.png");
-            InvokeShutdown(_shutdownPackage);
+            List<string> itemsA = ReadItems(rootA);
+            List<string> itemsB = ReadItems(rootB);
+            bool dataIsolated = itemsA is ["条目甲"] && itemsB is ["条目乙"];
+
+            // Destroy A; B must remain fully functional.
+            DestroyByHandle(destroyExport, handleA);
+            inputB.Text = "条目乙二";
+            new Microsoft.UI.Xaml.Automation.Peers.ButtonAutomationPeer(addB).Invoke();
+            await Task.Delay(400);
+            bool bSurvivedA = ReadItems(rootB) is ["条目乙", "条目乙二"];
+
+            // Destroy B (last instance) -> package shutdown exactly once.
+            DestroyByHandle(destroyExport, handleB);
+            ShutdownPackage(shutdownExport);
+            await CaptureAsync(contentB, "view.png");
             JsonDocument summary = JsonDocument.Parse(
-                await File.ReadAllTextAsync(Path.Combine(dataRoot, "interaction-summary.json")));
-            bool packageRootUntouched = !File.Exists(Path.Combine(_packages[0], "interaction-items.json"));
+                await File.ReadAllTextAsync(Path.Combine(packageDataRoot, "runtime-contract-summary.json")));
+            bool packageRootUntouched = !File.Exists(Path.Combine(_packages[0], "items.json"));
+
             WriteResult(result =>
             {
+                result.WriteNumber("abiVersion", abiVersion);
                 result.WriteBoolean("hostControlResolved", hostControlResolved);
                 result.WriteBoolean("toolkitControlResolved", toolkitControlResolved);
-                result.WriteNumber("itemsAfterFirstEdit", firstCount);
-                result.WriteNumber("itemsAfterRecreate", secondCount);
+                result.WriteBoolean("dataIsolated", dataIsolated);
+                result.WriteBoolean("bSurvivedADestroy", bSurvivedA);
                 result.WriteBoolean("packageRootUntouched", packageRootUntouched);
+                result.WriteNumber("hostLogCalls", _hostLogCalls);
                 result.WritePropertyName("packageSummary");
                 summary.RootElement.WriteTo(result);
             });
@@ -628,28 +682,6 @@ public sealed partial class ProbeApplication : Application
         finally { _window?.Close(); Exit(); }
     }
 
-    private static unsafe void InvokeDestroy(nint destroyExport, string widgetId)
-    {
-        var destroy = (delegate* unmanaged[Cdecl]<char*, int, int>)destroyExport;
-        fixed (char* id = widgetId) destroy(id, widgetId.Length);
-    }
-
-    private static unsafe void InvokeShutdown(nint shutdownExport)
-    {
-        ((delegate* unmanaged[Cdecl]<int>)shutdownExport)();
-    }
-
-    private static unsafe FrameworkElement CreateWidget(nint module, string export, string widgetId, string package, string output)
-    {
-        var create = (delegate* unmanaged[Cdecl]<char*, int, nint*, int>)NativeLibrary.GetExport(module, export);
-        nint abi = 0;
-        int status;
-        fixed (char* id = widgetId) status = create(id, widgetId.Length, &abi);
-        File.AppendAllText(Path.Combine(output, "stages.txt"), $"{export} status {status:X8}\n");
-        if (status != 0 || abi == 0) throw new InvalidOperationException($"{export} failed: 0x{status:X8}");
-        try { return WinRT.MarshalInspectable<FrameworkElement>.FromAbi(abi); }
-        finally { WinRT.MarshalInspectable<FrameworkElement>.DisposeAbi(abi); }
-    }
 
     private void RunTodo()
     {
