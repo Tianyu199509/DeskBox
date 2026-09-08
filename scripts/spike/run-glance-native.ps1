@@ -43,6 +43,13 @@ try {
     }
     $hostOutput = Join-Path $runRoot "host"
     Invoke-DotNet -CommandArguments (@("publish", $hostProject, "--no-restore") + $common + @("-o", $hostOutput))
+    # CONTRACT FINDING: publish drops Page XBFs for this unpackaged layout, but
+    # ms-appx resolution needs them on disk next to the exe (App.xaml's
+    # ApplicationDefinition XBF embeds differently). Copy Page XBFs explicitly.
+    $xbfSource = Join-Path $repoRoot "spikes\glance-native\Host\obj\x64\Release\net10.0-windows10.0.22621.0\win-x64"
+    Get-ChildItem -LiteralPath $xbfSource -Filter "*.xbf" -ErrorAction SilentlyContinue |
+        Where-Object Name -ne "App.xbf" |
+        ForEach-Object { Copy-Item -LiteralPath $_.FullName -Destination $hostOutput -Force }
     $hostExe = Join-Path $hostOutput "DeskBox.Glance.NativeHost.exe"
     $originalHostHash = (Get-FileHash -LiteralPath $hostExe -Algorithm SHA256).Hash
     $originalLayout = Join-Path $repoRoot "src\DeskBox\Services\GlanceCalendarLayoutCalculator.cs"
@@ -158,6 +165,29 @@ try {
         }
         if (-not (Test-Path -LiteralPath (Join-Path $evidence "view.png"))) { throw "Missing rendered view: $evidence" }
         $results += [pscustomobject]@{ scenario = "full-glance"; result = $result; evidence = $evidence }
+
+        # Batch C comprehensive interaction probe: host custom control + toolkit
+        # control in package text XAML, three-root ABI, theme tokens, event wiring.
+        $interactionProject = Join-Path $repoRoot "spikes\glance-native\InteractionPackage\Interaction.NativePackage.csproj"
+        Invoke-DotNet -CommandArguments @("restore", $interactionProject, "-p:Platform=$Platform", "-p:RuntimeIdentifier=$rid", "-p:PublishAot=false")
+        Invoke-DotNet -CommandArguments @("restore", $interactionProject, "-p:Platform=$Platform", "-p:RuntimeIdentifier=$rid", "-p:PublishAot=true")
+        $interactionOutput = Join-Path $runRoot "interaction-package"
+        Invoke-DotNet -CommandArguments (@("publish", $interactionProject, "--no-restore") + $common + @("-o", $interactionOutput))
+        $evidence = Join-Path $runRoot "result-interaction"
+        $result = Invoke-Probe -Exe $hostExe -WorkingDirectory $hostOutput -Evidence $evidence -Arguments @(
+            "--interaction-package", ('"{0}"' -f $interactionOutput), ('"{0}"' -f $evidence)) -TimeoutSeconds 45
+        if (-not $result.hostControlResolved -or
+            -not $result.toolkitControlResolved -or
+            $result.itemsAfterFirstEdit -ne 1 -or
+            $result.itemsAfterRecreate -ne 1 -or
+            -not $result.packageRootUntouched -or
+            -not $result.packageSummary.themeTokenApplied -or
+            $result.packageSummary.eventWiringCount -lt 2 -or
+            $result.packageSummary.destroyCalls -lt 1) {
+            throw "Interaction probe assertion failed: $evidence"
+        }
+        if (-not (Test-Path -LiteralPath (Join-Path $evidence "view.png"))) { throw "Missing rendered view: $evidence" }
+        $results += [pscustomobject]@{ scenario = "interaction-probe"; result = $result; evidence = $evidence }
 
         # Lifecycle: destroy and recreate the view within one process.
         $evidence = Join-Path $runRoot "result-lifecycle"

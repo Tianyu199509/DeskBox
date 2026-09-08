@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Batch C comprehensive interaction probe: host-owned custom control
+     (host:HostBadge) + toolkit control (toolkit:Segmented) resolution inside
+     runtime-parsed package XAML, todo-like interaction surface wired in code. -->
+<StackPanel
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:host="using:DeskBox.Glance.NativeHost"
+    xmlns:toolkit="using:CommunityToolkit.WinUI.Controls"
+    x:Name="RootPanel"
+    Padding="16"
+    Spacing="10">
+
+    <StackPanel.Resources>
+        <!-- Parse-time default; the activate() theme tokens replace this via the
+             code-applied resource dictionary after load. -->
+        <SolidColorBrush x:Key="ProbeAccentBrush" Color="#FF4CC2FF" />
+    </StackPanel.Resources>
+
+    <host:HostBadge x:Name="HostBadgeSlot" />
+
+    <toolkit:Segmented x:Name="FilterSegmented">
+        <toolkit:SegmentedItem Content="全部" />
+        <toolkit:SegmentedItem Content="未完成" />
+    </toolkit:Segmented>
+
+    <TextBox x:Name="InputBox" Header="待办" PlaceholderText="输入后点添加" />
+    <Button x:Name="AddButton" Content="添加" />
+    <ListView x:Name="ItemsList" />
+    <TextBlock x:Name="StatusText" FontSize="11" Foreground="#C5FFFFFF" Text="ready" />
+    <Border x:Name="ThemeProbe" Height="12" CornerRadius="6" Background="{ThemeResource ProbeAccentBrush}" />
+</StackPanel>
