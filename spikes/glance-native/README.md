@@ -26,6 +26,16 @@ v2 的结论不变：宿主 `RuntimeFeature.IsDynamicCodeSupported`=false，输�
 - **多包并存**（multi-package 场景）：同一宿主进程同时加载 v2（简单切片）与 v3（真实切片）两个原生 DLL，两个模块句柄不同、两个视图同时渲染（v2 高度 268 + v3 农历标题），宿主哈希不变。
 - **待办编辑/持久化**（todo-package 场景，`TodoPackage/`）：宿主通过投影设置包内 TextBox 文本、直接构造 `ButtonAutomationPeer` 触发真实点击路径，包代码将条目写入包目录 `todo-items.json`；销毁视图后重建，条目从文件恢复（1→1，内容一致）。数据所有权按"包目录"划分。
 
+### 第三轮：编译 XAML / PRI / WinRT 激活（钉住的负结论）
+
+第三轮（2026-09-08 深夜）用可复现探针回答了三个悬而未决的问题，全部为**当前不可行**，已作为回归断言钉进脚本（`compiled-xaml-pinned-negative` 场景；若未来 Windows App SDK 行为翻转，断言会失败并强制重评契约）：
+
+1. **编译 XAML（XBF）在动态加载的 AOT DLL 中无法定位。** 包项目为 `RealGlanceControl.xaml` 正常走完 XAML 编译（生成 XBF + XamlMetaDataProvider），但运行时 `Application.LoadComponent`（`ComponentResourceLocation.Nested`，`ms-appx:///DeskBox.Glance.NativePackage/...`）抛 XamlParseException。判别实验：**无任何包内自定义类型的最小编译控件同样失败**——问题在 XBF 定位层而非类型解析。把 XBF 按 ms-appx 布局拷到宿主目录子路径也不行（已试）。宿主自己的 XBF 无磁盘文件且 exe 内无明文名，说明解包应用的 XBF 解析内嵌在宿主 exe 的资源体系里，动态 DLL 借不到。**运行时文本 XAML + 预计算可绑定属性（第二轮）仍是已验证路径。** 若未来必须编译 XAML：`Application.ResourceManagerRequested` 提供自定义 `IResourceManager` 是候选逃逸口（未实验）。
+2. **AOT DLL 不导出 `DllGetActivationFactory`。** C#/WinRT 组件激活路径对 NativeAOT 包不可用，原生 C 导出（`UnmanagedCallersOnly`）是唯一 ABI。
+3. **独立 PRI 不随类库发布产生，MrtCore 无文件级加载。** `PRIResource`（resw）进了编译但发布输出没有 `.pri` 文件；MrtCore `ResourceManager` 两个构造路径均抛 COMException（找不到元素）；UWP 遗留 `LoadPriFiles` 因无文件可载而跳过。**包本地化需要自带字符串文件机制（或批次 C 重新决策布局）。**
+
+包体积变化：v1-v3 ≈ 6.18MB/个（编译控件+PRIResource 加入后，此前 4.55MB），todo 包 4.26MB。
+
 两轮所有场景的断言（业务值、实际布局、绑定、退出码、截图、宿主哈希一致）由 `scripts/spike/run-glance-native.ps1` 自动判定；本地证据在 `.artifacts/glance-native/runs/<timestamp>-x64/summary.json`，截图在各 `result-*/view.png`。二进制和运行证据不入库。
 
 ## 复现
@@ -48,10 +58,10 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/spike/run-glance
 
 ## 尚未验证
 
-- 包内**编译 XAML/XBF**、**PRI 资源/本地化**、**自定义 WinRT 类型激活**、**依赖分发**（当前全部为运行时文本 XAML + 内联资源）。
 - 真实**物理键盘/IME 输入**与焦点迁移（当前输入通过投影与 automation peer 模拟）。
 - Glance 完整功能（图片/天气/设置/右键菜单）与其余五功能迁移。
 - ARM64 设备运行（脚本支持 `-Platform ARM64 -BuildOnly` 编译验证，未执行）、冷启动/工作集/多包规模化的系统测量（当前仅记录模块加载+建视图耗时与 DLL 体积）。
 - 叠放/合并/胶囊容器中的内容迁移、1.5.0 升级与 Store 渠道。
+- 编译 XAML 需求若回归：`Application.ResourceManagerRequested` 自定义 `IResourceManager` 逃逸口未实验。
 
 宿主命令行仅接受显式开发包目录，这里没有接入产品安装、签名、授权或实例恢复。官方原生包执行在进程内，必须作为可信代码管理。试点通过允许继续完善正式边界，不表示批次 B 或六功能迁移已经完成。

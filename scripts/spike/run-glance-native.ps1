@@ -108,6 +108,24 @@ try {
         if (-not (Test-Path -LiteralPath (Join-Path $evidence "view.png"))) { throw "Missing rendered view: $evidence" }
         $results += [pscustomobject]@{ scenario = "real-glance"; result = $result; evidence = $evidence }
 
+        # Compiled-XAML (XBF) slice: PINNED NEGATIVE. XBF LoadComponent cannot
+        # locate compiled XAML in a dynamically loaded AOT DLL (even a type-free
+        # minimal control); AOT DLLs export no DllGetActivationFactory; the
+        # class-library build produces no standalone .pri and MrtCore has no
+        # file-based loading. The scenario records all three outcomes; if a
+        # future Windows App SDK flips any of them, the assertion forces the
+        # spike contract findings to be re-evaluated.
+        $evidence = Join-Path $runRoot "result-compiled"
+        $result = Invoke-Probe -Exe $hostExe -WorkingDirectory $hostOutput -Evidence $evidence -Arguments @(
+            "--compiled-package", ('"{0}"' -f $packageOutputs[3]), ('"{0}"' -f $evidence))
+        if ($result.compiledXamlLoads -or
+            $result.compiledStages -ne "none" -or
+            $result.activationFactoryExport -or
+            $result.localizationProbe.priFilesNextToDll -ne "none") {
+            throw "Compiled-XAML pin flipped - re-evaluate the spike contract findings: $evidence"
+        }
+        $results += [pscustomobject]@{ scenario = "compiled-xaml-pinned-negative"; result = $result; evidence = $evidence }
+
         # Lifecycle: destroy and recreate the view within one process.
         $evidence = Join-Path $runRoot "result-lifecycle"
         $result = Invoke-Probe -Exe $hostExe -WorkingDirectory $hostOutput -Evidence $evidence -Arguments @(

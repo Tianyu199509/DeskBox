@@ -62,6 +62,32 @@ public static unsafe class Exports
             return error.HResult;
         }
     }
+    [UnmanagedCallersOnly(EntryPoint = "glance_probe_create_compiled_view", CallConvs = [typeof(CallConvCdecl)])]
+    public static int CreateCompiledView(char* directory, int length, nint* view)
+    {
+        if (directory is null || length is <= 0 or > 32767 || view is null) return -1;
+        *view = 0;
+        string root = new(directory, 0, length);
+        try
+        {
+            PackageContext.Root = root;
+            LocalizationProbe.RunAsync(root).GetAwaiter().GetResult();
+            // Discrimination step: a type-free compiled control first, so the
+            // activation error names the failing layer (XBF locator vs type
+            // resolution vs localization).
+            var minimal = new MinimalControl();
+            File.AppendAllText(Path.Combine(root, "compiled-stages.txt"), "minimal ok\n");
+            var control = new RealGlanceControl();
+            File.AppendAllText(Path.Combine(root, "compiled-stages.txt"), "real compiled ok\n");
+            *view = WinRT.MarshalInspectable<FrameworkElement>.FromManaged(control);
+            return 0;
+        }
+        catch (Exception error)
+        {
+            File.WriteAllText(Path.Combine(root, "activation-error.txt"), error.ToString());
+            return error.HResult;
+        }
+    }
 }
 
 [WinRT.GeneratedBindableCustomProperty]

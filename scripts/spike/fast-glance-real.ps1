@@ -24,8 +24,20 @@ try {
     New-Item -ItemType Directory -Path $evidence -Force | Out-Null
     $process = Start-Process -FilePath $hostExe -WorkingDirectory $hostOutput -WindowStyle Hidden -PassThru -ArgumentList @(
         "--real-package", ('"{0}"' -f $packageOutput), ('"{0}"' -f $evidence))
-    if (-not $process.WaitForExit(30000)) { Stop-Process -Id $process.Id; throw "probe timed out" }
-    Write-Output ("exit=" + $process.ExitCode)
+    if (-not $process.WaitForExit(30000)) { Stop-Process -Id $process.Id; throw "real probe timed out" }
+    Write-Output ("real exit=" + $process.ExitCode)
+    if (Test-Path -LiteralPath (Join-Path $evidence "result.json")) {
+        Get-Content -LiteralPath (Join-Path $evidence "result.json") -Raw
+    }
+    $evidence = Join-Path $latestRun.FullName "result-compiled-fast"
+    Remove-Item -LiteralPath $evidence -Recurse -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath (Join-Path $packageOutput "compiled-stages.txt") -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath (Join-Path $packageOutput "activation-error.txt") -ErrorAction SilentlyContinue
+    New-Item -ItemType Directory -Path $evidence -Force | Out-Null
+    $process = Start-Process -FilePath $hostExe -WorkingDirectory $hostOutput -WindowStyle Hidden -PassThru -ArgumentList @(
+        "--compiled-package", ('"{0}"' -f $packageOutput), ('"{0}"' -f $evidence))
+    if (-not $process.WaitForExit(30000)) { Stop-Process -Id $process.Id; throw "compiled probe timed out" }
+    Write-Output ("compiled exit=" + $process.ExitCode)
     if (Test-Path -LiteralPath (Join-Path $evidence "result.json")) {
         Get-Content -LiteralPath (Join-Path $evidence "result.json") -Raw
     }

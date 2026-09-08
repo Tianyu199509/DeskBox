@@ -16,6 +16,7 @@ internal enum Scenario
 {
     Simple,
     RealGlance,
+    CompiledGlance,
     Lifecycle,
     MultiPackage,
     TodoEdit,
@@ -36,6 +37,9 @@ internal static class Program
                 break;
             case ["--real-package", string package, string outDir]:
                 (scenario, packages, output) = (Scenario.RealGlance, [package], outDir);
+                break;
+            case ["--compiled-package", string package, string outDir]:
+                (scenario, packages, output) = (Scenario.CompiledGlance, [package], outDir);
                 break;
             case ["--lifecycle-package", string package, string outDir]:
                 (scenario, packages, output) = (Scenario.Lifecycle, [package], outDir);
@@ -143,6 +147,7 @@ public sealed partial class ProbeApplication : Application
         {
             case Scenario.Simple: RunSimple(); break;
             case Scenario.RealGlance: RunReal(); break;
+            case Scenario.CompiledGlance: RunCompiled(); break;
             case Scenario.Lifecycle: RunLifecycle(); break;
             case Scenario.MultiPackage: RunMulti(); break;
             case Scenario.TodoEdit: RunTodo(); break;
@@ -220,6 +225,88 @@ public sealed partial class ProbeApplication : Application
                 result.WriteString("traditionalTitle", title);
                 result.WritePropertyName("packageSummary");
                 summary.RootElement.WriteTo(result);
+            });
+        }
+        catch (Exception error) { File.WriteAllText(Path.Combine(_output, "error.txt"), error.ToString()); }
+        finally { _window?.Close(); Exit(); }
+    }
+
+    private unsafe void RunCompiled()
+    {
+        nint module = LoadModule(_packages[0], "DeskBox.Glance.NativePackage.dll", _output);
+        bool activationFactoryExport = NativeLibrary.TryGetExport(module, "DllGetActivationFactory", out _);
+        File.AppendAllText(Path.Combine(_output, "stages.txt"),
+            $"DllGetActivationFactory present: {activationFactoryExport}\n");
+        FrameworkElement? content = null;
+        string failure = "";
+        try
+        {
+            content = CreateView(module, "glance_probe_create_compiled_view", _packages[0], _output);
+        }
+        catch (Exception error)
+        {
+            // Pinned negative: XBF LoadComponent cannot locate compiled XAML in a
+            // dynamically loaded AOT DLL (even a type-free minimal control). If a
+            // future Windows App SDK loads it, this probe flips and the script
+            // forces the spike contract findings to be re-evaluated.
+            failure = error.Message;
+        }
+        if (content is null)
+        {
+            string stages = File.Exists(Path.Combine(_packages[0], "compiled-stages.txt"))
+                ? File.ReadAllText(Path.Combine(_packages[0], "compiled-stages.txt")).Trim()
+                : "none";
+            string localization = File.Exists(Path.Combine(_packages[0], "localization-probe.json"))
+                ? File.ReadAllText(Path.Combine(_packages[0], "localization-probe.json"))
+                : "{}";
+            JsonDocument localizationProbe = JsonDocument.Parse(localization);
+            WriteResult(result =>
+            {
+                result.WriteBoolean("compiledXamlLoads", false);
+                result.WriteString("compiledStages", stages);
+                result.WriteBoolean("activationFactoryExport", activationFactoryExport);
+                result.WriteString("failure", failure);
+                result.WritePropertyName("localizationProbe");
+                localizationProbe.RootElement.WriteTo(result);
+            });
+            Exit();
+            return;
+        }
+        content.Width = 440;
+        content.Height = 560;
+        _window = new Window { Title = "Glance compiled slice probe", Content = content };
+        _window.AppWindow.Resize(new Windows.Graphics.SizeInt32(460, 610));
+        content.Loaded += (sender, args) => _ = FinishCompiled(content, activationFactoryExport);
+        _window.Activate();
+    }
+
+    private async Task FinishCompiled(FrameworkElement content, bool activationFactoryExport)
+    {
+        try
+        {
+            await Task.Delay(900);
+            await CaptureAsync(content, "view.png");
+            var calendar = content.FindName("NativeCalendarView").As<CalendarView>();
+            var themeProbe = content.FindName("ThemeProbeText").As<TextBlock>();
+            bool themeForegroundResolved = themeProbe.Foreground is not null;
+            string title = content.FindName("TraditionalCalendarTitlePresenter").As<TextBlock>().Text;
+            JsonDocument summary = JsonDocument.Parse(
+                await File.ReadAllTextAsync(Path.Combine(_packages[0], "compiled-summary.json")));
+            string localization = File.Exists(Path.Combine(_packages[0], "localization-probe.json"))
+                ? await File.ReadAllTextAsync(Path.Combine(_packages[0], "localization-probe.json"))
+                : "{}";
+            JsonDocument localizationProbe = JsonDocument.Parse(localization);
+            WriteResult(result =>
+            {
+                result.WriteBoolean("dynamicCodeSupported", RuntimeFeature.IsDynamicCodeSupported);
+                result.WriteBoolean("activationFactoryExport", activationFactoryExport);
+                result.WriteBoolean("themeForegroundResolved", themeForegroundResolved);
+                result.WriteNumber("calendarActualHeight", calendar.ActualHeight);
+                result.WriteString("traditionalTitle", title);
+                result.WritePropertyName("packageSummary");
+                summary.RootElement.WriteTo(result);
+                result.WritePropertyName("localizationProbe");
+                localizationProbe.RootElement.WriteTo(result);
             });
         }
         catch (Exception error) { File.WriteAllText(Path.Combine(_output, "error.txt"), error.ToString()); }

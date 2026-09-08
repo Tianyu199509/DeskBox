@@ -19,58 +19,13 @@ namespace DeskBox.Glance.NativePackage;
 /// </summary>
 internal static class RealGlanceView
 {
-    // Pinned so festival assertions are deterministic; today-highlighting still
-    // follows the machine clock and is not asserted.
-    private const int PinnedYear = 2026;
-    private const int PinnedMonth = 9;
-
-    // Mirrors GlanceWidgetViewModel sizing at the probe's 440x560 content area:
-    // CalendarPanelMaximumWidth=360, CalendarPanelHorizontalInset=28.
-    private const double AvailableWidth = 440;
-    private const double AvailableHeight = 560;
-
     public static FrameworkElement Create(string root)
     {
-        CultureInfo culture = CultureInfo.GetCultureInfo("zh-CN");
-        DateOnly month = new(PinnedYear, PinnedMonth, 1);
+        (GlanceCalendarMonth calendarMonth, bool isCompact, double panelHeight, double panelWidth, double dayItemHeight, bool showSecondaryText) = RealGlanceModel.Build();
+        CultureInfo culture = RealGlanceModel.Culture;
+        DateOnly month = new(RealGlanceModel.PinnedYear, RealGlanceModel.PinnedMonth, 1);
         DateOnly today = DateOnly.FromDateTime(DateTime.Today);
-
-        GlanceCalendarMonth calendarMonth = new LocalCalendarPresentationSource()
-            .GetMonthAsync(month, culture).GetAwaiter().GetResult();
-        DateOnly titleDate = month == new DateOnly(today.Year, today.Month, 1) ? today : month.AddDays(14);
-        calendarMonth = new GlanceTraditionalCalendarService().Apply(
-            calendarMonth, GlanceTraditionalCalendarMode.ChineseLunar, culture, titleDate);
-        calendarMonth = new GlanceFestivalService().Apply(
-            calendarMonth, showChineseFestivals: true, GlanceTraditionalCalendarMode.ChineseLunar, culture);
-
-        bool isCompact = GlanceCalendarLayoutCalculator.IsCompact(AvailableHeight);
-        double panelHeight = GlanceCalendarLayoutCalculator.CalculatePanelHeight(AvailableHeight, isCompact, true);
-        double panelWidth = Math.Round(Math.Clamp(AvailableWidth - 28, 272, 360));
-        double dayItemHeight = Math.Round(GlanceCalendarLayoutCalculator.CalculateDayHeight(panelHeight, isCompact, true) * 2) / 2;
-        bool showSecondaryText = GlanceCalendarLayoutCalculator.ShouldShowTraditionalDetails(panelWidth, dayItemHeight, isCompact, true);
-
-        DateTime now = DateTime.Now;
-        var presentation = new RealGlancePresentation
-        {
-            TimeText = now.ToString("HH:mm", culture),
-            DateText = now.ToString("M月d日", culture),
-            WeekdayText = culture.DateTimeFormat.GetDayName(now.DayOfWeek),
-            CompactCalendarDateText = now.ToString("M月d日", culture),
-            TraditionalCalendarTitle = calendarMonth.TraditionalTitle,
-            TimeFontFamily = new FontFamily("XamlAutoFontFamily"),
-            CompactTimeFontSize = Math.Round(Math.Clamp(Math.Min(AvailableWidth * 0.078, AvailableHeight * 0.095), 22, 28) * 2) / 2,
-            CalendarCompactTimeFontSize = Math.Round(Math.Clamp(Math.Min(AvailableWidth * 0.078, AvailableHeight * 0.095), 22, 28) * 2) / 2,
-            CalendarPanelHeight = panelHeight,
-            CalendarPanelWidth = panelWidth,
-            CalendarPanelMaxWidth = 360,
-            CalendarCornerRadius = new CornerRadius(12),
-            CalendarLayoutVisibility = Visibility.Visible,
-            IsCompactVisibility = isCompact ? Visibility.Visible : Visibility.Collapsed,
-            IsExpandedVisibility = isCompact ? Visibility.Collapsed : Visibility.Visible,
-            ShowTimeVisibility = Visibility.Visible,
-            ShowDateVisibility = Visibility.Visible,
-            ShowWeekdayVisibility = Visibility.Visible,
-        };
+        var presentation = RealGlanceModel.CreatePresentation(calendarMonth, isCompact, panelHeight, panelWidth);
 
         FrameworkElement content = (FrameworkElement)XamlReader.Load(
             File.ReadAllText(Path.Combine(root, "glance-real.xaml")));
@@ -121,7 +76,7 @@ internal static class RealGlanceView
             .ToList();
         Dictionary<string, object?> Summary() => new()
         {
-            ["pinnedMonth"] = $"{PinnedYear:0000}-{PinnedMonth:00}",
+            ["pinnedMonth"] = $"{RealGlanceModel.PinnedYear:0000}-{RealGlanceModel.PinnedMonth:00}",
             ["traditionalTitle"] = calendarMonth.TraditionalTitle,
             ["showSecondaryText"] = showSecondaryText,
             ["panelHeight"] = panelHeight,
@@ -181,10 +136,16 @@ internal static class RealGlanceView
     nameof(CompactCalendarDateText),
     nameof(CompactTimeFontSize),
     nameof(DateText),
+    nameof(IsCalendarLayout),
+    nameof(IsCompactCalendarPresentation),
     nameof(IsCompactVisibility),
+    nameof(IsExpandedCalendarPresentation),
     nameof(IsExpandedVisibility),
+    nameof(ShowDate),
     nameof(ShowDateVisibility),
+    nameof(ShowTime),
     nameof(ShowTimeVisibility),
+    nameof(ShowWeekday),
     nameof(ShowWeekdayVisibility),
     nameof(TimeFontFamily),
     nameof(TimeText),
@@ -198,19 +159,25 @@ public sealed partial class RealGlancePresentation
     public string WeekdayText { get; init; } = "";
     public string CompactCalendarDateText { get; init; } = "";
     public string TraditionalCalendarTitle { get; init; } = "";
-    public FontFamily TimeFontFamily { get; init; } = new("XamlAutoFontFamily");
+    public Microsoft.UI.Xaml.Media.FontFamily TimeFontFamily { get; init; } = new("XamlAutoFontFamily");
     public double CompactTimeFontSize { get; init; }
     public double CalendarCompactTimeFontSize { get; init; }
     public double CalendarPanelHeight { get; init; }
     public double CalendarPanelWidth { get; init; }
     public double CalendarPanelMaxWidth { get; init; }
-    public CornerRadius CalendarCornerRadius { get; init; }
+    public Microsoft.UI.Xaml.CornerRadius CalendarCornerRadius { get; init; }
     public Visibility CalendarLayoutVisibility { get; init; }
     public Visibility IsCompactVisibility { get; init; }
     public Visibility IsExpandedVisibility { get; init; }
     public Visibility ShowTimeVisibility { get; init; }
     public Visibility ShowDateVisibility { get; init; }
     public Visibility ShowWeekdayVisibility { get; init; }
+    public bool ShowTime { get; init; }
+    public bool ShowDate { get; init; }
+    public bool ShowWeekday { get; init; }
+    public bool IsCalendarLayout { get; init; }
+    public bool IsCompactCalendarPresentation { get; init; }
+    public bool IsExpandedCalendarPresentation { get; init; }
 }
 
 // Package-local mirror of the production GlanceCalendarDayDecoration contract:
