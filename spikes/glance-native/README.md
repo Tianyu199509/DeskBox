@@ -1,29 +1,32 @@
 # Glance NativeAOT 原生模块试点
 
-这是 [官方功能包执行计划](../../docs/architecture/official-widget-packages-plan.md) 批次 B 的第一项可运行证据。独立 NativeAOT 宿主通过 C ABI 加载独立 NativeAOT DLL，DLL 读取外置 XAML、创建 WinUI 控件并提供绑定对象。宿主没有引用包项目，也没有编译 Glance 的业务实现。
+这是 [官方功能包执行计划](../../docs/architecture/official-widget-packages-plan.md) 批次 B 的可运行证据。独立 NativeAOT 宿主通过 C ABI 加载独立 NativeAOT DLL，DLL 读取外置 XAML、创建 WinUI 控件并提供绑定对象。宿主没有引用包项目，也没有编译 Glance 的业务实现。
+
+第一轮（v1/v2 小切片）证明机制存在；第二轮（2026-09-08 晚）补齐真实 Glance 切片、生命周期、多包并存与待办编辑/持久化切片。
 
 ## 已验证
 
 2026-09-08，Windows x64、.NET SDK 10.0.303、Microsoft.WindowsAppSDK 2.4.0。
 
-脚本只发布一次宿主，随后分别发布两版 DLL，并启动两个使用相同宿主文件的新进程。v1 链接生产代码 `GlanceCalendarLayoutCalculator.cs`；v2 在本次输出目录中复制同一计算器，仅将紧凑模式阈值从 320 改为 360。生产计算器没有改动。
+### 第一轮：同一宿主，两版包（机制证明）
 
-| 证据 | v1 | v2 |
-| --- | --- | --- |
-| 宿主 `RuntimeFeature.IsDynamicCodeSupported` | false | false |
-| 模块版本 | 1 | 2 |
-| 输入高度 340 的业务计算值 | 244 | 268 |
-| 实际 CalendarView 高度 | 244 | 268 |
-| 原生模块对象绑定的标题 | Glance native package v1 | Glance native package v2 |
-| 原生 DLL 大小 | 3,911,168 字节 | 3,911,168 字节 |
+脚本只发布一次宿主，随后分别发布两版 DLL，并启动使用相同宿主文件的新进程。v1 链接生产代码 `GlanceCalendarLayoutCalculator.cs`；v2 在输出目录中复制同一计算器，仅将紧凑模式阈值从 320 改为 360。生产计算器没有改动。
 
-两次宿主 SHA-256 均为 `FFADB7F0377D2A54653E5FD9991BA2757288EF7142EF0C0C5127B2FF7EA43A61`。
+v2 的结论不变：宿主 `RuntimeFeature.IsDynamicCodeSupported`=false，输入高度 340 的业务计算值与实际 CalendarView 高度从 244 变为 268，标题绑定随包版本更新。
 
-v1 DLL SHA-256 为 `1838EDE00D38355FB25E42185EEB5E7CBB6083A3A716C54754083C49C25EE407`。
+### 第二轮：真实 Glance 切片（v3 包）
 
-v2 DLL SHA-256 为 `BAD30302C26B0AE3A6CBCBD2017F1035B086C2EB40165DF812A310F2A0D2CD31`。
+`glance-real.xaml` 从生产 `GlanceWidgetContent.xaml` 移植（日项模板、玻璃面板、紧凑表头、CalendarView 及其资源覆写逐字保留；图片层/沉浸布局/照片操作栏属于本切片未包含的图片服务）。业务代码**链接生产源码**而非重写：布局计算器、日历契约模型、本地月视图源、传统历法服务、节日服务、日装饰记录、ChineseTextConverter（仅 `App.LogVerbose`（诊断日志）与 `IsTraditionalChineseCulture`（纯函数原样拷贝）两处宿主面以 `ProductionSeams.cs` 过渡，批次 C 定契约）。
 
-本地原始证据在 `.artifacts/glance-native/runs/20260908-161708-028-x64/summary.json`，两份 `result-v*/view.png` 已检查。二进制和运行证据不入库；重新运行会产生新的独立输出目录，哈希可能因构建而变化。
+固定 2026-09、zh-CN、农历模式下实测：42/42 天有农历文本，`2026-09-25 中秋` 出现在节日列表，标题为"丙午年 七月廿七"（真实传统历法服务输出），43 个日项被装饰（42 格 + 1 次回收重实例化），CalendarView 实际高度 306，模块加载+建视图 ~44ms。
+
+### 第二轮：生命周期、多包并存、待办编辑/持久化
+
+- **销毁重建**（lifecycle 场景）：同一进程内创建→卸载（Unloaded 事件确认）→再创建，第二个视图正常渲染（业务值 244 + 标题绑定恢复）。
+- **多包并存**（multi-package 场景）：同一宿主进程同时加载 v2（简单切片）与 v3（真实切片）两个原生 DLL，两个模块句柄不同、两个视图同时渲染（v2 高度 268 + v3 农历标题），宿主哈希不变。
+- **待办编辑/持久化**（todo-package 场景，`TodoPackage/`）：宿主通过投影设置包内 TextBox 文本、直接构造 `ButtonAutomationPeer` 触发真实点击路径，包代码将条目写入包目录 `todo-items.json`；销毁视图后重建，条目从文件恢复（1→1，内容一致）。数据所有权按"包目录"划分。
+
+两轮所有场景的断言（业务值、实际布局、绑定、退出码、截图、宿主哈希一致）由 `scripts/spike/run-glance-native.ps1` 自动判定；本地证据在 `.artifacts/glance-native/runs/<timestamp>-x64/summary.json`，截图在各 `result-*/view.png`。二进制和运行证据不入库。
 
 ## 复现
 
@@ -31,21 +34,24 @@ v2 DLL SHA-256 为 `BAD30302C26B0AE3A6CBCBD2017F1035B086C2EB40165DF812A310F2A0D2
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/spike/run-glance-native.ps1
 ```
 
-需要当前仓库的 .NET、MSVC、Windows App SDK 构建环境。项目放在 `spikes/`，不进入应用的项目引用或发布流水线。正常和 AOT 两份依赖锁均保留。脚本不会清空历史运行目录。
+需要当前仓库的 .NET、MSVC、Windows App SDK 构建环境。项目放在 `spikes/`，不进入应用的项目引用或发布流水线。正常和 AOT 两份依赖锁均保留。脚本不会清空历史运行目录。参数 `-Platform ARM64 -BuildOnly` 可用于 ARM64 编译验证；本轮仅执行了 x64。
 
-脚本检查两版包的业务结果、实际布局、标题绑定、进程退出码、截图存在以及宿主哈希一致。模块加载后保留到进程退出，不调用 FreeLibrary。参数 `-Platform ARM64 -BuildOnly` 可用于后续 ARM64 编译验证；本轮仅执行了 x64。
+## 发现的集成契约（批次 C 输入）
 
-## 发现的集成要求
-
-- 宿主需要正常生成的 WinUI XAML 元数据及 App 资源初始化。最初仅以 C# 创建 XamlControlsResources 时在初始化处出现 `0xC000027B`；添加 App.xaml 后消失。
-- 在 OnLaunched 创建内容和窗口。运行时 XAML 的 FindName 结果通过 C#/WinRT `As<T>()` 显式投影后访问；直接 CLR 强制转换在这次 AOT 场景中失败。
-- 模块返回 IInspectable 的拥有引用，宿主创建投影后释放该 ABI 引用。宿主与模块不直接交换普通托管对象；绑定对象使用 C#/WinRT 生成的可绑定属性实现。
-- 相同 Windows App SDK 版本下，本机可以加载、显示并跨 ABI 绑定。不同版本组合仍需单独验证。
+1. **运行时解析的包 XAML 不能使用包内自定义类型（转换器）。** `XamlReader.Load` 找不到 `using:包命名空间` 下的转换器类型——原生 DLL 没有自己的 XAML 元数据提供器，宿主的提供器也不认识包的命名空间。解法：可绑定模型直接预计算 `Visibility`/`FontWeight`（本试点的 `RealGlanceDayDecoration`），模板绑定形状保持不变。
+2. **WinUI 控件主题字典的 ThemeResource key 到不了运行时解析的包 XAML。** 宿主 `Application.Resources` 合并 `XamlControlsResources` 也不行（`TextFillColorPrimaryBrush` 等解析失败）；只有平台级 key（如 `ApplicationPageBackgroundThemeBrush`）可达。解法：包 XAML 资源自含（本试点内联 Fluent 暗色近似值，单主题；正式包需要主题感知设计）。
+3. **宿主需要正常生成的 WinUI XAML 元数据及 App 资源初始化**（第一轮结论，`0xC000027B` 消失于补 App.xaml 后）。
+4. **CalendarView 日项在进树后才实例化**：任何"日项渲染完成"的证据必须在 Loaded 之后延迟采样（本试点用 600ms DispatcherQueueTimer 重写摘要）。
+5. **AutomationPeer 懒创建**：宿主侧 `FromElement` 可能返回 null；直接 `new ButtonAutomationPeer(owner)` 后 `Invoke()` 走同一条点击路径。
+6. **运行时 XAML 的 FindName 结果通过 C#/WinRT `As<T>()` 显式投影后访问**；直接 CLR 强制转换在该 AOT 场景失败（第一轮结论，沿用）。
+7. **生产源码可以链接复用**：纯计算服务（传统历法/节日/布局/转换器）原文件链接进包即可工作；宿主面（日志、本地化大类）需要明确接缝——批次 C 要把它们定义为真实契约，而不是试点里的 no-op/拷贝。
 
 ## 尚未验证
 
-该试点只使用生产 Glance 的布局计算器，界面为小型 CalendarView/TextBox 切片。完整 Glance 的日期样式、农历、图片、设置与业务服务尚未迁出主程序，待办编辑和持久化切片也尚未实现。
-
-外置 XAML 是文本资源，尚未证明包内编译 XAML/XBF、PRI、本地化、自定义 WinRT 类型激活与依赖分发。输入框显示不代表物理键盘/IME、焦点迁移已经通过。销毁重建、叠放/合并迁移、多包同时运行、工作集及冷启动测量、ARM64 设备、1.5.0 升级与 Store 渠道均待验收。
+- 包内**编译 XAML/XBF**、**PRI 资源/本地化**、**自定义 WinRT 类型激活**、**依赖分发**（当前全部为运行时文本 XAML + 内联资源）。
+- 真实**物理键盘/IME 输入**与焦点迁移（当前输入通过投影与 automation peer 模拟）。
+- Glance 完整功能（图片/天气/设置/右键菜单）与其余五功能迁移。
+- ARM64 设备运行（脚本支持 `-Platform ARM64 -BuildOnly` 编译验证，未执行）、冷启动/工作集/多包规模化的系统测量（当前仅记录模块加载+建视图耗时与 DLL 体积）。
+- 叠放/合并/胶囊容器中的内容迁移、1.5.0 升级与 Store 渠道。
 
 宿主命令行仅接受显式开发包目录，这里没有接入产品安装、签名、授权或实例恢复。官方原生包执行在进程内，必须作为可信代码管理。试点通过允许继续完善正式边界，不表示批次 B 或六功能迁移已经完成。

@@ -19,11 +19,24 @@
     <GlancePackageVersion Condition="'$(GlancePackageVersion)' == ''">1</GlancePackageVersion>
     <DefineConstants Condition="'$(GlancePackageVersion)' == '2'">$(DefineConstants);GLANCE_VERSION_TWO</DefineConstants>
     <GlanceLayoutSource Condition="'$(GlanceLayoutSource)' == ''">$(MSBuildThisFileDirectory)..\..\..\src\DeskBox\Services\GlanceCalendarLayoutCalculator.cs</GlanceLayoutSource>
+    <!-- Production sources linked verbatim: the real-Glance slice must run the
+         same business code the host ships, not a re-implementation. -->
+    <DeskBoxSourceRoot>$(MSBuildThisFileDirectory)..\..\..\src\DeskBox\</DeskBoxSourceRoot>
+    <AbstractionsRoot>$(MSBuildThisFileDirectory)..\..\..\src\DeskBox.Abstractions\</AbstractionsRoot>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.WindowsAppSDK" Version="2.4.0" />
     <Compile Include="$(GlanceLayoutSource)" Link="GlanceCalendarLayoutCalculator.cs" />
+    <Compile Include="$(AbstractionsRoot)Models\GlanceCalendarModels.cs" Link="Production\GlanceCalendarModels.cs" />
+    <Compile Include="$(AbstractionsRoot)Contracts\ICalendarPresentationSource.cs" Link="Production\ICalendarPresentationSource.cs" />
+    <Compile Include="$(DeskBoxSourceRoot)Services\LocalCalendarPresentationSource.cs" Link="Production\LocalCalendarPresentationSource.cs" />
+    <Compile Include="$(DeskBoxSourceRoot)Services\GlanceTraditionalCalendarService.cs" Link="Production\GlanceTraditionalCalendarService.cs" />
+    <Compile Include="$(DeskBoxSourceRoot)Services\GlanceFestivalService.cs" Link="Production\GlanceFestivalService.cs" />
+    <Compile Include="$(DeskBoxSourceRoot)Models\GlanceWidgetData.cs" Link="Production\GlanceWidgetData.cs" />
+    <Compile Include="$(DeskBoxSourceRoot)Helpers\ChineseTextConverter.cs" Link="Production\ChineseTextConverter.cs" />
     <Page Remove="calendar.xaml" />
     <None Update="calendar.xaml" CopyToOutputDirectory="PreserveNewest" />
+    <Page Remove="glance-real.xaml" />
+    <None Update="glance-real.xaml" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>
