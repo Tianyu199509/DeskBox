@@ -136,8 +136,21 @@ public sealed class PluginPackageManager
                 InstalledPackageRecord? record = LoadRegistry().FirstOrDefault(r => r.PackageId == packageId);
                 return record is not null && IsRecordIntact(record) ? record : null;
             }
-            catch (Exception error) when (IsStorageFailure(error)) { return null; }
-        }
+            catch (Exception error) when (IsStorageFailure(error)) { return null; }        }
+    }
+
+    /// <summary>
+    /// Batch C1: structurally paired handle for the native runtime. The record
+    /// and its resolved install root can only be combined here; the runtime
+    /// manager never accepts a separable package + path pair. Refuses every
+    /// record until the package-format freeze introduces runtime:native.
+    /// </summary>
+    public NativeInstalledPackageHandle? TryCreateNativeHandle(string packageId)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(packageId);
+        InstalledPackageRecord? record = Find(packageId);
+        if (record is null || record.Runtime != NativeWidgetRuntimeManager.NativeRuntimeType) return null;
+        return new NativeInstalledPackageHandle(record, ResolveInstallPath(record));
     }
 
     public bool Uninstall(string packageId)

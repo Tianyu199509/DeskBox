@@ -184,6 +184,8 @@ public static unsafe class Exports
 [StructLayout(LayoutKind.Sequential)]
 public struct UnifiedHostApi
 {
+    public uint Size;
+    public uint Version;
     public nint Log;
 }
 

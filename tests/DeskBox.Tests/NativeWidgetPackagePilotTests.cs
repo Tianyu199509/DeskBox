@@ -20,7 +20,7 @@ public class NativeWidgetPackagePilotTests
 
             string packageDir = Directory.CreateTempSubdirectory("deskbox-native-pilot-pkg").FullName;
             File.WriteAllText(Path.Combine(packageDir,
-                DeskBox.Services.Plugins.NativeWidgetPackageLoader.PackageDllFileName), "stub");
+                DeskBox.Services.Plugins.NativeWidgetPackageLoader.DevelopmentPackageDllFileName), "stub");
             Environment.SetEnvironmentVariable(
                 DeskBox.Services.Plugins.NativeWidgetPackageLoader.DevelopmentPackageEnvironmentVariable, packageDir);
             Assert.Equal(
@@ -52,11 +52,37 @@ public class NativeWidgetPackagePilotTests
         var other = new DeskBox.Services.Plugins.NativePackageIdentity(
             "b".PadLeft(64, '0'), "com.deskbox.glance");
         Assert.NotEqual(v1, other.ResolvePackageDataRoot(@"D:\Data\data"));
+    }
 
-        // Instance roots hang off the stable package root.
-        Assert.Equal(
-            Path.Combine(v1, "instances", "widget-42"),
-            identity.ResolveInstanceDataRoot(@"D:\Data\data", "widget-42"));
+    [Fact]
+    public void InstanceStorageKeysAreHashedAndTraversalProof()
+    {
+        var identity = new DeskBox.Services.Plugins.NativePackageIdentity(
+            "a".PadLeft(64, '0'), "com.deskbox.glance");
+        // Persisted instance ids are input: raw ids never become path fragments.
+        string normal = DeskBox.Services.Plugins.NativePackageIdentity.InstanceStorageKey("widget-42");
+        string hostile = DeskBox.Services.Plugins.NativePackageIdentity.InstanceStorageKey("../../escape");
+        string rooted = DeskBox.Services.Plugins.NativePackageIdentity.InstanceStorageKey(@"C:\steal");
+        Assert.Matches("^[0-9a-f]{64}$", normal);
+        Assert.Matches("^[0-9a-f]{64}$", hostile);
+        Assert.Matches("^[0-9a-f]{64}$", rooted);
+        Assert.Equal(normal, DeskBox.Services.Plugins.NativePackageIdentity.InstanceStorageKey("widget-42"));
+        Assert.NotEqual(normal, hostile);
+        string root = identity.ResolveInstanceDataRoot(@"D:\Data\data", "../..");
+        Assert.DoesNotContain("..", root);
+        Assert.StartsWith(identity.ResolvePackageDataRoot(@"D:\Data\data"), root);
+    }
+
+    [Fact]
+    public void PilotContentMustBeDisposableForHostLifecycle()
+    {
+        // The host disposes widget content via `is IDisposable` only; a plain
+        // Dispose() method without the interface silently skips native destroy
+        // (regression seen in batch C1, caught by audit round 12).
+        Type content = typeof(DeskBox.Services.Plugins.NativeWidgetPilot)
+            .Assembly.GetType("DeskBox.Services.Plugins.NativeWidgetPilotContent")!;
+        Assert.True(typeof(IDisposable).IsAssignableFrom(content));
+        Assert.True(typeof(DeskBox.Contracts.IWidgetContent).IsAssignableFrom(content));
     }
 
     [Fact]
