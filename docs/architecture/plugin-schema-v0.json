@@ -132,8 +132,8 @@
       "description": "Ed25519 public key, base64 of the raw 32-byte key. Verification material for signature.publisherSignature: a fingerprint alone cannot verify a signature, so the pre-account package carries the key itself (review option A). Validation must check publisher == sha256(raw key bytes) as lowercase hex."
     },
     "runtime": {
-      "enum": ["none", "wasm", "process"],
-      "description": "Execution technology for this package. none = declarative-only (resource-pack class; no code executes). wasm = sandboxed component (in-process, WIT-based). process = full-trust executable (requires Windows code signing, L1 store review, Store/WinGet channel). A package has exactly one runtime; its declarative contributions (UI etc.) are always host-rendered regardless of runtime."
+      "enum": ["none", "wasm", "process", "native"],
+      "description": "Execution technology for this package. none = declarative-only (resource-pack class; no code executes). wasm = sandboxed component (in-process, WIT-based). process = full-trust executable (requires Windows code signing, L1 store review, Store/WinGet channel). native = DeskBox official trusted first-party NativeAOT DLL (in-process, full-trust, C ABI v2; only official publishers may declare runtime:native - third-party packages with runtime:native are rejected at install). A package has exactly one runtime; its declarative contributions (UI etc.) are always host-rendered regardless of runtime."
     },
     "hostApi": {
       "type": "object",
@@ -230,7 +230,7 @@
         "main": {
           "type": "string",
           "minLength": 1,
-          "description": "Path to the runtime entry artifact inside the package (process: script path such as plugin/main.mjs; wasm: module path - final vocabulary per roadmap stage 4). Required for runtime wasm/process; the artifact is an ordinary integrity-listed payload file. Spike-proposed field name (leg 2)."
+          "description": "Path to the runtime entry artifact inside the package. process: script path (plugin/main.mjs). wasm: module path. native: the NativeAOT DLL file name (e.g. package.dll) - must be an integrity-listed payload file and must resolve via the package path grammar. Required for runtime wasm/process/native; forbidden for runtime:none."
         }
       },
       "description": "Runtime entry point for code-bearing packages. runtime:none packages have no entry."

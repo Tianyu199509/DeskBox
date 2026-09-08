@@ -28,7 +28,7 @@ public sealed class PluginSchemaContractTests
     }
 
     [Fact]
-    public void Schema_RuntimeVocabulary_MatchesThreeRuntimes()
+    public void Schema_RuntimeVocabulary_MatchesFourRuntimes()
     {
         using JsonDocument schema = JsonDocument.Parse(File.ReadAllText(
             TestPaths.FromRepository("docs/architecture/plugin-schema-v0.json")));
@@ -39,7 +39,7 @@ public sealed class PluginSchemaContractTests
             .Select(value => value.GetString()!)
             .Order()
             .ToArray();
-        Assert.Equal(["none", "process", "wasm"], values);
+        Assert.Equal(["native", "none", "process", "wasm"], values);
     }
 
     [Fact]
