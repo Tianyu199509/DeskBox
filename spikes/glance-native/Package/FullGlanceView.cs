@@ -44,7 +44,11 @@ internal static class FullGlanceView
         content.DataContext = presentation;
 
         var calendarView = content.FindName("NativeCalendarView").As<CalendarView>();
-        WireDayDecoration(calendarView, month, dayItemHeight, state.ShowTraditional, state.ShowFestivals, state);
+        // Single subscription (audit round 11): settings changes update the
+        // decoration state in place; re-subscribing per rebuild would stack
+        // handlers that capture stale calendar state.
+        var decoration = new CalendarDecorationState(month, dayItemHeight, state.ShowTraditional, state.ShowFestivals);
+        SubscribeDayDecoration(calendarView, decoration);
 
         // Image pipeline: package-local folder, A/B cross-fade borders.
         string[] images = Directory.Exists(Path.Combine(root, "backgrounds"))
@@ -104,13 +108,13 @@ internal static class FullGlanceView
         festivalToggle.Toggled += (_, _) =>
         {
             state.ShowFestivals = festivalToggle.IsOn;
-            Rebuild(root, state, calendarView, dayItemHeight);
+            Rebuild(root, state, calendarView, decoration, dayItemHeight);
             SaveState(root, state);
         };
         traditionalToggle.Toggled += (_, _) =>
         {
             state.ShowTraditional = traditionalToggle.IsOn;
-            Rebuild(root, state, calendarView, dayItemHeight);
+            Rebuild(root, state, calendarView, decoration, dayItemHeight);
             SaveState(root, state);
         };
 
@@ -138,40 +142,57 @@ internal static class FullGlanceView
         return content;
     }
 
-    private static void Rebuild(string root, FullState state, CalendarView calendarView, double dayItemHeight)
+    private static void Rebuild(string root, FullState state, CalendarView calendarView, CalendarDecorationState decoration, double dayItemHeight)
     {
         (GlanceCalendarMonth rebuilt, _, _, _, _, _) = RealGlanceModel.Build(state.ShowTraditional, state.ShowFestivals);
-        WireDayDecoration(calendarView, rebuilt, dayItemHeight, state.ShowTraditional, state.ShowFestivals, state);
+        decoration.Update(rebuilt, dayItemHeight, state.ShowTraditional, state.ShowFestivals);
         WriteSummary(root, [], state, rebuilt);
     }
 
-    private static void WireDayDecoration(
-        CalendarView calendarView,
+    /// <summary>Mutable decoration state read by the single day-item handler.</summary>
+    private sealed class CalendarDecorationState(
         GlanceCalendarMonth month,
         double dayItemHeight,
         bool showTraditional,
-        bool showFestivals,
-        FullState state)
+        bool showFestivals)
+    {
+        public GlanceCalendarMonth Month = month;
+        public double DayItemHeight = dayItemHeight;
+        public bool ShowTraditional = showTraditional;
+        public bool ShowFestivals = showFestivals;
+
+        public void Update(GlanceCalendarMonth rebuilt, double itemHeight, bool traditional, bool festivals)
+        {
+            Month = rebuilt;
+            DayItemHeight = itemHeight;
+            ShowTraditional = traditional;
+            ShowFestivals = festivals;
+        }
+    }
+
+    private static void SubscribeDayDecoration(CalendarView calendarView, CalendarDecorationState decoration)
     {
         System.Globalization.CultureInfo culture = RealGlanceModel.Culture;
         DateOnly pinned = new(RealGlanceModel.PinnedYear, RealGlanceModel.PinnedMonth, 1);
         DateOnly today = DateOnly.FromDateTime(DateTime.Today);
-        Dictionary<DateOnly, GlanceCalendarDay> days = month.Days.ToDictionary(day => day.Date);
-        int decorated = 0;
         calendarView.CalendarViewDayItemChanging += (_, args) =>
         {
             CalendarViewDayItem item = args.Item;
             if (args.InRecycleQueue) { item.Tag = null; return; }
             DateOnly date = DateOnly.FromDateTime(item.Date.DateTime);
-            days.TryGetValue(date, out GlanceCalendarDay? day);
-            string secondaryText = !showTraditional ? string.Empty
-                : showFestivals && !string.IsNullOrWhiteSpace(day?.FestivalText) ? day.FestivalText
+            GlanceCalendarDay? day = null;
+            foreach (GlanceCalendarDay candidate in decoration.Month.Days)
+            {
+                if (candidate.Date == date) { day = candidate; break; }
+            }
+            string secondaryText = !decoration.ShowTraditional ? string.Empty
+                : decoration.ShowFestivals && !string.IsNullOrWhiteSpace(day?.FestivalText) ? day.FestivalText
                 : day?.TraditionalText ?? string.Empty;
             bool hasSecondaryText = !string.IsNullOrWhiteSpace(secondaryText);
             bool isFestival = hasSecondaryText && day?.HasFestival == true;
             bool isCurrentMonth = day?.IsCurrentMonth ?? date.Month == pinned.Month;
-            item.MinHeight = dayItemHeight;
-            item.Height = dayItemHeight;
+            item.MinHeight = decoration.DayItemHeight;
+            item.Height = decoration.DayItemHeight;
             item.Tag = new RealGlanceDayDecoration(
                 day?.DayText ?? date.Day.ToString(culture),
                 secondaryText,
@@ -181,9 +202,7 @@ internal static class FullGlanceView
                 isFestival ? Microsoft.UI.Text.FontWeights.SemiBold : Microsoft.UI.Text.FontWeights.Normal,
                 isCurrentMonth ? 1.0 : 0.42,
                 !isCurrentMonth ? 0.34 : isFestival ? 0.88 : 0.62);
-            if (hasSecondaryText) decorated++;
         };
-        state.Decorated = decorated;
     }
 
     private static FullState LoadState(string root)
