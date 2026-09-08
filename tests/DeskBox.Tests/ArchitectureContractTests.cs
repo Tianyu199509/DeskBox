@@ -100,6 +100,9 @@ public sealed class ArchitectureContractTests
         {
             ["src/DeskBox/Views"] = ["SettingsSections"],
             ["src/DeskBox/Controls"] = ["WidgetContents"],
+            // Plugin pipeline host-side code (B1); runtime-agnostic package
+            // machinery, deliberately outside the six-feature inventory.
+            ["src/DeskBox/Services"] = ["Plugins"],
         };
 
     [Fact]
