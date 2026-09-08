@@ -42,11 +42,18 @@ struct HostState {
 }
 
 impl HostState {
-    fn hostname_of(url: &str) -> Option<String> {
-        url.split("://").nth(1)?
-            .split(['/', ':'])
-            .next()
-            .map(|h| h.to_ascii_lowercase())
+    /// Canonical URL check for the capability gate: a REAL parser (never a
+    /// hand-rolled split - userinfo/IPv6/encoded forms parse differently
+    /// and a bypass is "gate sees host A, HTTP client connects to B").
+    /// Production policy is HTTPS-only; the loopback exemption exists
+    /// solely for the self-test mock server.
+    fn canonical_host(url: &str) -> Result<(String, bool), String> {
+        let parsed = url::Url::parse(url).map_err(|e| format!("unparseable url '{url}': {e}"))?;
+        let host = parsed
+            .host_str()
+            .ok_or_else(|| format!("url '{url}' has no host"))?
+            .to_ascii_lowercase();
+        Ok((host, parsed.scheme() == "https"))
     }
 
     fn gate(&self, url: &str, permission: &str) -> Result<(), String> {
@@ -62,8 +69,15 @@ impl HostState {
         if !declared {
             return Err(format!("capability '{permission}' is not declared by the package"));
         }
-        let host = Self::hostname_of(url)
-            .ok_or_else(|| format!("unparseable url '{url}'"))?;
+        let (host, is_https) = Self::canonical_host(url)?;
+        let loopback_mock = self.mock_url.is_some()
+            && !is_https
+            && (host == "127.0.0.1" || host == "localhost" || host == "[::1]");
+        if !is_https && !loopback_mock {
+            return Err(format!(
+                "url '{url}' must use https (scheme enforcement; http requests are refused)"
+            ));
+        }
         let in_scope = permissions
             .iter()
             .find(|p| p.get("id").and_then(|i| i.as_str()) == Some(permission))
@@ -293,7 +307,9 @@ fn run() -> anyhow::Result<()> {
     });
 
     let component_bytes = std::fs::read(std::path::Path::new(&pkg_dir).join(entry))?;
+    let compile_start = Instant::now();
     let component = wasmtime::component::Component::new(&engine, &component_bytes)?;
+    let compile_ms = compile_start.elapsed().as_millis();
 
     let mut store = Store::new(&engine, state);
     store.set_fuel(FUEL_LIMIT)?;
@@ -360,6 +376,10 @@ fn run() -> anyhow::Result<()> {
     }
     if measure {
         output["measurements"] = serde_json::json!({
+            // Cold start = compile + instantiate + activate. The earlier
+            // "instantiate ~0ms" claim excluded compilation (round-8 fix);
+            // instantiateMs alone is a warm-cache-style number.
+            "compileMs": compile_ms,
             "instantiateMs": instantiate_ms,
             "activateMs": activate_ms,
             "fuelRemaining": store.get_fuel().ok(),

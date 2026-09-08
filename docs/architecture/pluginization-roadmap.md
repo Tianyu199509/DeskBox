@@ -433,6 +433,19 @@ P0：§6 重写为 Runtime 矩阵（删除 A→B→C 旧结论，与 §14 唯一
 
 **2026-09-07 3b 接线完工（同日）**：WidgetManager 声明实现三端口；切点 1=`PresentReminderTargetAsync` 包装现有流程+富诊断日志（HWND/Visible/XamlRoot）移入实现侧、App 两处调用改走 `TodoReminderPresenter` 端口属性；切点 2=QuickCapture 的 item→file 翻译（命名/.url 格式）归 `QuickCaptureService.BuildFileImportPlan`（生产者自有知识），File-widget 内部（目标校验/文件夹解析/写入+取消/刷新+Reveal）归 `TryImportFileAsync/TryImportTextAsync`（流式 CopyToAsync 真兑现取消），`QuickCaptureFileWidgetTarget`→`FileWidgetImportTarget` 移入 Contracts，Menus 三处改走 `App.Current.FileWidgetImport`；切点 3=`SetFeatureWidgetEnabledState` 的 App.Current switch 替换为 `FeatureStateChanged` 事件（按订阅者异常隔离 raise，UI 线程），App 侧 `OnFeatureStateChanged` 自持三个服务刷新。行为测试迁移至端口路径+新增接线契约测试与 plan 边界测试。
 
+### 16.10 第八轮评审吸收（2026-09-08，三腿合入后）
+
+四主张全核实为真并修复（B0 批次）：
+
+1. **Process=Full Trust 诚实化**：Node 子进程拥有 OS 用户全部权限、可完全绕过 broker——**声明式/WASM=真实技术强制；Process 的 Broker=推荐 API/UX/审计/兼容边界，非 OS 安全边界**。三方定位收敛入册：**声明式=安全默认（AI/普通用户）；WASM=沙箱代码第一候选（社区商店）；Process=Full Trust 扩展（专业/重型/原生集成）**——"WASM 是否默认代码 Runtime"等 AI 同题实验+公平基准再拍板。
+2. **能力门 scheme 强制（P0）**：门原先只比 host，`http://<granted-host>` 可过门。Node/Rust 两门已加 **https-only**（自测 mock 回环 http 走显式豁免，生产语义严格）；Rust 门弃手写 URL 拆分（`split("://")` 对 userinfo 形状会"门看 A 实连 B"）改 **`url` crate 唯一 canonicalization**。**永久纪律：network.fetch 的 URL canonicalization 全平台只有一个实现+一套共享 conformance 测试向量**（https allow/http deny/同 host 后缀 deny/userinfo 语义/端口/localhost deny——B1 C# 移植时建向量表三腿共跑）。
+3. **WASM 基准修正**：原"instantiate ~0ms"把 `Component::new` 编译排除在计时外。修正后真实冷启动=**compile 14ms + instantiate ~0ms + activate 1ms ≈ 15ms**（vs 进程腿 spawn 43+activate 50ms——结论方向不变但数字诚实了）；正式对比边界=Package validate/Compile-or-spawn/Activate/First state 四段三腿对齐，宿主 exe 体积≠内存数据。治理验证精度改口：**fuel=行为已验证；epoch/内存=机制已接入、行为场景待补**（正式 Runtime 批补 hostile memory growth 与 epoch-only 场景）。
+4. **Runtime 只消费已验证包（防 TOCTOU）设计入册**：`PackageManager`（install 期完整验证→**内容寻址不可变安装目录**）→ `RuntimeManager`（**只接受 InstalledPackageHandle，不接受任意文件夹路径**）。验证完成→文件被替换→运行时加载的窗口由不可变性关闭。Wasmtime 的安装期预编译+缓存序列化组件也归此架构（cold install / warm activation 分测）。
+
+WIT world 与 ndjson JSON-RPC 维持 **Spike World** 身份不冻结（widget-update 语义为 metric 量体裁衣；正式版走 Semantic Model→WIT Adapter，Process 正式协议倾向 LSP framing+stdout 纯协议/stderr 日志+违规不静默）。
+
+**3.5 收官后路线（Simon 拍板 2026-09-08）**：AI 同题实验等未做功能后置；先做**"基础完整版"（Declarative-only 跑道）**——B1 C# 包安装/验证/授权存储 → B2 格子拆分（C# 声明式执行器+六模板渲染+贡献→真实格子 widget 生命周期+插件管理面）→ B3 商店基础功能（GitHub 索引+列表+安装流程权限授予+更新检查）→ B4 发布（store 规范 v0+1.4.3→新版直跳实测）。期间冻结 schema 于 v10。
+
 ## 附录 A：关键证据文件索引
 
 | 主题 | 文件 |
