@@ -65,7 +65,26 @@ Store 路径在批次 B 前期就核对，不能等发布前才验证。动态�
 
 **渠道决策**：Direct/GitHub 渠道（现行安装器+release）不受上述约束，功能包按 B1 管线从 GitHub 索引下载；**Store 渠道的功能包交付=捆绑进主包或 Store add-ons，不做 Store 版外部下载**。因此批次 C 的原生包格式必须同时支撑两种交付形态（同一包内容，两种分发通道），批次 E 按渠道分别验收。
 
-### 批次 C 输入（2026-09-08 外部二次审计吸收，逐条对码核实）
+### 批次 C 输入·第十一轮审计吸收（2026-09-09，逐条对码核实）
+
+**已修的产品/代码缺陷**：①试点内容未实现 IDisposable——宿主只 Dispose `IDisposable`（WidgetManager:1598/2099），导致 `widget_destroy`/`shutdown` 从未被调用；已实现 Dispose→DestroyWidget（不触发 shutdown，防误伤其他实例）。②试点每 Widget 重新 Activate 覆盖包静态会话——已加宿主侧会话缓存（每包根一次激活）。③FullGlance 每次 Rebuild 重复订阅 CalendarViewDayItemChanging（叠处理器+旧状态捕获）——已改单订阅+可变状态持有者。④脚本 XBF 拷贝路径硬编码 x64——已改平台感知。
+
+**C1（下一批，运行时契约收口，全部真运行测试而非源码扫描）**：
+- ABI 重塑：`activate(packageRoot, packageDataRoot, hostApi*)` 去掉 instanceId（包生命周期）；`create_widget(contributionId, instanceId, instanceDataRoot, out widgetHandle, out view)`（补贡献身份+实例数据根+包侧不透明句柄）；`destroy_widget(widgetHandle)`；`shutdown()`。
+- `NativePackageSession/RuntimeManager`：PackageId+ContentHash→会话（module/roots/liveInstances[]）；最后实例销毁才 shutdown；模块仍不 FreeLibrary。
+- **加载器只接受 `VerifiedInstalledPackage`**（B1 管线绑定：验证→不可变根→LoadLibrary，禁止任意目录直载）。
+- **PackageDataRoot 绝不由安装目录名推导**（叶子名=内容哈希，更新即漂移）：`data/packages/<publisherFingerprint>/<packageId>/`，实例 `instances/<instanceId>/`。
+- 必测：同包双实例数据隔离、销毁 A 后 B 继续工作、关窗恰好销毁一次、v1→v2 更新后数据根不变、包更新不丢数据。
+
+**C2（宿主 UI/主题/输入）**：真实 `WidgetTitleIcon` 替代 HostBadge；Segmented 订阅自身事件验证完整交互契约；主题走 HostApi GetTheme/ThemeChanged（非数据根 JSON；合并而非替换资源字典）；本地化 zh-CN/en-US 切换实测；Drag/Drop/KeyDown/IME/焦点；**Host UI Kit 不直接暴露 CommunityToolkit**（版本耦合风险，宿主包一层 DeskBox 控件）。
+
+**批次 D 迁移顺序（审计建议，已采纳）**：Glance→Music→Search→Weather→Todo→QuickCapture（最重交互最后）。
+
+**措辞收窄**：XBF 结论限定为"当前 NativeAOT 动态 DLL+运行时文本 XAML 路线中，宿主编译 Page 的 XBF 须保持 ms-appx 可解析"；Direct/Store 渠道分别实测，非平台定律。FullGlance 设置仍写包目录=已知 spike 债务（README 已标注反模式，C1 随三根落地一并清理）。
+
+
+
+### 批次 C 输入·第十轮审计吸收（2026-09-08，逐条对码核实）
 
 - **P0 存储三根拆分**：PackageRoot（只读，二进制/XAML/资源）／PackageDataRoot（可写，包级持久数据）／InstanceDataRoot（可写，实例级数据）；激活 ABI 从单一 `directory` 改为 `packageRoot + dataRoot + widgetInstanceId`。Spike 把数据写进包目录是被否决的反模式（与只读内容寻址安装/更新换目录/卸载清理直接冲突）。
 - **宿主类型/主题/本地化契约**：先做 QuickCapture/Todo 综合 probe（它们比 Glance 难：CommunityToolkit 控件、拖放、KeyDown、宿主自定义控件 `WidgetTitleIcon`、局部转换器——均已对码核实）；宿主元数据提供器覆盖宿主类型（84 处命中）→"包文本 XAML 能否解析宿主自定义控件/工具包控件"是最高价值未验证项。主题走 HostThemeContract token（host→package 激活时注入，package 映射为本地 ResourceDictionary——本地字典解析已被 spike 证明可行）；本地化走包内 strings/*.json+展示层预本地化，不用 x:Uid/PRI。

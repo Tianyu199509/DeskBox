@@ -45,8 +45,9 @@ try {
     Invoke-DotNet -CommandArguments (@("publish", $hostProject, "--no-restore") + $common + @("-o", $hostOutput))
     # CONTRACT FINDING: publish drops Page XBFs for this unpackaged layout, but
     # ms-appx resolution needs them on disk next to the exe (App.xaml's
-    # ApplicationDefinition XBF embeds differently). Copy Page XBFs explicitly.
-    $xbfSource = Join-Path $repoRoot "spikes\glance-native\Host\obj\x64\Release\net10.0-windows10.0.22621.0\win-x64"
+    # ApplicationDefinition XBF embeds differently). Copy Page XBFs explicitly;
+    # path is platform-aware so ARM64 BuildOnly keeps honest evidence.
+    $xbfSource = Join-Path $repoRoot "spikes\glance-native\Host\obj\$Platform\Release\net10.0-windows10.0.22621.0\$rid"
     Get-ChildItem -LiteralPath $xbfSource -Filter "*.xbf" -ErrorAction SilentlyContinue |
         Where-Object Name -ne "App.xbf" |
         ForEach-Object { Copy-Item -LiteralPath $_.FullName -Destination $hostOutput -Force }
