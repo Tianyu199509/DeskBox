@@ -75,41 +75,12 @@ public sealed class PluginCapabilityGate
         {
             return false;
         }
-        if (!IPAddress.TryParse(host, out IPAddress? address))
+        if (!IPAddress.TryParse(host.Trim('[', ']'), out IPAddress? address))
         {
             return false;
         }
 
-        // IPv4-mapped IPv6 (::ffff:127.0.0.1 etc.) must be unwrapped and
-        // classified as the IPv4 it is - otherwise the v6 branch would
-        // wave loopback/private v4 through (round 10).
-        if (address.IsIPv4MappedToIPv6)
-        {
-            address = address.MapToIPv4();
-        }
-
-        if (address.IsIPv6LinkLocal || address.IsIPv6SiteLocal)
-        {
-            return true;
-        }
-        if (address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetworkV6)
-        {
-            byte[] bytes = address.GetAddressBytes();
-            // Unspecified (::), loopback (::1), unique-local fc00::/7.
-            return bytes.AsSpan()[..15].SequenceEqual(new byte[15]) ||
-                   bytes[0] == 0xfc || bytes[0] == 0xfd;
-        }
-
-        // IPv4: unspecified, loopback, private, link-local (metadata
-        // included), multicast/broadcast-reserved.
-        byte[] v4 = address.GetAddressBytes();
-        return v4[0] == 0 ||
-               v4[0] == 127 ||
-               v4[0] == 10 ||
-               (v4[0] == 172 && v4[1] >= 16 && v4[1] <= 31) ||
-               (v4[0] == 192 && v4[1] == 168) ||
-               (v4[0] == 169 && v4[1] == 254) ||
-               v4[0] >= 224;
+        return !PluginPinnedHttpClientFactory.IsGloballyRoutable(address);
     }
 }
 

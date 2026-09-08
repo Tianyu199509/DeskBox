@@ -10,7 +10,7 @@ namespace DeskBox.Tests;
 /// HTTP client factory's globally-routable classification. Network
 /// touching is faked via the injectable client factory (deterministic).
 /// </summary>
-public sealed class PluginDeclarativeExecutorTests
+public sealed partial class PluginDeclarativeExecutorTests
 {
     private static VerifiedPluginPackage CreateLivePackage() => new()
     {
