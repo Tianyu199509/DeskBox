@@ -6,13 +6,16 @@ namespace DeskBox.Services.Plugins;
 
 /// <summary>
 /// Development pilot: widget content served by a native package. The
-/// INSTALLED path is tried first regardless of any environment variable;
-/// DESKBOX_DEV_NATIVE_GLANCE only controls the dev-time install bootstrap
-/// and the raw-directory fallback for spike iteration.
+/// INSTALLED path is tried first regardless of any environment variable and
+/// serves both production records and dev-installed records (isDevelopment)
+/// gated by DESKBOX_ALLOW_UNTRUSTED_NATIVE_DEV=1, with the full B1
+/// verification + identity-binding chain. DESKBOX_DEV_NATIVE_GLANCE only
+/// controls the dev-time install bootstrap; the raw-directory fallback for
+/// spike iteration exists exclusively in pilot builds (#if) so Release has
+/// no raw-load entry at all.
 /// </summary>
 internal static class NativeWidgetPilot
 {
-    private const string DevPublisherFingerprint = "1bc4f2db8438d2fd296bd48074088ccc726c265712125abbae975063ba719ea4";
     private const string TargetPackageId = "deskbox.glance";
 
     private static PluginPackageManager? _manager;
@@ -30,6 +33,7 @@ internal static class NativeWidgetPilot
     /// have no dev trust root at all.
     /// </summary>
 #if DESKBOX_NATIVE_DEV_PILOT
+    private const string DevPublisherFingerprint = "1bc4f2db8438d2fd296bd48074088ccc726c265712125abbae975063ba719ea4";
     private static PluginPackageManager? _devManager;
     private static PluginPackageManager DevManager => _devManager ??= new PluginPackageManager(
         Path.Combine(DeskBoxDataPathService.Current.DataDirectory, "plugins"),
@@ -50,7 +54,14 @@ internal static class NativeWidgetPilot
         if (packageRoot is null) return;
         try
         {
-            PluginInstallResult result = DevManager.Install(packageRoot);
+            // Development policy (audit round 17): the record must be marked
+            // isDevelopment so activation goes through the installed path's
+            // DESKBOX_ALLOW_UNTRUSTED_NATIVE_DEV gate. A Store-policy install
+            // would leave the record untrusted-but-not-dev, which the empty
+            // production trust set always rejects - the dev smoke chain would
+            // silently degrade to the raw DLL fallback.
+            PluginInstallResult result = DevManager.Install(
+                packageRoot, PluginPackageVerificationPolicy.Development);
             App.Log(result.Succeeded
                 ? $"[NativePackage] dev package installed: {result.Package!.PackageId} v{result.Package.Version} -> {result.InstallDirectory}"
                 : $"[NativePackage] dev package install failed: {string.Join("; ", result.Failures)}");
@@ -67,6 +78,9 @@ internal static class NativeWidgetPilot
         content = null;
 
         // 1. Installed path (no env-var dependency): B1 handle → runtime manager.
+        //    Dev-installed records (isDevelopment) activate here too when
+        //    DESKBOX_ALLOW_UNTRUSTED_NATIVE_DEV=1 - still behind the full B1
+        //    verification + identity-binding chain.
         NativeInstalledPackageHandle? handle = Manager.TryCreateNativeHandle(TargetPackageId);
         if (handle is not null &&
             NativeWidgetRuntimeManager.TryCreateFromInstalled(
@@ -78,7 +92,11 @@ internal static class NativeWidgetPilot
             return true;
         }
 
+#if DESKBOX_NATIVE_DEV_PILOT
         // 2. Dev fallback (env-var gated): raw directory, no B1 pipeline.
+        //    Pilot builds only - Release compiles this path out entirely so no
+        //    env var can bypass manifest/signature/install verification
+        //    (audit round 17).
         string? packageRoot = NativeWidgetPackageLoader.TryGetDevelopmentPackageRoot();
         if (packageRoot is null) return false;
         if (NativeWidgetRuntimeManager.TryCreateInstance(
@@ -91,6 +109,7 @@ internal static class NativeWidgetPilot
             content = new NativeWidgetPilotContent(config, devLease!);
             return true;
         }
+#endif
         return false;
     }
 }
