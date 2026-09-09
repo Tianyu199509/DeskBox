@@ -150,7 +150,32 @@ public sealed class PluginPackageManager
         ArgumentException.ThrowIfNullOrWhiteSpace(packageId);
         InstalledPackageRecord? record = Find(packageId);
         if (record is null || record.Runtime != NativeWidgetRuntimeManager.NativeRuntimeType) return null;
-        return new NativeInstalledPackageHandle(record, ResolveInstallPath(record));
+        // Native packages are in-process full-trust code; Development-mode
+        // records are refused unless the explicit dev override is set (audit
+        // round 13 §5: a valid signature alone is insufficient - the publisher
+        // must be trusted, which Development-mode records skip by design).
+        if (record.IsDevelopment &&
+            Environment.GetEnvironmentVariable("DESKBOX_ALLOW_UNTRUSTED_NATIVE_DEV") != "1")
+        {
+            return null;
+        }
+        string installRoot = ResolveInstallPath(record);
+        // Re-verify the installed content and rebuild the typed model; the
+        // runtime needs the actual EntryMain, not a hardcoded DLL name.
+        PluginPackageVerifier.VerificationResult verification = PluginPackageVerifier.Verify(installRoot, PluginPackageVerificationPolicy.Store);
+        if (!verification.IsValid) return null;
+        try
+        {
+            using var document = System.Text.Json.JsonDocument.Parse(
+                System.IO.File.ReadAllText(Path.Combine(installRoot, "manifest.json")));
+            VerifiedPluginPackage? verified = BuildVerifiedModel(document.RootElement, record.ContentHash);
+            if (verified is null) return null;
+            return new NativeInstalledPackageHandle(record, verified, installRoot);
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     public bool Uninstall(string packageId)
@@ -283,7 +308,8 @@ public sealed class PluginPackageManager
                 contributions.Add(new VerifiedContribution(
                     contribution.GetProperty("id").GetString()!,
                     contribution.GetProperty("displayName").GetString()!,
-                    contribution.GetProperty("template").GetString()!,
+                    // Template is optional for runtime:native (native renders via its own DLL).
+                    contribution.TryGetProperty("template", out JsonElement templateElement) ? templateElement.GetString()! : "native",
                     payloadFields,
                     bindings)
                 {

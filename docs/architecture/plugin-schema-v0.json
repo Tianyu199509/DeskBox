@@ -20,7 +20,17 @@
         "displayName": { "type": "string", "minLength": 1 },
         "template": {
           "enum": ["metric", "list", "status", "gallery", "action-list", "simple-form"],
-          "description": "Host-rendered declarative template (roadmap 13.5). v0 deliberately has no free-form layout primitives."
+          "description": "Host-rendered declarative template (roadmap 13.5). Required for runtime:none/wasm/process; optional for runtime:native (native packages render via their own DLL, not via host templates)."
+        },
+        "fallback": {
+          "type": "object",
+          "required": ["template"],
+          "properties": {
+            "template": { "enum": ["status"] },
+            "message": { "type": "string" }
+          },
+          "additionalProperties": false,
+          "description": "Declarative fallback for native packages: what the host renders when the native runtime is unavailable (package missing, wrong architecture, restart required, load failure). Only meaningful for runtime:native."
         },
         "payload": {
           "type": "object",
@@ -231,6 +241,10 @@
           "type": "string",
           "minLength": 1,
           "description": "Path to the runtime entry artifact inside the package. process: script path (plugin/main.mjs). wasm: module path. native: the NativeAOT DLL file name (e.g. package.dll) - must be an integrity-listed payload file and must resolve via the package path grammar. Required for runtime wasm/process/native; forbidden for runtime:none."
+        },
+        "architecture": {
+          "enum": ["x64", "arm64"],
+          "description": "CPU architecture of the native DLL. Required for runtime:native; the verifier cross-checks the manifest claim against the PE machine header of the entry DLL. Install refuses when the manifest architecture does not match the running host."
         }
       },
       "description": "Runtime entry point for code-bearing packages. runtime:none packages have no entry."

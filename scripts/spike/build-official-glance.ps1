@@ -31,10 +31,18 @@ try {
     New-Item -ItemType Directory -Path $packageDir -Force | Out-Null
     $sourceDll = Join-Path $publishDir "DeskBox.Glance.NativePackage.dll"
     if (-not (Test-Path $sourceDll)) { throw "AOT DLL not found: $sourceDll" }
-    Copy-Item $sourceDll (Join-Path $packageDir "package.dll")
-    Copy-Item (Join-Path $publishDir "glance-real.xaml") $packageDir -ErrorAction SilentlyContinue
-    Copy-Item (Join-Path $publishDir "calendar.xaml") $packageDir -ErrorAction SilentlyContinue
-    Copy-Item (Join-Path $publishDir "full-glance.xaml") $packageDir -ErrorAction SilentlyContinue
+    # Required payload files - fail fast if any is missing (audit round 13 §30).
+    foreach ($requiredFile in @("DeskBox.Glance.NativePackage.dll", "glance-real.xaml")) {
+        $source = Join-Path $publishDir $requiredFile
+        if (-not (Test-Path $source)) { throw "required payload missing from AOT publish: $requiredFile" }
+    }
+    Copy-Item (Join-Path $publishDir "DeskBox.Glance.NativePackage.dll") (Join-Path $packageDir "package.dll")
+    Copy-Item (Join-Path $publishDir "glance-real.xaml") $packageDir
+    # Optional XAML files (probe variants; may be absent without breaking the package).
+    foreach ($optionalFile in @("calendar.xaml", "full-glance.xaml")) {
+        $source = Join-Path $publishDir $optionalFile
+        if (Test-Path $source) { Copy-Item $source $packageDir }
+    }
     Copy-Item (Join-Path $repoRoot "spikes\glance-native\OfficialPackage\manifest.json") $packageDir
 
     # 3. Generate integrity manifest and signature using the Node tooling.

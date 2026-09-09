@@ -46,7 +46,7 @@ export function validatePackage(pkgDir) {
       fail('entry.main must be a non-empty string');
     }
     for (const key of Object.keys(manifest.entry ?? {})) {
-      if (key !== 'main') fail(`entry: unknown property '${key}'`);
+      if (key !== 'main' && key !== 'architecture') fail(`entry: unknown property '${key}'`);
     }
     if (typeof manifest.entry?.main === 'string') {
       const violation = packagePathViolation(manifest.entry.main);
@@ -70,7 +70,7 @@ export function validatePackage(pkgDir) {
 
   const contributions = manifest.contributions;
   if (!Array.isArray(contributions) || contributions.length < 1) fail('contributions: minItems 1');
-  const widgetClosed = ['type', 'id', 'displayName', 'template', 'payload', 'bindings', 'defaultSize', 'activationEvents'];
+  const widgetClosed = ['type', 'id', 'displayName', 'template', 'payload', 'bindings', 'defaultSize', 'activationEvents', 'fallback'];
   const templates = ['metric', 'list', 'status', 'gallery', 'action-list', 'simple-form'];
   const dataSources = manifest.dataSources ?? {};
   const actions = manifest.actions ?? {};
@@ -83,11 +83,19 @@ export function validatePackage(pkgDir) {
   }
   (contributions ?? []).forEach((c, i) => {
     const where = `contributions[${i}]`;
-    for (const key of ['type', 'id', 'displayName', 'template']) {
+    // template is required for non-native runtimes; optional for native
+    // (native packages render via their own DLL, audit round 13 §2).
+    const isNative = manifest.runtime === 'native';
+    for (const key of ['type', 'id', 'displayName']) {
       if (!(key in c)) fail(`${where}: missing required '${key}'`);
     }
+    if (!isNative && !('template' in c)) fail(`${where}: missing required 'template' for runtime:${manifest.runtime}`);
     for (const key of Object.keys(c)) {
       if (!widgetClosed.includes(key)) fail(`${where}: unknown property '${key}'`);
+    }
+    if (c.fallback !== undefined) {
+      if (c.fallback.template !== 'status') fail(`${where}.fallback.template must be 'status'`);
+      if (typeof c.fallback.message !== 'string') fail(`${where}.fallback.message must be a string`);
     }
     if (c.type !== undefined && c.type !== 'widget') fail(`${where}: unknown contribution type`);
     if (c.id !== undefined && !/^[a-z0-9][a-z0-9-]*$/.test(c.id)) fail(`${where}: id pattern`);
