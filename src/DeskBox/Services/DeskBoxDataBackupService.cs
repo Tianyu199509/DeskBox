@@ -1458,9 +1458,14 @@ public sealed partial class DeskBoxDataBackupService
         // they regenerate on next use, so backups skip them. Restoring a
         // backup without them only means the first weather render falls back
         // to the location flow and glance images redownload.
+        // audit round 20: plugins/ directory contains externally managed
+        // data (e.g., music service token cache, gallery binding state) that
+        // should NOT be part of DeskBox's portable backup. The plugin's own
+        // config system handles its persistence separately.
         return !relativePath.StartsWith("quick-capture/thumbnails/", StringComparison.OrdinalIgnoreCase) &&
                !relativePath.StartsWith("quick-capture/exports/", StringComparison.OrdinalIgnoreCase) &&
                !relativePath.StartsWith("cache/", StringComparison.OrdinalIgnoreCase) &&
+               !relativePath.StartsWith("plugins/", StringComparison.OrdinalIgnoreCase) &&
                !string.Equals(relativePath, "weather-cache.json", StringComparison.OrdinalIgnoreCase);
     }
 

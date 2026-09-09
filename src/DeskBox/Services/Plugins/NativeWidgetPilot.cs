@@ -16,8 +16,6 @@ namespace DeskBox.Services.Plugins;
 /// </summary>
 internal static class NativeWidgetPilot
 {
-    private const string TargetPackageId = "deskbox.glance";
-
     private static PluginPackageManager? _manager;
 
     /// <summary>
@@ -76,22 +74,29 @@ internal static class NativeWidgetPilot
     public static bool TryCreate(WidgetConfig config, out IWidgetContent? content)
     {
         content = null;
+        // Binding-driven (audit round 20 §18): the pilot is generic — which
+        // package id, contribution, and migration adapter serve this widget
+        // kind comes from the registry, so the second package is a
+        // registration rather than a new branch here.
+        OfficialPackageBinding? binding = PackageBindingRegistry.TryGetByKind(config.WidgetKind);
+        if (binding is null) return false;
 
         // 1. Installed path (no env-var dependency): B1 handle → runtime manager.
         //    Dev-installed records (isDevelopment) activate here too when
         //    DESKBOX_ALLOW_UNTRUSTED_NATIVE_DEV=1 - still behind the full B1
         //    verification + identity-binding chain.
-        NativeInstalledPackageHandle? handle = Manager.TryCreateNativeHandle(TargetPackageId);
+        NativeInstalledPackageHandle? handle = Manager.TryCreateNativeHandle(binding.PackageId);
         if (handle is not null)
         {
-            // Legacy data handoff (D3): the built-in Glance store file is
-            // copied into the package's instance data root before the first
-            // native create; the package reads its settings from there.
-            NativeWidgetDataMigration.TryMigrate(
+            // Legacy data handoff (D3): the feature adapter resolves and
+            // validates the authoritative bytes; they are synced into the
+            // package's instance data root before the first native create.
+            NativeWidgetDataMigration.TrySync(
+                binding.Migration,
                 handle.Record.PublisherFingerprint, handle.Record.PackageId, config.Id,
                 DeskBoxDataPathService.Current.DataDirectory);
             if (NativeWidgetRuntimeManager.TryCreateFromInstalled(
-                    handle!, "glance", config.Id,
+                    handle!, binding.ContributionId, config.Id,
                     DeskBoxDataPathService.Current.DataDirectory,
                     out NativeWidgetLease? lease))
             {

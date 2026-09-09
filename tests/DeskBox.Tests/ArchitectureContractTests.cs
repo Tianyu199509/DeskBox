@@ -70,7 +70,7 @@ public sealed class ArchitectureContractTests
             ["Weather"] = 16,
             ["Todo"] = 36,
             ["Music"] = 15,
-            ["Glance"] = 19,
+            ["Glance"] = 20,
             ["Search"] = 20,
             ["QuickCapture"] = 22,
         };

@@ -1,42 +1,38 @@
-using System.Text.Json;
+using DeskBox.Contracts;
 
 namespace DeskBox.Services.Plugins;
 
 /// <summary>
-/// Legacy data handoff (D3 data-ownership, audits 18-19).
+/// Legacy data handoff (D3 data-ownership, audits 18-20). Generic host-side
+/// machinery: the FEATURE adapter (ILegacyInstanceMigration) resolves and
+/// validates the legacy bytes; this class only performs the resilient
+/// byte-for-byte sync into the package's instance data root.
 ///
 /// Ownership model until the formal cutover marker exists: the built-in
-/// store stays the SINGLE source of truth. Every native create re-syncs the
-/// resolved legacy bytes into the package's instance data root (the native
-/// side commits its own mutations back through the HostApi write-through
-/// channel), so neither side can strand the other with stale data.
+/// store stays the SINGLE source of truth. Every native create re-syncs,
+/// so neither side can strand the other with stale data (the native side
+/// commits its own mutations back through the HostApi write-through
+/// channel, routed by PackageInstanceRegistry).
 ///
-/// Candidate resolution mirrors the built-in recovery chain (per-widget
-/// store, its .bak, the single-instance legacy store, its .bak), and a
-/// candidate is only accepted when it parses AND its glance settings fields
-/// are type-valid - a syntactically valid object with, say, a string where a
-/// number belongs must fall through to the backup just like the built-in's
-/// deserializer would reject it (audit round 19).
-///
-/// The write itself uses the same replace-with-fallback algorithm as
+/// The write uses the same replace-with-fallback algorithm as
 /// ResilientJsonStore (GUID temp, 1175 retry ladder, verified in-place
 /// fallback), ported synchronous: this runs on the UI thread and must not
 /// block on async continuations.
 /// </summary>
 internal static class NativeWidgetDataMigration
 {
-    internal const string DataFileName = "glance-data.json";
-
-    // Win32 ERROR_UNABLE_TO_REMOVE_REPLACED (1175), surfaced by File.Replace.
-    private const int UnableToRemoveReplacedFileHResult = unchecked((int)0x80070497);
-    private static readonly int[] ReplaceRetryDelayMs = [50, 150];
-
-    internal static void TryMigrate(string publisherFingerprint, string packageId, string instanceId, string dataDirectory)
+    internal static void TrySync(
+        ILegacyInstanceMigration? migration,
+        string publisherFingerprint,
+        string packageId,
+        string instanceId,
+        string dataDirectory)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(instanceId);
+        if (migration is null) return;
         try
         {
-            string? legacy = ResolveLegacyContent(dataDirectory, instanceId);
+            string? legacy = migration.ResolveLegacyContent(dataDirectory, instanceId);
             if (legacy is null)
             {
                 // No host-side data for this instance: whatever the package
@@ -46,115 +42,15 @@ internal static class NativeWidgetDataMigration
             string instanceRoot = new NativePackageIdentity(publisherFingerprint, packageId)
                 .ResolveInstanceDataRoot(dataDirectory, instanceId);
             Directory.CreateDirectory(instanceRoot);
-            WriteResilient(Path.Combine(instanceRoot, DataFileName), legacy);
-            App.Log($"[NativePackage] synced legacy glance data for instance {instanceId}");
+            WriteResilient(Path.Combine(instanceRoot, migration.DataFileName), legacy);
+            App.Log($"[NativePackage] synced legacy data for instance {instanceId}");
         }
         catch (Exception error)
         {
             // Best-effort: a failed sync must never block native widget
             // creation, it just means the package keeps its current data.
-            App.LogVerbose($"[NativePackage] glance data sync failed for {instanceId}: {error.Message}");
+            App.LogVerbose($"[NativePackage] data sync failed for {instanceId}: {error.Message}");
         }
-    }
-
-    private static string? ResolveLegacyContent(string dataDirectory, string instanceId)
-    {
-        string widgetFile = Path.Combine(
-            dataDirectory, "glance", "widgets",
-            $"{GlanceWidgetStore.GetSafeWidgetFileName(instanceId)}.json");
-        string legacyFile = Path.Combine(dataDirectory, "glance", "glance.json");
-        foreach (string candidate in new[] { widgetFile, widgetFile + ".bak", legacyFile, legacyFile + ".bak" })
-        {
-            if (TryReadValidSettings(candidate, out string? content))
-            {
-                return content;
-            }
-        }
-        return null;
-    }
-
-    private static bool TryReadValidSettings(string path, out string? content)
-    {
-        content = null;
-        try
-        {
-            if (!File.Exists(path)) return false;
-            string text = File.ReadAllText(path);
-            if (!IsValidSettingsShape(text)) return false;
-            content = text;
-            return true;
-        }
-        catch
-        {
-            return false;
-        }
-    }
-
-    /// <summary>
-    /// Structural + semantic validation: the candidate must parse AND the
-    /// glance settings fields must be type-valid, mirroring what the
-    /// built-in deserializer would accept (audits 19-20). Only the fields
-    /// the sync target consumes are checked; the built-in store owns the
-    /// rest of the schema and its own recovery.
-    /// </summary>
-    private static bool IsValidSettingsShape(string text)
-    {
-        try
-        {
-            using JsonDocument document = JsonDocument.Parse(text);
-            if (document.RootElement.ValueKind != JsonValueKind.Object) return false;
-            JsonElement root = document.RootElement;
-            foreach (JsonProperty property in root.EnumerateObject())
-            {
-                bool typeValid = property.Name switch
-                {
-                    "showChineseFestivals" or "randomOrder" or "showPhotoControls" =>
-                        property.Value.ValueKind is JsonValueKind.True or JsonValueKind.False,
-                    "rotationIntervalMinutes" =>
-                        property.Value.ValueKind == JsonValueKind.Number && property.Value.TryGetDouble(out _),
-                    "localImagePaths" =>
-                        // Strict (audit 20): the built-in deserializer rejects
-                        // a non-array here, so the sync must too - never
-                        // accept a scalar and copy it as a valid primary.
-                        property.Value.ValueKind == JsonValueKind.Array &&
-                        property.Value.EnumerateArray().All(item => item.ValueKind == JsonValueKind.String),
-                    "localFolderPath" =>
-                        property.Value.ValueKind is JsonValueKind.String or JsonValueKind.Null,
-                    "traditionalCalendarMode" => IsValidEnumValue<DeskBox.Models.GlanceTraditionalCalendarMode>(property.Value),
-                    "backgroundSource" => IsValidEnumValue<DeskBox.Models.GlanceBackgroundSource>(property.Value),
-                    "imageFit" => IsValidEnumValue<DeskBox.Models.GlanceImageFitMode>(property.Value),
-                    _ => true,
-                };
-                if (!typeValid) return false;
-            }
-            return true;
-        }
-        catch
-        {
-            return false;
-        }
-    }
-
-    /// <summary>
-    /// Enums travel as names or legacy integers (the built-in accepts both);
-    /// anything else - or an undefined value - is a type error.
-    /// </summary>
-    private static bool IsValidEnumValue<TEnum>(JsonElement element)
-        where TEnum : struct, Enum
-    {
-        if (element.ValueKind == JsonValueKind.String)
-        {
-            return Enum.TryParse(element.GetString(), ignoreCase: true, out TEnum parsed) &&
-                   Enum.IsDefined(parsed);
-        }
-        if (element.ValueKind == JsonValueKind.Number &&
-            element.TryGetInt32(out int number) &&
-            number >= 0)
-        {
-            TEnum candidate = (TEnum)(object)number;
-            return Enum.IsDefined(candidate);
-        }
-        return false;
     }
 
     private static void WriteResilient(string path, string content)
@@ -206,6 +102,10 @@ internal static class NativeWidgetDataMigration
             }
         }
     }
+
+    // Win32 ERROR_UNABLE_TO_REMOVE_REPLACED (1175), surfaced by File.Replace.
+    private const int UnableToRemoveReplacedFileHResult = unchecked((int)0x80070497);
+    private static readonly int[] ReplaceRetryDelayMs = [50, 150];
 
     private static void WriteInPlaceAndVerify(string path, byte[] contents, string description)
     {

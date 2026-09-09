@@ -25,8 +25,8 @@ public class NativeInstanceConfigPatchTests
                 ShowChineseFestivals = true,
             });
 
-            DeskBox.Services.Plugins.InstanceConfigPatch? patch =
-                DeskBox.Services.Plugins.InstanceConfigPatch.TryParse(
+            DeskBox.Services.GlanceInstanceConfigPatch? patch =
+                DeskBox.Services.GlanceInstanceConfigPatch.TryParse(
                     """{"showChineseFestivals":false,"rotationIntervalMinutes":5}""");
             Assert.NotNull(patch);
             await store.UpdateAsync(data => patch!.ApplyTo(data));
@@ -47,18 +47,18 @@ public class NativeInstanceConfigPatchTests
         // A string where a number belongs: syntactically valid JSON that the
         // built-in deserializer would reject - the channel must reject it
         // too instead of committing garbage (audit round 19).
-        Assert.Null(DeskBox.Services.Plugins.InstanceConfigPatch.TryParse(
+        Assert.Null(DeskBox.Services.GlanceInstanceConfigPatch.TryParse(
             """{"rotationIntervalMinutes":"abc"}"""));
-        Assert.Null(DeskBox.Services.Plugins.InstanceConfigPatch.TryParse(
+        Assert.Null(DeskBox.Services.GlanceInstanceConfigPatch.TryParse(
             """{"localImagePaths":["a.png",5]}"""));
-        Assert.Null(DeskBox.Services.Plugins.InstanceConfigPatch.TryParse("[1,2,3]"));
+        Assert.Null(DeskBox.Services.GlanceInstanceConfigPatch.TryParse("[1,2,3]"));
     }
 
     [Fact]
     public void IntegerEnumPatchIsAccepted()
     {
-        DeskBox.Services.Plugins.InstanceConfigPatch? patch =
-            DeskBox.Services.Plugins.InstanceConfigPatch.TryParse("""{"traditionalCalendarMode":9}""");
+        DeskBox.Services.GlanceInstanceConfigPatch? patch =
+            DeskBox.Services.GlanceInstanceConfigPatch.TryParse("""{"traditionalCalendarMode":9}""");
         Assert.NotNull(patch);
         Assert.Equal(DeskBox.Models.GlanceTraditionalCalendarMode.Hebrew, patch!.TraditionalCalendarMode);
     }
@@ -68,19 +68,19 @@ public class NativeInstanceConfigPatchTests
     {
         // TryParse accepts numeric STRINGS into undefined values; the patch
         // channel must not commit those (audit round 20).
-        Assert.Null(DeskBox.Services.Plugins.InstanceConfigPatch.TryParse(
+        Assert.Null(DeskBox.Services.GlanceInstanceConfigPatch.TryParse(
             """{"traditionalCalendarMode":"999"}"""));
-        Assert.Null(DeskBox.Services.Plugins.InstanceConfigPatch.TryParse(
+        Assert.Null(DeskBox.Services.GlanceInstanceConfigPatch.TryParse(
             """{"backgroundSource":"NotAMode"}"""));
-        Assert.Null(DeskBox.Services.Plugins.InstanceConfigPatch.TryParse(
+        Assert.Null(DeskBox.Services.GlanceInstanceConfigPatch.TryParse(
             """{"backgroundSource":{}}"""));
     }
 
     [Fact]
     public void ClearingTheLocalFolderMapsEmptyStringToNull()
     {
-        DeskBox.Services.Plugins.InstanceConfigPatch? patch =
-            DeskBox.Services.Plugins.InstanceConfigPatch.TryParse("""{"localFolderPath":""}""");
+        DeskBox.Services.GlanceInstanceConfigPatch? patch =
+            DeskBox.Services.GlanceInstanceConfigPatch.TryParse("""{"localFolderPath":""}""");
         Assert.NotNull(patch);
         var data = new DeskBox.Models.GlanceWidgetData { LocalFolderPath = @"C:\old" };
         patch!.ApplyTo(data);

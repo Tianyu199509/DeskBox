@@ -160,21 +160,23 @@ internal static unsafe class NativeHostApiBridge
             if (instanceId is null || json is null || jsonLength <= 0) return unchecked((int)0x80070057);
             string widgetId = new(instanceId, 0, instanceIdLength);
             string payload = Encoding.UTF8.GetString(json, jsonLength);
-            InstanceConfigPatch? patch = InstanceConfigPatch.TryParse(payload);
-            if (patch is null)
+            // Generic routing (audit round 20 §18): instanceId → owning
+            // packageId → binding → feature adapter. The bridge knows no
+            // feature; an unregistered instance is rejected outright.
+            string? packageId = PackageInstanceRegistry.TryResolvePackageId(widgetId);
+            if (packageId is null)
             {
-                App.LogVerbose($"[NativePackage] rejected malformed instance config patch for {widgetId}");
+                App.LogVerbose($"[NativePackage] config patch for unknown instance {widgetId} rejected");
                 return unchecked((int)0x80070057); // E_INVALIDARG
             }
-            // Authority write (audits 19-20): the native setting mutation
-            // commits to the built-in store. The return value means
-            // ACCEPTED, not committed: the store update runs fire-and-forget
-            // because blocking the UI thread on the async store pipeline
-            // would deadlock. The package treats only synchronous rejection
-            // as a revert condition; a failed async persistence is logged
-            // below and self-heals on the next create-time sync from
-            // authority (which is also what reverts the widget's cache).
-            _ = InstanceConfigPatch.CommitAsync(GlanceWidgetStore.ForWidget(widgetId), patch);
+            OfficialPackageBinding? binding = PackageBindingRegistry.TryGetByPackageId(packageId);
+            if (binding?.Migration is null || !binding.Migration.TryApplyPatch(widgetId, payload))
+            {
+                return unchecked((int)0x80070057); // E_INVALIDARG
+            }
+            // The adapter has ACCEPTED the patch; the authoritative store
+            // update runs fire-and-forget (see the adapter's CommitAsync).
+            // The return value means accepted, not committed.
             return 0;
         }
         catch (Exception error)
@@ -336,16 +338,19 @@ internal sealed class NativeWidgetLease : IDisposable
     private bool _released;
 
     internal Microsoft.UI.Xaml.FrameworkElement View { get; private set; } = null!;
+    private string _instanceId = null!;
     private string _instanceDataRoot = null!;
 
     internal NativePackageSession Session => _session;
 
     internal static NativeWidgetLease Create(
-        NativePackageSession session, nint handle, Microsoft.UI.Xaml.FrameworkElement view, string instanceDataRoot) => new()
+        NativePackageSession session, nint handle, Microsoft.UI.Xaml.FrameworkElement view,
+        string instanceId, string instanceDataRoot) => new()
     {
         _session = session,
         _handle = handle,
         View = view,
+        _instanceId = instanceId,
         _instanceDataRoot = instanceDataRoot,
     };
 
@@ -405,6 +410,8 @@ internal sealed unsafe class NativePackageSession
     // audit round 20: instance data roots are deleted on final destroy,
     // allowing plugins to clean up their per-instance files without host intervention.
     private readonly Dictionary<nint, string> _instanceDataRoots = [];
+    // audit 20 §18: instance ids for PackageInstanceRegistry unregistration.
+    private readonly Dictionary<nint, string> _instanceIds = [];
 
     internal NativePackageSession(
         NativePackageIdentity identity,
@@ -505,8 +512,11 @@ internal sealed unsafe class NativePackageSession
         {
             _liveHandles.Add(handle);
             _instanceDataRoots[handle] = instanceDataRoot;
+            _instanceIds[handle] = instanceId;
         }
-        return NativeWidgetLease.Create(this, handle, view, instanceDataRoot);
+        // Ownership for the generic write-through routing (audit 20 §18).
+        PackageInstanceRegistry.Register(Identity.PackageId, instanceId);
+        return NativeWidgetLease.Create(this, handle, view, instanceId, instanceDataRoot);
     }
 
     /// <summary>Destroys by handle; returns true only when the package confirms success.
@@ -520,22 +530,30 @@ internal sealed unsafe class NativePackageSession
             App.Log($"[NativePackage] destroy 0x{handle:X} failed: 0x{status:X8}; instance remains counted");
             return false;
         }
+        string? instanceId;
         lock (_instanceGate)
         {
             _liveHandles.Remove(handle);
-            if (_instanceDataRoots.Remove(handle, out string? dataRoot))
+            _instanceIds.Remove(handle, out instanceId);
+        }
+        if (instanceId is not null)
+        {
+            PackageInstanceRegistry.Unregister(instanceId);
+        }
+        // Delete OUTSIDE the gate: disk I/O must never run under the lock the
+        // LiveInstanceCount probe takes (regression pass, audit-round-20 hygiene).
+        if (_instanceDataRoots.Remove(handle, out string? dataRoot))
+        {
+            // Total teardown (audit round 20): the destroy must never fail because of
+            // the runtime-state save (that happens in the package's Dispose), so
+            // disk access errors here are logged but don't turn into ABI failure.
+            try
             {
-                // Total teardown (audit round 20): the destroy must never fail because of
-                // the runtime-state save (that happens in the package's Dispose), so
-                // disk access errors here are logged but don't turn into ABI failure.
-                try
-                {
-                    if (Directory.Exists(dataRoot)) Directory.Delete(dataRoot, recursive: true);
-                }
-                catch (Exception error)
-                {
-                    App.Log($"[NativePackage] failed to delete instance data root '{dataRoot}': {error.Message}");
-                }
+                if (Directory.Exists(dataRoot)) Directory.Delete(dataRoot, recursive: true);
+            }
+            catch (Exception error)
+            {
+                App.Log($"[NativePackage] failed to delete instance data root '{dataRoot}': {error.Message}");
             }
         }
         return true;
@@ -599,6 +617,10 @@ internal sealed unsafe class NativePackageSession
             var handles = _liveHandles.ToArray();
             foreach (nint handle in handles)
             {
+                if (_instanceIds.Remove(handle, out string? instanceId))
+                {
+                    PackageInstanceRegistry.Unregister(instanceId);
+                }
                 if (_instanceDataRoots.Remove(handle, out string? dataRoot))
                 {
                     try

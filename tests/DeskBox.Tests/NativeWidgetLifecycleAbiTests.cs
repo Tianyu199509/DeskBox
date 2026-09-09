@@ -46,7 +46,7 @@ public class NativeWidgetLifecycleAbiTests
             destroyExport: Marshal.GetFunctionPointerForDelegate(DestroyStub),
             shutdownExport: Marshal.GetFunctionPointerForDelegate(ShutdownStub),
             widgetEventExport: Marshal.GetFunctionPointerForDelegate(WidgetEventStub));
-        NativeWidgetLease lease = NativeWidgetLease.Create(session, 0x1234, null!);
+        NativeWidgetLease lease = NativeWidgetLease.Create(session, 0x1234, null!, "instance-1", "/tmp/instance");
         return new NativeWidgetPilotContent(new DeskBox.Models.WidgetConfig(), lease);
     }
 

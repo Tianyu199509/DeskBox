@@ -889,6 +889,15 @@ public partial class App : Application
 
         try
         {
+            // Official-package bindings (audit round 20 §18): one registration
+            // per official package — the generic pilot, data sync, and HostApi
+            // write-through resolve everything feature-specific through this
+            // registry, so adding a package never branches the plugin layer.
+            DeskBox.Services.Plugins.PackageBindingRegistry.Register(
+                new DeskBox.Services.Plugins.OfficialPackageBinding(
+                    DeskBox.Models.WidgetKind.Glance, "deskbox.glance", "glance",
+                    DeskBox.Services.GlanceInstanceMigration.Instance));
+
             // Dev native package bootstrap: install through the B1 pipeline
             // once at startup when DESKBOX_DEV_NATIVE_GLANCE points at a
             // package directory. Compiled only with EnableDeskBoxNativeDevPilot.

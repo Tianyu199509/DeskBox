@@ -29,7 +29,7 @@ public class NativeWidgetDataMigrationTests
         Path.Combine(
             new DeskBox.Services.Plugins.NativePackageIdentity(publisher, "deskbox.glance")
                 .ResolveInstanceDataRoot(root, widgetId),
-            DeskBox.Services.Plugins.NativeWidgetDataMigration.DataFileName);
+            DeskBox.Services.GlanceInstanceMigration.Instance.DataFileName);
 
     [Fact]
     public async Task SyncCopiesHostStoreVerbatimIntoInstanceRoot()
@@ -48,7 +48,7 @@ public class NativeWidgetDataMigrationTests
             await store.SaveAsync(data);
 
             string publisher = "a".PadLeft(64, '0');
-            DeskBox.Services.Plugins.NativeWidgetDataMigration.TryMigrate(publisher, "deskbox.glance", widgetId, root);
+            DeskBox.Services.Plugins.NativeWidgetDataMigration.TrySync(DeskBox.Services.GlanceInstanceMigration.Instance, publisher, "deskbox.glance", widgetId, root);
 
             string target = TargetPath(root, publisher, widgetId);
             Assert.True(File.Exists(target), "synced data file must exist in the instance data root");
@@ -72,14 +72,14 @@ public class NativeWidgetDataMigrationTests
 
             // First native create syncs state A.
             await store.SaveAsync(new DeskBox.Models.GlanceWidgetData { RotationIntervalMinutes = 5 });
-            DeskBox.Services.Plugins.NativeWidgetDataMigration.TryMigrate(publisher, "deskbox.glance", widgetId, root);
+            DeskBox.Services.Plugins.NativeWidgetDataMigration.TrySync(DeskBox.Services.GlanceInstanceMigration.Instance, publisher, "deskbox.glance", widgetId, root);
 
             // The user changes settings while native is not running; the next
             // native create must NOT serve the stale snapshot. (Both values
             // come from the store's supported rotation steps - Normalize
             // snaps free-form values onto that set.)
             await store.SaveAsync(new DeskBox.Models.GlanceWidgetData { RotationIntervalMinutes = 60 });
-            DeskBox.Services.Plugins.NativeWidgetDataMigration.TryMigrate(publisher, "deskbox.glance", widgetId, root);
+            DeskBox.Services.Plugins.NativeWidgetDataMigration.TrySync(DeskBox.Services.GlanceInstanceMigration.Instance, publisher, "deskbox.glance", widgetId, root);
 
             using JsonDocument synced = JsonDocument.Parse(await File.ReadAllTextAsync(target));
             Assert.Equal(60, synced.RootElement.GetProperty("rotationIntervalMinutes").GetInt32());
@@ -104,7 +104,7 @@ public class NativeWidgetDataMigrationTests
             await File.WriteAllTextAsync(store.StorePath, "{ torn");
 
             string publisher = "c".PadLeft(64, '0');
-            DeskBox.Services.Plugins.NativeWidgetDataMigration.TryMigrate(publisher, "deskbox.glance", widgetId, root);
+            DeskBox.Services.Plugins.NativeWidgetDataMigration.TrySync(DeskBox.Services.GlanceInstanceMigration.Instance, publisher, "deskbox.glance", widgetId, root);
 
             using JsonDocument synced = JsonDocument.Parse(
                 await File.ReadAllTextAsync(TargetPath(root, publisher, widgetId)));
@@ -132,7 +132,7 @@ public class NativeWidgetDataMigrationTests
                 """{ "rotationIntervalMinutes": 66 }""");
 
             string publisher = "f".PadLeft(64, '0');
-            DeskBox.Services.Plugins.NativeWidgetDataMigration.TryMigrate(publisher, "deskbox.glance", widgetId, root);
+            DeskBox.Services.Plugins.NativeWidgetDataMigration.TrySync(DeskBox.Services.GlanceInstanceMigration.Instance, publisher, "deskbox.glance", widgetId, root);
 
             using JsonDocument synced = JsonDocument.Parse(
                 await File.ReadAllTextAsync(TargetPath(root, publisher, widgetId)));
@@ -158,7 +158,7 @@ public class NativeWidgetDataMigrationTests
                 """{ "version": 5, "rotationIntervalMinutes": 8, "futureField": "keep" }""");
 
             string publisher = "d".PadLeft(64, '0');
-            DeskBox.Services.Plugins.NativeWidgetDataMigration.TryMigrate(publisher, "deskbox.glance", widgetId, root);
+            DeskBox.Services.Plugins.NativeWidgetDataMigration.TrySync(DeskBox.Services.GlanceInstanceMigration.Instance, publisher, "deskbox.glance", widgetId, root);
 
             using JsonDocument synced = JsonDocument.Parse(
                 await File.ReadAllTextAsync(TargetPath(root, publisher, widgetId)));
@@ -184,7 +184,7 @@ public class NativeWidgetDataMigrationTests
                 """{ "version": 10, "rotationIntervalMinutes": 42 }""");
 
             // The package already owns data and the host has none: untouched.
-            DeskBox.Services.Plugins.NativeWidgetDataMigration.TryMigrate(publisher, "deskbox.glance", widgetId, root);
+            DeskBox.Services.Plugins.NativeWidgetDataMigration.TrySync(DeskBox.Services.GlanceInstanceMigration.Instance, publisher, "deskbox.glance", widgetId, root);
             using JsonDocument kept = JsonDocument.Parse(await File.ReadAllTextAsync(target));
             Assert.Equal(42, kept.RootElement.GetProperty("rotationIntervalMinutes").GetInt32());
         }
@@ -208,7 +208,7 @@ public class NativeWidgetDataMigrationTests
             await File.WriteAllTextAsync(store.StorePath,
                 """{ "localImagePaths": "not-array" }""");
             string publisher = "g".PadLeft(64, '0');
-            DeskBox.Services.Plugins.NativeWidgetDataMigration.TryMigrate(publisher, "deskbox.glance", widgetId, root);
+            DeskBox.Services.Plugins.NativeWidgetDataMigration.TrySync(DeskBox.Services.GlanceInstanceMigration.Instance, publisher, "deskbox.glance", widgetId, root);
             using (JsonDocument synced = JsonDocument.Parse(
                 await File.ReadAllTextAsync(TargetPath(root, publisher, widgetId))))
             {
@@ -219,7 +219,7 @@ public class NativeWidgetDataMigrationTests
             await File.WriteAllTextAsync(store.StorePath,
                 """{ "backgroundSource": {} }""");
             File.Delete(TargetPath(root, publisher, widgetId));
-            DeskBox.Services.Plugins.NativeWidgetDataMigration.TryMigrate(publisher, "deskbox.glance", widgetId, root);
+            DeskBox.Services.Plugins.NativeWidgetDataMigration.TrySync(DeskBox.Services.GlanceInstanceMigration.Instance, publisher, "deskbox.glance", widgetId, root);
             using (JsonDocument synced = JsonDocument.Parse(
                 await File.ReadAllTextAsync(TargetPath(root, publisher, widgetId))))
             {
@@ -240,19 +240,27 @@ public class NativeWidgetDataMigrationTests
             "src/DeskBox.GlancePackage/Rendering/GlanceDataFile.cs",
             "src/DeskBox.GlancePackage/Services/PackageFileStore.cs",
             "src/DeskBox/Services/Plugins/NativeWidgetDataMigration.cs",
+            "src/DeskBox/Services/GlanceInstanceMigration.cs",
+            "src/DeskBox/Services/Plugins/PackageBindingRegistry.cs",
         })
         {
             string source = File.ReadAllText(TestPaths.SourceFile(relativePath));
             Assert.DoesNotContain("JsonSerializer", source);
         }
 
-        string controller = File.ReadAllText(TestPaths.SourceFile(
-            "src/DeskBox.GlancePackage/Rendering/GlanceWidgetController.cs"));
-        Assert.Contains("GlanceDataFile.Load", controller);
-        Assert.Contains("RotationIntervalMinutes > 0", controller);
-
+        // The generic layers must not know Glance: the pilot resolves the
+        // package through the registry, and the write-through bridge routes
+        // by instance ownership — no feature type appears in either.
         string pilot = File.ReadAllText(TestPaths.SourceFile(
             "src/DeskBox/Services/Plugins/NativeWidgetPilot.cs"));
-        Assert.Contains("NativeWidgetDataMigration.TryMigrate", pilot);
+        Assert.Contains("NativeWidgetDataMigration.TrySync", pilot);
+        Assert.Contains("PackageBindingRegistry.TryGetByKind", pilot);
+        Assert.DoesNotContain("deskbox.glance", pilot);
+
+        string loader = File.ReadAllText(TestPaths.SourceFile(
+            "src/DeskBox/Services/Plugins/NativeWidgetPackageLoader.cs"));
+        Assert.Contains("PackageInstanceRegistry.TryResolvePackageId", loader);
+        Assert.Contains("PackageBindingRegistry.TryGetByPackageId", loader);
+        Assert.DoesNotContain("GlanceWidgetStore", loader);
     }
 }
