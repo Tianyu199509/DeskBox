@@ -2,5 +2,8 @@
   "title": "C2 综合探针",
   "add": "添加",
   "todoHeader": "待办",
-  "statusReady": "就绪"
+  "statusReady": "就绪",
+  "menuNextBackground": "下一张背景",
+  "menuPauseRotation": "暂停轮播",
+  "menuSettings": "设置"
 }

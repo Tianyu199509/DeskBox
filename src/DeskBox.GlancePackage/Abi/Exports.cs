@@ -73,6 +73,13 @@ public static unsafe class Exports
             // Route package-side verbose logging to the host callback (D3
             // Phase 2: replaces the silent App.LogVerbose seam).
             DeskBox.GlancePackage.Services.PackageLogger.Sink = static message => HostLog(message);
+            // Host config channel (HostApi v2): locale/accent for the
+            // rendering pipeline (D3 product migration: real locale instead
+            // of a fixed one).
+            if (hostApi is not null && hostApi->GetConfigJson != 0)
+            {
+                DeskBox.GlancePackage.Services.HostConfig.Initialize(hostApi->GetConfigJson);
+            }
             if (hostApi is not null && hostApi->Log != 0)
             {
                 _hostLog = (delegate* unmanaged[Cdecl]<byte*, int, void>)hostApi->Log;
@@ -99,9 +106,11 @@ public static unsafe class Exports
             string instance = new(instanceId, 0, instanceIdLength);
             string dataRoot = new(instanceDataRoot, 0, instanceDataRootLength);
             Directory.CreateDirectory(dataRoot);
-            FrameworkElement content = Rendering.GlanceViewBuilder.Create(_packageRoot, contribution, instance, dataRoot);
+            FrameworkElement content = Rendering.GlanceViewBuilder.Create(
+                _packageRoot, contribution, instance, dataRoot,
+                out Action<double, double>? onViewportChanged);
             nint handle = ++_nextHandle;
-            var lifecycleHandle = new Rendering.GlanceWidgetHandle(content);
+            var lifecycleHandle = new Rendering.GlanceWidgetHandle(content, onViewportChanged);
             _handles[handle] = lifecycleHandle;
             Instances[handle] = content;
             *widgetHandle = handle;
