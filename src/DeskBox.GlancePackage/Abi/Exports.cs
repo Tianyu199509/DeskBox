@@ -18,7 +18,7 @@ public static unsafe class Exports
     private static nint _nextHandle = 0x1000;
 
     [UnmanagedCallersOnly(EntryPoint = "deskbox_package_get_abi_version", CallConvs = [typeof(CallConvCdecl)])]
-    public static int GetAbiVersion() => 2;
+    public static int GetAbiVersion() => 3;
 
     [StructLayout(LayoutKind.Sequential)]
     public struct HostApi
@@ -68,6 +68,8 @@ public static unsafe class Exports
             Directory.CreateDirectory(dataRoot);
             FrameworkElement content = Rendering.GlanceViewBuilder.Create(_packageRoot, contribution, instance, dataRoot);
             nint handle = ++_nextHandle;
+            var lifecycleHandle = new Rendering.GlanceWidgetHandle(content);
+            _handles[handle] = lifecycleHandle;
             Instances[handle] = content;
             *widgetHandle = handle;
             *view = WinRT.MarshalInspectable<FrameworkElement>.FromManaged(content);
@@ -84,6 +86,7 @@ public static unsafe class Exports
     [UnmanagedCallersOnly(EntryPoint = "deskbox_widget_destroy", CallConvs = [typeof(CallConvCdecl)])]
     public static int DestroyWidget(nint widgetHandle)
     {
+        _handles.Remove(widgetHandle);
         Instances.Remove(widgetHandle);
         return 0;
     }
@@ -99,6 +102,32 @@ public static unsafe class Exports
             return 0;
         }
         catch { return 0; }
+    }
+
+    /// <summary>Widget lifecycle event kinds (ABI v3).</summary>
+    public const uint RefreshRequested = 1;
+    public const uint AppearanceChanged = 2;
+    public const uint Activated = 3;
+    public const uint Deactivated = 4;
+    public const uint VisibilityChanged = 5;
+    public const uint RevealCompleted = 6;
+    public const uint LongHidden = 7;
+    public const uint CompactStateChanged = 8;
+    public const uint ViewportChanged = 9;
+    public const uint PerformanceSettingsChanged = 10;
+    public const uint InteractiveResizeBegin = 11;
+    public const uint InteractiveResizeEnd = 12;
+
+    private static readonly Dictionary<nint, Rendering.GlanceWidgetHandle> _handles = [];
+
+    [UnmanagedCallersOnly(EntryPoint = "deskbox_widget_event", CallConvs = [typeof(CallConvCdecl)])]
+    public static int WidgetEvent(nint widgetHandle, uint eventKind, double width, double height, uint flags)
+    {
+        if (_handles.TryGetValue(widgetHandle, out Rendering.GlanceWidgetHandle? handle))
+        {
+            handle.OnLifecycleEvent(eventKind, width, height, flags);
+        }
+        return 0;
     }
 
     private static void HostLog(string message)

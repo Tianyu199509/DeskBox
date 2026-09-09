@@ -144,7 +144,7 @@ internal static unsafe class NativeHostApiBridge
 /// </summary>
 internal static class NativeWidgetRuntimeManager
 {
-    public const int RequiredAbiVersion = 2;
+    public const int RequiredAbiVersion = 3;
     public const string NativeRuntimeType = "native";
     private static readonly object Gate = new();
     private static readonly Dictionary<string, NativePackageSession> Sessions = [];
@@ -295,6 +295,29 @@ internal sealed class NativeWidgetLease : IDisposable
     }
 
     void IDisposable.Dispose() => NativeWidgetRuntimeManager.Release(this);
+
+    /// <summary>Forward a host lifecycle event to the package (no-op if the package has no event export).</summary>
+    internal void InvokeWidgetEvent(WidgetLifecycleEventKind kind, double width, double height, uint flags)
+    {
+        _session.SendWidgetEvent(_handle, kind, width, height, flags);
+    }
+}
+
+/// <summary>Typed host→package lifecycle events (ABI v3, audit round 15).</summary>
+internal enum WidgetLifecycleEventKind : uint
+{
+    RefreshRequested = 1,
+    AppearanceChanged = 2,
+    Activated = 3,
+    Deactivated = 4,
+    VisibilityChanged = 5,     // flags bit 0: 1=visible, 0=hidden
+    RevealCompleted = 6,
+    LongHidden = 7,
+    CompactStateChanged = 8,   // flags bit 0: 1=collapsed, 0=expanded
+    ViewportChanged = 9,       // width/height carry the new size
+    PerformanceSettingsChanged = 10,
+    InteractiveResizeBegin = 11,
+    InteractiveResizeEnd = 12,
 }
 
 internal sealed unsafe class NativePackageSession
@@ -303,6 +326,7 @@ internal sealed unsafe class NativePackageSession
     private readonly nint _createExport;
     private readonly nint _destroyExport;
     private readonly nint _shutdownExport;
+    private readonly nint _widgetEventExport; // 0 when the package has no event export
     private readonly object _instanceGate = new();
     private readonly HashSet<nint> _liveHandles = [];
 
@@ -313,7 +337,8 @@ internal sealed unsafe class NativePackageSession
         nint activateExport,
         nint createExport,
         nint destroyExport,
-        nint shutdownExport)
+        nint shutdownExport,
+        nint widgetEventExport = 0)
     {
         Identity = identity;
         PackageRoot = packageRoot;
@@ -322,6 +347,7 @@ internal sealed unsafe class NativePackageSession
         _createExport = createExport;
         _destroyExport = destroyExport;
         _shutdownExport = shutdownExport;
+        _widgetEventExport = widgetEventExport;
     }
 
     internal NativePackageIdentity Identity { get; }
@@ -416,6 +442,21 @@ internal sealed unsafe class NativePackageSession
         return true;
     }
 
+    /// <summary>Forward a lifecycle event to the package; no-op when the export is absent.</summary>
+    internal unsafe void SendWidgetEvent(nint handle, WidgetLifecycleEventKind kind, double width, double height, uint flags)
+    {
+        if (_widgetEventExport == 0) return;
+        try
+        {
+            var send = (delegate* unmanaged[Cdecl]<nint, uint, double, double, uint, int>)_widgetEventExport;
+            send(handle, (uint)kind, width, height, flags);
+        }
+        catch (Exception error)
+        {
+            App.LogVerbose($"[NativePackage] widget event {kind} failed: {error.Message}");
+        }
+    }
+
     internal void Shutdown()
     {
         try
@@ -485,7 +526,7 @@ internal static class NativeWidgetPackageLoader
                 !TryGetExport(module, "deskbox_widget_destroy", out nint destroyExport) ||
                 !TryGetExport(module, "deskbox_package_shutdown", out nint shutdownExport))
             {
-                App.LogVerbose("[NativePackage] unified ABI v2 exports missing");
+                App.LogVerbose("[NativePackage] unified ABI v3 exports missing");
                 return null;
             }
             int version = ((delegate* unmanaged[Cdecl]<int>)versionExport)();
@@ -494,9 +535,11 @@ internal static class NativeWidgetPackageLoader
                 App.Log($"[NativePackage] ABI version {version} != {NativeWidgetRuntimeManager.RequiredAbiVersion}");
                 return null;
             }
+            // Widget lifecycle event export is optional (v3 additive).
+            _ = NativeLibrary.TryGetExport(module, "deskbox_widget_event", out nint widgetEventExport);
             var session = new NativePackageSession(
                 descriptor.Identity, descriptor.PackageRoot, packageDataRoot,
-                activateExport, createExport, destroyExport, shutdownExport);
+                activateExport, createExport, destroyExport, shutdownExport, widgetEventExport);
             NativePackageSession.Activate(session);
             return session;
         }
