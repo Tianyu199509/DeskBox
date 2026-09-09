@@ -338,8 +338,13 @@ internal sealed class GlanceWidgetController : IDisposable
 
     private void UpdateClockText()
     {
-        _content.DataContext = GlanceMonthPipeline.CreatePresentation(
+        var presentation = GlanceMonthPipeline.CreatePresentation(
             _month, _isCompact, _panelHeight, _panelWidth, Settings, _culture, _width, _height);
+        // Built-in parity: the action-bar affordance follows the runtime
+        // pause state - paused shows the play triangle to resume.
+        presentation.PlayIconVisibility = _runtimeState.Paused ? Visibility.Visible : Visibility.Collapsed;
+        presentation.PauseIconVisibility = _runtimeState.Paused ? Visibility.Collapsed : Visibility.Visible;
+        _content.DataContext = presentation;
     }
 
     // ---- Settings (host-authoritative write-through) ----
@@ -403,6 +408,7 @@ internal sealed class GlanceWidgetController : IDisposable
     {
         _runtimeState.Paused = !_runtimeState.Paused;
         UpdateTimers();
+        UpdateClockText();
         // Persist the pause at the change point: teardown no longer saves on
         // Unloaded, and destroy persistence must be able to stay no-throw.
         GlanceRuntimeState.TrySave(_runtimeState, _instanceDataRoot);
