@@ -45,14 +45,18 @@ public class NativeGlanceHostConfigContractTests
     public void ViewportChangesReachTheResponsiveRebuild()
     {
         string handle = Read("src/DeskBox.GlancePackage/Rendering/GlanceWidgetHandle.cs");
-        Assert.Contains("onViewportChanged?.Invoke(width, height)", handle);
-        string builder = Read("src/DeskBox.GlancePackage/Rendering/GlanceViewBuilder.cs");
+        Assert.Contains("_controller.OnViewportChanged(width, height)", handle);
+        string controller = Read("src/DeskBox.GlancePackage/Rendering/GlanceWidgetController.cs");
         // Debounced rebuild on resize, not a rebuild per event.
-        Assert.Contains("resizeTimer", builder);
-        Assert.Contains("onViewportChanged = (newWidth, newHeight)", builder);
+        Assert.Contains("resizeTimer", controller);
         // Menu strings go through the locale table, with zh-CN kept only as
         // the last-resort inline fallback.
-        Assert.Contains("PackageStrings.Get(\"menuNextBackground\"", builder);
+        Assert.Contains("PackageStrings.Get(\"menuNextBackground\"", controller);
+        // Lifecycle events drive real work: the clock timer exists and the
+        // energy policy decides whether timers run (audit rounds 18-19).
+        Assert.Contains("_clockTimer", controller);
+        Assert.Contains("GlanceLifecyclePolicy.Compute", controller);
+        Assert.Contains("public void Dispose()", controller);
     }
 
     [Fact]

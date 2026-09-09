@@ -208,10 +208,10 @@ public class NativeWidgetDataMigrationTests
             Assert.DoesNotContain("JsonSerializer", source);
         }
 
-        string builder = File.ReadAllText(TestPaths.SourceFile(
-            "src/DeskBox.GlancePackage/Rendering/GlanceViewBuilder.cs"));
-        Assert.Contains("GlanceDataFile.Load", builder);
-        Assert.Contains("RotationIntervalMinutes > 0", builder);
+        string controller = File.ReadAllText(TestPaths.SourceFile(
+            "src/DeskBox.GlancePackage/Rendering/GlanceWidgetController.cs"));
+        Assert.Contains("GlanceDataFile.Load", controller);
+        Assert.Contains("RotationIntervalMinutes > 0", controller);
 
         string pilot = File.ReadAllText(TestPaths.SourceFile(
             "src/DeskBox/Services/Plugins/NativeWidgetPilot.cs"));
