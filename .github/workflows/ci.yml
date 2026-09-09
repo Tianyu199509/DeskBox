@@ -31,6 +31,12 @@ jobs:
       - name: Build
         run: dotnet build .\src\DeskBox\DeskBox.csproj --configuration Release --no-restore -p:Platform=x64 -p:RuntimeIdentifier=win-x64 -v:minimal
 
+      # The host deliberately does not reference the package projects, so a
+      # compile break inside them would otherwise stay invisible to CI
+      # (audit round 17).
+      - name: Build native packages
+        run: dotnet build .\src\DeskBox.GlancePackage\DeskBox.GlancePackage.csproj --configuration Release --no-restore -p:Platform=x64 -p:RuntimeIdentifier=win-x64 -v:minimal
+
       - name: Test
         timeout-minutes: 10
         run: dotnet test .\tests\DeskBox.Tests\DeskBox.Tests.csproj --configuration Release --no-restore -p:Platform=x64 -p:RuntimeIdentifier=win-x64 -p:WindowsAppSdkBootstrapInitialize=false --blame-hang --blame-hang-timeout 5m --logger "trx;LogFileName=test-results.trx" -v:minimal

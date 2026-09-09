@@ -4,7 +4,7 @@ using Microsoft.UI.Xaml.Controls;
 namespace DeskBox.GlancePackage.Rendering;
 
 /// <summary>
-/// Receives host lifecycle events (ABI v3) and routes them to the widget's
+/// Receives host lifecycle events (ABI v4) and routes them to the widget's
 /// visual tree. This is the package-side counterpart of IWidgetContent's
 /// optional lifecycle interfaces.
 /// </summary>
