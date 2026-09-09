@@ -45,8 +45,7 @@ public class NativeGlanceDataGoldenTests
                   "showChineseFestivals": true,
                   "rotationIntervalMinutes": 30
                 }
-                """);
-            GlanceData? loaded = GlanceDataFile.Load(root);
+                """);            GlanceData? loaded = GlanceDataFile.Load(root);
             Assert.NotNull(loaded);
 
             // The user flips one package-owned toggle and the rotation.
@@ -232,8 +231,8 @@ public class NativeGlanceDataGoldenTests
         string full = GlanceDataFile.BuildOwnedPatch(settings);
         using (JsonDocument document = JsonDocument.Parse(full))
         {
-            // 9 interaction fields + 6 display-element/time-format fields.
-            Assert.Equal(15, document.RootElement.EnumerateObject().Count());
+            // 9 interaction fields + 6 display/time fields + layout.
+            Assert.Equal(16, document.RootElement.EnumerateObject().Count());
         }
     }
 

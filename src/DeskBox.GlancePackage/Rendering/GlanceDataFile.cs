@@ -52,6 +52,7 @@ internal static class GlanceDataFile
             if (TryBool(raw, "showWeekday", out bool showWeekday)) settings.ShowWeekday = showWeekday;
             if (TryBool(raw, "showCalendar", out bool showCalendar)) settings.ShowCalendar = showCalendar;
             if (TryEnum<GlanceTimeFormatMode>(raw, "timeFormat", out var timeFormat)) settings.TimeFormat = timeFormat;
+            if (TryEnum<GlanceLayoutMode>(raw, "layout", out var layout)) settings.Layout = layout;
             return new GlanceData(settings, raw);
         }
         catch
@@ -173,6 +174,7 @@ internal static class GlanceDataFile
         if (skip?.Contains("showWeekday") != true && only?.Contains("showWeekday") != false) writer.WriteBoolean("showWeekday", settings.ShowWeekday);
         if (skip?.Contains("showCalendar") != true && only?.Contains("showCalendar") != false) writer.WriteBoolean("showCalendar", settings.ShowCalendar);
         if (skip?.Contains("timeFormat") != true && only?.Contains("timeFormat") != false) writer.WriteString("timeFormat", settings.TimeFormat.ToString());
+        if (skip?.Contains("layout") != true && only?.Contains("layout") != false) writer.WriteString("layout", settings.Layout.ToString());
     }
 
     private static bool TryBool(JsonElement root, string property, out bool value)

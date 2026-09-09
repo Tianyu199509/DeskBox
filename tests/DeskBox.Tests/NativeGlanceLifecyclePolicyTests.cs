@@ -103,16 +103,17 @@ public class NativeGlanceLifecyclePolicyTests
     {
         var mode = GlancePkg::DeskBox.Models.GlanceTraditionalCalendarMode.None;
         Assert.Equal(ClockCadence.None, Display.ComputeClockCadence(
-            showTime: false, showDate: false, showWeekday: false, showCalendarEffective: false, traditionalMode: mode));
+            showTime: false, showDate: false, showWeekday: false, showCalendar: false, traditionalMode: mode));
         Assert.Equal(ClockCadence.PerMinute, Display.ComputeClockCadence(
-            showTime: true, showDate: false, showWeekday: false, showCalendarEffective: false, traditionalMode: mode));
-        // Any date-bearing element without a clock ticks once per midnight.
+            showTime: true, showDate: false, showWeekday: false, showCalendar: false, traditionalMode: mode));
+        // Any date-bearing element without a clock ticks once per midnight
+        // (raw showCalendar setting - the built-in does not floor here).
         Assert.Equal(ClockCadence.PerMidnight, Display.ComputeClockCadence(
-            showTime: false, showDate: true, showWeekday: false, showCalendarEffective: false, traditionalMode: mode));
+            showTime: false, showDate: true, showWeekday: false, showCalendar: false, traditionalMode: mode));
         Assert.Equal(ClockCadence.PerMidnight, Display.ComputeClockCadence(
-            showTime: false, showDate: false, showWeekday: false, showCalendarEffective: true, traditionalMode: mode));
+            showTime: false, showDate: false, showWeekday: false, showCalendar: true, traditionalMode: mode));
         Assert.Equal(ClockCadence.PerMidnight, Display.ComputeClockCadence(
-            showTime: false, showDate: false, showWeekday: false, showCalendarEffective: false,
+            showTime: false, showDate: false, showWeekday: false, showCalendar: false,
             traditionalMode: GlancePkg::DeskBox.Models.GlanceTraditionalCalendarMode.Hebrew));
     }
 

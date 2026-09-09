@@ -22,15 +22,38 @@ internal static class GlanceDisplayPolicy
         showCalendar && availableWidth >= 300 && availableHeight >= 280;
 
     /// <summary>
+    /// Built-in layout resolution: Centered/Editorial map to themselves; the
+    /// Calendar layout degrades to Immersive (background + non-calendar
+    /// foreground) when the calendar is off or below the responsive floor.
+    /// </summary>
+    public static NativeLayout ResolveLayout(GlanceLayoutMode mode, bool showCalendarEffective) => mode switch
+    {
+        GlanceLayoutMode.Centered => NativeLayout.Centered,
+        GlanceLayoutMode.Editorial => NativeLayout.Editorial,
+        GlanceLayoutMode.Calendar => showCalendarEffective ? NativeLayout.Calendar : NativeLayout.Immersive,
+        _ => NativeLayout.Immersive,
+    };
+
+    /// <summary>Built-in TimeFontSize (TimeScale stays at 1 until the
+    /// font/scale settings batch).</summary>
+    public static double TimeFontSize(double availableWidth, double availableHeight) =>
+        RoundToHalf(Math.Clamp(Math.Min(availableWidth * 0.18, availableHeight * 0.28), 38, 78));
+
+    private static double RoundToHalf(double value) => Math.Round(value * 2) / 2;
+
+    /// <summary>
     /// Built-in UpdateClockTimer cadence: a time display needs per-minute
     /// ticks; date/weekday/calendar-only needs one tick per midnight;
-    /// nothing that displays time or dates needs no clock at all.
+    /// nothing that displays time or dates needs no clock at all. Uses the
+    /// RAW showCalendar setting (the built-in does not apply the responsive
+    /// floor here - a floored-off calendar still displays dates elsewhere
+    /// or may come back on resize).
     /// </summary>
     public static ClockCadence ComputeClockCadence(
-        bool showTime, bool showDate, bool showWeekday, bool showCalendarEffective,
+        bool showTime, bool showDate, bool showWeekday, bool showCalendar,
         GlanceTraditionalCalendarMode traditionalMode)
     {
-        bool needsCalendarClock = showDate || showWeekday || showCalendarEffective ||
+        bool needsCalendarClock = showDate || showWeekday || showCalendar ||
                                   traditionalMode != GlanceTraditionalCalendarMode.None;
         if (!showTime && !needsCalendarClock)
         {
@@ -158,4 +181,13 @@ internal enum ClockCadence
     None,
     PerMinute,
     PerMidnight,
+}
+
+/// <summary>The four built-in glance layouts (native resolution).</summary>
+internal enum NativeLayout
+{
+    Immersive,
+    Centered,
+    Editorial,
+    Calendar,
 }

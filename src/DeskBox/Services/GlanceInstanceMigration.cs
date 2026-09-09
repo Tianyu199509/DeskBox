@@ -91,6 +91,7 @@ internal sealed class GlanceInstanceMigration : ILegacyInstanceMigration
                     "backgroundSource" => IsValidEnumValue<GlanceBackgroundSource>(property.Value),
                     "imageFit" => IsValidEnumValue<GlanceImageFitMode>(property.Value),
                     "timeFormat" => IsValidEnumValue<GlanceTimeFormatMode>(property.Value),
+                    "layout" => IsValidEnumValue<GlanceLayoutMode>(property.Value),
                     _ => true,
                 };
                 if (!typeValid) return false;

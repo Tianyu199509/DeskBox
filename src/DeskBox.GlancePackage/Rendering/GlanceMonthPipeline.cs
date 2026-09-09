@@ -52,6 +52,12 @@ internal static class GlanceMonthPipeline
     {
         DateTime now = DateTime.Now;
         double compactFontSize = Math.Round(Math.Clamp(Math.Min(availableWidth * 0.078, availableHeight * 0.095), 22, 28) * 2) / 2;
+        // Built-in layout resolution: Calendar degrades to Immersive when the
+        // calendar is off or below the responsive floor.
+        bool calendarEffective = GlanceDisplayPolicy.ShowCalendarEffective(
+            settings.ShowCalendar, availableWidth, availableHeight);
+        NativeLayout layout = GlanceDisplayPolicy.ResolveLayout(settings.Layout, calendarEffective);
+        bool foreground = settings.ShowTime || settings.ShowDate || settings.ShowWeekday || calendarEffective;
         return new GlancePresentation
         {
             TimeText = GlanceDisplayPolicy.FormatTimeText(now, settings.TimeFormat, culture),
@@ -61,6 +67,7 @@ internal static class GlanceMonthPipeline
             CompactCalendarDateText = GlanceDisplayPolicy.FormatCompactCalendarDateText(now, culture),
             TraditionalCalendarTitle = month.TraditionalTitle,
             TimeFontFamily = new FontFamily("XamlAutoFontFamily"),
+            TimeFontSize = GlanceDisplayPolicy.TimeFontSize(availableWidth, availableHeight),
             CompactTimeFontSize = compactFontSize,
             CalendarCompactTimeFontSize = compactFontSize,
             CalendarPanelHeight = panelHeight,
@@ -70,14 +77,16 @@ internal static class GlanceMonthPipeline
             PlayIconVisibility = Visibility.Collapsed,
             PauseIconVisibility = Visibility.Visible,
             // Built-in display toggles gate each element; the calendar
-            // surface additionally carries the responsive floor.
+            // surface follows the resolved layout.
             TimeVisibility = settings.ShowTime ? Visibility.Visible : Visibility.Collapsed,
             DateVisibility = settings.ShowDate ? Visibility.Visible : Visibility.Collapsed,
             WeekdayVisibility = settings.ShowWeekday ? Visibility.Visible : Visibility.Collapsed,
-            CalendarHeaderVisibility = isCompact ? Visibility.Visible : Visibility.Collapsed,
-            CalendarSurfaceVisibility = GlanceDisplayPolicy.ShowCalendarEffective(
-                settings.ShowCalendar, availableWidth, availableHeight)
-                ? Visibility.Visible : Visibility.Collapsed,
+            CalendarHeaderVisibility = isCompact && layout == NativeLayout.Calendar ? Visibility.Visible : Visibility.Collapsed,
+            CalendarSurfaceVisibility = layout == NativeLayout.Calendar ? Visibility.Visible : Visibility.Collapsed,
+            ForegroundVisibility = foreground ? Visibility.Visible : Visibility.Collapsed,
+            ImmersiveVisibility = foreground && layout == NativeLayout.Immersive ? Visibility.Visible : Visibility.Collapsed,
+            CenteredVisibility = foreground && layout == NativeLayout.Centered ? Visibility.Visible : Visibility.Collapsed,
+            EditorialVisibility = foreground && layout == NativeLayout.Editorial ? Visibility.Visible : Visibility.Collapsed,
         };
     }
 }
@@ -90,13 +99,18 @@ internal static class GlanceMonthPipeline
     nameof(CalendarPanelMaxWidth),
     nameof(CalendarPanelWidth),
     nameof(CalendarSurfaceVisibility),
+    nameof(CenteredVisibility),
     nameof(CompactCalendarDateText),
     nameof(CompactTimeFontSize),
     nameof(DateText),
     nameof(DateVisibility),
+    nameof(EditorialVisibility),
+    nameof(ForegroundVisibility),
+    nameof(ImmersiveVisibility),
     nameof(PauseIconVisibility),
     nameof(PlayIconVisibility),
     nameof(TimeFontFamily),
+    nameof(TimeFontSize),
     nameof(TimeText),
     nameof(TimeVisibility),
     nameof(TraditionalCalendarTitle),
@@ -111,6 +125,7 @@ public sealed partial class GlancePresentation
     public string CompactCalendarDateText { get; init; } = "";
     public string TraditionalCalendarTitle { get; init; } = "";
     public FontFamily TimeFontFamily { get; init; } = new("XamlAutoFontFamily");
+    public double TimeFontSize { get; init; }
     public double CompactTimeFontSize { get; init; }
     public double CalendarCompactTimeFontSize { get; init; }
     public double CalendarPanelHeight { get; init; }
@@ -122,6 +137,10 @@ public sealed partial class GlancePresentation
     public Visibility WeekdayVisibility { get; init; }
     public Visibility CalendarHeaderVisibility { get; init; }
     public Visibility CalendarSurfaceVisibility { get; init; }
+    public Visibility ForegroundVisibility { get; init; }
+    public Visibility ImmersiveVisibility { get; init; }
+    public Visibility CenteredVisibility { get; init; }
+    public Visibility EditorialVisibility { get; init; }
     public Visibility PlayIconVisibility { get; set; }
     public Visibility PauseIconVisibility { get; set; }
 }
