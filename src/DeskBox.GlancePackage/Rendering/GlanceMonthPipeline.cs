@@ -51,7 +51,8 @@ internal static class GlanceMonthPipeline
         GlanceWidgetData settings, CultureInfo culture, double availableWidth, double availableHeight)
     {
         DateTime now = DateTime.Now;
-        double compactFontSize = Math.Round(Math.Clamp(Math.Min(availableWidth * 0.078, availableHeight * 0.095), 22, 28) * 2) / 2;
+        double compactFontSize = GlanceDisplayPolicy.ScaledCompactFontSize(availableWidth, availableHeight, settings.TimeScale);
+        double calendarCompactFontSize = GlanceDisplayPolicy.ScaledCalendarCompactFontSize(availableWidth, availableHeight, settings.TimeScale);
         // Built-in layout resolution: Calendar degrades to Immersive when the
         // calendar is off or below the responsive floor.
         bool calendarEffective = GlanceDisplayPolicy.ShowCalendarEffective(
@@ -66,17 +67,18 @@ internal static class GlanceMonthPipeline
             WeekdayText = now.ToString("dddd", culture),
             CompactCalendarDateText = GlanceDisplayPolicy.FormatCompactCalendarDateText(now, culture),
             TraditionalCalendarTitle = month.TraditionalTitle,
-            TimeFontFamily = new FontFamily("XamlAutoFontFamily"),
-            TimeFontSize = GlanceDisplayPolicy.TimeFontSize(availableWidth, availableHeight),
+            TimeFontFamily = new FontFamily(string.IsNullOrWhiteSpace(settings.TimeFontFamily)
+                ? "XamlAutoFontFamily"
+                : settings.TimeFontFamily),
+            TimeFontSize = GlanceDisplayPolicy.ScaledFontSize(availableWidth, availableHeight, settings.TimeScale),
             CompactTimeFontSize = compactFontSize,
-            CalendarCompactTimeFontSize = compactFontSize,
+            CalendarCompactTimeFontSize = calendarCompactFontSize,
             CalendarPanelHeight = panelHeight,
             CalendarPanelWidth = panelWidth,
             CalendarPanelMaxWidth = 360,
             CalendarCornerRadius = new CornerRadius(12),
             PlayIconVisibility = Visibility.Collapsed,
-            PauseIconVisibility = Visibility.Visible,
-        // Built-in display toggles gate each element; the calendar
+            PauseIconVisibility = Visibility.Visible,        // Built-in display toggles gate each element; the calendar
         // surface follows the resolved layout.
         TimeVisibility = settings.ShowTime ? Visibility.Visible : Visibility.Collapsed,
         DateVisibility = settings.ShowDate ? Visibility.Visible : Visibility.Collapsed,

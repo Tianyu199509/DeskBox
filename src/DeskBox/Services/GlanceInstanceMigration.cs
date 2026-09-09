@@ -97,6 +97,10 @@ internal sealed class GlanceInstanceMigration : ILegacyInstanceMigration
                     "readability" => IsValidEnumValue<GlanceReadabilityMode>(property.Value),
                     "backgroundImageTransparency" =>
                         property.Value.ValueKind == JsonValueKind.Number && property.Value.TryGetDouble(out _),
+                    "timeFontFamily" =>
+                        property.Value.ValueKind is JsonValueKind.String or JsonValueKind.Null,
+                    "timeScale" =>
+                        property.Value.ValueKind == JsonValueKind.Number && property.Value.TryGetDouble(out _),
                     _ => true,
                 };
                 if (!typeValid) return false;

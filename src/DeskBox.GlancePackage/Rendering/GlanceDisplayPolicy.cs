@@ -41,6 +41,33 @@ internal static class GlanceDisplayPolicy
 
     private static double RoundToHalf(double value) => Math.Round(value * 2) / 2;
 
+    /// <summary>Built-in font-size formulas share one shape: clamp first,
+    /// then multiply the user's time scale, then round to halves.</summary>
+    public static double ScaledFontSize(
+        double availableWidth, double availableHeight, double timeScale) =>
+        Math.Round(RoundToHalf(Math.Clamp(Math.Min(availableWidth * 0.18, availableHeight * 0.28), 38, 78)) * timeScale * 2) / 2;
+
+    public static double ScaledCompactFontSize(
+        double availableWidth, double availableHeight, double timeScale) =>
+        Math.Round(RoundToHalf(Math.Clamp(Math.Min(availableWidth * 0.13, availableHeight * 0.2), 30, 60)) * timeScale * 2) / 2;
+
+    public static double ScaledCalendarCompactFontSize(
+        double availableWidth, double availableHeight, double timeScale) =>
+        Math.Round(RoundToHalf(Math.Clamp(Math.Min(availableWidth * 0.078, availableHeight * 0.095), 22, 28)) * timeScale * 2) / 2;
+
+    /// <summary>Built-in ImageFocus mapping: horizontal and vertical
+    /// alignment default to Center, with the focus point pinning the
+    /// corresponding edge/axis.</summary>
+    public static (Microsoft.UI.Xaml.Media.AlignmentX X, Microsoft.UI.Xaml.Media.AlignmentY Y) ResolveImageFocus(
+        GlanceImageFocus focus) => focus switch
+    {
+        GlanceImageFocus.Left => (Microsoft.UI.Xaml.Media.AlignmentX.Left, Microsoft.UI.Xaml.Media.AlignmentY.Center),
+        GlanceImageFocus.Right => (Microsoft.UI.Xaml.Media.AlignmentX.Right, Microsoft.UI.Xaml.Media.AlignmentY.Center),
+        GlanceImageFocus.Top => (Microsoft.UI.Xaml.Media.AlignmentX.Center, Microsoft.UI.Xaml.Media.AlignmentY.Top),
+        GlanceImageFocus.Bottom => (Microsoft.UI.Xaml.Media.AlignmentX.Center, Microsoft.UI.Xaml.Media.AlignmentY.Bottom),
+        _ => (Microsoft.UI.Xaml.Media.AlignmentX.Center, Microsoft.UI.Xaml.Media.AlignmentY.Center),
+    };
+
     /// <summary>
     /// Built-in UpdateClockTimer cadence: a time display needs per-minute
     /// ticks; date/weekday/calendar-only needs one tick per midnight;

@@ -57,6 +57,8 @@ internal static class GlanceDataFile
             if (TryEnum<GlanceTransitionSpeed>(raw, "transitionSpeed", out var speed)) settings.TransitionSpeed = speed;
             if (TryEnum<GlanceReadabilityMode>(raw, "readability", out var readability)) settings.Readability = readability;
             if (TryDouble(raw, "backgroundImageTransparency", out double transparency)) settings.BackgroundImageTransparency = transparency;
+            if (TryString(raw, "timeFontFamily", out string? fontFamily) && !string.IsNullOrWhiteSpace(fontFamily)) settings.TimeFontFamily = fontFamily;
+            if (TryDouble(raw, "timeScale", out double scale) && scale > 0) settings.TimeScale = scale;
             return new GlanceData(settings, raw);
         }
         catch
@@ -183,6 +185,8 @@ internal static class GlanceDataFile
         if (skip?.Contains("transitionSpeed") != true && only?.Contains("transitionSpeed") != false) writer.WriteString("transitionSpeed", settings.TransitionSpeed.ToString());
         if (skip?.Contains("readability") != true && only?.Contains("readability") != false) writer.WriteString("readability", settings.Readability.ToString());
         if (skip?.Contains("backgroundImageTransparency") != true && only?.Contains("backgroundImageTransparency") != false) writer.WriteNumber("backgroundImageTransparency", settings.BackgroundImageTransparency);
+        if (skip?.Contains("timeFontFamily") != true && only?.Contains("timeFontFamily") != false) writer.WriteString("timeFontFamily", settings.TimeFontFamily);
+        if (skip?.Contains("timeScale") != true && only?.Contains("timeScale") != false) writer.WriteNumber("timeScale", settings.TimeScale);
     }
 
     private static bool TryBool(JsonElement root, string property, out bool value)

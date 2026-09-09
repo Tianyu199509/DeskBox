@@ -431,6 +431,7 @@ internal sealed class GlanceWidgetController : IDisposable
             ImageSource = new Microsoft.UI.Xaml.Media.Imaging.BitmapImage(new Uri(_images[_runtimeState.ImageIndex])),
             Stretch = _imageStretch,
         };
+        (brush.AlignmentX, brush.AlignmentY) = GlanceDisplayPolicy.ResolveImageFocus(Settings.ImageFocus);
         Border incoming = _showingA ? _backgroundB : _backgroundA;
         Border outgoing = _showingA ? _backgroundA : _backgroundB;
         RunTransition(incoming, outgoing, brush);

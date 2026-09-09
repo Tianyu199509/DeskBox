@@ -91,6 +91,34 @@ public class NativeGlanceDisplayPolicyTests
     }
 
     [Fact]
+    public void TimeScaleMultipliesAfterTheClamp()
+    {
+        // Built-in order: clamp first, then multiply by the user's scale,
+        // then round to halves - scale can exceed the clamp range.
+        Assert.Equal(117, Display.ScaledFontSize(440, 560, 1.5));
+        Assert.Equal(78, Display.ScaledFontSize(440, 560, 1.0));
+        // Compact variants use their own clamps.
+        Assert.Equal(57, Display.ScaledCompactFontSize(440, 560, 1.0));
+        Assert.Equal(28, Display.ScaledCalendarCompactFontSize(440, 560, 1.0));
+    }
+
+    [Fact]
+    public void ImageFocusPinsTheNamedEdges()
+    {
+        var (topX, topY) = Display.ResolveImageFocus(GlancePkg::DeskBox.Models.GlanceImageFocus.Top);
+        Assert.Equal(Microsoft.UI.Xaml.Media.AlignmentX.Center, topX);
+        Assert.Equal(Microsoft.UI.Xaml.Media.AlignmentY.Top, topY);
+
+        var (leftX, leftY) = Display.ResolveImageFocus(GlancePkg::DeskBox.Models.GlanceImageFocus.Left);
+        Assert.Equal(Microsoft.UI.Xaml.Media.AlignmentX.Left, leftX);
+        Assert.Equal(Microsoft.UI.Xaml.Media.AlignmentY.Center, leftY);
+
+        var (centerX, centerY) = Display.ResolveImageFocus(GlancePkg::DeskBox.Models.GlanceImageFocus.Center);
+        Assert.Equal(Microsoft.UI.Xaml.Media.AlignmentX.Center, centerX);
+        Assert.Equal(Microsoft.UI.Xaml.Media.AlignmentY.Center, centerY);
+    }
+
+    [Fact]
     public void TwelveHourSurvivesQuotedLiterals()
     {
         // A pattern with a quoted literal containing "t" must not lose the
