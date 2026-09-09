@@ -58,12 +58,13 @@ public static unsafe class Exports
         public nint Log;
         public nint GetConfigJson;
         public nint SetConfigChangedHandler;
+        public nint SetInstanceConfigJson;
     }
 
     private static delegate* unmanaged[Cdecl]<byte*, int, void> _hostLog;
 
     /// <summary>HostApi table version this package build understands.</summary>
-    private const uint RequiredHostApiVersion = 2;
+    private const uint RequiredHostApiVersion = 3;
 
     [UnmanagedCallersOnly(EntryPoint = "deskbox_package_activate", CallConvs = [typeof(CallConvCdecl)])]
     public static int Activate(char* packageRoot, int packageRootLength, char* packageDataRoot, int packageDataRootLength, HostApi* hostApi)
@@ -95,6 +96,10 @@ public static unsafe class Exports
                 if (hostApi->GetConfigJson != 0)
                 {
                     DeskBox.GlancePackage.Services.HostConfig.Initialize(hostApi->GetConfigJson);
+                }
+                if (hostApi->SetInstanceConfigJson != 0)
+                {
+                    DeskBox.GlancePackage.Services.HostConfig.InitializeSetInstanceConfig(hostApi->SetInstanceConfigJson);
                 }
             }
             return S_OK;

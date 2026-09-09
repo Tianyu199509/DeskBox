@@ -60,7 +60,11 @@ internal static class GlanceDataFile
     /// <summary>
     /// Re-emit the original document, replacing only owned properties with
     /// current values; everything else is copied verbatim, and owned fields
-    /// missing from the original are appended.
+    /// missing from the original are appended. The schema "version" is NOT
+    /// owned by this partial writer (audit round 19): the package has not
+    /// run the full legacy migration pipeline, so re-stamping an old file
+    /// would falsely claim it, and a future host's newer version must
+    /// survive untouched.
     /// </summary>
     private static void WritePreserving(Utf8JsonWriter writer, GlanceData data)
     {
@@ -73,9 +77,6 @@ internal static class GlanceDataFile
             {
                 switch (property.Name)
                 {
-                    case "version":
-                        writer.WriteNumber(property.Name, GlanceWidgetData.CurrentVersion);
-                        break;
                     case "showChineseFestivals":
                         writer.WriteBoolean(property.Name, settings.ShowChineseFestivals);
                         break;
@@ -112,22 +113,47 @@ internal static class GlanceDataFile
                 written.Add(property.Name);
             }
         }
+        // Fresh file (no original document): stamp the current schema
+        // version once; afterwards the version travels untouched above.
         if (!written.Contains("version")) writer.WriteNumber("version", GlanceWidgetData.CurrentVersion);
-        if (!written.Contains("showChineseFestivals")) writer.WriteBoolean("showChineseFestivals", settings.ShowChineseFestivals);
-        if (!written.Contains("traditionalCalendarMode")) writer.WriteString("traditionalCalendarMode", settings.TraditionalCalendarMode.ToString());
-        if (!written.Contains("rotationIntervalMinutes")) writer.WriteNumber("rotationIntervalMinutes", settings.RotationIntervalMinutes);
-        if (!written.Contains("randomOrder")) writer.WriteBoolean("randomOrder", settings.RandomOrder);
-        if (!written.Contains("backgroundSource")) writer.WriteString("backgroundSource", settings.BackgroundSource.ToString());
-        if (!written.Contains("localImagePaths"))
+        WriteOwnedProperties(writer, settings, written);
+        writer.WriteEndObject();
+    }
+
+    /// <summary>
+    /// The package-owned settings as a standalone patch document for the
+    /// host write-through channel (audit round 19: under host authority,
+    /// native mutations must commit to the authoritative store, not just to
+    /// the local copy).
+    /// </summary>
+    internal static string BuildOwnedPatch(GlanceWidgetData settings)
+    {
+        using var stream = new MemoryStream();
+        using (var writer = new Utf8JsonWriter(stream))
+        {
+            writer.WriteStartObject();
+            WriteOwnedProperties(writer, settings, null);
+            writer.WriteEndObject();
+        }
+        return System.Text.Encoding.UTF8.GetString(stream.ToArray());
+    }
+
+    private static void WriteOwnedProperties(Utf8JsonWriter writer, GlanceWidgetData settings, HashSet<string>? skip)
+    {
+        if (skip?.Contains("showChineseFestivals") != true) writer.WriteBoolean("showChineseFestivals", settings.ShowChineseFestivals);
+        if (skip?.Contains("traditionalCalendarMode") != true) writer.WriteString("traditionalCalendarMode", settings.TraditionalCalendarMode.ToString());
+        if (skip?.Contains("rotationIntervalMinutes") != true) writer.WriteNumber("rotationIntervalMinutes", settings.RotationIntervalMinutes);
+        if (skip?.Contains("randomOrder") != true) writer.WriteBoolean("randomOrder", settings.RandomOrder);
+        if (skip?.Contains("backgroundSource") != true) writer.WriteString("backgroundSource", settings.BackgroundSource.ToString());
+        if (skip?.Contains("localImagePaths") != true)
         {
             writer.WriteStartArray("localImagePaths");
             foreach (string path in settings.LocalImagePaths) writer.WriteStringValue(path);
             writer.WriteEndArray();
         }
-        if (!written.Contains("localFolderPath")) writer.WriteString("localFolderPath", settings.LocalFolderPath);
-        if (!written.Contains("imageFit")) writer.WriteString("imageFit", settings.ImageFit.ToString());
-        if (!written.Contains("showPhotoControls")) writer.WriteBoolean("showPhotoControls", settings.ShowPhotoControls);
-        writer.WriteEndObject();
+        if (skip?.Contains("localFolderPath") != true) writer.WriteString("localFolderPath", settings.LocalFolderPath);
+        if (skip?.Contains("imageFit") != true) writer.WriteString("imageFit", settings.ImageFit.ToString());
+        if (skip?.Contains("showPhotoControls") != true) writer.WriteBoolean("showPhotoControls", settings.ShowPhotoControls);
     }
 
     private static bool TryBool(JsonElement root, string property, out bool value)
