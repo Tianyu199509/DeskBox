@@ -231,8 +231,9 @@ public class NativeGlanceDataGoldenTests
         string full = GlanceDataFile.BuildOwnedPatch(settings);
         using (JsonDocument document = JsonDocument.Parse(full))
         {
-            // 9 interaction fields + 6 display/time fields + layout.
-            Assert.Equal(16, document.RootElement.EnumerateObject().Count());
+            // 9 interaction + 6 display/time + layout + 4 playback-appearance
+            // fields.
+            Assert.Equal(20, document.RootElement.EnumerateObject().Count());
         }
     }
 

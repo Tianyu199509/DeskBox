@@ -92,6 +92,11 @@ internal sealed class GlanceInstanceMigration : ILegacyInstanceMigration
                     "imageFit" => IsValidEnumValue<GlanceImageFitMode>(property.Value),
                     "timeFormat" => IsValidEnumValue<GlanceTimeFormatMode>(property.Value),
                     "layout" => IsValidEnumValue<GlanceLayoutMode>(property.Value),
+                    "transition" => IsValidEnumValue<GlanceTransitionMode>(property.Value),
+                    "transitionSpeed" => IsValidEnumValue<GlanceTransitionSpeed>(property.Value),
+                    "readability" => IsValidEnumValue<GlanceReadabilityMode>(property.Value),
+                    "backgroundImageTransparency" =>
+                        property.Value.ValueKind == JsonValueKind.Number && property.Value.TryGetDouble(out _),
                     _ => true,
                 };
                 if (!typeValid) return false;

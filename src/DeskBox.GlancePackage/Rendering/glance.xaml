@@ -27,16 +27,46 @@
         </ResourceDictionary>
     </Grid.Resources>
 
-    <Grid x:Name="BackgroundImageLayer" IsHitTestVisible="False">
-        <Border x:Name="BackgroundA" Opacity="0" />
-        <Border x:Name="BackgroundB" Opacity="0" />
-    </Grid>
-
-    <Border
-        x:Name="ReadabilityLayer"
-        Background="Black"
-        IsHitTestVisible="False"
-        Opacity="0.42" />
+        <Grid x:Name="BackgroundImageLayer" IsHitTestVisible="False">
+            <Border
+                x:Name="BackgroundA"
+                Opacity="0"
+                RenderTransformOrigin="0.5,0.5">
+                <Border.RenderTransform>
+                    <CompositeTransform />
+                </Border.RenderTransform>
+            </Border>
+            <Border
+                x:Name="BackgroundB"
+                Opacity="0"
+                RenderTransformOrigin="0.5,0.5">
+                <Border.RenderTransform>
+                    <CompositeTransform />
+                </Border.RenderTransform>
+            </Border>
+        </Grid>
+        <Border
+            x:Name="ReadabilityLayer"
+            Background="Black"
+            IsHitTestVisible="False"
+            Opacity="0" />
+        <Border
+            x:Name="CalendarReadabilityLayer"
+            Background="{StaticResource SolidBackgroundFillColorBaseBrush}"
+            IsHitTestVisible="False"
+            Opacity="0" />
+        <Border
+            x:Name="NonCalendarGradientLayer"
+            IsHitTestVisible="False"
+            Opacity="0.34"
+            Visibility="Collapsed">
+            <Border.Background>
+                <LinearGradientBrush StartPoint="0.5,0" EndPoint="0.5,1">
+                    <GradientStop Color="#00000000" Offset="0.34" />
+                    <GradientStop Color="#78000000" Offset="1" />
+                </LinearGradientBrush>
+            </Border.Background>
+        </Border>
 
     <Grid
         x:Name="ImageForegroundThemeScope"

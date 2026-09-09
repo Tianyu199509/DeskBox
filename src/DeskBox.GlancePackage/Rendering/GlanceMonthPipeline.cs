@@ -76,18 +76,26 @@ internal static class GlanceMonthPipeline
             CalendarCornerRadius = new CornerRadius(12),
             PlayIconVisibility = Visibility.Collapsed,
             PauseIconVisibility = Visibility.Visible,
-            // Built-in display toggles gate each element; the calendar
-            // surface follows the resolved layout.
-            TimeVisibility = settings.ShowTime ? Visibility.Visible : Visibility.Collapsed,
-            DateVisibility = settings.ShowDate ? Visibility.Visible : Visibility.Collapsed,
-            WeekdayVisibility = settings.ShowWeekday ? Visibility.Visible : Visibility.Collapsed,
-            CalendarHeaderVisibility = isCompact && layout == NativeLayout.Calendar ? Visibility.Visible : Visibility.Collapsed,
-            CalendarSurfaceVisibility = layout == NativeLayout.Calendar ? Visibility.Visible : Visibility.Collapsed,
-            ForegroundVisibility = foreground ? Visibility.Visible : Visibility.Collapsed,
-            ImmersiveVisibility = foreground && layout == NativeLayout.Immersive ? Visibility.Visible : Visibility.Collapsed,
-            CenteredVisibility = foreground && layout == NativeLayout.Centered ? Visibility.Visible : Visibility.Collapsed,
-            EditorialVisibility = foreground && layout == NativeLayout.Editorial ? Visibility.Visible : Visibility.Collapsed,
-        };
+        // Built-in display toggles gate each element; the calendar
+        // surface follows the resolved layout.
+        TimeVisibility = settings.ShowTime ? Visibility.Visible : Visibility.Collapsed,
+        DateVisibility = settings.ShowDate ? Visibility.Visible : Visibility.Collapsed,
+        WeekdayVisibility = settings.ShowWeekday ? Visibility.Visible : Visibility.Collapsed,
+        CalendarHeaderVisibility = isCompact && layout == NativeLayout.Calendar ? Visibility.Visible : Visibility.Collapsed,
+        CalendarSurfaceVisibility = layout == NativeLayout.Calendar ? Visibility.Visible : Visibility.Collapsed,
+        ForegroundVisibility = foreground ? Visibility.Visible : Visibility.Collapsed,
+        ImmersiveVisibility = foreground && layout == NativeLayout.Immersive ? Visibility.Visible : Visibility.Collapsed,
+        CenteredVisibility = foreground && layout == NativeLayout.Centered ? Visibility.Visible : Visibility.Collapsed,
+        EditorialVisibility = foreground && layout == NativeLayout.Editorial ? Visibility.Visible : Visibility.Collapsed,
+        // Built-in ReadabilityOpacity: strength only counts when the
+        // foreground is visible (background-only shows no darkening).
+        ReadabilityOpacity = foreground ? settings.Readability switch
+        {
+            GlanceReadabilityMode.None => 0,
+            GlanceReadabilityMode.Strong => 0.5,
+            _ => 0.28,
+        } : 0,
+    };
     }
 }
 
@@ -109,6 +117,7 @@ internal static class GlanceMonthPipeline
     nameof(ImmersiveVisibility),
     nameof(PauseIconVisibility),
     nameof(PlayIconVisibility),
+    nameof(ReadabilityOpacity),
     nameof(TimeFontFamily),
     nameof(TimeFontSize),
     nameof(TimeText),
@@ -141,6 +150,7 @@ public sealed partial class GlancePresentation
     public Visibility ImmersiveVisibility { get; init; }
     public Visibility CenteredVisibility { get; init; }
     public Visibility EditorialVisibility { get; init; }
+    public double ReadabilityOpacity { get; init; }
     public Visibility PlayIconVisibility { get; set; }
     public Visibility PauseIconVisibility { get; set; }
 }
