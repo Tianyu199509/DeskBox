@@ -113,16 +113,22 @@ internal static unsafe class NativeHostApiBridge
     internal static string BuildConfigJson(string locale, string accent) =>
         $$"""{"locale":"{{locale}}","accent":"{{accent}}"}""";
 
-    private static readonly string CurrentConfig = BuildConfigJson(
-        System.Globalization.CultureInfo.CurrentUICulture.Name,
-        "#FF4CC2FF");
+    /// <summary>
+    /// DeskBox's own language selection, not the OS UI culture - the user can
+    /// override the OS locale in settings and the built-in widgets follow
+    /// that choice (audit round 18). Falls back to the OS culture when the
+    /// app instance is not available.
+    /// </summary>
+    private static string CurrentLocale() =>
+        App.Current?.LocalizationService?.CurrentCultureName
+        ?? System.Globalization.CultureInfo.CurrentUICulture.Name;
 
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
     private static int GetConfigJson(byte* buffer, int bufferLength)
     {
         try
         {
-            byte[] utf8 = Encoding.UTF8.GetBytes(CurrentConfig);
+            byte[] utf8 = Encoding.UTF8.GetBytes(BuildConfigJson(CurrentLocale(), "#FF4CC2FF"));
             if (utf8.Length > bufferLength) return utf8.Length;
             for (int index = 0; index < utf8.Length; index++) buffer[index] = utf8[index];
             return utf8.Length;

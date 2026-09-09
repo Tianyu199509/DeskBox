@@ -62,6 +62,9 @@ public static unsafe class Exports
 
     private static delegate* unmanaged[Cdecl]<byte*, int, void> _hostLog;
 
+    /// <summary>HostApi table version this package build understands.</summary>
+    private const uint RequiredHostApiVersion = 2;
+
     [UnmanagedCallersOnly(EntryPoint = "deskbox_package_activate", CallConvs = [typeof(CallConvCdecl)])]
     public static int Activate(char* packageRoot, int packageRootLength, char* packageDataRoot, int packageDataRootLength, HostApi* hostApi)
     {
@@ -73,17 +76,26 @@ public static unsafe class Exports
             // Route package-side verbose logging to the host callback (D3
             // Phase 2: replaces the silent App.LogVerbose seam).
             DeskBox.GlancePackage.Services.PackageLogger.Sink = static message => HostLog(message);
-            // Host config channel (HostApi v2): locale/accent for the
-            // rendering pipeline (D3 product migration: real locale instead
-            // of a fixed one).
-            if (hostApi is not null && hostApi->GetConfigJson != 0)
+            if (hostApi is not null)
             {
-                DeskBox.GlancePackage.Services.HostConfig.Initialize(hostApi->GetConfigJson);
-            }
-            if (hostApi is not null && hostApi->Log != 0)
-            {
-                _hostLog = (delegate* unmanaged[Cdecl]<byte*, int, void>)hostApi->Log;
-                HostLog("glance package activated (abi 4)");
+                // The HostApi table is a versioned contract: never read
+                // function pointers before Version/Size prove they are there
+                // (audit round 18 - this is a real product path now).
+                if (hostApi->Version < RequiredHostApiVersion || hostApi->Size < (uint)sizeof(HostApi))
+                {
+                    TryWriteDiagnostic("activate-hostapi.txt",
+                        $"hostApi version={hostApi->Version} size={hostApi->Size} requiredVersion={RequiredHostApiVersion}");
+                    return E_INVALIDARG;
+                }
+                if (hostApi->Log != 0)
+                {
+                    _hostLog = (delegate* unmanaged[Cdecl]<byte*, int, void>)hostApi->Log;
+                    HostLog("glance package activated (abi 4)");
+                }
+                if (hostApi->GetConfigJson != 0)
+                {
+                    DeskBox.GlancePackage.Services.HostConfig.Initialize(hostApi->GetConfigJson);
+                }
             }
             return S_OK;
         }
@@ -162,6 +174,14 @@ public static unsafe class Exports
         {
             TryWriteDiagnostic("shutdown-error.txt", error.ToString());
             return error.HResult;
+        }
+        finally
+        {
+            // The module stays resident for process lifetime, but the next
+            // activate must not observe stale host callbacks (audit 18).
+            _hostLog = null;
+            DeskBox.GlancePackage.Services.HostConfig.Reset();
+            DeskBox.GlancePackage.Services.PackageLogger.Sink = null;
         }
     }
 

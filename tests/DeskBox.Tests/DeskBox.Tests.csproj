@@ -42,6 +42,10 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\DeskBox\DeskBox.csproj" />
     <ProjectReference Include="..\..\src\DeskBox.Updater\DeskBox.Updater.csproj" />
+    <!-- Golden data tests exercise the native package's persistence layer
+         directly (the host still does not reference it). The alias keeps the
+         package's DeskBox.* types from colliding with the host's. -->
+    <ProjectReference Include="..\..\src\DeskBox.GlancePackage\DeskBox.GlancePackage.csproj" Aliases="GlancePkg" />
   </ItemGroup>
 
   <ItemGroup>

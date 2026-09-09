@@ -29,6 +29,15 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.WindowsAppSDK" Version="2.4.0" />
   </ItemGroup>
+
+  <!-- Test-only visibility: lets the golden data tests exercise the package's
+       persistence layer directly. The HOST still does not reference this
+       project - that boundary is unchanged. -->
+  <ItemGroup>
+    <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleTo">
+      <_Parameter1>DeskBox.Tests</_Parameter1>
+    </AssemblyAttribute>
+  </ItemGroup>
   <ItemGroup>
     <None Update="Rendering\glance.xaml" CopyToOutputDirectory="PreserveNewest" />
     <None Include="strings\*.json" CopyToOutputDirectory="PreserveNewest" />

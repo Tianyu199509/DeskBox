@@ -18,6 +18,10 @@ internal static unsafe class HostConfig
     internal static void Initialize(nint getConfigJson) =>
         _getConfigJson = (delegate* unmanaged[Cdecl]<byte*, int, int>)getConfigJson;
 
+    /// <summary>Drop the host callback; called on shutdown so a later
+    /// activate in the same process never observes a stale pointer.</summary>
+    internal static void Reset() => _getConfigJson = null;
+
     internal static CultureInfo? TryGetCulture()
     {
         string? locale = TryReadString("locale");

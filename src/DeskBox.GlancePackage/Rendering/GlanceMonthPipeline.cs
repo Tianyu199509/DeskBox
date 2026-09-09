@@ -18,25 +18,28 @@ internal static class GlanceMonthPipeline
     public const double DefaultWidth = 440;
     public const double DefaultHeight = 560;
 
-    public static (GlanceCalendarMonth Month, bool IsCompact, double PanelHeight, double PanelWidth, double DayItemHeight, bool ShowSecondary) Build(
-        bool showTraditional, bool showFestivals, CultureInfo culture, double availableWidth, double availableHeight)
+    public static (GlanceCalendarMonth Month, bool IsCompact, double PanelHeight, double PanelWidth, double DayItemHeight, bool ShowSecondary, GlanceTraditionalCalendarMode EffectiveMode) Build(
+        bool showFestivals, GlanceTraditionalCalendarMode traditionalMode, CultureInfo culture, double availableWidth, double availableHeight)
     {
         DateOnly today = DateOnly.FromDateTime(DateTime.Today);
         DateOnly month = new(today.Year, today.Month, 1);
         GlanceCalendarMonth calendarMonth = new LocalCalendarPresentationSource()
             .GetMonthAsync(month, culture).GetAwaiter().GetResult();
         DateOnly titleDate = today;
-        GlanceTraditionalCalendarMode mode = showTraditional
-            ? GlanceTraditionalCalendarMode.ChineseLunar
-            : GlanceTraditionalCalendarMode.None;
+        // The real mode travels through the pipeline (audit round 18: a bool
+        // collapsed Hebrew/Japanese/Persian/... into Chinese lunar).
+        GlanceTraditionalCalendarMode mode = traditionalMode == GlanceTraditionalCalendarMode.Auto
+            ? new GlanceTraditionalCalendarService().ResolveMode(GlanceTraditionalCalendarMode.Auto, culture.Name)
+            : traditionalMode;
         calendarMonth = new GlanceTraditionalCalendarService().Apply(calendarMonth, mode, culture, titleDate);
-        calendarMonth = new GlanceFestivalService().Apply(calendarMonth, showChineseFestivals: showFestivals && showTraditional, mode, culture);
+        calendarMonth = new GlanceFestivalService().Apply(
+            calendarMonth, showChineseFestivals: showFestivals && mode == GlanceTraditionalCalendarMode.ChineseLunar, mode, culture);
         bool isCompact = GlanceCalendarLayoutCalculator.IsCompact(availableHeight);
         double panelHeight = GlanceCalendarLayoutCalculator.CalculatePanelHeight(availableHeight, isCompact, true);
         double panelWidth = Math.Round(Math.Clamp(availableWidth - 28, 272, 360));
         double dayItemHeight = Math.Round(GlanceCalendarLayoutCalculator.CalculateDayHeight(panelHeight, isCompact, true) * 2) / 2;
         bool showSecondary = GlanceCalendarLayoutCalculator.ShouldShowTraditionalDetails(panelWidth, dayItemHeight, isCompact, true);
-        return (calendarMonth, isCompact, panelHeight, panelWidth, dayItemHeight, showSecondary);
+        return (calendarMonth, isCompact, panelHeight, panelWidth, dayItemHeight, showSecondary, mode);
     }
 
     public static GlancePresentation CreatePresentation(
