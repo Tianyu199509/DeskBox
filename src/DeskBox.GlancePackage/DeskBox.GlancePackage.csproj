@@ -1,0 +1,47 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    DeskBox official Glance native package (batch D3 phase 1).
+    D3 phase 1: project lives in src/, is part of the solution and CI, and
+    produces the installable native package. Production source files are
+    linked (Compile Include) from the host during the transition period;
+    D3 phase 2 copies them here and removes them from the host.
+    The host does NOT reference this project.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows10.0.22621.0</TargetFramework>
+    <SupportedOSPlatformVersion>10.0.19044.0</SupportedOSPlatformVersion>
+    <UseWinUI>true</UseWinUI>
+    <WindowsPackageType>None</WindowsPackageType>
+    <WindowsAppSDKSelfContained>false</WindowsAppSDKSelfContained>
+    <RuntimeIdentifiers>win-x64;win-arm64</RuntimeIdentifiers>
+    <Platforms>x64;ARM64</Platforms>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <IsAotCompatible>true</IsAotCompatible>
+    <JsonSerializerIsReflectionEnabledByDefault>false</JsonSerializerIsReflectionEnabledByDefault>
+    <RootNamespace>DeskBox.GlancePackage</RootNamespace>
+    <AssemblyName>DeskBox.GlancePackage</AssemblyName>
+    <WindowsAppSdkBootstrapInitialize>false</WindowsAppSdkBootstrapInitialize>
+    <WindowsAppSDKDeploymentManagerInitialize>false</WindowsAppSDKDeploymentManagerInitialize>
+    <WindowsAppSDKUndockedRegFreeWinRTInitialize>false</WindowsAppSDKUndockedRegFreeWinRTInitialize>
+    <HostSourceRoot>$(MSBuildThisFileDirectory)..\DeskBox\</HostSourceRoot>
+    <AbstractionsRoot>$(MSBuildThisFileDirectory)..\DeskBox.Abstractions\</AbstractionsRoot>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.WindowsAppSDK" Version="2.4.0" />
+    <!-- D3 phase 1: link production sources (D3 phase 2 will copy + delete from host). -->
+    <Compile Include="$(AbstractionsRoot)Models\GlanceCalendarModels.cs" Link="Linked\GlanceCalendarModels.cs" />
+    <Compile Include="$(AbstractionsRoot)Contracts\ICalendarPresentationSource.cs" Link="Linked\ICalendarPresentationSource.cs" />
+    <Compile Include="$(HostSourceRoot)Services\GlanceCalendarLayoutCalculator.cs" Link="Linked\GlanceCalendarLayoutCalculator.cs" />
+    <Compile Include="$(HostSourceRoot)Services\LocalCalendarPresentationSource.cs" Link="Linked\LocalCalendarPresentationSource.cs" />
+    <Compile Include="$(HostSourceRoot)Services\GlanceTraditionalCalendarService.cs" Link="Linked\GlanceTraditionalCalendarService.cs" />
+    <Compile Include="$(HostSourceRoot)Services\GlanceFestivalService.cs" Link="Linked\GlanceFestivalService.cs" />
+    <Compile Include="$(HostSourceRoot)Models\GlanceWidgetData.cs" Link="Linked\GlanceWidgetData.cs" />
+    <Compile Include="$(HostSourceRoot)Helpers\ChineseTextConverter.cs" Link="Linked\ChineseTextConverter.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Update="Rendering\glance.xaml" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="strings\*.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>
