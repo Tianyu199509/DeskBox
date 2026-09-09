@@ -48,18 +48,17 @@ internal static class GlanceMonthPipeline
 
     public static GlancePresentation CreatePresentation(
         GlanceCalendarMonth month, bool isCompact, double panelHeight, double panelWidth,
-        CultureInfo culture, double availableWidth, double availableHeight)
+        GlanceWidgetData settings, CultureInfo culture, double availableWidth, double availableHeight)
     {
         DateTime now = DateTime.Now;
         double compactFontSize = Math.Round(Math.Clamp(Math.Min(availableWidth * 0.078, availableHeight * 0.095), 22, 28) * 2) / 2;
         return new GlancePresentation
         {
-            TimeText = now.ToString("HH:mm", culture),
-            // "M" is the culture-aware month-day pattern (Chinese locales
-            // render their native month-day form); never hard-code one
-            // locale's literal format here.
-            DateText = now.ToString("M", culture),
-            WeekdayText = culture.DateTimeFormat.GetDayName(now.DayOfWeek),
+            TimeText = GlanceDisplayPolicy.FormatTimeText(now, settings.TimeFormat, culture),
+            // Culture-aware month-day (or long-date-with-year) pattern.
+            DateText = GlanceDisplayPolicy.FormatDateText(now, culture, settings.ShowYear),
+            WeekdayText = now.ToString("dddd", culture),
+            CompactCalendarDateText = GlanceDisplayPolicy.FormatCompactCalendarDateText(now, culture),
             TraditionalCalendarTitle = month.TraditionalTitle,
             TimeFontFamily = new FontFamily("XamlAutoFontFamily"),
             CompactTimeFontSize = compactFontSize,
@@ -70,6 +69,15 @@ internal static class GlanceMonthPipeline
             CalendarCornerRadius = new CornerRadius(12),
             PlayIconVisibility = Visibility.Collapsed,
             PauseIconVisibility = Visibility.Visible,
+            // Built-in display toggles gate each element; the calendar
+            // surface additionally carries the responsive floor.
+            TimeVisibility = settings.ShowTime ? Visibility.Visible : Visibility.Collapsed,
+            DateVisibility = settings.ShowDate ? Visibility.Visible : Visibility.Collapsed,
+            WeekdayVisibility = settings.ShowWeekday ? Visibility.Visible : Visibility.Collapsed,
+            CalendarHeaderVisibility = isCompact ? Visibility.Visible : Visibility.Collapsed,
+            CalendarSurfaceVisibility = GlanceDisplayPolicy.ShowCalendarEffective(
+                settings.ShowCalendar, availableWidth, availableHeight)
+                ? Visibility.Visible : Visibility.Collapsed,
         };
     }
 }
@@ -77,23 +85,30 @@ internal static class GlanceMonthPipeline
 [WinRT.GeneratedBindableCustomProperty([
     nameof(CalendarCompactTimeFontSize),
     nameof(CalendarCornerRadius),
+    nameof(CalendarHeaderVisibility),
     nameof(CalendarPanelHeight),
     nameof(CalendarPanelMaxWidth),
     nameof(CalendarPanelWidth),
+    nameof(CalendarSurfaceVisibility),
+    nameof(CompactCalendarDateText),
     nameof(CompactTimeFontSize),
     nameof(DateText),
+    nameof(DateVisibility),
     nameof(PauseIconVisibility),
     nameof(PlayIconVisibility),
     nameof(TimeFontFamily),
     nameof(TimeText),
+    nameof(TimeVisibility),
     nameof(TraditionalCalendarTitle),
-    nameof(WeekdayText)
+    nameof(WeekdayText),
+    nameof(WeekdayVisibility)
 ], [])]
 public sealed partial class GlancePresentation
 {
     public string TimeText { get; init; } = "";
     public string DateText { get; init; } = "";
     public string WeekdayText { get; init; } = "";
+    public string CompactCalendarDateText { get; init; } = "";
     public string TraditionalCalendarTitle { get; init; } = "";
     public FontFamily TimeFontFamily { get; init; } = new("XamlAutoFontFamily");
     public double CompactTimeFontSize { get; init; }
@@ -102,6 +117,11 @@ public sealed partial class GlancePresentation
     public double CalendarPanelWidth { get; init; }
     public double CalendarPanelMaxWidth { get; init; }
     public CornerRadius CalendarCornerRadius { get; init; }
+    public Visibility TimeVisibility { get; init; }
+    public Visibility DateVisibility { get; init; }
+    public Visibility WeekdayVisibility { get; init; }
+    public Visibility CalendarHeaderVisibility { get; init; }
+    public Visibility CalendarSurfaceVisibility { get; init; }
     public Visibility PlayIconVisibility { get; set; }
     public Visibility PauseIconVisibility { get; set; }
 }

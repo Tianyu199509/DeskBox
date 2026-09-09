@@ -39,8 +39,9 @@
         Opacity="0.42" />
 
     <Grid x:Name="CalendarLayoutRoot" Padding="20,22,20,18">
-        <Border
-            x:Name="CalendarGlassSurface"
+                <Border
+                    x:Name="CalendarGlassSurface"
+                    Visibility="{Binding CalendarSurfaceVisibility}"
             Height="{Binding CalendarPanelHeight}"
             HorizontalAlignment="Center"
             Margin="-6,0,-6,0"
@@ -59,8 +60,12 @@
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="*" />
                     </Grid.RowDefinitions>
-                    <Grid Grid.Row="0" Height="27" Margin="13,7,6,0" Visibility="Collapsed">
-                        <TextBlock x:Name="CompactTimeText" Margin="0,5,0,-5" HorizontalAlignment="Left" FontSize="22" FontWeight="SemiBold" Foreground="{StaticResource TextFillColorPrimaryBrush}" LineHeight="26" LineStackingStrategy="BlockLineHeight" Text="{Binding TimeText}" Typography.NumeralAlignment="Tabular" />
+                    <Grid Grid.Row="0" Height="27" Margin="13,7,6,0" Visibility="{Binding CalendarHeaderVisibility}">
+                        <TextBlock x:Name="CompactTimeText" Margin="0,5,0,-5" HorizontalAlignment="Left" FontSize="22" FontWeight="SemiBold" Foreground="{StaticResource TextFillColorPrimaryBrush}" LineHeight="26" LineStackingStrategy="BlockLineHeight" Text="{Binding TimeText}" Typography.NumeralAlignment="Tabular" Visibility="{Binding TimeVisibility}" />
+                        <StackPanel Margin="0,5,0,-5" HorizontalAlignment="Right" VerticalAlignment="Top">
+                            <TextBlock HorizontalAlignment="Right" FontSize="10" FontWeight="SemiBold" Foreground="{StaticResource TextFillColorPrimaryBrush}" LineHeight="12" LineStackingStrategy="BlockLineHeight" Text="{Binding CompactCalendarDateText}" Typography.NumeralAlignment="Tabular" Visibility="{Binding DateVisibility}" />
+                            <TextBlock HorizontalAlignment="Right" FontSize="9.5" Foreground="{StaticResource TextFillColorSecondaryBrush}" LineHeight="11" LineStackingStrategy="BlockLineHeight" Text="{Binding WeekdayText}" Visibility="{Binding WeekdayVisibility}" />
+                        </StackPanel>
                     </Grid>
                     <Grid Grid.Row="1">
                         <CalendarView
