@@ -303,7 +303,7 @@ internal sealed class NativeWidgetLease : IDisposable
     }
 }
 
-/// <summary>Typed host→package lifecycle events (ABI v3, audit round 15).</summary>
+/// <summary>Typed host→package lifecycle events (ABI v3, audit rounds 15-16).</summary>
 internal enum WidgetLifecycleEventKind : uint
 {
     RefreshRequested = 1,
@@ -318,6 +318,9 @@ internal enum WidgetLifecycleEventKind : uint
     PerformanceSettingsChanged = 10,
     InteractiveResizeBegin = 11,
     InteractiveResizeEnd = 12,
+    ResponsiveLayoutBegin = 13,   // capsule/breakpoint transition (not user drag)
+    ResponsiveLayoutComplete = 14,
+    ResponsiveLayoutCancel = 15,
 }
 
 internal sealed unsafe class NativePackageSession
@@ -442,14 +445,18 @@ internal sealed unsafe class NativePackageSession
         return true;
     }
 
-    /// <summary>Forward a lifecycle event to the package; no-op when the export is absent.</summary>
+    /// <summary>Forward a lifecycle event; logs when the package reports failure.</summary>
     internal unsafe void SendWidgetEvent(nint handle, WidgetLifecycleEventKind kind, double width, double height, uint flags)
     {
         if (_widgetEventExport == 0) return;
         try
         {
             var send = (delegate* unmanaged[Cdecl]<nint, uint, double, double, uint, int>)_widgetEventExport;
-            send(handle, (uint)kind, width, height, flags);
+            int status = send(handle, (uint)kind, width, height, flags);
+            if (status != 0)
+            {
+                App.LogVerbose($"[NativePackage] widget event {kind} returned 0x{status:X8}");
+            }
         }
         catch (Exception error)
         {
@@ -524,7 +531,8 @@ internal static class NativeWidgetPackageLoader
                 !TryGetExport(module, "deskbox_package_activate", out nint activateExport) ||
                 !TryGetExport(module, "deskbox_widget_create", out nint createExport) ||
                 !TryGetExport(module, "deskbox_widget_destroy", out nint destroyExport) ||
-                !TryGetExport(module, "deskbox_package_shutdown", out nint shutdownExport))
+                !TryGetExport(module, "deskbox_package_shutdown", out nint shutdownExport) ||
+                !TryGetExport(module, "deskbox_widget_event", out nint widgetEventExport))
             {
                 App.LogVerbose("[NativePackage] unified ABI v3 exports missing");
                 return null;
@@ -535,8 +543,6 @@ internal static class NativeWidgetPackageLoader
                 App.Log($"[NativePackage] ABI version {version} != {NativeWidgetRuntimeManager.RequiredAbiVersion}");
                 return null;
             }
-            // Widget lifecycle event export is optional (v3 additive).
-            _ = NativeLibrary.TryGetExport(module, "deskbox_widget_event", out nint widgetEventExport);
             var session = new NativePackageSession(
                 descriptor.Identity, descriptor.PackageRoot, packageDataRoot,
                 activateExport, createExport, destroyExport, shutdownExport, widgetEventExport);

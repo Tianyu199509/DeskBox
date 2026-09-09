@@ -16,9 +16,25 @@ internal static class NativeWidgetPilot
     private const string TargetPackageId = "deskbox.glance";
 
     private static PluginPackageManager? _manager;
+
+    /// <summary>
+    /// Production manager: empty trusted-publisher set until batch E provisions
+    /// the official key. The dev spike publisher is NEVER trusted here.
+    /// </summary>
     private static PluginPackageManager Manager => _manager ??= new PluginPackageManager(
+        Path.Combine(DeskBoxDataPathService.Current.DataDirectory, "plugins"));
+
+    /// <summary>
+    /// Dev manager: trusts the public spike publisher. Exists only when
+    /// EnableDeskBoxNativeDevPilot=true compiles this type; Release builds
+    /// have no dev trust root at all.
+    /// </summary>
+#if DESKBOX_NATIVE_DEV_PILOT
+    private static PluginPackageManager? _devManager;
+    private static PluginPackageManager DevManager => _devManager ??= new PluginPackageManager(
         Path.Combine(DeskBoxDataPathService.Current.DataDirectory, "plugins"),
         [DevPublisherFingerprint]);
+#endif
 
     /// <summary>
     /// Called once from App startup to install the dev package through the B1
@@ -34,7 +50,7 @@ internal static class NativeWidgetPilot
         if (packageRoot is null) return;
         try
         {
-            PluginInstallResult result = Manager.Install(packageRoot);
+            PluginInstallResult result = DevManager.Install(packageRoot);
             App.Log(result.Succeeded
                 ? $"[NativePackage] dev package installed: {result.Package!.PackageId} v{result.Package.Version} -> {result.InstallDirectory}"
                 : $"[NativePackage] dev package install failed: {string.Join("; ", result.Failures)}");
@@ -102,7 +118,9 @@ internal sealed class NativeWidgetPilotContent :
 
     public Task InitializeAsync()
     {
-        _lease.InvokeWidgetEvent(WidgetLifecycleEventKind.RefreshRequested, 0, 0, 0);
+        // create_widget already starts the package's initial lifecycle;
+        // InitializeAsync must NOT send RefreshRequested (audit round 16: conflating
+        // initialization with refresh causes double-fetch in Weather/Music).
         return Task.CompletedTask;
     }
 
@@ -134,12 +152,13 @@ internal sealed class NativeWidgetPilotContent :
         _lease.InvokeWidgetEvent(WidgetLifecycleEventKind.CompactStateChanged, 0, 0, collapsed ? 1u : 0u);
 
     public void BeginResponsiveLayoutTransition(double targetContentWidth, double targetContentHeight, bool isCollapsing) =>
-        _lease.InvokeWidgetEvent(WidgetLifecycleEventKind.InteractiveResizeBegin, targetContentWidth, targetContentHeight, isCollapsing ? 1u : 0u);
+        _lease.InvokeWidgetEvent(WidgetLifecycleEventKind.ResponsiveLayoutBegin, targetContentWidth, targetContentHeight, isCollapsing ? 1u : 0u);
 
     public void CompleteResponsiveLayoutTransition(double finalContentWidth, double finalContentHeight) =>
-        _lease.InvokeWidgetEvent(WidgetLifecycleEventKind.InteractiveResizeEnd, finalContentWidth, finalContentHeight, 0);
+        _lease.InvokeWidgetEvent(WidgetLifecycleEventKind.ResponsiveLayoutComplete, finalContentWidth, finalContentHeight, 0);
 
-    public void CancelResponsiveLayoutTransition() { }
+    public void CancelResponsiveLayoutTransition() =>
+        _lease.InvokeWidgetEvent(WidgetLifecycleEventKind.ResponsiveLayoutCancel, 0, 0, 0);
 
     public void OnHostViewportSizeChanged(double width, double height) =>
         _lease.InvokeWidgetEvent(WidgetLifecycleEventKind.ViewportChanged, width, height, 0);

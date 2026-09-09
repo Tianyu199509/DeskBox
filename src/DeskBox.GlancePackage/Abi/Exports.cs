@@ -123,11 +123,25 @@ public static unsafe class Exports
     [UnmanagedCallersOnly(EntryPoint = "deskbox_widget_event", CallConvs = [typeof(CallConvCdecl)])]
     public static int WidgetEvent(nint widgetHandle, uint eventKind, double width, double height, uint flags)
     {
-        if (_handles.TryGetValue(widgetHandle, out Rendering.GlanceWidgetHandle? handle))
+        // Total function: managed exceptions must never cross the C ABI boundary.
+        try
         {
+            if (!_handles.TryGetValue(widgetHandle, out Rendering.GlanceWidgetHandle? handle))
+            {
+                return unchecked((int)0x80070510); // ERROR_INVALID_HANDLE
+            }
+            if (eventKind is < 1 or > 12)
+            {
+                return unchecked((int)0x80070057); // E_INVALIDARG
+            }
             handle.OnLifecycleEvent(eventKind, width, height, flags);
+            return 0;
         }
-        return 0;
+        catch (Exception error)
+        {
+            TryWriteDiagnostic("widget-event-error.txt", error.ToString());
+            return error.HResult;
+        }
     }
 
     private static void HostLog(string message)
