@@ -94,10 +94,18 @@ public sealed class TestPathsContractTests
             }
         }
 
+        // Native package projects are deliberately NOT referenced by the host
+        // (loaded at runtime via the native ABI, not compiled in). They have
+        // their own build pipeline (scripts/spike/build-official-glance.ps1).
+        string[] deliberatelyUnreachable =
+        [
+            Path.GetFullPath(Path.Combine(repositoryRoot, "src/DeskBox.GlancePackage/DeskBox.GlancePackage.csproj")),
+        ];
+
         foreach (string project in srcProjects)
         {
             Assert.True(
-                reachable.Contains(project),
+                reachable.Contains(project) || deliberatelyUnreachable.Contains(project, StringComparer.OrdinalIgnoreCase),
                 $"{project} is not reachable from the host or test build graph; CI never compiles it. " +
                 "Add a ProjectReference or a dedicated pipeline step deliberately.");
         }
