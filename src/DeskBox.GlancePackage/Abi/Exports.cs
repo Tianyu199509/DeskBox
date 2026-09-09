@@ -148,10 +148,13 @@ public static unsafe class Exports
         // host destroy state machine only commits a release on package success.
         try
         {
-            if (!_handles.Remove(widgetHandle, out Rendering.GlanceWidgetHandle? handle)) return E_HANDLE;
-            // Explicit teardown (audit 19): stop timers and save runtime
-            // state now - never bet on the UI tree firing Unloaded.
+            if (!_handles.TryGetValue(widgetHandle, out Rendering.GlanceWidgetHandle? handle)) return E_HANDLE;
+            // Dispose FIRST, then remove the handle (audit round 20): the
+            // controller's Dispose is total/no-throw, so nothing between the
+            // two steps can fail and leave the host lease alive against an
+            // already-gone package handle (the destroy transaction contract).
             handle.Dispose();
+            _handles.Remove(widgetHandle);
             Instances.Remove(widgetHandle);
             return S_OK;
         }

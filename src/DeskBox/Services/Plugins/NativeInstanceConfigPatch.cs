@@ -36,6 +36,24 @@ internal sealed record InstanceConfigPatch(
         if (ShowPhotoControls is { } controls) data.ShowPhotoControls = controls;
     }
 
+    /// <summary>
+    /// Commits an accepted patch through the authoritative store.
+    /// Deliberately OUTSIDE the unsafe HostApi bridge (await is not allowed
+    /// in an unsafe context); failures are observed and logged here so a
+    /// lost async commit never disappears silently.
+    /// </summary>
+    public static async Task CommitAsync(GlanceWidgetStore store, InstanceConfigPatch patch)
+    {
+        try
+        {
+            await store.UpdateAsync(data => patch.ApplyTo(data));
+        }
+        catch (Exception error)
+        {
+            App.Log($"[NativePackage] instance config commit failed: {error.Message}");
+        }
+    }
+
     public static InstanceConfigPatch? TryParse(string payload)
     {
         try
@@ -125,7 +143,12 @@ internal sealed record InstanceConfigPatch(
         if (!root.TryGetProperty(property, out JsonElement element)) return true;
         if (element.ValueKind == JsonValueKind.String)
         {
-            if (!Enum.TryParse(element.GetString(), ignoreCase: true, out TEnum parsed)) return false;
+            // TryParse also accepts numeric STRINGS into undefined values -
+            // IsDefined closes that hole (audit round 20).
+            if (!Enum.TryParse(element.GetString(), ignoreCase: true, out TEnum parsed) || !Enum.IsDefined(parsed))
+            {
+                return false;
+            }
             value = parsed;
             return true;
         }

@@ -64,6 +64,19 @@ public class NativeInstanceConfigPatchTests
     }
 
     [Fact]
+    public void UndefinedEnumValuesAreRejected()
+    {
+        // TryParse accepts numeric STRINGS into undefined values; the patch
+        // channel must not commit those (audit round 20).
+        Assert.Null(DeskBox.Services.Plugins.InstanceConfigPatch.TryParse(
+            """{"traditionalCalendarMode":"999"}"""));
+        Assert.Null(DeskBox.Services.Plugins.InstanceConfigPatch.TryParse(
+            """{"backgroundSource":"NotAMode"}"""));
+        Assert.Null(DeskBox.Services.Plugins.InstanceConfigPatch.TryParse(
+            """{"backgroundSource":{}}"""));
+    }
+
+    [Fact]
     public void ClearingTheLocalFolderMapsEmptyStringToNull()
     {
         DeskBox.Services.Plugins.InstanceConfigPatch? patch =

@@ -196,4 +196,23 @@ internal sealed class GlanceRuntimeState
                 writer.WriteNumber("imageIndex", state.ImageIndex);
                 writer.WriteEndObject();
             });
+
+    /// <summary>
+    /// Total no-throw variant (audit round 20): ephemeral runtime state must
+    /// never turn into an ABI destroy failure, so a failed save is logged
+    /// and reported as false instead of propagating.
+    /// </summary>
+    public static bool TrySave(GlanceRuntimeState state, string instanceDataRoot)
+    {
+        try
+        {
+            Save(state, instanceDataRoot);
+            return true;
+        }
+        catch (Exception error)
+        {
+            PackageLogger.LogVerbose($"[GlancePackage] failed to save runtime state: {error.Message}");
+            return false;
+        }
+    }
 }

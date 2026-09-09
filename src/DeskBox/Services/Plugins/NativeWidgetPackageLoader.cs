@@ -164,12 +164,15 @@ internal static unsafe class NativeHostApiBridge
                 App.LogVerbose($"[NativePackage] rejected malformed instance config patch for {widgetId}");
                 return unchecked((int)0x80070057); // E_INVALIDARG
             }
-            // Authority write (audit round 19): the native setting mutation
-            // commits to the built-in store; the package's local copy is a
-            // cache the next create re-syncs. Fire-and-forget on the caller's
-            // dispatcher context - the callback must never block the UI
-            // thread on the store's async pipeline.
-            _ = GlanceWidgetStore.ForWidget(widgetId).UpdateAsync(data => patch.ApplyTo(data));
+            // Authority write (audits 19-20): the native setting mutation
+            // commits to the built-in store. The return value means
+            // ACCEPTED, not committed: the store update runs fire-and-forget
+            // because blocking the UI thread on the async store pipeline
+            // would deadlock. The package treats only synchronous rejection
+            // as a revert condition; a failed async persistence is logged
+            // below and self-heals on the next create-time sync from
+            // authority (which is also what reverts the widget's cache).
+            _ = InstanceConfigPatch.CommitAsync(GlanceWidgetStore.ForWidget(widgetId), patch);
             return 0;
         }
         catch (Exception error)

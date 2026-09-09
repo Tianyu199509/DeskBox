@@ -46,6 +46,7 @@ internal sealed class GlanceWidgetController : IDisposable
     private bool _collapsed;
     private bool _applying; // toggle revert suppression
     private bool _disposed;
+    private DateOnly _renderedDate;
 
     private double _width;
     private double _height;
@@ -120,7 +121,10 @@ internal sealed class GlanceWidgetController : IDisposable
         {
             if (_applying) return;
             Settings.ShowChineseFestivals = festivalToggle.IsOn;
-            if (CommitSettings())
+            // Minimal patch (audit round 20): send ONLY the mutated field -
+            // a full owned snapshot would overwrite concurrent host-side
+            // setting changes with this widget's stale cache.
+            if (CommitSettings(GlanceDataFile.BuildOwnedPatch(Settings, "showChineseFestivals")))
             {
                 RebuildMonth();
                 return;
@@ -131,7 +135,7 @@ internal sealed class GlanceWidgetController : IDisposable
         {
             if (_applying) return;
             Settings.TraditionalCalendarMode = traditionalToggle.IsOn ? _restoreMode : GlanceTraditionalCalendarMode.None;
-            if (CommitSettings())
+            if (CommitSettings(GlanceDataFile.BuildOwnedPatch(Settings, "traditionalCalendarMode")))
             {
                 RebuildMonth();
                 return;
@@ -165,11 +169,19 @@ internal sealed class GlanceWidgetController : IDisposable
         _resizeTimer.Interval = TimeSpan.FromMilliseconds(120);
         _resizeTimer.IsRepeating = false;
         _resizeTimer.Tick += (_, _) => RebuildMonth();
+        _renderedDate = DateOnly.FromDateTime(DateTime.Today);
 
-        // Safety net only: the primary teardown is deskbox_widget_destroy ->
-        // Dispose(). Unloaded may fire first when the host tears the tree
-        // down; the disposed guard makes double teardown a no-op.
-        _content.Unloaded += (_, _) => Dispose();
+        // Visual pause ONLY (audit round 20): Unloaded fires during host
+        // group transitions that can ROLL BACK, so it must never permanently
+        // dispose the controller - a rolled-back view would come back with
+        // dead timers. Real teardown happens exclusively on
+        // deskbox_widget_destroy.
+        _content.Unloaded += (_, _) => StopVisualResources();
+        _content.Loaded += (_, _) =>
+        {
+            EnsureCurrentDate();
+            UpdateTimers();
+        };
 
         UpdateTimers();
     }
@@ -180,7 +192,7 @@ internal sealed class GlanceWidgetController : IDisposable
     {
         EventsReceived++;
         if (_disposed) return;
-        UpdateClockText();
+        EnsureCurrentDate();
         RebuildMonth();
     }
 
@@ -192,9 +204,11 @@ internal sealed class GlanceWidgetController : IDisposable
         if (visible)
         {
             // Built-in parity: the clock text refreshes immediately on
-            // reveal instead of showing the hidden-time snapshot.
+            // reveal instead of showing the hidden-time snapshot, and a
+            // widget hidden across midnight/month rolls its grid forward
+            // (the minute tick cannot detect a date change while stopped).
             _longHidden = false;
-            UpdateClockText();
+            EnsureCurrentDate();
         }
         UpdateTimers();
     }
@@ -256,21 +270,30 @@ internal sealed class GlanceWidgetController : IDisposable
     private void ClockTimerTick()
     {
         if (_disposed) return;
-        // Built-in parity: compare the date a minute ago with now - at
-        // midnight (or any date change) the month grid refreshes.
-        DateOnly previousDate = DateOnly.FromDateTime(DateTime.Now.AddMinutes(-1));
-        DateOnly currentDate = DateOnly.FromDateTime(DateTime.Now);
-        UpdateClockText();
-        if (previousDate != currentDate &&
-            _month.Month == new DateOnly(previousDate.Year, previousDate.Month, 1))
-        {
-            RebuildMonth();
-        }
+        // A running clock catches the midnight rollover here; a HIDDEN
+        // widget catches it in EnsureCurrentDate on reveal (audit 20).
+        EnsureCurrentDate();
         // Re-arm the one-shot clock only; restarting the rotation timer here
         // would reset its progress.
         _clockTimer.Stop();
         _clockTimer.Interval = GlanceLifecyclePolicy.DelayToNextMinute(DateTime.Now);
         _clockTimer.Start();
+    }
+
+    /// <summary>
+    /// Brings the rendered date (and month grid) forward to today. Cheap
+    /// when nothing changed; rebuilds the month on any date rollover.
+    /// </summary>
+    private void EnsureCurrentDate()
+    {
+        DateOnly today = DateOnly.FromDateTime(DateTime.Today);
+        if (today == _renderedDate)
+        {
+            UpdateClockText();
+            return;
+        }
+        _renderedDate = today;
+        RebuildMonth();
     }
 
     private void UpdateClockText()
@@ -281,9 +304,9 @@ internal sealed class GlanceWidgetController : IDisposable
 
     // ---- Settings (host-authoritative write-through) ----
 
-    private bool CommitSettings()
+    private bool CommitSettings(string patch)
     {
-        if (HostConfig.TryPushInstanceConfig(_instanceId, GlanceDataFile.BuildOwnedPatch(Settings)))
+        if (HostConfig.TryPushInstanceConfig(_instanceId, patch))
         {
             // Local cache for continuity until the next host sync; the
             // authoritative copy lives in the built-in store.
@@ -315,6 +338,7 @@ internal sealed class GlanceWidgetController : IDisposable
         (_month, _isCompact, _panelHeight, _panelWidth, double itemHeight, bool secondary, GlanceTraditionalCalendarMode mode) =
             GlanceMonthPipeline.Build(Settings.ShowChineseFestivals, Settings.TraditionalCalendarMode, _culture, _width, _height);
         _decoration.Update(_month, itemHeight, mode != GlanceTraditionalCalendarMode.None, Settings.ShowChineseFestivals, secondary);
+        _renderedDate = DateOnly.FromDateTime(DateTime.Today);
         UpdateClockText();
     }
 
@@ -339,10 +363,27 @@ internal sealed class GlanceWidgetController : IDisposable
     {
         _runtimeState.Paused = !_runtimeState.Paused;
         UpdateTimers();
+        // Persist the pause at the change point: teardown no longer saves on
+        // Unloaded, and destroy persistence must be able to stay no-throw.
+        GlanceRuntimeState.TrySave(_runtimeState, _instanceDataRoot);
     }
 
     // ---- Teardown ----
 
+    private void StopVisualResources()
+    {
+        if (_disposed) return;
+        _clockTimer.Stop();
+        _rotationTimer.Stop();
+        _resizeTimer.Stop();
+    }
+
+    /// <summary>
+    /// Total no-throw teardown (audit round 20): deskbox_widget_destroy
+    /// calls this BEFORE removing the handle, so a runtime-state save
+    /// failure must never turn into an ABI destroy failure - that would
+    /// leave the host lease alive against an already-gone package handle.
+    /// </summary>
     public void Dispose()
     {
         if (_disposed) return;
@@ -350,6 +391,6 @@ internal sealed class GlanceWidgetController : IDisposable
         _clockTimer.Stop();
         _rotationTimer.Stop();
         _resizeTimer.Stop();
-        GlanceRuntimeState.Save(_runtimeState, _instanceDataRoot);
+        GlanceRuntimeState.TrySave(_runtimeState, _instanceDataRoot);
     }
 }
