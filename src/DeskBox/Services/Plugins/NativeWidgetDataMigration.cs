@@ -93,7 +93,7 @@ internal static class NativeWidgetDataMigration
     /// <summary>
     /// Structural + semantic validation: the candidate must parse AND the
     /// glance settings fields must be type-valid, mirroring what the
-    /// built-in deserializer would accept (audit round 19). Only the fields
+    /// built-in deserializer would accept (audits 19-20). Only the fields
     /// the sync target consumes are checked; the built-in store owns the
     /// rest of the schema and its own recovery.
     /// </summary>
@@ -113,10 +113,16 @@ internal static class NativeWidgetDataMigration
                     "rotationIntervalMinutes" =>
                         property.Value.ValueKind == JsonValueKind.Number && property.Value.TryGetDouble(out _),
                     "localImagePaths" =>
-                        property.Value.ValueKind != JsonValueKind.Array ||
+                        // Strict (audit 20): the built-in deserializer rejects
+                        // a non-array here, so the sync must too - never
+                        // accept a scalar and copy it as a valid primary.
+                        property.Value.ValueKind == JsonValueKind.Array &&
                         property.Value.EnumerateArray().All(item => item.ValueKind == JsonValueKind.String),
                     "localFolderPath" =>
                         property.Value.ValueKind is JsonValueKind.String or JsonValueKind.Null,
+                    "traditionalCalendarMode" => IsValidEnumValue<DeskBox.Models.GlanceTraditionalCalendarMode>(property.Value),
+                    "backgroundSource" => IsValidEnumValue<DeskBox.Models.GlanceBackgroundSource>(property.Value),
+                    "imageFit" => IsValidEnumValue<DeskBox.Models.GlanceImageFitMode>(property.Value),
                     _ => true,
                 };
                 if (!typeValid) return false;
@@ -127,6 +133,28 @@ internal static class NativeWidgetDataMigration
         {
             return false;
         }
+    }
+
+    /// <summary>
+    /// Enums travel as names or legacy integers (the built-in accepts both);
+    /// anything else - or an undefined value - is a type error.
+    /// </summary>
+    private static bool IsValidEnumValue<TEnum>(JsonElement element)
+        where TEnum : struct, Enum
+    {
+        if (element.ValueKind == JsonValueKind.String)
+        {
+            return Enum.TryParse(element.GetString(), ignoreCase: true, out TEnum parsed) &&
+                   Enum.IsDefined(parsed);
+        }
+        if (element.ValueKind == JsonValueKind.Number &&
+            element.TryGetInt32(out int number) &&
+            number >= 0)
+        {
+            TEnum candidate = (TEnum)(object)number;
+            return Enum.IsDefined(candidate);
+        }
+        return false;
     }
 
     private static void WriteResilient(string path, string content)

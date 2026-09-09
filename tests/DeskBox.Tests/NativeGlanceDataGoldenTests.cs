@@ -178,4 +178,74 @@ public class NativeGlanceDataGoldenTests
             Directory.Delete(root, recursive: true);
         }
     }
+
+    [Fact]
+    public void MinimalPatchCarriesOnlyTheMutatedField()
+    {
+        // Audit round 20 (lost update): a toggle must send ONLY its own
+        // field - a full owned snapshot would overwrite concurrent host-side
+        // changes with the widget's stale cache.
+        var settings = new PackageData
+        {
+            ShowChineseFestivals = false, // the mutated field
+            RandomOrder = true,
+            RotationIntervalMinutes = 30,
+        };
+        string minimal = GlanceDataFile.BuildOwnedPatch(settings, "showChineseFestivals");
+        using (JsonDocument document = JsonDocument.Parse(minimal))
+        {
+            Assert.Equal(1, document.RootElement.EnumerateObject().Count());
+            Assert.False(document.RootElement.GetProperty("showChineseFestivals").GetBoolean());
+        }
+
+        string full = GlanceDataFile.BuildOwnedPatch(settings);
+        using (JsonDocument document = JsonDocument.Parse(full))
+        {
+            Assert.Equal(9, document.RootElement.EnumerateObject().Count());
+        }
+    }
+
+    [Fact]
+    public void RuntimeStateTrySaveNeverThrows()
+    {
+        string root = Root();
+        try
+        {
+            // A FILE where the data root directory should be: every write
+            // must fail, and the failure must be contained (audit 20 -
+            // destroy can never fail because of ephemeral state).
+            string fileAsRoot = Path.Combine(root, "not-a-directory");
+            File.WriteAllText(fileAsRoot, "x");
+            var state = new GlancePkg::DeskBox.GlancePackage.Rendering.GlanceRuntimeState
+            {
+                Paused = true,
+                ImageIndex = 3,
+            };
+            Assert.False(GlancePkg::DeskBox.GlancePackage.Rendering.GlanceRuntimeState.TrySave(state, fileAsRoot));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void DestroyAndUnloadSemanticsStayStrict()
+    {
+        // Audit round 20 contracts: dispose-before-remove (the destroy
+        // transaction) and Unloaded-as-visual-pause only.
+        string exports = File.ReadAllText(TestPaths.SourceFile(
+            "src/DeskBox.GlancePackage/Abi/Exports.cs"));
+        int dispose = exports.IndexOf("handle.Dispose();", StringComparison.Ordinal);
+        int remove = exports.IndexOf("_handles.Remove(widgetHandle)", StringComparison.Ordinal);
+        Assert.True(dispose >= 0 && remove > dispose,
+            "destroy must dispose the controller BEFORE removing the handle");
+
+        string controller = File.ReadAllText(TestPaths.SourceFile(
+            "src/DeskBox.GlancePackage/Rendering/GlanceWidgetController.cs"));
+        Assert.DoesNotContain("Unloaded += (_, _) => Dispose()", controller);
+        Assert.Contains("StopVisualResources", controller);
+        // Hidden-across-midnight recovery: reveal must re-derive the date.
+        Assert.Contains("EnsureCurrentDate", controller);
+    }
 }

@@ -195,6 +195,44 @@ public class NativeWidgetDataMigrationTests
     }
 
     [Fact]
+    public async Task SyncRejectsWrongFieldTypesAndFallsToBackup()
+    {
+        (string root, string widgetId) = CreateRoot();
+        try
+        {
+            var store = CreateProductionLayoutStore(root, widgetId);
+            await File.WriteAllTextAsync(store.StorePath + ".bak",
+                """{ "rotationIntervalMinutes": 66 }""");
+
+            // A scalar where the built-in deserializer wants a string list.
+            await File.WriteAllTextAsync(store.StorePath,
+                """{ "localImagePaths": "not-array" }""");
+            string publisher = "g".PadLeft(64, '0');
+            DeskBox.Services.Plugins.NativeWidgetDataMigration.TryMigrate(publisher, "deskbox.glance", widgetId, root);
+            using (JsonDocument synced = JsonDocument.Parse(
+                await File.ReadAllTextAsync(TargetPath(root, publisher, widgetId))))
+            {
+                Assert.Equal(66, synced.RootElement.GetProperty("rotationIntervalMinutes").GetInt32());
+            }
+
+            // An object where the built-in deserializer wants an enum.
+            await File.WriteAllTextAsync(store.StorePath,
+                """{ "backgroundSource": {} }""");
+            File.Delete(TargetPath(root, publisher, widgetId));
+            DeskBox.Services.Plugins.NativeWidgetDataMigration.TryMigrate(publisher, "deskbox.glance", widgetId, root);
+            using (JsonDocument synced = JsonDocument.Parse(
+                await File.ReadAllTextAsync(TargetPath(root, publisher, widgetId))))
+            {
+                Assert.Equal(66, synced.RootElement.GetProperty("rotationIntervalMinutes").GetInt32());
+            }
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public void PackagePersistsWithoutReflectionJson()
     {
         foreach (string relativePath in new[]

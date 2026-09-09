@@ -124,4 +124,14 @@ Store 路径在批次 B 前期就核对，不能等发布前才验证。动态�
   附带（审计 §12/§13）：布局计算三处硬编码 `true` 改传真实 `hasTraditional`（None 模式不再预留次行空间）；`showSecondary` 真正消费——日项次行按响应式空间门控（对齐内置 `ShowCalendarTraditionalDetails`）。
   测试：patch 4 条（权威提交/类型拒绝/整数枚举/空串清 Folder）+迁移类型腐蚀场景+golden version 断言反转。
 - **D3 生命周期 Controller 批（2026-09-09，第十八/十九轮审计 §16-17 落地）**：包端实例状态从 ViewBuilder 闭包收进 **`GlanceWidgetController`**（view/settings/runtime/images/三个 timer/生命周期/写回/Dispose），`GlanceWidgetHandle` 降级为 ABI 事件薄路由（**探针视觉残留清除**——Visibility 的 opacity 0.9、Compact 的 MaxHeight 260 不复存在）：①**时钟**：可见时按 `GlanceLifecyclePolicy.DelayToNextMinute` 单发到下一分钟边界（对齐内置 60-Second 算法+50ms 守卫）刷新时间/日期/星期；tick 里比对前后一分钟日期，**跨午夜自动刷新月历**（修时钟冻结）；②**能耗**：`GlanceLifecyclePolicy` 纯逻辑核（镜像内置 UpdateTimers 条件）决定 clock/rotation 运行——hidden/longHidden 全停、compact 与用户暂停只停轮播、轮播还需间隔>0+图≥2；reveal 时立即刷新时间文本（不显示隐藏期快照）；③**RefreshRequested(1) 首次消费**：刷新时钟+重建月份；④**destroy 显式 Dispose**（停三表+保存 runtime state），Unloaded 降级为带 disposed 守卫的兜底；⑤ViewBuilder 瘦身为静态构建助手。未接事件（2/3/4/6/10/11-15）注释标注归属批次（主题推送/性能策略需 config 通道扩展）。测试 +7（policy 矩阵 6+时钟边界纯函数；真包代码经 extern alias 直跑）。
+- **D3 边界 correctness 收口（2026-09-09，第二十轮审计吸收·八项全修）**：审计在 #304/#305 找到两个回归+一批收严项，全部修复：
+  ①**Destroy 事务恢复**——原 `_handles.Remove` 在 `Dispose`（含磁盘写、可抛）之前，失败即造成"包侧句柄已删/宿主 lease 仍活"的永久分歧（破坏 #281/#295 建立的销毁契约）。修复=`GlanceRuntimeState.TrySave`（total no-throw）+ destroy 改 **TryGetValue→Dispose（不可抛）→Remove** 顺序。
+  ②**Unloaded→Dispose 删除**——宿主组切换会 reparent+可回滚 outgoing 视图，Unloaded 永久 Dispose 会让回滚回来的视图计时器全死。改为 `Unloaded→StopVisualResources()`（停三表）/`Loaded→EnsureCurrentDate+UpdateTimers`；真正的 teardown 只允许 deskbox_widget_destroy；暂停态改在 TogglePause 时即存。
+  ③**写回最小 patch**——原 BuildOwnedPatch 发全部 9 个 owned 字段=用包缓存旧值覆盖宿主并发修改（典型 lost update：宿主设置页改 RandomOrder，原生关一下节日就被旧 false 盖掉）。修复=开关只发**被改的单个字段**（BuildOwnedPatch(params onlyFields)）。
+  ④**写回语义改 accepted-not-committed**——回调返回 0 只表示"已受理"，UpdateAsync fire-and-forget 在宿主 dispatcher 上执行（阻塞 UI 会死锁）；异步持久化失败由宿主日志观测（CommitToAuthorityAsync try/catch），包端只把同步拒绝视为回滚条件；丢失的异步提交经下次 create 权威同步自愈。真正的 ack 等推送通道批次。
+  ⑤**迁移校验 localImagePaths 条件反转修复**——原 `!=Array || All(string)` 会把 `"localImagePaths":"not-array"` 判合法（审计抓到的明确 bug）；改严格 `==Array && All(string)`。
+  ⑥**迁移校验补三个枚举字段**（traditionalCalendarMode/backgroundSource/imageFit：名字可解析或整数在定义域内），`"backgroundSource":{}` 现在正确落 .bak。
+  ⑦**Patch 枚举字符串收严**——`Enum.TryParse` 会把 `"999"` 这类数字字符串解析成未定义枚举值，补 `Enum.IsDefined`。
+  ⑧**隐藏跨午夜/跨月修复**——新增 `EnsureCurrentDate`（_renderedDate 缓存）：reveal/Loaded/RefreshRequested/时钟 tick 统一走它，隐藏跨天后重显自动重建月历（运行中的分钟 tick 检测不到停摆期间的跨日）。
+  测试 +5（未定义枚举拒绝/迁移错型落 .bak/最小 patch 恰一字段/TrySave 失败不抛/destroy 顺序+Unloaded 语义源码契约）。#306 Pomodoro 外部 PR 关闭符合架构方向（正是要消除的"加功能改宿主十几处"路径，未来可作官方包示例）。
 - 批次 C–E：C1/C2 完成。六功能仍保留在现有应用中；商店界面和升级迁移未在本批次提前切换。

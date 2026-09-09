@@ -122,38 +122,40 @@ internal static class GlanceDataFile
 
     /// <summary>
     /// The package-owned settings as a standalone patch document for the
-    /// host write-through channel (audit round 19: under host authority,
-    /// native mutations must commit to the authoritative store, not just to
-    /// the local copy).
+    /// host write-through channel (audit round 20): pass ONLY the mutated
+    /// field names - a full owned snapshot would overwrite concurrent
+    /// host-side setting changes with this widget's stale cache. With no
+    /// field names the full owned set is written (fresh-file path).
     /// </summary>
-    internal static string BuildOwnedPatch(GlanceWidgetData settings)
+    internal static string BuildOwnedPatch(GlanceWidgetData settings, params string[] onlyFields)
     {
+        HashSet<string>? only = onlyFields.Length == 0 ? null : onlyFields.ToHashSet(StringComparer.Ordinal);
         using var stream = new MemoryStream();
         using (var writer = new Utf8JsonWriter(stream))
         {
             writer.WriteStartObject();
-            WriteOwnedProperties(writer, settings, null);
+            WriteOwnedProperties(writer, settings, skip: null, only);
             writer.WriteEndObject();
         }
         return System.Text.Encoding.UTF8.GetString(stream.ToArray());
     }
 
-    private static void WriteOwnedProperties(Utf8JsonWriter writer, GlanceWidgetData settings, HashSet<string>? skip)
+    private static void WriteOwnedProperties(Utf8JsonWriter writer, GlanceWidgetData settings, HashSet<string>? skip, HashSet<string>? only = null)
     {
-        if (skip?.Contains("showChineseFestivals") != true) writer.WriteBoolean("showChineseFestivals", settings.ShowChineseFestivals);
-        if (skip?.Contains("traditionalCalendarMode") != true) writer.WriteString("traditionalCalendarMode", settings.TraditionalCalendarMode.ToString());
-        if (skip?.Contains("rotationIntervalMinutes") != true) writer.WriteNumber("rotationIntervalMinutes", settings.RotationIntervalMinutes);
-        if (skip?.Contains("randomOrder") != true) writer.WriteBoolean("randomOrder", settings.RandomOrder);
-        if (skip?.Contains("backgroundSource") != true) writer.WriteString("backgroundSource", settings.BackgroundSource.ToString());
-        if (skip?.Contains("localImagePaths") != true)
+        if (skip?.Contains("showChineseFestivals") != true && only?.Contains("showChineseFestivals") != false) writer.WriteBoolean("showChineseFestivals", settings.ShowChineseFestivals);
+        if (skip?.Contains("traditionalCalendarMode") != true && only?.Contains("traditionalCalendarMode") != false) writer.WriteString("traditionalCalendarMode", settings.TraditionalCalendarMode.ToString());
+        if (skip?.Contains("rotationIntervalMinutes") != true && only?.Contains("rotationIntervalMinutes") != false) writer.WriteNumber("rotationIntervalMinutes", settings.RotationIntervalMinutes);
+        if (skip?.Contains("randomOrder") != true && only?.Contains("randomOrder") != false) writer.WriteBoolean("randomOrder", settings.RandomOrder);
+        if (skip?.Contains("backgroundSource") != true && only?.Contains("backgroundSource") != false) writer.WriteString("backgroundSource", settings.BackgroundSource.ToString());
+        if (skip?.Contains("localImagePaths") != true && only?.Contains("localImagePaths") != false)
         {
             writer.WriteStartArray("localImagePaths");
             foreach (string path in settings.LocalImagePaths) writer.WriteStringValue(path);
             writer.WriteEndArray();
         }
-        if (skip?.Contains("localFolderPath") != true) writer.WriteString("localFolderPath", settings.LocalFolderPath);
-        if (skip?.Contains("imageFit") != true) writer.WriteString("imageFit", settings.ImageFit.ToString());
-        if (skip?.Contains("showPhotoControls") != true) writer.WriteBoolean("showPhotoControls", settings.ShowPhotoControls);
+        if (skip?.Contains("localFolderPath") != true && only?.Contains("localFolderPath") != false) writer.WriteString("localFolderPath", settings.LocalFolderPath);
+        if (skip?.Contains("imageFit") != true && only?.Contains("imageFit") != false) writer.WriteString("imageFit", settings.ImageFit.ToString());
+        if (skip?.Contains("showPhotoControls") != true && only?.Contains("showPhotoControls") != false) writer.WriteBoolean("showPhotoControls", settings.ShowPhotoControls);
     }
 
     private static bool TryBool(JsonElement root, string property, out bool value)
