@@ -232,8 +232,8 @@ public class NativeGlanceDataGoldenTests
         using (JsonDocument document = JsonDocument.Parse(full))
         {
             // 9 interaction + 6 display/time + layout + 4 playback-appearance
-            // fields.
-            Assert.Equal(20, document.RootElement.EnumerateObject().Count());
+            // + font family/scale fields.
+            Assert.Equal(22, document.RootElement.EnumerateObject().Count());
         }
     }
 
