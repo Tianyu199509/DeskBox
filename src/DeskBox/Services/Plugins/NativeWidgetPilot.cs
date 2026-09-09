@@ -79,7 +79,13 @@ internal static class NativeWidgetPilot
     }
 }
 
-internal sealed class NativeWidgetPilotContent : IWidgetContent, IDisposable
+internal sealed class NativeWidgetPilotContent :
+    IWidgetContent,
+    IWidgetResponsiveLayoutContent,
+    IWidgetHostViewportContent,
+    IWidgetPerformanceAwareContent,
+    IWidgetInteractiveResizeContent,
+    IDisposable
 {
     private readonly NativeWidgetLease _lease;
 
@@ -96,14 +102,56 @@ internal sealed class NativeWidgetPilotContent : IWidgetContent, IDisposable
 
     public Task InitializeAsync()
     {
-        App.LogVerbose($"[NativePackage] pilot initialized for {WidgetId}");
+        _lease.InvokeWidgetEvent(WidgetLifecycleEventKind.RefreshRequested, 0, 0, 0);
         return Task.CompletedTask;
     }
 
-    public Task RefreshAsync() => Task.CompletedTask;
-    public void ApplyAppearance() { }
-    public void OnActivated() { }
-    public void OnDeactivated() { }
+    public Task RefreshAsync()
+    {
+        _lease.InvokeWidgetEvent(WidgetLifecycleEventKind.RefreshRequested, 0, 0, 0);
+        return Task.CompletedTask;
+    }
+
+    public void ApplyAppearance() =>
+        _lease.InvokeWidgetEvent(WidgetLifecycleEventKind.AppearanceChanged, 0, 0, 0);
+
+    public void OnActivated() =>
+        _lease.InvokeWidgetEvent(WidgetLifecycleEventKind.Activated, 0, 0, 0);
+
+    public void OnDeactivated() =>
+        _lease.InvokeWidgetEvent(WidgetLifecycleEventKind.Deactivated, 0, 0, 0);
+
+    public void OnWindowVisibilityChanged(bool visible) =>
+        _lease.InvokeWidgetEvent(WidgetLifecycleEventKind.VisibilityChanged, 0, 0, visible ? 1u : 0u);
+
+    public void OnWindowRevealCompleted() =>
+        _lease.InvokeWidgetEvent(WidgetLifecycleEventKind.RevealCompleted, 0, 0, 0);
+
+    public void OnWindowLongHidden() =>
+        _lease.InvokeWidgetEvent(WidgetLifecycleEventKind.LongHidden, 0, 0, 0);
+
+    public void OnCompactStateChanged(bool collapsed) =>
+        _lease.InvokeWidgetEvent(WidgetLifecycleEventKind.CompactStateChanged, 0, 0, collapsed ? 1u : 0u);
+
+    public void BeginResponsiveLayoutTransition(double targetContentWidth, double targetContentHeight, bool isCollapsing) =>
+        _lease.InvokeWidgetEvent(WidgetLifecycleEventKind.InteractiveResizeBegin, targetContentWidth, targetContentHeight, isCollapsing ? 1u : 0u);
+
+    public void CompleteResponsiveLayoutTransition(double finalContentWidth, double finalContentHeight) =>
+        _lease.InvokeWidgetEvent(WidgetLifecycleEventKind.InteractiveResizeEnd, finalContentWidth, finalContentHeight, 0);
+
+    public void CancelResponsiveLayoutTransition() { }
+
+    public void OnHostViewportSizeChanged(double width, double height) =>
+        _lease.InvokeWidgetEvent(WidgetLifecycleEventKind.ViewportChanged, width, height, 0);
+
+    public void ApplyPerformanceSettings() =>
+        _lease.InvokeWidgetEvent(WidgetLifecycleEventKind.PerformanceSettingsChanged, 0, 0, 0);
+
+    public void BeginInteractiveResize(double contentWidth, double contentHeight) =>
+        _lease.InvokeWidgetEvent(WidgetLifecycleEventKind.InteractiveResizeBegin, contentWidth, contentHeight, 0);
+
+    public void CompleteInteractiveResize(double contentWidth, double contentHeight) =>
+        _lease.InvokeWidgetEvent(WidgetLifecycleEventKind.InteractiveResizeEnd, contentWidth, contentHeight, 0);
 
     public void Dispose() => ((IDisposable)_lease).Dispose();
 }
