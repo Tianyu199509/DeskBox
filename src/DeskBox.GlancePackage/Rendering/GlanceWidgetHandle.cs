@@ -6,11 +6,13 @@ namespace DeskBox.GlancePackage.Rendering;
 /// <summary>
 /// Receives host lifecycle events (ABI v4) and routes them to the widget's
 /// visual tree. This is the package-side counterpart of IWidgetContent's
-/// optional lifecycle interfaces.
+/// optional lifecycle interfaces. ViewportChanged also forwards the new size
+/// to the view builder's debounced responsive rebuild.
 /// </summary>
-internal sealed class GlanceWidgetHandle(FrameworkElement view)
+internal sealed class GlanceWidgetHandle(FrameworkElement view, Action<double, double>? onViewportChanged = null)
 {
     private readonly FrameworkElement _view = view;
+    private readonly Action<double, double>? _onViewportChanged = onViewportChanged;
     internal int EventsReceived;
 
     internal void OnLifecycleEvent(uint eventKind, double width, double height, uint flags)
@@ -32,6 +34,7 @@ internal sealed class GlanceWidgetHandle(FrameworkElement view)
             case 9: // ViewportChanged
                 _view.Width = width;
                 _view.Height = height;
+                _onViewportChanged?.Invoke(width, height);
                 break;
         }
     }

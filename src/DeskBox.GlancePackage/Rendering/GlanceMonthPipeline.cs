@@ -7,48 +7,51 @@ using Microsoft.UI.Xaml.Media;
 namespace DeskBox.GlancePackage.Rendering;
 
 /// <summary>
-/// Month-data pipeline: production source → traditional calendar → festival →
-/// presentation. Mirrors GlanceWidgetViewModel sizing at 440x560.
+/// Month-data pipeline: production source → traditional calendar → festival
+/// → presentation. D3 product migration: culture comes from the host config
+/// channel (HostApi v2 GetConfigJson), the month is the CURRENT month, and
+/// sizing is parameterized by the live viewport (defaults mirror
+/// GlanceWidgetViewModel at 440x560 until the first ViewportChanged event).
 /// </summary>
 internal static class GlanceMonthPipeline
 {
-    public const int PinnedYear = 2026;
-    public const int PinnedMonth = 9;
-    public const double AvailableWidth = 440;
-    public const double AvailableHeight = 560;
-    public static CultureInfo Culture { get; } = CultureInfo.GetCultureInfo("zh-CN");
+    public const double DefaultWidth = 440;
+    public const double DefaultHeight = 560;
 
     public static (GlanceCalendarMonth Month, bool IsCompact, double PanelHeight, double PanelWidth, double DayItemHeight, bool ShowSecondary) Build(
-        bool showTraditional, bool showFestivals)
+        bool showTraditional, bool showFestivals, CultureInfo culture, double availableWidth, double availableHeight)
     {
-        DateOnly month = new(PinnedYear, PinnedMonth, 1);
         DateOnly today = DateOnly.FromDateTime(DateTime.Today);
+        DateOnly month = new(today.Year, today.Month, 1);
         GlanceCalendarMonth calendarMonth = new LocalCalendarPresentationSource()
-            .GetMonthAsync(month, Culture).GetAwaiter().GetResult();
-        DateOnly titleDate = month == new DateOnly(today.Year, today.Month, 1) ? today : month.AddDays(14);
+            .GetMonthAsync(month, culture).GetAwaiter().GetResult();
+        DateOnly titleDate = today;
         GlanceTraditionalCalendarMode mode = showTraditional
             ? GlanceTraditionalCalendarMode.ChineseLunar
             : GlanceTraditionalCalendarMode.None;
-        calendarMonth = new GlanceTraditionalCalendarService().Apply(calendarMonth, mode, Culture, titleDate);
-        calendarMonth = new GlanceFestivalService().Apply(calendarMonth, showChineseFestivals: showFestivals && showTraditional, mode, Culture);
-        bool isCompact = GlanceCalendarLayoutCalculator.IsCompact(AvailableHeight);
-        double panelHeight = GlanceCalendarLayoutCalculator.CalculatePanelHeight(AvailableHeight, isCompact, true);
-        double panelWidth = Math.Round(Math.Clamp(AvailableWidth - 28, 272, 360));
+        calendarMonth = new GlanceTraditionalCalendarService().Apply(calendarMonth, mode, culture, titleDate);
+        calendarMonth = new GlanceFestivalService().Apply(calendarMonth, showChineseFestivals: showFestivals && showTraditional, mode, culture);
+        bool isCompact = GlanceCalendarLayoutCalculator.IsCompact(availableHeight);
+        double panelHeight = GlanceCalendarLayoutCalculator.CalculatePanelHeight(availableHeight, isCompact, true);
+        double panelWidth = Math.Round(Math.Clamp(availableWidth - 28, 272, 360));
         double dayItemHeight = Math.Round(GlanceCalendarLayoutCalculator.CalculateDayHeight(panelHeight, isCompact, true) * 2) / 2;
         bool showSecondary = GlanceCalendarLayoutCalculator.ShouldShowTraditionalDetails(panelWidth, dayItemHeight, isCompact, true);
         return (calendarMonth, isCompact, panelHeight, panelWidth, dayItemHeight, showSecondary);
     }
 
     public static GlancePresentation CreatePresentation(
-        GlanceCalendarMonth month, bool isCompact, double panelHeight, double panelWidth)
+        GlanceCalendarMonth month, bool isCompact, double panelHeight, double panelWidth,
+        CultureInfo culture, double availableWidth, double availableHeight)
     {
-        CultureInfo culture = Culture;
         DateTime now = DateTime.Now;
-        double compactFontSize = Math.Round(Math.Clamp(Math.Min(AvailableWidth * 0.078, AvailableHeight * 0.095), 22, 28) * 2) / 2;
+        double compactFontSize = Math.Round(Math.Clamp(Math.Min(availableWidth * 0.078, availableHeight * 0.095), 22, 28) * 2) / 2;
         return new GlancePresentation
         {
             TimeText = now.ToString("HH:mm", culture),
-            DateText = now.ToString("M月d日", culture),
+            // "M" is the culture-aware month-day pattern (Chinese locales
+            // render their native month-day form); never hard-code one
+            // locale's literal format here.
+            DateText = now.ToString("M", culture),
             WeekdayText = culture.DateTimeFormat.GetDayName(now.DayOfWeek),
             TraditionalCalendarTitle = month.TraditionalTitle,
             TimeFontFamily = new FontFamily("XamlAutoFontFamily"),

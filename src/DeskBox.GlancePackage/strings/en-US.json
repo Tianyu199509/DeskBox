@@ -2,5 +2,8 @@
   "title": "C2 interaction probe",
   "add": "Add",
   "todoHeader": "Todo",
-  "statusReady": "ready"
+  "statusReady": "ready",
+  "menuNextBackground": "Next background",
+  "menuPauseRotation": "Pause rotation",
+  "menuSettings": "Settings"
 }

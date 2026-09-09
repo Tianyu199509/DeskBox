@@ -1,4 +1,6 @@
+using System.Globalization;
 using System.Text.Json;
+using DeskBox.GlancePackage.Services;
 using DeskBox.Models;
 using DeskBox.Services;
 using Microsoft.UI.Xaml;
@@ -10,19 +12,29 @@ using WinRT;
 namespace DeskBox.GlancePackage.Rendering;
 
 /// <summary>
-/// Builds the Glance widget view from runtime text XAML, driven by
-/// production business services (layout calculator, traditional calendar,
-/// festival service) linked from the host during the D3 transition.
+/// Builds the Glance widget view from runtime text XAML, driven by the
+/// package-owned production services. D3 product migration: locale comes
+/// from the host config channel, the month view is the current month, and
+/// the presentation re-builds (debounced) when the host reports viewport
+/// changes.
 /// </summary>
 internal static class GlanceViewBuilder
 {
-    public static FrameworkElement Create(string packageRoot, string contributionId, string instanceId, string instanceDataRoot)
+    public static FrameworkElement Create(
+        string packageRoot, string contributionId, string instanceId, string instanceDataRoot,
+        out Action<double, double>? onViewportChanged)
     {
+        CultureInfo culture = HostConfig.TryGetCulture() ?? CultureInfo.CurrentUICulture;
+        PackageStrings.Configure(culture, packageRoot);
+
         // Build the month data through production services.
         var state = GlancePackageState.LoadOrCreate(instanceDataRoot);
-        (GlanceCalendarMonth month, bool isCompact, double panelHeight, double panelWidth, double dayItemHeight, bool showSecondary) = GlanceMonthPipeline.Build(state.ShowTraditional, state.ShowFestivals);
+        double width = GlanceMonthPipeline.DefaultWidth;
+        double height = GlanceMonthPipeline.DefaultHeight;
+        (GlanceCalendarMonth month, bool isCompact, double panelHeight, double panelWidth, double dayItemHeight, bool showSecondary) =
+            GlanceMonthPipeline.Build(state.ShowTraditional, state.ShowFestivals, culture, width, height);
 
-        var presentation = GlanceMonthPipeline.CreatePresentation(month, isCompact, panelHeight, panelWidth);
+        var presentation = GlanceMonthPipeline.CreatePresentation(month, isCompact, panelHeight, panelWidth, culture, width, height);
         FrameworkElement content = (FrameworkElement)XamlReader.Load(
             File.ReadAllText(Path.Combine(packageRoot, "glance.xaml")));
         content.DataContext = presentation;
@@ -30,7 +42,7 @@ internal static class GlanceViewBuilder
         // Calendar day decoration (single subscription, mutable state).
         var calendarView = content.FindName("NativeCalendarView").As<CalendarView>();
         var decoration = new CalendarDecorationState(month, dayItemHeight, state.ShowTraditional, state.ShowFestivals);
-        SubscribeDayDecoration(calendarView, decoration);
+        SubscribeDayDecoration(calendarView, decoration, culture);
 
         // Background image rotation from package-local backgrounds/ folder.
         string[] images = LoadImages(Path.Combine(packageRoot, "backgrounds"));
@@ -55,7 +67,6 @@ internal static class GlanceViewBuilder
         timer.Interval = TimeSpan.FromSeconds(3);
         timer.Tick += (_, _) => { if (!state.Paused) Show(state.ImageIndex + 1); };
         if (!state.Paused && images.Length > 1) timer.Start();
-        content.Unloaded += (_, _) => timer.Stop();
 
         // Action bar.
         var pauseButton = content.FindName("PauseButton").As<Button>();
@@ -78,23 +89,40 @@ internal static class GlanceViewBuilder
         festivalToggle.Toggled += (_, _) =>
         {
             state.ShowFestivals = festivalToggle.IsOn;
-            RebuildMonth(decoration, state);
+            RebuildMonth(decoration, state, culture, width, height, content);
             state.Save(instanceDataRoot);
         };
         traditionalToggle.Toggled += (_, _) =>
         {
             state.ShowTraditional = traditionalToggle.IsOn;
-            RebuildMonth(decoration, state);
+            RebuildMonth(decoration, state, culture, width, height, content);
             state.Save(instanceDataRoot);
         };
 
+        // Debounced responsive rebuild: the host can report viewport changes
+        // continuously during a resize; the pipeline (month data + panel
+        // sizing + presentation) re-runs once per settled size.
+        var resizeTimer = Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread().CreateTimer();
+        resizeTimer.Interval = TimeSpan.FromMilliseconds(120);
+        resizeTimer.IsRepeating = false;
+        resizeTimer.Tick += (_, _) => RebuildMonth(decoration, state, culture, width, height, content);
+        onViewportChanged = (newWidth, newHeight) =>
+        {
+            if (Math.Abs(newWidth - width) < 1 && Math.Abs(newHeight - height) < 1) return;
+            width = newWidth;
+            height = newHeight;
+            resizeTimer.Stop();
+            resizeTimer.Start();
+        };
+        content.Unloaded += (_, _) => { timer.Stop(); resizeTimer.Stop(); };
+
         // Right-click menu (code-built: runtime XAML cannot wire handlers).
         var menu = new MenuFlyout();
-        var nextItem = new MenuFlyoutItem { Text = "下一张背景" };
+        var nextItem = new MenuFlyoutItem { Text = PackageStrings.Get("menuNextBackground", "下一张背景") };
         nextItem.Click += (_, _) => Show(state.ImageIndex + 1);
-        var pauseItem = new MenuFlyoutItem { Text = "暂停轮播" };
+        var pauseItem = new MenuFlyoutItem { Text = PackageStrings.Get("menuPauseRotation", "暂停轮播") };
         pauseItem.Click += (_, _) => TogglePause();
-        var settingsItem = new MenuFlyoutItem { Text = "设置" };
+        var settingsItem = new MenuFlyoutItem { Text = PackageStrings.Get("menuSettings", "设置") };
         settingsItem.Click += (_, _) =>
         {
             settingsLayer.Visibility = settingsLayer.Visibility == Visibility.Visible
@@ -108,10 +136,14 @@ internal static class GlanceViewBuilder
         return content;
     }
 
-    private static void RebuildMonth(CalendarDecorationState decoration, GlancePackageState state)
+    private static void RebuildMonth(
+        CalendarDecorationState decoration, GlancePackageState state, CultureInfo culture,
+        double width, double height, FrameworkElement content)
     {
-        (GlanceCalendarMonth rebuilt, _, _, _, double itemHeight, _) = GlanceMonthPipeline.Build(state.ShowTraditional, state.ShowFestivals);
+        (GlanceCalendarMonth rebuilt, bool isCompact, double panelHeight, double panelWidth, double itemHeight, _) =
+            GlanceMonthPipeline.Build(state.ShowTraditional, state.ShowFestivals, culture, width, height);
         decoration.Update(rebuilt, itemHeight, state.ShowTraditional, state.ShowFestivals);
+        content.DataContext = GlanceMonthPipeline.CreatePresentation(rebuilt, isCompact, panelHeight, panelWidth, culture, width, height);
     }
 
     private static string[] LoadImages(string backgroundsDirectory) =>
@@ -136,10 +168,8 @@ internal static class GlanceViewBuilder
         }
     }
 
-    private static void SubscribeDayDecoration(CalendarView calendarView, CalendarDecorationState decoration)
+    private static void SubscribeDayDecoration(CalendarView calendarView, CalendarDecorationState decoration, CultureInfo culture)
     {
-        System.Globalization.CultureInfo culture = GlanceMonthPipeline.Culture;
-        DateOnly pinned = new(GlanceMonthPipeline.PinnedYear, GlanceMonthPipeline.PinnedMonth, 1);
         DateOnly today = DateOnly.FromDateTime(DateTime.Today);
         calendarView.CalendarViewDayItemChanging += (_, args) =>
         {
@@ -156,7 +186,7 @@ internal static class GlanceViewBuilder
                 : day?.TraditionalText ?? string.Empty;
             bool hasSecondaryText = !string.IsNullOrWhiteSpace(secondaryText);
             bool isFestival = hasSecondaryText && day?.HasFestival == true;
-            bool isCurrentMonth = day?.IsCurrentMonth ?? date.Month == pinned.Month;
+            bool isCurrentMonth = day?.IsCurrentMonth ?? date.Month == decoration.Month.Month.Month;
             item.MinHeight = decoration.DayItemHeight;
             item.Height = decoration.DayItemHeight;
             item.Tag = new GlanceDayDecoration(
