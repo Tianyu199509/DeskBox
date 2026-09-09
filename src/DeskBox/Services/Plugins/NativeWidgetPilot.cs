@@ -7,49 +7,88 @@ namespace DeskBox.Services.Plugins;
 /// <summary>
 /// Development pilot: widget content served by a native package when the
 /// DESKBOX_DEV_NATIVE_GLANCE environment variable points at a valid package
-/// directory. Default off; any failure falls back to the built-in provider
-/// path - the pilot can never break the affected widget kind. Runs entirely
-/// through the batch C1 runtime contract (session per identity, instance
-/// leases, handle-based destroy, shutdown on last release).
+/// directory. Default off; any failure falls back to the built-in provider.
+///
+/// Batch D2: when the env var is set, the pilot first INSTALLS the pointed
+/// directory through the B1 pipeline (PluginPackageManager.Install with the
+/// dev key as a trusted publisher), then activates through the full installed
+/// path (TryCreateNativeHandle → TryCreateFromInstalled). This proves the
+/// complete schema → sign → install → verify → activate chain on the real host.
 /// </summary>
 internal static class NativeWidgetPilot
 {
-    // 1. Installed path (batch D): B1 pipeline → native handle → runtime manager.
-    //    The manager is created lazily; it reads the B1 registry from the
-    //    standard plugins root under the host data directory.
-    private static PluginPackageManager? _installedPackageManager;
-    private static PluginPackageManager InstalledPackageManager => _installedPackageManager ??= new PluginPackageManager(
-        Path.Combine(DeskBoxDataPathService.Current.DataDirectory, "plugins"));
+    private const string DevPublisherFingerprint = "1bc4f2db8438d2fd296bd48074088ccc726c265712125abbae975063ba719ea4";
+    private const string TargetPackageId = "deskbox.glance";
+
+    private static PluginPackageManager? _manager;
+
+    private static PluginPackageManager Manager => _manager ??= new PluginPackageManager(
+        Path.Combine(DeskBoxDataPathService.Current.DataDirectory, "plugins"),
+        [DevPublisherFingerprint]);
+
+    /// <summary>
+    /// Called by WidgetContentFactory at construction; installs the pointed
+    /// package through the B1 pipeline at app startup (D2 smoke proof).
+    /// </summary>
+    internal static void Initialize()
+    {
+        string? packageRoot = NativeWidgetPackageLoader.TryGetDevelopmentPackageRoot();
+        if (packageRoot is not null)
+        {
+            TryInstallDevelopmentPackage(packageRoot);
+        }
+    }
+
     public static bool TryCreate(WidgetConfig config, out IWidgetContent? content)
     {
         content = null;
+        string? packageRoot = NativeWidgetPackageLoader.TryGetDevelopmentPackageRoot();
+        if (packageRoot is null) return false;
 
-        // 1. Installed path (batch D): B1 pipeline → native handle → runtime manager.
-        NativeInstalledPackageHandle? handle = InstalledPackageManager.TryCreateNativeHandle("deskbox.glance");
+        // Activate through the full installed path: B1 handle → runtime manager.
+        NativeInstalledPackageHandle? handle = Manager.TryCreateNativeHandle(TargetPackageId);
         if (handle is not null &&
             NativeWidgetRuntimeManager.TryCreateFromInstalled(
                 handle!, "glance", config.Id,
                 DeskBoxDataPathService.Current.DataDirectory,
-                out NativeWidgetLease? installedLease))
+                out NativeWidgetLease? lease))
         {
-            content = new NativeWidgetPilotContent(config, installedLease!);
+            content = new NativeWidgetPilotContent(config, lease!);
             return true;
         }
 
-        // 2. Development path (batch C spike): env-var gated, directory package.
-        string? packageRoot = NativeWidgetPackageLoader.TryGetDevelopmentPackageRoot();
-        if (packageRoot is null) return false;
-        if (!NativeWidgetRuntimeManager.TryCreateInstance(
+        // Fallback: direct directory load (batch C dev path, no B1 pipeline).
+        if (NativeWidgetRuntimeManager.TryCreateInstance(
                 NativeWidgetPackageLoader.CreateDevelopmentDescriptor(packageRoot),
                 contributionId: "main",
                 instanceId: config.Id,
                 dataDirectory: DeskBoxDataPathService.Current.DataDirectory,
-                out NativeWidgetLease? lease))
+                out NativeWidgetLease? devLease))
         {
-            return false;
+            content = new NativeWidgetPilotContent(config, devLease!);
+            return true;
         }
-        content = new NativeWidgetPilotContent(config, lease!);
-        return true;
+        return false;
+    }
+
+    private static void TryInstallDevelopmentPackage(string packageRoot)
+    {
+        try
+        {
+            PluginInstallResult result = Manager.Install(packageRoot);
+            if (result.Succeeded)
+            {
+                App.Log($"[NativePackage] dev package installed: {result.Package!.PackageId} v{result.Package.Version} -> {result.InstallDirectory}");
+            }
+            else
+            {
+                App.Log($"[NativePackage] dev package install failed: {string.Join("; ", result.Failures)}");
+            }
+        }
+        catch (Exception error)
+        {
+            App.Log($"[NativePackage] dev package install error: {error.Message}");
+        }
     }
 }
 

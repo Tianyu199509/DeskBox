@@ -19,6 +19,8 @@ public sealed class WidgetContentFactory
     {
         _localizationService = localizationService;
         _contentProviders = CreateContentProviders();
+        // Install the native dev package at app startup (D2 chain proof).
+        NativeWidgetPilot.Initialize();
     }
 
     private static readonly IReadOnlyList<WidgetContentDescriptor> DescriptorList =

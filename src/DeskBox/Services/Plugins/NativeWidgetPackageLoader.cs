@@ -448,7 +448,11 @@ internal static class NativeWidgetPackageLoader
         {
             string root = Path.GetFullPath(configured.Trim());
             if (!Directory.Exists(root)) return null;
-            return File.Exists(Path.Combine(root, DevelopmentPackageDllFileName)) ? root : null;
+            // Accept both the direct AOT output name and the official package
+            // format name (package.dll after the build script renames it).
+            bool hasDll = File.Exists(Path.Combine(root, DevelopmentPackageDllFileName)) ||
+                          File.Exists(Path.Combine(root, ProductEntryModuleFileName));
+            return hasDll ? root : null;
         }
         catch
         {
