@@ -37,11 +37,19 @@ public sealed record VerifiedPluginPackage
 
     public string? EntryMain { get; init; }
 
+    /// <summary>Architecture declared in entry.architecture (runtime:native only). Verified against the PE machine header by the verifier; against the running host by the PackageManager compatibility gate.</summary>
+    public string? EntryArchitecture { get; init; }
+
     public string HostApiMinimum { get; init; } = "1.0.0";
     public string HostApiMaximum { get; init; } = "1.0.0";
     public JsonElement Fallback { get; init; }
     public JsonElement DataSchema { get; init; }
 }
+
+/// <summary>Host-rendered placeholder when a native contribution's runtime is unavailable.</summary>
+public sealed record VerifiedContributionFallback(
+    string Template,
+    string? Message);
 
 public sealed record PluginRequestedPermission(
     string Id,
@@ -51,7 +59,7 @@ public sealed record PluginRequestedPermission(
 public sealed record VerifiedContribution(
     string Id,
     string DisplayName,
-    string Template,
+    string? Template,
     IReadOnlyDictionary<string, string> PayloadStringFields,
     IReadOnlyDictionary<string, VerifiedBinding> Bindings)
 {
@@ -59,6 +67,9 @@ public sealed record VerifiedContribution(
     public JsonElement Payload { get; init; }
     public VerifiedWidgetSize? DefaultSize { get; init; }
     public IReadOnlyList<string> ActivationEvents { get; init; } = [];
+
+    /// <summary>Native-runtime unavailable placeholder (null for declarative contributions).</summary>
+    public VerifiedContributionFallback? UnavailableFallback { get; init; }
 }
 
 public sealed record VerifiedWidgetSize(int Width, int Height);

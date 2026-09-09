@@ -889,6 +889,11 @@ public partial class App : Application
 
         try
         {
+            // Dev native package bootstrap: install through the B1 pipeline
+            // once at startup when DESKBOX_DEV_NATIVE_GLANCE points at a
+            // package directory. Compiled only with EnableDeskBoxNativeDevPilot.
+            DeskBox.Services.Plugins.NativeWidgetPilot.RunDevBootstrap();
+
             string? updateInstallOutcome = TryGetUpdateInstallOutcome(Environment.GetCommandLineArgs());
             IsStartupMode = _processStartupLaunchDetected || isStartupLaunch;
             UiDispatcherQueue = Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread();
