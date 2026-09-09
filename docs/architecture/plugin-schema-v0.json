@@ -5,8 +5,55 @@
   "description": "Draft manifest vocabulary for the DeskBox extension system. v0.1 incorporated the third review round (contributions[] replaces widgets[]; runtime describes execution technology; the signature block avoids self-reference). v0.2 incorporated the fourth round (widget contributions must be complete; signature blocks must be complete; packages carry the Ed25519 publisherPublicKey; hashing is pinned to JCS + a package.integrity manifest). v0.3 adds the declarative execution vocabulary (round 6): dataSources (http-json fetched by the HOST under the network.fetch permission), bindings (JSON-path overrides of payload fields), and actions (open-url under the shell.open permission) - runtime:none packages execute no third-party code, but the host executes governed capabilities on their behalf. Design decisions: roadmap sections 13.2, 13.4, 13.5, 14, 15, 16.7 and 16.10.",
   "type": "object",
   "required": ["schemaVersion", "id", "version", "publisher", "publisherPublicKey", "runtime", "hostApi", "contributions"],
+  "allOf": [
+    {
+      "if": { "properties": { "runtime": { "const": "native" } } },
+      "then": {
+        "properties": {
+          "contributions": {
+            "items": { "$ref": "#/$defs/nativeWidgetContribution" }
+          }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "runtime": { "not": { "const": "native" } } } },
+      "then": {
+        "properties": {
+          "contributions": {
+            "items": { "$ref": "#/$defs/templatedWidgetContribution" }
+          }
+        }
+      }
+    }
+  ],
   "$defs": {
-    "widgetContribution": {
+    "nativeWidgetContribution": {
+      "type": "object",
+      "required": ["type", "id", "displayName"],
+      "additionalProperties": false,
+      "properties": {
+        "type": { "const": "widget" },
+        "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" },
+        "displayName": { "type": "string", "minLength": 1 },
+        "template": false,
+        "fallback": {
+          "type": "object",
+          "required": ["template", "message"],
+          "properties": {
+            "template": { "const": "status" },
+            "message": { "type": "string", "minLength": 1 }
+          },
+          "additionalProperties": false,
+          "description": "What the host renders when the native runtime is unavailable."
+        },
+        "payload": true,
+        "bindings": true,
+        "defaultSize": true,
+        "activationEvents": true
+      }
+    },
+    "templatedWidgetContribution": {
       "type": "object",
       "required": ["type", "id", "displayName", "template"],
       "additionalProperties": false,
@@ -161,7 +208,7 @@
       "description": "Things this package contributes to the host. Each entry has a type discriminator; v0.2 defines only the widget type under $defs - command, ai-tool, settings and other types will be added as further $defs entries without changing the package-level structure.",
       "items": {
         "oneOf": [
-          { "$ref": "#/$defs/widgetContribution" }
+          { "$ref": "#/$defs/templatedWidgetContribution" }
         ]
       }
     },

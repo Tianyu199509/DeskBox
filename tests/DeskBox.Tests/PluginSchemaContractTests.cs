@@ -105,31 +105,30 @@ public sealed class PluginSchemaContractTests
     }
 
     [Fact]
-    public void Schema_WidgetContribution_MustBeCompleteAndClosed()
+    public void Schema_WidgetContributions_AreConditionallySplitByRuntime()
     {
         using JsonDocument schema = JsonDocument.Parse(File.ReadAllText(
             TestPaths.FromRepository("docs/architecture/plugin-schema-v0.json")));
-        JsonElement widget = schema.RootElement.GetProperty("$defs")
-            .GetProperty("widgetContribution");
+        JsonElement defs = schema.RootElement.GetProperty("$defs");
 
-        // v0.2: displayName/template are required per contribution (the
-        // shared [type, id] required let stub widgets through) and unknown
-        // properties are rejected instead of ignored.
-        string[] required = widget.GetProperty("required")
-            .EnumerateArray()
-            .Select(v => v.GetString()!)
-            .Order()
-            .ToArray();
-        Assert.Equal(["displayName", "id", "template", "type"], required);
-        Assert.False(widget.GetProperty("additionalProperties").GetBoolean());
+        // Templated (non-native) contributions require template; native
+        // contributions do not and instead accept a fallback block.
+        JsonElement templated = defs.GetProperty("templatedWidgetContribution");
+        string[] templatedRequired = templated.GetProperty("required")
+            .EnumerateArray().Select(v => v.GetString()!).Order().ToArray();
+        Assert.Equal(["displayName", "id", "template", "type"], templatedRequired);
+        Assert.True(templated.GetProperty("additionalProperties").GetBoolean() is false ||
+            !templated.TryGetProperty("additionalProperties", out _));
 
-        // contributions items dispatch through the $defs entry so later
-        // contribution types (command/ai-tool/settings) extend the oneOf.
-        JsonElement items = schema.RootElement.GetProperty("properties")
-            .GetProperty("contributions").GetProperty("items");
-        Assert.Equal(
-            "#/$defs/widgetContribution",
-            items.GetProperty("oneOf")[0].GetProperty("$ref").GetString());
+        JsonElement native = defs.GetProperty("nativeWidgetContribution");
+        string[] nativeRequired = native.GetProperty("required")
+            .EnumerateArray().Select(v => v.GetString()!).Order().ToArray();
+        Assert.Equal(["displayName", "id", "type"], nativeRequired);
+        Assert.True(native.GetProperty("properties").TryGetProperty("fallback", out _));
+
+        // Root allOf dispatches by runtime value.
+        JsonElement allOf = schema.RootElement.GetProperty("allOf");
+        Assert.True(allOf.GetArrayLength() >= 2);
     }
 
     [Fact]

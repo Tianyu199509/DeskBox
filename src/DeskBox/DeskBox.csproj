@@ -39,6 +39,14 @@
     <ApplicationIcon>Assets\deskbox.ico</ApplicationIcon>
   </PropertyGroup>
 
+  <!-- Dev native plugin pilot: compiles the B1 dev-install bootstrap with the
+       public spike key as a trusted native publisher. Release builds default
+       to false; enable explicitly for development and CI integration. -->
+  <PropertyGroup>
+    <EnableDeskBoxNativeDevPilot Condition="'$(EnableDeskBoxNativeDevPilot)' == ''">false</EnableDeskBoxNativeDevPilot>
+    <DefineConstants Condition="'$(EnableDeskBoxNativeDevPilot)' == 'true'">$(DefineConstants);DESKBOX_NATIVE_DEV_PILOT</DefineConstants>
+  </PropertyGroup>
+
   <!--
     Opt-in Native AOT audit profile. Keep ordinary Debug/Release behavior
     unchanged until the application-level AOT compatibility work is complete.
