@@ -1,3 +1,5 @@
+using System.Collections.Generic;
+using System.IO;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
@@ -334,14 +336,17 @@ internal sealed class NativeWidgetLease : IDisposable
     private bool _released;
 
     internal Microsoft.UI.Xaml.FrameworkElement View { get; private set; } = null!;
+    private string _instanceDataRoot = null!;
 
     internal NativePackageSession Session => _session;
 
-    internal static NativeWidgetLease Create(NativePackageSession session, nint handle, Microsoft.UI.Xaml.FrameworkElement view) => new()
+    internal static NativeWidgetLease Create(
+        NativePackageSession session, nint handle, Microsoft.UI.Xaml.FrameworkElement view, string instanceDataRoot) => new()
     {
         _session = session,
         _handle = handle,
         View = view,
+        _instanceDataRoot = instanceDataRoot,
     };
 
     /// <summary>
@@ -397,6 +402,9 @@ internal sealed unsafe class NativePackageSession
     private readonly nint _widgetEventExport; // required export at ABI v4
     private readonly object _instanceGate = new();
     private readonly HashSet<nint> _liveHandles = [];
+    // audit round 20: instance data roots are deleted on final destroy,
+    // allowing plugins to clean up their per-instance files without host intervention.
+    private readonly Dictionary<nint, string> _instanceDataRoots = [];
 
     internal NativePackageSession(
         NativePackageIdentity identity,
@@ -493,11 +501,17 @@ internal sealed unsafe class NativePackageSession
         }
         view.HorizontalAlignment = Microsoft.UI.Xaml.HorizontalAlignment.Stretch;
         view.VerticalAlignment = Microsoft.UI.Xaml.VerticalAlignment.Stretch;
-        lock (_instanceGate) _liveHandles.Add(handle);
-        return NativeWidgetLease.Create(this, handle, view);
+        lock (_instanceGate)
+        {
+            _liveHandles.Add(handle);
+            _instanceDataRoots[handle] = instanceDataRoot;
+        }
+        return NativeWidgetLease.Create(this, handle, view, instanceDataRoot);
     }
 
-    /// <summary>Destroys by handle; returns true only when the package confirms success.</summary>
+    /// <summary>Destroys by handle; returns true only when the package confirms success.
+    /// On success, the instance data root is deleted (audit round 20 - third law of
+    /// IWidgetInstanceLifecycle: Destroy cleans up all per-instance state).</summary>
     internal bool DestroyWidget(nint handle)
     {
         int status = ((delegate* unmanaged[Cdecl]<nint, int>)_destroyExport)(handle);
@@ -506,7 +520,24 @@ internal sealed unsafe class NativePackageSession
             App.Log($"[NativePackage] destroy 0x{handle:X} failed: 0x{status:X8}; instance remains counted");
             return false;
         }
-        lock (_instanceGate) _liveHandles.Remove(handle);
+        lock (_instanceGate)
+        {
+            _liveHandles.Remove(handle);
+            if (_instanceDataRoots.Remove(handle, out string? dataRoot))
+            {
+                // Total teardown (audit round 20): the destroy must never fail because of
+                // the runtime-state save (that happens in the package's Dispose), so
+                // disk access errors here are logged but don't turn into ABI failure.
+                try
+                {
+                    if (Directory.Exists(dataRoot)) Directory.Delete(dataRoot, recursive: true);
+                }
+                catch (Exception error)
+                {
+                    App.Log($"[NativePackage] failed to delete instance data root '{dataRoot}': {error.Message}");
+                }
+            }
+        }
         return true;
     }
 
@@ -556,6 +587,32 @@ internal sealed unsafe class NativePackageSession
         catch (Exception error)
         {
             App.Log($"[NativePackage] shutdown failed for {Identity.Key}: {error.Message}");
+        }
+
+        // audit round 20 - Shutdown Faulted: if destroy failed and the package
+        // did not clean up, the host must log and force cleanup of any remaining
+        // live handles to prevent data directory accumulation.
+        lock (_instanceGate)
+        {
+            if (_liveHandles.Count == 0) return;
+            App.Log($"[NativePackage] shutdown force-cleanup of {_liveHandles.Count} faulted instance(s) for {Identity.Key}");
+            var handles = _liveHandles.ToArray();
+            foreach (nint handle in handles)
+            {
+                if (_instanceDataRoots.Remove(handle, out string? dataRoot))
+                {
+                    try
+                    {
+                        if (Directory.Exists(dataRoot)) Directory.Delete(dataRoot, recursive: true);
+                    }
+                    catch
+                    {
+                        // No-op: nothing we can do at shutdown.
+                    }
+                }
+            }
+            _instanceDataRoots.Clear();
+            _liveHandles.Clear();
         }
     }
 }
