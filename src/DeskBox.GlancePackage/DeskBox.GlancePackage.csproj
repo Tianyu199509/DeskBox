@@ -30,15 +30,10 @@
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.WindowsAppSDK" Version="2.4.0" />
-    <!-- D3 phase 1: link production sources (D3 phase 2 will copy + delete from host). -->
-    <Compile Include="$(AbstractionsRoot)Models\GlanceCalendarModels.cs" Link="Linked\GlanceCalendarModels.cs" />
-    <Compile Include="$(AbstractionsRoot)Contracts\ICalendarPresentationSource.cs" Link="Linked\ICalendarPresentationSource.cs" />
-    <Compile Include="$(HostSourceRoot)Services\GlanceCalendarLayoutCalculator.cs" Link="Linked\GlanceCalendarLayoutCalculator.cs" />
-    <Compile Include="$(HostSourceRoot)Services\LocalCalendarPresentationSource.cs" Link="Linked\LocalCalendarPresentationSource.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <!-- D3 Phase 2: these two large services still link from host; copy in next PR. -->
     <Compile Include="$(HostSourceRoot)Services\GlanceTraditionalCalendarService.cs" Link="Linked\GlanceTraditionalCalendarService.cs" />
-    <Compile Include="$(HostSourceRoot)Services\GlanceFestivalService.cs" Link="Linked\GlanceFestivalService.cs" />
-    <Compile Include="$(HostSourceRoot)Models\GlanceWidgetData.cs" Link="Linked\GlanceWidgetData.cs" />
-    <Compile Include="$(HostSourceRoot)Helpers\ChineseTextConverter.cs" Link="Linked\ChineseTextConverter.cs" />
   </ItemGroup>
   <ItemGroup>
     <None Update="Rendering\glance.xaml" CopyToOutputDirectory="PreserveNewest" />
