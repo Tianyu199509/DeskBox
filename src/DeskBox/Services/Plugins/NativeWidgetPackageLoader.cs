@@ -526,10 +526,12 @@ internal static class NativeWidgetPackageLoader
     public const string DevelopmentPackageEnvironmentVariable = "DESKBOX_DEV_NATIVE_GLANCE";
     public const string DevelopmentPackageDllFileName = "DeskBox.Glance.NativePackage.dll";
     public const string ProductEntryModuleFileName = "package.dll";
-    public const string DevelopmentPublisherFingerprint = "dev-pilot";
-    public const string DevelopmentContentHash = "dev";
 
-    /// <summary>Path validation only - no module loading (unit-testable).</summary>
+    /// <summary>
+    /// Path validation only - no module loading (unit-testable). Compiled in
+    /// all configurations on purpose: it stays inert unless a pilot-gated
+    /// caller consumes it. Release builds have no such caller.
+    /// </summary>
     public static string? TryGetDevelopmentPackageRoot()
     {
         string? configured = Environment.GetEnvironmentVariable(DevelopmentPackageEnvironmentVariable);
@@ -550,6 +552,13 @@ internal static class NativeWidgetPackageLoader
         }
     }
 
+#if DESKBOX_NATIVE_DEV_PILOT
+    // Raw-directory load identity. Pilot builds only (audit round 17): the
+    // descriptor builder and its constants compile out of Release so no
+    // unverified module path can be constructed outside the B1 pipeline.
+    public const string DevelopmentPublisherFingerprint = "dev-pilot";
+    public const string DevelopmentContentHash = "dev";
+
     public static NativePackageDescriptor CreateDevelopmentDescriptor(string packageRoot)
     {
         string packageId = new DirectoryInfo(packageRoot).Name;
@@ -560,6 +569,7 @@ internal static class NativeWidgetPackageLoader
             packageRoot,
             DevelopmentPackageDllFileName);
     }
+#endif
 
     internal static unsafe NativePackageSession? TryOpenSession(NativePackageDescriptor descriptor, string dataDirectory)
     {
