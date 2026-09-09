@@ -75,7 +75,8 @@ internal sealed class GlanceInstanceMigration : ILegacyInstanceMigration
             {
                 bool typeValid = property.Name switch
                 {
-                    "showChineseFestivals" or "randomOrder" or "showPhotoControls" =>
+                    "showChineseFestivals" or "randomOrder" or "showPhotoControls" or
+                    "showTime" or "showDate" or "showYear" or "showWeekday" or "showCalendar" =>
                         property.Value.ValueKind is JsonValueKind.True or JsonValueKind.False,
                     "rotationIntervalMinutes" =>
                         property.Value.ValueKind == JsonValueKind.Number && property.Value.TryGetDouble(out _),
@@ -89,6 +90,7 @@ internal sealed class GlanceInstanceMigration : ILegacyInstanceMigration
                     "traditionalCalendarMode" => IsValidEnumValue<GlanceTraditionalCalendarMode>(property.Value),
                     "backgroundSource" => IsValidEnumValue<GlanceBackgroundSource>(property.Value),
                     "imageFit" => IsValidEnumValue<GlanceImageFitMode>(property.Value),
+                    "timeFormat" => IsValidEnumValue<GlanceTimeFormatMode>(property.Value),
                     _ => true,
                 };
                 if (!typeValid) return false;
