@@ -6,19 +6,49 @@ using WinRT;
 namespace DeskBox.GlancePackage.Abi;
 
 /// <summary>
-/// Unified package ABI v2: deskbox_package_activate / deskbox_widget_create /
-/// deskbox_widget_destroy / deskbox_package_shutdown. The DLL is named
-/// package.dll per the official package format.
+/// Unified package ABI v4: deskbox_package_activate / deskbox_widget_create /
+/// deskbox_widget_destroy / deskbox_package_shutdown / deskbox_widget_event.
+/// The DLL is named package.dll per the official package format.
 /// </summary>
 public static unsafe class Exports
 {
+    private const int S_OK = 0;
+    private const int E_HANDLE = unchecked((int)0x80070006);     // HRESULT_FROM_WIN32(ERROR_INVALID_HANDLE = 6)
+    private const int E_INVALIDARG = unchecked((int)0x80070057); // HRESULT_FROM_WIN32(ERROR_INVALID_PARAMETER = 87)
+    private const int E_POINTER = unchecked((int)0x80004003);
+    private const int E_UNEXPECTED = unchecked((int)0x8000FFFF);
+
     private static string _packageRoot = "";
     private static string _packageDataRoot = "";
     private static readonly Dictionary<nint, object> Instances = [];
     private static nint _nextHandle = 0x1000;
 
     [UnmanagedCallersOnly(EntryPoint = "deskbox_package_get_abi_version", CallConvs = [typeof(CallConvCdecl)])]
-    public static int GetAbiVersion() => 3;
+    public static int GetAbiVersion() => 4;
+
+    /// <summary>
+    /// Versioned host→package lifecycle event payload (ABI v4). Must stay
+    /// layout-identical to the host-side NativeWidgetEventV1 (pinned by
+    /// NativeWidgetLifecycleAbiTests). Append-only: future payload fields
+    /// consume Reserved slots or grow Size with a Version bump; existing
+    /// fields are never reordered or repurposed.
+    /// </summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct DeskBoxWidgetEventV1
+    {
+        public uint Size;
+        public uint Version;
+        public uint Kind;
+        public uint Flags;
+        public double Width;
+        public double Height;
+        public ulong Reserved0;
+        public ulong Reserved1;
+        public ulong Reserved2;
+        public ulong Reserved3;
+
+        public const uint CurrentVersion = 1;
+    }
 
     [StructLayout(LayoutKind.Sequential)]
     public struct HostApi
@@ -43,9 +73,9 @@ public static unsafe class Exports
             if (hostApi is not null && hostApi->Log != 0)
             {
                 _hostLog = (delegate* unmanaged[Cdecl]<byte*, int, void>)hostApi->Log;
-                HostLog("glance package activated (abi 2)");
+                HostLog("glance package activated (abi 4)");
             }
-            return 0;
+            return S_OK;
         }
         catch (Exception error)
         {
@@ -74,7 +104,7 @@ public static unsafe class Exports
             *widgetHandle = handle;
             *view = WinRT.MarshalInspectable<FrameworkElement>.FromManaged(content);
             HostLog($"widget created: {contribution}/{instance}");
-            return 0;
+            return S_OK;
         }
         catch (Exception error)
         {
@@ -86,56 +116,88 @@ public static unsafe class Exports
     [UnmanagedCallersOnly(EntryPoint = "deskbox_widget_destroy", CallConvs = [typeof(CallConvCdecl)])]
     public static int DestroyWidget(nint widgetHandle)
     {
-        _handles.Remove(widgetHandle);
-        Instances.Remove(widgetHandle);
-        return 0;
+        // Unknown handles report E_HANDLE so host/package lifecycle drift stays
+        // diagnosable instead of silently "succeeding" (audit round 17). The
+        // host destroy state machine only commits a release on package success.
+        try
+        {
+            if (!_handles.Remove(widgetHandle)) return E_HANDLE;
+            Instances.Remove(widgetHandle);
+            return S_OK;
+        }
+        catch (Exception error)
+        {
+            TryWriteDiagnostic("destroy-error.txt", error.ToString());
+            return error.HResult;
+        }
     }
 
     [UnmanagedCallersOnly(EntryPoint = "deskbox_package_shutdown", CallConvs = [typeof(CallConvCdecl)])]
     public static int Shutdown()
     {
+        // Live instances at shutdown mean a lifecycle bug upstream (the host
+        // only shuts down after the last successful destroy); surface it
+        // instead of reporting success (audit round 17).
+        if (Instances.Count > 0) return E_UNEXPECTED;
         try
         {
             File.WriteAllText(Path.Combine(_packageDataRoot, "glance-session.txt"),
                 $"instances={Instances.Count} shutdown={DateTime.Now:O}");
             HostLog("glance package shutdown");
-            return 0;
+            return S_OK;
         }
-        catch { return 0; }
+        catch (Exception error)
+        {
+            TryWriteDiagnostic("shutdown-error.txt", error.ToString());
+            return error.HResult;
+        }
     }
 
-    /// <summary>Widget lifecycle event kinds (ABI v3).</summary>
+    /// <summary>Widget lifecycle event kinds (ABI v4). Wire contract — keep in
+    /// sync with the host-side WidgetLifecycleEventKind enum (pinned by
+    /// NativeWidgetLifecycleAbiTests).</summary>
     public const uint RefreshRequested = 1;
     public const uint AppearanceChanged = 2;
     public const uint Activated = 3;
     public const uint Deactivated = 4;
-    public const uint VisibilityChanged = 5;
+    public const uint VisibilityChanged = 5;     // Flags bit 0: 1=visible, 0=hidden
     public const uint RevealCompleted = 6;
     public const uint LongHidden = 7;
-    public const uint CompactStateChanged = 8;
-    public const uint ViewportChanged = 9;
+    public const uint CompactStateChanged = 8;   // Flags bit 0: 1=collapsed, 0=expanded
+    public const uint ViewportChanged = 9;       // Width/Height carry the new size
     public const uint PerformanceSettingsChanged = 10;
     public const uint InteractiveResizeBegin = 11;
     public const uint InteractiveResizeEnd = 12;
+    public const uint ResponsiveLayoutBegin = 13;   // capsule/breakpoint transition (not user drag)
+    public const uint ResponsiveLayoutComplete = 14;
+    public const uint ResponsiveLayoutCancel = 15;
 
     private static readonly Dictionary<nint, Rendering.GlanceWidgetHandle> _handles = [];
 
     [UnmanagedCallersOnly(EntryPoint = "deskbox_widget_event", CallConvs = [typeof(CallConvCdecl)])]
-    public static int WidgetEvent(nint widgetHandle, uint eventKind, double width, double height, uint flags)
+    public static int WidgetEvent(nint widgetHandle, DeskBoxWidgetEventV1* payload)
     {
         // Total function: managed exceptions must never cross the C ABI boundary.
         try
         {
+            if (payload is null) return E_POINTER;
+            if (payload->Version != DeskBoxWidgetEventV1.CurrentVersion ||
+                payload->Size < (uint)sizeof(DeskBoxWidgetEventV1))
+            {
+                return E_INVALIDARG;
+            }
             if (!_handles.TryGetValue(widgetHandle, out Rendering.GlanceWidgetHandle? handle))
             {
-                return unchecked((int)0x80070510); // ERROR_INVALID_HANDLE
+                return E_HANDLE;
             }
-            if (eventKind is < 1 or > 12)
+            // Range is derived from the table itself, never a magic number, so
+            // adding a kind cannot silently strand it outside the accepted range.
+            if (payload->Kind is < RefreshRequested or > ResponsiveLayoutCancel)
             {
-                return unchecked((int)0x80070057); // E_INVALIDARG
+                return E_INVALIDARG;
             }
-            handle.OnLifecycleEvent(eventKind, width, height, flags);
-            return 0;
+            handle.OnLifecycleEvent(payload->Kind, payload->Width, payload->Height, payload->Flags);
+            return S_OK;
         }
         catch (Exception error)
         {

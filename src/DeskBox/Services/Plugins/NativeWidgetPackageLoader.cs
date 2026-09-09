@@ -71,6 +71,30 @@ internal struct NativeHostApiV1
     public nint SetConfigChangedHandler;
 }
 
+/// <summary>
+/// Versioned host→package lifecycle event payload (ABI v4). Must stay
+/// layout-identical to the package-side DeskBoxWidgetEventV1 (pinned by
+/// NativeWidgetLifecycleAbiTests). Append-only: future payload fields
+/// consume Reserved slots or grow Size with a Version bump; existing
+/// fields are never reordered or repurposed.
+/// </summary>
+[StructLayout(LayoutKind.Sequential)]
+internal struct NativeWidgetEventV1
+{
+    public uint Size;
+    public uint Version;
+    public uint Kind;
+    public uint Flags;
+    public double Width;
+    public double Height;
+    public ulong Reserved0;
+    public ulong Reserved1;
+    public ulong Reserved2;
+    public ulong Reserved3;
+
+    public const uint CurrentVersion = 1;
+}
+
 /// <summary>Host-side callbacks exposed to native packages via the HostApi table.</summary>
 internal static unsafe class NativeHostApiBridge
 {
@@ -133,7 +157,7 @@ internal static unsafe class NativeHostApiBridge
 }
 
 /// <summary>
-/// Batch C1 runtime contract (ABI v2): one session per loaded module identity
+/// Batch C1 runtime contract (ABI v4): one session per loaded module identity
 /// (publisher + packageId + contentHash), activated exactly once; widget
 /// instances are created per (contribution, instance) pair and destroyed by
 /// opaque handle; the last successful destroy shuts the package down. NativeAOT
@@ -144,7 +168,7 @@ internal static unsafe class NativeHostApiBridge
 /// </summary>
 internal static class NativeWidgetRuntimeManager
 {
-    public const int RequiredAbiVersion = 3;
+    public const int RequiredAbiVersion = 4;
     public const string NativeRuntimeType = "native";
     private static readonly object Gate = new();
     private static readonly Dictionary<string, NativePackageSession> Sessions = [];
@@ -303,7 +327,8 @@ internal sealed class NativeWidgetLease : IDisposable
     }
 }
 
-/// <summary>Typed host→package lifecycle events (ABI v3, audit rounds 15-16).</summary>
+/// <summary>Typed host→package lifecycle events (ABI v4, audit rounds 15-17). Wire
+/// values are pinned against the package-side constants by NativeWidgetLifecycleAbiTests.</summary>
 internal enum WidgetLifecycleEventKind : uint
 {
     RefreshRequested = 1,
@@ -329,7 +354,7 @@ internal sealed unsafe class NativePackageSession
     private readonly nint _createExport;
     private readonly nint _destroyExport;
     private readonly nint _shutdownExport;
-    private readonly nint _widgetEventExport; // 0 when the package has no event export
+    private readonly nint _widgetEventExport; // required export at ABI v4
     private readonly object _instanceGate = new();
     private readonly HashSet<nint> _liveHandles = [];
 
@@ -341,7 +366,7 @@ internal sealed unsafe class NativePackageSession
         nint createExport,
         nint destroyExport,
         nint shutdownExport,
-        nint widgetEventExport = 0)
+        nint widgetEventExport)
     {
         Identity = identity;
         PackageRoot = packageRoot;
@@ -445,14 +470,24 @@ internal sealed unsafe class NativePackageSession
         return true;
     }
 
-    /// <summary>Forward a lifecycle event; logs when the package reports failure.</summary>
+    /// <summary>Forward a lifecycle event through the versioned ABI v4 payload
+    /// struct; logs when the package reports failure.</summary>
     internal unsafe void SendWidgetEvent(nint handle, WidgetLifecycleEventKind kind, double width, double height, uint flags)
     {
         if (_widgetEventExport == 0) return;
         try
         {
-            var send = (delegate* unmanaged[Cdecl]<nint, uint, double, double, uint, int>)_widgetEventExport;
-            int status = send(handle, (uint)kind, width, height, flags);
+            NativeWidgetEventV1 payload = new()
+            {
+                Size = (uint)sizeof(NativeWidgetEventV1),
+                Version = NativeWidgetEventV1.CurrentVersion,
+                Kind = (uint)kind,
+                Flags = flags,
+                Width = width,
+                Height = height,
+            };
+            var send = (delegate* unmanaged[Cdecl]<nint, NativeWidgetEventV1*, int>)_widgetEventExport;
+            int status = send(handle, &payload);
             if (status != 0)
             {
                 App.LogVerbose($"[NativePackage] widget event {kind} returned 0x{status:X8}");
@@ -468,8 +503,15 @@ internal sealed unsafe class NativePackageSession
     {
         try
         {
-            ((delegate* unmanaged[Cdecl]<int>)_shutdownExport)();
-            App.Log($"[NativePackage] session shut down: {Identity.Key}");
+            int status = ((delegate* unmanaged[Cdecl]<int>)_shutdownExport)();
+            if (status != 0)
+            {
+                App.Log($"[NativePackage] shutdown reported 0x{status:X8} for {Identity.Key}; the package still holds state (lifecycle bug upstream)");
+            }
+            else
+            {
+                App.Log($"[NativePackage] session shut down: {Identity.Key}");
+            }
         }
         catch (Exception error)
         {
@@ -478,7 +520,7 @@ internal sealed unsafe class NativePackageSession
     }
 }
 
-/// <summary>Module loading + ABI resolution for the runtime manager (ABI v2).</summary>
+/// <summary>Module loading + ABI resolution for the runtime manager (ABI v4).</summary>
 internal static class NativeWidgetPackageLoader
 {
     public const string DevelopmentPackageEnvironmentVariable = "DESKBOX_DEV_NATIVE_GLANCE";
@@ -534,7 +576,7 @@ internal static class NativeWidgetPackageLoader
                 !TryGetExport(module, "deskbox_package_shutdown", out nint shutdownExport) ||
                 !TryGetExport(module, "deskbox_widget_event", out nint widgetEventExport))
             {
-                App.LogVerbose("[NativePackage] unified ABI v3 exports missing");
+                App.LogVerbose("[NativePackage] unified ABI v4 exports missing");
                 return null;
             }
             int version = ((delegate* unmanaged[Cdecl]<int>)versionExport)();
