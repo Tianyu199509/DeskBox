@@ -97,9 +97,8 @@ internal static class GlanceViewBuilder
         background.Opacity = 1;
     }
 
-    internal static void SubscribeDayDecoration(CalendarView calendarView, CalendarDecorationState decoration, CultureInfo culture)
+    internal static void SubscribeDayDecoration(CalendarView calendarView, CalendarDecorationState decoration)
     {
-        DateOnly today = DateOnly.FromDateTime(DateTime.Today);
         calendarView.CalendarViewDayItemChanging += (_, args) =>
         {
             CalendarViewDayItem item = args.Item;
@@ -118,10 +117,15 @@ internal static class GlanceViewBuilder
             bool hasSecondaryText = !string.IsNullOrWhiteSpace(secondaryText);
             bool isFestival = hasSecondaryText && day?.HasFestival == true;
             bool isCurrentMonth = day?.IsCurrentMonth ?? date.Month == decoration.Month.Month.Month;
+            // Regression pass: "today" and the culture are read PER CALL, not
+            // captured - a captured snapshot left the yesterday highlight
+            // marked as today after any midnight rollover, and kept the old
+            // locale's digit shaping after a live language switch.
+            DateOnly today = DateOnly.FromDateTime(DateTime.Today);
             item.MinHeight = decoration.DayItemHeight;
             item.Height = decoration.DayItemHeight;
             item.Tag = new GlanceDayDecoration(
-                day?.DayText ?? date.Day.ToString(culture),
+                day?.DayText ?? date.Day.ToString(decoration.Culture),
                 secondaryText,
                 hasSecondaryText ? Visibility.Visible : Visibility.Collapsed,
                 date == today ? Visibility.Visible : Visibility.Collapsed,
@@ -135,17 +139,19 @@ internal static class GlanceViewBuilder
 
 /// <summary>Mutable decoration state shared with the day-item callback.</summary>
 internal sealed class CalendarDecorationState(
-    GlanceCalendarMonth month, double dayItemHeight, bool showTraditional, bool showFestivals, bool showSecondary)
+    GlanceCalendarMonth month, double dayItemHeight, bool showTraditional, bool showFestivals, bool showSecondary,
+    CultureInfo culture)
 {
     public GlanceCalendarMonth Month = month;
     public double DayItemHeight = dayItemHeight;
     public bool ShowTraditional = showTraditional;
     public bool ShowFestivals = showFestivals;
     public bool ShowSecondary = showSecondary;
+    public CultureInfo Culture = culture;
 
-    public void Update(GlanceCalendarMonth rebuilt, double itemHeight, bool traditional, bool festivals, bool secondary)
+    public void Update(GlanceCalendarMonth rebuilt, double itemHeight, bool traditional, bool festivals, bool secondary, CultureInfo culture)
     {
-        Month = rebuilt; DayItemHeight = itemHeight; ShowTraditional = traditional; ShowFestivals = festivals; ShowSecondary = secondary;
+        Month = rebuilt; DayItemHeight = itemHeight; ShowTraditional = traditional; ShowFestivals = festivals; ShowSecondary = secondary; Culture = culture;
     }
 }
 

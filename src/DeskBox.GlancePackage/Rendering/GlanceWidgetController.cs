@@ -88,8 +88,8 @@ internal sealed class GlanceWidgetController : IDisposable
         _content.DataContext = GlanceMonthPipeline.CreatePresentation(_month, _isCompact, _panelHeight, _panelWidth, _culture, _width, _height);
 
         var calendarView = _content.FindName("NativeCalendarView").As<CalendarView>();
-        _decoration = new CalendarDecorationState(_month, dayItemHeight, showTraditional, showFestivals, showSecondary);
-        GlanceViewBuilder.SubscribeDayDecoration(calendarView, _decoration, _culture);
+        _decoration = new CalendarDecorationState(_month, dayItemHeight, showTraditional, showFestivals, showSecondary, _culture);
+        GlanceViewBuilder.SubscribeDayDecoration(calendarView, _decoration);
 
         _images = GlanceViewBuilder.LoadImages(Settings, packageRoot);
         _imageStretch = Settings.ImageFit == GlanceImageFitMode.Fit ? Stretch.Uniform : Stretch.UniformToFill;
@@ -359,7 +359,7 @@ internal sealed class GlanceWidgetController : IDisposable
     {
         (_month, _isCompact, _panelHeight, _panelWidth, double itemHeight, bool secondary, GlanceTraditionalCalendarMode mode) =
             GlanceMonthPipeline.Build(Settings.ShowChineseFestivals, Settings.TraditionalCalendarMode, _culture, _width, _height);
-        _decoration.Update(_month, itemHeight, mode != GlanceTraditionalCalendarMode.None, Settings.ShowChineseFestivals, secondary);
+        _decoration.Update(_month, itemHeight, mode != GlanceTraditionalCalendarMode.None, Settings.ShowChineseFestivals, secondary, _culture);
         _renderedDate = DateOnly.FromDateTime(DateTime.Today);
         UpdateClockText();
     }

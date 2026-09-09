@@ -454,19 +454,17 @@ internal sealed class NativeWidgetLease : IDisposable
 
     internal Microsoft.UI.Xaml.FrameworkElement View { get; private set; } = null!;
     private string _instanceId = null!;
-    private string _instanceDataRoot = null!;
 
     internal NativePackageSession Session => _session;
 
     internal static NativeWidgetLease Create(
         NativePackageSession session, nint handle, Microsoft.UI.Xaml.FrameworkElement view,
-        string instanceId, string instanceDataRoot) => new()
+        string instanceId) => new()
     {
         _session = session,
         _handle = handle,
         View = view,
         _instanceId = instanceId,
-        _instanceDataRoot = instanceDataRoot,
     };
 
     /// <summary>
@@ -478,7 +476,11 @@ internal sealed class NativeWidgetLease : IDisposable
     internal bool TryRelease()
     {
         if (_released) return false;
-        if (!_session.DestroyWidget(_handle)) return false;
+        if (!_session.DestroyWidget(_handle))
+        {
+            App.LogVerbose($"[NativePackage] destroy retry pending for instance {_instanceId}");
+            return false;
+        }
         _released = true;
         return true;
     }
@@ -637,7 +639,7 @@ internal sealed unsafe class NativePackageSession
         }
         // Ownership for the generic write-through routing (audit 20 §18).
         PackageInstanceRegistry.Register(Identity.PackageId, instanceId);
-        return NativeWidgetLease.Create(this, handle, view, instanceId, instanceDataRoot);
+        return NativeWidgetLease.Create(this, handle, view, instanceId);
     }
 
     /// <summary>Destroys by handle; returns true only when the package confirms success.
