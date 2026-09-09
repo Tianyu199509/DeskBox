@@ -5,6 +5,7 @@ using System.Globalization;
 namespace DeskBox.Tests;
 
 using Display = GlancePkg::DeskBox.GlancePackage.Rendering.GlanceDisplayPolicy;
+using NativeLayout = GlancePkg::DeskBox.GlancePackage.Rendering.NativeLayout;
 using GlanceTimeFormatMode = GlancePkg::DeskBox.Models.GlanceTimeFormatMode;
 
 /// <summary>
@@ -59,6 +60,34 @@ public class NativeGlanceDisplayPolicyTests
         Assert.Equal("9日", Display.FormatCompactCalendarDateText(Sample, Zh));
         Assert.Equal("9日", Display.FormatCompactCalendarDateText(Sample, CultureInfo.GetCultureInfo("ja-JP")));
         Assert.Equal("9", Display.FormatCompactCalendarDateText(Sample, En));
+    }
+
+    [Fact]
+    public void LayoutResolutionMatchesBuiltIn()
+    {
+        var immersive = GlancePkg::DeskBox.Models.GlanceLayoutMode.Immersive;
+        var centered = GlancePkg::DeskBox.Models.GlanceLayoutMode.Centered;
+        var editorial = GlancePkg::DeskBox.Models.GlanceLayoutMode.Editorial;
+        var calendar = GlancePkg::DeskBox.Models.GlanceLayoutMode.Calendar;
+
+        Assert.Equal(NativeLayout.Immersive, Display.ResolveLayout(immersive, showCalendarEffective: true));
+        Assert.Equal(NativeLayout.Centered, Display.ResolveLayout(centered, showCalendarEffective: false));
+        Assert.Equal(NativeLayout.Editorial, Display.ResolveLayout(editorial, showCalendarEffective: false));
+        // Calendar degrades to Immersive when the calendar is off or below
+        // the responsive floor.
+        Assert.Equal(NativeLayout.Calendar, Display.ResolveLayout(calendar, showCalendarEffective: true));
+        Assert.Equal(NativeLayout.Immersive, Display.ResolveLayout(calendar, showCalendarEffective: false));
+    }
+
+    [Fact]
+    public void TimeFontSizeClampsToTheBuiltInRange()
+    {
+        // 440x560: min(79.2, 156.8) -> clamp 78.
+        Assert.Equal(78, Display.TimeFontSize(440, 560));
+        // Tiny surface: clamps at the 38 floor.
+        Assert.Equal(38, Display.TimeFontSize(120, 120));
+        // Mid-size: min(0.18w, 0.28h) rounded to the half-step.
+        Assert.Equal(45.5, Display.TimeFontSize(253, 162.5));
     }
 
     [Fact]

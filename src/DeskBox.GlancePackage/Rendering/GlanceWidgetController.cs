@@ -274,7 +274,9 @@ internal sealed class GlanceWidgetController : IDisposable
     private ClockCadence CurrentClockCadence() =>
         GlanceDisplayPolicy.ComputeClockCadence(
             Settings.ShowTime, Settings.ShowDate, Settings.ShowWeekday,
-            GlanceDisplayPolicy.ShowCalendarEffective(Settings.ShowCalendar, _width, _height),
+            // Raw setting (built-in parity): the responsive floor only gates
+            // the surface, not the clock's midnight obligation.
+            Settings.ShowCalendar,
             Settings.TraditionalCalendarMode);
 
     private void UpdateTimers()
