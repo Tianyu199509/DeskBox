@@ -53,6 +53,10 @@ internal static class GlanceDataFile
             if (TryBool(raw, "showCalendar", out bool showCalendar)) settings.ShowCalendar = showCalendar;
             if (TryEnum<GlanceTimeFormatMode>(raw, "timeFormat", out var timeFormat)) settings.TimeFormat = timeFormat;
             if (TryEnum<GlanceLayoutMode>(raw, "layout", out var layout)) settings.Layout = layout;
+            if (TryEnum<GlanceTransitionMode>(raw, "transition", out var transition)) settings.Transition = transition;
+            if (TryEnum<GlanceTransitionSpeed>(raw, "transitionSpeed", out var speed)) settings.TransitionSpeed = speed;
+            if (TryEnum<GlanceReadabilityMode>(raw, "readability", out var readability)) settings.Readability = readability;
+            if (TryDouble(raw, "backgroundImageTransparency", out double transparency)) settings.BackgroundImageTransparency = transparency;
             return new GlanceData(settings, raw);
         }
         catch
@@ -175,6 +179,10 @@ internal static class GlanceDataFile
         if (skip?.Contains("showCalendar") != true && only?.Contains("showCalendar") != false) writer.WriteBoolean("showCalendar", settings.ShowCalendar);
         if (skip?.Contains("timeFormat") != true && only?.Contains("timeFormat") != false) writer.WriteString("timeFormat", settings.TimeFormat.ToString());
         if (skip?.Contains("layout") != true && only?.Contains("layout") != false) writer.WriteString("layout", settings.Layout.ToString());
+        if (skip?.Contains("transition") != true && only?.Contains("transition") != false) writer.WriteString("transition", settings.Transition.ToString());
+        if (skip?.Contains("transitionSpeed") != true && only?.Contains("transitionSpeed") != false) writer.WriteString("transitionSpeed", settings.TransitionSpeed.ToString());
+        if (skip?.Contains("readability") != true && only?.Contains("readability") != false) writer.WriteString("readability", settings.Readability.ToString());
+        if (skip?.Contains("backgroundImageTransparency") != true && only?.Contains("backgroundImageTransparency") != false) writer.WriteNumber("backgroundImageTransparency", settings.BackgroundImageTransparency);
     }
 
     private static bool TryBool(JsonElement root, string property, out bool value)

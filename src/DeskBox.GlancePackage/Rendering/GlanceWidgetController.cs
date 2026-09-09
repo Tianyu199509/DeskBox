@@ -6,6 +6,7 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Markup;
 using Microsoft.UI.Xaml.Media;
+using Microsoft.UI.Xaml.Media.Animation;
 using WinRT;
 
 namespace DeskBox.GlancePackage.Rendering;
@@ -33,9 +34,14 @@ internal sealed class GlanceWidgetController : IDisposable
     private readonly CalendarDecorationState _decoration;
     private readonly Border _backgroundA;
     private readonly Border _backgroundB;
+    private readonly Grid _backgroundLayer;
+    private readonly Border _readabilityLayer;
+    private readonly Border _calendarReadabilityLayer;
+    private readonly Border _gradientLayer;
     private readonly string[] _images;
     private readonly Stretch _imageStretch;
     private bool _showingA;
+    private Microsoft.UI.Xaml.Media.Animation.Storyboard? _transitionStoryboard;
 
     private readonly Microsoft.UI.Dispatching.DispatcherQueueTimer _rotationTimer;
     private readonly Microsoft.UI.Dispatching.DispatcherQueueTimer _resizeTimer;
@@ -95,6 +101,10 @@ internal sealed class GlanceWidgetController : IDisposable
         _imageStretch = Settings.ImageFit == GlanceImageFitMode.Fit ? Stretch.Uniform : Stretch.UniformToFill;
         _backgroundA = _content.FindName("BackgroundA").As<Border>();
         _backgroundB = _content.FindName("BackgroundB").As<Border>();
+        _backgroundLayer = _content.FindName("BackgroundImageLayer").As<Grid>();
+        _readabilityLayer = _content.FindName("ReadabilityLayer").As<Border>();
+        _calendarReadabilityLayer = _content.FindName("CalendarReadabilityLayer").As<Border>();
+        _gradientLayer = _content.FindName("NonCalendarGradientLayer").As<Border>();
         if (_images.Length == 0)
         {
             GlanceViewBuilder.ShowGradientFallback(_backgroundA);
@@ -190,6 +200,7 @@ internal sealed class GlanceWidgetController : IDisposable
         };
 
         UpdateTimers();
+        ApplyLayerEffects((GlancePresentation)_content.DataContext);
     }
 
     // ---- Host lifecycle events (ABI v4 kinds routed by GlanceWidgetHandle) ----
@@ -345,6 +356,28 @@ internal sealed class GlanceWidgetController : IDisposable
         presentation.PlayIconVisibility = _runtimeState.Paused ? Visibility.Visible : Visibility.Collapsed;
         presentation.PauseIconVisibility = _runtimeState.Paused ? Visibility.Collapsed : Visibility.Visible;
         _content.DataContext = presentation;
+        ApplyLayerEffects(presentation);
+    }
+
+    /// <summary>
+    /// Built-in parity: the background container carries the user's
+    /// transparency (opacity = 1 - transparency), and the readability
+    /// layers (black for non-calendar foreground, theme fill for the
+    /// calendar surface, bottom gradient) appear only when an image is
+    /// actually visible behind them.
+    /// </summary>
+    private void ApplyLayerEffects(GlancePresentation presentation)
+    {
+        _backgroundLayer.Opacity = 1.0 - Math.Clamp(Settings.BackgroundImageTransparency, 0.0, 1.0);
+        bool hasImage = _images.Length > 0;
+        bool calendar = presentation.CalendarSurfaceVisibility == Visibility.Visible;
+        bool nonCalendarForeground = hasImage &&
+            presentation.ForegroundVisibility == Visibility.Visible && !calendar;
+        _readabilityLayer.Opacity = presentation.ReadabilityOpacity;
+        _readabilityLayer.Visibility = nonCalendarForeground ? Visibility.Visible : Visibility.Collapsed;
+        _gradientLayer.Visibility = nonCalendarForeground ? Visibility.Visible : Visibility.Collapsed;
+        _calendarReadabilityLayer.Opacity = presentation.ReadabilityOpacity;
+        _calendarReadabilityLayer.Visibility = hasImage && calendar ? Visibility.Visible : Visibility.Collapsed;
     }
 
     // ---- Settings (host-authoritative write-through) ----
@@ -396,12 +429,101 @@ internal sealed class GlanceWidgetController : IDisposable
             ImageSource = new Microsoft.UI.Xaml.Media.Imaging.BitmapImage(new Uri(_images[_runtimeState.ImageIndex])),
             Stretch = _imageStretch,
         };
-        Border next = _showingA ? _backgroundB : _backgroundA;
-        Border fadeOut = _showingA ? _backgroundA : _backgroundB;
-        next.Background = brush;
-        next.Opacity = 1;
-        fadeOut.Opacity = 0;
-        _showingA = !_showingA;
+        Border incoming = _showingA ? _backgroundB : _backgroundA;
+        Border outgoing = _showingA ? _backgroundA : _backgroundB;
+        RunTransition(incoming, outgoing, brush);
+    }
+
+    /// <summary>
+    /// Verbatim port of the built-in RunTransition: per-mode opacity/slide/
+    /// zoom animation with the speed table (Fast 170 / Standard 300 /
+    /// Relaxed 520 ms, CubicEase EaseOut); instant swap for None or when
+    /// there is no outgoing image.
+    /// </summary>
+    private void RunTransition(Border incoming, Border outgoing, ImageBrush brush)
+    {
+        _transitionStoryboard?.Stop();
+        ResetTransform(incoming);
+        ResetTransform(outgoing);
+
+        bool animate = Settings.Transition != GlanceTransitionMode.None && outgoing.Background is not null;
+        if (!animate)
+        {
+            incoming.Background = brush;
+            incoming.Opacity = 1;
+            outgoing.Opacity = 0;
+            outgoing.Background = null;
+            _showingA = ReferenceEquals(incoming, _backgroundA);
+            return;
+        }
+
+        TimeSpan duration = TimeSpan.FromMilliseconds(Settings.TransitionSpeed switch
+        {
+            GlanceTransitionSpeed.Fast => 170,
+            GlanceTransitionSpeed.Relaxed => 520,
+            _ => 300,
+        });
+        incoming.Background = brush;
+        incoming.Opacity = 0;
+        outgoing.Opacity = 1;
+
+        var storyboard = new Storyboard();
+        AddAnimation(storyboard, incoming, "Opacity", 0, 1, duration);
+        AddAnimation(storyboard, outgoing, "Opacity", 1, 0, duration);
+
+        if (Settings.Transition == GlanceTransitionMode.SlideFade && incoming.RenderTransform is CompositeTransform slide)
+        {
+            slide.TranslateY = 16;
+            AddAnimation(storyboard, slide, "TranslateY", 16, 0, duration);
+        }
+        else if (Settings.Transition == GlanceTransitionMode.ZoomFade && incoming.RenderTransform is CompositeTransform zoom)
+        {
+            zoom.ScaleX = 1.035;
+            zoom.ScaleY = 1.035;
+            AddAnimation(storyboard, zoom, "ScaleX", 1.035, 1, duration);
+            AddAnimation(storyboard, zoom, "ScaleY", 1.035, 1, duration);
+        }
+
+        storyboard.Completed += (_, _) =>
+        {
+            outgoing.Background = null;
+            outgoing.Opacity = 0;
+            ResetTransform(incoming);
+            _showingA = ReferenceEquals(incoming, _backgroundA);
+        };
+        _transitionStoryboard = storyboard;
+        storyboard.Begin();
+    }
+
+    private static void ResetTransform(Border border)
+    {
+        if (border.RenderTransform is CompositeTransform transform)
+        {
+            transform.TranslateX = 0;
+            transform.TranslateY = 0;
+            transform.ScaleX = 1;
+            transform.ScaleY = 1;
+        }
+    }
+
+    private static void AddAnimation(
+        Storyboard storyboard,
+        DependencyObject target,
+        string property,
+        double from,
+        double to,
+        TimeSpan duration)
+    {
+        var animation = new DoubleAnimation
+        {
+            From = from,
+            To = to,
+            Duration = duration,
+            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut },
+        };
+        Storyboard.SetTarget(animation, target);
+        Storyboard.SetTargetProperty(animation, property);
+        storyboard.Children.Add(animation);
     }
 
     private void TogglePause()
@@ -422,6 +544,7 @@ internal sealed class GlanceWidgetController : IDisposable
         _clockTimer.Stop();
         _rotationTimer.Stop();
         _resizeTimer.Stop();
+        _transitionStoryboard?.Stop();
     }
 
     /// <summary>
@@ -437,6 +560,7 @@ internal sealed class GlanceWidgetController : IDisposable
         _clockTimer.Stop();
         _rotationTimer.Stop();
         _resizeTimer.Stop();
+        _transitionStoryboard?.Stop();
         GlanceRuntimeState.TrySave(_runtimeState, _instanceDataRoot);
     }
 }
