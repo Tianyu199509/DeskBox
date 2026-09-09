@@ -1,10 +1,10 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <!--
-    DeskBox official Glance native package (batch D3 phase 1).
-    D3 phase 1: project lives in src/, is part of the solution and CI, and
-    produces the installable native package. Production source files are
-    linked (Compile Include) from the host during the transition period;
-    D3 phase 2 copies them here and removes them from the host.
+    DeskBox official Glance native package (batch D3).
+    D3 phase 2 complete: all production source files are owned by this
+    project (copied from the host, seam references rewritten to package-owned
+    CultureRules/PackageLogger). The host keeps its own copies as the oracle
+    until behavioral parity is confirmed, then deletes them.
     The host does NOT reference this project.
   -->
   <PropertyGroup>
@@ -25,15 +25,9 @@
     <WindowsAppSdkBootstrapInitialize>false</WindowsAppSdkBootstrapInitialize>
     <WindowsAppSDKDeploymentManagerInitialize>false</WindowsAppSDKDeploymentManagerInitialize>
     <WindowsAppSDKUndockedRegFreeWinRTInitialize>false</WindowsAppSDKUndockedRegFreeWinRTInitialize>
-    <HostSourceRoot>$(MSBuildThisFileDirectory)..\DeskBox\</HostSourceRoot>
-    <AbstractionsRoot>$(MSBuildThisFileDirectory)..\DeskBox.Abstractions\</AbstractionsRoot>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.WindowsAppSDK" Version="2.4.0" />
-  </ItemGroup>
-  <ItemGroup>
-    <!-- D3 Phase 2: these two large services still link from host; copy in next PR. -->
-    <Compile Include="$(HostSourceRoot)Services\GlanceTraditionalCalendarService.cs" Link="Linked\GlanceTraditionalCalendarService.cs" />
   </ItemGroup>
   <ItemGroup>
     <None Update="Rendering\glance.xaml" CopyToOutputDirectory="PreserveNewest" />
