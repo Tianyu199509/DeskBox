@@ -41,19 +41,22 @@ internal sealed record NativePackageDescriptor(
 }
 
 /// <summary>
-/// Structurally paired installed-package handle: the record and its resolved
-/// install root travel together and can only be produced through
-/// PluginPackageManager.TryCreateNativeHandle - the runtime never accepts a
-/// separable "verified package + arbitrary path" pair.
+/// Structurally paired installed-package handle: the registry record, the
+/// verified package model, and the resolved install root travel together and
+/// can only be produced through PluginPackageManager.TryCreateNativeHandle.
+/// The verified model carries the actual EntryMain (not a runtime guess).
 /// </summary>
 public sealed record NativeInstalledPackageHandle
 {
     internal InstalledPackageRecord Record { get; }
+    internal VerifiedPluginPackage Verified { get; }
     internal string InstallRoot { get; }
+    internal string EntryMain => Verified.EntryMain ?? "package.dll";
 
-    internal NativeInstalledPackageHandle(InstalledPackageRecord record, string installRoot)
+    internal NativeInstalledPackageHandle(InstalledPackageRecord record, VerifiedPluginPackage verified, string installRoot)
     {
         Record = record;
+        Verified = verified;
         InstallRoot = installRoot;
     }
 }
@@ -217,13 +220,21 @@ internal static class NativeWidgetRuntimeManager
             App.LogVerbose($"[NativePackage] installed package {record.PackageId} runtime '{record.Runtime}' is not native; refusing to activate");
             return false;
         }
+        // Contribution must exist in the verified manifest before the runtime
+        // forwards it to the package DLL (audit round 13 §22).
+        if (!handle.Verified.Contributions.Any(contribution =>
+                string.Equals(contribution.Id, contributionId, StringComparison.Ordinal)))
+        {
+            App.LogVerbose($"[NativePackage] contribution '{contributionId}' not found in {record.PackageId}; refusing to create");
+            return false;
+        }
         return TryCreateInstance(
             new NativePackageDescriptor(
                 record.PublisherFingerprint,
                 record.PackageId,
                 record.ContentHash,
                 handle.InstallRoot,
-                NativeWidgetPackageLoader.ProductEntryModuleFileName),
+                handle.EntryMain),
             contributionId,
             instanceId,
             dataDirectory,
@@ -348,18 +359,21 @@ internal sealed unsafe class NativePackageSession
         {
             status = create(contribution, contributionId.Length, instance, instanceId.Length, dataRoot, instanceDataRoot.Length, &handle, &viewAbi);
         }
-        if (status != 0)
+        // Creation transaction (audit round 13): any incomplete output is
+        // rolled back regardless of the reported status - a partial success
+        // must never leave an untracked instance or a leaked ABI reference.
+        if (status != 0 || handle == 0 || viewAbi == 0)
         {
-            // Partial outputs (handle/view set despite failure) must be rolled
-            // back so the package never keeps an untracked instance.
             if (handle != 0) DestroyWidget(handle);
             if (viewAbi != 0) WinRT.MarshalInspectable<Microsoft.UI.Xaml.FrameworkElement>.DisposeAbi(viewAbi);
-            App.Log($"[NativePackage] create {contributionId}/{instanceId} failed: 0x{status:X8}");
-            return null;
-        }
-        if (handle == 0 || viewAbi == 0)
-        {
-            App.Log($"[NativePackage] create {contributionId}/{instanceId} returned incomplete outputs");
+            if (status != 0)
+            {
+                App.Log($"[NativePackage] create {contributionId}/{instanceId} failed: 0x{status:X8}");
+            }
+            else
+            {
+                App.Log($"[NativePackage] create {contributionId}/{instanceId} returned incomplete outputs (handle={handle:X}, view={viewAbi:X}); rolled back");
+            }
             return null;
         }
         Microsoft.UI.Xaml.FrameworkElement? view = null;

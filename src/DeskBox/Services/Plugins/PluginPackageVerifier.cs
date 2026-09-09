@@ -67,7 +67,7 @@ public static partial class PluginPackageVerifier
         [.. RootRequired, "permissions", "data", "signature", "fallback", "dataSources", "actions", "entry"];
 
     private static readonly string[] WidgetClosed =
-        ["type", "id", "displayName", "template", "payload", "bindings", "defaultSize", "activationEvents"];
+        ["type", "id", "displayName", "template", "payload", "bindings", "defaultSize", "activationEvents", "fallback"];
 
     private static readonly string[] Templates =
         ["metric", "list", "status", "gallery", "action-list", "simple-form"];
@@ -261,7 +261,7 @@ public static partial class PluginPackageVerifier
         {
             foreach (JsonProperty property in entry.EnumerateObject())
             {
-                if (property.Name != "main")
+                if (property.Name != "main" && property.Name != "architecture")
                 {
                     Fail($"entry: unknown property '{property.Name}'");
                 }
@@ -279,6 +279,33 @@ public static partial class PluginPackageVerifier
                 else if (!File.Exists(Path.Combine(packageDirectory, entryMain)))
                 {
                     Fail($"entry.main file not found in package: {entryMain}");
+                }
+            }
+            // Architecture cross-check for native packages (audit round 13):
+            // the manifest claim must match the PE machine header of the DLL.
+            string? architecture = StringValue(entry, "architecture");
+            if (runtime is "native")
+            {
+                if (architecture is not ("x64" or "arm64"))
+                {
+                    Fail("runtime:native requires entry.architecture (x64 or arm64)");
+                }
+                else if (StringValue(entry, "main") is { } nativeEntry &&
+                         File.Exists(Path.Combine(packageDirectory, nativeEntry)))
+                {
+                    ushort? machine = ReadPeMachine(Path.Combine(packageDirectory, nativeEntry));
+                    if (machine is null)
+                    {
+                        Fail($"entry.main is not a valid PE file: {nativeEntry}");
+                    }
+                    else
+                    {
+                        ushort expected = architecture == "x64" ? (ushort)0x8664 : (ushort)0xAA64;
+                        if (machine != expected)
+                        {
+                            Fail($"entry.architecture '{architecture}' does not match PE machine 0x{machine.Value:X4}");
+                        }
+                    }
                 }
             }
         }
@@ -358,7 +385,12 @@ public static partial class PluginPackageVerifier
                 Fail($"{where}: must be an object");
                 continue;
             }
-            foreach (string key in new[] { "type", "id", "displayName", "template" })
+            // template is required for non-native runtimes; optional for native
+            // (native packages render via their own DLL, audit round 13 §2).
+            bool isNativeRuntime = StringValue(root, "runtime") == "native";
+            foreach (string key in isNativeRuntime
+                ? new[] { "type", "id", "displayName" }
+                : new[] { "type", "id", "displayName", "template" })
             {
                 if (!contribution.TryGetProperty(key, out _))
                 {
@@ -395,9 +427,27 @@ public static partial class PluginPackageVerifier
             {
                 Fail($"{where}: displayName must be a non-empty string");
             }
-            if (StringValue(contribution, "template") is not { } template || !Templates.Contains(template))
+            if (contribution.TryGetProperty("template", out JsonElement templateElement))
             {
-                Fail($"{where}: template enum");
+                string? template = StringValue(contribution, "template");
+                if (template is null || !Templates.Contains(template))
+                {
+                    Fail($"{where}: template enum");
+                }
+            }
+            if (contribution.TryGetProperty("fallback", out JsonElement fallback) && fallback.ValueKind == JsonValueKind.Object)
+            {
+                foreach (JsonProperty fallbackProperty in fallback.EnumerateObject())
+                {
+                    if (fallbackProperty.Name is not ("template" or "message"))
+                    {
+                        Fail($"{where}.fallback: unknown property '{fallbackProperty.Name}'");
+                    }
+                }
+                if (StringValue(fallback, "template") is not "status")
+                {
+                    Fail($"{where}.fallback.template must be 'status'");
+                }
             }
 
             if (contribution.TryGetProperty("defaultSize", out JsonElement size))
@@ -886,6 +936,27 @@ public static partial class PluginPackageVerifier
     // the integrity strings must denote the same object.
     private static readonly string[] ReservedDeviceNames =
         ["CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9"];
+
+    // ---------- PE machine header reader (architecture cross-check) ----------
+    /// <summary>Reads the Machine field from a PE/COFF header, or null if not a valid PE.</summary>
+    internal static ushort? ReadPeMachine(string filePath)
+    {
+        try
+        {
+            using var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.Read);
+            using var reader = new BinaryReader(stream);
+            stream.Position = 0x3C;
+            uint peOffset = reader.ReadUInt32();
+            stream.Position = peOffset;
+            uint signature = reader.ReadUInt32();
+            if (signature != 0x4550) return null; // "PE\0\0"
+            return reader.ReadUInt16(); // Machine field
+        }
+        catch
+        {
+            return null;
+        }
+    }
 
     // ---------- package path grammar (zip-slip defense, shared with the Node tooling) ----------
     internal static string? PackagePathViolation(string relativePath)
