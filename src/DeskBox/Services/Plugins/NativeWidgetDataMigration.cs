@@ -1,16 +1,21 @@
+using System.Text.Json;
+
 namespace DeskBox.Services.Plugins;
 
 /// <summary>
-/// One-shot legacy data migration (D3 product migration): copies the
-/// built-in Glance widget store file verbatim into the native package's
-/// instance data root before the first native create. From then on the
-/// package owns its data; the built-in store keeps serving the built-in
-/// widget until the oracle comparison deletes it.
+/// Legacy data handoff (D3 data-ownership hardening, audit round 18).
 ///
-/// The copy is byte-for-byte on purpose: no JsonSerializer runs here (the
-/// host's frozen JSON call baseline stays untouched), and the package-side
-/// reader defaults every field its file version does not carry (files as old
-/// as v7 exist on real machines).
+/// Ownership model until the formal cutover marker exists: the built-in
+/// store stays the SINGLE source of truth for glance settings. Every native
+/// create re-syncs the resolved legacy bytes into the package's instance
+/// data root, so a failed native create can never strand a stale snapshot,
+/// and host-side setting changes always reach the next native session.
+///
+/// The resolved bytes come from the same candidates the built-in system
+/// recovers from: the per-widget store, its .bak, then the single-instance
+/// legacy store (and its .bak). Content is validated as a JSON object before
+/// copying, byte-for-byte - no re-serialization runs here, and the
+/// package-side reader defaults any field the file version does not carry.
 /// </summary>
 internal static class NativeWidgetDataMigration
 {
@@ -21,23 +26,68 @@ internal static class NativeWidgetDataMigration
         ArgumentException.ThrowIfNullOrWhiteSpace(instanceId);
         try
         {
+            string? legacy = ResolveLegacyContent(dataDirectory, instanceId);
+            if (legacy is null)
+            {
+                // No host-side data for this instance: whatever the package
+                // already owns stays untouched.
+                return;
+            }
             string instanceRoot = new NativePackageIdentity(publisherFingerprint, packageId)
                 .ResolveInstanceDataRoot(dataDirectory, instanceId);
-            string target = Path.Combine(instanceRoot, DataFileName);
-            if (File.Exists(target)) return; // idempotent: package data wins once migrated
-            string source = Path.Combine(
-                dataDirectory, "glance", "widgets",
-                $"{GlanceWidgetStore.GetSafeWidgetFileName(instanceId)}.json");
-            if (!File.Exists(source)) return; // fresh instance: package defaults apply
             Directory.CreateDirectory(instanceRoot);
-            File.Copy(source, target);
-            App.Log($"[NativePackage] migrated legacy glance data for instance {instanceId}");
+            string target = Path.Combine(instanceRoot, DataFileName);
+            string temp = target + ".tmp";
+            File.WriteAllText(temp, legacy);
+            if (File.Exists(target))
+            {
+                File.Replace(temp, target, target + ".bak");
+            }
+            else
+            {
+                File.Move(temp, target);
+            }
+            App.Log($"[NativePackage] synced legacy glance data for instance {instanceId}");
         }
         catch (Exception error)
         {
-            // Migration is best-effort: a failed copy must never block native
-            // widget creation, it just means the instance starts from defaults.
-            App.LogVerbose($"[NativePackage] glance data migration failed for {instanceId}: {error.Message}");
+            // Best-effort: a failed sync must never block native widget
+            // creation, it just means the package keeps its current data.
+            App.LogVerbose($"[NativePackage] glance data sync failed for {instanceId}: {error.Message}");
+        }
+    }
+
+    private static string? ResolveLegacyContent(string dataDirectory, string instanceId)
+    {
+        string widgetFile = Path.Combine(
+            dataDirectory, "glance", "widgets",
+            $"{GlanceWidgetStore.GetSafeWidgetFileName(instanceId)}.json");
+        string legacyFile = Path.Combine(dataDirectory, "glance", "glance.json");
+        foreach (string candidate in new[] { widgetFile, widgetFile + ".bak", legacyFile, legacyFile + ".bak" })
+        {
+            if (TryReadValidObject(candidate, out string? content))
+            {
+                return content;
+            }
+        }
+        return null;
+    }
+
+    private static bool TryReadValidObject(string path, out string? content)
+    {
+        content = null;
+        try
+        {
+            if (!File.Exists(path)) return false;
+            string text = File.ReadAllText(path);
+            using JsonDocument document = JsonDocument.Parse(text);
+            if (document.RootElement.ValueKind != JsonValueKind.Object) return false;
+            content = text;
+            return true;
+        }
+        catch
+        {
+            return false;
         }
     }
 }
