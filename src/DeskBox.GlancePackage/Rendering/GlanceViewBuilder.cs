@@ -14,9 +14,10 @@ namespace DeskBox.GlancePackage.Rendering;
 /// <summary>
 /// Builds the Glance widget view from runtime text XAML, driven by the
 /// package-owned production services. D3 product migration: locale comes
-/// from the host config channel, the month view is the current month, and
-/// the presentation re-builds (debounced) when the host reports viewport
-/// changes.
+/// from the host config channel, the month view is the current month,
+/// settings come from the migrated GlanceWidgetData file (legacy store
+/// handoff), and the presentation re-builds (debounced) when the host
+/// reports viewport changes.
 /// </summary>
 internal static class GlanceViewBuilder
 {
@@ -27,12 +28,17 @@ internal static class GlanceViewBuilder
         CultureInfo culture = HostConfig.TryGetCulture() ?? CultureInfo.CurrentUICulture;
         PackageStrings.Configure(culture, packageRoot);
 
-        // Build the month data through production services.
-        var state = GlancePackageState.LoadOrCreate(instanceDataRoot);
+        // Settings: migrated GlanceWidgetData (host legacy store handoff) or
+        // model defaults; runtime bits (paused, image index) stay separate.
+        GlanceWidgetData data = GlanceDataFile.Load(instanceDataRoot) ?? new GlanceWidgetData();
+        var runtimeState = GlanceRuntimeState.LoadOrCreate(instanceDataRoot);
+        bool showTraditional = data.TraditionalCalendarMode != GlanceTraditionalCalendarMode.None;
+        bool showFestivals = data.ShowChineseFestivals;
+
         double width = GlanceMonthPipeline.DefaultWidth;
         double height = GlanceMonthPipeline.DefaultHeight;
         (GlanceCalendarMonth month, bool isCompact, double panelHeight, double panelWidth, double dayItemHeight, bool showSecondary) =
-            GlanceMonthPipeline.Build(state.ShowTraditional, state.ShowFestivals, culture, width, height);
+            GlanceMonthPipeline.Build(showTraditional, showFestivals, culture, width, height);
 
         var presentation = GlanceMonthPipeline.CreatePresentation(month, isCompact, panelHeight, panelWidth, culture, width, height);
         FrameworkElement content = (FrameworkElement)XamlReader.Load(
@@ -41,19 +47,22 @@ internal static class GlanceViewBuilder
 
         // Calendar day decoration (single subscription, mutable state).
         var calendarView = content.FindName("NativeCalendarView").As<CalendarView>();
-        var decoration = new CalendarDecorationState(month, dayItemHeight, state.ShowTraditional, state.ShowFestivals);
+        var decoration = new CalendarDecorationState(month, dayItemHeight, showTraditional, showFestivals);
         SubscribeDayDecoration(calendarView, decoration, culture);
 
-        // Background image rotation from package-local backgrounds/ folder.
-        string[] images = LoadImages(Path.Combine(packageRoot, "backgrounds"));
+        // Background rotation. Image set follows GlanceWidgetData: explicit
+        // local files, a local folder, or the bundled backgrounds when the
+        // configured source needs a capability the package does not have yet.
+        string[] images = LoadImages(data, packageRoot);
+        Stretch imageStretch = data.ImageFit == GlanceImageFitMode.Fit ? Stretch.Uniform : Stretch.UniformToFill;
         var backgroundA = content.FindName("BackgroundA").As<Border>();
         var backgroundB = content.FindName("BackgroundB").As<Border>();
         bool showingA = true;
         void Show(int index)
         {
             if (images.Length == 0) return;
-            state.ImageIndex = ((index % images.Length) + images.Length) % images.Length;
-            var brush = new ImageBrush { ImageSource = new Microsoft.UI.Xaml.Media.Imaging.BitmapImage(new Uri(images[state.ImageIndex])), Stretch = Stretch.UniformToFill };
+            runtimeState.ImageIndex = ((index % images.Length) + images.Length) % images.Length;
+            var brush = new ImageBrush { ImageSource = new Microsoft.UI.Xaml.Media.Imaging.BitmapImage(new Uri(images[runtimeState.ImageIndex])), Stretch = imageStretch };
             Border next = showingA ? backgroundB : backgroundA;
             Border fadeOut = showingA ? backgroundA : backgroundB;
             next.Background = brush;
@@ -61,42 +70,50 @@ internal static class GlanceViewBuilder
             fadeOut.Opacity = 0;
             showingA = !showingA;
         }
-        Show(state.ImageIndex);
+        Show(runtimeState.ImageIndex);
 
         var timer = Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread().CreateTimer();
-        timer.Interval = TimeSpan.FromSeconds(3);
-        timer.Tick += (_, _) => { if (!state.Paused) Show(state.ImageIndex + 1); };
-        if (!state.Paused && images.Length > 1) timer.Start();
+        timer.Interval = TimeSpan.FromMinutes(Math.Clamp(data.RotationIntervalMinutes, 0.1, 1440));
+        timer.Tick += (_, _) => { if (!runtimeState.Paused) Show(runtimeState.ImageIndex + 1); };
+        if (!runtimeState.Paused && images.Length > 1) timer.Start();
 
-        // Action bar.
+        // Action bar (hidden when the user turned photo controls off).
         var pauseButton = content.FindName("PauseButton").As<Button>();
+        var nextButton = content.FindName("NextButton").As<Button>();
+        if (!data.ShowPhotoControls)
+        {
+            pauseButton.Visibility = Visibility.Collapsed;
+            nextButton.Visibility = Visibility.Collapsed;
+        }
         void TogglePause()
         {
-            state.Paused = !state.Paused;
-            if (state.Paused) timer.Stop();
+            runtimeState.Paused = !runtimeState.Paused;
+            if (runtimeState.Paused) timer.Stop();
             else if (images.Length > 1) timer.Start();
         }
         pauseButton.Click += (_, _) => TogglePause();
-        var nextButton = content.FindName("NextButton").As<Button>();
-        nextButton.Click += (_, _) => Show(state.ImageIndex + 1);
+        nextButton.Click += (_, _) => Show(runtimeState.ImageIndex + 1);
 
-        // Settings panel (in-namescope for host-side probes).
+        // Settings panel (in-namescope for host-side probes). Toggles now
+        // mutate the migrated data and persist it in the package's format.
         var settingsLayer = content.FindName("SettingsLayer").As<FrameworkElement>();
         var festivalToggle = content.FindName("FestivalToggle").As<ToggleSwitch>();
         var traditionalToggle = content.FindName("TraditionalToggle").As<ToggleSwitch>();
-        festivalToggle.IsOn = state.ShowFestivals;
-        traditionalToggle.IsOn = state.ShowTraditional;
+        festivalToggle.IsOn = showFestivals;
+        traditionalToggle.IsOn = showTraditional;
         festivalToggle.Toggled += (_, _) =>
         {
-            state.ShowFestivals = festivalToggle.IsOn;
-            RebuildMonth(decoration, state, culture, width, height, content);
-            state.Save(instanceDataRoot);
+            data.ShowChineseFestivals = festivalToggle.IsOn;
+            RebuildMonth(decoration, data, culture, width, height, content);
+            GlanceDataFile.Save(data, instanceDataRoot);
         };
         traditionalToggle.Toggled += (_, _) =>
         {
-            state.ShowTraditional = traditionalToggle.IsOn;
-            RebuildMonth(decoration, state, culture, width, height, content);
-            state.Save(instanceDataRoot);
+            data.TraditionalCalendarMode = traditionalToggle.IsOn
+                ? GlanceTraditionalCalendarMode.ChineseLunar
+                : GlanceTraditionalCalendarMode.None;
+            RebuildMonth(decoration, data, culture, width, height, content);
+            GlanceDataFile.Save(data, instanceDataRoot);
         };
 
         // Debounced responsive rebuild: the host can report viewport changes
@@ -105,7 +122,7 @@ internal static class GlanceViewBuilder
         var resizeTimer = Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread().CreateTimer();
         resizeTimer.Interval = TimeSpan.FromMilliseconds(120);
         resizeTimer.IsRepeating = false;
-        resizeTimer.Tick += (_, _) => RebuildMonth(decoration, state, culture, width, height, content);
+        resizeTimer.Tick += (_, _) => RebuildMonth(decoration, data, culture, width, height, content);
         onViewportChanged = (newWidth, newHeight) =>
         {
             if (Math.Abs(newWidth - width) < 1 && Math.Abs(newHeight - height) < 1) return;
@@ -114,12 +131,17 @@ internal static class GlanceViewBuilder
             resizeTimer.Stop();
             resizeTimer.Start();
         };
-        content.Unloaded += (_, _) => { timer.Stop(); resizeTimer.Stop(); };
+        content.Unloaded += (_, _) =>
+        {
+            timer.Stop();
+            resizeTimer.Stop();
+            GlanceRuntimeState.Save(runtimeState, instanceDataRoot);
+        };
 
         // Right-click menu (code-built: runtime XAML cannot wire handlers).
         var menu = new MenuFlyout();
         var nextItem = new MenuFlyoutItem { Text = PackageStrings.Get("menuNextBackground", "下一张背景") };
-        nextItem.Click += (_, _) => Show(state.ImageIndex + 1);
+        nextItem.Click += (_, _) => Show(runtimeState.ImageIndex + 1);
         var pauseItem = new MenuFlyoutItem { Text = PackageStrings.Get("menuPauseRotation", "暂停轮播") };
         pauseItem.Click += (_, _) => TogglePause();
         var settingsItem = new MenuFlyoutItem { Text = PackageStrings.Get("menuSettings", "设置") };
@@ -137,22 +159,61 @@ internal static class GlanceViewBuilder
     }
 
     private static void RebuildMonth(
-        CalendarDecorationState decoration, GlancePackageState state, CultureInfo culture,
+        CalendarDecorationState decoration, GlanceWidgetData data, CultureInfo culture,
         double width, double height, FrameworkElement content)
     {
+        bool showTraditional = data.TraditionalCalendarMode != GlanceTraditionalCalendarMode.None;
         (GlanceCalendarMonth rebuilt, bool isCompact, double panelHeight, double panelWidth, double itemHeight, _) =
-            GlanceMonthPipeline.Build(state.ShowTraditional, state.ShowFestivals, culture, width, height);
-        decoration.Update(rebuilt, itemHeight, state.ShowTraditional, state.ShowFestivals);
+            GlanceMonthPipeline.Build(showTraditional, data.ShowChineseFestivals, culture, width, height);
+        decoration.Update(rebuilt, itemHeight, showTraditional, data.ShowChineseFestivals);
         content.DataContext = GlanceMonthPipeline.CreatePresentation(rebuilt, isCompact, panelHeight, panelWidth, culture, width, height);
     }
 
-    private static string[] LoadImages(string backgroundsDirectory) =>
-        Directory.Exists(backgroundsDirectory)
-            ? Directory.GetFiles(backgroundsDirectory, "*.png")
-                .Concat(Directory.GetFiles(backgroundsDirectory, "*.jpg"))
-                .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
-                .ToArray()
-            : [];
+    private static string[] LoadImages(GlanceWidgetData data, string packageRoot)
+    {
+        IEnumerable<string> files = data.BackgroundSource switch
+        {
+            GlanceBackgroundSource.LocalFiles => data.LocalImagePaths.Where(File.Exists),
+            GlanceBackgroundSource.LocalFolder when !string.IsNullOrWhiteSpace(data.LocalFolderPath) &&
+                                                    Directory.Exists(data.LocalFolderPath)
+                => EnumerateImageFiles(data.LocalFolderPath),
+            _ => BundledBackgrounds(packageRoot, data.BackgroundSource),
+        };
+        string[] images = files.OrderBy(path => path, StringComparer.OrdinalIgnoreCase).ToArray();
+        if (data.RandomOrder && images.Length > 1)
+        {
+            // Approximate random rotation with a per-load shuffle.
+            for (int index = images.Length - 1; index > 0; index--)
+            {
+                int swap = Random.Shared.Next(index + 1);
+                (images[swap], images[index]) = (images[index], images[swap]);
+            }
+        }
+        return images;
+    }
+
+    private static IEnumerable<string> BundledBackgrounds(string packageRoot, GlanceBackgroundSource configured)
+    {
+        if (configured is not (GlanceBackgroundSource.Online or GlanceBackgroundSource.Bing))
+        {
+            yield break;
+        }
+        // Online/Bing sources need a network path the package does not have
+        // yet; fall back to the bundled backgrounds until that batch lands.
+        PackageLogger.LogVerbose(
+            $"[GlancePackage] background source {configured} is not available natively yet; using bundled backgrounds");
+        foreach (string file in EnumerateImageFiles(Path.Combine(packageRoot, "backgrounds")))
+        {
+            yield return file;
+        }
+    }
+
+    private static IEnumerable<string> EnumerateImageFiles(string directory)
+    {
+        if (!Directory.Exists(directory)) yield break;
+        foreach (string file in Directory.GetFiles(directory, "*.png")) yield return file;
+        foreach (string file in Directory.GetFiles(directory, "*.jpg")) yield return file;
+    }
 
     private sealed class CalendarDecorationState(
         GlanceCalendarMonth month, double dayItemHeight, bool showTraditional, bool showFestivals)
@@ -214,24 +275,24 @@ public sealed partial record GlanceDayDecoration(
     double PrimaryOpacity,
     double SecondaryOpacity);
 
-/// <summary>Per-instance persisted state.</summary>
-internal sealed class GlancePackageState
+/// <summary>
+/// Per-instance runtime state (paused flag, current image index). Settings
+/// live in the migrated GlanceWidgetData file; only ephemeral runtime bits
+/// persist here.
+/// </summary>
+internal sealed class GlanceRuntimeState
 {
     public int ImageIndex;
     public bool Paused;
-    public bool ShowFestivals = true;
-    public bool ShowTraditional = true;
 
-    public static GlancePackageState LoadOrCreate(string instanceDataRoot)
+    public static GlanceRuntimeState LoadOrCreate(string instanceDataRoot)
     {
         string path = Path.Combine(instanceDataRoot, "glance-state.json");
         if (!File.Exists(path)) return new();
         try
         {
             using JsonDocument document = JsonDocument.Parse(File.ReadAllText(path));
-            var state = new GlancePackageState();
-            if (document.RootElement.TryGetProperty("showFestivals", out var f)) state.ShowFestivals = f.GetBoolean();
-            if (document.RootElement.TryGetProperty("showTraditional", out var t)) state.ShowTraditional = t.GetBoolean();
+            var state = new GlanceRuntimeState();
             if (document.RootElement.TryGetProperty("paused", out var p)) state.Paused = p.GetBoolean();
             if (document.RootElement.TryGetProperty("imageIndex", out var i)) state.ImageIndex = i.GetInt32();
             return state;
@@ -239,16 +300,14 @@ internal sealed class GlancePackageState
         catch { return new(); }
     }
 
-    public void Save(string instanceDataRoot)
+    public static void Save(GlanceRuntimeState state, string instanceDataRoot)
     {
         Directory.CreateDirectory(instanceDataRoot);
         using var stream = File.Create(Path.Combine(instanceDataRoot, "glance-state.json"));
         using var writer = new Utf8JsonWriter(stream);
         writer.WriteStartObject();
-        writer.WriteBoolean("showFestivals", ShowFestivals);
-        writer.WriteBoolean("showTraditional", ShowTraditional);
-        writer.WriteBoolean("paused", Paused);
-        writer.WriteNumber("imageIndex", ImageIndex);
+        writer.WriteBoolean("paused", state.Paused);
+        writer.WriteNumber("imageIndex", state.ImageIndex);
         writer.WriteEndObject();
     }
 }

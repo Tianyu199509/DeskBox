@@ -297,7 +297,9 @@ public sealed class GlanceWidgetStore
                new GlanceWidgetData();
     }
 
-    private static string GetSafeWidgetFileName(string widgetId)
+    // Internal for NativeGlanceDataMigration: the migration must resolve the
+    // exact store path the built-in widget uses.
+    internal static string GetSafeWidgetFileName(string widgetId)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(widgetId);
         char[] invalidCharacters = Path.GetInvalidFileNameChars();

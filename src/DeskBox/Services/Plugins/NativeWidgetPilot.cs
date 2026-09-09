@@ -82,14 +82,22 @@ internal static class NativeWidgetPilot
         //    DESKBOX_ALLOW_UNTRUSTED_NATIVE_DEV=1 - still behind the full B1
         //    verification + identity-binding chain.
         NativeInstalledPackageHandle? handle = Manager.TryCreateNativeHandle(TargetPackageId);
-        if (handle is not null &&
-            NativeWidgetRuntimeManager.TryCreateFromInstalled(
-                handle!, "glance", config.Id,
-                DeskBoxDataPathService.Current.DataDirectory,
-                out NativeWidgetLease? lease))
+        if (handle is not null)
         {
-            content = new NativeWidgetPilotContent(config, lease!);
-            return true;
+            // Legacy data handoff (D3): the built-in Glance store file is
+            // copied into the package's instance data root before the first
+            // native create; the package reads its settings from there.
+            NativeWidgetDataMigration.TryMigrate(
+                handle.Record.PublisherFingerprint, handle.Record.PackageId, config.Id,
+                DeskBoxDataPathService.Current.DataDirectory);
+            if (NativeWidgetRuntimeManager.TryCreateFromInstalled(
+                    handle!, "glance", config.Id,
+                    DeskBoxDataPathService.Current.DataDirectory,
+                    out NativeWidgetLease? lease))
+            {
+                content = new NativeWidgetPilotContent(config, lease!);
+                return true;
+            }
         }
 
 #if DESKBOX_NATIVE_DEV_PILOT
