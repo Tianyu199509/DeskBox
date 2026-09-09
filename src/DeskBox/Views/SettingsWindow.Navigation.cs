@@ -61,6 +61,7 @@ public sealed partial class SettingsWindow
             ["WeatherSettings"] = WeatherSettingsSection,
             ["GlanceSettings"] = GlanceSettingsSection,
             ["SearchSettings"] = SearchSettingsSection,
+            ["PomodoroSettings"] = PomodoroSettingsSection,
             ["Interaction"] = InteractionSection,
             ["InteractionWindowSettings"] = InteractionWindowSettingsSection,
             ["ManagedStorage"] = ManagedStorageSection,
@@ -580,6 +581,10 @@ public sealed partial class SettingsWindow
         if (sectionTag == "SearchSettings")
         {
             SearchSettingsSection.RefreshFromSettings();
+        }
+        if (sectionTag == "PomodoroSettings")
+        {
+            PomodoroSettingsSection.RefreshFromSettings();
         }
         if (sectionTag == "GlanceSettings")
         {

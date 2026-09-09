@@ -3,10 +3,11 @@ using DeskBox.Models;
 
 namespace DeskBox.Services;
 
-internal enum PomodoroTimerPhase
+public enum PomodoroTimerPhase
 {
     Focus,
-    Break
+    ShortBreak,
+    LongBreak
 }
 
 internal enum PomodoroTimerTransition
@@ -17,7 +18,8 @@ internal enum PomodoroTimerTransition
     Reset,
     Skipped,
     FocusCompleted,
-    BreakCompleted
+    ShortBreakCompleted,
+    LongBreakCompleted
 }
 
 internal readonly record struct PomodoroTimerSnapshot(
@@ -39,8 +41,12 @@ internal readonly record struct PomodoroTimerUpdate(
 /// </summary>
 internal sealed class PomodoroTimerStateMachine
 {
-    internal static readonly TimeSpan FocusDuration = TimeSpan.FromMinutes(25);
-    internal static readonly TimeSpan BreakDuration = TimeSpan.FromMinutes(5);
+    internal static readonly TimeSpan FocusDuration = TimeSpan.FromMinutes(
+        PomodoroSettingsPolicy.DefaultFocusMinutes);
+    internal static readonly TimeSpan ShortBreakDuration = TimeSpan.FromMinutes(
+        PomodoroSettingsPolicy.DefaultShortBreakMinutes);
+    internal static readonly TimeSpan LongBreakDuration = TimeSpan.FromMinutes(
+        PomodoroSettingsPolicy.DefaultLongBreakMinutes);
 
     private const string MetadataPrefix = "Pomodoro.";
     private const string VersionKey = MetadataPrefix + "Version";
@@ -49,7 +55,8 @@ internal sealed class PomodoroTimerStateMachine
     private const string RemainingTicksKey = MetadataPrefix + "RemainingTicks";
     private const string DeadlineUtcKey = MetadataPrefix + "DeadlineUtc";
     private const string CompletedFocusRoundsKey = MetadataPrefix + "CompletedFocusRounds";
-    private const string CurrentVersion = "1";
+    private const string LegacyVersion = "1";
+    private const string CurrentVersion = "2";
 
     private static readonly string[] KnownMetadataKeys =
     [
@@ -67,14 +74,27 @@ internal sealed class PomodoroTimerStateMachine
     private TimeSpan _remainingWhenPaused;
     private DateTimeOffset? _deadlineUtc;
     private int _completedFocusRounds;
+    private TimeSpan _focusDuration;
+    private TimeSpan _shortBreakDuration;
+    private TimeSpan _longBreakDuration;
+    private int _roundCount;
 
     public PomodoroTimerStateMachine(
         WidgetConfig config,
-        DateTimeOffset utcNow)
+        DateTimeOffset utcNow,
+        int focusMinutes = PomodoroSettingsPolicy.DefaultFocusMinutes,
+        int shortBreakMinutes = PomodoroSettingsPolicy.DefaultShortBreakMinutes,
+        int longBreakMinutes = PomodoroSettingsPolicy.DefaultLongBreakMinutes,
+        int roundCount = PomodoroSettingsPolicy.DefaultRoundCount)
     {
         ArgumentNullException.ThrowIfNull(config);
 
         _metadata = config.Metadata ??= [];
+        ApplyDurations(
+            focusMinutes,
+            shortBreakMinutes,
+            longBreakMinutes,
+            roundCount);
         SetDefaultState();
 
         DateTimeOffset normalizedNow = utcNow.ToUniversalTime();
@@ -96,6 +116,10 @@ internal sealed class PomodoroTimerStateMachine
             RestoreTransition = CompleteNaturally();
             PersistMetadata();
         }
+        else if (WasMetadataMigrated)
+        {
+            PersistMetadata();
+        }
     }
 
     /// <summary>
@@ -104,15 +128,25 @@ internal sealed class PomodoroTimerStateMachine
     public bool WasMetadataRecovered { get; private set; }
 
     /// <summary>
+    /// 指示构造期间是否把旧版阶段或轮次元数据迁移为当前三阶段模型。
+    /// </summary>
+    public bool WasMetadataMigrated { get; private set; }
+
+    /// <summary>
     /// 指示构造期间是否因修复元数据或处理已过期计时器而需要保存配置。
     /// </summary>
     public bool ShouldPersistRestore => WasMetadataRecovered ||
+        WasMetadataMigrated ||
         RestoreTransition != PomodoroTimerTransition.None;
 
     /// <summary>
     /// 构造期间处理过期运行态时产生的自然完成转换。
     /// </summary>
     public PomodoroTimerTransition RestoreTransition { get; private set; }
+
+    public TimeSpan CurrentPhaseDuration => DurationFor(_phase);
+
+    public int RoundCount => _roundCount;
 
     public PomodoroTimerSnapshot GetSnapshot(DateTimeOffset utcNow)
     {
@@ -200,6 +234,9 @@ internal sealed class PomodoroTimerStateMachine
             return completed;
         }
 
+        // “跳过”表示主动结束当前阶段。若跳过的是专注阶段，也必须推进
+        // 当前轮次；否则连续跳过“专注 → 休息”后会再次回到第一轮。
+        AdvanceFocusRoundIfNeeded();
         SwitchPhasePaused();
         PersistMetadata();
         return Changed(normalizedNow, PomodoroTimerTransition.Skipped);
@@ -213,13 +250,77 @@ internal sealed class PomodoroTimerStateMachine
             : NoChange(normalizedNow);
     }
 
+    /// <summary>
+    /// 将新的番茄钟偏好应用到当前阶段。保留已经消耗的时间，避免修改设置后
+    /// 计时器跳回起点；当新时长短于已消耗时间时，将剩余时间收敛到一秒，
+    /// 由下一次 Tick 正常完成阶段。
+    /// </summary>
+    public PomodoroTimerUpdate UpdateSettings(
+        int focusMinutes,
+        int shortBreakMinutes,
+        int longBreakMinutes,
+        int roundCount,
+        DateTimeOffset utcNow)
+    {
+        DateTimeOffset normalizedNow = utcNow.ToUniversalTime();
+        if (TryCompleteExpired(normalizedNow, out PomodoroTimerUpdate completed))
+        {
+            return completed;
+        }
+
+        TimeSpan oldDuration = DurationFor(_phase);
+        TimeSpan oldRemaining = _isRunning && _deadlineUtc is { } deadline
+            ? ClampRemaining(deadline - normalizedNow, oldDuration)
+            : _remainingWhenPaused;
+
+        TimeSpan oldFocusDuration = _focusDuration;
+        TimeSpan oldShortBreakDuration = _shortBreakDuration;
+        TimeSpan oldLongBreakDuration = _longBreakDuration;
+        int oldRoundCount = _roundCount;
+        PomodoroTimerPhase oldPhase = _phase;
+        int oldCompletedFocusRounds = _completedFocusRounds;
+        ApplyDurations(
+            focusMinutes,
+            shortBreakMinutes,
+            longBreakMinutes,
+            roundCount);
+        ReconcileCycleState();
+
+        TimeSpan newDuration = DurationFor(_phase);
+        if (oldFocusDuration == _focusDuration &&
+            oldShortBreakDuration == _shortBreakDuration &&
+            oldLongBreakDuration == _longBreakDuration &&
+            oldRoundCount == _roundCount &&
+            oldPhase == _phase &&
+            oldCompletedFocusRounds == _completedFocusRounds)
+        {
+            return NoChange(normalizedNow);
+        }
+
+        TimeSpan elapsed = oldDuration - oldRemaining;
+        TimeSpan adjustedRemaining = newDuration - elapsed;
+        if (adjustedRemaining <= TimeSpan.Zero)
+        {
+            adjustedRemaining = TimeSpan.FromSeconds(1);
+        }
+        else if (adjustedRemaining > newDuration)
+        {
+            adjustedRemaining = newDuration;
+        }
+
+        _remainingWhenPaused = adjustedRemaining;
+        _deadlineUtc = _isRunning
+            ? normalizedNow + adjustedRemaining
+            : null;
+        PersistMetadata();
+        return Changed(normalizedNow, PomodoroTimerTransition.None);
+    }
+
     private bool TryRestore(DateTimeOffset utcNow)
     {
         if (!_metadata.TryGetValue(VersionKey, out string? version) ||
-            version != CurrentVersion ||
+            version is not (LegacyVersion or CurrentVersion) ||
             !_metadata.TryGetValue(PhaseKey, out string? phaseValue) ||
-            !Enum.TryParse(phaseValue, ignoreCase: false, out _phase) ||
-            !Enum.IsDefined(_phase) ||
             !_metadata.TryGetValue(RunningKey, out string? runningValue) ||
             !bool.TryParse(runningValue, out _isRunning) ||
             !_metadata.TryGetValue(CompletedFocusRoundsKey, out string? roundsValue) ||
@@ -227,11 +328,20 @@ internal sealed class PomodoroTimerStateMachine
                 roundsValue,
                 NumberStyles.None,
                 CultureInfo.InvariantCulture,
-                out _completedFocusRounds) ||
-            _completedFocusRounds < 0)
+                out int completedFocusRounds) ||
+            completedFocusRounds < 0 ||
+            !TryResolveRestoredPhase(version, phaseValue, out _phase))
         {
             return false;
         }
+
+        _completedFocusRounds = completedFocusRounds;
+        PomodoroTimerPhase restoredPhase = _phase;
+        int restoredCompletedFocusRounds = _completedFocusRounds;
+        ReconcileCycleState();
+        WasMetadataMigrated = version == LegacyVersion ||
+            restoredPhase != _phase ||
+            restoredCompletedFocusRounds != _completedFocusRounds;
 
         TimeSpan duration = DurationFor(_phase);
         if (_isRunning)
@@ -299,23 +409,40 @@ internal sealed class PomodoroTimerStateMachine
     private PomodoroTimerTransition CompleteNaturally()
     {
         PomodoroTimerPhase completedPhase = _phase;
-        if (completedPhase == PomodoroTimerPhase.Focus &&
-            _completedFocusRounds < int.MaxValue)
-        {
-            _completedFocusRounds++;
-        }
+        AdvanceFocusRoundIfNeeded();
 
         SwitchPhasePaused();
-        return completedPhase == PomodoroTimerPhase.Focus
-            ? PomodoroTimerTransition.FocusCompleted
-            : PomodoroTimerTransition.BreakCompleted;
+        return completedPhase switch
+        {
+            PomodoroTimerPhase.Focus => PomodoroTimerTransition.FocusCompleted,
+            PomodoroTimerPhase.ShortBreak =>
+                PomodoroTimerTransition.ShortBreakCompleted,
+            PomodoroTimerPhase.LongBreak =>
+                PomodoroTimerTransition.LongBreakCompleted,
+            _ => throw new ArgumentOutOfRangeException()
+        };
     }
 
     private void SwitchPhasePaused()
     {
-        _phase = _phase == PomodoroTimerPhase.Focus
-            ? PomodoroTimerPhase.Break
-            : PomodoroTimerPhase.Focus;
+        switch (_phase)
+        {
+            case PomodoroTimerPhase.Focus:
+                _phase = _completedFocusRounds >= _roundCount
+                    ? PomodoroTimerPhase.LongBreak
+                    : PomodoroTimerPhase.ShortBreak;
+                break;
+            case PomodoroTimerPhase.ShortBreak:
+                _phase = PomodoroTimerPhase.Focus;
+                break;
+            case PomodoroTimerPhase.LongBreak:
+                _phase = PomodoroTimerPhase.Focus;
+                _completedFocusRounds = 0;
+                break;
+            default:
+                throw new ArgumentOutOfRangeException();
+        }
+
         _isRunning = false;
         _deadlineUtc = null;
         _remainingWhenPaused = DurationFor(_phase);
@@ -325,10 +452,21 @@ internal sealed class PomodoroTimerStateMachine
     {
         _phase = PomodoroTimerPhase.Focus;
         _isRunning = false;
-        _remainingWhenPaused = FocusDuration;
+        _remainingWhenPaused = _focusDuration;
         _deadlineUtc = null;
         _completedFocusRounds = 0;
         RestoreTransition = PomodoroTimerTransition.None;
+        WasMetadataMigrated = false;
+    }
+
+    private void AdvanceFocusRoundIfNeeded()
+    {
+        if (_phase == PomodoroTimerPhase.Focus)
+        {
+            _completedFocusRounds = Math.Min(
+                _completedFocusRounds + 1,
+                _roundCount);
+        }
     }
 
     private void PersistMetadata()
@@ -362,8 +500,94 @@ internal sealed class PomodoroTimerStateMachine
     private PomodoroTimerUpdate NoChange(DateTimeOffset utcNow) =>
         new(GetSnapshot(utcNow), PomodoroTimerTransition.None, ShouldPersist: false);
 
-    private static TimeSpan DurationFor(PomodoroTimerPhase phase) =>
-        phase == PomodoroTimerPhase.Focus ? FocusDuration : BreakDuration;
+    private TimeSpan DurationFor(PomodoroTimerPhase phase) => phase switch
+    {
+        PomodoroTimerPhase.Focus => _focusDuration,
+        PomodoroTimerPhase.ShortBreak => _shortBreakDuration,
+        PomodoroTimerPhase.LongBreak => _longBreakDuration,
+        _ => throw new ArgumentOutOfRangeException(nameof(phase), phase, null)
+    };
+
+    private void ApplyDurations(
+        int focusMinutes,
+        int shortBreakMinutes,
+        int longBreakMinutes,
+        int roundCount)
+    {
+        _focusDuration = TimeSpan.FromMinutes(
+            PomodoroSettingsPolicy.NormalizeFocusMinutes(focusMinutes));
+        _shortBreakDuration = TimeSpan.FromMinutes(
+            PomodoroSettingsPolicy.NormalizeShortBreakMinutes(shortBreakMinutes));
+        _longBreakDuration = TimeSpan.FromMinutes(
+            PomodoroSettingsPolicy.NormalizeLongBreakMinutes(longBreakMinutes));
+        _roundCount = PomodoroSettingsPolicy.NormalizeRoundCount(roundCount);
+    }
+
+    private static bool TryResolveRestoredPhase(
+        string version,
+        string phaseValue,
+        out PomodoroTimerPhase phase)
+    {
+        if (version == LegacyVersion)
+        {
+            if (phaseValue == nameof(PomodoroTimerPhase.Focus))
+            {
+                phase = PomodoroTimerPhase.Focus;
+                return true;
+            }
+
+            if (phaseValue == "Break")
+            {
+                // 旧版只有一个休息阶段；具体映射会结合已完成轮数，
+                // 在 ReconcileCycleState 中确定短休息或长休息。
+                phase = PomodoroTimerPhase.ShortBreak;
+                return true;
+            }
+
+            phase = default;
+            return false;
+        }
+
+        return Enum.TryParse(phaseValue, ignoreCase: false, out phase) &&
+            Enum.IsDefined(phase);
+    }
+
+    private void ReconcileCycleState()
+    {
+        switch (_phase)
+        {
+            case PomodoroTimerPhase.Focus:
+                _completedFocusRounds %= _roundCount;
+                break;
+            case PomodoroTimerPhase.ShortBreak:
+            {
+                int completedInCycle = _completedFocusRounds % _roundCount;
+                if (_completedFocusRounds == 0)
+                {
+                    // 旧版允许“跳过专注”后进入休息但不推进轮数。迁移时将
+                    // 该休息视为第一轮之后的休息，避免继续显示第 1 轮。
+                    completedInCycle = 1;
+                }
+
+                if (_roundCount == 1 || completedInCycle == 0)
+                {
+                    _phase = PomodoroTimerPhase.LongBreak;
+                    _completedFocusRounds = _roundCount;
+                }
+                else
+                {
+                    _completedFocusRounds = completedInCycle;
+                }
+
+                break;
+            }
+            case PomodoroTimerPhase.LongBreak:
+                _completedFocusRounds = _roundCount;
+                break;
+            default:
+                throw new ArgumentOutOfRangeException();
+        }
+    }
 
     private static TimeSpan ClampRemaining(TimeSpan value, TimeSpan maximum)
     {

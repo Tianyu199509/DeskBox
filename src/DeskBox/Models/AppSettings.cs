@@ -788,6 +788,46 @@ public class AppSettings
     /// </summary>
     public int WeatherRefreshIntervalMinutes { get; set; } = 60;
 
+    // ─── Pomodoro Widget Settings ──────────────────────────────────
+
+    /// <summary>
+    /// 每个番茄钟周期包含的专注轮数。有效范围由
+    /// <see cref="DeskBox.Services.PomodoroSettingsPolicy"/> 统一约束。
+    /// </summary>
+    public int PomodoroRoundCount { get; set; } = 4;
+
+    /// <summary>
+    /// 每轮专注时长（分钟）。有效范围由
+    /// <see cref="DeskBox.Services.PomodoroSettingsPolicy"/> 统一约束。
+    /// </summary>
+    public int PomodoroFocusMinutes { get; set; } = 25;
+
+    /// <summary>
+    /// 非周期末尾的短休息时长（分钟）。有效范围由
+    /// <see cref="DeskBox.Services.PomodoroSettingsPolicy"/> 统一约束。
+    /// </summary>
+    public int PomodoroShortBreakMinutes { get; set; } = 5;
+
+    /// <summary>
+    /// 完成整个周期后的长休息时长（分钟）。有效范围由
+    /// <see cref="DeskBox.Services.PomodoroSettingsPolicy"/> 统一约束。
+    /// </summary>
+    public int PomodoroLongBreakMinutes { get; set; } = 15;
+
+    /// <summary>自然完成番茄钟阶段时是否播放提示音。</summary>
+    public bool PomodoroCompletionSoundEnabled { get; set; } = true;
+
+    /// <summary>自然完成番茄钟阶段时是否显示系统通知。</summary>
+    public bool PomodoroCompletionNotificationEnabled { get; set; } = true;
+
+    /// <summary>
+    /// 旧版单一休息时长的迁移入口。加载后会迁入
+    /// <see cref="PomodoroShortBreakMinutes"/> 并清空，避免形成两套配置真值。
+    /// </summary>
+    [JsonPropertyName("pomodoroBreakMinutes")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? LegacyPomodoroBreakMinutes { get; set; }
+
     // ─── Search Settings ───────────────────────────────────────────────
 
     /// <summary>Whether the search global hotkey is enabled.</summary>

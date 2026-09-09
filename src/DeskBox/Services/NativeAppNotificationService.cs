@@ -37,7 +37,8 @@ public sealed record NativeAppNotificationActivation(
 
 public sealed record NativeAppNotificationOptions(
     string? Tag = null,
-    string? Group = null);
+    string? Group = null,
+    bool MuteAudio = false);
 
 public sealed record NativeAppNotificationSnapshot(
     uint Id,
@@ -149,6 +150,11 @@ public sealed class NativeAppNotificationService : IDisposable
             var builder = new AppNotificationBuilder()
                 .AddText(title)
                 .AddText(message);
+
+            if (options?.MuteAudio == true)
+            {
+                builder.MuteAudio();
+            }
 
             if (!string.IsNullOrWhiteSpace(options?.Group))
             {

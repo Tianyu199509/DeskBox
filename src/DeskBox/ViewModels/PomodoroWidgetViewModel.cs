@@ -13,6 +13,8 @@ public sealed class PomodoroWidgetViewModel : ObservableObject, IDisposable
 {
     private const string PlayGlyph = "\uE102";
     private const string PauseGlyph = "\uE769";
+    private const string CompletionAlertMetadataKey =
+        "Pomodoro.CompletionAlertActive";
 
     private readonly LocalizationService _localizationService;
     private readonly SettingsService? _settingsService;
@@ -22,7 +24,7 @@ public sealed class PomodoroWidgetViewModel : ObservableObject, IDisposable
     private readonly PomodoroTimerStateMachine _stateMachine;
     private PomodoroTimerSnapshot _snapshot;
     private bool _isInitialized;
-    private bool _isWindowVisible = true;
+    private bool _isCompletionAlertActive;
     private bool _isDisposed;
 
     public PomodoroWidgetViewModel(
@@ -51,8 +53,20 @@ public sealed class PomodoroWidgetViewModel : ObservableObject, IDisposable
         _utcNowProvider = utcNowProvider ?? (() => DateTimeOffset.UtcNow);
 
         DateTimeOffset now = GetUtcNow();
-        _stateMachine = new PomodoroTimerStateMachine(config, now);
+        AppSettings timerSettings = settingsService?.Settings ?? new AppSettings();
+        _stateMachine = new PomodoroTimerStateMachine(
+            config,
+            now,
+            timerSettings.PomodoroFocusMinutes,
+            timerSettings.PomodoroShortBreakMinutes,
+            timerSettings.PomodoroLongBreakMinutes,
+            timerSettings.PomodoroRoundCount);
         _snapshot = _stateMachine.GetSnapshot(now);
+        bool completionAlertMetadataChanged = RestoreCompletionAlert();
+        if (IsNaturalCompletion(_stateMachine.RestoreTransition))
+        {
+            completionAlertMetadataChanged |= SetCompletionAlertActive(true);
+        }
 
         if (_dispatcherQueue is { } queue)
         {
@@ -62,8 +76,12 @@ public sealed class PomodoroWidgetViewModel : ObservableObject, IDisposable
             _refreshTimer.Tick += RefreshTimer_Tick;
         }
         _localizationService.LanguageChanged += LocalizationService_LanguageChanged;
+        if (_settingsService is not null)
+        {
+            _settingsService.SettingsChanged += SettingsService_SettingsChanged;
+        }
 
-        if (_stateMachine.ShouldPersistRestore)
+        if (_stateMachine.ShouldPersistRestore || completionAlertMetadataChanged)
         {
             PersistConfig();
         }
@@ -71,19 +89,34 @@ public sealed class PomodoroWidgetViewModel : ObservableObject, IDisposable
 
     public WidgetConfig Config { get; }
 
+    /// <summary>当前阶段的稳定标识，供视觉层选择阶段样式。</summary>
+    public PomodoroTimerPhase Phase => _snapshot.Phase;
+
+    /// <summary>当前阶段剩余时间。</summary>
+    public TimeSpan Remaining => _snapshot.Remaining;
+
     public string CountdownText => FormatCountdown(_snapshot.Remaining);
 
-    public string PhaseText => _localizationService.T(
-        IsFocusPhase ? "Pomodoro.Phase.Focus" : "Pomodoro.Phase.Break");
+    public string PhaseText => _localizationService.T(Phase switch
+    {
+        PomodoroTimerPhase.Focus => "Pomodoro.Phase.Focus",
+        PomodoroTimerPhase.ShortBreak => "Pomodoro.Phase.ShortBreak",
+        PomodoroTimerPhase.LongBreak => "Pomodoro.Phase.LongBreak",
+        _ => throw new ArgumentOutOfRangeException()
+    });
 
-    public string DescriptionText => _localizationService.T(
-        IsFocusPhase
-            ? "Pomodoro.Focus.Description"
-            : "Pomodoro.Break.Description");
+    public string DescriptionText => _localizationService.T(Phase switch
+    {
+        PomodoroTimerPhase.Focus => "Pomodoro.Focus.Description",
+        PomodoroTimerPhase.ShortBreak => "Pomodoro.ShortBreak.Description",
+        PomodoroTimerPhase.LongBreak => "Pomodoro.LongBreak.Description",
+        _ => throw new ArgumentOutOfRangeException()
+    });
 
     public string RoundSummaryText => _localizationService.Format(
         "Pomodoro.RoundSummary",
-        RoundNumber);
+        RoundNumber,
+        RoundCount);
 
     public string PrimaryActionText => _localizationService.T(
         IsRunning ? "Pomodoro.Action.Pause" : "Pomodoro.Action.Start");
@@ -98,18 +131,34 @@ public sealed class PomodoroWidgetViewModel : ObservableObject, IDisposable
 
     public bool IsRunning => _snapshot.IsRunning;
 
-    public bool IsFocusPhase => _snapshot.Phase == PomodoroTimerPhase.Focus;
+    public bool IsFocusPhase => Phase == PomodoroTimerPhase.Focus;
+
+    public bool IsShortBreakPhase => Phase == PomodoroTimerPhase.ShortBreak;
+
+    public bool IsLongBreakPhase => Phase == PomodoroTimerPhase.LongBreak;
+
+    public bool IsBreakPhase => !IsFocusPhase;
+
+    /// <summary>
+    /// 指示最近一次自然完成是否仍需向用户展示持续提醒。
+    /// 该状态仅由开始、跳过或重置操作清除。
+    /// </summary>
+    public bool IsCompletionAlertActive => _isCompletionAlertActive;
 
     public int CompletedFocusRounds => _snapshot.CompletedFocusRounds;
+
+    public int RoundCount => _stateMachine.RoundCount;
 
     public int CompletedRoundsInCycle
     {
         get
         {
-            int remainder = Math.Max(0, CompletedFocusRounds) % 4;
-            return !IsFocusPhase && CompletedFocusRounds > 0 && remainder == 0
-                ? 4
-                : remainder;
+            if (IsLongBreakPhase)
+            {
+                return RoundCount;
+            }
+
+            return Math.Clamp(CompletedFocusRounds, 0, RoundCount);
         }
     }
 
@@ -117,23 +166,29 @@ public sealed class PomodoroWidgetViewModel : ObservableObject, IDisposable
     {
         get
         {
-            if (IsFocusPhase)
+            return Phase switch
             {
-                return CompletedFocusRounds % 4 + 1;
-            }
-
-            int completedInCycle = CompletedRoundsInCycle;
-            return completedInCycle == 0 ? 1 : completedInCycle;
+                PomodoroTimerPhase.Focus => Math.Clamp(
+                    CompletedRoundsInCycle + 1,
+                    1,
+                    RoundCount),
+                PomodoroTimerPhase.ShortBreak => Math.Clamp(
+                    CompletedRoundsInCycle,
+                    1,
+                    RoundCount),
+                PomodoroTimerPhase.LongBreak => RoundCount,
+                _ => throw new ArgumentOutOfRangeException()
+            };
         }
     }
+
+    public TimeSpan PhaseDuration => _stateMachine.CurrentPhaseDuration;
 
     public double Progress
     {
         get
         {
-            TimeSpan duration = IsFocusPhase
-                ? PomodoroTimerStateMachine.FocusDuration
-                : PomodoroTimerStateMachine.BreakDuration;
+            TimeSpan duration = PhaseDuration;
             if (duration <= TimeSpan.Zero)
             {
                 return 0;
@@ -170,21 +225,26 @@ public sealed class PomodoroWidgetViewModel : ObservableObject, IDisposable
     {
         RunOnUiThread(() =>
         {
-            PomodoroTimerUpdate update = IsRunning
-                ? _stateMachine.Pause(GetUtcNow())
-                : _stateMachine.Start(GetUtcNow());
-            ApplyUpdate(update);
+            bool isStarting = !IsRunning;
+            PomodoroTimerUpdate update = isStarting
+                ? _stateMachine.Start(GetUtcNow())
+                : _stateMachine.Pause(GetUtcNow());
+            ApplyUpdate(update, clearCompletionAlert: isStarting);
         });
     }
 
     public void Reset()
     {
-        RunOnUiThread(() => ApplyUpdate(_stateMachine.Reset(GetUtcNow())));
+        RunOnUiThread(() => ApplyUpdate(
+            _stateMachine.Reset(GetUtcNow()),
+            clearCompletionAlert: true));
     }
 
     public void Skip()
     {
-        RunOnUiThread(() => ApplyUpdate(_stateMachine.Skip(GetUtcNow())));
+        RunOnUiThread(() => ApplyUpdate(
+            _stateMachine.Skip(GetUtcNow()),
+            clearCompletionAlert: true));
     }
 
     public void OnActivated()
@@ -207,7 +267,6 @@ public sealed class PomodoroWidgetViewModel : ObservableObject, IDisposable
             return;
         }
 
-        _isWindowVisible = visible;
         if (visible && _isInitialized)
         {
             RefreshFromClock();
@@ -244,22 +303,82 @@ public sealed class PomodoroWidgetViewModel : ObservableObject, IDisposable
         ApplyUpdate(_stateMachine.Tick(GetUtcNow()));
     }
 
-    private void ApplyUpdate(PomodoroTimerUpdate update)
+    private void ApplyUpdate(
+        PomodoroTimerUpdate update,
+        bool clearCompletionAlert = false)
     {
+        bool completedNaturally = IsNaturalCompletion(update.Transition);
+        bool completionAlertChanged = completedNaturally &&
+            SetCompletionAlertActive(true);
+        if (clearCompletionAlert)
+        {
+            completionAlertChanged |= SetCompletionAlertActive(false);
+        }
+
         _snapshot = update.Snapshot;
-        if (update.ShouldPersist)
+        if (update.ShouldPersist || completionAlertChanged)
         {
             PersistConfig();
         }
 
         PublishPresentation();
         UpdateRefreshTimer();
-        if (update.Transition is PomodoroTimerTransition.FocusCompleted or
-            PomodoroTimerTransition.BreakCompleted)
+        if (completedNaturally)
         {
             CompletionOccurred?.Invoke(this, EventArgs.Empty);
         }
     }
+
+    private bool RestoreCompletionAlert()
+    {
+        if (!Config.Metadata.TryGetValue(
+                CompletionAlertMetadataKey,
+                out string? storedValue) ||
+            !bool.TryParse(storedValue, out bool isActive) ||
+            !isActive)
+        {
+            _isCompletionAlertActive = false;
+            return Config.Metadata.Remove(CompletionAlertMetadataKey);
+        }
+
+        _isCompletionAlertActive = true;
+        if (storedValue == bool.TrueString)
+        {
+            return false;
+        }
+
+        Config.Metadata[CompletionAlertMetadataKey] = bool.TrueString;
+        return true;
+    }
+
+    private bool SetCompletionAlertActive(bool isActive)
+    {
+        bool changed = _isCompletionAlertActive != isActive;
+        _isCompletionAlertActive = isActive;
+
+        if (isActive)
+        {
+            if (!Config.Metadata.TryGetValue(
+                    CompletionAlertMetadataKey,
+                    out string? storedValue) ||
+                storedValue != bool.TrueString)
+            {
+                Config.Metadata[CompletionAlertMetadataKey] = bool.TrueString;
+                changed = true;
+            }
+        }
+        else if (Config.Metadata.Remove(CompletionAlertMetadataKey))
+        {
+            changed = true;
+        }
+
+        return changed;
+    }
+
+    private static bool IsNaturalCompletion(PomodoroTimerTransition transition) =>
+        transition is PomodoroTimerTransition.FocusCompleted or
+            PomodoroTimerTransition.ShortBreakCompleted or
+            PomodoroTimerTransition.LongBreakCompleted;
 
     private void PersistConfig()
     {
@@ -280,8 +399,9 @@ public sealed class PomodoroWidgetViewModel : ObservableObject, IDisposable
 
     private void UpdateRefreshTimer()
     {
+        // 这是负责阶段完成判定的低频状态计时器，不是视觉帧循环。
+        // 即使窗口不可见也必须继续运行，才能准时触发提示音和系统通知。
         bool shouldRun = _isInitialized &&
-            _isWindowVisible &&
             !_isDisposed &&
             IsRunning;
         if (shouldRun)
@@ -314,6 +434,39 @@ public sealed class PomodoroWidgetViewModel : ObservableObject, IDisposable
         }
     }
 
+    private void SettingsService_SettingsChanged()
+    {
+        if (_isDisposed || _settingsService is null)
+        {
+            return;
+        }
+
+        void ApplyTimerSettings()
+        {
+            if (_isDisposed)
+            {
+                return;
+            }
+
+            AppSettings settings = _settingsService.Settings;
+            ApplyUpdate(_stateMachine.UpdateSettings(
+                settings.PomodoroFocusMinutes,
+                settings.PomodoroShortBreakMinutes,
+                settings.PomodoroLongBreakMinutes,
+                settings.PomodoroRoundCount,
+                GetUtcNow()));
+        }
+
+        if (_dispatcherQueue is null || _dispatcherQueue.HasThreadAccess)
+        {
+            ApplyTimerSettings();
+        }
+        else
+        {
+            _dispatcherQueue.TryEnqueue(ApplyTimerSettings);
+        }
+    }
+
     private static DispatcherQueue? TryGetCurrentDispatcherQueue()
     {
         try
@@ -333,6 +486,8 @@ public sealed class PomodoroWidgetViewModel : ObservableObject, IDisposable
     private void PublishPresentation()
     {
         OnPropertyChanged(nameof(CountdownText));
+        OnPropertyChanged(nameof(Phase));
+        OnPropertyChanged(nameof(Remaining));
         OnPropertyChanged(nameof(PhaseText));
         OnPropertyChanged(nameof(DescriptionText));
         OnPropertyChanged(nameof(RoundSummaryText));
@@ -342,9 +497,15 @@ public sealed class PomodoroWidgetViewModel : ObservableObject, IDisposable
         OnPropertyChanged(nameof(SkipActionText));
         OnPropertyChanged(nameof(IsRunning));
         OnPropertyChanged(nameof(IsFocusPhase));
+        OnPropertyChanged(nameof(IsShortBreakPhase));
+        OnPropertyChanged(nameof(IsLongBreakPhase));
+        OnPropertyChanged(nameof(IsBreakPhase));
+        OnPropertyChanged(nameof(IsCompletionAlertActive));
         OnPropertyChanged(nameof(CompletedFocusRounds));
+        OnPropertyChanged(nameof(RoundCount));
         OnPropertyChanged(nameof(CompletedRoundsInCycle));
         OnPropertyChanged(nameof(RoundNumber));
+        OnPropertyChanged(nameof(PhaseDuration));
         OnPropertyChanged(nameof(Progress));
     }
 
@@ -396,6 +557,10 @@ public sealed class PomodoroWidgetViewModel : ObservableObject, IDisposable
             _refreshTimer.Tick -= RefreshTimer_Tick;
         }
         _localizationService.LanguageChanged -= LocalizationService_LanguageChanged;
+        if (_settingsService is not null)
+        {
+            _settingsService.SettingsChanged -= SettingsService_SettingsChanged;
+        }
         CompletionOccurred = null;
     }
 }

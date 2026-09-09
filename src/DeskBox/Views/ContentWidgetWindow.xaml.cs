@@ -44,6 +44,7 @@ public sealed partial class ContentWidgetWindow : WidgetWindowBase, IDesktopWidg
     private bool _isCancellingTitleRename;
     private bool _compactPresentationRefreshQueued;
     private INotifyPropertyChanged? _compactPresentationSource;
+    private PomodoroWidgetViewModel? _pomodoroAlertSource;
     private IWidgetFeedbackSource? _feedbackSource;
     private IWidgetHostContextMenuSource? _hostContextMenuSource;
     private Microsoft.UI.Dispatching.DispatcherQueueTimer? _autoRestoreTimer;
@@ -268,9 +269,7 @@ public sealed partial class ContentWidgetWindow : WidgetWindowBase, IDesktopWidg
     {
         PomodoroWidgetViewModel viewModel = pomodoro.ViewModel;
         bool showSummary = contentMode != SettingsService.WidgetCompactContentModeMinimal;
-        Windows.UI.Color accent = viewModel.IsFocusPhase
-            ? Windows.UI.Color.FromArgb(255, 233, 91, 77)
-            : Windows.UI.Color.FromArgb(255, 79, 157, 131);
+        Windows.UI.Color accent = GetPomodoroPhaseAccent(viewModel.Phase);
 
         return new WidgetCompactPresentation(
             viewModel.CountdownText,
@@ -284,14 +283,20 @@ public sealed partial class ContentWidgetWindow : WidgetWindowBase, IDesktopWidg
             PrimaryActionLabel: viewModel.PrimaryActionText,
             IsPlaying: viewModel.IsRunning,
             UseStackedText: showSummary,
+            EnableMarquee: false,
             Progress: viewModel.Progress,
             LiveStateKey: string.Join(
                 "|",
-                viewModel.CountdownText,
-                viewModel.IsFocusPhase,
+                viewModel.Phase,
                 viewModel.IsRunning,
-                viewModel.CompletedFocusRounds),
-            BadgeText: showSummary ? $"{viewModel.RoundNumber}/4" : string.Empty,
+                viewModel.RoundNumber,
+                viewModel.RoundCount,
+                viewModel.PhaseText,
+                viewModel.RoundSummaryText,
+                viewModel.PrimaryActionText),
+            BadgeText: showSummary
+                ? $"{viewModel.RoundNumber}/{viewModel.RoundCount}"
+                : string.Empty,
             BackgroundColorStart: Windows.UI.Color.FromArgb(
                 34,
                 accent.R,
@@ -303,8 +308,21 @@ public sealed partial class ContentWidgetWindow : WidgetWindowBase, IDesktopWidg
                 accent.G,
                 accent.B),
             EdgeGlowColor: accent,
-            IconColor: accent);
+            IconColor: accent,
+            IsLiveTextUpdate: true);
     }
+
+    private static Windows.UI.Color GetPomodoroPhaseAccent(
+        PomodoroTimerPhase phase) => phase switch
+        {
+            PomodoroTimerPhase.Focus =>
+                Windows.UI.Color.FromArgb(255, 244, 123, 103),
+            PomodoroTimerPhase.ShortBreak =>
+                Windows.UI.Color.FromArgb(255, 112, 174, 139),
+            PomodoroTimerPhase.LongBreak =>
+                Windows.UI.Color.FromArgb(255, 87, 150, 166),
+            _ => throw new ArgumentOutOfRangeException(nameof(phase), phase, null)
+        };
 
     private WidgetCompactPresentation CreateMusicCompactPresentation(
         MusicWidgetContentAdapter music,
@@ -715,6 +733,10 @@ public sealed partial class ContentWidgetWindow : WidgetWindowBase, IDesktopWidg
             dividerColor);
         ContentWidgetShell.TitleIconAccentColor = iconForeground;
         ContentWidgetShell.TitleIconMode = SettingsService.Settings.WidgetTitleIconMode;
+        if (_pomodoroAlertSource is not null)
+        {
+            ApplyPomodoroAttention(_pomodoroAlertSource);
+        }
     }
 
     protected override void OnRootElementLoaded()
@@ -1161,6 +1183,8 @@ IsHideAnimationRunning = true;
             _compactPresentationSource.PropertyChanged += CompactPresentationSource_PropertyChanged;
         }
 
+        AttachPomodoroAlertSource(content);
+
         // The search capsule's dynamic subtitle ("最近：xxx") tracks the recent-query
         // list, which has no INotifyPropertyChanged surface, so subscribe to the
         // history service's change event to refresh the compact presentation live.
@@ -1182,6 +1206,88 @@ IsHideAnimationRunning = true;
 
             historyService.RecentQueriesChanged += OnRecentQueriesChanged;
             _subscribedSearchHistoryService = historyService;
+        }
+    }
+
+    private void AttachPomodoroAlertSource(IWidgetContent content)
+    {
+        if (_pomodoroAlertSource is not null)
+        {
+            _pomodoroAlertSource.PropertyChanged -=
+                PomodoroAlertSource_PropertyChanged;
+            _pomodoroAlertSource.CompletionOccurred -=
+                PomodoroAlertSource_CompletionOccurred;
+        }
+
+        _pomodoroAlertSource = content is PomodoroWidgetContentAdapter pomodoro
+            ? pomodoro.ViewModel
+            : null;
+        if (_pomodoroAlertSource is null)
+        {
+            ContentWidgetShell.SetPersistentAttention(false, Colors.Transparent);
+            return;
+        }
+
+        _pomodoroAlertSource.PropertyChanged +=
+            PomodoroAlertSource_PropertyChanged;
+        _pomodoroAlertSource.CompletionOccurred +=
+            PomodoroAlertSource_CompletionOccurred;
+        ApplyPomodoroAttention(_pomodoroAlertSource);
+    }
+
+    private void PomodoroAlertSource_PropertyChanged(
+        object? sender,
+        PropertyChangedEventArgs e)
+    {
+        if (sender is not PomodoroWidgetViewModel viewModel ||
+            !ReferenceEquals(viewModel, _pomodoroAlertSource))
+        {
+            return;
+        }
+
+        if (string.IsNullOrEmpty(e.PropertyName) ||
+            e.PropertyName is nameof(PomodoroWidgetViewModel.Phase) or
+                nameof(PomodoroWidgetViewModel.IsCompletionAlertActive))
+        {
+            ApplyPomodoroAttention(viewModel);
+        }
+    }
+
+    private void ApplyPomodoroAttention(PomodoroWidgetViewModel viewModel)
+    {
+        ContentWidgetShell.SetPersistentAttention(
+            viewModel.IsCompletionAlertActive,
+            GetPomodoroPhaseAccent(viewModel.Phase));
+    }
+
+    private void PomodoroAlertSource_CompletionOccurred(
+        object? sender,
+        EventArgs e)
+    {
+        if (sender is not PomodoroWidgetViewModel viewModel ||
+            !ReferenceEquals(viewModel, _pomodoroAlertSource))
+        {
+            return;
+        }
+
+        ApplyPomodoroAttention(viewModel);
+
+        AppSettings settings = SettingsService.Settings;
+        if (settings.PomodoroCompletionNotificationEnabled)
+        {
+            LocalizationService localization = App.Current.LocalizationService;
+            App.Current.NativeNotificationService?.TryShow(
+                localization.T("Pomodoro.Notification.Title"),
+                localization.Format(
+                    "Pomodoro.Notification.Message",
+                    viewModel.PhaseText,
+                    viewModel.RoundSummaryText),
+                options: new NativeAppNotificationOptions(MuteAudio: true));
+        }
+
+        if (settings.PomodoroCompletionSoundEnabled)
+        {
+            _ = PomodoroCompletionSoundService.TryPlay();
         }
     }
 
@@ -1216,6 +1322,13 @@ IsHideAnimationRunning = true;
             if (!IsClosing && IsWidgetCollapsed)
             {
                 RefreshCompactPresentation();
+                if (_pomodoroAlertSource is not null)
+                {
+                    // 折叠呈现会在下一帧更新紧凑表面。随后重新挂载
+                    // 持续提醒，避免完成事件与折叠层提交处于同一帧时
+                    // Composition 动画未真正启动。
+                    ApplyPomodoroAttention(_pomodoroAlertSource);
+                }
             }
         }))
         {
@@ -1323,6 +1436,14 @@ IsHideAnimationRunning = true;
             {
                 _compactPresentationSource.PropertyChanged -= CompactPresentationSource_PropertyChanged;
                 _compactPresentationSource = null;
+            }
+            if (_pomodoroAlertSource is not null)
+            {
+                _pomodoroAlertSource.PropertyChanged -=
+                    PomodoroAlertSource_PropertyChanged;
+                _pomodoroAlertSource.CompletionOccurred -=
+                    PomodoroAlertSource_CompletionOccurred;
+                _pomodoroAlertSource = null;
             }
             if (_subscribedSearchHistoryService is { } historyService)
             {

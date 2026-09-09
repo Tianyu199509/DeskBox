@@ -135,6 +135,8 @@ public sealed class WidgetContentFactory
             WidgetContentAvailability.Available,
             "WidgetContent.Pomodoro.StatusLabel",
             "WidgetContent.Pomodoro.StatusDescription",
+            HasSettingsPage: true,
+            SettingsSectionTag: "PomodoroSettings",
             ChromeCategory: WidgetChromeCategory.Interactive,
             DefaultChromeMode: WidgetChromeMode.Standard)
     ];

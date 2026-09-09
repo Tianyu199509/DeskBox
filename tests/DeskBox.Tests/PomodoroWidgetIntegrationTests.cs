@@ -10,17 +10,31 @@ public sealed class PomodoroWidgetIntegrationTests
     [
         "Pomodoro.Title",
         "Pomodoro.Phase.Focus",
-        "Pomodoro.Phase.Break",
+        "Pomodoro.Phase.ShortBreak",
+        "Pomodoro.Phase.LongBreak",
         "Pomodoro.Action.Start",
         "Pomodoro.Action.Pause",
         "Pomodoro.Action.Reset",
         "Pomodoro.Action.Skip",
         "Pomodoro.RoundSummary",
         "Pomodoro.Focus.Description",
-        "Pomodoro.Break.Description",
+        "Pomodoro.ShortBreak.Description",
+        "Pomodoro.LongBreak.Description",
         "WidgetContent.Pomodoro.StatusLabel",
         "WidgetContent.Pomodoro.StatusDescription",
-        "WidgetTitleIcon.Label.Pomodoro"
+        "WidgetTitleIcon.Label.Pomodoro",
+        "Widget.Settings.Pomodoro",
+        "Settings.Pomodoro.Title",
+        "Settings.Pomodoro.Description",
+        "Settings.Pomodoro.Summary",
+        "Settings.Pomodoro.RoundCount.Title",
+        "Settings.Pomodoro.RoundCount.Description",
+        "Settings.Pomodoro.FocusMinutes.Title",
+        "Settings.Pomodoro.FocusMinutes.Description",
+        "Settings.Pomodoro.ShortBreakMinutes.Title",
+        "Settings.Pomodoro.ShortBreakMinutes.Description",
+        "Settings.Pomodoro.LongBreakMinutes.Title",
+        "Settings.Pomodoro.LongBreakMinutes.Description"
     ];
 
     [Fact]
@@ -59,14 +73,14 @@ public sealed class PomodoroWidgetIntegrationTests
     }
 
     [Fact]
-    public void WidgetWithoutSettingsPage_DoesNotExposeNoOpConfigurationMenu()
+    public void WidgetWithSettingsPage_ExposesPomodoroConfigurationMenu()
     {
         WidgetContentDescriptor descriptor =
             TestServices.CreateWidgetContentFactory().GetDescriptor(WidgetKind.Pomodoro);
         string menuSource = Read("src/DeskBox/Views/ContentWidgetWindow.Commands.cs");
 
-        Assert.False(descriptor.HasSettingsPage);
-        Assert.Null(descriptor.SettingsSectionTag);
+        Assert.True(descriptor.HasSettingsPage);
+        Assert.Equal("PomodoroSettings", descriptor.SettingsSectionTag);
         Assert.Contains("if (_descriptor.HasSettingsPage)", menuSource, StringComparison.Ordinal);
     }
 

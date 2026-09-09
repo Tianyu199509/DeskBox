@@ -61,4 +61,7 @@ public sealed record WidgetCompactPresentation(
     double FullBleedBackgroundOpacity = 1.0,
     // Optional accessible name for the capsule's primary action. The legacy
     // fallback remains the todo completion label for existing presentations.
-    string PrimaryActionLabel = "");
+    string PrimaryActionLabel = "",
+    // 高频文本（例如倒计时）只做原位增量更新，不重新布局、重启跑马灯
+    // 或重建操作按钮。离散状态变化仍通过 LiveStateKey 触发完整刷新。
+    bool IsLiveTextUpdate = false);

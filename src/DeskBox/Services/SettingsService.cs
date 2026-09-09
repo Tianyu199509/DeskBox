@@ -543,6 +543,17 @@ public const int DefaultSearchMaxResults = 100;
         settings.MusicUseArtworkBackdrop = true;
         settings.MusicEnableCoverHoverMotion = true;
         settings.MusicDisplayMode = MusicDisplayModeAuto;
+        settings.PomodoroRoundCount = PomodoroSettingsPolicy.DefaultRoundCount;
+        settings.PomodoroFocusMinutes = PomodoroSettingsPolicy.DefaultFocusMinutes;
+        settings.PomodoroShortBreakMinutes =
+            PomodoroSettingsPolicy.DefaultShortBreakMinutes;
+        settings.PomodoroLongBreakMinutes =
+            PomodoroSettingsPolicy.DefaultLongBreakMinutes;
+        settings.PomodoroCompletionSoundEnabled =
+            PomodoroSettingsPolicy.DefaultCompletionSoundEnabled;
+        settings.PomodoroCompletionNotificationEnabled =
+            PomodoroSettingsPolicy.DefaultCompletionNotificationEnabled;
+        settings.LegacyPomodoroBreakMinutes = null;
 settings.WeatherAutoLocation = true;
 settings.WeatherCityName = string.Empty;
 settings.WeatherLatitude = 0;
@@ -704,6 +715,7 @@ settings.FocusClickedWidgetOnRaise = false;
                 }
 
                 changed |= PerformanceSettingsPolicy.Normalize(_settings);
+                changed |= PomodoroSettingsPolicy.Normalize(_settings);
                 changed |= NormalizePresentationSettings(_settings);
                 changed |= NormalizeAppearanceSettings(_settings);
                 changed |= NormalizeFeatureWidgetSettings(_settings);
@@ -813,6 +825,7 @@ settings.FocusClickedWidgetOnRaise = false;
             lock (_lock)
             {
                 PerformanceSettingsPolicy.Normalize(_settings);
+                PomodoroSettingsPolicy.Normalize(_settings);
                 NormalizePresentationSettings(_settings);
                 NormalizeAppearanceSettings(_settings);
                 NormalizeFeatureWidgetSettings(_settings);

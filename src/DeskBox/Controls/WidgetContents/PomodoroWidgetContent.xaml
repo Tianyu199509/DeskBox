@@ -13,36 +13,60 @@
         <ResourceDictionary>
             <ResourceDictionary.ThemeDictionaries>
                 <ResourceDictionary x:Key="Light">
-                    <SolidColorBrush x:Key="PomodoroFocusBrush" Color="#C8463C" />
-                    <SolidColorBrush x:Key="PomodoroFocusSoftBrush" Color="#1FC8463C" />
-                    <SolidColorBrush x:Key="PomodoroBreakBrush" Color="#2F7C65" />
-                    <SolidColorBrush x:Key="PomodoroBreakSoftBrush" Color="#1F2F7C65" />
-                    <SolidColorBrush x:Key="PomodoroDialSurfaceBrush" Color="#EFFFFFFF" />
-                    <SolidColorBrush x:Key="PomodoroDialStrokeBrush" Color="#18524743" />
-                    <SolidColorBrush x:Key="PomodoroTrackBrush" Color="#24524743" />
+                    <SolidColorBrush x:Key="PomodoroFocusBrush" Color="#F47B67" />
+                    <SolidColorBrush x:Key="PomodoroFocusStrongBrush" Color="#DB5549" />
+                    <SolidColorBrush x:Key="PomodoroFocusSoftBrush" Color="#42F5A99D" />
+                    <SolidColorBrush x:Key="PomodoroShortBreakBrush" Color="#70AE8B" />
+                    <SolidColorBrush x:Key="PomodoroShortBreakStrongBrush" Color="#4D8D6C" />
+                    <SolidColorBrush x:Key="PomodoroShortBreakSoftBrush" Color="#3D70AE8B" />
+                    <SolidColorBrush x:Key="PomodoroLongBreakBrush" Color="#5796A6" />
+                    <SolidColorBrush x:Key="PomodoroLongBreakStrongBrush" Color="#397787" />
+                    <SolidColorBrush x:Key="PomodoroLongBreakSoftBrush" Color="#3D5796A6" />
+                    <SolidColorBrush x:Key="PomodoroDiscShadowBrush" Color="#240D0705" />
+                    <SolidColorBrush x:Key="PomodoroDiscHighlightBrush" Color="#2EFFFFFF" />
+                    <SolidColorBrush x:Key="PomodoroDialTextBrush" Color="#FFFFFFFF" />
                     <SolidColorBrush x:Key="PomodoroPendingDotBrush" Color="#2E524743" />
-                    <SolidColorBrush x:Key="PomodoroAccentTextBrush" Color="#FFFFFFFF" />
+                    <SolidColorBrush x:Key="PomodoroLeafBrush" Color="#3F8050" />
+                    <SolidColorBrush x:Key="PomodoroLeafHighlightBrush" Color="#67A86D" />
+                    <SolidColorBrush x:Key="PomodoroLeafShadowBrush" Color="#2E643D" />
+                    <SolidColorBrush x:Key="PomodoroAccentTextBrush" Color="#FF351714" />
                 </ResourceDictionary>
                 <ResourceDictionary x:Key="Dark">
-                    <SolidColorBrush x:Key="PomodoroFocusBrush" Color="#FF7B70" />
-                    <SolidColorBrush x:Key="PomodoroFocusSoftBrush" Color="#32FF7B70" />
-                    <SolidColorBrush x:Key="PomodoroBreakBrush" Color="#64C3A0" />
-                    <SolidColorBrush x:Key="PomodoroBreakSoftBrush" Color="#3264C3A0" />
-                    <SolidColorBrush x:Key="PomodoroDialSurfaceBrush" Color="#B81D1A19" />
-                    <SolidColorBrush x:Key="PomodoroDialStrokeBrush" Color="#26FFFFFF" />
-                    <SolidColorBrush x:Key="PomodoroTrackBrush" Color="#32FFFFFF" />
+                    <SolidColorBrush x:Key="PomodoroFocusBrush" Color="#FF8978" />
+                    <SolidColorBrush x:Key="PomodoroFocusStrongBrush" Color="#E7685B" />
+                    <SolidColorBrush x:Key="PomodoroFocusSoftBrush" Color="#45FF8978" />
+                    <SolidColorBrush x:Key="PomodoroShortBreakBrush" Color="#79C49C" />
+                    <SolidColorBrush x:Key="PomodoroShortBreakStrongBrush" Color="#54A27C" />
+                    <SolidColorBrush x:Key="PomodoroShortBreakSoftBrush" Color="#4279C49C" />
+                    <SolidColorBrush x:Key="PomodoroLongBreakBrush" Color="#67B2C2" />
+                    <SolidColorBrush x:Key="PomodoroLongBreakStrongBrush" Color="#438D9D" />
+                    <SolidColorBrush x:Key="PomodoroLongBreakSoftBrush" Color="#4267B2C2" />
+                    <SolidColorBrush x:Key="PomodoroDiscShadowBrush" Color="#4A000000" />
+                    <SolidColorBrush x:Key="PomodoroDiscHighlightBrush" Color="#30FFFFFF" />
+                    <SolidColorBrush x:Key="PomodoroDialTextBrush" Color="#FFFFFFFF" />
                     <SolidColorBrush x:Key="PomodoroPendingDotBrush" Color="#38FFFFFF" />
+                    <SolidColorBrush x:Key="PomodoroLeafBrush" Color="#72B77D" />
+                    <SolidColorBrush x:Key="PomodoroLeafHighlightBrush" Color="#91CE92" />
+                    <SolidColorBrush x:Key="PomodoroLeafShadowBrush" Color="#4D915F" />
                     <SolidColorBrush x:Key="PomodoroAccentTextBrush" Color="#FF171312" />
                 </ResourceDictionary>
                 <ResourceDictionary x:Key="HighContrast">
                     <SolidColorBrush x:Key="PomodoroFocusBrush" Color="{ThemeResource SystemColorHighlightColor}" />
+                    <SolidColorBrush x:Key="PomodoroFocusStrongBrush" Color="{ThemeResource SystemColorHighlightColor}" />
                     <SolidColorBrush x:Key="PomodoroFocusSoftBrush" Color="{ThemeResource SystemColorButtonFaceColor}" />
-                    <SolidColorBrush x:Key="PomodoroBreakBrush" Color="{ThemeResource SystemColorHighlightColor}" />
-                    <SolidColorBrush x:Key="PomodoroBreakSoftBrush" Color="{ThemeResource SystemColorButtonFaceColor}" />
-                    <SolidColorBrush x:Key="PomodoroDialSurfaceBrush" Color="{ThemeResource SystemColorWindowColor}" />
-                    <SolidColorBrush x:Key="PomodoroDialStrokeBrush" Color="{ThemeResource SystemColorWindowTextColor}" />
-                    <SolidColorBrush x:Key="PomodoroTrackBrush" Color="{ThemeResource SystemColorGrayTextColor}" />
+                    <SolidColorBrush x:Key="PomodoroShortBreakBrush" Color="{ThemeResource SystemColorHighlightColor}" />
+                    <SolidColorBrush x:Key="PomodoroShortBreakStrongBrush" Color="{ThemeResource SystemColorHighlightColor}" />
+                    <SolidColorBrush x:Key="PomodoroShortBreakSoftBrush" Color="{ThemeResource SystemColorButtonFaceColor}" />
+                    <SolidColorBrush x:Key="PomodoroLongBreakBrush" Color="{ThemeResource SystemColorHighlightColor}" />
+                    <SolidColorBrush x:Key="PomodoroLongBreakStrongBrush" Color="{ThemeResource SystemColorHighlightColor}" />
+                    <SolidColorBrush x:Key="PomodoroLongBreakSoftBrush" Color="{ThemeResource SystemColorButtonFaceColor}" />
+                    <SolidColorBrush x:Key="PomodoroDiscShadowBrush" Color="{ThemeResource SystemColorWindowTextColor}" />
+                    <SolidColorBrush x:Key="PomodoroDiscHighlightBrush" Color="{ThemeResource SystemColorHighlightTextColor}" />
+                    <SolidColorBrush x:Key="PomodoroDialTextBrush" Color="{ThemeResource SystemColorHighlightTextColor}" />
                     <SolidColorBrush x:Key="PomodoroPendingDotBrush" Color="{ThemeResource SystemColorGrayTextColor}" />
+                    <SolidColorBrush x:Key="PomodoroLeafBrush" Color="{ThemeResource SystemColorWindowTextColor}" />
+                    <SolidColorBrush x:Key="PomodoroLeafHighlightBrush" Color="{ThemeResource SystemColorWindowTextColor}" />
+                    <SolidColorBrush x:Key="PomodoroLeafShadowBrush" Color="{ThemeResource SystemColorWindowTextColor}" />
                     <SolidColorBrush x:Key="PomodoroAccentTextBrush" Color="{ThemeResource SystemColorHighlightTextColor}" />
                 </ResourceDictionary>
             </ResourceDictionary.ThemeDictionaries>
@@ -66,90 +90,141 @@
         Padding="16,10,16,14"
         SizeChanged="RootGrid_SizeChanged">
         <Grid.RowDefinitions>
-            <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
-        <Border
-            x:Name="PhasePill"
-            HorizontalAlignment="Center"
-            Padding="10,4"
-            CornerRadius="12">
-            <StackPanel Orientation="Horizontal" Spacing="6">
-                <Ellipse
-                    x:Name="PhaseDot"
-                    Width="6"
-                    Height="6"
-                    VerticalAlignment="Center" />
-                <TextBlock
-                    x:Name="PhaseTextBlock"
-                    AutomationProperties.LiveSetting="Polite"
-                    FontSize="11"
-                    FontWeight="SemiBold" />
-            </StackPanel>
-        </Border>
-
         <Grid
             x:Name="DialHost"
-            Grid.Row="1"
-            Width="180"
-            Height="180"
-            Margin="0,8"
+            Grid.Row="0"
+            Width="190"
+            Height="208"
+            Margin="0,4,0,8"
             HorizontalAlignment="Center"
-            VerticalAlignment="Center"
-            RenderTransformOrigin="0.5,0.5">
-            <Grid.RenderTransform>
-                <ScaleTransform x:Name="DialScaleTransform" ScaleX="1" ScaleY="1" />
-            </Grid.RenderTransform>
+            VerticalAlignment="Center">
 
-            <Ellipse x:Name="AmbientDisc" />
-            <Ellipse
-                x:Name="ProgressTrack"
-                Fill="Transparent"
-                Stroke="{ThemeResource PomodoroTrackBrush}"
-                StrokeThickness="9" />
-            <Path
-                x:Name="ProgressArc"
-                HorizontalAlignment="Left"
-                VerticalAlignment="Top"
-                StrokeStartLineCap="Round"
-                StrokeEndLineCap="Round"
-                StrokeThickness="9" />
-            <Ellipse
-                x:Name="CenterDisc"
-                Margin="15"
-                Fill="{ThemeResource PomodoroDialSurfaceBrush}"
-                Stroke="{ThemeResource PomodoroDialStrokeBrush}"
-                StrokeThickness="1" />
+            <Viewbox
+                HorizontalAlignment="Stretch"
+                VerticalAlignment="Stretch"
+                IsHitTestVisible="False"
+                Stretch="Uniform">
+                <Grid Width="190" Height="208">
+                    <Grid
+                        x:Name="TomatoDiscHost"
+                        Width="190"
+                        Height="190"
+                        VerticalAlignment="Bottom">
+                        <Ellipse
+                            x:Name="DiscShadow"
+                            Margin="10,15,5,3"
+                            Fill="{ThemeResource PomodoroDiscShadowBrush}" />
+                        <Ellipse
+                            x:Name="AmbientDisc"
+                            Fill="{ThemeResource PomodoroFocusSoftBrush}" />
+                        <Ellipse
+                            x:Name="TomatoDiscShape"
+                            Margin="7"
+                            Fill="{ThemeResource PomodoroFocusBrush}"
+                            Stroke="{ThemeResource PomodoroFocusStrongBrush}"
+                            StrokeThickness="1.5" />
+                        <Ellipse
+                            x:Name="TomatoHighlight"
+                            Width="78"
+                            Height="42"
+                            Margin="34,29,0,0"
+                            HorizontalAlignment="Left"
+                            VerticalAlignment="Top"
+                            Fill="{ThemeResource PomodoroDiscHighlightBrush}"
+                            IsHitTestVisible="False" />
+                        <Ellipse
+                            x:Name="ProgressTrackRing"
+                            Margin="5"
+                            Fill="Transparent"
+                            Stroke="{ThemeResource PomodoroFocusSoftBrush}"
+                            StrokeThickness="4" />
+                        <Path
+                            x:Name="ProgressArc"
+                            HorizontalAlignment="Left"
+                            VerticalAlignment="Top"
+                            Stroke="{ThemeResource PomodoroFocusBrush}"
+                            StrokeEndLineCap="Round"
+                            StrokeStartLineCap="Round"
+                            StrokeThickness="4" />
 
-            <StackPanel
-                HorizontalAlignment="Center"
-                VerticalAlignment="Center"
-                Spacing="5">
-                <TextBlock
-                    x:Name="CountdownTextBlock"
-                    HorizontalAlignment="Center"
-                    FontFamily="Bahnschrift"
-                    FontSize="52"
-                    FontWeight="SemiBold"
-                    CharacterSpacing="15"
-                    TextAlignment="Center" />
-                <TextBlock
-                    x:Name="DescriptionTextBlock"
-                    MaxWidth="150"
-                    HorizontalAlignment="Center"
-                    FontSize="10.5"
-                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                    TextAlignment="Center"
-                    TextWrapping="WrapWholeWords" />
-            </StackPanel>
+                        <StackPanel
+                            x:Name="CountdownPanel"
+                            Margin="0,-8,0,0"
+                            HorizontalAlignment="Center"
+                            VerticalAlignment="Center"
+                            Spacing="5">
+                            <TextBlock
+                                x:Name="CountdownTextBlock"
+                                MinWidth="120"
+                                HorizontalAlignment="Center"
+                                Foreground="{ThemeResource PomodoroDialTextBrush}"
+                                FontFamily="Bahnschrift"
+                                FontSize="54"
+                                FontWeight="Bold"
+                                CharacterSpacing="8"
+                                TextAlignment="Center" />
+                            <TextBlock
+                                x:Name="PhaseTextBlock"
+                                HorizontalAlignment="Center"
+                                AutomationProperties.LiveSetting="Polite"
+                                Foreground="{ThemeResource PomodoroDialTextBrush}"
+                                FontSize="13"
+                                FontWeight="SemiBold"
+                                Opacity="0.88"
+                                TextAlignment="Center" />
+                        </StackPanel>
+                    </Grid>
+
+                    <Viewbox
+                        x:Name="LeafCrownViewbox"
+                        Width="94"
+                        Height="46"
+                        HorizontalAlignment="Center"
+                        VerticalAlignment="Top"
+                        IsHitTestVisible="False"
+                        Stretch="Fill">
+                        <Canvas Width="120" Height="58">
+                            <Border
+                                Canvas.Left="58"
+                                Canvas.Top="0"
+                                Width="8"
+                                Height="27"
+                                Background="{ThemeResource PomodoroLeafShadowBrush}"
+                                CornerRadius="4"
+                                RenderTransformOrigin="0.5,1">
+                                <Border.RenderTransform>
+                                    <RotateTransform Angle="12" />
+                                </Border.RenderTransform>
+                            </Border>
+                            <Path
+                                Data="M58,42 C43,39 25,42 13,51 C24,61 45,56 58,42 Z"
+                                Fill="{ThemeResource PomodoroLeafBrush}" />
+                            <Path
+                                Data="M59,41 C48,27 36,20 27,23 C31,38 44,48 59,41 Z"
+                                Fill="{ThemeResource PomodoroLeafHighlightBrush}" />
+                            <Path
+                                Data="M60,41 C51,27 52,10 61,3 C71,13 70,30 60,41 Z"
+                                Fill="{ThemeResource PomodoroLeafBrush}" />
+                            <Path
+                                Data="M61,41 C74,27 87,20 96,24 C91,39 77,48 61,41 Z"
+                                Fill="{ThemeResource PomodoroLeafHighlightBrush}" />
+                            <Path
+                                Data="M62,42 C79,39 97,42 108,51 C96,61 77,56 62,42 Z"
+                                Fill="{ThemeResource PomodoroLeafBrush}" />
+                        </Canvas>
+                    </Viewbox>
+                </Grid>
+            </Viewbox>
         </Grid>
 
         <StackPanel
             x:Name="RoundPanel"
-            Grid.Row="2"
+            Grid.Row="1"
             Margin="0,0,0,10"
             HorizontalAlignment="Center"
             Orientation="Horizontal"
@@ -158,12 +233,7 @@
                 x:Name="RoundDotsPanel"
                 VerticalAlignment="Center"
                 Orientation="Horizontal"
-                Spacing="5">
-                <Ellipse x:Name="RoundDot1" Width="6" Height="6" />
-                <Ellipse x:Name="RoundDot2" Width="6" Height="6" />
-                <Ellipse x:Name="RoundDot3" Width="6" Height="6" />
-                <Ellipse x:Name="RoundDot4" Width="6" Height="6" />
-            </StackPanel>
+                Spacing="5" />
             <TextBlock
                 x:Name="RoundSummaryTextBlock"
                 VerticalAlignment="Center"
@@ -173,7 +243,7 @@
 
         <Grid
             x:Name="ActionBar"
-            Grid.Row="3"
+            Grid.Row="2"
             HorizontalAlignment="Center"
             ColumnSpacing="10">
             <Grid.ColumnDefinitions>

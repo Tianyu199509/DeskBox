@@ -93,6 +93,10 @@ public sealed partial class SettingsWindow
         {
             _ = RefreshBackupSnapshotInventoryAsync();
         }
+        if (string.Equals(_currentSettingsSection, "PomodoroSettings", StringComparison.Ordinal))
+        {
+            PomodoroSettingsSection.RefreshFromSettings();
+        }
     }
 
     private void ApplyToggleSwitchContentVisibility()

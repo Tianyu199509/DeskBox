@@ -15,6 +15,7 @@ public sealed class WidgetSettingsMenuHelperTests
     [InlineData(WidgetKind.Weather, "WeatherSettings")]
     [InlineData(WidgetKind.Glance, "GlanceSettings")]
     [InlineData(WidgetKind.Search, "SearchSettings")]
+    [InlineData(WidgetKind.Pomodoro, "PomodoroSettings")]
     public void GetSettingsSectionTag_Returns_Expected_Tag(WidgetKind kind, string expectedTag)
     {
         Assert.Equal(expectedTag, WidgetSettingsMenuHelper.GetSettingsSectionTag(kind));
@@ -24,7 +25,6 @@ public sealed class WidgetSettingsMenuHelperTests
     [InlineData(WidgetKind.Tags)]
     [InlineData(WidgetKind.SystemMonitor)]
     [InlineData(WidgetKind.Productivity)]
-    [InlineData(WidgetKind.Pomodoro)]
     public void GetSettingsSectionTag_Returns_Null_For_Unmapped_Kinds(WidgetKind kind)
     {
         Assert.Null(WidgetSettingsMenuHelper.GetSettingsSectionTag(kind));
@@ -40,6 +40,7 @@ public sealed class WidgetSettingsMenuHelperTests
         Assert.Equal("Widget.Settings.Weather", WidgetSettingsMenuHelper.GetLocalizationKey(WidgetKind.Weather));
         Assert.Equal("Widget.Settings.Glance", WidgetSettingsMenuHelper.GetLocalizationKey(WidgetKind.Glance));
         Assert.Equal("Widget.Settings.Search", WidgetSettingsMenuHelper.GetLocalizationKey(WidgetKind.Search));
+        Assert.Equal("Widget.Settings.Pomodoro", WidgetSettingsMenuHelper.GetLocalizationKey(WidgetKind.Pomodoro));
     }
 
     [Fact]

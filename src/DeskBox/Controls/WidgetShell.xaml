@@ -854,5 +854,14 @@
                 FontSize="14"
                 Glyph="&#xE8F1;" />
         </Border>
+
+        <Border
+            x:Name="PersistentAttentionBorder"
+            Grid.RowSpan="2"
+            Canvas.ZIndex="110"
+            BorderThickness="3"
+            CornerRadius="8"
+            IsHitTestVisible="False"
+            Opacity="0" />
     </Grid>
 </UserControl>

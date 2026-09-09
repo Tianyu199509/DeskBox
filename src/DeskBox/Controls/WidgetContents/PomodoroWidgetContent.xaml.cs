@@ -1,25 +1,51 @@
+using System.Diagnostics;
 using System.ComponentModel;
 using DeskBox.Services;
 using DeskBox.ViewModels;
+using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
-using Microsoft.UI.Xaml.Media.Animation;
 using Microsoft.UI.Xaml.Shapes;
 using Windows.Foundation;
 
 namespace DeskBox.Controls.WidgetContents;
 
 /// <summary>
-/// 番茄钟的机械表盘式界面。布局变化只调整视觉尺寸，计时真值由 ViewModel 持有。
+/// 番茄钟的原生番茄圆盘界面。布局变化只调整视觉尺寸，计时真值由 ViewModel 持有。
 /// </summary>
 public sealed partial class PomodoroWidgetContent : UserControl, IDisposable
 {
-    private readonly Ellipse[] _roundDots;
+    private const double TomatoVisualAspectRatio = 208d / 190d;
+    private const double ProgressRingCenter = 95;
+    private const double ProgressRingRadius = 90;
+    private static readonly TimeSpan ProgressFrameInterval =
+        TimeSpan.FromMilliseconds(33);
+
+    private readonly List<Ellipse> _roundDots = [];
+    private readonly Stopwatch _progressInterpolationClock = new();
+    private DispatcherQueueTimer? _progressAnimationTimer;
+    private ArcSegment? _progressArcSegment;
+    private PomodoroTimerPhase? _renderedPhase;
+    private string? _renderedPhaseText;
+    private string? _renderedCountdownText;
+    private string? _renderedRoundSummaryText;
+    private string? _renderedPrimaryActionText;
+    private string? _renderedPrimaryActionGlyph;
+    private string? _renderedResetActionText;
+    private string? _renderedSkipActionText;
+    private int _renderedRoundCount = -1;
+    private int _renderedCompletedRounds = -1;
+    private int _renderedRoundNumber = -1;
+    private bool _renderedIsFocusPhase;
     private bool _isResponsiveLayoutTransitionActive;
     private double _responsiveTargetWidth;
     private double _responsiveTargetHeight;
+    private double _progressAnchor;
+    private double _progressDurationSeconds = 1;
+    private bool _progressShouldAdvance;
+    private bool _isLoaded;
     private bool _visualUpdateQueued;
     private bool _isDisposed;
 
@@ -28,20 +54,20 @@ public sealed partial class PomodoroWidgetContent : UserControl, IDisposable
         ArgumentNullException.ThrowIfNull(viewModel);
 
         InitializeComponent();
-        _roundDots = [RoundDot1, RoundDot2, RoundDot3, RoundDot4];
+        InitializeProgressArc();
         ViewModel = viewModel;
         ViewModel.PropertyChanged += ViewModel_PropertyChanged;
-        ViewModel.CompletionOccurred += ViewModel_CompletionOccurred;
         ActualThemeChanged += PomodoroWidgetContent_ActualThemeChanged;
         Loaded += PomodoroWidgetContent_Loaded;
-        UpdateVisuals();
+        Unloaded += PomodoroWidgetContent_Unloaded;
+        UpdateVisuals(force: true);
     }
 
     public PomodoroWidgetViewModel ViewModel { get; }
 
     public void ApplyAppearance()
     {
-        UpdateVisuals();
+        UpdateVisuals(force: true);
     }
 
     internal void BeginResponsiveLayoutTransition(
@@ -78,15 +104,22 @@ public sealed partial class PomodoroWidgetContent : UserControl, IDisposable
 
     private void PomodoroWidgetContent_Loaded(object sender, RoutedEventArgs e)
     {
+        _isLoaded = true;
         UpdateResponsiveLayout();
-        UpdateVisuals();
+        UpdateVisuals(force: true);
+    }
+
+    private void PomodoroWidgetContent_Unloaded(object sender, RoutedEventArgs e)
+    {
+        _isLoaded = false;
+        StopProgressAnimationTimer();
     }
 
     private void PomodoroWidgetContent_ActualThemeChanged(
         FrameworkElement sender,
         object args)
     {
-        UpdateVisuals();
+        UpdateVisuals(force: true);
     }
 
     private void ViewModel_PropertyChanged(object? sender, PropertyChangedEventArgs e)
@@ -96,7 +129,7 @@ public sealed partial class PomodoroWidgetContent : UserControl, IDisposable
 
     /// <summary>
     /// ViewModel 会为同一次状态快照发布多个相关属性。合并到下一次 UI
-    /// 调度可避免每秒重复重建画刷、圆点和进度几何。
+    /// 调度并缓存稳定状态，确保每秒刷新只更新倒计时文本与进度几何。
     /// </summary>
     private void QueueVisualUpdate()
     {
@@ -119,89 +152,277 @@ public sealed partial class PomodoroWidgetContent : UserControl, IDisposable
         UpdateVisuals();
     }
 
-    private void ViewModel_CompletionOccurred(object? sender, EventArgs e)
-    {
-        if (_isDisposed || !WindowsCompatibilityService.ShouldAnimate)
-        {
-            return;
-        }
-
-        var storyboard = new Storyboard();
-        var scaleX = CreateCompletionPulseAnimation();
-        var scaleY = CreateCompletionPulseAnimation();
-        Storyboard.SetTarget(scaleX, DialScaleTransform);
-        Storyboard.SetTarget(scaleY, DialScaleTransform);
-        Storyboard.SetTargetProperty(scaleX, nameof(ScaleTransform.ScaleX));
-        Storyboard.SetTargetProperty(scaleY, nameof(ScaleTransform.ScaleY));
-        storyboard.Children.Add(scaleX);
-        storyboard.Children.Add(scaleY);
-        storyboard.Begin();
-    }
-
-    private static DoubleAnimation CreateCompletionPulseAnimation()
-    {
-        return new DoubleAnimation
-        {
-            From = 1,
-            To = 1.035,
-            Duration = new Duration(TimeSpan.FromMilliseconds(170)),
-            AutoReverse = true,
-            EnableDependentAnimation = true
-        };
-    }
-
-    private void UpdateVisuals()
+    private void UpdateVisuals(bool force = false)
     {
         if (_isDisposed)
         {
             return;
         }
 
-        Brush accent = GetThemeBrush(
-            ViewModel.IsFocusPhase
-                ? "PomodoroFocusBrush"
-                : "PomodoroBreakBrush");
-        Brush softAccent = GetThemeBrush(
-            ViewModel.IsFocusPhase
-                ? "PomodoroFocusSoftBrush"
-                : "PomodoroBreakSoftBrush");
+        PomodoroTimerPhase phase = ViewModel.Phase;
+        bool phaseVisualChanged = force || _renderedPhase != phase;
+        (string accentKey, string strongAccentKey, string softAccentKey) =
+            GetPhasePaletteKeys();
+        Brush accent = GetThemeBrush(accentKey);
+        Brush strongAccent = GetThemeBrush(strongAccentKey);
+        Brush softAccent = GetThemeBrush(softAccentKey);
 
-        PhaseTextBlock.Text = ViewModel.PhaseText;
-        CountdownTextBlock.Text = ViewModel.CountdownText;
-        DescriptionTextBlock.Text = ViewModel.DescriptionText;
-        RoundSummaryTextBlock.Text = ViewModel.RoundSummaryText;
-        PrimaryActionTextBlock.Text = ViewModel.PrimaryActionText;
-        PrimaryActionIcon.Glyph = ViewModel.PrimaryActionGlyph;
+        string phaseText = ViewModel.PhaseText;
+        if (force || _renderedPhaseText != phaseText)
+        {
+            PhaseTextBlock.Text = phaseText;
+            _renderedPhaseText = phaseText;
+        }
 
-        PhasePill.Background = softAccent;
-        PhaseDot.Fill = accent;
-        PhaseTextBlock.Foreground = accent;
-        AmbientDisc.Fill = softAccent;
-        ProgressArc.Stroke = accent;
-        PrimaryActionButton.Background = accent;
-        PrimaryActionButton.BorderBrush = accent;
-        PrimaryActionButton.Foreground = GetThemeBrush("PomodoroAccentTextBrush");
+        string countdownText = ViewModel.CountdownText;
+        if (force || _renderedCountdownText != countdownText)
+        {
+            CountdownTextBlock.Text = countdownText;
+            _renderedCountdownText = countdownText;
+        }
 
-        ToolTipService.SetToolTip(ResetButton, ViewModel.ResetActionText);
-        ToolTipService.SetToolTip(PrimaryActionButton, ViewModel.PrimaryActionText);
-        ToolTipService.SetToolTip(SkipButton, ViewModel.SkipActionText);
-        AutomationProperties.SetName(ResetButton, ViewModel.ResetActionText);
-        AutomationProperties.SetName(PrimaryActionButton, ViewModel.PrimaryActionText);
-        AutomationProperties.SetName(SkipButton, ViewModel.SkipActionText);
+        string roundSummaryText = ViewModel.RoundSummaryText;
+        if (force || _renderedRoundSummaryText != roundSummaryText)
+        {
+            RoundSummaryTextBlock.Text = roundSummaryText;
+            _renderedRoundSummaryText = roundSummaryText;
+        }
+
+        string primaryActionText = ViewModel.PrimaryActionText;
+        if (force || _renderedPrimaryActionText != primaryActionText)
+        {
+            PrimaryActionTextBlock.Text = primaryActionText;
+            ToolTipService.SetToolTip(PrimaryActionButton, primaryActionText);
+            AutomationProperties.SetName(PrimaryActionButton, primaryActionText);
+            _renderedPrimaryActionText = primaryActionText;
+        }
+
+        string primaryActionGlyph = ViewModel.PrimaryActionGlyph;
+        if (force || _renderedPrimaryActionGlyph != primaryActionGlyph)
+        {
+            PrimaryActionIcon.Glyph = primaryActionGlyph;
+            _renderedPrimaryActionGlyph = primaryActionGlyph;
+        }
+
+        string resetActionText = ViewModel.ResetActionText;
+        if (force || _renderedResetActionText != resetActionText)
+        {
+            ToolTipService.SetToolTip(ResetButton, resetActionText);
+            AutomationProperties.SetName(ResetButton, resetActionText);
+            _renderedResetActionText = resetActionText;
+        }
+
+        string skipActionText = ViewModel.SkipActionText;
+        if (force || _renderedSkipActionText != skipActionText)
+        {
+            ToolTipService.SetToolTip(SkipButton, skipActionText);
+            AutomationProperties.SetName(SkipButton, skipActionText);
+            _renderedSkipActionText = skipActionText;
+        }
+
+        if (phaseVisualChanged)
+        {
+            AmbientDisc.Fill = softAccent;
+            TomatoDiscShape.Fill = accent;
+            TomatoDiscShape.Stroke = strongAccent;
+            ProgressTrackRing.Stroke = softAccent;
+            ProgressArc.Stroke = accent;
+            PrimaryActionButton.Background = accent;
+            PrimaryActionButton.BorderBrush = strongAccent;
+            PrimaryActionButton.Foreground = GetThemeBrush("PomodoroAccentTextBrush");
+            ResetButton.Foreground = strongAccent;
+            SkipButton.Foreground = strongAccent;
+            _renderedPhase = phase;
+        }
+
         AutomationProperties.SetName(
             DialHost,
-            $"{ViewModel.PhaseText}, {ViewModel.CountdownText}, {ViewModel.RoundSummaryText}");
+            $"{phaseText}, {countdownText}, {roundSummaryText}");
 
-        UpdateRoundDots(accent);
-        UpdateProgressArc();
+        int roundCount = ViewModel.RoundCount;
+        int completedRounds = ViewModel.CompletedRoundsInCycle;
+        int roundNumber = ViewModel.RoundNumber;
+        bool isFocusPhase = ViewModel.IsFocusPhase;
+        if (force || phaseVisualChanged ||
+            _renderedRoundCount != roundCount ||
+            _renderedCompletedRounds != completedRounds ||
+            _renderedRoundNumber != roundNumber ||
+            _renderedIsFocusPhase != isFocusPhase)
+        {
+            UpdateRoundDots(accent);
+            _renderedRoundCount = roundCount;
+            _renderedCompletedRounds = completedRounds;
+            _renderedRoundNumber = roundNumber;
+            _renderedIsFocusPhase = isFocusPhase;
+        }
+
+        SyncProgressFromViewModel();
+    }
+
+    private (string Accent, string StrongAccent, string SoftAccent) GetPhasePaletteKeys()
+    {
+        if (ViewModel.IsFocusPhase)
+        {
+            return (
+                "PomodoroFocusBrush",
+                "PomodoroFocusStrongBrush",
+                "PomodoroFocusSoftBrush");
+        }
+
+        return ViewModel.IsLongBreakPhase
+            ? (
+                "PomodoroLongBreakBrush",
+                "PomodoroLongBreakStrongBrush",
+                "PomodoroLongBreakSoftBrush")
+            : (
+                "PomodoroShortBreakBrush",
+                "PomodoroShortBreakStrongBrush",
+                "PomodoroShortBreakSoftBrush");
+    }
+
+    /// <summary>
+    /// 进度环使用固定的 190×190 设计坐标，由外层 Viewbox 统一缩放。
+    /// 几何对象只创建一次，后续帧仅修改圆弧终点与长弧标记。
+    /// </summary>
+    private void InitializeProgressArc()
+    {
+        var start = new Point(
+            ProgressRingCenter,
+            ProgressRingCenter - ProgressRingRadius);
+        _progressArcSegment = new ArcSegment
+        {
+            Point = start,
+            Size = new Size(ProgressRingRadius, ProgressRingRadius),
+            IsLargeArc = false,
+            SweepDirection = SweepDirection.Clockwise
+        };
+        var figure = new PathFigure
+        {
+            StartPoint = start,
+            IsClosed = false,
+            IsFilled = false
+        };
+        figure.Segments.Add(_progressArcSegment);
+        var geometry = new PathGeometry();
+        geometry.Figures.Add(figure);
+        ProgressArc.Data = geometry;
+        ProgressArc.Opacity = 0;
+    }
+
+    /// <summary>
+    /// 低频 ViewModel 快照只负责校准锚点；帧定时器不会读取 ViewModel。
+    /// </summary>
+    private void SyncProgressFromViewModel()
+    {
+        double snapshotProgress = Math.Clamp(ViewModel.Progress, 0, 1);
+        if (!double.IsFinite(snapshotProgress))
+        {
+            snapshotProgress = 0;
+        }
+
+        double durationSeconds = ViewModel.PhaseDuration.TotalSeconds;
+        _progressAnchor = snapshotProgress;
+        _progressDurationSeconds = double.IsFinite(durationSeconds) &&
+            durationSeconds > 0
+            ? durationSeconds
+            : 1;
+        _progressShouldAdvance = ViewModel.IsRunning &&
+            durationSeconds > 0 &&
+            snapshotProgress < 1;
+        _progressInterpolationClock.Restart();
+        UpdateProgressArc(snapshotProgress);
+        UpdateProgressAnimationTimer();
+    }
+
+    private void UpdateProgressAnimationTimer()
+    {
+        if (_isLoaded && _progressShouldAdvance)
+        {
+            StartProgressAnimationTimer();
+            return;
+        }
+
+        StopProgressAnimationTimer();
+    }
+
+    private void StartProgressAnimationTimer()
+    {
+        if (_progressAnimationTimer is not null)
+        {
+            return;
+        }
+
+        DispatcherQueueTimer timer = DispatcherQueue.CreateTimer();
+        timer.Interval = ProgressFrameInterval;
+        timer.IsRepeating = true;
+        timer.Tick += ProgressAnimationTimer_Tick;
+        _progressAnimationTimer = timer;
+        timer.Start();
+    }
+
+    private void StopProgressAnimationTimer()
+    {
+        if (_progressAnimationTimer is not { } timer)
+        {
+            return;
+        }
+
+        _progressAnimationTimer = null;
+        timer.Stop();
+        timer.Tick -= ProgressAnimationTimer_Tick;
+    }
+
+    private void ProgressAnimationTimer_Tick(
+        DispatcherQueueTimer sender,
+        object args)
+    {
+        if (_isDisposed || !_isLoaded || !_progressShouldAdvance)
+        {
+            StopProgressAnimationTimer();
+            return;
+        }
+
+        double progress = _progressAnchor +
+            _progressInterpolationClock.Elapsed.TotalSeconds /
+            _progressDurationSeconds;
+        UpdateProgressArc(progress);
+        if (progress >= 1)
+        {
+            _progressShouldAdvance = false;
+            StopProgressAnimationTimer();
+        }
+    }
+
+    private void UpdateProgressArc(double progress)
+    {
+        if (_progressArcSegment is null)
+        {
+            return;
+        }
+
+        double normalizedProgress = Math.Clamp(progress, 0, 1);
+        if (!double.IsFinite(normalizedProgress) || normalizedProgress <= 0)
+        {
+            ProgressArc.Opacity = 0;
+            return;
+        }
+
+        double angle = Math.Min(359.999, normalizedProgress * 360);
+        double radians = angle * Math.PI / 180;
+        _progressArcSegment.Point = new Point(
+            ProgressRingCenter + ProgressRingRadius * Math.Sin(radians),
+            ProgressRingCenter - ProgressRingRadius * Math.Cos(radians));
+        _progressArcSegment.IsLargeArc = angle > 180;
+        ProgressArc.Opacity = 1;
     }
 
     private void UpdateRoundDots(Brush accent)
     {
+        EnsureRoundDots();
         Brush pending = GetThemeBrush("PomodoroPendingDotBrush");
         int completed = ViewModel.CompletedRoundsInCycle;
         int activeIndex = ViewModel.IsFocusPhase ? ViewModel.RoundNumber - 1 : -1;
-        for (int index = 0; index < _roundDots.Length; index++)
+        for (int index = 0; index < _roundDots.Count; index++)
         {
             Ellipse dot = _roundDots[index];
             bool isCompleted = index < completed;
@@ -211,6 +432,29 @@ public sealed partial class PomodoroWidgetContent : UserControl, IDisposable
             double size = isActive ? 8 : 6;
             dot.Width = size;
             dot.Height = size;
+        }
+    }
+
+    private void EnsureRoundDots()
+    {
+        int targetCount = ViewModel.RoundCount;
+        while (_roundDots.Count > targetCount)
+        {
+            int lastIndex = _roundDots.Count - 1;
+            Ellipse dot = _roundDots[lastIndex];
+            RoundDotsPanel.Children.Remove(dot);
+            _roundDots.RemoveAt(lastIndex);
+        }
+
+        while (_roundDots.Count < targetCount)
+        {
+            var dot = new Ellipse
+            {
+                Width = 6,
+                Height = 6
+            };
+            _roundDots.Add(dot);
+            RoundDotsPanel.Children.Add(dot);
         }
     }
 
@@ -237,53 +481,43 @@ public sealed partial class PomodoroWidgetContent : UserControl, IDisposable
             return;
         }
 
-        bool showPhase = width >= 120 && height >= 105;
-        bool showActions = width >= 150 && height >= 120;
-        bool showDescription = width >= 230 && height >= 265;
-        bool showRounds = width >= 150 && height >= 215;
-        bool dense = width < 245 || height < 245;
-        PhasePill.Visibility = showPhase
-            ? Visibility.Visible
-            : Visibility.Collapsed;
+        bool showActions = width >= 148 && height >= 148;
+        bool showRounds = width >= 160 && height >= 232;
+        bool dense = width < 250 || height < 270;
         ActionBar.Visibility = showActions
-            ? Visibility.Visible
-            : Visibility.Collapsed;
-        DescriptionTextBlock.Visibility = showDescription
             ? Visibility.Visible
             : Visibility.Collapsed;
         RoundPanel.Visibility = showRounds
             ? Visibility.Visible
             : Visibility.Collapsed;
         RootGrid.Padding = dense
-            ? new Thickness(10, 6, 10, 9)
+            ? new Thickness(10, 5, 10, 9)
             : new Thickness(16, 10, 16, 14);
 
         double horizontalPadding = dense ? 20 : 32;
-        double verticalPadding = dense ? 15 : 24;
+        double verticalPadding = dense ? 12 : 22;
         double accessoryHeight =
-            (showPhase ? 26 : 0) +
-            (showRounds ? 24 : 0) +
+            (showRounds ? 22 : 0) +
             (showActions ? (dense ? 40 : 44) : 0) +
-            (dense ? 8 : 16);
+            (dense ? 8 : 14);
+        double availableDialHeight = Math.Max(
+            36,
+            height - verticalPadding - accessoryHeight);
         double diameter = Math.Clamp(
             Math.Min(
                 width - horizontalPadding,
-                height - verticalPadding - accessoryHeight),
-            24,
-            190);
+                availableDialHeight / TomatoVisualAspectRatio),
+            42,
+            270);
         DialHost.Width = diameter;
-        DialHost.Height = diameter;
+        DialHost.Height = diameter * TomatoVisualAspectRatio;
         DialHost.Margin = dense
-            ? new Thickness(0, 4, 0, 4)
-            : new Thickness(0, 8, 0, 8);
+            ? new Thickness(0, 2, 0, 4)
+            : new Thickness(0, 4, 0, 8);
 
-        double stroke = Math.Clamp(Math.Round(diameter * 0.052), 3, 10);
-        ProgressTrack.StrokeThickness = stroke;
-        ProgressArc.StrokeThickness = stroke;
-        CenterDisc.Margin = new Thickness(Math.Clamp(diameter * 0.083, 3, 16));
-        CountdownTextBlock.FontSize = Math.Clamp(diameter * 0.285, 12, 54);
-        DescriptionTextBlock.MaxWidth = Math.Max(90, diameter - 34);
-        DescriptionTextBlock.FontSize = dense ? 9.5 : 10.5;
+        LeafCrownViewbox.Visibility = diameter >= 68
+            ? Visibility.Visible
+            : Visibility.Collapsed;
 
         bool showPrimaryActionText = showActions && width >= 220;
         double sideButtonSize = width < 190 ? 32 : dense ? 36 : 40;
@@ -317,8 +551,6 @@ public sealed partial class PomodoroWidgetContent : UserControl, IDisposable
         }
         PrimaryActionButton.CornerRadius = new CornerRadius(
             PrimaryActionButton.Height / 2);
-
-        UpdateProgressArc();
     }
 
     private static void SetCircularButtonSize(Button button, double size)
@@ -328,44 +560,6 @@ public sealed partial class PomodoroWidgetContent : UserControl, IDisposable
         button.MinWidth = size;
         button.MinHeight = size;
         button.CornerRadius = new CornerRadius(size / 2);
-    }
-
-    private void UpdateProgressArc()
-    {
-        double diameter = DialHost.Width;
-        double stroke = ProgressArc.StrokeThickness;
-        if (!double.IsFinite(diameter) || diameter <= stroke ||
-            ViewModel.Progress <= 0)
-        {
-            ProgressArc.Data = null;
-            return;
-        }
-
-        double center = diameter / 2;
-        double radius = Math.Max(1, (diameter - stroke) / 2);
-        double angle = Math.Min(359.999, ViewModel.Progress * 360);
-        double radians = angle * Math.PI / 180;
-        var start = new Point(center, center - radius);
-        var end = new Point(
-            center + radius * Math.Sin(radians),
-            center - radius * Math.Cos(radians));
-
-        var figure = new PathFigure
-        {
-            StartPoint = start,
-            IsClosed = false,
-            IsFilled = false
-        };
-        figure.Segments.Add(new ArcSegment
-        {
-            Point = end,
-            Size = new Size(radius, radius),
-            IsLargeArc = angle > 180,
-            SweepDirection = SweepDirection.Clockwise
-        });
-        var geometry = new PathGeometry();
-        geometry.Figures.Add(figure);
-        ProgressArc.Data = geometry;
     }
 
     private Brush GetThemeBrush(string key)
@@ -398,9 +592,13 @@ public sealed partial class PomodoroWidgetContent : UserControl, IDisposable
         }
 
         _isDisposed = true;
+        _isLoaded = false;
+        _progressShouldAdvance = false;
+        StopProgressAnimationTimer();
+        _progressInterpolationClock.Stop();
         ViewModel.PropertyChanged -= ViewModel_PropertyChanged;
-        ViewModel.CompletionOccurred -= ViewModel_CompletionOccurred;
         ActualThemeChanged -= PomodoroWidgetContent_ActualThemeChanged;
         Loaded -= PomodoroWidgetContent_Loaded;
+        Unloaded -= PomodoroWidgetContent_Unloaded;
     }
 }

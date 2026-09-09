@@ -95,33 +95,33 @@ public sealed class PomodoroTimerStateMachineTests
         PomodoroTimerUpdate reset = timer.Reset(FixedNow.AddMinutes(27));
 
         Assert.Equal(PomodoroTimerTransition.Reset, reset.Transition);
-        Assert.Equal(PomodoroTimerPhase.Break, reset.Snapshot.Phase);
+        Assert.Equal(PomodoroTimerPhase.ShortBreak, reset.Snapshot.Phase);
         Assert.False(reset.Snapshot.IsRunning);
         Assert.Equal(TimeSpan.FromMinutes(5), reset.Snapshot.Remaining);
         Assert.Equal(1, reset.Snapshot.CompletedFocusRounds);
     }
 
     [Fact]
-    public void Skip_SwitchesPhasePausedWithoutCompletingFocusRound()
+    public void Skip_SwitchesPhasePausedAndAdvancesPastSkippedFocusRound()
     {
         var config = new WidgetConfig();
         var timer = new PomodoroTimerStateMachine(config, FixedNow);
         timer.Start(FixedNow);
 
-        PomodoroTimerUpdate breakUpdate = timer.Skip(FixedNow.AddMinutes(10));
+        PomodoroTimerUpdate shortBreakUpdate = timer.Skip(FixedNow.AddMinutes(10));
         PomodoroTimerUpdate focusUpdate = timer.Skip(FixedNow);
 
-        Assert.Equal(PomodoroTimerTransition.Skipped, breakUpdate.Transition);
-        Assert.Equal(PomodoroTimerPhase.Break, breakUpdate.Snapshot.Phase);
-        Assert.False(breakUpdate.Snapshot.IsRunning);
-        Assert.Equal(TimeSpan.FromMinutes(5), breakUpdate.Snapshot.Remaining);
-        Assert.Equal(0, breakUpdate.Snapshot.CompletedFocusRounds);
+        Assert.Equal(PomodoroTimerTransition.Skipped, shortBreakUpdate.Transition);
+        Assert.Equal(PomodoroTimerPhase.ShortBreak, shortBreakUpdate.Snapshot.Phase);
+        Assert.False(shortBreakUpdate.Snapshot.IsRunning);
+        Assert.Equal(TimeSpan.FromMinutes(5), shortBreakUpdate.Snapshot.Remaining);
+        Assert.Equal(1, shortBreakUpdate.Snapshot.CompletedFocusRounds);
         Assert.Equal(PomodoroTimerPhase.Focus, focusUpdate.Snapshot.Phase);
-        Assert.Equal(0, focusUpdate.Snapshot.CompletedFocusRounds);
+        Assert.Equal(1, focusUpdate.Snapshot.CompletedFocusRounds);
     }
 
     [Fact]
-    public void NaturalFocusCompletion_IncrementsRoundAndPausesBreak()
+    public void NaturalFocusCompletion_IncrementsRoundAndPausesShortBreak()
     {
         var config = new WidgetConfig();
         var timer = new PomodoroTimerStateMachine(config, FixedNow);
@@ -131,7 +131,7 @@ public sealed class PomodoroTimerStateMachineTests
 
         Assert.Equal(PomodoroTimerTransition.FocusCompleted, update.Transition);
         Assert.True(update.ShouldPersist);
-        Assert.Equal(PomodoroTimerPhase.Break, update.Snapshot.Phase);
+        Assert.Equal(PomodoroTimerPhase.ShortBreak, update.Snapshot.Phase);
         Assert.False(update.Snapshot.IsRunning);
         Assert.Equal(TimeSpan.FromMinutes(5), update.Snapshot.Remaining);
         Assert.Equal(1, update.Snapshot.CompletedFocusRounds);
@@ -145,7 +145,7 @@ public sealed class PomodoroTimerStateMachineTests
     }
 
     [Fact]
-    public void NaturalBreakCompletion_PausesFocusWithoutIncrementingRound()
+    public void NaturalShortBreakCompletion_PausesNextFocusRound()
     {
         var config = new WidgetConfig();
         var timer = new PomodoroTimerStateMachine(config, FixedNow);
@@ -154,11 +154,104 @@ public sealed class PomodoroTimerStateMachineTests
 
         PomodoroTimerUpdate update = timer.Tick(FixedNow.AddMinutes(5));
 
-        Assert.Equal(PomodoroTimerTransition.BreakCompleted, update.Transition);
+        Assert.Equal(PomodoroTimerTransition.ShortBreakCompleted, update.Transition);
         Assert.Equal(PomodoroTimerPhase.Focus, update.Snapshot.Phase);
         Assert.False(update.Snapshot.IsRunning);
         Assert.Equal(TimeSpan.FromMinutes(25), update.Snapshot.Remaining);
+        Assert.Equal(1, update.Snapshot.CompletedFocusRounds);
+    }
+
+    [Fact]
+    public void FinalFocusCompletion_EntersLongBreakWithConfiguredDuration()
+    {
+        var config = new WidgetConfig();
+        var timer = new PomodoroTimerStateMachine(
+            config,
+            FixedNow,
+            focusMinutes: 10,
+            shortBreakMinutes: 3,
+            longBreakMinutes: 12,
+            roundCount: 2);
+        timer.Skip(FixedNow);
+        timer.Skip(FixedNow);
+        timer.Start(FixedNow);
+
+        PomodoroTimerUpdate update = timer.Tick(FixedNow.AddMinutes(10));
+
+        Assert.Equal(PomodoroTimerTransition.FocusCompleted, update.Transition);
+        Assert.Equal(PomodoroTimerPhase.LongBreak, update.Snapshot.Phase);
+        Assert.False(update.Snapshot.IsRunning);
+        Assert.Equal(TimeSpan.FromMinutes(12), update.Snapshot.Remaining);
+        Assert.Equal(2, update.Snapshot.CompletedFocusRounds);
+    }
+
+    [Fact]
+    public void LongBreakCompletion_ResetsCycleToFirstFocusRound()
+    {
+        var config = new WidgetConfig();
+        var timer = new PomodoroTimerStateMachine(
+            config,
+            FixedNow,
+            focusMinutes: 10,
+            shortBreakMinutes: 3,
+            longBreakMinutes: 12,
+            roundCount: 1);
+        timer.Skip(FixedNow);
+        timer.Start(FixedNow);
+
+        PomodoroTimerUpdate update = timer.Tick(FixedNow.AddMinutes(12));
+
+        Assert.Equal(
+            PomodoroTimerTransition.LongBreakCompleted,
+            update.Transition);
+        Assert.Equal(PomodoroTimerPhase.Focus, update.Snapshot.Phase);
+        Assert.False(update.Snapshot.IsRunning);
+        Assert.Equal(TimeSpan.FromMinutes(10), update.Snapshot.Remaining);
         Assert.Equal(0, update.Snapshot.CompletedFocusRounds);
+    }
+
+    [Fact]
+    public void Skip_FinalFocusAndLongBreak_ResetsCycleWithoutAutoStarting()
+    {
+        var config = new WidgetConfig();
+        var timer = new PomodoroTimerStateMachine(
+            config,
+            FixedNow,
+            roundCount: 1);
+
+        PomodoroTimerUpdate longBreak = timer.Skip(FixedNow);
+        PomodoroTimerUpdate firstFocus = timer.Skip(FixedNow);
+
+        Assert.Equal(PomodoroTimerPhase.LongBreak, longBreak.Snapshot.Phase);
+        Assert.Equal(1, longBreak.Snapshot.CompletedFocusRounds);
+        Assert.Equal(PomodoroTimerPhase.Focus, firstFocus.Snapshot.Phase);
+        Assert.False(firstFocus.Snapshot.IsRunning);
+        Assert.Equal(0, firstFocus.Snapshot.CompletedFocusRounds);
+    }
+
+    [Fact]
+    public void UpdateSettings_ReclassifiesCompletedCycleAndUsesLongBreakDuration()
+    {
+        var config = new WidgetConfig();
+        var timer = new PomodoroTimerStateMachine(
+            config,
+            FixedNow,
+            roundCount: 4);
+        timer.Skip(FixedNow);
+
+        PomodoroTimerUpdate update = timer.UpdateSettings(
+            focusMinutes: 30,
+            shortBreakMinutes: 7,
+            longBreakMinutes: 20,
+            roundCount: 1,
+            utcNow: FixedNow);
+
+        Assert.True(update.ShouldPersist);
+        Assert.Equal(PomodoroTimerPhase.LongBreak, update.Snapshot.Phase);
+        Assert.Equal(TimeSpan.FromMinutes(20), update.Snapshot.Remaining);
+        Assert.Equal(TimeSpan.FromMinutes(20), timer.CurrentPhaseDuration);
+        Assert.Equal(1, update.Snapshot.CompletedFocusRounds);
+        Assert.Equal(1, timer.RoundCount);
     }
 
     [Fact]
@@ -206,6 +299,36 @@ public sealed class PomodoroTimerStateMachineTests
         Assert.Equal(TimeSpan.FromMinutes(19), snapshot.Remaining);
     }
 
+    [Theory]
+    [InlineData(1, PomodoroTimerPhase.ShortBreak)]
+    [InlineData(4, PomodoroTimerPhase.LongBreak)]
+    public void Restore_LegacyBreakMigratesToCycleAwareBreakPhase(
+        int completedFocusRounds,
+        PomodoroTimerPhase expectedPhase)
+    {
+        var config = new WidgetConfig
+        {
+            Metadata = new Dictionary<string, string>
+            {
+                ["Pomodoro.Version"] = "1",
+                ["Pomodoro.Phase"] = "Break",
+                ["Pomodoro.Running"] = "False",
+                ["Pomodoro.RemainingTicks"] = TimeSpan.FromMinutes(5).Ticks.ToString(),
+                ["Pomodoro.CompletedFocusRounds"] = completedFocusRounds.ToString()
+            }
+        };
+
+        var timer = new PomodoroTimerStateMachine(config, FixedNow);
+        PomodoroTimerSnapshot snapshot = timer.GetSnapshot(FixedNow);
+
+        Assert.True(timer.WasMetadataMigrated);
+        Assert.True(timer.ShouldPersistRestore);
+        Assert.Equal(expectedPhase, snapshot.Phase);
+        Assert.Equal(TimeSpan.FromMinutes(5), snapshot.Remaining);
+        Assert.Equal("2", config.Metadata["Pomodoro.Version"]);
+        Assert.Equal(expectedPhase.ToString(), config.Metadata["Pomodoro.Phase"]);
+    }
+
     [Fact]
     public void Restore_ExpiredFocusCompletesExactlyOnceAndStaysPaused()
     {
@@ -224,14 +347,14 @@ public sealed class PomodoroTimerStateMachineTests
 
         Assert.True(restored.ShouldPersistRestore);
         Assert.Equal(PomodoroTimerTransition.FocusCompleted, restored.RestoreTransition);
-        Assert.Equal(PomodoroTimerPhase.Break, snapshot.Phase);
+        Assert.Equal(PomodoroTimerPhase.ShortBreak, snapshot.Phase);
         Assert.False(snapshot.IsRunning);
         Assert.Equal(TimeSpan.FromMinutes(5), snapshot.Remaining);
         Assert.Equal(1, snapshot.CompletedFocusRounds);
     }
 
     [Fact]
-    public void Restore_ExpiredBreakDoesNotIncrementCompletedFocusRounds()
+    public void Restore_ExpiredShortBreakPreservesCompletedFocusRounds()
     {
         var original = new WidgetConfig();
         var timer = new PomodoroTimerStateMachine(original, FixedNow);
@@ -247,10 +370,12 @@ public sealed class PomodoroTimerStateMachineTests
             FixedNow.AddMinutes(6));
         PomodoroTimerSnapshot snapshot = restored.GetSnapshot(FixedNow.AddMinutes(6));
 
-        Assert.Equal(PomodoroTimerTransition.BreakCompleted, restored.RestoreTransition);
+        Assert.Equal(
+            PomodoroTimerTransition.ShortBreakCompleted,
+            restored.RestoreTransition);
         Assert.Equal(PomodoroTimerPhase.Focus, snapshot.Phase);
         Assert.False(snapshot.IsRunning);
-        Assert.Equal(0, snapshot.CompletedFocusRounds);
+        Assert.Equal(1, snapshot.CompletedFocusRounds);
     }
 
     [Fact]

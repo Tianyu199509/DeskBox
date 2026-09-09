@@ -133,6 +133,8 @@ public sealed partial class WidgetShell : UserControl
     private bool _isShellDragActive;
     private bool _isCompactCompositionTransitionActive;
     private double _lastCompactTransitionCornerRadius = double.NaN;
+    private bool _isPersistentAttentionActive;
+    private Color _persistentAttentionColor = Colors.Transparent;
 
     public void ShowFeedback(WidgetFeedbackRequest request)
     {
@@ -413,6 +415,7 @@ public sealed partial class WidgetShell : UserControl
             ApplyChromeMode();
             ApplyCompactAdaptiveLayout();
             ApplyFullBleedOverlayTheme();
+            UpdatePersistentAttentionVisual();
             if (_isHostVisualActivityEnabled)
             {
                 QueueCompactMarquee();
@@ -427,6 +430,7 @@ public sealed partial class WidgetShell : UserControl
             StopCompactVisualTimers();
             StopCompactVinylRotation();
             StopTransientCompactStoryboards();
+            StopPersistentAttentionAnimation();
             _compactTextViewportUpdateQueued = false;
             StopGroupDropPreviewBreathing();
             EndShellDragSession(notifyCompact: true);
@@ -449,6 +453,7 @@ public sealed partial class WidgetShell : UserControl
 
         QueueCompactMarquee();
         RestartCompactVisualTimers();
+        UpdatePersistentAttentionVisual();
     }
 
     internal void SuspendVisualActivity()
@@ -463,6 +468,7 @@ public sealed partial class WidgetShell : UserControl
         StopCompactVisualTimers();
         StopCompactVinylRotation();
         StopTransientCompactStoryboards();
+        StopPersistentAttentionAnimation();
     }
 
     internal void ApplyPerformanceSettings()
@@ -471,6 +477,7 @@ public sealed partial class WidgetShell : UserControl
         StopCompactVisualTimers();
         StopCompactVinylRotation();
         StopTransientCompactStoryboards();
+        UpdatePersistentAttentionVisual();
         if (_hostedContent is IWidgetPerformanceAwareContent performanceAware)
         {
             performanceAware.ApplyPerformanceSettings();
@@ -580,6 +587,90 @@ public sealed partial class WidgetShell : UserControl
 
     public Grid TitleBar => TitleBarGrid;
     public Border BackgroundSurface => BackgroundPlate;
+
+    /// <summary>
+    /// 显示需要用户明确处理的持续提醒。动画可暂停以节省后台资源，
+    /// 但提醒状态会保留，并在格子重新显示时继续。
+    /// </summary>
+    public void SetPersistentAttention(bool active, Color color)
+    {
+        bool becameActive = active && !_isPersistentAttentionActive;
+        _isPersistentAttentionActive = active;
+        _persistentAttentionColor = color;
+        if (PersistentAttentionBorder.BorderBrush is SolidColorBrush brush)
+        {
+            brush.Color = color;
+        }
+        else
+        {
+            PersistentAttentionBorder.BorderBrush = new SolidColorBrush(color);
+        }
+
+        UpdatePersistentAttentionVisual();
+        if (becameActive && IsLoaded)
+        {
+            // Composition 对刚从 Collapsed 实例化的视觉有时不会立即接收
+            // 永久动画。边框常驻视觉树，并在下一帧重挂一次动画，确保
+            // 番茄钟在已经折叠时完成也能立刻闪烁。
+            DispatcherQueue.TryEnqueue(() =>
+            {
+                if (_isPersistentAttentionActive)
+                {
+                    UpdatePersistentAttentionVisual();
+                }
+            });
+        }
+    }
+
+    private void UpdatePersistentAttentionVisual()
+    {
+        Visual visual = ElementCompositionPreview.GetElementVisual(
+            PersistentAttentionBorder);
+        visual.StopAnimation(nameof(Visual.Opacity));
+
+        if (!_isPersistentAttentionActive)
+        {
+            visual.Opacity = 0;
+            return;
+        }
+
+        if (PersistentAttentionBorder.BorderBrush is SolidColorBrush brush)
+        {
+            brush.Color = _persistentAttentionColor;
+        }
+        else
+        {
+            PersistentAttentionBorder.BorderBrush =
+                new SolidColorBrush(_persistentAttentionColor);
+        }
+
+        PersistentAttentionBorder.CornerRadius = BackgroundPlate.CornerRadius;
+        visual.Opacity = 1;
+        if (!_isHostVisualActivityEnabled ||
+            !IsLoaded ||
+            !WindowsCompatibilityService.ShouldAnimate)
+        {
+            return;
+        }
+
+        ScalarKeyFrameAnimation animation =
+            visual.Compositor.CreateScalarKeyFrameAnimation();
+        animation.InsertKeyFrame(0, 1);
+        animation.InsertKeyFrame(0.5f, 0.22f);
+        animation.InsertKeyFrame(1, 1);
+        animation.Duration = TimeSpan.FromMilliseconds(820);
+        animation.IterationBehavior = AnimationIterationBehavior.Forever;
+        visual.StartAnimation(nameof(Visual.Opacity), animation);
+    }
+
+    private void StopPersistentAttentionAnimation()
+    {
+        Visual visual = ElementCompositionPreview.GetElementVisual(
+            PersistentAttentionBorder);
+        visual.StopAnimation(nameof(Visual.Opacity));
+        visual.Opacity = _isPersistentAttentionActive ? 1 : 0;
+    }
+
     public double ActualTitleBarHeight => Math.Max(0, TitleBarGrid.ActualHeight);
     public Border Divider => HeaderDivider;
     public WidgetTitleIcon TitleIconElement => TitleIcon;
@@ -2133,6 +2224,34 @@ public sealed partial class WidgetShell : UserControl
 
                 return;
             }
+
+            WidgetCompactPresentation previousWithCurrentLiveText = previous with
+            {
+                Title = presentation.Title,
+                Summary = presentation.Summary,
+                Progress = presentation.Progress,
+                IsProgressIndeterminate = presentation.IsProgressIndeterminate,
+                MusicProgress = presentation.MusicProgress
+            };
+            if (previous.IsLiveTextUpdate &&
+                presentation.IsLiveTextUpdate &&
+                string.Equals(
+                    previous.LiveStateKey,
+                    presentation.LiveStateKey,
+                    StringComparison.Ordinal) &&
+                previousWithCurrentLiveText == presentation)
+            {
+                // 倒计时每秒变化时仅替换文本与进度。完整的呈现刷新会重置
+                // marquee、动画和操作区，导致文字左右移动，甚至让悬停按钮闪退。
+                _compactPresentation = presentation;
+                CompactTitleText.Text = presentation.Title;
+                CompactTitleMarqueeClone.Text = presentation.Title;
+                CompactSummaryText.Text = presentation.Summary;
+                CompactSummaryMarqueeClone.Text = presentation.Summary;
+                CompactTitleIcon.LabelText = presentation.Title;
+                ApplyCompactLiveState();
+                return;
+            }
         }
 
         bool textChanged = previous is null ||
@@ -2621,8 +2740,12 @@ public sealed partial class WidgetShell : UserControl
         }
     }
 
-    private void SetBackgroundCornerRadius(double radius) =>
-        BackgroundPlate.CornerRadius = new CornerRadius(Math.Max(0, radius));
+    private void SetBackgroundCornerRadius(double radius)
+    {
+        var cornerRadius = new CornerRadius(Math.Max(0, radius));
+        BackgroundPlate.CornerRadius = cornerRadius;
+        PersistentAttentionBorder.CornerRadius = cornerRadius;
+    }
 
     private void ApplyCompactTextVisibility()
     {
