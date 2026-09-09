@@ -148,9 +148,9 @@ public sealed class PluginPackageManager
     public NativeInstalledPackageHandle? TryCreateNativeHandle(string packageId)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(packageId);
-        // Read the registry WITHOUT full verification (Find does a complete
-        // Verify via IsRecordIntact); this method performs its own single
-        // verification pass below (audit round 14: one request = one verify).
+        // Read the registry without full verification (single-verify pattern,
+        // audit round 14). Publisher trust and identity binding are checked
+        // AFTER verification below (audit round 15 P0).
         InstalledPackageRecord? record = null;
         lock (_lock)
         {
@@ -166,18 +166,34 @@ public sealed class PluginPackageManager
         {
             return null;
         }
+        // Publisher authorization (audit round 15 P0: in-process full-trust
+        // native code must never be activated on signature validity alone).
+        if (!record.IsDevelopment && !_trustedPublishers.Contains(record.PublisherFingerprint)) return null;
         string installRoot = ResolveInstallPath(record);
-        // Single verification pass: full Verify + BuildVerifiedModel.
+        // Single verification pass with the ACTUAL content hash from disk.
         PluginPackageVerifier.VerificationResult verification = PluginPackageVerifier.Verify(installRoot, PluginPackageVerificationPolicy.Store);
         if (!verification.IsValid) return null;
-        // Compatibility gate: the manifest architecture must match the running
-        // host process (not the OS; an x64 host on ARM64 Windows loads x64 DLLs).
         try
         {
+            // Use the actual verified content hash, not the registry value
+            // (audit round 15 P0: registry hash may be stale or tampered).
+            string actualContentHash = PluginPackageVerifier.Sha256HexFile(
+                Path.Combine(installRoot, "package.integrity"));
             using var document = System.Text.Json.JsonDocument.Parse(
                 System.IO.File.ReadAllText(Path.Combine(installRoot, "manifest.json")));
-            VerifiedPluginPackage? verified = BuildVerifiedModel(document.RootElement, record.ContentHash);
+            VerifiedPluginPackage? verified = BuildVerifiedModel(document.RootElement, actualContentHash);
             if (verified is null) return null;
+            // Identity binding: the verified package must match the registry
+            // record on all identity dimensions (audit round 15 P0).
+            if (!string.Equals(verified.PackageId, record.PackageId, StringComparison.Ordinal) ||
+                !string.Equals(verified.PublisherFingerprint, record.PublisherFingerprint, StringComparison.Ordinal) ||
+                !string.Equals(verified.Version, record.Version, StringComparison.Ordinal) ||
+                !string.Equals(verified.Runtime, record.Runtime, StringComparison.Ordinal) ||
+                !string.Equals(verified.ContentHash, record.ContentHash, StringComparison.OrdinalIgnoreCase))
+            {
+                return null;
+            }
+            // Compatibility gate: architecture must match the running host process.
             if (verified.EntryArchitecture is { } arch)
             {
                 string hostArch = System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture switch
