@@ -1,17 +1,154 @@
 using System.Text.Json;
+using DeskBox.Contracts;
 using DeskBox.Models;
 
-namespace DeskBox.Services.Plugins;
+namespace DeskBox.Services;
 
 /// <summary>
-/// The package-owned settings patch for the write-through channel (HostApi
-/// v3, audit round 19): under host authority a native setting mutation must
-/// commit to the built-in GlanceWidgetStore, never only to the package's
-/// local copy. Parsing is JsonDocument-based (reflection JSON stays out of
-/// the plugin host layer) and type-strict: a malformed patch is rejected
-/// before anything touches the authoritative store.
+/// Glance's implementation of the official-package data handoff (audit
+/// round 20 §18): the generic plugin layer routes through
+/// ILegacyInstanceMigration, and everything glance-specific — legacy store
+/// paths, recovery candidates, settings shape, and the authoritative
+/// write-through — lives here beside GlanceWidgetStore.
 /// </summary>
-internal sealed record InstanceConfigPatch(
+internal sealed class GlanceInstanceMigration : ILegacyInstanceMigration
+{
+    internal static GlanceInstanceMigration Instance { get; } = new();
+
+    private GlanceInstanceMigration()
+    {
+    }
+
+    // The package's GlanceDataFile reader defines this name.
+    public string DataFileName => "glance-data.json";
+
+    // ---- Legacy content resolution (host-authoritative sync) ----
+
+    public string? ResolveLegacyContent(string dataDirectory, string instanceId)
+    {
+        string widgetFile = Path.Combine(
+            dataDirectory, "glance", "widgets",
+            $"{GlanceWidgetStore.GetSafeWidgetFileName(instanceId)}.json");
+        string legacyFile = Path.Combine(dataDirectory, "glance", "glance.json");
+        foreach (string candidate in new[] { widgetFile, widgetFile + ".bak", legacyFile, legacyFile + ".bak" })
+        {
+            if (TryReadValidSettings(candidate, out string? content))
+            {
+                return content;
+            }
+        }
+        return null;
+    }
+
+    private static bool TryReadValidSettings(string path, out string? content)
+    {
+        content = null;
+        try
+        {
+            if (!File.Exists(path)) return false;
+            string text = File.ReadAllText(path);
+            if (!IsValidSettingsShape(text)) return false;
+            content = text;
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Structural + semantic validation: the candidate must parse AND the
+    /// glance settings fields must be type-valid, mirroring what the
+    /// built-in deserializer would accept (audits 19-20). Only the fields
+    /// the sync target consumes are checked; the built-in store owns the
+    /// rest of the schema and its own recovery.
+    /// </summary>
+    private static bool IsValidSettingsShape(string text)
+    {
+        try
+        {
+            using JsonDocument document = JsonDocument.Parse(text);
+            if (document.RootElement.ValueKind != JsonValueKind.Object) return false;
+            JsonElement root = document.RootElement;
+            foreach (JsonProperty property in root.EnumerateObject())
+            {
+                bool typeValid = property.Name switch
+                {
+                    "showChineseFestivals" or "randomOrder" or "showPhotoControls" =>
+                        property.Value.ValueKind is JsonValueKind.True or JsonValueKind.False,
+                    "rotationIntervalMinutes" =>
+                        property.Value.ValueKind == JsonValueKind.Number && property.Value.TryGetDouble(out _),
+                    "localImagePaths" =>
+                        // Strict (audit 20): the built-in deserializer rejects
+                        // a non-array here, so the sync must too.
+                        property.Value.ValueKind == JsonValueKind.Array &&
+                        property.Value.EnumerateArray().All(item => item.ValueKind == JsonValueKind.String),
+                    "localFolderPath" =>
+                        property.Value.ValueKind is JsonValueKind.String or JsonValueKind.Null,
+                    "traditionalCalendarMode" => IsValidEnumValue<GlanceTraditionalCalendarMode>(property.Value),
+                    "backgroundSource" => IsValidEnumValue<GlanceBackgroundSource>(property.Value),
+                    "imageFit" => IsValidEnumValue<GlanceImageFitMode>(property.Value),
+                    _ => true,
+                };
+                if (!typeValid) return false;
+            }
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Enums travel as names or legacy integers (the built-in accepts both);
+    /// anything else - or an undefined value - is a type error.
+    /// </summary>
+    private static bool IsValidEnumValue<TEnum>(JsonElement element)
+        where TEnum : struct, Enum
+    {
+        if (element.ValueKind == JsonValueKind.String)
+        {
+            return Enum.TryParse(element.GetString(), ignoreCase: true, out TEnum parsed) &&
+                   Enum.IsDefined(parsed);
+        }
+        if (element.ValueKind == JsonValueKind.Number &&
+            element.TryGetInt32(out int number) &&
+            number >= 0)
+        {
+            TEnum candidate = (TEnum)(object)number;
+            return Enum.IsDefined(candidate);
+        }
+        return false;
+    }
+
+    // ---- Write-through (native settings patch → authoritative store) ----
+
+    public bool TryApplyPatch(string instanceId, string jsonPatch)
+    {
+        GlanceInstanceConfigPatch? patch = GlanceInstanceConfigPatch.TryParse(jsonPatch);
+        if (patch is null)
+        {
+            App.LogVerbose($"[NativePackage] rejected malformed instance config patch for {instanceId}");
+            return false;
+        }
+        // Fire-and-forget: the callback must never block the UI thread on
+        // the store's async pipeline; a failed persistence is logged inside
+        // CommitAsync and self-heals on the next create-time sync.
+        _ = GlanceInstanceConfigPatch.CommitAsync(GlanceWidgetStore.ForWidget(instanceId), patch);
+        return true;
+    }
+}
+
+/// <summary>
+/// The package-owned settings patch for the glance write-through channel.
+/// Parsing is JsonDocument-based (reflection JSON stays out of the plugin
+/// host layer) and type-strict: absent fields are skipped, one wrong-typed
+/// field rejects the whole patch before anything touches the authoritative
+/// store (audits 19-20).
+/// </summary>
+internal sealed record GlanceInstanceConfigPatch(
     bool? ShowChineseFestivals = null,
     GlanceTraditionalCalendarMode? TraditionalCalendarMode = null,
     double? RotationIntervalMinutes = null,
@@ -42,7 +179,7 @@ internal sealed record InstanceConfigPatch(
     /// in an unsafe context); failures are observed and logged here so a
     /// lost async commit never disappears silently.
     /// </summary>
-    public static async Task CommitAsync(GlanceWidgetStore store, InstanceConfigPatch patch)
+    public static async Task CommitAsync(GlanceWidgetStore store, GlanceInstanceConfigPatch patch)
     {
         try
         {
@@ -54,7 +191,7 @@ internal sealed record InstanceConfigPatch(
         }
     }
 
-    public static InstanceConfigPatch? TryParse(string payload)
+    public static GlanceInstanceConfigPatch? TryParse(string payload)
     {
         try
         {
@@ -73,7 +210,7 @@ internal sealed record InstanceConfigPatch(
             if (!TryReadString(root, "localFolderPath", out string? folder)) return null;
             if (!TryReadEnum<GlanceImageFitMode>(root, "imageFit", out var fit)) return null;
             if (!TryReadBool(root, "showPhotoControls", out bool? controls)) return null;
-            return new InstanceConfigPatch(
+            return new GlanceInstanceConfigPatch(
                 ShowChineseFestivals: festivals,
                 TraditionalCalendarMode: mode,
                 RotationIntervalMinutes: minutes,

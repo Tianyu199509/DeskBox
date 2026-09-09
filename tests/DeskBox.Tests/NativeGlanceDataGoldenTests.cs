@@ -113,6 +113,37 @@ public class NativeGlanceDataGoldenTests
     }
 
     [Fact]
+    public void UndefinedEnumValuesAreRejectedEverywhere()
+    {
+        // Regression pass: Enum.TryParse accepts numeric STRINGS like "999"
+        // into undefined values. The patch parser and the migration validator
+        // already reject them; the package's own data-file reader must too
+        // (all three entry points share one strictness contract).
+        string root = Root();
+        try
+        {
+            WriteData(root, """{ "traditionalCalendarMode": "999" }""");
+            GlanceData? loaded = GlanceDataFile.Load(root);
+            Assert.NotNull(loaded);
+            // Undefined parse rejected -> model default (None) survives.
+            Assert.Equal(
+                GlancePkg::DeskBox.Models.GlanceTraditionalCalendarMode.None,
+                loaded!.Settings.TraditionalCalendarMode);
+
+            WriteData(root, """{ "backgroundSource": "NotASource" }""");
+            loaded = GlanceDataFile.Load(root);
+            Assert.NotNull(loaded);
+            Assert.Equal(
+                GlancePkg::DeskBox.Models.GlanceBackgroundSource.Bing,
+                loaded!.Settings.BackgroundSource);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public void MissingFieldsKeepModelDefaults()
     {
         string root = Root();

@@ -193,7 +193,11 @@ internal static class GlanceDataFile
         if (!root.TryGetProperty(property, out JsonElement element)) return false;
         if (element.ValueKind == JsonValueKind.String)
         {
-            return Enum.TryParse(element.GetString(), ignoreCase: true, out value);
+            // Enum.TryParse also accepts numeric STRINGS like "999" into
+            // undefined values - IsDefined keeps the reader as strict as the
+            // patch parser and the migration validator (regression pass).
+            return Enum.TryParse(element.GetString(), ignoreCase: true, out value) &&
+                   Enum.IsDefined(value);
         }
         // Legacy integer enums: the host stores historically wrote numbers
         // and still read them back; the package must keep that compatibility
