@@ -85,7 +85,7 @@ internal sealed class GlanceWidgetController : IDisposable
 
         _content = (FrameworkElement)XamlReader.Load(
             File.ReadAllText(Path.Combine(packageRoot, "glance.xaml")));
-        _content.DataContext = GlanceMonthPipeline.CreatePresentation(_month, _isCompact, _panelHeight, _panelWidth, _culture, _width, _height);
+        _content.DataContext = GlanceMonthPipeline.CreatePresentation(_month, _isCompact, _panelHeight, _panelWidth, Settings, _culture, _width, _height);
 
         var calendarView = _content.FindName("NativeCalendarView").As<CalendarView>();
         _decoration = new CalendarDecorationState(_month, dayItemHeight, showTraditional, showFestivals, showSecondary, _culture);
@@ -266,17 +266,29 @@ internal sealed class GlanceWidgetController : IDisposable
 
     // ---- Timers ----
 
+    /// <summary>
+    /// Built-in UpdateClockTimer cadence: a time display ticks per minute;
+    /// date/weekday/calendar/traditional-only ticks once per midnight;
+    /// nothing that displays time or dates needs no clock.
+    /// </summary>
+    private ClockCadence CurrentClockCadence() =>
+        GlanceDisplayPolicy.ComputeClockCadence(
+            Settings.ShowTime, Settings.ShowDate, Settings.ShowWeekday,
+            GlanceDisplayPolicy.ShowCalendarEffective(Settings.ShowCalendar, _width, _height),
+            Settings.TraditionalCalendarMode);
+
     private void UpdateTimers()
     {
         if (_disposed) return;
+        ClockCadence cadence = CurrentClockCadence();
         GlanceLifecyclePolicy.Activity activity = GlanceLifecyclePolicy.Compute(
             _visible, _longHidden, _collapsed, _runtimeState.Paused,
-            Settings.RotationIntervalMinutes > 0, _images.Length > 1);
+            cadence, Settings.RotationIntervalMinutes > 0, _images.Length > 1);
 
         _clockTimer.Stop();
-        if (activity.ClockRunning)
+        if (activity.Cadence != ClockCadence.None)
         {
-            _clockTimer.Interval = GlanceLifecyclePolicy.DelayToNextMinute(DateTime.Now);
+            _clockTimer.Interval = GlanceDisplayPolicy.DelayToBoundary(activity.Cadence, DateTime.Now);
             _clockTimer.Start();
         }
 
@@ -297,9 +309,13 @@ internal sealed class GlanceWidgetController : IDisposable
         EnsureCurrentDate();
         // Re-arm the one-shot clock only; restarting the rotation timer here
         // would reset its progress.
+        ClockCadence cadence = CurrentClockCadence();
         _clockTimer.Stop();
-        _clockTimer.Interval = GlanceLifecyclePolicy.DelayToNextMinute(DateTime.Now);
-        _clockTimer.Start();
+        if (cadence != ClockCadence.None)
+        {
+            _clockTimer.Interval = GlanceDisplayPolicy.DelayToBoundary(cadence, DateTime.Now);
+            _clockTimer.Start();
+        }
     }
 
     /// <summary>
@@ -321,7 +337,7 @@ internal sealed class GlanceWidgetController : IDisposable
     private void UpdateClockText()
     {
         _content.DataContext = GlanceMonthPipeline.CreatePresentation(
-            _month, _isCompact, _panelHeight, _panelWidth, _culture, _width, _height);
+            _month, _isCompact, _panelHeight, _panelWidth, Settings, _culture, _width, _height);
     }
 
     // ---- Settings (host-authoritative write-through) ----

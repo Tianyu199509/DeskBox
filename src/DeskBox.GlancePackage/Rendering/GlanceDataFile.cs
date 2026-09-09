@@ -44,6 +44,14 @@ internal static class GlanceDataFile
             if (TryString(raw, "localFolderPath", out string? folder) && !string.IsNullOrWhiteSpace(folder)) settings.LocalFolderPath = folder;
             if (TryEnum<GlanceImageFitMode>(raw, "imageFit", out var fit)) settings.ImageFit = fit;
             if (TryBool(raw, "showPhotoControls", out bool controls)) settings.ShowPhotoControls = controls;
+            // Display-element toggles + time format (parity batch: built-in
+            // UpdateClockTimer/visibility semantics consume these).
+            if (TryBool(raw, "showTime", out bool showTime)) settings.ShowTime = showTime;
+            if (TryBool(raw, "showDate", out bool showDate)) settings.ShowDate = showDate;
+            if (TryBool(raw, "showYear", out bool showYear)) settings.ShowYear = showYear;
+            if (TryBool(raw, "showWeekday", out bool showWeekday)) settings.ShowWeekday = showWeekday;
+            if (TryBool(raw, "showCalendar", out bool showCalendar)) settings.ShowCalendar = showCalendar;
+            if (TryEnum<GlanceTimeFormatMode>(raw, "timeFormat", out var timeFormat)) settings.TimeFormat = timeFormat;
             return new GlanceData(settings, raw);
         }
         catch
@@ -156,6 +164,15 @@ internal static class GlanceDataFile
         if (skip?.Contains("localFolderPath") != true && only?.Contains("localFolderPath") != false) writer.WriteString("localFolderPath", settings.LocalFolderPath);
         if (skip?.Contains("imageFit") != true && only?.Contains("imageFit") != false) writer.WriteString("imageFit", settings.ImageFit.ToString());
         if (skip?.Contains("showPhotoControls") != true && only?.Contains("showPhotoControls") != false) writer.WriteBoolean("showPhotoControls", settings.ShowPhotoControls);
+        // Display-element toggles: the package never mutates these (host
+        // settings UI owns them pre-cutover), but they ride the typed
+        // round-trip so a full-cache save preserves them exactly.
+        if (skip?.Contains("showTime") != true && only?.Contains("showTime") != false) writer.WriteBoolean("showTime", settings.ShowTime);
+        if (skip?.Contains("showDate") != true && only?.Contains("showDate") != false) writer.WriteBoolean("showDate", settings.ShowDate);
+        if (skip?.Contains("showYear") != true && only?.Contains("showYear") != false) writer.WriteBoolean("showYear", settings.ShowYear);
+        if (skip?.Contains("showWeekday") != true && only?.Contains("showWeekday") != false) writer.WriteBoolean("showWeekday", settings.ShowWeekday);
+        if (skip?.Contains("showCalendar") != true && only?.Contains("showCalendar") != false) writer.WriteBoolean("showCalendar", settings.ShowCalendar);
+        if (skip?.Contains("timeFormat") != true && only?.Contains("timeFormat") != false) writer.WriteString("timeFormat", settings.TimeFormat.ToString());
     }
 
     private static bool TryBool(JsonElement root, string property, out bool value)

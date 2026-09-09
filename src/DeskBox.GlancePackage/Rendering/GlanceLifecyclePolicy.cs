@@ -8,29 +8,26 @@ namespace DeskBox.GlancePackage.Rendering;
 /// </summary>
 internal static class GlanceLifecyclePolicy
 {
-    internal readonly record struct Activity(bool ClockRunning, bool RotationRunning);
+    internal readonly record struct Activity(ClockCadence Cadence, bool RotationRunning);
 
+    /// <summary>
+    /// Cadence comes from GlanceDisplayPolicy.ComputeClockCadence (the
+    /// display-settings half of the decision); this gate applies the
+    /// energy half - hidden/long-hidden stops everything, compact and user
+    /// pause stop only the image rotation.
+    /// </summary>
     internal static Activity Compute(
         bool visible,
         bool longHidden,
         bool collapsed,
         bool paused,
+        ClockCadence cadence,
         bool rotationConfigured,
         bool multipleImages)
     {
         bool active = visible && !longHidden;
         return new Activity(
-            ClockRunning: active,
+            Cadence: active ? cadence : ClockCadence.None,
             RotationRunning: active && !collapsed && !paused && rotationConfigured && multipleImages);
-    }
-
-    /// <summary>
-    /// One-shot interval to the next minute boundary (+50 ms guard so the
-    /// tick lands just past the boundary, mirroring the built-in cadence).
-    /// </summary>
-    internal static TimeSpan DelayToNextMinute(DateTime now)
-    {
-        double remainingMs = 60_000 - (now.Second * 1000) - now.Millisecond;
-        return TimeSpan.FromMilliseconds(Math.Max(1, remainingMs) + 50);
     }
 }
