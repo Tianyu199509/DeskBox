@@ -1,4 +1,5 @@
 using System.Globalization;
+using DeskBox.GlancePackage.Services;
 using DeskBox.Helpers;
 using DeskBox.Models;
 
@@ -23,7 +24,7 @@ internal sealed class GlanceFestivalService
         {
             return month with { Days = month.Days.Select(day => day with { FestivalText = string.Empty }).ToList() };
         }
-        bool useTraditional = LocalizationService.IsTraditionalChineseCulture(culture.Name);
+        bool useTraditional = CultureRules.IsTraditionalChineseCulture(culture.Name);
         return month with
         {
             Days = month.Days.Select(day => day with { FestivalText = GetChineseFestival(day.Date, useTraditional) }).ToList()

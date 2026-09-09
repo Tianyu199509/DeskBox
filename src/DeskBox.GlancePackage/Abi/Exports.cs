@@ -70,6 +70,9 @@ public static unsafe class Exports
             _packageRoot = new string(packageRoot, 0, packageRootLength);
             _packageDataRoot = new string(packageDataRoot, 0, packageDataRootLength);
             Directory.CreateDirectory(_packageDataRoot);
+            // Route package-side verbose logging to the host callback (D3
+            // Phase 2: replaces the silent App.LogVerbose seam).
+            DeskBox.GlancePackage.Services.PackageLogger.Sink = static message => HostLog(message);
             if (hostApi is not null && hostApi->Log != 0)
             {
                 _hostLog = (delegate* unmanaged[Cdecl]<byte*, int, void>)hostApi->Log;
