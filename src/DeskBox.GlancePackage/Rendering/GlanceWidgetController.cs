@@ -42,6 +42,8 @@ internal sealed class GlanceWidgetController : IDisposable
     private readonly Stretch _imageStretch;
     private bool _showingA;
     private Microsoft.UI.Xaml.Media.Animation.Storyboard? _transitionStoryboard;
+    private bool _transitionInFlight;
+    private Border? _transitionIncoming;
 
     private readonly Microsoft.UI.Dispatching.DispatcherQueueTimer _rotationTimer;
     private readonly Microsoft.UI.Dispatching.DispatcherQueueTimer _resizeTimer;
@@ -442,6 +444,9 @@ internal sealed class GlanceWidgetController : IDisposable
     /// </summary>
     private void RunTransition(Border incoming, Border outgoing, ImageBrush brush)
     {
+        // A previously in-flight transition is finalized first so its
+        // half-faded opacities never leak into this run.
+        FinalizeInFlightTransition();
         _transitionStoryboard?.Stop();
         ResetTransform(incoming);
         ResetTransform(outgoing);
@@ -466,6 +471,8 @@ internal sealed class GlanceWidgetController : IDisposable
         incoming.Background = brush;
         incoming.Opacity = 0;
         outgoing.Opacity = 1;
+        _transitionInFlight = true;
+        _transitionIncoming = incoming;
 
         var storyboard = new Storyboard();
         AddAnimation(storyboard, incoming, "Opacity", 0, 1, duration);
@@ -486,6 +493,7 @@ internal sealed class GlanceWidgetController : IDisposable
 
         storyboard.Completed += (_, _) =>
         {
+            _transitionInFlight = false;
             outgoing.Background = null;
             outgoing.Opacity = 0;
             ResetTransform(incoming);
@@ -493,6 +501,24 @@ internal sealed class GlanceWidgetController : IDisposable
         };
         _transitionStoryboard = storyboard;
         storyboard.Begin();
+    }
+
+    /// <summary>
+    /// Snaps an in-flight transition to its completed state (self-audit:
+    /// stopping a storyboard mid-fade would otherwise strand two
+    /// half-visible images and an unflipped active-buffer flag).
+    /// </summary>
+    private void FinalizeInFlightTransition()
+    {
+        if (!_transitionInFlight) return;
+        _transitionInFlight = false;
+        Border incoming = _transitionIncoming!;
+        Border outgoing = ReferenceEquals(incoming, _backgroundA) ? _backgroundB : _backgroundA;
+        incoming.Opacity = 1;
+        outgoing.Opacity = 0;
+        outgoing.Background = null;
+        ResetTransform(incoming);
+        _showingA = ReferenceEquals(incoming, _backgroundA);
     }
 
     private static void ResetTransform(Border border)
@@ -541,6 +567,7 @@ internal sealed class GlanceWidgetController : IDisposable
     private void StopVisualResources()
     {
         if (_disposed) return;
+        FinalizeInFlightTransition();
         _clockTimer.Stop();
         _rotationTimer.Stop();
         _resizeTimer.Stop();
@@ -557,6 +584,7 @@ internal sealed class GlanceWidgetController : IDisposable
     {
         if (_disposed) return;
         _disposed = true;
+        FinalizeInFlightTransition();
         _clockTimer.Stop();
         _rotationTimer.Stop();
         _resizeTimer.Stop();
