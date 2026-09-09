@@ -34,6 +34,7 @@ internal static class GlanceViewBuilder
 
         GlanceData data = GlanceDataFile.Load(instanceDataRoot) ?? new GlanceData(new GlanceWidgetData(), default);
         GlanceWidgetData settings = data.Settings;
+        bool showFestivals = settings.ShowChineseFestivals;
         var runtimeState = GlanceRuntimeState.LoadOrCreate(instanceDataRoot);
 
         double width = GlanceMonthPipeline.DefaultWidth;
@@ -49,7 +50,7 @@ internal static class GlanceViewBuilder
 
         // Calendar day decoration (single subscription, mutable state).
         var calendarView = content.FindName("NativeCalendarView").As<CalendarView>();
-        var decoration = new CalendarDecorationState(month, dayItemHeight, showTraditional, settings.ShowChineseFestivals);
+        var decoration = new CalendarDecorationState(month, dayItemHeight, showTraditional, settings.ShowChineseFestivals, showSecondary);
         SubscribeDayDecoration(calendarView, decoration, culture);
 
         // Background rotation. Image set follows GlanceWidgetData: explicit
@@ -118,24 +119,59 @@ internal static class GlanceViewBuilder
         var settingsLayer = content.FindName("SettingsLayer").As<FrameworkElement>();
         var festivalToggle = content.FindName("FestivalToggle").As<ToggleSwitch>();
         var traditionalToggle = content.FindName("TraditionalToggle").As<ToggleSwitch>();
-        festivalToggle.IsOn = settings.ShowChineseFestivals;
+        festivalToggle.IsOn = showFestivals;
         traditionalToggle.IsOn = showTraditional;
         GlanceTraditionalCalendarMode restoreMode = effectiveMode != GlanceTraditionalCalendarMode.None
             ? effectiveMode
             : GlanceTraditionalCalendarMode.ChineseLunar;
+        // Settings are HOST-AUTHORITATIVE (audit round 19): a toggle mutation
+        // commits through the write-through channel into the authoritative
+        // store. Without the channel (older host) or on failure the toggle
+        // reverts - never a silent local save that the next sync overwrites.
+        bool applying = false;
+        bool CommitSettings()
+        {
+            if (HostConfig.TryPushInstanceConfig(instanceId, GlanceDataFile.BuildOwnedPatch(settings)))
+            {
+                // Local cache for continuity until the next host sync; the
+                // authoritative copy lives in the built-in store.
+                GlanceDataFile.Save(data, instanceDataRoot);
+                return true;
+            }
+            PackageLogger.LogVerbose("[GlancePackage] settings write-through unavailable; reverting toggle");
+            return false;
+        }
         festivalToggle.Toggled += (_, _) =>
         {
+            if (applying) return;
             settings.ShowChineseFestivals = festivalToggle.IsOn;
-            RebuildMonth(decoration, data, culture, width, height, content);
-            GlanceDataFile.Save(data, instanceDataRoot);
+            if (CommitSettings())
+            {
+                RebuildMonth(decoration, data, culture, width, height, content);
+                return;
+            }
+            applying = true;
+            festivalToggle.IsOn = !festivalToggle.IsOn;
+            applying = false;
+            settings.ShowChineseFestivals = festivalToggle.IsOn;
         };
         traditionalToggle.Toggled += (_, _) =>
         {
+            if (applying) return;
             settings.TraditionalCalendarMode = traditionalToggle.IsOn
                 ? restoreMode
                 : GlanceTraditionalCalendarMode.None;
-            RebuildMonth(decoration, data, culture, width, height, content);
-            GlanceDataFile.Save(data, instanceDataRoot);
+            if (CommitSettings())
+            {
+                RebuildMonth(decoration, data, culture, width, height, content);
+                return;
+            }
+            applying = true;
+            traditionalToggle.IsOn = !traditionalToggle.IsOn;
+            applying = false;
+            settings.TraditionalCalendarMode = traditionalToggle.IsOn
+                ? restoreMode
+                : GlanceTraditionalCalendarMode.None;
         };
 
         // Debounced responsive rebuild: the host can report viewport changes
@@ -184,9 +220,9 @@ internal static class GlanceViewBuilder
         CalendarDecorationState decoration, GlanceData data, CultureInfo culture,
         double width, double height, FrameworkElement content)
     {
-        (GlanceCalendarMonth rebuilt, bool isCompact, double panelHeight, double panelWidth, double itemHeight, _, GlanceTraditionalCalendarMode mode) =
+        (GlanceCalendarMonth rebuilt, bool isCompact, double panelHeight, double panelWidth, double itemHeight, bool secondary, GlanceTraditionalCalendarMode mode) =
             GlanceMonthPipeline.Build(data.Settings.ShowChineseFestivals, data.Settings.TraditionalCalendarMode, culture, width, height);
-        decoration.Update(rebuilt, itemHeight, mode != GlanceTraditionalCalendarMode.None, data.Settings.ShowChineseFestivals);
+        decoration.Update(rebuilt, itemHeight, mode != GlanceTraditionalCalendarMode.None, data.Settings.ShowChineseFestivals, secondary);
         content.DataContext = GlanceMonthPipeline.CreatePresentation(rebuilt, isCompact, panelHeight, panelWidth, culture, width, height);
     }
 
@@ -271,16 +307,17 @@ internal static class GlanceViewBuilder
     }
 
     private sealed class CalendarDecorationState(
-        GlanceCalendarMonth month, double dayItemHeight, bool showTraditional, bool showFestivals)
+        GlanceCalendarMonth month, double dayItemHeight, bool showTraditional, bool showFestivals, bool showSecondary)
     {
         public GlanceCalendarMonth Month = month;
         public double DayItemHeight = dayItemHeight;
         public bool ShowTraditional = showTraditional;
         public bool ShowFestivals = showFestivals;
+        public bool ShowSecondary = showSecondary;
 
-        public void Update(GlanceCalendarMonth rebuilt, double itemHeight, bool traditional, bool festivals)
+        public void Update(GlanceCalendarMonth rebuilt, double itemHeight, bool traditional, bool festivals, bool secondary)
         {
-            Month = rebuilt; DayItemHeight = itemHeight; ShowTraditional = traditional; ShowFestivals = festivals;
+            Month = rebuilt; DayItemHeight = itemHeight; ShowTraditional = traditional; ShowFestivals = festivals; ShowSecondary = secondary;
         }
     }
 
@@ -297,7 +334,9 @@ internal static class GlanceViewBuilder
             {
                 if (candidate.Date == date) { day = candidate; break; }
             }
-            string secondaryText = !decoration.ShowTraditional ? string.Empty
+            // Built-in parity: the secondary line only renders when the
+            // responsive layout says there is room for it (audit round 19).
+            string secondaryText = !decoration.ShowSecondary || !decoration.ShowTraditional ? string.Empty
                 : decoration.ShowFestivals && !string.IsNullOrWhiteSpace(day?.FestivalText) ? day.FestivalText
                 : day?.TraditionalText ?? string.Empty;
             bool hasSecondaryText = !string.IsNullOrWhiteSpace(secondaryText);

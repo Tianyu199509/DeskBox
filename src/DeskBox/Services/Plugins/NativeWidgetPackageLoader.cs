@@ -69,6 +69,7 @@ internal struct NativeHostApiV1
     public nint Log;
     public nint GetConfigJson;
     public nint SetConfigChangedHandler;
+    public nint SetInstanceConfigJson;
 }
 
 /// <summary>
@@ -98,7 +99,7 @@ internal struct NativeWidgetEventV1
 /// <summary>Host-side callbacks exposed to native packages via the HostApi table.</summary>
 internal static unsafe class NativeHostApiBridge
 {
-    internal const uint CurrentVersion = 2;
+    internal const uint CurrentVersion = 3;
 
     internal static NativeHostApiV1 Create() => new()
     {
@@ -107,6 +108,7 @@ internal static unsafe class NativeHostApiBridge
         Log = (nint)(delegate* unmanaged[Cdecl]<byte*, int, void>)&Log,
         GetConfigJson = (nint)(delegate* unmanaged[Cdecl]<byte*, int, int>)&GetConfigJson,
         SetConfigChangedHandler = (nint)(delegate* unmanaged[Cdecl]<nint, int>)&SetConfigChangedHandler,
+        SetInstanceConfigJson = (nint)(delegate* unmanaged[Cdecl]<char*, int, byte*, int, int>)&SetInstanceConfigJson,
     };
 
     /// <summary>Config payload: locale + accent theme tokens (batch C2 contract).</summary>
@@ -146,6 +148,35 @@ internal static unsafe class NativeHostApiBridge
         // (theme/locale change events) wires up during batch D migration.
         App.LogVerbose($"[NativePackage] config-changed handler registered: 0x{handler:X}");
         return 0;
+    }
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static int SetInstanceConfigJson(char* instanceId, int instanceIdLength, byte* json, int jsonLength)
+    {
+        try
+        {
+            if (instanceId is null || json is null || jsonLength <= 0) return unchecked((int)0x80070057);
+            string widgetId = new(instanceId, 0, instanceIdLength);
+            string payload = Encoding.UTF8.GetString(json, jsonLength);
+            InstanceConfigPatch? patch = InstanceConfigPatch.TryParse(payload);
+            if (patch is null)
+            {
+                App.LogVerbose($"[NativePackage] rejected malformed instance config patch for {widgetId}");
+                return unchecked((int)0x80070057); // E_INVALIDARG
+            }
+            // Authority write (audit round 19): the native setting mutation
+            // commits to the built-in store; the package's local copy is a
+            // cache the next create re-syncs. Fire-and-forget on the caller's
+            // dispatcher context - the callback must never block the UI
+            // thread on the store's async pipeline.
+            _ = GlanceWidgetStore.ForWidget(widgetId).UpdateAsync(data => patch.ApplyTo(data));
+            return 0;
+        }
+        catch (Exception error)
+        {
+            App.LogVerbose($"[NativePackage] instance config write-through failed: {error.Message}");
+            return unchecked((int)0x80004005); // E_FAIL
+        }
     }
 
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]

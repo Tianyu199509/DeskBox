@@ -34,11 +34,15 @@ internal static class GlanceMonthPipeline
         calendarMonth = new GlanceTraditionalCalendarService().Apply(calendarMonth, mode, culture, titleDate);
         calendarMonth = new GlanceFestivalService().Apply(
             calendarMonth, showChineseFestivals: showFestivals && mode == GlanceTraditionalCalendarMode.ChineseLunar, mode, culture);
+        // Built-in parity (audit round 19): the layout calculators reserve
+        // space for the secondary line only when a traditional calendar is
+        // actually enabled - never a hardcoded true.
+        bool hasTraditional = mode != GlanceTraditionalCalendarMode.None;
         bool isCompact = GlanceCalendarLayoutCalculator.IsCompact(availableHeight);
-        double panelHeight = GlanceCalendarLayoutCalculator.CalculatePanelHeight(availableHeight, isCompact, true);
+        double panelHeight = GlanceCalendarLayoutCalculator.CalculatePanelHeight(availableHeight, isCompact, hasTraditional);
         double panelWidth = Math.Round(Math.Clamp(availableWidth - 28, 272, 360));
-        double dayItemHeight = Math.Round(GlanceCalendarLayoutCalculator.CalculateDayHeight(panelHeight, isCompact, true) * 2) / 2;
-        bool showSecondary = GlanceCalendarLayoutCalculator.ShouldShowTraditionalDetails(panelWidth, dayItemHeight, isCompact, true);
+        double dayItemHeight = Math.Round(GlanceCalendarLayoutCalculator.CalculateDayHeight(panelHeight, isCompact, hasTraditional) * 2) / 2;
+        bool showSecondary = GlanceCalendarLayoutCalculator.ShouldShowTraditionalDetails(panelWidth, dayItemHeight, isCompact, hasTraditional);
         return (calendarMonth, isCompact, panelHeight, panelWidth, dayItemHeight, showSecondary, mode);
     }
 

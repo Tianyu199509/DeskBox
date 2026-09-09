@@ -14,13 +14,45 @@ namespace DeskBox.GlancePackage.Services;
 internal static unsafe class HostConfig
 {
     private static delegate* unmanaged[Cdecl]<byte*, int, int> _getConfigJson;
+    private static delegate* unmanaged[Cdecl]<char*, int, byte*, int, int> _setInstanceConfig;
 
     internal static void Initialize(nint getConfigJson) =>
         _getConfigJson = (delegate* unmanaged[Cdecl]<byte*, int, int>)getConfigJson;
 
-    /// <summary>Drop the host callback; called on shutdown so a later
+    internal static void InitializeSetInstanceConfig(nint setInstanceConfig) =>
+        _setInstanceConfig = (delegate* unmanaged[Cdecl]<char*, int, byte*, int, int>)setInstanceConfig;
+
+    /// <summary>
+    /// Write-through (audit round 19): commit a settings mutation to the
+    /// authoritative host store. Returns false when the channel is absent
+    /// (older host) - callers must then treat settings as read-only instead
+    /// of silently mutating a copy that the next sync overwrites.
+    /// </summary>
+    internal static bool TryPushInstanceConfig(string instanceId, string json)
+    {
+        if (_setInstanceConfig == null) return false;
+        try
+        {
+            byte[] payload = Encoding.UTF8.GetBytes(json);
+            fixed (char* id = instanceId)
+            fixed (byte* bytes = payload)
+            {
+                return _setInstanceConfig(id, instanceId.Length, bytes, payload.Length) == 0;
+            }
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>Drop the host callbacks; called on shutdown so a later
     /// activate in the same process never observes a stale pointer.</summary>
-    internal static void Reset() => _getConfigJson = null;
+    internal static void Reset()
+    {
+        _getConfigJson = null;
+        _setInstanceConfig = null;
+    }
 
     internal static CultureInfo? TryGetCulture()
     {

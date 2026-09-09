@@ -117,6 +117,34 @@ public class NativeWidgetDataMigrationTests
     }
 
     [Fact]
+    public async Task SyncPrefersBackupWhenPrimaryIsTypeCorrupt()
+    {
+        (string root, string widgetId) = CreateRoot();
+        try
+        {
+            var store = CreateProductionLayoutStore(root, widgetId);
+            // Syntactically valid JSON, but a string where a number belongs -
+            // the built-in deserializer rejects this, so the sync must fall
+            // through to the backup instead of copying it (audit round 19).
+            await File.WriteAllTextAsync(store.StorePath,
+                """{ "rotationIntervalMinutes": "abc" }""");
+            await File.WriteAllTextAsync(store.StorePath + ".bak",
+                """{ "rotationIntervalMinutes": 66 }""");
+
+            string publisher = "f".PadLeft(64, '0');
+            DeskBox.Services.Plugins.NativeWidgetDataMigration.TryMigrate(publisher, "deskbox.glance", widgetId, root);
+
+            using JsonDocument synced = JsonDocument.Parse(
+                await File.ReadAllTextAsync(TargetPath(root, publisher, widgetId)));
+            Assert.Equal(66, synced.RootElement.GetProperty("rotationIntervalMinutes").GetInt32());
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task SyncFallsBackToLegacySingleInstanceStore()
     {
         (string root, string widgetId) = CreateRoot();

@@ -67,8 +67,10 @@ public class NativeGlanceDataGoldenTests
             Assert.Equal(0.35, o.GetProperty("backgroundImageTransparency").GetDouble(), precision: 5);
             Assert.Equal(1.2, o.GetProperty("timeScale").GetDouble(), precision: 5);
             Assert.Equal(123, o.GetProperty("futureField").GetInt32());
-            // Version is owned and stamped to current.
-            Assert.Equal(PackageData.CurrentVersion, o.GetProperty("version").GetInt32());
+            // The schema version is NOT owned by the partial writer (audit
+            // 19): the original travels untouched - no false v10 stamp, no
+            // downgrade of a future host's newer version.
+            Assert.Equal(7, o.GetProperty("version").GetInt32());
         }
         finally
         {

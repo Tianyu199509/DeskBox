@@ -3,23 +3,33 @@ using System.Text.Json;
 namespace DeskBox.Services.Plugins;
 
 /// <summary>
-/// Legacy data handoff (D3 data-ownership hardening, audit round 18).
+/// Legacy data handoff (D3 data-ownership, audits 18-19).
 ///
 /// Ownership model until the formal cutover marker exists: the built-in
-/// store stays the SINGLE source of truth for glance settings. Every native
-/// create re-syncs the resolved legacy bytes into the package's instance
-/// data root, so a failed native create can never strand a stale snapshot,
-/// and host-side setting changes always reach the next native session.
+/// store stays the SINGLE source of truth. Every native create re-syncs the
+/// resolved legacy bytes into the package's instance data root (the native
+/// side commits its own mutations back through the HostApi write-through
+/// channel), so neither side can strand the other with stale data.
 ///
-/// The resolved bytes come from the same candidates the built-in system
-/// recovers from: the per-widget store, its .bak, then the single-instance
-/// legacy store (and its .bak). Content is validated as a JSON object before
-/// copying, byte-for-byte - no re-serialization runs here, and the
-/// package-side reader defaults any field the file version does not carry.
+/// Candidate resolution mirrors the built-in recovery chain (per-widget
+/// store, its .bak, the single-instance legacy store, its .bak), and a
+/// candidate is only accepted when it parses AND its glance settings fields
+/// are type-valid - a syntactically valid object with, say, a string where a
+/// number belongs must fall through to the backup just like the built-in's
+/// deserializer would reject it (audit round 19).
+///
+/// The write itself uses the same replace-with-fallback algorithm as
+/// ResilientJsonStore (GUID temp, 1175 retry ladder, verified in-place
+/// fallback), ported synchronous: this runs on the UI thread and must not
+/// block on async continuations.
 /// </summary>
 internal static class NativeWidgetDataMigration
 {
     internal const string DataFileName = "glance-data.json";
+
+    // Win32 ERROR_UNABLE_TO_REMOVE_REPLACED (1175), surfaced by File.Replace.
+    private const int UnableToRemoveReplacedFileHResult = unchecked((int)0x80070497);
+    private static readonly int[] ReplaceRetryDelayMs = [50, 150];
 
     internal static void TryMigrate(string publisherFingerprint, string packageId, string instanceId, string dataDirectory)
     {
@@ -36,17 +46,7 @@ internal static class NativeWidgetDataMigration
             string instanceRoot = new NativePackageIdentity(publisherFingerprint, packageId)
                 .ResolveInstanceDataRoot(dataDirectory, instanceId);
             Directory.CreateDirectory(instanceRoot);
-            string target = Path.Combine(instanceRoot, DataFileName);
-            string temp = target + ".tmp";
-            File.WriteAllText(temp, legacy);
-            if (File.Exists(target))
-            {
-                File.Replace(temp, target, target + ".bak");
-            }
-            else
-            {
-                File.Move(temp, target);
-            }
+            WriteResilient(Path.Combine(instanceRoot, DataFileName), legacy);
             App.Log($"[NativePackage] synced legacy glance data for instance {instanceId}");
         }
         catch (Exception error)
@@ -65,7 +65,7 @@ internal static class NativeWidgetDataMigration
         string legacyFile = Path.Combine(dataDirectory, "glance", "glance.json");
         foreach (string candidate in new[] { widgetFile, widgetFile + ".bak", legacyFile, legacyFile + ".bak" })
         {
-            if (TryReadValidObject(candidate, out string? content))
+            if (TryReadValidSettings(candidate, out string? content))
             {
                 return content;
             }
@@ -73,21 +73,136 @@ internal static class NativeWidgetDataMigration
         return null;
     }
 
-    private static bool TryReadValidObject(string path, out string? content)
+    private static bool TryReadValidSettings(string path, out string? content)
     {
         content = null;
         try
         {
             if (!File.Exists(path)) return false;
             string text = File.ReadAllText(path);
-            using JsonDocument document = JsonDocument.Parse(text);
-            if (document.RootElement.ValueKind != JsonValueKind.Object) return false;
+            if (!IsValidSettingsShape(text)) return false;
             content = text;
             return true;
         }
         catch
         {
             return false;
+        }
+    }
+
+    /// <summary>
+    /// Structural + semantic validation: the candidate must parse AND the
+    /// glance settings fields must be type-valid, mirroring what the
+    /// built-in deserializer would accept (audit round 19). Only the fields
+    /// the sync target consumes are checked; the built-in store owns the
+    /// rest of the schema and its own recovery.
+    /// </summary>
+    private static bool IsValidSettingsShape(string text)
+    {
+        try
+        {
+            using JsonDocument document = JsonDocument.Parse(text);
+            if (document.RootElement.ValueKind != JsonValueKind.Object) return false;
+            JsonElement root = document.RootElement;
+            foreach (JsonProperty property in root.EnumerateObject())
+            {
+                bool typeValid = property.Name switch
+                {
+                    "showChineseFestivals" or "randomOrder" or "showPhotoControls" =>
+                        property.Value.ValueKind is JsonValueKind.True or JsonValueKind.False,
+                    "rotationIntervalMinutes" =>
+                        property.Value.ValueKind == JsonValueKind.Number && property.Value.TryGetDouble(out _),
+                    "localImagePaths" =>
+                        property.Value.ValueKind != JsonValueKind.Array ||
+                        property.Value.EnumerateArray().All(item => item.ValueKind == JsonValueKind.String),
+                    "localFolderPath" =>
+                        property.Value.ValueKind is JsonValueKind.String or JsonValueKind.Null,
+                    _ => true,
+                };
+                if (!typeValid) return false;
+            }
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static void WriteResilient(string path, string content)
+    {
+        string temp = $"{path}.{Guid.NewGuid():N}.tmp";
+        try
+        {
+            File.WriteAllText(temp, content);
+            if (File.Exists(path))
+            {
+                ReplaceOrFallback(temp, path, path + ".bak");
+            }
+            else
+            {
+                File.Move(temp, path);
+            }
+        }
+        finally
+        {
+            TryDeleteFile(temp);
+        }
+    }
+
+    private static void ReplaceOrFallback(string temp, string path, string backup)
+    {
+        for (int retry = 0; ; retry++)
+        {
+            try
+            {
+                File.Replace(temp, path, backup, ignoreMetadataErrors: true);
+                return;
+            }
+            catch (IOException error) when (error.HResult == UnableToRemoveReplacedFileHResult)
+            {
+                if (retry < ReplaceRetryDelayMs.Length)
+                {
+                    Thread.Sleep(ReplaceRetryDelayMs[retry]);
+                    continue;
+                }
+                if (!File.Exists(temp) || !File.Exists(path))
+                {
+                    throw;
+                }
+                byte[] updated = File.ReadAllBytes(temp);
+                byte[] original = File.ReadAllBytes(path);
+                WriteInPlaceAndVerify(backup, original, "backup");
+                WriteInPlaceAndVerify(path, updated, "primary file");
+                return;
+            }
+        }
+    }
+
+    private static void WriteInPlaceAndVerify(string path, byte[] contents, string description)
+    {
+        using var stream = new FileStream(
+            path, FileMode.Create, FileAccess.Write, FileShare.None,
+            bufferSize: 4096, FileOptions.WriteThrough);
+        stream.Write(contents, 0, contents.Length);
+        stream.Flush(flushToDisk: true);
+        if (!File.ReadAllBytes(path).AsSpan().SequenceEqual(contents))
+        {
+            throw new IOException($"The {description} could not be verified after the in-place save.");
+        }
+    }
+
+    private static void TryDeleteFile(string path)
+    {
+        try
+        {
+            if (File.Exists(path))
+            {
+                File.Delete(path);
+            }
+        }
+        catch
+        {
         }
     }
 }
