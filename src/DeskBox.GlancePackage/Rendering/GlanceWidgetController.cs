@@ -24,7 +24,7 @@ internal sealed class GlanceWidgetController : IDisposable
     private readonly string _packageRoot;
     private readonly string _instanceId;
     private readonly string _instanceDataRoot;
-    private readonly CultureInfo _culture;
+    private CultureInfo _culture;
     private readonly GlanceData _data;
     private GlanceWidgetData Settings => _data.Settings;
     private readonly GlanceRuntimeState _runtimeState;
@@ -47,6 +47,9 @@ internal sealed class GlanceWidgetController : IDisposable
     private bool _applying; // toggle revert suppression
     private bool _disposed;
     private DateOnly _renderedDate;
+    private MenuFlyoutItem _nextItem = null!;
+    private MenuFlyoutItem _pauseItem = null!;
+    private MenuFlyoutItem _settingsItem = null!;
 
     private double _width;
     private double _height;
@@ -145,10 +148,13 @@ internal sealed class GlanceWidgetController : IDisposable
 
         var menu = new MenuFlyout();
         var nextItem = new MenuFlyoutItem { Text = PackageStrings.Get("menuNextBackground", "下一张背景") };
-        nextItem.Click += (_, _) => Show(_runtimeState.ImageIndex + 1);
         var pauseItem = new MenuFlyoutItem { Text = PackageStrings.Get("menuPauseRotation", "暂停轮播") };
-        pauseItem.Click += (_, _) => TogglePause();
         var settingsItem = new MenuFlyoutItem { Text = PackageStrings.Get("menuSettings", "设置") };
+        _nextItem = nextItem;
+        _pauseItem = pauseItem;
+        _settingsItem = settingsItem;
+        nextItem.Click += (_, _) => Show(_runtimeState.ImageIndex + 1);
+        pauseItem.Click += (_, _) => TogglePause();
         settingsItem.Click += (_, _) =>
         {
             settingsLayer.Visibility = settingsLayer.Visibility == Visibility.Visible
@@ -240,6 +246,22 @@ internal sealed class GlanceWidgetController : IDisposable
         // resize; the pipeline re-runs once per settled size.
         _resizeTimer.Stop();
         _resizeTimer.Start();
+    }
+
+    /// <summary>
+    /// Live config push (HostApi v4): the host re-fired the config-changed
+    /// callback after a language (and later theme) change. Re-derives
+    /// culture, month data, presentation, and menu texts in place - the
+    /// user sees the widget switch language without recreation.
+    /// </summary>
+    internal void ApplyConfigChange(CultureInfo culture)
+    {
+        if (_disposed) return;
+        _culture = culture;
+        _nextItem.Text = PackageStrings.Get("menuNextBackground", "下一张背景");
+        _pauseItem.Text = PackageStrings.Get("menuPauseRotation", "暂停轮播");
+        _settingsItem.Text = PackageStrings.Get("menuSettings", "设置");
+        RebuildMonth();
     }
 
     // ---- Timers ----

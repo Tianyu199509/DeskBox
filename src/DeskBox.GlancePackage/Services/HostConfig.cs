@@ -14,17 +14,21 @@ namespace DeskBox.GlancePackage.Services;
 internal static unsafe class HostConfig
 {
     private static delegate* unmanaged[Cdecl]<byte*, int, int> _getConfigJson;
-    private static delegate* unmanaged[Cdecl]<char*, int, byte*, int, int> _setInstanceConfig;
+    private static delegate* unmanaged[Cdecl]<char*, int, byte*, int, nint, int> _setInstanceConfig;
+    private static nint _context;
 
     internal static void Initialize(nint getConfigJson) =>
         _getConfigJson = (delegate* unmanaged[Cdecl]<byte*, int, int>)getConfigJson;
 
     internal static void InitializeSetInstanceConfig(nint setInstanceConfig) =>
-        _setInstanceConfig = (delegate* unmanaged[Cdecl]<char*, int, byte*, int, int>)setInstanceConfig;
+        _setInstanceConfig = (delegate* unmanaged[Cdecl]<char*, int, byte*, int, nint, int>)setInstanceConfig;
+
+    internal static void InitializeContext(nint context) => _context = context;
 
     /// <summary>
-    /// Write-through (audit round 19): commit a settings mutation to the
-    /// authoritative host store. Returns false when the channel is absent
+    /// Write-through (audits 19-20): commit a settings mutation to the
+    /// authoritative host store. The session context is echoed so the host
+    /// can attribute the call; returns false when the channel is absent
     /// (older host) - callers must then treat settings as read-only instead
     /// of silently mutating a copy that the next sync overwrites.
     /// </summary>
@@ -37,7 +41,7 @@ internal static unsafe class HostConfig
             fixed (char* id = instanceId)
             fixed (byte* bytes = payload)
             {
-                return _setInstanceConfig(id, instanceId.Length, bytes, payload.Length) == 0;
+                return _setInstanceConfig(id, instanceId.Length, bytes, payload.Length, _context) == 0;
             }
         }
         catch
@@ -52,6 +56,7 @@ internal static unsafe class HostConfig
     {
         _getConfigJson = null;
         _setInstanceConfig = null;
+        _context = 0;
     }
 
     internal static CultureInfo? TryGetCulture()

@@ -72,6 +72,54 @@ internal struct NativeHostApiV1
     public nint GetConfigJson;
     public nint SetConfigChangedHandler;
     public nint SetInstanceConfigJson;
+    // v4 (append-only): opaque per-session context. The package echoes it
+    // back on config-changed registration and instance-config writes so the
+    // host can attribute every call to the calling session (audit 20 §31).
+    public nint Context;
+}
+
+/// <summary>
+/// Per-session attribution the host attaches to every HostApi table. The
+/// nint handed to the package is a registry id (never a real pointer), so
+/// nothing is pinned and an unknown/forged id resolves to null.
+/// </summary>
+internal sealed class NativePackageContext
+{
+    internal required string PackageId { get; init; }
+}
+
+internal static class NativePackageContextRegistry
+{
+    private static readonly object Gate = new();
+    private static readonly Dictionary<nint, NativePackageContext> Contexts = [];
+    private static long _next;
+
+    public static nint Register(NativePackageContext context)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        lock (Gate)
+        {
+            nint id = (nint)Interlocked.Increment(ref _next);
+            Contexts[id] = context;
+            return id;
+        }
+    }
+
+    public static void Unregister(nint context)
+    {
+        lock (Gate)
+        {
+            Contexts.Remove(context);
+        }
+    }
+
+    public static NativePackageContext? TryResolve(nint context)
+    {
+        lock (Gate)
+        {
+            return Contexts.TryGetValue(context, out NativePackageContext? value) ? value : null;
+        }
+    }
 }
 
 /// <summary>
@@ -101,17 +149,56 @@ internal struct NativeWidgetEventV1
 /// <summary>Host-side callbacks exposed to native packages via the HostApi table.</summary>
 internal static unsafe class NativeHostApiBridge
 {
-    internal const uint CurrentVersion = 3;
+    internal const uint CurrentVersion = 4;
 
-    internal static NativeHostApiV1 Create() => new()
+    internal static NativeHostApiV1 Create(nint context) => new()
     {
         Size = (uint)sizeof(NativeHostApiV1),
         Version = CurrentVersion,
         Log = (nint)(delegate* unmanaged[Cdecl]<byte*, int, void>)&Log,
         GetConfigJson = (nint)(delegate* unmanaged[Cdecl]<byte*, int, int>)&GetConfigJson,
-        SetConfigChangedHandler = (nint)(delegate* unmanaged[Cdecl]<nint, int>)&SetConfigChangedHandler,
-        SetInstanceConfigJson = (nint)(delegate* unmanaged[Cdecl]<char*, int, byte*, int, int>)&SetInstanceConfigJson,
+        SetConfigChangedHandler = (nint)(delegate* unmanaged[Cdecl]<nint, nint, int>)&SetConfigChangedHandler,
+        SetInstanceConfigJson = (nint)(delegate* unmanaged[Cdecl]<char*, int, byte*, int, nint, int>)&SetInstanceConfigJson,
+        Context = context,
     };
+
+    // Per-session config-changed subscriptions (package -> host push).
+    private static readonly object HandlerGate = new();
+    private static readonly Dictionary<nint, nint> ConfigChangedHandlers = [];
+
+    /// <summary>
+    /// Fires every registered package config-changed callback. Callers are
+    /// host-side setting sources (language/theme changes); a package
+    /// exception is contained and logged - it must never reach the host.
+    /// </summary>
+    internal static void PushConfigChanged()
+    {
+        nint[] handlers;
+        lock (HandlerGate)
+        {
+            handlers = [.. ConfigChangedHandlers.Values];
+        }
+        foreach (nint handler in handlers)
+        {
+            try
+            {
+                ((delegate* unmanaged[Cdecl]<void>)handler)();
+            }
+            catch (Exception error)
+            {
+                App.LogVerbose($"[NativePackage] config-changed callback failed: {error.Message}");
+            }
+        }
+    }
+
+    internal static void DetachSession(nint context)
+    {
+        NativePackageContextRegistry.Unregister(context);
+        lock (HandlerGate)
+        {
+            ConfigChangedHandlers.Remove(context);
+        }
+    }
 
     /// <summary>Config payload: locale + accent theme tokens (batch C2 contract).</summary>
     internal static string BuildConfigJson(string locale, string accent) =>
@@ -144,32 +231,60 @@ internal static unsafe class NativeHostApiBridge
     }
 
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
-    private static int SetConfigChangedHandler(nint handler)
+    private static int SetConfigChangedHandler(nint context, nint handler)
     {
-        // Package-side subscription recorded; the product notification source
-        // (theme/locale change events) wires up during batch D migration.
-        App.LogVerbose($"[NativePackage] config-changed handler registered: 0x{handler:X}");
-        return 0;
+        try
+        {
+            // Only sessions with a live context may subscribe (audit 20 §31:
+            // attribution). handler=0 unsubscribes.
+            if (NativePackageContextRegistry.TryResolve(context) is null)
+            {
+                return unchecked((int)0x80070057);
+            }
+            lock (HandlerGate)
+            {
+                if (handler != 0)
+                {
+                    ConfigChangedHandlers[context] = handler;
+                }
+                else
+                {
+                    ConfigChangedHandlers.Remove(context);
+                }
+            }
+            App.LogVerbose($"[NativePackage] config-changed handler registered for context 0x{context:X}");
+            return 0;
+        }
+        catch
+        {
+            return unchecked((int)0x80004005); // E_FAIL
+        }
     }
 
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
-    private static int SetInstanceConfigJson(char* instanceId, int instanceIdLength, byte* json, int jsonLength)
+    private static int SetInstanceConfigJson(char* instanceId, int instanceIdLength, byte* json, int jsonLength, nint context)
     {
         try
         {
             if (instanceId is null || json is null || jsonLength <= 0) return unchecked((int)0x80070057);
             string widgetId = new(instanceId, 0, instanceIdLength);
             string payload = Encoding.UTF8.GetString(json, jsonLength);
-            // Generic routing (audit round 20 §18): instanceId → owning
-            // packageId → binding → feature adapter. The bridge knows no
-            // feature; an unregistered instance is rejected outright.
-            string? packageId = PackageInstanceRegistry.TryResolvePackageId(widgetId);
-            if (packageId is null)
+            // Generic routing with session attribution (audit 20 §31): the
+            // echoed context identifies the calling session, and the
+            // instance must belong to that package - a package cannot patch
+            // another package's instance.
+            NativePackageContext? owner = NativePackageContextRegistry.TryResolve(context);
+            if (owner is null)
             {
-                App.LogVerbose($"[NativePackage] config patch for unknown instance {widgetId} rejected");
+                return unchecked((int)0x80070057);
+            }
+            string? registeredPackageId = PackageInstanceRegistry.TryResolvePackageId(widgetId);
+            if (!string.Equals(registeredPackageId, owner.PackageId, StringComparison.Ordinal))
+            {
+                App.LogVerbose($"[NativePackage] config patch for instance {widgetId} does not belong to {owner.PackageId}; rejected");
                 return unchecked((int)0x80070057); // E_INVALIDARG
             }
-            OfficialPackageBinding? binding = PackageBindingRegistry.TryGetByPackageId(packageId);
+            OfficialPackageBinding? binding = PackageBindingRegistry.TryGetByPackageId(owner.PackageId);
             if (binding?.Migration is null || !binding.Migration.TryApplyPatch(widgetId, payload))
             {
                 return unchecked((int)0x80070057); // E_INVALIDARG
@@ -412,6 +527,7 @@ internal sealed unsafe class NativePackageSession
     private readonly Dictionary<nint, string> _instanceDataRoots = [];
     // audit 20 §18: instance ids for PackageInstanceRegistry unregistration.
     private readonly Dictionary<nint, string> _instanceIds = [];
+    internal nint _hostApiContext;
 
     internal NativePackageSession(
         NativePackageIdentity identity,
@@ -441,7 +557,11 @@ internal sealed unsafe class NativePackageSession
     internal static void Activate(NativePackageSession session)
     {
         var activate = (delegate* unmanaged[Cdecl]<char*, int, char*, int, NativeHostApiV1*, int>)session._activateExport;
-        NativeHostApiV1 hostApi = NativeHostApiBridge.Create();
+        // Per-session attribution (audit 20 §31): the package echoes this id
+        // back on config-subscription and instance-config calls.
+        session._hostApiContext = NativePackageContextRegistry.Register(
+            new NativePackageContext { PackageId = session.Identity.PackageId });
+        NativeHostApiV1 hostApi = NativeHostApiBridge.Create(session._hostApiContext);
         int status;
         fixed (char* package = session.PackageRoot)
         fixed (char* data = session.PackageDataRoot)
@@ -451,6 +571,7 @@ internal sealed unsafe class NativePackageSession
         }
         if (status != 0)
         {
+            NativeHostApiBridge.DetachSession(session._hostApiContext);
             throw new InvalidOperationException($"[NativePackage] activate failed for {session.Identity.Key}: 0x{status:X8}");
         }
         App.Log($"[NativePackage] session active: {session.Identity.Key}");
@@ -636,6 +757,10 @@ internal sealed unsafe class NativePackageSession
             _instanceDataRoots.Clear();
             _liveHandles.Clear();
         }
+
+        // Detach the session attribution (config subscription + context) so
+        // the ids are never reused or resolved after shutdown.
+        NativeHostApiBridge.DetachSession(_hostApiContext);
     }
 }
 

@@ -184,10 +184,12 @@ public sealed class WidgetContentFactory
             todoStoreFactory,
             GetDescriptor);
 
-        // Development pilot seam (infrastructure-owned, env-gated, default off):
-        // native package content wins for the piloted kind; any failure or
-        // absence falls through to the built-in provider path.
-        if (config.WidgetKind == WidgetKind.Glance &&
+        // Official-package seam (infrastructure-owned): native package
+        // content wins for any kind with a REGISTERED binding (audit round
+        // 20 §18 — the registry decides, the factory never names a
+        // feature); any failure or absence falls through to the built-in
+        // provider path.
+        if (PackageBindingRegistry.TryGetByKind(config.WidgetKind) is not null &&
             NativeWidgetPilot.TryCreate(config, out IWidgetContent? pilotContent))
         {
             return pilotContent!;

@@ -945,6 +945,11 @@ public partial class App : Application
             ThemeService = Services.GetRequiredService<ThemeService>();
             LocalizationService = Services.GetRequiredService<LocalizationService>();
             LocalizationService.LanguageChanged += OnLanguageChanged;
+            // Live config push to activated native packages (audit 20 §23):
+            // language changes re-fire every registered config-changed
+            // callback so native widgets rebuild on the new locale at once.
+            LocalizationService.LanguageChanged += static () =>
+                DeskBox.Services.Plugins.NativeHostApiBridge.PushConfigChanged();
 
             var quickCaptureService = QuickCaptureService;
             var themeService = ThemeService;

@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using Microsoft.UI.Xaml;
@@ -59,12 +60,17 @@ public static unsafe class Exports
         public nint GetConfigJson;
         public nint SetConfigChangedHandler;
         public nint SetInstanceConfigJson;
+        // v4 (append-only): opaque per-session context - echo it back on
+        // SetConfigChangedHandler and SetInstanceConfigJson calls.
+        public nint Context;
     }
 
     private static delegate* unmanaged[Cdecl]<byte*, int, void> _hostLog;
+    private static nint _hostContext;
+    private static Microsoft.UI.Dispatching.DispatcherQueue? _dispatcher;
 
     /// <summary>HostApi table version this package build understands.</summary>
-    private const uint RequiredHostApiVersion = 3;
+    private const uint RequiredHostApiVersion = 4;
 
     [UnmanagedCallersOnly(EntryPoint = "deskbox_package_activate", CallConvs = [typeof(CallConvCdecl)])]
     public static int Activate(char* packageRoot, int packageRootLength, char* packageDataRoot, int packageDataRootLength, HostApi* hostApi)
@@ -100,6 +106,15 @@ public static unsafe class Exports
                 if (hostApi->SetInstanceConfigJson != 0)
                 {
                     DeskBox.GlancePackage.Services.HostConfig.InitializeSetInstanceConfig(hostApi->SetInstanceConfigJson);
+                }
+                // Session attribution + live config subscription (v4).
+                _hostContext = hostApi->Context;
+                DeskBox.GlancePackage.Services.HostConfig.InitializeContext(_hostContext);
+                _dispatcher = Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread();
+                if (hostApi->SetConfigChangedHandler != 0 && _dispatcher is not null)
+                {
+                    var subscribe = (delegate* unmanaged[Cdecl]<nint, nint, int>)hostApi->SetConfigChangedHandler;
+                    _ = subscribe(_hostContext, (nint)(delegate* unmanaged[Cdecl]<void>)&OnConfigChanged);
                 }
             }
             return S_OK;
@@ -189,6 +204,8 @@ public static unsafe class Exports
             // The module stays resident for process lifetime, but the next
             // activate must not observe stale host callbacks (audit 18).
             _hostLog = null;
+            _hostContext = 0;
+            _dispatcher = null;
             DeskBox.GlancePackage.Services.HostConfig.Reset();
             DeskBox.GlancePackage.Services.PackageLogger.Sink = null;
         }
@@ -244,6 +261,42 @@ public static unsafe class Exports
         {
             TryWriteDiagnostic("widget-event-error.txt", error.ToString());
             return error.HResult;
+        }
+    }
+
+    /// <summary>
+    /// Host pushes this on language (and later theme) changes. Runs on the
+    /// host UI thread - identical to the widgets' dispatcher - but the work
+    /// is enqueued anyway so the callback stays trivial and re-entrant safe.
+    /// </summary>
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
+    private static void OnConfigChanged()
+    {
+        try
+        {
+            _dispatcher?.TryEnqueue(() => RefreshAllForConfigChange());
+        }
+        catch
+        {
+            // Never let an exception cross back into the host.
+        }
+    }
+
+    private static void RefreshAllForConfigChange()
+    {
+        try
+        {
+            CultureInfo culture = DeskBox.GlancePackage.Services.HostConfig.TryGetCulture()
+                ?? CultureInfo.CurrentUICulture;
+            DeskBox.GlancePackage.Services.PackageStrings.Configure(culture, _packageRoot);
+            foreach (Rendering.GlanceWidgetHandle handle in _handles.Values.ToArray())
+            {
+                handle.Controller.ApplyConfigChange(culture);
+            }
+        }
+        catch (Exception error)
+        {
+            TryWriteDiagnostic("config-change-error.txt", error.ToString());
         }
     }
 
