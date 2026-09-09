@@ -208,6 +208,7 @@
       "description": "Things this package contributes to the host. Each entry has a type discriminator; v0.2 defines only the widget type under $defs - command, ai-tool, settings and other types will be added as further $defs entries without changing the package-level structure.",
       "items": {
         "oneOf": [
+          { "$ref": "#/$defs/nativeWidgetContribution" },
           { "$ref": "#/$defs/templatedWidgetContribution" }
         ]
       }
