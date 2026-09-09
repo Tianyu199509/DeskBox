@@ -123,15 +123,13 @@ public static unsafe class Exports
             string instance = new(instanceId, 0, instanceIdLength);
             string dataRoot = new(instanceDataRoot, 0, instanceDataRootLength);
             Directory.CreateDirectory(dataRoot);
-            FrameworkElement content = Rendering.GlanceViewBuilder.Create(
-                _packageRoot, contribution, instance, dataRoot,
-                out Action<double, double>? onViewportChanged);
+            var controller = new Rendering.GlanceWidgetController(_packageRoot, contribution, instance, dataRoot);
             nint handle = ++_nextHandle;
-            var lifecycleHandle = new Rendering.GlanceWidgetHandle(content, onViewportChanged);
+            var lifecycleHandle = new Rendering.GlanceWidgetHandle(controller);
             _handles[handle] = lifecycleHandle;
-            Instances[handle] = content;
+            Instances[handle] = controller.View;
             *widgetHandle = handle;
-            *view = WinRT.MarshalInspectable<FrameworkElement>.FromManaged(content);
+            *view = WinRT.MarshalInspectable<FrameworkElement>.FromManaged(controller.View);
             HostLog($"widget created: {contribution}/{instance}");
             return S_OK;
         }
@@ -150,7 +148,10 @@ public static unsafe class Exports
         // host destroy state machine only commits a release on package success.
         try
         {
-            if (!_handles.Remove(widgetHandle)) return E_HANDLE;
+            if (!_handles.Remove(widgetHandle, out Rendering.GlanceWidgetHandle? handle)) return E_HANDLE;
+            // Explicit teardown (audit 19): stop timers and save runtime
+            // state now - never bet on the UI tree firing Unloaded.
+            handle.Dispose();
             Instances.Remove(widgetHandle);
             return S_OK;
         }
