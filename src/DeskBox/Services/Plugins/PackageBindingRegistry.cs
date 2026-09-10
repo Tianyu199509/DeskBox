@@ -54,23 +54,24 @@ internal static class PackageBindingRegistry
 }
 
 /// <summary>
-/// Live instance ownership: instanceId → packageId, populated at native
-/// create and cleared at destroy. Lets the generic HostApi write-through
-/// callback route a settings patch to the owning feature's adapter without
-/// the bridge knowing any feature.
+/// Live instance ownership: instanceId → the owning feature's migration
+/// adapter, populated at native create and cleared at destroy. The
+/// write-through callback resolves the adapter DIRECTLY — no intermediate
+/// ByPackageId lookup — so a package with multiple contributions routes
+/// correctly (audit round 21 §11: Package ≠ Widget).
 /// </summary>
 internal static class PackageInstanceRegistry
 {
     private static readonly object Gate = new();
-    private static readonly Dictionary<string, string> PackageIdByInstance = new(StringComparer.Ordinal);
+    private static readonly Dictionary<string, ILegacyInstanceMigration> MigrationByInstance = new(StringComparer.Ordinal);
 
-    public static void Register(string packageId, string instanceId)
+    public static void Register(ILegacyInstanceMigration migration, string instanceId)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(packageId);
+        ArgumentNullException.ThrowIfNull(migration);
         ArgumentException.ThrowIfNullOrWhiteSpace(instanceId);
         lock (Gate)
         {
-            PackageIdByInstance[instanceId] = packageId;
+            MigrationByInstance[instanceId] = migration;
         }
     }
 
@@ -78,15 +79,15 @@ internal static class PackageInstanceRegistry
     {
         lock (Gate)
         {
-            PackageIdByInstance.Remove(instanceId);
+            MigrationByInstance.Remove(instanceId);
         }
     }
 
-    public static string? TryResolvePackageId(string instanceId)
+    public static ILegacyInstanceMigration? TryResolveMigration(string instanceId)
     {
         lock (Gate)
         {
-            return PackageIdByInstance.TryGetValue(instanceId, out string? packageId) ? packageId : null;
+            return MigrationByInstance.TryGetValue(instanceId, out var migration) ? migration : null;
         }
     }
 }

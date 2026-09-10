@@ -259,8 +259,7 @@ public class NativeWidgetDataMigrationTests
 
         string loader = File.ReadAllText(TestPaths.SourceFile(
             "src/DeskBox/Services/Plugins/NativeWidgetPackageLoader.cs"));
-        Assert.Contains("PackageInstanceRegistry.TryResolvePackageId", loader);
-        Assert.Contains("PackageBindingRegistry.TryGetByPackageId", loader);
+        Assert.Contains("PackageInstanceRegistry.TryResolveMigration", loader);
         Assert.DoesNotContain("GlanceWidgetStore", loader);
     }
 }
