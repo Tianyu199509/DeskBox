@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using DeskBox.Services.Plugins;
 
 namespace DeskBox.Tests;
@@ -64,5 +65,86 @@ public class NativeHostApiContextTests
         string controller = File.ReadAllText(TestPaths.SourceFile(
             "src/DeskBox.GlancePackage/Rendering/GlanceWidgetController.cs"));
         Assert.Contains("internal void ApplyConfigChange(CultureInfo culture)", controller);
+    }
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate void ConfigChangedCallback();
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate int FailShutdownThunk();
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate int OkDestroyThunk(nint handle);
+
+    private static int _pushCount;
+    private static void OnPush() => _pushCount++;
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate void CdeclAction();
+
+    private static readonly CdeclAction PushTarget = OnPush;
+
+    [Fact]
+    public void DetachSessionRemovesHandlerAndContext()
+    {
+        // Behavior test (audit round 21 — the normal-shutdown DetachSession
+        // skip was invisible without exactly this sequence).
+        var context = NativePackageContextRegistry.Register(
+            new NativePackageContext { PackageId = "deskbox.detach.test" });
+        nint handler = Marshal.GetFunctionPointerForDelegate(PushTarget);
+
+        NativeHostApiBridge.SubscribeConfigChanged(context, handler);
+        NativeHostApiBridge.PushConfigChanged();
+        Assert.Equal(1, _pushCount);
+
+        NativeHostApiBridge.DetachSession(context);
+        NativeHostApiBridge.PushConfigChanged();
+        Assert.Equal(1, _pushCount); // stale handler must NOT fire again
+        Assert.Null(NativePackageContextRegistry.TryResolve(context));
+        Assert.Equal(0, NativeHostApiBridge.RegisteredConfigChangedHandlerCount);
+    }
+
+    [Fact]
+    public void FailedShutdownMarksPackageFaulted()
+    {
+        // Behavior test (audit round 21): a session whose shutdown reported
+        // failure causes Shutdown() to return false — the trigger the
+        // runtime manager uses for Faulted marking.
+        var failStub = (FailShutdownThunk)(() => unchecked((int)0x8000FFFF));
+        var okStub = (OkDestroyThunk)(_ => 0);
+
+        var session = new NativePackageSession(
+            new NativePackageIdentity("f".PadLeft(64, '0'), "deskbox.faulted"),
+            packageRoot: "", packageDataRoot: "",
+            activateExport: 0, createExport: 0,
+            destroyExport: Marshal.GetFunctionPointerForDelegate(okStub),
+            shutdownExport: Marshal.GetFunctionPointerForDelegate(failStub),
+            widgetEventExport: 0);
+
+        var lease = NativeWidgetLease.Create(session, 0x5678, null!, "faulted-instance");
+        lease.TryRelease();
+        Assert.False(session.Shutdown()); // stub returns non-zero → false
+    }
+
+    [Fact]
+    public void FailedShutdownPreventsReactivation()
+    {
+        // Integration: verify the faulted-marking path end-to-end through
+        // the runtime manager's release method.
+        var identity = new NativePackageIdentity("f".PadLeft(64, '0'), "deskbox.faulted-integration");
+
+        var failStub = (FailShutdownThunk)(() => unchecked((int)0x8000FFFF));
+        var okStub = (OkDestroyThunk)(_ => 0);
+
+        var session = new NativePackageSession(
+            identity, "", "", 0, 0,
+            Marshal.GetFunctionPointerForDelegate(okStub),
+            Marshal.GetFunctionPointerForDelegate(failStub),
+            0);
+
+        var lease = NativeWidgetLease.Create(session, 0x99, null!, "test-inst");
+        NativeWidgetRuntimeManager.Release(lease);
+
+        Assert.True(NativeWidgetRuntimeManager.IsFaulted(identity.Key));
     }
 }
