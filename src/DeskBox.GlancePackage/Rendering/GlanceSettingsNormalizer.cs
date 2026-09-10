@@ -3,11 +3,12 @@ using DeskBox.Models;
 namespace DeskBox.GlancePackage.Rendering;
 
 /// <summary>
-/// Pure normalization rules ported VERBATIM from the built-in
-/// GlanceWidgetStore.Normalize (audit round 21 R2): the package must
-/// produce the same effective settings from the same input as the built-in
-/// widget. Applied to the typed model after loading from the migrated
-/// file; the raw JSON is preserved separately for lossless round-trip.
+/// Normalization subset for settings currently consumed by the native
+/// package (audit round 21 R2 repair): ports the rules from the built-in
+/// GlanceWidgetStore.Normalize for fields the package actually renders.
+/// Not yet included: Version stamp, OnlineImageCategory, CalendarMaterial
+/// fields (package does not consume these). When those fields are migrated
+/// into the package, their Normalize rules must be ported at that time.
 /// </summary>
 internal static class GlanceSettingsNormalizer
 {

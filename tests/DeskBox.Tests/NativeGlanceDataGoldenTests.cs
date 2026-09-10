@@ -312,20 +312,39 @@ public class NativeGlanceDataGoldenTests
         }
     }
 
-    [Fact]
-    public void NormalizerSnapsRotationIntervalAndClampsTimeScale()
+[Fact]
+public void NormalizerSnapsRotationIntervalAndClampsTimeScale()
+{
+    // Built-in Normalize: unsupported rotation → 30; TimeScale clamped
+    // to 0.75–1.35 (audit round 21 R2 — Normalizer port).
+    var settings = new PackageData
     {
-        // Built-in Normalize: unsupported rotation → 30; TimeScale clamped
-        // to 0.75–1.35 (audit round 21 R2 — Normalizer port).
-        var settings = new PackageData
-        {
-            RotationIntervalMinutes = 12,
-            TimeScale = 100,
-        };
-        GlancePkg::DeskBox.GlancePackage.Rendering.GlanceSettingsNormalizer.Normalize(settings);
-        Assert.Equal(30, settings.RotationIntervalMinutes);
-        Assert.Equal(1.35, settings.TimeScale, precision: 2);
-    }
+        RotationIntervalMinutes = 12,
+        TimeScale = 100,
+    };
+    GlancePkg::DeskBox.GlancePackage.Rendering.GlanceSettingsNormalizer.Normalize(settings);
+    Assert.Equal(30, settings.RotationIntervalMinutes);
+    Assert.Equal(1.35, settings.TimeScale, precision: 2);
+}
+
+[Fact]
+public void NormalizerClampsTimeScaleLowerBoundFromZero()
+{
+    // Parser + Normalize: timeScale=0 → parser accepts → Normalize clamps
+    // to 0.75 (built-in behavior, not discarded to default).
+    var settings = new PackageData { TimeScale = 0 };
+    GlancePkg::DeskBox.GlancePackage.Rendering.GlanceSettingsNormalizer.Normalize(settings);
+    Assert.Equal(0.75, settings.TimeScale, precision: 2);
+}
+
+[Fact]
+public void NormalizerClampsTimeScaleNegativeToOneQuater()
+{
+    // Parser + Normalize: timeScale=-1 → Normalize clamps to 0.75.
+    var settings = new PackageData { TimeScale = -1 };
+    GlancePkg::DeskBox.GlancePackage.Rendering.GlanceSettingsNormalizer.Normalize(settings);
+    Assert.Equal(0.75, settings.TimeScale, precision: 2);
+}
 
     [Fact]
     public void NormalizerShowDateFalseSuppressesYear()

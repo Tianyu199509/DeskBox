@@ -59,7 +59,9 @@ internal static class GlanceDataFile
             if (TryDouble(raw, "backgroundImageTransparency", out double transparency)) settings.BackgroundImageTransparency = transparency;
             if (TryEnum<GlanceImageFocus>(raw, "imageFocus", out var focus)) settings.ImageFocus = focus;
             if (TryString(raw, "timeFontFamily", out string? fontFamily) && !string.IsNullOrWhiteSpace(fontFamily)) settings.TimeFontFamily = fontFamily;
-            if (TryDouble(raw, "timeScale", out double scale) && scale > 0) settings.TimeScale = scale;
+            // TimeScale: always assign (Normalize will clamp 0 or negative to 0.75).
+            // This matches built-in behavior: JSON 0 → app default → clamp → 0.75.
+            if (TryDouble(raw, "timeScale", out double scale)) settings.TimeScale = scale;
             // Built-in parity (audit 21 R2): apply the same Normalize rules
             // the host store applies, so legacy/hand-edited data produces the
             // same effective settings as the built-in widget.
