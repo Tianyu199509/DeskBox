@@ -950,6 +950,8 @@ public partial class App : Application
             // callback so native widgets rebuild on the new locale at once.
             LocalizationService.LanguageChanged += static () =>
                 DeskBox.Services.Plugins.NativeHostApiBridge.PushConfigChanged();
+            ThemeService.AppearanceChanged += static () =>
+                DeskBox.Services.Plugins.NativeHostApiBridge.PushConfigChanged();
 
             var quickCaptureService = QuickCaptureService;
             var themeService = ThemeService;

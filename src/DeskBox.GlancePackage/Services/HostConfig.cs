@@ -6,8 +6,7 @@ namespace DeskBox.GlancePackage.Services;
 
 /// <summary>
 /// Reads the host-provided config payload (HostApi v2 GetConfigJson:
-/// {"locale":"...","accent":"#AARRGGBB"}). Locale drives the calendar
-/// culture; accent is reserved for the theme batch. Degrades gracefully:
+/// locale, effective theme/accent and material tokens). Degrades gracefully:
 /// no host pointer, bad payload, or unknown locale → null and callers fall
 /// back to ambient values.
 /// </summary>
@@ -72,6 +71,8 @@ internal static unsafe class HostConfig
             return null;
         }
     }
+
+    internal static PackageAppearance ReadAppearance() => PackageAppearance.Parse(TryFetchJson());
 
     private static string? TryReadString(string property)
     {

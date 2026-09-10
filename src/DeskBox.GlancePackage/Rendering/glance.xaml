@@ -13,6 +13,10 @@
     <Grid.Resources>
         <ResourceDictionary>
             <SolidColorBrush x:Key="TextFillColorPrimaryBrush" Color="#FFFFFFFF" />
+            <SolidColorBrush x:Key="ImageTextFillColorPrimaryBrush" Color="#FFFFFFFF" />
+            <SolidColorBrush x:Key="ImageTextFillColorSecondaryBrush" Color="#C5FFFFFF" />
+            <SolidColorBrush x:Key="SolidBackgroundFillColorBaseBrush" Color="#FF202020" />
+            <SolidColorBrush x:Key="SettingsSurfaceBrush" Color="#F0202020" />
             <SolidColorBrush x:Key="TextFillColorSecondaryBrush" Color="#C5FFFFFF" />
             <SolidColorBrush x:Key="TextFillColorDisabledBrush" Color="#5DFFFFFF" />
             <SolidColorBrush x:Key="TextOnAccentFillColorPrimaryBrush" Color="#FFFFFFFF" />
@@ -156,14 +160,14 @@
                 FontFamily="{Binding TimeFontFamily}"
                 FontSize="{Binding TimeFontSize}"
                 FontWeight="SemiBold"
-                Foreground="{StaticResource TextFillColorPrimaryBrush}"
+                Foreground="{StaticResource ImageTextFillColorPrimaryBrush}"
                 IsTextSelectionEnabled="False"
                 Text="{Binding TimeText}"
                 Typography.NumeralAlignment="Tabular"
                 Visibility="{Binding TimeVisibility}" />
             <StackPanel Orientation="Horizontal" Spacing="8">
-                <TextBlock FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource TextFillColorPrimaryBrush}" Text="{Binding DateText}" Typography.NumeralAlignment="Tabular" Visibility="{Binding DateVisibility}" />
-                <TextBlock FontSize="14" Foreground="{StaticResource TextFillColorSecondaryBrush}" Text="{Binding WeekdayText}" Visibility="{Binding WeekdayVisibility}" />
+                <TextBlock FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource ImageTextFillColorPrimaryBrush}" Text="{Binding DateText}" Typography.NumeralAlignment="Tabular" Visibility="{Binding DateVisibility}" />
+                <TextBlock FontSize="14" Foreground="{StaticResource ImageTextFillColorSecondaryBrush}" Text="{Binding WeekdayText}" Visibility="{Binding WeekdayVisibility}" />
             </StackPanel>
         </StackPanel>
 
@@ -178,21 +182,21 @@
                 FontFamily="{Binding TimeFontFamily}"
                 FontSize="{Binding TimeFontSize}"
                 FontWeight="SemiBold"
-                Foreground="{StaticResource TextFillColorPrimaryBrush}"
+                Foreground="{StaticResource ImageTextFillColorPrimaryBrush}"
                 IsTextSelectionEnabled="False"
                 Text="{Binding TimeText}"
                 Typography.NumeralAlignment="Tabular"
                 Visibility="{Binding TimeVisibility}" />
             <StackPanel HorizontalAlignment="Center" Orientation="Horizontal" Spacing="8">
-                <TextBlock FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource TextFillColorPrimaryBrush}" Text="{Binding DateText}" Typography.NumeralAlignment="Tabular" Visibility="{Binding DateVisibility}" />
-                <TextBlock FontSize="14" Foreground="{StaticResource TextFillColorSecondaryBrush}" Text="{Binding WeekdayText}" Visibility="{Binding WeekdayVisibility}" />
+                <TextBlock FontSize="14" FontWeight="SemiBold" Foreground="{StaticResource ImageTextFillColorPrimaryBrush}" Text="{Binding DateText}" Typography.NumeralAlignment="Tabular" Visibility="{Binding DateVisibility}" />
+                <TextBlock FontSize="14" Foreground="{StaticResource ImageTextFillColorSecondaryBrush}" Text="{Binding WeekdayText}" Visibility="{Binding WeekdayVisibility}" />
             </StackPanel>
         </StackPanel>
 
         <Grid x:Name="EditorialLayoutRoot" Visibility="{Binding EditorialVisibility}">
             <StackPanel HorizontalAlignment="Left" VerticalAlignment="Top" Spacing="2">
-                <TextBlock FontSize="16" FontWeight="SemiBold" Foreground="{StaticResource TextFillColorPrimaryBrush}" Text="{Binding DateText}" Visibility="{Binding DateVisibility}" />
-                <TextBlock FontSize="13" Foreground="{StaticResource TextFillColorSecondaryBrush}" Text="{Binding WeekdayText}" Visibility="{Binding WeekdayVisibility}" />
+                <TextBlock FontSize="16" FontWeight="SemiBold" Foreground="{StaticResource ImageTextFillColorPrimaryBrush}" Text="{Binding DateText}" Visibility="{Binding DateVisibility}" />
+                <TextBlock FontSize="13" Foreground="{StaticResource ImageTextFillColorSecondaryBrush}" Text="{Binding WeekdayText}" Visibility="{Binding WeekdayVisibility}" />
             </StackPanel>
             <TextBlock
                 HorizontalAlignment="Right"
@@ -200,7 +204,7 @@
                 FontFamily="{Binding TimeFontFamily}"
                 FontSize="{Binding CompactTimeFontSize}"
                 FontWeight="SemiBold"
-                Foreground="{StaticResource TextFillColorPrimaryBrush}"
+                Foreground="{StaticResource ImageTextFillColorPrimaryBrush}"
                 Text="{Binding TimeText}"
                 Typography.NumeralAlignment="Tabular"
                 Visibility="{Binding TimeVisibility}" />
@@ -211,13 +215,13 @@
         <StackPanel HorizontalAlignment="Left" VerticalAlignment="Top" Spacing="-1"
                     Visibility="{Binding ExpandedCalendarHeaderVisibility}">
             <TextBlock FontFamily="{Binding TimeFontFamily}" FontSize="{Binding CompactTimeFontSize}"
-                       FontWeight="SemiBold" Foreground="{StaticResource TextFillColorPrimaryBrush}"
+                       FontWeight="SemiBold" Foreground="{StaticResource ImageTextFillColorPrimaryBrush}"
                        Text="{Binding TimeText}" Typography.NumeralAlignment="Tabular"
                        Visibility="{Binding TimeVisibility}" />
             <StackPanel Orientation="Horizontal" Spacing="7">
-                <TextBlock FontSize="12" FontWeight="SemiBold" Foreground="{StaticResource TextFillColorPrimaryBrush}"
+                <TextBlock FontSize="12" FontWeight="SemiBold" Foreground="{StaticResource ImageTextFillColorPrimaryBrush}"
                            Text="{Binding DateText}" Visibility="{Binding DateVisibility}" />
-                <TextBlock FontSize="12" Foreground="{StaticResource TextFillColorSecondaryBrush}"
+                <TextBlock FontSize="12" Foreground="{StaticResource ImageTextFillColorSecondaryBrush}"
                            Text="{Binding WeekdayText}" Visibility="{Binding WeekdayVisibility}" />
             </StackPanel>
         </StackPanel>
@@ -371,7 +375,7 @@
         Margin="12"
         HorizontalAlignment="Left"
         VerticalAlignment="Top"
-        Background="#E6202020"
+        Background="{StaticResource SettingsSurfaceBrush}"
         CornerRadius="9"
         Padding="10"
         Visibility="Collapsed">

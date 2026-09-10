@@ -4,6 +4,7 @@ using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 
 namespace DeskBox.Services.Plugins;
 
@@ -200,9 +201,25 @@ internal static unsafe class NativeHostApiBridge
         }
     }
 
-    /// <summary>Config payload: locale + accent theme tokens (batch C2 contract).</summary>
-    internal static string BuildConfigJson(string locale, string accent) =>
-        $$"""{"locale":"{{locale}}","accent":"{{accent}}"}""";
+    /// <summary>Append-only JSON fields; the frozen HostApi v4 slots stay unchanged.</summary>
+    internal static string BuildConfigJson(string locale, string accent,
+        string theme = "Dark", string materialType = "Mica",
+        double materialOpacity = 0.8, double materialIntensity = 0.65)
+    {
+        using var stream = new MemoryStream();
+        using (var writer = new Utf8JsonWriter(stream))
+        {
+            writer.WriteStartObject();
+            writer.WriteString("locale", locale);
+            writer.WriteString("accent", accent);
+            writer.WriteString("theme", theme);
+            writer.WriteString("materialType", materialType);
+            writer.WriteNumber("materialOpacity", double.IsFinite(materialOpacity) ? Math.Clamp(materialOpacity, 0, 1) : 0.8);
+            writer.WriteNumber("materialIntensity", double.IsFinite(materialIntensity) ? Math.Clamp(materialIntensity, 0, 1) : 0.65);
+            writer.WriteEndObject();
+        }
+        return Encoding.UTF8.GetString(stream.ToArray());
+    }
 
     /// <summary>
     /// DeskBox's own language selection, not the OS UI culture - the user can
@@ -219,7 +236,21 @@ internal static unsafe class NativeHostApiBridge
     {
         try
         {
-            byte[] utf8 = Encoding.UTF8.GetBytes(BuildConfigJson(CurrentLocale(), "#FF4CC2FF"));
+            var themeService = App.Current?.ThemeService;
+            var settings = App.Current?.SettingsService?.Settings;
+            bool isDark = themeService?.CurrentTheme switch
+            {
+                Microsoft.UI.Xaml.ElementTheme.Light => false,
+                Microsoft.UI.Xaml.ElementTheme.Dark => true,
+                _ => Helpers.Win32Helper.IsSystemDarkMode(),
+            };
+            string accent = Helpers.AccentColorHelper.ToHex(
+                themeService?.GetEffectiveAccentColor() ?? Helpers.AccentColorHelper.DefaultAccentColor);
+            byte[] utf8 = Encoding.UTF8.GetBytes(BuildConfigJson(CurrentLocale(), accent,
+                isDark ? "Dark" : "Light",
+                WindowsCompatibilityService.ResolveWidgetMaterialType(settings?.WidgetMaterialType ?? SettingsService.WidgetMaterialTypeMica),
+                settings?.WidgetOpacity ?? SettingsService.DefaultWidgetOpacity,
+                settings?.WidgetMaterialIntensity ?? SettingsService.DefaultWidgetMaterialIntensity));
             if (utf8.Length > bufferLength) return utf8.Length;
             for (int index = 0; index < utf8.Length; index++) buffer[index] = utf8[index];
             return utf8.Length;

@@ -81,7 +81,7 @@ internal static class GlanceViewBuilder
         }
     }
 
-    internal static void ShowGradientFallback(Border background)
+    internal static void ShowGradientFallback(Border background, bool isDark = true)
     {
         // No resolvable image set: an explicit gradient surface instead of a
         // dead black widget (the official package ships no bundled images
@@ -91,8 +91,12 @@ internal static class GlanceViewBuilder
             StartPoint = new Windows.Foundation.Point(0, 0),
             EndPoint = new Windows.Foundation.Point(1, 1),
         };
-        gradient.GradientStops.Add(new GradientStop { Color = Microsoft.UI.ColorHelper.FromArgb(255, 0x33, 0x3D, 0x4D), Offset = 0 });
-        gradient.GradientStops.Add(new GradientStop { Color = Microsoft.UI.ColorHelper.FromArgb(255, 0x14, 0x14, 0x14), Offset = 1 });
+        gradient.GradientStops.Add(new GradientStop { Color = isDark
+            ? Microsoft.UI.ColorHelper.FromArgb(255, 0x33, 0x3D, 0x4D)
+            : Microsoft.UI.ColorHelper.FromArgb(255, 0xF4, 0xF7, 0xFC), Offset = 0 });
+        gradient.GradientStops.Add(new GradientStop { Color = isDark
+            ? Microsoft.UI.ColorHelper.FromArgb(255, 0x14, 0x14, 0x14)
+            : Microsoft.UI.ColorHelper.FromArgb(255, 0xDA, 0xE2, 0xEC), Offset = 1 });
         background.Background = gradient;
         background.Opacity = 1;
     }

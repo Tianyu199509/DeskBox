@@ -19,6 +19,9 @@ internal sealed class GlanceWidgetHandle(GlanceWidgetController controller)
     {
         switch (eventKind)
         {
+            case 2: // AppearanceChanged: re-read effective host tokens
+                _controller.OnAppearanceChanged();
+                break;
             case 1: // RefreshRequested
                 _controller.RefreshRequested();
                 break;
@@ -34,10 +37,10 @@ internal sealed class GlanceWidgetHandle(GlanceWidgetController controller)
             case 9: // ViewportChanged (width/height carry the new size)
                 _controller.OnViewportChanged(width, height);
                 break;
-            // 2 AppearanceChanged, 3 Activated, 4 Deactivated, 6 RevealCompleted,
+            // 3 Activated, 4 Deactivated, 6 RevealCompleted,
             // 10 PerformanceSettingsChanged, 11-12 interactive resize, 13-15
             // responsive transitions: no package-side behavior yet - these
-            // land with the theme push and performance-policy config batches.
+            // land with the performance-policy and interaction batches.
         }
     }
 

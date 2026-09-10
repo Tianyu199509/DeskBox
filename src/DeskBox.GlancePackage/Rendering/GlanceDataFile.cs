@@ -65,6 +65,8 @@ internal static class GlanceDataFile
             if (TryEnum<GlanceTransitionSpeed>(raw, "transitionSpeed", out var speed)) settings.TransitionSpeed = speed;
             if (TryEnum<GlanceReadabilityMode>(raw, "readability", out var readability)) settings.Readability = readability;
             if (TryDouble(raw, "backgroundImageTransparency", out double transparency)) settings.BackgroundImageTransparency = transparency;
+            if (TryEnum<GlanceCalendarMaterialMode>(raw, "calendarMaterialMode", out var materialMode)) settings.CalendarMaterialMode = materialMode;
+            if (TryDouble(raw, "calendarImageMaterialTransparency", out double materialTransparency)) settings.CalendarImageMaterialTransparency = materialTransparency;
             if (TryEnum<GlanceImageFocus>(raw, "imageFocus", out var focus)) settings.ImageFocus = focus;
             if (TryString(raw, "timeFontFamily", out string? fontFamily) && !string.IsNullOrWhiteSpace(fontFamily)) settings.TimeFontFamily = fontFamily;
             // TimeScale: always assign (Normalize will clamp 0 or negative to 0.75).

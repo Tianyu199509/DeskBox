@@ -265,7 +265,7 @@ public static unsafe class Exports
     }
 
     /// <summary>
-    /// Host pushes this on language (and later theme) changes. Runs on the
+    /// Host pushes this on language and appearance changes. Runs on the
     /// host UI thread - identical to the widgets' dispatcher - but the work
     /// is enqueued anyway so the callback stays trivial and re-entrant safe.
     /// </summary>

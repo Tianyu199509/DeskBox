@@ -55,6 +55,9 @@ internal sealed class GlanceWidgetController : IDisposable
     private bool _applying; // toggle revert suppression
     private bool _disposed;
     private bool _loaded;
+    private readonly GlanceAppearanceController _appearance;
+    private PackageAppearance _hostAppearance;
+    private bool? _fallbackIsDark;
     private DateOnly _renderedDate;
     private MenuFlyoutItem _nextItem = null!;
     private MenuFlyoutItem _pauseItem = null!;
@@ -79,6 +82,7 @@ internal sealed class GlanceWidgetController : IDisposable
         _instanceId = instanceId;
         _instanceDataRoot = instanceDataRoot;
         _culture = HostConfig.TryGetCulture() ?? CultureInfo.CurrentUICulture;
+        _hostAppearance = HostConfig.ReadAppearance();
         PackageStrings.Configure(_culture, packageRoot);
 
         _data = GlanceDataFile.Load(instanceDataRoot) ?? new GlanceData(new GlanceWidgetData(), default);
@@ -94,6 +98,7 @@ internal sealed class GlanceWidgetController : IDisposable
 
         _content = (FrameworkElement)XamlReader.Load(
             File.ReadAllText(Path.Combine(packageRoot, "glance.xaml")));
+        _appearance = new GlanceAppearanceController(_content);
         _content.DataContext = GlanceMonthPipeline.CreatePresentation(_month, _isCompact, _panelHeight, _panelWidth, Settings, _culture, _width, _height);
 
         var calendarView = _content.FindName("NativeCalendarView").As<CalendarView>();
@@ -110,7 +115,7 @@ internal sealed class GlanceWidgetController : IDisposable
         _gradientLayer = _content.FindName("NonCalendarGradientLayer").As<Border>();
         if (_images.Length == 0)
         {
-            GlanceViewBuilder.ShowGradientFallback(_backgroundA);
+            GlanceViewBuilder.ShowGradientFallback(_backgroundA, _hostAppearance.IsDark);
             _showingA = false;
         }
         else
@@ -199,16 +204,20 @@ internal sealed class GlanceWidgetController : IDisposable
         _content.Unloaded += (_, _) =>
         {
             _loaded = false;
+            _appearance.SetLoaded(false);
             StopVisualResources();
         };
         _content.Loaded += (_, _) =>
         {
             if (_disposed) return;
             _loaded = true;
+            _appearance.SetLoaded(true);
             EnsureCurrentDate();
             UpdateTimers();
         };
 
+        _appearance.SetLoaded(_loaded);
+        UpdateAppearance();
         UpdateTimers();
         ApplyLayerEffects((GlancePresentation)_content.DataContext);
     }
@@ -272,7 +281,7 @@ internal sealed class GlanceWidgetController : IDisposable
 
     /// <summary>
     /// Live config push (HostApi v4): the host re-fired the config-changed
-    /// callback after a language (and later theme) change. Re-derives
+    /// callback after a language or appearance change. Re-derives
     /// culture, month data, presentation, and menu texts in place - the
     /// user sees the widget switch language without recreation.
     /// </summary>
@@ -280,10 +289,31 @@ internal sealed class GlanceWidgetController : IDisposable
     {
         if (_disposed) return;
         _culture = culture;
+        _hostAppearance = HostConfig.ReadAppearance();
         _nextItem.Text = PackageStrings.Get("menuNextBackground", "下一张背景");
         _pauseItem.Text = PackageStrings.Get("menuPauseRotation", "暂停轮播");
         _settingsItem.Text = PackageStrings.Get("menuSettings", "设置");
         RebuildMonth();
+    }
+
+    internal void OnAppearanceChanged()
+    {
+        EventsReceived++;
+        if (_disposed) return;
+        _hostAppearance = HostConfig.ReadAppearance();
+        UpdateAppearance();
+    }
+
+    private void UpdateAppearance()
+    {
+        double opacity = 1 - Settings.BackgroundImageTransparency;
+        string? image = _images.Length == 0 ? null : _images[Math.Clamp(_runtimeState.ImageIndex, 0, _images.Length - 1)];
+        _appearance.Update(_hostAppearance, Settings, image, image is not null && opacity > 0.001);
+        if (_images.Length == 0 && _fallbackIsDark != _hostAppearance.IsDark)
+        {
+            GlanceViewBuilder.ShowGradientFallback(_backgroundA, _hostAppearance.IsDark);
+            _fallbackIsDark = _hostAppearance.IsDark;
+        }
     }
 
     // ---- Timers ----
@@ -368,6 +398,7 @@ internal sealed class GlanceWidgetController : IDisposable
         presentation.PauseIconVisibility = _runtimeState.Paused ? Visibility.Collapsed : Visibility.Visible;
         _content.DataContext = presentation;
         ApplyLayerEffects(presentation);
+        UpdateAppearance();
     }
 
     /// <summary>
@@ -474,7 +505,7 @@ internal sealed class GlanceWidgetController : IDisposable
             ResetTransform(_backgroundB);
             if (_images.Length == 0)
             {
-                GlanceViewBuilder.ShowGradientFallback(_backgroundA);
+                GlanceViewBuilder.ShowGradientFallback(_backgroundA, _hostAppearance.IsDark);
                 _showingA = true;
             }
             else Show(_runtimeState.ImageIndex);
@@ -503,6 +534,7 @@ internal sealed class GlanceWidgetController : IDisposable
         Border incoming = _showingA ? _backgroundB : _backgroundA;
         Border outgoing = _showingA ? _backgroundA : _backgroundB;
         RunTransition(incoming, outgoing, brush);
+        UpdateAppearance();
     }
 
     /// <summary>
@@ -653,6 +685,7 @@ internal sealed class GlanceWidgetController : IDisposable
     {
         if (_disposed) return;
         _disposed = true;
+        _appearance.Dispose();
         FinalizeInFlightTransition();
         _clockTimer.Stop();
         _rotationTimer.Stop();

@@ -6,8 +6,8 @@ namespace DeskBox.GlancePackage.Rendering;
 /// Normalization subset for settings currently consumed by the native
 /// package (audit round 21 R2 repair): ports the rules from the built-in
 /// GlanceWidgetStore.Normalize for fields the package actually renders.
-/// Not yet included: Version stamp, OnlineImageCategory, CalendarMaterial
-/// fields (package does not consume these). When those fields are migrated
+/// Not yet included: Version stamp and OnlineImageCategory.
+/// When those fields are migrated
 /// into the package, their Normalize rules must be ported at that time.
 /// </summary>
 internal static class GlanceSettingsNormalizer
@@ -69,6 +69,10 @@ internal static class GlanceSettingsNormalizer
         data.BackgroundImageTransparency = double.IsFinite(data.BackgroundImageTransparency)
             ? Math.Clamp(data.BackgroundImageTransparency, 0.0, 1.0)
             : 0.0;
+        data.CalendarMaterialMode = Enum.IsDefined(data.CalendarMaterialMode)
+            ? data.CalendarMaterialMode : GlanceCalendarMaterialMode.FollowSystem;
+        data.CalendarImageMaterialTransparency = double.IsFinite(data.CalendarImageMaterialTransparency)
+            ? Math.Clamp(data.CalendarImageMaterialTransparency, 0.0, 1.0) : 0.32;
         data.TraditionalCalendarMode = Enum.IsDefined(data.TraditionalCalendarMode)
             ? data.TraditionalCalendarMode
             : GlanceTraditionalCalendarMode.None;
