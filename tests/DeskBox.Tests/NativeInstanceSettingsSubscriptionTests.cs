@@ -11,6 +11,24 @@ namespace DeskBox.Tests;
 public sealed class NativeInstanceSettingsSubscriptionTests
 {
     [Fact]
+    public void ExplicitRefreshIsNotLostWhenCoalescedWithASettingsNotification()
+    {
+        var queue = new Queue<Action>();
+        var refreshes = new List<bool>();
+        var adapter = new FakeAdapter();
+        using var subscription = new NativeInstanceSettingsSubscription(adapter, "one",
+            action => { queue.Enqueue(action); return true; }, () => true,
+            refreshContent => refreshes.Add(refreshContent));
+        subscription.RequestRefresh(refreshContent: true);
+        adapter.Notify();
+        Assert.Single(queue);
+        queue.Dequeue()();
+        adapter.Notify();
+        queue.Dequeue()();
+        Assert.Equal(new[] { true, false }, refreshes);
+    }
+
+    [Fact]
     public async Task CommittedSettingsReachTheRunningPackageReaderWithoutRecreation()
     {
         string root = Directory.CreateTempSubdirectory("deskbox-live-settings").FullName;

@@ -3,7 +3,11 @@
   "add": "添加",
   "todoHeader": "待办",
   "statusReady": "就绪",
-  "menuNextBackground": "下一张背景",
-  "menuPauseRotation": "暂停轮播",
-  "menuSettings": "设置"
+  "menuNextBackground": "下一张",
+  "menuPauseRotation": "暂停轮换",
+  "menuSettings": "设置",
+  "festivalToggle": "中国传统节日",
+  "traditionalToggle": "传统历法",
+  "toggleOff": "关",
+  "toggleOn": "开"
 }

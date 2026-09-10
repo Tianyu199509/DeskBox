@@ -1,5 +1,6 @@
 using DeskBox.Models;
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Media;
 
 namespace DeskBox.Contracts;
 
@@ -49,6 +50,25 @@ public interface IWidgetContent
     /// </summary>
     void OnCompactStateChanged(bool collapsed) { }
 }
+
+/// <summary>
+/// Optional capsule background supplied by the content that owns the image.
+/// Return one image/opacity snapshot, or null when unavailable or fully
+/// transparent. Called on the UI thread; opacity must be finite in (0, 1].
+/// </summary>
+public interface IWidgetCompactBackgroundContent
+{
+    WidgetCompactBackgroundSnapshot? GetCompactBackground();
+
+    /// <summary>
+    /// UI-thread invalidation only: the host re-reads the snapshot. Contents
+    /// already refreshed through their view model may keep this no-op default.
+    /// </summary>
+    event EventHandler? CompactBackgroundChanged { add { } remove { } }
+}
+
+/// <summary>The content-owned image and its instance opacity at the same read.</summary>
+public sealed record WidgetCompactBackgroundSnapshot(ImageSource ImageSource, double Opacity);
 
 /// <summary>
 /// Optional lifecycle contract for content whose initialization can be stopped

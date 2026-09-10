@@ -4,8 +4,9 @@ using System.Text.Json;
 namespace DeskBox.GlancePackage.Services;
 
 /// <summary>
-/// Package-local string tables (strings/{locale}.json). Exact locale match
-/// first, then en-US, then hard-coded defaults. The package cannot reach
+/// Package-local string tables (strings/{locale}.json). The en-US base table
+/// is overlaid per key by the exact locale; caller defaults are a last resort.
+/// The package cannot reach
 /// host resources (batch B/C findings: library packages produce no PRI and
 /// MrtCore has no file-level loading), so localizations ship inside the
 /// package directory.
@@ -25,30 +26,38 @@ internal static class PackageStrings
             : fallback;
     }
 
-    private static Dictionary<string, string>? Load(CultureInfo culture, string packageRoot)
+    private static Dictionary<string, string> Load(CultureInfo culture, string packageRoot)
     {
-        foreach (string candidate in new[] { culture.Name, "en-US" })
+        var table = new Dictionary<string, string>(StringComparer.Ordinal);
+        Overlay("en-US");
+        if (!string.Equals(culture.Name, "en-US", StringComparison.OrdinalIgnoreCase))
         {
-            string path = Path.Combine(packageRoot, "strings", $"{candidate}.json");
-            if (!File.Exists(path)) continue;
+            Overlay(culture.Name);
+        }
+        return table;
+
+        void Overlay(string locale)
+        {
+            string path = Path.Combine(packageRoot, "strings", $"{locale}.json");
             try
             {
                 using JsonDocument document = JsonDocument.Parse(File.ReadAllText(path));
-                var table = new Dictionary<string, string>(StringComparer.Ordinal);
+                if (document.RootElement.ValueKind != JsonValueKind.Object) return;
+
                 foreach (JsonProperty property in document.RootElement.EnumerateObject())
                 {
-                    if (property.Value.ValueKind == JsonValueKind.String)
+                    if (property.Value.ValueKind == JsonValueKind.String
+                        && !string.IsNullOrWhiteSpace(property.Value.GetString()))
                     {
-                        table[property.Name] = property.Value.GetString() ?? string.Empty;
+                        table[property.Name] = property.Value.GetString()!;
                     }
                 }
-                return table;
             }
-            catch
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
             {
-                // Fall through to the next candidate / defaults.
+                // A missing/unreadable/malformed table cannot discard the base
+                // translations. JsonDocument parses fully before any overlay.
             }
         }
-        return null;
     }
 }

@@ -22,6 +22,31 @@ internal sealed class GlanceInstanceMigration : ILegacyInstanceMigration
     // The package's GlanceDataFile reader defines this name.
     public string DataFileName => "glance-data.json";
 
+    public void PreparePackageData(string dataDirectory, string packageDataRoot)
+    {
+        // Versioned, package-wide hint, NOT a completion marker. Never touch
+        // legacy image bytes on the UI thread. The package owns retry policy.
+        Directory.CreateDirectory(packageDataRoot);
+        string path = Path.Combine(packageDataRoot, "legacy-glance-cache.json");
+        string temporary = $"{path}.{Guid.NewGuid():N}.tmp";
+        try
+        {
+            using (var stream = File.Create(temporary))
+            using (var writer = new Utf8JsonWriter(stream))
+            {
+                writer.WriteStartObject();
+                writer.WriteNumber("version", 1);
+                writer.WriteString("sourceRoot", Path.GetFullPath(Path.Combine(dataDirectory, "cache", "glance")));
+                writer.WriteEndObject();
+            }
+            File.Move(temporary, path, overwrite: true);
+        }
+        finally
+        {
+            if (File.Exists(temporary)) File.Delete(temporary);
+        }
+    }
+
     public IDisposable SubscribeChanges(string instanceId, Action changed) =>
         SubscribeChanges(GlanceWidgetStore.ForWidget(instanceId), changed);
 

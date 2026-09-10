@@ -21,6 +21,12 @@ public static unsafe class Exports
 
     private static string _packageRoot = "";
     private static string _packageDataRoot = "";
+    private static Services.GlanceImageRepository? _imageRepository;
+    private static readonly object InstanceGate = new();
+    private static bool _compactBackgroundReady;
+    private static bool _active;
+    private static int _activationGeneration;
+    private static readonly HashSet<nint> ClosingHandles = [];
     private static readonly Dictionary<nint, object> Instances = [];
     private static nint _nextHandle = 0x1000;
 
@@ -75,6 +81,12 @@ public static unsafe class Exports
     [UnmanagedCallersOnly(EntryPoint = "deskbox_package_activate", CallConvs = [typeof(CallConvCdecl)])]
     public static int Activate(char* packageRoot, int packageRootLength, char* packageDataRoot, int packageDataRootLength, HostApi* hostApi)
     {
+        lock (InstanceGate)
+        {
+            _active = false;
+            _compactBackgroundReady = false;
+            _activationGeneration++;
+        }
         try
         {
             _packageRoot = new string(packageRoot, 0, packageRootLength);
@@ -117,6 +129,13 @@ public static unsafe class Exports
                     _ = subscribe(_hostContext, (nint)(delegate* unmanaged[Cdecl]<void>)&OnConfigChanged);
                 }
             }
+            _imageRepository = new Services.GlanceImageRepository(_packageDataRoot);
+            lock (InstanceGate)
+            {
+                _active = true;
+                // Only advertise image reads for a successfully negotiated host.
+                _compactBackgroundReady = hostApi is not null;
+            }
             return S_OK;
         }
         catch (Exception error)
@@ -138,11 +157,16 @@ public static unsafe class Exports
             string instance = new(instanceId, 0, instanceIdLength);
             string dataRoot = new(instanceDataRoot, 0, instanceDataRootLength);
             Directory.CreateDirectory(dataRoot);
-            var controller = new Rendering.GlanceWidgetController(_packageRoot, contribution, instance, dataRoot);
-            nint handle = ++_nextHandle;
+            var controller = new Rendering.GlanceWidgetController(_packageRoot, contribution, instance, dataRoot,
+                _imageRepository ?? throw new InvalidOperationException("Package image repository is not active."));
             var lifecycleHandle = new Rendering.GlanceWidgetHandle(controller);
-            _handles[handle] = lifecycleHandle;
-            Instances[handle] = controller.View;
+            nint handle;
+            lock (InstanceGate)
+            {
+                handle = ++_nextHandle;
+                _handles[handle] = lifecycleHandle;
+                Instances[handle] = controller.View;
+            }
             *widgetHandle = handle;
             *view = WinRT.MarshalInspectable<FrameworkElement>.FromManaged(controller.View);
             HostLog($"widget created: {contribution}/{instance}");
@@ -155,28 +179,112 @@ public static unsafe class Exports
         }
     }
 
+    /// <summary>
+    /// Optional snapshot schema v1 (mandatory package ABI stays v4).
+    /// Caller supplies Size >= 24, Version = 1 and zero outputs. Size/Version
+    /// remain unchanged; only the 24-byte v1 prefix may be written. Unknown
+    /// versions fail; future implementations must continue supporting v1.
+    /// A nonzero ImageSource transfers exactly one owned WinRT ImageSource
+    /// IInspectable reference, even on failure. Caller always releases it.
+    /// Opacity is finite [0,1]; no image/zero opacity returns both outputs zero.
+    /// No decoding or XAML-tree inspection occurs.
+    /// Called on the same UI thread as create/event/destroy.
+    /// </summary>
+    [UnmanagedCallersOnly(EntryPoint = "deskbox_widget_get_compact_background", CallConvs = [typeof(CallConvCdecl)])]
+    public static int GetCompactBackground(nint widgetHandle, DeskBoxCompactBackgroundV1* background)
+    {
+        if (background is null) return E_POINTER;
+        try
+        {
+            int validation = InitializeCompactBackground(ref *background);
+            if (validation < 0) return validation;
+            Rendering.GlanceWidgetHandle handle;
+            lock (InstanceGate)
+            {
+                if (!_active || !_compactBackgroundReady) return E_UNEXPECTED;
+                if (widgetHandle == 0 || ClosingHandles.Contains(widgetHandle) ||
+                    !_handles.TryGetValue(widgetHandle, out handle!)) return E_HANDLE;
+            }
+            double opacity = handle.Controller.CompactBackgroundOpacity;
+            if (!double.IsFinite(opacity) || opacity < 0 || opacity > 1) return E_INVALIDARG;
+            if (opacity == 0) return S_OK;
+            Microsoft.UI.Xaml.Media.ImageSource? image = handle.Controller.CompactBackgroundImage;
+            if (image is not null)
+            {
+                background->ImageSource = WinRT.MarshalInspectable<Microsoft.UI.Xaml.Media.ImageSource>.FromManaged(image);
+                if (background->ImageSource != 0) background->Opacity = opacity;
+            }
+            return S_OK;
+        }
+        catch (Exception error)
+        {
+            TryWriteDiagnostic("compact-background-error.txt", error.ToString());
+            return error.HResult < 0 ? error.HResult : unchecked((int)0x80004005);
+        }
+    }
+
+    [StructLayout(LayoutKind.Explicit, Size = 24)]
+    public struct DeskBoxCompactBackgroundV1
+    {
+        [FieldOffset(0)] public uint Size;
+        [FieldOffset(4)] public uint Version;
+        [FieldOffset(8)] public nint ImageSource;
+        [FieldOffset(16)] public double Opacity;
+
+        public const uint CurrentVersion = 1;
+    }
+
+    // Shared by the export and headless validation tests. A short buffer is
+    // rejected before touching Version or outputs. Full buffers have outputs
+    // cleared even on a version error. Incoming pointers must be zero/empty;
+    // initialization never releases caller-owned values.
+    internal static int InitializeCompactBackground(ref DeskBoxCompactBackgroundV1 background)
+    {
+        if (background.Size < (uint)sizeof(DeskBoxCompactBackgroundV1)) return E_INVALIDARG;
+        background.ImageSource = 0;
+        background.Opacity = 0;
+        return background.Version == DeskBoxCompactBackgroundV1.CurrentVersion ? S_OK : E_INVALIDARG;
+    }
+
     [UnmanagedCallersOnly(EntryPoint = "deskbox_widget_destroy", CallConvs = [typeof(CallConvCdecl)])]
     public static int DestroyWidget(nint widgetHandle)
     {
         // Unknown handles report E_HANDLE so host/package lifecycle drift stays
         // diagnosable instead of silently "succeeding" (audit round 17). The
         // host destroy state machine only commits a release on package success.
+        bool markedClosing = false;
         try
         {
-            if (!_handles.TryGetValue(widgetHandle, out Rendering.GlanceWidgetHandle? handle)) return E_HANDLE;
+            Rendering.GlanceWidgetHandle handle;
+            lock (InstanceGate)
+            {
+                if (!_handles.TryGetValue(widgetHandle, out handle!) ||
+                    !ClosingHandles.Add(widgetHandle)) return E_HANDLE;
+                markedClosing = true;
+            }
             // Dispose FIRST, then remove the handle (audit round 20): the
             // controller's Dispose is total/no-throw, so nothing between the
             // two steps can fail and leave the host lease alive against an
             // already-gone package handle (the destroy transaction contract).
             handle.Dispose();
-            _handles.Remove(widgetHandle);
-            Instances.Remove(widgetHandle);
+            lock (InstanceGate)
+            {
+                _handles.Remove(widgetHandle);
+                Instances.Remove(widgetHandle);
+            }
             return S_OK;
         }
         catch (Exception error)
         {
             TryWriteDiagnostic("destroy-error.txt", error.ToString());
             return error.HResult;
+        }
+        finally
+        {
+            if (markedClosing)
+            {
+                lock (InstanceGate) ClosingHandles.Remove(widgetHandle);
+            }
         }
     }
 
@@ -186,7 +294,13 @@ public static unsafe class Exports
         // Live instances at shutdown mean a lifecycle bug upstream (the host
         // only shuts down after the last successful destroy); surface it
         // instead of reporting success (audit round 17).
-        if (Instances.Count > 0) return E_UNEXPECTED;
+        lock (InstanceGate)
+        {
+            if (Instances.Count > 0) return E_UNEXPECTED;
+            _active = false;
+            _compactBackgroundReady = false;
+            _activationGeneration++;
+        }
         try
         {
             File.WriteAllText(Path.Combine(_packageDataRoot, "glance-session.txt"),
@@ -207,6 +321,8 @@ public static unsafe class Exports
             _hostContext = 0;
             _dispatcher = null;
             DeskBox.GlancePackage.Services.HostConfig.Reset();
+            _imageRepository?.Dispose();
+            _imageRepository = null;
             DeskBox.GlancePackage.Services.PackageLogger.Sink = null;
         }
     }
@@ -244,9 +360,11 @@ public static unsafe class Exports
             {
                 return E_INVALIDARG;
             }
-            if (!_handles.TryGetValue(widgetHandle, out Rendering.GlanceWidgetHandle? handle))
+            Rendering.GlanceWidgetHandle handle;
+            lock (InstanceGate)
             {
-                return E_HANDLE;
+                if (ClosingHandles.Contains(widgetHandle) ||
+                    !_handles.TryGetValue(widgetHandle, out handle!)) return E_HANDLE;
             }
             // Range is derived from the table itself, never a magic number, so
             // adding a kind cannot silently strand it outside the accepted range.
@@ -274,7 +392,14 @@ public static unsafe class Exports
     {
         try
         {
-            _dispatcher?.TryEnqueue(() => RefreshAllForConfigChange());
+            Microsoft.UI.Dispatching.DispatcherQueue? dispatcher = _dispatcher;
+            int generation;
+            lock (InstanceGate)
+            {
+                if (!_active || dispatcher is null) return;
+                generation = _activationGeneration;
+            }
+            dispatcher.TryEnqueue(() => RefreshAllForConfigChange(generation));
         }
         catch
         {
@@ -282,14 +407,20 @@ public static unsafe class Exports
         }
     }
 
-    private static void RefreshAllForConfigChange()
+    private static void RefreshAllForConfigChange(int generation)
     {
         try
         {
+            Rendering.GlanceWidgetHandle[] handles;
+            lock (InstanceGate)
+            {
+                if (!_active || generation != _activationGeneration) return;
+                handles = [.. _handles.Values];
+            }
             CultureInfo culture = DeskBox.GlancePackage.Services.HostConfig.TryGetCulture()
                 ?? CultureInfo.CurrentUICulture;
             DeskBox.GlancePackage.Services.PackageStrings.Configure(culture, _packageRoot);
-            foreach (Rendering.GlanceWidgetHandle handle in _handles.Values.ToArray())
+            foreach (Rendering.GlanceWidgetHandle handle in handles)
             {
                 handle.Controller.ApplyConfigChange(culture);
             }

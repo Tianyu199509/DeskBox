@@ -32,6 +32,7 @@ internal sealed class GlanceAppearanceController : IDisposable
     private string? _pendingPath;
     private CancellationTokenSource? _paletteCts;
     private bool _loaded;
+    private bool _active = true;
     private bool _disposed;
 
     internal GlanceAppearanceController(FrameworkElement root)
@@ -61,6 +62,13 @@ internal sealed class GlanceAppearanceController : IDisposable
     {
         _loaded = loaded;
         if (loaded && !_disposed) QueuePalette();
+        else CancelPalette();
+    }
+
+    internal void SetActive(bool active)
+    {
+        _active = active;
+        if (active && _loaded && !_disposed) QueuePalette();
         else CancelPalette();
     }
 
@@ -128,7 +136,7 @@ internal sealed class GlanceAppearanceController : IDisposable
 
     private void QueuePalette()
     {
-        if (!_loaded || _settings.CalendarMaterialMode != GlanceCalendarMaterialMode.FollowImage)
+        if (!_loaded || !_active || _settings.CalendarMaterialMode != GlanceCalendarMaterialMode.FollowImage)
         {
             CancelPalette();
             return;
@@ -154,23 +162,23 @@ internal sealed class GlanceAppearanceController : IDisposable
     private async Task SampleAsync(string path, CancellationTokenSource cts)
     {
         GlanceImagePalette? palette = null;
+        CancellationToken token = cts.Token;
         try
         {
-            palette = await _paletteService.GetPaletteAsync(path, cts.Token).ConfigureAwait(false);
+            palette = await _paletteService.GetPaletteAsync(path, token).ConfigureAwait(false);
         }
         catch (OperationCanceledException) { }
         catch (Exception error) { PackageLogger.LogVerbose($"[GlancePackage] palette update failed: {error.Message}"); }
         // Separate NativeAOT runtimes cannot rely on the host's managed
         // SynchronizationContext. Every post-decode visual write goes through
         // the owning WinRT dispatcher, including cancellation cleanup.
-        bool queued = false;
         try
         {
-            queued = _dispatcher.TryEnqueue(() =>
+            _dispatcher.TryEnqueue(() =>
             {
                 try
                 {
-                    if (cts.IsCancellationRequested || _disposed || !_loaded ||
+                    if (token.IsCancellationRequested || _disposed || !_loaded || !_active ||
                         !ReferenceEquals(_paletteCts, cts) ||
                         _settings.CalendarMaterialMode != GlanceCalendarMaterialMode.FollowImage ||
                         !string.Equals(path, _imagePath, StringComparison.OrdinalIgnoreCase)) return;
@@ -186,12 +194,16 @@ internal sealed class GlanceAppearanceController : IDisposable
                         _paletteCts = null;
                         _pendingPath = null;
                     }
-                    lock (cts) cts.Dispose();
                 }
             });
         }
         catch (Exception error) { PackageLogger.LogVerbose($"[GlancePackage] palette dispatcher unavailable: {error.Message}"); }
-        if (!queued) lock (cts) cts.Dispose();
+        finally
+        {
+            // Disposal cannot depend on an accepted dispatcher callback being
+            // executed; shutdown is allowed to drop queued work.
+            lock (cts) cts.Dispose();
+        }
     }
 
     private void CancelPalette()

@@ -45,6 +45,9 @@ public sealed partial class ContentWidgetWindow : WidgetWindowBase, IDesktopWidg
     private long _titleRenameOpenedAtTick;
     private bool _compactPresentationRefreshQueued;
     private INotifyPropertyChanged? _compactPresentationSource;
+    private IWidgetCompactBackgroundContent? _compactBackgroundSource;
+    private EventHandler? _compactBackgroundChangedHandler;
+    private long _compactPresentationSourceGeneration;
     private IWidgetFeedbackSource? _feedbackSource;
     private IWidgetHostContextMenuSource? _hostContextMenuSource;
     private Microsoft.UI.Dispatching.DispatcherQueueTimer? _autoRestoreTimer;
@@ -149,14 +152,27 @@ public sealed partial class ContentWidgetWindow : WidgetWindowBase, IDesktopWidg
                 CreateQuickCaptureCompactPresentation(quickCapture, contentMode),
             WeatherWidgetContentAdapter weather => CreateWeatherCompactPresentation(weather, contentMode),
             SearchWidgetContentAdapter => CreateSearchCompactPresentation(contentMode, localization),
-            _ => new WidgetCompactPresentation(
-                _titleViewModel.DisplayName,
-                string.Empty,
-                _descriptor.DefaultGlyph,
-                localization.T("Widget.Compact.DropHint"),
-                EnableMarquee: true,
-                LiveStateKey: _titleViewModel.DisplayName)
+            _ => CreateDefaultCompactPresentation(
+                CurrentContent as IWidgetCompactBackgroundContent, localization)
         };
+    }
+
+    private WidgetCompactPresentation CreateDefaultCompactPresentation(
+        IWidgetCompactBackgroundContent? backgroundContent,
+        LocalizationService localization)
+    {
+        WidgetCompactBackgroundSnapshot? background = backgroundContent?.GetCompactBackground();
+        ImageSource? backgroundImage = background?.ImageSource;
+        return new WidgetCompactPresentation(
+            _titleViewModel.DisplayName,
+            string.Empty,
+            _descriptor.DefaultGlyph,
+            localization.T("Widget.Compact.DropHint"),
+            Thumbnail: backgroundImage,
+            EnableMarquee: true,
+            UseFullBleedBackground: backgroundImage is not null,
+            LiveStateKey: _titleViewModel.DisplayName,
+            FullBleedBackgroundOpacity: background?.Opacity ?? 0);
     }
 
     private WidgetCompactPresentation CreateGlanceCompactPresentation(
@@ -196,8 +212,9 @@ public sealed partial class ContentWidgetWindow : WidgetWindowBase, IDesktopWidg
 
         string summary = string.Join(" · ", summaryParts);
         bool hasText = !string.IsNullOrWhiteSpace(title) || !string.IsNullOrWhiteSpace(summary);
+        WidgetCompactBackgroundSnapshot? background = ((IWidgetCompactBackgroundContent)glance).GetCompactBackground();
         ImageSource? backgroundImage = viewModel.HasVisibleCurrentImage
-            ? glance.GetCompactBackgroundImage()
+            ? background?.ImageSource
             : null;
         return new WidgetCompactPresentation(
             title,
@@ -217,7 +234,7 @@ public sealed partial class ContentWidgetWindow : WidgetWindowBase, IDesktopWidg
                 viewModel.CurrentImagePath),
             FullBleedOverlayOpacity: hasText ? viewModel.ReadabilityStrengthOpacity : 0,
             UseUniformFullBleedOverlay: true,
-            FullBleedBackgroundOpacity: viewModel.BackgroundImageOpacity);
+            FullBleedBackgroundOpacity: background?.Opacity ?? 0);
     }
 
     private WidgetCompactPresentation CreateSearchCompactPresentation(
@@ -1105,6 +1122,8 @@ IsHideAnimationRunning = true;
 
     private void AttachCompactPresentationSource(IWidgetContent content)
     {
+        if (IsClosing) return;
+        AttachCompactBackgroundSource(content);
         if (_compactPresentationSource is not null)
         {
             _compactPresentationSource.PropertyChanged -= CompactPresentationSource_PropertyChanged;
@@ -1150,6 +1169,31 @@ IsHideAnimationRunning = true;
         }
     }
 
+    private void AttachCompactBackgroundSource(IWidgetContent? content)
+    {
+        long generation = ++_compactPresentationSourceGeneration;
+        _compactPresentationRefreshQueued = false;
+        IWidgetCompactBackgroundContent? previous = _compactBackgroundSource;
+        EventHandler? previousHandler = _compactBackgroundChangedHandler;
+        _compactBackgroundSource = null;
+        _compactBackgroundChangedHandler = null;
+        if (previous is not null && previousHandler is not null)
+            previous.CompactBackgroundChanged -= previousHandler;
+
+        if (IsClosing || content is not IWidgetCompactBackgroundContent source) return;
+        _compactBackgroundSource = source;
+        _compactBackgroundChangedHandler = (_, _) =>
+        {
+            // A captured invocation from a detached source (including a
+            // cached member later reattached) cannot invalidate this member.
+            if (generation != _compactPresentationSourceGeneration ||
+                !ReferenceEquals(source, _compactBackgroundSource) ||
+                !ReferenceEquals(content, CurrentContent)) return;
+            QueueCompactPresentationRefresh();
+        };
+        source.CompactBackgroundChanged += _compactBackgroundChangedHandler;
+    }
+
     private void OnRecentQueriesChanged()
     {
         QueueCompactPresentationRefresh();
@@ -1175,10 +1219,15 @@ IsHideAnimationRunning = true;
         }
 
         _compactPresentationRefreshQueued = true;
+        long generation = _compactPresentationSourceGeneration;
+        IWidgetContent? content = CurrentContent;
         if (!DispatcherQueue.TryEnqueue(() =>
         {
+            // A switch/close resets the queue for the new subscription. An
+            // old callback must neither refresh it nor clear its pending flag.
+            if (generation != _compactPresentationSourceGeneration) return;
             _compactPresentationRefreshQueued = false;
-            if (!IsClosing && IsWidgetCollapsed)
+            if (!IsClosing && IsWidgetCollapsed && ReferenceEquals(content, CurrentContent))
             {
                 RefreshCompactPresentation();
             }
@@ -1284,6 +1333,7 @@ IsHideAnimationRunning = true;
             AppWindow.Changed -= OnAppWindowChanged;
             ContentWidgetShell.RightTapped -= ContentWidgetShell_RightTapped;
             ContentWidgetShell.TitleDoubleTapped -= ContentWidgetShell_TitleDoubleTapped;
+            AttachCompactBackgroundSource(null);
             if (_compactPresentationSource is not null)
             {
                 _compactPresentationSource.PropertyChanged -= CompactPresentationSource_PropertyChanged;

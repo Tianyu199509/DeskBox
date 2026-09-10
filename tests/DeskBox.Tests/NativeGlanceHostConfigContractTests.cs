@@ -64,7 +64,7 @@ public class NativeGlanceHostConfigContractTests
     {
         string zh = Read("src/DeskBox.GlancePackage/strings/zh-CN.json");
         string en = Read("src/DeskBox.GlancePackage/strings/en-US.json");
-        foreach (string key in new[] { "menuNextBackground", "menuPauseRotation", "menuSettings" })
+        foreach (string key in new[] { "menuNextBackground", "menuPauseRotation", "menuSettings", "festivalToggle", "traditionalToggle", "toggleOff", "toggleOn" })
         {
             Assert.Contains($"\"{key}\"", zh);
             Assert.Contains($"\"{key}\"", en);

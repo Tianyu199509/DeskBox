@@ -32,18 +32,26 @@ internal sealed class GlanceWidgetController : IDisposable
 
     private readonly FrameworkElement _content;
     private readonly CalendarDecorationState _decoration;
+    private readonly CalendarView _calendarView;
+    private readonly GlanceCalendarNavigationController _calendarNavigation;
+    private readonly long _calendarModeToken;
+    private DateOnly _displayedMonth;
     private readonly Border _backgroundA;
     private readonly Border _backgroundB;
     private readonly Grid _backgroundLayer;
     private readonly Border _readabilityLayer;
     private readonly Border _calendarReadabilityLayer;
     private readonly Border _gradientLayer;
+    private readonly Border _actionLayer;
+    private bool _pointerInside;
+    private bool _keyboardFocus;
     private string[] _images;
     private Stretch _imageStretch;
     private bool _showingA;
     private Microsoft.UI.Xaml.Media.Animation.Storyboard? _transitionStoryboard;
     private bool _transitionInFlight;
     private Border? _transitionIncoming;
+    private long _transitionGeneration;
 
     private readonly Microsoft.UI.Dispatching.DispatcherQueueTimer _rotationTimer;
     private readonly Microsoft.UI.Dispatching.DispatcherQueueTimer _resizeTimer;
@@ -58,13 +66,30 @@ internal sealed class GlanceWidgetController : IDisposable
     private readonly GlanceAppearanceController _appearance;
     private PackageAppearance _hostAppearance;
     private bool? _fallbackIsDark;
+    private PackagePerformancePolicy _performance;
+    private readonly GlanceImageLoadCoordinator _imageLoader;
+    private readonly GlanceImageDecodeCoordinator _imageDecoder;
+    private readonly HashSet<string> _failedImages = new(StringComparer.OrdinalIgnoreCase);
+    private string? _displayedImagePath;
+    private ImageSource? _displayedImageSource;
+    private int _requestedImageIndex;
+    private int _requestedDecodeWidth;
+    private int _displayedDecodeWidth;
+    private string[] _catalogPaths = [];
+    private bool _catalogRandomOrder;
+    private bool _needsImageLoad = true;
+    private bool _decodePending;
+    private bool _needsImageDecode;
+    private bool _forceImageReload;
     private DateOnly _renderedDate;
     private MenuFlyoutItem _nextItem = null!;
     private MenuFlyoutItem _pauseItem = null!;
     private MenuFlyoutItem _settingsItem = null!;
 
-    private double _width;
-    private double _height;
+    private readonly GlanceViewportCoordinator _viewport = new(GlanceMonthPipeline.DefaultWidth, GlanceMonthPipeline.DefaultHeight);
+    private double _width => _viewport.Width;
+    private double _height => _viewport.Height;
+    private bool _interactiveResize;
     // Last pipeline outputs, kept so clock ticks can refresh the
     // presentation without recomputing the month.
     private GlanceCalendarMonth _month;
@@ -74,38 +99,55 @@ internal sealed class GlanceWidgetController : IDisposable
     private GlanceTraditionalCalendarMode _restoreMode;
 
     internal FrameworkElement View => _content;
+    internal double CompactBackgroundOpacity => 1 - Settings.BackgroundImageTransparency;
+    internal ImageSource? CompactBackgroundImage => _disposed || CompactBackgroundOpacity <= 0.001 ? null : _displayedImageSource;
     internal int EventsReceived { get; private set; }
 
-    public GlanceWidgetController(string packageRoot, string contributionId, string instanceId, string instanceDataRoot)
+    public GlanceWidgetController(string packageRoot, string contributionId, string instanceId, string instanceDataRoot, GlanceImageRepository imageRepository)
     {
+        DateOnly today = DateOnly.FromDateTime(DateTime.Today);
+        _displayedMonth = new(today.Year, today.Month, 1);
+        _renderedDate = today;
         _packageRoot = packageRoot;
         _instanceId = instanceId;
         _instanceDataRoot = instanceDataRoot;
         _culture = HostConfig.TryGetCulture() ?? CultureInfo.CurrentUICulture;
         _hostAppearance = HostConfig.ReadAppearance();
+        _performance = HostConfig.ReadPerformancePolicy();
         PackageStrings.Configure(_culture, packageRoot);
 
         _data = GlanceDataFile.Load(instanceDataRoot) ?? new GlanceData(new GlanceWidgetData(), default);
         _runtimeState = GlanceRuntimeState.LoadOrCreate(instanceDataRoot);
         bool showFestivals = Settings.ShowChineseFestivals;
 
-        _width = GlanceMonthPipeline.DefaultWidth;
-        _height = GlanceMonthPipeline.DefaultHeight;
         (_month, _isCompact, _panelHeight, _panelWidth, double dayItemHeight, bool showSecondary, GlanceTraditionalCalendarMode effectiveMode) =
-            GlanceMonthPipeline.Build(showFestivals, Settings.TraditionalCalendarMode, _culture, _width, _height);
+            GlanceMonthPipeline.Build(showFestivals, Settings.TraditionalCalendarMode, _culture, _width, _height,
+                _displayedMonth, today);
         bool showTraditional = effectiveMode != GlanceTraditionalCalendarMode.None;
         _restoreMode = showTraditional ? effectiveMode : GlanceTraditionalCalendarMode.ChineseLunar;
 
         _content = (FrameworkElement)XamlReader.Load(
             File.ReadAllText(Path.Combine(packageRoot, "glance.xaml")));
+        _content.Language = _culture.Name;
         _appearance = new GlanceAppearanceController(_content);
         _content.DataContext = GlanceMonthPipeline.CreatePresentation(_month, _isCompact, _panelHeight, _panelWidth, Settings, _culture, _width, _height);
 
         var calendarView = _content.FindName("NativeCalendarView").As<CalendarView>();
+        _calendarView = calendarView;
         _decoration = new CalendarDecorationState(_month, dayItemHeight, showTraditional, showFestivals, showSecondary, _culture);
         GlanceViewBuilder.SubscribeDayDecoration(calendarView, _decoration);
+        _calendarNavigation = new GlanceCalendarNavigationController(calendarView, month =>
+        {
+            if (_disposed) return;
+            _displayedMonth = month;
+            RebuildMonth();
+        }, _displayedMonth);
+        _displayedMonth = _calendarNavigation.DisplayedMonth;
+        _calendarNavigation.SetCulture(_culture);
+        _calendarModeToken = calendarView.RegisterPropertyChangedCallback(CalendarView.DisplayModeProperty,
+            (_, _) => UpdateTraditionalTitleVisibility());
 
-        _images = GlanceViewBuilder.LoadImages(Settings, packageRoot);
+        _images = [];
         _imageStretch = Settings.ImageFit == GlanceImageFitMode.Fit ? Stretch.Uniform : Stretch.UniformToFill;
         _backgroundA = _content.FindName("BackgroundA").As<Border>();
         _backgroundB = _content.FindName("BackgroundB").As<Border>();
@@ -113,6 +155,16 @@ internal sealed class GlanceWidgetController : IDisposable
         _readabilityLayer = _content.FindName("ReadabilityLayer").As<Border>();
         _calendarReadabilityLayer = _content.FindName("CalendarReadabilityLayer").As<Border>();
         _gradientLayer = _content.FindName("NonCalendarGradientLayer").As<Border>();
+        _actionLayer = _content.FindName("ActionLayer").As<Border>();
+        _content.PointerEntered += (_, _) => { _pointerInside = true; UpdateActionLayer(); };
+        _content.PointerExited += (_, _) => { _pointerInside = false; UpdateActionLayer(); };
+        _content.GotFocus += (_, e) =>
+        {
+            _keyboardFocus = e.OriginalSource is Control control && control.FocusState == FocusState.Keyboard;
+            UpdateActionLayer();
+        };
+        _content.LostFocus += (_, _) => { _keyboardFocus = false; UpdateActionLayer(); };
+        UpdateActionLayer();
         if (_images.Length == 0)
         {
             GlanceViewBuilder.ShowGradientFallback(_backgroundA, _hostAppearance.IsDark);
@@ -182,8 +234,14 @@ internal sealed class GlanceWidgetController : IDisposable
         menu.Items.Add(pauseItem);
         menu.Items.Add(settingsItem);
         _content.ContextFlyout = menu;
+        UpdateSettingsStrings();
 
         var dispatcher = Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread();
+        _imageDecoder = new GlanceImageDecodeCoordinator(dispatcher, OnImageDecoded, OnImageDecodeFailed);
+        _imageLoader = new GlanceImageLoadCoordinator(
+            imageRepository.GetAvailableAsync,
+            imageRepository.RefreshOnlineAsync,
+            action => dispatcher.TryEnqueue(() => action()), ApplyImages);
         _rotationTimer = dispatcher.CreateTimer();
         _rotationTimer.Tick += (_, _) => { if (!_runtimeState.Paused) Show(_runtimeState.ImageIndex + 1); };
         _clockTimer = dispatcher.CreateTimer();
@@ -193,8 +251,6 @@ internal sealed class GlanceWidgetController : IDisposable
         _resizeTimer.Interval = TimeSpan.FromMilliseconds(120);
         _resizeTimer.IsRepeating = false;
         _resizeTimer.Tick += (_, _) => RebuildMonth();
-        _renderedDate = DateOnly.FromDateTime(DateTime.Today);
-
         // Visual pause ONLY (audit round 20): Unloaded fires during host
         // group transitions that can ROLL BACK, so it must never permanently
         // dispose the controller - a rolled-back view would come back with
@@ -204,31 +260,50 @@ internal sealed class GlanceWidgetController : IDisposable
         _content.Unloaded += (_, _) =>
         {
             _loaded = false;
+            _interactiveResize = false;
+            _pointerInside = _keyboardFocus = false;
+            UpdateActionLayer();
             _appearance.SetLoaded(false);
+            _calendarNavigation.SetLoaded(false);
+            if (!_collapsed) SuspendImageLoading();
             StopVisualResources();
+            if (_collapsed) UpdateTimers();
         };
         _content.Loaded += (_, _) =>
         {
             if (_disposed) return;
             _loaded = true;
             _appearance.SetLoaded(true);
+            _appearance.SetActive(_visible && !_longHidden);
+            _calendarNavigation.SetLoaded(true);
+            RequestImagesIfNeeded();
+            RequestImageDecodeIfNeeded();
             EnsureCurrentDate();
             UpdateTimers();
         };
 
         _appearance.SetLoaded(_loaded);
+        _appearance.SetActive(_visible && !_longHidden);
+        _calendarNavigation.SetLoaded(_loaded);
         UpdateAppearance();
         UpdateTimers();
         ApplyLayerEffects((GlancePresentation)_content.DataContext);
+        RequestImagesIfNeeded();
     }
 
     // ---- Host lifecycle events (ABI v4 kinds routed by GlanceWidgetHandle) ----
 
-    internal void RefreshRequested()
+    internal void RefreshRequested(bool refreshImages = true)
     {
         EventsReceived++;
         if (_disposed) return;
         ReloadSettings();
+        if (refreshImages)
+        {
+            _needsImageLoad = true;
+            _forceImageReload = true;
+            RequestImagesIfNeeded();
+        }
         RebuildMonth();
         UpdateTimers();
     }
@@ -245,7 +320,16 @@ internal sealed class GlanceWidgetController : IDisposable
             // widget hidden across midnight/month rolls its grid forward
             // (the minute tick cannot detect a date change while stopped).
             _longHidden = false;
+            _appearance.SetActive(true);
             EnsureCurrentDate();
+            RequestImagesIfNeeded();
+            RequestImageDecodeIfNeeded();
+        }
+        else
+        {
+            _appearance.SetActive(false);
+            StopImageTransition();
+            SuspendImageLoading();
         }
         UpdateTimers();
     }
@@ -255,6 +339,8 @@ internal sealed class GlanceWidgetController : IDisposable
         EventsReceived++;
         if (_disposed) return;
         _collapsed = collapsed;
+        RequestImagesIfNeeded();
+        RequestImageDecodeIfNeeded();
         UpdateTimers();
     }
 
@@ -263,6 +349,9 @@ internal sealed class GlanceWidgetController : IDisposable
         EventsReceived++;
         if (_disposed) return;
         _longHidden = true;
+        _appearance.SetActive(false);
+        StopImageTransition();
+        SuspendImageLoading();
         UpdateTimers();
     }
 
@@ -270,13 +359,80 @@ internal sealed class GlanceWidgetController : IDisposable
     {
         EventsReceived++;
         if (_disposed) return;
-        if (Math.Abs(width - _width) < 1 && Math.Abs(height - _height) < 1) return;
-        _width = width;
-        _height = height;
+        if (!_viewport.Resize(width, height)) return;
         // Debounce: the host reports viewport changes continuously during a
         // resize; the pipeline re-runs once per settled size.
         _resizeTimer.Stop();
         _resizeTimer.Start();
+    }
+
+    internal void BeginInteractiveResize()
+    {
+        EventsReceived++;
+        if (_disposed) return;
+        _interactiveResize = true;
+        StopImageTransition();
+        UpdateTimers();
+    }
+
+    internal void CompleteInteractiveResize(double width, double height)
+    {
+        EventsReceived++;
+        if (_disposed) return;
+        _interactiveResize = false;
+        _viewport.Resize(width, height);
+        _resizeTimer.Stop();
+        RebuildMonth();
+        UpdateTimers();
+    }
+
+    internal void BeginResponsiveLayoutTransition(double width, double height)
+    {
+        EventsReceived++;
+        if (_disposed) return;
+        StopImageTransition();
+        _viewport.Begin(width, height);
+        _resizeTimer.Stop();
+        RebuildMonth();
+        UpdateTimers();
+    }
+
+    internal void CompleteResponsiveLayoutTransition(double width, double height)
+    {
+        EventsReceived++;
+        if (_disposed) return;
+        _viewport.Complete(width, height);
+        _resizeTimer.Stop();
+        RebuildMonth();
+        UpdateTimers();
+    }
+
+    internal void CancelResponsiveLayoutTransition()
+    {
+        EventsReceived++;
+        if (_disposed) return;
+        _viewport.Cancel();
+        _resizeTimer.Stop();
+        RebuildMonth();
+        UpdateTimers();
+    }
+
+    internal void OnRevealCompleted()
+    {
+        EventsReceived++;
+        if (_disposed) return;
+        EnsureCurrentDate();
+        RequestImagesIfNeeded();
+        RequestImageDecodeIfNeeded();
+        UpdateTimers();
+    }
+
+    private void UpdateActionLayer()
+    {
+        bool shown = Settings.ShowPhotoControls && (_pointerInside || _keyboardFocus);
+        _actionLayer.Visibility = Settings.ShowPhotoControls ? Visibility.Visible : Visibility.Collapsed;
+        _actionLayer.Opacity = shown ? 1 : 0;
+        _actionLayer.IsHitTestVisible = shown;
     }
 
     /// <summary>
@@ -289,11 +445,46 @@ internal sealed class GlanceWidgetController : IDisposable
     {
         if (_disposed) return;
         _culture = culture;
+        _content.Language = culture.Name;
+        _calendarNavigation.SetCulture(culture);
         _hostAppearance = HostConfig.ReadAppearance();
+        ApplyPerformancePolicy();
         _nextItem.Text = PackageStrings.Get("menuNextBackground", "下一张背景");
         _pauseItem.Text = PackageStrings.Get("menuPauseRotation", "暂停轮播");
         _settingsItem.Text = PackageStrings.Get("menuSettings", "设置");
+        UpdateSettingsStrings();
         RebuildMonth();
+    }
+
+    internal void OnPerformanceSettingsChanged()
+    {
+        EventsReceived++;
+        if (_disposed) return;
+        ApplyPerformancePolicy();
+    }
+
+    private void ApplyPerformancePolicy()
+    {
+        _performance = HostConfig.ReadPerformancePolicy();
+        if (!_performance.AllowDecorativeAnimations)
+        {
+            StopImageTransition();
+        }
+        UpdateTimers();
+    }
+
+    private void UpdateSettingsStrings()
+    {
+        _content.FindName("SettingsTitle").As<TextBlock>().Text = PackageStrings.Get("menuSettings", "Settings");
+        var festivals = _content.FindName("FestivalToggle").As<ToggleSwitch>();
+        var traditional = _content.FindName("TraditionalToggle").As<ToggleSwitch>();
+        festivals.Header = PackageStrings.Get("festivalToggle", "Festivals");
+        traditional.Header = PackageStrings.Get("traditionalToggle", "Traditional calendar");
+        foreach (var toggle in new[] { festivals, traditional })
+        {
+            toggle.OffContent = PackageStrings.Get("toggleOff", "Off");
+            toggle.OnContent = PackageStrings.Get("toggleOn", "On");
+        }
     }
 
     internal void OnAppearanceChanged()
@@ -307,9 +498,9 @@ internal sealed class GlanceWidgetController : IDisposable
     private void UpdateAppearance()
     {
         double opacity = 1 - Settings.BackgroundImageTransparency;
-        string? image = _images.Length == 0 ? null : _images[Math.Clamp(_runtimeState.ImageIndex, 0, _images.Length - 1)];
+        string? image = _displayedImagePath;
         _appearance.Update(_hostAppearance, Settings, image, image is not null && opacity > 0.001);
-        if (_images.Length == 0 && _fallbackIsDark != _hostAppearance.IsDark)
+        if (image is null && _fallbackIsDark != _hostAppearance.IsDark)
         {
             GlanceViewBuilder.ShowGradientFallback(_backgroundA, _hostAppearance.IsDark);
             _fallbackIsDark = _hostAppearance.IsDark;
@@ -336,8 +527,10 @@ internal sealed class GlanceWidgetController : IDisposable
         if (_disposed) return;
         ClockCadence cadence = CurrentClockCadence();
         GlanceLifecyclePolicy.Activity activity = GlanceLifecyclePolicy.Compute(
-            _visible && _loaded, _longHidden, _collapsed, _runtimeState.Paused,
-            cadence, Settings.RotationIntervalMinutes > 0, _images.Length > 1);
+            _visible && (_loaded || _collapsed), _longHidden, _collapsed, _runtimeState.Paused,
+            cadence, Settings.RotationIntervalMinutes > 0 && _performance.AllowImageAutoRotation &&
+                !_interactiveResize && !_viewport.IsTransitionActive,
+            _images.Count(path => !_failedImages.Contains(path)) > 1);
 
         _clockTimer.Stop();
         if (activity.Cadence != ClockCadence.None)
@@ -384,6 +577,13 @@ internal sealed class GlanceWidgetController : IDisposable
             UpdateClockText();
             return;
         }
+        // Follow midnight/month rollover only when the user was viewing the
+        // current month; explicit calendar browsing keeps its context.
+        if (_displayedMonth.Year == _renderedDate.Year && _displayedMonth.Month == _renderedDate.Month)
+        {
+            _displayedMonth = new(today.Year, today.Month, 1);
+            _calendarNavigation.SetMonth(_displayedMonth);
+        }
         _renderedDate = today;
         RebuildMonth();
     }
@@ -399,6 +599,16 @@ internal sealed class GlanceWidgetController : IDisposable
         _content.DataContext = presentation;
         ApplyLayerEffects(presentation);
         UpdateAppearance();
+        UpdateTraditionalTitleVisibility();
+    }
+
+    private void UpdateTraditionalTitleVisibility()
+    {
+        if (_disposed) return;
+        _content.FindName("TraditionalCalendarTitlePresenter").As<TextBlock>().Visibility =
+            _loaded && _calendarView.DisplayMode == CalendarViewDisplayMode.Month &&
+            _decoration.ShowTraditional && _decoration.ShowSecondary
+                ? Visibility.Visible : Visibility.Collapsed;
     }
 
     /// <summary>
@@ -416,7 +626,7 @@ internal sealed class GlanceWidgetController : IDisposable
         // Built-in parity: HasVisibleCurrentImage = has image AND the image
         // is actually visible (opacity > 0.001). A fully transparent
         // background must not show darkening layers (audit 21 R2).
-        bool hasVisibleImage = _images.Length > 0 && imageOpacity > 0.001;
+        bool hasVisibleImage = _displayedImagePath is not null && imageOpacity > 0.001;
         bool nonCalendarForeground = hasVisibleImage &&
             presentation.ForegroundVisibility == Visibility.Visible && !calendar;
         _readabilityLayer.Opacity = presentation.ReadabilityOpacity;
@@ -465,8 +675,6 @@ internal sealed class GlanceWidgetController : IDisposable
         bool sourcesChanged = !GlanceDataFile.SameImageSources(Settings, next.Settings);
         bool imageStyleChanged = Settings.ImageFit != next.Settings.ImageFit ||
             Settings.ImageFocus != next.Settings.ImageFocus;
-        string? selectedImage = _images.Length == 0 ? null :
-            _images[Math.Clamp(_runtimeState.ImageIndex, 0, _images.Length - 1)];
         _data = next;
         _imageStretch = Settings.ImageFit == GlanceImageFitMode.Fit ? Stretch.Uniform : Stretch.UniformToFill;
 
@@ -484,57 +692,169 @@ internal sealed class GlanceWidgetController : IDisposable
         Visibility controls = Settings.ShowPhotoControls ? Visibility.Visible : Visibility.Collapsed;
         _content.FindName("PauseButton").As<Button>().Visibility = controls;
         _content.FindName("NextButton").As<Button>().Visibility = controls;
+        UpdateActionLayer();
 
         if (sourcesChanged)
         {
-            _images = GlanceViewBuilder.LoadImages(Settings, _packageRoot);
-            int retainedIndex = Array.FindIndex(_images,
-                path => string.Equals(path, selectedImage, StringComparison.OrdinalIgnoreCase));
-            _runtimeState.ImageIndex = retainedIndex >= 0 ? retainedIndex : 0;
+            _imageDecoder.Cancel();
+            _needsImageLoad = true;
+            RequestImagesIfNeeded();
         }
-        if (sourcesChanged || imageStyleChanged)
+        if (imageStyleChanged)
         {
-            FinalizeInFlightTransition();
-            _transitionStoryboard?.Stop();
-            _transitionStoryboard = null;
-            _backgroundA.Background = null;
-            _backgroundB.Background = null;
-            _backgroundA.Opacity = 0;
-            _backgroundB.Opacity = 0;
-            ResetTransform(_backgroundA);
-            ResetTransform(_backgroundB);
-            if (_images.Length == 0)
-            {
-                GlanceViewBuilder.ShowGradientFallback(_backgroundA, _hostAppearance.IsDark);
-                _showingA = true;
-            }
-            else Show(_runtimeState.ImageIndex);
+            _imageDecoder.Cancel();
+            _decodePending = false;
+            _needsImageDecode = true;
+            RequestImageDecodeIfNeeded();
         }
+    }
+
+    private void RequestImagesIfNeeded()
+    {
+        if (!_needsImageLoad || (!_loaded && !_collapsed) || !_visible || _longHidden || _disposed) return;
+        _needsImageLoad = false;
+        _ = _imageLoader.RequestAsync(Settings);
+    }
+
+    private void SuspendImageLoading()
+    {
+        _imageLoader.Cancel();
+        _imageDecoder.Cancel();
+        if (_decodePending) _needsImageDecode = true;
+        _decodePending = false;
+        _needsImageLoad = true;
+    }
+
+    private void RequestImageDecodeIfNeeded()
+    {
+        if (!_needsImageDecode || _images.Length == 0 || _disposed ||
+            (!_loaded && !_collapsed) || !_visible || _longHidden) return;
+        _needsImageDecode = false;
+        Show(_runtimeState.ImageIndex);
+    }
+
+    private void ApplyImages(IReadOnlyList<GlanceImageInfo> images)
+    {
+        if (_disposed) return;
+        string[] paths = images.Select(image => image.LocalPath).ToArray();
+        if (!_forceImageReload && _catalogRandomOrder == Settings.RandomOrder &&
+            _catalogPaths.SequenceEqual(paths, StringComparer.OrdinalIgnoreCase))
+        {
+            // Unload may cancel the first decode after discovery has finished.
+            if (_displayedImagePath is null && _failedImages.Count == 0 && _images.Length > 0)
+                Show(_runtimeState.ImageIndex);
+            else RequestImageDecodeIfNeeded();
+            return;
+        }
+        bool forceDecode = _forceImageReload;
+        _forceImageReload = false;
+        string? selected = _displayedImagePath;
+        _imageDecoder.Cancel();
+        _failedImages.Clear();
+        _catalogPaths = paths;
+        _catalogRandomOrder = Settings.RandomOrder;
+        _images = [.. paths];
+        if (_catalogRandomOrder && _images.Length > 1) Random.Shared.Shuffle(_images);
+        int retained = Array.FindIndex(_images, path => string.Equals(path, selected, StringComparison.OrdinalIgnoreCase));
+        _runtimeState.ImageIndex = retained >= 0 ? retained : Math.Clamp(_runtimeState.ImageIndex, 0, Math.Max(0, _images.Length - 1));
+        if (_images.Length == 0) ClearImages();
+        else if (retained < 0 || forceDecode || _needsImageDecode)
+        {
+            _needsImageDecode = false;
+            Show(_runtimeState.ImageIndex);
+        }
+        UpdateClockText();
+        UpdateTimers();
     }
 
     private void RebuildMonth()
     {
+        DateOnly today = DateOnly.FromDateTime(DateTime.Today);
         (_month, _isCompact, _panelHeight, _panelWidth, double itemHeight, bool secondary, GlanceTraditionalCalendarMode mode) =
-            GlanceMonthPipeline.Build(Settings.ShowChineseFestivals, Settings.TraditionalCalendarMode, _culture, _width, _height);
+            GlanceMonthPipeline.Build(Settings.ShowChineseFestivals, Settings.TraditionalCalendarMode, _culture, _width, _height,
+                _displayedMonth, today);
         _decoration.Update(_month, itemHeight, mode != GlanceTraditionalCalendarMode.None, Settings.ShowChineseFestivals, secondary, _culture);
-        _renderedDate = DateOnly.FromDateTime(DateTime.Today);
+        _renderedDate = today;
         UpdateClockText();
+        if (_displayedImagePath is not null && _loaded && _visible && !_collapsed &&
+            !_interactiveResize && !_viewport.IsTransitionActive &&
+            GlanceImageDecodeSizeCalculator.NeedsRefresh(_displayedDecodeWidth, RequiredDecodeWidth()))
+            Show(_runtimeState.ImageIndex);
     }
 
     private void Show(int index)
     {
-        if (_images.Length == 0) return;
-        _runtimeState.ImageIndex = ((index % _images.Length) + _images.Length) % _images.Length;
-        var brush = new ImageBrush
+        if (_images.Length == 0 || _disposed) return;
+        for (int offset = 0; offset < _images.Length; offset++)
         {
-            ImageSource = new Microsoft.UI.Xaml.Media.Imaging.BitmapImage(new Uri(_images[_runtimeState.ImageIndex])),
-            Stretch = _imageStretch,
-        };
-        (brush.AlignmentX, brush.AlignmentY) = GlanceDisplayPolicy.ResolveImageFocus(Settings.ImageFocus);
+            int candidate = ((index + offset) % _images.Length + _images.Length) % _images.Length;
+            if (_failedImages.Contains(_images[candidate])) continue;
+            _requestedImageIndex = candidate;
+            _requestedDecodeWidth = RequiredDecodeWidth();
+            var (alignmentX, alignmentY) = GlanceDisplayPolicy.ResolveImageFocus(Settings.ImageFocus);
+            _decodePending = true;
+            _imageDecoder.Request(_images[candidate], _imageStretch, alignmentX, alignmentY, _requestedDecodeWidth);
+            return;
+        }
+        // Every candidate failed decoding. Keep the last good image, or the
+        // existing gradient when no image has ever opened successfully.
+        UpdateClockText();
+        UpdateTimers();
+    }
+
+    private int RequiredDecodeWidth() => GlanceImageDecodeSizeCalculator.Calculate(
+        _width, _height, _content.XamlRoot?.RasterizationScale ?? 1);
+
+    private void OnImageDecoded(string path, ImageBrush brush)
+    {
+        _decodePending = false;
+        if (_disposed) return;
+        if ((!_loaded && !_collapsed) || !_visible || _longHidden)
+        {
+            _needsImageDecode = true;
+            return;
+        }
+        int index = Array.FindIndex(_images, item => string.Equals(item, path, StringComparison.OrdinalIgnoreCase));
+        if (index < 0) return;
+        _runtimeState.ImageIndex = index;
+        _displayedImagePath = path;
+        _displayedImageSource = brush.ImageSource;
+        _displayedDecodeWidth = _requestedDecodeWidth;
         Border incoming = _showingA ? _backgroundB : _backgroundA;
         Border outgoing = _showingA ? _backgroundA : _backgroundB;
         RunTransition(incoming, outgoing, brush);
-        UpdateAppearance();
+        UpdateClockText();
+        UpdateTimers();
+    }
+
+    private void OnImageDecodeFailed(string path)
+    {
+        _decodePending = false;
+        if (_disposed) return;
+        if ((!_loaded && !_collapsed) || !_visible || _longHidden)
+        {
+            _needsImageDecode = true;
+            return;
+        }
+        _failedImages.Add(path);
+        PackageLogger.LogVerbose($"[GlancePackage] skipped image that could not be decoded: {path}");
+        Show(_requestedImageIndex + 1);
+    }
+
+    private void ClearImages()
+    {
+        _imageDecoder.Cancel();
+        _decodePending = false;
+        _needsImageDecode = false;
+        StopImageTransition();
+        _backgroundA.Background = _backgroundB.Background = null;
+        _backgroundA.Opacity = _backgroundB.Opacity = 0;
+        ResetTransform(_backgroundA);
+        ResetTransform(_backgroundB);
+        _displayedImagePath = null;
+        _displayedImageSource = null;
+        _fallbackIsDark = null;
+        _showingA = true;
     }
 
     /// <summary>
@@ -545,14 +865,17 @@ internal sealed class GlanceWidgetController : IDisposable
     /// </summary>
     private void RunTransition(Border incoming, Border outgoing, ImageBrush brush)
     {
+        // The OS animation event invalidates the host's cache but does not
+        // require an app-settings change. Observe it before each transition.
+        _performance = HostConfig.ReadPerformancePolicy();
         // A previously in-flight transition is finalized first so its
         // half-faded opacities never leak into this run.
-        FinalizeInFlightTransition();
-        _transitionStoryboard?.Stop();
+        StopImageTransition();
         ResetTransform(incoming);
         ResetTransform(outgoing);
 
-        bool animate = Settings.Transition != GlanceTransitionMode.None && outgoing.Background is not null;
+        bool animate = _loaded && !_collapsed && !_interactiveResize && !_viewport.IsTransitionActive &&
+            _performance.AllowDecorativeAnimations && Settings.Transition != GlanceTransitionMode.None && outgoing.Background is not null;
         if (!animate)
         {
             incoming.Background = brush;
@@ -592,9 +915,14 @@ internal sealed class GlanceWidgetController : IDisposable
             AddAnimation(storyboard, zoom, "ScaleY", 1.035, 1, duration);
         }
 
+        long generation = ++_transitionGeneration;
         storyboard.Completed += (_, _) =>
         {
+            if (generation != _transitionGeneration || !ReferenceEquals(_transitionStoryboard, storyboard)) return;
             _transitionInFlight = false;
+            _transitionIncoming = null;
+            _transitionStoryboard = null;
+            incoming.Opacity = 1;
             outgoing.Background = null;
             outgoing.Opacity = 0;
             ResetTransform(incoming);
@@ -620,6 +948,16 @@ internal sealed class GlanceWidgetController : IDisposable
         outgoing.Background = null;
         ResetTransform(incoming);
         _showingA = ReferenceEquals(incoming, _backgroundA);
+        _transitionIncoming = null;
+    }
+
+    private void StopImageTransition()
+    {
+        _transitionGeneration++;
+        FinalizeInFlightTransition();
+        Microsoft.UI.Xaml.Media.Animation.Storyboard? storyboard = _transitionStoryboard;
+        _transitionStoryboard = null;
+        storyboard?.Stop();
     }
 
     private static void ResetTransform(Border border)
@@ -668,11 +1006,10 @@ internal sealed class GlanceWidgetController : IDisposable
     private void StopVisualResources()
     {
         if (_disposed) return;
-        FinalizeInFlightTransition();
+        StopImageTransition();
         _clockTimer.Stop();
         _rotationTimer.Stop();
         _resizeTimer.Stop();
-        _transitionStoryboard?.Stop();
     }
 
     /// <summary>
@@ -685,12 +1022,18 @@ internal sealed class GlanceWidgetController : IDisposable
     {
         if (_disposed) return;
         _disposed = true;
+        _displayedImageSource = null;
+        try { _calendarNavigation.Dispose(); }
+        catch (Exception error) { PackageLogger.LogVerbose($"[GlancePackage] calendar cleanup failed: {error.Message}"); }
+        try { _calendarView.UnregisterPropertyChangedCallback(CalendarView.DisplayModeProperty, _calendarModeToken); }
+        catch (Exception error) { PackageLogger.LogVerbose($"[GlancePackage] calendar callback cleanup failed: {error.Message}"); }
         _appearance.Dispose();
-        FinalizeInFlightTransition();
+        _imageLoader.Dispose();
+        _imageDecoder.Dispose();
+        StopImageTransition();
         _clockTimer.Stop();
         _rotationTimer.Stop();
         _resizeTimer.Stop();
-        _transitionStoryboard?.Stop();
         GlanceRuntimeState.TrySave(_runtimeState, _instanceDataRoot);
     }
 }

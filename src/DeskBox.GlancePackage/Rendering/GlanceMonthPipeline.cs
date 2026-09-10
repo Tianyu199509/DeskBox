@@ -9,7 +9,7 @@ namespace DeskBox.GlancePackage.Rendering;
 /// <summary>
 /// Month-data pipeline: production source → traditional calendar → festival
 /// → presentation. D3 product migration: culture comes from the host config
-/// channel (HostApi v2 GetConfigJson), the month is the CURRENT month, and
+/// channel (HostApi v2 GetConfigJson), the month follows calendar navigation, and
 /// sizing is parameterized by the live viewport (defaults mirror
 /// GlanceWidgetViewModel at 440x560 until the first ViewportChanged event).
 /// </summary>
@@ -19,13 +19,15 @@ internal static class GlanceMonthPipeline
     public const double DefaultHeight = 560;
 
     public static (GlanceCalendarMonth Month, bool IsCompact, double PanelHeight, double PanelWidth, double DayItemHeight, bool ShowSecondary, GlanceTraditionalCalendarMode EffectiveMode) Build(
-        bool showFestivals, GlanceTraditionalCalendarMode traditionalMode, CultureInfo culture, double availableWidth, double availableHeight)
+        bool showFestivals, GlanceTraditionalCalendarMode traditionalMode, CultureInfo culture, double availableWidth, double availableHeight,
+        DateOnly? displayedMonth = null, DateOnly? currentDate = null)
     {
-        DateOnly today = DateOnly.FromDateTime(DateTime.Today);
-        DateOnly month = new(today.Year, today.Month, 1);
+        DateOnly today = currentDate ?? DateOnly.FromDateTime(DateTime.Today);
+        DateOnly month = GlanceCalendarNavigationPolicy.ClampMonth(displayedMonth ?? today);
         GlanceCalendarMonth calendarMonth = new LocalCalendarPresentationSource()
-            .GetMonthAsync(month, culture).GetAwaiter().GetResult();
-        DateOnly titleDate = today;
+            .GetMonthAsync(month, culture, today).GetAwaiter().GetResult();
+        // Built-in parity: current month uses today, browsed months use the 15th.
+        DateOnly titleDate = GlanceCalendarNavigationPolicy.ResolveTitleDate(month, today);
         // The real mode travels through the pipeline (audit round 18: a bool
         // collapsed Hebrew/Japanese/Persian/... into Chinese lunar).
         GlanceTraditionalCalendarMode mode = traditionalMode == GlanceTraditionalCalendarMode.Auto

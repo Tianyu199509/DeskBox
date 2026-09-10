@@ -92,7 +92,8 @@ public sealed class DeskBoxDataBackupServiceTests : IDisposable
         Task<string> exportTask = service.ExportBackupAsync(_exportRoot);
         string stagedSettingsPath = await WaitForStagedFileAsync(
             service.BackupSnapshotStagingDirectory,
-            Path.Combine("data", "settings.json"));
+            Path.Combine("data", "settings.json"),
+            "{\"theme\":\"Light\"}");
         Assert.True(File.Exists(stagedSettingsPath));
 
         await File.WriteAllTextAsync(settingsPath, "{\"theme\":\"Dark\"}");
@@ -891,7 +892,8 @@ public sealed class DeskBoxDataBackupServiceTests : IDisposable
 
     private static async Task<string> WaitForStagedFileAsync(
         string stagingDirectory,
-        string relativePath)
+        string relativePath,
+        string expectedContent)
     {
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         while (!timeout.IsCancellationRequested)
@@ -904,7 +906,15 @@ public sealed class DeskBoxDataBackupServiceTests : IDisposable
                     .FirstOrDefault(File.Exists);
                 if (stagedFile is not null)
                 {
-                    return stagedFile;
+                    // File creation precedes the asynchronous copy. Waiting
+                    // for existence alone can mutate the source before the
+                    // snapshot has read it, testing a different race entirely.
+                    try
+                    {
+                        if (await File.ReadAllTextAsync(stagedFile, timeout.Token) == expectedContent)
+                            return stagedFile;
+                    }
+                    catch (IOException) { } // copy owns the file until ready
                 }
             }
 

@@ -10,6 +10,7 @@ namespace DeskBox.Controls.WidgetContents;
 
 public sealed class GlanceWidgetContentAdapter :
     IWidgetContent,
+    IWidgetCompactBackgroundContent,
     IWidgetResponsiveLayoutContent,
     IDisposable
 {
@@ -62,6 +63,15 @@ public sealed class GlanceWidgetContentAdapter :
 
     public void CancelResponsiveLayoutTransition()
     {
+    }
+
+    public WidgetCompactBackgroundSnapshot? GetCompactBackground()
+    {
+        double opacity = ViewModel.BackgroundImageOpacity;
+        if (!ViewModel.HasVisibleCurrentImage || !double.IsFinite(opacity) || opacity <= 0 || opacity > 1)
+            return null;
+        ImageSource? image = GetCompactBackgroundImage();
+        return image is null ? null : new WidgetCompactBackgroundSnapshot(image, opacity);
     }
 
     public ImageSource? GetCompactBackgroundImage()

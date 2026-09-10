@@ -32,6 +32,17 @@ internal static class NativeWidgetDataMigration
         if (migration is null) return false;
         try
         {
+            var identity = new NativePackageIdentity(publisherFingerprint, packageId);
+            try
+            {
+                // Package-wide preparation must run even without instance
+                // settings. Adapters may only write small handoff metadata.
+                migration.PreparePackageData(dataDirectory, identity.ResolvePackageDataRoot(dataDirectory));
+            }
+            catch (Exception error)
+            {
+                App.LogVerbose($"[NativePackage] package data preparation failed: {error.Message}");
+            }
             string? legacy = migration.ResolveLegacyContent(dataDirectory, instanceId);
             if (legacy is null)
             {
@@ -39,8 +50,7 @@ internal static class NativeWidgetDataMigration
                 // already owns stays untouched.
                 return false;
             }
-            string instanceRoot = new NativePackageIdentity(publisherFingerprint, packageId)
-                .ResolveInstanceDataRoot(dataDirectory, instanceId);
+            string instanceRoot = identity.ResolveInstanceDataRoot(dataDirectory, instanceId);
             Directory.CreateDirectory(instanceRoot);
             WriteResilient(Path.Combine(instanceRoot, migration.DataFileName), legacy);
             App.Log($"[NativePackage] synced legacy data for instance {instanceId}");

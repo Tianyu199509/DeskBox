@@ -15,77 +15,11 @@ namespace DeskBox.GlancePackage.Rendering;
 /// </summary>
 internal static class GlanceViewBuilder
 {
-    private static readonly string[] ImageExtensions = [".png", ".jpg", ".jpeg", ".webp", ".bmp"];
-
-    internal static string[] LoadImages(GlanceWidgetData settings, string packageRoot)
-    {
-        IEnumerable<string> files = settings.BackgroundSource switch
-        {
-            // Explicit file list: user order is meaningful, never re-sort.
-            GlanceBackgroundSource.LocalFiles => settings.LocalImagePaths.Where(File.Exists),
-            GlanceBackgroundSource.LocalFolder when !string.IsNullOrWhiteSpace(settings.LocalFolderPath) &&
-                                                    Directory.Exists(settings.LocalFolderPath)
-                => EnumerateImageFiles(settings.LocalFolderPath),
-            _ => BundledBackgrounds(packageRoot, settings.BackgroundSource),
-        };
-        string[] images = files.ToArray();
-        if (settings.RandomOrder && images.Length > 1)
-        {
-            // Approximate random rotation with a per-load shuffle.
-            for (int index = images.Length - 1; index > 0; index--)
-            {
-                int swap = Random.Shared.Next(index + 1);
-                (images[swap], images[index]) = (images[index], images[swap]);
-            }
-        }
-        return images;
-    }
-
-    private static IEnumerable<string> BundledBackgrounds(string packageRoot, GlanceBackgroundSource configured)
-    {
-        if (configured is not (GlanceBackgroundSource.Online or GlanceBackgroundSource.Bing))
-        {
-            yield break;
-        }
-        // Online/Bing sources need a network path the package does not have
-        // yet; fall back to the bundled backgrounds until that batch lands.
-        PackageLogger.LogVerbose(
-            $"[GlancePackage] background source {configured} is not available natively yet; using bundled backgrounds");
-        foreach (string file in EnumerateImageFiles(Path.Combine(packageRoot, "backgrounds")))
-        {
-            yield return file;
-        }
-    }
-
-    private static IEnumerable<string> EnumerateImageFiles(string directory)
-    {
-        // Built-in parity: the same extension set, and a failing folder
-        // (network share hiccup, permissions) yields nothing instead of
-        // throwing the whole widget away.
-        foreach (string extension in ImageExtensions)
-        {
-            string[]? files = null;
-            try
-            {
-                files = Directory.GetFiles(directory, "*" + extension);
-            }
-            catch (Exception error)
-            {
-                PackageLogger.LogVerbose($"[GlancePackage] failed to enumerate {directory}: {error.Message}");
-                yield break;
-            }
-            foreach (string file in files)
-            {
-                yield return file;
-            }
-        }
-    }
-
     internal static void ShowGradientFallback(Border background, bool isDark = true)
     {
         // No resolvable image set: an explicit gradient surface instead of a
-        // dead black widget (the official package ships no bundled images
-        // yet; the online-source batch will replace this).
+        // dead black widget while the asynchronous cache/network load runs;
+        // failed online loads keep this placeholder and can retry on refresh.
         var gradient = new LinearGradientBrush
         {
             StartPoint = new Windows.Foundation.Point(0, 0),

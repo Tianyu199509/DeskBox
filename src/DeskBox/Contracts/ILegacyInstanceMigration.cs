@@ -25,6 +25,13 @@ public interface ILegacyInstanceMigration
     string DataFileName { get; }
 
     /// <summary>
+    /// Prepares a small package-wide legacy data handoff at native creation.
+    /// Runs on the caller's thread: record source metadata only; the package
+    /// must perform any bulk copying asynchronously before reading its cache.
+    /// </summary>
+    void PreparePackageData(string dataDirectory, string packageDataRoot) { }
+
+    /// <summary>
     /// Resolves the feature's legacy persisted bytes for this instance
     /// (primary, backups, single-instance legacy stores — feature-owned
     /// recovery chain). Returns null when the host has no data; the

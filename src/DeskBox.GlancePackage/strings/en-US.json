@@ -3,7 +3,11 @@
   "add": "Add",
   "todoHeader": "Todo",
   "statusReady": "ready",
-  "menuNextBackground": "Next background",
+  "menuNextBackground": "Next photo",
   "menuPauseRotation": "Pause rotation",
-  "menuSettings": "Settings"
+  "menuSettings": "Settings",
+  "festivalToggle": "Chinese traditional festivals",
+  "traditionalToggle": "Traditional calendar",
+  "toggleOff": "Off",
+  "toggleOn": "On"
 }

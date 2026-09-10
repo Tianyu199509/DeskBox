@@ -6,7 +6,7 @@ namespace DeskBox.GlancePackage.Rendering;
 /// Normalization subset for settings currently consumed by the native
 /// package (audit round 21 R2 repair): ports the rules from the built-in
 /// GlanceWidgetStore.Normalize for fields the package actually renders.
-/// Not yet included: Version stamp and OnlineImageCategory.
+/// Not yet included: Version stamp.
 /// When those fields are migrated
 /// into the package, their Normalize rules must be ported at that time.
 /// </summary>
@@ -63,6 +63,8 @@ internal static class GlanceSettingsNormalizer
         data.BackgroundSource = Enum.IsDefined(data.BackgroundSource)
             ? data.BackgroundSource
             : GlanceBackgroundSource.Bing;
+        data.OnlineImageCategory = Enum.IsDefined(data.OnlineImageCategory)
+            ? data.OnlineImageCategory : GlanceOnlineImageCategory.Featured;
         data.Transition = Enum.IsDefined(data.Transition) ? data.Transition : GlanceTransitionMode.CrossFade;
         data.TransitionSpeed = Enum.IsDefined(data.TransitionSpeed) ? data.TransitionSpeed : GlanceTransitionSpeed.Standard;
         data.Readability = Enum.IsDefined(data.Readability) ? data.Readability : GlanceReadabilityMode.Soft;

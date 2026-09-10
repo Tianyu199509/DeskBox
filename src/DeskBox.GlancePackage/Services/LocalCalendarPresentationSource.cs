@@ -14,14 +14,19 @@ public sealed class LocalCalendarPresentationSource : ICalendarPresentationSourc
         DateOnly month,
         CultureInfo culture,
         CancellationToken cancellationToken = default)
+        => GetMonthAsync(month, culture, DateOnly.FromDateTime(DateTime.Today), cancellationToken);
+
+    internal Task<GlanceCalendarMonth> GetMonthAsync(
+        DateOnly month,
+        CultureInfo culture,
+        DateOnly today,
+        CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
         DateOnly first = new(month.Year, month.Month, 1);
         DayOfWeek firstDayOfWeek = culture.DateTimeFormat.FirstDayOfWeek;
         int leadingDays = ((int)first.DayOfWeek - (int)firstDayOfWeek + 7) % 7;
         DateOnly gridStart = first.AddDays(-leadingDays);
-        DateOnly today = DateOnly.FromDateTime(DateTime.Today);
-
         var headers = new List<string>(7);
         string[] shortestDayNames = culture.DateTimeFormat.ShortestDayNames;
         for (int index = 0; index < 7; index++)

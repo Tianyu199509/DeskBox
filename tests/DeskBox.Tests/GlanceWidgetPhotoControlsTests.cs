@@ -144,7 +144,7 @@ public sealed class GlanceWidgetPhotoControlsTests
             StringComparison.Ordinal);
         Assert.Contains("CreateGlanceCompactPresentation", host, StringComparison.Ordinal);
         Assert.Contains("ImageSource? backgroundImage = viewModel.HasVisibleCurrentImage", host, StringComparison.Ordinal);
-        Assert.Contains("glance.GetCompactBackgroundImage()", host, StringComparison.Ordinal);
+        Assert.Contains("((IWidgetCompactBackgroundContent)glance).GetCompactBackground()", host, StringComparison.Ordinal);
         Assert.Contains("Thumbnail: backgroundImage", host, StringComparison.Ordinal);
         Assert.Contains("UseFullBleedBackground: backgroundImage is not null", host, StringComparison.Ordinal);
         Assert.Contains(
@@ -152,7 +152,7 @@ public sealed class GlanceWidgetPhotoControlsTests
             host,
             StringComparison.Ordinal);
         Assert.Contains("UseUniformFullBleedOverlay: true", host, StringComparison.Ordinal);
-        Assert.Contains("FullBleedBackgroundOpacity: viewModel.BackgroundImageOpacity", host, StringComparison.Ordinal);
+        Assert.Contains("FullBleedBackgroundOpacity: background?.Opacity ?? 0", host, StringComparison.Ordinal);
         Assert.Contains("UseStackedText: true", host, StringComparison.Ordinal);
         Assert.Contains("viewModel.TimeText", host, StringComparison.Ordinal);
         Assert.Contains("viewModel.DateText", host, StringComparison.Ordinal);

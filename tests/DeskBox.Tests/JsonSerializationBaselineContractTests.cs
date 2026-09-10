@@ -13,7 +13,7 @@ public sealed class JsonSerializationBaselineContractTests : IDisposable
         Guid.NewGuid().ToString("N"));
 
     [Fact]
-    public void ProductionInventory_IsFrozenAtTwentyEightFilesAndSixtyFourCalls()
+    public void HostInventory_IsFrozenAtTwentyNineFilesAndSixtySevenCalls()
     {
         var expected = new Dictionary<string, int>(StringComparer.Ordinal)
         {
@@ -48,7 +48,9 @@ public sealed class JsonSerializationBaselineContractTests : IDisposable
             ["src/DeskBox/Services/WidgetFileStackSettings.cs"] = 7
         };
 
-        Dictionary<string, int> actual = ProductionSourceFiles()
+        // The frozen baseline belongs to the host executable. Independently
+        // built feature packages own separate serialization contexts.
+        Dictionary<string, int> actual = HostSourceFiles()
             .Select(path => new
             {
                 Path = RepositoryRelativePath(path),
@@ -98,7 +100,7 @@ public sealed class JsonSerializationBaselineContractTests : IDisposable
             "src/DeskBox/Services/WeatherService.cs",
             "src/DeskBox/Services/WidgetFileStackSettings.cs"
         ];
-        string[] actualContextOwners = ProductionSourceFiles()
+        string[] actualContextOwners = HostSourceFiles()
             .Where(path => File.ReadAllText(path).Contains(
                 "JsonSerializerContext",
                 StringComparison.Ordinal))
@@ -108,6 +110,16 @@ public sealed class JsonSerializationBaselineContractTests : IDisposable
 
         Assert.Equal(27, actualContextOwners.Length);
         Assert.Equal(expectedContextOwners, actualContextOwners);
+    }
+
+    [Fact]
+    public void NativeImageCatalogUsesItsOwnSourceGeneratedContext()
+    {
+        string source = ReadSource("src/DeskBox.GlancePackage/Services/GlanceImageService.cs");
+        Assert.Equal(2, Regex.Matches(source,
+            @"JsonSerializer\.(?:SerializeToUtf8Bytes|Serialize|Deserialize)(?:Async)?\b").Count);
+        Assert.Equal(2, Regex.Matches(source, @"GlanceImageCatalogJsonContext\.Default\.ImageCatalog").Count);
+        Assert.DoesNotContain("JsonSerializerOptions", source);
     }
 
     [Fact]
@@ -664,6 +676,10 @@ public sealed class JsonSerializationBaselineContractTests : IDisposable
 
     private static IEnumerable<string> ProductionSourceFiles() =>
         TestPaths.EnumerateProductionSourceFiles();
+
+    private static IEnumerable<string> HostSourceFiles() =>
+        ProductionSourceFiles().Where(path => RepositoryRelativePath(path)
+            .StartsWith("src/DeskBox/", StringComparison.Ordinal));
 
     private static string RepositoryRelativePath(string path) =>
         Path.GetRelativePath(TestPaths.FromRepository("."), path)

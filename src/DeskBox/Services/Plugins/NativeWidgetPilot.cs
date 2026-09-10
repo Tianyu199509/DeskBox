@@ -129,6 +129,7 @@ internal static class NativeWidgetPilot
 
 internal sealed class NativeWidgetPilotContent :
     IWidgetContent,
+    IWidgetCompactBackgroundContent,
     IWidgetResponsiveLayoutContent,
     IWidgetHostViewportContent,
     IWidgetPerformanceAwareContent,
@@ -137,6 +138,8 @@ internal sealed class NativeWidgetPilotContent :
 {
     private readonly NativeWidgetLease _lease;
     private readonly NativeInstanceSettingsSubscription? _settingsSubscription;
+    private FrameworkElement? _compactBackgroundView;
+    private bool _compactBackgroundNotificationsStopped;
 
     internal NativeWidgetPilotContent(WidgetConfig config, NativeWidgetLease lease)
     {
@@ -153,7 +156,17 @@ internal sealed class NativeWidgetPilotContent :
                 () => NativeWidgetDataMigration.TrySync(
                     migration, identity.PublisherFingerprint, identity.PackageId,
                     config.Id, DeskBoxDataPathService.Current.DataDirectory),
-                () => _lease.InvokeWidgetEvent(WidgetLifecycleEventKind.RefreshRequested, 0, 0, 0));
+                // Bit 0 means settings-only; ordinary/older flags=0 refreshes
+                // retain their full-content meaning.
+                refreshContent => _lease.InvokeWidgetEvent(WidgetLifecycleEventKind.RefreshRequested, 0, 0, refreshContent ? 0u : 1u));
+        }
+        // Treat DataContextChanged only as an invalidation signal. The package
+        // publishes a fresh context after decode/settings updates; its CLR
+        // business object is never inspected or projected by the host.
+        if (lease.View is { } backgroundView)
+        {
+            _compactBackgroundView = backgroundView;
+            backgroundView.DataContextChanged += CompactBackgroundView_DataContextChanged;
         }
     }
 
@@ -172,7 +185,7 @@ internal sealed class NativeWidgetPilotContent :
 
     public Task RefreshAsync()
     {
-        if (_settingsSubscription is not null) _settingsSubscription.RequestRefresh();
+        if (_settingsSubscription is not null) _settingsSubscription.RequestRefresh(refreshContent: true);
         else _lease.InvokeWidgetEvent(WidgetLifecycleEventKind.RefreshRequested, 0, 0, 0);
         return Task.CompletedTask;
     }
@@ -198,6 +211,33 @@ internal sealed class NativeWidgetPilotContent :
     public void OnCompactStateChanged(bool collapsed) =>
         _lease.InvokeWidgetEvent(WidgetLifecycleEventKind.CompactStateChanged, 0, 0, collapsed ? 1u : 0u);
 
+    public WidgetCompactBackgroundSnapshot? GetCompactBackground() =>
+        _lease.GetCompactBackground();
+
+    public event EventHandler? CompactBackgroundChanged;
+
+    private void CompactBackgroundView_DataContextChanged(FrameworkElement sender, DataContextChangedEventArgs args)
+    {
+        if (ReferenceEquals(sender, _compactBackgroundView)) NotifyCompactBackgroundChanged();
+    }
+
+    // Managed seam: no WinUI object or package DataContext is needed to
+    // verify notification delivery and suppression after disposal.
+    internal void NotifyCompactBackgroundChanged()
+    {
+        if (_compactBackgroundNotificationsStopped) return;
+        try
+        {
+            CompactBackgroundChanged?.Invoke(this, EventArgs.Empty);
+        }
+        catch (Exception error)
+        {
+            // A host subscriber must not throw back into the package's
+            // WinRT DataContext update.
+            App.LogVerbose($"[NativePackage] compact background notification failed: {error.Message}");
+        }
+    }
+
     public void BeginResponsiveLayoutTransition(double targetContentWidth, double targetContentHeight, bool isCollapsing) =>
         _lease.InvokeWidgetEvent(WidgetLifecycleEventKind.ResponsiveLayoutBegin, targetContentWidth, targetContentHeight, isCollapsing ? 1u : 0u);
 
@@ -221,6 +261,22 @@ internal sealed class NativeWidgetPilotContent :
 
     public void Dispose()
     {
+        _compactBackgroundNotificationsStopped = true;
+        CompactBackgroundChanged = null;
+        FrameworkElement? backgroundView = _compactBackgroundView;
+        try
+        {
+            if (backgroundView is not null)
+                backgroundView.DataContextChanged -= CompactBackgroundView_DataContextChanged;
+            _compactBackgroundView = null;
+        }
+        catch (Exception error)
+        {
+            // Keep the view for a later detach retry; notifications are
+            // already suppressed, and package destroy must still run.
+            App.LogVerbose($"[NativePackage] compact background detach failed: {error.Message}");
+        }
+        // Keep the existing destroy retry path even after notifications stop.
         _settingsSubscription?.Dispose();
         ((IDisposable)_lease).Dispose();
     }

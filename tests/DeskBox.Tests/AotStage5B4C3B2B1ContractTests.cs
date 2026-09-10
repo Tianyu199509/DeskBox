@@ -162,7 +162,7 @@ public sealed class AotStage5B4C3B2B1ContractTests
             "tests/DeskBox.Tests/JsonSerializationBaselineContractTests.cs");
         string rust = Read("native/deskbox-native/src/lib.rs");
 
-        Assert.Contains("TwentyEightFilesAndSixtyFourCalls", baseline, StringComparison.Ordinal);
+        Assert.Contains(nameof(JsonSerializationBaselineContractTests.HostInventory_IsFrozenAtTwentyNineFilesAndSixtySevenCalls), baseline, StringComparison.Ordinal);
         Assert.Contains("Assert.Equal(29, actual.Count)", baseline, StringComparison.Ordinal);
         Assert.Contains("Assert.Equal(67, actual.Values.Sum())", baseline, StringComparison.Ordinal);
         Assert.Contains("Assert.Equal(27, actualContextOwners.Length)", baseline, StringComparison.Ordinal);

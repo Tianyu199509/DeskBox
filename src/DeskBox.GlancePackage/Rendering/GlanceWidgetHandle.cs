@@ -23,10 +23,15 @@ internal sealed class GlanceWidgetHandle(GlanceWidgetController controller)
                 _controller.OnAppearanceChanged();
                 break;
             case 1: // RefreshRequested
-                _controller.RefreshRequested();
+                // Bit 0 marks a settings-only notification. flags=0 keeps
+                // the full refresh behavior of ordinary ABI v4 callers.
+                _controller.RefreshRequested(refreshImages: (flags & 1) == 0);
                 break;
             case 5: // VisibilityChanged (flags bit 0: 1=visible)
                 _controller.OnVisibilityChanged((flags & 1) != 0);
+                break;
+            case 6:
+                _controller.OnRevealCompleted();
                 break;
             case 7: // LongHidden
                 _controller.OnLongHidden();
@@ -37,10 +42,25 @@ internal sealed class GlanceWidgetHandle(GlanceWidgetController controller)
             case 9: // ViewportChanged (width/height carry the new size)
                 _controller.OnViewportChanged(width, height);
                 break;
-            // 3 Activated, 4 Deactivated, 6 RevealCompleted,
-            // 10 PerformanceSettingsChanged, 11-12 interactive resize, 13-15
-            // responsive transitions: no package-side behavior yet - these
-            // land with the performance-policy and interaction batches.
+            case 10: // PerformanceSettingsChanged
+                _controller.OnPerformanceSettingsChanged();
+                break;
+            case 11:
+                _controller.BeginInteractiveResize();
+                break;
+            case 12:
+                _controller.CompleteInteractiveResize(width, height);
+                break;
+            case 13:
+                _controller.BeginResponsiveLayoutTransition(width, height);
+                break;
+            case 14:
+                _controller.CompleteResponsiveLayoutTransition(width, height);
+                break;
+            case 15:
+                _controller.CancelResponsiveLayoutTransition();
+                break;
+            // Activated/Deactivated have no additional content-side policy.
         }
     }
 

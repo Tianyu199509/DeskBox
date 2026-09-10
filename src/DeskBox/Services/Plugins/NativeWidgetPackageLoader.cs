@@ -201,11 +201,21 @@ internal static unsafe class NativeHostApiBridge
         }
     }
 
-    /// <summary>Append-only JSON fields; the frozen HostApi v4 slots stay unchanged.</summary>
+    /// <summary>
+    /// Append-only JSON fields; the frozen HostApi v4 slots stay unchanged.
+    /// The animation argument is the effective WindowsCompatibilityService.ShouldAnimate
+    /// gate used by built-in Glance transitions, independent of rotation preferences.
+    /// </summary>
     internal static string BuildConfigJson(string locale, string accent,
         string theme = "Dark", string materialType = "Mica",
-        double materialOpacity = 0.8, double materialIntensity = 0.65)
+        double materialOpacity = 0.8, double materialIntensity = 0.65,
+        Models.AppSettings? performanceSettings = null, bool allowDecorativeAnimations = true)
     {
+        // Use the same resolver as built-in Glance. The legacy aggregate
+        // decorative-effects switch is only a compatibility mirror.
+        bool allowImageAutoRotation = performanceSettings is null
+            ? PerformanceSettingsPolicy.DefaultGlanceImageAutoRotationEnabled
+            : PerformanceSettingsPolicy.Resolve(performanceSettings).AllowGlanceImageAutoRotation;
         using var stream = new MemoryStream();
         using (var writer = new Utf8JsonWriter(stream))
         {
@@ -216,6 +226,8 @@ internal static unsafe class NativeHostApiBridge
             writer.WriteString("materialType", materialType);
             writer.WriteNumber("materialOpacity", double.IsFinite(materialOpacity) ? Math.Clamp(materialOpacity, 0, 1) : 0.8);
             writer.WriteNumber("materialIntensity", double.IsFinite(materialIntensity) ? Math.Clamp(materialIntensity, 0, 1) : 0.65);
+            writer.WriteBoolean("allowImageAutoRotation", allowImageAutoRotation);
+            writer.WriteBoolean("allowDecorativeAnimations", allowDecorativeAnimations);
             writer.WriteEndObject();
         }
         return Encoding.UTF8.GetString(stream.ToArray());
@@ -250,7 +262,8 @@ internal static unsafe class NativeHostApiBridge
                 isDark ? "Dark" : "Light",
                 WindowsCompatibilityService.ResolveWidgetMaterialType(settings?.WidgetMaterialType ?? SettingsService.WidgetMaterialTypeMica),
                 settings?.WidgetOpacity ?? SettingsService.DefaultWidgetOpacity,
-                settings?.WidgetMaterialIntensity ?? SettingsService.DefaultWidgetMaterialIntensity));
+                settings?.WidgetMaterialIntensity ?? SettingsService.DefaultWidgetMaterialIntensity,
+                settings, WindowsCompatibilityService.ShouldAnimate));
             if (utf8.Length > bufferLength) return utf8.Length;
             for (int index = 0; index < utf8.Length; index++) buffer[index] = utf8[index];
             return utf8.Length;
@@ -386,7 +399,9 @@ internal static class NativeWidgetRuntimeManager
     public const string NativeRuntimeType = "native";
     private static readonly object Gate = new();
     private static readonly Dictionary<string, NativePackageSession> Sessions = [];
-    private static readonly Dictionary<string, string> LoadedModuleHashes = [];
+    // Serializes activate/create/destroy/shutdown for one package identity
+    // without ever invoking package code under the global manager lock.
+    private static readonly Dictionary<string, object> IdentityGates = [];
     // audit round 21 — Faulted/RestartRequired: a package whose shutdown
     // reported failure has unknown internal state, and the NativeAOT module
     // stays resident for the process lifetime. It must never be re-activated
@@ -409,58 +424,43 @@ internal static class NativeWidgetRuntimeManager
         out NativeWidgetLease? lease)
     {
         lease = null;
-        // audit round 21 — Faulted/RestartRequired: a package whose shutdown
-        // failed has unknown resident state; refuse re-activation until
-        // process restart even though the module is still loaded.
-        lock (Gate)
+        object identityGate = GetIdentityGate(descriptor.Identity.Key);
+        lock (identityGate)
         {
-            if (FaultedPackages.TryGetValue(descriptor.Identity.Key, out string? reason))
+            NativePackageSession? session;
+            // audit round 21 — Faulted/RestartRequired: a package whose
+            // shutdown failed has unknown resident state; refuse re-activation
+            // until process restart even though the module is still loaded.
+            lock (Gate)
             {
-                App.Log($"[NativePackage] {descriptor.Identity.Key} is faulted and cannot be re-activated in this process ({reason})");
-                return false;
-            }
-        }
-        NativePackageSession? session = null;
-        lock (Gate)
-        {
-            if (Sessions.TryGetValue(descriptor.Identity.Key, out NativePackageSession? existing))
-            {
-                if (!string.Equals(LoadedModuleHashes[descriptor.Identity.Key], descriptor.ContentHash, StringComparison.Ordinal))
+                if (FaultedPackages.TryGetValue(descriptor.Identity.Key, out string? reason))
+                {
+                    App.Log($"[NativePackage] {descriptor.Identity.Key} is faulted and cannot be re-activated in this process ({reason})");
+                    return false;
+                }
+                // Module residency outlives sessions, including failed activation.
+                if (!NativeWidgetPackageLoader.IsContentHashCompatible(descriptor))
                 {
                     App.Log($"[NativePackage] {descriptor.Identity.Key} already loaded with a different content hash; restart required to activate the new version");
                     return false;
                 }
-                session = existing;
+                Sessions.TryGetValue(descriptor.Identity.Key, out session);
             }
-        }
-        if (session is null)
-        {
-            // Module open + package activate run OUTSIDE the manager lock.
-            NativePackageSession? opened = NativeWidgetPackageLoader.TryOpenSession(descriptor, dataDirectory);
-            if (opened is null) return false;
-            lock (Gate)
+
+            if (session is null)
             {
-                if (Sessions.TryGetValue(descriptor.Identity.Key, out NativePackageSession? existing))
-                {
-                    if (!string.Equals(LoadedModuleHashes[descriptor.Identity.Key], descriptor.ContentHash, StringComparison.Ordinal))
-                    {
-                        App.Log($"[NativePackage] {descriptor.Identity.Key} was loaded concurrently with a different content hash; restart required");
-                        return false;
-                    }
-                    session = existing;
-                }
-                else
-                {
-                    Sessions[descriptor.Identity.Key] = opened;
-                    LoadedModuleHashes[descriptor.Identity.Key] = descriptor.ContentHash;
-                    session = opened;
-                }
+                // The identity gate guarantees exactly one open/activate path
+                // for the first concurrent instance request.
+                session = NativeWidgetPackageLoader.TryOpenSession(descriptor, dataDirectory);
+                if (session is null) return false;
+                lock (Gate) Sessions[descriptor.Identity.Key] = session;
             }
+
+            NativeWidgetLease? created = session.CreateInstance(contributionId, instanceId, dataDirectory);
+            if (created is null) return false;
+            lease = created;
+            return true;
         }
-        NativeWidgetLease? created = session.CreateInstance(contributionId, instanceId, dataDirectory);
-        if (created is null) return false;
-        lease = created;
-        return true;
     }
 
     /// <summary>
@@ -505,37 +505,49 @@ internal static class NativeWidgetRuntimeManager
 
     internal static void Release(NativeWidgetLease lease)
     {
-        // Package destroy runs outside the manager lock; TryRelease only
-        // commits the lease as released when the package reports success.
-        if (!lease.TryRelease()) return;
-        bool shutdown;
-        lock (Gate)
+        object identityGate = GetIdentityGate(lease.Session.Identity.Key);
+        lock (identityGate)
         {
-            shutdown = lease.Session.LiveInstanceCount == 0;
+            // Package destroy runs outside the manager lock; TryRelease only
+            // commits the lease as released when the package reports success.
+            if (!lease.TryRelease()) return;
+            bool shutdown;
+            lock (Gate)
+            {
+                shutdown = lease.Session.LiveInstanceCount == 0;
+                if (shutdown &&
+                    Sessions.TryGetValue(lease.Session.Identity.Key, out NativePackageSession? current) &&
+                    ReferenceEquals(current, lease.Session))
+                {
+                    Sessions.Remove(lease.Session.Identity.Key);
+                }
+            }
             if (shutdown)
             {
-                Sessions.Remove(lease.Session.Identity.Key);
+                // audit round 21 — Faulted/RestartRequired: a failed package
+                // shutdown leaves the resident module's state unknown, so the
+                // identity is marked faulted before another create can enter.
+                if (lease.Session.Shutdown())
+                {
+                    App.Log($"[NativePackage] {lease.Session.Identity.Key} dormant; re-activation allowed");
+                }
+                else
+                {
+                    string reason = "package shutdown reported failure; restart required";
+                    lock (Gate) FaultedPackages[lease.Session.Identity.Key] = reason;
+                    App.Log($"[NativePackage] {lease.Session.Identity.Key} marked FAULTED: {reason}");
+                }
             }
         }
-        if (shutdown)
+    }
+
+    private static object GetIdentityGate(string identityKey)
+    {
+        lock (Gate)
         {
-            // audit round 21 — Faulted/RestartRequired: a failed package
-            // shutdown leaves the resident module's state unknown, so the
-            // identity is marked faulted and TryCreateInstance refuses
-            // re-activation until process restart.
-            if (lease.Session.Shutdown())
-            {
-                App.Log($"[NativePackage] {lease.Session.Identity.Key} dormant; re-activation allowed");
-            }
-            else
-            {
-                string reason = "package shutdown reported failure; restart required";
-                lock (Gate)
-                {
-                    FaultedPackages[lease.Session.Identity.Key] = reason;
-                }
-                App.Log($"[NativePackage] {lease.Session.Identity.Key} marked FAULTED: {reason}");
-            }
+            if (!IdentityGates.TryGetValue(identityKey, out object? identityGate))
+                IdentityGates[identityKey] = identityGate = new object();
+            return identityGate;
         }
     }
 }
@@ -545,6 +557,7 @@ internal sealed class NativeWidgetLease : IDisposable
 {
     private NativePackageSession _session = null!;
     private nint _handle;
+    private readonly object _operationGate = new();
     private bool _released;
 
     internal Microsoft.UI.Xaml.FrameworkElement View { get; private set; } = null!;
@@ -570,22 +583,34 @@ internal sealed class NativeWidgetLease : IDisposable
     /// </summary>
     internal bool TryRelease()
     {
-        if (_released) return false;
-        if (!_session.DestroyWidget(_handle))
+        lock (_operationGate)
         {
-            App.LogVerbose($"[NativePackage] destroy retry pending for instance {_instanceId}");
-            return false;
+            if (_released) return false;
+            if (!_session.DestroyWidget(_handle))
+            {
+                App.LogVerbose($"[NativePackage] destroy retry pending for instance {_instanceId}");
+                return false;
+            }
+            _released = true;
+            return true;
         }
-        _released = true;
-        return true;
     }
 
     void IDisposable.Dispose() => NativeWidgetRuntimeManager.Release(this);
 
+    internal Contracts.WidgetCompactBackgroundSnapshot? GetCompactBackground()
+    {
+        lock (_operationGate)
+            return _released ? null : _session.GetCompactBackground(_handle);
+    }
+
     /// <summary>Forward a host lifecycle event to the package (no-op if the package has no event export).</summary>
     internal void InvokeWidgetEvent(WidgetLifecycleEventKind kind, double width, double height, uint flags)
     {
-        _session.SendWidgetEvent(_handle, kind, width, height, flags);
+        lock (_operationGate)
+        {
+            if (!_released) _session.SendWidgetEvent(_handle, kind, width, height, flags);
+        }
     }
 }
 
@@ -617,6 +642,9 @@ internal sealed unsafe class NativePackageSession
     private readonly nint _destroyExport;
     private readonly nint _shutdownExport;
     private readonly nint _widgetEventExport; // required export at ABI v4
+    private readonly nint _compactBackgroundExport; // optional, ABI v4 unchanged
+    private bool _active;
+    private readonly HashSet<nint> _closingHandles = [];
     private readonly object _instanceGate = new();
     private readonly HashSet<nint> _liveHandles = [];
     // audit 20 §18: instance ids for PackageInstanceRegistry unregistration.
@@ -634,7 +662,8 @@ internal sealed unsafe class NativePackageSession
         nint createExport,
         nint destroyExport,
         nint shutdownExport,
-        nint widgetEventExport)
+        nint widgetEventExport,
+        nint compactBackgroundExport = 0)
     {
         Identity = identity;
         PackageRoot = packageRoot;
@@ -644,6 +673,7 @@ internal sealed unsafe class NativePackageSession
         _destroyExport = destroyExport;
         _shutdownExport = shutdownExport;
         _widgetEventExport = widgetEventExport;
+        _compactBackgroundExport = compactBackgroundExport;
     }
 
     internal NativePackageIdentity Identity { get; }
@@ -671,6 +701,7 @@ internal sealed unsafe class NativePackageSession
             NativeHostApiBridge.DetachSession(session._hostApiContext);
             throw new InvalidOperationException($"[NativePackage] activate failed for {session.Identity.Key}: 0x{status:X8}");
         }
+        session._active = true;
         App.Log($"[NativePackage] session active: {session.Identity.Key}");
     }
 
@@ -748,23 +779,54 @@ internal sealed unsafe class NativePackageSession
     /// </summary>
     internal bool DestroyWidget(nint handle)
     {
-        int status = ((delegate* unmanaged[Cdecl]<nint, int>)_destroyExport)(handle);
-        if (status != 0)
-        {
-            App.Log($"[NativePackage] destroy 0x{handle:X} failed: 0x{status:X8}; instance remains counted");
-            return false;
-        }
-        string? instanceId;
         lock (_instanceGate)
         {
-            _liveHandles.Remove(handle);
-            _instanceIds.Remove(handle, out instanceId);
+            if (!_closingHandles.Add(handle)) return false;
         }
-        if (instanceId is not null)
+        try
         {
-            PackageInstanceRegistry.Unregister(instanceId);
+            int status = ((delegate* unmanaged[Cdecl]<nint, int>)_destroyExport)(handle);
+            if (status != 0)
+            {
+                App.Log($"[NativePackage] destroy 0x{handle:X} failed: 0x{status:X8}; instance remains counted");
+                return false;
+            }
+            string? instanceId;
+            lock (_instanceGate)
+            {
+                _liveHandles.Remove(handle);
+                _instanceIds.Remove(handle, out instanceId);
+            }
+            if (instanceId is not null)
+            {
+                PackageInstanceRegistry.Unregister(instanceId);
+            }
+            return true;
         }
-        return true;
+        finally
+        {
+            // Failed destroys retain the existing retry/counting contract.
+            lock (_instanceGate) _closingHandles.Remove(handle);
+        }
+    }
+
+    internal Contracts.WidgetCompactBackgroundSnapshot? GetCompactBackground(nint handle)
+    {
+        var snapshot = NativeWidgetCompactBackground.Read(
+            _compactBackgroundExport, handle, () => CanReadCompactBackground(handle),
+            static pointer => WinRT.MarshalInspectable<Microsoft.UI.Xaml.Media.ImageSource>.FromAbi(pointer),
+            static pointer => WinRT.MarshalInspectable<Microsoft.UI.Xaml.Media.ImageSource>.DisposeAbi(pointer));
+        return snapshot is { } value
+            ? new Contracts.WidgetCompactBackgroundSnapshot(value.ImageSource, value.Opacity)
+            : null;
+    }
+
+    private bool CanReadCompactBackground(nint handle)
+    {
+        lock (_instanceGate)
+        {
+            return _active && handle != 0 && _liveHandles.Contains(handle) && !_closingHandles.Contains(handle);
+        }
     }
 
     /// <summary>Forward a lifecycle event through the versioned ABI v4 payload
@@ -772,6 +834,12 @@ internal sealed unsafe class NativePackageSession
     internal unsafe void SendWidgetEvent(nint handle, WidgetLifecycleEventKind kind, double width, double height, uint flags)
     {
         if (_widgetEventExport == 0) return;
+        lock (_instanceGate)
+        {
+            // A failed destroy keeps the lease usable for retry. Only block
+            // delivery while the same handle is actively closing.
+            if (_closingHandles.Contains(handle)) return;
+        }
         try
         {
             NativeWidgetEventV1 payload = new()
@@ -809,6 +877,9 @@ internal sealed unsafe class NativePackageSession
     /// </summary>
     internal bool Shutdown()
     {
+        // Refuse reads before entering package code, including reentrant reads
+        // during shutdown and reads after a failed shutdown.
+        lock (_instanceGate) _active = false;
         bool succeeded;
         try
         {
@@ -852,9 +923,142 @@ internal sealed unsafe class NativePackageSession
     }
 }
 
+/// <summary>
+/// Optional export payload, independent of mandatory ABI v4/HostApi. Layout
+/// is fixed at 24 bytes on x64/ARM64. Size is caller capacity, Version is the
+/// requested schema (1); both stay unchanged. Packages accept Size >= 24 and
+/// Version == 1, touch only the v1 prefix, and leave any trailing bytes alone.
+/// Future schemas must negotiate a new Version while continuing to serve v1.
+/// Caller initializes ImageSource/Opacity to zero; opacity is finite [0,1].
+/// Zero opacity or no image produces ImageSource=0, Opacity=0.
+/// </summary>
+[StructLayout(LayoutKind.Explicit, Size = 24)]
+internal struct NativeWidgetCompactBackgroundV1
+{
+    [FieldOffset(0)] public uint Size;
+    [FieldOffset(4)] public uint Version;
+    [FieldOffset(8)] public nint ImageSource;
+    [FieldOffset(16)] public double Opacity;
+
+    internal const uint CurrentVersion = 1;
+}
+
+/// <summary>
+/// Optional C ABI snapshot read. The nonzero output is one owned IInspectable
+/// reference, including partial failure outputs. Projection acquires its own
+/// reference; the transferred reference is released exactly once. Delegates
+/// keep ownership/error behavior testable without constructing WinUI objects.
+/// Like the native widget runtime, callers must use the UI thread.
+/// </summary>
+internal static class NativeWidgetCompactBackground
+{
+    internal static unsafe (T ImageSource, double Opacity)? Read<T>(nint export, nint handle, Func<bool> canRead,
+        Func<nint, T?> fromAbi, Action<nint> disposeAbi) where T : class
+    {
+        NativeWidgetCompactBackgroundV1 background = new()
+        {
+            Size = (uint)sizeof(NativeWidgetCompactBackgroundV1),
+            Version = NativeWidgetCompactBackgroundV1.CurrentVersion,
+        };
+        try
+        {
+            try
+            {
+                if (export == 0 || handle == 0 || !canRead()) return null;
+                int status = ((delegate* unmanaged[Cdecl]<nint, NativeWidgetCompactBackgroundV1*, int>)export)(handle, &background);
+                if (status < 0 || background.Size != (uint)sizeof(NativeWidgetCompactBackgroundV1) ||
+                    background.Version != NativeWidgetCompactBackgroundV1.CurrentVersion ||
+                    background.ImageSource == 0 || !double.IsFinite(background.Opacity) ||
+                    background.Opacity <= 0 || background.Opacity > 1 || !canRead()) return null;
+                T? image = fromAbi(background.ImageSource);
+                return image is not null && canRead() ? (image, background.Opacity) : null;
+            }
+            finally
+            {
+                if (background.ImageSource != 0) disposeAbi(background.ImageSource);
+            }
+        }
+        catch
+        {
+            // Neither package/projection nor cleanup exceptions escape into
+            // the host's compact-layout path. Never retry DisposeAbi.
+            return null;
+        }
+    }
+}
+
+/// <summary>
+/// Process-lifetime NativeAOT modules, independent of session activation/shutdown.
+/// A successful native load permanently pins its identity/hash and handle, even
+/// if export validation or activation later fails. There is no unload/reset path.
+/// </summary>
+internal sealed class NativePackageModuleRegistry
+{
+    private sealed class Entry(string contentHash)
+    {
+        internal string ContentHash { get; } = contentHash;
+        internal nint Module { get; set; }
+    }
+
+    private readonly object _gate = new();
+    private readonly Dictionary<NativePackageIdentity, Entry> _modules = [];
+
+    internal bool IsContentHashCompatible(NativePackageIdentity identity, string contentHash)
+    {
+        lock (_gate)
+        {
+            return !_modules.TryGetValue(identity, out Entry? entry) ||
+                string.Equals(entry.ContentHash, contentHash, StringComparison.Ordinal);
+        }
+    }
+
+    internal bool TryLoad(NativePackageIdentity identity, string contentHash,
+        Func<nint> load, out nint module)
+    {
+        module = 0;
+        Entry reservation;
+        lock (_gate)
+        {
+            if (_modules.TryGetValue(identity, out Entry? existing))
+            {
+                // Also reject reentrant/concurrent loads while native loading
+                // is in progress. Never run package code under this lock.
+                if (!string.Equals(existing.ContentHash, contentHash, StringComparison.Ordinal) ||
+                    existing.Module == 0) return false;
+                module = existing.Module;
+                return true;
+            }
+            reservation = new Entry(contentHash);
+            _modules.Add(identity, reservation);
+        }
+
+        try
+        {
+            module = load();
+            if (module == 0) return false;
+            lock (_gate) reservation.Module = module;
+            return true;
+        }
+        finally
+        {
+            // Only a load that never returned a valid handle can release the
+            // reservation. ABI/activation work runs AFTER this method returns.
+            if (module == 0)
+            {
+                lock (_gate) _modules.Remove(identity);
+            }
+        }
+    }
+}
+
 /// <summary>Module loading + ABI resolution for the runtime manager (ABI v4).</summary>
 internal static class NativeWidgetPackageLoader
 {
+    private static readonly NativePackageModuleRegistry Modules = new();
+
+    internal static bool IsContentHashCompatible(NativePackageDescriptor descriptor) =>
+        Modules.IsContentHashCompatible(descriptor.Identity, descriptor.ContentHash);
+
     public const string DevelopmentPackageEnvironmentVariable = "DESKBOX_DEV_NATIVE_GLANCE";
     public const string DevelopmentPackageDllFileName = "DeskBox.Glance.NativePackage.dll";
     public const string ProductEntryModuleFileName = "package.dll";
@@ -910,7 +1114,15 @@ internal static class NativeWidgetPackageLoader
             string modulePath = Path.Combine(descriptor.PackageRoot, descriptor.EntryModuleFileName);
             string packageDataRoot = descriptor.Identity.ResolvePackageDataRoot(dataDirectory);
             Directory.CreateDirectory(packageDataRoot);
-            nint module = NativeLibrary.Load(modulePath);
+            // Pin the hash at the actual successful load, before ANY export
+            // lookup, ABI check or activate call. Dormant sessions reuse this
+            // handle without another LoadLibrary reference or a new DLL copy.
+            if (!Modules.TryLoad(descriptor.Identity, descriptor.ContentHash,
+                () => NativeLibrary.Load(modulePath), out nint module))
+            {
+                App.Log($"[NativePackage] {descriptor.Identity.Key} module load refused: different content hash (restart required) or load already in progress");
+                return null;
+            }
             if (!TryGetExport(module, "deskbox_package_get_abi_version", out nint versionExport) ||
                 !TryGetExport(module, "deskbox_package_activate", out nint activateExport) ||
                 !TryGetExport(module, "deskbox_widget_create", out nint createExport) ||
@@ -927,9 +1139,13 @@ internal static class NativeWidgetPackageLoader
                 App.Log($"[NativePackage] ABI version {version} != {NativeWidgetRuntimeManager.RequiredAbiVersion}");
                 return null;
             }
+            // Optional capability: old ABI v4 packages remain valid. Resolve
+            // only after the existing version handshake has succeeded.
+            TryGetExport(module, "deskbox_widget_get_compact_background", out nint compactBackgroundExport);
             var session = new NativePackageSession(
                 descriptor.Identity, descriptor.PackageRoot, packageDataRoot,
-                activateExport, createExport, destroyExport, shutdownExport, widgetEventExport);
+                activateExport, createExport, destroyExport, shutdownExport, widgetEventExport,
+                compactBackgroundExport);
             NativePackageSession.Activate(session);
             return session;
         }

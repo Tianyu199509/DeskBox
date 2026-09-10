@@ -21,6 +21,7 @@ internal static class GlanceDataFile
     // or return the slideshow to its first image.
     internal static bool SameImageSources(GlanceWidgetData left, GlanceWidgetData right) =>
         left.BackgroundSource == right.BackgroundSource &&
+        left.OnlineImageCategory == right.OnlineImageCategory &&
         left.RandomOrder == right.RandomOrder &&
         string.Equals(left.LocalFolderPath, right.LocalFolderPath, StringComparison.OrdinalIgnoreCase) &&
         left.LocalImagePaths.SequenceEqual(right.LocalImagePaths, StringComparer.OrdinalIgnoreCase);
@@ -41,6 +42,7 @@ internal static class GlanceDataFile
             if (TryDouble(raw, "rotationIntervalMinutes", out double minutes)) settings.RotationIntervalMinutes = minutes;
             if (TryBool(raw, "randomOrder", out bool random)) settings.RandomOrder = random;
             if (TryEnum<GlanceBackgroundSource>(raw, "backgroundSource", out var source)) settings.BackgroundSource = source;
+            if (TryEnum<GlanceOnlineImageCategory>(raw, "onlineImageCategory", out var category)) settings.OnlineImageCategory = category;
             if (raw.TryGetProperty("localImagePaths", out JsonElement paths) && paths.ValueKind == JsonValueKind.Array)
             {
                 settings.LocalImagePaths = paths.EnumerateArray()

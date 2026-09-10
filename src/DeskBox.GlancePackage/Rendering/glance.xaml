@@ -380,9 +380,9 @@
         Padding="10"
         Visibility="Collapsed">
         <StackPanel Spacing="10">
-            <TextBlock FontSize="12" FontWeight="SemiBold" Foreground="White" Text="设置" />
-            <ToggleSwitch x:Name="FestivalToggle" Header="节日显示" MinWidth="160" OffContent="关" OnContent="开" />
-            <ToggleSwitch x:Name="TraditionalToggle" Header="传统历法" MinWidth="160" OffContent="关" OnContent="开" />
+            <TextBlock x:Name="SettingsTitle" FontSize="12" FontWeight="SemiBold" Foreground="{StaticResource TextFillColorPrimaryBrush}" />
+            <ToggleSwitch x:Name="FestivalToggle" MinWidth="160" />
+            <ToggleSwitch x:Name="TraditionalToggle" MinWidth="160" />
         </StackPanel>
     </Border>
 </Grid>

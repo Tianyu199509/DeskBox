@@ -5,10 +5,9 @@ using System.Text.Json;
 namespace DeskBox.GlancePackage.Services;
 
 /// <summary>
-/// Reads the host-provided config payload (HostApi v2 GetConfigJson:
-/// locale, effective theme/accent and material tokens). Degrades gracefully:
-/// no host pointer, bad payload, or unknown locale → null and callers fall
-/// back to ambient values.
+/// Reads locale, appearance and environment tokens through GetConfigJson
+/// (introduced in HostApi v2, unchanged in v4). Missing callbacks or bad
+/// payloads yield a null culture or compatible value-object defaults.
 /// </summary>
 internal static unsafe class HostConfig
 {
@@ -73,6 +72,10 @@ internal static unsafe class HostConfig
     }
 
     internal static PackageAppearance ReadAppearance() => PackageAppearance.Parse(TryFetchJson());
+
+    /// <summary>Read a fresh environment snapshot through the existing HostApi channel.</summary>
+    internal static PackagePerformancePolicy ReadPerformancePolicy() =>
+        PackagePerformancePolicy.Parse(TryFetchJson());
 
     private static string? TryReadString(string property)
     {

@@ -13,10 +13,11 @@ internal sealed class NativeInstanceSettingsSubscription : IDisposable
     private readonly object _gate = new();
     private readonly Func<Action, bool> _enqueue;
     private readonly Func<bool> _sync;
-    private readonly Action _refresh;
+    private readonly Action<bool> _refresh;
     private readonly IDisposable? _subscription;
     private bool _queued;
     private bool _disposed;
+    private bool _refreshContent;
 
     internal NativeInstanceSettingsSubscription(
         ILegacyInstanceMigration migration,
@@ -24,6 +25,14 @@ internal sealed class NativeInstanceSettingsSubscription : IDisposable
         Func<Action, bool> enqueue,
         Func<bool> sync,
         Action refresh)
+        : this(migration, instanceId, enqueue, sync, _ => refresh()) { }
+
+    internal NativeInstanceSettingsSubscription(
+        ILegacyInstanceMigration migration,
+        string instanceId,
+        Func<Action, bool> enqueue,
+        Func<bool> sync,
+        Action<bool> refresh)
     {
         _enqueue = enqueue;
         _sync = sync;
@@ -34,11 +43,15 @@ internal sealed class NativeInstanceSettingsSubscription : IDisposable
         if (_subscription is not null) RequestRefresh();
     }
 
-    internal void RequestRefresh()
+    internal void RequestRefresh() => RequestRefresh(refreshContent: false);
+
+    internal void RequestRefresh(bool refreshContent)
     {
         lock (_gate)
         {
-            if (_disposed || _queued) return;
+            if (_disposed) return;
+            _refreshContent |= refreshContent;
+            if (_queued) return;
             _queued = true;
         }
         try
@@ -54,10 +67,13 @@ internal sealed class NativeInstanceSettingsSubscription : IDisposable
 
     private void Drain()
     {
+        bool refreshContent;
         lock (_gate)
         {
             _queued = false;
             if (_disposed) return;
+            refreshContent = _refreshContent;
+            _refreshContent = false;
         }
         try
         {
@@ -68,7 +84,7 @@ internal sealed class NativeInstanceSettingsSubscription : IDisposable
             {
                 if (_disposed) return;
             }
-            _refresh();
+            _refresh(refreshContent);
         }
         catch (Exception error)
         {
