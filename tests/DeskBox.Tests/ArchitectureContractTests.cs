@@ -67,7 +67,7 @@ public sealed class ArchitectureContractTests
     private static readonly Dictionary<string, int> FrozenFeatureFileCounts =
         new(StringComparer.Ordinal)
         {
-            ["Weather"] = 16,
+            ["Weather"] = 17,
             ["Todo"] = 36,
             ["Music"] = 15,
             ["Glance"] = 20,

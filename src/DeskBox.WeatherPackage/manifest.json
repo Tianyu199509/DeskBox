@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 0,
+  "id": "deskbox.weather",
+  "version": "0.1.0",
+  "publisher": "1bc4f2db8438d2fd296bd48074088ccc726c265712125abbae975063ba719ea4",
+  "publisherPublicKey": "R/C3TWwBQNgtms2UI1i/yAWr9HnObV2lK0LQfjcPbZA=",
+  "runtime": "native",
+  "hostApi": { "min": "1.0.0", "max": "1.0.0" },
+  "entry": { "main": "package.dll", "architecture": "x64" },
+  "contributions": [
+    {
+      "type": "widget", "id": "weather", "displayName": "Weather",
+      "fallback": { "template": "status", "message": "Weather is unavailable. Install or restart DeskBox." }
+    }
+  ],
+  "permissions": []
+}

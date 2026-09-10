@@ -48,7 +48,7 @@ public sealed class JsonSerializationBaselineContractTests : IDisposable
             ["src/DeskBox/Services/WidgetFileStackSettings.cs"] = 7
         };
 
-        Dictionary<string, int> actual = ProductionSourceFiles()
+        Dictionary<string, int> actual = HostAndEstablishedPackageSources()
             .Select(path => new
             {
                 Path = RepositoryRelativePath(path),
@@ -98,7 +98,7 @@ public sealed class JsonSerializationBaselineContractTests : IDisposable
             "src/DeskBox/Services/WeatherService.cs",
             "src/DeskBox/Services/WidgetFileStackSettings.cs"
         ];
-        string[] actualContextOwners = ProductionSourceFiles()
+        string[] actualContextOwners = HostAndEstablishedPackageSources()
             .Where(path => File.ReadAllText(path).Contains(
                 "JsonSerializerContext",
                 StringComparison.Ordinal))
@@ -108,6 +108,37 @@ public sealed class JsonSerializationBaselineContractTests : IDisposable
 
         Assert.Equal(27, actualContextOwners.Length);
         Assert.Equal(expectedContextOwners, actualContextOwners);
+    }
+
+    // Preserve the independently verified host baseline, while covering the new
+    // native package explicitly instead of hiding it from production scans.
+    private static IEnumerable<string> HostAndEstablishedPackageSources() =>
+        ProductionSourceFiles().Where(path => !RepositoryRelativePath(path).StartsWith(
+            "src/DeskBox.WeatherPackage/", StringComparison.Ordinal));
+
+    [Fact]
+    public void WeatherPackageInventoryUsesExplicitSourceGeneratedContexts()
+    {
+        var files = ProductionSourceFiles().Where(path => RepositoryRelativePath(path).StartsWith(
+            "src/DeskBox.WeatherPackage/", StringComparison.Ordinal)).ToArray();
+        var expected = new Dictionary<string, int>
+        {
+            ["src/DeskBox.WeatherPackage/Rendering/WeatherWidgetController.cs"] = 1,
+            ["src/DeskBox.WeatherPackage/Services/CitySearchService.cs"] = 1,
+            ["src/DeskBox.WeatherPackage/Services/WeatherService.cs"] = 5,
+        };
+        var actual = files.Select(path => new {
+            Path = RepositoryRelativePath(path),
+            Count = Regex.Matches(File.ReadAllText(path), @"JsonSerializer\.(?:SerializeToUtf8Bytes|Serialize|Deserialize)(?:Async)?\b").Count
+        }).Where(value => value.Count > 0).ToDictionary(value => value.Path, value => value.Count);
+        Assert.Equal(expected.Keys.Order(), actual.Keys.Order());
+        foreach (var (path, count) in expected) Assert.Equal(count, actual[path]);
+        Assert.Equal(7, actual.Values.Sum());
+        Assert.Equal(new[] {
+            "src/DeskBox.WeatherPackage/Models/WeatherPreferences.cs",
+            "src/DeskBox.WeatherPackage/Services/WeatherService.cs",
+        }, files.Where(path => File.ReadAllText(path).Contains("JsonSerializerContext"))
+            .Select(RepositoryRelativePath).Order());
     }
 
     [Fact]
