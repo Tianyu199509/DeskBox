@@ -1,6 +1,7 @@
 extern alias GlancePkg;
 
 using System.Text.Json;
+using GlanceTimeFormatMode = GlancePkg::DeskBox.Models.GlanceTimeFormatMode;
 
 namespace DeskBox.Tests;
 
@@ -204,6 +205,78 @@ public class NativeGlanceDataGoldenTests
         {
             WriteData(root, "{ not json at all");
             Assert.Null(GlanceDataFile.Load(root));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void AllOwnedFieldsRoundTripEndToEnd()
+    {
+        // Anti-omission net (audit rounds 20-21): every owned field must
+        // round-trip through Save → Load. If a field is added to
+        // WriteOwnedProperties but forgotten in Load (or vice versa),
+        // this test catches it immediately.
+        string root = Root();
+        try
+        {
+            var original = new PackageData
+            {
+                ShowChineseFestivals = false,
+                TraditionalCalendarMode = GlancePkg::DeskBox.Models.GlanceTraditionalCalendarMode.Hebrew,
+                RotationIntervalMinutes = 10,
+                RandomOrder = false,
+                BackgroundSource = GlancePkg::DeskBox.Models.GlanceBackgroundSource.LocalFolder,
+                LocalFolderPath = @"D:\pictures",
+                ImageFit = GlancePkg::DeskBox.Models.GlanceImageFitMode.Fit,
+                ImageFocus = GlancePkg::DeskBox.Models.GlanceImageFocus.Bottom,
+                ShowPhotoControls = false,
+                ShowTime = false,
+                ShowDate = true,
+                ShowYear = false,
+                ShowWeekday = false,
+                ShowCalendar = true,
+                TimeFormat = GlanceTimeFormatMode.Hour24,
+                Layout = GlancePkg::DeskBox.Models.GlanceLayoutMode.Editorial,
+                Transition = GlancePkg::DeskBox.Models.GlanceTransitionMode.ZoomFade,
+                TransitionSpeed = GlancePkg::DeskBox.Models.GlanceTransitionSpeed.Relaxed,
+                Readability = GlancePkg::DeskBox.Models.GlanceReadabilityMode.Strong,
+                BackgroundImageTransparency = 0.42,
+                TimeScale = 1.2,
+            };
+            original.LocalImagePaths.Add(@"D:\test\a.png");
+            original.LocalImagePaths.Add(@"D:\test\b.jpg");
+
+            GlanceDataFile.Save(new GlanceData(original, default), root);
+            var loaded = GlanceDataFile.Load(root);
+
+            Assert.NotNull(loaded);
+            var s = loaded!.Settings;
+            Assert.False(s.ShowChineseFestivals);
+            Assert.Equal(GlancePkg::DeskBox.Models.GlanceTraditionalCalendarMode.Hebrew, s.TraditionalCalendarMode);
+            Assert.Equal(10, s.RotationIntervalMinutes);
+            Assert.False(s.RandomOrder);
+            Assert.Equal(GlancePkg::DeskBox.Models.GlanceBackgroundSource.LocalFolder, s.BackgroundSource);
+            Assert.Equal(@"D:\pictures", s.LocalFolderPath);
+            Assert.Equal(GlancePkg::DeskBox.Models.GlanceImageFitMode.Fit, s.ImageFit);
+            Assert.Equal(GlancePkg::DeskBox.Models.GlanceImageFocus.Bottom, s.ImageFocus);
+            Assert.False(s.ShowPhotoControls);
+            Assert.False(s.ShowTime);
+            Assert.True(s.ShowDate);
+            Assert.False(s.ShowYear);
+            Assert.False(s.ShowWeekday);
+            Assert.True(s.ShowCalendar);
+            Assert.Equal(GlanceTimeFormatMode.Hour24, s.TimeFormat);
+            Assert.Equal(GlancePkg::DeskBox.Models.GlanceLayoutMode.Editorial, s.Layout);
+            Assert.Equal(GlancePkg::DeskBox.Models.GlanceTransitionMode.ZoomFade, s.Transition);
+            Assert.Equal(GlancePkg::DeskBox.Models.GlanceTransitionSpeed.Relaxed, s.TransitionSpeed);
+            Assert.Equal(GlancePkg::DeskBox.Models.GlanceReadabilityMode.Strong, s.Readability);
+            Assert.Equal(0.42, s.BackgroundImageTransparency, precision: 2);
+            Assert.Equal(1.2, s.TimeScale, precision: 2);
+            Assert.Equal(@"D:\pictures", s.LocalFolderPath);
+            Assert.Equal(2, s.LocalImagePaths.Count);
         }
         finally
         {
