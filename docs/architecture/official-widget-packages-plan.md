@@ -28,6 +28,15 @@
 
 声明式卡片继续复用，但六模板不是旧六功能的替代实现。WASM/Process 社区插件、AI/MCP、多发布者账号及收费后置。其原型保留，不纳入官方功能包首发完成度。
 
+## 发布列车与 PR 纪律
+
+- 本轮官方功能包改造的下一稳定公开版本目标为 **1.6.0**。功能交付、数据迁移和渠道行为均发生变化，不把这批改造作为 1.5.1 补丁版本发布。
+- **1.5.1 保留给 1.5.0 维护线**。若 1.5.0 出现必须提前交付的用户故障，从 `v1.5.0` 建立 `release/1.5.x`，只移植必要修复和对应验证，不带入未完成的功能包改造。
+- 开发期继续保留 1.5.0 版本号；进入候选冻结后再统一更新应用、MSIX、安装器、文档和更新清单版本。候选可使用 GitHub prerelease/CI 产物验证，未满足首发判据前不创建稳定 tag。
+- 一个可独立验收的纵向批次使用一个短期分支和一个 Draft PR。审计、复评、修正和补测试继续进入同一 PR，退出条件满足后一次合并；只有前一 PR 已合并或后续修复可独立发布时才另开 PR。
+- PR 合并后删除 head branch。需要长期保留的未合并快照改用 annotated tag；普通 `backup/*`、`archive/*` 不长期充当活跃分支。
+- 稳定候选必须来自干净且固定的源码提交，并重新完成 x64 全量测试、当前提交的 NativeAOT 审计、ARM64 构建审计、Direct/Store 分渠道检查、1.5.0 覆盖升级与回滚、离线启动以及真实输入/拖放/合并/叠放验收。旧提交或 dirty 工作树的通过记录只作开发证据。
+
 ## 原生试点边界
 
 .NET 不支持 NativeAOT 运行时加载普通托管程序集，但支持原生共享 DLL。C#/WinRT 支持组件 AOT 发布；这只证明候选路线存在，不证明 DeskBox 的复杂 WinUI 内容已经可动态分发。[.NET 官方原生库说明](https://learn.microsoft.com/en-us/dotnet/core/deploying/native-aot/libraries)、[C#/WinRT AOT 支持](https://github.com/microsoft/CsWinRT/blob/master/docs/aot-trimming.md)
