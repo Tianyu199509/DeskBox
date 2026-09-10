@@ -2,6 +2,7 @@
 
 using DeskBox.Contracts;
 using DeskBox.Models;
+using DeskBox.Services.Plugins;
 using DeskBox.Helpers;
 using DeskBox.Controls.WidgetContents;
 using DeskBox.ViewModels;
@@ -1161,6 +1162,15 @@ public sealed partial class WidgetManager
                 if (kind == WidgetKind.Glance)
                 {
                     await GlanceWidgetStore.DeleteForWidgetAsync(duplicate.Id);
+                    // audit round 21 — logical delete dual-hook (matches the
+                    // RemoveWidgetAsync site): native instance data root is
+                    // removed here too, so reset-orphan cleanup stays in
+                    // lockstep with the host store.
+                    if (PackageBindingRegistry.TryGetByKind(kind) is { PackageId: var dupPackageId })
+                    {
+                        await NativeInstanceDataLifecycle.DeleteAsync(
+                            dupPackageId, duplicate.Id, DeskBoxDataPathService.Current.DataDirectory);
+                    }
                 }
                 else if (kind == WidgetKind.Todo)
                 {

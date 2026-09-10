@@ -2,6 +2,7 @@
 using DeskBox.Models;
 using DeskBox.Helpers;
 using DeskBox.Controls.WidgetContents;
+using DeskBox.Services.Plugins;
 using DeskBox.ViewModels;
 using DeskBox.Views;
 using Microsoft.UI.Dispatching;
@@ -1622,19 +1623,29 @@ public sealed partial class WidgetManager :
         _settingsService.RemoveWidgetImmediate(widgetId);
         _topologyLayoutService.RemoveSurface(_settingsService.Settings, widgetId);
         ClearWidgetGroupTransientState(widgetId);
-        if (config is not null && FeatureWidgetSettings.IsFeatureWidget(config.WidgetKind))
-        {
-            if (config.WidgetKind == WidgetKind.Glance)
+            if (config is not null && FeatureWidgetSettings.IsFeatureWidget(config.WidgetKind))
             {
-                await GlanceWidgetStore.DeleteForWidgetAsync(config.Id);
-                bool hasRemainingGlanceWidget = _settingsService.Settings.Widgets.Any(widget =>
-                    widget.WidgetKind == WidgetKind.Glance &&
-                    !IsDeleted(widget.Id));
-                if (!hasRemainingGlanceWidget)
+                if (config.WidgetKind == WidgetKind.Glance)
                 {
-                    SetFeatureWidgetEnabledState(WidgetKind.Glance, false);
+                    await GlanceWidgetStore.DeleteForWidgetAsync(config.Id);
+                    // audit round 21 — logical widget deletion (lifecycle 2):
+                    // the native instance data root is removed only here,
+                    // after the WidgetConfig deletion has committed; runtime
+                    // destroy keeps it. The binding resolves the package id
+                    // generically — no feature hard-coding.
+                    if (PackageBindingRegistry.TryGetByKind(config.WidgetKind) is { } deletedBinding)
+                    {
+                        await NativeInstanceDataLifecycle.DeleteAsync(
+                            deletedBinding.PackageId, config.Id, DeskBoxDataPathService.Current.DataDirectory);
+                    }
+                    bool hasRemainingGlanceWidget = _settingsService.Settings.Widgets.Any(widget =>
+                        widget.WidgetKind == WidgetKind.Glance &&
+                        !IsDeleted(widget.Id));
+                    if (!hasRemainingGlanceWidget)
+                    {
+                        SetFeatureWidgetEnabledState(WidgetKind.Glance, false);
+                    }
                 }
-            }
             else if (config.WidgetKind == WidgetKind.Todo)
             {
                 // Todo widgets can coexist; deleting one removes its store and

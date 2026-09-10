@@ -241,17 +241,7 @@ internal static unsafe class NativeHostApiBridge
             {
                 return unchecked((int)0x80070057);
             }
-            lock (HandlerGate)
-            {
-                if (handler != 0)
-                {
-                    ConfigChangedHandlers[context] = handler;
-                }
-                else
-                {
-                    ConfigChangedHandlers.Remove(context);
-                }
-            }
+            SubscribeConfigChanged(context, handler);
             App.LogVerbose($"[NativePackage] config-changed handler registered for context 0x{context:X}");
             return 0;
         }
@@ -259,6 +249,30 @@ internal static unsafe class NativeHostApiBridge
         {
             return unchecked((int)0x80004005); // E_FAIL
         }
+    }
+
+    /// <summary>
+    /// Managed seam for the subscription store (behavior-testable without a
+    /// native call), also used by the callback above.
+    /// </summary>
+    internal static void SubscribeConfigChanged(nint context, nint handler)
+    {
+        lock (HandlerGate)
+        {
+            if (handler != 0)
+            {
+                ConfigChangedHandlers[context] = handler;
+            }
+            else
+            {
+                ConfigChangedHandlers.Remove(context);
+            }
+        }
+    }
+
+    internal static int RegisteredConfigChangedHandlerCount
+    {
+        get { lock (HandlerGate) return ConfigChangedHandlers.Count; }
     }
 
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvCdecl)])]
@@ -316,6 +330,16 @@ internal static unsafe class NativeHostApiBridge
 }
 
 /// <summary>
+/// HostApi ABI FREEZE POLICY (audit round 21): HostApi v4 is the first
+/// frozen baseline. Versions v1–v3 were internal pre-release experiments
+/// and are not compatibility targets. From v4 onward, existing function
+/// pointer slots AND their signatures are immutable — new capabilities are
+/// added as NEW slots appended at the table end. The package's
+/// Size/Version gate (RequiredHostApiVersion) ensures it never reads past
+/// what the host provides.
+/// </summary>
+
+/// <summary>
 /// Batch C1 runtime contract (ABI v4): one session per loaded module identity
 /// (publisher + packageId + contentHash), activated exactly once; widget
 /// instances are created per (contribution, instance) pair and destroyed by
@@ -332,6 +356,19 @@ internal static class NativeWidgetRuntimeManager
     private static readonly object Gate = new();
     private static readonly Dictionary<string, NativePackageSession> Sessions = [];
     private static readonly Dictionary<string, string> LoadedModuleHashes = [];
+    // audit round 21 — Faulted/RestartRequired: a package whose shutdown
+    // reported failure has unknown internal state, and the NativeAOT module
+    // stays resident for the process lifetime. It must never be re-activated
+    // in this process; the flag clears only on restart.
+    private static readonly Dictionary<string, string> FaultedPackages = [];
+
+    internal static bool IsFaulted(string identityKey)
+    {
+        lock (Gate)
+        {
+            return FaultedPackages.ContainsKey(identityKey);
+        }
+    }
 
     public static bool TryCreateInstance(
         NativePackageDescriptor descriptor,
@@ -341,6 +378,17 @@ internal static class NativeWidgetRuntimeManager
         out NativeWidgetLease? lease)
     {
         lease = null;
+        // audit round 21 — Faulted/RestartRequired: a package whose shutdown
+        // failed has unknown resident state; refuse re-activation until
+        // process restart even though the module is still loaded.
+        lock (Gate)
+        {
+            if (FaultedPackages.TryGetValue(descriptor.Identity.Key, out string? reason))
+            {
+                App.Log($"[NativePackage] {descriptor.Identity.Key} is faulted and cannot be re-activated in this process ({reason})");
+                return false;
+            }
+        }
         NativePackageSession? session = null;
         lock (Gate)
         {
@@ -440,7 +488,23 @@ internal static class NativeWidgetRuntimeManager
         }
         if (shutdown)
         {
-            lease.Session.Shutdown();
+            // audit round 21 — Faulted/RestartRequired: a failed package
+            // shutdown leaves the resident module's state unknown, so the
+            // identity is marked faulted and TryCreateInstance refuses
+            // re-activation until process restart.
+            if (lease.Session.Shutdown())
+            {
+                App.Log($"[NativePackage] {lease.Session.Identity.Key} dormant; re-activation allowed");
+            }
+            else
+            {
+                string reason = "package shutdown reported failure; restart required";
+                lock (Gate)
+                {
+                    FaultedPackages[lease.Session.Identity.Key] = reason;
+                }
+                App.Log($"[NativePackage] {lease.Session.Identity.Key} marked FAULTED: {reason}");
+            }
         }
     }
 }
@@ -524,10 +588,10 @@ internal sealed unsafe class NativePackageSession
     private readonly nint _widgetEventExport; // required export at ABI v4
     private readonly object _instanceGate = new();
     private readonly HashSet<nint> _liveHandles = [];
-    // audit round 20: instance data roots are deleted on final destroy,
-    // allowing plugins to clean up their per-instance files without host intervention.
-    private readonly Dictionary<nint, string> _instanceDataRoots = [];
     // audit 20 §18: instance ids for PackageInstanceRegistry unregistration.
+    // audit 21: instance data roots are NOT tracked (or touched) here —
+    // runtime destroy keeps persistent data; logical widget deletion owns
+    // data removal via NativeInstanceDataLifecycle.
     private readonly Dictionary<nint, string> _instanceIds = [];
     internal nint _hostApiContext;
 
@@ -634,7 +698,6 @@ internal sealed unsafe class NativePackageSession
         lock (_instanceGate)
         {
             _liveHandles.Add(handle);
-            _instanceDataRoots[handle] = instanceDataRoot;
             _instanceIds[handle] = instanceId;
         }
         // Ownership for the generic write-through routing (audit 20 §18).
@@ -642,9 +705,16 @@ internal sealed unsafe class NativePackageSession
         return NativeWidgetLease.Create(this, handle, view, instanceId);
     }
 
-    /// <summary>Destroys by handle; returns true only when the package confirms success.
-    /// On success, the instance data root is deleted (audit round 20 - third law of
-    /// IWidgetInstanceLifecycle: Destroy cleans up all per-instance state).</summary>
+    /// <summary>
+    /// Destroys by handle; returns true only when the package confirms success.
+    /// Runtime destroy is lifecycle 1 of 3 (audit round 21): it releases the
+    /// widget handle and ownership ONLY — the persistent instance data root
+    /// is deliberately KEPT, because transient teardowns (group switches,
+    /// content rebuilds, reparents) reuse the same instance. Persistent data
+    /// removal belongs exclusively to logical widget deletion
+    /// (NativeInstanceDataLifecycle.DeleteAsync) after the WidgetConfig
+    /// deletion has committed.
+    /// </summary>
     internal bool DestroyWidget(nint handle)
     {
         int status = ((delegate* unmanaged[Cdecl]<nint, int>)_destroyExport)(handle);
@@ -662,22 +732,6 @@ internal sealed unsafe class NativePackageSession
         if (instanceId is not null)
         {
             PackageInstanceRegistry.Unregister(instanceId);
-        }
-        // Delete OUTSIDE the gate: disk I/O must never run under the lock the
-        // LiveInstanceCount probe takes (regression pass, audit-round-20 hygiene).
-        if (_instanceDataRoots.Remove(handle, out string? dataRoot))
-        {
-            // Total teardown (audit round 20): the destroy must never fail because of
-            // the runtime-state save (that happens in the package's Dispose), so
-            // disk access errors here are logged but don't turn into ABI failure.
-            try
-            {
-                if (Directory.Exists(dataRoot)) Directory.Delete(dataRoot, recursive: true);
-            }
-            catch (Exception error)
-            {
-                App.Log($"[NativePackage] failed to delete instance data root '{dataRoot}': {error.Message}");
-            }
         }
         return true;
     }
@@ -711,11 +765,24 @@ internal sealed unsafe class NativePackageSession
         }
     }
 
-    internal void Shutdown()
+    /// <summary>
+    /// Tears the session down. Returns true only when the package confirmed
+    /// a clean shutdown — a false return means the resident module's
+    /// internal state is unknown, and the caller must mark the package
+    /// Faulted so it is never re-activated in this process (audit round 21).
+    /// Session attribution (context + config subscription) is detached on
+    /// EVERY path: the previous early-return leaked both on the normal
+    /// shutdown path, accumulating stale callbacks across activate cycles.
+    /// Persistent instance data roots are never touched here — runtime
+    /// teardown is lifecycle 1; data removal belongs to logical deletion.
+    /// </summary>
+    internal bool Shutdown()
     {
+        bool succeeded;
         try
         {
             int status = ((delegate* unmanaged[Cdecl]<int>)_shutdownExport)();
+            succeeded = status == 0;
             if (status != 0)
             {
                 App.Log($"[NativePackage] shutdown reported 0x{status:X8} for {Identity.Key}; the package still holds state (lifecycle bug upstream)");
@@ -728,41 +795,29 @@ internal sealed unsafe class NativePackageSession
         catch (Exception error)
         {
             App.Log($"[NativePackage] shutdown failed for {Identity.Key}: {error.Message}");
+            succeeded = false;
         }
 
-        // audit round 20 - Shutdown Faulted: if destroy failed and the package
-        // did not clean up, the host must log and force cleanup of any remaining
-        // live handles to prevent data directory accumulation.
+        // Release ownership of any still-tracked instances (a destroy that
+        // failed earlier, or a host that tore down without destroying).
+        // Persistent data roots are KEPT — logical deletion owns them.
         lock (_instanceGate)
         {
-            if (_liveHandles.Count == 0) return;
-            App.Log($"[NativePackage] shutdown force-cleanup of {_liveHandles.Count} faulted instance(s) for {Identity.Key}");
-            var handles = _liveHandles.ToArray();
-            foreach (nint handle in handles)
+            foreach (nint handle in _liveHandles.ToArray())
             {
                 if (_instanceIds.Remove(handle, out string? instanceId))
                 {
                     PackageInstanceRegistry.Unregister(instanceId);
                 }
-                if (_instanceDataRoots.Remove(handle, out string? dataRoot))
-                {
-                    try
-                    {
-                        if (Directory.Exists(dataRoot)) Directory.Delete(dataRoot, recursive: true);
-                    }
-                    catch
-                    {
-                        // No-op: nothing we can do at shutdown.
-                    }
-                }
             }
-            _instanceDataRoots.Clear();
             _liveHandles.Clear();
         }
 
-        // Detach the session attribution (config subscription + context) so
-        // the ids are never reused or resolved after shutdown.
+        // No early return above this line: session attribution must detach
+        // on every path (audit round 21 — the normal shutdown path used to
+        // leak the context and config-changed subscription).
         NativeHostApiBridge.DetachSession(_hostApiContext);
+        return succeeded;
     }
 }
 
