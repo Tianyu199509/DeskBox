@@ -897,6 +897,7 @@ public partial class App : Application
                 new DeskBox.Services.Plugins.OfficialPackageBinding(
                     DeskBox.Models.WidgetKind.Glance, "deskbox.glance", "glance",
                     DeskBox.Services.GlanceInstanceMigration.Instance));
+            DeskBox.Services.WeatherInstanceMigration.Register();
 
             // Dev native package bootstrap: install through the B1 pipeline
             // once at startup when DESKBOX_DEV_NATIVE_GLANCE points at a
@@ -1100,6 +1101,9 @@ public partial class App : Application
             }
 
             Log("OnLaunched completed successfully");
+#if DESKBOX_NATIVE_DEV_PILOT
+            StartWeatherNativeProbe();
+#endif
 #if DESKBOX_NATIVE_AOT && DESKBOX_AOT_SMOKE_HARNESS
             StartAotShortcutSmokeIfRequested();
             StartAotShellSmokeIfRequested();

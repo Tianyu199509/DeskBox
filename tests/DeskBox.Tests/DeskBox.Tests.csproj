@@ -46,6 +46,7 @@
          directly (the host still does not reference it). The alias keeps the
          package's DeskBox.* types from colliding with the host's. -->
     <ProjectReference Include="..\..\src\DeskBox.GlancePackage\DeskBox.GlancePackage.csproj" Aliases="GlancePkg" />
+    <ProjectReference Include="..\..\src\DeskBox.WeatherPackage\DeskBox.WeatherPackage.csproj" Aliases="WeatherPkg" />
   </ItemGroup>
 
   <ItemGroup>

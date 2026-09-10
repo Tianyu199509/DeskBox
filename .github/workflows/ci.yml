@@ -35,7 +35,10 @@ jobs:
       # compile break inside them would otherwise stay invisible to CI
       # (audit round 17).
       - name: Build native packages
-        run: dotnet build .\src\DeskBox.GlancePackage\DeskBox.GlancePackage.csproj --configuration Release --no-restore -p:Platform=x64 -p:RuntimeIdentifier=win-x64 -v:minimal
+        run: |
+          dotnet build .\src\DeskBox.GlancePackage\DeskBox.GlancePackage.csproj --configuration Release --no-restore -p:Platform=x64 -p:RuntimeIdentifier=win-x64 -v:minimal
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          dotnet build .\src\DeskBox.WeatherPackage\DeskBox.WeatherPackage.csproj --configuration Release --no-restore -p:Platform=x64 -p:RuntimeIdentifier=win-x64 -v:minimal
 
       - name: Test
         timeout-minutes: 10

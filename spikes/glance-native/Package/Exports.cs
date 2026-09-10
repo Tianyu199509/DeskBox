@@ -187,6 +187,8 @@ public struct UnifiedHostApi
     public uint Size;
     public uint Version;
     public nint Log;
+    public nint GetConfigJson;
+    public nint SetConfigChangedHandler;
 }
 
 internal unsafe static class UnifiedSession
