@@ -72,6 +72,7 @@ internal static class TestPaths
             "src/DeskBox",
             "src/DeskBox.Abstractions",
             "src/DeskBox.GlancePackage",
+            "src/DeskBox.MusicPackage",
             "src/DeskBox.Updater",
         ];
     }
