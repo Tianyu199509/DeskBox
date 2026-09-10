@@ -224,46 +224,70 @@ public sealed class MusicSessionService : IDisposable
 
     public async Task<bool> TryTogglePlayPauseAsync(string? sessionId)
     {
-        var session = await GetSessionAsync(sessionId);
-        if (session is null)
+        try
         {
-            return false;
-        }
+            var session = await GetSessionAsync(sessionId);
+            if (session is null)
+            {
+                return false;
+            }
 
-        var playbackInfo = session.GetPlaybackInfo();
-        return playbackInfo.PlaybackStatus == GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing
-            ? await session.TryPauseAsync()
-            : await session.TryPlayAsync();
+            var playbackInfo = session.GetPlaybackInfo();
+            return playbackInfo.PlaybackStatus == GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing
+                ? await session.TryPauseAsync()
+                : await session.TryPlayAsync();
+        }
+        catch { return false; } // stale session mid-call (audit 21: SMTC transport)
     }
 
     public async Task<bool> TryPlayAsync(string? sessionId)
     {
-        var session = await GetSessionAsync(sessionId);
-        return session is not null && await session.TryPlayAsync();
+        try
+        {
+            var session = await GetSessionAsync(sessionId);
+            return session is not null && await session.TryPlayAsync();
+        }
+        catch { return false; }
     }
 
     public async Task<bool> TryPauseAsync(string? sessionId)
     {
-        var session = await GetSessionAsync(sessionId);
-        return session is not null && await session.TryPauseAsync();
+        try
+        {
+            var session = await GetSessionAsync(sessionId);
+            return session is not null && await session.TryPauseAsync();
+        }
+        catch { return false; }
     }
 
     public async Task<bool> TryPreviousAsync(string? sessionId)
     {
-        var session = await GetSessionAsync(sessionId);
-        return session is not null && await session.TrySkipPreviousAsync();
+        try
+        {
+            var session = await GetSessionAsync(sessionId);
+            return session is not null && await session.TrySkipPreviousAsync();
+        }
+        catch { return false; }
     }
 
     public async Task<bool> TryNextAsync(string? sessionId)
     {
-        var session = await GetSessionAsync(sessionId);
-        return session is not null && await session.TrySkipNextAsync();
+        try
+        {
+            var session = await GetSessionAsync(sessionId);
+            return session is not null && await session.TrySkipNextAsync();
+        }
+        catch { return false; }
     }
 
     public async Task<bool> TrySeekAsync(string? sessionId, TimeSpan position)
     {
-        var session = await GetSessionAsync(sessionId);
-        return session is not null && await session.TryChangePlaybackPositionAsync((long)position.TotalMilliseconds * 10_000);
+        try
+        {
+            var session = await GetSessionAsync(sessionId);
+            return session is not null && await session.TryChangePlaybackPositionAsync((long)position.TotalMilliseconds * 10_000);
+        }
+        catch { return false; }
     }
 
     public async Task<bool> TryChangePlaybackModeAsync(string? sessionId, MusicPlaybackMode playbackMode)

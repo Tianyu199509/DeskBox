@@ -167,8 +167,20 @@ public static unsafe class Exports
                 _handles[handle] = lifecycleHandle;
                 Instances[handle] = controller.View;
             }
-            *widgetHandle = handle;
-            *view = WinRT.MarshalInspectable<FrameworkElement>.FromManaged(controller.View);
+            try
+            {
+                *widgetHandle = handle;
+                *view = WinRT.MarshalInspectable<FrameworkElement>.FromManaged(controller.View);
+            }
+            catch
+            {
+                lock (InstanceGate)
+                {
+                    _handles.Remove(handle);
+                    Instances.Remove(handle);
+                }
+                throw;
+            }
             HostLog($"widget created: {contribution}/{instance}");
             return S_OK;
         }
