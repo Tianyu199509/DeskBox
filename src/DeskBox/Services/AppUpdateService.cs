@@ -165,6 +165,17 @@ public sealed partial class AppUpdateService : IAppUpdateService
             return AppUpdateDownloadResult.Failed(AppUpdateDownloadFailureKind.InvalidManifest);
         }
 
+        // HttpClient only transports HTTP(S). Any other absolute scheme
+        // (file:, ftp:, ms-windows-store:, ...) makes GetAsync throw
+        // NotSupportedException, which is outside this method's catch
+        // filters and would escape into the async-void UI caller.
+        if (downloadUri.Scheme is not ("http" or "https"))
+        {
+            return AppUpdateDownloadResult.Failed(
+                AppUpdateDownloadFailureKind.InvalidManifest,
+                "The update download URL must use HTTP or HTTPS.");
+        }
+
         if (!IsInstallerDownloadCompatibleWithArchitecture(
                 manifest.DownloadUrl,
                 CurrentInstallerArchitectureSuffix))
@@ -172,6 +183,15 @@ public sealed partial class AppUpdateService : IAppUpdateService
             return AppUpdateDownloadResult.Failed(
                 AppUpdateDownloadFailureKind.InvalidManifest,
                 "The installer architecture does not match this DeskBox process.");
+        }
+
+        if (!IsSafeVersionSegment(manifest.Version))
+        {
+            // A version of "." or ".." would move targetDirectory outside
+            // the update root even though SanitizeFileName leaves it intact.
+            return AppUpdateDownloadResult.Failed(
+                AppUpdateDownloadFailureKind.InvalidManifest,
+                "The update manifest version is not a safe path segment.");
         }
 
         string targetDirectory = Path.Combine(_updateRootPath, SanitizePathSegment(manifest.Version));
@@ -576,6 +596,30 @@ public sealed partial class AppUpdateService : IAppUpdateService
             Architecture.X64 => "x64",
             _ => string.Empty
         };
+    }
+
+    /// <summary>
+    /// The manifest version is used as a single directory segment under the
+    /// update root. <see cref="SanitizeFileName"/> cannot reject "." or ".."
+    /// because they contain no invalid characters, so callers that build a
+    /// path from the version must use this check instead.
+    /// </summary>
+    internal static bool IsSafeVersionSegment(string? version)
+    {
+        if (string.IsNullOrWhiteSpace(version))
+        {
+            return false;
+        }
+
+        string trimmed = version.Trim();
+        if (trimmed is "." or "..")
+        {
+            return false;
+        }
+
+        return trimmed.IndexOfAny(Path.GetInvalidFileNameChars()) < 0 &&
+               !trimmed.Contains('/') &&
+               !trimmed.Contains('\\');
     }
 
     private static string SanitizePathSegment(string value)

@@ -414,6 +414,49 @@ public sealed class DesktopOrganizationTests : IDisposable
     }
 
     [Fact]
+    public async Task Transaction_ProgressCountsOnlyCompletedItems()
+    {
+        string desktop = Directory.CreateDirectory(
+            Path.Combine(_root, "progress-desktop")).FullName;
+        string storage = Directory.CreateDirectory(
+            Path.Combine(_root, "progress-storage")).FullName;
+        string retainedSource = Path.Combine(desktop, "changed.txt");
+        string movedSource = Path.Combine(desktop, "stable.txt");
+        File.WriteAllText(retainedSource, "before");
+        File.WriteAllText(movedSource, "stable");
+        var scanner = new DesktopOrganizationScanner(
+            new DesktopOrganizationClassifier(),
+            () => desktop,
+            () => string.Empty);
+        DesktopOrganizationScanResult scan = await scanner.ScanAsync();
+        DesktopOrganizationPlan plan = new DesktopOrganizationPlanner(
+            new DesktopOrganizationRuleResolver()).CreatePlan(
+            scan,
+            storage,
+            [],
+            [],
+            _ => "Documents");
+        File.AppendAllText(retainedSource, "-changed-after-preview");
+        var settings = new SettingsService(Path.Combine(_root, "progress-settings"));
+        var progressValues = new List<DesktopOrganizationProgress>();
+
+        DesktopOrganizationExecutionResult result = await new DesktopOrganizationTransaction(
+                settings,
+                new FileService())
+            .ExecuteAsync(
+                plan,
+                new InlineProgress<DesktopOrganizationProgress>(progressValues.Add));
+
+        // Two items planned, one retained by revalidation. One personal
+        // item is transferred per batch, so the two reports must never count
+        // the retained item as completed; the running total ends at 1.
+        Assert.Single(result.RetainedItems);
+        Assert.Equal(2, progressValues.Count);
+        Assert.All(progressValues, value => Assert.Equal(2, value.TotalCount));
+        Assert.Equal(1, progressValues[^1].CompletedCount);
+    }
+
+    [Fact]
     public async Task Transaction_RetainsChangedItemAndContinuesTheRemainingBatch()
     {
         string desktop = Directory.CreateDirectory(

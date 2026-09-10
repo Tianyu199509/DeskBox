@@ -158,7 +158,10 @@ public sealed partial class DesktopOrganizationTransaction
                             retainedItems.Add(CreateRetainedItem(snapshotsByPath[item.SourcePath],
                                 failure ?? new IOException("The file was not moved.")));
                     }
-                    completedCount += batch.Count;
+                    // Only items whose transfer actually completed are
+                    // progress; items retained by revalidation or a failed
+                    // transfer must not inflate the reported count.
+                    completedCount += batch.Count(item => item.Completed);
                     var last = batch[^1];
                     progress?.Report(new DesktopOrganizationProgress(completedCount, totalCount,
                         last.TargetWidgetId, plan.Targets.First(target => target.TargetWidgetId == last.TargetWidgetId).SuggestedDisplayName,

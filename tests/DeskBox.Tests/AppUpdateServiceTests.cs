@@ -377,6 +377,83 @@ public sealed class AppUpdateServiceTests : IDisposable
         Assert.Equal(AppUpdateDownloadFailureKind.Cancelled, result.FailureKind);
     }
 
+    [Theory]
+    [InlineData("1.2.2", true)]
+    [InlineData("v1.2.2", true)]
+    [InlineData("1.2.2-beta.1", true)]
+    [InlineData(".", false)]
+    [InlineData("..", false)]
+    [InlineData("  ..  ", false)]
+    [InlineData("", false)]
+    [InlineData("   ", false)]
+    [InlineData("a/b", false)]
+    [InlineData("a\\b", false)]
+    public void IsSafeVersionSegment_RejectsTraversalAndSeparators(string version, bool expected)
+    {
+        Assert.Equal(expected, AppUpdateService.IsSafeVersionSegment(version));
+    }
+
+    [Fact]
+    public async Task DownloadUpdateAsync_RejectsNonHttpDownloadScheme()
+    {
+        bool handlerInvoked = false;
+        using var httpClient = CreateHttpClient(_ =>
+        {
+            handlerInvoked = true;
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new ByteArrayContent([1, 2, 3])
+            };
+        });
+        var service = new AppUpdateService(httpClient, updateRootPath: _tempRoot);
+
+        var result = await service.DownloadUpdateAsync(new AppUpdateManifest
+        {
+            Version = "1.2.2",
+            DownloadUrl =
+                $"file:///C:/updates/DeskBox_Setup_1.2.2_{AppUpdateService.CurrentInstallerArchitectureSuffix}.exe",
+            Sha256 = new string('A', 64),
+            Size = 3
+        });
+
+        Assert.False(result.Success);
+        Assert.Equal(AppUpdateDownloadFailureKind.InvalidManifest, result.FailureKind);
+        Assert.False(handlerInvoked);
+    }
+
+    [Theory]
+    [InlineData(".")]
+    [InlineData("..")]
+    public async Task DownloadUpdateAsync_RejectsVersionThatEscapesTheUpdateRoot(string version)
+    {
+        byte[] payload = Encoding.UTF8.GetBytes("deskbox-installer");
+        string sha256 = Convert.ToHexString(SHA256.HashData(payload));
+        using var httpClient = CreateHttpClient(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new ByteArrayContent(payload)
+        });
+        var service = new AppUpdateService(httpClient, updateRootPath: _tempRoot);
+
+        var result = await service.DownloadUpdateAsync(new AppUpdateManifest
+        {
+            Version = version,
+            DownloadUrl =
+                $"https://example.com/DeskBox_Setup_1.2.2_{AppUpdateService.CurrentInstallerArchitectureSuffix}.exe",
+            Sha256 = sha256,
+            Size = payload.Length
+        });
+
+        Assert.False(result.Success);
+        Assert.Equal(AppUpdateDownloadFailureKind.InvalidManifest, result.FailureKind);
+        // Regression guard: with the pre-fix code a "."/".." version wrote
+        // the installer beside (or one level above) the update root.
+        string parent = Path.GetDirectoryName(_tempRoot)!;
+        string escapedInstallerName =
+            $"DeskBox_Setup_1.2.2_{AppUpdateService.CurrentInstallerArchitectureSuffix}.exe";
+        Assert.False(File.Exists(Path.Combine(parent, escapedInstallerName)));
+        Assert.False(File.Exists(Path.Combine(_tempRoot, escapedInstallerName)));
+    }
+
     [Fact]
     public async Task PrepareDetachedUpdaterHelper_CopiesUpdaterOutsideAppDirectory()
     {
