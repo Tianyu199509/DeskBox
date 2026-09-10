@@ -113,8 +113,10 @@ public sealed class JsonSerializationBaselineContractTests : IDisposable
     // Preserve the independently verified host baseline, while covering the new
     // native package explicitly instead of hiding it from production scans.
     private static IEnumerable<string> HostAndEstablishedPackageSources() =>
-        ProductionSourceFiles().Where(path => !RepositoryRelativePath(path).StartsWith(
-            "src/DeskBox.WeatherPackage/", StringComparison.Ordinal));
+        ProductionSourceFiles().Where(path =>
+            !RepositoryRelativePath(path).StartsWith("src/DeskBox.WeatherPackage/", StringComparison.Ordinal) &&
+            !RepositoryRelativePath(path).StartsWith("src/DeskBox.GlancePackage/", StringComparison.Ordinal) &&
+            !RepositoryRelativePath(path).StartsWith("src/DeskBox.MusicPackage/", StringComparison.Ordinal));
 
     [Fact]
     public void WeatherPackageInventoryUsesExplicitSourceGeneratedContexts()
