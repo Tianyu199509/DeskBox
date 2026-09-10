@@ -114,27 +114,28 @@ internal sealed class GlanceInstanceMigration : ILegacyInstanceMigration
         }
     }
 
-    /// <summary>
-    /// Enums travel as names or legacy integers (the built-in accepts both);
-    /// anything else - or an undefined value - is a type error.
-    /// </summary>
-    private static bool IsValidEnumValue<TEnum>(JsonElement element)
-        where TEnum : struct, Enum
+/// <summary>
+/// Enums travel as names or legacy integers (the built-in accepts both);
+/// an undefined integer is still deserializable by JsonStringEnumConverter
+/// and will be corrected by Normalize, so migration recovery accepts any
+/// integer. Strings must be defined enum names. (Audit round 21 R2 repair.)
+/// </summary>
+private static bool IsValidEnumValue<TEnum>(JsonElement element)
+    where TEnum : struct, Enum
+{
+    if (element.ValueKind == JsonValueKind.String)
     {
-        if (element.ValueKind == JsonValueKind.String)
-        {
-            return Enum.TryParse(element.GetString(), ignoreCase: true, out TEnum parsed) &&
-                   Enum.IsDefined(parsed);
-        }
-        if (element.ValueKind == JsonValueKind.Number &&
-            element.TryGetInt32(out int number) &&
-            number >= 0)
-        {
-            TEnum candidate = (TEnum)(object)number;
-            return Enum.IsDefined(candidate);
-        }
-        return false;
+        return Enum.TryParse(element.GetString(), ignoreCase: true, out TEnum parsed) &&
+               Enum.IsDefined(parsed);
     }
+    // Any integer is accepted (matching built-in's JsonStringEnumConverter
+    // default allowIntegerValues=true); Normalize fixes undefined values.
+    if (element.ValueKind == JsonValueKind.Number)
+    {
+        return element.TryGetInt32(out _);
+    }
+    return false;
+}
 
     // ---- Write-through (native settings patch → authoritative store) ----
 
