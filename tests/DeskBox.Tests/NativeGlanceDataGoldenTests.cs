@@ -426,4 +426,54 @@ public void NormalizerClampsTimeScaleNegativeToOneQuater()
         GlancePkg::DeskBox.GlancePackage.Rendering.GlanceSettingsNormalizer.Normalize(settings);
         Assert.False(settings.ShowYear);
     }
+
+    [Fact]
+    public void NormalizerTrimsAndDeduplicatesImagePaths()
+    {
+        var settings = new PackageData();
+        settings.LocalImagePaths.AddRange(["  a.png  ", "", "b.jpg", "a.PNG", null!]);
+        GlancePkg::DeskBox.GlancePackage.Rendering.GlanceSettingsNormalizer.Normalize(settings);
+        Assert.Equal(["a.png", "b.jpg"], settings.LocalImagePaths);
+    }
+
+    [Fact]
+    public void NormalizerTrimsFolderAndNullifiesBlank()
+    {
+        var settings = new PackageData { LocalFolderPath = "  D:\\test  " };
+        GlancePkg::DeskBox.GlancePackage.Rendering.GlanceSettingsNormalizer.Normalize(settings);
+        Assert.Equal(@"D:\test", settings.LocalFolderPath);
+
+        settings.LocalFolderPath = "   ";
+        GlancePkg::DeskBox.GlancePackage.Rendering.GlanceSettingsNormalizer.Normalize(settings);
+        Assert.Null(settings.LocalFolderPath);
+    }
+
+    [Fact]
+    public void NormalizerClampsTransparencyAndHandlesNonFinite()
+    {
+        var settings = new PackageData { BackgroundImageTransparency = 1.5 };
+        GlancePkg::DeskBox.GlancePackage.Rendering.GlanceSettingsNormalizer.Normalize(settings);
+        Assert.Equal(1.0, settings.BackgroundImageTransparency, precision: 5);
+
+        settings.BackgroundImageTransparency = double.NaN;
+        GlancePkg::DeskBox.GlancePackage.Rendering.GlanceSettingsNormalizer.Normalize(settings);
+        Assert.Equal(0.0, settings.BackgroundImageTransparency);
+    }
+
+    [Fact]
+    public void NormalizerEnumFallbacksMatchBuiltIn()
+    {
+        var settings = new PackageData();
+        settings.TimeFormat = (GlanceTimeFormatMode)999;
+        settings.Layout = (GlancePkg::DeskBox.Models.GlanceLayoutMode)999;
+        settings.Transition = (GlancePkg::DeskBox.Models.GlanceTransitionMode)999;
+        settings.TransitionSpeed = (GlancePkg::DeskBox.Models.GlanceTransitionSpeed)999;
+        settings.Readability = (GlancePkg::DeskBox.Models.GlanceReadabilityMode)999;
+        GlancePkg::DeskBox.GlancePackage.Rendering.GlanceSettingsNormalizer.Normalize(settings);
+        Assert.Equal(GlanceTimeFormatMode.FollowSystem, settings.TimeFormat);
+        Assert.Equal(GlancePkg::DeskBox.Models.GlanceLayoutMode.Centered, settings.Layout);
+        Assert.Equal(GlancePkg::DeskBox.Models.GlanceTransitionMode.CrossFade, settings.Transition);
+        Assert.Equal(GlancePkg::DeskBox.Models.GlanceTransitionSpeed.Standard, settings.TransitionSpeed);
+        Assert.Equal(GlancePkg::DeskBox.Models.GlanceReadabilityMode.Soft, settings.Readability);
+    }
 }
