@@ -370,16 +370,20 @@ internal sealed class GlanceWidgetController : IDisposable
     /// </summary>
     private void ApplyLayerEffects(GlancePresentation presentation)
     {
-        _backgroundLayer.Opacity = 1.0 - Math.Clamp(Settings.BackgroundImageTransparency, 0.0, 1.0);
-        bool hasImage = _images.Length > 0;
+        double imageOpacity = 1.0 - Math.Clamp(Settings.BackgroundImageTransparency, 0.0, 1.0);
+        _backgroundLayer.Opacity = imageOpacity;
         bool calendar = presentation.CalendarSurfaceVisibility == Visibility.Visible;
-        bool nonCalendarForeground = hasImage &&
+        // Built-in parity: HasVisibleCurrentImage = has image AND the image
+        // is actually visible (opacity > 0.001). A fully transparent
+        // background must not show darkening layers (audit 21 R2).
+        bool hasVisibleImage = _images.Length > 0 && imageOpacity > 0.001;
+        bool nonCalendarForeground = hasVisibleImage &&
             presentation.ForegroundVisibility == Visibility.Visible && !calendar;
         _readabilityLayer.Opacity = presentation.ReadabilityOpacity;
         _readabilityLayer.Visibility = nonCalendarForeground ? Visibility.Visible : Visibility.Collapsed;
         _gradientLayer.Visibility = nonCalendarForeground ? Visibility.Visible : Visibility.Collapsed;
         _calendarReadabilityLayer.Opacity = presentation.ReadabilityOpacity;
-        _calendarReadabilityLayer.Visibility = hasImage && calendar ? Visibility.Visible : Visibility.Collapsed;
+        _calendarReadabilityLayer.Visibility = hasVisibleImage && calendar ? Visibility.Visible : Visibility.Collapsed;
     }
 
     // ---- Settings (host-authoritative write-through) ----

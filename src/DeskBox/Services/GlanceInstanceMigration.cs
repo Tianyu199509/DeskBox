@@ -90,6 +90,7 @@ internal sealed class GlanceInstanceMigration : ILegacyInstanceMigration
                     "traditionalCalendarMode" => IsValidEnumValue<GlanceTraditionalCalendarMode>(property.Value),
                     "backgroundSource" => IsValidEnumValue<GlanceBackgroundSource>(property.Value),
                     "imageFit" => IsValidEnumValue<GlanceImageFitMode>(property.Value),
+                    "imageFocus" => IsValidEnumValue<GlanceImageFocus>(property.Value),
                     "timeFormat" => IsValidEnumValue<GlanceTimeFormatMode>(property.Value),
                     "layout" => IsValidEnumValue<GlanceLayoutMode>(property.Value),
                     "transition" => IsValidEnumValue<GlanceTransitionMode>(property.Value),
