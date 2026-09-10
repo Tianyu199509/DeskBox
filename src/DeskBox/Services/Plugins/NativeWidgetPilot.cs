@@ -100,6 +100,11 @@ internal static class NativeWidgetPilot
                     DeskBoxDataPathService.Current.DataDirectory,
                     out NativeWidgetLease? lease))
             {
+                // Ownership for the write-through routing (audit 21 §11).
+                if (binding.Migration is not null)
+                {
+                    PackageInstanceRegistry.Register(binding.Migration, config.Id);
+                }
                 content = new NativeWidgetPilotContent(config, lease!);
                 return true;
             }
@@ -263,6 +268,9 @@ internal sealed class NativeWidgetPilotContent :
     {
         _compactBackgroundNotificationsStopped = true;
         CompactBackgroundChanged = null;
+        // Unregister ownership BEFORE destroy so the write-through callback
+        // doesn't route to a destroyed instance (audit 21 §11).
+        PackageInstanceRegistry.Unregister(WidgetId);
         FrameworkElement? backgroundView = _compactBackgroundView;
         try
         {

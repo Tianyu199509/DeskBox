@@ -48,7 +48,7 @@ internal static class MusicPackageIntegration
                 {
                     // Only sync live package instances. Creation already performs
                     // the initial migration; closed instances need no work.
-                    if (PackageInstanceRegistry.TryResolvePackageId(widget.Id) != record.PackageId) continue;
+                    if (PackageInstanceRegistry.TryResolveMigration(widget.Id) is null) continue;
                     NativeWidgetDataMigration.TrySync(MusicInstanceMigration.Instance,
                         record.PublisherFingerprint, record.PackageId, widget.Id, data);
                 }

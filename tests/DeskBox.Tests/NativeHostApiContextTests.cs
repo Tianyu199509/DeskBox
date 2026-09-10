@@ -47,7 +47,7 @@ public class NativeHostApiContextTests
         string loader = File.ReadAllText(TestPaths.SourceFile(
             "src/DeskBox/Services/Plugins/NativeWidgetPackageLoader.cs"));
         Assert.Contains("NativePackageContextRegistry.TryResolve(context)", loader);
-        Assert.Contains("string.Equals(registeredPackageId, owner.PackageId", loader);
+        Assert.Contains("PackageInstanceRegistry.TryResolveMigration(widgetId)", loader);
 
         string app = File.ReadAllText(TestPaths.SourceFile("src/DeskBox/App.xaml.cs"));
         Assert.Contains("NativeHostApiBridge.PushConfigChanged", app);

@@ -4,6 +4,7 @@ using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
+using DeskBox.Contracts;
 using System.Text.Json;
 
 namespace DeskBox.Services.Plugins;
@@ -336,14 +337,10 @@ internal static unsafe class NativeHostApiBridge
             {
                 return unchecked((int)0x80070057);
             }
-            string? registeredPackageId = PackageInstanceRegistry.TryResolvePackageId(widgetId);
-            if (!string.Equals(registeredPackageId, owner.PackageId, StringComparison.Ordinal))
-            {
-                App.LogVerbose($"[NativePackage] config patch for instance {widgetId} does not belong to {owner.PackageId}; rejected");
-                return unchecked((int)0x80070057); // E_INVALIDARG
-            }
-            OfficialPackageBinding? binding = PackageBindingRegistry.TryGetByPackageId(owner.PackageId);
-            if (binding?.Migration is null || !binding.Migration.TryApplyPatch(widgetId, payload))
+            // R3: instanceId resolves DIRECTLY to the migration adapter —
+            // no ByPackageId intermediate lookup (audit round 21 §11).
+            ILegacyInstanceMigration? migration = PackageInstanceRegistry.TryResolveMigration(widgetId);
+            if (migration is null || !migration.TryApplyPatch(widgetId, payload))
             {
                 return unchecked((int)0x80070057); // E_INVALIDARG
             }
@@ -762,8 +759,8 @@ internal sealed unsafe class NativePackageSession
             _liveHandles.Add(handle);
             _instanceIds[handle] = instanceId;
         }
-        // Ownership for the generic write-through routing (audit 20 §18).
-        PackageInstanceRegistry.Register(Identity.PackageId, instanceId);
+        // Ownership registration (PackageInstanceRegistry) is done by the
+        // caller (NativeWidgetPilot.TryCreate) which has the binding context.
         return NativeWidgetLease.Create(this, handle, view, instanceId);
     }
 
