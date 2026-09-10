@@ -57,8 +57,13 @@ internal static class GlanceDataFile
             if (TryEnum<GlanceTransitionSpeed>(raw, "transitionSpeed", out var speed)) settings.TransitionSpeed = speed;
             if (TryEnum<GlanceReadabilityMode>(raw, "readability", out var readability)) settings.Readability = readability;
             if (TryDouble(raw, "backgroundImageTransparency", out double transparency)) settings.BackgroundImageTransparency = transparency;
+            if (TryEnum<GlanceImageFocus>(raw, "imageFocus", out var focus)) settings.ImageFocus = focus;
             if (TryString(raw, "timeFontFamily", out string? fontFamily) && !string.IsNullOrWhiteSpace(fontFamily)) settings.TimeFontFamily = fontFamily;
             if (TryDouble(raw, "timeScale", out double scale) && scale > 0) settings.TimeScale = scale;
+            // Built-in parity (audit 21 R2): apply the same Normalize rules
+            // the host store applies, so legacy/hand-edited data produces the
+            // same effective settings as the built-in widget.
+            GlanceSettingsNormalizer.Normalize(settings);
             return new GlanceData(settings, raw);
         }
         catch
@@ -170,6 +175,7 @@ internal static class GlanceDataFile
         }
         if (skip?.Contains("localFolderPath") != true && only?.Contains("localFolderPath") != false) writer.WriteString("localFolderPath", settings.LocalFolderPath);
         if (skip?.Contains("imageFit") != true && only?.Contains("imageFit") != false) writer.WriteString("imageFit", settings.ImageFit.ToString());
+        if (skip?.Contains("imageFocus") != true && only?.Contains("imageFocus") != false) writer.WriteString("imageFocus", settings.ImageFocus.ToString());
         if (skip?.Contains("showPhotoControls") != true && only?.Contains("showPhotoControls") != false) writer.WriteBoolean("showPhotoControls", settings.ShowPhotoControls);
         // Display-element toggles: the package never mutates these (host
         // settings UI owns them pre-cutover), but they ride the typed

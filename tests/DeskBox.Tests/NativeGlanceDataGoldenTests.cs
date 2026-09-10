@@ -179,14 +179,16 @@ public class NativeGlanceDataGoldenTests
         {
             // First save creates the primary; a second save rotates the
             // previous content into the .bak via File.Replace.
-            GlanceDataFile.Save(new GlanceData(new PackageData { RotationIntervalMinutes = 77 }, default), root);
+            // RotationIntervalMinutes 60 is a supported interval (survives
+            // Normalize), making the assertion deterministic.
+            GlanceDataFile.Save(new GlanceData(new PackageData { RotationIntervalMinutes = 60 }, default), root);
             GlanceDataFile.Save(new GlanceData(new PackageData { RotationIntervalMinutes = 88 }, default), root);
             Assert.True(File.Exists(Path.Combine(root, GlanceDataFile.FileName + ".bak")));
 
             File.WriteAllText(Path.Combine(root, GlanceDataFile.FileName), "{ torn write");
             GlanceData? recovered = GlanceDataFile.Load(root);
             Assert.NotNull(recovered);
-            Assert.Equal(77, recovered!.Settings.RotationIntervalMinutes);
+            Assert.Equal(60, recovered!.Settings.RotationIntervalMinutes);
         }
         finally
         {
@@ -231,9 +233,9 @@ public class NativeGlanceDataGoldenTests
         string full = GlanceDataFile.BuildOwnedPatch(settings);
         using (JsonDocument document = JsonDocument.Parse(full))
         {
-            // 9 interaction + 6 display/time + layout + 4 playback-appearance
-            // + font family/scale fields.
-            Assert.Equal(22, document.RootElement.EnumerateObject().Count());
+            // 23 owned fields (9 interaction + 6 display/time + layout +
+            // 4 playback-appearance + imageFocus + font family/scale).
+            Assert.Equal(23, document.RootElement.EnumerateObject().Count());
         }
     }
 
@@ -279,5 +281,57 @@ public class NativeGlanceDataGoldenTests
         Assert.Contains("StopVisualResources", controller);
         // Hidden-across-midnight recovery: reveal must re-derive the date.
         Assert.Contains("EnsureCurrentDate", controller);
+    }
+
+    [Fact]
+    public void ImageFocusRoundTripsThroughTheDataPipeline()
+    {
+        // Audit round 21 R2 — the full data chain, not just the mapping:
+        // JSON "imageFocus":"Top" → GlanceDataFile.Load → Settings.ImageFocus
+        // must be Top, and Save must preserve it.
+        string root = Root();
+        try
+        {
+            WriteData(root, """{ "version": 7, "imageFocus": "Top" }""");
+            GlanceData? loaded = GlanceDataFile.Load(root);
+            Assert.NotNull(loaded);
+            Assert.Equal(
+                GlancePkg::DeskBox.Models.GlanceImageFocus.Top,
+                loaded!.Settings.ImageFocus);
+            GlanceDataFile.Save(loaded, root);
+
+            GlanceData? reloaded = GlanceDataFile.Load(root);
+            Assert.NotNull(reloaded);
+            Assert.Equal(
+                GlancePkg::DeskBox.Models.GlanceImageFocus.Top,
+                reloaded!.Settings.ImageFocus);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void NormalizerSnapsRotationIntervalAndClampsTimeScale()
+    {
+        // Built-in Normalize: unsupported rotation → 30; TimeScale clamped
+        // to 0.75–1.35 (audit round 21 R2 — Normalizer port).
+        var settings = new PackageData
+        {
+            RotationIntervalMinutes = 12,
+            TimeScale = 100,
+        };
+        GlancePkg::DeskBox.GlancePackage.Rendering.GlanceSettingsNormalizer.Normalize(settings);
+        Assert.Equal(30, settings.RotationIntervalMinutes);
+        Assert.Equal(1.35, settings.TimeScale, precision: 2);
+    }
+
+    [Fact]
+    public void NormalizerShowDateFalseSuppressesYear()
+    {
+        var settings = new PackageData { ShowDate = false, ShowYear = true };
+        GlancePkg::DeskBox.GlancePackage.Rendering.GlanceSettingsNormalizer.Normalize(settings);
+        Assert.False(settings.ShowYear);
     }
 }
