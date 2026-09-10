@@ -1,6 +1,8 @@
 # DeskBox Current Architecture
 
-Last updated: 2026-07-20
+Last updated: 2026-09-10
+
+> This is the current public-production architecture through DeskBox 1.5.0. The unreleased 1.6.0 official-package architecture, ABI/HostApi v4 baseline, and migration status are maintained in [official-widget-packages-plan.md](official-widget-packages-plan.md). This document will be rewritten after the package cutover is complete.
 
 This document describes the current architecture after the 1.2.0 widget foundation work. It is intended as the short, current-state handoff for future maintenance. Historical plans and checkpoints live under the archive folders.
 

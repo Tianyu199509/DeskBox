@@ -433,9 +433,9 @@ internal static class NativeWidgetRuntimeManager
     }
 
     /// <summary>
-    /// Product entry point (adapter seam until the package-format freeze adds
-    /// runtime:native to the schema; until then every registry record is
-    /// rejected here by construction - fail-closed).
+    /// Product entry point for a verified runtime:native record. The package
+    /// manager supplies the identity-bound immutable install handle; arbitrary
+    /// directories never reach this entry point.
     /// </summary>
     public static bool TryCreateFromInstalled(
         NativeInstalledPackageHandle handle,

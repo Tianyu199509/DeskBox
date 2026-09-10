@@ -5,7 +5,7 @@
 - 方案日期：2026-09-07；v1.1-v1.5（评审收敛+复盘修订）；v1.6/v1.7（评审纪律入册）；v1.8（第四轮评审吸收，§16.7/16.8）
 - 代码基线：main `2709d7f0`（阶段 3a 能力端口合入）；第四轮评审修复批次=PR #245（store 一致性+迁移事务性）/#246（schema v0.2）/#247（端口语义修正）
 - 评审记录：§12（v1.0→v1.1）、§13（v1.1→v1.2）、§16（v1.5-v1.8）
-- 当前状态：**阶段 3b（依赖倒置接线）已落地**（三切点调用方全部改走 `DeskBox.Contracts` 端口，零行为变化；物理搬移 3c 后置）。**阶段 3.5 三腿全部完成**：腿①声明式（①A 包样本+①B 执行闭环，第七轮安全语义补齐）+ 腿② TS 进程（`entry.main` 入口字段提案+ndjson JSON-RPC+共享能力门库+进程治理）+ **腿③ WASM（`native/deskbox-wasm-spike` 独立 crate 红线钉扎：Wasmtime 48 组件模型+wit-bindgen 0.61 `deskbox:plugin` world+fuel 2M/epoch/内存 64MB 三层治理；no_std 零 WASI 导入纯组件 37.9KB；Rust 版同一三层能力门；七场景验证含 fuel 耗尽治理与真实 GitHub 链路）**。测量矩阵已填三列（WASM 本机读数全面占优：激活 1-2ms vs 进程 50ms；AI 可生成性与集成成本待同题实测），**下一步=三腿同题 AI 生成实验+正式测量拍板"代码插件默认 Runtime"**。已落地的是 host 内部能力端口，**不是 Capability Broker**（registry/权限判定/调度/审计/运行时 adapter 均未开始）。**安全 backlog**：network.fetch/network.local 拆分（默认禁 loopback/私网/link-local/元数据，防 DNS 重绑定 SSRF）、File Widget 枚举过滤 `.import-*.tmp`
+- 历史状态快照：阶段 3b 和阶段 3.5 三路 runtime spike 已完成；其当时的“下一步”与 Declarative-only 默认路线已由 [官方功能包首发执行计划](official-widget-packages-plan.md) 取代。当前实现已经进入官方 `runtime:native`、ABI/HostApi v4 和 Glance 生产迁移阶段，实时进度只在该执行计划维护。三路 spike 的安全结论和测量数据继续作为未来社区插件路线的输入。
 
 ---
 
@@ -446,7 +446,7 @@ P0：§6 重写为 Runtime 矩阵（删除 A→B→C 旧结论，与 §14 唯一
 
 WIT world 与 ndjson JSON-RPC 维持 **Spike World** 身份不冻结（widget-update 语义为 metric 量体裁衣；正式版走 Semantic Model→WIT Adapter，Process 正式协议倾向 LSP framing+stdout 纯协议/stderr 日志+违规不静默）。
 
-**3.5 收官后路线（Simon 拍板 2026-09-08）**：AI 同题实验等未做功能后置；先做**"基础完整版"（Declarative-only 跑道）**——B1 C# 包安装/验证/授权存储 → B2 格子拆分（C# 声明式执行器+六模板渲染+贡献→真实格子 widget 生命周期+插件管理面）→ B3 商店基础功能（GitHub 索引+列表+安装流程权限授予+更新检查）→ B4 发布（store 规范 v0+1.4.3→新版直跳实测）。期间冻结 schema 于 v10。
+**历史路线（已由官方功能包首发执行计划取代）**：3.5 收官时曾计划先走 Declarative-only“基础完整版”——B1 C# 包安装/验证/授权存储 → B2 格子拆分 → B3 商店基础功能 → B4 发布，并冻结 schema 于 v10。该顺序不再作为当前执行要求，仅保留评审背景。
 
 ### 16.11 第九轮评审吸收（2026-09-08，B1a 硬化，"安全根标准"）
 

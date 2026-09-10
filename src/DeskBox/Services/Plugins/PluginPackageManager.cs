@@ -140,10 +140,10 @@ public sealed class PluginPackageManager
     }
 
     /// <summary>
-    /// Batch C1: structurally paired handle for the native runtime. The record
-    /// and its resolved install root can only be combined here; the runtime
-    /// manager never accepts a separable package + path pair. Refuses every
-    /// record until the package-format freeze introduces runtime:native.
+    /// Structurally paired handle for the native runtime. The record and its
+    /// resolved install root can only be combined here; the runtime manager
+    /// never accepts a separable package + path pair. runtime:native records
+    /// must pass compatibility, publisher authorization, and disk revalidation.
     /// </summary>
     public NativeInstalledPackageHandle? TryCreateNativeHandle(string packageId)
     {
