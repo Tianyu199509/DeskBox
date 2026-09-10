@@ -24,6 +24,80 @@
                 x:Key="GlanceCalendarAcrylicBrush"
                 FallbackColor="{ThemeResource SolidBackgroundFillColorBase}"
                 TintColor="{ThemeResource SolidBackgroundFillColorBase}" />
+        <Style x:Key="GlanceCalendarDayItemStyle" TargetType="CalendarViewDayItem">
+            <Setter Property="MinWidth" Value="34" />
+            <Setter Property="MinHeight" Value="24" />
+            <Setter Property="Margin" Value="0" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="UseSystemFocusVisuals" Value="True" />
+            <Setter Property="FocusVisualMargin" Value="-2" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="CalendarViewDayItem">
+                        <!-- CalendarView keeps native navigation and date semantics;
+                             this compact template owns the two-line day typography. -->
+                        <Grid MinWidth="34" MinHeight="24" Background="Transparent">
+                            <StackPanel
+                                HorizontalAlignment="Center"
+                                VerticalAlignment="Center"
+                                Opacity="{Binding Tag.PrimaryOpacity, RelativeSource={RelativeSource TemplatedParent}}"
+                                Spacing="0"
+                                Visibility="{Binding Tag.NonTodayVisibility, RelativeSource={RelativeSource TemplatedParent}}">
+                                <TextBlock
+                                    HorizontalAlignment="Center"
+                                    FontSize="11"
+                                    Foreground="{StaticResource TextFillColorPrimaryBrush}"
+                                    LineHeight="13"
+                                    LineStackingStrategy="BlockLineHeight"
+                                    Text="{Binding Tag.DayText, RelativeSource={RelativeSource TemplatedParent}}"
+                                    Typography.NumeralAlignment="Tabular" />
+                                <TextBlock
+                                    MaxWidth="32"
+                                    HorizontalAlignment="Center"
+                                    FontSize="7.5"
+                                    FontWeight="{Binding Tag.SecondaryFontWeight, RelativeSource={RelativeSource TemplatedParent}}"
+                                    Foreground="{StaticResource TextFillColorSecondaryBrush}"
+                                    LineHeight="10"
+                                    LineStackingStrategy="BlockLineHeight"
+                                    MaxLines="1"
+                                    Opacity="{Binding Tag.SecondaryOpacity, RelativeSource={RelativeSource TemplatedParent}}"
+                                    Text="{Binding Tag.SecondaryText, RelativeSource={RelativeSource TemplatedParent}}"
+                                    TextTrimming="CharacterEllipsis"
+                                    Visibility="{Binding Tag.SecondaryVisibility, RelativeSource={RelativeSource TemplatedParent}}" />
+                            </StackPanel>
+                            <StackPanel
+                                HorizontalAlignment="Center"
+                                VerticalAlignment="Center"
+                                Spacing="0"
+                                Visibility="{Binding Tag.TodayVisibility, RelativeSource={RelativeSource TemplatedParent}}">
+                                <TextBlock
+                                    HorizontalAlignment="Center"
+                                    FontSize="11"
+                                    FontWeight="SemiBold"
+                                    Foreground="{StaticResource TextOnAccentFillColorPrimaryBrush}"
+                                    LineHeight="13"
+                                    LineStackingStrategy="BlockLineHeight"
+                                    Text="{Binding Tag.DayText, RelativeSource={RelativeSource TemplatedParent}}"
+                                    Typography.NumeralAlignment="Tabular" />
+                                <TextBlock
+                                    MaxWidth="32"
+                                    HorizontalAlignment="Center"
+                                    FontSize="7.5"
+                                    FontWeight="{Binding Tag.SecondaryFontWeight, RelativeSource={RelativeSource TemplatedParent}}"
+                                    Foreground="{StaticResource TextOnAccentFillColorPrimaryBrush}"
+                                    LineHeight="10"
+                                    LineStackingStrategy="BlockLineHeight"
+                                    MaxLines="1"
+                                    Opacity="0.86"
+                                    Text="{Binding Tag.SecondaryText, RelativeSource={RelativeSource TemplatedParent}}"
+                                    TextTrimming="CharacterEllipsis"
+                                    Visibility="{Binding Tag.SecondaryVisibility, RelativeSource={RelativeSource TemplatedParent}}" />
+                            </StackPanel>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
         </ResourceDictionary>
     </Grid.Resources>
 
@@ -134,6 +208,19 @@
     </Grid>
 
     <Grid x:Name="CalendarLayoutRoot" Padding="20,22,20,18" Visibility="{Binding CalendarSurfaceVisibility}">
+        <StackPanel HorizontalAlignment="Left" VerticalAlignment="Top" Spacing="-1"
+                    Visibility="{Binding ExpandedCalendarHeaderVisibility}">
+            <TextBlock FontFamily="{Binding TimeFontFamily}" FontSize="{Binding CompactTimeFontSize}"
+                       FontWeight="SemiBold" Foreground="{StaticResource TextFillColorPrimaryBrush}"
+                       Text="{Binding TimeText}" Typography.NumeralAlignment="Tabular"
+                       Visibility="{Binding TimeVisibility}" />
+            <StackPanel Orientation="Horizontal" Spacing="7">
+                <TextBlock FontSize="12" FontWeight="SemiBold" Foreground="{StaticResource TextFillColorPrimaryBrush}"
+                           Text="{Binding DateText}" Visibility="{Binding DateVisibility}" />
+                <TextBlock FontSize="12" Foreground="{StaticResource TextFillColorSecondaryBrush}"
+                           Text="{Binding WeekdayText}" Visibility="{Binding WeekdayVisibility}" />
+            </StackPanel>
+        </StackPanel>
                 <Border
                     x:Name="CalendarGlassSurface"
                     Visibility="{Binding CalendarSurfaceVisibility}"
@@ -156,7 +243,7 @@
                         <RowDefinition Height="*" />
                     </Grid.RowDefinitions>
                     <Grid Grid.Row="0" Height="27" Margin="13,7,6,0" Visibility="{Binding CalendarHeaderVisibility}">
-                        <TextBlock x:Name="CompactTimeText" Margin="0,5,0,-5" HorizontalAlignment="Left" FontSize="22" FontWeight="SemiBold" Foreground="{StaticResource TextFillColorPrimaryBrush}" LineHeight="26" LineStackingStrategy="BlockLineHeight" Text="{Binding TimeText}" Typography.NumeralAlignment="Tabular" Visibility="{Binding TimeVisibility}" />
+                        <TextBlock x:Name="CompactTimeText" Margin="0,5,0,-5" HorizontalAlignment="Left" FontFamily="{Binding TimeFontFamily}" FontSize="{Binding CalendarCompactTimeFontSize}" FontWeight="SemiBold" Foreground="{StaticResource TextFillColorPrimaryBrush}" LineHeight="26" LineStackingStrategy="BlockLineHeight" Text="{Binding TimeText}" Typography.NumeralAlignment="Tabular" Visibility="{Binding TimeVisibility}" />
                         <StackPanel Margin="0,5,0,-5" HorizontalAlignment="Right" VerticalAlignment="Top">
                             <TextBlock HorizontalAlignment="Right" FontSize="10" FontWeight="SemiBold" Foreground="{StaticResource TextFillColorPrimaryBrush}" LineHeight="12" LineStackingStrategy="BlockLineHeight" Text="{Binding CompactCalendarDateText}" Typography.NumeralAlignment="Tabular" Visibility="{Binding DateVisibility}" />
                             <TextBlock HorizontalAlignment="Right" FontSize="9.5" Foreground="{StaticResource TextFillColorSecondaryBrush}" LineHeight="11" LineStackingStrategy="BlockLineHeight" Text="{Binding WeekdayText}" Visibility="{Binding WeekdayVisibility}" />
@@ -177,6 +264,7 @@
                             CalendarItemForeground="{StaticResource TextFillColorPrimaryBrush}"
                             CalendarItemHoverBackground="{StaticResource SubtleFillColorSecondaryBrush}"
                             CalendarItemPressedBackground="{StaticResource SubtleFillColorTertiaryBrush}"
+                            CalendarViewDayItemStyle="{StaticResource GlanceCalendarDayItemStyle}"
                             DayItemFontSize="0.1"
                             DayItemMargin="0"
                             DayOfWeekFormat="{}{dayofweek.abbreviated(1)}"

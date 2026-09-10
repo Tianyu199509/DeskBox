@@ -22,6 +22,31 @@ internal sealed class GlanceInstanceMigration : ILegacyInstanceMigration
     // The package's GlanceDataFile reader defines this name.
     public string DataFileName => "glance-data.json";
 
+    public IDisposable SubscribeChanges(string instanceId, Action changed) =>
+        SubscribeChanges(GlanceWidgetStore.ForWidget(instanceId), changed);
+
+    internal static IDisposable SubscribeChanges(GlanceWidgetStore store, Action changed) =>
+        new StoreSubscription(store, changed);
+
+    private sealed class StoreSubscription : IDisposable
+    {
+        private GlanceWidgetStore? _store;
+        private readonly EventHandler _handler;
+
+        internal StoreSubscription(GlanceWidgetStore store, Action changed)
+        {
+            _store = store;
+            _handler = (_, _) => changed();
+            store.Changed += _handler;
+        }
+
+        public void Dispose()
+        {
+            GlanceWidgetStore? store = Interlocked.Exchange(ref _store, null);
+            if (store is not null) store.Changed -= _handler;
+        }
+    }
+
     // ---- Legacy content resolution (host-authoritative sync) ----
 
     public string? ResolveLegacyContent(string dataDirectory, string instanceId)

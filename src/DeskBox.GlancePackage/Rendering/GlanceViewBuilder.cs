@@ -102,38 +102,53 @@ internal static class GlanceViewBuilder
         calendarView.CalendarViewDayItemChanging += (_, args) =>
         {
             CalendarViewDayItem item = args.Item;
-            if (args.InRecycleQueue) { item.Tag = null; return; }
-            DateOnly date = DateOnly.FromDateTime(item.Date.DateTime);
-            GlanceCalendarDay? day = null;
-            foreach (GlanceCalendarDay candidate in decoration.Month.Days)
+            if (args.InRecycleQueue)
             {
-                if (candidate.Date == date) { day = candidate; break; }
+                decoration.RealizedDays.Remove(item);
+                item.Tag = null;
+                return;
             }
-            // Built-in parity: the secondary line only renders when the
-            // responsive layout says there is room for it (audit round 19).
-            string secondaryText = !decoration.ShowSecondary || !decoration.ShowTraditional ? string.Empty
-                : decoration.ShowFestivals && !string.IsNullOrWhiteSpace(day?.FestivalText) ? day.FestivalText
-                : day?.TraditionalText ?? string.Empty;
-            bool hasSecondaryText = !string.IsNullOrWhiteSpace(secondaryText);
-            bool isFestival = hasSecondaryText && day?.HasFestival == true;
-            bool isCurrentMonth = day?.IsCurrentMonth ?? date.Month == decoration.Month.Month.Month;
-            // Regression pass: "today" and the culture are read PER CALL, not
-            // captured - a captured snapshot left the yesterday highlight
-            // marked as today after any midnight rollover, and kept the old
-            // locale's digit shaping after a live language switch.
-            DateOnly today = DateOnly.FromDateTime(DateTime.Today);
-            item.MinHeight = decoration.DayItemHeight;
-            item.Height = decoration.DayItemHeight;
-            item.Tag = new GlanceDayDecoration(
-                day?.DayText ?? date.Day.ToString(decoration.Culture),
-                secondaryText,
-                hasSecondaryText ? Visibility.Visible : Visibility.Collapsed,
-                date == today ? Visibility.Visible : Visibility.Collapsed,
-                date == today ? Visibility.Collapsed : Visibility.Visible,
-                isFestival ? Microsoft.UI.Text.FontWeights.SemiBold : Microsoft.UI.Text.FontWeights.Normal,
-                isCurrentMonth ? 1.0 : 0.42,
-                !isCurrentMonth ? 0.34 : isFestival ? 0.88 : 0.62);
+            DateOnly date = DateOnly.FromDateTime(item.Date.DateTime);
+            decoration.RealizedDays[item] = date;
+            ApplyDayDecoration(item, date, decoration);
         };
+    }
+
+    internal static void ApplyDayDecoration(CalendarViewDayItem item, DateOnly date, CalendarDecorationState decoration)
+    {
+        GlanceCalendarDay? day = null;
+        foreach (GlanceCalendarDay candidate in decoration.Month.Days)
+        {
+            if (candidate.Date == date) { day = candidate; break; }
+        }
+        // Built-in parity: the secondary line only renders when the
+        // responsive layout says there is room for it (audit round 19).
+        string secondaryText = !decoration.ShowSecondary || !decoration.ShowTraditional ? string.Empty
+            : decoration.ShowFestivals && !string.IsNullOrWhiteSpace(day?.FestivalText) ? day.FestivalText
+            : day?.TraditionalText ?? string.Empty;
+        bool hasSecondaryText = !string.IsNullOrWhiteSpace(secondaryText);
+        bool isFestival = hasSecondaryText && day?.HasFestival == true;
+        bool isCurrentMonth = day?.IsCurrentMonth ??
+            (date.Year == decoration.Month.Month.Year && date.Month == decoration.Month.Month.Month);
+        // Regression pass: "today" and the culture are read PER CALL, not
+        // captured - a captured snapshot left the yesterday highlight
+        // marked as today after any midnight rollover, and kept the old
+        // locale's digit shaping after a live language switch.
+        DateOnly today = DateOnly.FromDateTime(DateTime.Today);
+        if (Math.Abs(item.MinHeight - decoration.DayItemHeight) >= 0.1)
+            item.MinHeight = decoration.DayItemHeight;
+        if (double.IsNaN(item.Height) || Math.Abs(item.Height - decoration.DayItemHeight) >= 0.1)
+            item.Height = decoration.DayItemHeight;
+        var updated = new GlanceDayDecoration(
+            day?.DayText ?? date.Day.ToString(decoration.Culture),
+            secondaryText,
+            hasSecondaryText ? Visibility.Visible : Visibility.Collapsed,
+            date == today ? Visibility.Visible : Visibility.Collapsed,
+            date == today ? Visibility.Collapsed : Visibility.Visible,
+            isFestival ? Microsoft.UI.Text.FontWeights.SemiBold : Microsoft.UI.Text.FontWeights.Normal,
+            isCurrentMonth ? 1.0 : 0.42,
+            !isCurrentMonth ? 0.34 : isFestival ? 0.88 : 0.62);
+        if (!Equals(item.Tag, updated)) item.Tag = updated;
     }
 }
 
@@ -148,10 +163,13 @@ internal sealed class CalendarDecorationState(
     public bool ShowFestivals = showFestivals;
     public bool ShowSecondary = showSecondary;
     public CultureInfo Culture = culture;
+    internal Dictionary<CalendarViewDayItem, DateOnly> RealizedDays { get; } = [];
 
     public void Update(GlanceCalendarMonth rebuilt, double itemHeight, bool traditional, bool festivals, bool secondary, CultureInfo culture)
     {
         Month = rebuilt; DayItemHeight = itemHeight; ShowTraditional = traditional; ShowFestivals = festivals; ShowSecondary = secondary; Culture = culture;
+        foreach ((CalendarViewDayItem item, DateOnly date) in RealizedDays.ToArray())
+            GlanceViewBuilder.ApplyDayDecoration(item, date, this);
     }
 }
 

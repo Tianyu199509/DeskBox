@@ -40,4 +40,12 @@ public interface ILegacyInstanceMigration
     /// rejected.
     /// </summary>
     bool TryApplyPatch(string instanceId, string jsonPatch);
+
+    /// <summary>
+    /// Observes successfully persisted changes to one instance's authority.
+    /// The caller dispatches notifications to the widget UI thread and
+    /// disposes the subscription when the native instance is destroyed.
+    /// Adapters without live synchronization may return null.
+    /// </summary>
+    IDisposable? SubscribeChanges(string instanceId, Action changed) => null;
 }

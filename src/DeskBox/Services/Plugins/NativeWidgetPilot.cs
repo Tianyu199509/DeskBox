@@ -136,11 +136,25 @@ internal sealed class NativeWidgetPilotContent :
     IDisposable
 {
     private readonly NativeWidgetLease _lease;
+    private readonly NativeInstanceSettingsSubscription? _settingsSubscription;
 
     internal NativeWidgetPilotContent(WidgetConfig config, NativeWidgetLease lease)
     {
         Config = config;
         _lease = lease;
+        ILegacyInstanceMigration? migration = PackageBindingRegistry.TryGetByKind(config.WidgetKind)?.Migration;
+        if (migration is not null && lease.View is { } view)
+        {
+            var dispatcher = view.DispatcherQueue;
+            NativePackageIdentity identity = lease.Session.Identity;
+            _settingsSubscription = new NativeInstanceSettingsSubscription(
+                migration, config.Id,
+                action => dispatcher.TryEnqueue(() => action()),
+                () => NativeWidgetDataMigration.TrySync(
+                    migration, identity.PublisherFingerprint, identity.PackageId,
+                    config.Id, DeskBoxDataPathService.Current.DataDirectory),
+                () => _lease.InvokeWidgetEvent(WidgetLifecycleEventKind.RefreshRequested, 0, 0, 0));
+        }
     }
 
     public WidgetConfig Config { get; }
@@ -158,7 +172,8 @@ internal sealed class NativeWidgetPilotContent :
 
     public Task RefreshAsync()
     {
-        _lease.InvokeWidgetEvent(WidgetLifecycleEventKind.RefreshRequested, 0, 0, 0);
+        if (_settingsSubscription is not null) _settingsSubscription.RequestRefresh();
+        else _lease.InvokeWidgetEvent(WidgetLifecycleEventKind.RefreshRequested, 0, 0, 0);
         return Task.CompletedTask;
     }
 
@@ -204,5 +219,9 @@ internal sealed class NativeWidgetPilotContent :
     public void CompleteInteractiveResize(double contentWidth, double contentHeight) =>
         _lease.InvokeWidgetEvent(WidgetLifecycleEventKind.InteractiveResizeEnd, contentWidth, contentHeight, 0);
 
-    public void Dispose() => ((IDisposable)_lease).Dispose();
+    public void Dispose()
+    {
+        _settingsSubscription?.Dispose();
+        ((IDisposable)_lease).Dispose();
+    }
 }

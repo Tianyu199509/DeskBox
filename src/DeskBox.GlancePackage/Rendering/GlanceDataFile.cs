@@ -17,6 +17,14 @@ internal static class GlanceDataFile
 {
     internal const string FileName = "glance-data.json";
 
+    // Layout/clock/toggle changes must not reshuffle the current image list
+    // or return the slideshow to its first image.
+    internal static bool SameImageSources(GlanceWidgetData left, GlanceWidgetData right) =>
+        left.BackgroundSource == right.BackgroundSource &&
+        left.RandomOrder == right.RandomOrder &&
+        string.Equals(left.LocalFolderPath, right.LocalFolderPath, StringComparison.OrdinalIgnoreCase) &&
+        left.LocalImagePaths.SequenceEqual(right.LocalImagePaths, StringComparer.OrdinalIgnoreCase);
+
     internal static GlanceData? Load(string instanceDataRoot)
     {
         string? content = PackageFileStore.TryReadText(Path.Combine(instanceDataRoot, FileName));

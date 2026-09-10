@@ -26,7 +26,7 @@ internal sealed class GlanceWidgetController : IDisposable
     private readonly string _instanceId;
     private readonly string _instanceDataRoot;
     private CultureInfo _culture;
-    private readonly GlanceData _data;
+    private GlanceData _data;
     private GlanceWidgetData Settings => _data.Settings;
     private readonly GlanceRuntimeState _runtimeState;
 
@@ -38,8 +38,8 @@ internal sealed class GlanceWidgetController : IDisposable
     private readonly Border _readabilityLayer;
     private readonly Border _calendarReadabilityLayer;
     private readonly Border _gradientLayer;
-    private readonly string[] _images;
-    private readonly Stretch _imageStretch;
+    private string[] _images;
+    private Stretch _imageStretch;
     private bool _showingA;
     private Microsoft.UI.Xaml.Media.Animation.Storyboard? _transitionStoryboard;
     private bool _transitionInFlight;
@@ -54,6 +54,7 @@ internal sealed class GlanceWidgetController : IDisposable
     private bool _collapsed;
     private bool _applying; // toggle revert suppression
     private bool _disposed;
+    private bool _loaded;
     private DateOnly _renderedDate;
     private MenuFlyoutItem _nextItem = null!;
     private MenuFlyoutItem _pauseItem = null!;
@@ -194,9 +195,16 @@ internal sealed class GlanceWidgetController : IDisposable
         // dispose the controller - a rolled-back view would come back with
         // dead timers. Real teardown happens exclusively on
         // deskbox_widget_destroy.
-        _content.Unloaded += (_, _) => StopVisualResources();
+        _loaded = _content.IsLoaded;
+        _content.Unloaded += (_, _) =>
+        {
+            _loaded = false;
+            StopVisualResources();
+        };
         _content.Loaded += (_, _) =>
         {
+            if (_disposed) return;
+            _loaded = true;
             EnsureCurrentDate();
             UpdateTimers();
         };
@@ -211,8 +219,9 @@ internal sealed class GlanceWidgetController : IDisposable
     {
         EventsReceived++;
         if (_disposed) return;
-        EnsureCurrentDate();
+        ReloadSettings();
         RebuildMonth();
+        UpdateTimers();
     }
 
     internal void OnVisibilityChanged(bool visible)
@@ -297,7 +306,7 @@ internal sealed class GlanceWidgetController : IDisposable
         if (_disposed) return;
         ClockCadence cadence = CurrentClockCadence();
         GlanceLifecyclePolicy.Activity activity = GlanceLifecyclePolicy.Compute(
-            _visible, _longHidden, _collapsed, _runtimeState.Paused,
+            _visible && _loaded, _longHidden, _collapsed, _runtimeState.Paused,
             cadence, Settings.RotationIntervalMinutes > 0, _images.Length > 1);
 
         _clockTimer.Stop();
@@ -392,9 +401,9 @@ internal sealed class GlanceWidgetController : IDisposable
     {
         if (HostConfig.TryPushInstanceConfig(_instanceId, patch))
         {
-            // Local cache for continuity until the next host sync; the
-            // authoritative copy lives in the built-in store.
-            GlanceDataFile.Save(_data, _instanceDataRoot);
+            // Accepted is not committed. The host refreshes the snapshot
+            // after persistence succeeds; never write an optimistic value
+            // over a newer authoritative snapshot from another change.
             return true;
         }
         PackageLogger.LogVerbose("[GlancePackage] settings write-through unavailable; reverting toggle");
@@ -416,6 +425,61 @@ internal sealed class GlanceWidgetController : IDisposable
     }
 
     // ---- View updates ----
+
+    private void ReloadSettings()
+    {
+        GlanceData? next = GlanceDataFile.Load(_instanceDataRoot);
+        if (next is null) return;
+
+        bool sourcesChanged = !GlanceDataFile.SameImageSources(Settings, next.Settings);
+        bool imageStyleChanged = Settings.ImageFit != next.Settings.ImageFit ||
+            Settings.ImageFocus != next.Settings.ImageFocus;
+        string? selectedImage = _images.Length == 0 ? null :
+            _images[Math.Clamp(_runtimeState.ImageIndex, 0, _images.Length - 1)];
+        _data = next;
+        _imageStretch = Settings.ImageFit == GlanceImageFitMode.Fit ? Stretch.Uniform : Stretch.UniformToFill;
+
+        bool showTraditional = new GlanceTraditionalCalendarService().ResolveMode(
+            Settings.TraditionalCalendarMode, _culture.Name) != GlanceTraditionalCalendarMode.None;
+        if (showTraditional) _restoreMode = Settings.TraditionalCalendarMode;
+        _applying = true;
+        try
+        {
+            _content.FindName("FestivalToggle").As<ToggleSwitch>().IsOn = Settings.ShowChineseFestivals;
+            _content.FindName("TraditionalToggle").As<ToggleSwitch>().IsOn = showTraditional;
+        }
+        finally { _applying = false; }
+
+        Visibility controls = Settings.ShowPhotoControls ? Visibility.Visible : Visibility.Collapsed;
+        _content.FindName("PauseButton").As<Button>().Visibility = controls;
+        _content.FindName("NextButton").As<Button>().Visibility = controls;
+
+        if (sourcesChanged)
+        {
+            _images = GlanceViewBuilder.LoadImages(Settings, _packageRoot);
+            int retainedIndex = Array.FindIndex(_images,
+                path => string.Equals(path, selectedImage, StringComparison.OrdinalIgnoreCase));
+            _runtimeState.ImageIndex = retainedIndex >= 0 ? retainedIndex : 0;
+        }
+        if (sourcesChanged || imageStyleChanged)
+        {
+            FinalizeInFlightTransition();
+            _transitionStoryboard?.Stop();
+            _transitionStoryboard = null;
+            _backgroundA.Background = null;
+            _backgroundB.Background = null;
+            _backgroundA.Opacity = 0;
+            _backgroundB.Opacity = 0;
+            ResetTransform(_backgroundA);
+            ResetTransform(_backgroundB);
+            if (_images.Length == 0)
+            {
+                GlanceViewBuilder.ShowGradientFallback(_backgroundA);
+                _showingA = true;
+            }
+            else Show(_runtimeState.ImageIndex);
+        }
+    }
 
     private void RebuildMonth()
     {

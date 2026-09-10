@@ -21,7 +21,7 @@ namespace DeskBox.Services.Plugins;
 /// </summary>
 internal static class NativeWidgetDataMigration
 {
-    internal static void TrySync(
+    internal static bool TrySync(
         ILegacyInstanceMigration? migration,
         string publisherFingerprint,
         string packageId,
@@ -29,7 +29,7 @@ internal static class NativeWidgetDataMigration
         string dataDirectory)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(instanceId);
-        if (migration is null) return;
+        if (migration is null) return false;
         try
         {
             string? legacy = migration.ResolveLegacyContent(dataDirectory, instanceId);
@@ -37,19 +37,21 @@ internal static class NativeWidgetDataMigration
             {
                 // No host-side data for this instance: whatever the package
                 // already owns stays untouched.
-                return;
+                return false;
             }
             string instanceRoot = new NativePackageIdentity(publisherFingerprint, packageId)
                 .ResolveInstanceDataRoot(dataDirectory, instanceId);
             Directory.CreateDirectory(instanceRoot);
             WriteResilient(Path.Combine(instanceRoot, migration.DataFileName), legacy);
             App.Log($"[NativePackage] synced legacy data for instance {instanceId}");
+            return true;
         }
         catch (Exception error)
         {
             // Best-effort: a failed sync must never block native widget
             // creation, it just means the package keeps its current data.
             App.LogVerbose($"[NativePackage] data sync failed for {instanceId}: {error.Message}");
+            return false;
         }
     }
 

@@ -84,6 +84,7 @@ internal static class GlanceMonthPipeline
         DateVisibility = settings.ShowDate ? Visibility.Visible : Visibility.Collapsed,
         WeekdayVisibility = settings.ShowWeekday ? Visibility.Visible : Visibility.Collapsed,
         CalendarHeaderVisibility = isCompact && layout == NativeLayout.Calendar ? Visibility.Visible : Visibility.Collapsed,
+        ExpandedCalendarHeaderVisibility = !isCompact && layout == NativeLayout.Calendar ? Visibility.Visible : Visibility.Collapsed,
         CalendarSurfaceVisibility = layout == NativeLayout.Calendar ? Visibility.Visible : Visibility.Collapsed,
         ForegroundVisibility = foreground ? Visibility.Visible : Visibility.Collapsed,
         ImmersiveVisibility = foreground && layout == NativeLayout.Immersive ? Visibility.Visible : Visibility.Collapsed,
@@ -115,6 +116,7 @@ internal static class GlanceMonthPipeline
     nameof(DateText),
     nameof(DateVisibility),
     nameof(EditorialVisibility),
+    nameof(ExpandedCalendarHeaderVisibility),
     nameof(ForegroundVisibility),
     nameof(ImmersiveVisibility),
     nameof(PauseIconVisibility),
@@ -147,6 +149,7 @@ public sealed partial class GlancePresentation
     public Visibility DateVisibility { get; init; }
     public Visibility WeekdayVisibility { get; init; }
     public Visibility CalendarHeaderVisibility { get; init; }
+    public Visibility ExpandedCalendarHeaderVisibility { get; init; }
     public Visibility CalendarSurfaceVisibility { get; init; }
     public Visibility ForegroundVisibility { get; init; }
     public Visibility ImmersiveVisibility { get; init; }
