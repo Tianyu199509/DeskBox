@@ -45,6 +45,9 @@ internal sealed partial class MusicSettingsJsonContext : JsonSerializerContext
 /// </summary>
 public sealed class MusicSettingsStore
 {
+    // Raised only after a successful durable write. Consumers must marshal to
+    // their dispatcher; a subscriber cannot turn a completed write into failure.
+    internal event Action? Persisted;
     private static readonly object s_currentGate = new();
     private static MusicSettingsStore? s_current;
 
@@ -199,6 +202,9 @@ public sealed class MusicSettingsStore
             await ResilientJsonStore.SaveAsync(
                 _storePath,
                 SerializeSnapshot(snapshot));
+            if (Persisted is { } subscribers)
+                foreach (Action subscriber in subscribers.GetInvocationList())
+                    try { subscriber(); } catch (Exception error) { App.LogVerbose($"[MusicSettingsStore] subscriber failed: {error.Message}"); }
         }
         catch (Exception ex)
         {

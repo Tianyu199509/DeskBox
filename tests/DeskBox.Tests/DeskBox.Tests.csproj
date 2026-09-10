@@ -47,6 +47,8 @@
          package's DeskBox.* types from colliding with the host's. -->
     <ProjectReference Include="..\..\src\DeskBox.GlancePackage\DeskBox.GlancePackage.csproj" Aliases="GlancePkg" />
     <ProjectReference Include="..\..\src\DeskBox.WeatherPackage\DeskBox.WeatherPackage.csproj" Aliases="WeatherPkg" />
+    <ProjectReference Include="..\..\src\DeskBox.MusicPackage\DeskBox.MusicPackage.csproj" Aliases="MusicPkg" />
+
   </ItemGroup>
 
   <ItemGroup>

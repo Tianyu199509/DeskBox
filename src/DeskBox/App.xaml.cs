@@ -945,6 +945,7 @@ public partial class App : Application
             // Phase 2: Initialize services that depend on settings (parallel)
             ThemeService = Services.GetRequiredService<ThemeService>();
             LocalizationService = Services.GetRequiredService<LocalizationService>();
+            MusicPackageIntegration.Initialize(SettingsService, ThemeService, LocalizationService);
             LocalizationService.LanguageChanged += OnLanguageChanged;
             // Live config push to activated native packages (audit 20 §23):
             // language changes re-fire every registered config-changed
@@ -1103,6 +1104,8 @@ public partial class App : Application
             Log("OnLaunched completed successfully");
 #if DESKBOX_NATIVE_DEV_PILOT
             StartWeatherNativeProbe();
+            StartNativePackageSmokeIfRequested();
+
 #endif
 #if DESKBOX_NATIVE_AOT && DESKBOX_AOT_SMOKE_HARNESS
             StartAotShortcutSmokeIfRequested();
@@ -4240,7 +4243,11 @@ public partial class App : Application
         // last drag/order snapshot while it is being torn down.
         DesktopDoubleClickActivationService?.Dispose();
         DesktopDoubleClickActivationService = null;
+#if DESKBOX_NATIVE_DEV_PILOT
+        DisposeNativeMusicVisualPreview();
+#endif
         WidgetManager?.CloseAll();
+        MusicPackageIntegration.Dispose();
         await SettingsService.FlushPendingSaveAsync(notifySubscribers: false);
         SettingsService.PersistenceFailed -= OnSettingsPersistenceFailed;
         _nativeNotificationService?.Dispose();

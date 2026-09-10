@@ -39,6 +39,8 @@ jobs:
           dotnet build .\src\DeskBox.GlancePackage\DeskBox.GlancePackage.csproj --configuration Release --no-restore -p:Platform=x64 -p:RuntimeIdentifier=win-x64 -v:minimal
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           dotnet build .\src\DeskBox.WeatherPackage\DeskBox.WeatherPackage.csproj --configuration Release --no-restore -p:Platform=x64 -p:RuntimeIdentifier=win-x64 -v:minimal
+          dotnet build .\src\DeskBox.MusicPackage\DeskBox.MusicPackage.csproj --configuration Release --no-restore -p:Platform=x64 -p:RuntimeIdentifier=win-x64 -v:minimal
+
 
       - name: Test
         timeout-minutes: 10
