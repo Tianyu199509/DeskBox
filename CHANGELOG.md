@@ -1,6 +1,10 @@
 ﻿# Changelog
 
-## 1.5.0 - 2026-09-06
+## 1.6.0 - Unreleased
+
+DeskBox 1.6.0 is the active development train for independently installable and updatable official feature packages. DeskBox 1.5.0 remains the public stable release until the package migration, one-hop upgrade, and Direct/Store validation gates are complete.
+
+## 1.5.0 - 2026-09-07
 
 ### English
 

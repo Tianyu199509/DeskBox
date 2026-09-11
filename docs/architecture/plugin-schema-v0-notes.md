@@ -1,6 +1,6 @@
 # DeskBox Plugin Schema v0.3 — 语义注记
 
-配套 `plugin-schema-v0.json`。v0.x 是草案：给三路 spike（roadmap 阶段 3.5）、CLI validator（阶段 6）、商店规范（阶段 7）一个共同靶子，会迭代；契约测试只轻钉存在性与词汇+关键校验语义，不逐字段冻结。
+配套 `plugin-schema-v0.json`。v0.x 是草案：给三路 spike（roadmap 阶段 3.5）、CLI validator（阶段 6）、商店规范（阶段 7）一个共同靶子，会迭代；契约测试只轻钉存在性与词汇+关键校验语义，不逐字段冻结。2026-09-09 的官方功能包契约在 schema 0 内追加 `runtime:native`，其首个兼容基线为原生包 ABI/HostApi v4；下文 v0.1-v0.3 的三路 runtime 记录保留为历史演进说明。
 
 ## v0.2 → v0.3 变更（第六轮评审：声明式执行词汇，腿 1B 前置）
 
@@ -64,7 +64,7 @@
 | 变更 | 原因 |
 |---|---|
 | `widgets[]` → `contributions[]` + `type` discriminator | 消除 Plugin=WidgetPlugin 隐含；Package 可贡献 Command/AITool/Settings 等不含 widget 的类型，v0.1 只实现 widget 但结构不改 |
-| `category` → `runtime`（none/wasm/process） | 原枚举混合了内容类型（resource-pack）与运行时技术（wasm/out-of-proc）；runtime 描述执行技术，声明式 UI 在所有 runtime 下都是宿主渲染 |
+| `category` → `runtime`（当时为 none/wasm/process，后续追加 native） | 原枚举混合了内容类型（resource-pack）与运行时技术（wasm/out-of-proc）；runtime 描述执行技术，声明式 UI 在前三种 runtime 下由宿主渲染；官方 `native` 包通过自身 DLL 渲染并提供声明式故障回退 |
 | `typeId` pattern + description 矛盾修复 | 原 description 说"以 package id 为前缀"（含点）但 pattern 禁点号；改为 local id + 宿主派生 canonical id（`{package-id}/{local-id}`） |
 | `signature` 自引用修复 | contentHash 覆盖域定义为"除 signature 块自身外的全部文件，manifest 规范化（signature=null、排序键、无空白）后参与哈希" |
 | `publisherKey` → `publisherSignature` | 字段名与语义错位（装的是签名不是公钥）；公钥指纹在顶层 publisher 字段 |
@@ -75,7 +75,7 @@
 
 | Schema 条目 | 决策来源 |
 |---|---|
-| `runtime` 三枚举 | §13.1 三分类（none=resource-pack / wasm / process） |
+| `runtime` 四枚举 | 历史三分类（none=resource-pack / wasm / process）加官方可信首方 `native`；第三方 native 在安装期拒绝 |
 | `hostApi{min,max}` + 运行期 protocolVersion | §13.4 版本双闸 |
 | 六模板枚举 | §13.5（不发明小型 XAML） |
 | `payload.version` + per-element fallback | §13.5 分层规则 |

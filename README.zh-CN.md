@@ -40,10 +40,10 @@ DeskBox 使用贴近 Windows 原生体验的材质，同时保留普通桌面文
 
 ## 下载
 
-当前线上稳定版为 DeskBox 1.4.9，可从 [GitHub Releases](https://github.com/Tianyu199509/DeskBox/releases/tag/v1.4.9) 下载。
+当前线上稳定版为 DeskBox 1.5.0，可从 [GitHub Releases](https://github.com/Tianyu199509/DeskBox/releases/tag/v1.5.0) 下载。
 
-- [DeskBox 1.4.9 x64 安装包](https://github.com/Tianyu199509/DeskBox/releases/download/v1.4.9/DeskBox_Setup_1.4.9_x64.exe)，推荐大多数 Intel 和 AMD 电脑使用。
-- [DeskBox 1.4.9 ARM64 安装包](https://github.com/Tianyu199509/DeskBox/releases/download/v1.4.9/DeskBox_Setup_1.4.9_arm64.exe)，推荐骁龙、Surface Pro X 等 Windows on ARM 电脑使用。
+- [DeskBox 1.5.0 x64 安装包](https://github.com/Tianyu199509/DeskBox/releases/download/v1.5.0/DeskBox_Setup_1.5.0_x64.exe)，推荐大多数 Intel 和 AMD 电脑使用。
+- [DeskBox 1.5.0 ARM64 安装包](https://github.com/Tianyu199509/DeskBox/releases/download/v1.5.0/DeskBox_Setup_1.5.0_arm64.exe)，推荐骁龙、Surface Pro X 等 Windows on ARM 电脑使用。
 
 两个安装包都是 Full Native AOT 构建，并内置对应架构的私有 Windows App Runtime 2.4，可离线安装，不需要另外下载 .NET 10 或 Windows App Runtime。
 
@@ -167,7 +167,7 @@ DeskBox 使用贴近 Windows 原生体验的材质，同时保留普通桌面文
 - **Everything 文件搜索。** 直接读取 Everything 已有索引并与 DeskBox 内容合并，删除了重复的自建索引；Everything 需单独安装。
 - **Native AOT 直发包。** GitHub 包不再需要单独的 .NET 10 运行时，Windows App Runtime 升级到 2.4。
 
-完整内容见 [更新日志](CHANGELOG.md) 和 [1.4.9 发布说明](docs/releases/v1.4.9.md)。
+完整内容见 [更新日志](CHANGELOG.md) 和 [1.5.0 发布说明](docs/releases/v1.5.0.md)。
 
 ## 当前界面
 

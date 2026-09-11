@@ -40,10 +40,10 @@ All twelve selectable languages share the same resource-key and formatting-place
 
 ## Download
 
-The current stable release is DeskBox 1.4.9, available from [GitHub Releases](https://github.com/Tianyu199509/DeskBox/releases/tag/v1.4.9).
+The current stable release is DeskBox 1.5.0, available from [GitHub Releases](https://github.com/Tianyu199509/DeskBox/releases/tag/v1.5.0).
 
-- [DeskBox 1.4.9 for x64](https://github.com/Tianyu199509/DeskBox/releases/download/v1.4.9/DeskBox_Setup_1.4.9_x64.exe), recommended for most Intel and AMD PCs.
-- [DeskBox 1.4.9 for ARM64](https://github.com/Tianyu199509/DeskBox/releases/download/v1.4.9/DeskBox_Setup_1.4.9_arm64.exe), recommended for Snapdragon, Surface Pro X, and other Windows on ARM PCs.
+- [DeskBox 1.5.0 for x64](https://github.com/Tianyu199509/DeskBox/releases/download/v1.5.0/DeskBox_Setup_1.5.0_x64.exe), recommended for most Intel and AMD PCs.
+- [DeskBox 1.5.0 for ARM64](https://github.com/Tianyu199509/DeskBox/releases/download/v1.5.0/DeskBox_Setup_1.5.0_arm64.exe), recommended for Snapdragon, Surface Pro X, and other Windows on ARM PCs.
 
 Both packages are Full Native AOT builds with the matching private Windows App Runtime 2.4, so they can install offline without downloading a separate .NET 10 or Windows App Runtime package.
 
@@ -167,7 +167,7 @@ Every release also publishes a matching `.sha256` sidecar for each installer. Th
 - **Everything-powered file search.** DeskBox reads Everything's existing index over local IPC and merges it with notes, todos, and settings in one window, replacing the duplicate DeskBox-maintained index. Everything is not bundled.
 - **Native AOT Direct builds.** GitHub packages no longer need a separate .NET 10 runtime; Windows App Runtime moved to 2.4.
 
-Read the complete [changelog](CHANGELOG.md) or the [1.4.9 release notes](docs/releases/v1.4.9.md).
+Read the complete [changelog](CHANGELOG.md) or the [1.5.0 release notes](docs/releases/v1.5.0.md).
 
 ## Current interface
 

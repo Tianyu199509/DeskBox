@@ -26,7 +26,7 @@ Tianyu Zhu is a product designer and solo maker building native-feeling Windows 
 
 | Field | Fact |
 | --- | --- |
-| Current launch release | DeskBox 1.4.9 |
+| Current launch release | DeskBox 1.5.0 |
 | Platform | Windows 10 21H2 or later; Windows 11 recommended |
 | Architectures | x64 and ARM64 |
 | Technology | C#, WinUI 3, .NET 10, Windows App SDK 2.4 |

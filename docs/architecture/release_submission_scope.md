@@ -2,7 +2,7 @@
 
 日期：2026-07-06
 
-> ⚠️ **时效提示（2026-09-06）**：本文写于 Direct/Store 双通道时代。自 1.4.8 起，Direct 通道只发布 Full 安装包（内置运行时，安装包文件名不带 Full 后缀），并引入 InstallManifest 与更新清理脚本机制；Store 通道的打包入口见 `store_msix_build_notes.md`，发布通道与分发流程以 [`distribution_channel_workflow.md`](distribution_channel_workflow.md) 为准。使用本清单前，先按现行流程逐条复核，与上述文档冲突时以上述文档为准。
+> ⚠️ **时效提示（2026-09-10）**：1.5.0 是当前及最后一个 1.5.x 稳定版，下一公开版本为 1.6.0。自 1.4.8 起，Direct 通道只发布 Full 安装包（内置运行时，安装包文件名不带 Full 后缀），并引入 InstallManifest 与更新清理脚本机制；Store 通道的打包入口见 `store_msix_build_notes.md`，官方功能包范围和单跳升级判据以 [`official-widget-packages-plan.md`](official-widget-packages-plan.md) 为准，发布通道与分发流程以 [`distribution_channel_workflow.md`](distribution_channel_workflow.md) 为准。
 
 本文档用于每次发版前整理 Git 提交范围，避免把本地构建产物、测试包、公众号草稿、网站临时改动或 Store 本地签名文件混进应用发布提交。
 
@@ -24,6 +24,8 @@
 | 范围 | 是否提交 | 说明 |
 | --- | --- | --- |
 | `src/DeskBox/` | 提交 | 主程序、Store/Direct 通道、更新服务、设置页、定位服务等应用代码 |
+| `src/DeskBox.Abstractions/` | 提交 | 宿主与官方功能包共享的最小契约；版本和锁文件必须与主项目一致 |
+| `src/DeskBox.GlancePackage/` 及后续官方包项目 | 提交 | 独立 NativeAOT 功能包源码、资源和 ABI；必须加入解决方案并通过独立构建 |
 | `src/DeskBox.Updater/` | 提交 | Direct 官网版应用内更新器 |
 | `tests/DeskBox.Tests/` | 提交 | 与本次改动相关的单元测试 |
 | `installer/` | 提交 | Direct 官网版 Inno 安装器、运行时依赖检测 |
@@ -34,6 +36,9 @@
 | `README.zh-CN.md` | 提交 | 中文说明同步版本、运行时、下载和功能变化 |
 | `CHANGELOG.md` | 提交 | 版本更新日志 |
 | `DeskBox.sln` | 提交 | 如果新增项目或解决方案结构变化 |
+| `packages.lock.json` / `packages.aot.lock.json` | 提交 | 新增或调整 `src/` 项目后提交普通与 AOT 两套锁；AOT 锁只由 AOT profile restore 生成 |
+
+新增或调整 XAML/csproj 后必须重新运行 `scripts/publish-aot-audit.ps1`。发版提交只暂存本次批次的明确路径，不使用无范围的 `git add .` 或 `git add -A`。
 
 ## 三、需要单独判断的内容
 
