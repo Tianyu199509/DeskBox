@@ -562,6 +562,122 @@ public sealed class CloudBackupScopedTests : IDisposable
         Assert.Equal("cloud task", Assert.Single(orphan.Items).Text);
     }
 
+    [Fact]
+    public async Task ScopedRestore_RemappedTodoWidget_RewritesManagedAttachmentPaths()
+    {
+        // The remap moves the staged dir source→target; embedded attachment
+        // FilePaths carry the source id and must be rewritten to the target
+        // — otherwise the restore "succeeds" with dead references.
+        string dataDir = Directory.CreateDirectory(Path.Combine(_appDataRoot, "data")).FullName;
+        await File.WriteAllTextAsync(
+            Path.Combine(dataDir, "settings.json"),
+            "{\"widgets\":[{\"id\":\"target-widget\",\"widgetKind\":\"Todo\"}]}");
+        var liveTodo = new TodoWidgetStore(Path.Combine(dataDir, "widgets"), "target-widget");
+        await liveTodo.SaveAsync(new TodoWidgetData
+        {
+            Items = [new TodoItem { Id = "old", Text = "local task" }]
+        });
+
+        string sourceRoot = Path.Combine(_tempRoot, "source-app-data");
+        string sourceData = Directory.CreateDirectory(Path.Combine(sourceRoot, "data")).FullName;
+        string attachmentDir = Directory.CreateDirectory(
+            Path.Combine(sourceData, "widgets", "source-widget", "attachments")).FullName;
+        string sourceAttachment = Path.Combine(attachmentDir, "a.pdf");
+        await File.WriteAllTextAsync(sourceAttachment, "pdf-bytes");
+        var sourceTodo = new TodoWidgetStore(Path.Combine(sourceData, "widgets"), "source-widget");
+        await sourceTodo.SaveAsync(new TodoWidgetData
+        {
+            Items =
+            [
+                new TodoItem
+                {
+                    Id = "new",
+                    Text = "cloud task",
+                    Attachments =
+                    [
+                        new TodoAttachment
+                        {
+                            FilePath = sourceAttachment,
+                            DisplayName = "a.pdf",
+                            StorageMode = TodoAttachment.ManagedStorageMode
+                        }
+                    ]
+                }
+            ]
+        });
+        string backupPath = await new DeskBoxDataBackupService(sourceRoot)
+            .ExportScopedBackupAsync(_exportRoot, CloudBackupDomain.TodoData);
+
+        var service = new DeskBoxDataBackupService(_appDataRoot);
+        DeskBoxRestorePreparation prep = await service.PrepareScopedRestoreAsync(
+            backupPath, CloudBackupDomain.TodoData);
+        Assert.Single(prep.TodoWidgetRemaps!);
+
+        DeskBoxRestoreApplyResult result = await service.ApplyPendingRestoreAsync();
+        Assert.True(result.Succeeded, result.ErrorMessage);
+
+        TodoWidgetData restored = await new TodoWidgetStore(
+            Path.Combine(dataDir, "widgets"), "target-widget").LoadAsync();
+        TodoAttachment attachment = Assert.Single(
+            Assert.Single(restored.Items).Attachments);
+        Assert.Equal(
+            Path.Combine(dataDir, "widgets", "target-widget", "attachments", "a.pdf"),
+            attachment.FilePath);
+        Assert.True(File.Exists(attachment.FilePath));
+    }
+
+    [Fact]
+    public async Task ScopedRestore_MultipleOrphans_StayUnmapped()
+    {
+        // Two orphans against two free widgets: pairing them would be a
+        // guess at business semantics — keep both unmapped and preserved
+        // under their source ids rather than risk Work→Personal swaps.
+        string dataDir = Directory.CreateDirectory(Path.Combine(_appDataRoot, "data")).FullName;
+        await File.WriteAllTextAsync(
+            Path.Combine(dataDir, "settings.json"),
+            "{\"widgets\":[{\"id\":\"target-a\",\"widgetKind\":\"Todo\"}," +
+            "{\"id\":\"target-b\",\"widgetKind\":\"Todo\"}]}");
+        var liveA = new TodoWidgetStore(Path.Combine(dataDir, "widgets"), "target-a");
+        await liveA.SaveAsync(new TodoWidgetData { Items = [new TodoItem { Id = "a", Text = "local a" }] });
+        var liveB = new TodoWidgetStore(Path.Combine(dataDir, "widgets"), "target-b");
+        await liveB.SaveAsync(new TodoWidgetData { Items = [new TodoItem { Id = "b", Text = "local b" }] });
+
+        string sourceRoot = Path.Combine(_tempRoot, "source-app-data");
+        string sourceData = Directory.CreateDirectory(Path.Combine(sourceRoot, "data")).FullName;
+        var sourceX = new TodoWidgetStore(Path.Combine(sourceData, "widgets"), "source-x");
+        await sourceX.SaveAsync(new TodoWidgetData { Items = [new TodoItem { Id = "x", Text = "cloud x" }] });
+        var sourceY = new TodoWidgetStore(Path.Combine(sourceData, "widgets"), "source-y");
+        await sourceY.SaveAsync(new TodoWidgetData { Items = [new TodoItem { Id = "y", Text = "cloud y" }] });
+        string backupPath = await new DeskBoxDataBackupService(sourceRoot)
+            .ExportScopedBackupAsync(_exportRoot, CloudBackupDomain.TodoData);
+
+        var service = new DeskBoxDataBackupService(_appDataRoot);
+        DeskBoxRestorePreparation prep = await service.PrepareScopedRestoreAsync(
+            backupPath, CloudBackupDomain.TodoData);
+
+        Assert.Empty(prep.TodoWidgetRemaps!);
+        Assert.Equal(2, prep.UnmappedTodoWidgetIds!.Count);
+
+        DeskBoxRestoreApplyResult result = await service.ApplyPendingRestoreAsync();
+        Assert.True(result.Succeeded, result.ErrorMessage);
+        // Both orphans preserved on disk under their source ids.
+        TodoWidgetData orphanX = await new TodoWidgetStore(
+            Path.Combine(dataDir, "widgets"), "source-x").LoadAsync();
+        Assert.Equal("cloud x", Assert.Single(orphanX.Items).Text);
+        TodoWidgetData orphanY = await new TodoWidgetStore(
+            Path.Combine(dataDir, "widgets"), "source-y").LoadAsync();
+        Assert.Equal("cloud y", Assert.Single(orphanY.Items).Text);
+        // Domain-faithful restore: the snapshot defines the whole TodoData
+        // domain, so live stores the snapshot doesn't cover are wiped (the
+        // pre-restore full local backup covers that loss).
+        TodoWidgetData liveARestored = await new TodoWidgetStore(
+            Path.Combine(dataDir, "widgets"), "target-a").LoadAsync();
+        Assert.Empty(liveARestored.Items);
+        TodoWidgetData liveBRestored = await new TodoWidgetStore(
+            Path.Combine(dataDir, "widgets"), "target-b").LoadAsync();
+        Assert.Empty(liveBRestored.Items);
+    }
+
     private static async Task<JsonObject> ReadManifestAsync(ZipArchive archive)
     {
         ZipArchiveEntry entry = Assert.IsType<ZipArchiveEntry>(

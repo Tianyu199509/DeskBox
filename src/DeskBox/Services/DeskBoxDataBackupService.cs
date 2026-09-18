@@ -472,6 +472,7 @@ public sealed partial class DeskBoxDataBackupService
             await RebaseManagedAttachmentPathsAsync(
                 stagedDataDirectory,
                 archiveInfo.Manifest.SourceDataPath,
+                todoWidgetIdRemaps: null,
                 cancellationToken);
             ValidateRestoreData(stagedDataDirectory);
 
@@ -581,16 +582,25 @@ public sealed partial class DeskBoxDataBackupService
                     }
                 }
             }
+            // Remap order matters: plan source→target ids, move the staged
+            // widget dirs, THEN rebase attachment paths — embedded FilePaths
+            // carry the source id, so the rebase rewrites widgets/<source>
+            // to widgets/<target> while the moved files already sit there.
+            (IReadOnlyList<DeskBoxTodoWidgetRemap> remaps, IReadOnlyList<string> unmapped) =
+                appliedScope.HasFlag(CloudBackupDomain.TodoData)
+                    ? await PlanOrphanedTodoWidgetRemapsAsync(stagedDataDirectory, cancellationToken)
+                    : (Array.Empty<DeskBoxTodoWidgetRemap>(), Array.Empty<string>());
+            ApplyTodoWidgetRemaps(stagedDataDirectory, remaps);
+
+            IReadOnlyDictionary<string, string>? todoWidgetIdRemaps = remaps.Count > 0
+                ? remaps.ToDictionary(r => r.SourceWidgetId, r => r.TargetWidgetId, StringComparer.Ordinal)
+                : null;
             await RebaseManagedAttachmentPathsAsync(
                 stagedDataDirectory,
                 archiveInfo.Manifest.SourceDataPath,
+                todoWidgetIdRemaps,
                 cancellationToken);
             ValidateScopedRestoreData(stagedDataDirectory, appliedScope);
-
-            (IReadOnlyList<DeskBoxTodoWidgetRemap> remaps, IReadOnlyList<string> unmapped) =
-                appliedScope.HasFlag(CloudBackupDomain.TodoData)
-                    ? await RemapOrphanedTodoWidgetsAsync(stagedDataDirectory, cancellationToken)
-                    : (Array.Empty<DeskBoxTodoWidgetRemap>(), Array.Empty<string>());
 
             var marker = new PendingRestoreMarker(
                 stagingRoot,
@@ -681,12 +691,19 @@ public sealed partial class DeskBoxDataBackupService
     /// taken on another device — or before the widget was deleted and
     /// recreated — stages widgets/&lt;id&gt;/ dirs the live settings do not
     /// know; restoring them verbatim would wipe the live stores AND leave
-    /// the restored data invisible. Orphaned staged dirs are remapped onto
-    /// live todo widgets the snapshot does not already cover; leftovers
-    /// stay under their source id (preserved on disk) and are reported.
+    /// the restored data invisible. This is a pure plan: it only decides
+    /// source→target id pairs and never touches the file system, so the
+    /// caller can move dirs first and then rebase attachment paths with
+    /// the remap applied.
+    ///
+    /// Pairing is deliberately strict: exactly one orphan mapped onto
+    /// exactly one free live widget. Anything more ambiguous (multiple
+    /// orphans or multiple candidates) cannot be paired without guessing
+    /// at business semantics — those orphans stay unmapped, preserved on
+    /// disk under their source id, and reported.
     /// </summary>
     private async Task<(IReadOnlyList<DeskBoxTodoWidgetRemap> Remaps, IReadOnlyList<string> Unmapped)>
-        RemapOrphanedTodoWidgetsAsync(
+        PlanOrphanedTodoWidgetRemapsAsync(
             string stagedDataDirectory,
             CancellationToken cancellationToken)
     {
@@ -721,6 +738,10 @@ public sealed partial class DeskBoxDataBackupService
 
         HashSet<string> liveTodoIds = await ReadLiveTodoWidgetIdsAsync(cancellationToken);
         var stagedSet = new HashSet<string>(stagedIds, StringComparer.Ordinal);
+        List<string> orphans = stagedIds
+            .Where(id => !liveTodoIds.Contains(id))
+            .OrderBy(id => id, StringComparer.Ordinal)
+            .ToList();
         List<string> freeTargets = liveTodoIds
             .Where(id => !stagedSet.Contains(id))
             .OrderBy(id => id, StringComparer.Ordinal)
@@ -728,28 +749,41 @@ public sealed partial class DeskBoxDataBackupService
 
         var remaps = new List<DeskBoxTodoWidgetRemap>();
         var unmapped = new List<string>();
-        int targetIndex = 0;
-        foreach (string orphanId in stagedIds
-                     .Where(id => !liveTodoIds.Contains(id))
-                     .OrderBy(id => id, StringComparer.Ordinal))
+        if (orphans.Count == 1 && freeTargets.Count == 1)
         {
-            if (targetIndex >= freeTargets.Count)
-            {
-                unmapped.Add(orphanId);
-                continue;
-            }
-
-            string targetId = freeTargets[targetIndex++];
-            // freeTargets excludes staged ids by construction, so the
-            // destination directory cannot already exist in the snapshot.
-            Directory.Move(
-                Path.Combine(stagedWidgetsDirectory, orphanId),
-                Path.Combine(stagedWidgetsDirectory, targetId));
-            remaps.Add(new DeskBoxTodoWidgetRemap(orphanId, targetId));
-            App.Log($"[DataBackup] Scoped restore remapped todo store '{orphanId}' -> '{targetId}'.");
+            // The single orphan can only be the single free widget — the
+            // one pairing that carries no ambiguity.
+            remaps.Add(new DeskBoxTodoWidgetRemap(orphans[0], freeTargets[0]));
+        }
+        else
+        {
+            unmapped.AddRange(orphans);
         }
 
         return (remaps, unmapped);
+    }
+
+    /// <summary>
+    /// Moves staged widget directories according to the planned remaps.
+    /// Runs before attachment-path rebasing: embedded FilePaths carry the
+    /// source id, so the rebase rewrites the widgets/&lt;source&gt; prefix
+    /// to widgets/&lt;target&gt; while the moved files already sit where
+    /// the rewritten paths point.
+    /// </summary>
+    private static void ApplyTodoWidgetRemaps(
+        string stagedDataDirectory,
+        IReadOnlyList<DeskBoxTodoWidgetRemap> remaps)
+    {
+        string stagedWidgetsDirectory = Path.Combine(stagedDataDirectory, "widgets");
+        foreach (DeskBoxTodoWidgetRemap remap in remaps)
+        {
+            // freeTargets excludes staged ids by construction, so the
+            // destination directory cannot already exist in the snapshot.
+            Directory.Move(
+                Path.Combine(stagedWidgetsDirectory, remap.SourceWidgetId),
+                Path.Combine(stagedWidgetsDirectory, remap.TargetWidgetId));
+            App.Log($"[DataBackup] Scoped restore remapped todo store '{remap.SourceWidgetId}' -> '{remap.TargetWidgetId}'.");
+        }
     }
 
     /// <summary>
@@ -1269,6 +1303,7 @@ public sealed partial class DeskBoxDataBackupService
     private async Task RebaseManagedAttachmentPathsAsync(
         string stagedDataDirectory,
         string? sourceDataPath,
+        IReadOnlyDictionary<string, string>? todoWidgetIdRemaps,
         CancellationToken cancellationToken)
     {
         string quickCapturePath = Path.Combine(
@@ -1316,6 +1351,7 @@ public sealed partial class DeskBoxDataBackupService
                 todoPath,
                 stagedDataDirectory,
                 sourceDataPath,
+                todoWidgetIdRemaps,
                 cancellationToken);
             string backupPath = ResilientJsonStore.GetBackupPath(todoPath);
             if (File.Exists(backupPath))
@@ -1326,6 +1362,7 @@ public sealed partial class DeskBoxDataBackupService
                         backupPath,
                         stagedDataDirectory,
                         sourceDataPath,
+                        todoWidgetIdRemaps,
                         cancellationToken);
                 }
                 catch (Exception ex) when (ex is JsonException or InvalidDataException)
@@ -1391,16 +1428,34 @@ public sealed partial class DeskBoxDataBackupService
         string path,
         string stagedDataDirectory,
         string? sourceDataPath,
+        IReadOnlyDictionary<string, string>? widgetIdRemaps,
         CancellationToken cancellationToken)
     {
         TodoWidgetData data = JsonSerializer.Deserialize(
                                   await File.ReadAllTextAsync(path, cancellationToken),
                                   s_todoDataJsonContext.StoreData) ??
                               throw new InvalidDataException("Todo backup data is invalid.");
+        // The store dir may already have been moved to a remapped target id —
+        // embedded FilePaths still carry the SOURCE id, so the store-relative
+        // fallback lookup must use the source id while the final rewrite
+        // (inside TryRebaseManagedPath) points at the target.
         string storeRelativePath = Path.GetRelativePath(
                 stagedDataDirectory,
                 Path.GetDirectoryName(path)!)
             .Replace(Path.DirectorySeparatorChar, '/');
+        if (widgetIdRemaps is { Count: > 0 })
+        {
+            string currentWidgetId = Path.GetFileName(Path.GetDirectoryName(path)!);
+            foreach (KeyValuePair<string, string> remap in widgetIdRemaps)
+            {
+                if (string.Equals(remap.Value, currentWidgetId, StringComparison.Ordinal))
+                {
+                    storeRelativePath = $"widgets/{remap.Key}";
+                    break;
+                }
+            }
+        }
+
         foreach (TodoAttachment attachment in (data.Items ?? [])
                      .SelectMany(item => item.Attachments ?? [])
                      .Where(attachment => attachment is not null && attachment.IsManagedCopy))
@@ -1409,7 +1464,8 @@ public sealed partial class DeskBoxDataBackupService
                                       attachment.FilePath,
                                       sourceDataPath,
                                       stagedDataDirectory,
-                                      storeRelativePath) ??
+                                      storeRelativePath,
+                                      widgetIdRemaps) ??
                                   attachment.FilePath;
         }
 
@@ -1423,7 +1479,8 @@ public sealed partial class DeskBoxDataBackupService
         string? originalPath,
         string? sourceDataPath,
         string stagedDataDirectory,
-        string fallbackStoreRelativePath)
+        string fallbackStoreRelativePath,
+        IReadOnlyDictionary<string, string>? widgetIdRemaps = null)
     {
         if (string.IsNullOrWhiteSpace(originalPath))
         {
@@ -1441,6 +1498,26 @@ public sealed partial class DeskBoxDataBackupService
         if (string.IsNullOrWhiteSpace(relativePath))
         {
             return null;
+        }
+
+        // Embedded paths carry the source widget id; after a remap move the
+        // payload lives under the target id — rewrite the leading segment.
+        if (widgetIdRemaps is { Count: > 0 })
+        {
+            string normalized = relativePath.Replace('\\', '/');
+            const string widgetsPrefix = "widgets/";
+            if (normalized.StartsWith(widgetsPrefix, StringComparison.OrdinalIgnoreCase))
+            {
+                int idEnd = normalized.IndexOf('/', widgetsPrefix.Length);
+                if (idEnd > widgetsPrefix.Length &&
+                    widgetIdRemaps.TryGetValue(
+                        normalized[widgetsPrefix.Length..idEnd],
+                        out string? targetId))
+                {
+                    relativePath = (widgetsPrefix + targetId + normalized[idEnd..])
+                        .Replace('/', Path.DirectorySeparatorChar);
+                }
+            }
         }
 
         string stagedPath = Path.GetFullPath(Path.Combine(stagedDataDirectory, relativePath));
