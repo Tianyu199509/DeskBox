@@ -46,11 +46,14 @@ internal sealed class CloudBackupService
         // A success recorded against a different destination must not
         // suppress the first backup to the NEW destination: switching
         // provider/endpoint/folder/account/scope invalidates LastSuccess.
-        // Only a real destination switch counts — the first configured
-        // options push after startup must keep the persisted value.
+        // The comparison runs regardless of IsConfigured — a configured →
+        // unconfigured → configured detour must not smuggle the old
+        // success through either. Only a real destination switch counts:
+        // the first options push after startup keeps the persisted value,
+        // and an already-empty timestamp needs no invalidation write.
         if (_optionsInitialized &&
-            _options.IsConfigured && options.IsConfigured &&
-            DestinationIdentityChanged(_options, options))
+            DestinationIdentityChanged(_options, options) &&
+            options.LastSuccessUtc != DateTimeOffset.MinValue)
         {
             options = options with { LastSuccessUtc = DateTimeOffset.MinValue };
             _settingsService.Settings.CloudBackup.CloudBackupLastSuccessUtcTicks = 0;
@@ -161,7 +164,7 @@ internal sealed class CloudBackupService
             }
 
             int pruned = await ApplyRetentionAsync(transport, options, cancellationToken);
-            await MarkSuccessAsync();
+            await MarkSuccessAsync(options);
             App.Log($"[CloudBackup] Uploaded '{remoteFilePath}' (pruned {pruned} old snapshots).");
             return new CloudBackupRunResult(Uploaded: true, remoteFilePath, pruned);
         }
@@ -377,8 +380,20 @@ internal sealed class CloudBackupService
         return pruned;
     }
 
-    private async Task MarkSuccessAsync()
+    private async Task MarkSuccessAsync(CloudBackupOptions completedOptions)
     {
+        // The success belongs to the destination this run actually used.
+        // If the user reconfigured mid-upload, stamping it onto the NEW
+        // options would mark a destination that has never been backed up —
+        // false assurance that delays its first real backup by a full
+        // interval. Upload already succeeded; just skip the stamp.
+        if (!_options.IsConfigured ||
+            DestinationIdentityChanged(_options, completedOptions))
+        {
+            App.Log("[CloudBackup] Upload succeeded against superseded options; last-success not stamped.");
+            return;
+        }
+
         DateTimeOffset now = DateTimeOffset.UtcNow;
         _options = _options with { LastSuccessUtc = now };
         _settingsService.Settings.CloudBackup.CloudBackupLastSuccessUtcTicks = now.UtcTicks;

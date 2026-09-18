@@ -415,6 +415,61 @@ public sealed class CloudBackupTransportTests : IDisposable
     }
 
     [Fact]
+    public void UpdateOptions_UnconfiguredDetour_StillResetsLastSuccess()
+    {
+        var transport = new FakeCloudBackupTransport();
+        (CloudBackupService service, SettingsService settings) = CreateService(transport);
+        DateTimeOffset success = DateTimeOffset.UtcNow.AddHours(-2);
+        service.UpdateOptions(ConfiguredOptions(lastSuccess: success));
+
+        // configured → unconfigured (all domains off) → configured (a
+        // different domain): the middle step fails IsConfigured, but the
+        // destination identity changed twice — the original success must
+        // not survive the detour.
+        service.UpdateOptions(ConfiguredOptions(lastSuccess: success, scope: CloudBackupDomain.None));
+        service.UpdateOptions(ConfiguredOptions(lastSuccess: success, scope: CloudBackupDomain.QuickCaptureData));
+
+        Assert.Equal(DateTimeOffset.MinValue, service.Options.LastSuccessUtc);
+        Assert.Equal(0, settings.Settings.CloudBackup.CloudBackupLastSuccessUtcTicks);
+    }
+
+    [Fact]
+    public async Task RunBackup_UploadFinishingAfterDestinationChange_DoesNotStampNewDestination()
+    {
+        SeedTodoData();
+        var uploadStarted = new TaskCompletionSource();
+        var releaseUpload = new TaskCompletionSource();
+        var transport = new FakeCloudBackupTransport
+        {
+            UploadHook = _ =>
+            {
+                uploadStarted.TrySetResult();
+                return releaseUpload.Task;
+            }
+        };
+        (CloudBackupService service, SettingsService settings) = CreateService(transport);
+        service.UpdateOptions(ConfiguredOptions(lastSuccess: DateTimeOffset.MinValue));
+
+        Task<CloudBackupRunResult> run = service.RunBackupNowAsync();
+        await uploadStarted.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        // While A's upload is in flight the user repoints the backup to B.
+        service.UpdateOptions(ConfiguredOptions(lastSuccess: DateTimeOffset.MinValue) with
+        {
+            ServerUrl = "https://other.example.com/"
+        });
+
+        releaseUpload.SetResult();
+        CloudBackupRunResult result = await run;
+
+        // The upload succeeded — against A. Stamping that success onto B
+        // would mark a destination that has never produced a backup.
+        Assert.True(result.Uploaded);
+        Assert.Equal(DateTimeOffset.MinValue, service.Options.LastSuccessUtc);
+        Assert.Equal(0, settings.Settings.CloudBackup.CloudBackupLastSuccessUtcTicks);
+    }
+
+    [Fact]
     public async Task RunBackupNow_NotConfigured_ReturnsSkipped()
     {
         var transport = new FakeCloudBackupTransport();
