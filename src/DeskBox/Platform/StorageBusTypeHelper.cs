@@ -1,7 +1,7 @@
 using System.ComponentModel;
 using System.Runtime.InteropServices;
 
-namespace DeskBox.Helpers;
+namespace DeskBox.Platform;
 
 /// <summary>
 /// Resolves the physical bus behind a volume so drives that report as fixed

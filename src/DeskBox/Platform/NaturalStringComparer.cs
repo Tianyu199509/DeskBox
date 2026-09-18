@@ -1,7 +1,7 @@
 using System.Collections;
 using System.Runtime.InteropServices;
 
-namespace DeskBox.Helpers;
+namespace DeskBox.Platform;
 
 /// <summary>
 /// Compares strings the same way Windows Explorer sorts names such as 2 before 10.

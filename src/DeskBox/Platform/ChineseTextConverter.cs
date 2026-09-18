@@ -1,6 +1,6 @@
 using System.Runtime.InteropServices;
 
-namespace DeskBox.Helpers;
+namespace DeskBox.Platform;
 
 internal static partial class ChineseTextConverter
 {

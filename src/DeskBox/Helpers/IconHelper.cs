@@ -103,99 +103,8 @@ public static class IconHelper
         bool UsesShellItemIcon = false);
     private sealed record ResolvedIconSource(IconSource Source, string CacheKey);
 
-    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
-    private struct SHFILEINFO
-    {
-        public IntPtr hIcon;
-        public int iIcon;
-        public uint dwAttributes;
-
-        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 260)]
-        public string szDisplayName;
-
-        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 80)]
-        public string szTypeName;
-    }
-
-    private const uint SHGFI_ICON = 0x100;
-    private const uint SHGFI_LARGEICON = 0x0;
-    private const uint SHGFI_SYSICONINDEX = 0x4000;
-
-    [DllImport("shell32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-    private static extern IntPtr SHGetFileInfo(
-        string pszPath,
-        uint dwFileAttributes,
-        ref SHFILEINFO psfi,
-        uint cbFileInfo,
-        uint uFlags);
-
-    [DllImport("user32.dll", SetLastError = true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool DestroyIcon(IntPtr hIcon);
-
-    [DllImport("shell32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-    private static extern int SHDefExtractIcon(
-        string pszIconFile,
-        int iIcon,
-        uint uFlags,
-        out IntPtr phiconLarge,
-        out IntPtr phiconSmall,
-        uint nIconSize); // MAKELONG(cxSmall, cxLarge) — low word = small, high word = large
-
-    [DllImport("shell32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-    private static extern uint ExtractIconEx(
-        string lpszFile,
-        int nIconIndex,
-        IntPtr[]? phiconLarge,
-        IntPtr[]? phiconSmall,
-        uint nIcons);
-
-    [DllImport("shell32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-    private static extern int SHGetImageList(
-        int iImageList,
-        ref Guid riid,
-        ref IntPtr ppv);
-
-    // Image list size flags for SHGetImageList
-    private const int SHIL_EXTRALARGE = 0x2; // 48x48
-    private const int SHIL_JUMBO = 0x4;      // 256x256 (Vista+)
-
-    private static readonly Guid s_iidIImageList = new("46EB5926-582E-4017-9FDF-E899822AA8B3");
-
-    [ComImport]
-    [Guid("46EB5926-582E-4017-9FDF-E899822AA8B3")]
-    [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-    private interface IImageList
-    {
-        [PreserveSig]
-        int GetImageCount();
-
-        [PreserveSig]
-        int GetImageRect(int i, ref RECT pRect);
-
-        [PreserveSig]
-        int GetIcon(int i, uint flags, ref IntPtr picon);
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct RECT
-    {
-        public int left;
-        public int top;
-        public int right;
-        public int bottom;
-    }
-
-    private const uint ILD_TRANSPARENT = 0x00000001;
-
-    // Shell change notification for invalidating the icon cache.
-    private const int SHCNE_ASSOCCHANGED = 0x08000000;
-    private const uint SHCNF_IDLIST = 0x0000;
     private const long ShellInvalidateThrottleMs = 500;
     private static long s_lastShellInvalidateMs;
-
-    [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
-    private static extern void SHChangeNotify(int wEventId, uint uFlags, IntPtr dwItem1, IntPtr dwItem2);
 
     /// <summary>
     /// Asynchronously retrieve the native Windows shell icon for the given path.
@@ -783,8 +692,8 @@ public static class IconHelper
 
         // For directories, also invalidate the Windows shell icon cache.
         // Tools like Folder Painter modify desktop.ini to change folder icons,
-        // but SHGetFileInfo/SHGetImageList return stale icons from the shell's
-        // internal cache unless SHChangeNotify is called.
+        // but ShellIconNativeMethods.SHGetFileInfo/ShellIconNativeMethods.SHGetImageList return stale icons from the shell's
+        // internal cache unless ShellIconNativeMethods.SHChangeNotify is called.
         if (invalidatedDirectoryIcon)
         {
             InvalidateShellIconCache();
@@ -794,7 +703,7 @@ public static class IconHelper
     /// <summary>
     /// Notifies the shell that file associations (and therefore folder icons)
     /// have changed, forcing it to discard its cached icons and re-read
-    /// desktop.ini on the next SHGetFileInfo call.
+    /// desktop.ini on the next ShellIconNativeMethods.SHGetFileInfo call.
     /// Throttled: tools like Folder Painter often rewrite several folders in
     /// quick succession, and each broadcast makes Explorer flush its icon cache.
     /// </summary>
@@ -808,7 +717,7 @@ public static class IconHelper
             return;
         }
 
-        SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, IntPtr.Zero, IntPtr.Zero);
+        ShellIconNativeMethods.SHChangeNotify(ShellIconNativeMethods.SHCNE_ASSOCCHANGED, ShellIconNativeMethods.SHCNF_IDLIST, IntPtr.Zero, IntPtr.Zero);
     }
 
     /// <summary>
@@ -1134,7 +1043,7 @@ public static class IconHelper
             if (ShouldPreferHighResolutionShellItemIcon(isShortcutPath))
             {
                 // Ask the same isolated Shell-item pipeline used by Explorer for
-                // every real file and folder. SHGetImageList's Jumbo slot can be
+                // every real file and folder. ShellIconNativeMethods.SHGetImageList's Jumbo slot can be
                 // a pre-scaled 32/48 px bitmap even when the registered file icon
                 // contains a genuine 256 px frame. Keep the in-process image-list
                 // path below as the compatibility fallback.
@@ -1509,18 +1418,18 @@ public static class IconHelper
             }
 
             // Get the system icon index, then extract the highest-resolution
-            // version available via SHGetImageList (Jumbo 256 → ExtraLarge 48 → Large 32).
-            var shinfo = new SHFILEINFO();
-            IntPtr hImg = SHGetFileInfo(
+            // version available via ShellIconNativeMethods.SHGetImageList (Jumbo 256 → ExtraLarge 48 → Large 32).
+            var shinfo = new ShellIconNativeMethods.SHFILEINFO();
+            IntPtr hImg = ShellIconNativeMethods.SHGetFileInfo(
                 iconSource.Path,
                 0,
                 ref shinfo,
                 (uint)Marshal.SizeOf(shinfo),
-                SHGFI_SYSICONINDEX);
+                ShellIconNativeMethods.SHGFI_SYSICONINDEX);
 
             if (hImg == IntPtr.Zero)
             {
-                // Fallback: direct large icon via SHGetFileInfo
+                // Fallback: direct large icon via ShellIconNativeMethods.SHGetFileInfo
                 return LoadIconBytesFromShGetFileInfo(
                     iconSource.Path,
                     rejectPaddedShortcutIcon);
@@ -1530,7 +1439,7 @@ public static class IconHelper
 
             // Try Jumbo (256×256) first — gives crisp icons on high-DPI displays.
             byte[]? bytes = TryGetIconFromImageList(
-                SHIL_JUMBO,
+                ShellIconNativeMethods.SHIL_JUMBO,
                 iconIndex,
                 rejectPaddedShortcutIcon);
             if (bytes is not null)
@@ -1540,7 +1449,7 @@ public static class IconHelper
 
             // Fall back to Extra Large (48×48).
             bytes = TryGetIconFromImageList(
-                SHIL_EXTRALARGE,
+                ShellIconNativeMethods.SHIL_EXTRALARGE,
                 iconIndex,
                 rejectPaddedShortcutIcon);
             if (bytes is not null)
@@ -1548,7 +1457,7 @@ public static class IconHelper
                 return bytes;
             }
 
-            // Final fallback: Large (32×32) via SHGetFileInfo.
+            // Final fallback: Large (32×32) via ShellIconNativeMethods.SHGetFileInfo.
             return LoadIconBytesFromShGetFileInfo(
                 iconSource.Path,
                 rejectPaddedShortcutIcon);
@@ -1570,15 +1479,15 @@ public static class IconHelper
 
         try
         {
-            Guid iid = s_iidIImageList;
-            int hr = SHGetImageList(imageListFlags, ref iid, ref imageListPtr);
+            Guid iid = ShellIconNativeMethods.IImageListIid;
+            int hr = ShellIconNativeMethods.SHGetImageList(imageListFlags, ref iid, ref imageListPtr);
             if (hr != 0 || imageListPtr == IntPtr.Zero)
             {
                 return null;
             }
 
-            var imageList = (IImageList)Marshal.GetObjectForIUnknown(imageListPtr);
-            int result = imageList.GetIcon(iconIndex, ILD_TRANSPARENT, ref iconHandle);
+            var imageList = (ShellIconNativeMethods.IImageList)Marshal.GetObjectForIUnknown(imageListPtr);
+            int result = imageList.GetIcon(iconIndex, ShellIconNativeMethods.ILD_TRANSPARENT, ref iconHandle);
             if (result != 0 || iconHandle == IntPtr.Zero)
             {
                 return null;
@@ -1596,7 +1505,7 @@ public static class IconHelper
         {
             if (iconHandle != IntPtr.Zero)
             {
-                DestroyIcon(iconHandle);
+                ShellIconNativeMethods.DestroyIcon(iconHandle);
             }
 
             if (imageListPtr != IntPtr.Zero)
@@ -1610,13 +1519,13 @@ public static class IconHelper
         string path,
         bool rejectPaddedShortcutIcon = false)
     {
-        var shinfo = new SHFILEINFO();
-        IntPtr hImg = SHGetFileInfo(
+        var shinfo = new ShellIconNativeMethods.SHFILEINFO();
+        IntPtr hImg = ShellIconNativeMethods.SHGetFileInfo(
             path,
             0,
             ref shinfo,
             (uint)Marshal.SizeOf(shinfo),
-            SHGFI_ICON | SHGFI_LARGEICON);
+            ShellIconNativeMethods.SHGFI_ICON | ShellIconNativeMethods.SHGFI_LARGEICON);
 
         if (hImg == IntPtr.Zero || shinfo.hIcon == IntPtr.Zero)
         {
@@ -1631,7 +1540,7 @@ public static class IconHelper
         }
         finally
         {
-            DestroyIcon(shinfo.hIcon);
+            ShellIconNativeMethods.DestroyIcon(shinfo.hIcon);
         }
     }
 
@@ -1639,7 +1548,7 @@ public static class IconHelper
         IconSource iconSource,
         bool rejectPaddedShortcutIcon = false)
     {
-        // Try SHDefExtractIcon first — it can extract 256×256 icons from exe/dll/ico resources.
+        // Try ShellIconNativeMethods.SHDefExtractIcon first — it can extract 256×256 icons from exe/dll/ico resources.
         byte[]? hiResBytes = TryExtractHighResIndexedIcon(
             iconSource.Path,
             iconSource.IconIndex,
@@ -1661,10 +1570,10 @@ public static class IconHelper
             return hiResBytes;
         }
 
-        // Final fallback: ExtractIconEx (32×32 large / 16×16 small)
+        // Final fallback: ShellIconNativeMethods.ExtractIconEx (32×32 large / 16×16 small)
         var largeIcons = new IntPtr[1];
         var smallIcons = new IntPtr[1];
-        uint count = ExtractIconEx(
+        uint count = ShellIconNativeMethods.ExtractIconEx(
             iconSource.Path,
             iconSource.IconIndex,
             largeIcons,
@@ -1690,12 +1599,12 @@ public static class IconHelper
         {
             if (largeIcons[0] != IntPtr.Zero)
             {
-                DestroyIcon(largeIcons[0]);
+                ShellIconNativeMethods.DestroyIcon(largeIcons[0]);
             }
 
             if (smallIcons[0] != IntPtr.Zero && smallIcons[0] != largeIcons[0])
             {
-                DestroyIcon(smallIcons[0]);
+                ShellIconNativeMethods.DestroyIcon(smallIcons[0]);
             }
         }
     }
@@ -1713,7 +1622,7 @@ public static class IconHelper
         {
             // nIconSize: high word = large icon size, low word = small icon size
             uint nIconSize = ((uint)size << 16) | (uint)size;
-            int hr = SHDefExtractIcon(filePath, iconIndex, 0, out hLarge, out hSmall, nIconSize);
+            int hr = ShellIconNativeMethods.SHDefExtractIcon(filePath, iconIndex, 0, out hLarge, out hSmall, nIconSize);
             if (hr != 0 || hLarge == IntPtr.Zero)
             {
                 return null;
@@ -1731,12 +1640,12 @@ public static class IconHelper
         {
             if (hLarge != IntPtr.Zero)
             {
-                DestroyIcon(hLarge);
+                ShellIconNativeMethods.DestroyIcon(hLarge);
             }
 
             if (hSmall != IntPtr.Zero && hSmall != hLarge)
             {
-                DestroyIcon(hSmall);
+                ShellIconNativeMethods.DestroyIcon(hSmall);
             }
         }
     }

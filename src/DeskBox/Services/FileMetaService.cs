@@ -14,7 +14,7 @@ namespace DeskBox.Services;
 /// the real system icon (cached per extension — no per-file disk access),
 /// file size, and creation time.
 ///
-/// Icons use SHGetFileInfo with SHGFI_USEFILEATTRIBUTES, which resolves the icon
+/// Icons use ShellIconNativeMethods.SHGetFileInfo with ShellIconNativeMethods.SHGFI_USEFILEATTRIBUTES, which resolves the icon
 /// purely from the file name/attributes, so stale index entries (deleted files)
 /// still render a correct icon without touching the disk.
 /// </summary>
@@ -22,9 +22,6 @@ public sealed class FileMetaService : IDisposable
 {
     private const int MaxIconCacheEntries = 64;
     private const string SearchIconCacheScope = "search";
-    private const uint SHGFI_ICON = 0x100;
-    private const uint SHGFI_LARGEICON = 0x0;
-    private const uint SHGFI_USEFILEATTRIBUTES = 0x10;
     private const uint FILE_ATTRIBUTE_DIRECTORY = 0x10;
     private const uint FILE_ATTRIBUTE_NORMAL = 0x80;
 
@@ -42,31 +39,6 @@ public sealed class FileMetaService : IDisposable
 
     public int CachedIconCount => _iconCache.Count;
 
-    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
-    private struct SHFILEINFO
-    {
-        public IntPtr hIcon;
-        public int iIcon;
-        public uint dwAttributes;
-
-        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 260)]
-        public string szDisplayName;
-
-        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 80)]
-        public string szTypeName;
-    }
-
-    [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
-    private static extern IntPtr SHGetFileInfo(
-        string pszPath,
-        uint dwFileAttributes,
-        ref SHFILEINFO psfi,
-        uint cbFileInfo,
-        uint uFlags);
-
-    [DllImport("user32.dll")]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool DestroyIcon(IntPtr hIcon);
 
     /// <summary>
     /// Enriches file/folder results with icon, size, and creation time.
@@ -176,7 +148,7 @@ public sealed class FileMetaService : IDisposable
                 cacheScope: SearchIconCacheScope);
         }
 
-        // Fallback: use extension-cached SHGetFileInfo path.
+        // Fallback: use extension-cached ShellIconNativeMethods.SHGetFileInfo path.
         string key;
         if (item.Kind == SearchResultKind.Folder)
         {
@@ -328,13 +300,13 @@ public sealed class FileMetaService : IDisposable
         string probe = isFolder ? "folder" : cacheKey == NoExtensionCacheKey ? "*" : $"*{cacheKey}";
         uint attributes = isFolder ? FILE_ATTRIBUTE_DIRECTORY : FILE_ATTRIBUTE_NORMAL;
 
-        var shinfo = new SHFILEINFO();
-        IntPtr result = SHGetFileInfo(
+        var shinfo = new ShellIconNativeMethods.SHFILEINFO();
+        IntPtr result = ShellIconNativeMethods.SHGetFileInfo(
             probe,
             attributes,
             ref shinfo,
-            (uint)Marshal.SizeOf<SHFILEINFO>(),
-            SHGFI_ICON | SHGFI_LARGEICON | SHGFI_USEFILEATTRIBUTES);
+            (uint)Marshal.SizeOf<ShellIconNativeMethods.SHFILEINFO>(),
+            ShellIconNativeMethods.SHGFI_ICON | ShellIconNativeMethods.SHGFI_LARGEICON | ShellIconNativeMethods.SHGFI_USEFILEATTRIBUTES);
 
         if (result == IntPtr.Zero || shinfo.hIcon == IntPtr.Zero)
         {
@@ -356,7 +328,7 @@ public sealed class FileMetaService : IDisposable
         }
         finally
         {
-            DestroyIcon(shinfo.hIcon);
+            ShellIconNativeMethods.DestroyIcon(shinfo.hIcon);
         }
     }
 
