@@ -6,8 +6,9 @@ namespace DeskBox.Tests;
 
 /// <summary>
 /// Service-level credential helpers and policy normalizers.
-/// The secret key is scoped by provider+host+username so an account or
-/// endpoint change never silently reuses a stale credential.
+/// The secret key is scoped by provider+origin+username so an account,
+/// scheme or port change never silently reuses a stale credential —
+/// and saving under a re-keyed endpoint removes the stale vault entry.
 /// </summary>
 public sealed class CloudBackupServiceCredentialTests : IDisposable
 {
@@ -32,7 +33,26 @@ public sealed class CloudBackupServiceCredentialTests : IDisposable
 
         Assert.Equal(
             "s3cret-token",
-            await store.GetSecretAsync("webdav:alice@dav.example.com"));
+            await store.GetSecretAsync("webdav:alice@https://dav.example.com"));
+    }
+
+    [Fact]
+    public async Task SaveCredential_RemovesStaleKeysUnderSameProvider()
+    {
+        var store = new InMemoryCredentialStore();
+        CloudBackupService service = CreateService(store, out _);
+        service.UpdateOptions(MakeOptions());
+        await service.SaveCredentialAsync("old-secret");
+
+        // Re-keyed endpoint (port changed) → fresh key; the stale entry
+        // must not linger in the vault.
+        service.UpdateOptions(MakeOptions(serverUrl: "https://dav.example.com:8443/dav/"));
+        await service.SaveCredentialAsync("new-secret");
+
+        Assert.Null(await store.GetSecretAsync("webdav:alice@https://dav.example.com"));
+        Assert.Equal(
+            "new-secret",
+            await store.GetSecretAsync("webdav:alice@https://dav.example.com:8443"));
     }
 
     [Fact]
@@ -50,7 +70,7 @@ public sealed class CloudBackupServiceCredentialTests : IDisposable
     public async Task HasCredential_FalseWhenNotConfigured()
     {
         var store = new InMemoryCredentialStore();
-        await store.SetSecretAsync("webdav:alice@dav.example.com", "s3cret");
+        await store.SetSecretAsync("webdav:alice@https://dav.example.com", "s3cret");
         CloudBackupService service = CreateService(store, out _);
         service.UpdateOptions(MakeOptions(provider: CloudBackupSettingsPolicy.ProviderNone));
 
@@ -213,5 +233,8 @@ public sealed class CloudBackupServiceCredentialTests : IDisposable
             _secrets.Remove(key);
             return Task.CompletedTask;
         }
+
+        public Task<IReadOnlyList<string>> ListKeysAsync(CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<string>>(_secrets.Keys.ToList());
     }
 }

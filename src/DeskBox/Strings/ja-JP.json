@@ -2771,5 +2771,9 @@
     "Settings.CloudBackup.RestoreConfirm.Body": "{0} のバックアップ（DeskBox {1}）。{2} 個のファイル、{3}。復元するドメイン：{4}。復元を適用するためアプリを再起動します——先に完全なローカルバックアップを作成します。",
     "Settings.CloudBackup.RestoreConfirm.Button": "復元して再起動",
     "Settings.CloudBackup.RestoreFailed.Title": "復元に失敗しました",
-    "Settings.CloudBackup.RestoreFailed.Body": "リモートスナップショットを復元できませんでした：{0}"
+    "Settings.CloudBackup.RestoreFailed.Body": "リモートスナップショットを復元できませんでした：{0}",
+    "Settings.CloudBackup.HttpWarning": "http:// エンドポイントはパスワードを Base64 エンコードで平文チャネルに送信します。信頼できるローカルネットワークのサーバーにのみ使用してください。",
+    "Settings.CloudBackup.RestoreConfirm.SourceDevice": "ソースデバイス：{0}。",
+    "Settings.CloudBackup.RestoreConfirm.Remapped": "復元されたタスクデータは、ソースのウィジェット ID がこのデバイスに存在しないため、本デバイスの {0} 個のウィジェットにマッピングされました。",
+    "Settings.CloudBackup.RestoreConfirm.Unmapped": "{0} 件のタスクストアはこのデバイスのどのウィジェットにもマッピングできませんでした。ファイルはディスクに保存されますが表示されません。"
 }

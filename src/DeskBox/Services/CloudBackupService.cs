@@ -445,7 +445,8 @@ internal sealed class CloudBackupService
         }
     }
 
-    private static void TryDeleteDirectory(string path)
+    /// <summary>Best-effort temp directory cleanup — shared by staging and the UI restore path.</summary>
+    internal static void TryDeleteDirectory(string path)
     {
         try
         {

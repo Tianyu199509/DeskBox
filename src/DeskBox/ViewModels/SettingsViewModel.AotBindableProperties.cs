@@ -106,6 +106,8 @@ namespace DeskBox.ViewModels;
     nameof(CloudBackupActionsEnabled),
     nameof(CloudBackupConnectionStatusText),
     nameof(CloudBackupCredentialStatusText),
+    nameof(CloudBackupHttpWarningText),
+    nameof(CloudBackupHttpWarningVisibility),
     nameof(CloudBackupQuickCaptureDataEnabled),
     nameof(CloudBackupRemotePath),
     nameof(CloudBackupRemoteSnapshots),

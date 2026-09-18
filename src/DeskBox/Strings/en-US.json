@@ -2771,5 +2771,9 @@
     "Settings.CloudBackup.RestoreConfirm.Body": "Backup from {0} (DeskBox {1}). {2} files, {3}. Domains to restore: {4}. The app restarts to apply the restore - a full local backup is made first.",
     "Settings.CloudBackup.RestoreConfirm.Button": "Restore & restart",
     "Settings.CloudBackup.RestoreFailed.Title": "Restore failed",
-    "Settings.CloudBackup.RestoreFailed.Body": "The remote snapshot could not be restored: {0}"
+    "Settings.CloudBackup.RestoreFailed.Body": "The remote snapshot could not be restored: {0}",
+    "Settings.CloudBackup.HttpWarning": "http:// endpoints send the password base64-encoded over a cleartext channel. Use this only for trusted local-network servers.",
+    "Settings.CloudBackup.RestoreConfirm.SourceDevice": "Source device: {0}.",
+    "Settings.CloudBackup.RestoreConfirm.Remapped": "Restored todo data was mapped onto {0} widget(s) on this device because the source widget ids do not exist here.",
+    "Settings.CloudBackup.RestoreConfirm.Unmapped": "{0} todo store(s) could not be mapped to any widget on this device - files are kept on disk but will not be visible."
 }

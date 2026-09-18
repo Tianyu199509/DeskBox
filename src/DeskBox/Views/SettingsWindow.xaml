@@ -2691,6 +2691,12 @@ svc:Localized.DescriptionKey="Settings.DefaultWidth.Description"
                                     <TextBlock Style="{StaticResource SettingDescriptionTextStyle}" svc:Localized.Key="Settings.CloudBackup.ServerUrl.Label" />
                                     <TextBox x:Name="CloudBackupServerUrlBox" Text="{Binding CloudBackupServerUrl, Mode=TwoWay}" />
                                 </StackPanel>
+                                <InfoBar
+                                    IsClosable="False"
+                                    IsOpen="True"
+                                    Severity="Warning"
+                                    Message="{Binding CloudBackupHttpWarningText}"
+                                    Visibility="{Binding CloudBackupHttpWarningVisibility}" />
                                 <StackPanel Spacing="4">
                                     <TextBlock Style="{StaticResource SettingDescriptionTextStyle}" svc:Localized.Key="Settings.CloudBackup.RemotePath.Label" />
                                     <TextBox x:Name="CloudBackupRemotePathBox" Text="{Binding CloudBackupRemotePath, Mode=TwoWay}" />

@@ -2771,5 +2771,9 @@
     "Settings.CloudBackup.RestoreConfirm.Body": "{0} का बैकअप (DeskBox {1})। {2} फ़ाइलें, {3}। पुनर्स्थापित होने वाले डोमेन: {4}। पुनर्स्थापना लागू करने के लिए ऐप पुनः आरंभ होगा — पहले एक पूर्ण स्थानीय बैकअप बनाया जाता है।",
     "Settings.CloudBackup.RestoreConfirm.Button": "पुनर्स्थापित करें और पुनः आरंभ करें",
     "Settings.CloudBackup.RestoreFailed.Title": "पुनर्स्थापना विफल",
-    "Settings.CloudBackup.RestoreFailed.Body": "दूरस्थ स्नैपशॉट पुनर्स्थापित नहीं हो सका: {0}"
+    "Settings.CloudBackup.RestoreFailed.Body": "दूरस्थ स्नैपशॉट पुनर्स्थापित नहीं हो सका: {0}",
+    "Settings.CloudBackup.HttpWarning": "http:// एंडपॉइंट पासवर्ड को Base64 एनकोड करके सादे चैनल पर भेजते हैं। इसे केवल विश्वसनीय लोकल-नेटवर्क सर्वरों के लिए उपयोग करें।",
+    "Settings.CloudBackup.RestoreConfirm.SourceDevice": "स्रोत डिवाइस: {0}।",
+    "Settings.CloudBackup.RestoreConfirm.Remapped": "पुनर्स्थापित टूडू डेटा इस डिवाइस के {0} विजेट पर मैप किया गया क्योंकि स्रोत विजेट आईडी यहाँ मौजूद नहीं हैं।",
+    "Settings.CloudBackup.RestoreConfirm.Unmapped": "{0} टूडू स्टोर इस डिवाइस के किसी भी विजेट पर मैप नहीं किए जा सके - फ़ाइलें डिस्क पर रहेंगी लेकिन दिखाई नहीं देंगी।"
 }

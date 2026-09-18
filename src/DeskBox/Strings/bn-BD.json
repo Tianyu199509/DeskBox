@@ -2771,5 +2771,9 @@
     "Settings.CloudBackup.RestoreConfirm.Body": "{0}-এর ব্যাকআপ (DeskBox {1})। {2}টি ফাইল, {3}। পুনরুদ্ধার হবে: {4}। পুনরুদ্ধার প্রয়োগে অ্যাপ পুনরায় চালু হবে — আগে একটি সম্পূর্ণ স্থানীয় ব্যাকআপ নেওয়া হয়।",
     "Settings.CloudBackup.RestoreConfirm.Button": "পুনরুদ্ধার ও পুনরায় চালু",
     "Settings.CloudBackup.RestoreFailed.Title": "পুনরুদ্ধার ব্যর্থ",
-    "Settings.CloudBackup.RestoreFailed.Body": "দূরবর্তী স্ন্যাপশট পুনরুদ্ধার করা যায়নি: {0}"
+    "Settings.CloudBackup.RestoreFailed.Body": "দূরবর্তী স্ন্যাপশট পুনরুদ্ধার করা যায়নি: {0}",
+    "Settings.CloudBackup.HttpWarning": "http:// এন্ডপয়েন্টগুলো পাসওয়ার্ড Base64 এনকোড করে পরিষ্কার চ্যানেলে পাঠায়। শুধুমাত্র বিশ্বস্ত লোকাল-নেটওয়ার্ক সার্ভারে ব্যবহার করুন।",
+    "Settings.CloudBackup.RestoreConfirm.SourceDevice": "উৎস ডিভাইস: {0}।",
+    "Settings.CloudBackup.RestoreConfirm.Remapped": "পুনরুদ্ধার করা টুডু ডেটা এই ডিভাইসের {0} টি উইজেটে ম্যাপ করা হয়েছে কারণ উৎস উইজেট আইডি এখানে নেই।",
+    "Settings.CloudBackup.RestoreConfirm.Unmapped": "{0} টি টুডু স্টোর এই ডিভাইসের কোনো উইজেটে ম্যাপ করা যায়নি - ফাইলগুলো ডিস্কে থাকবে কিন্তু দৃশ্যমান হবে না।"
 }

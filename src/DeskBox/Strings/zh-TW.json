@@ -2771,5 +2771,9 @@
     "Settings.CloudBackup.RestoreConfirm.Body": "{0} 的備份（DeskBox {1}）。{2} 個檔案，{3}。將還原的資料域：{4}。應用程式會重新啟動以完成還原——還原前會先做一次完整本機備份。",
     "Settings.CloudBackup.RestoreConfirm.Button": "還原並重新啟動",
     "Settings.CloudBackup.RestoreFailed.Title": "還原失敗",
-    "Settings.CloudBackup.RestoreFailed.Body": "遠端快照還原失敗：{0}"
+    "Settings.CloudBackup.RestoreFailed.Body": "遠端快照還原失敗：{0}",
+    "Settings.CloudBackup.HttpWarning": "http:// 位址會將密碼以 Base64 形式在明文通道上傳輸，請僅用於可信任的區網伺服器。",
+    "Settings.CloudBackup.RestoreConfirm.SourceDevice": "來源裝置：{0}。",
+    "Settings.CloudBackup.RestoreConfirm.Remapped": "來源裝置的待辦格子在本機不存在，已將待辦資料映射到本機 {0} 個格子上。",
+    "Settings.CloudBackup.RestoreConfirm.Unmapped": "有 {0} 個待辦資料無法映射到本機任何格子，檔案已保留在磁碟但暫不可見。"
 }

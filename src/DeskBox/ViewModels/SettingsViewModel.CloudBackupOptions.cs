@@ -80,6 +80,7 @@ public partial class SettingsViewModel
                 return;
             }
 
+            OnPropertyChanged(nameof(CloudBackupHttpWarningVisibility));
             if (_isRestoringDefaults || _isApplyingSettingsSnapshot)
             {
                 return;
@@ -90,6 +91,16 @@ public partial class SettingsViewModel
             PushCloudBackupOptionsToService();
         }
     }
+
+    /// <summary>Plain-HTTP endpoints send Basic credentials on a cleartext channel.</summary>
+    public string CloudBackupHttpWarningText =>
+        _localizationService.T("Settings.CloudBackup.HttpWarning");
+
+    public Visibility CloudBackupHttpWarningVisibility =>
+        Uri.TryCreate(_cloudBackupServerUrl, UriKind.Absolute, out Uri? uri) &&
+        uri.Scheme == Uri.UriSchemeHttp
+            ? Visibility.Visible
+            : Visibility.Collapsed;
 
     private string _cloudBackupRemotePath = "DeskBox/backups";
 

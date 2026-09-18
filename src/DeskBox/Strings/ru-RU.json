@@ -2771,5 +2771,9 @@
     "Settings.CloudBackup.RestoreConfirm.Body": "Копия от {0} (DeskBox {1}). Файлов: {2}, {3}. Области для восстановления: {4}. Приложение перезапустится для применения восстановления — сначала будет создана полная локальная копия.",
     "Settings.CloudBackup.RestoreConfirm.Button": "Восстановить и перезапустить",
     "Settings.CloudBackup.RestoreFailed.Title": "Ошибка восстановления",
-    "Settings.CloudBackup.RestoreFailed.Body": "Не удалось восстановить удалённый снимок: {0}"
+    "Settings.CloudBackup.RestoreFailed.Body": "Не удалось восстановить удалённый снимок: {0}",
+    "Settings.CloudBackup.HttpWarning": "Конечные точки http:// передают пароль в кодировке Base64 по открытому каналу. Используйте только для доверенных серверов в локальной сети.",
+    "Settings.CloudBackup.RestoreConfirm.SourceDevice": "Исходное устройство: {0}.",
+    "Settings.CloudBackup.RestoreConfirm.Remapped": "Восстановленные данные задач были сопоставлены {0} виджету(ам) на этом устройстве, так как исходные идентификаторы виджетов здесь отсутствуют.",
+    "Settings.CloudBackup.RestoreConfirm.Unmapped": "{0} хранилищ(а) задач не удалось сопоставить ни одному виджету на этом устройстве - файлы сохранены на диске, но не будут видны."
 }

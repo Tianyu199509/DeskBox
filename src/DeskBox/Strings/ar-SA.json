@@ -2771,5 +2771,9 @@
     "Settings.CloudBackup.RestoreConfirm.Body": "نسخة من {0} (DeskBox {1}). عدد الملفات: {2}، {3}. النطاقات المراد استعادتها: {4}. سيعاد تشغيل التطبيق لتطبيق الاستعادة — يتم أولاً إنشاء نسخة محلية كاملة.",
     "Settings.CloudBackup.RestoreConfirm.Button": "استعادة وإعادة تشغيل",
     "Settings.CloudBackup.RestoreFailed.Title": "فشلت الاستعادة",
-    "Settings.CloudBackup.RestoreFailed.Body": "تعذرت استعادة اللقطة البعيدة: {0}"
+    "Settings.CloudBackup.RestoreFailed.Body": "تعذرت استعادة اللقطة البعيدة: {0}",
+    "Settings.CloudBackup.HttpWarning": "نقاط النهاية http:// ترسل كلمة المرور مشفرة بـ Base64 عبر قناة نصية مكشوفة. استخدمها فقط لخوادم الشبكة المحلية الموثوقة.",
+    "Settings.CloudBackup.RestoreConfirm.SourceDevice": "الجهاز المصدر: {0}.",
+    "Settings.CloudBackup.RestoreConfirm.Remapped": "تم تعيين بيانات المهام المستعادة إلى {0} من الويدجت على هذا الجهاز لأن معرفات الويدجت المصدر غير موجودة هنا.",
+    "Settings.CloudBackup.RestoreConfirm.Unmapped": "تعذر تعيين {0} من مخازن المهام إلى أي ويدجت على هذا الجهاز - تُحفظ الملفات على القرص ولكنها لن تكون مرئية."
 }

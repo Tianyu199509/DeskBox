@@ -2771,5 +2771,9 @@
     "Settings.CloudBackup.RestoreConfirm.Body": "Sicherung vom {0} (DeskBox {1}). {2} Dateien, {3}. Wiederherzustellende Bereiche: {4}. Die App startet neu, um die Wiederherstellung anzuwenden — vorher wird eine vollständige lokale Sicherung erstellt.",
     "Settings.CloudBackup.RestoreConfirm.Button": "Wiederherstellen & neu starten",
     "Settings.CloudBackup.RestoreFailed.Title": "Wiederherstellung fehlgeschlagen",
-    "Settings.CloudBackup.RestoreFailed.Body": "Die Remote-Momentaufnahme konnte nicht wiederhergestellt werden: {0}"
+    "Settings.CloudBackup.RestoreFailed.Body": "Die Remote-Momentaufnahme konnte nicht wiederhergestellt werden: {0}",
+    "Settings.CloudBackup.HttpWarning": "http://-Endpunkte übertragen das Passwort Base64-kodiert über einen Klartextkanal. Nur für vertrauenswürdige lokale Server verwenden.",
+    "Settings.CloudBackup.RestoreConfirm.SourceDevice": "Quellgerät: {0}.",
+    "Settings.CloudBackup.RestoreConfirm.Remapped": "Wiederhergestellte Aufgabendaten wurden {0} Widget(s) auf diesem Gerät zugeordnet, da die Quell-Widget-IDs hier nicht existieren.",
+    "Settings.CloudBackup.RestoreConfirm.Unmapped": "{0} Aufgaben-Store(s) konnten keinem Widget auf diesem Gerät zugeordnet werden - Dateien bleiben auf der Festplatte, sind aber nicht sichtbar."
 }

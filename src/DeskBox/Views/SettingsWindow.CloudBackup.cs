@@ -71,7 +71,11 @@ public sealed partial class SettingsWindow
         try
         {
             await _settingsService.SaveAsync();
-            await App.Current.CloudBackupService.ProbeConnectionAsync();
+            // A just-typed password probes that value directly — otherwise
+            // "test" would silently exercise the previously stored secret.
+            string typedPassword = CloudBackupPasswordBox.Password;
+            await App.Current.CloudBackupService.ProbeConnectionAsync(
+                string.IsNullOrEmpty(typedPassword) ? null : typedPassword);
             ViewModel.CloudBackupConnectionStatusText =
                 _localizationService.T("Settings.CloudBackup.TestConnection.Success");
         }
@@ -146,26 +150,20 @@ public sealed partial class SettingsWindow
 
     private CloudBackupRemoteSnapshotItem FormatRemoteSnapshot(CloudBackupRemoteEntry entry)
     {
-        // DeskBox-CloudBackup-20260918-210000-abcdef12.zip → local time + device.
+        // New names embed UTC (…T…Z); legacy names embed local time — the
+        // shared parser handles both so titles display correctly either way.
         string title = entry.Name;
         string details = entry.Name;
-        string stem = entry.Name;
-        if (stem.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
-        {
-            stem = stem[..^4];
-        }
-
-        string[] parts = stem.Split('-');
-        if (parts.Length >= 5 &&
-            DateTimeOffset.TryParseExact(
-                $"{parts[^3]}-{parts[^2]}",
-                "yyyyMMdd-HHmmss",
-                CultureInfo.InvariantCulture,
-                DateTimeStyles.AssumeUniversal,
-                out DateTimeOffset createdUtc))
+        if (CloudBackupService.ParseSnapshotTimestamp(entry.Name) is { } createdUtc)
         {
             title = createdUtc.ToLocalTime().ToString("g", CultureInfo.CurrentCulture);
-            string device = parts[^1];
+            string stem = entry.Name.EndsWith(".zip", StringComparison.OrdinalIgnoreCase)
+                ? entry.Name[..^4]
+                : entry.Name;
+            // An 8-char tail after the last '-' is the device suffix;
+            // legacy unsuffixed names end in the timestamp itself instead.
+            string tail = stem.Split('-').Last();
+            string device = tail.Length == 8 ? tail : entry.Name;
             string size = entry.Length is { } length ? $" · {ViewModel.FormatBytes(length)}" : string.Empty;
             details = _localizationService.Format(
                 "Settings.CloudBackup.SnapshotDetails",
@@ -255,9 +253,10 @@ public sealed partial class SettingsWindow
         // Step 2: download → prepare scoped restore → confirm → relaunch.
         ViewModel.CloudBackupBusy = true;
         bool restartScheduled = false;
+        string? downloadDirectory = null;
         try
         {
-            string downloadDirectory = Path.Combine(
+            downloadDirectory = Path.Combine(
                 Path.GetTempPath(),
                 $"deskbox-cloud-restore-{Guid.NewGuid():N}");
             string archivePath = await App.Current.CloudBackupService.DownloadSnapshotAsync(
@@ -270,6 +269,34 @@ public sealed partial class SettingsWindow
             string domainList = preparation.Domains is { Count: > 0 } domains
                 ? string.Join(", ", domains)
                 : _localizationService.T("Settings.CloudBackup.RestoreDomains.None");
+            var bodyText = new System.Text.StringBuilder(_localizationService.Format(
+                "Settings.CloudBackup.RestoreConfirm.Body",
+                preparation.BackupCreatedAtUtc.ToLocalTime().ToString("g"),
+                preparation.AppVersion,
+                preparation.FileCount,
+                ViewModel.FormatBytes(preparation.TotalUncompressedBytes),
+                domainList));
+            if (!string.IsNullOrEmpty(preparation.SourceDeviceId))
+            {
+                bodyText.Append(' ').Append(_localizationService.Format(
+                    "Settings.CloudBackup.RestoreConfirm.SourceDevice",
+                    preparation.SourceDeviceId));
+            }
+
+            if (preparation.TodoWidgetRemaps is { Count: > 0 } remaps)
+            {
+                bodyText.Append(' ').Append(_localizationService.Format(
+                    "Settings.CloudBackup.RestoreConfirm.Remapped",
+                    remaps.Count));
+            }
+
+            if (preparation.UnmappedTodoWidgetIds is { Count: > 0 } unmapped)
+            {
+                bodyText.Append(' ').Append(_localizationService.Format(
+                    "Settings.CloudBackup.RestoreConfirm.Unmapped",
+                    unmapped.Count));
+            }
+
             var confirmDialog = new ContentDialog
             {
                 XamlRoot = SettingsRoot.XamlRoot,
@@ -279,13 +306,7 @@ public sealed partial class SettingsWindow
                 DefaultButton = ContentDialogButton.Close,
                 Content = new TextBlock
                 {
-                    Text = _localizationService.Format(
-                        "Settings.CloudBackup.RestoreConfirm.Body",
-                        preparation.BackupCreatedAtUtc.ToLocalTime().ToString("g"),
-                        preparation.AppVersion,
-                        preparation.FileCount,
-                        ViewModel.FormatBytes(preparation.TotalUncompressedBytes),
-                        domainList),
+                    Text = bodyText.ToString(),
                     TextWrapping = TextWrapping.Wrap
                 }
             };
@@ -332,6 +353,14 @@ public sealed partial class SettingsWindow
         }
         finally
         {
+            // The staged archive was already extracted into the app's own
+            // restore staging — the temp download must not linger either
+            // way (it can be hundreds of MB).
+            if (downloadDirectory is not null)
+            {
+                CloudBackupService.TryDeleteDirectory(downloadDirectory);
+            }
+
             ViewModel.CloudBackupBusy = false;
         }
     }

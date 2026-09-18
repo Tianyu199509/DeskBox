@@ -2771,5 +2771,9 @@
     "Settings.CloudBackup.RestoreConfirm.Body": "Copia de {0} (DeskBox {1}). {2} archivos, {3}. Dominios a restaurar: {4}. La aplicación se reinicia para aplicar la restauración — primero se hace una copia local completa.",
     "Settings.CloudBackup.RestoreConfirm.Button": "Restaurar y reiniciar",
     "Settings.CloudBackup.RestoreFailed.Title": "Error al restaurar",
-    "Settings.CloudBackup.RestoreFailed.Body": "No se pudo restaurar la instantánea remota: {0}"
+    "Settings.CloudBackup.RestoreFailed.Body": "No se pudo restaurar la instantánea remota: {0}",
+    "Settings.CloudBackup.HttpWarning": "Los endpoints http:// envían la contraseña codificada en Base64 por un canal en texto claro. Úsalo solo para servidores locales de confianza.",
+    "Settings.CloudBackup.RestoreConfirm.SourceDevice": "Dispositivo de origen: {0}.",
+    "Settings.CloudBackup.RestoreConfirm.Remapped": "Los datos de tareas restaurados se asignaron a {0} widget(s) de este dispositivo porque los identificadores de widget de origen no existen aquí.",
+    "Settings.CloudBackup.RestoreConfirm.Unmapped": "{0} almacén(es) de tareas no se pudieron asignar a ningún widget de este dispositivo: los archivos se conservan en disco pero no serán visibles."
 }

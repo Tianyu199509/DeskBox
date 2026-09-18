@@ -2771,5 +2771,9 @@
     "Settings.CloudBackup.RestoreConfirm.Body": "Sauvegarde du {0} (DeskBox {1}). {2} fichiers, {3}. Domaines à restaurer : {4}. L’application redémarre pour appliquer la restauration — une sauvegarde locale complète est d’abord créée.",
     "Settings.CloudBackup.RestoreConfirm.Button": "Restaurer & redémarrer",
     "Settings.CloudBackup.RestoreFailed.Title": "Échec de la restauration",
-    "Settings.CloudBackup.RestoreFailed.Body": "L’instantané distant n’a pas pu être restauré : {0}"
+    "Settings.CloudBackup.RestoreFailed.Body": "L’instantané distant n’a pas pu être restauré : {0}",
+    "Settings.CloudBackup.HttpWarning": "Les endpoints http:// envoient le mot de passe encodé en Base64 sur un canal en clair. À réserver aux serveurs locaux de confiance.",
+    "Settings.CloudBackup.RestoreConfirm.SourceDevice": "Appareil source : {0}.",
+    "Settings.CloudBackup.RestoreConfirm.Remapped": "Les données de tâches restaurées ont été associées à {0} widget(s) de cet appareil, car les identifiants de widget source n'existent pas ici.",
+    "Settings.CloudBackup.RestoreConfirm.Unmapped": "{0} magasin(s) de tâches n'ont pu être associés à aucun widget de cet appareil : les fichiers sont conservés sur disque mais ne seront pas visibles."
 }
