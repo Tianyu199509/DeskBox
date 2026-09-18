@@ -1197,8 +1197,39 @@ public sealed partial class DeskBoxDataBackupService
             .ToArray();
 
         Directory.CreateDirectory(snapshotDataDirectory);
+
+        // FileSafety metadata must come from a single transaction epoch:
+        // settings, the organization-history store and the recovery journal
+        // are committed as a unit under OperationGate. Copying them
+        // file-by-file alongside everything else could capture history@T1
+        // with settings@T0 — a combination that never existed. Hold the gate
+        // only for these few small files; the rest still copies one by one.
+        var fileSafetyMetadata = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "settings.json",
+            "desktop-organization-history.json",
+            "desktop-organization-recovery.json"
+        };
+        await DesktopOrganizationTransaction.OperationGate.WaitAsync(cancellationToken);
+        try
+        {
+            foreach ((string sourcePath, string relativePath) in sourceFiles)
+            {
+                if (!fileSafetyMetadata.Contains(relativePath)) continue;
+                await CopyStableSnapshotFileAsync(
+                    sourcePath,
+                    Path.Combine(snapshotDataDirectory, relativePath),
+                    cancellationToken);
+            }
+        }
+        finally
+        {
+            DesktopOrganizationTransaction.OperationGate.Release();
+        }
+
         foreach ((string sourcePath, string relativePath) in sourceFiles)
         {
+            if (fileSafetyMetadata.Contains(relativePath)) continue;
             // A multi-gigabyte snapshot legitimately runs longer than the
             // startup watchdog's stall window; each file proves progress.
             App.MarkStartupProgress();

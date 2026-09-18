@@ -220,14 +220,18 @@ public sealed partial class DesktopOrganizationTransaction
                 // while the recovery journal still exists. Compacting before
                 // this save would let a crash between save and journal clear
                 // make RecoverPendingAsync treat committed moves as pending
-                // and restore them back to the desktop. The history store
-                // lands FIRST: it is the reconcile guard — if only settings
-                // committed, startup recovery would find no history entry and
-                // restore committed moves. SaveChecked is load-bearing on
-                // both halves: a silent save failure would clear the journal
-                // with no durable commit anywhere.
-                if (!await _settingsService.OrganizationHistory.SaveCheckedAsync() ||
-                    !await _settingsService.SaveCheckedAsync(notifySubscribers: false))
+                // and restore them back to the desktop. Settings land FIRST —
+                // widget/rule state is the dependent half; the history receipt
+                // drops LAST as the linearization point, so a durable receipt
+                // proves both halves committed. A crash with settings durable
+                // but no receipt leaves the journal effective: startup
+                // recovery restores the files and RemoveUncommittedWidgets
+                // reverts the settings half — a coherent rollback, never
+                // moved files orphaned without their widget. SaveChecked is
+                // load-bearing on both halves: a silent save failure would
+                // clear the journal with no durable commit anywhere.
+                if (!await _settingsService.SaveCheckedAsync(notifySubscribers: false) ||
+                    !await _settingsService.OrganizationHistory.SaveCheckedAsync())
                 {
                     throw new IOException(
                         "Persisting the desktop organization commit failed; the recovery journal is kept for the next launch.");
@@ -279,7 +283,10 @@ public sealed partial class DesktopOrganizationTransaction
                 // destination now, with no content verification at all.
                 RemoveEmptyCreatedDirectories(createdDirectories);
                 // Checked-and-ignored: a receipt save failure inside the
-                // rollback path must not replace the original exception.
+                // rollback path must not replace the original exception. The
+                // history rewrite lands FIRST on purpose: it removes any
+                // durable receipt before the settings revert — a crash here
+                // must never leave commit evidence without matching settings.
                 await _settingsService.OrganizationHistory.SaveCheckedAsync();
                 await _settingsService.SaveAsync(notifySubscribers: false);
                 throw;

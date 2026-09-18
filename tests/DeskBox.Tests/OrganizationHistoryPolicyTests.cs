@@ -522,6 +522,78 @@ public sealed class OrganizationHistoryPolicyTests : IDisposable
     }
 
     [Fact]
+    public async Task ExecuteAsync_HistorySaveFailureAfterSettingsCommit_RollsBackOnRestart()
+    {
+        // Crash window under the two-file commit: settings.json durable but
+        // the history receipt never landed. The journal has no commit
+        // evidence, so recovery must roll the transaction back — restore the
+        // files and revert the settings half — rather than trusting a
+        // half-committed widget/rule graph.
+        string desktop = Directory.CreateDirectory(Path.Combine(_tempRoot, "desktop")).FullName;
+        string storage = Directory.CreateDirectory(Path.Combine(_tempRoot, "storage")).FullName;
+        string source = Path.Combine(desktop, "one.pdf");
+        File.WriteAllText(source, "one");
+
+        var classifier = new DesktopOrganizationClassifier();
+        var scanner = new DesktopOrganizationScanner(classifier, () => desktop, () => string.Empty);
+        DesktopOrganizationScanResult scan = await scanner.ScanAsync();
+        DesktopOrganizationPlan plan = new DesktopOrganizationPlanner(
+            new DesktopOrganizationRuleResolver()).CreatePlan(
+            scan, storage, [], [], _ => "Documents");
+
+        string dataDir = Path.Combine(_tempRoot, "settings");
+        var settings = new SettingsService(dataDir);
+        await settings.LoadAsync();
+        string historyPath = Path.Combine(dataDir, "desktop-organization-history.json");
+        var recovery = new DesktopOrganizationRecoveryStore(Path.Combine(_tempRoot, "recovery.json"));
+        var transaction = new DesktopOrganizationTransaction(settings, new FileService(), recovery);
+
+        // A directory at the history path fails every write to it while
+        // settings.json stays writable — exactly the asymmetric window.
+        Directory.CreateDirectory(historyPath);
+        try
+        {
+            await Assert.ThrowsAsync<IOException>(() => transaction.ExecuteAsync(plan));
+            Assert.True(recovery.HasPendingJournal);
+            // The rollback path restored the in-memory settings graph, but
+            // the file itself stays moved until recovery runs.
+            Assert.False(File.Exists(source));
+
+            var restartedSettings = new SettingsService(dataDir);
+            await restartedSettings.LoadAsync();
+            var restartedRecovery = new DesktopOrganizationRecoveryStore(
+                Path.Combine(_tempRoot, "recovery.json"));
+            var restarted = new DesktopOrganizationTransaction(
+                restartedSettings, new FileService(), restartedRecovery);
+            await restarted.RecoverPendingAsync();
+
+            // No durable receipt → coherent rollback: file back at source,
+            // created widget/rule state gone. The journal survives only
+            // because the history save is still blocked.
+            Assert.True(File.Exists(source));
+            Assert.Empty(restartedSettings.Settings.Widgets);
+            Assert.Empty(restartedSettings.Settings.DesktopOrganizationRules);
+            Assert.True(restartedRecovery.HasPendingJournal);
+        }
+        finally
+        {
+            Directory.Delete(historyPath);
+        }
+
+        // With the history path writable again, the retained journal drains:
+        // nothing left to reconcile, so the WAL clears.
+        var finalSettings = new SettingsService(dataDir);
+        await finalSettings.LoadAsync();
+        var finalRecovery = new DesktopOrganizationRecoveryStore(
+            Path.Combine(_tempRoot, "recovery.json"));
+        var finalTransaction = new DesktopOrganizationTransaction(
+            finalSettings, new FileService(), finalRecovery);
+        await finalTransaction.RecoverPendingAsync();
+        Assert.False(finalRecovery.HasPendingJournal);
+        Assert.Empty(finalSettings.OrganizationHistory.Entries);
+    }
+
+    [Fact]
     public async Task RecoverPendingAsync_CommittedMovesStayPutWithFullReceiptsOnDisk()
     {
         // Simulates the crash window between the commit save (full receipts

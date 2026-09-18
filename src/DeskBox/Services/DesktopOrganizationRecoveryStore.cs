@@ -26,7 +26,11 @@ public sealed class DesktopOrganizationRecoveryStore
             "desktop-organization-recovery.json");
     }
 
-    public bool HasPendingJournal => File.Exists(_journalPath);
+    // A surviving .bak is itself a valid recovery source (LoadAsync would
+    // resurrect it), so a backup-only journal still counts as pending.
+    public bool HasPendingJournal =>
+        File.Exists(_journalPath) ||
+        File.Exists(ResilientJsonStore.GetBackupPath(_journalPath));
 
     public async Task<DesktopOrganizationRecoveryJournal?> LoadAsync()
     {
@@ -67,17 +71,19 @@ public sealed class DesktopOrganizationRecoveryStore
 
     public void Clear()
     {
-        if (File.Exists(_journalPath))
-        {
-            File.Delete(_journalPath);
-        }
-
-        // The backup must die with the journal — otherwise the next load would
-        // resurrect a cleared transaction from .bak as if it were pending.
+        // The backup must die BEFORE the primary: a crash between the two
+        // deletes must leave the primary (the most recent journal state, e.g.
+        // IsAbandoned) as the only recoverable copy. Deleting primary first
+        // would let a stale .bak resurrect an older, pre-finalize journal.
         string backupPath = ResilientJsonStore.GetBackupPath(_journalPath);
         if (File.Exists(backupPath))
         {
             File.Delete(backupPath);
+        }
+
+        if (File.Exists(_journalPath))
+        {
+            File.Delete(_journalPath);
         }
     }
 }

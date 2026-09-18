@@ -7,6 +7,7 @@ namespace DeskBox.Services;
 /// </summary>
 public static class DeviceIdentity
 {
+    private static readonly object s_gate = new();
     private static string? s_cached;
     private static string? s_dataRootOverride;
 
@@ -19,8 +20,11 @@ public static class DeviceIdentity
     {
         set
         {
-            s_dataRootOverride = value;
-            s_cached = null;
+            lock (s_gate)
+            {
+                s_dataRootOverride = value;
+                s_cached = null;
+            }
         }
     }
 
@@ -29,9 +33,16 @@ public static class DeviceIdentity
     {
         get
         {
-            s_cached ??= GetOrCreate(
-                s_dataRootOverride ?? DeskBoxDataPathService.Current.DataDirectory);
-            return s_cached;
+            // First-read generation must be single-winner: two concurrent
+            // callers racing GetOrCreate would mint different GUIDs, split
+            // device_id across records written in the same process, and race
+            // the device.id file write itself.
+            lock (s_gate)
+            {
+                s_cached ??= GetOrCreate(
+                    s_dataRootOverride ?? DeskBoxDataPathService.Current.DataDirectory);
+                return s_cached;
+            }
         }
     }
 

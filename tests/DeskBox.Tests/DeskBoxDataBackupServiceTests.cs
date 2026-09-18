@@ -20,6 +20,42 @@ public sealed class DeskBoxDataBackupServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task ExportBackupAsync_CopiesFileSafetyMetadataUnderOperationGate()
+    {
+        // settings/history/journal are committed as a unit under
+        // OperationGate; the snapshot must copy them under the same gate or
+        // a backup could capture history@T1 with settings@T0 — a mix that
+        // never existed in the live system.
+        string dataDirectory = Directory.CreateDirectory(Path.Combine(_appDataRoot, "data")).FullName;
+        await File.WriteAllTextAsync(Path.Combine(dataDirectory, "settings.json"), "{\"language\":\"en-US\"}");
+        await File.WriteAllTextAsync(
+            Path.Combine(dataDirectory, "desktop-organization-history.json"),
+            "{\"entries\":[]}");
+        var service = new DeskBoxDataBackupService(_appDataRoot);
+
+        await DesktopOrganizationTransaction.OperationGate.WaitAsync();
+        Task<string> backup;
+        try
+        {
+            backup = service.ExportBackupAsync(_exportRoot);
+            await Task.Delay(750);
+            Assert.False(
+                backup.IsCompleted,
+                "the snapshot must wait for OperationGate before copying FileSafety metadata");
+        }
+        finally
+        {
+            DesktopOrganizationTransaction.OperationGate.Release();
+        }
+
+        string backupPath = await backup;
+        Assert.True(File.Exists(backupPath));
+        using ZipArchive archive = ZipFile.OpenRead(backupPath);
+        Assert.NotNull(archive.GetEntry("data/settings.json"));
+        Assert.NotNull(archive.GetEntry("data/desktop-organization-history.json"));
+    }
+
+    [Fact]
     public async Task ExportBackupAsync_IncludesManifestDataAndNestedAttachments()
     {
         string dataDirectory = Directory.CreateDirectory(Path.Combine(_appDataRoot, "data")).FullName;

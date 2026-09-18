@@ -53,6 +53,24 @@ public sealed class SyncLayerFieldsContractTests : IDisposable
     }
 
     [Fact]
+    public void DeviceIdentity_ConcurrentFirstReads_MintSingleId()
+    {
+        // The ??= read used to race: two threads could each mint a GUID,
+        // split device_id across records written in the same process, and
+        // race the device.id file write itself.
+        Directory.CreateDirectory(_tempRoot);
+        DeviceIdentity.DataRootOverride = _tempRoot; // clears the cached value
+
+        var ids = new string[64];
+        Parallel.For(0, ids.Length, i => ids[i] = DeviceIdentity.Id);
+
+        Assert.Single(ids.Distinct(StringComparer.Ordinal));
+        Assert.Equal(
+            ids[0],
+            File.ReadAllText(Path.Combine(_tempRoot, "device.id")).Trim());
+    }
+
+    [Fact]
     public async Task TodoStore_SaveBackfillsDeviceIdAndKeepsTombstoneSlot()
     {
         var store = new TodoWidgetStore(_tempRoot, "w1");

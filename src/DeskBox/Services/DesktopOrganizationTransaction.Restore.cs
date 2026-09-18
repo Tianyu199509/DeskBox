@@ -47,11 +47,12 @@ public sealed partial class DesktopOrganizationTransaction
             await RestoreItemsAsync(journal, ownerWindowHandle);
             ApplyUndoReceipts(history, journal);
             // Checked persistence: clearing the journal below must only
-            // happen once the reconciled receipts are durable. The history
-            // store lands first — the terminal entry state is the reconcile
-            // guard against reviving this undo.
-            if (!await _settingsService.OrganizationHistory.SaveCheckedAsync() ||
-                !await _settingsService.SaveCheckedAsync(notifySubscribers: false))
+            // happen once the reconciled receipts are durable. Settings land
+            // first (the dependent half); the history entry drops last as the
+            // linearization point — a durable terminal receipt proves both
+            // halves committed and can never revive this undo.
+            if (!await _settingsService.SaveCheckedAsync(notifySubscribers: false) ||
+                !await _settingsService.OrganizationHistory.SaveCheckedAsync())
             {
                 throw new IOException(
                     "Persisting the undo receipts failed; the recovery journal is kept for the next launch.");
@@ -114,8 +115,8 @@ public sealed partial class DesktopOrganizationTransaction
                 // already-durable case is an idempotent no-op.
                 if (!history.CanUndo || history.IsUndone)
                 {
-                    if (!await _settingsService.OrganizationHistory.SaveCheckedAsync() ||
-                        !await _settingsService.SaveCheckedAsync(notifySubscribers: false))
+                    if (!await _settingsService.SaveCheckedAsync(notifySubscribers: false) ||
+                        !await _settingsService.OrganizationHistory.SaveCheckedAsync())
                     {
                         App.Log("[DesktopOrganization] Terminal undo state could not be persisted; journal kept.");
                         return journal.Items.Count(item => item.Completed);
@@ -131,8 +132,8 @@ public sealed partial class DesktopOrganizationTransaction
                 // happen once the reconciled receipts are durable. On
                 // failure the journal survives and the next startup retries
                 // the reconcile, which is idempotent.
-                if (!await _settingsService.OrganizationHistory.SaveCheckedAsync() ||
-                    !await _settingsService.SaveCheckedAsync(notifySubscribers: false))
+                if (!await _settingsService.SaveCheckedAsync(notifySubscribers: false) ||
+                    !await _settingsService.OrganizationHistory.SaveCheckedAsync())
                 {
                     App.Log("[DesktopOrganization] Undo reconcile could not persist settings; the journal is kept.");
                     return journal.Items.Count(item => item.Completed);
