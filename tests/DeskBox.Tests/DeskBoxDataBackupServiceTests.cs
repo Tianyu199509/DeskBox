@@ -42,6 +42,13 @@ public sealed class DeskBoxDataBackupServiceTests : IDisposable
             Assert.False(
                 backup.IsCompleted,
                 "the snapshot must wait for OperationGate before copying FileSafety metadata");
+
+            // A journal appearing while the snapshot waits for the gate must
+            // land in the backup — the FileSafety set is resolved inside the
+            // gate, not from the pre-enumerated file list.
+            await File.WriteAllTextAsync(
+                Path.Combine(dataDirectory, "desktop-organization-recovery.json"),
+                "{\"transactionId\":\"in-flight\"}");
         }
         finally
         {
@@ -53,6 +60,7 @@ public sealed class DeskBoxDataBackupServiceTests : IDisposable
         using ZipArchive archive = ZipFile.OpenRead(backupPath);
         Assert.NotNull(archive.GetEntry("data/settings.json"));
         Assert.NotNull(archive.GetEntry("data/desktop-organization-history.json"));
+        Assert.NotNull(archive.GetEntry("data/desktop-organization-recovery.json"));
     }
 
     [Fact]

@@ -101,6 +101,11 @@ internal static class ResilientJsonStore
         catch (Exception ex)
         {
             App.Log($"[{logName}] Backup store is invalid: {ex}");
+            // Quarantine symmetric to the primary path: a corrupt .bak left
+            // in place keeps "backup exists" probes true forever while every
+            // load still fails — callers checking File.Exists(backup) would
+            // deadlock on a recovery source that can never succeed.
+            QuarantineCorruptFile(backupPath, logName);
             return new ResilientJsonLoadResult<T>(
                 createDefault(),
                 ResilientJsonLoadSource.DefaultAfterFailure);

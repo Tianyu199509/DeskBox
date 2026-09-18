@@ -171,6 +171,29 @@ public sealed class DesktopOrganizationRecoveryAbandonTests : IDisposable
     }
 
     [Fact]
+    public async Task LoadAsync_CorruptBackupOnly_QuarantinesAndUnblocks()
+    {
+        // A corrupt backup-only journal used to deadlock Desktop
+        // Organization: HasPendingJournal stayed true (the file existed)
+        // while LoadAsync returned null forever — Execute refused to run
+        // and recovery had nothing to resolve. The corrupt .bak is now
+        // quarantined like a corrupt primary, so the pending state clears.
+        Directory.CreateDirectory(_root);
+        string journalPath = Path.Combine(_root, "recovery.json");
+        string backupPath = ResilientJsonStore.GetBackupPath(journalPath);
+        File.WriteAllText(backupPath, "{ not valid json !!!");
+        var store = new DesktopOrganizationRecoveryStore(journalPath);
+
+        Assert.True(store.HasPendingJournal);
+
+        Assert.Null(await store.LoadAsync());
+
+        Assert.False(store.HasPendingJournal);
+        Assert.False(File.Exists(backupPath));
+        Assert.Single(Directory.EnumerateFiles(_root, "recovery.json.bak.corrupt-*"));
+    }
+
+    [Fact]
     public void Clear_DeletesBackupBeforePrimary_SourceOrderPin()
     {
         // Order is the only crash-safety tool here (two deletes cannot be

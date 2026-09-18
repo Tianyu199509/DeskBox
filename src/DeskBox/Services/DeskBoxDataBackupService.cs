@@ -1200,22 +1200,26 @@ public sealed partial class DeskBoxDataBackupService
 
         // FileSafety metadata must come from a single transaction epoch:
         // settings, the organization-history store and the recovery journal
-        // are committed as a unit under OperationGate. Copying them
-        // file-by-file alongside everything else could capture history@T1
-        // with settings@T0 — a combination that never existed. Hold the gate
-        // only for these few small files; the rest still copies one by one.
-        var fileSafetyMetadata = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-        {
+        // are committed as a unit under OperationGate. The file SET is
+        // resolved inside the gate — a journal created while we waited for
+        // the gate must land in the snapshot, or the backup would hold
+        // settings@T1 with history@T0 and no WAL to converge them. Hold the
+        // gate only for these few small files; the rest still copies one by
+        // one from the pre-enumerated list.
+        string[] fileSafetyMetadata =
+        [
             "settings.json",
             "desktop-organization-history.json",
             "desktop-organization-recovery.json"
-        };
+        ];
+        var metadataSet = new HashSet<string>(fileSafetyMetadata, StringComparer.OrdinalIgnoreCase);
         await DesktopOrganizationTransaction.OperationGate.WaitAsync(cancellationToken);
         try
         {
-            foreach ((string sourcePath, string relativePath) in sourceFiles)
+            foreach (string relativePath in fileSafetyMetadata)
             {
-                if (!fileSafetyMetadata.Contains(relativePath)) continue;
+                string sourcePath = Path.Combine(DataDirectory, relativePath);
+                if (!File.Exists(sourcePath)) continue;
                 await CopyStableSnapshotFileAsync(
                     sourcePath,
                     Path.Combine(snapshotDataDirectory, relativePath),
@@ -1229,7 +1233,7 @@ public sealed partial class DeskBoxDataBackupService
 
         foreach ((string sourcePath, string relativePath) in sourceFiles)
         {
-            if (fileSafetyMetadata.Contains(relativePath)) continue;
+            if (metadataSet.Contains(relativePath)) continue;
             // A multi-gigabyte snapshot legitimately runs longer than the
             // startup watchdog's stall window; each file proves progress.
             App.MarkStartupProgress();
@@ -1487,7 +1491,14 @@ public sealed partial class DeskBoxDataBackupService
 
     private static bool ShouldIncludeInBackup(string relativePath)
     {
-        if (relativePath.EndsWith(".tmp", StringComparison.OrdinalIgnoreCase))
+        // .tmp/.bak/.corrupt-* are machine-local recovery artifacts, not user
+        // data: a stale recovery .bak inside a backup would resurrect a ghost
+        // pending journal on the restore machine, and quarantined .corrupt-*
+        // files are dead forensics. The live store regenerates its .bak on
+        // the next save anyway.
+        if (relativePath.EndsWith(".tmp", StringComparison.OrdinalIgnoreCase) ||
+            relativePath.EndsWith(".bak", StringComparison.OrdinalIgnoreCase) ||
+            relativePath.Contains(".corrupt-", StringComparison.OrdinalIgnoreCase))
         {
             return false;
         }
