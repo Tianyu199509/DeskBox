@@ -18,10 +18,15 @@ public sealed partial class SettingsWindow
 {
     private async Task InitializeCloudBackupSectionAsync()
     {
+        long generation = ViewModel.CloudBackupEndpointGeneration;
         try
         {
-            ViewModel.CloudBackupCredentialSaved =
-                await App.Current.CloudBackupService.HasCredentialAsync();
+            bool saved = await App.Current.CloudBackupService.HasCredentialAsync();
+            if (generation == ViewModel.CloudBackupEndpointGeneration)
+            {
+                ViewModel.CloudBackupCredentialSaved = saved;
+            }
+
             ViewModel.RefreshCloudBackupStatus();
         }
         catch (Exception ex)
@@ -42,12 +47,18 @@ public sealed partial class SettingsWindow
         }
 
         ViewModel.CloudBackupBusy = true;
+        long generation = ViewModel.CloudBackupEndpointGeneration;
         try
         {
             // Flush settings first so the credential key reflects the
             // provider/host/username the user just typed.
             await _settingsService.SaveAsync();
             await App.Current.CloudBackupService.SaveCredentialAsync(password);
+            if (generation != ViewModel.CloudBackupEndpointGeneration)
+            {
+                return; // endpoint moved on — don't stamp "saved" for it
+            }
+
             CloudBackupPasswordBox.Password = string.Empty;
             ViewModel.CloudBackupCredentialSaved = true;
             ViewModel.CloudBackupConnectionStatusText =
@@ -67,6 +78,7 @@ public sealed partial class SettingsWindow
     private async void CloudBackupTestConnectionButton_Click(object sender, RoutedEventArgs e)
     {
         ViewModel.CloudBackupBusy = true;
+        long generation = ViewModel.CloudBackupEndpointGeneration;
         ViewModel.CloudBackupConnectionStatusText = string.Empty;
         try
         {
@@ -76,15 +88,21 @@ public sealed partial class SettingsWindow
             string typedPassword = CloudBackupPasswordBox.Password;
             await App.Current.CloudBackupService.ProbeConnectionAsync(
                 string.IsNullOrEmpty(typedPassword) ? null : typedPassword);
-            ViewModel.CloudBackupConnectionStatusText =
-                _localizationService.T("Settings.CloudBackup.TestConnection.Success");
+            if (generation == ViewModel.CloudBackupEndpointGeneration)
+            {
+                ViewModel.CloudBackupConnectionStatusText =
+                    _localizationService.T("Settings.CloudBackup.TestConnection.Success");
+            }
         }
         catch (Exception ex)
         {
             App.Log($"[CloudBackup] Connection test failed: {ex}");
-            ViewModel.CloudBackupConnectionStatusText = _localizationService.Format(
-                "Settings.CloudBackup.TestConnection.Failed",
-                ex.Message);
+            if (generation == ViewModel.CloudBackupEndpointGeneration)
+            {
+                ViewModel.CloudBackupConnectionStatusText = _localizationService.Format(
+                    "Settings.CloudBackup.TestConnection.Failed",
+                    ex.Message);
+            }
         }
         finally
         {
@@ -95,23 +113,31 @@ public sealed partial class SettingsWindow
     private async void CloudBackupNowButton_Click(object sender, RoutedEventArgs e)
     {
         ViewModel.CloudBackupBusy = true;
+        long generation = ViewModel.CloudBackupEndpointGeneration;
         try
         {
             await _settingsService.SaveAsync();
             CloudBackupRunResult result = await App.Current.CloudBackupService.RunBackupNowAsync();
-            ViewModel.CloudBackupConnectionStatusText = result.Uploaded
-                ? _localizationService.Format(
-                    "Settings.CloudBackup.BackupNow.Success",
-                    result.RemoteFilePath ?? string.Empty)
-                : _localizationService.T("Settings.CloudBackup.NotConfigured");
+            if (generation == ViewModel.CloudBackupEndpointGeneration)
+            {
+                ViewModel.CloudBackupConnectionStatusText = result.Uploaded
+                    ? _localizationService.Format(
+                        "Settings.CloudBackup.BackupNow.Success",
+                        result.RemoteFilePath ?? string.Empty)
+                    : _localizationService.T("Settings.CloudBackup.NotConfigured");
+            }
+
             ViewModel.RefreshCloudBackupStatus();
         }
         catch (Exception ex)
         {
             App.Log($"[CloudBackup] Manual backup failed: {ex}");
-            ViewModel.CloudBackupConnectionStatusText = _localizationService.Format(
-                "Settings.CloudBackup.BackupNow.Failed",
-                ex.Message);
+            if (generation == ViewModel.CloudBackupEndpointGeneration)
+            {
+                ViewModel.CloudBackupConnectionStatusText = _localizationService.Format(
+                    "Settings.CloudBackup.BackupNow.Failed",
+                    ex.Message);
+            }
         }
         finally
         {
@@ -122,11 +148,19 @@ public sealed partial class SettingsWindow
     private async void CloudBackupRefreshSnapshotsButton_Click(object sender, RoutedEventArgs e)
     {
         ViewModel.CloudBackupBusy = true;
+        long generation = ViewModel.CloudBackupEndpointGeneration;
         try
         {
             await _settingsService.SaveAsync();
             IReadOnlyList<CloudBackupRemoteEntry> snapshots =
                 await App.Current.CloudBackupService.ListRemoteSnapshotsAsync();
+
+            // A slow PROPFIND can return after the user repointed the
+            // page — the list it fetched belongs to the OLD endpoint.
+            if (generation != ViewModel.CloudBackupEndpointGeneration)
+            {
+                return;
+            }
 
             ViewModel.CloudBackupRemoteSnapshots.Clear();
             foreach (CloudBackupRemoteEntry entry in snapshots)
@@ -138,9 +172,12 @@ public sealed partial class SettingsWindow
         catch (Exception ex)
         {
             App.Log($"[CloudBackup] Listing remote snapshots failed: {ex}");
-            ViewModel.CloudBackupConnectionStatusText = _localizationService.Format(
-                "Settings.CloudBackup.RefreshSnapshots.Failed",
-                ex.Message);
+            if (generation == ViewModel.CloudBackupEndpointGeneration)
+            {
+                ViewModel.CloudBackupConnectionStatusText = _localizationService.Format(
+                    "Settings.CloudBackup.RefreshSnapshots.Failed",
+                    ex.Message);
+            }
         }
         finally
         {

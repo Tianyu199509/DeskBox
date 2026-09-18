@@ -358,6 +358,16 @@ public partial class SettingsViewModel
     /// <summary>Remote snapshot inventory for the restore list.</summary>
     public ObservableCollection<CloudBackupRemoteSnapshotItem> CloudBackupRemoteSnapshots { get; } = [];
 
+    /// <summary>
+    /// Bumped every time an endpoint-identity field changes. Async UI
+    /// continuations (credential check, snapshot list, connection test)
+    /// capture it before awaiting and bail when it moved on — otherwise a
+    /// slow response from the OLD endpoint can repaint stale state after
+    /// the user already pointed the page at a new one.
+    /// </summary>
+    internal long CloudBackupEndpointGeneration => _cloudBackupEndpointGeneration;
+    private long _cloudBackupEndpointGeneration;
+
     private void PushCloudBackupOptionsToService()
     {
         App.Current?.CloudBackupService.UpdateOptions(
@@ -373,6 +383,7 @@ public partial class SettingsViewModel
     /// </summary>
     private void InvalidateCloudBackupEndpointState()
     {
+        _cloudBackupEndpointGeneration++;
         _cloudBackupCredentialSaved = false;
         OnPropertyChanged(nameof(CloudBackupCredentialStatusText));
         CloudBackupConnectionStatusText = string.Empty;
@@ -382,10 +393,16 @@ public partial class SettingsViewModel
 
     private async Task RefreshCloudBackupCredentialStateAsync()
     {
+        long generation = _cloudBackupEndpointGeneration;
         try
         {
-            CloudBackupCredentialSaved =
-                await App.Current.CloudBackupService.HasCredentialAsync();
+            bool saved = await App.Current.CloudBackupService.HasCredentialAsync();
+            // The vault answer belongs to the endpoint it was asked about;
+            // a newer edit already reset the flag for the current one.
+            if (generation == _cloudBackupEndpointGeneration)
+            {
+                CloudBackupCredentialSaved = saved;
+            }
         }
         catch (Exception ex)
         {
