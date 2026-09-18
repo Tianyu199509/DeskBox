@@ -17,6 +17,12 @@ public static class ServiceRegistry
         services.AddSingleton<SettingsService>();
         services.AddSingleton<SettingsMigrationPipeline>();
         services.AddSingleton<DeskBoxDataBackupService>();
+        services.AddSingleton<ICredentialStore>(_ => new PasswordVaultCredentialStore());
+        services.AddSingleton<CloudBackupService>(sp =>
+            new CloudBackupService(
+                sp.GetRequiredService<DeskBoxDataBackupService>(),
+                sp.GetRequiredService<SettingsService>(),
+                sp.GetRequiredService<ICredentialStore>()));
         services.AddSingleton<DeskBoxAttachmentHealthService>();
         services.AddSingleton<DeskBoxDiagnosticsBundleService>();
         services.AddSingleton<FileService>();

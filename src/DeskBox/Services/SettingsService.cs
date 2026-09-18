@@ -371,6 +371,14 @@ public const int DefaultSearchMaxResults = 100;
                 [nameof(AppSettings.DesktopAutoOrganizationBaselineUtc)] = DefaultPreferencePreservationReason.RuntimeState,
                 [nameof(AppSettings.DefaultManagedStorageRootPath)] = DefaultPreferencePreservationReason.Storage,
                 [nameof(AppSettings.AutomaticBackupDirectory)] = DefaultPreferencePreservationReason.Storage,
+                [nameof(AppSettings.CloudBackupProvider)] = DefaultPreferencePreservationReason.UserChoice,
+                [nameof(AppSettings.CloudBackupServerUrl)] = DefaultPreferencePreservationReason.Storage,
+                [nameof(AppSettings.CloudBackupRemotePath)] = DefaultPreferencePreservationReason.Storage,
+                [nameof(AppSettings.CloudBackupUsername)] = DefaultPreferencePreservationReason.UserChoice,
+                [nameof(AppSettings.CloudBackupTodoDataEnabled)] = DefaultPreferencePreservationReason.UserChoice,
+                [nameof(AppSettings.CloudBackupQuickCaptureDataEnabled)] = DefaultPreferencePreservationReason.UserChoice,
+                [nameof(AppSettings.CloudBackupWidgetStyleEnabled)] = DefaultPreferencePreservationReason.UserChoice,
+                [nameof(AppSettings.CloudBackupLastSuccessUtcTicks)] = DefaultPreferencePreservationReason.RuntimeState,
                 [nameof(AppSettings.ManagedStorageDesktopShortcutEnabled)] = DefaultPreferencePreservationReason.UserChoice,
                 [nameof(AppSettings.ManagedStorageDesktopShortcutPath)] = DefaultPreferencePreservationReason.SystemIntegration,
                 [nameof(AppSettings.HasCompletedOnboarding)] = DefaultPreferencePreservationReason.RuntimeState,
@@ -601,6 +609,12 @@ settings.WeatherRefreshIntervalMinutes = 60;
         settings.AutomaticBackupEnabled = DataBackupSettingsPolicy.DefaultEnabled;
         settings.AutomaticBackupIntervalMinutes = DataBackupSettingsPolicy.DefaultIntervalMinutes;
         settings.AutomaticBackupRetentionCount = DataBackupSettingsPolicy.DefaultRetentionCount;
+        // Cloud cadence prefs reset like the local ones; the channel itself
+        // (provider/url/path/user/toggles) stays preserved — see the policy.
+        settings.CloudBackup.CloudBackupRetentionCount =
+            CloudBackupSettingsPolicy.DefaultRetentionCount;
+        settings.CloudBackup.CloudBackupIntervalMinutes =
+            CloudBackupSettingsPolicy.DefaultIntervalMinutes;
         settings.GlobalHotkeyEnabled = DefaultGlobalHotkeyEnabled;
         settings.GlobalHotkeyActivationKind = DefaultGlobalHotkeyActivationKind;
         settings.GlobalHotkeyModifiers = DefaultGlobalHotkeyModifiers;

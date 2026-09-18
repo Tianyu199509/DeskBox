@@ -89,6 +89,10 @@ public sealed class ModuleBoundaryContractTests
         ["src/DeskBox/Services/AotShellMoveFixture.cs"] = 1,
         ["src/DeskBox/Services/AppUpdateService.cs"] = 5,
         ["src/DeskBox/Services/AttachmentStorageService.cs"] = 1,
+        // Cloud backup orchestrator cleans up its own %TEMP% upload staging
+        // directory — it never touches the data root (that stays inside
+        // DeskBoxDataBackupService's owned surface).
+        ["src/DeskBox/Services/CloudBackupService.cs"] = 1,
         // +2: scoped cloud restore deletes+copies domain files inside the
         // data directory it already owns (ApplyScopedRestoreCoreAsync).
         // +1: Directory.Move inside the scoped-restore staging dir remaps an

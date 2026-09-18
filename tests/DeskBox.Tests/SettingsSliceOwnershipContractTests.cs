@@ -28,7 +28,7 @@ public sealed class SettingsSliceOwnershipContractTests
     [Fact]
     public void EverySlice_IsExposedAsGetOnlyAndJsonIgnored()
     {
-        Assert.Equal(12, SliceProperties.Length);
+        Assert.Equal(13, SliceProperties.Length);
         Assert.All(SliceProperties, p =>
         {
             Assert.False(p.CanWrite, $"{p.Name} must be get-only");
@@ -39,7 +39,7 @@ public sealed class SettingsSliceOwnershipContractTests
     [Fact]
     public void EveryFacadeProperty_MapsToExactlyOneSliceProperty()
     {
-        Assert.Equal(207, FacadeProperties.Length);
+        Assert.Equal(217, FacadeProperties.Length);
 
         foreach (PropertyInfo facade in FacadeProperties)
         {
@@ -162,6 +162,8 @@ public sealed class SettingsSliceOwnershipContractTests
             return 17;
         if (type == typeof(double))
             return 0.137;
+        if (type == typeof(long))
+            return 638000000000000000L;
         if (type == typeof(DateTimeOffset?))
             return new DateTimeOffset(2030, 1, 2, 3, 4, 5, TimeSpan.Zero);
         if (type.IsEnum)

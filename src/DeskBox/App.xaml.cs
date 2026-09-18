@@ -133,6 +133,7 @@ public partial class App : Application
     public ServiceProvider Services { get; private set; } = null!;
     public SettingsService SettingsService { get; private set; } = null!;
     public DeskBoxDataBackupService DataBackupService { get; private set; } = null!;
+    internal CloudBackupService CloudBackupService { get; private set; } = null!;
     public DeskBoxAttachmentHealthService AttachmentHealthService { get; private set; } = null!;
     public FileService FileService { get; private set; } = null!;
     public OrganizerService OrganizerService { get; private set; } = null!;
@@ -270,6 +271,7 @@ public partial class App : Application
         SettingsService.PersistenceFailed += OnSettingsPersistenceFailed;
         DataBackupService = Services.GetRequiredService<DeskBoxDataBackupService>();
         DataBackupService.AutomaticSnapshotFallbackDetected += OnAutomaticBackupFallbackDetected;
+        CloudBackupService = Services.GetRequiredService<CloudBackupService>();
         _ = LegacySearchIndexCleanupService.TryCleanup();
         AttachmentHealthService = Services.GetRequiredService<DeskBoxAttachmentHealthService>();
         DiagnosticsBundleService = Services.GetRequiredService<DeskBoxDiagnosticsBundleService>();
@@ -2588,6 +2590,8 @@ public partial class App : Application
     {
         DataBackupService.UpdateAutomaticBackupOptions(
             DataBackupSettingsPolicy.GetOptions(SettingsService.Settings));
+        CloudBackupService.UpdateOptions(
+            CloudBackupSettingsPolicy.GetOptions(SettingsService.Settings));
     }
 
     private void OnBackupSettingsChanged()
@@ -2596,6 +2600,11 @@ public partial class App : Application
         if (DataBackupService.AutomaticBackupOptions.IsEnabled)
         {
             _ = RunAutomaticSnapshotIfDueAsync();
+        }
+
+        if (CloudBackupService.Options.IsConfigured)
+        {
+            _ = RunCloudBackupIfDueAsync();
         }
     }
 
@@ -2613,6 +2622,11 @@ public partial class App : Application
             {
                 _ = RunAutomaticSnapshotIfDueAsync();
             }
+
+            if (CloudBackupService.Options.IsConfigured)
+            {
+                _ = RunCloudBackupIfDueAsync();
+            }
         };
         _automaticBackupTimer.Start();
     }
@@ -2626,6 +2640,18 @@ public partial class App : Application
         catch (Exception ex)
         {
             Log($"[DataBackup] Periodic snapshot check failed: {ex}");
+        }
+    }
+
+    private async Task RunCloudBackupIfDueAsync()
+    {
+        try
+        {
+            await CloudBackupService.RunScheduledIfDueAsync();
+        }
+        catch (Exception ex)
+        {
+            Log($"[CloudBackup] Periodic upload check failed: {ex}");
         }
     }
 

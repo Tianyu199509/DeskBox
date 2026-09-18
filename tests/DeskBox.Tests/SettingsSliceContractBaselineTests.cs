@@ -219,6 +219,16 @@ public sealed class SettingsSliceContractBaselineTests
         Assert.Null(s.SearchPopupCustomY);
         Assert.Null(s.SearchPopupCustomWidth);
         Assert.Null(s.SearchPopupCustomHeight);
+        Assert.Equal("none", s.CloudBackupProvider);
+        Assert.Equal("", s.CloudBackupServerUrl);
+        Assert.Equal("DeskBox/backups", s.CloudBackupRemotePath);
+        Assert.Equal("", s.CloudBackupUsername);
+        Assert.False(s.CloudBackupTodoDataEnabled);
+        Assert.False(s.CloudBackupQuickCaptureDataEnabled);
+        Assert.False(s.CloudBackupWidgetStyleEnabled);
+        Assert.Equal(5, s.CloudBackupRetentionCount);
+        Assert.Equal(24 * 60, s.CloudBackupIntervalMinutes);
+        Assert.Equal(0L, s.CloudBackupLastSuccessUtcTicks);
     }
 
     [Fact]
@@ -444,5 +454,15 @@ public sealed class SettingsSliceContractBaselineTests
         "searchPopupCustomY",
         "searchPopupCustomWidth",
         "searchPopupCustomHeight",
+        "cloudBackupProvider",
+        "cloudBackupServerUrl",
+        "cloudBackupRemotePath",
+        "cloudBackupUsername",
+        "cloudBackupTodoDataEnabled",
+        "cloudBackupQuickCaptureDataEnabled",
+        "cloudBackupWidgetStyleEnabled",
+        "cloudBackupRetentionCount",
+        "cloudBackupIntervalMinutes",
+        "cloudBackupLastSuccessUtcTicks",
     ];
 }

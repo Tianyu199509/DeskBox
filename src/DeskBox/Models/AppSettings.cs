@@ -44,6 +44,9 @@ public class AppSettings
     public BackupSettingsSlice Backup { get; } = new();
 
     [JsonIgnore]
+    public CloudBackupSettingsSlice CloudBackup { get; } = new();
+
+    [JsonIgnore]
     public DesktopOrganizationSettingsSlice DesktopOrganization { get; } = new();
 
     [JsonIgnore]
@@ -681,4 +684,36 @@ public class AppSettings
 
     /// <inheritdoc cref="SearchSettingsSlice.SearchPopupCustomHeight"/>
     public int? SearchPopupCustomHeight { get => Search.SearchPopupCustomHeight; set => Search.SearchPopupCustomHeight = value; }
+
+    // ─── Cloud Backup (roadmap §10 — non-secret provider config only) ───
+
+    /// <inheritdoc cref="CloudBackupSettingsSlice.CloudBackupProvider"/>
+    public string CloudBackupProvider { get => CloudBackup.CloudBackupProvider; set => CloudBackup.CloudBackupProvider = value; }
+
+    /// <inheritdoc cref="CloudBackupSettingsSlice.CloudBackupServerUrl"/>
+    public string CloudBackupServerUrl { get => CloudBackup.CloudBackupServerUrl; set => CloudBackup.CloudBackupServerUrl = value; }
+
+    /// <inheritdoc cref="CloudBackupSettingsSlice.CloudBackupRemotePath"/>
+    public string CloudBackupRemotePath { get => CloudBackup.CloudBackupRemotePath; set => CloudBackup.CloudBackupRemotePath = value; }
+
+    /// <inheritdoc cref="CloudBackupSettingsSlice.CloudBackupUsername"/>
+    public string CloudBackupUsername { get => CloudBackup.CloudBackupUsername; set => CloudBackup.CloudBackupUsername = value; }
+
+    /// <inheritdoc cref="CloudBackupSettingsSlice.CloudBackupTodoDataEnabled"/>
+    public bool CloudBackupTodoDataEnabled { get => CloudBackup.CloudBackupTodoDataEnabled; set => CloudBackup.CloudBackupTodoDataEnabled = value; }
+
+    /// <inheritdoc cref="CloudBackupSettingsSlice.CloudBackupQuickCaptureDataEnabled"/>
+    public bool CloudBackupQuickCaptureDataEnabled { get => CloudBackup.CloudBackupQuickCaptureDataEnabled; set => CloudBackup.CloudBackupQuickCaptureDataEnabled = value; }
+
+    /// <inheritdoc cref="CloudBackupSettingsSlice.CloudBackupWidgetStyleEnabled"/>
+    public bool CloudBackupWidgetStyleEnabled { get => CloudBackup.CloudBackupWidgetStyleEnabled; set => CloudBackup.CloudBackupWidgetStyleEnabled = value; }
+
+    /// <inheritdoc cref="CloudBackupSettingsSlice.CloudBackupRetentionCount"/>
+    public int CloudBackupRetentionCount { get => CloudBackup.CloudBackupRetentionCount; set => CloudBackup.CloudBackupRetentionCount = value; }
+
+    /// <inheritdoc cref="CloudBackupSettingsSlice.CloudBackupIntervalMinutes"/>
+    public int CloudBackupIntervalMinutes { get => CloudBackup.CloudBackupIntervalMinutes; set => CloudBackup.CloudBackupIntervalMinutes = value; }
+
+    /// <inheritdoc cref="CloudBackupSettingsSlice.CloudBackupLastSuccessUtcTicks"/>
+    public long CloudBackupLastSuccessUtcTicks { get => CloudBackup.CloudBackupLastSuccessUtcTicks; set => CloudBackup.CloudBackupLastSuccessUtcTicks = value; }
 }

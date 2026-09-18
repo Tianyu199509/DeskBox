@@ -1628,6 +1628,11 @@ public sealed class SettingsServiceTests : IDisposable
             return (double)(defaultValue ?? 0d) + 0.137;
         }
 
+        if (type == typeof(long))
+        {
+            return (long)(defaultValue ?? 0L) + 123456789012345L;
+        }
+
         if (type == typeof(DateTimeOffset?))
         {
             return new DateTimeOffset(2030, 1, 2, 3, 4, 5, TimeSpan.Zero);
