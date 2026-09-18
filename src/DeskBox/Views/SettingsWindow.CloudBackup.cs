@@ -37,6 +37,11 @@ public sealed partial class SettingsWindow
 
     private async void CloudBackupSavePasswordButton_Click(object sender, RoutedEventArgs e)
     {
+        if (ViewModel.CloudBackupBusy)
+        {
+            return;
+        }
+
         string password = CloudBackupPasswordBox.Password;
         if (string.IsNullOrWhiteSpace(password))
         {
@@ -77,6 +82,11 @@ public sealed partial class SettingsWindow
 
     private async void CloudBackupTestConnectionButton_Click(object sender, RoutedEventArgs e)
     {
+        if (ViewModel.CloudBackupBusy)
+        {
+            return;
+        }
+
         ViewModel.CloudBackupBusy = true;
         long generation = ViewModel.CloudBackupEndpointGeneration;
         ViewModel.CloudBackupConnectionStatusText = string.Empty;
@@ -112,6 +122,11 @@ public sealed partial class SettingsWindow
 
     private async void CloudBackupNowButton_Click(object sender, RoutedEventArgs e)
     {
+        if (ViewModel.CloudBackupBusy)
+        {
+            return;
+        }
+
         ViewModel.CloudBackupBusy = true;
         long generation = ViewModel.CloudBackupEndpointGeneration;
         try
@@ -147,6 +162,11 @@ public sealed partial class SettingsWindow
 
     private async void CloudBackupRefreshSnapshotsButton_Click(object sender, RoutedEventArgs e)
     {
+        if (ViewModel.CloudBackupBusy)
+        {
+            return;
+        }
+
         ViewModel.CloudBackupBusy = true;
         long generation = ViewModel.CloudBackupEndpointGeneration;
         try
@@ -213,86 +233,92 @@ public sealed partial class SettingsWindow
 
     private async void CloudBackupRestoreSnapshotButton_Click(object sender, RoutedEventArgs e)
     {
-        if (SettingsRoot.XamlRoot is null ||
+        if (ViewModel.CloudBackupBusy ||
+            SettingsRoot.XamlRoot is null ||
             sender is not FrameworkElement { DataContext: CloudBackupRemoteSnapshotItem snapshot })
         {
             return;
         }
 
-        // Step 1: pick the domains to restore (all on by default).
-        var todoBox = new CheckBox
-        {
-            IsChecked = true,
-            Content = _localizationService.T("Settings.CloudBackup.TodoData.Title")
-        };
-        var quickCaptureBox = new CheckBox
-        {
-            IsChecked = true,
-            Content = _localizationService.T("Settings.CloudBackup.QuickCaptureData.Title")
-        };
-        var widgetStyleBox = new CheckBox
-        {
-            IsChecked = true,
-            Content = _localizationService.T("Settings.CloudBackup.WidgetStyle.Title")
-        };
-        var domainDialog = new ContentDialog
-        {
-            XamlRoot = SettingsRoot.XamlRoot,
-            Title = _localizationService.T("Settings.CloudBackup.RestoreDomains.Title"),
-            PrimaryButtonText = _localizationService.T("Settings.CloudBackup.RestoreDomains.Continue"),
-            CloseButtonText = _localizationService.T("Common.Cancel"),
-            DefaultButton = ContentDialogButton.Close,
-            Content = new StackPanel
-            {
-                Spacing = 8,
-                Children =
-                {
-                    new TextBlock
-                    {
-                        Text = _localizationService.Format(
-                            "Settings.CloudBackup.RestoreDomains.Body",
-                            snapshot.Title),
-                        TextWrapping = TextWrapping.Wrap
-                    },
-                    todoBox,
-                    quickCaptureBox,
-                    widgetStyleBox
-                }
-            }
-        };
-
-        if (await domainDialog.ShowAsync() != ContentDialogResult.Primary)
-        {
-            return;
-        }
-
-        CloudBackupDomain scope = CloudBackupDomain.None;
-        if (todoBox.IsChecked == true)
-        {
-            scope |= CloudBackupDomain.TodoData;
-        }
-
-        if (quickCaptureBox.IsChecked == true)
-        {
-            scope |= CloudBackupDomain.QuickCaptureData;
-        }
-
-        if (widgetStyleBox.IsChecked == true)
-        {
-            scope |= CloudBackupDomain.WidgetStyle;
-        }
-
-        if (scope == CloudBackupDomain.None)
-        {
-            return;
-        }
-
-        // Step 2: download → prepare scoped restore → confirm → relaunch.
+        // The busy flag covers the WHOLE flow, domain picker included. A
+        // second restore starting while the first is mid-download would
+        // run PrepareScopedRestoreAsync, which deletes the shared pending
+        // marker — the first dialog's confirm would then apply the SECOND
+        // snapshot. Confirmed must equal applied.
         ViewModel.CloudBackupBusy = true;
         bool restartScheduled = false;
         string? downloadDirectory = null;
         try
         {
+            // Step 1: pick the domains to restore (all on by default).
+            var todoBox = new CheckBox
+            {
+                IsChecked = true,
+                Content = _localizationService.T("Settings.CloudBackup.TodoData.Title")
+            };
+            var quickCaptureBox = new CheckBox
+            {
+                IsChecked = true,
+                Content = _localizationService.T("Settings.CloudBackup.QuickCaptureData.Title")
+            };
+            var widgetStyleBox = new CheckBox
+            {
+                IsChecked = true,
+                Content = _localizationService.T("Settings.CloudBackup.WidgetStyle.Title")
+            };
+            var domainDialog = new ContentDialog
+            {
+                XamlRoot = SettingsRoot.XamlRoot,
+                Title = _localizationService.T("Settings.CloudBackup.RestoreDomains.Title"),
+                PrimaryButtonText = _localizationService.T("Settings.CloudBackup.RestoreDomains.Continue"),
+                CloseButtonText = _localizationService.T("Common.Cancel"),
+                DefaultButton = ContentDialogButton.Close,
+                Content = new StackPanel
+                {
+                    Spacing = 8,
+                    Children =
+                    {
+                        new TextBlock
+                        {
+                            Text = _localizationService.Format(
+                                "Settings.CloudBackup.RestoreDomains.Body",
+                                snapshot.Title),
+                            TextWrapping = TextWrapping.Wrap
+                        },
+                        todoBox,
+                        quickCaptureBox,
+                        widgetStyleBox
+                    }
+                }
+            };
+
+            if (await domainDialog.ShowAsync() != ContentDialogResult.Primary)
+            {
+                return;
+            }
+
+            CloudBackupDomain scope = CloudBackupDomain.None;
+            if (todoBox.IsChecked == true)
+            {
+                scope |= CloudBackupDomain.TodoData;
+            }
+
+            if (quickCaptureBox.IsChecked == true)
+            {
+                scope |= CloudBackupDomain.QuickCaptureData;
+            }
+
+            if (widgetStyleBox.IsChecked == true)
+            {
+                scope |= CloudBackupDomain.WidgetStyle;
+            }
+
+            if (scope == CloudBackupDomain.None)
+            {
+                return;
+            }
+
+            // Step 2: download → prepare scoped restore → confirm → relaunch.
             downloadDirectory = Path.Combine(
                 Path.GetTempPath(),
                 $"deskbox-cloud-restore-{Guid.NewGuid():N}");

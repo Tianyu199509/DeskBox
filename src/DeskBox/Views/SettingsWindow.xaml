@@ -2673,6 +2673,7 @@ svc:Localized.DescriptionKey="Settings.DefaultWidth.Description"
                             </toolkit:SettingsCard.HeaderIcon>
                             <ComboBox
                                 MinWidth="150"
+                                IsEnabled="{Binding CloudBackupActionsEnabled}"
                                 ItemsSource="{Binding AvailableCloudBackupProviderOptions}"
                                 controls:SettingsComboBox.Value="{Binding SelectedCloudBackupProvider, Mode=TwoWay}" />
                         </toolkit:SettingsCard>
@@ -2689,7 +2690,7 @@ svc:Localized.DescriptionKey="Settings.DefaultWidth.Description"
                             <StackPanel Spacing="10">
                                 <StackPanel Spacing="4">
                                     <TextBlock Style="{StaticResource SettingDescriptionTextStyle}" svc:Localized.Key="Settings.CloudBackup.ServerUrl.Label" />
-                                    <TextBox x:Name="CloudBackupServerUrlBox" Text="{Binding CloudBackupServerUrl, Mode=TwoWay}" />
+                                    <TextBox x:Name="CloudBackupServerUrlBox" IsEnabled="{Binding CloudBackupActionsEnabled}" Text="{Binding CloudBackupServerUrl, Mode=TwoWay}" />
                                 </StackPanel>
                                 <InfoBar
                                     IsClosable="False"
@@ -2699,17 +2700,17 @@ svc:Localized.DescriptionKey="Settings.DefaultWidth.Description"
                                     Visibility="{Binding CloudBackupHttpWarningVisibility}" />
                                 <StackPanel Spacing="4">
                                     <TextBlock Style="{StaticResource SettingDescriptionTextStyle}" svc:Localized.Key="Settings.CloudBackup.RemotePath.Label" />
-                                    <TextBox x:Name="CloudBackupRemotePathBox" Text="{Binding CloudBackupRemotePath, Mode=TwoWay}" />
+                                    <TextBox x:Name="CloudBackupRemotePathBox" IsEnabled="{Binding CloudBackupActionsEnabled}" Text="{Binding CloudBackupRemotePath, Mode=TwoWay}" />
                                 </StackPanel>
                                 <StackPanel Spacing="4">
                                     <TextBlock Style="{StaticResource SettingDescriptionTextStyle}" svc:Localized.Key="Settings.CloudBackup.Username.Label" />
-                                    <TextBox x:Name="CloudBackupUsernameBox" Text="{Binding CloudBackupUsername, Mode=TwoWay}" />
+                                    <TextBox x:Name="CloudBackupUsernameBox" IsEnabled="{Binding CloudBackupActionsEnabled}" Text="{Binding CloudBackupUsername, Mode=TwoWay}" />
                                 </StackPanel>
                                 <StackPanel Spacing="4">
                                     <TextBlock Style="{StaticResource SettingDescriptionTextStyle}" svc:Localized.Key="Settings.CloudBackup.Password.Label" />
                                     <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
-                                        <PasswordBox x:Name="CloudBackupPasswordBox" Grid.Column="0" />
-                                        <Button x:Name="CloudBackupSavePasswordButton" Grid.Column="1" Click="CloudBackupSavePasswordButton_Click" Style="{StaticResource ActionButtonStyle}">
+                                        <PasswordBox x:Name="CloudBackupPasswordBox" Grid.Column="0" IsEnabled="{Binding CloudBackupActionsEnabled}" />
+                                        <Button x:Name="CloudBackupSavePasswordButton" Grid.Column="1" Click="CloudBackupSavePasswordButton_Click" IsEnabled="{Binding CloudBackupActionsEnabled}" Style="{StaticResource ActionButtonStyle}">
                                             <TextBlock svc:Localized.Key="Settings.CloudBackup.Password.Save" />
                                         </Button>
                                     </Grid>
@@ -2732,7 +2733,7 @@ svc:Localized.DescriptionKey="Settings.DefaultWidth.Description"
                             <toolkit:SettingsCard.HeaderIcon>
                                 <FontIcon Glyph="&#xE8FD;" />
                             </toolkit:SettingsCard.HeaderIcon>
-                            <ToggleSwitch OnContent="" OffContent="" MinWidth="0" IsOn="{Binding CloudBackupTodoDataEnabled, Mode=TwoWay}" />
+                            <ToggleSwitch OnContent="" OffContent="" MinWidth="0" IsEnabled="{Binding CloudBackupActionsEnabled}" IsOn="{Binding CloudBackupTodoDataEnabled, Mode=TwoWay}" />
                         </toolkit:SettingsCard>
 
                         <toolkit:SettingsCard
@@ -2742,7 +2743,7 @@ svc:Localized.DescriptionKey="Settings.DefaultWidth.Description"
                             <toolkit:SettingsCard.HeaderIcon>
                                 <FontIcon Glyph="&#xE8A5;" />
                             </toolkit:SettingsCard.HeaderIcon>
-                            <ToggleSwitch OnContent="" OffContent="" MinWidth="0" IsOn="{Binding CloudBackupQuickCaptureDataEnabled, Mode=TwoWay}" />
+                            <ToggleSwitch OnContent="" OffContent="" MinWidth="0" IsEnabled="{Binding CloudBackupActionsEnabled}" IsOn="{Binding CloudBackupQuickCaptureDataEnabled, Mode=TwoWay}" />
                         </toolkit:SettingsCard>
 
                         <toolkit:SettingsCard
@@ -2752,7 +2753,7 @@ svc:Localized.DescriptionKey="Settings.DefaultWidth.Description"
                             <toolkit:SettingsCard.HeaderIcon>
                                 <FontIcon Glyph="&#xE790;" />
                             </toolkit:SettingsCard.HeaderIcon>
-                            <ToggleSwitch OnContent="" OffContent="" MinWidth="0" IsOn="{Binding CloudBackupWidgetStyleEnabled, Mode=TwoWay}" />
+                            <ToggleSwitch OnContent="" OffContent="" MinWidth="0" IsEnabled="{Binding CloudBackupActionsEnabled}" IsOn="{Binding CloudBackupWidgetStyleEnabled, Mode=TwoWay}" />
                         </toolkit:SettingsCard>
 
                         <toolkit:SettingsCard
@@ -2765,6 +2766,7 @@ svc:Localized.DescriptionKey="Settings.DefaultWidth.Description"
                             </toolkit:SettingsCard.HeaderIcon>
                             <ComboBox
                                 MinWidth="150"
+                                IsEnabled="{Binding CloudBackupActionsEnabled}"
                                 ItemsSource="{Binding AvailableCloudBackupIntervalOptions}"
                                 controls:SettingsComboBox.Value="{Binding SelectedCloudBackupIntervalMinutes, Mode=TwoWay}" />
                         </toolkit:SettingsCard>
@@ -2779,6 +2781,7 @@ svc:Localized.DescriptionKey="Settings.DefaultWidth.Description"
                             </toolkit:SettingsCard.HeaderIcon>
                             <ComboBox
                                 MinWidth="150"
+                                IsEnabled="{Binding CloudBackupActionsEnabled}"
                                 ItemsSource="{Binding AvailableCloudBackupRetentionOptions}"
                                 controls:SettingsComboBox.Value="{Binding SelectedCloudBackupRetentionCount, Mode=TwoWay}" />
                         </toolkit:SettingsCard>
@@ -2802,7 +2805,7 @@ svc:Localized.DescriptionKey="Settings.DefaultWidth.Description"
                                     </Button>
                                 </StackPanel>
                                 <TextBlock Style="{StaticResource SettingDescriptionTextStyle}" Text="{Binding CloudBackupStatusText}" TextWrapping="Wrap" />
-                                <ListView x:Name="CloudBackupSnapshotsList" SelectionMode="None" IsItemClickEnabled="False" ItemsSource="{Binding CloudBackupRemoteSnapshots}">
+                                <ListView x:Name="CloudBackupSnapshotsList" SelectionMode="None" IsItemClickEnabled="False" IsEnabled="{Binding CloudBackupActionsEnabled}" ItemsSource="{Binding CloudBackupRemoteSnapshots}">
                                     <ListView.ItemTemplate>
                                         <DataTemplate>
                                             <Border Padding="10,8" Margin="0,2" Background="{ThemeResource CardBackgroundFillColorSecondaryBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="4">
