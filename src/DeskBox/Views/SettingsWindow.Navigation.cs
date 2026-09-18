@@ -554,6 +554,10 @@ public sealed partial class SettingsWindow
         {
             _ = GlanceSettingsSection.RefreshFromStoreAsync();
         }
+        if (sectionTag == "CloudBackupSettings")
+        {
+            _ = InitializeCloudBackupSectionAsync();
+        }
         if (sectionTag == "ManagedStorage")
         {
             RefreshManagedStorageFolderList();

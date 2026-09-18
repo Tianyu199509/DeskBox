@@ -42,6 +42,18 @@ internal static class CloudBackupSettingsPolicy
     internal const int DefaultRetentionCount = 5;
     internal const int DefaultIntervalMinutes = 24 * 60;
 
+    /// <summary>Preset interval choices for the settings ComboBox.</summary>
+    internal static readonly int[] SupportedIntervalMinutes = [60, 360, 720, 1440, 10080];
+
+    /// <summary>Preset retention choices for the settings ComboBox.</summary>
+    internal static readonly int[] SupportedRetentionCounts = [3, 5, 7, 10, 14];
+
+    internal static int NormalizeIntervalMinutes(int minutes) =>
+        SupportedIntervalMinutes.Contains(minutes) ? minutes : DefaultIntervalMinutes;
+
+    internal static int NormalizeRetentionCount(int count) =>
+        SupportedRetentionCounts.Contains(count) ? count : DefaultRetentionCount;
+
     internal static CloudBackupOptions GetOptions(AppSettings settings)
     {
         ArgumentNullException.ThrowIfNull(settings);

@@ -179,4 +179,6 @@ public sealed partial class SettingsWindow
         (global::Microsoft.UI.Xaml.Controls.Button)FindCreatedSectionElement("About", "OpenManualUpdateDownloadButton")!;
     private global::Microsoft.UI.Xaml.Controls.Button StoreSupportButton =>
         (global::Microsoft.UI.Xaml.Controls.Button)FindCreatedSectionElement("About", "StoreSupportButton")!;
+    private global::Microsoft.UI.Xaml.Controls.PasswordBox CloudBackupPasswordBox =>
+        (global::Microsoft.UI.Xaml.Controls.PasswordBox)FindCreatedSectionElement("CloudBackupSettings", "CloudBackupPasswordBox")!;
 }

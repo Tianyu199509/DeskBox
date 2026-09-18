@@ -485,6 +485,20 @@ _selectedWeatherRefreshInterval = Math.Clamp(
             settings.AutomaticBackupRetentionCount);
         _automaticBackupDirectory =
             DataBackupSettingsPolicy.NormalizeCustomDirectory(settings.AutomaticBackupDirectory) ?? string.Empty;
+        CloudBackupSettingsSlice cloudBackup = settings.CloudBackup;
+        _selectedCloudBackupProvider = cloudBackup.CloudBackupProvider is CloudBackupSettingsPolicy.ProviderWebDav
+            ? CloudBackupSettingsPolicy.ProviderWebDav
+            : CloudBackupSettingsPolicy.ProviderNone;
+        _cloudBackupServerUrl = cloudBackup.CloudBackupServerUrl ?? string.Empty;
+        _cloudBackupRemotePath = cloudBackup.CloudBackupRemotePath ?? string.Empty;
+        _cloudBackupUsername = cloudBackup.CloudBackupUsername ?? string.Empty;
+        CloudBackupTodoDataEnabled = cloudBackup.CloudBackupTodoDataEnabled;
+        CloudBackupQuickCaptureDataEnabled = cloudBackup.CloudBackupQuickCaptureDataEnabled;
+        CloudBackupWidgetStyleEnabled = cloudBackup.CloudBackupWidgetStyleEnabled;
+        _selectedCloudBackupIntervalMinutes = CloudBackupSettingsPolicy.NormalizeIntervalMinutes(
+            cloudBackup.CloudBackupIntervalMinutes);
+        _selectedCloudBackupRetentionCount = CloudBackupSettingsPolicy.NormalizeRetentionCount(
+            cloudBackup.CloudBackupRetentionCount);
 
         ApplyCachedUpdateResult();
         RefreshAccentPreview();

@@ -378,7 +378,7 @@ public sealed class SettingsCopyAndHierarchyTests
             "x:Name=\"MaintenanceSection\"",
             "x:Name=\"BackupRestoreSettingsSection\"");
         Assert.Equal(
-            3,
+            4,
             CountOccurrences(
                 maintenance,
                 "Style=\"{StaticResource SettingCardIdentityGridStyle}\""));

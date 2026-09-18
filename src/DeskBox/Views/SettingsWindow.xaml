@@ -2471,6 +2471,22 @@ svc:Localized.DescriptionKey="Settings.DefaultWidth.Description"
                             <Button
                                 Click="NestedSettingsButton_Click"
                                 Style="{StaticResource DrillDownRowStyle}"
+                                Tag="CloudBackupSettings">
+                                <Grid ColumnDefinitions="Auto,*,Auto" Style="{StaticResource SettingCardIdentityGridStyle}">
+                                    <FontIcon Grid.Column="0" FontSize="18" Glyph="&#xE753;" IsHitTestVisible="False" VerticalAlignment="Center" />
+                                    <StackPanel Grid.Column="1" IsHitTestVisible="False" Spacing="3" VerticalAlignment="Center">
+                                        <TextBlock Style="{StaticResource SettingTitleTextStyle}" svc:Localized.Key="Settings.CloudBackup.Title" />
+                                        <TextBlock Style="{StaticResource SettingDescriptionTextStyle}" TextWrapping="Wrap" svc:Localized.Key="Settings.CloudBackup.Description" />
+                                    </StackPanel>
+                                    <FontIcon Grid.Column="2" FontSize="12" Glyph="&#xE76C;" IsHitTestVisible="False" VerticalAlignment="Center" />
+                                </Grid>
+                            </Button>
+                        </Border>
+
+                        <Border Style="{StaticResource SettingsGroupStyle}">
+                            <Button
+                                Click="NestedSettingsButton_Click"
+                                Style="{StaticResource DrillDownRowStyle}"
                                 Tag="DataHealthSettings">
                                 <Grid ColumnDefinitions="Auto,*,Auto" Style="{StaticResource SettingCardIdentityGridStyle}">
                                     <FontIcon Grid.Column="0" FontSize="18" Glyph="&#xE9D9;" IsHitTestVisible="False" VerticalAlignment="Center" />
@@ -2630,6 +2646,167 @@ svc:Localized.DescriptionKey="Settings.DefaultWidth.Description"
                                                     </Button>
                                                     <Button Grid.Column="2" Click="DeleteSnapshotButton_Click" Style="{StaticResource ActionButtonStyle}">
                                                         <TextBlock svc:Localized.Key="Settings.DataBackup.Snapshots.Delete" />
+                                                    </Button>
+                                                </Grid>
+                                            </Border>
+                                        </DataTemplate>
+                                    </ListView.ItemTemplate>
+                                </ListView>
+                            </StackPanel>
+                        </toolkit:SettingsCard>
+                    </StackPanel>
+                </StackPanel>
+                    </DataTemplate>
+                    <DataTemplate x:Key="CloudBackupSettingsSectionTemplate" x:DataType="viewModels:SettingsViewModel">
+                        <StackPanel
+                    x:Name="CloudBackupSettingsSection"
+                    Visibility="Collapsed"
+                    Style="{StaticResource SectionPanelStyle}">
+                    <StackPanel Margin="0,8,0,0" Spacing="4">
+
+                        <toolkit:SettingsCard
+                            HorizontalContentAlignment="Right"
+                            svc:Localized.DescriptionKey="Settings.CloudBackup.Provider.Description"
+                            svc:Localized.HeaderKey="Settings.CloudBackup.Provider.Title">
+                            <toolkit:SettingsCard.HeaderIcon>
+                                <FontIcon Glyph="&#xE753;" />
+                            </toolkit:SettingsCard.HeaderIcon>
+                            <ComboBox
+                                MinWidth="150"
+                                ItemsSource="{Binding AvailableCloudBackupProviderOptions}"
+                                controls:SettingsComboBox.Value="{Binding SelectedCloudBackupProvider, Mode=TwoWay}" />
+                        </toolkit:SettingsCard>
+
+                        <toolkit:SettingsCard
+                            ContentAlignment="Vertical"
+                            HorizontalContentAlignment="Stretch"
+                            svc:Localized.DescriptionKey="Settings.CloudBackup.Connection.Description"
+                            svc:Localized.HeaderKey="Settings.CloudBackup.Connection.Title"
+                            Visibility="{Binding CloudBackupWebDavVisibility}">
+                            <toolkit:SettingsCard.HeaderIcon>
+                                <FontIcon Glyph="&#xE8B7;" />
+                            </toolkit:SettingsCard.HeaderIcon>
+                            <StackPanel Spacing="10">
+                                <StackPanel Spacing="4">
+                                    <TextBlock Style="{StaticResource SettingDescriptionTextStyle}" svc:Localized.Key="Settings.CloudBackup.ServerUrl.Label" />
+                                    <TextBox x:Name="CloudBackupServerUrlBox" Text="{Binding CloudBackupServerUrl, Mode=TwoWay}" />
+                                </StackPanel>
+                                <StackPanel Spacing="4">
+                                    <TextBlock Style="{StaticResource SettingDescriptionTextStyle}" svc:Localized.Key="Settings.CloudBackup.RemotePath.Label" />
+                                    <TextBox x:Name="CloudBackupRemotePathBox" Text="{Binding CloudBackupRemotePath, Mode=TwoWay}" />
+                                </StackPanel>
+                                <StackPanel Spacing="4">
+                                    <TextBlock Style="{StaticResource SettingDescriptionTextStyle}" svc:Localized.Key="Settings.CloudBackup.Username.Label" />
+                                    <TextBox x:Name="CloudBackupUsernameBox" Text="{Binding CloudBackupUsername, Mode=TwoWay}" />
+                                </StackPanel>
+                                <StackPanel Spacing="4">
+                                    <TextBlock Style="{StaticResource SettingDescriptionTextStyle}" svc:Localized.Key="Settings.CloudBackup.Password.Label" />
+                                    <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                                        <PasswordBox x:Name="CloudBackupPasswordBox" Grid.Column="0" />
+                                        <Button x:Name="CloudBackupSavePasswordButton" Grid.Column="1" Click="CloudBackupSavePasswordButton_Click" Style="{StaticResource ActionButtonStyle}">
+                                            <TextBlock svc:Localized.Key="Settings.CloudBackup.Password.Save" />
+                                        </Button>
+                                    </Grid>
+                                    <TextBlock Style="{StaticResource SettingDescriptionTextStyle}" Text="{Binding CloudBackupCredentialStatusText}" />
+                                </StackPanel>
+                                <Grid ColumnDefinitions="Auto,*" ColumnSpacing="8">
+                                    <Button x:Name="CloudBackupTestConnectionButton" Grid.Column="0" Click="CloudBackupTestConnectionButton_Click" IsEnabled="{Binding CloudBackupActionsEnabled}" Style="{StaticResource ActionButtonStyle}">
+                                        <TextBlock svc:Localized.Key="Settings.CloudBackup.TestConnection" />
+                                    </Button>
+                                    <TextBlock Grid.Column="1" VerticalAlignment="Center" Style="{StaticResource SettingDescriptionTextStyle}" Text="{Binding CloudBackupConnectionStatusText}" TextWrapping="Wrap" />
+                                </Grid>
+                                <TextBlock Style="{StaticResource SettingDescriptionTextStyle}" TextWrapping="Wrap" svc:Localized.Key="Settings.CloudBackup.OfficialCloudHint" />
+                            </StackPanel>
+                        </toolkit:SettingsCard>
+
+                        <toolkit:SettingsCard
+                            HorizontalContentAlignment="Right"
+                            svc:Localized.DescriptionKey="Settings.CloudBackup.TodoData.Description"
+                            svc:Localized.HeaderKey="Settings.CloudBackup.TodoData.Title">
+                            <toolkit:SettingsCard.HeaderIcon>
+                                <FontIcon Glyph="&#xE8FD;" />
+                            </toolkit:SettingsCard.HeaderIcon>
+                            <ToggleSwitch OnContent="" OffContent="" MinWidth="0" IsOn="{Binding CloudBackupTodoDataEnabled, Mode=TwoWay}" />
+                        </toolkit:SettingsCard>
+
+                        <toolkit:SettingsCard
+                            HorizontalContentAlignment="Right"
+                            svc:Localized.DescriptionKey="Settings.CloudBackup.QuickCaptureData.Description"
+                            svc:Localized.HeaderKey="Settings.CloudBackup.QuickCaptureData.Title">
+                            <toolkit:SettingsCard.HeaderIcon>
+                                <FontIcon Glyph="&#xE8A5;" />
+                            </toolkit:SettingsCard.HeaderIcon>
+                            <ToggleSwitch OnContent="" OffContent="" MinWidth="0" IsOn="{Binding CloudBackupQuickCaptureDataEnabled, Mode=TwoWay}" />
+                        </toolkit:SettingsCard>
+
+                        <toolkit:SettingsCard
+                            HorizontalContentAlignment="Right"
+                            svc:Localized.DescriptionKey="Settings.CloudBackup.WidgetStyle.Description"
+                            svc:Localized.HeaderKey="Settings.CloudBackup.WidgetStyle.Title">
+                            <toolkit:SettingsCard.HeaderIcon>
+                                <FontIcon Glyph="&#xE790;" />
+                            </toolkit:SettingsCard.HeaderIcon>
+                            <ToggleSwitch OnContent="" OffContent="" MinWidth="0" IsOn="{Binding CloudBackupWidgetStyleEnabled, Mode=TwoWay}" />
+                        </toolkit:SettingsCard>
+
+                        <toolkit:SettingsCard
+                            HorizontalContentAlignment="Right"
+                            svc:Localized.DescriptionKey="Settings.CloudBackup.Interval.Description"
+                            svc:Localized.HeaderKey="Settings.CloudBackup.Interval.Title"
+                            Visibility="{Binding CloudBackupWebDavVisibility}">
+                            <toolkit:SettingsCard.HeaderIcon>
+                                <FontIcon Glyph="&#xE823;" />
+                            </toolkit:SettingsCard.HeaderIcon>
+                            <ComboBox
+                                MinWidth="150"
+                                ItemsSource="{Binding AvailableCloudBackupIntervalOptions}"
+                                controls:SettingsComboBox.Value="{Binding SelectedCloudBackupIntervalMinutes, Mode=TwoWay}" />
+                        </toolkit:SettingsCard>
+
+                        <toolkit:SettingsCard
+                            HorizontalContentAlignment="Right"
+                            svc:Localized.DescriptionKey="Settings.CloudBackup.Retention.Description"
+                            svc:Localized.HeaderKey="Settings.CloudBackup.Retention.Title"
+                            Visibility="{Binding CloudBackupWebDavVisibility}">
+                            <toolkit:SettingsCard.HeaderIcon>
+                                <FontIcon Glyph="&#xE823;" />
+                            </toolkit:SettingsCard.HeaderIcon>
+                            <ComboBox
+                                MinWidth="150"
+                                ItemsSource="{Binding AvailableCloudBackupRetentionOptions}"
+                                controls:SettingsComboBox.Value="{Binding SelectedCloudBackupRetentionCount, Mode=TwoWay}" />
+                        </toolkit:SettingsCard>
+
+                        <toolkit:SettingsCard
+                            ContentAlignment="Vertical"
+                            HorizontalContentAlignment="Stretch"
+                            svc:Localized.DescriptionKey="Settings.CloudBackup.Snapshots.Description"
+                            svc:Localized.HeaderKey="Settings.CloudBackup.Snapshots.Title"
+                            Visibility="{Binding CloudBackupWebDavVisibility}">
+                            <toolkit:SettingsCard.HeaderIcon>
+                                <FontIcon Glyph="&#xE74E;" />
+                            </toolkit:SettingsCard.HeaderIcon>
+                            <StackPanel Spacing="12">
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <Button x:Name="CloudBackupNowButton" Click="CloudBackupNowButton_Click" IsEnabled="{Binding CloudBackupActionsEnabled}" Style="{StaticResource ActionButtonStyle}">
+                                        <StackPanel Orientation="Horizontal" Spacing="8"><FontIcon FontSize="14" Glyph="&#xE74E;" /><TextBlock svc:Localized.Key="Settings.CloudBackup.BackupNow" /></StackPanel>
+                                    </Button>
+                                    <Button x:Name="CloudBackupRefreshSnapshotsButton" Click="CloudBackupRefreshSnapshotsButton_Click" IsEnabled="{Binding CloudBackupActionsEnabled}" Style="{StaticResource ActionButtonStyle}">
+                                        <StackPanel Orientation="Horizontal" Spacing="8"><SymbolIcon Symbol="Refresh" /><TextBlock svc:Localized.Key="Settings.CloudBackup.RefreshSnapshots" /></StackPanel>
+                                    </Button>
+                                </StackPanel>
+                                <TextBlock Style="{StaticResource SettingDescriptionTextStyle}" Text="{Binding CloudBackupStatusText}" TextWrapping="Wrap" />
+                                <ListView x:Name="CloudBackupSnapshotsList" SelectionMode="None" IsItemClickEnabled="False" ItemsSource="{Binding CloudBackupRemoteSnapshots}">
+                                    <ListView.ItemTemplate>
+                                        <DataTemplate>
+                                            <Border Padding="10,8" Margin="0,2" Background="{ThemeResource CardBackgroundFillColorSecondaryBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="4">
+                                                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                                                    <StackPanel Grid.Column="0" Spacing="2">
+                                                        <TextBlock FontWeight="SemiBold" Text="{Binding Title}" TextTrimming="CharacterEllipsis" />
+                                                        <TextBlock Style="{StaticResource SettingDescriptionTextStyle}" Text="{Binding Details}" TextWrapping="Wrap" />
+                                                    </StackPanel>
+                                                    <Button Grid.Column="1" Click="CloudBackupRestoreSnapshotButton_Click" Style="{StaticResource ActionButtonStyle}">
+                                                        <TextBlock svc:Localized.Key="Settings.CloudBackup.Restore" />
                                                     </Button>
                                                 </Grid>
                                             </Border>

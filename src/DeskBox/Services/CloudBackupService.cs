@@ -178,6 +178,44 @@ internal sealed class CloudBackupService
     }
 
     /// <summary>
+    /// Stores the provider secret for the currently configured account in
+    /// the OS credential store. The key is scoped by provider+origin+username,
+    /// so changing the endpoint or account writes a fresh entry rather than
+    /// silently reusing the old one — and stale keys under the same provider
+    /// are removed so secrets never linger in the vault.
+    /// </summary>
+    internal async Task SaveCredentialAsync(string secret, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(secret);
+        string key = CloudBackupSettingsPolicy.CredentialKey(_options);
+        await _credentialStore.SetSecretAsync(key, secret, cancellationToken);
+
+        string prefix = $"{_options.Provider}:";
+        foreach (string stale in await _credentialStore.ListKeysAsync(cancellationToken))
+        {
+            if (stale.StartsWith(prefix, StringComparison.Ordinal) &&
+                !string.Equals(stale, key, StringComparison.Ordinal))
+            {
+                await _credentialStore.RemoveSecretAsync(stale, cancellationToken);
+            }
+        }
+    }
+
+    /// <summary>Whether a secret already exists for the configured account.</summary>
+    internal async Task<bool> HasCredentialAsync(CancellationToken cancellationToken = default)
+    {
+        CloudBackupOptions options = _options;
+        if (!options.IsConfigured)
+        {
+            return false;
+        }
+
+        return await _credentialStore.GetSecretAsync(
+            CloudBackupSettingsPolicy.CredentialKey(options),
+            cancellationToken) is not null;
+    }
+
+    /// <summary>
     /// Verifies the configured endpoint; for the PR-3 "test connection"
     /// button. <paramref name="secretOverride"/> lets the caller probe with
     /// a just-typed password before it is saved to the vault.
