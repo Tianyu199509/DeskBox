@@ -33,7 +33,7 @@ public sealed class CloudBackupServiceCredentialTests : IDisposable
 
         Assert.Equal(
             "s3cret-token",
-            await store.GetSecretAsync("webdav:alice@https://dav.example.com"));
+            await store.GetSecretAsync("webdav:alice@https://dav.example.com/dav"));
     }
 
     [Fact]
@@ -49,10 +49,10 @@ public sealed class CloudBackupServiceCredentialTests : IDisposable
         service.UpdateOptions(MakeOptions(serverUrl: "https://dav.example.com:8443/dav/"));
         await service.SaveCredentialAsync("new-secret");
 
-        Assert.Null(await store.GetSecretAsync("webdav:alice@https://dav.example.com"));
+        Assert.Null(await store.GetSecretAsync("webdav:alice@https://dav.example.com/dav"));
         Assert.Equal(
             "new-secret",
-            await store.GetSecretAsync("webdav:alice@https://dav.example.com:8443"));
+            await store.GetSecretAsync("webdav:alice@https://dav.example.com:8443/dav"));
     }
 
     [Fact]
@@ -70,7 +70,7 @@ public sealed class CloudBackupServiceCredentialTests : IDisposable
     public async Task HasCredential_FalseWhenNotConfigured()
     {
         var store = new InMemoryCredentialStore();
-        await store.SetSecretAsync("webdav:alice@https://dav.example.com", "s3cret");
+        await store.SetSecretAsync("webdav:alice@https://dav.example.com/dav", "s3cret");
         CloudBackupService service = CreateService(store, out _);
         service.UpdateOptions(MakeOptions(provider: CloudBackupSettingsPolicy.ProviderNone));
 

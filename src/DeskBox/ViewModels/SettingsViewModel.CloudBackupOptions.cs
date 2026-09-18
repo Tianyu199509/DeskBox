@@ -59,6 +59,7 @@ public partial class SettingsViewModel
             _settingsService.Settings.CloudBackup.CloudBackupProvider = normalized;
             _settingsService.SaveDebounced();
             PushCloudBackupOptionsToService();
+            InvalidateCloudBackupEndpointState();
         }
     }
 
@@ -89,6 +90,7 @@ public partial class SettingsViewModel
             _settingsService.Settings.CloudBackup.CloudBackupServerUrl = value ?? string.Empty;
             _settingsService.SaveDebounced();
             PushCloudBackupOptionsToService();
+            InvalidateCloudBackupEndpointState();
         }
     }
 
@@ -122,6 +124,7 @@ public partial class SettingsViewModel
             _settingsService.Settings.CloudBackup.CloudBackupRemotePath = value ?? string.Empty;
             _settingsService.SaveDebounced();
             PushCloudBackupOptionsToService();
+            InvalidateCloudBackupEndpointState();
         }
     }
 
@@ -145,6 +148,7 @@ public partial class SettingsViewModel
             _settingsService.Settings.CloudBackup.CloudBackupUsername = value ?? string.Empty;
             _settingsService.SaveDebounced();
             PushCloudBackupOptionsToService();
+            InvalidateCloudBackupEndpointState();
         }
     }
 
@@ -358,5 +362,34 @@ public partial class SettingsViewModel
     {
         App.Current?.CloudBackupService.UpdateOptions(
             CloudBackupSettingsPolicy.GetOptions(_settingsService.Settings));
+    }
+
+    /// <summary>
+    /// An endpoint-identity field changed: the credential flag, the
+    /// connection status and the fetched snapshot list all describe the
+    /// OLD endpoint and must not keep being shown. Re-checks the vault
+    /// asynchronously so switching back to a known endpoint restores its
+    /// "saved" state.
+    /// </summary>
+    private void InvalidateCloudBackupEndpointState()
+    {
+        _cloudBackupCredentialSaved = false;
+        OnPropertyChanged(nameof(CloudBackupCredentialStatusText));
+        CloudBackupConnectionStatusText = string.Empty;
+        CloudBackupRemoteSnapshots.Clear();
+        _ = RefreshCloudBackupCredentialStateAsync();
+    }
+
+    private async Task RefreshCloudBackupCredentialStateAsync()
+    {
+        try
+        {
+            CloudBackupCredentialSaved =
+                await App.Current.CloudBackupService.HasCredentialAsync();
+        }
+        catch (Exception ex)
+        {
+            App.Log($"[CloudBackup] Credential state refresh failed: {ex.Message}");
+        }
     }
 }
