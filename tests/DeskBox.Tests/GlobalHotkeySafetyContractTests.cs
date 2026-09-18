@@ -192,7 +192,7 @@ public sealed class GlobalHotkeySafetyContractTests
     public void ReservedHook_IgnoresInjectedInputAndFailsOpenWhenDeliveryFails()
     {
         string hook = Read("src/DeskBox/Services/ReservedHotkeyHookService.cs");
-        string win32 = Read("src/DeskBox/Helpers/Win32Helper.cs");
+        string win32 = Read("src/DeskBox/Platform/Win32Helper.cs");
 
         Assert.Contains("LLKHF_INJECTED", hook, StringComparison.Ordinal);
         Assert.Contains("TaskCompletionSource", hook, StringComparison.Ordinal);

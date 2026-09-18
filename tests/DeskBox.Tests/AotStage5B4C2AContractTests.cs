@@ -28,7 +28,7 @@ public sealed class AotStage5B4C2AContractTests
     public void StandardMatrix_UsesRealOsRegistrationAndSyntheticDispatchWithExactCounters()
     {
         string app = Read("src/DeskBox/App.AotHotkeySmoke.cs");
-        string helper = Read("src/DeskBox/Helpers/Win32Helper.AotHotkeySmoke.cs");
+        string helper = Read("src/DeskBox/Platform/Win32Helper.AotHotkeySmoke.cs");
 
         Assert.Contains("Ctrl + Shift", app, StringComparison.Ordinal);
         Assert.Contains("VirtualKey.F23", app, StringComparison.Ordinal);

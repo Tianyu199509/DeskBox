@@ -1143,7 +1143,7 @@ public sealed partial class SearchPopupViewModel : ObservableObject, IDisposable
             case SearchResultKind.File:
                 if (!string.IsNullOrWhiteSpace(item.DetailPath))
                 {
-                    if (DeskBox.Helpers.Win32Helper.OpenFileOrChooseApp(
+                    if (DeskBox.Platform.Win32Helper.OpenFileOrChooseApp(
                             OwnerWindowHandle,
                             item.DetailPath))
                     {

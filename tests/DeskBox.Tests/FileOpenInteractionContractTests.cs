@@ -121,7 +121,7 @@ public sealed class FileOpenInteractionContractTests
     public void UnassociatedItems_DeferToPickerAndKeepFailureToasts()
     {
         string win32Helper = File.ReadAllText(TestPaths.FromRepository(
-            "src/DeskBox/Helpers/Win32Helper.cs"));
+            "src/DeskBox/Platform/Win32Helper.cs"));
         string openItem = File.ReadAllText(TestPaths.FromRepository(
             "src/DeskBox/Services/FileService.OpenItem.cs"));
         string opening = File.ReadAllText(TestPaths.FromRepository(

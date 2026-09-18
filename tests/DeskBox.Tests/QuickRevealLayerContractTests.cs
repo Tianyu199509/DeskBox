@@ -73,7 +73,7 @@ public sealed class QuickRevealLayerContractTests
         string bounds = File.ReadAllText(TestPaths.FromRepository(
             "src/DeskBox/Views/WidgetWindowBase.Bounds.cs"));
         string helper = File.ReadAllText(TestPaths.FromRepository(
-            "src/DeskBox/Helpers/Win32Helper.cs"));
+            "src/DeskBox/Platform/Win32Helper.cs"));
 
         Assert.Contains(
             "WidgetLayerService.ShouldPreserveQuickRevealActivatingClick()",

@@ -257,7 +257,7 @@ public sealed class WidgetVisualActivityContractTests
     [Fact]
     public void AutomaticCleanup_HasNoForcedGcWorkingSetTrimOrHeapCompaction()
     {
-        string helper = Read("src/DeskBox/Helpers/Win32Helper.cs");
+        string helper = Read("src/DeskBox/Platform/Win32Helper.cs");
         string app = Read("src/DeskBox/App.xaml.cs");
         string reclaimer = Read("src/DeskBox/Services/MemoryReclaimer.cs");
 

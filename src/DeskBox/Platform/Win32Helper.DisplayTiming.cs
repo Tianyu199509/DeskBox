@@ -1,7 +1,7 @@
 using System.Runtime.InteropServices;
 using DeskBox.Models;
 
-namespace DeskBox.Helpers;
+namespace DeskBox.Platform;
 
 public static partial class Win32Helper
 {

@@ -1,6 +1,6 @@
 using System.Runtime.InteropServices;
 
-namespace DeskBox.Services;
+namespace DeskBox.Platform;
 
 /// <summary>
 /// Thin declarations for the official Everything 1.4 SDK wrapper. The build maps

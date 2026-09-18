@@ -3,15 +3,21 @@ using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
+using DeskBox.Helpers;
 using DeskBox.Models;
 using DeskBox.Services;
 using Microsoft.Win32.SafeHandles;
 
-namespace DeskBox.Helpers;
+namespace DeskBox.Platform;
 
 /// <summary>
 /// P/Invoke helpers for Win32 window management and shell operations.
 /// </summary>
+/// <remarks>
+/// Known inversion recorded at migration time: OpenFileOrChooseApp calls into
+/// the Helpers-layer ExplorerShellLaunch* machinery, so this file keeps a
+/// DeskBox.Helpers using until the launch subsystem moves as its own slice.
+/// </remarks>
 public static partial class Win32Helper
 {
     private const uint FileShareRead = 0x00000001;

@@ -1,7 +1,7 @@
 #if DESKBOX_NATIVE_AOT
 using System.Runtime.InteropServices;
 
-namespace DeskBox.Helpers;
+namespace DeskBox.Platform;
 
 public static partial class Win32Helper
 {

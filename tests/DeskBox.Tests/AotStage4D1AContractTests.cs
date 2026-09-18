@@ -7,7 +7,7 @@ public sealed class AotStage4D1AContractTests
     [Fact]
     public void DispatcherQueueOptions_UsesGenericStaticSize()
     {
-        string source = ReadRepositoryFile("src/DeskBox/Helpers/Win32Helper.cs");
+        string source = ReadRepositoryFile("src/DeskBox/Platform/Win32Helper.cs");
 
         Assert.Contains(
             "Marshal.SizeOf<DispatcherQueueOptions>()",

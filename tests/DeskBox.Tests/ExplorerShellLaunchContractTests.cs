@@ -47,7 +47,7 @@ public sealed class ExplorerShellLaunchContractTests
     public void OpenFile_TriesExplorerEnvironmentBeforeLocalShellFallback()
     {
         string source = File.ReadAllText(TestPaths.FromRepository(
-            "src/DeskBox/Helpers/Win32Helper.cs"));
+            "src/DeskBox/Platform/Win32Helper.cs"));
         string method = Slice(
             source,
             "public static bool OpenFileOrChooseApp",

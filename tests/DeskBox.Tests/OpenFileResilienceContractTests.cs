@@ -39,7 +39,7 @@ public sealed class OpenFileResilienceContractTests
     public void LocalShellExecuteFallback_ObservesPendingLaunchesWithoutAborting()
     {
         string source = File.ReadAllText(GetRepoFile(
-            "src/DeskBox/Helpers/Win32Helper.cs"));
+            "src/DeskBox/Platform/Win32Helper.cs"));
 
         Assert.Contains(
             "local ShellExecuteEx still pending for",

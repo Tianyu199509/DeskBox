@@ -729,7 +729,7 @@ public sealed class FileServiceTests : IDisposable
         string transferSource = File.ReadAllText(TestPaths.FromRepository(
             "src/DeskBox/Services/FileService.TransferProgress.cs"));
         string win32Source = File.ReadAllText(TestPaths.FromRepository(
-            "src/DeskBox/Helpers/Win32Helper.cs"));
+            "src/DeskBox/Platform/Win32Helper.cs"));
 
         // Raw File.Move/Directory.Move/File.Delete leave Explorer views
         // (including the desktop) with stale icons because they post no

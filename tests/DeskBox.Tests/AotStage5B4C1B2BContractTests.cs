@@ -74,7 +74,7 @@ public sealed class AotStage5B4C1B2BContractTests
     {
         string fixture = ReadRepositoryFile(
             "src/DeskBox/Services/AotFilePropertiesFixture.cs");
-        string win32 = ReadRepositoryFile("src/DeskBox/Helpers/Win32Helper.cs");
+        string win32 = ReadRepositoryFile("src/DeskBox/Platform/Win32Helper.cs");
 
         Assert.Contains("CaptureVisibleTopLevelWindowHandles", fixture, StringComparison.Ordinal);
         Assert.Contains("ObserveAndCloseOwnedDialogAsync", fixture, StringComparison.Ordinal);
