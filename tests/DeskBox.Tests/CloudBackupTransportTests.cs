@@ -55,7 +55,7 @@ public sealed class CloudBackupTransportTests : IDisposable
               <D:response>
                 <D:href>/dav/DeskBox/backups/DeskBox-CloudBackup-20260918-2100-abcdef12.zip</D:href>
                 <D:propstat><D:prop>
-                  <D:displayname>DeskBox-CloudBackup-20260918-2100-abcdef12.zip</D:displayname>
+                  <D:displayname>forged-displayname.zip</D:displayname>
                   <D:getcontentlength>4096</D:getcontentlength>
                   <D:getlastmodified>Fri, 18 Sep 2026 13:00:00 GMT</D:getlastmodified>
                   <D:resourcetype/>
@@ -76,6 +76,8 @@ public sealed class CloudBackupTransportTests : IDisposable
 
         Assert.Equal(2, entries.Count);
         CloudBackupRemoteEntry file = entries[0];
+        // Name is derived from the href's last segment — the server's
+        // displayname is decoration and must never be used for addressing.
         Assert.Equal("DeskBox-CloudBackup-20260918-2100-abcdef12.zip", file.Name);
         Assert.Equal(4096, file.Length);
         Assert.False(file.IsCollection);
@@ -195,7 +197,7 @@ public sealed class CloudBackupTransportTests : IDisposable
         var transport = new FakeCloudBackupTransport();
         for (int i = 1; i <= 6; i++)
         {
-            transport.Files[$"DeskBox/backups/DeskBox-CloudBackup-2026010{i}-0000-deadbeef.zip"] =
+            transport.Files[$"DeskBox/backups/DeskBox-CloudBackup-2026010{i}-000000-deadbeef.zip"] =
                 [0x50, 0x4B];
         }
 
@@ -255,6 +257,95 @@ public sealed class CloudBackupTransportTests : IDisposable
     }
 
     [Fact]
+    public async Task RunScheduledIfDue_SkipsWhileAnotherRunIsInFlight()
+    {
+        SeedTodoData();
+        var uploadStarted = new TaskCompletionSource();
+        var releaseUpload = new TaskCompletionSource();
+        var transport = new FakeCloudBackupTransport
+        {
+            UploadHook = _ =>
+            {
+                uploadStarted.TrySetResult();
+                return releaseUpload.Task;
+            }
+        };
+        (CloudBackupService service, _) = CreateService(transport);
+        service.UpdateOptions(ConfiguredOptions(lastSuccess: DateTimeOffset.MinValue));
+
+        Task first = service.RunScheduledIfDueAsync();
+        await uploadStarted.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        // A timer tick landing while an upload holds the gate must skip,
+        // not queue a second (stale-options) run behind it.
+        await service.RunScheduledIfDueAsync();
+
+        releaseUpload.SetResult();
+        await first;
+        await Task.Delay(50); // any wrongly queued run would surface here
+        Assert.Single(transport.Files);
+    }
+
+    [Fact]
+    public async Task RunBackupNow_NeverDeletesUnsafeListedNames()
+    {
+        SeedTodoData();
+        var transport = new FakeCloudBackupTransport();
+        // A hostile/broken server can list names that pass the loose prefix
+        // check but would traverse out of the backup directory on DELETE.
+        transport.Files["DeskBox/backups/DeskBox-CloudBackup-../../other.zip"] = [0x1];
+
+        (CloudBackupService service, _) = CreateService(transport);
+        service.UpdateOptions(ConfiguredOptions(retention: 1));
+
+        await service.RunBackupNowAsync();
+
+        // The forged entry is filtered before addressing: it is neither
+        // deleted nor counted against retention — only the fresh upload
+        // is a real snapshot.
+        Assert.Equal(2, transport.Files.Count);
+        Assert.True(transport.Files.ContainsKey(
+            "DeskBox/backups/DeskBox-CloudBackup-../../other.zip"));
+    }
+
+    [Fact]
+    public async Task ProbeConnection_UsesTypedSecretOverStoredOne()
+    {
+        var transport = new FakeCloudBackupTransport();
+        var backup = new DeskBoxDataBackupService(_appDataRoot);
+        var settings = new SettingsService(Path.Combine(_tempRoot, "settings"));
+        var credentials = new InMemoryCredentialStore();
+        string? usedSecret = null;
+        var service = new CloudBackupService(
+            backup, settings, credentials,
+            (options, secret) =>
+            {
+                usedSecret = secret;
+                return transport;
+            });
+        service.UpdateOptions(ConfiguredOptions());
+
+        await service.ProbeConnectionAsync("just-typed");
+
+        Assert.Equal("just-typed", usedSecret);
+        Assert.True(transport.Probed);
+    }
+
+    [Fact]
+    public async Task RunBackupNow_RemoteNameIsUtcSuffixed()
+    {
+        SeedTodoData();
+        var transport = new FakeCloudBackupTransport();
+        (CloudBackupService service, _) = CreateService(transport);
+        service.UpdateOptions(ConfiguredOptions());
+
+        CloudBackupRunResult result = await service.RunBackupNowAsync();
+
+        string fileName = result.RemoteFilePath!.Split('/').Last();
+        Assert.Matches(@"^DeskBox-CloudBackup-\d{8}T\d{6}Z-.{8}\.zip$", fileName);
+    }
+
+    [Fact]
     public async Task RunBackupNow_NotConfigured_ReturnsSkipped()
     {
         var transport = new FakeCloudBackupTransport();
@@ -284,8 +375,8 @@ public sealed class CloudBackupTransportTests : IDisposable
     public async Task ListRemoteSnapshots_ReturnsOnlySnapshotZips_NewestFirst()
     {
         var transport = new FakeCloudBackupTransport();
-        transport.Files["DeskBox/backups/DeskBox-CloudBackup-20260101-0000-aaaabbbb.zip"] = [0x1];
-        transport.Files["DeskBox/backups/DeskBox-CloudBackup-20260102-0000-aaaabbbb.zip"] = [0x1];
+        transport.Files["DeskBox/backups/DeskBox-CloudBackup-20260101-000000-aaaabbbb.zip"] = [0x1];
+        transport.Files["DeskBox/backups/DeskBox-CloudBackup-20260102-000000-aaaabbbb.zip"] = [0x1];
         transport.Files["DeskBox/backups/unrelated.txt"] = [0x1];
         transport.Files["DeskBox/backups/DeskBox-Backup-20260101-0000.zip"] = [0x1];
 
@@ -324,11 +415,35 @@ public sealed class CloudBackupTransportTests : IDisposable
     }
 
     [Fact]
-    public void CredentialKey_ScopesByProviderHostAndUser()
+    public void CredentialKey_ScopesByOriginAndUser()
     {
         CloudBackupOptions options = ConfiguredOptions(username: "alice");
-        Assert.Equal("webdav:alice@dav.example.com",
+        Assert.Equal("webdav:alice@https://dav.example.com",
             CloudBackupSettingsPolicy.CredentialKey(options));
+    }
+
+    [Fact]
+    public void CredentialKey_DistinguishesSchemeAndPort()
+    {
+        string https = CloudBackupSettingsPolicy.CredentialKey(
+            ConfiguredOptions());
+        string http = CloudBackupSettingsPolicy.CredentialKey(
+            ConfiguredOptions() with { ServerUrl = "http://dav.example.com/" });
+        string port8443 = CloudBackupSettingsPolicy.CredentialKey(
+            ConfiguredOptions() with { ServerUrl = "https://dav.example.com:8443/" });
+
+        Assert.Equal("webdav:alice@http://dav.example.com", http);
+        Assert.Equal("webdav:alice@https://dav.example.com:8443", port8443);
+        Assert.NotEqual(https, http);
+        Assert.NotEqual(https, port8443);
+    }
+
+    [Fact]
+    public void UsesPlainHttp_FlagsInsecureEndpoint()
+    {
+        Assert.False(ConfiguredOptions().UsesPlainHttp);
+        Assert.True((ConfiguredOptions() with { ServerUrl = "http://nas.local/" })
+            .UsesPlainHttp);
     }
 
     [Fact]
@@ -451,6 +566,7 @@ public sealed class CloudBackupTransportTests : IDisposable
         internal Dictionary<string, byte[]> Files { get; } = new(StringComparer.Ordinal);
         internal List<string> Directories { get; } = [];
         internal Func<string, bool>? FailOn { get; init; }
+        internal Func<string, Task>? UploadHook { get; init; }
         internal bool Probed { get; private set; }
 
         public Task ProbeAsync(CancellationToken cancellationToken = default)
@@ -482,6 +598,11 @@ public sealed class CloudBackupTransportTests : IDisposable
         public async Task UploadAsync(string remoteFilePath, Stream content, CancellationToken cancellationToken = default)
         {
             ThrowIfFailed(remoteFilePath);
+            if (UploadHook is not null)
+            {
+                await UploadHook(remoteFilePath);
+            }
+
             using var buffer = new MemoryStream();
             await content.CopyToAsync(buffer, cancellationToken);
             Files[remoteFilePath] = buffer.ToArray();
@@ -532,5 +653,8 @@ public sealed class CloudBackupTransportTests : IDisposable
             _secrets.Remove(key);
             return Task.CompletedTask;
         }
+
+        public Task<IReadOnlyList<string>> ListKeysAsync(CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<string>>(_secrets.Keys.ToList());
     }
 }

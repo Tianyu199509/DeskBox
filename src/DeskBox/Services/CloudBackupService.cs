@@ -50,24 +50,36 @@ internal sealed class CloudBackupService
     /// </summary>
     internal async Task RunScheduledIfDueAsync(CancellationToken cancellationToken = default)
     {
-        CloudBackupOptions options = _options;
-        if (!options.IsConfigured)
-        {
-            return;
-        }
-
-        if (DateTimeOffset.UtcNow - options.LastSuccessUtc < TimeSpan.FromMinutes(options.IntervalMinutes))
+        // Skip rather than queue: a manual run or a still-uploading
+        // scheduled run must not pile up a second upload behind it —
+        // especially one holding options the user already changed.
+        if (!await _gate.WaitAsync(0, cancellationToken))
         {
             return;
         }
 
         try
         {
-            await RunBackupNowAsync(cancellationToken);
+            CloudBackupOptions options = _options;   // re-read inside the gate
+            if (!options.IsConfigured)
+            {
+                return;
+            }
+
+            if (DateTimeOffset.UtcNow - options.LastSuccessUtc < TimeSpan.FromMinutes(options.IntervalMinutes))
+            {
+                return;
+            }
+
+            await RunBackupCoreAsync(options, cancellationToken);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             App.Log($"[CloudBackup] Scheduled upload failed: {ex}");
+        }
+        finally
+        {
+            _gate.Release();
         }
     }
 
@@ -77,13 +89,28 @@ internal sealed class CloudBackupService
     /// </summary>
     internal async Task<CloudBackupRunResult> RunBackupNowAsync(CancellationToken cancellationToken = default)
     {
-        CloudBackupOptions options = _options;
-        if (!options.IsConfigured)
-        {
-            return CloudBackupRunResult.NotConfigured;
-        }
-
         await _gate.WaitAsync(cancellationToken);
+        try
+        {
+            CloudBackupOptions options = _options;   // fresh read inside the gate
+            if (!options.IsConfigured)
+            {
+                return CloudBackupRunResult.NotConfigured;
+            }
+
+            return await RunBackupCoreAsync(options, cancellationToken);
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    /// <summary>Gate-held upload body shared by the scheduled and manual paths.</summary>
+    private async Task<CloudBackupRunResult> RunBackupCoreAsync(
+        CloudBackupOptions options,
+        CancellationToken cancellationToken)
+    {
         string? stagingDirectory = null;
         try
         {
@@ -100,7 +127,7 @@ internal sealed class CloudBackupService
                     WidgetStyleBackupProjection.Serialize(_settingsService.Settings)),
                 cancellationToken);
 
-            string remoteFilePath = $"{options.RemotePath}/{BuildRemoteSnapshotName(localArchivePath)}";
+            string remoteFilePath = $"{options.RemotePath}/{BuildRemoteSnapshotName()}";
             await using (FileStream content = File.OpenRead(localArchivePath))
             {
                 await transport.UploadAsync(remoteFilePath, content, cancellationToken);
@@ -117,13 +144,17 @@ internal sealed class CloudBackupService
             {
                 TryDeleteDirectory(stagingDirectory);
             }
-
-            _gate.Release();
         }
     }
 
-    /// <summary>Verifies the configured endpoint; for the PR-3 "test connection" button.</summary>
-    internal async Task ProbeConnectionAsync(CancellationToken cancellationToken = default)
+    /// <summary>
+    /// Verifies the configured endpoint; for the PR-3 "test connection"
+    /// button. <paramref name="secretOverride"/> lets the caller probe with
+    /// a just-typed password before it is saved to the vault.
+    /// </summary>
+    internal async Task ProbeConnectionAsync(
+        string? secretOverride = null,
+        CancellationToken cancellationToken = default)
     {
         CloudBackupOptions options = _options;
         if (!options.IsConfigured)
@@ -131,7 +162,9 @@ internal sealed class CloudBackupService
             throw new InvalidOperationException("Cloud backup is not configured.");
         }
 
-        ICloudBackupTransport transport = await CreateConfiguredTransportAsync(options, cancellationToken);
+        ICloudBackupTransport transport = string.IsNullOrEmpty(secretOverride)
+            ? await CreateConfiguredTransportAsync(options, cancellationToken)
+            : _transportFactory(options, secretOverride);
         await transport.ProbeAsync(cancellationToken);
     }
 
@@ -148,7 +181,7 @@ internal sealed class CloudBackupService
         ICloudBackupTransport transport = await CreateConfiguredTransportAsync(options, cancellationToken);
         IReadOnlyList<CloudBackupRemoteEntry> entries = await transport.ListAsync(options.RemotePath, cancellationToken);
         return entries
-            .Where(e => !e.IsCollection && IsSnapshotName(e.Name))
+            .Where(e => !e.IsCollection && IsSafeSnapshotBasename(e.Name))
             .OrderByDescending(e => e.Name, StringComparer.Ordinal)
             .ToList();
     }
@@ -171,10 +204,7 @@ internal sealed class CloudBackupService
 
         // Basename only — never let a remote-supplied name escape the
         // destination directory or reach outside RemotePath.
-        if (string.IsNullOrWhiteSpace(remoteFileName) ||
-            remoteFileName.Contains('/') ||
-            remoteFileName.Contains('\\') ||
-            remoteFileName.Contains(".."))
+        if (!IsSafeSnapshotBasename(remoteFileName))
         {
             throw new ArgumentException("Invalid remote snapshot name.", nameof(remoteFileName));
         }
@@ -214,20 +244,84 @@ internal sealed class CloudBackupService
         };
 
     /// <summary>
-    /// Remote name = local archive name + short device suffix, so two
-    /// devices backing up in the same minute can never overwrite each
-    /// other's snapshot.
+    /// Remote name = UTC timestamp + short device suffix, so two devices
+    /// backing up in the same minute can never overwrite each other's
+    /// snapshot — and cross-device ordering never depends on a local clock
+    /// (legacy local-time names are still parsed on read).
     /// </summary>
-    private static string BuildRemoteSnapshotName(string localArchivePath)
+    private static string BuildRemoteSnapshotName()
     {
-        string baseName = Path.GetFileNameWithoutExtension(localArchivePath);
         string deviceSuffix = DeviceIdentity.Id is { Length: >= 8 } id ? id[..8] : "nodevice";
-        return $"{baseName}-{deviceSuffix}{SnapshotFileExtension}";
+        return $"{SnapshotFilePrefix}{DateTimeOffset.UtcNow:yyyyMMdd'T'HHmmss'Z'}-{deviceSuffix}{SnapshotFileExtension}";
     }
 
     internal static bool IsSnapshotName(string name) =>
         name.StartsWith(SnapshotFilePrefix, StringComparison.Ordinal) &&
         name.EndsWith(SnapshotFileExtension, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// A snapshot name that is also safe to join into a remote path —
+    /// server-supplied names must never reach Delete/Download carrying
+    /// separators or traversal segments.
+    /// </summary>
+    internal static bool IsSafeSnapshotBasename(string name) =>
+        !string.IsNullOrEmpty(name) &&
+        IsSnapshotName(name) &&
+        !name.Contains('/') &&
+        !name.Contains('\\') &&
+        !name.Contains("..");
+
+    /// <summary>
+    /// Creation timestamp embedded in a remote snapshot name. New format:
+    /// <c>DeskBox-CloudBackup-20260918T124500Z-&lt;device8&gt;.zip</c> (UTC).
+    /// Legacy names embed local time (<c>20260918-210000</c>) and parse as
+    /// UTC on a best-effort basis.
+    /// </summary>
+    internal static DateTimeOffset? ParseSnapshotTimestamp(string name)
+    {
+        if (!IsSnapshotName(name))
+        {
+            return null;
+        }
+
+        string stem = name[..^SnapshotFileExtension.Length];
+        string[] parts = stem.Split('-');
+        if (parts.Length >= 4 &&
+            DateTimeOffset.TryParseExact(
+                parts[^2],
+                "yyyyMMdd'T'HHmmss'Z'",
+                System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.AssumeUniversal,
+                out DateTimeOffset utc))
+        {
+            return utc;
+        }
+
+        if (parts.Length >= 5 &&
+            DateTimeOffset.TryParseExact(
+                $"{parts[^3]}-{parts[^2]}",
+                "yyyyMMdd-HHmmss",
+                System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.AssumeUniversal,
+                out DateTimeOffset legacy))
+        {
+            return legacy;
+        }
+
+        // Pre-suffix legacy names end directly in the timestamp.
+        if (parts.Length >= 4 &&
+            DateTimeOffset.TryParseExact(
+                $"{parts[^2]}-{parts[^1]}",
+                "yyyyMMdd-HHmmss",
+                System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.AssumeUniversal,
+                out DateTimeOffset unsuffixed))
+        {
+            return unsuffixed;
+        }
+
+        return null;
+    }
 
     private async Task<int> ApplyRetentionAsync(
         ICloudBackupTransport transport,
@@ -236,8 +330,13 @@ internal sealed class CloudBackupService
     {
         IReadOnlyList<CloudBackupRemoteEntry> entries = await transport.ListAsync(options.RemotePath, cancellationToken);
         List<CloudBackupRemoteEntry> snapshots = entries
-            .Where(e => !e.IsCollection && IsSnapshotName(e.Name))
-            .OrderByDescending(e => e.Name, StringComparer.Ordinal)
+            .Where(e => !e.IsCollection && IsSafeSnapshotBasename(e.Name))
+            // Server-reported LastModified first, embedded timestamp as
+            // fallback — never raw name order, which legacy local-time
+            // names skew across devices.
+            .OrderByDescending(e => e.LastModified ??
+                                    ParseSnapshotTimestamp(e.Name) ??
+                                    DateTimeOffset.MinValue)
             .ToList();
 
         int pruned = 0;

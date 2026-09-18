@@ -721,5 +721,8 @@ public sealed class CloudBackupScopedTests : IDisposable
             _secrets.Remove(key);
             return Task.CompletedTask;
         }
+
+        public Task<IReadOnlyList<string>> ListKeysAsync(CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<string>>(_secrets.Keys.ToList());
     }
 }

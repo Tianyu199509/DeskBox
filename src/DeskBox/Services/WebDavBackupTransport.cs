@@ -216,7 +216,14 @@ internal sealed class WebDavBackupTransport : ICloudBackupTransport
         XDocument document;
         try
         {
-            document = XDocument.Parse(body);
+            // The response is server-controlled input: forbid DTDs outright
+            // rather than relying on the default null resolver.
+            var settings = new System.Xml.XmlReaderSettings
+            {
+                DtdProcessing = System.Xml.DtdProcessing.Prohibit
+            };
+            using var reader = System.Xml.XmlReader.Create(new StringReader(body), settings);
+            document = XDocument.Load(reader);
         }
         catch (System.Xml.XmlException ex)
         {
@@ -254,9 +261,12 @@ internal sealed class WebDavBackupTransport : ICloudBackupTransport
             }
 
             bool isCollection = prop.Element(Dav + "resourcetype")?.Element(Dav + "collection") is not null;
-            string name = prop.Element(Dav + "displayname")?.Value is { Length: > 0 } displayName
-                ? displayName
-                : Uri.UnescapeDataString(decodedPath.TrimEnd('/').Split('/').Last());
+            // The name comes from the href's last segment — displayname is
+            // server-controlled decoration and is never used for addressing
+            // (a forged name could otherwise smuggle path traversal into
+            // retention deletes).
+            string name = Uri.UnescapeDataString(
+                decodedPath.TrimEnd('/').Split('/').Last());
             long? length = long.TryParse(
                 prop.Element(Dav + "getcontentlength")?.Value,
                 NumberStyles.Integer,

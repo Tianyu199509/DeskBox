@@ -13,4 +13,7 @@ internal interface ICredentialStore
     Task SetSecretAsync(string key, string secret, CancellationToken cancellationToken = default);
 
     Task RemoveSecretAsync(string key, CancellationToken cancellationToken = default);
+
+    /// <summary>Every key currently held — used to prune stale entries after re-keying.</summary>
+    Task<IReadOnlyList<string>> ListKeysAsync(CancellationToken cancellationToken = default);
 }

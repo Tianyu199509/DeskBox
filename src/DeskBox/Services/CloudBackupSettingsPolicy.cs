@@ -23,6 +23,16 @@ internal sealed record CloudBackupOptions(
         Uri.TryCreate(ServerUrl, UriKind.Absolute, out Uri? uri) &&
         (uri.Scheme == Uri.UriSchemeHttps || uri.Scheme == Uri.UriSchemeHttp) &&
         Scope != CloudBackupDomain.None;
+
+    /// <summary>
+    /// Plain-HTTP endpoint: credentials travel base64 on a cleartext
+    /// channel. Still allowed for LAN NAS endpoints, but the settings UI
+    /// surfaces an explicit warning and the credential key includes the
+    /// scheme so switching to http always re-prompts for the password.
+    /// </summary>
+    internal bool UsesPlainHttp =>
+        Uri.TryCreate(ServerUrl, UriKind.Absolute, out Uri? uri) &&
+        uri.Scheme == Uri.UriSchemeHttp;
 }
 
 internal static class CloudBackupSettingsPolicy
@@ -68,21 +78,39 @@ internal static class CloudBackupSettingsPolicy
     }
 
     /// <summary>
-    /// Vault key for the provider secret. Scoped by provider + server host +
-    /// username so reconfiguring to a different endpoint never reuses a
-    /// stale credential.
+    /// Vault key for the provider secret. Scoped by provider + origin
+    /// (scheme + host + effective port) + username: Basic credentials are
+    /// per-origin, so a port or scheme change must never silently reuse a
+    /// secret — and https→http downgrades always re-prompt. The remote
+    /// path deliberately stays out: it is a folder choice on the same
+    /// origin, not an auth boundary.
     /// </summary>
     internal static string CredentialKey(CloudBackupOptions options)
     {
-        string host = Uri.TryCreate(options.ServerUrl, UriKind.Absolute, out Uri? uri)
-            ? uri.Host
-            : "invalid";
-        return $"{options.Provider}:{options.Username}@{host}";
+        if (Uri.TryCreate(options.ServerUrl, UriKind.Absolute, out Uri? uri))
+        {
+            string origin = uri.IsDefaultPort
+                ? $"{uri.Scheme}://{uri.Host}"
+                : $"{uri.Scheme}://{uri.Host}:{uri.Port}";
+            return $"{options.Provider}:{options.Username}@{origin.ToLowerInvariant()}";
+        }
+
+        return $"{options.Provider}:{options.Username}@invalid";
     }
 
     private static string NormalizeRemotePath(string? remotePath)
     {
         string trimmed = remotePath?.Trim().Trim('/') ?? string.Empty;
-        return trimmed.Length == 0 ? "DeskBox/backups" : trimmed;
+        if (trimmed.Length == 0)
+        {
+            return "DeskBox/backups";
+        }
+
+        // The path is joined verbatim into request URIs — a ".." segment
+        // would escape the configured folder on the user's own server.
+        return trimmed.Split('/', StringSplitOptions.RemoveEmptyEntries)
+            .Any(segment => segment is ".." or ".")
+            ? "DeskBox/backups"
+            : trimmed;
     }
 }

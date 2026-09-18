@@ -50,4 +50,24 @@ internal sealed class PasswordVaultCredentialStore : ICredentialStore
 
         return Task.CompletedTask;
     }
+
+    public Task<IReadOnlyList<string>> ListKeysAsync(CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            IReadOnlyList<string> keys = new PasswordVault()
+                .RetrieveAll()
+                .Where(credential => string.Equals(
+                    credential.Resource, Resource, StringComparison.Ordinal))
+                .Select(credential => credential.UserName)
+                .ToList();
+            return Task.FromResult(keys);
+        }
+        catch (Exception ex) when (ex is System.Runtime.InteropServices.COMException ||
+                                     ex is System.IO.FileNotFoundException)
+        {
+            // An empty vault throws on RetrieveAll.
+            return Task.FromResult<IReadOnlyList<string>>(Array.Empty<string>());
+        }
+    }
 }
