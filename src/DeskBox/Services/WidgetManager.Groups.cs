@@ -3,6 +3,7 @@ using DeskBox.Controls.WidgetContents;
 using DeskBox.Contracts;
 using DeskBox.Helpers;
 using DeskBox.Models;
+using DeskBox.Platform;
 using DeskBox.Views;
 using Windows.Graphics;
 

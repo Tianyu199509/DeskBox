@@ -1,4 +1,5 @@
 using DeskBox.Helpers;
+using DeskBox.Platform;
 using Microsoft.UI.Xaml;
 using WinRT.Interop;
 using Windows.UI;

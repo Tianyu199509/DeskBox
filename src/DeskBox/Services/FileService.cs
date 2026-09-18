@@ -1,5 +1,6 @@
 using DeskBox.Helpers;
 using DeskBox.Models;
+using DeskBox.Platform;
 using Microsoft.UI.Xaml.Media.Imaging;
 using Microsoft.Win32.SafeHandles;
 using System.ComponentModel;

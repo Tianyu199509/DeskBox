@@ -1,3 +1,5 @@
+
+using DeskBox.Platform;
 namespace DeskBox.Helpers;
 
 /// <summary>

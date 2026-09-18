@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using DeskBox.Helpers;
+using DeskBox.Platform;
 using DeskBox.Services;
 using Microsoft.UI.Dispatching;
 

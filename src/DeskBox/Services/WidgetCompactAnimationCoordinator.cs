@@ -3,6 +3,7 @@
 using System.Diagnostics;
 using DeskBox.Helpers;
 using DeskBox.Models;
+using DeskBox.Platform;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml.Media;
 using Windows.Graphics;

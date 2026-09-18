@@ -2,6 +2,7 @@ using System.Drawing;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Collections.Concurrent;
+using DeskBox.Platform;
 using DeskBox.Services;
 using Microsoft.UI.Xaml.Media.Imaging;
 

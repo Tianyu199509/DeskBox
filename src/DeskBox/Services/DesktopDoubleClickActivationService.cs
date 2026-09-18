@@ -3,6 +3,7 @@
 using System.Runtime.InteropServices;
 using System.Collections.Concurrent;
 using DeskBox.Helpers;
+using DeskBox.Platform;
 
 namespace DeskBox.Services;
 

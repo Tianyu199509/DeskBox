@@ -2,6 +2,7 @@
 
 using System.Runtime.InteropServices;
 using DeskBox.Helpers;
+using DeskBox.Platform;
 
 namespace DeskBox.Services;
 

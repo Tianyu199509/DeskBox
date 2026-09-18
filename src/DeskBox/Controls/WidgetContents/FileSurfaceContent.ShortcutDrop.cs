@@ -1,4 +1,5 @@
 using DeskBox.Helpers;
+using DeskBox.Platform;
 using DeskBox.Services;
 using Microsoft.UI.Xaml;
 using Windows.ApplicationModel.DataTransfer;

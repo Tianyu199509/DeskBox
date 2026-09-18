@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text;
 using DeskBox.Helpers;
+using DeskBox.Platform;
 using Microsoft.Win32.SafeHandles;
 
 namespace DeskBox.Services;

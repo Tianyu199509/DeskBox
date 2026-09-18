@@ -300,6 +300,34 @@ public sealed class ModuleBoundaryContractTests
     }
 
     [Fact]
+    public void DomainNamespaces_AreNotGloballyImported()
+    {
+        // Boundary checks above are source-string laws: they only see a
+        // forbidden reference when the source text names the namespace. A
+        // `global using` makes the same reference invisible (bare type names
+        // resolve without spelling the domain), silently defeating every
+        // ratchet that relies on the string. Domain namespaces must be
+        // imported explicitly, per file, where the dependency is visible.
+        Regex globalDomainUsing = new(
+            @"global\s+using\s+(?:static\s+)?(?:[\w.]+\s*=\s*)?DeskBox\.(FileSafety|Features|Platform|Sync)\b",
+            RegexOptions.Compiled);
+
+        List<string> violations = new();
+        foreach ((string path, string source) in ProductionSource())
+        {
+            foreach (Match match in globalDomainUsing.Matches(source))
+            {
+                violations.Add($"{path} globally imports DeskBox.{match.Groups[1].Value}");
+            }
+        }
+
+        Assert.True(
+            violations.Count == 0,
+            "Domain namespaces must be imported explicitly per file, not via global using:\n" +
+            string.Join('\n', violations.Select(violation => $"  {violation}")));
+    }
+
+    [Fact]
     public void FileSafetyNamespace_UsesContractsNotNativeMechanism()
     {
         // Hard-zero law, dormant until DeskBox.FileSafety exists: the policy

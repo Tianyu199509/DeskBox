@@ -1,6 +1,7 @@
 // Copyright (c) DeskBox. All rights reserved.
 
 using DeskBox.Helpers;
+using DeskBox.Platform;
 using DeskBox.Services;
 
 namespace DeskBox;

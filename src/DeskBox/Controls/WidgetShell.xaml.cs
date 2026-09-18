@@ -1,5 +1,6 @@
 using DeskBox.Contracts;
 using DeskBox.Controls.WidgetContents;
+using DeskBox.Platform;
 using DeskBox.Services;
 using DeskBox.Helpers;
 using DeskBox.Models;

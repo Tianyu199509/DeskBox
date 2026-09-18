@@ -1,4 +1,5 @@
 using DeskBox.Helpers;
+using DeskBox.Platform;
 using Windows.Graphics;
 
 namespace DeskBox.Services;

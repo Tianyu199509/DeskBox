@@ -1,5 +1,6 @@
 using DeskBox.Controls;
 using DeskBox.Helpers;
+using DeskBox.Platform;
 using DeskBox.Services;
 using Windows.Graphics;
 

@@ -1,5 +1,6 @@
-// DeskBox.Platform hosts every P/Invoke / COM-interop declaration
-// (module-boundary law: PlatformInterop_StaysInsideThePlatformDomain).
-// Imported globally so the moved legacy wrappers — Win32Helper above all —
-// keep resolving at their existing call sites without per-file using churn.
-global using DeskBox.Platform;
+// Global usings must not cover module-boundary namespaces (DeskBox.Platform,
+// DeskBox.FileSafety, DeskBox.Features, DeskBox.Sync): a global import would
+// let a file reach the domain without the namespace string appearing in its
+// source, silently bypassing the ratchet's reference checks. Every Platform
+// call site carries its own explicit `using DeskBox.Platform;` — that string
+// in the file is exactly what the boundary tests enforce on.

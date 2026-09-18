@@ -1,4 +1,5 @@
 using DeskBox.Helpers;
+using DeskBox.Platform;
 using System.Runtime.InteropServices;
 
 namespace DeskBox.Services;

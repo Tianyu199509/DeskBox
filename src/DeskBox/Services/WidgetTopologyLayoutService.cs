@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using System.Text;
 using DeskBox.Helpers;
 using DeskBox.Models;
+using DeskBox.Platform;
 
 namespace DeskBox.Services;
 

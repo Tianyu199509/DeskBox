@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Collections.Specialized;
 using System.Numerics;
 using DeskBox.Contracts;
+using DeskBox.Platform;
 using DeskBox.Services;
 using DeskBox.Helpers;
 using DeskBox.Models;

@@ -1,3 +1,4 @@
+using DeskBox.Platform;
 using System.Diagnostics;
 using System.Globalization;
 using System.Runtime.InteropServices;
