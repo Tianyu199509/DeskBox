@@ -131,7 +131,7 @@ public sealed partial class DesktopOrganizationTaskView : UserControl
                     PreviewScrollViewer.ChangeView(null, scrollOffset, null, disableAnimation: true);
             });
             UpdateRecoveryState();
-            var pendingUndo = App.Current.SettingsService.Settings.RecentOrganizationHistory.FirstOrDefault(entry =>
+            var pendingUndo = App.Current.SettingsService.OrganizationHistory.Entries.FirstOrDefault(entry =>
                 entry.ActionType == OrganizationActionType.DesktopOrganization && entry.UndoStarted && entry.CanUndo);
             AbandonUndoButton.Visibility = pendingUndo is not null
                 ? Visibility.Visible

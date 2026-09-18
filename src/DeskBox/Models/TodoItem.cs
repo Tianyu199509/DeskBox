@@ -65,6 +65,19 @@ public sealed class TodoItem
 
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
 
+    /// <summary>
+    /// Sync-layer field: ID of the device that last wrote this record.
+    /// Backfilled by the store's Normalize; used by the future sync projection.
+    /// </summary>
+    public string? DeviceId { get; set; }
+
+    /// <summary>
+    /// Sync-layer field: deletion tombstone slot. Soft-delete wiring arrives
+    /// with the sync projection; for now records are still hard-deleted and
+    /// this flag simply rides along.
+    /// </summary>
+    public bool IsDeleted { get; set; }
+
     public static string? NormalizeColorMarker(string? colorMarker)
     {
         if (string.IsNullOrWhiteSpace(colorMarker))

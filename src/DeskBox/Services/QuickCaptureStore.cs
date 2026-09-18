@@ -108,6 +108,9 @@ public sealed class QuickCaptureStore
                 item.Id = Guid.NewGuid().ToString("N");
             }
 
+            // Sync-layer field: local records all originate from this device.
+            item.DeviceId ??= DeviceIdentity.Id;
+
             item.ContentFormat = Enum.IsDefined(item.ContentFormat)
                 ? item.ContentFormat
                 : TextContentFormat.PlainText;

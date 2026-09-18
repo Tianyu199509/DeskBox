@@ -251,7 +251,7 @@ public sealed partial class DesktopOrganizationSettingsSection : UserControl
             try
             {
                 var app = global::DeskBox.App.Current;
-                var entry = app.SettingsService.Settings.RecentOrganizationHistory
+                var entry = app.SettingsService.OrganizationHistory.Entries
                     .FirstOrDefault(candidate => string.Equals(candidate.Id, historyId, StringComparison.Ordinal));
                 if (entry is not { CanUndo: true } || app.WidgetManager is not { } widgetManager)
                 {

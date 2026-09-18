@@ -207,6 +207,7 @@ https://deskbox.fun/update/stable.json
 
 2. 核对 GitHub Release 资产：
    - tag 是 `vx.y.z`
+   - **tag 显式打在发版提交上，不打在默认 HEAD**：`git tag vx.y.z <发版提交SHA>`。若工作区或 HEAD 上已叠加未发版的开发改动（如架构迁移批次），打在 HEAD 会把开发代码卷进发布 tag——此时 tag 必须指向发版批提交（例如 1.5.4 打 `d945f37`），或先推发版批并打 tag、再推开发批
    - Release 不是 Draft
    - Release 不是 Prerelease，除非刻意做预发布
    - 安装包大小和本地 `Output` 一致

@@ -644,7 +644,7 @@ public sealed class DesktopOrganizationTests : IDisposable
             TargetWidgetId = "temporary",
             CategoryIds = [DesktopOrganizationCategoryIds.Documents]
         });
-        settings.Settings.RecentOrganizationHistory.Add(new OrganizationHistoryEntry
+        settings.OrganizationHistory.Entries.Add(new OrganizationHistoryEntry
         {
             Id = "transaction",
             ActionType = OrganizationActionType.DesktopOrganization
@@ -678,7 +678,7 @@ public sealed class DesktopOrganizationTests : IDisposable
         Assert.False(File.Exists(destinationPath));
         Assert.DoesNotContain(settings.Settings.Widgets, widget => widget.Id == "temporary");
         Assert.DoesNotContain(settings.Settings.DesktopOrganizationRules, rule => rule.TargetWidgetId == "temporary");
-        Assert.DoesNotContain(settings.Settings.RecentOrganizationHistory, entry => entry.Id == "transaction");
+        Assert.DoesNotContain(settings.OrganizationHistory.Entries, entry => entry.Id == "transaction");
         Assert.False(store.HasPendingJournal);
 
     }
@@ -773,7 +773,7 @@ public sealed class DesktopOrganizationTests : IDisposable
                 }
             ]
         };
-        settings.Settings.RecentOrganizationHistory.Add(history);
+        settings.OrganizationHistory.Entries.Add(history);
         await settings.SaveAsync(notifySubscribers: false);
         // Simulate the state after a partial undo: the first item was already
         // restored to the desktop (its data still sits at the widget path,

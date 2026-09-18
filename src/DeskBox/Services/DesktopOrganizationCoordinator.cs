@@ -280,7 +280,7 @@ public sealed class DesktopOrganizationCoordinator
 
     public async Task UndoAsync(string historyId, IntPtr ownerWindowHandle = default)
     {
-        OrganizationHistoryEntry? history = _settingsService.Settings.RecentOrganizationHistory
+        OrganizationHistoryEntry? history = _settingsService.OrganizationHistory.Entries
             .FirstOrDefault(entry =>
                 string.Equals(entry.Id, historyId, StringComparison.Ordinal));
         if (history is null)

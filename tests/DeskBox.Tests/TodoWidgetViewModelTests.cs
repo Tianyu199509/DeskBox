@@ -1233,7 +1233,7 @@ public sealed class TodoWidgetViewModelTests : IDisposable
         int collectionChangeCount = 0;
         viewModel.VisibleItems.CollectionChanged += (_, _) => collectionChangeCount++;
 
-        settingsService.Settings.RecentOrganizationHistory.Add(new OrganizationHistoryEntry());
+        settingsService.OrganizationHistory.Entries.Add(new OrganizationHistoryEntry());
         viewModel.ApplyAppearance();
 
         Assert.Equal(0, collectionChangeCount);

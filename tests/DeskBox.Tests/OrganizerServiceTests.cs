@@ -43,7 +43,7 @@ public sealed class OrganizerServiceTests : IDisposable
         var item = Assert.Single(operation.CompletedItems);
         Assert.Equal(sourcePath, item.SourcePath);
         Assert.Equal(destinationPath, item.DestinationPath);
-        Assert.Same(operation.History, Assert.Single(_settingsService.Settings.RecentOrganizationHistory));
+        Assert.Same(operation.History, Assert.Single(_settingsService.OrganizationHistory.Entries));
     }
 
     [Fact]
@@ -86,7 +86,7 @@ public sealed class OrganizerServiceTests : IDisposable
         Assert.False(operation.History.CanUndo);
         Assert.True(File.Exists(sourcePath));
         Assert.False(File.Exists(Path.Combine(targetDirectory, "note (2).txt")));
-        Assert.Empty(_settingsService.Settings.RecentOrganizationHistory);
+        Assert.Empty(_settingsService.OrganizationHistory.Entries);
     }
 
     [Fact]
@@ -103,7 +103,7 @@ public sealed class OrganizerServiceTests : IDisposable
         await _organizerService.OrganizeDropAsync(widget, "Widget", [sourcePath], move: false);
 
         Assert.Equal(0, settingsChangedCount);
-        Assert.Single(_settingsService.Settings.RecentOrganizationHistory);
+        Assert.Single(_settingsService.OrganizationHistory.Entries);
     }
 
     [Fact]

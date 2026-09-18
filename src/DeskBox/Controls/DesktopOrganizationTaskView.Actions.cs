@@ -232,7 +232,7 @@ public sealed partial class DesktopOrganizationTaskView
             RetryPublicButton.Visibility = Visibility.Collapsed;
             UndoButton.Content = T("DesktopOrganization.Public.ContinueUndo");
             AbandonUndoButton.Visibility = Visibility.Visible;
-            var history = App.Current.SettingsService.Settings.RecentOrganizationHistory
+            var history = App.Current.SettingsService.OrganizationHistory.Entries
                 .FirstOrDefault(entry => entry.Id == _lastHistoryId);
             if (_hasCompletedExecution && history is not null) RenderExecutionResult(history.Items);
         }
@@ -269,7 +269,7 @@ public sealed partial class DesktopOrganizationTaskView
             return;
         }
 
-        var history = App.Current.SettingsService.Settings.RecentOrganizationHistory
+        var history = App.Current.SettingsService.OrganizationHistory.Entries
             .FirstOrDefault(entry => entry.Id == _lastHistoryId);
         if (history is null || !history.CanUndo)
         {

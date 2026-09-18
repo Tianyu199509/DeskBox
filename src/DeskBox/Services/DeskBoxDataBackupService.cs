@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
+using DeskBox.FileSafety;
 using DeskBox.Models;
 
 namespace DeskBox.Services;
@@ -635,6 +636,9 @@ public sealed partial class DeskBoxDataBackupService
         ValidateJsonFileIfPresent<QuickCaptureStoreData>(
             Path.Combine(dataDirectory, "quick-capture", "quick-capture.json"),
             s_quickCaptureDataJsonContext.StoreData);
+        ValidateJsonFileIfPresent<DesktopOrganizationHistoryData>(
+            Path.Combine(dataDirectory, "desktop-organization-history.json"),
+            DesktopOrganizationHistoryJsonContext.Default.DesktopOrganizationHistoryData);
 
         string widgetsDirectory = Path.Combine(dataDirectory, "widgets");
         if (Directory.Exists(widgetsDirectory))
@@ -1461,10 +1465,17 @@ public sealed partial class DeskBoxDataBackupService
         // they regenerate on next use, so backups skip them. Restoring a
         // backup without them only means the first weather render falls back
         // to the location flow and glance images redownload.
+        //
+        // device.id is excluded deliberately: it is installation-local
+        // identity, not user data. Carrying it into a backup would clone the
+        // device identity onto every machine that restores it — silently
+        // misattributing sync-layer provenance. DeviceIdentity.GetOrCreate
+        // regenerates a fresh ID on first use after a restore.
         return !relativePath.StartsWith("quick-capture/thumbnails/", StringComparison.OrdinalIgnoreCase) &&
                !relativePath.StartsWith("quick-capture/exports/", StringComparison.OrdinalIgnoreCase) &&
                !relativePath.StartsWith("cache/", StringComparison.OrdinalIgnoreCase) &&
-               !string.Equals(relativePath, "weather-cache.json", StringComparison.OrdinalIgnoreCase);
+               !string.Equals(relativePath, "weather-cache.json", StringComparison.OrdinalIgnoreCase) &&
+               !string.Equals(relativePath, "device.id", StringComparison.OrdinalIgnoreCase);
     }
 
     private static async Task<(long Length, string Sha256)> CopyAndHashAsync(

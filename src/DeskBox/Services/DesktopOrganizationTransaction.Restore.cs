@@ -9,7 +9,7 @@ public sealed partial class DesktopOrganizationTransaction
         await OperationGate.WaitAsync();
         try
         {
-            var history = _settingsService.Settings.RecentOrganizationHistory.FirstOrDefault(entry => entry.Id == historyId)
+            var history = _settingsService.OrganizationHistory.Entries.FirstOrDefault(entry => entry.Id == historyId)
                 ?? throw new InvalidOperationException("The organization history no longer exists.");
             if (!history.CanUndo || history.IsUndone) throw new InvalidOperationException("This operation cannot be undone.");
             var pending = await _recoveryStore.LoadAsync();
@@ -47,8 +47,11 @@ public sealed partial class DesktopOrganizationTransaction
             await RestoreItemsAsync(journal, ownerWindowHandle);
             ApplyUndoReceipts(history, journal);
             // Checked persistence: clearing the journal below must only
-            // happen once the reconciled receipts are durable in settings.
-            if (!await _settingsService.SaveCheckedAsync(notifySubscribers: false))
+            // happen once the reconciled receipts are durable. The history
+            // store lands first — the terminal entry state is the reconcile
+            // guard against reviving this undo.
+            if (!await _settingsService.OrganizationHistory.SaveCheckedAsync() ||
+                !await _settingsService.SaveCheckedAsync(notifySubscribers: false))
             {
                 throw new IOException(
                     "Persisting the undo receipts failed; the recovery journal is kept for the next launch.");
@@ -86,7 +89,7 @@ public sealed partial class DesktopOrganizationTransaction
                 return 0;
             }
 
-            var history = _settingsService.Settings.RecentOrganizationHistory.FirstOrDefault(entry => entry.Id == journal.TransactionId);
+            var history = _settingsService.OrganizationHistory.Entries.FirstOrDefault(entry => entry.Id == journal.TransactionId);
             if (journal.IsUndo)
             {
                 // Startup only reconciles receipts. Unfinished undo remains in
@@ -111,7 +114,8 @@ public sealed partial class DesktopOrganizationTransaction
                 // already-durable case is an idempotent no-op.
                 if (!history.CanUndo || history.IsUndone)
                 {
-                    if (!await _settingsService.SaveCheckedAsync(notifySubscribers: false))
+                    if (!await _settingsService.OrganizationHistory.SaveCheckedAsync() ||
+                        !await _settingsService.SaveCheckedAsync(notifySubscribers: false))
                     {
                         App.Log("[DesktopOrganization] Terminal undo state could not be persisted; journal kept.");
                         return journal.Items.Count(item => item.Completed);
@@ -127,7 +131,8 @@ public sealed partial class DesktopOrganizationTransaction
                 // happen once the reconciled receipts are durable. On
                 // failure the journal survives and the next startup retries
                 // the reconcile, which is idempotent.
-                if (!await _settingsService.SaveCheckedAsync(notifySubscribers: false))
+                if (!await _settingsService.OrganizationHistory.SaveCheckedAsync() ||
+                    !await _settingsService.SaveCheckedAsync(notifySubscribers: false))
                 {
                     App.Log("[DesktopOrganization] Undo reconcile could not persist settings; the journal is kept.");
                     return journal.Items.Count(item => item.Completed);
@@ -169,11 +174,14 @@ public sealed partial class DesktopOrganizationTransaction
             }
 
             if (history is { Items.Count: 0 })
-                _settingsService.Settings.RecentOrganizationHistory.Remove(history);
+                _settingsService.OrganizationHistory.Entries.Remove(history);
             RemoveUncommittedWidgets(journal, history);
             // Checked persistence: same rule as everywhere the journal is
-            // cleared — no durable settings, no journal removal.
-            if (!await _settingsService.SaveCheckedAsync(notifySubscribers: false))
+            // cleared — no durable state, no journal removal. Settings land
+            // first (widget/rule cleanup is the dependent half); the history
+            // entry removal is the reconcile guard and drops last.
+            if (!await _settingsService.SaveCheckedAsync(notifySubscribers: false) ||
+                !await _settingsService.OrganizationHistory.SaveCheckedAsync())
             {
                 App.Log("[DesktopOrganization] Recovery could not persist settings; the journal is kept.");
                 return restored;
@@ -198,8 +206,9 @@ public sealed partial class DesktopOrganizationTransaction
     private async Task CompactHistoryAfterJournalResolutionAsync()
     {
         if (_recoveryStore.HasPendingJournal) return;
-        if (OrganizationHistoryPolicy.ApplyRetentionPolicy(_settingsService.Settings.RecentOrganizationHistory))
+        if (OrganizationHistoryPolicy.ApplyRetentionPolicy(_settingsService.OrganizationHistory.Entries))
         {
+            await _settingsService.OrganizationHistory.SaveCheckedAsync();
             await _settingsService.SaveAsync(notifySubscribers: false);
         }
     }
@@ -216,11 +225,15 @@ public sealed partial class DesktopOrganizationTransaction
     /// </summary>
     private async Task<bool> TryFinalizeAbandonedJournalAsync(DesktopOrganizationRecoveryJournal journal)
     {
-        var history = _settingsService.Settings.RecentOrganizationHistory
+        var history = _settingsService.OrganizationHistory.Entries
             .FirstOrDefault(entry => string.Equals(entry.Id, journal.TransactionId, StringComparison.Ordinal));
         ApplyAbandonedTerminalState(journal, history);
 
-        if (!await _settingsService.SaveCheckedAsync(notifySubscribers: false))
+        // Settings first (widget/rule cleanup is the dependent half), then
+        // the history entry's terminal state — a crash between them leaves
+        // the journal for an idempotent re-finalize either way.
+        if (!await _settingsService.SaveCheckedAsync(notifySubscribers: false) ||
+            !await _settingsService.OrganizationHistory.SaveCheckedAsync())
         {
             App.Log("[DesktopOrganization] Abandoned transaction finalize could not persist settings; the journal is kept.");
             return false;
@@ -270,7 +283,7 @@ public sealed partial class DesktopOrganizationTransaction
         await OperationGate.WaitAsync();
         try
         {
-            var history = _settingsService.Settings.RecentOrganizationHistory
+            var history = _settingsService.OrganizationHistory.Entries
                 .FirstOrDefault(entry => string.Equals(entry.Id, historyId, StringComparison.Ordinal));
 
             var journal = await _recoveryStore.LoadAsync();
@@ -288,9 +301,11 @@ public sealed partial class DesktopOrganizationTransaction
             if (history is { CanUndo: true, IsUndone: false })
             {
                 MarkUndoAbandoned(history);
-                // Checked persistence: the durable state change must land
-                // before the journal is discarded below.
-                if (!await _settingsService.SaveCheckedAsync(notifySubscribers: false))
+                // Checked persistence: the durable terminal state must land
+                // before the journal is discarded below — it is the guard
+                // against reviving this undo, so it lands first.
+                if (!await _settingsService.OrganizationHistory.SaveCheckedAsync() ||
+                    !await _settingsService.SaveCheckedAsync(notifySubscribers: false))
                 {
                     throw new IOException("Persisting the abandon state failed; the recovery journal is kept.");
                 }
@@ -342,7 +357,7 @@ public sealed partial class DesktopOrganizationTransaction
     {
         if (history is { Items.Count: 0 })
         {
-            _settingsService.Settings.RecentOrganizationHistory.Remove(history);
+            _settingsService.OrganizationHistory.Entries.Remove(history);
         }
 
         var createdIds = journal.CreatedWidgetIds.ToHashSet(StringComparer.Ordinal);

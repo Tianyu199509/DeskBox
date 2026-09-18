@@ -234,7 +234,7 @@ public sealed class OnboardingExperienceTests
         string root = FindRepositoryRoot();
         string settingsModel = File.ReadAllText(Path.Combine(
             root,
-            "src/DeskBox/Models/AppSettings.cs"));
+            "src/DeskBox/Models/FileWidgetSettingsSlice.cs"));
         string userGuide = File.ReadAllText(Path.Combine(
             root,
             "docs/articles/15-getting-started.md"));

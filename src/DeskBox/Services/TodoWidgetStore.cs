@@ -80,6 +80,11 @@ public sealed class TodoWidgetStore
                 item.Id = Guid.NewGuid().ToString("N");
             }
 
+            // Sync-layer field: local records all originate from this device.
+            // Records imported with another device_id keep it (last-writer
+            // semantics are resolved by the future sync projection).
+            item.DeviceId ??= DeviceIdentity.Id;
+
             item.Text = item.Text?.Trim() ?? string.Empty;
             item.ColorMarker = TodoItem.NormalizeColorMarker(item.ColorMarker);
             item.Recurrence = TodoRecurrence.Normalize(item.Recurrence, item.DueDate);

@@ -352,7 +352,7 @@ public partial class App
             }
         }
 
-        SettingsService.Settings.RecentOrganizationHistory.Clear();
+        SettingsService.OrganizationHistory.Entries.Clear();
         RequireAotManagedUi(
             result,
             paths.OwnedFiles.All(file =>
@@ -385,7 +385,7 @@ public partial class App
             CaptureAotShellMoveDiskOnlyState(paths);
         state.MappedFolderPath = host.ViewModel.MappedFolderPath ?? string.Empty;
         state.Surface = MapAotLocalFileSurface(surface);
-        state.History = SettingsService.Settings.RecentOrganizationHistory
+        state.History = SettingsService.OrganizationHistory.Entries
             .Select(entry => new AotManagedUiShellMoveHistoryEvidence
             {
                 WidgetId = entry.WidgetId,

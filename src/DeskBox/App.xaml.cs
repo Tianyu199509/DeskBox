@@ -930,8 +930,11 @@ public partial class App : Application
         {
             string? updateInstallOutcome = TryGetUpdateInstallOutcome(Environment.GetCommandLineArgs());
             IsStartupMode = _processStartupLaunchDetected || isStartupLaunch;
-            UiDispatcherQueue = Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread();
-            WidgetSegmentedLayoutHelper.Initialize(UiDispatcherQueue);
+            RunCriticalStartupStep("dispatcher-init", () =>
+            {
+                UiDispatcherQueue = Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread();
+                WidgetSegmentedLayoutHelper.Initialize(UiDispatcherQueue);
+            });
 
             // The diagnostic report walks a snapshot of every process on the
             // machine plus several registry hives; none of it gates startup,
@@ -986,7 +989,7 @@ public partial class App : Application
 
             // Phase 1: Load settings (must complete first)
             MarkStartupProgress();
-            await SettingsService.LoadAsync();
+            await RunCriticalStartupStepAsync("settings-load", () => SettingsService.LoadAsync());
             RefreshAutomaticBackupOptionsFromSettings();
             SettingsService.SettingsChanged += OnBackupSettingsChanged;
             RunOptionalStartupStep("automatic-backup-timer", StartAutomaticBackupTimer);
@@ -1007,9 +1010,12 @@ public partial class App : Application
             });
 
             // Phase 2: Initialize services that depend on settings (parallel)
-            ThemeService = Services.GetRequiredService<ThemeService>();
-            LocalizationService = Services.GetRequiredService<LocalizationService>();
-            LocalizationService.LanguageChanged += OnLanguageChanged;
+            RunCriticalStartupStep("core-services", () =>
+            {
+                ThemeService = Services.GetRequiredService<ThemeService>();
+                LocalizationService = Services.GetRequiredService<LocalizationService>();
+                LocalizationService.LanguageChanged += OnLanguageChanged;
+            });
 
             var quickCaptureService = QuickCaptureService;
             var themeService = ThemeService;
@@ -1024,7 +1030,7 @@ public partial class App : Application
             // Parallel: independent UI setup. The tray is the lifeline: once its
             // icon is up the user can act on the process again.
             MarkStartupProgress();
-            CreateTrayIcon();
+            RunCriticalStartupStep("tray-icon", CreateTrayIcon);
             RunOptionalStartupStep("lifecycle-recovery-watcher", InitializeLifecycleRecoveryWatcher);
 
             await themeTask;
@@ -1040,13 +1046,19 @@ public partial class App : Application
                 Log("[Search] Feature disabled; search services were not initialized");
             }
 
-            WidgetManager = new WidgetManager(SettingsService, FileService, OrganizerService, themeService, quickCaptureService, localizationService);
-            WidgetManager.TrayLayerStateChanged += UpdateTrayLayerStateText;
+            RunCriticalStartupStep("widget-manager", () =>
+            {
+                WidgetManager = new WidgetManager(SettingsService, FileService, OrganizerService, themeService, quickCaptureService, localizationService);
+                WidgetManager.TrayLayerStateChanged += UpdateTrayLayerStateText;
+                // Lets a quick-reveal raise promote already-open DeskBox surfaces
+                // (search popup, settings, desktop organization) above the raised
+                // widget group; the reverse order is handled per-window at show.
+                WidgetManager.AuxiliaryWindowProvider = GetRaisedBandAuxiliaryWindowHandles;
+            });
             MarkStartupProgress();
-            // Lets a quick-reveal raise promote already-open DeskBox surfaces
-            // (search popup, settings, desktop organization) above the raised
-            // widget group; the reverse order is handled per-window at show.
-            WidgetManager.AuxiliaryWindowProvider = GetRaisedBandAuxiliaryWindowHandles;
+            // Non-null past this point: the critical step above rethrows on
+            // failure, so the launch never reaches here without a manager.
+            WidgetManager widgetManager = WidgetManager!;
             RunOptionalStartupStep("desktop-double-click-activation", () =>
             {
                 DesktopDoubleClickActivationService = new DesktopDoubleClickActivationService(
@@ -1078,7 +1090,7 @@ public partial class App : Application
             // A detached storage drive must not abort widget restoration.
             bool managedStorageRootUnavailable = false;
             RunOptionalStartupStep("storage-folder-entries", () =>
-                managedStorageRootUnavailable = !WidgetManager.SyncStorageFolderEntries());
+                managedStorageRootUnavailable = !widgetManager.SyncStorageFolderEntries());
             Task<bool>? startupDesktopLayerReadinessTask = null;
             if (IsStartupMode)
             {
@@ -1092,7 +1104,7 @@ public partial class App : Application
 
             try
             {
-                await WidgetManager.RestoreWidgetsAsync();
+                await widgetManager.RestoreWidgetsAsync();
             }
             catch (Exception ex)
             {
@@ -1100,6 +1112,7 @@ public partial class App : Application
                 // user a way back in, so a failure here degrades instead of
                 // blocking startup.
                 Log($"[Startup] Optional step 'restore-widgets' failed: {ex}");
+                RecordStartupDegradation("restore-widgets", ex.ToString());
                 if (startupDesktopLayerReadinessTask is not null)
                 {
                     startupDesktopLayerReadinessTask = null;
@@ -1112,7 +1125,7 @@ public partial class App : Application
                 SafeFireAndForget(
                     () => CompleteStartupDesktopLayerInitializationAsync(
                         startupDesktopLayerReadinessTask,
-                        WidgetManager),
+                        widgetManager),
                     "startup-desktop-layer");
             }
 
@@ -1150,7 +1163,7 @@ public partial class App : Application
                 DesktopAutoOrganizationWatcher = new DesktopAutoOrganizationWatcher(
                     SettingsService,
                     OrganizerService,
-                    WidgetManager);
+                    widgetManager);
                 DesktopAutoOrganizationWatcher.ItemOrganized += ShowDesktopAutoOrganizationNotification;
                 DesktopAutoOrganizationWatcher.Start();
             });
@@ -1220,6 +1233,7 @@ public partial class App : Application
             // every later launch.
             await EnsureStartupProducedUsableSurfaceAsync();
 
+            EnsureStartupPipeline().WriteSummary();
             Log("OnLaunched completed successfully");
             // Startup registration does not gate the first usable widgets.
             // DirectStartupService serializes migration with user toggle changes.
@@ -1788,7 +1802,7 @@ public partial class App : Application
     {
         try
         {
-            OrganizationHistoryEntry? history = SettingsService.Settings.RecentOrganizationHistory
+            OrganizationHistoryEntry? history = SettingsService.OrganizationHistory.Entries
                 .FirstOrDefault(entry =>
                     string.Equals(entry.Id, historyId, StringComparison.Ordinal));
             await OrganizerService.UndoAsync(historyId);

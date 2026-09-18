@@ -132,7 +132,7 @@ public sealed class AotStage5B4C1B2AContractTests
         Assert.Contains("case \"VerifyRestore\"", scenario, StringComparison.Ordinal);
         Assert.Contains("case \"Postflight\"", scenario, StringComparison.Ordinal);
         Assert.Contains("case \"Compensate\"", scenario, StringComparison.Ordinal);
-        Assert.Contains("RecentOrganizationHistory.Clear()", scenario, StringComparison.Ordinal);
+        Assert.Contains("OrganizationHistory.Entries.Clear()", scenario, StringComparison.Ordinal);
         Assert.Contains("SHA256.HashData(stream)", scenario, StringComparison.Ordinal);
     }
 

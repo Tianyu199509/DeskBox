@@ -50,7 +50,7 @@ public sealed class OrganizerService
 
     public IReadOnlyList<OrganizationHistoryEntry> GetRecentHistory(int maxCount = 6)
     {
-        return _settingsService.Settings.RecentOrganizationHistory
+        return _settingsService.OrganizationHistory.Entries
             .OrderByDescending(entry => entry.TimestampUtc)
             .Take(Math.Max(0, maxCount))
             .ToList();
@@ -58,7 +58,7 @@ public sealed class OrganizerService
 
     public OrganizationHistoryEntry? GetLatestUndoableEntry()
     {
-        return _settingsService.Settings.RecentOrganizationHistory
+        return _settingsService.OrganizationHistory.Entries
             .Where(entry => entry.CanUndo && !entry.IsUndone && !entry.IsFailed && entry.Items.Count > 0)
             .OrderByDescending(entry => entry.TimestampUtc)
             .FirstOrDefault();
@@ -426,7 +426,7 @@ public sealed class OrganizerService
 
     public async Task UndoAsync(string historyEntryId, IntPtr ownerWindowHandle = default)
     {
-        var historyEntry = _settingsService.Settings.RecentOrganizationHistory
+        var historyEntry = _settingsService.OrganizationHistory.Entries
             .FirstOrDefault(entry => string.Equals(entry.Id, historyEntryId, StringComparison.Ordinal));
 
         if (historyEntry is null || !historyEntry.CanUndo || historyEntry.IsUndone || historyEntry.IsFailed)
@@ -531,7 +531,7 @@ public sealed class OrganizerService
 
     private async Task AddHistoryEntryAsync(OrganizationHistoryEntry entry)
     {
-        var history = _settingsService.Settings.RecentOrganizationHistory;
+        var history = _settingsService.OrganizationHistory.Entries;
         history.Insert(0, entry);
 
         // The global budget and entry cap run here too, so a long session of
@@ -546,6 +546,10 @@ public sealed class OrganizerService
             OrganizationHistoryPolicy.CapEntryReceipts(entry);
         }
 
+        // Checked-but-ignored: a receipt persistence failure must not turn a
+        // physically completed file operation into a reported failure (the
+        // pre-split settings save had the same best-effort semantics).
+        await _settingsService.OrganizationHistory.SaveCheckedAsync();
         await _settingsService.SaveAsync(notifySubscribers: false);
     }
 

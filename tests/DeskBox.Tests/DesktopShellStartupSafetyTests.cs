@@ -58,7 +58,7 @@ public sealed class DesktopShellStartupSafetyTests
             ? -1
             : app.LastIndexOf("if (IsStartupMode)", beginDeferralIndex, StringComparison.Ordinal);
         int restoreIndex = app.IndexOf(
-            "await WidgetManager.RestoreWidgetsAsync();",
+            "await widgetManager.RestoreWidgetsAsync();",
             StringComparison.Ordinal);
         int deferredCompletionIndex = app.IndexOf(
             "CompleteStartupDesktopLayerInitializationAsync(",

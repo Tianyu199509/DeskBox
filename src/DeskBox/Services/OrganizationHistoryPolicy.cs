@@ -3,12 +3,13 @@ using DeskBox.Models;
 namespace DeskBox.Services;
 
 /// <summary>
-/// Bounds how much undo receipt data <see cref="AppSettings.RecentOrganizationHistory"/>
-/// may retain. The history lives inside settings.json, which is re-serialized
-/// on every debounced save, so a single unbounded multi-thousand-file batch
-/// permanently bloats the file on disk and the object graph rebuilt at every
-/// startup. Oversized batches keep their history entry as a summary — real
-/// item count, no receipts, never partially undoable.
+/// Bounds how much undo receipt data
+/// <see cref="DeskBox.FileSafety.DesktopOrganizationHistoryStore.Entries"/>
+/// may retain. The history lives in its own FileSafety-domain file, so a
+/// single unbounded multi-thousand-file batch would permanently bloat the
+/// store on disk and the object graph rebuilt at every startup. Oversized
+/// batches keep their history entry as a summary — real item count, no
+/// receipts, never partially undoable.
 /// </summary>
 /// <remarks>
 /// Compaction is only safe once no recovery journal can still reference the

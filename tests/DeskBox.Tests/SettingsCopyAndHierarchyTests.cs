@@ -121,6 +121,9 @@ public sealed class SettingsCopyAndHierarchyTests
         string appSettings = File.ReadAllText(Path.Combine(
             root,
             "src/DeskBox/Models/AppSettings.cs"));
+        string fileWidgetSettings = File.ReadAllText(Path.Combine(
+            root,
+            "src/DeskBox/Models/FileWidgetSettingsSlice.cs"));
         string routes = File.ReadAllText(Path.Combine(
             root,
             "src/DeskBox/Views/SettingsWindow.xaml.cs"));
@@ -146,7 +149,7 @@ public sealed class SettingsCopyAndHierarchyTests
             StringComparison.Ordinal);
         Assert.Contains(
             "public bool FileStacksEnabled { get; set; } = true;",
-            appSettings,
+            fileWidgetSettings,
             StringComparison.Ordinal);
         Assert.DoesNotContain(
             "public bool WidgetCapsuleModeEnabled",
@@ -163,7 +166,7 @@ public sealed class SettingsCopyAndHierarchyTests
             StringComparison.Ordinal);
         Assert.Contains(
             "public bool FileItemSystemContextMenuEnabled { get; set; }",
-            appSettings,
+            fileWidgetSettings,
             StringComparison.Ordinal);
 
         Assert.Contains("HoverButtonActionsSummaryText", windowXaml, StringComparison.Ordinal);

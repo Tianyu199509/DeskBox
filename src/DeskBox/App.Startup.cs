@@ -1,6 +1,7 @@
 // Copyright (c) DeskBox. All rights reserved.
 
 using DeskBox.Helpers;
+using DeskBox.Services;
 
 namespace DeskBox;
 
@@ -200,29 +201,37 @@ public partial class App
     /// Runs a startup step that is not part of the lifeline. A failure degrades
     /// to a log line so the app stays usable instead of refusing to start.
     /// </summary>
-    private static async Task RunOptionalStartupStepAsync(string name, Func<Task> step)
-    {
-        MarkStartupProgress();
-        try
-        {
-            await step();
-        }
-        catch (Exception ex)
-        {
-            Log($"[Startup] Optional step '{name}' failed: {ex}");
-        }
-    }
+    private static async Task RunOptionalStartupStepAsync(string name, Func<Task> step) =>
+        await EnsureStartupPipeline().RunOptionalAsync(name, step);
 
-    private static void RunOptionalStartupStep(string name, Action step)
-    {
-        MarkStartupProgress();
-        try
-        {
-            step();
-        }
-        catch (Exception ex)
-        {
-            Log($"[Startup] Optional step '{name}' failed: {ex}");
-        }
-    }
+    private static void RunOptionalStartupStep(string name, Action step) =>
+        EnsureStartupPipeline().RunOptional(name, step);
+
+    /// <summary>
+    /// Runs a startup step that is part of the lifeline. A failure is recorded
+    /// in the pipeline report, then rethrown so the launch's fatal path keeps
+    /// its existing semantics.
+    /// </summary>
+    private static async Task RunCriticalStartupStepAsync(string name, Func<Task> step) =>
+        await EnsureStartupPipeline().RunCriticalAsync(name, step);
+
+    private static void RunCriticalStartupStep(string name, Action step) =>
+        EnsureStartupPipeline().RunCritical(name, step);
+
+    /// <summary>
+    /// Records a degradation handled by a bespoke recovery path — one that needs
+    /// its own cleanup and cannot be expressed as a single step call (the widget
+    /// restore path must unwind the desktop-layer deferral on failure).
+    /// </summary>
+    private static void RecordStartupDegradation(string name, string? diagnostic) =>
+        EnsureStartupPipeline().RecordDegraded(name, diagnostic);
+
+    /// <summary>The startup step results collected so far, for diagnostics.</summary>
+    internal static IReadOnlyList<StartupStepResult> StartupStepResults =>
+        EnsureStartupPipeline().Snapshot();
+
+    private static StartupPipeline? s_startupPipeline;
+
+    private static StartupPipeline EnsureStartupPipeline() =>
+        s_startupPipeline ??= new StartupPipeline(Log, MarkStartupProgress);
 }

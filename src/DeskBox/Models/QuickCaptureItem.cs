@@ -46,6 +46,12 @@ public sealed class QuickCaptureItem
     public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
 
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
+
+    /// <summary>
+    /// Sync-layer field: ID of the device that last wrote this record.
+    /// Backfilled by the store's Normalize; used by the future sync projection.
+    /// </summary>
+    public string? DeviceId { get; set; }
 }
 
 public enum QuickCaptureItemType

@@ -13,7 +13,7 @@ public sealed class JsonSerializationBaselineContractTests : IDisposable
         Guid.NewGuid().ToString("N"));
 
     [Fact]
-    public void ProductionInventory_IsFrozenAtThirtyFilesAndSeventyCalls()
+    public void ProductionInventory_IsFrozenAtThirtyOneFilesAndSeventyTwoCalls()
     {
         var expected = new Dictionary<string, int>(StringComparer.Ordinal)
         {
@@ -34,6 +34,7 @@ public sealed class JsonSerializationBaselineContractTests : IDisposable
             ["src/DeskBox/Services/DeskBoxAttachmentHealthService.cs"] = 1,
             ["src/DeskBox/Services/DeskBoxDataBackupService.cs"] = 11,
             ["src/DeskBox/Services/DeskBoxDiagnosticsBundleService.cs"] = 1,
+            ["src/DeskBox/Services/DesktopOrganizationHistoryStore.cs"] = 2,
             ["src/DeskBox/Services/DesktopOrganizationRecoveryStore.cs"] = 2,
             ["src/DeskBox/Services/FeedbackService.cs"] = 4,
             ["src/DeskBox/Services/GlanceImageService.cs"] = 2,
@@ -66,8 +67,8 @@ public sealed class JsonSerializationBaselineContractTests : IDisposable
             Assert.Equal(expectedCount, actual[path]);
         }
 
-        Assert.Equal(30, actual.Count);
-        Assert.Equal(70, actual.Values.Sum());
+        Assert.Equal(31, actual.Count);
+        Assert.Equal(72, actual.Values.Sum());
 
         string[] expectedContextOwners =
         [
@@ -86,6 +87,7 @@ public sealed class JsonSerializationBaselineContractTests : IDisposable
             "src/DeskBox/Services/AppUpdateService.cs",
             "src/DeskBox/Services/DeskBoxDataBackupService.cs",
             "src/DeskBox/Services/DeskBoxDiagnosticsBundleService.cs",
+            "src/DeskBox/Services/DesktopOrganizationHistoryStore.cs",
             "src/DeskBox/Services/DesktopOrganizationRecoveryStore.cs",
             "src/DeskBox/Services/FeedbackService.cs",
             "src/DeskBox/Services/GlanceImageService.cs",
@@ -107,7 +109,7 @@ public sealed class JsonSerializationBaselineContractTests : IDisposable
             .Order()
             .ToArray();
 
-        Assert.Equal(27, actualContextOwners.Length);
+        Assert.Equal(28, actualContextOwners.Length);
         Assert.Equal(expectedContextOwners, actualContextOwners);
     }
 
@@ -426,7 +428,7 @@ public sealed class JsonSerializationBaselineContractTests : IDisposable
             ["QuickCaptureStoreData", "TodoWidgetData"],
             GenericTypeArguments(attachmentHealth, "ReadJson"));
         Assert.Equal(
-            ["AppSettings", "QuickCaptureStoreData", "TodoWidgetData"],
+            ["AppSettings", "DesktopOrganizationHistoryData", "QuickCaptureStoreData", "TodoWidgetData"],
             GenericTypeArguments(backup, "ValidateJsonFileIfPresent"));
         Assert.Contains(
             "private static T ReadJson<T>(string path, JsonTypeInfo<T> jsonTypeInfo)",

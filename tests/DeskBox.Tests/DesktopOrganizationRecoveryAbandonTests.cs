@@ -22,12 +22,12 @@ public sealed class DesktopOrganizationRecoveryAbandonTests : IDisposable
         string historyId = (await transaction.ExecuteAsync(plan)).History.Id;
 
         // The user moved the organized copy away, so the undo can never finish.
-        string destination = settings.Settings.RecentOrganizationHistory
+        string destination = settings.OrganizationHistory.Entries
             .Single(entry => entry.Id == historyId).Items.Single().DestinationPath;
         File.Delete(destination);
         await Assert.ThrowsAsync<DesktopOrganizationIncompleteUndoException>(
             () => transaction.UndoAsync(historyId));
-        OrganizationHistoryEntry stuck = settings.Settings.RecentOrganizationHistory
+        OrganizationHistoryEntry stuck = settings.OrganizationHistory.Entries
             .Single(entry => entry.Id == historyId);
         Assert.True(stuck.UndoStarted);
         Assert.True(stuck.CanUndo);
@@ -70,6 +70,64 @@ public sealed class DesktopOrganizationRecoveryAbandonTests : IDisposable
             .AbandonUndoAsync("some-undo-entry");
 
         Assert.True(recovery.HasPendingJournal);
+    }
+
+    [Fact]
+    public async Task Clear_RemovesBackupSoClearedJournalDoesNotResurrect()
+    {
+        var store = new DesktopOrganizationRecoveryStore(Path.Combine(_root, "recovery.json"));
+        var journal = new DesktopOrganizationRecoveryJournal
+        {
+            TransactionId = "cleared-transaction",
+            Items =
+            [
+                new DesktopOrganizationRecoveryItem
+                {
+                    SourcePath = Path.Combine(_root, "a.txt"),
+                    DestinationPath = Path.Combine(_root, "b", "a.txt")
+                }
+            ]
+        };
+        // Two saves: the second one uses File.Replace and produces the .bak.
+        await store.SaveAsync(journal);
+        await store.SaveAsync(journal);
+        string backupPath = ResilientJsonStore.GetBackupPath(
+            Path.Combine(_root, "recovery.json"));
+        Assert.True(File.Exists(backupPath));
+
+        store.Clear();
+
+        Assert.False(store.HasPendingJournal);
+        Assert.False(File.Exists(backupPath));
+        Assert.Null(await store.LoadAsync());
+    }
+
+    [Fact]
+    public async Task LoadAsync_CorruptPrimary_RecoversJournalFromBackup()
+    {
+        string journalPath = Path.Combine(_root, "recovery.json");
+        var store = new DesktopOrganizationRecoveryStore(journalPath);
+        var journal = new DesktopOrganizationRecoveryJournal
+        {
+            TransactionId = "rescued-transaction",
+            Items =
+            [
+                new DesktopOrganizationRecoveryItem
+                {
+                    SourcePath = Path.Combine(_root, "a.txt"),
+                    DestinationPath = Path.Combine(_root, "b", "a.txt")
+                }
+            ]
+        };
+        await store.SaveAsync(journal);
+        await store.SaveAsync(journal);
+        File.WriteAllText(journalPath, "{ not valid json !!!");
+
+        DesktopOrganizationRecoveryJournal? recovered = await store.LoadAsync();
+
+        Assert.NotNull(recovered);
+        Assert.Equal("rescued-transaction", recovered!.TransactionId);
+        Assert.Single(Directory.EnumerateFiles(_root, "recovery.json.corrupt-*"));
     }
 
     [Fact]

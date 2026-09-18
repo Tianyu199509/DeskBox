@@ -49,9 +49,10 @@ public sealed partial class DesktopOrganizationTransaction
             ValidateAvailableSpace(plan);
 
             var settings = _settingsService.Settings;
+            var historyEntries = _settingsService.OrganizationHistory.Entries;
             var originalWidgets = settings.Widgets.ToList();
             var originalRules = settings.DesktopOrganizationRules.ToList();
-            var originalHistory = settings.RecentOrganizationHistory.ToList();
+            var originalHistory = historyEntries.ToList();
             var createdDirectories = new List<string>();
             var retainedItems = new List<DesktopOrganizationRetainedItem>();
             var createdWidgets = CreateCandidateWidgets(plan, settings);
@@ -190,7 +191,7 @@ public sealed partial class DesktopOrganizationTransaction
                     journal);
                 if (history.Items.Count > 0)
                 {
-                    var previous = settings.RecentOrganizationHistory.FirstOrDefault(entry => entry.Id == history.Id);
+                    var previous = historyEntries.FirstOrDefault(entry => entry.Id == history.Id);
                     if (previous is not null)
                     {
                         OrganizationHistoryPolicy.MergeRetryHistory(history, previous);
@@ -199,30 +200,34 @@ public sealed partial class DesktopOrganizationTransaction
                             history.Targets.RemoveAll(candidate => candidate.WidgetId == target.WidgetId);
                             history.Targets.Add(target);
                         }
-                        settings.RecentOrganizationHistory.Remove(previous);
+                        historyEntries.Remove(previous);
                     }
-                    settings.RecentOrganizationHistory.Insert(0, history);
+                    historyEntries.Insert(0, history);
                     // The entry cap is enforced by the retention policy in
                     // the compaction below (single source), which also knows
                     // about active undos and journal-protected entries.
                 }
 
                 if (history.Items.Count == 0)
-                    history = settings.RecentOrganizationHistory.FirstOrDefault(entry => entry.Id == plan.Id) ?? history;
+                    history = historyEntries.FirstOrDefault(entry => entry.Id == plan.Id) ?? history;
 
                 // The result page renders this run's completed receipts; the
                 // persisted entry may be compacted to a summary right after
                 // the journal is cleared below.
                 var completedItems = history.Items.ToList();
 
-                // Saving settings is the commit point: full receipts must be
-                // on disk while the recovery journal still exists. Compacting
-                // before this save would let a crash between save and journal
-                // clear make RecoverPendingAsync treat committed moves as
-                // pending and restore them back to the desktop. SaveChecked
-                // is load-bearing here: a silent save failure would clear the
-                // journal with no durable commit anywhere.
-                if (!await _settingsService.SaveCheckedAsync(notifySubscribers: false))
+                // Saving is the commit point: full receipts must be on disk
+                // while the recovery journal still exists. Compacting before
+                // this save would let a crash between save and journal clear
+                // make RecoverPendingAsync treat committed moves as pending
+                // and restore them back to the desktop. The history store
+                // lands FIRST: it is the reconcile guard — if only settings
+                // committed, startup recovery would find no history entry and
+                // restore committed moves. SaveChecked is load-bearing on
+                // both halves: a silent save failure would clear the journal
+                // with no durable commit anywhere.
+                if (!await _settingsService.OrganizationHistory.SaveCheckedAsync() ||
+                    !await _settingsService.SaveCheckedAsync(notifySubscribers: false))
                 {
                     throw new IOException(
                         "Persisting the desktop organization commit failed; the recovery journal is kept for the next launch.");
@@ -236,8 +241,9 @@ public sealed partial class DesktopOrganizationTransaction
                 // but never rolls back — the transaction is durable and the
                 // journal is gone; at worst a larger settings file survives
                 // for the next compaction pass.
-                if (OrganizationHistoryPolicy.ApplyRetentionPolicy(settings.RecentOrganizationHistory))
+                if (OrganizationHistoryPolicy.ApplyRetentionPolicy(historyEntries))
                 {
+                    await _settingsService.OrganizationHistory.SaveCheckedAsync();
                     await _settingsService.SaveAsync(notifySubscribers: false);
                 }
 
@@ -264,7 +270,7 @@ public sealed partial class DesktopOrganizationTransaction
 
                 settings.Widgets = originalWidgets;
                 settings.DesktopOrganizationRules = originalRules;
-                settings.RecentOrganizationHistory = originalHistory;
+                _settingsService.OrganizationHistory.Entries = originalHistory;
                 // Completed physical moves are never reversed here. The
                 // journal keeps every recorded receipt, so the next launch's
                 // RecoverPendingAsync — the same path that handles a crash —
@@ -272,6 +278,9 @@ public sealed partial class DesktopOrganizationTransaction
                 // reverse move would relocate whatever happens to sit at the
                 // destination now, with no content verification at all.
                 RemoveEmptyCreatedDirectories(createdDirectories);
+                // Checked-and-ignored: a receipt save failure inside the
+                // rollback path must not replace the original exception.
+                await _settingsService.OrganizationHistory.SaveCheckedAsync();
                 await _settingsService.SaveAsync(notifySubscribers: false);
                 throw;
             }

@@ -175,7 +175,7 @@ public sealed partial class DesktopOrganizationTaskView
             : summary.SelectedCount == 0 ? T("DesktopOrganization.Layout.NoSelection")
             : Format("DesktopOrganization.Layout.TargetSummary", summary.DestinationCount, summary.NewDestinationCount);
         ExecuteButton.Content = Format("DesktopOrganization.Layout.Execute", summary.SelectedCount);
-        bool pendingUndo = App.Current.SettingsService.Settings.RecentOrganizationHistory.Any(entry =>
+        bool pendingUndo = App.Current.SettingsService.OrganizationHistory.Entries.Any(entry =>
             entry.ActionType == OrganizationActionType.DesktopOrganization && entry.UndoStarted && entry.CanUndo);
         ExecuteButton.IsEnabled = _isPreviewReady && summary.SelectedCount > 0 && !_isScanning && !_isExecuting && !_hasCompletedExecution &&
             !pendingUndo && !HasPendingRecovery;
