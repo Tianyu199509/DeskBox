@@ -287,3 +287,27 @@ AOT 内存曲线四轮批次峰值 171→399→480→491MB，批间增量 +228�
 **可选项**：功能使用遥测（哪个格子被创建、哪个 30 天零使用）可指导砍/加功能决策；但产品承诺 local-first，只能做**显式 opt-in**，不做则零损失。
 
 原则照原提案，且与 PowerToys 自身实践一致：**work on bounded problems, not the entire codebase at once**。每个版本只切一个 ownership boundary，不暂停产品，不搞 `refactor/*` 大爆炸分支。
+
+## 10. 云备份立项（WebDAV 首刀，2026-09-18 用户决策）
+
+**立项性质**：云**备份**（单向快照+按需还原），不是云同步（双向合并）。用户自配置 WebDAV；将来官方账户云只是 `ISyncTransport` 第二个实现，接缝/UI/凭证不动。与 §4 第 2C 刀不冲突不替代——envelope 语义将来可升级 merge，`updated_at`/tombstone 预埋字段继续待命。
+
+**v1 域开关（用户拍板，三个独立 toggle）**：
+
+| 开关 | 内容 |
+|---|---|
+| 待办数据 | `data/widgets/*/todo.json` + 各 widget `attachments/`（托管附件保留原名，一律用户数据） |
+| 随记数据 | `data/quick-capture/quick-capture.json` + `attachments/`（thumbnails/exports 仍排） |
+| 格子样式 | `WidgetShellSettingsSlice` 全量 + `WidgetConfig` 逐字段**样式投影**（排 position/topology/monitor——跨设备打架，用户明确"样式同步/布局不同步"） |
+
+**永不备份**：`device.id`、journal、history、`.bak`/`.corrupt-*`、`cache/`、`thumbnails/`、`settings.json` 本体、文件类格子指向的桌面文件内容（结构性白送——文件格子只存路径引用，内容从不进 data 目录）。
+
+**明确不加（v1）**：通用偏好（语言/主题/天气城市等非样式非设备设置）——用户拍板最小面，提了再加。
+
+**还原语义**：列远端快照 → 选一个 → 逐域显示元数据（来源设备/时间/记录数）→ 逐域确认覆盖。无合并、无冲突队列。
+
+**凭证纪律**：Windows Credential Manager / DPAPI；settings.json 只存 provider/url/路径/开关，**密码一个字符不落盘**。
+
+**远端布局**：`<用户路径>/DeskBox/backups/<时间戳>-<deviceid8>.zip`，保留最近 N 份（默认 5 可调）。
+
+**PR 分解**：PR-1 域范围快照+样式投影+凭证封装（纯本地）；PR-2 WebDAV transport+编排；PR-3 设置 UI；PR-4+ 官方云/真同步升级（换 envelope 语义/transport 实现）。

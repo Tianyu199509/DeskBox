@@ -47,7 +47,8 @@ public sealed class JsonSerializationBaselineContractTests : IDisposable
             ["src/DeskBox/Services/SettingsService.cs"] = 2,
             ["src/DeskBox/Services/TodoWidgetStore.cs"] = 2,
             ["src/DeskBox/Services/WeatherService.cs"] = 5,
-            ["src/DeskBox/Services/WidgetFileStackSettings.cs"] = 7
+            ["src/DeskBox/Services/WidgetFileStackSettings.cs"] = 7,
+            ["src/DeskBox/Services/WidgetStyleBackupProjection.cs"] = 1
         };
 
         Dictionary<string, int> actual = ProductionSourceFiles()
@@ -67,8 +68,8 @@ public sealed class JsonSerializationBaselineContractTests : IDisposable
             Assert.Equal(expectedCount, actual[path]);
         }
 
-        Assert.Equal(31, actual.Count);
-        Assert.Equal(72, actual.Values.Sum());
+        Assert.Equal(32, actual.Count);
+        Assert.Equal(73, actual.Values.Sum());
 
         string[] expectedContextOwners =
         [
@@ -315,8 +316,10 @@ public sealed class JsonSerializationBaselineContractTests : IDisposable
         var expectedBackupTypeInfoReferences = new Dictionary<string, int>(StringComparer.Ordinal)
         {
             ["s_settingsDataJsonContext.AppSettings"] = 1,
-            ["s_quickCaptureDataJsonContext.StoreData"] = 3,
-            ["s_todoDataJsonContext.StoreData"] = 3
+            // +1 each: ValidateScopedRestoreData validates the same store
+            // types for cloud-backup domain archives.
+            ["s_quickCaptureDataJsonContext.StoreData"] = 4,
+            ["s_todoDataJsonContext.StoreData"] = 4
         };
         foreach ((string reference, int expectedCount) in expectedAttachmentTypeInfoReferences)
         {
@@ -333,7 +336,7 @@ public sealed class JsonSerializationBaselineContractTests : IDisposable
         }
 
         Assert.Equal(
-            9,
+            11,
             expectedAttachmentTypeInfoReferences.Values.Sum() +
             expectedBackupTypeInfoReferences.Values.Sum());
         foreach (string source in new[] { attachmentHealth, backup })
@@ -441,10 +444,13 @@ public sealed class JsonSerializationBaselineContractTests : IDisposable
             backup.ReplaceLineEndings("\r\n"),
             StringComparison.Ordinal);
 
-        Assert.Single(
+        // Two call sites: classic prepare + scoped cloud prepare. Both must
+        // still go through the same atomic-write helper.
+        Assert.Equal(
+            2,
             Regex.Matches(
                 backup,
-                @"await\s+WritePendingRestoreMarkerAtomicallyAsync\s*\(").Cast<Match>());
+                @"await\s+WritePendingRestoreMarkerAtomicallyAsync\s*\(").Cast<Match>().Count());
         Assert.Contains(
             "private static async Task WritePendingRestoreMarkerAtomicallyAsync(",
             backup,
