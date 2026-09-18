@@ -1502,36 +1502,62 @@ public sealed partial class DeskBoxDataBackupService
 
     private static bool ShouldIncludeInBackup(string relativePath)
     {
-        // .tmp files and ResilientJsonStore sidecars are machine-local
-        // recovery artifacts, not user data: a stale recovery .bak inside a
-        // backup would resurrect a ghost pending journal on the restore
-        // machine, and .corrupt-* quarantines are dead forensics. The store
-        // regenerates its .bak on the next save anyway. The artifact check
-        // is scoped to the ResilientJsonStore naming convention itself
-        // ("<store>.json.bak" / "<store>.json.corrupt-*") — never to bare
-        // extensions — so a user attachment like "database.bak" or
-        // "report.corrupt-copy.pdf" is still backed up.
-        if (relativePath.EndsWith(".tmp", StringComparison.OrdinalIgnoreCase) ||
-            IsInternalStoreRecoveryArtifact(relativePath))
-        {
-            return false;
-        }
-
-        // cache/ (widget image caches) and weather-cache.json are disposable:
-        // they regenerate on next use, so backups skip them. Restoring a
-        // backup without them only means the first weather render falls back
-        // to the location flow and glance images redownload.
+        // DeskBox-managed disposable subtrees first: nothing under them is
+        // user data, and they can never contain a managed-attachments dir.
+        // cache/ (widget image caches) and weather-cache.json regenerate on
+        // next use; quick-capture exports/thumbnails are derived artifacts.
         //
         // device.id is excluded deliberately: it is installation-local
         // identity, not user data. Carrying it into a backup would clone the
         // device identity onto every machine that restores it — silently
         // misattributing sync-layer provenance. DeviceIdentity.GetOrCreate
         // regenerates a fresh ID on first use after a restore.
-        return !relativePath.StartsWith("quick-capture/thumbnails/", StringComparison.OrdinalIgnoreCase) &&
-               !relativePath.StartsWith("quick-capture/exports/", StringComparison.OrdinalIgnoreCase) &&
-               !relativePath.StartsWith("cache/", StringComparison.OrdinalIgnoreCase) &&
-               !string.Equals(relativePath, "weather-cache.json", StringComparison.OrdinalIgnoreCase) &&
-               !string.Equals(relativePath, "device.id", StringComparison.OrdinalIgnoreCase);
+        if (relativePath.StartsWith("quick-capture/thumbnails/", StringComparison.OrdinalIgnoreCase) ||
+            relativePath.StartsWith("quick-capture/exports/", StringComparison.OrdinalIgnoreCase) ||
+            relativePath.StartsWith("cache/", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(relativePath, "weather-cache.json", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(relativePath, "device.id", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        // Managed attachments are user data with their ORIGINAL filenames —
+        // no extension or sidecar heuristic may ever drop them (a user file
+        // literally named "config.json.bak" or "file.tmp" must still be
+        // backed up, or restore leaves dangling attachment metadata).
+        if (IsAttachmentPath(relativePath))
+        {
+            return true;
+        }
+
+        // .tmp files and ResilientJsonStore sidecars are machine-local
+        // recovery artifacts, not user data: a stale recovery .bak inside a
+        // backup would resurrect a ghost pending journal on the restore
+        // machine, and .corrupt-* quarantines are dead forensics. The store
+        // regenerates its .bak on the next save anyway. The artifact check
+        // is scoped to the ResilientJsonStore naming convention itself
+        // ("<store>.json.bak" / "<store>.json.corrupt-*").
+        if (relativePath.EndsWith(".tmp", StringComparison.OrdinalIgnoreCase) ||
+            IsInternalStoreRecoveryArtifact(relativePath))
+        {
+            return false;
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Managed attachment directories hold user files under their original
+    /// names — "attachments/" as a path segment anywhere under the data
+    /// root marks user content (widgets/&lt;id&gt;/attachments/,
+    /// quick-capture/attachments/, ...), which must never be filtered by
+    /// extension or store-sidecar heuristics.
+    /// </summary>
+    private static bool IsAttachmentPath(string relativePath)
+    {
+        string normalized = relativePath.Replace('\\', '/');
+        return normalized.StartsWith("attachments/", StringComparison.OrdinalIgnoreCase) ||
+               normalized.Contains("/attachments/", StringComparison.OrdinalIgnoreCase);
     }
 
     private static async Task<(long Length, string Sha256)> CopyAndHashAsync(

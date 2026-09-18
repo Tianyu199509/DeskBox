@@ -71,11 +71,15 @@ public sealed class DeskBoxDataBackupServiceTests : IDisposable
             Path.Combine(dataDirectory, "widgets", "todo", "attachments")).FullName;
         await File.WriteAllTextAsync(Path.Combine(dataDirectory, "settings.json"), "{\"language\":\"en-US\"}");
         await File.WriteAllBytesAsync(Path.Combine(attachmentDirectory, "spec.pdf"), [1, 2, 3]);
-        // User attachments keep their original names — "database.bak" and
-        // "report.corrupt-copy.pdf" are user data, not store sidecars, and
+        // User attachments keep their original names — "database.bak",
+        // "config.json.bak", "*.corrupt-*", "*.json.corrupt-*" and "*.tmp"
+        // are all user data under attachments/, not store sidecars, and
         // must never be filtered out of the backup.
         await File.WriteAllBytesAsync(Path.Combine(attachmentDirectory, "database.bak"), [10, 11]);
+        await File.WriteAllBytesAsync(Path.Combine(attachmentDirectory, "config.json.bak"), [10, 11]);
         await File.WriteAllBytesAsync(Path.Combine(attachmentDirectory, "report.corrupt-copy.pdf"), [12, 13]);
+        await File.WriteAllBytesAsync(Path.Combine(attachmentDirectory, "report.json.corrupt-copy"), [12, 13]);
+        await File.WriteAllBytesAsync(Path.Combine(attachmentDirectory, "file.tmp"), [12, 13]);
         // Internal ResilientJsonStore sidecars are the only .bak/.corrupt-*
         // paths that belong outside the backup.
         await File.WriteAllTextAsync(Path.Combine(dataDirectory, "settings.json.bak"), "{}");
@@ -103,7 +107,10 @@ public sealed class DeskBoxDataBackupServiceTests : IDisposable
         Assert.NotNull(archive.GetEntry("data/settings.json"));
         Assert.NotNull(archive.GetEntry("data/widgets/todo/attachments/spec.pdf"));
         Assert.NotNull(archive.GetEntry("data/widgets/todo/attachments/database.bak"));
+        Assert.NotNull(archive.GetEntry("data/widgets/todo/attachments/config.json.bak"));
         Assert.NotNull(archive.GetEntry("data/widgets/todo/attachments/report.corrupt-copy.pdf"));
+        Assert.NotNull(archive.GetEntry("data/widgets/todo/attachments/report.json.corrupt-copy"));
+        Assert.NotNull(archive.GetEntry("data/widgets/todo/attachments/file.tmp"));
         Assert.Null(archive.GetEntry("data/settings.json.bak"));
         Assert.Null(archive.GetEntry("data/desktop-organization-recovery.json.bak"));
         Assert.Null(archive.GetEntry("data/ignored.tmp"));
@@ -124,7 +131,7 @@ public sealed class DeskBoxDataBackupServiceTests : IDisposable
         Assert.Equal(2, manifest.RootElement.GetProperty("schemaVersion").GetInt32());
         Assert.Equal("manual", manifest.RootElement.GetProperty("kind").GetString());
         JsonElement[] files = manifest.RootElement.GetProperty("files").EnumerateArray().ToArray();
-        Assert.Equal(4, files.Length);
+        Assert.Equal(7, files.Length);
         Assert.All(files, file =>
         {
             Assert.Equal(JsonValueKind.String, file.GetProperty("path").ValueKind);
