@@ -430,6 +430,138 @@ public sealed class CloudBackupScopedTests : IDisposable
         await store.RemoveSecretAsync("webdav"); // absent → no-op
     }
 
+    [Fact]
+    public async Task ExportScoped_WritesSourceDeviceIdInManifest()
+    {
+        string dataDir = Directory.CreateDirectory(Path.Combine(_appDataRoot, "data")).FullName;
+        var todoStore = new TodoWidgetStore(Path.Combine(dataDir, "widgets"), "todo-widget");
+        await todoStore.SaveAsync(new TodoWidgetData { Items = [] });
+        var service = new DeskBoxDataBackupService(_appDataRoot);
+
+        string backupPath = await service.ExportScopedBackupAsync(
+            _exportRoot, CloudBackupDomain.TodoData);
+
+        using ZipArchive archive = ZipFile.OpenRead(backupPath);
+        JsonObject manifest = await ReadManifestAsync(archive);
+        Assert.Equal(
+            DeviceIdentity.Id,
+            manifest["sourceDeviceId"]!.GetValue<string>());
+    }
+
+    [Fact]
+    public async Task ScopedRestore_OversizedStyleEntry_Rejected()
+    {
+        // A scoped archive whose widget-style.json exceeds the dedicated
+        // cap must be rejected at prepare — the entry bypasses the per-file
+        // manifest but not the extraction safety budget.
+        string archivePath = Path.Combine(_exportRoot, "oversized-style.zip");
+        await using (FileStream stream = File.Create(archivePath))
+        {
+            using var archive = new ZipArchive(stream, ZipArchiveMode.Create);
+            ZipArchiveEntry manifestEntry = archive.CreateEntry("manifest.json");
+            await using (Stream manifestStream = manifestEntry.Open())
+            await using (var writer = new StreamWriter(manifestStream))
+            {
+                await writer.WriteAsync(
+                    "{\"schemaVersion\":2,\"kind\":\"cloud-backup\"," +
+                    "\"createdAtUtc\":\"2026-09-18T00:00:00+00:00\"," +
+                    "\"appVersion\":\"1.0.0.0\",\"domains\":[\"widget-style\"]}");
+            }
+
+            ZipArchiveEntry styleEntry = archive.CreateEntry("widget-style.json");
+            await using Stream styleStream = styleEntry.Open();
+            byte[] chunk = new byte[1024 * 1024];
+            Array.Fill(chunk, (byte)'x');
+            for (int i = 0; i < 9; i++)
+            {
+                await styleStream.WriteAsync(chunk);
+            }
+        }
+
+        var service = new DeskBoxDataBackupService(_appDataRoot);
+        InvalidDataException ex = await Assert.ThrowsAsync<InvalidDataException>(() =>
+            service.PrepareScopedRestoreAsync(archivePath, CloudBackupDomain.WidgetStyle));
+        Assert.Contains("widget-style", ex.Message);
+        Assert.False(File.Exists(service.PendingRestoreMarkerPath));
+    }
+
+    [Fact]
+    public async Task ScopedRestore_RemapsOrphanedTodoWidgetOntoLiveWidget()
+    {
+        // Live device has todo widget "target-widget"; the snapshot was
+        // taken with "source-widget" (another device, or a recreated
+        // widget). Prepare must remap the orphan onto the live widget so
+        // the restored data is actually visible.
+        string dataDir = Directory.CreateDirectory(Path.Combine(_appDataRoot, "data")).FullName;
+        await File.WriteAllTextAsync(
+            Path.Combine(dataDir, "settings.json"),
+            "{\"widgets\":[{\"id\":\"target-widget\",\"widgetKind\":\"Todo\"}]}");
+        var liveTodo = new TodoWidgetStore(Path.Combine(dataDir, "widgets"), "target-widget");
+        await liveTodo.SaveAsync(new TodoWidgetData
+        {
+            Items = [new TodoItem { Id = "old", Text = "local task" }]
+        });
+
+        string sourceRoot = Path.Combine(_tempRoot, "source-app-data");
+        string sourceData = Directory.CreateDirectory(Path.Combine(sourceRoot, "data")).FullName;
+        var sourceTodo = new TodoWidgetStore(Path.Combine(sourceData, "widgets"), "source-widget");
+        await sourceTodo.SaveAsync(new TodoWidgetData
+        {
+            Items = [new TodoItem { Id = "new", Text = "cloud task" }]
+        });
+        string backupPath = await new DeskBoxDataBackupService(sourceRoot)
+            .ExportScopedBackupAsync(_exportRoot, CloudBackupDomain.TodoData);
+
+        var service = new DeskBoxDataBackupService(_appDataRoot);
+        DeskBoxRestorePreparation prep = await service.PrepareScopedRestoreAsync(
+            backupPath, CloudBackupDomain.TodoData);
+
+        DeskBoxTodoWidgetRemap remap = Assert.Single(prep.TodoWidgetRemaps!);
+        Assert.Equal("source-widget", remap.SourceWidgetId);
+        Assert.Equal("target-widget", remap.TargetWidgetId);
+        Assert.Empty(prep.UnmappedTodoWidgetIds!);
+        Assert.Equal(DeviceIdentity.Id, prep.SourceDeviceId);
+
+        DeskBoxRestoreApplyResult result = await service.ApplyPendingRestoreAsync();
+        Assert.True(result.Succeeded, result.ErrorMessage);
+        TodoWidgetData restored = await new TodoWidgetStore(
+            Path.Combine(dataDir, "widgets"), "target-widget").LoadAsync();
+        Assert.Equal("cloud task", Assert.Single(restored.Items).Text);
+    }
+
+    [Fact]
+    public async Task ScopedRestore_OrphanWithoutFreeTarget_PreservedAndReported()
+    {
+        // No live todo widget at all (e.g. wiped device): the orphan stays
+        // on disk under its source id and is reported — data preserved,
+        // honestly labelled unmapped.
+        string dataDir = Directory.CreateDirectory(Path.Combine(_appDataRoot, "data")).FullName;
+        await File.WriteAllTextAsync(Path.Combine(dataDir, "settings.json"), "{}");
+
+        string sourceRoot = Path.Combine(_tempRoot, "source-app-data");
+        string sourceData = Directory.CreateDirectory(Path.Combine(sourceRoot, "data")).FullName;
+        var sourceTodo = new TodoWidgetStore(Path.Combine(sourceData, "widgets"), "source-widget");
+        await sourceTodo.SaveAsync(new TodoWidgetData
+        {
+            Items = [new TodoItem { Id = "new", Text = "cloud task" }]
+        });
+        string backupPath = await new DeskBoxDataBackupService(sourceRoot)
+            .ExportScopedBackupAsync(_exportRoot, CloudBackupDomain.TodoData);
+
+        var service = new DeskBoxDataBackupService(_appDataRoot);
+        DeskBoxRestorePreparation prep = await service.PrepareScopedRestoreAsync(
+            backupPath, CloudBackupDomain.TodoData);
+
+        Assert.Empty(prep.TodoWidgetRemaps!);
+        Assert.Equal(["source-widget"], prep.UnmappedTodoWidgetIds);
+
+        DeskBoxRestoreApplyResult result = await service.ApplyPendingRestoreAsync();
+        Assert.True(result.Succeeded, result.ErrorMessage);
+        TodoWidgetData orphan = await new TodoWidgetStore(
+            Path.Combine(dataDir, "widgets"), "source-widget").LoadAsync();
+        Assert.Equal("cloud task", Assert.Single(orphan.Items).Text);
+    }
+
     private static async Task<JsonObject> ReadManifestAsync(ZipArchive archive)
     {
         ZipArchiveEntry entry = Assert.IsType<ZipArchiveEntry>(

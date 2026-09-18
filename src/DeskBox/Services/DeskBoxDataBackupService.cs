@@ -1,6 +1,7 @@
 using System.IO.Compression;
 using System.Security.Cryptography;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
 using DeskBox.FileSafety;
@@ -14,6 +15,9 @@ public sealed partial class DeskBoxDataBackupService
     private const int MinimumSupportedBackupSchemaVersion = 1;
     private const int MaxPreRestoreBackupCount = 5;
     private const int MaxRestoreFileCount = 100_000;
+    // The widget-style document is a small projected JSON (~60 scalar
+    // fields); 8 MiB is far beyond any legitimate document.
+    private const long MaxWidgetStyleEntryBytes = 8L * 1024 * 1024;
     private const long MaxRestoreFileSizeBytes = 4L * 1024 * 1024 * 1024;
     private const long MaxRestoreTotalSizeBytes = 16L * 1024 * 1024 * 1024;
     private const int MaxSnapshotCopyAttempts = 4;
@@ -379,7 +383,8 @@ public sealed partial class DeskBoxDataBackupService
                 snapshotDataDirectory,
                 cancellationToken,
                 CloudBackupDomains.ToManifestNames(shippedScope),
-                rootEntries);
+                rootEntries,
+                DeviceIdentity.Id);
             App.Log($"[DataBackup] Exported scoped backup '{backupPath}' (domains: {shippedScope}).");
             return backupPath;
         }
@@ -582,6 +587,11 @@ public sealed partial class DeskBoxDataBackupService
                 cancellationToken);
             ValidateScopedRestoreData(stagedDataDirectory, appliedScope);
 
+            (IReadOnlyList<DeskBoxTodoWidgetRemap> remaps, IReadOnlyList<string> unmapped) =
+                appliedScope.HasFlag(CloudBackupDomain.TodoData)
+                    ? await RemapOrphanedTodoWidgetsAsync(stagedDataDirectory, cancellationToken)
+                    : (Array.Empty<DeskBoxTodoWidgetRemap>(), Array.Empty<string>());
+
             var marker = new PendingRestoreMarker(
                 stagingRoot,
                 archivePath,
@@ -601,7 +611,10 @@ public sealed partial class DeskBoxDataBackupService
                 archiveInfo.TotalUncompressedBytes,
                 archiveInfo.Manifest.SchemaVersion,
                 archiveInfo.Manifest.SchemaVersion >= 2,
-                CloudBackupDomains.ToManifestNames(appliedScope));
+                CloudBackupDomains.ToManifestNames(appliedScope),
+                archiveInfo.Manifest.SourceDeviceId,
+                remaps,
+                unmapped);
         }
         catch
         {
@@ -661,6 +674,128 @@ public sealed partial class DeskBoxDataBackupService
                     s_todoDataJsonContext.StoreData);
             }
         }
+    }
+
+    /// <summary>
+    /// Todo stores are keyed by widget id, which is device-local. A snapshot
+    /// taken on another device — or before the widget was deleted and
+    /// recreated — stages widgets/&lt;id&gt;/ dirs the live settings do not
+    /// know; restoring them verbatim would wipe the live stores AND leave
+    /// the restored data invisible. Orphaned staged dirs are remapped onto
+    /// live todo widgets the snapshot does not already cover; leftovers
+    /// stay under their source id (preserved on disk) and are reported.
+    /// </summary>
+    private async Task<(IReadOnlyList<DeskBoxTodoWidgetRemap> Remaps, IReadOnlyList<string> Unmapped)>
+        RemapOrphanedTodoWidgetsAsync(
+            string stagedDataDirectory,
+            CancellationToken cancellationToken)
+    {
+        const int MaxOrphanScanDepth = 64;
+        string stagedWidgetsDirectory = Path.Combine(stagedDataDirectory, "widgets");
+        if (!Directory.Exists(stagedWidgetsDirectory))
+        {
+            return (Array.Empty<DeskBoxTodoWidgetRemap>(), Array.Empty<string>());
+        }
+
+        // Widget dirs that actually carry todo-domain payload in the snapshot.
+        var stagedIds = new List<string>();
+        foreach (string widgetDir in Directory.EnumerateDirectories(stagedWidgetsDirectory))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            bool carriesTodoDomain = Directory
+                .EnumerateFiles(widgetDir, "*", SearchOption.AllDirectories)
+                .Take(MaxOrphanScanDepth)
+                .Select(path => Path.GetRelativePath(stagedDataDirectory, path)
+                    .Replace(Path.DirectorySeparatorChar, '/'))
+                .Any(rel => CloudBackupDomains.IsInDomain(CloudBackupDomain.TodoData, rel));
+            if (carriesTodoDomain)
+            {
+                stagedIds.Add(Path.GetFileName(widgetDir));
+            }
+        }
+
+        if (stagedIds.Count == 0)
+        {
+            return (Array.Empty<DeskBoxTodoWidgetRemap>(), Array.Empty<string>());
+        }
+
+        HashSet<string> liveTodoIds = await ReadLiveTodoWidgetIdsAsync(cancellationToken);
+        var stagedSet = new HashSet<string>(stagedIds, StringComparer.Ordinal);
+        List<string> freeTargets = liveTodoIds
+            .Where(id => !stagedSet.Contains(id))
+            .OrderBy(id => id, StringComparer.Ordinal)
+            .ToList();
+
+        var remaps = new List<DeskBoxTodoWidgetRemap>();
+        var unmapped = new List<string>();
+        int targetIndex = 0;
+        foreach (string orphanId in stagedIds
+                     .Where(id => !liveTodoIds.Contains(id))
+                     .OrderBy(id => id, StringComparer.Ordinal))
+        {
+            if (targetIndex >= freeTargets.Count)
+            {
+                unmapped.Add(orphanId);
+                continue;
+            }
+
+            string targetId = freeTargets[targetIndex++];
+            // freeTargets excludes staged ids by construction, so the
+            // destination directory cannot already exist in the snapshot.
+            Directory.Move(
+                Path.Combine(stagedWidgetsDirectory, orphanId),
+                Path.Combine(stagedWidgetsDirectory, targetId));
+            remaps.Add(new DeskBoxTodoWidgetRemap(orphanId, targetId));
+            App.Log($"[DataBackup] Scoped restore remapped todo store '{orphanId}' -> '{targetId}'.");
+        }
+
+        return (remaps, unmapped);
+    }
+
+    /// <summary>
+    /// Live todo-widget ids from the data dir's settings.json. A wiped
+    /// device (the disaster-recovery case) has no settings yet — the empty
+    /// set just leaves every orphan unmapped, which is the honest answer.
+    /// </summary>
+    private async Task<HashSet<string>> ReadLiveTodoWidgetIdsAsync(CancellationToken cancellationToken)
+    {
+        var ids = new HashSet<string>(StringComparer.Ordinal);
+        string settingsPath = Path.Combine(DataDirectory, "settings.json");
+        if (!File.Exists(settingsPath))
+        {
+            return ids;
+        }
+
+        try
+        {
+            byte[] json = await File.ReadAllBytesAsync(settingsPath, cancellationToken);
+            if (JsonNode.Parse(json)?["widgets"] is not JsonArray widgets)
+            {
+                return ids;
+            }
+
+            foreach (JsonNode? node in widgets)
+            {
+                if (node is not JsonObject element ||
+                    element["id"] is not JsonValue idValue ||
+                    !idValue.TryGetValue(out string? id) ||
+                    string.IsNullOrEmpty(id) ||
+                    element["widgetKind"] is not JsonValue kindValue ||
+                    !kindValue.TryGetValue(out string? kind) ||
+                    !string.Equals(kind, nameof(WidgetKind.Todo), StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                ids.Add(id);
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            App.Log($"[DataBackup] Could not enumerate live todo widgets for scoped remap: {ex.Message}");
+        }
+
+        return ids;
     }
 
     public async Task CancelPendingRestoreAsync(CancellationToken cancellationToken = default)
@@ -993,19 +1128,30 @@ public sealed partial class DeskBoxDataBackupService
                 throw new InvalidDataException("The backup data root entry must be a directory.");
             }
 
-            if (!isWidgetStyleEntry)
+            if (isWidgetStyleEntry)
+            {
+                // The style entry bypasses the per-file manifest but not the
+                // safety budget: it is a small JSON document by construction,
+                // so a dedicated cap stops a crafted archive from expanding
+                // unboundedly before the DOM parse.
+                if (entry.Length > MaxWidgetStyleEntryBytes)
+                {
+                    throw new InvalidDataException("The backup widget-style document is oversized.");
+                }
+            }
+            else
             {
                 fileCount++;
                 if (fileCount > MaxRestoreFileCount || entry.Length > MaxRestoreFileSizeBytes)
                 {
                     throw new InvalidDataException("The backup contains too many files or an oversized file.");
                 }
+            }
 
-                totalUncompressedBytes = checked(totalUncompressedBytes + entry.Length);
-                if (totalUncompressedBytes > MaxRestoreTotalSizeBytes)
-                {
-                    throw new InvalidDataException("The expanded backup is too large.");
-                }
+            totalUncompressedBytes = checked(totalUncompressedBytes + entry.Length);
+            if (totalUncompressedBytes > MaxRestoreTotalSizeBytes)
+            {
+                throw new InvalidDataException("The expanded backup is too large.");
             }
 
             if (!extractedPaths.Add(destinationPath))
@@ -1692,7 +1838,8 @@ public sealed partial class DeskBoxDataBackupService
         string snapshotDataDirectory,
         CancellationToken cancellationToken,
         IReadOnlyList<string>? manifestDomains = null,
-        IReadOnlyDictionary<string, byte[]>? rootEntries = null)
+        IReadOnlyDictionary<string, byte[]>? rootEntries = null,
+        string? sourceDeviceId = null)
     {
         (string SourcePath, string RelativePath)[] sourceFiles = Directory
             .EnumerateFiles(snapshotDataDirectory, "*", SearchOption.AllDirectories)
@@ -1758,7 +1905,8 @@ public sealed partial class DeskBoxDataBackupService
                         typeof(DeskBoxDataBackupService).Assembly.GetName().Version?.ToString() ?? "unknown",
                         DataDirectory,
                         fileManifest,
-                        manifestDomains);
+                        manifestDomains,
+                        sourceDeviceId);
                     ZipArchiveEntry manifestEntry = archive.CreateEntry("manifest.json", CompressionLevel.Fastest);
                     await using (Stream manifestStream = manifestEntry.Open())
                     {
@@ -2136,7 +2284,13 @@ public sealed partial class DeskBoxDataBackupService
         // a whole-directory swap would wipe everything else. Null stays
         // unwritten so classic manifests keep their canonical key set.
         [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-        IReadOnlyList<string>? Domains = null);
+        IReadOnlyList<string>? Domains = null,
+        // Scoped cloud backups only: the full device id that produced the
+        // archive (the file name only carries the 8-char suffix). Surfaced
+        // in the restore confirmation; never used to gate restores — a
+        // wiped device regenerates its id and still owns its backups.
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        string? SourceDeviceId = null);
 
     private sealed record DeskBoxBackupFileManifest(
         string Path,
@@ -2214,7 +2368,21 @@ public sealed record DeskBoxRestorePreparation(
     int BackupSchemaVersion,
     bool HasIntegrityManifest,
     // Non-empty on scoped cloud restores — the domains that will be applied.
-    IReadOnlyList<string>? Domains = null);
+    IReadOnlyList<string>? Domains = null,
+    // Scoped cloud restores only: full device id recorded in the archive
+    // manifest (informational — never a restore gate).
+    string? SourceDeviceId = null,
+    // Scoped restores only: staged todo stores whose source widget id does
+    // not exist on this device were remapped onto live todo widgets so the
+    // restored data stays visible.
+    IReadOnlyList<DeskBoxTodoWidgetRemap>? TodoWidgetRemaps = null,
+    // Source widget ids that could not be remapped (no free todo widget on
+    // this device). Their files are still restored under the source id —
+    // preserved on disk even though no widget currently reads them.
+    IReadOnlyList<string>? UnmappedTodoWidgetIds = null);
+
+/// <summary>One todo-store directory remapped from source to target widget id.</summary>
+public sealed record DeskBoxTodoWidgetRemap(string SourceWidgetId, string TargetWidgetId);
 
 internal sealed record DeskBoxRestoreApplyResult(
     bool HadPendingRestore,
