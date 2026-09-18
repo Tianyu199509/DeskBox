@@ -78,12 +78,12 @@ internal static class CloudBackupSettingsPolicy
     }
 
     /// <summary>
-    /// Vault key for the provider secret. Scoped by provider + origin
-    /// (scheme + host + effective port) + username: Basic credentials are
-    /// per-origin, so a port or scheme change must never silently reuse a
-    /// secret — and https→http downgrades always re-prompt. The remote
-    /// path deliberately stays out: it is a folder choice on the same
-    /// origin, not an auth boundary.
+    /// Vault key for the provider secret. Scoped by provider + endpoint
+    /// (scheme + host + effective port + DAV base path) + username: one
+    /// host can reverse-proxy several DAV services/tenants under different
+    /// base paths, and the wrong tenant must never receive a stored
+    /// secret. The remote path deliberately stays out: it is a folder
+    /// choice inside the same endpoint, not an auth boundary.
     /// </summary>
     internal static string CredentialKey(CloudBackupOptions options)
     {
@@ -92,7 +92,8 @@ internal static class CloudBackupSettingsPolicy
             string origin = uri.IsDefaultPort
                 ? $"{uri.Scheme}://{uri.Host}"
                 : $"{uri.Scheme}://{uri.Host}:{uri.Port}";
-            return $"{options.Provider}:{options.Username}@{origin.ToLowerInvariant()}";
+            string basePath = uri.AbsolutePath.TrimEnd('/');
+            return $"{options.Provider}:{options.Username}@{origin.ToLowerInvariant()}{basePath}";
         }
 
         return $"{options.Provider}:{options.Username}@invalid";

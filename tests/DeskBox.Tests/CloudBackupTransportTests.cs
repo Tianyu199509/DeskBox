@@ -346,6 +346,75 @@ public sealed class CloudBackupTransportTests : IDisposable
     }
 
     [Fact]
+    public void UpdateOptions_DestinationChange_ResetsLastSuccess()
+    {
+        var transport = new FakeCloudBackupTransport();
+        (CloudBackupService service, SettingsService settings) = CreateService(transport);
+        DateTimeOffset success = DateTimeOffset.UtcNow.AddHours(-2);
+        service.UpdateOptions(ConfiguredOptions(lastSuccess: success));
+        Assert.Equal(success, service.Options.LastSuccessUtc);
+
+        // Switching the endpoint invalidates the previous success —
+        // otherwise the new destination could go unbacked-up for a full
+        // interval while the UI claims a recent success.
+        service.UpdateOptions(ConfiguredOptions(lastSuccess: success) with
+        {
+            ServerUrl = "https://other.example.com/"
+        });
+
+        Assert.Equal(DateTimeOffset.MinValue, service.Options.LastSuccessUtc);
+        Assert.Equal(0, settings.Settings.CloudBackup.CloudBackupLastSuccessUtcTicks);
+    }
+
+    [Fact]
+    public void UpdateOptions_NonIdentityChange_KeepsLastSuccess()
+    {
+        var transport = new FakeCloudBackupTransport();
+        (CloudBackupService service, _) = CreateService(transport);
+        DateTimeOffset success = DateTimeOffset.UtcNow.AddHours(-2);
+        service.UpdateOptions(ConfiguredOptions(lastSuccess: success));
+
+        // Interval/retention are preferences, not destination identity.
+        service.UpdateOptions(ConfiguredOptions(
+            lastSuccess: success,
+            intervalMinutes: 360,
+            retention: 3));
+
+        Assert.Equal(success, service.Options.LastSuccessUtc);
+    }
+
+    [Fact]
+    public void UpdateOptions_ScopeExpansion_ResetsLastSuccess()
+    {
+        var transport = new FakeCloudBackupTransport();
+        (CloudBackupService service, _) = CreateService(transport);
+        DateTimeOffset success = DateTimeOffset.UtcNow.AddHours(-2);
+        service.UpdateOptions(ConfiguredOptions(lastSuccess: success));
+
+        // Turning on a new domain must produce a fresh backup soon —
+        // otherwise the new domain can sit unbacked-up for a full interval.
+        service.UpdateOptions(ConfiguredOptions(
+            lastSuccess: success,
+            scope: CloudBackupDomain.TodoData | CloudBackupDomain.QuickCaptureData));
+
+        Assert.Equal(DateTimeOffset.MinValue, service.Options.LastSuccessUtc);
+    }
+
+    [Fact]
+    public void UpdateOptions_FirstConfiguredPush_KeepsPersistedSuccess()
+    {
+        var transport = new FakeCloudBackupTransport();
+        (CloudBackupService service, _) = CreateService(transport);
+        DateTimeOffset success = DateTimeOffset.UtcNow.AddHours(-2);
+
+        // The first configured push after startup must keep the value
+        // loaded from settings.json — it is not a destination switch.
+        service.UpdateOptions(ConfiguredOptions(lastSuccess: success));
+
+        Assert.Equal(success, service.Options.LastSuccessUtc);
+    }
+
+    [Fact]
     public async Task RunBackupNow_NotConfigured_ReturnsSkipped()
     {
         var transport = new FakeCloudBackupTransport();
@@ -436,6 +505,21 @@ public sealed class CloudBackupTransportTests : IDisposable
         Assert.Equal("webdav:alice@https://dav.example.com:8443", port8443);
         Assert.NotEqual(https, http);
         Assert.NotEqual(https, port8443);
+    }
+
+    [Fact]
+    public void CredentialKey_DistinguishesBasePath()
+    {
+        // One host can reverse-proxy several DAV services/tenants — the
+        // wrong tenant must never receive a stored secret.
+        string tenantA = CloudBackupSettingsPolicy.CredentialKey(
+            ConfiguredOptions() with { ServerUrl = "https://example.com/dav-a/" });
+        string tenantB = CloudBackupSettingsPolicy.CredentialKey(
+            ConfiguredOptions() with { ServerUrl = "https://example.com/dav-b/" });
+
+        Assert.Equal("webdav:alice@https://example.com/dav-a", tenantA);
+        Assert.Equal("webdav:alice@https://example.com/dav-b", tenantB);
+        Assert.NotEqual(tenantA, tenantB);
     }
 
     [Fact]

@@ -23,6 +23,7 @@ internal sealed class CloudBackupService
     private readonly SemaphoreSlim _gate = new(1, 1);
 
     private CloudBackupOptions _options = CloudBackupSettingsPolicy.GetOptions(new AppSettings());
+    private bool _optionsInitialized;
 
     internal CloudBackupService(
         DeskBoxDataBackupService backupService,
@@ -40,8 +41,34 @@ internal sealed class CloudBackupService
 
     internal void UpdateOptions(CloudBackupOptions options)
     {
-        _options = options ?? throw new ArgumentNullException(nameof(options));
+        ArgumentNullException.ThrowIfNull(options);
+
+        // A success recorded against a different destination must not
+        // suppress the first backup to the NEW destination: switching
+        // provider/endpoint/folder/account/scope invalidates LastSuccess.
+        // Only a real destination switch counts — the first configured
+        // options push after startup must keep the persisted value.
+        if (_optionsInitialized &&
+            _options.IsConfigured && options.IsConfigured &&
+            DestinationIdentityChanged(_options, options))
+        {
+            options = options with { LastSuccessUtc = DateTimeOffset.MinValue };
+            _settingsService.Settings.CloudBackup.CloudBackupLastSuccessUtcTicks = 0;
+            _settingsService.SaveDebounced();
+            App.Log("[CloudBackup] Backup destination changed; last-success invalidated.");
+        }
+
+        _options = options;
+        _optionsInitialized = true;
     }
+
+    /// <summary>Fields defining which backup destination a success belongs to.</summary>
+    private static bool DestinationIdentityChanged(CloudBackupOptions previous, CloudBackupOptions next) =>
+        !string.Equals(previous.Provider, next.Provider, StringComparison.Ordinal) ||
+        !string.Equals(previous.ServerUrl, next.ServerUrl, StringComparison.Ordinal) ||
+        !string.Equals(previous.RemotePath, next.RemotePath, StringComparison.Ordinal) ||
+        !string.Equals(previous.Username, next.Username, StringComparison.Ordinal) ||
+        previous.Scope != next.Scope;
 
     /// <summary>
     /// Timer-tick entry point: uploads only when configured and the interval
