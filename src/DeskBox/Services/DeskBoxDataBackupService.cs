@@ -1489,16 +1489,30 @@ public sealed partial class DeskBoxDataBackupService
         }
     }
 
+    /// <summary>
+    /// ResilientJsonStore sidecars only ever sit next to a DeskBox *.json
+    /// store: "&lt;store&gt;.json.bak" and
+    /// "&lt;store&gt;.json.corrupt-&lt;timestamp&gt;-&lt;guid&gt;". Scoped to
+    /// that exact namespace so user files under attachments/ (which keep
+    /// their original names) are never filtered out.
+    /// </summary>
+    private static bool IsInternalStoreRecoveryArtifact(string relativePath) =>
+        relativePath.EndsWith(".json.bak", StringComparison.OrdinalIgnoreCase) ||
+        relativePath.Contains(".json.corrupt-", StringComparison.OrdinalIgnoreCase);
+
     private static bool ShouldIncludeInBackup(string relativePath)
     {
-        // .tmp/.bak/.corrupt-* are machine-local recovery artifacts, not user
-        // data: a stale recovery .bak inside a backup would resurrect a ghost
-        // pending journal on the restore machine, and quarantined .corrupt-*
-        // files are dead forensics. The live store regenerates its .bak on
-        // the next save anyway.
+        // .tmp files and ResilientJsonStore sidecars are machine-local
+        // recovery artifacts, not user data: a stale recovery .bak inside a
+        // backup would resurrect a ghost pending journal on the restore
+        // machine, and .corrupt-* quarantines are dead forensics. The store
+        // regenerates its .bak on the next save anyway. The artifact check
+        // is scoped to the ResilientJsonStore naming convention itself
+        // ("<store>.json.bak" / "<store>.json.corrupt-*") — never to bare
+        // extensions — so a user attachment like "database.bak" or
+        // "report.corrupt-copy.pdf" is still backed up.
         if (relativePath.EndsWith(".tmp", StringComparison.OrdinalIgnoreCase) ||
-            relativePath.EndsWith(".bak", StringComparison.OrdinalIgnoreCase) ||
-            relativePath.Contains(".corrupt-", StringComparison.OrdinalIgnoreCase))
+            IsInternalStoreRecoveryArtifact(relativePath))
         {
             return false;
         }
