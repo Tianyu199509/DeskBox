@@ -87,9 +87,9 @@
     "Settings.FileStacks.PopoverStyle.Neutral": "Neutral",
     "Settings.FileStacks.Auto.Title": "Automatic stacking",
     "Settings.FileStacks.Auto.Description": "Group loose files automatically by the grouping rule; off keeps stacking manual",
-    "Settings.FileStacks.GroupBy.Title": "Grouping rule",
-    "Settings.FileStacks.GroupBy.Description": "How automatic stacks group loose files",
-    "Settings.FileStacks.Enable.Description": "Turn off to hide all stacks, including manual ones",
+    "Settings.FileStacks.GroupBy.Title": "Grouping",
+    "Settings.FileStacks.GroupBy.Description": "Choose how files are automatically assigned to stacks",
+    "Settings.FileStacks.Enable.Description": "Automatically form stacks using the selected grouping rules",
     "Settings.FileStacks.Status.Manual": "Manual only",
     "Widget.Stack.UseDefaultOpenMode": "Use default open style",
     "Widget.Stack.RenameUnavailable": "This stack changed. Please try again.",
@@ -666,15 +666,11 @@
     "Settings.FileStacks.PageTitle": "File stacks",
     "Settings.FileStacks.Description": "Automatically organizes file-widget items without moving files; manual stacks are kept separately",
     "Settings.FileStacks.Enable.Title": "Enable automatic stacks",
-    "Settings.FileStacks.Enable.Description": "Automatically form stacks using the selected grouping rules",
     "Settings.FileStacks.Status.Off": "Off",
-
     "Settings.FileStacks.Status.On": "Groups loose files into stacks",
     "Settings.FileStacks.Mode.Title": "File stacking mode",
     "Settings.FileStacks.Mode.Description": "Enables manual and automatic file stacks; turn off to hide all stacks",
     "Settings.FileStacks.Status.Custom": "Custom formats · {0} rules",
-    "Settings.FileStacks.GroupBy.Title": "Grouping",
-    "Settings.FileStacks.GroupBy.Description": "Choose how files are automatically assigned to stacks",
     "Settings.FileStacks.GroupBy.Kind": "File type",
     "Settings.FileStacks.GroupBy.DateAdded": "Date added to DeskBox",
     "Settings.FileStacks.GroupBy.DateCreated": "Date added to DeskBox",
@@ -1215,6 +1211,7 @@
     "Feedback.Dialog.DiagnosticsFailed": "The feedback was submitted, but the diagnostics bundle could not be uploaded.",
     "Feedback.Dialog.RateLimited": "You already sent feedback within the last {0} minutes. Please try again later.",
     "Feedback.Dialog.NetworkError": "Could not reach the feedback service. Check your connection and try again.",
+    "Feedback.Dialog.SubmitAnother": "Submit another",
     "Feedback.My.Title": "My feedback",
     "Feedback.My.Retry": "Retry",
     "Feedback.My.LoadFailed": "Could not load your feedback. Please try again later.",
@@ -1266,6 +1263,12 @@
     "Settings.Dialog.MigrateStaleTitle": "Previous Migration Copy Found",
     "Settings.Dialog.MigrateStaleBody": "The selected location already contains the complete copy kept by a previous failed migration. It must be moved to the recycle bin before retrying.\n\nFolders found: {0}",
     "Settings.Dialog.MigrateStaleCleanButton": "Move to Recycle Bin and Retry",
+    "Settings.Dialog.MigrateRollbackTitle": "Migration failed; some folders could not be moved back",
+    "Settings.Dialog.MigrateRollbackBody": "Migration failed: {0}\n\nThe folders below could not be moved back automatically. Their files may now exist in both locations and are temporarily invisible in the widgets:",
+    "Settings.Dialog.MigrateRollbackHint": "Retrying moves these folders back to their original location. Existing files are never overwritten or deleted.",
+    "Settings.Dialog.MigrateRollbackRetryButton": "Retry moving back",
+    "Settings.Dialog.MigrateRollbackRetryComplete": "All folders were moved back to their original location.",
+    "Settings.Dialog.MigrateRollbackRetryPartial": "{0} folder(s) could not be moved back yet (still in use, or already moved elsewhere):",
     "Settings.Dialog.PinQuickAccessTitle": "Pinned to Quick Access",
     "Settings.Dialog.PinQuickAccessBody": "DeskBox requested that the folder be pinned to File Explorer Quick Access. You can enter it from the left side of file pickers when uploading files.",
     "Settings.Dialog.PinQuickAccessFailedTitle": "Pin to Quick Access Failed",
@@ -1292,17 +1295,17 @@
     "Onboarding.Step1.Body": "DeskBox doesn't replace your Windows desktop. It puts files, search, and everyday tools into lightweight widgets — visible when you need them, quiet when you don't.",
     "Onboarding.Step1.Hint1": "Doesn't replace Windows desktop — every action is reversible",
     "Onboarding.Step1.Hint2": "Widgets can be freely moved and resized",
-  "Onboarding.Step2.Eyebrow": "CREATE WIDGETS",
-  "Onboarding.Step2.Title": "Create more widgets from the tray",
-  "Onboarding.Step2.Body": "Right-click the DeskBox icon in the taskbar notification area whenever you want to create a widget.",
-  "Onboarding.Step2.TrayActionTitle": "Find the DeskBox icon",
-  "Onboarding.Step2.TrayActionBody": "Can't see it? Select ∧ on the taskbar, then find DeskBox.",
-  "Onboarding.Step2.RightClick": "Right-click",
-  "Onboarding.Step2.NewWidgetTitle": "New widget",
-  "Onboarding.Step2.NewWidgetBody": "Collect files dragged in from the desktop",
+    "Onboarding.Step2.Eyebrow": "CREATE WIDGETS",
+    "Onboarding.Step2.Title": "Create more widgets from the tray",
+    "Onboarding.Step2.Body": "Right-click the DeskBox icon in the taskbar notification area whenever you want to create a widget.",
+    "Onboarding.Step2.TrayActionTitle": "Find the DeskBox icon",
+    "Onboarding.Step2.TrayActionBody": "Can't see it? Select ∧ on the taskbar, then find DeskBox.",
+    "Onboarding.Step2.RightClick": "Right-click",
+    "Onboarding.Step2.NewWidgetTitle": "New widget",
+    "Onboarding.Step2.NewWidgetBody": "Collect files dragged in from the desktop",
     "Onboarding.Step2.ConnectFolderTitle": "Folder mapping",
-  "Onboarding.Step2.ConnectFolderBody": "Show the contents of an existing folder",
-  "Onboarding.Step2.FeatureHint": "Enable Todo, Quick Capture, and other feature widgets as needed in Settings",
+    "Onboarding.Step2.ConnectFolderBody": "Show the contents of an existing folder",
+    "Onboarding.Step2.FeatureHint": "Enable Todo, Quick Capture, and other feature widgets as needed in Settings",
     "Onboarding.Step2.Hint1": "You can add or remove feature widgets anytime in Settings",
     "Onboarding.Step2.FeatureListTitle": "Optional feature widgets",
     "Onboarding.Step2.FeatureList": "Todo · Quick Capture · Music · Weather · Global Search",
@@ -1346,9 +1349,9 @@
     "Onboarding.Step4.AutoLocationSubOption": "Auto-detect my location",
     "Onboarding.Step5.Eyebrow": "Ready",
     "Onboarding.Step5.Title": "You're all set",
-  "Onboarding.Step5.Body": "An empty file widget is ready on the right side of your screen. Try dragging some files into it.",
+    "Onboarding.Step5.Body": "An empty file widget is ready on the right side of your screen. Try dragging some files into it.",
     "Onboarding.Step5.Hint1": "Drag desktop files into a widget to organize instantly",
-  "Onboarding.Step5.Hint2": "Need another widget? Right-click the DeskBox tray icon and choose New widget",
+    "Onboarding.Step5.Hint2": "Need another widget? Right-click the DeskBox tray icon and choose New widget",
     "Onboarding.Step5.HotkeyTitle": "Global hotkey",
     "Onboarding.Step5.HotkeyDescription": "Press the hotkey to quickly show or hide all widgets",
     "Onboarding.Step5.HotkeyChange": "Change",
@@ -1617,7 +1620,7 @@
     "Widget.DeleteWidgetNote": "Only close this widget. The folder and its files will not change.",
     "Widget.DeleteWidgetConfirm": "Close widget",
     "Widget.DeleteManagedInfo": "What should happen to the files in this widget?",
-    "Widget.KeepManagedFolder": "Keep files",
+    "Widget.KeepManagedFolder": "Keep files (the managed folder stays in place)",
     "Widget.MoveBackThenDeleteFolder": "Move files to Desktop",
     "Widget.DeleteFolderToRecycleBin": "Also delete all files",
     "Widget.DeleteManagedFolderConfirmTitle": "Move \"{0}\" to Recycle Bin?",
@@ -1625,6 +1628,10 @@
     "Widget.DeleteManagedFolderConfirmMessageUnknownCount": "The widget will close and the entire folder and its contents will move to Recycle Bin.\n\n{0}\n\nYou can restore it from there.",
     "Widget.Error.OperationIncomplete": "The operation did not complete.",
     "Widget.Error.FileWidgetPathConflict": "This folder cannot be used because its path is the same as, contains, or is contained by the storage path of file widget \"{0}\". Choose a non-overlapping folder.",
+    "Widget.Error.FileWidgetPathConflictSameFolder": "Cannot use this folder: it is the same folder as the storage path of {0} (\"{1}\"). Managed storage needs an exclusive directory; pick a different folder.",
+    "Widget.Error.FileWidgetPathConflictInsideOther": "Cannot use this folder: it sits inside the storage path \"{1}\" of {0}. Managed storage needs an exclusive directory tree so migration and cleanup never touch each other. Plain folder widgets may map parent/child paths between each other.",
+    "Widget.Error.FileWidgetPathConflictContainsOther": "Cannot use this folder: it contains the storage path \"{1}\" of {0}. Managed storage needs an exclusive directory tree so migration and cleanup never touch each other. Plain folder widgets may map parent/child paths between each other.",
+    "Widget.Error.FileWidgetPathConflictUnresolvable": "Cannot use this folder: it overlaps with the storage path \"{1}\" of {0}, or the overlap cannot be verified safely. Pick a non-overlapping folder.",
     "Widget.MapFolder.ConflictWidgetHint": "This folder is already used by widget \"{0}\"; that widget has been opened for you.",
     "Widget.MapFolder.ConflictRootHint": "This folder overlaps the managed storage folder. Storage settings have been opened so you can move the storage location or choose a different folder.",
     "Widget.Error.UnsafeFolderTransfer": "A folder cannot be copied or moved into itself or one of its subfolders.",
@@ -1642,6 +1649,7 @@
     "Widget.Error.ManagedFolderStillActive": "This folder still belongs to an existing managed widget and cannot be cleaned up as orphaned.",
     "Widget.Error.ManagedFolderActionOnlyDefault": "Only managed widgets under the default storage path can synchronize folder handling.",
     "Widget.Error.ManagedFolderNameExists": "A managed widget with that name already exists. Choose a different name.",
+    "Widget.Error.ManagedFolderNameUnavailable": "Cannot use this name: an item with the same name already exists in the managed storage folder and cannot be merged automatically. Pick another name.",
     "QuickCapture.Name": "Quick Capture",
     "QuickCapture.InputPlaceholder": "Capture something...",
     "QuickCapture.AddInput": "Add Record",
@@ -1933,22 +1941,16 @@
     "Settings.Search.Everything.Detect": "Auto-detect",
     "Settings.Search.Everything.Launch": "Start Everything",
     "Settings.Search.Everything.Browse": "Choose Everything.exe",
-    "Settings.Search.Everything.Download": "Download Everything",
-
+    "Settings.Search.Everything.Download": "Open the Everything official site to download",
     "Settings.Search.Everything.About.Button": "About Everything",
-
     "Settings.Search.Everything.About.Title": "About the Everything integration",
-
     "Settings.Search.Everything.About.P1": "File and folder search in DeskBox is powered by Everything, a free third-party desktop search engine. DeskBox queries Everything's existing index for instant results and merges them with your DeskBox content — notes, todos, and settings — in the same search popup.",
-
     "Settings.Search.Everything.About.P3": "Everything is developed by voidtools and is not bundled with DeskBox. File search requires Everything to be installed and running; when it is missing, DeskBox shows a reminder instead of failing.",
     "Settings.Search.Everything.SetupHelp": "Setup help",
     "Settings.Search.Everything.Status.Unknown": "Everything has not been checked yet.",
     "Settings.Search.Everything.Status.Checking": "Checking the local Everything installation and connection…",
     "Settings.Search.Everything.Status.NotConfirmed": "Everything was found. Confirm local index sharing below to enable file search.",
     "Settings.Search.Everything.Status.NotInstalled": "Everything was not found. Download and install it from www.voidtools.com, then run auto-detect again.",
-
-    "Settings.Search.Everything.Download": "Open the Everything official site to download",
     "Settings.Search.Everything.Status.NotRunning": "Everything is installed but is not running. Start Everything before searching files.",
     "Settings.Search.Everything.Status.PermissionMismatch": "Everything is running with a different permission level. Keep DeskBox as a standard-user app and run the Everything client normally; its service may run elevated.",
     "Settings.Search.Everything.Status.IpcUnavailable": "Everything is running, but local IPC is unavailable. Check that IPC is enabled and that the default Everything instance is running.",
@@ -2311,327 +2313,327 @@
     "DesktopOrganization.Undo.Success": "The latest organization was undone",
     "DesktopOrganization.Undo.Failed": "Could not undo organization",
     "DesktopOrganization.Busy.Title": "Organizing the desktop",
-    "DesktopOrganization.Busy.Description": "Files are being moved. This widget is temporarily unavailable."
-    ,"Onboarding.Organization.Continue": "Continue"
-    ,"Onboarding.Organization.NotNow": "Not now"
-    ,"Tray.OrganizeDesktop": "Organize desktop…"
-    ,"DesktopOrganization.Window.Title": "Organize desktop"
-    ,"DesktopOrganization.Window.CloseBlocked": "Files are being moved. This window cannot be closed until organization is complete."
-    ,"DesktopOrganization.Window.ShowMore": "Show more"
-    ,"DesktopOrganization.Window.ShowLess": "Show less"
-    ,"DesktopOrganization.Window.Done": "Done"
-    ,"DesktopOrganization.Window.Cancel": "Cancel"
-    ,"DesktopOrganization.Window.ChangePathError": "Could not change the file storage location."
-    ,"Onboarding.Organization.ReviewAction": "Review plan"
-    ,"Onboarding.Organization.ReviewTitle": "Review files before organizing"
-    ,"Onboarding.Organization.ReviewBody": "We’ll show file names, recognized types, and destination widgets. Nothing moves until you confirm."
-    ,"DesktopOrganization.Preview.SelectTarget": "Organize"
-    ,"DesktopOrganization.Preview.DestinationLabel": "File destination"
-    ,"DesktopOrganization.Preview.DestinationPlaceholder": "Choose a target widget"
-    ,"DesktopOrganization.Preview.DestinationHelp": "Choose where this run should place the files. Dynamic organization follows your current rules."
-    ,"DesktopOrganization.Preview.DynamicDestination": "New widget"
-    ,"DesktopOrganization.Preview.CurrentRuleDestination": "Current rule: {0}"
-    ,"DesktopOrganization.Preview.NoItems": "No files to preview in this group"
-    ,"DesktopOrganization.Preview.NothingSelectedTitle": "Nothing is selected for organization"
-    ,"DesktopOrganization.Preview.NothingSelectedBody": "Select at least one card before moving desktop files."
-    ,"DesktopOrganization.Error.TargetUnavailable": "The selected target widget is unavailable, disabled, or has no usable destination."
-    ,"Settings.DragDropPermission.Status.NoAppCompatFlags": "No DeskBox compatibility flags found"
-    ,"Settings.DragDropPermission.Status.StartupDisabled": "Startup is not enabled"
-    ,"Settings.DragDropPermission.Status.Check": "Check: {0}"
-    ,"Settings.DragDropPermission.Status.Normal": "Normal: {0}"
-    ,"Settings.DragDropPermission.Status.Present": "Present"
-    ,"Settings.DragDropPermission.Status.Target": "Target: {0}"
-    ,"Settings.DragDropPermission.Status.TargetNormal": "Target is valid"
-    ,"Settings.DragDropPermission.Status.ShortcutTargetUnreadable": "Unable to read shortcut target"
-    ,"Settings.DragDropPermission.Status.CheckFailed": "Unable to check: {0}"
-    ,"Settings.DragDropPermission.Status.NoShortcuts": "No shortcuts found for the current user"
-    ,"Settings.DragDropPermission.Status.CheckPath": "Check: {0} ({1})"
-    ,"Settings.DragDropPermission.Status.NormalPath": "Normal: {0} ({1})"
-    ,"Settings.DragDropPermission.Status.Unknown": "Unknown"
-    ,"Settings.DragDropPermission.Status.UnknownValue": "unknown"
-    ,"Settings.DragDropPermission.Status.Administrator": "Administrator"
-    ,"Settings.DragDropPermission.Status.Standard": "Standard user"
-    ,"Settings.DragDropPermission.Status.AdminGroup": ", administrator group member"
-    ,"Settings.DragDropPermission.Status.NonAdminGroup": ", not an administrator group member"
-    ,"Settings.DragDropPermission.Status.ErrorSuffix": ", {0}"
-    ,"Settings.DragDropPermission.Status.Process": "{0}: {1}, integrity {2}{3}{4}"
-    ,"Settings.DragDropPermission.Status.ReadFailed": "Unable to read: {0}"
-    ,"Settings.DragDropPermission.Status.UacNeverNotify": "Never notify (EnableLUA=0)"
-    ,"Settings.DragDropPermission.Status.UacEnabled": "Enabled (EnableLUA=1)"
-    ,"Settings.DragDropPermission.Status.UacDetails": "{0}, ConsentPromptBehaviorAdmin={1}, PromptOnSecureDesktop={2}"
-    ,"Settings.Update.PreUpdateBackupFailedTitle": "Couldn't create an update recovery point"
-    ,"Settings.Update.PreUpdateBackupFailedBody": "DeskBox didn't start the update so it can protect your current settings. Try again later, or export a backup before installing the update manually."
-    ,"Settings.Update.PreUpdateBackupFailedBodyWithError": "DeskBox didn't start the update so it can protect your current settings.\n\n{0}"
-    ,"Settings.Recovery.AvailableTitle": "DeskBox recovery data is available"
-    ,"Settings.Recovery.AvailableBody": "A preserved recovery snapshot was found. Restore your previous widget layout and appearance from Settings > Backup & Restore > Local snapshots."
-    ,"Settings.Persistence.RecoveredTitle": "DeskBox settings were recovered"
-    ,"Settings.Persistence.RecoveredBody": "The primary settings file could not be read, so DeskBox restored the last valid backup. Review your widget layout and export a fresh backup."
-    ,"Settings.Persistence.ResetTitle": "DeskBox settings need recovery"
-    ,"Settings.Persistence.ResetBody": "Neither the primary nor backup settings file could be read. DeskBox started with defaults; use Backup & Restore to recover a local snapshot."
-    ,"Settings.Persistence.SaveFailedTitle": "DeskBox couldn't save settings"
-    ,"Settings.Persistence.SaveFailedBody": "Check available disk space and permissions for the DeskBox data folder. In-memory changes are retained and DeskBox will retry on the next change or when exiting."
-    ,"Settings.Diagnostics.Export": "Export diagnostics"
-    ,"Settings.Diagnostics.ExportTooltip": "Export runtime, display, hotkey queue, and sanitized log data"
-    ,"Settings.Diagnostics.SuccessTitle": "Diagnostic package exported"
-    ,"Settings.Diagnostics.SuccessBody": "The diagnostic package was saved to:\n{0}\n\nPlease review the archive before sharing it."
-    ,"Settings.Diagnostics.FailedTitle": "Couldn't export diagnostics"
-    ,"Settings.Diagnostics.FailedBody": "Check the destination folder permissions and available disk space, then try again.\n\n{0}"
-    ,"Onboarding.SkipAll": "Start now"
-    ,"Onboarding.Task.Step1.Title": "Your first file widget is on the right"
-    ,"Onboarding.Task.Step1.Body": "A file widget is a place to organize files on your desktop. Put frequently used files in it, then show or hide it anytime."
-    ,"Onboarding.Task.Step1.LocationTitle": "Where it is"
-    ,"Onboarding.Task.Step1.LocationBody": "The widget starts on the right side of the current display. You can move and resize it."
-    ,"Onboarding.Task.Step1.LocalTitle": "Uses a local folder"
-    ,"Onboarding.Task.Step1.LocalBody": "DeskBox uses local folders directly and does not upload files on its own."
-    ,"Onboarding.Task.Step1.ToggleTitle": "Show or hide it anytime"
-    ,"Onboarding.Task.Step1.ToggleBody": "Hide the widget when you do not need it, then show it again with the shortcut or tray icon."
-    ,"Onboarding.Task.Step2.Title": "Choose where collected files are stored"
-    ,"Onboarding.Task.Step2.Body": "A collection widget is not a shortcut. Files you drag or paste are moved or copied into the storage path below. Every collection widget creates its own folder under this path."
-    ,"Onboarding.Task.Step2.ManagedTitle": "Collection widget"
-    ,"Onboarding.Task.Step2.ManagedBody": "Files in every collection widget are physically stored in their own folder under the path above."
-    ,"Onboarding.Task.Step2.MappedTitle": "Folder mapping"
-    ,"Onboarding.Task.Step2.MappedBody": "Show an existing folder as a widget. Files stay in their original location, and widget actions affect them directly."
-    ,"Onboarding.Task.Step2.TransferTitle": "What happens when you add files"
-    ,"Onboarding.Task.Step2.TransferSummary": "Current setting: {0} files into the matching widget folder under this path."
-    ,"Onboarding.Task.Step2.ShowWidget": "Show widget"
-    ,"Onboarding.Task.Step2.StatusReady": "Select “Show widget” to display it on the right."
-    ,"Onboarding.Task.Step2.StatusShown": "The file widget is visible on the right."
-    ,"Onboarding.Task.Step2.StatusUnavailable": "No file widget was found. You can create one later by right-clicking the tray icon."
-    ,"Onboarding.Task.Step3.Title": "Put files in a widget"
-    ,"Onboarding.Task.Step3.Body": "Drag a file from the desktop or File Explorer. DeskBox moves it into this widget's folder."
-    ,"Onboarding.Task.Step3.DragTitle": "Drag a file"
-    ,"Onboarding.Task.Step3.DragBody": "Drag a file from the desktop or File Explorer into the widget."
-    ,"Onboarding.Task.Step3.PasteTitle": "Paste a file"
-    ,"Onboarding.Task.Step3.PasteBody": "Copy a file, select the widget, then press Ctrl+V."
-    ,"Onboarding.Task.Step3.AddTitle": "Add a file"
-    ,"Onboarding.Task.Step3.AddBody": "Select “Add file” in the widget, then choose a file."
-    ,"Onboarding.Task.Step3.TryButton": "Show widget and try"
-    ,"Onboarding.Task.Step3.StatusReady": "Try dragging one file into the widget."
-    ,"Onboarding.Task.Step3.StatusShown": "Try dragging one file into the widget."
-    ,"Onboarding.Task.Step3.SkipTip": "You can continue without adding a file."
-    ,"Onboarding.Task.Step4.Title": "Show them anytime. Hide them when done."
-    ,"Onboarding.Task.Step4.Body": "Bring your widgets in front of any window and use their content without leaving what you are doing."
-    ,"Onboarding.Task.Step4.ToggleTitle": "Show or hide all widgets"
-    ,"Onboarding.Task.Step4.ToggleBody": "Press {0}, or select the DeskBox icon at the right of the taskbar. Repeat to hide them."
-    ,"Onboarding.Task.Step4.ToggleButton": "Try it"
-    ,"Onboarding.Task.Step4.TrayTitle": "Manage DeskBox here"
-    ,"Onboarding.Task.Step4.TrayBody": "Right-click the DeskBox icon at the right of the taskbar to create a widget, map another folder as a widget, or open Settings."
-    ,"Onboarding.Task.Step4.TrayButton": "Open the DeskBox menu"
-    ,"Onboarding.Task.Step4.ManagedEntry": "Create a widget"
-    ,"Onboarding.Task.Step4.MappedEntry": "Map a folder as a widget"
-    ,"Onboarding.Task.Step4.FeatureEntry": "Feature widget: add To Do, Notes, Weather, or Music"
-    ,"Onboarding.Task.Step4.StatusReady": "Try hiding the widgets, then show them again."
-    ,"Onboarding.Task.Step4.StatusToggled": "The widgets were toggled. Select again to restore the previous state."
-    ,"Onboarding.Task.Step4.StatusHidden": "Widgets are hidden. Select again to show them."
-    ,"Onboarding.Task.Step4.StatusShown": "Widgets are visible. Select again to hide them."
-    ,"Onboarding.Task.Step4.StatusTrayOpened": "The DeskBox menu is open."
-    ,"Onboarding.Task.Step5.Title": "Add the features you need"
-    ,"Onboarding.Task.Step5.Body": "These features are optional. Turn one on to add its widget to the desktop."
-    ,"Onboarding.Task.Step5.TodoDescription": "Track and complete tasks"
-    ,"Onboarding.Task.Step5.QuickCaptureDescription": "Capture ideas quickly"
-    ,"Onboarding.Task.Step5.SearchDescription": "Find files and apps fast"
-    ,"Onboarding.Task.Step5.WeatherDescription": "Check weather and forecasts"
-    ,"Onboarding.Task.Step5.MusicDescription": "Control music playback"
-    ,"Onboarding.Task.Step5.Done1": "Know where the first file widget is"
-    ,"Onboarding.Task.Step5.Done2": "Drag, paste, and add files"
-    ,"Onboarding.Task.Step5.Done3": "Show or hide widgets with the shortcut or tray icon"
-    ,"Onboarding.Task.Step5.Done4": "Create widgets from the tray menu"
-    ,"Onboarding.Task.Step5.OptionalTitle": "Continue setup (optional)"
-    ,"Onboarding.Task.Step5.OptionalBody": "You can change these anytime in Settings > Feature widgets."
-    ,"Onboarding.Task.Step5.Organize": "Organize desktop"
-    ,"Onboarding.Task.Step5.Appearance": "Adjust appearance"
-    ,"Onboarding.Task.Step5.Settings": "Open Settings"
-    ,"Widget.Empty.ActionsHint": "Drag files or press Ctrl+V to paste"
-    ,"Onboarding.Task.Step2.PathTitle": "Actual file location"
-    ,"Onboarding.Task.Step2.ChangePath": "Change location"
-    ,"Onboarding.Task.Step2.ConfirmPath": "Use this path"
-    ,"Onboarding.Task.Step2.PathConfirmed": "Path confirmed"
-    ,"Onboarding.Task.Step2.SpaceUnknown": "space unknown"
-    ,"Onboarding.Task.Step2.PathMeta.System": "System drive · {0} free"
-    ,"Onboarding.Task.Step2.PathMeta.NonSystem": "Non-system drive · {0} free"
-    ,"Onboarding.Task.Step2.PathMeta.Removable": "Removable drive · {0} free"
-    ,"Onboarding.Task.Step2.PathMeta.Network": "Network location"
-    ,"Onboarding.Task.Step2.PathMeta.Unknown": "Drive status unavailable"
-    ,"Onboarding.Task.Step2.Warning.SystemDrive": "This path is on the system drive. Organizing the desktop will not free space on C:. Choose another drive if possible."
-    ,"Onboarding.Task.Step2.Warning.SystemDriveOnly": "No other local drive with enough free space was found. You can continue with the system drive and migrate later in Settings."
-    ,"Onboarding.Task.Step2.Warning.CloudSync": "DeskBox does not upload files itself. If this is a OneDrive or other synced folder, that service may sync the files."
-    ,"Onboarding.Task.Step2.Warning.Removable": "Files in collection widgets will be unavailable while this drive is disconnected."
-    ,"Onboarding.Task.Step2.Warning.Network": "Files in collection widgets will be unavailable while this network location is disconnected."
-    ,"Onboarding.Task.SkipPractice": "Skip this step"
-    ,"Onboarding.Task.Continue": "Continue"
-    ,"Onboarding.Task.Step3.StatusCompleted": "The file was moved into the widget."
-    ,"Onboarding.Task.Step4.StatusCompleted": "The widgets are visible again."
-    ,"Settings.WidgetGroups.Overview.Description": "Keep multiple widgets in one place and switch from the title bar"
-    ,"Settings.WidgetGroups.Overview.Ready": "{0} · Ready to combine"
-    ,"Settings.WidgetGroups.Overview.Summary": "{0} groups · {1}"
-    ,"Settings.WidgetGroups.PageDescription": "Keep multiple widgets in one place and switch from the title bar. Each widget keeps its own content."
-    ,"Settings.WidgetGroups.FollowDefaultWithValue": "Follow default ({0})"
-    ,"Settings.WidgetGroups.Existing.SummaryDefault": "{0} · {1} · Following defaults"
-    ,"Settings.WidgetGroups.Existing.SummaryCustom": "{0} · {1} · Customized"
-    ,"Settings.WidgetGroups.Existing.Name.Title": "Group name"
-    ,"Settings.WidgetGroups.GroupChrome.Title": "Title bar height"
-    ,"Settings.WidgetGroups.GroupChrome.Description": "Groups keep a visible title bar so you can switch widgets"
-    ,"Settings.WidgetGroups.GroupDisplay.Title": "Display mode"
-    ,"Settings.WidgetGroups.GroupDisplay.Description": "Keep this group expanded, expand it on click, or expand it on hover"
-    ,"Settings.WidgetGroups.Existing.Members.Title": "Widgets in this group"
-    ,"Settings.WidgetGroups.Existing.Member.MoveUp": "Move earlier"
-    ,"Settings.WidgetGroups.Existing.Member.MoveDown": "Move later"
-    ,"Settings.WidgetGroups.Existing.Member.Remove": "Remove from group"
-    ,"Settings.WidgetGroups.DissolveDialog.Title": "Dissolve this widget group?"
-    ,"Settings.WidgetGroups.DissolveDialog.Confirm": "Dissolve group"
-    ,"Settings.WidgetGroups.DissolveDialog.Description": "No content will be deleted. The widgets in this group will become independent widgets again."
-    ,"Glance.Title": "Glance"
-    ,"Glance.Instances.Title": "Glance widgets"
-    ,"Glance.Instances.Description": "Manage {0} Glance widget(s) independently"
-    ,"Glance.Instances.MasterOff": "The master switch is off, so every Glance widget is turned off."
-    ,"Glance.Instances.Empty": "No Glance widgets"
-    ,"Glance.Instances.Enable": "Enable this widget"
-    ,"Glance.Instances.Add": "Add Glance widget"
-    ,"Glance.Instances.More": "More actions"
-    ,"Glance.Instances.Locate": "Show on desktop"
-    ,"Glance.Instances.Duplicate": "Duplicate widget"
-    ,"Glance.Instances.RenamePlaceholder": "Enter a widget name"
-    ,"Glance.Instances.RenameTitle": "Rename Glance widget"
-    ,"Glance.Instances.DeleteTitle": "Delete “{0}”?"
-    ,"Glance.Instances.DeleteDescription": "Only this Glance widget and its independent settings will be deleted. Other Glance widgets are not affected."
-    ,"WidgetContent.Glance.StatusLabel": "Glance"
-    ,"WidgetContent.Glance.StatusDescription": "See your photo, time, and date at a glance"
-    ,"Glance.Settings.Title": "Glance"
-    ,"Glance.Settings.Description": "Create a calm desktop view with photos, time, and date"
-    ,"Glance.Display.Title": "Display"
-    ,"Glance.Display.Description": "Choose what appears in the widget"
-    ,"Glance.Display.PhotoOnly": "Photo only"
-    ,"Glance.Display.Separator": ", "
-    ,"Glance.Display.Time": "Time"
-    ,"Glance.Display.Date": "Date"
-    ,"Glance.Display.Year": "Year"
-    ,"Glance.Display.Weekday": "Weekday"
-    ,"Glance.Display.Calendar": "Calendar"
-    ,"Glance.Layout.Title": "Layout"
-    ,"Glance.LayoutGroup.Title": "Layout and typography"
-    ,"Glance.LayoutGroup.Description": "Layout, calendar, and time typography"
-    ,"Glance.Layout.Immersive": "Immersive"
-    ,"Glance.Layout.Centered": "Centered"
-    ,"Glance.Layout.Editorial": "Editorial"
-    ,"Glance.Layout.Calendar": "Calendar"
-    ,"Glance.CalendarMaterial.Title": "Calendar material"
-    ,"Glance.CalendarMaterial.Description": "Choose how the calendar card blends with the desktop"
-    ,"Glance.CalendarMaterial.FollowSystem": "Follow system"
-    ,"Glance.CalendarMaterial.FollowImage": "Follow image colors"
-    ,"Glance.CalendarMaterial.Transparency": "Transparency"
-    ,"Glance.CalendarMaterial.TransparencyDescription": "Affects only the calendar background; 100% is fully transparent"
-    ,"Glance.TraditionalCalendar.Title": "Traditional calendar"
-    ,"Glance.TraditionalCalendar.Description": "Follow the DeskBox language automatically, choose a calendar, or turn it off"
-    ,"Glance.Festivals.Title": "Chinese traditional festivals"
-    ,"Glance.Festivals.Description": "Show Spring Festival, Mid-Autumn Festival, and others in the lunar date line"
-    ,"Glance.TraditionalCalendar.Auto": "Automatic ({0})"
-    ,"Glance.TraditionalCalendar.None": "Off"
-    ,"Glance.TraditionalCalendar.ChineseLunar": "Chinese lunar"
-    ,"Glance.TraditionalCalendar.UmAlQura": "Umm al-Qura"
-    ,"Glance.TraditionalCalendar.Hijri": "Hijri"
-    ,"Glance.TraditionalCalendar.IndianSaka": "Indian national (Saka)"
-    ,"Glance.TraditionalCalendar.JapaneseEra": "Japanese era (Wareki)"
-    ,"Glance.TraditionalCalendar.Bangla": "Bangla"
-    ,"Glance.TraditionalCalendar.Julian": "Julian"
-    ,"Glance.TraditionalCalendar.Hebrew": "Hebrew"
-    ,"Glance.TraditionalCalendar.Persian": "Persian"
-    ,"Glance.TraditionalCalendar.ThaiBuddhist": "Thai Buddhist"
-    ,"Glance.Background.Title": "Background image"
-    ,"Glance.BackgroundGroup.Description": "Image source, rotation, and cache"
-    ,"Glance.Background.Transparency.Title": "Image transparency"
-    ,"Glance.Background.Transparency.Description": "Adjusts only the background image; text and controls remain unchanged"
-    ,"Glance.Background.Online": "Wikimedia Commons"
-    ,"Glance.Background.Files": "Local images"
-    ,"Glance.Background.Folder": "Image folder"
-    ,"Glance.Background.Bing": "Bing daily wallpaper"
-    ,"Glance.Background.ChooseFiles": "Choose images"
-    ,"Glance.Background.ChooseFolder": "Choose folder"
-    ,"Glance.Background.ClearSelection": "Clear"
-    ,"Glance.Background.LocalSummary": "{0} local images added"
-    ,"Glance.Background.Category.Title": "Online image category"
-    ,"Glance.Background.Category.Description": "Choose a theme for online images. New images load automatically after switching."
-    ,"Glance.Background.Category.Featured": "Featured"
-    ,"Glance.Background.Category.Landscapes": "Landscapes"
-    ,"Glance.Background.Category.Cities": "Cities"
-    ,"Glance.Background.Category.Architecture": "Architecture"
-    ,"Glance.Background.Category.Animals": "Animals"
-    ,"Glance.Background.Category.Plants": "Plants"
-    ,"Glance.Background.Category.Astronomy": "Space"
-    ,"Glance.Background.Category.People": "People"
-    ,"Glance.Rotation.Title": "Rotation"
-    ,"Glance.Rotation.Manual": "Manual"
-    ,"Glance.Rotation.10Seconds": "Every 10 seconds"
-    ,"Glance.Rotation.30Seconds": "Every 30 seconds"
-    ,"Glance.Rotation.60Seconds": "Every 60 seconds"
-    ,"Glance.Rotation.2Minutes": "Every 2 minutes"
-    ,"Glance.Rotation.5Minutes": "Every 5 minutes"
-    ,"Glance.Rotation.10Minutes": "Every 10 minutes"
-    ,"Glance.Rotation.30Minutes": "Every 30 minutes"
-    ,"Glance.Rotation.1Hour": "Every hour"
-    ,"Glance.Rotation.6Hours": "Every 6 hours"
-    ,"Glance.Rotation.Daily": "Daily"
-    ,"Glance.Rotation.Random": "Random order"
-    ,"Glance.Transition.Title": "Transition"
-    ,"Glance.AppearanceGroup.Title": "Appearance and motion"
-    ,"Glance.AppearanceGroup.Description": "Image transitions and content readability"
-    ,"Glance.Transition.None": "None"
-    ,"Glance.Transition.CrossFade": "Crossfade"
-    ,"Glance.Transition.SlideFade": "Slide and fade"
-    ,"Glance.Transition.ZoomFade": "Zoom and fade"
-    ,"Glance.Speed.Fast": "Fast"
-    ,"Glance.Speed.Standard": "Standard"
-    ,"Glance.Speed.Relaxed": "Relaxed"
-    ,"Glance.Typography.Title": "Font size"
-    ,"Glance.Typography.TimeFormat": "Time format"
-    ,"Glance.Typography.FollowSystem": "Follow system"
-    ,"Glance.Typography.Hour24": "24-hour"
-    ,"Glance.Typography.Hour12": "12-hour"
-    ,"Glance.Typography.Font": "Font"
-    ,"Glance.Speed.Title": "Transition speed"
-    ,"Glance.Typography.SystemDefault": "System default"
-    ,"Glance.Readability.Title": "Readability"
-    ,"Glance.Readability.None": "None"
-    ,"Glance.Readability.Soft": "Soft"
-    ,"Glance.Readability.Strong": "Strong"
-    ,"Glance.PhotoControls.Title": "Show photo controls"
-    ,"Glance.PhotoControls.Description": "Show pause, next, and photo information buttons when hovering"
-    ,"Glance.Actions.Next": "Next photo"
-    ,"Glance.Actions.Pause": "Pause rotation"
-    ,"Glance.Actions.Resume": "Resume rotation"
-    ,"Glance.Actions.PhotoInfo": "Photo information"
-    ,"Glance.Actions.OpenSource": "Open photo source"
-    ,"Glance.Actions.ShowInExplorer": "Show in File Explorer"
-    ,"Glance.Status.Loading": "Loading image…"
-    ,"Glance.Status.OnlineFallback": "Using fallback image"
-    ,"Glance.Status.NoLocalImages": "No local images added"
-    ,"Glance.Cache.Title": "Image cache"
-    ,"Glance.Cache.Clear": "Clear cache"
-    ,"Glance.Cache.Cleared": "Cache cleared"
-    ,"Settings.Windows10VisualCompatibility.Title": "Windows 10 visual compatibility"
-    ,"Settings.Windows10VisualCompatibility.Message": "Mica and system window corners require Windows 11. Windows 10 uses acrylic or solid material with square window corners.",
-  "Settings.Dialog.QuickAccessOperationFailedBody": "DeskBox could not update File Explorer Quick Access. Please try again later.",
-  "DesktopOrganization.Result.FailedBody": "Desktop organization could not be completed. Please try again later.",
-  "DesktopOrganization.Undo.FailedBody": "The desktop organization could not be undone. Please try again later.",
-  "Common.OperationFailedRetry": "The operation could not be completed. Please try again.",
-  "Settings.WidgetForeground.Title": "Widget foreground",
-  "Settings.WidgetForeground.Description": "Choose the color of widget text and monochrome controls without changing images or colorful icons.",
-  "Settings.WidgetForeground.FollowTheme": "Follow app theme",
-  "Settings.WidgetForeground.Light": "Light foreground",
-  "Settings.WidgetForeground.Dark": "Dark foreground",
-  "Settings.WidgetForeground.Custom": "Custom",
-  "Settings.WidgetForeground.CustomColor.Title": "Custom foreground color",
-  "Settings.WidgetForeground.CustomColor.Description": "Used for widget text and monochrome controls.",
-  "Widget.Foreground.Menu": "Text and readability",
-  "Widget.Foreground.UseGlobal": "Use global setting",
-  "Widget.Foreground.CustomColor": "Custom color…",
-  "Settings.DropAction.System": "Use Windows default",
-  "Widget.RunAsAdministrator": "Run as administrator",
-  "Widget.RunAsAdministrator.AlreadyRunning": "This app is already running without administrator privileges. Close it completely, then try again.",
-  "Widget.RunAsAdministrator.NotElevated": "Windows could not create an administrator process. Check UAC settings and try again.",
-  "Widget.CreateShortcut": "Create shortcut",
-  "Widget.MoreSystemOperations": "More system operations",
-  "Settings.ManagedPath.DesktopShortcut.Title": "Desktop storage shortcut",
-  "Settings.ManagedPath.DesktopShortcut.Description": "Creates a shortcut to the current storage folder. If you delete it, DeskBox will not create it again.",
+    "DesktopOrganization.Busy.Description": "Files are being moved. This widget is temporarily unavailable.",
+    "Onboarding.Organization.Continue": "Continue",
+    "Onboarding.Organization.NotNow": "Not now",
+    "Tray.OrganizeDesktop": "Organize desktop…",
+    "DesktopOrganization.Window.Title": "Organize desktop",
+    "DesktopOrganization.Window.CloseBlocked": "Files are being moved. This window cannot be closed until organization is complete.",
+    "DesktopOrganization.Window.ShowMore": "Show more",
+    "DesktopOrganization.Window.ShowLess": "Show less",
+    "DesktopOrganization.Window.Done": "Done",
+    "DesktopOrganization.Window.Cancel": "Cancel",
+    "DesktopOrganization.Window.ChangePathError": "Could not change the file storage location.",
+    "Onboarding.Organization.ReviewAction": "Review plan",
+    "Onboarding.Organization.ReviewTitle": "Review files before organizing",
+    "Onboarding.Organization.ReviewBody": "We’ll show file names, recognized types, and destination widgets. Nothing moves until you confirm.",
+    "DesktopOrganization.Preview.SelectTarget": "Organize",
+    "DesktopOrganization.Preview.DestinationLabel": "File destination",
+    "DesktopOrganization.Preview.DestinationPlaceholder": "Choose a target widget",
+    "DesktopOrganization.Preview.DestinationHelp": "Choose where this run should place the files. Dynamic organization follows your current rules.",
+    "DesktopOrganization.Preview.DynamicDestination": "New widget",
+    "DesktopOrganization.Preview.CurrentRuleDestination": "Current rule: {0}",
+    "DesktopOrganization.Preview.NoItems": "No files to preview in this group",
+    "DesktopOrganization.Preview.NothingSelectedTitle": "Nothing is selected for organization",
+    "DesktopOrganization.Preview.NothingSelectedBody": "Select at least one card before moving desktop files.",
+    "DesktopOrganization.Error.TargetUnavailable": "The selected target widget is unavailable, disabled, or has no usable destination.",
+    "Settings.DragDropPermission.Status.NoAppCompatFlags": "No DeskBox compatibility flags found",
+    "Settings.DragDropPermission.Status.StartupDisabled": "Startup is not enabled",
+    "Settings.DragDropPermission.Status.Check": "Check: {0}",
+    "Settings.DragDropPermission.Status.Normal": "Normal: {0}",
+    "Settings.DragDropPermission.Status.Present": "Present",
+    "Settings.DragDropPermission.Status.Target": "Target: {0}",
+    "Settings.DragDropPermission.Status.TargetNormal": "Target is valid",
+    "Settings.DragDropPermission.Status.ShortcutTargetUnreadable": "Unable to read shortcut target",
+    "Settings.DragDropPermission.Status.CheckFailed": "Unable to check: {0}",
+    "Settings.DragDropPermission.Status.NoShortcuts": "No shortcuts found for the current user",
+    "Settings.DragDropPermission.Status.CheckPath": "Check: {0} ({1})",
+    "Settings.DragDropPermission.Status.NormalPath": "Normal: {0} ({1})",
+    "Settings.DragDropPermission.Status.Unknown": "Unknown",
+    "Settings.DragDropPermission.Status.UnknownValue": "unknown",
+    "Settings.DragDropPermission.Status.Administrator": "Administrator",
+    "Settings.DragDropPermission.Status.Standard": "Standard user",
+    "Settings.DragDropPermission.Status.AdminGroup": ", administrator group member",
+    "Settings.DragDropPermission.Status.NonAdminGroup": ", not an administrator group member",
+    "Settings.DragDropPermission.Status.ErrorSuffix": ", {0}",
+    "Settings.DragDropPermission.Status.Process": "{0}: {1}, integrity {2}{3}{4}",
+    "Settings.DragDropPermission.Status.ReadFailed": "Unable to read: {0}",
+    "Settings.DragDropPermission.Status.UacNeverNotify": "Never notify (EnableLUA=0)",
+    "Settings.DragDropPermission.Status.UacEnabled": "Enabled (EnableLUA=1)",
+    "Settings.DragDropPermission.Status.UacDetails": "{0}, ConsentPromptBehaviorAdmin={1}, PromptOnSecureDesktop={2}",
+    "Settings.Update.PreUpdateBackupFailedTitle": "Couldn't create an update recovery point",
+    "Settings.Update.PreUpdateBackupFailedBody": "DeskBox didn't start the update so it can protect your current settings. Try again later, or export a backup before installing the update manually.",
+    "Settings.Update.PreUpdateBackupFailedBodyWithError": "DeskBox didn't start the update so it can protect your current settings.\n\n{0}",
+    "Settings.Recovery.AvailableTitle": "DeskBox recovery data is available",
+    "Settings.Recovery.AvailableBody": "A preserved recovery snapshot was found. Restore your previous widget layout and appearance from Settings > Backup & Restore > Local snapshots.",
+    "Settings.Persistence.RecoveredTitle": "DeskBox settings were recovered",
+    "Settings.Persistence.RecoveredBody": "The primary settings file could not be read, so DeskBox restored the last valid backup. Review your widget layout and export a fresh backup.",
+    "Settings.Persistence.ResetTitle": "DeskBox settings need recovery",
+    "Settings.Persistence.ResetBody": "Neither the primary nor backup settings file could be read. DeskBox started with defaults; use Backup & Restore to recover a local snapshot.",
+    "Settings.Persistence.SaveFailedTitle": "DeskBox couldn't save settings",
+    "Settings.Persistence.SaveFailedBody": "Check available disk space and permissions for the DeskBox data folder. In-memory changes are retained and DeskBox will retry on the next change or when exiting.",
+    "Settings.Diagnostics.Export": "Export diagnostics",
+    "Settings.Diagnostics.ExportTooltip": "Export runtime, display, hotkey queue, and sanitized log data",
+    "Settings.Diagnostics.SuccessTitle": "Diagnostic package exported",
+    "Settings.Diagnostics.SuccessBody": "The diagnostic package was saved to:\n{0}\n\nPlease review the archive before sharing it.",
+    "Settings.Diagnostics.FailedTitle": "Couldn't export diagnostics",
+    "Settings.Diagnostics.FailedBody": "Check the destination folder permissions and available disk space, then try again.\n\n{0}",
+    "Onboarding.SkipAll": "Start now",
+    "Onboarding.Task.Step1.Title": "Your first file widget is on the right",
+    "Onboarding.Task.Step1.Body": "A file widget is a place to organize files on your desktop. Put frequently used files in it, then show or hide it anytime.",
+    "Onboarding.Task.Step1.LocationTitle": "Where it is",
+    "Onboarding.Task.Step1.LocationBody": "The widget starts on the right side of the current display. You can move and resize it.",
+    "Onboarding.Task.Step1.LocalTitle": "Uses a local folder",
+    "Onboarding.Task.Step1.LocalBody": "DeskBox uses local folders directly and does not upload files on its own.",
+    "Onboarding.Task.Step1.ToggleTitle": "Show or hide it anytime",
+    "Onboarding.Task.Step1.ToggleBody": "Hide the widget when you do not need it, then show it again with the shortcut or tray icon.",
+    "Onboarding.Task.Step2.Title": "Choose where collected files are stored",
+    "Onboarding.Task.Step2.Body": "A collection widget is not a shortcut. Files you drag or paste are moved or copied into the storage path below. Every collection widget creates its own folder under this path.",
+    "Onboarding.Task.Step2.ManagedTitle": "Collection widget",
+    "Onboarding.Task.Step2.ManagedBody": "Files in every collection widget are physically stored in their own folder under the path above.",
+    "Onboarding.Task.Step2.MappedTitle": "Folder mapping",
+    "Onboarding.Task.Step2.MappedBody": "Show an existing folder as a widget. Files stay in their original location, and widget actions affect them directly.",
+    "Onboarding.Task.Step2.TransferTitle": "What happens when you add files",
+    "Onboarding.Task.Step2.TransferSummary": "Current setting: {0} files into the matching widget folder under this path.",
+    "Onboarding.Task.Step2.ShowWidget": "Show widget",
+    "Onboarding.Task.Step2.StatusReady": "Select “Show widget” to display it on the right.",
+    "Onboarding.Task.Step2.StatusShown": "The file widget is visible on the right.",
+    "Onboarding.Task.Step2.StatusUnavailable": "No file widget was found. You can create one later by right-clicking the tray icon.",
+    "Onboarding.Task.Step3.Title": "Put files in a widget",
+    "Onboarding.Task.Step3.Body": "Drag a file from the desktop or File Explorer. DeskBox moves it into this widget's folder.",
+    "Onboarding.Task.Step3.DragTitle": "Drag a file",
+    "Onboarding.Task.Step3.DragBody": "Drag a file from the desktop or File Explorer into the widget.",
+    "Onboarding.Task.Step3.PasteTitle": "Paste a file",
+    "Onboarding.Task.Step3.PasteBody": "Copy a file, select the widget, then press Ctrl+V.",
+    "Onboarding.Task.Step3.AddTitle": "Add a file",
+    "Onboarding.Task.Step3.AddBody": "Select “Add file” in the widget, then choose a file.",
+    "Onboarding.Task.Step3.TryButton": "Show widget and try",
+    "Onboarding.Task.Step3.StatusReady": "Try dragging one file into the widget.",
+    "Onboarding.Task.Step3.StatusShown": "Try dragging one file into the widget.",
+    "Onboarding.Task.Step3.SkipTip": "You can continue without adding a file.",
+    "Onboarding.Task.Step4.Title": "Show them anytime. Hide them when done.",
+    "Onboarding.Task.Step4.Body": "Bring your widgets in front of any window and use their content without leaving what you are doing.",
+    "Onboarding.Task.Step4.ToggleTitle": "Show or hide all widgets",
+    "Onboarding.Task.Step4.ToggleBody": "Press {0}, or select the DeskBox icon at the right of the taskbar. Repeat to hide them.",
+    "Onboarding.Task.Step4.ToggleButton": "Try it",
+    "Onboarding.Task.Step4.TrayTitle": "Manage DeskBox here",
+    "Onboarding.Task.Step4.TrayBody": "Right-click the DeskBox icon at the right of the taskbar to create a widget, map another folder as a widget, or open Settings.",
+    "Onboarding.Task.Step4.TrayButton": "Open the DeskBox menu",
+    "Onboarding.Task.Step4.ManagedEntry": "Create a widget",
+    "Onboarding.Task.Step4.MappedEntry": "Map a folder as a widget",
+    "Onboarding.Task.Step4.FeatureEntry": "Feature widget: add To Do, Notes, Weather, or Music",
+    "Onboarding.Task.Step4.StatusReady": "Try hiding the widgets, then show them again.",
+    "Onboarding.Task.Step4.StatusToggled": "The widgets were toggled. Select again to restore the previous state.",
+    "Onboarding.Task.Step4.StatusHidden": "Widgets are hidden. Select again to show them.",
+    "Onboarding.Task.Step4.StatusShown": "Widgets are visible. Select again to hide them.",
+    "Onboarding.Task.Step4.StatusTrayOpened": "The DeskBox menu is open.",
+    "Onboarding.Task.Step5.Title": "Add the features you need",
+    "Onboarding.Task.Step5.Body": "These features are optional. Turn one on to add its widget to the desktop.",
+    "Onboarding.Task.Step5.TodoDescription": "Track and complete tasks",
+    "Onboarding.Task.Step5.QuickCaptureDescription": "Capture ideas quickly",
+    "Onboarding.Task.Step5.SearchDescription": "Find files and apps fast",
+    "Onboarding.Task.Step5.WeatherDescription": "Check weather and forecasts",
+    "Onboarding.Task.Step5.MusicDescription": "Control music playback",
+    "Onboarding.Task.Step5.Done1": "Know where the first file widget is",
+    "Onboarding.Task.Step5.Done2": "Drag, paste, and add files",
+    "Onboarding.Task.Step5.Done3": "Show or hide widgets with the shortcut or tray icon",
+    "Onboarding.Task.Step5.Done4": "Create widgets from the tray menu",
+    "Onboarding.Task.Step5.OptionalTitle": "Continue setup (optional)",
+    "Onboarding.Task.Step5.OptionalBody": "You can change these anytime in Settings > Feature widgets.",
+    "Onboarding.Task.Step5.Organize": "Organize desktop",
+    "Onboarding.Task.Step5.Appearance": "Adjust appearance",
+    "Onboarding.Task.Step5.Settings": "Open Settings",
+    "Widget.Empty.ActionsHint": "Drag files or press Ctrl+V to paste",
+    "Onboarding.Task.Step2.PathTitle": "Actual file location",
+    "Onboarding.Task.Step2.ChangePath": "Change location",
+    "Onboarding.Task.Step2.ConfirmPath": "Use this path",
+    "Onboarding.Task.Step2.PathConfirmed": "Path confirmed",
+    "Onboarding.Task.Step2.SpaceUnknown": "space unknown",
+    "Onboarding.Task.Step2.PathMeta.System": "System drive · {0} free",
+    "Onboarding.Task.Step2.PathMeta.NonSystem": "Non-system drive · {0} free",
+    "Onboarding.Task.Step2.PathMeta.Removable": "Removable drive · {0} free",
+    "Onboarding.Task.Step2.PathMeta.Network": "Network location",
+    "Onboarding.Task.Step2.PathMeta.Unknown": "Drive status unavailable",
+    "Onboarding.Task.Step2.Warning.SystemDrive": "This path is on the system drive. Organizing the desktop will not free space on C:. Choose another drive if possible.",
+    "Onboarding.Task.Step2.Warning.SystemDriveOnly": "No other local drive with enough free space was found. You can continue with the system drive and migrate later in Settings.",
+    "Onboarding.Task.Step2.Warning.CloudSync": "DeskBox does not upload files itself. If this is a OneDrive or other synced folder, that service may sync the files.",
+    "Onboarding.Task.Step2.Warning.Removable": "Files in collection widgets will be unavailable while this drive is disconnected.",
+    "Onboarding.Task.Step2.Warning.Network": "Files in collection widgets will be unavailable while this network location is disconnected.",
+    "Onboarding.Task.SkipPractice": "Skip this step",
+    "Onboarding.Task.Continue": "Continue",
+    "Onboarding.Task.Step3.StatusCompleted": "The file was moved into the widget.",
+    "Onboarding.Task.Step4.StatusCompleted": "The widgets are visible again.",
+    "Settings.WidgetGroups.Overview.Description": "Keep multiple widgets in one place and switch from the title bar",
+    "Settings.WidgetGroups.Overview.Ready": "{0} · Ready to combine",
+    "Settings.WidgetGroups.Overview.Summary": "{0} groups · {1}",
+    "Settings.WidgetGroups.PageDescription": "Keep multiple widgets in one place and switch from the title bar. Each widget keeps its own content.",
+    "Settings.WidgetGroups.FollowDefaultWithValue": "Follow default ({0})",
+    "Settings.WidgetGroups.Existing.SummaryDefault": "{0} · {1} · Following defaults",
+    "Settings.WidgetGroups.Existing.SummaryCustom": "{0} · {1} · Customized",
+    "Settings.WidgetGroups.Existing.Name.Title": "Group name",
+    "Settings.WidgetGroups.GroupChrome.Title": "Title bar height",
+    "Settings.WidgetGroups.GroupChrome.Description": "Groups keep a visible title bar so you can switch widgets",
+    "Settings.WidgetGroups.GroupDisplay.Title": "Display mode",
+    "Settings.WidgetGroups.GroupDisplay.Description": "Keep this group expanded, expand it on click, or expand it on hover",
+    "Settings.WidgetGroups.Existing.Members.Title": "Widgets in this group",
+    "Settings.WidgetGroups.Existing.Member.MoveUp": "Move earlier",
+    "Settings.WidgetGroups.Existing.Member.MoveDown": "Move later",
+    "Settings.WidgetGroups.Existing.Member.Remove": "Remove from group",
+    "Settings.WidgetGroups.DissolveDialog.Title": "Dissolve this widget group?",
+    "Settings.WidgetGroups.DissolveDialog.Confirm": "Dissolve group",
+    "Settings.WidgetGroups.DissolveDialog.Description": "No content will be deleted. The widgets in this group will become independent widgets again.",
+    "Glance.Title": "Glance",
+    "Glance.Instances.Title": "Glance widgets",
+    "Glance.Instances.Description": "Manage {0} Glance widget(s) independently",
+    "Glance.Instances.MasterOff": "The master switch is off, so every Glance widget is turned off.",
+    "Glance.Instances.Empty": "No Glance widgets",
+    "Glance.Instances.Enable": "Enable this widget",
+    "Glance.Instances.Add": "Add Glance widget",
+    "Glance.Instances.More": "More actions",
+    "Glance.Instances.Locate": "Show on desktop",
+    "Glance.Instances.Duplicate": "Duplicate widget",
+    "Glance.Instances.RenamePlaceholder": "Enter a widget name",
+    "Glance.Instances.RenameTitle": "Rename Glance widget",
+    "Glance.Instances.DeleteTitle": "Delete “{0}”?",
+    "Glance.Instances.DeleteDescription": "Only this Glance widget and its independent settings will be deleted. Other Glance widgets are not affected.",
+    "WidgetContent.Glance.StatusLabel": "Glance",
+    "WidgetContent.Glance.StatusDescription": "See your photo, time, and date at a glance",
+    "Glance.Settings.Title": "Glance",
+    "Glance.Settings.Description": "Create a calm desktop view with photos, time, and date",
+    "Glance.Display.Title": "Display",
+    "Glance.Display.Description": "Choose what appears in the widget",
+    "Glance.Display.PhotoOnly": "Photo only",
+    "Glance.Display.Separator": ", ",
+    "Glance.Display.Time": "Time",
+    "Glance.Display.Date": "Date",
+    "Glance.Display.Year": "Year",
+    "Glance.Display.Weekday": "Weekday",
+    "Glance.Display.Calendar": "Calendar",
+    "Glance.Layout.Title": "Layout",
+    "Glance.LayoutGroup.Title": "Layout and typography",
+    "Glance.LayoutGroup.Description": "Layout, calendar, and time typography",
+    "Glance.Layout.Immersive": "Immersive",
+    "Glance.Layout.Centered": "Centered",
+    "Glance.Layout.Editorial": "Editorial",
+    "Glance.Layout.Calendar": "Calendar",
+    "Glance.CalendarMaterial.Title": "Calendar material",
+    "Glance.CalendarMaterial.Description": "Choose how the calendar card blends with the desktop",
+    "Glance.CalendarMaterial.FollowSystem": "Follow system",
+    "Glance.CalendarMaterial.FollowImage": "Follow image colors",
+    "Glance.CalendarMaterial.Transparency": "Transparency",
+    "Glance.CalendarMaterial.TransparencyDescription": "Affects only the calendar background; 100% is fully transparent",
+    "Glance.TraditionalCalendar.Title": "Traditional calendar",
+    "Glance.TraditionalCalendar.Description": "Follow the DeskBox language automatically, choose a calendar, or turn it off",
+    "Glance.Festivals.Title": "Chinese traditional festivals",
+    "Glance.Festivals.Description": "Show Spring Festival, Mid-Autumn Festival, and others in the lunar date line",
+    "Glance.TraditionalCalendar.Auto": "Automatic ({0})",
+    "Glance.TraditionalCalendar.None": "Off",
+    "Glance.TraditionalCalendar.ChineseLunar": "Chinese lunar",
+    "Glance.TraditionalCalendar.UmAlQura": "Umm al-Qura",
+    "Glance.TraditionalCalendar.Hijri": "Hijri",
+    "Glance.TraditionalCalendar.IndianSaka": "Indian national (Saka)",
+    "Glance.TraditionalCalendar.JapaneseEra": "Japanese era (Wareki)",
+    "Glance.TraditionalCalendar.Bangla": "Bangla",
+    "Glance.TraditionalCalendar.Julian": "Julian",
+    "Glance.TraditionalCalendar.Hebrew": "Hebrew",
+    "Glance.TraditionalCalendar.Persian": "Persian",
+    "Glance.TraditionalCalendar.ThaiBuddhist": "Thai Buddhist",
+    "Glance.Background.Title": "Background image",
+    "Glance.BackgroundGroup.Description": "Image source, rotation, and cache",
+    "Glance.Background.Transparency.Title": "Image transparency",
+    "Glance.Background.Transparency.Description": "Adjusts only the background image; text and controls remain unchanged",
+    "Glance.Background.Online": "Wikimedia Commons",
+    "Glance.Background.Files": "Local images",
+    "Glance.Background.Folder": "Image folder",
+    "Glance.Background.Bing": "Bing daily wallpaper",
+    "Glance.Background.ChooseFiles": "Choose images",
+    "Glance.Background.ChooseFolder": "Choose folder",
+    "Glance.Background.ClearSelection": "Clear",
+    "Glance.Background.LocalSummary": "{0} local images added",
+    "Glance.Background.Category.Title": "Online image category",
+    "Glance.Background.Category.Description": "Choose a theme for online images. New images load automatically after switching.",
+    "Glance.Background.Category.Featured": "Featured",
+    "Glance.Background.Category.Landscapes": "Landscapes",
+    "Glance.Background.Category.Cities": "Cities",
+    "Glance.Background.Category.Architecture": "Architecture",
+    "Glance.Background.Category.Animals": "Animals",
+    "Glance.Background.Category.Plants": "Plants",
+    "Glance.Background.Category.Astronomy": "Space",
+    "Glance.Background.Category.People": "People",
+    "Glance.Rotation.Title": "Rotation",
+    "Glance.Rotation.Manual": "Manual",
+    "Glance.Rotation.10Seconds": "Every 10 seconds",
+    "Glance.Rotation.30Seconds": "Every 30 seconds",
+    "Glance.Rotation.60Seconds": "Every 60 seconds",
+    "Glance.Rotation.2Minutes": "Every 2 minutes",
+    "Glance.Rotation.5Minutes": "Every 5 minutes",
+    "Glance.Rotation.10Minutes": "Every 10 minutes",
+    "Glance.Rotation.30Minutes": "Every 30 minutes",
+    "Glance.Rotation.1Hour": "Every hour",
+    "Glance.Rotation.6Hours": "Every 6 hours",
+    "Glance.Rotation.Daily": "Daily",
+    "Glance.Rotation.Random": "Random order",
+    "Glance.Transition.Title": "Transition",
+    "Glance.AppearanceGroup.Title": "Appearance and motion",
+    "Glance.AppearanceGroup.Description": "Image transitions and content readability",
+    "Glance.Transition.None": "None",
+    "Glance.Transition.CrossFade": "Crossfade",
+    "Glance.Transition.SlideFade": "Slide and fade",
+    "Glance.Transition.ZoomFade": "Zoom and fade",
+    "Glance.Speed.Fast": "Fast",
+    "Glance.Speed.Standard": "Standard",
+    "Glance.Speed.Relaxed": "Relaxed",
+    "Glance.Typography.Title": "Font size",
+    "Glance.Typography.TimeFormat": "Time format",
+    "Glance.Typography.FollowSystem": "Follow system",
+    "Glance.Typography.Hour24": "24-hour",
+    "Glance.Typography.Hour12": "12-hour",
+    "Glance.Typography.Font": "Font",
+    "Glance.Speed.Title": "Transition speed",
+    "Glance.Typography.SystemDefault": "System default",
+    "Glance.Readability.Title": "Readability",
+    "Glance.Readability.None": "None",
+    "Glance.Readability.Soft": "Soft",
+    "Glance.Readability.Strong": "Strong",
+    "Glance.PhotoControls.Title": "Show photo controls",
+    "Glance.PhotoControls.Description": "Show pause, next, and photo information buttons when hovering",
+    "Glance.Actions.Next": "Next photo",
+    "Glance.Actions.Pause": "Pause rotation",
+    "Glance.Actions.Resume": "Resume rotation",
+    "Glance.Actions.PhotoInfo": "Photo information",
+    "Glance.Actions.OpenSource": "Open photo source",
+    "Glance.Actions.ShowInExplorer": "Show in File Explorer",
+    "Glance.Status.Loading": "Loading image…",
+    "Glance.Status.OnlineFallback": "Using fallback image",
+    "Glance.Status.NoLocalImages": "No local images added",
+    "Glance.Cache.Title": "Image cache",
+    "Glance.Cache.Clear": "Clear cache",
+    "Glance.Cache.Cleared": "Cache cleared",
+    "Settings.Windows10VisualCompatibility.Title": "Windows 10 visual compatibility",
+    "Settings.Windows10VisualCompatibility.Message": "Mica and system window corners require Windows 11. Windows 10 uses acrylic or solid material with square window corners.",
+    "Settings.Dialog.QuickAccessOperationFailedBody": "DeskBox could not update File Explorer Quick Access. Please try again later.",
+    "DesktopOrganization.Result.FailedBody": "Desktop organization could not be completed. Please try again later.",
+    "DesktopOrganization.Undo.FailedBody": "The desktop organization could not be undone. Please try again later.",
+    "Common.OperationFailedRetry": "The operation could not be completed. Please try again.",
+    "Settings.WidgetForeground.Title": "Widget foreground",
+    "Settings.WidgetForeground.Description": "Choose the color of widget text and monochrome controls without changing images or colorful icons.",
+    "Settings.WidgetForeground.FollowTheme": "Follow app theme",
+    "Settings.WidgetForeground.Light": "Light foreground",
+    "Settings.WidgetForeground.Dark": "Dark foreground",
+    "Settings.WidgetForeground.Custom": "Custom",
+    "Settings.WidgetForeground.CustomColor.Title": "Custom foreground color",
+    "Settings.WidgetForeground.CustomColor.Description": "Used for widget text and monochrome controls.",
+    "Widget.Foreground.Menu": "Text and readability",
+    "Widget.Foreground.UseGlobal": "Use global setting",
+    "Widget.Foreground.CustomColor": "Custom color…",
+    "Settings.DropAction.System": "Use Windows default",
+    "Widget.RunAsAdministrator": "Run as administrator",
+    "Widget.RunAsAdministrator.AlreadyRunning": "This app is already running without administrator privileges. Close it completely, then try again.",
+    "Widget.RunAsAdministrator.NotElevated": "Windows could not create an administrator process. Check UAC settings and try again.",
+    "Widget.CreateShortcut": "Create shortcut",
+    "Widget.MoreSystemOperations": "More system operations",
+    "Settings.ManagedPath.DesktopShortcut.Title": "Desktop storage shortcut",
+    "Settings.ManagedPath.DesktopShortcut.Description": "Creates a shortcut to the current storage folder. If you delete it, DeskBox will not create it again.",
     "DesktopOrganization.Public.PersonalCount": "Personal desktop ({0} items)",
     "DesktopOrganization.Public.SharedCount": "Public desktop ({0} items, shared by all accounts)",
     "DesktopOrganization.Public.Unavailable": "Public desktop (currently unavailable)",
@@ -2735,13 +2737,12 @@
     "Settings.CloudBackup.TestConnection": "Test connection",
     "Settings.CloudBackup.TestConnection.Success": "Connection succeeded.",
     "Settings.CloudBackup.TestConnection.Failed": "Connection failed: {0}",
-    "Settings.CloudBackup.OfficialCloudHint": "DeskBox cloud backup will appear here once the official account service ships.",
     "Settings.CloudBackup.TodoData.Title": "Todo data",
-    "Settings.CloudBackup.TodoData.Description": "Todo items and their attachments from every todo widget.",
+    "Settings.CloudBackup.TodoData.Description": "Todo items from every todo widget. Attachments are not included.",
     "Settings.CloudBackup.QuickCaptureData.Title": "Quick capture data",
-    "Settings.CloudBackup.QuickCaptureData.Description": "Quick capture records and their attachments.",
+    "Settings.CloudBackup.QuickCaptureData.Description": "Quick-capture notes. Attachments are not included.",
     "Settings.CloudBackup.WidgetStyle.Title": "Widget style",
-    "Settings.CloudBackup.WidgetStyle.Description": "Appearance settings like opacity, material and colors. Positions and monitor layout are never included.",
+    "Settings.CloudBackup.WidgetStyle.Description": "Appearance settings like opacity, material and colors. Widget positions and monitor layout are not included.",
     "Settings.CloudBackup.Interval.Title": "Backup every",
     "Settings.CloudBackup.Interval.Description": "How often snapshots upload in the background while DeskBox runs.",
     "Settings.CloudBackup.Interval.Hour": "1 hour",
@@ -2757,6 +2758,7 @@
     "Settings.CloudBackup.BackupNow.Success": "Uploaded: {0}",
     "Settings.CloudBackup.BackupNow.Failed": "Backup failed: {0}",
     "Settings.CloudBackup.NotConfigured": "Cloud backup is not configured yet.",
+    "Settings.CloudBackup.NoScope": "Select at least one data type to back up.",
     "Settings.CloudBackup.LastSuccess": "Last successful backup: {0}",
     "Settings.CloudBackup.LastSuccess.Never": "No successful backup yet.",
     "Settings.CloudBackup.RefreshSnapshots": "Refresh",
@@ -2777,5 +2779,31 @@
     "Settings.CloudBackup.HttpWarning": "http:// endpoints send the password base64-encoded over a cleartext channel. Use this only for trusted local-network servers.",
     "Settings.CloudBackup.RestoreConfirm.SourceDevice": "Source device: {0}.",
     "Settings.CloudBackup.RestoreConfirm.Remapped": "Restored todo data was mapped onto {0} widget(s) on this device because the source widget ids do not exist here.",
-    "Settings.CloudBackup.RestoreConfirm.Unmapped": "{0} todo store(s) could not be mapped to any widget on this device - files are kept on disk but will not be visible."
+    "Settings.CloudBackup.RestoreConfirm.Unmapped": "{0} todo store(s) could not be mapped to any widget on this device - files are kept on disk but will not be visible.",
+    "Settings.Dialog.MigrateProgressTitle": "Moving storage location",
+    "Settings.Dialog.MigrateProgressBody": "Moving widget folders from\n{0}\nto\n{1}",
+    "Settings.Dialog.MigrateProgressWidget": "Folder {0} of {1}: {2}",
+    "Settings.Dialog.MigrateCanceling": "Canceling and restoring…",
+    "Settings.Dialog.MigrateItemPaths": "From: {0}\nTo: {1}",
+    "Settings.Dialog.MigrateItemRetry": "Retry",
+    "Settings.Dialog.MigrateItemSkip": "Skip",
+    "Settings.Dialog.MigrateItemAbort": "Stop migration",
+    "Settings.Dialog.MigrateItemApplyAll": "Do this for all remaining items",
+    "Settings.Dialog.MigrateReasonInUse": "The file is open in another program. Close it, then retry — or skip it.",
+    "Settings.Dialog.MigrateReasonAccessDenied": "Access was denied.",
+    "Settings.Dialog.MigrateReasonNotFound": "The item no longer exists (it may have been moved or deleted).",
+    "Settings.Dialog.MigrateReasonDiskFull": "The destination drive is full.",
+    "Settings.Dialog.MigrateReasonPathTooLong": "The path is too long.",
+    "Settings.Dialog.MigrateReasonUnknown": "Unexpected error.",
+    "Settings.Dialog.MigrateResultCanceledTitle": "Migration canceled",
+    "Settings.Dialog.MigrateResultCanceledBody": "Folders that had already moved were restored to the original location.",
+    "Settings.Dialog.MigrateResultFailedBody": "The migration stopped: {0}",
+    "Settings.Dialog.MigrateResultSummary": "{0} folder(s) migrated · {1} item(s) moved · {2} item(s) not moved",
+    "Settings.Dialog.MigrateResultResidueNote": "{0} old folder(s) could not be cleaned up — you can handle them next.",
+    "Settings.Dialog.MigrateSkippedHeader": "Items left behind (still in the old location):",
+    "Settings.Dialog.MigrateSkippedItem": "{0} · {1} — {2}",
+    "Settings.Dialog.MigrateSkippedKeptNote": "Skipped files stay in the old folder and remain accessible there.",
+    "Settings.Dialog.MigrateRetrySkippedButton": "Retry unmoved items",
+    "Settings.Dialog.MigrateRetryResult": "Retry finished — {0} item(s) still unmoved.",
+    "Settings.Dialog.MigrateOpenTargetButton": "Open new folder"
 }

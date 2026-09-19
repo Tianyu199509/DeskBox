@@ -11,6 +11,9 @@ public sealed partial class ContentWidgetWindow
 
     internal int CachedGroupContentCount => _cachedGroupContents.Count;
 
+    internal IEnumerable<WidgetKind> CachedGroupContentKinds =>
+        _cachedGroupContents.Values.Select(content => content.WidgetKind);
+
     internal bool HasPresentableContentFrame =>
         ContentWidgetShell.HasPresentableContentFrame;
 

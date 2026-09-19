@@ -63,7 +63,9 @@ public sealed partial class FileService
             IReadOnlyList<TransferOperation> operations,
             bool move,
             IProgress<FileTransferProgress>? progress,
-            CancellationToken cancellationToken)
+            CancellationToken cancellationToken,
+            Func<FileTransferItemError, Task<FileTransferItemAction>>? onItemError = null,
+            ICollection<FileTransferSkippedItem>? skippedItems = null)
     {
         var reporter = new TransferProgressReporter(progress, operations.Count);
         var completedOperations = new List<TransferOperation>(operations.Count);
@@ -91,24 +93,75 @@ public sealed partial class FileService
                     cancellationToken);
 
                 estimates.TryGetValue(operation.SourcePath, out TransferWorkEstimate? estimate);
-                if (move)
+                while (true)
                 {
-                    await MoveEntryWithProgressAsync(
-                        operation.SourcePath,
-                        operation.DestinationPath,
-                        estimate,
-                        reporter,
-                        cancellationToken);
-                    completedOperations.Add(operation);
-                }
-                else
-                {
-                    await CopyEntryWithProgressAsync(
-                        operation.SourcePath,
-                        operation.DestinationPath,
-                        reporter,
-                        cancellationToken);
-                    completedOperations.Add(operation);
+                    try
+                    {
+                        if (move)
+                        {
+                            await MoveEntryWithProgressAsync(
+                                operation.SourcePath,
+                                operation.DestinationPath,
+                                estimate,
+                                reporter,
+                                cancellationToken);
+                        }
+                        else
+                        {
+                            await CopyEntryWithProgressAsync(
+                                operation.SourcePath,
+                                operation.DestinationPath,
+                                reporter,
+                                cancellationToken);
+                        }
+
+                        completedOperations.Add(operation);
+                        break;
+                    }
+                    catch (Exception itemException) when (
+                        onItemError is not null &&
+                        itemException is not (
+                            OperationCanceledException or
+                            FileTransferSourceCleanupException or
+                            FileTransferSourceChangedException))
+                    {
+                        // The destination of a failed copy was already removed
+                        // through its own open handle and the source is
+                        // untouched, so asking the caller what to do with this
+                        // item is safe. Cleanup/changed-source exceptions are
+                        // excluded: their destination is a complete copy and
+                        // must keep propagating to the batch-level handlers.
+                        FileTransferItemAction action = await onItemError(
+                            new FileTransferItemError(
+                                operation.SourcePath,
+                                operation.DestinationPath,
+                                itemException));
+                        if (action == FileTransferItemAction.Retry)
+                        {
+                            reporter.SetCurrentItem(
+                                Path.GetFileName(operation.SourcePath));
+                            continue;
+                        }
+
+                        if (action == FileTransferItemAction.Skip)
+                        {
+                            skippedItems?.Add(new FileTransferSkippedItem(
+                                operation.SourcePath,
+                                operation.DestinationPath,
+                                ClassifyTransferError(itemException),
+                                itemException.Message));
+                            App.Log(
+                                $"[FileTransfer] Item skipped " +
+                                $"source='{operation.SourcePath}' " +
+                                $"destination='{operation.DestinationPath}': " +
+                                $"{itemException.Message}");
+                            break;
+                        }
+
+                        // Abort surfaces as cancellation so the batch-level
+                        // path restores/logs exactly like a user cancel.
+                        throw new OperationCanceledException(cancellationToken);
+                    }
                 }
 
                 reporter.CompleteItem(Path.GetFileName(operation.SourcePath));
@@ -716,7 +769,7 @@ public sealed partial class FileService
             !candidatePath.StartsWith(@"\\", StringComparison.Ordinal))
         {
             var volumePath = new StringBuilder(512);
-            if (GetVolumePathName(
+            if (Kernel32NativeMethods.GetVolumePathName(
                     candidatePath,
                     volumePath,
                     (uint)volumePath.Capacity))
@@ -727,17 +780,6 @@ public sealed partial class FileService
 
         return Path.GetPathRoot(fullPath);
     }
-
-    [DllImport(
-        "kernel32.dll",
-        EntryPoint = "GetVolumePathNameW",
-        CharSet = CharSet.Unicode,
-        SetLastError = true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool GetVolumePathName(
-        string fileName,
-        StringBuilder volumePathName,
-        uint bufferLength);
 
     private static Task CopyDirectoryWithProgressAsync(
         string sourceDirectory,
@@ -861,14 +903,58 @@ public sealed partial class FileService
         // while deleting an empty source directory split the tree between the
         // source and destination. Copy-first guarantees that every source
         // byte still exists in at least one complete tree.
+        //
+        // A copy phase that stops early (cancel, item abort, hard failure)
+        // leaves a partial destination tree that nothing tracks: the
+        // completed-results lists only carry finished operations, so a retry
+        // would meet its own half-copy — and re-copy its entries under "(2)"
+        // names. When the destination held nothing before this operation,
+        // everything under it is ours and the partial tree can go; a
+        // destination that already had content is a merge we cannot
+        // untangle, so it stays.
+        bool destinationPreHeldContent = true;
+        try
+        {
+            destinationPreHeldContent =
+                Directory.Exists(destinationDirectory) &&
+                Directory.EnumerateFileSystemEntries(destinationDirectory).Any();
+        }
+        catch
+        {
+            // Cannot inspect the destination: assume pre-existing content and
+            // never delete.
+        }
+
         var copiedSourceFiles = new List<CopiedSourceFileRecord>();
-        await CopyDirectoryWithProgressAsync(
-            sourceDirectory,
-            destinationDirectory,
-            reporter,
-            cancellationToken,
-            new HashSet<string>(StringComparer.OrdinalIgnoreCase),
-            copiedSourceFiles);
+        try
+        {
+            await CopyDirectoryWithProgressAsync(
+                sourceDirectory,
+                destinationDirectory,
+                reporter,
+                cancellationToken,
+                new HashSet<string>(StringComparer.OrdinalIgnoreCase),
+                copiedSourceFiles);
+        }
+        catch (Exception)
+        {
+            if (!destinationPreHeldContent)
+            {
+                try
+                {
+                    Directory.Delete(destinationDirectory, recursive: true);
+                }
+                catch (Exception cleanupException)
+                {
+                    App.Log(
+                        $"[FileTransfer] Partial destination cleanup failed " +
+                        $"destination='{destinationDirectory}': " +
+                        $"{cleanupException.Message}");
+                }
+            }
+
+            throw;
+        }
         if (cancellationToken.IsCancellationRequested)
         {
             // The destination is already complete while the source is still

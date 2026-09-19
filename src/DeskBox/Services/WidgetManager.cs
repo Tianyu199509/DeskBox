@@ -17,6 +17,19 @@ public enum FileWidgetPathConflictKind
 }
 
 /// <summary>
+/// How a candidate widget folder overlaps a path that must stay exclusive,
+/// so the error can name the actual relationship instead of a generic
+/// "same or mutually containing" blur (feedback #114).
+/// </summary>
+internal enum FileWidgetPathRelation
+{
+    SameDirectory,
+    CandidateInsideOther,
+    CandidateContainsOther,
+    UnresolvableOverlap
+}
+
+/// <summary>
 /// Why a folder cannot be mapped, and which existing surface owns it, so the
 /// UI can resolve the conflict instead of only announcing it.
 /// </summary>
@@ -30,11 +43,61 @@ public sealed record ManagedStorageMigrationResidue(
     string SourceFolder,
     string Reason);
 
+public sealed record ManagedStorageRollbackFailure(
+    string WidgetId,
+    string WidgetName,
+    string DestinationFolder,
+    string SourceFolder,
+    bool PreserveExisting,
+    string Reason);
+
+/// <summary>
+/// One entry the user chose to skip (or that stayed behind) during a storage
+/// migration. The file still exists at <see cref="SourcePath"/>; the widget's
+/// destination folder simply never received it.
+/// </summary>
+public sealed record ManagedStorageSkippedItem(
+    string WidgetId,
+    string WidgetName,
+    string SourcePath,
+    string DestinationPath,
+    FileService.FileTransferItemErrorKind ErrorKind,
+    string Detail);
+
+/// <summary>
+/// Progress of a managed storage migration across all affected widgets.
+/// Item counters are cumulative across widget folders.
+/// </summary>
+public sealed record ManagedStorageMigrationProgress(
+    FileService.FileTransferPhase Phase,
+    int CompletedWidgets,
+    int TotalWidgets,
+    string? CurrentWidgetName,
+    string? CurrentItemName,
+    int CompletedItems,
+    int TotalItems,
+    long BytesTransferred,
+    double? BytesPerSecond,
+    TimeSpan? EstimatedRemaining);
+
+/// <summary>
+/// Optional interactive controls for a storage migration: progress reports,
+/// cancellation, and a per-item retry/skip/abort decision callback. The
+/// callback runs on a background thread; UI callers must marshal through the
+/// dispatcher before touching XAML.
+/// </summary>
+public sealed record ManagedStorageMigrationOptions(
+    IProgress<ManagedStorageMigrationProgress>? Progress = null,
+    CancellationToken CancellationToken = default,
+    Func<FileService.FileTransferItemError, Task<FileService.FileTransferItemAction>>? OnItemError = null);
+
 public sealed record ManagedStorageMigrationResult(
     int AffectedWidgetCount,
     string OldRootPath,
     string NewRootPath,
-    IReadOnlyList<ManagedStorageMigrationResidue> Residues);
+    IReadOnlyList<ManagedStorageMigrationResidue> Residues,
+    int MovedItemCount,
+    IReadOnlyList<ManagedStorageSkippedItem> SkippedItems);
 
 /// <summary>
 /// The migration destination already holds non-empty widget folders, usually
@@ -54,6 +117,29 @@ public sealed class ManagedStorageDestinationResidueException : Exception
     }
 
     public IReadOnlyList<string> StaleDestinationFolders { get; }
+}
+
+/// <summary>
+/// A migration failed and the best-effort rollback could not return every
+/// moved folder, so some widget folders now live in both the old and the new
+/// root while the widgets point back at the old root. Carries the original
+/// failure plus the unreturned folders: the UI must list them and offer a
+/// recovery path instead of announcing a bare "migration failed" (#112).
+/// </summary>
+public sealed class ManagedStorageRollbackFailureException : Exception
+{
+    internal ManagedStorageRollbackFailureException(
+        Exception originalFailure,
+        IReadOnlyList<ManagedStorageRollbackFailure> failures)
+        : base(originalFailure.Message, originalFailure)
+    {
+        OriginalFailure = originalFailure;
+        Failures = failures;
+    }
+
+    public Exception OriginalFailure { get; }
+
+    public IReadOnlyList<ManagedStorageRollbackFailure> Failures { get; }
 }
 
 public sealed record QuickCaptureFileWidgetTarget(
@@ -1062,11 +1148,71 @@ public sealed partial class WidgetManager
             return;
         }
 
-        throw new InvalidOperationException(_localizationService.Format(
-            "Widget.Error.FileWidgetPathConflict",
-            conflict.Kind == FileWidgetPathConflictKind.ManagedStorageRoot
-                ? _localizationService.T("WidgetTitleIcon.Label.ManagedStorage")
-                : conflict.ConflictingWidget!.Name));
+        string otherDisplayName;
+        string otherFolderPath;
+        if (conflict.Kind == FileWidgetPathConflictKind.ManagedStorageRoot)
+        {
+            otherDisplayName = _localizationService.T("WidgetTitleIcon.Label.ManagedStorage");
+            otherFolderPath = SettingsService.NormalizeManagedStorageRootPath(
+                _settingsService.Settings.FileWidget.DefaultManagedStorageRootPath);
+        }
+        else
+        {
+            otherDisplayName = conflict.ConflictingWidget!.Name;
+            otherFolderPath = conflict.ConflictingWidget.MappedFolderPath!;
+        }
+
+        throw new InvalidOperationException(
+            FormatFileWidgetPathConflictMessage(folderPath, otherDisplayName, otherFolderPath));
+    }
+
+    internal static FileWidgetPathRelation DescribeFileWidgetPathRelation(
+        string candidatePath,
+        string otherPath)
+    {
+        string candidate = Path.TrimEndingDirectorySeparator(Path.GetFullPath(candidatePath));
+        string other = Path.TrimEndingDirectorySeparator(Path.GetFullPath(otherPath));
+        if (string.Equals(candidate, other, StringComparison.OrdinalIgnoreCase))
+        {
+            return FileWidgetPathRelation.SameDirectory;
+        }
+
+        if (FileService.TryIsPathUnderDirectoryResolved(candidatePath, otherPath, out bool candidateInsideOther) &&
+            FileService.TryIsPathUnderDirectoryResolved(otherPath, candidatePath, out bool otherInsideCandidate))
+        {
+            if (candidateInsideOther && otherInsideCandidate)
+            {
+                // Two logical aliases for one physical directory.
+                return FileWidgetPathRelation.SameDirectory;
+            }
+
+            if (candidateInsideOther)
+            {
+                return FileWidgetPathRelation.CandidateInsideOther;
+            }
+
+            if (otherInsideCandidate)
+            {
+                return FileWidgetPathRelation.CandidateContainsOther;
+            }
+        }
+
+        return FileWidgetPathRelation.UnresolvableOverlap;
+    }
+
+    internal string FormatFileWidgetPathConflictMessage(
+        string candidatePath,
+        string otherDisplayName,
+        string otherFolderPath)
+    {
+        string key = DescribeFileWidgetPathRelation(candidatePath, otherFolderPath) switch
+        {
+            FileWidgetPathRelation.SameDirectory => "Widget.Error.FileWidgetPathConflictSameFolder",
+            FileWidgetPathRelation.CandidateInsideOther => "Widget.Error.FileWidgetPathConflictInsideOther",
+            FileWidgetPathRelation.CandidateContainsOther => "Widget.Error.FileWidgetPathConflictContainsOther",
+            _ => "Widget.Error.FileWidgetPathConflictUnresolvable",
+        };
+        return _localizationService.Format(key, otherDisplayName, otherFolderPath);
     }
 
     public bool TryGetFileWidgetPathConflict(

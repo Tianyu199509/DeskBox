@@ -148,7 +148,9 @@ public sealed partial class SettingsWindow
         formPanel.Children.Add(new Grid { Children = { tooShortText, counterText } });
         formPanel.Children.Add(diagnosticsCheckBox);
         formPanel.Children.Add(wallLink);
-        formPanel.Children.Add(errorText);
+        // errorText intentionally lives OUTSIDE formPanel: once a submission
+        // succeeds the form is collapsed, and a rate-limit or network error
+        // surfaced afterwards would otherwise be invisible (feedback #115).
 
         var successIdText = new TextBlock
         {
@@ -187,92 +189,150 @@ public sealed partial class SettingsWindow
         resultPanel.Children.Add(successWallLink);
         resultPanel.Children.Add(diagnosticsNote);
 
+        var submitAnotherButton = new Button
+        {
+            Content = T("Feedback.Dialog.SubmitAnother"),
+            HorizontalAlignment = HorizontalAlignment.Center,
+            Margin = new Thickness(0, 12, 0, 0),
+        };
+        resultPanel.Children.Add(submitAnotherButton);
+
         var contentGrid = new Grid();
         contentGrid.Children.Add(formPanel);
         contentGrid.Children.Add(resultPanel);
+
+        var dialogContent = new StackPanel { Spacing = 0 };
+        dialogContent.Children.Add(contentGrid);
+        dialogContent.Children.Add(errorText);
 
         var dialog = new ContentDialog
         {
             XamlRoot = SettingsRoot.XamlRoot,
             Title = T("Feedback.Dialog.Title"),
-            Content = contentGrid,
+            Content = dialogContent,
             PrimaryButtonText = T("Feedback.Dialog.Submit"),
             CloseButtonText = T("Common.Close"),
             DefaultButton = ContentDialogButton.Primary,
         };
+
+        // Rate limiting outlives a single validation pass: editing the text
+        // must not re-enable submit while the server window is still open.
+        bool rateLimitedPrimaryDisabled = false;
 
         void RefreshValidation()
         {
             int length = contentBox.Text.Trim().Length;
             counterText.Text = _localizationService.Format("Feedback.Dialog.CharCount", length);
             tooShortText.Opacity = length is > 0 and < 10 ? 1 : 0;
-            dialog.IsPrimaryButtonEnabled = length is >= 10 and <= 2000;
+            dialog.IsPrimaryButtonEnabled = !rateLimitedPrimaryDisabled && length is >= 10 and <= 2000;
+        }
+
+        void RestoreFormControls()
+        {
+            dialog.PrimaryButtonText = T("Feedback.Dialog.Submit");
+            suggestionRadio.IsEnabled = true;
+            bugRadio.IsEnabled = true;
+            contentBox.IsEnabled = true;
+            diagnosticsCheckBox.IsEnabled = true;
+            RefreshValidation();
+        }
+
+        void ShowSubmitError(string message, bool disablePrimary)
+        {
+            rateLimitedPrimaryDisabled = disablePrimary;
+            errorText.Text = message;
+            errorText.Opacity = 1;
+            RestoreFormControls();
+            if (disablePrimary)
+            {
+                // Retrying inside the rate-limit window can only fail again;
+                // keep the button off so pressing it never looks silently
+                // ignored. The text stays editable for when the user returns.
+                dialog.IsPrimaryButtonEnabled = false;
+            }
         }
 
         contentBox.TextChanged += (_, _) => RefreshValidation();
-        RefreshValidation();
+
+        submitAnotherButton.Click += (_, _) =>
+        {
+            rateLimitedPrimaryDisabled = false;
+            errorText.Opacity = 0;
+            formPanel.Visibility = Visibility.Visible;
+            resultPanel.Visibility = Visibility.Collapsed;
+            contentBox.Text = string.Empty;
+            // Re-selecting Suggestion also resets the kind and hides the
+            // diagnostics checkbox through its Checked handler.
+            suggestionRadio.IsChecked = true;
+            kind = DeskBoxFeedbackKind.Suggestion;
+            // Success collapsed the primary button (empty text) and left the
+            // inputs disabled — RestoreFormControls undoes both, otherwise
+            // the "submit another" form comes back dead.
+            RestoreFormControls();
+        };
 
         dialog.PrimaryButtonClick += async (_, args) =>
         {
             args.Cancel = true;
             ContentDialogButtonClickDeferral deferral = args.GetDeferral();
-            dialog.IsPrimaryButtonEnabled = false;
-            suggestionRadio.IsEnabled = false;
-            bugRadio.IsEnabled = false;
-            contentBox.IsEnabled = false;
-            diagnosticsCheckBox.IsEnabled = false;
-            string submitLabel = dialog.PrimaryButtonText;
-            dialog.PrimaryButtonText = T("Feedback.Dialog.Submitting");
-            errorText.Opacity = 0;
-
-            string originalText = contentBox.Text;
-            bool attachDiagnostics = diagnosticsCheckBox.IsChecked == true;
-            DeskBoxFeedbackSubmissionResult result = await FeedbackService.SubmitAsync(
-                kind,
-                originalText,
-                attachDiagnostics);
-
-            if (result.Ok && result.Id is long feedbackId)
+            try
             {
-                bool diagnosticsUploaded = true;
-                if (attachDiagnostics)
+                dialog.IsPrimaryButtonEnabled = false;
+                suggestionRadio.IsEnabled = false;
+                bugRadio.IsEnabled = false;
+                contentBox.IsEnabled = false;
+                diagnosticsCheckBox.IsEnabled = false;
+                dialog.PrimaryButtonText = T("Feedback.Dialog.Submitting");
+                errorText.Opacity = 0;
+
+                string originalText = contentBox.Text;
+                bool attachDiagnostics = diagnosticsCheckBox.IsChecked == true;
+                DeskBoxFeedbackSubmissionResult result = await FeedbackService.SubmitAsync(
+                    kind,
+                    originalText,
+                    attachDiagnostics);
+
+                if (result.Ok && result.Id is long feedbackId)
                 {
-                    dialog.PrimaryButtonText = T("Feedback.Dialog.UploadingDiagnostics");
-                    diagnosticsUploaded = await TryUploadDiagnosticsAsync(feedbackId);
+                    bool diagnosticsUploaded = true;
+                    if (attachDiagnostics)
+                    {
+                        dialog.PrimaryButtonText = T("Feedback.Dialog.UploadingDiagnostics");
+                        diagnosticsUploaded = await TryUploadDiagnosticsAsync(feedbackId);
+                    }
+
+                    successIdText.Text = F("Feedback.Dialog.SuccessId", feedbackId);
+                    successHint.Text = T("Feedback.Dialog.SuccessHint");
+                    diagnosticsNote.Text = T("Feedback.Dialog.DiagnosticsFailed");
+                    diagnosticsNote.Visibility = attachDiagnostics && !diagnosticsUploaded
+                        ? Visibility.Visible
+                        : Visibility.Collapsed;
+                    formPanel.Visibility = Visibility.Collapsed;
+                    resultPanel.Visibility = Visibility.Visible;
+                    // Empty button text collapses the primary button in ContentDialog.
+                    dialog.PrimaryButtonText = string.Empty;
                 }
-
-                successIdText.Text = F("Feedback.Dialog.SuccessId", feedbackId);
-                successHint.Text = T("Feedback.Dialog.SuccessHint");
-                diagnosticsNote.Text = T("Feedback.Dialog.DiagnosticsFailed");
-                diagnosticsNote.Visibility = attachDiagnostics && !diagnosticsUploaded
-                    ? Visibility.Visible
-                    : Visibility.Collapsed;
-                formPanel.Visibility = Visibility.Collapsed;
-                resultPanel.Visibility = Visibility.Visible;
-                // Empty button text collapses the primary button in ContentDialog.
-                dialog.PrimaryButtonText = string.Empty;
-            }
-            else
-            {
-                if (result.RetryAfterMinutes is int minutes && minutes > 0)
+                else if (result.RetryAfterMinutes is int minutes && minutes > 0)
                 {
-                    errorText.Text = F("Feedback.Dialog.RateLimited", minutes);
+                    ShowSubmitError(F("Feedback.Dialog.RateLimited", minutes), disablePrimary: true);
                 }
                 else
                 {
-                    errorText.Text = T("Feedback.Dialog.NetworkError");
+                    ShowSubmitError(T("Feedback.Dialog.NetworkError"), disablePrimary: false);
                 }
-
-                errorText.Opacity = 1;
-                dialog.PrimaryButtonText = submitLabel;
-                dialog.IsPrimaryButtonEnabled = true;
-                suggestionRadio.IsEnabled = true;
-                bugRadio.IsEnabled = true;
-                contentBox.IsEnabled = true;
-                diagnosticsCheckBox.IsEnabled = true;
             }
-
-            deferral.Complete();
+            catch (Exception ex)
+            {
+                // Last-resort guard: any unexpected failure must still land on
+                // a visible error and complete the deferral, never leave the
+                // dialog stuck on "Submitting…" (feedback #115).
+                App.Log($"[Feedback] Submit handler failed unexpectedly: {ex}");
+                ShowSubmitError(T("Feedback.Dialog.NetworkError"), disablePrimary: false);
+            }
+            finally
+            {
+                deferral.Complete();
+            }
         };
 
         await dialog.ShowAsync();

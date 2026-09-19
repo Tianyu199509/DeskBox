@@ -1,6 +1,7 @@
 #if DESKBOX_NATIVE_AOT
 using System.Text;
 using DeskBox.Helpers;
+using DeskBox.Platform;
 
 namespace DeskBox.Services;
 

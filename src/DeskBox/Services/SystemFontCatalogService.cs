@@ -1,3 +1,4 @@
+using DeskBox.Platform;
 using System.Runtime.InteropServices;
 
 namespace DeskBox.Services;
@@ -45,7 +46,7 @@ public sealed class SystemFontCatalogService
         }
 
         var names = new List<string>();
-        var deviceContext = CreateCompatibleDC(IntPtr.Zero);
+        var deviceContext = Win32Helper.CreateCompatibleDC(IntPtr.Zero);
         if (deviceContext == IntPtr.Zero)
         {
             return Array.Empty<string>();
@@ -53,16 +54,16 @@ public sealed class SystemFontCatalogService
 
         try
         {
-            var logFont = new LogFont
+            var logFont = new Win32Helper.LogFont
             {
                 CharSet = DefaultCharSetValue,
                 FaceName = string.Empty
             };
-            EnumFontFamilyDelegate callback = (fontInfo, _, _, _) =>
+            Win32Helper.EnumFontFamilyDelegate callback = (fontInfo, _, _, _) =>
             {
                 try
                 {
-                    var logFontInfo = Marshal.PtrToStructure<LogFont>(fontInfo);
+                    var logFontInfo = Marshal.PtrToStructure<Win32Helper.LogFont>(fontInfo);
                     if (!string.IsNullOrWhiteSpace(logFontInfo.FaceName))
                     {
                         names.Add(logFontInfo.FaceName);
@@ -76,7 +77,7 @@ public sealed class SystemFontCatalogService
                 return 1;
             };
 
-            _ = EnumFontFamiliesEx(
+            _ = Win32Helper.EnumFontFamiliesExW(
                 deviceContext,
                 ref logFont,
                 callback,
@@ -93,60 +94,7 @@ public sealed class SystemFontCatalogService
         }
         finally
         {
-            _ = DeleteDC(deviceContext);
+            _ = Win32Helper.DeleteDC(deviceContext);
         }
-    }
-
-    [UnmanagedFunctionPointer(CallingConvention.Winapi)]
-    private delegate int EnumFontFamilyDelegate(
-        IntPtr fontInfo,
-        IntPtr textMetrics,
-        uint fontType,
-        IntPtr parameter);
-
-    [StructLayout(LayoutKind.Sequential, CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
-    private struct LogFont
-    {
-        public int Height;
-        public int Width;
-        public int Escapement;
-        public int Orientation;
-        public int Weight;
-        public byte Italic;
-        public byte Underline;
-        public byte StrikeOut;
-        public byte CharSet;
-        public byte OutPrecision;
-        public byte ClipPrecision;
-        public byte Quality;
-        public byte PitchAndFamily;
-
-        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)]
-        public string FaceName;
-    }
-
-    [DllImport("gdi32.dll", ExactSpelling = true)]
-    private static extern IntPtr CreateCompatibleDC(IntPtr deviceContext);
-
-    [DllImport("gdi32.dll", ExactSpelling = true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool DeleteDC(IntPtr deviceContext);
-
-    [DllImport("gdi32.dll", CharSet = CharSet.Unicode, ExactSpelling = true)]
-    private static extern int EnumFontFamiliesExW(
-        IntPtr deviceContext,
-        ref LogFont logFont,
-        EnumFontFamilyDelegate callback,
-        IntPtr parameter,
-        uint flags);
-
-    private static int EnumFontFamiliesEx(
-        IntPtr deviceContext,
-        ref LogFont logFont,
-        EnumFontFamilyDelegate callback,
-        IntPtr parameter,
-        uint flags)
-    {
-        return EnumFontFamiliesExW(deviceContext, ref logFont, callback, parameter, flags);
     }
 }

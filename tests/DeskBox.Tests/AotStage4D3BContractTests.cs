@@ -31,13 +31,17 @@ public sealed class AotStage4D3BContractTests
     {
         string source = ReadRepositoryFile(
             "src/DeskBox/Helpers/NativeDropTargetComInterop.cs");
+        string ole32 = ReadRepositoryFile(
+            "src/DeskBox/Platform/Ole32NativeMethods.cs");
 
-        Assert.Contains("[LibraryImport(\"ole32.dll\")]", source, StringComparison.Ordinal);
+        Assert.Contains("[LibraryImport(\"ole32.dll\")]", ole32, StringComparison.Ordinal);
         Assert.Contains(
             "RegisterDragDrop(nint hwnd, nint dropTarget)",
-            source,
+            ole32,
             StringComparison.Ordinal);
-        Assert.Contains("RevokeDragDrop(nint hwnd)", source, StringComparison.Ordinal);
+        Assert.Contains("RevokeDragDrop(nint hwnd)", ole32, StringComparison.Ordinal);
+        Assert.Contains("Ole32NativeMethods.RegisterDragDrop(", source, StringComparison.Ordinal);
+        Assert.Contains("Ole32NativeMethods.RevokeDragDrop(", source, StringComparison.Ordinal);
         Assert.Contains(
             "ComInterfaceMarshaller<INativeDropTarget>.ConvertToUnmanaged",
             source,

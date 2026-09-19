@@ -142,9 +142,18 @@ internal sealed class CloudBackupService
         try
         {
             CloudBackupOptions options = _options;   // fresh read inside the gate
-            if (!options.IsConfigured)
+            if (!options.HasEndpoint)
             {
                 return CloudBackupRunResult.NotConfigured;
+            }
+
+            // Uploading needs a scope — nothing to send when every domain
+            // toggle is off. Named distinctly so the UI can point at the
+            // domain switches instead of reporting a generic "not
+            // configured" for an endpoint that tests fine.
+            if (options.Scope == CloudBackupDomain.None)
+            {
+                return CloudBackupRunResult.NoScope;
             }
 
             // Same gate as the scheduled path: uploading now would push a
@@ -236,11 +245,11 @@ internal sealed class CloudBackupService
         }
     }
 
-    /// <summary>Whether a secret already exists for the configured account.</summary>
+    /// <summary>Whether a secret already exists for the selected endpoint.</summary>
     internal async Task<bool> HasCredentialAsync(CancellationToken cancellationToken = default)
     {
         CloudBackupOptions options = _options;
-        if (!options.IsConfigured)
+        if (!options.HasEndpoint)
         {
             return false;
         }
@@ -260,7 +269,7 @@ internal sealed class CloudBackupService
         CancellationToken cancellationToken = default)
     {
         CloudBackupOptions options = _options;
-        if (!options.IsConfigured)
+        if (!options.HasEndpoint)
         {
             throw new InvalidOperationException("Cloud backup is not configured.");
         }
@@ -276,7 +285,7 @@ internal sealed class CloudBackupService
         CancellationToken cancellationToken = default)
     {
         CloudBackupOptions options = _options;
-        if (!options.IsConfigured)
+        if (!options.HasEndpoint)
         {
             return Array.Empty<CloudBackupRemoteEntry>();
         }
@@ -300,7 +309,7 @@ internal sealed class CloudBackupService
         CancellationToken cancellationToken = default)
     {
         CloudBackupOptions options = _options;
-        if (!options.IsConfigured)
+        if (!options.HasEndpoint)
         {
             throw new InvalidOperationException("Cloud backup is not configured.");
         }
@@ -503,9 +512,11 @@ internal sealed record CloudBackupRunResult(
     string? RemoteFilePath,
     int PrunedCount,
     bool NoCredential = false,
-    bool RestorePending = false)
+    bool RestorePending = false,
+    bool NoScopeSelected = false)
 {
     internal static readonly CloudBackupRunResult NotConfigured = new(false, null, 0);
+    internal static readonly CloudBackupRunResult NoScope = new(false, null, 0, NoScopeSelected: true);
     internal static readonly CloudBackupRunResult MissingCredential = new(false, null, 0, NoCredential: true);
     internal static readonly CloudBackupRunResult PendingRestore = new(false, null, 0, RestorePending: true);
 }

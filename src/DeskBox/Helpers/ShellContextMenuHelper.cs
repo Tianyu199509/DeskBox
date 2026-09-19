@@ -1,4 +1,4 @@
-using System.Runtime.InteropServices;
+using DeskBox.Platform;
 #if DESKBOX_NATIVE_AOT && DESKBOX_AOT_SMOKE_HARNESS
 using DeskBox.Services;
 #endif
@@ -13,13 +13,6 @@ namespace DeskBox.Helpers;
 public static class ShellContextMenuHelper
 {
     private const uint SHOP_FILEPATH = 0x2;
-
-    [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
-    private static extern bool SHObjectProperties(
-        IntPtr hwnd,
-        uint shopObjectType,
-        string pszObjectName,
-        string? pszPropertyPage);
 
     /// <summary>
     /// Shows the native properties dialog for a file or folder.
@@ -37,7 +30,7 @@ public static class ShellContextMenuHelper
 #endif
         try
         {
-            bool invoked = SHObjectProperties(
+            bool invoked = Shell32NativeMethods.SHObjectProperties(
                 hwnd,
                 SHOP_FILEPATH,
                 filePath,

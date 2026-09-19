@@ -98,6 +98,15 @@ public sealed class DeskBoxDataBackupServiceTests : IDisposable
         await File.WriteAllTextAsync(
             Path.Combine(dataDirectory, "weather-cache.json"),
             "{\"schemaVersion\":2}");
+        // Device-local sync protocol state must never travel with a backup.
+        string syncOutbox = Directory.CreateDirectory(
+            Path.Combine(dataDirectory, "sync", "outbox", "todo-data")).FullName;
+        await File.WriteAllTextAsync(
+            Path.Combine(dataDirectory, "sync", "state.json"),
+            "{\"schemaVersion\":1}");
+        await File.WriteAllTextAsync(
+            Path.Combine(syncOutbox, "op-1.json"),
+            "{\"domain\":\"todo-data\"}");
         var service = new DeskBoxDataBackupService(_appDataRoot);
 
         string backupPath = await service.ExportBackupAsync(_exportRoot);
@@ -118,6 +127,8 @@ public sealed class DeskBoxDataBackupServiceTests : IDisposable
         Assert.Null(archive.GetEntry("data/quick-capture/exports/temporary.txt"));
         Assert.Null(archive.GetEntry("data/cache/glance/images/wallpaper.jpg"));
         Assert.Null(archive.GetEntry("data/weather-cache.json"));
+        Assert.Null(archive.GetEntry("data/sync/state.json"));
+        Assert.Null(archive.GetEntry("data/sync/outbox/todo-data/op-1.json"));
         ZipArchiveEntry manifestEntry = Assert.IsType<ZipArchiveEntry>(archive.GetEntry("manifest.json"));
         string manifestJson;
         using (var reader = new StreamReader(manifestEntry.Open()))

@@ -1,3 +1,4 @@
+using DeskBox.Platform;
 using System.Runtime.InteropServices;
 
 namespace DeskBox.Helpers;
@@ -134,13 +135,7 @@ internal static unsafe partial class ShellDropDelegator
         public int Y;
     }
 
-    [LibraryImport("shell32.dll", EntryPoint = "SHCreateItemFromParsingName",
-        StringMarshalling = StringMarshalling.Utf16)]
-    private static partial int SHCreateItemFromParsingName(
-        string path,
-        nint bindContext,
-        in Guid riid,
-        out nint shellItem);
+
 
     /// <summary>
     /// Runs DragEnter + Drop on the shortcut's Shell drop target. Returns
@@ -274,7 +269,7 @@ internal static unsafe partial class ShellDropDelegator
     {
         try
         {
-            int createHResult = SHCreateItemFromParsingName(
+            int createHResult = Shell32NativeMethods.SHCreateItemFromParsingName(
                 shortcutPath,
                 nint.Zero,
                 ShellItemIid,

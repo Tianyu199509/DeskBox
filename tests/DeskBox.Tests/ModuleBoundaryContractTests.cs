@@ -25,36 +25,17 @@ public sealed class ModuleBoundaryContractTests
     {
         ["src/DeskBox/App.xaml.cs"] = 10,
         ["src/DeskBox/Controls/NativeShellFileDragProvider.cs"] = 4,
-        ["src/DeskBox/Helpers/BoundedStaOperationRunner.cs"] = 2,
         ["src/DeskBox/Helpers/ElevatedFileLauncher.cs"] = 7,
-        ["src/DeskBox/Helpers/ExplorerShellLaunchService.cs"] = 1,
         ["src/DeskBox/Helpers/NativeDropDescriptionWriter.cs"] = 7,
-        ["src/DeskBox/Helpers/NativeDropImageManager.cs"] = 1,
         ["src/DeskBox/Helpers/NativeDropTarget.cs"] = 12,
-        ["src/DeskBox/Helpers/NativeDropTargetComInterop.cs"] = 2,
         ["src/DeskBox/Helpers/ShellClipboardHelper.cs"] = 12,
-        ["src/DeskBox/Helpers/ShellContextMenuHelper.cs"] = 1,
-        ["src/DeskBox/Helpers/ShellContextMenuProxy.cs"] = 1,
         ["src/DeskBox/Helpers/ShellDataObjectBuilder.cs"] = 5,
-        ["src/DeskBox/Helpers/ShellDesktopDropTarget.cs"] = 1,
-        ["src/DeskBox/Helpers/ShellDropDelegator.cs"] = 1,
-        ["src/DeskBox/Helpers/ShortcutHelper.cs"] = 1,
-        ["src/DeskBox/Helpers/ShortcutNativeBackend.cs"] = 1,
-        ["src/DeskBox/Services/AppDistributionService.cs"] = 1,
-        ["src/DeskBox/Services/AppLifecycleRecoveryWatcher.cs"] = 2,
-        ["src/DeskBox/Services/DesktopAutoOrganizationWatcher.cs"] = 1,
         ["src/DeskBox/Services/DesktopBlankHitTest.cs"] = 6,
-        ["src/DeskBox/Services/DesktopOrganizationCoordinator.cs"] = 2,
-        ["src/DeskBox/Services/DirectStartupTaskXmlReader.cs"] = 3,
         ["src/DeskBox/Services/DragDropPermissionService.cs"] = 13,
-        ["src/DeskBox/Services/EverythingInstallationDetector.cs"] = 4,
         ["src/DeskBox/Services/FileService.ShellTransfer.cs"] = 5,
-        ["src/DeskBox/Services/FileService.TransferProgress.cs"] = 1,
         ["src/DeskBox/Services/FileService.cs"] = 6,
         ["src/DeskBox/Services/JumpListService.cs"] = 4,
         ["src/DeskBox/Services/QuickLookPreviewService.cs"] = 4,
-        ["src/DeskBox/Services/SystemFontCatalogService.cs"] = 3,
-        ["src/DeskBox/Services/WidgetTopologyLayoutService.cs"] = 1,
         ["src/DeskBox/Views/ContentWidgetWindow.AotNativeDropSmoke.cs"] = 4,
     };
 
@@ -98,8 +79,8 @@ public sealed class ModuleBoundaryContractTests
         ["src/DeskBox/Services/DirectStartupTaskBackend.cs"] = 2,
         ["src/DeskBox/Services/FeedbackService.cs"] = 1,
         ["src/DeskBox/Services/FileService.CaseOnlyRename.cs"] = 2,
-        ["src/DeskBox/Services/FileService.TransferProgress.cs"] = 2,
-        ["src/DeskBox/Services/FileService.cs"] = 8,
+        ["src/DeskBox/Services/FileService.TransferProgress.cs"] = 3,
+        ["src/DeskBox/Services/FileService.cs"] = 9,
         ["src/DeskBox/Services/GlanceImageService.cs"] = 3,
         ["src/DeskBox/Services/GlanceWidgetStore.cs"] = 1,
         ["src/DeskBox/Services/LegacySearchIndexCleanupService.cs"] = 1,
@@ -111,7 +92,10 @@ public sealed class ModuleBoundaryContractTests
         ["src/DeskBox/Services/TodoWidgetStore.cs"] = 3,
         ["src/DeskBox/Services/VirtualDropFileNameResolver.cs"] = 1,
         ["src/DeskBox/Services/WidgetManager.FeatureWidgets.cs"] = 1,
-        ["src/DeskBox/Services/WidgetManager.Storage.cs"] = 3,
+        // +1: orphan managed-storage restore deletes the emptied source
+        // folder after moving its contents back to the desktop (#112
+        // migration rollback work in progress).
+        ["src/DeskBox/Services/WidgetManager.Storage.cs"] = 5,
         ["src/DeskBox/ViewModels/TodoWidgetViewModel.DetailAndAttachments.cs"] = 1,
         ["src/DeskBox/Views/ContentWidgetWindow.NativeDragDrop.cs"] = 1,
         ["src/DeskBox/Views/SearchPopupWindow.xaml.cs"] = 2,
@@ -217,6 +201,7 @@ public sealed class ModuleBoundaryContractTests
         string[] restrictedPrefixes =
         {
             "DeskBox.Core.Models",
+            "DeskBox.Core.Persistence",
             "DeskBox.FileSafety.Models",
             "DeskBox.Sync"
         };

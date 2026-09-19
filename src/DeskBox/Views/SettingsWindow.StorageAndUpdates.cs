@@ -84,7 +84,17 @@ public sealed partial class SettingsWindow
             ManagedStorageMigrationResult? result = null;
             try
             {
-                result = await App.Current.WidgetManager.UpdateDefaultManagedStorageRootAsync(normalizedPath);
+                string oldRootPath = ViewModel.ManagedStorageRootPath;
+                result = await ManagedStorageMigrationDialog.RunAsync(
+                    SettingsRoot.XamlRoot,
+                    SettingsRoot.DispatcherQueue,
+                    _localizationService,
+                    oldRootPath,
+                    normalizedPath,
+                    options => App.Current.WidgetManager
+                        .UpdateDefaultManagedStorageRootAsync(normalizedPath, options),
+                    (items, options) => App.Current.WidgetManager
+                        .RetrySkippedMigrationItemsAsync(items, options));
             }
             catch (ManagedStorageDestinationResidueException ex) when (
                 allowStaleCleanupRetry &&
@@ -107,8 +117,24 @@ public sealed partial class SettingsWindow
                     allowStaleCleanupRetry: false);
                 return;
             }
+            catch (ManagedStorageRollbackFailureException ex)
+            {
+                // The rollback left folders in both roots: list them and offer
+                // a conservative retry instead of a bare failure message (#112).
+                await ManagedStorageMigrationResidueDialog.ShowRollbackFailureAsync(
+                    SettingsRoot.XamlRoot,
+                    _localizationService,
+                    failures => App.Current.WidgetManager.RetryMigrationRollbackAsync(failures),
+                    ex);
+                return;
+            }
             catch (Exception ex)
             {
+                // The outer message only counts completed items; the inner
+                // exception names the file that failed (e.g. locked by an app).
+                string detail = ex.InnerException is { } inner
+                    ? $"{ex.Message} {inner.Message}"
+                    : ex.Message;
                 var errorDialog = new ContentDialog
                 {
                     XamlRoot = SettingsRoot.XamlRoot,
@@ -117,12 +143,22 @@ public sealed partial class SettingsWindow
                     DefaultButton = ContentDialogButton.Close,
                     Content = new TextBlock
                     {
-                        Text = _localizationService.Format("Settings.Dialog.MigrateFailedBody", ex.Message),
+                        Text = _localizationService.Format("Settings.Dialog.MigrateFailedBody", detail),
                         TextWrapping = TextWrapping.Wrap
                     }
                 };
 
                 await errorDialog.ShowAsync();
+                return;
+            }
+
+            if (result is null)
+            {
+                // Canceled or failed: the migration dialog already presented
+                // the outcome, and the rollback restored the stored root —
+                // ViewModel.ManagedStorageRootPath still shows the old path,
+                // so only the warning badge needs a refresh.
+                RefreshManagedStoragePathWarning();
                 return;
             }
 
@@ -136,16 +172,6 @@ public sealed partial class SettingsWindow
                     _localizationService,
                     folders => App.Current.WidgetManager.DeleteMigrationResidueFoldersAsync(folders),
                     result);
-            }
-            else
-            {
-                await ShowInfoDialogAsync(
-                    _localizationService.T("Settings.Dialog.MigrateCompleteTitle"),
-                    _localizationService.Format(
-                        "Settings.Dialog.MigrateCompleteBody",
-                        result.AffectedWidgetCount,
-                        result.OldRootPath,
-                        result.NewRootPath));
             }
         }
 

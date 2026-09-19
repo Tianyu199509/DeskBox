@@ -143,7 +143,9 @@ public sealed partial class SettingsWindow
                         ? _localizationService.T("Settings.CloudBackup.RestorePending")
                         : result.NoCredential
                             ? _localizationService.T("Settings.CloudBackup.Password.NotSaved")
-                            : _localizationService.T("Settings.CloudBackup.NotConfigured");
+                            : result.NoScopeSelected
+                                ? _localizationService.T("Settings.CloudBackup.NoScope")
+                                : _localizationService.T("Settings.CloudBackup.NotConfigured");
             }
 
             ViewModel.RefreshCloudBackupStatus();
@@ -176,9 +178,9 @@ public sealed partial class SettingsWindow
         try
         {
             await _settingsService.SaveAsync();
-            // Configured but no saved credential — an anonymous PROPFIND
+            // Endpoint set but no saved credential — an anonymous PROPFIND
             // would just 401. Point at the password field instead.
-            if (App.Current.CloudBackupService.Options.IsConfigured &&
+            if (App.Current.CloudBackupService.Options.HasEndpoint &&
                 !await App.Current.CloudBackupService.HasCredentialAsync())
             {
                 ViewModel.CloudBackupConnectionStatusText =

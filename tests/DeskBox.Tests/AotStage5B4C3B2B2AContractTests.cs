@@ -118,10 +118,10 @@ public sealed class AotStage5B4C3B2B2AContractTests
             "AotTodoNotificationSurfaceEvidence? TodoNotificationSurface",
             managed,
             StringComparison.Ordinal);
-        Assert.Contains("Assert.Equal(32, actual.Count)", baseline, StringComparison.Ordinal);
-        Assert.Contains("Assert.Equal(74, actual.Values.Sum())", baseline, StringComparison.Ordinal);
+        Assert.Contains("Assert.Equal(35, actual.Count)", baseline, StringComparison.Ordinal);
+        Assert.Contains("Assert.Equal(82, actual.Values.Sum())", baseline, StringComparison.Ordinal);
         Assert.Contains(
-            "Assert.Equal(28, actualContextOwners.Length)",
+            "Assert.Equal(32, actualContextOwners.Length)",
             baseline,
             StringComparison.Ordinal);
     }

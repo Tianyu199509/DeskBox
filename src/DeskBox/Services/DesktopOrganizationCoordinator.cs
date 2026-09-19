@@ -1,5 +1,5 @@
-using System.Runtime.InteropServices;
 using DeskBox.Models;
+using DeskBox.Platform;
 
 namespace DeskBox.Services;
 
@@ -359,13 +359,13 @@ public sealed class DesktopOrganizationCoordinator
             return;
         }
 
-        NativeRect nativeWorkArea = default;
-        if (!SystemParametersInfo(SpiGetWorkArea, 0, ref nativeWorkArea, 0))
+        Win32Helper.NativeRect nativeWorkArea = default;
+        if (!Win32Helper.SystemParametersInfo(SpiGetWorkArea, 0, ref nativeWorkArea, 0))
         {
             return;
         }
 
-        double scale = Math.Max(1, GetDpiForSystem() / 96d);
+        double scale = Math.Max(1, Win32Helper.GetDpiForSystem() / 96d);
         var workArea = new DesktopOrganizationRect(
             nativeWorkArea.Left,
             nativeWorkArea.Top,
@@ -411,24 +411,4 @@ public sealed class DesktopOrganizationCoordinator
     }
 
     private const uint SpiGetWorkArea = 0x0030;
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct NativeRect
-    {
-        public int Left;
-        public int Top;
-        public int Right;
-        public int Bottom;
-    }
-
-    [DllImport("user32.dll", SetLastError = true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool SystemParametersInfo(
-        uint action,
-        uint parameter,
-        ref NativeRect value,
-        uint update);
-
-    [DllImport("user32.dll")]
-    private static extern uint GetDpiForSystem();
 }

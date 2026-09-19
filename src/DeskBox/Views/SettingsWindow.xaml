@@ -2722,7 +2722,6 @@ svc:Localized.DescriptionKey="Settings.DefaultWidth.Description"
                                     </Button>
                                     <TextBlock Grid.Column="1" VerticalAlignment="Center" Style="{StaticResource SettingDescriptionTextStyle}" Text="{Binding CloudBackupConnectionStatusText}" TextWrapping="Wrap" />
                                 </Grid>
-                                <TextBlock Style="{StaticResource SettingDescriptionTextStyle}" TextWrapping="Wrap" svc:Localized.Key="Settings.CloudBackup.OfficialCloudHint" />
                             </StackPanel>
                         </toolkit:SettingsCard>
 

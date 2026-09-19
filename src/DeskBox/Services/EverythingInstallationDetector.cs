@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Runtime.InteropServices;
+using DeskBox.Platform;
 using Microsoft.Win32;
 
 namespace DeskBox.Services;
@@ -259,7 +260,10 @@ internal static class EverythingInstallationDetector
     private static bool TryGetProcessElevation(int processId, out bool elevated)
     {
         elevated = false;
-        nint processHandle = OpenProcess(ProcessQueryLimitedInformation, false, processId);
+        nint processHandle = Kernel32NativeMethods.OpenProcess(
+            ProcessQueryLimitedInformation,
+            false,
+            processId);
         if (processHandle == 0)
         {
             return false;
@@ -267,18 +271,21 @@ internal static class EverythingInstallationDetector
 
         try
         {
-            if (!OpenProcessToken(processHandle, TokenQuery, out nint tokenHandle))
+            if (!AdvApi32NativeMethods.OpenProcessToken(
+                    processHandle,
+                    TokenQuery,
+                    out nint tokenHandle))
             {
                 return false;
             }
 
             try
             {
-                if (!GetTokenInformation(
+                if (!AdvApi32NativeMethods.GetTokenInformation(
                         tokenHandle,
                         TokenElevationInformationClass,
-                        out TokenElevation elevation,
-                        Marshal.SizeOf<TokenElevation>(),
+                        out AdvApi32NativeMethods.TokenElevation elevation,
+                        Marshal.SizeOf<AdvApi32NativeMethods.TokenElevation>(),
                         out _))
                 {
                     return false;
@@ -289,36 +296,12 @@ internal static class EverythingInstallationDetector
             }
             finally
             {
-                _ = CloseHandle(tokenHandle);
+                _ = Kernel32NativeMethods.CloseHandle(tokenHandle);
             }
         }
         finally
         {
-            _ = CloseHandle(processHandle);
+            _ = Kernel32NativeMethods.CloseHandle(processHandle);
         }
     }
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct TokenElevation
-    {
-        public int TokenIsElevated;
-    }
-
-    [DllImport("kernel32.dll", SetLastError = true)]
-    private static extern nint OpenProcess(uint desiredAccess, bool inheritHandle, int processId);
-
-    [DllImport("advapi32.dll", SetLastError = true)]
-    private static extern bool OpenProcessToken(nint processHandle, uint desiredAccess, out nint tokenHandle);
-
-    [DllImport("advapi32.dll", SetLastError = true)]
-    private static extern bool GetTokenInformation(
-        nint tokenHandle,
-        int tokenInformationClass,
-        out TokenElevation tokenInformation,
-        int tokenInformationLength,
-        out int returnLength);
-
-    [DllImport("kernel32.dll")]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool CloseHandle(nint handle);
 }

@@ -87,9 +87,9 @@
     "Settings.FileStacks.PopoverStyle.Neutral": "中性模式",
     "Settings.FileStacks.Auto.Title": "自动叠放",
     "Settings.FileStacks.Auto.Description": "按归组方式自动聚合散落文件；关闭时仍可手动叠放",
-    "Settings.FileStacks.GroupBy.Title": "归组方式",
-    "Settings.FileStacks.GroupBy.Description": "自动叠放时如何为散落文件分组",
-    "Settings.FileStacks.Enable.Description": "关闭后隐藏所有叠放，包括手动叠放",
+    "Settings.FileStacks.GroupBy.Title": "分组方式",
+    "Settings.FileStacks.GroupBy.Description": "选择文件自动归入叠放的依据",
+    "Settings.FileStacks.Enable.Description": "开启后，文件会按所选规则自动形成叠放",
     "Settings.FileStacks.Status.Manual": "仅手动叠放",
     "Widget.Stack.UseDefaultOpenMode": "使用默认展开方式",
     "Widget.Stack.RenameUnavailable": "这个叠放已发生变化，请重试",
@@ -181,7 +181,6 @@
     "Widget.MoveToDesktop": "移到桌面",
     "Onboarding.Step3.Title": "选择你喜欢的外观",
     "Settings.FileStacks.Status.Off": "已关闭",
-
     "Settings.FileStacks.Status.On": "自动将散落文件归入叠放",
     "Settings.FileStacks.Mode.Title": "叠放模式",
     "Settings.FileStacks.Mode.Description": "开启手动叠放和自动叠放；关闭后隐藏所有叠放",
@@ -287,6 +286,7 @@
     "Feedback.Dialog.DiagnosticsFailed": "反馈已提交，但诊断包上传失败。",
     "Feedback.Dialog.RateLimited": "{0} 分钟内已反馈过，请稍后再试。",
     "Feedback.Dialog.NetworkError": "无法连接反馈服务，请检查网络后重试。",
+    "Feedback.Dialog.SubmitAnother": "再提交一条",
     "Feedback.My.Title": "我的反馈",
     "Feedback.My.Retry": "重试",
     "Feedback.My.LoadFailed": "加载失败，请稍后再试。",
@@ -298,6 +298,7 @@
     "Feedback.Status.Done": "已完成",
     "Feedback.Status.Wontfix": "暂不处理",
     "Widget.Error.ManagedFolderNameExists": "已存在同名收纳格子，请换一个名称。",
+    "Widget.Error.ManagedFolderNameUnavailable": "无法使用该名称：收纳目录下已有同名项目且无法自动合并。请换一个名称。",
     "Settings.WidgetTabStyle.Pivot": "指示条",
     "QuickCapture.Detail.Appearance": "纸张",
     "Onboarding.Step5.HotkeyTitle": "全局快捷键",
@@ -421,7 +422,7 @@
     "Onboarding.Scene.LightLayer": "轻量整理层",
     "Settings.ManagedStorage.MoveConfirmTitle": "移回桌面？",
     "Settings.FileStacks.Custom.Empty": "还没有规则。添加一条规则并填写扩展名，例如 .psd .ai .fig。",
-  "Onboarding.Step2.Eyebrow": "格子入口",
+    "Onboarding.Step2.Eyebrow": "格子入口",
     "QuickCapture.RecentStatus.Off": "最近复制记录未开启",
     "QuickCapture.SaveToRecords": "保存为随记",
     "Settings.Update.Status.Ready": "准备检查更新",
@@ -477,15 +478,15 @@
     "Settings.Todo.ShowFooterStats.Title": "剩余任务数量",
     "Settings.About.AboutMeTitle": "关于我",
     "Settings.AttachmentHealth.CheckTooltip": "检查待办和随记中的附件是否仍可用",
-  "Onboarding.Step2.Body": "右键任务栏通知区域中的 DeskBox 图标，就能随时新建格子。",
-  "Onboarding.Step2.TrayActionTitle": "找到 DeskBox 图标",
-  "Onboarding.Step2.TrayActionBody": "看不到图标？选择任务栏中的 ∧，然后找到 DeskBox。",
-  "Onboarding.Step2.RightClick": "右键",
-  "Onboarding.Step2.NewWidgetTitle": "新建格子",
-  "Onboarding.Step2.NewWidgetBody": "收纳从桌面拖入的文件",
-  "Onboarding.Step2.ConnectFolderTitle": "新建文件夹映射",
-  "Onboarding.Step2.ConnectFolderBody": "直接显示已有文件夹中的内容",
-  "Onboarding.Step2.FeatureHint": "待办、随记等功能格子，可在设置中按需开启",
+    "Onboarding.Step2.Body": "右键任务栏通知区域中的 DeskBox 图标，就能随时新建格子。",
+    "Onboarding.Step2.TrayActionTitle": "找到 DeskBox 图标",
+    "Onboarding.Step2.TrayActionBody": "看不到图标？选择任务栏中的 ∧，然后找到 DeskBox。",
+    "Onboarding.Step2.RightClick": "右键",
+    "Onboarding.Step2.NewWidgetTitle": "新建格子",
+    "Onboarding.Step2.NewWidgetBody": "收纳从桌面拖入的文件",
+    "Onboarding.Step2.ConnectFolderTitle": "新建文件夹映射",
+    "Onboarding.Step2.ConnectFolderBody": "直接显示已有文件夹中的内容",
+    "Onboarding.Step2.FeatureHint": "待办、随记等功能格子，可在设置中按需开启",
     "Onboarding.Step2.FeatureListTitle": "可选功能格子",
     "Onboarding.Step2.FeatureList": "待办 · 随记 · 音乐 · 天气 · 全局搜索",
     "Onboarding.Step2.FeatureListDescription": "它们是可选工具。先熟悉基础文件格子，再按需要添加，桌面会更清爽。",
@@ -839,7 +840,6 @@
     "Settings.Section.About": "关于",
     "History.CurrentWidget": "当前格子",
     "Settings.FileStacks.Custom.DragTooltip": "拖动整条规则可调整优先级",
-    "Settings.FileStacks.GroupBy.Title": "分组方式",
     "Settings.QuickCapture.ShowWidgetTitle": "显示随记格子",
     "Settings.Capsule.Direction.Vertical": "纵向",
     "Todo.Filter.Active": "进行中",
@@ -894,7 +894,6 @@
     "Settings.Capsule.Direction.Description": "自动会根据组合栏位置选择横向或纵向，通常无需手动修改",
     "QuickCapture.Empty.RecentTextWithImages": "复制的内容会显示在这里。",
     "QuickCapture.ClearDataDescription": "所有记录和固定内容都会被删除，此操作不可撤销。",
-    "Settings.FileStacks.Enable.Description": "开启后，文件会按所选规则自动形成叠放",
     "Todo.Menu.MarkImportant": "标记为重要",
     "Settings.QuickCapture.ImageClipboardTitle": "记录剪贴板图片",
     "Widget.DefaultNameShort": "DeskBox",
@@ -1077,7 +1076,6 @@
     "Settings.Music.Title": "音乐",
     "Common.Cut": "剪切",
     "Weather.Skin.Standard": "简洁",
-    "Settings.FileStacks.GroupBy.Description": "选择文件自动归入叠放的依据",
     "Settings.Corner.Square": "直角",
     "Settings.Todo.ShowCompleted.Description": "关闭后，已完成任务只在“已完成”视图中显示",
     "Widget.MovedToDesktop": "已移到桌面 {0} 项",
@@ -1092,7 +1090,7 @@
     "Onboarding.Step3.MaterialSection": "材质",
     "Widget.DeleteWidgetFailed": "关闭格子失败",
     "Widget.DeleteWidgetFailedWithReason": "关闭格子失败：{0}",
-  "Onboarding.Step5.Body": "屏幕右侧已经为你创建了一个空的收纳格子。把文件拖进去试试吧。",
+    "Onboarding.Step5.Body": "屏幕右侧已经为你创建了一个空的收纳格子。把文件拖进去试试吧。",
     "History.OperationFailed": "操作失败",
     "Settings.DataBackup.Snapshots.Delete": "删除",
     "Todo.Recurrence.Daily": "每天",
@@ -1206,6 +1204,10 @@
     "Todo.Recurrence.Weekly": "每周",
     "Widget.Error.OperationIncomplete": "操作没有完成。",
     "Widget.Error.FileWidgetPathConflict": "无法使用此文件夹，因为它与文件格子“{0}”的存储路径相同或相互包含。请选择一个不重叠的文件夹。",
+    "Widget.Error.FileWidgetPathConflictSameFolder": "无法使用此文件夹：它与{0}的存储路径「{1}」是同一个文件夹。收纳存储需要独占的目录，请选择另一个文件夹。",
+    "Widget.Error.FileWidgetPathConflictInsideOther": "无法使用此文件夹：它位于{0}的存储路径「{1}」内部。收纳存储需要独占的目录树，迁移和清理才不会互相影响；两个普通文件夹格子之间的父子映射不受此限制。",
+    "Widget.Error.FileWidgetPathConflictContainsOther": "无法使用此文件夹：它包含{0}的存储路径「{1}」。收纳存储需要独占的目录树，迁移和清理才不会互相影响；两个普通文件夹格子之间的父子映射不受此限制。",
+    "Widget.Error.FileWidgetPathConflictUnresolvable": "无法使用此文件夹：它与{0}的存储路径「{1}」重叠，或无法安全判定重叠关系。请选择不重叠的文件夹。",
     "Widget.MapFolder.ConflictWidgetHint": "此文件夹已被格子“{0}”使用，已为你打开该格子。",
     "Widget.MapFolder.ConflictRootHint": "此文件夹与收纳文件夹重叠，已为你打开存储设置，可更换收纳位置或选择其他文件夹。",
     "Widget.Error.UnsafeFolderTransfer": "不能将文件夹复制或移动到它自身或它的子文件夹中。",
@@ -1264,14 +1266,14 @@
     "Language.German": "Deutsch",
     "Language.Portuguese": "Português (Brasil)",
     "Settings.Weather.Group.Display.Title": "显示选项",
-    "Widget.KeepManagedFolder": "保留文件",
+    "Widget.KeepManagedFolder": "保留文件（文件夹留在原位置）",
     "Todo.Copy.Completed": "完成：{0}",
     "Settings.Weather.ShowUvIndex.Title": "紫外线指数",
     "Widget.Stack.Expand": "展开叠放",
     "Widget.MovedCount": "已移动 {0} 项",
     "Settings.Dialog.MigrateFailedTitle": "迁移失败",
     "Onboarding.Scene.StartupOff": "手动启动",
-  "Onboarding.Step2.Title": "以后要新建格子，从托盘开始",
+    "Onboarding.Step2.Title": "以后要新建格子，从托盘开始",
     "Settings.Dialog.UnpinQuickAccessFailedBody": "无法将 DeskBox 文件夹从快速访问中取消固定。\n\n{0}",
     "Settings.Capsule.Overrides.Geometry.Title": "宽度与位置",
     "Settings.Nav.FileWidget": "文件格子",
@@ -1316,6 +1318,12 @@
     "Settings.Dialog.MigrateStaleTitle": "发现上次迁移的副本",
     "Settings.Dialog.MigrateStaleBody": "所选位置已存在上次迁移失败时保留的完整副本，重试前需要先移入回收站。\n\n发现 {0} 个文件夹。",
     "Settings.Dialog.MigrateStaleCleanButton": "移入回收站并重试",
+    "Settings.Dialog.MigrateRollbackTitle": "迁移失败，部分文件夹未能归位",
+    "Settings.Dialog.MigrateRollbackBody": "迁移失败：{0}\n\n以下格子的文件夹未能自动搬回原位置，文件可能同时留在新旧两处，格子暂时无法显示它们：",
+    "Settings.Dialog.MigrateRollbackHint": "重试归位会把上述文件夹搬回原位置；已存在的同名文件不会被覆盖或删除。",
+    "Settings.Dialog.MigrateRollbackRetryButton": "重试归位",
+    "Settings.Dialog.MigrateRollbackRetryComplete": "未能归位的文件夹已全部搬回原位置。",
+    "Settings.Dialog.MigrateRollbackRetryPartial": "仍有 {0} 个文件夹未能搬回原位置（可能仍被占用或已被移动）：",
     "Settings.Todo.DefaultFilter.Active": "进行中",
     "Todo.Due.ThisWeek": "本周",
     "Settings.Language.Title": "语言",
@@ -1407,7 +1415,7 @@
     "Music.Control.Mode.Repeat": "循环播放",
     "Settings.ManagedStorage.MoveCompleteTitle": "已移回桌面",
     "Settings.Corner.Title": "格子圆角",
-  "Onboarding.Step5.Hint2": "需要更多格子时，右键 DeskBox 托盘图标，选择“新建格子”",
+    "Onboarding.Step5.Hint2": "需要更多格子时，右键 DeskBox 托盘图标，选择“新建格子”",
     "Settings.Todo.NewTaskPosition.Description": "新建任务后添加到列表顶部或底部",
     "Settings.Update.Detail.Checking": "正在读取最新版本信息…",
     "Onboarding.Step3.Hint1": "主题色会影响格子的强调色元素",
@@ -1920,22 +1928,16 @@
     "Settings.Search.Everything.Detect": "自动检测",
     "Settings.Search.Everything.Launch": "启动 Everything",
     "Settings.Search.Everything.Browse": "选择 Everything.exe",
-    "Settings.Search.Everything.Download": "下载 Everything",
-
+    "Settings.Search.Everything.Download": "前往 Everything 官网下载",
     "Settings.Search.Everything.About.Button": "说明",
-
     "Settings.Search.Everything.About.Title": "关于 Everything 集成",
-
     "Settings.Search.Everything.About.P1": "DeskBox 的文件与文件夹搜索由 Everything 驱动——一款免费的第三方桌面搜索引擎。DeskBox 查询 Everything 的已有索引获得即时结果，并与你的 DeskBox 内容（随记、待办、设置）合并在同一搜索弹窗中。",
-
     "Settings.Search.Everything.About.P3": "Everything 由 voidtools 开发，并未随 DeskBox 捆绑分发。使用文件搜索需要安装 Everything 并保持其运行；未安装时 DeskBox 会给出提示而不会出错。",
     "Settings.Search.Everything.SetupHelp": "设置帮助",
     "Settings.Search.Everything.Status.Unknown": "尚未检测 Everything。",
     "Settings.Search.Everything.Status.Checking": "正在检测本机的 Everything 安装和连接状态…",
     "Settings.Search.Everything.Status.NotConfirmed": "已找到 Everything。请在下方确认共享本机索引后启用文件搜索。",
     "Settings.Search.Everything.Status.NotInstalled": "未检测到 Everything。请从 www.voidtools.com 下载并安装，然后重新自动检测。",
-
-    "Settings.Search.Everything.Download": "前往 Everything 官网下载",
     "Settings.Search.Everything.Status.NotRunning": "已安装 Everything，但程序未运行。搜索文件前请先启动 Everything。",
     "Settings.Search.Everything.Status.PermissionMismatch": "Everything 与 DeskBox 的权限级别不同。请让 DeskBox 保持普通用户权限，并以普通方式运行 Everything 客户端；Everything 服务可以使用更高权限。",
     "Settings.Search.Everything.Status.IpcUnavailable": "Everything 正在运行，但本机 IPC 不可用。请确认已启用 IPC，并且默认 Everything 实例正在运行。",
@@ -2311,327 +2313,327 @@
     "DesktopOrganization.Undo.Success": "已撤销最近一次整理",
     "DesktopOrganization.Undo.Failed": "无法撤销整理",
     "DesktopOrganization.Busy.Title": "正在整理桌面",
-    "DesktopOrganization.Busy.Description": "正在移动文件，完成前暂时无法操作此格子。"
-    ,"Onboarding.Organization.Continue": "继续"
-    ,"Onboarding.Organization.NotNow": "暂不整理"
-    ,"Tray.OrganizeDesktop": "整理桌面…"
-    ,"DesktopOrganization.Window.Title": "整理桌面"
-    ,"DesktopOrganization.Window.CloseBlocked": "正在移动文件，完成前无法关闭此窗口。"
-    ,"DesktopOrganization.Window.ShowMore": "显示更多"
-    ,"DesktopOrganization.Window.ShowLess": "收起"
-    ,"DesktopOrganization.Window.Done": "完成"
-    ,"DesktopOrganization.Window.Cancel": "取消"
-    ,"DesktopOrganization.Window.ChangePathError": "无法更改文件收纳位置。"
-    ,"Onboarding.Organization.ReviewAction": "查看整理方案"
-    ,"Onboarding.Organization.ReviewTitle": "先查看将要整理的文件"
-    ,"Onboarding.Organization.ReviewBody": "我们会列出文件名、识别类型和目标格子；确认前不会移动任何内容。"
-    ,"DesktopOrganization.Preview.SelectTarget": "整理"
-    ,"DesktopOrganization.Preview.DestinationLabel": "文件收纳位置"
-    ,"DesktopOrganization.Preview.DestinationPlaceholder": "选择目标格子"
-    ,"DesktopOrganization.Preview.DestinationHelp": "选择本次整理要写入的格子；动态整理会遵循当前规则。"
-    ,"DesktopOrganization.Preview.DynamicDestination": "新建格子"
-    ,"DesktopOrganization.Preview.CurrentRuleDestination": "当前规则：{0}"
-    ,"DesktopOrganization.Preview.NoItems": "此分组暂无可预览文件"
-    ,"DesktopOrganization.Preview.NothingSelectedTitle": "还没有选择要整理的内容"
-    ,"DesktopOrganization.Preview.NothingSelectedBody": "勾选至少一个格子后，才会移动桌面文件。"
-    ,"DesktopOrganization.Error.TargetUnavailable": "选择的目标格子已不存在、被禁用或没有可用的收纳路径。"
-    ,"Settings.DragDropPermission.Status.NoAppCompatFlags": "未发现 DeskBox 兼容性标记"
-    ,"Settings.DragDropPermission.Status.StartupDisabled": "未启用开机启动"
-    ,"Settings.DragDropPermission.Status.Check": "需要检查：{0}"
-    ,"Settings.DragDropPermission.Status.Normal": "正常：{0}"
-    ,"Settings.DragDropPermission.Status.Present": "存在"
-    ,"Settings.DragDropPermission.Status.Target": "目标：{0}"
-    ,"Settings.DragDropPermission.Status.TargetNormal": "目标正常"
-    ,"Settings.DragDropPermission.Status.ShortcutTargetUnreadable": "无法读取快捷方式目标"
-    ,"Settings.DragDropPermission.Status.CheckFailed": "无法检查：{0}"
-    ,"Settings.DragDropPermission.Status.NoShortcuts": "未发现当前用户快捷方式"
-    ,"Settings.DragDropPermission.Status.CheckPath": "需要检查：{0}（{1}）"
-    ,"Settings.DragDropPermission.Status.NormalPath": "正常：{0}（{1}）"
-    ,"Settings.DragDropPermission.Status.Unknown": "未知"
-    ,"Settings.DragDropPermission.Status.UnknownValue": "未知"
-    ,"Settings.DragDropPermission.Status.Administrator": "管理员"
-    ,"Settings.DragDropPermission.Status.Standard": "普通用户"
-    ,"Settings.DragDropPermission.Status.AdminGroup": "，管理员组用户"
-    ,"Settings.DragDropPermission.Status.NonAdminGroup": "，非管理员组用户"
-    ,"Settings.DragDropPermission.Status.ErrorSuffix": "，{0}"
-    ,"Settings.DragDropPermission.Status.Process": "{0}：{1}，完整性 {2}{3}{4}"
-    ,"Settings.DragDropPermission.Status.ReadFailed": "无法读取：{0}"
-    ,"Settings.DragDropPermission.Status.UacNeverNotify": "从不通知（EnableLUA=0）"
-    ,"Settings.DragDropPermission.Status.UacEnabled": "已开启（EnableLUA=1）"
-    ,"Settings.DragDropPermission.Status.UacDetails": "{0}，ConsentPromptBehaviorAdmin={1}，PromptOnSecureDesktop={2}"
-    ,"Settings.Update.PreUpdateBackupFailedTitle": "无法创建更新恢复点"
-    ,"Settings.Update.PreUpdateBackupFailedBody": "为保护当前设置，DeskBox 未启动更新。请稍后重试，或先导出备份后手动安装更新。"
-    ,"Settings.Update.PreUpdateBackupFailedBodyWithError": "为保护当前设置，DeskBox 未启动更新。\n\n{0}"
-    ,"Settings.Recovery.AvailableTitle": "发现可恢复的 DeskBox 数据"
-    ,"Settings.Recovery.AvailableBody": "检测到已保留的恢复快照。可在“设置 > 备份与恢复 > 本机快照”中恢复之前的格子布局和样式。"
-    ,"Settings.Persistence.RecoveredTitle": "已恢复 DeskBox 设置"
-    ,"Settings.Persistence.RecoveredBody": "主设置文件无法读取，DeskBox 已从上一份有效备份恢复。建议检查格子布局并导出一份新备份。"
-    ,"Settings.Persistence.ResetTitle": "DeskBox 设置需要恢复"
-    ,"Settings.Persistence.ResetBody": "主设置和备用设置均无法读取，DeskBox 已使用默认设置启动。可前往“备份与恢复”恢复本机快照。"
-    ,"Settings.Persistence.SaveFailedTitle": "DeskBox 无法保存设置"
-    ,"Settings.Persistence.SaveFailedBody": "请检查磁盘空间和 DeskBox 数据目录权限。应用会保留内存中的更改，并在下次变更或退出时重试。"
-    ,"Settings.Diagnostics.Export": "导出诊断包"
-    ,"Settings.Diagnostics.ExportTooltip": "导出运行状态、显示器、快捷键队列和脱敏日志"
-    ,"Settings.Diagnostics.SuccessTitle": "诊断包已导出"
-    ,"Settings.Diagnostics.SuccessBody": "诊断包已保存到：\n{0}\n\n发送前仍建议快速检查压缩包内容。"
-    ,"Settings.Diagnostics.FailedTitle": "无法导出诊断包"
-    ,"Settings.Diagnostics.FailedBody": "请检查目标文件夹权限和磁盘空间后重试。\n\n{0}"
-    ,"Onboarding.SkipAll": "直接开始"
-    ,"Onboarding.Task.Step1.Title": "把文件拖进格子，桌面就整洁了"
-    ,"Onboarding.Task.Step1.Body": "文件默认移动到 DeskBox 的本机文件夹，原位置不再保留。"
-    ,"Onboarding.Task.Step1.LocationTitle": "格子在哪里"
-    ,"Onboarding.Task.Step1.LocationBody": "它默认出现在当前屏幕右侧，也可以拖动或调整大小。"
-    ,"Onboarding.Task.Step1.LocalTitle": "默认移动，不留副本"
-    ,"Onboarding.Task.Step1.LocalBody": "保存位置和拖入方式以后都能在设置中更改。"
-    ,"Onboarding.Task.Step1.ToggleTitle": "随时显示或隐藏"
-    ,"Onboarding.Task.Step1.ToggleBody": "可以隐藏格子，需要时用快捷键或托盘图标再次显示。"
-    ,"Onboarding.Task.Step2.Title": "先确定文件收纳到哪里"
-    ,"Onboarding.Task.Step2.Body": "收纳格子不是快捷方式。默认拖入或粘贴后，文件会移动到下面的收纳路径。以后所有收纳格子都会在这个路径下建立自己的文件夹。"
-    ,"Onboarding.Task.Step2.ManagedTitle": "收纳格子"
-    ,"Onboarding.Task.Step2.ManagedBody": "以后所有收纳格子里的文件，都会实际保存在上方路径下各自的文件夹中。"
-    ,"Onboarding.Task.Step2.MappedTitle": "文件夹映射"
-    ,"Onboarding.Task.Step2.MappedBody": "只把已有文件夹显示成格子。文件仍保留在原位置，格子中的操作会直接作用于这些文件。"
-    ,"Onboarding.Task.Step2.TransferTitle": "加入文件时会发生什么"
-    ,"Onboarding.Task.Step2.TransferSummary": "当前设置：拖入或粘贴后，将文件{0}到这个路径下对应格子的文件夹中；原位置不再保留。"
-    ,"Onboarding.Task.Step2.ShowWidget": "显示格子"
-    ,"Onboarding.Task.Step2.StatusReady": "点击“显示格子”，它会出现在屏幕右侧。"
-    ,"Onboarding.Task.Step2.StatusShown": "文件格子已显示在屏幕右侧。"
-    ,"Onboarding.Task.Step2.StatusUnavailable": "未找到可用的文件格子。之后可右键托盘图标新建。"
-    ,"Onboarding.Task.Step3.Title": "把文件放进格子"
-    ,"Onboarding.Task.Step3.Body": "从桌面或文件资源管理器拖入文件，DeskBox 会将文件移动到这个格子的文件夹中。"
-    ,"Onboarding.Task.Step3.DragTitle": "拖入文件"
-    ,"Onboarding.Task.Step3.DragBody": "把文件从桌面或文件资源管理器拖进格子，原位置将不再保留。"
-    ,"Onboarding.Task.Step3.PasteTitle": "粘贴文件"
-    ,"Onboarding.Task.Step3.PasteBody": "选中文件并复制，选中格子按 Ctrl+V 后，文件会被移动进来。"
-    ,"Onboarding.Task.Step3.AddTitle": "添加文件"
-    ,"Onboarding.Task.Step3.AddBody": "点击格子里的“添加文件”并选择文件，选中项会移动进来。"
-    ,"Onboarding.Task.Step3.TryButton": "显示格子"
-    ,"Onboarding.Task.Step3.StatusReady": "把一个文件拖进格子试试。"
-    ,"Onboarding.Task.Step3.StatusShown": "把一个文件拖进格子试试。"
-    ,"Onboarding.Task.Step3.SkipTip": "没有合适的文件，可以直接继续。"
-    ,"Onboarding.Task.Step4.Title": "随时显示，随时收起"
-    ,"Onboarding.Task.Step4.Body": "无论正在使用哪个窗口，都可以让格子显示在前面，快速使用其中的内容。"
-    ,"Onboarding.Task.Step4.ToggleTitle": "显示或收起所有格子"
-    ,"Onboarding.Task.Step4.ToggleBody": "按 {0}，或单击任务栏右下角的 DeskBox 图标。再次操作即可收起。"
-    ,"Onboarding.Task.Step4.ToggleButton": "试一下"
-    ,"Onboarding.Task.Step4.TrayTitle": "从这里管理 DeskBox"
-    ,"Onboarding.Task.Step4.TrayBody": "右键单击任务栏右下角的 DeskBox 图标，可以新建格子、将其他文件夹映射为格子，或打开设置。"
-    ,"Onboarding.Task.Step4.TrayButton": "打开 DeskBox 菜单"
-    ,"Onboarding.Task.Step4.ManagedEntry": "新建格子"
-    ,"Onboarding.Task.Step4.MappedEntry": "将文件夹映射为格子"
-    ,"Onboarding.Task.Step4.FeatureEntry": "功能格子：添加待办、随记、天气或音乐"
-    ,"Onboarding.Task.Step4.StatusReady": "试着收起格子，然后重新显示。"
-    ,"Onboarding.Task.Step4.StatusToggled": "格子已切换。再次点击可恢复刚才的状态。"
-    ,"Onboarding.Task.Step4.StatusHidden": "格子已收起。再次操作即可重新显示。"
-    ,"Onboarding.Task.Step4.StatusShown": "格子已显示。"
-    ,"Onboarding.Task.Step4.StatusTrayOpened": "DeskBox 菜单已打开。"
-    ,"Onboarding.Task.Step5.Title": "添加你需要的功能"
-    ,"Onboarding.Task.Step5.Body": "这些功能都是可选的。开启后，相应格子会出现在桌面上。"
-    ,"Onboarding.Task.Step5.TodoDescription": "记录并完成任务"
-    ,"Onboarding.Task.Step5.QuickCaptureDescription": "随手记下想法"
-    ,"Onboarding.Task.Step5.SearchDescription": "快速查找文件和应用"
-    ,"Onboarding.Task.Step5.WeatherDescription": "查看天气和预报"
-    ,"Onboarding.Task.Step5.MusicDescription": "控制音乐播放"
-    ,"Onboarding.Task.Step5.Done1": "知道第一个文件格子在哪里"
-    ,"Onboarding.Task.Step5.Done2": "会拖入、粘贴和添加文件"
-    ,"Onboarding.Task.Step5.Done3": "会用快捷键或托盘图标显示、隐藏格子"
-    ,"Onboarding.Task.Step5.Done4": "会从托盘菜单新建格子"
-    ,"Onboarding.Task.Step5.OptionalTitle": "从这里继续"
-    ,"Onboarding.Task.Step5.OptionalBody": "以后可以随时在“设置 > 功能格子”中更改。"
-    ,"Onboarding.Task.Step5.Organize": "整理桌面"
-    ,"Onboarding.Task.Step5.Appearance": "调整外观"
-    ,"Onboarding.Task.Step5.Settings": "打开设置"
-    ,"Widget.Empty.ActionsHint": "拖入文件或按 Ctrl+V 粘贴"
-    ,"Onboarding.Task.Step2.PathTitle": "文件保存到"
-    ,"Onboarding.Task.Step2.ChangePath": "更改位置"
-    ,"Onboarding.Task.Step2.ConfirmPath": "确认使用此路径"
-    ,"Onboarding.Task.Step2.PathConfirmed": "路径已确认"
-    ,"Onboarding.Task.Step2.SpaceUnknown": "空间未知"
-    ,"Onboarding.Task.Step2.PathMeta.System": "系统盘 · 剩余 {0}"
-    ,"Onboarding.Task.Step2.PathMeta.NonSystem": "非系统盘 · 剩余 {0}"
-    ,"Onboarding.Task.Step2.PathMeta.Removable": "可移动磁盘 · 剩余 {0}"
-    ,"Onboarding.Task.Step2.PathMeta.Network": "网络位置"
-    ,"Onboarding.Task.Step2.PathMeta.Unknown": "暂时无法确认磁盘状态"
-    ,"Onboarding.Task.Step2.Warning.SystemDrive": "当前在 C 盘，整理文件不会释放 C 盘空间。"
-    ,"Onboarding.Task.Step2.Warning.SystemDriveOnly": "暂未找到合适的其他磁盘，可先使用这里，之后再改。"
-    ,"Onboarding.Task.Step2.Warning.CloudSync": "若这是同步目录，文件会由对应云服务同步。"
-    ,"Onboarding.Task.Step2.Warning.Removable": "磁盘移除后，格子里的文件会暂时不可用。"
-    ,"Onboarding.Task.Step2.Warning.Network": "网络断开后，格子里的文件会暂时不可用。"
-    ,"Onboarding.Task.SkipPractice": "跳过这一步"
-    ,"Onboarding.Task.Continue": "继续"
-    ,"Onboarding.Task.Step3.StatusCompleted": "文件已移动到格子。"
-    ,"Onboarding.Task.Step4.StatusCompleted": "格子已重新显示。"
-    ,"Settings.WidgetGroups.Overview.Description": "将多个格子放在同一位置，通过标题栏快速切换"
-    ,"Settings.WidgetGroups.Overview.Ready": "{0} · 可随时组合"
-    ,"Settings.WidgetGroups.Overview.Summary": "{0} 组 · {1}"
-    ,"Settings.WidgetGroups.PageDescription": "将多个格子放在同一位置，通过标题栏切换。每个格子的内容仍然相互独立。"
-    ,"Settings.WidgetGroups.FollowDefaultWithValue": "跟随默认（{0}）"
-    ,"Settings.WidgetGroups.Existing.SummaryDefault": "{0} · {1} · 跟随默认"
-    ,"Settings.WidgetGroups.Existing.SummaryCustom": "{0} · {1} · 已单独设置"
-    ,"Settings.WidgetGroups.Existing.Name.Title": "格子组名称"
-    ,"Settings.WidgetGroups.GroupChrome.Title": "标题栏高度"
-    ,"Settings.WidgetGroups.GroupChrome.Description": "格子组需要保留标题栏，以便切换其中的格子"
-    ,"Settings.WidgetGroups.GroupDisplay.Title": "显示方式"
-    ,"Settings.WidgetGroups.GroupDisplay.Description": "选择这个格子组保持展开、点击展开或悬停展开"
-    ,"Settings.WidgetGroups.Existing.Members.Title": "组内格子"
-    ,"Settings.WidgetGroups.Existing.Member.MoveUp": "向前移动"
-    ,"Settings.WidgetGroups.Existing.Member.MoveDown": "向后移动"
-    ,"Settings.WidgetGroups.Existing.Member.Remove": "移出格子组"
-    ,"Settings.WidgetGroups.DissolveDialog.Title": "解散这个格子组？"
-    ,"Settings.WidgetGroups.DissolveDialog.Confirm": "解散格子组"
-    ,"Settings.WidgetGroups.DissolveDialog.Description": "格子内容不会删除，组内格子会恢复为独立格子。"
-    ,"Glance.Title": "时光"
-    ,"Glance.Instances.Title": "时光格子"
-    ,"Glance.Instances.Description": "共 {0} 个时光格子，可在这里分别设置"
-    ,"Glance.Instances.MasterOff": "总开关已关闭，所有时光格子均为关闭状态。"
-    ,"Glance.Instances.Empty": "暂无时光格子"
-    ,"Glance.Instances.Enable": "启用此格子"
-    ,"Glance.Instances.Add": "新增时光格子"
-    ,"Glance.Instances.More": "更多操作"
-    ,"Glance.Instances.Locate": "在桌面上显示"
-    ,"Glance.Instances.Duplicate": "复制格子"
-    ,"Glance.Instances.RenamePlaceholder": "输入格子名称"
-    ,"Glance.Instances.RenameTitle": "重命名时光格子"
-    ,"Glance.Instances.DeleteTitle": "删除“{0}”？"
-    ,"Glance.Instances.DeleteDescription": "只删除这个时光格子及其独立设置，其他时光格子不受影响。"
-    ,"WidgetContent.Glance.StatusLabel": "时光"
-    ,"WidgetContent.Glance.StatusDescription": "在桌面上一眼查看照片、时间与日期"
-    ,"Glance.Settings.Title": "时光"
-    ,"Glance.Settings.Description": "用一张照片、时间和日期打造属于你的桌面一角"
-    ,"Glance.Display.Title": "显示内容"
-    ,"Glance.Display.Description": "选择格子中需要显示的内容"
-    ,"Glance.Display.PhotoOnly": "仅图片"
-    ,"Glance.Display.Separator": "、"
-    ,"Glance.Display.Time": "时间"
-    ,"Glance.Display.Date": "日期"
-    ,"Glance.Display.Year": "年份"
-    ,"Glance.Display.Weekday": "星期"
-    ,"Glance.Display.Calendar": "月历"
-    ,"Glance.Layout.Title": "布局"
-    ,"Glance.LayoutGroup.Title": "布局与排版"
-    ,"Glance.LayoutGroup.Description": "布局、日历与时间文字样式"
-    ,"Glance.Layout.Immersive": "沉浸式"
-    ,"Glance.Layout.Centered": "居中"
-    ,"Glance.Layout.Editorial": "杂志式"
-    ,"Glance.Layout.Calendar": "日历"
-    ,"Glance.CalendarMaterial.Title": "日历材质"
-    ,"Glance.CalendarMaterial.Description": "设置日历卡片的背景风格"
-    ,"Glance.CalendarMaterial.FollowSystem": "跟随系统"
-    ,"Glance.CalendarMaterial.FollowImage": "跟随图片颜色"
-    ,"Glance.CalendarMaterial.Transparency": "透明度"
-    ,"Glance.CalendarMaterial.TransparencyDescription": "仅调整日历背景，100% 时完全透明"
-    ,"Glance.TraditionalCalendar.Title": "传统历法"
-    ,"Glance.TraditionalCalendar.Description": "自动跟随 DeskBox 语言，也可手动选择或关闭"
-    ,"Glance.Festivals.Title": "中国传统节日"
-    ,"Glance.Festivals.Description": "在农历日期位置优先显示春节、中秋等传统节日"
-    ,"Glance.TraditionalCalendar.Auto": "自动（{0}）"
-    ,"Glance.TraditionalCalendar.None": "关闭"
-    ,"Glance.TraditionalCalendar.ChineseLunar": "中国农历"
-    ,"Glance.TraditionalCalendar.UmAlQura": "乌姆古拉历"
-    ,"Glance.TraditionalCalendar.Hijri": "伊斯兰历（Hijri）"
-    ,"Glance.TraditionalCalendar.IndianSaka": "印度国定历（萨卡）"
-    ,"Glance.TraditionalCalendar.JapaneseEra": "日本和历（年号）"
-    ,"Glance.TraditionalCalendar.Bangla": "孟加拉国历"
-    ,"Glance.TraditionalCalendar.Julian": "儒略历"
-    ,"Glance.TraditionalCalendar.Hebrew": "希伯来历"
-    ,"Glance.TraditionalCalendar.Persian": "波斯历"
-    ,"Glance.TraditionalCalendar.ThaiBuddhist": "泰国佛历"
-    ,"Glance.Background.Title": "背景图片"
-    ,"Glance.BackgroundGroup.Description": "图片来源、轮换方式与缓存"
-    ,"Glance.Background.Transparency.Title": "图片透明度"
-    ,"Glance.Background.Transparency.Description": "仅调整背景图片，文字和控件保持不变"
-    ,"Glance.Background.Online": "Wikimedia Commons"
-    ,"Glance.Background.Files": "本地图片"
-    ,"Glance.Background.Folder": "图片文件夹"
-    ,"Glance.Background.Bing": "必应每日壁纸"
-    ,"Glance.Background.ChooseFiles": "选择图片"
-    ,"Glance.Background.ChooseFolder": "选择文件夹"
-    ,"Glance.Background.ClearSelection": "清除"
-    ,"Glance.Background.LocalSummary": "已添加 {0} 张本地图片"
-    ,"Glance.Background.Category.Title": "在线图片分类"
-    ,"Glance.Background.Category.Description": "选择在线图片的主题，切换后会自动获取新图片"
-    ,"Glance.Background.Category.Featured": "精选"
-    ,"Glance.Background.Category.Landscapes": "自然风光"
-    ,"Glance.Background.Category.Cities": "城市"
-    ,"Glance.Background.Category.Architecture": "建筑"
-    ,"Glance.Background.Category.Animals": "动物"
-    ,"Glance.Background.Category.Plants": "植物"
-    ,"Glance.Background.Category.Astronomy": "太空"
-    ,"Glance.Background.Category.People": "人文"
-    ,"Glance.Rotation.Title": "轮换"
-    ,"Glance.Rotation.Manual": "手动"
-    ,"Glance.Rotation.10Seconds": "每 10 秒"
-    ,"Glance.Rotation.30Seconds": "每 30 秒"
-    ,"Glance.Rotation.60Seconds": "每 60 秒"
-    ,"Glance.Rotation.2Minutes": "每 2 分钟"
-    ,"Glance.Rotation.5Minutes": "每 5 分钟"
-    ,"Glance.Rotation.10Minutes": "每 10 分钟"
-    ,"Glance.Rotation.30Minutes": "每 30 分钟"
-    ,"Glance.Rotation.1Hour": "每小时"
-    ,"Glance.Rotation.6Hours": "每 6 小时"
-    ,"Glance.Rotation.Daily": "每天"
-    ,"Glance.Rotation.Random": "随机顺序"
-    ,"Glance.Transition.Title": "切换动效"
-    ,"Glance.AppearanceGroup.Title": "外观与动效"
-    ,"Glance.AppearanceGroup.Description": "图片切换方式与内容可读性"
-    ,"Glance.Transition.None": "无"
-    ,"Glance.Transition.CrossFade": "交叉淡化"
-    ,"Glance.Transition.SlideFade": "滑动淡化"
-    ,"Glance.Transition.ZoomFade": "缩放淡化"
-    ,"Glance.Speed.Fast": "快速"
-    ,"Glance.Speed.Standard": "标准"
-    ,"Glance.Speed.Relaxed": "舒缓"
-    ,"Glance.Typography.Title": "字体大小"
-    ,"Glance.Typography.TimeFormat": "时间格式"
-    ,"Glance.Typography.FollowSystem": "跟随系统"
-    ,"Glance.Typography.Hour24": "24 小时制"
-    ,"Glance.Typography.Hour12": "12 小时制"
-    ,"Glance.Typography.Font": "字体"
-    ,"Glance.Speed.Title": "切换速度"
-    ,"Glance.Typography.SystemDefault": "系统默认"
-    ,"Glance.Readability.Title": "可读性"
-    ,"Glance.Readability.None": "无"
-    ,"Glance.Readability.Soft": "柔和"
-    ,"Glance.Readability.Strong": "增强"
-    ,"Glance.PhotoControls.Title": "显示图片控制按钮"
-    ,"Glance.PhotoControls.Description": "鼠标移入时显示暂停、切换和图片信息按钮"
-    ,"Glance.Actions.Next": "下一张"
-    ,"Glance.Actions.Pause": "暂停轮换"
-    ,"Glance.Actions.Resume": "继续轮换"
-    ,"Glance.Actions.PhotoInfo": "图片信息"
-    ,"Glance.Actions.OpenSource": "打开图片来源"
-    ,"Glance.Actions.ShowInExplorer": "在资源管理器中显示"
-    ,"Glance.Status.Loading": "正在加载图片…"
-    ,"Glance.Status.OnlineFallback": "正在使用备用图片"
-    ,"Glance.Status.NoLocalImages": "尚未添加本地图片"
-    ,"Glance.Cache.Title": "图片缓存"
-    ,"Glance.Cache.Clear": "清除缓存"
-    ,"Glance.Cache.Cleared": "缓存已清除"
-    ,"Settings.Windows10VisualCompatibility.Title": "Windows 10 视觉兼容"
-    ,"Settings.Windows10VisualCompatibility.Message": "云母材质和系统窗口圆角仅适用于 Windows 11。Windows 10 将使用亚克力或纯色，并保持直角窗口。",
-  "Settings.Dialog.QuickAccessOperationFailedBody": "DeskBox 无法更新文件资源管理器中的快速访问，请稍后重试。",
-  "DesktopOrganization.Result.FailedBody": "无法完成桌面整理，请稍后重试。",
-  "DesktopOrganization.Undo.FailedBody": "无法撤销桌面整理，请稍后重试。",
-  "Common.OperationFailedRetry": "操作无法完成。请重试。",
-  "Settings.WidgetForeground.Title": "格子文字",
-  "Settings.WidgetForeground.Description": "选择格子文字和单色控件的颜色，不影响图片和彩色图标。",
-  "Settings.WidgetForeground.FollowTheme": "跟随应用主题",
-  "Settings.WidgetForeground.Light": "浅色文字",
-  "Settings.WidgetForeground.Dark": "深色文字",
-  "Settings.WidgetForeground.Custom": "自定义",
-  "Settings.WidgetForeground.CustomColor.Title": "自定义文字颜色",
-  "Settings.WidgetForeground.CustomColor.Description": "用于格子文字和单色控件。",
-  "Widget.Foreground.Menu": "文字与可读性",
-  "Widget.Foreground.UseGlobal": "使用全局设置",
-  "Widget.Foreground.CustomColor": "自定义颜色…",
-  "Settings.DropAction.System": "跟随 Windows 默认",
-  "Widget.RunAsAdministrator": "使用管理员身份打开",
-  "Widget.RunAsAdministrator.AlreadyRunning": "该程序正在以普通权限运行，请完全退出后再使用管理员身份打开。",
-  "Widget.RunAsAdministrator.NotElevated": "Windows 未能创建管理员进程，请检查 UAC 设置后重试。",
-  "Widget.CreateShortcut": "创建快捷方式",
-  "Widget.MoreSystemOperations": "更多系统操作",
-  "Settings.ManagedPath.DesktopShortcut.Title": "桌面上的收纳文件入口",
-  "Settings.ManagedPath.DesktopShortcut.Description": "创建后可直接打开当前收纳目录；手动删除后，DeskBox 不会重新创建",
+    "DesktopOrganization.Busy.Description": "正在移动文件，完成前暂时无法操作此格子。",
+    "Onboarding.Organization.Continue": "继续",
+    "Onboarding.Organization.NotNow": "暂不整理",
+    "Tray.OrganizeDesktop": "整理桌面…",
+    "DesktopOrganization.Window.Title": "整理桌面",
+    "DesktopOrganization.Window.CloseBlocked": "正在移动文件，完成前无法关闭此窗口。",
+    "DesktopOrganization.Window.ShowMore": "显示更多",
+    "DesktopOrganization.Window.ShowLess": "收起",
+    "DesktopOrganization.Window.Done": "完成",
+    "DesktopOrganization.Window.Cancel": "取消",
+    "DesktopOrganization.Window.ChangePathError": "无法更改文件收纳位置。",
+    "Onboarding.Organization.ReviewAction": "查看整理方案",
+    "Onboarding.Organization.ReviewTitle": "先查看将要整理的文件",
+    "Onboarding.Organization.ReviewBody": "我们会列出文件名、识别类型和目标格子；确认前不会移动任何内容。",
+    "DesktopOrganization.Preview.SelectTarget": "整理",
+    "DesktopOrganization.Preview.DestinationLabel": "文件收纳位置",
+    "DesktopOrganization.Preview.DestinationPlaceholder": "选择目标格子",
+    "DesktopOrganization.Preview.DestinationHelp": "选择本次整理要写入的格子；动态整理会遵循当前规则。",
+    "DesktopOrganization.Preview.DynamicDestination": "新建格子",
+    "DesktopOrganization.Preview.CurrentRuleDestination": "当前规则：{0}",
+    "DesktopOrganization.Preview.NoItems": "此分组暂无可预览文件",
+    "DesktopOrganization.Preview.NothingSelectedTitle": "还没有选择要整理的内容",
+    "DesktopOrganization.Preview.NothingSelectedBody": "勾选至少一个格子后，才会移动桌面文件。",
+    "DesktopOrganization.Error.TargetUnavailable": "选择的目标格子已不存在、被禁用或没有可用的收纳路径。",
+    "Settings.DragDropPermission.Status.NoAppCompatFlags": "未发现 DeskBox 兼容性标记",
+    "Settings.DragDropPermission.Status.StartupDisabled": "未启用开机启动",
+    "Settings.DragDropPermission.Status.Check": "需要检查：{0}",
+    "Settings.DragDropPermission.Status.Normal": "正常：{0}",
+    "Settings.DragDropPermission.Status.Present": "存在",
+    "Settings.DragDropPermission.Status.Target": "目标：{0}",
+    "Settings.DragDropPermission.Status.TargetNormal": "目标正常",
+    "Settings.DragDropPermission.Status.ShortcutTargetUnreadable": "无法读取快捷方式目标",
+    "Settings.DragDropPermission.Status.CheckFailed": "无法检查：{0}",
+    "Settings.DragDropPermission.Status.NoShortcuts": "未发现当前用户快捷方式",
+    "Settings.DragDropPermission.Status.CheckPath": "需要检查：{0}（{1}）",
+    "Settings.DragDropPermission.Status.NormalPath": "正常：{0}（{1}）",
+    "Settings.DragDropPermission.Status.Unknown": "未知",
+    "Settings.DragDropPermission.Status.UnknownValue": "未知",
+    "Settings.DragDropPermission.Status.Administrator": "管理员",
+    "Settings.DragDropPermission.Status.Standard": "普通用户",
+    "Settings.DragDropPermission.Status.AdminGroup": "，管理员组用户",
+    "Settings.DragDropPermission.Status.NonAdminGroup": "，非管理员组用户",
+    "Settings.DragDropPermission.Status.ErrorSuffix": "，{0}",
+    "Settings.DragDropPermission.Status.Process": "{0}：{1}，完整性 {2}{3}{4}",
+    "Settings.DragDropPermission.Status.ReadFailed": "无法读取：{0}",
+    "Settings.DragDropPermission.Status.UacNeverNotify": "从不通知（EnableLUA=0）",
+    "Settings.DragDropPermission.Status.UacEnabled": "已开启（EnableLUA=1）",
+    "Settings.DragDropPermission.Status.UacDetails": "{0}，ConsentPromptBehaviorAdmin={1}，PromptOnSecureDesktop={2}",
+    "Settings.Update.PreUpdateBackupFailedTitle": "无法创建更新恢复点",
+    "Settings.Update.PreUpdateBackupFailedBody": "为保护当前设置，DeskBox 未启动更新。请稍后重试，或先导出备份后手动安装更新。",
+    "Settings.Update.PreUpdateBackupFailedBodyWithError": "为保护当前设置，DeskBox 未启动更新。\n\n{0}",
+    "Settings.Recovery.AvailableTitle": "发现可恢复的 DeskBox 数据",
+    "Settings.Recovery.AvailableBody": "检测到已保留的恢复快照。可在“设置 > 备份与恢复 > 本机快照”中恢复之前的格子布局和样式。",
+    "Settings.Persistence.RecoveredTitle": "已恢复 DeskBox 设置",
+    "Settings.Persistence.RecoveredBody": "主设置文件无法读取，DeskBox 已从上一份有效备份恢复。建议检查格子布局并导出一份新备份。",
+    "Settings.Persistence.ResetTitle": "DeskBox 设置需要恢复",
+    "Settings.Persistence.ResetBody": "主设置和备用设置均无法读取，DeskBox 已使用默认设置启动。可前往“备份与恢复”恢复本机快照。",
+    "Settings.Persistence.SaveFailedTitle": "DeskBox 无法保存设置",
+    "Settings.Persistence.SaveFailedBody": "请检查磁盘空间和 DeskBox 数据目录权限。应用会保留内存中的更改，并在下次变更或退出时重试。",
+    "Settings.Diagnostics.Export": "导出诊断包",
+    "Settings.Diagnostics.ExportTooltip": "导出运行状态、显示器、快捷键队列和脱敏日志",
+    "Settings.Diagnostics.SuccessTitle": "诊断包已导出",
+    "Settings.Diagnostics.SuccessBody": "诊断包已保存到：\n{0}\n\n发送前仍建议快速检查压缩包内容。",
+    "Settings.Diagnostics.FailedTitle": "无法导出诊断包",
+    "Settings.Diagnostics.FailedBody": "请检查目标文件夹权限和磁盘空间后重试。\n\n{0}",
+    "Onboarding.SkipAll": "直接开始",
+    "Onboarding.Task.Step1.Title": "把文件拖进格子，桌面就整洁了",
+    "Onboarding.Task.Step1.Body": "文件默认移动到 DeskBox 的本机文件夹，原位置不再保留。",
+    "Onboarding.Task.Step1.LocationTitle": "格子在哪里",
+    "Onboarding.Task.Step1.LocationBody": "它默认出现在当前屏幕右侧，也可以拖动或调整大小。",
+    "Onboarding.Task.Step1.LocalTitle": "默认移动，不留副本",
+    "Onboarding.Task.Step1.LocalBody": "保存位置和拖入方式以后都能在设置中更改。",
+    "Onboarding.Task.Step1.ToggleTitle": "随时显示或隐藏",
+    "Onboarding.Task.Step1.ToggleBody": "可以隐藏格子，需要时用快捷键或托盘图标再次显示。",
+    "Onboarding.Task.Step2.Title": "先确定文件收纳到哪里",
+    "Onboarding.Task.Step2.Body": "收纳格子不是快捷方式。默认拖入或粘贴后，文件会移动到下面的收纳路径。以后所有收纳格子都会在这个路径下建立自己的文件夹。",
+    "Onboarding.Task.Step2.ManagedTitle": "收纳格子",
+    "Onboarding.Task.Step2.ManagedBody": "以后所有收纳格子里的文件，都会实际保存在上方路径下各自的文件夹中。",
+    "Onboarding.Task.Step2.MappedTitle": "文件夹映射",
+    "Onboarding.Task.Step2.MappedBody": "只把已有文件夹显示成格子。文件仍保留在原位置，格子中的操作会直接作用于这些文件。",
+    "Onboarding.Task.Step2.TransferTitle": "加入文件时会发生什么",
+    "Onboarding.Task.Step2.TransferSummary": "当前设置：拖入或粘贴后，将文件{0}到这个路径下对应格子的文件夹中；原位置不再保留。",
+    "Onboarding.Task.Step2.ShowWidget": "显示格子",
+    "Onboarding.Task.Step2.StatusReady": "点击“显示格子”，它会出现在屏幕右侧。",
+    "Onboarding.Task.Step2.StatusShown": "文件格子已显示在屏幕右侧。",
+    "Onboarding.Task.Step2.StatusUnavailable": "未找到可用的文件格子。之后可右键托盘图标新建。",
+    "Onboarding.Task.Step3.Title": "把文件放进格子",
+    "Onboarding.Task.Step3.Body": "从桌面或文件资源管理器拖入文件，DeskBox 会将文件移动到这个格子的文件夹中。",
+    "Onboarding.Task.Step3.DragTitle": "拖入文件",
+    "Onboarding.Task.Step3.DragBody": "把文件从桌面或文件资源管理器拖进格子，原位置将不再保留。",
+    "Onboarding.Task.Step3.PasteTitle": "粘贴文件",
+    "Onboarding.Task.Step3.PasteBody": "选中文件并复制，选中格子按 Ctrl+V 后，文件会被移动进来。",
+    "Onboarding.Task.Step3.AddTitle": "添加文件",
+    "Onboarding.Task.Step3.AddBody": "点击格子里的“添加文件”并选择文件，选中项会移动进来。",
+    "Onboarding.Task.Step3.TryButton": "显示格子",
+    "Onboarding.Task.Step3.StatusReady": "把一个文件拖进格子试试。",
+    "Onboarding.Task.Step3.StatusShown": "把一个文件拖进格子试试。",
+    "Onboarding.Task.Step3.SkipTip": "没有合适的文件，可以直接继续。",
+    "Onboarding.Task.Step4.Title": "随时显示，随时收起",
+    "Onboarding.Task.Step4.Body": "无论正在使用哪个窗口，都可以让格子显示在前面，快速使用其中的内容。",
+    "Onboarding.Task.Step4.ToggleTitle": "显示或收起所有格子",
+    "Onboarding.Task.Step4.ToggleBody": "按 {0}，或单击任务栏右下角的 DeskBox 图标。再次操作即可收起。",
+    "Onboarding.Task.Step4.ToggleButton": "试一下",
+    "Onboarding.Task.Step4.TrayTitle": "从这里管理 DeskBox",
+    "Onboarding.Task.Step4.TrayBody": "右键单击任务栏右下角的 DeskBox 图标，可以新建格子、将其他文件夹映射为格子，或打开设置。",
+    "Onboarding.Task.Step4.TrayButton": "打开 DeskBox 菜单",
+    "Onboarding.Task.Step4.ManagedEntry": "新建格子",
+    "Onboarding.Task.Step4.MappedEntry": "将文件夹映射为格子",
+    "Onboarding.Task.Step4.FeatureEntry": "功能格子：添加待办、随记、天气或音乐",
+    "Onboarding.Task.Step4.StatusReady": "试着收起格子，然后重新显示。",
+    "Onboarding.Task.Step4.StatusToggled": "格子已切换。再次点击可恢复刚才的状态。",
+    "Onboarding.Task.Step4.StatusHidden": "格子已收起。再次操作即可重新显示。",
+    "Onboarding.Task.Step4.StatusShown": "格子已显示。",
+    "Onboarding.Task.Step4.StatusTrayOpened": "DeskBox 菜单已打开。",
+    "Onboarding.Task.Step5.Title": "添加你需要的功能",
+    "Onboarding.Task.Step5.Body": "这些功能都是可选的。开启后，相应格子会出现在桌面上。",
+    "Onboarding.Task.Step5.TodoDescription": "记录并完成任务",
+    "Onboarding.Task.Step5.QuickCaptureDescription": "随手记下想法",
+    "Onboarding.Task.Step5.SearchDescription": "快速查找文件和应用",
+    "Onboarding.Task.Step5.WeatherDescription": "查看天气和预报",
+    "Onboarding.Task.Step5.MusicDescription": "控制音乐播放",
+    "Onboarding.Task.Step5.Done1": "知道第一个文件格子在哪里",
+    "Onboarding.Task.Step5.Done2": "会拖入、粘贴和添加文件",
+    "Onboarding.Task.Step5.Done3": "会用快捷键或托盘图标显示、隐藏格子",
+    "Onboarding.Task.Step5.Done4": "会从托盘菜单新建格子",
+    "Onboarding.Task.Step5.OptionalTitle": "从这里继续",
+    "Onboarding.Task.Step5.OptionalBody": "以后可以随时在“设置 > 功能格子”中更改。",
+    "Onboarding.Task.Step5.Organize": "整理桌面",
+    "Onboarding.Task.Step5.Appearance": "调整外观",
+    "Onboarding.Task.Step5.Settings": "打开设置",
+    "Widget.Empty.ActionsHint": "拖入文件或按 Ctrl+V 粘贴",
+    "Onboarding.Task.Step2.PathTitle": "文件保存到",
+    "Onboarding.Task.Step2.ChangePath": "更改位置",
+    "Onboarding.Task.Step2.ConfirmPath": "确认使用此路径",
+    "Onboarding.Task.Step2.PathConfirmed": "路径已确认",
+    "Onboarding.Task.Step2.SpaceUnknown": "空间未知",
+    "Onboarding.Task.Step2.PathMeta.System": "系统盘 · 剩余 {0}",
+    "Onboarding.Task.Step2.PathMeta.NonSystem": "非系统盘 · 剩余 {0}",
+    "Onboarding.Task.Step2.PathMeta.Removable": "可移动磁盘 · 剩余 {0}",
+    "Onboarding.Task.Step2.PathMeta.Network": "网络位置",
+    "Onboarding.Task.Step2.PathMeta.Unknown": "暂时无法确认磁盘状态",
+    "Onboarding.Task.Step2.Warning.SystemDrive": "当前在 C 盘，整理文件不会释放 C 盘空间。",
+    "Onboarding.Task.Step2.Warning.SystemDriveOnly": "暂未找到合适的其他磁盘，可先使用这里，之后再改。",
+    "Onboarding.Task.Step2.Warning.CloudSync": "若这是同步目录，文件会由对应云服务同步。",
+    "Onboarding.Task.Step2.Warning.Removable": "磁盘移除后，格子里的文件会暂时不可用。",
+    "Onboarding.Task.Step2.Warning.Network": "网络断开后，格子里的文件会暂时不可用。",
+    "Onboarding.Task.SkipPractice": "跳过这一步",
+    "Onboarding.Task.Continue": "继续",
+    "Onboarding.Task.Step3.StatusCompleted": "文件已移动到格子。",
+    "Onboarding.Task.Step4.StatusCompleted": "格子已重新显示。",
+    "Settings.WidgetGroups.Overview.Description": "将多个格子放在同一位置，通过标题栏快速切换",
+    "Settings.WidgetGroups.Overview.Ready": "{0} · 可随时组合",
+    "Settings.WidgetGroups.Overview.Summary": "{0} 组 · {1}",
+    "Settings.WidgetGroups.PageDescription": "将多个格子放在同一位置，通过标题栏切换。每个格子的内容仍然相互独立。",
+    "Settings.WidgetGroups.FollowDefaultWithValue": "跟随默认（{0}）",
+    "Settings.WidgetGroups.Existing.SummaryDefault": "{0} · {1} · 跟随默认",
+    "Settings.WidgetGroups.Existing.SummaryCustom": "{0} · {1} · 已单独设置",
+    "Settings.WidgetGroups.Existing.Name.Title": "格子组名称",
+    "Settings.WidgetGroups.GroupChrome.Title": "标题栏高度",
+    "Settings.WidgetGroups.GroupChrome.Description": "格子组需要保留标题栏，以便切换其中的格子",
+    "Settings.WidgetGroups.GroupDisplay.Title": "显示方式",
+    "Settings.WidgetGroups.GroupDisplay.Description": "选择这个格子组保持展开、点击展开或悬停展开",
+    "Settings.WidgetGroups.Existing.Members.Title": "组内格子",
+    "Settings.WidgetGroups.Existing.Member.MoveUp": "向前移动",
+    "Settings.WidgetGroups.Existing.Member.MoveDown": "向后移动",
+    "Settings.WidgetGroups.Existing.Member.Remove": "移出格子组",
+    "Settings.WidgetGroups.DissolveDialog.Title": "解散这个格子组？",
+    "Settings.WidgetGroups.DissolveDialog.Confirm": "解散格子组",
+    "Settings.WidgetGroups.DissolveDialog.Description": "格子内容不会删除，组内格子会恢复为独立格子。",
+    "Glance.Title": "时光",
+    "Glance.Instances.Title": "时光格子",
+    "Glance.Instances.Description": "共 {0} 个时光格子，可在这里分别设置",
+    "Glance.Instances.MasterOff": "总开关已关闭，所有时光格子均为关闭状态。",
+    "Glance.Instances.Empty": "暂无时光格子",
+    "Glance.Instances.Enable": "启用此格子",
+    "Glance.Instances.Add": "新增时光格子",
+    "Glance.Instances.More": "更多操作",
+    "Glance.Instances.Locate": "在桌面上显示",
+    "Glance.Instances.Duplicate": "复制格子",
+    "Glance.Instances.RenamePlaceholder": "输入格子名称",
+    "Glance.Instances.RenameTitle": "重命名时光格子",
+    "Glance.Instances.DeleteTitle": "删除“{0}”？",
+    "Glance.Instances.DeleteDescription": "只删除这个时光格子及其独立设置，其他时光格子不受影响。",
+    "WidgetContent.Glance.StatusLabel": "时光",
+    "WidgetContent.Glance.StatusDescription": "在桌面上一眼查看照片、时间与日期",
+    "Glance.Settings.Title": "时光",
+    "Glance.Settings.Description": "用一张照片、时间和日期打造属于你的桌面一角",
+    "Glance.Display.Title": "显示内容",
+    "Glance.Display.Description": "选择格子中需要显示的内容",
+    "Glance.Display.PhotoOnly": "仅图片",
+    "Glance.Display.Separator": "、",
+    "Glance.Display.Time": "时间",
+    "Glance.Display.Date": "日期",
+    "Glance.Display.Year": "年份",
+    "Glance.Display.Weekday": "星期",
+    "Glance.Display.Calendar": "月历",
+    "Glance.Layout.Title": "布局",
+    "Glance.LayoutGroup.Title": "布局与排版",
+    "Glance.LayoutGroup.Description": "布局、日历与时间文字样式",
+    "Glance.Layout.Immersive": "沉浸式",
+    "Glance.Layout.Centered": "居中",
+    "Glance.Layout.Editorial": "杂志式",
+    "Glance.Layout.Calendar": "日历",
+    "Glance.CalendarMaterial.Title": "日历材质",
+    "Glance.CalendarMaterial.Description": "设置日历卡片的背景风格",
+    "Glance.CalendarMaterial.FollowSystem": "跟随系统",
+    "Glance.CalendarMaterial.FollowImage": "跟随图片颜色",
+    "Glance.CalendarMaterial.Transparency": "透明度",
+    "Glance.CalendarMaterial.TransparencyDescription": "仅调整日历背景，100% 时完全透明",
+    "Glance.TraditionalCalendar.Title": "传统历法",
+    "Glance.TraditionalCalendar.Description": "自动跟随 DeskBox 语言，也可手动选择或关闭",
+    "Glance.Festivals.Title": "中国传统节日",
+    "Glance.Festivals.Description": "在农历日期位置优先显示春节、中秋等传统节日",
+    "Glance.TraditionalCalendar.Auto": "自动（{0}）",
+    "Glance.TraditionalCalendar.None": "关闭",
+    "Glance.TraditionalCalendar.ChineseLunar": "中国农历",
+    "Glance.TraditionalCalendar.UmAlQura": "乌姆古拉历",
+    "Glance.TraditionalCalendar.Hijri": "伊斯兰历（Hijri）",
+    "Glance.TraditionalCalendar.IndianSaka": "印度国定历（萨卡）",
+    "Glance.TraditionalCalendar.JapaneseEra": "日本和历（年号）",
+    "Glance.TraditionalCalendar.Bangla": "孟加拉国历",
+    "Glance.TraditionalCalendar.Julian": "儒略历",
+    "Glance.TraditionalCalendar.Hebrew": "希伯来历",
+    "Glance.TraditionalCalendar.Persian": "波斯历",
+    "Glance.TraditionalCalendar.ThaiBuddhist": "泰国佛历",
+    "Glance.Background.Title": "背景图片",
+    "Glance.BackgroundGroup.Description": "图片来源、轮换方式与缓存",
+    "Glance.Background.Transparency.Title": "图片透明度",
+    "Glance.Background.Transparency.Description": "仅调整背景图片，文字和控件保持不变",
+    "Glance.Background.Online": "Wikimedia Commons",
+    "Glance.Background.Files": "本地图片",
+    "Glance.Background.Folder": "图片文件夹",
+    "Glance.Background.Bing": "必应每日壁纸",
+    "Glance.Background.ChooseFiles": "选择图片",
+    "Glance.Background.ChooseFolder": "选择文件夹",
+    "Glance.Background.ClearSelection": "清除",
+    "Glance.Background.LocalSummary": "已添加 {0} 张本地图片",
+    "Glance.Background.Category.Title": "在线图片分类",
+    "Glance.Background.Category.Description": "选择在线图片的主题，切换后会自动获取新图片",
+    "Glance.Background.Category.Featured": "精选",
+    "Glance.Background.Category.Landscapes": "自然风光",
+    "Glance.Background.Category.Cities": "城市",
+    "Glance.Background.Category.Architecture": "建筑",
+    "Glance.Background.Category.Animals": "动物",
+    "Glance.Background.Category.Plants": "植物",
+    "Glance.Background.Category.Astronomy": "太空",
+    "Glance.Background.Category.People": "人文",
+    "Glance.Rotation.Title": "轮换",
+    "Glance.Rotation.Manual": "手动",
+    "Glance.Rotation.10Seconds": "每 10 秒",
+    "Glance.Rotation.30Seconds": "每 30 秒",
+    "Glance.Rotation.60Seconds": "每 60 秒",
+    "Glance.Rotation.2Minutes": "每 2 分钟",
+    "Glance.Rotation.5Minutes": "每 5 分钟",
+    "Glance.Rotation.10Minutes": "每 10 分钟",
+    "Glance.Rotation.30Minutes": "每 30 分钟",
+    "Glance.Rotation.1Hour": "每小时",
+    "Glance.Rotation.6Hours": "每 6 小时",
+    "Glance.Rotation.Daily": "每天",
+    "Glance.Rotation.Random": "随机顺序",
+    "Glance.Transition.Title": "切换动效",
+    "Glance.AppearanceGroup.Title": "外观与动效",
+    "Glance.AppearanceGroup.Description": "图片切换方式与内容可读性",
+    "Glance.Transition.None": "无",
+    "Glance.Transition.CrossFade": "交叉淡化",
+    "Glance.Transition.SlideFade": "滑动淡化",
+    "Glance.Transition.ZoomFade": "缩放淡化",
+    "Glance.Speed.Fast": "快速",
+    "Glance.Speed.Standard": "标准",
+    "Glance.Speed.Relaxed": "舒缓",
+    "Glance.Typography.Title": "字体大小",
+    "Glance.Typography.TimeFormat": "时间格式",
+    "Glance.Typography.FollowSystem": "跟随系统",
+    "Glance.Typography.Hour24": "24 小时制",
+    "Glance.Typography.Hour12": "12 小时制",
+    "Glance.Typography.Font": "字体",
+    "Glance.Speed.Title": "切换速度",
+    "Glance.Typography.SystemDefault": "系统默认",
+    "Glance.Readability.Title": "可读性",
+    "Glance.Readability.None": "无",
+    "Glance.Readability.Soft": "柔和",
+    "Glance.Readability.Strong": "增强",
+    "Glance.PhotoControls.Title": "显示图片控制按钮",
+    "Glance.PhotoControls.Description": "鼠标移入时显示暂停、切换和图片信息按钮",
+    "Glance.Actions.Next": "下一张",
+    "Glance.Actions.Pause": "暂停轮换",
+    "Glance.Actions.Resume": "继续轮换",
+    "Glance.Actions.PhotoInfo": "图片信息",
+    "Glance.Actions.OpenSource": "打开图片来源",
+    "Glance.Actions.ShowInExplorer": "在资源管理器中显示",
+    "Glance.Status.Loading": "正在加载图片…",
+    "Glance.Status.OnlineFallback": "正在使用备用图片",
+    "Glance.Status.NoLocalImages": "尚未添加本地图片",
+    "Glance.Cache.Title": "图片缓存",
+    "Glance.Cache.Clear": "清除缓存",
+    "Glance.Cache.Cleared": "缓存已清除",
+    "Settings.Windows10VisualCompatibility.Title": "Windows 10 视觉兼容",
+    "Settings.Windows10VisualCompatibility.Message": "云母材质和系统窗口圆角仅适用于 Windows 11。Windows 10 将使用亚克力或纯色，并保持直角窗口。",
+    "Settings.Dialog.QuickAccessOperationFailedBody": "DeskBox 无法更新文件资源管理器中的快速访问，请稍后重试。",
+    "DesktopOrganization.Result.FailedBody": "无法完成桌面整理，请稍后重试。",
+    "DesktopOrganization.Undo.FailedBody": "无法撤销桌面整理，请稍后重试。",
+    "Common.OperationFailedRetry": "操作无法完成。请重试。",
+    "Settings.WidgetForeground.Title": "格子文字",
+    "Settings.WidgetForeground.Description": "选择格子文字和单色控件的颜色，不影响图片和彩色图标。",
+    "Settings.WidgetForeground.FollowTheme": "跟随应用主题",
+    "Settings.WidgetForeground.Light": "浅色文字",
+    "Settings.WidgetForeground.Dark": "深色文字",
+    "Settings.WidgetForeground.Custom": "自定义",
+    "Settings.WidgetForeground.CustomColor.Title": "自定义文字颜色",
+    "Settings.WidgetForeground.CustomColor.Description": "用于格子文字和单色控件。",
+    "Widget.Foreground.Menu": "文字与可读性",
+    "Widget.Foreground.UseGlobal": "使用全局设置",
+    "Widget.Foreground.CustomColor": "自定义颜色…",
+    "Settings.DropAction.System": "跟随 Windows 默认",
+    "Widget.RunAsAdministrator": "使用管理员身份打开",
+    "Widget.RunAsAdministrator.AlreadyRunning": "该程序正在以普通权限运行，请完全退出后再使用管理员身份打开。",
+    "Widget.RunAsAdministrator.NotElevated": "Windows 未能创建管理员进程，请检查 UAC 设置后重试。",
+    "Widget.CreateShortcut": "创建快捷方式",
+    "Widget.MoreSystemOperations": "更多系统操作",
+    "Settings.ManagedPath.DesktopShortcut.Title": "桌面上的收纳文件入口",
+    "Settings.ManagedPath.DesktopShortcut.Description": "创建后可直接打开当前收纳目录；手动删除后，DeskBox 不会重新创建",
     "DesktopOrganization.Public.PersonalCount": "个人桌面（{0} 项）",
     "DesktopOrganization.Public.SharedCount": "公用桌面（{0} 项，所有账户共享）",
     "DesktopOrganization.Public.Unavailable": "公用桌面（暂时无法读取）",
@@ -2735,13 +2737,12 @@
     "Settings.CloudBackup.TestConnection": "测试连接",
     "Settings.CloudBackup.TestConnection.Success": "连接成功。",
     "Settings.CloudBackup.TestConnection.Failed": "连接失败：{0}",
-    "Settings.CloudBackup.OfficialCloudHint": "官方账号服务上线后，DeskBox 云备份会出现在这里。",
     "Settings.CloudBackup.TodoData.Title": "待办数据",
-    "Settings.CloudBackup.TodoData.Description": "所有待办格子里的待办项及其附件。",
+    "Settings.CloudBackup.TodoData.Description": "所有待办格子里的待办项。不包含附件文件。",
     "Settings.CloudBackup.QuickCaptureData.Title": "随记数据",
-    "Settings.CloudBackup.QuickCaptureData.Description": "随记记录及其附件。",
+    "Settings.CloudBackup.QuickCaptureData.Description": "速记内容。不包含附件文件。",
     "Settings.CloudBackup.WidgetStyle.Title": "格子样式",
-    "Settings.CloudBackup.WidgetStyle.Description": "透明度、材质、配色等外观设置。位置和显示器布局永不包含。",
+    "Settings.CloudBackup.WidgetStyle.Description": "透明度、材质、配色等外观设置。不包含格子位置和显示器布局",
     "Settings.CloudBackup.Interval.Title": "备份间隔",
     "Settings.CloudBackup.Interval.Description": "DeskBox 运行期间后台上传快照的频率。",
     "Settings.CloudBackup.Interval.Hour": "1 小时",
@@ -2757,6 +2758,7 @@
     "Settings.CloudBackup.BackupNow.Success": "已上传：{0}",
     "Settings.CloudBackup.BackupNow.Failed": "备份失败：{0}",
     "Settings.CloudBackup.NotConfigured": "云备份尚未配置。",
+    "Settings.CloudBackup.NoScope": "请先开启至少一项要备份的内容。",
     "Settings.CloudBackup.LastSuccess": "上次成功备份：{0}",
     "Settings.CloudBackup.LastSuccess.Never": "还没有成功备份过。",
     "Settings.CloudBackup.RefreshSnapshots": "刷新",
@@ -2777,5 +2779,31 @@
     "Settings.CloudBackup.HttpWarning": "http:// 地址会把密码以 Base64 形式在明文信道上传输，请仅用于可信的内网服务器。",
     "Settings.CloudBackup.RestoreConfirm.SourceDevice": "来源设备：{0}。",
     "Settings.CloudBackup.RestoreConfirm.Remapped": "源设备的待办格子在本机不存在，已将待办数据映射到本机 {0} 个格子上。",
-    "Settings.CloudBackup.RestoreConfirm.Unmapped": "有 {0} 个待办数据无法映射到本机任何格子，文件已保留在磁盘但暂不可见。"
+    "Settings.CloudBackup.RestoreConfirm.Unmapped": "有 {0} 个待办数据无法映射到本机任何格子，文件已保留在磁盘但暂不可见。",
+    "Settings.Dialog.MigrateProgressTitle": "正在迁移收纳路径",
+    "Settings.Dialog.MigrateProgressBody": "正在将格子文件夹从\n{0}\n迁移到\n{1}",
+    "Settings.Dialog.MigrateProgressWidget": "文件夹 {0}/{1}：{2}",
+    "Settings.Dialog.MigrateCanceling": "正在取消并还原…",
+    "Settings.Dialog.MigrateItemPaths": "源：{0}\n目标：{1}",
+    "Settings.Dialog.MigrateItemRetry": "重试",
+    "Settings.Dialog.MigrateItemSkip": "跳过",
+    "Settings.Dialog.MigrateItemAbort": "中止迁移",
+    "Settings.Dialog.MigrateItemApplyAll": "对剩余项执行相同操作",
+    "Settings.Dialog.MigrateReasonInUse": "文件正被其他程序占用。请关闭后重试，或跳过此项。",
+    "Settings.Dialog.MigrateReasonAccessDenied": "没有访问权限。",
+    "Settings.Dialog.MigrateReasonNotFound": "该项已不存在（可能已被移动或删除）。",
+    "Settings.Dialog.MigrateReasonDiskFull": "目标磁盘空间不足。",
+    "Settings.Dialog.MigrateReasonPathTooLong": "路径过长。",
+    "Settings.Dialog.MigrateReasonUnknown": "发生未知错误。",
+    "Settings.Dialog.MigrateResultCanceledTitle": "迁移已取消",
+    "Settings.Dialog.MigrateResultCanceledBody": "已移动的文件夹已还原到原位置。",
+    "Settings.Dialog.MigrateResultFailedBody": "迁移中止：{0}",
+    "Settings.Dialog.MigrateResultSummary": "已迁移 {0} 个文件夹 · 移动 {1} 项 · {2} 项未移动",
+    "Settings.Dialog.MigrateResultResidueNote": "有 {0} 个旧文件夹未能清理——接下来可以处理。",
+    "Settings.Dialog.MigrateSkippedHeader": "未移动的项（仍在原位置）：",
+    "Settings.Dialog.MigrateSkippedItem": "{0} · {1} — {2}",
+    "Settings.Dialog.MigrateSkippedKeptNote": "跳过的文件保留在旧文件夹中，仍可在原位置访问。",
+    "Settings.Dialog.MigrateRetrySkippedButton": "重试未移动的项",
+    "Settings.Dialog.MigrateRetryResult": "重试完成——仍有 {0} 项未移动。",
+    "Settings.Dialog.MigrateOpenTargetButton": "打开新文件夹"
 }

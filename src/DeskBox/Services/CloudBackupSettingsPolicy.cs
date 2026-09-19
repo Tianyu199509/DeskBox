@@ -17,11 +17,24 @@ internal sealed record CloudBackupOptions(
     int IntervalMinutes,
     DateTimeOffset LastSuccessUtc)
 {
-    /// <summary>Provider selected, URL parseable, at least one domain on.</summary>
-    internal bool IsConfigured =>
+    /// <summary>
+    /// Provider selected and URL parseable — enough to reach the endpoint.
+    /// Backup scope deliberately stays out: probing the server, storing a
+    /// credential and listing/downloading remote snapshots (restore side,
+    /// whose domain pick happens in the restore dialog) are endpoint-level
+    /// operations that must work before the user chooses what to back up.
+    /// </summary>
+    internal bool HasEndpoint =>
         Provider != CloudBackupSettingsPolicy.ProviderNone &&
         Uri.TryCreate(ServerUrl, UriKind.Absolute, out Uri? uri) &&
-        (uri.Scheme == Uri.UriSchemeHttps || uri.Scheme == Uri.UriSchemeHttp) &&
+        (uri.Scheme == Uri.UriSchemeHttps || uri.Scheme == Uri.UriSchemeHttp);
+
+    /// <summary>
+    /// Endpoint reachable AND at least one backup domain on — the bar for
+    /// actually uploading a snapshot.
+    /// </summary>
+    internal bool IsConfigured =>
+        HasEndpoint &&
         Scope != CloudBackupDomain.None;
 
     /// <summary>

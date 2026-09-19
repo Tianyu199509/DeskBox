@@ -1,6 +1,7 @@
 #if DESKBOX_NATIVE_AOT
 using DeskBox.Controls;
 using DeskBox.Helpers;
+using DeskBox.Platform;
 using DeskBox.Models;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;

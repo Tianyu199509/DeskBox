@@ -414,6 +414,79 @@ public sealed class WidgetManagerStorageCleanupTests : IDisposable
     }
 
     [Fact]
+    public async Task RenameWidgetAsync_EmptyWidgetAdoptsClosedWidgetResidueFolder()
+    {
+        // A closed widget kept its managed folder behind by design; a fresh
+        // empty widget renamed to the same name must adopt it instead of
+        // dead-ending on a misleading duplicate-name error (#113).
+        string residueFolder = Directory.CreateDirectory(Path.Combine(_storageRoot, "Sysinternals")).FullName;
+        File.WriteAllText(Path.Combine(residueFolder, "procmon.lnk"), "old shortcut");
+        string emptyFolder = Directory.CreateDirectory(Path.Combine(_storageRoot, "Work")).FullName;
+        var widget = CreateManagedWidget("Work", emptyFolder);
+        _settingsService.Settings.Widgets.Add(widget);
+
+        await _widgetManager.RenameWidgetAsync(widget.Id, "Sysinternals");
+
+        Assert.Equal("Sysinternals", widget.Name);
+        Assert.Equal("Sysinternals", widget.ManagedFolderName);
+        Assert.Equal(residueFolder, widget.MappedFolderPath, ignoreCase: true);
+        Assert.True(File.Exists(Path.Combine(residueFolder, "procmon.lnk")),
+            "The adopted folder's contents must stay untouched.");
+        Assert.False(Directory.Exists(emptyFolder),
+            "The fresh widget's empty default folder must be cleaned up.");
+        Assert.False(Directory.Exists(Path.Combine(_storageRoot, "Sysinternals (2)")));
+    }
+
+    [Fact]
+    public async Task RenameWidgetAsync_RejectsAdoptionWhenFolderClaimedByLiveWidget()
+    {
+        // A mapped widget's folder under the managed root must never be
+        // adopted — two widgets sharing one directory means the first
+        // "close and delete files" wipes the other's contents.
+        string claimedFolder = Directory.CreateDirectory(Path.Combine(_storageRoot, "AI")).FullName;
+        File.WriteAllText(Path.Combine(claimedFolder, "theirs.txt"), "mapped content");
+        _settingsService.Settings.Widgets.Add(new WidgetConfig
+        {
+            Name = "Mapped",
+            WidgetKind = WidgetKind.File,
+            MappedFolderPath = claimedFolder,
+            FollowsDefaultStoragePath = false
+        });
+        string emptyFolder = Directory.CreateDirectory(Path.Combine(_storageRoot, "Work")).FullName;
+        var widget = CreateManagedWidget("Work", emptyFolder);
+        _settingsService.Settings.Widgets.Add(widget);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            _widgetManager.RenameWidgetAsync(widget.Id, "AI"));
+
+        Assert.Equal("Work", widget.ManagedFolderName);
+        Assert.Equal(emptyFolder, widget.MappedFolderPath, ignoreCase: true);
+        Assert.True(Directory.Exists(emptyFolder));
+        Assert.True(File.Exists(Path.Combine(claimedFolder, "theirs.txt")));
+    }
+
+    [Fact]
+    public async Task RenameWidgetAsync_RejectsNameWhenBothFoldersHoldFiles()
+    {
+        string residueFolder = Directory.CreateDirectory(Path.Combine(_storageRoot, "AI")).FullName;
+        File.WriteAllText(Path.Combine(residueFolder, "old.txt"), "residue content");
+        string targetFolder = Directory.CreateDirectory(Path.Combine(_storageRoot, "Work")).FullName;
+        File.WriteAllText(Path.Combine(targetFolder, "mine.txt"), "current content");
+        var widget = CreateManagedWidget("Work", targetFolder);
+        _settingsService.Settings.Widgets.Add(widget);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            _widgetManager.RenameWidgetAsync(widget.Id, "AI"));
+
+        Assert.Equal("Work", widget.Name);
+        Assert.Equal("Work", widget.ManagedFolderName);
+        Assert.Equal(targetFolder, widget.MappedFolderPath, ignoreCase: true);
+        Assert.True(File.Exists(Path.Combine(residueFolder, "old.txt")));
+        Assert.True(File.Exists(Path.Combine(targetFolder, "mine.txt")),
+            "A rejected rename must not move, merge, or delete either side.");
+    }
+
+    [Fact]
     public async Task RenameWidgetAsync_ManagedWidgetMovesFolderAfterValidation()
     {
         string sourceFolder = Directory.CreateDirectory(Path.Combine(_storageRoot, "Work")).FullName;
@@ -609,6 +682,42 @@ public sealed class WidgetManagerStorageCleanupTests : IDisposable
             freeFolder,
             out FileWidgetPathConflict? none));
         Assert.Null(none);
+    }
+
+    [Fact]
+    public void DescribeFileWidgetPathRelation_DistinguishesSameInsideAndContains()
+    {
+        string root = Directory.CreateDirectory(Path.Combine(_tempRoot, "relation")).FullName;
+        string parent = Directory.CreateDirectory(Path.Combine(root, "parent")).FullName;
+        string child = Directory.CreateDirectory(Path.Combine(parent, "child")).FullName;
+        string elsewhere = Directory.CreateDirectory(Path.Combine(root, "elsewhere")).FullName;
+
+        Assert.Equal(
+            FileWidgetPathRelation.SameDirectory,
+            WidgetManager.DescribeFileWidgetPathRelation(parent, parent));
+        Assert.Equal(
+            FileWidgetPathRelation.CandidateInsideOther,
+            WidgetManager.DescribeFileWidgetPathRelation(child, parent));
+        Assert.Equal(
+            FileWidgetPathRelation.CandidateContainsOther,
+            WidgetManager.DescribeFileWidgetPathRelation(parent, child));
+        // Unrelated paths never reach the conflict formatter, but the
+        // classifier still answers from the neutral "cannot verify" bucket.
+        Assert.Equal(
+            FileWidgetPathRelation.UnresolvableOverlap,
+            WidgetManager.DescribeFileWidgetPathRelation(parent, elsewhere));
+    }
+
+    [Fact]
+    public void FormatFileWidgetPathConflictMessage_NamesTheOtherPath()
+    {
+        string parent = Directory.CreateDirectory(Path.Combine(_tempRoot, "conflict-parent")).FullName;
+        string child = Directory.CreateDirectory(Path.Combine(parent, "conflict-child")).FullName;
+
+        string message = _widgetManager.FormatFileWidgetPathConflictMessage(child, "配置", parent);
+
+        Assert.Contains("配置", message);
+        Assert.Contains(parent, message);
     }
 
     private static WidgetConfig CreateManagedWidget(string name, string folderPath)

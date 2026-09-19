@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using DeskBox.Platform;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
@@ -253,7 +254,7 @@ internal sealed unsafe partial class ShortcutNativeModule
                 $"Native shortcut module was not found at '{fullPath}'.");
         }
 
-        nint module = LoadLibraryEx(
+        nint module = Kernel32NativeMethods.LoadLibraryEx(
             fullPath,
             0,
             LoadLibrarySearchDllLoadDir | LoadLibrarySearchSystem32);
@@ -833,13 +834,6 @@ internal sealed unsafe partial class ShortcutNativeModule
             result.AttemptedPhases,
             result.ResolveFlags);
     }
-
-    [LibraryImport(
-        "kernel32.dll",
-        EntryPoint = "LoadLibraryExW",
-        SetLastError = true,
-        StringMarshalling = StringMarshalling.Utf16)]
-    private static partial nint LoadLibraryEx(string fileName, nint file, uint flags);
 
     [StructLayout(LayoutKind.Sequential)]
     internal readonly struct NativeUtf16Buffer

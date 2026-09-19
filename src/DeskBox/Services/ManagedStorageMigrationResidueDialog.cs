@@ -84,6 +84,100 @@ internal static class ManagedStorageMigrationResidueDialog
     }
 
     /// <summary>
+    /// Reports a failed migration whose rollback could not return every
+    /// folder: lists the folders still sitting in the new root, explains that
+    /// files may now exist in both roots, and offers a conservative retry
+    /// (never overwrites or deletes). Kept open until every folder is back or
+    /// the user gives up (feedback #112).
+    /// </summary>
+    public static async Task ShowRollbackFailureAsync(
+        XamlRoot xamlRoot,
+        LocalizationService localizationService,
+        Func<IReadOnlyList<ManagedStorageRollbackFailure>, Task<IReadOnlyList<ManagedStorageRollbackFailure>>> retryRollbackAsync,
+        ManagedStorageRollbackFailureException failure)
+    {
+        IReadOnlyList<ManagedStorageRollbackFailure> failures = failure.Failures;
+        if (failures.Count == 0)
+        {
+            return;
+        }
+
+        string bodyText = localizationService.Format(
+            "Settings.Dialog.MigrateRollbackBody",
+            failure.OriginalFailure.Message);
+
+        while (true)
+        {
+            var dialog = new ContentDialog
+            {
+                XamlRoot = xamlRoot,
+                Title = localizationService.T("Settings.Dialog.MigrateRollbackTitle"),
+                PrimaryButtonText = localizationService.T("Settings.Dialog.MigrateRollbackRetryButton"),
+                CloseButtonText = localizationService.T("Common.Ok"),
+                DefaultButton = ContentDialogButton.Primary,
+                Content = new StackPanel
+                {
+                    Spacing = 0,
+                    Children =
+                    {
+                        new TextBlock
+                        {
+                            Text = bodyText,
+                            TextWrapping = TextWrapping.Wrap
+                        },
+                        new TextBlock
+                        {
+                            Text = string.Join(
+                                Environment.NewLine,
+                                failures.Select(item =>
+                                    $"{item.WidgetName}: {item.DestinationFolder}")),
+                            TextWrapping = TextWrapping.Wrap,
+                            Margin = new Thickness(0, 8, 0, 0)
+                        },
+                        new TextBlock
+                        {
+                            Text = localizationService.T("Settings.Dialog.MigrateRollbackHint"),
+                            TextWrapping = TextWrapping.Wrap,
+                            FontSize = 12,
+                            Opacity = 0.75,
+                            Margin = new Thickness(0, 8, 0, 0)
+                        },
+                    }
+                }
+            };
+
+            if (await dialog.ShowAsync() != ContentDialogResult.Primary)
+            {
+                return;
+            }
+
+            failures = await retryRollbackAsync(failures);
+            if (failures.Count == 0)
+            {
+                var doneDialog = new ContentDialog
+                {
+                    XamlRoot = xamlRoot,
+                    Title = localizationService.T("Settings.Dialog.MigrateRollbackTitle"),
+                    CloseButtonText = localizationService.T("Common.Ok"),
+                    DefaultButton = ContentDialogButton.Close,
+                    Content = new TextBlock
+                    {
+                        Text = localizationService.T("Settings.Dialog.MigrateRollbackRetryComplete"),
+                        TextWrapping = TextWrapping.Wrap
+                    }
+                };
+                await doneDialog.ShowAsync();
+                return;
+            }
+
+            // Some folders are still stuck; redisplay with only those listed.
+            bodyText = localizationService.Format(
+                "Settings.Dialog.MigrateRollbackRetryPartial",
+                failures.Count);
+        }
+    }
+
+    /// <summary>
     /// Warns that the destination still holds the previous attempt's
     /// complete copy and offers to recycle it before retrying.
     /// </summary>

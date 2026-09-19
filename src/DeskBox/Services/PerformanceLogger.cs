@@ -330,6 +330,8 @@ public static partial class PerformanceLogger
                 app.WidgetManager?.ActiveFolderWatcherCount ?? 0;
             int cachedGroupContentCount =
                 app.WidgetManager?.CachedGroupContentCount ?? 0;
+            (string materializedContentByKind, string cachedContentByKind) =
+                app.WidgetManager?.DescribeContentResidencyByKind() ?? ("none", "none");
             EffectivePerformanceSettings performance =
                 PerformanceSettingsPolicy.Resolve(app.SettingsService.Settings);
 #if DESKBOX_NATIVE_AOT
@@ -412,6 +414,8 @@ public static partial class PerformanceLogger
                  $"surfaceSwitchGates={surfaceSwitchGateCount} " +
                  $"activeFolderWatchers={activeFolderWatcherCount} " +
                  $"cachedGroupContents={cachedGroupContentCount} " +
+                 $"materializedContentByKind={materializedContentByKind} " +
+                 $"cachedContentByKind={cachedContentByKind} " +
                   $"searchEnabled={searchEnabled} " +
                  $"everythingState={everythingState} " +
                  $"everythingConnected={app.IsEverythingSearchConnected} " +

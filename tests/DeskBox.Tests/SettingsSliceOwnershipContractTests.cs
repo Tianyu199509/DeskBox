@@ -271,7 +271,7 @@ public sealed class SettingsSliceOwnershipContractTests
         ["src/DeskBox/Services/WidgetManager.CapsuleArrangement.cs"] = 44,
         ["src/DeskBox/Services/WidgetManager.FeatureWidgets.cs"] = 48,
         ["src/DeskBox/Services/WidgetManager.Groups.cs"] = 57,
-        ["src/DeskBox/Services/WidgetManager.Storage.cs"] = 19,
+        ["src/DeskBox/Services/WidgetManager.Storage.cs"] = 20,
         ["src/DeskBox/Services/WidgetManager.Surfaces.cs"] = 1,
         ["src/DeskBox/Services/WidgetManager.TrayAnimation.cs"] = 3,
         ["src/DeskBox/Services/WidgetManager.cs"] = 27,

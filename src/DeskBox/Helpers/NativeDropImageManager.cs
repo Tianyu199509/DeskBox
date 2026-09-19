@@ -1,3 +1,4 @@
+using DeskBox.Platform;
 using System.Runtime.InteropServices;
 
 namespace DeskBox.Helpers;
@@ -32,17 +33,9 @@ internal sealed unsafe partial class NativeDropImageManager : IDisposable
 
     internal bool IsDragActive => _isDragActive;
 
-    [LibraryImport("ole32.dll")]
-    private static partial int CoCreateInstance(
-        in Guid classId,
-        nint outer,
-        uint classContext,
-        in Guid interfaceId,
-        out nint instance);
-
     internal static NativeDropImageManager? TryCreate()
     {
-        int result = CoCreateInstance(
+        int result = Ole32NativeMethods.CoCreateInstance(
             in s_dragDropHelperClassId,
             0,
             ClsctxInprocServer,

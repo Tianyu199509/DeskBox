@@ -868,15 +868,19 @@ internal sealed class WidgetTopologyLayoutService
 
         try
         {
-            var displayDevice = new DisplayDevice
+            var displayDevice = new Win32Helper.DisplayDevice
             {
-                Size = Marshal.SizeOf<DisplayDevice>(),
+                Size = Marshal.SizeOf<Win32Helper.DisplayDevice>(),
                 DeviceName = string.Empty,
                 DeviceString = string.Empty,
                 DeviceId = string.Empty,
                 DeviceKey = string.Empty
             };
-            if (EnumDisplayDevices(deviceName, 0, ref displayDevice, EddGetDeviceInterfaceName))
+            if (Win32Helper.EnumDisplayDevices(
+                    deviceName,
+                    0,
+                    ref displayDevice,
+                    EddGetDeviceInterfaceName))
             {
                 if (!string.IsNullOrWhiteSpace(displayDevice.DeviceId))
                 {
@@ -899,34 +903,6 @@ internal sealed class WidgetTopologyLayoutService
         }
 
         return fallback;
-    }
-
-    [DllImport("user32.dll", EntryPoint = "EnumDisplayDevicesW", CharSet = CharSet.Unicode)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool EnumDisplayDevices(
-        string device,
-        uint deviceIndex,
-        ref DisplayDevice displayDevice,
-        uint flags);
-
-    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
-    private struct DisplayDevice
-    {
-        public int Size;
-
-        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)]
-        public string DeviceName;
-
-        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)]
-        public string DeviceString;
-
-        public uint StateFlags;
-
-        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)]
-        public string DeviceId;
-
-        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)]
-        public string DeviceKey;
     }
 }
 

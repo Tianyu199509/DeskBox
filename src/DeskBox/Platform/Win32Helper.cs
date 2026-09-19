@@ -903,6 +903,7 @@ public static partial class Win32Helper
 
     private const uint AssocfNone = 0;
     private const uint AssocstrCommand = 1;
+    private const uint AssocstrProgId = 20; // ASSOCSTR_PROGID
     private const uint HResultEPointer = 0x80004003;
 
     [LibraryImport("shlwapi.dll", EntryPoint = "AssocQueryStringW", StringMarshalling = StringMarshalling.Utf16)]
@@ -915,7 +916,7 @@ public static partial class Win32Helper
         ref uint cchOut);
 
     /// <summary>
-    /// Whether the shell has a registered command for opening this path.
+    /// Whether the shell resolves a default open handler for this path.
     /// URIs dispatch by protocol and directories through Explorer itself, so
     /// both count as associated. Unassociated files must not go through any
     /// Shell dispatch: every dispatch path answers its own Open With picker
@@ -951,12 +952,46 @@ public static partial class Win32Helper
             return false;
         }
 
+        // The classic command query resolves the effective association —
+        // UserChoice included — but only reports handlers expressed as a
+        // literal shell\open\command line.
+        if (TryQueryOpenCommand(extension))
+        {
+            return true;
+        }
+
+        // Packaged (AppX) defaults register shell\open\command with only a
+        // DelegateExecute CLSID and no command line. Resolving the EFFECTIVE
+        // ProgId is UserChoice-aware and fails outright when nothing is
+        // associated, so a resolved ProgId already proves a default exists —
+        // a recommended-handler list would only prove capability. The verb
+        // check on that ProgId then covers DelegateExecute-only defaults.
+        if (TryQueryEffectiveProgId(extension, out string effectiveProgId) &&
+            ProgIdHasOpenVerb(effectiveProgId))
+        {
+            return true;
+        }
+
+        // A UserChoice whose hash no longer validates poisons both queries
+        // above, while Explorer still opens the file through the extension's
+        // class-default ProgId.
+        return ClassDefaultHasOpenVerb(extension);
+    }
+
+    /// <summary>
+    /// Whether the association string (extension or ProgId) resolves a real
+    /// shell\open\command line. Windows answers S_OK with the generic
+    /// OpenWith.exe launcher for unknown extensions; that fallback IS the
+    /// picker, not an association.
+    /// </summary>
+    private static bool TryQueryOpenCommand(string assoc)
+    {
         var buffer = new char[1024];
         uint length = (uint)buffer.Length;
         uint queryResult = AssocQueryString(
             AssocfNone,
             AssocstrCommand,
-            extension,
+            assoc,
             "open",
             buffer,
             ref length);
@@ -966,7 +1001,7 @@ public static partial class Win32Helper
             queryResult = AssocQueryString(
                 AssocfNone,
                 AssocstrCommand,
-                extension,
+                assoc,
                 "open",
                 buffer,
                 ref length);
@@ -982,13 +1017,126 @@ public static partial class Win32Helper
                 0,
                 (int)Math.Min(length, (uint)buffer.Length))
             .TrimEnd('\0');
-        // Windows resolves every unknown extension to the generic OpenWith
-        // launcher with S_OK; that fallback IS the picker, not an
-        // association.
         return !string.IsNullOrWhiteSpace(command) &&
                command.IndexOf(
                    "OpenWith.exe",
                    StringComparison.OrdinalIgnoreCase) < 0;
+    }
+
+    /// <summary>
+    /// Resolves the effective ProgId for the extension through the shell's
+    /// association chain — UserChoice first, then the class default. The
+    /// query fails when nothing is associated at all, which is what makes
+    /// it a proof of a default rather than of mere handler capability.
+    /// </summary>
+    private static bool TryQueryEffectiveProgId(string extension, out string progId)
+    {
+        progId = string.Empty;
+        var buffer = new char[512];
+        uint length = (uint)buffer.Length;
+        uint queryResult = AssocQueryString(
+            AssocfNone,
+            AssocstrProgId,
+            extension,
+            null,
+            buffer,
+            ref length);
+        if (queryResult == HResultEPointer && length > (uint)buffer.Length)
+        {
+            buffer = new char[length];
+            queryResult = AssocQueryString(
+                AssocfNone,
+                AssocstrProgId,
+                extension,
+                null,
+                buffer,
+                ref length);
+        }
+
+        if (queryResult != 0)
+        {
+            return false;
+        }
+
+        progId = new string(
+                buffer,
+                0,
+                (int)Math.Min(length, (uint)buffer.Length))
+            .TrimEnd('\0');
+        return !string.IsNullOrWhiteSpace(progId);
+    }
+
+    /// <summary>
+    /// Whether the extension's class-default ProgId carries a verb the Shell
+    /// can execute. Resolving the ProgId by name skips the extension's
+    /// UserChoice layer, so a stale or unverifiable UserChoice cannot hide a
+    /// working default.
+    /// </summary>
+    private static bool ClassDefaultHasOpenVerb(string extension)
+    {
+        try
+        {
+            using Microsoft.Win32.RegistryKey? extensionKey =
+                Microsoft.Win32.Registry.ClassesRoot.OpenSubKey(extension);
+            return extensionKey?.GetValue(null) is string progId &&
+                   !string.IsNullOrWhiteSpace(progId) &&
+                   ProgIdHasOpenVerb(progId);
+        }
+        catch (Exception)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Whether a ProgId registration carries a verb the Shell can execute —
+    /// a classic command line or a packaged DelegateExecute command.
+    /// </summary>
+    private static bool ProgIdHasOpenVerb(string progId)
+    {
+        if (TryQueryOpenCommand(progId))
+        {
+            return true;
+        }
+
+        try
+        {
+            using Microsoft.Win32.RegistryKey? shellKey =
+                Microsoft.Win32.Registry.ClassesRoot.OpenSubKey(
+                    progId + "\\shell");
+            if (shellKey is null)
+            {
+                return false;
+            }
+
+            foreach (string verb in shellKey.GetSubKeyNames())
+            {
+                using Microsoft.Win32.RegistryKey? commandKey =
+                    shellKey.OpenSubKey(verb + "\\command");
+                if (commandKey is null)
+                {
+                    continue;
+                }
+
+                if (commandKey.GetValue(null) is string command &&
+                    !string.IsNullOrWhiteSpace(command))
+                {
+                    return true;
+                }
+
+                if (commandKey.GetValue("DelegateExecute") is string delegateExecute &&
+                    !string.IsNullOrWhiteSpace(delegateExecute))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+        catch (Exception)
+        {
+            return false;
+        }
     }
 
     private const int ShcneRenameItem = 0x00000001;

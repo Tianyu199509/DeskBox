@@ -1,3 +1,4 @@
+using DeskBox.Platform;
 using System.Runtime.InteropServices;
 using System.Runtime.InteropServices.Marshalling;
 
@@ -77,12 +78,6 @@ internal sealed partial class NativeDropTargetComObject : INativeDropTarget
 
 internal static partial class NativeDropTargetComInterop
 {
-    [LibraryImport("ole32.dll")]
-    private static partial int RegisterDragDrop(nint hwnd, nint dropTarget);
-
-    [LibraryImport("ole32.dll")]
-    private static partial int RevokeDragDrop(nint hwnd);
-
     internal static void Register(nint hwnd, INativeDropTarget dropTarget)
     {
         ArgumentNullException.ThrowIfNull(dropTarget);
@@ -90,7 +85,7 @@ internal static partial class NativeDropTargetComInterop
         nint dropTargetPointer = AcquireInterfacePointer(dropTarget);
         try
         {
-            Marshal.ThrowExceptionForHR(RegisterDragDrop(hwnd, dropTargetPointer));
+            Marshal.ThrowExceptionForHR(Ole32NativeMethods.RegisterDragDrop(hwnd, dropTargetPointer));
         }
         finally
         {
@@ -100,7 +95,7 @@ internal static partial class NativeDropTargetComInterop
 
     internal static void Revoke(nint hwnd)
     {
-        Marshal.ThrowExceptionForHR(RevokeDragDrop(hwnd));
+        Marshal.ThrowExceptionForHR(Ole32NativeMethods.RevokeDragDrop(hwnd));
     }
 
     internal static unsafe nint AcquireInterfacePointer(INativeDropTarget dropTarget)

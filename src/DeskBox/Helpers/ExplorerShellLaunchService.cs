@@ -13,11 +13,6 @@ internal static class ExplorerShellLaunchService
     private const int ShellWindowClassDesktop = 8;
     private const int ShellWindowFindNeedDispatch = 1;
     private const int ShowNormal = 1;
-
-    [DllImport("ole32.dll")]
-    private static extern int CoAllowSetForegroundWindow(
-        IntPtr unknown,
-        IntPtr reserved);
 #endif
 
     public static bool TryOpen(
@@ -185,7 +180,7 @@ internal static class ExplorerShellLaunchService
         try
         {
             unknown = Marshal.GetIUnknownForObject(explorerHostedShell);
-            int hResult = CoAllowSetForegroundWindow(unknown, IntPtr.Zero);
+            int hResult = Ole32NativeMethods.CoAllowSetForegroundWindow(unknown, IntPtr.Zero);
             if (hResult < 0)
             {
                 App.Log(

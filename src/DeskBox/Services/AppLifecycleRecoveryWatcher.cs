@@ -1,7 +1,6 @@
 using DeskBox.Helpers;
 using DeskBox.Platform;
 using Microsoft.UI.Dispatching;
-using System.Runtime.InteropServices;
 
 namespace DeskBox.Services;
 
@@ -63,7 +62,7 @@ internal sealed class AppLifecycleRecoveryWatcher : IDisposable
 
         try
         {
-            _sessionNotificationRegistered = WTSRegisterSessionNotification(
+            _sessionNotificationRegistered = Win32Helper.WTSRegisterSessionNotification(
                 _hWnd,
                 NotifyForThisSession);
         }
@@ -208,7 +207,7 @@ internal sealed class AppLifecycleRecoveryWatcher : IDisposable
         {
             try
             {
-                WTSUnRegisterSessionNotification(_hWnd);
+                Win32Helper.WTSUnRegisterSessionNotification(_hWnd);
             }
             catch
             {
@@ -224,12 +223,4 @@ internal sealed class AppLifecycleRecoveryWatcher : IDisposable
             _isSubclassInstalled = false;
         }
     }
-
-    [DllImport("wtsapi32.dll", SetLastError = true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool WTSRegisterSessionNotification(IntPtr hWnd, uint flags);
-
-    [DllImport("wtsapi32.dll", SetLastError = true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool WTSUnRegisterSessionNotification(IntPtr hWnd);
 }

@@ -87,9 +87,9 @@
     "Settings.FileStacks.PopoverStyle.Neutral": "Neutral",
     "Settings.FileStacks.Auto.Title": "Automatisches Stapeln",
     "Settings.FileStacks.Auto.Description": "Lose Dateien anhand der Gruppierungsregel automatisch stapeln; aus lässt Stapel manuell",
-    "Settings.FileStacks.GroupBy.Title": "Gruppierungsregel",
-    "Settings.FileStacks.GroupBy.Description": "Wie automatische Stapel lose Dateien gruppieren",
-    "Settings.FileStacks.Enable.Description": "Deaktiviert blendet alle Stapel aus, einschließlich manueller",
+    "Settings.FileStacks.GroupBy.Title": "Gruppierung",
+    "Settings.FileStacks.GroupBy.Description": "Wählen, wie Dateien automatisch Stapeln zugewiesen werden",
+    "Settings.FileStacks.Enable.Description": "Automatisch Stapel mit den ausgewählten Gruppierungsregeln bilden",
     "Settings.FileStacks.Status.Manual": "Nur manuell",
     "Widget.Stack.UseDefaultOpenMode": "Standard-Öffnungsart verwenden",
     "Widget.Stack.RenameUnavailable": "Dieser Stapel wurde geändert. Bitte versuchen Sie es erneut.",
@@ -652,15 +652,11 @@
     "Settings.FileStacks.PageTitle": "Dateistapel",
     "Settings.FileStacks.Description": "Organisiert Datei-Widget-Elemente automatisch, ohne Dateien zu verschieben; manuelle Stapel bleiben erhalten",
     "Settings.FileStacks.Enable.Title": "Automatische Stapel aktivieren",
-    "Settings.FileStacks.Enable.Description": "Automatisch Stapel mit den ausgewählten Gruppierungsregeln bilden",
     "Settings.FileStacks.Status.Off": "Aus",
-
     "Settings.FileStacks.Status.On": "Gruppiert verstreute Dateien in Stapeln",
     "Settings.FileStacks.Mode.Title": "Dateistapelmodus",
     "Settings.FileStacks.Mode.Description": "Aktiviert manuelle und automatische Dateistapel; ausschalten, um alle Stapel auszublenden",
     "Settings.FileStacks.Status.Custom": "Benutzerdefinierte Formate · {0} Regeln",
-    "Settings.FileStacks.GroupBy.Title": "Gruppierung",
-    "Settings.FileStacks.GroupBy.Description": "Wählen, wie Dateien automatisch Stapeln zugewiesen werden",
     "Settings.FileStacks.GroupBy.Kind": "Dateityp",
     "Settings.FileStacks.GroupBy.DateAdded": "Zu DeskBox hinzugefügt am",
     "Settings.FileStacks.GroupBy.DateCreated": "Zu DeskBox hinzugefügt am",
@@ -1212,6 +1208,7 @@
     "Feedback.Dialog.DiagnosticsFailed": "Das Feedback wurde übermittelt, aber das Diagnosepaket konnte nicht hochgeladen werden.",
     "Feedback.Dialog.RateLimited": "Sie haben innerhalb der letzten {0} Minuten bereits Feedback gesendet. Bitte später erneut versuchen.",
     "Feedback.Dialog.NetworkError": "Der Feedback-Dienst ist nicht erreichbar. Prüfen Sie die Verbindung und versuchen Sie es erneut.",
+    "Feedback.Dialog.SubmitAnother": "Weitere Rückmeldung senden",
     "Feedback.My.Title": "Mein Feedback",
     "Feedback.My.Retry": "Erneut versuchen",
     "Feedback.My.LoadFailed": "Ihr Feedback konnte nicht geladen werden. Bitte später erneut versuchen.",
@@ -1263,6 +1260,12 @@
     "Settings.Dialog.MigrateStaleTitle": "Kopie der vorherigen Migration gefunden",
     "Settings.Dialog.MigrateStaleBody": "Am gewählten Speicherort existiert bereits die vollständige Kopie einer zuvor fehlgeschlagenen Migration. Sie muss vor dem erneuten Versuch in den Papierkorb verschoben werden.\n\nGefundene Ordner: {0}",
     "Settings.Dialog.MigrateStaleCleanButton": "In den Papierkorb verschieben und erneut versuchen",
+    "Settings.Dialog.MigrateRollbackTitle": "Migration fehlgeschlagen; einige Ordner konnten nicht zurückbewegt werden",
+    "Settings.Dialog.MigrateRollbackBody": "Migration fehlgeschlagen: {0}\n\nDie folgenden Ordner konnten nicht automatisch an den ursprünglichen Speicherort zurückbewegt werden. Die Dateien könnten sich jetzt an beiden Speicherorten befinden und sind in den Widgets vorübergehend nicht sichtbar:",
+    "Settings.Dialog.MigrateRollbackHint": "Beim erneuten Versuch werden diese Ordner an den ursprünglichen Speicherort zurückbewegt. Vorhandene Dateien werden nie überschrieben oder gelöscht.",
+    "Settings.Dialog.MigrateRollbackRetryButton": "Zurückbewegen erneut versuchen",
+    "Settings.Dialog.MigrateRollbackRetryComplete": "Alle verbliebenen Ordner wurden an ihren ursprünglichen Speicherort zurückbewegt.",
+    "Settings.Dialog.MigrateRollbackRetryPartial": "{0} Ordner konnten noch nicht zurückbewegt werden (möglicherweise noch in Verwendung oder bereits verschoben):",
     "Settings.Dialog.PinQuickAccessTitle": "An Schnellzugriff angeheftet",
     "Settings.Dialog.PinQuickAccessBody": "DeskBox hat den Ordner zum Datei-Explorer-Schnellzugriff angeheftet. Sie können ihn über die linke Seite von Datei-Pickern beim Upload erreichen.",
     "Settings.Dialog.PinQuickAccessFailedTitle": "Anheften an Schnellzugriff fehlgeschlagen",
@@ -1289,17 +1292,17 @@
     "Onboarding.Step1.Body": "DeskBox ersetzt nicht Ihren Windows-Desktop. Es bündelt Dateien, Suche und häufig genutzte Tools in leichten Widgets — sichtbar bei Bedarf, leise im Hintergrund.",
     "Onboarding.Step1.Hint1": "Ersetzt nicht den Windows-Desktop — jede Aktion ist umkehrbar",
     "Onboarding.Step1.Hint2": "Widgets können frei verschoben und in der Größe geändert werden",
-  "Onboarding.Step2.Eyebrow": "WIDGETS ERSTELLEN",
-  "Onboarding.Step2.Title": "Weitere Widgets über das Tray erstellen",
-  "Onboarding.Step2.Body": "Klicken Sie mit der rechten Maustaste auf das DeskBox-Symbol im Infobereich der Taskleiste, um jederzeit ein Widget zu erstellen.",
-  "Onboarding.Step2.TrayActionTitle": "Rechtsklick auf das DeskBox-Tray-Symbol",
-  "Onboarding.Step2.TrayActionBody": "Falls es ausgeblendet ist, öffnen Sie zuerst „Ausgeblendete Symbole einblenden“ in der Taskleiste",
-  "Onboarding.Step2.RightClick": "Rechtsklick",
-  "Onboarding.Step2.NewWidgetTitle": "Neues Widget",
-  "Onboarding.Step2.NewWidgetBody": "Vom Desktop hineingezogene Dateien sammeln",
-  "Onboarding.Step2.ConnectFolderTitle": "Ordnerzuordnung",
-  "Onboarding.Step2.ConnectFolderBody": "Inhalte eines vorhandenen Ordners anzeigen",
-  "Onboarding.Step2.FeatureHint": "To-do, Schnellerfassung und weitere Funktions-Widgets können Sie bei Bedarf in den Einstellungen aktivieren",
+    "Onboarding.Step2.Eyebrow": "WIDGETS ERSTELLEN",
+    "Onboarding.Step2.Title": "Weitere Widgets über das Tray erstellen",
+    "Onboarding.Step2.Body": "Klicken Sie mit der rechten Maustaste auf das DeskBox-Symbol im Infobereich der Taskleiste, um jederzeit ein Widget zu erstellen.",
+    "Onboarding.Step2.TrayActionTitle": "Rechtsklick auf das DeskBox-Tray-Symbol",
+    "Onboarding.Step2.TrayActionBody": "Falls es ausgeblendet ist, öffnen Sie zuerst „Ausgeblendete Symbole einblenden“ in der Taskleiste",
+    "Onboarding.Step2.RightClick": "Rechtsklick",
+    "Onboarding.Step2.NewWidgetTitle": "Neues Widget",
+    "Onboarding.Step2.NewWidgetBody": "Vom Desktop hineingezogene Dateien sammeln",
+    "Onboarding.Step2.ConnectFolderTitle": "Ordnerzuordnung",
+    "Onboarding.Step2.ConnectFolderBody": "Inhalte eines vorhandenen Ordners anzeigen",
+    "Onboarding.Step2.FeatureHint": "To-do, Schnellerfassung und weitere Funktions-Widgets können Sie bei Bedarf in den Einstellungen aktivieren",
     "Onboarding.Step2.FeatureListTitle": "Optionale Funktions-Widgets",
     "Onboarding.Step2.FeatureList": "To-do · Schnellerfassung · Musik · Wetter · Globale Suche",
     "Onboarding.Step2.FeatureListDescription": "Fügen Sie sie erst hinzu, wenn Sie mit den Datei-Widgets vertraut sind, und wählen Sie nur die Tools aus, die Sie brauchen.",
@@ -1343,9 +1346,9 @@
     "Onboarding.Step4.AutoLocationSubOption": "Meinen Standort automatisch erkennen",
     "Onboarding.Step5.Eyebrow": "Bereit",
     "Onboarding.Step5.Title": "Alles bereit",
-  "Onboarding.Step5.Body": "Auf der rechten Seite des Bildschirms steht ein leeres Datei-Widget bereit. Ziehen Sie Dateien hinein, um es auszuprobieren.",
+    "Onboarding.Step5.Body": "Auf der rechten Seite des Bildschirms steht ein leeres Datei-Widget bereit. Ziehen Sie Dateien hinein, um es auszuprobieren.",
     "Onboarding.Step5.Hint1": "Desktop-Dateien in ein Widget ziehen, um sofort aufzuräumen",
-  "Onboarding.Step5.Hint2": "Für ein weiteres Widget: Rechtsklick auf das DeskBox-Tray-Symbol und „Neues Widget“ wählen",
+    "Onboarding.Step5.Hint2": "Für ein weiteres Widget: Rechtsklick auf das DeskBox-Tray-Symbol und „Neues Widget“ wählen",
     "Onboarding.Step5.HotkeyTitle": "Globale Tastenkombination",
     "Onboarding.Step5.HotkeyDescription": "Tastenkombination drücken, um schnell alle Widgets ein- oder auszublenden",
     "Onboarding.Step5.HotkeyChange": "Ändern",
@@ -1605,7 +1608,7 @@
     "Widget.DeleteWidgetNote": "Nur dieses Widget schließen. Ordner und Dateien bleiben unverändert.",
     "Widget.DeleteWidgetConfirm": "Widget schließen",
     "Widget.DeleteManagedInfo": "Was soll mit den Dateien im Widget geschehen?",
-    "Widget.KeepManagedFolder": "Dateien behalten",
+    "Widget.KeepManagedFolder": "Dateien behalten (Ordner bleibt an seinem Ort)",
     "Widget.MoveBackThenDeleteFolder": "Dateien auf den Desktop verschieben",
     "Widget.DeleteFolderToRecycleBin": "Auch alle Dateien löschen",
     "Widget.DeleteManagedFolderConfirmTitle": "„{0}“ in den Papierkorb verschieben?",
@@ -1613,6 +1616,10 @@
     "Widget.DeleteManagedFolderConfirmMessageUnknownCount": "Das Widget wird geschlossen und der gesamte Ordner mit seinem Inhalt in den Papierkorb verschoben.\n\n{0}\n\nEr kann von dort wiederhergestellt werden.",
     "Widget.Error.OperationIncomplete": "Die Operation wurde nicht abgeschlossen.",
     "Widget.Error.FileWidgetPathConflict": "Dieser Ordner kann nicht verwendet werden, weil sein Pfad mit dem Speicherpfad des Datei-Widgets \"{0}\" identisch ist, ihn enthält oder darin enthalten ist. Wählen Sie einen Pfad ohne Überschneidung.",
+    "Widget.Error.FileWidgetPathConflictSameFolder": "Dieser Ordner kann nicht verwendet werden: Er ist derselbe Ordner wie der Speicherpfad von {0} („{1}“). Verwalteter Speicher benötigt ein exklusives Verzeichnis; bitte einen anderen Ordner wählen.",
+    "Widget.Error.FileWidgetPathConflictInsideOther": "Dieser Ordner kann nicht verwendet werden: Er liegt innerhalb des Speicherpfads „{1}“ von {0}. Verwalteter Speicher benötigt einen exklusiven Verzeichnisbaum, damit Migration und Bereinigung sich nie gegenseitig treffen. Gewöhnliche Ordner-Widgets dürfen Eltern-/Kind-Pfade zwischen sich abbilden.",
+    "Widget.Error.FileWidgetPathConflictContainsOther": "Dieser Ordner kann nicht verwendet werden: Er enthält den Speicherpfad „{1}“ von {0}. Verwalteter Speicher benötigt einen exklusiven Verzeichnisbaum, damit Migration und Bereinigung sich nie gegenseitig treffen. Gewöhnliche Ordner-Widgets dürfen Eltern-/Kind-Pfade zwischen sich abbilden.",
+    "Widget.Error.FileWidgetPathConflictUnresolvable": "Dieser Ordner kann nicht verwendet werden: Er überschneidet sich mit dem Speicherpfad „{1}“ von {0}, oder die Überschneidung lässt sich nicht sicher prüfen. Bitte einen nicht überlappenden Ordner wählen.",
     "Widget.MapFolder.ConflictWidgetHint": "Dieser Ordner wird bereits vom Widget \"{0}\" verwendet; das Widget wurde für Sie geöffnet.",
     "Widget.MapFolder.ConflictRootHint": "Dieser Ordner überschneidet sich mit dem Ablageordner. Die Speichereinstellungen wurden geöffnet, damit Sie den Ablageort ändern oder einen anderen Ordner wählen können.",
     "Widget.Error.UnsafeFolderTransfer": "Ein Ordner kann nicht in sich selbst oder in einen seiner Unterordner kopiert oder verschoben werden.",
@@ -1630,6 +1637,7 @@
     "Widget.Error.ManagedFolderStillActive": "Dieser Ordner gehört noch zu einem bestehenden verwalteten Widget und kann nicht als verwaist bereinigt werden.",
     "Widget.Error.ManagedFolderActionOnlyDefault": "Nur verwaltete Widgets unter dem Standard-Speicherpfad können die Ordner-Behandlung synchronisieren.",
     "Widget.Error.ManagedFolderNameExists": "Ein verwaltetes Widget mit diesem Namen existiert bereits. Anderen Namen wählen.",
+    "Widget.Error.ManagedFolderNameUnavailable": "Dieser Name kann nicht verwendet werden: Im Verwaltungsordner existiert bereits ein gleichnamiges Element, das nicht automatisch zusammengeführt werden kann. Bitte anderen Namen wählen.",
     "QuickCapture.Name": "Quick Capture",
     "QuickCapture.InputPlaceholder": "Etwas erfassen...",
     "QuickCapture.AddInput": "Eintrag hinzufügen",
@@ -1921,22 +1929,16 @@
     "Settings.Search.Everything.Detect": "Automatisch erkennen",
     "Settings.Search.Everything.Launch": "Everything starten",
     "Settings.Search.Everything.Browse": "Everything.exe auswählen",
-    "Settings.Search.Everything.Download": "Everything herunterladen",
-
+    "Settings.Search.Everything.Download": "Offizielle Everything-Website zum Herunterladen öffnen",
     "Settings.Search.Everything.About.Button": "Über Everything",
-
     "Settings.Search.Everything.About.Title": "Über die Everything-Integration",
-
     "Settings.Search.Everything.About.P1": "Die Datei- und Ordnersuche in DeskBox wird von Everything angetrieben, einer kostenlosen Desktop-Suchmaschine eines Drittanbieters. DeskBox fragt den vorhandenen Index von Everything ab und vereint die Ergebnisse mit Ihrem DeskBox-Inhalt – Notizen, Aufgaben und Einstellungen – im selben Suchfenster.",
-
     "Settings.Search.Everything.About.P3": "Everything wird von voidtools entwickelt und nicht mit DeskBox gebündelt. Für die Dateisuche muss Everything installiert sein und laufen; fehlt es, zeigt DeskBox einen Hinweis an, statt zu fehlschlagen.",
     "Settings.Search.Everything.SetupHelp": "Einrichtungshilfe",
     "Settings.Search.Everything.Status.Unknown": "Everything wurde noch nicht geprüft.",
     "Settings.Search.Everything.Status.Checking": "Lokale Everything-Installation und Verbindung werden geprüft…",
     "Settings.Search.Everything.Status.NotConfirmed": "Everything wurde gefunden. Bestätigen Sie unten die Freigabe des lokalen Indexes.",
     "Settings.Search.Everything.Status.NotInstalled": "Everything wurde nicht gefunden. Laden Sie es von www.voidtools.com herunter und installieren Sie es, und führen Sie dann die automatische Erkennung erneut aus.",
-
-    "Settings.Search.Everything.Download": "Offizielle Everything-Website zum Herunterladen öffnen",
     "Settings.Search.Everything.Status.NotRunning": "Everything ist installiert, wird aber nicht ausgeführt. Starten Sie Everything vor der Dateisuche.",
     "Settings.Search.Everything.Status.PermissionMismatch": "Everything und DeskBox werden mit unterschiedlichen Berechtigungsstufen ausgeführt. Lassen Sie DeskBox als Standardbenutzer laufen und starten Sie den Everything-Client normal; der Dienst darf erhöht laufen.",
     "Settings.Search.Everything.Status.IpcUnavailable": "Everything läuft, aber lokales IPC ist nicht verfügbar. Prüfen Sie IPC und die standardmäßige Everything-Instanz.",
@@ -2460,178 +2462,178 @@
     "Onboarding.Task.SkipPractice": "Übung überspringen",
     "Onboarding.Task.Continue": "Weiter",
     "Onboarding.Task.Step3.StatusCompleted": "Geschafft: Die Datei wurde in das Ablage-Widget verschoben.",
-    "Onboarding.Task.Step4.StatusCompleted": "Geschafft: Sie haben die Widgets ausgeblendet und wieder angezeigt."
-    ,"Settings.WidgetGroups.Overview.Description": "Mehrere Widgets an einem Ort bündeln und über die Titelleiste wechseln"
-    ,"Settings.WidgetGroups.Overview.Ready": "{0} · Bereit zum Gruppieren"
-    ,"Settings.WidgetGroups.Overview.Summary": "{0} Gruppen · {1}"
-    ,"Settings.WidgetGroups.PageDescription": "Mehrere Widgets bleiben an einem Ort und lassen sich über die Titelleiste wechseln. Die Inhalte bleiben getrennt."
-    ,"Settings.WidgetGroups.FollowDefaultWithValue": "Standard übernehmen ({0})"
-    ,"Settings.WidgetGroups.Existing.SummaryDefault": "{0} · {1} · Standard"
-    ,"Settings.WidgetGroups.Existing.SummaryCustom": "{0} · {1} · Angepasst"
-    ,"Settings.WidgetGroups.Existing.Name.Title": "Gruppenname"
-    ,"Settings.WidgetGroups.GroupChrome.Title": "Höhe der Titelleiste"
-    ,"Settings.WidgetGroups.GroupChrome.Description": "Gruppen behalten eine sichtbare Titelleiste zum Wechseln der Widgets"
-    ,"Settings.WidgetGroups.GroupDisplay.Title": "Anzeigemodus"
-    ,"Settings.WidgetGroups.GroupDisplay.Description": "Diese Gruppe dauerhaft, per Klick oder beim Zeigen erweitern"
-    ,"Settings.WidgetGroups.Existing.Members.Title": "Widgets in dieser Gruppe"
-    ,"Settings.WidgetGroups.Existing.Member.MoveUp": "Nach vorn"
-    ,"Settings.WidgetGroups.Existing.Member.MoveDown": "Nach hinten"
-    ,"Settings.WidgetGroups.Existing.Member.Remove": "Aus Gruppe entfernen"
-    ,"Settings.WidgetGroups.DissolveDialog.Title": "Diese Widget-Gruppe auflösen?"
-    ,"Settings.WidgetGroups.DissolveDialog.Confirm": "Gruppe auflösen"
-    ,"Settings.WidgetGroups.DissolveDialog.Description": "Es werden keine Inhalte gelöscht. Die Widgets werden wieder unabhängig."
-    ,"Glance.Title": "Glance"
-    ,"Glance.Instances.Title": "Glance-Widgets"
-    ,"Glance.Instances.Description": "{0} Glance-Widget(s) einzeln verwalten"
-    ,"Glance.Instances.MasterOff": "Der Hauptschalter ist aus; alle Glance-Widgets sind deaktiviert."
-    ,"Glance.Instances.Empty": "Keine Glance-Widgets"
-    ,"Glance.Instances.Enable": "Dieses Widget aktivieren"
-    ,"Glance.Instances.Add": "Glance-Widget hinzufügen"
-    ,"Glance.Instances.More": "Weitere Aktionen"
-    ,"Glance.Instances.Locate": "Auf dem Desktop anzeigen"
-    ,"Glance.Instances.Duplicate": "Widget duplizieren"
-    ,"Glance.Instances.RenamePlaceholder": "Widgetnamen eingeben"
-    ,"Glance.Instances.RenameTitle": "Glance-Widget umbenennen"
-    ,"Glance.Instances.DeleteTitle": "„{0}“ löschen?"
-    ,"Glance.Instances.DeleteDescription": "Nur dieses Glance-Widget und seine eigenen Einstellungen werden gelöscht. Andere Glance-Widgets bleiben unverändert."
-    ,"WidgetContent.Glance.StatusLabel": "Glance"
-    ,"WidgetContent.Glance.StatusDescription": "Fotos, Uhrzeit und Datum auf einen Blick"
-    ,"Glance.Settings.Title": "Glance"
-    ,"Glance.Settings.Description": "Eine ruhige Desktopansicht mit Fotos, Uhrzeit und Datum"
-    ,"Glance.Display.Title": "Anzeige"
-    ,"Glance.Display.Description": "Wählen Sie aus, was im Widget angezeigt wird"
-    ,"Glance.Display.PhotoOnly": "Nur Foto"
-    ,"Glance.Display.Separator": ", "
-    ,"Glance.Display.Time": "Uhrzeit"
-    ,"Glance.Display.Date": "Datum"
-    ,"Glance.Display.Year": "Jahr"
-    ,"Glance.Display.Weekday": "Wochentag"
-    ,"Glance.Display.Calendar": "Kalender"
-    ,"Glance.Layout.Title": "Layout"
-    ,"Glance.LayoutGroup.Title": "Layout und Typografie"
-    ,"Glance.LayoutGroup.Description": "Layout, Kalender und Zeittypografie"
-    ,"Glance.Layout.Immersive": "Immersiv"
-    ,"Glance.Layout.Centered": "Zentriert"
-    ,"Glance.Layout.Editorial": "Magazinstil"
-    ,"Glance.Layout.Calendar": "Kalender"
-    ,"Glance.CalendarMaterial.Title": "Kalendermaterial"
-    ,"Glance.CalendarMaterial.Description": "Wählen Sie, wie sich die Kalenderkarte in den Desktop einfügt"
-    ,"Glance.CalendarMaterial.FollowSystem": "Systemeinstellung übernehmen"
-    ,"Glance.CalendarMaterial.FollowImage": "Bildfarben übernehmen"
-    ,"Glance.CalendarMaterial.Transparency": "Transparenz"
-    ,"Glance.CalendarMaterial.TransparencyDescription": "Wirkt nur auf den Kalenderhintergrund; 100 % ist vollständig transparent"
-    ,"Glance.TraditionalCalendar.Title": "Traditioneller Kalender"
-    ,"Glance.TraditionalCalendar.Description": "Automatisch der DeskBox-Sprache folgen, einen Kalender wählen oder ausschalten"
-    ,"Glance.Festivals.Title": "Traditionelle chinesische Feste"
-    ,"Glance.Festivals.Description": "Zeigt Frühlingsfest, Mittherbstfest und weitere Feste in der Mondkalenderzeile"
-    ,"Glance.TraditionalCalendar.Auto": "Automatisch ({0})"
-    ,"Glance.TraditionalCalendar.None": "Aus"
-    ,"Glance.TraditionalCalendar.ChineseLunar": "Chinesischer Mondkalender"
-    ,"Glance.TraditionalCalendar.UmAlQura": "Umm al-Qura"
-    ,"Glance.TraditionalCalendar.Hijri": "Hijri"
-    ,"Glance.TraditionalCalendar.IndianSaka": "Indischer Nationalkalender (Saka)"
-    ,"Glance.TraditionalCalendar.JapaneseEra": "Japanische Ära (Wareki)"
-    ,"Glance.TraditionalCalendar.Bangla": "Bangla"
-    ,"Glance.TraditionalCalendar.Julian": "Julianisch"
-    ,"Glance.TraditionalCalendar.Hebrew": "Hebräisch"
-    ,"Glance.TraditionalCalendar.Persian": "Persisch"
-    ,"Glance.TraditionalCalendar.ThaiBuddhist": "Thailändisch-buddhistisch"
-    ,"Glance.Background.Title": "Hintergrundbild"
-    ,"Glance.BackgroundGroup.Description": "Bildquelle, Wechsel und Cache"
-    ,"Glance.Background.Transparency.Title": "Bildtransparenz"
-    ,"Glance.Background.Transparency.Description": "Passt nur das Hintergrundbild an; Text und Steuerelemente bleiben unverändert"
-    ,"Glance.Background.Online": "Wikimedia Commons"
-    ,"Glance.Background.Files": "Lokale Bilder"
-    ,"Glance.Background.Folder": "Bilderordner"
-    ,"Glance.Background.Bing": "Tägliches Bing-Hintergrundbild"
-    ,"Glance.Background.ChooseFiles": "Bilder auswählen"
-    ,"Glance.Background.ChooseFolder": "Ordner auswählen"
-    ,"Glance.Background.ClearSelection": "Löschen"
-    ,"Glance.Background.LocalSummary": "{0} lokale Bilder hinzugefügt"
-    ,"Glance.Background.Category.Title": "Onlinebild-Kategorie"
-    ,"Glance.Background.Category.Description": "Wählen Sie ein Thema für Onlinebilder. Nach dem Wechsel werden neue Bilder automatisch geladen."
-    ,"Glance.Background.Category.Featured": "Ausgewählt"
-    ,"Glance.Background.Category.Landscapes": "Landschaften"
-    ,"Glance.Background.Category.Cities": "Städte"
-    ,"Glance.Background.Category.Architecture": "Architektur"
-    ,"Glance.Background.Category.Animals": "Tiere"
-    ,"Glance.Background.Category.Plants": "Pflanzen"
-    ,"Glance.Background.Category.Astronomy": "Weltraum"
-    ,"Glance.Background.Category.People": "Menschen"
-    ,"Glance.Rotation.Title": "Bildwechsel"
-    ,"Glance.Rotation.Manual": "Manuell"
-    ,"Glance.Rotation.10Seconds": "Alle 10 Sekunden"
-    ,"Glance.Rotation.30Seconds": "Alle 30 Sekunden"
-    ,"Glance.Rotation.60Seconds": "Alle 60 Sekunden"
-    ,"Glance.Rotation.2Minutes": "Alle 2 Minuten"
-    ,"Glance.Rotation.5Minutes": "Alle 5 Minuten"
-    ,"Glance.Rotation.10Minutes": "Alle 10 Minuten"
-    ,"Glance.Rotation.30Minutes": "Alle 30 Minuten"
-    ,"Glance.Rotation.1Hour": "Stündlich"
-    ,"Glance.Rotation.6Hours": "Alle 6 Stunden"
-    ,"Glance.Rotation.Daily": "Täglich"
-    ,"Glance.Rotation.Random": "Zufällige Reihenfolge"
-    ,"Glance.Transition.Title": "Übergang"
-    ,"Glance.AppearanceGroup.Title": "Darstellung und Bewegung"
-    ,"Glance.AppearanceGroup.Description": "Bildübergänge und Lesbarkeit der Inhalte"
-    ,"Glance.Transition.None": "Keine"
-    ,"Glance.Transition.CrossFade": "Überblenden"
-    ,"Glance.Transition.SlideFade": "Schieben und blenden"
-    ,"Glance.Transition.ZoomFade": "Zoomen und blenden"
-    ,"Glance.Speed.Fast": "Schnell"
-    ,"Glance.Speed.Standard": "Standard"
-    ,"Glance.Speed.Relaxed": "Ruhig"
-    ,"Glance.Typography.Title": "Schriftgröße"
-    ,"Glance.Typography.TimeFormat": "Zeitformat"
-    ,"Glance.Typography.FollowSystem": "System folgen"
-    ,"Glance.Typography.Hour24": "24-Stunden-Format"
-    ,"Glance.Typography.Hour12": "12-Stunden-Format"
-    ,"Glance.Typography.Font": "Schriftart"
-    ,"Glance.Speed.Title": "Übergangsgeschwindigkeit"
-    ,"Glance.Typography.SystemDefault": "Systemstandard"
-    ,"Glance.Readability.Title": "Lesbarkeit"
-    ,"Glance.Readability.None": "Keine"
-    ,"Glance.Readability.Soft": "Dezent"
-    ,"Glance.Readability.Strong": "Stark"
-    ,"Glance.PhotoControls.Title": "Fotosteuerung anzeigen"
-    ,"Glance.PhotoControls.Description": "Beim Zeigen Pause, nächstes Foto und Bildinformationen anzeigen"
-    ,"Glance.Actions.Next": "Nächstes Foto"
-    ,"Glance.Actions.Pause": "Bildwechsel anhalten"
-    ,"Glance.Actions.Resume": "Bildwechsel fortsetzen"
-    ,"Glance.Actions.PhotoInfo": "Bildinformationen"
-    ,"Glance.Actions.OpenSource": "Bildquelle öffnen"
-    ,"Glance.Actions.ShowInExplorer": "Im Datei-Explorer anzeigen"
-    ,"Glance.Status.Loading": "Bild wird geladen…"
-    ,"Glance.Status.OnlineFallback": "Ersatzbild wird verwendet"
-    ,"Glance.Status.NoLocalImages": "Keine lokalen Bilder hinzugefügt"
-    ,"Glance.Cache.Title": "Bildcache"
-    ,"Glance.Cache.Clear": "Cache leeren"
-    ,"Glance.Cache.Cleared": "Cache geleert"
-    ,"Settings.Windows10VisualCompatibility.Title": "Visuelle Kompatibilität mit Windows 10"
-    ,"Settings.Windows10VisualCompatibility.Message": "Mica und abgerundete Systemfenster erfordern Windows 11. Windows 10 verwendet Acrylic oder Vollfarbe mit eckigen Fenstern.",
-  "Settings.Dialog.QuickAccessOperationFailedBody": "DeskBox konnte den Schnellzugriff im Datei-Explorer nicht aktualisieren. Versuchen Sie es später erneut.",
-  "DesktopOrganization.Result.FailedBody": "Die Desktoporganisation konnte nicht abgeschlossen werden. Versuchen Sie es später erneut.",
-  "DesktopOrganization.Undo.FailedBody": "Die Desktoporganisation konnte nicht rückgängig gemacht werden. Versuchen Sie es später erneut.",
-  "Common.OperationFailedRetry": "Der Vorgang konnte nicht abgeschlossen werden. Bitte versuchen Sie es erneut.",
-  "Settings.WidgetForeground.Title": "Widget-Vordergrund",
-  "Settings.WidgetForeground.Description": "Wählt die Farbe für Text und einfarbige Steuerelemente, ohne Bilder oder farbige Symbole zu ändern.",
-  "Settings.WidgetForeground.FollowTheme": "App-Design übernehmen",
-  "Settings.WidgetForeground.Light": "Heller Vordergrund",
-  "Settings.WidgetForeground.Dark": "Dunkler Vordergrund",
-  "Settings.WidgetForeground.Custom": "Benutzerdefiniert",
-  "Settings.WidgetForeground.CustomColor.Title": "Benutzerdefinierte Textfarbe",
-  "Settings.WidgetForeground.CustomColor.Description": "Für Widget-Text und einfarbige Steuerelemente.",
-  "Widget.Foreground.Menu": "Text und Lesbarkeit",
-  "Widget.Foreground.UseGlobal": "Globale Einstellung verwenden",
-  "Widget.Foreground.CustomColor": "Benutzerdefinierte Farbe…",
-  "Settings.DropAction.System": "Windows-Standard verwenden",
-  "Widget.RunAsAdministrator": "Als Administrator ausführen",
-  "Widget.RunAsAdministrator.AlreadyRunning": "Diese App wird bereits ohne Administratorrechte ausgeführt. Beenden Sie sie vollständig und versuchen Sie es erneut.",
-  "Widget.RunAsAdministrator.NotElevated": "Windows konnte keinen Administratorprozess erstellen. Prüfen Sie die UAC-Einstellungen und versuchen Sie es erneut.",
-  "Widget.CreateShortcut": "Verknüpfung erstellen",
-  "Widget.MoreSystemOperations": "Weitere Systemaktionen",
-  "Settings.ManagedPath.DesktopShortcut.Title": "Desktop-Verknüpfung zum Speicher",
-  "Settings.ManagedPath.DesktopShortcut.Description": "Erstellt eine Verknüpfung zum aktuellen Speicherordner. Wenn Sie sie löschen, erstellt DeskBox sie nicht erneut.",
+    "Onboarding.Task.Step4.StatusCompleted": "Geschafft: Sie haben die Widgets ausgeblendet und wieder angezeigt.",
+    "Settings.WidgetGroups.Overview.Description": "Mehrere Widgets an einem Ort bündeln und über die Titelleiste wechseln",
+    "Settings.WidgetGroups.Overview.Ready": "{0} · Bereit zum Gruppieren",
+    "Settings.WidgetGroups.Overview.Summary": "{0} Gruppen · {1}",
+    "Settings.WidgetGroups.PageDescription": "Mehrere Widgets bleiben an einem Ort und lassen sich über die Titelleiste wechseln. Die Inhalte bleiben getrennt.",
+    "Settings.WidgetGroups.FollowDefaultWithValue": "Standard übernehmen ({0})",
+    "Settings.WidgetGroups.Existing.SummaryDefault": "{0} · {1} · Standard",
+    "Settings.WidgetGroups.Existing.SummaryCustom": "{0} · {1} · Angepasst",
+    "Settings.WidgetGroups.Existing.Name.Title": "Gruppenname",
+    "Settings.WidgetGroups.GroupChrome.Title": "Höhe der Titelleiste",
+    "Settings.WidgetGroups.GroupChrome.Description": "Gruppen behalten eine sichtbare Titelleiste zum Wechseln der Widgets",
+    "Settings.WidgetGroups.GroupDisplay.Title": "Anzeigemodus",
+    "Settings.WidgetGroups.GroupDisplay.Description": "Diese Gruppe dauerhaft, per Klick oder beim Zeigen erweitern",
+    "Settings.WidgetGroups.Existing.Members.Title": "Widgets in dieser Gruppe",
+    "Settings.WidgetGroups.Existing.Member.MoveUp": "Nach vorn",
+    "Settings.WidgetGroups.Existing.Member.MoveDown": "Nach hinten",
+    "Settings.WidgetGroups.Existing.Member.Remove": "Aus Gruppe entfernen",
+    "Settings.WidgetGroups.DissolveDialog.Title": "Diese Widget-Gruppe auflösen?",
+    "Settings.WidgetGroups.DissolveDialog.Confirm": "Gruppe auflösen",
+    "Settings.WidgetGroups.DissolveDialog.Description": "Es werden keine Inhalte gelöscht. Die Widgets werden wieder unabhängig.",
+    "Glance.Title": "Glance",
+    "Glance.Instances.Title": "Glance-Widgets",
+    "Glance.Instances.Description": "{0} Glance-Widget(s) einzeln verwalten",
+    "Glance.Instances.MasterOff": "Der Hauptschalter ist aus; alle Glance-Widgets sind deaktiviert.",
+    "Glance.Instances.Empty": "Keine Glance-Widgets",
+    "Glance.Instances.Enable": "Dieses Widget aktivieren",
+    "Glance.Instances.Add": "Glance-Widget hinzufügen",
+    "Glance.Instances.More": "Weitere Aktionen",
+    "Glance.Instances.Locate": "Auf dem Desktop anzeigen",
+    "Glance.Instances.Duplicate": "Widget duplizieren",
+    "Glance.Instances.RenamePlaceholder": "Widgetnamen eingeben",
+    "Glance.Instances.RenameTitle": "Glance-Widget umbenennen",
+    "Glance.Instances.DeleteTitle": "„{0}“ löschen?",
+    "Glance.Instances.DeleteDescription": "Nur dieses Glance-Widget und seine eigenen Einstellungen werden gelöscht. Andere Glance-Widgets bleiben unverändert.",
+    "WidgetContent.Glance.StatusLabel": "Glance",
+    "WidgetContent.Glance.StatusDescription": "Fotos, Uhrzeit und Datum auf einen Blick",
+    "Glance.Settings.Title": "Glance",
+    "Glance.Settings.Description": "Eine ruhige Desktopansicht mit Fotos, Uhrzeit und Datum",
+    "Glance.Display.Title": "Anzeige",
+    "Glance.Display.Description": "Wählen Sie aus, was im Widget angezeigt wird",
+    "Glance.Display.PhotoOnly": "Nur Foto",
+    "Glance.Display.Separator": ", ",
+    "Glance.Display.Time": "Uhrzeit",
+    "Glance.Display.Date": "Datum",
+    "Glance.Display.Year": "Jahr",
+    "Glance.Display.Weekday": "Wochentag",
+    "Glance.Display.Calendar": "Kalender",
+    "Glance.Layout.Title": "Layout",
+    "Glance.LayoutGroup.Title": "Layout und Typografie",
+    "Glance.LayoutGroup.Description": "Layout, Kalender und Zeittypografie",
+    "Glance.Layout.Immersive": "Immersiv",
+    "Glance.Layout.Centered": "Zentriert",
+    "Glance.Layout.Editorial": "Magazinstil",
+    "Glance.Layout.Calendar": "Kalender",
+    "Glance.CalendarMaterial.Title": "Kalendermaterial",
+    "Glance.CalendarMaterial.Description": "Wählen Sie, wie sich die Kalenderkarte in den Desktop einfügt",
+    "Glance.CalendarMaterial.FollowSystem": "Systemeinstellung übernehmen",
+    "Glance.CalendarMaterial.FollowImage": "Bildfarben übernehmen",
+    "Glance.CalendarMaterial.Transparency": "Transparenz",
+    "Glance.CalendarMaterial.TransparencyDescription": "Wirkt nur auf den Kalenderhintergrund; 100 % ist vollständig transparent",
+    "Glance.TraditionalCalendar.Title": "Traditioneller Kalender",
+    "Glance.TraditionalCalendar.Description": "Automatisch der DeskBox-Sprache folgen, einen Kalender wählen oder ausschalten",
+    "Glance.Festivals.Title": "Traditionelle chinesische Feste",
+    "Glance.Festivals.Description": "Zeigt Frühlingsfest, Mittherbstfest und weitere Feste in der Mondkalenderzeile",
+    "Glance.TraditionalCalendar.Auto": "Automatisch ({0})",
+    "Glance.TraditionalCalendar.None": "Aus",
+    "Glance.TraditionalCalendar.ChineseLunar": "Chinesischer Mondkalender",
+    "Glance.TraditionalCalendar.UmAlQura": "Umm al-Qura",
+    "Glance.TraditionalCalendar.Hijri": "Hijri",
+    "Glance.TraditionalCalendar.IndianSaka": "Indischer Nationalkalender (Saka)",
+    "Glance.TraditionalCalendar.JapaneseEra": "Japanische Ära (Wareki)",
+    "Glance.TraditionalCalendar.Bangla": "Bangla",
+    "Glance.TraditionalCalendar.Julian": "Julianisch",
+    "Glance.TraditionalCalendar.Hebrew": "Hebräisch",
+    "Glance.TraditionalCalendar.Persian": "Persisch",
+    "Glance.TraditionalCalendar.ThaiBuddhist": "Thailändisch-buddhistisch",
+    "Glance.Background.Title": "Hintergrundbild",
+    "Glance.BackgroundGroup.Description": "Bildquelle, Wechsel und Cache",
+    "Glance.Background.Transparency.Title": "Bildtransparenz",
+    "Glance.Background.Transparency.Description": "Passt nur das Hintergrundbild an; Text und Steuerelemente bleiben unverändert",
+    "Glance.Background.Online": "Wikimedia Commons",
+    "Glance.Background.Files": "Lokale Bilder",
+    "Glance.Background.Folder": "Bilderordner",
+    "Glance.Background.Bing": "Tägliches Bing-Hintergrundbild",
+    "Glance.Background.ChooseFiles": "Bilder auswählen",
+    "Glance.Background.ChooseFolder": "Ordner auswählen",
+    "Glance.Background.ClearSelection": "Löschen",
+    "Glance.Background.LocalSummary": "{0} lokale Bilder hinzugefügt",
+    "Glance.Background.Category.Title": "Onlinebild-Kategorie",
+    "Glance.Background.Category.Description": "Wählen Sie ein Thema für Onlinebilder. Nach dem Wechsel werden neue Bilder automatisch geladen.",
+    "Glance.Background.Category.Featured": "Ausgewählt",
+    "Glance.Background.Category.Landscapes": "Landschaften",
+    "Glance.Background.Category.Cities": "Städte",
+    "Glance.Background.Category.Architecture": "Architektur",
+    "Glance.Background.Category.Animals": "Tiere",
+    "Glance.Background.Category.Plants": "Pflanzen",
+    "Glance.Background.Category.Astronomy": "Weltraum",
+    "Glance.Background.Category.People": "Menschen",
+    "Glance.Rotation.Title": "Bildwechsel",
+    "Glance.Rotation.Manual": "Manuell",
+    "Glance.Rotation.10Seconds": "Alle 10 Sekunden",
+    "Glance.Rotation.30Seconds": "Alle 30 Sekunden",
+    "Glance.Rotation.60Seconds": "Alle 60 Sekunden",
+    "Glance.Rotation.2Minutes": "Alle 2 Minuten",
+    "Glance.Rotation.5Minutes": "Alle 5 Minuten",
+    "Glance.Rotation.10Minutes": "Alle 10 Minuten",
+    "Glance.Rotation.30Minutes": "Alle 30 Minuten",
+    "Glance.Rotation.1Hour": "Stündlich",
+    "Glance.Rotation.6Hours": "Alle 6 Stunden",
+    "Glance.Rotation.Daily": "Täglich",
+    "Glance.Rotation.Random": "Zufällige Reihenfolge",
+    "Glance.Transition.Title": "Übergang",
+    "Glance.AppearanceGroup.Title": "Darstellung und Bewegung",
+    "Glance.AppearanceGroup.Description": "Bildübergänge und Lesbarkeit der Inhalte",
+    "Glance.Transition.None": "Keine",
+    "Glance.Transition.CrossFade": "Überblenden",
+    "Glance.Transition.SlideFade": "Schieben und blenden",
+    "Glance.Transition.ZoomFade": "Zoomen und blenden",
+    "Glance.Speed.Fast": "Schnell",
+    "Glance.Speed.Standard": "Standard",
+    "Glance.Speed.Relaxed": "Ruhig",
+    "Glance.Typography.Title": "Schriftgröße",
+    "Glance.Typography.TimeFormat": "Zeitformat",
+    "Glance.Typography.FollowSystem": "System folgen",
+    "Glance.Typography.Hour24": "24-Stunden-Format",
+    "Glance.Typography.Hour12": "12-Stunden-Format",
+    "Glance.Typography.Font": "Schriftart",
+    "Glance.Speed.Title": "Übergangsgeschwindigkeit",
+    "Glance.Typography.SystemDefault": "Systemstandard",
+    "Glance.Readability.Title": "Lesbarkeit",
+    "Glance.Readability.None": "Keine",
+    "Glance.Readability.Soft": "Dezent",
+    "Glance.Readability.Strong": "Stark",
+    "Glance.PhotoControls.Title": "Fotosteuerung anzeigen",
+    "Glance.PhotoControls.Description": "Beim Zeigen Pause, nächstes Foto und Bildinformationen anzeigen",
+    "Glance.Actions.Next": "Nächstes Foto",
+    "Glance.Actions.Pause": "Bildwechsel anhalten",
+    "Glance.Actions.Resume": "Bildwechsel fortsetzen",
+    "Glance.Actions.PhotoInfo": "Bildinformationen",
+    "Glance.Actions.OpenSource": "Bildquelle öffnen",
+    "Glance.Actions.ShowInExplorer": "Im Datei-Explorer anzeigen",
+    "Glance.Status.Loading": "Bild wird geladen…",
+    "Glance.Status.OnlineFallback": "Ersatzbild wird verwendet",
+    "Glance.Status.NoLocalImages": "Keine lokalen Bilder hinzugefügt",
+    "Glance.Cache.Title": "Bildcache",
+    "Glance.Cache.Clear": "Cache leeren",
+    "Glance.Cache.Cleared": "Cache geleert",
+    "Settings.Windows10VisualCompatibility.Title": "Visuelle Kompatibilität mit Windows 10",
+    "Settings.Windows10VisualCompatibility.Message": "Mica und abgerundete Systemfenster erfordern Windows 11. Windows 10 verwendet Acrylic oder Vollfarbe mit eckigen Fenstern.",
+    "Settings.Dialog.QuickAccessOperationFailedBody": "DeskBox konnte den Schnellzugriff im Datei-Explorer nicht aktualisieren. Versuchen Sie es später erneut.",
+    "DesktopOrganization.Result.FailedBody": "Die Desktoporganisation konnte nicht abgeschlossen werden. Versuchen Sie es später erneut.",
+    "DesktopOrganization.Undo.FailedBody": "Die Desktoporganisation konnte nicht rückgängig gemacht werden. Versuchen Sie es später erneut.",
+    "Common.OperationFailedRetry": "Der Vorgang konnte nicht abgeschlossen werden. Bitte versuchen Sie es erneut.",
+    "Settings.WidgetForeground.Title": "Widget-Vordergrund",
+    "Settings.WidgetForeground.Description": "Wählt die Farbe für Text und einfarbige Steuerelemente, ohne Bilder oder farbige Symbole zu ändern.",
+    "Settings.WidgetForeground.FollowTheme": "App-Design übernehmen",
+    "Settings.WidgetForeground.Light": "Heller Vordergrund",
+    "Settings.WidgetForeground.Dark": "Dunkler Vordergrund",
+    "Settings.WidgetForeground.Custom": "Benutzerdefiniert",
+    "Settings.WidgetForeground.CustomColor.Title": "Benutzerdefinierte Textfarbe",
+    "Settings.WidgetForeground.CustomColor.Description": "Für Widget-Text und einfarbige Steuerelemente.",
+    "Widget.Foreground.Menu": "Text und Lesbarkeit",
+    "Widget.Foreground.UseGlobal": "Globale Einstellung verwenden",
+    "Widget.Foreground.CustomColor": "Benutzerdefinierte Farbe…",
+    "Settings.DropAction.System": "Windows-Standard verwenden",
+    "Widget.RunAsAdministrator": "Als Administrator ausführen",
+    "Widget.RunAsAdministrator.AlreadyRunning": "Diese App wird bereits ohne Administratorrechte ausgeführt. Beenden Sie sie vollständig und versuchen Sie es erneut.",
+    "Widget.RunAsAdministrator.NotElevated": "Windows konnte keinen Administratorprozess erstellen. Prüfen Sie die UAC-Einstellungen und versuchen Sie es erneut.",
+    "Widget.CreateShortcut": "Verknüpfung erstellen",
+    "Widget.MoreSystemOperations": "Weitere Systemaktionen",
+    "Settings.ManagedPath.DesktopShortcut.Title": "Desktop-Verknüpfung zum Speicher",
+    "Settings.ManagedPath.DesktopShortcut.Description": "Erstellt eine Verknüpfung zum aktuellen Speicherordner. Wenn Sie sie löschen, erstellt DeskBox sie nicht erneut.",
     "DesktopOrganization.Public.PersonalCount": "Persönlicher Desktop ({0} Elemente)",
     "DesktopOrganization.Public.SharedCount": "Öffentlicher Desktop ({0} Elemente, für alle Konten)",
     "DesktopOrganization.Public.Unavailable": "Öffentlicher Desktop (derzeit nicht verfügbar)",
@@ -2735,13 +2737,12 @@
     "Settings.CloudBackup.TestConnection": "Verbindung testen",
     "Settings.CloudBackup.TestConnection.Success": "Verbindung erfolgreich.",
     "Settings.CloudBackup.TestConnection.Failed": "Verbindung fehlgeschlagen: {0}",
-    "Settings.CloudBackup.OfficialCloudHint": "Die DeskBox-Cloud-Sicherung erscheint hier, sobald der offizielle Kontodienst verfügbar ist.",
     "Settings.CloudBackup.TodoData.Title": "Aufgabendaten",
-    "Settings.CloudBackup.TodoData.Description": "Aufgaben und ihre Anhänge aus allen Aufgaben-Widgets.",
+    "Settings.CloudBackup.TodoData.Description": "Aufgaben aus allen Aufgaben-Widgets. Anhänge sind nicht enthalten.",
     "Settings.CloudBackup.QuickCaptureData.Title": "Schnellnotiz-Daten",
-    "Settings.CloudBackup.QuickCaptureData.Description": "Schnellnotizen und ihre Anhänge.",
+    "Settings.CloudBackup.QuickCaptureData.Description": "Schnellnotizen. Anhänge sind nicht enthalten.",
     "Settings.CloudBackup.WidgetStyle.Title": "Widget-Stil",
-    "Settings.CloudBackup.WidgetStyle.Description": "Darstellungseinstellungen wie Deckkraft, Material und Farben. Positionen und Monitor-Layout sind nie enthalten.",
+    "Settings.CloudBackup.WidgetStyle.Description": "Darstellungseinstellungen wie Deckkraft, Material und Farben. Widget-Positionen und Monitor-Layout sind nicht enthalten.",
     "Settings.CloudBackup.Interval.Title": "Sichern alle",
     "Settings.CloudBackup.Interval.Description": "Wie oft Momentaufnahmen im Hintergrund hochgeladen werden, während DeskBox läuft.",
     "Settings.CloudBackup.Interval.Hour": "1 Stunde",
@@ -2757,6 +2758,7 @@
     "Settings.CloudBackup.BackupNow.Success": "Hochgeladen: {0}",
     "Settings.CloudBackup.BackupNow.Failed": "Sicherung fehlgeschlagen: {0}",
     "Settings.CloudBackup.NotConfigured": "Cloud-Sicherung ist noch nicht konfiguriert.",
+    "Settings.CloudBackup.NoScope": "Wählen Sie mindestens einen Datentyp für die Sicherung aus.",
     "Settings.CloudBackup.LastSuccess": "Letzte erfolgreiche Sicherung: {0}",
     "Settings.CloudBackup.LastSuccess.Never": "Noch keine erfolgreiche Sicherung.",
     "Settings.CloudBackup.RefreshSnapshots": "Aktualisieren",
@@ -2777,5 +2779,31 @@
     "Settings.CloudBackup.HttpWarning": "http://-Endpunkte übertragen das Passwort Base64-kodiert über einen Klartextkanal. Nur für vertrauenswürdige lokale Server verwenden.",
     "Settings.CloudBackup.RestoreConfirm.SourceDevice": "Quellgerät: {0}.",
     "Settings.CloudBackup.RestoreConfirm.Remapped": "Wiederhergestellte Aufgabendaten wurden {0} Widget(s) auf diesem Gerät zugeordnet, da die Quell-Widget-IDs hier nicht existieren.",
-    "Settings.CloudBackup.RestoreConfirm.Unmapped": "{0} Aufgaben-Store(s) konnten keinem Widget auf diesem Gerät zugeordnet werden - Dateien bleiben auf der Festplatte, sind aber nicht sichtbar."
+    "Settings.CloudBackup.RestoreConfirm.Unmapped": "{0} Aufgaben-Store(s) konnten keinem Widget auf diesem Gerät zugeordnet werden - Dateien bleiben auf der Festplatte, sind aber nicht sichtbar.",
+    "Settings.Dialog.MigrateProgressTitle": "Speicherort wird verschoben",
+    "Settings.Dialog.MigrateProgressBody": "Widget-Ordner werden verschoben von\n{0}\nnach\n{1}",
+    "Settings.Dialog.MigrateProgressWidget": "Ordner {0} von {1}: {2}",
+    "Settings.Dialog.MigrateCanceling": "Abbruch und Wiederherstellung…",
+    "Settings.Dialog.MigrateItemPaths": "Von: {0}\nNach: {1}",
+    "Settings.Dialog.MigrateItemRetry": "Wiederholen",
+    "Settings.Dialog.MigrateItemSkip": "Überspringen",
+    "Settings.Dialog.MigrateItemAbort": "Migration abbrechen",
+    "Settings.Dialog.MigrateItemApplyAll": "Für alle verbleibenden Elemente übernehmen",
+    "Settings.Dialog.MigrateReasonInUse": "Die Datei ist in einem anderen Programm geöffnet. Schließen Sie sie und wiederholen Sie den Vorgang, oder überspringen Sie sie.",
+    "Settings.Dialog.MigrateReasonAccessDenied": "Zugriff verweigert.",
+    "Settings.Dialog.MigrateReasonNotFound": "Das Element ist nicht mehr vorhanden (möglicherweise verschoben oder gelöscht).",
+    "Settings.Dialog.MigrateReasonDiskFull": "Das Ziellaufwerk ist voll.",
+    "Settings.Dialog.MigrateReasonPathTooLong": "Der Pfad ist zu lang.",
+    "Settings.Dialog.MigrateReasonUnknown": "Unerwarteter Fehler.",
+    "Settings.Dialog.MigrateResultCanceledTitle": "Migration abgebrochen",
+    "Settings.Dialog.MigrateResultCanceledBody": "Bereits verschobene Ordner wurden an den ursprünglichen Ort zurückversetzt.",
+    "Settings.Dialog.MigrateResultFailedBody": "Die Migration wurde angehalten: {0}",
+    "Settings.Dialog.MigrateResultSummary": "{0} Ordner migriert · {1} Elemente verschoben · {2} Elemente nicht verschoben",
+    "Settings.Dialog.MigrateResultResidueNote": "{0} alte Ordner konnten nicht bereinigt werden — Sie können sie als Nächstes behandeln.",
+    "Settings.Dialog.MigrateSkippedHeader": "Nicht verschobene Elemente (noch am alten Ort):",
+    "Settings.Dialog.MigrateSkippedItem": "{0} · {1} — {2}",
+    "Settings.Dialog.MigrateSkippedKeptNote": "Übersprungene Dateien bleiben im alten Ordner und sind dort weiterhin verfügbar.",
+    "Settings.Dialog.MigrateRetrySkippedButton": "Nicht verschobene Elemente erneut versuchen",
+    "Settings.Dialog.MigrateRetryResult": "Wiederholung abgeschlossen — {0} Elemente noch nicht verschoben.",
+    "Settings.Dialog.MigrateOpenTargetButton": "Neuen Ordner öffnen"
 }

@@ -20,18 +20,26 @@ public enum CloudBackupDomain
 /// scoped restore overlay so they can never disagree.
 ///
 /// Path ownership rules (see roadmap §10):
-///   TodoData         — data/widgets/&lt;id&gt;/todo.json plus that widget's
-///                      attachments/ subtree (managed attachments keep the
-///                      user's original filenames; every file under an
-///                      attachments/ segment is user data).
-///   QuickCaptureData — data/quick-capture/quick-capture.json plus
-///                      quick-capture/attachments/ (thumbnails/ and exports/
-///                      are derived artifacts and stay out).
+///   TodoData         — data/widgets/&lt;id&gt;/todo.json only. The widget's
+///                      attachments/ subtree is deliberately NOT in the
+///                      domain for now: uploads have no size bound, so one
+///                      large attached file would ship whole. Excluding at
+///                      domain level (not export-filter level) also keeps
+///                      restore semantics right — the snapshot-faithful
+///                      delete phase only touches in-domain files, so a
+///                      restore never wipes the user's live attachments.
+///                      todo.json still carries attachment FilePaths; they
+///                      simply dangle on a machine that lacks the files.
+///   QuickCaptureData — data/quick-capture/quick-capture.json only;
+///                      attachments/ excluded for the same reason
+///                      (thumbnails/ and exports/ are derived artifacts and
+///                      stay out either way).
 ///   WidgetStyle      — no data files; carried as widget-style.json.
 ///
-/// Everything else — settings.json, FileSafety history/journal, sidecars,
-/// caches, device.id, file-widget contents (which only ever hold path
-/// references anyway) — is never part of a scoped cloud backup.
+/// Everything else — settings.json, widget-layout.json (device-local layout
+/// state), FileSafety history/journal, sidecars, caches, device.id,
+/// file-widget contents (which only ever hold path references anyway) — is
+/// never part of a scoped cloud backup.
 /// </summary>
 internal static class CloudBackupDomains
 {
@@ -127,8 +135,8 @@ internal static class CloudBackupDomains
         return scope;
     }
 
-    // widgets/<id>/todo.json and widgets/<id>/attachments/<...> — the todo
-    // store plus its managed attachments, both keyed off the widget dir.
+    // widgets/<id>/todo.json — the todo store, keyed off the widget dir.
+    // attachments/ stays out of the domain until upload size bounds land.
     private static bool IsTodoDataPath(string normalizedPath)
     {
         const string prefix = "widgets/";
@@ -145,11 +153,9 @@ internal static class CloudBackupDomains
         }
 
         string tail = rest[(slash + 1)..];
-        return tail.Equals("todo.json", StringComparison.OrdinalIgnoreCase) ||
-               tail.StartsWith("attachments/", StringComparison.OrdinalIgnoreCase);
+        return tail.Equals("todo.json", StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool IsQuickCaptureDataPath(string normalizedPath) =>
-        normalizedPath.Equals("quick-capture/quick-capture.json", StringComparison.OrdinalIgnoreCase) ||
-        normalizedPath.StartsWith("quick-capture/attachments/", StringComparison.OrdinalIgnoreCase);
+        normalizedPath.Equals("quick-capture/quick-capture.json", StringComparison.OrdinalIgnoreCase);
 }

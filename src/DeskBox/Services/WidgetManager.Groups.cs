@@ -31,6 +31,9 @@ public sealed partial class WidgetManager
     private bool _groupDragDropReady;
     private WidgetDetachPlacementPreviewWindow? _widgetDetachPlacementPreview;
     private readonly Dictionary<string, WidgetGroupTransientState> _widgetGroupTransientStates = [];
+    // Residency P0: Stopwatch timestamp of when each member last left the
+    // active slot, so a switch back can log how long it sat inactive.
+    private readonly Dictionary<string, long> _widgetGroupMemberInactiveSince = [];
     private string _lastWidgetGroupDefaultNavigationStyle =
         WidgetGroupNavigationStyles.Stack;
     private string _lastWidgetGroupDefaultTitleDisplayMode =
@@ -933,6 +936,7 @@ public sealed partial class WidgetManager
                 () => SwitchWidgetGroupMemberAsync(targetWidgetId, origin));
         }
 
+        long switchStartedTimestamp = System.Diagnostics.Stopwatch.GetTimestamp();
         WidgetGroupConfig? requestedGroup = WidgetGroupSettings.FindByMember(
             _settingsService.Settings,
             targetWidgetId);
@@ -1052,7 +1056,8 @@ public sealed partial class WidgetManager
                     previousConfig,
                     targetConfig,
                     persistentContentWindow,
-                    contentWindowFactory);
+                    contentWindowFactory,
+                    switchStartedTimestamp);
             }
             catch (OperationCanceledException)
                 when (request.CancellationToken.IsCancellationRequested)
@@ -1081,10 +1086,16 @@ public sealed partial class WidgetManager
         WidgetConfig? previousConfig,
         WidgetConfig targetConfig,
         ContentWidgetWindow persistentWindow,
-        ContentWidgetWindowFactory contentWindowFactory)
+        ContentWidgetWindowFactory contentWindowFactory,
+        long switchStartedTimestamp)
     {
         IWidgetContent? cachedContent =
             persistentWindow.TakeCachedGroupContent(targetConfig.Id);
+        var timeline = new WidgetGroupSwitchTimeline(
+            cachedContent is null
+                ? WidgetGroupSwitchTimeline.SourceFresh
+                : WidgetGroupSwitchTimeline.SourceCached,
+            switchStartedTimestamp);
         ContentWidgetWindowPlan plan =
             contentWindowFactory.CreateContentWindowPlan(targetConfig, cachedContent);
         PreviewWidgetGroupTransientState(
@@ -1128,6 +1139,7 @@ public sealed partial class WidgetManager
             return false;
         }
 
+        timeline.MarkPrepared(System.Diagnostics.Stopwatch.GetTimestamp());
         PreviewWidgetGroupTransientState(
             targetConfig.Id,
             plan.Content as IWidgetTransientStateContent);
@@ -1153,6 +1165,7 @@ public sealed partial class WidgetManager
             {
                 await persistentWindow.WaitForFirstPresentedFrameAsync(
                     frameTimeout.Token);
+                timeline.MarkFirstFrame(System.Diagnostics.Stopwatch.GetTimestamp());
             }
             catch (OperationCanceledException)
                 when (frameTimeout.IsCancellationRequested)
@@ -1160,7 +1173,8 @@ public sealed partial class WidgetManager
                 App.Log(
                     $"[WidgetGroup] In-place first-frame wait timed out; " +
                     $"keeping previous member group={group.Id} " +
-                    $"target={targetConfig.Id} previous={previousActiveId}");
+                    $"target={targetConfig.Id} previous={previousActiveId} " +
+                    timeline.Describe(sinceLastActive: null));
                 transition.Rollback();
                 LogWidgetSurfaceEvidence(group, "timeout-rollback");
                 return false;
@@ -1250,11 +1264,19 @@ public sealed partial class WidgetManager
             persistentWindow.CompleteTrayShowWithoutAnimation();
         }
 
+        long settledTimestamp = System.Diagnostics.Stopwatch.GetTimestamp();
+        timeline.MarkSettled(settledTimestamp);
+        TimeSpan? sinceLastActive =
+            _widgetGroupMemberInactiveSince.Remove(targetConfig.Id, out long inactiveSince)
+                ? System.Diagnostics.Stopwatch.GetElapsedTime(inactiveSince, settledTimestamp)
+                : null;
+        _widgetGroupMemberInactiveSince[previousActiveId] = settledTimestamp;
         App.Log(
             $"[WidgetGroup] Switched persistent surface={group.SurfaceId} " +
             $"group={group.Id} origin={request.Origin} " +
             $"{previousActiveId} -> {targetConfig.Id} " +
-            $"hwnd=0x{persistentWindow.WindowHandle.ToInt64():X}");
+            $"hwnd=0x{persistentWindow.WindowHandle.ToInt64():X} " +
+            timeline.Describe(sinceLastActive));
         LogWidgetSurfaceEvidence(group, "settled");
         RaiseWidgetGroupsChanged();
         ApplyCapsuleArrangementIfChanged(force: true);
@@ -1326,6 +1348,9 @@ public sealed partial class WidgetManager
                 StringComparison.Ordinal);
             List<string> previousMembers = group.MemberIds.ToList();
             group.MemberIds.Remove(widgetId);
+            // No longer an inactive group member — drop its residency
+            // timestamp so a never-reactivated id cannot linger in the map.
+            _widgetGroupMemberInactiveSince.Remove(widgetId);
 
             PlaceDetachedMember(
                 removedConfig,
@@ -1338,6 +1363,11 @@ public sealed partial class WidgetManager
             if (survivingGroup is null)
             {
                 _settingsService.Settings.WidgetGroups.Remove(group);
+                foreach (string exMemberId in group.MemberIds)
+                {
+                    _widgetGroupMemberInactiveSince.Remove(exMemberId);
+                }
+
                 if (group.MemberIds.FirstOrDefault() is { } remainingId &&
                     FindConfig(remainingId) is { } remainingConfig)
                 {
@@ -2460,6 +2490,7 @@ public sealed partial class WidgetManager
     private void ClearWidgetGroupTransientState(string widgetId)
     {
         _widgetGroupTransientStates.Remove(widgetId);
+        _widgetGroupMemberInactiveSince.Remove(widgetId);
     }
 
     private bool NormalizeCapsuleIdentityForGroup(WidgetGroupConfig group)

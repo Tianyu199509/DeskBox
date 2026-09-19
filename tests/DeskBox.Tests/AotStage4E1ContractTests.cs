@@ -101,7 +101,7 @@ public sealed class AotStage4E1ContractTests
     {
         string audit = ReadRepositoryFile("scripts/publish-aot-audit.ps1");
 
-        Assert.Contains("$stage4E1MaximumWmc1510Count = 1258", audit, StringComparison.Ordinal);
+        Assert.Contains("$stage4E1MaximumWmc1510Count = 866", audit, StringComparison.Ordinal);
         Assert.Contains("Stage 4E-1 WMC1510 count regressed above its ceiling", audit, StringComparison.Ordinal);
     }
 

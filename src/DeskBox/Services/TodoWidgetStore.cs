@@ -12,6 +12,9 @@ namespace DeskBox.Services;
 [JsonSerializable(
     typeof(TodoWidgetData),
     TypeInfoPropertyName = "StoreData")]
+[JsonSerializable(
+    typeof(TodoItem),
+    TypeInfoPropertyName = "TodoItem")]
 internal sealed partial class TodoJsonContext : JsonSerializerContext
 {
 }

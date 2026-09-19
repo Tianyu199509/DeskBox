@@ -63,4 +63,27 @@ public sealed class WidgetLayoutSettingsSlice
 
     /// <summary>Widget ids that were deleted and should not be restored.</summary>
     public List<string> DeletedWidgetIds { get; set; } = [];
+
+    /// <summary>
+    /// Replaces every member with <paramref name="other"/>'s values. The
+    /// layout store keeps this slice as the live object for the session
+    /// (AppSettings.WidgetLayout is get-only by the 2A facade contract), so
+    /// adoption copies data in place instead of swapping the reference.
+    /// </summary>
+    internal void CopyFrom(WidgetLayoutSettingsSlice other)
+    {
+        ArgumentNullException.ThrowIfNull(other);
+
+        FeatureWidgetEnabledStates = other.FeatureWidgetEnabledStates;
+        Widgets = other.Widgets;
+        WidgetGroups = other.WidgetGroups;
+        WidgetTopologyLayouts = other.WidgetTopologyLayouts;
+        ActiveWidgetTopologyKey = other.ActiveWidgetTopologyKey;
+        WidgetGroupsEnabled = other.WidgetGroupsEnabled;
+        WidgetGroupDefaultNavigationStyle = other.WidgetGroupDefaultNavigationStyle;
+        WidgetGroupDefaultTitleDisplayMode = other.WidgetGroupDefaultTitleDisplayMode;
+        WidgetGroupWheelSwitchEnabled = other.WidgetGroupWheelSwitchEnabled;
+        WidgetGroupHoverSwitchEnabled = other.WidgetGroupHoverSwitchEnabled;
+        DeletedWidgetIds = other.DeletedWidgetIds;
+    }
 }

@@ -1,5 +1,4 @@
 using DeskBox.Platform;
-using System.Runtime.InteropServices;
 using System.Text;
 
 namespace DeskBox.Helpers;
@@ -15,8 +14,7 @@ internal static partial class ShellDesktopDropTarget
 {
     private const int MaxAncestorDepth = 16;
 
-    [LibraryImport("user32.dll")]
-    private static partial IntPtr GetShellWindow();
+
 
     internal static bool IsPointerOverDesktop()
     {
@@ -75,7 +73,7 @@ internal static partial class ShellDesktopDropTarget
         // positive class match to Explorer whenever its process identity is
         // available, while retaining the class fallback during Explorer
         // restart when GetShellWindow temporarily returns zero.
-        IntPtr shellWindow = GetShellWindow();
+        IntPtr shellWindow = Win32Helper.GetShellWindow();
         if (shellWindow == IntPtr.Zero)
         {
             return true;

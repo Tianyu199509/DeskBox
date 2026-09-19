@@ -214,7 +214,9 @@ public sealed partial class WidgetManager
         await fileSurface.ViewModel.HandleItemsMovedOutAsync(paths);
     }
 
-    public async Task<ManagedStorageMigrationResult> UpdateDefaultManagedStorageRootAsync(string newRootPath)
+    public async Task<ManagedStorageMigrationResult> UpdateDefaultManagedStorageRootAsync(
+        string newRootPath,
+        ManagedStorageMigrationOptions? options = null)
     {
         string oldRootPath = SettingsService.NormalizeManagedStorageRootPath(_settingsService.Settings.DefaultManagedStorageRootPath);
         string normalizedNewRootPath = SettingsService.NormalizeManagedStorageRootPath(newRootPath);
@@ -227,7 +229,9 @@ public sealed partial class WidgetManager
                 0,
                 oldRootPath,
                 normalizedNewRootPath,
-                Array.Empty<ManagedStorageMigrationResidue>());
+                Array.Empty<ManagedStorageMigrationResidue>(),
+                0,
+                Array.Empty<ManagedStorageSkippedItem>());
         }
 
         var affectedWidgets = _settingsService.Settings.Widgets
@@ -260,12 +264,14 @@ public sealed partial class WidgetManager
                 candidateFollowsDefaultStoragePath: true);
             if (FileService.IsPathUnderDirectoryResolved(widgetPlan.DestinationFolder, widgetPlan.SourceFolder))
             {
-                throw new InvalidOperationException(_localizationService.Format(
-                    "Widget.Error.FileWidgetPathConflict",
-                    widgetPlan.Widget.Name));
+                throw new InvalidOperationException(FormatFileWidgetPathConflictMessage(
+                    widgetPlan.DestinationFolder,
+                    widgetPlan.Widget.Name,
+                    widgetPlan.SourceFolder));
             }
         }
 
+        bool newRootPreExisted = Directory.Exists(normalizedNewRootPath);
         Directory.CreateDirectory(normalizedNewRootPath);
 
         // A non-empty destination folder is almost always the complete copy a
@@ -282,16 +288,94 @@ public sealed partial class WidgetManager
             throw new ManagedStorageDestinationResidueException(staleDestinationFolders);
         }
 
-        var completedMoves = new List<(string WidgetId, string SourceFolder, string DestinationFolder)>(affectedWidgets.Count);
+        var completedMoves = new List<(string WidgetId, string WidgetName, string SourceFolder, string DestinationFolder)>(affectedWidgets.Count);
+        var restoreBackFailures = new List<ManagedStorageRollbackFailure>();
         var residueReports = new List<ManagedStorageMigrationResidue>();
         var residueWidgetIds = new HashSet<string>(StringComparer.Ordinal);
+        var skippedItems = new List<ManagedStorageSkippedItem>();
+        var unmigratedWidgetIds = new HashSet<string>(StringComparer.Ordinal);
         var originalWidgetStorage = affectedWidgets.ToDictionary(
             widget => widget.Widget.Id,
             widget => (widget.Widget.ManagedFolderName, widget.Widget.MappedFolderPath),
             StringComparer.Ordinal);
+        CancellationToken cancellationToken = options?.CancellationToken ?? CancellationToken.None;
 
-        Func<string, string, Task> relocateDirectory = RelocateDirectoryForMigrationOverride ??
-            _fileService.RelocateDirectoryAsync;
+        int totalItems = options?.Progress is null && options?.OnItemError is null
+            ? 0
+            : await Task.Run(
+                () => affectedWidgets.Sum(widgetPlan =>
+                {
+                    try
+                    {
+                        return Directory.Exists(widgetPlan.SourceFolder)
+                            ? Directory.EnumerateFileSystemEntries(widgetPlan.SourceFolder).Count()
+                            : 0;
+                    }
+                    catch
+                    {
+                        return 0;
+                    }
+                }),
+                CancellationToken.None);
+
+        int movedItemCount = 0;
+        int completedItemsAcrossWidgets = 0;
+        int completedWidgetCount = 0;
+        long bytesBeforeCurrentWidget = 0;
+        long currentWidgetBytes = 0;
+
+        async Task<FileService.DirectoryMoveReport> RelocateWidgetFolderAsync(
+            string widgetName,
+            string sourceFolder,
+            string destinationFolder)
+        {
+            int baseItems = completedItemsAcrossWidgets;
+            long baseBytes = bytesBeforeCurrentWidget;
+            currentWidgetBytes = 0;
+            IProgress<FileService.FileTransferProgress>? folderProgress =
+                options?.Progress is null
+                    ? null
+                    : new Progress<FileService.FileTransferProgress>(inner =>
+                    {
+                        currentWidgetBytes = inner.BytesTransferred;
+                        options.Progress.Report(new ManagedStorageMigrationProgress(
+                            inner.Phase,
+                            completedWidgetCount,
+                            affectedWidgets.Count,
+                            widgetName,
+                            inner.CurrentItemName,
+                            Math.Min(totalItems, baseItems + inner.CompletedItems),
+                            totalItems,
+                            baseBytes + inner.BytesTransferred,
+                            inner.BytesPerSecond,
+                            inner.EstimatedRemaining));
+                    });
+
+            if (RelocateDirectoryForMigrationOverrideEx is { } overrideEx)
+            {
+                return await overrideEx(
+                    sourceFolder,
+                    destinationFolder,
+                    folderProgress,
+                    cancellationToken,
+                    options?.OnItemError);
+            }
+
+            if (RelocateDirectoryForMigrationOverride is { } legacyOverride)
+            {
+                // Legacy test seam: no report is produced, so the widget is
+                // always treated as fully migrated once the call returns.
+                await legacyOverride(sourceFolder, destinationFolder);
+                return new FileService.DirectoryMoveReport(-1, []);
+            }
+
+            return await _fileService.RelocateDirectoryAsync(
+                sourceFolder,
+                destinationFolder,
+                folderProgress,
+                cancellationToken,
+                options?.OnItemError);
+        }
 
         SetManagedStorageMigrationBusy(affectedWidgets.Select(widget => widget.Widget.Id), isBusy: true);
         try
@@ -303,9 +387,70 @@ public sealed partial class WidgetManager
 
             foreach (var widgetPlan in affectedWidgets)
             {
+                cancellationToken.ThrowIfCancellationRequested();
+                bool widgetMigrated = true;
                 try
                 {
-                    await relocateDirectory(widgetPlan.SourceFolder, widgetPlan.DestinationFolder);
+                    FileService.DirectoryMoveReport report = await RelocateWidgetFolderAsync(
+                        widgetPlan.Widget.Name,
+                        widgetPlan.SourceFolder,
+                        widgetPlan.DestinationFolder);
+                    foreach (var skipped in report.SkippedItems)
+                    {
+                        skippedItems.Add(new ManagedStorageSkippedItem(
+                            widgetPlan.Widget.Id,
+                            widgetPlan.Widget.Name,
+                            skipped.SourcePath,
+                            skipped.DestinationPath,
+                            skipped.ErrorKind,
+                            skipped.Detail));
+                    }
+
+                    if (report.MovedItems > 0)
+                    {
+                        movedItemCount += report.MovedItems;
+                        completedItemsAcrossWidgets += report.MovedItems;
+                    }
+
+                    completedItemsAcrossWidgets += report.SkippedItems.Count;
+                    if (report.MovedItems == 0 && report.SkippedItems.Count > 0)
+                    {
+                        // Every entry of this folder was skipped, so the widget
+                        // keeps pointing at its untouched source folder instead
+                        // of an empty destination.
+                        widgetMigrated = false;
+                        unmigratedWidgetIds.Add(widgetPlan.Widget.Id);
+                    }
+
+                    bytesBeforeCurrentWidget += currentWidgetBytes;
+                }
+                catch (FileService.FileTransferPartialFailureException partialFailure)
+                {
+                    // A move that stopped midway already moved some items into
+                    // the destination, but this folder never reaches
+                    // completedMoves so the outer rollback cannot return them.
+                    // Move them back now — otherwise the leftover destination
+                    // items trip the stale-destination guard on every retry.
+                    // A failed return is recorded as a rollback failure: the
+                    // outer catch forwards the receipt to the retry flow.
+                    restoreBackFailures.AddRange(await RestorePartiallyMigratedItemsAsync(
+                        partialFailure.CompletedResults,
+                        widgetPlan.Widget.Id,
+                        widgetPlan.Widget.Name));
+                    TryDeleteEmptyFolder(widgetPlan.DestinationFolder);
+                    throw;
+                }
+                catch (FileService.FileTransferCanceledException canceled)
+                {
+                    // Same partial-tree hazard as a hard failure: items the
+                    // cancelled folder move already delivered must go back so
+                    // a retry does not hit the stale-destination guard.
+                    restoreBackFailures.AddRange(await RestorePartiallyMigratedItemsAsync(
+                        canceled.CompletedResults,
+                        widgetPlan.Widget.Id,
+                        widgetPlan.Widget.Name));
+                    TryDeleteEmptyFolder(widgetPlan.DestinationFolder);
+                    throw;
                 }
                 catch (Exception ex) when (
                     ex is FileService.FileTransferSourceCleanupException or
@@ -327,15 +472,37 @@ public sealed partial class WidgetManager
                     residueWidgetIds.Add(widgetPlan.Widget.Id);
                 }
 
-                completedMoves.Add((
-                    widgetPlan.Widget.Id,
-                    widgetPlan.SourceFolder,
-                    widgetPlan.DestinationFolder));
+                if (widgetMigrated)
+                {
+                    completedMoves.Add((
+                        widgetPlan.Widget.Id,
+                        widgetPlan.Widget.Name,
+                        widgetPlan.SourceFolder,
+                        widgetPlan.DestinationFolder));
+                }
+
+                completedWidgetCount++;
+                options?.Progress?.Report(new ManagedStorageMigrationProgress(
+                    FileService.FileTransferPhase.Transferring,
+                    completedWidgetCount,
+                    affectedWidgets.Count,
+                    widgetPlan.Widget.Name,
+                    null,
+                    Math.Min(totalItems, completedItemsAcrossWidgets),
+                    totalItems,
+                    bytesBeforeCurrentWidget,
+                    null,
+                    null));
             }
 
             _settingsService.Settings.DefaultManagedStorageRootPath = normalizedNewRootPath;
             foreach (var widgetPlan in affectedWidgets)
             {
+                if (unmigratedWidgetIds.Contains(widgetPlan.Widget.Id))
+                {
+                    continue;
+                }
+
                 widgetPlan.Widget.ManagedFolderName = widgetPlan.ManagedFolderName;
                 widgetPlan.Widget.MappedFolderPath = widgetPlan.DestinationFolder;
             }
@@ -391,8 +558,9 @@ public sealed partial class WidgetManager
                 }
             }
         }
-        catch
+        catch (Exception originalFailure)
         {
+            App.Log($"[ManagedStorageMigration] Migration failed, rolling back: {originalFailure}");
             _settingsService.Settings.DefaultManagedStorageRootPath = oldRootPath;
             foreach (var widgetPlan in affectedWidgets)
             {
@@ -405,6 +573,7 @@ public sealed partial class WidgetManager
                 widgetPlan.Widget.MappedFolderPath = originalStorage.MappedFolderPath;
             }
 
+            var rollbackFailures = new List<ManagedStorageRollbackFailure>();
             foreach (var move in completedMoves.AsEnumerable().Reverse())
             {
                 try
@@ -427,7 +596,34 @@ public sealed partial class WidgetManager
                 catch (Exception ex)
                 {
                     App.Log($"[ManagedStorageMigration] Rollback failed for '{move.DestinationFolder}' -> '{move.SourceFolder}': {ex}");
+                    rollbackFailures.Add(new ManagedStorageRollbackFailure(
+                        move.WidgetId,
+                        move.WidgetName,
+                        move.DestinationFolder,
+                        move.SourceFolder,
+                        residueWidgetIds.Contains(move.WidgetId),
+                        ex.Message));
                 }
+            }
+
+            // A widget that never reached completedMoves can still have
+            // items stranded at the destination: the partial-move restore
+            // records those as rollback failures too.
+            rollbackFailures.AddRange(restoreBackFailures);
+
+            if (rollbackFailures.Count > 0)
+            {
+                // Files are now split across both roots and the widgets point
+                // at the old root. A bare rethrow would hide them behind a
+                // generic failure dialog, so hand the list to the UI (#112).
+                throw new ManagedStorageRollbackFailureException(originalFailure, rollbackFailures);
+            }
+
+            // A failed migration that created the new root should not leave
+            // its empty shell behind either.
+            if (!newRootPreExisted)
+            {
+                TryDeleteEmptyFolder(normalizedNewRootPath);
             }
 
             throw;
@@ -447,10 +643,88 @@ public sealed partial class WidgetManager
         }
 
         return new ManagedStorageMigrationResult(
-            affectedWidgets.Count,
+            completedMoves.Count,
             oldRootPath,
             normalizedNewRootPath,
-            residueReports);
+            residueReports,
+            movedItemCount,
+            skippedItems);
+    }
+
+    /// <summary>
+    /// Returns items that a partially completed folder move left at the
+    /// destination, grouped by their original parent folder. A group that
+    /// cannot move back becomes a rollback-failure receipt: the stranded
+    /// files must reach the rollback-retry flow instead of silently
+    /// splitting the widget's folder across both roots.
+    /// </summary>
+    private async Task<IReadOnlyList<ManagedStorageRollbackFailure>> RestorePartiallyMigratedItemsAsync(
+        IReadOnlyList<FileService.FileTransferResult> completedResults,
+        string widgetId,
+        string widgetName)
+    {
+        var failures = new List<ManagedStorageRollbackFailure>();
+        foreach (var group in completedResults
+            .Select(result => new
+            {
+                result.DestinationPath,
+                DestinationDirectory = Path.GetDirectoryName(result.DestinationPath),
+                SourceDirectory = Path.GetDirectoryName(result.SourcePath)
+            })
+            .Where(item =>
+                item.DestinationDirectory is not null &&
+                item.SourceDirectory is not null)
+            .GroupBy(item => (
+                DestinationDirectory: item.DestinationDirectory!,
+                SourceDirectory: item.SourceDirectory!)))
+        {
+            try
+            {
+                await _fileService.TransferItemsWithResultAsync(
+                    group.Select(item => item.DestinationPath).ToList(),
+                    group.Key.SourceDirectory,
+                    move: true);
+            }
+            catch (Exception ex)
+            {
+                App.Log(
+                    $"[ManagedStorageMigration] Failed to return partially " +
+                    $"moved items to '{group.Key.SourceDirectory}': {ex.Message}");
+                // The source folder can still hold items that never moved,
+                // so the retry must never overwrite what is already there.
+                failures.Add(new ManagedStorageRollbackFailure(
+                    widgetId,
+                    widgetName,
+                    group.Key.DestinationDirectory,
+                    group.Key.SourceDirectory,
+                    PreserveExisting: true,
+                    ex.Message));
+            }
+        }
+
+        return failures;
+    }
+
+    /// <summary>
+    /// Removes a folder left empty after a rollback step — best-effort, only
+    /// when it exists and holds no entries. Never deletes content.
+    /// </summary>
+    private static void TryDeleteEmptyFolder(string folderPath)
+    {
+        try
+        {
+            if (Directory.Exists(folderPath) &&
+                !Directory.EnumerateFileSystemEntries(folderPath).Any())
+            {
+                Directory.Delete(folderPath, recursive: false);
+            }
+        }
+        catch (Exception ex)
+        {
+            App.Log(
+                $"[ManagedStorageMigration] Empty folder cleanup failed " +
+                $"for '{folderPath}': {ex.Message}");
+        }
     }
 
     /// <summary>
@@ -459,6 +733,220 @@ public sealed partial class WidgetManager
     /// use it to inject deterministic copy/cleanup failures.
     /// </summary>
     internal Func<string, string, Task>? RelocateDirectoryForMigrationOverride { get; set; }
+
+    /// <summary>
+    /// Extended test seam matching the interactive FileService relocation
+    /// overload (progress, cancellation, item-error decisions, move report).
+    /// Applies to the first migration and to skipped-item retries alike.
+    /// Takes precedence over <see cref="RelocateDirectoryForMigrationOverride"/>.
+    /// </summary>
+    internal Func<string, string,
+        IProgress<FileService.FileTransferProgress>?,
+        CancellationToken,
+        Func<FileService.FileTransferItemError, Task<FileService.FileTransferItemAction>>?,
+        Task<FileService.DirectoryMoveReport>>? RelocateDirectoryForMigrationOverrideEx { get; set; }
+
+    /// <summary>
+    /// Re-runs the move only for entries a migration skipped, grouped by their
+    /// widget folder so the same per-item decisions apply. When every entry of
+    /// a widget's old folder finally moved, a widget that stayed behind is
+    /// repointed to the new root. Returns the items that are still unmoved.
+    /// </summary>
+    public async Task<IReadOnlyList<ManagedStorageSkippedItem>> RetrySkippedMigrationItemsAsync(
+        IReadOnlyList<ManagedStorageSkippedItem> items,
+        ManagedStorageMigrationOptions? options = null)
+    {
+        var remaining = new List<ManagedStorageSkippedItem>();
+        if (items.Count == 0)
+        {
+            return remaining;
+        }
+
+        CancellationToken cancellationToken =
+            options?.CancellationToken ?? CancellationToken.None;
+        var groups = items
+            .GroupBy(item => (
+                SourceFolder: Path.GetDirectoryName(item.SourcePath) ?? string.Empty,
+                DestinationFolder: Path.GetDirectoryName(item.DestinationPath) ?? string.Empty,
+                item.WidgetId,
+                item.WidgetName))
+            .ToList();
+        int completedItems = 0;
+
+        void ReportItemProgress(string? widgetName, string? itemName)
+        {
+            options?.Progress?.Report(new ManagedStorageMigrationProgress(
+                FileService.FileTransferPhase.Transferring,
+                0,
+                0,
+                widgetName,
+                itemName,
+                completedItems,
+                items.Count,
+                0,
+                null,
+                null));
+        }
+
+        SetManagedStorageMigrationBusy(
+            groups.Select(group => group.Key.WidgetId), isBusy: true);
+        try
+        {
+            foreach (var group in groups)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (string.IsNullOrEmpty(group.Key.SourceFolder) ||
+                    !Directory.Exists(group.Key.SourceFolder))
+                {
+                    // The old folder is already gone (cleaned up or recycled
+                    // meanwhile): the entries can never move now.
+                    foreach (var item in group)
+                    {
+                        remaining.Add(item with
+                        {
+                            ErrorKind = FileService.FileTransferItemErrorKind.NotFound
+                        });
+                        completedItems++;
+                    }
+
+                    continue;
+                }
+
+                bool retryFailed = false;
+                try
+                {
+                    FileService.DirectoryMoveReport report =
+                        RelocateDirectoryForMigrationOverrideEx is { } retryOverride
+                            ? await retryOverride(
+                                group.Key.SourceFolder,
+                                group.Key.DestinationFolder,
+                                null,
+                                cancellationToken,
+                                options?.OnItemError)
+                            : await _fileService.RelocateDirectoryAsync(
+                                group.Key.SourceFolder,
+                                group.Key.DestinationFolder,
+                                progress: null,
+                                cancellationToken,
+                                options?.OnItemError);
+                    foreach (var skipped in report.SkippedItems)
+                    {
+                        remaining.Add(new ManagedStorageSkippedItem(
+                            group.Key.WidgetId,
+                            group.Key.WidgetName,
+                            skipped.SourcePath,
+                            skipped.DestinationPath,
+                            skipped.ErrorKind,
+                            skipped.Detail));
+                    }
+
+                    completedItems += group.Count() - report.SkippedItems.Count;
+                }
+                catch (FileService.FileTransferCanceledException canceled)
+                {
+                    // Same transaction rule as the first migration: undo what
+                    // this retry already moved so the group stays fully
+                    // skipped and the widget keeps pointing at its untouched
+                    // source folder. A stranded undo becomes a rollback
+                    // failure — a bare cancel would drop the receipt when
+                    // the dialog closes.
+                    IReadOnlyList<ManagedStorageRollbackFailure> undoFailures =
+                        await RestorePartiallyMigratedItemsAsync(
+                            canceled.CompletedResults,
+                            group.Key.WidgetId,
+                            group.Key.WidgetName);
+                    TryDeleteEmptyFolder(group.Key.DestinationFolder);
+                    if (undoFailures.Count > 0)
+                    {
+                        throw new ManagedStorageRollbackFailureException(
+                            canceled,
+                            undoFailures);
+                    }
+
+                    throw;
+                }
+                catch (FileService.FileTransferPartialFailureException partial)
+                {
+                    retryFailed = true;
+                    IReadOnlyList<ManagedStorageRollbackFailure> undoFailures =
+                        await RestorePartiallyMigratedItemsAsync(
+                            partial.CompletedResults,
+                            group.Key.WidgetId,
+                            group.Key.WidgetName);
+                    TryDeleteEmptyFolder(group.Key.DestinationFolder);
+                    if (undoFailures.Count > 0)
+                    {
+                        throw new ManagedStorageRollbackFailureException(
+                            partial,
+                            undoFailures);
+                    }
+
+                    App.Log(
+                        $"[ManagedStorageMigration] Skipped-item retry failed " +
+                        $"for '{group.Key.SourceFolder}': {partial.InnerException?.Message ?? partial.Message}");
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    retryFailed = true;
+                    App.Log(
+                        $"[ManagedStorageMigration] Skipped-item retry failed " +
+                        $"for '{group.Key.SourceFolder}': {ex.Message}");
+                }
+
+                if (retryFailed)
+                {
+                    completedItems += group.Count();
+                    foreach (var item in group)
+                    {
+                        if (!remaining.Any(entry => string.Equals(
+                                entry.SourcePath,
+                                item.SourcePath,
+                                StringComparison.OrdinalIgnoreCase)))
+                        {
+                            remaining.Add(item);
+                        }
+                    }
+                }
+
+                // A widget whose folder was fully skipped kept pointing at the
+                // old root. Once nothing is left there, repoint it so the
+                // migrated files actually show up in the widget.
+                var widget = _settingsService.Settings.Widgets.FirstOrDefault(
+                    candidate => candidate.Id == group.Key.WidgetId);
+                if (widget is not null &&
+                    string.Equals(
+                        widget.MappedFolderPath,
+                        group.Key.SourceFolder,
+                        StringComparison.OrdinalIgnoreCase) &&
+                    (!Directory.Exists(group.Key.SourceFolder) ||
+                     !Directory.EnumerateFileSystemEntries(group.Key.SourceFolder).Any()))
+                {
+                    widget.MappedFolderPath = group.Key.DestinationFolder;
+                    await _settingsService.SaveAsync();
+                    try
+                    {
+                        await RefreshFileWidgetAsync(widget.Id);
+                    }
+                    catch (Exception ex)
+                    {
+                        App.Log(
+                            $"[ManagedStorageMigration] Refresh after skipped-item " +
+                            $"retry failed for widget '{widget.Id}': {ex.Message}");
+                    }
+                }
+
+                completedItems = Math.Min(completedItems, items.Count);
+                ReportItemProgress(group.Key.WidgetName, null);
+            }
+        }
+        finally
+        {
+            SetManagedStorageMigrationBusy(
+                groups.Select(group => group.Key.WidgetId), isBusy: false);
+        }
+
+        return remaining;
+    }
 
     /// <summary>
     /// Moves migration residue folders (old-root leftovers whose destination
@@ -486,6 +974,82 @@ public sealed partial class WidgetManager
         }
 
         return recycledCount;
+    }
+
+    /// <summary>
+    /// Re-runs the rollback for folders a failed migration could not return to
+    /// the old root. Uses the same conservative merge as the original rollback
+    /// (existing files are never overwritten or deleted), so a retry after the
+    /// user moved things around cannot destroy data. Returns the failures that
+    /// still could not be returned; the caller keeps showing those.
+    /// </summary>
+    public async Task<IReadOnlyList<ManagedStorageRollbackFailure>> RetryMigrationRollbackAsync(
+        IReadOnlyList<ManagedStorageRollbackFailure> failures)
+    {
+        var remaining = new List<ManagedStorageRollbackFailure>();
+        if (failures.Count == 0)
+        {
+            return remaining;
+        }
+
+        SetManagedStorageMigrationBusy(failures.Select(failure => failure.WidgetId), isBusy: true);
+        try
+        {
+            foreach (var failure in failures)
+            {
+                try
+                {
+                    if (failure.PreserveExisting)
+                    {
+                        await FileService.RestoreMigratedDirectoryPreservingExistingAsync(
+                            failure.DestinationFolder,
+                            failure.SourceFolder);
+                    }
+                    else
+                    {
+                        await _fileService.RelocateDirectoryAsync(
+                            failure.DestinationFolder,
+                            failure.SourceFolder);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    App.Log(
+                        $"[ManagedStorageMigration] Rollback retry failed for " +
+                        $"'{failure.DestinationFolder}' -> '{failure.SourceFolder}': {ex.Message}");
+                    remaining.Add(failure);
+                    continue;
+                }
+
+                // The folder is physically back — a UI refresh failure must
+                // not requeue it, or the next retry would try to move a
+                // destination folder that no longer exists and wedge the
+                // folder on the failure list forever.
+                try
+                {
+                    await RefreshFileWidgetAsync(failure.WidgetId);
+                }
+                catch (Exception ex)
+                {
+                    App.Log(
+                        $"[ManagedStorageMigration] Post-rollback refresh failed " +
+                        $"for '{failure.WidgetId}': {ex.Message}");
+                }
+            }
+        }
+        finally
+        {
+            try
+            {
+                SetManagedStorageMigrationBusy(failures.Select(failure => failure.WidgetId), isBusy: false);
+            }
+            catch (Exception ex)
+            {
+                App.Log($"[ManagedStorageMigration] Failed to clear the busy state after rollback retry: {ex.Message}");
+            }
+        }
+
+        return remaining;
     }
 
     private void SetManagedStorageMigrationBusy(IEnumerable<string> widgetIds, bool isBusy)
@@ -544,13 +1108,67 @@ public sealed partial class WidgetManager
         }
 
         string destinationFolderPath = Path.Combine(rootPath, desiredFolderName);
-        if (IsManagedWidgetNameInUse(newName, desiredFolderName, config.Id) ||
-            IsUnavailableManagedFolderPath(destinationFolderPath, currentFolderPath))
+        if (IsManagedWidgetNameInUse(newName, desiredFolderName, config.Id))
         {
             throw new InvalidOperationException(_localizationService.T("Widget.Error.ManagedFolderNameExists"));
         }
 
-        if (!string.Equals(currentFolderPath, destinationFolderPath, StringComparison.OrdinalIgnoreCase))
+        if (!string.Equals(currentFolderPath, destinationFolderPath, StringComparison.OrdinalIgnoreCase) &&
+            Directory.Exists(destinationFolderPath))
+        {
+            bool currentFolderIsEmpty = !Directory.EnumerateFileSystemEntries(currentFolderPath).Any();
+            if (!currentFolderIsEmpty)
+            {
+                // Both sides hold files and merging them could shadow either
+                // copy, so the rename stays blocked with an accurate message
+                // (the folder usually belongs to a closed widget, #113).
+                throw new InvalidOperationException(_localizationService.T("Widget.Error.ManagedFolderNameUnavailable"));
+            }
+
+            // Never adopt a folder a live widget already claims (a mapped
+            // widget's folder can sit under the managed root when the root
+            // moved around it): two widgets sharing one directory means the
+            // first "close and delete files" wipes the other's contents.
+            // Whether the destination is genuinely a closed widget's kept
+            // folder is unprovable — RemoveWidgetImmediate drops the config
+            // and only the id tombstone survives — so live-claim exclusion
+            // is the only enforceable guard.
+            string normalizedDestination = Path.TrimEndingDirectorySeparator(
+                Path.GetFullPath(destinationFolderPath));
+            bool destinationClaimedByLiveWidget = _settingsService.Settings.WidgetLayout.Widgets.Any(widget =>
+                widget.WidgetKind == WidgetKind.File &&
+                !IsDeleted(widget.Id) &&
+                !string.Equals(widget.Id, config.Id, StringComparison.Ordinal) &&
+                !string.IsNullOrWhiteSpace(widget.MappedFolderPath) &&
+                string.Equals(
+                    Path.TrimEndingDirectorySeparator(Path.GetFullPath(widget.MappedFolderPath)),
+                    normalizedDestination,
+                    StringComparison.OrdinalIgnoreCase));
+            if (destinationClaimedByLiveWidget)
+            {
+                throw new InvalidOperationException(_localizationService.T("Widget.Error.ManagedFolderNameUnavailable"));
+            }
+
+            // The empty current folder is the default folder a fresh widget
+            // got; the existing destination is the managed folder a closed
+            // widget kept behind on purpose. Adopt it as the storage
+            // location instead of dead-ending the name (feedback #113):
+            // nothing inside either folder is moved, merged, or deleted, and
+            // the kept contents show up in the widget again.
+            Directory.Delete(currentFolderPath);
+            App.Log(
+                $"[WidgetManager] Managed folder rename adopted the existing " +
+                $"folder '{destinationFolderPath}' for widget '{config.Id}'");
+        }
+        else if (File.Exists(destinationFolderPath))
+        {
+            // A file holds the name: the widget needs a directory and there
+            // is nothing safe to adopt here.
+            throw new InvalidOperationException(_localizationService.T("Widget.Error.ManagedFolderNameUnavailable"));
+        }
+
+        if (!string.Equals(currentFolderPath, destinationFolderPath, StringComparison.OrdinalIgnoreCase) &&
+            !Directory.Exists(destinationFolderPath))
         {
             await Task.Run(() => Directory.Move(currentFolderPath, destinationFolderPath));
         }

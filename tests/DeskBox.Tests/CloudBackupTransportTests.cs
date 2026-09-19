@@ -545,7 +545,75 @@ public sealed class CloudBackupTransportTests : IDisposable
         CloudBackupRunResult result = await service.RunBackupNowAsync();
 
         Assert.False(result.Uploaded);
+        Assert.False(result.NoScopeSelected);
         Assert.Empty(transport.Files);
+    }
+
+    /// <summary>
+    /// Endpoint set but every domain toggle off — a valid state while the
+    /// user is still configuring. Backup-now must name the gap instead of
+    /// reporting a generic "not configured".
+    /// </summary>
+    [Fact]
+    public async Task RunBackupNow_EndpointWithoutScope_ReturnsNoScope()
+    {
+        var transport = new FakeCloudBackupTransport();
+        (CloudBackupService service, _) = CreateService(transport);
+        service.UpdateOptions(ConfiguredOptions(scope: CloudBackupDomain.None));
+
+        CloudBackupRunResult result = await service.RunBackupNowAsync();
+
+        Assert.False(result.Uploaded);
+        Assert.True(result.NoScopeSelected);
+        Assert.Empty(transport.Files);
+    }
+
+    /// <summary>
+    /// A connection test validates the endpoint, not the backup selection —
+    /// it must work before the user has toggled any domain on.
+    /// </summary>
+    [Fact]
+    public async Task ProbeConnection_EndpointWithoutScope_StillProbes()
+    {
+        var transport = new FakeCloudBackupTransport();
+        (CloudBackupService service, _) = CreateService(transport);
+        service.UpdateOptions(ConfiguredOptions(scope: CloudBackupDomain.None));
+
+        await service.ProbeConnectionAsync("just-typed");
+
+        Assert.True(transport.Probed);
+    }
+
+    /// <summary>
+    /// Restoring a snapshot on a fresh install predates any backup-scope
+    /// choice — listing and downloading must only require a reachable
+    /// endpoint (restore domains are picked in the restore dialog).
+    /// </summary>
+    [Fact]
+    public async Task RestoreEndpoints_EndpointWithoutScope_ListAndDownload()
+    {
+        var transport = new FakeCloudBackupTransport();
+        transport.Files["DeskBox/backups/DeskBox-CloudBackup-20260101-000000-aaaabbbb.zip"] = [0x1, 0x2];
+
+        (CloudBackupService service, _) = CreateService(transport);
+        service.UpdateOptions(ConfiguredOptions(scope: CloudBackupDomain.None));
+
+        IReadOnlyList<CloudBackupRemoteEntry> snapshots = await service.ListRemoteSnapshotsAsync();
+        string path = await service.DownloadSnapshotAsync(snapshots[0].Name, _tempRoot);
+
+        Assert.Single(snapshots);
+        Assert.Equal([0x1, 0x2], await File.ReadAllBytesAsync(path));
+    }
+
+    /// <summary>The credential belongs to the endpoint, not the backup scope.</summary>
+    [Fact]
+    public async Task HasCredential_EndpointWithoutScope_Resolves()
+    {
+        var transport = new FakeCloudBackupTransport();
+        (CloudBackupService service, _) = CreateService(transport);
+        service.UpdateOptions(ConfiguredOptions(scope: CloudBackupDomain.None));
+
+        Assert.True(await service.HasCredentialAsync());
     }
 
     [Fact]

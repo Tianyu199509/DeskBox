@@ -4,6 +4,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
+using DeskBox.Core.Persistence;
 using DeskBox.FileSafety;
 using DeskBox.Models;
 
@@ -878,8 +879,22 @@ public sealed partial class DeskBoxDataBackupService
 
         try
         {
-            byte[] json = await File.ReadAllBytesAsync(settingsPath, cancellationToken);
-            if (JsonNode.Parse(json)?["widgets"] is not JsonArray widgets)
+            // The widgets array lives in widget-layout.json once the device
+            // store exists; before adoption it is still a settings.json key.
+            JsonArray? widgets = null;
+            string layoutPath = Path.Combine(DataDirectory, "widget-layout.json");
+            if (File.Exists(layoutPath))
+            {
+                byte[] layoutJson = await File.ReadAllBytesAsync(layoutPath, cancellationToken);
+                widgets = JsonNode.Parse(layoutJson)?["layout"]?["widgets"] as JsonArray;
+            }
+            else
+            {
+                byte[] json = await File.ReadAllBytesAsync(settingsPath, cancellationToken);
+                widgets = JsonNode.Parse(json)?["widgets"] as JsonArray;
+            }
+
+            if (widgets is null)
             {
                 return ids;
             }
@@ -1104,9 +1119,10 @@ public sealed partial class DeskBoxDataBackupService
                         styleDocumentPath,
                         cancellationToken);
                     WidgetStyleBackupProjection.ApplyResult styleResult =
-                        await WidgetStyleBackupProjection.ApplyToSettingsFileAsync(
+                        await WidgetStyleBackupProjection.ApplyAsync(
                             documentBytes,
                             Path.Combine(DataDirectory, "settings.json"),
+                            Path.Combine(DataDirectory, "widget-layout.json"),
                             cancellationToken);
                     App.Log(
                         $"[DataBackup] Widget style restore: applied={styleResult.Applied}, " +
@@ -1335,6 +1351,9 @@ public sealed partial class DeskBoxDataBackupService
         ValidateJsonFileIfPresent<DesktopOrganizationHistoryData>(
             Path.Combine(dataDirectory, "desktop-organization-history.json"),
             DesktopOrganizationHistoryJsonContext.Default.DesktopOrganizationHistoryData);
+        ValidateJsonFileIfPresent<WidgetLayoutDocument>(
+            Path.Combine(dataDirectory, "widget-layout.json"),
+            WidgetLayoutJsonContext.Default.WidgetLayoutDocument);
 
         string widgetsDirectory = Path.Combine(dataDirectory, "widgets");
         if (Directory.Exists(widgetsDirectory))
@@ -1938,16 +1957,17 @@ public sealed partial class DeskBoxDataBackupService
         Directory.CreateDirectory(snapshotDataDirectory);
 
         // FileSafety metadata must come from a single transaction epoch:
-        // settings, the organization-history store and the recovery journal
-        // are committed as a unit under OperationGate. The file SET is
-        // resolved inside the gate — a journal created while we waited for
-        // the gate must land in the snapshot, or the backup would hold
-        // settings@T1 with history@T0 and no WAL to converge them. Hold the
-        // gate only for these few small files; the rest still copies one by
-        // one from the pre-enumerated list.
+        // settings, the device-layout store, the organization-history store
+        // and the recovery journal are committed as a unit under
+        // OperationGate. The file SET is resolved inside the gate — a journal
+        // created while we waited for the gate must land in the snapshot, or
+        // the backup would hold settings@T1 with history@T0 and no WAL to
+        // converge them. Hold the gate only for these few small files; the
+        // rest still copies one by one from the pre-enumerated list.
         string[] fileSafetyMetadata =
         [
             "settings.json",
+            "widget-layout.json",
             "desktop-organization-history.json",
             "desktop-organization-recovery.json"
         ];
@@ -2271,9 +2291,16 @@ public sealed partial class DeskBoxDataBackupService
         // device identity onto every machine that restores it — silently
         // misattributing sync-layer provenance. DeviceIdentity.GetOrCreate
         // regenerates a fresh ID on first use after a restore.
+        //
+        // sync/ is excluded deliberately too: it is device-local protocol
+        // state (outbox queue, pull cursors, revision map, conflict log).
+        // Restoring it onto another machine would replay stale cursors and
+        // push intents against data the restore also rewrote — the sync
+        // contract assigns it no backup semantics at all.
         if (relativePath.StartsWith("quick-capture/thumbnails/", StringComparison.OrdinalIgnoreCase) ||
             relativePath.StartsWith("quick-capture/exports/", StringComparison.OrdinalIgnoreCase) ||
             relativePath.StartsWith("cache/", StringComparison.OrdinalIgnoreCase) ||
+            relativePath.StartsWith("sync/", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(relativePath, "weather-cache.json", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(relativePath, "device.id", StringComparison.OrdinalIgnoreCase))
         {

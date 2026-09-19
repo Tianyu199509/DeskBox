@@ -12,6 +12,9 @@ namespace DeskBox.Services;
 [JsonSerializable(
     typeof(QuickCaptureStoreData),
     TypeInfoPropertyName = "StoreData")]
+[JsonSerializable(
+    typeof(QuickCaptureItem),
+    TypeInfoPropertyName = "QuickCaptureItem")]
 internal sealed partial class QuickCaptureJsonContext : JsonSerializerContext
 {
 }

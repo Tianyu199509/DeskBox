@@ -1,3 +1,4 @@
+using DeskBox.Platform;
 using System.Runtime.InteropServices;
 
 namespace DeskBox.Services;
@@ -24,7 +25,7 @@ internal static unsafe partial class DirectStartupTaskXmlReader
     internal static string Read(string taskName)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(taskName);
-        int initialized = CoInitializeEx(0, 0); // COINIT_MULTITHREADED
+        int initialized = Ole32NativeMethods.CoInitializeEx(0, 0); // COINIT_MULTITHREADED
         if (initialized < 0 && initialized != RpcChangedMode)
         {
             Marshal.ThrowExceptionForHR(initialized);
@@ -38,7 +39,7 @@ internal static unsafe partial class DirectStartupTaskXmlReader
         nint xml = 0;
         try
         {
-            Marshal.ThrowExceptionForHR(CoCreateInstance(
+            Marshal.ThrowExceptionForHR(Ole32NativeMethods.CoCreateInstance(
                 in TaskSchedulerClassId, 0, 1, in TaskServiceInterfaceId, out service));
 
             // VT_EMPTY connects to the local scheduler using the current token.
@@ -74,7 +75,7 @@ internal static unsafe partial class DirectStartupTaskXmlReader
             // STA returns RPC_E_CHANGED_MODE and remains owned by the caller.
             if (initialized >= 0)
             {
-                CoUninitialize();
+                Ole32NativeMethods.CoUninitialize();
             }
         }
     }
@@ -100,14 +101,4 @@ internal static unsafe partial class DirectStartupTaskXmlReader
         private nint _value;
         private nint _recordInfo;
     }
-
-    [LibraryImport("ole32.dll")]
-    private static partial int CoInitializeEx(nint reserved, uint concurrencyModel);
-
-    [LibraryImport("ole32.dll")]
-    private static partial void CoUninitialize();
-
-    [LibraryImport("ole32.dll")]
-    private static partial int CoCreateInstance(
-        in Guid classId, nint outer, uint classContext, in Guid interfaceId, out nint instance);
 }

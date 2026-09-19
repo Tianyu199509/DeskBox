@@ -142,9 +142,17 @@ public sealed partial class FeedbackService
                 ? DeskBoxFeedbackSubmissionResult.Success(success.Id.Value)
                 : DeskBoxFeedbackSubmissionResult.Rejected("invalid_response");
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             throw;
+        }
+        catch (OperationCanceledException)
+        {
+            // HttpClient's 60-second timeout also surfaces as an
+            // OperationCanceledException. It must read as a network failure;
+            // rethrowing escapes the dialog's button deferral and wedges the
+            // submit button forever (feedback #115).
+            return DeskBoxFeedbackSubmissionResult.NetworkFailure();
         }
         catch (Exception)
         {
@@ -224,9 +232,16 @@ public sealed partial class FeedbackService
 
             return new DeskBoxFeedbackMineResult(true, body.Items);
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             throw;
+        }
+        catch (OperationCanceledException)
+        {
+            // Same timeout-vs-cancellation split as SubmitAsync: the dialog's
+            // loader has no retry path for a thrown exception, so a 60-second
+            // timeout must land on the Failure branch.
+            return DeskBoxFeedbackMineResult.Failure();
         }
         catch (Exception)
         {

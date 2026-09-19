@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using DeskBox.Platform;
 #if !DESKBOX_NATIVE_AOT
 using System.Runtime.InteropServices;
 using System.Runtime.InteropServices.ComTypes;
@@ -648,7 +649,7 @@ public static class ShortcutHelper
         string description)
     {
         IntPtr pidl = IntPtr.Zero;
-        int hresult = SHParseDisplayName(
+        int hresult = Shell32NativeMethods.SHParseDisplayName(
             parsingName,
             IntPtr.Zero,
             out pidl,
@@ -706,14 +707,6 @@ public static class ShortcutHelper
     }
 
 #if !DESKBOX_NATIVE_AOT
-    [DllImport("shell32.dll", CharSet = CharSet.Unicode, PreserveSig = true)]
-    private static extern int SHParseDisplayName(
-        string name,
-        IntPtr bindContext,
-        out IntPtr itemIdList,
-        uint attributesIn,
-        out uint attributesOut);
-
     /// <summary>Shell Link CoClass (CLSID_ShellLink).</summary>
     [ComImport]
     [Guid("00021401-0000-0000-C000-000000000046")]

@@ -87,9 +87,9 @@
     "Settings.FileStacks.PopoverStyle.Neutral": "ニュートラル",
     "Settings.FileStacks.Auto.Title": "自動スタック",
     "Settings.FileStacks.Auto.Description": "分類ルールに従って散在するファイルを自動的にまとめます。オフでも手動スタックは可能です",
-    "Settings.FileStacks.GroupBy.Title": "分類ルール",
-    "Settings.FileStacks.GroupBy.Description": "自動スタックが散在ファイルを分類する方法",
-    "Settings.FileStacks.Enable.Description": "オフにすると手動スタックを含むすべてのスタックを非表示にします",
+    "Settings.FileStacks.GroupBy.Title": "グループ化",
+    "Settings.FileStacks.GroupBy.Description": "ファイルがスタックに自動的に割り当てられる方法を選択します",
+    "Settings.FileStacks.Enable.Description": "選択したグループルールを使用して自動的にスタックを形成します",
     "Settings.FileStacks.Status.Manual": "手動のみ",
     "Widget.Stack.UseDefaultOpenMode": "既定の展開方法を使用",
     "Widget.Stack.RenameUnavailable": "このスタックは変更されました。もう一度お試しください。",
@@ -652,15 +652,11 @@
     "Settings.FileStacks.PageTitle": "ファイルスタック",
     "Settings.FileStacks.Description": "ファイルを移動せずに自動整理し、手動スタックはそのまま保持します",
     "Settings.FileStacks.Enable.Title": "自動スタックを有効化",
-    "Settings.FileStacks.Enable.Description": "選択したグループルールを使用して自動的にスタックを形成します",
     "Settings.FileStacks.Status.Off": "オフ",
-
     "Settings.FileStacks.Status.On": "散在するファイルをスタックにまとめる",
     "Settings.FileStacks.Mode.Title": "ファイルスタック モード",
     "Settings.FileStacks.Mode.Description": "手動および自動のファイルスタックを有効にします。オフにするとすべてのスタックを非表示にします",
     "Settings.FileStacks.Status.Custom": "カスタム形式 · {0} ルール",
-    "Settings.FileStacks.GroupBy.Title": "グループ化",
-    "Settings.FileStacks.GroupBy.Description": "ファイルがスタックに自動的に割り当てられる方法を選択します",
     "Settings.FileStacks.GroupBy.Kind": "ファイルの種類",
     "Settings.FileStacks.GroupBy.DateAdded": "DeskBox に追加された日",
     "Settings.FileStacks.GroupBy.DateCreated": "DeskBox に追加された日",
@@ -1212,6 +1208,7 @@
     "Feedback.Dialog.DiagnosticsFailed": "フィードバックは送信されましたが、診断バンドルをアップロードできませんでした。",
     "Feedback.Dialog.RateLimited": "直近 {0} 分以内に送信済みです。しばらくしてからお試しください。",
     "Feedback.Dialog.NetworkError": "フィードバックサービスに接続できません。接続を確認して再試行してください。",
+    "Feedback.Dialog.SubmitAnother": "さらにフィードバックを送る",
     "Feedback.My.Title": "自分のフィードバック",
     "Feedback.My.Retry": "再試行",
     "Feedback.My.LoadFailed": "読み込みに失敗しました。しばらくしてからお試しください。",
@@ -1263,6 +1260,12 @@
     "Settings.Dialog.MigrateStaleTitle": "前回の移行コピーが見つかりました",
     "Settings.Dialog.MigrateStaleBody": "選択した場所には、前回失敗した移行で保持された完全なコピーが既に存在します。再試行前にごみ箱へ移動する必要があります。\n\n{0} 個のフォルダーが見つかりました。",
     "Settings.Dialog.MigrateStaleCleanButton": "ごみ箱へ移動して再試行",
+    "Settings.Dialog.MigrateRollbackTitle": "移行に失敗し、一部のフォルダーを戻せませんでした",
+    "Settings.Dialog.MigrateRollbackBody": "移行に失敗しました：{0}\n\n以下のフォルダーを自動的に元の場所へ戻せませんでした。ファイルが新旧両方に残っている可能性があり、ウィジェットには一時的に表示されません：",
+    "Settings.Dialog.MigrateRollbackHint": "再試行すると、これらのフォルダーを元の場所へ戻します。既存のファイルが上書きまたは削除されることはありません。",
+    "Settings.Dialog.MigrateRollbackRetryButton": "戻しを再試行",
+    "Settings.Dialog.MigrateRollbackRetryComplete": "戻せていなかったフォルダーはすべて元の場所へ戻しました。",
+    "Settings.Dialog.MigrateRollbackRetryPartial": "まだ {0} 個のフォルダーを元の場所へ戻せていません（使用中か、すでに移動済みの可能性があります）：",
     "Settings.Dialog.PinQuickAccessTitle": "クイックアクセスにピン留てしました",
     "Settings.Dialog.PinQuickAccessBody": "DeskBox がフォルダーをエクスプローラーのクイックアクセスにピン留てするよう要求しました。ファイルのアップロード時にピッカーの左側からアクセスできます。",
     "Settings.Dialog.PinQuickAccessFailedTitle": "クイックアクセスへのピン留てに失敗",
@@ -1289,17 +1292,17 @@
     "Onboarding.Step1.Body": "DeskBox は Windows デスクトップを置き換えません。ファイル、検索、よく使うツールを軽量なウィジェットにまとめ、必要なときだけ表示します。",
     "Onboarding.Step1.Hint1": "Windows デスクトップを置き換えません。すべての操作は取り消し可能",
     "Onboarding.Step1.Hint2": "ウィジェットは自由に移動・リサイズできます",
-  "Onboarding.Step2.Eyebrow": "ウィジェットの作成",
-  "Onboarding.Step2.Title": "新しいウィジェットはトレイから作成",
-  "Onboarding.Step2.Body": "タスクバーの通知領域にある DeskBox アイコンを右クリックすると、いつでもウィジェットを作成できます。",
-  "Onboarding.Step2.TrayActionTitle": "DeskBox のトレイアイコンを右クリック",
-  "Onboarding.Step2.TrayActionBody": "アイコンが隠れている場合は、タスクバーの「隠れているインジケーターを表示します」を先に開きます",
-  "Onboarding.Step2.RightClick": "右クリック",
-  "Onboarding.Step2.NewWidgetTitle": "新しいウィジェット",
-  "Onboarding.Step2.NewWidgetBody": "デスクトップからドラッグしたファイルを整理",
-  "Onboarding.Step2.ConnectFolderTitle": "フォルダーマッピング",
-  "Onboarding.Step2.ConnectFolderBody": "既存フォルダーの内容をそのまま表示",
-  "Onboarding.Step2.FeatureHint": "ToDo、クイックキャプチャなどの機能ウィジェットは、設定で必要に応じて有効にできます",
+    "Onboarding.Step2.Eyebrow": "ウィジェットの作成",
+    "Onboarding.Step2.Title": "新しいウィジェットはトレイから作成",
+    "Onboarding.Step2.Body": "タスクバーの通知領域にある DeskBox アイコンを右クリックすると、いつでもウィジェットを作成できます。",
+    "Onboarding.Step2.TrayActionTitle": "DeskBox のトレイアイコンを右クリック",
+    "Onboarding.Step2.TrayActionBody": "アイコンが隠れている場合は、タスクバーの「隠れているインジケーターを表示します」を先に開きます",
+    "Onboarding.Step2.RightClick": "右クリック",
+    "Onboarding.Step2.NewWidgetTitle": "新しいウィジェット",
+    "Onboarding.Step2.NewWidgetBody": "デスクトップからドラッグしたファイルを整理",
+    "Onboarding.Step2.ConnectFolderTitle": "フォルダーマッピング",
+    "Onboarding.Step2.ConnectFolderBody": "既存フォルダーの内容をそのまま表示",
+    "Onboarding.Step2.FeatureHint": "ToDo、クイックキャプチャなどの機能ウィジェットは、設定で必要に応じて有効にできます",
     "Onboarding.Step2.FeatureListTitle": "オプションの機能ウィジェット",
     "Onboarding.Step2.FeatureList": "ToDo · クイックキャプチャ · ミュージック · 天気 · グローバル検索",
     "Onboarding.Step2.FeatureListDescription": "ファイルウィジェットに慣れてから、必要なツールだけを追加できます。",
@@ -1343,9 +1346,9 @@
     "Onboarding.Step4.AutoLocationSubOption": "現在地を自動検出",
     "Onboarding.Step5.Eyebrow": "準備完了",
     "Onboarding.Step5.Title": "準備が整いました",
-  "Onboarding.Step5.Body": "画面の右側に空のファイルウィジェットを作成しました。ファイルをドラッグして試してみてください。",
+    "Onboarding.Step5.Body": "画面の右側に空のファイルウィジェットを作成しました。ファイルをドラッグして試してみてください。",
     "Onboarding.Step5.Hint1": "デスクトップのファイルをウィジェットにドラッグして整理",
-  "Onboarding.Step5.Hint2": "追加するには DeskBox のトレイアイコンを右クリックし、「新しいウィジェット」を選びます",
+    "Onboarding.Step5.Hint2": "追加するには DeskBox のトレイアイコンを右クリックし、「新しいウィジェット」を選びます",
     "Onboarding.Step5.HotkeyTitle": "グローバルホットキー",
     "Onboarding.Step5.HotkeyDescription": "ホットキーを押して素早くすべてのウィジェットを表示・非表示",
     "Onboarding.Step5.HotkeyChange": "変更",
@@ -1605,7 +1608,7 @@
     "Widget.DeleteWidgetNote": "このウィジェットのみ閉じます。フォルダーとファイルは変更されません。",
     "Widget.DeleteWidgetConfirm": "ウィジェットを閉じる",
     "Widget.DeleteManagedInfo": "ウィジェット内のファイルをどうしますか？",
-    "Widget.KeepManagedFolder": "ファイルを保持",
+    "Widget.KeepManagedFolder": "ファイルを保持（フォルダーはそのまま）",
     "Widget.MoveBackThenDeleteFolder": "ファイルをデスクトップへ移動",
     "Widget.DeleteFolderToRecycleBin": "すべてのファイルも削除",
     "Widget.DeleteManagedFolderConfirmTitle": "「{0}」をごみ箱に移動しますか？",
@@ -1613,6 +1616,10 @@
     "Widget.DeleteManagedFolderConfirmMessageUnknownCount": "ウィジェットを閉じ、フォルダーとそのすべての内容をごみ箱に移動します。\n\n{0}\n\nごみ箱から復元できます。",
     "Widget.Error.OperationIncomplete": "操作は完了しませんでした。",
     "Widget.Error.FileWidgetPathConflict": "このフォルダーは、ファイルウィジェット「{0}」の保存先と同じパス、または互いに包含するパスであるため使用できません。重複しないフォルダーを選択してください。",
+    "Widget.Error.FileWidgetPathConflictSameFolder": "このフォルダーは使用できません：{0}の保存先「{1}」と同じフォルダーです。管理ストレージには専用ディレクトリが必要です。別のフォルダーを選んでください。",
+    "Widget.Error.FileWidgetPathConflictInsideOther": "このフォルダーは使用できません：{0}の保存先「{1}」の内部にあります。管理ストレージは移行やクリーンアップが影響し合わないよう専用のディレクトリ ツリーを必要とします。通常のフォルダー ウィジェット同士の親子マッピングはこの制限を受けません。",
+    "Widget.Error.FileWidgetPathConflictContainsOther": "このフォルダーは使用できません：{0}の保存先「{1}」を含んでいます。管理ストレージは移行やクリーンアップが影響し合わないよう専用のディレクトリ ツリーを必要とします。通常のフォルダー ウィジェット同士の親子マッピングはこの制限を受けません。",
+    "Widget.Error.FileWidgetPathConflictUnresolvable": "このフォルダーは使用できません：{0}の保存先「{1}」と重複しているか、重複を安全に判定できません。重複しないフォルダーを選んでください。",
     "Widget.MapFolder.ConflictWidgetHint": "このフォルダーはウィジェット「{0}」で使用中のため、そのウィジェットを開きました。",
     "Widget.MapFolder.ConflictRootHint": "このフォルダーは収納フォルダーと重複しています。設定の保存先を開いたので、収納場所を変更するか別のフォルダーを選択してください。",
     "Widget.Error.UnsafeFolderTransfer": "フォルダーをそれ自身、またはそのサブフォルダー内にコピーまたは移動することはできません。",
@@ -1630,6 +1637,7 @@
     "Widget.Error.ManagedFolderStillActive": "このフォルダーは既存の管理ウィジェットに属しているため、孤立としてクリーンアップできません。",
     "Widget.Error.ManagedFolderActionOnlyDefault": "デフォルトストレージパスの下の管理ウィジェットのみフォルダー処理を同期できます。",
     "Widget.Error.ManagedFolderNameExists": "その名前の管理ウィジェットは既に存在します。別の名前を選んでください。",
+    "Widget.Error.ManagedFolderNameUnavailable": "この名前は使用できません：管理フォルダー内に同名の項目が既にあり、自動的に統合できません。別の名前にしてください。",
     "QuickCapture.Name": "クイックキャプチャ",
     "QuickCapture.InputPlaceholder": "何かキャプチャ...",
     "QuickCapture.AddInput": "記録を追加",
@@ -1921,22 +1929,16 @@
     "Settings.Search.Everything.Detect": "自動検出",
     "Settings.Search.Everything.Launch": "Everything を起動",
     "Settings.Search.Everything.Browse": "Everything.exe を選択",
-    "Settings.Search.Everything.Download": "Everything をダウンロード",
-
+    "Settings.Search.Everything.Download": "Everything 公式サイトを開いてダウンロード",
     "Settings.Search.Everything.About.Button": "Everything について",
-
     "Settings.Search.Everything.About.Title": "Everything 統合について",
-
     "Settings.Search.Everything.About.P1": "DeskBox のファイルとフォルダーの検索は、無料のサードパーティ製デスクトップ検索エンジン Everything によって動作します。DeskBox は Everything の既存のインデックスを照会して即時結果を取得し、DeskBox のコンテンツ（メモ、タスク、設定）と同じ検索ポップアップに統合します。",
-
     "Settings.Search.Everything.About.P3": "Everything は voidtools が開発しており、DeskBox には同梱されていません。ファイル検索には Everything のインストールと実行が必要です。見つからない場合、DeskBox はエラーではなくリマインダーを表示します。",
     "Settings.Search.Everything.SetupHelp": "設定ヘルプ",
     "Settings.Search.Everything.Status.Unknown": "Everything はまだ確認されていません。",
     "Settings.Search.Everything.Status.Checking": "ローカルの Everything のインストールと接続を確認しています…",
     "Settings.Search.Everything.Status.NotConfirmed": "Everything が見つかりました。下でローカルインデックスの共有を確認してください。",
     "Settings.Search.Everything.Status.NotInstalled": "Everything が見つかりません。www.voidtools.com からダウンロードしてインストールし、自動検出をもう一度実行してください。",
-
-    "Settings.Search.Everything.Download": "Everything 公式サイトを開いてダウンロード",
     "Settings.Search.Everything.Status.NotRunning": "Everything はインストール済みですが実行されていません。先に起動してください。",
     "Settings.Search.Everything.Status.PermissionMismatch": "Everything と DeskBox の権限レベルが異なります。DeskBox は標準ユーザーのまま、Everything クライアントも通常権限で実行してください。サービスは昇格して構いません。",
     "Settings.Search.Everything.Status.IpcUnavailable": "Everything は実行中ですがローカル IPC を使用できません。IPC と既定の Everything インスタンスを確認してください。",
@@ -2460,178 +2462,178 @@
     "Onboarding.Task.SkipPractice": "練習をスキップ",
     "Onboarding.Task.Continue": "続ける",
     "Onboarding.Task.Step3.StatusCompleted": "完了：ファイルを収納ウィジェットへ移動しました。",
-    "Onboarding.Task.Step4.StatusCompleted": "完了：ウィジェットを非表示にして、もう一度表示しました。"
-    ,"Settings.WidgetGroups.Overview.Description": "複数のウィジェットを1か所にまとめ、タイトルバーから切り替えます"
-    ,"Settings.WidgetGroups.Overview.Ready": "{0} · いつでもグループ化できます"
-    ,"Settings.WidgetGroups.Overview.Summary": "{0}グループ · {1}"
-    ,"Settings.WidgetGroups.PageDescription": "複数のウィジェットを1か所にまとめ、タイトルバーから切り替えます。各ウィジェットの内容は独立したままです。"
-    ,"Settings.WidgetGroups.FollowDefaultWithValue": "既定値に従う（{0}）"
-    ,"Settings.WidgetGroups.Existing.SummaryDefault": "{0} · {1} · 既定値"
-    ,"Settings.WidgetGroups.Existing.SummaryCustom": "{0} · {1} · 個別設定"
-    ,"Settings.WidgetGroups.Existing.Name.Title": "グループ名"
-    ,"Settings.WidgetGroups.GroupChrome.Title": "タイトルバーの高さ"
-    ,"Settings.WidgetGroups.GroupChrome.Description": "ウィジェットを切り替えるため、グループではタイトルバーを表示します"
-    ,"Settings.WidgetGroups.GroupDisplay.Title": "表示方法"
-    ,"Settings.WidgetGroups.GroupDisplay.Description": "常に展開するか、クリックまたはホバーで展開します"
-    ,"Settings.WidgetGroups.Existing.Members.Title": "グループ内のウィジェット"
-    ,"Settings.WidgetGroups.Existing.Member.MoveUp": "前へ移動"
-    ,"Settings.WidgetGroups.Existing.Member.MoveDown": "後ろへ移動"
-    ,"Settings.WidgetGroups.Existing.Member.Remove": "グループから外す"
-    ,"Settings.WidgetGroups.DissolveDialog.Title": "このウィジェットグループを解除しますか？"
-    ,"Settings.WidgetGroups.DissolveDialog.Confirm": "グループを解除"
-    ,"Settings.WidgetGroups.DissolveDialog.Description": "内容は削除されません。各ウィジェットは再び独立して表示されます。"
-    ,"Glance.Title": "Glance"
-    ,"Glance.Instances.Title": "Glance ウィジェット"
-    ,"Glance.Instances.Description": "{0} 個の Glance ウィジェットを個別に管理します"
-    ,"Glance.Instances.MasterOff": "全体スイッチがオフのため、すべての Glance ウィジェットが無効です。"
-    ,"Glance.Instances.Empty": "Glance ウィジェットはありません"
-    ,"Glance.Instances.Enable": "このウィジェットを有効にする"
-    ,"Glance.Instances.Add": "Glance ウィジェットを追加"
-    ,"Glance.Instances.More": "その他の操作"
-    ,"Glance.Instances.Locate": "デスクトップに表示"
-    ,"Glance.Instances.Duplicate": "ウィジェットを複製"
-    ,"Glance.Instances.RenamePlaceholder": "ウィジェット名を入力"
-    ,"Glance.Instances.RenameTitle": "Glance ウィジェットの名前を変更"
-    ,"Glance.Instances.DeleteTitle": "「{0}」を削除しますか？"
-    ,"Glance.Instances.DeleteDescription": "この Glance ウィジェットと個別設定だけを削除します。他のウィジェットには影響しません。"
-    ,"WidgetContent.Glance.StatusLabel": "Glance"
-    ,"WidgetContent.Glance.StatusDescription": "写真、時刻、日付をデスクトップでひと目で確認"
-    ,"Glance.Settings.Title": "Glance"
-    ,"Glance.Settings.Description": "写真、時刻、日付で落ち着いたデスクトップを作ります"
-    ,"Glance.Display.Title": "表示内容"
-    ,"Glance.Display.Description": "ウィジェットに表示する内容を選択します"
-    ,"Glance.Display.PhotoOnly": "写真のみ"
-    ,"Glance.Display.Separator": "、"
-    ,"Glance.Display.Time": "時刻"
-    ,"Glance.Display.Date": "日付"
-    ,"Glance.Display.Year": "年"
-    ,"Glance.Display.Weekday": "曜日"
-    ,"Glance.Display.Calendar": "カレンダー"
-    ,"Glance.Layout.Title": "レイアウト"
-    ,"Glance.LayoutGroup.Title": "レイアウトと文字"
-    ,"Glance.LayoutGroup.Description": "レイアウト、カレンダー、時刻の文字スタイル"
-    ,"Glance.Layout.Immersive": "没入型"
-    ,"Glance.Layout.Centered": "中央"
-    ,"Glance.Layout.Editorial": "雑誌風"
-    ,"Glance.Layout.Calendar": "カレンダー"
-    ,"Glance.CalendarMaterial.Title": "カレンダーの素材"
-    ,"Glance.CalendarMaterial.Description": "カレンダーカードの背景スタイルを選択します"
-    ,"Glance.CalendarMaterial.FollowSystem": "システムに従う"
-    ,"Glance.CalendarMaterial.FollowImage": "画像の色に従う"
-    ,"Glance.CalendarMaterial.Transparency": "透明度"
-    ,"Glance.CalendarMaterial.TransparencyDescription": "カレンダー背景のみに適用され、100% で完全に透明になります"
-    ,"Glance.TraditionalCalendar.Title": "伝統暦"
-    ,"Glance.TraditionalCalendar.Description": "DeskBox の言語に自動で従うか、暦を選択またはオフにします"
-    ,"Glance.Festivals.Title": "中国の伝統行事"
-    ,"Glance.Festivals.Description": "春節や中秋節などを旧暦の日付欄に優先表示します"
-    ,"Glance.TraditionalCalendar.Auto": "自動（{0}）"
-    ,"Glance.TraditionalCalendar.None": "オフ"
-    ,"Glance.TraditionalCalendar.ChineseLunar": "中国暦"
-    ,"Glance.TraditionalCalendar.UmAlQura": "Umm al-Qura"
-    ,"Glance.TraditionalCalendar.Hijri": "Hijri"
-    ,"Glance.TraditionalCalendar.IndianSaka": "インド国定暦（サカ暦）"
-    ,"Glance.TraditionalCalendar.JapaneseEra": "和暦"
-    ,"Glance.TraditionalCalendar.Bangla": "Bangla"
-    ,"Glance.TraditionalCalendar.Julian": "ユリウス暦"
-    ,"Glance.TraditionalCalendar.Hebrew": "ヘブライ暦"
-    ,"Glance.TraditionalCalendar.Persian": "ペルシャ暦"
-    ,"Glance.TraditionalCalendar.ThaiBuddhist": "タイ仏暦"
-    ,"Glance.Background.Title": "背景画像"
-    ,"Glance.BackgroundGroup.Description": "画像ソース、切り替え、キャッシュ"
-    ,"Glance.Background.Transparency.Title": "画像の透明度"
-    ,"Glance.Background.Transparency.Description": "背景画像だけを調整し、文字やコントロールには影響しません"
-    ,"Glance.Background.Online": "Wikimedia Commons"
-    ,"Glance.Background.Files": "ローカル画像"
-    ,"Glance.Background.Folder": "画像フォルダー"
-    ,"Glance.Background.Bing": "Bing の今日の壁紙"
-    ,"Glance.Background.ChooseFiles": "画像を選択"
-    ,"Glance.Background.ChooseFolder": "フォルダーを選択"
-    ,"Glance.Background.ClearSelection": "クリア"
-    ,"Glance.Background.LocalSummary": "ローカル画像を {0} 枚追加済み"
-    ,"Glance.Background.Category.Title": "オンライン画像のカテゴリ"
-    ,"Glance.Background.Category.Description": "テーマを選択します。切り替えると新しい画像が自動で読み込まれます。"
-    ,"Glance.Background.Category.Featured": "おすすめ"
-    ,"Glance.Background.Category.Landscapes": "風景"
-    ,"Glance.Background.Category.Cities": "都市"
-    ,"Glance.Background.Category.Architecture": "建築"
-    ,"Glance.Background.Category.Animals": "動物"
-    ,"Glance.Background.Category.Plants": "植物"
-    ,"Glance.Background.Category.Astronomy": "宇宙"
-    ,"Glance.Background.Category.People": "人物"
-    ,"Glance.Rotation.Title": "切り替え間隔"
-    ,"Glance.Rotation.Manual": "手動"
-    ,"Glance.Rotation.10Seconds": "10 秒ごと"
-    ,"Glance.Rotation.30Seconds": "30 秒ごと"
-    ,"Glance.Rotation.60Seconds": "60 秒ごと"
-    ,"Glance.Rotation.2Minutes": "2 分ごと"
-    ,"Glance.Rotation.5Minutes": "5 分ごと"
-    ,"Glance.Rotation.10Minutes": "10 分ごと"
-    ,"Glance.Rotation.30Minutes": "30 分ごと"
-    ,"Glance.Rotation.1Hour": "1 時間ごと"
-    ,"Glance.Rotation.6Hours": "6 時間ごと"
-    ,"Glance.Rotation.Daily": "毎日"
-    ,"Glance.Rotation.Random": "ランダム順"
-    ,"Glance.Transition.Title": "切り替え効果"
-    ,"Glance.AppearanceGroup.Title": "外観とアニメーション"
-    ,"Glance.AppearanceGroup.Description": "画像の切り替え効果と内容の読みやすさ"
-    ,"Glance.Transition.None": "なし"
-    ,"Glance.Transition.CrossFade": "クロスフェード"
-    ,"Glance.Transition.SlideFade": "スライドとフェード"
-    ,"Glance.Transition.ZoomFade": "ズームとフェード"
-    ,"Glance.Speed.Fast": "速い"
-    ,"Glance.Speed.Standard": "標準"
-    ,"Glance.Speed.Relaxed": "ゆったり"
-    ,"Glance.Typography.Title": "フォント サイズ"
-    ,"Glance.Typography.TimeFormat": "時刻形式"
-    ,"Glance.Typography.FollowSystem": "システムに従う"
-    ,"Glance.Typography.Hour24": "24時間制"
-    ,"Glance.Typography.Hour12": "12時間制"
-    ,"Glance.Typography.Font": "フォント"
-    ,"Glance.Speed.Title": "切り替え速度"
-    ,"Glance.Typography.SystemDefault": "システム既定"
-    ,"Glance.Readability.Title": "読みやすさ"
-    ,"Glance.Readability.None": "なし"
-    ,"Glance.Readability.Soft": "ソフト"
-    ,"Glance.Readability.Strong": "強い"
-    ,"Glance.PhotoControls.Title": "写真の操作ボタンを表示"
-    ,"Glance.PhotoControls.Description": "ポインターを合わせたときに一時停止、次へ、写真情報を表示します"
-    ,"Glance.Actions.Next": "次の写真"
-    ,"Glance.Actions.Pause": "切り替えを一時停止"
-    ,"Glance.Actions.Resume": "切り替えを再開"
-    ,"Glance.Actions.PhotoInfo": "写真情報"
-    ,"Glance.Actions.OpenSource": "写真の出典を開く"
-    ,"Glance.Actions.ShowInExplorer": "エクスプローラーで表示"
-    ,"Glance.Status.Loading": "画像を読み込んでいます…"
-    ,"Glance.Status.OnlineFallback": "代替画像を使用しています"
-    ,"Glance.Status.NoLocalImages": "ローカル画像が追加されていません"
-    ,"Glance.Cache.Title": "画像キャッシュ"
-    ,"Glance.Cache.Clear": "キャッシュをクリア"
-    ,"Glance.Cache.Cleared": "キャッシュをクリアしました"
-    ,"Settings.Windows10VisualCompatibility.Title": "Windows 10 の表示互換性"
-    ,"Settings.Windows10VisualCompatibility.Message": "Mica とシステムのウィンドウ角丸には Windows 11 が必要です。Windows 10 ではアクリルまたは単色と直角のウィンドウを使用します。",
-  "Settings.Dialog.QuickAccessOperationFailedBody": "DeskBox はエクスプローラーのクイック アクセスを更新できませんでした。後でもう一度お試しください。",
-  "DesktopOrganization.Result.FailedBody": "デスクトップの整理を完了できませんでした。後でもう一度お試しください。",
-  "DesktopOrganization.Undo.FailedBody": "デスクトップの整理を元に戻せませんでした。後でもう一度お試しください。",
-  "Common.OperationFailedRetry": "操作を完了できませんでした。もう一度お試しください。",
-  "Settings.WidgetForeground.Title": "ウィジェットの文字色",
-  "Settings.WidgetForeground.Description": "画像やカラーアイコンを変えずに、文字と単色コントロールの色を選択します。",
-  "Settings.WidgetForeground.FollowTheme": "アプリのテーマに従う",
-  "Settings.WidgetForeground.Light": "明るい文字",
-  "Settings.WidgetForeground.Dark": "暗い文字",
-  "Settings.WidgetForeground.Custom": "カスタム",
-  "Settings.WidgetForeground.CustomColor.Title": "カスタム文字色",
-  "Settings.WidgetForeground.CustomColor.Description": "文字と単色コントロールに使用します。",
-  "Widget.Foreground.Menu": "文字と読みやすさ",
-  "Widget.Foreground.UseGlobal": "全体設定を使用",
-  "Widget.Foreground.CustomColor": "カスタム色…",
-  "Settings.DropAction.System": "Windows の既定に従う",
-  "Widget.RunAsAdministrator": "管理者として実行",
-  "Widget.RunAsAdministrator.AlreadyRunning": "このアプリは通常の権限ですでに実行中です。完全に終了してから、もう一度お試しください。",
-  "Widget.RunAsAdministrator.NotElevated": "Windows は管理者プロセスを作成できませんでした。UAC の設定を確認して、もう一度お試しください。",
-  "Widget.CreateShortcut": "ショートカットを作成",
-  "Widget.MoreSystemOperations": "その他のシステム操作",
-  "Settings.ManagedPath.DesktopShortcut.Title": "保存フォルダーのデスクトップ ショートカット",
-  "Settings.ManagedPath.DesktopShortcut.Description": "現在の保存フォルダーへのショートカットを作成します。削除した場合、DeskBox が再作成することはありません。",
+    "Onboarding.Task.Step4.StatusCompleted": "完了：ウィジェットを非表示にして、もう一度表示しました。",
+    "Settings.WidgetGroups.Overview.Description": "複数のウィジェットを1か所にまとめ、タイトルバーから切り替えます",
+    "Settings.WidgetGroups.Overview.Ready": "{0} · いつでもグループ化できます",
+    "Settings.WidgetGroups.Overview.Summary": "{0}グループ · {1}",
+    "Settings.WidgetGroups.PageDescription": "複数のウィジェットを1か所にまとめ、タイトルバーから切り替えます。各ウィジェットの内容は独立したままです。",
+    "Settings.WidgetGroups.FollowDefaultWithValue": "既定値に従う（{0}）",
+    "Settings.WidgetGroups.Existing.SummaryDefault": "{0} · {1} · 既定値",
+    "Settings.WidgetGroups.Existing.SummaryCustom": "{0} · {1} · 個別設定",
+    "Settings.WidgetGroups.Existing.Name.Title": "グループ名",
+    "Settings.WidgetGroups.GroupChrome.Title": "タイトルバーの高さ",
+    "Settings.WidgetGroups.GroupChrome.Description": "ウィジェットを切り替えるため、グループではタイトルバーを表示します",
+    "Settings.WidgetGroups.GroupDisplay.Title": "表示方法",
+    "Settings.WidgetGroups.GroupDisplay.Description": "常に展開するか、クリックまたはホバーで展開します",
+    "Settings.WidgetGroups.Existing.Members.Title": "グループ内のウィジェット",
+    "Settings.WidgetGroups.Existing.Member.MoveUp": "前へ移動",
+    "Settings.WidgetGroups.Existing.Member.MoveDown": "後ろへ移動",
+    "Settings.WidgetGroups.Existing.Member.Remove": "グループから外す",
+    "Settings.WidgetGroups.DissolveDialog.Title": "このウィジェットグループを解除しますか？",
+    "Settings.WidgetGroups.DissolveDialog.Confirm": "グループを解除",
+    "Settings.WidgetGroups.DissolveDialog.Description": "内容は削除されません。各ウィジェットは再び独立して表示されます。",
+    "Glance.Title": "Glance",
+    "Glance.Instances.Title": "Glance ウィジェット",
+    "Glance.Instances.Description": "{0} 個の Glance ウィジェットを個別に管理します",
+    "Glance.Instances.MasterOff": "全体スイッチがオフのため、すべての Glance ウィジェットが無効です。",
+    "Glance.Instances.Empty": "Glance ウィジェットはありません",
+    "Glance.Instances.Enable": "このウィジェットを有効にする",
+    "Glance.Instances.Add": "Glance ウィジェットを追加",
+    "Glance.Instances.More": "その他の操作",
+    "Glance.Instances.Locate": "デスクトップに表示",
+    "Glance.Instances.Duplicate": "ウィジェットを複製",
+    "Glance.Instances.RenamePlaceholder": "ウィジェット名を入力",
+    "Glance.Instances.RenameTitle": "Glance ウィジェットの名前を変更",
+    "Glance.Instances.DeleteTitle": "「{0}」を削除しますか？",
+    "Glance.Instances.DeleteDescription": "この Glance ウィジェットと個別設定だけを削除します。他のウィジェットには影響しません。",
+    "WidgetContent.Glance.StatusLabel": "Glance",
+    "WidgetContent.Glance.StatusDescription": "写真、時刻、日付をデスクトップでひと目で確認",
+    "Glance.Settings.Title": "Glance",
+    "Glance.Settings.Description": "写真、時刻、日付で落ち着いたデスクトップを作ります",
+    "Glance.Display.Title": "表示内容",
+    "Glance.Display.Description": "ウィジェットに表示する内容を選択します",
+    "Glance.Display.PhotoOnly": "写真のみ",
+    "Glance.Display.Separator": "、",
+    "Glance.Display.Time": "時刻",
+    "Glance.Display.Date": "日付",
+    "Glance.Display.Year": "年",
+    "Glance.Display.Weekday": "曜日",
+    "Glance.Display.Calendar": "カレンダー",
+    "Glance.Layout.Title": "レイアウト",
+    "Glance.LayoutGroup.Title": "レイアウトと文字",
+    "Glance.LayoutGroup.Description": "レイアウト、カレンダー、時刻の文字スタイル",
+    "Glance.Layout.Immersive": "没入型",
+    "Glance.Layout.Centered": "中央",
+    "Glance.Layout.Editorial": "雑誌風",
+    "Glance.Layout.Calendar": "カレンダー",
+    "Glance.CalendarMaterial.Title": "カレンダーの素材",
+    "Glance.CalendarMaterial.Description": "カレンダーカードの背景スタイルを選択します",
+    "Glance.CalendarMaterial.FollowSystem": "システムに従う",
+    "Glance.CalendarMaterial.FollowImage": "画像の色に従う",
+    "Glance.CalendarMaterial.Transparency": "透明度",
+    "Glance.CalendarMaterial.TransparencyDescription": "カレンダー背景のみに適用され、100% で完全に透明になります",
+    "Glance.TraditionalCalendar.Title": "伝統暦",
+    "Glance.TraditionalCalendar.Description": "DeskBox の言語に自動で従うか、暦を選択またはオフにします",
+    "Glance.Festivals.Title": "中国の伝統行事",
+    "Glance.Festivals.Description": "春節や中秋節などを旧暦の日付欄に優先表示します",
+    "Glance.TraditionalCalendar.Auto": "自動（{0}）",
+    "Glance.TraditionalCalendar.None": "オフ",
+    "Glance.TraditionalCalendar.ChineseLunar": "中国暦",
+    "Glance.TraditionalCalendar.UmAlQura": "Umm al-Qura",
+    "Glance.TraditionalCalendar.Hijri": "Hijri",
+    "Glance.TraditionalCalendar.IndianSaka": "インド国定暦（サカ暦）",
+    "Glance.TraditionalCalendar.JapaneseEra": "和暦",
+    "Glance.TraditionalCalendar.Bangla": "Bangla",
+    "Glance.TraditionalCalendar.Julian": "ユリウス暦",
+    "Glance.TraditionalCalendar.Hebrew": "ヘブライ暦",
+    "Glance.TraditionalCalendar.Persian": "ペルシャ暦",
+    "Glance.TraditionalCalendar.ThaiBuddhist": "タイ仏暦",
+    "Glance.Background.Title": "背景画像",
+    "Glance.BackgroundGroup.Description": "画像ソース、切り替え、キャッシュ",
+    "Glance.Background.Transparency.Title": "画像の透明度",
+    "Glance.Background.Transparency.Description": "背景画像だけを調整し、文字やコントロールには影響しません",
+    "Glance.Background.Online": "Wikimedia Commons",
+    "Glance.Background.Files": "ローカル画像",
+    "Glance.Background.Folder": "画像フォルダー",
+    "Glance.Background.Bing": "Bing の今日の壁紙",
+    "Glance.Background.ChooseFiles": "画像を選択",
+    "Glance.Background.ChooseFolder": "フォルダーを選択",
+    "Glance.Background.ClearSelection": "クリア",
+    "Glance.Background.LocalSummary": "ローカル画像を {0} 枚追加済み",
+    "Glance.Background.Category.Title": "オンライン画像のカテゴリ",
+    "Glance.Background.Category.Description": "テーマを選択します。切り替えると新しい画像が自動で読み込まれます。",
+    "Glance.Background.Category.Featured": "おすすめ",
+    "Glance.Background.Category.Landscapes": "風景",
+    "Glance.Background.Category.Cities": "都市",
+    "Glance.Background.Category.Architecture": "建築",
+    "Glance.Background.Category.Animals": "動物",
+    "Glance.Background.Category.Plants": "植物",
+    "Glance.Background.Category.Astronomy": "宇宙",
+    "Glance.Background.Category.People": "人物",
+    "Glance.Rotation.Title": "切り替え間隔",
+    "Glance.Rotation.Manual": "手動",
+    "Glance.Rotation.10Seconds": "10 秒ごと",
+    "Glance.Rotation.30Seconds": "30 秒ごと",
+    "Glance.Rotation.60Seconds": "60 秒ごと",
+    "Glance.Rotation.2Minutes": "2 分ごと",
+    "Glance.Rotation.5Minutes": "5 分ごと",
+    "Glance.Rotation.10Minutes": "10 分ごと",
+    "Glance.Rotation.30Minutes": "30 分ごと",
+    "Glance.Rotation.1Hour": "1 時間ごと",
+    "Glance.Rotation.6Hours": "6 時間ごと",
+    "Glance.Rotation.Daily": "毎日",
+    "Glance.Rotation.Random": "ランダム順",
+    "Glance.Transition.Title": "切り替え効果",
+    "Glance.AppearanceGroup.Title": "外観とアニメーション",
+    "Glance.AppearanceGroup.Description": "画像の切り替え効果と内容の読みやすさ",
+    "Glance.Transition.None": "なし",
+    "Glance.Transition.CrossFade": "クロスフェード",
+    "Glance.Transition.SlideFade": "スライドとフェード",
+    "Glance.Transition.ZoomFade": "ズームとフェード",
+    "Glance.Speed.Fast": "速い",
+    "Glance.Speed.Standard": "標準",
+    "Glance.Speed.Relaxed": "ゆったり",
+    "Glance.Typography.Title": "フォント サイズ",
+    "Glance.Typography.TimeFormat": "時刻形式",
+    "Glance.Typography.FollowSystem": "システムに従う",
+    "Glance.Typography.Hour24": "24時間制",
+    "Glance.Typography.Hour12": "12時間制",
+    "Glance.Typography.Font": "フォント",
+    "Glance.Speed.Title": "切り替え速度",
+    "Glance.Typography.SystemDefault": "システム既定",
+    "Glance.Readability.Title": "読みやすさ",
+    "Glance.Readability.None": "なし",
+    "Glance.Readability.Soft": "ソフト",
+    "Glance.Readability.Strong": "強い",
+    "Glance.PhotoControls.Title": "写真の操作ボタンを表示",
+    "Glance.PhotoControls.Description": "ポインターを合わせたときに一時停止、次へ、写真情報を表示します",
+    "Glance.Actions.Next": "次の写真",
+    "Glance.Actions.Pause": "切り替えを一時停止",
+    "Glance.Actions.Resume": "切り替えを再開",
+    "Glance.Actions.PhotoInfo": "写真情報",
+    "Glance.Actions.OpenSource": "写真の出典を開く",
+    "Glance.Actions.ShowInExplorer": "エクスプローラーで表示",
+    "Glance.Status.Loading": "画像を読み込んでいます…",
+    "Glance.Status.OnlineFallback": "代替画像を使用しています",
+    "Glance.Status.NoLocalImages": "ローカル画像が追加されていません",
+    "Glance.Cache.Title": "画像キャッシュ",
+    "Glance.Cache.Clear": "キャッシュをクリア",
+    "Glance.Cache.Cleared": "キャッシュをクリアしました",
+    "Settings.Windows10VisualCompatibility.Title": "Windows 10 の表示互換性",
+    "Settings.Windows10VisualCompatibility.Message": "Mica とシステムのウィンドウ角丸には Windows 11 が必要です。Windows 10 ではアクリルまたは単色と直角のウィンドウを使用します。",
+    "Settings.Dialog.QuickAccessOperationFailedBody": "DeskBox はエクスプローラーのクイック アクセスを更新できませんでした。後でもう一度お試しください。",
+    "DesktopOrganization.Result.FailedBody": "デスクトップの整理を完了できませんでした。後でもう一度お試しください。",
+    "DesktopOrganization.Undo.FailedBody": "デスクトップの整理を元に戻せませんでした。後でもう一度お試しください。",
+    "Common.OperationFailedRetry": "操作を完了できませんでした。もう一度お試しください。",
+    "Settings.WidgetForeground.Title": "ウィジェットの文字色",
+    "Settings.WidgetForeground.Description": "画像やカラーアイコンを変えずに、文字と単色コントロールの色を選択します。",
+    "Settings.WidgetForeground.FollowTheme": "アプリのテーマに従う",
+    "Settings.WidgetForeground.Light": "明るい文字",
+    "Settings.WidgetForeground.Dark": "暗い文字",
+    "Settings.WidgetForeground.Custom": "カスタム",
+    "Settings.WidgetForeground.CustomColor.Title": "カスタム文字色",
+    "Settings.WidgetForeground.CustomColor.Description": "文字と単色コントロールに使用します。",
+    "Widget.Foreground.Menu": "文字と読みやすさ",
+    "Widget.Foreground.UseGlobal": "全体設定を使用",
+    "Widget.Foreground.CustomColor": "カスタム色…",
+    "Settings.DropAction.System": "Windows の既定に従う",
+    "Widget.RunAsAdministrator": "管理者として実行",
+    "Widget.RunAsAdministrator.AlreadyRunning": "このアプリは通常の権限ですでに実行中です。完全に終了してから、もう一度お試しください。",
+    "Widget.RunAsAdministrator.NotElevated": "Windows は管理者プロセスを作成できませんでした。UAC の設定を確認して、もう一度お試しください。",
+    "Widget.CreateShortcut": "ショートカットを作成",
+    "Widget.MoreSystemOperations": "その他のシステム操作",
+    "Settings.ManagedPath.DesktopShortcut.Title": "保存フォルダーのデスクトップ ショートカット",
+    "Settings.ManagedPath.DesktopShortcut.Description": "現在の保存フォルダーへのショートカットを作成します。削除した場合、DeskBox が再作成することはありません。",
     "DesktopOrganization.Public.PersonalCount": "個人デスクトップ（{0} 項目）",
     "DesktopOrganization.Public.SharedCount": "パブリックデスクトップ（{0} 項目、全アカウント共有）",
     "DesktopOrganization.Public.Unavailable": "パブリックデスクトップ（現在読み取れません）",
@@ -2735,13 +2737,12 @@
     "Settings.CloudBackup.TestConnection": "接続をテスト",
     "Settings.CloudBackup.TestConnection.Success": "接続に成功しました。",
     "Settings.CloudBackup.TestConnection.Failed": "接続に失敗しました：{0}",
-    "Settings.CloudBackup.OfficialCloudHint": "公式アカウントサービスの提供開始後、DeskBox クラウドバックアップがここに表示されます。",
     "Settings.CloudBackup.TodoData.Title": "ToDo データ",
-    "Settings.CloudBackup.TodoData.Description": "すべての ToDo ウィジェットのタスクとその添付ファイル。",
+    "Settings.CloudBackup.TodoData.Description": "すべての ToDo ウィジェットの ToDo 項目。添付ファイルは含まれません。",
     "Settings.CloudBackup.QuickCaptureData.Title": "クイックキャプチャデータ",
-    "Settings.CloudBackup.QuickCaptureData.Description": "クイックキャプチャの記録とその添付ファイル。",
+    "Settings.CloudBackup.QuickCaptureData.Description": "クイックメモ。添付ファイルは含まれません。",
     "Settings.CloudBackup.WidgetStyle.Title": "ウィジェットスタイル",
-    "Settings.CloudBackup.WidgetStyle.Description": "不透明度、マテリアル、配色などの外観設定。位置やモニターレイアウトは含まれません。",
+    "Settings.CloudBackup.WidgetStyle.Description": "透明度、マテリアル、配色などの外観設定。ウィジェットの位置やモニターレイアウトは含まれません。",
     "Settings.CloudBackup.Interval.Title": "バックアップ間隔",
     "Settings.CloudBackup.Interval.Description": "DeskBox 実行中にバックグラウンドでスナップショットをアップロードする頻度。",
     "Settings.CloudBackup.Interval.Hour": "1 時間",
@@ -2757,6 +2758,7 @@
     "Settings.CloudBackup.BackupNow.Success": "アップロードしました：{0}",
     "Settings.CloudBackup.BackupNow.Failed": "バックアップに失敗しました：{0}",
     "Settings.CloudBackup.NotConfigured": "クラウドバックアップはまだ設定されていません。",
+    "Settings.CloudBackup.NoScope": "バックアップするデータの種類を 1 つ以上選択してください。",
     "Settings.CloudBackup.LastSuccess": "前回の成功したバックアップ：{0}",
     "Settings.CloudBackup.LastSuccess.Never": "成功したバックアップはまだありません。",
     "Settings.CloudBackup.RefreshSnapshots": "更新",
@@ -2777,5 +2779,31 @@
     "Settings.CloudBackup.HttpWarning": "http:// エンドポイントはパスワードを Base64 エンコードで平文チャネルに送信します。信頼できるローカルネットワークのサーバーにのみ使用してください。",
     "Settings.CloudBackup.RestoreConfirm.SourceDevice": "ソースデバイス：{0}。",
     "Settings.CloudBackup.RestoreConfirm.Remapped": "復元されたタスクデータは、ソースのウィジェット ID がこのデバイスに存在しないため、本デバイスの {0} 個のウィジェットにマッピングされました。",
-    "Settings.CloudBackup.RestoreConfirm.Unmapped": "{0} 件のタスクストアはこのデバイスのどのウィジェットにもマッピングできませんでした。ファイルはディスクに保存されますが表示されません。"
+    "Settings.CloudBackup.RestoreConfirm.Unmapped": "{0} 件のタスクストアはこのデバイスのどのウィジェットにもマッピングできませんでした。ファイルはディスクに保存されますが表示されません。",
+    "Settings.Dialog.MigrateProgressTitle": "ストレージの場所を移動しています",
+    "Settings.Dialog.MigrateProgressBody": "ウィジェットフォルダーを\n{0}\nから\n{1}\nへ移動しています",
+    "Settings.Dialog.MigrateProgressWidget": "フォルダー {0}/{1}: {2}",
+    "Settings.Dialog.MigrateCanceling": "キャンセルして元に戻しています…",
+    "Settings.Dialog.MigrateItemPaths": "移動元: {0}\n移動先: {1}",
+    "Settings.Dialog.MigrateItemRetry": "再試行",
+    "Settings.Dialog.MigrateItemSkip": "スキップ",
+    "Settings.Dialog.MigrateItemAbort": "移行を中止",
+    "Settings.Dialog.MigrateItemApplyAll": "残りのすべての項目に同じ操作を適用",
+    "Settings.Dialog.MigrateReasonInUse": "ファイルが別のプログラムで開かれています。閉じてから再試行するか、スキップしてください。",
+    "Settings.Dialog.MigrateReasonAccessDenied": "アクセスが拒否されました。",
+    "Settings.Dialog.MigrateReasonNotFound": "項目が存在しません（移動または削除された可能性があります）。",
+    "Settings.Dialog.MigrateReasonDiskFull": "移動先のドライブの容量が不足しています。",
+    "Settings.Dialog.MigrateReasonPathTooLong": "パスが長すぎます。",
+    "Settings.Dialog.MigrateReasonUnknown": "予期しないエラーが発生しました。",
+    "Settings.Dialog.MigrateResultCanceledTitle": "移行がキャンセルされました",
+    "Settings.Dialog.MigrateResultCanceledBody": "移動済みのフォルダーは元の場所に復元されました。",
+    "Settings.Dialog.MigrateResultFailedBody": "移行が停止しました: {0}",
+    "Settings.Dialog.MigrateResultSummary": "{0} 個のフォルダーを移行 · {1} 項目を移動 · {2} 項目は未移動",
+    "Settings.Dialog.MigrateResultResidueNote": "古いフォルダー {0} 個をクリーンアップできませんでした。次に処理できます。",
+    "Settings.Dialog.MigrateSkippedHeader": "移動されなかった項目（元の場所に残っています）:",
+    "Settings.Dialog.MigrateSkippedItem": "{0} · {1} — {2}",
+    "Settings.Dialog.MigrateSkippedKeptNote": "スキップしたファイルは古いフォルダーに残り、そこから引き続きアクセスできます。",
+    "Settings.Dialog.MigrateRetrySkippedButton": "未移動の項目を再試行",
+    "Settings.Dialog.MigrateRetryResult": "再試行が完了しました — 未移動の項目は {0} 件です。",
+    "Settings.Dialog.MigrateOpenTargetButton": "新しいフォルダーを開く"
 }

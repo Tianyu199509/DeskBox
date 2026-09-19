@@ -1,6 +1,6 @@
-using System.Runtime.InteropServices;
 using Microsoft.Win32.SafeHandles;
 using DeskBox.Models;
+using DeskBox.Platform;
 
 namespace DeskBox.Services;
 
@@ -879,7 +879,9 @@ public sealed class DesktopAutoOrganizationWatcher : IDisposable
 
     private static FileIdentity? TryGetFileIdentity(SafeFileHandle handle)
     {
-        return GetFileInformationByHandle(handle, out ByHandleFileInformation information)
+        return Kernel32NativeMethods.GetFileInformationByHandle(
+            handle,
+            out Kernel32NativeMethods.ByHandleFileInformation information)
             ? new FileIdentity(
                 information.VolumeSerialNumber,
                 ((ulong)information.FileIndexHigh << 32) | information.FileIndexLow)
@@ -1067,26 +1069,6 @@ public sealed class DesktopAutoOrganizationWatcher : IDisposable
         uint VolumeSerialNumber,
         ulong FileIndex);
 
-    [StructLayout(LayoutKind.Sequential)]
-    private struct ByHandleFileInformation
-    {
-        public uint FileAttributes;
-        public System.Runtime.InteropServices.ComTypes.FILETIME CreationTime;
-        public System.Runtime.InteropServices.ComTypes.FILETIME LastAccessTime;
-        public System.Runtime.InteropServices.ComTypes.FILETIME LastWriteTime;
-        public uint VolumeSerialNumber;
-        public uint FileSizeHigh;
-        public uint FileSizeLow;
-        public uint NumberOfLinks;
-        public uint FileIndexHigh;
-        public uint FileIndexLow;
-    }
-
-    [DllImport("kernel32.dll", SetLastError = true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool GetFileInformationByHandle(
-        SafeFileHandle hFile,
-        out ByHandleFileInformation fileInformation);
 }
 
 public sealed record DesktopAutoOrganizationCompleted(

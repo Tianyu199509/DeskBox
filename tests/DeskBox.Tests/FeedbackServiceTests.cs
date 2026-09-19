@@ -125,6 +125,39 @@ public sealed class FeedbackServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task Submit_HttpTimeoutReportsNetworkFailureInsteadOfThrowing()
+    {
+        // HttpClient's 60-second timeout surfaces as TaskCanceledException (an
+        // OperationCanceledException subclass). It must land on the network
+        // failure branch so the dialog's deferral always completes (#115).
+        var handler = new RecordingHandler(_ => throw new TaskCanceledException("timeout"));
+        FeedbackService service = CreateService(handler);
+
+        DeskBoxFeedbackSubmissionResult result = await service.SubmitAsync(
+            DeskBoxFeedbackKind.Bug,
+            "A timeout should read as a network failure.");
+
+        Assert.False(result.Ok);
+        Assert.Equal("network", result.Error);
+    }
+
+    [Fact]
+    public async Task Submit_UserCancellationStillThrows()
+    {
+        var handler = new RecordingHandler(_ => throw new OperationCanceledException("caller cancelled"));
+        FeedbackService service = CreateService(handler);
+
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => service.SubmitAsync(
+                DeskBoxFeedbackKind.Bug,
+                "A caller cancellation must stay observable.",
+                cancellationToken: cts.Token));
+    }
+
+    [Fact]
     public async Task ClientId_IsPersistedAndStableAcrossServiceInstances()
     {
         var handler = new RecordingHandler(_ =>

@@ -20,6 +20,8 @@ internal static class WidgetStyleBackupProjection
     internal const int DocumentSchemaVersion = 1;
     internal const string DocumentKind = "widget-style";
 
+    private static readonly FileService s_fileService = new();
+
     /// <summary>
     /// Flat settings.json keys carrying widget-shell style/display
     /// preferences — the wire-name whitelist for both directions.
@@ -144,18 +146,27 @@ internal static class WidgetStyleBackupProjection
             ["shell"] = shell,
             ["widgets"] = widgets
         };
-        return JsonSerializer.SerializeToUtf8Bytes(document);
+        // JsonNode.ToJsonString stays on STJ's non-generic DOM path — the
+        // generic SerializeToUtf8Bytes<JsonObject> overload carries
+        // RequiresUnreferencedCode/RequiresDynamicCode and trips the AOT
+        // audit's unexpected-warning gate.
+        return System.Text.Encoding.UTF8.GetBytes(document.ToJsonString());
     }
 
     /// <summary>
-    /// Patches the style document onto a settings.json file, atomically via
+    /// Patches the style document onto the live data files, atomically via
     /// the same resilient-write path the settings store itself uses. Only
     /// whitelisted keys are written; widgets are matched by id and verified
-    /// by widgetKind before any field is touched.
+    /// by widgetKind before any field is touched. Shell keys always land in
+    /// settings.json; per-widget keys land wherever the device layout
+    /// currently lives — widget-layout.json once it exists, else the legacy
+    /// settings.json widgets array (pre-migration profiles, which the layout
+    /// store then adopts).
     /// </summary>
-    internal static async Task<ApplyResult> ApplyToSettingsFileAsync(
+    internal static async Task<ApplyResult> ApplyAsync(
         byte[] documentBytes,
         string settingsPath,
+        string layoutPath,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(documentBytes);
@@ -191,20 +202,19 @@ internal static class WidgetStyleBackupProjection
             return new ApplyResult(false, 0, 0, "settings.json does not exist");
         }
 
-        JsonObject settingsDom;
-        await using (var input = new FileStream(
-                         settingsPath,
-                         FileMode.Open,
-                         FileAccess.Read,
-                         FileShare.Read,
-                         bufferSize: 81920,
-                         useAsync: true))
-        {
-            settingsDom = (await JsonNode.ParseAsync(
-                    input,
-                    cancellationToken: cancellationToken))?.AsObject()
-                ?? throw new InvalidDataException("settings.json is empty.");
-        }
+        // A previous restore may have died between the two commits — heal
+        // the pair from its journal before snapshotting originals for this
+        // transaction, otherwise this apply would build on half-applied
+        // state and its own rollback would re-corrupt the files.
+        await RecoverPendingRestoreAsync(settingsPath, layoutPath, cancellationToken);
+
+        // Keep the original bytes: the settings and layout commits below are
+        // two independent stores and cannot be atomic, so a layout-commit
+        // failure rolls the settings file back to exactly this content.
+        string originalSettingsJson = await File.ReadAllTextAsync(
+            settingsPath, cancellationToken);
+        JsonObject settingsDom = JsonNode.Parse(originalSettingsJson)?.AsObject()
+            ?? throw new InvalidDataException("settings.json is empty.");
 
         int shellPatched = 0;
         if (document["shell"] is JsonObject shellDoc)
@@ -221,10 +231,29 @@ internal static class WidgetStyleBackupProjection
             }
         }
 
+        // The widgets array lives in widget-layout.json once the device store
+        // exists; before adoption it is still a settings.json key.
+        JsonObject? layoutDom = null;
+        JsonArray? widgetsArray = null;
+        string? originalLayoutJson = null;
+        bool widgetsInLayoutFile = File.Exists(layoutPath);
+        if (widgetsInLayoutFile)
+        {
+            originalLayoutJson = await File.ReadAllTextAsync(
+                layoutPath, cancellationToken);
+            layoutDom = JsonNode.Parse(originalLayoutJson)?.AsObject()
+                ?? throw new InvalidDataException("widget-layout.json is empty.");
+
+            widgetsArray = layoutDom["layout"]?["widgets"] as JsonArray;
+        }
+        else if (settingsDom.TryGetPropertyValue("widgets", out JsonNode? widgetsNode))
+        {
+            widgetsArray = widgetsNode as JsonArray;
+        }
+
         int widgetsPatched = 0;
         if (document["widgets"] is JsonObject widgetsDoc &&
-            settingsDom.TryGetPropertyValue("widgets", out JsonNode? widgetsNode) &&
-            widgetsNode is JsonArray widgetsArray)
+            widgetsArray is not null)
         {
             foreach (JsonNode? node in widgetsArray)
             {
@@ -259,7 +288,179 @@ internal static class WidgetStyleBackupProjection
         }
 
         string patched = settingsDom.ToJsonString(new JsonSerializerOptions { WriteIndented = true });
-        await ResilientJsonStore.SaveAsync(settingsPath, patched);
+        if (!widgetsInLayoutFile)
+        {
+            // Single store: the resilient commit is already atomic — no
+            // journal needed.
+            await ResilientJsonStore.SaveAsync(settingsPath, patched);
+            return new ApplyResult(true, shellPatched, widgetsPatched, null);
+        }
+
+        // Two stores cannot commit atomically, so journal both originals
+        // BEFORE the first commit (the pending marker is written last —
+        // its presence means both snapshots are complete on disk). After
+        // both commits land, the committed flag is written before cleanup
+        // so a crash there cannot roll back a finished transaction.
+        await File.WriteAllTextAsync(
+            JournalOrigPath(settingsPath), originalSettingsJson, cancellationToken);
+        await File.WriteAllTextAsync(
+            JournalOrigPath(layoutPath), originalLayoutJson!, cancellationToken);
+        await File.WriteAllTextAsync(
+            JournalPendingPath(settingsPath),
+            DateTimeOffset.UtcNow.ToString("O"),
+            cancellationToken);
+        try
+        {
+            await ResilientJsonStore.SaveAsync(settingsPath, patched);
+            await ResilientJsonStore.SaveAsync(
+                layoutPath,
+                layoutDom!.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
+            await File.WriteAllTextAsync(
+                JournalCommittedPath(settingsPath), "1", cancellationToken);
+        }
+        catch
+        {
+            // Any failure — including a rollback-worthy layout-commit one —
+            // goes through the same recovery the next launch would run:
+            // restore both originals (primary AND .bak) from the journal.
+            await TryRecoverPendingRestoreAsync(settingsPath, layoutPath);
+            throw;
+        }
+
+        await CleanupJournalAsync(settingsPath, layoutPath);
         return new ApplyResult(true, shellPatched, widgetsPatched, null);
     }
+
+    /// <summary>
+    /// Crash recovery for the two-file style-restore transaction. A pending
+    /// marker without the committed flag means the commits did not both
+    /// land — the journaled originals go back to the live files AND their
+    /// .bak siblings: the resilient commit rotates primaries into .bak, so
+    /// restoring only the primary would leave the half-applied bytes one
+    /// later corruption away from resurrecting. The committed flag means
+    /// the transaction finished — only cleanup remains.
+    /// </summary>
+    private static async Task RecoverPendingRestoreAsync(
+        string settingsPath,
+        string layoutPath,
+        CancellationToken cancellationToken)
+    {
+        bool pending = File.Exists(JournalPendingPath(settingsPath));
+        bool committed = File.Exists(JournalCommittedPath(settingsPath));
+        if (!pending && !committed)
+        {
+            // Snapshots orphaned by a torn journal write — nothing was ever
+            // committed, so they are just litter.
+            await TryDeleteFileAsync(JournalOrigPath(settingsPath));
+            await TryDeleteFileAsync(JournalOrigPath(layoutPath));
+            return;
+        }
+
+        if (committed)
+        {
+            await CleanupJournalAsync(settingsPath, layoutPath);
+            return;
+        }
+
+        // Uncommitted transaction. The pending marker is written only after
+        // BOTH snapshots are complete, and this path only exists when the
+        // layout file existed at journal time — so a missing snapshot means
+        // the journal itself is corrupt. Fail closed: keep every artifact
+        // and never touch the live files on a guess.
+        string settingsOrig = JournalOrigPath(settingsPath);
+        string layoutOrig = JournalOrigPath(layoutPath);
+        if (!File.Exists(settingsOrig) || !File.Exists(layoutOrig))
+        {
+            throw new InvalidDataException(
+                "Widget-style restore journal is incomplete: pending marker " +
+                "without both original snapshots; live files left untouched.");
+        }
+
+        // The journal is deleted ONLY after a complete restore — a partial
+        // restore keeps it so the next apply retries to convergence
+        // (re-restoring the same snapshots is idempotent).
+        await RestoreJournalSnapshotAsync(
+            settingsOrig, settingsPath, cancellationToken);
+        await RestoreJournalSnapshotAsync(
+            layoutOrig, layoutPath, cancellationToken);
+        await CleanupJournalAsync(settingsPath, layoutPath);
+    }
+
+    private static async Task RestoreJournalSnapshotAsync(
+        string origPath,
+        string livePath,
+        CancellationToken cancellationToken)
+    {
+        string original = await File.ReadAllTextAsync(origPath, cancellationToken);
+        await File.WriteAllTextAsync(livePath, original, cancellationToken);
+        await File.WriteAllTextAsync(
+            ResilientJsonStore.GetBackupPath(livePath), original, cancellationToken);
+    }
+
+    /// <summary>
+    /// Recovery on the failure path of a live apply — never masks the
+    /// original exception.
+    /// </summary>
+    private static async Task TryRecoverPendingRestoreAsync(
+        string settingsPath,
+        string layoutPath)
+    {
+        try
+        {
+            await RecoverPendingRestoreAsync(
+                settingsPath, layoutPath, CancellationToken.None);
+        }
+        catch (Exception recoveryException)
+        {
+            App.Log(
+                $"[WidgetStyleRestore] Journal recovery after apply failure " +
+                $"also failed: {recoveryException}");
+        }
+    }
+
+    /// <summary>
+    /// Ordered journal cleanup. Pending goes first and the committed flag
+    /// LAST, stopping at the first artifact that survives — a "pending-only"
+    /// remnant would read as an uncommitted transaction and could roll back
+    /// (or delete live files over) finished work.
+    /// </summary>
+    private static async Task CleanupJournalAsync(string settingsPath, string layoutPath)
+    {
+        string pending = JournalPendingPath(settingsPath);
+        await TryDeleteFileAsync(pending);
+        if (File.Exists(pending))
+        {
+            return;
+        }
+
+        await TryDeleteFileAsync(JournalOrigPath(settingsPath));
+        await TryDeleteFileAsync(JournalOrigPath(layoutPath));
+        await TryDeleteFileAsync(JournalCommittedPath(settingsPath));
+    }
+
+    /// <summary>
+    /// Quiet headless delete routed through the file-safety kernel (the
+    /// module-boundary ratchet forbids raw File.Delete outside owned
+    /// domains). Absent paths and failures are both non-fatal here.
+    /// </summary>
+    private static async Task TryDeleteFileAsync(string path)
+    {
+        try
+        {
+            await s_fileService.DeleteEntryAsync(path, recycle: false);
+        }
+        catch (Exception ex)
+        {
+            App.Log($"[WidgetStyleRestore] Journal cleanup failed for {path}: {ex}");
+        }
+    }
+
+    private static string JournalPendingPath(string settingsPath) =>
+        settingsPath + ".style-restore.pending";
+
+    private static string JournalCommittedPath(string settingsPath) =>
+        settingsPath + ".style-restore.committed";
+
+    private static string JournalOrigPath(string livePath) =>
+        livePath + ".style-restore.orig";
 }

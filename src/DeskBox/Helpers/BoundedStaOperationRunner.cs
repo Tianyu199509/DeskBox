@@ -1,3 +1,4 @@
+using DeskBox.Platform;
 using System.Runtime.InteropServices;
 
 namespace DeskBox.Helpers;
@@ -75,7 +76,7 @@ internal sealed class BoundedStaOperationRunner
                 cancellationToken.ThrowIfCancellationRequested();
                 // Explicitly initialize COM even under Native AOT, where
                 // setting the managed apartment flag alone is not enough.
-                int hresult = CoInitializeEx(IntPtr.Zero, 0x2 | 0x4);
+                int hresult = Ole32NativeMethods.CoInitializeEx(IntPtr.Zero, 0x2 | 0x4);
                 Marshal.ThrowExceptionForHR(hresult);
                 T result;
                 try
@@ -85,7 +86,7 @@ internal sealed class BoundedStaOperationRunner
                 }
                 finally
                 {
-                    CoUninitialize();
+                    Ole32NativeMethods.CoUninitialize();
                 }
 
                 completion.TrySetResult(result);
@@ -116,10 +117,4 @@ internal sealed class BoundedStaOperationRunner
 
         return completion.Task;
     }
-
-    [DllImport("ole32.dll", ExactSpelling = true)]
-    private static extern int CoInitializeEx(IntPtr reserved, uint flags);
-
-    [DllImport("ole32.dll", ExactSpelling = true)]
-    private static extern void CoUninitialize();
 }

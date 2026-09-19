@@ -611,6 +611,51 @@ public sealed class FileServiceTests : IDisposable
         Assert.Equal(100d, completed.Percentage);
     }
 
+    [Fact]
+    public async Task ExecuteTransferPlanAsync_AbortedDirectoryMove_RemovesPartialDestination()
+    {
+        var service = new FileService();
+        string sourceDirectory = Directory.CreateDirectory(
+            Path.Combine(_tempRoot, "move-source")).FullName;
+        File.WriteAllText(Path.Combine(sourceDirectory, "a.txt"), "a");
+        string lockedFile = Path.Combine(sourceDirectory, "locked.txt");
+        File.WriteAllText(lockedFile, "locked");
+        // A pre-existing destination directory forces the copy-first
+        // fallback: the same-volume atomic rename would carry the lock
+        // along instead of failing on it.
+        string destinationDirectory = Directory.CreateDirectory(
+            Path.Combine(_tempRoot, "move-destination")).FullName;
+
+        var decisions = new List<FileService.FileTransferItemError>();
+        await using (var lockStream = new FileStream(
+                         lockedFile, FileMode.Open, FileAccess.Read, FileShare.None))
+        {
+            FileService.FileTransferCanceledException canceled =
+                await Assert.ThrowsAsync<FileService.FileTransferCanceledException>(() =>
+                    service.ExecuteTransferPlanAsync(
+                        [new FileService.FileTransferPlan(
+                            sourceDirectory,
+                            destinationDirectory)],
+                        move: true,
+                        onItemError: error =>
+                        {
+                            decisions.Add(error);
+                            return Task.FromResult(
+                                FileService.FileTransferItemAction.Abort);
+                        }));
+            Assert.Empty(canceled.CompletedResults);
+        }
+
+        Assert.Single(decisions);
+        Assert.False(
+            Directory.Exists(destinationDirectory),
+            "The aborted in-flight directory move must not leave its " +
+            "partial copy behind — nothing tracks it, and a retry would " +
+            "meet it as a stale destination.");
+        Assert.True(File.Exists(Path.Combine(sourceDirectory, "a.txt")));
+        Assert.True(File.Exists(lockedFile));
+    }
+
     [Theory]
     [InlineData(@"E:\source.bin", @"E:\folder\destination.bin", true)]
     [InlineData(@"F:\source.bin", @"E:\folder\destination.bin", false)]
