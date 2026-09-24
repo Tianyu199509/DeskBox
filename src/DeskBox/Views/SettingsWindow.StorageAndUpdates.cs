@@ -503,8 +503,9 @@ public sealed partial class SettingsWindow
     {
         try
         {
-            await App.Current.SettingsService.SaveAsync(notifySubscribers: false);
-            string? snapshotPath = await App.Current.DataBackupService.CreateAutomaticSnapshotNowAsync();
+            var result = await _backupCommands.CreateSnapshotNowAsync();
+            if (_isClosed || _backupCommands.IsStopping) return false;
+            string? snapshotPath = result.ArchivePath;
             if (!string.IsNullOrWhiteSpace(snapshotPath))
             {
                 return true;
@@ -514,9 +515,11 @@ public sealed partial class SettingsWindow
                 _localizationService.T("Settings.Update.PreUpdateBackupFailedTitle"),
                 _localizationService.T("Settings.Update.PreUpdateBackupFailedBody"));
         }
+        catch (OperationCanceledException) when (_backupCommands.IsStopping) { }
         catch (Exception ex)
         {
             App.Log($"[Update] Failed to create pre-update recovery snapshot: {ex}");
+            if (_isClosed || _backupCommands.IsStopping) return false;
             await ShowInfoDialogAsync(
                 _localizationService.T("Settings.Update.PreUpdateBackupFailedTitle"),
                 _localizationService.Format("Settings.Update.PreUpdateBackupFailedBodyWithError", ex.Message));

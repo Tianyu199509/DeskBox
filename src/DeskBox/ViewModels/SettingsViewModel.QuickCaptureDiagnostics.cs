@@ -1,12 +1,11 @@
 using System.Globalization;
+using DeskBox.Contracts;
 using DeskBox.Services;
 
 namespace DeskBox.ViewModels;
 
 public partial class SettingsViewModel
 {
-    private QuickCaptureClipboardService? _quickCaptureClipboardDiagnosticsService;
-
     public string QuickCaptureStatusText => QuickCaptureEnabled
         ? _localizationService.T("Settings.QuickCapture.Status.Enabled")
         : _localizationService.T("Settings.QuickCapture.Status.Disabled");
@@ -79,13 +78,13 @@ public partial class SettingsViewModel
 
     public void RefreshQuickCaptureClipboardDiagnostics()
     {
-        SetQuickCaptureClipboardDiagnosticsService(
-            App.Current?.QuickCaptureClipboardService);
-        if (App.Current?.QuickCaptureClipboardService is not { } clipboardService)
+        var diagnostics = _quickCaptureSettings.ClipboardDiagnostics;
+        if (diagnostics is null)
         {
-            string inactiveReason = !_settingsService.Settings.QuickCaptureEnabled
+            QuickCaptureSettingsSnapshot state = _quickCaptureSettings.Read();
+            string inactiveReason = !state.Enabled
                 ? "disabled:quick-capture-off"
-                : !_settingsService.Settings.QuickCaptureClipboardEnabled
+                : !state.ClipboardEnabled
                     ? "disabled:clipboard-off"
                     : "disabled:unknown";
             QuickCaptureClipboardDiagnosticsText = _localizationService.Format(
@@ -94,7 +93,6 @@ public partial class SettingsViewModel
             return;
         }
 
-        var diagnostics = clipboardService.GetDiagnostics();
         string reasonText = GetQuickCaptureClipboardReasonText(diagnostics.LastReason);
         if (diagnostics.LastCapturedAt is { } capturedAt)
         {
@@ -112,30 +110,6 @@ public partial class SettingsViewModel
                 ? "Settings.QuickCapture.ClipboardDiagnosticsNoCapture"
                 : "Settings.QuickCapture.ClipboardDiagnosticsNotRecordingNoCapture",
             reasonText);
-    }
-
-    private void SetQuickCaptureClipboardDiagnosticsService(
-        QuickCaptureClipboardService? clipboardService)
-    {
-        if (ReferenceEquals(
-                _quickCaptureClipboardDiagnosticsService,
-                clipboardService))
-        {
-            return;
-        }
-
-        if (_quickCaptureClipboardDiagnosticsService is not null)
-        {
-            _quickCaptureClipboardDiagnosticsService.DiagnosticsChanged -=
-                OnQuickCaptureClipboardDiagnosticsChanged;
-        }
-
-        _quickCaptureClipboardDiagnosticsService = clipboardService;
-        if (_quickCaptureClipboardDiagnosticsService is not null)
-        {
-            _quickCaptureClipboardDiagnosticsService.DiagnosticsChanged +=
-                OnQuickCaptureClipboardDiagnosticsChanged;
-        }
     }
 
     private string GetQuickCaptureClipboardReasonText(string reason)
@@ -162,6 +136,7 @@ public partial class SettingsViewModel
 
     private void OnQuickCaptureClipboardDiagnosticsChanged()
     {
+        if (_isDisposed) return;
         if (App.UiDispatcherQueue is { } dispatcherQueue)
         {
             dispatcherQueue.TryEnqueue(RefreshQuickCaptureClipboardDiagnostics);

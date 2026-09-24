@@ -1,6 +1,7 @@
 using System.Runtime.InteropServices;
 using DeskBox.Helpers;
 using DeskBox.Models;
+using DeskBox.Contracts;
 using DeskBox.Platform;
 using Windows.System;
 
@@ -12,7 +13,7 @@ namespace DeskBox.Services;
 /// Alt+Space preset rides the reserved low-level hook, matching how the main
 /// hotkey handles system-reserved gestures.
 /// </summary>
-public sealed class SearchHotkeyService : IDisposable, IHookHealthProbeTarget
+public sealed class SearchHotkeyService : IDisposable, IHookHealthProbeTarget, ISearchHotkeyController
 {
     private const int SearchHotkeyId = 0x4444;
     private const uint WmReservedSearchHotkey = 0x8444;

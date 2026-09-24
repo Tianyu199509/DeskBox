@@ -94,7 +94,11 @@ public sealed class AotStage4E4ContractTests
         int bridgeClear = code.IndexOf(
             "AppearanceDetailSection.ViewModel = null;",
             StringComparison.Ordinal);
-        int viewModelDispose = code.IndexOf("ViewModel.Dispose();", StringComparison.Ordinal);
+        // Match the shell property, not a child such as _searchSettingsViewModel.
+        var disposeCall = System.Text.RegularExpressions.Regex.Match(
+            code, @"(?m)^[ \t]*ViewModel\.Dispose\(\);");
+        Assert.True(disposeCall.Success);
+        int viewModelDispose = disposeCall.Index;
 
         Assert.True(rootCreation >= 0 && rootAssignment > rootCreation);
         Assert.True(bridgeAssignment > rootAssignment && bridgeAssignment < rootAttachment);

@@ -92,17 +92,10 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
     private string _selectedInteractiveWidgetChromeMode = SettingsService.WidgetChromeModeStandard;
     private string _selectedWidgetTitleIconMode = SettingsService.WidgetTitleIconModeColor;
     private string _selectedWidgetLayerMode = SettingsService.WidgetLayerModeDynamic;
-    private string _selectedQuickCaptureDefaultView = SettingsService.QuickCaptureDefaultViewRecords;
-    private string _selectedQuickCaptureTabStyle = SettingsService.WidgetTabStyleButton;
-    private string _selectedTodoNewTaskPosition = SettingsService.TodoNewTaskPositionTop;
-    private string _selectedTodoLayoutMode = SettingsService.TodoLayoutModeAuto;
     private string _selectedAttachmentStorageMode = SettingsService.AttachmentStorageModeLink;
     private string _selectedManagedDropAction = SettingsService.ManagedDropActionMove;
     private string _selectedFileWidgetFolderOpenBehavior =
         FileWidgetFolderOpenBehaviorNames.Explorer;
-    private string _selectedTodoDefaultFilter = SettingsService.TodoDefaultFilterAll;
-    private string _selectedTodoTabStyle = SettingsService.WidgetTabStyleButton;
-    private int _selectedTodoReminderOffsetMinutes = SettingsService.DefaultTodoReminderOffsetMinutes;
     private string _selectedMusicDisplayMode = SettingsService.MusicDisplayModeAuto;
     private string _selectedWeatherTemperatureUnit = SettingsService.WeatherTemperatureUnitCelsius;
     private string _selectedWeatherWindSpeedUnit = SettingsService.WeatherWindSpeedUnitKmh;
@@ -243,7 +236,6 @@ private string[]? _cachedWeatherRefreshIntervalDisplayNames;
     [ObservableProperty] public partial bool QuickCaptureShowRecordsTab { get; set; } = true;
     [ObservableProperty] public partial bool QuickCaptureShowPinnedTab { get; set; } = true;
     [ObservableProperty] public partial bool QuickCaptureShowRecentTab { get; set; } = true;
-    [ObservableProperty] public partial bool TodoEnabled { get; set; }
     [ObservableProperty] public partial bool TodoShowTabBar { get; set; } = true;
     [ObservableProperty] public partial bool TodoShowAllTab { get; set; } = true;
     [ObservableProperty] public partial bool TodoShowActiveTab { get; set; }
@@ -255,7 +247,6 @@ private string[]? _cachedWeatherRefreshIntervalDisplayNames;
     [ObservableProperty] public partial bool TodoShowCompletedTasks { get; set; } = true;
     [ObservableProperty] public partial bool TodoShowFooterStats { get; set; }
     [ObservableProperty] public partial bool TodoShowClearCompletedButton { get; set; } = true;
-    [ObservableProperty] public partial bool TodoReminderEnabled { get; set; } = true;
     [ObservableProperty] public partial bool TodoUseWideDetailPane { get; set; } = true;
     [ObservableProperty] public partial bool TodoAutoSelectFirstInWideLayout { get; set; } = true;
     [ObservableProperty] public partial bool MusicUseArtworkBackdrop { get; set; } = true;
@@ -288,10 +279,20 @@ private string[]? _cachedWeatherRefreshIntervalDisplayNames;
     public SettingsViewModel(
         SettingsService settingsService,
         ThemeService themeService,
+        DeskBox.Features.Todo.TodoSettingsViewModel todoSettings,
+        DeskBox.Features.Backup.BackupSettingsViewModel backupSettings,
+        DeskBox.Contracts.IQuickCaptureSettings quickCaptureSettings,
+        DeskBox.Contracts.ISearchFeatureSettings searchFeatureSettings,
         LocalizationService? localizationService = null,
         IAppUpdateService? appUpdateService = null)
     {
         _settingsService = settingsService;
+        _todoSettings = todoSettings;
+        _todoSettings.PropertyChanged += OnTodoSettingsPropertyChanged;
+        _backupSettings = backupSettings;
+        _backupSettings.PropertyChanged += OnBackupSettingsPropertyChanged;
+        _quickCaptureSettings = quickCaptureSettings;
+        _searchFeatureSettings = searchFeatureSettings;
         _themeService = themeService;
         _localizationService = localizationService ?? new LocalizationService(settingsService);
         _widgetContentFactory = new WidgetContentFactory(_localizationService);
@@ -399,11 +400,9 @@ private string[]? _cachedWeatherRefreshIntervalDisplayNames;
         IdleWorkingSetTrimEnabled = settings.IdleWorkingSetTrimEnabled;
         ImmediateHiddenWorkingSetTrimEnabled = settings.ImmediateHiddenWorkingSetTrimEnabled;
         QuiescenceWorkingSetTrimEnabled = settings.Performance.QuiescenceWorkingSetTrimEnabled;
-        QuickCaptureEnabled = FeatureWidgetSettings.IsEnabled(settings, WidgetKind.QuickCapture);
-        QuickCaptureClipboardEnabled = settings.QuickCaptureClipboardEnabled;
-        QuickCaptureImageClipboardEnabled = settings.QuickCaptureImageClipboardEnabled;
-        QuickCaptureRecentLimit = QuickCaptureService.NormalizeRecentLimit(settings.QuickCaptureRecentLimit);
-        QuickCaptureShowCreatedTime = settings.QuickCaptureShowCreatedTime;
+        SyncQuickCaptureSettingsFacade();
+        SyncQuickCapturePresentationFacade();
+        SyncQuickCaptureRecentLimitFacade();
         QuickCaptureListTextSize = SettingsService.NormalizeTextSize(
             (settings.QuickCaptureListTextSize > 0 ? settings.QuickCaptureListTextSize : settings.TextSize));
         QuickCaptureContentTextSize = SettingsService.NormalizeTextSize(
@@ -417,34 +416,12 @@ private string[]? _cachedWeatherRefreshIntervalDisplayNames;
                 SettingsService.ManagedDropActionFollowWindows,
             _ => SettingsService.ManagedDropActionCopy
         };
-        _selectedQuickCaptureDefaultView = NormalizeQuickCaptureDefaultView(settings.QuickCaptureDefaultView);
-        _selectedQuickCaptureTabStyle = SettingsService.NormalizeWidgetTabStyle(settings.QuickCaptureTabStyle);
-        QuickCaptureShowTabBar = settings.QuickCaptureShowTabBar;
-        QuickCaptureShowRecordsTab = settings.QuickCaptureShowRecordsTab;
-        QuickCaptureShowPinnedTab = settings.QuickCaptureShowPinnedTab;
-        QuickCaptureShowRecentTab = settings.QuickCaptureShowRecentTab;
-        TodoEnabled = FeatureWidgetSettings.IsEnabled(settings, WidgetKind.Todo);
-        TodoShowTabBar = settings.TodoShowTabBar;
-        TodoShowAllTab = settings.TodoShowAllTab;
-        TodoShowActiveTab = settings.TodoShowActiveTab;
-        TodoShowTodayTab = settings.TodoShowTodayTab;
-        TodoShowThisWeekTab = settings.TodoShowThisWeekTab;
-        TodoShowThisMonthTab = settings.TodoShowThisMonthTab;
-        TodoShowImportantTab = settings.TodoShowImportantTab;
-        TodoShowCompletedTab = settings.TodoShowCompletedTab;
-        TodoShowCompletedTasks = settings.TodoShowCompletedTasks;
-        TodoListTextSize = SettingsService.NormalizeTextSize(
-            (settings.TodoListTextSize > 0 ? settings.TodoListTextSize : settings.TextSize));
-        TodoContentTextSize = SettingsService.NormalizeTextSize(
-            (settings.TodoContentTextSize > 0 ? settings.TodoContentTextSize : settings.TextSize));
-        TodoShowFooterStats = settings.TodoShowFooterStats;
-        TodoShowClearCompletedButton = settings.TodoShowClearCompletedButton;
-        _selectedTodoLayoutMode = SettingsService.NormalizeTodoLayoutMode(
-            settings.TodoLayoutMode,
-            settings.TodoUseWideDetailPane);
-        TodoUseWideDetailPane = _selectedTodoLayoutMode != SettingsService.TodoLayoutModeSinglePane;
-        TodoAutoSelectFirstInWideLayout = settings.TodoAutoSelectFirstInWideLayout;
-        TodoReminderEnabled = settings.TodoReminderEnabled;
+        SyncQuickCaptureTabsFacade();
+        SyncTodoTabFacade();
+        SyncTodoDisplayFacade();
+        SyncTodoTextSizeFacade();
+        TodoUseWideDetailPane = _todoSettings.LayoutMode != SettingsService.TodoLayoutModeSinglePane;
+        TodoAutoSelectFirstInWideLayout = _todoSettings.AutoSelectFirstInWideLayout;
         MusicUseArtworkBackdrop = settings.MusicUseArtworkBackdrop;
         MusicEnableCoverHoverMotion = settings.MusicEnableCoverHoverMotion;
         _selectedMusicDisplayMode = SettingsService.NormalizeMusicDisplayMode(settings.MusicDisplayMode);
@@ -475,32 +452,8 @@ private string[]? _cachedWeatherRefreshIntervalDisplayNames;
             SettingsService.WeatherRefreshMinMinutes,
             SettingsService.WeatherRefreshMaxMinutes);
         _isRestoringDefaults = false;
-        _selectedTodoNewTaskPosition = NormalizeTodoNewTaskPosition(settings.TodoNewTaskPosition);
-        _selectedTodoDefaultFilter = NormalizeTodoDefaultFilter(settings.TodoDefaultFilter);
-        _selectedTodoTabStyle = SettingsService.NormalizeWidgetTabStyle(settings.TodoTabStyle);
-        _selectedTodoReminderOffsetMinutes = SettingsService.NormalizeTodoReminderOffsetMinutes(settings.TodoDefaultReminderOffsetMinutes);
         _managedStorageRootPath = settings.DefaultManagedStorageRootPath;
-        AutomaticBackupEnabled = settings.AutomaticBackupEnabled;
-        _selectedAutomaticBackupIntervalMinutes = DataBackupSettingsPolicy.NormalizeIntervalMinutes(
-            settings.AutomaticBackupIntervalMinutes);
-        _selectedAutomaticBackupRetentionCount = DataBackupSettingsPolicy.NormalizeRetentionCount(
-            settings.AutomaticBackupRetentionCount);
-        _automaticBackupDirectory =
-            DataBackupSettingsPolicy.NormalizeCustomDirectory(settings.AutomaticBackupDirectory) ?? string.Empty;
-        CloudBackupSettingsSlice cloudBackup = settings.CloudBackup;
-        _selectedCloudBackupProvider = cloudBackup.CloudBackupProvider is CloudBackupSettingsPolicy.ProviderWebDav
-            ? CloudBackupSettingsPolicy.ProviderWebDav
-            : CloudBackupSettingsPolicy.ProviderNone;
-        _cloudBackupServerUrl = cloudBackup.CloudBackupServerUrl ?? string.Empty;
-        _cloudBackupRemotePath = cloudBackup.CloudBackupRemotePath ?? string.Empty;
-        _cloudBackupUsername = cloudBackup.CloudBackupUsername ?? string.Empty;
-        CloudBackupTodoDataEnabled = cloudBackup.CloudBackupTodoDataEnabled;
-        CloudBackupQuickCaptureDataEnabled = cloudBackup.CloudBackupQuickCaptureDataEnabled;
-        CloudBackupWidgetStyleEnabled = cloudBackup.CloudBackupWidgetStyleEnabled;
-        _selectedCloudBackupIntervalMinutes = CloudBackupSettingsPolicy.NormalizeIntervalMinutes(
-            cloudBackup.CloudBackupIntervalMinutes);
-        _selectedCloudBackupRetentionCount = CloudBackupSettingsPolicy.NormalizeRetentionCount(
-            cloudBackup.CloudBackupRetentionCount);
+        SyncBackupSettingsFacade();
 
         ApplyCachedUpdateResult();
         RefreshAccentPreview();
@@ -508,6 +461,9 @@ private string[]? _cachedWeatherRefreshIntervalDisplayNames;
 _ = PopulateNearbyPopularCitiesAsync();
 _ = RefreshQuickAccessStateAsync();
         _settingsService.SettingsChanged += OnSettingsChanged;
+        _quickCaptureSettings.Changed += OnQuickCaptureSettingsChanged;
+        _quickCaptureSettings.DiagnosticsChanged += OnQuickCaptureClipboardDiagnosticsChanged;
+        _searchFeatureSettings.FeatureChanged += OnSearchFeatureChanged;
         _themeService.AppearanceChanged += OnAppearanceChanged;
         _localizationService.LanguageChanged += OnLanguageChanged;
         RefreshQuickCaptureClipboardDiagnostics();
@@ -527,10 +483,16 @@ _ = RefreshQuickAccessStateAsync();
         }
 
         _isDisposed = true;
+        _todoSettings.PropertyChanged -= OnTodoSettingsPropertyChanged;
+        _todoSettings.Dispose();
+        _backupSettings.PropertyChanged -= OnBackupSettingsPropertyChanged;
+        _backupSettings.Dispose();
         _lifetimeCts.Cancel();
         _updateOperationCts?.Cancel();
         _updateOperationCts?.Dispose();
-        SetQuickCaptureClipboardDiagnosticsService(null);
+        _quickCaptureSettings.Changed -= OnQuickCaptureSettingsChanged;
+        _quickCaptureSettings.DiagnosticsChanged -= OnQuickCaptureClipboardDiagnosticsChanged;
+        _searchFeatureSettings.FeatureChanged -= OnSearchFeatureChanged;
 
         _settingsService.SettingsChanged -= OnSettingsChanged;
         _themeService.AppearanceChanged -= OnAppearanceChanged;

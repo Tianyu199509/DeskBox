@@ -16,64 +16,27 @@ public partial class SettingsViewModel
 {
     public string SelectedTodoLayoutMode
     {
-        get => _selectedTodoLayoutMode;
+        get => _todoSettings.LayoutMode;
         set
         {
-            string normalized = SettingsService.NormalizeTodoLayoutMode(value);
-            if (!SetProperty(ref _selectedTodoLayoutMode, normalized))
-            {
-                return;
-            }
-
-            OnPropertyChanged(nameof(TodoLayoutSummaryText));
-            OnPropertyChanged(nameof(TodoWideOptionsVisibility));
-
-            bool canUseWideDetail = normalized != SettingsService.TodoLayoutModeSinglePane;
-            if (TodoUseWideDetailPane != canUseWideDetail)
-            {
-                bool wasApplyingSnapshot = _isApplyingSettingsSnapshot;
-                _isApplyingSettingsSnapshot = true;
-                try
-                {
-                    TodoUseWideDetailPane = canUseWideDetail;
-                }
-                finally
-                {
-                    _isApplyingSettingsSnapshot = wasApplyingSnapshot;
-                }
-            }
-
             if (_isRestoringDefaults || _isApplyingSettingsSnapshot)
             {
                 return;
             }
-
-            _settingsService.Settings.TodoLayoutMode = normalized;
-            _settingsService.Settings.TodoUseWideDetailPane = canUseWideDetail;
-            _settingsService.SaveDebounced();
+            _todoSettings.LayoutMode = value;
         }
     }
 
     public string SelectedTodoNewTaskPosition
     {
-        get => _selectedTodoNewTaskPosition;
+        get => _todoSettings.NewTaskPosition;
         set
         {
-            if (!SetProperty(ref _selectedTodoNewTaskPosition, NormalizeTodoNewTaskPosition(value)))
-            {
-                return;
-            }
-
-            OnPropertyChanged(nameof(SelectedTodoNewTaskPositionText));
-            RefreshTodoContentPresentation();
-
             if (_isRestoringDefaults || _isApplyingSettingsSnapshot)
             {
                 return;
             }
-
-            _settingsService.Settings.TodoNewTaskPosition = _selectedTodoNewTaskPosition;
-            _settingsService.SaveDebounced();
+            _todoSettings.NewTaskPosition = value;
         }
     }
 
@@ -171,145 +134,45 @@ public partial class SettingsViewModel
 
     public string SelectedQuickCaptureDefaultView
     {
-        get => _selectedQuickCaptureDefaultView;
-        set
-        {
-            if (!SetProperty(ref _selectedQuickCaptureDefaultView, NormalizeQuickCaptureDefaultView(value)))
-            {
-                return;
-            }
-
-            OnPropertyChanged(nameof(SelectedQuickCaptureDefaultViewText));
-            RefreshQuickCaptureTabsPresentation();
-
-            if (_isRestoringDefaults || _isApplyingSettingsSnapshot)
-            {
-                return;
-            }
-
-            EnsureQuickCaptureTabEnabled(_selectedQuickCaptureDefaultView);
-            _settingsService.Settings.QuickCaptureDefaultView = _selectedQuickCaptureDefaultView;
-            _settingsService.SaveDebounced();
-        }
+        get => _quickCaptureSettings.ReadTabs().DefaultView;
+        set => ApplyQuickCaptureDefaultView(value);
     }
 
     public string SelectedQuickCaptureDefaultViewText => GetQuickCaptureDefaultViewDisplayName(SelectedQuickCaptureDefaultView);
 
     public string SelectedQuickCaptureTabStyle
     {
-        get => _selectedQuickCaptureTabStyle;
-        set
-        {
-            if (!SetProperty(ref _selectedQuickCaptureTabStyle, SettingsService.NormalizeWidgetTabStyle(value)))
-            {
-                return;
-            }
-
-            OnPropertyChanged(nameof(SelectedQuickCaptureTabStyleText));
-            OnPropertyChanged(nameof(QuickCaptureTabStyleIndex));
-
-            if (_isRestoringDefaults || _isApplyingSettingsSnapshot)
-            {
-                return;
-            }
-
-            _settingsService.Settings.QuickCaptureTabStyle = _selectedQuickCaptureTabStyle;
-            _settingsService.SaveDebounced();
-        }
+        get => _quickCaptureSettings.ReadPresentation().TabStyle;
+        set => ApplyQuickCaptureTabStyle(value);
     }
 
     public string SelectedQuickCaptureTabStyleText => GetWidgetTabStyleDisplayName(SelectedQuickCaptureTabStyle);
 
     public string SelectedTodoDefaultFilter
     {
-        get => _selectedTodoDefaultFilter;
+        get => _todoSettings.DefaultFilter;
         set
         {
-            if (!SetProperty(ref _selectedTodoDefaultFilter, NormalizeTodoDefaultFilter(value)))
-            {
-                return;
-            }
-
-            OnPropertyChanged(nameof(SelectedTodoDefaultFilterText));
-            RefreshTodoTabsPresentation();
-
             if (_isRestoringDefaults || _isApplyingSettingsSnapshot)
             {
                 return;
             }
-
-            EnsureTodoTabEnabled(_selectedTodoDefaultFilter);
-            _settingsService.Settings.TodoDefaultFilter = _selectedTodoDefaultFilter;
-            _settingsService.SaveDebounced();
+            _todoSettings.DefaultFilter = value;
         }
     }
 
     public string SelectedTodoDefaultFilterText => GetTodoDefaultFilterDisplayName(SelectedTodoDefaultFilter);
 
-    private void EnsureQuickCaptureTabEnabled(string view)
-    {
-        switch (view)
-        {
-            case SettingsService.QuickCaptureDefaultViewPinned:
-                QuickCaptureShowPinnedTab = true;
-                break;
-            case SettingsService.QuickCaptureDefaultViewRecent:
-                QuickCaptureShowRecentTab = true;
-                break;
-            default:
-                QuickCaptureShowRecordsTab = true;
-                break;
-        }
-    }
-
-    private void EnsureTodoTabEnabled(string filter)
-    {
-        switch (filter)
-        {
-            case SettingsService.TodoDefaultFilterActive:
-                TodoShowActiveTab = true;
-                break;
-            case SettingsService.TodoDefaultFilterToday:
-                TodoShowTodayTab = true;
-                break;
-            case SettingsService.TodoDefaultFilterThisWeek:
-                TodoShowThisWeekTab = true;
-                break;
-            case SettingsService.TodoDefaultFilterThisMonth:
-                TodoShowThisMonthTab = true;
-                break;
-            case SettingsService.TodoDefaultFilterImportant:
-                TodoShowImportantTab = true;
-                break;
-            case SettingsService.TodoDefaultFilterCompleted:
-                TodoShowCompletedTab = true;
-                break;
-            default:
-                TodoShowAllTab = true;
-                break;
-        }
-    }
-
     public string SelectedTodoTabStyle
     {
-        get => _selectedTodoTabStyle;
+        get => _todoSettings.TabStyle;
         set
         {
-            if (!SetProperty(ref _selectedTodoTabStyle, SettingsService.NormalizeWidgetTabStyle(value)))
-            {
-                return;
-            }
-
-            OnPropertyChanged(nameof(SelectedTodoTabStyleText));
-            OnPropertyChanged(nameof(TodoTabStyleIndex));
-
             if (_isRestoringDefaults || _isApplyingSettingsSnapshot)
             {
                 return;
             }
-
-            _settingsService.Settings.TodoTabStyle = _selectedTodoTabStyle;
-            _settingsService.SaveDebounced();
+            _todoSettings.TabStyle = value;
         }
     }
 
@@ -317,25 +180,15 @@ public partial class SettingsViewModel
 
     public int SelectedTodoReminderOffsetMinutes
     {
-        get => _selectedTodoReminderOffsetMinutes;
+        get => _todoSettings.DefaultOffsetMinutes;
         set
         {
-            int normalizedValue = SettingsService.NormalizeTodoReminderOffsetMinutes(value);
-            if (!SetProperty(ref _selectedTodoReminderOffsetMinutes, normalizedValue))
-            {
-                return;
-            }
-
-            OnPropertyChanged(nameof(SelectedTodoReminderOffsetMinutesText));
-            OnPropertyChanged(nameof(TodoReminderSummaryText));
-
             if (_isRestoringDefaults || _isApplyingSettingsSnapshot)
             {
                 return;
             }
 
-            _settingsService.Settings.TodoDefaultReminderOffsetMinutes = normalizedValue;
-            _settingsService.SaveDebounced();
+            _todoSettings.DefaultOffsetMinutes = value;
         }
     }
 
@@ -644,6 +497,8 @@ set => WidgetOpacity = Math.Clamp(1.0 - value / 100d, SettingsService.MinWidgetO
 
     public bool IsWidgetEnabled(WidgetKind kind)
     {
+        if (kind == WidgetKind.Todo) return TodoEnabled;
+        if (kind == WidgetKind.Search) return _searchFeatureSettings.Enabled;
         return App.Current?.WidgetManager?.IsFeatureWidgetEnabled(kind) ??
                FeatureWidgetSettings.IsEnabled(_settingsService.Settings, kind);
     }
@@ -657,6 +512,9 @@ set => WidgetOpacity = Math.Clamp(1.0 - value / 100d, SettingsService.MinWidgetO
                 return;
             case WidgetKind.Todo:
                 TodoEnabled = enabled;
+                return;
+            case WidgetKind.Search:
+                TrackSearchFeatureAction(_searchFeatureSettings.SetEnabledAsync(enabled, reveal: enabled));
                 return;
         }
 
@@ -697,6 +555,7 @@ set => WidgetOpacity = Math.Clamp(1.0 - value / 100d, SettingsService.MinWidgetO
 
     private async Task ApplyFeatureWidgetDefaultSettingsAsync(WidgetKind kind)
     {
+        Task recordingDrain = Task.CompletedTask;
         bool wasApplyingSnapshot = _isApplyingSettingsSnapshot;
         _isApplyingSettingsSnapshot = true;
         try
@@ -706,83 +565,30 @@ set => WidgetOpacity = Math.Clamp(1.0 - value / 100d, SettingsService.MinWidgetO
                 case WidgetKind.QuickCapture:
                     QuickCaptureClipboardEnabled = false;
                     QuickCaptureImageClipboardEnabled = false;
-                    QuickCaptureRecentLimit = QuickCaptureService.DefaultRecentLimit;
-                    QuickCaptureShowCreatedTime = true;
-                    QuickCaptureItemPreviewLineCount = SettingsService.DefaultQuickCaptureItemPreviewLineCount;
                     QuickCaptureEditorEnterBehavior = SettingsService.EditorEnterBehaviorCtrlEnterSaves;
                     QuickCaptureEditorFormat = SettingsService.QuickCaptureFormatMarkdown;
                     QuickCaptureWideLayout = SettingsService.QuickCaptureWideLayoutAuto;
                     QuickCaptureWideOpenMode = SettingsService.QuickCaptureWideOpenReading;
                     QuickCaptureAllowRemoteImages = false;
-                    SelectedQuickCaptureDefaultView = SettingsService.QuickCaptureDefaultViewRecords;
-                    SelectedQuickCaptureTabStyle = SettingsService.WidgetTabStyleButton;
-                    QuickCaptureShowTabBar = true;
-                    QuickCaptureShowRecordsTab = true;
-                    QuickCaptureShowPinnedTab = true;
-                    QuickCaptureShowRecentTab = true;
-                    _settingsService.Settings.QuickCaptureClipboardEnabled = false;
-                    _settingsService.Settings.QuickCaptureImageClipboardEnabled = false;
-                    _settingsService.Settings.QuickCaptureRecentLimit = QuickCaptureService.DefaultRecentLimit;
-                    _settingsService.Settings.QuickCaptureShowCreatedTime = true;
-                    _settingsService.Settings.QuickCaptureItemPreviewLineCount = SettingsService.DefaultQuickCaptureItemPreviewLineCount;
+                    _quickCaptureSettings.ResetTabPreferences(scheduleSave: false);
+                    _quickCaptureSettings.ResetPresentationPreferences(scheduleSave: false);
+                    _quickCaptureSettings.ResetRecentLimit(scheduleSave: false);
+                    recordingDrain = _quickCaptureSettings.ResetRecordingAsync();
                     _settingsService.Settings.QuickCaptureEditorEnterBehavior = SettingsService.EditorEnterBehaviorCtrlEnterSaves;
                     _settingsService.Settings.QuickCaptureDefaultFormat = SettingsService.QuickCaptureFormatMarkdown;
                     _settingsService.Settings.QuickCaptureWideLayout = SettingsService.QuickCaptureWideLayoutAuto;
                     _settingsService.Settings.QuickCaptureWideOpenMode = SettingsService.QuickCaptureWideOpenReading;
                     _settingsService.Settings.QuickCaptureAllowRemoteImages = false;
-                    _settingsService.Settings.QuickCaptureDefaultView = SettingsService.QuickCaptureDefaultViewRecords;
-                    _settingsService.Settings.QuickCaptureTabStyle = SettingsService.WidgetTabStyleButton;
-                    _settingsService.Settings.QuickCaptureShowTabBar = true;
-                    _settingsService.Settings.QuickCaptureShowRecordsTab = true;
-                    _settingsService.Settings.QuickCaptureShowPinnedTab = true;
-                    _settingsService.Settings.QuickCaptureShowRecentTab = true;
                     _settingsService.Settings.LastQuickCaptureFileWidgetId = string.Empty;
-                    App.Current?.RefreshQuickCaptureClipboardService();
                     RefreshQuickCaptureClipboardDiagnostics();
                     break;
                 case WidgetKind.Todo:
-                    TodoShowCompletedTasks = false;
-                    TodoItemPreviewLineCount = SettingsService.DefaultTodoItemPreviewLineCount;
-                    TodoEditorEnterBehavior = SettingsService.EditorEnterBehaviorCtrlEnterSaves;
-                    TodoShowFooterStats = false;
-                    TodoShowClearCompletedButton = true;
-                    TodoReminderEnabled = true;
-                    SelectedTodoLayoutMode = SettingsService.TodoLayoutModeAuto;
-                    TodoUseWideDetailPane = true;
-                    TodoAutoSelectFirstInWideLayout = true;
-                    SelectedTodoReminderOffsetMinutes = SettingsService.DefaultTodoReminderOffsetMinutes;
-                    SelectedTodoNewTaskPosition = SettingsService.TodoNewTaskPositionTop;
-                    SelectedTodoDefaultFilter = SettingsService.TodoDefaultFilterAll;
-                    SelectedTodoTabStyle = SettingsService.WidgetTabStyleButton;
-                    TodoShowTabBar = true;
-                    TodoShowAllTab = true;
-                    TodoShowActiveTab = false;
-                    TodoShowTodayTab = true;
-                    TodoShowThisWeekTab = false;
-                    TodoShowThisMonthTab = false;
-                    TodoShowImportantTab = true;
-                    TodoShowCompletedTab = true;
-                    _settingsService.Settings.TodoShowCompletedTasks = false;
-                    _settingsService.Settings.TodoItemPreviewLineCount = SettingsService.DefaultTodoItemPreviewLineCount;
-                    _settingsService.Settings.TodoEditorEnterBehavior = SettingsService.EditorEnterBehaviorCtrlEnterSaves;
-                    _settingsService.Settings.TodoShowFooterStats = false;
-                    _settingsService.Settings.TodoShowClearCompletedButton = true;
-                    _settingsService.Settings.TodoReminderEnabled = true;
-                    _settingsService.Settings.TodoLayoutMode = SettingsService.TodoLayoutModeAuto;
-                    _settingsService.Settings.TodoUseWideDetailPane = true;
-                    _settingsService.Settings.TodoAutoSelectFirstInWideLayout = true;
-                    _settingsService.Settings.TodoDefaultReminderOffsetMinutes = SettingsService.DefaultTodoReminderOffsetMinutes;
-                    _settingsService.Settings.TodoNewTaskPosition = SettingsService.TodoNewTaskPositionTop;
-                    _settingsService.Settings.TodoDefaultFilter = SettingsService.TodoDefaultFilterAll;
-                    _settingsService.Settings.TodoTabStyle = SettingsService.WidgetTabStyleButton;
-                    _settingsService.Settings.TodoShowTabBar = true;
-                    _settingsService.Settings.TodoShowAllTab = true;
-                    _settingsService.Settings.TodoShowActiveTab = false;
-                    _settingsService.Settings.TodoShowTodayTab = true;
-                    _settingsService.Settings.TodoShowThisWeekTab = false;
-                    _settingsService.Settings.TodoShowThisMonthTab = false;
-                    _settingsService.Settings.TodoShowImportantTab = true;
-                    _settingsService.Settings.TodoShowCompletedTab = true;
+                    _todoSettings.ResetDisplayOptions(scheduleSave: false);
+                    _todoSettings.ResetPreviewLineCount(scheduleSave: false);
+                    _todoSettings.ResetInputPreferences(scheduleSave: false);
+                    _todoSettings.ResetLayoutPreferences(scheduleSave: false);
+                    _todoSettings.ResetTabPreferences(scheduleSave: false);
+                    _todoSettings.ResetReminderPreferences(scheduleSave: false);
                     break;
                 case WidgetKind.Music:
                     MusicUseArtworkBackdrop = true;
@@ -832,6 +638,7 @@ set => WidgetOpacity = Math.Clamp(1.0 - value / 100d, SettingsService.MinWidgetO
             _isApplyingSettingsSnapshot = wasApplyingSnapshot;
         }
 
+        await recordingDrain;
         await _settingsService.SaveAsync();
     }
 

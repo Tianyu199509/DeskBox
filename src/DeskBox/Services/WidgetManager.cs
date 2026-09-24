@@ -1,5 +1,6 @@
 ﻿﻿using DeskBox.Models;
 using DeskBox.Helpers;
+using DeskBox.Contracts;
 using DeskBox.Controls.WidgetContents;
 using DeskBox.Platform;
 using DeskBox.ViewModels;
@@ -238,6 +239,9 @@ internal interface IDesktopWidgetWindow
 /// </summary>
 public sealed partial class WidgetManager
 {
+    private readonly TodoSettingsCoordinator? _todoSettings;
+    private readonly IQuickCaptureSettings? _quickCaptureSettings;
+    private readonly ISearchFeatureSettings? _searchFeatureSettings;
     private const string ManagedShortcutDescriptionPrefix = "DeskBox mapped widget shortcut:";
 
     private readonly SettingsService _settingsService;
@@ -575,7 +579,10 @@ public sealed partial class WidgetManager
         OrganizerService organizerService,
         ThemeService themeService,
         QuickCaptureService quickCaptureService,
-        LocalizationService? localizationService = null)
+        LocalizationService? localizationService = null,
+        TodoSettingsCoordinator? todoSettings = null,
+        IQuickCaptureSettings? quickCaptureSettings = null,
+        ISearchFeatureSettings? searchFeatureSettings = null)
         : this(
             settingsService,
             fileService,
@@ -584,7 +591,10 @@ public sealed partial class WidgetManager
             quickCaptureService,
             localizationService ?? new LocalizationService(settingsService),
             () => Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory),
-            recycleManagedFolderDeletes: true)
+            recycleManagedFolderDeletes: true,
+            todoSettings,
+            quickCaptureSettings,
+            searchFeatureSettings)
     {
     }
 
@@ -616,9 +626,15 @@ public sealed partial class WidgetManager
         QuickCaptureService quickCaptureService,
         LocalizationService? localizationService,
         Func<string> desktopPathProvider,
-        bool recycleManagedFolderDeletes)
+        bool recycleManagedFolderDeletes,
+        TodoSettingsCoordinator? todoSettings = null,
+        IQuickCaptureSettings? quickCaptureSettings = null,
+        ISearchFeatureSettings? searchFeatureSettings = null)
     {
         _settingsService = settingsService;
+        _todoSettings = todoSettings;
+        _quickCaptureSettings = quickCaptureSettings;
+        _searchFeatureSettings = searchFeatureSettings;
         _fileService = fileService;
         _organizerService = organizerService;
         _themeService = themeService;
@@ -779,6 +795,10 @@ public sealed partial class WidgetManager
             }
 
             _lastFeatureWidgetEnabledStates[kind] = enabled;
+            if (kind == WidgetKind.QuickCapture && _quickCaptureSettings is not null)
+                continue;
+            if (kind == WidgetKind.Search && _searchFeatureSettings is not null)
+                continue;
             ApplyFeatureWidgetEnabledState(kind, enabled);
         }
 

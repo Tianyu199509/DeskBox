@@ -434,15 +434,18 @@ public sealed class OnboardingExperienceTests
         string settingsCallbacks = File.ReadAllText(Path.Combine(
             root,
             "src/DeskBox/ViewModels/SettingsViewModel.FeatureCallbacks.cs"));
+        string quickCaptureCoordinator = File.ReadAllText(Path.Combine(
+            root,
+            "src/DeskBox/Services/QuickCaptureSettingsCoordinator.cs"));
 
         Assert.Contains("_featureWidgetUpdateLocks", featureManager, StringComparison.Ordinal);
         Assert.Contains("await updateLock.WaitAsync()", featureManager, StringComparison.Ordinal);
         Assert.Contains("updateLock.Release()", featureManager, StringComparison.Ordinal);
         Assert.Contains("config.IsVisible = true;", manager, StringComparison.Ordinal);
-        Assert.Contains(
-            "SetFeatureWidgetEnabledAsync(\n                    WidgetKind.QuickCapture",
-            settingsCallbacks.ReplaceLineEndings("\n"),
-            StringComparison.Ordinal);
+        Assert.Contains("_quickCaptureSettings.SetEnabledAsync(value, reveal: value)",
+            settingsCallbacks, StringComparison.Ordinal);
+        Assert.Contains("await _widgetGate.WaitAsync(linked.Token)",
+            quickCaptureCoordinator, StringComparison.Ordinal);
     }
 
     [Fact]

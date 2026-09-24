@@ -8,6 +8,8 @@ using DeskBox.Core.Persistence;
 using DeskBox.FileSafety;
 using DeskBox.Models;
 
+using DeskBox.Contracts;
+
 namespace DeskBox.Services;
 
 public sealed partial class DeskBoxDataBackupService
@@ -230,6 +232,13 @@ public sealed partial class DeskBoxDataBackupService
         bool force,
         CancellationToken cancellationToken)
     {
+        return (await CreateAutomaticSnapshotResultAsync(force, cancellationToken)).ArchivePath;
+    }
+
+    public async Task<LocalBackupResult> CreateAutomaticSnapshotResultAsync(
+        bool force,
+        CancellationToken cancellationToken = default)
+    {
         await _gate.WaitAsync(cancellationToken);
         try
         {
@@ -237,12 +246,12 @@ public sealed partial class DeskBoxDataBackupService
             // "Back up now" (force) stays available even when the schedule is off.
             if (!options.IsEnabled && !force)
             {
-                return null;
+                return new(BackupOutcome.Skipped);
             }
 
             if (!HasBackupSourceData())
             {
-                return null;
+                return new(BackupOutcome.Skipped);
             }
 
             AutomaticSnapshotTarget target = ResolveAutomaticSnapshotTarget(probeWriteAccess: true);
@@ -255,7 +264,7 @@ public sealed partial class DeskBoxDataBackupService
                 DateTime.UtcNow - File.GetLastWriteTimeUtc(latestSnapshot) <
                     TimeSpan.FromMinutes(Math.Max(1, options.IntervalMinutes)))
             {
-                return null;
+                return new(BackupOutcome.Skipped);
             }
 
             string snapshotPath = GetAvailableArchivePath(
@@ -281,7 +290,7 @@ public sealed partial class DeskBoxDataBackupService
             }
 
             App.Log($"[DataBackup] Created automatic snapshot '{snapshotPath}'.");
-            return snapshotPath;
+            return new(BackupOutcome.Succeeded, snapshotPath);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -290,7 +299,7 @@ public sealed partial class DeskBoxDataBackupService
         catch (Exception ex)
         {
             App.Log($"[DataBackup] Automatic snapshot failed: {ex}");
-            return null;
+            return new(BackupOutcome.Failed, Error: ex.Message);
         }
         finally
         {
@@ -2742,6 +2751,9 @@ public sealed partial class DeskBoxDataBackupService
                 await output.FlushAsync(cancellationToken);
             }
 
+            // The final rename commits the archive. Cancellation is accepted
+            // before it; after it succeeds the completed backup is retained.
+            cancellationToken.ThrowIfCancellationRequested();
             File.Move(tempArchivePath, archivePath, overwrite: false);
         }
         finally

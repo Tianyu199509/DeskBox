@@ -1,4 +1,8 @@
 using DeskBox.Controls;
+using DeskBox.Features.Todo;
+using DeskBox.Features.Search;
+using DeskBox.Features.Backup;
+using DeskBox.Contracts;
 using DeskBox.Helpers;
 using DeskBox.Models;
 using DeskBox.Platform;
@@ -128,8 +132,17 @@ public sealed partial class SettingsWindow : Window
         };
 
     public SettingsViewModel ViewModel { get; }
+    private readonly SearchSettingsViewModel _searchSettingsViewModel;
+    private readonly BackupSettingsViewModel _backupSettingsViewModel;
+    private readonly BackupRestoreActions _backupRestoreActions;
+    private readonly IBackupCommands _backupCommands;
 
-    public SettingsWindow(SettingsService settingsService, ThemeService themeService, LocalizationService localizationService)
+    public SettingsWindow(SettingsService settingsService, ThemeService themeService, LocalizationService localizationService,
+        TodoSettingsViewModel todoSettings, SearchSettingsViewModel searchSettings,
+        BackupSettingsViewModel backupSettings, BackupRestoreActions backupRestoreActions,
+        IQuickCaptureSettings quickCaptureSettings,
+        ISearchFeatureSettings searchFeatureSettings,
+        IBackupCommands backupCommands)
     {
         var constructionStopwatch = Stopwatch.StartNew();
         long previousCheckpointMilliseconds = 0;
@@ -144,9 +157,15 @@ public sealed partial class SettingsWindow : Window
         }
 
         _settingsService = settingsService;
+        _backupCommands = backupCommands;
+        _searchSettingsViewModel = searchSettings;
+        _backupSettingsViewModel = backupSettings;
+        _backupRestoreActions = backupRestoreActions;
         _themeService = themeService;
         _localizationService = localizationService;
-        ViewModel = new SettingsViewModel(settingsService, themeService, localizationService, App.Current.AppUpdateService);
+        ViewModel = new SettingsViewModel(settingsService, themeService, todoSettings,
+            backupSettings, quickCaptureSettings, searchFeatureSettings,
+            localizationService, App.Current.AppUpdateService);
         LogConstructionCheckpoint("view-model");
         _settingsRootPointerPressedHandler = SettingsRoot_PointerPressedHandled;
         _settingsRootPointerReleasedHandler = SettingsRoot_PointerReleasedHandled;
@@ -239,6 +258,8 @@ public sealed partial class SettingsWindow : Window
         // frozen on a stale theme.
         _themeService.ApplyToWindow(this);
         _appWindow.Show();
+        UpdateSearchSettingsActivity();
+        UpdateBackupSettingsActivity();
         // Route through the manager so a quick-reveal raised session (widget
         // group held topmost) lifts this window above the widgets instead of
         // leaving it in the normal band below them. Outside a session this is
@@ -325,6 +346,8 @@ public sealed partial class SettingsWindow : Window
 
         args.Cancel = true;
         _appWindow.Hide();
+        UpdateSearchSettingsActivity();
+        UpdateBackupSettingsActivity();
         App.Current.WidgetManager?.ReleaseRaisedBandGuest(
             _hWnd,
             "settings-hidden");
@@ -342,6 +365,9 @@ public sealed partial class SettingsWindow : Window
         }
 
         _isClosed = true;
+        UpdateSearchSettingsActivity();
+        _searchSettingsViewModel.Dispose();
+        _backupSettingsViewModel.Deactivate();
         Activated -= SettingsWindow_Activated;
         _appWindow.Closing -= SettingsWindow_AppWindowClosing;
         Closed -= SettingsWindow_Closed;
@@ -350,7 +376,8 @@ public sealed partial class SettingsWindow : Window
         SettingsRoot.ActualThemeChanged -= SettingsRoot_ActualThemeChanged;
         SettingsRoot.RemoveHandler(UIElement.PointerPressedEvent, _settingsRootPointerPressedHandler);
         SettingsRoot.RemoveHandler(UIElement.PointerReleasedEvent, _settingsRootPointerReleasedHandler);
-        App.Current.CloudBackupService.BackupRunCompleted -= OnCloudBackupRunCompleted;
+        if (_cloudBackupCollectionChanged is not null)
+            ViewModel.CloudBackupRemoteSnapshots.CollectionChanged -= _cloudBackupCollectionChanged;
 
         _resizeSettleTimer.Stop();
         _resizeSettleTimer.Tick -= ResizeSettleTimer_Tick;

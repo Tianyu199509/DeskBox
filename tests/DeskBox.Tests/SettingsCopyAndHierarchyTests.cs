@@ -537,7 +537,7 @@ public sealed class SettingsCopyAndHierarchyTests
         Assert.Contains("x:Name=\"SearchHotkeyToggle\"", searchXaml, StringComparison.Ordinal);
         Assert.Contains("Settings.Search.Hotkey.Title", searchXaml, StringComparison.Ordinal);
         Assert.DoesNotContain("Settings.Search.Scope.Title", searchXaml, StringComparison.Ordinal);
-        Assert.Contains("FeatureWidgetSettings.IsEnabled(settings, WidgetKind.Search)", searchCodeBehind, StringComparison.Ordinal);
+        Assert.Contains("_viewModel.State.FeatureEnabled", searchCodeBehind, StringComparison.Ordinal);
     }
 
     [Fact]

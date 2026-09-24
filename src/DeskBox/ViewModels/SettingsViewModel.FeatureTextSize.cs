@@ -24,18 +24,53 @@ public partial class SettingsViewModel
             nameof(QuickCaptureContentTextSizeValueText));
 
     partial void OnTodoListTextSizeChanged(double value) =>
-        PersistFeatureTextSize(
+        PersistTodoTextSize(
             value,
             normalized => TodoListTextSize = normalized,
-            normalized => _settingsService.Settings.TodoListTextSize = normalized,
+            normalized => _todoSettings.TrySetListTextSize(
+                normalized,
+                scheduleSave: false),
             nameof(TodoListTextSizeValueText));
 
     partial void OnTodoContentTextSizeChanged(double value) =>
-        PersistFeatureTextSize(
+        PersistTodoTextSize(
             value,
             normalized => TodoContentTextSize = normalized,
-            normalized => _settingsService.Settings.TodoContentTextSize = normalized,
+            normalized => _todoSettings.TrySetContentTextSize(
+                normalized,
+                scheduleSave: false),
             nameof(TodoContentTextSizeValueText));
+
+    private void PersistTodoTextSize(
+        double value,
+        Action<double> setViewModelValue,
+        Func<double, bool> setStoredValue,
+        string valueTextPropertyName)
+    {
+        OnPropertyChanged(valueTextPropertyName);
+        if (_isRestoringDefaults || _isApplyingSettingsSnapshot) return;
+
+        if (!double.IsFinite(value))
+        {
+            setViewModelValue(SettingsService.NormalizeTextSize(
+                _settingsService.Settings.TextSize));
+            return;
+        }
+
+        double normalized = Math.Clamp(
+            Math.Round(value * 2d, MidpointRounding.AwayFromZero) / 2d,
+            SettingsService.MinTextSize,
+            SettingsService.MaxTextSize);
+        if (Math.Abs(normalized - value) > 0.0001)
+        {
+            setViewModelValue(normalized);
+            return;
+        }
+
+        if (!setStoredValue(normalized)) return;
+        SaveAppearanceChange();
+        OnPropertyChanged(valueTextPropertyName);
+    }
 
     private void PersistFeatureTextSize(
         double value,

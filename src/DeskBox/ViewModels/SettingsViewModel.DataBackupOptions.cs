@@ -1,4 +1,5 @@
 using CommunityToolkit.Mvvm.ComponentModel;
+using DeskBox.Contracts;
 using DeskBox.Services;
 using Microsoft.UI.Xaml;
 
@@ -47,9 +48,7 @@ public partial class SettingsViewModel
             return;
         }
 
-        _settingsService.Settings.AutomaticBackupEnabled = value;
-        _settingsService.SaveDebounced();
-        PushAutomaticBackupOptionsToService();
+        _backupSettings.Update(new(LocalEnabled: value));
     }
 
     private int _selectedAutomaticBackupIntervalMinutes = DataBackupSettingsPolicy.DefaultIntervalMinutes;
@@ -70,11 +69,7 @@ public partial class SettingsViewModel
                 return;
             }
 
-            DataBackupSettingsPolicy.SetIntervalMinutes(
-                _settingsService.Settings,
-                normalized);
-            _settingsService.SaveDebounced();
-            PushAutomaticBackupOptionsToService();
+            _backupSettings.Update(new(LocalIntervalMinutes: normalized));
         }
     }
 
@@ -96,11 +91,7 @@ public partial class SettingsViewModel
                 return;
             }
 
-            DataBackupSettingsPolicy.SetRetentionCount(
-                _settingsService.Settings,
-                normalized);
-            _settingsService.SaveDebounced();
-            PushAutomaticBackupOptionsToService();
+            _backupSettings.Update(new(LocalRetentionCount: normalized));
         }
     }
 
@@ -117,8 +108,7 @@ public partial class SettingsViewModel
     public string AutomaticBackupDirectoryDisplayText =>
         _automaticBackupDirectory.Length > 0
             ? _automaticBackupDirectory
-            : App.Current?.DataBackupService.GetAutomaticBackupDirectoryStatus().EffectiveDirectory
-              ?? string.Empty;
+            : _backupSettings.State.EffectiveLocalDirectory;
 
     private string _automaticBackupFallbackWarningText = string.Empty;
 
@@ -133,10 +123,7 @@ public partial class SettingsViewModel
     {
         string normalizedDirectory =
             DataBackupSettingsPolicy.NormalizeCustomDirectory(path) ?? string.Empty;
-        AutomaticBackupDirectory = normalizedDirectory;
-        _settingsService.Settings.AutomaticBackupDirectory = normalizedDirectory;
-        _settingsService.SaveDebounced();
-        PushAutomaticBackupOptionsToService();
+        _backupSettings.Update(new(LocalDirectory: normalizedDirectory));
         RefreshAutomaticBackupStatus();
     }
 
@@ -146,30 +133,18 @@ public partial class SettingsViewModel
     /// </summary>
     public void RefreshAutomaticBackupStatus()
     {
-        DeskBoxDataBackupService? backupService = App.Current?.DataBackupService;
-        if (backupService is null)
-        {
-            return;
-        }
-
+        _backupSettings.RefreshState();
         OnPropertyChanged(nameof(AutomaticBackupDirectoryDisplayText));
-        AutomaticBackupDirectoryStatus status = backupService.GetAutomaticBackupDirectoryStatus();
-        bool showFallbackWarning =
-            status.ConfiguredDirectory is not null &&
-            (!status.IsCustomDirectoryActive ||
-             backupService.LastAutomaticSnapshotFallbackMessage is not null);
-        _automaticBackupFallbackWarningText = showFallbackWarning
+        BackupSettingsSnapshot state = _backupSettings.State;
+        _automaticBackupFallbackWarningText = state.LocalDirectoryFallback
             ? _localizationService.Format(
                 "Settings.DataBackup.AutomaticBackupDirectory.FallbackWarning",
-                status.EffectiveDirectory)
+                state.EffectiveLocalDirectory)
             : string.Empty;
         OnPropertyChanged(nameof(AutomaticBackupFallbackWarningText));
         OnPropertyChanged(nameof(AutomaticBackupFallbackWarningVisibility));
     }
 
-    private void PushAutomaticBackupOptionsToService()
-    {
-        App.Current?.DataBackupService.UpdateAutomaticBackupOptions(
-            DataBackupSettingsPolicy.GetOptions(_settingsService.Settings));
-    }
+    public bool IsValidAutomaticBackupDirectory(string path, out string? rejectionReasonKey) =>
+        _backupSettings.IsValidLocalDirectory(path, out rejectionReasonKey);
 }

@@ -4,11 +4,47 @@ using System.Text.Json;
 using DeskBox.Core.Persistence;
 using DeskBox.Models;
 using DeskBox.Services;
+using DeskBox.Contracts;
 
 namespace DeskBox.Tests;
 
 public sealed class DeskBoxDataBackupServiceTests : IDisposable
 {
+    [Fact]
+    public async Task DetailedSnapshotResult_DistinguishesEmptyDataFromFilesystemFailure()
+    {
+        var empty = new DeskBoxDataBackupService(_appDataRoot);
+        Assert.Equal(BackupOutcome.Skipped, (await empty.CreateAutomaticSnapshotResultAsync(true)).Outcome);
+        string data = Directory.CreateDirectory(Path.Combine(_appDataRoot, "data")).FullName;
+        await File.WriteAllTextAsync(Path.Combine(data, "settings.json"), "{}");
+        string blockedRecovery = Path.Combine(_tempRoot, "blocked-recovery");
+        await File.WriteAllTextAsync(blockedRecovery, "occupied");
+        var failing = new DeskBoxDataBackupService(_appDataRoot, blockedRecovery);
+        LocalBackupResult result = await failing.CreateAutomaticSnapshotResultAsync(true);
+        Assert.Equal(BackupOutcome.Failed, result.Outcome);
+        Assert.Null(result.ArchivePath);
+        Assert.NotNull(result.Error);
+    }
+
+    [Fact]
+    public async Task CanceledSnapshot_DoesNotLeaveACompletedArchive()
+    {
+        string data = Directory.CreateDirectory(Path.Combine(_appDataRoot, "data")).FullName;
+        await File.WriteAllTextAsync(Path.Combine(data, "settings.json"), "{}");
+        var service = new DeskBoxDataBackupService(_appDataRoot);
+        using var cancellation = new CancellationTokenSource();
+        await DesktopOrganizationTransaction.OperationGate.WaitAsync();
+        try
+        {
+            Task<LocalBackupResult> pending = service.CreateAutomaticSnapshotResultAsync(true, cancellation.Token);
+            Assert.False(pending.IsCompleted);
+            cancellation.Cancel();
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => pending);
+        }
+        finally { DesktopOrganizationTransaction.OperationGate.Release(); }
+        Assert.Empty(Directory.EnumerateFiles(_tempRoot, "*.zip", SearchOption.AllDirectories));
+    }
+
     private readonly string _tempRoot;
     private readonly string _appDataRoot;
     private readonly string _exportRoot;

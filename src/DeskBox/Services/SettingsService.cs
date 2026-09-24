@@ -3160,12 +3160,11 @@ settings.FocusClickedWidgetOnRaise = false;
             changed = true;
         }
 
-        if (settings.QuickCaptureDefaultView is not (
-            QuickCaptureDefaultViewRecords or
-            QuickCaptureDefaultViewPinned or
-            QuickCaptureDefaultViewRecent))
+        string normalizedDefaultView = NormalizeQuickCaptureDefaultView(
+            settings.QuickCaptureDefaultView);
+        if (settings.QuickCaptureDefaultView != normalizedDefaultView)
         {
-            settings.QuickCaptureDefaultView = QuickCaptureDefaultViewRecords;
+            settings.QuickCaptureDefaultView = normalizedDefaultView;
             changed = true;
         }
 
@@ -3252,20 +3251,15 @@ settings.FocusClickedWidgetOnRaise = false;
             changed = true;
         }
 
-        if (settings.TodoNewTaskPosition is not (TodoNewTaskPositionTop or TodoNewTaskPositionBottom))
+        if (settings.TodoNewTaskPosition != NormalizeTodoNewTaskPosition(
+                settings.TodoNewTaskPosition))
         {
             settings.TodoNewTaskPosition = TodoNewTaskPositionTop;
             changed = true;
         }
 
-        if (settings.TodoDefaultFilter is not (
-            TodoDefaultFilterAll or
-            TodoDefaultFilterActive or
-            TodoDefaultFilterToday or
-            TodoDefaultFilterThisWeek or
-            TodoDefaultFilterThisMonth or
-            TodoDefaultFilterImportant or
-            TodoDefaultFilterCompleted))
+        if (settings.TodoDefaultFilter != NormalizeTodoDefaultFilter(
+                settings.TodoDefaultFilter))
         {
             settings.TodoDefaultFilter = TodoDefaultFilterAll;
             changed = true;
@@ -3346,6 +3340,11 @@ settings.FocusClickedWidgetOnRaise = false;
             ? !controlPressed
             : controlPressed;
 
+    public static string NormalizeTodoNewTaskPosition(string? position) =>
+        position == TodoNewTaskPositionBottom
+            ? TodoNewTaskPositionBottom
+            : TodoNewTaskPositionTop;
+
     public static string NormalizeWidgetTabStyle(string? style)
     {
         return style == WidgetTabStylePivot
@@ -3380,6 +3379,11 @@ settings.FocusClickedWidgetOnRaise = false;
             ? QuickCaptureWideOpenEditing
             : QuickCaptureWideOpenReading;
 
+    public static string NormalizeQuickCaptureDefaultView(string? view) => view is
+        QuickCaptureDefaultViewPinned or QuickCaptureDefaultViewRecent
+            ? view
+            : QuickCaptureDefaultViewRecords;
+
     public static bool IsQuickCaptureTabVisible(AppSettings settings, string? view) => view switch
     {
         QuickCaptureDefaultViewPinned => settings.QuickCaptureShowPinnedTab,
@@ -3395,26 +3399,42 @@ settings.FocusClickedWidgetOnRaise = false;
         return QuickCaptureDefaultViewRecords;
     }
 
-    public static bool IsTodoTabVisible(AppSettings settings, string? filter) => filter switch
+    public static string NormalizeTodoDefaultFilter(string? filter) => filter is
+        TodoDefaultFilterActive or
+        TodoDefaultFilterToday or
+        TodoDefaultFilterThisWeek or
+        TodoDefaultFilterThisMonth or
+        TodoDefaultFilterImportant or
+        TodoDefaultFilterCompleted
+        ? filter
+        : TodoDefaultFilterAll;
+
+    public static bool IsTodoTabVisible(AppSettings settings, string? filter) =>
+        IsTodoTabVisible(settings.Todo, filter);
+
+    public static bool IsTodoTabVisible(TodoSettingsSlice todo, string? filter) => filter switch
     {
-        TodoDefaultFilterActive => settings.TodoShowActiveTab,
-        TodoDefaultFilterToday => settings.TodoShowTodayTab,
-        TodoDefaultFilterThisWeek => settings.TodoShowThisWeekTab,
-        TodoDefaultFilterThisMonth => settings.TodoShowThisMonthTab,
-        TodoDefaultFilterImportant => settings.TodoShowImportantTab,
-        TodoDefaultFilterCompleted => settings.TodoShowCompletedTab,
-        _ => settings.TodoShowAllTab
+        TodoDefaultFilterActive => todo.TodoShowActiveTab,
+        TodoDefaultFilterToday => todo.TodoShowTodayTab,
+        TodoDefaultFilterThisWeek => todo.TodoShowThisWeekTab,
+        TodoDefaultFilterThisMonth => todo.TodoShowThisMonthTab,
+        TodoDefaultFilterImportant => todo.TodoShowImportantTab,
+        TodoDefaultFilterCompleted => todo.TodoShowCompletedTab,
+        _ => todo.TodoShowAllTab
     };
 
-    public static string GetFirstVisibleTodoTab(AppSettings settings)
+    public static string GetFirstVisibleTodoTab(AppSettings settings) =>
+        GetFirstVisibleTodoTab(settings.Todo);
+
+    public static string GetFirstVisibleTodoTab(TodoSettingsSlice todo)
     {
-        if (settings.TodoShowAllTab) return TodoDefaultFilterAll;
-        if (settings.TodoShowActiveTab) return TodoDefaultFilterActive;
-        if (settings.TodoShowTodayTab) return TodoDefaultFilterToday;
-        if (settings.TodoShowThisWeekTab) return TodoDefaultFilterThisWeek;
-        if (settings.TodoShowThisMonthTab) return TodoDefaultFilterThisMonth;
-        if (settings.TodoShowImportantTab) return TodoDefaultFilterImportant;
-        if (settings.TodoShowCompletedTab) return TodoDefaultFilterCompleted;
+        if (todo.TodoShowAllTab) return TodoDefaultFilterAll;
+        if (todo.TodoShowActiveTab) return TodoDefaultFilterActive;
+        if (todo.TodoShowTodayTab) return TodoDefaultFilterToday;
+        if (todo.TodoShowThisWeekTab) return TodoDefaultFilterThisWeek;
+        if (todo.TodoShowThisMonthTab) return TodoDefaultFilterThisMonth;
+        if (todo.TodoShowImportantTab) return TodoDefaultFilterImportant;
+        if (todo.TodoShowCompletedTab) return TodoDefaultFilterCompleted;
         return TodoDefaultFilterAll;
     }
 

@@ -4,6 +4,8 @@ using System.Text;
 using DeskBox.Models;
 using DeskBox.Services;
 
+using DeskBox.Contracts;
+
 namespace DeskBox.Tests;
 
 /// <summary>
@@ -928,6 +930,137 @@ public sealed class CloudBackupTransportTests : IDisposable
         Assert.Contains("20260101", snapshots[1].Name);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task CancellationBeforeUploadAcceptance_DoesNotStampSuccessOrFailure(bool scheduled)
+    {
+        SeedTodoData();
+        using var cancellation = new CancellationTokenSource();
+        var transport = new FakeCloudBackupTransport
+        {
+            UploadHook = _ => { cancellation.Cancel(); return Task.CompletedTask; }
+        };
+        (CloudBackupService service, SettingsService settings) = CreateService(transport);
+        service.UpdateOptions(ConfiguredOptions());
+        var events = new List<CloudBackupRunCompletedInfo>();
+        service.BackupRunCompleted += events.Add;
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => scheduled
+            ? service.RunScheduledIfDueAsync(cancellation.Token)
+            : service.RunBackupNowAsync(cancellation.Token));
+        Assert.Empty(transport.Files);
+        Assert.Empty(events);
+        Assert.Equal(0, settings.Settings.CloudBackup.CloudBackupLastSuccessUtcTicks);
+        Assert.Equal(0, settings.Settings.CloudBackup.CloudBackupLastFailureUtcTicks);
+    }
+
+    [Fact]
+    public async Task SnapshotTarget_RejectsStaleRow_AndFrozenServiceCallUsesOriginalEndpoint()
+    {
+        const string name = "DeskBox-CloudBackup-20260910T110000Z-abcd1234.zip";
+        var a = new FakeCloudBackupTransport();
+        var b = new FakeCloudBackupTransport();
+        a.Files[$"DeskBox/backups/{name}"] = [1];
+        b.Files[$"DeskBox/backups/{name}"] = [2];
+        CloudBackupOptions optionsA = ConfiguredOptions() with { ServerUrl = "https://a.example/dav" };
+        CloudBackupOptions optionsB = optionsA with { ServerUrl = "https://b.example/dav" };
+        var backup = new DeskBoxDataBackupService(_appDataRoot);
+        var settings = new SettingsService(Path.Combine(_tempRoot, "target-settings"));
+        settings.Settings.CloudBackup.CloudBackupProvider = optionsA.Provider;
+        settings.Settings.CloudBackup.CloudBackupServerUrl = optionsA.ServerUrl;
+        settings.Settings.CloudBackup.CloudBackupRemotePath = optionsA.RemotePath;
+        settings.Settings.CloudBackup.CloudBackupUsername = optionsA.Username;
+        var credentials = new InMemoryCredentialStore();
+        await credentials.SetSecretAsync(CloudBackupSettingsPolicy.CredentialKey(optionsA), "a-secret");
+        await credentials.SetSecretAsync(CloudBackupSettingsPolicy.CredentialKey(optionsB), "b-secret");
+        var service = new CloudBackupService(backup, settings, credentials,
+            (options, _) => options.Endpoint == optionsA.Endpoint ? a : b);
+        service.UpdateOptions(optionsA);
+        var actions = new BackupRestoreActions(settings, service, backup, () => Task.CompletedTask);
+        Assert.True(actions.IsCurrentEndpoint(optionsA.Endpoint));
+
+        settings.Settings.CloudBackup.CloudBackupServerUrl = optionsB.ServerUrl;
+        service.UpdateOptions(optionsB);
+        Assert.False(actions.IsCurrentEndpoint(optionsA.Endpoint));
+        await Assert.ThrowsAsync<OperationCanceledException>(async () =>
+            await actions.DeleteSnapshotAsync(optionsA.Endpoint, name));
+        Assert.True(b.Files.ContainsKey($"DeskBox/backups/{name}"));
+
+        await service.DeleteRemoteSnapshotAsync(optionsA, name);
+        Assert.False(a.Files.ContainsKey($"DeskBox/backups/{name}"));
+        Assert.True(b.Files.ContainsKey($"DeskBox/backups/{name}"));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task CancellationAfterUploadAcceptance_RecordsUnverifiedSuccess(bool duringRetry)
+    {
+        SeedTodoData();
+        using var cancellation = new CancellationTokenSource();
+        var listed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var transport = new FakeCloudBackupTransport
+        {
+            UploadCompleted = () => { if (!duringRetry) cancellation.Cancel(); },
+            ExcludeFromListing = _ => true,
+            ListRequested = () => listed.TrySetResult()
+        };
+        (CloudBackupService service, SettingsService settings) = CreateService(transport);
+        service.UpdateOptions(ConfiguredOptions());
+        service.VerificationRetryDelayMs = [60_000];
+        var events = new List<CloudBackupRunCompletedInfo>();
+        service.BackupRunCompleted += events.Add;
+        Task<CloudBackupRunResult> run = service.RunBackupNowAsync(cancellation.Token);
+        if (duringRetry)
+        {
+            await listed.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            cancellation.Cancel();
+        }
+        CloudBackupRunResult result = await run.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.True(result.Uploaded);
+        Assert.True(result.UploadUnverified);
+        Assert.Single(transport.Files);
+        Assert.True(settings.Settings.CloudBackup.CloudBackupLastSuccessUtcTicks > 0);
+        Assert.True(settings.Settings.CloudBackup.CloudBackupLastUnverifiedUtcTicks > 0);
+        Assert.Equal(0, settings.Settings.CloudBackup.CloudBackupLastFailureUtcTicks);
+        Assert.True(Assert.Single(events).Uploaded);
+    }
+
+    [Fact]
+    public async Task RetentionCancellation_PreservesVerifiedUploadAndDoesNotDeleteOldSnapshots()
+    {
+        SeedTodoData();
+        using var cancellation = new CancellationTokenSource();
+        int listings = 0;
+        var transport = new FakeCloudBackupTransport
+        {
+            ListRequested = () => { if (++listings == 2) cancellation.Cancel(); }
+        };
+        transport.Files["DeskBox/backups/DeskBox-CloudBackup-20000101T000000Z-node.zip"] = [1];
+        (CloudBackupService service, SettingsService settings) = CreateService(transport);
+        service.UpdateOptions(ConfiguredOptions(retention: 1));
+        CloudBackupRunResult result = await service.RunBackupNowAsync(cancellation.Token);
+        Assert.True(result.Uploaded);
+        Assert.False(result.UploadUnverified);
+        Assert.Equal(2, transport.Files.Count);
+        Assert.Equal(0, settings.Settings.CloudBackup.CloudBackupLastFailureUtcTicks);
+    }
+
+    [Fact]
+    public async Task CompletionObserverFailure_CannotReclassifyAnAcceptedUpload()
+    {
+        SeedTodoData();
+        (CloudBackupService service, SettingsService settings) = CreateService(new FakeCloudBackupTransport());
+        service.UpdateOptions(ConfiguredOptions());
+        var events = new List<CloudBackupRunCompletedInfo>();
+        service.BackupRunCompleted += _ => throw new InvalidOperationException("view already closed");
+        service.BackupRunCompleted += events.Add;
+        Assert.True((await service.RunBackupNowAsync()).Uploaded);
+        Assert.True(Assert.Single(events).Uploaded);
+        Assert.Equal(ConfiguredOptions().Endpoint, Assert.Single(events).Endpoint);
+        Assert.Equal(0, settings.Settings.CloudBackup.CloudBackupLastFailureUtcTicks);
+    }
+
     // ── Policy ──────────────────────────────────────────────────────────
 
     [Fact]
@@ -1130,6 +1263,8 @@ public sealed class CloudBackupTransportTests : IDisposable
         internal List<string> Directories { get; } = [];
         internal Func<string, bool>? FailOn { get; init; }
         internal Func<string, Task>? UploadHook { get; init; }
+        internal Action? UploadCompleted { get; init; }
+        internal Action? ListRequested { get; init; }
         // Verification-fault knobs: ReportedLengthOverride makes the
         // listing lie about sizes; ExcludeFromListing hides entries
         // entirely — together they simulate silent truncation and
@@ -1155,6 +1290,8 @@ public sealed class CloudBackupTransportTests : IDisposable
         public Task<IReadOnlyList<CloudBackupRemoteEntry>> ListAsync(
             string remoteDirectory, CancellationToken cancellationToken = default)
         {
+            cancellationToken.ThrowIfCancellationRequested();
+            ListRequested?.Invoke();
             ThrowIfFailed(remoteDirectory);
             string prefix = remoteDirectory.TrimEnd('/') + "/";
             IReadOnlyList<CloudBackupRemoteEntry> entries = Files.Keys
@@ -1180,6 +1317,7 @@ public sealed class CloudBackupTransportTests : IDisposable
             using var buffer = new MemoryStream();
             await content.CopyToAsync(buffer, cancellationToken);
             Files[remoteFilePath] = buffer.ToArray();
+            UploadCompleted?.Invoke();
         }
 
         public Task DownloadAsync(string remoteFilePath, Stream destination, CancellationToken cancellationToken = default)

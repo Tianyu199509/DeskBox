@@ -1,5 +1,8 @@
 ﻿using DeskBox.Helpers;
 using DeskBox.Models;
+using System.ComponentModel;
+using DeskBox.Contracts;
+using DeskBox.Features.Search;
 using DeskBox.Platform;
 using DeskBox.Services;
 using Microsoft.UI.Xaml;
@@ -14,14 +17,17 @@ namespace DeskBox.Views.SettingsSections;
 
 /// <summary>
 /// Settings section for the global search feature: hotkey, display mode, scopes and
-/// recommendations. Reads and writes settings directly through the shared SettingsService.
+/// recommendations. The injected editor owns settings operations and visit cancellation.
 /// </summary>
 public sealed partial class SearchSettingsSection : UserControl
 {
     private bool _isLoading;
     private bool _isRecordingSearchHotkey;
-    private EverythingSearchService? _observedEverythingProvider;
-    private CancellationTokenSource? _everythingRefreshCts;
+    private SearchSettingsViewModel? _viewModel;
+    private LocalizationService _localization = null!;
+    private nint _ownerWindow;
+    private bool _hostActive;
+    private bool _observingModel;
 
     public SearchSettingsSection()
     {
@@ -30,47 +36,61 @@ public sealed partial class SearchSettingsSection : UserControl
         Unloaded += OnUnloaded;
     }
 
-    private SettingsService Settings => App.Current.SettingsService;
-    private LocalizationService Localization => App.Current.LocalizationService;
+    private LocalizationService Localization => _localization;
+
+    public void Configure(SearchSettingsViewModel viewModel, LocalizationService localization, nint ownerWindow)
+    {
+        _viewModel = viewModel;
+        _localization = localization;
+        _ownerWindow = ownerWindow;
+        RefreshFromSettings();
+    }
+
+    public void SetActive(bool active)
+    {
+        _hostActive = active;
+        SynchronizeActivity();
+    }
+
+    private void SynchronizeActivity()
+    {
+        if (_viewModel is null) return;
+        bool active = _hostActive && IsLoaded;
+        if (_observingModel != active)
+        {
+            if (active) _viewModel.PropertyChanged += OnEditorChanged;
+            else _viewModel.PropertyChanged -= OnEditorChanged;
+            _observingModel = active;
+        }
+        if (active)
+        {
+            _viewModel.Activate();
+            RefreshFromSettings();
+        }
+        else
+        {
+            _isRecordingSearchHotkey = false;
+            _viewModel.Deactivate();
+        }
+    }
+
+    private void OnEditorChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (_hostActive && IsLoaded) RenderEditor();
+    }
 
     private void OnLoaded(object sender, RoutedEventArgs e)
     {
-        RefreshFromSettings();
+        SynchronizeActivity();
     }
 
     private void OnUnloaded(object sender, RoutedEventArgs e)
     {
-        _everythingRefreshCts?.Cancel();
-        _everythingRefreshCts?.Dispose();
-        _everythingRefreshCts = null;
-        ObserveEverythingProvider(null);
-    }
-
-    private void ObserveEverythingProvider(EverythingSearchService? provider)
-    {
-        if (ReferenceEquals(_observedEverythingProvider, provider))
-        {
-            return;
-        }
-
-        if (_observedEverythingProvider is not null)
-        {
-            _observedEverythingProvider.ConnectionChanged -= OnEverythingConnectionChanged;
-        }
-
-        _observedEverythingProvider = provider;
-        if (_observedEverythingProvider is not null)
-        {
-            _observedEverythingProvider.ConnectionChanged += OnEverythingConnectionChanged;
-        }
-    }
-
-    private EverythingSearchService? EnsureEverythingProviderForUserAction()
-    {
-        var engine = App.Current.EnsureSearchServicesForUserAction();
-        EverythingSearchService? provider = engine?.EverythingProvider;
-        ObserveEverythingProvider(provider);
-        return provider;
+        if (_viewModel is null) return;
+        _viewModel.PropertyChanged -= OnEditorChanged;
+        _observingModel = false;
+        _isRecordingSearchHotkey = false;
+        _viewModel.Deactivate();
     }
 
     /// <summary>
@@ -78,44 +98,48 @@ public sealed partial class SearchSettingsSection : UserControl
     /// </summary>
     public void RefreshFromSettings()
     {
+        if (_viewModel is null) return;
+        _viewModel.RefreshState();
+        RenderEditor();
+    }
+
+    private void RenderEditor()
+    {
+        if (_viewModel is null) return;
         _isLoading = true;
         try
         {
-            var settings = Settings.Settings;
-            EverythingConsentCheckBox.IsChecked = settings.SearchEverythingEnabled;
+            SearchPreferences settings = _viewModel.State.Preferences;
+            EverythingConsentCheckBox.IsChecked = settings.EverythingEnabled;
             EverythingAdvancedSyntaxToggle.IsOn =
-                settings.SearchEverythingAdvancedSyntaxEnabled;
-            EverythingAdvancedSyntaxToggle.IsEnabled = settings.SearchEverythingEnabled;
-            SearchDeskBoxContentToggle.IsOn = settings.SearchIncludeDeskBoxContent;
-            SearchRecommendationsToggle.IsOn = settings.SearchShowRecommendations;
+                settings.AdvancedSyntax;
+            EverythingAdvancedSyntaxToggle.IsEnabled = settings.EverythingEnabled;
+            SearchDeskBoxContentToggle.IsOn = settings.IncludeDeskBoxContent;
+            SearchRecommendationsToggle.IsOn = settings.ShowRecommendations;
             SearchDefaultTabComboBox.SelectedItem = SearchDefaultTabComboBox.Items
                 .OfType<ComboBoxItem>()
                 .FirstOrDefault(item => string.Equals(
                     item.Tag as string,
-                    settings.SearchDefaultTab,
+                    settings.DefaultTab,
                     StringComparison.OrdinalIgnoreCase));
             SearchIconAnimationComboBox.SelectedItem = SearchIconAnimationComboBox.Items
                 .OfType<ComboBoxItem>()
                 .FirstOrDefault(item => string.Equals(
                     item.Tag as string,
-                    settings.SearchAppIconAnimation.ToString(),
+                    settings.IconAnimation.ToString(),
                     StringComparison.Ordinal));
             RefreshSearchHotkeyControls();
+            UpdateEverythingDashboard(_viewModel.Connection);
+            bool canOperate = _viewModel.State.FeatureEnabled && !_viewModel.IsBusy;
+            EverythingDetectButton.IsEnabled = canOperate;
+            EverythingBrowseButton.IsEnabled = canOperate;
+            EverythingLaunchButton.IsEnabled = canOperate;
         }
         finally
         {
             _isLoading = false;
         }
 
-        EverythingSearchService? provider = EnsureEverythingProviderForUserAction();
-        if (provider is not null)
-        {
-            UpdateEverythingDashboard(provider.CurrentSnapshot);
-            if (IsLoaded && Visibility == Visibility.Visible)
-            {
-                QueueEverythingRefresh();
-            }
-        }
     }
 
     private void SearchScopeToggle_Toggled(object sender, RoutedEventArgs e)
@@ -125,11 +149,7 @@ public sealed partial class SearchSettingsSection : UserControl
             return;
         }
 
-        var settings = Settings.Settings;
-        settings.SearchIncludeDeskBoxContent = SearchDeskBoxContentToggle.IsOn;
-        Settings.SaveDebounced();
-        App.Current.SearchEngineService?.SetDeskBoxContentSearchEnabled(
-            settings.SearchIncludeDeskBoxContent);
+        _viewModel?.UpdatePreferences(new(IncludeDeskBoxContent: SearchDeskBoxContentToggle.IsOn));
     }
 
     private void SearchRecommendationsToggle_Toggled(object sender, RoutedEventArgs e)
@@ -139,8 +159,7 @@ public sealed partial class SearchSettingsSection : UserControl
             return;
         }
 
-        Settings.Settings.SearchShowRecommendations = SearchRecommendationsToggle.IsOn;
-        Settings.SaveDebounced();
+        _viewModel?.UpdatePreferences(new(ShowRecommendations: SearchRecommendationsToggle.IsOn));
     }
 
     private void SearchDefaultTabComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -150,8 +169,7 @@ public sealed partial class SearchSettingsSection : UserControl
             return;
         }
 
-        Settings.Settings.SearchDefaultTab = tabId;
-        Settings.SaveDebounced();
+        _viewModel?.UpdatePreferences(new(DefaultTab: tabId));
     }
 
     private void SearchIconAnimationComboBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -162,51 +180,7 @@ public sealed partial class SearchSettingsSection : UserControl
             return;
         }
 
-        Settings.Settings.SearchAppIconAnimation = style;
-        Settings.SaveDebounced();
-    }
-
-    private void QueueEverythingRefresh()
-    {
-        EverythingSearchService? provider = EnsureEverythingProviderForUserAction();
-        if (provider is null)
-        {
-            return;
-        }
-
-        _everythingRefreshCts?.Cancel();
-        _everythingRefreshCts?.Dispose();
-        _everythingRefreshCts = new CancellationTokenSource();
-        _ = RefreshEverythingStatusAsync(provider, _everythingRefreshCts.Token);
-    }
-
-    private async Task RefreshEverythingStatusAsync(
-        EverythingSearchService provider,
-        CancellationToken cancellationToken)
-    {
-        try
-        {
-            EverythingConnectionSnapshot snapshot = await provider.RefreshConnectionAsync(
-                allowIpcProbe: Settings.Settings.SearchEverythingEnabled,
-                cancellationToken);
-            if (!cancellationToken.IsCancellationRequested)
-            {
-                _ = DispatcherQueue.TryEnqueue(() => UpdateEverythingDashboard(snapshot));
-            }
-        }
-        catch (OperationCanceledException)
-        {
-            // Superseded by a newer detection or the settings window closing.
-        }
-        catch (Exception ex)
-        {
-            App.Log($"[Everything] Settings refresh failed: {ex.Message}");
-        }
-    }
-
-    private void OnEverythingConnectionChanged(EverythingConnectionSnapshot snapshot)
-    {
-        _ = DispatcherQueue.TryEnqueue(() => UpdateEverythingDashboard(snapshot));
+        _viewModel?.UpdatePreferences(new(IconAnimation: style));
     }
 
     private async void EverythingAboutButton_Click(object sender, RoutedEventArgs e)
@@ -300,7 +274,7 @@ private void UpdateEverythingDashboard(EverythingConnectionSnapshot snapshot)
                 ? Visibility.Visible
                 : Visibility.Collapsed;
 
-        bool enabled = Settings.Settings.SearchEverythingEnabled;
+        bool enabled = _viewModel!.State.Preferences.EverythingEnabled;
         EverythingAdvancedSyntaxToggle.IsEnabled = enabled;
         EverythingLaunchButton.Visibility =
             !string.IsNullOrWhiteSpace(snapshot.ExecutablePath) && !snapshot.IsRunning
@@ -315,6 +289,20 @@ private void UpdateEverythingDashboard(EverythingConnectionSnapshot snapshot)
             EverythingConnectionState.IpcUnavailable
                 ? Visibility.Visible
                 : Visibility.Collapsed;
+
+        if (!_viewModel.State.FeatureEnabled)
+        {
+            EverythingStatusInfoBar.Severity = InfoBarSeverity.Informational;
+            EverythingStatusInfoBar.Message = Localization.T("Settings.Search.Index.Status.Disabled");
+        }
+        else if (_viewModel.Failure != SearchSettingsFailure.None)
+        {
+            EverythingStatusInfoBar.Severity = InfoBarSeverity.Error;
+            EverythingStatusInfoBar.Message = Localization.T(
+                _viewModel.Failure == SearchSettingsFailure.InvalidExecutable
+                    ? "Settings.Search.Everything.Status.InvalidExecutable"
+                    : "Settings.Search.Everything.Status.Error");
+        }
     }
 
     private void EverythingConsentCheckBox_Changed(object sender, RoutedEventArgs e)
@@ -325,10 +313,7 @@ private void UpdateEverythingDashboard(EverythingConnectionSnapshot snapshot)
         }
 
         bool enabled = EverythingConsentCheckBox.IsChecked == true;
-        Settings.Settings.SearchEverythingEnabled = enabled;
-        Settings.SaveDebounced();
-        EverythingAdvancedSyntaxToggle.IsEnabled = enabled;
-        QueueEverythingRefresh();
+        _viewModel?.UpdatePreferences(new(EverythingEnabled: enabled));
     }
 
     private void EverythingAdvancedSyntaxToggle_Toggled(object sender, RoutedEventArgs e)
@@ -338,78 +323,38 @@ private void UpdateEverythingDashboard(EverythingConnectionSnapshot snapshot)
             return;
         }
 
-        Settings.Settings.SearchEverythingAdvancedSyntaxEnabled =
-            EverythingAdvancedSyntaxToggle.IsOn;
-        Settings.SaveDebounced();
+        _viewModel?.UpdatePreferences(new(AdvancedSyntax: EverythingAdvancedSyntaxToggle.IsOn));
     }
 
     private async void EverythingDetectButton_Click(object sender, RoutedEventArgs e)
     {
-        if (EnsureEverythingProviderForUserAction() is not { } provider)
-        {
-            return;
-        }
-
-        EverythingDetectButton.IsEnabled = false;
-        try
-        {
-            await provider.UseAutomaticDetectionAsync();
-        }
-        finally
-        {
-            EverythingDetectButton.IsEnabled = true;
-        }
+        if (_viewModel is { } editor) await editor.DetectAutomaticallyAsync();
     }
 
     private async void EverythingLaunchButton_Click(object sender, RoutedEventArgs e)
     {
-        if (EnsureEverythingProviderForUserAction() is not { } provider)
-        {
-            return;
-        }
-
-        EverythingLaunchButton.IsEnabled = false;
-        try
-        {
-            _ = await provider.LaunchEverythingAsync();
-        }
-        finally
-        {
-            EverythingLaunchButton.IsEnabled = true;
-        }
+        if (_viewModel is { } editor) await editor.LaunchEverythingAsync();
     }
 
     private async void EverythingBrowseButton_Click(object sender, RoutedEventArgs e)
     {
-        if (App.Current.SettingsWindowInstance is not { } settingsWindow ||
-            EnsureEverythingProviderForUserAction() is not { } provider)
+        if (_viewModel is not { IsActive: true } editor || _ownerWindow == 0) return;
+        CancellationToken visit = editor.VisitToken;
+        try
         {
-            return;
+            var picker = new FileOpenPicker
+            {
+                SuggestedStartLocation = PickerLocationId.ComputerFolder
+            };
+            picker.FileTypeFilter.Add(".exe");
+            InitializeWithWindow.Initialize(picker, _ownerWindow);
+            Windows.Storage.StorageFile? file = await picker.PickSingleFileAsync();
+            if (file is null || visit.IsCancellationRequested) return;
+            await editor.SelectExecutableAsync(file.Path);
         }
-
-        nint owner = WindowNative.GetWindowHandle(settingsWindow);
-        if (owner == 0)
+        catch (Exception ex)
         {
-            return;
-        }
-
-        var picker = new FileOpenPicker
-        {
-            SuggestedStartLocation = PickerLocationId.ComputerFolder
-        };
-        picker.FileTypeFilter.Add(".exe");
-        InitializeWithWindow.Initialize(picker, owner);
-        Windows.Storage.StorageFile? file = await picker.PickSingleFileAsync();
-        if (file is null)
-        {
-            return;
-        }
-
-        if (!await provider.SetExecutablePathAsync(file.Path))
-        {
-            EverythingStatusInfoBar.Severity = InfoBarSeverity.Error;
-            EverythingStatusInfoBar.Message =
-                Localization.T("Settings.Search.Everything.Status.InvalidExecutable");
+            if (!visit.IsCancellationRequested) editor.ReportViewError(ex);
         }
     }
 
@@ -426,27 +371,26 @@ private void UpdateEverythingDashboard(EverythingConnectionSnapshot snapshot)
 
     private void RefreshSearchHotkeyControls()
     {
-        var settings = Settings.Settings;
-        var gesture = GlobalHotkeyService.NormalizeGesture(
-            settings.SearchHotkeyModifiers,
-            settings.SearchHotkeyKey);
-        bool searchWidgetEnabled = FeatureWidgetSettings.IsEnabled(settings, WidgetKind.Search);
-        bool hotkeyAvailable = searchWidgetEnabled && App.Current.SearchHotkeyService is not null;
+        if (_viewModel is null) return;
+        SearchHotkeyState hotkey = _viewModel.State.Hotkey;
+        bool hotkeyAvailable = _viewModel.State.FeatureEnabled && hotkey.Available;
 
         SearchHotkeyExpander.IsEnabled = hotkeyAvailable;
-        SearchHotkeyToggle.IsOn = settings.SearchHotkeyEnabled && hotkeyAvailable;
+        SearchHotkeyToggle.IsOn = hotkey.Enabled && hotkeyAvailable;
 
         if (!_isRecordingSearchHotkey)
         {
-            SearchHotkeyCaptureButton.Content = GlobalHotkeyService.FormatGesture(gesture, Localization);
+            SearchHotkeyCaptureButton.Content = hotkey.DisplayText;
         }
 
         SearchHotkeyPresetAltSpaceButton.IsChecked =
-            gesture.Equals(SearchHotkeyService.AltSpaceGesture);
+            hotkey.Gesture.Equals(SearchSettingsViewModel.AltSpaceGesture);
 
-        SearchHotkeyStatusText.Text = settings.SearchHotkeyEnabled && hotkeyAvailable
-            ? Localization.T("Settings.Search.Hotkey.Status.Active")
-            : Localization.T("Settings.Search.Hotkey.Status.Disabled");
+        SearchHotkeyStatusText.Text = !hotkeyAvailable
+            ? Localization.T("Settings.Search.Hotkey.Status.Disabled")
+            : _viewModel.HotkeyError ?? Localization.T(
+                !hotkey.Enabled ? "Settings.Search.Hotkey.Status.Disabled" :
+                hotkey.Registered ? "Settings.Search.Hotkey.Status.Active" : "Settings.Search.Hotkey.Status.Failed");
     }
 
     private void SearchHotkeyToggle_Toggled(object sender, RoutedEventArgs e)
@@ -456,14 +400,7 @@ private void UpdateEverythingDashboard(EverythingConnectionSnapshot snapshot)
             return;
         }
 
-        if (App.Current.SearchHotkeyService is not { } service)
-        {
-            RefreshSearchHotkeyControls();
-            return;
-        }
-
-        service.SetEnabled(SearchHotkeyToggle.IsOn);
-        RefreshSearchHotkeyControls();
+        _viewModel?.SetHotkeyEnabled(SearchHotkeyToggle.IsOn);
     }
 
     private void SearchHotkeyCaptureButton_Click(object sender, RoutedEventArgs e)
@@ -495,8 +432,8 @@ private void UpdateEverythingDashboard(EverythingConnectionSnapshot snapshot)
 
         var gesture = new GlobalHotkeyGesture(GetPressedHotkeyModifiers(), (int)e.Key);
         EndSearchHotkeyRecording();
-        await ApplySearchHotkeyGestureAsync(gesture);
         e.Handled = true;
+        await ApplySearchHotkeyGestureAsync(gesture);
     }
 
     private async void SearchHotkeyPresetButton_Click(object sender, RoutedEventArgs e)
@@ -506,37 +443,27 @@ private void UpdateEverythingDashboard(EverythingConnectionSnapshot snapshot)
             return;
         }
 
-        await ApplySearchHotkeyGestureAsync(SearchHotkeyService.AltSpaceGesture);
+        await ApplySearchHotkeyGestureAsync(SearchSettingsViewModel.AltSpaceGesture);
     }
 
     private async Task ApplySearchHotkeyGestureAsync(GlobalHotkeyGesture gesture)
     {
-        if (App.Current.SearchHotkeyService is not { } service)
+        if (_viewModel is not { IsActive: true } editor) return;
+        CancellationToken visit = editor.VisitToken;
+        try
         {
-            RefreshSearchHotkeyControls();
-            return;
+            if (editor.RequiresReservedHotkeyConfirmation(gesture) &&
+                !await ConfirmSearchReservedHotkeyOverrideAsync())
+            {
+                if (!visit.IsCancellationRequested) RenderEditor();
+                return;
+            }
+            if (!visit.IsCancellationRequested) editor.ApplyHotkey(gesture);
         }
-
-        var settings = Settings.Settings;
-        var current = GlobalHotkeyService.NormalizeGesture(
-            settings.SearchHotkeyModifiers,
-            settings.SearchHotkeyKey);
-        if (gesture.Equals(SearchHotkeyService.AltSpaceGesture) &&
-            !gesture.Equals(current) &&
-            !await ConfirmSearchReservedHotkeyOverrideAsync())
+        catch (Exception ex)
         {
-            RefreshSearchHotkeyControls();
-            return;
+            if (!visit.IsCancellationRequested) editor.ReportViewError(ex);
         }
-
-        if (!service.TryApplyGesture(gesture, out string? error))
-        {
-            SearchHotkeyStatusText.Text = error ??
-                Localization.T("Settings.Search.Hotkey.Status.Failed");
-            return;
-        }
-
-        RefreshSearchHotkeyControls();
     }
 
     private async Task<bool> ConfirmSearchReservedHotkeyOverrideAsync()
@@ -549,9 +476,7 @@ private void UpdateEverythingDashboard(EverythingConnectionSnapshot snapshot)
         var dialog = new ContentDialog
         {
             XamlRoot = XamlRoot,
-            Title = GlobalHotkeyService.FormatGesture(
-                SearchHotkeyService.AltSpaceGesture,
-                Localization),
+            Title = _viewModel!.ReservedHotkeyDisplayText,
             PrimaryButtonText = Localization.T("Common.Enable"),
             CloseButtonText = Localization.T("Common.Cancel"),
             DefaultButton = ContentDialogButton.Close,
@@ -575,18 +500,13 @@ private void UpdateEverythingDashboard(EverythingConnectionSnapshot snapshot)
 
     private void ResetSearchHotkeyButton_Click(object sender, RoutedEventArgs e)
     {
-        var settings = Settings.Settings;
-        settings.SearchHotkeyModifiers = (int)HotkeyModifierKeys.Alt;
-        settings.SearchHotkeyKey = 0x44; // Alt+D default
-        Settings.SaveDebounced();
-        App.Current.SearchHotkeyService?.RefreshRegistration();
-        RefreshSearchHotkeyControls();
+        _viewModel?.ResetHotkey();
     }
 
     private void EndSearchHotkeyRecording()
     {
         _isRecordingSearchHotkey = false;
-        RefreshSearchHotkeyControls();
+        RenderEditor();
     }
 
     private static HotkeyModifierKeys GetPressedHotkeyModifiers()
