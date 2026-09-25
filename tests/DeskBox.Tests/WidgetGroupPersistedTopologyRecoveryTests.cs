@@ -206,4 +206,58 @@ public sealed class WidgetGroupPersistedTopologyRecoveryTests
         Assert.True(registry.TryGetByMember("b", out var unrelatedClaim));
         Assert.Same(unrelated, unrelatedClaim);
     }
+
+    [Fact]
+    public void QuarantineCommittedDetachClaims_RemovesStaleGroupClaimAndRestoresStandalone()
+    {
+        var registry = new WidgetSurfaceRegistry<object>();
+        object detachedHost = new();
+        registry.RegisterActive(
+            new WidgetSurfaceDefinition("g1", "group-1", ["removed", "other"], "removed"),
+            detachedHost);
+
+        bool restored = WidgetGroupPersistedTopologyRecovery.QuarantineCommittedDetachClaims(
+            registry,
+            "g1",
+            "removed",
+            detachedHost,
+            new WidgetSurfaceDefinition("s-removed", null, ["removed"], "removed"),
+            _ => { });
+
+        Assert.True(restored);
+        Assert.False(registry.TryGet("g1", out _));
+        Assert.True(registry.TryGetByMember("removed", out var standalone));
+        Assert.Same(detachedHost, standalone!.Host);
+        Assert.False(registry.TryGetByMember("other", out _));
+    }
+
+    [Fact]
+    public void QuarantineCommittedDetachClaims_ReportsObservableFailureWhenRetryIsRejected()
+    {
+        var registry = new WidgetSurfaceRegistry<object>();
+        object detachedHost = new();
+        object survivorHost = new();
+        registry.RegisterActive(
+            new WidgetSurfaceDefinition("other", "other-id", ["x"], "x"),
+            survivorHost);
+
+        var logs = new List<string>();
+        // The retried declaration claims a member ("x") still owned by the
+        // unrelated surface, so the registry rejects it before mutating.
+        bool restored = WidgetGroupPersistedTopologyRecovery.QuarantineCommittedDetachClaims(
+            registry,
+            "g1",
+            "removed",
+            detachedHost,
+            new WidgetSurfaceDefinition("s-new", "new-id", ["removed", "x"], "removed"),
+            logs.Add);
+
+        Assert.False(restored);
+        Assert.Contains(logs, line => line.Contains(
+            "Detach reconciliation quarantined without a standalone declaration",
+            StringComparison.Ordinal));
+        // The rejected retry must not have removed the unrelated declaration.
+        Assert.True(registry.TryGet("other", out var survivor));
+        Assert.Same(survivorHost, survivor!.Host);
+    }
 }

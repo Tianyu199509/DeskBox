@@ -1152,14 +1152,34 @@ public sealed partial class WidgetManager
                         $"group={committedGroup.Id}: {cleanupError}");
                 }
             }
-            _widgetSurfaces.UnregisterHost(host);
+            try
+            {
+                _widgetSurfaces.UnregisterHost(host);
+            }
+            catch (Exception quarantineError)
+            {
+                App.Log(
+                    $"[WidgetGroup] Committed merge host unregister failed " +
+                    $"group={committedGroup.Id}: {quarantineError}");
+            }
         }
 
         foreach (string memberId in memberIds)
         {
             if (_widgetSurfaces.TryGetByMember(memberId, out var residual) &&
                 residual is not null)
-                _widgetSurfaces.UnregisterHost(residual.Host);
+            {
+                try
+                {
+                    _widgetSurfaces.UnregisterHost(residual.Host);
+                }
+                catch (Exception quarantineError)
+                {
+                    App.Log(
+                        $"[WidgetGroup] Committed merge residual unregister " +
+                        $"failed group={committedGroup.Id}: {quarantineError}");
+                }
+            }
         }
 
         if (sourceGroup is not null &&
@@ -2600,6 +2620,7 @@ public sealed partial class WidgetManager
 
         try
         {
+            WidgetGroupFailureProbe.ThrowIfRequested("detach-reconcile-registry");
             if (_widgetSurfaces.TryGet(originalGroup.SurfaceId, out var original) &&
                 ReferenceEquals(original!.Host, detachedHost))
             {
@@ -2619,6 +2640,23 @@ public sealed partial class WidgetManager
             App.Log(
                 $"[WidgetGroup] Saved detach Surface reconciliation failed " +
                 $"group={originalGroup.Id}: {registryError}");
+            // The saved split must not leave declarations that make every
+            // later group notification throw; quarantine the stale claims
+            // and retry the standalone declaration once.
+            if (WidgetGroupPersistedTopologyRecovery
+                .QuarantineCommittedDetachClaims(
+                    _widgetSurfaces,
+                    originalGroup.SurfaceId,
+                    removedConfig.Id,
+                    detachedHost,
+                    CreateSurfaceDefinition(removedConfig),
+                    App.Log))
+            {
+                RegisterStandaloneUnifiedFileSessionIfNeeded(
+                    removedConfig,
+                    detachedHost,
+                    detachedHost.CurrentContent);
+            }
         }
 
         try
