@@ -142,6 +142,7 @@ public partial class SettingsViewModel
         SyncLayoutDensitySelection();
         SaveAppearanceChange();
         _todoSettings.Refresh();
+        _quickCaptureSettings.RefreshFromSettings();
         OnPropertyChanged(nameof(TextSizeValueText));
         OnPropertyChanged(nameof(TextSizeInput));
     }

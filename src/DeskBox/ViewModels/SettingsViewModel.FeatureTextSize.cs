@@ -10,21 +10,21 @@ public partial class SettingsViewModel
     public string TodoContentTextSizeValueText => $"{TodoContentTextSize:0.#}pt";
 
     partial void OnQuickCaptureListTextSizeChanged(double value) =>
-        PersistFeatureTextSize(
+        PersistOwnedTextSize(
             value,
             normalized => QuickCaptureListTextSize = normalized,
-            normalized => _settingsService.Settings.QuickCaptureListTextSize = normalized,
+            TrySetQuickCaptureListTextSize,
             nameof(QuickCaptureListTextSizeValueText));
 
     partial void OnQuickCaptureContentTextSizeChanged(double value) =>
-        PersistFeatureTextSize(
+        PersistOwnedTextSize(
             value,
             normalized => QuickCaptureContentTextSize = normalized,
-            normalized => _settingsService.Settings.QuickCaptureContentTextSize = normalized,
+            TrySetQuickCaptureContentTextSize,
             nameof(QuickCaptureContentTextSizeValueText));
 
     partial void OnTodoListTextSizeChanged(double value) =>
-        PersistTodoTextSize(
+        PersistOwnedTextSize(
             value,
             normalized => TodoListTextSize = normalized,
             normalized => _todoSettings.TrySetListTextSize(
@@ -33,7 +33,7 @@ public partial class SettingsViewModel
             nameof(TodoListTextSizeValueText));
 
     partial void OnTodoContentTextSizeChanged(double value) =>
-        PersistTodoTextSize(
+        PersistOwnedTextSize(
             value,
             normalized => TodoContentTextSize = normalized,
             normalized => _todoSettings.TrySetContentTextSize(
@@ -41,7 +41,7 @@ public partial class SettingsViewModel
                 scheduleSave: false),
             nameof(TodoContentTextSizeValueText));
 
-    private void PersistTodoTextSize(
+    private void PersistOwnedTextSize(
         double value,
         Action<double> setViewModelValue,
         Func<double, bool> setStoredValue,
@@ -72,36 +72,4 @@ public partial class SettingsViewModel
         OnPropertyChanged(valueTextPropertyName);
     }
 
-    private void PersistFeatureTextSize(
-        double value,
-        Action<double> setViewModelValue,
-        Action<double> setStoredValue,
-        string valueTextPropertyName)
-    {
-        OnPropertyChanged(valueTextPropertyName);
-        if (_isRestoringDefaults)
-        {
-            return;
-        }
-
-        if (!double.IsFinite(value))
-        {
-            setViewModelValue(SettingsService.NormalizeTextSize(_settingsService.Settings.TextSize));
-            return;
-        }
-
-        double normalized = Math.Clamp(
-            Math.Round(value * 2d, MidpointRounding.AwayFromZero) / 2d,
-            SettingsService.MinTextSize,
-            SettingsService.MaxTextSize);
-        if (Math.Abs(normalized - value) > 0.0001)
-        {
-            setViewModelValue(normalized);
-            return;
-        }
-
-        setStoredValue(normalized);
-        SaveAppearanceChange();
-        OnPropertyChanged(valueTextPropertyName);
-    }
 }

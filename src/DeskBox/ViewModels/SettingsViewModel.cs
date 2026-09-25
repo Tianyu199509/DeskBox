@@ -403,10 +403,7 @@ private string[]? _cachedWeatherRefreshIntervalDisplayNames;
         SyncQuickCaptureSettingsFacade();
         SyncQuickCapturePresentationFacade();
         SyncQuickCaptureRecentLimitFacade();
-        QuickCaptureListTextSize = SettingsService.NormalizeTextSize(
-            (settings.QuickCaptureListTextSize > 0 ? settings.QuickCaptureListTextSize : settings.TextSize));
-        QuickCaptureContentTextSize = SettingsService.NormalizeTextSize(
-            (settings.QuickCaptureContentTextSize > 0 ? settings.QuickCaptureContentTextSize : settings.TextSize));
+        SyncQuickCaptureTextSizeFacade();
         _selectedAttachmentStorageMode = SettingsService.NormalizeAttachmentStorageMode(settings.AttachmentStorageMode);
         _selectedManagedDropAction = settings.ManagedDropAction switch
         {

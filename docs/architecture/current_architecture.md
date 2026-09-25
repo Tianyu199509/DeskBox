@@ -1,6 +1,54 @@
 # DeskBox Current Architecture
 
-Last updated: 2026-07-20
+Foundation overview: 2026-07-20. Maintenance entry updated: 2026-09-23.
+
+Current implementation progress and the next bounded batch are recorded in
+[architecture-optimization-progress-20260922.md](architecture-optimization-progress-20260922.md).
+The original foundation sections below describe their historical milestone;
+use current source and the progress record when they differ. Todo enablement
+and reminder settings now have a feature editor, a settings coordinator, and
+an explicitly owned reminder runtime. Settings sections are created on demand.
+Search settings now use an injected editor/coordinator with per-visit request
+cancellation; hiding settings releases the page visit while the global search
+runtime remains owned by the application. BackupRuntime now owns scheduled and
+manual backup work; ShutdownSequence drains work before consumer/container
+cleanup. Backup settings now use an injected editor and coordinator; each
+visible cloud page owns its credential, probe, and list requests, while uploads
+remain app-owned. QuickCapture enablement and recording choices now share one
+settings coordinator; a feature runtime owns the clipboard listener and drains
+retired captures. Search master enablement now shares the settings coordinator;
+the application still owns its global engine, hotkey, and popup instances. The
+content-window ID/HWND registration now mutates WidgetManager's existing
+collections through one boundary; file-widget sessions remain with their
+existing dictionary but now use one identity-aware registration boundary.
+SurfaceRegistry retains the previous active host while a group-promotion
+candidate is prepared and rejects overlapping candidates. Member claims now
+transfer only through an explicit, validated group-topology commit; merge,
+detach, dissolve, and reorder wait for relevant Surface switches to settle.
+Non-reuse detach and dissolve now compensate replacement creation or first-frame
+failure after topology settings have been persisted; merge distinguishes failures
+before and after the durable save. Reused-HWND detach now keeps memory and Surface
+claims aligned with whichever topology was durably saved. Isolated Debug checks
+confirmed real HWND ownership for merge, detach, dissolve, and injected detach
+failures. Todo layout mode, its legacy wide-detail flag, and wide-layout auto
+selection now share the Todo settings coordinator. Todo's default filter,
+seven visible-tab flags, and tab-bar switch now commit together through
+that coordinator. Todo preview-line count and its two optional text-size
+overrides now use the same writer while retaining global-size inheritance and
+the existing appearance-preview timing. Todo new-task placement and editor
+Enter behavior use that writer too. Todo completed-task visibility, footer
+options, and tab style now use the same writer. Todo feature-default restoration
+also delegates reminder preferences to the coordinator; the settings page no
+longer writes Todo fields directly. QuickCapture's default view, three visible
+tabs, and tab-bar switch now commit through its settings coordinator without
+refreshing the clipboard listener for navigation-only changes. QuickCapture
+tab style, created-time visibility, and preview-line count now use a separate
+presentation snapshot in the same coordinator. The recent-record limit and its
+destructive trim are now owned by that coordinator: it coalesces queued values,
+reports trim failures, and drains active work on shutdown. QuickCapture's
+optional list and content text-size overrides also use that coordinator;
+stored zero continues to inherit the global text size without being rewritten
+as an explicit override during settings refresh.
 
 This document describes the current architecture after the 1.2.0 widget foundation work. It is intended as the short, current-state handoff for future maintenance. Historical plans and checkpoints live under the archive folders.
 
@@ -21,7 +69,7 @@ Current widget kinds are represented by `WidgetKind`.
 Current production widget categories:
 
 - `File`: file organizer / mapped folder widgets.
-- `QuickCapture`: the note and clipboard widget, still using a dedicated window.
+- `QuickCapture`: the note and clipboard widget, now using the shared content-window path.
 - `Todo`: content-type feature widget using `ContentWidgetWindow`.
 - `Music`: content-type feature widget using `ContentWidgetWindow` and Windows media sessions.
 - `Weather`: content-type feature widget using `ContentWidgetWindow`, Open-Meteo API, and adaptive responsive layouts.
