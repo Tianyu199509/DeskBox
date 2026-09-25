@@ -160,17 +160,8 @@ public sealed partial class WidgetManager
                 },
                 rollbackCandidate: candidate =>
                 {
-                    if (_contentWidgets.TryGetValue(
-                            config.Id,
-                            out var registeredCandidate) &&
-                        ReferenceEquals(registeredCandidate, candidate))
-                    {
-                        _contentWidgets.Remove(config.Id);
-                    }
-
+                    _contentWindowRegistration.Unregister(candidate);
                     RemoveFileWidgetSessionsForHost(candidate);
-
-                    _widgetWindowHandles.Remove(candidate.WindowHandle);
                     UnregisterSurfaceHost(candidate);
                     CloseFailedCreatedWindow(
                         config.Id,

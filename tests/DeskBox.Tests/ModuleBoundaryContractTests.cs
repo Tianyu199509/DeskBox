@@ -332,6 +332,53 @@ public sealed class ModuleBoundaryContractTests
             string.Join('\n', offenders.Select(path => $"  {path}")));
     }
 
+    [Fact]
+    public void WidgetManagerContentRegistrations_HaveOneMutationBoundary()
+    {
+        Regex scatteredMutation = new(
+            @"_contentWidgets\s*(?:\[[^\]]+\]\s*=|\.\s*(?:Remove|Clear)\s*\()|" +
+            @"_widgetWindowHandles\s*\.\s*(?:Add|Remove|Clear)\s*\(");
+        foreach ((string path, string source) in ProductionSource().Where(item =>
+                     item.Path.StartsWith("src/DeskBox/Services/WidgetManager", StringComparison.Ordinal) &&
+                     item.Path.EndsWith(".cs", StringComparison.Ordinal)))
+        {
+            Assert.True(!scatteredMutation.IsMatch(source),
+                $"Content window ID/HWND mutations must use the shared registration boundary: {path}");
+        }
+
+        string creation = ProductionSource().Single(item =>
+            item.Path == "src/DeskBox/Services/WidgetManager.cs").Source;
+        int factory = creation.IndexOf("var window = factory.CreateContentWindow(plan);", StringComparison.Ordinal);
+        int guarded = creation.IndexOf("try", factory + 1, StringComparison.Ordinal);
+        int registered = creation.IndexOf("_contentWindowRegistration.Register(config.Id, window)",
+            factory + 1, StringComparison.Ordinal);
+        Assert.True(factory >= 0 && guarded > factory && registered > guarded,
+            "Window tracking and registration must be inside creation's failure-cleanup scope.");
+        Assert.Contains("if (registeredIds.Count == 0) return;", creation,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void WidgetManagerFileSessions_HaveOneMutationBoundary()
+    {
+        Regex scatteredMutation = new(
+            @"_fileWidgets\s*(?:\[[^\]]+\]\s*=|\.\s*(?:Remove|Clear)\s*\()");
+        foreach ((string path, string source) in ProductionSource().Where(item =>
+                     item.Path.StartsWith("src/DeskBox/Services/WidgetManager", StringComparison.Ordinal) &&
+                     item.Path.EndsWith(".cs", StringComparison.Ordinal)))
+        {
+            Assert.True(!scatteredMutation.IsMatch(source),
+                $"Standalone file-session mutations must use the shared identity boundary: {path}");
+        }
+
+        string manager = ProductionSource().Single(item =>
+            item.Path == "src/DeskBox/Services/WidgetManager.cs").Source;
+        Assert.Contains("_fileSessionRegistration.RegisterOrReplace(config.Id, session)",
+            manager, StringComparison.Ordinal);
+        Assert.Contains("_fileSessionRegistration.UnregisterHost(host)",
+            manager, StringComparison.Ordinal);
+    }
+
     private static void AssertViolationManifest(
         (string Path, int Count)[] actual,
         IReadOnlyDictionary<string, int> expected,

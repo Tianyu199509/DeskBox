@@ -1468,19 +1468,10 @@ public sealed partial class WidgetManager
 
         window.Config.IsVisible = false;
 
-        if (window.Config.WidgetKind == WidgetKind.File &&
-                 _fileWidgets.TryGetValue(window.Config.Id, out var fileEntry) &&
-                 ReferenceEquals(fileEntry.Host, window))
-        {
-            _fileWidgets.Remove(window.Config.Id);
-        }
+        RemoveFileWidgetSessionsForHost(window);
 
-        if (_contentWidgets.TryGetValue(window.Config.Id, out var contentWindow) &&
-            ReferenceEquals(contentWindow, window))
-        {
-            _contentWidgets.Remove(window.Config.Id);
-            _widgetWindowHandles.Remove(window.WindowHandle);
-        }
+        if (window is ContentWidgetWindow contentWindow)
+            _contentWindowRegistration.Unregister(contentWindow);
 
         try
         {

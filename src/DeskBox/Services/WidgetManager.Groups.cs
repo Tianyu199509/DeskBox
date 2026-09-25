@@ -1089,6 +1089,12 @@ public sealed partial class WidgetManager
         ContentWidgetWindowFactory contentWindowFactory,
         long switchStartedTimestamp)
     {
+        if (!_contentWindowRegistration.CanRebind(targetConfig.Id, persistentWindow))
+        {
+            App.Log($"[WidgetGroup] In-place switch rejected: content registration missing or conflicting id={targetConfig.Id}");
+            return false;
+        }
+
         IWidgetContent? cachedContent =
             persistentWindow.TakeCachedGroupContent(targetConfig.Id);
         var timeline = new WidgetGroupSwitchTimeline(
@@ -1149,6 +1155,12 @@ public sealed partial class WidgetManager
             preparation.BeginTransition();
         if (transition is null)
         {
+            return false;
+        }
+        if (!_contentWindowRegistration.CanRebind(targetConfig.Id, persistentWindow))
+        {
+            transition.Rollback();
+            App.Log($"[WidgetGroup] In-place switch rejected after preparation: content registration changed id={targetConfig.Id}");
             return false;
         }
         LogWidgetSurfaceEvidence(group, "transition");
@@ -1236,14 +1248,7 @@ public sealed partial class WidgetManager
             throw;
         }
 
-        foreach (string registeredId in _contentWidgets
-                     .Where(entry => ReferenceEquals(entry.Value, persistentWindow))
-                     .Select(entry => entry.Key)
-                     .ToList())
-        {
-            _contentWidgets.Remove(registeredId);
-        }
-        _contentWidgets[targetConfig.Id] = persistentWindow;
+        _contentWindowRegistration.Rebind(targetConfig.Id, persistentWindow);
         RestoreWidgetGroupTransientState(targetConfig.Id);
         SaveWidgetGroupActiveMemberDeferred();
 
@@ -2236,15 +2241,10 @@ public sealed partial class WidgetManager
         _suppressClosedVisibilityPersistence.Add(widgetId);
         try
         {
-            if (_fileWidgets.TryGetValue(widgetId, out var file) &&
-                ReferenceEquals(file.Host, window))
+            RemoveFileWidgetSessionsForHost(window);
+            if (window is ContentWidgetWindow content &&
+                _contentWindowRegistration.Unregister(content).Count > 0)
             {
-                _fileWidgets.Remove(widgetId);
-            }
-            if (_contentWidgets.TryGetValue(widgetId, out var content) &&
-                ReferenceEquals(content, window))
-            {
-                _contentWidgets.Remove(widgetId);
                 try
                 {
                     (content.CurrentContent as IDisposable)?.Dispose();
@@ -2254,7 +2254,6 @@ public sealed partial class WidgetManager
                 }
             }
 
-            _widgetWindowHandles.Remove(window.WindowHandle);
             window.Config.IsVisible = keepConfigVisible;
             try
             {
