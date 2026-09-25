@@ -23,15 +23,7 @@ public partial class SettingsViewModel
             return;
         }
 
-        FeatureWidgetSettings.SetEnabled(_settingsService.Settings, WidgetKind.QuickCapture, value);
-        if (!value)
-        {
-            ApplyQuickCaptureRecordingState(clipboardEnabled: false, imageEnabled: false);
-            _settingsService.SaveDebounced();
-            App.Current?.RefreshQuickCaptureClipboardService();
-        }
-
-        _ = SyncQuickCaptureEnabledAsync(value);
+        TrackQuickCaptureAction(_quickCaptureSettings.SetEnabledAsync(value, reveal: value));
         OnPropertyChanged(nameof(QuickCaptureStatusText));
         OnPropertyChanged(nameof(QuickCaptureDependencyStatusText));
         RefreshQuickCaptureClipboardDiagnostics();
@@ -39,149 +31,62 @@ public partial class SettingsViewModel
 
     partial void OnQuickCaptureShowTabBarChanged(bool value)
     {
-        PersistQuickCaptureTabSettings();
-        RefreshQuickCaptureTabsPresentation();
+        ApplyQuickCaptureTabBarVisibility(value);
     }
 
     partial void OnQuickCaptureShowRecordsTabChanged(bool value)
     {
-        PersistQuickCaptureTabSettings();
-        RefreshQuickCaptureTabsPresentation();
+        ApplyQuickCaptureTabVisibility(SettingsService.QuickCaptureDefaultViewRecords, value);
     }
 
     partial void OnQuickCaptureShowPinnedTabChanged(bool value)
     {
-        PersistQuickCaptureTabSettings();
-        RefreshQuickCaptureTabsPresentation();
+        ApplyQuickCaptureTabVisibility(SettingsService.QuickCaptureDefaultViewPinned, value);
     }
 
     partial void OnQuickCaptureShowRecentTabChanged(bool value)
     {
-        PersistQuickCaptureTabSettings();
-        RefreshQuickCaptureTabsPresentation();
-    }
-
-    private void PersistQuickCaptureTabSettings()
-    {
-        if (_isRestoringDefaults || _isApplyingSettingsSnapshot)
-        {
-            return;
-        }
-
-        var settings = _settingsService.Settings;
-        settings.QuickCaptureShowTabBar = QuickCaptureShowTabBar;
-        settings.QuickCaptureShowRecordsTab = QuickCaptureShowRecordsTab;
-        settings.QuickCaptureShowPinnedTab = QuickCaptureShowPinnedTab;
-        settings.QuickCaptureShowRecentTab = QuickCaptureShowRecentTab;
-        if (!QuickCaptureShowRecordsTab && !QuickCaptureShowPinnedTab && !QuickCaptureShowRecentTab)
-        {
-            _isApplyingSettingsSnapshot = true;
-            try
-            {
-                QuickCaptureShowRecordsTab = true;
-            }
-            finally
-            {
-                _isApplyingSettingsSnapshot = false;
-            }
-
-            settings.QuickCaptureShowRecordsTab = true;
-        }
-
-        if (!SettingsService.IsQuickCaptureTabVisible(settings, settings.QuickCaptureDefaultView))
-        {
-            SelectedQuickCaptureDefaultView = SettingsService.GetFirstVisibleQuickCaptureTab(settings);
-        }
-
-        _settingsService.SaveDebounced();
-    }
-
-    private async Task SyncQuickCaptureEnabledAsync(bool value)
-    {
-        try
-        {
-            if (App.Current?.WidgetManager is { } widgetManager)
-            {
-                await widgetManager.SetFeatureWidgetEnabledAsync(
-                    WidgetKind.QuickCapture,
-                    value,
-                    reveal: value);
-                return;
-            }
-
-            await _settingsService.SaveAsync();
-        }
-        catch (Exception ex)
-        {
-            App.Log($"[SettingsViewModel] Failed to sync Quick Capture enabled state: {ex}");
-        }
-        finally
-        {
-            App.Current?.RefreshQuickCaptureClipboardService();
-            OnPropertyChanged(nameof(FeatureWidgetEntries));
-            RefreshQuickCaptureClipboardDiagnostics();
-        }
-    }
-
-    partial void OnTodoEnabledChanged(bool value)
-    {
-        if (_isRestoringDefaults || _isApplyingSettingsSnapshot)
-        {
-            return;
-        }
-
-        FeatureWidgetSettings.SetEnabled(_settingsService.Settings, WidgetKind.Todo, value);
-        _ = SyncTodoEnabledAsync(value);
-        OnPropertyChanged(nameof(FeatureWidgetEntries));
-        App.Current?.RefreshTodoReminderService();
+        ApplyQuickCaptureTabVisibility(SettingsService.QuickCaptureDefaultViewRecent, value);
     }
 
     partial void OnTodoShowTabBarChanged(bool value)
     {
-        PersistTodoTabSettings();
-        RefreshTodoTabsPresentation();
+        ApplyTodoTabBarVisibility(value);
     }
 
     partial void OnTodoShowAllTabChanged(bool value)
     {
-        PersistTodoTabSettings();
-        RefreshTodoTabsPresentation();
+        ApplyTodoTabVisibility(SettingsService.TodoDefaultFilterAll, value);
     }
 
     partial void OnTodoShowActiveTabChanged(bool value)
     {
-        PersistTodoTabSettings();
-        RefreshTodoTabsPresentation();
+        ApplyTodoTabVisibility(SettingsService.TodoDefaultFilterActive, value);
     }
 
     partial void OnTodoShowTodayTabChanged(bool value)
     {
-        PersistTodoTabSettings();
-        RefreshTodoTabsPresentation();
+        ApplyTodoTabVisibility(SettingsService.TodoDefaultFilterToday, value);
     }
 
     partial void OnTodoShowThisWeekTabChanged(bool value)
     {
-        PersistTodoTabSettings();
-        RefreshTodoTabsPresentation();
+        ApplyTodoTabVisibility(SettingsService.TodoDefaultFilterThisWeek, value);
     }
 
     partial void OnTodoShowThisMonthTabChanged(bool value)
     {
-        PersistTodoTabSettings();
-        RefreshTodoTabsPresentation();
+        ApplyTodoTabVisibility(SettingsService.TodoDefaultFilterThisMonth, value);
     }
 
     partial void OnTodoShowImportantTabChanged(bool value)
     {
-        PersistTodoTabSettings();
-        RefreshTodoTabsPresentation();
+        ApplyTodoTabVisibility(SettingsService.TodoDefaultFilterImportant, value);
     }
 
     partial void OnTodoShowCompletedTabChanged(bool value)
     {
-        PersistTodoTabSettings();
-        RefreshTodoTabsPresentation();
+        ApplyTodoTabVisibility(SettingsService.TodoDefaultFilterCompleted, value);
     }
 
     partial void OnTodoUseWideDetailPaneChanged(bool value)
@@ -191,8 +96,7 @@ public partial class SettingsViewModel
             return;
         }
 
-        _settingsService.Settings.TodoUseWideDetailPane = value;
-        _settingsService.SaveDebounced();
+        _todoSettings.SetLegacyWideDetailPane(value);
     }
 
     partial void OnTodoAutoSelectFirstInWideLayoutChanged(bool value)
@@ -203,98 +107,28 @@ public partial class SettingsViewModel
             return;
         }
 
-        _settingsService.Settings.TodoAutoSelectFirstInWideLayout = value;
-        _settingsService.SaveDebounced();
-    }
-
-    private void PersistTodoTabSettings()
-    {
-        if (_isRestoringDefaults || _isApplyingSettingsSnapshot)
-        {
-            return;
-        }
-
-        var settings = _settingsService.Settings;
-        settings.TodoShowTabBar = TodoShowTabBar;
-        settings.TodoShowAllTab = TodoShowAllTab;
-        settings.TodoShowActiveTab = TodoShowActiveTab;
-        settings.TodoShowTodayTab = TodoShowTodayTab;
-        settings.TodoShowThisWeekTab = TodoShowThisWeekTab;
-        settings.TodoShowThisMonthTab = TodoShowThisMonthTab;
-        settings.TodoShowImportantTab = TodoShowImportantTab;
-        settings.TodoShowCompletedTab = TodoShowCompletedTab;
-        if (!TodoShowAllTab && !TodoShowActiveTab && !TodoShowTodayTab &&
-            !TodoShowThisWeekTab && !TodoShowThisMonthTab &&
-            !TodoShowImportantTab && !TodoShowCompletedTab)
-        {
-            _isApplyingSettingsSnapshot = true;
-            try
-            {
-                TodoShowAllTab = true;
-            }
-            finally
-            {
-                _isApplyingSettingsSnapshot = false;
-            }
-
-            settings.TodoShowAllTab = true;
-        }
-
-        if (!SettingsService.IsTodoTabVisible(settings, settings.TodoDefaultFilter))
-        {
-            SelectedTodoDefaultFilter = SettingsService.GetFirstVisibleTodoTab(settings);
-        }
-
-        _settingsService.SaveDebounced();
+        _todoSettings.AutoSelectFirstInWideLayout = value;
     }
 
     partial void OnTodoShowCompletedTasksChanged(bool value)
     {
-        RefreshTodoContentPresentation();
-        if (_isRestoringDefaults || _isApplyingSettingsSnapshot)
-        {
-            return;
-        }
-
-        _settingsService.Settings.TodoShowCompletedTasks = value;
-        _settingsService.SaveDebounced();
+        if (_isRestoringDefaults || _isApplyingSettingsSnapshot) return;
+        _todoSettings.ShowCompletedTasks = value;
+        SyncTodoDisplayFacade();
     }
 
     partial void OnTodoShowFooterStatsChanged(bool value)
     {
-        OnPropertyChanged(nameof(TodoFooterDisplaySummaryText));
-        if (_isRestoringDefaults || _isApplyingSettingsSnapshot)
-        {
-            return;
-        }
-
-        _settingsService.Settings.TodoShowFooterStats = value;
-        _settingsService.SaveDebounced();
+        if (_isRestoringDefaults || _isApplyingSettingsSnapshot) return;
+        _todoSettings.ShowFooterStats = value;
+        SyncTodoDisplayFacade();
     }
 
     partial void OnTodoShowClearCompletedButtonChanged(bool value)
     {
-        OnPropertyChanged(nameof(TodoFooterDisplaySummaryText));
-        if (_isRestoringDefaults || _isApplyingSettingsSnapshot)
-        {
-            return;
-        }
-
-        _settingsService.Settings.TodoShowClearCompletedButton = value;
-        _settingsService.SaveDebounced();
-    }
-
-    partial void OnTodoReminderEnabledChanged(bool value)
-    {
-        OnPropertyChanged(nameof(TodoReminderSummaryText));
-        if (_isRestoringDefaults || _isApplyingSettingsSnapshot)
-        {
-            return;
-        }
-
-        _settingsService.Settings.TodoReminderEnabled = value;
-        _settingsService.SaveDebounced();
-        App.Current?.RefreshTodoReminderService(checkNow: value);
+        if (_isRestoringDefaults || _isApplyingSettingsSnapshot) return;
+        _todoSettings.ShowClearCompletedButton = value;
+        SyncTodoDisplayFacade();
     }
 
     partial void OnMusicUseArtworkBackdropChanged(bool value)
@@ -319,28 +153,6 @@ public partial class SettingsViewModel
         _settingsService.SaveDebounced();
     }
 
-    private async Task SyncTodoEnabledAsync(bool enabled)
-    {
-        try
-        {
-            if (App.Current?.WidgetManager is { } widgetManager)
-            {
-                await widgetManager.SetFeatureWidgetEnabledAsync(WidgetKind.Todo, enabled, reveal: enabled);
-                return;
-            }
-
-            await _settingsService.SaveAsync();
-        }
-        catch (Exception ex)
-        {
-            App.Log($"[SettingsViewModel] Failed to sync Todo enabled state: {ex}");
-        }
-        finally
-        {
-            OnPropertyChanged(nameof(FeatureWidgetEntries));
-        }
-    }
-
     partial void OnQuickCaptureClipboardEnabledChanged(bool value)
     {
         if (_isRestoringDefaults || _isApplyingSettingsSnapshot)
@@ -348,28 +160,8 @@ public partial class SettingsViewModel
             return;
         }
 
-        ApplyQuickCaptureRecordingState(
-            clipboardEnabled: value,
-            imageEnabled: value && QuickCaptureImageClipboardEnabled);
-
-        if (value)
-        {
-            FeatureWidgetSettings.SetEnabled(_settingsService.Settings, WidgetKind.QuickCapture, true);
-            if (!QuickCaptureEnabled)
-            {
-                EnableQuickCaptureForRecordingDependency();
-            }
-
-            _ = SyncQuickCaptureEnabledAsync(true);
-        }
-        else
-        {
-            App.Log("[QuickCaptureClipboard] Disabled from settings");
-        }
-
-        _settingsService.SaveDebounced();
-        App.Current?.RefreshQuickCaptureClipboardService(captureCurrent: value);
-
+        TrackQuickCaptureAction(_quickCaptureSettings.SetClipboardEnabledAsync(
+            value, captureCurrent: value));
         RefreshQuickCaptureClipboardDiagnostics();
     }
 
@@ -380,105 +172,18 @@ public partial class SettingsViewModel
             return;
         }
 
-        if (value)
-        {
-            ApplyQuickCaptureRecordingState(clipboardEnabled: true, imageEnabled: true);
-            FeatureWidgetSettings.SetEnabled(_settingsService.Settings, WidgetKind.QuickCapture, true);
-            if (!QuickCaptureEnabled)
-            {
-                EnableQuickCaptureForRecordingDependency();
-            }
-
-            _ = SyncQuickCaptureEnabledAsync(true);
-        }
-        else
-        {
-            ApplyQuickCaptureRecordingState(
-                clipboardEnabled: QuickCaptureClipboardEnabled,
-                imageEnabled: false);
-        }
-
-        _settingsService.SaveDebounced();
-        App.Current?.RefreshQuickCaptureClipboardService(captureCurrent: value);
+        TrackQuickCaptureAction(_quickCaptureSettings.SetImageEnabledAsync(
+            value, captureCurrent: value));
         RefreshQuickCaptureClipboardDiagnostics();
-    }
-
-    private void EnableQuickCaptureForRecordingDependency()
-    {
-        bool wasApplyingSnapshot = _isApplyingSettingsSnapshot;
-        _isApplyingSettingsSnapshot = true;
-        try
-        {
-            QuickCaptureEnabled = true;
-        }
-        finally
-        {
-            _isApplyingSettingsSnapshot = wasApplyingSnapshot;
-        }
-    }
-
-    private void ApplyQuickCaptureRecordingState(bool clipboardEnabled, bool imageEnabled)
-    {
-        if (!clipboardEnabled)
-        {
-            imageEnabled = false;
-        }
-
-        _settingsService.Settings.QuickCaptureClipboardEnabled = clipboardEnabled;
-        _settingsService.Settings.QuickCaptureImageClipboardEnabled = imageEnabled;
-
-        bool wasApplyingSnapshot = _isApplyingSettingsSnapshot;
-        _isApplyingSettingsSnapshot = true;
-        try
-        {
-            if (QuickCaptureClipboardEnabled != clipboardEnabled)
-            {
-                QuickCaptureClipboardEnabled = clipboardEnabled;
-            }
-
-            if (QuickCaptureImageClipboardEnabled != imageEnabled)
-            {
-                QuickCaptureImageClipboardEnabled = imageEnabled;
-            }
-        }
-        finally
-        {
-            _isApplyingSettingsSnapshot = wasApplyingSnapshot;
-        }
     }
 
     partial void OnQuickCaptureRecentLimitChanged(int value)
     {
-        if (_isRestoringDefaults || _isApplyingSettingsSnapshot)
-        {
-            OnPropertyChanged(nameof(QuickCaptureRecentLimitText));
-            OnPropertyChanged(nameof(QuickCaptureRecentLimitInput));
-            return;
-        }
-
-        int normalizedValue = QuickCaptureService.NormalizeRecentLimit(value);
-        if (normalizedValue != value)
-        {
-            QuickCaptureRecentLimit = normalizedValue;
-            return;
-        }
-
-        _settingsService.Settings.QuickCaptureRecentLimit = normalizedValue;
-        _settingsService.SaveDebounced();
-        _ = App.Current.QuickCaptureService.TrimRecentItemsAsync(normalizedValue);
-        OnPropertyChanged(nameof(QuickCaptureRecentLimitText));
-        OnPropertyChanged(nameof(QuickCaptureRecentLimitInput));
+        ApplyQuickCaptureRecentLimit(value);
     }
 
     partial void OnQuickCaptureShowCreatedTimeChanged(bool value)
     {
-        RefreshQuickCaptureContentPresentation();
-        if (_isRestoringDefaults || _isApplyingSettingsSnapshot)
-        {
-            return;
-        }
-
-        _settingsService.Settings.QuickCaptureShowCreatedTime = value;
-        _settingsService.SaveDebounced();
+        ApplyQuickCaptureShowCreatedTime(value);
     }
 }

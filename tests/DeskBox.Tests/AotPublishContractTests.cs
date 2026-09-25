@@ -543,7 +543,7 @@ public sealed class AotPublishContractTests
 
     [Theory]
     [InlineData("src/DeskBox/ViewModels/SearchPopupViewModel.cs", 15)]
-    [InlineData("src/DeskBox/ViewModels/SettingsViewModel.cs", 77)]
+    [InlineData("src/DeskBox/ViewModels/SettingsViewModel.cs", 75)]
     public void AotSensitiveViewModels_UseObservablePartialProperties(
         string relativePath,
         int expectedCount)
@@ -556,6 +556,26 @@ public sealed class AotPublishContractTests
         Assert.Equal(
             expectedCount,
             Regex.Matches(source, @"\[ObservableProperty\]\s+public\s+partial\s+").Count);
+    }
+
+    [Fact]
+    public void TodoSettingsFacade_PreservesWritableAotBindingSurface()
+    {
+        string bridge = File.ReadAllText(TestPaths.FromRepository(
+            "src/DeskBox/ViewModels/SettingsViewModel.AotBindableProperties.cs"));
+        foreach ((string name, Type expectedType) in new[]
+        {
+            ("TodoEnabled", typeof(bool)),
+            ("TodoReminderEnabled", typeof(bool)),
+            ("SelectedTodoReminderOffsetMinutes", typeof(int))
+        })
+        {
+            var property = typeof(DeskBox.ViewModels.SettingsViewModel).GetProperty(name);
+            Assert.NotNull(property);
+            Assert.Equal(expectedType, property!.PropertyType);
+            Assert.True(property.CanRead && property.CanWrite);
+            Assert.Contains($"nameof({name})", bridge, StringComparison.Ordinal);
+        }
     }
 
     [Fact]

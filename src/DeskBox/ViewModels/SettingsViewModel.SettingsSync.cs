@@ -139,11 +139,9 @@ public partial class SettingsViewModel
             ApplyContentEditorSettingsSnapshot(settings);
             ApplyFileStackSettingsSnapshot(settings);
 
-            QuickCaptureEnabled = FeatureWidgetSettings.IsEnabled(settings, WidgetKind.QuickCapture);
-            QuickCaptureClipboardEnabled = settings.QuickCaptureClipboardEnabled;
-            QuickCaptureImageClipboardEnabled = settings.QuickCaptureImageClipboardEnabled;
-            QuickCaptureRecentLimit = QuickCaptureService.NormalizeRecentLimit(settings.QuickCaptureRecentLimit);
-            QuickCaptureShowCreatedTime = settings.QuickCaptureShowCreatedTime;
+            SyncQuickCaptureSettingsFacade();
+            SyncQuickCapturePresentationFacade();
+            SyncQuickCaptureRecentLimitFacade();
             QuickCaptureListTextSize = SettingsService.NormalizeTextSize(
                 (settings.QuickCaptureListTextSize > 0 ? settings.QuickCaptureListTextSize : settings.TextSize));
             QuickCaptureContentTextSize = SettingsService.NormalizeTextSize(
@@ -158,40 +156,14 @@ public partial class SettingsViewModel
                     SettingsService.ManagedDropActionFollowWindows,
                 _ => SettingsService.ManagedDropActionCopy
             };
-            SelectedQuickCaptureDefaultView = NormalizeQuickCaptureDefaultView(settings.QuickCaptureDefaultView);
-            SelectedQuickCaptureTabStyle = SettingsService.NormalizeWidgetTabStyle(settings.QuickCaptureTabStyle);
-            QuickCaptureShowTabBar = settings.QuickCaptureShowTabBar;
-            QuickCaptureShowRecordsTab = settings.QuickCaptureShowRecordsTab;
-            QuickCaptureShowPinnedTab = settings.QuickCaptureShowPinnedTab;
-            QuickCaptureShowRecentTab = settings.QuickCaptureShowRecentTab;
+            SyncQuickCaptureTabsFacade();
 
-            TodoEnabled = FeatureWidgetSettings.IsEnabled(settings, WidgetKind.Todo);
-            TodoShowTabBar = settings.TodoShowTabBar;
-            TodoShowAllTab = settings.TodoShowAllTab;
-            TodoShowActiveTab = settings.TodoShowActiveTab;
-            TodoShowTodayTab = settings.TodoShowTodayTab;
-            TodoShowThisWeekTab = settings.TodoShowThisWeekTab;
-            TodoShowThisMonthTab = settings.TodoShowThisMonthTab;
-            TodoShowImportantTab = settings.TodoShowImportantTab;
-            TodoShowCompletedTab = settings.TodoShowCompletedTab;
-            TodoShowCompletedTasks = settings.TodoShowCompletedTasks;
-            TodoListTextSize = SettingsService.NormalizeTextSize(
-                (settings.TodoListTextSize > 0 ? settings.TodoListTextSize : settings.TextSize));
-            TodoContentTextSize = SettingsService.NormalizeTextSize(
-                (settings.TodoContentTextSize > 0 ? settings.TodoContentTextSize : settings.TextSize));
-            TodoShowFooterStats = settings.TodoShowFooterStats;
-            TodoShowClearCompletedButton = settings.TodoShowClearCompletedButton;
-            SelectedTodoLayoutMode = SettingsService.NormalizeTodoLayoutMode(
-                settings.TodoLayoutMode,
-                settings.TodoUseWideDetailPane);
-            TodoUseWideDetailPane = SelectedTodoLayoutMode != SettingsService.TodoLayoutModeSinglePane;
-            TodoAutoSelectFirstInWideLayout = settings.TodoAutoSelectFirstInWideLayout;
-            TodoReminderEnabled = settings.TodoReminderEnabled;
-            SelectedTodoNewTaskPosition = NormalizeTodoNewTaskPosition(settings.TodoNewTaskPosition);
-            SelectedTodoDefaultFilter = NormalizeTodoDefaultFilter(settings.TodoDefaultFilter);
-            SelectedTodoTabStyle = SettingsService.NormalizeWidgetTabStyle(settings.TodoTabStyle);
-            SelectedTodoReminderOffsetMinutes = SettingsService.NormalizeTodoReminderOffsetMinutes(
-                settings.TodoDefaultReminderOffsetMinutes);
+            _todoSettings.Refresh();
+            SyncTodoTabFacade();
+            SyncTodoDisplayFacade();
+            SyncTodoTextSizeFacade();
+            TodoUseWideDetailPane = _todoSettings.LayoutMode != SettingsService.TodoLayoutModeSinglePane;
+            TodoAutoSelectFirstInWideLayout = _todoSettings.AutoSelectFirstInWideLayout;
 
             MusicUseArtworkBackdrop = settings.MusicUseArtworkBackdrop;
             MusicEnableCoverHoverMotion = settings.MusicEnableCoverHoverMotion;
@@ -228,13 +200,7 @@ public partial class SettingsViewModel
                 SettingsService.WeatherRefreshMaxMinutes);
 
             ManagedStorageRootPath = SettingsService.NormalizeManagedStorageRootPath(settings.DefaultManagedStorageRootPath);
-            AutomaticBackupEnabled = settings.AutomaticBackupEnabled;
-            SelectedAutomaticBackupIntervalMinutes = DataBackupSettingsPolicy.NormalizeIntervalMinutes(
-                settings.AutomaticBackupIntervalMinutes);
-            SelectedAutomaticBackupRetentionCount = DataBackupSettingsPolicy.NormalizeRetentionCount(
-                settings.AutomaticBackupRetentionCount);
-            AutomaticBackupDirectory =
-                DataBackupSettingsPolicy.NormalizeCustomDirectory(settings.AutomaticBackupDirectory) ?? string.Empty;
+            _backupSettings.RefreshState();
             GlobalHotkeyEnabled = settings.GlobalHotkeyEnabled;
         }
         finally

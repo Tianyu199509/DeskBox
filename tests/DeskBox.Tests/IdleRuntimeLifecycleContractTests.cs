@@ -45,29 +45,36 @@ public sealed class IdleRuntimeLifecycleContractTests
             app,
             "internal void RefreshQuickCaptureClipboardService(bool captureCurrent = false)",
             "internal TodoReminderService? RefreshTodoReminderService");
+        string clipboardRuntime = Read("src/DeskBox/Features/QuickCapture/QuickCaptureClipboardRuntime.cs");
+        string quickCaptureCoordinator = Read("src/DeskBox/Services/QuickCaptureSettingsCoordinator.cs");
         string reminder = Slice(
             app,
             "internal TodoReminderService? RefreshTodoReminderService(bool checkNow = false)",
-            "private void StartTodoReminderService()");
+            "private TodoReminderService CreateTodoReminderService()");
         string manager = Read("src/DeskBox/Services/WidgetManager.FeatureWidgets.cs");
 
         Assert.Contains("() => RefreshQuickCaptureClipboardService()", launch, StringComparison.Ordinal);
         Assert.Contains("() => RefreshTodoReminderService()", launch, StringComparison.Ordinal);
-        Assert.DoesNotContain("new QuickCaptureClipboardService", launch, StringComparison.Ordinal);
+        Assert.Contains("new QuickCaptureClipboardRuntime(", launch, StringComparison.Ordinal);
+        Assert.Contains("() => new QuickCaptureClipboardService(SettingsService, QuickCaptureService)",
+            launch, StringComparison.Ordinal);
         Assert.DoesNotContain("StartTodoReminderService();", launch, StringComparison.Ordinal);
 
-        Assert.Contains("settings.QuickCaptureClipboardEnabled", clipboard, StringComparison.Ordinal);
-        Assert.Contains("FeatureWidgetSettings.IsEnabled(settings, WidgetKind.QuickCapture)", clipboard, StringComparison.Ordinal);
-        Assert.Contains("QuickCaptureClipboardService.Dispose();", clipboard, StringComparison.Ordinal);
-        Assert.Contains("QuickCaptureClipboardService = null;", clipboard, StringComparison.Ordinal);
+        Assert.Contains("_quickCaptureSettings?.RefreshFromSettings(captureCurrent)", clipboard, StringComparison.Ordinal);
+        Assert.Contains("IQuickCaptureClipboardSession? Current", clipboardRuntime, StringComparison.Ordinal);
+        Assert.Contains("await session.StopAsync()", clipboardRuntime, StringComparison.Ordinal);
+        Assert.Contains("session.Dispose()", clipboardRuntime, StringComparison.Ordinal);
+        Assert.Contains("_settings.SettingsChanged += OnSettingsChanged", quickCaptureCoordinator, StringComparison.Ordinal);
+        Assert.Contains("_clipboard.StopAsync()", quickCaptureCoordinator, StringComparison.Ordinal);
 
-        Assert.Contains("settings.TodoReminderEnabled", reminder, StringComparison.Ordinal);
-        Assert.Contains("FeatureWidgetSettings.IsEnabled(settings, WidgetKind.Todo)", reminder, StringComparison.Ordinal);
-        Assert.Contains("_todoReminderService.Dispose();", reminder, StringComparison.Ordinal);
-        Assert.Contains("_todoReminderService = null;", reminder, StringComparison.Ordinal);
+        // Session lifetime is exercised by TodoReminderRuntimeTests; this
+        // integration guard only pins the host's delegation to that owner.
+        Assert.Contains("_todoReminderRuntime.Reconcile(_todoSettings.Read(), forceActive)", reminder, StringComparison.Ordinal);
+        Assert.Contains("_todoSettings.CommitEnabledState(enabled)", manager, StringComparison.Ordinal);
 
-        Assert.Contains("App.Current.RefreshQuickCaptureClipboardService();", manager, StringComparison.Ordinal);
-        Assert.Contains("App.Current.RefreshTodoReminderService();", manager, StringComparison.Ordinal);
+        Assert.Contains("_quickCaptureSettings.CommitEnabledState(enabled)", manager, StringComparison.Ordinal);
+        Assert.DoesNotContain("App.Current.RefreshQuickCaptureClipboardService();", manager, StringComparison.Ordinal);
+        Assert.DoesNotContain("App.Current.RefreshTodoReminderService", manager, StringComparison.Ordinal);
     }
 
     private static string Slice(string source, string startMarker, string endMarker)

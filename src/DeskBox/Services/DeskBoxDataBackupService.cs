@@ -8,6 +8,8 @@ using DeskBox.Core.Persistence;
 using DeskBox.FileSafety;
 using DeskBox.Models;
 
+using DeskBox.Contracts;
+
 namespace DeskBox.Services;
 
 public sealed partial class DeskBoxDataBackupService
@@ -230,6 +232,13 @@ public sealed partial class DeskBoxDataBackupService
         bool force,
         CancellationToken cancellationToken)
     {
+        return (await CreateAutomaticSnapshotResultAsync(force, cancellationToken)).ArchivePath;
+    }
+
+    public async Task<LocalBackupResult> CreateAutomaticSnapshotResultAsync(
+        bool force,
+        CancellationToken cancellationToken = default)
+    {
         await _gate.WaitAsync(cancellationToken);
         try
         {
@@ -237,12 +246,12 @@ public sealed partial class DeskBoxDataBackupService
             // "Back up now" (force) stays available even when the schedule is off.
             if (!options.IsEnabled && !force)
             {
-                return null;
+                return new(BackupOutcome.Skipped);
             }
 
             if (!HasBackupSourceData())
             {
-                return null;
+                return new(BackupOutcome.Skipped);
             }
 
             AutomaticSnapshotTarget target = ResolveAutomaticSnapshotTarget(probeWriteAccess: true);
@@ -255,7 +264,7 @@ public sealed partial class DeskBoxDataBackupService
                 DateTime.UtcNow - File.GetLastWriteTimeUtc(latestSnapshot) <
                     TimeSpan.FromMinutes(Math.Max(1, options.IntervalMinutes)))
             {
-                return null;
+                return new(BackupOutcome.Skipped);
             }
 
             string snapshotPath = GetAvailableArchivePath(
@@ -281,7 +290,7 @@ public sealed partial class DeskBoxDataBackupService
             }
 
             App.Log($"[DataBackup] Created automatic snapshot '{snapshotPath}'.");
-            return snapshotPath;
+            return new(BackupOutcome.Succeeded, snapshotPath);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -290,7 +299,7 @@ public sealed partial class DeskBoxDataBackupService
         catch (Exception ex)
         {
             App.Log($"[DataBackup] Automatic snapshot failed: {ex}");
-            return null;
+            return new(BackupOutcome.Failed, Error: ex.Message);
         }
         finally
         {
@@ -669,7 +678,8 @@ public sealed partial class DeskBoxDataBackupService
                 DateTimeOffset.UtcNow,
                 archiveInfo.Manifest.CreatedAtUtc,
                 archiveInfo.Manifest.AppVersion,
-                CloudBackupDomains.ToManifestNames(appliedScope));
+                CloudBackupDomains.ToManifestNames(appliedScope),
+                ScopedRestoreConfirmed: false);
             await WritePendingRestoreMarkerAtomicallyAsync(
                 PendingRestoreMarkerPath,
                 marker,
@@ -1226,6 +1236,16 @@ public sealed partial class DeskBoxDataBackupService
                 throw new InvalidDataException("The pending restore staging path is invalid.");
             }
 
+            if (marker.Domains is { Count: > 0 } &&
+                marker.ScopedRestoreConfirmed == false)
+            {
+                // A crash or timed-out shutdown must never apply a cloud
+                // restore while its confirmation dialog was still open.
+                DeletePendingRestoreCore();
+                App.Log("[DataBackup] Discarded an unconfirmed scoped restore.");
+                return DeskBoxRestoreApplyResult.NoPendingRestore;
+            }
+
             if (marker.Domains is { Count: > 0 } markerDomains)
             {
                 return await ApplyScopedRestoreCoreAsync(
@@ -1479,7 +1499,13 @@ public sealed partial class DeskBoxDataBackupService
             PendingRestoreMarker marker = await ReadPendingRestoreMarkerAsync(cancellationToken);
             await WritePendingRestoreMarkerAtomicallyAsync(
                 PendingRestoreMarkerPath,
-                marker with { ReplaceItemData = replaceItemData },
+                marker with
+                {
+                    ReplaceItemData = replaceItemData,
+                    ScopedRestoreConfirmed = marker.Domains is { Count: > 0 }
+                        ? true
+                        : marker.ScopedRestoreConfirmed
+                },
                 cancellationToken);
             return true;
         }
@@ -2742,6 +2768,9 @@ public sealed partial class DeskBoxDataBackupService
                 await output.FlushAsync(cancellationToken);
             }
 
+            // The final rename commits the archive. Cancellation is accepted
+            // before it; after it succeeds the completed backup is retained.
+            cancellationToken.ThrowIfCancellationRequested();
             File.Move(tempArchivePath, archivePath, overwrite: false);
         }
         finally
@@ -3228,9 +3257,8 @@ public sealed partial class DeskBoxDataBackupService
         // Scoped restores only: the item-restore mode the user picked in
         // the confirm dialog. True = snapshot-faithful domain replace;
         // false/absent = additive merge (nothing local is deleted). The
-        // field is inverted on purpose: the marker is written BEFORE the
-        // user confirms, so an app exit while the dialog is still open
-        // must fall back to the non-destructive mode, never to replace.
+        // Existing markers without a confirmation field keep their original
+        // additive-merge fallback for compatibility.
         [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
         bool ReplaceItemData = false,
         // Bounded retries: a deterministically failing scoped restore
@@ -3238,7 +3266,12 @@ public sealed partial class DeskBoxDataBackupService
         // boot forever — the pending marker also blocks scheduled uploads.
         // Rewritten atomically on each failed apply.
         [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
-        int ApplyAttemptCount = 0);
+        int ApplyAttemptCount = 0,
+        // New scoped markers are explicitly unconfirmed until the user
+        // chooses an item mode. Null means a pre-existing marker or full
+        // restore and retains its historical apply behavior.
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        bool? ScopedRestoreConfirmed = null);
 
     [JsonSourceGenerationOptions(
         GenerationMode = JsonSourceGenerationMode.Metadata,

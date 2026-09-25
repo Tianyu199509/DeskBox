@@ -1,8 +1,9 @@
 using DeskBox.Models;
+using DeskBox.Contracts;
 
 namespace DeskBox.Services;
 
-public sealed class QuickCaptureClipboardService : IDisposable
+public sealed class QuickCaptureClipboardService : IQuickCaptureClipboardSession
 {
     public const int MaxClipboardTextCharacters = 20000;
     public const int MaxClipboardImageBytes = 12 * 1024 * 1024;
@@ -13,6 +14,11 @@ public sealed class QuickCaptureClipboardService : IDisposable
     private bool _isStarted;
     private volatile bool _isProcessing;
     private volatile bool _hasPendingCapture;
+    private Task _activeCapture = Task.CompletedTask;
+    private CancellationTokenSource _readCancellation = new();
+    private int _captureGeneration;
+    private bool _stopping;
+    private bool _disposed;
     private string? _lastStateLog;
     private DateTimeOffset? _lastCapturedAt;
     private string _lastReason = "disabled:initial";
@@ -28,11 +34,11 @@ public sealed class QuickCaptureClipboardService : IDisposable
         _settingsService = settingsService;
         _quickCaptureService = quickCaptureService;
         _clipboardReader = clipboardReader ?? new WindowsQuickCaptureClipboardReader();
-        _settingsService.SettingsChanged += OnSettingsChanged;
     }
 
     public void Refresh()
     {
+        if (_stopping || _disposed) return;
         if (App.UiDispatcherQueue is { } dispatcherQueue &&
             !dispatcherQueue.HasThreadAccess)
         {
@@ -64,29 +70,45 @@ public sealed class QuickCaptureClipboardService : IDisposable
 
     public void CaptureCurrent()
     {
+        if (_stopping || _disposed) return;
         if (App.UiDispatcherQueue is { } dispatcherQueue)
         {
-            dispatcherQueue.TryEnqueue(() => _ = CaptureCurrentClipboardAsync());
+            dispatcherQueue.TryEnqueue(() => _ = BeginCaptureAsync());
             return;
         }
 
-        _ = CaptureCurrentClipboardAsync();
+        _ = BeginCaptureAsync();
     }
 
     internal Task CaptureCurrentForTestingAsync()
     {
-        return CaptureCurrentClipboardAsync();
+        return BeginCaptureAsync();
     }
 
     public void Dispose()
     {
-        _settingsService.SettingsChanged -= OnSettingsChanged;
+        if (_disposed) return;
+        _disposed = true;
         Stop();
+        _readCancellation.Dispose();
+    }
+
+    public async Task StopAsync()
+    {
+        if (_disposed)
+        {
+            await _activeCapture;
+            return;
+        }
+        _stopping = true;
+        Stop();
+        await _activeCapture;
     }
 
     private bool ShouldCaptureClipboard()
     {
-        return _settingsService.Settings.QuickCaptureEnabled &&
+        return !_stopping && !_disposed &&
+               _settingsService.Settings.QuickCaptureEnabled &&
                _settingsService.Settings.QuickCaptureClipboardEnabled;
     }
 
@@ -116,34 +138,36 @@ public sealed class QuickCaptureClipboardService : IDisposable
         App.Log($"[QuickCaptureClipboard] State {state}");
     }
 
-    private void OnSettingsChanged()
-    {
-        App.UiDispatcherQueue?.TryEnqueue(Refresh);
-    }
-
     private void Start()
     {
-        if (_isStarted)
+        if (_isStarted || _stopping || _disposed)
         {
             return;
+        }
+
+        if (_readCancellation.IsCancellationRequested)
+        {
+            _readCancellation.Dispose();
+            _readCancellation = new();
         }
 
         _clipboardReader.ContentChanged += Clipboard_ContentChanged;
         _isStarted = true;
         App.Log($"[QuickCaptureClipboard] Started uiThread={App.UiDispatcherQueue?.HasThreadAccess.ToString() ?? "unknown"}");
-        _ = CaptureCurrentClipboardAsync();
+        _ = BeginCaptureAsync();
     }
 
     private void Stop()
     {
-        if (!_isStarted)
+        ++_captureGeneration;
+        _hasPendingCapture = false;
+        if (!_readCancellation.IsCancellationRequested) _readCancellation.Cancel();
+        if (_isStarted)
         {
-            return;
+            _clipboardReader.ContentChanged -= Clipboard_ContentChanged;
+            _isStarted = false;
+            App.Log("[QuickCaptureClipboard] Stopped");
         }
-
-        _clipboardReader.ContentChanged -= Clipboard_ContentChanged;
-        _isStarted = false;
-        App.Log("[QuickCaptureClipboard] Stopped");
     }
 
     private void Clipboard_ContentChanged(object? sender, object e)
@@ -151,15 +175,39 @@ public sealed class QuickCaptureClipboardService : IDisposable
         App.LogVerbose("[QuickCaptureClipboard] ContentChanged");
         if (App.UiDispatcherQueue is { } dispatcherQueue)
         {
-            dispatcherQueue.TryEnqueue(() => _ = CaptureCurrentClipboardAsync());
+            dispatcherQueue.TryEnqueue(() => _ = BeginCaptureAsync());
             return;
         }
 
-        _ = CaptureCurrentClipboardAsync();
+        _ = BeginCaptureAsync();
+    }
+
+    private Task BeginCaptureAsync()
+    {
+        if (_stopping || _disposed) return Task.CompletedTask;
+        if (_isProcessing)
+        {
+            _hasPendingCapture = true;
+            return _activeCapture;
+        }
+
+        var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _activeCapture = completion.Task;
+        _ = CompleteCaptureAsync(completion);
+        return completion.Task;
+    }
+
+    private async Task CompleteCaptureAsync(TaskCompletionSource completion)
+    {
+        try { await CaptureCurrentClipboardAsync(); }
+        catch (Exception ex) { App.Log($"[QuickCaptureClipboardService] Capture callback failed: {ex}"); }
+        finally { completion.TrySetResult(); }
     }
 
     private async Task CaptureCurrentClipboardAsync()
     {
+        int generation = _captureGeneration;
+        CancellationToken readToken = _readCancellation.Token;
         if (!ShouldCaptureClipboard())
         {
             SetReason(BuildDisabledReason());
@@ -184,7 +232,15 @@ public sealed class QuickCaptureClipboardService : IDisposable
                     return;
                 }
 
-                QuickCaptureClipboardContent? content = await _clipboardReader.ReadContentAsync();
+                QuickCaptureClipboardContent? content =
+                    await _clipboardReader.ReadContentAsync().WaitAsync(readToken);
+                // A read that started before disable/retirement must never
+                // turn into a new note after that session has stopped.
+                if (generation != _captureGeneration || !ShouldCaptureClipboard())
+                {
+                    SetReason(BuildDisabledReason());
+                    return;
+                }
                 if (content is null || (!content.HasImage && string.IsNullOrWhiteSpace(content.Text)))
                 {
                     SetReason("ignored:empty-or-unsupported");
@@ -226,6 +282,7 @@ public sealed class QuickCaptureClipboardService : IDisposable
 
                     item = await _quickCaptureService.AddRecentClipboardItemAsync(text, maxItems);
                 }
+                if (generation != _captureGeneration || !ShouldCaptureClipboard()) return;
                 if (item is null)
                 {
                     SetReason("ignored:duplicate-or-app-write");
@@ -237,6 +294,11 @@ public sealed class QuickCaptureClipboardService : IDisposable
                 }
             } while (_hasPendingCapture);
         }
+        catch (OperationCanceledException) when (readToken.IsCancellationRequested)
+        {
+            // A clipboard provider may still finish later, but this session
+            // will never observe that result or start a new data write.
+        }
         catch (Exception ex)
         {
             SetReason("failed:read-or-save");
@@ -245,6 +307,7 @@ public sealed class QuickCaptureClipboardService : IDisposable
         finally
         {
             _isProcessing = false;
+            if (_hasPendingCapture && ShouldCaptureClipboard()) _ = BeginCaptureAsync();
         }
     }
 

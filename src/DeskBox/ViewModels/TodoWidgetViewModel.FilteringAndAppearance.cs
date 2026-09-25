@@ -437,9 +437,7 @@ public sealed partial class TodoWidgetViewModel
 
     private static string NormalizeNewTaskPosition(string? value)
     {
-        return value == SettingsService.TodoNewTaskPositionBottom
-            ? SettingsService.TodoNewTaskPositionBottom
-            : SettingsService.TodoNewTaskPositionTop;
+        return SettingsService.NormalizeTodoNewTaskPosition(value);
     }
 
     private static DateTimeOffset? NormalizeDueDate(DateTimeOffset? dueDate)

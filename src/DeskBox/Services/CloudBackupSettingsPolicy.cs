@@ -1,4 +1,5 @@
 using DeskBox.Models;
+using DeskBox.Contracts;
 
 namespace DeskBox.Services;
 
@@ -17,6 +18,7 @@ internal sealed record CloudBackupOptions(
     int IntervalMinutes,
     DateTimeOffset LastSuccessUtc)
 {
+    internal BackupEndpoint Endpoint => new(Provider, ServerUrl, RemotePath, Username);
     /// <summary>
     /// Provider selected and URL parseable — enough to reach the endpoint.
     /// Backup scope deliberately stays out: probing the server, storing a

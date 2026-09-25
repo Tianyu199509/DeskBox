@@ -1,6 +1,8 @@
 using Microsoft.UI.Dispatching;
 using DeskBox.Models;
 
+using DeskBox.Contracts;
+
 namespace DeskBox.Services;
 
 /// <summary>

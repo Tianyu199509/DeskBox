@@ -546,10 +546,8 @@ public sealed partial class SettingsWindow
             ViewModel.RefreshQuickCaptureClipboardDiagnostics();
             _ = ViewModel.RefreshQuickCaptureImageCacheInfoAsync();
         }
-        if (sectionTag == "SearchSettings")
-        {
-            SearchSettingsSection.RefreshFromSettings();
-        }
+        UpdateSearchSettingsActivity();
+        UpdateBackupSettingsActivity();
         if (sectionTag == "GlanceSettings")
         {
             _ = GlanceSettingsSection.RefreshFromStoreAsync();

@@ -4,7 +4,8 @@ namespace DeskBox.Services;
 
 /// <summary>
 /// Central DI registration for all core DeskBox services.
-/// All services use Singleton lifetime (desktop app = single process).
+/// These registrations have application lifetime. Feature/window factories
+/// own shorter-lived instances; App disposes this container after its consumers.
 /// </summary>
 public static class ServiceRegistry
 {

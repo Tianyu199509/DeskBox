@@ -5,6 +5,36 @@ namespace DeskBox.Tests;
 
 public sealed class TodoReminderServiceTests : IDisposable
 {
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task CheckInProgress_DoesNotNotifyAfterDisableOrDisposal(bool dispose)
+    {
+        DateTimeOffset now = new(2026, 7, 7, 10, 0, 0, TimeSpan.Zero);
+        var settings = CreateSettingsService("todo-widget");
+        await CreateStore("todo-widget").SaveAsync(new TodoWidgetData
+        {
+            Items = [new TodoItem { Id = "task", Text = "Pending", DueDate = now.AddMinutes(4) }]
+        });
+        var notifications = new List<TodoReminderNotification>();
+        TodoReminderService? service = null;
+        service = new TodoReminderService(settings, TestServices.CreateLocalizationService(), null,
+            notifications.Add, widgetId =>
+            {
+                // The check already captured its widget/settings list. The
+                // owner disables it before the asynchronous load completes.
+                if (dispose) service!.Dispose();
+                else settings.Settings.TodoReminderEnabled = false;
+                return CreateStore(widgetId);
+            }, () => now);
+
+        Assert.Equal(0, await service.CheckNowAsync(now));
+        await service.DisposeAsync();
+        Assert.Empty(notifications);
+        TodoItem saved = Assert.Single((await CreateStore("todo-widget").LoadAsync()).Items);
+        Assert.Null(saved.ReminderLastNotifiedAt);
+    }
+
     private readonly string _tempRoot;
     private readonly string _settingsRoot;
     private readonly string _widgetsDataRoot;

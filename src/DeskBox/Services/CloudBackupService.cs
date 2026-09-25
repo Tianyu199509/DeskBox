@@ -1,5 +1,7 @@
 using DeskBox.Models;
 
+using DeskBox.Contracts;
+
 namespace DeskBox.Services;
 
 /// <summary>
@@ -118,14 +120,14 @@ internal sealed class CloudBackupService
     /// has elapsed. Never throws — a transient network failure must not take
     /// down the timer path.
     /// </summary>
-    internal async Task RunScheduledIfDueAsync(CancellationToken cancellationToken = default)
+    internal async Task<CloudBackupRunResult> RunScheduledIfDueAsync(CancellationToken cancellationToken = default)
     {
         // Skip rather than queue: a manual run or a still-uploading
         // scheduled run must not pile up a second upload behind it —
         // especially one holding options the user already changed.
         if (!await _gate.WaitAsync(0, cancellationToken))
         {
-            return;
+            return CloudBackupRunResult.InProgress;
         }
 
         // Read before the gate: WaitAsync(0) never suspends, and the catch
@@ -136,7 +138,7 @@ internal sealed class CloudBackupService
         {
             if (!options.IsConfigured)
             {
-                return;
+                return CloudBackupRunResult.NotConfigured;
             }
 
             // A pending restore replaces the staged domains on the next
@@ -152,7 +154,7 @@ internal sealed class CloudBackupService
                     App.Log("[CloudBackup] Scheduled upload skipped: a restore is pending.");
                 }
 
-                return;
+                return CloudBackupRunResult.PendingRestore;
             }
 
             _loggedPendingRestore = false;
@@ -170,14 +172,14 @@ internal sealed class CloudBackupService
                     App.Log("[CloudBackup] Scheduled upload skipped: no credential for the configured endpoint.");
                 }
 
-                return;
+                return CloudBackupRunResult.MissingCredential;
             }
 
             _loggedMissingCredentialKey = null;
 
             if (DateTimeOffset.UtcNow - options.LastSuccessUtc < TimeSpan.FromMinutes(options.IntervalMinutes))
             {
-                return;
+                return CloudBackupRunResult.NotDue;
             }
 
             // Editing the remote path invalidates LastSuccessUtc on every
@@ -186,11 +188,11 @@ internal sealed class CloudBackupService
             if (DateTimeOffset.UtcNow - _lastScheduledAttemptUtc <
                 MinimumScheduledAttemptSpacing)
             {
-                return;
+                return CloudBackupRunResult.NotDue;
             }
 
             _lastScheduledAttemptUtc = DateTimeOffset.UtcNow;
-            await RunBackupCoreAsync(options, cancellationToken, scheduled: true);
+            return await RunBackupCoreAsync(options, cancellationToken, scheduled: true);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -204,11 +206,13 @@ internal sealed class CloudBackupService
             }
 
             bool streakStart = await RecordFailureAsync(options);
-            BackupRunCompleted?.Invoke(new CloudBackupRunCompletedInfo(
+            NotifyRunCompleted(new CloudBackupRunCompletedInfo(
                 Uploaded: false,
                 WasScheduled: true,
                 IsFirstFailureSinceSuccess: streakStart,
-                RemoteFilePath: null));
+                RemoteFilePath: null,
+                Endpoint: options.Endpoint));
+            return CloudBackupRunResult.Failure;
         }
         finally
         {
@@ -281,11 +285,12 @@ internal sealed class CloudBackupService
                 // manual run is still "the last upload failed" for the
                 // status row, even though the click already shows it.
                 bool streakStart = await RecordFailureAsync(options);
-                BackupRunCompleted?.Invoke(new CloudBackupRunCompletedInfo(
+                NotifyRunCompleted(new CloudBackupRunCompletedInfo(
                     Uploaded: false,
                     WasScheduled: false,
                     IsFirstFailureSinceSuccess: streakStart,
-                    RemoteFilePath: null));
+                    RemoteFilePath: null,
+                    Endpoint: options.Endpoint));
                 throw;
             }
         }
@@ -323,13 +328,20 @@ internal sealed class CloudBackupService
                 await transport.UploadAsync(remoteFilePath, content, cancellationToken);
             }
 
-            bool uploadVerified = await VerifyUploadAsync(
-                transport,
-                options,
-                remoteFilePath,
-                new FileInfo(localArchivePath).Length,
-                VerificationRetryDelayMs,
-                cancellationToken);
+            // UploadAsync returned successfully: the server accepted this
+            // archive. A shutdown cancellation may skip verification/pruning,
+            // but must not turn that accepted upload into a canceled attempt.
+            bool uploadVerified = false;
+            try
+            {
+                uploadVerified = await VerifyUploadAsync(
+                    transport, options, remoteFilePath,
+                    new FileInfo(localArchivePath).Length, VerificationRetryDelayMs, cancellationToken);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                App.Log("[CloudBackup] Upload accepted; verification canceled, recording unverified success.");
+            }
             if (!uploadVerified)
             {
                 App.Log(
@@ -343,7 +355,12 @@ internal sealed class CloudBackupService
             int? pruned = null;
             try
             {
-                pruned = await ApplyRetentionAsync(transport, options, cancellationToken);
+                if (!cancellationToken.IsCancellationRequested)
+                    pruned = await ApplyRetentionAsync(transport, options, cancellationToken);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                App.Log("[CloudBackup] Retention canceled after the upload was accepted.");
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
@@ -354,13 +371,14 @@ internal sealed class CloudBackupService
             _loggedScheduledFailureKey = null;
             App.Log(pruned is { } count
                 ? $"[CloudBackup] Uploaded '{remoteFilePath}' (pruned {count} old snapshots)."
-                : $"[CloudBackup] Uploaded '{remoteFilePath}' (retention prune failed).");
-            BackupRunCompleted?.Invoke(new CloudBackupRunCompletedInfo(
+                : $"[CloudBackup] Uploaded '{remoteFilePath}' (retention not completed).");
+            NotifyRunCompleted(new CloudBackupRunCompletedInfo(
                 Uploaded: true,
                 WasScheduled: scheduled,
                 IsFirstFailureSinceSuccess: false,
                 RemoteFilePath: remoteFilePath,
-                UploadUnverified: !uploadVerified));
+                UploadUnverified: !uploadVerified,
+                Endpoint: options.Endpoint));
             return new CloudBackupRunResult(
                 Uploaded: true,
                 remoteFilePath,
@@ -383,19 +401,26 @@ internal sealed class CloudBackupService
     /// silently reusing the old one — and stale keys under the same provider
     /// are removed so secrets never linger in the vault.
     /// </summary>
-    internal async Task SaveCredentialAsync(string secret, CancellationToken cancellationToken = default)
+    internal Task SaveCredentialAsync(string secret, CancellationToken cancellationToken = default) =>
+        SaveCredentialAsync(_options, secret, cancellationToken);
+
+    internal async Task SaveCredentialAsync(CloudBackupOptions options, string secret, CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(secret);
-        CloudBackupOptions options = _options;
         string key = CloudBackupSettingsPolicy.CredentialKey(options);
         await _credentialStore.SetSecretAsync(key, secret, cancellationToken);
         _loggedMissingCredentialKey = null;
+
+        // A save that completed after an endpoint edit must not sweep the new
+        // account's credential from the vault.
+        if (cancellationToken.IsCancellationRequested || _options.Endpoint != options.Endpoint) return;
 
         // Capture the provider before any await: UpdateOptions may swap
         // endpoints mid-call, and the stale-key sweep must not inherit it.
         string prefix = $"{options.Provider}:";
         foreach (string stale in await _credentialStore.ListKeysAsync(cancellationToken))
         {
+            if (cancellationToken.IsCancellationRequested || _options.Endpoint != options.Endpoint) break;
             if (stale.StartsWith(prefix, StringComparison.Ordinal) &&
                 !string.Equals(stale, key, StringComparison.Ordinal))
             {
@@ -405,9 +430,11 @@ internal sealed class CloudBackupService
     }
 
     /// <summary>Whether a secret already exists for the selected endpoint.</summary>
-    internal async Task<bool> HasCredentialAsync(CancellationToken cancellationToken = default)
+    internal Task<bool> HasCredentialAsync(CancellationToken cancellationToken = default) =>
+        HasCredentialAsync(_options, cancellationToken);
+
+    internal async Task<bool> HasCredentialAsync(CloudBackupOptions options, CancellationToken cancellationToken = default)
     {
-        CloudBackupOptions options = _options;
         if (!options.HasEndpoint)
         {
             return false;
@@ -423,11 +450,14 @@ internal sealed class CloudBackupService
     /// button. <paramref name="secretOverride"/> lets the caller probe with
     /// a just-typed password before it is saved to the vault.
     /// </summary>
+    internal Task ProbeConnectionAsync(string? secretOverride = null, CancellationToken cancellationToken = default) =>
+        ProbeConnectionAsync(_options, secretOverride, cancellationToken);
+
     internal async Task ProbeConnectionAsync(
+        CloudBackupOptions options,
         string? secretOverride = null,
         CancellationToken cancellationToken = default)
     {
-        CloudBackupOptions options = _options;
         if (!options.HasEndpoint)
         {
             throw new InvalidOperationException("Cloud backup is not configured.");
@@ -440,10 +470,13 @@ internal sealed class CloudBackupService
     }
 
     /// <summary>Remote snapshot inventory for the PR-3 restore picker, newest first.</summary>
+    internal Task<IReadOnlyList<CloudBackupRemoteEntry>> ListRemoteSnapshotsAsync(
+        CancellationToken cancellationToken = default) => ListRemoteSnapshotsAsync(_options, cancellationToken);
+
     internal async Task<IReadOnlyList<CloudBackupRemoteEntry>> ListRemoteSnapshotsAsync(
+        CloudBackupOptions options,
         CancellationToken cancellationToken = default)
     {
-        CloudBackupOptions options = _options;
         if (!options.HasEndpoint)
         {
             return Array.Empty<CloudBackupRemoteEntry>();
@@ -468,12 +501,16 @@ internal sealed class CloudBackupService
     /// file feeds straight into
     /// <see cref="DeskBoxDataBackupService.PrepareScopedRestoreAsync"/>.
     /// </summary>
+    internal Task<string> DownloadSnapshotAsync(string remoteFileName, string destinationDirectory,
+        CancellationToken cancellationToken = default) =>
+        DownloadSnapshotAsync(_options, remoteFileName, destinationDirectory, cancellationToken);
+
     internal async Task<string> DownloadSnapshotAsync(
+        CloudBackupOptions options,
         string remoteFileName,
         string destinationDirectory,
         CancellationToken cancellationToken = default)
     {
-        CloudBackupOptions options = _options;
         if (!options.HasEndpoint)
         {
             throw new InvalidOperationException("Cloud backup is not configured.");
@@ -503,11 +540,15 @@ internal sealed class CloudBackupService
     /// retention never counts a file the user is mid-deleting, and a delete
     /// never slips between PUT and prune.
     /// </summary>
+    internal Task DeleteRemoteSnapshotAsync(string remoteFileName,
+        CancellationToken cancellationToken = default) =>
+        DeleteRemoteSnapshotAsync(_options, remoteFileName, cancellationToken);
+
     internal async Task DeleteRemoteSnapshotAsync(
+        CloudBackupOptions options,
         string remoteFileName,
         CancellationToken cancellationToken = default)
     {
-        CloudBackupOptions options = _options;
         if (!options.HasEndpoint)
         {
             throw new InvalidOperationException("Cloud backup is not configured.");
@@ -704,6 +745,15 @@ internal sealed class CloudBackupService
         return pruned;
     }
 
+    private void NotifyRunCompleted(CloudBackupRunCompletedInfo info)
+    {
+        foreach (Action<CloudBackupRunCompletedInfo> observer in BackupRunCompleted?.GetInvocationList() ?? [])
+        {
+            try { observer(info); }
+            catch (Exception ex) { App.Log($"[CloudBackup] Completion observer failed: {ex}"); }
+        }
+    }
+
     private async Task MarkSuccessAsync(
         CloudBackupOptions completedOptions,
         bool uploadVerified = true)
@@ -791,28 +841,11 @@ internal sealed class CloudBackupService
     }
 }
 
-/// <summary>Outcome of <see cref="CloudBackupService.RunBackupNowAsync"/>.</summary>
-internal sealed record CloudBackupRunResult(
-    bool Uploaded,
-    string? RemoteFilePath,
-    int PrunedCount,
-    bool NoCredential = false,
-    bool RestorePending = false,
-    bool NoScopeSelected = false,
-    bool AlreadyInProgress = false,
-    bool UploadUnverified = false)
-{
-    internal static readonly CloudBackupRunResult NotConfigured = new(false, null, 0);
-    internal static readonly CloudBackupRunResult NoScope = new(false, null, 0, NoScopeSelected: true);
-    internal static readonly CloudBackupRunResult MissingCredential = new(false, null, 0, NoCredential: true);
-    internal static readonly CloudBackupRunResult PendingRestore = new(false, null, 0, RestorePending: true);
-    internal static readonly CloudBackupRunResult InProgress = new(false, null, 0, AlreadyInProgress: true);
-}
-
 /// <summary>One finished upload attempt, for <see cref="CloudBackupService.BackupRunCompleted"/>.</summary>
 internal sealed record CloudBackupRunCompletedInfo(
     bool Uploaded,
     bool WasScheduled,
     bool IsFirstFailureSinceSuccess,
     string? RemoteFilePath,
-    bool UploadUnverified = false);
+    bool UploadUnverified = false,
+    BackupEndpoint? Endpoint = null);

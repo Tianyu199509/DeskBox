@@ -141,6 +141,7 @@ public partial class SettingsViewModel
         _settingsService.Settings.TextSize = normalizedValue;
         SyncLayoutDensitySelection();
         SaveAppearanceChange();
+        _todoSettings.Refresh();
         OnPropertyChanged(nameof(TextSizeValueText));
         OnPropertyChanged(nameof(TextSizeInput));
     }

@@ -270,30 +270,16 @@ public partial class SettingsViewModel
 
     private static string NormalizeTodoNewTaskPosition(string? position)
     {
-        return position == SettingsService.TodoNewTaskPositionBottom
-            ? SettingsService.TodoNewTaskPositionBottom
-            : SettingsService.TodoNewTaskPositionTop;
+        return SettingsService.NormalizeTodoNewTaskPosition(position);
     }
 
     private static string NormalizeQuickCaptureDefaultView(string? view)
     {
-        return view is
-            SettingsService.QuickCaptureDefaultViewPinned or
-            SettingsService.QuickCaptureDefaultViewRecent
-            ? view
-            : SettingsService.QuickCaptureDefaultViewRecords;
+        return SettingsService.NormalizeQuickCaptureDefaultView(view);
     }
 
     private static string NormalizeTodoDefaultFilter(string? filter)
     {
-        return filter is
-            SettingsService.TodoDefaultFilterActive or
-            SettingsService.TodoDefaultFilterToday or
-            SettingsService.TodoDefaultFilterThisWeek or
-            SettingsService.TodoDefaultFilterThisMonth or
-            SettingsService.TodoDefaultFilterImportant or
-            SettingsService.TodoDefaultFilterCompleted
-            ? filter
-            : SettingsService.TodoDefaultFilterAll;
+        return SettingsService.NormalizeTodoDefaultFilter(filter);
     }
 }

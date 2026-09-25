@@ -1,5 +1,7 @@
 using System.Collections.ObjectModel;
+using System.Globalization;
 using CommunityToolkit.Mvvm.ComponentModel;
+using DeskBox.Contracts;
 using DeskBox.Models;
 using DeskBox.Services;
 using Microsoft.UI.Xaml;
@@ -14,16 +16,18 @@ namespace DeskBox.ViewModels;
 [WinRT.GeneratedBindableCustomProperty]
 public sealed partial class CloudBackupRemoteSnapshotItem
 {
-    internal CloudBackupRemoteSnapshotItem(string name, string title, string details)
+    internal CloudBackupRemoteSnapshotItem(string name, string title, string details, BackupEndpoint endpoint)
     {
         Name = name;
         Title = title;
         Details = details;
+        Endpoint = endpoint;
     }
 
     public string Name { get; }
     public string Title { get; }
     public string Details { get; }
+    internal BackupEndpoint Endpoint { get; }
 }
 
 public partial class SettingsViewModel
@@ -61,10 +65,7 @@ public partial class SettingsViewModel
                 return;
             }
 
-            _settingsService.Settings.CloudBackup.CloudBackupProvider = normalized;
-            _settingsService.SaveDebounced();
-            PushCloudBackupOptionsToService();
-            InvalidateCloudBackupEndpointState();
+            _backupSettings.Update(new(CloudProvider: normalized));
         }
     }
 
@@ -92,10 +93,7 @@ public partial class SettingsViewModel
                 return;
             }
 
-            _settingsService.Settings.CloudBackup.CloudBackupServerUrl = value ?? string.Empty;
-            _settingsService.SaveDebounced();
-            PushCloudBackupOptionsToService();
-            InvalidateCloudBackupEndpointState();
+            _backupSettings.Update(new(CloudServerUrl: value ?? string.Empty));
         }
     }
 
@@ -126,10 +124,7 @@ public partial class SettingsViewModel
                 return;
             }
 
-            _settingsService.Settings.CloudBackup.CloudBackupRemotePath = value ?? string.Empty;
-            _settingsService.SaveDebounced();
-            PushCloudBackupOptionsToService();
-            InvalidateCloudBackupEndpointState();
+            _backupSettings.Update(new(CloudRemotePath: value ?? string.Empty));
         }
     }
 
@@ -150,10 +145,7 @@ public partial class SettingsViewModel
                 return;
             }
 
-            _settingsService.Settings.CloudBackup.CloudBackupUsername = value ?? string.Empty;
-            _settingsService.SaveDebounced();
-            PushCloudBackupOptionsToService();
-            InvalidateCloudBackupEndpointState();
+            _backupSettings.Update(new(CloudUsername: value ?? string.Empty));
         }
     }
 
@@ -167,9 +159,7 @@ public partial class SettingsViewModel
             return;
         }
 
-        _settingsService.Settings.CloudBackup.CloudBackupTodoDataEnabled = value;
-        _settingsService.SaveDebounced();
-        PushCloudBackupOptionsToService();
+        _backupSettings.Update(new(CloudTodoEnabled: value));
     }
 
     [ObservableProperty]
@@ -182,9 +172,7 @@ public partial class SettingsViewModel
             return;
         }
 
-        _settingsService.Settings.CloudBackup.CloudBackupQuickCaptureDataEnabled = value;
-        _settingsService.SaveDebounced();
-        PushCloudBackupOptionsToService();
+        _backupSettings.Update(new(CloudQuickCaptureEnabled: value));
     }
 
     [ObservableProperty]
@@ -197,9 +185,7 @@ public partial class SettingsViewModel
             return;
         }
 
-        _settingsService.Settings.CloudBackup.CloudBackupWidgetStyleEnabled = value;
-        _settingsService.SaveDebounced();
-        PushCloudBackupOptionsToService();
+        _backupSettings.Update(new(CloudWidgetStyleEnabled: value));
     }
 
     public int[] AvailableCloudBackupIntervals { get; } =
@@ -257,9 +243,7 @@ public partial class SettingsViewModel
                 return;
             }
 
-            _settingsService.Settings.CloudBackup.CloudBackupIntervalMinutes = normalized;
-            _settingsService.SaveDebounced();
-            PushCloudBackupOptionsToService();
+            _backupSettings.Update(new(CloudIntervalMinutes: normalized));
         }
     }
 
@@ -281,20 +265,18 @@ public partial class SettingsViewModel
                 return;
             }
 
-            _settingsService.Settings.CloudBackup.CloudBackupRetentionCount = normalized;
-            _settingsService.SaveDebounced();
-            PushCloudBackupOptionsToService();
+            _backupSettings.Update(new(CloudRetentionCount: normalized));
         }
     }
 
-    // ── Status surface (written by the code-behind actions) ────────────
+    // The shell keeps established XAML names; the backup editor owns page reads.
 
     private bool _cloudBackupBusy;
 
     /// <summary>True while a test/backup/restore round-trip is in flight.</summary>
     public bool CloudBackupBusy
     {
-        get => _cloudBackupBusy;
+        get => _cloudBackupBusy || _backupSettings.IsBusy;
         set
         {
             if (SetProperty(ref _cloudBackupBusy, value))
@@ -305,7 +287,7 @@ public partial class SettingsViewModel
     }
 
     /// <summary>Action buttons stay enabled only while no round-trip is in flight.</summary>
-    public bool CloudBackupActionsEnabled => !_cloudBackupBusy;
+    public bool CloudBackupActionsEnabled => !CloudBackupBusy;
 
     private string _cloudBackupConnectionStatusText = string.Empty;
 
@@ -326,31 +308,19 @@ public partial class SettingsViewModel
             ? Visibility.Collapsed
             : Visibility.Visible;
 
-    private bool _cloudBackupCredentialSaved;
-
-    public string CloudBackupCredentialStatusText => _cloudBackupCredentialSaved
+    public string CloudBackupCredentialStatusText => _backupSettings.CredentialSaved
         ? _localizationService.T("Settings.CloudBackup.Password.Saved")
         : _localizationService.T("Settings.CloudBackup.Password.NotSaved");
 
-    public bool CloudBackupCredentialSaved
-    {
-        get => _cloudBackupCredentialSaved;
-        set
-        {
-            if (SetProperty(ref _cloudBackupCredentialSaved, value))
-            {
-                OnPropertyChanged(nameof(CloudBackupCredentialStatusText));
-            }
-        }
-    }
+    public bool CloudBackupCredentialSaved => _backupSettings.CredentialSaved;
 
     /// <summary>Last successful upload — plus the latest failure when it is newer, so a silently-broken scheduled backup can't hide behind a stale success.</summary>
     public string CloudBackupStatusText
     {
         get
         {
-            long successTicks = _settingsService.Settings.CloudBackup.CloudBackupLastSuccessUtcTicks;
-            long failureTicks = _settingsService.Settings.CloudBackup.CloudBackupLastFailureUtcTicks;
+            long successTicks = _backupSettings.State.CloudLastSuccessUtcTicks;
+            long failureTicks = _backupSettings.State.CloudLastFailureUtcTicks;
             string status = successTicks > 0
                 ? _localizationService.Format(
                     "Settings.CloudBackup.LastSuccess",
@@ -367,7 +337,7 @@ public partial class SettingsViewModel
             // An accepted-but-never-listed upload is stamped separately: it
             // is not a failure, yet the snapshot may never have landed —
             // show it alongside the success instead of hiding behind it.
-            long unverifiedTicks = _settingsService.Settings.CloudBackup.CloudBackupLastUnverifiedUtcTicks;
+            long unverifiedTicks = _backupSettings.State.CloudLastUnverifiedUtcTicks;
             if (unverifiedTicks > 0)
             {
                 status += " · " + _localizationService.Format(
@@ -379,60 +349,59 @@ public partial class SettingsViewModel
         }
     }
 
-    public void RefreshCloudBackupStatus() => OnPropertyChanged(nameof(CloudBackupStatusText));
+    public void RefreshCloudBackupStatus()
+    {
+        _backupSettings.RefreshState();
+        OnPropertyChanged(nameof(CloudBackupStatusText));
+    }
 
     /// <summary>Remote snapshot inventory for the restore list.</summary>
     public ObservableCollection<CloudBackupRemoteSnapshotItem> CloudBackupRemoteSnapshots { get; } = [];
 
-    /// <summary>
-    /// Bumped every time an endpoint-identity field changes. Async UI
-    /// continuations (credential check, snapshot list, connection test)
-    /// capture it before awaiting and bail when it moved on — otherwise a
-    /// slow response from the OLD endpoint can repaint stale state after
-    /// the user already pointed the page at a new one.
-    /// </summary>
-    internal long CloudBackupEndpointGeneration => _cloudBackupEndpointGeneration;
-    private long _cloudBackupEndpointGeneration;
+    internal long CloudBackupEndpointGeneration => _backupSettings.EndpointGeneration;
 
-    private void PushCloudBackupOptionsToService()
+    private void ApplyBackupSettingsMessage()
     {
-        App.Current?.CloudBackupService.UpdateOptions(
-            CloudBackupSettingsPolicy.GetOptions(_settingsService.Settings));
+        var message = _backupSettings.Message;
+        CloudBackupConnectionStatusText = message.Kind switch
+        {
+            Features.Backup.BackupPageMessageKind.PasswordSaved =>
+                _localizationService.T("Settings.CloudBackup.Password.Saved"),
+            Features.Backup.BackupPageMessageKind.PasswordMissing =>
+                _localizationService.T("Settings.CloudBackup.Password.NotSaved"),
+            Features.Backup.BackupPageMessageKind.PasswordSaveFailed =>
+                _localizationService.Format("Settings.CloudBackup.Password.SaveFailed", message.Error ?? string.Empty),
+            Features.Backup.BackupPageMessageKind.ProbeSucceeded =>
+                _localizationService.T("Settings.CloudBackup.TestConnection.Success"),
+            Features.Backup.BackupPageMessageKind.ProbeFailed =>
+                _localizationService.Format("Settings.CloudBackup.TestConnection.Failed", message.Error ?? string.Empty),
+            Features.Backup.BackupPageMessageKind.ListFailed =>
+                _localizationService.Format("Settings.CloudBackup.RefreshSnapshots.Failed", message.Error ?? string.Empty),
+            Features.Backup.BackupPageMessageKind.NotYetVisible =>
+                _localizationService.T("Settings.CloudBackup.SnapshotList.NotYetVisible"),
+            _ => string.Empty
+        };
     }
 
-    /// <summary>
-    /// An endpoint-identity field changed: the credential flag, the
-    /// connection status and the fetched snapshot list all describe the
-    /// OLD endpoint and must not keep being shown. Re-checks the vault
-    /// asynchronously so switching back to a known endpoint restores its
-    /// "saved" state.
-    /// </summary>
-    private void InvalidateCloudBackupEndpointState()
+    private void SyncCloudBackupRemoteSnapshots()
     {
-        _cloudBackupEndpointGeneration++;
-        _cloudBackupCredentialSaved = false;
-        OnPropertyChanged(nameof(CloudBackupCredentialStatusText));
-        CloudBackupConnectionStatusText = string.Empty;
         CloudBackupRemoteSnapshots.Clear();
-        _ = RefreshCloudBackupCredentialStateAsync();
-    }
-
-    private async Task RefreshCloudBackupCredentialStateAsync()
-    {
-        long generation = _cloudBackupEndpointGeneration;
-        try
+        BackupEndpoint endpoint = _backupSettings.Endpoint;
+        foreach (BackupRemoteSnapshot item in _backupSettings.RemoteSnapshots)
         {
-            bool saved = await App.Current.CloudBackupService.HasCredentialAsync();
-            // The vault answer belongs to the endpoint it was asked about;
-            // a newer edit already reset the flag for the current one.
-            if (generation == _cloudBackupEndpointGeneration)
+            string title = item.Name;
+            string details = item.Name;
+            if (item.CreatedAtUtc is { } createdUtc)
             {
-                CloudBackupCredentialSaved = saved;
+                title = createdUtc.ToLocalTime().ToString("g", CultureInfo.CurrentCulture);
+                string stem = item.Name.EndsWith(".zip", StringComparison.OrdinalIgnoreCase)
+                    ? item.Name[..^4] : item.Name;
+                string tail = stem.Split('-').Last();
+                string device = tail.Length == 8 ? tail : item.Name;
+                string size = item.Length is { } length ? $" · {FormatBytes(length)}" : string.Empty;
+                details = _localizationService.Format("Settings.CloudBackup.SnapshotDetails", device, size);
             }
-        }
-        catch (Exception ex)
-        {
-            App.Log($"[CloudBackup] Credential state refresh failed: {ex.Message}");
+            CloudBackupRemoteSnapshots.Add(new(item.Name, title, details, endpoint));
         }
     }
 }

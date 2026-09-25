@@ -229,6 +229,28 @@ public sealed class QuickCaptureClipboardServiceTests : IDisposable
         settingsService.Settings.QuickCaptureImageClipboardEnabled = true;
     }
 
+    [Fact]
+    public async Task StopCancelsPendingRead_AndLateReadCannotCreateNote()
+    {
+        var settingsService = await CreateLoadedSettingsServiceAsync();
+        EnableClipboardCapture(settingsService);
+        var quickCaptureService = CreateQuickCaptureService();
+        var pending = new TaskCompletionSource<QuickCaptureClipboardContent?>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var reader = new FakeClipboardReader { ReadOverride = () => pending.Task };
+        using var service = new QuickCaptureClipboardService(settingsService, quickCaptureService, reader);
+
+        Task capture = service.CaptureCurrentForTestingAsync();
+        settingsService.Settings.QuickCaptureEnabled = false;
+        Task stopping = service.StopAsync();
+        await stopping.WaitAsync(TimeSpan.FromSeconds(2));
+        await capture;
+        pending.SetResult(QuickCaptureClipboardContent.FromText("late clipboard text"));
+        await Task.Yield();
+        Assert.Empty((await quickCaptureService.GetDataAsync()).RecentItems);
+        Assert.False(service.GetDiagnostics().IsListening);
+    }
+
     public void Dispose()
     {
         DeskBoxClipboardWriteScope.ClearForTesting();
@@ -245,9 +267,11 @@ public sealed class QuickCaptureClipboardServiceTests : IDisposable
         public string? Text { get; set; }
 
         public byte[]? ImagePngBytes { get; set; }
+        public Func<Task<QuickCaptureClipboardContent?>>? ReadOverride { get; set; }
 
         public Task<QuickCaptureClipboardContent?> ReadContentAsync()
         {
+            if (ReadOverride is not null) return ReadOverride();
             if (ImagePngBytes is { Length: > 0 })
             {
                 return Task.FromResult<QuickCaptureClipboardContent?>(
