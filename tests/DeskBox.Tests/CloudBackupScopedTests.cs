@@ -323,13 +323,14 @@ public sealed class CloudBackupScopedTests : IDisposable
             dataDir, "widgets", "todo-widget", "todo.json")));
     }
 
-    [Fact]
-    public async Task ScopedRestore_UnconfirmedMarker_DefaultsToMerge()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ScopedRestore_UnconfirmedMarker_IsDiscarded_WhileLegacyMarkerKeepsMerge(
+        bool legacyMarker)
     {
-        // The marker is written at prepare time — BEFORE the confirm dialog.
-        // If the app exits while the dialog is still open, the pending
-        // marker carries no mode choice; apply must fall back to the
-        // non-destructive merge, never to replace.
+        // New markers are never applied before confirmation. Markers written
+        // by an older DeskBox lack that field and retain their merge behavior.
         string dataDir = Directory.CreateDirectory(Path.Combine(_appDataRoot, "data")).FullName;
         await File.WriteAllTextAsync(Path.Combine(dataDir, "settings.json"), "{}");
         var liveExtra = new TodoWidgetStore(Path.Combine(dataDir, "widgets"), "extra-todo");
@@ -355,16 +356,26 @@ public sealed class CloudBackupScopedTests : IDisposable
 
         var service = new DeskBoxDataBackupService(_appDataRoot);
         await service.PrepareScopedRestoreAsync(backupPath, CloudBackupDomain.TodoData);
-        // No SetPendingRestoreItemReplaceModeAsync call — the app exited
-        // while the confirm dialog was open.
+        if (legacyMarker)
+        {
+            JsonObject marker = JsonNode.Parse(
+                await File.ReadAllTextAsync(service.PendingRestoreMarkerPath))!.AsObject();
+            Assert.True(marker.Remove("scopedRestoreConfirmed"));
+            await File.WriteAllTextAsync(service.PendingRestoreMarkerPath,
+                marker.ToJsonString());
+        }
         DeskBoxRestoreApplyResult result = await service.ApplyPendingRestoreAsync();
 
         Assert.True(result.Succeeded, result.ErrorMessage);
-        TodoWidgetData merged = await new TodoWidgetStore(
+        Assert.Equal(legacyMarker, result.HadPendingRestore);
+        TodoWidgetData stored = await new TodoWidgetStore(
             Path.Combine(dataDir, "widgets"), "todo-widget").LoadAsync();
         Assert.Equal(
-            ["local", "remote"],
-            merged.Items.Select(item => item.Id).OrderBy(id => id, StringComparer.Ordinal).ToArray());
+            legacyMarker ? new[] { "local", "remote" } : new[] { "local" },
+            stored.Items.Select(item => item.Id).OrderBy(id => id, StringComparer.Ordinal).ToArray());
+        Assert.False(File.Exists(service.PendingRestoreMarkerPath));
+        if (Directory.Exists(service.RestoreStagingDirectory))
+            Assert.Empty(Directory.EnumerateFileSystemEntries(service.RestoreStagingDirectory));
         Assert.True(File.Exists(Path.Combine(
             dataDir, "widgets", "extra-todo", "todo.json")));
     }
@@ -734,6 +745,7 @@ public sealed class CloudBackupScopedTests : IDisposable
         DeskBoxRestorePreparation prep = await service.PrepareScopedRestoreAsync(
             backupPath, CloudBackupDomain.TodoData);
         Assert.Equal(["todo-data"], prep.Domains);
+        Assert.True(await service.SetPendingRestoreItemReplaceModeAsync(false));
         DeskBoxRestoreApplyResult result = await service.ApplyPendingRestoreAsync();
 
         Assert.True(result.Succeeded, result.ErrorMessage);
@@ -808,6 +820,7 @@ public sealed class CloudBackupScopedTests : IDisposable
 
         var service = new DeskBoxDataBackupService(_appDataRoot);
         await service.PrepareScopedRestoreAsync(backupPath, CloudBackupDomain.WidgetStyle);
+        Assert.True(await service.SetPendingRestoreItemReplaceModeAsync(false));
         DeskBoxRestoreApplyResult result = await service.ApplyPendingRestoreAsync();
 
         Assert.True(result.Succeeded, result.ErrorMessage);
@@ -1484,6 +1497,7 @@ public sealed class CloudBackupScopedTests : IDisposable
         Assert.Empty(prep.TodoWidgetRemaps!);
         Assert.Equal(["source-widget"], prep.UnmappedTodoWidgetIds);
 
+        Assert.True(await service.SetPendingRestoreItemReplaceModeAsync(false));
         DeskBoxRestoreApplyResult result = await service.ApplyPendingRestoreAsync();
         Assert.True(result.Succeeded, result.ErrorMessage);
         TodoWidgetData orphan = await new TodoWidgetStore(

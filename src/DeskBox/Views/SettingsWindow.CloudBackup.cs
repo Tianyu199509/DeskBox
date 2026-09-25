@@ -20,6 +20,12 @@ public sealed partial class SettingsWindow
     private bool _cloudBackupSnapshotSyncHooked;
     private NotifyCollectionChangedEventHandler? _cloudBackupCollectionChanged;
 
+    internal Task StopCloudBackupActionsAsync()
+    {
+        _backupSettingsViewModel.Deactivate();
+        return _backupRestoreActions.StopAsync();
+    }
+
     private Task InitializeCloudBackupSectionAsync()
     {
         if (!_cloudBackupSnapshotSyncHooked)
@@ -247,7 +253,8 @@ public sealed partial class SettingsWindow
                 _backupSettingsViewModel.RemoveSnapshot(snapshot.Name);
             }
         }
-        catch (OperationCanceledException) when (!_backupRestoreActions.IsCurrentEndpoint(snapshot.Endpoint)) { }
+        catch (OperationCanceledException) when (!CurrentCloudBackupVisit(generation, visit) ||
+            !_backupRestoreActions.IsCurrentEndpoint(snapshot.Endpoint)) { }
         catch (Exception ex)
         {
             App.Log($"[CloudBackup] Deleting remote snapshot failed: {ex}");
@@ -260,7 +267,7 @@ public sealed partial class SettingsWindow
         }
         finally
         {
-            ViewModel.CloudBackupBusy = false;
+            if (!_isClosed) ViewModel.CloudBackupBusy = false;
         }
     }
 
@@ -512,7 +519,8 @@ public sealed partial class SettingsWindow
             restartScheduled = true;
             await _backupRestoreActions.ShutdownForRestartAsync();
         }
-        catch (OperationCanceledException) when (!prepareStarted) { }
+        catch (OperationCanceledException) when (!prepareStarted ||
+            !CurrentCloudBackupVisit(generation, visit)) { }
         catch (Exception ex)
         {
             App.Log($"[CloudBackup] Remote restore failed: {ex}");
@@ -539,7 +547,7 @@ public sealed partial class SettingsWindow
             // way (it can be hundreds of MB).
             _backupRestoreActions.DeleteTemporaryDownload(downloadDirectory);
 
-            ViewModel.CloudBackupBusy = false;
+            if (!_isClosed) ViewModel.CloudBackupBusy = false;
         }
     }
 }

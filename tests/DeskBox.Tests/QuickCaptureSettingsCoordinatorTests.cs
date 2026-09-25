@@ -18,7 +18,7 @@ public sealed class QuickCaptureSettingsCoordinatorTests : IDisposable
         var trims = new List<int>();
         var coordinator = new QuickCaptureSettingsCoordinator(settings, clipboard,
             (_, _) => Task.CompletedTask, action => { action(); return true; }, _ => { },
-            limit => { trims.Add(limit); return Task.CompletedTask; });
+            (limit, _) => { trims.Add(limit); return Task.CompletedTask; });
 
         coordinator.SetRecentLimit(10);
         coordinator.SetRecentLimit(100);
@@ -43,7 +43,7 @@ public sealed class QuickCaptureSettingsCoordinatorTests : IDisposable
         var trims = new List<int>();
         var coordinator = new QuickCaptureSettingsCoordinator(settings, clipboard,
             (_, _) => Task.CompletedTask, action => { action(); return true; }, _ => { },
-            limit => { trims.Add(limit); return Task.CompletedTask; });
+            (limit, _) => { trims.Add(limit); return Task.CompletedTask; });
 
         coordinator.SetRecentLimit(10);
         coordinator.ResetRecentLimit(scheduleSave: false);
@@ -70,7 +70,7 @@ public sealed class QuickCaptureSettingsCoordinatorTests : IDisposable
         var trims = new List<int>();
         var coordinator = new QuickCaptureSettingsCoordinator(settings, clipboard,
             (_, _) => Task.CompletedTask, action => { action(); return true; }, _ => { },
-            async limit =>
+            async (limit, _) =>
             {
                 trims.Add(limit);
                 started.TrySetResult(limit);
@@ -90,6 +90,30 @@ public sealed class QuickCaptureSettingsCoordinatorTests : IDisposable
     }
 
     [Fact]
+    public async Task Stop_CancelsCooperativeRecentTrimBeforeWaiting()
+    {
+        var settings = new SettingsService(Path.Combine(_root, "settings"));
+        var clipboard = new QuickCaptureClipboardRuntime(
+            () => CanListen(settings), () => new FakeSession(), _ => { });
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var errors = new List<Exception>();
+        var coordinator = new QuickCaptureSettingsCoordinator(settings, clipboard,
+            (_, _) => Task.CompletedTask, action => { action(); return true; }, errors.Add,
+            async (_, token) =>
+            {
+                started.TrySetResult();
+                await Task.Delay(Timeout.InfiniteTimeSpan, token);
+            });
+
+        coordinator.SetRecentLimit(10);
+        await started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await coordinator.StopAsync().WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.Empty(errors);
+        Assert.True(coordinator.PendingRecentTrim.IsCompletedSuccessfully);
+    }
+
+    [Fact]
     public async Task FailedRecentTrim_IsReportedAndDoesNotBlockTheNextRequest()
     {
         var settings = new SettingsService(Path.Combine(_root, "settings"));
@@ -99,7 +123,7 @@ public sealed class QuickCaptureSettingsCoordinatorTests : IDisposable
         var trims = new List<int>();
         var coordinator = new QuickCaptureSettingsCoordinator(settings, clipboard,
             (_, _) => Task.CompletedTask, action => { action(); return true; }, errors.Add,
-            limit =>
+            (limit, _) =>
             {
                 trims.Add(limit);
                 return trims.Count == 1
@@ -160,7 +184,7 @@ public sealed class QuickCaptureSettingsCoordinatorTests : IDisposable
         var trims = new List<int>();
         var coordinator = new QuickCaptureSettingsCoordinator(settings, clipboard,
             (_, _) => Task.CompletedTask, action => { action(); return true; }, _ => { },
-            limit => { trims.Add(limit); return Task.CompletedTask; });
+            (limit, _) => { trims.Add(limit); return Task.CompletedTask; });
         coordinator.RefreshFromSettings();
         Assert.Single(sessions);
         int clipboardRefreshes = sessions[0].Refreshes;
@@ -457,6 +481,42 @@ public sealed class QuickCaptureSettingsCoordinatorTests : IDisposable
     }
 
     [Fact]
+    public async Task OpenWidgetEnablesClipboard_AfterSavingWithoutRevealingWidget()
+    {
+        string settingsDirectory = Path.Combine(_root, "settings");
+        string settingsPath = Path.Combine(settingsDirectory, "settings.json");
+        var settings = new SettingsService(settingsDirectory);
+        Assert.False(File.Exists(settingsPath));
+        bool savedBeforeRefresh = false;
+        int widgetApplies = 0;
+        var clipboard = new QuickCaptureClipboardRuntime(
+            () => CanListen(settings),
+            () => new FakeSession(onRefresh: () =>
+            {
+                if (!File.Exists(settingsPath)) return;
+                using System.Text.Json.JsonDocument persisted =
+                    System.Text.Json.JsonDocument.Parse(File.ReadAllText(settingsPath));
+                savedBeforeRefresh = persisted.RootElement
+                    .GetProperty("quickCaptureClipboardEnabled").GetBoolean();
+            }), _ => { });
+        var coordinator = new QuickCaptureSettingsCoordinator(settings, clipboard,
+            (_, _) => { widgetApplies++; return Task.CompletedTask; },
+            action => { action(); return true; }, _ => { });
+
+        await coordinator.EnableClipboardFromOpenWidgetAsync();
+
+        Assert.True(savedBeforeRefresh);
+        Assert.Equal(0, widgetApplies);
+        Assert.Equal(new(true, true, false), coordinator.Read());
+        var reloaded = new SettingsService(settingsDirectory);
+        await reloaded.LoadAsync();
+        Assert.True(FeatureWidgetSettings.IsEnabled(reloaded.Settings,
+            WidgetKind.QuickCapture));
+        Assert.True(reloaded.Settings.QuickCapture.QuickCaptureClipboardEnabled);
+        await coordinator.StopAsync();
+    }
+
+    [Fact]
     public async Task ImageRecordingEnablesDependencies_AndDisablingTextRetiresListener()
     {
         var settings = new SettingsService(Path.Combine(_root, "settings"));
@@ -583,7 +643,7 @@ public sealed class QuickCaptureSettingsCoordinatorTests : IDisposable
         if (Directory.Exists(_root)) Directory.Delete(_root, recursive: true);
     }
 
-    private sealed class FakeSession(Task? stop = null) : IQuickCaptureClipboardSession
+    private sealed class FakeSession(Task? stop = null, Action? onRefresh = null) : IQuickCaptureClipboardSession
     {
         public event Action? DiagnosticsChanged;
         public bool Disposed { get; private set; }
@@ -591,6 +651,7 @@ public sealed class QuickCaptureSettingsCoordinatorTests : IDisposable
         public void Refresh()
         {
             Refreshes++;
+            onRefresh?.Invoke();
             DiagnosticsChanged?.Invoke();
         }
         public void CaptureCurrent() { }

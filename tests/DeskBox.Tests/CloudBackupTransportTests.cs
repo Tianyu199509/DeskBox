@@ -991,6 +991,89 @@ public sealed class CloudBackupTransportTests : IDisposable
         Assert.True(b.Files.ContainsKey($"DeskBox/backups/{name}"));
     }
 
+    [Fact]
+    public async Task RestoreActionsStop_CancelsAndDrainsDownload_ThenRemovesTemporaryFiles()
+    {
+        const string name = "DeskBox-CloudBackup-20260910T110000Z-abcd1234.zip";
+        var entered = new TaskCompletionSource<CancellationToken>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var transport = new FakeCloudBackupTransport
+        {
+            DownloadHook = async (_, token) =>
+            {
+                entered.TrySetResult(token);
+                await release.Task;
+                token.ThrowIfCancellationRequested();
+            }
+        };
+        transport.Files[$"DeskBox/backups/{name}"] = [1];
+        (CloudBackupService service, SettingsService settings) = CreateService(transport);
+        CloudBackupOptions options = ConfiguredOptions();
+        settings.Settings.CloudBackup.CloudBackupProvider = options.Provider;
+        settings.Settings.CloudBackup.CloudBackupServerUrl = options.ServerUrl;
+        settings.Settings.CloudBackup.CloudBackupRemotePath = options.RemotePath;
+        settings.Settings.CloudBackup.CloudBackupUsername = options.Username;
+        var actions = new BackupRestoreActions(settings, service,
+            new DeskBoxDataBackupService(_appDataRoot), () => Task.CompletedTask);
+        string directory = Path.Combine(_tempRoot, "pending-download");
+
+        Task<string> download = actions.DownloadSnapshotAsync(options.Endpoint, name, directory);
+        CancellationToken token = await entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        Task stop = actions.StopAsync();
+        Assert.Same(stop, actions.StopAsync());
+        Assert.True(token.IsCancellationRequested);
+        Assert.False(stop.IsCompleted);
+        var logs = new List<string>();
+        bool laterStepRan = false;
+        await new ShutdownSequence(logs.Add).RunAsync(
+            ShutdownStep.Bounded("backup-restore-actions", () => stop,
+                TimeSpan.FromMilliseconds(50)),
+            ShutdownStep.Sync("later-cleanup", () => laterStepRan = true))
+            .WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.True(laterStepRan);
+        Assert.Contains("backup-restore-actions", Assert.Single(logs));
+        release.TrySetResult();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => download);
+        await stop;
+
+        Assert.False(Directory.Exists(directory));
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            actions.DeleteSnapshotAsync(options.Endpoint, name));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task RestoreActionsStop_CancelsUnconfirmedMarker_ButPreservesScheduledRelaunch(
+        bool relaunchScheduled)
+    {
+        var todoStore = new TodoWidgetStore(
+            Path.Combine(_appDataRoot, "data", "widgets"), "todo-widget");
+        await todoStore.SaveAsync(new TodoWidgetData
+        {
+            Items = [new TodoItem { Id = "todo-1", Text = "restore candidate" }]
+        });
+        var backup = new DeskBoxDataBackupService(_appDataRoot);
+        string archivePath = await backup.ExportScopedBackupAsync(
+            Path.Combine(_tempRoot, "restore-export"), CloudBackupDomain.TodoData);
+        (CloudBackupService cloud, SettingsService settings) =
+            CreateService(new FakeCloudBackupTransport());
+        var actions = new BackupRestoreActions(settings, cloud, backup,
+            () => Task.CompletedTask,
+            () => relaunchScheduled
+                ? AppRelaunchScheduleResult.StartedSuccessfully
+                : AppRelaunchScheduleResult.Failed("simulated restart failure"));
+
+        await actions.PrepareScopedRestoreAsync(archivePath, CloudBackupDomain.TodoData);
+        Assert.True(File.Exists(backup.PendingRestoreMarkerPath));
+        if (relaunchScheduled) Assert.True(actions.ScheduleRelaunch().Started);
+        await actions.StopAsync();
+
+        Assert.Equal(relaunchScheduled, File.Exists(backup.PendingRestoreMarkerPath));
+        if (relaunchScheduled) await backup.CancelPendingRestoreAsync();
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -1263,6 +1346,7 @@ public sealed class CloudBackupTransportTests : IDisposable
         internal List<string> Directories { get; } = [];
         internal Func<string, bool>? FailOn { get; init; }
         internal Func<string, Task>? UploadHook { get; init; }
+        internal Func<string, CancellationToken, Task>? DownloadHook { get; init; }
         internal Action? UploadCompleted { get; init; }
         internal Action? ListRequested { get; init; }
         // Verification-fault knobs: ReportedLengthOverride makes the
@@ -1320,7 +1404,7 @@ public sealed class CloudBackupTransportTests : IDisposable
             UploadCompleted?.Invoke();
         }
 
-        public Task DownloadAsync(string remoteFilePath, Stream destination, CancellationToken cancellationToken = default)
+        public async Task DownloadAsync(string remoteFilePath, Stream destination, CancellationToken cancellationToken = default)
         {
             ThrowIfFailed(remoteFilePath);
             if (!Files.TryGetValue(remoteFilePath, out byte[]? data))
@@ -1328,7 +1412,8 @@ public sealed class CloudBackupTransportTests : IDisposable
                 throw new CloudBackupTransportException("not found", HttpStatusCode.NotFound);
             }
 
-            return destination.WriteAsync(data, cancellationToken).AsTask();
+            if (DownloadHook is not null) await DownloadHook(remoteFilePath, cancellationToken);
+            await destination.WriteAsync(data, cancellationToken);
         }
 
         public Task DeleteAsync(string remoteFilePath, CancellationToken cancellationToken = default)

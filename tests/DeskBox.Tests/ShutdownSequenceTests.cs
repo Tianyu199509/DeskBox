@@ -36,4 +36,23 @@ public sealed class ShutdownSequenceTests
         await shutdown.RunAsync();
         Assert.Equal(1, disposed);
     }
+
+    [Fact]
+    public async Task BoundedStep_TimesOutAndContinuesWithRemainingCleanup()
+    {
+        var blocked = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var calls = new List<string>();
+        var logs = new List<string>();
+        var shutdown = new ShutdownSequence(logs.Add);
+
+        await shutdown.RunAsync(
+            ShutdownStep.Bounded("quick-capture", () => blocked.Task,
+                TimeSpan.FromMilliseconds(20)),
+            ShutdownStep.Sync("settings-flush", () => calls.Add("settings-flush")),
+            ShutdownStep.Sync("single-instance", () => calls.Add("single-instance")));
+
+        Assert.Equal(["settings-flush", "single-instance"], calls);
+        Assert.Contains("quick-capture", Assert.Single(logs));
+        blocked.TrySetResult();
+    }
 }

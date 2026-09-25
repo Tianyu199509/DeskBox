@@ -14,7 +14,7 @@ public sealed class QuickCaptureSettingsCoordinator : IQuickCaptureSettings
     private readonly Func<bool, bool, Task> _applyWidget;
     private readonly Func<Action, bool> _tryEnqueue;
     private readonly Action<Exception> _reportError;
-    private readonly Func<int, Task> _trimRecentItems;
+    private readonly Func<int, CancellationToken, Task> _trimRecentItems;
     private readonly SemaphoreSlim _widgetGate = new(1, 1);
     private readonly CancellationTokenSource _lifetime = new();
     private readonly object _recentTrimLock = new();
@@ -36,14 +36,14 @@ public sealed class QuickCaptureSettingsCoordinator : IQuickCaptureSettings
     public QuickCaptureSettingsCoordinator(SettingsService settings,
         QuickCaptureClipboardRuntime clipboard, Func<bool, bool, Task> applyWidget,
         Func<Action, bool> tryEnqueue, Action<Exception> reportError,
-        Func<int, Task>? trimRecentItems = null)
+        Func<int, CancellationToken, Task>? trimRecentItems = null)
     {
         _settings = settings;
         _clipboard = clipboard;
         _applyWidget = applyWidget;
         _tryEnqueue = tryEnqueue;
         _reportError = reportError;
-        _trimRecentItems = trimRecentItems ?? (_ => Task.CompletedTask);
+        _trimRecentItems = trimRecentItems ?? ((_, _) => Task.CompletedTask);
         _last = Read();
         _lastTabs = ReadTabs();
         _lastPresentation = ReadPresentation();
@@ -337,7 +337,8 @@ public sealed class QuickCaptureSettingsCoordinator : IQuickCaptureSettings
                 _pendingRecentLimit = null;
             }
 
-            try { await _trimRecentItems(limit); }
+            try { await _trimRecentItems(limit, _lifetime.Token); }
+            catch (OperationCanceledException) when (_lifetime.IsCancellationRequested) { }
             catch (Exception ex)
             {
                 try { _reportError(ex); }
@@ -369,6 +370,34 @@ public sealed class QuickCaptureSettingsCoordinator : IQuickCaptureSettings
             ? ApplyWidgetAsync(++_requestGeneration, enabled: true, reveal: true, cancellationToken)
             : Task.CompletedTask;
         await SaveRecordingAsync(widget);
+    }
+
+    /// <summary>The open widget enables recent capture without revealing another window.</summary>
+    public async Task EnableClipboardFromOpenWidgetAsync()
+    {
+        ObjectDisposedException.ThrowIf(_stopping, this);
+        QuickCaptureSettingsSnapshot before = Read();
+        AppSettings settings = _settings.Settings;
+        FeatureWidgetSettings.SetEnabled(settings, WidgetKind.QuickCapture, true);
+        settings.QuickCapture.QuickCaptureClipboardEnabled = true;
+        _desiredEnabled = true;
+        ++_requestGeneration;
+        QuickCaptureSettingsSnapshot current = Read();
+        _last = current;
+
+        // SettingsChanged may be delivered during SaveAsync. The explicit
+        // refresh below must remain the first capture after persistence.
+        bool hadReconciledClipboard = _hasReconciledClipboard;
+        _hasReconciledClipboard = true;
+        try { await _settings.SaveAsync(); }
+        catch
+        {
+            _hasReconciledClipboard = hadReconciledClipboard;
+            throw;
+        }
+
+        if (before != current) Changed?.Invoke();
+        _clipboard.Refresh(captureCurrent: true);
     }
 
     public async Task SetImageEnabledAsync(bool enabled, bool captureCurrent = true,

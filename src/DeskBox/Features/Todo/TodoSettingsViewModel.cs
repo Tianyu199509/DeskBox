@@ -261,7 +261,7 @@ public sealed class TodoSettingsViewModel : ObservableObject, IDisposable
 
     public bool TrySetListTextSize(double size, bool scheduleSave = true)
     {
-        if (_disposed) return false;
+        if (_disposed || !double.IsFinite(size)) return false;
         try
         {
             _settings.SetListTextSize(size, scheduleSave);
@@ -278,7 +278,7 @@ public sealed class TodoSettingsViewModel : ObservableObject, IDisposable
 
     public bool TrySetContentTextSize(double size, bool scheduleSave = true)
     {
-        if (_disposed) return false;
+        if (_disposed || !double.IsFinite(size)) return false;
         try
         {
             _settings.SetContentTextSize(size, scheduleSave);

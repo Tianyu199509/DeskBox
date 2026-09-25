@@ -288,13 +288,11 @@ public sealed class TodoSettingsCoordinator : ITodoSettings
     private void SetTextSize(double size, bool list, bool scheduleSave)
     {
         ObjectDisposedException.ThrowIf(_stopped, this);
-        double normalized = double.IsFinite(size)
-            ? Math.Clamp(
-                Math.Round(size * 2d, MidpointRounding.AwayFromZero) / 2d,
-                SettingsService.MinTextSize,
-                SettingsService.MaxTextSize)
-            : SettingsService.NormalizeTextSize(
-                _settings.Settings.WidgetShell.TextSize);
+        if (!double.IsFinite(size)) return;
+        double normalized = Math.Clamp(
+            Math.Round(size * 2d, MidpointRounding.AwayFromZero) / 2d,
+            SettingsService.MinTextSize,
+            SettingsService.MaxTextSize);
         TodoSettingsSlice todo = _settings.Settings.Todo;
         double previous = list
             ? todo.TodoListTextSize

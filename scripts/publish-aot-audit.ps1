@@ -1609,9 +1609,12 @@ $stage4E4BridgeAssignmentIndex = $stage4E4DeferredSectionsSource.IndexOf(
 $stage4E4BridgeClearIndex = $stage4E4SettingsWindowSource.IndexOf(
     "AppearanceDetailSection.ViewModel = null;",
     [StringComparison]::Ordinal)
-$stage4E4ViewModelDisposeIndex = $stage4E4SettingsWindowSource.IndexOf(
-    "ViewModel.Dispose();",
-    [StringComparison]::Ordinal)
+$stage4E4ViewModelDisposeMatch = [regex]::Match(
+    $stage4E4SettingsWindowSource,
+    '(?m)^[ \t]*ViewModel\.Dispose\(\);[ \t]*\r?$')
+$stage4E4ViewModelDisposeIndex = if ($stage4E4ViewModelDisposeMatch.Success) {
+    $stage4E4ViewModelDisposeMatch.Index
+} else { -1 }
 $stage4E4ViewModelBridgeOrderValid =
     $stage4E4RootDataContextIndex -ge 0 -and
     $stage4E4DeferredDataContextIndex -ge 0 -and
@@ -7372,7 +7375,9 @@ $stage5B4C3AProductSource =
 $stage5B4C3ARequiredProductPatterns = @(
     'Func<string, TodoWidgetStore> storeFactory',
     'Func<DateTimeOffset> clock',
-    'public async Task<int> CheckNowAsync(DateTimeOffset now)',
+    'public Task<int> CheckNowAsync(DateTimeOffset now)',
+    'return _activeCheck = CheckCoreAsync(now);',
+    'private async Task<int> CheckCoreAsync(DateTimeOffset now)',
     'public async Task<bool> SnoozeAsync(',
     'item.SnoozedUntil = snoozedUntil',
     'item.ReminderDismissedForDueDate = item.DueDate',

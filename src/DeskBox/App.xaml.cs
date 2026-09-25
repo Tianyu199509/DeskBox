@@ -1078,7 +1078,7 @@ public partial class App : Application
                     : SettingsService.SaveAsync(),
                 action => UiDispatcherQueue.TryEnqueue(() => action()),
                 ex => Log($"[QuickCapture] Settings operation failed: {ex}"),
-                limit => QuickCaptureService.TrimRecentItemsAsync(limit));
+                (limit, token) => QuickCaptureService.TrimRecentItemsAsync(limit, token));
 
             var quickCaptureService = QuickCaptureService;
             var themeService = ThemeService;
@@ -4556,6 +4556,7 @@ public partial class App : Application
     private async Task ShutdownCoreAsync()
     {
         Interlocked.Exchange(ref s_shutdownRequested, 1);
+        TimeSpan shutdownGrace = TimeSpan.FromSeconds(15);
         await _shutdownSequence.RunAsync(
             ShutdownStep.Sync("backup-subscriptions", () =>
             {
@@ -4563,7 +4564,12 @@ public partial class App : Application
                 CloudBackupService.BackupRunCompleted -= OnCloudBackupRunCompleted;
                 DataBackupService.AutomaticSnapshotFallbackDetected -= OnAutomaticBackupFallbackDetected;
             }),
-            new("backup-runtime", () => _backupRuntime?.StopAsync() ?? Task.CompletedTask),
+            ShutdownStep.Bounded("backup-restore-actions", () =>
+                _settingsWindow?.StopCloudBackupActionsAsync() ?? Task.CompletedTask,
+                shutdownGrace),
+            ShutdownStep.Bounded("backup-runtime", () =>
+                _backupRuntime?.StopAsync() ?? Task.CompletedTask,
+                shutdownGrace),
             new("todo-settings", () => _todoSettings?.StopAsync() ?? Task.CompletedTask),
             ShutdownStep.Sync("memory-maintenance", () =>
             {
@@ -4579,8 +4585,10 @@ public partial class App : Application
             ShutdownStep.Sync("lifecycle-watcher", () => { _lifecycleRecoveryWatcher?.Dispose(); _lifecycleRecoveryWatcher = null; }),
             ShutdownStep.Sync("hook-watchdog", () => { _hookHealthWatchdog?.Dispose(); _hookHealthWatchdog = null; }),
             ShutdownStep.Sync("diagnostics", () => { _diagnosticsService?.Dispose(); _diagnosticsService = null; }),
-            new("quick-capture", () => _quickCaptureSettings?.StopAsync() ??
-                _quickCaptureClipboardRuntime?.StopAsync() ?? Task.CompletedTask),
+            ShutdownStep.Bounded("quick-capture", () =>
+                _quickCaptureSettings?.StopAsync() ??
+                _quickCaptureClipboardRuntime?.StopAsync() ?? Task.CompletedTask,
+                shutdownGrace),
             ShutdownStep.Sync("desktop-organization-watcher", () =>
             {
                 if (DesktopAutoOrganizationWatcher is not null)

@@ -1887,7 +1887,7 @@ public sealed partial class WidgetManager
             }
             else
             {
-                SetFeatureWidgetEnabledState(config.WidgetKind, false);
+                await CommitFeatureWidgetStateAsync(config.WidgetKind, false);
             }
         }
         await _settingsService.SaveAsync();

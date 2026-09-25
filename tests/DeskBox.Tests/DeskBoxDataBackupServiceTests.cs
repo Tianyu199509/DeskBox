@@ -1105,6 +1105,7 @@ public sealed class DeskBoxDataBackupServiceTests : IDisposable
         var service = new DeskBoxDataBackupService(_appDataRoot);
         await service.PrepareScopedRestoreAsync(
             backupPath, CloudBackupDomain.WidgetStyle);
+        Assert.True(await service.SetPendingRestoreItemReplaceModeAsync(false));
 
         // Attempts below the cap keep the marker (with a bumped counter)
         // so the next launch retries.

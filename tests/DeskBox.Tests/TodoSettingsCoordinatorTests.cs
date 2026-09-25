@@ -339,6 +339,32 @@ public sealed class TodoSettingsCoordinatorTests : IDisposable
     }
 
     [Fact]
+    public async Task NonFiniteTextSizes_DoNotReplaceInheritedOverrides()
+    {
+        var settings = new SettingsService(_root);
+        settings.Settings.WidgetShell.TextSize = 13.5;
+        var coordinator = new TodoSettingsCoordinator(settings);
+        var errors = new List<Exception>();
+        using var editor = new TodoSettingsViewModel(coordinator, errors.Add);
+
+        foreach (double invalid in new[] { double.NaN, double.PositiveInfinity,
+                     double.NegativeInfinity })
+        {
+            Assert.False(editor.TrySetListTextSize(invalid));
+            Assert.False(editor.TrySetContentTextSize(invalid));
+            coordinator.SetListTextSize(invalid);
+            coordinator.SetContentTextSize(invalid);
+        }
+
+        Assert.Equal(13.5, editor.ListTextSize);
+        Assert.Equal(13.5, editor.ContentTextSize);
+        Assert.Equal(0, settings.Settings.Todo.TodoListTextSize);
+        Assert.Equal(0, settings.Settings.Todo.TodoContentTextSize);
+        Assert.Empty(errors);
+        await coordinator.StopAsync();
+    }
+
+    [Fact]
     public async Task PreviewLinesClampAndResetThroughTodoWriter()
     {
         var settings = new SettingsService(_root);

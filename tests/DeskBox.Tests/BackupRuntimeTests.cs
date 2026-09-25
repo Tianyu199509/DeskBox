@@ -1,5 +1,6 @@
 using DeskBox.Contracts;
 using DeskBox.Features.Backup;
+using DeskBox.Services;
 
 namespace DeskBox.Tests;
 
@@ -79,6 +80,43 @@ public sealed class BackupRuntimeTests
         Assert.Contains(reports, item => item.Outcome == BackupOutcome.Canceled);
         Assert.Contains(reports, item => item.Outcome == BackupOutcome.Succeeded);
         Assert.Equal(1, timer.Disposals);
+    }
+
+    [Fact]
+    public async Task NonCooperativeBackend_CannotBlockTheRemainingShutdownSteps()
+    {
+        var release = new TaskCompletionSource<LocalBackupResult>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        CancellationToken activeToken = default;
+        var backend = new FakeBackend
+        {
+            LocalWork = (_, token) =>
+            {
+                activeToken = token;
+                return release.Task;
+            }
+        };
+        var runtime = new BackupRuntime(backend, new FakeTimer(), _ => { });
+        Task<LocalBackupResult> active = runtime.CreateSnapshotNowAsync();
+        var logs = new List<string>();
+        bool laterStepRan = false;
+        var shutdown = new ShutdownSequence(logs.Add);
+
+        await shutdown.RunAsync(
+            ShutdownStep.Bounded("backup-runtime", runtime.StopAsync,
+                TimeSpan.FromMilliseconds(50)),
+            ShutdownStep.Sync("later-cleanup", () => laterStepRan = true))
+            .WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.True(activeToken.IsCancellationRequested);
+        Assert.True(laterStepRan);
+        Assert.False(active.IsCompleted);
+        Assert.Contains("backup-runtime", Assert.Single(logs));
+        Assert.Contains("may still be running", logs[0]);
+        release.TrySetResult(new(BackupOutcome.Succeeded, "committed.zip"));
+        Assert.Equal("committed.zip", (await active).ArchivePath);
+        await runtime.StopAsync();
+        Assert.Equal(0, runtime.PendingCount);
     }
 
     [Fact]

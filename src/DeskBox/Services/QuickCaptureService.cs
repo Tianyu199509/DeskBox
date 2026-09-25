@@ -1011,12 +1011,14 @@ public sealed class QuickCaptureService
         }
     }
 
-    public async Task TrimRecentItemsAsync(int maxRecentItems)
+    public async Task TrimRecentItemsAsync(int maxRecentItems,
+        CancellationToken cancellationToken = default)
     {
-        await _gate.WaitAsync();
+        await _gate.WaitAsync(cancellationToken);
         try
         {
             await EnsureLoadedCoreAsync();
+            cancellationToken.ThrowIfCancellationRequested();
             int before = _data!.RecentItems.Count;
             TrimRecentItemsCore(NormalizeRecentLimit(maxRecentItems));
             if (_data.RecentItems.Count != before)

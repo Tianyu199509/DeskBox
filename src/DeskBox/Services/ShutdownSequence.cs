@@ -7,6 +7,21 @@ internal sealed record ShutdownStep(string Name, Func<Task> Run)
         action();
         return Task.CompletedTask;
     });
+
+    public static ShutdownStep Bounded(string name, Func<Task> run, TimeSpan gracePeriod) =>
+        new(name, async () =>
+        {
+            try
+            {
+                await run().WaitAsync(gracePeriod);
+            }
+            catch (TimeoutException ex)
+            {
+                throw new TimeoutException(
+                    $"Step '{name}' exceeded its {gracePeriod.TotalSeconds:F0}s shutdown grace period; its operation may still be running.",
+                    ex);
+            }
+        });
 }
 
 /// <summary>Runs teardown once, in dependency order, continuing after individual failures.</summary>

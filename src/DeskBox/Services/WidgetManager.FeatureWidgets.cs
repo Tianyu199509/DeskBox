@@ -1010,6 +1010,11 @@ public sealed partial class WidgetManager
             await _searchFeatureSettings.SetEnabledAsync(enabled, reveal);
             return;
         }
+        if (kind == WidgetKind.Todo && _todoSettings is not null)
+        {
+            await _todoSettings.SetEnabledAsync(enabled);
+            return;
+        }
 
         if (_featureWidgetHandlers.TryGetValue(kind, out var handler) &&
             _featureWidgetUpdateLocks.TryGetValue(kind, out var updateLock))
@@ -1411,16 +1416,21 @@ public sealed partial class WidgetManager
         return FeatureWidgetSettings.IsFeatureWidget(kind);
     }
 
-    private Task CommitFeatureWidgetStateAsync(WidgetKind kind, bool enabled)
+    private async Task CommitFeatureWidgetStateAsync(WidgetKind kind, bool enabled)
     {
         if (kind == WidgetKind.Search && _searchFeatureSettings is not null)
-            return _searchFeatureSettings.CommitEnabledStateAsync(enabled);
+        {
+            await _searchFeatureSettings.CommitEnabledStateAsync(enabled);
+            _lastFeatureWidgetEnabledStates[kind] = GetFeatureWidgetEnabledState(kind);
+            return;
+        }
         SetFeatureWidgetEnabledState(kind, enabled);
-        return Task.CompletedTask;
     }
 
     private void SetFeatureWidgetEnabledState(WidgetKind kind, bool enabled)
     {
+        if (kind == WidgetKind.Search && _searchFeatureSettings is not null)
+            throw new InvalidOperationException("Search state commits must await their runtime boundary.");
         _lastFeatureWidgetEnabledStates[kind] = enabled;
         if (kind == WidgetKind.Todo && _todoSettings is not null)
         {
@@ -1432,8 +1442,6 @@ public sealed partial class WidgetManager
             _quickCaptureSettings.CommitEnabledState(enabled);
             return;
         }
-        if (kind == WidgetKind.Search && _searchFeatureSettings is not null)
-            throw new InvalidOperationException("Search state commits must await their runtime boundary.");
         FeatureWidgetSettings.SetEnabled(_settingsService.Settings, kind, enabled);
     }
 
