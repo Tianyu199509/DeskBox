@@ -471,6 +471,58 @@ public sealed class WidgetManagerStorageCleanupTests : IDisposable
     }
 
     [Fact]
+    public async Task HiddenMerge_PostSaveFailureAndRejectedRollbackKeepCommittedTopologyUsable()
+    {
+        var target = new WidgetConfig
+        {
+            Name = "Target",
+            WidgetKind = WidgetKind.File,
+            MappedFolderPath = Directory.CreateDirectory(Path.Combine(_tempRoot, "target-files")).FullName,
+            FollowsDefaultStoragePath = false,
+            IsVisible = false
+        };
+        var source = new WidgetConfig
+        {
+            Name = "Source",
+            WidgetKind = WidgetKind.File,
+            MappedFolderPath = Directory.CreateDirectory(Path.Combine(_tempRoot, "source-files")).FullName,
+            FollowsDefaultStoragePath = false,
+            IsVisible = false
+        };
+        WidgetChromeModeNames.SetOverrideMode(target, WidgetChromeMode.Standard);
+        WidgetChromeModeNames.SetOverrideMode(source, WidgetChromeMode.Standard);
+        _settingsService.Settings.Widgets.Add(target);
+        _settingsService.Settings.Widgets.Add(source);
+
+        string? previousRoot = Environment.GetEnvironmentVariable("DESKBOX_DEV_DATA_ROOT");
+        string? previousStage = Environment.GetEnvironmentVariable("DESKBOX_DEV_GROUP_FAIL_STAGE");
+        try
+        {
+            Environment.SetEnvironmentVariable("DESKBOX_DEV_DATA_ROOT", _tempRoot);
+            Environment.SetEnvironmentVariable("DESKBOX_DEV_GROUP_FAIL_STAGE",
+                "merge-post-save-commit,merge-rollback-save");
+
+            Assert.True(await _widgetManager.MergeWidgetsAsync(source.Id, target.Id));
+            Assert.False(WidgetGroupFailureProbe.Consume("merge-post-save-commit"));
+            Assert.False(WidgetGroupFailureProbe.Consume("merge-rollback-save"));
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("DESKBOX_DEV_DATA_ROOT", previousRoot);
+            Environment.SetEnvironmentVariable("DESKBOX_DEV_GROUP_FAIL_STAGE", previousStage);
+        }
+
+        WidgetGroupConfig group = Assert.Single(_settingsService.Settings.WidgetGroups);
+        Assert.Equal([target.Id, source.Id], group.MemberIds);
+        Assert.Equal(target.Id, group.ActiveMemberId);
+        Assert.False(group.IsVisible);
+        Assert.Equal(0, _widgetManager.LoadedSurfaceCount);
+        var reloaded = new SettingsService(Path.Combine(_tempRoot, "settings"));
+        await reloaded.LoadAsync();
+        Assert.Equal(group.Id, Assert.Single(reloaded.Settings.WidgetGroups).Id);
+    }
+
+    [Fact]
     public async Task RenameWidgetAsync_ManagedWidgetRejectsDuplicateNameWithoutCreatingFolder()
     {
         string existingFolder = Directory.CreateDirectory(Path.Combine(_storageRoot, "AI")).FullName;

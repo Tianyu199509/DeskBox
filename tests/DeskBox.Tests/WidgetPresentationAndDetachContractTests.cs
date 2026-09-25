@@ -166,6 +166,80 @@ public sealed class WidgetPresentationAndDetachContractTests
     }
 
     [Fact]
+    public void NonReuseTopologyChanges_CompensateFailedReplacementFrames()
+    {
+        string source = Read("src/DeskBox/Services/WidgetManager.Groups.cs");
+        string detach = ExtractSection(
+            source,
+            "public async Task<bool> RemoveWidgetFromGroupAsync(",
+            "public async Task<bool> DissolveWidgetGroupContainingAsync(");
+        string dissolve = ExtractSection(
+            source,
+            "public async Task<bool> DissolveWidgetGroupContainingAsync(",
+            "public async Task<bool> ReorderWidgetGroupMemberAsync(");
+
+        foreach (string operation in new[] { detach, dissolve })
+        {
+            Assert.Contains(
+                "await WaitForGroupReplacementFirstFrameAsync(replacement);",
+                operation,
+                StringComparison.Ordinal);
+            Assert.Contains(
+                "await RecoverFailedGroupReplacementAsync(",
+                operation,
+                StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
+    public void ReusedDetach_DoesNotReassignOldGroupBeforeDurableRollback()
+    {
+        string source = Read("src/DeskBox/Services/WidgetManager.Groups.cs");
+        string reuse = ExtractSection(
+            source,
+            "private async Task<WidgetGroupDetachSurfaceReuseResult>",
+            "private async Task ReconcileCommittedDetachedSurfaceAsync(");
+
+        int persist = reuse.IndexOf(".TryRestorePreviousAsync(", StringComparison.Ordinal);
+        int failedWrite = reuse.IndexOf("if (!rollbackSaved)", StringComparison.Ordinal);
+        int keepSavedSplit = reuse.IndexOf(
+            "await ReconcileCommittedDetachedSurfaceAsync(",
+            StringComparison.Ordinal);
+        int restoreOldClaim = reuse.IndexOf(
+            "CommitSurfaceHost(originalGroup, detachedHost);",
+            StringComparison.Ordinal);
+
+        Assert.True(
+            persist >= 0 &&
+            persist < failedWrite &&
+            failedWrite < keepSavedSplit &&
+            keepSavedSplit < restoreOldClaim);
+    }
+
+    [Fact]
+    public void Merge_DoubleFailureRecoversCommittedTopologyBeforeNotifyingGroups()
+    {
+        string source = Read("src/DeskBox/Services/WidgetManager.Groups.cs");
+        string merge = ExtractSection(
+            source,
+            "public async Task<bool> MergeWidgetsAsync(",
+            "private async Task<bool> TryRecoverCommittedMergeAfterRollbackFailureAsync(");
+
+        int saved = merge.IndexOf("topologyPersisted = true;", StringComparison.Ordinal);
+        int failAfterSave = merge.IndexOf("merge-post-save-commit", StringComparison.Ordinal);
+        int rollback = merge.IndexOf("merge-rollback-save", StringComparison.Ordinal);
+        int recovery = merge.IndexOf(
+            "await TryRecoverCommittedMergeAfterRollbackFailureAsync(",
+            StringComparison.Ordinal);
+        int notify = merge.LastIndexOf("RaiseWidgetGroupsChanged();", StringComparison.Ordinal);
+
+        Assert.True(saved >= 0 && saved < failAfterSave &&
+            failAfterSave < rollback && rollback < recovery && recovery < notify);
+        Assert.Contains("ReconcileCommittedMergeClaims(", source, StringComparison.Ordinal);
+        Assert.Contains("QuarantineCommittedMergeAsync(", source, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void ReusedSurface_RetargetsWhileCloakedBeforePreparingAnimationOffset()
     {
         string source = Read(
