@@ -160,6 +160,10 @@ public partial class SettingsViewModel
             return;
         }
 
+        if (!value)
+        {
+            App.Log("[QuickCaptureClipboard] Disabled from settings");
+        }
         TrackQuickCaptureAction(_quickCaptureSettings.SetClipboardEnabledAsync(
             value, captureCurrent: value));
         RefreshQuickCaptureClipboardDiagnostics();
