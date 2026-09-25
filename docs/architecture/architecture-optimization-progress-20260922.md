@@ -505,3 +505,17 @@ A+B 工作树已补齐最终 QuickCapture 退出/快捷入口和 Todo 非有限�
 在用户明确授权“发”之后，A+B 已提交并推送 `c966a9a0`，创建 [PR #423](https://github.com/Tianyu199509/DeskBox/pull/423)；C 从该提交叠加 `6728c2e4`，创建 [PR #424](https://github.com/Tianyu199509/DeskBox/pull/424)；D 再叠加 `a3809579`，创建 [PR #425](https://github.com/Tianyu199509/DeskBox/pull/425)。第 22 批使用独立 `codex/architecture-quickcapture-text-size-review` 分支，以 D 提交为基线。前三段本地全量 x64 分别为 4,167、4,177、4,224 全绿；最终叠加态 **4,229/4,229** 通过，完整 Native AOT publish/link 与审计通过。最终 canonical Debug 从独立数据根恢复 1 个随记格子，原始字号 13/13.5 与剪贴板记录状态保持，启动 35 步 0 degraded / 0 failed；测试进程已退出。最终源码、测试与脚本和先前已实测的统一候选逐文件一致，内存探针未进入提交链。
 
 **下一批**：核对四个 PR 各自 CI 及审阅反馈，按依赖顺序处理合并；合并动作和正式版本发布另行授权。云同步设备层、contribution descriptor、Generic Host 或物理拆工程仍遵照原路线图的触发条件，不混入当前 PR 链。具体范围见 `architecture-final-candidate-review-20260924.md`。
+
+## 2026-09-25：四段 PR 栈合并完成
+
+经逐段核对，#423、#424、#425、#426 均通过远程 `Build and test`，并按此顺序以保留提交祖先关系的合并提交进入 `main`。四个合并提交分别为 `a7488e46`、`cc3dd408`、`ab2044d1`、`8cedf5f2`；每一步的文件树与对应 PR head 一致，最终远端 `main` 为 `8cedf5f2`，四个 PR 均显示 `MERGED`。提交作者与提交者均为 Simon。原共享工作区 `D:/project/wingezi` 的并行 `MemoryDestroyProbe` 和两份外部审查报告没有并入，也没有清理该工作区。
+
+合并前修复了第 22 批切片遗漏：全局字号回调现在与 Todo 一样立即刷新 QuickCapture 设置协调器。正常滑块拖动及提交不会发出普通 `SettingsChanged`，因此不能依赖异步广播更新随记设置页的继承字号。新增回归测试先在漏项上失败，再验证列表和正文字号均随全局值更新、原始覆盖值仍为 `0`；最终本地 Debug 与 CI 同配置 Release/x64 全量均为 **4,230/4,230** 通过。隔离 Debug 启动记录 36 步、0 degraded、0 failed；#426 最终远程 CI 通过。#423 的 PR 说明明确了新 scoped 恢复标记在用户确认前中断时丢弃暂存、旧标记缺少确认字段时继续采用旧合并语义。
+
+此前统一候选的完整 x64 Native AOT publish/link、测试 MSIX 安装启动和部分真实交互已有独立证据；本次补回一行现有协调器调用后，没有重新执行完整 Native AOT publish/link 或正式双架构安装包验收。它们仍是后续正式发布前的门禁，不与这次源码合并混为一谈。
+
+### 下一批
+
+1. **第 23 批：退出链路剩余等待的所有权。** 先测量和故障注入 `todo-settings`、`search-settings`、`todo-reminders` 三步的挂起路径，再明确取消、排空与宿主资源释放的顺序。不能只给步骤套 `WaitAsync`：超时后的任务仍会运行，后续关闭窗口或释放服务可能与之竞争。验收包括不合作后端、重复退出、退出后不得回写已释放对象，以及隔离 Debug 的实际退出；保持设置 schema 和用户交互不变。
+2. **随后处理 D 段剩余的拆离对账异常。** 针对回滚写盘失败且 Registry/替换窗口再次出错的窄路径，建立可观测的失败结果或隔离补偿，补一条经过真实拆离编排的自动测试。现有真实拖离故障注入已证明常见回滚路径可用，隐藏成员的无正常入口状态不再列为手动验收前提。
+3. WebDAV 真服务器、通知交互和正式包的设备验收按各功能/发版门禁单独完成；`SwitchGate` 旧测试与成员、远端列表登记等低风险清理随相关代码触碰处理。设备层 store、云同步协议、contribution descriptor、Generic Host 和物理拆工程继续遵照路线图的立项触发条件，不并入第 23 批。
