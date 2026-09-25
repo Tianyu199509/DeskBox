@@ -22,6 +22,34 @@ internal sealed class WidgetSurfaceSwitchGatePool
             static _ => new SemaphoreSlim(1, 1));
     }
 
+    public async Task<IDisposable> AcquireManyAsync(
+        IEnumerable<string?> surfaceIds,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(surfaceIds);
+        var held = new List<SemaphoreSlim>();
+        try
+        {
+            foreach (string surfaceId in surfaceIds
+                         .Where(id => !string.IsNullOrWhiteSpace(id))
+                         .Select(id => id!)
+                         .Distinct(StringComparer.Ordinal)
+                         .OrderBy(id => id, StringComparer.Ordinal))
+            {
+                SemaphoreSlim gate = Get(surfaceId);
+                await gate.WaitAsync(cancellationToken);
+                held.Add(gate);
+            }
+
+            return new GateLease(held);
+        }
+        catch
+        {
+            ReleaseHeld(held);
+            throw;
+        }
+    }
+
     public bool Remove(string surfaceId)
     {
         if (string.IsNullOrWhiteSpace(surfaceId))
@@ -38,5 +66,27 @@ internal sealed class WidgetSurfaceSwitchGatePool
     public void Clear()
     {
         _gates.Clear();
+    }
+
+    private static void ReleaseHeld(IReadOnlyList<SemaphoreSlim> held)
+    {
+        for (int index = held.Count - 1; index >= 0; index--)
+        {
+            held[index].Release();
+        }
+    }
+
+    private sealed class GateLease(List<SemaphoreSlim> held) : IDisposable
+    {
+        private List<SemaphoreSlim>? _held = held;
+
+        public void Dispose()
+        {
+            List<SemaphoreSlim>? held = Interlocked.Exchange(ref _held, null);
+            if (held is not null)
+            {
+                ReleaseHeld(held);
+            }
+        }
     }
 }

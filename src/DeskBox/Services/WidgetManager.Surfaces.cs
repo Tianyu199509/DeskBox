@@ -45,7 +45,8 @@ public sealed partial class WidgetManager
 
     private void RegisterCreatedSurfaceHost(
         WidgetConfig config,
-        IDesktopWidgetWindow window)
+        IDesktopWidgetWindow window,
+        bool prepareSurfacePromotionCandidate = false)
     {
         WidgetGroupConfig? group = WidgetGroupSettings.FindByMember(
             _settingsService.Settings,
@@ -53,6 +54,33 @@ public sealed partial class WidgetManager
         WidgetSurfaceDefinition definition = group is null
             ? CreateSurfaceDefinition(config)
             : CreateSurfaceDefinition(group);
+
+        if (prepareSurfacePromotionCandidate)
+        {
+            if (group is null ||
+                !string.Equals(
+                    definition.ActiveMemberId,
+                    config.Id,
+                    StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException(
+                    $"Widget '{config.Id}' is not the active member of a group Surface.");
+            }
+
+            // A newly formed group has no active Surface declaration yet. Keep
+            // the legacy member's claim until the candidate is presented and
+            // CommitSurfaceHost transfers it to the group identity.
+            if (_widgetSurfaces.TryGet(definition.SurfaceId, out _) &&
+                !_widgetSurfaces.StageCandidate(
+                    definition.SurfaceId,
+                    config.Id,
+                    window))
+            {
+                throw new InvalidOperationException(
+                    $"Unable to stage promotion candidate for Surface '{definition.SurfaceId}'.");
+            }
+            return;
+        }
 
         if (group is not null &&
             !string.Equals(
@@ -66,9 +94,9 @@ public sealed partial class WidgetManager
                     config.Id,
                     window))
             {
-                App.Log(
-                    $"[WidgetSurface] Unable to stage candidate " +
-                    $"surface={definition.SurfaceId} member={config.Id}");
+                throw new InvalidOperationException(
+                    $"Unable to stage candidate for Surface '{definition.SurfaceId}' " +
+                    $"member '{config.Id}'.");
             }
             return;
         }
@@ -76,6 +104,12 @@ public sealed partial class WidgetManager
         if (_widgetSurfaces.TryGet(definition.SurfaceId, out var existing) &&
             !ReferenceEquals(existing!.Host, window))
         {
+            if (group is not null)
+            {
+                throw new InvalidOperationException(
+                    $"Surface '{definition.SurfaceId}' already owns another host; " +
+                    "replacement requires a promotion transaction.");
+            }
             _widgetSurfaces.SynchronizeActive(definition, window);
         }
         else
@@ -95,11 +129,20 @@ public sealed partial class WidgetManager
 
         IDesktopWidgetWindow? activeHost =
             GetLegacyLoadedWindow(group.ActiveMemberId);
-        return activeHost is null
-            ? null
-            : _widgetSurfaces.RegisterActive(
-                CreateSurfaceDefinition(group),
-                activeHost);
+        if (activeHost is null)
+        {
+            return null;
+        }
+
+        WidgetSurfaceDefinition definition = CreateSurfaceDefinition(group);
+        IReadOnlyList<WidgetSurfaceClaimTransfer<IDesktopWidgetWindow>> retiring =
+            _widgetSurfaces.CaptureGroupClaimTransfers(
+                definition,
+                onlyRetireHost: activeHost);
+        return _widgetSurfaces.RegisterActive(
+            definition,
+            activeHost,
+            expectedRetiringClaims: retiring);
     }
 
     private SemaphoreSlim GetWidgetSurfaceSwitchGate(WidgetGroupConfig group)
@@ -109,12 +152,15 @@ public sealed partial class WidgetManager
 
     private void CommitSurfaceHost(
         WidgetGroupConfig group,
-        IDesktopWidgetWindow window)
+        IDesktopWidgetWindow window,
+        IReadOnlyCollection<WidgetSurfaceClaimTransfer<IDesktopWidgetWindow>>?
+            expectedRetiringClaims = null)
     {
         WidgetSurfaceSession<IDesktopWidgetWindow> session =
             _widgetSurfaces.CommitActive(
                 CreateSurfaceDefinition(group),
-                window);
+                window,
+                expectedRetiringClaims);
         // Standalone file sessions are aliases for a single member. Once the
         // HWND becomes a persistent group surface, content switching owns the
         // active member and the standalone alias must not outlive that change.
@@ -195,11 +241,16 @@ public sealed partial class WidgetManager
             return;
         }
 
-        // A standalone surface becomes a group surface when its widget is the
-        // merge target. Remove the old host claim before assigning the new
-        // stable group identity.
-        _widgetSurfaces.UnregisterHost(activeHost);
-        _widgetSurfaces.SynchronizeActive(definition, activeHost);
+        // Reconcile a standalone claim and the group declaration in one
+        // registry operation. A conflicting source leaves both claims intact.
+        IReadOnlyList<WidgetSurfaceClaimTransfer<IDesktopWidgetWindow>> retiring =
+            _widgetSurfaces.CaptureGroupClaimTransfers(
+                definition,
+                onlyRetireHost: activeHost);
+        _widgetSurfaces.SynchronizeActive(
+            definition,
+            activeHost,
+            expectedRetiringClaims: retiring);
     }
 
     private IDesktopWidgetWindow? GetLegacyLoadedWindow(string widgetId)

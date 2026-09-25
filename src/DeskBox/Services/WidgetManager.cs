@@ -802,9 +802,9 @@ public sealed partial class WidgetManager
 
             _lastFeatureWidgetEnabledStates[kind] = enabled;
             if (kind == WidgetKind.QuickCapture && _quickCaptureSettings is not null)
-                continue;
+                continue; // the coordinator handles external enablement and listener state
             if (kind == WidgetKind.Search && _searchFeatureSettings is not null)
-                continue;
+                continue; // the coordinator orders widget teardown before runtime release
             ApplyFeatureWidgetEnabledState(kind, enabled);
         }
 
@@ -1014,6 +1014,7 @@ public sealed partial class WidgetManager
             _sessionManager.MarkDesktopResting("restore-widgets");
             QueueVisibleGroupedFileIconRecoveryAfterStartup();
         }
+
     }
 
     /// <summary>
@@ -1645,6 +1646,7 @@ public sealed partial class WidgetManager
         // re-held by a fast reraise during the await.
         SweepRaisedBandGuests("set-all-hidden", endedRaiseGeneration);
         App.LogVerbose($"[TrayBatch] SetAllVisible completed visible=false prepared={windowsToHide.Count}");
+
         ReconcileBackgroundMemoryCleanupForWidgetVisibility(
             "tray-batch-hidden",
             forceScheduleWhenHidden: true);
@@ -2616,7 +2618,8 @@ public sealed partial class WidgetManager
         bool keepPreparedForAnimation = false,
         bool revealAfterCreate = false,
         bool showRaisedWhileInitializing = false,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        bool prepareSurfacePromotionCandidate = false)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
@@ -2627,11 +2630,18 @@ public sealed partial class WidgetManager
                 keepPreparedForAnimation,
                 revealAfterCreate,
                 showRaisedWhileInitializing,
-                cancellationToken));
+                cancellationToken,
+                prepareSurfacePromotionCandidate));
         }
 
         if (_contentWidgets.TryGetValue(config.Id, out var existing))
         {
+            if (prepareSurfacePromotionCandidate)
+            {
+                throw new InvalidOperationException(
+                    $"Promotion candidate for '{config.Id}' must be a newly created host.");
+            }
+
             if (!showRaisedWhileInitializing)
             {
                 await existing.ContentReadyTask.WaitAsync(cancellationToken);
@@ -2671,7 +2681,10 @@ public sealed partial class WidgetManager
                 config,
                 window,
                 plan.Content);
-            RegisterCreatedSurfaceHost(config, window);
+            RegisterCreatedSurfaceHost(
+                config,
+                window,
+                prepareSurfacePromotionCandidate);
             ApplyCapsuleArrangementIfChanged(force: true);
 
             window.Closed += (_, _) =>

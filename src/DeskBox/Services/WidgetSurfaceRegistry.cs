@@ -35,7 +35,8 @@ internal sealed class WidgetSurfaceRegistry<THost>
 
     public WidgetSurfaceSession<THost> RegisterActive(
         WidgetSurfaceDefinition definition,
-        THost host)
+        THost host,
+        IReadOnlyCollection<WidgetSurfaceClaimTransfer<THost>>? expectedRetiringClaims = null)
     {
         ArgumentNullException.ThrowIfNull(definition);
         ArgumentNullException.ThrowIfNull(host);
@@ -51,12 +52,16 @@ internal sealed class WidgetSurfaceRegistry<THost>
                         $"Surface '{definition.SurfaceId}' already owns another active host.");
                 }
 
-                ReindexMembers(existing.MemberIds, definition);
+                List<WidgetSurfaceSession<THost>> retiring =
+                    ValidateMemberClaimTransfer(definition, expectedRetiringClaims);
+                ReindexMembers(existing.MemberIds, definition, retiring);
                 existing.UpdateDefinition(definition);
                 return existing;
             }
 
-            RemoveMemberClaims(definition.MemberIds, definition.SurfaceId);
+            List<WidgetSurfaceSession<THost>> newRetiring =
+                ValidateMemberClaimTransfer(definition, expectedRetiringClaims);
+            RetireClaimedSurfaces(newRetiring);
             var session = new WidgetSurfaceSession<THost>(definition, host);
             _sessions.Add(definition.SurfaceId, session);
             IndexMembers(definition);
@@ -71,7 +76,8 @@ internal sealed class WidgetSurfaceRegistry<THost>
     /// </summary>
     public WidgetSurfaceSession<THost> SynchronizeActive(
         WidgetSurfaceDefinition definition,
-        THost host)
+        THost host,
+        IReadOnlyCollection<WidgetSurfaceClaimTransfer<THost>>? expectedRetiringClaims = null)
     {
         ArgumentNullException.ThrowIfNull(definition);
         ArgumentNullException.ThrowIfNull(host);
@@ -81,12 +87,16 @@ internal sealed class WidgetSurfaceRegistry<THost>
         {
             if (_sessions.TryGetValue(definition.SurfaceId, out var existing))
             {
-                ReindexMembers(existing.MemberIds, definition);
+                List<WidgetSurfaceSession<THost>> retiring =
+                    ValidateMemberClaimTransfer(definition, expectedRetiringClaims);
+                ReindexMembers(existing.MemberIds, definition, retiring);
                 existing.CommitActive(definition, host);
                 return existing;
             }
 
-            RemoveMemberClaims(definition.MemberIds, definition.SurfaceId);
+            List<WidgetSurfaceSession<THost>> newRetiring =
+                ValidateMemberClaimTransfer(definition, expectedRetiringClaims);
+            RetireClaimedSurfaces(newRetiring);
             var session = new WidgetSurfaceSession<THost>(definition, host);
             _sessions.Add(definition.SurfaceId, session);
             IndexMembers(definition);
@@ -111,14 +121,14 @@ internal sealed class WidgetSurfaceRegistry<THost>
                 return false;
             }
 
-            session.StageCandidate(targetMemberId, candidateHost);
-            return true;
+            return session.StageCandidate(targetMemberId, candidateHost);
         }
     }
 
     public WidgetSurfaceSession<THost> CommitActive(
         WidgetSurfaceDefinition definition,
-        THost host)
+        THost host,
+        IReadOnlyCollection<WidgetSurfaceClaimTransfer<THost>>? expectedRetiringClaims = null)
     {
         ArgumentNullException.ThrowIfNull(definition);
         ArgumentNullException.ThrowIfNull(host);
@@ -128,7 +138,7 @@ internal sealed class WidgetSurfaceRegistry<THost>
         {
             if (!_sessions.TryGetValue(definition.SurfaceId, out var session))
             {
-                return RegisterActive(definition, host);
+                return RegisterActive(definition, host, expectedRetiringClaims);
             }
 
             if (!ReferenceEquals(session.Host, host) &&
@@ -142,7 +152,9 @@ internal sealed class WidgetSurfaceRegistry<THost>
                     $"Host was not prepared for surface '{definition.SurfaceId}'.");
             }
 
-            ReindexMembers(session.MemberIds, definition);
+            List<WidgetSurfaceSession<THost>> retiring =
+                ValidateMemberClaimTransfer(definition, expectedRetiringClaims);
+            ReindexMembers(session.MemberIds, definition, retiring);
             session.CommitActive(definition, host);
             return session;
         }
@@ -172,7 +184,9 @@ internal sealed class WidgetSurfaceRegistry<THost>
                 return false;
             }
 
-            ReindexMembers(session.MemberIds, definition);
+            List<WidgetSurfaceSession<THost>> retiring =
+                ValidateMemberClaimTransfer(definition, expectedRetiringClaims: null);
+            ReindexMembers(session.MemberIds, definition, retiring);
             session.UpdateDefinition(definition);
             return true;
         }
@@ -281,10 +295,11 @@ internal sealed class WidgetSurfaceRegistry<THost>
 
     private void ReindexMembers(
         IReadOnlyList<string> previousMemberIds,
-        WidgetSurfaceDefinition definition)
+        WidgetSurfaceDefinition definition,
+        IReadOnlyList<WidgetSurfaceSession<THost>> retiringSessions)
     {
         RemoveIndexedMembers(previousMemberIds, definition.SurfaceId);
-        RemoveMemberClaims(definition.MemberIds, definition.SurfaceId);
+        RetireClaimedSurfaces(retiringSessions);
         IndexMembers(definition);
     }
 
@@ -296,29 +311,177 @@ internal sealed class WidgetSurfaceRegistry<THost>
         }
     }
 
-    private void RemoveMemberClaims(
-        IReadOnlyList<string> memberIds,
-        string exceptSurfaceId)
+    private List<WidgetSurfaceSession<THost>> ValidateMemberClaimTransfer(
+        WidgetSurfaceDefinition definition,
+        IReadOnlyCollection<WidgetSurfaceClaimTransfer<THost>>? expectedRetiringClaims)
     {
-        foreach (string memberId in memberIds)
+        var claimed = new HashSet<WidgetSurfaceSession<THost>>(
+            ReferenceEqualityComparer.Instance);
+        foreach (string memberId in definition.MemberIds)
         {
             if (!_surfaceIdByMemberId.TryGetValue(memberId, out string? claimedSurfaceId) ||
-                string.Equals(claimedSurfaceId, exceptSurfaceId, StringComparison.Ordinal))
+                string.Equals(claimedSurfaceId, definition.SurfaceId, StringComparison.Ordinal))
             {
                 continue;
             }
 
-            if (_sessions.Remove(claimedSurfaceId, out var claimedSession))
+            if (!_sessions.TryGetValue(claimedSurfaceId, out var claimedSession) ||
+                !claimedSession.MemberIds.Contains(memberId, StringComparer.Ordinal))
             {
-                RemoveIndexedMembers(
-                    claimedSession.MemberIds,
-                    claimedSession.SurfaceId);
-                claimedSession.Dispose();
+                throw new InvalidOperationException(
+                    $"Member '{memberId}' has an inconsistent Surface claim.");
             }
-            else
+
+            claimed.Add(claimedSession);
+        }
+
+        var expected = new HashSet<WidgetSurfaceSession<THost>>(
+            (expectedRetiringClaims ?? [])
+                .Select(snapshot => snapshot.Session),
+            ReferenceEqualityComparer.Instance);
+        if (expectedRetiringClaims is not null &&
+            expected.Count != expectedRetiringClaims.Count)
+        {
+            throw new InvalidOperationException(
+                "A Surface claim transfer contains duplicate source sessions.");
+        }
+
+        if (!claimed.SetEquals(expected))
+        {
+            throw new InvalidOperationException(
+                $"Surface '{definition.SurfaceId}' cannot take member claims " +
+                "without the exact retiring sessions.");
+        }
+
+        if (claimed.Count > 0 && definition.GroupId is null)
+        {
+            throw new InvalidOperationException(
+                "A standalone Surface cannot take another Surface's member claim.");
+        }
+
+        foreach (WidgetSurfaceClaimTransfer<THost> snapshot in
+                 expectedRetiringClaims ?? [])
+        {
+            WidgetSurfaceSession<THost> source = snapshot.Session;
+            if (!_sessions.TryGetValue(source.SurfaceId, out var current) ||
+                !ReferenceEquals(current, source) ||
+                !ReferenceEquals(source.Host, snapshot.Host) ||
+                !string.Equals(
+                    source.ActiveMemberId,
+                    snapshot.ActiveMemberId,
+                    StringComparison.Ordinal) ||
+                !string.Equals(
+                    source.GroupId,
+                    snapshot.GroupId,
+                    StringComparison.Ordinal) ||
+                !source.MemberIds.SequenceEqual(
+                    snapshot.MemberIds,
+                    StringComparer.Ordinal) ||
+                source.CandidateHost is not null ||
+                source.MemberIds.Any(memberId =>
+                    !definition.MemberIds.Contains(memberId, StringComparer.Ordinal)))
             {
-                _surfaceIdByMemberId.Remove(memberId);
+                throw new InvalidOperationException(
+                    $"Source Surface '{source.SurfaceId}' cannot be retired " +
+                    "for this member-claim transfer.");
             }
+        }
+
+        return claimed.ToList();
+    }
+
+    private void RetireClaimedSurfaces(
+        IReadOnlyList<WidgetSurfaceSession<THost>> retiringSessions)
+    {
+        foreach (WidgetSurfaceSession<THost> source in retiringSessions)
+        {
+            _sessions.Remove(source.SurfaceId);
+            RemoveIndexedMembers(source.MemberIds, source.SurfaceId);
+            source.Dispose();
+        }
+    }
+
+    /// <summary>
+    /// Captures the exact sessions a configured group may retire when its
+    /// members move to one Surface. The later commit rechecks their identity
+    /// under the same registry lock before changing any claim.
+    /// </summary>
+    public IReadOnlyList<WidgetSurfaceClaimTransfer<THost>> CaptureGroupClaimTransfers(
+        WidgetSurfaceDefinition definition,
+        string? sourceGroupId = null,
+        string? sourceSurfaceId = null,
+        THost? onlyRetireHost = null)
+    {
+        ArgumentNullException.ThrowIfNull(definition);
+        definition.Validate();
+        if (definition.GroupId is null ||
+            (sourceGroupId is null) != (sourceSurfaceId is null))
+        {
+            throw new ArgumentException(
+                "A group claim transfer requires a group definition and a complete source identity.");
+        }
+
+        lock (_gate)
+        {
+            var retiring = new HashSet<WidgetSurfaceSession<THost>>(
+                ReferenceEqualityComparer.Instance);
+            foreach (string memberId in definition.MemberIds)
+            {
+                if (!_surfaceIdByMemberId.TryGetValue(memberId, out string? claimedId))
+                {
+                    continue;
+                }
+
+                if (!_sessions.TryGetValue(claimedId, out var claimed) ||
+                    !claimed.MemberIds.Contains(memberId, StringComparer.Ordinal))
+                {
+                    throw new InvalidOperationException(
+                        $"Member '{memberId}' has an inconsistent Surface claim.");
+                }
+
+                if (string.Equals(claimedId, definition.SurfaceId, StringComparison.Ordinal))
+                {
+                    if (!string.Equals(
+                            claimed.GroupId,
+                            definition.GroupId,
+                            StringComparison.Ordinal))
+                    {
+                        throw new InvalidOperationException(
+                            $"Surface '{definition.SurfaceId}' has a conflicting group identity.");
+                    }
+                    continue;
+                }
+
+                bool standaloneClaim = claimed.GroupId is null &&
+                    string.Equals(claimed.SurfaceId, memberId, StringComparison.Ordinal) &&
+                    claimed.MemberIds.Count == 1 &&
+                    string.Equals(
+                        claimed.ActiveMemberId,
+                        memberId,
+                        StringComparison.Ordinal);
+                bool sourceGroupClaim = sourceGroupId is not null &&
+                    string.Equals(claimed.GroupId, sourceGroupId, StringComparison.Ordinal) &&
+                    string.Equals(
+                        claimed.SurfaceId,
+                        sourceSurfaceId,
+                        StringComparison.Ordinal);
+                if ((!standaloneClaim && !sourceGroupClaim) ||
+                    (onlyRetireHost is not null &&
+                     !ReferenceEquals(claimed.Host, onlyRetireHost)))
+                {
+                    throw new InvalidOperationException(
+                        $"Member '{memberId}' belongs to another active Surface " +
+                        $"'{claimed.SurfaceId}'.");
+                }
+
+                retiring.Add(claimed);
+            }
+
+            WidgetSurfaceClaimTransfer<THost>[] snapshots = retiring
+                .Select(session => new WidgetSurfaceClaimTransfer<THost>(session))
+                .ToArray();
+            ValidateMemberClaimTransfer(definition, snapshots);
+            return snapshots;
         }
     }
 
@@ -335,6 +498,29 @@ internal sealed class WidgetSurfaceRegistry<THost>
             }
         }
     }
+}
+
+internal sealed class WidgetSurfaceClaimTransfer<THost>
+    where THost : class
+{
+    internal WidgetSurfaceClaimTransfer(WidgetSurfaceSession<THost> session)
+    {
+        Session = session;
+        Host = session.Host;
+        ActiveMemberId = session.ActiveMemberId;
+        GroupId = session.GroupId;
+        MemberIds = Array.AsReadOnly(session.MemberIds.ToArray());
+    }
+
+    public WidgetSurfaceSession<THost> Session { get; }
+
+    public THost Host { get; }
+
+    public string ActiveMemberId { get; }
+
+    public string? GroupId { get; }
+
+    public IReadOnlyList<string> MemberIds { get; }
 }
 
 internal sealed record WidgetSurfaceDefinition(
@@ -406,11 +592,26 @@ internal sealed class WidgetSurfaceSession<THost> : IDisposable
         }
     }
 
-    internal void StageCandidate(string targetMemberId, THost candidateHost)
+    internal bool StageCandidate(string targetMemberId, THost candidateHost)
     {
         ThrowIfDisposed();
+        if (CandidateHost is not null)
+        {
+            return ReferenceEquals(CandidateHost, candidateHost) &&
+                   string.Equals(
+                       CandidateMemberId,
+                       targetMemberId,
+                       StringComparison.Ordinal);
+        }
+
+        if (ReferenceEquals(Host, candidateHost))
+        {
+            return false;
+        }
+
         CandidateMemberId = targetMemberId;
         CandidateHost = candidateHost;
+        return true;
     }
 
     internal bool CancelCandidate(THost candidateHost)
