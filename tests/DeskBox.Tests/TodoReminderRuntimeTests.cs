@@ -1,5 +1,6 @@
 using DeskBox.Contracts;
 using DeskBox.Features.Todo;
+using DeskBox.Services;
 
 namespace DeskBox.Tests;
 
@@ -70,6 +71,34 @@ public sealed class TodoReminderRuntimeTests
         await runtime.DisposeAsync();
         Assert.Equal(1, session.Starts);
         Assert.Equal(1, session.Disposals);
+    }
+
+    [Fact]
+    public async Task HungReminderDrain_StopsSessionButKeepsNotificationsAliveUntilExit()
+    {
+        var drain = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var session = new FakeSession { Drain = drain.Task };
+        var runtime = new TodoReminderRuntime(() => session);
+        runtime.Reconcile(Active);
+        bool notificationsDisposed = false;
+        var shutdown = new ShutdownSequence(_ => { });
+        Task? reminderStop = null;
+
+        bool completed = await shutdown.RunAsync(
+            ShutdownStep.Bounded("todo-reminders",
+                () => reminderStop = runtime.DisposeAsync().AsTask(),
+                TimeSpan.FromMilliseconds(30), abortFollowingStepsOnTimeout: true),
+            ShutdownStep.Sync("notifications", () => notificationsDisposed = true));
+
+        Assert.False(completed);
+        Assert.Equal(1, session.Disposals);
+        Assert.False(notificationsDisposed);
+        runtime.Reconcile(Active);
+        Assert.Null(runtime.Current);
+        drain.SetResult();
+        await reminderStop!;
+        await runtime.DisposeAsync();
+        Assert.False(notificationsDisposed);
     }
 
     [Fact]

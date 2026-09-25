@@ -1,6 +1,7 @@
 namespace DeskBox.Services;
 
-internal sealed record ShutdownStep(string Name, Func<Task> Run)
+internal sealed record ShutdownStep(
+    string Name, Func<Task> Run, bool AbortFollowingStepsOnTimeout = false)
 {
     public static ShutdownStep Sync(string name, Action action) => new(name, () =>
     {
@@ -8,31 +9,39 @@ internal sealed record ShutdownStep(string Name, Func<Task> Run)
         return Task.CompletedTask;
     });
 
-    public static ShutdownStep Bounded(string name, Func<Task> run, TimeSpan gracePeriod) =>
+    public static ShutdownStep Bounded(
+        string name, Func<Task> run, TimeSpan gracePeriod,
+        bool abortFollowingStepsOnTimeout = false) =>
         new(name, async () =>
         {
-            try
+            Task operation = run();
+            using var deadlineCancellation = new CancellationTokenSource();
+            Task deadline = Task.Delay(gracePeriod, deadlineCancellation.Token);
+            if (await Task.WhenAny(operation, deadline) != operation)
             {
-                await run().WaitAsync(gracePeriod);
+                throw new ShutdownStepDeadlineExceededException(name, gracePeriod);
             }
-            catch (TimeoutException ex)
-            {
-                throw new TimeoutException(
-                    $"Step '{name}' exceeded its {gracePeriod.TotalSeconds:F0}s shutdown grace period; its operation may still be running.",
-                    ex);
-            }
-        });
+            deadlineCancellation.Cancel();
+            await operation;
+        }, abortFollowingStepsOnTimeout);
 }
 
-/// <summary>Runs teardown once, in dependency order, continuing after individual failures.</summary>
+internal sealed class ShutdownStepDeadlineExceededException(
+    string name, TimeSpan gracePeriod) : TimeoutException(
+    $"Step '{name}' exceeded its {gracePeriod.TotalSeconds:F0}s shutdown grace period; its operation may still be running.");
+
+/// <summary>
+/// Runs teardown once in dependency order. Ordinary failures continue; an
+/// ownership deadline leaves dependent resources alive for process exit.
+/// </summary>
 internal sealed class ShutdownSequence(Action<string> log)
 {
     private readonly object _gate = new();
-    private Task? _completion;
+    private Task<bool>? _completion;
 
-    public Task RunAsync(params ShutdownStep[] steps)
+    public Task<bool> RunAsync(params ShutdownStep[] steps)
     {
-        TaskCompletionSource completion;
+        TaskCompletionSource<bool> completion;
         lock (_gate)
         {
             if (_completion is not null) return _completion;
@@ -47,12 +56,19 @@ internal sealed class ShutdownSequence(Action<string> log)
             foreach (ShutdownStep step in steps)
             {
                 try { await step.Run(); }
+                catch (ShutdownStepDeadlineExceededException ex)
+                    when (step.AbortFollowingStepsOnTimeout)
+                {
+                    try { log($"[Shutdown] Step '{step.Name}' failed: {ex}"); } catch { }
+                    completion.TrySetResult(false);
+                    return;
+                }
                 catch (Exception ex)
                 {
                     try { log($"[Shutdown] Step '{step.Name}' failed: {ex}"); } catch { }
                 }
             }
-            completion.TrySetResult();
+            completion.TrySetResult(true);
         }
     }
 }

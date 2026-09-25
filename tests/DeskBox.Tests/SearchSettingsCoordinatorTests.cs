@@ -178,6 +178,31 @@ public sealed class SearchSettingsCoordinatorTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task HungProbe_SkipsBorrowedRuntimeDisposalDuringShutdown()
+    {
+        FeatureWidgetSettings.SetEnabled(_settings.Settings, WidgetKind.Search, true);
+        var pending = new TaskCompletionSource<EverythingConnectionSnapshot>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var connection = new FakeConnection { Probe = _ => pending.Task };
+        var coordinator = Create(() => connection, () => connection);
+        Task<EverythingConnectionSnapshot> probe = coordinator.RefreshConnectionAsync(default);
+        var shutdown = new ShutdownSequence(_ => { });
+
+        bool completed = await shutdown.RunAsync(
+            ShutdownStep.Bounded("search-settings", coordinator.StopAsync,
+                TimeSpan.FromMilliseconds(30), abortFollowingStepsOnTimeout: true),
+            ShutdownStep.Sync("search-runtime", connection.Dispose));
+
+        Assert.False(completed);
+        Assert.True(connection.LastToken.IsCancellationRequested);
+        Assert.Equal(0, connection.Disposals);
+        pending.SetResult(EverythingConnectionSnapshot.Unknown);
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => probe);
+        await coordinator.StopAsync();
+        Assert.Equal(0, connection.Disposals);
+    }
+
+    [Fact]
     public async Task Preferences_OnlyUpdateSearchSliceAndApplyLiveContentScopeOnce()
     {
         _settings.Settings.Language = "zh-TW";

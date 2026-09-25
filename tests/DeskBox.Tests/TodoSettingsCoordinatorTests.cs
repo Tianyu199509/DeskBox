@@ -713,6 +713,30 @@ public sealed class TodoSettingsCoordinatorTests : IDisposable
     }
 
     [Fact]
+    public async Task HungHostOperation_AbortsDependentWindowCleanupDuringShutdown()
+    {
+        var settings = new SettingsService(_root);
+        var active = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var coordinator = new TodoSettingsCoordinator(settings, _ => active.Task);
+        Task enable = coordinator.SetEnabledAsync(true);
+        bool windowsDisposed = false;
+        var shutdown = new ShutdownSequence(_ => { });
+
+        bool completed = await shutdown.RunAsync(
+            ShutdownStep.Bounded("todo-settings", coordinator.StopAsync,
+                TimeSpan.FromMilliseconds(30), abortFollowingStepsOnTimeout: true),
+            ShutdownStep.Sync("widgets", () => windowsDisposed = true));
+
+        Assert.False(completed);
+        Assert.False(windowsDisposed);
+        Assert.False(enable.IsCompleted);
+        active.SetResult();
+        await enable;
+        await coordinator.StopAsync();
+        Assert.False(windowsDisposed);
+    }
+
+    [Fact]
     public async Task ExternalRestore_ReconcilesRuntimeWithoutAnOpenEditor()
     {
         var settings = new SettingsService(_root);

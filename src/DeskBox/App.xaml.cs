@@ -1310,6 +1310,16 @@ public partial class App : Application
 
             EnsureStartupPipeline().WriteSummary();
             Log("OnLaunched completed successfully");
+#if DEBUG
+            if (Environment.GetEnvironmentVariable("DESKBOX_DEV_DATA_ROOT") is { } probeRoot &&
+                probeRoot.Contains("architecture-shutdown-ownership-20260925",
+                    StringComparison.OrdinalIgnoreCase) &&
+                Environment.GetEnvironmentVariable("DESKBOX_DEV_SHUTDOWN_PROBE") is { } probeStage)
+            {
+                Log($"[ShutdownProbe] Starting stage={probeStage}");
+                _ = ShutdownApplicationAsync();
+            }
+#endif
             // Startup registration does not gate the first usable widgets.
             // DirectStartupService serializes migration with user toggle changes.
             _ = Task.Run(() =>
@@ -4525,9 +4535,10 @@ public partial class App : Application
 
     private async Task ShutdownApplicationAsync()
     {
+        bool dependentTeardownCompleted = true;
         try
         {
-            await ShutdownCoreAsync();
+            dependentTeardownCompleted = await ShutdownCoreAsync();
         }
         catch (Exception ex)
         {
@@ -4541,23 +4552,56 @@ public partial class App : Application
             // shutdown sequence and all of its continuations have completed.
             try
             {
+                if (!dependentTeardownCompleted)
+                {
+                    // Keep dependent widget windows and services alive, but
+                    // close the tray dispatcher host so the process can exit.
+                    Log("[Shutdown] Dependent teardown skipped after a deadline.");
+                }
                 _trayWindow?.Close();
                 _trayWindow = null;
             }
             catch (Exception ex) { Log($"[Shutdown] Tray window close failed: {ex}"); }
             finally
             {
-                DrainLogQueue();
-                Exit();
+                try
+                {
+                    try { _singleInstanceMutex?.ReleaseMutex(); }
+                    catch (ApplicationException) { }
+                    _singleInstanceMutex?.Dispose();
+                    _singleInstanceMutex = null;
+                }
+                catch (Exception ex) { Log($"[Shutdown] Mutex release failed: {ex}"); }
+                finally
+                {
+                    try { DrainLogQueue(); }
+                    finally
+                    {
+                        if (!dependentTeardownCompleted)
+                        {
+                            // Application.Exit is deferred through the XAML
+                            // message loop, and the skipped teardown can keep
+                            // that loop alive after Exit returns (measured:
+                            // the deadline probe stayed pumping forever).
+                            // The deadline path must still terminate.
+                            _ = Task.Run(async () =>
+                            {
+                                await Task.Delay(TimeSpan.FromSeconds(3));
+                                Environment.Exit(0);
+                            });
+                        }
+                        Exit();
+                    }
+                }
             }
         }
     }
 
-    private async Task ShutdownCoreAsync()
+    private async Task<bool> ShutdownCoreAsync()
     {
         Interlocked.Exchange(ref s_shutdownRequested, 1);
         TimeSpan shutdownGrace = TimeSpan.FromSeconds(15);
-        await _shutdownSequence.RunAsync(
+        return await _shutdownSequence.RunAsync(
             ShutdownStep.Sync("backup-subscriptions", () =>
             {
                 SettingsService.SettingsChanged -= OnBackupSettingsChanged;
@@ -4570,7 +4614,18 @@ public partial class App : Application
             ShutdownStep.Bounded("backup-runtime", () =>
                 _backupRuntime?.StopAsync() ?? Task.CompletedTask,
                 shutdownGrace),
-            new("todo-settings", () => _todoSettings?.StopAsync() ?? Task.CompletedTask),
+            ShutdownStep.Bounded("todo-settings", () =>
+            {
+#if DEBUG
+                if (Environment.GetEnvironmentVariable("DESKBOX_DEV_SHUTDOWN_PROBE") == "hang-todo")
+                {
+                    Log("[ShutdownProbe] Holding todo-settings stop");
+                    return Task.Delay(Timeout.InfiniteTimeSpan);
+                }
+#endif
+                return _todoSettings?.StopAsync() ?? Task.CompletedTask;
+            },
+                shutdownGrace, abortFollowingStepsOnTimeout: true),
             ShutdownStep.Sync("memory-maintenance", () =>
             {
                 StopVisibleIdleMemoryMaintenance();
@@ -4599,9 +4654,15 @@ public partial class App : Application
                 }
             }),
             ShutdownStep.Sync("desktop-activation", () => { DesktopDoubleClickActivationService?.Dispose(); DesktopDoubleClickActivationService = null; }),
-            new("todo-reminders", async () => { if (_todoReminderRuntime is not null) await _todoReminderRuntime.DisposeAsync(); }),
+            ShutdownStep.Bounded("todo-reminders", async () =>
+            {
+                if (_todoReminderRuntime is not null)
+                    await _todoReminderRuntime.DisposeAsync();
+            }, shutdownGrace, abortFollowingStepsOnTimeout: true),
             ShutdownStep.Sync("notifications", () => { _nativeNotificationService?.Dispose(); _nativeNotificationService = null; }),
-            new("search-settings", () => _searchSettings?.StopAsync() ?? Task.CompletedTask),
+            ShutdownStep.Bounded("search-settings", () =>
+                _searchSettings?.StopAsync() ?? Task.CompletedTask,
+                shutdownGrace, abortFollowingStepsOnTimeout: true),
             ShutdownStep.Sync("search-runtime", DisposeSearchServices),
             // Hooks must be removed while their owning tray window still exists.
             ShutdownStep.Sync("global-hotkey", () => { GlobalHotkeyService?.Dispose(); GlobalHotkeyService = null; }),

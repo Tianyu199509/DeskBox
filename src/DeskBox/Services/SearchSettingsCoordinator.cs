@@ -164,12 +164,17 @@ public sealed class SearchSettingsCoordinator : ISearchSettings, ISearchFeatureS
         StateChanged?.Invoke();
     }
 
-    private async Task DrainRequestsAsync()
+    private async Task DrainRequestsAsync(bool forShutdown = false)
     {
         Task[] requests;
         lock (_requestLock) requests = _requests.ToArray();
         if (requests.Length == 0) return;
-        try { await Task.WhenAll(requests).WaitAsync(TimeSpan.FromSeconds(5)); }
+        try
+        {
+            Task drain = Task.WhenAll(requests);
+            if (forShutdown) await drain;
+            else await drain.WaitAsync(TimeSpan.FromSeconds(5));
+        }
         catch (TimeoutException ex) { _reportError(ex); }
         catch (OperationCanceledException) { }
         catch (Exception) { } // request errors belong to their original callers
@@ -351,7 +356,9 @@ public sealed class SearchSettingsCoordinator : ISearchSettings, ISearchFeatureS
         _lifetime.Cancel();
         ObserveConnection(null);
         await _enableGate.WaitAsync();
-        try { await DrainRequestsAsync(); }
+        // App owns the shutdown deadline. Reporting completion here means no
+        // request can still use a connection after search services are released.
+        try { await DrainRequestsAsync(forShutdown: true); }
         finally
         {
             _enableGate.Release();
