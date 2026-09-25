@@ -10,6 +10,102 @@ public sealed class QuickCaptureSettingsCoordinatorTests : IDisposable
     private readonly string _root = Path.Combine(Path.GetTempPath(), "DeskBox.Tests", Guid.NewGuid().ToString("N"));
 
     [Fact]
+    public async Task TextSizes_InheritGlobalUntilExplicitlyOverridden()
+    {
+        var settings = new SettingsService(Path.Combine(_root, "settings"));
+        settings.Settings.WidgetShell.TextSize = 12.5;
+        var clipboard = new QuickCaptureClipboardRuntime(
+            () => CanListen(settings), () => new FakeSession(), _ => { });
+        var coordinator = new QuickCaptureSettingsCoordinator(settings, clipboard,
+            (_, _) => Task.CompletedTask, action => { action(); return true; }, _ => { });
+        int saves = 0;
+        settings.SettingsChanged += () => saves++;
+
+        Assert.Equal(new(12.5, 12.5), coordinator.ReadTextSizes());
+        Assert.Equal(0, settings.Settings.QuickCapture.QuickCaptureListTextSize);
+        Assert.Equal(0, settings.Settings.QuickCapture.QuickCaptureContentTextSize);
+
+        settings.Settings.WidgetShell.TextSize = 14.5;
+        coordinator.RefreshFromSettings();
+        Assert.Equal(new(14.5, 14.5), coordinator.ReadTextSizes());
+        Assert.Equal(0, settings.Settings.QuickCapture.QuickCaptureListTextSize);
+        Assert.Equal(0, settings.Settings.QuickCapture.QuickCaptureContentTextSize);
+
+        Assert.True(coordinator.TrySetListTextSize(12.26, scheduleSave: false));
+        Assert.Equal(12.5, settings.Settings.QuickCapture.QuickCaptureListTextSize);
+        Assert.Equal(0, saves);
+        settings.Settings.WidgetShell.TextSize = 15;
+        coordinator.RefreshFromSettings();
+        Assert.Equal(new(12.5, 15), coordinator.ReadTextSizes());
+        Assert.Equal(0, settings.Settings.QuickCapture.QuickCaptureContentTextSize);
+
+        Assert.True(coordinator.TrySetContentTextSize(17, scheduleSave: false));
+        Assert.Equal(SettingsService.MaxTextSize,
+            settings.Settings.QuickCapture.QuickCaptureContentTextSize);
+        await settings.SaveAsync();
+        var reloaded = new SettingsService(Path.Combine(_root, "settings"));
+        await reloaded.LoadAsync();
+        Assert.Equal(12.5, reloaded.Settings.QuickCapture.QuickCaptureListTextSize);
+        Assert.Equal(SettingsService.MaxTextSize,
+            reloaded.Settings.QuickCapture.QuickCaptureContentTextSize);
+        await coordinator.StopAsync();
+    }
+
+    [Fact]
+    public async Task GlobalSizeRefresh_DoesNotRefreshTheClipboardSession()
+    {
+        var settings = new SettingsService(Path.Combine(_root, "settings"));
+        FeatureWidgetSettings.SetEnabled(settings.Settings, WidgetKind.QuickCapture, true);
+        settings.Settings.QuickCapture.QuickCaptureClipboardEnabled = true;
+        var sessions = new List<FakeSession>();
+        var clipboard = new QuickCaptureClipboardRuntime(
+            () => CanListen(settings), () =>
+            {
+                var session = new FakeSession();
+                sessions.Add(session);
+                return session;
+            }, _ => { });
+        var coordinator = new QuickCaptureSettingsCoordinator(settings, clipboard,
+            (_, _) => Task.CompletedTask, action => { action(); return true; }, _ => { });
+        coordinator.RefreshFromSettings();
+        Assert.Single(sessions);
+        int refreshes = sessions[0].Refreshes;
+        int changes = 0;
+        coordinator.Changed += () => changes++;
+
+        settings.Settings.WidgetShell.TextSize = 14.5;
+        coordinator.RefreshFromSettings();
+
+        Assert.Equal(1, changes);
+        Assert.Equal(new(14.5, 14.5), coordinator.ReadTextSizes());
+        Assert.Equal(0, settings.Settings.QuickCapture.QuickCaptureListTextSize);
+        Assert.Equal(0, settings.Settings.QuickCapture.QuickCaptureContentTextSize);
+        Assert.Same(sessions[0], clipboard.Current);
+        Assert.Equal(refreshes, sessions[0].Refreshes);
+        await coordinator.StopAsync();
+    }
+
+    [Fact]
+    public async Task TextSizeWriter_RejectsNonFiniteInputAndStoppedChanges()
+    {
+        var settings = new SettingsService(Path.Combine(_root, "settings"));
+        var clipboard = new QuickCaptureClipboardRuntime(
+            () => CanListen(settings), () => new FakeSession(), _ => { });
+        var coordinator = new QuickCaptureSettingsCoordinator(settings, clipboard,
+            (_, _) => Task.CompletedTask, action => { action(); return true; }, _ => { });
+
+        Assert.False(coordinator.TrySetListTextSize(double.NaN));
+        Assert.False(coordinator.TrySetContentTextSize(double.PositiveInfinity));
+        Assert.Equal(0, settings.Settings.QuickCapture.QuickCaptureListTextSize);
+        Assert.Equal(0, settings.Settings.QuickCapture.QuickCaptureContentTextSize);
+        await coordinator.StopAsync();
+        Assert.Throws<ObjectDisposedException>(() =>
+            coordinator.TrySetListTextSize(12));
+        Assert.Throws<ObjectDisposedException>(() =>
+            coordinator.TrySetContentTextSize(12));
+    }
+
+    [Fact]
     public async Task RapidRecentLimitChanges_TrimOnlyTheLatestQueuedValue()
     {
         var settings = new SettingsService(Path.Combine(_root, "settings"));

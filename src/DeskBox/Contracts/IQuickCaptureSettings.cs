@@ -16,6 +16,11 @@ public readonly record struct QuickCapturePresentationSettings(
     bool ShowCreatedTime,
     int PreviewLineCount);
 
+/// <summary>Effective sizes; stored zero inherits the global appearance size.</summary>
+public readonly record struct QuickCaptureTextSizeSettings(
+    double ListTextSize,
+    double ContentTextSize);
+
 /// <summary>One owner for Quick Capture enablement, recording choices, and their host work.</summary>
 public interface IQuickCaptureSettings
 {
@@ -33,6 +38,9 @@ public interface IQuickCaptureSettings
     int ReadRecentLimit();
     void SetRecentLimit(int limit);
     void ResetRecentLimit(bool scheduleSave = true);
+    QuickCaptureTextSizeSettings ReadTextSizes();
+    bool TrySetListTextSize(double size, bool scheduleSave = true);
+    bool TrySetContentTextSize(double size, bool scheduleSave = true);
     Task SetEnabledAsync(bool enabled, bool reveal = true, CancellationToken cancellationToken = default);
     Task SetClipboardEnabledAsync(bool enabled, bool captureCurrent = true, CancellationToken cancellationToken = default);
     Task SetImageEnabledAsync(bool enabled, bool captureCurrent = true, CancellationToken cancellationToken = default);

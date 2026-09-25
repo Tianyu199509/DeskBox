@@ -1,7 +1,7 @@
 # DeskBox 模块边界路线图：Modular Monolith 落地方案
 
 - 日期：2026-09-18（同日经两轮复核 + 一轮独立审计修订）
-- 状态：**评审用文档，未改任何代码**
+- 状态：**持续实施中**。当前已完成批次、验证证据和下一批范围见 [架构优化进度](architecture-optimization-progress-20260922.md)。下文早期统计是当时快照，不代表当前数量。
 - 输入：方向评审稿《方向.md》（PowerToys 架构辨析 + Modular Monolith 提案）、本仓 `widget_contribution_seam.md`（2026-09-11）、`startup-resilience-audit-20260915.md`、红队 DD 采纳对照、AOT 内存曲线实验（**已结案：PLATEAU**）、两轮独立复核 + 独立审计稿《方向审计.md》（已逐条核验吸收）
 - 本文回答三件事：这个方向值不值得做、按 DeskBox 现状应该怎么改、每刀的验收判据与工作量
 - 修订记录：第二轮——第 0 刀门禁已开、原第 3 刀降为可选、原第 4 刀升级为数据分层刀；第三轮——刀序按"事故驱动 > 假设驱动"重排，新增立法前置步；**第四轮（审计收敛）——依赖方向改 ports & adapters、数据分层拆 2A/2B/2C、软边界措辞修正、新增 IFeatureRuntime 资源租约、启动管线带 criticality 模型、Platform 改随触碰 ratchet 不设专刀**

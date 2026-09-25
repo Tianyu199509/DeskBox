@@ -13,6 +13,7 @@ public partial class SettingsViewModel
         SyncQuickCaptureTabsFacade();
         SyncQuickCapturePresentationFacade();
         SyncQuickCaptureRecentLimitFacade();
+        SyncQuickCaptureTextSizeFacade();
         OnPropertyChanged(nameof(QuickCaptureStatusText));
         OnPropertyChanged(nameof(QuickCaptureDependencyStatusText));
         OnPropertyChanged(nameof(FeatureWidgetEntries));
@@ -115,6 +116,43 @@ public partial class SettingsViewModel
         try { _quickCaptureSettings.SetRecentLimit(limit); }
         catch (Exception ex) { App.Log($"[QuickCapture] Recent limit update failed: {ex}"); }
         SyncQuickCaptureRecentLimitFacade();
+    }
+
+    private void SyncQuickCaptureTextSizeFacade()
+    {
+        QuickCaptureTextSizeSettings sizes = _quickCaptureSettings.ReadTextSizes();
+        bool wasApplying = _isApplyingSettingsSnapshot;
+        _isApplyingSettingsSnapshot = true;
+        try
+        {
+            QuickCaptureListTextSize = sizes.ListTextSize;
+            QuickCaptureContentTextSize = sizes.ContentTextSize;
+        }
+        finally { _isApplyingSettingsSnapshot = wasApplying; }
+        OnPropertyChanged(nameof(QuickCaptureListTextSizeValueText));
+        OnPropertyChanged(nameof(QuickCaptureContentTextSizeValueText));
+    }
+
+    private bool TrySetQuickCaptureListTextSize(double size)
+    {
+        try { return _quickCaptureSettings.TrySetListTextSize(size, scheduleSave: false); }
+        catch (Exception ex)
+        {
+            App.Log($"[QuickCapture] List text size update failed: {ex}");
+            SyncQuickCaptureTextSizeFacade();
+            return false;
+        }
+    }
+
+    private bool TrySetQuickCaptureContentTextSize(double size)
+    {
+        try { return _quickCaptureSettings.TrySetContentTextSize(size, scheduleSave: false); }
+        catch (Exception ex)
+        {
+            App.Log($"[QuickCapture] Content text size update failed: {ex}");
+            SyncQuickCaptureTextSizeFacade();
+            return false;
+        }
     }
 
     private void ApplyQuickCaptureDefaultView(string? view)

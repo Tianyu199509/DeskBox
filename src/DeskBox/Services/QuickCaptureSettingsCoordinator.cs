@@ -25,6 +25,7 @@ public sealed class QuickCaptureSettingsCoordinator : IQuickCaptureSettings
     private QuickCaptureSettingsSnapshot _last;
     private QuickCaptureTabSettings _lastTabs;
     private QuickCapturePresentationSettings _lastPresentation;
+    private QuickCaptureTextSizeSettings _lastTextSizes;
     private int _lastRecentLimit;
     private int _requestGeneration;
     private bool _desiredEnabled;
@@ -47,6 +48,7 @@ public sealed class QuickCaptureSettingsCoordinator : IQuickCaptureSettings
         _last = Read();
         _lastTabs = ReadTabs();
         _lastPresentation = ReadPresentation();
+        _lastTextSizes = ReadTextSizes();
         _lastRecentLimit = ReadRecentLimit();
         _desiredEnabled = _last.Enabled;
         _settings.SettingsChanged += OnSettingsChanged;
@@ -243,6 +245,56 @@ public sealed class QuickCaptureSettingsCoordinator : IQuickCaptureSettings
         _lastPresentation = ReadPresentation();
         if (scheduleSave) _settings.SaveDebounced();
         Changed?.Invoke();
+    }
+
+    public QuickCaptureTextSizeSettings ReadTextSizes()
+    {
+        AppSettings settings = _settings.Settings;
+        QuickCaptureSettingsSlice quickCapture = settings.QuickCapture;
+        return new(
+            SettingsService.NormalizeTextSize(
+                quickCapture.QuickCaptureListTextSize > 0
+                    ? quickCapture.QuickCaptureListTextSize
+                    : settings.WidgetShell.TextSize),
+            SettingsService.NormalizeTextSize(
+                quickCapture.QuickCaptureContentTextSize > 0
+                    ? quickCapture.QuickCaptureContentTextSize
+                    : settings.WidgetShell.TextSize));
+    }
+
+    public bool TrySetListTextSize(double size, bool scheduleSave = true) =>
+        TrySetTextSize(size, list: true, scheduleSave: scheduleSave);
+
+    public bool TrySetContentTextSize(double size, bool scheduleSave = true) =>
+        TrySetTextSize(size, list: false, scheduleSave: scheduleSave);
+
+    private bool TrySetTextSize(double size, bool list, bool scheduleSave)
+    {
+        ObjectDisposedException.ThrowIf(_stopping, this);
+        if (!double.IsFinite(size)) return false;
+
+        double normalized = Math.Clamp(
+            Math.Round(size * 2d, MidpointRounding.AwayFromZero) / 2d,
+            SettingsService.MinTextSize,
+            SettingsService.MaxTextSize);
+        QuickCaptureSettingsSlice quickCapture = _settings.Settings.QuickCapture;
+        double previous = list
+            ? quickCapture.QuickCaptureListTextSize
+            : quickCapture.QuickCaptureContentTextSize;
+        if (Math.Abs(previous - normalized) <= 0.0001) return false;
+
+        if (list)
+            quickCapture.QuickCaptureListTextSize = normalized;
+        else
+            quickCapture.QuickCaptureContentTextSize = normalized;
+        _lastTextSizes = ReadTextSizes();
+        if (scheduleSave)
+        {
+            _settings.RequestAppearancePreview();
+            _settings.SaveDebounced(changeKind: SettingsChangeKind.Appearance);
+        }
+        Changed?.Invoke();
+        return true;
     }
 
     public int ReadRecentLimit() => QuickCaptureService.NormalizeRecentLimit(
@@ -511,6 +563,7 @@ public sealed class QuickCaptureSettingsCoordinator : IQuickCaptureSettings
         QuickCaptureSettingsSnapshot current = Read();
         QuickCaptureTabSettings tabs = ReadTabs();
         QuickCapturePresentationSettings presentation = ReadPresentation();
+        QuickCaptureTextSizeSettings textSizes = ReadTextSizes();
         int recentLimit = ReadRecentLimit();
         bool normalized = false;
         if (!current.Enabled && (current.ClipboardEnabled || current.ImageEnabled))
@@ -529,15 +582,19 @@ public sealed class QuickCaptureSettingsCoordinator : IQuickCaptureSettings
         bool stateChanged = current != _last || normalized;
         bool tabsChanged = tabs != _lastTabs;
         bool presentationChanged = presentation != _lastPresentation;
+        bool textSizesChanged = textSizes != _lastTextSizes;
         bool recentLimitChanged = recentLimit != _lastRecentLimit;
         bool refreshClipboard = stateChanged || captureCurrent || !_hasReconciledClipboard;
         if (!stateChanged && !tabsChanged && !presentationChanged &&
+            !textSizesChanged &&
             !recentLimitChanged && !refreshClipboard) return;
-        if (stateChanged || tabsChanged || presentationChanged || recentLimitChanged)
+        if (stateChanged || tabsChanged || presentationChanged ||
+            textSizesChanged || recentLimitChanged)
         {
             _last = current;
             _lastTabs = tabs;
             _lastPresentation = presentation;
+            _lastTextSizes = textSizes;
             _lastRecentLimit = recentLimit;
             _desiredEnabled = current.Enabled;
             if (recentLimitChanged) QueueRecentTrim(recentLimit);

@@ -97,6 +97,23 @@ public sealed class ModuleBoundaryContractTests
             StringComparison.Ordinal);
     }
 
+    [Fact]
+    public void QuickCaptureSettingsPage_DoesNotWriteTextSizeOverridesDirectly()
+    {
+        Regex directWrite = new(
+            @"\b(?:_settingsService\s*\.\s*Settings|settings)\s*\.\s*(?:QuickCapture\s*\.\s*)?QuickCapture(?:ListTextSize|ContentTextSize)\s*=(?!=)");
+        string[] violations = ProductionSource()
+            .Where(item => item.Path.StartsWith(
+                    "src/DeskBox/ViewModels/SettingsViewModel", StringComparison.Ordinal) &&
+                item.Path.EndsWith(".cs", StringComparison.Ordinal))
+            .SelectMany(item => directWrite.Matches(item.Source)
+                .Cast<Match>()
+                .Select(match => $"{item.Path}: {match.Value}"))
+            .ToArray();
+
+        Assert.Empty(violations);
+    }
+
     private static readonly IReadOnlyDictionary<string, int> BusinessGlobalAccessExpectedViolations =
         new Dictionary<string, int>(StringComparer.Ordinal)
     {

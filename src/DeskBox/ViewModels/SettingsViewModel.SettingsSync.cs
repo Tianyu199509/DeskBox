@@ -142,10 +142,7 @@ public partial class SettingsViewModel
             SyncQuickCaptureSettingsFacade();
             SyncQuickCapturePresentationFacade();
             SyncQuickCaptureRecentLimitFacade();
-            QuickCaptureListTextSize = SettingsService.NormalizeTextSize(
-                (settings.QuickCaptureListTextSize > 0 ? settings.QuickCaptureListTextSize : settings.TextSize));
-            QuickCaptureContentTextSize = SettingsService.NormalizeTextSize(
-                (settings.QuickCaptureContentTextSize > 0 ? settings.QuickCaptureContentTextSize : settings.TextSize));
+            SyncQuickCaptureTextSizeFacade();
             SelectedAttachmentStorageMode = SettingsService.NormalizeAttachmentStorageMode(settings.AttachmentStorageMode);
             ApplyPerformanceSettingsSnapshot(settings);
             SelectedManagedDropAction = settings.ManagedDropAction switch
