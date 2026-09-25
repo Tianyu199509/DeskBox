@@ -45,14 +45,54 @@ public sealed class ShutdownSequenceTests
         var logs = new List<string>();
         var shutdown = new ShutdownSequence(logs.Add);
 
-        await shutdown.RunAsync(
+        bool completed = await shutdown.RunAsync(
             ShutdownStep.Bounded("quick-capture", () => blocked.Task,
                 TimeSpan.FromMilliseconds(20)),
             ShutdownStep.Sync("settings-flush", () => calls.Add("settings-flush")),
             ShutdownStep.Sync("single-instance", () => calls.Add("single-instance")));
 
+        Assert.True(completed);
         Assert.Equal(["settings-flush", "single-instance"], calls);
         Assert.Contains("quick-capture", Assert.Single(logs));
         blocked.TrySetResult();
+    }
+
+    [Fact]
+    public async Task OwnershipDeadline_SkipsDependentTeardownAndSharesTheResult()
+    {
+        var blocked = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var calls = new List<string>();
+        var logs = new List<string>();
+        var shutdown = new ShutdownSequence(logs.Add);
+
+        Task<bool> first = shutdown.RunAsync(
+            ShutdownStep.Bounded("todo-settings", () => blocked.Task,
+                TimeSpan.FromMilliseconds(20), abortFollowingStepsOnTimeout: true),
+            ShutdownStep.Sync("widgets", () => calls.Add("widgets")),
+            ShutdownStep.Sync("service-container", () => calls.Add("service-container")));
+        Task<bool> repeated = shutdown.RunAsync(
+            ShutdownStep.Sync("unexpected", () => calls.Add("unexpected")));
+
+        Assert.Same(first, repeated);
+        Assert.False(await first);
+        Assert.Empty(calls);
+        Assert.Contains("todo-settings", Assert.Single(logs));
+        blocked.TrySetResult();
+    }
+
+    [Fact]
+    public async Task BackendTimeout_IsLoggedButDoesNotAbortDependentTeardown()
+    {
+        var calls = new List<string>();
+        var shutdown = new ShutdownSequence(_ => { });
+
+        bool completed = await shutdown.RunAsync(
+            ShutdownStep.Bounded("todo-settings",
+                () => Task.FromException(new TimeoutException("backend failed")),
+                TimeSpan.FromSeconds(1), abortFollowingStepsOnTimeout: true),
+            ShutdownStep.Sync("widgets", () => calls.Add("widgets")));
+
+        Assert.True(completed);
+        Assert.Equal(["widgets"], calls);
     }
 }

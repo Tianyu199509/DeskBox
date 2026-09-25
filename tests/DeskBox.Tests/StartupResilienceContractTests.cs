@@ -220,10 +220,16 @@ public sealed class StartupResilienceContractTests
         Assert.Contains("!IsStartupLifelineEstablished", handler, StringComparison.Ordinal);
         Assert.Contains("FailStartup(", handler, StringComparison.Ordinal);
 
-        string shutdown = Slice(app, "private async Task ShutdownApplicationAsync", "private async Task ShutdownCoreAsync");
+        string shutdown = Slice(app, "private async Task ShutdownApplicationAsync", "private async Task<bool> ShutdownCoreAsync");
         Assert.Contains("await ShutdownCoreAsync();", shutdown, StringComparison.Ordinal);
         Assert.Contains("finally", shutdown, StringComparison.Ordinal);
         Assert.Contains("Exit();", shutdown, StringComparison.Ordinal);
+
+        // Application.Exit alone leaves the message loop pumping when the
+        // deadline path skips dependent teardown (measured on the probe);
+        // the skipped path must arm an Environment.Exit watchdog.
+        Assert.Contains("Dependent teardown skipped", shutdown, StringComparison.Ordinal);
+        Assert.Contains("Environment.Exit(0)", shutdown, StringComparison.Ordinal);
     }
 
     [Fact]

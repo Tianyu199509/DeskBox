@@ -519,3 +519,19 @@ A+B 工作树已补齐最终 QuickCapture 退出/快捷入口和 Todo 非有限�
 1. **第 23 批：退出链路剩余等待的所有权。** 先测量和故障注入 `todo-settings`、`search-settings`、`todo-reminders` 三步的挂起路径，再明确取消、排空与宿主资源释放的顺序。不能只给步骤套 `WaitAsync`：超时后的任务仍会运行，后续关闭窗口或释放服务可能与之竞争。验收包括不合作后端、重复退出、退出后不得回写已释放对象，以及隔离 Debug 的实际退出；保持设置 schema 和用户交互不变。
 2. **随后处理 D 段剩余的拆离对账异常。** 针对回滚写盘失败且 Registry/替换窗口再次出错的窄路径，建立可观测的失败结果或隔离补偿，补一条经过真实拆离编排的自动测试。现有真实拖离故障注入已证明常见回滚路径可用，隐藏成员的无正常入口状态不再列为手动验收前提。
 3. WebDAV 真服务器、通知交互和正式包的设备验收按各功能/发版门禁单独完成；`SwitchGate` 旧测试与成员、远端列表登记等低风险清理随相关代码触碰处理。设备层 store、云同步协议、contribution descriptor、Generic Host 和物理拆工程继续遵照路线图的立项触发条件，不并入第 23 批。
+
+## 第二十三批：退出链路剩余等待的所有权
+
+实施基线：`53c65f9d`。本批只处理退出序列中 `todo-settings`、`search-settings`、`todo-reminders` 三步的等待所有权；设置 schema、用户交互与其余步骤不变。
+
+实现：`ShutdownSequence.RunAsync` 返回完整清理是否执行。`ShutdownStep.Bounded` 期限届满抛出专用 `ShutdownStepDeadlineExceededException`；后端自身的超时或失败仍按普通失败记录并继续，不触发中止。带 `abortFollowingStepsOnTimeout` 的步骤超时后中止其余步骤并返回 false——超时后仍会运行的操作不得与随后关闭窗口、释放服务和容器的步骤竞争。三步均以 15 秒期限启用该语义。`ShutdownApplicationAsync` 的 finally 成为兜底：托盘窗关闭、单实例互斥释放并置空（正常路径由 `single-instance` 步执行并置空，null 传播防止双重释放）。`SearchSettingsCoordinator` 停止时移除内部 5 秒上限，改为排空全部在途请求：期限由 App 层统一持有，协调器报告完成即代表没有请求再使用连接；超时则不释放借用的搜索运行时，交由进程退出接管。
+
+测量与故障注入（隔离 Debug，数据根含 `architecture-shutdown-ownership-20260925`，`DESKBOX_DEV_SHUTDOWN_PROBE`）：`clean-exit` 全序列执行、2 秒退出；`hang-todo` 在 15 秒整抛出期限并跳过依赖清理。测量发现：跳过依赖清理时 `Application.Exit()` 返回后 XAML 消息循环继续泵送（dotnet-stack 证实 UI 线程空转于 Main、无前台线程阻塞、`ShutdownApplicationAsync` 已完成），进程无限存活。修复：deadline 路径在 `Exit()` 前布置 3 秒 `Environment.Exit(0)` 看门狗，仅该路径武装。修复后 `hang-todo` 20 秒退出（15 秒期限 + 3 秒看门狗 + 余量），`clean-exit` 仍 2 秒且不触及看门狗；契约测试钉住看门狗与跳过日志。注意本批首次尝试用 `BaseIntermediateOutputPath` 隔离 AOT 构建会破坏 XamlCompiler 状态（WMC9999），隔离应使用 SDK `ArtifactsPath`。
+
+验证记录：
+
+- 定向测试 56/56 通过，含所有权期限中止与共享完成结果、后端超时区分、挂起的 Todo 窗口操作/提醒排空/搜索探测分别中止依赖清理。
+- 全量 x64 测试 4,235/4,235 通过（合并态 4,230 + 本批 5 个新用例）。
+- AOT 条件编译（x64/win-x64、DeskBoxAotAudit + DeskBoxAotSmokeHarness + DeskBoxRustNative、`ArtifactsPath` 隔离）通过：888 警告、0 错误。未执行 Native AOT publish/link 或发布包运行，仍为发版门禁。
+- Debug 构建 0 错误；`git diff --check` 通过。
+- 真实挂起仅经探针模拟；生产三步后端均自带取消与排空，期限属于最后防线。未提交推送。
