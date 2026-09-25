@@ -58,7 +58,10 @@ public sealed class SettingsViewModelQuickCaptureTextSizeTests
 
             viewModel.DeferAppearancePersistence = false;
             viewModel.SuppressAppearanceNotifications = false;
-            viewModel.CommitAppearanceChanges();
+            // The slider commit saves without SettingsChanged. Its App memory
+            // cleanup is unavailable in the headless CI test host.
+            settings.NotifyAppearancePreviewNow();
+            settings.SaveDebounced(notifySubscribers: false);
             await settings.FlushPendingSaveAsync();
             Assert.Equal(1, quickCaptureRefreshes);
 
