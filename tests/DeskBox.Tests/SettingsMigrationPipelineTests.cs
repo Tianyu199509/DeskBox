@@ -221,6 +221,73 @@ public sealed class SettingsMigrationPipelineTests
         Assert.Equal(10 * 60, settings.TransientWindowReleaseDelaySeconds);
     }
 
+    [Theory]
+    [InlineData(true, true)]
+    [InlineData(false, false)]
+    public void VersionNine_SplitsLegacyStackSwitchIntoMasterAndAutoPair(
+        bool legacyStacksEnabled,
+        bool expectedAutoStacking)
+    {
+        // The legacy all-in-one switch meant automatic grouping: "on" maps to
+        // (master on, auto on), while legacy "off" kept manual stacks usable,
+        // which is exactly (master on, auto off) — never a disabled master.
+        var settings = new AppSettings
+        {
+            SchemaVersion = 8,
+            FileStacksEnabled = legacyStacksEnabled
+        };
+
+        var (migratedSettings, migrationsApplied) = new SettingsMigrationPipeline().RunMigrationsOnCopy(settings);
+        Assert.True(migrationsApplied);
+        settings = migratedSettings;
+
+        Assert.Equal(SettingsMigrationPipeline.CurrentSchemaVersion, settings.SchemaVersion);
+        Assert.True(settings.FileStacksEnabled);
+        Assert.Equal(expectedAutoStacking, settings.FileStackAutoStacking);
+    }
+
+    [Fact]
+    public void VersionNine_PreservesStackDetailsAndUnrelatedFields()
+    {
+        var settings = new AppSettings
+        {
+            SchemaVersion = 8,
+            FileStacksEnabled = false,
+            FileStackGroupBy = SettingsService.FileStackGroupByCustom,
+            FileStackThreshold = 5,
+            FileStackOrderBy = SettingsService.FileStackOrderByDateModified,
+            FileStackCustomRules =
+            [
+                new FileStackCustomRule
+                {
+                    Id = "stack-rule-media",
+                    Name = "Media",
+                    Extensions = [".png", ".mp4"]
+                }
+            ],
+            Language = SettingsService.LanguageEnglish,
+            SearchMaxResults = 100,
+            WidgetOpacity = 0.8
+        };
+
+        var (migratedSettings, migrationsApplied) = new SettingsMigrationPipeline().RunMigrationsOnCopy(settings);
+        Assert.True(migrationsApplied);
+        settings = migratedSettings;
+
+        Assert.Equal(SettingsMigrationPipeline.CurrentSchemaVersion, settings.SchemaVersion);
+        // The master/auto split must not touch the stack behavior details.
+        Assert.Equal(SettingsService.FileStackGroupByCustom, settings.FileStackGroupBy);
+        Assert.Equal(5, settings.FileStackThreshold);
+        Assert.Equal(SettingsService.FileStackOrderByDateModified, settings.FileStackOrderBy);
+        FileStackCustomRule rule = Assert.Single(settings.FileStackCustomRules);
+        Assert.Equal("stack-rule-media", rule.Id);
+        Assert.Equal([".png", ".mp4"], rule.Extensions);
+        // Unrelated fields ride along untouched.
+        Assert.Equal(SettingsService.LanguageEnglish, settings.Language);
+        Assert.Equal(100, settings.SearchMaxResults);
+        Assert.Equal(0.8, settings.WidgetOpacity);
+    }
+
     private sealed class TrackedMigration(int fromVersion) : ISettingsMigration
     {
         public int FromVersion => fromVersion;
