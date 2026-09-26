@@ -118,6 +118,8 @@ public partial class App : Application
     private FileStackSettingsCoordinator? _fileStackSettings;
     private GroupNavigationSettingsCoordinator? _groupNavigationSettings;
     private FeatureWidgetsSettingsCoordinator? _featureWidgetsSettings;
+    private ManagedStorageSettingsCoordinator? _managedStorageSettings;
+    private MaintenanceSettingsCoordinator? _maintenanceSettings;
     private QuickCaptureClipboardRuntime? _quickCaptureClipboardRuntime;
     private BackupRuntime? _backupRuntime;
     private readonly ShutdownSequence _shutdownSequence = new(Log);
@@ -1029,6 +1031,8 @@ public partial class App : Application
             _fileStackSettings = new FileStackSettingsCoordinator(SettingsService);
             _groupNavigationSettings = new GroupNavigationSettingsCoordinator(SettingsService);
             _featureWidgetsSettings = new FeatureWidgetsSettingsCoordinator(SettingsService);
+            _managedStorageSettings = new ManagedStorageSettingsCoordinator(SettingsService);
+            _maintenanceSettings = new MaintenanceSettingsCoordinator(SettingsService);
             _quickCaptureClipboardRuntime = _featureRuntimes.Register(QuickCaptureFeatureRuntimeId,
                 new QuickCaptureClipboardRuntime(
                     () => !IsShuttingDown &&
@@ -2946,7 +2950,11 @@ public partial class App : Application
             new DeskBox.Features.GroupNavigation.GroupNavigationSettingsViewModel(
                 _groupNavigationSettings ?? throw new InvalidOperationException("Group navigation settings are not initialized.")),
             new DeskBox.Features.FeatureWidgets.FeatureWidgetsSettingsViewModel(
-                _featureWidgetsSettings ?? throw new InvalidOperationException("Feature widgets settings are not initialized.")));
+                _featureWidgetsSettings ?? throw new InvalidOperationException("Feature widgets settings are not initialized.")),
+            new DeskBox.Features.ManagedStorage.ManagedStorageSettingsViewModel(
+                _managedStorageSettings ?? throw new InvalidOperationException("Managed storage settings are not initialized.")),
+            new DeskBox.Features.Maintenance.MaintenanceSettingsViewModel(
+                _maintenanceSettings ?? throw new InvalidOperationException("Maintenance settings are not initialized.")));
         _settingsWindow.Closed += SettingsWindow_ClosedForApp;
         return _settingsWindow;
     }

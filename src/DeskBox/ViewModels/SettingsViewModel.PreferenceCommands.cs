@@ -46,10 +46,12 @@ public partial class SettingsViewModel
 
     public void UpdateManagedStorageRootPath(string path)
     {
-        string normalizedPath = SettingsService.NormalizeManagedStorageRootPath(path);
+        // The coordinator owns the raw-path normalization, the stored write
+        // and the debounced save; the file migration that moved widget
+        // content to the new root already ran on the host's existing
+        // WidgetManager chain before this commit step.
+        string normalizedPath = _managedStorageSettings.SetDefaultRootPath(path);
         ManagedStorageRootPath = normalizedPath;
-        _settingsService.Settings.DefaultManagedStorageRootPath = normalizedPath;
-        _settingsService.SaveDebounced();
         _ = RefreshQuickAccessStateAsync(showBusy: true);
     }
 

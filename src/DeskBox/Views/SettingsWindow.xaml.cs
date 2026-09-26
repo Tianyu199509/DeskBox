@@ -149,7 +149,9 @@ public sealed partial class SettingsWindow : Window
         DeskBox.Features.FileDisplay.FileDisplaySettingsViewModel fileDisplaySettings,
         DeskBox.Features.FileStack.FileStackSettingsViewModel fileStackSettings,
         DeskBox.Features.GroupNavigation.GroupNavigationSettingsViewModel groupNavigationSettings,
-        DeskBox.Features.FeatureWidgets.FeatureWidgetsSettingsViewModel featureWidgetsSettings)
+        DeskBox.Features.FeatureWidgets.FeatureWidgetsSettingsViewModel featureWidgetsSettings,
+        DeskBox.Features.ManagedStorage.ManagedStorageSettingsViewModel managedStorageSettings,
+        DeskBox.Features.Maintenance.MaintenanceSettingsViewModel maintenanceSettings)
     {
         var constructionStopwatch = Stopwatch.StartNew();
         long previousCheckpointMilliseconds = 0;
@@ -173,7 +175,8 @@ public sealed partial class SettingsWindow : Window
         ViewModel = new SettingsViewModel(settingsService, themeService, todoSettings,
             backupSettings, quickCaptureSettings, searchFeatureSettings, appearanceSettings,
             capsuleSettings, interactionSettings, fileDisplaySettings, fileStackSettings,
-            groupNavigationSettings, featureWidgetsSettings, localizationService,
+            groupNavigationSettings, featureWidgetsSettings, managedStorageSettings,
+            maintenanceSettings, localizationService,
             App.Current.AppUpdateService);
         LogConstructionCheckpoint("view-model");
         _settingsRootPointerPressedHandler = SettingsRoot_PointerPressedHandled;

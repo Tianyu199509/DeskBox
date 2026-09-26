@@ -67,6 +67,8 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
     private readonly DeskBox.Features.FileStack.FileStackSettingsViewModel _fileStackSettings;
     private readonly DeskBox.Features.GroupNavigation.GroupNavigationSettingsViewModel _groupNavigationSettings;
     private readonly DeskBox.Features.FeatureWidgets.FeatureWidgetsSettingsViewModel _featureWidgetsSettings;
+    private readonly DeskBox.Features.ManagedStorage.ManagedStorageSettingsViewModel _managedStorageSettings;
+    private readonly DeskBox.Features.Maintenance.MaintenanceSettingsViewModel _maintenanceSettings;
     private readonly LocalizationService _localizationService;
     private readonly WidgetContentFactory _widgetContentFactory;
     private readonly IAppUpdateService _appUpdateService;
@@ -298,6 +300,8 @@ private string[]? _cachedWeatherRefreshIntervalDisplayNames;
         DeskBox.Features.FileStack.FileStackSettingsViewModel fileStackSettings,
         DeskBox.Features.GroupNavigation.GroupNavigationSettingsViewModel groupNavigationSettings,
         DeskBox.Features.FeatureWidgets.FeatureWidgetsSettingsViewModel featureWidgetsSettings,
+        DeskBox.Features.ManagedStorage.ManagedStorageSettingsViewModel managedStorageSettings,
+        DeskBox.Features.Maintenance.MaintenanceSettingsViewModel maintenanceSettings,
         LocalizationService? localizationService = null,
         IAppUpdateService? appUpdateService = null)
     {
@@ -315,6 +319,8 @@ private string[]? _cachedWeatherRefreshIntervalDisplayNames;
         _fileStackSettings = fileStackSettings;
         _groupNavigationSettings = groupNavigationSettings;
         _featureWidgetsSettings = featureWidgetsSettings;
+        _managedStorageSettings = managedStorageSettings;
+        _maintenanceSettings = maintenanceSettings;
         _themeService = themeService;
         _localizationService = localizationService ?? new LocalizationService(settingsService);
         _widgetContentFactory = new WidgetContentFactory(_localizationService);
