@@ -328,7 +328,12 @@ public sealed class FileWidgetContentAdapter :
 
     internal bool WasLaunchConsumedRecently()
     {
-        return Surface?.WasLaunchConsumedRecently() ?? false;
+        // Fail-safe direction: a null Surface means the consumed latch lives on
+        // the previous surface while the content already switched to an
+        // unmaterialized member. Reporting "not consumed" would re-arm the
+        // legacy WM_DROPFILES import and the OLE double-launch paths; reporting
+        // "consumed" only means the gesture is left unimported.
+        return Surface?.WasLaunchConsumedRecently() ?? true;
     }
 
     internal void ShowShortcutLaunchRefusedFeedback(string? applicationName)

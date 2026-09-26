@@ -145,7 +145,5 @@ public sealed class MusicWidgetContentAdapter :
 
         // Dispose the ViewModel first (stops timers, detaches service events).
         ViewModel.Dispose();
-
-        ReleaseView();
     }
 }

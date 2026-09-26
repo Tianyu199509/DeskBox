@@ -3992,8 +3992,12 @@ elseif ($scenario -ceq "GlancePersistenceRestart") {
     $glanceStorePath = Join-Path `
         $glanceStoreDirectory `
         "aot-5b4b2c1-glance.json"
+    # Seed the fixture at an old schema form (version 8). The evidence gate
+    # below expects version 10, so the scenario verifies that the glance
+    # preference store's Normalize pass stamps the current schema version on
+    # load instead of echoing whatever the fixture shipped.
     $glanceBaseline = [ordered]@{
-        version = 10
+        version = 8
         showTime = $true
         showDate = $true
         showYear = $false
