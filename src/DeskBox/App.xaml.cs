@@ -4564,34 +4564,40 @@ public partial class App : Application
             catch (Exception ex) { Log($"[Shutdown] Tray window close failed: {ex}"); }
             finally
             {
-                try
+                // The watchdog path guarantees process death within seconds;
+                // releasing the mutex there would open a window where a new
+                // instance starts while this process may still be writing.
+                // Let process death release it instead. The throw path has no
+                // watchdog, so the manual release must remain unconditional
+                // there to never leave a pumping process holding the mutex.
+                if (dependentTeardownCompleted)
                 {
-                    try { _singleInstanceMutex?.ReleaseMutex(); }
-                    catch (ApplicationException) { }
-                    _singleInstanceMutex?.Dispose();
-                    _singleInstanceMutex = null;
+                    try
+                    {
+                        try { _singleInstanceMutex?.ReleaseMutex(); }
+                        catch (ApplicationException) { }
+                        _singleInstanceMutex?.Dispose();
+                        _singleInstanceMutex = null;
+                    }
+                    catch (Exception ex) { Log($"[Shutdown] Mutex release failed: {ex}"); }
                 }
-                catch (Exception ex) { Log($"[Shutdown] Mutex release failed: {ex}"); }
+                try { DrainLogQueue(); }
                 finally
                 {
-                    try { DrainLogQueue(); }
-                    finally
+                    if (!dependentTeardownCompleted)
                     {
-                        if (!dependentTeardownCompleted)
+                        // Application.Exit is deferred through the XAML
+                        // message loop, and the skipped teardown can keep
+                        // that loop alive after Exit returns (measured:
+                        // the deadline probe stayed pumping forever).
+                        // The deadline path must still terminate.
+                        _ = Task.Run(async () =>
                         {
-                            // Application.Exit is deferred through the XAML
-                            // message loop, and the skipped teardown can keep
-                            // that loop alive after Exit returns (measured:
-                            // the deadline probe stayed pumping forever).
-                            // The deadline path must still terminate.
-                            _ = Task.Run(async () =>
-                            {
-                                await Task.Delay(TimeSpan.FromSeconds(3));
-                                Environment.Exit(0);
-                            });
-                        }
-                        Exit();
+                            await Task.Delay(TimeSpan.FromSeconds(3));
+                            Environment.Exit(0);
+                        });
                     }
+                    Exit();
                 }
             }
         }
@@ -4608,6 +4614,11 @@ public partial class App : Application
                 CloudBackupService.BackupRunCompleted -= OnCloudBackupRunCompleted;
                 DataBackupService.AutomaticSnapshotFallbackDetected -= OnAutomaticBackupFallbackDetected;
             }),
+            // The backup and quick-capture steps deliberately do NOT abort on
+            // deadline: their hung work is IO-only against non-disposable
+            // services, so later teardown cannot race it into disposed state,
+            // while aborting would skip the settings flush and window cleanup
+            // and arm the hard-exit watchdog for no benefit.
             ShutdownStep.Bounded("backup-restore-actions", () =>
                 _settingsWindow?.StopCloudBackupActionsAsync() ?? Task.CompletedTask,
                 shutdownGrace),

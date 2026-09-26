@@ -230,6 +230,13 @@ public sealed class StartupResilienceContractTests
         // the skipped path must arm an Environment.Exit watchdog.
         Assert.Contains("Dependent teardown skipped", shutdown, StringComparison.Ordinal);
         Assert.Contains("Environment.Exit(0)", shutdown, StringComparison.Ordinal);
+
+        // The watchdog path must NOT release the single-instance mutex early:
+        // the process lives ~3s past the deadline and a new instance starting
+        // in that window would race this process's final writes. Process
+        // death releases the abandoned mutex instead.
+        Assert.Contains("if (dependentTeardownCompleted)", shutdown, StringComparison.Ordinal);
+        Assert.Contains("ReleaseMutex", shutdown, StringComparison.Ordinal);
     }
 
     [Fact]
