@@ -1958,7 +1958,7 @@ public sealed partial class FileService
         {
             fixed (char* fromPointer = from)
             {
-                var operation = new ShFileOperation
+                var operation = new FileTransferNativeMethods.ShFileOperation
                 {
                     WindowHandle = ownerHandle,
                     Function = FoDelete,
@@ -1967,7 +1967,7 @@ public sealed partial class FileService
                     Flags = flags
                 };
 
-                int result = SHFileOperation(ref operation);
+                int result = FileTransferNativeMethods.SHFileOperation(ref operation);
                 foreach (string existingPath in existingPaths)
                 {
                     if (!File.Exists(existingPath) &&
@@ -2013,7 +2013,7 @@ public sealed partial class FileService
                 fixed (char* fromPointer = from)
                 fixed (char* toPointer = to)
                 {
-                    var fileOperation = new ShFileOperation
+                    var fileOperation = new FileTransferNativeMethods.ShFileOperation
                     {
                         WindowHandle = ownerWindowHandle,
                         Function = FoMove,
@@ -2027,7 +2027,7 @@ public sealed partial class FileService
                                 FofNoErrorUi
                     };
 
-                    int result = SHFileOperation(ref fileOperation);
+                    int result = FileTransferNativeMethods.SHFileOperation(ref fileOperation);
                     if (result == 1223 || fileOperation.AnyOperationsAborted != 0)
                     {
                         return;
@@ -2074,7 +2074,7 @@ public sealed partial class FileService
             fixed (char* fromPointer = from)
             fixed (char* toPointer = to)
             {
-                var fileOperation = new ShFileOperation
+                var fileOperation = new FileTransferNativeMethods.ShFileOperation
                 {
                     WindowHandle = ownerWindowHandle,
                     Function = FoMove,
@@ -2085,7 +2085,7 @@ public sealed partial class FileService
                             FofNoErrorUi
                 };
 
-                int result = SHFileOperation(ref fileOperation);
+                int result = FileTransferNativeMethods.SHFileOperation(ref fileOperation);
                 if (result == 1223 || fileOperation.AnyOperationsAborted != 0)
                 {
                     return true;
@@ -3081,21 +3081,9 @@ public sealed partial class FileService
         return reservedPaths.Add(path);
     }
 
-    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
-    private unsafe struct ShFileOperation
-    {
-        public IntPtr WindowHandle;
-        public uint Function;
-        public char* From;
-        public char* To;
-        public ushort Flags;
-        public int AnyOperationsAborted;
-        public IntPtr NameMappings;
-        public char* ProgressTitle;
-    }
-
-    [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
-    private static extern int SHFileOperation(ref ShFileOperation fileOperation);
+    // ─── Shell file operation bridge ──────────────────────────────────
+    // The SHFileOperation declaration and its SHFILEOPSTRUCT marshaling
+    // struct live in DeskBox.Platform.FileTransferNativeMethods.
 
     // ─── Copy-then-delete source identity ───────────────────────────────
 
@@ -3113,7 +3101,7 @@ public sealed partial class FileService
     /// A full 128-bit file system object id (FILE_ID_128). The legacy 64-bit
     /// nFileIndex from BY_HANDLE_FILE_INFORMATION is not guaranteed unique
     /// on ReFS, so identity comparisons use the full id from
-    /// GetFileInformationByHandleEx(FileIdInfo).
+    /// FileTransferNativeMethods.GetFileInformationByHandleEx(FileTransferNativeMethods.FileIdInfo).
     /// </summary>
     internal readonly record struct FileId128(ulong High, ulong Low);
 
@@ -3123,28 +3111,8 @@ public sealed partial class FileService
         ulong VolumeSerialNumber,
         FileId128? FileId);
 
-    [StructLayout(LayoutKind.Sequential)]
-    private struct ByHandleFileInformation
-    {
-        public uint FileAttributes;
-        public uint CreationTimeLow;
-        public uint CreationTimeHigh;
-        public uint LastAccessTimeLow;
-        public uint LastAccessTimeHigh;
-        public uint LastWriteTimeLow;
-        public uint LastWriteTimeHigh;
-        public uint VolumeSerialNumber;
-        public uint FileSizeHigh;
-        public uint FileSizeLow;
-        public uint NumberOfLinks;
-        public uint FileIndexHigh;
-        public uint FileIndexLow;
-    }
-
-    [DllImport("kernel32.dll", SetLastError = true)]
-    private static extern bool GetFileInformationByHandle(
-        SafeFileHandle file,
-        out ByHandleFileInformation information);
+    // The BY_HANDLE view and the kernel32 handle-identity entry points live
+    // in DeskBox.Platform.FileTransferNativeMethods.
 
     internal static FileTransferSourceIdentity? TryCaptureSourceIdentity(string path)
     {
@@ -3153,7 +3121,7 @@ public sealed partial class FileService
             // Native open (not FileStream): FILE_FLAG_BACKUP_SEMANTICS makes
             // this work for DIRECTORIES as well as files, so recovery
             // receipts can identify folder items too.
-            using SafeFileHandle handle = CreateFileW(
+            using SafeFileHandle handle = FileTransferNativeMethods.CreateFileW(
                 path,
                 GenericReadAccess,
                 ShareRead | ShareWrite,
@@ -3277,91 +3245,35 @@ public sealed partial class FileService
     private const uint OpenExisting = 3;
     private const uint CreateNewDisposition = 1;
     private const uint FileFlagOverlapped = 0x40000000;
-    private const int FileDispositionInfoClass = 4; // FILE_INFO_BY_HANDLE_CLASS.FileDispositionInfo
+    private const int FileDispositionInfoClass = 4; // FILE_INFO_BY_HANDLE_CLASS.FileTransferNativeMethods.FileDispositionInfo
     private const int ErrorAccessDenied = 5;
     private const int ErrorSharingViolation = 32;
     private const int ErrorAlreadyExists = 183;
 
-    [StructLayout(LayoutKind.Sequential)]
-    private struct FileDispositionInfo
-    {
-        // FILE_DISPOSITION_INFO carries a 1-byte BOOLEAN, not a 4-byte BOOL:
-        // without U1 marshaling the native call sees garbage.
-        [MarshalAs(UnmanagedType.U1)]
-        public bool Delete;
-    }
-
-    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-    private static extern SafeFileHandle CreateFileW(
-        string lpFileName,
-        uint dwDesiredAccess,
-        uint dwShareMode,
-        IntPtr lpSecurityAttributes,
-        uint dwCreationDisposition,
-        uint dwFlagsAndAttributes,
-        IntPtr hTemplateFile);
-
-    [DllImport("kernel32.dll", SetLastError = true)]
-    private static extern bool SetFileInformationByHandle(
-        SafeFileHandle hFile,
-        int fileInformationClass,
-        ref FileDispositionInfo lpFileInformation,
-        int dwBufferSize);
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct FileBasicInfo
-    {
-        public long CreationTime;
-        public long LastAccessTime;
-        public long LastWriteTime;
-        public long ChangeTime;
-        public uint FileAttributes;
-    }
-
-    [DllImport("kernel32.dll", SetLastError = true, EntryPoint = "SetFileInformationByHandle")]
-    private static extern bool SetFileBasicInfoByHandle(
-        SafeFileHandle hFile,
-        int fileInformationClass,
-        ref FileBasicInfo lpFileInformation,
-        int dwBufferSize);
+    // CreateFileW / SetFileInformationByHandle / SetFileBasicInfoByHandle /
+    // GetFileInformationByHandleEx and their marshaling structures live in
+    // DeskBox.Platform.FileTransferNativeMethods.
 
     private const int FileBasicInfoClass = 0;
-    private const int FileIdInfoClass = 18; // FILE_INFO_BY_HANDLE_CLASS.FileIdInfo
+    private const int FileIdInfoClass = 18; // FILE_INFO_BY_HANDLE_CLASS.FileTransferNativeMethods.FileIdInfo
     private const uint ReadOnlyAttribute = 0x00000001;
     private const uint FileAttributeNormal = 0x00000080;
     private const uint FileFlagBackupSemantics = 0x02000000;
-
-    [StructLayout(LayoutKind.Sequential)]
-    private unsafe struct FileIdInfo
-    {
-        // Must mirror the native FILE_ID_INFO exactly: the volume serial is
-        // ULONGLONG (8 bytes), not DWORD — an undersized layout makes
-        // GetFileInformationByHandleEx reject the buffer outright.
-        public ulong VolumeSerialNumber;
-        public fixed byte FileId[16];
-    }
-
-    [DllImport("kernel32.dll", SetLastError = true)]
-    private static extern unsafe bool GetFileInformationByHandleEx(
-        SafeFileHandle hFile,
-        int fileInformationClass,
-        out FileIdInfo lpFileInformation,
-        int dwBufferSize);
 
     /// <summary>
     /// Reads the object identity from an already-open handle. The identity
     /// describes exactly the object the handle is bound to, so callers that
     /// keep the handle open can validate and act without any path race. The
-    /// id comes from FileIdInfo (full 128 bits — the 64-bit index is not
+    /// id comes from FileTransferNativeMethods.FileIdInfo (full 128 bits — the 64-bit index is not
     /// unique on ReFS); length and timestamps come from the classic
     /// BY_HANDLE view in the same call sequence. A failed 128-bit query
-    /// returns null: FileIdInfo is supported everywhere DeskBox runs, so a
+    /// returns null: FileTransferNativeMethods.FileIdInfo is supported everywhere DeskBox runs, so a
     /// failure means an exotic provider, and identity authority is denied
     /// rather than degraded to the non-unique 64-bit index.
     /// </summary>
     internal static FileTransferSourceIdentity? IdentityFromHandle(SafeFileHandle handle)
     {
-        if (!GetFileInformationByHandle(handle, out ByHandleFileInformation information))
+        if (!FileTransferNativeMethods.GetFileInformationByHandle(handle, out FileTransferNativeMethods.ByHandleFileInformation information))
         {
             return null;
         }
@@ -3371,12 +3283,12 @@ public sealed partial class FileService
             ((long)information.LastWriteTimeHigh << 32) | information.LastWriteTimeLow;
         unsafe
         {
-            FileIdInfo idInfo = default;
-            if (!GetFileInformationByHandleEx(
+            FileTransferNativeMethods.FileIdInfo idInfo = default;
+            if (!FileTransferNativeMethods.GetFileInformationByHandleEx(
                     handle,
                     FileIdInfoClass,
                     out idInfo,
-                    sizeof(FileIdInfo)))
+                    sizeof(FileTransferNativeMethods.FileIdInfo)))
             {
                 return null;
             }
@@ -3399,12 +3311,12 @@ public sealed partial class FileService
     /// </summary>
     private static bool TrySetDispositionByHandle(
         SafeFileHandle handle,
-        in ByHandleFileInformation information,
+        in FileTransferNativeMethods.ByHandleFileInformation information,
         string path)
     {
-        var disposition = new FileDispositionInfo { Delete = true };
-        int dispositionSize = Marshal.SizeOf<FileDispositionInfo>();
-        if (SetFileInformationByHandle(
+        var disposition = new FileTransferNativeMethods.FileDispositionInfo { Delete = true };
+        int dispositionSize = Marshal.SizeOf<FileTransferNativeMethods.FileDispositionInfo>();
+        if (FileTransferNativeMethods.SetFileInformationByHandle(
                 handle,
                 FileDispositionInfoClass,
                 ref disposition,
@@ -3429,7 +3341,7 @@ public sealed partial class FileService
             return false;
         }
 
-        bool retryDeleted = SetFileInformationByHandle(
+        bool retryDeleted = FileTransferNativeMethods.SetFileInformationByHandle(
             handle,
             FileDispositionInfoClass,
             ref disposition,
@@ -3446,14 +3358,14 @@ public sealed partial class FileService
 
     private static bool TryClearReadOnlyByHandle(
         SafeFileHandle handle,
-        in ByHandleFileInformation information)
+        in FileTransferNativeMethods.ByHandleFileInformation information)
     {
         // FILE_BASIC_INFO rewrites every field; zeros mean "keep current"
         // for ChangeTime, and the timestamps must be echoed back verbatim.
         // An attributes value of 0 also means "no change", so a file whose
         // only attribute was read-only must become FILE_ATTRIBUTE_NORMAL.
         uint clearedAttributes = information.FileAttributes & ~ReadOnlyAttribute;
-        var basic = new FileBasicInfo
+        var basic = new FileTransferNativeMethods.FileBasicInfo
         {
             CreationTime = ((long)information.CreationTimeHigh << 32) | information.CreationTimeLow,
             LastAccessTime = ((long)information.LastAccessTimeHigh << 32) | information.LastAccessTimeLow,
@@ -3461,11 +3373,11 @@ public sealed partial class FileService
             ChangeTime = 0,
             FileAttributes = clearedAttributes == 0 ? FileAttributeNormal : clearedAttributes,
         };
-        return SetFileBasicInfoByHandle(
+        return FileTransferNativeMethods.SetFileBasicInfoByHandle(
             handle,
             FileBasicInfoClass,
             ref basic,
-            Marshal.SizeOf<FileBasicInfo>());
+            Marshal.SizeOf<FileTransferNativeMethods.FileBasicInfo>());
     }
 
     /// <summary>
@@ -3498,7 +3410,7 @@ public sealed partial class FileService
     {
         try
         {
-            using SafeFileHandle handle = CreateFileW(
+            using SafeFileHandle handle = FileTransferNativeMethods.CreateFileW(
                 path,
                 GenericReadAccess | DeleteAccess | FileWriteAttributesAccess,
                 ShareRead,
@@ -3516,7 +3428,7 @@ public sealed partial class FileService
                 return false;
             }
 
-            if (!GetFileInformationByHandle(handle, out ByHandleFileInformation information) ||
+            if (!FileTransferNativeMethods.GetFileInformationByHandle(handle, out FileTransferNativeMethods.ByHandleFileInformation information) ||
                 IdentityFromHandle(handle) is not { } currentIdentity)
             {
                 App.Log($"[FileTransfer] Kept '{path}': its identity could not be read for deletion.");

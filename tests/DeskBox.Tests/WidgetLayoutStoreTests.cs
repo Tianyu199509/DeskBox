@@ -450,4 +450,197 @@ public sealed class WidgetLayoutStoreTests : IDisposable
         JsonObject saved = await ReadObjectAsync(SettingsPath);
         Assert.True(saved.ContainsKey("widgets"));
     }
+
+    // ── 第 30 批 real-data drill ────────────────────────────────────────
+
+    [Fact]
+    public async Task SettingsService_RealDataDrill_AdoptsGroupsMembersTopology_AndIsStableAcrossRestart()
+    {
+        // The full device-domain shape a legacy profile can carry: 2 groups
+        // with 2 members each plus a standalone widget, per-topology layout
+        // memory for two monitor arrangements, an active-topology key, and a
+        // deletion tombstone. New-version startup must adopt it all into
+        // widget-layout.json, strip the eleven keys from settings.json on the
+        // first durable save, and reload identically on the next launch.
+        // (Rolling an OLD build over the migrated profile reads a
+        // settings.json without layout keys and falls back to the default
+        // layout — the recorded downgrade trade-off, same stance as 2B-2.)
+        var legacy = new AppSettings();
+        WidgetConfig CreateMember(string id, bool visible = true) => new()
+        {
+            Id = id,
+            WidgetKind = WidgetKind.File,
+            Name = $"widget-{id}",
+            IsVisible = visible,
+            X = 100,
+            Y = 100,
+            Width = 300,
+            Height = 400,
+        };
+
+        legacy.Widgets.AddRange(
+        [
+            CreateMember("m1"), CreateMember("m2"),
+            CreateMember("m3"), CreateMember("m4"),
+            CreateMember("s1"),
+        ]);
+        legacy.WidgetGroups.AddRange(
+        [
+            new WidgetGroupConfig
+            {
+                Id = "group-a",
+                SurfaceId = "surface-a",
+                Name = "Files and notes",
+                MemberIds = ["m1", "m2"],
+                ActiveMemberId = "m2",
+                IsVisible = true,
+                X = 40, Y = 80, Width = 320, Height = 480,
+                PositionMonitorKey = "mon-a",
+                PositionMonitorDeviceName = @"\\.\DISPLAY1",
+                PositionMonitorWasPrimary = true,
+            },
+            new WidgetGroupConfig
+            {
+                Id = "group-b",
+                SurfaceId = "surface-b",
+                Name = "Second desk",
+                MemberIds = ["m3", "m4"],
+                ActiveMemberId = "m3",
+                IsVisible = false,
+                X = 700, Y = 90, Width = 300, Height = 400,
+            },
+        ]);
+        WidgetTopologyLayoutProfile Profile(double x, params string[] surfaceIds)
+        {
+            var profile = new WidgetTopologyLayoutProfile
+            {
+                Monitors =
+                [
+                    new WidgetTopologyMonitorProfile
+                    {
+                        StableId = "stable-1",
+                        DeviceName = @"\\.\DISPLAY1",
+                        IsPrimary = true,
+                        MonitorWidth = 1920,
+                        MonitorHeight = 1080,
+                        WorkAreaWidth = 1920,
+                        WorkAreaHeight = 1040,
+                        DpiScale = 1.25,
+                    },
+                ],
+            };
+            foreach (string surfaceId in surfaceIds)
+            {
+                profile.Surfaces[surfaceId] = new WidgetSurfaceLayoutProfile
+                {
+                    X = x,
+                    Y = 50,
+                    Width = 320,
+                    Height = 480,
+                    PositionMonitorStableId = "stable-1",
+                };
+            }
+
+            return profile;
+        }
+
+        legacy.WidgetTopologyLayouts["v3-single"] = Profile(10, "surface-a", "surface-b", "s1");
+        legacy.WidgetTopologyLayouts["v3-dual"] = Profile(2200, "surface-a", "s1");
+        legacy.ActiveWidgetTopologyKey = "v3-dual";
+        legacy.DeletedWidgetIds = ["tomb-removed"];
+        legacy.FeatureWidgetEnabledStates["Search"] = true;
+
+        Directory.CreateDirectory(_tempRoot);
+        await File.WriteAllTextAsync(
+            SettingsPath,
+            JsonSerializer.Serialize(legacy, SettingsJsonContext.Default.AppSettings));
+
+        // New-version startup: adopt, then the first durable save strips the
+        // legacy keys (the startup restore path saves immediately in a real
+        // launch, SaveAsync stands in for it here).
+        var first = new SettingsService(_tempRoot);
+        await first.LoadAsync();
+
+        Assert.True(first.Layout.IsAuthoritative);
+        Assert.True(File.Exists(LayoutPath));
+
+        await first.SaveAsync();
+
+        JsonObject stripped = await ReadObjectAsync(SettingsPath);
+        foreach (string key in WidgetLayoutStore.SettingsWireKeys)
+        {
+            Assert.False(stripped.ContainsKey(key), $"settings.json still carries '{key}'");
+        }
+
+        // The store file is the single owner and carries the whole shape.
+        JsonObject layoutDoc = await ReadObjectAsync(LayoutPath);
+        JsonObject layout = layoutDoc["layout"]!.AsObject();
+        Assert.Equal(5, layout["widgets"]!.AsArray().Count);
+        JsonArray groups = layout["widgetGroups"]!.AsArray();
+        Assert.Equal(2, groups.Count);
+        Assert.Equal(
+            ["m1", "m2"],
+            groups[0]!["memberIds"]!.AsArray()
+                .Select(id => id!.GetValue<string>())
+                .ToArray());
+        Assert.Equal("m2", groups[0]!["activeMemberId"]!.GetValue<string>());
+        Assert.Equal("mon-a", groups[0]!["positionMonitorKey"]!.GetValue<string>());
+        JsonObject topologies = layout["widgetTopologyLayouts"]!.AsObject();
+        Assert.Equal(2, topologies.Count);
+        Assert.Equal(3, topologies["v3-single"]!["surfaces"]!.AsObject().Count);
+        Assert.Equal("v3-dual", layout["activeWidgetTopologyKey"]!.GetValue<string>());
+        Assert.Equal(
+            "tomb-removed",
+            layout["deletedWidgetIds"]!.AsArray().Single().GetValue<string>());
+
+        // Restart: the file loads back as the authority with the identical
+        // device-domain state, and settings.json stays stripped.
+        var second = new SettingsService(_tempRoot);
+        await second.LoadAsync();
+        await second.SaveAsync();
+
+        Assert.True(second.Layout.IsAuthoritative);
+        WidgetGroupConfig groupA = Assert.Single(
+            second.Settings.WidgetGroups, g => g.Id == "group-a");
+        WidgetGroupConfig groupB = Assert.Single(
+            second.Settings.WidgetGroups, g => g.Id == "group-b");
+        Assert.Equal(["m1", "m2"], groupA.MemberIds);
+        Assert.Equal("m2", groupA.ActiveMemberId);
+        Assert.Equal("surface-a", groupA.SurfaceId);
+        Assert.Equal("mon-a", groupA.PositionMonitorKey);
+        Assert.Equal(@"\\.\DISPLAY1", groupA.PositionMonitorDeviceName);
+        Assert.True(groupA.PositionMonitorWasPrimary);
+        Assert.Equal(["m3", "m4"], groupB.MemberIds);
+        Assert.Equal(5, second.Settings.Widgets.Count);
+        Assert.Equal(2, second.Settings.WidgetTopologyLayouts.Count);
+        Assert.Equal(3, second.Settings.WidgetTopologyLayouts["v3-single"].Surfaces.Count);
+        Assert.Equal(
+            10,
+            second.Settings.WidgetTopologyLayouts["v3-single"].Surfaces["surface-a"].X);
+        Assert.Equal(
+            2200,
+            second.Settings.WidgetTopologyLayouts["v3-dual"].Surfaces["surface-a"].X);
+        Assert.Equal("v3-dual", second.Settings.ActiveWidgetTopologyKey);
+        Assert.Equal(["tomb-removed"], second.Settings.DeletedWidgetIds);
+        Assert.True(second.Settings.FeatureWidgetEnabledStates["Search"]);
+
+        JsonObject restripped = await ReadObjectAsync(SettingsPath);
+        foreach (string key in WidgetLayoutStore.SettingsWireKeys)
+        {
+            Assert.False(restripped.ContainsKey(key), $"settings.json re-emitted '{key}'");
+        }
+    }
+
+    [Fact]
+    public void StyleWhitelist_IsDisjointFromDeviceLayoutWireKeys()
+    {
+        // 三域归属 boundary: cloud style sync ("样式同步") and the
+        // device-domain layout keys ("布局不同步") must never overlap — a
+        // key drifting into both whitelists would carry machine-local layout
+        // state across devices inside a widget-style backup.
+        string[] overlap = WidgetStyleBackupProjection.ShellKeys
+            .Intersect(WidgetLayoutStore.SettingsWireKeys, StringComparer.Ordinal)
+            .ToArray();
+        Assert.Empty(overlap);
+    }
 }

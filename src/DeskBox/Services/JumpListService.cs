@@ -25,7 +25,7 @@ public static class JumpListService
     {
         try
         {
-            SetCurrentProcessExplicitAppUserModelID(AppUserModelId);
+            JumpListNativeMethods.SetCurrentProcessExplicitAppUserModelID(AppUserModelId);
             App.LogVerbose($"[JumpList] AUMID registered: {AppUserModelId}");
         }
         catch (Exception ex)
@@ -177,11 +177,6 @@ public static class JumpListService
         }
     }
 
-    [DllImport("shell32.dll", EntryPoint = "SetCurrentProcessExplicitAppUserModelID",
-        CharSet = CharSet.Unicode, SetLastError = true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool SetCurrentProcessExplicitAppUserModelID(string appId);
-
     // ── Shortcut AUMID property (for unpackaged apps) ──
 
     private static readonly Guid s_iid_IPropertyStore =
@@ -190,15 +185,8 @@ public static class JumpListService
     private static readonly PropertyKey s_pkey_AppUserModelID = new(
         new Guid("9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3"), 5);
 
-    [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
-    private static extern int SHGetPropertyStoreFromParsingName(
-        string pszPath, IntPtr pbc, uint flags, ref Guid riid, out IntPtr ppv);
-
-    [DllImport("propsys.dll", CharSet = CharSet.Unicode)]
-    private static extern int PropVariantFromString(string psz, IntPtr ppropvar);
-
-    [DllImport("ole32.dll")]
-    private static extern int PropVariantClear(IntPtr ppropvar);
+    // shell32/propsys/ole32 AUMID entry points live in
+    // DeskBox.Platform.JumpListNativeMethods.
 
     [StructLayout(LayoutKind.Sequential, Pack = 4)]
     private struct PropertyKey
@@ -242,7 +230,7 @@ public static class JumpListService
             }
 
             Guid iid = s_iid_IPropertyStore;
-            int hr = SHGetPropertyStoreFromParsingName(
+            int hr = JumpListNativeMethods.SHGetPropertyStoreFromParsingName(
                 shortcutPath, IntPtr.Zero, 0, ref iid, out IntPtr storePtr);
             if (hr != 0 || storePtr == IntPtr.Zero)
             {
@@ -262,7 +250,7 @@ public static class JumpListService
                     propStore.GetValue(ref key, pv);
 
                     string? current = ReadPropVariantString(pv);
-                    PropVariantClear(pv);
+                    JumpListNativeMethods.PropVariantClear(pv);
 
                     if (string.Equals(current, AppUserModelId, StringComparison.Ordinal))
                     {
@@ -271,9 +259,9 @@ public static class JumpListService
 
                     // Set new value
                     Marshal.Copy(new byte[propVarSize], 0, pv, propVarSize);
-                    PropVariantFromString(AppUserModelId, pv);
+                    JumpListNativeMethods.PropVariantFromString(AppUserModelId, pv);
                     propStore.SetValue(ref key, pv);
-                    PropVariantClear(pv);
+                    JumpListNativeMethods.PropVariantClear(pv);
                     propStore.Commit();
                     App.LogVerbose($"[JumpList] Shortcut AUMID set: {shortcutPath}");
                 }

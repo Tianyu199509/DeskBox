@@ -992,6 +992,42 @@ public sealed class CloudBackupTransportTests : IDisposable
     }
 
     [Fact]
+    public async Task RemoteSnapshotList_RoutesThroughRestoreActions_WithEndpointFreezeAndStop()
+    {
+        const string name = "DeskBox-CloudBackup-20260910T110000Z-abcd1234.zip";
+        var transport = new FakeCloudBackupTransport();
+        transport.Files[$"DeskBox/backups/{name}"] = [1, 2, 3];
+        CloudBackupOptions options = ConfiguredOptions();
+        var backup = new DeskBoxDataBackupService(_appDataRoot);
+        (CloudBackupService service, SettingsService settings) = CreateService(transport);
+        settings.Settings.CloudBackup.CloudBackupProvider = options.Provider;
+        settings.Settings.CloudBackup.CloudBackupServerUrl = options.ServerUrl;
+        settings.Settings.CloudBackup.CloudBackupRemotePath = options.RemotePath;
+        settings.Settings.CloudBackup.CloudBackupUsername = options.Username;
+        var actions = new BackupRestoreActions(settings, service, backup, () => Task.CompletedTask);
+
+        // The read-only list is tracked like the destructive actions: it
+        // carries the endpoint captured at call time.
+        IReadOnlyList<CloudBackupRemoteEntry> entries = await actions.ListSnapshotsAsync(options.Endpoint);
+        CloudBackupRemoteEntry entry = Assert.Single(entries);
+        Assert.Equal(name, entry.Name);
+        Assert.Equal(3, entry.Length);
+
+        // Endpoint freeze: a stale endpoint rejects before any remote call,
+        // exactly like delete/download.
+        settings.Settings.CloudBackup.CloudBackupServerUrl = "https://other.example/dav";
+        Assert.False(actions.IsCurrentEndpoint(options.Endpoint));
+        await Assert.ThrowsAsync<OperationCanceledException>(
+            () => actions.ListSnapshotsAsync(options.Endpoint));
+
+        // Stop freeze: after StopAsync the list is refused, so a PROPFIND
+        // cannot outlive shutdown.
+        await actions.StopAsync();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => actions.ListSnapshotsAsync(options.Endpoint));
+    }
+
+    [Fact]
     public async Task RestoreActionsStop_CancelsAndDrainsDownload_ThenRemovesTemporaryFiles()
     {
         const string name = "DeskBox-CloudBackup-20260910T110000Z-abcd1234.zip";

@@ -531,12 +531,12 @@ public sealed partial class FileService
         {
             if (!destination.SafeFileHandle.IsClosed)
             {
-                var disposition = new FileDispositionInfo { Delete = true };
-                bool deleted = SetFileInformationByHandle(
+                var disposition = new FileTransferNativeMethods.FileDispositionInfo { Delete = true };
+                bool deleted = FileTransferNativeMethods.SetFileInformationByHandle(
                     destination.SafeFileHandle,
                     FileDispositionInfoClass,
                     ref disposition,
-                    Marshal.SizeOf<FileDispositionInfo>());
+                    Marshal.SizeOf<FileTransferNativeMethods.FileDispositionInfo>());
                 App.Log(
                     $"[FileTransfer] Partial cleanup disposition applied={deleted} " +
                     $"for '{destination.Name}'");
@@ -619,7 +619,7 @@ public sealed partial class FileService
         // write, rename, or delete the source mid-move, and the final
         // disposition deletes the exact object that was copied — no gap
         // remains between validation and deletion.
-        SafeFileHandle sourceHandle = CreateFileW(
+        SafeFileHandle sourceHandle = FileTransferNativeMethods.CreateFileW(
             sourceFilePath,
             GenericReadAccess | DeleteAccess | FileWriteAttributesAccess,
             ShareRead,
@@ -671,7 +671,7 @@ public sealed partial class FileService
 
             // The copy was read from this very handle; the disposition
             // therefore deletes exactly the object that was copied.
-            if (!GetFileInformationByHandle(sourceHandle, out ByHandleFileInformation sourceInformation))
+            if (!FileTransferNativeMethods.GetFileInformationByHandle(sourceHandle, out FileTransferNativeMethods.ByHandleFileInformation sourceInformation))
             {
                 throw new FileTransferSourceCleanupException(
                     sourceFilePath,
@@ -1176,7 +1176,7 @@ public sealed partial class FileService
     /// </summary>
     internal static FileStream CreateTransferDestinationStream(string destinationFilePath)
     {
-        SafeFileHandle destinationHandle = CreateFileW(
+        SafeFileHandle destinationHandle = FileTransferNativeMethods.CreateFileW(
             destinationFilePath,
             GenericWriteAccess | DeleteAccess,
             ShareNone,

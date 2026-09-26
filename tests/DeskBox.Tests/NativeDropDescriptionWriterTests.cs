@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using DeskBox.Platform;
 using DeskBox.Helpers;
 
 namespace DeskBox.Tests;

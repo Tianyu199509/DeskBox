@@ -1,5 +1,6 @@
 using System.Buffers.Binary;
 using System.Runtime.InteropServices;
+using DeskBox.Platform;
 
 namespace DeskBox.Helpers;
 
@@ -34,24 +35,7 @@ internal static unsafe partial class ShellDataObjectBuilder
     // synthesized-drop path (routed XAML drop, right-button launch, WM_DROPFILES).
     private static readonly Guid DataObjectIid = new("0000010E-0000-0000-C000-000000000046");
 
-    [LibraryImport("shell32.dll", EntryPoint = "SHCreateDataObject")]
-    private static partial int SHCreateDataObject(
-        nint parentFolder,
-        uint childCount,
-        nint childPidls,
-        nint bindContext,
-        in Guid riid,
-        out nint dataObject);
-
-    [LibraryImport("kernel32.dll", SetLastError = true)]
-    private static partial nint GlobalAlloc(uint flags, nuint bytes);
-
-    [LibraryImport("kernel32.dll", SetLastError = true)]
-    private static partial nint GlobalLock(nint memory);
-
-    [LibraryImport("kernel32.dll", SetLastError = true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static partial bool GlobalUnlock(nint memory);
+    // Native entry points live in DeskBox.Platform.HdropDataObjectNativeMethods.
 
     internal static bool TryCreateHdropDataObject(
         IReadOnlyList<string> paths,
@@ -79,7 +63,7 @@ internal static unsafe partial class ShellDataObjectBuilder
             return false;
         }
 
-        int createHResult = SHCreateDataObject(
+        int createHResult = HdropDataObjectNativeMethods.SHCreateDataObject(
             nint.Zero,
             0,
             nint.Zero,
@@ -125,7 +109,7 @@ internal static unsafe partial class ShellDataObjectBuilder
             {
                 // The Shell object rejected the medium, so its ownership never
                 // transferred and the HDROP memory is still ours to free.
-                GlobalFree(medium.Content);
+                HdropDataObjectNativeMethods.GlobalFree(medium.Content);
                 App.Log(
                     "[ShortcutLaunch] SetData(CF_HDROP) failed: " +
                     $"hr=0x{setResult:X8}.");
@@ -148,7 +132,7 @@ internal static unsafe partial class ShellDataObjectBuilder
     private static nint BuildHdropMemory(string[] paths)
     {
         byte[] payload = BuildHdropBytes(paths);
-        nint memory = GlobalAlloc(
+        nint memory = HdropDataObjectNativeMethods.GlobalAlloc(
             GmemMoveable | GmemZeroInit,
             (nuint)payload.Length);
         if (memory == 0)
@@ -157,10 +141,10 @@ internal static unsafe partial class ShellDataObjectBuilder
             return 0;
         }
 
-        nint locked = GlobalLock(memory);
+        nint locked = HdropDataObjectNativeMethods.GlobalLock(memory);
         if (locked == 0)
         {
-            GlobalFree(memory);
+            HdropDataObjectNativeMethods.GlobalFree(memory);
             return 0;
         }
 
@@ -171,7 +155,7 @@ internal static unsafe partial class ShellDataObjectBuilder
         }
         finally
         {
-            _ = GlobalUnlock(memory);
+            _ = HdropDataObjectNativeMethods.GlobalUnlock(memory);
         }
     }
 
@@ -226,7 +210,4 @@ internal static unsafe partial class ShellDataObjectBuilder
         payload[offset] = 0;
         return payload;
     }
-
-    [LibraryImport("kernel32.dll", SetLastError = true)]
-    private static partial void GlobalFree(nint memory);
 }
