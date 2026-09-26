@@ -113,6 +113,7 @@ public partial class App : Application
     private QuickCaptureSettingsCoordinator? _quickCaptureSettings;
     private AppearanceSettingsCoordinator? _appearanceSettings;
     private CapsuleSettingsCoordinator? _capsuleSettings;
+    private InteractionSettingsCoordinator? _interactionSettings;
     private QuickCaptureClipboardRuntime? _quickCaptureClipboardRuntime;
     private BackupRuntime? _backupRuntime;
     private readonly ShutdownSequence _shutdownSequence = new(Log);
@@ -1019,6 +1020,7 @@ public partial class App : Application
                 () => _backupRuntime?.RefreshOptions());
             _appearanceSettings = new AppearanceSettingsCoordinator(SettingsService);
             _capsuleSettings = new CapsuleSettingsCoordinator(SettingsService);
+            _interactionSettings = new InteractionSettingsCoordinator(SettingsService);
             _quickCaptureClipboardRuntime = _featureRuntimes.Register(QuickCaptureFeatureRuntimeId,
                 new QuickCaptureClipboardRuntime(
                     () => !IsShuttingDown &&
@@ -2926,7 +2928,9 @@ public partial class App : Application
             new DeskBox.Features.Appearance.AppearanceSettingsViewModel(
                 _appearanceSettings ?? throw new InvalidOperationException("Appearance settings are not initialized.")),
             new DeskBox.Features.Capsule.CapsuleSettingsViewModel(
-                _capsuleSettings ?? throw new InvalidOperationException("Capsule settings are not initialized.")));
+                _capsuleSettings ?? throw new InvalidOperationException("Capsule settings are not initialized.")),
+            new DeskBox.Features.Interaction.InteractionSettingsViewModel(
+                _interactionSettings ?? throw new InvalidOperationException("Interaction settings are not initialized.")));
         _settingsWindow.Closed += SettingsWindow_ClosedForApp;
         return _settingsWindow;
     }

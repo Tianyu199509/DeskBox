@@ -62,6 +62,7 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
     private readonly ThemeService _themeService;
     private readonly DeskBox.Features.Appearance.AppearanceSettingsViewModel _appearanceSettings;
     private readonly DeskBox.Features.Capsule.CapsuleSettingsViewModel _capsuleSettings;
+    private readonly DeskBox.Features.Interaction.InteractionSettingsViewModel _interactionSettings;
     private readonly LocalizationService _localizationService;
     private readonly WidgetContentFactory _widgetContentFactory;
     private readonly IAppUpdateService _appUpdateService;
@@ -288,6 +289,7 @@ private string[]? _cachedWeatherRefreshIntervalDisplayNames;
         DeskBox.Contracts.ISearchFeatureSettings searchFeatureSettings,
         DeskBox.Features.Appearance.AppearanceSettingsViewModel appearanceSettings,
         DeskBox.Features.Capsule.CapsuleSettingsViewModel capsuleSettings,
+        DeskBox.Features.Interaction.InteractionSettingsViewModel interactionSettings,
         LocalizationService? localizationService = null,
         IAppUpdateService? appUpdateService = null)
     {
@@ -300,6 +302,7 @@ private string[]? _cachedWeatherRefreshIntervalDisplayNames;
         _searchFeatureSettings = searchFeatureSettings;
         _appearanceSettings = appearanceSettings;
         _capsuleSettings = capsuleSettings;
+        _interactionSettings = interactionSettings;
         _themeService = themeService;
         _localizationService = localizationService ?? new LocalizationService(settingsService);
         _widgetContentFactory = new WidgetContentFactory(_localizationService);

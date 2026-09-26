@@ -104,7 +104,9 @@ public partial class SettingsViewModel
             return;
         }
 
-        _settingsService.Settings.WidgetHoverButtonActions = BuildHoverButtonActionSettingValue();
+        // The interaction editor stores the value; the shell's appearance-save
+        // routine still owns the commit (drag deferral and suppression flags).
+        _interactionSettings.SetWidgetHoverButtonActions(BuildHoverButtonActionSettingValue());
         SaveAppearanceChange();
     }
 
