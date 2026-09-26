@@ -5459,6 +5459,26 @@ if ($scenario -ceq "TodoAttachmentsPersistenceRestart") {
             throw "Todo attachment postflight retained managed files."
         }
 
+        $deletedTodoAttachmentsItemId = [string]$afterAttachmentDelete.items[0].id
+        $todoAttachmentsTombstoneIdsAfterDelete =
+            @($verifyDelete.todoAttachmentsPersistence.after.tombstoneIds)
+        $todoAttachmentsTombstoneIdsAfterRestart =
+            @($postflight.todoAttachmentsPersistence.before.tombstoneIds)
+        if ([string]::IsNullOrWhiteSpace($deletedTodoAttachmentsItemId) -or
+            $todoAttachmentsTombstoneIdsAfterDelete.Count -ne 1 -or
+            -not [string]::Equals(
+                [string]$todoAttachmentsTombstoneIdsAfterDelete[0],
+                $deletedTodoAttachmentsItemId,
+                [System.StringComparison]::Ordinal) -or
+            $todoAttachmentsTombstoneIdsAfterRestart.Count -ne 1 -or
+            -not [string]::Equals(
+                [string]$todoAttachmentsTombstoneIdsAfterRestart[0],
+                $deletedTodoAttachmentsItemId,
+                [System.StringComparison]::Ordinal) -or
+            @($postflight.todoAttachmentsPersistence.after.tombstoneIds).Count -ne 1) {
+            throw "Todo attachments delete did not persist its soft-delete tombstone across the process restart."
+        }
+
         $todoAttachmentsNaturalExit = [ordered]@{
             mutate = [bool]$mutatePhase.naturalExit
             verifyDelete = [bool]$verifyDeletePhase.naturalExit
@@ -5723,6 +5743,26 @@ if ($scenario -ceq "TodoStepsPersistenceRestart") {
             throw "Todo steps verify/delete did not archive the zero-step task state."
         }
 
+        $deletedTodoStepsItemId = [string]$afterStepDelete.items[0].id
+        $todoStepsTombstoneIdsAfterDelete =
+            @($verifyDelete.todoStepsPersistence.after.tombstoneIds)
+        $todoStepsTombstoneIdsAfterRestart =
+            @($postflight.todoStepsPersistence.before.tombstoneIds)
+        if ([string]::IsNullOrWhiteSpace($deletedTodoStepsItemId) -or
+            $todoStepsTombstoneIdsAfterDelete.Count -ne 1 -or
+            -not [string]::Equals(
+                [string]$todoStepsTombstoneIdsAfterDelete[0],
+                $deletedTodoStepsItemId,
+                [System.StringComparison]::Ordinal) -or
+            $todoStepsTombstoneIdsAfterRestart.Count -ne 1 -or
+            -not [string]::Equals(
+                [string]$todoStepsTombstoneIdsAfterRestart[0],
+                $deletedTodoStepsItemId,
+                [System.StringComparison]::Ordinal) -or
+            @($postflight.todoStepsPersistence.after.tombstoneIds).Count -ne 1) {
+            throw "Todo steps delete did not persist its soft-delete tombstone across the process restart."
+        }
+
         $todoStepsNaturalExit = [ordered]@{
             mutate = [bool]$mutatePhase.naturalExit
             verifyDelete = [bool]$verifyDeletePhase.naturalExit
@@ -5926,6 +5966,24 @@ if ($scenario -ceq "TodoPersistenceRestart") {
             -Expected $postflight.todoPersistence.before `
             -Actual $postflight.todoPersistence.after `
             -Name "postflight-before-to-after"
+
+        $deletedTodoItemId = [string]$verifyDelete.todoPersistence.before.items[0].id
+        $tombstoneIdsAfterDelete = @($verifyDelete.todoPersistence.after.tombstoneIds)
+        $tombstoneIdsAfterRestart = @($postflight.todoPersistence.before.tombstoneIds)
+        if ([string]::IsNullOrWhiteSpace($deletedTodoItemId) -or
+            $tombstoneIdsAfterDelete.Count -ne 1 -or
+            -not [string]::Equals(
+                [string]$tombstoneIdsAfterDelete[0],
+                $deletedTodoItemId,
+                [System.StringComparison]::Ordinal) -or
+            $tombstoneIdsAfterRestart.Count -ne 1 -or
+            -not [string]::Equals(
+                [string]$tombstoneIdsAfterRestart[0],
+                $deletedTodoItemId,
+                [System.StringComparison]::Ordinal) -or
+            @($postflight.todoPersistence.after.tombstoneIds).Count -ne 1) {
+            throw "Todo delete did not persist its soft-delete tombstone across the process restart."
+        }
 
         $afterExplicitSave = $verifyDelete.todoPersistence.afterExplicitSave
         if ($null -eq $afterExplicitSave -or

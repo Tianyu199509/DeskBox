@@ -133,25 +133,38 @@ public partial class App
                     surface,
                     AotManagedUiTodoStepsWidgetId);
                 RequireAotManagedUiTodoEmpty(evidence.After);
+                RequireAotTodoTombstonesPersisted(evidence.After, restart.ItemId);
                 RequireAotManagedUi(
                     result,
                     true,
                     "TodoStepsItemDeleted",
                     "The Todo steps fixture task was not deleted.");
+                RequireAotManagedUi(
+                    result,
+                    true,
+                    "TodoStepsDeletedItemTombstonePersisted",
+                    "The deleted Todo steps fixture task was not written back into the store as a soft-delete tombstone.");
                 break;
             }
 
             case AotManagedUiTodoStepsPostflightPhase:
                 RequireAotManagedUiTodoEmpty(evidence.Before);
+                RequireAotTodoTombstoneSurvivedRestart(evidence.Before);
                 evidence.After = await CaptureAotManagedUiTodoStateAsync(
                     surface,
                     AotManagedUiTodoStepsWidgetId);
                 RequireAotManagedUiTodoEmpty(evidence.After);
+                RequireAotTodoTombstoneSurvivedRestart(evidence.After);
                 RequireAotManagedUi(
                     result,
                     true,
                     "TodoStepsDeletePostflightVerified",
                     "The Todo steps delete postflight was not clean.");
+                RequireAotManagedUi(
+                    result,
+                    true,
+                    "TodoStepsDeleteTombstoneSurvivedRestart",
+                    "The deleted Todo steps fixture task tombstone did not survive the process restart.");
                 break;
 
             default:
@@ -185,6 +198,8 @@ public partial class App
         double expectedOpacity = expectedCompleted ? 0.58 : 1;
         if (state.StoreVersion != 3 ||
             !state.StoreFileExists ||
+            state.TombstoneIdCount != 0 ||
+            state.TombstoneIds.Count != 0 ||
             !string.Equals(item.Id, expectedItemId, StringComparison.Ordinal) ||
             !string.Equals(item.Text, AotTodoStepsExpectedTaskTitle, StringComparison.Ordinal) ||
             item.Notes.Length != 0 ||
@@ -233,6 +248,8 @@ public partial class App
         AotManagedUiTodoItemEvidence item = state.Items.Single();
         if (state.StoreVersion != 3 ||
             !state.StoreFileExists ||
+            state.TombstoneIdCount != 0 ||
+            state.TombstoneIds.Count != 0 ||
             !string.Equals(item.Id, expectedItemId, StringComparison.Ordinal) ||
             !string.Equals(item.Text, AotTodoStepsExpectedTaskTitle, StringComparison.Ordinal) ||
             item.StepCount != 0 ||
