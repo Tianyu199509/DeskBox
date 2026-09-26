@@ -84,6 +84,13 @@ public sealed class FeatureSettingsBoundaryContractTests
         // through InteractionSettingsCoordinator.
         Regex interactionWrite = new(
             @"\b(?:_settingsService\s*\.\s*Settings|settings)\s*\.\s*(?:WidgetShell\s*\.\s*)?(?:AutoStart|AutoCheckForUpdates|DoubleClickToOpen|FileItemSystemContextMenuEnabled|ResizeSnapEnabled|WidgetSnapSpacing|KeepWidgetsVisibleOnShowDesktop|ShowHoverButtons|WidgetHoverButtonActions|WidgetLayerMode|IdleWorkingSetTrimEnabled|ImmediateHiddenWorkingSetTrimEnabled)\s*=(?!=)");
+        // Batch 35: the file-display section (file-name extension visibility
+        // plus the shortcut-extension hiding rule, shortcut link-arrow
+        // overlay, image-file icon projection, list-item detail lines,
+        // file-item path tooltips) writes through
+        // FileDisplaySettingsCoordinator.
+        Regex fileDisplayWrite = new(
+            @"\b(?:_settingsService\s*\.\s*Settings|settings)\s*\.\s*(?:FileWidget\s*\.\s*)?(?:ShowFileExtensions|HideShortcutExtensionWhenShowingFileExtensions|HideShortcutArrowOverlay|ShowImageFilesAsIcons|ShowListItemDetails|ShowFileItemPathTooltips)\s*=(?!=)");
         (string Path, string Source)[] pages = ProductionSource()
             .Where(item => item.Path.StartsWith(
                     "src/DeskBox/ViewModels/SettingsViewModel", StringComparison.Ordinal) &&
@@ -95,6 +102,7 @@ public sealed class FeatureSettingsBoundaryContractTests
                     .Concat(appearanceWrite.Matches(item.Source).Cast<Match>())
                     .Concat(capsuleWrite.Matches(item.Source).Cast<Match>())
                     .Concat(interactionWrite.Matches(item.Source).Cast<Match>())
+                    .Concat(fileDisplayWrite.Matches(item.Source).Cast<Match>())
                     .Select(match => $"{item.Path}: {match.Value}"))
             .ToArray();
 

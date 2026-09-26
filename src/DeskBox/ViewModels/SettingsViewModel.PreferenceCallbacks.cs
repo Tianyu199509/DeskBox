@@ -250,8 +250,7 @@ public partial class SettingsViewModel
             return;
         }
 
-        _settingsService.Settings.HideShortcutArrowOverlay = value;
-        _settingsService.SaveDebounced();
+        _fileDisplaySettings.SetHideShortcutArrowOverlay(value);
     }
 
     partial void OnShowImageFilesAsIconsChanged(bool value)
@@ -261,8 +260,7 @@ public partial class SettingsViewModel
             return;
         }
 
-        _settingsService.Settings.ShowImageFilesAsIcons = value;
-        _settingsService.SaveDebounced();
+        _fileDisplaySettings.SetShowImageFilesAsIcons(value);
     }
 
     partial void OnShowHoverButtonsChanged(bool value)
@@ -308,8 +306,7 @@ public partial class SettingsViewModel
             return;
         }
 
-        _settingsService.Settings.ShowListItemDetails = value;
-        _settingsService.SaveDebounced();
+        _fileDisplaySettings.SetShowListItemDetails(value);
     }
 
     partial void OnShowFileItemPathTooltipsChanged(bool value)
@@ -319,8 +316,7 @@ public partial class SettingsViewModel
             return;
         }
 
-        _settingsService.Settings.ShowFileItemPathTooltips = value;
-        _settingsService.SaveDebounced();
+        _fileDisplaySettings.SetShowFileItemPathTooltips(value);
     }
 
     partial void OnShowFileExtensionsChanged(bool value)
@@ -330,8 +326,7 @@ public partial class SettingsViewModel
             return;
         }
 
-        _settingsService.Settings.ShowFileExtensions = value;
-        _settingsService.SaveDebounced();
+        _fileDisplaySettings.SetShowFileExtensions(value);
     }
 
     partial void OnHideShortcutExtensionWhenShowingFileExtensionsChanged(bool value)
@@ -341,8 +336,7 @@ public partial class SettingsViewModel
             return;
         }
 
-        _settingsService.Settings.HideShortcutExtensionWhenShowingFileExtensions = value;
-        _settingsService.SaveDebounced();
+        _fileDisplaySettings.SetHideShortcutExtensionWhenShowingFileExtensions(value);
     }
 
     partial void OnIdleWorkingSetTrimEnabledChanged(bool value)

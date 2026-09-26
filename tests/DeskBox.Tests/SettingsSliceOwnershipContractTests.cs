@@ -302,7 +302,11 @@ public sealed class SettingsSliceOwnershipContractTests
         // InteractionSettingsCoordinator (PreferenceCallbacks 17->6, leaving
         // the file-display section for batch 35; HoverActions 1->0 and lost
         // its entry; AppearanceOptions 2->1, only the widget list read of the
-        // chrome-override reset remains).
+        // chrome-override reset remains). Batch 35 moved the file-display
+        // section writes into FileDisplaySettingsCoordinator
+        // (PreferenceCallbacks 6->0 and lost its entry; the only remaining
+        // facade-shaped access is the QuiescenceWorkingSetTrimEnabled write
+        // through the Performance slice, which is not a passthrough).
         ["src/DeskBox/ViewModels/SettingsViewModel.AppearanceOptions.cs"] = 1,
         ["src/DeskBox/ViewModels/SettingsViewModel.CapsuleOptions.cs"] = 20,
         ["src/DeskBox/ViewModels/SettingsViewModel.ContentEditorOptions.cs"] = 24,
@@ -315,7 +319,6 @@ public sealed class SettingsSliceOwnershipContractTests
         ["src/DeskBox/ViewModels/SettingsViewModel.GroupNavigation.cs"] = 28,
         ["src/DeskBox/ViewModels/SettingsViewModel.HotkeyAndStorage.cs"] = 6,
         ["src/DeskBox/ViewModels/SettingsViewModel.Performance.cs"] = 11,
-        ["src/DeskBox/ViewModels/SettingsViewModel.PreferenceCallbacks.cs"] = 6,
         ["src/DeskBox/ViewModels/SettingsViewModel.PreferenceCommands.cs"] = 2,
         ["src/DeskBox/ViewModels/SettingsViewModel.RuntimeDiagnostics.cs"] = 1,
         ["src/DeskBox/ViewModels/SettingsViewModel.SettingsSync.cs"] = 133,
