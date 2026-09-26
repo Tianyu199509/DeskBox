@@ -5195,7 +5195,11 @@ $stage5B4B2C2ASourceFiles = @(
     "src/DeskBox/App.AotManagedUiSmoke.cs",
     "src/DeskBox/App.AotWeatherSettingsPersistenceSmoke.cs",
     "src/DeskBox/Services/WeatherSettingsPolicy.cs",
-    "src/DeskBox/ViewModels/SettingsViewModel.WeatherOptions.cs",
+    # Batch 38 moved the settings page's weather policy writes from the
+    # SettingsViewModel.WeatherOptions shell facade into the feature-section
+    # coordinator; the "product writer reuses the local policy" pin follows
+    # the owner.
+    "src/DeskBox/Services/FeatureWidgetsSettingsCoordinator.cs",
     "src/DeskBox/Services/WeatherWidgetViewModeSettings.cs",
     "src/DeskBox/Services/WidgetManager.AotWeatherSettingsPersistenceSmoke.cs",
     "src/DeskBox/ViewModels/WeatherWidgetViewModel.RefreshAndLayout.cs",
@@ -5372,7 +5376,7 @@ $stage5B4B2C2ASourceWarningMessages = @(
             $line = $_
             $warningCodeRegex.IsMatch($line) -and
                 $line -notmatch "warning WMC1510:" -and
-                $line -match "(?:App\.Aot(?:ManagedUi|WeatherSettingsPersistence)Smoke|WeatherSettingsPolicy|SettingsViewModel\.WeatherOptions|WeatherWidgetViewModeSettings|WidgetManager\.AotWeatherSettingsPersistenceSmoke|WeatherWidgetViewModel\.RefreshAndLayout)\.cs\("
+                $line -match "(?:App\.Aot(?:ManagedUi|WeatherSettingsPersistence)Smoke|WeatherSettingsPolicy|FeatureWidgetsSettingsCoordinator|SettingsViewModel\.WeatherOptions|WeatherWidgetViewModeSettings|WidgetManager\.AotWeatherSettingsPersistenceSmoke|WeatherWidgetViewModel\.RefreshAndLayout)\.cs\("
         } |
         ForEach-Object { $_.Trim() } |
         Sort-Object -Unique

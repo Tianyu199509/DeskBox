@@ -21,6 +21,17 @@ public readonly record struct QuickCaptureTextSizeSettings(
     double ListTextSize,
     double ContentTextSize);
 
+/// <summary>
+/// Effective editor preferences; stored raw values normalize exactly like
+/// the load pipeline does.
+/// </summary>
+public readonly record struct QuickCaptureEditorSettings(
+    string EnterBehavior,
+    string DefaultFormat,
+    string WideLayout,
+    string WideOpenMode,
+    bool AllowRemoteImages);
+
 /// <summary>One owner for Quick Capture enablement, recording choices, and their host work.</summary>
 public interface IQuickCaptureSettings
 {
@@ -41,6 +52,18 @@ public interface IQuickCaptureSettings
     QuickCaptureTextSizeSettings ReadTextSizes();
     bool TrySetListTextSize(double size, bool scheduleSave = true);
     bool TrySetContentTextSize(double size, bool scheduleSave = true);
+    QuickCaptureEditorSettings ReadEditorSettings();
+    void SetEditorEnterBehavior(string? behavior);
+    void SetEditorFormat(string? format);
+    void SetWideLayout(string? layout);
+    void SetWideOpenMode(string? mode);
+    void SetAllowRemoteImages(bool allowed);
+    /// <summary>
+    /// Writes the fresh-install editor preferences and clears the remembered
+    /// last Quick Capture file widget. Used by the feature-card reset flow's
+    /// single explicit save; normal edits use the individual setters.
+    /// </summary>
+    void ResetEditorPreferences(bool scheduleSave = true);
     Task SetEnabledAsync(bool enabled, bool reveal = true, CancellationToken cancellationToken = default);
     Task SetClipboardEnabledAsync(bool enabled, bool captureCurrent = true, CancellationToken cancellationToken = default);
     Task SetImageEnabledAsync(bool enabled, bool captureCurrent = true, CancellationToken cancellationToken = default);

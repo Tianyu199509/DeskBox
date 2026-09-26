@@ -138,8 +138,7 @@ public partial class SettingsViewModel
             return;
         }
 
-        _settingsService.Settings.MusicUseArtworkBackdrop = value;
-        _settingsService.SaveDebounced();
+        _featureWidgetsSettings.SetMusicUseArtworkBackdrop(value);
     }
 
     partial void OnMusicEnableCoverHoverMotionChanged(bool value)
@@ -149,8 +148,7 @@ public partial class SettingsViewModel
             return;
         }
 
-        _settingsService.Settings.MusicEnableCoverHoverMotion = value;
-        _settingsService.SaveDebounced();
+        _featureWidgetsSettings.SetMusicEnableCoverHoverMotion(value);
     }
 
     partial void OnQuickCaptureClipboardEnabledChanged(bool value)

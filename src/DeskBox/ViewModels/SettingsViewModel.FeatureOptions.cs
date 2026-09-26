@@ -55,8 +55,7 @@ public partial class SettingsViewModel
 
             if (!_isRestoringDefaults && !_isApplyingSettingsSnapshot)
             {
-                _settingsService.Settings.AttachmentStorageMode = normalized;
-                _settingsService.SaveDebounced();
+                _featureWidgetsSettings.SetAttachmentStorageMode(normalized);
             }
 
         }
@@ -83,8 +82,7 @@ public partial class SettingsViewModel
 
             if (!_isRestoringDefaults && !_isApplyingSettingsSnapshot)
             {
-                _settingsService.Settings.ManagedDropAction = normalized;
-                _settingsService.SaveDebounced();
+                _featureWidgetsSettings.SetManagedDropAction(normalized);
             }
 
         }
@@ -109,8 +107,7 @@ public partial class SettingsViewModel
                 return;
             }
 
-            _settingsService.Settings.FileWidgetFolderOpenBehavior = normalized;
-            _settingsService.SaveDebounced();
+            _featureWidgetsSettings.SetFileWidgetFolderOpenBehavior(normalized);
         }
     }
 
@@ -211,8 +208,7 @@ public partial class SettingsViewModel
                 return;
             }
 
-            _settingsService.Settings.MusicDisplayMode = normalizedValue;
-            _settingsService.SaveDebounced();
+            _featureWidgetsSettings.SetMusicDisplayMode(normalizedValue);
         }
     }
 
@@ -518,7 +514,7 @@ set => WidgetOpacity = Math.Clamp(1.0 - value / 100d, SettingsService.MinWidgetO
                 return;
         }
 
-        FeatureWidgetSettings.SetEnabled(_settingsService.Settings, kind, enabled);
+        _featureWidgetsSettings.SetFeatureWidgetEnabled(kind, enabled);
         _ = SyncFeatureWidgetAsync(kind, enabled);
     }
 
@@ -574,12 +570,7 @@ set => WidgetOpacity = Math.Clamp(1.0 - value / 100d, SettingsService.MinWidgetO
                     _quickCaptureSettings.ResetPresentationPreferences(scheduleSave: false);
                     _quickCaptureSettings.ResetRecentLimit(scheduleSave: false);
                     recordingDrain = _quickCaptureSettings.ResetRecordingAsync();
-                    _settingsService.Settings.QuickCaptureEditorEnterBehavior = SettingsService.EditorEnterBehaviorCtrlEnterSaves;
-                    _settingsService.Settings.QuickCaptureDefaultFormat = SettingsService.QuickCaptureFormatMarkdown;
-                    _settingsService.Settings.QuickCaptureWideLayout = SettingsService.QuickCaptureWideLayoutAuto;
-                    _settingsService.Settings.QuickCaptureWideOpenMode = SettingsService.QuickCaptureWideOpenReading;
-                    _settingsService.Settings.QuickCaptureAllowRemoteImages = false;
-                    _settingsService.Settings.LastQuickCaptureFileWidgetId = string.Empty;
+                    _quickCaptureSettings.ResetEditorPreferences(scheduleSave: false);
                     RefreshQuickCaptureClipboardDiagnostics();
                     break;
                 case WidgetKind.Todo:
@@ -594,9 +585,7 @@ set => WidgetOpacity = Math.Clamp(1.0 - value / 100d, SettingsService.MinWidgetO
                     MusicUseArtworkBackdrop = true;
                     MusicEnableCoverHoverMotion = true;
                     SelectedMusicDisplayMode = SettingsService.MusicDisplayModeAuto;
-                    _settingsService.Settings.MusicUseArtworkBackdrop = true;
-                    _settingsService.Settings.MusicEnableCoverHoverMotion = true;
-                    _settingsService.Settings.MusicDisplayMode = SettingsService.MusicDisplayModeAuto;
+                    _featureWidgetsSettings.ResetMusicPresentationPreferences(scheduleSave: false);
                     break;
                 case WidgetKind.Weather:
                     WeatherAutoLocation = true;
@@ -614,22 +603,7 @@ set => WidgetOpacity = Math.Clamp(1.0 - value / 100d, SettingsService.MinWidgetO
                     WeatherShowPressure = false;
                     SelectedWeatherRefreshInterval = 60;
 
-                    _settingsService.Settings.WeatherAutoLocation = true;
-                    _settingsService.Settings.WeatherCityName = string.Empty;
-                    _settingsService.Settings.WeatherLatitude = 0;
-                    _settingsService.Settings.WeatherLongitude = 0;
-                    _settingsService.Settings.WeatherTemperatureUnit = SettingsService.WeatherTemperatureUnitCelsius;
-                    _settingsService.Settings.WeatherWindSpeedUnit = SettingsService.WeatherWindSpeedUnitKmh;
-                    _settingsService.Settings.WeatherDefaultView = SettingsService.WeatherDefaultViewToday;
-                    _settingsService.Settings.WeatherSkin = SettingsService.WeatherSkinRich;
-                    _settingsService.Settings.WeatherShowForecast = true;
-                    _settingsService.Settings.WeatherShowSunrise = true;
-                    _settingsService.Settings.WeatherShowUvIndex = true;
-                    _settingsService.Settings.WeatherShowPrecipitation = true;
-                    _settingsService.Settings.WeatherShowHumidity = true;
-                    _settingsService.Settings.WeatherShowWind = true;
-                    _settingsService.Settings.WeatherShowPressure = false;
-                    _settingsService.Settings.WeatherRefreshIntervalMinutes = 60;
+                    _featureWidgetsSettings.ResetWeatherPreferences(scheduleSave: false);
                     break;
             }
         }
