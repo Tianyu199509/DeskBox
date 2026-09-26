@@ -35,7 +35,7 @@ public sealed partial class WidgetManager
 
     private IWidgetContent CreateQuickCaptureSurfaceContent(WidgetConfig config)
     {
-        return new QuickCaptureSurfaceContent(
+        return new QuickCaptureWidgetContentAdapter(
             config,
             _quickCaptureService,
             _settingsService,

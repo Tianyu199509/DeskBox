@@ -150,7 +150,7 @@ public sealed partial class ContentWidgetWindow : WidgetWindowBase, IDesktopWidg
                 CreateGlanceCompactPresentation(glance),
             MusicWidgetContentAdapter music =>
                 CreateMusicCompactPresentation(music, contentMode),
-            QuickCaptureSurfaceContent quickCapture =>
+            QuickCaptureWidgetContentAdapter quickCapture =>
                 CreateQuickCaptureCompactPresentation(quickCapture, contentMode),
             WeatherWidgetContentAdapter weather => CreateWeatherCompactPresentation(weather, contentMode),
             SearchWidgetContentAdapter => CreateSearchCompactPresentation(contentMode, localization),
@@ -1122,7 +1122,7 @@ IsHideAnimationRunning = true;
             GlanceWidgetContentAdapter glance => glance.ViewModel,
             MusicWidgetContentAdapter music => music.ViewModel,
             WeatherWidgetContentAdapter weather => weather.ViewModel,
-            QuickCaptureSurfaceContent quickCapture => quickCapture.ViewModel,
+            QuickCaptureWidgetContentAdapter quickCapture => quickCapture.ViewModel,
             _ => null
         };
 

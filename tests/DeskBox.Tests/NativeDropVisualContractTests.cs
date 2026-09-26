@@ -168,7 +168,7 @@ public sealed class NativeDropVisualContractTests
             "src/DeskBox/Controls/WidgetContents/TodoWidgetContentAdapter.cs");
 
         Assert.Contains(
-            "QuickCaptureSurfaceContent => true",
+            "QuickCaptureWidgetContentAdapter => true",
             window,
             StringComparison.Ordinal);
         Assert.Contains(
@@ -192,7 +192,7 @@ public sealed class NativeDropVisualContractTests
             window,
             StringComparison.Ordinal);
         Assert.Contains(
-            "case QuickCaptureSurfaceContent quickCapture:",
+            "case QuickCaptureWidgetContentAdapter quickCapture:",
             window,
             StringComparison.Ordinal);
         Assert.Contains(

@@ -6,7 +6,7 @@ namespace DeskBox.Views;
 public sealed partial class ContentWidgetWindow
 {
     private WidgetCompactPresentation CreateQuickCaptureCompactPresentation(
-        QuickCaptureSurfaceContent quickCapture,
+        QuickCaptureWidgetContentAdapter quickCapture,
         string contentMode)
     {
         bool hidesSensitiveContent =

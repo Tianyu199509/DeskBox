@@ -233,7 +233,7 @@ public sealed partial class ContentWidgetWindow
             {
                 SuppressesNativeShellDragVisual: false
             } => true,
-            QuickCaptureSurfaceContent => true,
+            QuickCaptureWidgetContentAdapter => true,
             TodoWidgetContentAdapter => true,
             _ => false
         };
@@ -264,7 +264,7 @@ public sealed partial class ContentWidgetWindow
             return null;
         }
 
-        if (CurrentContent is QuickCaptureSurfaceContent)
+        if (CurrentContent is QuickCaptureWidgetContentAdapter)
         {
             return new NativeDropDescriptionText(
                 "%1",
@@ -1555,7 +1555,7 @@ public sealed partial class ContentWidgetWindow
                         screenY);
                     break;
 
-                case QuickCaptureSurfaceContent quickCapture:
+                case QuickCaptureWidgetContentAdapter quickCapture:
                     await quickCapture.ImportNativeDroppedFilesAsync(
                         CreateNativeDroppedFilePaths(
                             paths,
