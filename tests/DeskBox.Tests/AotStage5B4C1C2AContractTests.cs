@@ -179,7 +179,7 @@ public sealed class AotStage5B4C1C2AContractTests
         Assert.Contains("Remove-Item -LiteralPath $resolvedRoot -Recurse -Force", runner, StringComparison.Ordinal);
         Assert.Contains("Wait-NaturalPreviewExit", runner, StringComparison.Ordinal);
         Assert.Contains("Stop-ExactPreviewProcess", runner, StringComparison.Ordinal);
-        Assert.Contains("profile 56 / schema 53", runner, StringComparison.Ordinal);
+        Assert.Contains("profile 59 / schema 55", runner, StringComparison.Ordinal);
     }
 
     [Fact]
