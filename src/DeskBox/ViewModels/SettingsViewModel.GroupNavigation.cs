@@ -36,19 +36,14 @@ public partial class SettingsViewModel
             allowFollowDefault: false);
         set
         {
-            string normalized = WidgetGroupNavigationStyles.Normalize(
-                value,
-                allowFollowDefault: false);
-            if (string.Equals(
-                    _settingsService.Settings.WidgetGroupDefaultNavigationStyle,
-                    normalized,
-                    StringComparison.Ordinal))
+            // The coordinator normalizes, skips unchanged writes and owns the
+            // debounced save; the shell keeps the post-write linkages.
+            if (!_groupNavigationSettings.SetDefaultNavigationStyle(value))
             {
                 return;
             }
 
-            _settingsService.Settings.WidgetGroupDefaultNavigationStyle = normalized;
-            SaveWidgetGroupPresentationChange();
+            AfterWidgetGroupPresentationChange();
             OnPropertyChanged();
         }
     }
@@ -67,19 +62,12 @@ public partial class SettingsViewModel
             allowFollowDefault: false);
         set
         {
-            string normalized = WidgetGroupTitleDisplayModes.Normalize(
-                value,
-                allowFollowDefault: false);
-            if (string.Equals(
-                    _settingsService.Settings.WidgetGroupDefaultTitleDisplayMode,
-                    normalized,
-                    StringComparison.Ordinal))
+            if (!_groupNavigationSettings.SetDefaultTitleDisplayMode(value))
             {
                 return;
             }
 
-            _settingsService.Settings.WidgetGroupDefaultTitleDisplayMode = normalized;
-            SaveWidgetGroupPresentationChange();
+            AfterWidgetGroupPresentationChange();
             OnPropertyChanged();
         }
     }
@@ -97,13 +85,12 @@ public partial class SettingsViewModel
         get => _settingsService.Settings.WidgetGroupWheelSwitchEnabled;
         set
         {
-            if (_settingsService.Settings.WidgetGroupWheelSwitchEnabled == value)
+            if (!_groupNavigationSettings.SetWheelSwitchEnabled(value))
             {
                 return;
             }
 
-            _settingsService.Settings.WidgetGroupWheelSwitchEnabled = value;
-            SaveWidgetGroupPresentationChange();
+            AfterWidgetGroupPresentationChange();
             OnPropertyChanged();
         }
     }
@@ -113,13 +100,12 @@ public partial class SettingsViewModel
         get => _settingsService.Settings.WidgetGroupHoverSwitchEnabled;
         set
         {
-            if (_settingsService.Settings.WidgetGroupHoverSwitchEnabled == value)
+            if (!_groupNavigationSettings.SetHoverSwitchEnabled(value))
             {
                 return;
             }
 
-            _settingsService.Settings.WidgetGroupHoverSwitchEnabled = value;
-            SaveWidgetGroupPresentationChange();
+            AfterWidgetGroupPresentationChange();
             OnPropertyChanged();
         }
     }
@@ -345,9 +331,13 @@ public partial class SettingsViewModel
         return true;
     }
 
-    private void SaveWidgetGroupPresentationChange()
+    // The debounced save itself lives in the group-navigation coordinator's
+    // write; this keeps the shell-side post-write linkages that the four
+    // default-field setters always ran: the explicit host notification that
+    // also covers the silent-save group edits, the overview summary refresh
+    // and the existing-group projection rebuild.
+    private void AfterWidgetGroupPresentationChange()
     {
-        _settingsService.SaveDebounced();
         App.Current?.WidgetManager?.NotifyWidgetGroupPresentationSettingsChanged();
         OnPropertyChanged(nameof(WidgetGroupOverviewSummaryText));
         NotifyExistingWidgetGroupPropertiesChanged();

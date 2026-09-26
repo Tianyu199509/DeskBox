@@ -586,11 +586,10 @@ A+B 工作树已补齐最终 QuickCapture 退出/快捷入口和 Todo 非有限�
 
 | 批 | 节 | 写入点 | 触面文件 | 共享棘轮资源 |
 |---|---|---|---|---|
-| 37 | 分组导航 | 4 | GroupNavigation 4（WheelSwitch/HoverSwitch/DefaultTitleDisplayMode/DefaultNavigationStyle） | AotStage5B4B1 对 GroupNavigation 源码钉 |
 | 38 | 功能节（音乐/天气/Glance）+ QuickCapture 编辑器组 | 37 | FeatureOptions 29、FeatureCallbacks 2、WeatherOptions 1、ContentEditorOptions 5 | ModuleBoundary App.Current 例外（FeatureOptions=4）、FeatureSettingsBoundary quickCaptureWrite 门禁 |
 | 39 | 存储/诊断尾巴 | 2 | PreferenceCommands 1（DefaultManagedStorageRootPath）、AboutAndUpdates 1（LastUpdateCheckAt） | SettingsSync 133 处快照读随各批顺手收缩 |
 
-合计 4+37+2 = 43（第 29 批外观 28、第 33 批胶囊/紧凑 16、第 34 批交互 12、第 35 批文件显示 6、第 36 批文件栈 10 已完成并在各自批次记录中销账）。**外部残余写入者**（不在 SettingsViewModel 内、后续单独处理）：OnboardingWindow.Appearance.cs 1 处 WidgetMaterialType 写入、OnboardingWindow.Hotkey.cs 的 AutoStart 直写（onboarding 批次）、SettingsService 自身的加载/迁移/默认值路径（Track B 界面）。
+合计 37+2 = 39（第 29 批外观 28、第 33 批胶囊/紧凑 16、第 34 批交互 12、第 35 批文件显示 6、第 36 批文件栈 10、第 37 批分组导航 4 已完成并在各自批次记录中销账）。**外部残余写入者**（不在 SettingsViewModel 内、后续单独处理）：OnboardingWindow.Appearance.cs 1 处 WidgetMaterialType 写入、OnboardingWindow.Hotkey.cs 的 AutoStart 直写（onboarding 批次）、SettingsService 自身的加载/迁移/默认值路径（Track B 界面）。
 
 ### 本批实现
 
@@ -810,6 +809,33 @@ Simon 拍板放弃"随触碰 ratchet"，对 Platform 域的 DllImport/LibraryImp
 - 隔离 Debug 启动：数据根 `C:/Users/simon/AppData/Local/DeskBox-Dev/filestack-track-a-36-20260926`（DESKBOX_DEV_DATA_ROOT）预置文件栈 10 字段非默认值（开+Custom 分组+2 条自定义规则（Documents/.pdf/.docx、Images/.png/.jpg）+自动堆叠开+阈值 2+Name 排序+Popover 打开+Grid5 浮窗+FollowMaterial 样式+Other 未匹配行为，另预置 hasCompletedOnboarding/hasResolvedInitialFileWidgetSetup=true 保持无格子安静启动）。canonical 路径 `src/DeskBox/bin/Debug/net10.0-windows10.0.22621.0/DeskBox.exe` 启动 PID 21896，启动管线 **35 步（5 critical）、0 degraded、0 failed**（日志中 F7 RegisterHotKey error=1409 为本机并存实例占用热键的环境性记录，非启动步失败）；运行中与按 PID 强制结束（关闭到托盘语义下无 CLI 退出入口，与批 35 同款）后磁盘 10 个预置字段（含 2 条规则的 Id/名称/归一化扩展名）全部保持原值。验证后已确认本 worktree 实例归零（并存的他 worktree 实例未触碰）。
 - `git diff --check` 通过。
 - 已知残余：设置壳 ApplySettingsSnapshot/构造的文件栈字段读仍走门面读（无写入，FileStackOptions ratchet 22 计数内）；规则预览的文件枚举（BuildFileStackPreviewEntries 读 Widgets）仍在壳门面；未做真实设置页点击（开关切换、规则增删拖拽后真实堆叠投影重建效果）的设备级手感验收，自动化证据不替代文件栈页实际操作与堆叠重建的视觉验收。
+
+## 第三十七批：分组导航设置节迁移（Track A 第六批）
+
+实施基线：`8593c158`（main，含批 29-36），worktree `codex/final-settings-groupnav`。对象是第二十九批清点表中"37 分组导航"行：`SettingsViewModel.GroupNavigation` partial 的 4 个写入点——`SelectedWidgetGroupDefaultNavigationStyle`（默认导航风格）/`SelectedWidgetGroupDefaultTitleDisplayMode`（默认标题显示）/`IsWidgetGroupWheelSwitchEnabled`（滚轮切换）/`IsWidgetGroupHoverSwitchEnabled`（悬停切换），全部为"归一化→比较原始存储值→写值→SaveDebounced"直保存族。**切片归属勘误**：任务简报称"这组字段写 WidgetShell 切片"，实际四个字段自第 30 批设备层迁移起就住在 `WidgetLayoutSettingsSlice`（widget-layout.json，第 30 批 11 键中的 5 个组导航/兼容默认值键成员），协调器按真实归属走 `Settings.WidgetLayout` 切片路径，经既有 SettingsService 成对提交（单一 FileWriteLock 下 layout 先落、settings 后落）。
+
+**协调器归属决策：独立建 `GroupNavigationSettingsCoordinator`（不并入交互/胶囊协调器）。** 判据与批 33/34/35/36 同款：四个默认字段是纯直保存族，与外观活预览机制零耦合；但与前几节有两处结构性差异——①持久化目标是设备层 WidgetLayout 切片（并入交互会把 WidgetShell/Core/Performance 切片写与 WidgetLayout 切片写搅进同一端口，且引入跨设备层文件的保存语义）；②设置壳在每次真实写入后除 SettingsChanged 广播外还显式调 `App.Current?.WidgetManager?.NotifyWidgetGroupPresentationSettingsChanged()`（组表面呈现刷新链），写入口返回 bool"是否发生变化"让壳保留"只在真实变化时跑通知链"的原语义（与本 partial 既有 per-group 方法族的 bool 返回约定一致）。
+
+| 职责 | 所有者 |
+|---|---|
+| 分组导航 4 默认字段的唯一设置页写入、归一化（`WidgetGroupNavigationStyles`/`WidgetGroupTitleDisplayModes` Normalize，FollowDefault 对默认级永不接受、无效值收口到出厂默认，与加载管线一致）、未变化跳过、每字段原保存语义（写值+SaveDebounced 订户广播） | `Services/GroupNavigationSettingsCoordinator`，经 `Contracts/IGroupNavigationSettings` 暴露 |
+| 分组导航节编辑器缝（设置壳转发目标） | `Features/GroupNavigation/GroupNavigationSettingsViewModel`（无复制状态） |
+| XAML 绑定名、AOT 生成属性、文案、选项列表/概要汇总/既有组投影、写后通知链（`AfterWidgetGroupPresentationChange`：显式组呈现通知+概要刷新+既有组投影刷新）、per-group 覆盖编辑方法（Rename/SetWidgetGroup*/ResetWidgetGroupOverrides，写 WidgetGroupConfig 对象非门面） | `SettingsViewModel` 兼容门面（GroupNavigation partial） |
+| 装配 | App 创建协调器与编辑器，经 SettingsWindow 注入 SettingsViewModel（与批 29/33/34/35/36 同款） |
+
+特有语义保全：①四个 setter 原顺序逐字保持——归一化→与原始存储值 Ordinal 比较→写归一化值→SaveDebounced→壳通知链（显式组呈现通知、概要/属性 OnPropertyChanged），未变化写入零通知零保存零投影重建；②组切换行为到宿主仍只经既有 SettingsChanged→WidgetManager/WidgetShell 消费链加壳的显式 `NotifyWidgetGroupPresentationSettingsChanged` 链接，WidgetManager/WidgetShell 消费代码零改动（含 `RefreshWidgetGroupPresentationDefaultsIfChanged` 缓存比较守卫）；③壳的 `SaveWidgetGroupPresentationChange` 私有方法随迁移改名为 `AfterWidgetGroupPresentationChange`（去 SaveDebounced 行，保存职责入协调器；per-group 侧 `CompleteWidgetGroupSettingsChange` 的 `SaveDebounced(notifySubscribers:false)` 静默保存语义原样不动）；④AotStage5B4B1 对 GroupNavigation 源码的钉逐一核对保持：`WidgetGroupSettingsItem`/`WidgetGroupMemberSettingsItem` 两个 `[WinRT.GeneratedBindableCustomProperty]` record 留在 partial（契约测试与 publish-aot-audit.ps1 stage5B4B1SourceFiles[14] 双侧钉）、四个属性的 AotBindableProperties nameof 面与 349 计数零变化（requiredBindingProperties==generatedBindableProperties 自动保持）、XAML 绑定名/文案/磁盘 schema 零变化。
+
+门禁收缩：`SettingsSliceOwnershipContractTests` 平铺清单收缩（GroupNavigation 28→20：四个 setter 的比较读+写入共 8 处消失，仅剩属性 get/概要/投影/本地化键字面量读），只删不加；`FeatureSettingsBoundaryContractTests.SettingsShell_DoesNotWriteMigratedFeatureFieldsDirectly` 新增分组导航 4 字段写入门禁（含 `WidgetLayout` 切片前缀变体）；协调器/编辑器/接口三个新文件 FacadePassthroughAccess 零命中。
+
+### 第三十七批验证记录
+
+- restore Updater 后 `dotnet build src/DeskBox/DeskBox.csproj -p:Platform=x64`：0 错误、22 警告（均为既有位置，与批 36 后同位）；非平台 canonical Debug（启动用）0 错误。
+- 定向测试 26/26 通过（新增 GroupNavigationSettingsCoordinatorTests 4 用例：4 字段经编辑器缝写入/bool 变化报告/未变化跳过（SettingsChanged 计数 4 不涨）、无效值按页面归一化收口（FollowDefault→Tabs no-op、legacy Auto→Stack、Nonsense/null→出厂默认、归一化等值重发 no-op）、非默认全量磁盘往返（写→SaveAsync→fresh LoadAsync→ReadAll 等值，验证 widget-layout.json 设备层承载与再会话 no-op）、停止后拒写（ObjectDisposedException+磁盘保持默认）；SettingsSliceOwnership 7；FeatureSettingsBoundary 3；AotStage5B4B1 12）。
+- 全量 x64 测试：**4,315/4,315 通过**（新基线 4,311 + 本批 4 个新用例）。
+- AOT 定义编译检查（x64、`DefineConstants="TRACE;DEBUG;DESKBOX_NATIVE_AOT"`，`ArtifactsPath`/`RestorePackagesPath` 隔离于 `.aotcheck/`（Updater 引用随 DeskBox 的 ArtifactsPath 一并隔离 restore），检查后已清理）：11 警告（与批 32/33/34/35/36 同位）、**0 错误**。未执行 Native AOT publish/link，仍为发版门禁。
+- 隔离 Debug 启动：数据根 `C:/Users/simon/AppData/Local/DeskBox-Dev/groupnav-track-a-37-20260926`（DESKBOX_DEV_DATA_ROOT）预置分组导航 4 字段非默认值（Stack 导航+TextOnly 标题+滚轮切换关+悬停切换开，另预置 hasCompletedOnboarding/hasResolvedInitialFileWidgetSetup=true 保持无格子安静启动）。canonical 路径 `src/DeskBox/bin/Debug/net10.0-windows10.0.22621.0/DeskBox.exe` 启动 PID 35452（本 worktree 唯一实例），启动管线 **36 步（5 critical）、0 degraded、0 failed**（日志中 F7 RegisterHotKey error=1409 为本机并存实例占用热键的环境性记录，非启动步失败，与批 36 同款）；懒领养符合预期（本次会话无设置变更即无持久保存，widget-layout.json 未生成、settings.json 仍为权威并完整保有 4 键——设备层往返已由本批磁盘往返测试覆盖）；按 PID 强制结束（关闭到托盘语义下无 CLI 退出入口，与批 35/36 同款）后磁盘 4 个预置字段全部保持原值。验证后已确认本 worktree 实例归零（并存的他 worktree 实例未触碰）。
+- `git diff --check` 通过。
+- 已知残余：设置壳的 GroupNavigation 属性 get/概要/既有组投影读仍走门面读（无写入，ratchet 20 计数内）；per-group 覆盖写（WidgetGroupConfig 对象）按口径留在壳（非平铺门面写入）；未做真实设置页点击（导航风格/标题显示切换后真实组表面呈现刷新）的设备级手感验收，自动化证据不替代分组导航页实际操作与组切换行为的视觉验收。
 
 # 架构优化进度与下一批计划
 

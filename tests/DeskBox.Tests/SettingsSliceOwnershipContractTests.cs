@@ -321,7 +321,12 @@ public sealed class SettingsSliceOwnershipContractTests
         ["src/DeskBox/ViewModels/SettingsViewModel.FeatureOptions.cs"] = 68,
         ["src/DeskBox/ViewModels/SettingsViewModel.FeatureTextSize.cs"] = 5,
         ["src/DeskBox/ViewModels/SettingsViewModel.FileStackOptions.cs"] = 22,
-        ["src/DeskBox/ViewModels/SettingsViewModel.GroupNavigation.cs"] = 28,
+        // Batch 37 moved the group-navigation default writes (wheel switch,
+        // hover switch, default title display mode, default navigation style)
+        // into GroupNavigationSettingsCoordinator (GroupNavigation 28->20,
+        // leaving only the property/summary/projection reads; the four
+        // setters no longer compare or write through the facade).
+        ["src/DeskBox/ViewModels/SettingsViewModel.GroupNavigation.cs"] = 20,
         ["src/DeskBox/ViewModels/SettingsViewModel.HotkeyAndStorage.cs"] = 6,
         ["src/DeskBox/ViewModels/SettingsViewModel.Performance.cs"] = 11,
         ["src/DeskBox/ViewModels/SettingsViewModel.PreferenceCommands.cs"] = 2,
