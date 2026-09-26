@@ -115,6 +115,7 @@ public partial class App : Application
     private CapsuleSettingsCoordinator? _capsuleSettings;
     private InteractionSettingsCoordinator? _interactionSettings;
     private FileDisplaySettingsCoordinator? _fileDisplaySettings;
+    private FileStackSettingsCoordinator? _fileStackSettings;
     private QuickCaptureClipboardRuntime? _quickCaptureClipboardRuntime;
     private BackupRuntime? _backupRuntime;
     private readonly ShutdownSequence _shutdownSequence = new(Log);
@@ -1023,6 +1024,7 @@ public partial class App : Application
             _capsuleSettings = new CapsuleSettingsCoordinator(SettingsService);
             _interactionSettings = new InteractionSettingsCoordinator(SettingsService);
             _fileDisplaySettings = new FileDisplaySettingsCoordinator(SettingsService);
+            _fileStackSettings = new FileStackSettingsCoordinator(SettingsService);
             _quickCaptureClipboardRuntime = _featureRuntimes.Register(QuickCaptureFeatureRuntimeId,
                 new QuickCaptureClipboardRuntime(
                     () => !IsShuttingDown &&
@@ -2934,7 +2936,9 @@ public partial class App : Application
             new DeskBox.Features.Interaction.InteractionSettingsViewModel(
                 _interactionSettings ?? throw new InvalidOperationException("Interaction settings are not initialized.")),
             new DeskBox.Features.FileDisplay.FileDisplaySettingsViewModel(
-                _fileDisplaySettings ?? throw new InvalidOperationException("File display settings are not initialized.")));
+                _fileDisplaySettings ?? throw new InvalidOperationException("File display settings are not initialized.")),
+            new DeskBox.Features.FileStack.FileStackSettingsViewModel(
+                _fileStackSettings ?? throw new InvalidOperationException("File stack settings are not initialized.")));
         _settingsWindow.Closed += SettingsWindow_ClosedForApp;
         return _settingsWindow;
     }

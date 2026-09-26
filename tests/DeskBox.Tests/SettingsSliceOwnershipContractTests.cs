@@ -306,7 +306,12 @@ public sealed class SettingsSliceOwnershipContractTests
         // section writes into FileDisplaySettingsCoordinator
         // (PreferenceCallbacks 6->0 and lost its entry; the only remaining
         // facade-shaped access is the QuiescenceWorkingSetTrimEnabled write
-        // through the Performance slice, which is not a passthrough).
+        // through the Performance slice, which is not a passthrough). Batch 36
+        // moved the file-stack section writes (master switch, auto-stacking,
+        // grouping, threshold, ordering, open mode, popover layout/style,
+        // unmatched behavior and the custom-rule collection) into
+        // FileStackSettingsCoordinator (FileStackOptions 32->22, leaving only
+        // the constructor/snapshot reads and the Widgets preview read).
         ["src/DeskBox/ViewModels/SettingsViewModel.AppearanceOptions.cs"] = 1,
         ["src/DeskBox/ViewModels/SettingsViewModel.CapsuleOptions.cs"] = 20,
         ["src/DeskBox/ViewModels/SettingsViewModel.ContentEditorOptions.cs"] = 24,
@@ -315,7 +320,7 @@ public sealed class SettingsSliceOwnershipContractTests
         ["src/DeskBox/ViewModels/SettingsViewModel.FeatureCallbacks.cs"] = 25,
         ["src/DeskBox/ViewModels/SettingsViewModel.FeatureOptions.cs"] = 68,
         ["src/DeskBox/ViewModels/SettingsViewModel.FeatureTextSize.cs"] = 5,
-        ["src/DeskBox/ViewModels/SettingsViewModel.FileStackOptions.cs"] = 32,
+        ["src/DeskBox/ViewModels/SettingsViewModel.FileStackOptions.cs"] = 22,
         ["src/DeskBox/ViewModels/SettingsViewModel.GroupNavigation.cs"] = 28,
         ["src/DeskBox/ViewModels/SettingsViewModel.HotkeyAndStorage.cs"] = 6,
         ["src/DeskBox/ViewModels/SettingsViewModel.Performance.cs"] = 11,
