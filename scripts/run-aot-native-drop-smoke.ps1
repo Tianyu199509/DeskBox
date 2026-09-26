@@ -587,6 +587,17 @@ try {
         [bool]$mutate.result.nativeDrop.nativeLeaveClear.highlightActiveAfter) {
         throw "Mutate phase did not prove deferred shell progress or stale-highlight cleanup."
     }
+    if (-not [bool]$mutate.result.nativeDrop.copyImport.duringImport.busyElapsedMilliseconds -or
+        [int]$mutate.result.nativeDrop.copyImport.duringImport.busyElapsedMilliseconds -lt 150) {
+        throw "Mutate phase did not sample the shell-delegated busy window past the 150 ms import-card delay floor."
+    }
+    if (-not [bool]$mutate.result.nativeDrop.managedCardImport.cardShown.cardVisible -or
+        -not [bool]$mutate.result.nativeDrop.managedCardImport.cardShown.isImportBusy -or
+        -not [bool]$mutate.result.nativeDrop.managedCardImport.cardShown.backgroundIsAcrylicBrush -or
+        [int]$mutate.result.nativeDrop.managedCardImport.cardShown.canvasZIndex -ne 1000 -or
+        -not [bool]$mutate.result.nativeDrop.managedCardImport.destinationRemovedAfterProbe) {
+        throw "Mutate phase did not prove the managed-transfer acrylic card display or probe cleanup."
+    }
 
     $verifyRestore = Invoke-NativeDropPhase `
         -Phase "VerifyRestore" `
