@@ -286,8 +286,7 @@ public partial class SettingsViewModel
                 return;
             }
 
-            _settingsService.Settings.WidgetCollapseBehavior = normalized;
-            _settingsService.SaveDebounced();
+            _capsuleSettings.SetWidgetCollapseBehavior(normalized);
         }
     }
 
@@ -311,8 +310,7 @@ public partial class SettingsViewModel
                 return;
             }
 
-            _settingsService.Settings.WidgetCompactContentMode = normalized;
-            _settingsService.SaveDebounced();
+            _capsuleSettings.SetWidgetCompactContentMode(normalized);
             OnPropertyChanged(nameof(SelectedWidgetCompactContentModeText));
         }
     }

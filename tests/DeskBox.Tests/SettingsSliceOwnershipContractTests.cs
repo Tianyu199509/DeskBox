@@ -295,11 +295,12 @@ public sealed class SettingsSliceOwnershipContractTests
         ["src/DeskBox/ViewModels/SettingsViewModel.AboutAndUpdates.cs"] = 1,
         // Batch 29 moved the appearance section writes into
         // AppearanceSettingsCoordinator; AppearanceCallbacks reached zero and
-        // lost its entry. The remaining AppearanceOptions/WidgetForeground
-        // accesses are the capsule/interaction fields deferred to later
-        // batches plus snapshot reads.
-        ["src/DeskBox/ViewModels/SettingsViewModel.AppearanceOptions.cs"] = 4,
-        ["src/DeskBox/ViewModels/SettingsViewModel.CapsuleOptions.cs"] = 34,
+        // lost its entry. Batch 33 moved the capsule/compact section writes
+        // into CapsuleSettingsCoordinator (CapsuleOptions 34->20, leaving only
+        // widget/group override-list reads; AppearanceOptions 4->2, leaving
+        // WidgetLayerMode for the interaction batch plus snapshot reads).
+        ["src/DeskBox/ViewModels/SettingsViewModel.AppearanceOptions.cs"] = 2,
+        ["src/DeskBox/ViewModels/SettingsViewModel.CapsuleOptions.cs"] = 20,
         ["src/DeskBox/ViewModels/SettingsViewModel.ContentEditorOptions.cs"] = 24,
         ["src/DeskBox/ViewModels/SettingsViewModel.DesktopOrganization.cs"] = 1,
         ["src/DeskBox/ViewModels/SettingsViewModel.DisplayNames.cs"] = 6,

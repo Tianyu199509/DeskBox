@@ -586,8 +586,6 @@ A+B 工作树已补齐最终 QuickCapture 退出/快捷入口和 Todo 非有限�
 
 | 批 | 节 | 写入点 | 触面文件 | 共享棘轮资源 |
 |---|---|---|---|---|
-| **29（本批）** | 外观（材质/密度/排版/默认尺寸/窗口外观/动画/前景/托盘图标） | 28 | AppearanceCallbacks 8、AppearanceOptions 14、WidgetForeground 2、SettingsViewModel.cs 2（LayoutDensity）、PreferenceCallbacks 2（DefaultW/H） | SettingsSliceOwnership 清单（5 文件收缩）、AotPublishContract 75 ObservableProperty 钉、ModuleBoundary App.Current 例外（AppearanceOptions=2 保持） |
-| 33 | 胶囊/紧凑模式 | 16 | CapsuleOptions 14、AppearanceOptions 2（CollapseBehavior/CompactContentMode） | AotStage5B4B1 对 CapsuleOptions 源码钉 |
 | 34 | 交互 | 12 | PreferenceCallbacks 10（AutoStart/AutoCheck/DoubleClick/FileItemMenu/ResizeSnap/SnapSpacing/KeepVisible/ShowHoverButtons/Idle/ImmediateTrim）、HoverActions 1、AppearanceOptions 1（WidgetLayerMode） | ModuleBoundary App.Current 例外、ShellContextMenuCompatibility（Prewarm 钉在 PreferenceCallbacks） |
 | 35 | 文件显示 | 6 | PreferenceCallbacks（ShowFileExtensions/HideShortcutArrowOverlay/ShowImageFilesAsIcons/ShowListItemDetails/ShowFileItemPathTooltips/HideShortcutExtensionWhenShowingFileExtensions） | 与 31 同文件分批，注意 ratchet 计数联动 |
 | 36 | 文件栈/文件格子 | 10 | FileStackOptions 10 | AotStage5B4B1 FileStack 源码钉 |
@@ -595,7 +593,7 @@ A+B 工作树已补齐最终 QuickCapture 退出/快捷入口和 Todo 非有限�
 | 38 | 功能节（音乐/天气/Glance）+ QuickCapture 编辑器组 | 37 | FeatureOptions 29、FeatureCallbacks 2、WeatherOptions 1、ContentEditorOptions 5 | ModuleBoundary App.Current 例外（FeatureOptions=4）、FeatureSettingsBoundary quickCaptureWrite 门禁 |
 | 39 | 存储/诊断尾巴 | 2 | PreferenceCommands 1（DefaultManagedStorageRootPath）、AboutAndUpdates 1（LastUpdateCheckAt） | SettingsSync 133 处快照读随各批顺手收缩 |
 
-合计 28+16+12+6+10+4+37+2 = 115，与逐文件实测一致。**外部残余写入者**（不在 SettingsViewModel 内、后续单独处理）：OnboardingWindow.Appearance.cs 1 处 WidgetMaterialType 写入、SettingsService 自身的加载/迁移/默认值路径（Track B 界面）。
+合计 12+6+10+4+37+2 = 71（第 29 批外观 28、第 33 批胶囊/紧凑 16 已完成并在第三十三批记录中销账）。**外部残余写入者**（不在 SettingsViewModel 内、后续单独处理）：OnboardingWindow.Appearance.cs 1 处 WidgetMaterialType 写入、SettingsService 自身的加载/迁移/默认值路径（Track B 界面）。
 
 ### 本批实现
 
@@ -707,6 +705,33 @@ Simon 拍板放弃"随触碰 ratchet"，对 Platform 域的 DllImport/LibraryImp
 - canonical Debug 构建 0 错误（警告均为既有位置：CS0108/CS0414/CS0169/CS8602 与 WinUI 可空性，无本批新文件告警）。
 - 隔离 Debug 启动：数据根 `C:/Users/simon/AppData/Local/DeskBox-Dev/final-feature-runtime-20260926-d32`，核验进程 PID 45132，路径为 `D:/project/wingezi-final-d/src/DeskBox/bin/Debug/net10.0-windows10.0.22621.0/DeskBox.exe`（本工作树唯一实例）；启动 **36 步、0 degraded、0 failed**，默认态 Search 未初始化服务（符合禁用路径），外部状态恢复完成，正常关闭退出（本工作树实例计数归零）。三个功能的开关循环由 SearchCase/接口级用例与既有功能级测试覆盖（真实 UI 点击仍属人工验收）。
 - `git diff --check` 通过；未提交推送（本记录随提交一并入库）。
+
+## 第三十三批：胶囊/紧凑模式设置节迁移（Track A 第二批）
+
+实施基线：`405ca777`（main，含批 29-32），worktree `codex/final-settings-capsule`。对象是第二十九批清点表中"33 胶囊/紧凑模式"行：16 个写入点（CapsuleOptions 14 + AppearanceOptions 2 的 CollapseBehavior/CompactContentMode），覆盖胶囊内容模式、胶囊栏排列/位置/方向/间距、敏感内容隐藏、折叠行为、紧凑动画（效果+时长预设）、悬停展开/收起延迟、紧凑媒体圆角。
+
+**协调器归属决策：独立建 `CapsuleSettingsCoordinator`（不并入外观协调器）。** 判据：胶囊/紧凑族写入与外观预览机制零耦合——CapsuleOptions 全部 14 个写入点均为"归一化→写值→SaveDebounced"直保存，从不走 `SaveAppearanceChange`/`RequestAppearancePreview`/`DeferAppearancePersistence` 拖动期活预览链；节内仅有的联动是本族预设对（动画效果↔时长、悬停响应↔双延迟），胶囊协调器可整体内聚。并入外观会把两种保存语义搅进同一端口。胶囊行为到宿主（WidgetShell/ApplyCompactState 等）仍只经既有 SettingsChanged/外观刷新链，宿主侧逻辑零改动。
+
+| 职责 | 所有者 |
+|---|---|
+| 胶囊/紧凑 14 字段的唯一设置页写入、数值归一化（钳制/取整）、每字段原保存语义、动画效果↔时长与效果翻转 Custom 的成对写 | `Services/CapsuleSettingsCoordinator`，经 `Contracts/ICapsuleSettings` 暴露 |
+| 胶囊节编辑器缝（设置壳转发目标） | `Features/Capsule/CapsuleSettingsViewModel`（无复制状态） |
+| XAML 绑定名、AOT 生成属性、文案、预设选择的视图态联动（动画预设时长镜像、悬停响应派生 Custom 标记与 `_isApplyingWidgetCompactHoverResponse` 防回环、胶囊覆盖项重置命令） | `SettingsViewModel` 兼容门面（CapsuleOptions/AppearanceOptions 两个 partial） |
+| 装配 | App 创建协调器与编辑器，经 SettingsWindow 注入 SettingsViewModel（与批 29 外观编辑器同款） |
+
+关键时序保真点：悬停响应对（Sensitive/Balanced/PreventAccidental）没有自己的持久字段——设置壳经自身双延迟绑定套用预设（各延迟绑定再转发协调器，保持原"两次防抖保存"语义），响应选择本身是派生视图态不落盘；手动改延迟时 `MarkWidgetCompactHoverResponseCustom` 只翻视图选择不写设置；紧凑动画预设时长映射与悬停响应预设延迟映射从设置壳私有 switch 上移为 `SettingsService.WidgetCompactAnimationPresetDurationMs`/`WidgetCompactHoverResponsePresetDelays` 公共静态（与批 29 四个动画归一化器上移同款先例），壳与协调器共用一份映射；协调器选项写入带"无变化跳过"（跳过冗余 SaveDebounced/SettingsChanged，与批 29 选项门面同款）。
+
+门禁收缩：`SettingsSliceOwnershipContractTests` 平铺清单 2 个文件收缩（CapsuleOptions 34→20，仅剩 Widgets/WidgetGroups 覆盖项清单读；AppearanceOptions 4→2，剩 WidgetLayerMode 写与快照读留给第 34 批），只删不加；`FeatureSettingsBoundaryContractTests.SettingsShell_DoesNotWriteMigratedFeatureFieldsDirectly` 新增胶囊字段写入门禁（14 字清单，WidgetLayerMode 留给交互批）；AotStage5B4B1 对 CapsuleOptions 的源码钉（`CapsuleOverrideSettingsItem` record 位置）与 AOT 绑定面（属性零增删）自动保持，无需改钉。磁盘 schema、XAML、文案零变化。
+
+### 第三十三批验证记录
+
+- restore Updater 后 `dotnet build src/DeskBox/DeskBox.csproj -p:Platform=x64`：22 警告（均为既有位置）、0 错误；非平台 canonical Debug（启动用）0 错误。
+- 定向测试 30/30 通过（新增 CapsuleSettingsCoordinatorTests 8 用例：选项归一化与无变化跳过、动画预设成对写单次保存、自定义时长翻转 Custom/保留 Custom 或 None、数值钳制（NaN 间距回默认 8、时长/延迟夹 Min/Max）、行为/延迟/排列端口读写、磁盘往返、上移预设映射与持久字段一致、停止后拒写；SettingsSliceOwnership 7；FeatureSettingsBoundary 3；AotStage5B4B1 相关）。
+- 全量 x64 测试：**4,295/4,295 通过**（新基线 4,287 + 本批 8 个新用例）。
+- AOT 定义编译检查（x64、`DefineConstants="TRACE;...;DEBUG;DESKBOX_NATIVE_AOT"`，`ArtifactsPath`/`RestorePackagesPath` 隔离于 `.aotcheck/`）：11 警告、**0 错误**（与批 32 同位警告）。未执行 Native AOT publish/link，仍为发版门禁。
+- 隔离 Debug 启动：数据根 `C:/Users/simon/AppData/Local/DeskBox-Dev/capsule-track-a-33-20260926`（DESKBOX_DEV_DATA_ROOT）预置胶囊 14 字段非默认值（Smart 折叠、Minimal 内容、隐藏敏感内容、Independent 宽度、Up 展开、Bar 排列/Top 位置/Vertical 方向/21px 间距、Custom 动画 330ms、500/900ms 悬停延迟、Round 媒体圆角）。canonical 路径 `src/DeskBox/bin/Debug/net10.0-windows10.0.22621.0/DeskBox.exe` 启动 PID 11544，启动管线 35 步、0 degraded、0 failed；优雅关停后磁盘全部 14 个预置字段保持。验证后已按路径停止本 worktree 实例。
+- `git diff --check` 通过；未推送。
+- 已知残余：胶囊覆盖项重置命令（行为/几何/全量重置）仍操作 Widgets/WidgetGroups 集合（非平铺门面写入，清点表口径外，随分组导航或覆盖项后续批评估）；设置壳 ApplySettingsSnapshot/构造的胶囊读仍走门面读（无写入，ratchet 20 计数内）；未做真实胶囊悬停/动画的设备级手感验收，自动化证据不替代胶囊页实际拖动与悬停展开的视觉验收。
 # 架构优化进度与下一批计划
 
 更新时间：2026-09-23。实施基线：`d4b0a7a2`。本记录承接当日的架构核对方案，按可独立验证的功能链路推进。

@@ -2376,6 +2376,34 @@ settings.FocusClickedWidgetOnRaise = false;
             : WidgetCompactMediaCornerFollowWidget;
     }
 
+    // Uplifted from the settings shell's capsule section (batch 33) so the
+    // CapsuleSettingsCoordinator and the shell's binding state share one
+    // preset mapping, like the animation-normalizer precedent of batch 29.
+    public static int? WidgetCompactAnimationPresetDurationMs(string? effect)
+    {
+        return NormalizeWidgetCompactAnimationEffect(effect) switch
+        {
+            WidgetCompactAnimationSmooth => DefaultWidgetCompactAnimationDurationMs,
+            WidgetCompactAnimationSlow => SlowWidgetCompactAnimationDurationMs,
+            WidgetCompactAnimationSnappy => SnappyWidgetCompactAnimationDurationMs,
+            _ => null
+        };
+    }
+
+    public static (int Expand, int Collapse)? WidgetCompactHoverResponsePresetDelays(string? response)
+    {
+        return NormalizeWidgetCompactHoverResponse(response) switch
+        {
+            WidgetCompactHoverResponseSensitive =>
+                (SensitiveWidgetCompactExpandDelayMs, SensitiveWidgetCompactCollapseDelayMs),
+            WidgetCompactHoverResponsePreventAccidental =>
+                (PreventAccidentalWidgetCompactExpandDelayMs, PreventAccidentalWidgetCompactCollapseDelayMs),
+            WidgetCompactHoverResponseBalanced =>
+                (DefaultWidgetCompactExpandDelayMs, DefaultWidgetCompactCollapseDelayMs),
+            _ => null
+        };
+    }
+
     public static string NormalizeWidgetTitleIconModeSetting(string? value)
     {
         return WidgetTitleIconModeNames.NormalizeSettingValue(value);
