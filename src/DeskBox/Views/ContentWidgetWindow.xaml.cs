@@ -116,7 +116,7 @@ public sealed partial class ContentWidgetWindow : WidgetWindowBase, IDesktopWidg
 
     protected override bool HasBlockingFlyoutOpen() =>
         base.HasBlockingFlyoutOpen() ||
-        CurrentContent is FileSurfaceContent
+        CurrentContent is FileWidgetContentAdapter
         {
             IsStackPopoverBlockingSurfaceOpen: true
         };
@@ -143,7 +143,7 @@ public sealed partial class ContentWidgetWindow : WidgetWindowBase, IDesktopWidg
         string contentMode = ResolveEffectiveCompactContentMode();
         return CurrentContent switch
         {
-            FileSurfaceContent file =>
+            FileWidgetContentAdapter file =>
                 CreateFileCompactPresentation(file, contentMode),
             TodoWidgetContentAdapter todo => CreateTodoCompactPresentation(todo, contentMode, localization),
             GlanceWidgetContentAdapter glance =>
@@ -1079,7 +1079,7 @@ IsHideAnimationRunning = true;
 
     private void AttachHostContextMenuSource(IWidgetContent content)
     {
-        if (content is FileSurfaceContent fileSurface)
+        if (content is FileWidgetContentAdapter fileSurface)
         {
             fileSurface.SetHostWindowHandle(HWnd);
         }
@@ -1117,7 +1117,7 @@ IsHideAnimationRunning = true;
 
         _compactPresentationSource = content switch
         {
-            FileSurfaceContent file => file.ViewModel,
+            FileWidgetContentAdapter file => file.ViewModel,
             TodoWidgetContentAdapter todo => todo.ViewModel,
             GlanceWidgetContentAdapter glance => glance.ViewModel,
             MusicWidgetContentAdapter music => music.ViewModel,

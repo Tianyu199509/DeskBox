@@ -1200,9 +1200,12 @@ public sealed class FileSurfaceParityContractTests
             "SearchEngineService",
             stackPopover,
             StringComparison.Ordinal);
+        string adapter = File.ReadAllText(Path.Combine(
+            root,
+            "src/DeskBox/Controls/WidgetContents/FileWidgetContentAdapter.cs"));
         Assert.Contains(
             "public void PrepareForReuse()",
-            source,
+            adapter,
             StringComparison.Ordinal);
         Assert.Contains(
             "ViewModel.PrepareStackDisplayForReuse()",

@@ -156,7 +156,7 @@ public sealed partial class WidgetManager
             if (selectedTarget)
             {
                 targetHost.Host.ActivateQuickLookNavigationTarget(
-                    targetHost.Surface);
+                    targetHost.Adapter);
             }
         }
         finally
@@ -247,13 +247,20 @@ public sealed partial class WidgetManager
     {
         var hosts = new List<QuickLookSurfaceHost>();
         hosts.AddRange(_fileWidgets.Values.Select(session =>
-            new QuickLookSurfaceHost(session.Host, session.Content)));
+            new QuickLookSurfaceHost(
+                session.Host,
+                session.Content,
+                session.Content.Surface!)));
         hosts.AddRange(_contentWidgets.Values
             .Distinct()
-            .Where(window => window.CurrentContent is FileSurfaceContent)
+            .Where(window => window.CurrentContent is FileWidgetContentAdapter
+                {
+                    Surface: not null
+                })
             .Select(window => new QuickLookSurfaceHost(
                 window,
-                (FileSurfaceContent)window.CurrentContent!)));
+                (FileWidgetContentAdapter)window.CurrentContent!,
+                ((FileWidgetContentAdapter)window.CurrentContent!).Surface!)));
 
         return hosts
             .Where(host => host.Host.Visible && host.Surface.IsLoaded)
@@ -280,5 +287,6 @@ public sealed partial class WidgetManager
 
     private sealed record QuickLookSurfaceHost(
         ContentWidgetWindow Host,
+        FileWidgetContentAdapter Adapter,
         FileSurfaceContent Surface);
 }

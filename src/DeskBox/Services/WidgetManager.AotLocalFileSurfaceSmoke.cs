@@ -32,7 +32,7 @@ public sealed partial class WidgetManager
         }
 
         return new AotLocalFileSurfaceHost(
-            session.Content,
+            session.Content.Surface!,
             session.ViewModel,
             session.Host.WindowHandle.ToInt64(),
             session.Host.WindowContentRoot?.XamlRoot is not null,
@@ -59,7 +59,7 @@ public sealed partial class WidgetManager
 
         return new AotNativeDropSurfaceHost(
             session.Host,
-            session.Content,
+            session.Content.Surface!,
             session.ViewModel,
             session.Host.WindowHandle.ToInt64(),
             session.Host.WindowContentRoot?.XamlRoot is not null,

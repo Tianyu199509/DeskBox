@@ -197,15 +197,15 @@ public sealed class RenameExtensionChangeTests
     public void RenamePipeline_SurfaceWiresTheShellConfirmationToTheHostWindow()
     {
         string root = FindRepositoryRoot();
-        string surface = File.ReadAllText(Path.Combine(
+        string adapter = File.ReadAllText(Path.Combine(
             root,
-            "src/DeskBox/Controls/WidgetContents/FileSurfaceContent.xaml.cs"));
+            "src/DeskBox/Controls/WidgetContents/FileWidgetContentAdapter.cs"));
         Assert.Contains(
-            "ViewModel.ConfirmExtensionChangeHandler = ConfirmExtensionRename;",
-            surface,
+            "_viewModel.ConfirmExtensionChangeHandler = ConfirmExtensionRename;",
+            adapter,
             StringComparison.Ordinal);
-        Assert.Contains("Win32Helper.ConfirmExtensionChange(", surface, StringComparison.Ordinal);
-        Assert.Contains("Widget.Rename.ExtensionChangeWarning", surface, StringComparison.Ordinal);
+        Assert.Contains("Win32Helper.ConfirmExtensionChange(", adapter, StringComparison.Ordinal);
+        Assert.Contains("Widget.Rename.ExtensionChangeWarning", adapter, StringComparison.Ordinal);
     }
 
     [Fact]

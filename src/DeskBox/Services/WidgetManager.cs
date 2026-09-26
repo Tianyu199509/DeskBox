@@ -296,7 +296,7 @@ public sealed partial class WidgetManager
             .Distinct()
             .Any(window =>
                 window.Visible &&
-                window.CurrentContent is FileSurfaceContent);
+                window.CurrentContent is FileWidgetContentAdapter);
 
     internal int LoadedWidgetCount => _widgetSurfaces.Count;
 
@@ -1993,7 +1993,7 @@ public sealed partial class WidgetManager
 
         foreach (ContentWidgetWindow window in _contentWidgets.Values.Distinct())
         {
-            if (window.CurrentContent is not FileSurfaceContent fileContent ||
+            if (window.CurrentContent is not FileWidgetContentAdapter fileContent ||
                 string.Equals(
                     fileContent.WidgetId,
                     activeWidgetId,
@@ -2133,7 +2133,7 @@ public sealed partial class WidgetManager
 
                     if (GetLoadedWindow(group.ActiveMemberId) is not ContentWidgetWindow window ||
                         !window.Visible ||
-                        window.CurrentContent is not FileSurfaceContent fileSurface ||
+                        window.CurrentContent is not FileWidgetContentAdapter fileSurface ||
                         !string.Equals(
                             fileSurface.WidgetId,
                             group.ActiveMemberId,
@@ -2449,9 +2449,9 @@ public sealed partial class WidgetManager
         ContentWidgetWindow? contentWindow = _contentWidgets.Values
             .Distinct()
             .FirstOrDefault(window =>
-                window.CurrentContent is FileSurfaceContent surface &&
+                window.CurrentContent is FileWidgetContentAdapter surface &&
                 string.Equals(surface.WidgetId, widgetId, StringComparison.Ordinal));
-        if (contentWindow?.CurrentContent is FileSurfaceContent fileSurface)
+        if (contentWindow?.CurrentContent is FileWidgetContentAdapter fileSurface)
         {
             await fileSurface.ViewModel.RefreshFromConfigAsync();
         }
@@ -2479,9 +2479,9 @@ public sealed partial class WidgetManager
             ContentWidgetWindow? contentWindow = _contentWidgets.Values
                 .Distinct()
                 .FirstOrDefault(window =>
-                    window.CurrentContent is FileSurfaceContent surface &&
+                    window.CurrentContent is FileWidgetContentAdapter surface &&
                     string.Equals(surface.WidgetId, widgetId, StringComparison.Ordinal));
-            if (contentWindow?.CurrentContent is FileSurfaceContent fileSurface)
+            if (contentWindow?.CurrentContent is FileWidgetContentAdapter fileSurface)
             {
                 fileSurface.SetDesktopOrganizationBusy(isBusy);
             }
@@ -2772,7 +2772,7 @@ public sealed partial class WidgetManager
             WidgetGroupSettings.FindByMember(
                 _settingsService.Settings,
                 config.Id) is not null ||
-            content is not FileSurfaceContent fileSurface)
+            content is not FileWidgetContentAdapter fileAdapter)
         {
             return;
         }
@@ -2784,7 +2784,7 @@ public sealed partial class WidgetManager
 
         bool newHost = !_fileWidgets.TryGetValue(config.Id, out var previous) ||
             !ReferenceEquals(previous.Host, window);
-        var session = new FileWidgetSession(window, fileSurface);
+        var session = new FileWidgetSession(window, fileAdapter);
         if (!_fileSessionRegistration.RegisterOrReplace(config.Id, session)) return;
         if (newHost) _fileWidgetHostDiagnostics.RecordUnifiedCreation();
         App.LogVerbose(

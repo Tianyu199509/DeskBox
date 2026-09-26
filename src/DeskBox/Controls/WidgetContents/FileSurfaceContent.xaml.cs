@@ -23,17 +23,12 @@ using VirtualKey = Windows.System.VirtualKey;
 namespace DeskBox.Controls.WidgetContents;
 
 /// <summary>
-/// Shared file-widget content used by both standalone and grouped unified hosts.
+/// Shared file-widget leaf view used by both standalone and grouped unified
+/// hosts. The residency adapter (FileWidgetContentAdapter) owns the view
+/// model and this leaf's lifetime.
 /// </summary>
 public sealed partial class FileSurfaceContent :
     UserControl,
-    IWidgetContent,
-    ICancellableWidgetContent,
-    IWidgetGroupContentCacheable,
-    IWidgetAddActionContent,
-    IWidgetFeedbackSource,
-    IWidgetHostContextMenuSource,
-    IWidgetTransientStateContent,
     IDisposable
 {
     private const int StackDuplicateInputWindowMs = 120;
@@ -201,23 +196,15 @@ public sealed partial class FileSurfaceContent :
     }
 
     public FileSurfaceContent(
-        WidgetConfig config,
+        WidgetViewModel viewModel,
         FileService fileService,
-        OrganizerService organizerService,
         SettingsService settingsService,
-        LocalizationService localizationService,
-        DispatcherQueue dispatcherQueue)
+        LocalizationService localizationService)
     {
         _fileService = fileService;
         _settingsService = settingsService;
         _localizationService = localizationService;
-        ViewModel = new WidgetViewModel(
-            config,
-            fileService,
-            organizerService,
-            settingsService,
-            localizationService,
-            dispatcherQueue);
+        ViewModel = viewModel;
 
         InitializeComponent();
         Root.AddHandler(
@@ -265,9 +252,9 @@ public sealed partial class FileSurfaceContent :
 
     public WidgetViewModel ViewModel { get; }
 
-    public event EventHandler<WidgetFeedbackRequestedEventArgs>? FeedbackRequested;
+    internal event EventHandler<WidgetFeedbackRequestedEventArgs>? FeedbackRequested;
 
-    public event EventHandler<WidgetHostContextMenuOpeningEventArgs>?
+    internal event EventHandler<WidgetHostContextMenuOpeningEventArgs>?
         HostContextMenuOpening;
 
     internal event Action<bool>? ImportBusyChanged;
@@ -283,21 +270,10 @@ public sealed partial class FileSurfaceContent :
 
     internal void SetHostWindowHandle(IntPtr windowHandle)
     {
+        // The confirm-extension callback is wired by the owning adapter, so
+        // the leaf only records the handle its shell dialogs and popovers
+        // parent to.
         _hostWindowHandle = windowHandle;
-        ViewModel.ConfirmExtensionChangeHandler = ConfirmExtensionRename;
-    }
-
-    private bool ConfirmExtensionRename(string sourcePath, string destinationPath)
-    {
-        if (_isDisposed)
-        {
-            return false;
-        }
-
-        return Win32Helper.ConfirmExtensionChange(
-            _hostWindowHandle,
-            T("Widget.Rename.ExtensionChangeWarning"),
-            T("Common.Rename"));
     }
 
     internal void SuspendItemContainerTransitionsForHostSwitch()
@@ -332,22 +308,18 @@ public sealed partial class FileSurfaceContent :
         _itemContainerTransitionsSuspendedForHostSwitch = false;
     }
 
-    public WidgetConfig Config => ViewModel.Config;
+    internal WidgetConfig Config => ViewModel.Config;
 
-    public string WidgetId => Config.Id;
+    internal string WidgetId => Config.Id;
 
-    public WidgetKind WidgetKind => WidgetKind.File;
+    internal bool IsReadyForReuse => _isReadyForReuse && !_isDisposed;
 
-    public FrameworkElement View => this;
-
-    public bool IsReadyForReuse => _isReadyForReuse && !_isDisposed;
-
-    public Task InitializeAsync()
+    internal Task InitializeAsync()
     {
         return InitializeAsync(CancellationToken.None);
     }
 
-    public async Task InitializeAsync(CancellationToken cancellationToken)
+    internal async Task InitializeAsync(CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
         await ViewModel.InitializeAsync(cancellationToken);
@@ -357,7 +329,7 @@ public sealed partial class FileSurfaceContent :
         UpdateEmptyState();
     }
 
-    public async Task RefreshAsync()
+    internal async Task RefreshAsync()
     {
         await ViewModel.RefreshFolderContentsAsync();
         _lastDiskReconciliationUtc = DateTime.UtcNow;
@@ -405,7 +377,7 @@ public sealed partial class FileSurfaceContent :
             "file-saved-here"));
     }
 
-    public void ApplyAppearance()
+    internal void ApplyAppearance()
     {
         ViewModel.ApplyAppearancePreview();
         ApplyAccentVisuals();
@@ -443,7 +415,7 @@ public sealed partial class FileSurfaceContent :
         }
     }
 
-    public void OnActivated()
+    internal void OnActivated()
     {
         bool pointerActivation = Win32Helper.IsAnyMouseButtonDown();
         if (IsLoaded && !pointerActivation)
@@ -461,7 +433,7 @@ public sealed partial class FileSurfaceContent :
         }
     }
 
-    public void PrepareForReuse()
+    internal void PrepareForReuse()
     {
         ResetOpenItemStateForReuse();
         CloseStackPopover(releaseImmediately: true);
@@ -475,7 +447,7 @@ public sealed partial class FileSurfaceContent :
         ViewModel.PrepareStackDisplayForReuse();
     }
 
-    public void OnDeactivated()
+    internal void OnDeactivated()
     {
         // File hydration and folder watchers follow the actual window visibility,
         // rather than foreground activation. Desktop-layer groups intentionally
@@ -488,7 +460,7 @@ public sealed partial class FileSurfaceContent :
         ClearItemSelectionIfInteractionIdle();
     }
 
-    public void OnCompactStateChanged(bool collapsed)
+    internal void OnCompactStateChanged(bool collapsed)
     {
         // Collapsing a widget hides its items; keeping hidden selection state
         // would resurrect stale highlights on the next expand.
@@ -498,7 +470,7 @@ public sealed partial class FileSurfaceContent :
         }
     }
 
-    public void OnCompactBoundsTransitionActiveChanged(bool isActive)
+    internal void OnCompactBoundsTransitionActiveChanged(bool isActive)
     {
         // Icon hydration batches re-layout tiles as their bitmaps land. The
         // bounds-transition animation needs an uncontended UI thread, so hold
@@ -540,7 +512,7 @@ public sealed partial class FileSurfaceContent :
         ClearItemSelection();
     }
 
-    public object? CaptureTransientState()
+    internal object? CaptureTransientState()
     {
         return new FileWidgetTransientState(
             GetSelectedItems()
@@ -551,7 +523,7 @@ public sealed partial class FileSurfaceContent :
             _cutClipboardPaths.ToArray());
     }
 
-    public void RestoreTransientState(object? state)
+    internal void RestoreTransientState(object? state)
     {
         if (state is not FileWidgetTransientState fileState)
         {
@@ -568,7 +540,7 @@ public sealed partial class FileSurfaceContent :
         RefreshItemSelectionVisuals();
     }
 
-    public void OnWindowVisibilityChanged(bool visible)
+    internal void OnWindowVisibilityChanged(bool visible)
     {
         _isWindowVisible = visible;
         if (visible)
@@ -667,7 +639,7 @@ public sealed partial class FileSurfaceContent :
         await Task.Delay(TimeSpan.FromMilliseconds(48), cancellationToken);
     }
 
-    public Task AddFromTitleButtonAsync() => RunAsync(PickAndImportFilesAsync);
+    internal Task AddFromTitleButtonAsync() => RunAsync(PickAndImportFilesAsync);
 
     private void OnLoaded(object sender, RoutedEventArgs e)
     {
@@ -869,7 +841,7 @@ public sealed partial class FileSurfaceContent :
         }
     }
 
-    public void OnWindowRevealCompleted()
+    internal void OnWindowRevealCompleted()
     {
         if (_isDisposed || !_isWindowVisible || _isWindowRevealCompleted)
         {
@@ -5300,10 +5272,10 @@ public sealed partial class FileSurfaceContent :
         ResetStackInteractionVisuals();
         DisposeStackSurfacePropertyChanges();
         DisposeStackPopoverLifecycle();
-        if (ViewModel.ConfirmExtensionChangeHandler == ConfirmExtensionRename)
-        {
-            ViewModel.ConfirmExtensionChangeHandler = null;
-        }
+        // The confirm-extension callback belongs to the owning adapter; the
+        // view model is being disposed here anyway, so drop any handler it
+        // still carries instead of assuming whose it was.
+        ViewModel.ConfirmExtensionChangeHandler = null;
 
         _isDisposed = true;
         _isReadyForReuse = false;

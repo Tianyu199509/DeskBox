@@ -45,7 +45,7 @@ public sealed partial class WidgetManager
 
     private IWidgetContent CreateFileSurfaceContent(WidgetConfig config)
     {
-        return new FileSurfaceContent(
+        return new FileWidgetContentAdapter(
             config,
             _fileService,
             _organizerService,

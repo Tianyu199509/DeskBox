@@ -380,7 +380,7 @@ public sealed partial class ContentWidgetWindow
             _config,
             behavior);
         SettingsService.UpdateWidget(_config);
-        if (CurrentContent is FileSurfaceContent fileSurface)
+        if (CurrentContent is FileWidgetContentAdapter fileSurface)
         {
             _ = fileSurface.ApplyFolderOpenBehaviorChangeAsync();
         }

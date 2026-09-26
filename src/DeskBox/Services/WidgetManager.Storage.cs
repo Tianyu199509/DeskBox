@@ -194,12 +194,12 @@ public sealed partial class WidgetManager
                 : _contentWidgets.Values
                     .Distinct()
                     .FirstOrDefault(window =>
-                        window.CurrentContent is FileSurfaceContent surface &&
+                        window.CurrentContent is FileWidgetContentAdapter surface &&
                         string.Equals(
                             surface.WidgetId,
                             widgetId,
                             StringComparison.Ordinal));
-        if (contentWindow?.CurrentContent is not FileSurfaceContent fileSurface ||
+        if (contentWindow?.CurrentContent is not FileWidgetContentAdapter fileSurface ||
             !string.Equals(
                 fileSurface.WidgetId,
                 widgetId,
@@ -1200,9 +1200,9 @@ public sealed partial class WidgetManager
             ContentWidgetWindow? contentWindow = _contentWidgets.Values
                 .Distinct()
                 .FirstOrDefault(window =>
-                    window.CurrentContent is FileSurfaceContent surface &&
+                    window.CurrentContent is FileWidgetContentAdapter surface &&
                     string.Equals(surface.WidgetId, widgetId, StringComparison.Ordinal));
-            if (contentWindow?.CurrentContent is FileSurfaceContent fileSurface)
+            if (contentWindow?.CurrentContent is FileWidgetContentAdapter fileSurface)
             {
                 fileSurface.SetMigrationBusy(isBusy);
             }
