@@ -464,7 +464,10 @@ Set-Content `
 $settings = [ordered]@{
     schemaVersion = 9
     language = "zh-CN"
-    managedDropAction = "Copy"
+    # The no-modifier probe must freeze a Move (its sources have to disappear),
+    # so the widget's native default transfer has to be the product default
+    # "Move"; the Ctrl probes explicitly force Copy on top of it.
+    managedDropAction = "Move"
     autoStart = $false
     autoCheckForUpdates = $false
     globalHotkeyEnabled = $false
@@ -577,14 +580,12 @@ try {
             [string]$initialHashes.moveNested) {
         throw "Native-drop destination content hashes do not match their sources."
     }
-    if (-not [bool]$mutate.result.nativeDrop.copyImport.duringImport.cardVisible -or
-        -not [bool]$mutate.result.nativeDrop.copyImport.duringImport.backgroundIsAcrylicBrush -or
-        [int]$mutate.result.nativeDrop.copyImport.duringImport.canvasZIndex -lt 1000 -or
-        [double]$mutate.result.nativeDrop.copyImport.duringImport.translationZ -lt 64 -or
+    if (-not [bool]$mutate.result.nativeDrop.copyImport.duringImport.isImportBusy -or
+        [bool]$mutate.result.nativeDrop.copyImport.duringImport.cardVisible -or
         [bool]$mutate.result.nativeDrop.copyImport.immediatelyAfterCallback.isImportBusy -or
         [bool]$mutate.result.nativeDrop.nativePointerClear.highlightActiveAfter -or
         [bool]$mutate.result.nativeDrop.nativeLeaveClear.highlightActiveAfter) {
-        throw "Mutate phase did not prove progress layering or stale-highlight cleanup."
+        throw "Mutate phase did not prove deferred shell progress or stale-highlight cleanup."
     }
 
     $verifyRestore = Invoke-NativeDropPhase `
