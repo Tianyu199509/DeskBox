@@ -10,7 +10,7 @@ public sealed partial class WidgetManager
             .Select(entry => entry.ViewModel)
             .Concat(_contentWidgets.Values
                 .Select(window => window.CurrentContent)
-                .OfType<FileSurfaceContent>()
+                .OfType<FileWidgetContentAdapter>()
                 .Select(content => content.ViewModel))
             .Distinct()
             .SelectMany(viewModel => new[]
