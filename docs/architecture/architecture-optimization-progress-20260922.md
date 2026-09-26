@@ -550,3 +550,15 @@ A+B 工作树已补齐最终 QuickCapture 退出/快捷入口和 Todo 非有限�
 - 全量 x64 4,232/4,232（分支基线 4,230 + 2 个新用例）；AOT 条件编译 890 警告、0 错误（`ArtifactsPath` 隔离，仓库锁文件未改动）；`git diff --check` 通过。
 - 设备级检查已完成（2026-09-25 晚，隔离 Debug 临时入口，入口已移除）：真实 HWND 双文件格子组，`reused-detach-create,reused-detach-rollback-save,detach-reconcile-registry` 三阶段全触发——复用失败→回滚写盘被拒→对账重指失败→隔离补偿成功重建独立声明→后续经真实编排的重命名正常完成（`RaiseWidgetGroupsChanged` 不再抛），进程无崩溃。
 - 老版对照终审（同日）：设置面/运行时/磁盘兼容三路审计。磁盘兼容全绿（新→旧→新双向启动演练 settings.json 逐字节一致）；两处用户可见变更确认为第 5 批文档明示的有意统一（菜单关闭随记同步停录制、旧"功能关+录制开"配置启动归一化），列入 1.6.0 changelog 候选；补回 3 条剪贴板日志标记线（"Disabled from settings"/"Service initialized on demand"/"Inactive service released"）。最终全量 4,237/4,237。
+
+## 第二十五批：审计遗留清理与文档对账
+
+实施基线：`fdb5d45a`（main，四段 PR 栈 + #427 + #428 全部合并后）。本批只清理历次审查的低风险遗留项与文档欠账，不改用户可见行为。
+
+- 删除 `WidgetSurfaceSession.SwitchGate` 死代码（全仓零引用，真串行早已由 `WidgetSurfaceSwitchGatePool` 承担）。
+- 空白 SurfaceId 语义澄清：全量测试证明 `AcquireManyAsync` 的跳过空白行为是**承载语义**（独立格子的拓扑事务参与者没有 SurfaceId，必须无门控运行），不可改为抛错（首版 fail-closed 尝试被 HiddenMerge 双故障测试当场击落并回退）；拆离/解散/重排入口在查找组之前先 `WidgetGroupSettings.Normalize`（对齐合并路径既有做法），`Get` 对空白仍严格抛错。新增测试钉住跳过语义。
+- `FileSurfaceContent` 磁盘协调的 `OperationCanceledException` 与表面切换/退役的竞争改为 Verbose 记录（Session A 观察到的日志噪声），真实失败仍走原错误日志。
+- 远端**列表**操作仍不经 `BackupRestoreActions` 登记（只读、页面访问已取消、无状态影响；为它穿透三层构造函数与低风险清理批的定位不符）——维持文档化残余，随下次触碰备份协调器时顺手收编。
+- 文档对账：路线图追记执行对账（分组事务线立档、2C PR-1 状态修正、IFeatureRuntime 替代记录）。
+
+验证记录：定向测试（GatePool/Registry）通过；全量 x64 4,238/4,238（4,237 + 1 个新用例；首版抛错尝试在 4,237/4,238 被合并编排测试击落后回退）；`git diff --check` 通过。设备验收（A/B/D）已于 2026-09-26 全绿，发版等 Simon 指令。

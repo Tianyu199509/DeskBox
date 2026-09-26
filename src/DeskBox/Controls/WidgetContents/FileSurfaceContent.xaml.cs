@@ -630,6 +630,14 @@ public sealed partial class FileSurfaceContent :
                         $"[FolderRefresh] Reconciled file surface " +
                         $"widget={WidgetId} reason={reason}");
                 }
+                catch (OperationCanceledException)
+                {
+                    // Losing the race against a surface switch or teardown is
+                    // the expected outcome, not a reconciliation failure.
+                    App.LogVerbose(
+                        $"[FolderRefresh] File surface reconciliation canceled " +
+                        $"widget={WidgetId} reason={reason}");
+                }
                 catch (Exception ex)
                 {
                     App.Log(

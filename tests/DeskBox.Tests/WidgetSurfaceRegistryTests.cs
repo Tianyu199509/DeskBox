@@ -665,15 +665,10 @@ public sealed class WidgetSurfaceRegistryTests
     [Fact]
     public void DifferentSurfacesOwnDifferentSwitchGates()
     {
-        var registry = new WidgetSurfaceRegistry<object>();
-        WidgetSurfaceSession<object> first = registry.RegisterActive(
-            CreateDefinition("surface-1", "a", "a", "b"),
-            new object());
-        WidgetSurfaceSession<object> second = registry.RegisterActive(
-            CreateDefinition("surface-2", "c", "c", "d"),
-            new object());
+        var gates = new WidgetSurfaceSwitchGatePool();
 
-        Assert.NotSame(first.SwitchGate, second.SwitchGate);
+        Assert.NotSame(gates.Get("surface-1"), gates.Get("surface-2"));
+        Assert.Same(gates.Get("surface-1"), gates.Get("surface-1"));
     }
 
     [Fact]
@@ -699,14 +694,15 @@ public sealed class WidgetSurfaceRegistryTests
     public async Task RemovingSurfaceWhileGateIsHeld_AllowsInFlightRelease()
     {
         var registry = new WidgetSurfaceRegistry<object>();
-        WidgetSurfaceSession<object> session = registry.RegisterActive(
+        registry.RegisterActive(
             CreateDefinition("surface", "a", "a", "b"),
             new object());
-        await session.SwitchGate.WaitAsync();
+        var gates = new WidgetSurfaceSwitchGatePool();
+        IDisposable lease = await gates.AcquireManyAsync(["surface"]);
 
         Assert.True(registry.RemoveSurface("surface"));
         Exception? releaseFailure = Record.Exception(
-            () => { session.SwitchGate.Release(); });
+            () => { lease.Dispose(); });
 
         Assert.Null(releaseFailure);
         Assert.False(registry.TryGet("surface", out _));
