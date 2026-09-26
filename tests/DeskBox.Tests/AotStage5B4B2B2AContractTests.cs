@@ -163,6 +163,113 @@ public sealed class AotStage5B4B2B2AContractTests
     }
 
     [Fact]
+    public void Evidence_ProjectsOnlyLiveItemsBecauseDeletesPersistAsTombstones()
+    {
+        string persistence = ReadRepositoryFile(
+            "src/DeskBox/App.AotTodoPersistenceSmoke.cs");
+        string steps = ReadRepositoryFile(
+            "src/DeskBox/App.AotTodoStepsPersistenceSmoke.cs");
+        string attachments = ReadRepositoryFile(
+            "src/DeskBox/App.AotTodoAttachmentsPersistenceSmoke.cs");
+
+        Assert.Contains("Where(item => !item.IsDeleted)", persistence, StringComparison.Ordinal);
+        Assert.Contains("Single(entry => !entry.IsDeleted)", persistence, StringComparison.Ordinal);
+        Assert.Contains("Single(entry => !entry.IsDeleted)", steps, StringComparison.Ordinal);
+        Assert.Contains("Single(entry => !entry.IsDeleted)", attachments, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Evidence_GatesDeletedItemTombstoneWriteAndRestartSurvival()
+    {
+        string persistence = ReadRepositoryFile(
+            "src/DeskBox/App.AotTodoPersistenceSmoke.cs");
+        string steps = ReadRepositoryFile(
+            "src/DeskBox/App.AotTodoStepsPersistenceSmoke.cs");
+        string attachments = ReadRepositoryFile(
+            "src/DeskBox/App.AotTodoAttachmentsPersistenceSmoke.cs");
+
+        Assert.Contains(
+            "TombstoneIdCount = data.Items.Count(item => item.IsDeleted)",
+            persistence,
+            StringComparison.Ordinal);
+        Assert.Contains("public int TombstoneIdCount { get; set; }", persistence, StringComparison.Ordinal);
+        Assert.Contains("public List<string> TombstoneIds { get; set; } = [];", persistence, StringComparison.Ordinal);
+        Assert.Contains(
+            "RequireAotTodoTombstonesPersisted(evidence.After, itemId)",
+            persistence,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "RequireAotTodoTombstonesPersisted(evidence.After, restart.ItemId)",
+            steps,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "RequireAotTodoTombstonesPersisted(evidence.After, deletion.ItemId)",
+            attachments,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "RequireAotTodoTombstoneSurvivedRestart(evidence.Before)",
+            persistence,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "RequireAotTodoTombstoneSurvivedRestart(evidence.Before)",
+            steps,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "RequireAotTodoTombstoneSurvivedRestart(evidence.Before)",
+            attachments,
+            StringComparison.Ordinal);
+        Assert.Contains("TodoDeletedItemTombstonePersisted", persistence, StringComparison.Ordinal);
+        Assert.Contains("TodoDeleteTombstoneSurvivedRestart", persistence, StringComparison.Ordinal);
+        Assert.Contains("TodoStepsDeletedItemTombstonePersisted", steps, StringComparison.Ordinal);
+        Assert.Contains("TodoStepsDeleteTombstoneSurvivedRestart", steps, StringComparison.Ordinal);
+        Assert.Contains("TodoAttachmentsDeletedItemTombstonePersisted", attachments, StringComparison.Ordinal);
+        Assert.Contains("TodoAttachmentsDeleteTombstoneSurvivedRestart", attachments, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void OuterRunner_GatesDeletedItemTombstoneIdsAcrossRestart()
+    {
+        string script = ReadRepositoryFile("scripts/run-aot-managed-ui-smoke.ps1");
+
+        Assert.Contains("$deletedTodoItemId", script, StringComparison.Ordinal);
+        Assert.Contains("tombstoneIdsAfterDelete", script, StringComparison.Ordinal);
+        Assert.Contains("tombstoneIdsAfterRestart", script, StringComparison.Ordinal);
+        Assert.Contains("$deletedTodoStepsItemId", script, StringComparison.Ordinal);
+        Assert.Contains("todoStepsTombstoneIdsAfterRestart", script, StringComparison.Ordinal);
+        Assert.Contains("$deletedTodoAttachmentsItemId", script, StringComparison.Ordinal);
+        Assert.Contains("todoAttachmentsTombstoneIdsAfterRestart", script, StringComparison.Ordinal);
+        Assert.Contains(
+            "did not persist its soft-delete tombstone across the process restart.",
+            script,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void AuditFreezesTombstoneWritePathGatesInAllTodoStages()
+    {
+        string audit = ReadRepositoryFile("scripts/publish-aot-audit.ps1");
+
+        Assert.Contains(
+            "stage5B4B2B2ARequiredRunnerPatterns",
+            audit,
+            StringComparison.Ordinal);
+        Assert.Contains("'TombstoneIdCount'", audit, StringComparison.Ordinal);
+        Assert.Contains("'RequireAotTodoTombstonesPersisted'", audit, StringComparison.Ordinal);
+        Assert.Contains("'RequireAotTodoTombstoneSurvivedRestart'", audit, StringComparison.Ordinal);
+        Assert.Contains(
+            "'RequireAotTodoTombstonesPersisted(evidence.After, restart.ItemId)'",
+            audit,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "'RequireAotTodoTombstonesPersisted(evidence.After, deletion.ItemId)'",
+            audit,
+            StringComparison.Ordinal);
+        Assert.Contains("'tombstoneIdsAfterRestart'", audit, StringComparison.Ordinal);
+        Assert.Contains("'todoStepsTombstoneIdsAfterRestart'", audit, StringComparison.Ordinal);
+        Assert.Contains("'todoAttachmentsTombstoneIdsAfterRestart'", audit, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void TodoScenario_ReusesSingleSourceGeneratedResultWriter()
     {
         string source = ReadRepositoryFile("src/DeskBox/App.AotManagedUiSmoke.cs");

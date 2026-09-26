@@ -115,7 +115,7 @@ public sealed partial class SettingsWindow
                         parentPage.CurrentSection,
                         deepSettingsRoutes[1],
                         StringComparison.Ordinal) &&
-                    parentPage.BreadcrumbItems.Count == 2;
+                    parentPage.BreadcrumbItems.Count == 0;
             }
 
             await Task.Delay(100);

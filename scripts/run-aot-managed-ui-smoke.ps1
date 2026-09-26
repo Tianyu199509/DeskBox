@@ -946,7 +946,7 @@ function Assert-GlanceEvidenceState {
     $viewModel = $State.viewModel
     $surface = $State.surface
     $commonStoreValid =
-        [int]$store.version -eq 8 -and
+        [int]$store.version -eq 10 -and
         [string]$store.backgroundSource -ceq "LocalFiles" -and
         $null -eq $store.localFolderPath -and
         [bool]$store.showTime -and
@@ -3594,7 +3594,7 @@ New-Item -ItemType Directory -Path $fixtureDirectory -Force | Out-Null
 
 # Seed AppSettings.HasCompletedOnboarding, FeatureWidgetEnabledStates, and SearchSaveHistory.
 $settings = [ordered]@{
-    schemaVersion = 5
+    schemaVersion = 9
     language = "en-US"
     autoStart = $false
     autoCheckForUpdates = $false
@@ -3670,6 +3670,7 @@ $settings = [ordered]@{
 }
 if ($scenario -ceq "DeepSettingsReadOnly") {
     $settings["fileStacksEnabled"] = $true
+    $settings["fileStackAutoStacking"] = $true
     $settings["fileStackGroupBy"] = "Custom"
     $settings["fileStackCustomRules"] = @(
         [ordered]@{
@@ -3991,6 +3992,10 @@ elseif ($scenario -ceq "GlancePersistenceRestart") {
     $glanceStorePath = Join-Path `
         $glanceStoreDirectory `
         "aot-5b4b2c1-glance.json"
+    # Seed the fixture at an old schema form (version 8). The evidence gate
+    # below expects version 10, so the scenario verifies that the glance
+    # preference store's Normalize pass stamps the current schema version on
+    # load instead of echoing whatever the fixture shipped.
     $glanceBaseline = [ordered]@{
         version = 8
         showTime = $true
@@ -5458,6 +5463,26 @@ if ($scenario -ceq "TodoAttachmentsPersistenceRestart") {
             throw "Todo attachment postflight retained managed files."
         }
 
+        $deletedTodoAttachmentsItemId = [string]$afterAttachmentDelete.items[0].id
+        $todoAttachmentsTombstoneIdsAfterDelete =
+            @($verifyDelete.todoAttachmentsPersistence.after.tombstoneIds)
+        $todoAttachmentsTombstoneIdsAfterRestart =
+            @($postflight.todoAttachmentsPersistence.before.tombstoneIds)
+        if ([string]::IsNullOrWhiteSpace($deletedTodoAttachmentsItemId) -or
+            $todoAttachmentsTombstoneIdsAfterDelete.Count -ne 1 -or
+            -not [string]::Equals(
+                [string]$todoAttachmentsTombstoneIdsAfterDelete[0],
+                $deletedTodoAttachmentsItemId,
+                [System.StringComparison]::Ordinal) -or
+            $todoAttachmentsTombstoneIdsAfterRestart.Count -ne 1 -or
+            -not [string]::Equals(
+                [string]$todoAttachmentsTombstoneIdsAfterRestart[0],
+                $deletedTodoAttachmentsItemId,
+                [System.StringComparison]::Ordinal) -or
+            @($postflight.todoAttachmentsPersistence.after.tombstoneIds).Count -ne 1) {
+            throw "Todo attachments delete did not persist its soft-delete tombstone across the process restart."
+        }
+
         $todoAttachmentsNaturalExit = [ordered]@{
             mutate = [bool]$mutatePhase.naturalExit
             verifyDelete = [bool]$verifyDeletePhase.naturalExit
@@ -5722,6 +5747,26 @@ if ($scenario -ceq "TodoStepsPersistenceRestart") {
             throw "Todo steps verify/delete did not archive the zero-step task state."
         }
 
+        $deletedTodoStepsItemId = [string]$afterStepDelete.items[0].id
+        $todoStepsTombstoneIdsAfterDelete =
+            @($verifyDelete.todoStepsPersistence.after.tombstoneIds)
+        $todoStepsTombstoneIdsAfterRestart =
+            @($postflight.todoStepsPersistence.before.tombstoneIds)
+        if ([string]::IsNullOrWhiteSpace($deletedTodoStepsItemId) -or
+            $todoStepsTombstoneIdsAfterDelete.Count -ne 1 -or
+            -not [string]::Equals(
+                [string]$todoStepsTombstoneIdsAfterDelete[0],
+                $deletedTodoStepsItemId,
+                [System.StringComparison]::Ordinal) -or
+            $todoStepsTombstoneIdsAfterRestart.Count -ne 1 -or
+            -not [string]::Equals(
+                [string]$todoStepsTombstoneIdsAfterRestart[0],
+                $deletedTodoStepsItemId,
+                [System.StringComparison]::Ordinal) -or
+            @($postflight.todoStepsPersistence.after.tombstoneIds).Count -ne 1) {
+            throw "Todo steps delete did not persist its soft-delete tombstone across the process restart."
+        }
+
         $todoStepsNaturalExit = [ordered]@{
             mutate = [bool]$mutatePhase.naturalExit
             verifyDelete = [bool]$verifyDeletePhase.naturalExit
@@ -5925,6 +5970,24 @@ if ($scenario -ceq "TodoPersistenceRestart") {
             -Expected $postflight.todoPersistence.before `
             -Actual $postflight.todoPersistence.after `
             -Name "postflight-before-to-after"
+
+        $deletedTodoItemId = [string]$verifyDelete.todoPersistence.before.items[0].id
+        $tombstoneIdsAfterDelete = @($verifyDelete.todoPersistence.after.tombstoneIds)
+        $tombstoneIdsAfterRestart = @($postflight.todoPersistence.before.tombstoneIds)
+        if ([string]::IsNullOrWhiteSpace($deletedTodoItemId) -or
+            $tombstoneIdsAfterDelete.Count -ne 1 -or
+            -not [string]::Equals(
+                [string]$tombstoneIdsAfterDelete[0],
+                $deletedTodoItemId,
+                [System.StringComparison]::Ordinal) -or
+            $tombstoneIdsAfterRestart.Count -ne 1 -or
+            -not [string]::Equals(
+                [string]$tombstoneIdsAfterRestart[0],
+                $deletedTodoItemId,
+                [System.StringComparison]::Ordinal) -or
+            @($postflight.todoPersistence.after.tombstoneIds).Count -ne 1) {
+            throw "Todo delete did not persist its soft-delete tombstone across the process restart."
+        }
 
         $afterExplicitSave = $verifyDelete.todoPersistence.afterExplicitSave
         if ($null -eq $afterExplicitSave -or
@@ -6793,7 +6856,7 @@ try {
         $deepSettings = $smokeResult.deepSettings
         $deepRouteExpectations = [ordered]@{
             AppearanceDetail = @{ parent = $null; nav = "AppearanceDetail" }
-            CapsuleMode = @{ parent = "Appearance"; nav = "Appearance" }
+            CapsuleMode = @{ parent = $null; nav = "CapsuleMode" }
             WidgetGroups = @{ parent = "Appearance"; nav = "Appearance" }
             FileDisplaySettings = @{ parent = "AppearanceDetail"; nav = "AppearanceDetail" }
             ManagedStorage = @{ parent = "AppearanceDetail"; nav = "AppearanceDetail" }
@@ -6809,13 +6872,14 @@ try {
             AppearanceDensitySettings = @{ parent = "Appearance"; nav = "Appearance" }
             AppearanceWindowSettings = @{ parent = "Appearance"; nav = "Appearance" }
             AppearanceAnimationSettings = @{ parent = "Appearance"; nav = "Appearance" }
-            CapsuleBehaviorSettings = @{ parent = "CapsuleMode"; nav = "Appearance" }
-            CapsuleArrangementSettings = @{ parent = "CapsuleMode"; nav = "Appearance" }
-            CapsuleAnimationSettings = @{ parent = "CapsuleMode"; nav = "Appearance" }
-            CapsuleOverridesSettings = @{ parent = "CapsuleMode"; nav = "Appearance" }
+            CapsuleBehaviorSettings = @{ parent = "CapsuleMode"; nav = "CapsuleMode" }
+            CapsuleArrangementSettings = @{ parent = "CapsuleMode"; nav = "CapsuleMode" }
+            CapsuleAnimationSettings = @{ parent = "CapsuleMode"; nav = "CapsuleMode" }
+            CapsuleOverridesSettings = @{ parent = "CapsuleMode"; nav = "CapsuleMode" }
             BackupRestoreSettings = @{ parent = "Maintenance"; nav = "Maintenance" }
             DataHealthSettings = @{ parent = "Maintenance"; nav = "Maintenance" }
             CompatibilityDiagnosticsSettings = @{ parent = "Maintenance"; nav = "Maintenance" }
+            PerformanceSettings = @{ parent = "General"; nav = "General" }
         }
         $pageTransitions = @($deepSettings.pageTransitions)
         $searchSuggestions = @($deepSettings.searchSuggestions)

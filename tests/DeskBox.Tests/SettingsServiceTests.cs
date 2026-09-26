@@ -143,6 +143,132 @@ public sealed class SettingsServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task LoadAsync_MigratesLegacySchemaFiveProfileThroughTheFullChainToNine()
+    {
+        // A realistic settings.json as an older DeskBox build would have left
+        // it on disk: widgets with geometry, Everything consent captured under
+        // the retired local-index model, the all-or-nothing decorative
+        // animation switch, and the legacy stack master switch turned off.
+        // Loading it must run the real 5→9 chain and rewrite the store.
+        string settingsPath = Path.Combine(_settingsRoot, "settings.json");
+        await File.WriteAllTextAsync(
+            settingsPath,
+            """
+            {
+              "schemaVersion": 5,
+              "language": "en-US",
+              "searchMaxResults": 100,
+              "searchEverythingEnabled": true,
+              "searchEverythingExecutablePath": "C:\\Portable\\Everything.exe",
+              "searchEverythingAdvancedSyntaxEnabled": true,
+              "enableContinuousDecorativeAnimations": true,
+              "fileStacksEnabled": false,
+              "fileStackGroupBy": "Custom",
+              "fileStackThreshold": 5,
+              "fileStackCustomRules": [
+                {
+                  "id": "stack-rule-media",
+                  "name": "Media",
+                  "extensions": [".png", ".mp4"]
+                }
+              ],
+              "widgets": [
+                {
+                  "id": "desktop-files",
+                  "name": "Desktop Files",
+                  "widgetKind": "File",
+                  "x": 120,
+                  "y": 80,
+                  "width": 420,
+                  "height": 360,
+                  "mappedFolderPath": "C:\\Users\\user\\Desktop"
+                },
+                {
+                  "id": "tasks",
+                  "name": "Tasks",
+                  "widgetKind": "Todo",
+                  "x": 200,
+                  "y": 300,
+                  "width": 320,
+                  "height": 240
+                }
+              ]
+            }
+            """);
+
+        var service = new SettingsService(_settingsRoot);
+        await service.LoadAsync();
+
+        Assert.Equal(SettingsLoadRecoveryState.Primary, service.LastLoadRecoveryState);
+        Assert.Equal(SettingsMigrationPipeline.CurrentSchemaVersion, service.Settings.SchemaVersion);
+        Assert.Equal(9, service.Settings.SchemaVersion);
+
+        // Widgets survive the chain (and the layout-store adoption): both
+        // instances keep their identity, kind, and legacy geometry — the 5→6
+        // hop must not move a window while capturing the first topology.
+        WidgetConfig fileWidget = Assert.Single(
+            service.Settings.Widgets,
+            widget => widget.Id == "desktop-files");
+        WidgetConfig todoWidget = Assert.Single(
+            service.Settings.Widgets,
+            widget => widget.Id == "tasks");
+        Assert.Equal(WidgetKind.File, fileWidget.WidgetKind);
+        Assert.Equal(WidgetKind.Todo, todoWidget.WidgetKind);
+        Assert.Equal(120, fileWidget.X);
+        Assert.Equal(80, fileWidget.Y);
+        Assert.Equal(420, fileWidget.Width);
+        Assert.Equal(360, fileWidget.Height);
+
+        // 5→6: bounded topology layouts start empty; legacy geometry stays
+        // the active truth until the first stable startup captures it.
+        Assert.NotNull(service.Settings.WidgetTopologyLayouts);
+        Assert.Empty(service.Settings.WidgetTopologyLayouts);
+        Assert.Null(service.Settings.ActiveWidgetTopologyKey);
+
+        // 6→7: the retired local filename index needs fresh consent, so all
+        // three Everything settings reset regardless of the stored values.
+        Assert.False(service.Settings.SearchEverythingEnabled);
+        Assert.Equal(string.Empty, service.Settings.SearchEverythingExecutablePath);
+        Assert.False(service.Settings.SearchEverythingAdvancedSyntaxEnabled);
+
+        // 7→8: the all-or-nothing decorative switch fans out to the
+        // individual effects; glance rotation becomes independent and on.
+        Assert.True(service.Settings.EnableTextMarqueeAnimations);
+        Assert.True(service.Settings.EnableVinylRotationAnimations);
+        Assert.True(service.Settings.EnableCompactAmbientAnimations);
+        Assert.True(service.Settings.EnableGlanceImageAutoRotation);
+
+        // 8→9: legacy stacks off becomes (master on, auto off) so manual
+        // stacks stay visible, and the stack details ride along untouched.
+        Assert.True(service.Settings.FileStacksEnabled);
+        Assert.False(service.Settings.FileStackAutoStacking);
+        Assert.Equal(SettingsService.FileStackGroupByCustom, service.Settings.FileStackGroupBy);
+        Assert.Equal(5, service.Settings.FileStackThreshold);
+        FileStackCustomRule rule = Assert.Single(service.Settings.FileStackCustomRules);
+        Assert.Equal("stack-rule-media", rule.Id);
+        Assert.Equal([".png", ".mp4"], rule.Extensions);
+        Assert.Equal(SettingsService.LanguageEnglish, service.Settings.Language);
+        Assert.Equal(100, service.Settings.SearchMaxResults);
+
+        // The migrated profile is persisted back at the current schema.
+        using JsonDocument persisted = JsonDocument.Parse(
+            await File.ReadAllTextAsync(settingsPath));
+        Assert.Equal(9, persisted.RootElement.GetProperty("schemaVersion").GetInt32());
+        Assert.True(persisted.RootElement.GetProperty("fileStacksEnabled").GetBoolean());
+        Assert.False(persisted.RootElement.GetProperty("fileStackAutoStacking").GetBoolean());
+
+        // A fresh load of the rewritten store re-migrates nothing and still
+        // has both widgets: the migration write is durable and complete.
+        var reloaded = new SettingsService(_settingsRoot);
+        await reloaded.LoadAsync();
+        Assert.Equal(SettingsLoadRecoveryState.Primary, reloaded.LastLoadRecoveryState);
+        Assert.Equal(9, reloaded.Settings.SchemaVersion);
+        Assert.True(reloaded.Settings.FileStacksEnabled);
+        Assert.False(reloaded.Settings.FileStackAutoStacking);
+        Assert.Equal(2, reloaded.Settings.Widgets.Count);
+    }
+
+    [Fact]
     public async Task SaveAsync_PreservesDisabledStateForIndividualGlanceWidgets()
     {
         var service = new SettingsService(_settingsRoot);

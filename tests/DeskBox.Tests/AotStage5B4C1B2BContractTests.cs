@@ -140,7 +140,7 @@ public sealed class AotStage5B4C1B2BContractTests
         Assert.Contains("run-aot-file-properties-smoke.ps1", master, StringComparison.Ordinal);
         Assert.Contains("[Guid]::NewGuid().ToString(\"N\")", runner, StringComparison.Ordinal);
         Assert.Contains("file-properties-preview-$runId", runner, StringComparison.Ordinal);
-        Assert.Contains("profile 49 / schema 46", runner, StringComparison.Ordinal);
+        Assert.Contains("profile 59 / schema 55", runner, StringComparison.Ordinal);
         Assert.Contains("Refusing to replace an existing file Properties preview root", runner, StringComparison.Ordinal);
         Assert.Contains("Refusing to replace an existing file Properties recovery root", runner, StringComparison.Ordinal);
         Assert.Contains("properties-$runId.txt", runner, StringComparison.Ordinal);

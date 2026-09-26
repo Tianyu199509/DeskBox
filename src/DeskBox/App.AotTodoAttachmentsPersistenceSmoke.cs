@@ -43,7 +43,7 @@ public partial class App
         {
             TodoWidgetData reloaded = await new TodoWidgetStore(
                 AotManagedUiTodoAttachmentsWidgetId).LoadAsync();
-            TodoItem item = reloaded.Items.Single();
+            TodoItem item = reloaded.Items.Single(entry => !entry.IsDeleted);
             TodoAttachment attachment = item.Attachments.Single();
             evidence.RestartAttachmentUiProjected =
                 await surface.WaitForAotTodoAttachmentProjectionAsync(
@@ -126,25 +126,38 @@ public partial class App
                     surface,
                     AotManagedUiTodoAttachmentsWidgetId);
                 RequireAotManagedUiTodoEmpty(evidence.After);
+                RequireAotTodoTombstonesPersisted(evidence.After, deletion.ItemId);
                 RequireAotManagedUi(
                     result,
                     true,
                     "TodoAttachmentsItemDeleted",
                     "The Todo attachment fixture task was not deleted.");
+                RequireAotManagedUi(
+                    result,
+                    true,
+                    "TodoAttachmentsDeletedItemTombstonePersisted",
+                    "The deleted Todo attachment fixture task was not written back into the store as a soft-delete tombstone.");
                 break;
             }
 
             case AotManagedUiTodoAttachmentsPostflightPhase:
                 RequireAotManagedUiTodoEmpty(evidence.Before);
+                RequireAotTodoTombstoneSurvivedRestart(evidence.Before);
                 evidence.After = await CaptureAotManagedUiTodoStateAsync(
                     surface,
                     AotManagedUiTodoAttachmentsWidgetId);
                 RequireAotManagedUiTodoEmpty(evidence.After);
+                RequireAotTodoTombstoneSurvivedRestart(evidence.After);
                 RequireAotManagedUi(
                     result,
                     true,
                     "TodoAttachmentsDeletePostflightVerified",
                     "The Todo attachments delete postflight was not clean.");
+                RequireAotManagedUi(
+                    result,
+                    true,
+                    "TodoAttachmentsDeleteTombstoneSurvivedRestart",
+                    "The deleted Todo attachment fixture task tombstone did not survive the process restart.");
                 break;
 
             default:
@@ -179,6 +192,8 @@ public partial class App
             $"{item.Id}/{AotTodoAttachmentsExpectedDisplayName}";
         if (state.StoreVersion != 3 ||
             !state.StoreFileExists ||
+            state.TombstoneIdCount != 0 ||
+            state.TombstoneIds.Count != 0 ||
             !string.Equals(item.Id, expectedItemId, StringComparison.Ordinal) ||
             !string.Equals(
                 item.Text,
@@ -275,6 +290,8 @@ public partial class App
         AotManagedUiTodoItemEvidence item = state.Items.Single();
         if (state.StoreVersion != 3 ||
             !state.StoreFileExists ||
+            state.TombstoneIdCount != 0 ||
+            state.TombstoneIds.Count != 0 ||
             !string.Equals(item.Id, expectedItemId, StringComparison.Ordinal) ||
             !string.Equals(
                 item.Text,

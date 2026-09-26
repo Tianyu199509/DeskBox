@@ -45,7 +45,7 @@ public partial class App
         {
             TodoWidgetData reloaded =
                 await new TodoWidgetStore(AotManagedUiTodoWidgetId).LoadAsync();
-            TodoItem item = reloaded.Items.Single();
+            TodoItem item = reloaded.Items.Single(entry => !entry.IsDeleted);
             await surface.OpenAotTodoItemAsync(item.Id);
         }
         evidence.Before = await CaptureAotManagedUiTodoStateAsync(
@@ -121,25 +121,38 @@ public partial class App
                     surface,
                     AotManagedUiTodoWidgetId);
                 RequireAotManagedUiTodoEmpty(evidence.After);
+                RequireAotTodoTombstonesPersisted(evidence.After, itemId);
                 RequireAotManagedUi(
                     result,
                     true,
                     "TodoItemDeleted",
                     "The product Todo item deletion path did not complete.");
+                RequireAotManagedUi(
+                    result,
+                    true,
+                    "TodoDeletedItemTombstonePersisted",
+                    "The deleted Todo item was not written back into the store as a soft-delete tombstone.");
                 break;
             }
 
             case AotManagedUiTodoPostflightPhase:
                 RequireAotManagedUiTodoEmpty(evidence.Before);
+                RequireAotTodoTombstoneSurvivedRestart(evidence.Before);
                 evidence.After = await CaptureAotManagedUiTodoStateAsync(
                     surface,
                     AotManagedUiTodoWidgetId);
                 RequireAotManagedUiTodoEmpty(evidence.After);
+                RequireAotTodoTombstoneSurvivedRestart(evidence.After);
                 RequireAotManagedUi(
                     result,
                     true,
                     "TodoDeletePostflightVerified",
                     "The Todo delete postflight was not clean.");
+                RequireAotManagedUi(
+                    result,
+                    true,
+                    "TodoDeleteTombstoneSurvivedRestart",
+                    "The deleted Todo item tombstone did not survive the process restart.");
                 break;
 
             default:
@@ -175,7 +188,11 @@ public partial class App
         {
             StoreVersion = data.Version,
             StoreFileExists = File.Exists(store.StorePath),
+            // Deletes persist as soft-delete tombstones (merge safety), so the
+            // matrix projects only live items — the same contract as the
+            // Quick Capture persistence evidence.
             Items = data.Items
+                .Where(item => !item.IsDeleted)
                 .OrderBy(item => item.Id, StringComparer.Ordinal)
                 .Select(item => new AotManagedUiTodoItemEvidence
                 {
@@ -221,6 +238,15 @@ public partial class App
                     CreatedAt = item.CreatedAt,
                     UpdatedAt = item.UpdatedAt
                 })
+                .ToList(),
+            // Raw, unfiltered projection: deletes must land in the store as
+            // soft-delete tombstones (merge safety), so the deleted ids are
+            // recorded next to the live-only Items projection above.
+            TombstoneIdCount = data.Items.Count(item => item.IsDeleted),
+            TombstoneIds = data.Items
+                .Where(item => item.IsDeleted)
+                .Select(item => item.Id)
+                .OrderBy(id => id, StringComparer.Ordinal)
                 .ToList(),
             ManagedAttachmentDirectoryExists =
                 Directory.Exists(store.AttachmentDirectory),
@@ -316,6 +342,8 @@ public partial class App
         AotManagedUiTodoItemEvidence item = state.Items.Single();
         if (state.StoreVersion != 3 ||
             !state.StoreFileExists ||
+            state.TombstoneIdCount != 0 ||
+            state.TombstoneIds.Count != 0 ||
             !string.Equals(item.Text, expectedTitle, StringComparison.Ordinal) ||
             !string.Equals(item.Notes, expectedNotes, StringComparison.Ordinal) ||
             item.IsCompleted != expectedCompleted ||
@@ -365,6 +393,44 @@ public partial class App
                 "The Todo store, core task, notes, completion, or real detail state is incomplete.");
         }
     }
+
+    // The write path under test: deleting an item must keep its record in
+    // the store with IsDeleted == true so a cloud restore merge cannot
+    // resurrect it. A regression back to hard delete leaves the expected
+    // ids absent from the raw tombstone projection and fails here.
+    private static void RequireAotTodoTombstonesPersisted(
+        AotManagedUiTodoStateEvidence state,
+        params string[] expectedDeletedIds)
+    {
+        string[] expected = expectedDeletedIds
+            .Where(id => !string.IsNullOrEmpty(id))
+            .OrderBy(id => id, StringComparer.Ordinal)
+            .ToArray();
+        if (expectedDeletedIds.Length == 0 ||
+            expected.Length != expectedDeletedIds.Length ||
+            state.TombstoneIdCount != expected.Length ||
+            state.TombstoneIds.Count != expected.Length ||
+            !state.TombstoneIds.SequenceEqual(expected))
+        {
+            throw new InvalidOperationException(
+                "The deleted Todo items did not persist as soft-delete tombstones in the store.");
+        }
+    }
+
+    // Postflight runs in a fresh process where only the store crosses the
+    // restart, so the surviving tombstone is gated by count here; the outer
+    // runner pins its exact id against the pre-restart evidence.
+    private static void RequireAotTodoTombstoneSurvivedRestart(
+        AotManagedUiTodoStateEvidence state)
+    {
+        if (state.TombstoneIdCount != 1 ||
+            state.TombstoneIds.Count != 1 ||
+            string.IsNullOrEmpty(state.TombstoneIds.Single()))
+        {
+            throw new InvalidOperationException(
+                "The deleted Todo item tombstone did not survive the process restart.");
+        }
+    }
 }
 
 internal sealed class AotManagedUiTodoPersistenceEvidence
@@ -384,6 +450,8 @@ internal sealed class AotManagedUiTodoStateEvidence
     public int StoreVersion { get; set; }
     public bool StoreFileExists { get; set; }
     public List<AotManagedUiTodoItemEvidence> Items { get; set; } = [];
+    public int TombstoneIdCount { get; set; }
+    public List<string> TombstoneIds { get; set; } = [];
     public bool ManagedAttachmentDirectoryExists { get; set; }
     public int ManagedAttachmentFileCount { get; set; }
     public List<string> ManagedAttachmentRelativePaths { get; set; } = [];

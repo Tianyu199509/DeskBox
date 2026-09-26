@@ -250,7 +250,7 @@ public sealed partial class WidgetManager
             new QuickLookSurfaceHost(
                 session.Host,
                 session.Content,
-                session.Content.Surface!)));
+                session.Content.RequireSurface())));
         hosts.AddRange(_contentWidgets.Values
             .Distinct()
             .Where(window => window.CurrentContent is FileWidgetContentAdapter
@@ -260,7 +260,7 @@ public sealed partial class WidgetManager
             .Select(window => new QuickLookSurfaceHost(
                 window,
                 (FileWidgetContentAdapter)window.CurrentContent!,
-                ((FileWidgetContentAdapter)window.CurrentContent!).Surface!)));
+                ((FileWidgetContentAdapter)window.CurrentContent!).RequireSurface())));
 
         return hosts
             .Where(host => host.Host.Visible && host.Surface.IsLoaded)

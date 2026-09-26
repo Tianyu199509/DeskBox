@@ -201,7 +201,7 @@ public sealed class RenameExtensionChangeTests
             root,
             "src/DeskBox/Controls/WidgetContents/FileWidgetContentAdapter.cs"));
         Assert.Contains(
-            "_viewModel.ConfirmExtensionChangeHandler = ConfirmExtensionRename;",
+            "ViewModel.ConfirmExtensionChangeHandler = ConfirmExtensionRename;",
             adapter,
             StringComparison.Ordinal);
         Assert.Contains("Win32Helper.ConfirmExtensionChange(", adapter, StringComparison.Ordinal);
