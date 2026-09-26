@@ -312,13 +312,24 @@ public sealed class SettingsSliceOwnershipContractTests
         // unmatched behavior and the custom-rule collection) into
         // FileStackSettingsCoordinator (FileStackOptions 32->22, leaving only
         // the constructor/snapshot reads and the Widgets preview read).
+        // Batch 38 moved the feature-section writes (music presentation,
+        // weather options incl. the policy path, feature-card enable states,
+        // attachment storage, managed-drop action, folder-open behavior, and
+        // the music/weather feature-reset defaults) into
+        // FeatureWidgetsSettingsCoordinator, and the Quick Capture editor
+        // group into the existing QuickCaptureSettingsCoordinator
+        // (FeatureCallbacks 25->0 and lost its entry; WeatherOptions 2->1,
+        // only the city-name restore read remains; ContentEditorOptions
+        // 24->10, only the constructor/snapshot reads remain). FeatureOptions
+        // 68->2: both remaining matches are localization-key string literals
+        // ("Settings.AttachmentStorageMode.Copy"/".Link"), not facade
+        // accesses.
         ["src/DeskBox/ViewModels/SettingsViewModel.AppearanceOptions.cs"] = 1,
         ["src/DeskBox/ViewModels/SettingsViewModel.CapsuleOptions.cs"] = 20,
-        ["src/DeskBox/ViewModels/SettingsViewModel.ContentEditorOptions.cs"] = 24,
+        ["src/DeskBox/ViewModels/SettingsViewModel.ContentEditorOptions.cs"] = 10,
         ["src/DeskBox/ViewModels/SettingsViewModel.DesktopOrganization.cs"] = 1,
         ["src/DeskBox/ViewModels/SettingsViewModel.DisplayNames.cs"] = 6,
-        ["src/DeskBox/ViewModels/SettingsViewModel.FeatureCallbacks.cs"] = 25,
-        ["src/DeskBox/ViewModels/SettingsViewModel.FeatureOptions.cs"] = 68,
+        ["src/DeskBox/ViewModels/SettingsViewModel.FeatureOptions.cs"] = 2,
         ["src/DeskBox/ViewModels/SettingsViewModel.FeatureTextSize.cs"] = 5,
         ["src/DeskBox/ViewModels/SettingsViewModel.FileStackOptions.cs"] = 22,
         // Batch 37 moved the group-navigation default writes (wheel switch,
@@ -332,7 +343,7 @@ public sealed class SettingsSliceOwnershipContractTests
         ["src/DeskBox/ViewModels/SettingsViewModel.PreferenceCommands.cs"] = 2,
         ["src/DeskBox/ViewModels/SettingsViewModel.RuntimeDiagnostics.cs"] = 1,
         ["src/DeskBox/ViewModels/SettingsViewModel.SettingsSync.cs"] = 133,
-        ["src/DeskBox/ViewModels/SettingsViewModel.WeatherOptions.cs"] = 2,
+        ["src/DeskBox/ViewModels/SettingsViewModel.WeatherOptions.cs"] = 1,
         ["src/DeskBox/ViewModels/SettingsViewModel.WidgetForeground.cs"] = 4,
         ["src/DeskBox/ViewModels/SettingsViewModel.cs"] = 94,
         ["src/DeskBox/ViewModels/TodoWidgetViewModel.DetailAndAttachments.cs"] = 1,

@@ -104,10 +104,7 @@ public string SelectedWeatherTemperatureUnit
             return;
         }
 
-        WeatherSettingsPolicy.SetTemperatureUnit(
-            _settingsService.Settings,
-            _selectedWeatherTemperatureUnit);
-        _settingsService.SaveDebounced();
+        _featureWidgetsSettings.SetWeatherTemperatureUnit(_selectedWeatherTemperatureUnit);
     }
 }
 
@@ -140,10 +137,7 @@ public string SelectedWeatherWindSpeedUnit
             return;
         }
 
-        WeatherSettingsPolicy.SetWindSpeedUnit(
-            _settingsService.Settings,
-            _selectedWeatherWindSpeedUnit);
-        _settingsService.SaveDebounced();
+        _featureWidgetsSettings.SetWeatherWindSpeedUnit(_selectedWeatherWindSpeedUnit);
     }
 }
 
@@ -175,10 +169,7 @@ public string SelectedWeatherDefaultView
             return;
         }
 
-        WeatherSettingsPolicy.SetDefaultView(
-            _settingsService.Settings,
-            _selectedWeatherDefaultView);
-        _settingsService.SaveDebounced();
+        _featureWidgetsSettings.SetWeatherDefaultView(_selectedWeatherDefaultView);
     }
 }
 
@@ -210,10 +201,7 @@ public string SelectedWeatherSkin
             return;
         }
 
-        WeatherSettingsPolicy.SetSkin(
-            _settingsService.Settings,
-            _selectedWeatherSkin);
-        _settingsService.SaveDebounced();
+        _featureWidgetsSettings.SetWeatherSkin(_selectedWeatherSkin);
     }
 }
 
@@ -245,8 +233,7 @@ public string SelectedWeatherDataSource
             return;
         }
 
-        _settingsService.Settings.WeatherDataSource = _selectedWeatherDataSource;
-        _settingsService.SaveDebounced();
+        _featureWidgetsSettings.SetWeatherDataSource(_selectedWeatherDataSource);
     }
 }
 
@@ -278,10 +265,7 @@ public int SelectedWeatherRefreshInterval
             return;
         }
 
-        WeatherSettingsPolicy.SetRefreshInterval(
-            _settingsService.Settings,
-            _selectedWeatherRefreshInterval);
-        _settingsService.SaveDebounced();
+        _featureWidgetsSettings.SetWeatherRefreshInterval(_selectedWeatherRefreshInterval);
     }
 }
 
@@ -328,8 +312,7 @@ partial void OnWeatherAutoLocationChanged(bool value)
         return;
     }
 
-    WeatherSettingsPolicy.SetAutoLocation(_settingsService.Settings, value);
-    _settingsService.SaveDebounced();
+    _featureWidgetsSettings.SetWeatherAutoLocation(value);
     OnPropertyChanged(nameof(WeatherCityNameVisibility));
     OnPropertyChanged(nameof(WeatherLocationStatusVisibility));
 
@@ -649,8 +632,7 @@ public void SelectWeatherCity(WeatherCitySearchResult result)
             WeatherAutoLocation = false; // triggers OnWeatherAutoLocationChanged
         }
 
-        if (!WeatherSettingsPolicy.TrySetManualLocation(
-                _settingsService.Settings,
+        if (!_featureWidgetsSettings.TrySetWeatherManualLocation(
                 result.DisplayName,
                 result.Latitude,
                 result.Longitude))
@@ -658,7 +640,6 @@ public void SelectWeatherCity(WeatherCitySearchResult result)
             App.Log("[SettingsViewModel] Ignored city selection rejected by weather policy");
             return;
         }
-        _settingsService.SaveDebounced();
 
         WeatherCityName = result.DisplayName;
         _weatherCitySearchText = result.DisplayName;
@@ -704,11 +685,7 @@ partial void OnWeatherShowForecastChanged(bool value)
         return;
     }
 
-    WeatherSettingsPolicy.SetDisplayOption(
-        _settingsService.Settings,
-        WeatherDisplayOption.Forecast,
-        value);
-    _settingsService.SaveDebounced();
+    _featureWidgetsSettings.SetWeatherDisplayOption("Forecast", value);
 }
 
 partial void OnWeatherShowSunriseChanged(bool value)
@@ -719,11 +696,7 @@ partial void OnWeatherShowSunriseChanged(bool value)
         return;
     }
 
-    WeatherSettingsPolicy.SetDisplayOption(
-        _settingsService.Settings,
-        WeatherDisplayOption.Sunrise,
-        value);
-    _settingsService.SaveDebounced();
+    _featureWidgetsSettings.SetWeatherDisplayOption("Sunrise", value);
 }
 
 partial void OnWeatherShowUvIndexChanged(bool value)
@@ -734,11 +707,7 @@ partial void OnWeatherShowUvIndexChanged(bool value)
         return;
     }
 
-    WeatherSettingsPolicy.SetDisplayOption(
-        _settingsService.Settings,
-        WeatherDisplayOption.UvIndex,
-        value);
-    _settingsService.SaveDebounced();
+    _featureWidgetsSettings.SetWeatherDisplayOption("UvIndex", value);
 }
 
 partial void OnWeatherShowPrecipitationChanged(bool value)
@@ -749,11 +718,7 @@ partial void OnWeatherShowPrecipitationChanged(bool value)
         return;
     }
 
-    WeatherSettingsPolicy.SetDisplayOption(
-        _settingsService.Settings,
-        WeatherDisplayOption.Precipitation,
-        value);
-    _settingsService.SaveDebounced();
+    _featureWidgetsSettings.SetWeatherDisplayOption("Precipitation", value);
 }
 
 partial void OnWeatherShowHumidityChanged(bool value)
@@ -764,11 +729,7 @@ partial void OnWeatherShowHumidityChanged(bool value)
         return;
     }
 
-    WeatherSettingsPolicy.SetDisplayOption(
-        _settingsService.Settings,
-        WeatherDisplayOption.Humidity,
-        value);
-    _settingsService.SaveDebounced();
+    _featureWidgetsSettings.SetWeatherDisplayOption("Humidity", value);
 }
 
 partial void OnWeatherShowWindChanged(bool value)
@@ -779,11 +740,7 @@ partial void OnWeatherShowWindChanged(bool value)
         return;
     }
 
-    WeatherSettingsPolicy.SetDisplayOption(
-        _settingsService.Settings,
-        WeatherDisplayOption.Wind,
-        value);
-    _settingsService.SaveDebounced();
+    _featureWidgetsSettings.SetWeatherDisplayOption("Wind", value);
 }
 
 partial void OnWeatherShowPressureChanged(bool value)
@@ -794,10 +751,6 @@ partial void OnWeatherShowPressureChanged(bool value)
         return;
     }
 
-    WeatherSettingsPolicy.SetDisplayOption(
-        _settingsService.Settings,
-        WeatherDisplayOption.Pressure,
-        value);
-    _settingsService.SaveDebounced();
+    _featureWidgetsSettings.SetWeatherDisplayOption("Pressure", value);
 }
 }

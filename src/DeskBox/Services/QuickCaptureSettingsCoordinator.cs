@@ -300,6 +300,141 @@ public sealed class QuickCaptureSettingsCoordinator : IQuickCaptureSettings
     public int ReadRecentLimit() => QuickCaptureService.NormalizeRecentLimit(
         _settings.Settings.QuickCapture.QuickCaptureRecentLimit);
 
+    public QuickCaptureEditorSettings ReadEditorSettings()
+    {
+        QuickCaptureSettingsSlice quickCapture = _settings.Settings.QuickCapture;
+        return new(
+            SettingsService.NormalizeEditorEnterBehavior(
+                quickCapture.QuickCaptureEditorEnterBehavior),
+            SettingsService.NormalizeQuickCaptureFormat(
+                quickCapture.QuickCaptureDefaultFormat),
+            SettingsService.NormalizeQuickCaptureWideLayout(
+                quickCapture.QuickCaptureWideLayout),
+            SettingsService.NormalizeQuickCaptureWideOpenMode(
+                quickCapture.QuickCaptureWideOpenMode),
+            quickCapture.QuickCaptureAllowRemoteImages);
+    }
+
+    public void SetEditorEnterBehavior(string? behavior)
+    {
+        ObjectDisposedException.ThrowIf(_stopping, this);
+        QuickCaptureSettingsSlice quickCapture = _settings.Settings.QuickCapture;
+        string normalized = SettingsService.NormalizeEditorEnterBehavior(behavior);
+        if (string.Equals(
+                quickCapture.QuickCaptureEditorEnterBehavior,
+                normalized,
+                StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        quickCapture.QuickCaptureEditorEnterBehavior = normalized;
+        _settings.SaveDebounced();
+    }
+
+    public void SetEditorFormat(string? format)
+    {
+        ObjectDisposedException.ThrowIf(_stopping, this);
+        QuickCaptureSettingsSlice quickCapture = _settings.Settings.QuickCapture;
+        string normalized = SettingsService.NormalizeQuickCaptureFormat(format);
+        if (string.Equals(
+                quickCapture.QuickCaptureDefaultFormat,
+                normalized,
+                StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        quickCapture.QuickCaptureDefaultFormat = normalized;
+        _settings.SaveDebounced();
+    }
+
+    public void SetWideLayout(string? layout)
+    {
+        ObjectDisposedException.ThrowIf(_stopping, this);
+        QuickCaptureSettingsSlice quickCapture = _settings.Settings.QuickCapture;
+        string normalized = SettingsService.NormalizeQuickCaptureWideLayout(layout);
+        if (string.Equals(
+                quickCapture.QuickCaptureWideLayout,
+                normalized,
+                StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        quickCapture.QuickCaptureWideLayout = normalized;
+        _settings.SaveDebounced();
+    }
+
+    public void SetWideOpenMode(string? mode)
+    {
+        ObjectDisposedException.ThrowIf(_stopping, this);
+        QuickCaptureSettingsSlice quickCapture = _settings.Settings.QuickCapture;
+        string normalized = SettingsService.NormalizeQuickCaptureWideOpenMode(mode);
+        if (string.Equals(
+                quickCapture.QuickCaptureWideOpenMode,
+                normalized,
+                StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        quickCapture.QuickCaptureWideOpenMode = normalized;
+        _settings.SaveDebounced();
+    }
+
+    public void SetAllowRemoteImages(bool allowed)
+    {
+        ObjectDisposedException.ThrowIf(_stopping, this);
+        QuickCaptureSettingsSlice quickCapture = _settings.Settings.QuickCapture;
+        if (quickCapture.QuickCaptureAllowRemoteImages == allowed)
+        {
+            return;
+        }
+
+        quickCapture.QuickCaptureAllowRemoteImages = allowed;
+        _settings.SaveDebounced();
+    }
+
+    public void ResetEditorPreferences(bool scheduleSave = true)
+    {
+        ObjectDisposedException.ThrowIf(_stopping, this);
+        QuickCaptureSettingsSlice quickCapture = _settings.Settings.QuickCapture;
+        bool changed =
+            !string.Equals(
+                quickCapture.QuickCaptureEditorEnterBehavior,
+                SettingsService.EditorEnterBehaviorCtrlEnterSaves,
+                StringComparison.Ordinal) ||
+            !string.Equals(
+                quickCapture.QuickCaptureDefaultFormat,
+                SettingsService.QuickCaptureFormatMarkdown,
+                StringComparison.Ordinal) ||
+            !string.Equals(
+                quickCapture.QuickCaptureWideLayout,
+                SettingsService.QuickCaptureWideLayoutAuto,
+                StringComparison.Ordinal) ||
+            !string.Equals(
+                quickCapture.QuickCaptureWideOpenMode,
+                SettingsService.QuickCaptureWideOpenReading,
+                StringComparison.Ordinal) ||
+            quickCapture.QuickCaptureAllowRemoteImages != false ||
+            quickCapture.LastQuickCaptureFileWidgetId.Length != 0;
+        quickCapture.QuickCaptureEditorEnterBehavior =
+            SettingsService.EditorEnterBehaviorCtrlEnterSaves;
+        quickCapture.QuickCaptureDefaultFormat =
+            SettingsService.QuickCaptureFormatMarkdown;
+        quickCapture.QuickCaptureWideLayout =
+            SettingsService.QuickCaptureWideLayoutAuto;
+        quickCapture.QuickCaptureWideOpenMode =
+            SettingsService.QuickCaptureWideOpenReading;
+        quickCapture.QuickCaptureAllowRemoteImages = false;
+        quickCapture.LastQuickCaptureFileWidgetId = string.Empty;
+        if (scheduleSave && changed)
+        {
+            _settings.SaveDebounced();
+        }
+    }
+
     public void SetRecentLimit(int limit)
     {
         ObjectDisposedException.ThrowIf(_stopping, this);

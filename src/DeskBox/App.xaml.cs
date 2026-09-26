@@ -117,6 +117,7 @@ public partial class App : Application
     private FileDisplaySettingsCoordinator? _fileDisplaySettings;
     private FileStackSettingsCoordinator? _fileStackSettings;
     private GroupNavigationSettingsCoordinator? _groupNavigationSettings;
+    private FeatureWidgetsSettingsCoordinator? _featureWidgetsSettings;
     private QuickCaptureClipboardRuntime? _quickCaptureClipboardRuntime;
     private BackupRuntime? _backupRuntime;
     private readonly ShutdownSequence _shutdownSequence = new(Log);
@@ -1027,6 +1028,7 @@ public partial class App : Application
             _fileDisplaySettings = new FileDisplaySettingsCoordinator(SettingsService);
             _fileStackSettings = new FileStackSettingsCoordinator(SettingsService);
             _groupNavigationSettings = new GroupNavigationSettingsCoordinator(SettingsService);
+            _featureWidgetsSettings = new FeatureWidgetsSettingsCoordinator(SettingsService);
             _quickCaptureClipboardRuntime = _featureRuntimes.Register(QuickCaptureFeatureRuntimeId,
                 new QuickCaptureClipboardRuntime(
                     () => !IsShuttingDown &&
@@ -2942,7 +2944,9 @@ public partial class App : Application
             new DeskBox.Features.FileStack.FileStackSettingsViewModel(
                 _fileStackSettings ?? throw new InvalidOperationException("File stack settings are not initialized.")),
             new DeskBox.Features.GroupNavigation.GroupNavigationSettingsViewModel(
-                _groupNavigationSettings ?? throw new InvalidOperationException("Group navigation settings are not initialized.")));
+                _groupNavigationSettings ?? throw new InvalidOperationException("Group navigation settings are not initialized.")),
+            new DeskBox.Features.FeatureWidgets.FeatureWidgetsSettingsViewModel(
+                _featureWidgetsSettings ?? throw new InvalidOperationException("Feature widgets settings are not initialized.")));
         _settingsWindow.Closed += SettingsWindow_ClosedForApp;
         return _settingsWindow;
     }

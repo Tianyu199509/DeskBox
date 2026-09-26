@@ -730,6 +730,79 @@ public sealed class QuickCaptureSettingsCoordinatorTests : IDisposable
         await coordinator.StopAsync();
     }
 
+    [Fact]
+    public async Task EditorPreferences_NormalizePersistSkipUnchangedAndReset()
+    {
+        var settings = new SettingsService(Path.Combine(_root, "settings"));
+        var clipboard = new QuickCaptureClipboardRuntime(
+            () => CanListen(settings), () => new FakeSession(), _ => { });
+        var coordinator = new QuickCaptureSettingsCoordinator(settings, clipboard,
+            (_, _) => Task.CompletedTask, action => { action(); return true; }, _ => { });
+        int notifications = 0;
+        settings.SettingsChanged += () => notifications++;
+
+        // The five editor fields write through the coordinator, normalize
+        // exactly like the settings page setters did, and skip unchanged
+        // writes without a second debounced save.
+        coordinator.SetEditorEnterBehavior(SettingsService.EditorEnterBehaviorEnterSaves);
+        coordinator.SetEditorFormat(SettingsService.QuickCaptureFormatPlainText);
+        coordinator.SetWideLayout(SettingsService.QuickCaptureWideLayoutDualPane);
+        coordinator.SetWideOpenMode(SettingsService.QuickCaptureWideOpenEditing);
+        coordinator.SetAllowRemoteImages(true);
+        Assert.Equal(5, notifications);
+        Assert.Equal(new(
+            SettingsService.EditorEnterBehaviorEnterSaves,
+            SettingsService.QuickCaptureFormatPlainText,
+            SettingsService.QuickCaptureWideLayoutDualPane,
+            SettingsService.QuickCaptureWideOpenEditing,
+            true), coordinator.ReadEditorSettings());
+
+        coordinator.SetEditorEnterBehavior("Nonsense");
+        coordinator.SetEditorFormat("Nonsense");
+        coordinator.SetWideLayout("Nonsense");
+        coordinator.SetWideOpenMode(null);
+        coordinator.SetAllowRemoteImages(true);
+        Assert.Equal(new(
+            SettingsService.EditorEnterBehaviorCtrlEnterSaves,
+            SettingsService.QuickCaptureFormatMarkdown,
+            SettingsService.QuickCaptureWideLayoutAuto,
+            SettingsService.QuickCaptureWideOpenReading,
+            true), coordinator.ReadEditorSettings());
+        Assert.Equal(9, notifications);
+
+        await settings.FlushPendingSaveAsync();
+        var reloaded = new SettingsService(Path.Combine(_root, "settings"));
+        await reloaded.LoadAsync();
+        Assert.Equal(SettingsService.EditorEnterBehaviorCtrlEnterSaves,
+            reloaded.Settings.QuickCapture.QuickCaptureEditorEnterBehavior);
+        Assert.Equal(SettingsService.QuickCaptureFormatMarkdown,
+            reloaded.Settings.QuickCapture.QuickCaptureDefaultFormat);
+        Assert.Equal(SettingsService.QuickCaptureWideLayoutAuto,
+            reloaded.Settings.QuickCapture.QuickCaptureWideLayout);
+        Assert.Equal(SettingsService.QuickCaptureWideOpenReading,
+            reloaded.Settings.QuickCapture.QuickCaptureWideOpenMode);
+        Assert.True(reloaded.Settings.QuickCapture.QuickCaptureAllowRemoteImages);
+
+        // The feature-card reset path clears the remembered last Quick
+        // Capture file widget together with the editor defaults and relies
+        // on the caller's single explicit save.
+        settings.Settings.QuickCapture.LastQuickCaptureFileWidgetId = "widget-42";
+        int beforeReset = notifications;
+        coordinator.ResetEditorPreferences(scheduleSave: false);
+        Assert.Equal(beforeReset, notifications);
+        Assert.Equal(new(
+            SettingsService.EditorEnterBehaviorCtrlEnterSaves,
+            SettingsService.QuickCaptureFormatMarkdown,
+            SettingsService.QuickCaptureWideLayoutAuto,
+            SettingsService.QuickCaptureWideOpenReading,
+            false), coordinator.ReadEditorSettings());
+        Assert.Equal(string.Empty,
+            settings.Settings.QuickCapture.LastQuickCaptureFileWidgetId);
+        await settings.SaveAsync();
+        Assert.Equal(beforeReset + 1, notifications);
+        await coordinator.StopAsync();
+    }
+
     private static bool CanListen(SettingsService settings) =>
         FeatureWidgetSettings.IsEnabled(settings.Settings, WidgetKind.QuickCapture) &&
         settings.Settings.QuickCapture.QuickCaptureClipboardEnabled;

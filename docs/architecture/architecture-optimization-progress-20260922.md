@@ -586,10 +586,9 @@ A+B 工作树已补齐最终 QuickCapture 退出/快捷入口和 Todo 非有限�
 
 | 批 | 节 | 写入点 | 触面文件 | 共享棘轮资源 |
 |---|---|---|---|---|
-| 38 | 功能节（音乐/天气/Glance）+ QuickCapture 编辑器组 | 37 | FeatureOptions 29、FeatureCallbacks 2、WeatherOptions 1、ContentEditorOptions 5 | ModuleBoundary App.Current 例外（FeatureOptions=4）、FeatureSettingsBoundary quickCaptureWrite 门禁 |
 | 39 | 存储/诊断尾巴 | 2 | PreferenceCommands 1（DefaultManagedStorageRootPath）、AboutAndUpdates 1（LastUpdateCheckAt） | SettingsSync 133 处快照读随各批顺手收缩 |
 
-合计 37+2 = 39（第 29 批外观 28、第 33 批胶囊/紧凑 16、第 34 批交互 12、第 35 批文件显示 6、第 36 批文件栈 10、第 37 批分组导航 4 已完成并在各自批次记录中销账）。**外部残余写入者**（不在 SettingsViewModel 内、后续单独处理）：OnboardingWindow.Appearance.cs 1 处 WidgetMaterialType 写入、OnboardingWindow.Hotkey.cs 的 AutoStart 直写（onboarding 批次）、SettingsService 自身的加载/迁移/默认值路径（Track B 界面）。
+合计剩余 2（第 29 批外观 28、第 33 批胶囊/紧凑 16、第 34 批交互 12、第 35 批文件显示 6、第 36 批文件栈 10、第 37 批分组导航 4、第 38 批功能节+QuickCapture 编辑器组 37 已完成并在各自批次记录中销账）。**外部残余写入者**（不在 SettingsViewModel 内、后续单独处理）：OnboardingWindow.Appearance.cs 1 处 WidgetMaterialType 写入、OnboardingWindow.Hotkey.cs 的 AutoStart 直写（onboarding 批次）、SettingsService 自身的加载/迁移/默认值路径（Track B 界面）。
 
 ### 本批实现
 
@@ -836,6 +835,35 @@ Simon 拍板放弃"随触碰 ratchet"，对 Platform 域的 DllImport/LibraryImp
 - 隔离 Debug 启动：数据根 `C:/Users/simon/AppData/Local/DeskBox-Dev/groupnav-track-a-37-20260926`（DESKBOX_DEV_DATA_ROOT）预置分组导航 4 字段非默认值（Stack 导航+TextOnly 标题+滚轮切换关+悬停切换开，另预置 hasCompletedOnboarding/hasResolvedInitialFileWidgetSetup=true 保持无格子安静启动）。canonical 路径 `src/DeskBox/bin/Debug/net10.0-windows10.0.22621.0/DeskBox.exe` 启动 PID 35452（本 worktree 唯一实例），启动管线 **36 步（5 critical）、0 degraded、0 failed**（日志中 F7 RegisterHotKey error=1409 为本机并存实例占用热键的环境性记录，非启动步失败，与批 36 同款）；懒领养符合预期（本次会话无设置变更即无持久保存，widget-layout.json 未生成、settings.json 仍为权威并完整保有 4 键——设备层往返已由本批磁盘往返测试覆盖）；按 PID 强制结束（关闭到托盘语义下无 CLI 退出入口，与批 35/36 同款）后磁盘 4 个预置字段全部保持原值。验证后已确认本 worktree 实例归零（并存的他 worktree 实例未触碰）。
 - `git diff --check` 通过。
 - 已知残余：设置壳的 GroupNavigation 属性 get/概要/既有组投影读仍走门面读（无写入，ratchet 20 计数内）；per-group 覆盖写（WidgetGroupConfig 对象）按口径留在壳（非平铺门面写入）；未做真实设置页点击（导航风格/标题显示切换后真实组表面呈现刷新）的设备级手感验收，自动化证据不替代分组导航页实际操作与组切换行为的视觉验收。
+
+## 第三十八批：功能节与 QuickCapture 编辑器组迁移（Track A 第七批）
+
+实施基线：`c469f58a`（main，含批 29-37），worktree `codex/final-settings-features`。对象是第二十九批清点表中"38 功能节（音乐/天气/Glance）+ QuickCapture 编辑器组"行：37 个平铺写入点（FeatureOptions 29、FeatureCallbacks 2、WeatherOptions 1、ContentEditorOptions 5）——音乐呈现 3、天气选项（数据源平铺写 1 + 既有 WeatherSettingsPolicy 归一化路径的温度/风力单位/默认视图/皮肤/刷新间隔/自动定位/手动城市/七项显示开关）、功能卡重置默认块（QuickCapture 编辑器 6、音乐 3、天气 16）、功能节杂项呈现（附件存储/托管拖放动作/文件夹打开方式）与音乐两个 ObservableProperty 回调。
+
+**协调器归属决策：独立建 `FeatureWidgetsSettingsCoordinator` 承载整个功能节（音乐+天气+功能卡启停+节内杂项呈现），QuickCapture 编辑器组并入既有 `QuickCaptureSettingsCoordinator`。** 判据：①功能节全部写入是同一"归一化→与原始存储值比较→写切片→SaveDebounced"直保存族，与外观活预览机制零耦合；②功能卡重置流（ResetFeatureWidgetAsync）在一次 `_isApplyingSettingsSnapshot` 事务里跨 Music/Weather/QuickCapture 应用默认值并靠调用方单次 SaveAsync 落盘——按音乐/天气分设协调器会迫使壳编排多协调器默认值事务；天气归一化本来就集中在共享 `WeatherSettingsPolicy`（AOT 烟具也直接调用它），协调器内部继续调政策类，归一化单一来源零变化。③QuickCapture 编辑器 5+1 个字段全部住在 `QuickCaptureSettingsSlice`，与批 19-22 已迁的导航/呈现/字号同切片——并入既有协调器保持单一写入者，不再为同一切片开第二个端口。
+
+| 职责 | 所有者 |
+|---|---|
+| 音乐 3 字段、天气（数据源+政策路径 9 组）、附件存储/托管拖放/文件夹打开 3 字段的唯一设置页写入、归一化（SettingsService 共享归一化器与 WeatherSettingsPolicy）、未变化跳过、每字段原保存语义 | `Services/FeatureWidgetsSettingsCoordinator`，经 `Contracts/IFeatureWidgetsSettings` 暴露 |
+| 功能卡启停的持久旗标写入（`SetFeatureWidgetEnabled`：只写不存——持久化仍由壳的 WidgetManager 同步链拥有，与迁移前一致）与音乐/天气重置默认块（`Reset*Preferences(scheduleSave:false)`，靠重置流的单次显式保存） | `Services/FeatureWidgetsSettingsCoordinator` |
+| QuickCapture 编辑器 5 字段（进入行为/格式/宽布局/宽打开模式/远程图片）写入+归一化+未变化跳过，与重置块（5 默认值+清空 LastQuickCaptureFileWidgetId） | 既有 `Services/QuickCaptureSettingsCoordinator`（IQuickCaptureSettings 新增 SetEditor*/ResetEditorPreferences/ReadEditorSettings） |
+| 功能节编辑器缝（设置壳转发目标） | `Features/FeatureWidgets/FeatureWidgetsSettingsViewModel`（无复制状态） |
+| XAML 绑定名、AOT 生成属性、文案、回调守卫（`_isRestoringDefaults`/`_isApplyingSettingsSnapshot`）、天气摘要/城市搜索/定位状态/建议列表、功能卡列表与 WidgetManager 同步链（SyncFeatureWidgetAsync/ResetFeatureWidgetAsync）、音乐显示模式文本通知 | `SettingsViewModel` 兼容门面（FeatureOptions/FeatureCallbacks/WeatherOptions/ContentEditorOptions 四个 partial） |
+| 装配 | App 创建协调器与编辑器，经 SettingsWindow 注入 SettingsViewModel（与批 29/33-37 同款） |
+
+特有语义保全：①功能启停关联的格子创建/隐藏/运行时启停零改动——壳的 `SetWidgetEnabled` 仍只把持久旗标写经协调器，`SyncFeatureWidgetAsync`→WidgetManager 链原样；②天气归一化随写入迁入：协调器内部调 `WeatherSettingsPolicy`（温度/风力/视图/皮肤/刷新间隔/自动定位/手动城市/显示开关），无效值收口与迁移前逐字节一致，未变化跳过等价于原 SetProperty 门（壳字段变化才进回调）；`SelectWeatherCity` 的坐标校验拒绝（91°/NaN 返回 false+壳日志）与"自动定位开着时选手动城市先切手动"顺序不变；③功能卡重置块的壳属性写（静默更新绑定状态）原样保留，仅持久化写改经协调器 Reset 端口（scheduleSave:false），重置流尾部的单次 `SaveAsync` 不变；④音乐显示模式 setter 的 `OnPropertyChanged(SelectedMusicDisplayModeText)` 时机、天气回调"摘要刷新→守卫→写"顺序逐字保持；⑤AotStage5B4B2C2A 的"全局突变复用产品政策"钉随归属更新：契约测试与 publish-aot-audit.ps1 的 stage5B4B2C2A 源清单从 SettingsViewModel.WeatherOptions.cs 改指 FeatureWidgetsSettingsCoordinator.cs（政策仍是单一归一化来源，钉的是"产品写入者复用它"这一不变量），警告归属过滤器同步纳入新协调器文件。
+
+门禁收缩：`SettingsSliceOwnershipContractTests` 平铺清单收缩（FeatureOptions 68→2——仅剩两条本地化键字面量 "Settings.AttachmentStorageMode.Copy/Link"；FeatureCallbacks 25→0 删除条目；WeatherOptions 2→1——仅剩城市搜索文本恢复读；ContentEditorOptions 24→10——仅剩构造/快照读），只删不加；`FeatureSettingsBoundaryContractTests` quickCaptureWrite 门禁扩展编辑器 6 字段、新增 featureSectionWrite 门禁（音乐/天气/杂项 22 字段清单，含切片前缀变体）；ModuleBoundary 的 App.Current 例外 FeatureOptions=4 保留并注明（全局热键启用调用、功能卡启用读穿透、两个 WidgetManager 同步链是刻意留在壳门面的宿主侧联动）；AOT 绑定面（属性零增删）与磁盘 schema/XAML/文案零变化自动保持。协调器/编辑器/接口三个新文件 FacadePassthroughAccess 零命中。
+
+### 第三十八批验证记录
+
+- restore Updater 后 `dotnet build src/DeskBox/DeskBox.csproj -p:Platform=x64`：0 错误、22 警告（均为既有位置，与批 36/37 后同位）；非平台 canonical Debug（启动用）0 错误。
+- 定向测试 62/62 通过（新增 FeatureWidgetsSettingsCoordinatorTests 6 用例：音乐+杂项经编辑器缝写入/未变化跳过/无效值按页面归一化收口、天气政策路径写入与无效值收口与刷新间隔钳制/未变化跳过/未知显示开关抛参、手动城市政策拒绝（91°/NaN）与有效写入及同城市重选零保存、功能重置默认不排保存+调用方单次保存后全量磁盘往返（含 WeatherDataSource 不在重置块的保真）、功能卡启停写不排保存+保存后经设备层保持、停止后全端口拒写；QuickCaptureSettingsCoordinatorTests 新增 1 用例：编辑器 5 字段归一化/未变化跳过/磁盘往返/重置清 LastQuickCaptureFileWidgetId 不排保存；SettingsSliceOwnership 7；FeatureSettingsBoundary 3；ModuleBoundary；AotStage5B4B2C2A 11）。首轮全量 4,321/4,322：唯一失败是 AotStage5B4B2C2A 的"产品政策复用"钉仍指向壳文件，已随归属更新为协调器。
+- 全量 x64 测试：**4,322/4,322 通过**（新基线 4,315 + 本批 7 个新用例）。
+- AOT 定义编译检查（x64、`DefineConstants=TRACE;DEBUG;DESKBOX_NATIVE_AOT`，`ArtifactsPath`/`RestorePackagesPath` 隔离于 `.aotcheck/`，Updater 引用随同隔离 restore，检查后已清理）：11 警告（与批 32-37 同位）、**0 错误**。未执行 Native AOT publish/link 或发布包运行，仍为发版门禁。
+- 隔离 Debug 启动：数据根 `C:/Users/simon/AppData/Local/DeskBox-Dev/featurewidgets-track-a-38-20260926`（DESKBOX_DEV_DATA_ROOT）预置功能节 24 项非默认值（音乐 Controls/双 false、天气 Hanoi 21.03/105.85 手动定位+Fahrenheit+mph+Week+Rich+OpenMeteo+Wind 关/Pressure 开+180 分、QuickCapture 编辑器 EnterSaves/PlainText/DualPane/Editing/远程图片开、附件 Copy/托管拖放 FollowWindows/文件夹打开 Embedded、功能卡 Music 关/Weather 开，另预置 hasCompletedOnboarding/hasResolvedInitialFileWidgetSetup=true 保持无格子安静启动）。canonical 路径 `src/DeskBox/bin/Debug/net10.0-windows10.0.22621.0/DeskBox.exe` 启动 PID 35804（本 worktree 唯一实例，进程路径核验一致；并存的 wingezi-p1c 实例未触碰），启动管线 **36 步（5 critical）、0 degraded、0 failed**；按 PID 强制结束（关闭到托盘语义下无 CLI 退出入口，与批 35-37 同款）后磁盘 24 项预置字段全部保持原值（本会话无设置变更即无持久保存，settings.json 未被重写，与批 37 懒领养观察一致）。
+- `git diff --check` 通过。
+- 已知残余：设置壳构造/快照/属性 get 的功能节读仍走门面读（无写入，ratchet 内）；天气城市搜索的定位状态/建议列表 UI 状态机仍留在壳门面（非设置写入）；publish-aot-audit.ps1 的 stage5B4B2C2A 文件清单已随归属更新但完整 Native AOT publish/link 审计未在本批重跑（发版门禁时验证）；未做真实设置页点击（音乐显示模式切换、天气单位/城市选择、功能卡开关后真实格子创建隐藏、QuickCapture 编辑器格式切换后真实编辑行为）的设备级手感验收，自动化证据不替代功能节实际操作与天气/音乐格子呈现的视觉验收。
 
 # 架构优化进度与下一批计划
 

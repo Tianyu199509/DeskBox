@@ -98,8 +98,7 @@ public partial class SettingsViewModel
                 return;
             }
 
-            _settingsService.Settings.QuickCaptureEditorEnterBehavior = normalized;
-            _settingsService.SaveDebounced();
+            _quickCaptureSettings.SetEditorEnterBehavior(normalized);
         }
     }
 
@@ -111,7 +110,7 @@ public partial class SettingsViewModel
             SetQuickCaptureSetting(
                 ref _quickCaptureEditorFormat,
                 SettingsService.NormalizeQuickCaptureFormat(value),
-                normalized => _settingsService.Settings.QuickCaptureDefaultFormat = normalized,
+                normalized => _quickCaptureSettings.SetEditorFormat(normalized),
                 nameof(QuickCaptureEditorFormat));
             RefreshQuickCaptureContentPresentation();
         }
@@ -125,7 +124,7 @@ public partial class SettingsViewModel
             SetQuickCaptureSetting(
                 ref _quickCaptureWideLayout,
                 SettingsService.NormalizeQuickCaptureWideLayout(value),
-                normalized => _settingsService.Settings.QuickCaptureWideLayout = normalized,
+                normalized => _quickCaptureSettings.SetWideLayout(normalized),
                 nameof(QuickCaptureWideLayout));
             OnPropertyChanged(nameof(QuickCaptureLayoutSummaryText));
             OnPropertyChanged(nameof(QuickCaptureWideOptionsVisibility));
@@ -140,7 +139,7 @@ public partial class SettingsViewModel
             SetQuickCaptureSetting(
                 ref _quickCaptureWideOpenMode,
                 SettingsService.NormalizeQuickCaptureWideOpenMode(value),
-                normalized => _settingsService.Settings.QuickCaptureWideOpenMode = normalized,
+                normalized => _quickCaptureSettings.SetWideOpenMode(normalized),
                 nameof(QuickCaptureWideOpenMode));
             OnPropertyChanged(nameof(QuickCaptureLayoutSummaryText));
         }
@@ -157,8 +156,7 @@ public partial class SettingsViewModel
                 return;
             }
 
-            _settingsService.Settings.QuickCaptureAllowRemoteImages = value;
-            _settingsService.SaveDebounced();
+            _quickCaptureSettings.SetAllowRemoteImages(value);
         }
     }
 
@@ -267,7 +265,9 @@ public partial class SettingsViewModel
             return;
         }
 
+        // The apply callback forwards to the Quick Capture settings
+        // coordinator, which owns the unchanged-write skip and the debounced
+        // save for the editor group.
         apply(value);
-        _settingsService.SaveDebounced();
     }
 }

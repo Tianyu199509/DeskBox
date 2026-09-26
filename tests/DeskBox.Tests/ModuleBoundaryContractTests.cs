@@ -124,6 +124,14 @@ public sealed class ModuleBoundaryContractTests
         ["src/DeskBox/ViewModels/SettingsViewModel.AppearanceOptions.cs"] = 2,
         ["src/DeskBox/ViewModels/QuickCaptureWidgetViewModel.Operations.cs"] = 1,
         ["src/DeskBox/ViewModels/MusicWidgetViewModel.MediaInfo.cs"] = 3,
+        // Batch 38 moved the feature-section persisted writes into
+        // FeatureWidgetsSettingsCoordinator (and the Quick Capture editor
+        // group into QuickCaptureSettingsCoordinator), but the four
+        // App.Current accesses stay in the shell facade on purpose: the
+        // global-hotkey enable call, the feature-card enabled read-through
+        // and the two WidgetManager sync chains (feature reset + enable
+        // state) are host-side linkages that run around the coordinator's
+        // write, not settings writes.
         ["src/DeskBox/ViewModels/SettingsViewModel.FeatureOptions.cs"] = 4,
         ["src/DeskBox/ViewModels/SettingsViewModel.HotkeyAndStorage.cs"] = 1,
         ["src/DeskBox/ViewModels/SettingsViewModel.GroupNavigation.cs"] = 2,

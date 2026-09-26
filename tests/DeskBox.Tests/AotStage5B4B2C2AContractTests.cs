@@ -26,8 +26,12 @@ public sealed class AotStage5B4B2C2AContractTests
     public void GlobalMutation_ReusesLocalWeatherSettingsProductPolicy()
     {
         string policy = ReadRepositoryFile("src/DeskBox/Services/WeatherSettingsPolicy.cs");
+        // Batch 38 moved the settings page's weather writes into
+        // FeatureWidgetsSettingsCoordinator; the coordinator is now the
+        // product writer whose normalization the AOT global mutation must
+        // reuse, so the pin follows the owner.
         string settings = ReadRepositoryFile(
-            "src/DeskBox/ViewModels/SettingsViewModel.WeatherOptions.cs");
+            "src/DeskBox/Services/FeatureWidgetsSettingsCoordinator.cs");
         string scenario = ReadRepositoryFile(
             "src/DeskBox/App.AotWeatherSettingsPersistenceSmoke.cs");
 

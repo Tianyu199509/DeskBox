@@ -63,7 +63,7 @@ public sealed class FeatureSettingsBoundaryContractTests
         Regex todoWrite = new(
             $@"\b(?:_settingsService\s*\.\s*Settings|settings)\s*\.\s*(?:Todo\s*\.\s*)?(?:{todoFields})\s*=(?!=)");
         Regex quickCaptureWrite = new(
-            @"\b(?:_settingsService\s*\.\s*Settings|settings)\s*\.\s*(?:QuickCapture\s*\.\s*)?QuickCapture(?:DefaultView|ShowTabBar|ShowRecordsTab|ShowPinnedTab|ShowRecentTab|TabStyle|ShowCreatedTime|ItemPreviewLineCount|RecentLimit)\s*=(?!=)");
+            @"\b(?:_settingsService\s*\.\s*Settings|settings)\s*\.\s*(?:QuickCapture\s*\.\s*)?(?:QuickCapture(?:DefaultView|ShowTabBar|ShowRecordsTab|ShowPinnedTab|ShowRecentTab|TabStyle|ShowCreatedTime|ItemPreviewLineCount|RecentLimit|EditorEnterBehavior|DefaultFormat|WideLayout|WideOpenMode|AllowRemoteImages)|LastQuickCaptureFileWidgetId)\s*=(?!=)");
         // Batch 29: the appearance section (material/density/typography/window
         // chrome/animation/foreground/tray icon/default size) writes through
         // AppearanceSettingsCoordinator; the settings shell must not regain
@@ -102,6 +102,19 @@ public sealed class FeatureSettingsBoundaryContractTests
         // GroupNavigationSettingsCoordinator.
         Regex groupNavigationWrite = new(
             @"\b(?:_settingsService\s*\.\s*Settings|settings)\s*\.\s*(?:WidgetLayout\s*\.\s*)?(?:WidgetGroupWheelSwitchEnabled|WidgetGroupHoverSwitchEnabled|WidgetGroupDefaultTitleDisplayMode|WidgetGroupDefaultNavigationStyle)\s*=(?!=)");
+        // Batch 38: the feature-section writes — music presentation, the
+        // weather options (data source, location, units, default view, skin,
+        // display toggles, refresh interval; the policy path used to write
+        // through WeatherSettingsPolicy from the shell), the feature-card
+        // reset defaults and the section's misc presentation picks
+        // (attachment storage, managed-drop action, folder-open behavior) —
+        // go through FeatureWidgetsSettingsCoordinator. The Quick Capture
+        // editor group (enter behavior, format, wide layout, wide-open mode,
+        // remote images, last file widget id) writes through the existing
+        // QuickCaptureSettingsCoordinator and is covered by the extended
+        // quickCaptureWrite gate above.
+        Regex featureSectionWrite = new(
+            @"\b(?:_settingsService\s*\.\s*Settings|settings)\s*\.\s*(?:Music\s*\.\s*|Weather\s*\.\s*|QuickCapture\s*\.\s*|FileWidget\s*\.\s*)?(?:MusicUseArtworkBackdrop|MusicEnableCoverHoverMotion|MusicDisplayMode|WeatherDataSource|WeatherAutoLocation|WeatherCityName|WeatherLatitude|WeatherLongitude|WeatherTemperatureUnit|WeatherWindSpeedUnit|WeatherDefaultView|WeatherSkin|WeatherShowForecast|WeatherShowSunrise|WeatherShowUvIndex|WeatherShowPrecipitation|WeatherShowHumidity|WeatherShowWind|WeatherShowPressure|WeatherRefreshIntervalMinutes|AttachmentStorageMode|ManagedDropAction|FileWidgetFolderOpenBehavior)\s*=(?!=)");
         (string Path, string Source)[] pages = ProductionSource()
             .Where(item => item.Path.StartsWith(
                     "src/DeskBox/ViewModels/SettingsViewModel", StringComparison.Ordinal) &&
@@ -116,6 +129,7 @@ public sealed class FeatureSettingsBoundaryContractTests
                     .Concat(fileDisplayWrite.Matches(item.Source).Cast<Match>())
                     .Concat(fileStackWrite.Matches(item.Source).Cast<Match>())
                     .Concat(groupNavigationWrite.Matches(item.Source).Cast<Match>())
+                    .Concat(featureSectionWrite.Matches(item.Source).Cast<Match>())
                     .Select(match => $"{item.Path}: {match.Value}"))
             .ToArray();
 
