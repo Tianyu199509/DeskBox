@@ -82,7 +82,7 @@ internal static partial class DesktopBlankHitTest
             return false;
         }
 
-        IntPtr process = OpenProcess(
+        IntPtr process = RemoteProcessMemoryNativeMethods.OpenProcess(
             ProcessVmOperation | ProcessVmRead | ProcessVmWrite,
             false,
             processId);
@@ -106,14 +106,14 @@ internal static partial class DesktopBlankHitTest
             };
             Marshal.StructureToPtr(hitTest, localBuffer, false);
 
-            remoteBuffer = VirtualAllocEx(
+            remoteBuffer = RemoteProcessMemoryNativeMethods.VirtualAllocEx(
                 process,
                 IntPtr.Zero,
                 (UIntPtr)structureSize,
                 MemCommit | MemReserve,
                 PageReadWrite);
             if (remoteBuffer == IntPtr.Zero ||
-                !WriteProcessMemory(
+                !RemoteProcessMemoryNativeMethods.WriteProcessMemory(
                     process,
                     remoteBuffer,
                     localBuffer,
@@ -132,7 +132,7 @@ internal static partial class DesktopBlankHitTest
                 80,
                 out _);
             if (delivered == IntPtr.Zero ||
-                !ReadProcessMemory(
+                !RemoteProcessMemoryNativeMethods.ReadProcessMemory(
                     process,
                     remoteBuffer,
                     localBuffer,
@@ -149,7 +149,7 @@ internal static partial class DesktopBlankHitTest
         {
             if (remoteBuffer != IntPtr.Zero)
             {
-                VirtualFreeEx(process, remoteBuffer, UIntPtr.Zero, MemRelease);
+                RemoteProcessMemoryNativeMethods.VirtualFreeEx(process, remoteBuffer, UIntPtr.Zero, MemRelease);
             }
 
             if (localBuffer != IntPtr.Zero)
@@ -157,7 +157,7 @@ internal static partial class DesktopBlankHitTest
                 Marshal.FreeHGlobal(localBuffer);
             }
 
-            CloseHandle(process);
+            RemoteProcessMemoryNativeMethods.CloseHandle(process);
         }
     }
 
@@ -181,47 +181,6 @@ internal static partial class DesktopBlankHitTest
         public int GroupIndex;
     }
 
-    [LibraryImport("kernel32.dll", SetLastError = true)]
-    private static partial IntPtr OpenProcess(
-        uint desiredAccess,
-        [MarshalAs(UnmanagedType.Bool)] bool inheritHandle,
-        uint processId);
-
-    [LibraryImport("kernel32.dll", SetLastError = true)]
-    private static partial IntPtr VirtualAllocEx(
-        IntPtr process,
-        IntPtr address,
-        UIntPtr size,
-        uint allocationType,
-        uint protect);
-
-    [LibraryImport("kernel32.dll", SetLastError = true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static partial bool VirtualFreeEx(
-        IntPtr process,
-        IntPtr address,
-        UIntPtr size,
-        uint freeType);
-
-    [LibraryImport("kernel32.dll", SetLastError = true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static partial bool WriteProcessMemory(
-        IntPtr process,
-        IntPtr baseAddress,
-        IntPtr buffer,
-        UIntPtr size,
-        out UIntPtr written);
-
-    [LibraryImport("kernel32.dll", SetLastError = true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static partial bool ReadProcessMemory(
-        IntPtr process,
-        IntPtr baseAddress,
-        IntPtr buffer,
-        UIntPtr size,
-        out UIntPtr read);
-
-    [LibraryImport("kernel32.dll")]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static partial bool CloseHandle(IntPtr handle);
+    // kernel32 remote-process-memory entry points live in
+    // DeskBox.Platform.RemoteProcessMemoryNativeMethods.
 }
