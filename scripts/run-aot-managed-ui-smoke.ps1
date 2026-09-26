@@ -946,7 +946,7 @@ function Assert-GlanceEvidenceState {
     $viewModel = $State.viewModel
     $surface = $State.surface
     $commonStoreValid =
-        [int]$store.version -eq 8 -and
+        [int]$store.version -eq 10 -and
         [string]$store.backgroundSource -ceq "LocalFiles" -and
         $null -eq $store.localFolderPath -and
         [bool]$store.showTime -and
@@ -3993,7 +3993,7 @@ elseif ($scenario -ceq "GlancePersistenceRestart") {
         $glanceStoreDirectory `
         "aot-5b4b2c1-glance.json"
     $glanceBaseline = [ordered]@{
-        version = 8
+        version = 10
         showTime = $true
         showDate = $true
         showYear = $false
