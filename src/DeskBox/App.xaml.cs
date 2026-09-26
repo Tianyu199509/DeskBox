@@ -111,6 +111,7 @@ public partial class App : Application
     private BackupSettingsCoordinator? _backupSettings;
     private BackupRestoreActions? _backupRestoreActions;
     private QuickCaptureSettingsCoordinator? _quickCaptureSettings;
+    private AppearanceSettingsCoordinator? _appearanceSettings;
     private QuickCaptureClipboardRuntime? _quickCaptureClipboardRuntime;
     private BackupRuntime? _backupRuntime;
     private readonly ShutdownSequence _shutdownSequence = new(Log);
@@ -1015,6 +1016,7 @@ public partial class App : Application
             _backupSettings = new BackupSettingsCoordinator(
                 SettingsService, DataBackupService, CloudBackupService, _backupRestoreActions,
                 () => _backupRuntime?.RefreshOptions());
+            _appearanceSettings = new AppearanceSettingsCoordinator(SettingsService);
             _quickCaptureClipboardRuntime = _featureRuntimes.Register(QuickCaptureFeatureRuntimeId,
                 new QuickCaptureClipboardRuntime(
                     () => !IsShuttingDown &&
@@ -2918,7 +2920,9 @@ public partial class App : Application
                 "Backup restore actions are not initialized."),
             _quickCaptureSettings ?? throw new InvalidOperationException("Quick Capture is not initialized."),
             _searchSettings ?? throw new InvalidOperationException("Search settings are not initialized."),
-            _backupRuntime ?? throw new InvalidOperationException("Backup runtime is not initialized."));
+            _backupRuntime ?? throw new InvalidOperationException("Backup runtime is not initialized."),
+            new DeskBox.Features.Appearance.AppearanceSettingsViewModel(
+                _appearanceSettings ?? throw new InvalidOperationException("Appearance settings are not initialized.")));
         _settingsWindow.Closed += SettingsWindow_ClosedForApp;
         return _settingsWindow;
     }

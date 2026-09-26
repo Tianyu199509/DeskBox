@@ -225,25 +225,13 @@ public partial class SettingsViewModel
             return;
         }
 
-        if (double.IsNaN(value))
+        var update = _appearanceSettings.UpdateDefaultWidgetWidth(value);
+        if (!update.Committed)
         {
-            DefaultWidth = _settingsService.Settings.DefaultWidgetWidth;
+            DefaultWidth = update.Value;
             return;
         }
 
-        double normalizedValue = Math.Clamp(
-            Math.Round(value / 10d, MidpointRounding.AwayFromZero) * 10d,
-            SettingsService.MinWidgetWidth,
-            1200d);
-
-        if (Math.Abs(normalizedValue - value) > 0.0001)
-        {
-            DefaultWidth = normalizedValue;
-            return;
-        }
-
-        _settingsService.Settings.DefaultWidgetWidth = normalizedValue;
-        _settingsService.SaveDebounced();
         OnPropertyChanged(nameof(DefaultWidthInput));
     }
 
@@ -255,25 +243,13 @@ public partial class SettingsViewModel
             return;
         }
 
-        if (double.IsNaN(value))
+        var update = _appearanceSettings.UpdateDefaultWidgetHeight(value);
+        if (!update.Committed)
         {
-            DefaultHeight = _settingsService.Settings.DefaultWidgetHeight;
+            DefaultHeight = update.Value;
             return;
         }
 
-        double normalizedValue = Math.Clamp(
-            Math.Round(value / 10d, MidpointRounding.AwayFromZero) * 10d,
-            SettingsService.MinWidgetHeight,
-            1200d);
-
-        if (Math.Abs(normalizedValue - value) > 0.0001)
-        {
-            DefaultHeight = normalizedValue;
-            return;
-        }
-
-        _settingsService.Settings.DefaultWidgetHeight = normalizedValue;
-        _settingsService.SaveDebounced();
         OnPropertyChanged(nameof(DefaultHeightInput));
     }
 

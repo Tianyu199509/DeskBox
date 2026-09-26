@@ -57,8 +57,7 @@ public partial class SettingsViewModel
                 return;
             }
 
-            _settingsService.Settings.TrayIconStyle = styleValue;
-            _settingsService.SaveDebounced();
+            _appearanceSettings.SetTrayIconStyle(styleValue);
             App.Current.UpdateTrayIcon();
             OnPropertyChanged(nameof(SelectedTrayIconStyleText));
         }
@@ -157,10 +156,7 @@ public partial class SettingsViewModel
                 return;
             }
 
-            _settingsService.Settings.WidgetCornerPreference = value is CornerSquare or CornerSmall or CornerRound
-                ? value
-                : SettingsService.WidgetCornerPreferenceRound;
-            _settingsService.SaveDebounced();
+            _appearanceSettings.SetWidgetCornerPreference(value);
             OnPropertyChanged(nameof(SelectedWidgetCornerPreferenceText));
         }
     }
@@ -182,14 +178,8 @@ public partial class SettingsViewModel
                 return;
             }
 
-            _settingsService.Settings.WidgetMaterialType = value is
-                MaterialMica or MaterialMicaAlt or MaterialAcrylic or MaterialAcrylicBase or MaterialSolid
-                ? value
-                : SettingsService.WidgetMaterialTypeAcrylic;
+            _appearanceSettings.SetWidgetMaterialType(value);
 
-            _settingsService.RequestAppearancePreview();
-
-            _settingsService.SaveDebounced();
             OnPropertyChanged(nameof(SelectedWidgetMaterialTypeText));
             OnPropertyChanged(nameof(IsOpacitySliderEnabled));
             OnPropertyChanged(nameof(WidgetOpacityVisibility));
@@ -238,11 +228,7 @@ public partial class SettingsViewModel
                 return;
             }
 
-            _settingsService.Settings.WidgetBorderColorMode = value is
-                BorderColorNeutral or BorderColorAccent or BorderColorNone
-                    ? value
-                    : BorderColorNeutral;
-            _settingsService.SaveDebounced();
+            _appearanceSettings.SetWidgetBorderColorMode(value);
             OnPropertyChanged(nameof(SelectedWidgetBorderColorModeText));
             OnPropertyChanged(nameof(IsWidgetBorderStyleEnabled));
         }
@@ -270,10 +256,7 @@ public partial class SettingsViewModel
                 return;
             }
 
-            _settingsService.Settings.WidgetBorderStyle = value is BorderThin or BorderMedium or BorderThick
-                ? value
-                : SettingsService.WidgetBorderStyleThin;
-            _settingsService.SaveDebounced();
+            _appearanceSettings.SetWidgetBorderStyle(value);
             OnPropertyChanged(nameof(SelectedWidgetBorderStyleText));
         }
     }
@@ -363,7 +346,7 @@ public partial class SettingsViewModel
 
             if (normalizedValue == SettingsService.LayoutDensityCustom)
             {
-                _settingsService.Settings.LayoutDensity = normalizedValue;
+                _appearanceSettings.MarkLayoutDensityCustom();
                 _settingsService.SaveDebounced();
                 return;
             }
@@ -390,7 +373,7 @@ public partial class SettingsViewModel
                 return;
             }
 
-            _settingsService.Settings.FileNameLineCount = normalizedValue;
+            _appearanceSettings.SetFileNameLineCount(normalizedValue);
             SaveAppearanceChange();
         }
     }
@@ -439,17 +422,15 @@ public partial class SettingsViewModel
                 return;
             }
 
-            _settingsService.Settings.WidgetAnimationEffect = _selectedWidgetAnimationEffect;
+            _appearanceSettings.SetAnimationEffect(
+                _selectedWidgetAnimationEffect,
+                scheduleSave: !_isApplyingAnimationPreset);
             if (_selectedWidgetAnimationEffect == SettingsService.WidgetAnimationEffectSlideFade &&
                 _selectedWidgetAnimationSlideDirection == SettingsService.WidgetAnimationSlideDirectionNone)
             {
                 SelectedWidgetAnimationSlideDirection = SettingsService.WidgetAnimationSlideDirectionRight;
             }
 
-            if (!_isApplyingAnimationPreset)
-            {
-                _settingsService.SaveDebounced();
-            }
             OnPropertyChanged(nameof(SelectedWidgetAnimationEffectText));
             OnPropertyChanged(nameof(IsDirectionEnabled));
             OnPropertyChanged(nameof(IsEasingEnabled));
@@ -483,11 +464,9 @@ public partial class SettingsViewModel
                 return;
             }
 
-            _settingsService.Settings.WidgetAnimationSpeed = _selectedWidgetAnimationSpeed;
-            if (!_isApplyingAnimationPreset)
-            {
-                _settingsService.SaveDebounced();
-            }
+            _appearanceSettings.SetAnimationSpeed(
+                _selectedWidgetAnimationSpeed,
+                scheduleSave: !_isApplyingAnimationPreset);
             OnPropertyChanged(nameof(SelectedWidgetAnimationSpeedText));
             SyncAnimationPresetSelection();
         }
@@ -510,11 +489,9 @@ public partial class SettingsViewModel
                 return;
             }
 
-            _settingsService.Settings.WidgetAnimationSlideDirection = _selectedWidgetAnimationSlideDirection;
-            if (!_isApplyingAnimationPreset)
-            {
-                _settingsService.SaveDebounced();
-            }
+            _appearanceSettings.SetAnimationSlideDirection(
+                _selectedWidgetAnimationSlideDirection,
+                scheduleSave: !_isApplyingAnimationPreset);
             OnPropertyChanged(nameof(SelectedWidgetAnimationSlideDirectionText));
             SyncAnimationPresetSelection();
         }
@@ -537,11 +514,9 @@ public partial class SettingsViewModel
                 return;
             }
 
-            _settingsService.Settings.WidgetAnimationEasingIntensity = _selectedWidgetAnimationEasingIntensity;
-            if (!_isApplyingAnimationPreset)
-            {
-                _settingsService.SaveDebounced();
-            }
+            _appearanceSettings.SetAnimationEasingIntensity(
+                _selectedWidgetAnimationEasingIntensity,
+                scheduleSave: !_isApplyingAnimationPreset);
             OnPropertyChanged(nameof(SelectedWidgetAnimationEasingIntensityText));
             SyncAnimationPresetSelection();
         }
@@ -564,8 +539,7 @@ public partial class SettingsViewModel
                 return;
             }
 
-            _settingsService.Settings.DisplayWidgetChromeMode = _selectedDisplayWidgetChromeMode;
-            _settingsService.SaveDebounced();
+            _appearanceSettings.SetDisplayWidgetChromeMode(_selectedDisplayWidgetChromeMode);
             OnPropertyChanged(nameof(SelectedDisplayWidgetChromeModeText));
         }
     }
@@ -587,8 +561,7 @@ public partial class SettingsViewModel
                 return;
             }
 
-            _settingsService.Settings.InteractiveWidgetChromeMode = _selectedInteractiveWidgetChromeMode;
-            _settingsService.SaveDebounced();
+            _appearanceSettings.SetInteractiveWidgetChromeMode(_selectedInteractiveWidgetChromeMode);
             OnPropertyChanged(nameof(SelectedInteractiveWidgetChromeModeText));
         }
     }
@@ -610,7 +583,7 @@ public partial class SettingsViewModel
                 return;
             }
 
-            _settingsService.Settings.WidgetTitleIconMode = _selectedWidgetTitleIconMode;
+            _appearanceSettings.SetWidgetTitleIconMode(_selectedWidgetTitleIconMode);
             SaveAppearanceChange();
             OnPropertyChanged(nameof(SelectedWidgetTitleIconModeText));
         }

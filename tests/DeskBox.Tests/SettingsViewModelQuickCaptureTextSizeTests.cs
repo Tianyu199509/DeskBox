@@ -34,6 +34,9 @@ public sealed class SettingsViewModelQuickCaptureTextSizeTests
                 .SetValue(viewModel, todo);
             typeof(SettingsViewModel).GetField("_quickCaptureSettings", flags)!
                 .SetValue(viewModel, quickCapture);
+            typeof(SettingsViewModel).GetField("_appearanceSettings", flags)!
+                .SetValue(viewModel, new DeskBox.Features.Appearance.AppearanceSettingsViewModel(
+                    new AppearanceSettingsCoordinator(settings)));
 
             MethodInfo sync = typeof(SettingsViewModel).GetMethod(
                 "SyncQuickCaptureTextSizeFacade", flags)!;

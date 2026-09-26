@@ -46,7 +46,7 @@ public partial class SettingsViewModel
                 return;
             }
 
-            _settingsService.Settings.WidgetForegroundMode = normalized;
+            _appearanceSettings.SetWidgetForegroundMode(normalized);
             SaveAppearanceChange();
         }
     }
@@ -67,8 +67,8 @@ public partial class SettingsViewModel
                 return;
             }
 
-            _settingsService.Settings.WidgetForegroundColor =
-                AccentColorHelper.ToHex(opaque);
+            _appearanceSettings.SetWidgetForegroundColor(
+                AccentColorHelper.ToHex(opaque));
             SaveAppearanceChange();
         }
     }

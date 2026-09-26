@@ -203,60 +203,17 @@ public partial class SettingsViewModel
         OnPropertyChanged(nameof(HoverButtonActionsSummaryText));
     }
 
-    private static string NormalizeWidgetAnimationEffect(string? effect)
-    {
-        return effect is
-            SettingsService.WidgetAnimationEffectFade or
-            SettingsService.WidgetAnimationEffectSlideRight or
-            SettingsService.WidgetAnimationEffectSlideLeft or
-            SettingsService.WidgetAnimationEffectSlideUp or
-            SettingsService.WidgetAnimationEffectSlideDown or
-            SettingsService.WidgetAnimationEffectScaleFade or
-            SettingsService.WidgetAnimationEffectSlideFade or
-            SettingsService.WidgetAnimationEffectZoom or
-            SettingsService.WidgetAnimationEffectSlideUpFade or
-            SettingsService.WidgetAnimationEffectSlideDownFade or
-            SettingsService.WidgetAnimationEffectSlideLeftFade or
-            SettingsService.WidgetAnimationEffectSlideRightFade or
-            SettingsService.WidgetAnimationEffectScaleSlide
-            ? effect
-            : SettingsService.WidgetAnimationEffectSlideFade;
-    }
+    private static string NormalizeWidgetAnimationEffect(string? effect) =>
+        SettingsService.NormalizeWidgetAnimationEffect(effect);
 
-    private static string NormalizeWidgetAnimationSpeed(string? speed)
-    {
-        return speed is
-            SettingsService.WidgetAnimationSpeedVeryFast or
-            SettingsService.WidgetAnimationSpeedFast or
-            SettingsService.WidgetAnimationSpeedStandard or
-            SettingsService.WidgetAnimationSpeedRelaxed or
-            SettingsService.WidgetAnimationSpeedSlow
-            ? speed
-            : SettingsService.WidgetAnimationSpeedStandard;
-    }
+    private static string NormalizeWidgetAnimationSpeed(string? speed) =>
+        SettingsService.NormalizeWidgetAnimationSpeed(speed);
 
-    private static string NormalizeWidgetAnimationSlideDirection(string? direction)
-    {
-        return direction is
-            SettingsService.WidgetAnimationSlideDirectionNone or
-            SettingsService.WidgetAnimationSlideDirectionLeft or
-            SettingsService.WidgetAnimationSlideDirectionRight or
-            SettingsService.WidgetAnimationSlideDirectionUp or
-            SettingsService.WidgetAnimationSlideDirectionDown
-            ? direction
-            : SettingsService.WidgetAnimationSlideDirectionRight;
-    }
+    private static string NormalizeWidgetAnimationSlideDirection(string? direction) =>
+        SettingsService.NormalizeWidgetAnimationSlideDirection(direction);
 
-    private static string NormalizeWidgetAnimationEasingIntensity(string? intensity)
-    {
-        return intensity is
-            SettingsService.WidgetAnimationEasingNone or
-            SettingsService.WidgetAnimationEasingLight or
-            SettingsService.WidgetAnimationEasingStandard or
-            SettingsService.WidgetAnimationEasingStrong
-            ? intensity
-            : SettingsService.WidgetAnimationEasingStandard;
-    }
+    private static string NormalizeWidgetAnimationEasingIntensity(string? intensity) =>
+        SettingsService.NormalizeWidgetAnimationEasingIntensity(intensity);
 
     private static string NormalizeWidgetChromeModeSetting(string? mode, WidgetChromeMode fallback)
     {
