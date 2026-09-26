@@ -4116,7 +4116,8 @@ $stage5B4B2B1RequiredManagerPatterns = @(
     'aot-5b4b2b1-quick-capture',
     '_contentWidgets.TryGetValue',
     'window.ContentReadyTask',
-    'window.CurrentContent is QuickCaptureSurfaceContent',
+    'window.CurrentContent is QuickCaptureWidgetContentAdapter adapter',
+    'adapter.View is QuickCaptureSurfaceContent surface',
     'WindowHandle',
     'WindowContentRoot?.XamlRoot',
     'Visible'

@@ -27,7 +27,6 @@ public sealed class FileWidgetContentAdapter :
     IWidgetHostContextMenuSource,
     IWidgetTransientStateContent
 {
-    private readonly FileService _fileService;
     private readonly LocalizationService _localizationService;
     private IntPtr _hostWindowHandle;
 
@@ -72,7 +71,6 @@ public sealed class FileWidgetContentAdapter :
     {
         ArgumentNullException.ThrowIfNull(fileService);
 
-        _fileService = fileService;
         _localizationService = localizationService;
         ViewModel = viewModel;
     }
