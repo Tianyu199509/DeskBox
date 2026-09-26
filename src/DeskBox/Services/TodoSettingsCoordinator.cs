@@ -16,6 +16,8 @@ public sealed class TodoSettingsCoordinator : ITodoSettings
     private readonly CancellationTokenSource _lifetime = new();
     private bool _updatingPreferences;
     private bool _stopped;
+    private (bool Enabled, bool Reminders, int Offset, string WidgetIds)?
+        _lastReconciledReminderInputs;
     private Task? _stopTask;
 
     internal bool IsStopped => _stopped;
@@ -506,11 +508,30 @@ public sealed class TodoSettingsCoordinator : ITodoSettings
 
     private void OnSettingsChanged()
     {
-        if (!_stopped && !_updatingPreferences)
+        if (_stopped || _updatingPreferences)
         {
-            // Covers restore/defaults and legacy callers during migration.
-            _refreshReminders(false);
+            return;
         }
+        // Every debounced save fires this handler and most touch unrelated
+        // slices (e.g. dragging an appearance slider). Reconcile only when a
+        // reminder-relevant input actually changed.
+        TodoSettingsSlice todo = _settings.Settings.Todo;
+        var inputs = (
+            todo.TodoEnabled,
+            todo.TodoReminderEnabled,
+            todo.TodoDefaultReminderOffsetMinutes,
+            WidgetIds: string.Join(',',
+                _settings.Settings.Widgets
+                    .Where(widget => widget.WidgetKind == WidgetKind.Todo)
+                    .Select(widget => widget.Id)
+                    .OrderBy(id => id, StringComparer.Ordinal)));
+        if (_lastReconciledReminderInputs is { } previous && previous == inputs)
+        {
+            return;
+        }
+        _lastReconciledReminderInputs = inputs;
+        // Covers restore/defaults and legacy callers during migration.
+        _refreshReminders(false);
     }
 
     public Task StopAsync() => _stopTask ??= StopCoreAsync();
