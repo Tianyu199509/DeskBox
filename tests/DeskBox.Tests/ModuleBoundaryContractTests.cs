@@ -127,6 +127,12 @@ public sealed class ModuleBoundaryContractTests
         ["src/DeskBox/ViewModels/SettingsViewModel.FeatureOptions.cs"] = 4,
         ["src/DeskBox/ViewModels/SettingsViewModel.HotkeyAndStorage.cs"] = 1,
         ["src/DeskBox/ViewModels/SettingsViewModel.GroupNavigation.cs"] = 2,
+        // Batch 34 moved the interaction section's persisted writes into
+        // InteractionSettingsCoordinator, but the three App.Current accesses
+        // stay in the shell facade on purpose: the resize-overlay sync, the
+        // show-desktop layer refresh and the context-menu prewarm (pinned by
+        // ShellContextMenuCompatibilityContractTests) are host-side linkages
+        // that run after the coordinator's write, not settings writes.
         ["src/DeskBox/ViewModels/SettingsViewModel.PreferenceCallbacks.cs"] = 3,
         ["src/DeskBox/ViewModels/SettingsViewModel.PreferenceCommands.cs"] = 3,
         ["src/DeskBox/ViewModels/SettingsViewModel.QuickCaptureDiagnostics.cs"] = 2,

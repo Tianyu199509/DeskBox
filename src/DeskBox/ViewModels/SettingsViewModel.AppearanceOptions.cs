@@ -627,8 +627,7 @@ public partial class SettingsViewModel
                 return;
             }
 
-            _settingsService.Settings.WidgetLayerMode = normalizedValue;
-            _settingsService.SaveDebounced();
+            _interactionSettings.SetWidgetLayerMode(normalizedValue);
             App.Current?.WidgetManager?.RefreshVisibleWidgetDesktopLayers("settings-layer-mode");
             OnPropertyChanged(nameof(SelectedWidgetLayerModeText));
         }

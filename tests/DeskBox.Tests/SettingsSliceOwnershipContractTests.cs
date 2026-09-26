@@ -297,9 +297,13 @@ public sealed class SettingsSliceOwnershipContractTests
         // AppearanceSettingsCoordinator; AppearanceCallbacks reached zero and
         // lost its entry. Batch 33 moved the capsule/compact section writes
         // into CapsuleSettingsCoordinator (CapsuleOptions 34->20, leaving only
-        // widget/group override-list reads; AppearanceOptions 4->2, leaving
-        // WidgetLayerMode for the interaction batch plus snapshot reads).
-        ["src/DeskBox/ViewModels/SettingsViewModel.AppearanceOptions.cs"] = 2,
+        // widget/group override-list reads; AppearanceOptions 4->2). Batch 34
+        // moved the interaction section writes into
+        // InteractionSettingsCoordinator (PreferenceCallbacks 17->6, leaving
+        // the file-display section for batch 35; HoverActions 1->0 and lost
+        // its entry; AppearanceOptions 2->1, only the widget list read of the
+        // chrome-override reset remains).
+        ["src/DeskBox/ViewModels/SettingsViewModel.AppearanceOptions.cs"] = 1,
         ["src/DeskBox/ViewModels/SettingsViewModel.CapsuleOptions.cs"] = 20,
         ["src/DeskBox/ViewModels/SettingsViewModel.ContentEditorOptions.cs"] = 24,
         ["src/DeskBox/ViewModels/SettingsViewModel.DesktopOrganization.cs"] = 1,
@@ -310,9 +314,8 @@ public sealed class SettingsSliceOwnershipContractTests
         ["src/DeskBox/ViewModels/SettingsViewModel.FileStackOptions.cs"] = 32,
         ["src/DeskBox/ViewModels/SettingsViewModel.GroupNavigation.cs"] = 28,
         ["src/DeskBox/ViewModels/SettingsViewModel.HotkeyAndStorage.cs"] = 6,
-        ["src/DeskBox/ViewModels/SettingsViewModel.HoverActions.cs"] = 1,
         ["src/DeskBox/ViewModels/SettingsViewModel.Performance.cs"] = 11,
-        ["src/DeskBox/ViewModels/SettingsViewModel.PreferenceCallbacks.cs"] = 17,
+        ["src/DeskBox/ViewModels/SettingsViewModel.PreferenceCallbacks.cs"] = 6,
         ["src/DeskBox/ViewModels/SettingsViewModel.PreferenceCommands.cs"] = 2,
         ["src/DeskBox/ViewModels/SettingsViewModel.RuntimeDiagnostics.cs"] = 1,
         ["src/DeskBox/ViewModels/SettingsViewModel.SettingsSync.cs"] = 133,

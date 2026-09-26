@@ -586,14 +586,13 @@ A+B 工作树已补齐最终 QuickCapture 退出/快捷入口和 Todo 非有限�
 
 | 批 | 节 | 写入点 | 触面文件 | 共享棘轮资源 |
 |---|---|---|---|---|
-| 34 | 交互 | 12 | PreferenceCallbacks 10（AutoStart/AutoCheck/DoubleClick/FileItemMenu/ResizeSnap/SnapSpacing/KeepVisible/ShowHoverButtons/Idle/ImmediateTrim）、HoverActions 1、AppearanceOptions 1（WidgetLayerMode） | ModuleBoundary App.Current 例外、ShellContextMenuCompatibility（Prewarm 钉在 PreferenceCallbacks） |
 | 35 | 文件显示 | 6 | PreferenceCallbacks（ShowFileExtensions/HideShortcutArrowOverlay/ShowImageFilesAsIcons/ShowListItemDetails/ShowFileItemPathTooltips/HideShortcutExtensionWhenShowingFileExtensions） | 与 31 同文件分批，注意 ratchet 计数联动 |
 | 36 | 文件栈/文件格子 | 10 | FileStackOptions 10 | AotStage5B4B1 FileStack 源码钉 |
 | 37 | 分组导航 | 4 | GroupNavigation 4（WheelSwitch/HoverSwitch/DefaultTitleDisplayMode/DefaultNavigationStyle） | AotStage5B4B1 对 GroupNavigation 源码钉 |
 | 38 | 功能节（音乐/天气/Glance）+ QuickCapture 编辑器组 | 37 | FeatureOptions 29、FeatureCallbacks 2、WeatherOptions 1、ContentEditorOptions 5 | ModuleBoundary App.Current 例外（FeatureOptions=4）、FeatureSettingsBoundary quickCaptureWrite 门禁 |
 | 39 | 存储/诊断尾巴 | 2 | PreferenceCommands 1（DefaultManagedStorageRootPath）、AboutAndUpdates 1（LastUpdateCheckAt） | SettingsSync 133 处快照读随各批顺手收缩 |
 
-合计 12+6+10+4+37+2 = 71（第 29 批外观 28、第 33 批胶囊/紧凑 16 已完成并在第三十三批记录中销账）。**外部残余写入者**（不在 SettingsViewModel 内、后续单独处理）：OnboardingWindow.Appearance.cs 1 处 WidgetMaterialType 写入、SettingsService 自身的加载/迁移/默认值路径（Track B 界面）。
+合计 6+10+4+37+2 = 59（第 29 批外观 28、第 33 批胶囊/紧凑 16、第 34 批交互 12 已完成并在各自批次记录中销账）。**外部残余写入者**（不在 SettingsViewModel 内、后续单独处理）：OnboardingWindow.Appearance.cs 1 处 WidgetMaterialType 写入、OnboardingWindow.Hotkey.cs 的 AutoStart 直写（onboarding 批次）、SettingsService 自身的加载/迁移/默认值路径（Track B 界面）。
 
 ### 本批实现
 
@@ -732,6 +731,34 @@ Simon 拍板放弃"随触碰 ratchet"，对 Platform 域的 DllImport/LibraryImp
 - 隔离 Debug 启动：数据根 `C:/Users/simon/AppData/Local/DeskBox-Dev/capsule-track-a-33-20260926`（DESKBOX_DEV_DATA_ROOT）预置胶囊 14 字段非默认值（Smart 折叠、Minimal 内容、隐藏敏感内容、Independent 宽度、Up 展开、Bar 排列/Top 位置/Vertical 方向/21px 间距、Custom 动画 330ms、500/900ms 悬停延迟、Round 媒体圆角）。canonical 路径 `src/DeskBox/bin/Debug/net10.0-windows10.0.22621.0/DeskBox.exe` 启动 PID 11544，启动管线 35 步、0 degraded、0 failed；优雅关停后磁盘全部 14 个预置字段保持。验证后已按路径停止本 worktree 实例。
 - `git diff --check` 通过；未推送。
 - 已知残余：胶囊覆盖项重置命令（行为/几何/全量重置）仍操作 Widgets/WidgetGroups 集合（非平铺门面写入，清点表口径外，随分组导航或覆盖项后续批评估）；设置壳 ApplySettingsSnapshot/构造的胶囊读仍走门面读（无写入，ratchet 20 计数内）；未做真实胶囊悬停/动画的设备级手感验收，自动化证据不替代胶囊页实际拖动与悬停展开的视觉验收。
+
+## 第三十四批：交互设置节迁移（Track A 第三批）
+
+实施基线：`01db3a02`（main，含批 29-33），worktree `codex/final-settings-interaction`。对象是第二十九批清点表中"34 交互"行：12 个写入点（PreferenceCallbacks 10——AutoStart/AutoCheck/DoubleClick/FileItemMenu/ResizeSnap/SnapSpacing/KeepVisible/ShowHoverButtons/Idle/ImmediateTrim，HoverActions 1——WidgetHoverButtonActions，AppearanceOptions 1——WidgetLayerMode）。
+
+**协调器归属决策：独立建 `InteractionSettingsCoordinator`（不并入外观/胶囊协调器）。** 判据：交互族写入与外观活预览机制零耦合——11 个写入点均为"（按需归一化）→写值→SaveDebounced"直保存，唯一的例外 WidgetHoverButtonActions 走设置壳 `SaveAppearanceChange`（拖动延迟/通知抑制属壳的保存编排，不属于外观协调器），端口只负责存值、保存仍由壳唯一决定；WidgetLayerMode 是置顶层级语义（批 29 的 FeatureSettingsBoundary 注释本就"留给交互批"），并入外观会把窗口层级搅进视觉族。协调器内部一律走切片路径（`Settings.Core/FileWidget/WidgetShell/Performance.<字段>`），不新增平铺门面访问（FacadePassthroughAccess 棘轮零新增，与胶囊/外观协调器同款）。
+
+| 职责 | 所有者 |
+|---|---|
+| 交互节 12 字段的唯一设置页写入、数值/选项归一化（SnapSpacing 钳制、LayerMode 归一）、每字段原保存语义、AutoStart 的"未变化跳过"守卫（壳原读前置卫一并移入） | `Services/InteractionSettingsCoordinator`，经 `Contracts/IInteractionSettings` 暴露 |
+| 交互节编辑器缝（设置壳转发目标） | `Features/Interaction/InteractionSettingsViewModel`（无复制状态） |
+| XAML 绑定名、AOT 生成属性、文案、启动注册操作与状态回映（StartupService.SetEnabled/SetMode/失败回读）、更新检查触发时序、宿主侧联动（ResizeGuideOverlay 同步、WidgetManager 层级刷新、ShellContextMenuProxy.Prewarm）、HoverActions 的 SaveAppearanceChange 提交 | `SettingsViewModel` 兼容门面（PreferenceCallbacks/HoverActions/AppearanceOptions 三个 partial） |
+| 装配 | App 创建协调器与编辑器，经 SettingsWindow 注入 SettingsViewModel（与批 29/33 同款） |
+
+特有语义保全：①AutoStart——设置页写点在 `ApplyAutoStartState` 尾部（注册状态回映），StartupService 的模式切换/任务计划/Run 键迁移链零改动（DirectStartupService.SetMode 自身的 AutoStartMode 写入维持原样，属宿主侧自启动逻辑）；开发数据根（DESKBOX_DEV_DATA_ROOT）不触发开机默认自启应用，`ApplyDefaultAutoStartOnce` 的 App 侧写入不在本批范围。②AutoCheckForUpdates——App 启动时检查触发（App.xaml.cs 读门面）零改动，设置页只改持久值。③Idle/ImmediateTrim——第 1.4.9 时代工作集修剪仍只走既有 SettingsChanged 消费链（App.ImmediateHiddenWorkingSetTrim / App.QuiescenceWorkingSetTrim 读门面），协调器不触碰。④WidgetLayerMode——写值后壳仍按原顺序调 `RefreshVisibleWidgetDesktopLayers("settings-layer-mode")`。WidgetHoverButtonActions 语义精确化：协调器 SetWidgetHoverButtonActions 只存值不排保存（壳随后调 SaveAppearanceChange，避免双保存）；写入后宿主联动顺序（写→存→联动）原样保留。
+
+门禁收缩：`SettingsSliceOwnershipContractTests` 平铺清单 3 个文件收缩（PreferenceCallbacks 17→6，剩文件显示 6 字段留给第 35 批；HoverActions 1→0 删除条目；AppearanceOptions 2→1，仅剩 chrome 覆盖项重置的 Widgets 清单读），只删不加；协调器新文件走切片路径零新增门面访问。`FeatureSettingsBoundaryContractTests.SettingsShell_DoesNotWriteMigratedFeatureFieldsDirectly` 新增交互字段写入门禁（12 字清单），批 29 注释中"WidgetLayerMode 留给交互批"改为指向新门禁。ModuleBoundary 的 App.Current 例外清单 PreferenceCallbacks=3 **保留并注明**：三处（ResizeGuideOverlay×2、WidgetManager 层刷新）是刻意留在壳门面的宿主侧联动，Prewarm 钉（ShellContextMenuCompatibilityContractTests.Prewarm_IsWiredToStartupAndSettingsToggle 要求 Prewarm 调用留在 PreferenceCallbacks）不受影响。AOT 绑定面（属性零增删）自动保持。磁盘 schema、XAML、文案零变化。
+
+### 第三十四批验证记录
+
+- restore Updater 后 `dotnet build src/DeskBox/DeskBox.csproj -p:Platform=x64`：0 错误（警告均为既有位置）；非平台 canonical Debug（启动用）0 错误。
+- 定向测试 46/46 通过（新增 InteractionSettingsCoordinatorTests 7 用例：开关族写入+未变化跳过、AutoStart 回映守卫、SnapSpacing NaN/越界钳制、LayerMode 归一与无变化跳过、HoverActions 只存值不排保存且显式保存可落盘、12 字段磁盘往返、停止后拒写；SettingsSliceOwnership 7；FeatureSettingsBoundary 3；ModuleBoundary 4；ShellContextMenuCompatibility 5 及其余）。首版 LayerMode 用例把"无效值归一到已存默认值→无变化跳过"误计为一次通知，按实际语义修正断言。
+- 全量 x64 测试：**4,302/4,302 通过**（新基线 4,295 + 本批 7 个新用例）。
+- AOT 定义编译检查（x64、`DefineConstants="TRACE;...;DEBUG;DESKBOX_NATIVE_AOT"`，`ArtifactsPath`/`RestorePackagesPath` 隔离于 `.aotcheck/`，检查后已清理）：11 警告（与批 32/33 同位）、**0 错误**。未执行 Native AOT publish/link，仍为发版门禁。
+- 隔离 Debug 启动：数据根 `C:/Users/simon/AppData/Local/DeskBox-Dev/interaction-track-a-34-20260926`（DESKBOX_DEV_DATA_ROOT）预置交互 12 字段非默认值（autoStart/autoCheckForUpdates/doubleClickToOpen/resizeSnap/keepVisible/showHoverButtons/idle+immediateTrim 全 false、fileItemSystemContextMenuEnabled true、widgetSnapSpacing 14、widgetLayerMode QuickReveal、widgetHoverButtonActions "LockPosition,Delete"）。canonical 路径 `src/DeskBox/bin/Debug/net10.0-windows10.0.22621.0/DeskBox.exe` 启动 PID 33680，启动管线 **35 步、0 degraded、0 failed**（日志中 F7 RegisterHotKey error=1409 为本机并存生产实例占用热键的环境性记录，非启动步失败）；停机后磁盘 12 个预置字段全部保持（settings.json 经首启规范化补全 schema，预置值原样）。验证后已按路径停止本 worktree 实例。
+- `git diff --check` 通过。
+- 已知残余：设置壳 ApplySettingsSnapshot/构造的交互字段读仍走门面读（无写入，ratchet 6 计数内）；OnboardingWindow.Hotkey.cs 的 2 处 AutoStart 直写与 App.xaml.cs ApplyDefaultAutoStartOnce 的 1 处（开发根豁免外的开机默认回映）属宿主/onboarding 侧写入，不在 Track A 设置页清零口径内，已登记到剩余批次表的外部残余写入者行；未做真实设置页点击（自启开关、吸附间距滑杆、悬停按钮组合）的设备级手感验收，自动化证据不替代交互页实际操作验收。
+
 # 架构优化进度与下一批计划
 
 更新时间：2026-09-23。实施基线：`d4b0a7a2`。本记录承接当日的架构核对方案，按可独立验证的功能链路推进。
