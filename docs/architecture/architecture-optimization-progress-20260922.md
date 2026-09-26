@@ -535,3 +535,18 @@ A+B 工作树已补齐最终 QuickCapture 退出/快捷入口和 Todo 非有限�
 - AOT 条件编译（x64/win-x64、DeskBoxAotAudit + DeskBoxAotSmokeHarness + DeskBoxRustNative、`ArtifactsPath` 隔离）通过：888 警告、0 错误。未执行 Native AOT publish/link 或发布包运行，仍为发版门禁。
 - Debug 构建 0 错误；`git diff --check` 通过。
 - 真实挂起仅经探针模拟；生产三步后端均自带取消与排空，期限属于最后防线。未提交推送。
+
+## 第二十四批：拆离对账失败的隔离补偿
+
+实施基线：`53c65f9d`（分支自 main；与退出所有权批次（PR #427）无源码交集，可独立合并）。本批只处理复用拆离回滚写盘失败后 Registry 重指再出错的窄路径；拆离编排、磁盘 schema、Z-order 与拖放规则不变。
+
+原路径：`ReconcileCommittedDetachedSurfaceAsync` 的 Registry 重指失败时只记日志——设置已保存拆分而 Registry 仍持旧组声明，此后每次 `RaiseWidgetGroupsChanged` 都会撞声明校验抛点，分组操作降级直到重启。现在该 catch 调用 `WidgetGroupPersistedTopologyRecovery.QuarantineCommittedDetachClaims`：按实例注销被拆宿主、注销仍声明该成员的其它 Surface、移除旧组 Surface，再重试一次独立声明注册；重试被拒返回 false 并输出可观测标记（"Detach reconciliation quarantined without a standalone declaration"），不改动无关声明。补偿成功后补登记独立文件会话。`QuarantineCommittedMergeAsync` 两处原位于 try 之外的 `UnregisterHost` 补了逐项守卫，隔离级不再可能把异常逸出到合并 catch 之外。
+
+新增探针阶段 `detach-reconcile-registry`（DEBUG+开发数据根门控、单次触发）用于注入该重指失败。
+
+验证记录：
+
+- 定向 35/35 通过：真实 `WidgetSurfaceRegistry` + 假宿主断言隔离会清除旧组声明并重建独立声明；重试被拒时返回 false、输出可观测标记、且不误删无关声明。
+- 全量 x64 4,232/4,232（分支基线 4,230 + 2 个新用例）；AOT 条件编译 890 警告、0 错误（`ArtifactsPath` 隔离，仓库锁文件未改动）；`git diff --check` 通过。
+- 设备级检查已完成（2026-09-25 晚，隔离 Debug 临时入口，入口已移除）：真实 HWND 双文件格子组，`reused-detach-create,reused-detach-rollback-save,detach-reconcile-registry` 三阶段全触发——复用失败→回滚写盘被拒→对账重指失败→隔离补偿成功重建独立声明→后续经真实编排的重命名正常完成（`RaiseWidgetGroupsChanged` 不再抛），进程无崩溃。
+- 老版对照终审（同日）：设置面/运行时/磁盘兼容三路审计。磁盘兼容全绿（新→旧→新双向启动演练 settings.json 逐字节一致）；两处用户可见变更确认为第 5 批文档明示的有意统一（菜单关闭随记同步停录制、旧"功能关+录制开"配置启动归一化），列入 1.6.0 changelog 候选；补回 3 条剪贴板日志标记线（"Disabled from settings"/"Service initialized on demand"/"Inactive service released"）。最终全量 4,237/4,237。

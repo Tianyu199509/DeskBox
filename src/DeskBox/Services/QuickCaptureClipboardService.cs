@@ -154,6 +154,7 @@ public sealed class QuickCaptureClipboardService : IQuickCaptureClipboardSession
         _clipboardReader.ContentChanged += Clipboard_ContentChanged;
         _isStarted = true;
         App.Log($"[QuickCaptureClipboard] Started uiThread={App.UiDispatcherQueue?.HasThreadAccess.ToString() ?? "unknown"}");
+        App.Log("[QuickCaptureClipboard] Service initialized on demand");
         _ = BeginCaptureAsync();
     }
 
@@ -167,6 +168,7 @@ public sealed class QuickCaptureClipboardService : IQuickCaptureClipboardSession
             _clipboardReader.ContentChanged -= Clipboard_ContentChanged;
             _isStarted = false;
             App.Log("[QuickCaptureClipboard] Stopped");
+            App.Log("[QuickCaptureClipboard] Inactive service released");
         }
     }
 
