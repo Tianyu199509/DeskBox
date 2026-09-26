@@ -586,12 +586,11 @@ A+B 工作树已补齐最终 QuickCapture 退出/快捷入口和 Todo 非有限�
 
 | 批 | 节 | 写入点 | 触面文件 | 共享棘轮资源 |
 |---|---|---|---|---|
-| 36 | 文件栈/文件格子 | 10 | FileStackOptions 10 | AotStage5B4B1 FileStack 源码钉 |
 | 37 | 分组导航 | 4 | GroupNavigation 4（WheelSwitch/HoverSwitch/DefaultTitleDisplayMode/DefaultNavigationStyle） | AotStage5B4B1 对 GroupNavigation 源码钉 |
 | 38 | 功能节（音乐/天气/Glance）+ QuickCapture 编辑器组 | 37 | FeatureOptions 29、FeatureCallbacks 2、WeatherOptions 1、ContentEditorOptions 5 | ModuleBoundary App.Current 例外（FeatureOptions=4）、FeatureSettingsBoundary quickCaptureWrite 门禁 |
 | 39 | 存储/诊断尾巴 | 2 | PreferenceCommands 1（DefaultManagedStorageRootPath）、AboutAndUpdates 1（LastUpdateCheckAt） | SettingsSync 133 处快照读随各批顺手收缩 |
 
-合计 10+4+37+2 = 53（第 29 批外观 28、第 33 批胶囊/紧凑 16、第 34 批交互 12、第 35 批文件显示 6 已完成并在各自批次记录中销账）。**外部残余写入者**（不在 SettingsViewModel 内、后续单独处理）：OnboardingWindow.Appearance.cs 1 处 WidgetMaterialType 写入、OnboardingWindow.Hotkey.cs 的 AutoStart 直写（onboarding 批次）、SettingsService 自身的加载/迁移/默认值路径（Track B 界面）。
+合计 4+37+2 = 43（第 29 批外观 28、第 33 批胶囊/紧凑 16、第 34 批交互 12、第 35 批文件显示 6、第 36 批文件栈 10 已完成并在各自批次记录中销账）。**外部残余写入者**（不在 SettingsViewModel 内、后续单独处理）：OnboardingWindow.Appearance.cs 1 处 WidgetMaterialType 写入、OnboardingWindow.Hotkey.cs 的 AutoStart 直写（onboarding 批次）、SettingsService 自身的加载/迁移/默认值路径（Track B 界面）。
 
 ### 本批实现
 
@@ -784,6 +783,33 @@ Simon 拍板放弃"随触碰 ratchet"，对 Platform 域的 DllImport/LibraryImp
 - 隔离 Debug 启动：数据根 `C:/Users/simon/AppData/Local/DeskBox-Dev/filedisplay-track-a-35-20260926`（DESKBOX_DEV_DATA_ROOT）预置文件显示 6 字段非默认值（showFileExtensions=true、hideShortcutExtensionWhenShowingFileExtensions=false、hideShortcutArrowOverlay=false、showImageFilesAsIcons=true、showListItemDetails=true、showFileItemPathTooltips=false，另预置 hasCompletedOnboarding/hasResolvedInitialFileWidgetSetup=true 保持无格子安静启动）。canonical 路径 `src/DeskBox/bin/Debug/net10.0-windows10.0.22621.0/DeskBox.exe` 启动 PID 28520，启动管线 35 步（5 critical）、0 degraded、0 failed（日志中 F7 RegisterHotKey error=1409 为本机并存实例占用热键的环境性记录，非启动步失败）；运行中与停止后磁盘 6 个预置字段均保持原值（首启规范化补全 schema，预置值原样；widget-layout.json 由 store 正常领养生成空布局）。停止采用按 PID 强制结束（关闭到托盘语义下 WM_CLOSE 不触发退出序列，无 CLI 退出入口），未走完整退出管线——本批验证的字段在启动加载时已由既有保存链定格，不受影响。验证后已确认本 worktree 实例归零（并存的他 worktree 实例未触碰）。
 - `git diff --check` 通过。
 - 已知残余：设置壳 ApplySettingsSnapshot/构造的文件显示字段读仍走门面读（无写入，FacadeAccessManifest SettingsSync 133/SettingsViewModel.cs 94 计数内）；未做真实设置页点击（扩展名开关、图片图标投影切换后真实文件夹图标的实际重投影效果）的设备级手感验收，自动化证据不替代文件显示页实际操作与图标刷新的视觉验收。
+
+## 第三十六批：文件栈/文件格子设置节迁移（Track A 第五批）
+
+实施基线：`c89f5eb0`（main，含批 29-35），worktree `codex/final-settings-filestack`。对象是第二十九批清点表中"36 文件栈/文件格子"行：`SettingsViewModel.FileStackOptions` partial 的 10 个写入点——堆叠总开关/自动堆叠/分组方式/阈值/排序/打开方式/浮窗布局/浮窗样式/未匹配行为 9 个标量加 `FileStackCustomRules` 集合整写，全部为"（选项归一）→写值→SaveDebounced"直保存族。
+
+**协调器归属决策：独立建 `FileStackSettingsCoordinator`（不并入文件显示协调器）。** 判据与批 33/34/35 同款：文件栈族写入与外观活预览机制零耦合，全部直保存，从不走 `SaveAppearanceChange`/`RequestAppearancePreview` 链；但与文件显示的纯标量族有一处结构性差异——自定义规则是集合整写（增删改与拖拽排序共用 `PersistFileStackCustomRules` 单一投影），并入文件显示会把"标量逐字段写"与"集合替换写"搅进同一端口。协调器一律走 `Settings.FileWidget` 切片路径，FacadePassthroughAccess 棘轮零新增。
+
+| 职责 | 所有者 |
+|---|---|
+| 文件栈 10 字段的唯一设置页写入、选项/阈值归一化、每字段原保存语义、未变化跳过守卫 | `Services/FileStackSettingsCoordinator`，经 `Contracts/IFileStackSettings` 暴露 |
+| 文件栈节编辑器缝（设置壳转发目标） | `Features/FileStack/FileStackSettingsViewModel`（无复制状态） |
+| XAML 绑定名、AOT 生成属性、文案、规则编辑器集合（增删/上移下移/拖拽排序提交/逐规则编辑）、规则预览投影、回调守卫（`_isRestoringDefaults`/`_isApplyingSettingsSnapshot`）、`editor.ToModel()` 扩展名归一化投影 | `SettingsViewModel` 兼容门面（FileStackOptions partial） |
+| 装配 | App 创建协调器与编辑器，经 SettingsWindow 注入 SettingsViewModel（与批 29/33/34/35 同款） |
+
+特有语义保全：①自定义规则集合的三条触发路径（CollectionChanged 增删、逐规则 PropertyChanged、`CommitFileStackCustomRuleOrder` 拖拽排序提交）仍汇聚到壳的 `PersistFileStackCustomRules`，改经协调器 `SetFileStackCustomRules` 单一写入入口；`ToModel()` 的扩展名归一化（ParseExtensions→NormalizeFileStackExtensions+每规则 64 个上限）原样保留，协调器写入侧存储同一投影（裁剪名称+归一化上限扩展名，与加载管线归一化一致），并带等价跳过（同 Id/同裁剪名/等价扩展名序列——拖回原位的排序重提交不再触发保存与投影重建，与批 33/34/35 未变化跳过同款语义精确化）。②堆叠开关/分组/规则变更后的投影重建零触碰：仍只由 SaveDebounced 触发的既有 SettingsChanged 广播驱动（WidgetViewModel 的 QueueStackDisplayRebuild 排队链），宿主侧消费代码原样。③AotStage5B4B1 对 FileStackOptions 源码的钉逐一核对保持：`AvailableFileStackPopoverLayoutOptions` 属性留在 partial、`FileStacksEnabled` 的 TwoWay XAML 钉与 `FileStackCustomRules` 的 OneWay ItemsSource 钉（XAML 零变化）、AotDeepSmoke 的 `FileStackRuleCount` 探针路径（读壳的 `ViewModel.FileStackCustomRules`，属性面零增删）、AotBindableProperties 的 349 计数均自动保持。
+
+门禁收缩：`SettingsSliceOwnershipContractTests` 平铺清单收缩（FileStackOptions 32→22，仅剩构造/快照读与 Widgets 预览读），只删不加；`FeatureSettingsBoundaryContractTests.SettingsShell_DoesNotWriteMigratedFeatureFieldsDirectly` 新增文件栈 10 字段写入门禁（含 `FileWidget` 切片前缀变体）；AOT 绑定面与磁盘 schema/XAML/文案零变化自动保持。
+
+### 第三十六批验证记录
+
+- restore Updater 后 `dotnet build src/DeskBox/DeskBox.csproj -p:Platform=x64`：0 错误、22 警告（均为既有位置，与批 35 后同位）；非平台 canonical Debug（启动用）0 错误。
+- 定向测试 27/27 通过（新增 FileStackSettingsCoordinatorTests 5 用例：9 标量+规则集合写入与未变化跳过、规则单一入口等价重提交跳过/真实排序与编辑落盘、非默认全量磁盘往返（ReadAll 快照+扩展名归一化断言）、无效选项按页面归一化收口、停止后拒写；SettingsSliceOwnership 7；FeatureSettingsBoundary 3；AotStage5B4B1 12）。
+- 全量 x64 测试：**4,311/4,311 通过**（新基线 4,306 + 本批 5 个新用例）。
+- AOT 定义编译检查（x64、`DefineConstants="TRACE;DEBUG;DESKBOX_NATIVE_AOT"`，`ArtifactsPath`/`RestorePackagesPath` 隔离于 `.aotcheck/`，检查后已清理）：11 警告（与批 32/33/34/35 同位）、**0 错误**。未执行 Native AOT publish/link，仍为发版门禁。
+- 隔离 Debug 启动：数据根 `C:/Users/simon/AppData/Local/DeskBox-Dev/filestack-track-a-36-20260926`（DESKBOX_DEV_DATA_ROOT）预置文件栈 10 字段非默认值（开+Custom 分组+2 条自定义规则（Documents/.pdf/.docx、Images/.png/.jpg）+自动堆叠开+阈值 2+Name 排序+Popover 打开+Grid5 浮窗+FollowMaterial 样式+Other 未匹配行为，另预置 hasCompletedOnboarding/hasResolvedInitialFileWidgetSetup=true 保持无格子安静启动）。canonical 路径 `src/DeskBox/bin/Debug/net10.0-windows10.0.22621.0/DeskBox.exe` 启动 PID 21896，启动管线 **35 步（5 critical）、0 degraded、0 failed**（日志中 F7 RegisterHotKey error=1409 为本机并存实例占用热键的环境性记录，非启动步失败）；运行中与按 PID 强制结束（关闭到托盘语义下无 CLI 退出入口，与批 35 同款）后磁盘 10 个预置字段（含 2 条规则的 Id/名称/归一化扩展名）全部保持原值。验证后已确认本 worktree 实例归零（并存的他 worktree 实例未触碰）。
+- `git diff --check` 通过。
+- 已知残余：设置壳 ApplySettingsSnapshot/构造的文件栈字段读仍走门面读（无写入，FileStackOptions ratchet 22 计数内）；规则预览的文件枚举（BuildFileStackPreviewEntries 读 Widgets）仍在壳门面；未做真实设置页点击（开关切换、规则增删拖拽后真实堆叠投影重建效果）的设备级手感验收，自动化证据不替代文件栈页实际操作与堆叠重建的视觉验收。
 
 # 架构优化进度与下一批计划
 

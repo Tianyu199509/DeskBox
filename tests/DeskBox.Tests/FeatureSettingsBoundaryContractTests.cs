@@ -91,6 +91,12 @@ public sealed class FeatureSettingsBoundaryContractTests
         // FileDisplaySettingsCoordinator.
         Regex fileDisplayWrite = new(
             @"\b(?:_settingsService\s*\.\s*Settings|settings)\s*\.\s*(?:FileWidget\s*\.\s*)?(?:ShowFileExtensions|HideShortcutExtensionWhenShowingFileExtensions|HideShortcutArrowOverlay|ShowImageFilesAsIcons|ShowListItemDetails|ShowFileItemPathTooltips)\s*=(?!=)");
+        // Batch 36: the file-stack section (stack master switch, auto-stacking,
+        // grouping mode plus the custom-rule collection, auto-stack threshold,
+        // stack ordering, open mode, popover layout/style and the unmatched-file
+        // behavior) writes through FileStackSettingsCoordinator.
+        Regex fileStackWrite = new(
+            @"\b(?:_settingsService\s*\.\s*Settings|settings)\s*\.\s*(?:FileWidget\s*\.\s*)?(?:FileStacksEnabled|FileStackAutoStacking|FileStackGroupBy|FileStackThreshold|FileStackOrderBy|FileStackOpenMode|FileStackPopoverLayout|FileStackPopoverStyle|FileStackCustomRules|FileStackUnmatchedBehavior)\s*=(?!=)");
         (string Path, string Source)[] pages = ProductionSource()
             .Where(item => item.Path.StartsWith(
                     "src/DeskBox/ViewModels/SettingsViewModel", StringComparison.Ordinal) &&
@@ -103,6 +109,7 @@ public sealed class FeatureSettingsBoundaryContractTests
                     .Concat(capsuleWrite.Matches(item.Source).Cast<Match>())
                     .Concat(interactionWrite.Matches(item.Source).Cast<Match>())
                     .Concat(fileDisplayWrite.Matches(item.Source).Cast<Match>())
+                    .Concat(fileStackWrite.Matches(item.Source).Cast<Match>())
                     .Select(match => $"{item.Path}: {match.Value}"))
             .ToArray();
 

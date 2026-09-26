@@ -94,8 +94,7 @@ public partial class SettingsViewModel
                 return;
             }
 
-            _settingsService.Settings.FileStacksEnabled = value;
-            _settingsService.SaveDebounced();
+            _fileStackSettings.SetFileStacksEnabled(value);
         }
     }
 
@@ -115,8 +114,7 @@ public partial class SettingsViewModel
                 return;
             }
 
-            _settingsService.Settings.FileStackAutoStacking = value;
-            _settingsService.SaveDebounced();
+            _fileStackSettings.SetFileStackAutoStacking(value);
         }
     }
 
@@ -138,8 +136,7 @@ public partial class SettingsViewModel
                 return;
             }
 
-            _settingsService.Settings.FileStackGroupBy = normalized;
-            _settingsService.SaveDebounced();
+            _fileStackSettings.SetFileStackGroupBy(normalized);
         }
     }
 
@@ -171,8 +168,7 @@ public partial class SettingsViewModel
                 return;
             }
 
-            _settingsService.Settings.FileStackThreshold = normalized;
-            _settingsService.SaveDebounced();
+            _fileStackSettings.SetFileStackThreshold(normalized);
         }
     }
 
@@ -203,8 +199,7 @@ public partial class SettingsViewModel
                 return;
             }
 
-            _settingsService.Settings.FileStackOrderBy = normalized;
-            _settingsService.SaveDebounced();
+            _fileStackSettings.SetFileStackOrderBy(normalized);
         }
     }
 
@@ -236,8 +231,7 @@ public partial class SettingsViewModel
                 return;
             }
 
-            _settingsService.Settings.FileStackOpenMode = normalized;
-            _settingsService.SaveDebounced();
+            _fileStackSettings.SetFileStackOpenMode(normalized);
         }
     }
 
@@ -293,8 +287,7 @@ public partial class SettingsViewModel
                 return;
             }
 
-            _settingsService.Settings.FileStackPopoverLayout = normalized;
-            _settingsService.SaveDebounced();
+            _fileStackSettings.SetFileStackPopoverLayout(normalized);
         }
     }
 
@@ -331,8 +324,7 @@ public partial class SettingsViewModel
                 return;
             }
 
-            _settingsService.Settings.FileStackPopoverStyle = normalized;
-            _settingsService.SaveDebounced();
+            _fileStackSettings.SetFileStackPopoverStyle(normalized);
         }
     }
 
@@ -353,8 +345,7 @@ public partial class SettingsViewModel
                 return;
             }
 
-            _settingsService.Settings.FileStackUnmatchedBehavior = normalized;
-            _settingsService.SaveDebounced();
+            _fileStackSettings.SetFileStackUnmatchedBehavior(normalized);
         }
     }
 
@@ -668,10 +659,12 @@ public partial class SettingsViewModel
 
     private void PersistFileStackCustomRules()
     {
-        _settingsService.Settings.FileStackCustomRules = FileStackCustomRules
-            .Select(editor => editor.ToModel())
-            .ToList();
-        _settingsService.SaveDebounced();
+        // Single write entry for the custom-rule collection: add/remove,
+        // per-rule edits and drag-order commits all project their editors to
+        // models here (extension-list normalization stays in ToModel) and let
+        // the coordinator own the store-and-save semantics.
+        _fileStackSettings.SetFileStackCustomRules(
+            FileStackCustomRules.Select(editor => editor.ToModel()).ToList());
     }
 
     private bool FileStackCustomRuleEditorsMatch(
