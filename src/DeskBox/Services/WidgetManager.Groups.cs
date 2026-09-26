@@ -3211,6 +3211,19 @@ public sealed partial class WidgetManager
         IWidgetTransientStateContent? transientStateSource)
     {
         object? opaqueState = transientStateSource?.CaptureTransientState();
+        if (opaqueState is null &&
+            transientStateSource is IWidgetGroupContentCacheable)
+        {
+            // Diagnostic only, no behavior change: a cacheable member whose
+            // adapter is cold reports no transient state, and the capture
+            // policy silently drops null. Once ReleaseView becomes a
+            // cached-member eviction path, this line marks the state that
+            // would be lost across rematerialization.
+            App.LogVerbose(
+                "[WidgetGroup] Transient state capture returned null for a " +
+                $"cacheable content member={widgetId}");
+        }
+
         WidgetGroupTransientState? state = opaqueState is null
             ? null
             : new WidgetGroupTransientState(opaqueState);

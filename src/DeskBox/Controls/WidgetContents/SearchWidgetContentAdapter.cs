@@ -115,6 +115,5 @@ public sealed class SearchWidgetContentAdapter :
 
         (MaterializedView as IDisposable)?.Dispose();
         _searchRequested = null;
-        ReleaseView();
     }
 }

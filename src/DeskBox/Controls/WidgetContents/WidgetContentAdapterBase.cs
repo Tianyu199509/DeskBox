@@ -39,6 +39,14 @@ public abstract class WidgetContentAdapterBase : IWidgetContent, IDisposable
     /// The lazy leaf view. Materializing happens on the first access inside
     /// the owning switch transaction; accessing after disposal without a
     /// materialized view is a programming error and throws.
+    ///
+    /// Disposal policy (uniform across adapters): Dispose tears down the leaf
+    /// and the view model but deliberately keeps the materialized view
+    /// reference returnable, matching the File/QuickCapture semantics the
+    /// residency roadmap froze. Callers must treat a view handed back after
+    /// Dispose as a detached, already-disposed element and never re-attach
+    /// it; only ReleaseView (the cold-eviction primitive) clears the
+    /// reference so a later access rematerializes.
     /// </summary>
     public FrameworkElement View
     {
@@ -67,6 +75,13 @@ public abstract class WidgetContentAdapterBase : IWidgetContent, IDisposable
     /// Drops the materialized view without disposing the adapter or the
     /// view model (the residency roadmap's release-view primitive). The
     /// next View access rematerializes through the factory.
+    ///
+    /// Precondition before enabling this for cached-member eviction: a cold
+    /// adapter transient capture strategy must be defined first. Today the
+    /// group transient-capture path treats a null CaptureTransientState
+    /// result as "nothing to preserve" and silently discards it, so evicting
+    /// an adapter whose leaf held un-captured state would lose that state on
+    /// rematerialization.
     /// </summary>
     protected void ReleaseView()
     {
