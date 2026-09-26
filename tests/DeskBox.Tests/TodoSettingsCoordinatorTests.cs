@@ -765,6 +765,62 @@ public sealed class TodoSettingsCoordinatorTests : IDisposable
         }
     }
 
+
+    [Fact]
+    public async Task ExternalUnrelatedSave_DoesNotReconcileReminders()
+    {
+        var settings = new SettingsService(_root);
+        int reconciles = 0;
+        var coordinator = new TodoSettingsCoordinator(
+            settings, refreshReminders: _ => reconciles++);
+        await settings.SaveAsync();
+
+        int afterFirst = reconciles;
+        Assert.Equal(1, afterFirst);
+
+        settings.Settings.TextSize = 13.5;
+        await settings.SaveAsync();
+
+        Assert.Equal(afterFirst, reconciles);
+    }
+
+    [Fact]
+    public async Task ExternalReminderToggle_ReconcilesReminders()
+    {
+        var settings = new SettingsService(_root);
+        int reconciles = 0;
+        var coordinator = new TodoSettingsCoordinator(
+            settings, refreshReminders: _ => reconciles++);
+        await settings.SaveAsync();
+        Assert.Equal(1, reconciles);
+
+        settings.Settings.TodoReminderEnabled = !settings.Settings.TodoReminderEnabled;
+        await settings.SaveAsync();
+
+        Assert.Equal(2, reconciles);
+    }
+
+    [Fact]
+    public async Task ExternalTodoWidgetAdded_ReconcilesReminders()
+    {
+        var settings = new SettingsService(_root);
+        int reconciles = 0;
+        var coordinator = new TodoSettingsCoordinator(
+            settings, refreshReminders: _ => reconciles++);
+        await settings.SaveAsync();
+        Assert.Equal(1, reconciles);
+
+        settings.Settings.Widgets.Add(new WidgetConfig
+        {
+            Id = Guid.NewGuid().ToString(),
+            Name = "Todo",
+            WidgetKind = WidgetKind.Todo
+        });
+        await settings.SaveAsync();
+
+        Assert.Equal(2, reconciles);
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_root)) Directory.Delete(_root, recursive: true);

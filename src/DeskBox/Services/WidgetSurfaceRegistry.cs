@@ -559,7 +559,6 @@ internal sealed class WidgetSurfaceSession<THost> : IDisposable
         MemberIds = definition.MemberIds.ToArray();
         ActiveMemberId = definition.ActiveMemberId;
         Host = host;
-        SwitchGate = new SemaphoreSlim(1, 1);
     }
 
     public string SurfaceId { get; }
@@ -575,8 +574,6 @@ internal sealed class WidgetSurfaceSession<THost> : IDisposable
     public string? CandidateMemberId { get; private set; }
 
     public THost? CandidateHost { get; private set; }
-
-    public SemaphoreSlim SwitchGate { get; }
 
     internal void UpdateDefinition(WidgetSurfaceDefinition definition)
     {

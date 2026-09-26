@@ -27,6 +27,9 @@ internal sealed class WidgetSurfaceSwitchGatePool
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(surfaceIds);
+        // Blank ids are legitimate here: standalone (non-group) participants
+        // of a topology transaction have no SurfaceId and must run ungated;
+        // group ids are normalized by their entry points before this call.
         var held = new List<SemaphoreSlim>();
         try
         {

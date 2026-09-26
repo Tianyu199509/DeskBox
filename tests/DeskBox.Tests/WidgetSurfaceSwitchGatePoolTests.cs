@@ -86,4 +86,25 @@ public sealed class WidgetSurfaceSwitchGatePoolTests
         pool.Get("surface-a").Release();
         blocked.Release();
     }
+
+    [Fact]
+    public async Task AcquireMany_SkipsBlankIdsForStandaloneParticipants()
+    {
+        var pool = new WidgetSurfaceSwitchGatePool();
+
+        // Standalone topology participants have no SurfaceId; they must run
+        // ungated instead of failing the whole transaction.
+        IDisposable lease = await pool.AcquireManyAsync(["surface-a", null, " "]);
+
+        try
+        {
+            Assert.Equal(0, pool.Get("surface-a").CurrentCount);
+        }
+        finally
+        {
+            lease.Dispose();
+        }
+        Assert.Equal(1, pool.Get("surface-a").CurrentCount);
+        Assert.Equal(1, pool.Count);
+    }
 }

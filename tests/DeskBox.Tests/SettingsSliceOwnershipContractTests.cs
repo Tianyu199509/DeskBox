@@ -238,6 +238,11 @@ public sealed class SettingsSliceOwnershipContractTests
         // 5 = legacy 4 + DesktopDoubleClickEnabled read backing the hook
         // watchdog's HookProbeWanted gate (activation service line 122).
         ["src/DeskBox/Services/DesktopDoubleClickActivationService.cs"] = 5,
+        // TodoSettingsCoordinator reads Settings.Widgets once in the
+        // reminder-reconcile change guard: the Todo widget id set has no
+        // slice projection, and watching it keeps external widget deletions
+        // reconciled without reacting to unrelated debounced saves.
+        ["src/DeskBox/Services/TodoSettingsCoordinator.cs"] = 1,
         ["src/DeskBox/Services/DesktopOrganizationCoordinator.cs"] = 13,
         ["src/DeskBox/Services/DesktopOrganizationTransaction.Restore.cs"] = 3,
         ["src/DeskBox/Services/DesktopOrganizationTransaction.cs"] = 9,

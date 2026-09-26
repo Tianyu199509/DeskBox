@@ -1611,6 +1611,9 @@ public sealed partial class WidgetManager
                     detachedPosition));
         }
 
+        // Hand-edited settings can leave a blank SurfaceId; the switch-gate
+        // pool rejects those, so repair the topology before any lookup.
+        WidgetGroupSettings.Normalize(_settingsService.Settings);
         WidgetGroupConfig? pendingGroup = WidgetGroupSettings.FindByMember(
             _settingsService.Settings,
             widgetId);
@@ -1859,6 +1862,9 @@ public sealed partial class WidgetManager
                 () => DissolveWidgetGroupContainingAsync(widgetId));
         }
 
+        // Hand-edited settings can leave a blank SurfaceId; the switch-gate
+        // pool rejects those, so repair the topology before any lookup.
+        WidgetGroupSettings.Normalize(_settingsService.Settings);
         WidgetGroupConfig? pendingGroup = WidgetGroupSettings.FindByMember(
             _settingsService.Settings,
             widgetId);
@@ -1870,6 +1876,7 @@ public sealed partial class WidgetManager
         await _widgetGroupGate.WaitAsync();
         try
         {
+            WidgetGroupSettings.Normalize(_settingsService.Settings);
             WidgetGroupConfig? group = WidgetGroupSettings.FindByMember(
                 _settingsService.Settings,
                 widgetId);
@@ -2009,6 +2016,7 @@ public sealed partial class WidgetManager
         await _widgetGroupGate.WaitAsync();
         try
         {
+            WidgetGroupSettings.Normalize(_settingsService.Settings);
             WidgetGroupConfig? group = WidgetGroupSettings.FindByMember(
                 _settingsService.Settings,
                 sourceWidgetId);

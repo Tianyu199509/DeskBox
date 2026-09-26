@@ -550,3 +550,28 @@ A+B 工作树已补齐最终 QuickCapture 退出/快捷入口和 Todo 非有限�
 - 全量 x64 4,232/4,232（分支基线 4,230 + 2 个新用例）；AOT 条件编译 890 警告、0 错误（`ArtifactsPath` 隔离，仓库锁文件未改动）；`git diff --check` 通过。
 - 设备级检查已完成（2026-09-25 晚，隔离 Debug 临时入口，入口已移除）：真实 HWND 双文件格子组，`reused-detach-create,reused-detach-rollback-save,detach-reconcile-registry` 三阶段全触发——复用失败→回滚写盘被拒→对账重指失败→隔离补偿成功重建独立声明→后续经真实编排的重命名正常完成（`RaiseWidgetGroupsChanged` 不再抛），进程无崩溃。
 - 老版对照终审（同日）：设置面/运行时/磁盘兼容三路审计。磁盘兼容全绿（新→旧→新双向启动演练 settings.json 逐字节一致）；两处用户可见变更确认为第 5 批文档明示的有意统一（菜单关闭随记同步停录制、旧"功能关+录制开"配置启动归一化），列入 1.6.0 changelog 候选；补回 3 条剪贴板日志标记线（"Disabled from settings"/"Service initialized on demand"/"Inactive service released"）。最终全量 4,237/4,237。
+
+## 第二十五批：审计遗留清理与文档对账
+
+实施基线：`fdb5d45a`（main，四段 PR 栈 + #427 + #428 全部合并后）。本批只清理历次审查的低风险遗留项与文档欠账，不改用户可见行为。
+
+- 删除 `WidgetSurfaceSession.SwitchGate` 死代码（全仓零引用，真串行早已由 `WidgetSurfaceSwitchGatePool` 承担）。
+- 空白 SurfaceId 语义澄清：全量测试证明 `AcquireManyAsync` 的跳过空白行为是**承载语义**（独立格子的拓扑事务参与者没有 SurfaceId，必须无门控运行），不可改为抛错（首版 fail-closed 尝试被 HiddenMerge 双故障测试当场击落并回退）；拆离/解散/重排入口在查找组之前先 `WidgetGroupSettings.Normalize`（对齐合并路径既有做法），`Get` 对空白仍严格抛错。新增测试钉住跳过语义。
+- `FileSurfaceContent` 磁盘协调的 `OperationCanceledException` 与表面切换/退役的竞争改为 Verbose 记录（Session A 观察到的日志噪声），真实失败仍走原错误日志。
+- 远端**列表**操作仍不经 `BackupRestoreActions` 登记（只读、页面访问已取消、无状态影响；为它穿透三层构造函数与低风险清理批的定位不符）——维持文档化残余，随下次触碰备份协调器时顺手收编。
+- 文档对账：路线图追记执行对账（分组事务线立档、2C PR-1 状态修正、IFeatureRuntime 替代记录）。
+
+验证记录：定向测试（GatePool/Registry）通过；全量 x64 4,238/4,238（4,237 + 1 个新用例；首版抛错尝试在 4,237/4,238 被合并编排测试击落后回退）；`git diff --check` 通过。设备验收（A/B/D）已于 2026-09-26 全绿，发版等 Simon 指令。
+
+## 第二十六批（部分）：P0 归因与日志队列评估
+
+- **P0 全应用内存归因已完成**（报告 `residency-p0-attribution-20260926.md`）：framework Release、3 组×9 格子同进程差分——组缓存树增量 3~5MB、占稳态私有 2~3%，**命中 <10% 停止线：跳过 Cold 档**。两个意外发现：冷启动缓存为空（按需物化+Small 预算封顶，"缓存常驻"前提已不成立）；P2（Warm TTL）价值降级为 CPU/订阅冻结，降为低优先级待真实反馈，**P1-c 维持无条件执行**。测量用临时解除 `DESKBOX_DEV_DATA_ROOT` Release 门控的本地构建，改动已全部还原（一次真实数据误写疑云经快照比对确认为虚惊、零影响，如实记录）。
+- **日志队列迁移评估结案：不迁移**。理由：日志队列与单实例锁同属进程生命周期基础设施，必须活到所有服务释放之后（退出序列中 log-drain 在 service-container 之后）；移入 DI 容器会倒置依赖，移入协调器只换边界无行为收益；模块边界立法本就将日志兼容调用豁免在外。重开触发条件：日志需要可配置 sink/级别（结构化日志功能立项）时，抽 Contracts 接口、App 为默认实现。第 3 批起的"待评估"就此关闭。
+
+## 第二十七批：外部审计对照（#427/#428 复审）
+
+外部审计四项指控经两路独立对码验证：①"三个备份/快采步骤缺 abort 会与容器释放竞争"——**事实成立但影响链被驳斥**（五类依赖服务均非 IDisposable，容器只释放 Theme/Weather/CitySearch；备份挂起是纯 IO；abort 反而是错误语义），仅补防翻修注释；②"看门狗路径互斥锁提前释放开 3 秒双实例窗口"——**成立并已修复**：mutex 仅在完整清理时手动释放，看门狗路径交给进程死亡释放（修复含审计员遗漏的约束：throw 路径无看门狗、必须保留手动释放）；契约断言钉住该语义，hang 探针复验 20 秒退出不变；③"Search 停止/准入竞态"——**驳斥**（admission 与 Stop 全在 UI 线程、无挂起点交叉，连 latent 都不成立）；④"隔离补偿缺身份校验可误删有效声明"——**驳斥**（已提交拓扑下 removedMember 为独立，任何其它声明定义上即 stale；提议的 SurfaceId==originalSurfaceId 校验在唯一可构造子情形会破坏清理，提议的测试会把违反不变量的状态固化为正例）。审计的 P3（PR 混日志修复）与拆 Coordinator 建议记录在案（后者与路线图拆工程触发条件一致）。全量 4,238/4,238。
+
+## 第二十八批：提醒重入的切片收窄
+
+审计遗留 P3-2 收口。目标口径：全局 `SettingsChanged` 无参数广播导致 `TodoSettingsCoordinator.OnSettingsChanged` 在每次防抖保存（如拖动外观滑块每秒一次）都重入提醒协调。评估后取**协调器侧变更检测守卫**而非全量事件参数化：其余订阅者（QuickCapture/Search/WidgetManager/备份）早已自带缓存比较守卫，事件签名改造是一天级宽 API 动而收益仅剩提醒一处。守卫缓存四个提醒相关输入（TodoEnabled、TodoReminderEnabled、默认提前分钟、Todo 格子 ID 集合），无变化即跳过；首次通知仍重入（覆盖恢复/默认值路径）。新增三条测试：无关保存零重入、提醒开关变化重入、Todo 格子增删重入。事件参数化留作触发项：出现第二个必须依赖切片信息的消费者时再立法。
