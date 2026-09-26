@@ -324,7 +324,7 @@ public partial class App : Application
         {
             using var identity = WindowsIdentity.GetCurrent();
             var principal = new WindowsPrincipal(identity);
-            return $"isAdminRole={principal.IsInRole(WindowsBuiltInRole.Administrator)} {GetProcessTokenReport(GetCurrentProcess())}";
+            return $"isAdminRole={principal.IsInRole(WindowsBuiltInRole.Administrator)} {GetProcessTokenReport(ProcessDiagnosticsNativeMethods.GetCurrentProcess())}";
         }
         catch (Exception ex)
         {
@@ -371,7 +371,7 @@ public partial class App : Application
 
     private static string GetProcessTokenReport(uint processId)
     {
-        IntPtr processHandle = OpenProcess(ProcessQueryLimitedInformation, false, processId);
+        IntPtr processHandle = ProcessDiagnosticsNativeMethods.OpenProcess(ProcessQueryLimitedInformation, false, processId);
         if (processHandle == IntPtr.Zero)
         {
             return $"token=unavailable error={Marshal.GetLastWin32Error()}";
@@ -383,7 +383,7 @@ public partial class App : Application
         }
         finally
         {
-            CloseHandle(processHandle);
+            ProcessDiagnosticsNativeMethods.CloseHandle(processHandle);
         }
     }
 
@@ -428,7 +428,7 @@ public partial class App : Application
         parentProcessId = 0;
         const uint Th32csSnapProcess = 0x00000002;
 
-        IntPtr snapshot = CreateToolhelp32Snapshot(Th32csSnapProcess, 0);
+        IntPtr snapshot = ProcessDiagnosticsNativeMethods.CreateToolhelp32Snapshot(Th32csSnapProcess, 0);
         if (snapshot == IntPtr.Zero || snapshot == new IntPtr(-1))
         {
             return false;
@@ -436,12 +436,12 @@ public partial class App : Application
 
         try
         {
-            var entry = new ProcessEntry32
+            var entry = new ProcessDiagnosticsNativeMethods.ProcessEntry32
             {
-                dwSize = (uint)Marshal.SizeOf<ProcessEntry32>()
+                dwSize = (uint)Marshal.SizeOf<ProcessDiagnosticsNativeMethods.ProcessEntry32>()
             };
 
-            if (!Process32First(snapshot, ref entry))
+            if (!ProcessDiagnosticsNativeMethods.Process32First(snapshot, ref entry))
             {
                 return false;
             }
@@ -454,13 +454,13 @@ public partial class App : Application
                     return true;
                 }
             }
-            while (Process32Next(snapshot, ref entry));
+            while (ProcessDiagnosticsNativeMethods.Process32Next(snapshot, ref entry));
 
             return false;
         }
         finally
         {
-            CloseHandle(snapshot);
+            ProcessDiagnosticsNativeMethods.CloseHandle(snapshot);
         }
     }
 
@@ -490,23 +490,23 @@ public partial class App : Application
     private static bool TryGetTokenElevation(IntPtr processHandle, out bool isElevated)
     {
         isElevated = false;
-        if (!OpenProcessToken(processHandle, TokenQuery, out IntPtr tokenHandle))
+        if (!ProcessDiagnosticsNativeMethods.OpenProcessToken(processHandle, TokenQuery, out IntPtr tokenHandle))
         {
             return false;
         }
 
         try
         {
-            int length = Marshal.SizeOf<TokenElevation>();
+            int length = Marshal.SizeOf<ProcessDiagnosticsNativeMethods.TokenElevation>();
             IntPtr buffer = Marshal.AllocHGlobal(length);
             try
             {
-                if (!GetTokenInformation(tokenHandle, TokenInformationClass.TokenElevation, buffer, length, out _))
+                if (!ProcessDiagnosticsNativeMethods.GetTokenInformation(tokenHandle, ProcessDiagnosticsNativeMethods.TokenInformationClass.TokenElevation, buffer, length, out _))
                 {
                     return false;
                 }
 
-                var elevation = Marshal.PtrToStructure<TokenElevation>(buffer);
+                var elevation = Marshal.PtrToStructure<ProcessDiagnosticsNativeMethods.TokenElevation>(buffer);
                 isElevated = elevation.TokenIsElevated != 0;
                 return true;
             }
@@ -517,21 +517,21 @@ public partial class App : Application
         }
         finally
         {
-            CloseHandle(tokenHandle);
+            ProcessDiagnosticsNativeMethods.CloseHandle(tokenHandle);
         }
     }
 
     private static bool TryGetIntegrityLevel(IntPtr processHandle, out string level)
     {
         level = string.Empty;
-        if (!OpenProcessToken(processHandle, TokenQuery, out IntPtr tokenHandle))
+        if (!ProcessDiagnosticsNativeMethods.OpenProcessToken(processHandle, TokenQuery, out IntPtr tokenHandle))
         {
             return false;
         }
 
         try
         {
-            _ = GetTokenInformation(tokenHandle, TokenInformationClass.TokenIntegrityLevel, IntPtr.Zero, 0, out int length);
+            _ = ProcessDiagnosticsNativeMethods.GetTokenInformation(tokenHandle, ProcessDiagnosticsNativeMethods.TokenInformationClass.TokenIntegrityLevel, IntPtr.Zero, 0, out int length);
             if (length <= 0)
             {
                 return false;
@@ -540,13 +540,13 @@ public partial class App : Application
             IntPtr buffer = Marshal.AllocHGlobal(length);
             try
             {
-                if (!GetTokenInformation(tokenHandle, TokenInformationClass.TokenIntegrityLevel, buffer, length, out _))
+                if (!ProcessDiagnosticsNativeMethods.GetTokenInformation(tokenHandle, ProcessDiagnosticsNativeMethods.TokenInformationClass.TokenIntegrityLevel, buffer, length, out _))
                 {
                     return false;
                 }
 
-                var label = Marshal.PtrToStructure<TokenMandatoryLabel>(buffer);
-                IntPtr subAuthorityCount = GetSidSubAuthorityCount(label.Label.Sid);
+                var label = Marshal.PtrToStructure<ProcessDiagnosticsNativeMethods.TokenMandatoryLabel>(buffer);
+                IntPtr subAuthorityCount = ProcessDiagnosticsNativeMethods.GetSidSubAuthorityCount(label.Label.Sid);
                 if (subAuthorityCount == IntPtr.Zero)
                 {
                     return false;
@@ -558,7 +558,7 @@ public partial class App : Application
                     return false;
                 }
 
-                IntPtr integrityRidPointer = GetSidSubAuthority(label.Label.Sid, (uint)(count - 1));
+                IntPtr integrityRidPointer = ProcessDiagnosticsNativeMethods.GetSidSubAuthority(label.Label.Sid, (uint)(count - 1));
                 int integrityRid = Marshal.ReadInt32(integrityRidPointer);
                 level = FormatIntegrityLevel(integrityRid);
                 return true;
@@ -570,7 +570,7 @@ public partial class App : Application
         }
         finally
         {
-            CloseHandle(tokenHandle);
+            ProcessDiagnosticsNativeMethods.CloseHandle(tokenHandle);
         }
     }
 
@@ -595,86 +595,8 @@ public partial class App : Application
     private const int SecurityMandatorySystemRid = 0x4000;
     private const int SecurityMandatoryProtectedProcessRid = 0x5000;
 
-    private enum TokenInformationClass
-    {
-        TokenElevation = 20,
-        TokenIntegrityLevel = 25
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct TokenElevation
-    {
-        public int TokenIsElevated;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct TokenMandatoryLabel
-    {
-        public SidAndAttributes Label;
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct SidAndAttributes
-    {
-        public IntPtr Sid;
-        public int Attributes;
-    }
-
-    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
-    private struct ProcessEntry32
-    {
-        public uint dwSize;
-        public uint cntUsage;
-        public uint th32ProcessID;
-        public IntPtr th32DefaultHeapID;
-        public uint th32ModuleID;
-        public uint cntThreads;
-        public uint th32ParentProcessID;
-        public int pcPriClassBase;
-        public uint dwFlags;
-        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 260)]
-        public string szExeFile;
-    }
-
-    [DllImport("kernel32.dll")]
-    private static extern IntPtr GetCurrentProcess();
-
-    [DllImport("kernel32.dll", SetLastError = true)]
-    private static extern IntPtr OpenProcess(uint desiredAccess, [MarshalAs(UnmanagedType.Bool)] bool inheritHandle, uint processId);
-
-    [DllImport("kernel32.dll", SetLastError = true)]
-    private static extern IntPtr CreateToolhelp32Snapshot(uint dwFlags, uint th32ProcessID);
-
-    [DllImport("kernel32.dll", SetLastError = true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool CloseHandle(IntPtr handle);
-
-    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool Process32First(IntPtr hSnapshot, ref ProcessEntry32 lppe);
-
-    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool Process32Next(IntPtr hSnapshot, ref ProcessEntry32 lppe);
-
-    [DllImport("advapi32.dll", SetLastError = true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool OpenProcessToken(IntPtr processHandle, uint desiredAccess, out IntPtr tokenHandle);
-
-    [DllImport("advapi32.dll", SetLastError = true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool GetTokenInformation(
-        IntPtr tokenHandle,
-        TokenInformationClass tokenInformationClass,
-        IntPtr tokenInformation,
-        int tokenInformationLength,
-        out int returnLength);
-
-    [DllImport("advapi32.dll")]
-    private static extern IntPtr GetSidSubAuthority(IntPtr sid, uint subAuthority);
-
-    [DllImport("advapi32.dll")]
-    private static extern IntPtr GetSidSubAuthorityCount(IntPtr sid);
+    // Process/token diagnostics entry points and their marshaling
+    // structures live in DeskBox.Platform.ProcessDiagnosticsNativeMethods.
 
     public bool IsDeskBoxWindow(IntPtr hwnd)
     {

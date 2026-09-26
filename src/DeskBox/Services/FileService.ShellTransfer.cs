@@ -1,3 +1,4 @@
+using DeskBox.Platform;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Runtime.InteropServices.Marshalling;
@@ -283,7 +284,7 @@ public sealed partial class FileService
         Action<FileTransferResult>? itemCompleted)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        int initializeResult = CoInitializeEx(
+        int initializeResult = FileOperationNativeMethods.CoInitializeEx(
             IntPtr.Zero,
             CoInitApartmentThreaded);
         ThrowForShellHResult(initializeResult, cancellationToken);
@@ -299,7 +300,7 @@ public sealed partial class FileService
             Guid classId = s_fileOperationClassId;
             Guid interfaceId = s_fileOperationInterfaceId;
             ThrowForShellHResult(
-                CoCreateInstance(
+                FileOperationNativeMethods.CoCreateInstance(
                     ref classId,
                     IntPtr.Zero,
                     ClsContextInProcessServer,
@@ -392,7 +393,7 @@ public sealed partial class FileService
             GC.KeepAlive(sink);
             if (uninitialize)
             {
-                CoUninitialize();
+                FileOperationNativeMethods.CoUninitialize();
             }
         }
     }
@@ -403,7 +404,7 @@ public sealed partial class FileService
     {
         Guid interfaceId = s_shellItemInterfaceId;
         ThrowForShellHResult(
-            SHCreateItemFromParsingName(
+            FileOperationNativeMethods.SHCreateItemFromParsingName(
                 path,
                 IntPtr.Zero,
                 ref interfaceId,
@@ -455,7 +456,7 @@ public sealed partial class FileService
         {
             if (pathPointer != IntPtr.Zero)
             {
-                CoTaskMemFree(pathPointer);
+                FileOperationNativeMethods.CoTaskMemFree(pathPointer);
             }
         }
     }
@@ -799,14 +800,6 @@ public sealed partial class FileService
         }
     }
 
-    [LibraryImport("ole32.dll")]
-    private static partial int CoInitializeEx(IntPtr reserved, uint coInitialize);
-    [LibraryImport("ole32.dll")]
-    private static partial void CoUninitialize();
-    [LibraryImport("ole32.dll")]
-    private static partial int CoCreateInstance(ref Guid classId, IntPtr outerUnknown, uint classContext, ref Guid interfaceId, out IntPtr fileOperation);
-    [LibraryImport("shell32.dll", StringMarshalling = StringMarshalling.Utf16)]
-    private static partial int SHCreateItemFromParsingName(string path, IntPtr bindContext, ref Guid interfaceId, out IntPtr shellItem);
-    [LibraryImport("ole32.dll")]
-    private static partial void CoTaskMemFree(IntPtr memory);
+    // ole32/shell32 COM entry points live in
+    // DeskBox.Platform.FileOperationNativeMethods.
 }

@@ -577,25 +577,6 @@ internal sealed unsafe class AotNativeHDropDataObject : IDisposable
     }
 }
 
-internal static partial class AotNativeDropWin32
-{
-    internal const uint Moveable = 0x0002;
-    internal const uint ZeroInitialize = 0x0040;
-
-    [LibraryImport("kernel32.dll", SetLastError = true)]
-    internal static partial nint GlobalAlloc(uint flags, nuint bytes);
-
-    [LibraryImport("kernel32.dll", SetLastError = true)]
-    internal static partial nint GlobalLock(nint memory);
-
-    [LibraryImport("kernel32.dll", SetLastError = true)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    internal static partial bool GlobalUnlock(nint memory);
-
-    [LibraryImport("kernel32.dll", SetLastError = true)]
-    internal static partial nint GlobalFree(nint memory);
-}
-
 internal sealed record AotNativeDropCallbackResult(
     bool TargetRegistered,
     IReadOnlyList<string> Paths,

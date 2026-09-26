@@ -1,6 +1,7 @@
 using System.Runtime.InteropServices;
+using DeskBox.Helpers;
 
-namespace DeskBox.Helpers;
+namespace DeskBox.Platform;
 
 internal readonly record struct NativeDropDescriptionText(
     string Message,

@@ -386,23 +386,14 @@ public sealed class ModuleBoundaryContractTests
     // let one file's cleanup pay for another file's regression; the manifest
     // closes that substitution gap. Tighten an entry in the same commit that
     // removes its violations — the manifest is the ratchet's memory.
+    //
+    // Batch 31 (2026-09-26) completed the proactive Platform P/Invoke
+    // migration: every DllImport/LibraryImport outside DeskBox.Platform was
+    // moved or extracted, so this manifest is now empty and the test below is
+    // a hard-zero law — new P/Invoke must land in Platform from today.
     private static readonly IReadOnlyDictionary<string, int> PlatformInteropExpectedViolations =
         new Dictionary<string, int>(StringComparer.Ordinal)
     {
-        ["src/DeskBox/App.xaml.cs"] = 10,
-        ["src/DeskBox/Controls/NativeShellFileDragProvider.cs"] = 4,
-        ["src/DeskBox/Helpers/ElevatedFileLauncher.cs"] = 7,
-        ["src/DeskBox/Helpers/NativeDropDescriptionWriter.cs"] = 7,
-        ["src/DeskBox/Helpers/NativeDropTarget.cs"] = 12,
-        ["src/DeskBox/Helpers/ShellClipboardHelper.cs"] = 12,
-        ["src/DeskBox/Helpers/ShellDataObjectBuilder.cs"] = 5,
-        ["src/DeskBox/Services/DesktopBlankHitTest.cs"] = 6,
-        ["src/DeskBox/Services/DragDropPermissionService.cs"] = 13,
-        ["src/DeskBox/Services/FileService.ShellTransfer.cs"] = 5,
-        ["src/DeskBox/Services/FileService.cs"] = 6,
-        ["src/DeskBox/Services/JumpListService.cs"] = 4,
-        ["src/DeskBox/Services/QuickLookPreviewService.cs"] = 4,
-        ["src/DeskBox/Views/ContentWidgetWindow.AotNativeDropSmoke.cs"] = 4,
     };
 
     private static readonly IReadOnlyDictionary<string, int> DestructiveFileOpExpectedViolations =

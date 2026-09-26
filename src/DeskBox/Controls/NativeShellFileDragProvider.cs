@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 using DeskBox.Helpers;
+using DeskBox.Platform;
 using Windows.ApplicationModel.DataTransfer;
 
 namespace DeskBox.Controls;
@@ -23,31 +24,7 @@ internal static partial class NativeShellFileDragProvider
     private static readonly Guid s_dataObjectProviderInterfaceId =
         new("3D25F6D6-4B2A-433C-9184-7C33AD35D001");
 
-    [LibraryImport(
-        "shell32.dll",
-        EntryPoint = "SHParseDisplayName",
-        StringMarshalling = StringMarshalling.Utf16)]
-    private static partial int SHParseDisplayName(
-        string name,
-        nint bindContext,
-        out nint itemIdList,
-        uint attributesIn,
-        out uint attributesOut);
-
-    [LibraryImport("shell32.dll")]
-    private static partial nint ILFindLastID(nint itemIdList);
-
-    [LibraryImport("shell32.dll")]
-    private static unsafe partial int SHCreateDataObject(
-        nint folderItemIdList,
-        uint itemCount,
-        nint* childItemIdLists,
-        nint innerDataObject,
-        Guid* interfaceId,
-        out nint dataObject);
-
-    [LibraryImport("ole32.dll")]
-    private static partial void CoTaskMemFree(nint value);
+    // Native entry points live in DeskBox.Platform.ShellItemDragNativeMethods.
 
     /// <param name="hidePreferredDropEffect">
     /// Hide the CFSTR_PREFERREDDROPEFFECT value WinUI copies from
@@ -206,7 +183,7 @@ internal static partial class NativeShellFileDragProvider
                 Marshal.ThrowExceptionForHR(ParseItemIdList(
                     normalizedPaths[index],
                     out absoluteItemIdLists[index]));
-                childItemIdLists[index] = ILFindLastID(
+                childItemIdLists[index] = ShellItemDragNativeMethods.ILFindLastID(
                     absoluteItemIdLists[index]);
                 if (childItemIdLists[index] == 0)
                 {
@@ -219,7 +196,7 @@ internal static partial class NativeShellFileDragProvider
             Guid interfaceId = s_dataObjectInterfaceId;
             fixed (nint* children = childItemIdLists)
             {
-                int result = SHCreateDataObject(
+                int result = ShellItemDragNativeMethods.SHCreateDataObject(
                     parentItemIdList,
                     (uint)childItemIdLists.Length,
                     children,
@@ -251,7 +228,7 @@ internal static partial class NativeShellFileDragProvider
         string path,
         out nint itemIdList)
     {
-        int result = SHParseDisplayName(
+        int result = ShellItemDragNativeMethods.SHParseDisplayName(
             path,
             0,
             out itemIdList,
@@ -362,7 +339,7 @@ internal static partial class NativeShellFileDragProvider
     {
         if (itemIdList != 0)
         {
-            CoTaskMemFree(itemIdList);
+            ShellItemDragNativeMethods.CoTaskMemFree(itemIdList);
         }
     }
 }

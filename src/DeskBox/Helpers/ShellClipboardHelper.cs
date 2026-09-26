@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 using System.Text;
+using DeskBox.Platform;
 
 namespace DeskBox.Helpers;
 
@@ -15,7 +16,7 @@ public static class ShellClipboardHelper
     private const int ClipboardOpenAttempts = 5;
     private const int ClipboardOpenRetryDelayMs = 5;
 
-    private static readonly uint PreferredDropEffectFormat = RegisterClipboardFormat("Preferred DropEffect");
+    private static readonly uint PreferredDropEffectFormat = ClipboardNativeMethods.RegisterClipboardFormat("Preferred DropEffect");
 
     public static bool TrySetFileDropList(IReadOnlyList<string> paths, bool cut)
     {
@@ -39,7 +40,7 @@ public static class ShellClipboardHelper
         IntPtr effectHandle = IntPtr.Zero;
         try
         {
-            if (!EmptyClipboard())
+            if (!ClipboardNativeMethods.EmptyClipboard())
             {
                 return false;
             }
@@ -51,7 +52,7 @@ public static class ShellClipboardHelper
                     cut ? DropEffectMove : DropEffectCopy);
             }
 
-            if (SetClipboardData(CfHdrop, dropHandle) == IntPtr.Zero)
+            if (ClipboardNativeMethods.SetClipboardData(CfHdrop, dropHandle) == IntPtr.Zero)
             {
                 return false;
             }
@@ -59,7 +60,7 @@ public static class ShellClipboardHelper
             dropHandle = IntPtr.Zero;
 
             if (PreferredDropEffectFormat != 0 &&
-                SetClipboardData(PreferredDropEffectFormat, effectHandle) ==
+                ClipboardNativeMethods.SetClipboardData(PreferredDropEffectFormat, effectHandle) ==
                     IntPtr.Zero)
             {
                 return false;
@@ -72,21 +73,21 @@ public static class ShellClipboardHelper
         {
             if (dropHandle != IntPtr.Zero)
             {
-                GlobalFree(dropHandle);
+                ClipboardNativeMethods.GlobalFree(dropHandle);
             }
 
             if (effectHandle != IntPtr.Zero)
             {
-                GlobalFree(effectHandle);
+                ClipboardNativeMethods.GlobalFree(effectHandle);
             }
 
-            CloseClipboard();
+            ClipboardNativeMethods.CloseClipboard();
         }
     }
 
     public static bool HasFileDropList()
     {
-        return IsClipboardFormatAvailable(CfHdrop);
+        return ClipboardNativeMethods.IsClipboardFormatAvailable(CfHdrop);
     }
 
     public static bool TryGetFileDropList(
@@ -102,13 +103,13 @@ public static class ShellClipboardHelper
 
         try
         {
-            IntPtr dropHandle = GetClipboardData(CfHdrop);
+            IntPtr dropHandle = ClipboardNativeMethods.GetClipboardData(CfHdrop);
             if (dropHandle == IntPtr.Zero)
             {
                 return false;
             }
 
-            uint count = DragQueryFile(
+            uint count = ClipboardNativeMethods.DragQueryFile(
                 dropHandle,
                 DragQueryFileCount,
                 null,
@@ -121,14 +122,14 @@ public static class ShellClipboardHelper
             var result = new List<string>((int)count);
             for (uint index = 0; index < count; index++)
             {
-                uint length = DragQueryFile(dropHandle, index, null, 0);
+                uint length = ClipboardNativeMethods.DragQueryFile(dropHandle, index, null, 0);
                 if (length == 0 || length >= int.MaxValue)
                 {
                     continue;
                 }
 
                 var buffer = new StringBuilder(checked((int)length + 1));
-                if (DragQueryFile(
+                if (ClipboardNativeMethods.DragQueryFile(
                         dropHandle,
                         index,
                         buffer,
@@ -153,14 +154,14 @@ public static class ShellClipboardHelper
         }
         finally
         {
-            CloseClipboard();
+            ClipboardNativeMethods.CloseClipboard();
         }
     }
 
     private static IntPtr CreateDropFilesHandle(IReadOnlyList<string> paths)
     {
         byte[] payload = CreateDropFilesPayload(paths);
-        IntPtr handle = GlobalAlloc(
+        IntPtr handle = ClipboardNativeMethods.GlobalAlloc(
             GmemMoveable | GmemZeroinit,
             (nuint)payload.Length);
         if (handle == IntPtr.Zero)
@@ -168,10 +169,10 @@ public static class ShellClipboardHelper
             throw new InvalidOperationException(Localize("Widget.Error.ClipboardAllocate"));
         }
 
-        IntPtr pointer = GlobalLock(handle);
+        IntPtr pointer = ClipboardNativeMethods.GlobalLock(handle);
         if (pointer == IntPtr.Zero)
         {
-            GlobalFree(handle);
+            ClipboardNativeMethods.GlobalFree(handle);
             throw new InvalidOperationException(Localize("Widget.Error.ClipboardWrite"));
         }
 
@@ -181,7 +182,7 @@ public static class ShellClipboardHelper
         }
         finally
         {
-            GlobalUnlock(handle);
+            ClipboardNativeMethods.GlobalUnlock(handle);
         }
 
         return handle;
@@ -205,18 +206,18 @@ public static class ShellClipboardHelper
     private static uint? ReadPreferredDropEffect()
     {
         if (PreferredDropEffectFormat == 0 ||
-            !IsClipboardFormatAvailable(PreferredDropEffectFormat))
+            !ClipboardNativeMethods.IsClipboardFormatAvailable(PreferredDropEffectFormat))
         {
             return null;
         }
 
-        IntPtr effectHandle = GetClipboardData(PreferredDropEffectFormat);
+        IntPtr effectHandle = ClipboardNativeMethods.GetClipboardData(PreferredDropEffectFormat);
         if (effectHandle == IntPtr.Zero)
         {
             return null;
         }
 
-        IntPtr pointer = GlobalLock(effectHandle);
+        IntPtr pointer = ClipboardNativeMethods.GlobalLock(effectHandle);
         if (pointer == IntPtr.Zero)
         {
             return null;
@@ -228,7 +229,7 @@ public static class ShellClipboardHelper
         }
         finally
         {
-            GlobalUnlock(effectHandle);
+            ClipboardNativeMethods.GlobalUnlock(effectHandle);
         }
     }
 
@@ -236,7 +237,7 @@ public static class ShellClipboardHelper
     {
         for (int attempt = 0; attempt < ClipboardOpenAttempts; attempt++)
         {
-            if (OpenClipboard(IntPtr.Zero))
+            if (ClipboardNativeMethods.OpenClipboard(IntPtr.Zero))
             {
                 return true;
             }
@@ -252,16 +253,16 @@ public static class ShellClipboardHelper
 
     private static IntPtr CreateDropEffectHandle(uint effect)
     {
-        IntPtr handle = GlobalAlloc(GmemMoveable | GmemZeroinit, sizeof(uint));
+        IntPtr handle = ClipboardNativeMethods.GlobalAlloc(GmemMoveable | GmemZeroinit, sizeof(uint));
         if (handle == IntPtr.Zero)
         {
             throw new InvalidOperationException(Localize("Widget.Error.ClipboardAllocate"));
         }
 
-        IntPtr pointer = GlobalLock(handle);
+        IntPtr pointer = ClipboardNativeMethods.GlobalLock(handle);
         if (pointer == IntPtr.Zero)
         {
-            GlobalFree(handle);
+            ClipboardNativeMethods.GlobalFree(handle);
             throw new InvalidOperationException(Localize("Widget.Error.ClipboardWrite"));
         }
 
@@ -271,7 +272,7 @@ public static class ShellClipboardHelper
         }
         finally
         {
-            GlobalUnlock(handle);
+            ClipboardNativeMethods.GlobalUnlock(handle);
         }
 
         return handle;
@@ -289,43 +290,6 @@ public static class ShellClipboardHelper
         }
     }
 
-    [DllImport("user32.dll", SetLastError = true)]
-    private static extern bool OpenClipboard(IntPtr newOwner);
-
-    [DllImport("user32.dll", SetLastError = true)]
-    private static extern bool CloseClipboard();
-
-    [DllImport("user32.dll", SetLastError = true)]
-    private static extern bool EmptyClipboard();
-
-    [DllImport("user32.dll", SetLastError = true)]
-    private static extern IntPtr SetClipboardData(uint format, IntPtr memoryHandle);
-
-    [DllImport("user32.dll", SetLastError = true)]
-    private static extern IntPtr GetClipboardData(uint format);
-
-    [DllImport("user32.dll", SetLastError = true)]
-    private static extern bool IsClipboardFormatAvailable(uint format);
-
-    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-    private static extern uint RegisterClipboardFormat(string format);
-
-    [DllImport("kernel32.dll", SetLastError = true)]
-    private static extern IntPtr GlobalAlloc(uint flags, nuint bytes);
-
-    [DllImport("kernel32.dll", SetLastError = true)]
-    private static extern IntPtr GlobalLock(IntPtr memoryHandle);
-
-    [DllImport("kernel32.dll", SetLastError = true)]
-    private static extern bool GlobalUnlock(IntPtr memoryHandle);
-
-    [DllImport("kernel32.dll", SetLastError = true)]
-    private static extern IntPtr GlobalFree(IntPtr memoryHandle);
-
-    [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
-    private static extern uint DragQueryFile(
-        IntPtr dropHandle,
-        uint fileIndex,
-        StringBuilder? fileName,
-        uint fileNameLength);
+    // Win32 clipboard/global-memory/HDROP entry points live in
+    // DeskBox.Platform.ClipboardNativeMethods.
 }
