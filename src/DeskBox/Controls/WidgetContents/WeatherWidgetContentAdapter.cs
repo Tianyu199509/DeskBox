@@ -7,14 +7,11 @@ using Microsoft.UI.Xaml;
 namespace DeskBox.Controls.WidgetContents;
 
 public sealed class WeatherWidgetContentAdapter :
-    IWidgetContent,
+    WidgetContentAdapterBase,
     IWidgetResponsiveLayoutContent,
-    IWidgetFeedbackSource,
-    IDisposable
+    IWidgetFeedbackSource
 {
-    private readonly Func<WeatherWidgetViewModel, FrameworkElement> _viewFactory;
     private readonly LocalizationService _localizationService;
-    private FrameworkElement? _view;
 
     public WeatherWidgetContentAdapter(
         WidgetConfig config,
@@ -22,30 +19,36 @@ public sealed class WeatherWidgetContentAdapter :
         SettingsService? settingsService = null,
         WeatherService? weatherService = null,
         Func<WeatherWidgetViewModel, FrameworkElement>? viewFactory = null)
+        : this(
+            config,
+            new WeatherWidgetViewModel(
+                config,
+                weatherService ?? new WeatherService(),
+                localizationService,
+                settingsService),
+            localizationService,
+            viewFactory)
+    {
+    }
+
+    private WeatherWidgetContentAdapter(
+        WidgetConfig config,
+        WeatherWidgetViewModel viewModel,
+        LocalizationService localizationService,
+        Func<WeatherWidgetViewModel, FrameworkElement>? viewFactory)
+        : base(
+            config,
+            () => (viewFactory ?? (vm => new WeatherWidgetContent(vm)))(viewModel))
     {
         if (config.WidgetKind != WidgetKind.Weather)
         {
             throw new ArgumentException("Weather content requires a Weather widget config.", nameof(config));
         }
 
-        Config = config;
         _localizationService = localizationService;
-        ViewModel = new WeatherWidgetViewModel(
-            config,
-            weatherService ?? new WeatherService(),
-            localizationService,
-            settingsService);
-        _viewFactory = viewFactory ?? (vm => new WeatherWidgetContent(vm));
+        ViewModel = viewModel;
         ViewModel.PropertyChanged += ViewModel_PropertyChanged;
     }
-
-    public WidgetConfig Config { get; }
-
-    public string WidgetId => Config.Id;
-
-    public WidgetKind WidgetKind => Config.WidgetKind;
-
-    public FrameworkElement View => _view ??= _viewFactory(ViewModel);
 
     public WeatherWidgetViewModel ViewModel { get; }
 
@@ -76,37 +79,37 @@ public sealed class WeatherWidgetContentAdapter :
                     "weather-refresh")));
     }
 
-    public Task InitializeAsync()
+    public override Task InitializeAsync()
     {
         return ViewModel.InitializeAsync();
     }
 
-    public Task RefreshAsync()
+    public override Task RefreshAsync()
     {
         return ViewModel.RefreshAsync();
     }
 
-    public void ApplyAppearance()
+    public override void ApplyAppearance()
     {
         ViewModel.ApplyAppearance();
     }
 
-    public void OnActivated()
+    public override void OnActivated()
     {
         ViewModel.OnActivated();
     }
 
-    public void OnDeactivated()
+    public override void OnDeactivated()
     {
         ViewModel.OnDeactivated();
     }
 
-    public void OnWindowVisibilityChanged(bool visible)
+    public override void OnWindowVisibilityChanged(bool visible)
     {
         ViewModel.OnWindowVisibilityChanged(visible);
     }
 
-    public void OnWindowRevealCompleted()
+    public override void OnWindowRevealCompleted()
     {
         ViewModel.OnWindowRevealCompleted();
     }
@@ -134,7 +137,7 @@ public sealed class WeatherWidgetContentAdapter :
         ViewModel.CancelResponsiveLayoutTransition();
     }
 
-    public void Dispose()
+    protected override void Dispose(bool disposing)
     {
         ViewModel.PropertyChanged -= ViewModel_PropertyChanged;
         ViewModel.Dispose();

@@ -19,23 +19,17 @@ namespace DeskBox.Controls.WidgetContents;
 /// confirm-extension dialog wiring — hang off the adapter.
 /// </summary>
 public sealed class FileWidgetContentAdapter :
-    IWidgetContent,
+    WidgetContentAdapterBase,
     ICancellableWidgetContent,
     IWidgetGroupContentCacheable,
     IWidgetAddActionContent,
     IWidgetFeedbackSource,
     IWidgetHostContextMenuSource,
-    IWidgetTransientStateContent,
-    IDisposable
+    IWidgetTransientStateContent
 {
-    private readonly Func<WidgetViewModel, FrameworkElement> _viewFactory;
-    private readonly WidgetViewModel _viewModel;
     private readonly FileService _fileService;
-    private readonly SettingsService _settingsService;
     private readonly LocalizationService _localizationService;
-    private FrameworkElement? _view;
     private IntPtr _hostWindowHandle;
-    private bool _isDisposed;
 
     public FileWidgetContentAdapter(
         WidgetConfig config,
@@ -45,69 +39,66 @@ public sealed class FileWidgetContentAdapter :
         LocalizationService localizationService,
         DispatcherQueue dispatcherQueue,
         Func<WidgetViewModel, FrameworkElement>? viewFactory = null)
-    {
-        ArgumentNullException.ThrowIfNull(config);
-        ArgumentNullException.ThrowIfNull(fileService);
-
-        Config = config;
-        _fileService = fileService;
-        _settingsService = settingsService;
-        _localizationService = localizationService;
-        _viewModel = new WidgetViewModel(
+        : this(
             config,
             fileService,
-            organizerService,
+            new WidgetViewModel(
+                config,
+                fileService,
+                organizerService,
+                settingsService,
+                localizationService,
+                dispatcherQueue),
             settingsService,
             localizationService,
-            dispatcherQueue);
-        _viewFactory = viewFactory ?? (viewModel => new FileSurfaceContent(
-            viewModel,
-            fileService,
-            settingsService,
-            localizationService));
-    }
-
-    public WidgetConfig Config { get; }
-
-    public string WidgetId => Config.Id;
-
-    public WidgetKind WidgetKind => Config.WidgetKind;
-
-    public WidgetViewModel ViewModel => _viewModel;
-
-    public FrameworkElement View
+            viewFactory)
     {
-        get
-        {
-            ObjectDisposedException.ThrowIf(_isDisposed, this);
-            if (_view is null)
-            {
-                _view = _viewFactory(_viewModel);
-                if (_view is FileSurfaceContent content)
-                {
-                    content.FeedbackRequested += Content_FeedbackRequested;
-                    content.HostContextMenuOpening +=
-                        Content_HostContextMenuOpening;
-                    content.ImportBusyChanged += Content_ImportBusyChanged;
-                    if (_hostWindowHandle != IntPtr.Zero)
-                    {
-                        content.SetHostWindowHandle(_hostWindowHandle);
-                    }
-                }
-            }
-
-            return _view;
-        }
     }
+
+    private FileWidgetContentAdapter(
+        WidgetConfig config,
+        FileService fileService,
+        WidgetViewModel viewModel,
+        SettingsService settingsService,
+        LocalizationService localizationService,
+        Func<WidgetViewModel, FrameworkElement>? viewFactory)
+        : base(
+            config,
+            () => (viewFactory ?? (vm => new FileSurfaceContent(
+                vm,
+                fileService,
+                settingsService,
+                localizationService)))(viewModel))
+    {
+        ArgumentNullException.ThrowIfNull(fileService);
+
+        _fileService = fileService;
+        _localizationService = localizationService;
+        ViewModel = viewModel;
+    }
+
+    public WidgetViewModel ViewModel { get; }
 
     /// <summary>
     /// The materialized leaf, if the view has been attached. Reading this
     /// never constructs the leaf; group-cache probes rely on that.
     /// </summary>
-    internal FileSurfaceContent? Surface => _view as FileSurfaceContent;
+    internal FileSurfaceContent? Surface => MaterializedView as FileSurfaceContent;
+
+    /// <summary>
+    /// The materialized leaf for hosts that must operate on the live view
+    /// (QuickLook navigation, AOT smoke). Throws instead of returning null
+    /// so a premature call cannot silently no-op.
+    /// </summary>
+    internal FileSurfaceContent RequireSurface()
+    {
+        return Surface ?? throw new InvalidOperationException(
+            $"File widget '{WidgetId}' has no materialized surface leaf; " +
+            "the host must attach the adapter before reaching its view.");
+    }
 
     public bool IsReadyForReuse =>
-        _view is FileSurfaceContent content &&
+        MaterializedView is FileSurfaceContent content &&
         content.IsReadyForReuse;
 
     public event EventHandler<WidgetFeedbackRequestedEventArgs>? FeedbackRequested;
@@ -118,10 +109,25 @@ public sealed class FileWidgetContentAdapter :
     internal event Action<bool>? ImportBusyChanged;
 
     internal bool IsImportBusy =>
-        _view is FileSurfaceContent { IsImportBusy: true };
+        MaterializedView is FileSurfaceContent { IsImportBusy: true };
 
     internal long? ImportBusyElapsedMilliseconds =>
-        (_view as FileSurfaceContent)?.ImportBusyElapsedMilliseconds;
+        Surface?.ImportBusyElapsedMilliseconds;
+
+    protected override void OnViewMaterialized(FrameworkElement view)
+    {
+        if (view is FileSurfaceContent content)
+        {
+            content.FeedbackRequested += Content_FeedbackRequested;
+            content.HostContextMenuOpening +=
+                Content_HostContextMenuOpening;
+            content.ImportBusyChanged += Content_ImportBusyChanged;
+            if (_hostWindowHandle != IntPtr.Zero)
+            {
+                content.SetHostWindowHandle(_hostWindowHandle);
+            }
+        }
+    }
 
     private void Content_FeedbackRequested(
         object? sender,
@@ -142,7 +148,7 @@ public sealed class FileWidgetContentAdapter :
         ImportBusyChanged?.Invoke(isBusy);
     }
 
-    public Task InitializeAsync()
+    public override Task InitializeAsync()
     {
         return AsContent(View).InitializeAsync();
     }
@@ -152,9 +158,9 @@ public sealed class FileWidgetContentAdapter :
         return AsContent(View).InitializeAsync(cancellationToken);
     }
 
-    public Task RefreshAsync()
+    public override Task RefreshAsync()
     {
-        return _view is FileSurfaceContent content
+        return Surface is { } content
             ? content.RefreshAsync()
             : Task.CompletedTask;
     }
@@ -164,78 +170,54 @@ public sealed class FileWidgetContentAdapter :
         return AsContent(View).AddFromTitleButtonAsync();
     }
 
-    public void ApplyAppearance()
+    public override void ApplyAppearance()
     {
-        if (_view is FileSurfaceContent content)
-        {
-            content.ApplyAppearance();
-        }
+        Surface?.ApplyAppearance();
     }
 
-    public void OnActivated()
+    public override void OnActivated()
     {
-        if (_view is FileSurfaceContent content)
-        {
-            content.OnActivated();
-        }
+        Surface?.OnActivated();
     }
 
-    public void OnDeactivated()
+    public override void OnDeactivated()
     {
-        if (_view is FileSurfaceContent content)
-        {
-            content.OnDeactivated();
-        }
+        Surface?.OnDeactivated();
     }
 
-    public void OnWindowVisibilityChanged(bool visible)
+    public override void OnWindowVisibilityChanged(bool visible)
     {
-        if (_view is FileSurfaceContent content)
-        {
-            content.OnWindowVisibilityChanged(visible);
-        }
+        Surface?.OnWindowVisibilityChanged(visible);
     }
 
-    public void OnWindowRevealCompleted()
+    public override void OnWindowRevealCompleted()
     {
-        if (_view is FileSurfaceContent content)
-        {
-            content.OnWindowRevealCompleted();
-        }
+        Surface?.OnWindowRevealCompleted();
     }
 
-    public void OnCompactStateChanged(bool collapsed)
+    public override void OnCompactStateChanged(bool collapsed)
     {
-        if (_view is FileSurfaceContent content)
-        {
-            content.OnCompactStateChanged(collapsed);
-        }
+        Surface?.OnCompactStateChanged(collapsed);
     }
 
-    public void OnCompactBoundsTransitionActiveChanged(bool isActive)
+    public override void OnCompactBoundsTransitionActiveChanged(bool isActive)
     {
-        if (_view is FileSurfaceContent content)
-        {
-            content.OnCompactBoundsTransitionActiveChanged(isActive);
-        }
+        Surface?.OnCompactBoundsTransitionActiveChanged(isActive);
     }
 
     public void PrepareForReuse()
     {
-        if (_view is FileSurfaceContent content)
-        {
-            content.PrepareForReuse();
-        }
+        Surface?.PrepareForReuse();
     }
 
     object? IWidgetTransientStateContent.CaptureTransientState()
     {
-        return (_view as FileSurfaceContent)?.CaptureTransientState();
+        return Surface?.CaptureTransientState();
     }
 
     void IWidgetTransientStateContent.RestoreTransientState(object? state)
     {
-        (_view as FileSurfaceContent)?.RestoreTransientState(state);
+        Surface?.RestoreTransientState(state);
     }
 
     internal void SetHostWindowHandle(IntPtr windowHandle)
@@ -244,17 +226,14 @@ public sealed class FileWidgetContentAdapter :
         // model wiring, not to the leaf view: a cached member can outlive a
         // specific leaf, and the dialog only needs the owning HWND.
         _hostWindowHandle = windowHandle;
-        if (_view is FileSurfaceContent content)
-        {
-            content.SetHostWindowHandle(windowHandle);
-        }
+        Surface?.SetHostWindowHandle(windowHandle);
 
-        _viewModel.ConfirmExtensionChangeHandler = ConfirmExtensionRename;
+        ViewModel.ConfirmExtensionChangeHandler = ConfirmExtensionRename;
     }
 
     private bool ConfirmExtensionRename(string sourcePath, string destinationPath)
     {
-        if (_isDisposed)
+        if (IsDisposed)
         {
             return false;
         }
@@ -267,65 +246,64 @@ public sealed class FileWidgetContentAdapter :
 
     internal void RevealSavedItem(string itemPath)
     {
-        (_view as FileSurfaceContent)?.RevealSavedItem(itemPath);
+        Surface?.RevealSavedItem(itemPath);
     }
 
     internal void SetMigrationBusy(bool isBusy)
     {
-        (_view as FileSurfaceContent)?.SetMigrationBusy(isBusy);
+        Surface?.SetMigrationBusy(isBusy);
     }
 
     internal void SetDesktopOrganizationBusy(bool isBusy)
     {
-        (_view as FileSurfaceContent)?.SetDesktopOrganizationBusy(isBusy);
+        Surface?.SetDesktopOrganizationBusy(isBusy);
     }
 
     internal void ClearItemSelection()
     {
-        (_view as FileSurfaceContent)?.ClearItemSelection();
+        Surface?.ClearItemSelection();
     }
 
     internal Task ApplyFolderOpenBehaviorChangeAsync()
     {
-        return _view is FileSurfaceContent content
+        return Surface is { } content
             ? content.ApplyFolderOpenBehaviorChangeAsync()
             : Task.CompletedTask;
     }
 
     internal void SuspendItemContainerTransitionsForHostSwitch()
     {
-        (_view as FileSurfaceContent)?.SuspendItemContainerTransitionsForHostSwitch();
+        Surface?.SuspendItemContainerTransitionsForHostSwitch();
     }
 
     internal void ResumeItemContainerTransitionsAfterHostSwitch()
     {
-        (_view as FileSurfaceContent)?.ResumeItemContainerTransitionsAfterHostSwitch();
+        Surface?.ResumeItemContainerTransitionsAfterHostSwitch();
     }
 
     internal void ClearDragSessionVisualState()
     {
-        (_view as FileSurfaceContent)?.ClearDragSessionVisualState();
+        Surface?.ClearDragSessionVisualState();
     }
 
     internal bool CompleteReleasedDragSession()
     {
-        return (_view as FileSurfaceContent)?.CompleteReleasedDragSession() ?? true;
+        return Surface?.CompleteReleasedDragSession() ?? true;
     }
 
     internal bool ShouldDeferReleasedDragSessionRecovery()
     {
-        return (_view as FileSurfaceContent)?
-            .ShouldDeferReleasedDragSessionRecovery() ?? false;
+        return Surface?.ShouldDeferReleasedDragSessionRecovery() ?? false;
     }
 
     internal void CaptureNativeDropInsertion(int screenX, int screenY)
     {
-        (_view as FileSurfaceContent)?.CaptureNativeDropInsertion(screenX, screenY);
+        Surface?.CaptureNativeDropInsertion(screenX, screenY);
     }
 
     internal void ClearPendingNativeDropInsertion()
     {
-        (_view as FileSurfaceContent)?.ClearPendingNativeDropInsertion();
+        Surface?.ClearPendingNativeDropInsertion();
     }
 
     internal void ObserveNativeDragPointer(
@@ -336,7 +314,7 @@ public sealed class FileWidgetContentAdapter :
         WidgetItem? nativeTarget = null,
         WidgetItem? launchTarget = null)
     {
-        (_view as FileSurfaceContent)?.ObserveNativeDragPointer(
+        Surface?.ObserveNativeDragPointer(
             screenX,
             screenY,
             hasFileData,
@@ -347,36 +325,34 @@ public sealed class FileWidgetContentAdapter :
 
     internal void MarkNativeLaunchConsumed()
     {
-        (_view as FileSurfaceContent)?.MarkNativeLaunchConsumed();
+        Surface?.MarkNativeLaunchConsumed();
     }
 
     internal bool WasLaunchConsumedRecently()
     {
-        return (_view as FileSurfaceContent)?.WasLaunchConsumedRecently() ?? false;
+        return Surface?.WasLaunchConsumedRecently() ?? false;
     }
 
     internal void ShowShortcutLaunchRefusedFeedback(string? applicationName)
     {
-        (_view as FileSurfaceContent)?.ShowShortcutLaunchRefusedFeedback(
-            applicationName);
+        Surface?.ShowShortcutLaunchRefusedFeedback(applicationName);
     }
 
     internal void NotifyNativeDropBlockedUndisplayable(int undisplayableCount)
     {
-        (_view as FileSurfaceContent)?.NotifyNativeDropBlockedUndisplayable(
-            undisplayableCount);
+        Surface?.NotifyNativeDropBlockedUndisplayable(undisplayableCount);
     }
 
     internal bool IsInternalReorderDrag(DataPackageView dataView)
     {
-        return (_view as FileSurfaceContent)?.IsInternalReorderDrag(dataView) ?? false;
+        return Surface?.IsInternalReorderDrag(dataView) ?? false;
     }
 
     internal bool SuppressesNativeShellDragVisual =>
-        (_view as FileSurfaceContent)?.SuppressesNativeShellDragVisual ?? false;
+        Surface?.SuppressesNativeShellDragVisual ?? false;
 
     internal bool IsStackPopoverBlockingSurfaceOpen =>
-        (_view as FileSurfaceContent)?.IsStackPopoverBlockingSurfaceOpen ?? false;
+        Surface?.IsStackPopoverBlockingSurfaceOpen ?? false;
 
     internal Task<bool> ImportNativeDroppedFilesAsync(
         IReadOnlyList<string> paths,
@@ -387,7 +363,7 @@ public sealed class FileWidgetContentAdapter :
         int? screenX = null,
         int? screenY = null)
     {
-        return _view is FileSurfaceContent content
+        return Surface is { } content
             ? content.ImportNativeDroppedFilesAsync(
                 paths,
                 containsTemporaryFiles,
@@ -401,34 +377,34 @@ public sealed class FileWidgetContentAdapter :
 
     internal void ApplyHostEdgeDragOverFeedback(DragEventArgs e)
     {
-        (_view as FileSurfaceContent)?.ApplyHostEdgeDragOverFeedback(e);
+        Surface?.ApplyHostEdgeDragOverFeedback(e);
     }
 
     internal void HandleHostEdgeDrop(DragEventArgs e)
     {
-        (_view as FileSurfaceContent)?.HandleHostEdgeDrop(e);
+        Surface?.HandleHostEdgeDrop(e);
     }
 
     internal Task<bool> TryHandleClipboardShortcutAsync(KeyRoutedEventArgs e)
     {
-        return _view is FileSurfaceContent content
+        return Surface is { } content
             ? content.TryHandleClipboardShortcutAsync(e)
             : Task.FromResult(false);
     }
 
     internal IReadOnlyList<string> GetQuickLookNavigationPaths()
     {
-        return (_view as FileSurfaceContent)?.GetQuickLookNavigationPaths() ?? [];
+        return Surface?.GetQuickLookNavigationPaths() ?? [];
     }
 
     internal bool TrySelectQuickLookTarget(string path)
     {
-        return (_view as FileSurfaceContent)?.TrySelectQuickLookTarget(path) ?? false;
+        return Surface?.TrySelectQuickLookTarget(path) ?? false;
     }
 
     internal void FocusQuickLookNavigationTarget()
     {
-        (_view as FileSurfaceContent)?.FocusQuickLookNavigationTarget();
+        Surface?.FocusQuickLookNavigationTarget();
     }
 
     private FileSurfaceContent AsContent(FrameworkElement view)
@@ -438,20 +414,14 @@ public sealed class FileWidgetContentAdapter :
                 "File widget content requires the surface leaf view.");
     }
 
-    public void Dispose()
+    protected override void Dispose(bool disposing)
     {
-        if (_isDisposed)
+        if (ViewModel.ConfirmExtensionChangeHandler == ConfirmExtensionRename)
         {
-            return;
+            ViewModel.ConfirmExtensionChangeHandler = null;
         }
 
-        _isDisposed = true;
-        if (_viewModel.ConfirmExtensionChangeHandler == ConfirmExtensionRename)
-        {
-            _viewModel.ConfirmExtensionChangeHandler = null;
-        }
-
-        if (_view is FileSurfaceContent content)
+        if (Surface is { } content)
         {
             // The leaf's dispose chain releases its shell surfaces and
             // disposes the view model, matching the pre-adapter ownership.
@@ -463,7 +433,7 @@ public sealed class FileWidgetContentAdapter :
         }
         else
         {
-            _viewModel.Dispose();
+            ViewModel.Dispose();
         }
     }
 }

@@ -12,19 +12,14 @@ namespace DeskBox.Controls.WidgetContents;
 /// content pipeline without making the widget kind user-creatable yet.
 /// </summary>
 public sealed class TodoWidgetContentAdapter :
-    IWidgetContent,
+    WidgetContentAdapterBase,
     IWidgetAddActionContent,
     IWidgetFeedbackSource,
     IWidgetTransientStateContent,
     IWidgetResponsiveLayoutContent,
     IWidgetInteractiveResizeContent,
-    IWidgetGroupContentCacheable,
-    IDisposable
+    IWidgetGroupContentCacheable
 {
-    private readonly Func<TodoWidgetViewModel, FrameworkElement> _viewFactory;
-    private FrameworkElement? _view;
-    private bool _isDisposed;
-
     public TodoWidgetContentAdapter(WidgetConfig config, LocalizationService localizationService)
         : this(config, new TodoWidgetStore(config.Id), localizationService)
     {
@@ -44,45 +39,31 @@ public sealed class TodoWidgetContentAdapter :
         WidgetConfig config,
         TodoWidgetViewModel viewModel,
         Func<TodoWidgetViewModel, FrameworkElement>? viewFactory = null)
+        : base(
+            config,
+            () => (viewFactory ?? (vm => new TodoWidgetContent(vm)))(viewModel))
     {
         if (config.WidgetKind != WidgetKind.Todo)
         {
             throw new ArgumentException("Todo content requires a Todo widget config.", nameof(config));
         }
 
-        Config = config;
         ViewModel = viewModel;
-        _viewFactory = viewFactory ?? (vm => new TodoWidgetContent(vm));
-    }
-
-    public WidgetConfig Config { get; }
-
-    public string WidgetId => Config.Id;
-
-    public WidgetKind WidgetKind => Config.WidgetKind;
-
-    public FrameworkElement View
-    {
-        get
-        {
-            if (_view is null)
-            {
-                _view = _viewFactory(ViewModel);
-                if (_view is TodoWidgetContent todoContent)
-                {
-                    todoContent.FeedbackRequested += TodoContent_FeedbackRequested;
-                }
-            }
-
-            return _view;
-        }
     }
 
     public TodoWidgetViewModel ViewModel { get; }
 
-    public bool IsReadyForReuse => ViewModel.IsInitialized && !_isDisposed;
+    public bool IsReadyForReuse => ViewModel.IsInitialized && !IsDisposed;
 
     public event EventHandler<WidgetFeedbackRequestedEventArgs>? FeedbackRequested;
+
+    protected override void OnViewMaterialized(FrameworkElement view)
+    {
+        if (view is TodoWidgetContent todoContent)
+        {
+            todoContent.FeedbackRequested += TodoContent_FeedbackRequested;
+        }
+    }
 
     private void TodoContent_FeedbackRequested(
         object? sender,
@@ -91,32 +72,24 @@ public sealed class TodoWidgetContentAdapter :
         FeedbackRequested?.Invoke(this, e);
     }
 
-    public Task InitializeAsync()
+    public override Task InitializeAsync()
     {
         return ViewModel.InitializeAsync();
     }
 
-    public Task RefreshAsync()
+    public override Task RefreshAsync()
     {
         return ViewModel.InitializeAsync();
     }
 
-    public void ApplyAppearance()
+    public override void ApplyAppearance()
     {
         ViewModel.ApplyAppearance();
     }
 
-    public void OnActivated()
+    public override void OnWindowLongHidden()
     {
-    }
-
-    public void OnDeactivated()
-    {
-    }
-
-    public void OnWindowLongHidden()
-    {
-        if (_view is TodoWidgetContent todoContent)
+        if (MaterializedView is TodoWidgetContent todoContent)
         {
             todoContent.ReleaseTransientRenderingSubscriptions();
         }
@@ -127,7 +100,7 @@ public sealed class TodoWidgetContentAdapter :
         double targetContentHeight,
         bool isCollapsing)
     {
-        if (_view is TodoWidgetContent todoContent)
+        if (MaterializedView is TodoWidgetContent todoContent)
         {
             todoContent.BeginResponsiveLayoutTransition(
                 targetContentWidth,
@@ -140,7 +113,7 @@ public sealed class TodoWidgetContentAdapter :
         double finalContentWidth,
         double finalContentHeight)
     {
-        if (_view is TodoWidgetContent todoContent)
+        if (MaterializedView is TodoWidgetContent todoContent)
         {
             todoContent.CompleteResponsiveLayoutTransition(
                 finalContentWidth,
@@ -150,7 +123,7 @@ public sealed class TodoWidgetContentAdapter :
 
     public void CancelResponsiveLayoutTransition()
     {
-        if (_view is TodoWidgetContent todoContent)
+        if (MaterializedView is TodoWidgetContent todoContent)
         {
             todoContent.CancelResponsiveLayoutTransition();
         }
@@ -158,7 +131,7 @@ public sealed class TodoWidgetContentAdapter :
 
     public void BeginInteractiveResize(double contentWidth, double contentHeight)
     {
-        if (_view is TodoWidgetContent todoContent)
+        if (MaterializedView is TodoWidgetContent todoContent)
         {
             todoContent.BeginInteractiveResize();
         }
@@ -166,7 +139,7 @@ public sealed class TodoWidgetContentAdapter :
 
     public void CompleteInteractiveResize(double contentWidth, double contentHeight)
     {
-        if (_view is TodoWidgetContent todoContent)
+        if (MaterializedView is TodoWidgetContent todoContent)
         {
             todoContent.CompleteInteractiveResize(contentWidth);
         }
@@ -230,15 +203,9 @@ public sealed class TodoWidgetContentAdapter :
             : Task.FromResult(false);
     }
 
-    public void Dispose()
+    protected override void Dispose(bool disposing)
     {
-        if (_isDisposed)
-        {
-            return;
-        }
-
-        _isDisposed = true;
-        if (_view is TodoWidgetContent todoContent)
+        if (MaterializedView is TodoWidgetContent todoContent)
         {
             todoContent.ReleaseTransientRenderingSubscriptions();
             todoContent.FeedbackRequested -= TodoContent_FeedbackRequested;

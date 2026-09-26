@@ -9,12 +9,9 @@ using Microsoft.UI.Xaml.Media.Imaging;
 namespace DeskBox.Controls.WidgetContents;
 
 public sealed class GlanceWidgetContentAdapter :
-    IWidgetContent,
-    IWidgetResponsiveLayoutContent,
-    IDisposable
+    WidgetContentAdapterBase,
+    IWidgetResponsiveLayoutContent
 {
-    private readonly Func<GlanceWidgetViewModel, FrameworkElement> _viewFactory;
-    private FrameworkElement? _view;
     private string? _compactBackgroundPath;
     private ImageSource? _compactBackground;
     private long _compactBackgroundEstimatedBytes;
@@ -27,32 +24,47 @@ public sealed class GlanceWidgetContentAdapter :
         ICalendarPresentationSource? calendarSource = null,
         Func<GlanceWidgetViewModel, FrameworkElement>? viewFactory = null,
         SettingsService? settingsService = null)
-    {
-        Config = config;
-        ViewModel = new GlanceWidgetViewModel(
+        : this(
             config,
-            localizationService,
-            store,
-            imageService,
-            calendarSource,
-            settingsService: settingsService);
-        _viewFactory = viewFactory ?? (viewModel => new GlanceWidgetContent(viewModel));
+            new GlanceWidgetViewModel(
+                config,
+                localizationService,
+                store,
+                imageService,
+                calendarSource,
+                settingsService: settingsService),
+            viewFactory)
+    {
     }
 
-    public WidgetConfig Config { get; }
-    public string WidgetId => Config.Id;
-    public WidgetKind WidgetKind => Config.WidgetKind;
-    public FrameworkElement View => _view ??= _viewFactory(ViewModel);
+    private GlanceWidgetContentAdapter(
+        WidgetConfig config,
+        GlanceWidgetViewModel viewModel,
+        Func<GlanceWidgetViewModel, FrameworkElement>? viewFactory)
+        : base(
+            config,
+            () => (viewFactory ?? (vm => new GlanceWidgetContent(vm)))(viewModel))
+    {
+        ViewModel = viewModel;
+    }
+
     public GlanceWidgetViewModel ViewModel { get; }
 
-    public Task InitializeAsync() => ViewModel.InitializeAsync();
-    public Task RefreshAsync() => ViewModel.RefreshAsync();
-    public void ApplyAppearance() => ViewModel.ApplyAppearance();
-    public void OnActivated() => ViewModel.OnActivated();
-    public void OnDeactivated() => ViewModel.OnDeactivated();
-    public void OnWindowVisibilityChanged(bool visible) => ViewModel.OnWindowVisibilityChanged(visible);
-    public void OnWindowRevealCompleted() => ViewModel.OnWindowRevealCompleted();
-    public void OnCompactStateChanged(bool collapsed) => ViewModel.OnCompactStateChanged(collapsed);
+    public override Task InitializeAsync() => ViewModel.InitializeAsync();
+
+    public override Task RefreshAsync() => ViewModel.RefreshAsync();
+
+    public override void ApplyAppearance() => ViewModel.ApplyAppearance();
+
+    public override void OnActivated() => ViewModel.OnActivated();
+
+    public override void OnDeactivated() => ViewModel.OnDeactivated();
+
+    public override void OnWindowVisibilityChanged(bool visible) => ViewModel.OnWindowVisibilityChanged(visible);
+
+    public override void OnWindowRevealCompleted() => ViewModel.OnWindowRevealCompleted();
+
+    public override void OnCompactStateChanged(bool collapsed) => ViewModel.OnCompactStateChanged(collapsed);
 
     public void BeginResponsiveLayoutTransition(double targetContentWidth, double targetContentHeight, bool isCollapsing)
         => ViewModel.UpdateAvailableSize(targetContentWidth, targetContentHeight);
@@ -112,7 +124,7 @@ public sealed class GlanceWidgetContentAdapter :
         }
     }
 
-    public void Dispose()
+    protected override void Dispose(bool disposing)
     {
         _compactBackground = null;
         _compactBackgroundPath = null;

@@ -13,21 +13,15 @@ namespace DeskBox.Controls.WidgetContents;
 /// leaf control stays a disposable view (roadmap P1-c).
 /// </summary>
 public sealed class QuickCaptureWidgetContentAdapter :
-    IWidgetContent,
+    WidgetContentAdapterBase,
     IWidgetFeedbackSource,
     IWidgetTransientStateContent,
     IWidgetResponsiveLayoutContent,
     IWidgetHostViewportContent,
     IWidgetInteractiveResizeContent,
     IWidgetAddActionContent,
-    IWidgetGroupContentCacheable,
-    IDisposable
+    IWidgetGroupContentCacheable
 {
-    private readonly Func<QuickCaptureWidgetViewModel, FrameworkElement> _viewFactory;
-    private readonly QuickCaptureWidgetViewModel _viewModel;
-    private FrameworkElement? _view;
-    private bool _isDisposed;
-
     public QuickCaptureWidgetContentAdapter(
         WidgetConfig config,
         QuickCaptureService quickCaptureService,
@@ -35,55 +29,56 @@ public sealed class QuickCaptureWidgetContentAdapter :
         LocalizationService localizationService,
         DispatcherQueue dispatcherQueue,
         Func<QuickCaptureWidgetViewModel, FrameworkElement>? viewFactory = null)
-    {
-        ArgumentNullException.ThrowIfNull(config);
-        ArgumentNullException.ThrowIfNull(quickCaptureService);
-
-        Config = config;
-        _viewModel = new QuickCaptureWidgetViewModel(
+        : this(
             config,
-            quickCaptureService,
+            new QuickCaptureWidgetViewModel(
+                config,
+                quickCaptureService,
+                settingsService,
+                localizationService,
+                dispatcherQueue),
             settingsService,
             localizationService,
-            dispatcherQueue);
-        _viewFactory = viewFactory ?? (viewModel => new QuickCaptureSurfaceContent(
-            viewModel,
-            settingsService,
-            localizationService,
-            dispatcherQueue));
-    }
-
-    public WidgetConfig Config { get; }
-
-    public string WidgetId => Config.Id;
-
-    public WidgetKind WidgetKind => Config.WidgetKind;
-
-    public QuickCaptureWidgetViewModel ViewModel => _viewModel;
-
-    public FrameworkElement View
+            dispatcherQueue,
+            viewFactory)
     {
-        get
-        {
-            ObjectDisposedException.ThrowIf(_isDisposed, this);
-            if (_view is null)
-            {
-                _view = _viewFactory(_viewModel);
-                if (_view is QuickCaptureSurfaceContent content)
-                {
-                    content.FeedbackRequested += Content_FeedbackRequested;
-                }
-            }
-
-            return _view;
-        }
     }
+
+    private QuickCaptureWidgetContentAdapter(
+        WidgetConfig config,
+        QuickCaptureWidgetViewModel viewModel,
+        SettingsService settingsService,
+        LocalizationService localizationService,
+        DispatcherQueue dispatcherQueue,
+        Func<QuickCaptureWidgetViewModel, FrameworkElement>? viewFactory)
+        : base(
+            config,
+            () => (viewFactory ?? (vm => new QuickCaptureSurfaceContent(
+                vm,
+                settingsService,
+                localizationService,
+                dispatcherQueue)))(viewModel))
+    {
+        ArgumentNullException.ThrowIfNull(viewModel);
+
+        ViewModel = viewModel;
+    }
+
+    public QuickCaptureWidgetViewModel ViewModel { get; }
 
     public bool IsReadyForReuse =>
-        _view is QuickCaptureSurfaceContent content &&
+        MaterializedView is QuickCaptureSurfaceContent content &&
         content.IsReadyForReuse;
 
     public event EventHandler<WidgetFeedbackRequestedEventArgs>? FeedbackRequested;
+
+    protected override void OnViewMaterialized(FrameworkElement view)
+    {
+        if (view is QuickCaptureSurfaceContent content)
+        {
+            content.FeedbackRequested += Content_FeedbackRequested;
+        }
+    }
 
     private void Content_FeedbackRequested(
         object? sender,
@@ -92,14 +87,14 @@ public sealed class QuickCaptureWidgetContentAdapter :
         FeedbackRequested?.Invoke(this, e);
     }
 
-    public Task InitializeAsync()
+    public override Task InitializeAsync()
     {
         return AsContent(View).InitializeContentAsync();
     }
 
-    public Task RefreshAsync()
+    public override Task RefreshAsync()
     {
-        return _viewModel.RefreshItemsAsync();
+        return ViewModel.RefreshItemsAsync();
     }
 
     public Task AddFromTitleButtonAsync()
@@ -107,41 +102,41 @@ public sealed class QuickCaptureWidgetContentAdapter :
         return AsContent(View).AddFromTitleButtonAsync();
     }
 
-    public void ApplyAppearance()
+    public override void ApplyAppearance()
     {
-        if (_view is QuickCaptureSurfaceContent content)
+        if (MaterializedView is QuickCaptureSurfaceContent content)
         {
             content.ApplyAppearance();
         }
     }
 
-    public void OnActivated()
+    public override void OnActivated()
     {
-        if (_view is QuickCaptureSurfaceContent content)
+        if (MaterializedView is QuickCaptureSurfaceContent content)
         {
             content.OnActivated();
         }
     }
 
-    public void OnDeactivated()
+    public override void OnDeactivated()
     {
-        if (_view is QuickCaptureSurfaceContent content)
+        if (MaterializedView is QuickCaptureSurfaceContent content)
         {
             content.OnDeactivated();
         }
     }
 
-    public void OnWindowVisibilityChanged(bool visible)
+    public override void OnWindowVisibilityChanged(bool visible)
     {
-        if (_view is QuickCaptureSurfaceContent content)
+        if (MaterializedView is QuickCaptureSurfaceContent content)
         {
             content.OnWindowVisibilityChanged(visible);
         }
     }
 
-    public void OnWindowRevealCompleted()
+    public override void OnWindowRevealCompleted()
     {
-        if (_view is QuickCaptureSurfaceContent content)
+        if (MaterializedView is QuickCaptureSurfaceContent content)
         {
             content.OnWindowRevealCompleted();
         }
@@ -149,7 +144,7 @@ public sealed class QuickCaptureWidgetContentAdapter :
 
     public void OnHostViewportSizeChanged(double width, double height)
     {
-        if (_view is QuickCaptureSurfaceContent content)
+        if (MaterializedView is QuickCaptureSurfaceContent content)
         {
             content.OnHostViewportSizeChanged(width, height);
         }
@@ -157,7 +152,7 @@ public sealed class QuickCaptureWidgetContentAdapter :
 
     public void BeginInteractiveResize(double contentWidth, double contentHeight)
     {
-        if (_view is QuickCaptureSurfaceContent content)
+        if (MaterializedView is QuickCaptureSurfaceContent content)
         {
             content.BeginInteractiveResize(contentWidth, contentHeight);
         }
@@ -165,7 +160,7 @@ public sealed class QuickCaptureWidgetContentAdapter :
 
     public void CompleteInteractiveResize(double contentWidth, double contentHeight)
     {
-        if (_view is QuickCaptureSurfaceContent content)
+        if (MaterializedView is QuickCaptureSurfaceContent content)
         {
             content.CompleteInteractiveResize(contentWidth, contentHeight);
         }
@@ -176,7 +171,7 @@ public sealed class QuickCaptureWidgetContentAdapter :
         double targetContentHeight,
         bool isCollapsing)
     {
-        if (_view is QuickCaptureSurfaceContent content)
+        if (MaterializedView is QuickCaptureSurfaceContent content)
         {
             content.BeginResponsiveLayoutTransition(
                 targetContentWidth,
@@ -189,7 +184,7 @@ public sealed class QuickCaptureWidgetContentAdapter :
         double finalContentWidth,
         double finalContentHeight)
     {
-        if (_view is QuickCaptureSurfaceContent content)
+        if (MaterializedView is QuickCaptureSurfaceContent content)
         {
             content.CompleteResponsiveLayoutTransition(
                 finalContentWidth,
@@ -199,7 +194,7 @@ public sealed class QuickCaptureWidgetContentAdapter :
 
     public void CancelResponsiveLayoutTransition()
     {
-        if (_view is QuickCaptureSurfaceContent content)
+        if (MaterializedView is QuickCaptureSurfaceContent content)
         {
             content.CancelResponsiveLayoutTransition();
         }
@@ -207,14 +202,14 @@ public sealed class QuickCaptureWidgetContentAdapter :
 
     object? IWidgetTransientStateContent.CaptureTransientState()
     {
-        return _view is QuickCaptureSurfaceContent content
+        return MaterializedView is QuickCaptureSurfaceContent content
             ? content.CaptureSwitchTransientState()
             : null;
     }
 
     void IWidgetTransientStateContent.RestoreTransientState(object? state)
     {
-        if (_view is QuickCaptureSurfaceContent content)
+        if (MaterializedView is QuickCaptureSurfaceContent content)
         {
             content.RestoreSwitchTransientState(state);
         }
@@ -222,7 +217,7 @@ public sealed class QuickCaptureWidgetContentAdapter :
 
     internal Task RevealItemAsync(string? itemId)
     {
-        return _view is QuickCaptureSurfaceContent content
+        return MaterializedView is QuickCaptureSurfaceContent content
             ? content.RevealItemAsync(itemId)
             : Task.CompletedTask;
     }
@@ -231,7 +226,7 @@ public sealed class QuickCaptureWidgetContentAdapter :
         IReadOnlyList<DroppedFilePath> files,
         QuickCaptureItemViewModel? targetItem)
     {
-        return _view is QuickCaptureSurfaceContent content
+        return MaterializedView is QuickCaptureSurfaceContent content
             ? content.ImportNativeDroppedFilesAsync(files, targetItem)
             : Task.FromResult(false);
     }
@@ -243,15 +238,9 @@ public sealed class QuickCaptureWidgetContentAdapter :
                 "Quick Capture content requires the surface leaf view.");
     }
 
-    public void Dispose()
+    protected override void Dispose(bool disposing)
     {
-        if (_isDisposed)
-        {
-            return;
-        }
-
-        _isDisposed = true;
-        if (_view is QuickCaptureSurfaceContent content)
+        if (MaterializedView is QuickCaptureSurfaceContent content)
         {
             // The leaf's dispose chain releases view subscriptions and
             // disposes the view model, matching the pre-adapter ownership.
@@ -260,7 +249,7 @@ public sealed class QuickCaptureWidgetContentAdapter :
         }
         else
         {
-            _viewModel.Dispose();
+            ViewModel.Dispose();
         }
     }
 }
