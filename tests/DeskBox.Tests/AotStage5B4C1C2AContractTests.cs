@@ -115,7 +115,7 @@ public sealed class AotStage5B4C1C2AContractTests
     }
 
     [Fact]
-    public void ProgressEvidence_RequiresTopLayerAcrylicAndReleasedOleCallback()
+    public void ProgressEvidence_DelegatesCardToShellAndReleasesOleCallback()
     {
         string scenario = ReadRepositoryFile(
             "src/DeskBox/App.AotNativeDropSmoke.cs");
@@ -124,11 +124,16 @@ public sealed class AotStage5B4C1C2AContractTests
         string xaml = ReadRepositoryFile(
             "src/DeskBox/Controls/WidgetContents/FileSurfaceContent.xaml");
 
+        // Physical-file copies run on the Windows Shell engine, which owns the
+        // native progress window: the scenario proves the surface stays busy
+        // without painting a second, competing widget card. The acrylic card
+        // contract itself (top-layered, translated, acrylic background) stays
+        // pinned statically through the probe capture and the XAML below.
         Assert.Contains("OleCallbackReleasedBeforeProgress", scenario, StringComparison.Ordinal);
-        Assert.Contains("ProgressCardVisibleAboveDragVisual", scenario, StringComparison.Ordinal);
-        Assert.Contains("CanvasZIndex >= 1000", scenario, StringComparison.Ordinal);
-        Assert.Contains("TranslationZ >= 64", scenario, StringComparison.Ordinal);
-        Assert.Contains("BackgroundIsAcrylicBrush", scenario, StringComparison.Ordinal);
+        Assert.Contains("ProgressDeferredToShellTransfer", scenario, StringComparison.Ordinal);
+        Assert.Contains("duringImport.IsImportBusy", scenario, StringComparison.Ordinal);
+        Assert.Contains("!duringImport.CardVisible", scenario, StringComparison.Ordinal);
+        Assert.Contains("WaitForAotImportBusySnapshotAsync", scenario, StringComparison.Ordinal);
         Assert.Contains("GetAotNativeFolderVisualState(", probe, StringComparison.Ordinal);
         // The drop visual is a neutral hover surface with no border, so the
         // probe reports the recorded drop target instead of drawing state.

@@ -232,7 +232,7 @@ public partial class App
             pointerProbe.OutsideScreenY,
             AotNativeDropControlKeyState,
             expectedFeedbackEffect: NativeDropEffectPolicy.Copy,
-            requireVisibleProgressCard: true,
+            requireTransferBusyEvidence: true,
             stepPrefix: "NativeDropCopy");
         await host.Surface.WaitForAotLocalFileSurfaceAsync(
             paths.WidgetRoot,
@@ -252,7 +252,7 @@ public partial class App
             pointerProbe.OutsideScreenY,
             keyState: 0,
             expectedFeedbackEffect: NativeDropEffectPolicy.Move,
-            requireVisibleProgressCard: false,
+            requireTransferBusyEvidence: false,
             stepPrefix: "NativeDropMove");
         await host.Surface.WaitForAotLocalFileSurfaceAsync(
             paths.WidgetRoot,
@@ -285,7 +285,7 @@ public partial class App
             int screenY,
             uint keyState,
             uint expectedFeedbackEffect,
-            bool requireVisibleProgressCard,
+            bool requireTransferBusyEvidence,
             string stepPrefix)
     {
         var busyStarted = new TaskCompletionSource<bool>(
@@ -335,19 +335,21 @@ public partial class App
 
             await busyStarted.Task.WaitAsync(TimeSpan.FromSeconds(15));
             AotNativeDropProgressSnapshot duringImport;
-            if (requireVisibleProgressCard)
+            if (requireTransferBusyEvidence)
             {
-                await Task.Delay(160);
-                duringImport = host.Surface.CaptureAotNativeDropProgress();
+                // Physical-file copies delegate to the Windows Shell engine,
+                // which owns the native progress window. The widget surface
+                // must stay busy for the transfer without painting a second,
+                // competing progress card over the Shell's own progress.
+                duringImport = await WaitForAotImportBusySnapshotAsync(
+                    host,
+                    TimeSpan.FromSeconds(5));
                 RequireAotManagedUi(
                     result,
                     duringImport.IsImportBusy &&
-                    duringImport.CardVisible &&
-                    duringImport.CanvasZIndex >= 1000 &&
-                    duringImport.TranslationZ >= 64 &&
-                    duringImport.BackgroundIsAcrylicBrush,
-                    stepPrefix + "ProgressCardVisibleAboveDragVisual",
-                    "The large-file progress card was not visible, top-layered and acrylic during transfer.");
+                    !duringImport.CardVisible,
+                    stepPrefix + "ProgressDeferredToShellTransfer",
+                    "The delegated shell transfer did not keep the surface busy without a competing widget progress card.");
             }
             else
             {
@@ -377,6 +379,28 @@ public partial class App
         {
             host.Surface.ImportBusyChanged -= OnImportBusyChanged;
         }
+    }
+
+    private static async Task<AotNativeDropProgressSnapshot>
+        WaitForAotImportBusySnapshotAsync(
+            AotNativeDropSurfaceHost host,
+            TimeSpan limit)
+    {
+        DateTime deadline = DateTime.UtcNow + limit;
+        while (DateTime.UtcNow < deadline)
+        {
+            AotNativeDropProgressSnapshot snapshot =
+                host.Surface.CaptureAotNativeDropProgress();
+            if (snapshot.IsImportBusy)
+            {
+                return snapshot;
+            }
+
+            await Task.Delay(20);
+        }
+
+        throw new InvalidOperationException(
+            "The native-drop import never entered its busy state.");
     }
 
     private async Task RestoreAotNativeDropBaselineAsync(
