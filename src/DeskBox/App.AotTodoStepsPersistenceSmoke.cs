@@ -41,7 +41,7 @@ public partial class App
         {
             TodoWidgetData reloaded = await new TodoWidgetStore(
                 AotManagedUiTodoStepsWidgetId).LoadAsync();
-            TodoItem item = reloaded.Items.Single();
+            TodoItem item = reloaded.Items.Single(entry => !entry.IsDeleted);
             await surface.OpenAotTodoItemAsync(item.Id);
             await surface.WaitForAotTodoStepProjectionAsync(
                 item.Steps.Single().Id,

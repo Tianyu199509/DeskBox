@@ -43,7 +43,7 @@ public partial class App
         {
             TodoWidgetData reloaded = await new TodoWidgetStore(
                 AotManagedUiTodoAttachmentsWidgetId).LoadAsync();
-            TodoItem item = reloaded.Items.Single();
+            TodoItem item = reloaded.Items.Single(entry => !entry.IsDeleted);
             TodoAttachment attachment = item.Attachments.Single();
             evidence.RestartAttachmentUiProjected =
                 await surface.WaitForAotTodoAttachmentProjectionAsync(

@@ -45,7 +45,7 @@ public partial class App
         {
             TodoWidgetData reloaded =
                 await new TodoWidgetStore(AotManagedUiTodoWidgetId).LoadAsync();
-            TodoItem item = reloaded.Items.Single();
+            TodoItem item = reloaded.Items.Single(entry => !entry.IsDeleted);
             await surface.OpenAotTodoItemAsync(item.Id);
         }
         evidence.Before = await CaptureAotManagedUiTodoStateAsync(
@@ -175,7 +175,11 @@ public partial class App
         {
             StoreVersion = data.Version,
             StoreFileExists = File.Exists(store.StorePath),
+            // Deletes persist as soft-delete tombstones (merge safety), so the
+            // matrix projects only live items — the same contract as the
+            // Quick Capture persistence evidence.
             Items = data.Items
+                .Where(item => !item.IsDeleted)
                 .OrderBy(item => item.Id, StringComparer.Ordinal)
                 .Select(item => new AotManagedUiTodoItemEvidence
                 {

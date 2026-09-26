@@ -163,6 +163,22 @@ public sealed class AotStage5B4B2B2AContractTests
     }
 
     [Fact]
+    public void Evidence_ProjectsOnlyLiveItemsBecauseDeletesPersistAsTombstones()
+    {
+        string persistence = ReadRepositoryFile(
+            "src/DeskBox/App.AotTodoPersistenceSmoke.cs");
+        string steps = ReadRepositoryFile(
+            "src/DeskBox/App.AotTodoStepsPersistenceSmoke.cs");
+        string attachments = ReadRepositoryFile(
+            "src/DeskBox/App.AotTodoAttachmentsPersistenceSmoke.cs");
+
+        Assert.Contains("Where(item => !item.IsDeleted)", persistence, StringComparison.Ordinal);
+        Assert.Contains("Single(entry => !entry.IsDeleted)", persistence, StringComparison.Ordinal);
+        Assert.Contains("Single(entry => !entry.IsDeleted)", steps, StringComparison.Ordinal);
+        Assert.Contains("Single(entry => !entry.IsDeleted)", attachments, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void TodoScenario_ReusesSingleSourceGeneratedResultWriter()
     {
         string source = ReadRepositoryFile("src/DeskBox/App.AotManagedUiSmoke.cs");

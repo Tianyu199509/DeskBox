@@ -4255,6 +4255,8 @@ $stage5B4B2B2ARequiredRunnerPatterns = @(
     'AttachmentCount',
     'HasDueDate',
     'HasRecurrence',
+    'Where(item => !item.IsDeleted)',
+    'Single(entry => !entry.IsDeleted)',
     'NormalShutdownRequested',
     'ShutdownApplicationAsync()',
     'AotManagedUiSmokeJsonContext.Default.AotManagedUiSmokeResult'
@@ -4478,6 +4480,7 @@ $stage5B4B2B2B1RequiredRunnerPatterns = @(
     'AfterStepDelete',
     'RequireAotManagedUiTodoStepPopulated',
     'RequireAotManagedUiTodoTaskWithoutSteps',
+    'Single(entry => !entry.IsDeleted)',
     'NormalShutdownRequested',
     'ShutdownApplicationAsync()',
     'AotManagedUiSmokeJsonContext.Default.AotManagedUiSmokeResult'
@@ -4708,6 +4711,7 @@ $stage5B4B2B2B2RequiredRunnerPatterns = @(
     'AfterAttachmentDelete',
     'RequireAotManagedUiTodoAttachmentPopulated',
     'RequireAotManagedUiTodoTaskWithoutAttachments',
+    'Single(entry => !entry.IsDeleted)',
     'NormalShutdownRequested',
     'ShutdownApplicationAsync()',
     'AotManagedUiSmokeJsonContext.Default.AotManagedUiSmokeResult'
