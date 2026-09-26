@@ -576,7 +576,29 @@ A+B 工作树已补齐最终 QuickCapture 退出/快捷入口和 Todo 非有限�
 
 审计遗留 P3-2 收口。目标口径：全局 `SettingsChanged` 无参数广播导致 `TodoSettingsCoordinator.OnSettingsChanged` 在每次防抖保存（如拖动外观滑块每秒一次）都重入提醒协调。评估后取**协调器侧变更检测守卫**而非全量事件参数化：其余订阅者（QuickCapture/Search/WidgetManager/备份）早已自带缓存比较守卫，事件签名改造是一天级宽 API 动而收益仅剩提醒一处。守卫缓存四个提醒相关输入（TodoEnabled、TodoReminderEnabled、默认提前分钟、Todo 格子 ID 集合），无变化即跳过；首次通知仍重入（覆盖恢复/默认值路径）。新增三条测试：无关保存零重入、提醒开关变化重入、Todo 格子增删重入。事件参数化留作触发项：出现第二个必须依赖切片信息的消费者时再立法。
 
-<<<<<<< HEAD
+## 第三十批：设备层迁移收口核验（2B 剩余项，提前纳入完全拆完）
+
+实施基线：`688d7d67`（main）。本批对象是路线图 §2B 标记的最后一项剩余——格子布局/拓扑 → 设备域 store（原定云同步立项触发，Simon 拍板提前）。**对码结论：迁移本体已随 `b8dfb443`（2026-09-19）及四轮加固（`0b66db18`/`ed5b5a52`/`8319db1e`/`1d598f90`/`4378134c`）进入 main，路线图"剩余 ~330 处"的记载滞后于实况**；本批做全量收口核验、补齐演练契约与文档对账，未发现需要修复的产品缺陷。
+
+store 设计（在库现状，非本批新写）：`DeskBox.Core.Persistence.WidgetLayoutStore` 承载 `widget-layout.json`（与 `desktop-organization-history.json` 同款命名风格），11 个布局线级键（widgets/widgetGroups/widgetTopologyLayouts/activeWidgetTopologyKey/deletedWidgetIds/featureWidgetEnabledStates + 5 个组导航/兼容默认值键）整体迁出 settings.json。接入 `ResilientJsonStore`（`.bak` 自救 + `.corrupt-*` 隔离 + 校验写入），自带 schemaVersion 与未来 schema 只读保护（typed slice 表示不了的文件拒绝覆写、save 如实报失败并保留冗余 settings 键），结构校验 fail-closed（`null`/`{}`/`{"layout":null}` 走隔离路径而非充当权威空布局）。
+
+领养规则（fail-closed，2B-2 同款）：`SettingsService.LoadAsync` 把迁移+归一化后的旧 settings 键作为种子交给 `WidgetLayoutStore.LoadAsync`——store 文件落盘成为权威后才在下次保存剥离 settings 旧键；写失败保留旧键下次重试；corrupt primary 隔离留证不覆写；settings.json 整体加载失败时 layout 独立重新领养（单文件损坏不拖垮桌面）。旧版回退语义如实记录：旧版读不到设备层文件=回默认布局，与 2B-2 同款既定取舍。
+
+引用迁移覆盖面核对（原估 ~330 处的实际处置）：2A facade 吸收了调用面——全部消费方（WidgetManager 11 个 partial、分组事务线、WidgetTopologyLayoutService、协调器/VM/启动恢复）继续读写 `AppSettings.WidgetLayout` 内存切片（store 的会话内活对象，`CopyFrom` 原位并入），持久化统一经 SettingsService 成对提交：单一 `FileWriteLock` 下 layout 先落、settings 后落，settings 提交失败回滚 layout 至提交前字节——一次保存=一对一致文件，**无半迁移混合读写状态**（不存在"一半走 store 一半走 settings"的路径）。逐文件走查确认除 SettingsService/WidgetStyleBackupProjection/备份服务外无任何直读直写布局数据文件的代码。
+
+事务时序冻结的证据走查：①分组事务线（第 9-12/24 批）——合并/拆离/解散保持 快照→成对提交→表面退役 顺序（提交在 `beforeRetireAsync` 内执行 `SaveWidgetGroupSettingsCheckedAsync`，回滚=切片快照还原+再保存+表面对账，隔离补偿入口不变）；②#393 整理事务线——`settings→history→clear journal` 线性化点不变，settings 腿内部先 commit layout 对，history receipt 仍最后落；③启动恢复路径——`RestoreWidgetsAsync` 在内存切片上激活当前拓扑（数据已由 LoadAsync 从 store 装载），SaveDebounced 走同一成对保存；④本地灾难快照在 `OperationGate`+settings 写锁下把 settings/layout/history/journal 四文件同纪元拷备（防撕裂对）。
+
+备份域排除核对：云备份域为 allowlist（todo/quick-capture 数据 + widget-style 投影），`widget-layout.json` 永不可入域（`LayoutFile_IsNeverInAnyCloudBackupDomain` 钉固）；`device.id` 维持排除（installation-local 身份）；样式口径与云备份 v1 一致——`WidgetStyleBackupProjection` 白名单只含样式键，恢复端对 post-adoption 文件直接补进 layout 文件并带 journal 两提交事务。本批新增 `StyleWhitelist_IsDisjointFromDeviceLayoutWireKeys` 契约：样式白名单与 11 个设备层键不相交（键漂进两侧即"布局借样式通道跨设备"）。
+
+本批新增测试（`WidgetLayoutStoreTests`，+2）：`SettingsService_RealDataDrill_AdoptsGroupsMembersTopology_AndIsStableAcrossRestart`——预置带 2 组 4 成员+1 独立格子、双拓扑档案（组表面/独立表面几何+显示器记忆）、active key、墓碑的旧 settings.json→新版本启动领养→settings 剥离 11 键→store 文件承载完整形态→重启加载等值且 settings 不回吐。写失败保留旧字段重试路径由既有 `SettingsService_FailedAdoption_RetriesOnNextLaunch`/`SettingsService_LayoutWriteFailure_KeepsKeysInSettingsJson` 覆盖；三域归属其余两域由 `SyncLayerFieldsContractTests`（同步层字段集不变）与 history/journal store 测试（本地层不动）钉固。
+
+验证记录：
+
+- 定向 `WidgetLayoutStoreTests` 22/22 通过（20 既有 + 2 新增）。
+- 全量 x64 **4,254/4,254**（基线 4,252 + 2 新用例）；build x64 0 错误（并发测试+构建会撞 XamlCompiler 状态，分开跑即净）。
+- AOT 定义编译检查（`DESKBOX_NATIVE_AOT` DefineConstants）0 错误、22 警告；canonical Debug 构建 0 错误。
+- 隔离 Debug 启动演练（2026-09-26 晚，数据根 `device-layer-batch30-20260926-7f3a1c`，DESKBOX_DEV_DATA_ROOT，仓库唯一实例 PID 4104→45084，路径 `src/DeskBox/bin/Debug/net10.0-windows10.0.22621.0/DeskBox.exe`）：预置 2 组 4 成员+1 独立文件格子（真实映射文件夹）+双拓扑档案+墓碑的旧 settings.json→首启 36 步 0 degraded / 0 failed，两组表面以真实 HWND 呈现且成员切换正常（surface-a 0x1410E10 / surface-b 0xCF166A），磁盘上 `widget-layout.json` 生成且完整承载 5 格子/2 组/双拓扑/墓碑/功能态，settings.json 11 键全部清空；强制结束→重启同数据根，36 步 0 degraded / 0 failed，组/成员/拓扑/墓碑保持，settings 保持清空，无 corrupt 残留。演练中一次预置错误（非法 `viewMode` 枚举值）被既有 fail-closed 机制正确拦截（settings 整体隔离为 `.corrupt-*` 留证），顺带验证了损坏路径。测试实例已结束，未触碰生产数据根与并行代理实例。
+- `git diff --check` 通过；未推送。路线图 §2B 状态同步更新（2B-3 条目 + 节奏建议行）。
 ## 第三十一批：Platform P/Invoke 主动全迁（Track C）
 
 Simon 拍板放弃"随触碰 ratchet"，对 Platform 域的 DllImport/LibraryImport 存量做一次性主动全迁（与 2026-09-18 路线图"不做一次性大搬家"的原始口径就此收口）。实施基线：`688d7d67`（origin/main，worktree `codex/final-platform-pinvoke`）。行为零变化：只做声明搬家/抽取，DllImport 特性、字符集、SetLastError 错误位、签名逐字保留；调用语义、线程模型、错误处理不动。
@@ -611,28 +633,32 @@ Simon 拍板放弃"随触碰 ratchet"，对 Platform 域的 DllImport/LibraryImp
 - AOT 文本钉逐一复核未破坏：`SHFileOperation(ref operation/fileOperation)`（AotStage4D2/5B4C1B1/5B4C1B2A 与 publish-aot-audit.ps1 5984/6269 行）——调用文本加限定后子串保留；`GlobalAlloc(`（AotStage5B4C1C2A 探针钉）同理保留；AotRetailIsolation 的烟具清单 61 个与排除模式列表不变（新 Platform 文件不匹配 `*.Aot*Smoke.cs`，且保留 `#if DESKBOX_NATIVE_AOT` 门控，retail 烟具移除后无引用可裁）。
 
 验证记录：restore Updater 后 build x64 0 错误；全量单测 4,252/4,252 全绿；AOT 定义编译检查（DESKBOX_NATIVE_AOT）0 错误；隔离 Debug 启动烟测通过。`grep DllImport|LibraryImport` 非 Platform 命中 0。
-=======
-## 第三十批：设备层迁移收口核验（2B 剩余项，提前纳入完全拆完）
 
-实施基线：`688d7d67`（main）。本批对象是路线图 §2B 标记的最后一项剩余——格子布局/拓扑 → 设备域 store（原定云同步立项触发，Simon 拍板提前）。**对码结论：迁移本体已随 `b8dfb443`（2026-09-19）及四轮加固（`0b66db18`/`ed5b5a52`/`8319db1e`/`1d598f90`/`4378134c`）进入 main，路线图"剩余 ~330 处"的记载滞后于实况**；本批做全量收口核验、补齐演练契约与文档对账，未发现需要修复的产品缺陷。
+## 第三十二批：IFeatureRuntime 正式化与两项残余收口
 
-store 设计（在库现状，非本批新写）：`DeskBox.Core.Persistence.WidgetLayoutStore` 承载 `widget-layout.json`（与 `desktop-organization-history.json` 同款命名风格），11 个布局线级键（widgets/widgetGroups/widgetTopologyLayouts/activeWidgetTopologyKey/deletedWidgetIds/featureWidgetEnabledStates + 5 个组导航/兼容默认值键）整体迁出 settings.json。接入 `ResilientJsonStore`（`.bak` 自救 + `.corrupt-*` 隔离 + 校验写入），自带 schemaVersion 与未来 schema 只读保护（typed slice 表示不了的文件拒绝覆写、save 如实报失败并保留冗余 settings 键），结构校验 fail-closed（`null`/`{}`/`{"layout":null}` 走隔离路径而非充当权威空布局）。
+实施基线：`688d7d67`（main）。本批把路线图 §2 的功能运行时租约从"手写等价语义"升为正式契约，并收掉第 25 批文档化的远端列表残余与 App 装配区的功能分支清点。行为零变化：三个运行时的既有幂等/取消/串行语义原样保留，接口适配层为薄封装。
 
-领养规则（fail-closed，2B-2 同款）：`SettingsService.LoadAsync` 把迁移+归一化后的旧 settings 键作为种子交给 `WidgetLayoutStore.LoadAsync`——store 文件落盘成为权威后才在下次保存剥离 settings 旧键；写失败保留旧键下次重试；corrupt primary 隔离留证不覆写；settings.json 整体加载失败时 layout 独立重新领养（单文件损坏不拖垮桌面）。旧版回退语义如实记录：旧版读不到设备层文件=回默认布局，与 2B-2 同款既定取舍。
+**接口（`Contracts/IFeatureRuntime.cs`）**：`IFeatureRuntime : IAsyncDisposable`，仅 `StartAsync(CancellationToken)` 一个新成员。状态机语义以 XML 契约注释立法：①幂等——重复 Start 不建第二份租约、重复 Dispose 不是二次释放；②Start 可取消且失败按获取逆序回收已建资源（不留半租约）；③Dispose 与进行中的 Start 竞争按状态机串行（Start 完成→Dispose，或 Start 取消→Dispose），不允许并发交错；④Dispose 不得无限阻塞宿主关闭——宿主持有期限、记诊断并把未回收运行时计入泄漏隔离清单。明确不是 PowerToys 式模块生命周期；不持长生命周期资源的功能不实现。
 
-引用迁移覆盖面核对（原估 ~330 处的实际处置）：2A facade 吸收了调用面——全部消费方（WidgetManager 11 个 partial、分组事务线、WidgetTopologyLayoutService、协调器/VM/启动恢复）继续读写 `AppSettings.WidgetLayout` 内存切片（store 的会话内活对象，`CopyFrom` 原位并入），持久化统一经 SettingsService 成对提交：单一 `FileWriteLock` 下 layout 先落、settings 后落，settings 提交失败回滚 layout 至提交前字节——一次保存=一对一致文件，**无半迁移混合读写状态**（不存在"一半走 store 一半走 settings"的路径）。逐文件走查确认除 SettingsService/WidgetStyleBackupProjection/备份服务外无任何直读直写布局数据文件的代码。
+**三个实现（形式化封装，不重设计）**：
 
-事务时序冻结的证据走查：①分组事务线（第 9-12/24 批）——合并/拆离/解散保持 快照→成对提交→表面退役 顺序（提交在 `beforeRetireAsync` 内执行 `SaveWidgetGroupSettingsCheckedAsync`，回滚=切片快照还原+再保存+表面对账，隔离补偿入口不变）；②#393 整理事务线——`settings→history→clear journal` 线性化点不变，settings 腿内部先 commit layout 对，history receipt 仍最后落；③启动恢复路径——`RestoreWidgetsAsync` 在内存切片上激活当前拓扑（数据已由 LoadAsync 从 store 装载），SaveDebounced 走同一成对保存；④本地灾难快照在 `OperationGate`+settings 写锁下把 settings/layout/history/journal 四文件同纪元拷备（防撕裂对）。
+- `Features/Todo/TodoReminderRuntime`：`StartAsync` = 按当前设置的 `Reconcile`（协调器同一路径，构造函数新增 `readSettings` 读取器）；DisposeAsync 原有停止+排空；`_stopped` 守卫即终态语义。失败候选的回收（逆序回滚）为既有行为。
+- `Features/QuickCapture/QuickCaptureClipboardRuntime`：`StartAsync` = `Refresh()`（按当前设置创建/刷新唯一监听）；`DisposeAsync` = 既有幂等 `StopAsync`（缓存任务）。
+- `Features/Search/SearchFeatureRuntime`（新）：App 持有的第 6 批启停链（`EnsureSearchServices`/`DisposeSearchServices`）之上的委托适配器。链自身的幂等与部分失败回收保持权威；适配器加 `_started` 旗标使注册表级重复调用与清扫为 no-op。`SetSearchFeatureEnabled`（设置协调器注入的启停回调）改经适配器，enable/disable 循环与关停释放同一条契约路径。
 
-备份域排除核对：云备份域为 allowlist（todo/quick-capture 数据 + widget-style 投影），`widget-layout.json` 永不可入域（`LayoutFile_IsNeverInAnyCloudBackupDomain` 钉固）；`device.id` 维持排除（installation-local 身份）；样式口径与云备份 v1 一致——`WidgetStyleBackupProjection` 白名单只含样式键，恢复端对 post-adoption 文件直接补进 layout 文件并带 journal 两提交事务。本批新增 `StyleWhitelist_IsDisjointFromDeviceLayoutWireKeys` 契约：样式白名单与 11 个设备层键不相交（键漂进两侧即"布局借样式通道跨设备"）。
+**App 侧所有权（`Services/FeatureRuntimeRegistry`，新）**：注册表登记 `search`/`quick-capture`/`todo-reminders` 三个运行时实例（键与退出步同名），提供 `TryGet` 借用、按 id 释放、`DisposeAllAsync` 反向注册序兜底清扫（与契约的逆获取序回收一致；单运行时故障记 `[FeatureRuntimes] '...' ... quarantined for leak isolation` 诊断后跳过，不阻塞其余释放）。退出序列：`todo-reminders` 与 `search-runtime` 两步改经注册表解析（语义同前）；`search-runtime` 之后新增 `feature-runtimes` 兜底清扫步（`ShutdownStep.Bounded`，现有三运行时在此均为幂等 no-op，为未来无专属步骤的运行时立安全网）。装配区创建注册表并注册三个实例；协调器构造注入是装配期注入而非调用方缓存。
 
-本批新增测试（`WidgetLayoutStoreTests`，+2）：`SettingsService_RealDataDrill_AdoptsGroupsMembersTopology_AndIsStableAcrossRestart`——预置带 2 组 4 成员+1 独立格子、双拓扑档案（组表面/独立表面几何+显示器记忆）、active key、墓碑的旧 settings.json→新版本启动领养→settings 剥离 11 键→store 文件承载完整形态→重启加载等值且 settings 不回吐。写失败保留旧字段重试路径由既有 `SettingsService_FailedAdoption_RetriesOnNextLaunch`/`SettingsService_LayoutWriteFailure_KeepsKeysInSettingsJson` 覆盖；三域归属其余两域由 `SyncLayerFieldsContractTests`（同步层字段集不变）与 history/journal store 测试（本地层不动）钉固。
+**共享契约测试（`tests/DeskBox.Tests/FeatureRuntimeContractTests.cs`）**：接口级状态机测试以 Theory 同时跑四个用例——全 gated 的多资源 Fake（立法本体）+ 三个生产运行时的薄用例适配。断言：重复 Start 单租约、预取消 token 零获取、重复 Dispose 单次释放、部分失败无残留租约且可重试；Fake 专属断言逆序回收与 Dispose/Start 竞争串行（Start 完成→Dispose、Start 取消→Dispose 两序）；Search 专属断言 enable/disable 循环（释放后可再 Start）。生产运行时在自有 UI 线程上的串行边界无法从测试线程证明，由 Fake 的门控转换测试代替钉住，功能级既有测试保留不动。`FeatureRuntimeRegistryTests` 钉注册表：注册/借用/重复键拒绝、按 id 定向释放、反向注册序清扫与故障隔离。
+
+**残余一（第 25 批文档化项）**：备份设置页的远端 PROPFIND/列表读从 `BackupSettingsCoordinator.ListAsync` 直连 `CloudBackupService` 改经 `BackupRestoreActions.ListSnapshotsAsync`（internal）——同一 `CaptureCurrent` 端点校验、同一 `TrackAsync`/`StopAsync` 冻结语义，与删除/下载一致；`IBackupSettings.ListAsync` 端口不变，页面取消链不变。`BackupRestoreActions` 由设置窗口每次新建改为 App 启动时创建的单实例（设置窗口借用；未开过窗口时 `backup-restore-actions` 退出步也补了无窗口分支的 Stop）。新增测试：列表经登记路径返回条目、端点漂移拒绝、StopAsync 后列表拒绝。
+
+**残余二（App.xaml.cs 功能分支清点）**：grep 清点后归四类——①Todo 通知激活链（常量、路由、snooze 确认、原生/托盘通知呈现、`CreateTodoReminderService` 工厂）：宿主适配（原生通知+托盘回退+WidgetManager 交互），第 1 批所有权表本就归 App，保留；②搜索结果动作/内容分发（`HandleSearchContentAsync`/`HandleSearchActionAsync` 的 Todo/QuickCapture 分支）：功能分支可挪 `WidgetManager.RevealSearchResultAsync`，但 WidgetManager 属并行轨道文件且 Features 层按边界法不能引 Services，列入清单建议后续随 WidgetManager 触碰时收编；③启动期功能门（search-shell/todo-reminders/quick-capture-clipboard 三步）：启动管线契约测试钉住步骤名，保留，search-shell 可在未来触碰启动管线时改经注册表 StartAsync；④备份设置回调与未验证上传 toast 策略：薄委托+一次性提示策略，随 BackupRuntime 触碰时评估。**本批实际小挪**：Todo"立即检查"（`CheckNowAsync` 触发）从 App 移入 `TodoReminderRuntime.CheckCurrentAsync`，App 只传用户意图；退出步经注册表解析替代两处直接字段调用。
 
 验证记录：
 
-- 定向 `WidgetLayoutStoreTests` 22/22 通过（20 既有 + 2 新增）。
-- 全量 x64 **4,254/4,254**（基线 4,252 + 2 新用例）；build x64 0 错误（并发测试+构建会撞 XamlCompiler 状态，分开跑即净）。
-- AOT 定义编译检查（`DESKBOX_NATIVE_AOT` DefineConstants）0 错误、22 警告；canonical Debug 构建 0 错误。
-- 隔离 Debug 启动演练（2026-09-26 晚，数据根 `device-layer-batch30-20260926-7f3a1c`，DESKBOX_DEV_DATA_ROOT，仓库唯一实例 PID 4104→45084，路径 `src/DeskBox/bin/Debug/net10.0-windows10.0.22621.0/DeskBox.exe`）：预置 2 组 4 成员+1 独立文件格子（真实映射文件夹）+双拓扑档案+墓碑的旧 settings.json→首启 36 步 0 degraded / 0 failed，两组表面以真实 HWND 呈现且成员切换正常（surface-a 0x1410E10 / surface-b 0xCF166A），磁盘上 `widget-layout.json` 生成且完整承载 5 格子/2 组/双拓扑/墓碑/功能态，settings.json 11 键全部清空；强制结束→重启同数据根，36 步 0 degraded / 0 failed，组/成员/拓扑/墓碑保持，settings 保持清空，无 corrupt 残留。演练中一次预置错误（非法 `viewMode` 枚举值）被既有 fail-closed 机制正确拦截（settings 整体隔离为 `.corrupt-*` 留证），顺带验证了损坏路径。测试实例已结束，未触碰生产数据根与并行代理实例。
-- `git diff --check` 通过；未推送。路线图 §2B 状态同步更新（2B-3 条目 + 节奏建议行）。
->>>>>>> origin/main
+- 定向测试（契约/注册表/三运行时/备份传输/边界/启动韧性/关停序列）172/172 通过。
+- 全量 x64 测试 **4,277/4,277** 通过（main 基线 4,252 + 本批 25 个新用例：契约 Theory 16 + Fake/Search 专属 4 + 注册表 4 + 列表登记 1）。
+- AOT 定义编译检查（`DESKBOX_NATIVE_AOT` DefineConstants、x64、`ArtifactsPath`/`RestorePackagesPath` 隔离于 `.aotcheck/`，仓库主 obj 与锁文件未受影响）：11 警告、**0 错误**。未执行 Native AOT publish/link 或发布包运行，仍为发版门禁。
+- canonical Debug 构建 0 错误（警告均为既有位置：CS0108/CS0414/CS0169/CS8602 与 WinUI 可空性，无本批新文件告警）。
+- 隔离 Debug 启动：数据根 `C:/Users/simon/AppData/Local/DeskBox-Dev/final-feature-runtime-20260926-d32`，核验进程 PID 45132，路径为 `D:/project/wingezi-final-d/src/DeskBox/bin/Debug/net10.0-windows10.0.22621.0/DeskBox.exe`（本工作树唯一实例）；启动 **36 步、0 degraded、0 failed**，默认态 Search 未初始化服务（符合禁用路径），外部状态恢复完成，正常关闭退出（本工作树实例计数归零）。三个功能的开关循环由 SearchCase/接口级用例与既有功能级测试覆盖（真实 UI 点击仍属人工验收）。
+- `git diff --check` 通过；未提交推送（本记录随提交一并入库）。

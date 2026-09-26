@@ -55,6 +55,12 @@ public partial class App : Application
     private const string TodoSnoozeConfirmationNotificationSource = "todoSnoozeConfirmation";
     private const string TodoSnoozeConfirmationNotificationGroup = "todo-feedback";
     private const string TodoSnoozeConfirmationNotificationTag = "todo-snooze-confirmation";
+
+    // Feature-runtime registry keys (Services/FeatureRuntimeRegistry). They
+    // intentionally read like the matching shutdown step names.
+    private const string SearchFeatureRuntimeId = "search";
+    private const string QuickCaptureFeatureRuntimeId = "quick-capture";
+    private const string TodoRemindersFeatureRuntimeId = "todo-reminders";
     private const string PendingJumpListArgumentFileName = "pending-jumplist-arg.txt";
     private const string VerboseLoggingEnvironmentVariable = "DESKBOX_VERBOSE_LOG";
     private static readonly bool EnableVerboseLogging = IsEnabledEnvironmentValue(
@@ -97,10 +103,13 @@ public partial class App : Application
     private NativeAppNotificationService? _nativeNotificationService;
     private NativeNotificationActivationBootstrap? _nativeNotificationBootstrap;
     private bool _initialNotificationHandled;
+    private FeatureRuntimeRegistry? _featureRuntimes;
     private TodoReminderRuntime? _todoReminderRuntime;
     private TodoSettingsCoordinator? _todoSettings;
     private SearchSettingsCoordinator? _searchSettings;
+    private SearchFeatureRuntime? _searchFeatureRuntime;
     private BackupSettingsCoordinator? _backupSettings;
+    private BackupRestoreActions? _backupRestoreActions;
     private QuickCaptureSettingsCoordinator? _quickCaptureSettings;
     private QuickCaptureClipboardRuntime? _quickCaptureClipboardRuntime;
     private BackupRuntime? _backupRuntime;
@@ -967,7 +976,13 @@ public partial class App : Application
                 LocalizationService.LanguageChanged += OnLanguageChanged;
             });
 
-            _todoReminderRuntime = new TodoReminderRuntime(CreateTodoReminderService);
+            // Feature-runtime ownership ledger (roadmap §2): the registry owns
+            // the runtime instances; feature flows borrow through it instead
+            // of caching. Registration order is the shutdown sweep's reverse
+            // disposal order, so it follows the acquisition order above.
+            _featureRuntimes = new FeatureRuntimeRegistry(message => Log(message));
+            _todoReminderRuntime = _featureRuntimes.Register(TodoRemindersFeatureRuntimeId,
+                new TodoReminderRuntime(CreateTodoReminderService, () => _todoSettings!.Read()));
             _todoSettings = new TodoSettingsCoordinator(
                 SettingsService,
                 enabled => WidgetManager!.SetTodoEnabledAsync(enabled, reveal: enabled),
@@ -984,15 +999,29 @@ public partial class App : Application
                 SetSearchFeatureEnabled,
                 action => UiDispatcherQueue.TryEnqueue(() => action()),
                 ex => Log($"[Search] Feature enablement failed: {ex}"));
+            // The App-owned search start/stop chain, formalized as the
+            // search feature's runtime lease. The settings coordinator's
+            // enable callback and the shutdown step both go through this
+            // adapter; ad-hoc ensures stay on the idempotent chain below.
+            _searchFeatureRuntime = _featureRuntimes.Register(SearchFeatureRuntimeId,
+                new SearchFeatureRuntime(EnsureSearchServices, DisposeSearchServices));
+            // One restore-actions owner for the process: the settings editor
+            // borrows it for delete/download/restore, and the remote list
+            // reads route through the same registration, endpoint freeze and
+            // stop semantics as the destructive operations.
+            _backupRestoreActions = new BackupRestoreActions(
+                SettingsService, CloudBackupService, DataBackupService,
+                ShutdownForRestartAsync);
             _backupSettings = new BackupSettingsCoordinator(
-                SettingsService, DataBackupService, CloudBackupService,
+                SettingsService, DataBackupService, CloudBackupService, _backupRestoreActions,
                 () => _backupRuntime?.RefreshOptions());
-            _quickCaptureClipboardRuntime = new QuickCaptureClipboardRuntime(
-                () => !IsShuttingDown &&
-                    FeatureWidgetSettings.IsEnabled(SettingsService.Settings, WidgetKind.QuickCapture) &&
-                    SettingsService.Settings.QuickCapture.QuickCaptureClipboardEnabled,
-                () => new QuickCaptureClipboardService(SettingsService, QuickCaptureService),
-                ex => Log($"[QuickCaptureClipboard] Stop failed: {ex}"));
+            _quickCaptureClipboardRuntime = _featureRuntimes.Register(QuickCaptureFeatureRuntimeId,
+                new QuickCaptureClipboardRuntime(
+                    () => !IsShuttingDown &&
+                        FeatureWidgetSettings.IsEnabled(SettingsService.Settings, WidgetKind.QuickCapture) &&
+                        SettingsService.Settings.QuickCapture.QuickCaptureClipboardEnabled,
+                    () => new QuickCaptureClipboardService(SettingsService, QuickCaptureService),
+                    ex => Log($"[QuickCaptureClipboard] Stop failed: {ex}")));
             _quickCaptureSettings = new QuickCaptureSettingsCoordinator(
                 SettingsService, _quickCaptureClipboardRuntime,
                 (enabled, reveal) => WidgetManager is { } manager
@@ -1634,9 +1663,9 @@ public partial class App : Application
         else if (hadSession && _todoReminderRuntime.Current is null)
             Log("[TodoReminder] Inactive service released");
 
-        if (checkNow && _todoReminderService is { } reminderService)
+        if (checkNow)
         {
-            _ = reminderService.CheckNowAsync(DateTimeOffset.Now);
+            _ = _todoReminderRuntime.CheckCurrentAsync(DateTimeOffset.Now);
         }
 
         return _todoReminderService;
@@ -2885,8 +2914,8 @@ public partial class App : Application
                 _backupSettings ?? throw new InvalidOperationException("Backup settings are not initialized."),
                 action => UiDispatcherQueue.TryEnqueue(() => action()),
                 ex => Log($"[BackupSettings] Operation failed: {ex}")),
-            new BackupRestoreActions(SettingsService, CloudBackupService, DataBackupService,
-                ShutdownForRestartAsync),
+            _backupRestoreActions ?? throw new InvalidOperationException(
+                "Backup restore actions are not initialized."),
             _quickCaptureSettings ?? throw new InvalidOperationException("Quick Capture is not initialized."),
             _searchSettings ?? throw new InvalidOperationException("Search settings are not initialized."),
             _backupRuntime ?? throw new InvalidOperationException("Backup runtime is not initialized."));
@@ -4548,9 +4577,18 @@ public partial class App : Application
             // services, so later teardown cannot race it into disposed state,
             // while aborting would skip the settings flush and window cleanup
             // and arm the hard-exit watchdog for no benefit.
-            ShutdownStep.Bounded("backup-restore-actions", () =>
-                _settingsWindow?.StopCloudBackupActionsAsync() ?? Task.CompletedTask,
-                shutdownGrace),
+            ShutdownStep.Bounded("backup-restore-actions", async () =>
+            {
+                if (_settingsWindow is not null)
+                {
+                    await _settingsWindow.StopCloudBackupActionsAsync();
+                    return;
+                }
+                // No settings window was ever opened: the process-level
+                // restore-actions owner still gets its stop so in-flight
+                // tracked operations (including remote list reads) freeze.
+                await (_backupRestoreActions?.StopAsync() ?? Task.CompletedTask);
+            }, shutdownGrace),
             ShutdownStep.Bounded("backup-runtime", () =>
                 _backupRuntime?.StopAsync() ?? Task.CompletedTask,
                 shutdownGrace),
@@ -4594,16 +4632,24 @@ public partial class App : Application
                 }
             }),
             ShutdownStep.Sync("desktop-activation", () => { DesktopDoubleClickActivationService?.Dispose(); DesktopDoubleClickActivationService = null; }),
-            ShutdownStep.Bounded("todo-reminders", async () =>
-            {
-                if (_todoReminderRuntime is not null)
-                    await _todoReminderRuntime.DisposeAsync();
-            }, shutdownGrace, abortFollowingStepsOnTimeout: true),
+            ShutdownStep.Bounded("todo-reminders", () =>
+                _featureRuntimes?.DisposeAsync(TodoRemindersFeatureRuntimeId) ?? Task.CompletedTask,
+                shutdownGrace, abortFollowingStepsOnTimeout: true),
             ShutdownStep.Sync("notifications", () => { _nativeNotificationService?.Dispose(); _nativeNotificationService = null; }),
             ShutdownStep.Bounded("search-settings", () =>
                 _searchSettings?.StopAsync() ?? Task.CompletedTask,
                 shutdownGrace, abortFollowingStepsOnTimeout: true),
-            ShutdownStep.Sync("search-runtime", DisposeSearchServices),
+            ShutdownStep.Bounded("search-runtime", () =>
+                _featureRuntimes?.DisposeAsync(SearchFeatureRuntimeId) ?? Task.CompletedTask,
+                shutdownGrace),
+            // Registry safety net: runtimes without a dedicated step (future
+            // features) are released here in reverse registration order.
+            // Runtimes that already ran their own step are idempotent no-ops;
+            // one that cannot be disposed is reported and quarantined for
+            // leak isolation instead of blocking shutdown.
+            ShutdownStep.Bounded("feature-runtimes", () =>
+                _featureRuntimes?.DisposeAllAsync() ?? Task.CompletedTask,
+                shutdownGrace),
             // Hooks must be removed while their owning tray window still exists.
             ShutdownStep.Sync("global-hotkey", () => { GlobalHotkeyService?.Dispose(); GlobalHotkeyService = null; }),
             ShutdownStep.Sync("widgets", () => WidgetManager?.CloseAll()),
@@ -4759,14 +4805,16 @@ public partial class App : Application
             return;
         }
 
+        // The enable/disable cycle goes through the registered runtime lease;
+        // both transitions complete synchronously on the UI thread.
         if (enabled)
         {
-            EnsureSearchServices();
+            _ = _searchFeatureRuntime?.StartAsync();
             PerformanceLogger.SampleMemory("search-enabled");
             return;
         }
 
-        DisposeSearchServices();
+        _ = _searchFeatureRuntime?.DisposeAsync();
         PerformanceLogger.SampleMemory("search-disabled");
     }
 

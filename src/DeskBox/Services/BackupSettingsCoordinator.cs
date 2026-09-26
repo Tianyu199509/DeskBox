@@ -9,15 +9,17 @@ public sealed class BackupSettingsCoordinator : IBackupSettings, IDisposable
     private readonly SettingsService _settings;
     private readonly DeskBoxDataBackupService _local;
     private readonly CloudBackupService _cloud;
+    private readonly BackupRestoreActions _restoreActions;
     private readonly Action _refreshRuntimeOptions;
     private bool _disposed;
 
     internal BackupSettingsCoordinator(SettingsService settings, DeskBoxDataBackupService local,
-        CloudBackupService cloud, Action refreshRuntimeOptions)
+        CloudBackupService cloud, BackupRestoreActions restoreActions, Action refreshRuntimeOptions)
     {
         _settings = settings;
         _local = local;
         _cloud = cloud;
+        _restoreActions = restoreActions;
         _refreshRuntimeOptions = refreshRuntimeOptions;
         _cloud.BackupRunCompleted += OnUploadCompleted;
     }
@@ -136,11 +138,16 @@ public sealed class BackupSettingsCoordinator : IBackupSettings, IDisposable
     public Task ProbeAsync(BackupEndpoint endpoint, string? secretOverride, CancellationToken cancellationToken) =>
         _cloud.ProbeConnectionAsync(CurrentOptions(endpoint), secretOverride, cancellationToken);
 
+    /// <summary>
+    /// Remote inventory routed through <see cref="BackupRestoreActions"/>:
+    /// same endpoint capture and shutdown freeze as delete/download, then
+    /// mapped to the picker's snapshot rows.
+    /// </summary>
     public async Task<IReadOnlyList<BackupRemoteSnapshot>> ListAsync(
         BackupEndpoint endpoint, CancellationToken cancellationToken)
     {
-        IReadOnlyList<CloudBackupRemoteEntry> entries = await _cloud.ListRemoteSnapshotsAsync(
-            CurrentOptions(endpoint), cancellationToken);
+        IReadOnlyList<CloudBackupRemoteEntry> entries = await _restoreActions.ListSnapshotsAsync(
+            endpoint, cancellationToken);
         return entries.Select(entry => new BackupRemoteSnapshot(entry.Name, entry.Length,
             CloudBackupService.ParseSnapshotTimestamp(entry.Name))).ToArray();
     }
