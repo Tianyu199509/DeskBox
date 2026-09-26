@@ -1,6 +1,7 @@
 using System.Diagnostics;
-using System.IO.Pipes;
 using System.Security.Principal;
+using DeskBox.Platform;
+using System.IO.Pipes;
 using System.Text;
 
 namespace DeskBox.Services;
@@ -142,23 +143,23 @@ public sealed class QuickLookPreviewService
     {
         try
         {
-            IntPtr hProcess = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, processId);
+            IntPtr hProcess = QuickLookElevationNativeMethods.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, processId);
             if (hProcess == IntPtr.Zero) return false;
 
             try
             {
-                if (!OpenProcessToken(hProcess, TOKEN_QUERY, out IntPtr hToken)) return false;
+                if (!QuickLookElevationNativeMethods.OpenProcessToken(hProcess, TOKEN_QUERY, out IntPtr hToken)) return false;
                 try
                 {
-                    TOKEN_ELEVATION elevation;
-                    bool ok = GetTokenInformation(
+                    QuickLookElevationNativeMethods.TOKEN_ELEVATION elevation;
+                    bool ok = QuickLookElevationNativeMethods.GetTokenInformation(
                         hToken, TokenElevation, out elevation,
-                        (uint)System.Runtime.InteropServices.Marshal.SizeOf<TOKEN_ELEVATION>(), out _);
+                        (uint)System.Runtime.InteropServices.Marshal.SizeOf<QuickLookElevationNativeMethods.TOKEN_ELEVATION>(), out _);
                     return ok && elevation.TokenIsElevated != 0;
                 }
-                finally { CloseHandle(hToken); }
+                finally { QuickLookElevationNativeMethods.CloseHandle(hToken); }
             }
-            finally { CloseHandle(hProcess); }
+            finally { QuickLookElevationNativeMethods.CloseHandle(hProcess); }
         }
         catch { return false; }
     }
@@ -239,32 +240,6 @@ public sealed class QuickLookPreviewService
     private const uint TOKEN_QUERY = 0x0008;
     private const int TokenElevation = 20;
 
-    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
-    private struct TOKEN_ELEVATION
-    {
-        public uint TokenIsElevated;
-    }
-
-    [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
-    private static extern IntPtr OpenProcess(
-        uint dwDesiredAccess,
-        bool bInheritHandle,
-        int dwProcessId);
-
-    [System.Runtime.InteropServices.DllImport("kernel32.dll", SetLastError = true)]
-    private static extern bool CloseHandle(IntPtr hObject);
-
-    [System.Runtime.InteropServices.DllImport("advapi32.dll", SetLastError = true)]
-    private static extern bool OpenProcessToken(
-        IntPtr ProcessHandle,
-        uint DesiredAccess,
-        out IntPtr TokenHandle);
-
-    [System.Runtime.InteropServices.DllImport("advapi32.dll", SetLastError = true)]
-    private static extern bool GetTokenInformation(
-        IntPtr TokenHandle,
-        int TokenInformationClass,
-        out TOKEN_ELEVATION TokenInformation,
-        uint TokenInformationLength,
-        out uint ReturnLength);
+    // kernel32/advapi32 elevation entry points live in
+    // DeskBox.Platform.QuickLookElevationNativeMethods.
 }

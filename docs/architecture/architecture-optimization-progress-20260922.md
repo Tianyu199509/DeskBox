@@ -576,6 +576,42 @@ A+B 工作树已补齐最终 QuickCapture 退出/快捷入口和 Todo 非有限�
 
 审计遗留 P3-2 收口。目标口径：全局 `SettingsChanged` 无参数广播导致 `TodoSettingsCoordinator.OnSettingsChanged` 在每次防抖保存（如拖动外观滑块每秒一次）都重入提醒协调。评估后取**协调器侧变更检测守卫**而非全量事件参数化：其余订阅者（QuickCapture/Search/WidgetManager/备份）早已自带缓存比较守卫，事件签名改造是一天级宽 API 动而收益仅剩提醒一处。守卫缓存四个提醒相关输入（TodoEnabled、TodoReminderEnabled、默认提前分钟、Todo 格子 ID 集合），无变化即跳过；首次通知仍重入（覆盖恢复/默认值路径）。新增三条测试：无关保存零重入、提醒开关变化重入、Todo 格子增删重入。事件参数化留作触发项：出现第二个必须依赖切片信息的消费者时再立法。
 
+<<<<<<< HEAD
+## 第三十一批：Platform P/Invoke 主动全迁（Track C）
+
+Simon 拍板放弃"随触碰 ratchet"，对 Platform 域的 DllImport/LibraryImport 存量做一次性主动全迁（与 2026-09-18 路线图"不做一次性大搬家"的原始口径就此收口）。实施基线：`688d7d67`（origin/main，worktree `codex/final-platform-pinvoke`）。行为零变化：只做声明搬家/抽取，DllImport 特性、字符集、SetLastError 错误位、签名逐字保留；调用语义、线程模型、错误处理不动。
+
+计数对账（ratchet 口径，文件→调用点）：立法日 2026-09-18 为 **41 文件 / 260 调用点**（路线图口径）；历经各批收缩后本批起点（origin/main）为 **14 文件 / 99 调用点**（任务简报中的 41→26 为撰写时点快照，26 在中间批已继续下降）；本批完成后 **0 文件 / 0 调用点**——`PlatformInterop_StaysInsideThePlatformDomain` 自此成为硬零法，新增 P/Invoke 只能落 `DeskBox.Platform`。Platform 域内现有 26 个文件 / 约 270 处声明。
+
+迁移清单（14 文件：1 整迁 + 1 整类迁 + 12 抽取）：
+
+| 原文件 | 计数 | 方式 | 去向（DeskBox.Platform） |
+| --- | --- | --- | --- |
+| Helpers/NativeDropDescriptionWriter.cs | 7 | 整文件迁 | Platform/NativeDropDescriptionWriter.cs |
+| Views/ContentWidgetWindow.AotNativeDropSmoke.cs（尾部 AotNativeDropWin32 类） | 4 | 整类迁（保留 `#if DESKBOX_NATIVE_AOT` 门控） | Platform/AotNativeDropWin32.cs |
+| App.xaml.cs | 10 | 抽取 | Platform/ProcessDiagnosticsNativeMethods.cs（含 ProcessEntry32/TokenElevation/TokenMandatoryLabel/SidAndAttributes/TokenInformationClass） |
+| Services/DragDropPermissionService.cs | 13 | 抽取 | Platform/DragDropPermissionNativeMethods.cs（含 StartupInfo/ProcessInformation 及 token 结构） |
+| Helpers/NativeDropTarget.cs | 12 | 抽取 | Platform/OleDropTargetNativeMethods.cs |
+| Helpers/ShellClipboardHelper.cs | 12 | 抽取 | Platform/ClipboardNativeMethods.cs |
+| Helpers/ElevatedFileLauncher.cs | 7 | 抽取 | Platform/ElevatedLaunchNativeMethods.cs（含 ShellExecuteInfo/TokenElevation） |
+| Services/FileService.cs | 6 | 抽取 | Platform/FileTransferNativeMethods.cs（含 ShFileOperation/ByHandleFileInformation/FileDispositionInfo/FileBasicInfo/FileIdInfo） |
+| Services/DesktopBlankHitTest.cs | 6 | 抽取 | Platform/RemoteProcessMemoryNativeMethods.cs |
+| Services/FileService.ShellTransfer.cs | 5 | 抽取 | Platform/FileOperationNativeMethods.cs |
+| Helpers/ShellDataObjectBuilder.cs | 5 | 抽取 | Platform/HdropDataObjectNativeMethods.cs |
+| Controls/NativeShellFileDragProvider.cs | 4 | 抽取 | Platform/ShellItemDragNativeMethods.cs |
+| Services/JumpListService.cs | 4 | 抽取 | Platform/JumpListNativeMethods.cs（PropertyKey/IPropertyStore COM 侧留在原处） |
+| Services/QuickLookPreviewService.cs | 4 | 抽取 | Platform/QuickLookElevationNativeMethods.cs |
+
+抽取原则：纯 native interop 帮助类整迁；业务混合类只把 P/Invoke 声明与其签名直接引用的封送结构搬进 Platform（`private`→`internal`），业务侧调用点加类名限定。NativeDropTarget/DesktopBlankHitTest 的破坏性文件操作计数（Destructive manifest）不受影响——文件留在原命名空间，File/Directory 调用未动。
+
+棘轮与钉同步：
+
+- `ModuleBoundaryContractTests.PlatformInteropExpectedViolations` 清空（14 条→0），测试转为硬零法；Destructive 清单无需变化（NativeDropTarget.cs = 5 等条目所在文件未迁走、调用未动）。
+- `NativeDropVisualContractTests`：NativeDropDescriptionWriter 的 2 处路径钉 Helpers→Platform；`NativeDropDescriptionWriterTests` 补 `using DeskBox.Platform`。
+- AOT 文本钉逐一复核未破坏：`SHFileOperation(ref operation/fileOperation)`（AotStage4D2/5B4C1B1/5B4C1B2A 与 publish-aot-audit.ps1 5984/6269 行）——调用文本加限定后子串保留；`GlobalAlloc(`（AotStage5B4C1C2A 探针钉）同理保留；AotRetailIsolation 的烟具清单 61 个与排除模式列表不变（新 Platform 文件不匹配 `*.Aot*Smoke.cs`，且保留 `#if DESKBOX_NATIVE_AOT` 门控，retail 烟具移除后无引用可裁）。
+
+验证记录：restore Updater 后 build x64 0 错误；全量单测 4,252/4,252 全绿；AOT 定义编译检查（DESKBOX_NATIVE_AOT）0 错误；隔离 Debug 启动烟测通过。`grep DllImport|LibraryImport` 非 Platform 命中 0。
+=======
 ## 第三十批：设备层迁移收口核验（2B 剩余项，提前纳入完全拆完）
 
 实施基线：`688d7d67`（main）。本批对象是路线图 §2B 标记的最后一项剩余——格子布局/拓扑 → 设备域 store（原定云同步立项触发，Simon 拍板提前）。**对码结论：迁移本体已随 `b8dfb443`（2026-09-19）及四轮加固（`0b66db18`/`ed5b5a52`/`8319db1e`/`1d598f90`/`4378134c`）进入 main，路线图"剩余 ~330 处"的记载滞后于实况**；本批做全量收口核验、补齐演练契约与文档对账，未发现需要修复的产品缺陷。
@@ -599,3 +635,4 @@ store 设计（在库现状，非本批新写）：`DeskBox.Core.Persistence.Wid
 - AOT 定义编译检查（`DESKBOX_NATIVE_AOT` DefineConstants）0 错误、22 警告；canonical Debug 构建 0 错误。
 - 隔离 Debug 启动演练（2026-09-26 晚，数据根 `device-layer-batch30-20260926-7f3a1c`，DESKBOX_DEV_DATA_ROOT，仓库唯一实例 PID 4104→45084，路径 `src/DeskBox/bin/Debug/net10.0-windows10.0.22621.0/DeskBox.exe`）：预置 2 组 4 成员+1 独立文件格子（真实映射文件夹）+双拓扑档案+墓碑的旧 settings.json→首启 36 步 0 degraded / 0 failed，两组表面以真实 HWND 呈现且成员切换正常（surface-a 0x1410E10 / surface-b 0xCF166A），磁盘上 `widget-layout.json` 生成且完整承载 5 格子/2 组/双拓扑/墓碑/功能态，settings.json 11 键全部清空；强制结束→重启同数据根，36 步 0 degraded / 0 failed，组/成员/拓扑/墓碑保持，settings 保持清空，无 corrupt 残留。演练中一次预置错误（非法 `viewMode` 枚举值）被既有 fail-closed 机制正确拦截（settings 整体隔离为 `.corrupt-*` 留证），顺带验证了损坏路径。测试实例已结束，未触碰生产数据根与并行代理实例。
 - `git diff --check` 通过；未推送。路线图 §2B 状态同步更新（2B-3 条目 + 节奏建议行）。
+>>>>>>> origin/main

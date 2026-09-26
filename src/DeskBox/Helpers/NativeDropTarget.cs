@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 using System.Runtime.InteropServices.ComTypes;
+using DeskBox.Platform;
 using DeskBox.Services;
 
 namespace DeskBox.Helpers;
@@ -100,46 +101,8 @@ public sealed class NativeDropTarget : IDisposable
         "shell:::{4234d49b-0245-4df3-b780-3893943456e1}\\";
 
     // ── P/Invoke ──
-
-    [DllImport("ole32.dll")]
-    private static extern int OleInitialize(IntPtr reserved);
-
-    [DllImport("ole32.dll")]
-    private static extern void OleUninitialize();
-
-    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
-    private static extern uint RegisterClipboardFormatW(string lpszFormat);
-
-    [DllImport("ole32.dll")]
-    private static extern void ReleaseStgMedium(ref NativeStorageMedium medium);
-
-    [DllImport("ole32.dll")]
-    private static extern void CoTaskMemFree(IntPtr value);
-
-    [DllImport("kernel32.dll")]
-    private static extern IntPtr GlobalLock(IntPtr hMem);
-
-    [DllImport("kernel32.dll")]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static extern bool GlobalUnlock(IntPtr hMem);
-
-    [DllImport("kernel32.dll")]
-    private static extern IntPtr GlobalSize(IntPtr hMem);
-
-    [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
-    private static extern uint DragQueryFile(IntPtr hDrop, uint fileIndex, System.Text.StringBuilder? fileName, uint bufferSize);
-
-    [DllImport("shell32.dll")]
-    private static extern IntPtr ILCombine(IntPtr parent, IntPtr child);
-
-    [DllImport("shell32.dll")]
-    private static extern void ILFree(IntPtr itemIdList);
-
-    [DllImport("shell32.dll", PreserveSig = true)]
-    private static extern int SHGetNameFromIDList(
-        IntPtr itemIdList,
-        uint displayNameType,
-        out IntPtr displayName);
+    // ole32/user32/kernel32/shell32 entry points live in
+    // DeskBox.Platform.OleDropTargetNativeMethods.
 
     private const uint CF_HDROP = 15;
     private static readonly ushort s_fileGroupDescriptorFormat;
@@ -252,15 +215,15 @@ public sealed class NativeDropTarget : IDisposable
 
     static NativeDropTarget()
     {
-        s_fileGroupDescriptorFormat = (ushort)RegisterClipboardFormatW("FileGroupDescriptorW");
-        s_fileContentsFormat = (ushort)RegisterClipboardFormatW("FileContents");
-        s_shellIdListFormat = (ushort)RegisterClipboardFormatW("Shell IDList Array");
+        s_fileGroupDescriptorFormat = (ushort)OleDropTargetNativeMethods.RegisterClipboardFormatW("FileGroupDescriptorW");
+        s_fileContentsFormat = (ushort)OleDropTargetNativeMethods.RegisterClipboardFormatW("FileContents");
+        s_shellIdListFormat = (ushort)OleDropTargetNativeMethods.RegisterClipboardFormatW("Shell IDList Array");
 
         // Ensure OLE is initialized (WinUI 3 usually does this, but call
         // again is harmless if already initialized).
         try
         {
-            OleInitialize(IntPtr.Zero);
+            OleDropTargetNativeMethods.OleInitialize(IntPtr.Zero);
         }
         catch
         {
@@ -877,7 +840,7 @@ public sealed class NativeDropTarget : IDisposable
             }
             finally
             {
-                ReleaseStgMedium(ref medium);
+                OleDropTargetNativeMethods.ReleaseStgMedium(ref medium);
             }
         }
         catch (Exception ex)
@@ -924,7 +887,7 @@ public sealed class NativeDropTarget : IDisposable
             }
             finally
             {
-                ReleaseStgMedium(ref medium);
+                OleDropTargetNativeMethods.ReleaseStgMedium(ref medium);
             }
         }
         catch
@@ -991,7 +954,7 @@ public sealed class NativeDropTarget : IDisposable
                 }
                 finally
                 {
-                    ReleaseStgMedium(ref medium);
+                    OleDropTargetNativeMethods.ReleaseStgMedium(ref medium);
                 }
             }
 
@@ -1039,7 +1002,7 @@ public sealed class NativeDropTarget : IDisposable
             }
             finally
             {
-                ReleaseStgMedium(ref medium);
+                OleDropTargetNativeMethods.ReleaseStgMedium(ref medium);
             }
 
             return MaterializeShellApplicationShortcuts(applications);
@@ -1055,14 +1018,14 @@ public sealed class NativeDropTarget : IDisposable
     private static IReadOnlyList<ShellApplicationDropItem>
         ReadShellApplicationDropItems(IntPtr shellIdListHandle)
     {
-        long bufferSize = GlobalSize(shellIdListHandle).ToInt64();
+        long bufferSize = OleDropTargetNativeMethods.GlobalSize(shellIdListHandle).ToInt64();
         if (bufferSize < sizeof(uint) + (2 * sizeof(uint)) ||
             bufferSize > int.MaxValue)
         {
             return [];
         }
 
-        IntPtr bufferStart = GlobalLock(shellIdListHandle);
+        IntPtr bufferStart = OleDropTargetNativeMethods.GlobalLock(shellIdListHandle);
         if (bufferStart == IntPtr.Zero)
         {
             return [];
@@ -1115,7 +1078,7 @@ public sealed class NativeDropTarget : IDisposable
                     continue;
                 }
 
-                IntPtr absolutePidl = ILCombine(parentPidl, childPidl);
+                IntPtr absolutePidl = OleDropTargetNativeMethods.ILCombine(parentPidl, childPidl);
                 if (absolutePidl == IntPtr.Zero)
                 {
                     continue;
@@ -1148,7 +1111,7 @@ public sealed class NativeDropTarget : IDisposable
                 }
                 finally
                 {
-                    ILFree(absolutePidl);
+                    OleDropTargetNativeMethods.ILFree(absolutePidl);
                 }
             }
 
@@ -1156,7 +1119,7 @@ public sealed class NativeDropTarget : IDisposable
         }
         finally
         {
-            _ = GlobalUnlock(shellIdListHandle);
+            _ = OleDropTargetNativeMethods.GlobalUnlock(shellIdListHandle);
         }
     }
 
@@ -1212,7 +1175,7 @@ public sealed class NativeDropTarget : IDisposable
         uint displayNameType)
     {
         IntPtr value = IntPtr.Zero;
-        int hresult = SHGetNameFromIDList(
+        int hresult = OleDropTargetNativeMethods.SHGetNameFromIDList(
             itemIdList,
             displayNameType,
             out value);
@@ -1227,7 +1190,7 @@ public sealed class NativeDropTarget : IDisposable
         }
         finally
         {
-            CoTaskMemFree(value);
+            OleDropTargetNativeMethods.CoTaskMemFree(value);
         }
     }
 
@@ -1325,17 +1288,17 @@ public sealed class NativeDropTarget : IDisposable
     private static IReadOnlyList<string> GetDroppedFiles(IntPtr hDrop)
     {
         var paths = new List<string>();
-        uint count = DragQueryFile(hDrop, 0xFFFFFFFF, null, 0);
+        uint count = OleDropTargetNativeMethods.DragQueryFile(hDrop, 0xFFFFFFFF, null, 0);
         for (uint i = 0; i < count; i++)
         {
-            uint length = DragQueryFile(hDrop, i, null, 0);
+            uint length = OleDropTargetNativeMethods.DragQueryFile(hDrop, i, null, 0);
             if (length == 0)
             {
                 continue;
             }
 
             var builder = new System.Text.StringBuilder((int)length + 1);
-            uint copied = DragQueryFile(hDrop, i, builder, (uint)builder.Capacity);
+            uint copied = OleDropTargetNativeMethods.DragQueryFile(hDrop, i, builder, (uint)builder.Capacity);
             if (copied > 0)
             {
                 paths.Add(builder.ToString());
@@ -1370,7 +1333,7 @@ public sealed class NativeDropTarget : IDisposable
         }
         finally
         {
-            ReleaseStgMedium(ref descriptorMedium);
+            OleDropTargetNativeMethods.ReleaseStgMedium(ref descriptorMedium);
         }
 
         if (descriptors.Count == 0)
@@ -1443,8 +1406,8 @@ public sealed class NativeDropTarget : IDisposable
 
     internal static List<FILEDESCRIPTORW> ReadVirtualFileDescriptors(IntPtr descriptorHandle)
     {
-        long bufferSize = GlobalSize(descriptorHandle).ToInt64();
-        IntPtr pointer = GlobalLock(descriptorHandle);
+        long bufferSize = OleDropTargetNativeMethods.GlobalSize(descriptorHandle).ToInt64();
+        IntPtr pointer = OleDropTargetNativeMethods.GlobalLock(descriptorHandle);
         if (pointer == IntPtr.Zero)
         {
             return [];
@@ -1494,7 +1457,7 @@ public sealed class NativeDropTarget : IDisposable
         }
         finally
         {
-            GlobalUnlock(descriptorHandle);
+            OleDropTargetNativeMethods.GlobalUnlock(descriptorHandle);
         }
     }
 
@@ -1535,7 +1498,7 @@ public sealed class NativeDropTarget : IDisposable
             // different tymed (GetData may have set unionMember on failure).
             if (contentsMedium.Content != IntPtr.Zero)
             {
-                ReleaseStgMedium(ref contentsMedium);
+                OleDropTargetNativeMethods.ReleaseStgMedium(ref contentsMedium);
                 contentsMedium = default;
             }
         }
@@ -1583,7 +1546,7 @@ public sealed class NativeDropTarget : IDisposable
         }
         finally
         {
-            ReleaseStgMedium(ref contentsMedium);
+            OleDropTargetNativeMethods.ReleaseStgMedium(ref contentsMedium);
         }
     }
 
@@ -1610,7 +1573,7 @@ public sealed class NativeDropTarget : IDisposable
 
     private static void SaveGlobalMemory(IntPtr memoryHandle, string destinationPath, ref long remainingBudgetBytes)
     {
-        long size = GlobalSize(memoryHandle).ToInt64();
+        long size = OleDropTargetNativeMethods.GlobalSize(memoryHandle).ToInt64();
         if (size < 0 || size > int.MaxValue)
         {
             throw new IOException("Virtual file memory payload is too large.");
@@ -1623,7 +1586,7 @@ public sealed class NativeDropTarget : IDisposable
                 $"Virtual file memory payload of {size} bytes exceeds the budget.");
         }
 
-        IntPtr pointer = GlobalLock(memoryHandle);
+        IntPtr pointer = OleDropTargetNativeMethods.GlobalLock(memoryHandle);
         if (pointer == IntPtr.Zero)
         {
             throw new IOException("Could not lock virtual file memory payload.");
@@ -1638,7 +1601,7 @@ public sealed class NativeDropTarget : IDisposable
         }
         finally
         {
-            GlobalUnlock(memoryHandle);
+            OleDropTargetNativeMethods.GlobalUnlock(memoryHandle);
         }
     }
 }
