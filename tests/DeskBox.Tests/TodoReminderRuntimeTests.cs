@@ -17,7 +17,7 @@ public sealed class TodoReminderRuntimeTests
             var session = new FakeSession();
             sessions.Add(session);
             return session;
-        });
+        }, () => Active);
 
         for (int i = 0; i < 5; i++) runtime.Reconcile(Active);
         Assert.Single(sessions);
@@ -40,7 +40,7 @@ public sealed class TodoReminderRuntimeTests
         var failed = new FakeSession { FailStart = true };
         var healthy = new FakeSession();
         int attempts = 0;
-        await using var runtime = new TodoReminderRuntime(() => ++attempts == 1 ? failed : healthy);
+        await using var runtime = new TodoReminderRuntime(() => ++attempts == 1 ? failed : healthy, () => Active);
 
         Assert.Throws<InvalidOperationException>(() => runtime.Reconcile(Active));
         Assert.Null(runtime.Current);
@@ -56,7 +56,7 @@ public sealed class TodoReminderRuntimeTests
     {
         var drain = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var session = new FakeSession { Drain = drain.Task };
-        var runtime = new TodoReminderRuntime(() => session);
+        var runtime = new TodoReminderRuntime(() => session, () => Active);
         runtime.Reconcile(Active);
         runtime.Reconcile(Active with { Enabled = false });
 
@@ -78,7 +78,7 @@ public sealed class TodoReminderRuntimeTests
     {
         var drain = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var session = new FakeSession { Drain = drain.Task };
-        var runtime = new TodoReminderRuntime(() => session);
+        var runtime = new TodoReminderRuntime(() => session, () => Active);
         runtime.Reconcile(Active);
         bool notificationsDisposed = false;
         var shutdown = new ShutdownSequence(_ => { });
@@ -105,7 +105,7 @@ public sealed class TodoReminderRuntimeTests
     public async Task AuditOverride_DoesNotChangeDisabledProductPreferences()
     {
         var session = new FakeSession();
-        await using var runtime = new TodoReminderRuntime(() => session);
+        await using var runtime = new TodoReminderRuntime(() => session, () => Active);
         var disabled = Active with { RemindersEnabled = false };
         runtime.Reconcile(disabled);
         Assert.Null(runtime.Current);

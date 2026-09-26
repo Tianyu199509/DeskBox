@@ -51,13 +51,13 @@ public sealed class TodoSettingsCoordinatorTests : IDisposable
         settings.Settings.Todo.TodoReminderEnabled = false;
         settings.Settings.Todo.TodoDefaultReminderOffsetMinutes = 30;
         var sessions = new List<RecordingReminderSession>();
+        TodoSettingsCoordinator? coordinator = null;
         await using var runtime = new TodoReminderRuntime(() =>
         {
             var session = new RecordingReminderSession();
             sessions.Add(session);
             return session;
-        });
-        TodoSettingsCoordinator? coordinator = null;
+        }, () => coordinator!.Read());
         coordinator = new TodoSettingsCoordinator(settings,
             refreshReminders: _ => runtime.Reconcile(coordinator!.Read()));
         using var editor = new TodoSettingsViewModel(coordinator, _ => { });

@@ -52,6 +52,18 @@ public sealed class BackupRestoreActions
         }, cancellationToken);
     }
 
+    /// <summary>
+    /// Remote inventory (PROPFIND) for the restore picker. Read-only, but it
+    /// goes through the same endpoint capture and stop freeze as the
+    /// destructive actions so a list read cannot outlive shutdown.
+    /// </summary>
+    internal Task<IReadOnlyList<CloudBackupRemoteEntry>> ListSnapshotsAsync(
+        BackupEndpoint endpoint, CancellationToken cancellationToken = default)
+    {
+        CloudBackupOptions options = CaptureCurrent(endpoint);
+        return TrackAsync(token => _cloud.ListRemoteSnapshotsAsync(options, token), cancellationToken);
+    }
+
     public Task<string> DownloadSnapshotAsync(BackupEndpoint endpoint, string name, string directory,
         CancellationToken cancellationToken = default)
     {

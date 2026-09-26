@@ -575,3 +575,32 @@ A+B 工作树已补齐最终 QuickCapture 退出/快捷入口和 Todo 非有限�
 ## 第二十八批：提醒重入的切片收窄
 
 审计遗留 P3-2 收口。目标口径：全局 `SettingsChanged` 无参数广播导致 `TodoSettingsCoordinator.OnSettingsChanged` 在每次防抖保存（如拖动外观滑块每秒一次）都重入提醒协调。评估后取**协调器侧变更检测守卫**而非全量事件参数化：其余订阅者（QuickCapture/Search/WidgetManager/备份）早已自带缓存比较守卫，事件签名改造是一天级宽 API 动而收益仅剩提醒一处。守卫缓存四个提醒相关输入（TodoEnabled、TodoReminderEnabled、默认提前分钟、Todo 格子 ID 集合），无变化即跳过；首次通知仍重入（覆盖恢复/默认值路径）。新增三条测试：无关保存零重入、提醒开关变化重入、Todo 格子增删重入。事件参数化留作触发项：出现第二个必须依赖切片信息的消费者时再立法。
+
+## 第三十二批：IFeatureRuntime 正式化与两项残余收口
+
+实施基线：`688d7d67`（main）。本批把路线图 §2 的功能运行时租约从"手写等价语义"升为正式契约，并收掉第 25 批文档化的远端列表残余与 App 装配区的功能分支清点。行为零变化：三个运行时的既有幂等/取消/串行语义原样保留，接口适配层为薄封装。
+
+**接口（`Contracts/IFeatureRuntime.cs`）**：`IFeatureRuntime : IAsyncDisposable`，仅 `StartAsync(CancellationToken)` 一个新成员。状态机语义以 XML 契约注释立法：①幂等——重复 Start 不建第二份租约、重复 Dispose 不是二次释放；②Start 可取消且失败按获取逆序回收已建资源（不留半租约）；③Dispose 与进行中的 Start 竞争按状态机串行（Start 完成→Dispose，或 Start 取消→Dispose），不允许并发交错；④Dispose 不得无限阻塞宿主关闭——宿主持有期限、记诊断并把未回收运行时计入泄漏隔离清单。明确不是 PowerToys 式模块生命周期；不持长生命周期资源的功能不实现。
+
+**三个实现（形式化封装，不重设计）**：
+
+- `Features/Todo/TodoReminderRuntime`：`StartAsync` = 按当前设置的 `Reconcile`（协调器同一路径，构造函数新增 `readSettings` 读取器）；DisposeAsync 原有停止+排空；`_stopped` 守卫即终态语义。失败候选的回收（逆序回滚）为既有行为。
+- `Features/QuickCapture/QuickCaptureClipboardRuntime`：`StartAsync` = `Refresh()`（按当前设置创建/刷新唯一监听）；`DisposeAsync` = 既有幂等 `StopAsync`（缓存任务）。
+- `Features/Search/SearchFeatureRuntime`（新）：App 持有的第 6 批启停链（`EnsureSearchServices`/`DisposeSearchServices`）之上的委托适配器。链自身的幂等与部分失败回收保持权威；适配器加 `_started` 旗标使注册表级重复调用与清扫为 no-op。`SetSearchFeatureEnabled`（设置协调器注入的启停回调）改经适配器，enable/disable 循环与关停释放同一条契约路径。
+
+**App 侧所有权（`Services/FeatureRuntimeRegistry`，新）**：注册表登记 `search`/`quick-capture`/`todo-reminders` 三个运行时实例（键与退出步同名），提供 `TryGet` 借用、按 id 释放、`DisposeAllAsync` 反向注册序兜底清扫（与契约的逆获取序回收一致；单运行时故障记 `[FeatureRuntimes] '...' ... quarantined for leak isolation` 诊断后跳过，不阻塞其余释放）。退出序列：`todo-reminders` 与 `search-runtime` 两步改经注册表解析（语义同前）；`search-runtime` 之后新增 `feature-runtimes` 兜底清扫步（`ShutdownStep.Bounded`，现有三运行时在此均为幂等 no-op，为未来无专属步骤的运行时立安全网）。装配区创建注册表并注册三个实例；协调器构造注入是装配期注入而非调用方缓存。
+
+**共享契约测试（`tests/DeskBox.Tests/FeatureRuntimeContractTests.cs`）**：接口级状态机测试以 Theory 同时跑四个用例——全 gated 的多资源 Fake（立法本体）+ 三个生产运行时的薄用例适配。断言：重复 Start 单租约、预取消 token 零获取、重复 Dispose 单次释放、部分失败无残留租约且可重试；Fake 专属断言逆序回收与 Dispose/Start 竞争串行（Start 完成→Dispose、Start 取消→Dispose 两序）；Search 专属断言 enable/disable 循环（释放后可再 Start）。生产运行时在自有 UI 线程上的串行边界无法从测试线程证明，由 Fake 的门控转换测试代替钉住，功能级既有测试保留不动。`FeatureRuntimeRegistryTests` 钉注册表：注册/借用/重复键拒绝、按 id 定向释放、反向注册序清扫与故障隔离。
+
+**残余一（第 25 批文档化项）**：备份设置页的远端 PROPFIND/列表读从 `BackupSettingsCoordinator.ListAsync` 直连 `CloudBackupService` 改经 `BackupRestoreActions.ListSnapshotsAsync`（internal）——同一 `CaptureCurrent` 端点校验、同一 `TrackAsync`/`StopAsync` 冻结语义，与删除/下载一致；`IBackupSettings.ListAsync` 端口不变，页面取消链不变。`BackupRestoreActions` 由设置窗口每次新建改为 App 启动时创建的单实例（设置窗口借用；未开过窗口时 `backup-restore-actions` 退出步也补了无窗口分支的 Stop）。新增测试：列表经登记路径返回条目、端点漂移拒绝、StopAsync 后列表拒绝。
+
+**残余二（App.xaml.cs 功能分支清点）**：grep 清点后归四类——①Todo 通知激活链（常量、路由、snooze 确认、原生/托盘通知呈现、`CreateTodoReminderService` 工厂）：宿主适配（原生通知+托盘回退+WidgetManager 交互），第 1 批所有权表本就归 App，保留；②搜索结果动作/内容分发（`HandleSearchContentAsync`/`HandleSearchActionAsync` 的 Todo/QuickCapture 分支）：功能分支可挪 `WidgetManager.RevealSearchResultAsync`，但 WidgetManager 属并行轨道文件且 Features 层按边界法不能引 Services，列入清单建议后续随 WidgetManager 触碰时收编；③启动期功能门（search-shell/todo-reminders/quick-capture-clipboard 三步）：启动管线契约测试钉住步骤名，保留，search-shell 可在未来触碰启动管线时改经注册表 StartAsync；④备份设置回调与未验证上传 toast 策略：薄委托+一次性提示策略，随 BackupRuntime 触碰时评估。**本批实际小挪**：Todo"立即检查"（`CheckNowAsync` 触发）从 App 移入 `TodoReminderRuntime.CheckCurrentAsync`，App 只传用户意图；退出步经注册表解析替代两处直接字段调用。
+
+验证记录：
+
+- 定向测试（契约/注册表/三运行时/备份传输/边界/启动韧性/关停序列）172/172 通过。
+- 全量 x64 测试 **4,277/4,277** 通过（main 基线 4,252 + 本批 25 个新用例：契约 Theory 16 + Fake/Search 专属 4 + 注册表 4 + 列表登记 1）。
+- AOT 定义编译检查（`DESKBOX_NATIVE_AOT` DefineConstants、x64、`ArtifactsPath`/`RestorePackagesPath` 隔离于 `.aotcheck/`，仓库主 obj 与锁文件未受影响）：11 警告、**0 错误**。未执行 Native AOT publish/link 或发布包运行，仍为发版门禁。
+- canonical Debug 构建 0 错误（警告均为既有位置：CS0108/CS0414/CS0169/CS8602 与 WinUI 可空性，无本批新文件告警）。
+- 隔离 Debug 启动：数据根 `C:/Users/simon/AppData/Local/DeskBox-Dev/final-feature-runtime-20260926-d32`，核验进程 PID 45132，路径为 `D:/project/wingezi-final-d/src/DeskBox/bin/Debug/net10.0-windows10.0.22621.0/DeskBox.exe`（本工作树唯一实例）；启动 **36 步、0 degraded、0 failed**，默认态 Search 未初始化服务（符合禁用路径），外部状态恢复完成，正常关闭退出（本工作树实例计数归零）。三个功能的开关循环由 SearchCase/接口级用例与既有功能级测试覆盖（真实 UI 点击仍属人工验收）。
+- `git diff --check` 通过；未提交推送（本记录随提交一并入库）。
