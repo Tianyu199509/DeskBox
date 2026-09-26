@@ -292,7 +292,6 @@ public sealed class SettingsSliceOwnershipContractTests
         ["src/DeskBox/ViewModels/QuickCaptureWidgetViewModel.SettingsAndRefresh.cs"] = 14,
         ["src/DeskBox/ViewModels/QuickCaptureWidgetViewModel.cs"] = 17,
         ["src/DeskBox/ViewModels/SearchPopupViewModel.cs"] = 13,
-        ["src/DeskBox/ViewModels/SettingsViewModel.AboutAndUpdates.cs"] = 1,
         // Batch 29 moved the appearance section writes into
         // AppearanceSettingsCoordinator; AppearanceCallbacks reached zero and
         // lost its entry. Batch 33 moved the capsule/compact section writes
@@ -323,7 +322,11 @@ public sealed class SettingsSliceOwnershipContractTests
         // 24->10, only the constructor/snapshot reads remain). FeatureOptions
         // 68->2: both remaining matches are localization-key string literals
         // ("Settings.AttachmentStorageMode.Copy"/".Link"), not facade
-        // accesses.
+        // accesses. Batch 39 moved the storage/diagnostics tail writes into
+        // ManagedStorageSettingsCoordinator and MaintenanceSettingsCoordinator
+        // (AboutAndUpdates 1->0 and lost its entry; PreferenceCommands 2->1,
+        // only the ResizeSnapEnabled read of the restore-defaults
+        // guide-overlay sync remains).
         ["src/DeskBox/ViewModels/SettingsViewModel.AppearanceOptions.cs"] = 1,
         ["src/DeskBox/ViewModels/SettingsViewModel.CapsuleOptions.cs"] = 20,
         ["src/DeskBox/ViewModels/SettingsViewModel.ContentEditorOptions.cs"] = 10,
@@ -340,7 +343,7 @@ public sealed class SettingsSliceOwnershipContractTests
         ["src/DeskBox/ViewModels/SettingsViewModel.GroupNavigation.cs"] = 20,
         ["src/DeskBox/ViewModels/SettingsViewModel.HotkeyAndStorage.cs"] = 6,
         ["src/DeskBox/ViewModels/SettingsViewModel.Performance.cs"] = 11,
-        ["src/DeskBox/ViewModels/SettingsViewModel.PreferenceCommands.cs"] = 2,
+        ["src/DeskBox/ViewModels/SettingsViewModel.PreferenceCommands.cs"] = 1,
         ["src/DeskBox/ViewModels/SettingsViewModel.RuntimeDiagnostics.cs"] = 1,
         ["src/DeskBox/ViewModels/SettingsViewModel.SettingsSync.cs"] = 133,
         ["src/DeskBox/ViewModels/SettingsViewModel.WeatherOptions.cs"] = 1,

@@ -115,6 +115,15 @@ public sealed class FeatureSettingsBoundaryContractTests
         // quickCaptureWrite gate above.
         Regex featureSectionWrite = new(
             @"\b(?:_settingsService\s*\.\s*Settings|settings)\s*\.\s*(?:Music\s*\.\s*|Weather\s*\.\s*|QuickCapture\s*\.\s*|FileWidget\s*\.\s*)?(?:MusicUseArtworkBackdrop|MusicEnableCoverHoverMotion|MusicDisplayMode|WeatherDataSource|WeatherAutoLocation|WeatherCityName|WeatherLatitude|WeatherLongitude|WeatherTemperatureUnit|WeatherWindSpeedUnit|WeatherDefaultView|WeatherSkin|WeatherShowForecast|WeatherShowSunrise|WeatherShowUvIndex|WeatherShowPrecipitation|WeatherShowHumidity|WeatherShowWind|WeatherShowPressure|WeatherRefreshIntervalMinutes|AttachmentStorageMode|ManagedDropAction|FileWidgetFolderOpenBehavior)\s*=(?!=)");
+        // Batch 39: the managed-storage root-path commit — the write that
+        // follows the host's WidgetManager storage migration chain — and the
+        // maintenance-domain update-check timestamp stamp write through
+        // ManagedStorageSettingsCoordinator and
+        // MaintenanceSettingsCoordinator respectively.
+        Regex managedStorageWrite = new(
+            @"\b(?:_settingsService\s*\.\s*Settings|settings)\s*\.\s*(?:FileWidget\s*\.\s*)?DefaultManagedStorageRootPath\s*=(?!=)");
+        Regex maintenanceWrite = new(
+            @"\b(?:_settingsService\s*\.\s*Settings|settings)\s*\.\s*(?:Core\s*\.\s*)?LastUpdateCheckAt\s*=(?!=)");
         (string Path, string Source)[] pages = ProductionSource()
             .Where(item => item.Path.StartsWith(
                     "src/DeskBox/ViewModels/SettingsViewModel", StringComparison.Ordinal) &&
@@ -130,6 +139,8 @@ public sealed class FeatureSettingsBoundaryContractTests
                     .Concat(fileStackWrite.Matches(item.Source).Cast<Match>())
                     .Concat(groupNavigationWrite.Matches(item.Source).Cast<Match>())
                     .Concat(featureSectionWrite.Matches(item.Source).Cast<Match>())
+                    .Concat(managedStorageWrite.Matches(item.Source).Cast<Match>())
+                    .Concat(maintenanceWrite.Matches(item.Source).Cast<Match>())
                     .Select(match => $"{item.Path}: {match.Value}"))
             .ToArray();
 

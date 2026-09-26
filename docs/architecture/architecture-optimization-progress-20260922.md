@@ -586,9 +586,9 @@ A+B 工作树已补齐最终 QuickCapture 退出/快捷入口和 Todo 非有限�
 
 | 批 | 节 | 写入点 | 触面文件 | 共享棘轮资源 |
 |---|---|---|---|---|
-| 39 | 存储/诊断尾巴 | 2 | PreferenceCommands 1（DefaultManagedStorageRootPath）、AboutAndUpdates 1（LastUpdateCheckAt） | SettingsSync 133 处快照读随各批顺手收缩 |
+| （无剩余行——第 39 批完成后 Track A 清点口径归零） | | | | |
 
-合计剩余 2（第 29 批外观 28、第 33 批胶囊/紧凑 16、第 34 批交互 12、第 35 批文件显示 6、第 36 批文件栈 10、第 37 批分组导航 4、第 38 批功能节+QuickCapture 编辑器组 37 已完成并在各自批次记录中销账）。**外部残余写入者**（不在 SettingsViewModel 内、后续单独处理）：OnboardingWindow.Appearance.cs 1 处 WidgetMaterialType 写入、OnboardingWindow.Hotkey.cs 的 AutoStart 直写（onboarding 批次）、SettingsService 自身的加载/迁移/默认值路径（Track B 界面）。
+合计剩余 **0**（第 29 批外观 28、第 33 批胶囊/紧凑 16、第 34 批交互 12、第 35 批文件显示 6、第 36 批文件栈 10、第 37 批分组导航 4、第 38 批功能节+QuickCapture 编辑器组 37、第 39 批存储/诊断尾巴 2 全部完成并在各自批次记录中销账；28+16+12+6+10+4+37+2=115 对上第二十九批清点总数）。**外部残余写入者**（不在 SettingsViewModel 内、后续单独处理）：OnboardingWindow.Appearance.cs 1 处 WidgetMaterialType 写入、OnboardingWindow.Hotkey.cs 的 AutoStart 直写与 App.xaml.cs ApplyDefaultAutoStartOnce 的开机默认回映（onboarding/宿主批次）、SettingsService 自身的加载/迁移/默认值路径（Track B 界面）；第 39 批收官对账另行登记同字段宿主侧写入者（WidgetManager 存储迁移链、OnboardingWindow.Storage、App 后台更新检查），见第三十九批记录。
 
 ### 本批实现
 
@@ -864,6 +864,66 @@ Simon 拍板放弃"随触碰 ratchet"，对 Platform 域的 DllImport/LibraryImp
 - 隔离 Debug 启动：数据根 `C:/Users/simon/AppData/Local/DeskBox-Dev/featurewidgets-track-a-38-20260926`（DESKBOX_DEV_DATA_ROOT）预置功能节 24 项非默认值（音乐 Controls/双 false、天气 Hanoi 21.03/105.85 手动定位+Fahrenheit+mph+Week+Rich+OpenMeteo+Wind 关/Pressure 开+180 分、QuickCapture 编辑器 EnterSaves/PlainText/DualPane/Editing/远程图片开、附件 Copy/托管拖放 FollowWindows/文件夹打开 Embedded、功能卡 Music 关/Weather 开，另预置 hasCompletedOnboarding/hasResolvedInitialFileWidgetSetup=true 保持无格子安静启动）。canonical 路径 `src/DeskBox/bin/Debug/net10.0-windows10.0.22621.0/DeskBox.exe` 启动 PID 35804（本 worktree 唯一实例，进程路径核验一致；并存的 wingezi-p1c 实例未触碰），启动管线 **36 步（5 critical）、0 degraded、0 failed**；按 PID 强制结束（关闭到托盘语义下无 CLI 退出入口，与批 35-37 同款）后磁盘 24 项预置字段全部保持原值（本会话无设置变更即无持久保存，settings.json 未被重写，与批 37 懒领养观察一致）。
 - `git diff --check` 通过。
 - 已知残余：设置壳构造/快照/属性 get 的功能节读仍走门面读（无写入，ratchet 内）；天气城市搜索的定位状态/建议列表 UI 状态机仍留在壳门面（非设置写入）；publish-aot-audit.ps1 的 stage5B4B2C2A 文件清单已随归属更新但完整 Native AOT publish/link 审计未在本批重跑（发版门禁时验证）；未做真实设置页点击（音乐显示模式切换、天气单位/城市选择、功能卡开关后真实格子创建隐藏、QuickCapture 编辑器格式切换后真实编辑行为）的设备级手感验收，自动化证据不替代功能节实际操作与天气/音乐格子呈现的视觉验收。
+
+## 第三十九批：存储/诊断尾巴迁移（Track A 收官批）
+
+实施基线：`194544cc`（main，含批 29-38），worktree `codex/final-settings-tail`。对象是第二十九批清点表中"39 存储/诊断尾巴"行的最后 2 个写入点：`PreferenceCommands.UpdateManagedStorageRootPath` 的 `DefaultManagedStorageRootPath`（默认托管存储根路径）与 `AboutAndUpdates.CheckForUpdatesAsync` 的 `LastUpdateCheckAt`（更新检查时间戳）。XAML 绑定名、文案与磁盘 schema 零变化。
+
+**协调器归属决策：存储路径新建 `ManagedStorageSettingsCoordinator`（桌面整理/文件域），更新时间戳新建 `MaintenanceSettingsCoordinator`（维护域），各配 `IManagedStorageSettings`/`IMaintenanceSettings` 合同与 `Features/ManagedStorage`/`Features/Maintenance` 编辑器缝。** 判据：①既有 `DesktopOrganizationCoordinator` 是整理事务引擎（扫描/计划/事务），不是设置页写入协调器（无 Stop 拒写、无合同端口），混入设置写会破坏批 29-38 的协调器家族形状；存储路径虽与整理域相邻，其设置页归属是"ManagedStorage"节（SectionRoutes）且字段住 `FileWidgetSettingsSlice`——按批 35/36 的"按节建协调器"先例独立建。②`LastUpdateCheckAt` 是纯记录性写入（UI 从不回读、磁盘仅供诊断），与交互批 34 迁走的 `AutoCheckForUpdates` 开关（InteractionSettingsCoordinator）不同域，与备份协调器（数据备份操作）也不同域——归维护域新建协调器，端口 `RecordUpdateCheck(DateTimeOffset checkedAt)` 由调用方决定"何时"，协调器只拥有"怎么写"（写切片 + 一次静默防抖保存）。
+
+| 职责 | 所有者 |
+|---|---|
+| `DefaultManagedStorageRootPath` 的唯一设置页写入（归一化→写 FileWidget 切片→SaveDebounced 常规广播）与读取 | `Services/ManagedStorageSettingsCoordinator`，经 `Contracts/IManagedStorageSettings` 暴露 |
+| `LastUpdateCheckAt` 的唯一设置页写入（写 Core 切片→SaveDebounced(notifySubscribers:false) 静默记录）与读取 | `Services/MaintenanceSettingsCoordinator`，经 `Contracts/IMaintenanceSettings` 暴露 |
+| 存储路径显示镜像（`ManagedStorageRootPath` 绑定属性）、快速访问刷新、迁移确认/残留对话框、更新卡（检查/下载/安装流） | `SettingsViewModel` 兼容门面（PreferenceCommands/AboutAndUpdates 两个 partial） |
+| 装配 | App 创建两个协调器，经 SettingsWindow 注入 SettingsViewModel（与批 29/33-38 同款） |
+
+特有语义保全：①存储迁移链零改动——设置页写点只是迁移成功后的提交步骤；`WidgetManager.UpdateDefaultManagedStorageRootAsync` 链（含其自身 3 处 `DefaultManagedStorageRootPath` 写：迁移提交/重试/回滚）原样保留；写值无变化跳过仍由窗口层等值预滤（`ChangeManagedStoragePathButton_Click` 比较 `ViewModel.ManagedStorageRootPath`）承担，协调器写保持原命令的无条件写+广播语义。②`LastUpdateCheckAt` 只作记录性写入：调用方提供时间戳（`DateTimeOffset.Now` 原位）、保存不带 `SettingsChanged` 广播（记录检查不得惊动在跑格子），写序仍在 `CheckForUpdatesAsync` 结果应用之前逐字保持。③归一化随写入迁入：`NormalizeManagedStorageRootPath`（空/不可用路径回默认根）继续由 SettingsService 单一持有，协调器经它归一化并返回归一值供壳镜像绑定——与批 38 天气政策路径同款"单一归一化来源"原则。
+
+门禁收缩：`SettingsSliceOwnershipContractTests` 平铺清单收缩（AboutAndUpdates 1→0 删条目；PreferenceCommands 2→1——仅剩恢复默认块的 ResizeSnapEnabled 读），只删不加；`FeatureSettingsBoundaryContractTests` 新增 managedStorageWrite 与 maintenanceWrite 两道写入门禁（含 FileWidget/Core 切片前缀变体）；AOT 绑定面（属性零增删）、磁盘 schema、XAML 与文案零变化自动保持；两个新协调器/编辑器/合同文件 FacadePassthroughAccess 零命中（切片路径访问不计门面）。
+
+### 第三十九批验证记录
+
+- restore Updater 后 `dotnet build src/DeskBox/DeskBox.csproj -p:Platform=x64`：0 错误、22 警告（与批 36/37/38 后同位）；非平台 canonical Debug（启动用）0 错误、22 警告。
+- 定向测试 48/48 通过（新增 ManagedStorageSettingsCoordinatorTests 4 用例：归一化写入+广播保持/空路径回退默认根/磁盘往返/停止拒写；MaintenanceSettingsCoordinatorTests 3 用例：静默记录零广播/磁盘往返/停止拒写；SettingsSliceOwnership 7、FeatureSettingsBoundary 3、ModuleBoundary、AotStage7C1、第 22 批字号回归 2 等边界组全绿）。
+- 全量 x64 测试：**4,329/4,329 通过**（新基线 4,322 + 本批 7 个新用例）。
+- AOT 定义编译检查（x64、`DefineConstants=TRACE;DEBUG;DESKBOX_NATIVE_AOT`，`ArtifactsPath`/`RestorePackagesPath` 隔离于 `.aotcheck/`，Updater 引用随同隔离 restore，检查后已清理）：11 警告（与批 32-38 同位）、**0 错误**。未执行 Native AOT publish/link 或发布包运行，仍为发版门禁。
+- 隔离 Debug 启动：数据根 `C:/Users/simon/AppData/Local/DeskBox-Dev/storage-tail-39-20260927-a1c4e8f2` 预置两字段非默认值（`defaultManagedStorageRootPath=batch39-managed-store`、`lastUpdateCheckAt=2026-09-20T10:11:12+08:00`、`autoCheckForUpdates=false` 防宿主后台检查改写、空格子布局全功能关）。canonical 路径 `src/DeskBox/bin/Debug/net10.0-windows10.0.22621.0/DeskBox.exe` 启动 PID 21472（仓库下唯一实例），启动管线 35 步、0 degraded、0 failed；停止后磁盘两字段保持预置值（路径斜杠方向由既有加载归一化统一为反斜杠，语义位置不变）。验证后已按路径停止本 worktree 实例。
+- `git diff --check` 通过。
+
+### Track A 收官对账（批 29-39 结账）
+
+**清单终值 vs 起始：第二十九批清点口径（`_settingsService.Settings.<平铺门面> = ` 直接赋值）在 SettingsViewModel 33 个 partial 内的 115 个写入点 → 归零。** 复核命令（`grep -rE "_settingsService\.Settings\.[A-Za-z]+\s*=[^=]" src/DeskBox/ViewModels/SettingsViewModel*.cs`）当前命中 0；批次销账对账：29 外观 28 + 33 胶囊/紧凑 16 + 34 交互 12 + 35 文件显示 6 + 36 文件栈 10 + 37 分组导航 4 + 38 功能节+QuickCapture 编辑器 37 + 39 存储/诊断尾巴 2 = 115，无遗漏无重复。已知口径外残余：①`SettingsViewModel.Performance.cs` 的自定义性能节 11 处经局部变量 lambda（`UpdateCustomPerformanceSetting(settings => settings.X = …)`）的门面写——该模式不匹配批 29 清点的直接赋值口径，一直由 FacadeAccessManifest 预算（Performance=11）圈住，属设置页最后一块未迁节，留待后续按节立项；②设置壳大量门面**读**（构造/快照/属性 get，SettingsSync 实测 88/预算 133、SettingsViewModel.cs 94 等）无写入，按"只删不加"棘轮继续收缩。
+
+**Track A 九个设置页写入协调器（批 29-39 新建）全表：**
+
+| # | 协调器 | 批 | 节 | 写入点 |
+|---|---|---|---|---|
+| 1 | AppearanceSettingsCoordinator | 29 | 外观 | 28 |
+| 2 | CapsuleSettingsCoordinator | 33 | 胶囊/紧凑 | 16 |
+| 3 | InteractionSettingsCoordinator | 34 | 交互 | 12 |
+| 4 | FileDisplaySettingsCoordinator | 35 | 文件显示 | 6 |
+| 5 | FileStackSettingsCoordinator | 36 | 文件栈/文件格子 | 10 |
+| 6 | GroupNavigationSettingsCoordinator | 37 | 分组导航 | 4 |
+| 7 | FeatureWidgetsSettingsCoordinator | 38 | 功能节 | 37 中 32 |
+| 8 | ManagedStorageSettingsCoordinator | 39 | 托管存储 | 1 |
+| 9 | MaintenanceSettingsCoordinator | 39 | 维护域记录 | 1 |
+
+批 38 的其余 5 写点并入既有 `QuickCaptureSettingsCoordinator`（批 19-22 建、编辑器组同切片），保持单一写入者；先于 Track A 的功能协调器（批 1-22 的 Todo/Search/Backup/QuickCapture）不在本表。每批同款装配：`Contracts/IXSettings` 合同 + `Services/XSettingsCoordinator`（Stop 拒写）+ `Features/X/XSettingsViewModel` 编辑器缝 + App 创建 + SettingsWindow/SettingsViewModel 注入 + FeatureSettingsBoundary 写入门禁 + SettingsSliceOwnership 清单收缩。
+
+**外部残余写入者终表（设置页清零后仍合法在册的非 SettingsViewModel 写入者）：**
+
+| 写入者 | 字段 | 状态 |
+|---|---|---|
+| OnboardingWindow.Appearance.cs 1 处 | WidgetMaterialType | 在册，待 onboarding 批次 |
+| OnboardingWindow.Hotkey.cs 2 处 + App.xaml.cs ApplyDefaultAutoStartOnce 1 处 | AutoStart | 在册，宿主/onboarding 侧（批 34 登记） |
+| OnboardingWindow.Storage.cs 1 处 | DefaultManagedStorageRootPath | 在册（onboarding 引导流），本批顺带登记 |
+| WidgetManager.Storage.cs 3 处（迁移提交/重试/回滚） | DefaultManagedStorageRootPath | 在册且**刻意保留**：存储迁移链宿主侧写入，第 39 批语义保全对象 |
+| App.xaml.cs ScheduleBackgroundUpdateCheck 1 处 | LastUpdateCheckAt | 在册（宿主后台检查，12/45 秒延迟），本批顺带登记；未并入维护协调器以避免停止语义与后台任务的竞态 |
+| SettingsService 加载/迁移/默认值路径 | 全部切片 | 在册，Track B 界面 |
+
+Track A 就此收官：设置页（SettingsViewModel）不再有任何平铺门面直写，后续新增设置字段的唯一合法入口是各节协调器合同端口（FeatureSettingsBoundary 门禁 + SettingsSliceOwnership 棘轮双向锁）。
+
 
 # 架构优化进度与下一批计划
 

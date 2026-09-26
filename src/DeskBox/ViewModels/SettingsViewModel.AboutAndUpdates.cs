@@ -176,8 +176,10 @@ public partial class SettingsViewModel
         try
         {
             var result = await _appUpdateService.CheckForUpdatesAsync(AppVersion, _updateOperationCts.Token);
-            _settingsService.Settings.LastUpdateCheckAt = DateTimeOffset.Now;
-            _settingsService.SaveDebounced(notifySubscribers: false);
+            // Record-keeping stamp only: the coordinator stores the
+            // timestamp and schedules one silent debounced save (no
+            // SettingsChanged pass), exactly as the direct write did.
+            _maintenanceSettings.RecordUpdateCheck(DateTimeOffset.Now);
             ApplyUpdateCheckResult(result);
         }
         finally
