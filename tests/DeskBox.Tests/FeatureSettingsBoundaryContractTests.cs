@@ -97,6 +97,11 @@ public sealed class FeatureSettingsBoundaryContractTests
         // behavior) writes through FileStackSettingsCoordinator.
         Regex fileStackWrite = new(
             @"\b(?:_settingsService\s*\.\s*Settings|settings)\s*\.\s*(?:FileWidget\s*\.\s*)?(?:FileStacksEnabled|FileStackAutoStacking|FileStackGroupBy|FileStackThreshold|FileStackOrderBy|FileStackOpenMode|FileStackPopoverLayout|FileStackPopoverStyle|FileStackCustomRules|FileStackUnmatchedBehavior)\s*=(?!=)");
+        // Batch 37: the group-navigation defaults (wheel switch, hover switch,
+        // default title display mode, default navigation style) write through
+        // GroupNavigationSettingsCoordinator.
+        Regex groupNavigationWrite = new(
+            @"\b(?:_settingsService\s*\.\s*Settings|settings)\s*\.\s*(?:WidgetLayout\s*\.\s*)?(?:WidgetGroupWheelSwitchEnabled|WidgetGroupHoverSwitchEnabled|WidgetGroupDefaultTitleDisplayMode|WidgetGroupDefaultNavigationStyle)\s*=(?!=)");
         (string Path, string Source)[] pages = ProductionSource()
             .Where(item => item.Path.StartsWith(
                     "src/DeskBox/ViewModels/SettingsViewModel", StringComparison.Ordinal) &&
@@ -110,6 +115,7 @@ public sealed class FeatureSettingsBoundaryContractTests
                     .Concat(interactionWrite.Matches(item.Source).Cast<Match>())
                     .Concat(fileDisplayWrite.Matches(item.Source).Cast<Match>())
                     .Concat(fileStackWrite.Matches(item.Source).Cast<Match>())
+                    .Concat(groupNavigationWrite.Matches(item.Source).Cast<Match>())
                     .Select(match => $"{item.Path}: {match.Value}"))
             .ToArray();
 
