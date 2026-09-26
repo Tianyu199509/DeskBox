@@ -293,8 +293,12 @@ public sealed class SettingsSliceOwnershipContractTests
         ["src/DeskBox/ViewModels/QuickCaptureWidgetViewModel.cs"] = 17,
         ["src/DeskBox/ViewModels/SearchPopupViewModel.cs"] = 13,
         ["src/DeskBox/ViewModels/SettingsViewModel.AboutAndUpdates.cs"] = 1,
-        ["src/DeskBox/ViewModels/SettingsViewModel.AppearanceCallbacks.cs"] = 16,
-        ["src/DeskBox/ViewModels/SettingsViewModel.AppearanceOptions.cs"] = 18,
+        // Batch 29 moved the appearance section writes into
+        // AppearanceSettingsCoordinator; AppearanceCallbacks reached zero and
+        // lost its entry. The remaining AppearanceOptions/WidgetForeground
+        // accesses are the capsule/interaction fields deferred to later
+        // batches plus snapshot reads.
+        ["src/DeskBox/ViewModels/SettingsViewModel.AppearanceOptions.cs"] = 4,
         ["src/DeskBox/ViewModels/SettingsViewModel.CapsuleOptions.cs"] = 34,
         ["src/DeskBox/ViewModels/SettingsViewModel.ContentEditorOptions.cs"] = 24,
         ["src/DeskBox/ViewModels/SettingsViewModel.DesktopOrganization.cs"] = 1,
@@ -307,13 +311,13 @@ public sealed class SettingsSliceOwnershipContractTests
         ["src/DeskBox/ViewModels/SettingsViewModel.HotkeyAndStorage.cs"] = 6,
         ["src/DeskBox/ViewModels/SettingsViewModel.HoverActions.cs"] = 1,
         ["src/DeskBox/ViewModels/SettingsViewModel.Performance.cs"] = 11,
-        ["src/DeskBox/ViewModels/SettingsViewModel.PreferenceCallbacks.cs"] = 21,
+        ["src/DeskBox/ViewModels/SettingsViewModel.PreferenceCallbacks.cs"] = 17,
         ["src/DeskBox/ViewModels/SettingsViewModel.PreferenceCommands.cs"] = 2,
         ["src/DeskBox/ViewModels/SettingsViewModel.RuntimeDiagnostics.cs"] = 1,
         ["src/DeskBox/ViewModels/SettingsViewModel.SettingsSync.cs"] = 133,
         ["src/DeskBox/ViewModels/SettingsViewModel.WeatherOptions.cs"] = 2,
-        ["src/DeskBox/ViewModels/SettingsViewModel.WidgetForeground.cs"] = 6,
-        ["src/DeskBox/ViewModels/SettingsViewModel.cs"] = 141,
+        ["src/DeskBox/ViewModels/SettingsViewModel.WidgetForeground.cs"] = 4,
+        ["src/DeskBox/ViewModels/SettingsViewModel.cs"] = 94,
         ["src/DeskBox/ViewModels/TodoWidgetViewModel.DetailAndAttachments.cs"] = 1,
         ["src/DeskBox/ViewModels/TodoWidgetViewModel.FilteringAndAppearance.cs"] = 21,
         ["src/DeskBox/ViewModels/TodoWidgetViewModel.cs"] = 12,

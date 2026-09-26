@@ -3,6 +3,7 @@ using System.Collections.ObjectModel;
 using System.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using DeskBox.Contracts;
 using DeskBox.Helpers;
 using DeskBox.Models;
 using DeskBox.Services;
@@ -18,31 +19,20 @@ public partial class SettingsViewModel
     {
         if (_isRestoringDefaults)
         {
-        OnPropertyChanged(nameof(WidgetOpacityValueText));
-        OnPropertyChanged(nameof(WidgetOpacityPercent));
-        OnPropertyChanged(nameof(WidgetOpacityPercentInput));
-        OnPropertyChanged(nameof(WidgetTransparency));
-        return;
-    }
-
-        if (double.IsNaN(value))
-        {
-            WidgetOpacity = _settingsService.Settings.WidgetOpacity;
+            OnPropertyChanged(nameof(WidgetOpacityValueText));
+            OnPropertyChanged(nameof(WidgetOpacityPercent));
+            OnPropertyChanged(nameof(WidgetOpacityPercentInput));
+            OnPropertyChanged(nameof(WidgetTransparency));
             return;
         }
 
-        double normalizedValue = Math.Clamp(
-            Math.Round(value / 0.02d, MidpointRounding.AwayFromZero) * 0.02d,
-            SettingsService.MinWidgetOpacity,
-            SettingsService.MaxWidgetOpacity);
-
-        if (Math.Abs(normalizedValue - value) > 0.0001)
+        AppearanceValueUpdate update = _appearanceSettings.UpdateWidgetOpacity(value);
+        if (!update.Committed)
         {
-            WidgetOpacity = normalizedValue;
+            WidgetOpacity = update.Value;
             return;
         }
 
-        _settingsService.Settings.WidgetOpacity = normalizedValue;
         SaveAppearanceChange();
         OnPropertyChanged(nameof(WidgetOpacityValueText));
         OnPropertyChanged(nameof(WidgetOpacityPercent));
@@ -58,23 +48,13 @@ public partial class SettingsViewModel
             return;
         }
 
-        if (!double.IsFinite(value))
+        AppearanceValueUpdate update = _appearanceSettings.UpdateWidgetMaterialIntensity(value);
+        if (!update.Committed)
         {
-            WidgetMaterialIntensity = _settingsService.Settings.WidgetMaterialIntensity;
+            WidgetMaterialIntensity = update.Value;
             return;
         }
 
-        double normalizedValue = Math.Clamp(
-            Math.Round(value / 0.02d, MidpointRounding.AwayFromZero) * 0.02d,
-            SettingsService.MinWidgetMaterialIntensity,
-            SettingsService.MaxWidgetMaterialIntensity);
-        if (Math.Abs(normalizedValue - value) > 0.0001)
-        {
-            WidgetMaterialIntensity = normalizedValue;
-            return;
-        }
-
-        _settingsService.Settings.WidgetMaterialIntensity = normalizedValue;
         SaveAppearanceChange();
         OnPropertyChanged(nameof(WidgetMaterialIntensityValueText));
     }
@@ -88,24 +68,13 @@ public partial class SettingsViewModel
             return;
         }
 
-        if (double.IsNaN(value))
+        AppearanceValueUpdate update = _appearanceSettings.UpdateIconSize(value);
+        if (!update.Committed)
         {
-            IconSize = _settingsService.Settings.IconSize;
+            IconSize = update.Value;
             return;
         }
 
-        double normalizedValue = Math.Clamp(
-            Math.Round(value / 2d, MidpointRounding.AwayFromZero) * 2d,
-            SettingsService.MinIconSize,
-            SettingsService.MaxIconSize);
-
-        if (Math.Abs(normalizedValue - value) > 0.0001)
-        {
-            IconSize = normalizedValue;
-            return;
-        }
-
-        _settingsService.Settings.IconSize = normalizedValue;
         SyncLayoutDensitySelection();
         SaveAppearanceChange();
         OnPropertyChanged(nameof(IconSizeValueText));
@@ -121,26 +90,18 @@ public partial class SettingsViewModel
             return;
         }
 
-        if (double.IsNaN(value))
+        AppearanceValueUpdate update = _appearanceSettings.UpdateTextSize(value);
+        if (!update.Committed)
         {
-            TextSize = _settingsService.Settings.TextSize;
+            TextSize = update.Value;
             return;
         }
 
-        double normalizedValue = Math.Clamp(
-            Math.Round(value * 2d, MidpointRounding.AwayFromZero) / 2d,
-            SettingsService.MinTextSize,
-            SettingsService.MaxTextSize);
-
-        if (Math.Abs(normalizedValue - value) > 0.0001)
-        {
-            TextSize = normalizedValue;
-            return;
-        }
-
-        _settingsService.Settings.TextSize = normalizedValue;
         SyncLayoutDensitySelection();
         SaveAppearanceChange();
+        // Global text size also drives the effective inherited font sizes of
+        // the Todo and Quick Capture sections; keep them in sync immediately
+        // (batch 22 regression) while their raw override values stay as-is.
         _todoSettings.Refresh();
         _quickCaptureSettings.RefreshFromSettings();
         OnPropertyChanged(nameof(TextSizeValueText));
@@ -157,24 +118,13 @@ public partial class SettingsViewModel
             return;
         }
 
-        if (double.IsNaN(value))
+        AppearanceValueUpdate update = _appearanceSettings.UpdateLayoutDensityScale(value);
+        if (!update.Committed)
         {
-            LayoutDensityScale = _settingsService.Settings.LayoutDensityScale;
+            LayoutDensityScale = update.Value;
             return;
         }
 
-        double normalizedValue = Math.Clamp(
-            Math.Round(value / 0.02d, MidpointRounding.AwayFromZero) * 0.02d,
-            SettingsService.MinLayoutDensityScale,
-            SettingsService.MaxLayoutDensityScale);
-
-        if (Math.Abs(normalizedValue - value) > 0.0001)
-        {
-            LayoutDensityScale = normalizedValue;
-            return;
-        }
-
-        _settingsService.Settings.LayoutDensityScale = normalizedValue;
         SyncLayoutDensitySelection();
         SaveAppearanceChange();
         OnPropertyChanged(nameof(LayoutDensityValueText));
@@ -193,10 +143,8 @@ public partial class SettingsViewModel
         }
 
         ApplySpacingScaleChange(
-            value,
-            _settingsService.Settings.HorizontalSpacingScale,
+            _appearanceSettings.UpdateHorizontalSpacingScale(value),
             next => HorizontalSpacingScale = next,
-            next => _settingsService.Settings.HorizontalSpacingScale = next,
             nameof(HorizontalSpacingValueText),
             nameof(HorizontalSpacingPercent),
             nameof(HorizontalSpacingPercentInput));
@@ -213,10 +161,8 @@ public partial class SettingsViewModel
         }
 
         ApplySpacingScaleChange(
-            value,
-            _settingsService.Settings.VerticalSpacingScale,
+            _appearanceSettings.UpdateVerticalSpacingScale(value),
             next => VerticalSpacingScale = next,
-            next => _settingsService.Settings.VerticalSpacingScale = next,
             nameof(VerticalSpacingValueText),
             nameof(VerticalSpacingPercent),
             nameof(VerticalSpacingPercentInput));
@@ -233,10 +179,8 @@ public partial class SettingsViewModel
         }
 
         ApplySpacingScaleChange(
-            value,
-            _settingsService.Settings.FileNameWidthScale,
+            _appearanceSettings.UpdateFileNameWidthScale(value),
             next => FileNameWidthScale = next,
-            next => _settingsService.Settings.FileNameWidthScale = next,
             nameof(FileNameWidthValueText),
             nameof(FileNameWidthPercent),
             nameof(FileNameWidthPercentInput));

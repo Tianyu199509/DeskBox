@@ -2133,6 +2133,61 @@ settings.FocusClickedWidgetOnRaise = false;
             WidgetCollapseBehaviorNames.Normalize(value));
     }
 
+    public static string NormalizeWidgetAnimationEffect(string? effect)
+    {
+        return effect is
+            WidgetAnimationEffectFade or
+            WidgetAnimationEffectSlideRight or
+            WidgetAnimationEffectSlideLeft or
+            WidgetAnimationEffectSlideUp or
+            WidgetAnimationEffectSlideDown or
+            WidgetAnimationEffectScaleFade or
+            WidgetAnimationEffectSlideFade or
+            WidgetAnimationEffectZoom or
+            WidgetAnimationEffectSlideUpFade or
+            WidgetAnimationEffectSlideDownFade or
+            WidgetAnimationEffectSlideLeftFade or
+            WidgetAnimationEffectSlideRightFade or
+            WidgetAnimationEffectScaleSlide
+            ? effect
+            : WidgetAnimationEffectSlideFade;
+    }
+
+    public static string NormalizeWidgetAnimationSpeed(string? speed)
+    {
+        return speed is
+            WidgetAnimationSpeedVeryFast or
+            WidgetAnimationSpeedFast or
+            WidgetAnimationSpeedStandard or
+            WidgetAnimationSpeedRelaxed or
+            WidgetAnimationSpeedSlow
+            ? speed
+            : WidgetAnimationSpeedStandard;
+    }
+
+    public static string NormalizeWidgetAnimationSlideDirection(string? direction)
+    {
+        return direction is
+            WidgetAnimationSlideDirectionNone or
+            WidgetAnimationSlideDirectionLeft or
+            WidgetAnimationSlideDirectionRight or
+            WidgetAnimationSlideDirectionUp or
+            WidgetAnimationSlideDirectionDown
+            ? direction
+            : WidgetAnimationSlideDirectionRight;
+    }
+
+    public static string NormalizeWidgetAnimationEasingIntensity(string? intensity)
+    {
+        return intensity is
+            WidgetAnimationEasingNone or
+            WidgetAnimationEasingLight or
+            WidgetAnimationEasingStandard or
+            WidgetAnimationEasingStrong
+            ? intensity
+            : WidgetAnimationEasingStandard;
+    }
+
     public static string NormalizeWidgetCompactWidthMode(string? value)
     {
         return string.Equals(

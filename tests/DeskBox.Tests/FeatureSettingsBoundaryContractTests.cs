@@ -64,6 +64,13 @@ public sealed class FeatureSettingsBoundaryContractTests
             $@"\b(?:_settingsService\s*\.\s*Settings|settings)\s*\.\s*(?:Todo\s*\.\s*)?(?:{todoFields})\s*=(?!=)");
         Regex quickCaptureWrite = new(
             @"\b(?:_settingsService\s*\.\s*Settings|settings)\s*\.\s*(?:QuickCapture\s*\.\s*)?QuickCapture(?:DefaultView|ShowTabBar|ShowRecordsTab|ShowPinnedTab|ShowRecentTab|TabStyle|ShowCreatedTime|ItemPreviewLineCount|RecentLimit)\s*=(?!=)");
+        // Batch 29: the appearance section (material/density/typography/window
+        // chrome/animation/foreground/tray icon/default size) writes through
+        // AppearanceSettingsCoordinator; the settings shell must not regain
+        // direct assignment sites. WidgetLayerMode/collapse/compact fields
+        // stay out until their capsule/interaction batches.
+        Regex appearanceWrite = new(
+            @"\b(?:_settingsService\s*\.\s*Settings|settings)\s*\.\s*(?:WidgetShell\s*\.\s*)?(?:WidgetOpacity|WidgetMaterialIntensity|IconSize|TextSize|LayoutDensityScale|HorizontalSpacingScale|VerticalSpacingScale|FileNameWidthScale|FileNameLineCount|TrayIconStyle|WidgetMaterialType|WidgetCornerPreference|WidgetBorderColorMode|WidgetBorderStyle|LayoutDensity|WidgetAnimationEffect|WidgetAnimationSpeed|WidgetAnimationSlideDirection|WidgetAnimationEasingIntensity|DisplayWidgetChromeMode|InteractiveWidgetChromeMode|WidgetTitleIconMode|DefaultWidgetWidth|DefaultWidgetHeight|WidgetForegroundMode|WidgetForegroundColor)\s*=(?!=)");
         (string Path, string Source)[] pages = ProductionSource()
             .Where(item => item.Path.StartsWith(
                     "src/DeskBox/ViewModels/SettingsViewModel", StringComparison.Ordinal) &&
@@ -72,6 +79,7 @@ public sealed class FeatureSettingsBoundaryContractTests
         string[] violations = pages.SelectMany(item =>
                 todoWrite.Matches(item.Source).Cast<Match>()
                     .Concat(quickCaptureWrite.Matches(item.Source).Cast<Match>())
+                    .Concat(appearanceWrite.Matches(item.Source).Cast<Match>())
                     .Select(match => $"{item.Path}: {match.Value}"))
             .ToArray();
 

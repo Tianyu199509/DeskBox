@@ -575,3 +575,48 @@ A+B 工作树已补齐最终 QuickCapture 退出/快捷入口和 Todo 非有限�
 ## 第二十八批：提醒重入的切片收窄
 
 审计遗留 P3-2 收口。目标口径：全局 `SettingsChanged` 无参数广播导致 `TodoSettingsCoordinator.OnSettingsChanged` 在每次防抖保存（如拖动外观滑块每秒一次）都重入提醒协调。评估后取**协调器侧变更检测守卫**而非全量事件参数化：其余订阅者（QuickCapture/Search/WidgetManager/备份）早已自带缓存比较守卫，事件签名改造是一天级宽 API 动而收益仅剩提醒一处。守卫缓存四个提醒相关输入（TodoEnabled、TodoReminderEnabled、默认提前分钟、Todo 格子 ID 集合），无变化即跳过；首次通知仍重入（覆盖恢复/默认值路径）。新增三条测试：无关保存零重入、提醒开关变化重入、Todo 格子增删重入。事件参数化留作触发项：出现第二个必须依赖切片信息的消费者时再立法。
+
+## 第二十九批（Track A 首批）：设置门面剩余写入清点 + 外观节迁移
+
+实施基线：`688d7d67`（main，第 1–28 批全部合并后），工作树 `codex/final-settings-appearance`。这是"完全拆完"计划 Track A（设置门面清零）的第一批。
+
+### 清点：SettingsViewModel 33 个 partial 的剩余平铺写入点
+
+清点口径：`_settingsService.Settings.<平铺门面> = ` 直接赋值（读写混合的门面访问总数另有 ratchet 管理）。全量共 **115 个写入点，分布在 15 个文件**；Todo/QuickCapture 功能开关与提醒、备份、搜索各节经第 1–22 批已收口，不在清单内。按设置节聚类后的 Track A 剩余批次划分：
+
+| 批 | 节 | 写入点 | 触面文件 | 共享棘轮资源 |
+|---|---|---|---|---|
+| **29（本批）** | 外观（材质/密度/排版/默认尺寸/窗口外观/动画/前景/托盘图标） | 28 | AppearanceCallbacks 8、AppearanceOptions 14、WidgetForeground 2、SettingsViewModel.cs 2（LayoutDensity）、PreferenceCallbacks 2（DefaultW/H） | SettingsSliceOwnership 清单（5 文件收缩）、AotPublishContract 75 ObservableProperty 钉、ModuleBoundary App.Current 例外（AppearanceOptions=2 保持） |
+| 30 | 胶囊/紧凑模式 | 16 | CapsuleOptions 14、AppearanceOptions 2（CollapseBehavior/CompactContentMode） | AotStage5B4B1 对 CapsuleOptions 源码钉 |
+| 31 | 交互 | 12 | PreferenceCallbacks 10（AutoStart/AutoCheck/DoubleClick/FileItemMenu/ResizeSnap/SnapSpacing/KeepVisible/ShowHoverButtons/Idle/ImmediateTrim）、HoverActions 1、AppearanceOptions 1（WidgetLayerMode） | ModuleBoundary App.Current 例外、ShellContextMenuCompatibility（Prewarm 钉在 PreferenceCallbacks） |
+| 32 | 文件显示 | 6 | PreferenceCallbacks（ShowFileExtensions/HideShortcutArrowOverlay/ShowImageFilesAsIcons/ShowListItemDetails/ShowFileItemPathTooltips/HideShortcutExtensionWhenShowingFileExtensions） | 与 31 同文件分批，注意 ratchet 计数联动 |
+| 33 | 文件栈/文件格子 | 10 | FileStackOptions 10 | AotStage5B4B1 FileStack 源码钉 |
+| 34 | 分组导航 | 4 | GroupNavigation 4（WheelSwitch/HoverSwitch/DefaultTitleDisplayMode/DefaultNavigationStyle） | AotStage5B4B1 对 GroupNavigation 源码钉 |
+| 35 | 功能节（音乐/天气/Glance）+ QuickCapture 编辑器组 | 37 | FeatureOptions 29、FeatureCallbacks 2、WeatherOptions 1、ContentEditorOptions 5 | ModuleBoundary App.Current 例外（FeatureOptions=4）、FeatureSettingsBoundary quickCaptureWrite 门禁 |
+| 36 | 存储/诊断尾巴 | 2 | PreferenceCommands 1（DefaultManagedStorageRootPath）、AboutAndUpdates 1（LastUpdateCheckAt） | SettingsSync 133 处快照读随各批顺手收缩 |
+
+合计 28+16+12+6+10+4+37+2 = 115，与逐文件实测一致。**外部残余写入者**（不在 SettingsViewModel 内、后续单独处理）：OnboardingWindow.Appearance.cs 1 处 WidgetMaterialType 写入、SettingsService 自身的加载/迁移/默认值路径（Track B 界面）。
+
+### 本批实现
+
+| 职责 | 所有者 |
+|---|---|
+| 外观节 26 个字段的唯一设置页写入、数值归一化（步进/钳制）、每个字段的原有保存语义 | `Services/AppearanceSettingsCoordinator`，经 `Contracts/IAppearanceSettings` 暴露 |
+| 外观节编辑器缝（设置壳转发目标） | `Features/Appearance/AppearanceSettingsViewModel`（无复制状态：滑块可编辑状态仍在设置壳的 AOT 绑定属性上，拖动期间活预览时序原样保留） |
+| XAML 绑定名、AOT 生成属性、文案、密度/动画预设联动、`SaveAppearanceChange` 拖动期预览+延迟保存、`CommitAppearanceChanges` | `SettingsViewModel` 兼容门面（AppearanceCallbacks/AppearanceOptions/WidgetForeground/PreferenceCallbacks/SettingsViewModel.cs 五个 partial） |
+| 全局字号联动（写入后立即 `_todoSettings.Refresh()` + `_quickCaptureSettings.RefreshFromSettings()`，第 22 批教训） | 设置壳回调保留原顺序，仅写值改经编辑器 |
+| 装配 | App 创建协调器与编辑器，经 SettingsWindow 注入 SettingsViewModel |
+
+关键时序保真点：滑块 Update 类方法只归一化+写原始字段，不触发预览或保存——预览（`RequestAppearancePreview` 66ms 防抖）与防抖保存仍由设置壳的 `SaveAppearanceChange`（受 `DeferAppearancePersistence`/`SuppressAppearanceNotifications` 拖动标志控制）唯一决定；材质类型切换保留"写值→预览→防抖保存"的原顺序（由协调器内聚）；动画预设应用传 `scheduleSave:false` 四字段后由壳一次 `SaveDebounced`；密度预设经协调器一次写 7 字段不落保存、壳在预设应用完成后走一次 `SaveAppearanceChange`；窗口默认宽高与窗口外观模式保留即时保存。归一化反馈环（NeedsNormalization→壳重设自身绑定→再入）保留原语义；非有限输入（NaN/Infinity）按原判定拒写并回读存储值。数值归一化逻辑随写入迁入协调器（0.02/2/0.5/10 步进与各 Min/Max 常量仍取自 SettingsService），四个动画归一化器从 SettingsViewModel.HoverActions 私有方法上移为 SettingsService 公共静态（与 chrome/titleIcon 先例一致）。
+
+门禁收缩：`SettingsSliceOwnershipContractTests` 平铺访问清单 5 个文件收缩（AppearanceCallbacks 16→0 删除条目、AppearanceOptions 18→4、PreferenceCallbacks 21→17、WidgetForeground 6→4、SettingsViewModel.cs 141→94），只删不加；`FeatureSettingsBoundaryContractTests.SettingsShell_DoesNotWriteMigratedFeatureFieldsDirectly` 新增外观字段写入门禁（26 字清单，WidgetLayerMode/collapse/compact 留给 30/31 批）；AOT 绑定契约（`requiredBindingProperties == generatedBindableProperties`）因绑定面零变化自动保持。磁盘 schema、XAML、文案零变化。
+
+### 第二十九批验证记录
+
+- canonical x64 Debug 构建（restore Updater 后 `dotnet build src/DeskBox/DeskBox.csproj -p:Platform=x64`）：22 警告、0 错误（警告来自既有可空性/控件位置）；非平台 canonical Debug（启动用）24 警告、0 错误。
+- 定向测试 18/18 通过（新增 AppearanceSettingsCoordinatorTests 8 用例：步进归一化反馈、非有限拒写回读、滑块零通知零保存、选项归一化与无变化跳过、密度预设七字段不落保存、动画 scheduleSave、前景/标题图标延迟保存、停止后拒写；SettingsSliceOwnership 7；FeatureSettingsBoundary 3）。首轮全量 4,259/4,260：唯一失败是第 22 批全局字号回归测试用反射构造 SettingsViewModel 未注入新编辑器，已补注入真实 `AppearanceSettingsViewModel(AppearanceSettingsCoordinator)`。
+- 全量 x64 测试：**4,260/4,260 通过**（基线 4,252 + 本批 8 个新用例）。
+- AOT 定义编译检查（x64、`DefineConstants="TRACE;...;DEBUG;DESKBOX_NATIVE_AOT"`）：22 警告、0 错误。
+- 隔离 Debug 启动：数据根 `C:/Users/simon/AppData/Local/DeskBox-Dev/appearance-track-a-20260926-215022` 预置外观非默认值（White 托盘图标、Acrylic 0.92/0.8、Custom 前景 #20A0FF、Small 角/Accent 边/Medium 边框、图标 36/字号 13、Custom 密度 0.84/0.68/0.82/0.5、文件名 1 行、默认 340×460、Compact/Overlay chrome、FilledMono 标题图标、Zoom/Fast/Strong 动画、空格子布局）。canonical 路径 `src/DeskBox/bin/Debug/net10.0-windows10.0.22621.0/DeskBox.exe` 启动 PID 27704，启动管线 35 步、0 degraded、0 failed；停机后磁盘全部预置字段保持。唯一变化 `widgetAnimationSlideDirection: "Left"→"None"` 为既有加载归一化（非 SlideFade 效果强制方向 None——预置组合本身无效），非本批行为。验证后已按路径停止本 worktree 实例。
+- `git diff --check` 通过。
+- 已知残余：OnboardingWindow.Appearance.cs 的 1 处 WidgetMaterialType 直写留给后续 onboarding 批次；设置壳 ApplySettingsSnapshot/构造函数中的外观读仍走门面读（无写入，ratchet 已顺带收缩 141→94）。未做真实滑块拖动的设备级手感验收，自动化证据不替代外观页实际拖动与材质切换的视觉验收。

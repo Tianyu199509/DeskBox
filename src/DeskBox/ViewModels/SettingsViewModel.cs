@@ -3,6 +3,7 @@ using System.Collections.ObjectModel;
 using System.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using DeskBox.Contracts;
 using DeskBox.Helpers;
 using DeskBox.Models;
 using DeskBox.Services;
@@ -59,6 +60,7 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
 
     private readonly SettingsService _settingsService;
     private readonly ThemeService _themeService;
+    private readonly DeskBox.Features.Appearance.AppearanceSettingsViewModel _appearanceSettings;
     private readonly LocalizationService _localizationService;
     private readonly WidgetContentFactory _widgetContentFactory;
     private readonly IAppUpdateService _appUpdateService;
@@ -283,6 +285,7 @@ private string[]? _cachedWeatherRefreshIntervalDisplayNames;
         DeskBox.Features.Backup.BackupSettingsViewModel backupSettings,
         DeskBox.Contracts.IQuickCaptureSettings quickCaptureSettings,
         DeskBox.Contracts.ISearchFeatureSettings searchFeatureSettings,
+        DeskBox.Features.Appearance.AppearanceSettingsViewModel appearanceSettings,
         LocalizationService? localizationService = null,
         IAppUpdateService? appUpdateService = null)
     {
@@ -293,6 +296,7 @@ private string[]? _cachedWeatherRefreshIntervalDisplayNames;
         _backupSettings.PropertyChanged += OnBackupSettingsPropertyChanged;
         _quickCaptureSettings = quickCaptureSettings;
         _searchFeatureSettings = searchFeatureSettings;
+        _appearanceSettings = appearanceSettings;
         _themeService = themeService;
         _localizationService = localizationService ?? new LocalizationService(settingsService);
         _widgetContentFactory = new WidgetContentFactory(_localizationService);
@@ -634,7 +638,7 @@ _ = RefreshQuickAccessStateAsync();
             HorizontalSpacingScale = values.HorizontalSpacingScale;
             VerticalSpacingScale = values.VerticalSpacingScale;
             FileNameWidthScale = values.FileNameWidthScale;
-            _settingsService.Settings.LayoutDensity = preset;
+            _appearanceSettings.ApplyLayoutDensityPreset(preset);
         }
         finally
         {
@@ -652,11 +656,11 @@ _ = RefreshQuickAccessStateAsync();
             return;
         }
 
-        _settingsService.Settings.LayoutDensity = SettingsService.LayoutDensityCustom;
+        _appearanceSettings.MarkLayoutDensityCustom();
         if (SetProperty(
-            ref _selectedLayoutDensity,
-            SettingsService.LayoutDensityCustom,
-            nameof(SelectedLayoutDensity)))
+                ref _selectedLayoutDensity,
+                SettingsService.LayoutDensityCustom,
+                nameof(SelectedLayoutDensity)))
         {
             OnPropertyChanged(nameof(SelectedLayoutDensityText));
         }
@@ -741,30 +745,16 @@ _ = RefreshQuickAccessStateAsync();
     }
 
     private void ApplySpacingScaleChange(
-        double value,
-        double currentStoredValue,
+        AppearanceValueUpdate update,
         Action<double> setViewModelValue,
-        Action<double> setStoredValue,
         params string[] dependentPropertyNames)
     {
-        if (double.IsNaN(value))
+        if (!update.Committed)
         {
-            setViewModelValue(currentStoredValue);
+            setViewModelValue(update.Value);
             return;
         }
 
-        double normalizedValue = Math.Clamp(
-            Math.Round(value / 0.02d, MidpointRounding.AwayFromZero) * 0.02d,
-            SettingsService.MinSpacingScale,
-            SettingsService.MaxSpacingScale);
-
-        if (Math.Abs(normalizedValue - value) > 0.0001)
-        {
-            setViewModelValue(normalizedValue);
-            return;
-        }
-
-        setStoredValue(normalizedValue);
         SyncLayoutDensitySelection();
         SaveAppearanceChange();
         foreach (string propertyName in dependentPropertyNames)
