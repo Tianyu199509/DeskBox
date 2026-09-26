@@ -1173,7 +1173,7 @@ public partial class App
                 result.DeepSettings.SearchActivatedSection,
                 "BackupRestoreSettings",
                 StringComparison.Ordinal) &&
-            result.DeepSettings.PageTransitions.Count == 24 &&
+            result.DeepSettings.PageTransitions.Count == 25 &&
             result.DeepSettings.BreadcrumbParentReturned &&
             result.DeepSettings.FileStackRuleCount == 1 &&
             result.DeepSettings.BackupSnapshotCount > 0,

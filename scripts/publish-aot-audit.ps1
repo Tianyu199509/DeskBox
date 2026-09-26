@@ -3467,7 +3467,7 @@ $stage5B4B1RequiredRunnerPatterns = @(
     'FileStackRuleCount',
     'BackupSnapshotCount',
     'DeepSettingsCompleted',
-    'result.DeepSettings.PageTransitions.Count == 24',
+    'result.DeepSettings.PageTransitions.Count == 25',
     'AotManagedUiSmokeJsonContext.Default.AotManagedUiSmokeResult'
 )
 $stage5B4B1MissingRunnerPatterns = @(

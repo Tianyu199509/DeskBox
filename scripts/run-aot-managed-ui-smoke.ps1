@@ -6794,7 +6794,7 @@ try {
         $deepSettings = $smokeResult.deepSettings
         $deepRouteExpectations = [ordered]@{
             AppearanceDetail = @{ parent = $null; nav = "AppearanceDetail" }
-            CapsuleMode = @{ parent = "Appearance"; nav = "Appearance" }
+            CapsuleMode = @{ parent = $null; nav = "CapsuleMode" }
             WidgetGroups = @{ parent = "Appearance"; nav = "Appearance" }
             FileDisplaySettings = @{ parent = "AppearanceDetail"; nav = "AppearanceDetail" }
             ManagedStorage = @{ parent = "AppearanceDetail"; nav = "AppearanceDetail" }
@@ -6810,13 +6810,14 @@ try {
             AppearanceDensitySettings = @{ parent = "Appearance"; nav = "Appearance" }
             AppearanceWindowSettings = @{ parent = "Appearance"; nav = "Appearance" }
             AppearanceAnimationSettings = @{ parent = "Appearance"; nav = "Appearance" }
-            CapsuleBehaviorSettings = @{ parent = "CapsuleMode"; nav = "Appearance" }
-            CapsuleArrangementSettings = @{ parent = "CapsuleMode"; nav = "Appearance" }
-            CapsuleAnimationSettings = @{ parent = "CapsuleMode"; nav = "Appearance" }
-            CapsuleOverridesSettings = @{ parent = "CapsuleMode"; nav = "Appearance" }
+            CapsuleBehaviorSettings = @{ parent = "CapsuleMode"; nav = "CapsuleMode" }
+            CapsuleArrangementSettings = @{ parent = "CapsuleMode"; nav = "CapsuleMode" }
+            CapsuleAnimationSettings = @{ parent = "CapsuleMode"; nav = "CapsuleMode" }
+            CapsuleOverridesSettings = @{ parent = "CapsuleMode"; nav = "CapsuleMode" }
             BackupRestoreSettings = @{ parent = "Maintenance"; nav = "Maintenance" }
             DataHealthSettings = @{ parent = "Maintenance"; nav = "Maintenance" }
             CompatibilityDiagnosticsSettings = @{ parent = "Maintenance"; nav = "Maintenance" }
+            PerformanceSettings = @{ parent = "General"; nav = "General" }
         }
         $pageTransitions = @($deepSettings.pageTransitions)
         $searchSuggestions = @($deepSettings.searchSuggestions)
