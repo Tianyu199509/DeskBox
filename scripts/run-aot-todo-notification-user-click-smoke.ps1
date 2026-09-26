@@ -470,7 +470,7 @@ New-Item -ItemType Directory -Path $dataDirectory -Force | Out-Null
     -LiteralPath (Join-Path $DataRoot $ownedMarkerName) `
     -Encoding UTF8
 @{
-    schemaVersion = 5
+    schemaVersion = 9
     language = "zh-CN"
     autoStart = $false
     autoCheckForUpdates = $false

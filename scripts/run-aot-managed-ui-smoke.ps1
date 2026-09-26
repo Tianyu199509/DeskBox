@@ -3594,7 +3594,7 @@ New-Item -ItemType Directory -Path $fixtureDirectory -Force | Out-Null
 
 # Seed AppSettings.HasCompletedOnboarding, FeatureWidgetEnabledStates, and SearchSaveHistory.
 $settings = [ordered]@{
-    schemaVersion = 5
+    schemaVersion = 9
     language = "en-US"
     autoStart = $false
     autoCheckForUpdates = $false
@@ -3670,6 +3670,7 @@ $settings = [ordered]@{
 }
 if ($scenario -ceq "DeepSettingsReadOnly") {
     $settings["fileStacksEnabled"] = $true
+    $settings["fileStackAutoStacking"] = $true
     $settings["fileStackGroupBy"] = "Custom"
     $settings["fileStackCustomRules"] = @(
         [ordered]@{
