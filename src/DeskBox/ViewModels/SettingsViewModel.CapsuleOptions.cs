@@ -73,8 +73,7 @@ public partial class SettingsViewModel
                 return;
             }
 
-            _settingsService.Settings.WidgetCompactWidthMode = normalized;
-            _settingsService.SaveDebounced();
+            _capsuleSettings.SetWidgetCompactWidthMode(normalized);
         }
     }
 
@@ -111,8 +110,7 @@ public partial class SettingsViewModel
                 return;
             }
 
-            _settingsService.Settings.WidgetCompactExpansionDirection = normalized;
-            _settingsService.SaveDebounced();
+            _capsuleSettings.SetWidgetCompactExpansionDirection(normalized);
         }
     }
 
@@ -155,8 +153,7 @@ public partial class SettingsViewModel
                 return;
             }
 
-            _settingsService.Settings.WidgetCapsuleArrangementMode = normalized;
-            _settingsService.SaveDebounced();
+            _capsuleSettings.SetWidgetCapsuleArrangementMode(normalized);
         }
     }
 
@@ -207,8 +204,7 @@ public partial class SettingsViewModel
                 return;
             }
 
-            _settingsService.Settings.WidgetCapsuleBarPlacement = normalized;
-            _settingsService.SaveDebounced();
+            _capsuleSettings.SetWidgetCapsuleBarPlacement(normalized);
         }
     }
 
@@ -246,8 +242,7 @@ public partial class SettingsViewModel
                 return;
             }
 
-            _settingsService.Settings.WidgetCapsuleBarDirection = normalized;
-            _settingsService.SaveDebounced();
+            _capsuleSettings.SetWidgetCapsuleBarDirection(normalized);
         }
     }
 
@@ -272,8 +267,7 @@ public partial class SettingsViewModel
                 return;
             }
 
-            _settingsService.Settings.WidgetCapsuleBarSpacing = normalized;
-            _settingsService.SaveDebounced();
+            _capsuleSettings.SetWidgetCapsuleBarSpacing(normalized);
         }
     }
 
@@ -300,8 +294,7 @@ public partial class SettingsViewModel
                 return;
             }
 
-            _settingsService.Settings.WidgetCompactHideSensitiveContent = value;
-            _settingsService.SaveDebounced();
+            _capsuleSettings.SetWidgetCompactHideSensitiveContent(value);
         }
     }
 
@@ -339,27 +332,15 @@ public partial class SettingsViewModel
                 return;
             }
 
-            _settingsService.Settings.WidgetCompactAnimationEffect = normalized;
-            int? presetDuration = normalized switch
-            {
-                SettingsService.WidgetCompactAnimationSmooth =>
-                    SettingsService.DefaultWidgetCompactAnimationDurationMs,
-                SettingsService.WidgetCompactAnimationSlow =>
-                    SettingsService.SlowWidgetCompactAnimationDurationMs,
-                SettingsService.WidgetCompactAnimationSnappy =>
-                    SettingsService.SnappyWidgetCompactAnimationDurationMs,
-                _ => null
-            };
-            if (presetDuration is { } duration &&
+            _capsuleSettings.SetWidgetCompactAnimationEffect(normalized);
+            if (SettingsService.WidgetCompactAnimationPresetDurationMs(normalized) is { } duration &&
                 SetProperty(
                     ref _widgetCompactAnimationDurationMs,
                     duration,
                     nameof(WidgetCompactAnimationDurationMs)))
             {
-                _settingsService.Settings.WidgetCompactAnimationDurationMs = duration;
                 OnPropertyChanged(nameof(WidgetCompactAnimationDurationText));
             }
-            _settingsService.SaveDebounced();
         }
     }
 
@@ -401,8 +382,6 @@ public partial class SettingsViewModel
                  SettingsService.WidgetCompactAnimationNone))
             {
                 _selectedWidgetCompactAnimationEffect = SettingsService.WidgetCompactAnimationCustom;
-                _settingsService.Settings.WidgetCompactAnimationEffect =
-                    SettingsService.WidgetCompactAnimationCustom;
                 OnPropertyChanged(nameof(SelectedWidgetCompactAnimationEffect));
                 OnPropertyChanged(nameof(SelectedWidgetCompactAnimationEffectText));
                 OnPropertyChanged(nameof(IsWidgetCompactAnimationEnabled));
@@ -411,8 +390,7 @@ public partial class SettingsViewModel
                 OnPropertyChanged(nameof(CanOpenWidgetCompactAnimationDetails));
             }
 
-            _settingsService.Settings.WidgetCompactAnimationDurationMs = normalized;
-            _settingsService.SaveDebounced();
+            _capsuleSettings.SetWidgetCompactAnimationDurationMs(normalized);
         }
     }
 
@@ -452,19 +430,11 @@ public partial class SettingsViewModel
                 return;
             }
 
-            (int Expand, int Collapse)? delays = normalized switch
-            {
-                SettingsService.WidgetCompactHoverResponseSensitive =>
-                    (SettingsService.SensitiveWidgetCompactExpandDelayMs,
-                     SettingsService.SensitiveWidgetCompactCollapseDelayMs),
-                SettingsService.WidgetCompactHoverResponseBalanced =>
-                    (SettingsService.DefaultWidgetCompactExpandDelayMs,
-                     SettingsService.DefaultWidgetCompactCollapseDelayMs),
-                SettingsService.WidgetCompactHoverResponsePreventAccidental =>
-                    (SettingsService.PreventAccidentalWidgetCompactExpandDelayMs,
-                     SettingsService.PreventAccidentalWidgetCompactCollapseDelayMs),
-                _ => null
-            };
+            // Presets persist through the shell's own delay bindings, which
+            // forward their writes to the capsule editor; the selection
+            // itself is derived view state and is never persisted directly.
+            (int Expand, int Collapse)? delays =
+                SettingsService.WidgetCompactHoverResponsePresetDelays(normalized);
             if (delays is not { } preset)
             {
                 return;
@@ -514,8 +484,7 @@ public partial class SettingsViewModel
 
             MarkWidgetCompactHoverResponseCustom();
 
-            _settingsService.Settings.WidgetCompactExpandDelayMs = normalized;
-            _settingsService.SaveDebounced();
+            _capsuleSettings.SetWidgetCompactExpandDelayMs(normalized);
         }
     }
 
@@ -540,8 +509,7 @@ public partial class SettingsViewModel
 
             MarkWidgetCompactHoverResponseCustom();
 
-            _settingsService.Settings.WidgetCompactCollapseDelayMs = normalized;
-            _settingsService.SaveDebounced();
+            _capsuleSettings.SetWidgetCompactCollapseDelayMs(normalized);
         }
     }
 
@@ -591,8 +559,7 @@ public partial class SettingsViewModel
                 return;
             }
 
-            _settingsService.Settings.WidgetCompactMediaCornerMode = normalized;
-            _settingsService.SaveDebounced();
+            _capsuleSettings.SetWidgetCompactMediaCornerMode(normalized);
         }
     }
 

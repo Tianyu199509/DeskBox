@@ -143,7 +143,8 @@ public sealed partial class SettingsWindow : Window
         IQuickCaptureSettings quickCaptureSettings,
         ISearchFeatureSettings searchFeatureSettings,
         IBackupCommands backupCommands,
-        DeskBox.Features.Appearance.AppearanceSettingsViewModel appearanceSettings)
+        DeskBox.Features.Appearance.AppearanceSettingsViewModel appearanceSettings,
+        DeskBox.Features.Capsule.CapsuleSettingsViewModel capsuleSettings)
     {
         var constructionStopwatch = Stopwatch.StartNew();
         long previousCheckpointMilliseconds = 0;
@@ -166,7 +167,7 @@ public sealed partial class SettingsWindow : Window
         _localizationService = localizationService;
         ViewModel = new SettingsViewModel(settingsService, themeService, todoSettings,
             backupSettings, quickCaptureSettings, searchFeatureSettings, appearanceSettings,
-            localizationService, App.Current.AppUpdateService);
+            capsuleSettings, localizationService, App.Current.AppUpdateService);
         LogConstructionCheckpoint("view-model");
         _settingsRootPointerPressedHandler = SettingsRoot_PointerPressedHandled;
         _settingsRootPointerReleasedHandler = SettingsRoot_PointerReleasedHandled;
