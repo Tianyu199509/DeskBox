@@ -104,7 +104,7 @@ public sealed partial class ContentWidgetWindow
         // File widgets own their managed/mapped identity in the view model so
         // runtime remapping and group switches stay consistent; every other
         // kind keeps the descriptor defaults.
-        if (content is FileSurfaceContent fileSurface)
+        if (content is FileWidgetContentAdapter fileSurface)
         {
             ContentWidgetShell.TitleGlyph = fileSurface.ViewModel.IconGlyph;
             ContentWidgetShell.TitleIconKind = fileSurface.ViewModel.TitleIconKind;

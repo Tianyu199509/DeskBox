@@ -218,10 +218,10 @@ if (-not (Test-Path -LiteralPath $SummaryPath -PathType Leaf)) {
     throw "Native AOT audit summary was not found: '$SummaryPath'."
 }
 $auditSummary = Get-Content -LiteralPath $SummaryPath -Raw | ConvertFrom-Json
-if ([int]$auditSummary.schemaVersion -ne 46 -or
-    [int]$auditSummary.auditProfileVersion -ne 49 -or
+if ([int]$auditSummary.schemaVersion -ne 55 -or
+    [int]$auditSummary.auditProfileVersion -ne 59 -or
     -not [bool]$auditSummary.sourceStableDuringAudit) {
-    throw "File Properties smoke requires stable AOT audit profile 49 / schema 46."
+    throw "File Properties smoke requires stable AOT audit profile 59 / schema 55."
 }
 
 New-Item -ItemType Directory -Path $evidenceRoot -Force | Out-Null
@@ -299,7 +299,7 @@ $utf8WithoutBom = [System.Text.UTF8Encoding]::new($false)
     $utf8WithoutBom)
 
 $settings = [ordered]@{
-    schemaVersion = 5
+    schemaVersion = 9
     language = "en-US"
     autoStart = $false
     autoCheckForUpdates = $false

@@ -84,7 +84,7 @@ public partial class App
                     ShellMoveMutatedDestinationNames(paths),
                     [1, 0, 1, 1],
                     "ShellMoveRestartMutationVerified");
-                evidence.Operations = RestoreAotShellMoveBaseline(
+                evidence.Operations = await RestoreAotShellMoveBaselineAsync(
                     result,
                     paths,
                     compensation: false);
@@ -118,7 +118,7 @@ public partial class App
 
             case "Compensate":
                 evidence.Before = CaptureAotShellMoveDiskOnlyState(paths);
-                evidence.Operations = RestoreAotShellMoveBaseline(
+                evidence.Operations = await RestoreAotShellMoveBaselineAsync(
                     result,
                     paths,
                     compensation: true);
@@ -316,10 +316,11 @@ public partial class App
         menu.Items[menu.MoveIndex].IsMove &&
         menu.Items[menu.MoveIndex].IsEnabled;
 
-    private AotManagedUiShellMoveOperationsEvidence RestoreAotShellMoveBaseline(
-        AotManagedUiSmokeResult result,
-        AotShellMoveFixturePaths paths,
-        bool compensation)
+    private async Task<AotManagedUiShellMoveOperationsEvidence>
+        RestoreAotShellMoveBaselineAsync(
+            AotManagedUiSmokeResult result,
+            AotShellMoveFixturePaths paths,
+            bool compensation)
     {
         int restoredCount = 0;
         foreach (AotShellMoveOwnedFile file in paths.OwnedFiles)
@@ -353,15 +354,24 @@ public partial class App
         }
 
         SettingsService.OrganizationHistory.Entries.Clear();
+        // The receipt store owns desktop-organization-history.json beside
+        // settings.json; SettingsService's debounced save and flush never
+        // commit it. Without this durable save the cleared receipts only
+        // exist in memory, so the next phase's fresh process reloads the
+        // pre-clear entries from disk and the restart persistence proof
+        // fails. The store's contract requires persisting every mutation.
+        bool historySaved =
+            await SettingsService.OrganizationHistory.SaveCheckedAsync();
         RequireAotManagedUi(
             result,
+            historySaved &&
             paths.OwnedFiles.All(file =>
                 File.Exists(file.SourcePath) &&
                 !File.Exists(file.DestinationPath)),
             compensation
                 ? "ShellMoveCompensationFilesRestored"
                 : "ShellMoveFilesRestoredByHarness",
-            "The owned Shell move fixture did not return to its source baseline.");
+            "The owned Shell move fixture or its persisted organization history did not return to its source baseline.");
         return new AotManagedUiShellMoveOperationsEvidence
         {
             RestoredByHarness = true,

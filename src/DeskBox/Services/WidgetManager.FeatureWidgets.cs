@@ -743,12 +743,12 @@ public sealed partial class WidgetManager
                 ContentWidgetWindow? contentWindow = _contentWidgets.Values
                     .Distinct()
                     .FirstOrDefault(window =>
-                        window.CurrentContent is FileSurfaceContent surface &&
+                        window.CurrentContent is FileWidgetContentAdapter surface &&
                         string.Equals(
                             surface.WidgetId,
                             targetWidgetId,
                             StringComparison.Ordinal));
-                if (contentWindow?.CurrentContent is FileSurfaceContent fileSurface)
+                if (contentWindow?.CurrentContent is FileWidgetContentAdapter fileSurface)
                 {
                     await fileSurface.ViewModel.RefreshFromConfigAsync();
                     fileSurface.RevealSavedItem(destinationPath);

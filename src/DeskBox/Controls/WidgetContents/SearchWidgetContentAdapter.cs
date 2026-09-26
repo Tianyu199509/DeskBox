@@ -8,72 +8,55 @@ namespace DeskBox.Controls.WidgetContents;
 /// <summary>
 /// Adapts SearchWidgetContent to the IWidgetContent contract.
 /// </summary>
-public sealed class SearchWidgetContentAdapter : IWidgetContent, IWidgetResponsiveLayoutContent, IDisposable
+public sealed class SearchWidgetContentAdapter :
+    WidgetContentAdapterBase,
+    IWidgetResponsiveLayoutContent
 {
-    private readonly Func<FrameworkElement> _viewFactory;
-    private FrameworkElement? _view;
-    private bool _isDisposed;
+    private EventHandler? _searchRequested;
 
     public SearchWidgetContentAdapter(
         WidgetConfig config,
         LocalizationService localizationService,
         SettingsService? settingsService = null,
         Func<FrameworkElement>? viewFactory = null)
+        : base(
+            config,
+            viewFactory ?? (() => new SearchWidgetContent(localizationService, settingsService)))
     {
         if (config.WidgetKind != WidgetKind.Search)
         {
             throw new ArgumentException("Search content requires a Search widget config.", nameof(config));
         }
-
-        Config = config;
-        _viewFactory = viewFactory ?? (() => new SearchWidgetContent(localizationService, settingsService));
     }
 
-    public WidgetConfig Config { get; }
-
-    public string WidgetId => Config.Id;
-
-    public WidgetKind WidgetKind => Config.WidgetKind;
-
-    public FrameworkElement View
+    protected override void OnViewMaterialized(FrameworkElement view)
     {
-        get
+        if (view is SearchWidgetContent content)
         {
-            ObjectDisposedException.ThrowIf(_isDisposed, this);
-            _view ??= _viewFactory();
-            return _view;
+            content.SearchRequested += Content_SearchRequested;
         }
     }
 
     /// <summary>
     /// Raised when the user clicks the widget to open the search popup.
+    /// The adapter holds the handler list itself: subscribing a cold
+    /// adapter must not materialize the view tree (roadmap section 4.5,
+    /// Search row — the accessors used to read View).
     /// </summary>
     public event EventHandler? SearchRequested
     {
-        add
-        {
-            if (View is SearchWidgetContent content)
-            {
-                content.SearchRequested += value;
-            }
-        }
-        remove
-        {
-            if (View is SearchWidgetContent content)
-            {
-                content.SearchRequested -= value;
-            }
-        }
+        add => _searchRequested += value;
+        remove => _searchRequested -= value;
     }
 
-    public Task InitializeAsync()
+    private void Content_SearchRequested(object? sender, EventArgs e)
     {
-        return Task.CompletedTask;
+        _searchRequested?.Invoke(this, e);
     }
 
-    public Task RefreshAsync()
+    public override Task RefreshAsync()
     {
-        if (_view is SearchWidgetContent content)
+        if (MaterializedView is SearchWidgetContent content)
         {
             content.UpdateContent();
         }
@@ -81,20 +64,12 @@ public sealed class SearchWidgetContentAdapter : IWidgetContent, IWidgetResponsi
         return Task.CompletedTask;
     }
 
-    public void ApplyAppearance()
+    public override void ApplyAppearance()
     {
-        if (_view is SearchWidgetContent content)
+        if (MaterializedView is SearchWidgetContent content)
         {
             content.ApplyAppearance();
         }
-    }
-
-    public void OnActivated()
-    {
-    }
-
-    public void OnDeactivated()
-    {
     }
 
     public void BeginResponsiveLayoutTransition(
@@ -102,7 +77,7 @@ public sealed class SearchWidgetContentAdapter : IWidgetContent, IWidgetResponsi
         double targetContentHeight,
         bool isCollapsing)
     {
-        if (_view is SearchWidgetContent content)
+        if (MaterializedView is SearchWidgetContent content)
         {
             content.BeginResponsiveLayoutTransition(
                 targetContentWidth,
@@ -115,7 +90,7 @@ public sealed class SearchWidgetContentAdapter : IWidgetContent, IWidgetResponsi
         double finalContentWidth,
         double finalContentHeight)
     {
-        if (_view is SearchWidgetContent content)
+        if (MaterializedView is SearchWidgetContent content)
         {
             content.CompleteResponsiveLayoutTransition(
                 finalContentWidth,
@@ -125,21 +100,20 @@ public sealed class SearchWidgetContentAdapter : IWidgetContent, IWidgetResponsi
 
     public void CancelResponsiveLayoutTransition()
     {
-        if (_view is SearchWidgetContent content)
+        if (MaterializedView is SearchWidgetContent content)
         {
             content.CancelResponsiveLayoutTransition();
         }
     }
 
-    public void Dispose()
+    protected override void Dispose(bool disposing)
     {
-        if (_isDisposed)
+        if (MaterializedView is SearchWidgetContent content)
         {
-            return;
+            content.SearchRequested -= Content_SearchRequested;
         }
 
-        _isDisposed = true;
-        (_view as IDisposable)?.Dispose();
-        _view = null;
+        (MaterializedView as IDisposable)?.Dispose();
+        _searchRequested = null;
     }
 }

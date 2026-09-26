@@ -22,7 +22,7 @@ public sealed class TodoWidgetContentAdapterTests : IDisposable
     {
         Assert.True(
             typeof(IWidgetGroupContentCacheable).IsAssignableFrom(
-                typeof(QuickCaptureSurfaceContent)));
+                typeof(QuickCaptureWidgetContentAdapter)));
         Assert.True(
             typeof(IWidgetGroupContentCacheable).IsAssignableFrom(
                 typeof(TodoWidgetContentAdapter)));

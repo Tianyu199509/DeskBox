@@ -262,8 +262,8 @@ public sealed partial class WidgetShell : UserControl
     private IWidgetContent? _hostedContent;
     private IWidgetResponsiveLayoutContent? _responsiveLayoutContent;
     private readonly InsetClip _contentTransitionClip;
-    private FileSurfaceContent? _transitionOutgoingFileSurface;
-    private FileSurfaceContent? _transitionIncomingFileSurface;
+    private FileWidgetContentAdapter? _transitionOutgoingFileSurface;
+    private FileWidgetContentAdapter? _transitionIncomingFileSurface;
     private bool _isContentSnapshotTransitionActive;
     private bool _isResponsiveLayoutTransitionActive;
     private double _responsiveTargetContentWidth;
@@ -1147,8 +1147,8 @@ public sealed partial class WidgetShell : UserControl
         IWidgetContent incomingContent)
     {
         ResumeFileSurfaceItemTransitions();
-        _transitionOutgoingFileSurface = outgoingContent as FileSurfaceContent;
-        _transitionIncomingFileSurface = incomingContent as FileSurfaceContent;
+        _transitionOutgoingFileSurface = outgoingContent as FileWidgetContentAdapter;
+        _transitionIncomingFileSurface = incomingContent as FileWidgetContentAdapter;
 
         _transitionOutgoingFileSurface?
             .SuspendItemContainerTransitionsForHostSwitch();
@@ -1163,8 +1163,8 @@ public sealed partial class WidgetShell : UserControl
 
     private void ResumeFileSurfaceItemTransitions()
     {
-        FileSurfaceContent? outgoing = _transitionOutgoingFileSurface;
-        FileSurfaceContent? incoming = _transitionIncomingFileSurface;
+        FileWidgetContentAdapter? outgoing = _transitionOutgoingFileSurface;
+        FileWidgetContentAdapter? incoming = _transitionIncomingFileSurface;
         _transitionOutgoingFileSurface = null;
         _transitionIncomingFileSurface = null;
 
@@ -1550,7 +1550,7 @@ public sealed partial class WidgetShell : UserControl
 
     private void AttachHostedContentEvents()
     {
-        if (_hostedContent is FileSurfaceContent fileSurface)
+        if (_hostedContent is FileWidgetContentAdapter fileSurface)
         {
             fileSurface.ImportBusyChanged += HostedFileSurface_ImportBusyChanged;
             TitleBarGrid.IsHitTestVisible = !fileSurface.IsImportBusy;
@@ -1559,7 +1559,7 @@ public sealed partial class WidgetShell : UserControl
 
     private void DetachHostedContentEvents()
     {
-        if (_hostedContent is FileSurfaceContent fileSurface)
+        if (_hostedContent is FileWidgetContentAdapter fileSurface)
         {
             fileSurface.ImportBusyChanged -= HostedFileSurface_ImportBusyChanged;
         }
@@ -4931,7 +4931,7 @@ public sealed partial class WidgetShell : UserControl
     {
         bool wasActive = _isShellDragActive;
         _isShellDragActive = false;
-        if (wasActive && _hostedContent is FileSurfaceContent fileSurface)
+        if (wasActive && _hostedContent is FileWidgetContentAdapter fileSurface)
         {
             fileSurface.ClearDragSessionVisualState();
         }
@@ -4951,7 +4951,7 @@ public sealed partial class WidgetShell : UserControl
         // Button-up can precede native Drop completion. Rebuilding the file
         // projection here can remove the active target while its last feedback
         // is still Move, authorizing Shell to delete the source shortcut.
-        if (_hostedContent is FileSurfaceContent activeFileSurface &&
+        if (_hostedContent is FileWidgetContentAdapter activeFileSurface &&
             activeFileSurface.ShouldDeferReleasedDragSessionRecovery())
         {
             return false;
@@ -4962,7 +4962,7 @@ public sealed partial class WidgetShell : UserControl
         // real drag leave and can race the hover request repairing this stale
         // session.
         _isShellDragActive = false;
-        if (_hostedContent is FileSurfaceContent fileSurface)
+        if (_hostedContent is FileWidgetContentAdapter fileSurface)
         {
             fileSurface.CompleteReleasedDragSession();
         }

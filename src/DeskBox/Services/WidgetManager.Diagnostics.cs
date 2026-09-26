@@ -10,7 +10,7 @@ public sealed partial class WidgetManager
             .Select(entry => entry.ViewModel)
             .Concat(_contentWidgets.Values
                 .Select(window => window.CurrentContent)
-                .OfType<FileSurfaceContent>()
+                .OfType<FileWidgetContentAdapter>()
                 .Select(content => content.ViewModel))
             .Distinct()
             .SelectMany(viewModel => new[]
@@ -29,7 +29,7 @@ public sealed partial class WidgetManager
             .DistinctBy(window => window.WindowHandle)
             .Count(window =>
                 window.Identity.IsGroupSurface &&
-                window.CurrentContent is FileSurfaceContent);
+                window.CurrentContent is FileWidgetContentAdapter);
         DeskBoxFileHostDiagnostic fileHosts = _fileWidgetHostDiagnostics.CreateSnapshot(
             _fileWidgets.Values
                 .DistinctBy(session => session.Host.WindowHandle)
@@ -39,10 +39,10 @@ public sealed partial class WidgetManager
             .OrderBy(window => window.Identity.SurfaceId, StringComparer.Ordinal)
             .Select((window, index) =>
             {
-                FileSurfaceContent? fileSurface = _contentWidgets.Values
+                FileWidgetContentAdapter? fileSurface = _contentWidgets.Values
                     .FirstOrDefault(contentWindow =>
                         contentWindow.WindowHandle == window.WindowHandle)
-                    ?.CurrentContent as FileSurfaceContent;
+                    ?.CurrentContent as FileWidgetContentAdapter;
                 return new DeskBoxWidgetHostDiagnostic(
                     index + 1,
                     window.Identity.WidgetKind,

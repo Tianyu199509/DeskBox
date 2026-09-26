@@ -94,7 +94,7 @@ public sealed class AotStage5B4C3B2AContractTests
         string runner = Read("scripts/run-aot-todo-notification-activation-smoke.ps1");
         string managedRunner = Read("scripts/run-aot-managed-ui-smoke.ps1");
 
-        Assert.Contains("profile 56 / schema 53", runner, StringComparison.Ordinal);
+        Assert.Contains("profile 59 / schema 55", runner, StringComparison.Ordinal);
         Assert.Contains("Invoke-TodoNotificationActivationPhase", runner, StringComparison.Ordinal);
         Assert.Contains("processIdsDistinct", runner, StringComparison.Ordinal);
         Assert.Contains("executableHashesMatch", runner, StringComparison.Ordinal);

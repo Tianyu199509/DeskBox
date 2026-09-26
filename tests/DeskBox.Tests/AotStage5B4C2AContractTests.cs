@@ -88,7 +88,7 @@ public sealed class AotStage5B4C2AContractTests
     {
         string runner = Read("scripts/run-aot-hotkey-smoke.ps1");
 
-        Assert.Contains("profile 56 / schema 53", runner, StringComparison.Ordinal);
+        Assert.Contains("profile 59 / schema 55", runner, StringComparison.Ordinal);
         Assert.Contains("productionDataFingerprintBefore", runner, StringComparison.Ordinal);
         Assert.Contains("productionDataFingerprintAfter", runner, StringComparison.Ordinal);
         Assert.Contains("SyntheticSendInputForRegisterHotKeyOnly", runner, StringComparison.Ordinal);

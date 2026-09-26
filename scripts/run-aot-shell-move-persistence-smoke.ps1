@@ -508,7 +508,7 @@ foreach ($entry in @(
 }
 
 $settings = [ordered]@{
-    schemaVersion = 5
+    schemaVersion = 9
     language = "en-US"
     autoStart = $false
     autoCheckForUpdates = $false

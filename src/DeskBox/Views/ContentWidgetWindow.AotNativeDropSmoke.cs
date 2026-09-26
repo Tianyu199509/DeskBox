@@ -2,7 +2,9 @@
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Threading;
 using DeskBox.Helpers;
+using DeskBox.Platform;
 
 namespace DeskBox.Views;
 
@@ -184,12 +186,28 @@ internal sealed unsafe class AotNativeHDropDataObject : IDisposable
     private const int Success = 0;
     private const int FormatError = unchecked((int)0x80040064);
     private const int GeneralFailure = unchecked((int)0x80004005);
+    private const int NotImplemented = unchecked((int)0x80004001);
+    private const int NoInterface = unchecked((int)0x80004002);
+    private const int AdviseNotSupported = unchecked((int)0x80040003);
+
+    // The product drop target retains the incoming data object
+    // (Marshal.AddRef/Marshal.Release for shell drop descriptions and the
+    // drag-image helper), and the shell itself queries SetData and
+    // QueryInterface on it. A vtable without a complete IUnknown therefore
+    // crashes the audited process with a null-pointer call, so every
+    // IDataObject slot must carry a valid entry.
+    private static readonly Guid IUnknownIdentifier = new(
+        0x00000000, 0x0000, 0x0000, 0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46);
+    private static readonly Guid IDataObjectIdentifier = new(
+        0x0000010E, 0x0000, 0x0000, 0xC0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46);
 
     private readonly string[] _paths;
     private readonly GCHandle _selfHandle;
     private readonly nint* _vtable;
     private readonly nint* _instance;
+    private int _references;
     private bool _disposed;
+    private bool _destroyed;
 
     internal AotNativeHDropDataObject(IReadOnlyList<string> paths)
     {
@@ -200,20 +218,212 @@ internal sealed unsafe class AotNativeHDropDataObject : IDisposable
         _instance = (nint*)NativeMemory.AllocZeroed(2, (nuint)sizeof(nint));
         _selfHandle = GCHandle.Alloc(this, GCHandleType.Normal);
 
+        _vtable[0] = (nint)(delegate* unmanaged[Stdcall]<
+            nint,
+            Guid*,
+            nint*,
+            int>)&QueryInterface;
+        _vtable[1] = (nint)(delegate* unmanaged[Stdcall]<nint, uint>)&AddRef;
+        _vtable[2] = (nint)(delegate* unmanaged[Stdcall]<nint, uint>)&Release;
         _vtable[3] = (nint)(delegate* unmanaged[Stdcall]<
             nint,
             NativeFormatEtc*,
             NativeStorageMedium*,
             int>)&GetData;
+        _vtable[4] = (nint)(delegate* unmanaged[Stdcall]<
+            nint,
+            NativeFormatEtc*,
+            NativeStorageMedium*,
+            int>)&GetDataHere;
         _vtable[5] = (nint)(delegate* unmanaged[Stdcall]<
             nint,
             NativeFormatEtc*,
             int>)&QueryGetData;
+        _vtable[6] = (nint)(delegate* unmanaged[Stdcall]<
+            nint,
+            NativeFormatEtc*,
+            NativeFormatEtc*,
+            int>)&GetCanonicalFormatEtc;
+        _vtable[7] = (nint)(delegate* unmanaged[Stdcall]<
+            nint,
+            NativeFormatEtc*,
+            NativeStorageMedium*,
+            int,
+            int>)&SetData;
+        _vtable[8] = (nint)(delegate* unmanaged[Stdcall]<
+            nint,
+            uint,
+            nint*,
+            int>)&EnumFormatEtc;
+        _vtable[9] = (nint)(delegate* unmanaged[Stdcall]<
+            nint,
+            NativeFormatEtc*,
+            uint,
+            nint,
+            uint*,
+            int>)&DAdvise;
+        _vtable[10] = (nint)(delegate* unmanaged[Stdcall]<nint, uint, int>)&DUnadvise;
+        _vtable[11] = (nint)(delegate* unmanaged[Stdcall]<nint, nint*, int>)&EnumDAdvise;
         _instance[0] = (nint)_vtable;
         _instance[1] = GCHandle.ToIntPtr(_selfHandle);
     }
 
     internal nint Pointer => (nint)_instance;
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvStdcall)])]
+    private static int QueryInterface(
+        nint self,
+        Guid* interfaceId,
+        nint* interfacePointer)
+    {
+        if (interfacePointer is not null)
+        {
+            *interfacePointer = 0;
+        }
+        if (self == 0 || interfaceId is null || interfacePointer is null)
+        {
+            return NoInterface;
+        }
+
+        if (*interfaceId != IUnknownIdentifier &&
+            *interfaceId != IDataObjectIdentifier)
+        {
+            return NoInterface;
+        }
+
+        *interfacePointer = self;
+        // Returning the object must take a reference (COM contract), but an
+        // UnmanagedCallersOnly entry point cannot be invoked directly, so the
+        // increment is inlined from the shared owner lookup.
+        AotNativeHDropDataObject? queried = TryGetOwner(self);
+        if (queried is not null)
+        {
+            _ = Interlocked.Increment(ref queried._references);
+        }
+
+        return Success;
+    }
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvStdcall)])]
+    private static uint AddRef(nint self)
+    {
+        AotNativeHDropDataObject? owner = TryGetOwner(self);
+        if (owner is null)
+        {
+            return 0;
+        }
+
+        // The product retains the data object across OLE callbacks (drop
+        // descriptions and the shell drag-image helper). The reference count
+        // keeps the native memory alive until the product releases it, even
+        // after the harness has finished driving its callbacks.
+        return (uint)Interlocked.Increment(ref owner._references);
+    }
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvStdcall)])]
+    private static uint Release(nint self)
+    {
+        AotNativeHDropDataObject? owner = TryGetOwner(self);
+        if (owner is null)
+        {
+            return 0;
+        }
+
+        int count = Interlocked.Decrement(ref owner._references);
+        if (count == 0 && owner._disposed)
+        {
+            owner.DestroyNativeStorage();
+        }
+
+        return (uint)count;
+    }
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvStdcall)])]
+    private static int GetDataHere(
+        nint self,
+        NativeFormatEtc* format,
+        NativeStorageMedium* medium)
+    {
+        return NotImplemented;
+    }
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvStdcall)])]
+    private static int GetCanonicalFormatEtc(
+        nint self,
+        NativeFormatEtc* format,
+        NativeFormatEtc* canonical)
+    {
+        return NotImplemented;
+    }
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvStdcall)])]
+    private static int SetData(
+        nint self,
+        NativeFormatEtc* format,
+        NativeStorageMedium* medium,
+        int release)
+    {
+        if (medium is null)
+        {
+            return FormatError;
+        }
+
+        // Accept and discard shell-owned storage (DROPDESCRIPTION,
+        // DragImageBits) exactly like a real Explorer drag source. When the
+        // caller transfers ownership, release the storage it handed over.
+        if (release != 0)
+        {
+            NativeStorageMedium owned = *medium;
+            Win32Helper.ReleaseStorageMedium(ref owned);
+            *medium = owned;
+        }
+
+        return Success;
+    }
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvStdcall)])]
+    private static int EnumFormatEtc(nint self, uint direction, nint* enumerator)
+    {
+        if (enumerator is not null)
+        {
+            *enumerator = 0;
+        }
+
+        return NotImplemented;
+    }
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvStdcall)])]
+    private static int DAdvise(
+        nint self,
+        NativeFormatEtc* format,
+        uint flags,
+        nint sink,
+        uint* connection)
+    {
+        if (connection is not null)
+        {
+            *connection = 0;
+        }
+
+        return AdviseNotSupported;
+    }
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvStdcall)])]
+    private static int DUnadvise(nint self, uint connection)
+    {
+        return AdviseNotSupported;
+    }
+
+    [UnmanagedCallersOnly(CallConvs = [typeof(CallConvStdcall)])]
+    private static int EnumDAdvise(nint self, nint* enumerator)
+    {
+        if (enumerator is not null)
+        {
+            *enumerator = 0;
+        }
+
+        return AdviseNotSupported;
+    }
 
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvStdcall)])]
     private static int QueryGetData(nint self, NativeFormatEtc* format)
@@ -281,11 +491,50 @@ internal sealed unsafe class AotNativeHDropDataObject : IDisposable
 
     private static AotNativeHDropDataObject GetOwner(nint self)
     {
-        nint handlePointer = ((nint*)self)[1];
-        return GCHandle.FromIntPtr(handlePointer).Target as
-            AotNativeHDropDataObject ??
+        return TryGetOwner(self) ??
             throw new InvalidOperationException(
                 "The AOT HDROP data object lost its managed owner.");
+    }
+
+    private static AotNativeHDropDataObject? TryGetOwner(nint self)
+    {
+        if (self == 0)
+        {
+            return null;
+        }
+
+        nint handlePointer = ((nint*)self)[1];
+        return GCHandle.FromIntPtr(handlePointer).Target as AotNativeHDropDataObject;
+    }
+
+    private void DestroyNativeStorage()
+    {
+        if (_destroyed)
+        {
+            return;
+        }
+
+        _destroyed = true;
+        _selfHandle.Free();
+        NativeMemory.Free(_instance);
+        NativeMemory.Free(_vtable);
+    }
+
+    public void Dispose()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        _disposed = true;
+        // The product may still hold AddRef'd references that it will
+        // release in a later OLE callback (for example the explicit
+        // DragLeave probe). Defer the native teardown to the final Release.
+        if (Volatile.Read(ref _references) == 0)
+        {
+            DestroyNativeStorage();
+        }
     }
 
     private nint CreateHDrop()
@@ -325,19 +574,6 @@ internal sealed unsafe class AotNativeHDropDataObject : IDisposable
         }
 
         return hDrop;
-    }
-
-    public void Dispose()
-    {
-        if (_disposed)
-        {
-            return;
-        }
-
-        _disposed = true;
-        _selfHandle.Free();
-        NativeMemory.Free(_instance);
-        NativeMemory.Free(_vtable);
     }
 }
 

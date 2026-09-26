@@ -14,7 +14,7 @@ internal sealed class FileWidgetSession
 {
     internal FileWidgetSession(
         ContentWidgetWindow host,
-        FileSurfaceContent content)
+        FileWidgetContentAdapter content)
     {
         Host = host;
         Content = content;
@@ -22,7 +22,7 @@ internal sealed class FileWidgetSession
 
     internal ContentWidgetWindow Host { get; }
 
-    internal FileSurfaceContent Content { get; }
+    internal FileWidgetContentAdapter Content { get; }
 
     internal WidgetViewModel ViewModel => Content.ViewModel;
 

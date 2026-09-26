@@ -31,7 +31,7 @@ public sealed partial class ContentWidgetWindow
 
     private void RootGrid_DragOver(object sender, DragEventArgs e)
     {
-        if (CurrentContent is FileSurfaceContent file)
+        if (CurrentContent is FileWidgetContentAdapter file)
         {
             // The transparent resize grid sits above the content along every
             // window edge. Reuse the file surface's normal feedback there so
@@ -77,7 +77,7 @@ public sealed partial class ContentWidgetWindow
 
     private async void RootGrid_Drop(object sender, DragEventArgs e)
     {
-        if (CurrentContent is FileSurfaceContent file)
+        if (CurrentContent is FileWidgetContentAdapter file)
         {
             file.HandleHostEdgeDrop(e);
             return;
@@ -106,7 +106,7 @@ public sealed partial class ContentWidgetWindow
 
     private async void RootGrid_PreviewKeyDown(object sender, KeyRoutedEventArgs e)
     {
-        if (CurrentContent is FileSurfaceContent fileSurface &&
+        if (CurrentContent is FileWidgetContentAdapter fileSurface &&
             await fileSurface.TryHandleClipboardShortcutAsync(e))
         {
             return;

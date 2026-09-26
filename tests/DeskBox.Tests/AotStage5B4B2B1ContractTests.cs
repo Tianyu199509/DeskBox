@@ -132,7 +132,7 @@ public sealed class AotStage5B4B2B1ContractTests
 
         Assert.Contains("aot-5b4b2b1-quick-capture", manager, StringComparison.Ordinal);
         Assert.Contains("_contentWidgets.TryGetValue", manager, StringComparison.Ordinal);
-        Assert.Contains("window.CurrentContent is QuickCaptureSurfaceContent", manager, StringComparison.Ordinal);
+        Assert.Contains("window.CurrentContent is QuickCaptureWidgetContentAdapter adapter", manager, StringComparison.Ordinal);
         Assert.Contains("WindowHandle", manager, StringComparison.Ordinal);
         Assert.Contains("WindowContentRoot?.XamlRoot", manager, StringComparison.Ordinal);
         Assert.Contains("Visible", manager, StringComparison.Ordinal);

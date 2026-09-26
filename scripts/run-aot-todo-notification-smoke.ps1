@@ -385,18 +385,18 @@ if (-not (Test-Path -LiteralPath $auditSummaryPath -PathType Leaf)) {
 $auditSummary = Get-Content `
     -LiteralPath $auditSummaryPath `
     -Raw | ConvertFrom-Json
-if ([int]$auditSummary.auditProfileVersion -ne 54 -or
-    [int]$auditSummary.schemaVersion -ne 51 -or
+if ([int]$auditSummary.auditProfileVersion -ne 59 -or
+    [int]$auditSummary.schemaVersion -ne 55 -or
     -not [bool]$auditSummary.sourceStableDuringAudit -or
     [string]$auditSummary.configuration -cne "Release" -or
     [string]$auditSummary.platform -cne "x64" -or
     [string]$auditSummary.runtimeIdentifier -cne "win-x64" -or
     @($auditSummary.warningCodes | Where-Object { $_ -ceq "WMC1506" }).Count -ne 0 -or
-    [int]$auditSummary.warningCodeCounts.WMC1510 -ne 1213 -or
+    [int]$auditSummary.warningCodeCounts.WMC1510 -ne 866 -or
     @($auditSummary.alwaysThrowMessages).Count -ne 0 -or
     [int]$auditSummary.rustNative.abiVersion -ne 2 -or
     [int]$auditSummary.rustNative.capabilities -ne 511) {
-    throw "Todo notification smoke requires a successful profile 56 / schema 53 audit."
+    throw "Todo notification smoke requires a successful profile 59 / schema 55 audit."
 }
 
 if ([string]::IsNullOrWhiteSpace($DataRoot)) {
@@ -425,7 +425,7 @@ New-Item -ItemType Directory -Path $dataDirectory -Force | Out-Null
     -Encoding UTF8
 
 $settings = [ordered]@{
-    schemaVersion = 5
+    schemaVersion = 9
     language = "zh-CN"
     autoStart = $false
     autoCheckForUpdates = $false

@@ -150,7 +150,7 @@ public sealed partial class ContentWidgetWindow
 
     internal Task RevealItemAsync(string? itemId)
     {
-        return _contentHost.CurrentContent is QuickCaptureSurfaceContent quickCapture
+        return _contentHost.CurrentContent is QuickCaptureWidgetContentAdapter quickCapture
             ? quickCapture.RevealItemAsync(itemId)
             : Task.CompletedTask;
     }
@@ -380,7 +380,7 @@ public sealed partial class ContentWidgetWindow
             _config,
             behavior);
         SettingsService.UpdateWidget(_config);
-        if (CurrentContent is FileSurfaceContent fileSurface)
+        if (CurrentContent is FileWidgetContentAdapter fileSurface)
         {
             _ = fileSurface.ApplyFolderOpenBehaviorChangeAsync();
         }

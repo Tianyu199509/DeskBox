@@ -189,7 +189,7 @@ public sealed class AotStage5B4C1C1ContractTests
             "$settingsPath = Join-Path $dataDirectory \"settings.json\"",
             runner,
             StringComparison.Ordinal);
-        Assert.Contains("schemaVersion = 5", runner, StringComparison.Ordinal);
+        Assert.Contains("schemaVersion = 9", runner, StringComparison.Ordinal);
         Assert.Contains(
             "hasResolvedInitialFileWidgetSetup = $true",
             runner,

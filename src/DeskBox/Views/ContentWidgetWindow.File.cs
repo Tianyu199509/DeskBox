@@ -8,7 +8,7 @@ namespace DeskBox.Views;
 
 public sealed partial class ContentWidgetWindow
 {
-    internal void ActivateQuickLookNavigationTarget(FileSurfaceContent content)
+    internal void ActivateQuickLookNavigationTarget(FileWidgetContentAdapter content)
     {
         if (!Visible || !ReferenceEquals(CurrentContent, content))
         {
@@ -21,7 +21,7 @@ public sealed partial class ContentWidgetWindow
     }
 
     private WidgetCompactPresentation CreateFileCompactPresentation(
-        FileSurfaceContent file,
+        FileWidgetContentAdapter file,
         string contentMode)
     {
         bool hidesSensitiveContent =

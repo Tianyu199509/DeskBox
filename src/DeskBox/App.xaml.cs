@@ -1723,7 +1723,14 @@ public partial class App : Application
     private TodoReminderService CreateTodoReminderService()
     {
 #if DESKBOX_NATIVE_AOT && DESKBOX_AOT_SMOKE_HARNESS
-        if (TryGetAotTodoNotificationForwardingClock() is not null)
+        // The router computes SnoozedUntil from GetTodoNotificationActivationNow,
+        // which any fixed-clock notification smoke controls. SnoozeUntilAsync
+        // rejects targets not after its own clock, so the same fixed clock must
+        // reach the service; otherwise the fixture's snooze time lands in the
+        // past against the real wall clock and the mutation is refused.
+        if (TryGetAotTodoNotificationForwardingClock() is not null ||
+            TryGetAotTodoNotificationSurfaceClock() is not null ||
+            TryGetAotTodoNotificationUserClickClock() is not null)
         {
             return new TodoReminderService(
                 SettingsService,

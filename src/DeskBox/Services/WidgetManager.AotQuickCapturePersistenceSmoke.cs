@@ -23,7 +23,8 @@ public sealed partial class WidgetManager
         }
 
         await window.ContentReadyTask;
-        if (window.CurrentContent is QuickCaptureSurfaceContent surface)
+        if (window.CurrentContent is QuickCaptureWidgetContentAdapter adapter &&
+            adapter.View is QuickCaptureSurfaceContent surface)
         {
             return new AotQuickCapturePersistenceHost(
                 surface,
