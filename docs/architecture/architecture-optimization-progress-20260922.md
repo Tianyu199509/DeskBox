@@ -586,13 +586,12 @@ A+B 工作树已补齐最终 QuickCapture 退出/快捷入口和 Todo 非有限�
 
 | 批 | 节 | 写入点 | 触面文件 | 共享棘轮资源 |
 |---|---|---|---|---|
-| 35 | 文件显示 | 6 | PreferenceCallbacks（ShowFileExtensions/HideShortcutArrowOverlay/ShowImageFilesAsIcons/ShowListItemDetails/ShowFileItemPathTooltips/HideShortcutExtensionWhenShowingFileExtensions） | 与 31 同文件分批，注意 ratchet 计数联动 |
 | 36 | 文件栈/文件格子 | 10 | FileStackOptions 10 | AotStage5B4B1 FileStack 源码钉 |
 | 37 | 分组导航 | 4 | GroupNavigation 4（WheelSwitch/HoverSwitch/DefaultTitleDisplayMode/DefaultNavigationStyle） | AotStage5B4B1 对 GroupNavigation 源码钉 |
 | 38 | 功能节（音乐/天气/Glance）+ QuickCapture 编辑器组 | 37 | FeatureOptions 29、FeatureCallbacks 2、WeatherOptions 1、ContentEditorOptions 5 | ModuleBoundary App.Current 例外（FeatureOptions=4）、FeatureSettingsBoundary quickCaptureWrite 门禁 |
 | 39 | 存储/诊断尾巴 | 2 | PreferenceCommands 1（DefaultManagedStorageRootPath）、AboutAndUpdates 1（LastUpdateCheckAt） | SettingsSync 133 处快照读随各批顺手收缩 |
 
-合计 6+10+4+37+2 = 59（第 29 批外观 28、第 33 批胶囊/紧凑 16、第 34 批交互 12 已完成并在各自批次记录中销账）。**外部残余写入者**（不在 SettingsViewModel 内、后续单独处理）：OnboardingWindow.Appearance.cs 1 处 WidgetMaterialType 写入、OnboardingWindow.Hotkey.cs 的 AutoStart 直写（onboarding 批次）、SettingsService 自身的加载/迁移/默认值路径（Track B 界面）。
+合计 10+4+37+2 = 53（第 29 批外观 28、第 33 批胶囊/紧凑 16、第 34 批交互 12、第 35 批文件显示 6 已完成并在各自批次记录中销账）。**外部残余写入者**（不在 SettingsViewModel 内、后续单独处理）：OnboardingWindow.Appearance.cs 1 处 WidgetMaterialType 写入、OnboardingWindow.Hotkey.cs 的 AutoStart 直写（onboarding 批次）、SettingsService 自身的加载/迁移/默认值路径（Track B 界面）。
 
 ### 本批实现
 
@@ -758,6 +757,33 @@ Simon 拍板放弃"随触碰 ratchet"，对 Platform 域的 DllImport/LibraryImp
 - 隔离 Debug 启动：数据根 `C:/Users/simon/AppData/Local/DeskBox-Dev/interaction-track-a-34-20260926`（DESKBOX_DEV_DATA_ROOT）预置交互 12 字段非默认值（autoStart/autoCheckForUpdates/doubleClickToOpen/resizeSnap/keepVisible/showHoverButtons/idle+immediateTrim 全 false、fileItemSystemContextMenuEnabled true、widgetSnapSpacing 14、widgetLayerMode QuickReveal、widgetHoverButtonActions "LockPosition,Delete"）。canonical 路径 `src/DeskBox/bin/Debug/net10.0-windows10.0.22621.0/DeskBox.exe` 启动 PID 33680，启动管线 **35 步、0 degraded、0 failed**（日志中 F7 RegisterHotKey error=1409 为本机并存生产实例占用热键的环境性记录，非启动步失败）；停机后磁盘 12 个预置字段全部保持（settings.json 经首启规范化补全 schema，预置值原样）。验证后已按路径停止本 worktree 实例。
 - `git diff --check` 通过。
 - 已知残余：设置壳 ApplySettingsSnapshot/构造的交互字段读仍走门面读（无写入，ratchet 6 计数内）；OnboardingWindow.Hotkey.cs 的 2 处 AutoStart 直写与 App.xaml.cs ApplyDefaultAutoStartOnce 的 1 处（开发根豁免外的开机默认回映）属宿主/onboarding 侧写入，不在 Track A 设置页清零口径内，已登记到剩余批次表的外部残余写入者行；未做真实设置页点击（自启开关、吸附间距滑杆、悬停按钮组合）的设备级手感验收，自动化证据不替代交互页实际操作验收。
+
+## 第三十五批：文件显示设置节迁移（Track A 第四批）
+
+实施基线：`2ee5fb56`（main，含批 29-34），worktree `codex/final-settings-filedisplay`。对象是第二十九批清点表中"35 文件显示"行：PreferenceCallbacks 的 6 个写入点（ShowFileExtensions/HideShortcutExtensionWhenShowingFileExtensions/HideShortcutArrowOverlay/ShowImageFilesAsIcons/ShowListItemDetails/ShowFileItemPathTooltips），全部为"写值→SaveDebounced"纯直保存族。
+
+**协调器归属决策：独立建 `FileDisplaySettingsCoordinator`（不并入外观/胶囊/交互协调器）。** 判据与批 33/34 同款：文件显示族写入与外观活预览机制零耦合，6 个写入点均为直保存，从不走 `SaveAppearanceChange`/`RequestAppearancePreview` 链；字段全部落在 `FileWidget` 切片（文件格子的呈现偏好），与交互族共享 partial 但语义独立（清点表"与 31 同文件分批"即指此）。并入交互会把"文件怎么显示"搅进"窗口怎么操作"；并入外观会把直保存搅进活预览端口。协调器一律走切片路径（`Settings.FileWidget.<字段>`），FacadePassthroughAccess 棘轮零新增。迁移后 PreferenceCallbacks 的平铺写入清零（门禁条目 6→0 删除），partial 内仅剩的 `_settingsService` 访问是 QuiescenceWorkingSetTrimEnabled 的 Performance 切片写（非平铺门面，批 34 已按切片路径留下）。
+
+| 职责 | 所有者 |
+|---|---|
+| 文件显示 6 字段的唯一设置页写入、每字段原保存语义、未变化跳过守卫 | `Services/FileDisplaySettingsCoordinator`，经 `Contracts/IFileDisplaySettings` 暴露 |
+| 文件显示节编辑器缝（设置壳转发目标） | `Features/FileDisplay/FileDisplaySettingsViewModel`（无复制状态） |
+| XAML 绑定名、AOT 生成属性、文案、回调守卫（`_isRestoringDefaults`；ShowImageFilesAsIcons/ShowFileItemPathTooltips 原有的 `_isApplyingSettingsSnapshot` 追加守卫） | `SettingsViewModel` 兼容门面（PreferenceCallbacks partial） |
+| 装配 | App 创建协调器与编辑器，经 SettingsWindow 注入 SettingsViewModel（与批 29/33/34 同款） |
+
+特有语义保全：ShowFileExtensions/HideShortcutExtensionWhenShowingFileExtensions/ShowImageFilesAsIcons 变更后的图标缓存清理与文件重投影链**零触碰**——这些仍只由 SaveDebounced 触发的既有 SettingsChanged 广播驱动（WidgetViewModel.OnSettingsChanged 比较 `_showImageFilesAsIcons`/`_hideShortcutArrowOverlay`/`_showFileExtensions` 缓存后走 FileService.ClearIconCache/RefreshItemDisplayNames），宿主侧消费代码原样；协调器新增的"未变化跳过"与回调驱动等价（ObservableProperty 只在值真变时触发回调，跳过只挡端口级冗余重写，与批 33/34 同款语义精确化）。壳侧 RestoringDefaults 链（SettingsService.ApplyDefaultPreferences + ApplySettingsSnapshot 在 `_isRestoringDefaults` 下写盘）与 SettingsService 加载/默认值路径（Track B）不在本批范围。
+
+门禁收缩：`SettingsSliceOwnershipContractTests` 平铺清单 PreferenceCallbacks 6→0 删除条目（该 partial 自此无平铺门面访问），只删不加；`FeatureSettingsBoundaryContractTests.SettingsShell_DoesNotWriteMigratedFeatureFieldsDirectly` 新增文件显示字段写入门禁（6 字清单，含 `(?:FileWidget\s*\.\s*)?` 切片前缀变体）；ModuleBoundary 的 PreferenceCallbacks App.Current=3 例外不变（属批 34 注明的宿主侧联动，本批 6 字段无 App.Current 访问）；AotStage5B4B2A 对 App.AotManagedUiSmoke 的 `ShowFileExtensions` 源码钉不受影响（钉的是烟具经真实 ViewModel 属性写设置，路径改经编辑器后行为等价）；AOT 绑定面（属性零增删）自动保持。磁盘 schema、XAML、文案零变化。
+
+### 第三十五批验证记录
+
+- restore Updater 后 `dotnet build src/DeskBox/DeskBox.csproj -p:Platform=x64`：0 错误、11 警告（均为既有位置，与批 34 后同位）。
+- 定向测试 34/34 通过（新增 FileDisplaySettingsCoordinatorTests 4 用例：6 字段写入+未变化跳过、ReadAll 快照磁盘往返、显式保存落盘且未触字段保持默认、停止后拒写；SettingsSliceOwnership 7；FeatureSettingsBoundary 3；ModuleBoundary 20）。
+- 全量 x64 测试：**4,306/4,306 通过**（新基线 4,302 + 本批 4 个新用例）。
+- AOT 定义编译检查（x64、`DefineConstants="TRACE;...;DEBUG;DESKBOX_NATIVE_AOT"`，`ArtifactsPath`/`RestorePackagesPath` 隔离于 `.aotcheck/`，检查后已清理）：11 警告（与批 32/33/34 同位）、**0 错误**。未执行 Native AOT publish/link，仍为发版门禁。
+- 隔离 Debug 启动：数据根 `C:/Users/simon/AppData/Local/DeskBox-Dev/filedisplay-track-a-35-20260926`（DESKBOX_DEV_DATA_ROOT）预置文件显示 6 字段非默认值（showFileExtensions=true、hideShortcutExtensionWhenShowingFileExtensions=false、hideShortcutArrowOverlay=false、showImageFilesAsIcons=true、showListItemDetails=true、showFileItemPathTooltips=false，另预置 hasCompletedOnboarding/hasResolvedInitialFileWidgetSetup=true 保持无格子安静启动）。canonical 路径 `src/DeskBox/bin/Debug/net10.0-windows10.0.22621.0/DeskBox.exe` 启动 PID 28520，启动管线 35 步（5 critical）、0 degraded、0 failed（日志中 F7 RegisterHotKey error=1409 为本机并存实例占用热键的环境性记录，非启动步失败）；运行中与停止后磁盘 6 个预置字段均保持原值（首启规范化补全 schema，预置值原样；widget-layout.json 由 store 正常领养生成空布局）。停止采用按 PID 强制结束（关闭到托盘语义下 WM_CLOSE 不触发退出序列，无 CLI 退出入口），未走完整退出管线——本批验证的字段在启动加载时已由既有保存链定格，不受影响。验证后已确认本 worktree 实例归零（并存的他 worktree 实例未触碰）。
+- `git diff --check` 通过。
+- 已知残余：设置壳 ApplySettingsSnapshot/构造的文件显示字段读仍走门面读（无写入，FacadeAccessManifest SettingsSync 133/SettingsViewModel.cs 94 计数内）；未做真实设置页点击（扩展名开关、图片图标投影切换后真实文件夹图标的实际重投影效果）的设备级手感验收，自动化证据不替代文件显示页实际操作与图标刷新的视觉验收。
 
 # 架构优化进度与下一批计划
 
