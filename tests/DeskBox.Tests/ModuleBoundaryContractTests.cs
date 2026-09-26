@@ -414,7 +414,9 @@ public sealed class ModuleBoundaryContractTests
         ["src/DeskBox/App.AotMusicVolumeMutationSmoke.cs"] = 3,
         ["src/DeskBox/App.AotMusicVolumeReadSmoke.cs"] = 2,
         ["src/DeskBox/App.AotMusicVolumeSessionMutationSmoke.cs"] = 3,
-        ["src/DeskBox/App.AotNativeDropSmoke.cs"] = 4,
+        // +1: the 5B-4C1C2A managed-card probe deletes the destination file
+        // it just created inside the owned native-drop fixture widget root.
+        ["src/DeskBox/App.AotNativeDropSmoke.cs"] = 5,
         ["src/DeskBox/App.AotQuickAccessMutationSmoke.cs"] = 2,
         ["src/DeskBox/App.AotShellMoveSmoke.cs"] = 2,
         ["src/DeskBox/App.AotShellSmoke.cs"] = 2,

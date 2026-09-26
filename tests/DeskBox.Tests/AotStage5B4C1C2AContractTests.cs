@@ -133,7 +133,22 @@ public sealed class AotStage5B4C1C2AContractTests
         Assert.Contains("ProgressDeferredToShellTransfer", scenario, StringComparison.Ordinal);
         Assert.Contains("duringImport.IsImportBusy", scenario, StringComparison.Ordinal);
         Assert.Contains("!duringImport.CardVisible", scenario, StringComparison.Ordinal);
-        Assert.Contains("WaitForAotImportBusySnapshotAsync", scenario, StringComparison.Ordinal);
+        // The busy sample must be taken past the product's 120 ms card-show
+        // delay, or the "card invisible" result is indistinguishable from
+        // "not due to show yet" — the timing hole this stage closed.
+        Assert.Contains("WaitForAotImportBusyPastCardDelayAsync", scenario, StringComparison.Ordinal);
+        Assert.Contains("AotImportCardDelayProofFloorMilliseconds", scenario, StringComparison.Ordinal);
+        Assert.Contains("duringImport.BusyElapsedMilliseconds", scenario, StringComparison.Ordinal);
+        // The managed (non-shell-delegated) transfer must show the acrylic
+        // card at runtime while busy — the positive counterpart of the shell
+        // suppression proof above.
+        Assert.Contains("WaitForAotImportCardVisibleSnapshotAsync", scenario, StringComparison.Ordinal);
+        Assert.Contains("containsTemporaryFiles: true", scenario, StringComparison.Ordinal);
+        Assert.Contains("NativeDropManagedImportShowedAcrylicCard", scenario, StringComparison.Ordinal);
+        Assert.Contains("cardShown.BackgroundIsAcrylicBrush", scenario, StringComparison.Ordinal);
+        Assert.Contains("cardShown.CanvasZIndex == 1000", scenario, StringComparison.Ordinal);
+        Assert.Contains("NativeDropManagedImportSettled", scenario, StringComparison.Ordinal);
+        Assert.Contains("NativeDropManagedCardProbeCleanedUp", scenario, StringComparison.Ordinal);
         Assert.Contains("GetAotNativeFolderVisualState(", probe, StringComparison.Ordinal);
         // The drop visual is a neutral hover surface with no border, so the
         // probe reports the recorded drop target instead of drawing state.
@@ -185,6 +200,12 @@ public sealed class AotStage5B4C1C2AContractTests
         Assert.Contains("Wait-NaturalPreviewExit", runner, StringComparison.Ordinal);
         Assert.Contains("Stop-ExactPreviewProcess", runner, StringComparison.Ordinal);
         Assert.Contains("profile 59 / schema 55", runner, StringComparison.Ordinal);
+        // The runner re-checks both directions of the card contract from the
+        // serialized evidence: shell-delegated stays cardless, managed shows
+        // the acrylic top-layer card.
+        Assert.Contains("managedCardImport.cardShown.cardVisible", runner, StringComparison.Ordinal);
+        Assert.Contains("managedCardImport.cardShown.backgroundIsAcrylicBrush", runner, StringComparison.Ordinal);
+        Assert.Contains("managedCardImport.destinationRemovedAfterProbe", runner, StringComparison.Ordinal);
     }
 
     [Fact]

@@ -12,6 +12,14 @@ public partial class App
 {
     private const uint AotNativeDropControlKeyState = 0x0008;
 
+    // The product delays the acrylic import card by 120 ms
+    // (FileSurfaceContent.ImportProgress.ImportCardShowDelay) before showing
+    // it, so a "card invisible" sample only proves the Shell delegation
+    // suppressed the card once the busy window has outlived that delay plus
+    // timer, dispatcher and polling slack. Sampling before this floor cannot
+    // distinguish "suppressed" from "not due to show yet".
+    private const int AotImportCardDelayProofFloorMilliseconds = 150;
+
     private static readonly string[] AotNativeDropBaselineSurfaceNames =
     [
         AotNativeDropFixture.TargetFolderName,
@@ -259,6 +267,16 @@ public partial class App
             AotNativeDropMutationSurfaceNames,
             expectAtMappedRoot: true);
 
+        // Runtime coverage for the acrylic card itself: the managed (non
+        // shell-delegated) transfer engine is the path a browser file or URL
+        // download drop takes, and its card MUST become visible while the
+        // surface is busy. This is the counterpart of the suppression proof
+        // above: one engine must show the card, the other must not.
+        evidence.ManagedCardImport = await InvokeAotNativeDropManagedCardImportAsync(
+            result,
+            host,
+            paths);
+
         bool copySemantics =
             File.Exists(paths.CopyLargeSourceFile) &&
             Directory.Exists(paths.CopySourceFolder) &&
@@ -340,16 +358,23 @@ public partial class App
                 // Physical-file copies delegate to the Windows Shell engine,
                 // which owns the native progress window. The widget surface
                 // must stay busy for the transfer without painting a second,
-                // competing progress card over the Shell's own progress.
-                duringImport = await WaitForAotImportBusySnapshotAsync(
+                // competing progress card over the Shell's own progress. The
+                // card's own show delay is 120 ms, so the busy sample is only
+                // taken once the window has outlived that delay: an earlier
+                // sample could not tell suppression from "not due yet".
+                duringImport = await WaitForAotImportBusyPastCardDelayAsync(
                     host,
                     TimeSpan.FromSeconds(5));
                 RequireAotManagedUi(
                     result,
                     duringImport.IsImportBusy &&
-                    !duringImport.CardVisible,
+                    !duringImport.CardVisible &&
+                    duringImport.BusyElapsedMilliseconds >=
+                        AotImportCardDelayProofFloorMilliseconds,
                     stepPrefix + "ProgressDeferredToShellTransfer",
-                    "The delegated shell transfer did not keep the surface busy without a competing widget progress card.");
+                    "The delegated shell transfer did not keep the surface " +
+                    "busy without a competing widget progress card after the " +
+                    "import-card delay elapsed.");
             }
             else
             {
@@ -381,26 +406,198 @@ public partial class App
         }
     }
 
+    private async Task<AotManagedUiNativeDropManagedCardEvidence>
+        InvokeAotNativeDropManagedCardImportAsync(
+            AotManagedUiSmokeResult result,
+            AotNativeDropSurfaceHost host,
+            AotNativeDropFixturePaths paths)
+    {
+        AotNativeDropProgressSnapshot settledBeforeProbe =
+            host.Surface.CaptureAotNativeDropProgress();
+        RequireAotManagedUi(
+            result,
+            !settledBeforeProbe.IsImportBusy &&
+            !settledBeforeProbe.CardVisible,
+            "NativeDropManagedCardImportStartedIdle",
+            "The managed-card probe requires an idle surface with no visible progress card.");
+
+        string[] widgetRootFilesBefore = await Task.Run(() =>
+            Directory.GetFiles(paths.WidgetRoot));
+        var busyStarted = new TaskCompletionSource<bool>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        void OnImportBusyChanged(bool busy)
+        {
+            if (busy)
+            {
+                busyStarted.TrySetResult(true);
+            }
+        }
+
+        host.Surface.ImportBusyChanged += OnImportBusyChanged;
+        try
+        {
+            // containsTemporaryFiles routes every path through the product's
+            // ForceManagedCopy leg (the exact path a browser file or URL
+            // download drop takes): the managed chunked engine runs with
+            // useShellProgress: false while the surface tracks busy state and
+            // delays the acrylic card, so once the busy window outlives the
+            // 120 ms delay the card must be visible.
+            Task<bool> importTask = host.Surface.ImportNativeDroppedFilesAsync(
+                [paths.CopyLargeSourceFile],
+                containsTemporaryFiles: true,
+                copyWhenMapped: true);
+            await busyStarted.Task.WaitAsync(TimeSpan.FromSeconds(15));
+            AotNativeDropProgressSnapshot cardShown =
+                await WaitForAotImportCardVisibleSnapshotAsync(
+                    host,
+                    TimeSpan.FromSeconds(30));
+            RequireAotManagedUi(
+                result,
+                cardShown.IsImportBusy &&
+                cardShown.CardVisible &&
+                cardShown.BackgroundIsAcrylicBrush &&
+                cardShown.CanvasZIndex == 1000,
+                "NativeDropManagedImportShowedAcrylicCard",
+                "The managed (non-shell) transfer did not show the top-layer acrylic import card while busy.");
+
+            bool importAccepted = await importTask;
+            AotNativeDropProgressSnapshot afterImport =
+                host.Surface.CaptureAotNativeDropProgress();
+            RequireAotManagedUi(
+                result,
+                importAccepted &&
+                !afterImport.IsImportBusy &&
+                !afterImport.CardVisible,
+                "NativeDropManagedImportSettled",
+                "The managed-card import did not complete and collapse its progress card.");
+
+            string destinationFile = await Task.Run(() =>
+                Directory.GetFiles(paths.WidgetRoot)
+                    .Except(
+                        widgetRootFilesBefore,
+                        StringComparer.OrdinalIgnoreCase)
+                    .Single());
+            await Task.Run(() => File.Delete(destinationFile));
+            AotLocalFileSurfaceSnapshot restoredSurface =
+                await host.Surface.WaitForAotLocalFileSurfaceAsync(
+                    paths.WidgetRoot,
+                    AotNativeDropMutationSurfaceNames,
+                    expectAtMappedRoot: true);
+
+            var evidence = new AotManagedUiNativeDropManagedCardEvidence
+            {
+                CardShown = MapAotNativeDropProgress(cardShown),
+                AfterImport = MapAotNativeDropProgress(afterImport),
+                DestinationFile = destinationFile,
+                DestinationRemovedAfterProbe =
+                    !File.Exists(destinationFile) &&
+                    restoredSurface.ProjectedItemCount ==
+                        AotNativeDropMutationSurfaceNames.Length
+            };
+            RequireAotManagedUi(
+                result,
+                evidence.DestinationRemovedAfterProbe,
+                "NativeDropManagedCardProbeCleanedUp",
+                "The managed-card probe did not return the owned widget root to its mutation baseline.");
+            return evidence;
+        }
+        finally
+        {
+            host.Surface.ImportBusyChanged -= OnImportBusyChanged;
+        }
+    }
+
     private static async Task<AotNativeDropProgressSnapshot>
-        WaitForAotImportBusySnapshotAsync(
+        WaitForAotImportBusyPastCardDelayAsync(
             AotNativeDropSurfaceHost host,
             TimeSpan limit)
     {
         DateTime deadline = DateTime.UtcNow + limit;
+        bool sawBusy = false;
+        long longestBusyElapsedMilliseconds = 0;
         while (DateTime.UtcNow < deadline)
         {
             AotNativeDropProgressSnapshot snapshot =
                 host.Surface.CaptureAotNativeDropProgress();
             if (snapshot.IsImportBusy)
             {
+                sawBusy = true;
+                longestBusyElapsedMilliseconds = Math.Max(
+                    longestBusyElapsedMilliseconds,
+                    snapshot.BusyElapsedMilliseconds ?? 0);
+                if (snapshot.BusyElapsedMilliseconds >=
+                    AotImportCardDelayProofFloorMilliseconds)
+                {
+                    return snapshot;
+                }
+            }
+
+            await Task.Delay(10);
+        }
+
+        // An honest failure: a busy window shorter than the card show delay
+        // cannot prove suppression either way, so the run must fail instead
+        // of silently reporting an unprovable pass.
+        throw new InvalidOperationException(
+            sawBusy
+                ? $"The native-drop import busy window (longest observed " +
+                  $"{longestBusyElapsedMilliseconds} ms) never outlived the " +
+                  $"{AotImportCardDelayProofFloorMilliseconds} ms import-card " +
+                  "delay proof floor, so shell progress suppression could not " +
+                  "be proven on this run."
+                : "The native-drop import never entered its busy state.");
+    }
+
+    private static async Task<AotNativeDropProgressSnapshot>
+        WaitForAotImportCardVisibleSnapshotAsync(
+            AotNativeDropSurfaceHost host,
+            TimeSpan limit)
+    {
+        DateTime deadline = DateTime.UtcNow + limit;
+        bool sawBusy = false;
+        long longestBusyElapsedMilliseconds = 0;
+        while (DateTime.UtcNow < deadline)
+        {
+            AotNativeDropProgressSnapshot snapshot =
+                host.Surface.CaptureAotNativeDropProgress();
+            if (snapshot.IsImportBusy && snapshot.CardVisible)
+            {
                 return snapshot;
             }
 
-            await Task.Delay(20);
+            if (snapshot.IsImportBusy)
+            {
+                sawBusy = true;
+                longestBusyElapsedMilliseconds = Math.Max(
+                    longestBusyElapsedMilliseconds,
+                    snapshot.BusyElapsedMilliseconds ?? 0);
+            }
+            else if (sawBusy)
+            {
+                // Busy ended without the card ever being observed visible.
+                break;
+            }
+
+            await Task.Delay(10);
         }
 
         throw new InvalidOperationException(
-            "The native-drop import never entered its busy state.");
+            !sawBusy
+                ? "The managed import busy window ended before the first " +
+                  "poll could observe it, so managed card display could not " +
+                  "be proven on this run."
+                : longestBusyElapsedMilliseconds >=
+                        AotImportCardDelayProofFloorMilliseconds
+                    ? $"The managed import stayed busy for " +
+                      $"{longestBusyElapsedMilliseconds} ms (past the " +
+                      $"{AotImportCardDelayProofFloorMilliseconds} ms card " +
+                      "delay proof floor) without ever showing its acrylic " +
+                      "progress card."
+                    : $"The managed import busy window (longest observed " +
+                      $"{longestBusyElapsedMilliseconds} ms) never outlived " +
+                      $"the {AotImportCardDelayProofFloorMilliseconds} ms " +
+                      "import-card delay proof floor, so managed card display " +
+                      "could not be proven on this run.");
     }
 
     private async Task RestoreAotNativeDropBaselineAsync(
@@ -667,6 +864,7 @@ internal sealed class AotManagedUiNativeDropEvidence
     public AotManagedUiNativeDropHighlightEvidence NativeLeaveClear { get; set; } = new();
     public AotManagedUiNativeDropImportEvidence CopyImport { get; set; } = new();
     public AotManagedUiNativeDropImportEvidence MoveImport { get; set; } = new();
+    public AotManagedUiNativeDropManagedCardEvidence ManagedCardImport { get; set; } = new();
 }
 
 internal sealed class AotManagedUiNativeDropStateEvidence
@@ -702,6 +900,14 @@ internal sealed class AotManagedUiNativeDropImportEvidence
     public AotManagedUiNativeDropProgressEvidence ImmediatelyAfterCallback { get; set; } = new();
     public AotManagedUiNativeDropProgressEvidence DuringImport { get; set; } = new();
     public AotManagedUiNativeDropProgressEvidence AfterImport { get; set; } = new();
+}
+
+internal sealed class AotManagedUiNativeDropManagedCardEvidence
+{
+    public AotManagedUiNativeDropProgressEvidence CardShown { get; set; } = new();
+    public AotManagedUiNativeDropProgressEvidence AfterImport { get; set; } = new();
+    public string DestinationFile { get; set; } = string.Empty;
+    public bool DestinationRemovedAfterProbe { get; set; }
 }
 
 internal sealed class AotManagedUiNativeDropCallbackEvidence
