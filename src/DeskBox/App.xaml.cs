@@ -86,7 +86,7 @@ public partial class App : Application
     private TaskbarIcon? _trayIcon;
     private Window? _trayWindow;
     private MenuFlyout? _trayContextMenu;
-    private bool _traySecondWindowSyncLogged;
+    private bool _trayPresenterSyncLogged;
     private MenuFlyoutItem? _trayOrganizeDesktopItem;
     private MenuFlyoutItem? _trayMapFolderItem;
     private MenuFlyoutItem? _trayAddFeatureWidgetItem;
@@ -4740,6 +4740,7 @@ public partial class App : Application
                 SettingsService.SettingsChanged -= OnMaterialCapabilitySettingsChanged;
                 LocalizationService.LanguageChanged -= OnLanguageChanged;
             }),
+            ShutdownStep.Sync("tray-menu", () => { _trayMenuHost?.Dispose(); _trayMenuHost = null; }),
             ShutdownStep.Sync("tray-icon", () => { _trayIcon?.Dispose(); _trayIcon = null; }),
             ShutdownStep.Sync("activation-registration", () => { _activationRegistration?.Unregister(null); _activationRegistration = null; }),
             ShutdownStep.Sync("activation-event", () => { _activationEvent?.Dispose(); _activationEvent = null; }),

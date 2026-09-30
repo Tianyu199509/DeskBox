@@ -44,11 +44,11 @@ public sealed class AotStage4D5ContractTests
     }
 
     [Fact]
-    public void SecondWindowPresenter_UsesPublicLifecycleAndVisualTreeWithoutPrivateReflection()
+    public void TrayMenuPresenter_UsesOwnedLifecycleAndVisualTreeWithoutPrivateReflection()
     {
         string source = ReadRepositoryFile("src/DeskBox/App.Tray.cs");
 
-        Assert.Contains("SecondWindowContextMenuOpened +=", source, StringComparison.Ordinal);
+        Assert.Contains("_trayMenuHost.Opened +=", source, StringComparison.Ordinal);
         Assert.Contains("VisualTreeHelper.GetParent", source, StringComparison.Ordinal);
         Assert.Contains("VisualTreeHelper.GetOpenPopupsForXamlRoot", source, StringComparison.Ordinal);
         Assert.Contains("MenuFlyoutPresenter", source, StringComparison.Ordinal);
@@ -59,12 +59,12 @@ public sealed class AotStage4D5ContractTests
     }
 
     [Fact]
-    public void TrayBehavior_KeepsSecondWindowPlacementAndNoScrollConstraints()
+    public void TrayBehavior_KeepsOwnedWindowPlacementAndNoScrollConstraints()
     {
         string source = ReadRepositoryFile("src/DeskBox/App.Tray.cs");
 
-        Assert.Contains("ContextMenuMode = ContextMenuMode.SecondWindow", source, StringComparison.Ordinal);
-        Assert.Contains("_trayIcon.ShowContextMenu(point)", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("ContextMenuMode = ContextMenuMode.SecondWindow", source, StringComparison.Ordinal);
+        Assert.Contains("_trayMenuHost?.ShowMenu(point)", source, StringComparison.Ordinal);
         Assert.Contains("Win32Helper.TryGetNotifyIconRect", source, StringComparison.Ordinal);
         Assert.Contains("GetFallbackTrayContextMenuAnchorPoint", source, StringComparison.Ordinal);
         Assert.Contains("ScrollViewer.VerticalScrollModeProperty", source, StringComparison.Ordinal);
