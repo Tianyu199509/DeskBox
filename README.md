@@ -1,262 +1,261 @@
 # DeskBox
 
-**A free, open-source Windows desktop organizer with native-feeling WinUI 3 widgets.**
+**本地优先的 Windows 10/11 桌面整理工具：用格子管理文件、文件夹、时光、待办、随记、搜索、天气和音乐。**
 
-English | [简体中文](README.zh-CN.md)
+简体中文 | [English](README.md)
 
-> External pull requests are not being merged at this time — bug reports, ideas, and discussions are very welcome via Issues / Discussions. See [CONTRIBUTING.md](CONTRIBUTING.md).
+> 目前暂不接受外部 PR 合并——欢迎通过 Issue / Discussion 提交 Bug、功能建议与技术讨论，详见 [CONTRIBUTING.md](CONTRIBUTING.md)。
 
 [![CI](https://github.com/Tianyu199509/DeskBox/actions/workflows/ci.yml/badge.svg)](https://github.com/Tianyu199509/DeskBox/actions/workflows/ci.yml)
-[![Release 1.5.5](https://img.shields.io/badge/release-1.5.5-2563EB.svg)](https://github.com/Tianyu199509/DeskBox/releases/tag/v1.5.5)
-[![Windows 10/11](https://img.shields.io/badge/Windows-10%2F11-0078D4.svg)](#system-requirements)
-[![x64 and ARM64](https://img.shields.io/badge/architecture-x64%20%7C%20ARM64-5C2D91.svg)](#download)
+[![1.5.5 版本](https://img.shields.io/badge/release-1.5.5-2563EB.svg)](https://github.com/Tianyu199509/DeskBox/releases/tag/v1.5.5)
+[![Windows 10/11](https://img.shields.io/badge/Windows-10%2F11-0078D4.svg)](#环境要求)
+[![x64 and ARM64](https://img.shields.io/badge/architecture-x64%20%7C%20ARM64-5C2D91.svg)](#下载)
 [![License: GPL v3](https://img.shields.io/badge/license-GPLv3-blue.svg)](LICENSE)
 [![GitHub stars](https://img.shields.io/github/stars/Tianyu199509/DeskBox?style=flat&color=yellow)](https://github.com/Tianyu199509/DeskBox/stargazers)
 [![Downloads](https://img.shields.io/github/downloads/Tianyu199509/DeskBox/total?style=flat&color=brightgreen)](https://github.com/Tianyu199509/DeskBox/releases)
-<a href="https://hellogithub.com/repository/Tianyu199509/DeskBox" target="_blank"><img src="https://api.hellogithub.com/v1/widgets/recommend.svg?rid=f0cae3cb81f3496b9b6ead91194dc6f8&claim_uid=x4er8iQsXYT3aMN&theme=small" alt="Featured｜HelloGitHub" /></a>
 
-![DeskBox Windows desktop organizer with file, todo, search, weather, and music widgets](docs/images/brand/readme-hero-1-3-7-dark-en.png)
+![DeskBox Windows 桌面整理工具，包含文件、待办、搜索、天气和音乐格子](docs/images/brand/readme-hero-1-3-7-dark-zh-cn.png)
 
-DeskBox organizes desktop files, maps existing folders, and keeps everyday tools close without replacing Explorer or changing how your files work. Its real-folder-backed widgets make it a modern open-source alternative to tools such as Stardock Fences, while Glance, todos, quick notes, search, weather, and music controls remain useful extras rather than the product's core promise.
+DeskBox 基于 C#、WinUI 3 和 Windows App SDK 构建，在原生 Windows 桌面上增加一层轻量格子，但不会替换资源管理器，也不会改变文件原本的使用方式。你可以创建真实文件夹支撑的文件格子、映射已有文件夹、用时光格子保留日期与农历、记录待办与随记、搜索电脑内容、查看天气或控制当前音乐。格子既能保持展开，也能收起成胶囊，并可通过托盘或全局快捷键临时唤起。
 
-## Mica and Acrylic on the desktop
+## 桌面上的 Mica 与 Acrylic
 
-DeskBox uses native-feeling Windows materials and keeps ordinary desktop files and folders in place.
+DeskBox 使用贴近 Windows 原生体验的材质，同时保留普通桌面文件与文件夹原本的使用方式。
 
-| Mica | Acrylic |
+| Mica 云母 | Acrylic 亚克力 |
 | --- | --- |
-| ![DeskBox desktop widgets with Mica material in English](docs/images/screenshots/en-us/云母材质.png) | ![DeskBox desktop widgets with Acrylic material in English](docs/images/screenshots/en-us/亚克力材质.png) |
+| ![DeskBox 中文界面的 Windows 11 云母材质桌面格子](docs/images/screenshots/zh-cn/云母材质.png) | ![DeskBox 中文界面的 Windows 11 亚克力材质桌面格子](docs/images/screenshots/zh-cn/亚克力材质.png) |
 
-## DeskBox at a glance
+## DeskBox 概览
 
 | | |
 | --- | --- |
-| **Platform** | Windows 10/11, x64 and ARM64 |
-| **Technology** | C#, WinUI 3, .NET 10 Native AOT, Windows App SDK 2.4, Rust native Shell layer |
-| **Storage model** | Local-first; files, notes, tasks, settings, and layouts remain on the PC |
-| **Languages** | English, Simplified Chinese, Traditional Chinese, Japanese, German, Brazilian Portuguese, Hindi, Spanish, French, Arabic, Bengali, Russian |
-| **License** | GPL-3.0-only |
+| **支持平台** | Windows 10/11，x64 与 ARM64 |
+| **技术栈** | C#、WinUI 3、.NET 10 Native AOT、Windows App SDK 2.4、Rust 原生 Shell 层 |
+| **数据方式** | 本地优先；文件、随记、待办、设置与布局保存在电脑上 |
+| **界面语言** | 简体中文、繁體中文、English、日本語、Deutsch、Português do Brasil、हिन्दी、Español、Français、العربية、বাংলা、Русский |
+| **开源协议** | GPL-3.0-only |
 
-All twelve selectable languages share the same resource-key and formatting-placeholder coverage.
+12 种可选语言使用一致的资源键和格式化占位符覆盖范围。
 
-## Download
+## 下载
 
-DeskBox 1.5.5 is prepared for release. The [GitHub Releases](https://github.com/Tianyu199509/DeskBox/releases/tag/v1.5.5) download links below will become available after publication.
+DeskBox 1.5.5 已进入发版准备阶段。下方 [GitHub Releases](https://github.com/Tianyu199509/DeskBox/releases/tag/v1.5.5) 下载链接会在正式发布后生效。
 
-- [DeskBox 1.5.5 for x64](https://github.com/Tianyu199509/DeskBox/releases/download/v1.5.5/DeskBox_Setup_1.5.5_x64.exe), recommended for most Intel and AMD PCs.
-- [DeskBox 1.5.5 for ARM64](https://github.com/Tianyu199509/DeskBox/releases/download/v1.5.5/DeskBox_Setup_1.5.5_arm64.exe), recommended for Snapdragon, Surface Pro X, and other Windows on ARM PCs.
+- [DeskBox 1.5.5 x64 安装包](https://github.com/Tianyu199509/DeskBox/releases/download/v1.5.5/DeskBox_Setup_1.5.5_x64.exe)，推荐大多数 Intel 和 AMD 电脑使用。
+- [DeskBox 1.5.5 ARM64 安装包](https://github.com/Tianyu199509/DeskBox/releases/download/v1.5.5/DeskBox_Setup_1.5.5_arm64.exe)，推荐骁龙、Surface Pro X 等 Windows on ARM 电脑使用。
 
-Both packages are Full Native AOT builds with the matching private Windows App Runtime 2.4, so they can install offline without downloading a separate .NET 10 or Windows App Runtime package.
+两个安装包都是 Full Native AOT 构建，并内置对应架构的私有 Windows App Runtime 2.4，可离线安装，不需要另外下载 .NET 10 或 Windows App Runtime。
 
-Every release also publishes a matching `.sha256` sidecar for each installer. The installers are currently unsigned, so verify the hash before running one if that matters to you.
+每个安装包都提供同名的 `.sha256` 校验文件。安装包目前尚未进行 Authenticode 签名，介意者请在运行前核对哈希。
 
-> DeskBox itself installs for the current user by default.
+> DeskBox 本体默认安装到当前用户目录。
 
-## Features
+## 核心功能
 
-### File organizer and folder widgets
+### 文件整理与文件夹格子
 
-- Create managed file widgets backed by ordinary folders, or map an existing folder without moving it.
-- Use icon or list layouts, title styles, detail and path controls, manual or rule-based sorting, compact display density, per-widget icon size override, and one-line, two-line, or hidden file names. Widgets resize down to 50×50.
-- Reorder items directly, move or copy them into a folder item, and create a folder with automatic scrolling and inline naming. Manual order is restored after restart.
-- Stack files manually, or let automatic grouping do it as a separate opt-in switch. A stack can expand inside the widget or open as an Adaptive, 3×3, or 5×5 popover that shares the grid's icon size, density, selection, and Ctrl+mouse-wheel behavior and stays within screen edges.
-- Drag files and shortcuts in or out, copy, cut, paste, rename, delete, and reveal in Explorer. Dragging can follow the Windows default copy-or-move decision, including cross-volume behavior and modifier-key shortcut creation, with native drop images and target descriptions.
-- Shell copy and move operations show per-item progress while keeping the source, destination, and receiving folders protected from conflicting changes.
-- Create shortcuts, permanently delete with confirmation and partial-result reporting, run a supported executable as administrator, or open the rest of the native Shell menu near the pointer.
-- Drop content from Explorer, WeChat, or a browser; remote image and file URLs can be downloaded and imported.
-- Preview supported files through a running [QuickLook](https://github.com/QL-Win/QuickLook) instance by pressing Space.
+- 创建由普通文件夹支撑的收纳格子，或把已有文件夹直接映射到桌面，不改变原文件位置。
+- 支持图标/列表布局、标题样式、详细信息和路径开关、手动或规则排序、显示密度设置；每个格子可单独覆盖全局图标大小，文件名可选单行、双行或隐藏，格子最小可调整到 50×50。
+- 可直接调整项目顺序、把文件移动或复制到格子内的文件夹；新建文件夹时自动滚动到对应位置并进入名称输入，手动顺序可在重启后恢复。
+- 叠放拆分为叠放总开关与自动归组开关；点击叠放可在格子布局内展开，或使用自适应、3×3、5×5 独立弹窗，弹窗与格子共用图标大小、密度、选中状态和 Ctrl+鼠标滚轮缩放，并始终保持在屏幕边缘以内。
+- 支持文件和快捷方式拖入、拖出、复制、剪切、粘贴、重命名、删除与在资源管理器中显示；拖放可选择跟随 Windows 默认的复制/移动判断，正确处理跨磁盘和修饰键创建快捷方式，并使用原生拖放图像与目标说明。
+- Windows Shell 复制和移动会显示逐项进度标记，并在传输期间保护来源、目标和接收文件夹，减少互相冲突的操作。
+- 支持创建快捷方式、带二次确认与部分失败提示的永久删除、仅对选中目标生效的使用管理员身份打开，以及靠近鼠标位置弹出的“更多”系统菜单。
+- 可从资源管理器、微信或浏览器拖入内容；浏览器中的远程图片与文件链接可以下载后导入。
+- 已运行 [QuickLook](https://github.com/QL-Win/QuickLook) 时，可在格子中按空格预览支持的文件。
 
-### Widget groups and desktop organization
+### 格子组与桌面整理
 
-- Merge file widgets into a group without changing their backing folders, then switch members from the title, mouse wheel, or cyclic Ctrl+Tab shortcut.
-- Detach a member or dissolve a group safely; grouped and standalone file widgets share the same views, settings, menus, sorting, drag-and-drop, and QuickLook behavior.
-- Preview desktop organization by category before moving anything, and choose whether each category creates a folder or reuses an existing widget.
-- Optionally include retained folders, large files, and items beyond the quick batch, and get access-denied, in-use, changed, unavailable, or failed transfers explained separately instead of a silent skip.
-- Optionally organize new desktop files after downloads, extraction, and same-path replacements reach a stable state.
+- 文件格子可以在不改变底层文件夹的情况下合并成组，并通过标题、鼠标滚轮或可循环的 Ctrl+Tab 快捷键切换成员。
+- 支持安全拆出成员或解散格子组；组内与独立文件格子共用视图、设置、菜单、排序、拖放和 QuickLook 交互。
+- 桌面整理会先按类别预览将要移动的内容，每类可选择新建文件夹或复用已有格子。
+- 可选择把保留文件夹、大文件和快速批次之外的项目也纳入整理，并按访问被拒、文件占用、已变更、目标不可用或传输失败分别说明项目为何保留，而不是静默跳过。
+- 可在下载、解压和同路径替换达到稳定状态后，自动整理新出现的桌面文件。
 
-### Todo and Quick Capture
+### 待办与随记
 
-- Work in responsive Todo and Quick Capture list/detail layouts that switch between single- and dual-pane modes, with an adjustable master pane on wide widgets.
-- Track tasks with due dates, reminders, recurrence, color markers, Markdown notes, attachments, filters, and batch actions.
-- Save reusable text, links, images, and files in Quick Capture with pinning, paper styles, Markdown editing and preview, removable attachments, and focused editing.
-- Keep attachment files linked to their original location or copy them into DeskBox-managed storage.
+- 待办与随记使用响应式列表/详情布局，宽屏可双栏展示并调整列表宽度，窄屏会自动切换为单页浏览。
+- 待办支持截止日期、提醒、重复、颜色标记、Markdown 备注、多附件、筛选与批量操作。
+- 随记支持文本、链接、图片和文件，提供固定、纸张样式、Markdown 编辑与预览、附件删除和专注编辑。
+- 附件可以关联原文件，也可以复制到 DeskBox 管理的数据目录。
 
-### Desktop search
+### 桌面搜索
 
-- Search files, folders, applications, settings, notes, and todos from one popup or search widget.
-- File results come from Everything's existing local index over IPC and merge with DeskBox content in the same window. DeskBox no longer maintains a duplicate file index.
-- Everything is detected or launched from Settings, where you can choose its executable, see connection and permission status, opt into advanced syntax, and filter low-value system and cache paths. Everything itself is not bundled and must be installed separately.
-- Use configurable filters, sortable detail columns, result limits, history, favorites, and a global search hotkey.
-- Select multiple rows with Ctrl or Shift, drag a selection rectangle with edge auto-scroll, and apply batch actions to the result set.
-- Receive staged incremental results while individual providers stay isolated from one another when a source fails.
-- The popup shell is warmed during idle time so a widget click can show and focus it first, while recommendations and icons recover in the background. A search window left hidden long enough can release its visual tree; disabling Search releases the complete search runtime.
+- 在一个搜索弹窗或搜索格子中查找文件、文件夹、应用、设置与随记、待办内容。
+- 文件结果通过本机 IPC 读取 Everything 已有索引，并与 DeskBox 内容在同一窗口合并展示，DeskBox 不再维护重复的文件索引。
+- 设置中可检测或启动 Everything、选择其程序位置、查看连接与权限状态、启用高级语法并过滤低价值的系统与缓存路径。Everything 不随 DeskBox 捆绑，需要单独安装。
+- 支持结果筛选、可排序详细列、数量设置、历史、收藏和独立全局快捷键。
+- 支持 Ctrl/Shift 多选、带边缘自动滚动的框选，以及对选中结果执行批量操作。
+- 搜索结果按阶段增量返回；单个来源异常时会被隔离，不影响其他来源继续工作。
+- 空闲时预热搜索弹窗外壳，点击搜索格子后优先显示并聚焦窗口，推荐内容和图标在后台恢复；长期隐藏的搜索窗口会释放界面树，关闭搜索功能则释放完整搜索运行资源。
 
-### Glance, weather, and music
+### 时光、天气与音乐
 
-- Glance keeps the date, weekday, lunar calendar, and festivals visible, with your own background image or rotation and an independent image transparency control.
-- View current conditions plus hourly and multi-day forecasts with MSN Weather and automatic Open-Meteo fallback.
-- Choose a theme-aware Standard weather skin or the richer condition-based skin, with responsive Day and Week views across widget sizes. Startup shows a fresh cached forecast immediately and keeps refresh work off the interaction path.
-- Control the active Windows media session, playback mode, progress, and system volume from the music widget, or switch between available media sessions and follow the system-selected source.
-- Use responsive cover, controls, record, and compact layouts with optional album-color ambience.
+- 时光格子常驻显示日期、星期、农历与节气节日，可自定义背景图片或轮播，并单独设置背景透明度。
+- 天气格子可展示实时天气、逐小时和多日预报，默认使用 MSN 天气，失败时自动回退到 Open-Meteo。
+- 天气提供跟随明暗模式的标准皮肤和按天气变化的高级皮肤，日/周视图会随格子尺寸响应式调整；启动时先使用仍然新鲜的缓存预报，刷新工作不占用交互路径。
+- 音乐格子通过 Windows 媒体会话控制当前播放器，支持播放模式、进度和系统音量，也可在多个媒体会话间切换或跟随系统选定的来源。
+- 音乐提供封面、控制、唱片与紧凑布局，并可选择跟随专辑封面的氛围色。
 
-### Capsule mode and native Windows behavior
+### 胶囊模式与原生交互
 
-- Collapse widgets into smart capsules with click-to-toggle or hover-to-expand behavior; the expansion choice is the main capsule control, with ready-made hover presets.
-- Show key information, a short summary, or only an icon and title; hide sensitive Todo and Quick Capture text while collapsed.
-- Arrange capsules independently or combine them into a movable, ordered bar.
-- A hover-expanded capsule or group stays open while you use a stack popover, context menu, drag operation, title editor, or close confirmation, and collapses only after the interaction ends and the pointer has left.
-- Raise or hide all widgets from the tray, F7, double Ctrl, Alt+Space, Win+Space, a single Win-key tap, a custom shortcut, or an optional double-click on a blank desktop area. Reserved Windows combinations warn about their system-side effect before you enable them, and modifier-only or incomplete taps are ignored.
-- Quick Reveal temporarily shows widgets above other windows without permanently changing their desktop-layer behavior, and keeps the first activating click instead of losing it.
-- Serialized repeated-toggle handling and recovery cover display, DPI, sleep, and Explorer changes.
-- Customize Mica/acrylic materials, opacity, borders, DWM corners, animation, title bars, icon size, and text size. Widget text and monochrome controls can follow the app theme or use light, dark, custom, and per-widget colors, with an optional text edge treatment.
+- 格子可收起为智能胶囊，支持点击切换或鼠标悬停自动展开；胶囊设置以“展开方式”为主控制项，并提供现成的悬停预设。
+- 收起后可显示关键信息、简要摘要或仅图标与标题；待办和随记可隐藏敏感正文。
+- 胶囊可以独立摆放，也可以组合成可整体移动、可排序的胶囊栏。
+- 操作叠放弹窗、右键菜单、拖放、标题编辑或关闭确认时，悬停展开的胶囊和格子组会保持展开，直到交互结束且鼠标移出后才收起。
+- 可通过托盘、F7、双击 Ctrl、Alt+Space、Win+Space、单独按一下 Win、自定义快捷键，或可选的双击桌面空白区域显示、隐藏全部格子；会改变 Windows 行为的组合在启用前会明确提示，修饰键组合和未完成按键不会误触发。
+- “快捷唤起层”可临时把格子显示到其他窗口上方，不永久改变其桌面层级行为，并保留用于第一次操作的点击。
+- 连续触发会串行处理，并可在显示器、DPI、睡眠唤醒和资源管理器变化后恢复。
+- 支持云母/亚克力材质、透明度、边框、DWM 圆角、动画、标题栏、图标与文字大小；格子文字和单色控件可跟随主题，也可使用浅色、深色、自定义和单格子覆盖配色，并可选文字描边。
 
-### Layout, displays, and performance
+### 布局、显示器与性能
 
-- DeskBox stores a separate widget layout for each known monitor topology. Reconnecting a display arrangement restores the positions, sizes, group surfaces, and capsule placement saved for it. Hot-plug, work-area, and DPI changes settle before restore, and layout writes pause during the transition so temporary coordinates cannot overwrite a saved layout.
-- A replacement or differently scaled monitor receives a proportional in-bounds layout instead of leaving widgets off-screen.
-- Hold Ctrl while dragging a widget title to move every eligible widget on the current display as one bounded group. Snapping works while moving as well as resizing, with a configurable gap and screen-edge protection.
-- Choose Balanced, Resource saver, or Custom performance modes. Custom controls hidden-widget cache cleanup, visible-idle cleanup, transient-window release, icon/thumbnail/image cache budget, and individual continuous animations such as text marquee, vinyl rotation, Glance image rotation, and capsule effects.
-- Hidden and inactive widgets release recreatable UI surfaces, decoded images, icons, and thumbnails according to the selected policy, while process-wide WinRT settings reuse, shared brushes, cached window factories, and targeted list updates keep the hot paths quiet. Animation pacing adapts to the current display's refresh rate, with extra frame-pacing and backdrop safeguards on Windows 10.
-- Startup waits for Explorer's desktop icon host to stabilize before attaching desktop-layer widgets, so widget restoration does not disturb Windows' own icon-position recovery. If the managed storage drive is temporarily disconnected, widgets stay intact and recover once it returns.
+- DeskBox 为不同的显示器拓扑分别保存格子布局。重新接入用过的屏幕组合后，会恢复该组合对应的位置、尺寸、格子组表面和胶囊位置；热插拔、工作区和 DPI 变化会先等待稳定再恢复，切换期间暂停写入布局，避免临时坐标覆盖已保存的布局。
+- 更换显示器或缩放比例变化时，会按可用工作区映射出限制在屏幕范围内的比例布局，不会把格子留在屏幕外。
+- 按住 Ctrl 拖动格子标题，可把当前显示器上的可移动格子作为一个整体移动。吸附在移动和调整尺寸时都生效，可设置相邻格子间距，并保证贴近屏幕边缘时仍在可用工作区内。
+- 设置 > 常规的“性能与资源”提供均衡、节省资源和自定义三种模式；自定义可分别控制格子隐藏后的缓存回收、可见闲置回收、临时窗口释放、图标/缩略图/解码图片缓存容量，以及文字跑马灯、唱片旋转、时光图片切换和胶囊光效等持续动画。
+- 隐藏和非活动格子会按所选策略释放可重建的界面、解码图片、图标和缩略图；同时通过复用进程级 WinRT 设置对象、共享画刷、缓存窗口工厂和只更新变化条目，减少热路径上的重复分配。窗口动画会按当前显示器刷新率调整节拍，并为 Windows 10 增加帧节奏和背景材质保护。
+- 开机会等待资源管理器桌面图标环境稳定后再挂接桌面层格子，避免干扰系统自身的图标位置恢复；收纳磁盘临时断开时格子保持完整，磁盘回来后自动恢复。
 
-### Updates, backup, and diagnostics
+### 更新、备份与诊断
 
-- Check for updates in the app, read long release notes in a dedicated view, retry failed downloads, or continue from the official website.
-- Start a visible installer after DeskBox closes; upgrades reuse and lock the existing installation path instead of creating a second copy.
-- Back up and restore settings, and export a privacy-filtered diagnostics package for troubleshooting.
-- Recover settings from resilient snapshots, flush pending changes during shutdown, and report save failures instead of silently reverting to defaults.
+- 支持应用内检查更新，在独立界面阅读较长的更新日志；下载失败时可重试或前往官网继续下载。
+- DeskBox 关闭后会显示安装界面；升级会复用并锁定原安装路径，避免生成第二份应用。
+- 支持设置备份与恢复，并可导出经过隐私过滤的一键诊断包用于排查问题。
+- 设置使用可恢复快照，退出时刷新待保存内容；保存失败会明确记录和提示，不再静默恢复默认配置。
 
-## What's new in 1.5.5
+## 1.5.5 更新亮点
 
-- **Cloud backup to your own server.** Back up todos, quick captures, and widget styles to WebDAV on a schedule (Settings → Maintenance). Passwords live in Windows Credential Manager, each data domain toggles independently, and remote snapshots are listed for browsing and restore.
-- **Restore only what you want.** Pick the data domains to bring back — todo, quick capture, widget style — and choose merge (newer entries win, nothing on this device is deleted) or a full snapshot-faithful restore. Deletions now leave tombstones, so merged restores stop resurrecting items you removed locally.
-- **Drag-and-drop that works everywhere.** File drags out of widgets now carry the same native Shell data object Explorer uses: VS Code, browsers, and other Copy-only targets that used to reject DeskBox drags now accept them. Cross-volume transfers go through the system file-operation engine with native progress, cancellation, and conflict handling — fixing the cross-volume import that completed with "0 items".
-- **Hotkeys that heal themselves.** Windows can silently strip the low-level hooks behind the global hotkey, search hotkey, or desktop double-click activation — previously dead until restart. A health watchdog now detects and re-registers them automatically.
-- **Widgets trim idle memory during true quiet.** After a few seconds of real inactivity — no longer only when everything is hidden — widgets can release memory back to Windows, gated by absolute working-set floors and ambient-animation awareness. Controlled by the new "Trim memory when idle" option.
-- **Snap feedback got a Fluent-grade makeover.** The looping breathing glow while resizing or dragging is replaced by a crisp accent edge band that settles once and dissolves cleanly around rounded corners.
-- **Compact widgets get directional control and capsule reordering.** Override the expansion direction per widget (auto / down / up) from the collapse menu, and reorder capsule bars by dragging — including across monitors. New groups default to tab navigation, and there's a new window-shadow toggle in Appearance.
-- **Dozens of visible fixes.** The settings window no longer freezes on the theme it had when closed; shortcut arrows are sharp at large sizes; alt-dragged shortcuts keep the target's own icon; the cloud-backup page no longer crashes on Native AOT builds; leftover folders no longer block creating a same-named widget; migration rollback failures explain themselves; aborted transfers never sweep files they didn't create.
-- **Backup honesty.** An upload the server accepted but never listed is marked "awaiting server confirmation" instead of looking like a clean success, and the material-fallback hint fires the moment transparency effects or battery saver degrade Mica mid-session.
+- **云备份上线。** 把待办、随记和格子样式定时备份到你自己的 WebDAV 服务器（设置 → 维护）。密码保存在 Windows 凭据管理器，每个数据域独立开关，远端快照可浏览、可还原。
+- **想还原什么就还原什么。** 可选回哪些数据域——待办、随记、格子样式——并选择"合并"（新者胜出、不删除本机数据）或"完全恢复"（严格按快照还原）。删除现在会留下墓碑，合并还原不再复活本机已删的条目。
+- **拖放到处都好用。** 从格子拖出文件现在携带与 Explorer 同源的原生 Shell 数据对象：VS Code、浏览器等此前拒绝 DeskBox 拖放的目标现在都能接受。跨盘传输改走系统文件操作引擎，获得原生进度、取消与冲突处理——修复了跨盘导入以"0 items"空完成的问题。
+- **热键自愈。** Windows 会静默摘除全局热键、搜索热键、桌面双击激活背后的低级钩子——此前只能重启恢复。现在有健康 watchdog 自动检测并重新注册。
+- **真正静默时修剪空闲内存。** 不再要求全部隐藏——格子在几秒真实静默后即可向 Windows 归还内存，受绝对工作集下限和常驻动画感知保护。由新的"空闲时修剪内存"选项控制。
+- **吸附反馈换上 Fluent 风格。** 调整或拖动时的循环呼吸辉光改为锐利的 accent 边缘光带，落定一次后稳定常亮，在圆角处自然消融。
+- **紧凑格子方向控制与胶囊重排。** 收起菜单可单独覆盖展开方向（自动/向下/向上），胶囊条支持拖拽重排——包括跨显示器。新格子组默认标签页导航，外观设置还新增了窗口阴影开关。
+- **一大批看得见的修复。** 设置窗不再冻结在关闭时的主题；快捷方式箭头大尺寸下清晰；Alt 拖入的快捷方式保留目标自身图标；云备份页在 Native AOT 版不再崩溃；残留文件夹不再堵死同名格子的创建；迁移回滚失败会说清楚自己；中止的传输绝不误删不是它创建的文件。
+- **备份更诚实。** 服务器已接收但迟迟未列入目录的上传会标注"等待服务器确认"而非看似干净的成功；透明效果或省电模式在会话中途降级 Mica 时，材质提示会即时出现。
 
-Read the complete [changelog](CHANGELOG.md) or the [1.5.5 release notes](docs/releases/v1.5.5.md).
+完整内容见 [更新日志](CHANGELOG.md) 和 [1.5.5 发布说明](docs/releases/v1.5.5.md)。
 
-## What's new in 1.5.4
+## 1.5.4 更新亮点
 
-- **Keep memory in check after large batch operations.** Importing, organizing, or cutting thousands of files no longer leaves private memory near 1 GB until restart: settings persist by streaming to disk, move-out batches stop triggering thousands of redundant saves, and the cut-state sweep runs once per batch instead of freezing the widget per item.
-- **Bound the undo history inside settings.json.** Oversized batches keep a summary history entry (real count, never partially undoable), so settings.json can no longer grow unboundedly — a profile bloated to nearly 20 MB shrinks to under 100 KB automatically on the first launch after updating.
-- **Speed up large widget operations.** Imports and watcher reloads use a scoped path index with binary insertion instead of per-file list scans.
+- **大批量操作后内存不再高居不下。** 导入、整理或剪切数千文件不再让私有内存逼近 1 GB 直到重启：设置改为流式写盘、移出批处理不再触发数千次冗余保存、剪切状态清扫合并为每批一次，不再逐项卡住格子。
+- **为 settings.json 中的撤销历史设置上限。** 超大批次保留摘要式历史条目（真实数量、绝不部分撤销），settings.json 不再无限膨胀——膨胀到近 20 MB 的配置在升级后首次启动自动瘦身到 100 KB 以内。
+- **大批量格子操作更快。** 导入与监视器重载改用批内路径索引和二分插入，替代逐文件列表扫描。
 
-Read the complete [changelog](CHANGELOG.md) or the [1.5.4 release notes](docs/releases/v1.5.4.md).
+完整内容见 [更新日志](CHANGELOG.md) 和 [1.5.4 发布说明](docs/releases/v1.5.4.md)。
 
-## What's new in 1.5.3
+## 1.5.3 更新亮点
 
-- **Choose how DeskBox starts with Windows.** Direct installations offer standard startup by default for new users and an optional scheduled task. Existing methods are preserved, failed task registration can fall back to verified standard startup, and Windows disable choices are respected.
-- **Enable scheduled startup with Unicode paths.** Task definitions are read directly as Unicode, avoiding the code-page mismatch that could reject Chinese account names and installation paths.
-- **Handle notification activation in the correct order.** Notifications are registered before activation arguments are read, and early input waits for the main instance to be ready. The Store version keeps Windows StartupTask.
-- **Improve startup recovery and diagnostics.** Tray creation retries while the desktop starts, fatal initialization failures release the instance by exiting, and boolean diagnostic checks remain readable without exposing private paths.
+- **直装版可选择开机自启方式。** 新用户默认标准方式，计划任务作为可选项；已有安装保留实际方式，任务注册失败时可回退到验证成功的标准自启，并尊重 Windows 禁用选择。
+- **中文路径可正常校验计划任务。** 直接按 Unicode 读取任务定义，避免账户名和安装路径因代码页不一致被错误拒绝。
+- **修复通知激活初始化顺序。** 先注册通知，再读取激活参数，初始化期间的通知等主实例就绪后处理。商店版继续使用 Windows StartupTask。
+- **改善启动恢复与诊断。** 桌面启动期间重试托盘创建，不可恢复的初始化失败退出并释放实例；诊断保留布尔检查结果，同时继续隐藏私密路径。
 
-Read the complete [changelog](CHANGELOG.md) or the [1.5.3 release notes](docs/releases/v1.5.3.md).
+完整内容见 [更新日志](CHANGELOG.md) 和 [1.5.3 发布说明](docs/releases/v1.5.3.md)。
 
-## What's new in 1.5.2
+## 1.5.2 更新亮点
 
-- **File widgets show everything again.** Fixes a 1.5.1 regression where a file box displayed at most its first 30 items: folders up to the render threshold list every item, and larger folders extend the rendered window whenever the visible area is not yet filled.
+- **文件格子恢复完整显示。** 修复 1.5.1 的回归：文件格子最多只显示前 30 个项目。不高于渲染阈值的文件夹列出全部条目，更大的文件夹在可视区域尚未填满时自动扩展渲染窗口。
 
-Read the complete [changelog](CHANGELOG.md) or the [1.5.2 release notes](docs/releases/v1.5.2.md).
+完整内容见 [更新日志](CHANGELOG.md) 和 [1.5.2 发布说明](docs/releases/v1.5.2.md)。
 
-## What's new in 1.5.1
+## 1.5.1 更新亮点
 
-- **Storage moves survive read-only files.** Changing the default storage location no longer fails when a folder contains read-only files; cleanup only deletes files that were verifiably copied, and a blocked cleanup finishes the move with an explicit recycle-the-leftovers choice instead of rolling the whole migration back.
-- **The search popup's app grid finally works with the mouse.** Single-click selects a card, double-click opens it, arrow keys plus Enter launch it, and icons now appear on the very first open instead of only after reopening the popup.
-- **Big folders no longer freeze widgets.** Folders with thousands of files render in a window and hydrate more rows as you scroll; the first launch after a fresh install is also faster thanks to batched shell-icon extraction.
-- **Open files by dropping them on a shortcut tile.** Drop files onto an application shortcut tile to open them with that application — from the desktop or between widgets.
-- **More ways to switch and launch.** Hover a dragged file over a group tab to switch members, use the new Copilot-key global hotkey preset, or click the title bar to collapse a widget in click-collapse mode.
-- **Capsule transitions fully fixed.** Expanding a capsule after collapsing no longer clips the title bar by a few pixels, and the very first expansion on a fresh install no longer leaves capsule icon and title ghosts over the expanded body.
-- **A snappier native context menu.** Clicking an item in the native Windows right-click menu no longer stalls the whole system; the menu hook now runs off the UI thread and unloads when the menu closes.
-- **Icons never shrink.** Associated icons whose artwork sits inside a larger transparent canvas keep their full size in file tiles.
-- **Harder Organize Desktop recovery.** Unrecoverable restores get an explicit abandon path with diagnostics, orphaned journals are cleaned up, and mapping conflicts auto-resolve or reveal the conflicting tiles.
-- **Leaner defaults.** New installations start on the Resource saver preset (5-minute visible maintenance, 30-second hidden cache release, small cache budget), and the experimental immediate working-set trim waits 3 seconds so quick hide/show round trips trim at most once. Upgrades never rewrite existing settings.
+- **收纳路径迁移不再被只读文件卡死。** 格子文件夹里有只读文件也能正常迁移；清理只删除已确认复制的文件，旧文件夹清不掉时提供「移入回收站」的收尾选项，而不是整次迁移失败回滚。
+- **搜索弹窗的应用推荐区终于响应鼠标。** 单击选中、双击打开、方向键加 Enter 启动，图标在首次打开时即可显示，不再需要第二次打开。
+- **大文件夹不再卡死格子。** 上千文件的文件夹改为窗口化渲染、滚动按需加载；全新安装后的首次启动也因图标批量提取而更快。
+- **拖到快捷方式上即用其打开。** 把文件拖到应用快捷方式格子上，直接用该应用打开——桌面拖入与格间互拖都支持。
+- **切换与唤起更多方式。** 拖动文件悬停分组标签即可切换成员，新增 Copilot 实体键全局热键预设，点击收起模式下点击标题栏即收起格子。
+- **胶囊过渡彻底修复。** 收起后再展开，标题栏不再缺一角；全新安装后首次展开胶囊，展开区域中间不再残留胶囊图标与标题。
+- **原生右键菜单更跟手。** 点击菜单项不再让整机卡顿 1-2 秒；菜单钩子移出 UI 线程，菜单关闭即卸载。
+- **图标不再缩水。** 画布带大透明边距的关联图标在文件格子里保持原始尺寸。
+- **整理桌面恢复更可靠。** 不可恢复的放弃有明确出口与诊断，孤儿恢复日志自动清理，格子映射冲突自动解决或揭示冲突瓦片。
+- **更省资源的默认值。** 新安装默认「节省资源」预设（可见维护 5 分钟、隐藏回收 30 秒、较小缓存）；实验性的隐藏后裁剪改为 3 秒宽限，连续隐藏/显示最多裁剪一次。升级绝不改写既有设置。
 
-Read the complete [changelog](CHANGELOG.md) or the [1.5.1 release notes](docs/releases/v1.5.1.md).
+完整内容见 [更新日志](CHANGELOG.md) 和 [1.5.1 发布说明](docs/releases/v1.5.1.md)。
 
-## Current interface
+## 当前界面
 
-These screenshots are representative of the current DeskBox settings interface.
+以下图片用于展示当前 DeskBox 的设置界面。
 
-### Settings
+### 设置
 
-| General | Appearance |
+| 常规 | 外观 |
 | --- | --- |
-| ![DeskBox General settings in English](docs/images/screenshots/en-us/常规.png) | ![DeskBox Appearance settings in English](docs/images/screenshots/en-us/外观.png) |
+| ![DeskBox 中文常规设置](docs/images/screenshots/zh-cn/常规.png) | ![DeskBox 中文外观设置](docs/images/screenshots/zh-cn/外观.png) |
 
-| Capsule mode | File widgets |
+| 胶囊模式 | 文件格子 |
 | --- | --- |
-| ![DeskBox Capsule mode settings in English](docs/images/screenshots/en-us/胶囊模式.png) | ![DeskBox File widget settings in English](docs/images/screenshots/en-us/文件格子.png) |
+| ![DeskBox 中文胶囊模式设置](docs/images/screenshots/zh-cn/胶囊模式.png) | ![DeskBox 中文文件格子设置](docs/images/screenshots/zh-cn/文件格子.png) |
 
-| Feature widgets | Shortcuts & interaction |
+| 功能格子 | 快捷与交互 |
 | --- | --- |
-| ![DeskBox Feature widget settings in English](docs/images/screenshots/en-us/功能格子.png) | ![DeskBox Shortcuts and interaction settings in English](docs/images/screenshots/en-us/快捷与交互.png) |
+| ![DeskBox 中文功能格子设置](docs/images/screenshots/zh-cn/功能格子.png) | ![DeskBox 中文快捷与交互设置](docs/images/screenshots/zh-cn/快捷与交互.png) |
 
-## Local-first data and privacy
+## 本地数据与隐私
 
-DeskBox does not require an account or cloud synchronization. Widget configuration, todos, quick notes, search history, layouts, and managed files are stored locally.
+DeskBox 不要求注册账号，也不依赖云同步。格子配置、待办、随记、搜索历史、窗口布局和收纳文件都保存在本机。
 
-Some actions intentionally use the network:
+以下功能会按使用意图联网：
 
-- Weather requests use MSN Weather or Open-Meteo.
-- Update checks contact the DeskBox update endpoint or GitHub Releases.
-- DeskBox 1.4.8 and later Full installers carry the matching Windows App Runtime; older Direct installers download a missing runtime when needed.
-- A remote URL dragged from a browser is downloaded only when you import it.
+- 天气数据来自 MSN 天气或 Open-Meteo。
+- 更新检查访问 DeskBox 更新服务或 GitHub Releases。
+- DeskBox 1.4.8 及后续 Full 安装包内置匹配架构的 Windows App Runtime；更早的直发安装器会在缺少运行时时联网下载。
+- 从浏览器拖入远程链接时，只有确认导入的内容会被下载。
 
-Capsule privacy mode hides selected text in the collapsed presentation; it is a presentation control, not file encryption.
+胶囊隐私选项只是在收起状态下隐藏部分文字，属于展示控制，并不等同于文件加密。
 
-## System requirements
+## 环境要求
 
-- Windows 10 version 21H2 (build 19044) or later; Windows 11 version 22H2 or later for the full visual treatment.
-- x64 or ARM64 processor matching the installer.
-- Windows App Runtime 2.4. DeskBox 1.4.8 and later Full installers include a private matching runtime, and Native AOT requires no separate .NET 10 runtime.
+- Windows 10 21H2（build 19044）或更高版本；Windows 11 22H2 或更高版本可获得完整视觉效果。
+- 与安装包匹配的 x64 或 ARM64 处理器。
+- Windows App Runtime 2.4。DeskBox 1.4.8 及后续 Full 安装包内置匹配架构的专用运行时，Native AOT 版本不再需要单独的 .NET 10 运行时。
 
-On Windows 10, unsupported materials, rounded corners, and some animations automatically fall back to compatible visuals; file sync, drag-and-drop, and core widget behavior are validated against the compatibility floor.
+Windows 10 会自动降级不受系统支持的材质、圆角和部分动画；文件同步、拖放与格子核心功能仍按兼容基线验证。
 
-## Installation, updates, and removal
+## 安装、更新与卸载
 
-DeskBox uses an Inno Setup installer and installs for the current user by default. Overwrite installation preserves app settings, widget configuration, and managed storage. Older administrator-level installations under Program Files are migrated to avoid elevated-process drag-and-drop restrictions.
+DeskBox 使用 Inno Setup 安装器，默认安装到当前用户目录。覆盖安装会保留应用设置、格子配置和收纳目录。旧版如果安装在 Program Files，安装器会进行迁移，以避免管理员权限进程影响资源管理器拖拽。
 
-Startup launch is tray-first and silent. If DeskBox is already running, a second startup instance exits instead of opening another settings window.
+开机自启会静默启动到托盘。DeskBox 已运行时，再启动一个实例会直接退出，不会重复打开设置窗口。
 
-Auto-start uses a per-user Run entry, so DeskBox appears in **Settings → Apps → Startup**. Legacy scheduled-task registrations migrate automatically when it is safe to do so, and disabling DeskBox from Windows is reflected by the in-app switch.
+开机自启使用当前用户的 Run 注册表项，因此 DeskBox 会出现在“Windows 设置 → 应用 → 启动”中；旧的计划任务注册会在安全的前提下自动迁移，在系统侧关闭 DeskBox 后应用内开关也会同步显示为关闭。
 
-Uninstall offers explicit choices to keep application data or permanently remove it. Permanent removal clears `%LocalAppData%\DeskBox`, `%LocalAppData%\DeskBox-Recovery`, temporary files, and DeskBox-owned registration data; user files in the managed storage path are always preserved. Silent uninstall keeps application data unless an administrator explicitly supplies `/PURGEUSERDATA`.
+卸载时会明确提供“保留应用数据”和“彻底删除应用数据”两个选择。彻底删除会清理 `%LocalAppData%\DeskBox`、`%LocalAppData%\DeskBox-Recovery`、临时文件和 DeskBox 自己创建的注册信息；收纳路径中的用户文件始终保留。静默卸载默认保留应用数据，管理员只有显式传入 `/PURGEUSERDATA` 才会执行彻底清理。
 
-## FAQ
+## 常见问题
 
-### Is DeskBox a Windows desktop replacement?
+### DeskBox 会替换 Windows 桌面吗？
 
-No. Explorer remains the desktop shell, and files remain normal files and folders. DeskBox adds independently managed widgets above the existing desktop.
+不会。Windows 资源管理器仍是桌面外壳，文件也仍是普通文件和文件夹。DeskBox 只是在现有桌面上增加独立管理的格子。
 
-### Where does DeskBox store data?
+### DeskBox 把数据保存在哪里？
 
-- App settings and widget data: `%LocalAppData%\DeskBox\data`
-- New-user managed storage: a fixed non-system drive with enough free space when available, such as `D:\DeskBox\username`; otherwise `%UserProfile%\DeskBox`
+- 应用设置和格子数据：`%LocalAppData%\DeskBox\data`
+- 新用户收纳目录：优先使用空间充足的非系统固定磁盘，例如 `D:\DeskBox\用户名`；没有合适磁盘时回退到 `%UserProfile%\DeskBox`
 
-Both locations can be backed up from DeskBox settings.
+两类数据都可以通过 DeskBox 设置中的备份功能进行备份。
 
-### Which installer should I choose?
+### 应该下载 x64 还是 ARM64？
 
-Choose x64 for almost all Intel and AMD Windows PCs. Choose ARM64 for native Windows on ARM devices such as Snapdragon PCs. Check **Settings → System → About → System type** if unsure.
+绝大多数 Intel、AMD 电脑选择 x64；骁龙等原生 Windows on ARM 设备选择 ARM64。不确定时可在“Windows 设置 → 系统 → 系统信息 → 系统类型”中查看。
 
-### Why can the installer need the internet?
+### 为什么安装时可能需要联网？
 
-The currently published 1.4.7 and earlier Direct installers can download a missing Windows App Runtime. Starting with 1.4.8, the standard x64 and ARM64 Full installers bundle the matching private runtime and can install offline; Native AOT needs no separate .NET runtime.
+当前已发布的 1.4.7 及更早直发安装包可能会在缺少 Windows App Runtime 时联网下载。从 1.4.8 开始，标准命名的 x64、ARM64 Full 安装包会内置匹配架构的专用运行时，可在离线电脑上安装；Native AOT 版本不需要单独的 .NET 运行时。
 
-### Does disabling a feature widget remove its data?
+### 关闭功能格子会删除内容吗？
 
-No. Disabling a feature closes its UI and releases runtime resources, while its saved configuration remains available for the next time you enable it.
+不会。关闭功能会关闭对应界面并释放运行资源，但保存的数据和配置仍会保留，下次开启后继续使用。
 
-## Build from source
+## 从源码构建
 
-Development requires the .NET 10 SDK and a Windows 11 environment. Visual Studio with the Windows App SDK workload is recommended. The Rust toolchain pinned by `rust-toolchain.toml` is required when publishing with `-p:DeskBoxRustNative=true`, which is what shipping builds use for the shortcut, system volume, Quick Access, Recycle Bin, and Explorer Shell native paths.
+开发需要 .NET 10 SDK 和 Windows 11 环境，推荐安装带 Windows App SDK 工作负载的 Visual Studio。发布时如果带上 `-p:DeskBoxRustNative=true`（正式版本使用），还需要 `rust-toolchain.toml` 指定的 Rust 工具链，用于编译快捷方式、系统音量、快速访问、回收站和资源管理器 Shell 相关的原生路径。
 
-Restore, test, and build the x64 Debug version:
+还原、测试并构建 x64 Debug 版本：
 
 ```powershell
 dotnet restore .\DeskBox.sln -p:Platform=x64
@@ -264,64 +263,61 @@ dotnet test .\DeskBox.Tests\DeskBox.Tests.csproj --configuration Debug --no-rest
 dotnet build .\src\DeskBox\DeskBox.csproj --configuration Debug --no-restore -p:Platform=x64 -v:minimal
 ```
 
-`scripts\publish-aot-retail.ps1` is the authoritative path for retail packages. It produces a Full Native AOT payload with private Windows App Runtime components, builds the matching Rust DLL, generates the install manifest used for safe upgrades, and audits the produced binaries:
+`scripts\publish-aot-retail.ps1` 是正式零售产物的权威入口，它会生成 Full Native AOT 载荷、内置 Windows App Runtime、编译对应架构的 Rust DLL、生成升级清单并校验产物：
 
 ```powershell
 .\scripts\publish-aot-retail.ps1 -Platform x64
 .\scripts\publish-aot-retail.ps1 -Platform ARM64
 ```
 
-The publish output is self-contained for both .NET Native AOT and Windows App SDK deployment. Do not replace this script with a bare `dotnet publish`: the installer requires the generated `DeskBox.InstallManifest.txt` to remove files owned by older payloads without touching user-created files.
-
-With Inno Setup 6 or newer installed, compile the standard-named offline installers:
+发布结果同时满足 .NET Native AOT 与 Windows App SDK 自包含要求。不要用裸 `dotnet publish` 替代这个脚本，安装器需要脚本生成的 `DeskBox.InstallManifest.txt` 才能安全清理旧载荷：
 
 ```powershell
 ISCC.exe /DDeskBoxNativeAot=1 /DDeskBoxBundledRuntime=1 /DMyAppReleaseDir=..\.artifacts\aot-retail\win-x64\publish .\installer\DeskBox.iss
 ISCC.exe /DDeskBoxNativeAot=1 /DDeskBoxBundledRuntime=1 /DMyAppReleaseDir=..\.artifacts\aot-retail\win-arm64\publish .\installer\DeskBox.arm64.iss
 ```
 
-Expected outputs:
+预期输出：
 
 ```text
 Output\DeskBox_Setup_1.4.8_x64.exe
 Output\DeskBox_Setup_1.4.8_arm64.exe
 ```
 
-## Project layout
+## 项目结构
 
 ```text
-src\DeskBox                 WinUI 3 application (widget shell, services, views)
-src\DeskBox.Updater         direct-release updater helper
-native                      Rust native layer, Shell ABI, and thumbnail proxy
-tests\DeskBox.Tests         service, policy, and AOT contract tests
-scripts                     build, publish, audit, and memory measurement scripts
-installer                   x64/ARM64 Inno Setup scripts
-docs\architecture           current architecture, native ABI contracts, AOT stages
-docs\articles              product articles and tutorials
-docs\images                 README and release imagery
-docs\releases               release copy and test checklists
-.github\workflows           CI, ARM64 runtime, and distribution audits
+src\DeskBox                 WinUI 3 应用源码（格子外壳、服务、视图）
+src\DeskBox.Updater         直发版更新辅助程序
+native                      Rust 原生层、Shell ABI 与缩略图代理
+tests\DeskBox.Tests         服务、策略与 AOT 契约测试
+scripts                     构建、发布、审计与内存测量脚本
+installer                   x64/ARM64 Inno Setup 脚本
+docs\architecture           当前架构、原生 ABI 契约与 AOT 阶段记录
+docs\articles              功能文章与使用教程
+docs\images                 README 与发布图片
+docs\releases               版本发布文案和测试清单
+.github\workflows           CI、ARM64 运行时与分发包审计
 ```
 
-## Feedback and localization
+## 反馈与本地化
 
-DeskBox is currently developed and maintained by a solo developer. External pull requests are not being accepted at this stage so the project can keep a consistent architecture and clear copyright boundaries, but bug reports, feature requests, translations, and UI/UX feedback are welcome through [GitHub Issues](https://github.com/Tianyu199509/DeskBox/issues).
+DeskBox 目前由个人独立开发和维护。为了保持架构一致性与后续版权边界，现阶段暂不接受外部 Pull Request；欢迎通过 [GitHub Issues](https://github.com/Tianyu199509/DeskBox/issues) 提交问题、功能建议、翻译和 UI/UX 反馈。
 
-Special thanks to [@magisph](https://github.com/magisph) for the Brazilian Portuguese localization.
+特别感谢 [@magisph](https://github.com/magisph) 提供巴西葡萄牙语本地化支持。
 
-You can also visit [deskbox.fun](https://deskbox.fun) or use the contact information in the app's About page.
+也可以访问 [deskbox.fun](https://deskbox.fun)，或通过应用“关于”页面中的联系方式反馈。
 
-## Author and license
+## 作者与协议
 
-- Developer: Tianyu Zhu
-- Repository: <https://github.com/Tianyu199509/DeskBox>
-- License: [GPL-3.0-only](LICENSE)
+- 开发者：朱天雨
+- 项目地址：<https://github.com/Tianyu199509/DeskBox>
+- 开源协议：[GPL-3.0-only](LICENSE)
 
-Earlier DeskBox versions already published under the MIT License remain available under that license. The change is not retroactive.
+早期已按 MIT 协议发布的 DeskBox 版本继续保持原许可，协议变更不追溯历史版本。
 
+## Star 趋势
 
-## Star history
-
-If DeskBox helps you, a star ⭐ is a big encouragement for this solo project.
+如果 DeskBox 对你有帮助，欢迎点一个 Star ⭐，这是对这个独立项目最大的鼓励。
 
 [![Star History Chart](https://api.star-history.com/svg?repos=Tianyu199509/DeskBox&type=Date)](https://star-history.com/#Tianyu199509/DeskBox&Date)
