@@ -18,6 +18,19 @@ public sealed class WidgetTopologyLayoutProfile
     public List<WidgetTopologyMonitorProfile> Monitors { get; set; } = [];
 
     public Dictionary<string, WidgetSurfaceLayoutProfile> Surfaces { get; set; } = [];
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public WidgetTopologyAppearance? Appearance { get; set; }
+}
+
+/// <summary>File-icon dimensions for one topology; unrelated preferences stay global.</summary>
+public sealed record WidgetTopologyAppearance
+{
+    public double IconSize { get; set; } = 36;
+    public double TextSize { get; set; } = 11.5;
+    public double HorizontalSpacingScale { get; set; } = 0.1;
+    public double VerticalSpacingScale { get; set; } = 0.3;
+    public double FileNameWidthScale { get; set; } = 0.25;
 }
 
 /// <summary>Monitor geometry and scale captured with a topology profile.</summary>

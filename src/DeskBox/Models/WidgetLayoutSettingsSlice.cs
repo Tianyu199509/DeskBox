@@ -31,6 +31,9 @@ public sealed class WidgetLayoutSettingsSlice
     /// <summary>The topology profile currently projected into Widgets/WidgetGroups.</summary>
     public string? ActiveWidgetTopologyKey { get; set; }
 
+    /// <summary>Optional baseline enabling independent dimensions for each display topology.</summary>
+    public WidgetTopologyAppearance? WidgetTopologyAppearanceDefaults { get; set; }
+
     /// <summary>
     /// Legacy compatibility flag. Widget grouping is now always available;
     /// normalization keeps this value true for older settings files.
@@ -79,6 +82,7 @@ public sealed class WidgetLayoutSettingsSlice
         WidgetGroups = other.WidgetGroups;
         WidgetTopologyLayouts = other.WidgetTopologyLayouts;
         ActiveWidgetTopologyKey = other.ActiveWidgetTopologyKey;
+        WidgetTopologyAppearanceDefaults = other.WidgetTopologyAppearanceDefaults;
         WidgetGroupsEnabled = other.WidgetGroupsEnabled;
         WidgetGroupDefaultNavigationStyle = other.WidgetGroupDefaultNavigationStyle;
         WidgetGroupDefaultTitleDisplayMode = other.WidgetGroupDefaultTitleDisplayMode;

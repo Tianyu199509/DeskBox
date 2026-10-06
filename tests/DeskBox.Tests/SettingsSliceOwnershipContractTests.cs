@@ -39,7 +39,7 @@ public sealed class SettingsSliceOwnershipContractTests
     [Fact]
     public void EveryFacadeProperty_MapsToExactlyOneSliceProperty()
     {
-        Assert.Equal(233, FacadeProperties.Length);
+        Assert.Equal(234, FacadeProperties.Length);
 
         foreach (PropertyInfo facade in FacadeProperties)
         {
@@ -148,6 +148,8 @@ public sealed class SettingsSliceOwnershipContractTests
 
     private static object? NonDefaultValue(Type type)
     {
+        if (type == typeof(WidgetTopologyAppearance))
+            return new WidgetTopologyAppearance { IconSize = 42, TextSize = 13 };
         if (Nullable.GetUnderlyingType(type) is { IsEnum: true } enumType)
             return Enum.GetValues(enumType).Cast<object>().First();
         if (type == typeof(string))

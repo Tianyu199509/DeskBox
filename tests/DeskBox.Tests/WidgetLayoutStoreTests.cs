@@ -68,7 +68,7 @@ public sealed class WidgetLayoutStoreTests : IDisposable
     // ── Three-domain ownership contract ────────────────────────────────
 
     [Fact]
-    public void SettingsWireKeys_AreExactlyTheElevenLayoutMembers()
+    public void SettingsWireKeys_AreExactlyTheExpectedLayoutMembers()
     {
         // The strip set IS the migration surface: a member added to the slice
         // without a conscious ownership decision fails here, and a facade key
@@ -80,6 +80,7 @@ public sealed class WidgetLayoutStoreTests : IDisposable
             "widgetGroups",
             "widgetTopologyLayouts",
             "activeWidgetTopologyKey",
+            "widgetTopologyAppearanceDefaults",
             "widgetGroupsEnabled",
             "widgetGroupDefaultNavigationStyle",
             "widgetGroupDefaultTitleDisplayMode",
@@ -111,7 +112,7 @@ public sealed class WidgetLayoutStoreTests : IDisposable
         // it lands in the file AND the settings strip set automatically, so
         // this pins the count.
         Assert.Equal(
-            11,
+            12,
             typeof(WidgetLayoutSettingsSlice).GetProperties(
                 System.Reflection.BindingFlags.Instance |
                 System.Reflection.BindingFlags.Public).Length);

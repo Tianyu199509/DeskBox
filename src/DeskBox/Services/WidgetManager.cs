@@ -799,6 +799,8 @@ public sealed partial class WidgetManager
 
     private void ApplyAppearancePreview()
     {
+        if (_topologyLayoutService.CaptureCurrentAppearance(_settingsService.Settings))
+            _settingsService.SaveDebounced(notifySubscribers: false);
         if (_isApplyingAppearancePreview)
         {
             return;
@@ -830,7 +832,7 @@ public sealed partial class WidgetManager
         // multiple independently configured instances.
         DeduplicateFeatureWidgets();
         NormalizeWidgetGroupsForRuntime();
-        if (_topologyLayoutService.ActivateCurrentTopology(_settingsService.Settings))
+        if (_topologyLayoutService.ActivateCurrentTopology(_settingsService.Settings, startup: true))
         {
             _settingsService.SaveDebounced(notifySubscribers: false);
         }
@@ -1547,6 +1549,7 @@ public sealed partial class WidgetManager
             if (_topologyLayoutService.ActivateCurrentTopology(_settingsService.Settings))
             {
                 _settingsService.SaveDebounced(notifySubscribers: false);
+                ApplyAppearancePreview();
             }
 
             foreach (IDesktopWidgetWindow window in windows)

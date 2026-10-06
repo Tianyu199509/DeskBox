@@ -377,6 +377,7 @@ public const int DefaultSearchMaxResults = 100;
                 [nameof(AppSettings.Widgets)] = DefaultPreferencePreservationReason.UserData,
                 [nameof(AppSettings.WidgetGroups)] = DefaultPreferencePreservationReason.UserData,
                 [nameof(AppSettings.WidgetTopologyLayouts)] = DefaultPreferencePreservationReason.UserData,
+                [nameof(AppSettings.WidgetTopologyAppearanceDefaults)] = DefaultPreferencePreservationReason.UserData,
                 [nameof(AppSettings.ActiveWidgetTopologyKey)] = DefaultPreferencePreservationReason.RuntimeState,
                 [nameof(AppSettings.WidgetCapsuleBarOrder)] = DefaultPreferencePreservationReason.UserData,
                 [nameof(AppSettings.WidgetCapsuleFreePlacements)] = DefaultPreferencePreservationReason.UserData,

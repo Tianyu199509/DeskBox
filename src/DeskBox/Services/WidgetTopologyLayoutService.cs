@@ -18,12 +18,15 @@ internal sealed class WidgetTopologyLayoutService
     private const string CurrentTopologyKeyPrefix = "v3-";
     private const uint EddGetDeviceInterfaceName = 0x00000001;
 
-    public bool ActivateCurrentTopology(AppSettings settings)
+    public bool ActivateCurrentTopology(AppSettings settings, bool startup = false)
     {
         ArgumentNullException.ThrowIfNull(settings);
         WidgetDisplayTopologySnapshot topology = CaptureCurrentTopology();
-        return Activate(settings, topology);
+        return Activate(settings, topology, startup);
     }
+
+    public bool CaptureCurrentAppearance(AppSettings settings) =>
+        WidgetTopologyAppearanceService.CaptureActive(settings, CaptureCurrentTopology().Key);
 
     public bool CaptureCurrentSurface(AppSettings settings, WidgetConfig member)
     {
@@ -32,8 +35,8 @@ internal sealed class WidgetTopologyLayoutService
 
         WidgetDisplayTopologySnapshot topology = CaptureCurrentTopology();
         if (topology.Monitors.Count == 0 ||
-            !string.Equals(settings.ActiveWidgetTopologyKey, topology.Key, StringComparison.Ordinal) ||
-            !settings.WidgetTopologyLayouts.TryGetValue(topology.Key, out WidgetTopologyLayoutProfile? profile))
+            !string.Equals(settings.WidgetLayout.ActiveWidgetTopologyKey, topology.Key, StringComparison.Ordinal) ||
+            !settings.WidgetLayout.WidgetTopologyLayouts.TryGetValue(topology.Key, out WidgetTopologyLayoutProfile? profile))
         {
             // A native DPI/display message can arrive before the coalesced
             // topology transaction. Never write current HWND geometry into the
@@ -60,7 +63,7 @@ internal sealed class WidgetTopologyLayoutService
     public bool RemoveSurface(AppSettings settings, string surfaceId)
     {
         bool changed = false;
-        foreach (WidgetTopologyLayoutProfile profile in settings.WidgetTopologyLayouts.Values)
+        foreach (WidgetTopologyLayoutProfile profile in settings.WidgetLayout.WidgetTopologyLayouts.Values)
         {
             changed |= profile.Surfaces.Remove(surfaceId);
         }
@@ -68,22 +71,24 @@ internal sealed class WidgetTopologyLayoutService
         return changed;
     }
 
-    internal bool Activate(AppSettings settings, WidgetDisplayTopologySnapshot topology)
+    internal bool Activate(AppSettings settings, WidgetDisplayTopologySnapshot topology, bool startup = false)
     {
-        settings.WidgetTopologyLayouts ??= [];
+        settings.WidgetLayout.WidgetTopologyLayouts ??= [];
         if (topology.Monitors.Count == 0 || string.IsNullOrWhiteSpace(topology.Key))
         {
             return false;
         }
 
         bool changed = false;
-        string? previousKey = settings.ActiveWidgetTopologyKey;
+        string? previousKey = settings.WidgetLayout.ActiveWidgetTopologyKey;
         bool initialCapture = string.IsNullOrWhiteSpace(previousKey);
+        if (!startup && previousKey is not null && !string.Equals(previousKey, topology.Key, StringComparison.Ordinal))
+            WidgetTopologyAppearanceService.CaptureActive(settings, previousKey);
         bool targetMonitorProjectionChanged = false;
         bool targetWasSeededFromCompatibleProfile = false;
         WidgetTopologyLayoutProfile? sourceProfile = null;
         if (!string.IsNullOrWhiteSpace(previousKey) &&
-            settings.WidgetTopologyLayouts.TryGetValue(previousKey, out sourceProfile))
+            settings.WidgetLayout.WidgetTopologyLayouts.TryGetValue(previousKey, out sourceProfile))
         {
             // Runtime configs are the live projection. Refresh the outgoing
             // profile before replacing them so a final drag/resize cannot be
@@ -91,7 +96,7 @@ internal sealed class WidgetTopologyLayoutService
             CaptureAllSurfaces(settings, sourceProfile);
         }
 
-        if (!settings.WidgetTopologyLayouts.TryGetValue(topology.Key, out WidgetTopologyLayoutProfile? targetProfile))
+        if (!settings.WidgetLayout.WidgetTopologyLayouts.TryGetValue(topology.Key, out WidgetTopologyLayoutProfile? targetProfile))
         {
             WidgetTopologyLayoutProfile? compatibleProfile = FindCompatibleProfile(
                 settings,
@@ -110,6 +115,7 @@ internal sealed class WidgetTopologyLayoutService
                 // project the newest semantically equivalent profile into the
                 // stable v3 key instead of making the user arrange it again.
                 SeedProfile(settings, compatibleProfile, targetProfile);
+                targetProfile.Appearance = compatibleProfile.Appearance;
                 targetWasSeededFromCompatibleProfile = true;
                 App.Log(
                     $"[DisplayTopology] Migrated compatible layout profile " +
@@ -123,7 +129,7 @@ internal sealed class WidgetTopologyLayoutService
             {
                 SeedProfile(settings, sourceProfile, targetProfile);
             }
-            settings.WidgetTopologyLayouts[topology.Key] = targetProfile;
+            settings.WidgetLayout.WidgetTopologyLayouts[topology.Key] = targetProfile;
             changed = true;
         }
         else
@@ -149,6 +155,7 @@ internal sealed class WidgetTopologyLayoutService
         }
 
         bool topologyKeyChanged = !string.Equals(previousKey, topology.Key, StringComparison.Ordinal);
+        changed |= WidgetTopologyAppearanceService.Apply(settings, targetProfile);
         if (topologyKeyChanged || targetMonitorProjectionChanged)
         {
             if (!initialCapture ||
@@ -160,7 +167,7 @@ internal sealed class WidgetTopologyLayoutService
 
             if (topologyKeyChanged)
             {
-                settings.ActiveWidgetTopologyKey = topology.Key;
+                settings.WidgetLayout.ActiveWidgetTopologyKey = topology.Key;
                 changed = true;
             }
         }
@@ -239,7 +246,7 @@ internal sealed class WidgetTopologyLayoutService
     {
         string targetSignature = CreateTopologySignature(topology.Monitors);
         foreach ((string key, WidgetTopologyLayoutProfile profile) in
-                 settings.WidgetTopologyLayouts
+                 settings.WidgetLayout.WidgetTopologyLayouts
                      .Where(pair =>
                          pair.Value is not null &&
                          pair.Value.Monitors is { Count: > 0 } &&
@@ -373,7 +380,7 @@ internal sealed class WidgetTopologyLayoutService
 
     private static void ApplyProfile(AppSettings settings, WidgetTopologyLayoutProfile profile)
     {
-        foreach (WidgetGroupConfig group in settings.WidgetGroups)
+        foreach (WidgetGroupConfig group in settings.WidgetLayout.WidgetGroups)
         {
             if (!profile.Surfaces.TryGetValue(
                     ResolveGroupSurfaceId(group),
@@ -385,7 +392,7 @@ internal sealed class WidgetTopologyLayoutService
             ApplyToGroup(group, layout);
             foreach (string memberId in group.MemberIds)
             {
-                WidgetConfig? member = settings.Widgets.FirstOrDefault(
+                WidgetConfig? member = settings.WidgetLayout.Widgets.FirstOrDefault(
                     candidate => string.Equals(candidate.Id, memberId, StringComparison.Ordinal));
                 if (member is not null)
                 {
@@ -394,10 +401,10 @@ internal sealed class WidgetTopologyLayoutService
             }
         }
 
-        HashSet<string> groupedMemberIds = settings.WidgetGroups
+        HashSet<string> groupedMemberIds = settings.WidgetLayout.WidgetGroups
             .SelectMany(group => group.MemberIds)
             .ToHashSet(StringComparer.Ordinal);
-        foreach (WidgetConfig widget in settings.Widgets)
+        foreach (WidgetConfig widget in settings.WidgetLayout.Widgets)
         {
             if (!groupedMemberIds.Contains(widget.Id) &&
                 profile.Surfaces.TryGetValue(widget.Id, out WidgetSurfaceLayoutProfile? layout))
@@ -524,23 +531,23 @@ internal sealed class WidgetTopologyLayoutService
         EnumerateSurfaces(AppSettings settings)
     {
         var groupedMemberIds = new HashSet<string>(StringComparer.Ordinal);
-        foreach (WidgetGroupConfig group in settings.WidgetGroups)
+        foreach (WidgetGroupConfig group in settings.WidgetLayout.WidgetGroups)
         {
             foreach (string memberId in group.MemberIds)
             {
                 groupedMemberIds.Add(memberId);
             }
 
-            WidgetConfig? active = settings.Widgets.FirstOrDefault(widget =>
+            WidgetConfig? active = settings.WidgetLayout.Widgets.FirstOrDefault(widget =>
                 string.Equals(widget.Id, group.ActiveMemberId, StringComparison.Ordinal)) ??
-                settings.Widgets.FirstOrDefault(widget => group.MemberIds.Contains(widget.Id, StringComparer.Ordinal));
+                settings.WidgetLayout.Widgets.FirstOrDefault(widget => group.MemberIds.Contains(widget.Id, StringComparer.Ordinal));
             if (active is not null)
             {
                 yield return (ResolveGroupSurfaceId(group), active, group);
             }
         }
 
-        foreach (WidgetConfig widget in settings.Widgets)
+        foreach (WidgetConfig widget in settings.WidgetLayout.Widgets)
         {
             if (!groupedMemberIds.Contains(widget.Id))
             {
@@ -749,9 +756,9 @@ internal sealed class WidgetTopologyLayoutService
     private static bool PruneProfiles(AppSettings settings, string activeKey)
     {
         bool changed = false;
-        while (settings.WidgetTopologyLayouts.Count > MaximumRetainedProfiles)
+        while (settings.WidgetLayout.WidgetTopologyLayouts.Count > MaximumRetainedProfiles)
         {
-            string? oldest = settings.WidgetTopologyLayouts
+            string? oldest = settings.WidgetLayout.WidgetTopologyLayouts
                 .Where(pair => !string.Equals(pair.Key, activeKey, StringComparison.Ordinal))
                 .OrderBy(pair => pair.Value.LastUsedAtUtc)
                 .Select(pair => pair.Key)
@@ -761,7 +768,7 @@ internal sealed class WidgetTopologyLayoutService
                 break;
             }
 
-            changed |= settings.WidgetTopologyLayouts.Remove(oldest);
+            changed |= settings.WidgetLayout.WidgetTopologyLayouts.Remove(oldest);
         }
 
         return changed;
@@ -773,7 +780,7 @@ internal sealed class WidgetTopologyLayoutService
             .Select(surface => surface.SurfaceId)
             .ToHashSet(StringComparer.Ordinal);
         bool changed = false;
-        foreach (WidgetTopologyLayoutProfile profile in settings.WidgetTopologyLayouts.Values)
+        foreach (WidgetTopologyLayoutProfile profile in settings.WidgetLayout.WidgetTopologyLayouts.Values)
         {
             foreach (string staleId in profile.Surfaces.Keys
                          .Where(surfaceId => !validSurfaceIds.Contains(surfaceId))

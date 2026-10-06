@@ -1778,6 +1778,8 @@ public sealed class SettingsServiceTests : IDisposable
 
     private static object? CreateNonDefaultSettingValue(Type type, object? defaultValue)
     {
+        if (type == typeof(WidgetTopologyAppearance))
+            return new WidgetTopologyAppearance { IconSize = 42, TextSize = 13 };
         if (Nullable.GetUnderlyingType(type) is { IsEnum: true } enumType)
             return Enum.GetValues(enumType).Cast<object>().First(value => !Equals(value, defaultValue));
         if (type == typeof(string))

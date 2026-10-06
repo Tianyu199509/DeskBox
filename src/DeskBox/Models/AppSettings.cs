@@ -617,6 +617,9 @@ public class AppSettings
     /// <inheritdoc cref="WidgetLayoutSettingsSlice.ActiveWidgetTopologyKey"/>
     public string? ActiveWidgetTopologyKey { get => WidgetLayout.ActiveWidgetTopologyKey; set => WidgetLayout.ActiveWidgetTopologyKey = value; }
 
+    /// <inheritdoc cref="WidgetLayoutSettingsSlice.WidgetTopologyAppearanceDefaults"/>
+    public WidgetTopologyAppearance? WidgetTopologyAppearanceDefaults { get => WidgetLayout.WidgetTopologyAppearanceDefaults; set => WidgetLayout.WidgetTopologyAppearanceDefaults = value; }
+
     /// <inheritdoc cref="WidgetLayoutSettingsSlice.WidgetGroupsEnabled"/>
     public bool WidgetGroupsEnabled { get => WidgetLayout.WidgetGroupsEnabled; set => WidgetLayout.WidgetGroupsEnabled = value; }
 

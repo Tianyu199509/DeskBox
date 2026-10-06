@@ -249,7 +249,10 @@ public sealed class SettingsSliceContractBaselineTests
                 s, DeskBox.Services.SettingsJsonContext.Default.AppSettings));
         string[] actual = doc.RootElement.EnumerateObject()
             .Select(p => p.Name).ToArray();
-        Assert.Equal(ExpectedMemberOrder, actual);
+        // Optional extensions do not reorder any legacy wire member.
+        string[] extensions = ["widgetTopologyAppearanceDefaults"];
+        Assert.All(extensions, key => Assert.Contains(key, actual));
+        Assert.Equal(ExpectedMemberOrder, actual.Where(key => !extensions.Contains(key)));
     }
 
     private static readonly string[] ExpectedMemberOrder =
