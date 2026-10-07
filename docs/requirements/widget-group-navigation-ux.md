@@ -216,7 +216,7 @@ WheelSwitchEnabled: bool
 1. 模型约束与迁移：标题展示、滚轮设置、Standard/Compact 校验、偏好记录和旧配置归一化。
 2. 稳定标题选择器：常驻控件、稳定集合、三种展示和原生 Flyout，退出重复导航。
 3. Surface 原子切换：标题、内容、索引和诊断统一代次，补齐回滚和每 Surface 协调器。
-4. 统一宿主：迁移文件与随记，清除跨宿主换窗和窗口 re-key 主路径。
+4. 统一宿主：迁移文件与随记，清除跨宿主换窗和窗口 re-key 主路径。（已完成：随记于 2026-10 迁入统一宿主，`QuickCaptureWidgetWindow` 窗口族删除，剩实机矩阵验证。）
 5. 输入、动效和无障碍：热区、阈值、冷却、固定槽位动效、焦点和系统降级。
 6. 资源与验收：快照硬预算、内存回落及全部类型/DPI/输入矩阵。
 
@@ -296,7 +296,7 @@ Apple Smart Stack、动画时长、阈值和缓存算法是设计参考或初始
 | 最后意图、取消和 900ms 首帧超时 | 已验证到事务单元层 | 同组新请求会取消旧请求；目标挂载后等待两个合成帧；超时或取消保留旧成员。当前所有组合仍共享一个全局切换锁，不同 Surface 不能真正并发。 |
 | 内容型成员共享 HWND | 已实现待矩阵验证 | 待办、音乐、天气、搜索可在 `ContentWidgetWindow` 内准备、提交和回滚；已有内容宿主事务单元测试，尚缺同 HWND 实机组合矩阵。 |
 | 文件成员共享 HWND | 已验证 | 文件已迁移为 `FileSurfaceContent` 并由 `ContentWidgetWindow` 统一承载；独立文件格子与格子组共享同一内容实现，旧 `WidgetWindow` 已删除。 |
-| 随记和跨宿主类型共享 HWND | 部分实现 | 文件↔内容型已使用统一内容宿主；随记↔其他类型仍需退役旧窗口，不符合最终持久宿主不变量。 |
+| 随记和跨宿主类型共享 HWND | 已实现待矩阵验证 | 随记已迁移为 `QuickCaptureWidgetContentAdapter`（视图 `QuickCaptureSurfaceContent`）并由 `ContentWidgetWindow` 统一承载，`QuickCaptureWidgetWindow` 窗口族已删除；瞬态状态经 `IWidgetTransientStateContent` 保存。尚缺随记↔文件/内容型同 HWND 实机组合矩阵。 |
 | 切换期间保留可见内容 | 部分实现 | 内容型保留旧实时 View，文件型保留旧内容位图，兼容路径保留旧窗口至目标两帧；尚无覆盖所有组合、DPI 和失败注入的无空白帧证据。 |
 | 隐藏、胶囊和退出时取消切换 | 未实现 | 当前只在移除成员或解散组合时显式取消；隐藏全部、单组隐藏、进入胶囊和 `CloseAll` 尚未统一 settle 正在进行的事务。 |
 | 外部附着导航条 | 未实现 | 当前 `WidgetGroupNavigationBar` 位于 `WidgetShell` 标题行；悬浮/隐藏标题仍使用内容顶部的 `OverlayGroupSelector`。 |
@@ -307,7 +307,7 @@ Apple Smart Stack、动画时长、阈值和缓存算法是设计参考或初始
 | 快照缓存与资源预算 | 未实现 | 只有单次过渡快照，没有相邻视觉 LRU、像素预算、内存压力和隐藏释放策略。 |
 | 无障碍、焦点、高对比度和减少动态效果 | 部分实现 | 标签有自动化名称和系统焦点视觉；缺少“当前成员、序号、总数”播报、完整键盘焦点策略和组动效降级验证。 |
 
-最近一次完整测试基线为 x64 `1100/1100` 通过，canonical Debug 构建成功。这个结果证明现有测试未回归，不等同于第 17 节最终验收已经全部通过。真实 HWND、帧可见性和随记跨宿主组合仍需持续做窗口级矩阵验证。
+最近一次完整测试基线为 x64 `4773/4773` 通过（2026-10-03），canonical Debug 构建成功。这个结果证明现有测试未回归，不等同于第 17 节最终验收已经全部通过。真实 HWND、帧可见性和随记组合仍需持续做窗口级矩阵验证。
 
 ### 0.5 当前类型迁移矩阵
 
@@ -315,13 +315,13 @@ Apple Smart Stack、动画时长、阈值和缓存算法是设计参考或初始
 |---|---|---|---|
 | 文件、映射文件夹 | `ContentWidgetWindow` + `FileSurfaceContent` | 与其他内容成员原位切换，共享 Surface/宿主 | 已完成统一宿主迁移；继续保持文件交互仅在共享内容层实现。 |
 | 待办、音乐、天气、搜索 | `ContentWidgetWindow` + `IWidgetContent` | 可跨这些内容类型原位切换 | 直接接入 Surface Session，保留现有内容生命周期协议。 |
-| 随记 | `QuickCaptureWidgetWindow` + `QuickCaptureWidgetViewModel` | 兼容换窗；只临时保存输入和搜索文本 | 提取为可托管成员内容，完整定义草稿、搜索、详情和附件状态。 |
-| 上述类型之间的交叉组合 | 文件与内容型共享宿主；随记仍为专用宿主 | 随记边界仍兼容换窗 | 全部通过同一 Surface Session 和顶层 HWND 切换。 |
+| 随记 | `ContentWidgetWindow` + `QuickCaptureWidgetContentAdapter`（视图为 `QuickCaptureSurfaceContent`） | 与其他成员原位切换，共享 Surface/宿主；瞬态状态经 `IWidgetTransientStateContent` 保存 | 已完成统一宿主迁移（`QuickCaptureWidgetWindow` 已删除）；待实机组合矩阵验证。 |
+| 上述类型之间的交叉组合 | 全部类型共享统一宿主 `ContentWidgetWindow` | 原位切换，无跨宿主换窗 | 已达成：全部通过同一 Surface Session 和顶层 HWND 切换；剩余为实机矩阵验证。 |
 | Tags、System Monitor 等尚未开放类型 | 占位/规划中 | 不作为当前完成门槛 | 类型开放前必须直接实现统一成员内容协议，不能新增窗口特例。 |
 
 ### 0.6 最终架构决策
 
-文件与内容型成员已经由 `ContentWidgetWindow` / `WidgetShellContentHost` 统一承载；下一阶段重点是将随记纳入同一 Surface 宿主，并继续按 `SurfaceId` 收敛运行时状态：
+文件、随记与内容型成员均已由 `ContentWidgetWindow` / `WidgetShellContentHost` 统一承载（随记 2026-10 迁入，旧窗口族已删除）；下一阶段重点是对随记组合补实机矩阵验证，并继续按 `SurfaceId` 收敛运行时状态：
 
 - 稳定顶层宿主窗口、导航层、内容卡片层、过渡层和当前成员身份。
 - 每个 Surface 独立的请求代次、切换锁和状态机；不同 Surface 的准备任务不能互相阻塞。

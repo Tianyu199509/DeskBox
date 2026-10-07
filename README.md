@@ -7,7 +7,7 @@ English | [简体中文](README.zh-CN.md)
 > External pull requests are not being merged at this time — bug reports, ideas, and discussions are very welcome via Issues / Discussions. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 [![CI](https://github.com/Tianyu199509/DeskBox/actions/workflows/ci.yml/badge.svg)](https://github.com/Tianyu199509/DeskBox/actions/workflows/ci.yml)
-[![Release 1.5.5](https://img.shields.io/badge/release-1.5.5-2563EB.svg)](https://github.com/Tianyu199509/DeskBox/releases/tag/v1.5.5)
+[![Release 1.5.6](https://img.shields.io/badge/release-1.5.6-2563EB.svg)](https://github.com/Tianyu199509/DeskBox/releases/tag/v1.5.6)
 [![Windows 10/11](https://img.shields.io/badge/Windows-10%2F11-0078D4.svg)](#system-requirements)
 [![x64 and ARM64](https://img.shields.io/badge/architecture-x64%20%7C%20ARM64-5C2D91.svg)](#download)
 [![License: GPL v3](https://img.shields.io/badge/license-GPLv3-blue.svg)](LICENSE)
@@ -41,10 +41,10 @@ All twelve selectable languages share the same resource-key and formatting-place
 
 ## Download
 
-DeskBox 1.5.5 is prepared for release. The [GitHub Releases](https://github.com/Tianyu199509/DeskBox/releases/tag/v1.5.5) download links below will become available after publication.
+DeskBox 1.5.6 is prepared for release. The [GitHub Releases](https://github.com/Tianyu199509/DeskBox/releases/tag/v1.5.6) download links below will become available after publication.
 
-- [DeskBox 1.5.5 for x64](https://github.com/Tianyu199509/DeskBox/releases/download/v1.5.5/DeskBox_Setup_1.5.5_x64.exe), recommended for most Intel and AMD PCs.
-- [DeskBox 1.5.5 for ARM64](https://github.com/Tianyu199509/DeskBox/releases/download/v1.5.5/DeskBox_Setup_1.5.5_arm64.exe), recommended for Snapdragon, Surface Pro X, and other Windows on ARM PCs.
+- [DeskBox 1.5.6 for x64](https://github.com/Tianyu199509/DeskBox/releases/download/v1.5.6/DeskBox_Setup_1.5.6_x64.exe), recommended for most Intel and AMD PCs.
+- [DeskBox 1.5.6 for ARM64](https://github.com/Tianyu199509/DeskBox/releases/download/v1.5.6/DeskBox_Setup_1.5.6_arm64.exe), recommended for Snapdragon, Surface Pro X, and other Windows on ARM PCs.
 
 Both packages are Full Native AOT builds with the matching private Windows App Runtime 2.4, so they can install offline without downloading a separate .NET 10 or Windows App Runtime package.
 
@@ -125,6 +125,19 @@ Every release also publishes a matching `.sha256` sidecar for each installer. Th
 - Start a visible installer after DeskBox closes; upgrades reuse and lock the existing installation path instead of creating a second copy.
 - Back up and restore settings, and export a privacy-filtered diagnostics package for troubleshooting.
 - Recover settings from resilient snapshots, flush pending changes during shutdown, and report save failures instead of silently reverting to defaults.
+
+## What's new in 1.5.6
+
+- **Dress up your widgets.** Swap any widget's icon for an emoji or a local image, give it its own background (with fit and dim controls) and border style, and choose global background modes — follow the material, one unified image, or a panorama sliced across stacked widgets. A text-shadow toggle rounds out the appearance settings.
+- **Pin widgets to a display.** A new Displays page in Settings previews the arrangement, identifies screens with a flashed number, pins every widget to the current layout in one click, and sets a default display for new widgets. Bindings follow display hardware identity, so they survive sleep, reconnects, and display renumbering.
+- **A tidier Settings window.** Low-frequency settings fold into expandable accordions, pages are reordered to put fundamentals first, and section switches slide in and out the way Windows' own Settings do. Entry cards are clickable across the whole row, and notices render as readable native info bars.
+- **Run quietly and migrate safely.** Start silently with Windows and summon everything back from the tray or hotkey; moving files into managed storage is now a copy-first flow with preview, verification, and resumable retry.
+- **Motion and timing.** Three new reveal effects (Edge scale, Tilt, Wipe) plus Spring easing and staggered group timing; hiding widgets slides them fully out with a per-window edge fade; desktop files wait a configurable dwell — real-time to 12 hours — before auto-organizing.
+- **Pick a weather icon style.** Settings → Weather now offers four bundled vector icon sets — Fluent (the Windows 11 emoji look, the default), DeskBox line-art, Meteocons Flat, and Meteocons Line. Weather icons no longer depend on the system emoji font, so they render identically on Windows 10 and 11.
+- **Cleaner drag-outs on Windows 10.** Dragging files out of a widget no longer pops Explorer's Copy / Move / Cancel picker, shows a brief Shift/Ctrl hint and a result toast instead, and the drag-out option drop-down in settings works again on Native AOT builds.
+- **Tray, capsule, and failure fixes.** A tray double-click no longer hides widgets right after revealing; a compact capsule no longer stays stuck expanded; search explains empty results when Everything is not connected; clipboard images from WeChat/QQ/browsers land; managed-folder renames retry transient locks; the direct-edition uninstaller keeps data safe when the Store edition may still be installed; and feedback cooldowns only count successful submissions.
+
+Read the complete [changelog](CHANGELOG.md) or the [1.5.6 release notes](docs/releases/v1.5.6.md).
 
 ## What's new in 1.5.5
 

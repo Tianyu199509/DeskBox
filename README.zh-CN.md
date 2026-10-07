@@ -7,7 +7,7 @@
 > 目前暂不接受外部 PR 合并——欢迎通过 Issue / Discussion 提交 Bug、功能建议与技术讨论，详见 [CONTRIBUTING.md](CONTRIBUTING.md)。
 
 [![CI](https://github.com/Tianyu199509/DeskBox/actions/workflows/ci.yml/badge.svg)](https://github.com/Tianyu199509/DeskBox/actions/workflows/ci.yml)
-[![1.5.5 版本](https://img.shields.io/badge/release-1.5.5-2563EB.svg)](https://github.com/Tianyu199509/DeskBox/releases/tag/v1.5.5)
+[![1.5.6 版本](https://img.shields.io/badge/release-1.5.6-2563EB.svg)](https://github.com/Tianyu199509/DeskBox/releases/tag/v1.5.6)
 [![Windows 10/11](https://img.shields.io/badge/Windows-10%2F11-0078D4.svg)](#环境要求)
 [![x64 and ARM64](https://img.shields.io/badge/architecture-x64%20%7C%20ARM64-5C2D91.svg)](#下载)
 [![License: GPL v3](https://img.shields.io/badge/license-GPLv3-blue.svg)](LICENSE)
@@ -40,10 +40,10 @@ DeskBox 使用贴近 Windows 原生体验的材质，同时保留普通桌面文
 
 ## 下载
 
-DeskBox 1.5.5 已进入发版准备阶段。下方 [GitHub Releases](https://github.com/Tianyu199509/DeskBox/releases/tag/v1.5.5) 下载链接会在正式发布后生效。
+DeskBox 1.5.6 已进入发版准备阶段。下方 [GitHub Releases](https://github.com/Tianyu199509/DeskBox/releases/tag/v1.5.6) 下载链接会在正式发布后生效。
 
-- [DeskBox 1.5.5 x64 安装包](https://github.com/Tianyu199509/DeskBox/releases/download/v1.5.5/DeskBox_Setup_1.5.5_x64.exe)，推荐大多数 Intel 和 AMD 电脑使用。
-- [DeskBox 1.5.5 ARM64 安装包](https://github.com/Tianyu199509/DeskBox/releases/download/v1.5.5/DeskBox_Setup_1.5.5_arm64.exe)，推荐骁龙、Surface Pro X 等 Windows on ARM 电脑使用。
+- [DeskBox 1.5.6 x64 安装包](https://github.com/Tianyu199509/DeskBox/releases/download/v1.5.6/DeskBox_Setup_1.5.6_x64.exe)，推荐大多数 Intel 和 AMD 电脑使用。
+- [DeskBox 1.5.6 ARM64 安装包](https://github.com/Tianyu199509/DeskBox/releases/download/v1.5.6/DeskBox_Setup_1.5.6_arm64.exe)，推荐骁龙、Surface Pro X 等 Windows on ARM 电脑使用。
 
 两个安装包都是 Full Native AOT 构建，并内置对应架构的私有 Windows App Runtime 2.4，可离线安装，不需要另外下载 .NET 10 或 Windows App Runtime。
 
@@ -124,6 +124,19 @@ DeskBox 1.5.5 已进入发版准备阶段。下方 [GitHub Releases](https://git
 - DeskBox 关闭后会显示安装界面；升级会复用并锁定原安装路径，避免生成第二份应用。
 - 支持设置备份与恢复，并可导出经过隐私过滤的一键诊断包用于排查问题。
 - 设置使用可恢复快照，退出时刷新待保存内容；保存失败会明确记录和提示，不再静默恢复默认配置。
+
+## 1.5.6 更新亮点
+
+- **装扮你的格子。** 任意格子可换表情或本地图片图标、设置自己的背景图（契合度与明暗可调）和边框样式；全局背景提供跟随材质、统一图片、横跨叠放格子的全景切片三种模式，外观里还有新的文字阴影开关。
+- **把格子钉在指定显示器上。** 设置新增「显示器」页：排列预览、一键识别屏幕、一键固定当前布局、设置新格子默认显示器。绑定跟随显示器硬件身份，睡眠、重插、系统重排编号都不跑偏。
+- **更清爽的设置窗口。** 低频设置收进风琴卡，页面按基础优先重排，分区切换带 Windows 设置式的左右滑入转场；入口卡整行可点，说明条改用清晰可读的原生信息条。
+- **安静启动，安全迁移。** 可随 Windows 静默启动，托盘或热键一键唤回；文件迁入受管存储改为“先复制”流程——预览、校验、可恢复重试，校验通过前不动源文件。
+- **动效与时机。** 新增边缘缩放、倾斜、擦除三个显示效果和弹簧缓动、错峰时序；隐藏格子改为完整滑出加边缘逐窗渐隐；桌面文件可配置停留多久后才被自动整理（实时到 12 小时）。
+- **天气图标可选风格了。** 设置 → 天气新增图标风格：四套内置矢量图标——Fluent（Windows 11 表情风格，默认）、DeskBox 简笔、Meteocons 扁平、Meteocons 线框。不再依赖系统 emoji 字体，Windows 10 和 11 上观感完全一致。
+- **Windows 10 拖出更干净。** 从格子拖出文件不再弹出 Explorer 的"复制 / 移动 / 取消"选择框，拖出时有 Shift/Ctrl 修饰键提示与结果提示；Native AOT 版中"拖出格子时"设置下拉恢复正常。
+- **托盘、胶囊与容错修复。** 双击托盘图标不再在格子刚展开后又立刻收起；紧凑胶囊不再卡在展开态；Everything 未连接时空结果有说明；微信/QQ/浏览器剪贴板图片能正常落盘；受管文件夹重命名会对瞬时占用重试；直装版卸载器在商店版可能仍在装时保守保留数据；反馈冷却只计成功提交。
+
+完整内容见 [更新日志](CHANGELOG.md) 和 [1.5.6 发布说明](docs/releases/v1.5.6.md)。
 
 ## 1.5.5 更新亮点
 
