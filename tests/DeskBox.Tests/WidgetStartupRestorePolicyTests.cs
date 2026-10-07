@@ -147,9 +147,11 @@ public sealed class WidgetStartupRestorePolicyTests
             "src/DeskBox/Services/WidgetManager.TrayAnimation.cs"));
 
         // The hide decision is made before the restore loop and feeds the
-        // creation parameter.
+        // creation parameter. The Count gate keeps empty restore passes off
+        // WidgetLayerService.UsesQuickRevealMode(), whose Application.Current
+        // activation throws in non-XAML unit-test hosts.
         int decisionIndex = manager.IndexOf(
-            "bool hideWidgetsAtStartup = WidgetStartupRestorePolicy.GetStartupHideReason(",
+            "bool hideWidgetsAtStartup = configs.Count > 0 &&",
             StringComparison.Ordinal);
         int restoreIndex = manager.IndexOf(
             "await StartupWidgetRestoreRunner.RestoreAsync(",

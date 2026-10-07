@@ -879,9 +879,15 @@ public sealed partial class WidgetManager
         // pass — the older shape — left every widget visibly on the desktop
         // for the full restore duration (seconds with many widgets), which
         // made silent startup look like it had no effect at all.
-        bool hideWidgetsAtStartup = WidgetStartupRestorePolicy.GetStartupHideReason(
-            WidgetLayerService.UsesQuickRevealMode(),
-            _settingsService.Settings) is not null;
+        // The Count gate keeps the empty restore pass off
+        // WidgetLayerService.UsesQuickRevealMode(): it reads
+        // Microsoft.UI.Xaml.Application.Current, whose activation throws
+        // REGDB_E_CLASSNOTREG in non-XAML unit-test hosts (CI runners
+        // without the WinAppSDK runtime registration).
+        bool hideWidgetsAtStartup = configs.Count > 0 &&
+            WidgetStartupRestorePolicy.GetStartupHideReason(
+                WidgetLayerService.UsesQuickRevealMode(),
+                _settingsService.Settings) is not null;
 
         // Arm the session flag before the restore loop so every automatic
         // re-show pass (deferred bounds reconciliation, group restore) already
