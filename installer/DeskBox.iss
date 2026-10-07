@@ -65,7 +65,9 @@ UsePreviousPrivileges=yes
 ; Manager cannot always close the whole process through a single window, so
 ; allow Setup to terminate DeskBox after the normal close attempt times out.
 CloseApplications=force
-CloseApplicationsFilter={#MyAppExeName}
+; The short-lived thumbnail proxy batches can outlive a killed host when a
+; shell handler hangs, so Restart Manager must cover it as well.
+CloseApplicationsFilter={#MyAppExeName},DeskBox.ThumbnailProxy.exe
 RestartApplications=no
 OutputDir=..\Output
 #if DeskBoxBundledRuntime

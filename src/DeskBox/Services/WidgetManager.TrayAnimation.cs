@@ -73,6 +73,9 @@ public sealed partial class WidgetManager
         _lastTrayLayerToggleUtc = now;
         _lastRaiseOriginatedFromTrayIcon =
             string.Equals(source, "tray-icon", StringComparison.Ordinal);
+        // A tray raise (tray icon, hotkey, desktop double-click, Quick Reveal)
+        // is the first explicit user reveal of a hidden startup session.
+        ClearStartupHiddenSession(source);
         try
         {
             CancelActiveTrayAnimationsAndRestorePositions();
@@ -425,7 +428,6 @@ public sealed partial class WidgetManager
         foreach (var window in windows)
         {
             window.SetTrayAnimationOffsetOverride(null, null);
-            window.SetTrayAnimationEdgeFade(false);
         }
 
         var options = WidgetAnimationSettings.From(_settingsService.Settings);
@@ -450,8 +452,6 @@ public sealed partial class WidgetManager
             }
 
             var workArea = GetAnimationWorkArea(groupWindows[0]);
-            bool hasAdjacentDisplay = WidgetSlideBoundaryPolicy.HasAdjacentDisplayBeyondEdge(
-                GetAnimationOuterBounds(groupWindows[0]), direction);
 
             // Use resting bounds: during prepare/play the HWNDs are physically
             // displaced offscreen, which would collapse the group offset to ~0
@@ -461,56 +461,34 @@ public sealed partial class WidgetManager
             double groupRight = groupWindows.Max(window => window.RestingAnimationBounds.Right);
             double groupBottom = groupWindows.Max(window => window.RestingAnimationBounds.Bottom);
 
-            // Unconfined targets eject the group past this monitor's work-area
-            // boundary; confined targets stop it flush with the boundary so it
-            // never drifts onto an adjacent display (fading out instead).
-            // The group slides on a single axis; the other override stays 0.
-            WidgetSlideBoundaryPolicy.SlideBoundaryDecision decision = direction switch
+            // The group ejects past this monitor's work-area boundary on a
+            // single axis; the other override stays 0. Windows crossing onto
+            // an adjacent display dissolve per-window: each window fades over
+            // its own boundary span inside the tray animation controller.
+            double offsetX = 0;
+            double offsetY = 0;
+            switch (direction)
             {
-                SettingsService.WidgetAnimationSlideDirectionLeft =>
-                    WidgetSlideBoundaryPolicy.ResolveSlideOffset(
-                        -(groupRight - workArea.X + OffscreenAnimationPadding),
-                        farEdge: groupLeft,
-                        workAreaEdge: workArea.X,
-                        hasAdjacentDisplay),
-                SettingsService.WidgetAnimationSlideDirectionUp =>
-                    WidgetSlideBoundaryPolicy.ResolveSlideOffset(
-                        -(groupBottom - workArea.Y + OffscreenAnimationPadding),
-                        farEdge: groupTop,
-                        workAreaEdge: workArea.Y,
-                        hasAdjacentDisplay),
-                SettingsService.WidgetAnimationSlideDirectionDown =>
-                    WidgetSlideBoundaryPolicy.ResolveSlideOffset(
-                        workArea.Y + workArea.Height - groupTop + OffscreenAnimationPadding,
-                        farEdge: groupBottom,
-                        workAreaEdge: workArea.Y + workArea.Height,
-                        hasAdjacentDisplay),
-                _ => WidgetSlideBoundaryPolicy.ResolveSlideOffset(
-                        workArea.X + workArea.Width - groupLeft + OffscreenAnimationPadding,
-                        farEdge: groupRight,
-                        workAreaEdge: workArea.X + workArea.Width,
-                        hasAdjacentDisplay)
-            };
+                case SettingsService.WidgetAnimationSlideDirectionLeft:
+                    offsetX = -(groupRight - workArea.X + OffscreenAnimationPadding);
+                    break;
 
-            double confinedOffsetX = 0;
-            double confinedOffsetY = 0;
-            if (direction is SettingsService.WidgetAnimationSlideDirectionLeft or
-                SettingsService.WidgetAnimationSlideDirectionRight)
-            {
-                confinedOffsetX = decision.Offset;
-            }
-            else
-            {
-                confinedOffsetY = decision.Offset;
+                case SettingsService.WidgetAnimationSlideDirectionUp:
+                    offsetY = -(groupBottom - workArea.Y + OffscreenAnimationPadding);
+                    break;
+
+                case SettingsService.WidgetAnimationSlideDirectionDown:
+                    offsetY = workArea.Y + workArea.Height - groupTop + OffscreenAnimationPadding;
+                    break;
+
+                default:
+                    offsetX = workArea.X + workArea.Width - groupLeft + OffscreenAnimationPadding;
+                    break;
             }
 
             foreach (var window in groupWindows)
             {
-                window.SetTrayAnimationOffsetOverride(confinedOffsetX, confinedOffsetY);
-                if (decision.ConfineWithFade)
-                {
-                    window.SetTrayAnimationEdgeFade(true);
-                }
+                window.SetTrayAnimationOffsetOverride(offsetX, offsetY);
             }
         }
     }
@@ -524,11 +502,6 @@ public sealed partial class WidgetManager
     private static Windows.Graphics.RectInt32 GetAnimationWorkArea(IDesktopWidgetWindow window)
     {
         return GetAnimationDisplayArea(window).WorkArea;
-    }
-
-    private static Windows.Graphics.RectInt32 GetAnimationOuterBounds(IDesktopWidgetWindow window)
-    {
-        return GetAnimationDisplayArea(window).OuterBounds;
     }
 
     private static DisplayArea GetAnimationDisplayArea(IDesktopWidgetWindow window)

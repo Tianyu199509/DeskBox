@@ -201,22 +201,23 @@ public abstract partial class WidgetWindowBase
     {
         if (highContrast)
         {
-            try
+            // Reuse the shared cached UISettings instance instead of a new
+            // projection per palette resolve; TryGetUiColor already carries
+            // the unavailability fallback contract.
+            Color? foreground = WindowsCompatibilityService.TryGetUiColor(
+                UIColorType.Foreground);
+            if (foreground is { } highContrastForeground)
             {
-                var uiSettings = new UISettings();
-                Color foreground = uiSettings.GetColorValue(UIColorType.Foreground);
                 return new WidgetForegroundPalette(
-                    foreground,
-                    foreground,
-                    foreground,
-                    foreground,
-                    foreground);
+                    highContrastForeground,
+                    highContrastForeground,
+                    highContrastForeground,
+                    highContrastForeground,
+                    highContrastForeground);
             }
-            catch
-            {
-                // Continue with the selected palette if WinRT accessibility
-                // colors are temporarily unavailable.
-            }
+
+            // Continue with the selected palette if WinRT accessibility
+            // colors are temporarily unavailable.
         }
 
         Color primary = mode switch

@@ -1217,7 +1217,10 @@ public sealed partial class WidgetManager
         config.PositionMarginY = 0;
         config.PositionMonitorKey = null;
         config.PositionMonitorDeviceName = null;
+        config.PositionMonitorStableId = null;
         config.PositionMonitorWasPrimary = null;
+        config.ScreenBindingMode = WidgetScreenBindingMode.Unbound;
+        config.BoundScreenId = null;
         config.BoundsCoordinateVersion = WidgetConfig.CurrentBoundsCoordinateVersion;
         (config.Width, config.Height) = GetDefaultFeatureWidgetSize(kind);
         config.ViewMode = ViewMode.Icon;

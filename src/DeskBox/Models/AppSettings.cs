@@ -608,6 +608,13 @@ public class AppSettings
     /// <inheritdoc cref="WidgetLayoutSettingsSlice.Widgets"/>
     public List<WidgetConfig> Widgets { get => WidgetLayout.Widgets; set => WidgetLayout.Widgets = value; }
 
+    /// <inheritdoc cref="WidgetLayoutSettingsSlice.WidgetDefaultBoundScreenId"/>
+    public string? WidgetDefaultBoundScreenId
+    {
+        get => WidgetLayout.WidgetDefaultBoundScreenId;
+        set => WidgetLayout.WidgetDefaultBoundScreenId = value;
+    }
+
     /// <inheritdoc cref="WidgetLayoutSettingsSlice.WidgetGroups"/>
     public List<WidgetGroupConfig> WidgetGroups { get => WidgetLayout.WidgetGroups; set => WidgetLayout.WidgetGroups = value; }
 

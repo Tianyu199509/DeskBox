@@ -1776,6 +1776,95 @@ public sealed class SettingsServiceTests : IDisposable
         Assert.True(restored.Settings.AutoStartDefaultApplied);
     }
 
+    [Fact]
+    public void NormalizeScreenBindings_DowngradesWidgetPinsWithBlankBoundScreenId()
+    {
+        var pinnedBlank = new WidgetConfig
+        {
+            Id = "pinned-blank",
+            ScreenBindingMode = WidgetScreenBindingMode.Pinned,
+            BoundScreenId = ""
+        };
+        var pinnedWhitespace = new WidgetConfig
+        {
+            Id = "pinned-whitespace",
+            ScreenBindingMode = WidgetScreenBindingMode.Pinned,
+            BoundScreenId = "   "
+        };
+        var pinnedValid = new WidgetConfig
+        {
+            Id = "pinned-valid",
+            ScreenBindingMode = WidgetScreenBindingMode.Pinned,
+            BoundScreenId = "external-panel"
+        };
+        var followPrimary = new WidgetConfig
+        {
+            Id = "follow-primary",
+            ScreenBindingMode = WidgetScreenBindingMode.FollowPrimary,
+            BoundScreenId = null
+        };
+        var unboundWithId = new WidgetConfig
+        {
+            Id = "unbound-with-id",
+            ScreenBindingMode = WidgetScreenBindingMode.Unbound,
+            BoundScreenId = "external-panel"
+        };
+        var settings = new AppSettings
+        {
+            Widgets = [pinnedBlank, pinnedWhitespace, pinnedValid, followPrimary, unboundWithId]
+        };
+
+        SettingsService.NormalizeScreenBindings(settings);
+
+        Assert.Equal(WidgetScreenBindingMode.Unbound, pinnedBlank.ScreenBindingMode);
+        Assert.Null(pinnedBlank.BoundScreenId);
+        Assert.Equal(WidgetScreenBindingMode.Unbound, pinnedWhitespace.ScreenBindingMode);
+        Assert.Null(pinnedWhitespace.BoundScreenId);
+        Assert.Equal(WidgetScreenBindingMode.Pinned, pinnedValid.ScreenBindingMode);
+        Assert.Equal("external-panel", pinnedValid.BoundScreenId);
+        Assert.Equal(WidgetScreenBindingMode.FollowPrimary, followPrimary.ScreenBindingMode);
+        // Unbound entries keep a leftover id: normalization only repairs pins
+        // whose resolution would dead-end on the empty reference.
+        Assert.Equal(WidgetScreenBindingMode.Unbound, unboundWithId.ScreenBindingMode);
+        Assert.Equal("external-panel", unboundWithId.BoundScreenId);
+    }
+
+    [Fact]
+    public void NormalizeScreenBindings_DowngradesGroupPinsWithBlankBoundScreenId()
+    {
+        var pinnedBlank = new WidgetGroupConfig
+        {
+            Id = "group-blank",
+            ScreenBindingMode = WidgetScreenBindingMode.Pinned,
+            BoundScreenId = " "
+        };
+        var pinnedValid = new WidgetGroupConfig
+        {
+            Id = "group-valid",
+            ScreenBindingMode = WidgetScreenBindingMode.Pinned,
+            BoundScreenId = "panel"
+        };
+        var unbound = new WidgetGroupConfig
+        {
+            Id = "group-unbound",
+            ScreenBindingMode = WidgetScreenBindingMode.Unbound,
+            BoundScreenId = null
+        };
+        var settings = new AppSettings
+        {
+            WidgetGroups = [pinnedBlank, pinnedValid, unbound]
+        };
+
+        SettingsService.NormalizeScreenBindings(settings);
+
+        Assert.Equal(WidgetScreenBindingMode.Unbound, pinnedBlank.ScreenBindingMode);
+        Assert.Null(pinnedBlank.BoundScreenId);
+        Assert.Equal(WidgetScreenBindingMode.Pinned, pinnedValid.ScreenBindingMode);
+        Assert.Equal("panel", pinnedValid.BoundScreenId);
+        Assert.Equal(WidgetScreenBindingMode.Unbound, unbound.ScreenBindingMode);
+        Assert.Null(unbound.BoundScreenId);
+    }
+
     private static object? CreateNonDefaultSettingValue(Type type, object? defaultValue)
     {
         if (Nullable.GetUnderlyingType(type) is { IsEnum: true } enumType)

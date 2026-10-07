@@ -54,18 +54,14 @@ public sealed partial class SettingsWindow
         FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.StackPanel>("WidgetGroups", "WidgetGroupsSection")!;
     private global::DeskBox.Views.SettingsSections.CapsuleModeSettingsSection CapsuleModeSection =>
         FindCreatedSectionElement<global::DeskBox.Views.SettingsSections.CapsuleModeSettingsSection>("CapsuleMode", "CapsuleModeSection")!;
-    private global::Microsoft.UI.Xaml.Controls.StackPanel CapsuleBehaviorSettingsSection =>
-        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.StackPanel>("CapsuleBehaviorSettings", "CapsuleBehaviorSettingsSection")!;
-    private global::Microsoft.UI.Xaml.Controls.StackPanel CapsuleArrangementSettingsSection =>
-        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.StackPanel>("CapsuleArrangementSettings", "CapsuleArrangementSettingsSection")!;
-    private global::Microsoft.UI.Xaml.Controls.StackPanel CapsuleAnimationSettingsSection =>
-        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.StackPanel>("CapsuleAnimationSettings", "CapsuleAnimationSettingsSection")!;
     private global::Microsoft.UI.Xaml.Controls.StackPanel CapsuleOverridesSettingsSection =>
         FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.StackPanel>("CapsuleOverridesSettings", "CapsuleOverridesSettingsSection")!;
     private global::DeskBox.Views.SettingsSections.FileWidgetSettingsSection AppearanceDetailSection =>
         FindCreatedSectionElement<global::DeskBox.Views.SettingsSections.FileWidgetSettingsSection>("AppearanceDetail", "AppearanceDetailSection")!;
     private global::DeskBox.Views.SettingsSections.DesktopOrganizationSettingsSection DesktopOrganizationSettingsSection =>
         FindCreatedSectionElement<global::DeskBox.Views.SettingsSections.DesktopOrganizationSettingsSection>("DesktopOrganizationSettings", "DesktopOrganizationSettingsSection")!;
+    private global::DeskBox.Views.SettingsSections.DisplaySettingsSection DisplaysSection =>
+        FindCreatedSectionElement<global::DeskBox.Views.SettingsSections.DisplaySettingsSection>("Displays", "DisplaysSection")!;
     private global::Microsoft.UI.Xaml.Controls.StackPanel FileDisplaySettingsSection =>
         FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.StackPanel>("FileDisplaySettings", "FileDisplaySettingsSection")!;
     private global::Microsoft.UI.Xaml.Controls.StackPanel FileStorageSettingsSection =>

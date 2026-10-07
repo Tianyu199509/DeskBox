@@ -250,7 +250,10 @@ public abstract partial class WidgetWindowBase
         SimplifyBackdropForInteraction();
         HasMovedTitleBarDrag = false;
         DisplayChangeWatcher?.SuppressRestore();
-        Win32Helper.GetCursorPos(out InitialCursorPt);
+        if (!Win32Helper.TryGetPointerScreenPoint(HWnd, RootElement, e, out InitialPointerPt))
+        {
+            Win32Helper.GetCursorPos(out InitialPointerPt);
+        }
         RectInt32 initialBounds = GetActualWindowBounds();
         InitialWindowPos = new PointInt32(initialBounds.X, initialBounds.Y);
         InitialWindowSize = new SizeInt32(initialBounds.Width, initialBounds.Height);
@@ -280,9 +283,14 @@ public abstract partial class WidgetWindowBase
             return;
         }
 
-        Win32Helper.GetCursorPos(out var currentPt);
-        int deltaX = currentPt.X - InitialCursorPt.X;
-        int deltaY = currentPt.Y - InitialCursorPt.Y;
+        if (!Win32Helper.TryGetPointerScreenPoint(HWnd, RootElement, e, out var currentPt) &&
+            !Win32Helper.GetCursorPos(out currentPt))
+        {
+            e.Handled = true;
+            return;
+        }
+        int deltaX = currentPt.X - InitialPointerPt.X;
+        int deltaY = currentPt.Y - InitialPointerPt.Y;
         int dragDistanceSquared = (deltaX * deltaX) + (deltaY * deltaY);
 
         if (!HasMovedTitleBarDrag)
@@ -485,7 +493,10 @@ public abstract partial class WidgetWindowBase
         ResizeDirection = direction;
         DisplayChangeWatcher?.SuppressRestore();
         OnResizeStart();
-        Win32Helper.GetCursorPos(out InitialCursorPt);
+        if (!Win32Helper.TryGetPointerScreenPoint(HWnd, RootElement, e, out InitialPointerPt))
+        {
+            Win32Helper.GetCursorPos(out InitialPointerPt);
+        }
         RectInt32 initialBounds = GetActualWindowBounds();
         InitialWindowPos = new PointInt32(initialBounds.X, initialBounds.Y);
         InitialWindowSize = new SizeInt32(initialBounds.Width, initialBounds.Height);
@@ -508,7 +519,8 @@ public abstract partial class WidgetWindowBase
             return;
         }
 
-        if (Win32Helper.GetCursorPos(out var currentPt))
+        if (Win32Helper.TryGetPointerScreenPoint(HWnd, RootElement, e, out var currentPt) ||
+            Win32Helper.GetCursorPos(out currentPt))
         {
             QueueInteractiveResizePointer(new PointInt32(currentPt.X, currentPt.Y));
         }
@@ -517,8 +529,8 @@ public abstract partial class WidgetWindowBase
 
     private RectInt32 ResolveInteractiveResizeBounds(PointInt32 currentPt)
     {
-        int deltaX = currentPt.X - InitialCursorPt.X;
-        int deltaY = currentPt.Y - InitialCursorPt.Y;
+        int deltaX = currentPt.X - InitialPointerPt.X;
+        int deltaY = currentPt.Y - InitialPointerPt.Y;
 
         int newWidth = InitialWindowSize.Width;
         int newHeight = InitialWindowSize.Height;

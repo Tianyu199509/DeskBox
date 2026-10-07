@@ -5,10 +5,11 @@ using DeskBox.Contracts;
 using DeskBox.Features.Search;
 using DeskBox.Platform;
 using DeskBox.Services;
+using CommunityToolkit.WinUI.Controls;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
-using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Input;
+using Microsoft.UI.Xaml.Media;
 using Microsoft.Windows.Storage.Pickers;
 using Windows.System;
 
@@ -33,6 +34,9 @@ public sealed partial class SearchSettingsSection : UserControl
         InitializeComponent();
         Loaded += OnLoaded;
         Unloaded += OnUnloaded;
+        // Local brush values do not follow theme swaps; re-pin when the
+        // realized section's theme flips.
+        ActualThemeChanged += (_, _) => ApplyElevatedNoticeSeverityBrushes();
     }
 
     private LocalizationService Localization => _localization;
@@ -80,7 +84,32 @@ public sealed partial class SearchSettingsSection : UserControl
 
     private void OnLoaded(object sender, RoutedEventArgs e)
     {
+        ApplyElevatedNoticeSeverityBrushes();
         SynchronizeActivity();
+    }
+
+    /// <summary>
+    /// The elevated-hotkey notice's ThemeResource severity brushes fail to
+    /// resolve inside sections realized through DataTemplate.LoadContent
+    /// (the known delayed-creation pitfall), leaving the bar painted like
+    /// the card behind it with near-invisible text. Pin the informational
+    /// severity brushes from the application resources so the notice keeps
+    /// a distinct background and readable text in both themes.
+    /// </summary>
+    private void ApplyElevatedNoticeSeverityBrushes()
+    {
+        if (Application.Current.Resources.TryGetValue(
+                "InfoBarInformationalSeverityBackgroundBrush", out object? background) &&
+            background is Brush backgroundBrush)
+        {
+            SearchHotkeyElevatedNoticeInfoBar.Background = backgroundBrush;
+        }
+        if (Application.Current.Resources.TryGetValue(
+                "InfoBarInformationalSeverityForegroundBrush", out object? foreground) &&
+            foreground is Brush foregroundBrush)
+        {
+            SearchHotkeyElevatedNoticeInfoBar.Foreground = foregroundBrush;
+        }
     }
 
     private void OnUnloaded(object sender, RoutedEventArgs e)
@@ -371,7 +400,13 @@ private void UpdateEverythingDashboard(EverythingConnectionSnapshot snapshot)
         SearchHotkeyState hotkey = _viewModel.State.Hotkey;
         bool hotkeyAvailable = _viewModel.State.FeatureEnabled && hotkey.Available;
 
-        SearchHotkeyExpander.IsEnabled = hotkeyAvailable;
+        // Content-level gating on purpose: the expander itself stays enabled
+        // so the notice about the unavailable hotkey can always be read;
+        // only the controls that would mutate the hotkey go gray.
+        SearchHotkeyToggle.IsEnabled = hotkeyAvailable;
+        SearchHotkeyPresetSegmented.IsEnabled = hotkeyAvailable;
+        SearchHotkeyCaptureButton.IsEnabled = hotkeyAvailable;
+        ResetSearchHotkeyButton.IsEnabled = hotkeyAvailable;
         SearchHotkeyToggle.IsOn = hotkey.Enabled && hotkeyAvailable;
 
         if (!_isRecordingSearchHotkey)
@@ -379,8 +414,10 @@ private void UpdateEverythingDashboard(EverythingConnectionSnapshot snapshot)
             SearchHotkeyCaptureButton.Content = hotkey.DisplayText;
         }
 
-        SearchHotkeyPresetAltSpaceButton.IsChecked =
-            hotkey.Gesture.Equals(SearchSettingsViewModel.AltSpaceGesture);
+        SearchHotkeyPresetSegmented.SelectedItem =
+            hotkey.Gesture.Equals(SearchSettingsViewModel.AltSpaceGesture)
+                ? SearchHotkeyPresetAltSpaceButton
+                : null;
 
         SearchHotkeyStatusText.Text = !hotkeyAvailable
             ? Localization.T("Settings.Search.Hotkey.Status.Disabled")
@@ -432,9 +469,10 @@ private void UpdateEverythingDashboard(EverythingConnectionSnapshot snapshot)
         await ApplySearchHotkeyGestureAsync(gesture);
     }
 
-    private async void SearchHotkeyPresetButton_Click(object sender, RoutedEventArgs e)
+    private async void SearchHotkeyPresetSegmented_SelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (_isLoading || sender is not ToggleButton { Tag: "AltSpace" })
+        if (_isLoading || e.AddedItems.OfType<SegmentedItem>()
+                .FirstOrDefault(item => item.Tag is "AltSpace") is null)
         {
             return;
         }

@@ -92,7 +92,12 @@ public static class WidgetCompactBoundsCalculator
             PositionMarginY = placement.PositionMarginY,
             PositionMonitorKey = placement.PositionMonitorKey,
             PositionMonitorDeviceName = placement.PositionMonitorDeviceName,
-            PositionMonitorWasPrimary = placement.PositionMonitorWasPrimary
+            PositionMonitorStableId = placement.PositionMonitorStableId,
+            PositionMonitorWasPrimary = placement.PositionMonitorWasPrimary,
+            // The capsule shares the parent widget's screen binding so a pinned
+            // widget resolves its compact placement on the bound monitor too.
+            ScreenBindingMode = config.ScreenBindingMode,
+            BoundScreenId = config.BoundScreenId
         };
         RectInt32 resolved = WidgetPositioningService.ResolveBoundsForCurrentTopology(placementConfig);
         RectInt32 workArea = DisplayArea.GetFromRect(resolved, DisplayAreaFallback.Nearest).WorkArea;
@@ -307,6 +312,7 @@ public static class WidgetCompactBoundsCalculator
             PositionMarginY = placementConfig.PositionMarginY,
             PositionMonitorKey = placementConfig.PositionMonitorKey,
             PositionMonitorDeviceName = placementConfig.PositionMonitorDeviceName,
+            PositionMonitorStableId = placementConfig.PositionMonitorStableId,
             PositionMonitorWasPrimary = placementConfig.PositionMonitorWasPrimary,
             BoundsCoordinateVersion = WidgetConfig.CurrentBoundsCoordinateVersion
         };

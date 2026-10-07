@@ -28,7 +28,10 @@ public sealed partial class AppearanceSettingsSection : UserControl
 
     private void NestedSettingsButton_Click(object sender, RoutedEventArgs e)
     {
-        if (sender is Button { Tag: string sectionTag })
+        // Drill-down rows are Buttons, but the 格子组-style entry cards are
+        // toolkit SettingsCards (ButtonBase, not Button); match the shell's
+        // FrameworkElement guard so both navigate.
+        if (sender is FrameworkElement { Tag: string sectionTag })
         {
             NavigationRequested?.Invoke(this, new SettingsSectionNavigationRequestedEventArgs(sectionTag));
         }

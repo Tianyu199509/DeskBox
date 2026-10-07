@@ -625,7 +625,7 @@ public sealed partial class SearchPopupWindow : Window
             return;
         }
 
-        if (!TryBeginWindowInteraction(element, e.Pointer))
+        if (!TryBeginWindowInteraction(element, e))
         {
             return;
         }
@@ -650,7 +650,7 @@ public sealed partial class SearchPopupWindow : Window
         }
 
         string direction = element.Tag as string ?? string.Empty;
-        if (string.IsNullOrEmpty(direction) || !TryBeginWindowInteraction(element, e.Pointer))
+        if (string.IsNullOrEmpty(direction) || !TryBeginWindowInteraction(element, e))
         {
             return;
         }
@@ -660,10 +660,11 @@ public sealed partial class SearchPopupWindow : Window
         e.Handled = true;
     }
 
-    private bool TryBeginWindowInteraction(FrameworkElement element, Pointer pointer)
+    private bool TryBeginWindowInteraction(FrameworkElement element, PointerRoutedEventArgs e)
     {
-        if (!Win32Helper.GetCursorPos(out _interactionStartCursor) ||
-            !Win32Helper.GetWindowRect(_hwnd, out var rect))
+        bool anchored = Win32Helper.TryGetPointerScreenPoint(_hwnd, Content, e, out _interactionStartCursor) ||
+            Win32Helper.GetCursorPos(out _interactionStartCursor);
+        if (!anchored || !Win32Helper.GetWindowRect(_hwnd, out var rect))
         {
             return false;
         }
@@ -674,7 +675,7 @@ public sealed partial class SearchPopupWindow : Window
             rect.Right - rect.Left,
             rect.Bottom - rect.Top);
         _windowInteractionElement = element;
-        if (!element.CapturePointer(pointer))
+        if (!element.CapturePointer(e.Pointer))
         {
             _windowInteractionElement = null;
             return false;
@@ -685,8 +686,13 @@ public sealed partial class SearchPopupWindow : Window
 
     private void WindowInteraction_PointerMoved(object sender, PointerRoutedEventArgs e)
     {
-        if ((!_isWindowDragging && !_isWindowResizing) || _appWindow is null ||
-            !Win32Helper.GetCursorPos(out var cursor))
+        if ((!_isWindowDragging && !_isWindowResizing) || _appWindow is null)
+        {
+            return;
+        }
+
+        if (!Win32Helper.TryGetPointerScreenPoint(_hwnd, Content, e, out var cursor) &&
+            !Win32Helper.GetCursorPos(out cursor))
         {
             return;
         }

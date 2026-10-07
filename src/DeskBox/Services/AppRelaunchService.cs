@@ -6,8 +6,19 @@ namespace DeskBox.Services;
 
 public static class AppRelaunchService
 {
+    // Store builds do not ship DeskBox.Updater (excluded from Store packaging),
+    // so the relaunch is delegated to the WinAppSDK restart agent from the
+    // graceful-shutdown tail instead of a detached helper process.
+    public static bool PendingOsRestartOnShutdown { get; set; }
+
     public static AppRelaunchScheduleResult ScheduleAfterCurrentProcessExit()
     {
+        if (AppDistributionService.Current.IsMicrosoftStore)
+        {
+            PendingOsRestartOnShutdown = true;
+            return AppRelaunchScheduleResult.StartedSuccessfully;
+        }
+
         string appPath = Environment.ProcessPath ?? Path.Combine(AppContext.BaseDirectory, "DeskBox.exe");
         if (!File.Exists(appPath))
         {

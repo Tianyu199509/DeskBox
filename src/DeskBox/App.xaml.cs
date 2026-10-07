@@ -4558,6 +4558,25 @@ public partial class App : Application
                             Environment.Exit(0);
                         });
                     }
+                    if (dependentTeardownCompleted &&
+                        AppRelaunchService.PendingOsRestartOnShutdown &&
+                        DistributionService.IsMicrosoftStore)
+                    {
+                        // Store builds have no detached updater helper; the
+                        // WinAppSDK restart agent terminates this process on
+                        // success and never returns. On failure the pending
+                        // restore marker on disk still applies on next launch.
+                        try
+                        {
+                            Microsoft.Windows.AppLifecycle.AppInstance.Restart(
+                                string.Empty);
+                        }
+                        catch (Exception restartEx)
+                        {
+                            Log($"[Shutdown] Store relaunch failed: {restartEx}");
+                        }
+                        AppRelaunchService.PendingOsRestartOnShutdown = false;
+                    }
                     Exit();
                 }
             }

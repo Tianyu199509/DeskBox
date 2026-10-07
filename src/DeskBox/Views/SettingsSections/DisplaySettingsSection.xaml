@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="utf-8"?>
+<UserControl
+    x:Class="DeskBox.Views.SettingsSections.DisplaySettingsSection"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:svc="using:DeskBox.Services"
+    xmlns:toolkit="using:CommunityToolkit.WinUI.Controls">
+
+    <UserControl.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="ms-appx:///Styles/SettingsOverviewResources.xaml" />
+            </ResourceDictionary.MergedDictionaries>
+        </ResourceDictionary>
+    </UserControl.Resources>
+
+    <!-- Windows display-settings anatomy: header card with the Identify
+         action, a frameless arrangement preview (single-monitor systems keep
+         a compact preview, matching how Windows still draws the arrangement;
+         see R8.5.2/R8.7 in widget-screen-binding.md), the selected display's
+         settings card below it, and the widget rows with inline "show on"
+         combos. No frame box around the preview; unselected cards keep their
+         default Fluent styling, while the selected card is fully
+         accent-filled like the native display page (selection fill, state
+         brushes, and contrast colors are applied in code-behind from the
+         live system accent). -->
+    <StackPanel Style="{StaticResource SectionPanelStyle}" Spacing="12">
+        <InfoBar
+            x:Name="DisplaysStatusInfo"
+            IsClosable="True"
+            IsOpen="False" />
+
+        <toolkit:SettingsCard
+            x:Name="DisplaysOverviewCard"
+            HorizontalContentAlignment="Right"
+            svc:Localized.DescriptionKey="Settings.Displays.Description"
+            svc:Localized.HeaderKey="Settings.Displays.Title">
+            <toolkit:SettingsCard.HeaderIcon>
+                <FontIcon Glyph="&#xE7F4;" />
+            </toolkit:SettingsCard.HeaderIcon>
+            <Button
+                x:Name="IdentifyButton"
+                Click="IdentifyButton_Click"
+                svc:Localized.Key="Settings.Displays.Identify" />
+        </toolkit:SettingsCard>
+
+        <StackPanel x:Name="PreviewArea" Spacing="8">
+            <TextBlock
+                x:Name="PreviewHintText"
+                FontSize="12"
+                Opacity="0.7"
+                svc:Localized.Key="Settings.Displays.PreviewHint" />
+            <Viewbox
+                x:Name="PreviewViewbox"
+                MaxHeight="280"
+                HorizontalAlignment="Stretch"
+                Stretch="Uniform">
+                <Canvas x:Name="DisplayPreviewCanvas" />
+            </Viewbox>
+        </StackPanel>
+
+        <toolkit:SettingsCard
+            x:Name="ScreenDetailCard"
+            HorizontalContentAlignment="Right"
+            Visibility="Collapsed">
+            <toolkit:SettingsCard.HeaderIcon>
+                <FontIcon Glyph="&#xE7F4;" />
+            </toolkit:SettingsCard.HeaderIcon>
+            <StackPanel Orientation="Horizontal" Spacing="8">
+                <Button
+                    x:Name="SetDefaultScreenButton"
+                    Click="SetDefaultScreenButton_Click"
+                    Style="{StaticResource AccentButtonStyle}" />
+                <Button
+                    x:Name="PinAllWidgetsButton"
+                    Click="PinAllWidgetsButton_Click"
+                    svc:Localized.Key="Settings.Displays.PinAll" />
+            </StackPanel>
+        </toolkit:SettingsCard>
+
+        <StackPanel Spacing="6">
+            <TextBlock
+                Style="{StaticResource SettingsSubsectionTitleTextStyle}"
+                svc:Localized.Key="Settings.Displays.Widgets.SectionTitle" />
+            <StackPanel x:Name="WidgetBindingCards" Spacing="4" />
+        </StackPanel>
+    </StackPanel>
+</UserControl>

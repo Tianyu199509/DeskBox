@@ -282,20 +282,22 @@
                     Toggled="ShowChineseFestivalsToggle_Toggled" />
             </toolkit:SettingsCard>
 
-            <toolkit:SettingsCard HorizontalContentAlignment="Right" svc:Localized.HeaderKey="Glance.Transition.Title">
-                <toolkit:SettingsCard.HeaderIcon>
+            <toolkit:SettingsExpander
+                IsExpanded="False"
+                svc:Localized.HeaderKey="Glance.Transition.Title">
+                <toolkit:SettingsExpander.HeaderIcon>
                     <FontIcon Glyph="&#xE790;" />
-                </toolkit:SettingsCard.HeaderIcon>
+                </toolkit:SettingsExpander.HeaderIcon>
                 <ComboBox x:Name="TransitionComboBox" Width="220" SelectionChanged="TransitionComboBox_SelectionChanged" />
-            </toolkit:SettingsCard>
-
-            <toolkit:SettingsCard HorizontalContentAlignment="Right" svc:Localized.HeaderKey="Glance.Speed.Title">
-                <ComboBox x:Name="SpeedComboBox" Width="220" SelectionChanged="SpeedComboBox_SelectionChanged" />
-            </toolkit:SettingsCard>
-
-            <toolkit:SettingsCard HorizontalContentAlignment="Right" svc:Localized.HeaderKey="Glance.Readability.Title">
-                <ComboBox x:Name="ReadabilityComboBox" Width="220" SelectionChanged="ReadabilityComboBox_SelectionChanged" />
-            </toolkit:SettingsCard>
+                <toolkit:SettingsExpander.Items>
+                    <toolkit:SettingsCard HorizontalContentAlignment="Right" svc:Localized.HeaderKey="Glance.Speed.Title">
+                        <ComboBox x:Name="SpeedComboBox" Width="220" SelectionChanged="SpeedComboBox_SelectionChanged" />
+                    </toolkit:SettingsCard>
+                    <toolkit:SettingsCard HorizontalContentAlignment="Right" svc:Localized.HeaderKey="Glance.Readability.Title">
+                        <ComboBox x:Name="ReadabilityComboBox" Width="220" SelectionChanged="ReadabilityComboBox_SelectionChanged" />
+                    </toolkit:SettingsCard>
+                </toolkit:SettingsExpander.Items>
+            </toolkit:SettingsExpander>
 
             <toolkit:SettingsCard
                 HorizontalContentAlignment="Right"

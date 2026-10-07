@@ -16,7 +16,6 @@ internal sealed class WidgetTopologyLayoutService
 {
     internal const int MaximumRetainedProfiles = 12;
     private const string CurrentTopologyKeyPrefix = "v3-";
-    private const uint EddGetDeviceInterfaceName = 0x00000001;
 
     public bool ActivateCurrentTopology(AppSettings settings)
     {
@@ -563,6 +562,8 @@ internal sealed class WidgetTopologyLayoutService
             PositionMonitorKey = config.PositionMonitorKey,
             PositionMonitorDeviceName = config.PositionMonitorDeviceName,
             PositionMonitorWasPrimary = config.PositionMonitorWasPrimary,
+            ScreenBindingMode = config.ScreenBindingMode,
+            BoundScreenId = config.BoundScreenId,
             BoundsCoordinateVersion = config.BoundsCoordinateVersion,
             Width = config.Width,
             Height = config.Height,
@@ -587,6 +588,8 @@ internal sealed class WidgetTopologyLayoutService
             PositionMonitorKey = group.PositionMonitorKey,
             PositionMonitorDeviceName = group.PositionMonitorDeviceName,
             PositionMonitorWasPrimary = group.PositionMonitorWasPrimary,
+            ScreenBindingMode = group.ScreenBindingMode,
+            BoundScreenId = group.BoundScreenId,
             BoundsCoordinateVersion = group.BoundsCoordinateVersion,
             Width = group.Width,
             Height = group.Height,
@@ -607,6 +610,14 @@ internal sealed class WidgetTopologyLayoutService
         config.PositionMonitorKey = layout.PositionMonitorKey;
         config.PositionMonitorDeviceName = layout.PositionMonitorDeviceName;
         config.PositionMonitorWasPrimary = layout.PositionMonitorWasPrimary;
+        // The stable id must be backfilled together with the device name:
+        // WidgetPositioningService ranks it ABOVE the device name, so leaving
+        // a stale id behind would keep resolving the freshly projected
+        // geometry onto the previous monitor (the wrong-screen regression).
+        config.PositionMonitorStableId = layout.PositionMonitorStableId;
+        // Screen binding is topology-independent user intent: profile
+        // activation repositions but never rebinds the surface, so a stale
+        // profile captured before a pin cannot undo it.
         config.BoundsCoordinateVersion = layout.BoundsCoordinateVersion;
         config.Width = layout.Width;
         config.Height = layout.Height;
@@ -624,6 +635,10 @@ internal sealed class WidgetTopologyLayoutService
         group.PositionMonitorKey = layout.PositionMonitorKey;
         group.PositionMonitorDeviceName = layout.PositionMonitorDeviceName;
         group.PositionMonitorWasPrimary = layout.PositionMonitorWasPrimary;
+        // Same stable-id backfill as ApplyToWidget: the group surface resolves
+        // through the identical stable-id-first chain.
+        group.PositionMonitorStableId = layout.PositionMonitorStableId;
+        // Same orthogonality rule as ApplyToWidget: never rebind from a profile.
         group.BoundsCoordinateVersion = layout.BoundsCoordinateVersion;
         group.Width = layout.Width;
         group.Height = layout.Height;
@@ -681,6 +696,19 @@ internal sealed class WidgetTopologyLayoutService
         WidgetTopologyMonitorProfile? sourceMonitor,
         IReadOnlyList<WidgetTopologyMonitorProfile> targets)
     {
+        // An explicit pin outranks every positional heuristic: when the bound
+        // monitor exists in the target topology, the layout migrates onto it.
+        if (layout.ScreenBindingMode == WidgetScreenBindingMode.Pinned &&
+            !string.IsNullOrWhiteSpace(layout.BoundScreenId))
+        {
+            WidgetTopologyMonitorProfile? bound = targets.FirstOrDefault(target =>
+                MonitorStableIdEquals(target.StableId, layout.BoundScreenId));
+            if (bound is not null)
+            {
+                return bound;
+            }
+        }
+
         if (sourceMonitor is not null)
         {
             WidgetTopologyMonitorProfile? stable = targets.FirstOrDefault(target =>
@@ -718,6 +746,24 @@ internal sealed class WidgetTopologyLayoutService
         }
 
         return targets.FirstOrDefault(target => target.IsPrimary) ?? targets.FirstOrDefault();
+    }
+
+    /// <summary>
+    /// Stable-id equality for binding comparisons: ids that degenerated to the
+    /// unstable <c>\\.\DISPLAYn</c> name or "unknown-display" never match, so a
+    /// pin cannot accidentally latch onto a renumbered monitor.
+    /// </summary>
+    private static bool MonitorStableIdEquals(string? left, string? right)
+    {
+        string normalizedLeft = NormalizeStableIdentityForKey(left);
+        string normalizedRight = NormalizeStableIdentityForKey(right);
+        if (string.Equals(normalizedLeft, "geometry-only", StringComparison.Ordinal) ||
+            string.Equals(normalizedRight, "geometry-only", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        return string.Equals(normalizedLeft, normalizedRight, StringComparison.Ordinal);
     }
 
     private static bool MonitorIdentityEquals(
@@ -827,6 +873,8 @@ internal sealed class WidgetTopologyLayoutService
         new()
         {
             PositionMonitorStableId = source.PositionMonitorStableId,
+            ScreenBindingMode = source.ScreenBindingMode,
+            BoundScreenId = source.BoundScreenId,
             X = source.X,
             Y = source.Y,
             PositionAnchor = source.PositionAnchor,
@@ -854,55 +902,14 @@ internal sealed class WidgetTopologyLayoutService
                 PositionMarginY = source.PositionMarginY,
                 PositionMonitorKey = source.PositionMonitorKey,
                 PositionMonitorDeviceName = source.PositionMonitorDeviceName,
+                PositionMonitorStableId = source.PositionMonitorStableId,
                 PositionMonitorWasPrimary = source.PositionMonitorWasPrimary,
                 BoundsCoordinateVersion = source.BoundsCoordinateVersion
             };
 
     private static string ResolveStableMonitorId(string? deviceName)
     {
-        string fallback = string.IsNullOrWhiteSpace(deviceName) ? "unknown-display" : deviceName.Trim();
-        if (string.IsNullOrWhiteSpace(deviceName))
-        {
-            return fallback;
-        }
-
-        try
-        {
-            var displayDevice = new Win32Helper.DisplayDevice
-            {
-                Size = Marshal.SizeOf<Win32Helper.DisplayDevice>(),
-                DeviceName = string.Empty,
-                DeviceString = string.Empty,
-                DeviceId = string.Empty,
-                DeviceKey = string.Empty
-            };
-            if (Win32Helper.EnumDisplayDevices(
-                    deviceName,
-                    0,
-                    ref displayDevice,
-                    EddGetDeviceInterfaceName))
-            {
-                if (!string.IsNullOrWhiteSpace(displayDevice.DeviceId))
-                {
-                    return displayDevice.DeviceId.Trim();
-                }
-
-                if (!string.IsNullOrWhiteSpace(displayDevice.DeviceKey))
-                {
-                    return displayDevice.DeviceKey.Trim();
-                }
-            }
-        }
-        catch (Exception ex) when (
-            ex is DllNotFoundException or
-                EntryPointNotFoundException or
-                BadImageFormatException or
-                MarshalDirectiveException or
-                TypeLoadException)
-        {
-        }
-
-        return fallback;
+        return Win32Helper.ResolveStableMonitorId(deviceName);
     }
 }
 

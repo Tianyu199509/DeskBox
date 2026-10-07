@@ -590,6 +590,12 @@ public abstract partial class WidgetWindowBase
 
     public void RestoreBoundsForCurrentTopology()
     {
+        // A programmatic re-resolve must not trust the memoized capsule
+        // placement: screen-binding changes resolve a different monitor, and
+        // the stale stable-bounds memo would silently pin the collapsed
+        // capsule to its old screen (the pin-all batch missed collapsed
+        // widgets through exactly this path).
+        InvalidateStableCompactBounds();
         _ = TryRestoreBoundsForCurrentTopology(allowHidden: true);
     }
 

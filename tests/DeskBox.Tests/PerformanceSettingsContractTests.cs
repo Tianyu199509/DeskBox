@@ -3,7 +3,7 @@ namespace DeskBox.Tests;
 public sealed class PerformanceSettingsContractTests
 {
     [Fact]
-    public void GeneralPage_PlacesPerformanceBeforeStartupWithPresetAndDrillDown()
+    public void GeneralPage_PlacesPerformanceAfterStartupAndBeforeAttachmentStorage()
     {
         string xaml = ReadRepositoryFile(
             "src/DeskBox/Views/SettingsWindow.xaml");
@@ -19,8 +19,9 @@ public sealed class PerformanceSettingsContractTests
             StringComparison.Ordinal);
 
         Assert.True(attachment >= 0);
-        Assert.True(performance > attachment);
-        Assert.True(autoStart > performance);
+        Assert.True(performance > autoStart);
+        Assert.True(attachment > performance);
+        Assert.True(autoStart >= 0);
         Assert.Contains(
             "ItemsSource=\"{Binding AvailablePerformanceModeOptions}\"",
             xaml,

@@ -154,7 +154,7 @@ public sealed class GlanceWidgetInstanceManagementTests
                 "SettingsExpander",
                 StringComparison.Ordinal))
             .ToArray();
-        Assert.Equal(2, expanders.Length);
+        Assert.Equal(3, expanders.Length);
         System.Xml.Linq.XElement typography = Assert.Single(expanders.Where(element =>
             element.Attributes().Any(attribute =>
                 attribute.Name.LocalName == "Localized.HeaderKey" &&

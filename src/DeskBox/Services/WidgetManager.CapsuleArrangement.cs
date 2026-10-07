@@ -826,6 +826,7 @@ public sealed partial class WidgetManager
             PositionMarginY = placement.PositionMarginY,
             PositionMonitorKey = placement.PositionMonitorKey,
             PositionMonitorDeviceName = placement.PositionMonitorDeviceName,
+            PositionMonitorStableId = placement.PositionMonitorStableId,
             PositionMonitorWasPrimary = placement.PositionMonitorWasPrimary,
             BoundsCoordinateVersion = placement.BoundsCoordinateVersion
         };

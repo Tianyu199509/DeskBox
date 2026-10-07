@@ -33,6 +33,12 @@ public sealed class InstallerUninstallContractTests
         "ManagedStorageShortcutCreateFailed"
     ];
 
+    private static readonly string[] StoreEditionMessages =
+    [
+        "StoreEditionDataPreserved",
+        "StoreEditionStateUnknown"
+    ];
+
     private static readonly string[] DependencyMessages =
     [
         "DependencyDownloadCancelled",
@@ -262,6 +268,117 @@ public sealed class InstallerUninstallContractTests
     }
 
     [Fact]
+    public void Uninstall_StoreEditionProbe_IsThreeStateWithPlatformPrecheck()
+    {
+        string code = ReadRepositoryFile("installer/DeskBox.Uninstall.iss");
+
+        Assert.Contains("GetStoreDeskBoxInstallState", code, StringComparison.Ordinal);
+        Assert.Contains("StoreDeskBoxStateNotInstalled", code, StringComparison.Ordinal);
+        Assert.Contains("StoreDeskBoxStateInstalled", code, StringComparison.Ordinal);
+        Assert.Contains("StoreDeskBoxStateUnknown", code, StringComparison.Ordinal);
+        Assert.Contains("Result := StoreDeskBoxStateUnknown;", code, StringComparison.Ordinal);
+        Assert.DoesNotContain("IsStoreDeskBoxInstalled", code, StringComparison.Ordinal);
+
+        // The platform pre-check must decide whether AppX can exist at all
+        // with native Inno Setup probes only, without spawning another process.
+        Assert.Contains(
+            "DirExists(ExpandConstant('{win}\\System32\\WindowsApps'))",
+            code,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "RegKeyExists(HKEY_LOCAL_MACHINE, 'SYSTEM\\CurrentControlSet\\Services\\AppXSvc')",
+            code,
+            StringComparison.Ordinal);
+
+        // The PowerShell probe must stay scoped to the current user's
+        // package registration and keep its documented exit-code contract.
+        Assert.Contains("Get-AppxPackage -Name", code, StringComparison.Ordinal);
+        Assert.Contains("exit 1", code, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Uninstall_StoreEditionUnknownState_FailsClosed()
+    {
+        string code = ReadRepositoryFile("installer/DeskBox.Uninstall.iss");
+
+        // Both the /PURGEUSERDATA path and the interactive keep-or-remove path
+        // must branch on the tri-state probe and treat Unknown exactly like
+        // installed: the purge stays blocked and the dedicated message is shown.
+        Assert.Equal(2, CountOccurrences(code, "case GetStoreDeskBoxInstallState of"));
+        Assert.Equal(2, CountOccurrences(code, "StoreDeskBoxStateUnknown:"));
+        Assert.Equal(2, CountOccurrences(code, "{cm:StoreEditionStateUnknown}"));
+        Assert.Contains("{cm:StoreEditionDataPreserved}", code, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void StoreEditionMessages_AreLocalizedForEveryInstallerLanguage()
+    {
+        string messages = ReadRepositoryFile("installer/DeskBox.UninstallCustomMessages.iss");
+
+        foreach (string language in InstallerLanguages)
+        {
+            foreach (string message in StoreEditionMessages)
+            {
+                Assert.Contains(
+                    $"{language}.{message}=",
+                    messages,
+                    StringComparison.Ordinal);
+            }
+        }
+
+        // The corrected copy must not claim the two editions share one
+        // application-data directory: the Store edition keeps its data in its
+        // own MSIX LocalCache and this uninstaller never touches it.
+        Assert.DoesNotContain(
+            "Both editions share the same application data",
+            messages,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("两个版本共用同一应用数据目录", messages, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void UninstallCustomMessages_KeySetsAreAlignedAcrossLanguages()
+    {
+        string messages = ReadRepositoryFile("installer/DeskBox.UninstallCustomMessages.iss");
+        string code = ReadRepositoryFile("installer/DeskBox.Uninstall.iss");
+        var tables = InstallerLanguages.ToDictionary(
+            language => language,
+            _ => new HashSet<string>(StringComparer.Ordinal),
+            StringComparer.Ordinal);
+
+        foreach (string line in messages.Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries))
+        {
+            int dotIndex = line.IndexOf('.');
+            int equalsIndex = line.IndexOf('=');
+            if (dotIndex <= 0 || equalsIndex <= dotIndex)
+            {
+                continue;
+            }
+
+            string language = line[..dotIndex].Trim();
+            if (tables.TryGetValue(language, out HashSet<string>? keys))
+            {
+                keys.Add(line[(dotIndex + 1)..equalsIndex].Trim());
+            }
+        }
+
+        HashSet<string> english = tables["english"];
+        Assert.Contains("StoreEditionDataPreserved", english);
+        Assert.Contains("StoreEditionStateUnknown", english);
+        foreach ((string language, HashSet<string> keys) in tables)
+        {
+            Assert.Equal(
+                english.OrderBy(key => key, StringComparer.Ordinal),
+                keys.OrderBy(key => key, StringComparer.Ordinal));
+        }
+
+        foreach (string message in StoreEditionMessages)
+        {
+            Assert.Contains("{cm:" + message + "}", code, StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
     public void CustomMessageKeysAndPlaceholders_AreAlignedAcrossLanguages()
     {
         string messages = string.Join(
@@ -380,6 +497,19 @@ public sealed class InstallerUninstallContractTests
             .Select(match => match.Value)
             .OrderBy(placeholder => placeholder, StringComparer.Ordinal)
             .ToArray();
+    }
+
+    private static int CountOccurrences(string text, string value)
+    {
+        int count = 0;
+        int index = 0;
+        while ((index = text.IndexOf(value, index, StringComparison.Ordinal)) >= 0)
+        {
+            count++;
+            index += value.Length;
+        }
+
+        return count;
     }
 
     private static string FindRepositoryRoot()

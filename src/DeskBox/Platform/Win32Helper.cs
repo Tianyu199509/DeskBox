@@ -2038,6 +2038,81 @@ public static partial class Win32Helper
     [return: MarshalAs(UnmanagedType.Bool)]
     public static partial bool GetCursorPos(out POINT lpPoint);
 
+    [LibraryImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static partial bool ClientToScreen(IntPtr hWnd, ref POINT lpPoint);
+
+    [LibraryImport("user32.dll")]
+    private static partial uint GetMessagePos();
+
+    // GetMessagePos packs signed screen coordinates for the input message
+    // currently being dispatched; both words must be sign-extended so windows
+    // left of / above the primary monitor resolve correctly. It reflects the
+    // pointer event itself, not the shared cursor, so touch drags work.
+    private static bool IsPointOnVirtualDesktop(POINT point)
+    {
+        int vx = GetSystemMetrics(SM_XVIRTUALSCREEN);
+        int vy = GetSystemMetrics(SM_YVIRTUALSCREEN);
+        int width = GetSystemMetrics(SM_CXVIRTUALSCREEN);
+        int height = GetSystemMetrics(SM_CYVIRTUALSCREEN);
+        return width > 0 && height > 0 &&
+            point.X >= vx && point.X <= vx + width &&
+            point.Y >= vy && point.Y <= vy + height;
+    }
+
+    /// <summary>
+    /// Resolves the screen-space point of the pointer event being dispatched,
+    /// from the thread message queue (GetMessagePos) instead of the shared
+    /// mouse cursor. Touch contact never moves the cursor, so GetCursorPos-
+    /// based drag and resize math silently no-ops on touch. GetMessagePos is
+    /// also independent of this window's bounds, unlike the client-origin +
+    /// XAML-position conversion, which feedback-loops when window moves are
+    /// paced behind pointer events during fast drags; that conversion stays
+    /// as a fallback only.
+    /// </summary>
+    public static bool TryGetPointerScreenPoint(
+        IntPtr hWnd,
+        Microsoft.UI.Xaml.UIElement? relativeTo,
+        Microsoft.UI.Xaml.Input.PointerRoutedEventArgs e,
+        out POINT screenPoint)
+    {
+        screenPoint = default;
+        uint messagePos = GetMessagePos();
+        if (messagePos != 0)
+        {
+            var candidate = new POINT
+            {
+                X = (short)(messagePos & 0xFFFF),
+                Y = (short)(messagePos >> 16),
+            };
+            if (IsPointOnVirtualDesktop(candidate))
+            {
+                screenPoint = candidate;
+                return true;
+            }
+        }
+
+        if (relativeTo?.XamlRoot is not { } xamlRoot)
+        {
+            return false;
+        }
+
+        Windows.Foundation.Point position = e.GetCurrentPoint(relativeTo).Position;
+        double scale = GetDpiScaleForWindow(hWnd, xamlRoot);
+        var clientOrigin = default(POINT);
+        if (!ClientToScreen(hWnd, ref clientOrigin))
+        {
+            return false;
+        }
+
+        screenPoint = new POINT
+        {
+            X = clientOrigin.X + (int)Math.Round(position.X * scale),
+            Y = clientOrigin.Y + (int)Math.Round(position.Y * scale),
+        };
+        return true;
+    }
+
     [StructLayout(LayoutKind.Sequential)]
     public struct RECT
     {
@@ -2104,7 +2179,8 @@ public static partial class Win32Helper
         RECT WorkArea,
         string DeviceName,
         bool IsPrimary,
-        double DpiScale);
+        double DpiScale,
+        string StableId);
 
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
     private struct DISPLAY_DEVICEW
@@ -2300,6 +2376,48 @@ public static partial class Win32Helper
     }
 
     /// <summary>
+    /// Full physical monitor rectangle of the display currently containing
+    /// the window. Per-monitor consumers (panorama background fitting) must
+    /// key off this rect rather than the virtual-desktop union — the union
+    /// mixes monitor DPI scales and only behaves like one canvas when every
+    /// monitor shares a single scale.
+    /// </summary>
+    public static bool TryGetWindowMonitorRect(IntPtr hWnd, out RECT monitorRect)
+    {
+        monitorRect = default;
+        if (hWnd == IntPtr.Zero)
+        {
+            return false;
+        }
+
+        try
+        {
+            IntPtr monitor = MonitorFromWindow(hWnd, MONITOR_DEFAULTTONEAREST);
+            if (monitor == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            var info = new MONITORINFO
+            {
+                cbSize = Marshal.SizeOf<MONITORINFO>()
+            };
+            if (!GetMonitorInfo(monitor, ref info))
+            {
+                return false;
+            }
+
+            monitorRect = info.rcMonitor;
+            return true;
+        }
+        catch (Exception ex) when (
+            ex is DllNotFoundException or EntryPointNotFoundException or BadImageFormatException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
     /// Returns the refresh rate of the monitor currently containing the window.
     /// Invalid driver values safely normalize to 60 Hz.
     /// </summary>
@@ -2386,12 +2504,14 @@ public static partial class Win32Helper
                 };
                 if (GetMonitorInfoEx(hMonitor, ref info))
                 {
+                    string deviceName = info.szDevice ?? string.Empty;
                     areas.Add(new MonitorWorkAreaInfo(
                         info.rcMonitor,
                         info.rcWork,
-                        info.szDevice ?? string.Empty,
+                        deviceName,
                         (info.dwFlags & MonitorInfoPrimary) == MonitorInfoPrimary,
-                        GetDpiScaleForMonitor(hMonitor)));
+                        GetDpiScaleForMonitor(hMonitor),
+                        ResolveStableMonitorId(deviceName)));
                 }
                 else
                 {
@@ -2406,7 +2526,8 @@ public static partial class Win32Helper
                             fallbackInfo.rcWork,
                             string.Empty,
                             (fallbackInfo.dwFlags & MonitorInfoPrimary) == MonitorInfoPrimary,
-                            GetDpiScaleForMonitor(hMonitor)));
+                            GetDpiScaleForMonitor(hMonitor),
+                            ResolveStableMonitorId(null)));
                     }
                 }
 
@@ -2415,6 +2536,64 @@ public static partial class Win32Helper
             IntPtr.Zero);
 
         return areas;
+    }
+
+    /// <summary>EnumDisplayDevices dwFlags: retrieve the device interface name for the monitor.</summary>
+    private const uint EddGetDeviceInterfaceName = 0x00000001;
+
+    /// <summary>
+    /// Best-effort stable identity for a monitor: the PnP device interface id
+    /// when the adapter exposes one, otherwise the registry device key, and
+    /// finally the (unstable) <c>\\.\DISPLAYn</c> name. Unlike the device name,
+    /// the first two survive the renumbering Windows performs around lock,
+    /// sleep, and display-mode switches, so persisted monitor references key
+    /// on this value.
+    /// </summary>
+    public static string ResolveStableMonitorId(string? deviceName)
+    {
+        string fallback = string.IsNullOrWhiteSpace(deviceName) ? "unknown-display" : deviceName.Trim();
+        if (string.IsNullOrWhiteSpace(deviceName))
+        {
+            return fallback;
+        }
+
+        try
+        {
+            var displayDevice = new DisplayDevice
+            {
+                Size = Marshal.SizeOf<DisplayDevice>(),
+                DeviceName = string.Empty,
+                DeviceString = string.Empty,
+                DeviceId = string.Empty,
+                DeviceKey = string.Empty
+            };
+            if (EnumDisplayDevices(
+                    deviceName,
+                    0,
+                    ref displayDevice,
+                    EddGetDeviceInterfaceName))
+            {
+                if (!string.IsNullOrWhiteSpace(displayDevice.DeviceId))
+                {
+                    return displayDevice.DeviceId.Trim();
+                }
+
+                if (!string.IsNullOrWhiteSpace(displayDevice.DeviceKey))
+                {
+                    return displayDevice.DeviceKey.Trim();
+                }
+            }
+        }
+        catch (Exception ex) when (
+            ex is DllNotFoundException or
+                EntryPointNotFoundException or
+                BadImageFormatException or
+                MarshalDirectiveException or
+                TypeLoadException)
+        {
+        }
+
+        return fallback;
     }
 
     /// <summary>

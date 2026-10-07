@@ -61,4 +61,39 @@ public static class WidgetBackgroundPanoramaCalculator
             (right - left) / scale,
             (bottom - top) / scale);
     }
+
+    /// <summary>
+    /// UniformToFill fit of the image over ONE monitor, expressed as the
+    /// fitted rectangle's top-left offset inside the monitor plus its size.
+    /// This is the widget-level analogue of how Windows fills each monitor
+    /// with the wallpaper independently. A single fit over the whole
+    /// virtual-desktop union only works when every monitor shares one DPI:
+    /// on mixed-DPI / mixed-resolution setups the union fit renders the
+    /// sampled slice zoomed, while the per-monitor fit stays purely local
+    /// (monitor rect + the window's own DPI scale) and recomputes cleanly
+    /// after every topology or monitor change.
+    /// </summary>
+    public static (double OffsetX, double OffsetY, double Width, double Height) ComputeMonitorFit(
+        double imageWidth,
+        double imageHeight,
+        double monitorWidth,
+        double monitorHeight)
+    {
+        if (imageWidth <= 0 || imageHeight <= 0 ||
+            monitorWidth <= 0 || monitorHeight <= 0)
+        {
+            return (0, 0, monitorWidth, monitorHeight);
+        }
+
+        double scale = Math.Max(
+            monitorWidth / imageWidth,
+            monitorHeight / imageHeight);
+        double fittedWidth = imageWidth * scale;
+        double fittedHeight = imageHeight * scale;
+        return (
+            -(fittedWidth - monitorWidth) / 2,
+            -(fittedHeight - monitorHeight) / 2,
+            fittedWidth,
+            fittedHeight);
+    }
 }

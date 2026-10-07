@@ -153,25 +153,15 @@
                         ContentAlignment="Vertical"
                         HorizontalContentAlignment="Stretch"
                         svc:Localized.HeaderKey="Settings.Search.Hotkey.PresetsTitle">
-                        <ScrollViewer
-                            HorizontalScrollBarVisibility="Auto"
-                            HorizontalScrollMode="Enabled"
-                            VerticalScrollBarVisibility="Disabled"
-                            VerticalScrollMode="Disabled">
-                            <StackPanel
-                                x:Name="SearchHotkeyPresetButtonsPanel"
-                                Orientation="Horizontal"
-                                Spacing="8">
-                                <ToggleButton
-                                    x:Name="SearchHotkeyPresetAltSpaceButton"
-                                    MinWidth="0"
-                                    Padding="12,6"
-                                    Click="SearchHotkeyPresetButton_Click"
-                                    Tag="AltSpace">
-                                    <TextBlock svc:Localized.Key="Settings.GlobalHotkey.Preset.AltSpace" />
-                                </ToggleButton>
-                            </StackPanel>
-                        </ScrollViewer>
+                        <toolkit:Segmented
+                            x:Name="SearchHotkeyPresetSegmented"
+                            SelectionChanged="SearchHotkeyPresetSegmented_SelectionChanged">
+                            <toolkit:SegmentedItem
+                                x:Name="SearchHotkeyPresetAltSpaceButton"
+                                Tag="AltSpace">
+                                <TextBlock svc:Localized.Key="Settings.GlobalHotkey.Preset.AltSpace" />
+                            </toolkit:SegmentedItem>
+                        </toolkit:Segmented>
                     </toolkit:SettingsCard>
                     <toolkit:SettingsCard
                         ContentAlignment="Vertical"
@@ -218,31 +208,27 @@
                                         <TextBlock svc:Localized.Key="Common.Restore" />
                                     </StackPanel>
                                 </Button>
-                        <InfoBar
-                            Grid.Row="2"
-                            IsClosable="False"
-                            IsIconVisible="True"
-                            IsOpen="True"
-                            Severity="Informational">
-                            <InfoBar.Content>
-                                <StackPanel Margin="4,10,14,10" Spacing="2">
-                                    <TextBlock
-                                        FontSize="14"
-                                        FontWeight="SemiBold"
-                                        svc:Localized.Key="Settings.GlobalHotkey.ElevatedNotice.Title" />
-                                    <TextBlock
-                                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                        FontSize="12"
-                                        TextWrapping="WrapWholeWords"
-                                        svc:Localized.Key="Settings.GlobalHotkey.ElevatedNotice.Description" />
-                                </StackPanel>
-                            </InfoBar.Content>
-                        </InfoBar>
                             </Grid>
                         </Grid>
                     </toolkit:SettingsCard>
                 </toolkit:SettingsExpander.Items>
             </toolkit:SettingsExpander>
+
+            <!-- Native InfoBar driven through the native Title/Message
+                 properties. A sibling below the hotkey expander so the long
+                 wrapped message lays out at page width (an earlier
+                 rich-content placement drew the template's action-button
+                 outline across the text). The severity brushes are pinned
+                 from code-behind because ThemeResource severity lookups
+                 fail inside late-created section templates. -->
+            <InfoBar
+                x:Name="SearchHotkeyElevatedNoticeInfoBar"
+                IsClosable="False"
+                IsIconVisible="True"
+                IsOpen="True"
+                Severity="Informational"
+                svc:Localized.DescriptionKey="Settings.GlobalHotkey.ElevatedNotice.Description"
+                svc:Localized.HeaderKey="Settings.GlobalHotkey.ElevatedNotice.Title" />
 
             <!-- Scope: DeskBox content -->
             <toolkit:SettingsCard

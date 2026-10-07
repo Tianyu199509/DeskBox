@@ -227,6 +227,10 @@
     -->
     <Content Remove="Assets\wechat-qrcode.jpg" />
     <Content Remove="Assets\Support\*.png" />
+    <!-- city data is consumed exclusively through the embedded resource in
+         CitySearchService; the SDK wildcard Content copy is dead weight in
+         every package -->
+    <Content Remove="Assets\Cities\cities.json" />
     <Content Include="Assets\deskbox.ico">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </Content>

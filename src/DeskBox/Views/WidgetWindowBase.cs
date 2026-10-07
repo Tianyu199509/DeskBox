@@ -77,7 +77,7 @@ public abstract partial class WidgetWindowBase : Window
     protected bool IsResizing;
     protected bool IsApplyingBounds;
     protected string ResizeDirection = string.Empty;
-    protected Win32Helper.POINT InitialCursorPt;
+    protected Win32Helper.POINT InitialPointerPt;
     protected PointInt32 InitialWindowPos;
     protected SizeInt32 InitialWindowSize;
     protected FrameworkElement? DragCaptureElement;

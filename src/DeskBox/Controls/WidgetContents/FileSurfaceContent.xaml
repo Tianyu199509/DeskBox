@@ -59,12 +59,10 @@
                                             <Setter Target="FocusVisualInnerBorder.Opacity" Value="1" />
                                         </VisualState.Setters>
                                     </VisualState>
-                                    <VisualState x:Name="PointerFocused">
-                                        <VisualState.Setters>
-                                            <Setter Target="FocusVisualBorder.Opacity" Value="1" />
-                                            <Setter Target="FocusVisualInnerBorder.Opacity" Value="1" />
-                                        </VisualState.Setters>
-                                    </VisualState>
+                                    <!-- Deliberately empty like the WinUI default item template:
+                                         pointer/touch focus must not draw the focus ring; only the
+                                         keyboard Focused state shows it. -->
+                                    <VisualState x:Name="PointerFocused" />
                                     <VisualState x:Name="Unfocused">
                                         <VisualState.Setters>
                                             <Setter Target="FocusVisualBorder.Opacity" Value="0" />
@@ -122,12 +120,10 @@
                                             <Setter Target="FocusVisualInnerBorder.Opacity" Value="1" />
                                         </VisualState.Setters>
                                     </VisualState>
-                                    <VisualState x:Name="PointerFocused">
-                                        <VisualState.Setters>
-                                            <Setter Target="FocusVisualBorder.Opacity" Value="1" />
-                                            <Setter Target="FocusVisualInnerBorder.Opacity" Value="1" />
-                                        </VisualState.Setters>
-                                    </VisualState>
+                                    <!-- Deliberately empty like the WinUI default item template:
+                                         pointer/touch focus must not draw the focus ring; only the
+                                         keyboard Focused state shows it. -->
+                                    <VisualState x:Name="PointerFocused" />
                                     <VisualState x:Name="Unfocused">
                                         <VisualState.Setters>
                                             <Setter Target="FocusVisualBorder.Opacity" Value="0" />

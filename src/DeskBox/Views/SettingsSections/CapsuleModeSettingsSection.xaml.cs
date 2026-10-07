@@ -28,7 +28,9 @@ public sealed partial class CapsuleModeSettingsSection : UserControl
 
     private void NestedSettingsButton_Click(object sender, RoutedEventArgs e)
     {
-        if (sender is Button { Tag: string sectionTag })
+        // Keep this guard aligned with the shell's FrameworkElement match so
+        // toolkit SettingsCard entries (ButtonBase, not Button) navigate too.
+        if (sender is FrameworkElement { Tag: string sectionTag })
         {
             NavigationRequested?.Invoke(this, new SettingsSectionNavigationRequestedEventArgs(sectionTag));
         }

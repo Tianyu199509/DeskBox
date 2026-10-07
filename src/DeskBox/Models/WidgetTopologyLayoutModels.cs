@@ -60,6 +60,17 @@ public sealed class WidgetSurfaceLayoutProfile
 {
     public string? PositionMonitorStableId { get; set; }
 
+    /// <summary>
+    /// Monitor binding intent carried through profiles unchanged. Binding is
+    /// topology-independent user intent, so profile switches reposition but
+    /// never rebind the surface.
+    /// </summary>
+    [JsonConverter(typeof(WidgetScreenBindingModeJsonConverter))]
+    public WidgetScreenBindingMode ScreenBindingMode { get; set; } = WidgetScreenBindingMode.Unbound;
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? BoundScreenId { get; set; }
+
     public double X { get; set; }
 
     public double Y { get; set; }

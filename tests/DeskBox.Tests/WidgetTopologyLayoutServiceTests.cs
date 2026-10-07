@@ -269,6 +269,52 @@ public sealed class WidgetTopologyLayoutServiceTests
         Assert.Equal(group.Height, second.Height);
     }
 
+    [Fact]
+    public void ProfileActivation_BackfillsStableIdOntoGroupSurfaceAndMembers()
+    {
+        WidgetConfig first = CreateWidget();
+        WidgetConfig second = CreateWidget();
+        second.Id = "widget-2";
+        var group = new WidgetGroupConfig
+        {
+            Id = "group-1",
+            SurfaceId = "surface-1",
+            MemberIds = [first.Id, second.Id],
+            ActiveMemberId = first.Id,
+            X = 200,
+            Y = 160,
+            Width = 600,
+            Height = 500,
+            BoundsCoordinateVersion = WidgetConfig.CurrentBoundsCoordinateVersion,
+            PositionAnchor = WidgetPositionAnchors.LeftTop,
+            PositionMarginX = 100,
+            PositionMarginY = 80,
+            PositionMonitorDeviceName = @"\\.\DISPLAY1",
+            PositionMonitorWasPrimary = true
+        };
+        var settings = new AppSettings
+        {
+            Widgets = [first, second],
+            WidgetGroups = [group]
+        };
+        var service = new WidgetTopologyLayoutService();
+        WidgetDisplayTopologySnapshot highDpi = WidgetTopologyLayoutService.CreateSnapshotForTest(
+            Monitor("panel", @"\\.\DISPLAY1", true, 0, 0, 3840, 2080, 2));
+        WidgetDisplayTopologySnapshot standardDpi = WidgetTopologyLayoutService.CreateSnapshotForTest(
+            Monitor("panel", @"\\.\DISPLAY1", true, 0, 0, 1920, 1040, 1));
+
+        service.Activate(settings, highDpi);
+        service.Activate(settings, standardDpi);
+
+        // The projection must carry the stable id onto the shared group
+        // surface and every member: WidgetPositioningService ranks the stable
+        // id above the device name, so a stale/missing id on any of them
+        // resolves the surface onto the wrong monitor after a switch.
+        Assert.Equal("panel", group.PositionMonitorStableId);
+        Assert.Equal("panel", first.PositionMonitorStableId);
+        Assert.Equal("panel", second.PositionMonitorStableId);
+    }
+
     private static WidgetConfig CreateWidget() => new()
     {
         Id = "widget-1",

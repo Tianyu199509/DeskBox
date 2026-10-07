@@ -39,8 +39,23 @@ public sealed class WidgetGroupConfig
 
     public string? PositionMonitorDeviceName { get; set; }
 
+    /// <summary>
+    /// Stable PnP/display-interface identity of the group surface monitor; mirrors
+    /// <see cref="WidgetConfig.PositionMonitorStableId"/> for shared-surface positioning.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? PositionMonitorStableId { get; set; }
+
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public bool? PositionMonitorWasPrimary { get; set; }
+
+    /// <summary>Monitor selection intent for the group surface, shared by every member.</summary>
+    [JsonConverter(typeof(WidgetScreenBindingModeJsonConverter))]
+    public WidgetScreenBindingMode ScreenBindingMode { get; set; } = WidgetScreenBindingMode.Unbound;
+
+    /// <summary>Stable monitor identity the group surface is pinned to.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? BoundScreenId { get; set; }
 
     public int BoundsCoordinateVersion { get; set; } = WidgetConfig.CurrentBoundsCoordinateVersion;
 

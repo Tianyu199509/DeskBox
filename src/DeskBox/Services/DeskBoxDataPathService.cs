@@ -36,8 +36,16 @@ public sealed class DeskBoxDataPathService
     public string DataDirectory => Path.Combine(RootPath, "data");
     public string UpdatesDirectory => Path.Combine(RootPath, "updates");
     // Recovery snapshots intentionally live beside, rather than inside, the
-    // app-data root. A normal uninstall can therefore never erase the only
-    // automatic recovery copy together with settings and widget layouts.
+    // app-data root. Direct install: the directory really is
+    // %LOCALAPPDATA%\DeskBox-Recovery and survives a normal uninstall.
+    // Store (MSIX): AppData write virtualization redirects the write into
+    // Packages\<PFN>\LocalCache, so uninstalling the package deletes the
+    // recovery copy with it; an in-place update over the same
+    // PackageFamilyName keeps LocalCache and therefore the snapshots.
+    // Guaranteeing uninstall survival on the store channel as well would
+    // require declaring desktop6:FileSystemWriteVirtualization=disabled
+    // (a restricted capability needing store approval) — pending product
+    // decision.
     public string RecoveryDirectory => IsDevelopmentRoot
         ? $"{RootPath}-Recovery"
         : Path.Combine(

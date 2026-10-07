@@ -20,7 +20,11 @@ public static class WidgetPositioningService
     private const int FallbackOffset = 32;
     private const int PrimaryOriginTolerance = 96;
 
-    private readonly record struct AvailableMonitorWorkArea(RectInt32 WorkArea, string? DeviceName, bool IsPrimary);
+    private readonly record struct AvailableMonitorWorkArea(
+        RectInt32 WorkArea,
+        string? DeviceName,
+        string? StableId,
+        bool IsPrimary);
 
     public static RectInt32 ResolveBounds(WidgetConfig config, RectInt32 workArea)
     {
@@ -35,7 +39,7 @@ public static class WidgetPositioningService
         return ResolveBoundsCore(
             config,
             fallbackWorkArea,
-            availableWorkAreas.Select(workArea => new AvailableMonitorWorkArea(workArea, null, false)).ToList());
+            availableWorkAreas.Select(workArea => new AvailableMonitorWorkArea(workArea, null, null, false)).ToList());
     }
 
     internal static RectInt32 ResolveBoundsForTest(
@@ -48,7 +52,7 @@ public static class WidgetPositioningService
             config,
             fallbackWorkArea,
             availableWorkAreas
-                .Select(area => new AvailableMonitorWorkArea(area.WorkArea, area.DeviceName, false))
+                .Select(area => new AvailableMonitorWorkArea(area.WorkArea, area.DeviceName, null, false))
                 .ToList(),
             dpiScaleProvider);
     }
@@ -63,7 +67,22 @@ public static class WidgetPositioningService
             config,
             fallbackWorkArea,
             availableWorkAreas
-                .Select(area => new AvailableMonitorWorkArea(area.WorkArea, area.DeviceName, area.IsPrimary))
+                .Select(area => new AvailableMonitorWorkArea(area.WorkArea, area.DeviceName, null, area.IsPrimary))
+                .ToList(),
+            dpiScaleProvider);
+    }
+
+    internal static RectInt32 ResolveBoundsForTestWithScreens(
+        WidgetConfig config,
+        RectInt32 fallbackWorkArea,
+        IReadOnlyList<(RectInt32 WorkArea, string? DeviceName, string? StableId, bool IsPrimary)> availableWorkAreas,
+        Func<RectInt32, double> dpiScaleProvider)
+    {
+        return ResolveBoundsCore(
+            config,
+            fallbackWorkArea,
+            availableWorkAreas
+                .Select(area => new AvailableMonitorWorkArea(area.WorkArea, area.DeviceName, area.StableId, area.IsPrimary))
                 .ToList(),
             dpiScaleProvider);
     }
@@ -121,7 +140,7 @@ public static class WidgetPositioningService
             config,
             fallbackWorkArea,
             availableWorkAreas
-                .Select(area => new AvailableMonitorWorkArea(area.WorkArea, area.DeviceName, false))
+                .Select(area => new AvailableMonitorWorkArea(area.WorkArea, area.DeviceName, null, false))
                 .ToList(),
             dpiScaleProvider);
     }
@@ -136,7 +155,7 @@ public static class WidgetPositioningService
             config,
             fallbackWorkArea,
             availableWorkAreas
-                .Select(area => new AvailableMonitorWorkArea(area.WorkArea, area.DeviceName, area.IsPrimary))
+                .Select(area => new AvailableMonitorWorkArea(area.WorkArea, area.DeviceName, null, area.IsPrimary))
                 .ToList(),
             dpiScaleProvider);
     }
@@ -215,6 +234,7 @@ public static class WidgetPositioningService
         config.PositionMonitorKey = CreateMonitorKey(workArea);
         var monitor = FindMonitorForWorkArea(workArea, availableWorkAreas);
         config.PositionMonitorDeviceName = monitor?.DeviceName;
+        config.PositionMonitorStableId = monitor?.StableId;
         config.PositionMonitorWasPrimary = monitor?.IsPrimary;
     }
 
@@ -294,6 +314,7 @@ public static class WidgetPositioningService
                     area.WorkArea.Right - area.WorkArea.Left,
                     area.WorkArea.Bottom - area.WorkArea.Top),
                 string.IsNullOrWhiteSpace(area.DeviceName) ? null : area.DeviceName,
+                string.IsNullOrWhiteSpace(area.StableId) ? null : area.StableId,
                 area.IsPrimary))
             .ToList();
     }
@@ -303,10 +324,52 @@ public static class WidgetPositioningService
         RectInt32 fallbackWorkArea,
         IReadOnlyList<AvailableMonitorWorkArea> availableWorkAreas)
     {
+        // Explicit user binding wins over every positional heuristic. A pin
+        // whose monitor is currently absent deliberately falls through to the
+        // legacy chain below so the widget stays visible somewhere and snaps
+        // back once the bound monitor returns.
+        if (config.ScreenBindingMode == WidgetScreenBindingMode.Pinned &&
+            !string.IsNullOrWhiteSpace(config.BoundScreenId))
+        {
+            foreach (var area in availableWorkAreas)
+            {
+                if (StableIdMatches(area.StableId, config.BoundScreenId))
+                {
+                    return area.WorkArea;
+                }
+            }
+        }
+
+        if (config.ScreenBindingMode == WidgetScreenBindingMode.FollowPrimary)
+        {
+            foreach (var area in availableWorkAreas)
+            {
+                if (area.IsPrimary)
+                {
+                    return area.WorkArea;
+                }
+            }
+        }
+
         var primaryWorkArea = SelectPrimaryWorkAreaForSmartMode(config, availableWorkAreas);
         if (primaryWorkArea.HasValue)
         {
             return primaryWorkArea.Value;
+        }
+
+        // Stable PnP identity outranks the device name: Windows renumbers
+        // \\.\DISPLAYn around lock, sleep, and mode switches, which used to
+        // relocate widgets onto whichever physical monitor inherited the old
+        // number (the lock-screen jump reports).
+        if (!string.IsNullOrWhiteSpace(config.PositionMonitorStableId))
+        {
+            foreach (var area in availableWorkAreas)
+            {
+                if (StableIdMatches(area.StableId, config.PositionMonitorStableId))
+                {
+                    return area.WorkArea;
+                }
+            }
         }
 
         if (!string.IsNullOrWhiteSpace(config.PositionMonitorDeviceName))
@@ -357,6 +420,34 @@ public static class WidgetPositioningService
         }
 
         return fallbackWorkArea;
+    }
+
+    /// <summary>
+    /// Stable-id equality that refuses to match ids which degenerated to the
+    /// unstable <c>\\.\DISPLAYn</c> name or the "unknown-display" fallback, so
+    /// lookups can never latch onto a renumbered monitor.
+    /// </summary>
+    private static bool StableIdMatches(string? candidate, string expected)
+    {
+        if (string.IsNullOrWhiteSpace(candidate) || string.IsNullOrWhiteSpace(expected))
+        {
+            return false;
+        }
+
+        string normalizedCandidate = candidate.Trim();
+        string normalizedExpected = expected.Trim();
+        if (IsUnstableStableId(normalizedCandidate) || IsUnstableStableId(normalizedExpected))
+        {
+            return false;
+        }
+
+        return string.Equals(normalizedCandidate, normalizedExpected, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsUnstableStableId(string value)
+    {
+        return value.Equals("unknown-display", StringComparison.OrdinalIgnoreCase) ||
+               value.StartsWith(@"\\.\DISPLAY", StringComparison.OrdinalIgnoreCase);
     }
 
     private static RectInt32? SelectPrimaryWorkAreaForSmartMode(

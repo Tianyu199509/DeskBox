@@ -9,6 +9,7 @@ using DeskBox.Platform;
 using DeskBox.Services;
 using DeskBox.ViewModels;
 using DeskBox.Views.SettingsSections;
+using CommunityToolkit.WinUI.Controls;
 using System.ComponentModel;
 using System.Diagnostics;
 using Microsoft.UI;
@@ -29,14 +30,11 @@ namespace DeskBox.Views;
 public sealed partial class SettingsWindow : Window
 {
     private sealed record FeatureWidgetRowElements(
-        Border Container,
-        WidgetTitleIcon Icon,
-        TextBlock Title,
-        TextBlock Description,
-        Button? SettingsButton,
+        SettingsCard Card,
+        DeskBox.Controls.WidgetTitleIcon TitleIcon,
+        TextBlock TitleText,
         Button? ResetButton,
         ToggleSwitch? Toggle,
-        FontIcon? Arrow,
         bool HasSettingsPage,
         bool HasReset,
         bool HasToggle);
@@ -47,9 +45,6 @@ public sealed partial class SettingsWindow : Window
     private const int MinWindowHeight = 560;
     private const int WindowWorkAreaMargin = 48;
     private const double ContentMaxWidth = 760;
-    private const double SettingsSearchMinWidth = 260;
-    private const double SettingsSearchMaxWidth = 520;
-    private const double SettingsSearchWidthRatio = 0.5;
     private const double PageSidePadding = 20;
     private const double RowStackContentThreshold = 620;
     private const double NarrowTitleThreshold = 560;
@@ -104,6 +99,7 @@ public sealed partial class SettingsWindow : Window
             ["AppearanceDetail"] = new("AppearanceDetail", "Settings.Appearance.DetailTitle", null, "AppearanceDetail"),
             ["FeatureWidgets"] = new("FeatureWidgets", "Settings.Section.FeatureWidgets", null, "FeatureWidgets"),
             ["Interaction"] = new("Interaction", "Settings.Section.Interaction", null, "Interaction"),
+            ["Displays"] = new("Displays", "Settings.Displays.Title", "General", "General"),
             ["Advanced"] = new("Advanced", "Settings.Section.Advanced", null, "Interaction"),
             ["Maintenance"] = new("Maintenance", "Settings.Section.Maintenance", null, "Maintenance"),
             ["About"] = new("About", "Settings.Nav.About", null, "About"),
@@ -121,9 +117,6 @@ public sealed partial class SettingsWindow : Window
             ["AppearanceDensitySettings"] = new("AppearanceDensitySettings", "Settings.Density.Title", "Appearance", "Appearance"),
             ["AppearanceWindowSettings"] = new("AppearanceWindowSettings", "Settings.Group.AppVisual.Title", "Appearance", "Appearance"),
             ["AppearanceAnimationSettings"] = new("AppearanceAnimationSettings", "Settings.Group.Animation.Title", "Appearance", "Appearance"),
-            ["CapsuleBehaviorSettings"] = new("CapsuleBehaviorSettings", "Settings.Capsule.HoverResponse.Title", "CapsuleMode", "CapsuleMode"),
-            ["CapsuleArrangementSettings"] = new("CapsuleArrangementSettings", "Settings.Capsule.ArrangementDetails.Title", "CapsuleMode", "CapsuleMode"),
-            ["CapsuleAnimationSettings"] = new("CapsuleAnimationSettings", "Settings.Capsule.Animation.Title", "CapsuleMode", "CapsuleMode"),
             ["CapsuleOverridesSettings"] = new("CapsuleOverridesSettings", "Settings.Capsule.Overrides.Title", "CapsuleMode", "CapsuleMode"),
             ["BackupRestoreSettings"] = new("BackupRestoreSettings", "Settings.DataBackup.Title", "Maintenance", "Maintenance"),
             ["CloudBackupSettings"] = new("CloudBackupSettings", "Settings.CloudBackup.Title", "Maintenance", "Maintenance"),
@@ -380,6 +373,22 @@ public sealed partial class SettingsWindow : Window
         ApplyToggleSwitchContentVisibility();
     }
 
+    // The file-name width/line cards migrated from the density section bind
+    // through the appearance editor (FileNameWidthScale, FileNameLineCount and
+    // their option lists live there), while the file-display section's
+    // DataContext is the file-display editor. Re-target just this panel when
+    // it loads, mirroring the element-level DataContext pattern the General
+    // section uses for its cross-domain combos.
+    private void FileNameLayoutPanel_Loaded(object sender, RoutedEventArgs e)
+    {
+        if (_isClosed || sender is not StackPanel panel)
+        {
+            return;
+        }
+
+        panel.DataContext = _appearanceSettingsViewModel;
+    }
+
     private void SettingsRoot_Loaded(object sender, RoutedEventArgs e)
     {
         var stopwatch = Stopwatch.StartNew();
@@ -536,11 +545,6 @@ public sealed partial class SettingsWindow : Window
         DispatcherQueue.TryEnqueue(RefreshFeatureWidgetList);
     }
 
-    private Brush CreateFeatureWidgetIconBrush()
-    {
-        return new SolidColorBrush(IsEffectiveSettingsThemeDark() ? Colors.White : Colors.Black);
-    }
-
     private bool IsEffectiveSettingsThemeDark()
     {
         if (SettingsRoot is not null)
@@ -631,11 +635,13 @@ public sealed partial class SettingsWindow : Window
             ? new Thickness(PageSidePadding, 16, PageSidePadding, 34)
             : new Thickness(PageSidePadding, 16, PageSidePadding, 38);
 
-        double searchWidth = Math.Min(
-            SettingsSearchMaxWidth,
-            Math.Max(SettingsSearchMinWidth, width * SettingsSearchWidthRatio));
-
-        SettingsSearchBox.Width = searchWidth;
+        // The search box has no explicit Height (a fixed 32px height corrupted
+        // the template's re-measure on width changes: corners flattened and
+        // the query icon escaped the box). Width stays responsive so the box
+        // keeps its intended size instead of collapsing to MinWidth.
+        SettingsSearchBox.Width = Math.Min(
+            520,
+            Math.Max(260, width * 0.5));
 
         ContentHost.Width = Math.Min(ContentMaxWidth, availableContentWidth);
         ContentHost.MaxWidth = ContentMaxWidth;

@@ -51,7 +51,9 @@ public sealed class AppSettingsFacadeNarrowingContractTests
         // it drops a field from every file written henceforth. Either change
         // is a disk-schema decision — update this pin consciously alongside
         // the SettingsSliceContractBaselineTests order pin.
-        Assert.Equal(233, Passthroughs.Length);
+        // +1 = widgetDefaultBoundScreenId (screen-binding default; nullable,
+        // additive — absent files deserialize as null).
+        Assert.Equal(234, Passthroughs.Length);
         Assert.Equal(13, SliceAccessors.Length);
     }
 
@@ -69,8 +71,8 @@ public sealed class AppSettingsFacadeNarrowingContractTests
         expected.Add("schemaVersion");
         Assert.True(
             SerializedMemberNames.SetEquals(expected),
-            "Serialized member set must equal schemaVersion + the 233 passthrough wire names.");
-        Assert.Equal(234, SerializedMemberNames.Count);
+            "Serialized member set must equal schemaVersion + the 234 passthrough wire names.");
+        Assert.Equal(235, SerializedMemberNames.Count);
     }
 
     [Fact]

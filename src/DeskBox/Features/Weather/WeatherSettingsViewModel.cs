@@ -527,62 +527,11 @@ public sealed partial class WeatherSettingsViewModel : ObservableObject
         OnPropertyChanged(nameof(CitySearchText));
     }
 
-    // ─── Display options flyout ───
-
-    /// <summary>The options offered by the display-options flyout.</summary>
-    public string[] AvailableDisplayOptions => WeatherOptionKinds.DisplayOptionKeys;
-
-    public string DisplayOptionsSummaryText
-    {
-        get
-        {
-            string[] selected = WeatherOptionKinds.DisplayOptionKeys
-                .Where(IsDisplayOptionSelected)
-                .Select(GetDisplayOptionName)
-                .ToArray();
-            return selected.Length == 0
-                ? _localize("Settings.Toggle.Off")
-                : string.Join(" · ", selected);
-        }
-    }
-
-    public string GetDisplayOptionName(string option) => option switch
-    {
-        "Forecast" => _localize("Settings.Weather.ShowForecast.Title"),
-        "Sunrise" => _localize("Settings.Weather.ShowSunrise.Title"),
-        "UvIndex" => _localize("Settings.Weather.ShowUvIndex.Title"),
-        "Precipitation" => _localize("Settings.Weather.ShowPrecipitation.Title"),
-        "Humidity" => _localize("Settings.Weather.ShowHumidity.Title"),
-        "Wind" => _localize("Settings.Weather.ShowWind.Title"),
-        "Pressure" => _localize("Settings.Weather.ShowPressure.Title"),
-        _ => string.Empty
-    };
-
-    public bool IsDisplayOptionSelected(string option) => option switch
-    {
-        "Forecast" => _showForecast,
-        "Sunrise" => _showSunrise,
-        "UvIndex" => _showUvIndex,
-        "Precipitation" => _showPrecipitation,
-        "Humidity" => _showHumidity,
-        "Wind" => _showWind,
-        "Pressure" => _showPressure,
-        _ => false
-    };
-
-    public void ToggleDisplayOption(string option)
-    {
-        switch (option)
-        {
-            case "Forecast": ShowForecast = !ShowForecast; break;
-            case "Sunrise": ShowSunrise = !ShowSunrise; break;
-            case "UvIndex": ShowUvIndex = !ShowUvIndex; break;
-            case "Precipitation": ShowPrecipitation = !ShowPrecipitation; break;
-            case "Humidity": ShowHumidity = !ShowHumidity; break;
-            case "Wind": ShowWind = !ShowWind; break;
-            case "Pressure": ShowPressure = !ShowPressure; break;
-        }
-    }
+    // ─── Display options ───
+    // The seven display switches render as settings sub-cards bound straight
+    // to the properties below; the retired flyout menu builders that used to
+    // project them (summary text, name lookup, selection probe and toggle
+    // dispatcher) were removed with the flyout.
 
     public bool ShowForecast
     {
@@ -633,7 +582,6 @@ public sealed partial class WeatherSettingsViewModel : ObservableObject
             return;
         }
 
-        OnPropertyChanged(nameof(DisplayOptionsSummaryText));
         if (_isSyncingPresentation)
         {
             return;
@@ -689,13 +637,12 @@ public sealed partial class WeatherSettingsViewModel : ObservableObject
 
         OnPropertyChanged(nameof(CitySearchText));
         OnPropertyChanged(nameof(ShowLocationStatus));
-        OnPropertyChanged(nameof(DisplayOptionsSummaryText));
     }
 
     /// <summary>
     /// Drops the localized option-name caches after a language change so
-    /// the option tables, the summary, the placeholder and the no-results
-    /// text re-project in the new language.
+    /// the option tables, the placeholder and the no-results text
+    /// re-project in the new language.
     /// </summary>
     public void RefreshLocalization()
     {
@@ -725,7 +672,6 @@ public sealed partial class WeatherSettingsViewModel : ObservableObject
         OnPropertyChanged(nameof(SelectedIconStyle));
         OnPropertyChanged(nameof(SelectedDataSource));
         OnPropertyChanged(nameof(SelectedRefreshInterval));
-        OnPropertyChanged(nameof(DisplayOptionsSummaryText));
         OnPropertyChanged(nameof(CitySearchPlaceholder));
         OnPropertyChanged(nameof(NoCityResultsText));
     }

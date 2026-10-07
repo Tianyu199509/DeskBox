@@ -45,7 +45,11 @@ public partial class SettingsViewModel
         CanViewReleaseNotes ? Visibility.Visible : Visibility.Collapsed;
     public string ViewReleaseNotesButtonText => _localizationService.T("Settings.Update.ViewReleaseNotes");
     public string ManualUpdateDownloadUrl => GetManualUpdateDownloadUrl(_availableUpdateManifest);
-    public Visibility UpdateAutoCheckVisibility => Visibility.Visible;
+    // Store builds deliver updates through the Store itself; the auto-check
+    // toggle has no effect there (the background check short-circuits), so the
+    // card folds the same way the install-button card does.
+    public Visibility UpdateAutoCheckVisibility =>
+        IsDirectInstallerUpdateDelivery ? Visibility.Visible : Visibility.Collapsed;
     public Visibility UpdateProgressVisibility => IsDownloadingUpdate ? Visibility.Visible : Visibility.Collapsed;
     public Visibility UpdateProgressTextVisibility => IsDownloadingUpdate ? Visibility.Visible : Visibility.Collapsed;
     public Visibility UpdateReleaseNotesVisibility =>

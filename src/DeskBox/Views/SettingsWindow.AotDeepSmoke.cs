@@ -28,9 +28,6 @@ public sealed partial class SettingsWindow
             "AppearanceDensitySettings",
             "AppearanceWindowSettings",
             "AppearanceAnimationSettings",
-            "CapsuleBehaviorSettings",
-            "CapsuleArrangementSettings",
-            "CapsuleAnimationSettings",
             "CapsuleOverridesSettings",
             "BackupRestoreSettings",
             "DataHealthSettings",
@@ -62,7 +59,7 @@ public sealed partial class SettingsWindow
             match.IsPage &&
             string.Equals(
                 match.SectionTag,
-                deepSettingsRoutes[21],
+                deepSettingsRoutes[18],
                 StringComparison.Ordinal));
         if (exactNestedPage is null ||
             !SettingsSearchBox.IsSuggestionListOpen ||
@@ -74,7 +71,7 @@ public sealed partial class SettingsWindow
 
         ActivateSettingsSearchResult(exactNestedPage, SettingsSearchBox);
         AotDeepSettingsPageSnapshot activatedPage =
-            await WaitForAotDeepSettingsPageAsync(deepSettingsRoutes[21]);
+            await WaitForAotDeepSettingsPageAsync(deepSettingsRoutes[18]);
 
         var pageTransitions = new List<AotDeepSettingsPageSnapshot>(deepSettingsRoutes.Length);
         bool breadcrumbParentReturned = false;
@@ -93,7 +90,7 @@ public sealed partial class SettingsWindow
                 fileStackRuleCount = await WaitForAotFileStackRuleProjectionAsync();
             }
 
-            if (string.Equals(sectionTag, deepSettingsRoutes[21], StringComparison.Ordinal))
+            if (string.Equals(sectionTag, deepSettingsRoutes[18], StringComparison.Ordinal))
             {
                 backupSnapshotCount = await WaitForAotBackupSnapshotProjectionAsync();
             }

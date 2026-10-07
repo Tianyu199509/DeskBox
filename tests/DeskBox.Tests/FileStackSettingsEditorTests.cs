@@ -524,7 +524,7 @@ public sealed class FileStackSettingsEditorTests : IDisposable
             overviewXaml,
             StringComparison.Ordinal);
         Assert.Contains(
-            "Text=\"{x:Bind FileStack.SettingsSummaryText, Mode=OneWay}\"",
+            "Description=\"{x:Bind FileStack.SettingsSummaryText, Mode=OneWay}\"",
             overviewXaml,
             StringComparison.Ordinal);
         Assert.Contains(

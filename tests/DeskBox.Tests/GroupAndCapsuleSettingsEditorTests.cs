@@ -416,9 +416,9 @@ public sealed class GroupAndCapsuleSettingsEditorTests : IDisposable
         Assert.Contains(
             "Visibility=\"{Binding ShowHoverResponseEntry, Converter={StaticResource SettingsBoolToVisibilityConverter}}\"",
             capsuleSection);
-        Assert.Contains("Value=\"{Binding BarSpacing, Mode=TwoWay}\"", window);
-        Assert.Contains("Value=\"{Binding ExpandDelayMs, Mode=TwoWay}\"", window);
-        Assert.Contains("Value=\"{Binding AnimationDurationMs, Mode=TwoWay}\"", window);
+        Assert.Contains("Value=\"{Binding BarSpacing, Mode=TwoWay}\"", capsuleSection);
+        Assert.Contains("Value=\"{Binding ExpandDelayMs, Mode=TwoWay}\"", capsuleSection);
+        Assert.Contains("Value=\"{Binding AnimationDurationMs, Mode=TwoWay}\"", capsuleSection);
         Assert.Contains("ItemsSource=\"{Binding OverrideItems}\"", window);
 
         // The appearance main section no longer hosts the recycled
@@ -430,9 +430,6 @@ public sealed class GroupAndCapsuleSettingsEditorTests : IDisposable
         // Section-level DataContext switch covers both families.
         Assert.Contains("section.DataContext = _groupNavigationSettingsViewModel;", deferred);
         Assert.Contains("\"CapsuleMode\" or", deferred);
-        Assert.Contains("\"CapsuleBehaviorSettings\"", deferred);
-        Assert.Contains("\"CapsuleArrangementSettings\"", deferred);
-        Assert.Contains("\"CapsuleAnimationSettings\"", deferred);
         Assert.Contains("\"CapsuleOverridesSettings\"", deferred);
         Assert.Contains("section.DataContext = _capsuleSettingsViewModel;", deferred);
 

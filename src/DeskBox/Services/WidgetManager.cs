@@ -96,7 +96,6 @@ internal interface IDesktopWidgetWindow
     void ClearCompactArrangementConstraint();
     void PreviewCompactArrangement(Windows.Graphics.RectInt32 bounds);
     void SetTrayAnimationOffsetOverride(double? offsetX, double? offsetY);
-    void SetTrayAnimationEdgeFade(bool enabled);
     void CancelTrayAnimationAndRestorePosition();
     void PrepareTrayShowAnimation();
     void ShowPreparedAtDesktopLayer(bool persistVisibility = true);
@@ -164,6 +163,15 @@ public sealed partial class WidgetManager
     private readonly TrayToggleRequestQueue _trayToggleRequestQueue;
     private EffectivePerformanceSettings _lastPerformanceSettings;
     private bool? _lastNativeWidgetVisibilityForMemoryCleanup;
+
+    /// <summary>
+    /// Process-local state for a hidden startup (silent-startup preference or
+    /// the quick-reveal layer). Armed while widgets are created hidden and
+    /// cleared by the first explicit user reveal (tray/hotkey, re-activation,
+    /// Quick Reveal). Never persisted: a killed session leaves the user's
+    /// real visibility flags untouched on disk.
+    /// </summary>
+    private bool _startupHiddenSessionActive;
 
     internal IReadOnlyDictionary<string, ContentWidgetWindow> ContentWidgets => _contentWidgets;
 
@@ -865,6 +873,21 @@ public sealed partial class WidgetManager
         }
 
         using var perfScope = PerformanceLogger.Measure("WidgetManager.RestoreWidgets", $"count={configs.Count}");
+
+        // Decide the startup hide BEFORE restoring so the windows are created
+        // already hidden (prepared state). Hiding only after the whole restore
+        // pass — the older shape — left every widget visibly on the desktop
+        // for the full restore duration (seconds with many widgets), which
+        // made silent startup look like it had no effect at all.
+        bool hideWidgetsAtStartup = WidgetStartupRestorePolicy.GetStartupHideReason(
+            WidgetLayerService.UsesQuickRevealMode(),
+            _settingsService.Settings) is not null;
+
+        // Arm the session flag before the restore loop so every automatic
+        // re-show pass (deferred bounds reconciliation, group restore) already
+        // respects the hidden session while the windows are being created.
+        _startupHiddenSessionActive = hideWidgetsAtStartup;
+
         await StartupWidgetRestoreRunner.RestoreAsync(
             configs,
             async config =>
@@ -875,7 +898,9 @@ public sealed partial class WidgetManager
                 using var widgetPerfScope = PerformanceLogger.Measure(
                     "WidgetManager.RestoreWidget",
                     $"id={config.Id} name={config.Name}");
-                await CreateRegisteredWidgetFromConfigAsync(config);
+                await CreateRegisteredWidgetFromConfigAsync(
+                    config,
+                    keepPreparedForAnimation: hideWidgetsAtStartup);
             },
             (config, ex) =>
             {
@@ -887,8 +912,12 @@ public sealed partial class WidgetManager
         // can still be hidden or positioned by WinUI after its content tree
         // finishes loading.  Re-show each persisted visible group once the
         // complete restore pass has settled so a group cannot silently lose
-        // its surface during startup.
-        await RestoreVisibleWidgetGroupsAsync();
+        // its surface during startup.  Skipped on a hidden startup: re-showing
+        // here would surface every group right before the unified hide below.
+        if (!hideWidgetsAtStartup)
+        {
+            await RestoreVisibleWidgetGroupsAsync();
+        }
 
         // Window creation can temporarily apply compact/capsule geometry
         // before the surface host has finished loading. Reconcile every
@@ -900,13 +929,25 @@ public sealed partial class WidgetManager
 
         PlacePendingInitialWidgets();
 
-        if (configs.Count > 0 &&
-            WidgetStartupRestorePolicy.GetStartupHideReason(
-                WidgetLayerService.UsesQuickRevealMode(),
-                _settingsService.Settings) is string startupHideReason)
+        if (configs.Count > 0 && hideWidgetsAtStartup)
         {
+            // Safety net only: windows are already created hidden by the
+            // keepPreparedForAnimation pass above, so the tray-batch hide has
+            // nothing visible to process. It is kept for restore races where
+            // a host still leaked into the visible state.
             await SetAllWidgetsVisibleCoreAsync(false);
-            App.LogVerbose($"[WidgetManager] Startup widgets hidden reason={startupHideReason}");
+
+            // The hidden state is session-only (_startupHiddenSessionActive).
+            // Persisted config/group IsVisible keeps the user's real state:
+            // turning the silent-startup preference off (or a kill mid-session)
+            // must find visibility untouched so the next launch restores
+            // normally, and the deferred reconciliation honors the session
+            // flag instead of relying on zeroed persisted flags.
+            App.LogVerbose(
+                "[WidgetManager] Startup widgets hidden reason=" +
+                WidgetStartupRestorePolicy.GetStartupHideReason(
+                    WidgetLayerService.UsesQuickRevealMode(),
+                    _settingsService.Settings));
         }
         else if (configs.Count > 0)
         {
@@ -953,6 +994,29 @@ public sealed partial class WidgetManager
 
         if (placeForFirstRun)
         {
+            // "设为格子主屏幕" outranks the cursor: a pinned default monitor
+            // owns the first placement and the new widget inherits the pin.
+            WidgetScreenInfo? defaultScreen = WidgetScreenCatalog.TryFindScreen(
+                WidgetScreenCatalog.Capture(),
+                _settingsService.Settings.WidgetDefaultBoundScreenId);
+            if (defaultScreen is not null)
+            {
+                config.ScreenBindingMode = WidgetScreenBindingMode.Pinned;
+                config.BoundScreenId = defaultScreen.StableId;
+                InitialFileWidgetPlacementPolicy.Apply(
+                    config,
+                    new Windows.Graphics.RectInt32(
+                        defaultScreen.WorkArea.X,
+                        defaultScreen.WorkArea.Y,
+                        defaultScreen.WorkArea.Width,
+                        defaultScreen.WorkArea.Height),
+                    WidgetPositioningService.GetDpiScale(defaultScreen.WorkArea));
+                _settingsService.Settings.Widgets.Add(config);
+                await _settingsService.SaveAsync();
+                await CreateWidgetFromConfigAsync(config, revealAfterCreate: true);
+                return;
+            }
+
             Windows.Graphics.PointInt32 pointerPosition = new(0, 0);
             if (Win32Helper.GetCursorPos(out Win32Helper.POINT cursor))
             {
@@ -1397,6 +1461,9 @@ public sealed partial class WidgetManager
         CancelActiveTrayAnimationsAndRestorePositions();
         if (visible)
         {
+            // An explicit show-all is a user reveal: it ends the hidden
+            // startup session so later automatic passes can re-show freely.
+            ClearStartupHiddenSession("set-all-visible");
             App.CancelBackgroundMemoryCleanup();
             var candidates = _settingsService.Settings.Widgets
                 .Where(IsSessionCandidate)
@@ -1589,6 +1656,152 @@ public sealed partial class WidgetManager
         }
     }
 
+    /// <summary>
+    /// Applies an explicit screen binding to one widget, mirrors it onto the
+    /// group surface and every member when grouped (regardless of which
+    /// member the change arrives through), repositions the live host window,
+    /// and captures the settled geometry into the active topology profile.
+    /// </summary>
+    public async Task ApplyScreenBindingAsync(
+        string widgetId,
+        WidgetScreenBindingMode mode,
+        string? boundScreenId)
+    {
+        if (FindConfig(widgetId) is not { } config)
+        {
+            return;
+        }
+
+        config.ScreenBindingMode = mode;
+        config.BoundScreenId = mode == WidgetScreenBindingMode.Pinned ? boundScreenId : null;
+
+        // SynchronizeGroupLayoutFromMember only runs for the ACTIVE member;
+        // binding arrives through any member (settings rows use the first
+        // member), so mirror the authoritative group binding directly.
+        WidgetGroupConfig? group = WidgetGroupSettings.FindByMember(
+            _settingsService.Settings,
+            widgetId);
+        HashSet<string> surfaceMemberIds = [widgetId];
+        if (group is not null)
+        {
+            group.ScreenBindingMode = mode;
+            group.BoundScreenId = mode == WidgetScreenBindingMode.Pinned ? boundScreenId : null;
+            foreach (string memberId in group.MemberIds)
+            {
+                surfaceMemberIds.Add(memberId);
+                if (FindConfig(memberId) is { } member)
+                {
+                    member.ScreenBindingMode = mode;
+                    member.BoundScreenId = mode == WidgetScreenBindingMode.Pinned ? boundScreenId : null;
+                }
+            }
+
+            _settingsService.UpdateWidget(config, notifySubscribers: false);
+        }
+        else
+        {
+            _settingsService.UpdateWidget(config, notifySubscribers: false);
+        }
+
+        // The group surface window's identity tracks whichever member hosts
+        // it, so match the host by any member of the surface.
+        foreach (IDesktopWidgetWindow window in GetLoadedDesktopWindows())
+        {
+            if (window.Identity.WidgetId is { } id && surfaceMemberIds.Contains(id))
+            {
+                try
+                {
+                    window.RestoreBoundsForCurrentTopology();
+                }
+                catch (Exception ex)
+                {
+                    // The binding itself is already persisted above; a failed
+                    // reposition must not unwind the settings save below.
+                    App.Log(
+                        $"[WidgetManager] Screen-binding reposition failed for " +
+                        $"'{window.Identity.WidgetId}': {ex.Message}");
+                }
+
+                break;
+            }
+        }
+
+        CaptureCurrentTopologyLayout(config);
+        await _settingsService.SaveAsync();
+    }
+
+    /// <summary>
+    /// Pins every widget surface (widgets and groups) to the monitor named by
+    /// <paramref name="stableId"/> and repositions all live windows onto it.
+    /// Returns the number of widget configs whose binding changed.
+    /// </summary>
+    public async Task<int> PinAllWidgetSurfacesToScreenAsync(string stableId)
+    {
+        if (string.IsNullOrWhiteSpace(stableId))
+        {
+            return 0;
+        }
+
+        var settings = _settingsService.Settings;
+        int changed = 0;
+        foreach (WidgetConfig widget in settings.Widgets)
+        {
+            if (widget.ScreenBindingMode != WidgetScreenBindingMode.Pinned ||
+                !string.Equals(widget.BoundScreenId, stableId, StringComparison.OrdinalIgnoreCase))
+            {
+                widget.ScreenBindingMode = WidgetScreenBindingMode.Pinned;
+                widget.BoundScreenId = stableId;
+                changed++;
+            }
+        }
+
+        foreach (WidgetGroupConfig group in settings.WidgetGroups)
+        {
+            group.ScreenBindingMode = WidgetScreenBindingMode.Pinned;
+            group.BoundScreenId = stableId;
+        }
+
+        await _settingsService.SaveAsync();
+
+        long generation = DateTimeOffset.UtcNow.UtcTicks;
+        IReadOnlyList<IDesktopWidgetWindow> windows = GetLoadedDesktopWindows();
+        foreach (IDesktopWidgetWindow window in windows)
+        {
+            window.BeginDisplayTopologyTransition(generation);
+        }
+
+        try
+        {
+            foreach (IDesktopWidgetWindow window in windows)
+            {
+                try
+                {
+                    window.RestoreBoundsForCurrentTopology();
+                }
+                catch (Exception ex)
+                {
+                    App.Log(
+                        $"[WidgetManager] Pin-all reposition failed for " +
+                        $"'{window.Identity.WidgetId}': {ex.Message}");
+                }
+            }
+        }
+        finally
+        {
+            foreach (IDesktopWidgetWindow window in windows)
+            {
+                window.EndDisplayTopologyTransition(generation);
+            }
+        }
+
+        foreach (IDesktopWidgetWindow window in windows)
+        {
+            CaptureCurrentTopologyLayout(window.Config);
+        }
+
+        return changed;
+    }
+
     private void MarkNeedsInitialPlacementIfDisplayUnusable(WidgetConfig config)
     {
         if (!HasUsableWorkArea())
@@ -1621,11 +1834,18 @@ public sealed partial class WidgetManager
 
         try
         {
-            Windows.Graphics.RectInt32 workArea = DisplayArea.Primary.WorkArea;
-            double dpiScale = WidgetPositioningService.GetDpiScale(workArea);
+            // A pinned surface (group first, then the widget itself) must land
+            // on its bound monitor even on this fallback path; FollowPrimary
+            // and missing/degenerate pins keep the historical primary work area.
+            IReadOnlyList<WidgetScreenInfo> screens = WidgetScreenCatalog.Capture();
+            Windows.Graphics.RectInt32 primaryWorkArea = DisplayArea.Primary.WorkArea;
             int cascadeIndex = 0;
             foreach (WidgetConfig config in pending)
             {
+                Windows.Graphics.RectInt32 workArea =
+                    TryFindBoundWorkAreaForPendingPlacement(config, screens) ??
+                    primaryWorkArea;
+                double dpiScale = WidgetPositioningService.GetDpiScale(workArea);
                 Windows.Graphics.RectInt32 bounds =
                     InitialFileWidgetPlacementPolicy.CalculateRightAlignedBounds(
                         workArea,
@@ -1661,6 +1881,32 @@ public sealed partial class WidgetManager
         {
             App.Log($"[WidgetManager] Failed to place pending initial widgets: {ex.Message}");
         }
+    }
+
+    /// <summary>
+    /// Resolves the work area a pending initial placement must target. The
+    /// group surface owns placement for grouped widgets (the member binding is
+    /// a projection), and only an explicit pin redirects the fallback: an
+    /// absent or degenerate bound id resolves to null so the caller keeps the
+    /// primary work area.
+    /// </summary>
+    private Windows.Graphics.RectInt32? TryFindBoundWorkAreaForPendingPlacement(
+        WidgetConfig config,
+        IReadOnlyList<WidgetScreenInfo> screens)
+    {
+        WidgetGroupConfig? group = WidgetGroupSettings.FindByMember(
+            _settingsService.Settings,
+            config.Id);
+        bool pinned = group is not null
+            ? group.ScreenBindingMode == WidgetScreenBindingMode.Pinned
+            : config.ScreenBindingMode == WidgetScreenBindingMode.Pinned;
+        string? boundScreenId = group is not null ? group.BoundScreenId : config.BoundScreenId;
+        if (!pinned)
+        {
+            return null;
+        }
+
+        return WidgetScreenCatalog.TryFindScreen(screens, boundScreenId)?.WorkArea;
     }
 
     internal void CaptureCurrentTopologyLayout(WidgetConfig config)
@@ -1893,6 +2139,16 @@ public sealed partial class WidgetManager
 
     private async Task RestoreVisibleWidgetGroupsAsync()
     {
+        // A hidden startup keeps every surface hidden until the first explicit
+        // user reveal. group.IsVisible still carries the user's real state, so
+        // this pass (initial restore, deferred startup reconciliation, later
+        // topology restores routing through it) must consult the session flag
+        // instead of the persisted flag.
+        if (_startupHiddenSessionActive)
+        {
+            return;
+        }
+
         foreach (WidgetGroupConfig group in _settingsService.Settings.WidgetGroups.ToList())
         {
             if (!group.IsVisible ||
@@ -1947,6 +2203,22 @@ public sealed partial class WidgetManager
                     $"group={group.Id} active={group.ActiveMemberId}: {ex}");
             }
         }
+    }
+
+    /// <summary>
+    /// Ends the hidden startup session on the first explicit user reveal
+    /// (tray/hotkey toggle, external activation, layer-mode change away from
+    /// quick reveal). After this, automatic re-show passes run normally again.
+    /// </summary>
+    private void ClearStartupHiddenSession(string reason)
+    {
+        if (!_startupHiddenSessionActive)
+        {
+            return;
+        }
+
+        _startupHiddenSessionActive = false;
+        App.LogVerbose($"[WidgetManager] Startup hidden session ended reason={reason}");
     }
 
     private void QueueDeferredStartupWidgetBoundsReconciliation()
@@ -2699,6 +2971,7 @@ public sealed partial class WidgetManager
         double previousMarginY = config.PositionMarginY;
         string? previousMonitorKey = config.PositionMonitorKey;
         string? previousMonitorDeviceName = config.PositionMonitorDeviceName;
+        string? previousMonitorStableId = config.PositionMonitorStableId;
         bool? previousMonitorWasPrimary = config.PositionMonitorWasPrimary;
         int previousBoundsCoordinateVersion = config.BoundsCoordinateVersion;
 
@@ -2713,6 +2986,7 @@ public sealed partial class WidgetManager
         bool shouldCaptureAnchor = string.IsNullOrWhiteSpace(config.PositionAnchor) ||
                                    string.IsNullOrWhiteSpace(config.PositionMonitorKey) ||
                                    string.IsNullOrWhiteSpace(config.PositionMonitorDeviceName) ||
+                                   string.IsNullOrWhiteSpace(config.PositionMonitorStableId) ||
                                    !config.PositionMonitorWasPrimary.HasValue ||
                                    config.PositionMonitorWasPrimary == true ||
                                    string.Equals(
@@ -2737,6 +3011,7 @@ public sealed partial class WidgetManager
             Math.Abs(config.PositionMarginY - previousMarginY) > double.Epsilon ||
             !string.Equals(config.PositionMonitorKey, previousMonitorKey, StringComparison.Ordinal) ||
             !string.Equals(config.PositionMonitorDeviceName, previousMonitorDeviceName, StringComparison.OrdinalIgnoreCase) ||
+            !string.Equals(config.PositionMonitorStableId, previousMonitorStableId, StringComparison.OrdinalIgnoreCase) ||
             config.PositionMonitorWasPrimary != previousMonitorWasPrimary;
 
         if (!changed)

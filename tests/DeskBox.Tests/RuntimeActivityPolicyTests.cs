@@ -273,6 +273,26 @@ public sealed class RuntimeActivityPolicyTests
         Assert.False(WidgetCompactWarmupPolicy.CanRun(snapshot));
     }
 
+    [Fact]
+    public void WidgetCompactWarmupPolicy_OnlyWaitsOutTransientBlockers()
+    {
+        // A hidden window cannot warm and stays unrunnable until the show
+        // path re-arms an urgent run, so a deferred run must stop instead
+        // of polling.
+        Assert.False(WidgetCompactWarmupPolicy.ShouldKeepWaiting(
+            CreateWarmupSnapshot() with { IsWindowVisible = false }));
+
+        // Every other gate clears on its own (idle arrives, the pointer
+        // leaves, content finishes loading), so a visible window keeps
+        // waiting.
+        Assert.True(WidgetCompactWarmupPolicy.ShouldKeepWaiting(
+            CreateWarmupSnapshot() with { IsApplicationIdle = false }));
+        Assert.True(WidgetCompactWarmupPolicy.ShouldKeepWaiting(
+            CreateWarmupSnapshot() with { IsPointerOverWidget = true }));
+        Assert.True(WidgetCompactWarmupPolicy.ShouldKeepWaiting(
+            CreateWarmupSnapshot() with { IsContentReady = false }));
+    }
+
     private static WidgetCompactWarmupSnapshot CreateWarmupSnapshot()
     {
         return new WidgetCompactWarmupSnapshot(

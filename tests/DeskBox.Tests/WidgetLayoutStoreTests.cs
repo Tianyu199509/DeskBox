@@ -77,6 +77,7 @@ public sealed class WidgetLayoutStoreTests : IDisposable
         [
             "featureWidgetEnabledStates",
             "widgets",
+            "widgetDefaultBoundScreenId",
             "widgetGroups",
             "widgetTopologyLayouts",
             "activeWidgetTopologyKey",
@@ -107,11 +108,11 @@ public sealed class WidgetLayoutStoreTests : IDisposable
     [Fact]
     public void SliceHasExactlyTheExpectedMembers()
     {
-        // A 12th member is a device-vs-user-data decision, not a casual add:
+        // A 13th member is a device-vs-user-data decision, not a casual add:
         // it lands in the file AND the settings strip set automatically, so
         // this pins the count.
         Assert.Equal(
-            11,
+            12,
             typeof(WidgetLayoutSettingsSlice).GetProperties(
                 System.Reflection.BindingFlags.Instance |
                 System.Reflection.BindingFlags.Public).Length);

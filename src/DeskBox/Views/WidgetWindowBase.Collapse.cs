@@ -798,21 +798,40 @@ public abstract partial class WidgetWindowBase
                     : WidgetCompactWarmupSchedulePolicy.GetInitialDelayMilliseconds(
                         Config.WidgetKind),
                 token);
+            string? lastDeferral = null;
             while (!token.IsCancellationRequested &&
                    _collapseInitialized &&
+                   _targetCollapsed &&
                    !IsClosing &&
                    !IsCompactExpansionReady)
             {
-                if (!CanRunCompactExpansionWarmup(urgent))
+                WidgetCompactWarmupSnapshot warmupSnapshot =
+                    CaptureCompactExpansionWarmupSnapshot(urgent);
+                if (!WidgetCompactWarmupPolicy.CanRun(warmupSnapshot))
                 {
-                    PerformanceLogger.Mark(
-                        "CompactExpansionWarmupDeferred",
+                    string deferral =
                         $"urgent={urgent} pointer={_isPointerOverWidget} " +
                         $"interactionDepth={_compactInteractionDepth} " +
-                        $"windowVisible={HWnd != IntPtr.Zero && Win32Helper.IsWindowVisible(HWnd)} " +
+                        $"windowVisible={warmupSnapshot.IsWindowVisible} " +
                         $"rootLoaded={RootElement.IsLoaded} " +
                         $"contentReady={IsCompactExpansionWarmupContentReady} " +
-                        $"kind={Config.WidgetKind} id={Config.Id}");
+                        $"kind={Config.WidgetKind} id={Config.Id}";
+                    if (!WidgetCompactWarmupPolicy.ShouldKeepWaiting(warmupSnapshot))
+                    {
+                        PerformanceLogger.Mark(
+                            "CompactExpansionWarmupDeferred",
+                            $"action=stop-until-shown {deferral}");
+                        return;
+                    }
+
+                    if (!string.Equals(deferral, lastDeferral, StringComparison.Ordinal))
+                    {
+                        lastDeferral = deferral;
+                        PerformanceLogger.Mark(
+                            "CompactExpansionWarmupDeferred",
+                            $"action=retry {deferral}");
+                    }
+
                     await Task.Delay(
                         urgent
                             ? CompactExpansionUrgentWarmupRetryDelayMs
@@ -821,6 +840,7 @@ public abstract partial class WidgetWindowBase
                     continue;
                 }
 
+                lastDeferral = null;
                 bool gateEntered = false;
                 WidgetCompactWarmupSliceResult result =
                     WidgetCompactWarmupSliceResult.Blocked;
@@ -906,10 +926,17 @@ public abstract partial class WidgetWindowBase
 
     private bool CanRunCompactExpansionWarmup(bool urgent = false)
     {
+        return WidgetCompactWarmupPolicy.CanRun(
+            CaptureCompactExpansionWarmupSnapshot(urgent));
+    }
+
+    private WidgetCompactWarmupSnapshot CaptureCompactExpansionWarmupSnapshot(
+        bool urgent)
+    {
         bool applicationIdle = urgent
             ? App.Current?.CanRunCriticalCompactExpansionWarmup == true
             : App.Current?.CanRunCompactExpansionWarmup == true;
-        var snapshot = new WidgetCompactWarmupSnapshot(
+        return new WidgetCompactWarmupSnapshot(
             IsCollapseInitialized: _collapseInitialized,
             IsCollapsed: _targetCollapsed && WidgetShellControl.IsCollapsed,
             IsExpansionWarmed: IsCompactExpansionReady,
@@ -926,7 +953,6 @@ public abstract partial class WidgetWindowBase
             IsWindowVisible: HWnd != IntPtr.Zero && Win32Helper.IsWindowVisible(HWnd),
             IsContentReady: RootElement.IsLoaded && IsCompactExpansionWarmupContentReady,
             IsApplicationIdle: applicationIdle);
-        return WidgetCompactWarmupPolicy.CanRun(snapshot);
     }
 
     private Task<WidgetCompactWarmupSliceResult>

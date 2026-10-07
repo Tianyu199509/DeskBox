@@ -3,6 +3,7 @@ using DeskBox.Helpers;
 using DeskBox.Models;
 using DeskBox.Services;
 using DeskBox.ViewModels;
+using CommunityToolkit.WinUI.Controls;
 using System.ComponentModel;
 using Microsoft.UI;
 using Microsoft.UI.Composition.SystemBackdrops;
@@ -139,7 +140,7 @@ public sealed partial class SettingsWindow
                 {
                     var row = CreateFeatureWidgetRow(entry);
                     _featureWidgetRows[entry.Kind] = row;
-                    FeatureWidgetList.Children.Add(row.Container);
+                    FeatureWidgetList.Children.Add(row.Card);
                 }
             }
             else
@@ -160,51 +161,23 @@ public sealed partial class SettingsWindow
 
     private FeatureWidgetRowElements CreateFeatureWidgetRow(FeatureWidgetEntry entry)
     {
-        var border = new Border
+        var card = new SettingsCard
         {
-            Style = (Style)SettingsRoot.Resources["SettingsGroupStyle"]
+            Tag = entry.SettingsSectionTag,
+            IsClickEnabled = entry.HasSettingsPage && !string.IsNullOrWhiteSpace(entry.SettingsSectionTag),
+            HorizontalContentAlignment = HorizontalAlignment.Right,
+            Description = entry.DisplayDescription
         };
-
-        var root = new Grid
+        if (card.IsClickEnabled)
         {
-            MinHeight = 64,
-            Margin = new Thickness(4),
-            ColumnSpacing = 12
-        };
-        root.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        root.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        root.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        root.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-
-        var identity = new Grid
-        {
-            Style = (Style)SettingsRoot.Resources["SettingCardIdentityGridStyle"]
-        };
-        identity.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        identity.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-
-        Button? settingsButton = null;
-        if (entry.HasSettingsPage && !string.IsNullOrWhiteSpace(entry.SettingsSectionTag))
-        {
-            settingsButton = new Button
-            {
-                Style = (Style)SettingsRoot.Resources["DrillDownRowStyle"],
-                Tag = entry.SettingsSectionTag,
-                Content = identity
-            };
-            settingsButton.Click += FeatureWidgetSettingsButton_Click;
-            Grid.SetColumn(settingsButton, 0);
-            root.Children.Add(settingsButton);
-        }
-        else
-        {
-            identity.MinHeight = 64;
-            identity.Padding = new Thickness(16, 10, 16, 10);
-            Grid.SetColumn(identity, 0);
-            root.Children.Add(identity);
+            card.Click += FeatureWidgetSettingsButton_Click;
         }
 
-        var icon = new WidgetTitleIcon
+        // WidgetTitleIcon (colorful kind icon) is a UserControl and cannot
+        // fill the native HeaderIcon slot, so the header carries it inline
+        // next to the title instead — this row is built in code, so the
+        // header never goes through Localized.HeaderKey.
+        var titleIcon = new WidgetTitleIcon
         {
             IconKind = WidgetTitleIconKindNames.FromWidgetKind(entry.Kind),
             Mode = WidgetTitleIconModeNames.Color,
@@ -214,28 +187,28 @@ public sealed partial class SettingsWindow
             IsHitTestVisible = false,
             VerticalAlignment = VerticalAlignment.Center
         };
-        Grid.SetColumn(icon, 0);
-        identity.Children.Add(icon);
-
-        var textPanel = new StackPanel
-        {
-            IsHitTestVisible = false,
-            Style = (Style)SettingsRoot.Resources["SettingTextPanelStyle"]
-        };
-        var title = new TextBlock
+        var titleText = new TextBlock
         {
             Text = entry.Title,
             Style = (Style)SettingsRoot.Resources["SettingTitleTextStyle"]
         };
-        textPanel.Children.Add(title);
-        var description = new TextBlock
+        var headerPanel = new StackPanel
         {
-            Text = entry.DisplayDescription,
-            Style = (Style)SettingsRoot.Resources["SettingDescriptionTextStyle"]
+            Orientation = Orientation.Horizontal,
+            Spacing = 8
         };
-        textPanel.Children.Add(description);
-        Grid.SetColumn(textPanel, 1);
-        identity.Children.Add(textPanel);
+        headerPanel.Children.Add(titleIcon);
+        headerPanel.Children.Add(titleText);
+        card.Header = headerPanel;
+        // The composed header is not a string, so the card's automation peer
+        // cannot derive a name from it; expose the title explicitly.
+        Microsoft.UI.Xaml.Automation.AutomationProperties.SetName(card, entry.Title);
+
+        var contentPanel = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Spacing = 8
+        };
 
         Button? resetButton = null;
         if (FeatureWidgetSettings.IsFeatureWidget(entry.Kind))
@@ -243,7 +216,6 @@ public sealed partial class SettingsWindow
             resetButton = new Button
             {
                 Padding = new Thickness(0),
-                HorizontalAlignment = HorizontalAlignment.Right,
                 VerticalAlignment = VerticalAlignment.Center,
                 Style = (Style)SettingsRoot.Resources["IconActionButtonStyle"],
                 Tag = entry.Kind,
@@ -251,15 +223,12 @@ public sealed partial class SettingsWindow
                 {
                     Glyph = "\uE72C",
                     FontSize = 13,
-                    FontFamily = (FontFamily)Application.Current.Resources["SymbolThemeFontFamily"],
-                    Foreground = CreateFeatureWidgetIconBrush()
+                    FontFamily = (FontFamily)Application.Current.Resources["SymbolThemeFontFamily"]
                 }
             };
             ToolTipService.SetToolTip(resetButton, _localizationService.T("Settings.FeatureWidgets.ResetTooltip"));
             resetButton.Click += FeatureWidgetResetButton_Click;
-            Canvas.SetZIndex(resetButton, 2);
-            Grid.SetColumn(resetButton, 1);
-            root.Children.Add(resetButton);
+            contentPanel.Children.Add(resetButton);
         }
 
         ToggleSwitch? toggle = null;
@@ -268,45 +237,26 @@ public sealed partial class SettingsWindow
             toggle = new ToggleSwitch
             {
                 MinWidth = 0,
-                HorizontalAlignment = HorizontalAlignment.Right,
-                VerticalAlignment = VerticalAlignment.Center,
                 IsOn = entry.IsEnabled,
                 IsEnabled = entry.CanToggle,
                 Tag = entry.Kind
             };
             ClearToggleSwitchContent(toggle);
             toggle.Toggled += FeatureWidgetToggle_Toggled;
-            Canvas.SetZIndex(toggle, 2);
-            Grid.SetColumn(toggle, 2);
-            root.Children.Add(toggle);
+            contentPanel.Children.Add(toggle);
         }
 
-        FontIcon? arrow = null;
-        if (entry.HasSettingsPage && !string.IsNullOrWhiteSpace(entry.SettingsSectionTag))
+        if (contentPanel.Children.Count > 0)
         {
-            arrow = new FontIcon
-            {
-                IsHitTestVisible = false,
-                VerticalAlignment = VerticalAlignment.Center,
-                FontSize = 12,
-                FontFamily = (FontFamily)Application.Current.Resources["SymbolThemeFontFamily"],
-                Glyph = "\uE974",
-                Foreground = CreateFeatureWidgetIconBrush()
-            };
-            Grid.SetColumn(arrow, 3);
-            root.Children.Add(arrow);
+            card.Content = contentPanel;
         }
 
-        border.Child = root;
         return new FeatureWidgetRowElements(
-            border,
-            icon,
-            title,
-            description,
-            settingsButton,
+            card,
+            titleIcon,
+            titleText,
             resetButton,
             toggle,
-            arrow,
             entry.HasSettingsPage,
             FeatureWidgetSettings.IsFeatureWidget(entry.Kind),
             entry.ShowToggle);
@@ -314,28 +264,17 @@ public sealed partial class SettingsWindow
 
     private void UpdateFeatureWidgetRow(FeatureWidgetRowElements row, FeatureWidgetEntry entry)
     {
-        Brush iconBrush = CreateFeatureWidgetIconBrush();
-        row.Icon.IconKind = WidgetTitleIconKindNames.FromWidgetKind(entry.Kind);
-        row.Icon.Mode = WidgetTitleIconModeNames.Color;
-        row.Icon.IconSize = 16;
-        row.Icon.Glyph = entry.Glyph;
-        row.Icon.LabelText = entry.Title;
-        row.Title.Text = entry.Title;
-        row.Description.Text = entry.DisplayDescription;
-
-        if (row.SettingsButton is not null)
-        {
-            row.SettingsButton.Tag = entry.SettingsSectionTag;
-        }
+        row.TitleText.Text = entry.Title;
+        row.Card.Description = entry.DisplayDescription;
+        row.Card.Tag = entry.SettingsSectionTag;
+        row.TitleIcon.Glyph = entry.Glyph;
+        row.TitleIcon.IconKind = WidgetTitleIconKindNames.FromWidgetKind(entry.Kind);
+        row.TitleIcon.LabelText = entry.Title;
 
         if (row.ResetButton is not null)
         {
             row.ResetButton.Tag = entry.Kind;
             ToolTipService.SetToolTip(row.ResetButton, _localizationService.T("Settings.FeatureWidgets.ResetTooltip"));
-            if (row.ResetButton.Content is FontIcon resetIcon)
-            {
-                resetIcon.Foreground = iconBrush;
-            }
         }
 
         if (row.Toggle is not null)
@@ -345,21 +284,13 @@ public sealed partial class SettingsWindow
             row.Toggle.IsEnabled = entry.CanToggle;
             ClearToggleSwitchContent(row.Toggle);
         }
-
-        if (row.Arrow is not null)
-        {
-            row.Arrow.Foreground = iconBrush;
-        }
     }
 
     private void ClearFeatureWidgetRows()
     {
         foreach (var row in _featureWidgetRows.Values)
         {
-            if (row.SettingsButton is not null)
-            {
-                row.SettingsButton.Click -= FeatureWidgetSettingsButton_Click;
-            }
+            row.Card.Click -= FeatureWidgetSettingsButton_Click;
 
             if (row.ResetButton is not null)
             {
@@ -378,7 +309,7 @@ public sealed partial class SettingsWindow
 
     private void FeatureWidgetSettingsButton_Click(object sender, RoutedEventArgs e)
     {
-        if (sender is Button { Tag: string sectionTag })
+        if (sender is SettingsCard { Tag: string sectionTag })
         {
             NavigateToSettingsSection(sectionTag);
         }

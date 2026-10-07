@@ -1,27 +1,52 @@
-; Messages for the persistent managed-storage desktop shortcut used by the
-; direct uninstaller. Keep placeholders aligned across every installer locale.
+; Messages for the direct uninstaller: the persistent managed-storage desktop
+; shortcut and the Microsoft Store edition coexistence warnings. Keep
+; placeholders aligned across every installer locale.
 
 english.ManagedStorageShortcutPrompt=To make these files easy to find after uninstalling, create a "DeskBox Files" shortcut on the desktop?%n%nThe shortcut opens:%n%1
 english.ManagedStorageShortcutCreateFailed=The desktop shortcut could not be created. Your files are still safe at:%n%1
+english.StoreEditionDataPreserved=The Microsoft Store edition of DeskBox is still installed. Its data lives in a separate location and will not be touched by this uninstall; the desktop-edition data is also kept for safety.
+english.StoreEditionStateUnknown=Unable to verify whether the Microsoft Store edition of DeskBox is installed. For safety, app data has been kept.%n%nPlease uninstall the Store edition first and retry, or choose to keep the data.
 chinesesimplified.ManagedStorageShortcutPrompt=为避免卸载后找不到这些文件，是否在桌面创建“DeskBox Files”快捷方式？%n%n快捷方式将打开：%n%1
 chinesesimplified.ManagedStorageShortcutCreateFailed=未能创建桌面快捷方式。你的文件仍安全保存在：%n%1
+chinesesimplified.StoreEditionDataPreserved=检测到 Microsoft Store 版 DeskBox 仍在安装。它的数据保存在独立位置，本次卸载不会清除；直装版数据也将一并保留以确保安全。
+chinesesimplified.StoreEditionStateUnknown=无法确认 Microsoft Store 版 DeskBox 的安装状态，为安全起见已保留应用数据。%n%n请先卸载商店版后重试，或选择保留数据继续。
 chinesetraditional.ManagedStorageShortcutPrompt=為避免解除安裝後找不到這些檔案，是否在桌面建立「DeskBox Files」捷徑？%n%n捷徑將開啟：%n%1
 chinesetraditional.ManagedStorageShortcutCreateFailed=無法建立桌面捷徑。你的檔案仍安全地儲存在：%n%1
+chinesetraditional.StoreEditionDataPreserved=偵測到 Microsoft Store 版 DeskBox 仍在安裝。它的資料儲存在獨立位置，本次解除安裝不會清除；直接安裝版資料也將一併保留以確保安全。
+chinesetraditional.StoreEditionStateUnknown=無法確認 Microsoft Store 版 DeskBox 的安裝狀態，為安全起見已保留應用程式資料。%n%n請先解除安裝商店版後重試，或選擇保留資料繼續。
 japanese.ManagedStorageShortcutPrompt=アンインストール後もファイルを簡単に見つけられるよう、デスクトップに「DeskBox Files」ショートカットを作成しますか？%n%nショートカットで開く場所：%n%1
 japanese.ManagedStorageShortcutCreateFailed=デスクトップ ショートカットを作成できませんでした。ファイルは引き続き次の場所に安全に保存されています：%n%1
+japanese.StoreEditionDataPreserved=Microsoft Store 版の DeskBox がまだインストールされています。Store 版のデータは別の場所に保存されており、今回のアンインストールでは削除されません。安全のため、直接インストール版のデータも保持されます。
+japanese.StoreEditionStateUnknown=Microsoft Store 版 DeskBox のインストール状態を確認できませんでした。安全のため、アプリデータは保持されています。%n%n先に Store 版をアンインストールしてから再試行するか、データを保持したまま続行してください。
 german.ManagedStorageShortcutPrompt=Soll eine Verknüpfung „DeskBox Files“ auf dem Desktop erstellt werden, damit diese Dateien nach der Deinstallation leicht auffindbar bleiben?%n%nDie Verknüpfung öffnet:%n%1
 german.ManagedStorageShortcutCreateFailed=Die Desktopverknüpfung konnte nicht erstellt werden. Ihre Dateien befinden sich weiterhin sicher unter:%n%1
+german.StoreEditionDataPreserved=Die Microsoft Store-Edition von DeskBox ist noch installiert. Ihre Daten liegen an einem eigenen Speicherort und werden von dieser Deinstallation nicht angetastet; die Daten der Direktinstallation werden aus Sicherheitsgründen ebenfalls aufbewahrt.
+german.StoreEditionStateUnknown=Der Installationsstatus der Microsoft Store-Edition von DeskBox konnte nicht überprüft werden. Die Anwendungsdaten wurden aus Sicherheitsgründen aufbewahrt.%n%nDeinstallieren Sie zuerst die Store-Edition und versuchen Sie es erneut, oder fahren Sie mit erhaltenen Daten fort.
 brazilianportuguese.ManagedStorageShortcutPrompt=Para facilitar a localização desses arquivos após a desinstalação, deseja criar um atalho "DeskBox Files" na área de trabalho?%n%nO atalho abrirá:%n%1
 brazilianportuguese.ManagedStorageShortcutCreateFailed=Não foi possível criar o atalho na área de trabalho. Seus arquivos continuam seguros em:%n%1
+brazilianportuguese.StoreEditionDataPreserved=A edição do DeskBox da Microsoft Store ainda está instalada. Os dados dela ficam em um local separado e não serão afetados por esta desinstalação; por segurança, os dados da edição de instalação direta também serão mantidos.
+brazilianportuguese.StoreEditionStateUnknown=Não foi possível verificar se a edição do DeskBox da Microsoft Store está instalada. Por segurança, os dados do aplicativo foram mantidos.%n%nDesinstale primeiro a edição da Store e tente novamente, ou continue mantendo os dados.
 hindi.ManagedStorageShortcutPrompt=अनइंस्टॉल करने के बाद इन फ़ाइलों को आसानी से ढूँढने के लिए, क्या डेस्कटॉप पर "DeskBox Files" शॉर्टकट बनाया जाए?%n%nशॉर्टकट यह स्थान खोलेगा:%n%1
 hindi.ManagedStorageShortcutCreateFailed=डेस्कटॉप शॉर्टकट नहीं बनाया जा सका। आपकी फ़ाइलें अभी भी यहाँ सुरक्षित हैं:%n%1
+hindi.StoreEditionDataPreserved=DeskBox का Microsoft Store संस्करण अभी भी स्थापित है। इसका डेटा अलग स्थान पर संग्रहीत है और इस अनइंस्टॉल से प्रभावित नहीं होगा; सुरक्षा के लिए डायरेक्ट-इंस्टॉल संस्करण का डेटा भी रखा गया है।
+hindi.StoreEditionStateUnknown=यह सुनिश्चित नहीं किया जा सका कि DeskBox का Microsoft Store संस्करण स्थापित है या नहीं। सुरक्षा के लिए ऐप डेटा रखा गया है।%n%nपहले Store संस्करण अनइंस्टॉल करके पुनः प्रयास करें, या डेटा बनाए रखते हुए आगे बढ़ें।
 spanish.ManagedStorageShortcutPrompt=Para que estos archivos sean fáciles de encontrar después de desinstalar, ¿quieres crear un acceso directo "DeskBox Files" en el escritorio?%n%nEl acceso directo abrirá:%n%1
 spanish.ManagedStorageShortcutCreateFailed=No se pudo crear el acceso directo del escritorio. Tus archivos siguen estando seguros en:%n%1
+spanish.StoreEditionDataPreserved=La edición de DeskBox de Microsoft Store sigue instalada. Sus datos se guardan en una ubicación independiente y esta desinstalación no los tocará; por seguridad, los datos de la edición de instalación directa también se conservan.
+spanish.StoreEditionStateUnknown=No se pudo verificar si la edición de DeskBox de Microsoft Store está instalada. Por seguridad, se han conservado los datos de la aplicación.%n%nDesinstala primero la edición de la Store y vuelve a intentarlo, o continúa conservando los datos.
 french.ManagedStorageShortcutPrompt=Pour retrouver facilement ces fichiers après la désinstallation, créer un raccourci « DeskBox Files » sur le bureau ?%n%nLe raccourci ouvrira :%n%1
 french.ManagedStorageShortcutCreateFailed=Le raccourci sur le bureau n’a pas pu être créé. Vos fichiers sont toujours conservés ici :%n%1
+french.StoreEditionDataPreserved=L’édition Microsoft Store de DeskBox est encore installée. Ses données se trouvent dans un emplacement distinct et ne seront pas touchées par cette désinstallation ; par sécurité, les données de l’édition à installation directe sont également conservées.
+french.StoreEditionStateUnknown=Impossible de vérifier si l’édition Microsoft Store de DeskBox est installée. Par sécurité, les données de l’application ont été conservées.%n%nDésinstallez d’abord l’édition du Store puis réessayez, ou choisissez de conserver les données.
 arabic.ManagedStorageShortcutPrompt=لتسهيل العثور على هذه الملفات بعد إزالة التثبيت، هل تريد إنشاء اختصار "DeskBox Files" على سطح المكتب؟%n%nسيفتح الاختصار:%n%1
 arabic.ManagedStorageShortcutCreateFailed=تعذر إنشاء اختصار سطح المكتب. لا تزال ملفاتك محفوظة بأمان في:%n%1
+arabic.StoreEditionDataPreserved=لا يزال إصدار DeskBox من Microsoft Store مثبتًا. تُحفظ بياناته في موقع منفصل ولن تتأثر بإزالة هذا التثبيت؛ وحفظًا على السلامة سيتم أيضًا الاحتفاظ ببيانات إصدار التثبيت المباشر.
+arabic.StoreEditionStateUnknown=تعذر التحقق من حالة تثبيت إصدار DeskBox من Microsoft Store. حفظًا على السلامة، تم الاحتفاظ ببيانات التطبيق.%n%nأزل تثبيت إصدار Store أولًا ثم أعد المحاولة، أو اختر الاحتفاظ بالبيانات والمتابعة.
 bengali.ManagedStorageShortcutPrompt=আনইনস্টল করার পরে এই ফাইলগুলো সহজে খুঁজে পেতে, ডেস্কটপে একটি "DeskBox Files" শর্টকাট তৈরি করবেন?%n%nশর্টকাটটি খুলবে:%n%1
 bengali.ManagedStorageShortcutCreateFailed=ডেস্কটপ শর্টকাট তৈরি করা যায়নি। আপনার ফাইলগুলো এখনও এখানে নিরাপদ আছে:%n%1
+bengali.StoreEditionDataPreserved=DeskBox-এর Microsoft Store সংস্করণ এখনও ইনস্টল করা আছে। এর ডেটা আলাদা অবস্থানে সংরক্ষিত এবং এই আনইনস্টলে মুছে ফেলা হবে না; নিরাপত্তার জন্য ডিরেক্ট-ইনস্টল সংস্করণের ডেটাও রাখা হবে।
+bengali.StoreEditionStateUnknown=DeskBox-এর Microsoft Store সংস্করণ ইনস্টল করা আছে কি না তা যাচাই করা যায়নি। নিরাপত্তার জন্য অ্যাপ ডেটা রাখা হয়েছে।%n%nপ্রথমে Store সংস্করণ আনইনস্টল করে আবার চেষ্টা করুন, অথবা ডেটা রেখেই চালিয়ে যান।
 russian.ManagedStorageShortcutPrompt=Чтобы эти файлы было легко найти после удаления программы, создать на рабочем столе ярлык «DeskBox Files»?%n%nЯрлык будет открывать:%n%1
 russian.ManagedStorageShortcutCreateFailed=Не удалось создать ярлык на рабочем столе. Ваши файлы по-прежнему находятся в безопасности здесь:%n%1
+russian.StoreEditionDataPreserved=Версия DeskBox из Microsoft Store всё ещё установлена. Её данные хранятся в отдельном месте и эта деинсталляция их не затронет; для безопасности данные версии с прямой установкой также сохраняются.
+russian.StoreEditionStateUnknown=Не удалось проверить, установлена ли версия DeskBox из Microsoft Store. Из соображений безопасности данные приложения сохранены.%n%nСначала удалите версию из Store и повторите попытку либо продолжите, сохранив данные.

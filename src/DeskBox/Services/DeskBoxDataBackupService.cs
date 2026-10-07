@@ -98,7 +98,11 @@ public sealed partial class DeskBoxDataBackupService
 
     /// <summary>
     /// Automatic snapshots are retained outside the app-data root so they
-    /// survive normal uninstall and can be restored after reinstall.
+    /// survive a normal direct-install uninstall and can be restored after
+    /// reinstall. On the store channel, MSIX AppData write virtualization
+    /// places them under Packages/[PFN]/LocalCache instead: they are
+    /// deleted with the package on uninstall but kept across updates over
+    /// the same PackageFamilyName.
     /// </summary>
     internal string AutomaticSnapshotDirectory => Path.Combine(_recoveryRootPath, "automatic");
 

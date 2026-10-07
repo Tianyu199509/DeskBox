@@ -65,6 +65,13 @@ public sealed class WidgetLayoutSettingsSlice
     public List<string> DeletedWidgetIds { get; set; } = [];
 
     /// <summary>
+    /// Stable monitor identity chosen with "设为格子主屏幕". New widgets pin to
+    /// this monitor instead of the cursor screen; null keeps the legacy
+    /// cursor-based first placement.
+    /// </summary>
+    public string? WidgetDefaultBoundScreenId { get; set; }
+
+    /// <summary>
     /// Replaces every member with <paramref name="other"/>'s values. The
     /// layout store keeps this slice as the live object for the session
     /// (AppSettings.WidgetLayout is get-only by the 2A facade contract), so
@@ -85,5 +92,6 @@ public sealed class WidgetLayoutSettingsSlice
         WidgetGroupWheelSwitchEnabled = other.WidgetGroupWheelSwitchEnabled;
         WidgetGroupHoverSwitchEnabled = other.WidgetGroupHoverSwitchEnabled;
         DeletedWidgetIds = other.DeletedWidgetIds;
+        WidgetDefaultBoundScreenId = other.WidgetDefaultBoundScreenId;
     }
 }

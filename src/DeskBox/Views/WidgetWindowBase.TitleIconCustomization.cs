@@ -146,9 +146,12 @@ public abstract partial class WidgetWindowBase
 
     /// <summary>
     /// Repositions the shared panorama image so the slice under the window's
-    /// desktop position lands inside the plate. Pure math plus one Win32
-    /// rect read — no decode — so window drags update the sampled slice in
-    /// real time.
+    /// desktop position lands inside the plate. Pure math plus Win32 rect
+    /// reads — no decode — so window drags update the sampled slice in real
+    /// time. The fit is per-monitor (the wallpaper model: each monitor fills
+    /// itself with the image); fitting the whole virtual-desktop union only
+    /// works on single-DPI setups and rendered zoomed slices on mixed-DPI
+    /// screens that never recovered after switching back.
     /// </summary>
     protected void UpdateCustomPanoramaViewport()
     {
@@ -156,39 +159,22 @@ public abstract partial class WidgetWindowBase
             bitmap.PixelWidth <= 0 ||
             bitmap.PixelHeight <= 0 ||
             HWnd == IntPtr.Zero ||
-            !Win32Helper.GetWindowRect(HWnd, out Win32Helper.RECT windowRect))
+            !Win32Helper.GetWindowRect(HWnd, out Win32Helper.RECT windowRect) ||
+            !Win32Helper.TryGetWindowMonitorRect(HWnd, out Win32Helper.RECT monitorRect))
         {
             return;
         }
 
-        double canvasX = Win32Helper.GetSystemMetrics(Win32Helper.SM_XVIRTUALSCREEN);
-        double canvasY = Win32Helper.GetSystemMetrics(Win32Helper.SM_YVIRTUALSCREEN);
-        double canvasWidth = Win32Helper.GetSystemMetrics(Win32Helper.SM_CXVIRTUALSCREEN);
-        double canvasHeight = Win32Helper.GetSystemMetrics(Win32Helper.SM_CYVIRTUALSCREEN);
-        Windows.Foundation.Rect? fitted = WidgetBackgroundPanoramaCalculator.ComputeViewbox(
-            bitmap.PixelWidth,
-            bitmap.PixelHeight,
-            canvasX,
-            canvasY,
-            canvasWidth,
-            canvasHeight,
-            windowRect.Left,
-            windowRect.Top,
-            windowRect.Right - windowRect.Left,
-            windowRect.Bottom - windowRect.Top);
-        if (fitted is null)
-        {
-            return;
-        }
-
-        // The calculator clamps the sampled rect; the placement instead needs
-        // the full fitted rect relative to the window so the image extends
-        // beyond the plate on every side and the clip picks the slice.
-        double scale = Math.Max(canvasWidth / bitmap.PixelWidth, canvasHeight / bitmap.PixelHeight);
-        double fittedWidth = bitmap.PixelWidth * scale;
-        double fittedHeight = bitmap.PixelHeight * scale;
-        double fittedX = canvasX - (fittedWidth - canvasWidth) / 2;
-        double fittedY = canvasY - (fittedHeight - canvasHeight) / 2;
+        double monitorWidth = monitorRect.Right - monitorRect.Left;
+        double monitorHeight = monitorRect.Bottom - monitorRect.Top;
+        (double offsetX, double offsetY, double fittedWidth, double fittedHeight) =
+            WidgetBackgroundPanoramaCalculator.ComputeMonitorFit(
+                bitmap.PixelWidth,
+                bitmap.PixelHeight,
+                monitorWidth,
+                monitorHeight);
+        double fittedX = monitorRect.Left + offsetX;
+        double fittedY = monitorRect.Top + offsetY;
         double dipScale = Win32Helper.GetDpiScaleForWindow(HWnd, xamlRoot: null);
         if (!double.IsFinite(dipScale) || dipScale <= 0)
         {

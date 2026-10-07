@@ -217,14 +217,11 @@ public sealed partial class SettingsWindow
             section.DataContext = _groupNavigationSettingsViewModel;
         }
 
-        // The capsule family (main capsule section plus the behavior,
-        // arrangement, animation and overrides subsections) binds through the
-        // capsule editor (batch 44); the override-list projection is pushed
-        // in by the shell's override state machine.
+        // The capsule family (main capsule section plus the overrides
+        // subsection) binds through the capsule editor (batch 44); the
+        // override-list projection is pushed in by the shell's override state
+        // machine.
         if (sectionTag is "CapsuleMode" or
-            "CapsuleBehaviorSettings" or
-            "CapsuleArrangementSettings" or
-            "CapsuleAnimationSettings" or
             "CapsuleOverridesSettings")
         {
             section.DataContext = _capsuleSettingsViewModel;

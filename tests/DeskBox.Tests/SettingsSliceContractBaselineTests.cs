@@ -426,6 +426,7 @@ public sealed class SettingsSliceContractBaselineTests
         "showFileExtensions",
         "hideShortcutExtensionWhenShowingFileExtensions",
         "widgets",
+        "widgetDefaultBoundScreenId",
         "widgetGroups",
         "widgetTopologyLayouts",
         "activeWidgetTopologyKey",
