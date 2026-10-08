@@ -2,6 +2,12 @@ name: Native AOT Distribution Gate
 
 on:
   workflow_dispatch:
+    inputs:
+      signing-policy:
+        description: 'Sign direct installers via SignPath (empty = skip signing)'
+        required: false
+        default: ''
+        type: string
 
 permissions:
   contents: read
@@ -40,7 +46,7 @@ jobs:
       - name: Setup pinned .NET SDK
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: 10.0.303
+          dotnet-version: 10.0.401
 
       - name: Verify native runner, Rust, Inno Setup, and Windows SDK
         shell: pwsh
@@ -180,3 +186,57 @@ jobs:
           if-no-files-found: error
           retention-days: 14
           path: evidence/stage7c1-cross-architecture-summary.json
+
+  sign:
+    name: Sign direct installers (SignPath)
+    needs: distribution
+    if: needs.distribution.result == 'success' && inputs.signing-policy != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Download distribution artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: stage7c1-*-distribution
+          path: distribution
+
+      - name: Collect unsigned installers
+        shell: pwsh
+        run: |
+          $installers = Get-ChildItem -LiteralPath .\distribution -Recurse -Filter 'DeskBox_Setup_*.exe' -File
+          if (-not $installers) {
+            throw 'No DeskBox_Setup_*.exe found in distribution artifacts.'
+          }
+          New-Item -ItemType Directory -Force -Path .\unsigned | Out-Null
+          Copy-Item -LiteralPath $installers.FullName -Destination .\unsigned
+          Get-ChildItem -LiteralPath .\unsigned | Select-Object Name, Length
+
+      - name: Upload unsigned installers
+        id: upload-unsigned
+        uses: actions/upload-artifact@v4
+        with:
+          name: unsigned-installers
+          if-no-files-found: error
+          retention-days: 7
+          path: unsigned
+
+      - name: Submit SignPath signing request
+        id: signpath
+        uses: signpath/github-action-submit-signing-request@v3
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: 'e4f8de42-d97c-409d-b768-ee383c34c15b'
+          project-slug: 'DeskBox'
+          signing-policy-slug: ${{ inputs.signing-policy }}
+          github-artifact-id: ${{ steps.upload-unsigned.outputs.artifact-id }}
+          wait-for-completion: true
+          output-artifact-directory: signed
+
+      - name: Upload signed installers
+        uses: actions/upload-artifact@v4
+        with:
+          name: signed-installers
+          if-no-files-found: error
+          retention-days: 14
+          path: signed
