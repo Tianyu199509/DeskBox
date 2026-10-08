@@ -3,7 +3,62 @@
     x:Class="DeskBox.Controls.WidgetFeedbackPresenter"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:svc="using:DeskBox.Services"
     Foreground="{ThemeResource TextFillColorPrimaryBrush}">
+
+    <!-- The tip plate follows the window theme (SystemControlAcrylicElementBrush
+         resolves from the theme dictionaries), but the widget window locks the
+         TextFillColor*/Button* foreground tokens to its mutable widget-foreground
+         brushes, which can stay white while the plate turns light (widget
+         foreground "follow theme" resolves through its own snapshot path). The
+         theme dictionaries here re-scope exactly those tokens to the presenter's
+         own ActualTheme so text, action button and close glyph always contrast
+         with the plate, mirroring the Fluent token values the app uses. -->
+    <UserControl.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.ThemeDictionaries>
+                <ResourceDictionary x:Key="Light">
+                    <SolidColorBrush x:Key="TextFillColorPrimaryBrush" Color="#E4000000" />
+                    <SolidColorBrush x:Key="TextFillColorSecondaryBrush" Color="#93000000" />
+                    <SolidColorBrush x:Key="TextFillColorDisabledBrush" Color="#6B000000" />
+                    <SolidColorBrush x:Key="ButtonForeground" Color="#E4000000" />
+                    <SolidColorBrush x:Key="ButtonForegroundPointerOver" Color="#E4000000" />
+                    <SolidColorBrush x:Key="ButtonForegroundPressed" Color="#93000000" />
+                    <SolidColorBrush x:Key="ButtonForegroundDisabled" Color="#6B000000" />
+                    <SolidColorBrush x:Key="SubtleButtonForeground" Color="#E4000000" />
+                    <SolidColorBrush x:Key="SubtleButtonForegroundPointerOver" Color="#E4000000" />
+                    <SolidColorBrush x:Key="SubtleButtonForegroundPressed" Color="#93000000" />
+                    <SolidColorBrush x:Key="SubtleButtonForegroundDisabled" Color="#6B000000" />
+                </ResourceDictionary>
+                <ResourceDictionary x:Key="Dark">
+                    <SolidColorBrush x:Key="TextFillColorPrimaryBrush" Color="#FFFFFFFF" />
+                    <SolidColorBrush x:Key="TextFillColorSecondaryBrush" Color="#C5FFFFFF" />
+                    <SolidColorBrush x:Key="TextFillColorDisabledBrush" Color="#5CFFFFFF" />
+                    <SolidColorBrush x:Key="ButtonForeground" Color="#FFFFFFFF" />
+                    <SolidColorBrush x:Key="ButtonForegroundPointerOver" Color="#FFFFFFFF" />
+                    <SolidColorBrush x:Key="ButtonForegroundPressed" Color="#C5FFFFFF" />
+                    <SolidColorBrush x:Key="ButtonForegroundDisabled" Color="#5CFFFFFF" />
+                    <SolidColorBrush x:Key="SubtleButtonForeground" Color="#FFFFFFFF" />
+                    <SolidColorBrush x:Key="SubtleButtonForegroundPointerOver" Color="#FFFFFFFF" />
+                    <SolidColorBrush x:Key="SubtleButtonForegroundPressed" Color="#C5FFFFFF" />
+                    <SolidColorBrush x:Key="SubtleButtonForegroundDisabled" Color="#5CFFFFFF" />
+                </ResourceDictionary>
+                <ResourceDictionary x:Key="Default">
+                    <SolidColorBrush x:Key="TextFillColorPrimaryBrush" Color="#FFFFFFFF" />
+                    <SolidColorBrush x:Key="TextFillColorSecondaryBrush" Color="#C5FFFFFF" />
+                    <SolidColorBrush x:Key="TextFillColorDisabledBrush" Color="#5CFFFFFF" />
+                    <SolidColorBrush x:Key="ButtonForeground" Color="#FFFFFFFF" />
+                    <SolidColorBrush x:Key="ButtonForegroundPointerOver" Color="#FFFFFFFF" />
+                    <SolidColorBrush x:Key="ButtonForegroundPressed" Color="#C5FFFFFF" />
+                    <SolidColorBrush x:Key="ButtonForegroundDisabled" Color="#5CFFFFFF" />
+                    <SolidColorBrush x:Key="SubtleButtonForeground" Color="#FFFFFFFF" />
+                    <SolidColorBrush x:Key="SubtleButtonForegroundPointerOver" Color="#FFFFFFFF" />
+                    <SolidColorBrush x:Key="SubtleButtonForegroundPressed" Color="#C5FFFFFF" />
+                    <SolidColorBrush x:Key="SubtleButtonForegroundDisabled" Color="#5CFFFFFF" />
+                </ResourceDictionary>
+            </ResourceDictionary.ThemeDictionaries>
+        </ResourceDictionary>
+    </UserControl.Resources>
 
     <Border
         x:Name="FeedbackSurface"
@@ -27,6 +82,7 @@
                 <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="*" />
                 <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
             <FontIcon
                 x:Name="SeverityIcon"
@@ -48,6 +104,17 @@
                 Click="ActionButton_Click"
                 Style="{StaticResource WidgetToastActionButtonStyle}"
                 Visibility="Collapsed" />
+            <Button
+                x:Name="DismissButton"
+                Grid.Column="3"
+                MinWidth="0"
+                Padding="4,2"
+                Click="DismissButton_Click"
+                Style="{StaticResource WidgetToastActionButtonStyle}"
+                svc:Localized.ToolTipKey="Common.Close"
+                Visibility="Collapsed">
+                <FontIcon FontSize="12" Glyph="&#xE711;" />
+            </Button>
         </Grid>
     </Border>
 </UserControl>

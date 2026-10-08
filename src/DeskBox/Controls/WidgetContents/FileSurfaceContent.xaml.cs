@@ -2574,10 +2574,13 @@ public sealed partial class FileSurfaceContent :
             return;
         }
 
+        // The tip outlives a quick drag (dismiss requests hold a five-second
+        // window), so the X is reachable with the mouse free after the drop.
         ShowFeedback(new WidgetFeedbackRequest(
             T("Widget.DragOutTip.Modifiers"),
             WidgetFeedbackSeverity.Info,
-            "drag-out-modifier-tip"));
+            "drag-out-modifier-tip",
+            DismissAction: DisableDragOutModifierTipAsync));
     }
 
     // Receipt after an unambiguous external drop (a reported Copy or Move —
@@ -2606,10 +2609,54 @@ public sealed partial class FileSurfaceContent :
             return;
         }
 
+        // Closing the receipt means the user does not want it: switch the
+        // setting off and persist through the normal save path so the settings
+        // window's toggle follows on the next SettingsChanged broadcast.
         ShowFeedback(new WidgetFeedbackRequest(
             T(key),
             WidgetFeedbackSeverity.Info,
-            "drag-out-result-tip"));
+            "drag-out-result-tip",
+            DismissAction: DisableDragOutResultHintAsync));
+    }
+
+    private Task DisableDragOutResultHintAsync()
+    {
+        return DisableDragTipSettingAsync(() =>
+            _settingsService.Settings.FileWidget.DragOutResultHintEnabled = false);
+    }
+
+    private Task DisableDragOutModifierTipAsync()
+    {
+        return DisableDragTipSettingAsync(() =>
+            _settingsService.Settings.FileWidget.DragOutModifierTipEnabled = false);
+    }
+
+    // Both dismiss paths persist through the normal save channel so the
+    // SettingsChanged broadcast re-projects an open settings window's
+    // toggles; the write must land on the UI thread either way.
+    private Task DisableDragTipSettingAsync(Action persist)
+    {
+        if (DispatcherQueue.HasThreadAccess)
+        {
+            persist();
+            _settingsService.SaveDebounced();
+            return Task.CompletedTask;
+        }
+
+        var completion = new TaskCompletionSource();
+        DispatcherQueue.TryEnqueue(() =>
+        {
+            try
+            {
+                persist();
+                _settingsService.SaveDebounced();
+            }
+            finally
+            {
+                completion.SetResult();
+            }
+        });
+        return completion.Task;
     }
 
     // Pure key choice for the receipt above, extracted for unit tests: only
@@ -2908,19 +2955,28 @@ public sealed partial class FileSurfaceContent :
                 // toast here would replace that explanation.
                 if (_lastImportSkippedUndisplayableCount == 0)
                 {
-                    ShowFeedback(moveWhenMapped == true && completedCount == 0
-                        ? new(
+                    if (moveWhenMapped == true && completedCount == 0)
+                    {
+                        ShowFeedback(new(
                             T("Widget.NoItemsMoved"),
                             WidgetFeedbackSeverity.Warning,
-                            "file-drop-empty")
-                        : new(
+                            "file-drop-empty"));
+                    }
+                    else if (
+                        _settingsService.Settings.FileWidget.DragOutResultHintEnabled)
+                    {
+                        // The count receipt is the drop-in half of the result
+                        // hint setting: closing it switches the setting off.
+                        ShowFeedback(new(
                             _localizationService.Format(
                                 moveWhenMapped == true
                                     ? "Widget.MovedCount"
                                     : "Widget.PastedCount",
                                 completedCount),
                             WidgetFeedbackSeverity.Success,
-                            "file-drop"));
+                            "file-drop",
+                            DismissAction: DisableDragOutResultHintAsync));
+                    }
                 }
             }
         }
@@ -4177,8 +4233,12 @@ public sealed partial class FileSurfaceContent :
             App.Log(
                 $"[Import] Native import completed id={importId} widget={WidgetId} " +
                 $"count={droppedFiles.Length} elapsedMs={stopwatch.ElapsedMilliseconds}");
-            if (_lastImportSkippedUndisplayableCount == 0)
+            if (_lastImportSkippedUndisplayableCount == 0 &&
+                _settingsService.Settings.FileWidget.DragOutResultHintEnabled)
             {
+                // Same receipt contract as the WinUI drop path above: the
+                // count toast belongs to the result-hint setting and carries
+                // its dismiss affordance.
                 ShowFeedback(new(
                     _localizationService.Format(
                         moveWhenMapped == true
@@ -4186,7 +4246,8 @@ public sealed partial class FileSurfaceContent :
                             : "Widget.PastedCount",
                         droppedFiles.Length),
                     WidgetFeedbackSeverity.Success,
-                    "native-file-drop"));
+                    "native-file-drop",
+                    DismissAction: DisableDragOutResultHintAsync));
             }
 
             // When entries were refused as undisplayable, the skip feedback
