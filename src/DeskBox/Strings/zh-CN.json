@@ -254,6 +254,8 @@
   "Widget.Import.Canceled": "已取消导入",
   "Widget.Import.Failed": "导入失败",
   "Widget.Import.SourceCleanupPending": "文件已全部导入，但部分源文件正被其他程序使用，未能从原位置删除。关闭相关程序后手动删除即可。",
+  "Widget.Import.MappedFolderUnavailable": "未能导入：收纳目录当前不可用，文件已保留在原位置。重新连接磁盘或恢复目录后会自动恢复。",
+  "Widget.Import.DestinationOutsideMappedRoot": "未能导入：目标位置已不在本格子的收纳文件夹内。刷新格子后重试，或在设置中重新选择收纳路径。",
   "Widget.Import.Failed.Description": "部分文件可能未导入，请查看错误提示。",
   "Widget.Import.Canceling": "正在取消…",
   "Widget.Import.Canceling.Description": "正在清理未完成的文件",

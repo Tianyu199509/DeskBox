@@ -1371,6 +1371,8 @@
   "Widget.Import.Canceled": "Importación cancelada",
   "Widget.Import.Failed": "Importación fallida",
   "Widget.Import.SourceCleanupPending": "Todos los archivos se importaron, pero algunos archivos de origen seguían en uso por otras aplicaciones y no se pudieron eliminar de su ubicación original. Cierra esas aplicaciones y elimínalos manualmente.",
+  "Widget.Import.MappedFolderUnavailable": "No se pudo importar: la carpeta de almacenamiento no está disponible ahora mismo. Tus archivos se han conservado donde están y se recuperarán en cuanto vuelva la unidad o la carpeta.",
+  "Widget.Import.DestinationOutsideMappedRoot": "No se pudo importar: el destino ya no está dentro de la carpeta de almacenamiento de este widget. Actualiza el widget e inténtalo de nuevo, o elige otra ubicación de almacenamiento en Configuración.",
   "Widget.Import.Failed.Description": "Es posible que algunos archivos no se hayan importado. Verifique el mensaje de error.",
   "Widget.Import.Canceling": "Cancelando…",
   "Widget.Import.Canceling.Description": "Eliminar archivos sin terminar",

@@ -1371,6 +1371,8 @@
   "Widget.Import.Canceled": "Importation annulée",
   "Widget.Import.Failed": "Échec de l'importation",
   "Widget.Import.SourceCleanupPending": "Tous les fichiers ont été importés, mais certains fichiers sources étaient encore utilisés par d'autres applications et n'ont pas pu être supprimés de leur emplacement d'origine. Fermez ces applications, puis supprimez-les manuellement.",
+  "Widget.Import.MappedFolderUnavailable": "Importation impossible : le dossier de stockage est indisponible pour le moment. Vos fichiers restent où ils sont et seront rétablis dès que le disque ou le dossier sera de retour.",
+  "Widget.Import.DestinationOutsideMappedRoot": "Importation impossible : la destination n'est plus dans le dossier de stockage de ce widget. Actualisez le widget puis réessayez, ou choisissez un autre emplacement de stockage dans les paramètres.",
   "Widget.Import.Failed.Description": "Certains fichiers peuvent ne pas avoir été importés. Vérifiez le message d'erreur.",
   "Widget.Import.Canceling": "Annulation…",
   "Widget.Import.Canceling.Description": "Suppression des fichiers inachevés",

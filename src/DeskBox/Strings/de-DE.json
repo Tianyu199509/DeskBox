@@ -1368,6 +1368,8 @@
   "Widget.Import.Canceled": "Import abgebrochen",
   "Widget.Import.Failed": "Import fehlgeschlagen",
   "Widget.Import.SourceCleanupPending": "Alle Dateien wurden importiert, aber einige Quelldateien waren noch durch andere Apps in Gebrauch und konnten nicht am ursprünglichen Speicherort gelöscht werden. Schließe die Apps und lösche sie manuell.",
+  "Widget.Import.MappedFolderUnavailable": "Import nicht möglich: Der Speicherordner ist derzeit nicht verfügbar. Deine Dateien bleiben, wo sie sind, und die Widgets erholen sich, sobald das Laufwerk oder der Ordner wieder erreichbar ist.",
+  "Widget.Import.DestinationOutsideMappedRoot": "Import nicht möglich: Das Ziel liegt nicht mehr im Speicherordner dieses Widgets. Aktualisiere das Widget und versuche es erneut, oder wähle in den Einstellungen einen anderen Speicherort.",
   "Widget.Import.Failed.Description": "Einige Dateien wurden möglicherweise nicht importiert. Prüfen Sie die Fehlermeldung.",
   "Widget.Import.Canceling": "Wird abgebrochen…",
   "Widget.Import.Canceling.Description": "Unvollständige Dateien werden entfernt",

@@ -1371,6 +1371,8 @@
   "Widget.Import.Canceled": "Import canceled",
   "Widget.Import.Failed": "Import failed",
   "Widget.Import.SourceCleanupPending": "All files were imported, but some sources were still in use by other apps and could not be removed from their original location. Close those apps and delete them manually.",
+  "Widget.Import.MappedFolderUnavailable": "Couldn't import: the storage folder isn't available right now. Your files were kept where they are, and the widgets recover once the drive or folder is back.",
+  "Widget.Import.DestinationOutsideMappedRoot": "Couldn't import: the destination is no longer inside this widget's storage folder. Refresh the widget and try again, or choose a different storage location in Settings.",
   "Widget.Import.Failed.Description": "Some files may not have been imported. Check the error message.",
   "Widget.Import.Canceling": "Canceling…",
   "Widget.Import.Canceling.Description": "Removing unfinished files",

@@ -1368,6 +1368,8 @@
   "Widget.Import.Canceled": "Importação cancelada",
   "Widget.Import.Failed": "Falha na importação",
   "Widget.Import.SourceCleanupPending": "Todos os arquivos foram importados, mas alguns arquivos de origem ainda estavam em uso por outros aplicativos e não puderam ser removidos do local original. Feche esses aplicativos e exclua-os manualmente.",
+  "Widget.Import.MappedFolderUnavailable": "Não foi possível importar: a pasta de armazenamento não está disponível no momento. Seus arquivos foram mantidos onde estão e serão recuperados assim que a unidade ou a pasta voltar.",
+  "Widget.Import.DestinationOutsideMappedRoot": "Não foi possível importar: o destino não está mais dentro da pasta de armazenamento deste widget. Atualize o widget e tente novamente, ou escolha outro local de armazenamento nas configurações.",
   "Widget.Import.Failed.Description": "Alguns arquivos podem não ter sido importados. Confira a mensagem de erro.",
   "Widget.Import.Canceling": "Cancelando…",
   "Widget.Import.Canceling.Description": "Removendo arquivos incompletos",

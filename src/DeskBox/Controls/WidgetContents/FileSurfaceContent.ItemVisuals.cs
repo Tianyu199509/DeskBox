@@ -881,7 +881,7 @@ public sealed partial class FileSurfaceContent
                 $"[WidgetSurface] Native stack drop failed id={WidgetId} " +
                 $"stack='{targetStackKey}': {ex}");
             ShowFeedback(new(
-                ex.Message,
+                DescribeImportFailure(ex, requestedCount: 0),
                 WidgetFeedbackSeverity.Error,
                 "native-stack-drop-error"));
             return false;
@@ -2038,7 +2038,7 @@ public sealed partial class FileSurfaceContent
                         ImportCompletionState.Failed);
                 }
                 ShowFeedback(new(
-                    ex.Message,
+                    DescribeImportFailure(ex, requestedCount: 0),
                     WidgetFeedbackSeverity.Error,
                     "stack-file-drop-error"));
             }

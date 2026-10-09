@@ -254,6 +254,8 @@
   "Widget.Import.Canceled": "已取消匯入",
   "Widget.Import.Failed": "匯入失敗",
   "Widget.Import.SourceCleanupPending": "檔案已全部匯入，但部分來源檔案正被其他程式使用，未能從原始位置刪除。關閉相關程式後手動刪除即可。",
+  "Widget.Import.MappedFolderUnavailable": "無法匯入：收納目錄目前無法使用，檔案已保留在原始位置。重新連線磁碟或恢復目錄後會自動恢復。",
+  "Widget.Import.DestinationOutsideMappedRoot": "無法匯入：目標位置已不在這個格子的收納資料夾內。重新整理格子後再試一次，或在設定中重新選擇收納路徑。",
   "Widget.Import.Failed.Description": "部分檔案可能未匯入，請檢視錯誤提示。",
   "Widget.Import.Canceling": "正在取消…",
   "Widget.Import.Canceling.Description": "正在清理未完成的檔案",

@@ -3002,7 +3002,7 @@ public sealed partial class FileSurfaceContent :
                 $"[DropOperation] operation={dropOperationId} widget={WidgetId} " +
                 $"stage=Failed error={ex}");
             ShowFeedback(new(
-                T("Widget.ImportFailed"),
+                DescribeImportFailure(ex, requestedCount: 0),
                 WidgetFeedbackSeverity.Error,
                 "file-drop-error"));
             if (_activeImportCancellation is not null)
@@ -4287,20 +4287,36 @@ public sealed partial class FileSurfaceContent :
     /// <summary>
     /// Localized import-failure feedback. Transfer-exception messages are
     /// English diagnostics aimed at the log and must not reach the toast;
-    /// partial results instead surface the counts the user can act on.
+    /// partial results instead surface the counts the user can act on, and
+    /// drop-preparation failures surface their dedicated causes.
     /// </summary>
     private string DescribeImportFailure(
         Exception exception,
-        int requestedCount) =>
-        exception is FileService.IFileTransferWithCompletedResults
+        int requestedCount,
+        string? singleItemPath = null)
+    {
+        if (ImportFailureMessagePolicy.SelectOverride(
+                exception,
+                requestedCount,
+                singleItemPath) is { } overrideSelection)
+        {
+            return overrideSelection.Args.Length == 0
+                ? _localizationService.T(overrideSelection.Key)
+                : _localizationService.Format(
+                    overrideSelection.Key,
+                    overrideSelection.Args);
+        }
+
+        return exception is FileService.IFileTransferWithCompletedResults
             {
                 CompletedResults: { } completed
-            }
+            } && requestedCount > 0
             ? _localizationService.Format(
                 "Widget.ImportPartialFailure",
                 completed.Count,
                 requestedCount)
             : _localizationService.T("Widget.ImportFailed");
+    }
 
     private void HandleSurfaceRealTimeReorder(
         DragPayloadSnapshot payload,
@@ -5579,6 +5595,16 @@ public sealed partial class FileSurfaceContent :
         catch (OperationCanceledException)
         {
             App.Log($"[WidgetSurface] File action canceled id={WidgetId}");
+        }
+        catch (Exception ex) when (
+            ex is OrganizerService.MappedFolderUnavailableException or
+               OrganizerService.DestinationOutsideMappedRootException)
+        {
+            App.Log($"[WidgetSurface] File action failed id={WidgetId}: {ex}");
+            ShowFeedback(new(
+                DescribeImportFailure(ex, requestedCount: 0),
+                WidgetFeedbackSeverity.Error,
+                "file-action-error"));
         }
         catch (Exception ex)
         {

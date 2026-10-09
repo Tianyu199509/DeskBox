@@ -1368,6 +1368,8 @@
   "Widget.Import.Canceled": "インポートをキャンセルしました",
   "Widget.Import.Failed": "インポートに失敗しました",
   "Widget.Import.SourceCleanupPending": "ファイルはすべてインポートされましたが、一部の元のファイルは他のアプリで使用中のため、元の場所から削除できませんでした。該当アプリを終了してから手動で削除してください。",
+  "Widget.Import.MappedFolderUnavailable": "インポートできませんでした：収納フォルダーは現在利用できません。ファイルは元の場所にそのまま残されており、ドライブまたはフォルダーが戻ると自動的に復元されます。",
+  "Widget.Import.DestinationOutsideMappedRoot": "インポートできませんでした：指定先はこのウィジェットの収納フォルダー内にありません。ウィジェットを更新して再試行するか、設定で別の保存先を選んでください。",
   "Widget.Import.Failed.Description": "一部のファイルがインポートされていない可能性があります。エラーを確認してください。",
   "Widget.Import.Canceling": "キャンセル中…",
   "Widget.Import.Canceling.Description": "未完了のファイルを削除しています",
