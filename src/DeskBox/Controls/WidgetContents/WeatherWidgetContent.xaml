@@ -3,6 +3,7 @@
     x:Class="DeskBox.Controls.WidgetContents.WeatherWidgetContent"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:helpers="using:DeskBox.Helpers"
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:local="using:DeskBox.Controls.WidgetContents"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
@@ -740,6 +741,7 @@
                                             <RowDefinition Height="7" />
                                         </Grid.RowDefinitions>
                                         <TextBlock
+                                            helpers:WidgetTextShadow.Cast="True"
                                             x:Name="HourlyHourText"
                                             Grid.Row="0"
                                             HorizontalAlignment="Center"
@@ -756,6 +758,7 @@
                                             Source="{Binding Icon}"
                                             Stretch="Uniform" />
                                         <TextBlock
+                                            helpers:WidgetTextShadow.Cast="True"
                                             x:Name="HourlyTemperatureText"
                                             Grid.Row="2"
                                             HorizontalAlignment="Center"
@@ -763,6 +766,7 @@
                                             FontWeight="SemiBold"
                                             Text="{Binding TemperatureText}" />
                                         <TextBlock
+                                            helpers:WidgetTextShadow.Cast="True"
                                             Grid.Row="3"
                                             HorizontalAlignment="Center"
                                             FontSize="{x:Bind ForecastHourTextSize, Mode=OneWay}"
@@ -826,6 +830,7 @@
                                             <ColumnDefinition Width="Auto" />
                                         </Grid.ColumnDefinitions>
                                         <TextBlock
+                                            helpers:WidgetTextShadow.Cast="True"
                                             x:Name="DailyDayText"
                                             Grid.Column="0"
                                             VerticalAlignment="Center"
@@ -861,6 +866,7 @@
                                             </Border>
                                         </Grid>
                                         <TextBlock
+                                            helpers:WidgetTextShadow.Cast="True"
                                             x:Name="DailyMaxText"
                                             Grid.Column="4"
                                             VerticalAlignment="Center"
@@ -868,6 +874,7 @@
                                             FontWeight="SemiBold"
                                             Text="{Binding TempMaxText}" />
                                         <TextBlock
+                                            helpers:WidgetTextShadow.Cast="True"
                                             x:Name="DailyMinText"
                                             Grid.Column="5"
                                             VerticalAlignment="Center"

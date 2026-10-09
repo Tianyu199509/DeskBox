@@ -165,9 +165,9 @@ GET https://update.your-domain.com/deskbox/v1/stable/win-x64.json
 
 代码签名：
 
-- 如果安装包没有代码签名，Windows SmartScreen 仍可能提示未知发布者。
-- 代码签名不是在线更新的硬性前置，但会明显影响安装体验。
-- 早期可以先不买，等公开用户量上来后再购买代码签名证书。
+- 已接入 SignPath Foundation 免费代码签名（2026-10）：直装安装包在 GitHub Actions 构建后于同一 workflow run 内由 SignPath 完成 Authenticode 签名（含 RFC 3161 时间戳），生产证书由 SignPath Foundation 审查签发中。
+- 代码签名不是在线更新的硬性前置。生产签名生效后，SmartScreen「未知发布者」提示会随下载量逐步消除（OV 级信誉需要积累，非即时）。
+- 上一节的更新清单签名（Ed25519）与本节的安装包代码签名是两套独立机制：前者保护更新器信任的版本元数据，后者保护安装包文件本身，互不替代。
 
 ## 服务器迁移兼容
 

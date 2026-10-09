@@ -1,4 +1,5 @@
 using DeskBox.Helpers;
+using DeskBox.Services;
 using Windows.Graphics;
 
 namespace DeskBox.Views;
@@ -67,18 +68,7 @@ public abstract partial class WidgetWindowBase
                 finalBounds = CompleteExpandedWidgetDrag(
                     finalBounds,
                     coordinateCapsuleBar: false);
-                CapturePositionAnchor(
-                    finalBounds.X,
-                    finalBounds.Y,
-                    finalBounds.Width,
-                    finalBounds.Height);
-                UpdateConfigBoundsFromPhysical(
-                    finalBounds.X,
-                    finalBounds.Y,
-                    finalBounds.Width,
-                    finalBounds.Height,
-                    persist: false);
-                SynchronizeWidgetGroupLayout();
+                CommitUserPlacementFromWindow(WidgetPlacementSource.CoordinatedMove);
             }
         }
         finally

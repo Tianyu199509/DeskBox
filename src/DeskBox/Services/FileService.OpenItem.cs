@@ -45,7 +45,7 @@ public sealed partial class FileService
             "FileService.OpenItemAsync",
             $"kind={kind}");
 
-        Stopwatch queueStopwatch = Stopwatch.StartNew();
+        Stopwatch runStopwatch = Stopwatch.StartNew();
         StaOperationResult<OpenItemResult> operation = await s_openItemRunner.RunAsync(
             () => OpenItemCore(
                 itemPath,
@@ -57,7 +57,8 @@ public sealed partial class FileService
             cancellationToken).ConfigureAwait(false);
         trace?.Mark(
             "admission",
-            $"started={operation.Started} queueWaitMs={queueStopwatch.Elapsed.TotalMilliseconds:F1}");
+            $"started={operation.Started} queueWaitMs={operation.QueueWait.TotalMilliseconds:F1} " +
+            $"runTotalMs={runStopwatch.Elapsed.TotalMilliseconds:F1}");
         if (!operation.Started)
         {
             trace?.Mark("result", "result=Busy");

@@ -1413,10 +1413,15 @@ public sealed partial class WidgetManager
         using var loadingDelayCancellation =
             CancellationTokenSource.CreateLinkedTokenSource(
                 request.CancellationToken);
-        Task loadingDelay = ShowGroupMemberLoadingAfterDelayAsync(
-            persistentWindow,
-            targetConfig.Id,
-            loadingDelayCancellation.Token);
+        // A drag-hover switch already announced itself through the dwell, and
+        // the ring lives inside the tab header: widening a frozen strip
+        // mid-drag would move the very targets the user is aiming at.
+        Task loadingDelay = request.Origin == WidgetGroupSwitchOrigin.DragHover
+            ? Task.CompletedTask
+            : ShowGroupMemberLoadingAfterDelayAsync(
+                persistentWindow,
+                targetConfig.Id,
+                loadingDelayCancellation.Token);
         ContentWidgetWindow.ContentWidgetSwitchPreparation? preparedContent;
         try
         {
@@ -1674,6 +1679,19 @@ public sealed partial class WidgetManager
                 group,
                 Math.Max(1, removedIndex + 1),
                 detachedPosition);
+            if (detachedPosition is { } dropPoint)
+            {
+                // Drag-out is a user placement (spec 5.4): the drop point —
+                // not the inherited group home — decides the new standalone
+                // surface's home display.
+                CommitUserPlacement(
+                    removedConfig,
+                    new Windows.Graphics.RectInt32(dropPoint.X, dropPoint.Y, 1, 1),
+                    new Windows.Graphics.RectInt32(dropPoint.X, dropPoint.Y, 1, 1),
+                    WidgetPlacementSource.Drag,
+                    captureIntent: false);
+            }
+
             removedConfig.IsVisible = revealStandalone && group.IsVisible;
 
             WidgetGroupConfig? survivingGroup = group.MemberIds.Count >= 2 ? group : null;
@@ -2225,16 +2243,40 @@ public sealed partial class WidgetManager
         }
 
         string? targetId = string.Equals(
-            _groupDragSourceId,
-            sourceWidgetId,
-            StringComparison.Ordinal) &&
+                _groupDragSourceId,
+                sourceWidgetId,
+                StringComparison.Ordinal) &&
             _groupDragDropReady &&
             IsGroupDragTargetUnderCursor()
             ? _groupDragTargetId
             : null;
         ClearGroupDragPreview();
-        return targetId is not null &&
-               await MergeWidgetsAsync(sourceWidgetId, targetId);
+        if (targetId is not null &&
+            await MergeWidgetsAsync(sourceWidgetId, targetId))
+        {
+            // The merge created a new group surface: commit its landing once
+            // so the entry lands under the group surface id as authoritative
+            // (spec 5.4 合并建组 entry).
+            if (FindConfig(sourceWidgetId) is { } merged &&
+                GetLoadedWindow(sourceWidgetId) is { } hostWindow &&
+                Win32Helper.GetWindowRect(hostWindow.WindowHandle, out Win32Helper.RECT hostRect))
+            {
+                CommitUserPlacement(
+                    merged,
+                    new Windows.Graphics.RectInt32(
+                        hostRect.Left, hostRect.Top,
+                        hostRect.Right - hostRect.Left, hostRect.Bottom - hostRect.Top),
+                    new Windows.Graphics.RectInt32(
+                        hostRect.Left, hostRect.Top,
+                        hostRect.Right - hostRect.Left, hostRect.Bottom - hostRect.Top),
+                    WidgetPlacementSource.GroupMerge,
+                    captureIntent: false);
+            }
+
+            return true;
+        }
+
+        return false;
     }
 
     public void CancelWidgetGroupDrag(string sourceWidgetId)
@@ -2287,7 +2329,11 @@ public sealed partial class WidgetManager
             PositionMarginY = source.PositionMarginY,
             PositionMonitorKey = source.PositionMonitorKey,
             PositionMonitorDeviceName = source.PositionMonitorDeviceName,
+            PositionMonitorStableId = source.PositionMonitorStableId,
             PositionMonitorWasPrimary = source.PositionMonitorWasPrimary,
+            ScreenBindingMode = source.ScreenBindingMode,
+            BoundScreenId = source.BoundScreenId,
+            BoundScreenLabel = source.BoundScreenLabel,
             BoundsCoordinateVersion = source.BoundsCoordinateVersion,
             Width = source.Width,
             Height = source.Height,
@@ -2314,7 +2360,11 @@ public sealed partial class WidgetManager
         group.PositionMarginY = member.PositionMarginY;
         group.PositionMonitorKey = member.PositionMonitorKey;
         group.PositionMonitorDeviceName = member.PositionMonitorDeviceName;
+        group.PositionMonitorStableId = member.PositionMonitorStableId;
         group.PositionMonitorWasPrimary = member.PositionMonitorWasPrimary;
+        group.ScreenBindingMode = member.ScreenBindingMode;
+        group.BoundScreenId = member.BoundScreenId;
+        group.BoundScreenLabel = member.BoundScreenLabel;
         group.BoundsCoordinateVersion = member.BoundsCoordinateVersion;
         group.Width = member.Width;
         group.Height = member.Height;
@@ -2345,7 +2395,11 @@ public sealed partial class WidgetManager
         member.PositionMarginY = group.PositionMarginY;
         member.PositionMonitorKey = group.PositionMonitorKey;
         member.PositionMonitorDeviceName = group.PositionMonitorDeviceName;
+        member.PositionMonitorStableId = group.PositionMonitorStableId;
         member.PositionMonitorWasPrimary = group.PositionMonitorWasPrimary;
+        member.ScreenBindingMode = group.ScreenBindingMode;
+        member.BoundScreenId = group.BoundScreenId;
+        member.BoundScreenLabel = group.BoundScreenLabel;
         member.BoundsCoordinateVersion = group.BoundsCoordinateVersion;
         member.Width = group.Width;
         member.Height = group.Height;
@@ -2377,6 +2431,7 @@ public sealed partial class WidgetManager
                 PositionMarginY = source.PositionMarginY,
                 PositionMonitorKey = source.PositionMonitorKey,
                 PositionMonitorDeviceName = source.PositionMonitorDeviceName,
+                PositionMonitorStableId = source.PositionMonitorStableId,
                 PositionMonitorWasPrimary = source.PositionMonitorWasPrimary,
                 BoundsCoordinateVersion = source.BoundsCoordinateVersion
             };
@@ -2404,7 +2459,13 @@ public sealed partial class WidgetManager
         member.PositionMarginY = 0;
         member.PositionMonitorKey = null;
         member.PositionMonitorDeviceName = null;
+        member.PositionMonitorStableId = null;
         member.PositionMonitorWasPrimary = null;
+        // Detaching inherits the surface binding: the member stays on the
+        // monitor the group was bound to, as a standalone surface.
+        member.ScreenBindingMode = group.ScreenBindingMode;
+        member.BoundScreenId = group.BoundScreenId;
+        member.BoundScreenLabel = group.BoundScreenLabel;
         member.CompactPlacement = null;
     }
 
@@ -3512,6 +3573,7 @@ public sealed partial class WidgetManager
             private readonly double _positionMarginY;
             private readonly string? _positionMonitorKey;
             private readonly string? _positionMonitorDeviceName;
+            private readonly string? _positionMonitorStableId;
             private readonly bool? _positionMonitorWasPrimary;
             private readonly int _boundsCoordinateVersion;
             private readonly double _width;
@@ -3534,6 +3596,7 @@ public sealed partial class WidgetManager
                 _positionMarginY = config.PositionMarginY;
                 _positionMonitorKey = config.PositionMonitorKey;
                 _positionMonitorDeviceName = config.PositionMonitorDeviceName;
+                _positionMonitorStableId = config.PositionMonitorStableId;
                 _positionMonitorWasPrimary = config.PositionMonitorWasPrimary;
                 _boundsCoordinateVersion = config.BoundsCoordinateVersion;
                 _width = config.Width;
@@ -3558,6 +3621,7 @@ public sealed partial class WidgetManager
                 _config.PositionMarginY = _positionMarginY;
                 _config.PositionMonitorKey = _positionMonitorKey;
                 _config.PositionMonitorDeviceName = _positionMonitorDeviceName;
+                _config.PositionMonitorStableId = _positionMonitorStableId;
                 _config.PositionMonitorWasPrimary = _positionMonitorWasPrimary;
                 _config.BoundsCoordinateVersion = _boundsCoordinateVersion;
                 _config.Width = _width;

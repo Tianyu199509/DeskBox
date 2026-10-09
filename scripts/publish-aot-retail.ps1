@@ -99,7 +99,7 @@ function Copy-WindowsAppRuntimeInsightsResource {
         throw "The restored $($runtimeLibrary.Name) framework MSIX is missing for '$NativePlatform'."
     }
 
-    # WindowsAppSDK 2.4.0 resolves Foundation 2.3.9, whose self-contained
+    # WindowsAppSDK 2.5.1 resolves Foundation 2.3.12, whose self-contained
     # component payload omits this signed resource DLL even though the matching
     # Runtime framework MSIX contains it. Extract the file from that exact,
     # restore-locked MSIX so app-local RuntimeInfo/AppNotification startup does

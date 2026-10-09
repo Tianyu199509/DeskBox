@@ -3,6 +3,7 @@
     x:Class="DeskBox.Controls.WidgetContents.FileSurfaceContent"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:helpers="using:DeskBox.Helpers"
     xmlns:controls="using:DeskBox.Controls"
     xmlns:svc="using:DeskBox.Services"
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
@@ -59,12 +60,10 @@
                                             <Setter Target="FocusVisualInnerBorder.Opacity" Value="1" />
                                         </VisualState.Setters>
                                     </VisualState>
-                                    <VisualState x:Name="PointerFocused">
-                                        <VisualState.Setters>
-                                            <Setter Target="FocusVisualBorder.Opacity" Value="1" />
-                                            <Setter Target="FocusVisualInnerBorder.Opacity" Value="1" />
-                                        </VisualState.Setters>
-                                    </VisualState>
+                                    <!-- Deliberately empty like the WinUI default item template:
+                                         pointer/touch focus must not draw the focus ring; only the
+                                         keyboard Focused state shows it. -->
+                                    <VisualState x:Name="PointerFocused" />
                                     <VisualState x:Name="Unfocused">
                                         <VisualState.Setters>
                                             <Setter Target="FocusVisualBorder.Opacity" Value="0" />
@@ -122,12 +121,10 @@
                                             <Setter Target="FocusVisualInnerBorder.Opacity" Value="1" />
                                         </VisualState.Setters>
                                     </VisualState>
-                                    <VisualState x:Name="PointerFocused">
-                                        <VisualState.Setters>
-                                            <Setter Target="FocusVisualBorder.Opacity" Value="1" />
-                                            <Setter Target="FocusVisualInnerBorder.Opacity" Value="1" />
-                                        </VisualState.Setters>
-                                    </VisualState>
+                                    <!-- Deliberately empty like the WinUI default item template:
+                                         pointer/touch focus must not draw the focus ring; only the
+                                         keyboard Focused state shows it. -->
+                                    <VisualState x:Name="PointerFocused" />
                                     <VisualState x:Name="Unfocused">
                                         <VisualState.Setters>
                                             <Setter Target="FocusVisualBorder.Opacity" Value="0" />
@@ -316,6 +313,7 @@
                                 Background="{ThemeResource AccentFillColorDefaultBrush}"
                                 CornerRadius="8">
                                 <TextBlock
+                                    helpers:WidgetTextShadow.Cast="True"
                                     Tag="StackPreviewCountText"
                                     HorizontalAlignment="Center"
                                     VerticalAlignment="Center"
@@ -340,6 +338,7 @@
                         </Button>
                     </Grid>
                     <TextBlock
+                        helpers:WidgetTextShadow.Cast="True"
                         MaxWidth="{Binding LabelMaxWidth}"
                         Margin="2,0"
                         HorizontalAlignment="Center"
@@ -360,7 +359,7 @@
                 Mode="List"
                 LayoutContext="{Binding DataContext, ElementName=ItemsList}"
                 UseStackChildIndent="True"
-                HorizontalAlignment="Left"
+                HorizontalAlignment="Stretch"
                 AllowDrop="True"
                 Loaded="ItemSurface_Loaded"
                 Unloaded="ItemSurface_Unloaded"
@@ -480,6 +479,7 @@
                                 Background="{ThemeResource AccentFillColorDefaultBrush}"
                                 CornerRadius="7">
                                 <TextBlock
+                                    helpers:WidgetTextShadow.Cast="True"
                                     Tag="StackPreviewCountText"
                                     HorizontalAlignment="Center"
                                     VerticalAlignment="Center"
@@ -500,8 +500,8 @@
                         </Button>
                     </Grid>
                     <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="1">
-                        <TextBlock FontSize="{Binding LabelFontSize}" Tag="StackName" Text="{Binding Name}" TextTrimming="CharacterEllipsis" />
-                        <TextBlock FontSize="11" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="{Binding Summary}" TextTrimming="CharacterEllipsis" />
+                        <TextBlock helpers:WidgetTextShadow.Cast="True" FontSize="{Binding LabelFontSize}" Tag="StackName" Text="{Binding Name}" TextTrimming="CharacterEllipsis" />
+                        <TextBlock helpers:WidgetTextShadow.Cast="True" FontSize="11" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="{Binding Summary}" TextTrimming="CharacterEllipsis" />
                     </StackPanel>
                     <Button
                         Grid.Column="2"

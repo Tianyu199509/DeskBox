@@ -157,21 +157,24 @@ public abstract partial class WidgetWindowBase
 
     private void ApplyForegroundBrushes(WidgetForegroundPalette palette)
     {
+        // The drag handle renders over widget content without a plate behind
+        // it, so a translucent tone shows the content through the bar. It
+        // follows the full-opacity primary tone instead of the tertiary one.
         SetBrushColor(palette.Primary,
             "TextFillColorPrimaryBrush",
             "ControlStrongFillColorDefaultBrush",
             "ButtonForeground",
             "ButtonForegroundPointerOver",
             "SubtleButtonForeground",
-            "SubtleButtonForegroundPointerOver");
+            "SubtleButtonForegroundPointerOver",
+            "WidgetDragHandleBrush");
         SetBrushColor(palette.Secondary,
             "TextFillColorSecondaryBrush",
             "ControlStrongStrokeColorDefaultBrush",
             "ButtonForegroundPressed",
             "SubtleButtonForegroundPressed");
         SetBrushColor(palette.Tertiary,
-            "TextFillColorTertiaryBrush",
-            "WidgetDragHandleBrush");
+            "TextFillColorTertiaryBrush");
         SetBrushColor(palette.Disabled,
             "TextFillColorDisabledBrush",
             "ControlStrongFillColorDisabledBrush",
@@ -201,22 +204,23 @@ public abstract partial class WidgetWindowBase
     {
         if (highContrast)
         {
-            try
+            // Reuse the shared cached UISettings instance instead of a new
+            // projection per palette resolve; TryGetUiColor already carries
+            // the unavailability fallback contract.
+            Color? foreground = WindowsCompatibilityService.TryGetUiColor(
+                UIColorType.Foreground);
+            if (foreground is { } highContrastForeground)
             {
-                var uiSettings = new UISettings();
-                Color foreground = uiSettings.GetColorValue(UIColorType.Foreground);
                 return new WidgetForegroundPalette(
-                    foreground,
-                    foreground,
-                    foreground,
-                    foreground,
-                    foreground);
+                    highContrastForeground,
+                    highContrastForeground,
+                    highContrastForeground,
+                    highContrastForeground,
+                    highContrastForeground);
             }
-            catch
-            {
-                // Continue with the selected palette if WinRT accessibility
-                // colors are temporarily unavailable.
-            }
+
+            // Continue with the selected palette if WinRT accessibility
+            // colors are temporarily unavailable.
         }
 
         Color primary = mode switch

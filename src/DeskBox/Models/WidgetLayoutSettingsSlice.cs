@@ -61,8 +61,36 @@ public sealed class WidgetLayoutSettingsSlice
     /// </summary>
     public bool WidgetGroupHoverSwitchEnabled { get; set; }
 
+    /// <summary>
+    /// Member-switch transition style for widget groups
+    /// (<see cref="WidgetGroupSwitchAnimationStyles"/>). Auto follows each
+    /// group's resolved navigation style at switch time.
+    /// </summary>
+    public string WidgetGroupSwitchAnimationStyle { get; set; } =
+        WidgetGroupSwitchAnimationStyles.Auto;
+
     /// <summary>Widget ids that were deleted and should not be restored.</summary>
     public List<string> DeletedWidgetIds { get; set; } = [];
+
+    /// <summary>
+    /// Stable monitor identity chosen with "设为格子主屏幕". New widgets pin to
+    /// this monitor instead of the cursor screen; null keeps the legacy
+    /// cursor-based first placement.
+    /// </summary>
+    public string? WidgetDefaultBoundScreenId { get; set; }
+
+    /// <summary>
+    /// "新格子出现在"（spec D6/4.5）：CursorDisplay（默认）/ MainDisplay /
+    /// SpecificDisplay（目标为 <see cref="WidgetDefaultBoundScreenId"/>）。
+    /// 只决定创建落点，新格子归属 = 实际创建所在屏，不隐式固定。
+    /// </summary>
+    public string WidgetNewPlacementTarget { get; set; } = "CursorDisplay";
+
+    /// <summary>
+    /// "显示器断开时"（spec D3/4.5）：MoveToRemaining（默认，把它的格子移到
+    /// 其他显示器）/ CollapseToCapsule（收起为胶囊，重连后自动展开）。
+    /// </summary>
+    public string WidgetDisplayDisconnectBehavior { get; set; } = "MoveToRemaining";
 
     /// <summary>
     /// Replaces every member with <paramref name="other"/>'s values. The
@@ -84,6 +112,10 @@ public sealed class WidgetLayoutSettingsSlice
         WidgetGroupDefaultTitleDisplayMode = other.WidgetGroupDefaultTitleDisplayMode;
         WidgetGroupWheelSwitchEnabled = other.WidgetGroupWheelSwitchEnabled;
         WidgetGroupHoverSwitchEnabled = other.WidgetGroupHoverSwitchEnabled;
+        WidgetGroupSwitchAnimationStyle = other.WidgetGroupSwitchAnimationStyle;
         DeletedWidgetIds = other.DeletedWidgetIds;
+        WidgetDefaultBoundScreenId = other.WidgetDefaultBoundScreenId;
+        WidgetNewPlacementTarget = other.WidgetNewPlacementTarget;
+        WidgetDisplayDisconnectBehavior = other.WidgetDisplayDisconnectBehavior;
     }
 }

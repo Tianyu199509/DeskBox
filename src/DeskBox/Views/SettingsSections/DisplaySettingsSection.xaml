@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="utf-8"?>
+<UserControl
+    x:Class="DeskBox.Views.SettingsSections.DisplaySettingsSection"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:svc="using:DeskBox.Services"
+    xmlns:toolkit="using:CommunityToolkit.WinUI.Controls">
+
+    <UserControl.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="ms-appx:///Styles/SettingsOverviewResources.xaml" />
+            </ResourceDictionary.MergedDictionaries>
+        </ResourceDictionary>
+    </UserControl.Resources>
+
+    <!-- Stage-4 layout (spec 6.3): header + Identify, arrangement preview,
+         selected display card with "把所有格子移到这里", "新格子出现在",
+         "多显示器" expander with the disconnect behavior, per-widget rows.
+         Selection styling stays in code-behind (accent fill per R8). -->
+    <StackPanel Style="{StaticResource SectionPanelStyle}">
+        <InfoBar
+            x:Name="DisplaysStatusInfo"
+            IsClosable="True"
+            IsOpen="False" />
+
+        <toolkit:SettingsCard
+            x:Name="DisplaysOverviewCard"
+            HorizontalContentAlignment="Right"
+            svc:Localized.DescriptionKey="Settings.Displays.Description"
+            svc:Localized.HeaderKey="Settings.Displays.Title">
+            <toolkit:SettingsCard.HeaderIcon>
+                <FontIcon Glyph="&#xE7F4;" />
+            </toolkit:SettingsCard.HeaderIcon>
+            <Button
+                x:Name="IdentifyButton"
+                Click="IdentifyButton_Click"
+                svc:Localized.Key="Settings.Displays.Identify" />
+        </toolkit:SettingsCard>
+
+        <StackPanel x:Name="PreviewArea" Spacing="8">
+            <TextBlock
+                x:Name="PreviewHintText"
+                FontSize="12"
+                svc:Localized.Key="Settings.Displays.PreviewHint" />
+            <Viewbox
+                x:Name="PreviewViewbox"
+                MaxHeight="280"
+                HorizontalAlignment="Stretch"
+                Stretch="Uniform">
+                <Canvas x:Name="DisplayPreviewCanvas" />
+            </Viewbox>
+        </StackPanel>
+
+        <toolkit:SettingsCard
+            x:Name="ScreenDetailCard"
+            HorizontalContentAlignment="Right"
+            Visibility="Collapsed">
+            <toolkit:SettingsCard.HeaderIcon>
+                <FontIcon Glyph="&#xE7F4;" />
+            </toolkit:SettingsCard.HeaderIcon>
+            <Button
+                x:Name="MoveAllWidgetsButton"
+                Click="MoveAllWidgetsButton_Click"
+                svc:Localized.Key="Settings.Displays.MoveAll" />
+        </toolkit:SettingsCard>
+
+        <toolkit:SettingsCard
+            HorizontalContentAlignment="Right"
+            svc:Localized.DescriptionKey="Settings.Displays.NewWidgets.Description"
+            svc:Localized.HeaderKey="Settings.Displays.NewWidgets.Header">
+            <toolkit:SettingsCard.HeaderIcon>
+                <FontIcon Glyph="&#xE710;" />
+            </toolkit:SettingsCard.HeaderIcon>
+            <ComboBox
+                x:Name="NewPlacementCombo"
+                MinWidth="240"
+                SelectionChanged="NewPlacementCombo_SelectionChanged" />
+        </toolkit:SettingsCard>
+
+        <toolkit:SettingsExpander
+            HorizontalContentAlignment="Stretch"
+            svc:Localized.HeaderKey="Settings.Displays.MultipleDisplays.Header">
+            <toolkit:SettingsExpander.HeaderIcon>
+                <FontIcon Glyph="&#xE7F4;" />
+            </toolkit:SettingsExpander.HeaderIcon>
+            <toolkit:SettingsExpander.Items>
+                <toolkit:SettingsCard
+                    HorizontalContentAlignment="Right"
+                    svc:Localized.DescriptionKey="Settings.Displays.Disconnect.Description"
+                    svc:Localized.HeaderKey="Settings.Displays.Disconnect.Header">
+                    <ComboBox
+                        x:Name="DisconnectBehaviorCombo"
+                        MinWidth="240"
+                        SelectionChanged="DisconnectBehaviorCombo_SelectionChanged" />
+                </toolkit:SettingsCard>
+            </toolkit:SettingsExpander.Items>
+        </toolkit:SettingsExpander>
+
+        <StackPanel x:Name="WidgetListPanel" Spacing="6">
+            <TextBlock
+                Style="{StaticResource SettingsSubsectionTitleTextStyle}"
+                svc:Localized.Key="Settings.Displays.Widgets.SectionTitle" />
+            <StackPanel x:Name="WidgetBindingCards" Spacing="4" />
+        </StackPanel>
+    </StackPanel>
+</UserControl>

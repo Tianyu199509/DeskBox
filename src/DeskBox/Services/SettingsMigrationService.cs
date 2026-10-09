@@ -21,7 +21,7 @@ public interface ISettingsMigration
 public sealed class SettingsMigrationPipeline
 {
     /// <summary>The current schema version that the application expects.</summary>
-    public const int CurrentSchemaVersion = 11;
+    public const int CurrentSchemaVersion = 13;
 
     private readonly List<ISettingsMigration> _migrations = [];
 
@@ -39,6 +39,8 @@ public sealed class SettingsMigrationPipeline
         _migrations.Add(new Migration_8_To_9());
         _migrations.Add(new Migration_9_To_10());
         _migrations.Add(new Migration_10_To_11());
+        _migrations.Add(new Migration_11_To_12());
+        _migrations.Add(new Migration_12_To_13());
     }
 
     /// <summary>
@@ -371,6 +373,323 @@ internal sealed class Migration_10_To_11 : ISettingsMigration
 
     public void Migrate(AppSettings settings)
     {
+    }
+}
+
+/// <summary>
+/// Schema v12 introduces the screen-home model (spec 7.1): infers a home
+/// display for every surface, stamps profile entries with authority, syncs
+/// capsule monitor fields to their surfaces, and derives the new-widget
+/// placement target from the legacy default-screen setting. Pure data — no
+/// Win32/display access.
+/// </summary>
+internal sealed class Migration_11_To_12 : ISettingsMigration
+{
+    public int FromVersion => 11;
+
+    public void Migrate(AppSettings settings)
+    {
+        settings.WidgetGroups ??= [];
+        settings.WidgetTopologyLayouts ??= [];
+
+        // 1. Infer homes: standalone widgets and group surfaces first, then
+        // mirror into group members.
+        foreach (WidgetConfig widget in settings.Widgets)
+        {
+            if (widget.ScreenBindingMode == WidgetScreenBindingMode.FollowPrimary)
+            {
+                continue;
+            }
+
+            if (widget.ScreenBindingMode == WidgetScreenBindingMode.Pinned &&
+                !IsDegenerateId(widget.BoundScreenId))
+            {
+                continue;
+            }
+
+            string? inferred = InferHomeFromProfiles(settings, widget.Id) ??
+                NonDegenerateId(widget.PositionMonitorStableId);
+            if (inferred is not null)
+            {
+                widget.ScreenBindingMode = WidgetScreenBindingMode.Pinned;
+                widget.BoundScreenId = inferred;
+            }
+            else
+            {
+                widget.ScreenBindingMode = WidgetScreenBindingMode.Unbound;
+                widget.BoundScreenId = null;
+            }
+        }
+
+        foreach (WidgetGroupConfig group in settings.WidgetGroups)
+        {
+            if (group.ScreenBindingMode == WidgetScreenBindingMode.Pinned &&
+                !IsDegenerateId(group.BoundScreenId))
+            {
+                continue;
+            }
+
+            // Group profile entries are keyed by the group surface id, not
+            // member ids — try both, surface id first.
+            string? inferred = InferHomeFromProfiles(settings, group.SurfaceId) ??
+                (group.MemberIds.FirstOrDefault() is { } representativeId
+                    ? InferHomeFromProfiles(settings, representativeId)
+                    : null);
+            if (inferred is not null)
+            {
+                group.ScreenBindingMode = WidgetScreenBindingMode.Pinned;
+                group.BoundScreenId = inferred;
+            }
+        }
+
+        foreach (WidgetGroupConfig group in settings.WidgetGroups)
+        {
+            foreach (string memberId in group.MemberIds)
+            {
+                if (settings.Widgets.FirstOrDefault(widget =>
+                        string.Equals(widget.Id, memberId, StringComparison.Ordinal)) is { } member)
+                {
+                    member.ScreenBindingMode = group.ScreenBindingMode;
+                    member.BoundScreenId = group.BoundScreenId;
+                }
+            }
+        }
+
+        // FollowPrimary surfaces never keep a stale bound id.
+        foreach (WidgetConfig widget in settings.Widgets)
+        {
+            if (widget.ScreenBindingMode == WidgetScreenBindingMode.FollowPrimary)
+            {
+                widget.BoundScreenId = null;
+            }
+        }
+
+        // 2. Profile entry authority + 3. capsule field sync.
+        foreach (WidgetTopologyLayoutProfile profile in settings.WidgetTopologyLayouts.Values)
+        {
+            foreach ((string surfaceId, WidgetSurfaceLayoutProfile entry) in profile.Surfaces)
+            {
+                string? home = HomeOfSurface(settings, surfaceId);
+                entry.IsAuthoritative = entry.IsAuthoritative == true ||
+                    (home is not null &&
+                     string.Equals(
+                         NonDegenerateId(entry.PositionMonitorStableId),
+                         home,
+                         StringComparison.OrdinalIgnoreCase));
+                entry.AuthoredAtUtc ??= profile.LastUsedAtUtc;
+
+                // Binding intent is topology-independent and profile switches
+                // must carry it verbatim: mirror the home inferred in step 1
+                // into the entry so the first topology projection after
+                // upgrade does not fall back to heuristics (an entry pin
+                // outranks every heuristic in SelectTargetMonitor).
+                if (home is not null)
+                {
+                    entry.ScreenBindingMode = WidgetScreenBindingMode.Pinned;
+                    entry.BoundScreenId = home;
+                }
+
+                if (entry.CompactPlacement is { } compact)
+                {
+                    compact.PositionMonitorKey = entry.PositionMonitorKey;
+                    compact.PositionMonitorDeviceName = entry.PositionMonitorDeviceName;
+                    compact.PositionMonitorStableId = entry.PositionMonitorStableId;
+                    compact.PositionMonitorWasPrimary = entry.PositionMonitorWasPrimary;
+                }
+            }
+        }
+
+        foreach (WidgetConfig widget in settings.Widgets)
+        {
+            if (widget.CompactPlacement is { } compact)
+            {
+                compact.PositionMonitorKey = widget.PositionMonitorKey;
+                compact.PositionMonitorDeviceName = widget.PositionMonitorDeviceName;
+                compact.PositionMonitorStableId = widget.PositionMonitorStableId;
+                compact.PositionMonitorWasPrimary = widget.PositionMonitorWasPrimary;
+            }
+        }
+
+        // 4. New-widget placement target derives from the legacy default
+        // screen setting; 5. disconnect behavior keeps its default.
+        settings.WidgetNewPlacementTarget = string.IsNullOrWhiteSpace(
+            settings.WidgetDefaultBoundScreenId)
+            ? SettingsService.WidgetNewPlacementCursorDisplay
+            : SettingsService.WidgetNewPlacementSpecificDisplay;
+    }
+
+    private static string? HomeOfSurface(AppSettings settings, string surfaceId)
+    {
+        foreach (WidgetConfig widget in settings.Widgets)
+        {
+            if (string.Equals(widget.Id, surfaceId, StringComparison.Ordinal) &&
+                widget.ScreenBindingMode == WidgetScreenBindingMode.Pinned)
+            {
+                return NonDegenerateId(widget.BoundScreenId);
+            }
+        }
+
+        foreach (WidgetGroupConfig group in settings.WidgetGroups)
+        {
+            if (group.ScreenBindingMode == WidgetScreenBindingMode.Pinned &&
+                string.Equals(group.SurfaceId, surfaceId, StringComparison.Ordinal))
+            {
+                return NonDegenerateId(group.BoundScreenId);
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// The home for an Unbound surface: its entry in the profile with the
+    /// most monitors (positions captured with the fullest display set are
+    /// the most likely to be user-chosen), falling back to its config
+    /// identity field.
+    /// </summary>
+    private static string? InferHomeFromProfiles(AppSettings settings, string surfaceId)
+    {
+        WidgetSurfaceLayoutProfile? best = null;
+        int bestMonitorCount = -1;
+        DateTimeOffset bestUsedAt = DateTimeOffset.MinValue;
+        foreach (WidgetTopologyLayoutProfile profile in settings.WidgetTopologyLayouts.Values)
+        {
+            if (!profile.Surfaces.TryGetValue(surfaceId, out WidgetSurfaceLayoutProfile? entry) ||
+                entry is null)
+            {
+                continue;
+            }
+
+            int monitorCount = profile.Monitors?.Count ?? 0;
+            if (monitorCount > bestMonitorCount ||
+                (monitorCount == bestMonitorCount && profile.LastUsedAtUtc > bestUsedAt))
+            {
+                bestMonitorCount = monitorCount;
+                bestUsedAt = profile.LastUsedAtUtc;
+                best = entry;
+            }
+        }
+
+        return NonDegenerateId(best?.PositionMonitorStableId);
+    }
+
+    private static bool IsDegenerateId(string? stableId) =>
+        string.IsNullOrWhiteSpace(stableId) ||
+        stableId.Trim().Equals("unknown-display", StringComparison.OrdinalIgnoreCase) ||
+        stableId.Trim().StartsWith(@"\\.\DISPLAY", StringComparison.OrdinalIgnoreCase);
+
+    private static string? NonDegenerateId(string? stableId) =>
+        IsDegenerateId(stableId) ? null : stableId!.Trim();
+}
+
+/// <summary>
+/// Schema v13 rewrites topology profile keys to v4 (display identity set
+/// only, spec 7.2): each stored profile's key is recomputed from its
+/// persisted Monitors; profiles collapsing onto the same v4 key merge
+/// (newest LastUsedAtUtc wins, ties broken by v3 key ordinal; missing
+/// surfaces filled from sibling profiles' newest authoritative entries).
+/// Profiles with empty or all-degenerate Monitors are dropped — their v4
+/// key would collide (the empty set).
+/// </summary>
+internal sealed class Migration_12_To_13 : ISettingsMigration
+{
+    public int FromVersion => 12;
+
+    public void Migrate(AppSettings settings)
+    {
+        if (settings.WidgetTopologyLayouts.Count == 0)
+        {
+            return;
+        }
+
+        var merged = new Dictionary<string, WidgetTopologyLayoutProfile>(StringComparer.Ordinal);
+        foreach ((string key, WidgetTopologyLayoutProfile? profile) in
+                 settings.WidgetTopologyLayouts.Where(pair => pair.Value is not null)
+                     .OrderBy(pair => pair.Key, StringComparer.Ordinal))
+        {
+            if (profile!.Monitors is not { Count: > 0 })
+            {
+                continue;
+            }
+
+            string v4Key = ComputeV4Key(profile.Monitors);
+            if (!merged.TryGetValue(v4Key, out WidgetTopologyLayoutProfile? target))
+            {
+                profile.Monitors = profile.Monitors.ToList();
+                merged[v4Key] = profile;
+                continue;
+            }
+
+            // Same identity set: keep the newest usage as the base, merge
+            // missing surfaces from the sibling's authoritative entries.
+            WidgetTopologyLayoutProfile older;
+            if (profile.LastUsedAtUtc <= target.LastUsedAtUtc)
+            {
+                older = profile;
+            }
+            else
+            {
+                // Incoming profile is newer: it becomes the base and must
+                // receive the previous base's unique surfaces — reassign
+                // target, otherwise the merge loop below would compare the
+                // old base against itself and silently drop those entries.
+                older = target;
+                merged[v4Key] = profile;
+                target = profile;
+            }
+            foreach ((string surfaceId, WidgetSurfaceLayoutProfile? siblingEntry) in older.Surfaces)
+            {
+                if (!target.Surfaces.ContainsKey(surfaceId) && siblingEntry is not null)
+                {
+                    target.Surfaces[surfaceId] = siblingEntry;
+                }
+            }
+
+            target.Monitors = target.Monitors.Count >= older.Monitors.Count
+                ? target.Monitors
+                : older.Monitors.ToList();
+        }
+
+        string? activeKey = settings.ActiveWidgetTopologyKey;
+        string? remappedActiveKey = null;
+        if (activeKey is not null &&
+            settings.WidgetTopologyLayouts.TryGetValue(activeKey, out WidgetTopologyLayoutProfile? activeProfile) &&
+            activeProfile is not null &&
+            activeProfile.Monitors is { Count: > 0 })
+        {
+            remappedActiveKey = ComputeV4Key(activeProfile.Monitors);
+        }
+
+        settings.WidgetTopologyLayouts = merged;
+        settings.ActiveWidgetTopologyKey =
+            remappedActiveKey is not null && merged.ContainsKey(remappedActiveKey)
+                ? remappedActiveKey
+                : null;
+    }
+
+    private static string ComputeV4Key(IReadOnlyList<WidgetTopologyMonitorProfile> monitors)
+    {
+        IEnumerable<string> tokens = monitors
+            .Select(monitor => MonitorToken(monitor))
+            .OrderBy(token => token, StringComparer.Ordinal);
+        byte[] hash = System.Security.Cryptography.SHA256.HashData(
+            System.Text.Encoding.UTF8.GetBytes(string.Join("|", tokens)));
+        return "v4-" + Convert.ToHexString(hash.AsSpan(0, 12));
+    }
+
+    private static string MonitorToken(WidgetTopologyMonitorProfile monitor)
+    {
+        string? stableId = string.IsNullOrWhiteSpace(monitor.StableId)
+            ? null
+            : monitor.StableId.Trim();
+        if (stableId is null ||
+            stableId.Equals("unknown-display", StringComparison.OrdinalIgnoreCase) ||
+            stableId.StartsWith(@"\\.\DISPLAY", StringComparison.OrdinalIgnoreCase))
+        {
+            return $"geo:{Math.Max(1, monitor.MonitorWidth)}x{Math.Max(1, monitor.MonitorHeight)}";
+        }
+
+        return stableId.ToUpperInvariant();
     }
 }
 

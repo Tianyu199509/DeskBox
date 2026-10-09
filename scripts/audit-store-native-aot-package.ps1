@@ -198,7 +198,7 @@ if ($null -eq $application -or $application.Executable -ne "DeskBox.exe") {
     Add-AuditFailure "The package application does not target DeskBox.exe."
 }
 if ($null -eq $frameworkDependency -or
-    [version]$frameworkDependency.MinVersion -lt [version]"2.4.0.0") {
+    [version]$frameworkDependency.MinVersion -lt [version]"2.5.1.0") {
     Add-AuditFailure "The Microsoft.WindowsAppRuntime.2 framework dependency is missing or too old."
 }
 
@@ -368,6 +368,40 @@ if (-not [string]::IsNullOrWhiteSpace($AppxSymPath)) {
     }
 }
 
+function Get-WorkingTreeSnapshot {
+    $commit = (& git -C $repoRoot rev-parse HEAD).Trim()
+    if ($LASTEXITCODE -ne 0) {
+        throw "Unable to resolve the repository commit."
+    }
+
+    $status = (& git -C $repoRoot status --porcelain=v1 --untracked-files=all) -join "`n"
+    if ($LASTEXITCODE -ne 0) {
+        throw "Unable to capture the repository status."
+    }
+
+    $diff = (& git -C $repoRoot diff --no-ext-diff --binary HEAD) -join "`n"
+    if ($LASTEXITCODE -ne 0) {
+        throw "Unable to capture the repository diff."
+    }
+
+    [pscustomobject]@{
+        GitCommit = $commit
+        GitDirty = -not [string]::IsNullOrWhiteSpace($status)
+        StatusEntries = @($status -split "`n" | Where-Object { $_ })
+    }
+}
+
+# Reproducibility evidence: the store pipeline has no direct-publish twin of
+# the retail chain's tree fingerprint, so the audit records it here. Git being
+# unavailable must not fail the package audit itself.
+$workingTree = $null
+try {
+    $workingTree = Get-WorkingTreeSnapshot
+}
+catch {
+    Write-Warning "Working-tree snapshot unavailable: $($_.Exception.Message)"
+}
+
 $summary = [ordered]@{
     schemaVersion = 1
     status = if ($failures.Count -eq 0) { "passed" } else { "failed" }
@@ -377,6 +411,7 @@ $summary = [ordered]@{
     msixBytes = (Get-Item -LiteralPath $resolvedMsix).Length
     msixSha256 = Get-FileSha256 -Path $resolvedMsix
     makeAppxPath = $makeAppx
+    workingTree = $workingTree
     fileCount = $fileEntries.Count
     identity = if ($null -eq $identity) { $null } else {
         [ordered]@{

@@ -60,6 +60,29 @@ public sealed class WidgetSurfaceLayoutProfile
 {
     public string? PositionMonitorStableId { get; set; }
 
+    /// <summary>
+    /// Monitor binding intent carried through profiles unchanged. Binding is
+    /// topology-independent user intent, so profile switches reposition but
+    /// never rebind the surface.
+    /// </summary>
+    [JsonConverter(typeof(WidgetScreenBindingModeJsonConverter))]
+    public WidgetScreenBindingMode ScreenBindingMode { get; set; } = WidgetScreenBindingMode.Unbound;
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? BoundScreenId { get; set; }
+
+    /// <summary>
+    /// True when this entry records a placement the user made by hand (or the
+    /// initial layout captured on first run). Seeded/projected entries stay
+    /// false; captures never promote, they only preserve an existing flag.
+    /// Seeding prefers the newest authoritative entry for a surface.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? IsAuthoritative { get; set; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public DateTimeOffset? AuthoredAtUtc { get; set; }
+
     public double X { get; set; }
 
     public double Y { get; set; }

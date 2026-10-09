@@ -46,7 +46,9 @@ internal static unsafe class StorageMigrationNativeMethods
         if (find == new IntPtr(-1))
         {
             int error = Marshal.GetLastWin32Error();
-            if (error == 38) return result; // Empty file/directory without a data stream.
+            // 38: no named data stream. 87 (invalid parameter): FAT32/exFAT
+            // volumes do not support the stream enumeration at all.
+            if (error is 38 or 87) return result;
             throw new IOException($"Cannot inspect file streams: '{path}'.", new Win32Exception(error));
         }
         try

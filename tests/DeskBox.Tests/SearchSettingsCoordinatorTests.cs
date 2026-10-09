@@ -310,6 +310,7 @@ public sealed class SearchSettingsCoordinatorTests : IAsyncLifetime
         public GlobalHotkeyGesture CurrentGesture => new(
             (HotkeyModifierKeys)settings.Settings.Search.SearchHotkeyModifiers, settings.Settings.Search.SearchHotkeyKey);
         public void SetEnabled(bool enabled) => settings.Settings.Search.SearchHotkeyEnabled = enabled;
+        public bool IsGestureOwnedByMainHotkey(GlobalHotkeyGesture gesture) => false;
         public bool TryApplyGesture(GlobalHotkeyGesture gesture, out string? error)
         {
             error = RejectGesture ? "already-owned" : null;

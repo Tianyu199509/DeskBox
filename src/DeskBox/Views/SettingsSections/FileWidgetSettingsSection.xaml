@@ -18,29 +18,25 @@
     <StackPanel Style="{StaticResource SectionPanelStyle}">
         <TextBlock Style="{StaticResource SectionTitleTextStyle}" svc:Localized.Key="Settings.Appearance.DetailTitle" />
         <StackPanel x:Name="SectionCardsPanel" Margin="0,8,0,0" Spacing="4">
-            <Border Style="{StaticResource SettingsGroupStyle}">
-                <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="12" Margin="4">
-                    <Button Grid.Column="0" Click="NestedSettingsButton_Click" Style="{StaticResource DrillDownRowStyle}" Tag="DesktopOrganizationSettings">
-                        <Grid ColumnDefinitions="Auto,*" Style="{StaticResource SettingCardIdentityGridStyle}">
-                            <FontIcon Grid.Column="0" FontSize="18" Glyph="&#xE74C;" IsHitTestVisible="False" VerticalAlignment="Center" />
-                            <StackPanel Grid.Column="1" IsHitTestVisible="False" Spacing="3" VerticalAlignment="Center">
-                                <TextBlock Style="{StaticResource SettingTitleTextStyle}" svc:Localized.Key="DesktopOrganization.Settings.Title" />
-                                <TextBlock Style="{StaticResource SettingDescriptionTextStyle}" svc:Localized.Key="DesktopOrganization.Settings.EntryDescription" />
-                            </StackPanel>
-                        </Grid>
-                    </Button>
-                    <Button
-                        Grid.Column="1"
-                        Click="OrganizeDesktopButton_Click"
-                        Style="{StaticResource AccentButtonStyle}">
+            <toolkit:SettingsCard
+                Click="NestedSettingsButton_Click"
+                HorizontalContentAlignment="Right"
+                IsClickEnabled="True"
+                Tag="DesktopOrganizationSettings"
+                svc:Localized.DescriptionKey="DesktopOrganization.Settings.EntryDescription"
+                svc:Localized.HeaderKey="DesktopOrganization.Settings.Title">
+                <toolkit:SettingsCard.HeaderIcon>
+                    <FontIcon Glyph="&#xE74C;" />
+                </toolkit:SettingsCard.HeaderIcon>
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <Button Click="OrganizeDesktopButton_Click" Style="{StaticResource AccentButtonStyle}">
                         <StackPanel Orientation="Horizontal" Spacing="6">
                             <FontIcon FontSize="13" Glyph="&#xE74C;" />
                             <TextBlock svc:Localized.Key="DesktopOrganization.Settings.StartAction" />
                         </StackPanel>
                     </Button>
-                    <FontIcon Grid.Column="2" FontSize="12" Glyph="&#xE76C;" IsHitTestVisible="False" VerticalAlignment="Center" />
-                </Grid>
-            </Border>
+                </StackPanel>
+            </toolkit:SettingsCard>
 
             <toolkit:SettingsCard
                 Click="NestedSettingsButton_Click"
@@ -51,30 +47,24 @@
                 <toolkit:SettingsCard.HeaderIcon>
                     <FontIcon Glyph="&#xE8A5;" />
                 </toolkit:SettingsCard.HeaderIcon>
-                <FontIcon FontSize="12" Glyph="&#xE76C;" />
             </toolkit:SettingsCard>
 
-            <Border Style="{StaticResource SettingsGroupStyle}">
-                <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="12" Margin="4">
-                    <Button Grid.Column="0" Click="NestedSettingsButton_Click" Style="{StaticResource DrillDownRowStyle}" Tag="FileStackSettings">
-                        <Grid ColumnDefinitions="Auto,*" Style="{StaticResource SettingCardIdentityGridStyle}">
-                            <FontIcon Grid.Column="0" FontSize="18" Glyph="&#xE81E;" IsHitTestVisible="False" VerticalAlignment="Center" />
-                            <StackPanel Grid.Column="1" IsHitTestVisible="False" Spacing="3" VerticalAlignment="Center">
-                                <TextBlock Style="{StaticResource SettingTitleTextStyle}" svc:Localized.Key="Settings.FileStacks.Title" />
-                                <TextBlock Style="{StaticResource SettingDescriptionTextStyle}" Text="{x:Bind FileStack.SettingsSummaryText, Mode=OneWay}" />
-                            </StackPanel>
-                        </Grid>
-                    </Button>
-                    <ToggleSwitch
-                        Grid.Column="1"
-                        MinWidth="0"
-                        VerticalAlignment="Center"
-                        OnContent=""
-                        OffContent=""
-                        IsOn="{x:Bind FileStack.StacksEnabled, Mode=TwoWay}" />
-                    <FontIcon Grid.Column="2" FontSize="12" Glyph="&#xE76C;" IsHitTestVisible="False" VerticalAlignment="Center" />
-                </Grid>
-            </Border>
+            <toolkit:SettingsCard
+                Click="NestedSettingsButton_Click"
+                Description="{x:Bind FileStack.SettingsSummaryText, Mode=OneWay}"
+                HorizontalContentAlignment="Right"
+                IsClickEnabled="True"
+                Tag="FileStackSettings"
+                svc:Localized.HeaderKey="Settings.FileStacks.Title">
+                <toolkit:SettingsCard.HeaderIcon>
+                    <FontIcon Glyph="&#xE81E;" />
+                </toolkit:SettingsCard.HeaderIcon>
+                <ToggleSwitch
+                    MinWidth="0"
+                    OnContent=""
+                    OffContent=""
+                    IsOn="{x:Bind FileStack.StacksEnabled, Mode=TwoWay}" />
+            </toolkit:SettingsCard>
 
             <toolkit:SettingsCard
                 HorizontalContentAlignment="Right"

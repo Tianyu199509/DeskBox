@@ -211,7 +211,7 @@ public sealed class AotPublishContractTests
         using JsonDocument globalJson = JsonDocument.Parse(
             File.ReadAllText(TestPaths.FromRepository("global.json")));
         JsonElement sdk = globalJson.RootElement.GetProperty("sdk");
-        Assert.Equal("10.0.303", sdk.GetProperty("version").GetString());
+        Assert.Equal("10.0.401", sdk.GetProperty("version").GetString());
         Assert.Equal("latestPatch", sdk.GetProperty("rollForward").GetString());
 
         string rustToolchain = File.ReadAllText(TestPaths.FromRepository("rust-toolchain.toml"));

@@ -1,3 +1,4 @@
+using DeskBox.Models;
 using DeskBox.Services;
 
 namespace DeskBox.Tests;
@@ -8,33 +9,35 @@ public sealed class GlobalHotkeySafetyContractTests
     public void SettingsExposeExplicitPresetsAndPersistentSystemOverrideWarning()
     {
         string xaml = Read("src/DeskBox/Views/SettingsWindow.xaml");
-        string settingsWindow = Read("src/DeskBox/Views/SettingsWindow.xaml.cs");
         string hotkeyCode = Read("src/DeskBox/Views/SettingsWindow.HotkeyAndAppearance.cs");
-        string presetButtons = Slice(
-            xaml,
-            "x:Name=\"GlobalHotkeyPresetButtonsPanel\"",
-            "</StackPanel>");
+        string dialogCode = Read("src/DeskBox/Views/Dialogs/HotkeyRecorderDialog.xaml.cs");
+        string dialogXaml = Read("src/DeskBox/Views/Dialogs/HotkeyRecorderDialog.xaml");
 
         Assert.Contains("x:Name=\"GlobalHotkeyCaptureButton\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("x:Name=\"GlobalHotkeyPresetButtonsPanel\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("x:Name=\"GlobalHotkeyPresetF7Button\"", presetButtons, StringComparison.Ordinal);
-        Assert.Contains("x:Name=\"GlobalHotkeyPresetDoubleControlButton\"", presetButtons, StringComparison.Ordinal);
-        Assert.Contains("x:Name=\"GlobalHotkeyPresetAltSpaceButton\"", presetButtons, StringComparison.Ordinal);
-        Assert.Contains("x:Name=\"GlobalHotkeyPresetWinSpaceButton\"", presetButtons, StringComparison.Ordinal);
-        Assert.Contains("x:Name=\"GlobalHotkeyPresetWindowsTapButton\"", presetButtons, StringComparison.Ordinal);
-        Assert.Contains("x:Name=\"GlobalHotkeyPresetCopilotKeyButton\"", presetButtons, StringComparison.Ordinal);
-        Assert.Contains("Settings.GlobalHotkey.PresetsTitle", xaml, StringComparison.Ordinal);
-        Assert.DoesNotContain("Settings.GlobalHotkey.PresetsDescription", xaml, StringComparison.Ordinal);
-        Assert.DoesNotContain("Settings.GlobalHotkey.RecommendedTitle", xaml, StringComparison.Ordinal);
-        Assert.DoesNotContain("Settings.GlobalHotkey.SystemTitle", xaml, StringComparison.Ordinal);
         Assert.Contains("x:Name=\"GlobalHotkeyCustomRow\"", xaml, StringComparison.Ordinal);
         Assert.Contains("x:Name=\"DesktopDoubleClickToggle\"", xaml, StringComparison.Ordinal);
         Assert.Contains("x:Name=\"GlobalHotkeyReservedWarning\"", xaml, StringComparison.Ordinal);
         Assert.Contains("CanShowHotkeyWarning", xaml, StringComparison.Ordinal);
-        Assert.Contains("WmReservedHotkeyCapture", settingsWindow, StringComparison.Ordinal);
-        Assert.Contains("_hotkeyRecordingHook.TryStart", hotkeyCode, StringComparison.Ordinal);
-        Assert.Contains("_hotkeyRecordingHook.Stop", hotkeyCode, StringComparison.Ordinal);
-        Assert.Contains("IsInternalMaskKey", hotkeyCode, StringComparison.Ordinal);
+
+        // The preset list lives inside the shared recorder dialog now: all six
+        // presets ride through the dialog's preset panel.
+        Assert.Contains("Settings.GlobalHotkey.Preset.F7", hotkeyCode, StringComparison.Ordinal);
+        Assert.Contains("Settings.GlobalHotkey.Preset.DoubleControl", hotkeyCode, StringComparison.Ordinal);
+        Assert.Contains("Settings.GlobalHotkey.Preset.AltSpace", hotkeyCode, StringComparison.Ordinal);
+        Assert.Contains("Settings.GlobalHotkey.Preset.WinSpace", hotkeyCode, StringComparison.Ordinal);
+        Assert.Contains("Settings.GlobalHotkey.Preset.WindowsTap", hotkeyCode, StringComparison.Ordinal);
+        Assert.Contains("Settings.GlobalHotkey.Preset.CopilotKey", hotkeyCode, StringComparison.Ordinal);
+        Assert.Contains("HotkeyRecorderDialog.Scope.Global", hotkeyCode, StringComparison.Ordinal);
+        Assert.Contains("Settings.GlobalHotkey.PresetsTitle", dialogCode, StringComparison.Ordinal);
+        Assert.DoesNotContain("Settings.GlobalHotkey.PresetsDescription", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("Settings.GlobalHotkey.RecommendedTitle", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("Settings.GlobalHotkey.SystemTitle", xaml, StringComparison.Ordinal);
+
+        // Recording rides the dedicated low-level hook dialog: registrations
+        // suspend while it is open and restore on close.
+        Assert.Contains("SuspendForRecording", dialogCode, StringComparison.Ordinal);
+        Assert.Contains("ResumeAfterRecording", dialogCode, StringComparison.Ordinal);
+        Assert.Contains("x:Name=\"ErrorInfoBar\"", dialogXaml, StringComparison.Ordinal);
         Assert.DoesNotContain("UseWinSpaceHotkeyButton_Click", hotkeyCode, StringComparison.Ordinal);
     }
 
@@ -44,7 +47,6 @@ public sealed class GlobalHotkeySafetyContractTests
         string search = Read("src/DeskBox/Services/SearchHotkeyService.cs");
         string global = Read("src/DeskBox/Services/GlobalHotkeyService.cs");
         string settingsService = Read("src/DeskBox/Services/SettingsService.cs");
-        string sectionXaml = Read("src/DeskBox/Views/SettingsSections/SearchSettingsSection.xaml");
         string sectionCode = Read("src/DeskBox/Views/SettingsSections/SearchSettingsSection.xaml.cs");
 
         // The Alt+Space search preset must reuse the opt-in reserved hook, not
@@ -73,12 +75,13 @@ public sealed class GlobalHotkeySafetyContractTests
             "private static bool NormalizeSearchSettings");
         Assert.Contains("GlobalHotkeyActivationKind", normalize, StringComparison.Ordinal);
 
-        Assert.Contains(
-            "x:Name=\"SearchHotkeyPresetAltSpaceButton\"",
-            sectionXaml,
-            StringComparison.Ordinal);
-        Assert.Contains("Settings.GlobalHotkey.AltSpaceWarning", sectionCode, StringComparison.Ordinal);
-        Assert.Contains("ConfirmSearchReservedHotkeyOverrideAsync", sectionCode, StringComparison.Ordinal);
+        // The Alt+Space preset is offered inside the shared recorder dialog
+        // for the search scope, and the dialog surfaces the same system-menu
+        // override warning the legacy confirmation carried.
+        string dialogCode = Read("src/DeskBox/Views/Dialogs/HotkeyRecorderDialog.xaml.cs");
+        Assert.Contains("SearchSettingsViewModel.AltSpaceGesture", sectionCode, StringComparison.Ordinal);
+        Assert.Contains("HotkeyRecorderDialog.Scope.Search", sectionCode, StringComparison.Ordinal);
+        Assert.Contains("Settings.GlobalHotkey.AltSpaceWarning", dialogCode, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -92,10 +95,10 @@ public sealed class GlobalHotkeySafetyContractTests
             Slice(serviceCode, "public static string FormatGesture", "private IntPtr WindowSubclassProc"),
             StringComparison.Ordinal);
         Assert.Contains(
-            "\"CopilotKey\" => GlobalHotkeyActivation.FromChord(GlobalHotkeyService.CopilotKeyGesture)",
+            "GlobalHotkeyActivation.FromChord(GlobalHotkeyService.CopilotKeyGesture)",
             hotkeyCode,
             StringComparison.Ordinal);
-        Assert.Contains("GlobalHotkeyPresetCopilotKeyButton.IsChecked", hotkeyCode, StringComparison.Ordinal);
+        Assert.Contains("Settings.GlobalHotkey.Preset.CopilotKey", hotkeyCode, StringComparison.Ordinal);
 
         // The Copilot preset must keep riding the standard RegisterHotKey path:
         // a reserved-hook mode would make it depend on the low-level hook.
@@ -107,19 +110,20 @@ public sealed class GlobalHotkeySafetyContractTests
     }
 
     [Fact]
-    public void SettingsRecorder_IgnoresReservedHookMaskKey()
+    public void Recorder_IgnoresReservedHookMaskKeyAndInjectedInput()
     {
         Assert.True(ReservedHotkeyHookService.IsInternalMaskKey(0xE8));
         Assert.False(ReservedHotkeyHookService.IsInternalMaskKey(0x20));
 
-        string settingsSource = Read("src/DeskBox/Views/SettingsWindow.HotkeyAndAppearance.cs");
-        string settingsHandler = Slice(
-            settingsSource,
-            "private void GlobalHotkeyCaptureButton_KeyDown",
-            "private void GlobalHotkeyCaptureButton_LostFocus");
-        Assert.True(
-            settingsHandler.IndexOf("IsInternalMaskKey", StringComparison.Ordinal) <
-            settingsHandler.IndexOf("ApplyRecordedHotkeyAsync", StringComparison.Ordinal));
+        // The recording session never turns the reserved hook's synthetic mask
+        // key into a captured chord.
+        var session = new HotkeyRecordingSession();
+        session.ProcessKey(0xE8, isKeyDown: true);
+        Assert.False(session.HasGesture);
+
+        // Injected events are dropped inside the capture hook itself.
+        string hook = Read("src/DeskBox/Services/HotkeyRecorderHookService.cs");
+        Assert.Contains("LLKHF_INJECTED", hook, StringComparison.Ordinal);
     }
 
     [Fact]

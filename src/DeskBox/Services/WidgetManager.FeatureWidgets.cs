@@ -3,6 +3,7 @@
 using DeskBox.Models;
 using DeskBox.Helpers;
 using DeskBox.Controls.WidgetContents;
+using DeskBox.Platform;
 using DeskBox.ViewModels;
 using DeskBox.Views;
 using Microsoft.UI.Dispatching;
@@ -43,9 +44,9 @@ public sealed partial class WidgetManager
 
     private void ApplyFeatureWidgetEnabledState(WidgetKind kind, bool enabled)
     {
-        if (App.UiDispatcherQueue is { } dispatcherQueue && !dispatcherQueue.HasThreadAccess)
+        if (!UiDispatch.HasAccess)
         {
-            dispatcherQueue.TryEnqueue(() => ApplyFeatureWidgetEnabledState(kind, enabled));
+            UiDispatch.RunOrDefer(() => ApplyFeatureWidgetEnabledState(kind, enabled));
             return;
         }
 
@@ -93,6 +94,7 @@ public sealed partial class WidgetManager
                 Width = _settingsService.Settings.DefaultWidgetWidth,
                 Height = _settingsService.Settings.DefaultWidgetHeight
             };
+            ApplyNewWidgetPlacement(config);
             _settingsService.Settings.Widgets.Add(config);
         }
 
@@ -153,7 +155,7 @@ public sealed partial class WidgetManager
             Height = Math.Max(_settingsService.Settings.DefaultWidgetHeight, 420)
         };
 
-        MarkNeedsInitialPlacementIfDisplayUnusable(config);
+        ApplyNewWidgetPlacement(config);
         _settingsService.Settings.Widgets.Add(config);
         await _settingsService.SaveAsync();
         await TryAdoptOrphanedTodoStoreAsync(config);
@@ -435,7 +437,7 @@ public sealed partial class WidgetManager
         };
         ApplyDefaultFeatureWidgetChromeMode(config, kind);
 
-        MarkNeedsInitialPlacementIfDisplayUnusable(config);
+        ApplyNewWidgetPlacement(config);
         _settingsService.Settings.Widgets.Add(config);
         await _settingsService.SaveAsync();
 
@@ -504,7 +506,7 @@ public sealed partial class WidgetManager
             : await GlanceWidgetStore.ForWidget(sourceConfig.Id).LoadAsync();
         await GlanceWidgetStore.ForWidget(config.Id).SaveAsync(data);
 
-        MarkNeedsInitialPlacementIfDisplayUnusable(config);
+        ApplyNewWidgetPlacement(config);
         _settingsService.Settings.Widgets.Add(config);
         await _settingsService.SaveAsync();
 
@@ -978,6 +980,16 @@ public sealed partial class WidgetManager
 
     internal async Task<IDesktopWidgetWindow?> CreateOrShowFeatureWidgetAsync(WidgetKind kind)
     {
+        if (!UiDispatch.HasXamlApp)
+        {
+            // Test hosts: no XAML Application exists, so window creation
+            // cannot succeed. Skip instead of attempting it on the inline
+            // fiction thread (which produced swallowed RPC_E_WRONG_THREAD
+            // noise in the user log).
+            App.LogVerbose($"[WidgetManager] CreateOrShowFeatureWidget skipped (no XAML app): kind={kind}");
+            return null;
+        }
+
         if (!HasUiThreadAccess())
         {
             return await RunOnUiThreadAsync(() => CreateOrShowFeatureWidgetAsync(kind));
@@ -1159,6 +1171,7 @@ public sealed partial class WidgetManager
             if (config is null)
             {
                 config = CreateDefaultFeatureWidgetConfig(kind, isEnabled: false);
+                ApplyNewWidgetPlacement(config);
                 _settingsService.Settings.Widgets.Add(config);
             }
             else
@@ -1217,7 +1230,10 @@ public sealed partial class WidgetManager
         config.PositionMarginY = 0;
         config.PositionMonitorKey = null;
         config.PositionMonitorDeviceName = null;
+        config.PositionMonitorStableId = null;
         config.PositionMonitorWasPrimary = null;
+        config.ScreenBindingMode = WidgetScreenBindingMode.Unbound;
+        config.BoundScreenId = null;
         config.BoundsCoordinateVersion = WidgetConfig.CurrentBoundsCoordinateVersion;
         (config.Width, config.Height) = GetDefaultFeatureWidgetSize(kind);
         config.ViewMode = ViewMode.Icon;

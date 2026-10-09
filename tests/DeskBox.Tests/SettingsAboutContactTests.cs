@@ -110,7 +110,10 @@ public sealed class SettingsAboutContactTests
             Assert.Equal("108", container.Attribute("Height")?.Value);
         });
         Assert.Equal("12,5,12,7", supportStoreButton.Attribute("Padding")?.Value);
-        Assert.Equal("Right", supportStoreButton.Attribute("HorizontalAlignment")?.Value);
+        // The store button lives in the notice InfoBar's action-button slot;
+        // the template places that slot on the right, so the button itself
+        // no longer carries an explicit HorizontalAlignment.
+        Assert.Equal("InfoBar.ActionButton", supportStoreButton.Parent?.Name.LocalName);
         Assert.Equal("Center", supportStoreButton.Attribute("VerticalAlignment")?.Value);
         Assert.Contains("ShowStoreSupportDialogButton_Click", xaml, StringComparison.Ordinal);
         Assert.Contains("OpenMicrosoftStoreButton_Click", xaml, StringComparison.Ordinal);

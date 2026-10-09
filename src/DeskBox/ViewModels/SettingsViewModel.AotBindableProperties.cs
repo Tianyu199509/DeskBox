@@ -21,7 +21,6 @@ namespace DeskBox.ViewModels;
     nameof(MicrosoftStoreLink),
     nameof(OfficialWebsiteLink),
     nameof(OneClickActionButtonText),
-    nameof(ReleaseNotesButtonVisibility),
     nameof(SelectedLanguage),
     nameof(StoreSupportCardVisibility),
     nameof(UpdateAutoCheckVisibility),

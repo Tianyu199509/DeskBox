@@ -6,16 +6,21 @@ public readonly record struct WidgetContentTransitionProfile(
     int SwapGapMilliseconds,
     int IncomingDurationMilliseconds,
     double TranslationDistance,
-    double MinimumScale,
     double IncomingStartOpacity,
     double OutgoingEndOpacity,
-    bool UsesMotion)
+    bool UsesMotion,
+    WidgetGroupSwitchAnimationEffect Effect)
 {
+    private const int VerticalTranslationDistance = 6;
+    private const int HorizontalTranslationDistance = 12;
+
     public static WidgetContentTransitionProfile Create(
         bool animationsEnabled,
-        bool directional)
+        bool directional,
+        WidgetGroupSwitchAnimationEffect effect = WidgetGroupSwitchAnimationEffect.Vertical)
     {
-        if (!animationsEnabled)
+        if (!animationsEnabled ||
+            effect == WidgetGroupSwitchAnimationEffect.Suppress)
         {
             return new WidgetContentTransitionProfile(
                 0,
@@ -23,21 +28,28 @@ public readonly record struct WidgetContentTransitionProfile(
                 0,
                 0,
                 0,
-                1,
                 0,
                 0,
-                UsesMotion: false);
+                UsesMotion: false,
+                Effect: WidgetGroupSwitchAnimationEffect.Vertical);
         }
 
+        bool slides = effect is WidgetGroupSwitchAnimationEffect.Vertical
+            or WidgetGroupSwitchAnimationEffect.Horizontal;
+        double distance = slides && directional
+            ? effect == WidgetGroupSwitchAnimationEffect.Horizontal
+                ? HorizontalTranslationDistance
+                : VerticalTranslationDistance
+            : 0;
         return new WidgetContentTransitionProfile(
             210,
             78,
             12,
             120,
-            directional ? 6 : 0,
-            0.975,
+            distance,
             0,
             0,
-            UsesMotion: directional);
+            UsesMotion: distance > 0,
+            Effect: effect);
     }
 }

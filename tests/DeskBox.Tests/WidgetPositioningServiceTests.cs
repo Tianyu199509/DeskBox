@@ -176,8 +176,11 @@ public sealed class WidgetPositioningServiceTests
     }
 
     [Fact]
-    public void ResolveBounds_FollowsCurrentPrimaryWhenCapturedOnPrimaryMonitor()
+    public void ResolveBounds_StaysOnFormerPrimaryWhenStillOnline()
     {
+        // Spec 5.1: the runtime smart-follow is gone — a widget captured on a
+        // monitor that is still online stays there even when the primary
+        // moved elsewhere.
         var formerPrimaryLaptop = new RectInt32(-1536, 0, 1536, 824);
         var currentPrimaryExternal = new RectInt32(0, 0, 2560, 1400);
         var config = new WidgetConfig
@@ -202,8 +205,8 @@ public sealed class WidgetPositioningServiceTests
             ],
             1.0);
 
-        Assert.Equal(2244, bounds.X);
-        Assert.Equal(1176, bounds.Y);
+        Assert.Equal(-316, bounds.X);
+        Assert.Equal(600, bounds.Y);
         Assert.Equal(300, bounds.Width);
         Assert.Equal(200, bounds.Height);
     }
@@ -242,8 +245,11 @@ public sealed class WidgetPositioningServiceTests
     }
 
     [Fact]
-    public void ResolveBounds_TreatsLegacyOriginMonitorAsPrimaryForSmartMode()
+    public void ResolveBounds_LegacyEntryStaysOnOriginWithoutSmartMode()
     {
+        // The "origin-near-primary" heuristic is deleted (spec 5.1); a legacy
+        // entry resolves through device-name/work-area identity and stays on
+        // its origin display.
         var secondaryLaptop = new RectInt32(-1536, 0, 1536, 824);
         var currentPrimaryExternal = new RectInt32(0, 0, 2560, 1400);
         var config = new WidgetConfig
@@ -267,8 +273,8 @@ public sealed class WidgetPositioningServiceTests
             ],
             1.0);
 
-        Assert.Equal(2244, bounds.X);
-        Assert.Equal(1176, bounds.Y);
+        Assert.Equal(-316, bounds.X);
+        Assert.Equal(600, bounds.Y);
     }
 
     [Fact]
@@ -320,7 +326,7 @@ public sealed class WidgetPositioningServiceTests
     }
 
     [Fact]
-    public void EnsureCurrentBoundsCoordinateVersion_MigratesLegacyPrimaryWidgetToCurrentPrimary()
+    public void EnsureCurrentBoundsCoordinateVersion_LegacyPrimaryWidgetStaysOnOriginDisplay()
     {
         var secondaryLaptop = new RectInt32(-1536, 0, 1536, 824);
         var currentPrimaryExternal = new RectInt32(0, 0, 2560, 1400);
@@ -346,11 +352,13 @@ public sealed class WidgetPositioningServiceTests
 
         Assert.True(migrated);
         Assert.Equal(WidgetConfig.CurrentBoundsCoordinateVersion, config.BoundsCoordinateVersion);
-        Assert.Equal(2244, config.X);
-        Assert.Equal(1176, config.Y);
-        Assert.Equal(@"\\.\DISPLAY2", config.PositionMonitorDeviceName);
-        Assert.True(config.PositionMonitorWasPrimary);
-        Assert.Equal(WidgetPositioningService.CreateMonitorKey(currentPrimaryExternal), config.PositionMonitorKey);
+        // Legacy migration now resolves through identity: the origin display
+        // is still online, so the widget stays there (spec 5.1).
+        Assert.Equal(-316, config.X);
+        Assert.Equal(600, config.Y);
+        Assert.Equal(@"\\.\DISPLAY1", config.PositionMonitorDeviceName);
+        Assert.False(config.PositionMonitorWasPrimary!.Value);
+        Assert.Equal(WidgetPositioningService.CreateMonitorKey(secondaryLaptop), config.PositionMonitorKey);
     }
     [Fact]
     public void EnsureCurrentBoundsCoordinateVersion_MigratesLegacyPhysicalSizeToLogicalSize()

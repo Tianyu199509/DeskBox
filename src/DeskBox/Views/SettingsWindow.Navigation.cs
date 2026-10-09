@@ -31,6 +31,37 @@ public sealed partial class SettingsWindow
     private readonly List<SettingsExpander> _featureSettingsExpanders = [];
     private readonly Dictionary<SettingsExpander, long> _featureSettingsExpanderCallbacks = [];
     private bool _isSynchronizingFeatureSettingsExpanders;
+    private List<string>? _navigationTagOrder;
+    private readonly HashSet<InfoBar> _pinnedNoticeInfoBars = [];
+
+    private const float NavigationEnterOffsetPx = 40f;
+
+    /// <summary>
+    /// Drill-down order of the sub-pages that share one navigation entry
+    /// (same parent NavTag): the order their entry cards appear in the
+    /// owning template. Same-depth sibling navigation uses this table so
+    /// switching between children of one nav item slides directionally
+    /// instead of always entering from the left.
+    /// </summary>
+    private static readonly string[] SubSectionTagOrder =
+    [
+        // FeatureWidgets family
+        "QuickCaptureSettings", "TodoSettings", "MusicSettings",
+        "WeatherSettings", "GlanceSettings", "SearchSettings",
+        // Appearance family
+        "AppearanceMaterialSettings", "AppearanceDensitySettings",
+        "AppearanceWindowSettings", "AppearanceAnimationSettings",
+        // AppearanceDetail family
+        "FileDisplaySettings", "ManagedStorage", "FileStackSettings",
+        "DesktopOrganizationSettings",
+        // Maintenance family
+        "BackupRestoreSettings", "CloudBackupSettings", "DataHealthSettings",
+        "CompatibilityDiagnosticsSettings",
+        // CapsuleMode family
+        "CapsuleOverridesSettings",
+        // General family
+        "PerformanceSettings", "Displays"
+    ];
 
     private void InitializeSettingsSectionElements()
     {
@@ -477,6 +508,18 @@ public sealed partial class SettingsWindow
             route = SectionRoutes[sectionTag];
         }
 
+        // Re-entering the visible section would re-run every refresh and,
+        // with the enter transition wired below, replay a slide-in onto
+        // unchanged content. Skip it once the window is live; the
+        // construction-time initial navigation (IsLoaded == false) must
+        // still run to reveal the section.
+        if (SettingsRoot.IsLoaded &&
+            string.Equals(sectionTag, _currentSettingsSection, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        string previousSectionTag = _currentSettingsSection;
         isNestedSection = !string.IsNullOrWhiteSpace(route.ParentTag);
         _currentSettingsSection = sectionTag;
         int navigationGeneration = ++_settingsNavigationGeneration;
@@ -494,6 +537,7 @@ public sealed partial class SettingsWindow
         {
             EnsureSettingsSectionCreated(inlineSectionTag);
         }
+        PrepareDeferredNoticeInfoBars();
         foreach ((string tag, FrameworkElement sectionElement) in _settingsSectionElements)
         {
             bool isPrimarySection = string.Equals(
@@ -511,6 +555,14 @@ public sealed partial class SettingsWindow
                 ? Visibility.Visible : Visibility.Collapsed;
         }
 
+        // Reset scrolling before the enter transition starts: a page sliding
+        // in at a stale scroll offset would visibly jump to the top mid-slide.
+        // Synchronous (rather than the low-priority dispatch below) so the
+        // first animation frame is already rendered at offset zero.
+        PageScroller.ChangeView(null, 0, null, disableAnimation: true);
+
+        PlaySettingsSectionEnterTransition(visibleSectionTag, previousSectionTag, sectionTag, inlineSectionTag);
+
         if (sectionTag == "FileStackSettings")
         {
             _ = ViewModel.RefreshFileStackRulePreviewFromDiskAsync();
@@ -518,6 +570,10 @@ public sealed partial class SettingsWindow
         if (sectionTag == "DesktopOrganizationSettings")
         {
             DesktopOrganizationSettingsSection.Refresh();
+        }
+        if (sectionTag == "Displays")
+        {
+            DisplaysSection.Refresh();
         }
         if (sectionTag == "WidgetGroups")
         {
@@ -575,9 +631,178 @@ public sealed partial class SettingsWindow
             {
                 return;
             }
-            PageScroller.ChangeView(null, 0, null, disableAnimation: true);
             RestartSectionLayoutSettleTimer();
         });
+    }
+
+    private void PlaySettingsSectionEnterTransition(
+        string visibleSectionTag,
+        string previousSectionTag,
+        string sectionTag,
+        string? inlineSectionTag)
+    {
+        // The construction-time initial navigation runs before the window is
+        // loaded; animating it would flash the freshly built content.
+        if (!SettingsRoot.IsLoaded ||
+            !_settingsSectionElements.TryGetValue(visibleSectionTag, out FrameworkElement? enteringSection))
+        {
+            return;
+        }
+
+        // Force layout (notably the first, lazy instantiation of the section)
+        // before animating so the page does not visibly grow while sliding.
+        enteringSection.UpdateLayout();
+        float enterOffsetX = DetermineNavigationEnterOffset(previousSectionTag, sectionTag);
+        DetailPageTransitionHelper.PlayNavigationEnter(enteringSection, enterOffsetX);
+
+        // Inline sibling sections (the file-grid page riding along with
+        // AppearanceDetail, the hotkey page with Interaction, the reset page
+        // with Maintenance) enter together with the primary page in the same
+        // direction so the composed page slides as one.
+        if (inlineSectionTag is not null &&
+            _settingsSectionElements.TryGetValue(inlineSectionTag, out FrameworkElement? inlineSection) &&
+            !ReferenceEquals(inlineSection, enteringSection))
+        {
+            inlineSection.UpdateLayout();
+            DetailPageTransitionHelper.PlayNavigationEnter(inlineSection, enterOffsetX);
+        }
+        App.Log($"[SettingsNav] transition tag={sectionTag} offset={enterOffsetX}");
+    }
+
+    private float DetermineNavigationEnterOffset(string previousSectionTag, string sectionTag) =>
+        DetermineNavigationEnterOffset(
+            previousSectionTag,
+            sectionTag,
+            GetNavigationTagOrder(),
+            SubSectionTagOrder);
+
+    /// <summary>
+    /// Pure direction logic for the section enter transition, extracted for
+    /// contract testing. Deeper targets enter from the right (drilling in),
+    /// returning to shallower pages enters from the left, and same-depth
+    /// navigation follows the nav menu order — with sub-pages sharing one
+    /// nav entry tie-broken by their drill-down order in
+    /// <paramref name="subSectionTagOrder"/>.
+    /// </summary>
+    internal static float DetermineNavigationEnterOffset(
+        string previousSectionTag,
+        string sectionTag,
+        IReadOnlyList<string> navigationTagOrder,
+        IReadOnlyList<string> subSectionTagOrder)
+    {
+        int previousDepth = GetSectionRouteDepth(previousSectionTag);
+        int nextDepth = GetSectionRouteDepth(sectionTag);
+        if (nextDepth != previousDepth)
+        {
+            return nextDepth > previousDepth ? NavigationEnterOffsetPx : -NavigationEnterOffsetPx;
+        }
+
+        // Same depth (top-level pages or sibling sub-pages): slide follows
+        // the nav menu order — moving down the list enters from the right,
+        // moving up from the left.
+        (int NavIndex, int SubIndex)? previousKey = GetNavigationOrderKey(
+            navigationTagOrder, subSectionTagOrder, previousSectionTag);
+        (int NavIndex, int SubIndex)? nextKey = GetNavigationOrderKey(
+            navigationTagOrder, subSectionTagOrder, sectionTag);
+        if (previousKey is null || nextKey is null)
+        {
+            return NavigationEnterOffsetPx;
+        }
+        int navComparison = nextKey.Value.NavIndex.CompareTo(previousKey.Value.NavIndex);
+        if (navComparison != 0)
+        {
+            return navComparison > 0 ? NavigationEnterOffsetPx : -NavigationEnterOffsetPx;
+        }
+
+        // Same nav entry (sibling sub-pages under one parent): previously
+        // both compared equal here and the slide was always leftward; now
+        // the family's drill-down order decides the direction. Untracked
+        // tags keep the forward default instead of a bogus rank.
+        if (previousKey.Value.SubIndex < 0 || nextKey.Value.SubIndex < 0)
+        {
+            return NavigationEnterOffsetPx;
+        }
+        return nextKey.Value.SubIndex > previousKey.Value.SubIndex
+            ? NavigationEnterOffsetPx
+            : -NavigationEnterOffsetPx;
+    }
+
+    private static (int NavIndex, int SubIndex)? GetNavigationOrderKey(
+        IReadOnlyList<string> navigationTagOrder,
+        IReadOnlyList<string> subSectionTagOrder,
+        string sectionTag)
+    {
+        if (!TryGetSectionRoute(sectionTag, out SettingsSectionRoute route))
+        {
+            return null;
+        }
+
+        int navIndex = IndexOfTag(navigationTagOrder, route.NavTag);
+        if (navIndex < 0)
+        {
+            return null;
+        }
+
+        int subIndex = route.ParentTag is null ? 0 : IndexOfTag(subSectionTagOrder, sectionTag);
+        return (navIndex, subIndex);
+    }
+
+    private static int IndexOfTag(IReadOnlyList<string> tags, string tag)
+    {
+        for (int index = 0; index < tags.Count; index++)
+        {
+            if (string.Equals(tags[index], tag, StringComparison.Ordinal))
+            {
+                return index;
+            }
+        }
+
+        return -1;
+    }
+
+    private static int GetSectionRouteDepth(string sectionTag)
+    {
+        int depth = 0;
+        string current = sectionTag;
+        var visited = new HashSet<string>(StringComparer.Ordinal);
+        while (TryGetSectionRoute(current, out SettingsSectionRoute route) &&
+               route.ParentTag is string parentTag &&
+               visited.Add(parentTag))
+        {
+            depth++;
+            current = parentTag;
+        }
+        return depth;
+    }
+
+    private List<string> GetNavigationTagOrder()
+    {
+        _navigationTagOrder ??= BuildNavigationTagOrder(SettingsNavigationView.MenuItems);
+        return _navigationTagOrder;
+    }
+
+    private static List<string> BuildNavigationTagOrder(IList<object> menuItems)
+    {
+        var tags = new List<string>();
+        CollectNavigationItemTags(menuItems, tags);
+        return tags;
+    }
+
+    private static void CollectNavigationItemTags(IList<object> menuItems, List<string> tags)
+    {
+        // Indexer loop on purpose: CsWinRT IVector iteration can throw on
+        // projected collections (see the animation-batch foreach incidents).
+        for (int index = 0; index < menuItems.Count; index++)
+        {
+            if (menuItems[index] is NavigationViewItem navItem)
+            {
+                if (navItem.Tag is string tag)
+                {
+                    tags.Add(tag);
+                }
+                CollectNavigationItemTags(navItem.MenuItems, tags);
+            }
+        }
     }
 
     private void UpdateBreadcrumb(SettingsSectionRoute route)
@@ -981,26 +1206,6 @@ public sealed partial class SettingsWindow
             todoSettings.ToggleFooterDisplayOption);
     }
 
-    private void WeatherDisplayOptionsDropDown_Click(object sender, RoutedEventArgs e)
-    {
-        if (sender is not DropDownButton button)
-        {
-            return;
-        }
-
-        // The weather display flyout's selection surface lives on the
-        // section editor (batch 48); the section reaches it through its
-        // DataContext.
-        var weatherSettings = _weatherSettingsViewModel;
-        SettingsMultiSelectMenu.Show(
-            button,
-            weatherSettings.AvailableDisplayOptions,
-            weatherSettings.GetDisplayOptionName,
-            weatherSettings.IsDisplayOptionSelected,
-            _ => true,
-            weatherSettings.ToggleDisplayOption);
-    }
-
     private void ContinuousDecorativeAnimationsDropDown_Click(
         object sender,
         RoutedEventArgs e)
@@ -1095,5 +1300,169 @@ public sealed partial class SettingsWindow
                 ViewModel.IsHoverButtonActionSelected(action);
             item.IsEnabled = ViewModel.CanToggleHoverButtonAction(action);
         }
+    }
+
+    // ── Deferred-notice InfoBar severity brushes ────────────────
+
+    // Accessors live here rather than SectionElements.cs so the notice
+    // pinning stays self-contained; both lookups follow the established
+    // FindCreatedSectionElement deferred-name pattern (never forces
+    // section creation, returns null before the section exists).
+    private global::Microsoft.UI.Xaml.Controls.InfoBar? GlobalHotkeyElevatedNoticeInfoBar =>
+        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.InfoBar>(
+            "InteractionWindowSettings", "GlobalHotkeyElevatedNoticeInfoBar");
+
+    private global::Microsoft.UI.Xaml.Controls.InfoBar? Windows10CompatibilityInfoBar =>
+        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.InfoBar>(
+            "AppearanceMaterialSettings", "Windows10CompatibilityInfoBar");
+
+    private global::Microsoft.UI.Xaml.Controls.InfoBar? CloudBackupSyncNoticeInfoBar =>
+        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.InfoBar>(
+            "CloudBackupSettings", "CloudBackupSyncNoticeInfoBar");
+
+    private void PrepareDeferredNoticeInfoBars()
+    {
+        // ThemeResource severity brushes inside the InfoBar template fail to
+        // resolve for sections realized through DataTemplate.LoadContent
+        // (the same delayed-creation pitfall as the card brushes), leaving
+        // the notices painted exactly like the card behind them. Pin the
+        // informational severity brushes from the application resources;
+        // null-guarded because each template only populates its field once
+        // its section has been created.
+        PinInformationalSeverityBrushes(GlobalHotkeyElevatedNoticeInfoBar);
+        PinInformationalSeverityBrushes(Windows10CompatibilityInfoBar);
+        ApplyNoticeMessageTypography(CloudBackupSyncNoticeInfoBar);
+        ApplyNoticeMessageTypography(GlobalHotkeyElevatedNoticeInfoBar);
+        ApplyNoticeMessageTypography(Windows10CompatibilityInfoBar);
+        ApplyNoticeMessageTypography(AboutStoreNoticeInfoBar);
+    }
+
+    private void PinInformationalSeverityBrushes(InfoBar? infoBar)
+    {
+        if (infoBar is null)
+        {
+            return;
+        }
+
+        ApplyInformationalSeverityBrushes(infoBar);
+        if (_pinnedNoticeInfoBars.Add(infoBar))
+        {
+            // Local brush values do not follow theme swaps; re-pin when the
+            // realized section's theme flips.
+            infoBar.ActualThemeChanged += (_, _) => ApplyInformationalSeverityBrushes(infoBar);
+        }
+    }
+
+    internal static void ApplyInformationalSeverityBrushes(InfoBar infoBar)
+    {
+        if (Application.Current.Resources.TryGetValue(
+                "InfoBarInformationalSeverityBackgroundBrush", out object? background) &&
+            background is Brush backgroundBrush)
+        {
+            infoBar.Background = backgroundBrush;
+        }
+        if (Application.Current.Resources.TryGetValue(
+                "InfoBarInformationalSeverityForegroundBrush", out object? foreground) &&
+            foreground is Brush foregroundBrush)
+        {
+            infoBar.Foreground = foregroundBrush;
+        }
+    }
+
+    // ── Notice InfoBar message typography ───────────────────────
+
+    // The InfoBar control template reads its Title/Message font sizes
+    // through StaticResource lookups that resolve inside the control
+    // library's generic.xaml, so neither element-local resource overrides
+    // nor implicit text styles can reach those two text blocks (unlike
+    // the severity brushes, which are ThemeResource values pinned above).
+    // Size the message text block down to the settings-card description
+    // spec directly once the template has been applied; the title keeps
+    // the template default (14px semi-bold). Shared with the search
+    // section's notices.
+    internal static void ApplyNoticeMessageTypography(InfoBar? infoBar)
+    {
+        if (infoBar is null)
+        {
+            return;
+        }
+
+        if (infoBar.IsLoaded)
+        {
+            SetNoticeMessageTypography(infoBar);
+            return;
+        }
+
+        // Deferred sections are created before they join the visual tree;
+        // wait for the first Loaded (template applied) and detach after.
+        infoBar.Loaded -= OnNoticeLoadedForTypography;
+        infoBar.Loaded += OnNoticeLoadedForTypography;
+    }
+
+    private static void OnNoticeLoadedForTypography(object sender, RoutedEventArgs e)
+    {
+        if (sender is not InfoBar infoBar)
+        {
+            return;
+        }
+
+        infoBar.Loaded -= OnNoticeLoadedForTypography;
+        SetNoticeMessageTypography(infoBar);
+    }
+
+    private static void SetNoticeMessageTypography(InfoBar infoBar)
+    {
+        if (TryApplyNoticeMessageTypography(infoBar))
+        {
+            return;
+        }
+
+        // Loaded fires before the first layout pass, so the template parts
+        // (Title/Message text blocks) may not exist in the visual tree yet;
+        // retry from the first LayoutUpdated, which runs after ApplyTemplate.
+        EventHandler<object> retry = null!;
+        retry = (_, _) =>
+        {
+            if (TryApplyNoticeMessageTypography(infoBar))
+            {
+                infoBar.LayoutUpdated -= retry;
+            }
+        };
+        infoBar.LayoutUpdated += retry;
+    }
+
+    private static bool TryApplyNoticeMessageTypography(InfoBar infoBar)
+    {
+        if (FindNamedDescendant(infoBar, "Message") is not TextBlock message)
+        {
+            return false;
+        }
+
+        message.FontSize = 12;
+        return true;
+    }
+
+    private static FrameworkElement? FindNamedDescendant(DependencyObject root, string name)
+    {
+        int childCount = VisualTreeHelper.GetChildrenCount(root);
+        for (int index = 0; index < childCount; index++)
+        {
+            if (VisualTreeHelper.GetChild(root, index) is not FrameworkElement child)
+            {
+                continue;
+            }
+
+            if (child.Name == name)
+            {
+                return child;
+            }
+
+            if (FindNamedDescendant(child, name) is { } match)
+            {
+                return match;
+            }
+        }
+
+        return null;
     }
 }

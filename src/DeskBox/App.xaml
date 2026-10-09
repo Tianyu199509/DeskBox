@@ -3,6 +3,7 @@
     x:Class="DeskBox.App"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:helpers="using:DeskBox.Helpers"
     xmlns:toolkit="using:CommunityToolkit.WinUI.Controls">
 
     <Application.Resources>
@@ -107,6 +108,15 @@
 
             <Style x:Key="WidgetEmptyStateIconStyle" TargetType="FontIcon">
                 <Setter Property="HorizontalAlignment" Value="Center" />
+            </Style>
+
+            <!-- Every TextBlock opts into the widget text shadow. Only the
+                 application resources reach text expanded from data and
+                 control templates; WidgetTextShadow ignores texts outside
+                 windows marked with WidgetTextShadow.Scope and does nothing
+                 while the setting is off. -->
+            <Style TargetType="TextBlock">
+                <Setter Property="helpers:WidgetTextShadow.Cast" Value="True" />
             </Style>
 
             <Style x:Key="WidgetEmptyStateTitleTextStyle" TargetType="TextBlock">

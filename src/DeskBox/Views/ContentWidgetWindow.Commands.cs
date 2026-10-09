@@ -432,6 +432,16 @@ public sealed partial class ContentWidgetWindow
             SetPositionLocked,
             SetSizeLocked));
 
+        // Hidden entirely on single-monitor systems, matching how Windows
+        // hides commands that cannot apply; null must not reach Items.Add.
+        if (WidgetScreenMenuBuilder.TryCreate(
+                App.Current.LocalizationService,
+                _config,
+                ApplyScreenBinding) is { } screenMenu)
+        {
+            flyout.Items.Add(screenMenu);
+        }
+
         if (_config.WidgetKind is WidgetKind.File)
         {
             flyout.Items.Add(
@@ -929,6 +939,23 @@ public sealed partial class ContentWidgetWindow
         SettingsService.UpdateWidget(_config);
         SynchronizeWidgetGroupLayout();
         ApplyLockActionIconState();
+    }
+
+    private void ApplyScreenBinding(WidgetScreenBindingMode mode, string? boundScreenId)
+    {
+        if (_config.ScreenBindingMode == mode &&
+            string.Equals(_config.BoundScreenId, boundScreenId, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        // SafeFireAndForget keeps the observed-and-log failure semantics of a
+        // discarded task without letting an unobserved fault crash the app.
+        if (App.Current?.WidgetManager is { } widgetManager)
+        {
+            App.SafeFireAndForget(
+                () => widgetManager.ApplyScreenBindingAsync(_config.Id, mode, boundScreenId));
+        }
     }
 
     private void SetSizeLocked(bool value)

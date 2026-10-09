@@ -552,18 +552,18 @@ public sealed partial class SettingsWindow
 
     private void ViewReleaseNotesButton_Click(object sender, RoutedEventArgs e)
     {
-        if (!ViewModel.CanViewReleaseNotes || ViewModel.LatestUpdateManifest is not { } manifest)
-        {
-            return;
-        }
-
+        // The button is always visible: when no check has produced a
+        // manifest yet the window still opens and resolves its manifest
+        // lazily inside itself.
+        AppUpdateManifest? manifest = ViewModel.LatestUpdateManifest;
         if (_releaseNotesWindow is null)
         {
             var releaseNotesWindow = new ReleaseNotesWindow(
                 manifest,
                 ViewModel.AppVersion,
                 _themeService,
-                _localizationService);
+                _localizationService,
+                manifest is null ? ViewModel.FetchLatestManifestForReleaseNotesAsync : null);
             _releaseNotesWindow = releaseNotesWindow;
             releaseNotesWindow.Closed += (_, _) =>
             {
@@ -573,9 +573,13 @@ public sealed partial class SettingsWindow
                 }
             };
         }
-        else
+        else if (manifest is not null)
         {
             _releaseNotesWindow.UpdateManifest(manifest, ViewModel.AppVersion);
+        }
+        else
+        {
+            _releaseNotesWindow.RetryManifestLoad();
         }
 
         _releaseNotesWindow.ShowWindow(_hWnd);

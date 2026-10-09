@@ -4,15 +4,18 @@ using DeskBox.Services;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Controls.Primitives;
+using Microsoft.UI.Xaml.Media;
+using Windows.UI;
 
 namespace DeskBox.Controls;
 
 /// <summary>
 /// Per-widget background customizer: pick an image (relayed through the
-/// owning window because the system picker dismisses the flyout), choose
-/// fill/contain fit, adjust the readability scrim strength, and clear the
-/// override. Fit and dim apply live; the widget behind the flyout is the
-/// preview.
+/// owning window because the system picker dismisses the flyout), choose a
+/// solid color, adjust fill/contain fit and the readability scrim strength,
+/// and clear the override. Fit and dim apply live; the widget behind the
+/// flyout is the preview. Image and color are mutually exclusive kinds of
+/// per-widget background — picking one retires the other.
 /// </summary>
 public sealed partial class WidgetBackgroundCustomizer : UserControl
 {
@@ -46,6 +49,7 @@ public sealed partial class WidgetBackgroundCustomizer : UserControl
                 : WidgetBackgroundCustomization.FitContain);
         };
         DimSlider.ValueChanged += DimSlider_ValueChanged;
+        BackgroundColorPicker.ColorChanged += BackgroundColorPicker_ColorChanged;
         ClearButton.Click += (_, _) => ResetToDefault();
         ChooseImageButton.Click += (_, _) =>
         {
@@ -66,6 +70,7 @@ public sealed partial class WidgetBackgroundCustomizer : UserControl
         FitFillItem.Content = localization.T("Widget.CustomBackground.FitFill");
         FitContainItem.Content = localization.T("Widget.CustomBackground.FitContain");
         DimLabel.Text = localization.T("Widget.CustomBackground.DimLabel");
+        ColorLabel.Text = localization.T("Widget.CustomBackground.ColorLabel");
         ClearButton.Content = localization.T("Widget.CustomBackground.Clear");
         RefreshFromConfig();
     }
@@ -92,6 +97,29 @@ public sealed partial class WidgetBackgroundCustomizer : UserControl
         WidgetBackgroundCustomization.SetDimPercent(_config, e.NewValue);
         DimValueText.Text = ((int)Math.Round(e.NewValue)).ToString();
         PersistAndNotify();
+    }
+
+    private void BackgroundColorPicker_ColorChanged(
+        ColorPicker sender,
+        ColorChangedEventArgs args)
+    {
+        if (_isSyncingControls || _config is null)
+        {
+            return;
+        }
+
+        // Image and color are mutually exclusive: adopting a color retires
+        // the image override and deletes its asset file, so "clear" later
+        // never resurrects a stale photo behind the color.
+        string? imageFileName = WidgetBackgroundCustomization.GetImageFileNameOverride(_config);
+        if (imageFileName is not null)
+        {
+            WidgetTitleIconAssetStore.Current.DeleteImage(_config.Id, imageFileName);
+        }
+
+        WidgetBackgroundCustomization.SetColorOverride(_config, args.NewColor);
+        PersistAndNotify();
+        RefreshFromConfig();
     }
 
     private void ResetToDefault()
@@ -137,17 +165,33 @@ public sealed partial class WidgetBackgroundCustomizer : UserControl
             _config.Id,
             imageFileName);
         bool hasImage = imagePath is not null;
+        bool hasColor = !hasImage &&
+            WidgetBackgroundCustomization.GetColorOverride(_config) is not null;
         LocalizationService localization = App.Current.LocalizationService;
 
         PreviewImage.Source = hasImage
             ? WidgetBackgroundImageSourceFactory.TryCreate(imagePath)
             : null;
         PreviewImage.Visibility = hasImage ? Visibility.Visible : Visibility.Collapsed;
-        PreviewEmptyIcon.Visibility = hasImage ? Visibility.Collapsed : Visibility.Visible;
+        PreviewEmptyIcon.Visibility = hasImage || hasColor
+            ? Visibility.Collapsed
+            : Visibility.Visible;
+        PreviewSurface.Background = hasColor &&
+            AccentColorHelper.TryParseHex(
+                WidgetBackgroundCustomization.GetColorOverride(_config),
+                out Color previewColor)
+                ? new SolidColorBrush(previewColor)
+                : Application.Current.Resources.TryGetValue(
+                    "CardBackgroundFillColorDefaultBrush",
+                    out object? themeBrush) && themeBrush is Brush brush
+                    ? brush
+                    : PreviewSurface.Background;
         SubtitleText.Text = localization.T(
             hasImage
                 ? "Widget.CustomBackground.ImageCurrent"
-                : "Widget.CustomBackground.ImageNone");
+                : hasColor
+                    ? "Widget.CustomBackground.ColorCurrent"
+                    : "Widget.CustomBackground.ImageNone");
         OptionsPanel.Visibility = hasImage ? Visibility.Visible : Visibility.Collapsed;
         ErrorText.Visibility = Visibility.Collapsed;
         SyncOptionControls();
@@ -169,6 +213,11 @@ public sealed partial class WidgetBackgroundCustomizer : UserControl
             double dim = WidgetBackgroundCustomization.ResolveDimPercent(_config);
             DimSlider.Value = dim;
             DimValueText.Text = ((int)Math.Round(dim)).ToString();
+            if (WidgetBackgroundCustomization.GetColorOverride(_config) is { } colorHex &&
+                AccentColorHelper.TryParseHex(colorHex, out Color storedColor))
+            {
+                BackgroundColorPicker.Color = storedColor;
+            }
         }
         finally
         {

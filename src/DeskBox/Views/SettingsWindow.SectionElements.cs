@@ -54,18 +54,14 @@ public sealed partial class SettingsWindow
         FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.StackPanel>("WidgetGroups", "WidgetGroupsSection")!;
     private global::DeskBox.Views.SettingsSections.CapsuleModeSettingsSection CapsuleModeSection =>
         FindCreatedSectionElement<global::DeskBox.Views.SettingsSections.CapsuleModeSettingsSection>("CapsuleMode", "CapsuleModeSection")!;
-    private global::Microsoft.UI.Xaml.Controls.StackPanel CapsuleBehaviorSettingsSection =>
-        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.StackPanel>("CapsuleBehaviorSettings", "CapsuleBehaviorSettingsSection")!;
-    private global::Microsoft.UI.Xaml.Controls.StackPanel CapsuleArrangementSettingsSection =>
-        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.StackPanel>("CapsuleArrangementSettings", "CapsuleArrangementSettingsSection")!;
-    private global::Microsoft.UI.Xaml.Controls.StackPanel CapsuleAnimationSettingsSection =>
-        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.StackPanel>("CapsuleAnimationSettings", "CapsuleAnimationSettingsSection")!;
     private global::Microsoft.UI.Xaml.Controls.StackPanel CapsuleOverridesSettingsSection =>
         FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.StackPanel>("CapsuleOverridesSettings", "CapsuleOverridesSettingsSection")!;
     private global::DeskBox.Views.SettingsSections.FileWidgetSettingsSection AppearanceDetailSection =>
         FindCreatedSectionElement<global::DeskBox.Views.SettingsSections.FileWidgetSettingsSection>("AppearanceDetail", "AppearanceDetailSection")!;
     private global::DeskBox.Views.SettingsSections.DesktopOrganizationSettingsSection DesktopOrganizationSettingsSection =>
         FindCreatedSectionElement<global::DeskBox.Views.SettingsSections.DesktopOrganizationSettingsSection>("DesktopOrganizationSettings", "DesktopOrganizationSettingsSection")!;
+    private global::DeskBox.Views.SettingsSections.DisplaySettingsSection DisplaysSection =>
+        FindCreatedSectionElement<global::DeskBox.Views.SettingsSections.DisplaySettingsSection>("Displays", "DisplaysSection")!;
     private global::Microsoft.UI.Xaml.Controls.StackPanel FileDisplaySettingsSection =>
         FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.StackPanel>("FileDisplaySettings", "FileDisplaySettingsSection")!;
     private global::Microsoft.UI.Xaml.Controls.StackPanel FileStorageSettingsSection =>
@@ -98,20 +94,6 @@ public sealed partial class SettingsWindow
         FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.StackPanel>("Interaction", "InteractionSection")!;
     private global::Microsoft.UI.Xaml.Controls.StackPanel InteractionWindowSettingsSection =>
         FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.StackPanel>("InteractionWindowSettings", "InteractionWindowSettingsSection")!;
-    private global::Microsoft.UI.Xaml.Controls.StackPanel GlobalHotkeyPresetButtonsPanel =>
-        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.StackPanel>("InteractionWindowSettings", "GlobalHotkeyPresetButtonsPanel")!;
-    private global::Microsoft.UI.Xaml.Controls.Primitives.ToggleButton GlobalHotkeyPresetF7Button =>
-        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.Primitives.ToggleButton>("InteractionWindowSettings", "GlobalHotkeyPresetF7Button")!;
-    private global::Microsoft.UI.Xaml.Controls.Primitives.ToggleButton GlobalHotkeyPresetDoubleControlButton =>
-        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.Primitives.ToggleButton>("InteractionWindowSettings", "GlobalHotkeyPresetDoubleControlButton")!;
-    private global::Microsoft.UI.Xaml.Controls.Primitives.ToggleButton GlobalHotkeyPresetAltSpaceButton =>
-        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.Primitives.ToggleButton>("InteractionWindowSettings", "GlobalHotkeyPresetAltSpaceButton")!;
-    private global::Microsoft.UI.Xaml.Controls.Primitives.ToggleButton GlobalHotkeyPresetWinSpaceButton =>
-        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.Primitives.ToggleButton>("InteractionWindowSettings", "GlobalHotkeyPresetWinSpaceButton")!;
-    private global::Microsoft.UI.Xaml.Controls.Primitives.ToggleButton GlobalHotkeyPresetWindowsTapButton =>
-        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.Primitives.ToggleButton>("InteractionWindowSettings", "GlobalHotkeyPresetWindowsTapButton")!;
-    private global::Microsoft.UI.Xaml.Controls.Primitives.ToggleButton GlobalHotkeyPresetCopilotKeyButton =>
-        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.Primitives.ToggleButton>("InteractionWindowSettings", "GlobalHotkeyPresetCopilotKeyButton")!;
     private global::Microsoft.UI.Xaml.Controls.Grid GlobalHotkeyCustomRow =>
         FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.Grid>("InteractionWindowSettings", "GlobalHotkeyCustomRow")!;
     private global::Microsoft.UI.Xaml.Controls.Grid GlobalHotkeyActionsPanel =>
@@ -200,6 +182,8 @@ public sealed partial class SettingsWindow
         FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.Button>("About", "AboutWebsiteButton")!;
     private global::Microsoft.UI.Xaml.Controls.Button OneClickUpdateButton =>
         FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.Button>("About", "OneClickUpdateButton")!;
+    private global::Microsoft.UI.Xaml.Controls.StackPanel UpdateCheckActionsPanel =>
+        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.StackPanel>("About", "UpdateCheckActionsPanel")!;
     private global::Microsoft.UI.Xaml.Controls.Button ViewReleaseNotesButton =>
         FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.Button>("About", "ViewReleaseNotesButton")!;
     private global::Microsoft.UI.Xaml.Controls.StackPanel UpdateActionsPanel =>

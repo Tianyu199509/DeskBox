@@ -1523,7 +1523,8 @@ public sealed partial class MusicWidgetContent : UserControl, IDisposable
         if (ViewModel is null)
         {
             ProgressFill.Width = 0;
-            RecordProgressBar.Value = 0;
+            RecordProgressFill.Width = 0;
+            RecordHorizontalProgressFill.Width = 0;
             ProgressThumb.Opacity = 0;
             return;
         }
@@ -1546,10 +1547,29 @@ public sealed partial class MusicWidgetContent : UserControl, IDisposable
             ProgressThumb.Opacity = 0;
         }
 
-        RecordProgressBar.Value = ratio;
-        RecordProgressBar.Opacity = ViewModel.HasSeekableTimeline ? 1 : 0.6;
+        // Record layouts use the same custom track+fill pair as the default
+        // layout: the native ProgressBar swap (A10) rendered neither track
+        // nor indicator, leaving the record rows without a visible bar.
+        if (RecordProgressHost.ActualWidth > 0)
+        {
+            RecordProgressFill.Width = Math.Max(0, RecordProgressHost.ActualWidth * ratio);
+            RecordProgressTrack.Opacity = ViewModel.HasSeekableTimeline ? 0.36 : 0.2;
+        }
+        else
+        {
+            RecordProgressFill.Width = 0;
+        }
 
-        RecordHorizontalProgressBar.Value = ratio;
-        RecordHorizontalProgressBar.Opacity = ViewModel.HasSeekableTimeline ? 1 : 0.6;
+        if (RecordHorizontalProgressHost.ActualWidth > 0)
+        {
+            RecordHorizontalProgressFill.Width =
+                Math.Max(0, RecordHorizontalProgressHost.ActualWidth * ratio);
+            RecordHorizontalProgressTrack.Opacity =
+                ViewModel.HasSeekableTimeline ? 0.36 : 0.2;
+        }
+        else
+        {
+            RecordHorizontalProgressFill.Width = 0;
+        }
     }
 }

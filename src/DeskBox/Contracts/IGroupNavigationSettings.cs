@@ -4,7 +4,8 @@ public readonly record struct GroupNavigationSettingsSnapshot(
     string DefaultNavigationStyle,
     string DefaultTitleDisplayMode,
     bool WheelSwitchEnabled,
-    bool HoverSwitchEnabled);
+    bool HoverSwitchEnabled,
+    string SwitchAnimationStyle);
 
 /// <summary>
 /// Settings-page writes for the group-navigation defaults: the default
@@ -38,4 +39,6 @@ public interface IGroupNavigationSettings
     bool SetWheelSwitchEnabled(bool value);
 
     bool SetHoverSwitchEnabled(bool value);
+
+    bool SetWidgetGroupSwitchAnimationStyle(string? value);
 }

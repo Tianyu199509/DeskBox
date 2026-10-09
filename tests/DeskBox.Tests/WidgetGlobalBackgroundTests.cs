@@ -9,6 +9,58 @@ public sealed class WidgetGlobalBackgroundTests
     // ── Panorama mapping math ────────────────────────────────────
 
     [Fact]
+    public void Panorama_MonitorFit_CoversTheMonitorAndCentersTheOverflow()
+    {
+        // 2000x1000 image on a 1000x1000 monitor: fill crops horizontally,
+        // fitted 2000x1000 centered → x offset -500, y offset 0.
+        (double offsetX, double offsetY, double width, double height) =
+            WidgetBackgroundPanoramaCalculator.ComputeMonitorFit(
+                imageWidth: 2000, imageHeight: 1000,
+                monitorWidth: 1000, monitorHeight: 1000);
+
+        Assert.Equal(-500, offsetX, 3);
+        Assert.Equal(0, offsetY, 3);
+        Assert.Equal(2000, width, 3);
+        Assert.Equal(1000, height, 3);
+    }
+
+    [Fact]
+    public void Panorama_MonitorFit_IsPurelyLocal_SameResultOnEveryMonitor()
+    {
+        // The per-monitor model must not depend on any other screen: a
+        // 3840x2160 image fitted onto a 1920x1080 monitor yields the same
+        // matrix whether that monitor sits alone or beside a 4K panel — the
+        // property the union fit lost on mixed-DPI setups.
+        (double offsetX, double offsetY, double width, double height) =
+            WidgetBackgroundPanoramaCalculator.ComputeMonitorFit(
+                imageWidth: 3840, imageHeight: 2160,
+                monitorWidth: 1920, monitorHeight: 1080);
+
+        Assert.Equal(0, offsetX, 3);
+        Assert.Equal(0, offsetY, 3);
+        Assert.Equal(1920, width, 3);
+        Assert.Equal(1080, height, 3);
+
+        // Portrait image on a landscape monitor fills by width and crops
+        // height, centered.
+        (offsetX, offsetY, width, height) = WidgetBackgroundPanoramaCalculator.ComputeMonitorFit(
+            imageWidth: 1000, imageHeight: 2000,
+            monitorWidth: 1000, monitorHeight: 1000);
+        Assert.Equal(0, offsetX, 3);
+        Assert.Equal(-500, offsetY, 3);
+        Assert.Equal(1000, width, 3);
+        Assert.Equal(2000, height, 3);
+    }
+
+    [Fact]
+    public void Panorama_MonitorFit_InvalidInputs_ReturnMonitorUnscaled()
+    {
+        Assert.Equal(
+            (0, 0, 800, 600),
+            WidgetBackgroundPanoramaCalculator.ComputeMonitorFit(0, 1000, 800, 600));
+    }
+
+    [Fact]
     public void Panorama_WindowInsideCanvas_MapsItsExactSlice()
     {
         // 2000x1000 image over a 1000x1000 canvas: UniformToFill crops
@@ -178,7 +230,7 @@ public sealed class WidgetGlobalBackgroundTests
     public void GlobalBackground_IsWiredAcrossSchemaSettingsAndShell()
     {
         Assert.Contains(
-            "CurrentSchemaVersion = 11",
+            "CurrentSchemaVersion = 13",
             File.ReadAllText(TestPaths.FromRepository(
                 "src/DeskBox/Services/SettingsMigrationService.cs")),
             StringComparison.Ordinal);

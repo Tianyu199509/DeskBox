@@ -1,5 +1,6 @@
 using DeskBox.Models;
 using DeskBox.Services;
+using Windows.UI;
 
 namespace DeskBox.Tests;
 
@@ -120,6 +121,78 @@ public sealed class WidgetBackgroundCustomizationTests : IDisposable
     }
 
     [Fact]
+    public void SetColorOverride_RoundTripsAsOpaqueHex()
+    {
+        var config = new WidgetConfig();
+        // An 8-digit input (alpha ignored) normalizes to the opaque #RRGGBB
+        // storage shape shared with the per-widget foreground color.
+        WidgetBackgroundCustomization.SetColorOverride(
+            config,
+            Color.FromArgb(0x80, 0xAA, 0x11, 0x22));
+
+        Assert.Equal("#AA1122", WidgetBackgroundCustomization.GetColorOverride(config));
+        Assert.True(WidgetBackgroundCustomization.HasCustomBackground(config));
+
+        WidgetBackgroundCustomization.SetColorOverride(config, null);
+        Assert.Null(WidgetBackgroundCustomization.GetColorOverride(config));
+        Assert.False(WidgetBackgroundCustomization.HasCustomBackground(config));
+    }
+
+    [Fact]
+    public void ImageAndColorAreMutuallyExclusive()
+    {
+        var config = new WidgetConfig();
+        WidgetBackgroundCustomization.SetImageOverride(config, "background.png");
+        WidgetBackgroundCustomization.SetFitOverride(config, "Contain");
+        WidgetBackgroundCustomization.SetDimPercent(config, 60);
+
+        WidgetBackgroundCustomization.SetColorOverride(
+            config,
+            Color.FromArgb(0xFF, 0x10, 0x20, 0x30));
+        Assert.Null(WidgetBackgroundCustomization.GetImageFileNameOverride(config));
+        Assert.Null(WidgetBackgroundCustomization.GetFitOverride(config));
+
+        WidgetBackgroundCustomization.SetImageOverride(config, "background.jpg");
+        Assert.Null(WidgetBackgroundCustomization.GetColorOverride(config));
+    }
+
+    [Fact]
+    public void Clear_RemovesColorToo()
+    {
+        var config = new WidgetConfig();
+        WidgetBackgroundCustomization.SetColorOverride(
+            config,
+            Color.FromArgb(0xFF, 0x10, 0x20, 0x30));
+
+        WidgetBackgroundCustomization.Clear(config);
+
+        Assert.False(WidgetBackgroundCustomization.HasCustomBackground(config));
+    }
+
+    [Fact]
+    public void NormalizeOverrides_HealsInvalidAndShadowedColors()
+    {
+        var config = new WidgetConfig();
+        config.Metadata[WidgetBackgroundCustomization.ColorMetadataKey] = "not-hex";
+        Assert.True(WidgetBackgroundCustomization.NormalizeOverrides(config));
+        Assert.Null(WidgetBackgroundCustomization.GetColorOverride(config));
+
+        // A color stored under an image is unreachable (the image wins) and
+        // must self-heal away, mirroring fit/dim noise cleanup.
+        config.Metadata[WidgetBackgroundCustomization.ImageMetadataKey] = "background.png";
+        config.Metadata[WidgetBackgroundCustomization.ColorMetadataKey] = "#FF0000";
+        Assert.True(WidgetBackgroundCustomization.NormalizeOverrides(config));
+        Assert.Null(WidgetBackgroundCustomization.GetColorOverride(config));
+        Assert.NotNull(WidgetBackgroundCustomization.GetImageFileNameOverride(config));
+
+        // Hand-edited 8-digit hex normalizes to the canonical opaque form.
+        config.Metadata.Remove(WidgetBackgroundCustomization.ImageMetadataKey);
+        config.Metadata[WidgetBackgroundCustomization.ColorMetadataKey] = "#80AA1122";
+        Assert.True(WidgetBackgroundCustomization.NormalizeOverrides(config));
+        Assert.Equal("#AA1122", WidgetBackgroundCustomization.GetColorOverride(config));
+    }
+
+    [Fact]
     public void NormalizeOverrides_DropsInvalidEntriesAndOrphanOptions()
     {
         var config = new WidgetConfig();
@@ -183,10 +256,32 @@ public sealed class WidgetBackgroundCustomizationTests : IDisposable
             TestPaths.FromRepository("src/DeskBox/Controls/WidgetShell.xaml"));
         Assert.Contains("CustomBackgroundImage", xaml, StringComparison.Ordinal);
         Assert.Contains("CustomBackgroundScrim", xaml, StringComparison.Ordinal);
+        Assert.Contains("CustomBackgroundColorLayer", xaml, StringComparison.Ordinal);
 
         string code = File.ReadAllText(
             TestPaths.FromRepository("src/DeskBox/Controls/WidgetShell.xaml.cs"));
         Assert.Contains("CustomBackgroundSourceProperty", code, StringComparison.Ordinal);
+        Assert.Contains("CustomBackgroundColorHexProperty", code, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void WindowPriorityChain_HonorsThePerWidgetColor()
+    {
+        // Image > per-widget color > global image modes > material: the
+        // window-side resolver assigns the color only when no image layer
+        // resolved.
+        string window = File.ReadAllText(TestPaths.FromRepository(
+            "src/DeskBox/Views/WidgetWindowBase.TitleIconCustomization.cs"));
+        Assert.Contains("GetColorOverride", window, StringComparison.Ordinal);
+        Assert.Contains("CustomBackgroundColorHex", window, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SettingsClearAll_CoversColorOnlyWidgets()
+    {
+        string coordinator = File.ReadAllText(TestPaths.FromRepository(
+            "src/DeskBox/Services/AppearanceSettingsCoordinator.cs"));
+        Assert.Contains("GetColorOverride", coordinator, StringComparison.Ordinal);
     }
 
     [Fact]

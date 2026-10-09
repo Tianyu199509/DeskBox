@@ -27,6 +27,25 @@ public sealed class WidgetSessionManager
     public bool IsRaised => State == WidgetSessionState.RaisedSession || State == WidgetSessionState.InteractionActive;
     public bool IsInteractionActive => _interactionDepth > 0;
 
+    /// <summary>
+    /// Raised when IsInteractionActive flips. The display-topology gate parks
+    /// restores while an interaction (drag/resize/capsule arrangement) runs so
+    /// long interactions cannot burn the coordinator's retry budget (spec 5.6).
+    /// </summary>
+    public event Action? InteractionActiveChanged;
+
+    private void OnInteractionDepthChanged()
+    {
+        try
+        {
+            InteractionActiveChanged?.Invoke();
+        }
+        catch (Exception ex)
+        {
+            _log?.Invoke($"[WidgetSession] InteractionActiveChanged handler failed: {ex.Message}");
+        }
+    }
+
     public void MarkDesktopResting(string reason)
     {
         _interactionDepth = 0;
@@ -58,6 +77,11 @@ public sealed class WidgetSessionManager
         }
 
         _interactionDepth++;
+        if (_interactionDepth == 1)
+        {
+            OnInteractionDepthChanged();
+        }
+
         SetState(WidgetSessionState.InteractionActive, reason);
     }
 
@@ -70,6 +94,11 @@ public sealed class WidgetSessionManager
         }
 
         _interactionDepth--;
+        if (_interactionDepth == 0)
+        {
+            OnInteractionDepthChanged();
+        }
+
         SetState(_interactionDepth > 0 ? WidgetSessionState.InteractionActive : _stateBeforeInteraction, reason);
     }
 

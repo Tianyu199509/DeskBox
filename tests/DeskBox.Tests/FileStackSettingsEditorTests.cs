@@ -524,7 +524,7 @@ public sealed class FileStackSettingsEditorTests : IDisposable
             overviewXaml,
             StringComparison.Ordinal);
         Assert.Contains(
-            "Text=\"{x:Bind FileStack.SettingsSummaryText, Mode=OneWay}\"",
+            "Description=\"{x:Bind FileStack.SettingsSummaryText, Mode=OneWay}\"",
             overviewXaml,
             StringComparison.Ordinal);
         Assert.Contains(
@@ -570,6 +570,6 @@ public sealed class FileStackSettingsEditorTests : IDisposable
         Assert.Contains("nameof(StacksEnabled)", bridge, StringComparison.Ordinal);
         Assert.DoesNotContain("nameof(AvailableOpenModeOptions)", bridge, StringComparison.Ordinal);
         Assert.DoesNotContain("nameof(CustomRules)", bridge, StringComparison.Ordinal);
-        Assert.Equal(34, Regex.Matches(bindableShell, @"nameof\(").Count);
+        Assert.Equal(33, Regex.Matches(bindableShell, @"nameof\(").Count);
     }
 }

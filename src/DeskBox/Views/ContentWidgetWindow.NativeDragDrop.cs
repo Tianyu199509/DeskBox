@@ -831,7 +831,11 @@ public sealed partial class ContentWidgetWindow
         _nativeFileDropLaunchTarget = null;
         RunOnNativeFileDropUiThread(file =>
             file.ClearDragSessionVisualState());
-        RunOnUi(() => WidgetShellControl.CancelGroupTabDragHover());
+        RunOnUi(() =>
+        {
+            WidgetShellControl.CancelGroupTabDragHover();
+            WidgetShellControl.SetGroupTabFileDragActive(false);
+        });
     }
 
     private void ObserveNativeFileDragPointer(
@@ -967,6 +971,10 @@ public sealed partial class ContentWidgetWindow
                 // DragOver can be older than the newest pointer location.
                 return;
             }
+            // File-bearing drags freeze the group tab strip wherever they are
+            // in the window: entering the strip already frozen skips the
+            // one-frame widen TabView reserves on its DragEnter.
+            WidgetShellControl.SetGroupTabFileDragActive(hasFileData);
             if (!hasFileData)
             {
                 WidgetShellControl.CancelGroupTabDragHover();
@@ -1044,6 +1052,7 @@ public sealed partial class ContentWidgetWindow
             screenY);
         _nativeFileDropItemTarget = null;
         _nativeFileDropLaunchTarget = null;
+        RunOnUi(() => WidgetShellControl.SetGroupTabFileDragActive(false));
     }
 
     /// <summary>

@@ -4,6 +4,7 @@
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:helpers="using:DeskBox.Helpers"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     Foreground="{ThemeResource TextFillColorPrimaryBrush}"
     mc:Ignorable="d">
@@ -105,6 +106,7 @@
             </Grid>
             <TextBlock
                 x:Name="LabelElement"
+                helpers:WidgetTextShadow.Cast="False"
                 HorizontalAlignment="Center"
                 VerticalAlignment="Center"
                 FontWeight="SemiBold"
@@ -119,6 +121,7 @@
                 Visibility="Collapsed" />
             <TextBlock
                 x:Name="CustomEmojiElement"
+                helpers:WidgetTextShadow.Cast="False"
                 HorizontalAlignment="Center"
                 VerticalAlignment="Center"
                 FontFamily="Segoe UI Emoji"

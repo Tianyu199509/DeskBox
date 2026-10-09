@@ -10,6 +10,7 @@ public sealed partial class DesktopOrganizationTransaction
     private readonly FileService _fileService;
     private readonly DesktopOrganizationRecoveryStore _recoveryStore;
     private readonly IDesktopOrganizationTransfer _transfer;
+    private readonly WidgetManager? _widgetManager;
 
     public bool HasPendingRecovery => _recoveryStore.HasPendingJournal;
 
@@ -19,12 +20,14 @@ public sealed partial class DesktopOrganizationTransaction
         SettingsService settingsService,
         FileService fileService,
         DesktopOrganizationRecoveryStore? recoveryStore = null,
-        IDesktopOrganizationTransfer? transfer = null)
+        IDesktopOrganizationTransfer? transfer = null,
+        WidgetManager? widgetManager = null)
     {
         _settingsService = settingsService;
         _fileService = fileService;
         _transfer = transfer ?? new DesktopOrganizationTransfer(fileService);
         _recoveryStore = recoveryStore ?? new DesktopOrganizationRecoveryStore();
+        _widgetManager = widgetManager;
     }
 
     public async Task<DesktopOrganizationExecutionResult> ExecuteAsync(
@@ -463,10 +466,30 @@ public sealed partial class DesktopOrganizationTransaction
                 BoundsCoordinateVersion = WidgetConfig.CurrentBoundsCoordinateVersion,
                 Width = settings.DefaultWidgetWidth,
                 Height = settings.DefaultWidgetHeight,
-                X = bounds?.X ?? 100,
-                Y = bounds?.Y ?? 100,
                 IsVisible = true
             };
+            // Organizer-planned rects flow through the placement funnel as
+            // explicit bounds (spec 5.8 step 1); without a manager (older
+            // callers) the planned rect is applied directly as before.
+            if (_widgetManager is not null)
+            {
+                _widgetManager.ApplyNewWidgetPlacement(
+                    config,
+                    new NewWidgetPlacementContext(
+                        bounds is null
+                            ? null
+                            : new Windows.Graphics.RectInt32(
+                                (int)Math.Round(bounds.Value.X),
+                                (int)Math.Round(bounds.Value.Y),
+                                Math.Max(1, (int)Math.Round(bounds.Value.Width)),
+                                Math.Max(1, (int)Math.Round(bounds.Value.Height)))));
+            }
+            else
+            {
+                config.X = bounds?.X ?? 100;
+                config.Y = bounds?.Y ?? 100;
+            }
+
             settings.Widgets.Add(config);
             created.Add(config);
         }

@@ -55,7 +55,10 @@ public sealed class WidgetTrayAnimationController : IDisposable
     private PointInt32? _targetPosition;
     private double? _offsetOverrideX;
     private double? _offsetOverrideY;
-    private bool _forceEdgeFade;
+    private bool _useCrossingFade;
+    private double _crossingFadeStartOffset;
+    private double _crossingFadeEndOffset;
+    private bool _crossingFadeAxisIsX;
     private double _centerAnchorX = 0.5;
     private double _centerAnchorY = 0.5;
     private float _showStartRotation;
@@ -126,16 +129,6 @@ public sealed class WidgetTrayAnimationController : IDisposable
     {
         _offsetOverrideX = offsetX;
         _offsetOverrideY = offsetY;
-    }
-
-    /// <summary>
-    /// Group-level flag from the batch orchestrator: the group's slide-out
-    /// target was confined to the current monitor's boundary (adjacent
-    /// display detected), so profiles must fade out during the slide.
-    /// </summary>
-    public void SetEdgeFadeOverride(bool enabled)
-    {
-        _forceEdgeFade = enabled;
     }
 
     public void CloakWindowForTrayShow()
@@ -247,7 +240,8 @@ public sealed class WidgetTrayAnimationController : IDisposable
         int durationMs = options.DurationMs;
         string effectiveDirection = WidgetAnimationSettings.GetEffectiveSlideDirection(
             effect, options.SlideDirection);
-        var slideOffsets = GetOffscreenSlideOffsets(effectiveDirection);
+        var slideOffsets = GetOffscreenSlideOffsets();
+        ResolveCrossingFadeState(effectiveDirection, GetDirectionalTravel(effectiveDirection, slideOffsets));
         var (dirX, dirY) = WidgetAnimationSettings.GetDirectionalOffset(options.SlideDirection, slideOffsets);
 
         ResetVisualMotionChannels(effect, effectiveDirection);
@@ -348,20 +342,43 @@ public sealed class WidgetTrayAnimationController : IDisposable
                 durationMs, true)
         };
 
-        if (_forceEdgeFade &&
-            (profile.ShowOffsetX != 0 || profile.ShowOffsetY != 0))
+        // Crossing fade owns opacity only for effects that would otherwise
+        // stay fully opaque while sliding; fade-bearing effects already dim
+        // the crossing sliver with their own curve.
+        _useCrossingFade &= profile.ShowOffsetX != 0 || profile.ShowOffsetY != 0;
+        if (_useCrossingFade &&
+            profile.ShowStartOpacity == RestingOpacity &&
+            profile.HideEndOpacity == RestingOpacity)
         {
-            // Confined slide: the window stops flush with the monitor
-            // boundary, so it must fade out instead of drifting onto the
-            // adjacent display.
+            // Endpoints anchor at transparent: the parked show state must be
+            // invisible on the adjacent display, and the per-frame boundary
+            // formula drives everything in between.
             profile = profile with
             {
                 ShowStartOpacity = SoftOpacity,
                 HideEndOpacity = SoftOpacity
             };
         }
+        else
+        {
+            _useCrossingFade = false;
+        }
 
         return profile;
+    }
+
+    private static double GetDirectionalTravel(
+        string effectiveDirection,
+        (double Left, double Right, double Up, double Down) slideOffsets)
+    {
+        return effectiveDirection switch
+        {
+            SettingsService.WidgetAnimationSlideDirectionLeft => slideOffsets.Left,
+            SettingsService.WidgetAnimationSlideDirectionUp => slideOffsets.Up,
+            SettingsService.WidgetAnimationSlideDirectionDown => slideOffsets.Down,
+            SettingsService.WidgetAnimationSlideDirectionRight => slideOffsets.Right,
+            _ => 0
+        };
     }
 
     /// <summary>
@@ -523,15 +540,18 @@ public sealed class WidgetTrayAnimationController : IDisposable
         var easing = _compositionResources.GetTrayEasing(compositor, easingIntensity, isShowing);
         var duration = TimeSpan.FromMilliseconds(durationMs);
 
-        StartOpacityAnimation(
-            visual,
-            compositor,
-            easing,
-            duration,
-            fromOpacity,
-            toOpacity,
-            usesConfinedSlideFade: _forceEdgeFade && HasWindowTravel(
-                fromOffsetX, toOffsetX, fromOffsetY, toOffsetY));
+        if (_useCrossingFade)
+        {
+            // Crossing fade replaces the opacity keyframe animation: opacity
+            // tracks the boundary-relative displacement of the window frame
+            // by frame. Anchor the first presented frame here so the parked
+            // state is already correct.
+            visual.Opacity = ComputeCrossingFadeOpacity(fromOffsetX, fromOffsetY);
+        }
+        else
+        {
+            StartOpacityAnimation(visual, compositor, easing, duration, fromOpacity, toOpacity);
+        }
 
         // Scale animation
         if (Math.Abs(fromScale - toScale) > 0.001f)
@@ -643,15 +663,18 @@ public sealed class WidgetTrayAnimationController : IDisposable
         var easing = _compositionResources.GetTrayEasing(compositor, easingIntensity, isShowing);
         var duration = TimeSpan.FromMilliseconds(durationMs);
 
-        StartOpacityAnimation(
-            visual,
-            compositor,
-            easing,
-            duration,
-            fromOpacity,
-            toOpacity,
-            usesConfinedSlideFade: _forceEdgeFade && HasWindowTravel(
-                fromOffsetX, toOffsetX, fromOffsetY, toOffsetY));
+        if (_useCrossingFade)
+        {
+            // Crossing fade replaces the opacity keyframe animation: opacity
+            // tracks the boundary-relative displacement of the window frame
+            // by frame. Anchor the first presented frame here so the parked
+            // state is already correct.
+            visual.Opacity = ComputeCrossingFadeOpacity(fromOffsetX, fromOffsetY);
+        }
+        else
+        {
+            StartOpacityAnimation(visual, compositor, easing, duration, fromOpacity, toOpacity);
+        }
 
         if (Math.Abs(fromScale - toScale) > 0.001f)
         {
@@ -688,6 +711,22 @@ public sealed class WidgetTrayAnimationController : IDisposable
             RefreshRateHz = _preparedRefreshRateHz,
             RefreshAnchorX = _preparedRefreshAnchorX,
             RefreshAnchorY = _preparedRefreshAnchorY,
+            FrameVisual = _useCrossingFade
+                ? progress =>
+                {
+                    // Crossing fade on the shared clock: opacity follows this
+                    // window's own boundary-relative displacement, so lockstep
+                    // group slides still dissolve each window as it crosses.
+                    if (capturedGeneration != Generation)
+                    {
+                        return;
+                    }
+
+                    GetCachedRootVisual().Opacity = ComputeCrossingFadeOpacity(
+                        Lerp(fromOffsetX, toOffsetX, progress),
+                        Lerp(fromOffsetY, toOffsetY, progress));
+                }
+                : null,
             IsValid = () => capturedGeneration == Generation,
             Completed = () => CompleteAnimation(toOffsetX, toOffsetY, isShowing, capturedGeneration, completed,
                 positionAlreadyCommitted: true),
@@ -759,7 +798,15 @@ public sealed class WidgetTrayAnimationController : IDisposable
             double currentOffsetX = Lerp(_renderFromOffsetX, _renderToOffsetX, easedProgress);
             double currentOffsetY = Lerp(_renderFromOffsetY, _renderToOffsetY, easedProgress);
 
-            // Only move the window — opacity/scale are GPU-driven by Composition animations.
+            // Move the window; opacity/scale stay GPU-driven by Composition
+            // animations — except the crossing fade, which rides this very
+            // position clock so it stays pixel-exact against the monitor
+            // boundary regardless of easing.
+            if (_useCrossingFade)
+            {
+                GetCachedRootVisual().Opacity = ComputeCrossingFadeOpacity(currentOffsetX, currentOffsetY);
+            }
+
             long started = Stopwatch.GetTimestamp();
             bool submitted = ApplyWindowOffset(currentOffsetX, currentOffsetY, force: finalFrame);
             if (submitted)
@@ -1050,24 +1097,13 @@ public sealed class WidgetTrayAnimationController : IDisposable
         return _cachedCompositor ??= visual.Compositor;
     }
 
-    private static bool HasWindowTravel(
-        double fromOffsetX,
-        double toOffsetX,
-        double fromOffsetY,
-        double toOffsetY)
-    {
-        return Math.Abs(toOffsetX - fromOffsetX) > 0.5 ||
-               Math.Abs(toOffsetY - fromOffsetY) > 0.5;
-    }
-
     private void StartOpacityAnimation(
         Microsoft.UI.Composition.Visual visual,
         Microsoft.UI.Composition.Compositor compositor,
         Microsoft.UI.Composition.CompositionEasingFunction easing,
         TimeSpan duration,
         float fromOpacity,
-        float toOpacity,
-        bool usesConfinedSlideFade)
+        float toOpacity)
     {
         if (Math.Abs(fromOpacity - toOpacity) <= 0.001f)
         {
@@ -1078,15 +1114,6 @@ public sealed class WidgetTrayAnimationController : IDisposable
         var opacityAnim = _compositionResources.GetScalar(compositor, WidgetAnimationTemplate.TrayOpacity);
         opacityAnim.Duration = duration;
         opacityAnim.InsertKeyFrame(0, fromOpacity);
-        if (usesConfinedSlideFade)
-        {
-            // Confined slides may briefly cross the monitor boundary (minimum
-            // travel); keep the crossing half of the fade far along so the
-            // sliver touching the adjacent display never reads as the widget
-            // landing there.
-            opacityAnim.InsertKeyFrame(0.5f, 0.25f, easing);
-        }
-
         opacityAnim.InsertKeyFrame(1, toOpacity, easing);
         visual.Opacity = fromOpacity;
         visual.StartAnimation("Opacity", opacityAnim);
@@ -1195,8 +1222,7 @@ public sealed class WidgetTrayAnimationController : IDisposable
         _cachedRootClip = null;
     }
 
-    private (double Left, double Right, double Up, double Down) GetOffscreenSlideOffsets(
-        string effectiveDirection)
+    private (double Left, double Right, double Up, double Down) GetOffscreenSlideOffsets()
     {
         if (_offsetOverrideX.HasValue || _offsetOverrideY.HasValue)
         {
@@ -1226,66 +1252,122 @@ public sealed class WidgetTrayAnimationController : IDisposable
         }
 
         RectInt32 workArea = displayArea.WorkArea;
-        RectInt32 outerBounds = displayArea.OuterBounds;
         var bounds = _getAnimationBounds();
         double x = bounds.X;
         double y = bounds.Y;
         double width = Math.Max(MinWidgetSlideOffset, bounds.Width);
         double height = Math.Max(MinWidgetSlideOffset, bounds.Height);
 
-        // Unconfined targets push the leading edge past the monitor boundary
-        // by OffscreenSlidePadding — correct when nothing abuts this screen,
-        // but on an adjacent display the widget lands fully visible there.
-        bool adjacentLeft = WidgetSlideBoundaryPolicy.HasAdjacentDisplayBeyondEdge(
-            outerBounds, SettingsService.WidgetAnimationSlideDirectionLeft);
-        bool adjacentRight = WidgetSlideBoundaryPolicy.HasAdjacentDisplayBeyondEdge(
-            outerBounds, SettingsService.WidgetAnimationSlideDirectionRight);
-        bool adjacentUp = WidgetSlideBoundaryPolicy.HasAdjacentDisplayBeyondEdge(
-            outerBounds, SettingsService.WidgetAnimationSlideDirectionUp);
-        bool adjacentDown = WidgetSlideBoundaryPolicy.HasAdjacentDisplayBeyondEdge(
-            outerBounds, SettingsService.WidgetAnimationSlideDirectionDown);
+        double left = Math.Max(MinWidgetSlideOffset, (x + width) - workArea.X + OffscreenSlidePadding);
+        double right = Math.Max(MinWidgetSlideOffset, (workArea.X + workArea.Width) - x + OffscreenSlidePadding);
+        double up = Math.Max(MinWidgetSlideOffset, (y + height) - workArea.Y + OffscreenSlidePadding);
+        double down = Math.Max(MinWidgetSlideOffset, (workArea.Y + workArea.Height) - y + OffscreenSlidePadding);
+        return (left, right, up, down);
+    }
 
-        double left = Math.Max(
-            MinWidgetSlideOffset,
-            Math.Abs(WidgetSlideBoundaryPolicy.ResolveSlideOffset(
-                -(x + width - workArea.X + OffscreenSlidePadding),
-                farEdge: x,
-                workAreaEdge: workArea.X,
-                adjacentLeft).Offset));
-        double right = Math.Max(
-            MinWidgetSlideOffset,
-            Math.Abs(WidgetSlideBoundaryPolicy.ResolveSlideOffset(
-                (workArea.X + workArea.Width) - x + OffscreenSlidePadding,
-                farEdge: x + width,
-                workAreaEdge: workArea.X + workArea.Width,
-                adjacentRight).Offset));
-        double up = Math.Max(
-            MinWidgetSlideOffset,
-            Math.Abs(WidgetSlideBoundaryPolicy.ResolveSlideOffset(
-                -(y + height - workArea.Y + OffscreenSlidePadding),
-                farEdge: y,
-                workAreaEdge: workArea.Y,
-                adjacentUp).Offset));
-        double down = Math.Max(
-            MinWidgetSlideOffset,
-            Math.Abs(WidgetSlideBoundaryPolicy.ResolveSlideOffset(
-                (workArea.Y + workArea.Height) - y + OffscreenSlidePadding,
-                farEdge: y + height,
-                workAreaEdge: workArea.Y + workArea.Height,
-                adjacentDown).Offset));
+    /// <summary>
+    /// Arms the per-window crossing fade when the slide direction leads onto
+    /// an adjacent display. The fade span is derived from this window's own
+    /// resting geometry, so lockstep group slides still dissolve each window
+    /// as it individually crosses the monitor boundary.
+    /// </summary>
+    private void ResolveCrossingFadeState(string effectiveDirection, double unconfinedTravel)
+    {
+        _useCrossingFade = false;
+        _crossingFadeStartOffset = 0;
+        _crossingFadeEndOffset = 0;
+        _crossingFadeAxisIsX = false;
 
-        // Only the direction the effect actually slides in decides whether
-        // the profile fades; the other three measurements stay untouched.
-        _forceEdgeFade = effectiveDirection switch
+        if (unconfinedTravel <= 0 ||
+            effectiveDirection == SettingsService.WidgetAnimationSlideDirectionNone)
         {
-            SettingsService.WidgetAnimationSlideDirectionLeft => adjacentLeft,
-            SettingsService.WidgetAnimationSlideDirectionRight => adjacentRight,
-            SettingsService.WidgetAnimationSlideDirectionUp => adjacentUp,
-            SettingsService.WidgetAnimationSlideDirectionDown => adjacentDown,
-            _ => false
+            return;
+        }
+
+        // Resting geometry, not physical: show profiles are re-created after
+        // prepare has already parked the HWND on the adjacent display, and the
+        // fade span must describe the resting position it animates back to.
+        Windows.Foundation.Rect rest = GetRestingAnimationBounds();
+        var displayArea = DisplayArea.GetFromPoint(
+            new PointInt32(
+                (int)Math.Round(rest.X),
+                (int)Math.Round(rest.Y)),
+            DisplayAreaFallback.Primary);
+
+        RectInt32 workArea = displayArea.WorkArea;
+        RectInt32 outerBounds = displayArea.OuterBounds;
+        double x = rest.X;
+        double y = rest.Y;
+        double width = Math.Max(MinWidgetSlideOffset, rest.Width);
+        double height = Math.Max(MinWidgetSlideOffset, rest.Height);
+
+        WidgetSlideBoundaryPolicy.CrossingFadeDecision decision = effectiveDirection switch
+        {
+            SettingsService.WidgetAnimationSlideDirectionLeft =>
+                WidgetSlideBoundaryPolicy.ResolveCrossingFade(
+                    unconfinedTravel,
+                    farEdge: x,
+                    nearEdge: x + width,
+                    workAreaEdge: workArea.X,
+                    WidgetSlideBoundaryPolicy.HasAdjacentDisplayBeyondEdge(
+                        outerBounds, SettingsService.WidgetAnimationSlideDirectionLeft)),
+            SettingsService.WidgetAnimationSlideDirectionUp =>
+                WidgetSlideBoundaryPolicy.ResolveCrossingFade(
+                    unconfinedTravel,
+                    farEdge: y,
+                    nearEdge: y + height,
+                    workAreaEdge: workArea.Y,
+                    WidgetSlideBoundaryPolicy.HasAdjacentDisplayBeyondEdge(
+                        outerBounds, SettingsService.WidgetAnimationSlideDirectionUp)),
+            SettingsService.WidgetAnimationSlideDirectionDown =>
+                WidgetSlideBoundaryPolicy.ResolveCrossingFade(
+                    unconfinedTravel,
+                    farEdge: y + height,
+                    nearEdge: y,
+                    workAreaEdge: workArea.Y + workArea.Height,
+                    WidgetSlideBoundaryPolicy.HasAdjacentDisplayBeyondEdge(
+                        outerBounds, SettingsService.WidgetAnimationSlideDirectionDown)),
+            SettingsService.WidgetAnimationSlideDirectionRight =>
+                WidgetSlideBoundaryPolicy.ResolveCrossingFade(
+                    unconfinedTravel,
+                    farEdge: x + width,
+                    nearEdge: x,
+                    workAreaEdge: workArea.X + workArea.Width,
+                    WidgetSlideBoundaryPolicy.HasAdjacentDisplayBeyondEdge(
+                        outerBounds, SettingsService.WidgetAnimationSlideDirectionRight)),
+            _ => default
         };
 
-        return (left, right, up, down);
+        if (!decision.UseCrossingFade)
+        {
+            return;
+        }
+
+        _useCrossingFade = true;
+        _crossingFadeStartOffset = decision.StartOffset;
+        _crossingFadeEndOffset = decision.EndOffset;
+        _crossingFadeAxisIsX = effectiveDirection is
+            SettingsService.WidgetAnimationSlideDirectionLeft or
+            SettingsService.WidgetAnimationSlideDirectionRight;
+    }
+
+    /// <summary>
+    /// Opacity implied by the window's current slide displacement: fully
+    /// opaque until the leading edge reaches the monitor boundary, then a
+    /// linear fade to invisible as the window crosses onto the adjacent
+    /// display. Symmetric for show (displacement shrinks) and hide.
+    /// </summary>
+    private float ComputeCrossingFadeOpacity(double offsetX, double offsetY)
+    {
+        double travel = Math.Abs(_crossingFadeAxisIsX ? offsetX : offsetY);
+        double span = _crossingFadeEndOffset - _crossingFadeStartOffset;
+        if (span <= 0)
+        {
+            return travel >= _crossingFadeEndOffset ? SoftOpacity : RestingOpacity;
+        }
+
+        double progress = (travel - _crossingFadeStartOffset) / span;
+        return (float)(1.0 - Math.Clamp(progress, 0.0, 1.0));
     }
 
     private Microsoft.UI.Composition.Visual GetCachedRootVisual()

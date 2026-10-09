@@ -162,6 +162,13 @@ Shared shell and window helpers:
 - `src/DeskBox/Services/WidgetTitleBarMetrics.cs`
 - `src/DeskBox/Services/WidgetSessionManager.cs`
 
+Display binding (widgets pinned to a display by hardware identity; requirements in `docs/requirements/widget-screen-binding.md`):
+
+- `src/DeskBox/Services/WidgetScreenCatalog.cs`: enumerates monitors into stable identities (PnP device-interface id via `Win32Helper.ResolveStableMonitorId`, rejecting unstable `\\.\DISPLAYn` fallbacks) and resolves bound widgets/groups to a target work area.
+- `src/DeskBox/Services/WidgetScreenMenuBuilder.cs`: builds the per-widget/group "show on" context-menu section (auto / follow primary / pinned to a named display).
+- `src/DeskBox/Views/SettingsSections/DisplaySettingsSection.xaml(.cs)`: the Displays settings page — arrangement preview (accent-filled selection applied in code-behind), identify overlay trigger, per-screen widget lists with inline rebind combos, pin-all, and the clearable default display for new widgets.
+- `src/DeskBox/Views/DisplayIdentifyOverlayWindow.cs`: borderless topmost per-monitor overlay that flashes the display number and fades out (classic layered-window alpha).
+
 Current windows:
 
 - `src/DeskBox/Views/QuickCaptureWidgetWindow.xaml.cs`: QuickCapture / note widget.
@@ -505,7 +512,7 @@ QuickCapture data:
 - `%LocalAppData%/DeskBox/data/quick-capture/images/...`
 - `%LocalAppData%/DeskBox/data/quick-capture/thumbnails/...`
 
-Uninstalling the app may remove binaries but should not be assumed to remove `%LocalAppData%/DeskBox`. This is user data.
+Uninstalling the app may remove binaries but should not be assumed to remove `%LocalAppData%/DeskBox`. This is user data. (Correction 2026-10-04: this holds for the direct-install channel. The store build's `%LocalAppData%` writes are redirected by MSIX AppData write virtualization to `Packages/[PFN]/LocalCache`, which is removed on uninstall and preserved only across same-PackageFamilyName updates — see `module-boundary-roadmap-20260918.md`.)
 
 ## Adding A New Content Widget
 

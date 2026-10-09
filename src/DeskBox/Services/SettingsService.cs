@@ -378,6 +378,11 @@ public const int DefaultSearchMaxResults = 100;
                 [nameof(AppSettings.WidgetGroups)] = DefaultPreferencePreservationReason.UserData,
                 [nameof(AppSettings.WidgetTopologyLayouts)] = DefaultPreferencePreservationReason.UserData,
                 [nameof(AppSettings.ActiveWidgetTopologyKey)] = DefaultPreferencePreservationReason.RuntimeState,
+                // Device-local monitor identity; the screen it names may not
+                // exist on the machine "reset defaults" runs on.
+                [nameof(AppSettings.WidgetDefaultBoundScreenId)] = DefaultPreferencePreservationReason.UserData,
+                [nameof(AppSettings.WidgetNewPlacementTarget)] = DefaultPreferencePreservationReason.UserChoice,
+                [nameof(AppSettings.WidgetDisplayDisconnectBehavior)] = DefaultPreferencePreservationReason.UserChoice,
                 [nameof(AppSettings.WidgetCapsuleBarOrder)] = DefaultPreferencePreservationReason.UserData,
                 [nameof(AppSettings.WidgetCapsuleFreePlacements)] = DefaultPreferencePreservationReason.UserData,
                 [nameof(AppSettings.DeletedWidgetIds)] = DefaultPreferencePreservationReason.UserData,
@@ -411,6 +416,9 @@ public const int DefaultSearchMaxResults = 100;
 
     private readonly string _settingsPath;
     private AppSettings _settings = new();
+    // Set at load when the on-disk settings.json carries a schema version
+    // from a newer build; every save is refused for the session.
+    private bool _settingsSchemaNewerThanBuild;
     private readonly object _lock = new();
 
     // The settings.json / widget-layout.json commit pair is protected by a
@@ -530,6 +538,9 @@ public const int DefaultSearchMaxResults = 100;
             WidgetGroupTitleDisplayModes.IconAndText;
         settings.WidgetGroupWheelSwitchEnabled = true;
         settings.WidgetGroupHoverSwitchEnabled = false;
+        // Reset through the slice so the facade-access ratchet stays untouched.
+        settings.WidgetLayout.WidgetGroupSwitchAnimationStyle =
+            WidgetGroupSwitchAnimationStyles.Auto;
         settings.WidgetGroupsEnabled = true;
         settings.LegacyWidgetCapsuleModeEnabled = null;
         settings.WidgetCompactWidthMode = WidgetCompactWidthModeAligned;
@@ -760,6 +771,20 @@ settings.FocusClickedWidgetOnRaise = false;
             lock (_lock)
             {
                 _settings = loadResult.Value;
+                // A settings.json stamped by a NEWER build must never be
+                // overwritten by this one: the typed model silently drops its
+                // unknown fields, so a save would strip them irreversibly
+                // (and the stripped file would never re-migrate). Same stance
+                // the widget-layout store takes via Layout.CanWrite.
+                _settingsSchemaNewerThanBuild = loadedFromDisk &&
+                    _settings.SchemaVersion > SettingsMigrationPipeline.CurrentSchemaVersion;
+                if (_settingsSchemaNewerThanBuild)
+                {
+                    App.Log(
+                        $"[SettingsService] settings.json schema {_settings.SchemaVersion} is newer " +
+                        $"than this build ({SettingsMigrationPipeline.CurrentSchemaVersion}); " +
+                        "this session's changes cannot persist");
+                }
             }
 
             bool changed;
@@ -970,6 +995,15 @@ settings.FocusClickedWidgetOnRaise = false;
 
     private async Task<bool> SaveToFileOnlyAsync()
     {
+        if (_settingsSchemaNewerThanBuild)
+        {
+            App.Log(
+                "[SettingsService] Save refused: settings.json schema " +
+                $"{_settings.SchemaVersion} is newer than this build understands; " +
+                "settings changes cannot persist");
+            return false;
+        }
+
         await FileWriteLock.WaitAsync();
         try
         {
@@ -1411,6 +1445,63 @@ settings.FocusClickedWidgetOnRaise = false;
         }
     }
 
+    /// <summary>
+    /// Downgrades pins that lost their bound monitor id (hand-edited settings,
+    /// partial migration) back to the legacy unbound chain so resolution can
+    /// never dead-end on an empty reference. Internal for direct policy tests.
+    /// </summary>
+    internal static void NormalizeScreenBindings(AppSettings settings)
+    {
+        foreach (WidgetConfig widget in settings.Widgets)
+        {
+            if (widget.ScreenBindingMode == WidgetScreenBindingMode.Pinned &&
+                string.IsNullOrWhiteSpace(widget.BoundScreenId))
+            {
+                widget.ScreenBindingMode = WidgetScreenBindingMode.Unbound;
+                widget.BoundScreenId = null;
+            }
+        }
+
+        foreach (WidgetGroupConfig group in settings.WidgetGroups)
+        {
+            if (group.ScreenBindingMode == WidgetScreenBindingMode.Pinned &&
+                string.IsNullOrWhiteSpace(group.BoundScreenId))
+            {
+                group.ScreenBindingMode = WidgetScreenBindingMode.Unbound;
+                group.BoundScreenId = null;
+            }
+        }
+
+        settings.WidgetNewPlacementTarget = NormalizeWidgetNewPlacementTarget(
+            settings.WidgetNewPlacementTarget);
+        settings.WidgetDisplayDisconnectBehavior = NormalizeWidgetDisplayDisconnectBehavior(
+            settings.WidgetDisplayDisconnectBehavior);
+    }
+
+    public const string WidgetNewPlacementCursorDisplay = "CursorDisplay";
+    public const string WidgetNewPlacementMainDisplay = "MainDisplay";
+    public const string WidgetNewPlacementSpecificDisplay = "SpecificDisplay";
+
+    public static string NormalizeWidgetNewPlacementTarget(string? value)
+    {
+        return value switch
+        {
+            WidgetNewPlacementMainDisplay => WidgetNewPlacementMainDisplay,
+            WidgetNewPlacementSpecificDisplay => WidgetNewPlacementSpecificDisplay,
+            _ => WidgetNewPlacementCursorDisplay
+        };
+    }
+
+    public const string WidgetDisplayDisconnectMoveToRemaining = "MoveToRemaining";
+    public const string WidgetDisplayDisconnectCollapseToCapsule = "CollapseToCapsule";
+
+    public static string NormalizeWidgetDisplayDisconnectBehavior(string? value)
+    {
+        return string.Equals(value, WidgetDisplayDisconnectCollapseToCapsule)
+            ? WidgetDisplayDisconnectCollapseToCapsule
+            : WidgetDisplayDisconnectMoveToRemaining;
+    }
+
     private static bool NormalizeWidgetTopologyLayouts(AppSettings settings)
     {
         bool changed = false;
@@ -1418,9 +1509,11 @@ settings.FocusClickedWidgetOnRaise = false;
         {
             settings.WidgetTopologyLayouts = [];
             settings.ActiveWidgetTopologyKey = null;
+            NormalizeScreenBindings(settings);
             return true;
         }
 
+        NormalizeScreenBindings(settings);
         foreach (string invalidKey in settings.WidgetTopologyLayouts
                      .Where(pair => string.IsNullOrWhiteSpace(pair.Key) || pair.Value is null)
                      .Select(pair => pair.Key)

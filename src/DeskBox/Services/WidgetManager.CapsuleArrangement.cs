@@ -388,6 +388,10 @@ public sealed partial class WidgetManager
             config.CompactPlacement = CreatePlacement(bounds);
             FindLoadedWindow(id)?.ApplyCompactArrangement(bounds, constrainSize: true);
             SynchronizeGroupLayoutFromMember(config);
+            // Every capsule on the bar is a user placement (spec 5.4): the
+            // bar drag can carry capsules across displays, so each one
+            // commits its own home/entry update.
+            CommitUserPlacement(config, bounds, bounds, WidgetPlacementSource.CapsuleBarDrag, captureIntent: false);
         }
 
         NoteWidgetWindowsMoved();
@@ -826,6 +830,7 @@ public sealed partial class WidgetManager
             PositionMarginY = placement.PositionMarginY,
             PositionMonitorKey = placement.PositionMonitorKey,
             PositionMonitorDeviceName = placement.PositionMonitorDeviceName,
+            PositionMonitorStableId = placement.PositionMonitorStableId,
             PositionMonitorWasPrimary = placement.PositionMonitorWasPrimary,
             BoundsCoordinateVersion = placement.BoundsCoordinateVersion
         };

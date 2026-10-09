@@ -158,6 +158,56 @@ public sealed class WidgetCompactTrayVisibilityContractTests
         Assert.True(recoveryIndex >= 0 && recoveryIndex < synchronizeIndex);
     }
 
+    /// <summary>
+    /// A hidden widget can never satisfy the warm-up gate, and no in-loop
+    /// delay changes that — only a native show can. The deferred run must
+    /// stop instead of polling until the next lifecycle event (perf-log
+    /// flood, 2026-10-03: hidden widgets logged CompactExpansionWarmupDeferred
+    /// every ~320 ms and rotated the log within an hour).
+    /// </summary>
+    [Fact]
+    public void WarmupRetry_StopsWhileHiddenAndReliesOnShowPathToRearm()
+    {
+        string source = File.ReadAllText(TestPaths.FromRepository(
+            "src/DeskBox/Views/WidgetWindowBase.Collapse.cs"));
+        string warmupRun = ExtractSection(
+            source,
+            "private async Task RunCompactExpansionWarmupAsync(",
+            "private static async Task<bool> WaitForCompactExpansionWarmupGateAsync(");
+        string visibility = ExtractSection(
+            source,
+            "protected void NotifyCompactHostVisibilityChanged(bool isVisible)",
+            "private void StartCompactHoverRecoveryProbe()");
+
+        int stopIndex = warmupRun.IndexOf(
+            "action=stop-until-shown",
+            StringComparison.Ordinal);
+        int retryIndex = warmupRun.IndexOf(
+            "action=retry",
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "WidgetCompactWarmupPolicy.ShouldKeepWaiting(warmupSnapshot)",
+            warmupRun,
+            StringComparison.Ordinal);
+        Assert.True(stopIndex >= 0 && stopIndex < retryIndex);
+
+        // Deferral logging is deduplicated so a long-lived transient block
+        // (cursor parked on the capsule) cannot flood the log either.
+        Assert.Contains("lastDeferral", warmupRun, StringComparison.Ordinal);
+
+        // The re-arm contract the stop relies on: hiding cancels the run,
+        // and every show path funnels through this method, which queues an
+        // urgent warm-up for the now-visible window.
+        int hideCancelIndex = visibility.IndexOf(
+            "CancelCompactExpansionWarmup();",
+            StringComparison.Ordinal);
+        int showRearmIndex = visibility.IndexOf(
+            "QueueCompactExpansionWarmup(urgent: true);",
+            StringComparison.Ordinal);
+        Assert.True(hideCancelIndex >= 0);
+        Assert.True(showRearmIndex > hideCancelIndex);
+    }
+
     [Fact]
     public void StaleRoutedDragSession_DoesNotPermanentlyBlockHoverExpansion()
     {

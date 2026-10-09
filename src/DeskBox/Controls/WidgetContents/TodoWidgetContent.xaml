@@ -4,6 +4,7 @@
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:controls="using:DeskBox.Controls"
+    xmlns:helpers="using:DeskBox.Helpers"
     xmlns:toolkit="using:CommunityToolkit.WinUI.Controls"
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
@@ -365,6 +366,7 @@
                                     Opacity="{Binding ContentOpacity}"
                                     Spacing="2">
                                     <TextBlock
+                                        helpers:WidgetTextShadow.Cast="True"
                                         FontSize="{Binding ElementName=TodoListView, Path=DataContext.TextSize}"
                                         LineHeight="{Binding ElementName=TodoListView, Path=DataContext.ItemTextLineHeight}"
                                         LineStackingStrategy="BlockLineHeight"
@@ -376,6 +378,7 @@
 
                                     <StackPanel Orientation="Horizontal" Spacing="6">
                                         <TextBlock
+                                            helpers:WidgetTextShadow.Cast="True"
                                             FontSize="{Binding ElementName=TodoListView, Path=DataContext.SecondaryTextSize}"
                                             Foreground="{ThemeResource TextFillColorTertiaryBrush}"
                                             MaxLines="1"
@@ -383,6 +386,7 @@
                                             TextTrimming="CharacterEllipsis"
                                             Visibility="{Binding DueStatusNormalVisibility}" />
                                         <TextBlock
+                                            helpers:WidgetTextShadow.Cast="True"
                                             FontSize="{Binding ElementName=TodoListView, Path=DataContext.SecondaryTextSize}"
                                             Foreground="{ThemeResource SystemFillColorCautionBrush}"
                                             MaxLines="1"
@@ -391,7 +395,7 @@
                                             Visibility="{Binding DueStatusOverdueVisibility}" />
                                         <StackPanel Orientation="Horizontal" Spacing="2" Visibility="{Binding AttachmentSummaryVisibility}">
                                             <FontIcon FontSize="{Binding ElementName=TodoListView, Path=DataContext.SmallIconSize}" Foreground="{ThemeResource TextFillColorTertiaryBrush}" Glyph="&#xE723;" />
-                                            <TextBlock FontSize="{Binding ElementName=TodoListView, Path=DataContext.SecondaryTextSize}" Foreground="{ThemeResource TextFillColorTertiaryBrush}" Text="{Binding AttachmentSummaryText}" />
+                                            <TextBlock helpers:WidgetTextShadow.Cast="True" FontSize="{Binding ElementName=TodoListView, Path=DataContext.SecondaryTextSize}" Foreground="{ThemeResource TextFillColorTertiaryBrush}" Text="{Binding AttachmentSummaryText}" />
                                         </StackPanel>
                                     </StackPanel>
 
@@ -404,7 +408,7 @@
                                         Visibility="{Binding RecurringHistoryToggleVisibility}">
                                         <StackPanel Orientation="Horizontal" Spacing="4">
                                             <FontIcon FontSize="{Binding ElementName=TodoListView, Path=DataContext.SmallIconSize}" Glyph="{Binding RecurringHistoryToggleGlyph}" />
-                                            <TextBlock FontSize="{Binding ElementName=TodoListView, Path=DataContext.SecondaryTextSize}" Text="{Binding RecurringHistoryToggleText}" />
+                                            <TextBlock helpers:WidgetTextShadow.Cast="True" FontSize="{Binding ElementName=TodoListView, Path=DataContext.SecondaryTextSize}" Text="{Binding RecurringHistoryToggleText}" />
                                         </StackPanel>
                                     </Button>
                                 </StackPanel>
@@ -469,12 +473,14 @@
                     Opacity="0.72"
                     Style="{StaticResource WidgetEmptyStateIconStyle}" />
                 <TextBlock
+                    helpers:WidgetTextShadow.Cast="True"
                     FontSize="{Binding TitleTextSize}"
                     FontWeight="SemiBold"
                     Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                     Style="{StaticResource WidgetEmptyStateTitleTextStyle}"
                     Text="{Binding EmptyStateTitle}" />
                 <TextBlock
+                    helpers:WidgetTextShadow.Cast="True"
                     FontSize="{Binding SecondaryTextSize}"
                     Foreground="{ThemeResource TextFillColorTertiaryBrush}"
                     Style="{StaticResource WidgetEmptyStateDescriptionTextStyle}"

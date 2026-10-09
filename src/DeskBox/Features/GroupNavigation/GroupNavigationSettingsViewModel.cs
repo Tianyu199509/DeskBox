@@ -7,20 +7,22 @@ namespace DeskBox.Features.GroupNavigation;
 /// <summary>
 /// Group-navigation section editor and binding surface (batch 44). The
 /// WidgetGroups settings section switches its DataContext to this editor:
-/// the four default fields (navigation style, title display mode, wheel
-/// switch, hover switch) bind TwoWay through <see cref="IGroupNavigationSettings"/>
-/// with the coordinator owning normalization, the unchanged-write skip and
-/// the debounced save, while the existing-groups projection is built by the
-/// shell's group-editing state machine and pushed in as read-only view
-/// state. The editor stays WinUI-free: visibility gates are booleans the XAML
-/// runs through <c>SettingsBoolToVisibilityConverter</c>, and the host-side
-/// group-presentation notification stays on the shell through the
+/// the five default fields (navigation style, title display mode, wheel
+/// switch, hover switch, switch animation) bind TwoWay through
+/// <see cref="IGroupNavigationSettings"/> with the coordinator owning
+/// normalization, the unchanged-write skip and the debounced save, while the
+/// existing-groups projection is built by the shell's group-editing state
+/// machine and pushed in as read-only view state. The editor stays
+/// WinUI-free: visibility gates are booleans the XAML runs through
+/// <c>SettingsBoolToVisibilityConverter</c>, and the host-side group-
+/// presentation notification stays on the shell through the
 /// <see cref="PresentationUserChanged"/> event.
 /// </summary>
 public sealed partial class GroupNavigationSettingsViewModel : ObservableObject
 {
     private const string NavigationKeyPrefix = "Settings.WidgetGroup";
     private const string TitleKeyPrefix = "Settings.WidgetGroup";
+    private const string SwitchAnimationKeyPrefix = "Settings.WidgetGroup";
 
     private readonly IGroupNavigationSettings _settings;
     private readonly Func<string, string> _localize;
@@ -28,11 +30,13 @@ public sealed partial class GroupNavigationSettingsViewModel : ObservableObject
     private bool _isSyncingPresentation;
     private string[]? _cachedNavigationStyleNames;
     private string[]? _cachedTitleDisplayModeNames;
+    private string[]? _cachedSwitchAnimationNames;
 
     private string _defaultNavigationStyle = WidgetGroupNavigationStyles.Stack;
     private string _defaultTitleDisplayMode = WidgetGroupTitleDisplayModes.IconAndText;
     private bool _wheelSwitchEnabled = true;
     private bool _hoverSwitchEnabled = true;
+    private string _defaultSwitchAnimationStyle = WidgetGroupSwitchAnimationStyles.Auto;
     private IReadOnlyList<WidgetGroupSettingsItem> _existingGroups = [];
     private bool _hasExistingGroups;
 
@@ -196,6 +200,57 @@ public sealed partial class GroupNavigationSettingsViewModel : ObservableObject
         }
     }
 
+    public string DefaultSwitchAnimationStyle
+    {
+        get => _defaultSwitchAnimationStyle;
+        set
+        {
+            string normalized = WidgetGroupSwitchAnimationStyles.Normalize(value);
+            if (!SetProperty(ref _defaultSwitchAnimationStyle, normalized))
+            {
+                return;
+            }
+
+            if (_isSyncingPresentation)
+            {
+                return;
+            }
+
+            if (_settings.SetWidgetGroupSwitchAnimationStyle(normalized))
+            {
+                PresentationUserChanged?.Invoke();
+            }
+        }
+    }
+
+    public IReadOnlyList<SettingsOption> AvailableSwitchAnimationOptions
+    {
+        get
+        {
+            // Build a real SettingsOption[] (not a collection expression): the
+            // hidden read-only-array type cannot marshal across the WinRT ABI
+            // in Native AOT builds and would leave the ItemsSource empty.
+            string[] values =
+            [
+                WidgetGroupSwitchAnimationStyles.Auto,
+                WidgetGroupSwitchAnimationStyles.Vertical,
+                WidgetGroupSwitchAnimationStyles.Horizontal,
+                WidgetGroupSwitchAnimationStyles.Fade,
+                WidgetGroupSwitchAnimationStyles.None
+            ];
+            _cachedSwitchAnimationNames ??= values
+                .Select(value => _localize(SwitchAnimationKeyPrefix + "SwitchAnimation." + value))
+                .ToArray();
+            var options = new SettingsOption[values.Length];
+            for (int index = 0; index < values.Length; index++)
+            {
+                options[index] = new SettingsOption(values[index], _cachedSwitchAnimationNames[index]);
+            }
+
+            return options;
+        }
+    }
+
     // --- Pushed existing-groups projection (shell-owned state machine) ---
 
     public IReadOnlyList<WidgetGroupSettingsItem> ExistingGroups => _existingGroups;
@@ -239,6 +294,8 @@ public sealed partial class GroupNavigationSettingsViewModel : ObservableObject
                 allowFollowDefault: false);
             WheelSwitchEnabled = snapshot.WheelSwitchEnabled;
             HoverSwitchEnabled = snapshot.HoverSwitchEnabled;
+            DefaultSwitchAnimationStyle = WidgetGroupSwitchAnimationStyles.Normalize(
+                snapshot.SwitchAnimationStyle);
         }
         finally
         {
@@ -254,8 +311,10 @@ public sealed partial class GroupNavigationSettingsViewModel : ObservableObject
     {
         _cachedNavigationStyleNames = null;
         _cachedTitleDisplayModeNames = null;
+        _cachedSwitchAnimationNames = null;
         OnPropertyChanged(nameof(AvailableNavigationStyleOptions));
         OnPropertyChanged(nameof(AvailableTitleDisplayModeOptions));
+        OnPropertyChanged(nameof(AvailableSwitchAnimationOptions));
     }
 
     // --- Coordinator seam retained for non-XAML callers and tests ---
@@ -273,4 +332,7 @@ public sealed partial class GroupNavigationSettingsViewModel : ObservableObject
 
     public bool SetHoverSwitchEnabled(bool value) =>
         _settings.SetHoverSwitchEnabled(value);
+
+    public bool SetWidgetGroupSwitchAnimationStyle(string? value) =>
+        _settings.SetWidgetGroupSwitchAnimationStyle(value);
 }

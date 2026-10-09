@@ -174,9 +174,14 @@ public sealed class SearchHotkeyService : IDisposable, IHookHealthProbeTarget, I
 
     internal bool IsGestureOwnedByMainHotkey()
     {
+        return IsGestureOwnedByMainHotkey(AltSpaceGesture);
+    }
+
+    public bool IsGestureOwnedByMainHotkey(GlobalHotkeyGesture gesture)
+    {
         return App.Current?.GlobalHotkeyService?.CurrentActivation is
             { Kind: HotkeyActivationKind.Chord } activation &&
-            activation.Gesture.Equals(AltSpaceGesture);
+            activation.Gesture.Equals(gesture);
     }
 
     private static bool IsReservedHookDisabledByEnvironment()
@@ -202,7 +207,7 @@ public sealed class SearchHotkeyService : IDisposable, IHookHealthProbeTarget, I
             return false;
         }
 
-        if (gesture.Equals(AltSpaceGesture) && IsGestureOwnedByMainHotkey())
+        if (IsGestureOwnedByMainHotkey(gesture))
         {
             error = _localizationService.T("Settings.Search.Hotkey.Status.GlobalHotkeyConflict");
             return false;
@@ -269,6 +274,22 @@ public sealed class SearchHotkeyService : IDisposable, IHookHealthProbeTarget, I
 
         _settingsService.Settings.SearchHotkeyEnabled = enabled;
         _settingsService.SaveDebounced();
+        RefreshRegistration();
+    }
+
+    /// <summary>
+    /// Drops the current registration (including the reserved hook) while the
+    /// recorder dialog captures input, so the live hotkey cannot fire or eat
+    /// the keys being recorded. Settings are untouched;
+    /// <see cref="ResumeAfterRecording"/> restores registration from them.
+    /// </summary>
+    public void SuspendForRecording()
+    {
+        Unregister();
+    }
+
+    public void ResumeAfterRecording()
+    {
         RefreshRegistration();
     }
 

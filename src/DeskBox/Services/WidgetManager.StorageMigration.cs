@@ -172,7 +172,7 @@ public sealed partial class WidgetManager
     {
         if (ManagedStoragePathService.IsSameOrDescendant(newRoot, oldRoot) ||
             ManagedStoragePathService.IsSameOrDescendant(oldRoot, newRoot))
-            throw new StorageMigrationException(StorageMigrationProblem.DestinationConflict,
+            throw new StorageMigrationException(StorageMigrationProblem.RootsOverlap,
                 "The old and new storage roots must not contain one another.");
 
         var folders = new List<ManagedStorageMigrationFolder>();
@@ -201,7 +201,7 @@ public sealed partial class WidgetManager
         {
             if (ManagedStoragePathService.IsSameOrDescendant(target.DestinationFolder, source.SourceFolder) ||
                 ManagedStoragePathService.IsSameOrDescendant(source.SourceFolder, target.DestinationFolder))
-                throw new StorageMigrationException(StorageMigrationProblem.DestinationConflict,
+                throw new StorageMigrationException(StorageMigrationProblem.RootsOverlap,
                     "Source and destination widget folders must not overlap.");
         }
 

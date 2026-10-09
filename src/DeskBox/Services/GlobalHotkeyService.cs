@@ -299,6 +299,22 @@ public sealed class GlobalHotkeyService : IDisposable, IHookHealthProbeTarget
         RefreshRegistration();
     }
 
+    /// <summary>
+    /// Drops the current registration (including the reserved hook) while the
+    /// recorder dialog captures input, so the live hotkey cannot fire or eat
+    /// the keys being recorded. Settings are untouched;
+    /// <see cref="ResumeAfterRecording"/> restores registration from them.
+    /// </summary>
+    public void SuspendForRecording()
+    {
+        Unregister();
+    }
+
+    public void ResumeAfterRecording()
+    {
+        RefreshRegistration();
+    }
+
     string IHookHealthProbeTarget.ProbeName => "global-hotkey";
 
     // Only the reserved-gesture path owns a low-level hook; RegisterHotKey
@@ -661,7 +677,7 @@ public sealed class GlobalHotkeyService : IDisposable, IHookHealthProbeTarget
         return virtualKey is >= (int)VirtualKey.F1 and <= (int)VirtualKey.F24;
     }
 
-    private static string FormatVirtualKey(int virtualKey)
+    internal static string FormatVirtualKey(int virtualKey)
     {
         if (virtualKey is >= (int)VirtualKey.A and <= (int)VirtualKey.Z)
         {

@@ -19,7 +19,6 @@ public sealed partial class SettingsWindow
         {
             RefreshManagedStoragePathWarning();
             RefreshManagedStorageDesktopShortcutState();
-            _ = ViewModel.RefreshQuickAccessStateAsync();
         }
         if (_currentSettingsSection is "Interaction" or "Advanced")
         {
@@ -206,6 +205,13 @@ public sealed partial class SettingsWindow
             "AppearanceAnimationSettings")
         {
             section.DataContext = _appearanceSettingsViewModel;
+            if (sectionTag == "AppearanceMaterialSettings")
+            {
+                // The section hosts the system visual-effect status cards;
+                // creation-time refresh covers state changed while the
+                // window sat closed (activation only fires on focus).
+                RefreshSystemAppearanceStates();
+            }
         }
 
         // The WidgetGroups section binds through the group-navigation
@@ -217,14 +223,11 @@ public sealed partial class SettingsWindow
             section.DataContext = _groupNavigationSettingsViewModel;
         }
 
-        // The capsule family (main capsule section plus the behavior,
-        // arrangement, animation and overrides subsections) binds through the
-        // capsule editor (batch 44); the override-list projection is pushed
-        // in by the shell's override state machine.
+        // The capsule family (main capsule section plus the overrides
+        // subsection) binds through the capsule editor (batch 44); the
+        // override-list projection is pushed in by the shell's override state
+        // machine.
         if (sectionTag is "CapsuleMode" or
-            "CapsuleBehaviorSettings" or
-            "CapsuleArrangementSettings" or
-            "CapsuleAnimationSettings" or
             "CapsuleOverridesSettings")
         {
             section.DataContext = _capsuleSettingsViewModel;

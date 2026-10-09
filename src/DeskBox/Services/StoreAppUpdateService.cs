@@ -69,7 +69,10 @@ public sealed class StoreAppUpdateService : IAppUpdateService
                     ["fr-FR"] = "Une mise à jour est disponible dans le Microsoft Store. Le Microsoft Store se chargera du téléchargement et de l’installation.",
                     ["ar-SA"] = "يتوفر تحديث في Microsoft Store. سيتولى المتجر تنزيله وتثبيته.",
                     ["bn-BD"] = "Microsoft Store-এ একটি আপডেট পাওয়া যাচ্ছে। Microsoft Store এটি ডাউনলোড ও ইনস্টল করবে।",
-                    ["ru-RU"] = "В Microsoft Store доступно обновление. Microsoft Store выполнит загрузку и установку."
+                    ["ru-RU"] = "В Microsoft Store доступно обновление. Microsoft Store выполнит загрузку и установку.",
+                    ["ja-JP"] = "Microsoft Store でアップデートが利用可能です。ストアがダウンロードとインストールを行います。",
+                    ["de-DE"] = "Ein Update ist im Microsoft Store verfügbar. Der Store übernimmt Download und Installation.",
+                    ["pt-BR"] = "Há uma atualização disponível na Microsoft Store. A Store fará o download e a instalação."
                 }
             };
 

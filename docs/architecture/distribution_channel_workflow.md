@@ -201,6 +201,8 @@ https://deskbox.fun/update/stable.json
 
 每次发布 Direct 版本时必须执行：
 
+0. 构建与签名（生产签名生效后）：触发 Native AOT Distribution Gate（workflow_dispatch，`signing-policy=release-signing`），等 `verify-signature` job 绿，从该 run 的 `signed-installers` 产物取双架构安装包。**签名会改变文件哈希**——后续所有哈希（`.sha256` sidecar、Release 资产核对、官网 `stable.json` 的 `sha256`）一律对签名后文件计算。生产签名生效前的版本沿用未签名产物流程（`docs/code-signing.md` 记录当前状态）。
+
 1. 发布 GitHub Release，并上传：
    - `DeskBox_Setup_x.y.z_x64.exe`
    - `DeskBox_Setup_x.y.z_x64.exe.sha256`
@@ -212,6 +214,7 @@ https://deskbox.fun/update/stable.json
    - Release 不是 Prerelease，除非刻意做预发布
    - 安装包大小和本地 `Output` 一致
    - 安装包 digest / `.sha256` 和本地 `Get-FileHash` 一致
+   - （签名版）`Get-AuthenticodeSignature` 显示签名者为 SignPath 证书且带 RFC 3161 时间戳，签名者 CN 与发版门禁 `expected-signer-cn` 输入一致
 
 3. 更新并部署官网清单：
    - `deskbox-site/public/update/stable.json`

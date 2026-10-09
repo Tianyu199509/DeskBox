@@ -25,6 +25,13 @@ public sealed class WidgetTrayBatchAnimationEntry
     public int? RefreshAnchorX { get; init; }
     public int? RefreshAnchorY { get; init; }
 
+    /// <summary>
+    /// Optional per-frame visual hook (eased progress) for effects whose
+    /// visuals must track the shared position clock — e.g. the crossing fade,
+    /// whose opacity follows the window's boundary-relative displacement.
+    /// </summary>
+    public Action<double>? FrameVisual { get; init; }
+
     /// <summary>Returns false when the owning window started a newer animation.</summary>
     public required Func<bool> IsValid { get; init; }
 
@@ -391,6 +398,10 @@ public sealed class WidgetTrayBatchAnimationDriver
             {
                 continue;
             }
+
+            // Position unchanged implies displacement unchanged, so the visual
+            // hook only needs to run on frames that actually move the window.
+            entry.FrameVisual?.Invoke(easedProgress);
             moves.Add(new WidgetTrayWindowPosition(entry.WindowHandle, position.X, position.Y));
             participants.Add((state, (int)Math.Round(1000.0 / Math.Max(0.1, budgetMs))));
         }

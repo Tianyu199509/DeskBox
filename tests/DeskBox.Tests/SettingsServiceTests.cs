@@ -144,7 +144,7 @@ public sealed class SettingsServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task LoadAsync_MigratesLegacySchemaFiveProfileThroughTheFullChainToEleven()
+    public async Task LoadAsync_MigratesLegacySchemaFiveProfileThroughTheFullChainToThirteen()
     {
         // A realistic settings.json as an older DeskBox build would have left
         // it on disk: widgets with geometry, Everything consent captured under
@@ -202,7 +202,7 @@ public sealed class SettingsServiceTests : IDisposable
 
         Assert.Equal(SettingsLoadRecoveryState.Primary, service.LastLoadRecoveryState);
         Assert.Equal(SettingsMigrationPipeline.CurrentSchemaVersion, service.Settings.SchemaVersion);
-        Assert.Equal(11, service.Settings.SchemaVersion);
+        Assert.Equal(13, service.Settings.SchemaVersion);
 
         // Widgets survive the chain (and the layout-store adoption): both
         // instances keep their identity, kind, and legacy geometry — the 5→6
@@ -219,6 +219,15 @@ public sealed class SettingsServiceTests : IDisposable
         Assert.Equal(80, fileWidget.Y);
         Assert.Equal(420, fileWidget.Width);
         Assert.Equal(360, fileWidget.Height);
+
+        // 11→12 (screen-home model): the legacy widgets keep their geometry
+        // and gain Unbound homes — no profiles exist yet to infer from, and
+        // the legacy entries carry no stable monitor ids.
+        Assert.Equal(WidgetScreenBindingMode.Unbound, fileWidget.ScreenBindingMode);
+        Assert.Equal(WidgetScreenBindingMode.Unbound, todoWidget.ScreenBindingMode);
+        Assert.Equal(
+            SettingsService.WidgetNewPlacementCursorDisplay,
+            service.Settings.WidgetNewPlacementTarget);
 
         // 5→6: bounded topology layouts start empty; legacy geometry stays
         // the active truth until the first stable startup captures it.
@@ -254,7 +263,7 @@ public sealed class SettingsServiceTests : IDisposable
         // The migrated profile is persisted back at the current schema.
         using JsonDocument persisted = JsonDocument.Parse(
             await File.ReadAllTextAsync(settingsPath));
-        Assert.Equal(11, persisted.RootElement.GetProperty("schemaVersion").GetInt32());
+        Assert.Equal(13, persisted.RootElement.GetProperty("schemaVersion").GetInt32());
         Assert.True(persisted.RootElement.GetProperty("fileStacksEnabled").GetBoolean());
         Assert.False(persisted.RootElement.GetProperty("fileStackAutoStacking").GetBoolean());
 
@@ -263,7 +272,7 @@ public sealed class SettingsServiceTests : IDisposable
         var reloaded = new SettingsService(_settingsRoot);
         await reloaded.LoadAsync();
         Assert.Equal(SettingsLoadRecoveryState.Primary, reloaded.LastLoadRecoveryState);
-        Assert.Equal(11, reloaded.Settings.SchemaVersion);
+        Assert.Equal(13, reloaded.Settings.SchemaVersion);
         Assert.True(reloaded.Settings.FileStacksEnabled);
         Assert.False(reloaded.Settings.FileStackAutoStacking);
         Assert.Equal(2, reloaded.Settings.Widgets.Count);
@@ -1774,6 +1783,95 @@ public sealed class SettingsServiceTests : IDisposable
         Assert.Equal(mode, restored.Settings.AutoStartMode);
         Assert.False(restored.Settings.AutoStart);
         Assert.True(restored.Settings.AutoStartDefaultApplied);
+    }
+
+    [Fact]
+    public void NormalizeScreenBindings_DowngradesWidgetPinsWithBlankBoundScreenId()
+    {
+        var pinnedBlank = new WidgetConfig
+        {
+            Id = "pinned-blank",
+            ScreenBindingMode = WidgetScreenBindingMode.Pinned,
+            BoundScreenId = ""
+        };
+        var pinnedWhitespace = new WidgetConfig
+        {
+            Id = "pinned-whitespace",
+            ScreenBindingMode = WidgetScreenBindingMode.Pinned,
+            BoundScreenId = "   "
+        };
+        var pinnedValid = new WidgetConfig
+        {
+            Id = "pinned-valid",
+            ScreenBindingMode = WidgetScreenBindingMode.Pinned,
+            BoundScreenId = "external-panel"
+        };
+        var followPrimary = new WidgetConfig
+        {
+            Id = "follow-primary",
+            ScreenBindingMode = WidgetScreenBindingMode.FollowPrimary,
+            BoundScreenId = null
+        };
+        var unboundWithId = new WidgetConfig
+        {
+            Id = "unbound-with-id",
+            ScreenBindingMode = WidgetScreenBindingMode.Unbound,
+            BoundScreenId = "external-panel"
+        };
+        var settings = new AppSettings
+        {
+            Widgets = [pinnedBlank, pinnedWhitespace, pinnedValid, followPrimary, unboundWithId]
+        };
+
+        SettingsService.NormalizeScreenBindings(settings);
+
+        Assert.Equal(WidgetScreenBindingMode.Unbound, pinnedBlank.ScreenBindingMode);
+        Assert.Null(pinnedBlank.BoundScreenId);
+        Assert.Equal(WidgetScreenBindingMode.Unbound, pinnedWhitespace.ScreenBindingMode);
+        Assert.Null(pinnedWhitespace.BoundScreenId);
+        Assert.Equal(WidgetScreenBindingMode.Pinned, pinnedValid.ScreenBindingMode);
+        Assert.Equal("external-panel", pinnedValid.BoundScreenId);
+        Assert.Equal(WidgetScreenBindingMode.FollowPrimary, followPrimary.ScreenBindingMode);
+        // Unbound entries keep a leftover id: normalization only repairs pins
+        // whose resolution would dead-end on the empty reference.
+        Assert.Equal(WidgetScreenBindingMode.Unbound, unboundWithId.ScreenBindingMode);
+        Assert.Equal("external-panel", unboundWithId.BoundScreenId);
+    }
+
+    [Fact]
+    public void NormalizeScreenBindings_DowngradesGroupPinsWithBlankBoundScreenId()
+    {
+        var pinnedBlank = new WidgetGroupConfig
+        {
+            Id = "group-blank",
+            ScreenBindingMode = WidgetScreenBindingMode.Pinned,
+            BoundScreenId = " "
+        };
+        var pinnedValid = new WidgetGroupConfig
+        {
+            Id = "group-valid",
+            ScreenBindingMode = WidgetScreenBindingMode.Pinned,
+            BoundScreenId = "panel"
+        };
+        var unbound = new WidgetGroupConfig
+        {
+            Id = "group-unbound",
+            ScreenBindingMode = WidgetScreenBindingMode.Unbound,
+            BoundScreenId = null
+        };
+        var settings = new AppSettings
+        {
+            WidgetGroups = [pinnedBlank, pinnedValid, unbound]
+        };
+
+        SettingsService.NormalizeScreenBindings(settings);
+
+        Assert.Equal(WidgetScreenBindingMode.Unbound, pinnedBlank.ScreenBindingMode);
+        Assert.Null(pinnedBlank.BoundScreenId);
+        Assert.Equal(WidgetScreenBindingMode.Pinned, pinnedValid.ScreenBindingMode);
+        Assert.Equal("panel", pinnedValid.BoundScreenId);
+        Assert.Equal(WidgetScreenBindingMode.Unbound, unbound.ScreenBindingMode);
+        Assert.Null(unbound.BoundScreenId);
     }
 
     private static object? CreateNonDefaultSettingValue(Type type, object? defaultValue)

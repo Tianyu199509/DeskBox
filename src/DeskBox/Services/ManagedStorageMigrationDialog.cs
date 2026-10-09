@@ -134,7 +134,10 @@ internal sealed class ManagedStorageMigrationDialog
                 if (closed) return;
                 problem = ManagedStorageMigrationPresentation.Classify(ex);
                 status.Text = localization.T("Settings.Dialog.SafeMigrationError." + problem);
-                technical.Text = ex.Message;
+                // The localized precautions stay in the expander; the raw English
+                // detail is log-only here. Only the run dialog exposes a
+                // technical-details expander for it.
+                App.Log($"[ManagedStorageMigration] Preview failed ({problem}): {ex}");
                 start.Content = localization.T(ManagedStorageMigrationPresentation.NeedsNewLocation(problem.Value)
                     ? "Settings.Dialog.SafeMigrationChooseLocation" : "Settings.Dialog.SafeMigrationRetry");
             }

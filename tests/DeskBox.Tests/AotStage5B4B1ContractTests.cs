@@ -21,9 +21,6 @@ public sealed class AotStage5B4B1ContractTests
         "AppearanceDensitySettings",
         "AppearanceWindowSettings",
         "AppearanceAnimationSettings",
-        "CapsuleBehaviorSettings",
-        "CapsuleArrangementSettings",
-        "CapsuleAnimationSettings",
         "CapsuleOverridesSettings",
         "BackupRestoreSettings",
         "DataHealthSettings",
@@ -82,7 +79,7 @@ public sealed class AotStage5B4B1ContractTests
     {
         string source = ReadRepositoryFile("src/DeskBox/Views/SettingsWindow.AotDeepSmoke.cs");
 
-        Assert.Contains("CapsuleBehaviorSettings", source, StringComparison.Ordinal);
+        Assert.Contains("CapsuleOverridesSettings", source, StringComparison.Ordinal);
         Assert.Contains("CapsuleMode", source, StringComparison.Ordinal);
         Assert.Contains("BreadcrumbItems", source, StringComparison.Ordinal);
         Assert.Contains("NavigateFromSettingsBreadcrumbItem", source, StringComparison.Ordinal);
@@ -208,7 +205,7 @@ public sealed class AotStage5B4B1ContractTests
             "ItemsSource=\"{x:Bind CustomRules, Mode=OneWay}\"",
             xaml,
             StringComparison.Ordinal);
-        Assert.Equal(34, CountOccurrences(bindableViewModel, "nameof("));
+        Assert.Equal(33, CountOccurrences(bindableViewModel, "nameof("));
         Assert.Contains("nameof(AvailableAutoStartModeOptions)", bindableViewModel, StringComparison.Ordinal);
         // Batch 50: the performance section (and the General section's
         // inline preset combo + attachment-storage combo) bind through the

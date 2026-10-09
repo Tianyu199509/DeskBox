@@ -814,7 +814,11 @@ public sealed partial class FileSurfaceContent :
 
     // Elevated widget windows cannot receive OLE drops from Explorer (UIPI),
     // so the empty state calls that case out instead of letting the drop fail
-    // silently (#458 follow-up).
+    // silently (#458 follow-up). The elevation check deliberately routes
+    // through DragDropPermissionService: an Owner-vs-User comparison (used
+    // here originally) is true for every admin-account user even on a
+    // standard filtered token — the Administrators SID stays the token's
+    // default owner — which disabled dragging on non-elevated instances.
     private static bool IsCurrentProcessElevatedCached()
     {
         if (s_isProcessElevated is { } cached)
@@ -822,8 +826,7 @@ public sealed partial class FileSurfaceContent :
             return cached;
         }
 
-        using var identity = System.Security.Principal.WindowsIdentity.GetCurrent();
-        s_isProcessElevated = identity.Owner != identity.User;
+        s_isProcessElevated = DragDropPermissionService.IsCurrentProcessElevated();
         return s_isProcessElevated.Value;
     }
 
@@ -2574,10 +2577,13 @@ public sealed partial class FileSurfaceContent :
             return;
         }
 
+        // The tip outlives a quick drag (dismiss requests hold a five-second
+        // window), so the X is reachable with the mouse free after the drop.
         ShowFeedback(new WidgetFeedbackRequest(
             T("Widget.DragOutTip.Modifiers"),
             WidgetFeedbackSeverity.Info,
-            "drag-out-modifier-tip"));
+            "drag-out-modifier-tip",
+            DismissAction: DisableDragOutModifierTipAsync));
     }
 
     // Receipt after an unambiguous external drop (a reported Copy or Move —
@@ -2606,10 +2612,54 @@ public sealed partial class FileSurfaceContent :
             return;
         }
 
+        // Closing the receipt means the user does not want it: switch the
+        // setting off and persist through the normal save path so the settings
+        // window's toggle follows on the next SettingsChanged broadcast.
         ShowFeedback(new WidgetFeedbackRequest(
             T(key),
             WidgetFeedbackSeverity.Info,
-            "drag-out-result-tip"));
+            "drag-out-result-tip",
+            DismissAction: DisableDragOutResultHintAsync));
+    }
+
+    private Task DisableDragOutResultHintAsync()
+    {
+        return DisableDragTipSettingAsync(() =>
+            _settingsService.Settings.FileWidget.DragOutResultHintEnabled = false);
+    }
+
+    private Task DisableDragOutModifierTipAsync()
+    {
+        return DisableDragTipSettingAsync(() =>
+            _settingsService.Settings.FileWidget.DragOutModifierTipEnabled = false);
+    }
+
+    // Both dismiss paths persist through the normal save channel so the
+    // SettingsChanged broadcast re-projects an open settings window's
+    // toggles; the write must land on the UI thread either way.
+    private Task DisableDragTipSettingAsync(Action persist)
+    {
+        if (DispatcherQueue.HasThreadAccess)
+        {
+            persist();
+            _settingsService.SaveDebounced();
+            return Task.CompletedTask;
+        }
+
+        var completion = new TaskCompletionSource();
+        DispatcherQueue.TryEnqueue(() =>
+        {
+            try
+            {
+                persist();
+                _settingsService.SaveDebounced();
+            }
+            finally
+            {
+                completion.SetResult();
+            }
+        });
+        return completion.Task;
     }
 
     // Pure key choice for the receipt above, extracted for unit tests: only
@@ -2908,19 +2958,28 @@ public sealed partial class FileSurfaceContent :
                 // toast here would replace that explanation.
                 if (_lastImportSkippedUndisplayableCount == 0)
                 {
-                    ShowFeedback(moveWhenMapped == true && completedCount == 0
-                        ? new(
+                    if (moveWhenMapped == true && completedCount == 0)
+                    {
+                        ShowFeedback(new(
                             T("Widget.NoItemsMoved"),
                             WidgetFeedbackSeverity.Warning,
-                            "file-drop-empty")
-                        : new(
+                            "file-drop-empty"));
+                    }
+                    else if (
+                        _settingsService.Settings.FileWidget.DragOutResultHintEnabled)
+                    {
+                        // The count receipt is the drop-in half of the result
+                        // hint setting: closing it switches the setting off.
+                        ShowFeedback(new(
                             _localizationService.Format(
                                 moveWhenMapped == true
                                     ? "Widget.MovedCount"
                                     : "Widget.PastedCount",
                                 completedCount),
                             WidgetFeedbackSeverity.Success,
-                            "file-drop"));
+                            "file-drop",
+                            DismissAction: DisableDragOutResultHintAsync));
+                    }
                 }
             }
         }
@@ -2943,7 +3002,7 @@ public sealed partial class FileSurfaceContent :
                 $"[DropOperation] operation={dropOperationId} widget={WidgetId} " +
                 $"stage=Failed error={ex}");
             ShowFeedback(new(
-                T("Widget.ImportFailed"),
+                DescribeImportFailure(ex, requestedCount: 0),
                 WidgetFeedbackSeverity.Error,
                 "file-drop-error"));
             if (_activeImportCancellation is not null)
@@ -4177,8 +4236,12 @@ public sealed partial class FileSurfaceContent :
             App.Log(
                 $"[Import] Native import completed id={importId} widget={WidgetId} " +
                 $"count={droppedFiles.Length} elapsedMs={stopwatch.ElapsedMilliseconds}");
-            if (_lastImportSkippedUndisplayableCount == 0)
+            if (_lastImportSkippedUndisplayableCount == 0 &&
+                _settingsService.Settings.FileWidget.DragOutResultHintEnabled)
             {
+                // Same receipt contract as the WinUI drop path above: the
+                // count toast belongs to the result-hint setting and carries
+                // its dismiss affordance.
                 ShowFeedback(new(
                     _localizationService.Format(
                         moveWhenMapped == true
@@ -4186,7 +4249,8 @@ public sealed partial class FileSurfaceContent :
                             : "Widget.PastedCount",
                         droppedFiles.Length),
                     WidgetFeedbackSeverity.Success,
-                    "native-file-drop"));
+                    "native-file-drop",
+                    DismissAction: DisableDragOutResultHintAsync));
             }
 
             // When entries were refused as undisplayable, the skip feedback
@@ -4207,7 +4271,10 @@ public sealed partial class FileSurfaceContent :
                 $"[WidgetSurface] Native file drop failed id={WidgetId} " +
                 $"import={importId} elapsedMs={stopwatch.ElapsedMilliseconds}: {ex}");
             ShowFeedback(new(
-                DescribeImportFailure(ex, droppedFiles.Length),
+                DescribeImportFailure(
+                    ex,
+                    droppedFiles.Length,
+                    droppedFiles.Length == 1 ? droppedFiles[0].Path : null),
                 WidgetFeedbackSeverity.Error,
                 "native-file-drop-error"));
             return false;
@@ -4223,20 +4290,36 @@ public sealed partial class FileSurfaceContent :
     /// <summary>
     /// Localized import-failure feedback. Transfer-exception messages are
     /// English diagnostics aimed at the log and must not reach the toast;
-    /// partial results instead surface the counts the user can act on.
+    /// partial results instead surface the counts the user can act on, and
+    /// drop-preparation failures surface their dedicated causes.
     /// </summary>
     private string DescribeImportFailure(
         Exception exception,
-        int requestedCount) =>
-        exception is FileService.IFileTransferWithCompletedResults
+        int requestedCount,
+        string? singleItemPath = null)
+    {
+        if (ImportFailureMessagePolicy.SelectOverride(
+                exception,
+                requestedCount,
+                singleItemPath) is { } overrideSelection)
+        {
+            return overrideSelection.Args.Length == 0
+                ? _localizationService.T(overrideSelection.Key)
+                : _localizationService.Format(
+                    overrideSelection.Key,
+                    overrideSelection.Args);
+        }
+
+        return exception is FileService.IFileTransferWithCompletedResults
             {
                 CompletedResults: { } completed
-            }
+            } && requestedCount > 0
             ? _localizationService.Format(
                 "Widget.ImportPartialFailure",
                 completed.Count,
                 requestedCount)
             : _localizationService.T("Widget.ImportFailed");
+    }
 
     private void HandleSurfaceRealTimeReorder(
         DragPayloadSnapshot payload,
@@ -5515,6 +5598,16 @@ public sealed partial class FileSurfaceContent :
         catch (OperationCanceledException)
         {
             App.Log($"[WidgetSurface] File action canceled id={WidgetId}");
+        }
+        catch (Exception ex) when (
+            ex is OrganizerService.MappedFolderUnavailableException or
+               OrganizerService.DestinationOutsideMappedRootException)
+        {
+            App.Log($"[WidgetSurface] File action failed id={WidgetId}: {ex}");
+            ShowFeedback(new(
+                DescribeImportFailure(ex, requestedCount: 0),
+                WidgetFeedbackSeverity.Error,
+                "file-action-error"));
         }
         catch (Exception ex)
         {

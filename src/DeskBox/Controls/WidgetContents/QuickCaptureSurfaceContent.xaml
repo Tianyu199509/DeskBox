@@ -3,6 +3,7 @@
     x:Class="DeskBox.Controls.WidgetContents.QuickCaptureSurfaceContent"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:helpers="using:DeskBox.Helpers"
     xmlns:controls="using:DeskBox.Controls"
     xmlns:viewModels="using:DeskBox.ViewModels"
     xmlns:toolkit="using:CommunityToolkit.WinUI.Controls"
@@ -247,6 +248,7 @@
                                         VerticalAlignment="Center"
                                         Spacing="2">
                                         <TextBlock
+                                            helpers:WidgetTextShadow.Cast="True"
                                             FontSize="{Binding TextSize}"
                                             MaxLines="{Binding ElementName=ItemsList, Path=DataContext.ItemPreviewLineCount}"
                                             Text="{Binding DisplayText}"
@@ -254,6 +256,7 @@
                                             TextWrapping="Wrap"
                                             Visibility="{Binding TextPreviewVisibility}" />
                                         <TextBlock
+                                            helpers:WidgetTextShadow.Cast="True"
                                             FontSize="{Binding SecondaryTextSize}"
                                             Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                                             Text="{Binding CreatedAtText}"

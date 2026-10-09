@@ -56,6 +56,79 @@ public static partial class Win32Helper
         [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)] public string DeviceName;
     }
 
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    private struct DisplayTargetName
+    {
+        public uint Type, Size;
+        public DisplayAdapterId AdapterId;
+        public uint Id;
+        // Full native layout of DISPLAYCONFIG_TARGET_DEVICE_NAME (wingdi.h):
+        // a short Size makes DisplayConfigGetDeviceInfo reject the request
+        // (ERROR_INSUFFICIENT_BUFFER), silently killing friendly names.
+        public uint Flags;             // DISPLAYCONFIG_TARGET_DEVICE_NAME_FLAGS
+        public uint OutputTechnology;  // DISPLAYCONFIG_OUTPUT_TECHNOLOGY
+        public ushort EdidManufactureId;
+        public ushort EdidProductCodeId;
+        public uint ConnectorInstance;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 64)] public string MonitorFriendlyDeviceName;
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 128)] public string MonitorDevicePath;
+    }
+
+    /// <summary>
+    /// Queries the monitor friendly name (e.g. "DELL U2720Q") per device
+    /// interface path via CCD (spec 4.6). The path key matches the stable
+    /// monitor identity used across placement. Virtual/absent names fall
+    /// back to an empty string; callers substitute their own fallbacks.
+    /// </summary>
+    internal static Dictionary<string, string> QueryMonitorFriendlyNames()
+    {
+        var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        uint flags = 0x02u | 0x10u;
+        try
+        {
+            for (int attempt = 0; attempt < 3; attempt++)
+            {
+                int status = GetDisplayConfigBufferSizes(flags, out uint pathCount, out uint modeCount);
+                if (status != 0 || pathCount > 128 || modeCount > 512) return result;
+                var paths = new DisplayPath[pathCount];
+                var modes = new DisplayMode[modeCount];
+                status = QueryDisplayConfig(flags, ref pathCount, paths, ref modeCount, modes, IntPtr.Zero);
+                if (status == 122) continue;
+                if (status != 0) return result;
+                foreach (DisplayPath path in paths)
+                {
+                    var request = new DisplayTargetName
+                    {
+                        Type = 2,
+                        Size = (uint)Marshal.SizeOf<DisplayTargetName>(),
+                        AdapterId = path.Target.AdapterId,
+                        Id = path.Target.Id,
+                        MonitorFriendlyDeviceName = string.Empty,
+                        MonitorDevicePath = string.Empty
+                    };
+                    if (DisplayConfigGetDeviceInfoTarget(ref request) != 0) continue;
+                    string name = request.MonitorFriendlyDeviceName?.Trim() ?? string.Empty;
+                    string devicePath = request.MonitorDevicePath?.Trim() ?? string.Empty;
+                    if (devicePath.Length > 0 && name.Length > 0)
+                    {
+                        result[devicePath] = name;
+                    }
+                }
+
+                return result;
+            }
+        }
+        catch (Exception ex) when (
+            ex is DllNotFoundException or EntryPointNotFoundException or BadImageFormatException)
+        {
+        }
+
+        return result;
+    }
+
+    [DllImport("user32.dll", EntryPoint = "DisplayConfigGetDeviceInfo")]
+    private static extern int DisplayConfigGetDeviceInfoTarget(ref DisplayTargetName request);
+
     [DllImport("user32.dll")]
     private static extern int GetDisplayConfigBufferSizes(uint flags, out uint pathCount, out uint modeCount);
 

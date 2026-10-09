@@ -7,8 +7,10 @@ namespace DeskBox.Features.GroupNavigation;
 // GlanceWidgetViewModel / AppearanceSettingsViewModel bridge pattern.
 [WinRT.GeneratedBindableCustomProperty([
     nameof(AvailableNavigationStyleOptions),
+    nameof(AvailableSwitchAnimationOptions),
     nameof(AvailableTitleDisplayModeOptions),
     nameof(DefaultNavigationStyle),
+    nameof(DefaultSwitchAnimationStyle),
     nameof(DefaultTitleDisplayMode),
     nameof(ExistingGroups),
     nameof(HasExistingGroups),

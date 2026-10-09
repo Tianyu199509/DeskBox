@@ -309,6 +309,8 @@ public sealed partial class DesktopOrganizationWindow : Window
 
     private void DesktopOrganizationWindow_ClosedInternal(object sender, WindowEventArgs args)
     {
+        WindowsCompatibilityService.ReleaseTitleBarExtensions(this, _appWindow);
+
         // This window closes for real (no hide-and-reuse), so leaving the
         // quick-reveal raised band happens on teardown; the manager skips
         // destroyed handles either way, but releasing keeps the guest

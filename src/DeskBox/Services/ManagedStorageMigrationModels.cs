@@ -19,7 +19,7 @@ public sealed record ManagedStorageMigrationResult(
 
 internal enum StorageMigrationProblem
 {
-    Unknown, CopiesRemoved, DestinationChanged, DestinationConflict,
+    Unknown, CopiesRemoved, DestinationChanged, DestinationConflict, RootsOverlap,
     VolumeUnavailable, SourceChanged, Unsupported, InUse, AccessDenied, DiskFull
 }
 

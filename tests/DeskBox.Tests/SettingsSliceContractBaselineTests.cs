@@ -189,6 +189,7 @@ public sealed class SettingsSliceContractBaselineTests
         Assert.Equal(WidgetGroupTitleDisplayModes.IconAndText, s.WidgetGroupDefaultTitleDisplayMode);
         Assert.True(s.WidgetGroupWheelSwitchEnabled);
         Assert.False(s.WidgetGroupHoverSwitchEnabled);
+        Assert.Equal(WidgetGroupSwitchAnimationStyles.Auto, s.WidgetGroupSwitchAnimationStyle);
         Assert.False(s.FocusClickedWidgetOnRaise);
         Assert.Empty(s.DeletedWidgetIds);
         Assert.True(s.WeatherAutoLocation);
@@ -426,6 +427,9 @@ public sealed class SettingsSliceContractBaselineTests
         "showFileExtensions",
         "hideShortcutExtensionWhenShowingFileExtensions",
         "widgets",
+        "widgetDefaultBoundScreenId",
+        "widgetNewPlacementTarget",
+        "widgetDisplayDisconnectBehavior",
         "widgetGroups",
         "widgetTopologyLayouts",
         "activeWidgetTopologyKey",
@@ -434,6 +438,7 @@ public sealed class SettingsSliceContractBaselineTests
         "widgetGroupDefaultTitleDisplayMode",
         "widgetGroupWheelSwitchEnabled",
         "widgetGroupHoverSwitchEnabled",
+        "widgetGroupSwitchAnimationStyle",
         "focusClickedWidgetOnRaise",
         "deletedWidgetIds",
         "weatherAutoLocation",

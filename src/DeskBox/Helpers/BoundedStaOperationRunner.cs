@@ -1,9 +1,13 @@
 using DeskBox.Platform;
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 
 namespace DeskBox.Helpers;
 
-internal readonly record struct StaOperationResult<T>(bool Started, T? Value = default);
+internal readonly record struct StaOperationResult<T>(
+    bool Started,
+    T? Value = default,
+    TimeSpan QueueWait = default);
 
 /// <summary>
 /// Short-lived STA workers for synchronous Shell operations. Both the running
@@ -42,16 +46,18 @@ internal sealed class BoundedStaOperationRunner
 
         try
         {
+            Stopwatch queueStopwatch = Stopwatch.StartNew();
             if (!await _workers.WaitAsync(_queueTimeout, cancellationToken).ConfigureAwait(false))
             {
-                return new(false);
+                return new(false, QueueWait: queueStopwatch.Elapsed);
             }
 
+            TimeSpan queueWait = queueStopwatch.Elapsed;
             try
             {
                 // Do not WaitAsync(cancellationToken) here: the worker owns the
                 // capacity until the underlying native operation really ends.
-                return new(true, await RunOnStaAsync(operation, cancellationToken).ConfigureAwait(false));
+                return new(true, await RunOnStaAsync(operation, cancellationToken).ConfigureAwait(false), queueWait);
             }
             finally
             {

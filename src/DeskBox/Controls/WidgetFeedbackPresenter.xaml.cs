@@ -1,5 +1,6 @@
 using DeskBox.Models;
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Animation;
@@ -16,6 +17,12 @@ public sealed partial class WidgetFeedbackPresenter : UserControl
     public WidgetFeedbackPresenter()
     {
         InitializeComponent();
+        string? closeLabel = App.Current?.LocalizationService?.T("Common.Close");
+        if (!string.IsNullOrWhiteSpace(closeLabel))
+        {
+            AutomationProperties.SetName(DismissButton, closeLabel);
+        }
+
         Unloaded += (_, _) => Clear();
     }
 
@@ -48,7 +55,10 @@ public sealed partial class WidgetFeedbackPresenter : UserControl
             request.Action is not null;
         ActionButton.Content = request.ActionText;
         ActionButton.Visibility = hasAction ? Visibility.Visible : Visibility.Collapsed;
-        FeedbackSurface.IsHitTestVisible = hasAction;
+        DismissButton.Visibility = request.DismissAction is not null
+            ? Visibility.Visible
+            : Visibility.Collapsed;
+        FeedbackSurface.IsHitTestVisible = hasAction || request.DismissAction is not null;
         FeedbackSurface.Visibility = Visibility.Visible;
 
         AnimateIn();
@@ -128,6 +138,32 @@ public sealed partial class WidgetFeedbackPresenter : UserControl
         {
             ActionButton.IsEnabled = true;
         }
+    }
+
+    // The X both hides this tip and runs the requester's dismissal side effect
+    // (for the drag-out receipt, switching the result-hint setting off), so the
+    // dismissal outlives the tip instead of reappearing on the next drop.
+    private async void DismissButton_Click(object sender, RoutedEventArgs e)
+    {
+        Func<Task>? dismiss = _current?.DismissAction;
+        DismissButton.IsEnabled = false;
+        try
+        {
+            if (dismiss is not null)
+            {
+                await dismiss();
+            }
+        }
+        catch (Exception ex)
+        {
+            App.Log($"[Feedback] Dismiss failed: {ex}");
+        }
+        finally
+        {
+            DismissButton.IsEnabled = true;
+        }
+
+        Clear();
     }
 
     private void ApplySeverity(WidgetFeedbackSeverity severity)

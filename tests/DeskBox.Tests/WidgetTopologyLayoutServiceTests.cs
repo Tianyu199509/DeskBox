@@ -15,7 +15,7 @@ public sealed class WidgetTopologyLayoutServiceTests
             Monitor("panel", @"\\.\DISPLAY2", true, 0, 0, 1920, 1040, 1),
             Monitor("external", @"\\.\DISPLAY1", false, 1920, 0, 1920, 1040, 1));
 
-        Assert.StartsWith("v3-", initial.Key, StringComparison.Ordinal);
+        Assert.StartsWith("v4-", initial.Key, StringComparison.Ordinal);
         Assert.Equal(initial.Key, reEnumerated.Key);
     }
 
@@ -62,8 +62,11 @@ public sealed class WidgetTopologyLayoutServiceTests
     }
 
     [Fact]
-    public void ReturningToKnownTopology_RestoresTheLayoutEditedForThatTopology()
+    public void SameTopology_DpiRoundTrip_KeepsEditedIntentAndRealizesPhysicalCache()
     {
+        // v4 (D5): resolution/DPI changes stay in ONE profile. The edits made
+        // at either DPI survive as intent (DIP); only the physical X/Y cache
+        // is re-realized for the current DPI (spec 5.2).
         var widget = CreateWidget();
         var settings = new AppSettings { Widgets = [widget] };
         var service = new WidgetTopologyLayoutService();
@@ -82,16 +85,21 @@ public sealed class WidgetTopologyLayoutServiceTests
         widget.Y = 36;
 
         service.Activate(settings, highDpi);
-        Assert.Equal(600, widget.Width);
-        Assert.Equal(500, widget.Height);
-        Assert.Equal(200, widget.X);
-        Assert.Equal(160, widget.Y);
+        // One profile: the standard-DPI edits persist (no revival of the
+        // pre-edit high-DPI arrangement), and the physical cache follows the
+        // 2× scale: margin 44 DIP → 88 physical.
+        Assert.Equal(720, widget.Width);
+        Assert.Equal(620, widget.Height);
+        Assert.Equal(44, widget.PositionMarginX);
+        Assert.Equal(88, widget.X);
+        Assert.Equal(72, widget.Y);
 
         service.Activate(settings, standardDpi);
         Assert.Equal(720, widget.Width);
         Assert.Equal(620, widget.Height);
         Assert.Equal(44, widget.X);
         Assert.Equal(36, widget.Y);
+        Assert.Single(settings.WidgetTopologyLayouts);
     }
 
     [Fact]
@@ -117,8 +125,11 @@ public sealed class WidgetTopologyLayoutServiceTests
 
         service.Activate(settings, laptop);
 
-        Assert.Equal(200, widget.X);
-        Assert.Equal(160, widget.Y);
+        // v4 semantics: the physical cache is realized from the anchor at
+        // the laptop's scale (margin 100 DIP → 100 physical at 1×), the
+        // stored intent keeps the original capture.
+        Assert.Equal(100, widget.X);
+        Assert.Equal(80, widget.Y);
         Assert.Equal(600, widget.Width);
         Assert.Equal(500, widget.Height);
         Assert.Equal(@"\\.\DISPLAY1", widget.PositionMonitorDeviceName);
@@ -267,6 +278,52 @@ public sealed class WidgetTopologyLayoutServiceTests
         Assert.Equal(group.Y, second.Y);
         Assert.Equal(group.Width, second.Width);
         Assert.Equal(group.Height, second.Height);
+    }
+
+    [Fact]
+    public void ProfileActivation_BackfillsStableIdOntoGroupSurfaceAndMembers()
+    {
+        WidgetConfig first = CreateWidget();
+        WidgetConfig second = CreateWidget();
+        second.Id = "widget-2";
+        var group = new WidgetGroupConfig
+        {
+            Id = "group-1",
+            SurfaceId = "surface-1",
+            MemberIds = [first.Id, second.Id],
+            ActiveMemberId = first.Id,
+            X = 200,
+            Y = 160,
+            Width = 600,
+            Height = 500,
+            BoundsCoordinateVersion = WidgetConfig.CurrentBoundsCoordinateVersion,
+            PositionAnchor = WidgetPositionAnchors.LeftTop,
+            PositionMarginX = 100,
+            PositionMarginY = 80,
+            PositionMonitorDeviceName = @"\\.\DISPLAY1",
+            PositionMonitorWasPrimary = true
+        };
+        var settings = new AppSettings
+        {
+            Widgets = [first, second],
+            WidgetGroups = [group]
+        };
+        var service = new WidgetTopologyLayoutService();
+        WidgetDisplayTopologySnapshot highDpi = WidgetTopologyLayoutService.CreateSnapshotForTest(
+            Monitor("panel", @"\\.\DISPLAY1", true, 0, 0, 3840, 2080, 2));
+        WidgetDisplayTopologySnapshot standardDpi = WidgetTopologyLayoutService.CreateSnapshotForTest(
+            Monitor("panel", @"\\.\DISPLAY1", true, 0, 0, 1920, 1040, 1));
+
+        service.Activate(settings, highDpi);
+        service.Activate(settings, standardDpi);
+
+        // The projection must carry the stable id onto the shared group
+        // surface and every member: WidgetPositioningService ranks the stable
+        // id above the device name, so a stale/missing id on any of them
+        // resolves the surface onto the wrong monitor after a switch.
+        Assert.Equal("panel", group.PositionMonitorStableId);
+        Assert.Equal("panel", first.PositionMonitorStableId);
+        Assert.Equal("panel", second.PositionMonitorStableId);
     }
 
     private static WidgetConfig CreateWidget() => new()

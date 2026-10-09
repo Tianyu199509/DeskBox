@@ -476,6 +476,52 @@ public sealed partial class AppearanceSettingsViewModel : ObservableObject
     public string Windows10CompatibilityMessage =>
         _localize("Settings.Windows10VisualCompatibility.Message");
 
+    // Read-only projections of the Windows-wide shadow/transparency switches
+    // mirrored by the material section's bottom system cards. Like the
+    // compatibility flag above, the Win32 probes stay on the shell and push
+    // their results in — the cards deep-link into the OS settings surfaces
+    // rather than writing (an in-app write would be swallowed by MSIX
+    // copy-on-write HKCU virtualization). The raw states are stored instead
+    // of localized strings so RefreshLocalization can re-project the text
+    // without a shell round-trip.
+    private bool? _windowShadowEnabled;
+    private bool? _transparencyEffectsEnabled;
+
+    public string SystemShadowStatusText =>
+        LocalizeSystemEffectState(_windowShadowEnabled);
+
+    public string SystemTransparencyStatusText =>
+        LocalizeSystemEffectState(_transparencyEffectsEnabled);
+
+    /// <summary>
+    /// Pushed by the shell: re-projects the Windows-wide visual-effect
+    /// switches. A null probe result means "unknown" and leaves the status
+    /// blank instead of showing a state the OS may not actually have.
+    /// </summary>
+    public void UpdateSystemEffectStates(
+        bool? windowShadowEnabled,
+        bool? transparencyEffectsEnabled)
+    {
+        if (_windowShadowEnabled != windowShadowEnabled)
+        {
+            _windowShadowEnabled = windowShadowEnabled;
+            OnPropertyChanged(nameof(SystemShadowStatusText));
+        }
+
+        if (_transparencyEffectsEnabled != transparencyEffectsEnabled)
+        {
+            _transparencyEffectsEnabled = transparencyEffectsEnabled;
+            OnPropertyChanged(nameof(SystemTransparencyStatusText));
+        }
+    }
+
+    private string LocalizeSystemEffectState(bool? enabled) =>
+        enabled is null
+            ? string.Empty
+            : _localize(enabled.Value
+                ? "Settings.SystemEffect.StateOn"
+                : "Settings.SystemEffect.StateOff");
+
     /// <summary>Whether the opacity slider applies to the current material.</summary>
     public bool ShowOpacitySlider => WidgetMaterialKinds.SupportsOpacity(MaterialType);
 
@@ -957,9 +1003,9 @@ public sealed partial class AppearanceSettingsViewModel : ObservableObject
         {
             string[] keys =
             [
-                "Settings.Corner.Square",
+                "Settings.Corner.Round",
                 "Settings.Corner.Small",
-                "Settings.Corner.Round"
+                "Settings.Corner.Square"
             ];
             _cachedCornerPreferenceNames ??= keys.Select(key => _localize(key)).ToArray();
             var options = new SettingsOption[CornerPreferences.Length];
@@ -2030,6 +2076,13 @@ public sealed partial class AppearanceSettingsViewModel : ObservableObject
         _cachedCornerPreferenceNames = null;
         _cachedFileNameLineCountNames = null;
         _cachedTitleIconModeNames = null;
+        _cachedLayoutDensityNames = null;
+        _cachedAnimationPresetNames = null;
+        _cachedAnimationEffectNames = null;
+        _cachedAnimationSpeedNames = null;
+        _cachedAnimationSlideDirectionNames = null;
+        _cachedAnimationEasingIntensityNames = null;
+        _cachedChromeModeNames = null;
         OnPropertyChanged(nameof(AvailableThemeOptions));
         OnPropertyChanged(nameof(AvailableTrayIconStyleOptions));
         OnPropertyChanged(nameof(AvailableAccentColorSourceOptions));
@@ -2054,6 +2107,8 @@ public sealed partial class AppearanceSettingsViewModel : ObservableObject
         OnPropertyChanged(nameof(MaterialTypeText));
         OnPropertyChanged(nameof(Windows10CompatibilityTitle));
         OnPropertyChanged(nameof(Windows10CompatibilityMessage));
+        OnPropertyChanged(nameof(SystemShadowStatusText));
+        OnPropertyChanged(nameof(SystemTransparencyStatusText));
         OnPropertyChanged(nameof(AccentColorDescription));
         OnPropertyChanged(nameof(LayoutDensityText));
         OnPropertyChanged(nameof(AnimationPresetText));

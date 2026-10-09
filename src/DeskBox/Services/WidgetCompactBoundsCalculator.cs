@@ -90,9 +90,17 @@ public static class WidgetCompactBoundsCalculator
             PositionAnchor = placement.PositionAnchor,
             PositionMarginX = placement.PositionMarginX,
             PositionMarginY = placement.PositionMarginY,
-            PositionMonitorKey = placement.PositionMonitorKey,
-            PositionMonitorDeviceName = placement.PositionMonitorDeviceName,
-            PositionMonitorWasPrimary = placement.PositionMonitorWasPrimary
+            // The capsule is derived from its surface (spec 4.4): monitor
+            // identity comes from the surface so a stale capsule reference
+            // can never pull the capsule onto the old screen; the capsule
+            // itself only contributes the anchor and margins. Binding fields
+            // share the surface's intent as before.
+            PositionMonitorKey = config.PositionMonitorKey,
+            PositionMonitorDeviceName = config.PositionMonitorDeviceName,
+            PositionMonitorStableId = config.PositionMonitorStableId,
+            PositionMonitorWasPrimary = config.PositionMonitorWasPrimary,
+            ScreenBindingMode = config.ScreenBindingMode,
+            BoundScreenId = config.BoundScreenId
         };
         RectInt32 resolved = WidgetPositioningService.ResolveBoundsForCurrentTopology(placementConfig);
         RectInt32 workArea = DisplayArea.GetFromRect(resolved, DisplayAreaFallback.Nearest).WorkArea;
@@ -283,6 +291,21 @@ public static class WidgetCompactBoundsCalculator
         // capture is intentionally independent of expansion direction.
         _ = expansionDirection;
         RectInt32 workArea = DisplayArea.GetFromRect(bounds, DisplayAreaFallback.Nearest).WorkArea;
+        CapturePlacementCore(config, bounds, workArea);
+    }
+
+    /// <summary>
+    /// The capture math isolated from the WinAppSDK <see cref="DisplayArea"/>
+    /// probe: the CI unit-test host has no Windows App SDK WinRT classes
+    /// registered (activation throws REGDB_E_CLASSNOTREG), so tests exercise
+    /// this core with a synthetic work area while production resolves the
+    /// real one at the <see cref="CapturePlacement"/> entry point.
+    /// </summary>
+    internal static void CapturePlacementCore(
+        WidgetConfig config,
+        RectInt32 bounds,
+        RectInt32 workArea)
+    {
         var placementConfig = new WidgetConfig
         {
             BoundsCoordinateVersion = WidgetConfig.CurrentBoundsCoordinateVersion,
@@ -305,9 +328,12 @@ public static class WidgetCompactBoundsCalculator
             PositionAnchor = placementConfig.PositionAnchor,
             PositionMarginX = placementConfig.PositionMarginX,
             PositionMarginY = placementConfig.PositionMarginY,
-            PositionMonitorKey = placementConfig.PositionMonitorKey,
-            PositionMonitorDeviceName = placementConfig.PositionMonitorDeviceName,
-            PositionMonitorWasPrimary = placementConfig.PositionMonitorWasPrimary,
+            // Derived fields (spec 4.4): the stored capsule monitor identity
+            // always mirrors the surface's identity, never its own snapshot.
+            PositionMonitorKey = config.PositionMonitorKey,
+            PositionMonitorDeviceName = config.PositionMonitorDeviceName,
+            PositionMonitorStableId = config.PositionMonitorStableId,
+            PositionMonitorWasPrimary = config.PositionMonitorWasPrimary,
             BoundsCoordinateVersion = WidgetConfig.CurrentBoundsCoordinateVersion
         };
     }

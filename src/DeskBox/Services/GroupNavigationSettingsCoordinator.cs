@@ -39,7 +39,8 @@ public sealed class GroupNavigationSettingsCoordinator : IGroupNavigationSetting
             layout.WidgetGroupDefaultNavigationStyle,
             layout.WidgetGroupDefaultTitleDisplayMode,
             layout.WidgetGroupWheelSwitchEnabled,
-            layout.WidgetGroupHoverSwitchEnabled);
+            layout.WidgetGroupHoverSwitchEnabled,
+            layout.WidgetGroupSwitchAnimationStyle);
     }
 
     public bool SetDefaultNavigationStyle(string? value)
@@ -106,6 +107,24 @@ public sealed class GroupNavigationSettingsCoordinator : IGroupNavigationSetting
         }
 
         layout.WidgetGroupHoverSwitchEnabled = value;
+        _settings.SaveDebounced();
+        return true;
+    }
+
+    public bool SetWidgetGroupSwitchAnimationStyle(string? value)
+    {
+        ThrowIfStopped();
+        string normalized = WidgetGroupSwitchAnimationStyles.Normalize(value);
+        WidgetLayoutSettingsSlice layout = _settings.Settings.WidgetLayout;
+        if (string.Equals(
+                layout.WidgetGroupSwitchAnimationStyle,
+                normalized,
+                StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        layout.WidgetGroupSwitchAnimationStyle = normalized;
         _settings.SaveDebounced();
         return true;
     }

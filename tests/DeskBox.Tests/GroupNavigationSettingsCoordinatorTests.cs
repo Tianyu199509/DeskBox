@@ -28,32 +28,38 @@ public sealed class GroupNavigationSettingsCoordinatorTests : IDisposable
         settings.SettingsChanged += () => notified++;
 
         // Defaults from a fresh profile: Tabs / IconAndText / wheel on /
-        // hover off. Flip all four through the editor seam.
+        // hover off / switch animation Auto. Flip all five through the
+        // editor seam.
         Assert.True(editor.SetDefaultNavigationStyle(WidgetGroupNavigationStyles.Stack));
         Assert.True(editor.SetDefaultTitleDisplayMode(WidgetGroupTitleDisplayModes.IconOnly));
         Assert.True(editor.SetWheelSwitchEnabled(false));
         Assert.True(editor.SetHoverSwitchEnabled(true));
+        Assert.True(editor.SetWidgetGroupSwitchAnimationStyle(
+            WidgetGroupSwitchAnimationStyles.None));
 
         WidgetLayoutSettingsSlice layout = settings.Settings.WidgetLayout;
         Assert.Equal(WidgetGroupNavigationStyles.Stack, layout.WidgetGroupDefaultNavigationStyle);
         Assert.Equal(WidgetGroupTitleDisplayModes.IconOnly, layout.WidgetGroupDefaultTitleDisplayMode);
         Assert.False(layout.WidgetGroupWheelSwitchEnabled);
         Assert.True(layout.WidgetGroupHoverSwitchEnabled);
+        Assert.Equal(WidgetGroupSwitchAnimationStyles.None, layout.WidgetGroupSwitchAnimationStyle);
 
-        // Four real changes schedule four SettingsChanged passes; re-sending
+        // Five real changes schedule five SettingsChanged passes; re-sending
         // the same values reports no change and must not save again, exactly
         // like the shell setters skipped unchanged writes before the
         // migration (no notification, no projection rebuild).
-        Assert.Equal(4, notified);
+        Assert.Equal(5, notified);
         Assert.False(editor.SetDefaultNavigationStyle(WidgetGroupNavigationStyles.Stack));
         Assert.False(editor.SetDefaultTitleDisplayMode(WidgetGroupTitleDisplayModes.IconOnly));
         Assert.False(editor.SetWheelSwitchEnabled(false));
         Assert.False(editor.SetHoverSwitchEnabled(true));
-        Assert.Equal(4, notified);
+        Assert.False(editor.SetWidgetGroupSwitchAnimationStyle(
+            WidgetGroupSwitchAnimationStyles.None));
+        Assert.Equal(5, notified);
 
         // A real flip still reports true and saves.
         Assert.True(editor.SetDefaultNavigationStyle(WidgetGroupNavigationStyles.Tabs));
-        Assert.Equal(5, notified);
+        Assert.Equal(6, notified);
     }
 
     [Fact]
@@ -96,6 +102,21 @@ public sealed class GroupNavigationSettingsCoordinatorTests : IDisposable
             WidgetGroupTitleDisplayModes.IconAndText,
             settings.Settings.WidgetLayout.WidgetGroupDefaultTitleDisplayMode);
         Assert.False(coordinator.SetDefaultTitleDisplayMode("IconAndText"));
+
+        // The switch-animation store starts at the fresh Auto default: an
+        // invalid or null write normalizes back to Auto without changing
+        // anything, a real selection persists, and a normalized-equal
+        // re-send is a no-op.
+        Assert.False(coordinator.SetWidgetGroupSwitchAnimationStyle(null));
+        Assert.False(coordinator.SetWidgetGroupSwitchAnimationStyle("Bogus"));
+        Assert.True(coordinator.SetWidgetGroupSwitchAnimationStyle(
+            WidgetGroupSwitchAnimationStyles.Horizontal));
+        Assert.True(coordinator.SetWidgetGroupSwitchAnimationStyle("Nonsense"));
+        Assert.Equal(
+            WidgetGroupSwitchAnimationStyles.Auto,
+            settings.Settings.WidgetLayout.WidgetGroupSwitchAnimationStyle);
+        Assert.False(coordinator.SetWidgetGroupSwitchAnimationStyle(
+            WidgetGroupSwitchAnimationStyles.Auto));
     }
 
     [Fact]
@@ -113,6 +134,8 @@ public sealed class GroupNavigationSettingsCoordinatorTests : IDisposable
         Assert.True(coordinator.SetDefaultTitleDisplayMode(WidgetGroupTitleDisplayModes.TextOnly));
         Assert.True(coordinator.SetWheelSwitchEnabled(false));
         Assert.True(coordinator.SetHoverSwitchEnabled(true));
+        Assert.True(coordinator.SetWidgetGroupSwitchAnimationStyle(
+            WidgetGroupSwitchAnimationStyles.None));
         await settings.SaveAsync();
 
         var reloaded = new SettingsService(_root);
@@ -123,6 +146,7 @@ public sealed class GroupNavigationSettingsCoordinatorTests : IDisposable
         Assert.Equal(WidgetGroupTitleDisplayModes.TextOnly, snapshot.DefaultTitleDisplayMode);
         Assert.False(snapshot.WheelSwitchEnabled);
         Assert.True(snapshot.HoverSwitchEnabled);
+        Assert.Equal(WidgetGroupSwitchAnimationStyles.None, snapshot.SwitchAnimationStyle);
         Assert.True(reloaded.Layout.IsAuthoritative);
 
         // Reloaded values are already normalized, so re-sending them is a
@@ -132,6 +156,8 @@ public sealed class GroupNavigationSettingsCoordinatorTests : IDisposable
         Assert.False(nextSession.SetDefaultTitleDisplayMode(WidgetGroupTitleDisplayModes.TextOnly));
         Assert.False(nextSession.SetWheelSwitchEnabled(false));
         Assert.False(nextSession.SetHoverSwitchEnabled(true));
+        Assert.False(nextSession.SetWidgetGroupSwitchAnimationStyle(
+            WidgetGroupSwitchAnimationStyles.None));
     }
 
     [Fact]
@@ -147,6 +173,9 @@ public sealed class GroupNavigationSettingsCoordinatorTests : IDisposable
             () => coordinator.SetDefaultTitleDisplayMode(WidgetGroupTitleDisplayModes.IconOnly));
         Assert.Throws<ObjectDisposedException>(() => coordinator.SetWheelSwitchEnabled(false));
         Assert.Throws<ObjectDisposedException>(() => coordinator.SetHoverSwitchEnabled(true));
+        Assert.Throws<ObjectDisposedException>(
+            () => coordinator.SetWidgetGroupSwitchAnimationStyle(
+                WidgetGroupSwitchAnimationStyles.None));
         Assert.True(coordinator.IsStopped);
 
         await settings.SaveAsync();
@@ -158,5 +187,8 @@ public sealed class GroupNavigationSettingsCoordinatorTests : IDisposable
             settings.Settings.WidgetLayout.WidgetGroupDefaultTitleDisplayMode);
         Assert.True(settings.Settings.WidgetLayout.WidgetGroupWheelSwitchEnabled);
         Assert.False(settings.Settings.WidgetLayout.WidgetGroupHoverSwitchEnabled);
+        Assert.Equal(
+            WidgetGroupSwitchAnimationStyles.Auto,
+            settings.Settings.WidgetLayout.WidgetGroupSwitchAnimationStyle);
     }
 }

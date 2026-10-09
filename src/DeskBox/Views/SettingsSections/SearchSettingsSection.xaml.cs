@@ -3,12 +3,11 @@ using DeskBox.Models;
 using System.ComponentModel;
 using DeskBox.Contracts;
 using DeskBox.Features.Search;
-using DeskBox.Platform;
 using DeskBox.Services;
+using DeskBox.Views.Dialogs;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
-using Microsoft.UI.Xaml.Controls.Primitives;
-using Microsoft.UI.Xaml.Input;
+using Microsoft.UI.Xaml.Media;
 using Microsoft.Windows.Storage.Pickers;
 using Windows.System;
 
@@ -21,7 +20,6 @@ namespace DeskBox.Views.SettingsSections;
 public sealed partial class SearchSettingsSection : UserControl
 {
     private bool _isLoading;
-    private bool _isRecordingSearchHotkey;
     private SearchSettingsViewModel? _viewModel;
     private LocalizationService _localization = null!;
     private nint _ownerWindow;
@@ -33,6 +31,9 @@ public sealed partial class SearchSettingsSection : UserControl
         InitializeComponent();
         Loaded += OnLoaded;
         Unloaded += OnUnloaded;
+        // Local brush values do not follow theme swaps; re-pin when the
+        // realized section's theme flips.
+        ActualThemeChanged += (_, _) => ApplyElevatedNoticeSeverityBrushes();
     }
 
     private LocalizationService Localization => _localization;
@@ -68,7 +69,6 @@ public sealed partial class SearchSettingsSection : UserControl
         }
         else
         {
-            _isRecordingSearchHotkey = false;
             _viewModel.Deactivate();
         }
     }
@@ -80,7 +80,38 @@ public sealed partial class SearchSettingsSection : UserControl
 
     private void OnLoaded(object sender, RoutedEventArgs e)
     {
+        ApplyElevatedNoticeSeverityBrushes();
+        // Both notices keep the template-default title (14px semi-bold) with
+        // the message sized down to the settings-card description spec; see
+        // SettingsWindow.ApplyNoticeMessageTypography for why the template
+        // text block must be retargeted from code-behind.
+        SettingsWindow.ApplyNoticeMessageTypography(EverythingStatusInfoBar);
+        SettingsWindow.ApplyNoticeMessageTypography(SearchHotkeyElevatedNoticeInfoBar);
         SynchronizeActivity();
+    }
+
+    /// <summary>
+    /// The elevated-hotkey notice's ThemeResource severity brushes fail to
+    /// resolve inside sections realized through DataTemplate.LoadContent
+    /// (the known delayed-creation pitfall), leaving the bar painted like
+    /// the card behind it with near-invisible text. Pin the informational
+    /// severity brushes from the application resources so the notice keeps
+    /// a distinct background and readable text in both themes.
+    /// </summary>
+    private void ApplyElevatedNoticeSeverityBrushes()
+    {
+        if (Application.Current.Resources.TryGetValue(
+                "InfoBarInformationalSeverityBackgroundBrush", out object? background) &&
+            background is Brush backgroundBrush)
+        {
+            SearchHotkeyElevatedNoticeInfoBar.Background = backgroundBrush;
+        }
+        if (Application.Current.Resources.TryGetValue(
+                "InfoBarInformationalSeverityForegroundBrush", out object? foreground) &&
+            foreground is Brush foregroundBrush)
+        {
+            SearchHotkeyElevatedNoticeInfoBar.Foreground = foregroundBrush;
+        }
     }
 
     private void OnUnloaded(object sender, RoutedEventArgs e)
@@ -88,7 +119,6 @@ public sealed partial class SearchSettingsSection : UserControl
         if (_viewModel is null) return;
         _viewModel.PropertyChanged -= OnEditorChanged;
         _observingModel = false;
-        _isRecordingSearchHotkey = false;
         _viewModel.Deactivate();
     }
 
@@ -371,16 +401,14 @@ private void UpdateEverythingDashboard(EverythingConnectionSnapshot snapshot)
         SearchHotkeyState hotkey = _viewModel.State.Hotkey;
         bool hotkeyAvailable = _viewModel.State.FeatureEnabled && hotkey.Available;
 
-        SearchHotkeyExpander.IsEnabled = hotkeyAvailable;
+        // Content-level gating on purpose: the expander itself stays enabled
+        // so the notice about the unavailable hotkey can always be read;
+        // only the controls that would mutate the hotkey go gray.
+        SearchHotkeyToggle.IsEnabled = hotkeyAvailable;
+        SearchHotkeyCaptureButton.IsEnabled = hotkeyAvailable;
+        ResetSearchHotkeyButton.IsEnabled = hotkeyAvailable;
         SearchHotkeyToggle.IsOn = hotkey.Enabled && hotkeyAvailable;
-
-        if (!_isRecordingSearchHotkey)
-        {
-            SearchHotkeyCaptureButton.Content = hotkey.DisplayText;
-        }
-
-        SearchHotkeyPresetAltSpaceButton.IsChecked =
-            hotkey.Gesture.Equals(SearchSettingsViewModel.AltSpaceGesture);
+        SearchHotkeyCaptureButton.Content = hotkey.DisplayText;
 
         SearchHotkeyStatusText.Text = !hotkeyAvailable
             ? Localization.T("Settings.Search.Hotkey.Status.Disabled")
@@ -399,147 +427,59 @@ private void UpdateEverythingDashboard(EverythingConnectionSnapshot snapshot)
         _viewModel?.SetHotkeyEnabled(SearchHotkeyToggle.IsOn);
     }
 
-    private void SearchHotkeyCaptureButton_Click(object sender, RoutedEventArgs e)
+    private async void SearchHotkeyCaptureButton_Click(object sender, RoutedEventArgs e)
     {
-        _isRecordingSearchHotkey = true;
-        SearchHotkeyCaptureButton.Content = Localization.T("Settings.Search.Hotkey.Recording");
-        SearchHotkeyCaptureButton.Focus(FocusState.Programmatic);
+        if (XamlRoot is null || _viewModel is not { IsActive: true } editor)
+        {
+            return;
+        }
+
+        HotkeyRecorderDialog.Preset[] presets =
+        [
+            new(
+                Localization.T("Settings.GlobalHotkey.Preset.AltSpace"),
+                GlobalHotkeyActivation.FromChord(SearchSettingsViewModel.AltSpaceGesture))
+        ];
+
+        var dialog = new HotkeyRecorderDialog(
+            XamlRoot,
+            Localization,
+            HotkeyRecorderDialog.Scope.Search,
+            GlobalHotkeyActivation.FromChord(editor.State.Hotkey.Gesture),
+            presets,
+            activation => ApplySearchHotkeyFromRecorderAsync(editor, activation),
+            GetSearchHotkeyRecorderConflict);
+        await dialog.ShowAsync();
     }
 
-    private async void SearchHotkeyCaptureButton_KeyDown(object sender, KeyRoutedEventArgs e)
+    private Task<string?> ApplySearchHotkeyFromRecorderAsync(
+        SearchSettingsViewModel editor,
+        GlobalHotkeyActivation activation)
     {
-        if (!_isRecordingSearchHotkey)
-        {
-            return;
-        }
-
-        if (e.Key == Windows.System.VirtualKey.Escape)
-        {
-            EndSearchHotkeyRecording();
-            e.Handled = true;
-            return;
-        }
-
-        if (IsModifierKey(e.Key))
-        {
-            e.Handled = true;
-            return;
-        }
-
-        var gesture = new GlobalHotkeyGesture(GetPressedHotkeyModifiers(), (int)e.Key);
-        EndSearchHotkeyRecording();
-        e.Handled = true;
-        await ApplySearchHotkeyGestureAsync(gesture);
-    }
-
-    private async void SearchHotkeyPresetButton_Click(object sender, RoutedEventArgs e)
-    {
-        if (_isLoading || sender is not ToggleButton { Tag: "AltSpace" })
-        {
-            return;
-        }
-
-        await ApplySearchHotkeyGestureAsync(SearchSettingsViewModel.AltSpaceGesture);
-    }
-
-    private async Task ApplySearchHotkeyGestureAsync(GlobalHotkeyGesture gesture)
-    {
-        if (_viewModel is not { IsActive: true } editor) return;
-        CancellationToken visit = editor.VisitToken;
         try
         {
-            if (editor.RequiresReservedHotkeyConfirmation(gesture) &&
-                !await ConfirmSearchReservedHotkeyOverrideAsync())
-            {
-                if (!visit.IsCancellationRequested) RenderEditor();
-                return;
-            }
-            if (!visit.IsCancellationRequested) editor.ApplyHotkey(gesture);
+            editor.ApplyHotkey(activation.Gesture);
+            return Task.FromResult(editor.HotkeyError);
         }
         catch (Exception ex)
         {
-            if (!visit.IsCancellationRequested) editor.ReportViewError(ex);
+            editor.ReportViewError(ex);
+            return Task.FromResult<string?>(
+                Localization.T("Settings.Search.Hotkey.Status.Failed"));
         }
     }
 
-    private async Task<bool> ConfirmSearchReservedHotkeyOverrideAsync()
+    private string? GetSearchHotkeyRecorderConflict(GlobalHotkeyGesture gesture)
     {
-        if (XamlRoot is null)
-        {
-            return false;
-        }
-
-        var dialog = new ContentDialog
-        {
-            XamlRoot = XamlRoot,
-            Title = _viewModel!.ReservedHotkeyDisplayText,
-            PrimaryButtonText = Localization.T("Common.Enable"),
-            CloseButtonText = Localization.T("Common.Cancel"),
-            DefaultButton = ContentDialogButton.Close,
-            Content = new TextBlock
-            {
-                Text = Localization.T("Settings.GlobalHotkey.AltSpaceWarning"),
-                TextWrapping = TextWrapping.Wrap
-            }
-        };
-
-        return await dialog.ShowAsync() == ContentDialogResult.Primary;
-    }
-
-    private void SearchHotkeyCaptureButton_LostFocus(object sender, RoutedEventArgs e)
-    {
-        if (_isRecordingSearchHotkey)
-        {
-            EndSearchHotkeyRecording();
-        }
+        return _viewModel is { IsActive: true } editor &&
+            editor.IsHotkeyOwnedByMainHotkey(gesture)
+                ? Localization.T("Settings.Search.Hotkey.Status.GlobalHotkeyConflict")
+                : null;
     }
 
     private void ResetSearchHotkeyButton_Click(object sender, RoutedEventArgs e)
     {
         _viewModel?.ResetHotkey();
-    }
-
-    private void EndSearchHotkeyRecording()
-    {
-        _isRecordingSearchHotkey = false;
-        RenderEditor();
-    }
-
-    private static HotkeyModifierKeys GetPressedHotkeyModifiers()
-    {
-        var modifiers = HotkeyModifierKeys.None;
-        if (Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Control))
-        {
-            modifiers |= HotkeyModifierKeys.Control;
-        }
-
-        if (Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Menu))
-        {
-            modifiers |= HotkeyModifierKeys.Alt;
-        }
-
-        if (Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Shift))
-        {
-            modifiers |= HotkeyModifierKeys.Shift;
-        }
-
-        return modifiers;
-    }
-
-    private static bool IsModifierKey(Windows.System.VirtualKey key)
-    {
-        return key is
-            Windows.System.VirtualKey.Control or
-            Windows.System.VirtualKey.LeftControl or
-            Windows.System.VirtualKey.RightControl or
-            Windows.System.VirtualKey.Menu or
-            Windows.System.VirtualKey.LeftMenu or
-            Windows.System.VirtualKey.RightMenu or
-            Windows.System.VirtualKey.Shift or
-            Windows.System.VirtualKey.LeftShift or
-            Windows.System.VirtualKey.RightShift or
-            Windows.System.VirtualKey.LeftWindows or
-            Windows.System.VirtualKey.RightWindows;
     }
 
 }

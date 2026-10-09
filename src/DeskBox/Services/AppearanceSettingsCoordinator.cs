@@ -435,13 +435,18 @@ public sealed class AppearanceSettingsCoordinator : IAppearanceSettings
         foreach (WidgetConfig widget in _settings.Settings.WidgetLayout.Widgets)
         {
             string? fileName = WidgetBackgroundCustomization.GetImageFileNameOverride(widget);
-            if (fileName is null)
+            if (fileName is null &&
+                WidgetBackgroundCustomization.GetColorOverride(widget) is null)
             {
                 continue;
             }
 
             WidgetBackgroundCustomization.Clear(widget);
-            WidgetTitleIconAssetStore.Current.DeleteImage(widget.Id, fileName);
+            if (fileName is not null)
+            {
+                WidgetTitleIconAssetStore.Current.DeleteImage(widget.Id, fileName);
+            }
+
             cleared++;
         }
 

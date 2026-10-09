@@ -14,6 +14,7 @@ internal static class ManagedStorageMigrationPresentation
 
     internal static bool NeedsNewLocation(StorageMigrationProblem problem) => problem is
         StorageMigrationProblem.DestinationChanged or StorageMigrationProblem.DestinationConflict or
+        StorageMigrationProblem.RootsOverlap or
         StorageMigrationProblem.SourceChanged or StorageMigrationProblem.Unsupported;
 
     internal static StorageMigrationProblem Classify(Exception exception)

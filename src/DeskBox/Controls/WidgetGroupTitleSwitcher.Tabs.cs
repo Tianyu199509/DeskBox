@@ -27,8 +27,14 @@ public sealed partial class WidgetGroupTitleSwitcher
     private TabDragSnapshot? _tabDragSnapshot;
     private DispatcherQueueTimer? _dragHoverSwitchTimer;
     private string? _dragHoverSwitchTargetId;
+    private bool _isFileDragStripFreeze;
+    private int _fileDragFreezeExitGeneration;
 
-    private const int DragHoverSwitchDelayMilliseconds = 200;
+    // Chrome/Edge and VS Code both dwell 500ms before a drag-hover tab
+    // switch; Win11 Explorer takes 1-2s. 400ms keeps DeskBox snappier than
+    // the browsers while giving the frozen strip a stable, deliberate
+    // targeting rhythm instead of a hair trigger.
+    private const int DragHoverSwitchDelayMilliseconds = 400;
 
     private bool UsesTabs => WidgetGroupNavigationStyles.Normalize(
         NavigationStyle, allowFollowDefault: false) == WidgetGroupNavigationStyles.Tabs;
@@ -88,6 +94,8 @@ public sealed partial class WidgetGroupTitleSwitcher
         // Drag events must be observed with handledEventsToo: TabView's own
         // external-tab-drop feature marks DragOver handled, which hides
         // drags from attribute-wired handlers on this element.
+        TabsView.AddHandler(UIElement.DragEnterEvent,
+            new DragEventHandler(TabsView_DragEnter), handledEventsToo: true);
         TabsView.AddHandler(UIElement.DragOverEvent,
             new DragEventHandler(TabsView_DragOver), handledEventsToo: true);
         TabsView.AddHandler(UIElement.DragLeaveEvent,
@@ -117,10 +125,18 @@ public sealed partial class WidgetGroupTitleSwitcher
         {
             var memberIds = _presentation.Members.Select(member => member.WidgetId)
                 .ToHashSet(StringComparer.Ordinal);
-            foreach (string removedId in _tabs.Keys.Where(id => !memberIds.Contains(id)).ToArray())
+            // While a file drag freezes the strip, membership churn is
+            // deferred: dwell switches still need the selection and opacity
+            // pass below, but removing or reinserting items mid-drag would
+            // move the very targets the user is aiming at. The deferred
+            // cleanup runs when the freeze lifts.
+            if (!_isFileDragStripFreeze)
             {
-                TabsView.TabItems.Remove(_tabs[removedId].Tab);
-                _tabs.Remove(removedId);
+                foreach (string removedId in _tabs.Keys.Where(id => !memberIds.Contains(id)).ToArray())
+                {
+                    TabsView.TabItems.Remove(_tabs[removedId].Tab);
+                    _tabs.Remove(removedId);
+                }
             }
 
             string displayMode = WidgetGroupTitleDisplayModes.Normalize(
@@ -139,7 +155,8 @@ public sealed partial class WidgetGroupTitleSwitcher
                 }
                 // Keep the native containers alive across content commits, title
                 // changes and settings notifications. Never rebuild during a drag.
-                if (index >= TabsView.TabItems.Count || !ReferenceEquals(TabsView.TabItems[index], row.Tab))
+                if (!_isFileDragStripFreeze &&
+                    (index >= TabsView.TabItems.Count || !ReferenceEquals(TabsView.TabItems[index], row.Tab)))
                 {
                     TabsView.TabItems.Remove(row.Tab);
                     TabsView.TabItems.Insert(index, row.Tab);
@@ -331,6 +348,10 @@ public sealed partial class WidgetGroupTitleSwitcher
 
     private void TabsView_PointerPressed(object sender, PointerRoutedEventArgs e)
     {
+        // A real press cannot happen while an OLE drag loop is alive, so any
+        // freeze still held here is a zombie (a missed DragLeave/Drop) and
+        // must not block tab dragging or reorder.
+        ExitFileDragStripFreeze();
         if (e.GetCurrentPoint(TabsView).Properties.IsLeftButtonPressed &&
             FindGroupTab(e.OriginalSource) is { Tag: string memberId })
         {
@@ -401,6 +422,9 @@ public sealed partial class WidgetGroupTitleSwitcher
 
     private void TabsView_TabDragStarting(TabView sender, TabViewTabDragStartingEventArgs args)
     {
+        // A tab drag starting proves no file-drag session is alive; in-strip
+        // reorder also needs AllowDropTabs restored to work at all.
+        ExitFileDragStripFreeze();
         if (!UsesTabs || _isSavingTabOrder || _tabDragSnapshot is not null ||
             _presentation is null || _presentation.Members.Count < 2 ||
             args.Tab?.Tag is not string memberId ||
@@ -449,8 +473,23 @@ public sealed partial class WidgetGroupTitleSwitcher
 
         // A file drag is not an external tab drop. Reject that reading so
         // TabView does not draw its tab-insertion invite while the drag-hover
-        // dwell below runs.
+        // dwell below runs. (The strip-wide widen on DragEnter is killed
+        // separately by the file-drag freeze below, which flips
+        // AllowDropTabs before TabView reserves its drag-over column.)
         args.AcceptedOperation = DataPackageOperation.None;
+    }
+
+    private void TabsView_DragEnter(object sender, DragEventArgs args)
+    {
+        // A tab-detach drag keeps the native drop posture; every other
+        // payload is a foreign (file) drag and must freeze the strip before
+        // TabView's DragEnter handling reserves the widened tab column.
+        if (args.DataView.Contains(DetachDragFormat))
+        {
+            return;
+        }
+
+        EnterFileDragStripFreeze();
     }
 
     private void TabsView_DragOver(object sender, DragEventArgs args)
@@ -461,12 +500,20 @@ public sealed partial class WidgetGroupTitleSwitcher
             return;
         }
 
+        // DragEnter can be swallowed on some machines; every DragOver is a
+        // idempotent re-freeze that also cancels a pending debounced exit.
+        EnterFileDragStripFreeze();
         ObserveDragHoverSwitch(FindTabMemberUnderDrag(args), native: false);
     }
 
     private void TabsView_DragLeave(object sender, DragEventArgs args)
     {
         CancelDragHoverSwitch();
+        // Flipping AllowDropTabs off makes the inner ListView drop its
+        // target status, which surfaces as a DragLeave here even though the
+        // pointer never left the strip — debounce the exit and let any later
+        // DragEnter/DragOver (or the native stream) cancel it.
+        ScheduleFileDragStripFreezeExit();
     }
 
     private void TabsView_Drop(object sender, DragEventArgs args)
@@ -474,6 +521,73 @@ public sealed partial class WidgetGroupTitleSwitcher
         // The drag session has ended. The event itself stays untouched: the
         // shell's drop handling is authoritative for ordinary file drops.
         CancelDragHoverSwitch();
+        ExitFileDragStripFreeze();
+    }
+
+    // Freezing the strip during a foreign drag keeps the tabs a stable
+    // target: TabView stops reserving the widened drag-over tab column and
+    // stops drawing reorder visuals, while the dwell switch below stays the
+    // only visible change. The shell's own AllowDrop stays true so the
+    // routed DragOver stream feeding the dwell keeps flowing.
+    private void EnterFileDragStripFreeze()
+    {
+        _fileDragFreezeExitGeneration++;
+        if (_isFileDragStripFreeze || !UsesTabs)
+        {
+            return;
+        }
+
+        _isFileDragStripFreeze = true;
+        TabsView.AllowDropTabs = false;
+    }
+
+    private void ScheduleFileDragStripFreezeExit()
+    {
+        if (!_isFileDragStripFreeze)
+        {
+            return;
+        }
+
+        int generation = ++_fileDragFreezeExitGeneration;
+        DispatcherQueue.TryEnqueue(DispatcherQueuePriority.Low, () =>
+        {
+            if (_fileDragFreezeExitGeneration == generation)
+            {
+                ExitFileDragStripFreeze();
+            }
+        });
+    }
+
+    private void ExitFileDragStripFreeze()
+    {
+        _fileDragFreezeExitGeneration++;
+        if (!_isFileDragStripFreeze)
+        {
+            return;
+        }
+
+        _isFileDragStripFreeze = false;
+        TabsView.AllowDropTabs = true;
+        // Re-run the full synchronization: the freeze deferred membership
+        // removals and order repairs that may have queued up mid-drag.
+        SynchronizeTabs();
+    }
+
+    /// <summary>
+    /// Native-stream entry point for the file-drag freeze: Explorer-style
+    /// drags may never surface as XAML drag events, so the window's OLE
+    /// observer drives the same freeze from its DragEnter/DragOver stream.
+    /// </summary>
+    internal void SetFileDragStripFreeze(bool active)
+    {
+        if (active)
+        {
+            EnterFileDragStripFreeze();
+        }
+        else
+        {
+            ExitFileDragStripFreeze();
+        }
     }
 
     // Dwelling a file drag over a specific tab switches to that member so the

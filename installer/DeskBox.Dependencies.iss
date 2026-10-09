@@ -1,10 +1,10 @@
 ﻿[Code]
 const
-  DotNetRuntimeUrl = 'https://builds.dotnet.microsoft.com/dotnet/Runtime/10.0.9/dotnet-runtime-10.0.9-win-x64.exe';
+  DotNetRuntimeUrl = 'https://builds.dotnet.microsoft.com/dotnet/Runtime/10.0.12/dotnet-runtime-10.0.12-win-x64.exe';
   DotNetRuntimeFallbackUrl = 'https://aka.ms/dotnet/10.0/dotnet-runtime-win-x64.exe';
-  DotNetRuntimeInstallerName = 'dotnet-runtime-10.0.9-win-x64.exe';
-  WindowsAppRuntimeUrl = 'https://aka.ms/windowsappsdk/2.4/2.4.0/windowsappruntimeinstall-x64.exe';
-  WindowsAppRuntimeFallbackUrl = 'https://download.microsoft.com/download/097dbd99-ea76-49de-994b-eb935c72dcf1/WindowsAppRuntimeInstall-x64.exe';
+  DotNetRuntimeInstallerName = 'dotnet-runtime-10.0.12-win-x64.exe';
+  WindowsAppRuntimeUrl = 'https://aka.ms/windowsappsdk/2.5/2.5.1/windowsappruntimeinstall-x64.exe';
+  WindowsAppRuntimeFallbackUrl = 'https://download.microsoft.com/download/de664922-b046-432f-bb2a-54aec3c5f1f6/WindowsAppRuntimeInstall-x64.exe';
   WindowsAppRuntimeInstallerName = 'WindowsAppRuntimeInstall-x64.exe';
 
 var
@@ -107,14 +107,14 @@ begin
     IsDotNet10RuntimeInstalledAt(ExpandConstant('{pf}'));
 end;
 
-function IsWindowsAppRuntime24Installed: Boolean;
+function IsWindowsAppRuntime25Installed: Boolean;
 var
   ResultCode: Integer;
 begin
   Result :=
     Exec(
       ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
-      '-NoProfile -ExecutionPolicy Bypass -Command "$pkg = Get-AppxPackage -Name Microsoft.WindowsAppRuntime.2 -ErrorAction SilentlyContinue | Where-Object { $_.Architecture -eq ''X64'' -and [version]$_.Version -ge [version]''2.4.0.0'' } | Select-Object -First 1; if (-not $pkg) { $pkg = Get-AppxPackage -AllUsers -Name Microsoft.WindowsAppRuntime.2 -ErrorAction SilentlyContinue | Where-Object { $_.Architecture -eq ''X64'' -and [version]$_.Version -ge [version]''2.4.0.0'' } | Select-Object -First 1 }; if ($pkg) { exit 0 } exit 1"',
+      '-NoProfile -ExecutionPolicy Bypass -Command "$pkg = Get-AppxPackage -Name Microsoft.WindowsAppRuntime.2 -ErrorAction SilentlyContinue | Where-Object { $_.Architecture -eq ''X64'' -and [version]$_.Version -ge [version]''2.5.1.0'' } | Select-Object -First 1; if (-not $pkg) { $pkg = Get-AppxPackage -AllUsers -Name Microsoft.WindowsAppRuntime.2 -ErrorAction SilentlyContinue | Where-Object { $_.Architecture -eq ''X64'' -and [version]$_.Version -ge [version]''2.5.1.0'' } | Select-Object -First 1 }; if ($pkg) { exit 0 } exit 1"',
       '',
       SW_HIDE,
       ewWaitUntilTerminated,
@@ -129,7 +129,7 @@ begin
 #else
   ShouldInstallDotNetRuntime := not IsDotNet10RuntimeInstalled;
 #endif
-  ShouldInstallWindowsAppRuntime := not IsWindowsAppRuntime24Installed;
+  ShouldInstallWindowsAppRuntime := not IsWindowsAppRuntime25Installed;
 
   Log('DeskBox dependency check: dotnet10Missing=' + IntToStr(Integer(ShouldInstallDotNetRuntime)));
   Log('DeskBox dependency check: windowsAppRuntimeMissing=' + IntToStr(Integer(ShouldInstallWindowsAppRuntime)));
@@ -229,7 +229,7 @@ begin
     begin
       DependencyDownloadPage.Msg1Label.Caption := ExpandConstant('{cm:DownloadingWinAppRuntime}');
       if not DownloadDependencyWithProgress(
-        'Windows App Runtime 2.4 x64',
+        'Windows App Runtime 2.5 x64',
         WindowsAppRuntimeUrl,
         WindowsAppRuntimeFallbackUrl,
         WindowsAppRuntimeInstallerName,
@@ -336,7 +336,7 @@ begin
     begin
       Step := Step + 1;
       if not InstallDownloadedDependency(
-        'Windows App Runtime 2.4 x64',
+        'Windows App Runtime 2.5 x64',
         WindowsAppRuntimeInstallerName,
         '--quiet',
         Step,

@@ -238,6 +238,9 @@ public static class Localized
             case TextBox textBox:
                 textBox.Header = value;
                 break;
+            case InfoBar infoBar:
+                infoBar.Title = value;
+                break;
             default:
                 System.Diagnostics.Debug.WriteLine(
                     $"[Localized] HeaderKey ignored for unsupported target {target.GetType().FullName}.");
@@ -254,6 +257,9 @@ public static class Localized
                 break;
             case SettingsExpander settingsExpander:
                 settingsExpander.Description = value;
+                break;
+            case InfoBar infoBar:
+                infoBar.Message = value;
                 break;
             default:
                 System.Diagnostics.Debug.WriteLine(

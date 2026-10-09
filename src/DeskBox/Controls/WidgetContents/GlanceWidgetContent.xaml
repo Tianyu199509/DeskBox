@@ -3,6 +3,7 @@
     x:Class="DeskBox.Controls.WidgetContents.GlanceWidgetContent"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:helpers="using:DeskBox.Helpers"
     xmlns:local="using:DeskBox.Controls.WidgetContents"
     Foreground="{ThemeResource TextFillColorPrimaryBrush}"
     Loaded="UserControl_Loaded"
@@ -49,6 +50,7 @@
                                 Spacing="0"
                                 Visibility="{Binding Tag.IsToday, RelativeSource={RelativeSource TemplatedParent}, Converter={StaticResource InverseBoolToVisibility}}">
                                 <TextBlock
+                                    helpers:WidgetTextShadow.Cast="True"
                                     HorizontalAlignment="Center"
                                     FontSize="11"
                                     Foreground="{ThemeResource TextFillColorPrimaryBrush}"
@@ -57,6 +59,7 @@
                                     Text="{Binding Tag.DayText, RelativeSource={RelativeSource TemplatedParent}}"
                                     Typography.NumeralAlignment="Tabular" />
                                 <TextBlock
+                                    helpers:WidgetTextShadow.Cast="True"
                                     MaxWidth="32"
                                     HorizontalAlignment="Center"
                                     FontSize="7.5"
@@ -76,6 +79,7 @@
                                 Spacing="0"
                                 Visibility="{Binding Tag.IsToday, RelativeSource={RelativeSource TemplatedParent}, Converter={StaticResource BoolToVisibility}}">
                                 <TextBlock
+                                    helpers:WidgetTextShadow.Cast="True"
                                     HorizontalAlignment="Center"
                                     FontSize="11"
                                     FontWeight="SemiBold"
@@ -85,6 +89,7 @@
                                     Text="{Binding Tag.DayText, RelativeSource={RelativeSource TemplatedParent}}"
                                     Typography.NumeralAlignment="Tabular" />
                                 <TextBlock
+                                    helpers:WidgetTextShadow.Cast="True"
                                     MaxWidth="32"
                                     HorizontalAlignment="Center"
                                     FontSize="7.5"

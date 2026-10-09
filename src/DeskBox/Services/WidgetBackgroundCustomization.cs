@@ -1,5 +1,7 @@
 using DeskBox.Contracts;
+using DeskBox.Helpers;
 using DeskBox.Models;
+using Windows.UI;
 
 namespace DeskBox.Services;
 
@@ -8,13 +10,16 @@ namespace DeskBox.Services;
 /// Values live in <see cref="WidgetConfig.Metadata"/> like the title-icon
 /// override: the image entry stores the file name inside the widget's asset
 /// directory, the fit entry is Fill/Contain, and the dim entry is the scrim
-/// strength in percent (0-100).
+/// strength in percent (0-100). The color entry is an opaque #RRGGBB solid
+/// background — the same storage shape as the per-widget foreground color.
+/// Image and color are mutually exclusive kinds of per-widget background.
 /// </summary>
 public static class WidgetBackgroundCustomization
 {
     public const string ImageMetadataKey = "BackgroundImage";
     public const string FitMetadataKey = "BackgroundFit";
     public const string DimMetadataKey = "BackgroundDim";
+    public const string ColorMetadataKey = "BackgroundColor";
 
     public const string ImageFileStem = "background";
 
@@ -41,7 +46,48 @@ public static class WidgetBackgroundCustomization
     }
 
     public static bool HasCustomBackground(WidgetConfig config) =>
-        GetImageFileNameOverride(config) is not null;
+        GetImageFileNameOverride(config) is not null ||
+        GetColorOverride(config) is not null;
+
+    /// <summary>
+    /// Per-widget solid background color as an opaque #RRGGBB hex string, or
+    /// null when no color override applies.
+    /// </summary>
+    public static string? GetColorOverride(WidgetConfig config)
+    {
+        ArgumentNullException.ThrowIfNull(config);
+        if (config.Metadata is not null &&
+            config.Metadata.TryGetValue(ColorMetadataKey, out string? value) &&
+            AccentColorHelper.TryParseHex(value, out _))
+        {
+            return value;
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Sets the per-widget solid background color (null clears it). Writing a
+    /// color drops the image override — the two are mutually exclusive kinds
+    /// of per-widget background, and a color quietly layered under a missing
+    /// image file would only confuse ("cleared the image, still colored").
+    /// </summary>
+    public static void SetColorOverride(WidgetConfig config, Color? color)
+    {
+        ArgumentNullException.ThrowIfNull(config);
+        if (color is null)
+        {
+            config.Metadata?.Remove(ColorMetadataKey);
+            return;
+        }
+
+        config.Metadata ??= [];
+        config.Metadata[ColorMetadataKey] = AccentColorHelper.ToHex(
+            Color.FromArgb(0xFF, color.Value.R, color.Value.G, color.Value.B));
+        config.Metadata.Remove(ImageMetadataKey);
+        config.Metadata.Remove(FitMetadataKey);
+        config.Metadata.Remove(DimMetadataKey);
+    }
 
     /// <summary>Returns Fill or Contain; null follows the Fill default.</summary>
     public static string? GetFitOverride(WidgetConfig config)
@@ -177,6 +223,8 @@ public static class WidgetBackgroundCustomization
 
         config.Metadata ??= [];
         config.Metadata[ImageMetadataKey] = fileName!;
+        // Image and color are mutually exclusive; the image wins.
+        config.Metadata.Remove(ColorMetadataKey);
     }
 
     public static void SetFitOverride(WidgetConfig config, string? fit)
@@ -213,6 +261,7 @@ public static class WidgetBackgroundCustomization
         config.Metadata?.Remove(ImageMetadataKey);
         config.Metadata?.Remove(FitMetadataKey);
         config.Metadata?.Remove(DimMetadataKey);
+        config.Metadata?.Remove(ColorMetadataKey);
     }
 
     public static bool NormalizeOverrides(WidgetConfig config)
@@ -274,6 +323,28 @@ public static class WidgetBackgroundCustomization
             if (config.Metadata.Remove(DimMetadataKey))
             {
                 changed = true;
+            }
+        }
+
+        if (config.Metadata.TryGetValue(ColorMetadataKey, out string? colorHex))
+        {
+            if (config.Metadata.ContainsKey(ImageMetadataKey) ||
+                !AccentColorHelper.TryParseHex(colorHex, out Color parsed))
+            {
+                // A color under an image is unreachable (image wins), and a
+                // hand-edited invalid hex must self-heal away.
+                config.Metadata.Remove(ColorMetadataKey);
+                changed = true;
+            }
+            else
+            {
+                string normalized = AccentColorHelper.ToHex(
+                    Color.FromArgb(0xFF, parsed.R, parsed.G, parsed.B));
+                if (!string.Equals(colorHex, normalized, StringComparison.Ordinal))
+                {
+                    config.Metadata[ColorMetadataKey] = normalized;
+                    changed = true;
+                }
             }
         }
 

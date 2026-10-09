@@ -20,6 +20,36 @@ namespace DeskBox.Platform;
 /// </remarks>
 public static partial class Win32Helper
 {
+    // ── shell: fullscreen-app detection (display topology gate, spec 5.6) ──
+
+    public const int QueryUserNotificationStateBusy = 2;
+    public const int QueryUserNotificationStateRunningD3dFullScreen = 3;
+    public const int QueryUserNotificationStatePresentationMode = 4;
+
+    [DllImport("shell32.dll", SetLastError = false)]
+    private static extern int SHQueryUserNotificationState(out int state);
+
+    /// <summary>
+    /// True while a fullscreen-exclusive app (game) or presentation mode owns
+    /// the screen. Used to park topology restores (resolution flips from
+    /// fullscreen games must not reshuffle widgets, spec S13).
+    /// </summary>
+    public static bool IsFullscreenAppActive()
+    {
+        try
+        {
+            return SHQueryUserNotificationState(out int state) == 0 &&
+                   state is QueryUserNotificationStateBusy or
+                       QueryUserNotificationStateRunningD3dFullScreen or
+                       QueryUserNotificationStatePresentationMode;
+        }
+        catch (Exception ex) when (
+            ex is DllNotFoundException or EntryPointNotFoundException)
+        {
+            return false;
+        }
+    }
+
     private const uint FileShareRead = 0x00000001;
     private const uint FileShareWrite = 0x00000002;
     private const uint FileShareDelete = 0x00000004;
@@ -840,6 +870,7 @@ public static partial class Win32Helper
     public const int SM_YVIRTUALSCREEN = 77;
     public const int SM_CXVIRTUALSCREEN = 78;
     public const int SM_CYVIRTUALSCREEN = 79;
+    public const int SM_REMOTESESSION = 0x1000;
 
     [LibraryImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]
@@ -957,15 +988,13 @@ public static partial class Win32Helper
     [return: MarshalAs(UnmanagedType.Bool)]
     public static partial bool UnregisterPowerSettingNotification(IntPtr handle);
 
-    // System-wide visual effects (HKCU-scoped per-user parameters).
+    // System-wide visual effects (HKCU-scoped per-user parameters). Read-only:
+    // writes go through the OS settings surfaces — under an MSIX package the
+    // copy-on-write HKCU virtualization would swallow SPIF_UPDATEINIFILE's
+    // profile write and silently revert after the next sign-in.
     private const uint SpiGetDropShadow = 0x1024;
-    private const uint SpiSetDropShadow = 0x1025;
-    private const uint SpifUpdateIniFile = 0x0001;
-    private const uint SpifSendChange = 0x0002;
 
-    // pvParam is polymorphic: GET actions want a pointer to the receiving
-    // buffer; simple BOOL SET actions want the new value passed BY VALUE in
-    // the pvParam slot — a marshalled pointer is always nonzero, i.e. TRUE.
+    // The GET actions pass a pointer to the receiving buffer in pvParam.
     [LibraryImport("user32.dll", SetLastError = true, EntryPoint = "SystemParametersInfoW")]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static partial bool SystemParametersInfo(
@@ -1000,32 +1029,28 @@ public static partial class Win32Helper
     }
 
     /// <summary>
-    /// Writes the system-wide "show shadows under windows" effect the same way
-    /// the Performance Options dialog does: persist to the profile and broadcast
-    /// WM_SETTINGCHANGE. Affects every window with a non-client frame, not just
-    /// this app — callers must confirm with the user before invoking.
+    /// Reads Windows' "Transparency effects" personalization switch — the
+    /// setting Mica/Acrylic materials degrade without. The registry value is
+    /// the source of truth across every supported build; a missing value
+    /// means the OS default (on).
     /// </summary>
-    public static bool TrySetWindowDropShadowEnabled(bool enabled, out int errorCode)
+    public static bool TryGetSystemTransparencyEffectsEnabled(out bool enabled)
     {
-        errorCode = 0;
-        var value = (IntPtr)(enabled ? 1 : 0);
+        enabled = true;
         try
         {
-            if (SystemParametersInfo(
-                    SpiSetDropShadow,
-                    0,
-                    value,
-                    SpifUpdateIniFile | SpifSendChange))
+            using Microsoft.Win32.RegistryKey? personalize =
+                Microsoft.Win32.Registry.CurrentUser.OpenSubKey(
+                    @"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize");
+            if (personalize?.GetValue("EnableTransparency") is int value)
             {
-                return true;
+                enabled = value != 0;
             }
 
-            errorCode = Marshal.GetLastWin32Error();
-            return false;
+            return true;
         }
-        catch (Exception ex)
+        catch
         {
-            errorCode = ex.HResult;
             return false;
         }
     }
@@ -1748,8 +1773,9 @@ public static partial class Win32Helper
     /// </summary>
     public static int TrySetDwmWindowAttribute(IntPtr hwnd, int attr, ref int value)
     {
-        if ((attr is DWMWA_BORDER_COLOR or DWMWA_WINDOW_CORNER_PREFERENCE or DWMWA_SYSTEMBACKDROP_TYPE) &&
-            !Services.WindowsCompatibilityService.SupportsWin11DwmAttributes)
+        if (ShouldSkipDwmWindowAttribute(
+                attr,
+                Services.WindowsCompatibilityService.SupportsWin11DwmAttributes))
         {
             return 0;
         }
@@ -1763,6 +1789,19 @@ public static partial class Win32Helper
             return -1;
         }
     }
+
+    /// <summary>
+    /// The Win10 floor guard of <see cref="TrySetDwmWindowAttribute"/> as a
+    /// pure function: attributes 33/34/38 are Windows 11 additions and are
+    /// dropped (return 0, no P/Invoke) when the OS cannot render them. This
+    /// branch is the only thing keeping those attributes from reaching
+    /// DwmSetWindowAttribute on Windows 10.
+    /// </summary>
+    internal static bool ShouldSkipDwmWindowAttribute(
+        int attr,
+        bool supportsWin11DwmAttributes) =>
+        !supportsWin11DwmAttributes &&
+        attr is DWMWA_BORDER_COLOR or DWMWA_WINDOW_CORNER_PREFERENCE or DWMWA_SYSTEMBACKDROP_TYPE;
 
     public const int DWMWA_TRANSITIONS_FORCEDISABLED = 3;
     public const int DWMWA_CLOAK = 13;
@@ -2038,6 +2077,81 @@ public static partial class Win32Helper
     [return: MarshalAs(UnmanagedType.Bool)]
     public static partial bool GetCursorPos(out POINT lpPoint);
 
+    [LibraryImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static partial bool ClientToScreen(IntPtr hWnd, ref POINT lpPoint);
+
+    [LibraryImport("user32.dll")]
+    private static partial uint GetMessagePos();
+
+    // GetMessagePos packs signed screen coordinates for the input message
+    // currently being dispatched; both words must be sign-extended so windows
+    // left of / above the primary monitor resolve correctly. It reflects the
+    // pointer event itself, not the shared cursor, so touch drags work.
+    private static bool IsPointOnVirtualDesktop(POINT point)
+    {
+        int vx = GetSystemMetrics(SM_XVIRTUALSCREEN);
+        int vy = GetSystemMetrics(SM_YVIRTUALSCREEN);
+        int width = GetSystemMetrics(SM_CXVIRTUALSCREEN);
+        int height = GetSystemMetrics(SM_CYVIRTUALSCREEN);
+        return width > 0 && height > 0 &&
+            point.X >= vx && point.X <= vx + width &&
+            point.Y >= vy && point.Y <= vy + height;
+    }
+
+    /// <summary>
+    /// Resolves the screen-space point of the pointer event being dispatched,
+    /// from the thread message queue (GetMessagePos) instead of the shared
+    /// mouse cursor. Touch contact never moves the cursor, so GetCursorPos-
+    /// based drag and resize math silently no-ops on touch. GetMessagePos is
+    /// also independent of this window's bounds, unlike the client-origin +
+    /// XAML-position conversion, which feedback-loops when window moves are
+    /// paced behind pointer events during fast drags; that conversion stays
+    /// as a fallback only.
+    /// </summary>
+    public static bool TryGetPointerScreenPoint(
+        IntPtr hWnd,
+        Microsoft.UI.Xaml.UIElement? relativeTo,
+        Microsoft.UI.Xaml.Input.PointerRoutedEventArgs e,
+        out POINT screenPoint)
+    {
+        screenPoint = default;
+        uint messagePos = GetMessagePos();
+        if (messagePos != 0)
+        {
+            var candidate = new POINT
+            {
+                X = (short)(messagePos & 0xFFFF),
+                Y = (short)(messagePos >> 16),
+            };
+            if (IsPointOnVirtualDesktop(candidate))
+            {
+                screenPoint = candidate;
+                return true;
+            }
+        }
+
+        if (relativeTo?.XamlRoot is not { } xamlRoot)
+        {
+            return false;
+        }
+
+        Windows.Foundation.Point position = e.GetCurrentPoint(relativeTo).Position;
+        double scale = GetDpiScaleForWindow(hWnd, xamlRoot);
+        var clientOrigin = default(POINT);
+        if (!ClientToScreen(hWnd, ref clientOrigin))
+        {
+            return false;
+        }
+
+        screenPoint = new POINT
+        {
+            X = clientOrigin.X + (int)Math.Round(position.X * scale),
+            Y = clientOrigin.Y + (int)Math.Round(position.Y * scale),
+        };
+        return true;
+    }
+
     [StructLayout(LayoutKind.Sequential)]
     public struct RECT
     {
@@ -2104,7 +2218,8 @@ public static partial class Win32Helper
         RECT WorkArea,
         string DeviceName,
         bool IsPrimary,
-        double DpiScale);
+        double DpiScale,
+        string StableId);
 
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
     private struct DISPLAY_DEVICEW
@@ -2300,6 +2415,48 @@ public static partial class Win32Helper
     }
 
     /// <summary>
+    /// Full physical monitor rectangle of the display currently containing
+    /// the window. Per-monitor consumers (panorama background fitting) must
+    /// key off this rect rather than the virtual-desktop union — the union
+    /// mixes monitor DPI scales and only behaves like one canvas when every
+    /// monitor shares a single scale.
+    /// </summary>
+    public static bool TryGetWindowMonitorRect(IntPtr hWnd, out RECT monitorRect)
+    {
+        monitorRect = default;
+        if (hWnd == IntPtr.Zero)
+        {
+            return false;
+        }
+
+        try
+        {
+            IntPtr monitor = MonitorFromWindow(hWnd, MONITOR_DEFAULTTONEAREST);
+            if (monitor == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            var info = new MONITORINFO
+            {
+                cbSize = Marshal.SizeOf<MONITORINFO>()
+            };
+            if (!GetMonitorInfo(monitor, ref info))
+            {
+                return false;
+            }
+
+            monitorRect = info.rcMonitor;
+            return true;
+        }
+        catch (Exception ex) when (
+            ex is DllNotFoundException or EntryPointNotFoundException or BadImageFormatException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
     /// Returns the refresh rate of the monitor currently containing the window.
     /// Invalid driver values safely normalize to 60 Hz.
     /// </summary>
@@ -2386,12 +2543,14 @@ public static partial class Win32Helper
                 };
                 if (GetMonitorInfoEx(hMonitor, ref info))
                 {
+                    string deviceName = info.szDevice ?? string.Empty;
                     areas.Add(new MonitorWorkAreaInfo(
                         info.rcMonitor,
                         info.rcWork,
-                        info.szDevice ?? string.Empty,
+                        deviceName,
                         (info.dwFlags & MonitorInfoPrimary) == MonitorInfoPrimary,
-                        GetDpiScaleForMonitor(hMonitor)));
+                        GetDpiScaleForMonitor(hMonitor),
+                        ResolveStableMonitorId(deviceName)));
                 }
                 else
                 {
@@ -2406,7 +2565,8 @@ public static partial class Win32Helper
                             fallbackInfo.rcWork,
                             string.Empty,
                             (fallbackInfo.dwFlags & MonitorInfoPrimary) == MonitorInfoPrimary,
-                            GetDpiScaleForMonitor(hMonitor)));
+                            GetDpiScaleForMonitor(hMonitor),
+                            ResolveStableMonitorId(null)));
                     }
                 }
 
@@ -2415,6 +2575,64 @@ public static partial class Win32Helper
             IntPtr.Zero);
 
         return areas;
+    }
+
+    /// <summary>EnumDisplayDevices dwFlags: retrieve the device interface name for the monitor.</summary>
+    private const uint EddGetDeviceInterfaceName = 0x00000001;
+
+    /// <summary>
+    /// Best-effort stable identity for a monitor: the PnP device interface id
+    /// when the adapter exposes one, otherwise the registry device key, and
+    /// finally the (unstable) <c>\\.\DISPLAYn</c> name. Unlike the device name,
+    /// the first two survive the renumbering Windows performs around lock,
+    /// sleep, and display-mode switches, so persisted monitor references key
+    /// on this value.
+    /// </summary>
+    public static string ResolveStableMonitorId(string? deviceName)
+    {
+        string fallback = string.IsNullOrWhiteSpace(deviceName) ? "unknown-display" : deviceName.Trim();
+        if (string.IsNullOrWhiteSpace(deviceName))
+        {
+            return fallback;
+        }
+
+        try
+        {
+            var displayDevice = new DisplayDevice
+            {
+                Size = Marshal.SizeOf<DisplayDevice>(),
+                DeviceName = string.Empty,
+                DeviceString = string.Empty,
+                DeviceId = string.Empty,
+                DeviceKey = string.Empty
+            };
+            if (EnumDisplayDevices(
+                    deviceName,
+                    0,
+                    ref displayDevice,
+                    EddGetDeviceInterfaceName))
+            {
+                if (!string.IsNullOrWhiteSpace(displayDevice.DeviceId))
+                {
+                    return displayDevice.DeviceId.Trim();
+                }
+
+                if (!string.IsNullOrWhiteSpace(displayDevice.DeviceKey))
+                {
+                    return displayDevice.DeviceKey.Trim();
+                }
+            }
+        }
+        catch (Exception ex) when (
+            ex is DllNotFoundException or
+                EntryPointNotFoundException or
+                BadImageFormatException or
+                MarshalDirectiveException or
+                TypeLoadException)
+        {
+        }
+
+        return fallback;
     }
 
     /// <summary>

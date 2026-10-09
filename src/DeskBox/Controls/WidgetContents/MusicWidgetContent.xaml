@@ -850,17 +850,26 @@
                     FontSize="11"
                     Foreground="{ThemeResource TextFillColorTertiaryBrush}"
                     Text="{Binding PositionText}" />
-                <ProgressBar
-                    x:Name="RecordProgressBar"
+                <Grid
+                    x:Name="RecordProgressHost"
                     Grid.Column="1"
                     Height="4"
                     MinWidth="80"
-                    MinHeight="0"
-                    VerticalAlignment="Center"
-                    CornerRadius="2"
-                    Foreground="{Binding MusicAccentBrush}"
-                    Maximum="1"
-                    Minimum="0" />
+                    VerticalAlignment="Center">
+                    <Border
+                        x:Name="RecordProgressTrack"
+                        Height="4"
+                        Background="{ThemeResource ControlStrongStrokeColorDefaultBrush}"
+                        CornerRadius="2"
+                        Opacity="0.36" />
+                    <Border
+                        x:Name="RecordProgressFill"
+                        Height="4"
+                        Width="0"
+                        HorizontalAlignment="Left"
+                        Background="{Binding MusicAccentBrush}"
+                        CornerRadius="2" />
+                </Grid>
                 <TextBlock
                     Grid.Column="2"
                     VerticalAlignment="Center"
@@ -1053,17 +1062,26 @@
                         FontSize="11"
                         Foreground="{ThemeResource TextFillColorTertiaryBrush}"
                         Text="{Binding PositionText}" />
-                    <ProgressBar
-                        x:Name="RecordHorizontalProgressBar"
+                    <Grid
+                        x:Name="RecordHorizontalProgressHost"
                         Grid.Column="1"
                         Height="4"
                         MinWidth="60"
-                        MinHeight="0"
-                        VerticalAlignment="Center"
-                        CornerRadius="2"
-                        Foreground="{Binding MusicAccentBrush}"
-                        Maximum="1"
-                        Minimum="0" />
+                        VerticalAlignment="Center">
+                        <Border
+                            x:Name="RecordHorizontalProgressTrack"
+                            Height="4"
+                            Background="{ThemeResource ControlStrongStrokeColorDefaultBrush}"
+                            CornerRadius="2"
+                            Opacity="0.36" />
+                        <Border
+                            x:Name="RecordHorizontalProgressFill"
+                            Height="4"
+                            Width="0"
+                            HorizontalAlignment="Left"
+                            Background="{Binding MusicAccentBrush}"
+                            CornerRadius="2" />
+                    </Grid>
                     <TextBlock
                         Grid.Column="2"
                         VerticalAlignment="Center"

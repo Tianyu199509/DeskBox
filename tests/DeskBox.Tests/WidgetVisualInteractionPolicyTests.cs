@@ -33,6 +33,18 @@ public sealed class WidgetVisualInteractionPolicyTests
         Assert.Equal(5000, request.DisplayDuration.TotalMilliseconds);
     }
 
+    [Fact]
+    public void FeedbackWithDismiss_UsesFiveSecondWindow()
+    {
+        var request = new WidgetFeedbackRequest(
+            "copied",
+            WidgetFeedbackSeverity.Info,
+            "drag-out-result-tip",
+            DismissAction: () => Task.CompletedTask);
+
+        Assert.Equal(5000, request.DisplayDuration.TotalMilliseconds);
+    }
+
     [Theory]
     [InlineData(0, SearchAppMotionKind.FadeScale, 167, 0, 0)]
     [InlineData(1, SearchAppMotionKind.Rise, 167, 4, 0)]

@@ -59,18 +59,6 @@
         <Setter Property="FontWeight" Value="SemiBold" />
     </Style>
 
-    <Style x:Key="DrillDownRowStyle" TargetType="Button">
-        <Setter Property="HorizontalAlignment" Value="Stretch" />
-        <Setter Property="HorizontalContentAlignment" Value="Stretch" />
-        <Setter Property="Padding" Value="{StaticResource SettingsRowPadding}" />
-        <Setter Property="MinHeight" Value="{StaticResource SettingsRowMinHeight}" />
-        <Setter Property="Background" Value="Transparent" />
-        <Setter Property="BorderBrush" Value="Transparent" />
-        <Setter Property="BorderThickness" Value="0" />
-        <Setter Property="CornerRadius" Value="{StaticResource SettingsCardCornerRadius}" />
-        <Setter Property="VerticalAlignment" Value="Stretch" />
-    </Style>
-
     <Style x:Key="ActionButtonStyle" TargetType="Button">
         <Setter Property="MinHeight" Value="34" />
         <Setter Property="Height" Value="34" />

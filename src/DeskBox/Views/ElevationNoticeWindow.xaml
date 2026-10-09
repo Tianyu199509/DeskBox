@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Window
+    x:Class="DeskBox.Views.ElevationNoticeWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    mc:Ignorable="d"
+    Title="DeskBox">
+
+    <Grid
+        x:Name="RootGrid"
+        Padding="28,24,28,20"
+        RowSpacing="18"
+        MinWidth="440"
+        MaxWidth="520">
+
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <TextBlock
+            x:Name="TitleText"
+            Grid.Row="0"
+            FontSize="20"
+            FontWeight="SemiBold"
+            Foreground="{ThemeResource TextFillColorPrimaryBrush}"
+            TextWrapping="Wrap" />
+
+        <ScrollViewer
+            Grid.Row="1"
+            VerticalScrollBarVisibility="Auto"
+            VerticalAlignment="Top">
+            <TextBlock
+                x:Name="BodyText"
+                FontSize="14"
+                LineHeight="22"
+                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                TextWrapping="Wrap" />
+        </ScrollViewer>
+
+        <StackPanel
+            Grid.Row="2"
+            Orientation="Horizontal"
+            Spacing="8"
+            HorizontalAlignment="Right">
+            <Button
+                x:Name="RelaunchButton"
+                Click="RelaunchButton_Click"
+                MinWidth="150"
+                Style="{ThemeResource AccentButtonStyle}" />
+            <Button
+                x:Name="ContinueButton"
+                Click="ContinueButton_Click"
+                MinWidth="110" />
+            <Button
+                x:Name="OkButton"
+                Click="ContinueButton_Click"
+                MinWidth="110"
+                Visibility="Collapsed" />
+        </StackPanel>
+    </Grid>
+</Window>

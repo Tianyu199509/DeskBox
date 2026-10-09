@@ -45,10 +45,6 @@
             </toolkit:SettingsCard>
 
             <StackPanel Spacing="6">
-                <TextBlock
-                    Style="{StaticResource SettingsSubsectionTitleTextStyle}"
-                    svc:Localized.Key="DesktopOrganization.Auto.SectionTitle" />
-
                 <toolkit:SettingsCard
                     x:Name="AutoSetupCard"
                     HorizontalContentAlignment="Right"
@@ -62,37 +58,38 @@
                         svc:Localized.Key="DesktopOrganization.Auto.SetupAction" />
                 </toolkit:SettingsCard>
 
-                <toolkit:SettingsCard
+                <toolkit:SettingsExpander
                     x:Name="AutoToggleCard"
                     Visibility="Collapsed"
-                    HorizontalContentAlignment="Right"
+                    IsExpanded="False"
                     svc:Localized.DescriptionKey="DesktopOrganization.Auto.Description"
                     svc:Localized.HeaderKey="DesktopOrganization.Auto.Title">
-                    <toolkit:SettingsCard.HeaderIcon>
+                    <toolkit:SettingsExpander.HeaderIcon>
                         <FontIcon Glyph="&#xE7F4;" />
-                    </toolkit:SettingsCard.HeaderIcon>
+                    </toolkit:SettingsExpander.HeaderIcon>
                     <ToggleSwitch
                         x:Name="AutoOrganizationToggle"
                         MinWidth="0"
                         OffContent=""
                         OnContent=""
                         Toggled="AutoOrganizationToggle_Toggled" />
-                </toolkit:SettingsCard>
-
-                <toolkit:SettingsCard
-                    x:Name="AutoIntervalCard"
-                    Visibility="Collapsed"
-                    HorizontalContentAlignment="Right"
-                    svc:Localized.DescriptionKey="DesktopOrganization.Auto.Interval.Description"
-                    svc:Localized.HeaderKey="DesktopOrganization.Auto.Interval.Title">
-                    <toolkit:SettingsCard.HeaderIcon>
-                        <FontIcon Glyph="&#xE823;" />
-                    </toolkit:SettingsCard.HeaderIcon>
-                    <ComboBox
-                        x:Name="AutoIntervalComboBox"
-                        MinWidth="150"
-                        SelectionChanged="AutoIntervalComboBox_SelectionChanged" />
-                </toolkit:SettingsCard>
+                    <toolkit:SettingsExpander.Items>
+                        <toolkit:SettingsCard
+                            x:Name="AutoIntervalCard"
+                            Visibility="Collapsed"
+                            HorizontalContentAlignment="Right"
+                            svc:Localized.DescriptionKey="DesktopOrganization.Auto.Interval.Description"
+                            svc:Localized.HeaderKey="DesktopOrganization.Auto.Interval.Title">
+                            <toolkit:SettingsCard.HeaderIcon>
+                                <FontIcon Glyph="&#xE823;" />
+                            </toolkit:SettingsCard.HeaderIcon>
+                            <ComboBox
+                                x:Name="AutoIntervalComboBox"
+                                MinWidth="150"
+                                SelectionChanged="AutoIntervalComboBox_SelectionChanged" />
+                        </toolkit:SettingsCard>
+                    </toolkit:SettingsExpander.Items>
+                </toolkit:SettingsExpander>
             </StackPanel>
 
             <StackPanel Spacing="6">
@@ -150,6 +147,21 @@
                 </StackPanel>
             </Grid>
 
+            <toolkit:SettingsCard
+                x:Name="RuleEnabledCard"
+                HorizontalContentAlignment="Right"
+                svc:Localized.HeaderKey="DesktopOrganization.Rule.Enable.Title">
+                <toolkit:SettingsCard.HeaderIcon>
+                    <FontIcon Glyph="&#xE7F4;" />
+                </toolkit:SettingsCard.HeaderIcon>
+                <ToggleSwitch
+                    x:Name="RuleEnabledToggle"
+                    MinWidth="0"
+                    OffContent=""
+                    OnContent=""
+                    Toggled="RuleEnabledToggle_Toggled" />
+            </toolkit:SettingsCard>
+
             <toolkit:SettingsExpander
                 x:Name="FileTypeExpander"
                 IsExpanded="False"
@@ -184,21 +196,6 @@
                     </toolkit:SettingsCard>
                 </toolkit:SettingsExpander.Items>
             </toolkit:SettingsExpander>
-
-            <toolkit:SettingsCard
-                x:Name="RuleEnabledCard"
-                HorizontalContentAlignment="Right"
-                svc:Localized.HeaderKey="DesktopOrganization.Rule.Enable.Title">
-                <toolkit:SettingsCard.HeaderIcon>
-                    <FontIcon Glyph="&#xE7F4;" />
-                </toolkit:SettingsCard.HeaderIcon>
-                <ToggleSwitch
-                    x:Name="RuleEnabledToggle"
-                    MinWidth="0"
-                    OffContent=""
-                    OnContent=""
-                    Toggled="RuleEnabledToggle_Toggled" />
-            </toolkit:SettingsCard>
 
             <toolkit:SettingsExpander
                 IsExpanded="False"

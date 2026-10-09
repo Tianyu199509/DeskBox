@@ -41,6 +41,16 @@ public abstract partial class WidgetWindowBase
 {
     private const int SmartCollapseProbeMs = 220;
     private const int DragRestoreDelayMs = 420;
+    // The overlay drag bar's collapse cue tracks the physical cursor: entry
+    // hints are verified against GetCursorPos (Windows delivers spurious
+    // WM_MOUSEMOVE with shifted client coordinates while the widget morphs
+    // its bounds, so event coordinates cannot be trusted in either
+    // direction), and the restore waits out a short outside-streak so
+    // boundary jitter cannot flap the arrow.
+    private const int OverlayDragCuePollIntervalMs = 150;
+    private const int OverlayDragCueRestoreOutsideTicks = 2;
+    private const double OverlayDragCueSideToleranceDips = 10;
+    private const double OverlayDragCueBottomToleranceDips = 20;
     private const int CompactExpansionUrgentWarmupInitialDelayMs = 16;
     private const int CompactExpansionWarmupRetryDelayMs = 320;
     private const int CompactExpansionUrgentWarmupRetryDelayMs = 48;
@@ -64,6 +74,8 @@ public abstract partial class WidgetWindowBase
     private OwnedOneShotDispatcherTimer? _compactExpansionReadinessDeadlineTimer;
     private OwnedOneShotDispatcherTimer? _compactExpansionReadyCallbackDeadlineTimer;
     private OwnedOneShotDispatcherTimer? _compactLayerRestoreFallbackTimer;
+    private DispatcherQueueTimer? _overlayDragCuePollTimer;
+    private int _overlayDragCueOutsideStreak;
     private CancellationTokenSource? _compactExpansionWarmupCancellation;
     private IDisposable? _collapseAnimationFrameRegistration;
     private IDisposable? _compactLayerRestoreFrameRegistration;
@@ -654,6 +666,7 @@ public abstract partial class WidgetWindowBase
         _collapseInitialized = true;
         WidgetShellControl.CollapseRequested += WidgetShellControl_CollapseRequested;
         WidgetShellControl.ExpandRequested += WidgetShellControl_ExpandRequested;
+        WidgetShellControl.OverlayDragCueArmRequested += WidgetShellControl_OverlayDragCueArmRequested;
         WidgetShellControl.CompactBodyExpandRequested += WidgetShellControl_CompactBodyExpandRequested;
         WidgetShellControl.CompactPointerEntered += WidgetShellControl_CompactPointerEntered;
         WidgetShellControl.CompactPointerMoved += WidgetShellControl_CompactPointerMoved;
@@ -717,6 +730,8 @@ public abstract partial class WidgetWindowBase
 
         WidgetShellControl.CollapseRequested -= WidgetShellControl_CollapseRequested;
         WidgetShellControl.ExpandRequested -= WidgetShellControl_ExpandRequested;
+        WidgetShellControl.OverlayDragCueArmRequested -= WidgetShellControl_OverlayDragCueArmRequested;
+        StopOverlayDragCuePoll();
         WidgetShellControl.CompactBodyExpandRequested -= WidgetShellControl_CompactBodyExpandRequested;
         WidgetShellControl.CompactPointerEntered -= WidgetShellControl_CompactPointerEntered;
         WidgetShellControl.CompactPointerMoved -= WidgetShellControl_CompactPointerMoved;
@@ -798,21 +813,40 @@ public abstract partial class WidgetWindowBase
                     : WidgetCompactWarmupSchedulePolicy.GetInitialDelayMilliseconds(
                         Config.WidgetKind),
                 token);
+            string? lastDeferral = null;
             while (!token.IsCancellationRequested &&
                    _collapseInitialized &&
+                   _targetCollapsed &&
                    !IsClosing &&
                    !IsCompactExpansionReady)
             {
-                if (!CanRunCompactExpansionWarmup(urgent))
+                WidgetCompactWarmupSnapshot warmupSnapshot =
+                    CaptureCompactExpansionWarmupSnapshot(urgent);
+                if (!WidgetCompactWarmupPolicy.CanRun(warmupSnapshot))
                 {
-                    PerformanceLogger.Mark(
-                        "CompactExpansionWarmupDeferred",
+                    string deferral =
                         $"urgent={urgent} pointer={_isPointerOverWidget} " +
                         $"interactionDepth={_compactInteractionDepth} " +
-                        $"windowVisible={HWnd != IntPtr.Zero && Win32Helper.IsWindowVisible(HWnd)} " +
+                        $"windowVisible={warmupSnapshot.IsWindowVisible} " +
                         $"rootLoaded={RootElement.IsLoaded} " +
                         $"contentReady={IsCompactExpansionWarmupContentReady} " +
-                        $"kind={Config.WidgetKind} id={Config.Id}");
+                        $"kind={Config.WidgetKind} id={Config.Id}";
+                    if (!WidgetCompactWarmupPolicy.ShouldKeepWaiting(warmupSnapshot))
+                    {
+                        PerformanceLogger.Mark(
+                            "CompactExpansionWarmupDeferred",
+                            $"action=stop-until-shown {deferral}");
+                        return;
+                    }
+
+                    if (!string.Equals(deferral, lastDeferral, StringComparison.Ordinal))
+                    {
+                        lastDeferral = deferral;
+                        PerformanceLogger.Mark(
+                            "CompactExpansionWarmupDeferred",
+                            $"action=retry {deferral}");
+                    }
+
                     await Task.Delay(
                         urgent
                             ? CompactExpansionUrgentWarmupRetryDelayMs
@@ -821,6 +855,7 @@ public abstract partial class WidgetWindowBase
                     continue;
                 }
 
+                lastDeferral = null;
                 bool gateEntered = false;
                 WidgetCompactWarmupSliceResult result =
                     WidgetCompactWarmupSliceResult.Blocked;
@@ -906,10 +941,17 @@ public abstract partial class WidgetWindowBase
 
     private bool CanRunCompactExpansionWarmup(bool urgent = false)
     {
+        return WidgetCompactWarmupPolicy.CanRun(
+            CaptureCompactExpansionWarmupSnapshot(urgent));
+    }
+
+    private WidgetCompactWarmupSnapshot CaptureCompactExpansionWarmupSnapshot(
+        bool urgent)
+    {
         bool applicationIdle = urgent
             ? App.Current?.CanRunCriticalCompactExpansionWarmup == true
             : App.Current?.CanRunCompactExpansionWarmup == true;
-        var snapshot = new WidgetCompactWarmupSnapshot(
+        return new WidgetCompactWarmupSnapshot(
             IsCollapseInitialized: _collapseInitialized,
             IsCollapsed: _targetCollapsed && WidgetShellControl.IsCollapsed,
             IsExpansionWarmed: IsCompactExpansionReady,
@@ -926,7 +968,6 @@ public abstract partial class WidgetWindowBase
             IsWindowVisible: HWnd != IntPtr.Zero && Win32Helper.IsWindowVisible(HWnd),
             IsContentReady: RootElement.IsLoaded && IsCompactExpansionWarmupContentReady,
             IsApplicationIdle: applicationIdle);
-        return WidgetCompactWarmupPolicy.CanRun(snapshot);
     }
 
     private Task<WidgetCompactWarmupSliceResult>
@@ -1333,6 +1374,7 @@ public abstract partial class WidgetWindowBase
             _compactExpansionReadyCallbacks.Clear();
             CancelTimer(ref _compactExpansionReadyCallbackDeadlineTimer);
             StopCompactHoverRecoveryProbe();
+            StopOverlayDragCuePoll();
             WidgetShellControl.ResetTransientCompactPointerState();
             ResetCompactPointerStateAfterHide();
             return;
@@ -1407,6 +1449,163 @@ public abstract partial class WidgetWindowBase
         }
 
         RunCompactHoverRecoveryProbe(cursor, GetPointerRootWindow(cursor));
+    }
+
+    // ── Overlay drag cue arbitration ─────────────────────────────
+    // The collapse arrow's restore verdict comes from the physical cursor
+    // versus the bar's live screen rectangle, never from routed pointer
+    // events: the widget morphs its HWND bounds during Smart expansion,
+    // which makes Windows deliver spurious WM_MOUSEMOVE with shifted client
+    // coordinates under a stationary cursor, and enter/exit pairing is not
+    // guaranteed by WinUI. Arming stays event-driven for responsiveness; a
+    // false arm self-heals on the next poll tick.
+
+    private void WidgetShellControl_OverlayDragCueArmRequested(
+        object? sender,
+        EventArgs e)
+    {
+        // During a compact/expand bounds transition the window morphs under
+        // the cursor, so the bar can sweep across a stationary pointer and
+        // fire a false entry. Arm requests are dropped until the morph
+        // settles.
+        if (IsCompactTransitionActive)
+        {
+            return;
+        }
+
+        // The entered hint is verified against the physical cursor before the
+        // arrow shows: spurious hints arrive during bounds animations, and
+        // event coordinates cannot be trusted in either direction.
+        if (!Win32Helper.GetCursorPos(out Win32Helper.POINT cursor) ||
+            !IsScreenPointWithinOverlayDragCueZone(cursor))
+        {
+            return;
+        }
+
+        WidgetShellControl.SetOverlayDragCueActive(true);
+        _overlayDragCueOutsideStreak = 0;
+        if (_overlayDragCuePollTimer is null)
+        {
+            var timer = DispatcherQueue.CreateTimer();
+            timer.IsRepeating = true;
+            timer.Interval = TimeSpan.FromMilliseconds(OverlayDragCuePollIntervalMs);
+            timer.Tick += (_, _) => OverlayDragCuePollTimer_Tick();
+            _overlayDragCuePollTimer = timer;
+        }
+
+        if (!_overlayDragCuePollTimer.IsRunning)
+        {
+            _overlayDragCuePollTimer.Start();
+        }
+
+        App.LogVerbose(
+            "[DragCue] Poll started. " +
+            $"cursor={cursor.X},{cursor.Y} zone={DescribeOverlayDragCueScreenZone()}");
+    }
+
+    private void OverlayDragCuePollTimer_Tick()
+    {
+        if (IsClosing || !WidgetShellControl.IsOverlayDragCueArmed)
+        {
+            StopOverlayDragCuePoll();
+            return;
+        }
+
+        if (!Win32Helper.GetCursorPos(out Win32Helper.POINT cursor) ||
+            IsScreenPointWithinOverlayDragCueZone(cursor))
+        {
+            // The physical cursor is inside the bar's zone, or its position is
+            // momentarily unreadable — neither may advance the streak.
+            _overlayDragCueOutsideStreak = 0;
+            return;
+        }
+
+        if (++_overlayDragCueOutsideStreak >= OverlayDragCueRestoreOutsideTicks)
+        {
+            App.Log(
+                "[DragCue] Restored bar. " +
+                $"cursor={cursor.X},{cursor.Y} " +
+                $"zone={DescribeOverlayDragCueScreenZone()}");
+            StopOverlayDragCuePoll();
+            WidgetShellControl.SetOverlayDragCueActive(false);
+        }
+    }
+
+    private void StopOverlayDragCuePoll()
+    {
+        _overlayDragCuePollTimer?.Stop();
+        _overlayDragCueOutsideStreak = 0;
+    }
+
+    private bool IsScreenPointWithinOverlayDragCueZone(Win32Helper.POINT cursor)
+    {
+        if (!TryGetOverlayDragCueScreenZone(out Windows.Foundation.Rect zone))
+        {
+            // Unreadable geometry must not restore the cue.
+            return true;
+        }
+
+        return cursor.X >= zone.X &&
+            cursor.X < zone.X + zone.Width &&
+            cursor.Y >= zone.Y &&
+            cursor.Y < zone.Y + zone.Height;
+    }
+
+    private string DescribeOverlayDragCueScreenZone()
+    {
+        return TryGetOverlayDragCueScreenZone(out Windows.Foundation.Rect zone)
+            ? $"{zone.X:F0},{zone.Y:F0}+{zone.Width:F0}x{zone.Height:F0}"
+            : "<unavailable>";
+    }
+
+    private bool TryGetOverlayDragCueScreenZone(out Windows.Foundation.Rect zone)
+    {
+        zone = default;
+        FrameworkElement handle = WidgetShellControl.OverlayDragHandleElement;
+        if (handle.Visibility != Visibility.Visible ||
+            handle.ActualWidth <= 0 ||
+            handle.ActualHeight <= 0 ||
+            handle.XamlRoot is null)
+        {
+            return false;
+        }
+
+        try
+        {
+            // The bar's screen rectangle is recomputed on every tick so a
+            // bounds animation moving the window cannot strand the verdict in
+            // a stale coordinate frame. The root origin MUST come from
+            // ClientToScreen (like TryGetPointerScreenPoint, which the window
+            // drag path has proven): GetWindowRect includes any invisible
+            // frame, which silently displaces the zone off the visible bar.
+            var clientOrigin = default(Win32Helper.POINT);
+            if (!Win32Helper.ClientToScreen(HWnd, ref clientOrigin))
+            {
+                return false;
+            }
+
+            Windows.Foundation.Point topLeft = handle.TransformToVisual(null)
+                .TransformPoint(new Windows.Foundation.Point(0, 0));
+            double scale = handle.XamlRoot.RasterizationScale;
+            double left = clientOrigin.X +
+                ((topLeft.X - OverlayDragCueSideToleranceDips) * scale);
+            double top = clientOrigin.Y + (topLeft.Y * scale);
+            double right = clientOrigin.X +
+                ((topLeft.X + handle.ActualWidth + OverlayDragCueSideToleranceDips) * scale);
+            double bottom = clientOrigin.Y +
+                ((topLeft.Y + handle.ActualHeight + OverlayDragCueBottomToleranceDips) * scale);
+            zone = new Windows.Foundation.Rect(
+                left,
+                top,
+                Math.Max(0, right - left),
+                Math.Max(0, bottom - top));
+            return true;
+        }
+        catch
+        {
+            // A transform that fails mid-layout must not restore the cue.
+            return false;
+        }
     }
 
     private static void CompactHoverRecoveryTimer_Tick(DispatcherQueueTimer sender, object args)
@@ -2743,6 +2942,22 @@ public abstract partial class WidgetWindowBase
         }
     }
 
+    /// <summary>
+    /// Manager-driven compact-state request (H4): transitions the real window
+    /// into or out of the collapsed capsule without persisting a manual
+    /// collapse preference — used by the disconnect-collapse policy, which
+    /// owns its own persisted marker instead.
+    /// </summary>
+    public void RequestCompactState(bool collapsed, bool animate)
+    {
+        if (collapsed == IsCompactBoundsStateActive)
+        {
+            return;
+        }
+
+        SetCollapsedState(collapsed, persistManualState: false, animate: animate);
+    }
+
     private void SetCollapsedState(
         bool collapsed,
         bool persistManualState,
@@ -2841,6 +3056,10 @@ public abstract partial class WidgetWindowBase
         if (persistManualState && Config.IsCollapsed != collapsed)
         {
             Config.IsCollapsed = collapsed;
+            // Manual expand/collapse ends disconnect-collapse tracking
+            // (spec 5.7): reconnect must not auto-expand a surface the
+            // user touched while its home display was away.
+            App.Current?.WidgetManager?.ClearDisconnectCollapseMarker(Config);
             SettingsService.UpdateWidget(Config, notifySubscribers: false);
             SettingsService.SaveDebounced(notifySubscribers: false);
             SynchronizeWidgetGroupLayout();
@@ -3505,6 +3724,15 @@ public abstract partial class WidgetWindowBase
             bounds.Width,
             bounds.Height,
             persist: true);
+        // Resize keeps its specialized anchor capture above; this commit only
+        // updates the surface home / entry authority (usually a no-op for
+        // home since a resize rarely crosses displays).
+        App.Current?.WidgetManager?.CommitUserPlacement(
+            Config,
+            CollapseHostBoundsToContent(bounds),
+            bounds,
+            WidgetPlacementSource.Resize,
+            captureIntent: false);
         App.Current?.WidgetManager?.RefreshCapsuleBarLayout();
     }
 

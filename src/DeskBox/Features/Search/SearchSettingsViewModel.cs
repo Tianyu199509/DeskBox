@@ -96,6 +96,9 @@ public sealed class SearchSettingsViewModel : ObservableObject, IDisposable
     public bool RequiresReservedHotkeyConfirmation(GlobalHotkeyGesture gesture) =>
         gesture == AltSpaceGesture && State.Hotkey.Gesture != gesture;
 
+    public bool IsHotkeyOwnedByMainHotkey(GlobalHotkeyGesture gesture) =>
+        IsActive && _settings.IsGestureOwnedByMainHotkey(gesture);
+
     public void SetHotkeyEnabled(bool enabled) => ApplyHotkeyChange(() => _settings.SetHotkeyEnabled(enabled));
     public void ApplyHotkey(GlobalHotkeyGesture gesture) => ApplyHotkeyChange(() => _settings.ApplyHotkey(gesture));
     public void ResetHotkey() => ApplyHotkey(DefaultGesture);
