@@ -41,8 +41,6 @@ public partial class SettingsViewModel
     /// </summary>
     public AppUpdateManifest? LatestUpdateManifest => _availableUpdateManifest ?? _latestUpdateManifest;
     public bool CanViewReleaseNotes => LatestUpdateManifest?.HasReleaseNotesOrUrl == true;
-    public Visibility ReleaseNotesButtonVisibility =>
-        CanViewReleaseNotes ? Visibility.Visible : Visibility.Collapsed;
     public string ViewReleaseNotesButtonText => _localizationService.T("Settings.Update.ViewReleaseNotes");
     public string ManualUpdateDownloadUrl => GetManualUpdateDownloadUrl(_availableUpdateManifest);
     // Store builds deliver updates through the Store itself; the auto-check
@@ -188,6 +186,43 @@ public partial class SettingsViewModel
         {
             IsCheckingForUpdates = false;
             NotifyUpdateActionPropertiesChanged();
+        }
+    }
+
+    /// <summary>
+    /// Raw manifest fetch for the release-notes window. Deliberately skips
+    /// every update-UI state mutation <see cref="CheckForUpdatesAsync"/>
+    /// performs: the notes button is always visible now, and when no check
+    /// has produced a manifest yet the dialog resolves its own lazily.
+    /// An in-flight interactive check is awaited and reused rather than
+    /// racing a second network round-trip.
+    /// </summary>
+    public async Task<AppUpdateManifest?> FetchLatestManifestForReleaseNotesAsync(CancellationToken cancellationToken = default)
+    {
+        for (int i = 0; IsCheckingForUpdates && i < 80; i++)
+        {
+            await Task.Delay(250, cancellationToken);
+        }
+
+        if (LatestUpdateManifest is not null)
+        {
+            return LatestUpdateManifest;
+        }
+
+        try
+        {
+            var result = await _appUpdateService.CheckForUpdatesAsync(AppVersion, cancellationToken);
+            return result.Manifest is not null && AppUpdateService.IsManifestUsable(result.Manifest)
+                ? result.Manifest
+                : null;
+        }
+        catch (OperationCanceledException)
+        {
+            return null;
+        }
+        catch (Exception)
+        {
+            return null;
         }
     }
 
@@ -464,7 +499,6 @@ public partial class SettingsViewModel
         OnPropertyChanged(nameof(AvailableUpdateReleaseNotesUrl));
         OnPropertyChanged(nameof(LatestUpdateManifest));
         OnPropertyChanged(nameof(CanViewReleaseNotes));
-        OnPropertyChanged(nameof(ReleaseNotesButtonVisibility));
         OnPropertyChanged(nameof(ViewReleaseNotesButtonText));
         OnPropertyChanged(nameof(ManualUpdateDownloadUrl));
         OnPropertyChanged(nameof(CanOpenManualUpdateDownload));

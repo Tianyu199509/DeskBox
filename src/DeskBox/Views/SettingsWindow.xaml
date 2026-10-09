@@ -3160,36 +3160,39 @@ Text="DeskBox" />
                                 HorizontalContentAlignment="Right"
                                 Description="{Binding UpdateStatusText}"
                                 svc:Localized.HeaderKey="Settings.Update.Status">
-                                <Button
-                                    x:Name="OneClickUpdateButton"
-                                    VerticalAlignment="Center"
-                                    Click="OneClickUpdateButton_Click"
-                                    IsEnabled="{Binding IsOneClickActionEnabled}"
-                                    Style="{StaticResource ActionButtonStyle}">
-                                    <StackPanel Orientation="Horizontal" Spacing="8">
-                                        <FontIcon FontSize="14" Glyph="&#xE895;" />
-                                        <TextBlock Text="{Binding OneClickActionButtonText}" />
-                                    </StackPanel>
-                                </Button>
+                                <StackPanel
+                                    x:Name="UpdateCheckActionsPanel"
+                                    Orientation="Horizontal"
+                                    Spacing="8"
+                                    VerticalAlignment="Center">
+                                    <Button
+                                        x:Name="OneClickUpdateButton"
+                                        VerticalAlignment="Center"
+                                        Click="OneClickUpdateButton_Click"
+                                        IsEnabled="{Binding IsOneClickActionEnabled}"
+                                        Style="{StaticResource ActionButtonStyle}">
+                                        <StackPanel Orientation="Horizontal" Spacing="8">
+                                            <FontIcon FontSize="14" Glyph="&#xE895;" />
+                                            <TextBlock Text="{Binding OneClickActionButtonText}" />
+                                        </StackPanel>
+                                    </Button>
+                                    <Button
+                                        x:Name="ViewReleaseNotesButton"
+                                        VerticalAlignment="Center"
+                                        Click="ViewReleaseNotesButton_Click"
+                                        Style="{StaticResource ActionButtonStyle}">
+                                        <StackPanel Orientation="Horizontal" Spacing="8">
+                                            <FontIcon FontSize="14" Glyph="&#xE8A5;" />
+                                            <TextBlock Text="{Binding ViewReleaseNotesButtonText}" TextWrapping="NoWrap" />
+                                        </StackPanel>
+                                    </Button>
+                                </StackPanel>
                             </toolkit:SettingsCard>
 
                             <toolkit:SettingsCard
                                 HorizontalContentAlignment="Stretch"
                                 svc:Localized.HeaderKey="Settings.Update.Details">
                                 <StackPanel Spacing="10" VerticalAlignment="Center">
-                                    <Button
-                                        x:Name="ViewReleaseNotesButton"
-                                        HorizontalAlignment="Right"
-                                        Click="ViewReleaseNotesButton_Click"
-                                        IsEnabled="{Binding CanViewReleaseNotes}"
-                                        Style="{StaticResource ActionButtonStyle}"
-                                        Visibility="{Binding ReleaseNotesButtonVisibility}"
-                                        VerticalAlignment="Center">
-                                        <StackPanel Orientation="Horizontal" Spacing="8">
-                                            <FontIcon FontSize="14" Glyph="&#xE8A5;" />
-                                            <TextBlock Text="{Binding ViewReleaseNotesButtonText}" TextWrapping="NoWrap" />
-                                        </StackPanel>
-                                    </Button>
                                     <TextBlock
                                         Style="{StaticResource SettingDescriptionTextStyle}"
                                         Text="{Binding UpdateDetailText}"
