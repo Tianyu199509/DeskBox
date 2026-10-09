@@ -291,6 +291,21 @@ public static class WidgetCompactBoundsCalculator
         // capture is intentionally independent of expansion direction.
         _ = expansionDirection;
         RectInt32 workArea = DisplayArea.GetFromRect(bounds, DisplayAreaFallback.Nearest).WorkArea;
+        CapturePlacementCore(config, bounds, workArea);
+    }
+
+    /// <summary>
+    /// The capture math isolated from the WinAppSDK <see cref="DisplayArea"/>
+    /// probe: the CI unit-test host has no Windows App SDK WinRT classes
+    /// registered (activation throws REGDB_E_CLASSNOTREG), so tests exercise
+    /// this core with a synthetic work area while production resolves the
+    /// real one at the <see cref="CapturePlacement"/> entry point.
+    /// </summary>
+    internal static void CapturePlacementCore(
+        WidgetConfig config,
+        RectInt32 bounds,
+        RectInt32 workArea)
+    {
         var placementConfig = new WidgetConfig
         {
             BoundsCoordinateVersion = WidgetConfig.CurrentBoundsCoordinateVersion,

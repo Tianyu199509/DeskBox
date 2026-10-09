@@ -192,9 +192,13 @@ public sealed class DisplayPlacementResolverTests
             }
         };
 
-        WidgetCompactBoundsCalculator.CapturePlacement(
+        // CapturePlacementCore with the external monitor's work area: the
+        // production DisplayArea probe needs the WinAppSDK WinRT runtime,
+        // which the CI test host does not have registered.
+        WidgetCompactBoundsCalculator.CapturePlacementCore(
             config,
-            new RectInt32(2000, 40, 248, 42));
+            new RectInt32(2000, 40, 248, 42),
+            workArea: new RectInt32(1920, 0, 1920, 1040));
 
         // Derived fields mirror the surface (spec 4.4), never the capsule's
         // own snapshot.
