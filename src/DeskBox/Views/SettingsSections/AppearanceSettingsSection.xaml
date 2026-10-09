@@ -174,21 +174,6 @@
                 </toolkit:SettingsCard.HeaderIcon>
             </toolkit:SettingsCard>
 
-            <toolkit:SettingsCard
-                HorizontalContentAlignment="Right"
-                svc:Localized.DescriptionKey="Settings.WindowShadow.Description"
-                svc:Localized.HeaderKey="Settings.WindowShadow.Title">
-                <toolkit:SettingsCard.HeaderIcon>
-                    <FontIcon Glyph="&#xE771;" />
-                </toolkit:SettingsCard.HeaderIcon>
-                <ToggleSwitch
-                    x:Name="WindowShadowToggle"
-                    MinWidth="0"
-                    OffContent=""
-                    OnContent=""
-                    Toggled="WindowShadowToggle_Toggled" />
-            </toolkit:SettingsCard>
-
         </StackPanel>
     </StackPanel>
 </UserControl>

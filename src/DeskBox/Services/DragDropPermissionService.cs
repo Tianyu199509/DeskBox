@@ -258,7 +258,17 @@ public static class DragDropPermissionService
 
             try
             {
-                if (entry.Root.OpenSubKey(AppCompatLayersKey, writable: true) is { } key)
+                // The per-user branch deliberately bypasses the current-user
+                // hive shortcut: inside an MSIX container that view is
+                // copy-on-write virtualized, so the delete would land in the
+                // package-private hive while the real layer survives (and the
+                // repair would count it as cleared). HKLM only accepts writes
+                // when the process is elevated, which the failure list
+                // already covers.
+                RegistryKey? key = entry.RootName == PerUserRootName
+                    ? OpenPerUserAppCompatLayersKey(writable: true)
+                    : Registry.LocalMachine.OpenSubKey(AppCompatLayersKey, writable: true);
+                if (key is not null)
                 {
                     using (key)
                     {
@@ -547,16 +557,56 @@ public static class DragDropPermissionService
         }
 
         var entries = new List<AppCompatEntry>();
-        AddAppCompatEntries(entries, Registry.CurrentUser, "HKCU", paths);
-        AddAppCompatEntries(entries, Registry.LocalMachine, "HKLM", paths);
+        // Both sides of the per-user branch (read and clear) go through
+        // HKU\<SID>: under MSIX, a virtualized delete from an earlier Store
+        // build can even tombstone the value in the container's private
+        // hive, hiding the still-present real layer from HKCU reads here.
+        AddAppCompatEntries(
+            entries,
+            () => OpenPerUserAppCompatLayersKey(writable: false),
+            PerUserRootName,
+            paths);
+        AddAppCompatEntries(
+            entries,
+            () => Registry.LocalMachine.OpenSubKey(AppCompatLayersKey),
+            "HKLM",
+            paths);
         return entries;
     }
 
-    private static void AddAppCompatEntries(List<AppCompatEntry> entries, RegistryKey root, string rootName, HashSet<string> relevantPaths)
+    private const string PerUserRootName = "HKCU";
+
+    /// <summary>
+    /// Opens the current user's AppCompat Layers key through HKU\<SID>
+    /// instead of HKCU. Same rationale as the Run entry store: explicit user
+    /// identity bypasses the MSIX copy-on-write registry virtualization that
+    /// would otherwise swallow Repair's deletes (and mask prior virtualized
+    /// deletes from diagnose reads) in packaged builds.
+    /// </summary>
+    private static RegistryKey? OpenPerUserAppCompatLayersKey(bool writable)
+    {
+        using var identity = WindowsIdentity.GetCurrent();
+        string? sid = identity.User?.Value;
+        if (string.IsNullOrWhiteSpace(sid))
+        {
+            return null;
+        }
+
+        using RegistryKey users = RegistryKey.OpenBaseKey(
+            RegistryHive.Users,
+            RegistryView.Default);
+        return users.OpenSubKey($@"{sid}\{AppCompatLayersKey}", writable);
+    }
+
+    private static void AddAppCompatEntries(
+        List<AppCompatEntry> entries,
+        Func<RegistryKey?> openKey,
+        string rootName,
+        HashSet<string> relevantPaths)
     {
         try
         {
-            using var key = root.OpenSubKey(AppCompatLayersKey);
+            using var key = openKey();
             if (key is null)
             {
                 return;
@@ -571,7 +621,7 @@ public static class DragDropPermissionService
 
                 if (key.GetValue(valueName) is string value && !string.IsNullOrWhiteSpace(value))
                 {
-                    entries.Add(new AppCompatEntry(root, rootName, valueName, value));
+                    entries.Add(new AppCompatEntry(rootName, valueName, value));
                 }
             }
         }
@@ -1139,7 +1189,6 @@ public static class DragDropPermissionService
         string? Error);
 
     private sealed record AppCompatEntry(
-        RegistryKey Root,
         string RootName,
         string ExePath,
         string Value);

@@ -535,6 +535,58 @@ Text="DeskBox" />
                                         ItemsSource="{Binding AvailableCornerPreferenceOptions}"
                                         controls:SettingsComboBox.Value="{Binding CornerPreference, Mode=TwoWay}" />
                                 </toolkit:SettingsCard>
+
+                                <!-- Low-frequency system switches sit at the
+                                     bottom. Read-only projections: the buttons
+                                     deep-link into the OS settings surfaces
+                                     (an in-app write would be swallowed by
+                                     MSIX copy-on-write HKCU
+                                     virtualization). -->
+                                <toolkit:SettingsCard
+                                    HorizontalContentAlignment="Right"
+                                    svc:Localized.DescriptionKey="Settings.SystemTransparency.Description"
+                                    svc:Localized.HeaderKey="Settings.SystemTransparency.Title">
+                                    <toolkit:SettingsCard.HeaderIcon>
+                                        <FontIcon Glyph="&#xE703;" />
+                                    </toolkit:SettingsCard.HeaderIcon>
+                                    <StackPanel Orientation="Horizontal" Spacing="8">
+                                        <TextBlock
+                                            VerticalAlignment="Center"
+                                            Style="{StaticResource SettingDescriptionTextStyle}"
+                                            Text="{Binding SystemTransparencyStatusText}" />
+                                        <Button
+                                            Click="OpenSystemTransparencySettingsButton_Click"
+                                            Style="{StaticResource ActionButtonStyle}">
+                                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                                <FontIcon FontSize="14" Glyph="&#xE713;" />
+                                                <TextBlock svc:Localized.Key="Settings.SystemEffect.OpenSystemSettings" />
+                                            </StackPanel>
+                                        </Button>
+                                    </StackPanel>
+                                </toolkit:SettingsCard>
+
+                                <toolkit:SettingsCard
+                                    HorizontalContentAlignment="Right"
+                                    svc:Localized.DescriptionKey="Settings.WindowShadow.Description"
+                                    svc:Localized.HeaderKey="Settings.WindowShadow.Title">
+                                    <toolkit:SettingsCard.HeaderIcon>
+                                        <FontIcon Glyph="&#xE771;" />
+                                    </toolkit:SettingsCard.HeaderIcon>
+                                    <StackPanel Orientation="Horizontal" Spacing="8">
+                                        <TextBlock
+                                            VerticalAlignment="Center"
+                                            Style="{StaticResource SettingDescriptionTextStyle}"
+                                            Text="{Binding SystemShadowStatusText}" />
+                                        <Button
+                                            Click="OpenWindowShadowSettingsButton_Click"
+                                            Style="{StaticResource ActionButtonStyle}">
+                                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                                <FontIcon FontSize="14" Glyph="&#xE713;" />
+                                                <TextBlock svc:Localized.Key="Settings.SystemEffect.OpenSystemSettings" />
+                                            </StackPanel>
+                                        </Button>
+                                    </StackPanel>
+                                </toolkit:SettingsCard>
                     </StackPanel>
                 </StackPanel>
                     </DataTemplate>

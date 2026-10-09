@@ -205,6 +205,13 @@ public sealed partial class SettingsWindow
             "AppearanceAnimationSettings")
         {
             section.DataContext = _appearanceSettingsViewModel;
+            if (sectionTag == "AppearanceMaterialSettings")
+            {
+                // The section hosts the system visual-effect status cards;
+                // creation-time refresh covers state changed while the
+                // window sat closed (activation only fires on focus).
+                RefreshSystemAppearanceStates();
+            }
         }
 
         // The WidgetGroups section binds through the group-navigation

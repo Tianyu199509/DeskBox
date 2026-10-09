@@ -113,7 +113,10 @@ public sealed partial class SettingsWindow
                     current.Gesture)),
             new(
                 _localizationService.T("Settings.GlobalHotkey.Preset.CopilotKey"),
-                GlobalHotkeyActivation.FromChord(GlobalHotkeyService.CopilotKeyGesture)),
+                GlobalHotkeyActivation.FromChord(GlobalHotkeyService.CopilotKeyGesture),
+                // The chord is the hardware Copilot key's gesture — without
+                // that key the preset registers fine but can never fire.
+                _localizationService.T("Settings.GlobalHotkey.Preset.CopilotKey.Tooltip")),
         ];
 
         var dialog = new HotkeyRecorderDialog(
@@ -241,6 +244,61 @@ public sealed partial class SettingsWindow
         {
             BeginAppearanceSliderDrag();
             KeepSliderThumbExpanded(slider);
+        }
+    }
+
+    // ── System visual-effect deep links (material section) ────────
+    // Both cards mirror Windows-wide switches read-only: an in-app write
+    // would land in the MSIX copy-on-write private hive and silently revert
+    // after the next sign-in, so the buttons open the OS surfaces instead.
+    // The appearance editor owns the status projections (it is the section's
+    // DataContext); the Win32 probes stay here on the shell and push in.
+
+    public void RefreshSystemAppearanceStates()
+    {
+        bool? shadowOn = Win32Helper.TryGetWindowDropShadowEnabled(out bool shadowsEnabled)
+            ? shadowsEnabled
+            : null;
+        bool? transparencyOn =
+            Win32Helper.TryGetSystemTransparencyEffectsEnabled(out bool transparencyEnabled)
+                ? transparencyEnabled
+                : null;
+        _appearanceSettingsViewModel.UpdateSystemEffectStates(shadowOn, transparencyOn);
+    }
+
+    private async void OpenSystemTransparencySettingsButton_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            if (!await Windows.System.Launcher.LaunchUriAsync(new Uri("ms-settings:colors")))
+            {
+                App.Log("[Settings] Windows color settings could not be opened.");
+            }
+        }
+        catch (Exception ex)
+        {
+            App.Log($"[Settings] Failed to open Windows color settings: {ex.Message}");
+        }
+    }
+
+    private void OpenWindowShadowSettingsButton_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            using System.Diagnostics.Process? process = System.Diagnostics.Process.Start(
+                new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = "SystemPropertiesPerformance.exe",
+                    UseShellExecute = true
+                });
+            if (process is null)
+            {
+                App.Log("[Settings] Windows performance options could not be opened.");
+            }
+        }
+        catch (Exception ex)
+        {
+            App.Log($"[Settings] Failed to open Windows performance options: {ex.Message}");
         }
     }
 

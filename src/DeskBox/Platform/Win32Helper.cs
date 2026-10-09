@@ -988,15 +988,13 @@ public static partial class Win32Helper
     [return: MarshalAs(UnmanagedType.Bool)]
     public static partial bool UnregisterPowerSettingNotification(IntPtr handle);
 
-    // System-wide visual effects (HKCU-scoped per-user parameters).
+    // System-wide visual effects (HKCU-scoped per-user parameters). Read-only:
+    // writes go through the OS settings surfaces — under an MSIX package the
+    // copy-on-write HKCU virtualization would swallow SPIF_UPDATEINIFILE's
+    // profile write and silently revert after the next sign-in.
     private const uint SpiGetDropShadow = 0x1024;
-    private const uint SpiSetDropShadow = 0x1025;
-    private const uint SpifUpdateIniFile = 0x0001;
-    private const uint SpifSendChange = 0x0002;
 
-    // pvParam is polymorphic: GET actions want a pointer to the receiving
-    // buffer; simple BOOL SET actions want the new value passed BY VALUE in
-    // the pvParam slot — a marshalled pointer is always nonzero, i.e. TRUE.
+    // The GET actions pass a pointer to the receiving buffer in pvParam.
     [LibraryImport("user32.dll", SetLastError = true, EntryPoint = "SystemParametersInfoW")]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static partial bool SystemParametersInfo(
@@ -1031,32 +1029,28 @@ public static partial class Win32Helper
     }
 
     /// <summary>
-    /// Writes the system-wide "show shadows under windows" effect the same way
-    /// the Performance Options dialog does: persist to the profile and broadcast
-    /// WM_SETTINGCHANGE. Affects every window with a non-client frame, not just
-    /// this app — callers must confirm with the user before invoking.
+    /// Reads Windows' "Transparency effects" personalization switch — the
+    /// setting Mica/Acrylic materials degrade without. The registry value is
+    /// the source of truth across every supported build; a missing value
+    /// means the OS default (on).
     /// </summary>
-    public static bool TrySetWindowDropShadowEnabled(bool enabled, out int errorCode)
+    public static bool TryGetSystemTransparencyEffectsEnabled(out bool enabled)
     {
-        errorCode = 0;
-        var value = (IntPtr)(enabled ? 1 : 0);
+        enabled = true;
         try
         {
-            if (SystemParametersInfo(
-                    SpiSetDropShadow,
-                    0,
-                    value,
-                    SpifUpdateIniFile | SpifSendChange))
+            using Microsoft.Win32.RegistryKey? personalize =
+                Microsoft.Win32.Registry.CurrentUser.OpenSubKey(
+                    @"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize");
+            if (personalize?.GetValue("EnableTransparency") is int value)
             {
-                return true;
+                enabled = value != 0;
             }
 
-            errorCode = Marshal.GetLastWin32Error();
-            return false;
+            return true;
         }
-        catch (Exception ex)
+        catch
         {
-            errorCode = ex.HResult;
             return false;
         }
     }
@@ -1779,8 +1773,9 @@ public static partial class Win32Helper
     /// </summary>
     public static int TrySetDwmWindowAttribute(IntPtr hwnd, int attr, ref int value)
     {
-        if ((attr is DWMWA_BORDER_COLOR or DWMWA_WINDOW_CORNER_PREFERENCE or DWMWA_SYSTEMBACKDROP_TYPE) &&
-            !Services.WindowsCompatibilityService.SupportsWin11DwmAttributes)
+        if (ShouldSkipDwmWindowAttribute(
+                attr,
+                Services.WindowsCompatibilityService.SupportsWin11DwmAttributes))
         {
             return 0;
         }
@@ -1794,6 +1789,19 @@ public static partial class Win32Helper
             return -1;
         }
     }
+
+    /// <summary>
+    /// The Win10 floor guard of <see cref="TrySetDwmWindowAttribute"/> as a
+    /// pure function: attributes 33/34/38 are Windows 11 additions and are
+    /// dropped (return 0, no P/Invoke) when the OS cannot render them. This
+    /// branch is the only thing keeping those attributes from reaching
+    /// DwmSetWindowAttribute on Windows 10.
+    /// </summary>
+    internal static bool ShouldSkipDwmWindowAttribute(
+        int attr,
+        bool supportsWin11DwmAttributes) =>
+        !supportsWin11DwmAttributes &&
+        attr is DWMWA_BORDER_COLOR or DWMWA_WINDOW_CORNER_PREFERENCE or DWMWA_SYSTEMBACKDROP_TYPE;
 
     public const int DWMWA_TRANSITIONS_FORCEDISABLED = 3;
     public const int DWMWA_CLOAK = 13;

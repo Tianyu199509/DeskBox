@@ -73,6 +73,8 @@ namespace DeskBox.Features.Appearance;
     nameof(ShowOpacitySlider),
     nameof(ShowPanoramaBackgroundOptions),
     nameof(ShowUnifiedBackgroundOptions),
+    nameof(SystemShadowStatusText),
+    nameof(SystemTransparencyStatusText),
     nameof(TextSize),
     nameof(TextSizeValueText),
     nameof(Theme),

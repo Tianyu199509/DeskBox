@@ -167,18 +167,20 @@ public static class WindowsCompatibilityService
     public static string ApplySafeBackdrop(Window window, bool preferMica = true)
     {
         ArgumentNullException.ThrowIfNull(window);
+        string kind = ResolveSafeBackdropKind(
+            preferMica,
+            SupportsMica,
+            SupportsDesktopAcrylic);
         try
         {
-            if (preferMica && SupportsMica)
+            switch (kind)
             {
-                window.SystemBackdrop = new MicaBackdrop { Kind = MicaKind.BaseAlt };
-                return "Mica";
-            }
-
-            if (SupportsDesktopAcrylic)
-            {
-                window.SystemBackdrop = new DesktopAcrylicBackdrop();
-                return "Acrylic";
+                case "Mica":
+                    window.SystemBackdrop = new MicaBackdrop { Kind = MicaKind.BaseAlt };
+                    return "Mica";
+                case "Acrylic":
+                    window.SystemBackdrop = new DesktopAcrylicBackdrop();
+                    return "Acrylic";
             }
         }
         catch (Exception ex)
@@ -188,6 +190,25 @@ public static class WindowsCompatibilityService
 
         window.SystemBackdrop = null;
         return "Solid";
+    }
+
+    /// <summary>
+    /// The capability chain of <see cref="ApplySafeBackdrop"/> as a pure
+    /// function: Mica when preferred and supported, else desktop acrylic,
+    /// else the opaque XAML fallback. Controller-creation failures inside
+    /// ApplySafeBackdrop degrade through the same endpoint ("Solid").
+    /// </summary>
+    internal static string ResolveSafeBackdropKind(
+        bool preferMica,
+        bool supportsMica,
+        bool supportsDesktopAcrylic)
+    {
+        if (preferMica && supportsMica)
+        {
+            return "Mica";
+        }
+
+        return supportsDesktopAcrylic ? "Acrylic" : "Solid";
     }
 
     public static bool AreAnimationsEnabled => ReadUiSetting(

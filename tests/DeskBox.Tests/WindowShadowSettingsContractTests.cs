@@ -1,84 +1,135 @@
 namespace DeskBox.Tests;
 
 /// <summary>
-/// Pins the appearance-section window-shadow toggle contract: it mirrors the
-/// Windows-wide "show shadows under windows" effect through SystemParametersInfo
-/// and must always warn the user about the global scope before writing.
+/// Pins the material section's system visual-effect cards: they are read-only
+/// projections of the Windows-wide shadow/transparency switches. The buttons
+/// must deep-link into the OS settings surfaces — an in-app write (registry or
+/// SPIF_UPDATEINIFILE) lands in the MSIX copy-on-write private hive and
+/// silently reverts after the next sign-in, so no write path may return.
 /// </summary>
 public sealed class WindowShadowSettingsContractTests
 {
     [Fact]
-    public void AppearanceSection_ExposesSystemShadowToggleWithExplicitScopeLabeling()
+    public void MaterialSection_HostsBothSystemEffectCardsWithStatusAndDeepLinks()
     {
-        string xaml = Read("src/DeskBox/Views/SettingsSections/AppearanceSettingsSection.xaml");
+        string slice = Read(
+            "src/DeskBox/Views/SettingsWindow.xaml");
+        string material = Slice(
+            slice,
+            "x:Key=\"AppearanceMaterialSettingsSectionTemplate\"",
+            "x:Key=\"AppearanceDensitySettingsSectionTemplate\"");
 
-        Assert.Contains("x:Name=\"WindowShadowToggle\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("Toggled=\"WindowShadowToggle_Toggled\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("Settings.WindowShadow.Title", xaml, StringComparison.Ordinal);
-        Assert.Contains("Settings.WindowShadow.Description", xaml, StringComparison.Ordinal);
+        // Transparency card: status projection + ms-settings deep link.
+        Assert.Contains("HeaderKey=\"Settings.SystemTransparency.Title\"", material, StringComparison.Ordinal);
+        Assert.Contains("Text=\"{Binding SystemTransparencyStatusText}\"", material, StringComparison.Ordinal);
+        Assert.Contains("Click=\"OpenSystemTransparencySettingsButton_Click\"", material, StringComparison.Ordinal);
+        Assert.Contains("svc:Localized.Key=\"Settings.SystemEffect.OpenSystemSettings\"", material, StringComparison.Ordinal);
+
+        // Shadow card: same shape, mirroring SPI_GETDROPSHADOW.
+        Assert.Contains("HeaderKey=\"Settings.WindowShadow.Title\"", material, StringComparison.Ordinal);
+        Assert.Contains("Text=\"{Binding SystemShadowStatusText}\"", material, StringComparison.Ordinal);
+        Assert.Contains("Click=\"OpenWindowShadowSettingsButton_Click\"", material, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void ToggleHandler_ConfirmsGlobalScopeBeforeWritingAndReadsBackResult()
+    public void AppearanceSection_NoLongerExposesTheShadowToggle()
     {
-        string code = Read("src/DeskBox/Views/SettingsSections/AppearanceSettingsSection.xaml.cs");
-        string handler = Slice(
-            code,
-            "private async void WindowShadowToggle_Toggled",
-            "private async Task<bool> ConfirmWindowShadowChangeAsync");
+        string xaml = Read(
+            "src/DeskBox/Views/SettingsSections/AppearanceSettingsSection.xaml");
 
-        Assert.Contains("ConfirmWindowShadowChangeAsync()", handler, StringComparison.Ordinal);
-        Assert.Contains("TrySetWindowDropShadowEnabled(target", handler, StringComparison.Ordinal);
-        Assert.Contains("TryGetWindowDropShadowEnabled(out bool", handler, StringComparison.Ordinal);
-        Assert.Contains("applied.Value != target", handler, StringComparison.Ordinal);
-        Assert.Contains("RefreshWindowShadowToggle()", handler, StringComparison.Ordinal);
-
-        // SPIF_SENDCHANGE broadcasts to every top-level window and waits on
-        // each — the write must never run on the settings UI thread.
-        Assert.Contains("await Task.Run(", handler, StringComparison.Ordinal);
-        Assert.Contains("WindowShadowToggle.IsEnabled = false", handler, StringComparison.Ordinal);
-
-        string confirm = Slice(
-            code,
-            "private async Task<bool> ConfirmWindowShadowChangeAsync",
-            "private async Task ShowWindowShadowFailureAsync");
-
-        Assert.Contains("Settings.WindowShadow.Confirm.Title", confirm, StringComparison.Ordinal);
-        Assert.Contains("Settings.WindowShadow.Confirm.Body", confirm, StringComparison.Ordinal);
-        Assert.Contains("ContentDialogResult.Primary", confirm, StringComparison.Ordinal);
+        Assert.DoesNotContain("WindowShadowToggle", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("Settings.WindowShadow.Title", xaml, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void Win32Helper_WritesDropShadowThroughSystemParametersInfoWithBroadcast()
+    public void Win32Helper_ExposesReadOnlyProbes_WithoutAnyWritePath()
     {
         string source = Read("src/DeskBox/Platform/Win32Helper.cs");
 
+        // Live session state via SystemParametersInfo (GET only).
         Assert.Contains("SpiGetDropShadow = 0x1024", source, StringComparison.Ordinal);
-        Assert.Contains("SpiSetDropShadow = 0x1025", source, StringComparison.Ordinal);
-        Assert.Contains("SpifUpdateIniFile", source, StringComparison.Ordinal);
-        Assert.Contains("SpifSendChange", source, StringComparison.Ordinal);
-        Assert.Contains("SystemParametersInfo", source, StringComparison.Ordinal);
         Assert.Contains("TryGetWindowDropShadowEnabled", source, StringComparison.Ordinal);
-        Assert.Contains("TrySetWindowDropShadowEnabled", source, StringComparison.Ordinal);
 
-        // pvParam is polymorphic: SPI_SETDROPSHADOW wants the BOOL passed by
-        // value — a marshalled pointer is always nonzero and would be read as
-        // TRUE, silently turning "disable" into "enable".
-        string setter = Slice(
-            source,
-            "public static bool TrySetWindowDropShadowEnabled",
-            "[StructLayout");
-        Assert.Contains("(IntPtr)(enabled ? 1 : 0)", setter, StringComparison.Ordinal);
-        Assert.DoesNotContain("ref ", setter, StringComparison.Ordinal);
+        // Registry source of truth for the transparency switch.
+        Assert.Contains("TryGetSystemTransparencyEffectsEnabled", source, StringComparison.Ordinal);
+        Assert.Contains("EnableTransparency", source, StringComparison.Ordinal);
+
+        // The write path is gone: SPIF_UPDATEINIFILE persistence would be
+        // swallowed by MSIX HKCU copy-on-write virtualization and revert
+        // after the next sign-in.
+        Assert.DoesNotContain("TrySetWindowDropShadowEnabled", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("SpiSetDropShadow", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("SpifUpdateIniFile", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("SpifSendChange", source, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void WindowShadowStrings_PresentInEveryShippedLocale()
+    public void SettingsShell_DeepLinksIntoTheOsSettingsSurfaces()
+    {
+        string source = Read(
+            "src/DeskBox/Views/SettingsWindow.HotkeyAndAppearance.cs");
+
+        Assert.Contains("ms-settings:colors", source, StringComparison.Ordinal);
+        Assert.Contains("SystemPropertiesPerformance.exe", source, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SystemEffectStates_LiveOnTheAppearanceEditorAndRefreshViaTheShell()
+    {
+        // The material section's DataContext is the appearance editor, not
+        // SettingsViewModel — the status properties must live on the editor
+        // or the {Binding}s resolve to nothing and the cards show no state.
+        string startup = Read(
+            "src/DeskBox/Views/SettingsWindow.Startup.cs");
+        string shell = Read(
+            "src/DeskBox/Views/SettingsWindow.HotkeyAndAppearance.cs");
+        string deferred = Read(
+            "src/DeskBox/Views/SettingsWindow.DeferredSections.cs");
+        string editor = Read(
+            "src/DeskBox/Features/Appearance/AppearanceSettingsViewModel.cs");
+        string editorBridge = Read(
+            "src/DeskBox/Features/Appearance/AppearanceSettingsViewModel.AotBindableProperties.cs");
+
+        Assert.Contains("RefreshSystemAppearanceStates()", startup, StringComparison.Ordinal);
+        Assert.Contains("public void RefreshSystemAppearanceStates()", shell, StringComparison.Ordinal);
+        Assert.Contains("TryGetWindowDropShadowEnabled(out bool shadowsEnabled)", shell, StringComparison.Ordinal);
+        Assert.Contains("TryGetSystemTransparencyEffectsEnabled(out bool transparencyEnabled)", shell, StringComparison.Ordinal);
+        Assert.Contains("UpdateSystemEffectStates(shadowOn, transparencyOn)", shell, StringComparison.Ordinal);
+
+        // Creation-time refresh covers changes made while the window was closed.
+        Assert.Contains("RefreshSystemAppearanceStates()", deferred, StringComparison.Ordinal);
+
+        Assert.Contains("public void UpdateSystemEffectStates(", editor, StringComparison.Ordinal);
+        Assert.Contains("nameof(SystemShadowStatusText)", editorBridge, StringComparison.Ordinal);
+        Assert.Contains("nameof(SystemTransparencyStatusText)", editorBridge, StringComparison.Ordinal);
+
+        // Language switch regression: the status texts are computed getters
+        // over the pushed raw states and RefreshLocalization must re-raise
+        // them, or the cards keep showing the previous language (they store
+        // no localized strings of their own).
+        string refresh = Slice(
+            editor,
+            "public void RefreshLocalization()",
+            "/// <summary>");
+        Assert.Contains("OnPropertyChanged(nameof(SystemShadowStatusText))", refresh, StringComparison.Ordinal);
+        Assert.Contains("OnPropertyChanged(nameof(SystemTransparencyStatusText))", refresh, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void SystemEffectStrings_PresentInEveryShippedLocale()
     {
         string[] requiredKeys =
         [
+            "Settings.SystemTransparency.Title",
+            "Settings.SystemTransparency.Description",
+            "Settings.SystemEffect.OpenSystemSettings",
+            "Settings.SystemEffect.StateOn",
+            "Settings.SystemEffect.StateOff",
             "Settings.WindowShadow.Title",
-            "Settings.WindowShadow.Description",
+            "Settings.WindowShadow.Description"
+        ];
+        string[] removedKeys =
+        [
             "Settings.WindowShadow.Confirm.Title",
             "Settings.WindowShadow.Confirm.Body",
             "Settings.WindowShadow.ApplyFailed",
@@ -92,6 +143,11 @@ public sealed class WindowShadowSettingsContractTests
             foreach (string key in requiredKeys)
             {
                 Assert.Contains("\"" + key + "\"", content, StringComparison.Ordinal);
+            }
+
+            foreach (string key in removedKeys)
+            {
+                Assert.DoesNotContain("\"" + key + "\"", content, StringComparison.Ordinal);
             }
         }
     }

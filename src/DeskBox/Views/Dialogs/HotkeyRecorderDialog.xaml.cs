@@ -25,7 +25,10 @@ public sealed partial class HotkeyRecorderDialog : ContentDialog
         Search
     }
 
-    public sealed record Preset(string Label, GlobalHotkeyActivation Activation);
+    public sealed record Preset(
+        string Label,
+        GlobalHotkeyActivation Activation,
+        string? ToolTip = null);
 
     private const string WindowsLogoPathData =
         "M0.2 1.2 L5.0 0.5 L5.0 5.4 L0.2 5.4 Z " +
@@ -277,6 +280,13 @@ public sealed partial class HotkeyRecorderDialog : ContentDialog
                 Style = (Style)Resources["PresetButtonStyle"],
                 Content = new TextBlock { Text = _presets[index].Label }
             };
+            // Presets stay one-word compact; hardware requirements (e.g. the
+            // Copilot key) ride along as tooltips instead of label suffixes.
+            if (!string.IsNullOrWhiteSpace(_presets[index].ToolTip))
+            {
+                ToolTipService.SetToolTip(button, _presets[index].ToolTip);
+            }
+
             button.Click += (_, _) => SelectPreset(capturedIndex);
             _presetButtons.Add(button);
             PresetsPanel.Children.Add(button);

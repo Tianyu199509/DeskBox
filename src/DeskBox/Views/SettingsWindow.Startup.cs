@@ -16,6 +16,7 @@ public sealed partial class SettingsWindow
         }
 
         ViewModel.RefreshAutoStartState();
+        RefreshSystemAppearanceStates();
     }
 
     private async void OpenStartupAppsSettingsButton_Click(
