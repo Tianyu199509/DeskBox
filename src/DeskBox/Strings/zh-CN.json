@@ -2466,6 +2466,8 @@
   "Widget.CustomBackground.FitContain": "适应",
   "Widget.CustomBackground.DimLabel": "背景明暗",
   "Widget.CustomBackground.Clear": "清除背景",
+  "Widget.CustomBackground.ColorLabel": "背景颜色",
+  "Widget.CustomBackground.ColorCurrent": "正在使用自定义背景色",
   "Widget.StyleMenu.Label": "格子样式",
   "Widget.Border.Menu": "边框",
   "Widget.Border.UseGlobal": "使用全局设置",

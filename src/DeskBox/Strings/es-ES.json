@@ -2466,6 +2466,8 @@
   "Widget.CustomBackground.FitContain": "Ajustar",
   "Widget.CustomBackground.DimLabel": "Oscurecimiento del fondo",
   "Widget.CustomBackground.Clear": "Quitar fondo",
+  "Widget.CustomBackground.ColorLabel": "Color de fondo",
+  "Widget.CustomBackground.ColorCurrent": "Se usa un color de fondo personalizado",
   "Widget.StyleMenu.Label": "Estilo del widget",
   "Widget.Border.Menu": "Borde",
   "Widget.Border.UseGlobal": "Usar ajuste global",

@@ -2466,6 +2466,8 @@
   "Widget.CustomBackground.FitContain": "Ajuster",
   "Widget.CustomBackground.DimLabel": "Assombrissement de l'arrière-plan",
   "Widget.CustomBackground.Clear": "Effacer l'arrière-plan",
+  "Widget.CustomBackground.ColorLabel": "Couleur d'arrière-plan",
+  "Widget.CustomBackground.ColorCurrent": "Couleur d'arrière-plan personnalisée activée",
   "Widget.StyleMenu.Label": "Style du widget",
   "Widget.Border.Menu": "Bordure",
   "Widget.Border.UseGlobal": "Utiliser le réglage global",

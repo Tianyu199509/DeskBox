@@ -2466,6 +2466,8 @@
   "Widget.CustomBackground.FitContain": "Fit",
   "Widget.CustomBackground.DimLabel": "Background dimming",
   "Widget.CustomBackground.Clear": "Clear background",
+  "Widget.CustomBackground.ColorLabel": "Background color",
+  "Widget.CustomBackground.ColorCurrent": "Using a custom background color",
   "Widget.StyleMenu.Label": "Widget style",
   "Widget.Border.Menu": "Border",
   "Widget.Border.UseGlobal": "Use global setting",

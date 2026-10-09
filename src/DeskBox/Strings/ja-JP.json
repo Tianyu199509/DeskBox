@@ -2466,6 +2466,8 @@
   "Widget.CustomBackground.FitContain": "収める",
   "Widget.CustomBackground.DimLabel": "背景の明るさ",
   "Widget.CustomBackground.Clear": "背景を消す",
+  "Widget.CustomBackground.ColorLabel": "背景色",
+  "Widget.CustomBackground.ColorCurrent": "カスタム背景色を使用中",
   "Widget.StyleMenu.Label": "ウィジェットのスタイル",
   "Widget.Border.Menu": "枠線",
   "Widget.Border.UseGlobal": "全体設定を使用",

@@ -2466,6 +2466,8 @@
   "Widget.CustomBackground.FitContain": "Einpassen",
   "Widget.CustomBackground.DimLabel": "Hintergrund abdunkeln",
   "Widget.CustomBackground.Clear": "Hintergrund entfernen",
+  "Widget.CustomBackground.ColorLabel": "Hintergrundfarbe",
+  "Widget.CustomBackground.ColorCurrent": "Eigene Hintergrundfarbe aktiv",
   "Widget.StyleMenu.Label": "Widget-Stil",
   "Widget.Border.Menu": "Rahmen",
   "Widget.Border.UseGlobal": "Globale Einstellung verwenden",

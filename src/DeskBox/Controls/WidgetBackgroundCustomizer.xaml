@@ -58,6 +58,16 @@
             Foreground="{ThemeResource TextFillColorSecondaryBrush}"
             TextWrapping="Wrap" />
 
+        <!-- Solid per-widget background color; mutually exclusive with the
+             image above (picking a color retires the image). -->
+        <StackPanel x:Name="ColorPanel" Spacing="4">
+            <TextBlock x:Name="ColorLabel" FontSize="11" Opacity="0.7" />
+            <ColorPicker
+                x:Name="BackgroundColorPicker"
+                IsAlphaEnabled="False"
+                MinWidth="256" />
+        </StackPanel>
+
         <!-- Fit + dim, only meaningful while an image is set -->
         <StackPanel x:Name="OptionsPanel" Spacing="10" Visibility="Collapsed">
             <StackPanel Spacing="4">
@@ -91,10 +101,12 @@
                     SmallChange="5"
                     StepFrequency="5" />
             </StackPanel>
-            <Button
-                x:Name="ClearButton"
-                HorizontalAlignment="Stretch" />
         </StackPanel>
+
+        <!-- Always reachable: clears whichever background kind is set. -->
+        <Button
+            x:Name="ClearButton"
+            HorizontalAlignment="Stretch" />
 
         <TextBlock
             x:Name="ErrorText"

@@ -43,10 +43,10 @@ public abstract partial class WidgetWindowBase
     }
 
     /// <summary>
-    /// Resolves the widget background: a per-widget image wins, then the
-    /// global appearance mode (unified image or panorama sampling), then the
-    /// global window material. Per-widget fit/dim overrides apply on top of
-    /// whichever background is active.
+    /// Resolves the widget background: a per-widget image wins, then a
+    /// per-widget solid color, then the global appearance mode (unified image
+    /// or panorama sampling), then the global window material. Per-widget
+    /// fit/dim overrides apply on top of whichever background is active.
     /// </summary>
     protected void ApplyCustomWidgetBackground()
     {
@@ -55,6 +55,7 @@ public abstract partial class WidgetWindowBase
         WidgetShellSettingsSlice shellSettings = settings.WidgetShell;
         string mode = WidgetBackgroundModeKinds.Normalize(shellSettings.WidgetBackgroundMode);
         string? ownFile = WidgetBackgroundCustomization.GetImageFileNameOverride(Config);
+        string? ownColor = WidgetBackgroundCustomization.GetColorOverride(Config);
 
         ImageSource? panoramaSource = null;
         string? imagePath = null;
@@ -83,6 +84,12 @@ public abstract partial class WidgetWindowBase
         shell.CustomBackgroundPanoramaSource = panoramaSource;
         shell.CustomBackgroundSource = ResolveCustomBackgroundSource(imagePath);
         shell.CustomBackgroundFit = fit;
+        // The color only shows when no image layer resolved — image wins,
+        // per-widget color beats the global image modes, the material is the
+        // floor for everything.
+        shell.CustomBackgroundColorHex = imagePath is null && panoramaSource is null
+            ? ownColor
+            : null;
         shell.CustomBackgroundDim =
             WidgetBackgroundCustomization.ResolveEffectiveDimPercent(Config, settings) / 100d;
         _customBackgroundSurfaceReleased = false;

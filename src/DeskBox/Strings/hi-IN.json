@@ -2466,6 +2466,8 @@
   "Widget.CustomBackground.FitContain": "फ़िट करें",
   "Widget.CustomBackground.DimLabel": "बैकग्राउंड मद्धता",
   "Widget.CustomBackground.Clear": "बैकग्राउंड हटाएँ",
+  "Widget.CustomBackground.ColorLabel": "बैकग्राउंड रंग",
+  "Widget.CustomBackground.ColorCurrent": "कस्टम बैकग्राउंड रंग उपयोग में",
   "Widget.StyleMenu.Label": "विजेट स्टाइल",
   "Widget.Border.Menu": "बॉर्डर",
   "Widget.Border.UseGlobal": "वैश्विक सेटिंग उपयोग करें",

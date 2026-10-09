@@ -229,6 +229,19 @@ public sealed partial class WidgetShell : UserControl
             typeof(WidgetShell),
             new PropertyMetadata(null, OnCustomBackgroundChanged));
 
+    /// <summary>
+    /// Per-widget solid background color as an opaque #RRGGBB hex string.
+    /// Stored as a string (the same shape as the foreground-color override)
+    /// rather than a nullable struct so the dependency property stays a plain
+    /// reference type; null or unparsable means "no color override".
+    /// </summary>
+    public static readonly DependencyProperty CustomBackgroundColorHexProperty =
+        DependencyProperty.Register(
+            nameof(CustomBackgroundColorHex),
+            typeof(string),
+            typeof(WidgetShell),
+            new PropertyMetadata(null, OnCustomBackgroundChanged));
+
     public static readonly DependencyProperty OverlayTitleProperty =
         DependencyProperty.Register(
             nameof(OverlayTitle),
@@ -651,6 +664,13 @@ public sealed partial class WidgetShell : UserControl
         set => SetValue(CustomBackgroundPanoramaSourceProperty, value);
     }
 
+    /// <summary>Per-widget solid background color hex; null follows the image chain.</summary>
+    public string? CustomBackgroundColorHex
+    {
+        get => (string?)GetValue(CustomBackgroundColorHexProperty);
+        set => SetValue(CustomBackgroundColorHexProperty, value);
+    }
+
     /// <summary>
     /// Places the panorama image so the slice under the widget's desktop
     /// position lands inside the plate; values are DIPs relative to the
@@ -667,7 +687,9 @@ public sealed partial class WidgetShell : UserControl
         CustomBackgroundPanoramaImage.Margin = new Thickness(left, top, 0, 0);
     }
 
-    public bool IsCustomBackgroundActive => CustomBackgroundSource is not null;
+    public bool IsCustomBackgroundActive =>
+        CustomBackgroundSource is not null ||
+        CustomBackgroundColorHex is not null;
 
     public string OverlayTitle
     {
@@ -4332,8 +4354,25 @@ public sealed partial class WidgetShell : UserControl
 
     private void UpdateCustomBackgroundVisual()
     {
-        bool active = CustomBackgroundSource is not null ||
+        bool imageActive = CustomBackgroundSource is not null ||
             CustomBackgroundPanoramaSource is not null;
+
+        // Solid per-widget color: parses here so an unparsable stored value
+        // self-heals to "no override" instead of throwing in measure passes.
+        Color? solidColor = null;
+        if (CustomBackgroundColorHex is { } colorHex &&
+            AccentColorHelper.TryParseHex(colorHex, out Color parsedColor))
+        {
+            solidColor = Color.FromArgb(0xFF, parsedColor.R, parsedColor.G, parsedColor.B);
+        }
+
+        CustomBackgroundColorLayer.Visibility =
+            solidColor is not null && !imageActive
+                ? Visibility.Visible
+                : Visibility.Collapsed;
+        CustomBackgroundColorLayer.Background = solidColor is { } layerColor
+            ? new SolidColorBrush(layerColor)
+            : null;
 
         // Panorama rendering positions an oversized image and clips it to
         // the plate; the plain Image path covers per-widget and unified
@@ -4360,7 +4399,8 @@ public sealed partial class WidgetShell : UserControl
         // Theme-aware scrim: dark theme dims with black, light theme with
         // white, so foreground text keeps its contrast in both themes. High
         // contrast forces a stronger floor — text contrast wins over the
-        // photo there.
+        // photo there. The scrim tames photos only: it never washes out a
+        // solid color the user picked by hand.
         double dim = Math.Clamp(CustomBackgroundDim, 0d, 1d);
         if (WindowsCompatibilityService.IsHighContrast)
         {
@@ -4372,7 +4412,7 @@ public sealed partial class WidgetShell : UserControl
                 ? Windows.UI.Color.FromArgb(0xFF, 0x00, 0x00, 0x00)
                 : Windows.UI.Color.FromArgb(0xFF, 0xFF, 0xFF, 0xFF));
         CustomBackgroundScrim.Opacity = dim;
-        CustomBackgroundScrim.Visibility = active ? Visibility.Visible : Visibility.Collapsed;
+        CustomBackgroundScrim.Visibility = imageActive ? Visibility.Visible : Visibility.Collapsed;
     }
 
     private static void OnShowAddButtonChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)

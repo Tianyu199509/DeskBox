@@ -2466,6 +2466,8 @@
   "Widget.CustomBackground.FitContain": "Вписать",
   "Widget.CustomBackground.DimLabel": "Затемнение фона",
   "Widget.CustomBackground.Clear": "Убрать фон",
+  "Widget.CustomBackground.ColorLabel": "Цвет фона",
+  "Widget.CustomBackground.ColorCurrent": "Используется свой цвет фона",
   "Widget.StyleMenu.Label": "Стиль виджета",
   "Widget.Border.Menu": "Рамка",
   "Widget.Border.UseGlobal": "Использовать общую настройку",

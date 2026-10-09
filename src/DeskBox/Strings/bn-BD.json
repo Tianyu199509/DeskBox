@@ -2466,6 +2466,8 @@
   "Widget.CustomBackground.FitContain": "ফিট করুন",
   "Widget.CustomBackground.DimLabel": "ব্যাকগ্রাউন্ড ঝাপসা",
   "Widget.CustomBackground.Clear": "ব্যাকগ্রাউন্ড মুছুন",
+  "Widget.CustomBackground.ColorLabel": "ব্যাকগ্রাউন্ড রঙ",
+  "Widget.CustomBackground.ColorCurrent": "কাস্টম ব্যাকগ্রাউন্ড রঙ ব্যবহৃত হচ্ছে",
   "Widget.StyleMenu.Label": "উইজেট স্টাইল",
   "Widget.Border.Menu": "বর্ডার",
   "Widget.Border.UseGlobal": "বিশ্বব্যাপী সেটিং ব্যবহার করুন",

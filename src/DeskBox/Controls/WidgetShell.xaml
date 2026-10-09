@@ -45,6 +45,12 @@
             BorderThickness="0"
             CornerRadius="0">
             <Grid IsHitTestVisible="False">
+                <!-- Solid per-widget color sits at the bottom of the custom
+                     stack (above the material, below any image); the scrim
+                     only tames photos, never the user's chosen color. -->
+                <Border
+                    x:Name="CustomBackgroundColorLayer"
+                    Visibility="Collapsed" />
                 <Grid x:Name="CustomBackgroundPanoramaHost" Visibility="Collapsed">
                     <Image
                         x:Name="CustomBackgroundPanoramaImage"

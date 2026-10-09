@@ -2466,6 +2466,8 @@
   "Widget.CustomBackground.FitContain": "ملاءمة",
   "Widget.CustomBackground.DimLabel": "تعتيم الخلفية",
   "Widget.CustomBackground.Clear": "مسح الخلفية",
+  "Widget.CustomBackground.ColorLabel": "لون الخلفية",
+  "Widget.CustomBackground.ColorCurrent": "يُستخدم لون خلفية مخصص",
   "Widget.StyleMenu.Label": "نمط التطبيق المصغر",
   "Widget.Border.Menu": "الحدود",
   "Widget.Border.UseGlobal": "استخدام الإعداد العام",
