@@ -29,6 +29,22 @@ internal static class ImportFailureMessagePolicy
             return ("Widget.Import.DestinationOutsideMappedRoot", []);
         }
 
+        // A transfer that completed nothing and whose cause is a source file
+        // held open by another program: say so instead of the generic
+        // import-failed wording. Partial results keep the count message —
+        // one representative HRESULT cannot honestly label the rest.
+        bool hasCompletedResults =
+            exception is FileService.IFileTransferWithCompletedResults
+                { CompletedResults.Count: > 0 };
+        if (!hasCompletedResults &&
+            FileService.ClassifyTransferError(exception) ==
+                FileService.FileTransferItemErrorKind.InUse)
+        {
+            return requestedCount == 1 && !string.IsNullOrEmpty(singleItemPath)
+                ? ("Widget.Error.FileInUseWithPath", new object[] { singleItemPath })
+                : ("Widget.Error.FileInUse", []);
+        }
+
         return null;
     }
 }

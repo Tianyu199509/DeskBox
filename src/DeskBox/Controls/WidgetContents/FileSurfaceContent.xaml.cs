@@ -4271,7 +4271,10 @@ public sealed partial class FileSurfaceContent :
                 $"[WidgetSurface] Native file drop failed id={WidgetId} " +
                 $"import={importId} elapsedMs={stopwatch.ElapsedMilliseconds}: {ex}");
             ShowFeedback(new(
-                DescribeImportFailure(ex, droppedFiles.Length),
+                DescribeImportFailure(
+                    ex,
+                    droppedFiles.Length,
+                    droppedFiles.Length == 1 ? droppedFiles[0].Path : null),
                 WidgetFeedbackSeverity.Error,
                 "native-file-drop-error"));
             return false;
