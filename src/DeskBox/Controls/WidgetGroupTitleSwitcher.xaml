@@ -171,15 +171,7 @@
                                 Spacing="5">
                                 <controls:WidgetTitleIcon
                                     x:Name="CurrentIcon"
-                                    IsHitTestVisible="False"
-                                    RenderTransformOrigin="0.5,0.5">
-                                    <controls:WidgetTitleIcon.RenderTransform>
-                                        <ScaleTransform
-                                            x:Name="CurrentIconScaleTransform"
-                                            ScaleX="1"
-                                            ScaleY="1" />
-                                    </controls:WidgetTitleIcon.RenderTransform>
-                                </controls:WidgetTitleIcon>
+                                    IsHitTestVisible="False" />
                                 <TextBlock
                                     x:Name="CurrentTitle"
                                     MaxWidth="132"

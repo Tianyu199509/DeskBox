@@ -6,7 +6,6 @@ public readonly record struct WidgetContentTransitionProfile(
     int SwapGapMilliseconds,
     int IncomingDurationMilliseconds,
     double TranslationDistance,
-    double MinimumScale,
     double IncomingStartOpacity,
     double OutgoingEndOpacity,
     bool UsesMotion,
@@ -29,7 +28,6 @@ public readonly record struct WidgetContentTransitionProfile(
                 0,
                 0,
                 0,
-                1,
                 0,
                 0,
                 UsesMotion: false,
@@ -49,9 +47,6 @@ public readonly record struct WidgetContentTransitionProfile(
             12,
             120,
             distance,
-            // A pure cross fade carries no depth cue, so the restrained
-            // scale dip is reserved for the motion effects.
-            effect == WidgetGroupSwitchAnimationEffect.CrossFade ? 1 : 0.975,
             0,
             0,
             UsesMotion: distance > 0,

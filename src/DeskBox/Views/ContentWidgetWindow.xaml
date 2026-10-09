@@ -34,7 +34,7 @@
             <SolidColorBrush x:Key="ControlStrongStrokeColorDefaultBrush" Color="#E8FFFFFF" />
             <SolidColorBrush x:Key="ControlStrongStrokeColorDisabledBrush" Color="#8FFFFFFF" />
             <SolidColorBrush x:Key="DividerStrokeColorDefaultBrush" Color="#66FFFFFF" />
-            <SolidColorBrush x:Key="WidgetDragHandleBrush" Color="#CCFFFFFF" />
+            <SolidColorBrush x:Key="WidgetDragHandleBrush" Color="#FFF5F5F5" />
             <SolidColorBrush x:Key="ButtonForeground" Color="#FFF5F5F5" />
             <SolidColorBrush x:Key="ButtonForegroundPointerOver" Color="#FFF5F5F5" />
             <SolidColorBrush x:Key="ButtonForegroundPressed" Color="#E8FFFFFF" />

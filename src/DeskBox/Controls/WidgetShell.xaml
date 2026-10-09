@@ -856,7 +856,6 @@
                 Opacity="0"
                 PointerCaptureLost="OverlayDragHandle_PointerCaptureLost"
                 PointerEntered="OverlayDragHandle_PointerEntered"
-                PointerExited="OverlayDragHandle_PointerExited"
                 PointerMoved="OverlayDragHandle_PointerMoved"
                 PointerPressed="OverlayDragHandle_PointerPressed"
                 PointerReleased="OverlayDragHandle_PointerReleased">

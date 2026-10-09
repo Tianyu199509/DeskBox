@@ -157,21 +157,24 @@ public abstract partial class WidgetWindowBase
 
     private void ApplyForegroundBrushes(WidgetForegroundPalette palette)
     {
+        // The drag handle renders over widget content without a plate behind
+        // it, so a translucent tone shows the content through the bar. It
+        // follows the full-opacity primary tone instead of the tertiary one.
         SetBrushColor(palette.Primary,
             "TextFillColorPrimaryBrush",
             "ControlStrongFillColorDefaultBrush",
             "ButtonForeground",
             "ButtonForegroundPointerOver",
             "SubtleButtonForeground",
-            "SubtleButtonForegroundPointerOver");
+            "SubtleButtonForegroundPointerOver",
+            "WidgetDragHandleBrush");
         SetBrushColor(palette.Secondary,
             "TextFillColorSecondaryBrush",
             "ControlStrongStrokeColorDefaultBrush",
             "ButtonForegroundPressed",
             "SubtleButtonForegroundPressed");
         SetBrushColor(palette.Tertiary,
-            "TextFillColorTertiaryBrush",
-            "WidgetDragHandleBrush");
+            "TextFillColorTertiaryBrush");
         SetBrushColor(palette.Disabled,
             "TextFillColorDisabledBrush",
             "ControlStrongFillColorDisabledBrush",

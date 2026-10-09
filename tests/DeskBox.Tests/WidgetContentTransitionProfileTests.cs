@@ -18,13 +18,12 @@ public sealed class WidgetContentTransitionProfileTests
         Assert.Equal(12, profile.SwapGapMilliseconds);
         Assert.Equal(120, profile.IncomingDurationMilliseconds);
         Assert.Equal(6, profile.TranslationDistance);
-        Assert.Equal(0.975, profile.MinimumScale);
         Assert.Equal(0, profile.IncomingStartOpacity);
         Assert.Equal(0, profile.OutgoingEndOpacity);
     }
 
     [Fact]
-    public void DirectSelection_UsesMutuallyExclusiveScaleWithoutTranslation()
+    public void DirectSelection_FadesWithoutTranslation()
     {
         WidgetContentTransitionProfile profile =
             WidgetContentTransitionProfile.Create(
@@ -34,7 +33,6 @@ public sealed class WidgetContentTransitionProfileTests
         Assert.False(profile.UsesMotion);
         Assert.Equal(210, profile.DurationMilliseconds);
         Assert.Equal(0, profile.TranslationDistance);
-        Assert.Equal(0.975, profile.MinimumScale);
         Assert.Equal(0, profile.IncomingStartOpacity);
         Assert.Equal(0, profile.OutgoingEndOpacity);
     }
@@ -71,7 +69,6 @@ public sealed class WidgetContentTransitionProfileTests
         Assert.Equal(0, profile.SwapGapMilliseconds);
         Assert.Equal(0, profile.IncomingDurationMilliseconds);
         Assert.Equal(0, profile.TranslationDistance);
-        Assert.Equal(1, profile.MinimumScale);
     }
 
     [Fact]
@@ -92,11 +89,10 @@ public sealed class WidgetContentTransitionProfileTests
         Assert.Equal(78, profile.OutgoingDurationMilliseconds);
         Assert.Equal(12, profile.SwapGapMilliseconds);
         Assert.Equal(120, profile.IncomingDurationMilliseconds);
-        Assert.Equal(0.975, profile.MinimumScale);
     }
 
     [Fact]
-    public void HorizontalSwitch_WithoutDirectionalOrigin_KeepsTheScaleAndFadeOnly()
+    public void HorizontalSwitch_WithoutDirectionalOrigin_KeepsTheFadeOnly()
     {
         WidgetContentTransitionProfile profile =
             WidgetContentTransitionProfile.Create(
@@ -106,11 +102,10 @@ public sealed class WidgetContentTransitionProfileTests
 
         Assert.False(profile.UsesMotion);
         Assert.Equal(0, profile.TranslationDistance);
-        Assert.Equal(0.975, profile.MinimumScale);
     }
 
     [Fact]
-    public void CrossFade_KeepsTheTimelineFlatWithoutScaleOrMotion()
+    public void CrossFade_KeepsTheTimelineFlatWithoutMotion()
     {
         WidgetContentTransitionProfile profile =
             WidgetContentTransitionProfile.Create(
@@ -120,7 +115,6 @@ public sealed class WidgetContentTransitionProfileTests
 
         Assert.False(profile.UsesMotion);
         Assert.Equal(0, profile.TranslationDistance);
-        Assert.Equal(1, profile.MinimumScale);
         Assert.Equal(210, profile.DurationMilliseconds);
     }
 
@@ -136,6 +130,5 @@ public sealed class WidgetContentTransitionProfileTests
         Assert.False(profile.UsesMotion);
         Assert.Equal(0, profile.DurationMilliseconds);
         Assert.Equal(0, profile.TranslationDistance);
-        Assert.Equal(1, profile.MinimumScale);
     }
 }

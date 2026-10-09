@@ -1413,10 +1413,15 @@ public sealed partial class WidgetManager
         using var loadingDelayCancellation =
             CancellationTokenSource.CreateLinkedTokenSource(
                 request.CancellationToken);
-        Task loadingDelay = ShowGroupMemberLoadingAfterDelayAsync(
-            persistentWindow,
-            targetConfig.Id,
-            loadingDelayCancellation.Token);
+        // A drag-hover switch already announced itself through the dwell, and
+        // the ring lives inside the tab header: widening a frozen strip
+        // mid-drag would move the very targets the user is aiming at.
+        Task loadingDelay = request.Origin == WidgetGroupSwitchOrigin.DragHover
+            ? Task.CompletedTask
+            : ShowGroupMemberLoadingAfterDelayAsync(
+                persistentWindow,
+                targetConfig.Id,
+                loadingDelayCancellation.Token);
         ContentWidgetWindow.ContentWidgetSwitchPreparation? preparedContent;
         try
         {

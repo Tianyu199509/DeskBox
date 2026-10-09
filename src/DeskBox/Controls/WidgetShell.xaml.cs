@@ -814,8 +814,12 @@ public sealed partial class WidgetShell : UserControl
         }
 
         bool shellWasActive = _isPointerOverShell;
+        if (_isPointerOverDragHandle)
+        {
+            App.LogVerbose("[DragCue] Cleared by transient-state reset (host visibility).");
+        }
         _isPointerOverShell = false;
-        _isPointerOverDragHandle = false;
+        ForceClearDragCue();
         _isCompactKeyboardFocused = false;
         ResetCompactInteractionRegions();
 
@@ -1004,6 +1008,11 @@ public sealed partial class WidgetShell : UserControl
     internal void CancelGroupTabDragHover()
     {
         GroupTitleSwitcher.CancelDragHoverSwitch();
+    }
+
+    internal void SetGroupTabFileDragActive(bool active)
+    {
+        GroupTitleSwitcher.SetFileDragStripFreeze(active);
     }
 
     public void SetGroupDropPreview(
@@ -1459,11 +1468,7 @@ public sealed partial class WidgetShell : UserControl
         string motionProperty = horizontalMotion
             ? nameof(CompositeTransform.TranslateX)
             : nameof(CompositeTransform.TranslateY);
-        var incomingTransform = new CompositeTransform
-        {
-            ScaleX = profile.MinimumScale,
-            ScaleY = profile.MinimumScale
-        };
+        var incomingTransform = new CompositeTransform();
         if (profile.UsesMotion)
         {
             if (horizontalMotion)
@@ -1476,10 +1481,6 @@ public sealed partial class WidgetShell : UserControl
             }
         }
         var outgoingTransform = new CompositeTransform();
-        ShellContentPresenter.RenderTransformOrigin =
-            new Windows.Foundation.Point(0.5, 0.5);
-        OutgoingContentPresenter.RenderTransformOrigin =
-            new Windows.Foundation.Point(0.5, 0.5);
         ShellContentPresenter.RenderTransform = incomingTransform;
         OutgoingContentPresenter.RenderTransform = outgoingTransform;
 
@@ -1507,34 +1508,6 @@ public sealed partial class WidgetShell : UserControl
                 incomingDurationMs,
                 incomingBeginTimeMs);
         }
-        AddTransitionAnimation(
-            storyboard,
-            outgoingTransform,
-            nameof(CompositeTransform.ScaleX),
-            profile.MinimumScale,
-            outgoingDurationMs,
-            easingMode: EasingMode.EaseIn);
-        AddTransitionAnimation(
-            storyboard,
-            outgoingTransform,
-            nameof(CompositeTransform.ScaleY),
-            profile.MinimumScale,
-            outgoingDurationMs,
-            easingMode: EasingMode.EaseIn);
-        AddTransitionAnimation(
-            storyboard,
-            incomingTransform,
-            nameof(CompositeTransform.ScaleX),
-            1,
-            incomingDurationMs,
-            incomingBeginTimeMs);
-        AddTransitionAnimation(
-            storyboard,
-            incomingTransform,
-            nameof(CompositeTransform.ScaleY),
-            1,
-            incomingDurationMs,
-            incomingBeginTimeMs);
         AddTransitionAnimation(
             storyboard,
             OutgoingContentPresenter,
@@ -1636,10 +1609,6 @@ public sealed partial class WidgetShell : UserControl
         OutgoingContentPresenter.Opacity = incomingVisible ? 0 : 1;
         ShellContentPresenter.RenderTransform = null;
         OutgoingContentPresenter.RenderTransform = null;
-        ShellContentPresenter.RenderTransformOrigin =
-            new Windows.Foundation.Point(0, 0);
-        OutgoingContentPresenter.RenderTransformOrigin =
-            new Windows.Foundation.Point(0, 0);
     }
 
     private void ContentTransitionViewport_SizeChanged(
@@ -1844,7 +1813,11 @@ public sealed partial class WidgetShell : UserControl
         UpdateCompactInteractionRegionHighlights();
         if (collapsed)
         {
-            _isPointerOverDragHandle = false;
+            if (_isPointerOverDragHandle)
+            {
+                App.LogVerbose("[DragCue] Cleared by collapse transition.");
+            }
+            ForceClearDragCue();
         }
         _isMinimalCompactStyle = string.Equals(
             contentMode,
@@ -4274,9 +4247,55 @@ public sealed partial class WidgetShell : UserControl
         ApplyActionButtonVisibility();
     }
 
+    /// <summary>
+    /// Raised when the pointer enters the drag bar. The hosting window
+    /// verifies the claim against the physical cursor before showing the
+    /// arrow (spurious WM_MOUSEMOVE arrive while the widget morphs its
+    /// bounds, so event coordinates are not trusted in either direction) and
+    /// keeps it armed until the cursor physically leaves the bar's zone.
+    /// </summary>
+    public event EventHandler? OverlayDragCueArmRequested;
+
+    public bool IsOverlayDragCueArmed => _isPointerOverDragHandle;
+
+    /// <summary>
+    /// The window's physical-cursor verdict. This is the only path (short of
+    /// collapse/host-hide clears) that arms or restores the cue.
+    /// </summary>
+    public void SetOverlayDragCueActive(bool active)
+    {
+        if (active)
+        {
+            if (!_isPointerOverDragHandle)
+            {
+                _isPointerOverDragHandle = true;
+                App.LogVerbose("[DragCue] Armed.");
+                UpdateOverlayDragHandleVisual();
+            }
+
+            return;
+        }
+
+        if (_isPointerOverDragHandle)
+        {
+            _isPointerOverDragHandle = false;
+            App.LogVerbose("[DragCue] Restored bar.");
+            UpdateOverlayDragHandleVisual();
+        }
+    }
+
+    /// <summary>
+    /// Immediate, unconditional clear used by state transitions (collapse,
+    /// host hide) where the cue must not linger at all.
+    /// </summary>
+    private void ForceClearDragCue() => SetOverlayDragCueActive(false);
+
     private void ShellRoot_PointerExited(object sender, PointerRoutedEventArgs e)
     {
         _isPointerOverShell = false;
+        // Deliberately no drag-cue handling here: routed exits are frequently
+        // synthetic in this app (layer reasserts, bounds animations) and must
+        // not restore the cue — only the physical-cursor poll may.
         HideCompactHint();
         CompactPointerExited?.Invoke(this, EventArgs.Empty);
         if (_isCollapsed)
@@ -5582,14 +5601,11 @@ public sealed partial class WidgetShell : UserControl
 
     private void OverlayDragHandle_PointerEntered(object sender, PointerRoutedEventArgs e)
     {
-        _isPointerOverDragHandle = true;
-        UpdateOverlayDragHandleVisual();
-    }
-
-    private void OverlayDragHandle_PointerExited(object sender, PointerRoutedEventArgs e)
-    {
-        _isPointerOverDragHandle = false;
-        UpdateOverlayDragHandleVisual();
+        // A boundary crossing is the only trigger. The window verifies the
+        // physical cursor before the arrow shows and restores the flat bar
+        // only after the cursor physically leaves; no exit tracking exists on
+        // the shell side.
+        OverlayDragCueArmRequested?.Invoke(this, EventArgs.Empty);
     }
 
     private void UpdateOverlayDragHandleVisual(bool animate = true)
@@ -5627,7 +5643,21 @@ public sealed partial class WidgetShell : UserControl
             storyboard,
             OverlayDragGripRightRotation,
             rightAngle);
-        _overlayHandleVisualStoryboard.Begin(storyboard, showCollapseCue);
+        _overlayHandleVisualStoryboard.Begin(
+            storyboard,
+            showCollapseCue,
+            onCompleted: () =>
+            {
+                // StoryboardSlot's completion stops the storyboard and
+                // detaches its children; on WinUI that releases the held
+                // values back to their base (flat bar). The clocks are gone
+                // by the time this callback runs, so re-applying the resting
+                // values directly makes the morph persist until the cue
+                // state actually changes.
+                OverlayDragGrip.Opacity = gripOpacity;
+                OverlayDragGripLeftRotation.Angle = leftAngle;
+                OverlayDragGripRightRotation.Angle = rightAngle;
+            });
     }
 
     private static void AddHandleAngleAnimation(

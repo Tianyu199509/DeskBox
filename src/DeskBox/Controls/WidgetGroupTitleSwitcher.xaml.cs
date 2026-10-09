@@ -136,6 +136,7 @@ public sealed partial class WidgetGroupTitleSwitcher : UserControl
             CancelTabInteraction();
             CancelAllHoverSwitches();
             CancelDragHoverSwitch();
+            ExitFileDragStripFreeze();
         };
         Visibility = Visibility.Collapsed;
     }
@@ -597,6 +598,14 @@ public sealed partial class WidgetGroupTitleSwitcher : UserControl
     private async void BeginTabHoverSwitch(string memberId)
     {
         if (_draggingMemberId is not null || IsTabInteractionBusy)
+        {
+            return;
+        }
+
+        // PointerEntered can leak through on some machines while an OLE file
+        // drag is running; during a file drag the dwell switch owns member
+        // switching, so the 80ms hover path must stay out of its way.
+        if (_isFileDragStripFreeze)
         {
             return;
         }

@@ -792,25 +792,6 @@ public sealed partial class WidgetGroupTitleSwitcher
         storyboard.Children.Add(outgoingFade);
         storyboard.Children.Add(incomingFade);
 
-        // The icon pop belongs to the motion effects; a pure cross fade keeps
-        // the swap flat, matching the content presenter.
-        if (effect is WidgetGroupSwitchAnimationEffect.Vertical
-            or WidgetGroupSwitchAnimationEffect.Horizontal)
-        {
-            var iconScaleX = CreateIncomingIconScaleAnimation();
-            var iconScaleY = CreateIncomingIconScaleAnimation();
-            Storyboard.SetTarget(iconScaleX, CurrentIconScaleTransform);
-            Storyboard.SetTargetProperty(
-                iconScaleX,
-                nameof(ScaleTransform.ScaleX));
-            Storyboard.SetTarget(iconScaleY, CurrentIconScaleTransform);
-            Storyboard.SetTargetProperty(
-                iconScaleY,
-                nameof(ScaleTransform.ScaleY));
-            storyboard.Children.Add(iconScaleX);
-            storyboard.Children.Add(iconScaleY);
-        }
-
         var outgoingRailFade = new DoubleAnimation
         {
             From = 1,
@@ -934,39 +915,6 @@ public sealed partial class WidgetGroupTitleSwitcher
         storyboard.Completed += IdentityStoryboard_Completed;
         _identityStoryboard = storyboard;
         storyboard.Begin();
-
-        DoubleAnimationUsingKeyFrames CreateIncomingIconScaleAnimation()
-        {
-            var animation = new DoubleAnimationUsingKeyFrames();
-            animation.KeyFrames.Add(new DiscreteDoubleKeyFrame
-            {
-                KeyTime = KeyTime.FromTimeSpan(
-                    TimeSpan.FromMilliseconds(incomingBeginTimeMs)),
-                Value = 0.9
-            });
-            animation.KeyFrames.Add(new EasingDoubleKeyFrame
-            {
-                KeyTime = KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(
-                    incomingBeginTimeMs + (incomingDurationMs * 0.62))),
-                Value = 1.055,
-                EasingFunction = new CubicEase
-                {
-                    EasingMode = EasingMode.EaseOut
-                }
-            });
-            animation.KeyFrames.Add(new EasingDoubleKeyFrame
-            {
-                KeyTime = KeyTime.FromTimeSpan(TimeSpan.FromMilliseconds(
-                    incomingBeginTimeMs + incomingDurationMs)),
-                Value = 1,
-                EasingFunction = new BackEase
-                {
-                    Amplitude = 0.18,
-                    EasingMode = EasingMode.EaseOut
-                }
-            });
-            return animation;
-        }
     }
 
     private void UpdateInteractionChrome(bool animate = true)
@@ -1047,8 +995,6 @@ public sealed partial class WidgetGroupTitleSwitcher
         CurrentPositionRailLayer.Opacity = 1;
         OutgoingPositionRailLayer.RenderTransform = null;
         CurrentPositionRailLayer.RenderTransform = null;
-        CurrentIconScaleTransform.ScaleX = 1;
-        CurrentIconScaleTransform.ScaleY = 1;
         IdentityViewport.Width = _pendingIdentityWidth;
         SetIdentity(
             OutgoingIcon,
@@ -1076,8 +1022,6 @@ public sealed partial class WidgetGroupTitleSwitcher
         CurrentPositionRailLayer.Opacity = 1;
         OutgoingPositionRailLayer.RenderTransform = null;
         CurrentPositionRailLayer.RenderTransform = null;
-        CurrentIconScaleTransform.ScaleX = 1;
-        CurrentIconScaleTransform.ScaleY = 1;
         SetPositionRail(OutgoingPositionRailLayer, null);
     }
 
