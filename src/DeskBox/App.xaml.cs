@@ -238,6 +238,13 @@ public partial class App : Application
 
     public App()
     {
+        // Capture the XAML launcher thread before anything else: UI-thread
+        // identity is what lets UiDispatch distinguish "App constructor code
+        // running on the real UI thread" from foreign threads during the
+        // headless window before dispatcher-init. Test hosts never construct
+        // App, so they never register an origin thread.
+        DeskBox.Platform.UiDispatch.MarkUiOriginThread();
+
         // An unelevated relaunch (created by the elevated instance while it
         // still held the single-instance mutex) waits here for its parent to
         // exit before the mutex is taken, so the takeover cannot be mistaken
@@ -1044,6 +1051,7 @@ public partial class App : Application
             RunCriticalStartupStep("dispatcher-init", () =>
             {
                 UiDispatcherQueue = Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread();
+                DeskBox.Platform.UiDispatch.MarkReady(UiDispatcherQueue);
                 WidgetSegmentedLayoutHelper.Initialize(UiDispatcherQueue);
             });
 
@@ -4958,6 +4966,9 @@ public partial class App : Application
     private async Task<bool> ShutdownCoreAsync()
     {
         Interlocked.Exchange(ref s_shutdownRequested, 1);
+        // The canonical shutdown moment for UI dispatch: drop pending
+        // deferrals and refuse further dispatch so nothing replays post-exit.
+        DeskBox.Platform.UiDispatch.MarkShutdown();
         TimeSpan shutdownGrace = TimeSpan.FromSeconds(15);
         return await _shutdownSequence.RunAsync(
             ShutdownStep.Sync("backup-subscriptions", () =>

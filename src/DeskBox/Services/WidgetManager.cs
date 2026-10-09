@@ -376,6 +376,14 @@ public sealed partial class WidgetManager
     private static bool HasUiThreadAccess()
     {
         var dispatcherQueue = App.UiDispatcherQueue;
+        if (dispatcherQueue is null)
+        {
+            // Census instrumentation for the UiDispatch migration (stage 1):
+            // null used to mean "current thread is the UI thread". Removed
+            // together with these helpers in stage 2.
+            DeskBox.Platform.UiDispatch.NoteLegacyHeadlessInline();
+        }
+
         return dispatcherQueue is null || dispatcherQueue.HasThreadAccess;
     }
 
@@ -384,6 +392,11 @@ public sealed partial class WidgetManager
         var dispatcherQueue = App.UiDispatcherQueue;
         if (dispatcherQueue is null || dispatcherQueue.HasThreadAccess)
         {
+            if (dispatcherQueue is null)
+            {
+                DeskBox.Platform.UiDispatch.NoteLegacyHeadlessInline();
+            }
+
             return action();
         }
 
