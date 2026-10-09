@@ -744,9 +744,9 @@ public sealed partial class WidgetManager
             return false;
         }
 
-        if (App.UiDispatcherQueue is { } dispatcherQueue && !dispatcherQueue.HasThreadAccess)
+        if (!UiDispatch.HasAccess)
         {
-            dispatcherQueue.TryEnqueue(() => RequestRestoreRaisedWidgetsToDesktopLayer(reason));
+            UiDispatch.RunOrDefer(() => RequestRestoreRaisedWidgetsToDesktopLayer(reason));
             return true;
         }
 
@@ -757,7 +757,9 @@ public sealed partial class WidgetManager
     private void QueueRequestedLayerRestoreCheck(string reason, TimeSpan delay)
     {
         long generation = _trayRaiseBatchGeneration;
-        App.UiDispatcherQueue.TryEnqueue(async () =>
+        // RunOrDefer instead of a bare TryEnqueue on App.UiDispatcherQueue:
+        // the bare call would NullReference before dispatcher-init.
+        UiDispatch.RunOrDefer(async () =>
         {
             await Task.Delay(delay);
             TryRestoreRaisedWidgetsAfterInteraction(reason, generation);

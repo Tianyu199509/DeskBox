@@ -39,10 +39,9 @@ public sealed class QuickCaptureClipboardService : IQuickCaptureClipboardSession
     public void Refresh()
     {
         if (_stopping || _disposed) return;
-        if (App.UiDispatcherQueue is { } dispatcherQueue &&
-            !dispatcherQueue.HasThreadAccess)
+        if (!DeskBox.Platform.UiDispatch.HasAccess)
         {
-            dispatcherQueue.TryEnqueue(Refresh);
+            DeskBox.Platform.UiDispatch.RunOrDefer(Refresh);
             return;
         }
 

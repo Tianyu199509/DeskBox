@@ -1550,14 +1550,7 @@ public partial class App : Application
                 SettingsService.SaveDebounced();
             }
 
-            if (UiDispatcherQueue is { } dispatcher && !dispatcher.HasThreadAccess)
-            {
-                dispatcher.TryEnqueue(Commit);
-            }
-            else
-            {
-                Commit();
-            }
+            DeskBox.Platform.UiDispatch.RunOrDefer(Commit);
 
             Log(
                 $"[AutoStart] One-time default applied: initial={initialState} effective={effective} mirror={enabled}");

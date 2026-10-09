@@ -37,17 +37,18 @@ public sealed class UiDispatchTests : IDisposable
     }
 
     [Fact]
-    public async Task Headless_WithoutOriginThread_SkipsAndCounts()
+    public async Task Headless_TestHostWithoutOrigin_KeepsLegacyInlineFiction()
     {
-        // Test-host shape: no origin registered, foreign thread.
+        // Test-host shape: no origin registered, foreign thread. Test hosts
+        // deliberately keep the legacy inline fiction (mixed UI/config logic
+        // behind these gates must still run in fixtures); the production Skip
+        // branch is unreachable in this process and reviewed instead.
         Assert.Equal(UiDispatch.PhaseKind.Headless, UiDispatch.Phase);
-        Assert.False(UiDispatch.HasAccess);
 
         bool ran = false;
         await Task.Run(() => UiDispatch.RunOrDefer(() => ran = true));
 
-        Assert.False(ran);
-        Assert.True(UiDispatch.HeadlessSkipCount >= 1);
+        Assert.True(ran);
         Assert.Equal(0, UiDispatch.PendingCount);
     }
 

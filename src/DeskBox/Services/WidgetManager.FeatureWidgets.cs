@@ -3,6 +3,7 @@
 using DeskBox.Models;
 using DeskBox.Helpers;
 using DeskBox.Controls.WidgetContents;
+using DeskBox.Platform;
 using DeskBox.ViewModels;
 using DeskBox.Views;
 using Microsoft.UI.Dispatching;
@@ -43,9 +44,9 @@ public sealed partial class WidgetManager
 
     private void ApplyFeatureWidgetEnabledState(WidgetKind kind, bool enabled)
     {
-        if (App.UiDispatcherQueue is { } dispatcherQueue && !dispatcherQueue.HasThreadAccess)
+        if (!UiDispatch.HasAccess)
         {
-            dispatcherQueue.TryEnqueue(() => ApplyFeatureWidgetEnabledState(kind, enabled));
+            UiDispatch.RunOrDefer(() => ApplyFeatureWidgetEnabledState(kind, enabled));
             return;
         }
 
@@ -979,6 +980,16 @@ public sealed partial class WidgetManager
 
     internal async Task<IDesktopWidgetWindow?> CreateOrShowFeatureWidgetAsync(WidgetKind kind)
     {
+        if (!UiDispatch.HasXamlApp)
+        {
+            // Test hosts: no XAML Application exists, so window creation
+            // cannot succeed. Skip instead of attempting it on the inline
+            // fiction thread (which produced swallowed RPC_E_WRONG_THREAD
+            // noise in the user log).
+            App.LogVerbose($"[WidgetManager] CreateOrShowFeatureWidget skipped (no XAML app): kind={kind}");
+            return null;
+        }
+
         if (!HasUiThreadAccess())
         {
             return await RunOnUiThreadAsync(() => CreateOrShowFeatureWidgetAsync(kind));

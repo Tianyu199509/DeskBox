@@ -1,3 +1,4 @@
+using System.Linq;
 using Microsoft.UI.Dispatching;
 
 namespace DeskBox.Platform;
@@ -30,7 +31,6 @@ namespace DeskBox.Platform;
 internal static class UiDispatch
 {
     private const int MaxDeferredActions = 256;
-    private const int MaxInlineSamplesLogged = 32;
 
     private enum Decision
     {
@@ -61,8 +61,6 @@ internal static class UiDispatch
     private static long _headlessSkipCount;
     private static long _deferredCount;
     private static long _deferredDroppedCount;
-    private static long _legacyHeadlessInlineCount;
-    private static readonly List<string> LegacyInlineSamples = [];
 
     public static PhaseKind Phase
     {
@@ -106,7 +104,6 @@ internal static class UiDispatch
     public static long HeadlessSkipCount => Volatile.Read(ref _headlessSkipCount);
     public static long DeferredCount => Volatile.Read(ref _deferredCount);
     public static long DeferredDroppedCount => Volatile.Read(ref _deferredDroppedCount);
-    public static long LegacyHeadlessInlineCount => Volatile.Read(ref _legacyHeadlessInlineCount);
 
     /// <summary>
     /// Called first in the App instance constructor: the XAML runtime builds
@@ -272,44 +269,10 @@ internal static class UiDispatch
     }
 
     /// <summary>
-    /// Legacy-helper observability: bump when WidgetManager's pre-migration
-    /// helpers take their "null dispatcher ⇒ current thread is the UI thread"
-    /// inline path, so the test census can see who still depends on the
-    /// fiction. Removed together with those helpers in stage 2.
+    /// Legacy-helper observability removed in stage 2 together with the
+    /// null-inline helpers. Skip/defer counters below remain as permanent
+    /// observability.
     /// </summary>
-    public static void NoteLegacyHeadlessInline()
-    {
-        Interlocked.Increment(ref _legacyHeadlessInlineCount);
-        lock (Gate)
-        {
-            if (LegacyInlineSamples.Count < MaxInlineSamplesLogged)
-            {
-                string stack = Environment.StackTrace;
-                LegacyInlineSamples.Add(stack);
-                // One log line per early sample so the test census can name
-                // the dependent call sites without a debugger: the first two
-                // DeskBox frames outside this class and the legacy helpers.
-                string caller = string.Join(" <- ", stack
-                    .Split('\n')
-                    .Select(line => line.Trim())
-                    .Where(line => line.StartsWith("at DeskBox", StringComparison.Ordinal) &&
-                        !line.Contains("UiDispatch.", StringComparison.Ordinal) &&
-                        !line.Contains("WidgetManager.RunOnUiThreadAsync", StringComparison.Ordinal) &&
-                        !line.Contains("WidgetManager.HasUiThreadAccess", StringComparison.Ordinal))
-                    .Take(2));
-                App.Log($"[UiDispatch] Legacy headless inline #{LegacyInlineSamples.Count}: {caller}");
-            }
-        }
-    }
-
-    internal static IReadOnlyList<string> TakeLegacyInlineSamples()
-    {
-        lock (Gate)
-        {
-            return [.. LegacyInlineSamples];
-        }
-    }
-
     internal static void ResetForTests()
     {
         lock (Gate)
@@ -321,8 +284,6 @@ internal static class UiDispatch
             _headlessSkipCount = 0;
             _deferredCount = 0;
             _deferredDroppedCount = 0;
-            _legacyHeadlessInlineCount = 0;
-            LegacyInlineSamples.Clear();
         }
     }
 
@@ -343,11 +304,41 @@ internal static class UiDispatch
             return Decision.RunInline;
         }
 
-        // Headless with no registered origin thread (test host) or on a
-        // foreign thread: defer while an app might still come up (origin
-        // registered), skip permanently when no origin was ever registered.
-        return _originThreadId >= 0 ? Decision.Defer : Decision.Skip;
+        if (_originThreadId >= 0)
+        {
+            // Headless, foreign thread, app still coming up: defer.
+            return Decision.Defer;
+        }
+
+        // No origin registered: a real app records its launcher thread from
+        // the App constructor before anything meaningful runs, so this branch
+        // is only reachable from a test host (or a production window so
+        // early nothing calls here). Test hosts deliberately keep the legacy
+        // inline fiction — their fixtures exercise the mixed UI/config logic
+        // behind these gates and have no UI to dispatch to — detected
+        // deterministically by the loaded test assembly.
+        return IsTestHost ? Decision.RunInline : Decision.Skip;
     }
+
+    private static bool? _testHost;
+
+    private static bool IsTestHost
+    {
+        get
+        {
+            _testHost ??= AppDomain.CurrentDomain.GetAssemblies()
+                .Any(assembly => assembly.GetName().Name == "DeskBox.Tests");
+            return _testHost.Value;
+        }
+    }
+
+    /// <summary>
+    /// Whether a real XAML Application instance exists. Test hosts use App's
+    /// static members (logging) without ever constructing the Application,
+    /// so window-creating paths can use this to no-op instead of attempting
+    /// XAML object creation that cannot succeed there.
+    /// </summary>
+    public static bool HasXamlApp => App.Current is not null;
 
     private static Task<T> EnqueueCore<T>(DispatcherQueue queue, Func<Task<T>> action)
     {

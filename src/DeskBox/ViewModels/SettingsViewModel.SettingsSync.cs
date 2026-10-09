@@ -51,9 +51,9 @@ private void OnLanguageChanged()
 
     private void OnSettingsChanged()
     {
-        if (App.UiDispatcherQueue is { } dispatcherQueue && !dispatcherQueue.HasThreadAccess)
+        if (!DeskBox.Platform.UiDispatch.HasAccess)
         {
-            dispatcherQueue.TryEnqueue(OnSettingsChanged);
+            DeskBox.Platform.UiDispatch.RunOrDefer(ApplySettingsSnapshot);
             return;
         }
 

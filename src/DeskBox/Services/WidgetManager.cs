@@ -373,60 +373,19 @@ public sealed partial class WidgetManager
     public event Action<string>? WidgetRemoved;
     public event Action<bool>? TrayLayerStateChanged;
 
-    private static bool HasUiThreadAccess()
-    {
-        var dispatcherQueue = App.UiDispatcherQueue;
-        if (dispatcherQueue is null)
-        {
-            // Census instrumentation for the UiDispatch migration (stage 1):
-            // null used to mean "current thread is the UI thread". Removed
-            // together with these helpers in stage 2.
-            DeskBox.Platform.UiDispatch.NoteLegacyHeadlessInline();
-        }
+    // Stage-2 forwarders onto the unified dispatch portal. Deleted together
+    // with the last direct caller (WidgetManager.Groups.cs) once that
+    // in-flight batch lands. Behavior differs from the pre-stage helpers
+    // only while headless: an App-constructor call on the origin thread
+    // still runs inline, foreign threads defer or skip instead of
+    // pretending to be the UI thread.
+    private static bool HasUiThreadAccess() => UiDispatch.HasAccess;
 
-        return dispatcherQueue is null || dispatcherQueue.HasThreadAccess;
-    }
+    private static Task<T> RunOnUiThreadAsync<T>(Func<Task<T>> action) =>
+        UiDispatch.RunAsync(action);
 
-    private static Task<T> RunOnUiThreadAsync<T>(Func<Task<T>> action)
-    {
-        var dispatcherQueue = App.UiDispatcherQueue;
-        if (dispatcherQueue is null || dispatcherQueue.HasThreadAccess)
-        {
-            if (dispatcherQueue is null)
-            {
-                DeskBox.Platform.UiDispatch.NoteLegacyHeadlessInline();
-            }
-
-            return action();
-        }
-
-        var completion = new TaskCompletionSource<T>(TaskCreationOptions.RunContinuationsAsynchronously);
-        if (!dispatcherQueue.TryEnqueue(async () =>
-        {
-            try
-            {
-                completion.SetResult(await action());
-            }
-            catch (Exception ex)
-            {
-                completion.SetException(ex);
-            }
-        }))
-        {
-            completion.SetException(new InvalidOperationException("Unable to dispatch widget lifecycle operation to the UI thread."));
-        }
-
-        return completion.Task;
-    }
-
-    private static Task RunOnUiThreadAsync(Func<Task> action)
-    {
-        return RunOnUiThreadAsync(async () =>
-        {
-            await action();
-            return true;
-        });
-    }
+    private static Task RunOnUiThreadAsync(Func<Task> action) =>
+        UiDispatch.RunAsync(action);
 
     public bool ShouldHideWidgetsForTrayToggle()
     {
