@@ -47,6 +47,7 @@
 - Quick Capture picks up clipboard images from WeChat, QQ, and browsers that publish a bitmap the standard channel cannot decode, by falling back to the raw PNG / CF_DIB payloads (feedback 335).
 - Quick Capture widgets set to follow the global text size now refresh the moment the global size changes, instead of keeping the previous size until later.
 - Renaming a managed widget folder retries briefly against transient handles (antivirus, indexer) and reports a clear message when a long-lived lock — such as an Explorer window inside the folder — persists (feedback 240).
+- Dragging files across volumes ends with the truth: when the copy has fully completed but one source file is still held open by another program, the import is no longer judged a total failure — it now completes with a warning that the still-occupied sources can be deleted by hand once the program closes, and sources that still physically exist keep their tiles in the widget they came from. The old failure card read as if nothing had been imported and invited duplicate retries (feedback 236/316).
 - Picking a managed-storage root on the desktop (or a desktop subfolder) is rejected up front with a dedicated message: the desktop organizer would otherwise re-ingest its own managed folders on every run.
 - Native AOT builds: the cloud-backup page's password box resolves correctly again — "Test connection" and "Save" no longer throw "Specified cast is not valid" (incident P1-1).
 - The music widget no longer throws on stale session reads when a player exits or churns mid-refresh — the recurring timeline exception noise in diagnostics is gone.
@@ -116,6 +117,7 @@
 - 随记现在能接收微信、QQ 和浏览器剪贴板里标准通道解码不了的图片——通过回退读取原始 PNG / CF_DIB 数据实现（反馈 335）。
 - 跟随全局文字大小的随记格子，现在会在全局字号变化时立即刷新，不再停留在旧字号。
 - 重命名受管格子文件夹会对瞬时占用（杀毒扫描、索引器）短暂重试；遇到长驻占用（如 Explorer 窗口停在文件夹内）则给出明确提示而非原始系统报错（反馈 240）。
+- 跨盘拖入文件以真实结果收尾：复制已全部完成、只是个别源文件仍被其他程序占用时，导入不再被判为整体失败——现在按「已完成」收尾并警告说明：仍被占用的源文件待相关程序关闭后手动删除即可；实际仍存在于原位置的文件也会继续留在来源格子中，不会两头落空。旧的失败卡片读起来像什么都没导入，曾诱导用户重复拖入（反馈 236/316）。
 - 选择桌面（或其子文件夹）作为收纳根目录会在前端直接被拒绝并给出专门说明：桌面整理功能会把受管文件夹重新吞回自身。
 - Native AOT 版：云备份页密码框恢复正确的类型化解析——"测试连接"和"保存密码"不再抛出 "Specified cast is not valid"（事故 P1-1）。
 - 音乐格子在播放器退出或会话切换瞬间不再因陈旧的会话读取抛异常——诊断日志里反复出现的时间轴异常噪音已消除。
