@@ -39,7 +39,9 @@ public sealed class SettingsSliceOwnershipContractTests
     [Fact]
     public void EveryFacadeProperty_MapsToExactlyOneSliceProperty()
     {
-        Assert.Equal(234, FacadeProperties.Length);
+        // 237 = batch-51 level (236) plus widgetGroupSwitchAnimationStyle
+        // (group member-switch transition style).
+        Assert.Equal(237, FacadeProperties.Length);
 
         foreach (PropertyInfo facade in FacadeProperties)
         {
@@ -270,11 +272,11 @@ public sealed class SettingsSliceOwnershipContractTests
         ["src/DeskBox/Services/SearchEngineService.cs"] = 7,
         ["src/DeskBox/Services/SearchHotkeyService.cs"] = 12,
         ["src/DeskBox/Services/SearchResultActionService.cs"] = 2,
-        ["src/DeskBox/Services/SettingsMigrationService.cs"] = 35,
+        ["src/DeskBox/Services/SettingsMigrationService.cs"] = 55,
         ["src/DeskBox/Services/SettingsSearchCatalog.cs"] = 23,
-        ["src/DeskBox/Services/SettingsService.cs"] = 609,
+        ["src/DeskBox/Services/SettingsService.cs"] = 613,
         ["src/DeskBox/Services/ThemeService.cs"] = 11,
-        ["src/DeskBox/Views/SettingsSections/DisplaySettingsSection.xaml.cs"] = 9,
+        ["src/DeskBox/Views/SettingsSections/DisplaySettingsSection.xaml.cs"] = 14,
         ["src/DeskBox/Services/TodoReminderService.cs"] = 8,
         ["src/DeskBox/Services/WeatherService.cs"] = 1,
         ["src/DeskBox/Services/WeatherSettingsPolicy.cs"] = 18,
@@ -284,6 +286,10 @@ public sealed class SettingsSliceOwnershipContractTests
         ["src/DeskBox/Services/WidgetForegroundSettings.cs"] = 8,
         ["src/DeskBox/Services/WidgetGroupMenuBuilder.cs"] = 1,
         ["src/DeskBox/Services/WidgetGroupSettings.cs"] = 19,
+        ["src/DeskBox/Services/WidgetManager.NewWidgetPlacement.cs"] = 4,
+        ["src/DeskBox/Services/DisplayIdentityTokens.cs"] = 2,
+        ["src/DeskBox/Services/WidgetManager.MoveAll.cs"] = 9,
+        ["src/DeskBox/Services/WidgetManager.ScreenHome.cs"] = 2,
         ["src/DeskBox/Services/WidgetManager.CapsuleArrangement.cs"] = 45,
         ["src/DeskBox/Services/WidgetManager.FeatureWidgets.cs"] = 50,
         ["src/DeskBox/Services/WidgetManager.Groups.cs"] = 55,
@@ -292,7 +298,7 @@ public sealed class SettingsSliceOwnershipContractTests
         ["src/DeskBox/Services/WidgetManager.TrayAnimation.cs"] = 4,
         ["src/DeskBox/Services/WidgetManager.cs"] = 31,
         ["src/DeskBox/Services/WidgetStartupRestorePolicy.cs"] = 2,
-        ["src/DeskBox/Services/WidgetTopologyLayoutService.cs"] = 22,
+        ["src/DeskBox/Services/WidgetTopologyLayoutService.cs"] = 23,
         ["src/DeskBox/ViewModels/GlanceWidgetViewModel.cs"] = 4,
         ["src/DeskBox/ViewModels/MusicWidgetViewModel.Lifecycle.cs"] = 1,
         ["src/DeskBox/ViewModels/MusicWidgetViewModel.cs"] = 5,

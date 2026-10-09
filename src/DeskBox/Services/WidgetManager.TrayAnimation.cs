@@ -45,6 +45,9 @@ public sealed partial class WidgetManager
         string source = "raise-from-tray")
     {
         using var perfScope = PerformanceLogger.Measure("WidgetManager.RaiseWidgetsFromTray");
+        // A user reveal ends any open removal grace (spec 5.6): the parked
+        // topology restore applies before the widgets are shown.
+        EndRemovalGraceByUserAction?.Invoke();
         if (WidgetLayerService.UsesDesktopPinnedMode())
         {
             App.LogVerbose("[TrayBatch] Raise redirected to desktop-pinned show");

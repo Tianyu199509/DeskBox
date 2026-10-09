@@ -73,4 +73,69 @@ public sealed class WidgetContentTransitionProfileTests
         Assert.Equal(0, profile.TranslationDistance);
         Assert.Equal(1, profile.MinimumScale);
     }
+
+    [Fact]
+    public void HorizontalSwitch_SlidesALongerDistanceOnTheSameTimeline()
+    {
+        WidgetContentTransitionProfile profile =
+            WidgetContentTransitionProfile.Create(
+                animationsEnabled: true,
+                directional: true,
+                WidgetGroupSwitchAnimationEffect.Horizontal);
+
+        Assert.True(profile.UsesMotion);
+        Assert.Equal(WidgetGroupSwitchAnimationEffect.Horizontal, profile.Effect);
+        Assert.Equal(12, profile.TranslationDistance);
+        // The timeline skeleton is shared with the vertical push so both axes
+        // keep the same cadence.
+        Assert.Equal(210, profile.DurationMilliseconds);
+        Assert.Equal(78, profile.OutgoingDurationMilliseconds);
+        Assert.Equal(12, profile.SwapGapMilliseconds);
+        Assert.Equal(120, profile.IncomingDurationMilliseconds);
+        Assert.Equal(0.975, profile.MinimumScale);
+    }
+
+    [Fact]
+    public void HorizontalSwitch_WithoutDirectionalOrigin_KeepsTheScaleAndFadeOnly()
+    {
+        WidgetContentTransitionProfile profile =
+            WidgetContentTransitionProfile.Create(
+                animationsEnabled: true,
+                directional: false,
+                WidgetGroupSwitchAnimationEffect.Horizontal);
+
+        Assert.False(profile.UsesMotion);
+        Assert.Equal(0, profile.TranslationDistance);
+        Assert.Equal(0.975, profile.MinimumScale);
+    }
+
+    [Fact]
+    public void CrossFade_KeepsTheTimelineFlatWithoutScaleOrMotion()
+    {
+        WidgetContentTransitionProfile profile =
+            WidgetContentTransitionProfile.Create(
+                animationsEnabled: true,
+                directional: true,
+                WidgetGroupSwitchAnimationEffect.CrossFade);
+
+        Assert.False(profile.UsesMotion);
+        Assert.Equal(0, profile.TranslationDistance);
+        Assert.Equal(1, profile.MinimumScale);
+        Assert.Equal(210, profile.DurationMilliseconds);
+    }
+
+    [Fact]
+    public void Suppress_SwapsInstantlyEvenForDirectionalSwitches()
+    {
+        WidgetContentTransitionProfile profile =
+            WidgetContentTransitionProfile.Create(
+                animationsEnabled: true,
+                directional: true,
+                WidgetGroupSwitchAnimationEffect.Suppress);
+
+        Assert.False(profile.UsesMotion);
+        Assert.Equal(0, profile.DurationMilliseconds);
+        Assert.Equal(0, profile.TranslationDistance);
+        Assert.Equal(1, profile.MinimumScale);
+    }
 }

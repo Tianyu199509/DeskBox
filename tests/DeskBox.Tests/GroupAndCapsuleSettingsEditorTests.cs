@@ -50,6 +50,8 @@ public sealed class GroupAndCapsuleSettingsEditorTests : IDisposable
         Assert.False(editor.WheelSwitchEnabled);
         // Fresh-install default: the hover switch ships disabled.
         Assert.False(editor.HoverSwitchEnabled);
+        // Fresh-install default: the switch animation follows the layout.
+        Assert.Equal(WidgetGroupSwitchAnimationStyles.Auto, editor.DefaultSwitchAnimationStyle);
         Assert.Empty(editor.ExistingGroups);
         Assert.False(editor.HasExistingGroups);
         Assert.True(editor.ShowExistingGroupsEmpty);
@@ -71,15 +73,18 @@ public sealed class GroupAndCapsuleSettingsEditorTests : IDisposable
         editor.DefaultTitleDisplayMode = WidgetGroupTitleDisplayModes.IconOnly;
         editor.WheelSwitchEnabled = false;
         editor.HoverSwitchEnabled = true;
+        editor.DefaultSwitchAnimationStyle = WidgetGroupSwitchAnimationStyles.Horizontal;
 
-        Assert.Equal(4, hostEvents);
-        Assert.Equal(4, notified);
+        Assert.Equal(5, hostEvents);
+        Assert.Equal(5, notified);
         Assert.Equal(WidgetGroupNavigationStyles.Stack,
             settings.Settings.WidgetLayout.WidgetGroupDefaultNavigationStyle);
         Assert.Equal(WidgetGroupTitleDisplayModes.IconOnly,
             settings.Settings.WidgetLayout.WidgetGroupDefaultTitleDisplayMode);
         Assert.False(settings.Settings.WidgetLayout.WidgetGroupWheelSwitchEnabled);
         Assert.True(settings.Settings.WidgetLayout.WidgetGroupHoverSwitchEnabled);
+        Assert.Equal(WidgetGroupSwitchAnimationStyles.Horizontal,
+            settings.Settings.WidgetLayout.WidgetGroupSwitchAnimationStyle);
 
         // Unchanged writes skip both the save and the host event.
         int eventsBeforeRepeat = hostEvents;
@@ -155,6 +160,18 @@ public sealed class GroupAndCapsuleSettingsEditorTests : IDisposable
                 WidgetGroupTitleDisplayModes.TextOnly
             ],
             editor.AvailableTitleDisplayModeOptions.Select(option => option.Value));
+        Assert.Equal(
+            [
+                WidgetGroupSwitchAnimationStyles.Auto,
+                WidgetGroupSwitchAnimationStyles.Vertical,
+                WidgetGroupSwitchAnimationStyles.Horizontal,
+                WidgetGroupSwitchAnimationStyles.Fade,
+                WidgetGroupSwitchAnimationStyles.None
+            ],
+            editor.AvailableSwitchAnimationOptions.Select(option => option.Value));
+        Assert.Equal(
+            "Settings.WidgetGroupSwitchAnimation.None",
+            editor.AvailableSwitchAnimationOptions[^1].DisplayName);
     }
 
     [Fact]

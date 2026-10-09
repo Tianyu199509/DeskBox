@@ -15,7 +15,7 @@ public sealed class WidgetTopologyLayoutServiceTests
             Monitor("panel", @"\\.\DISPLAY2", true, 0, 0, 1920, 1040, 1),
             Monitor("external", @"\\.\DISPLAY1", false, 1920, 0, 1920, 1040, 1));
 
-        Assert.StartsWith("v3-", initial.Key, StringComparison.Ordinal);
+        Assert.StartsWith("v4-", initial.Key, StringComparison.Ordinal);
         Assert.Equal(initial.Key, reEnumerated.Key);
     }
 
@@ -62,8 +62,11 @@ public sealed class WidgetTopologyLayoutServiceTests
     }
 
     [Fact]
-    public void ReturningToKnownTopology_RestoresTheLayoutEditedForThatTopology()
+    public void SameTopology_DpiRoundTrip_KeepsEditedIntentAndRealizesPhysicalCache()
     {
+        // v4 (D5): resolution/DPI changes stay in ONE profile. The edits made
+        // at either DPI survive as intent (DIP); only the physical X/Y cache
+        // is re-realized for the current DPI (spec 5.2).
         var widget = CreateWidget();
         var settings = new AppSettings { Widgets = [widget] };
         var service = new WidgetTopologyLayoutService();
@@ -82,16 +85,21 @@ public sealed class WidgetTopologyLayoutServiceTests
         widget.Y = 36;
 
         service.Activate(settings, highDpi);
-        Assert.Equal(600, widget.Width);
-        Assert.Equal(500, widget.Height);
-        Assert.Equal(200, widget.X);
-        Assert.Equal(160, widget.Y);
+        // One profile: the standard-DPI edits persist (no revival of the
+        // pre-edit high-DPI arrangement), and the physical cache follows the
+        // 2× scale: margin 44 DIP → 88 physical.
+        Assert.Equal(720, widget.Width);
+        Assert.Equal(620, widget.Height);
+        Assert.Equal(44, widget.PositionMarginX);
+        Assert.Equal(88, widget.X);
+        Assert.Equal(72, widget.Y);
 
         service.Activate(settings, standardDpi);
         Assert.Equal(720, widget.Width);
         Assert.Equal(620, widget.Height);
         Assert.Equal(44, widget.X);
         Assert.Equal(36, widget.Y);
+        Assert.Single(settings.WidgetTopologyLayouts);
     }
 
     [Fact]
@@ -117,8 +125,11 @@ public sealed class WidgetTopologyLayoutServiceTests
 
         service.Activate(settings, laptop);
 
-        Assert.Equal(200, widget.X);
-        Assert.Equal(160, widget.Y);
+        // v4 semantics: the physical cache is realized from the anchor at
+        // the laptop's scale (margin 100 DIP → 100 physical at 1×), the
+        // stored intent keeps the original capture.
+        Assert.Equal(100, widget.X);
+        Assert.Equal(80, widget.Y);
         Assert.Equal(600, widget.Width);
         Assert.Equal(500, widget.Height);
         Assert.Equal(@"\\.\DISPLAY1", widget.PositionMonitorDeviceName);

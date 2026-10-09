@@ -13,8 +13,8 @@ namespace DeskBox.Tests;
 /// 2. The search hotkey expander is never disabled as a whole: only its
 ///    content controls gray out when the hotkey is unavailable, so the
 ///    expander can always be opened to read the status notice.
-/// 3. The drag-out tips expander header carries a description, matching
-///    the other group expanders.
+/// 3. The merged drag-and-drop behavior expander header carries a
+///    description, matching the other group expanders.
 /// </summary>
 public sealed class SettingsAccordionEmptyStateContractTests
 {
@@ -60,10 +60,11 @@ public sealed class SettingsAccordionEmptyStateContractTests
 
         Assert.DoesNotContain("SearchHotkeyExpander.IsEnabled", code, StringComparison.Ordinal);
 
-        // Content-level gating instead: toggle, preset picker, capture and
-        // reset controls gray out when the hotkey is unavailable.
+        // Content-level gating instead: toggle, capture and reset controls
+        // gray out when the hotkey is unavailable. The preset picker moved
+        // into the recorder dialog, so it no longer needs section-level
+        // gating.
         Assert.Contains("SearchHotkeyToggle.IsEnabled", code, StringComparison.Ordinal);
-        Assert.Contains("SearchHotkeyPresetSegmented.IsEnabled", code, StringComparison.Ordinal);
         Assert.Contains("SearchHotkeyCaptureButton.IsEnabled", code, StringComparison.Ordinal);
         Assert.Contains("ResetSearchHotkeyButton.IsEnabled", code, StringComparison.Ordinal);
     }
@@ -80,15 +81,17 @@ public sealed class SettingsAccordionEmptyStateContractTests
     }
 
     [Fact]
-    public void DragOutTips_ExpanderHeaderCarriesADescription()
+    public void DragBehavior_ExpanderHeaderCarriesADescription()
     {
         string xaml = ReadRepositoryFile(SettingsWindowXaml);
 
+        // The merged drag-and-drop group (拖放行为) folds the old 拖放提示
+        // expander in; its header must keep carrying a description.
         Match? expander = FindOpeningTag(
-            xaml, "toolkit:SettingsExpander", "HeaderKey=\"Settings.DragOutTips.Group.Title\"");
+            xaml, "toolkit:SettingsExpander", "HeaderKey=\"Settings.DragBehavior.Group.Title\"");
         Assert.NotNull(expander);
         Assert.Contains(
-            "DescriptionKey=\"Settings.DragOutTips.Group.Description\"",
+            "DescriptionKey=\"Settings.DragBehavior.Group.Description\"",
             expander.Value,
             StringComparison.Ordinal);
     }

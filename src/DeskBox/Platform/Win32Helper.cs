@@ -20,6 +20,36 @@ namespace DeskBox.Platform;
 /// </remarks>
 public static partial class Win32Helper
 {
+    // ── shell: fullscreen-app detection (display topology gate, spec 5.6) ──
+
+    public const int QueryUserNotificationStateBusy = 2;
+    public const int QueryUserNotificationStateRunningD3dFullScreen = 3;
+    public const int QueryUserNotificationStatePresentationMode = 4;
+
+    [DllImport("shell32.dll", SetLastError = false)]
+    private static extern int SHQueryUserNotificationState(out int state);
+
+    /// <summary>
+    /// True while a fullscreen-exclusive app (game) or presentation mode owns
+    /// the screen. Used to park topology restores (resolution flips from
+    /// fullscreen games must not reshuffle widgets, spec S13).
+    /// </summary>
+    public static bool IsFullscreenAppActive()
+    {
+        try
+        {
+            return SHQueryUserNotificationState(out int state) == 0 &&
+                   state is QueryUserNotificationStateBusy or
+                       QueryUserNotificationStateRunningD3dFullScreen or
+                       QueryUserNotificationStatePresentationMode;
+        }
+        catch (Exception ex) when (
+            ex is DllNotFoundException or EntryPointNotFoundException)
+        {
+            return false;
+        }
+    }
+
     private const uint FileShareRead = 0x00000001;
     private const uint FileShareWrite = 0x00000002;
     private const uint FileShareDelete = 0x00000004;
@@ -840,6 +870,7 @@ public static partial class Win32Helper
     public const int SM_YVIRTUALSCREEN = 77;
     public const int SM_CXVIRTUALSCREEN = 78;
     public const int SM_CYVIRTUALSCREEN = 79;
+    public const int SM_REMOTESESSION = 0x1000;
 
     [LibraryImport("user32.dll", SetLastError = true)]
     [return: MarshalAs(UnmanagedType.Bool)]

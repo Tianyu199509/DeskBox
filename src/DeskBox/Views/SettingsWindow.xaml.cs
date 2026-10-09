@@ -33,6 +33,7 @@ public sealed partial class SettingsWindow : Window
         SettingsCard Card,
         DeskBox.Controls.WidgetTitleIcon TitleIcon,
         TextBlock TitleText,
+        TextBlock DescriptionText,
         Button? ResetButton,
         ToggleSwitch? Toggle,
         bool HasSettingsPage,
@@ -53,7 +54,6 @@ public sealed partial class SettingsWindow : Window
     private static readonly TimeSpan SectionLayoutSettleDelay = TimeSpan.FromMilliseconds(90);
     private const uint WmGetMinMaxInfo = 0x0024;
     private const uint WmNcDestroy = 0x0082;
-    private const uint WmReservedHotkeyCapture = 0x8443;
     private static readonly UIntPtr SettingsWindowSubclassId = new(1);
 
     private readonly ThemeService _themeService;
@@ -70,13 +70,11 @@ public sealed partial class SettingsWindow : Window
     private readonly DispatcherTimer _sectionLayoutSettleTimer = new() { Interval = SectionLayoutSettleDelay };
     private readonly PointerEventHandler _settingsRootPointerPressedHandler;
     private readonly PointerEventHandler _settingsRootPointerReleasedHandler;
-    private readonly ReservedHotkeyHookService _hotkeyRecordingHook = new();
     private bool _isSubclassInstalled;
     private bool _isClosed;
     private bool _allowRealClose;
     private bool _hasShownOnce;
     private bool _isAppearanceSliderDragging;
-    private bool _isRecordingHotkey;
     private bool _isRefreshingHotkeyControls;
     private bool _isRefreshingFeatureWidgetList;
     private bool _isSyncingNavigationSelection;
@@ -431,6 +429,10 @@ public sealed partial class SettingsWindow : Window
         }
 
         args.Cancel = true;
+        // Hiding the window does not close an open ContentDialog, and the
+        // hotkey recorder's only hook teardown is its Closing event — force
+        // it shut or its keyboard hook keeps swallowing input system-wide.
+        global::DeskBox.Views.Dialogs.HotkeyRecorderDialog.ShutdownActiveRecorder();
         _appWindow.Hide();
         UpdateSearchSettingsActivity();
         UpdateBackupSettingsActivity();
@@ -451,6 +453,8 @@ public sealed partial class SettingsWindow : Window
         }
 
         _isClosed = true;
+        global::DeskBox.Views.Dialogs.HotkeyRecorderDialog.ShutdownActiveRecorder();
+        WindowsCompatibilityService.ReleaseTitleBarExtensions(this, _appWindow);
         UpdateSearchSettingsActivity();
         _searchSettingsViewModel.Dispose();
         _backupSettingsViewModel.Deactivate();
@@ -469,8 +473,6 @@ public sealed partial class SettingsWindow : Window
         _resizeSettleTimer.Tick -= ResizeSettleTimer_Tick;
         _sectionLayoutSettleTimer.Stop();
         _sectionLayoutSettleTimer.Tick -= SectionLayoutSettleTimer_Tick;
-        _isRecordingHotkey = false;
-        _hotkeyRecordingHook.Dispose();
         ClearSettingsSearchHighlight();
         ClearFeatureSettingsExpanderCallbacks();
         foreach (FrameworkElement section in _settingsSectionElements.Values)
@@ -857,18 +859,6 @@ public sealed partial class SettingsWindow : Window
         UIntPtr subclassId,
         UIntPtr refData)
     {
-        if (message == WmReservedHotkeyCapture)
-        {
-            if (_isRecordingHotkey)
-            {
-                _ = ApplyRecordedHotkeyAsync(new GlobalHotkeyGesture(
-                    HotkeyModifierKeys.Windows,
-                    (int)VirtualKey.Space));
-            }
-
-            return IntPtr.Zero;
-        }
-
         if (message == WmGetMinMaxInfo)
         {
             var minMaxInfo = Marshal.PtrToStructure<MinMaxInfo>(lParam);

@@ -108,16 +108,6 @@
                         Mode="{x:Bind TitleIconMode, Mode=OneWay}" />
                     <Grid>
                         <TextBlock
-                            x:Name="TitleTextShadow"
-                            Margin="1,1,0,0"
-                            helpers:WidgetTextShadow.Layer="True"
-                            FontSize="{Binding TitleTextSize}"
-                            Foreground="Black"
-                            IsHitTestVisible="False"
-                            Text="{Binding DisplayName}"
-                            TextTrimming="CharacterEllipsis"
-                            VerticalAlignment="Center" />
-                        <TextBlock
                             x:Name="TitleText"
                             FontSize="{Binding TitleTextSize}"
                             Text="{Binding DisplayName}"
@@ -555,20 +545,6 @@
                     <Grid x:Name="CompactTitleViewport" Height="18">
                         <Grid x:Name="CompactTitleMarqueeTrack">
                             <TextBlock
-                                x:Name="CompactTitleTextShadow"
-                                Margin="1,1,0,0"
-                                helpers:WidgetTextShadow.Layer="True"
-                                FontSize="12.5"
-                                FontWeight="SemiBold"
-                                Foreground="Black"
-                                IsHitTestVisible="False"
-                                MaxLines="1"
-                                Text="{Binding Text, ElementName=CompactTitleText}"
-                                TextTrimming="CharacterEllipsis"
-                                TextWrapping="NoWrap"
-                                HorizontalAlignment="Left"
-                                VerticalAlignment="Center" />
-                            <TextBlock
                                 x:Name="CompactTitleText"
                                 HorizontalAlignment="Left"
                                 VerticalAlignment="Center"
@@ -577,21 +553,6 @@
                                 MaxLines="1"
                                 TextWrapping="NoWrap"
                                 TextTrimming="CharacterEllipsis" />
-                            <TextBlock
-                                x:Name="CompactTitleMarqueeCloneShadow"
-                                Margin="1,1,0,0"
-                                helpers:WidgetTextShadow.Layer="True"
-                                FontSize="12.5"
-                                FontWeight="SemiBold"
-                                Foreground="Black"
-                                IsHitTestVisible="False"
-                                MaxLines="1"
-                                Text="{Binding Text, ElementName=CompactTitleMarqueeClone}"
-                                TextTrimming="Clip"
-                                TextWrapping="NoWrap"
-                                Visibility="{Binding Visibility, ElementName=CompactTitleMarqueeClone}"
-                                HorizontalAlignment="Left"
-                                VerticalAlignment="Center" />
                             <TextBlock
                                 x:Name="CompactTitleMarqueeClone"
                                 HorizontalAlignment="Left"
@@ -614,20 +575,6 @@
                     <Grid x:Name="CompactSummaryViewport" Height="17">
                         <Grid x:Name="CompactSummaryMarqueeTrack">
                             <TextBlock
-                                x:Name="CompactSummaryTextShadow"
-                                Margin="1,1,0,0"
-                                helpers:WidgetTextShadow.Layer="True"
-                                FontSize="11.5"
-                                Foreground="Black"
-                                IsHitTestVisible="False"
-                                MaxLines="1"
-                                MinWidth="0"
-                                Text="{Binding Text, ElementName=CompactSummaryText}"
-                                TextTrimming="CharacterEllipsis"
-                                TextWrapping="NoWrap"
-                                HorizontalAlignment="Left"
-                                VerticalAlignment="Center" />
-                            <TextBlock
                                 x:Name="CompactSummaryText"
                                 MinWidth="0"
                                 HorizontalAlignment="Left"
@@ -637,21 +584,6 @@
                                 MaxLines="1"
                                 TextWrapping="NoWrap"
                                 TextTrimming="CharacterEllipsis" />
-                            <TextBlock
-                                x:Name="CompactSummaryMarqueeCloneShadow"
-                                Margin="1,1,0,0"
-                                helpers:WidgetTextShadow.Layer="True"
-                                FontSize="11.5"
-                                Foreground="Black"
-                                IsHitTestVisible="False"
-                                MaxLines="1"
-                                MinWidth="0"
-                                Text="{Binding Text, ElementName=CompactSummaryMarqueeClone}"
-                                TextTrimming="Clip"
-                                TextWrapping="NoWrap"
-                                Visibility="{Binding Visibility, ElementName=CompactSummaryMarqueeClone}"
-                                HorizontalAlignment="Left"
-                                VerticalAlignment="Center" />
                             <TextBlock
                                 x:Name="CompactSummaryMarqueeClone"
                                 MinWidth="0"

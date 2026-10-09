@@ -92,6 +92,7 @@ internal interface IDesktopWidgetWindow
     void EndDisplayTopologyTransition(long generation);
     void RestoreBoundsForCurrentTopology();
     bool TryRestoreBoundsForDisplayTopology();
+    void RequestCompactState(bool collapsed, bool animate);
     void ApplyCompactArrangement(Windows.Graphics.RectInt32 bounds, bool constrainSize);
     void ClearCompactArrangementConstraint();
     void PreviewCompactArrangement(Windows.Graphics.RectInt32 bounds);
@@ -149,6 +150,24 @@ public sealed partial class WidgetManager
     private readonly bool _recycleManagedFolderDeletes;
     private readonly WidgetRegistry _widgetRegistry;
     private readonly WidgetSessionManager _sessionManager;
+
+    /// <summary>Session manager exposure for lifecycle wiring (topology gate).</summary>
+    internal WidgetSessionManager SessionManager => _sessionManager;
+
+    /// <summary>
+    /// Injected by the app shell: ends an open display removal grace (user
+    /// reveal / drag / explicit move). Kept as a delegate so the manager
+    /// never grows new business global-access dependencies.
+    /// </summary>
+    internal Action? EndRemovalGraceByUserAction { get; set; }
+
+    /// <summary>
+    /// Injected by the app shell: notifies UI surfaces (the settings display
+    /// preview) that a widget's screen home changed, so they refresh promptly
+    /// even when the change happened outside their own controls (drag
+    /// commits, context-menu moves, move-all / undo).
+    /// </summary>
+    internal Action? NotifyScreenHomeChangedAction { get; set; }
     private readonly FileWidgetHostDiagnostics _fileWidgetHostDiagnostics;
     private readonly WidgetTopologyLayoutService _topologyLayoutService = new();
     private readonly Dictionary<string, FileWidgetSession> _fileWidgets = new();
@@ -163,6 +182,16 @@ public sealed partial class WidgetManager
     private readonly TrayToggleRequestQueue _trayToggleRequestQueue;
     private EffectivePerformanceSettings _lastPerformanceSettings;
     private bool? _lastNativeWidgetVisibilityForMemoryCleanup;
+
+    /// <summary>
+    /// Monotonic version bumped by every committed user placement or explicit
+    /// screen-binding change (H3): move-all undo tokens capture the value at
+    /// creation and refuse to restore once any placement moved on.
+    /// </summary>
+    private long _placementGeneration;
+
+    /// <summary>Current placement generation for undo-token versioning (H3).</summary>
+    internal long PlacementGeneration => _placementGeneration;
 
     /// <summary>
     /// Process-local state for a hidden startup (silent-startup preference or
@@ -324,6 +353,9 @@ public sealed partial class WidgetManager
     {
         App.NotifyMemoryCleanupActivity();
         _idlePeerOrderGeneration++;
+        // A user interaction ends any open removal grace immediately (spec
+        // 5.6): the user is actively working with the widgets right now.
+        EndRemovalGraceByUserAction?.Invoke();
         _sessionManager.BeginInteraction(reason);
     }
 
@@ -998,58 +1030,13 @@ public sealed partial class WidgetManager
             Height = _settingsService.Settings.DefaultWidgetHeight
         };
 
-        if (placeForFirstRun)
-        {
-            // "设为格子主屏幕" outranks the cursor: a pinned default monitor
-            // owns the first placement and the new widget inherits the pin.
-            WidgetScreenInfo? defaultScreen = WidgetScreenCatalog.TryFindScreen(
-                WidgetScreenCatalog.Capture(),
-                _settingsService.Settings.WidgetDefaultBoundScreenId);
-            if (defaultScreen is not null)
-            {
-                config.ScreenBindingMode = WidgetScreenBindingMode.Pinned;
-                config.BoundScreenId = defaultScreen.StableId;
-                InitialFileWidgetPlacementPolicy.Apply(
-                    config,
-                    new Windows.Graphics.RectInt32(
-                        defaultScreen.WorkArea.X,
-                        defaultScreen.WorkArea.Y,
-                        defaultScreen.WorkArea.Width,
-                        defaultScreen.WorkArea.Height),
-                    WidgetPositioningService.GetDpiScale(defaultScreen.WorkArea));
-                _settingsService.Settings.Widgets.Add(config);
-                await _settingsService.SaveAsync();
-                await CreateWidgetFromConfigAsync(config, revealAfterCreate: true);
-                return;
-            }
-
-            Windows.Graphics.PointInt32 pointerPosition = new(0, 0);
-            if (Win32Helper.GetCursorPos(out Win32Helper.POINT cursor))
-            {
-                pointerPosition = new Windows.Graphics.PointInt32(cursor.X, cursor.Y);
-            }
-
-            var workArea = DisplayArea.GetFromPoint(
-                pointerPosition,
-                DisplayAreaFallback.Primary).WorkArea;
-            if (workArea.Width <= 0 || workArea.Height <= 0)
-            {
-                // A broken or virtualized display topology must not persist
-                // fallback coordinates as if the user had placed the widget.
-                config.NeedsInitialPlacement = true;
-                App.Log(
-                    "[WidgetManager] Display work area is unusable; deferring " +
-                    "initial placement for the new file widget.");
-            }
-            else
-            {
-                InitialFileWidgetPlacementPolicy.Apply(
-                    config,
-                    workArea,
-                    WidgetPositioningService.GetDpiScale(workArea));
-            }
-        }
-        else if (!HasUsableWorkArea())
+        // Unified new-widget funnel (spec 5.8): resolves the target display
+        // from the "新格子出现在" setting (cursor display by default), places
+        // right-aligned with cascade, and homes the widget there. The old
+        // first-run default-screen branch is gone — SpecificDisplay covers it
+        // without implicitly pinning to a global default.
+        ApplyNewWidgetPlacement(config);
+        if (!config.NeedsInitialPlacement && !HasUsableWorkArea())
         {
             config.NeedsInitialPlacement = true;
         }
@@ -1088,7 +1075,7 @@ public sealed partial class WidgetManager
                     break;
                 }
 
-                await CreateRegisteredWidgetFromConfigAsync(new WidgetConfig
+                var config = new WidgetConfig
                 {
                     Name = GetDefaultFeatureWidgetTitle(
                         widgetKind,
@@ -1097,7 +1084,9 @@ public sealed partial class WidgetManager
                     BoundsCoordinateVersion = WidgetConfig.CurrentBoundsCoordinateVersion,
                     Width = _settingsService.Settings.DefaultWidgetWidth,
                     Height = _settingsService.Settings.DefaultWidgetHeight
-                }, revealAfterCreate: true);
+                };
+                ApplyNewWidgetPlacement(config);
+                await CreateRegisteredWidgetFromConfigAsync(config, revealAfterCreate: true);
                 break;
         }
     }
@@ -1128,7 +1117,7 @@ public sealed partial class WidgetManager
             Height = _settingsService.Settings.DefaultWidgetHeight
         };
 
-        MarkNeedsInitialPlacementIfDisplayUnusable(config);
+        ApplyNewWidgetPlacement(config);
         _settingsService.Settings.Widgets.Add(config);
         SyncMappedWidgetShortcut(config);
         await _settingsService.SaveAsync();
@@ -1646,6 +1635,10 @@ public sealed partial class WidgetManager
         await Task.Yield();
         QueueIdleWidgetZOrderNormalization("display-topology-restored");
         PlacePendingInitialWidgets();
+        ApplyDisconnectCollapsePolicy(
+            Win32Helper.GetMonitorWorkAreaInfos()
+                .Select(area => Win32Helper.ResolveStableMonitorId(area.DeviceName))
+                .ToList());
         return allRestored;
     }
 
@@ -1678,8 +1671,29 @@ public sealed partial class WidgetManager
             return;
         }
 
+        // Idempotent no-op guard (M5): when both the widget and its group
+        // already carry exactly this binding, reapplying it would needlessly
+        // rewrite snapshots, bump topology entries, and save.
+        string? normalizedBound = mode == WidgetScreenBindingMode.Pinned ? boundScreenId : null;
+        if (config.ScreenBindingMode == mode &&
+            string.Equals(config.BoundScreenId, normalizedBound, StringComparison.OrdinalIgnoreCase))
+        {
+            var g = WidgetGroupSettings.FindByMember(_settingsService.Settings, widgetId);
+            if (g is null || (g.ScreenBindingMode == mode &&
+                string.Equals(g.BoundScreenId, normalizedBound, StringComparison.OrdinalIgnoreCase)))
+            {
+                return;
+            }
+        }
+
+        // Explicit screen moves from the settings page end the removal grace
+        // (spec 5.6 user action).
+        EndRemovalGraceByUserAction?.Invoke();
+        _placementGeneration++;
         config.ScreenBindingMode = mode;
-        config.BoundScreenId = mode == WidgetScreenBindingMode.Pinned ? boundScreenId : null;
+        config.BoundScreenId = normalizedBound;
+        string? boundLabel = ResolveBoundScreenLabel(mode, normalizedBound);
+        config.BoundScreenLabel = boundLabel;
 
         // SynchronizeGroupLayoutFromMember only runs for the ACTIVE member;
         // binding arrives through any member (settings rows use the first
@@ -1691,14 +1705,16 @@ public sealed partial class WidgetManager
         if (group is not null)
         {
             group.ScreenBindingMode = mode;
-            group.BoundScreenId = mode == WidgetScreenBindingMode.Pinned ? boundScreenId : null;
+            group.BoundScreenId = normalizedBound;
+            group.BoundScreenLabel = boundLabel;
             foreach (string memberId in group.MemberIds)
             {
                 surfaceMemberIds.Add(memberId);
                 if (FindConfig(memberId) is { } member)
                 {
                     member.ScreenBindingMode = mode;
-                    member.BoundScreenId = mode == WidgetScreenBindingMode.Pinned ? boundScreenId : null;
+                    member.BoundScreenId = normalizedBound;
+                    member.BoundScreenLabel = boundLabel;
                 }
             }
 
@@ -1733,7 +1749,34 @@ public sealed partial class WidgetManager
         }
 
         CaptureCurrentTopologyLayout(config);
+        // Setting the binding by hand is a user placement (spec task 1.7):
+        // the resulting entry becomes authoritative.
+        MarkSurfaceEntryAuthoritative(
+            config,
+            stableIdOverride: mode == WidgetScreenBindingMode.Pinned ? boundScreenId : null);
         await _settingsService.SaveAsync();
+        NotifyScreenHomeChangedAction?.Invoke();
+    }
+
+    /// <summary>
+    /// Resolves the user-facing label for a binding at bind time (H1): the CCD
+    /// friendly name of the pinned display when it is currently attached, null
+    /// when the display is offline or reports an empty name so the snapshot
+    /// never persists junk.
+    /// </summary>
+    private static string? ResolveBoundScreenLabel(
+        WidgetScreenBindingMode mode,
+        string? boundScreenId)
+    {
+        if (mode != WidgetScreenBindingMode.Pinned || string.IsNullOrWhiteSpace(boundScreenId))
+        {
+            return null;
+        }
+
+        string? friendlyName = WidgetScreenCatalog.TryFindScreen(
+            WidgetScreenCatalog.Capture(),
+            boundScreenId)?.FriendlyName;
+        return string.IsNullOrEmpty(friendlyName) ? null : friendlyName;
     }
 
     /// <summary>
@@ -1747,6 +1790,8 @@ public sealed partial class WidgetManager
         {
             return 0;
         }
+
+        EndRemovalGraceByUserAction?.Invoke();
 
         var settings = _settingsService.Settings;
         int changed = 0;
@@ -1803,6 +1848,9 @@ public sealed partial class WidgetManager
         foreach (IDesktopWidgetWindow window in windows)
         {
             CaptureCurrentTopologyLayout(window.Config);
+            // Batch move = one-shot user placement (spec task 1.7): each
+            // moved surface's entry becomes authoritative.
+            MarkSurfaceEntryAuthoritative(window.Config, stableIdOverride: stableId);
         }
 
         return changed;

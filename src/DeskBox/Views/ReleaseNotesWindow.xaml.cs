@@ -459,6 +459,7 @@ public sealed partial class ReleaseNotesWindow : Window
         }
 
         _isClosed = true;
+        WindowsCompatibilityService.ReleaseTitleBarExtensions(this, _appWindow);
         _loadCts?.Cancel();
         _loadCts?.Dispose();
         _loadCts = null;

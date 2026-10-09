@@ -198,7 +198,7 @@ if ($null -eq $application -or $application.Executable -ne "DeskBox.exe") {
     Add-AuditFailure "The package application does not target DeskBox.exe."
 }
 if ($null -eq $frameworkDependency -or
-    [version]$frameworkDependency.MinVersion -lt [version]"2.4.0.0") {
+    [version]$frameworkDependency.MinVersion -lt [version]"2.5.1.0") {
     Add-AuditFailure "The Microsoft.WindowsAppRuntime.2 framework dependency is missing or too old."
 }
 

@@ -77,7 +77,7 @@ internal static class Probe {
   <Identity Name="$packageName" Publisher="$publisher" Version="$version" ProcessorArchitecture="x64" />
   <Properties><DisplayName>DeskBox Startup Probe</DisplayName><PublisherDisplayName>DeskBox Test</PublisherDisplayName><Logo>Assets\Logo.png</Logo></Properties>
   <Resources><Resource Language="en-US" /></Resources>
-  <Dependencies><TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.19044.0" MaxVersionTested="10.0.26100.0" /></Dependencies>
+  <Dependencies><TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.19041.0" MaxVersionTested="10.0.26100.0" /></Dependencies>
   <Applications><Application Id="App" Executable="Probe.exe" EntryPoint="Windows.FullTrustApplication">
     <uap:VisualElements DisplayName="DeskBox Startup Probe" Description="Temporary startup lifecycle test" BackgroundColor="transparent" Square150x150Logo="Assets\Logo.png" Square44x44Logo="Assets\SmallLogo.png" />
     <Extensions><uap3:Extension Category="windows.appExecutionAlias" Executable="Probe.exe" EntryPoint="Windows.FullTrustApplication"><uap3:AppExecutionAlias><desktop:ExecutionAlias Alias="$aliasName" /></uap3:AppExecutionAlias></uap3:Extension></Extensions>

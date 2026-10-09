@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using Microsoft.UI.Composition.SystemBackdrops;
+using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Media;
 using Windows.UI.ViewManagement;
@@ -16,6 +17,25 @@ public static class WindowsCompatibilityService
     public const int Windows11Build = 22000;
     public const double MinSystemTextScaleFactor = 1.0;
     public const double MaxSystemTextScaleFactor = 2.25;
+
+    /// <summary>
+    /// Workaround for microsoft-ui-xaml#12210: a window destroyed while
+    /// <c>ExtendsContentIntoTitleBar</c> is still set leaks ~35 handles and
+    /// 2-3 MB of native memory per open/close cycle. Call from every Closed
+    /// handler of a window that opted into the extended title bar.
+    /// </summary>
+    public static void ReleaseTitleBarExtensions(Window window, AppWindow? appWindow)
+    {
+        try
+        {
+            window.ExtendsContentIntoTitleBar = false;
+            appWindow?.TitleBar.ResetToDefault();
+        }
+        catch (Exception ex)
+        {
+            App.Log($"[WindowsCompatibilityService] Title bar release failed: {ex.Message}");
+        }
+    }
 
     private static readonly Lazy<int> s_osBuild = new(GetOsBuild);
     private static readonly object s_animationSettingsCacheGate = new();

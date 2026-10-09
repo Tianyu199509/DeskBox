@@ -2769,6 +2769,22 @@ public abstract partial class WidgetWindowBase
         }
     }
 
+    /// <summary>
+    /// Manager-driven compact-state request (H4): transitions the real window
+    /// into or out of the collapsed capsule without persisting a manual
+    /// collapse preference — used by the disconnect-collapse policy, which
+    /// owns its own persisted marker instead.
+    /// </summary>
+    public void RequestCompactState(bool collapsed, bool animate)
+    {
+        if (collapsed == IsCompactBoundsStateActive)
+        {
+            return;
+        }
+
+        SetCollapsedState(collapsed, persistManualState: false, animate: animate);
+    }
+
     private void SetCollapsedState(
         bool collapsed,
         bool persistManualState,
@@ -2867,6 +2883,10 @@ public abstract partial class WidgetWindowBase
         if (persistManualState && Config.IsCollapsed != collapsed)
         {
             Config.IsCollapsed = collapsed;
+            // Manual expand/collapse ends disconnect-collapse tracking
+            // (spec 5.7): reconnect must not auto-expand a surface the
+            // user touched while its home display was away.
+            App.Current?.WidgetManager?.ClearDisconnectCollapseMarker(Config);
             SettingsService.UpdateWidget(Config, notifySubscribers: false);
             SettingsService.SaveDebounced(notifySubscribers: false);
             SynchronizeWidgetGroupLayout();
@@ -3531,6 +3551,15 @@ public abstract partial class WidgetWindowBase
             bounds.Width,
             bounds.Height,
             persist: true);
+        // Resize keeps its specialized anchor capture above; this commit only
+        // updates the surface home / entry authority (usually a no-op for
+        // home since a resize rarely crosses displays).
+        App.Current?.WidgetManager?.CommitUserPlacement(
+            Config,
+            CollapseHostBoundsToContent(bounds),
+            bounds,
+            WidgetPlacementSource.Resize,
+            captureIntent: false);
         App.Current?.WidgetManager?.RefreshCapsuleBarLayout();
     }
 

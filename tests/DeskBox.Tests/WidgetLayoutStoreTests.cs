@@ -73,11 +73,15 @@ public sealed class WidgetLayoutStoreTests : IDisposable
         // The strip set IS the migration surface: a member added to the slice
         // without a conscious ownership decision fails here, and a facade key
         // renamed without updating the slice fails here too.
+        // widgetGroupSwitchAnimationStyle is the 15th member: the group
+        // member-switch transition style, a device-domain group default.
         string[] expected =
         [
             "featureWidgetEnabledStates",
             "widgets",
             "widgetDefaultBoundScreenId",
+            "widgetNewPlacementTarget",
+            "widgetDisplayDisconnectBehavior",
             "widgetGroups",
             "widgetTopologyLayouts",
             "activeWidgetTopologyKey",
@@ -86,6 +90,7 @@ public sealed class WidgetLayoutStoreTests : IDisposable
             "widgetGroupDefaultTitleDisplayMode",
             "widgetGroupWheelSwitchEnabled",
             "widgetGroupHoverSwitchEnabled",
+            "widgetGroupSwitchAnimationStyle",
             "deletedWidgetIds",
         ];
 
@@ -108,11 +113,11 @@ public sealed class WidgetLayoutStoreTests : IDisposable
     [Fact]
     public void SliceHasExactlyTheExpectedMembers()
     {
-        // A 13th member is a device-vs-user-data decision, not a casual add:
+        // A 16th member is a device-vs-user-data decision, not a casual add:
         // it lands in the file AND the settings strip set automatically, so
         // this pins the count.
         Assert.Equal(
-            12,
+            15,
             typeof(WidgetLayoutSettingsSlice).GetProperties(
                 System.Reflection.BindingFlags.Instance |
                 System.Reflection.BindingFlags.Public).Length);
@@ -587,9 +592,14 @@ public sealed class WidgetLayoutStoreTests : IDisposable
         Assert.Equal("m2", groups[0]!["activeMemberId"]!.GetValue<string>());
         Assert.Equal("mon-a", groups[0]!["positionMonitorKey"]!.GetValue<string>());
         JsonObject topologies = layout["widgetTopologyLayouts"]!.AsObject();
-        Assert.Equal(2, topologies.Count);
-        Assert.Equal(3, topologies["v3-single"]!["surfaces"]!.AsObject().Count);
-        Assert.Equal("v3-dual", layout["activeWidgetTopologyKey"]!.GetValue<string>());
+        // Schema v13: both legacy profiles carry the same monitor identity
+        // set (stable-1), so they merge onto ONE v4 profile — surfaces union
+        // (3), newest-usage base, active key rewritten to the v4 form.
+        Assert.Equal(1, topologies.Count);
+        string mergedKey = topologies.Select(pair => pair.Key).Single();
+        Assert.StartsWith("v4-", mergedKey, StringComparison.Ordinal);
+        Assert.Equal(3, topologies[mergedKey]!["surfaces"]!.AsObject().Count);
+        Assert.Equal(mergedKey, layout["activeWidgetTopologyKey"]!.GetValue<string>());
         Assert.Equal(
             "tomb-removed",
             layout["deletedWidgetIds"]!.AsArray().Single().GetValue<string>());
@@ -613,15 +623,17 @@ public sealed class WidgetLayoutStoreTests : IDisposable
         Assert.True(groupA.PositionMonitorWasPrimary);
         Assert.Equal(["m3", "m4"], groupB.MemberIds);
         Assert.Equal(5, second.Settings.Widgets.Count);
-        Assert.Equal(2, second.Settings.WidgetTopologyLayouts.Count);
-        Assert.Equal(3, second.Settings.WidgetTopologyLayouts["v3-single"].Surfaces.Count);
-        Assert.Equal(
-            10,
-            second.Settings.WidgetTopologyLayouts["v3-single"].Surfaces["surface-a"].X);
+        // v13 merged profile survives the restart identically: one profile,
+        // unioned surfaces, the dual-era entry as the merged base for
+        // surface-a (newest LastUsedAtUtc).
+        Assert.Single(second.Settings.WidgetTopologyLayouts);
+        WidgetTopologyLayoutProfile mergedProfile =
+            second.Settings.WidgetTopologyLayouts.Values.Single();
+        Assert.StartsWith("v4-", second.Settings.ActiveWidgetTopologyKey, StringComparison.Ordinal);
+        Assert.Equal(3, mergedProfile.Surfaces.Count);
         Assert.Equal(
             2200,
-            second.Settings.WidgetTopologyLayouts["v3-dual"].Surfaces["surface-a"].X);
-        Assert.Equal("v3-dual", second.Settings.ActiveWidgetTopologyKey);
+            mergedProfile.Surfaces["surface-a"].X);
         Assert.Equal(["tomb-removed"], second.Settings.DeletedWidgetIds);
         Assert.True(second.Settings.FeatureWidgetEnabledStates["Search"]);
 

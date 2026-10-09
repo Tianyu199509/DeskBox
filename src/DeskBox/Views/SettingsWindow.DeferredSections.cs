@@ -19,7 +19,6 @@ public sealed partial class SettingsWindow
         {
             RefreshManagedStoragePathWarning();
             RefreshManagedStorageDesktopShortcutState();
-            _ = ViewModel.RefreshQuickAccessStateAsync();
         }
         if (_currentSettingsSection is "Interaction" or "Advanced")
         {

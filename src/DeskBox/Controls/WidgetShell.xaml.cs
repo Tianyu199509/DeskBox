@@ -1412,10 +1412,16 @@ public sealed partial class WidgetShell : UserControl
 
         bool animationsEnabled = SystemAnimationsEnabled();
 
+        WidgetGroupSwitchAnimationEffect effect =
+            WidgetGroupSwitchAnimationPolicy.ResolveEffect(
+                App.Current?.SettingsService?.Settings.WidgetLayout
+                    .WidgetGroupSwitchAnimationStyle,
+                _groupPresentation?.NavigationStyle);
         WidgetContentTransitionProfile profile =
             WidgetContentTransitionProfile.Create(
                 animationsEnabled,
-                directional);
+                directional,
+                effect);
         if (profile.DurationMilliseconds <= 0)
         {
             OutgoingContentPresenter.Opacity = 0;
@@ -1426,14 +1432,27 @@ public sealed partial class WidgetShell : UserControl
 
         double distance = profile.TranslationDistance;
         double sign = forward ? 1 : -1;
+        bool horizontalMotion =
+            effect == WidgetGroupSwitchAnimationEffect.Horizontal;
+        string motionProperty = horizontalMotion
+            ? nameof(CompositeTransform.TranslateX)
+            : nameof(CompositeTransform.TranslateY);
         var incomingTransform = new CompositeTransform
         {
             ScaleX = profile.MinimumScale,
-            ScaleY = profile.MinimumScale,
-            TranslateY = profile.UsesMotion
-                ? distance * sign
-                : 0
+            ScaleY = profile.MinimumScale
         };
+        if (profile.UsesMotion)
+        {
+            if (horizontalMotion)
+            {
+                incomingTransform.TranslateX = distance * sign;
+            }
+            else
+            {
+                incomingTransform.TranslateY = distance * sign;
+            }
+        }
         var outgoingTransform = new CompositeTransform();
         ShellContentPresenter.RenderTransformOrigin =
             new Windows.Foundation.Point(0.5, 0.5);
@@ -1454,14 +1473,14 @@ public sealed partial class WidgetShell : UserControl
             AddTransitionAnimation(
                 storyboard,
                 outgoingTransform,
-                nameof(CompositeTransform.TranslateY),
+                motionProperty,
                 -distance * sign,
                 outgoingDurationMs,
                 easingMode: EasingMode.EaseIn);
             AddTransitionAnimation(
                 storyboard,
                 incomingTransform,
-                nameof(CompositeTransform.TranslateY),
+                motionProperty,
                 0,
                 incomingDurationMs,
                 incomingBeginTimeMs);
@@ -3918,15 +3937,6 @@ public sealed partial class WidgetShell : UserControl
         // A Grid keeps both copies vertically centered, including while the
         // track scrolls. Canvas children ignore VerticalAlignment.
         marquee.Clone.Margin = new Thickness(marquee.NaturalWidth + CompactMarqueeGap, 0, 0, 0);
-        // The clone's shadow layer mirrors the clone placement, plus the
-        // one-pixel drop offset it normally carries in its own Margin.
-        TextBlock cloneShadow = ResolveMarqueeCloneShadow(marquee.Clone);
-        cloneShadow.Width = marquee.NaturalWidth;
-        cloneShadow.Margin = new Thickness(
-            marquee.NaturalWidth + CompactMarqueeGap + 1,
-            1,
-            0,
-            0);
 
         var transform = new TranslateTransform();
         marquee.Track.RenderTransform = transform;
@@ -3981,17 +3991,6 @@ public sealed partial class WidgetShell : UserControl
 
     private bool ShouldSuspendCompactMarquee() =>
         _compactPresentation is { ShowVinyl: true, IsPlaying: false };
-
-    /// <summary>
-    /// The shadow layer that mirrors a marquee clone; its Margin is managed
-    /// by the marquee start/stop code alongside the clone's own placement.
-    /// </summary>
-    private TextBlock ResolveMarqueeCloneShadow(TextBlock clone)
-    {
-        return ReferenceEquals(clone, CompactTitleMarqueeClone)
-            ? CompactTitleMarqueeCloneShadow
-            : CompactSummaryMarqueeCloneShadow;
-    }
 
     private (TextBlock Primary, TextBlock Clone, Grid Track, FrameworkElement Viewport, double NaturalWidth)?
         ResolveCompactMarqueeElements()
@@ -4132,9 +4131,6 @@ public sealed partial class WidgetShell : UserControl
             _compactMarqueeClone.ClearValue(WidthProperty);
             _compactMarqueeClone.Margin = new Thickness(0);
             _compactMarqueeClone.Visibility = Visibility.Collapsed;
-            TextBlock cloneShadow = ResolveMarqueeCloneShadow(_compactMarqueeClone);
-            cloneShadow.ClearValue(WidthProperty);
-            cloneShadow.Margin = new Thickness(1, 1, 0, 0);
         }
 
         _compactMarqueePrimary = null;

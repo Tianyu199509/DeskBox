@@ -8,6 +8,11 @@ on:
         required: false
         default: ''
         type: string
+      expected-signer-cn:
+        description: 'Expected signer certificate CN for verification (substring match, empty = DeskBox)'
+        required: false
+        default: 'DeskBox'
+        type: string
 
 permissions:
   contents: read
@@ -240,3 +245,54 @@ jobs:
           if-no-files-found: error
           retention-days: 14
           path: signed
+
+  verify-signature:
+    name: Verify signed installers (Authenticode)
+    needs: sign
+    if: needs.sign.result == 'success'
+    runs-on: windows-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Download signed installers
+        uses: actions/download-artifact@v4
+        with:
+          name: signed-installers
+          path: signed
+
+      - name: Verify Authenticode signature, signer CN, and RFC3161 timestamp
+        shell: pwsh
+        run: |
+          $expectedCn = '${{ inputs.expected-signer-cn }}'
+          if ([string]::IsNullOrWhiteSpace($expectedCn)) { $expectedCn = 'DeskBox' }
+
+          $installers = @(Get-ChildItem -LiteralPath .\signed -Recurse -Filter 'DeskBox_Setup_*.exe' -File)
+          if ($installers.Count -ne 2) {
+            throw "Expected exactly 2 signed installers (x64 + ARM64); found $($installers.Count)."
+          }
+
+          foreach ($exe in $installers) {
+            $sig = Get-AuthenticodeSignature -LiteralPath $exe.FullName
+            Write-Host "=== $($exe.Name) ==="
+            Write-Host "Status        : $($sig.Status)"
+            Write-Host "StatusMessage : $($sig.StatusMessage)"
+            Write-Host "Signer        : $($sig.SignerCertificate.Subject)"
+            Write-Host "Timestamp     : $($sig.TimeStamperCertificate.Subject)"
+
+            if ($sig.Status -eq [System.Management.Automation.SignatureStatus]::NotSigned) {
+              throw "$($exe.Name): no Authenticode signature is embedded."
+            }
+            if ($sig.Status -notin @('Valid', 'UnknownError', 'UnknownIssuer')) {
+              throw "$($exe.Name): signature status '$($sig.Status)' not acceptable ($($sig.StatusMessage))."
+            }
+            if ($null -eq $sig.SignerCertificate) {
+              throw "$($exe.Name): signature present but SignerCertificate is null."
+            }
+            if ($sig.SignerCertificate.Subject -notlike "*$expectedCn*") {
+              throw "$($exe.Name): signer '$($sig.SignerCertificate.Subject)' does not contain '$expectedCn'."
+            }
+            if ($null -eq $sig.TimeStamperCertificate) {
+              throw "$($exe.Name): no RFC3161 timestamp certificate found."
+            }
+          }
+          Write-Host 'All signed installers passed Authenticode verification.'

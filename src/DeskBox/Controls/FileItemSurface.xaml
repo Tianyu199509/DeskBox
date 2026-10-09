@@ -71,21 +71,7 @@
                 </Grid>
                 <Grid>
                     <TextBlock
-                        x:Name="IconItemNameTextShadow"
-                        helpers:WidgetTextShadow.Layer="True"
-                        FontSize="{Binding FontSize, ElementName=IconItemNameText}"
-                        Foreground="Black"
-                        IsHitTestVisible="False"
-                        Margin="3,1,2,0"
-                        MaxLines="{Binding MaxLines, ElementName=IconItemNameText}"
-                        MaxWidth="{Binding MaxWidth, ElementName=IconItemNameText}"
-                        Text="{Binding Name}"
-                        TextAlignment="Center"
-                        TextTrimming="CharacterEllipsis"
-                        TextWrapping="Wrap"
-                        Visibility="{Binding Visibility, ElementName=IconItemNameText}"
-                        HorizontalAlignment="Center" />
-                    <TextBlock
+                        helpers:WidgetTextShadow.Cast="True"
                         x:Name="IconItemNameText"
                         MaxWidth="{x:Bind LayoutContext.IconLabelMaxWidth, Mode=OneWay}"
                         Margin="2,0"
@@ -103,12 +89,12 @@
 
         <DataTemplate x:Key="ListItemLayoutTemplate" x:DataType="controls:FileItemSurface">
             <Grid
-                HorizontalAlignment="Left"
+                HorizontalAlignment="Stretch"
                 ColumnSpacing="10"
                 Visibility="{x:Bind ListLayoutVisibility, Mode=OneWay}">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto" />
-                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
                 </Grid.ColumnDefinitions>
                 <Grid x:Name="ListItemIconHost" Width="{x:Bind LayoutContext.ListIconSize, Mode=OneWay}">
                     <Image
@@ -151,18 +137,7 @@
                     Spacing="1">
                     <Grid>
                         <TextBlock
-                            x:Name="ListItemNameTextShadow"
-                            helpers:WidgetTextShadow.Layer="True"
-                            FontSize="{Binding FontSize, ElementName=ListItemNameText}"
-                            Foreground="Black"
-                            IsHitTestVisible="False"
-                            Margin="1,1,0,0"
-                            MaxWidth="{Binding MaxWidth, ElementName=ListItemNameText}"
-                            Text="{Binding Name}"
-                            TextTrimming="CharacterEllipsis"
-                            TextWrapping="NoWrap"
-                            HorizontalAlignment="Left" />
-                        <TextBlock
+                            helpers:WidgetTextShadow.Cast="True"
                             x:Name="ListItemNameText"
                             FontSize="{x:Bind LayoutContext.ListLabelFontSize, Mode=OneWay}"
                             HorizontalAlignment="Left"
@@ -172,6 +147,7 @@
                             TextWrapping="NoWrap" />
                     </Grid>
                     <TextBlock
+                        helpers:WidgetTextShadow.Cast="True"
                         FontSize="{x:Bind LayoutContext.ListItemDetailFontSize, Mode=OneWay}"
                         Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                         HorizontalAlignment="Left"

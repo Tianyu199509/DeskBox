@@ -16,11 +16,20 @@ public sealed record WidgetScreenInfo(
     RectInt32 Monitor,
     RectInt32 WorkArea,
     bool IsPrimary,
-    double DpiScale)
+    double DpiScale,
+    string FriendlyName = "")
 {
     public string PhysicalSizeText => $"{Monitor.Width}×{Monitor.Height}";
 
     public double EffectiveDpiScale => double.IsFinite(DpiScale) && DpiScale > 0 ? DpiScale : 1.0;
+
+    /// <summary>
+    /// The label used by menus and the settings page (spec 6.1): the CCD
+    /// friendly name when available, resolution otherwise.
+    /// </summary>
+    public string DisplayName => string.IsNullOrWhiteSpace(FriendlyName)
+        ? PhysicalSizeText
+        : FriendlyName;
 }
 
 public static class WidgetScreenCatalog
@@ -32,14 +41,32 @@ public static class WidgetScreenCatalog
     /// </summary>
     public static IReadOnlyList<WidgetScreenInfo> Capture()
     {
+        // CCD friendly names are keyed by the device interface path — the
+        // same identity used for stable ids (spec 4.6).
+        Dictionary<string, string> friendlyNames;
+        try
+        {
+            friendlyNames = Win32Helper.QueryMonitorFriendlyNames();
+        }
+        catch
+        {
+            friendlyNames = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        }
+
         var screens = new List<WidgetScreenInfo>();
         int number = 1;
         foreach (Win32Helper.MonitorWorkAreaInfo monitor in Win32Helper.GetMonitorWorkAreaInfos())
         {
+            string stableId = string.IsNullOrWhiteSpace(monitor.StableId)
+                ? (monitor.DeviceName ?? string.Empty)
+                : monitor.StableId;
+            string friendlyName = friendlyNames.TryGetValue(stableId.Trim(), out string? name) && name is not null
+                ? name
+                : string.Empty;
             screens.Add(new WidgetScreenInfo(
                 number++,
-                string.IsNullOrWhiteSpace(monitor.StableId) ? monitor.DeviceName : monitor.StableId,
-                monitor.DeviceName,
+                stableId,
+                monitor.DeviceName ?? string.Empty,
                 new RectInt32(
                     monitor.Monitor.Left,
                     monitor.Monitor.Top,
@@ -51,7 +78,8 @@ public static class WidgetScreenCatalog
                     monitor.WorkArea.Right - monitor.WorkArea.Left,
                     monitor.WorkArea.Bottom - monitor.WorkArea.Top),
                 monitor.IsPrimary,
-                monitor.DpiScale));
+                monitor.DpiScale,
+                friendlyName));
         }
 
         return screens;

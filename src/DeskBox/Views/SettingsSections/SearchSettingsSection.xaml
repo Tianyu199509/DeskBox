@@ -152,24 +152,9 @@
                     <toolkit:SettingsCard
                         ContentAlignment="Vertical"
                         HorizontalContentAlignment="Stretch"
-                        svc:Localized.HeaderKey="Settings.Search.Hotkey.PresetsTitle">
-                        <toolkit:Segmented
-                            x:Name="SearchHotkeyPresetSegmented"
-                            SelectionChanged="SearchHotkeyPresetSegmented_SelectionChanged">
-                            <toolkit:SegmentedItem
-                                x:Name="SearchHotkeyPresetAltSpaceButton"
-                                Tag="AltSpace">
-                                <TextBlock svc:Localized.Key="Settings.GlobalHotkey.Preset.AltSpace" />
-                            </toolkit:SegmentedItem>
-                        </toolkit:Segmented>
-                    </toolkit:SettingsCard>
-                    <toolkit:SettingsCard
-                        ContentAlignment="Vertical"
-                        HorizontalContentAlignment="Stretch"
                         svc:Localized.HeaderKey="Settings.Search.Hotkey.CustomTitle">
                         <Grid RowSpacing="10">
                             <Grid.RowDefinitions>
-                                <RowDefinition Height="Auto" />
                                 <RowDefinition Height="Auto" />
                                 <RowDefinition Height="Auto" />
                             </Grid.RowDefinitions>
@@ -193,8 +178,6 @@
                                     MinWidth="132"
                                     HorizontalAlignment="Stretch"
                                     Click="SearchHotkeyCaptureButton_Click"
-                                    KeyDown="SearchHotkeyCaptureButton_KeyDown"
-                                    LostFocus="SearchHotkeyCaptureButton_LostFocus"
                                     Style="{StaticResource ActionButtonStyle}"
                                     svc:Localized.ToolTipKey="Settings.Search.Hotkey.ChangeTooltip" />
                                 <Button
@@ -220,7 +203,9 @@
                  rich-content placement drew the template's action-button
                  outline across the text). The severity brushes are pinned
                  from code-behind because ThemeResource severity lookups
-                 fail inside late-created section templates. -->
+                 fail inside late-created section templates; the message
+                 typography is pinned there too (see the comment on the
+                 interaction page's copy of this notice). -->
             <InfoBar
                 x:Name="SearchHotkeyElevatedNoticeInfoBar"
                 IsClosable="False"

@@ -111,9 +111,14 @@ public sealed partial class SettingsWindow
 
             if (await dialog.ShowAsync() == ContentDialogResult.Primary)
             {
-                if (DragDropPermissionService.TryRelaunchAsExplorerUser())
+                if (DragDropPermissionService.TryRelaunchAsExplorerUser(
+                        $"--await-parent-exit {Environment.ProcessId}"))
                 {
-                    App.Current.Exit();
+                    // Same trap as the elevation notice: a bare inline
+                    // Application.Exit() is deferred through the XAML message
+                    // loop and never consumed. The full shutdown path carries
+                    // the deadline and Environment.Exit fallbacks.
+                    await App.Current.ShutdownForRestartAsync();
                 }
                 else
                 {

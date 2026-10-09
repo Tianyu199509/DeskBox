@@ -615,6 +615,20 @@ public class AppSettings
         set => WidgetLayout.WidgetDefaultBoundScreenId = value;
     }
 
+    /// <inheritdoc cref="WidgetLayoutSettingsSlice.WidgetNewPlacementTarget"/>
+    public string WidgetNewPlacementTarget
+    {
+        get => WidgetLayout.WidgetNewPlacementTarget;
+        set => WidgetLayout.WidgetNewPlacementTarget = value;
+    }
+
+    /// <inheritdoc cref="WidgetLayoutSettingsSlice.WidgetDisplayDisconnectBehavior"/>
+    public string WidgetDisplayDisconnectBehavior
+    {
+        get => WidgetLayout.WidgetDisplayDisconnectBehavior;
+        set => WidgetLayout.WidgetDisplayDisconnectBehavior = value;
+    }
+
     /// <inheritdoc cref="WidgetLayoutSettingsSlice.WidgetGroups"/>
     public List<WidgetGroupConfig> WidgetGroups { get => WidgetLayout.WidgetGroups; set => WidgetLayout.WidgetGroups = value; }
 
@@ -638,6 +652,9 @@ public class AppSettings
 
     /// <inheritdoc cref="WidgetLayoutSettingsSlice.WidgetGroupHoverSwitchEnabled"/>
     public bool WidgetGroupHoverSwitchEnabled { get => WidgetLayout.WidgetGroupHoverSwitchEnabled; set => WidgetLayout.WidgetGroupHoverSwitchEnabled = value; }
+
+    /// <inheritdoc cref="WidgetLayoutSettingsSlice.WidgetGroupSwitchAnimationStyle"/>
+    public string WidgetGroupSwitchAnimationStyle { get => WidgetLayout.WidgetGroupSwitchAnimationStyle; set => WidgetLayout.WidgetGroupSwitchAnimationStyle = value; }
 
     /// <inheritdoc cref="WidgetShellSettingsSlice.FocusClickedWidgetOnRaise"/>
     public bool FocusClickedWidgetOnRaise { get => WidgetShell.FocusClickedWidgetOnRaise; set => WidgetShell.FocusClickedWidgetOnRaise = value; }

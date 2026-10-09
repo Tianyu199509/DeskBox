@@ -44,11 +44,17 @@ internal static class AppLifecycleRecoverySignalClassifier
         // Idle background apps get their working sets trimmed and hooks
         // starved while the display is off; "display on" is the earliest
         // reliable signal that the user is back and input should work again.
+        // "display off" (Data=0) is a gate signal, not a recovery reason —
+        // topology changes while the screen is off must not be applied.
         if (message == WmPowerBroadcast &&
-            eventValue == Win32Helper.PbtPowerSettingChange &&
-            IsConsoleDisplayOn(lParam))
+            eventValue == Win32Helper.PbtPowerSettingChange)
         {
-            return "display-power-on";
+            return ResolveConsoleDisplayState(lParam) switch
+            {
+                1 => "display-power-on",
+                0 => "display-power-off",
+                _ => null
+            };
         }
 
         if (message == WmWtsSessionChange &&
@@ -69,23 +75,37 @@ internal static class AppLifecycleRecoverySignalClassifier
             : null;
     }
 
-    private static bool IsConsoleDisplayOn(IntPtr lParam)
+    /// <summary>
+    /// Console-display power state from a GUID_CONSOLE_DISPLAY_STATE
+    /// broadcast: 1 = on, 0 = off, 2 = dim (treated as unknown here), -1 =
+    /// not a console-display event.
+    /// </summary>
+    internal static int ResolveConsoleDisplayState(IntPtr lParam)
     {
         if (lParam == IntPtr.Zero)
         {
-            return false;
+            return -1;
         }
 
         try
         {
             var setting = Marshal.PtrToStructure<Win32Helper.PowerBroadcastSetting>(lParam);
-            return setting.PowerSetting == Win32Helper.ConsoleDisplayStatePowerSetting &&
-                   setting.DataLength >= 1 &&
-                   setting.Data == 1;
+            if (setting.PowerSetting != Win32Helper.ConsoleDisplayStatePowerSetting ||
+                setting.DataLength < 1)
+            {
+                return -1;
+            }
+
+            return setting.Data switch
+            {
+                1 => 1,
+                0 => 0,
+                _ => 2
+            };
         }
         catch (Exception)
         {
-            return false;
+            return -1;
         }
     }
 }

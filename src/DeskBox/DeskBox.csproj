@@ -4,7 +4,7 @@
     <OutputType>WinExe</OutputType>
     <TargetFramework>net10.0-windows10.0.22621.0</TargetFramework>
     <!-- Keep the compile-time SDK modern while declaring the supported Win10 floor explicitly. -->
-    <SupportedOSPlatformVersion>10.0.19044.0</SupportedOSPlatformVersion>
+    <SupportedOSPlatformVersion>10.0.19041.0</SupportedOSPlatformVersion>
     <RootNamespace>DeskBox</RootNamespace>
     <Version>1.5.6</Version>
     <AssemblyVersion>1.5.6.0</AssemblyVersion>
@@ -163,7 +163,7 @@
 
   <PropertyGroup Condition="'$(DeskBoxDistribution)' == 'Store'">
     <WindowsPackageType>MSIX</WindowsPackageType>
-    <TargetPlatformMinVersion>10.0.19044.0</TargetPlatformMinVersion>
+    <TargetPlatformMinVersion>10.0.19041.0</TargetPlatformMinVersion>
     <DefaultLanguage>zh-CN</DefaultLanguage>
     <AppxPackageSigningEnabled Condition="'$(AppxPackageSigningEnabled)' == ''">false</AppxPackageSigningEnabled>
     <UapAppxPackageBuildMode Condition="'$(UapAppxPackageBuildMode)' == ''">SideloadOnly</UapAppxPackageBuildMode>
@@ -178,7 +178,13 @@
     <PackageReference Include="CommunityToolkit.WinUI.Controls.Segmented" Version="8.2.251219" />
     <PackageReference Include="CommunityToolkit.WinUI.Controls.SettingsControls" Version="8.2.251219" />
     <PackageReference Include="CommunityToolkit.WinUI.Controls.Sizers" Version="8.2.251219" />
-    <PackageReference Include="Microsoft.WindowsAppSDK" Version="2.4.0" />
+    <PackageReference Include="Microsoft.WindowsAppSDK" Version="2.5.1" />
+    <!-- WinAppSDK 2.5 transitively ships an AI/ML inference stack
+         (WindowsAppSDK.ML -> Microsoft.Windows.AI.MachineLearning:
+         onnxruntime + DirectML, ~39 MB of native DLLs per architecture)
+         that DeskBox never references; exclude it from every package.
+         Drop this override if Windows AI features are ever adopted. -->
+    <PackageReference Include="Microsoft.Windows.AI.MachineLearning" Version="2.1.74" ExcludeAssets="all" />
     <PackageReference Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.28000.2270" />
     <PackageReference Include="WinUIEx" Version="2.9.3" />
     <PackageReference Include="H.NotifyIcon.WinUI" Version="2.5.0-beta.1" />

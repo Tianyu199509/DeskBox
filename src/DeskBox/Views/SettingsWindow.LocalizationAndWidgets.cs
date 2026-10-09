@@ -165,8 +165,7 @@ public sealed partial class SettingsWindow
         {
             Tag = entry.SettingsSectionTag,
             IsClickEnabled = entry.HasSettingsPage && !string.IsNullOrWhiteSpace(entry.SettingsSectionTag),
-            HorizontalContentAlignment = HorizontalAlignment.Right,
-            Description = entry.DisplayDescription
+            HorizontalContentAlignment = HorizontalAlignment.Right
         };
         if (card.IsClickEnabled)
         {
@@ -192,13 +191,24 @@ public sealed partial class SettingsWindow
             Text = entry.Title,
             Style = (Style)SettingsRoot.Resources["SettingTitleTextStyle"]
         };
+        // The description composes inside the header so it left-aligns with
+        // the title; the card's native Description slot starts under the icon.
+        var descriptionText = new TextBlock
+        {
+            Text = entry.DisplayDescription,
+            Style = (Style)SettingsRoot.Resources["SettingDescriptionTextStyle"]
+        };
+        var textPanel = new StackPanel();
+        textPanel.Children.Add(titleText);
+        textPanel.Children.Add(descriptionText);
+
         var headerPanel = new StackPanel
         {
             Orientation = Orientation.Horizontal,
             Spacing = 8
         };
         headerPanel.Children.Add(titleIcon);
-        headerPanel.Children.Add(titleText);
+        headerPanel.Children.Add(textPanel);
         card.Header = headerPanel;
         // The composed header is not a string, so the card's automation peer
         // cannot derive a name from it; expose the title explicitly.
@@ -255,6 +265,7 @@ public sealed partial class SettingsWindow
             card,
             titleIcon,
             titleText,
+            descriptionText,
             resetButton,
             toggle,
             entry.HasSettingsPage,
@@ -265,7 +276,7 @@ public sealed partial class SettingsWindow
     private void UpdateFeatureWidgetRow(FeatureWidgetRowElements row, FeatureWidgetEntry entry)
     {
         row.TitleText.Text = entry.Title;
-        row.Card.Description = entry.DisplayDescription;
+        row.DescriptionText.Text = entry.DisplayDescription;
         row.Card.Tag = entry.SettingsSectionTag;
         row.TitleIcon.Glyph = entry.Glyph;
         row.TitleIcon.IconKind = WidgetTitleIconKindNames.FromWidgetKind(entry.Kind);

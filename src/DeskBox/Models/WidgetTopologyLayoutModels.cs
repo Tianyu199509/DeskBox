@@ -71,6 +71,18 @@ public sealed class WidgetSurfaceLayoutProfile
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? BoundScreenId { get; set; }
 
+    /// <summary>
+    /// True when this entry records a placement the user made by hand (or the
+    /// initial layout captured on first run). Seeded/projected entries stay
+    /// false; captures never promote, they only preserve an existing flag.
+    /// Seeding prefers the newest authoritative entry for a surface.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? IsAuthoritative { get; set; }
+
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public DateTimeOffset? AuthoredAtUtc { get; set; }
+
     public double X { get; set; }
 
     public double Y { get; set; }

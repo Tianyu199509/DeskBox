@@ -90,12 +90,15 @@ public static class WidgetCompactBoundsCalculator
             PositionAnchor = placement.PositionAnchor,
             PositionMarginX = placement.PositionMarginX,
             PositionMarginY = placement.PositionMarginY,
-            PositionMonitorKey = placement.PositionMonitorKey,
-            PositionMonitorDeviceName = placement.PositionMonitorDeviceName,
-            PositionMonitorStableId = placement.PositionMonitorStableId,
-            PositionMonitorWasPrimary = placement.PositionMonitorWasPrimary,
-            // The capsule shares the parent widget's screen binding so a pinned
-            // widget resolves its compact placement on the bound monitor too.
+            // The capsule is derived from its surface (spec 4.4): monitor
+            // identity comes from the surface so a stale capsule reference
+            // can never pull the capsule onto the old screen; the capsule
+            // itself only contributes the anchor and margins. Binding fields
+            // share the surface's intent as before.
+            PositionMonitorKey = config.PositionMonitorKey,
+            PositionMonitorDeviceName = config.PositionMonitorDeviceName,
+            PositionMonitorStableId = config.PositionMonitorStableId,
+            PositionMonitorWasPrimary = config.PositionMonitorWasPrimary,
             ScreenBindingMode = config.ScreenBindingMode,
             BoundScreenId = config.BoundScreenId
         };
@@ -310,10 +313,12 @@ public static class WidgetCompactBoundsCalculator
             PositionAnchor = placementConfig.PositionAnchor,
             PositionMarginX = placementConfig.PositionMarginX,
             PositionMarginY = placementConfig.PositionMarginY,
-            PositionMonitorKey = placementConfig.PositionMonitorKey,
-            PositionMonitorDeviceName = placementConfig.PositionMonitorDeviceName,
-            PositionMonitorStableId = placementConfig.PositionMonitorStableId,
-            PositionMonitorWasPrimary = placementConfig.PositionMonitorWasPrimary,
+            // Derived fields (spec 4.4): the stored capsule monitor identity
+            // always mirrors the surface's identity, never its own snapshot.
+            PositionMonitorKey = config.PositionMonitorKey,
+            PositionMonitorDeviceName = config.PositionMonitorDeviceName,
+            PositionMonitorStableId = config.PositionMonitorStableId,
+            PositionMonitorWasPrimary = config.PositionMonitorWasPrimary,
             BoundsCoordinateVersion = WidgetConfig.CurrentBoundsCoordinateVersion
         };
     }

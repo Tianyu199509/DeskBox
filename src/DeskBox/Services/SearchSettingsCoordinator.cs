@@ -223,6 +223,9 @@ public sealed class SearchSettingsCoordinator : ISearchSettings, ISearchFeatureS
         return applied ? new(true) : FailedHotkey(error);
     }
 
+    public bool IsGestureOwnedByMainHotkey(GlobalHotkeyGesture gesture) =>
+        _getHotkey()?.IsGestureOwnedByMainHotkey(gesture) == true;
+
     private SearchHotkeyUpdateResult UnavailableHotkey() =>
         new(false, _localization.T("Settings.Search.Hotkey.Status.Disabled"));
 

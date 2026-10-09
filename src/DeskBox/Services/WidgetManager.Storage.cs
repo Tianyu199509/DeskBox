@@ -151,6 +151,7 @@ public sealed partial class WidgetManager
                 IsDisabled = false
             };
 
+            ApplyNewWidgetPlacement(config);
             _settingsService.Settings.Widgets.Add(config);
             if (canCreateWindow)
             {

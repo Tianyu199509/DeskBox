@@ -708,10 +708,16 @@ public sealed partial class WidgetGroupTitleSwitcher
         bool directional =
             animationsEnabled &&
             origin is not WidgetGroupSwitchOrigin.Programmatic;
+        WidgetGroupSwitchAnimationEffect effect =
+            WidgetGroupSwitchAnimationPolicy.ResolveEffect(
+                App.Current?.SettingsService?.Settings.WidgetLayout
+                    .WidgetGroupSwitchAnimationStyle,
+                NavigationStyle);
         WidgetContentTransitionProfile profile =
             WidgetContentTransitionProfile.Create(
                 animationsEnabled,
-                directional);
+                directional,
+                effect);
         if (profile.DurationMilliseconds <= 0)
         {
             IdentityViewport.Width = _pendingIdentityWidth;
@@ -733,15 +739,22 @@ public sealed partial class WidgetGroupTitleSwitcher
         double sign = forward ? 1 : -1;
         double distance = profile.TranslationDistance;
         double railDistance = Math.Min(4, distance);
+        bool horizontalMotion =
+            effect == WidgetGroupSwitchAnimationEffect.Horizontal;
+        string motionProperty = horizontalMotion
+            ? nameof(TranslateTransform.X)
+            : nameof(TranslateTransform.Y);
         var outgoingTransform = new TranslateTransform();
         var incomingTransform = new TranslateTransform
         {
-            Y = directional ? distance * sign : 0
+            X = horizontalMotion ? distance * sign : 0,
+            Y = horizontalMotion ? 0 : distance * sign
         };
         var outgoingRailTransform = new TranslateTransform();
         var incomingRailTransform = new TranslateTransform
         {
-            Y = directional ? railDistance * sign : 0
+            X = horizontalMotion ? railDistance * sign : 0,
+            Y = horizontalMotion ? 0 : railDistance * sign
         };
         OutgoingIdentityLayer.RenderTransform = outgoingTransform;
         CurrentIdentityLayer.RenderTransform = incomingTransform;
@@ -779,18 +792,24 @@ public sealed partial class WidgetGroupTitleSwitcher
         storyboard.Children.Add(outgoingFade);
         storyboard.Children.Add(incomingFade);
 
-        var iconScaleX = CreateIncomingIconScaleAnimation();
-        var iconScaleY = CreateIncomingIconScaleAnimation();
-        Storyboard.SetTarget(iconScaleX, CurrentIconScaleTransform);
-        Storyboard.SetTargetProperty(
-            iconScaleX,
-            nameof(ScaleTransform.ScaleX));
-        Storyboard.SetTarget(iconScaleY, CurrentIconScaleTransform);
-        Storyboard.SetTargetProperty(
-            iconScaleY,
-            nameof(ScaleTransform.ScaleY));
-        storyboard.Children.Add(iconScaleX);
-        storyboard.Children.Add(iconScaleY);
+        // The icon pop belongs to the motion effects; a pure cross fade keeps
+        // the swap flat, matching the content presenter.
+        if (effect is WidgetGroupSwitchAnimationEffect.Vertical
+            or WidgetGroupSwitchAnimationEffect.Horizontal)
+        {
+            var iconScaleX = CreateIncomingIconScaleAnimation();
+            var iconScaleY = CreateIncomingIconScaleAnimation();
+            Storyboard.SetTarget(iconScaleX, CurrentIconScaleTransform);
+            Storyboard.SetTargetProperty(
+                iconScaleX,
+                nameof(ScaleTransform.ScaleX));
+            Storyboard.SetTarget(iconScaleY, CurrentIconScaleTransform);
+            Storyboard.SetTargetProperty(
+                iconScaleY,
+                nameof(ScaleTransform.ScaleY));
+            storyboard.Children.Add(iconScaleX);
+            storyboard.Children.Add(iconScaleY);
+        }
 
         var outgoingRailFade = new DoubleAnimation
         {
@@ -844,7 +863,7 @@ public sealed partial class WidgetGroupTitleSwitcher
             widthAnimation,
             nameof(FrameworkElement.Width));
         storyboard.Children.Add(widthAnimation);
-        if (directional)
+        if (profile.UsesMotion)
         {
             var outgoingMotion = new DoubleAnimation
             {
@@ -857,7 +876,7 @@ public sealed partial class WidgetGroupTitleSwitcher
                 }
             };
             Storyboard.SetTarget(outgoingMotion, outgoingTransform);
-            Storyboard.SetTargetProperty(outgoingMotion, nameof(TranslateTransform.Y));
+            Storyboard.SetTargetProperty(outgoingMotion, motionProperty);
             storyboard.Children.Add(outgoingMotion);
 
             var incomingMotion = new DoubleAnimation
@@ -872,7 +891,7 @@ public sealed partial class WidgetGroupTitleSwitcher
                 }
             };
             Storyboard.SetTarget(incomingMotion, incomingTransform);
-            Storyboard.SetTargetProperty(incomingMotion, nameof(TranslateTransform.Y));
+            Storyboard.SetTargetProperty(incomingMotion, motionProperty);
             storyboard.Children.Add(incomingMotion);
 
             var outgoingRailMotion = new DoubleAnimation
@@ -890,7 +909,7 @@ public sealed partial class WidgetGroupTitleSwitcher
                 outgoingRailTransform);
             Storyboard.SetTargetProperty(
                 outgoingRailMotion,
-                nameof(TranslateTransform.Y));
+                motionProperty);
             storyboard.Children.Add(outgoingRailMotion);
 
             var incomingRailMotion = new DoubleAnimation
@@ -909,7 +928,7 @@ public sealed partial class WidgetGroupTitleSwitcher
                 incomingRailTransform);
             Storyboard.SetTargetProperty(
                 incomingRailMotion,
-                nameof(TranslateTransform.Y));
+                motionProperty);
             storyboard.Children.Add(incomingRailMotion);
         }
         storyboard.Completed += IdentityStoryboard_Completed;

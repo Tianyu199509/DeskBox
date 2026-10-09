@@ -20,10 +20,6 @@ namespace DeskBox.Views.SettingsSections;
 /// </summary>
 public sealed partial class DisplaySettingsSection : UserControl
 {
-    // Preview accents follow the user's system accent color, resolved fresh
-    // on every rebuild so theme/accent changes apply on the next refresh.
-    private Brush AccentBrush() => new SolidColorBrush(ResolveAccentColor());
-
     private const double PreviewPaddingPx = 16;
 
     private IReadOnlyList<WidgetScreenInfo> _screens = [];
@@ -33,8 +29,90 @@ public sealed partial class DisplaySettingsSection : UserControl
     public DisplaySettingsSection()
     {
         InitializeComponent();
-        Loaded += (_, _) => Refresh();
-        ActualThemeChanged += (_, _) => Refresh();
+        ApplyPreviewHintForeground();
+        Loaded += OnSectionLoaded;
+        Unloaded += OnSectionUnloaded;
+        ActualThemeChanged += (_, _) =>
+        {
+            ApplyPreviewHintForeground();
+            Refresh();
+        };
+    }
+
+    // H5: the app raises this when the display topology changes outside the
+    // settings page (hot-plug, resolution change), so the preview and combos
+    // do not keep showing a stale arrangement.
+    private void OnSectionLoaded(object sender, RoutedEventArgs e)
+    {
+        global::DeskBox.App.Current.DisplayTopologyChanged += OnExternalDisplayTopologyChanged;
+        global::DeskBox.App.Current.ScreenHomeChanged += OnExternalScreenHomeChanged;
+        Refresh();
+    }
+
+    private void OnSectionUnloaded(object sender, RoutedEventArgs e)
+    {
+        global::DeskBox.App.Current.DisplayTopologyChanged -= OnExternalDisplayTopologyChanged;
+        global::DeskBox.App.Current.ScreenHomeChanged -= OnExternalScreenHomeChanged;
+        _refreshDebounce?.Stop();
+    }
+
+    private void OnExternalDisplayTopologyChanged()
+    {
+        // Topology changes arrive in bursts while Windows re-enumerates
+        // monitors (a primary switch fires several signature flips); the
+        // debounce also skips the transient mid-states whose rasterization
+        // scale mismatch crashed the XAML layout pass.
+        ScheduleRefresh();
+    }
+
+    private void OnExternalScreenHomeChanged() => ScheduleRefresh();
+
+    private Microsoft.UI.Dispatching.DispatcherQueueTimer? _refreshDebounce;
+
+    /// <summary>
+    /// Coalesced UI refresh: screen-home changes arrive in bursts (move-all
+    /// fires one per surface) and topology changes flip through transient
+    /// states, so every external trigger funnels into one short debounce
+    /// instead of rebuilding the page back-to-back mid-layout.
+    /// </summary>
+    private void ScheduleRefresh()
+    {
+        _refreshDebounce ??= DispatcherQueue.CreateTimer();
+        _refreshDebounce.Interval = TimeSpan.FromMilliseconds(300);
+        _refreshDebounce.IsRepeating = false;
+        _refreshDebounce.Tick -= DebouncedRefresh;
+        _refreshDebounce.Tick += DebouncedRefresh;
+        _refreshDebounce.Stop();
+        _refreshDebounce.Start();
+    }
+
+    private void DebouncedRefresh(
+        Microsoft.UI.Dispatching.DispatcherQueueTimer sender,
+        object args)
+    {
+        if (!_isRefreshing)
+        {
+            Refresh();
+        }
+    }
+
+    /// <summary>
+    /// Preview hint keeps the secondary text color instead of raw opacity,
+    /// resolved in code-behind (SettingsWindow.Feedback precedent) because a
+    /// ThemeResource brush here can break DataTemplate.LoadContent. The
+    /// lookup must follow the section's own effective theme: an
+    /// application-scope lookup resolves against the startup system theme,
+    /// which pinned the hint to the dark dictionary's white in a Light
+    /// settings window.
+    /// </summary>
+    private void ApplyPreviewHintForeground()
+    {
+        if (Helpers.NeutralInteractionBrush.ResolveThemedResource(
+                "TextFillColorSecondaryBrush",
+                PreviewHintText) is Brush hintBrush)
+        {
+            PreviewHintText.Foreground = hintBrush;
+        }
     }
 
     public void Refresh()
@@ -44,30 +122,49 @@ public sealed partial class DisplaySettingsSection : UserControl
             return;
         }
 
+        // try/finally + single reset point: the flag guards the combo
+        // SelectionChanged handlers, and a rebuild can raise those events
+        // after the sub-builders finish — resetting inside them re-armed the
+        // page for re-entrant rebuilds during layout (the primary-switch
+        // crash family).
         _isRefreshing = true;
-        _screens = WidgetScreenCatalog.Capture();
-        if (_selectedScreen is { } currentScreen)
+        try
         {
-            _selectedScreen = WidgetScreenCatalog.TryFindScreen(_screens, currentScreen.StableId);
-        }
+            _screens = WidgetScreenCatalog.Capture();
+            if (_selectedScreen is { } currentScreen)
+            {
+                _selectedScreen = WidgetScreenCatalog.TryFindScreen(_screens, currentScreen.StableId);
+            }
 
-        // Windows opens the display page with the primary monitor selected.
-        if (_selectedScreen is null)
+            // Windows opens the display page with the primary monitor selected.
+            if (_selectedScreen is null)
+            {
+                _selectedScreen = _screens.FirstOrDefault(screen => screen.IsPrimary) ?? _screens.FirstOrDefault();
+            }
+
+            // Windows shows the arrangement even for a single monitor — the page
+            // keeps a compact preview so "identify" and the default badge stay
+            // meaningful; multi-monitor layouts get the full-size arrangement.
+            bool hasScreens = _screens.Count > 0;
+            PreviewArea.Visibility = hasScreens ? Visibility.Visible : Visibility.Collapsed;
+            PreviewViewbox.MaxHeight = _screens.Count > 1 ? 280 : 200;
+
+            RebuildPreview();
+            UpdateScreenDetailCard();
+            RefreshPlacementCombos();
+            RefreshWidgetCards();
+        }
+        catch (Exception ex)
         {
-            _selectedScreen = _screens.FirstOrDefault(screen => screen.IsPrimary) ?? _screens.FirstOrDefault();
+            // A topology change can land mid-rebuild (rasterization scale
+            // moving, monitors re-enumerating); losing one refresh beats a
+            // stowed-exception crash. The next event re-runs a full refresh.
+            global::DeskBox.App.Log($"[Displays] Refresh failed: {ex.Message}");
         }
-
-        // Windows shows the arrangement even for a single monitor — the page
-        // keeps a compact preview so "identify" and the default badge stay
-        // meaningful; multi-monitor layouts get the full-size arrangement.
-        bool hasScreens = _screens.Count > 0;
-        PreviewArea.Visibility = hasScreens ? Visibility.Visible : Visibility.Collapsed;
-        PreviewViewbox.MaxHeight = _screens.Count > 1 ? 280 : 200;
-
-        RebuildPreview();
-        UpdateScreenDetailCard();
-        RefreshWidgetCards();
-        _isRefreshing = false;
+        finally
+        {
+            _isRefreshing = false;
+        }
     }
 
     // ── Arrangement preview ────────────────────────────────────
@@ -228,6 +325,23 @@ public sealed partial class DisplaySettingsSection : UserControl
         card.Resources["ButtonForeground"] = Brush(contrast);
         card.Resources["ButtonForegroundPointerOver"] = Brush(contrast);
         card.Resources["ButtonForegroundPressed"] = Brush(contrast);
+
+        // L1: a fill whose luminance sits in the ambiguous band around the
+        // 0.45 black/white threshold (0.35–0.55) gives the number weak
+        // contrast against the fill; a 1px inner contrast stroke keeps the
+        // selection edge readable on those mid-luminance accents.
+        if (RelativeLuminance(fill) is >= 0.35 and <= 0.55 &&
+            card.Content is Grid content)
+        {
+            card.Content = new Border
+            {
+                BorderBrush = Brush(contrast),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(7),
+                Margin = new Thickness(1),
+                Child = content
+            };
+        }
     }
 
     private Border CreateBadge(
@@ -356,11 +470,11 @@ public sealed partial class DisplaySettingsSection : UserControl
             return;
         }
 
-        ScreenDetailCard.Visibility = Visibility.Visible;
+        ScreenDetailCard.Visibility = _screens.Count > 1 ? Visibility.Visible : Visibility.Collapsed;
         string title = Format(
             "Widget.ScreenBinding.MonitorFormat",
             screen.Number,
-            screen.PhysicalSizeText);
+            screen.DisplayName);
         ScreenDetailCard.Header = screen.IsPrimary
             ? title + T("Widget.ScreenBinding.PrimarySuffix")
             : title;
@@ -380,51 +494,14 @@ public sealed partial class DisplaySettingsSection : UserControl
 
         ScreenDetailCard.Description = Format(
             "Settings.Displays.ScreenSummary",
-            screen.PhysicalSizeText,
+            screen.DisplayName,
             Math.Round(screen.EffectiveDpiScale * 100),
             boundCount);
-
-        string? defaultId = global::DeskBox.App.Current.SettingsService.Settings
-            .WidgetDefaultBoundScreenId;
-        bool screenIsDefault = string.Equals(
-            defaultId?.Trim(),
-            screen.StableId.Trim(),
-            StringComparison.OrdinalIgnoreCase);
-
-        // Two-state action: the selected screen that is already the widget
-        // default offers "clear default" instead of a dead disabled button.
-        // The caption resolves in code-behind (not a Localized attached
-        // property) because it flips per selected screen at runtime.
-        SetDefaultScreenButton.IsEnabled = true;
-        SetDefaultScreenButton.Content = screenIsDefault
-            ? T("Settings.Displays.SetDefault.Clear.Title")
-            : T("Settings.Displays.SetDefault");
     }
 
-    private void SetDefaultScreenButton_Click(object sender, RoutedEventArgs e)
-    {
-        if (_selectedScreen is not { } screen)
-        {
-            return;
-        }
+    private WidgetMoveAllUndoToken? _lastMoveAllToken;
 
-        var service = global::DeskBox.App.Current.SettingsService;
-        bool clearing = string.Equals(
-            service.Settings.WidgetDefaultBoundScreenId?.Trim(),
-            screen.StableId.Trim(),
-            StringComparison.OrdinalIgnoreCase);
-        service.Settings.WidgetDefaultBoundScreenId = clearing ? null : screen.StableId;
-        _ = service.SaveAsync();
-        ShowStatus(
-            InfoBarSeverity.Success,
-            clearing
-                ? T("Settings.Displays.SetDefault.Clear.Title")
-                : Format("Settings.Displays.SetDefault.Done", screen.Number),
-            string.Empty);
-        Refresh();
-    }
-
-    private async void PinAllWidgetsButton_Click(object sender, RoutedEventArgs e)
+    private async void MoveAllWidgetsButton_Click(object sender, RoutedEventArgs e)
     {
         if (_selectedScreen is not { } screen ||
             global::DeskBox.App.Current.WidgetManager is not { } manager)
@@ -432,33 +509,234 @@ public sealed partial class DisplaySettingsSection : UserControl
             return;
         }
 
-        PinAllWidgetsButton.IsEnabled = false;
+        // Confirm dialog (spec 6.3/6.4): counts how many widgets sit on other
+        // displays right now.
+        var surfaces = EnumerateSurfaces().ToList();
+        int elsewhere = surfaces.Count(surface =>
+            surface.Mode == WidgetScreenBindingMode.Pinned &&
+            !string.Equals(
+                surface.BoundScreenId?.Trim(),
+                screen.StableId.Trim(),
+                StringComparison.OrdinalIgnoreCase));
+        var dialog = new ContentDialog
+        {
+            Title = Format("Settings.Displays.MoveAll.ConfirmTitle", screen.Number),
+            Content = elsewhere == 0
+                ? Format("Settings.Displays.MoveAll.ConfirmBodyAllHere", surfaces.Count)
+                : Format("Settings.Displays.MoveAll.ConfirmBody", surfaces.Count, elsewhere),
+            PrimaryButtonText = T("Settings.Displays.MoveAll.ConfirmButton"),
+            CloseButtonText = T("Common.Cancel"),
+            DefaultButton = ContentDialogButton.Primary,
+            XamlRoot = XamlRoot
+        };
+        if (await dialog.ShowAsync() != ContentDialogResult.Primary)
+        {
+            return;
+        }
+
+        MoveAllWidgetsButton.IsEnabled = false;
         try
         {
-            int changed = await manager.PinAllWidgetSurfacesToScreenAsync(screen.StableId);
-            ShowStatus(
-                InfoBarSeverity.Success,
-                Format("Settings.Displays.PinAll.Done", changed, screen.Number),
-                string.Empty);
+            (int moved, WidgetMoveAllUndoToken token) =
+                await manager.MoveAllWidgetSurfacesToDisplayAsync(screen.StableId);
+            _lastMoveAllToken = token;
+            ShowMoveAllDone(moved, screen.Number, token);
         }
         catch (Exception ex)
         {
-            global::DeskBox.App.Log($"[Displays] Pin-all failed: {ex}");
+            global::DeskBox.App.Log($"[Displays] Move-all failed: {ex}");
             ShowStatus(
                 InfoBarSeverity.Error,
-                T("Settings.Displays.PinAll.Failed"),
+                T("Settings.Displays.MoveAll.Failed"),
                 string.Empty);
         }
         finally
         {
-            PinAllWidgetsButton.IsEnabled = true;
+            MoveAllWidgetsButton.IsEnabled = true;
             Refresh();
         }
+    }
+
+    private void ShowMoveAllDone(int moved, int displayNumber, WidgetMoveAllUndoToken token)
+    {
+        var undoButton = new Button { Content = T("Settings.Displays.MoveAll.Undo") };
+        undoButton.Click += async (_, _) =>
+        {
+            undoButton.IsEnabled = false;
+            try
+            {
+                if (global::DeskBox.App.Current.WidgetManager is { } manager)
+                {
+                    // New signature: false means the snapshot went stale
+                    // (widgets moved again after the move-all) and nothing
+                    // was restored.
+                    bool undone = await manager.UndoMoveAllWidgetSurfacesAsync(token);
+                    _lastMoveAllToken = null;
+                    ShowStatus(
+                        undone ? InfoBarSeverity.Informational : InfoBarSeverity.Warning,
+                        undone
+                            ? T("Settings.Displays.MoveAll.Undone")
+                            : T("Settings.Displays.MoveAll.Stale"),
+                        string.Empty);
+                }
+            }
+            catch (Exception ex)
+            {
+                global::DeskBox.App.Log($"[Displays] Move-all undo failed: {ex}");
+            }
+            finally
+            {
+                Refresh();
+            }
+        };
+        DisplaysStatusInfo.ActionButton = undoButton;
+        ShowStatus(
+            InfoBarSeverity.Success,
+            Format("Settings.Displays.MoveAll.Done", moved, displayNumber),
+            string.Empty);
     }
 
     private void IdentifyButton_Click(object sender, RoutedEventArgs e)
     {
         DisplayIdentifyOverlayWindow.IdentifyAll(_screens);
+    }
+
+    // ── 新格子出现在 / 显示器断开时 (spec 6.3) ────────────────
+
+    private void RefreshPlacementCombos()
+    {
+        var settings = global::DeskBox.App.Current.SettingsService.Settings;
+        _isRefreshing = true;
+
+        // 新格子出现在: cursor / main / per-display (+ offline "specific"
+        // display keeps selection with a disabled marker row).
+        NewPlacementCombo.Items.Clear();
+        NewPlacementCombo.Items.Add(new ComboBoxItem
+        {
+            Content = T("Settings.Displays.NewWidgets.Cursor"),
+            Tag = SettingsService.WidgetNewPlacementCursorDisplay
+        });
+        NewPlacementCombo.Items.Add(new ComboBoxItem
+        {
+            Content = T("Settings.Displays.NewWidgets.Main"),
+            Tag = SettingsService.WidgetNewPlacementMainDisplay
+        });
+        string currentTarget = SettingsService.NormalizeWidgetNewPlacementTarget(
+            settings.WidgetNewPlacementTarget);
+        int selectedIndex = currentTarget switch
+        {
+            SettingsService.WidgetNewPlacementMainDisplay => 1,
+            SettingsService.WidgetNewPlacementSpecificDisplay => -1,
+            _ => 0
+        };
+        foreach (WidgetScreenInfo screen in _screens)
+        {
+            bool isSpecific = currentTarget == SettingsService.WidgetNewPlacementSpecificDisplay &&
+                string.Equals(
+                    settings.WidgetDefaultBoundScreenId?.Trim(),
+                    screen.StableId.Trim(),
+                    StringComparison.OrdinalIgnoreCase);
+            var item = new ComboBoxItem
+            {
+                Content = Format(
+                    "Widget.ScreenBinding.MonitorFormat",
+                    screen.Number,
+                    screen.DisplayName),
+                Tag = screen.StableId
+            };
+            NewPlacementCombo.Items.Add(item);
+            if (isSpecific)
+            {
+                selectedIndex = NewPlacementCombo.Items.Count - 1;
+            }
+        }
+
+        if (selectedIndex < 0)
+        {
+            // Specific display offline: keep a disabled marker selected. The
+            // default-screen id has no stored label, so the compact generic
+            // name fills {0} in the NewWidgets.Offline wording.
+            var offline = new ComboBoxItem
+            {
+                Content = Format(
+                    "Settings.Displays.NewWidgets.Offline",
+                    T("Widget.ScreenBinding.HomeOfflineFallbackName")),
+                IsEnabled = false,
+                Tag = "offline-specific"
+            };
+            NewPlacementCombo.Items.Add(offline);
+            selectedIndex = NewPlacementCombo.Items.Count - 1;
+        }
+
+        NewPlacementCombo.SelectedIndex = selectedIndex;
+
+        // 显示器断开时: move / collapse.
+        DisconnectBehaviorCombo.Items.Clear();
+        DisconnectBehaviorCombo.Items.Add(new ComboBoxItem
+        {
+            Content = T("Settings.Displays.Disconnect.Move"),
+            Tag = SettingsService.WidgetDisplayDisconnectMoveToRemaining
+        });
+        DisconnectBehaviorCombo.Items.Add(new ComboBoxItem
+        {
+            Content = T("Settings.Displays.Disconnect.Collapse"),
+            Tag = SettingsService.WidgetDisplayDisconnectCollapseToCapsule
+        });
+        DisconnectBehaviorCombo.SelectedIndex = string.Equals(
+            SettingsService.NormalizeWidgetDisplayDisconnectBehavior(settings.WidgetDisplayDisconnectBehavior),
+            SettingsService.WidgetDisplayDisconnectCollapseToCapsule) ? 1 : 0;
+        // _isRefreshing stays held: only the outer Refresh() releases it, so
+        // deferred SelectionChanged events from these rebuilds cannot trigger
+        // re-entrant page rebuilds during layout.
+    }
+
+    private void NewPlacementCombo_SelectionChanged(
+        object sender,
+        SelectionChangedEventArgs e)
+    {
+        if (_isRefreshing ||
+            NewPlacementCombo.SelectedItem is not ComboBoxItem { Tag: string tag } ||
+            string.Equals(tag, "offline-specific", StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        var service = global::DeskBox.App.Current.SettingsService;
+        if (tag is SettingsService.WidgetNewPlacementCursorDisplay or
+            SettingsService.WidgetNewPlacementMainDisplay)
+        {
+            service.Settings.WidgetNewPlacementTarget = tag;
+        }
+        else
+        {
+            service.Settings.WidgetNewPlacementTarget =
+                SettingsService.WidgetNewPlacementSpecificDisplay;
+            service.Settings.WidgetDefaultBoundScreenId = tag;
+        }
+
+        _ = service.SaveAsync();
+        // The preview's "新格子" badge mirrors this setting — schedule a
+        // refresh instead of calling Refresh() inline: this handler runs
+        // inside the combo's own SelectionChanged, and a synchronous rebuild
+        // here re-enters the selector while it is still settling (the
+        // primary-switch crash family).
+        ScheduleRefresh();
+    }
+
+    private void DisconnectBehaviorCombo_SelectionChanged(
+        object sender,
+        SelectionChangedEventArgs e)
+    {
+        if (_isRefreshing ||
+            DisconnectBehaviorCombo.SelectedItem is not ComboBoxItem { Tag: string tag })
+        {
+            return;
+        }
+
+        var service = global::DeskBox.App.Current.SettingsService;
+        service.Settings.WidgetDisplayDisconnectBehavior =
+            SettingsService.NormalizeWidgetDisplayDisconnectBehavior(tag);
+        _ = service.SaveAsync();
     }
 
     // ── Widget rows with inline "show on" combos ───────────────
@@ -486,17 +764,11 @@ public sealed partial class DisplaySettingsSection : UserControl
     {
         var combo = new ComboBox
         {
-            MinWidth = 200,
+            MinWidth = 240,
             Tag = surface.ApplyWidgetId
         };
         _isRefreshing = true;
-        int selectedIndex = surface.Mode switch
-        {
-            WidgetScreenBindingMode.FollowPrimary => 1,
-            WidgetScreenBindingMode.Pinned => -1,
-            _ => 0
-        };
-        combo.Items.Add(new ComboBoxItem { Content = T("Widget.ScreenBinding.Auto"), Tag = "auto" });
+        int selectedIndex = surface.Mode == WidgetScreenBindingMode.FollowPrimary ? 0 : -1;
         combo.Items.Add(new ComboBoxItem
         {
             Content = T("Widget.ScreenBinding.FollowPrimary"),
@@ -507,7 +779,7 @@ public sealed partial class DisplaySettingsSection : UserControl
             string label = Format(
                 "Widget.ScreenBinding.MonitorFormat",
                 screen.Number,
-                screen.PhysicalSizeText);
+                screen.DisplayName);
             if (screen.IsPrimary)
             {
                 label += T("Widget.ScreenBinding.PrimarySuffix");
@@ -526,13 +798,15 @@ public sealed partial class DisplaySettingsSection : UserControl
 
         if (selectedIndex < 0)
         {
-            // Pinned to a monitor that is not attached right now: show the
-            // state in place instead of silently snapping the combo to 自动.
+            // Pinned to a monitor that is not attached right now: the combo
+            // item stays compact ("DELL U2720Q（未连接）"); the explanatory
+            // "returns when reconnected" sentence lives in the row
+            // description instead of bloating the dropdown.
             var offline = new ComboBoxItem
             {
                 Content = Format(
-                    "Settings.Displays.Widgets.Offline",
-                    T("Settings.Displays.Widgets.Pinned")),
+                    "Widget.ScreenBinding.HomeOfflineCompact",
+                    OfflineHomeDisplayName(surface.BoundScreenLabel)),
                 IsEnabled = false,
                 Tag = "offline"
             };
@@ -541,12 +815,14 @@ public sealed partial class DisplaySettingsSection : UserControl
         }
 
         combo.SelectedIndex = selectedIndex;
-        _isRefreshing = false;
+        // SelectionChanged is wired only after the initial selection, and
+        // _isRefreshing stays held for the same reason as the placement
+        // combos: the outer Refresh() is the single release point.
         combo.SelectionChanged += WidgetBindingCombo_SelectionChanged;
 
         return new SettingsCard
         {
-            HeaderIcon = new FontIcon { Glyph = "\uE8A5" },
+            HeaderIcon = new FontIcon { Glyph = "\uE8A9" },
             Header = surface.DisplayName,
             Description = surface.MembersText ?? BuildBindingSummary(surface),
             HorizontalContentAlignment = HorizontalAlignment.Right,
@@ -566,14 +842,9 @@ public sealed partial class DisplaySettingsSection : UserControl
         }
 
         string widgetId = (combo.Tag as string)!;
-        (WidgetScreenBindingMode mode, string? boundId) = tag switch
-        {
-            "follow" => (WidgetScreenBindingMode.FollowPrimary, null),
-            string stableId when !string.Equals(stableId, "auto", StringComparison.Ordinal) &&
-                !string.Equals(stableId, "offline", StringComparison.Ordinal) =>
-                (WidgetScreenBindingMode.Pinned, stableId),
-            _ => (WidgetScreenBindingMode.Unbound, null)
-        };
+        (WidgetScreenBindingMode mode, string? boundId) = string.Equals(tag, "follow", StringComparison.Ordinal)
+            ? (WidgetScreenBindingMode.FollowPrimary, null)
+            : (WidgetScreenBindingMode.Pinned, tag);
 
         _ = ApplyBindingAndRefreshAsync(manager, widgetId, mode, boundId);
     }
@@ -603,14 +874,27 @@ public sealed partial class DisplaySettingsSection : UserControl
             WidgetScreenBindingMode.FollowPrimary => T("Widget.ScreenBinding.FollowPrimary"),
             WidgetScreenBindingMode.Pinned when WidgetScreenCatalog.TryFindScreen(
                 _screens, surface.BoundScreenId) is { } screen =>
-                Format("Widget.ScreenBinding.MonitorFormat", screen.Number, screen.PhysicalSizeText),
+                Format("Widget.ScreenBinding.MonitorFormat", screen.Number, screen.DisplayName),
+            // Row description carries the full explanatory sentence; without
+            // a stored label the pre-composed unnamed wording is used
+            // directly (never nested through Format).
+            WidgetScreenBindingMode.Pinned when !string.IsNullOrWhiteSpace(surface.BoundScreenLabel) =>
+                Format("Widget.ScreenBinding.HomeOffline", surface.BoundScreenLabel),
             WidgetScreenBindingMode.Pinned =>
-                Format(
-                    "Settings.Displays.Widgets.Offline",
-                    T("Settings.Displays.Widgets.Pinned")),
-            _ => T("Widget.ScreenBinding.Auto")
+                T("Widget.ScreenBinding.HomeOfflineUnnamed"),
+            _ => string.Empty
         };
     }
+
+    /// <summary>
+    /// Compact display name for a detached home: the friendly label captured
+    /// at bind time, or the generic "原显示器" fallback — never the raw
+    /// stable id, never a full sentence (that belongs to the description).
+    /// </summary>
+    private static string OfflineHomeDisplayName(string? storedLabel) =>
+        string.IsNullOrWhiteSpace(storedLabel)
+            ? T("Widget.ScreenBinding.HomeOfflineFallbackName")
+            : storedLabel;
 
     // ── Shared helpers ─────────────────────────────────────────
 
@@ -619,7 +903,8 @@ public sealed partial class DisplaySettingsSection : UserControl
         string ApplyWidgetId,
         WidgetScreenBindingMode Mode,
         string? BoundScreenId,
-        string? MembersText = null);
+        string? MembersText = null,
+        string? BoundScreenLabel = null);
 
     /// <summary>
     /// Every placeable surface: standalone widgets plus one row per group.
@@ -648,7 +933,8 @@ public sealed partial class DisplaySettingsSection : UserControl
                 widget.Name,
                 widget.Id,
                 widget.ScreenBindingMode,
-                widget.BoundScreenId));
+                widget.BoundScreenId,
+                BoundScreenLabel: widget.BoundScreenLabel));
         }
 
         foreach (WidgetGroupConfig group in settings.WidgetGroups)
@@ -671,7 +957,8 @@ public sealed partial class DisplaySettingsSection : UserControl
                 members[0].Id,
                 group.ScreenBindingMode,
                 group.BoundScreenId,
-                Format(
+                BoundScreenLabel: group.BoundScreenLabel,
+                MembersText: Format(
                     "Settings.Displays.GroupMembers",
                     string.Join(", ", members.Select(member => member.Name)))));
         }
@@ -681,6 +968,9 @@ public sealed partial class DisplaySettingsSection : UserControl
 
     private void ShowStatus(InfoBarSeverity severity, string title, string message)
     {
+        // Every status switch drops the action button: the undo affordance is
+        // only (re)attached right after a successful move-all.
+        DisplaysStatusInfo.ActionButton = null;
         DisplaysStatusInfo.Severity = severity;
         DisplaysStatusInfo.Title = title;
         DisplaysStatusInfo.Message = message;

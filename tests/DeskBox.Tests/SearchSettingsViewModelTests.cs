@@ -170,6 +170,7 @@ public sealed class SearchSettingsViewModelTests
         public void UpdatePreferences(SearchPreferenceChange change) => Writes++;
         public SearchHotkeyUpdateResult SetHotkeyEnabled(bool enabled) { Writes++; return HotkeyResult; }
         public SearchHotkeyUpdateResult ApplyHotkey(GlobalHotkeyGesture gesture) { Writes++; LastGesture = gesture; return HotkeyResult; }
+        public bool IsGestureOwnedByMainHotkey(GlobalHotkeyGesture gesture) => false;
         public async Task<EverythingConnectionSnapshot> RefreshConnectionAsync(CancellationToken cancellationToken)
         {
             LastToken = cancellationToken;

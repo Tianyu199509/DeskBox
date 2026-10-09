@@ -177,31 +177,26 @@ public sealed class SettingsAccordionAndOrderingContractTests
 
     // ------------------------------------------------------------ D. 外观动画
 
-    // Spec D: the animation template contains a SettingsExpander, and the five
-    // detail cards (Effect/Speed/Direction/Easing/Stagger) come after its
-    // declaration.
+    // Spec D: the animation template is flattened — no SettingsExpander left;
+    // the preset card (Settings.Group.Animation.Title) leads the page and the
+    // five detail cards (Effect/Speed/Direction/Easing/Stagger) follow in order.
     [Fact]
-    public void AppearanceAnimation_FiveDetailCards_FollowTheExpander()
+    public void AppearanceAnimation_DetailCards_AreFlattenedWithoutExpander()
     {
         string slice = Slice(
             ReadRepositoryFile(SettingsWindowXaml),
             "x:Key=\"AppearanceAnimationSettingsSectionTemplate\"",
             "x:Key=\"WidgetGroupsSectionTemplate\"");
 
-        int expander = IndexOfOrFail(slice, "<toolkit:SettingsExpander", "AppearanceAnimation section");
-        foreach (string key in new[]
-                 {
-                     "HeaderKey=\"Settings.Animation.Effect.Title\"",
-                     "HeaderKey=\"Settings.Animation.Speed.Title\"",
-                     "HeaderKey=\"Settings.Animation.Direction.Title\"",
-                     "HeaderKey=\"Settings.Animation.Easing.Title\"",
-                     "HeaderKey=\"Settings.Animation.Stagger.Title\"",
-                 })
-        {
-            int at = IndexOfOrFail(slice, key, "AppearanceAnimation section");
-            Assert.True(expander < at,
-                $"AppearanceAnimation section: {key} must come after the expander declaration.");
-        }
+        Assert.DoesNotContain("<toolkit:SettingsExpander", slice, StringComparison.Ordinal);
+
+        AssertAscending(slice, "AppearanceAnimation flattened card order",
+            "HeaderKey=\"Settings.Group.Animation.Title\"",
+            "HeaderKey=\"Settings.Animation.Effect.Title\"",
+            "HeaderKey=\"Settings.Animation.Speed.Title\"",
+            "HeaderKey=\"Settings.Animation.Direction.Title\"",
+            "HeaderKey=\"Settings.Animation.Easing.Title\"",
+            "HeaderKey=\"Settings.Animation.Stagger.Title\"");
     }
 
     // -------------------------------------------------------------- E. 材质
@@ -396,27 +391,27 @@ public sealed class SettingsAccordionAndOrderingContractTests
 
     // ------------------------------------------------------------- I. 交互页排序
 
-    // Spec I: GlobalHotkey < DesktopDoubleClick < ShowDesktop < OpenMethod <
-    // HoverButtons < ResizeSnap < WidgetLayerMode, with the elevated-notice
-    // InfoBar between the hotkey expander and the double-click card.
+    // Spec I: WidgetLayerMode < GlobalHotkey < ShowDesktop < OpenMethod <
+    // HoverButtons < ResizeSnap < DesktopDoubleClick, with the elevated-notice
+    // InfoBar between the hotkey expander and the show-desktop card.
     [Fact]
     public void Interaction_Section_FollowsThePinnedOrder()
     {
         string slice = InteractionSlice();
 
         AssertAscending(slice, "Interaction ordering",
+            "HeaderKey=\"Settings.WidgetLayerMode.Title\"",
             "HeaderKey=\"Settings.GlobalHotkey.Title\"",
-            "HeaderKey=\"Settings.DesktopDoubleClick.Title\"",
             "HeaderKey=\"Settings.ShowDesktopBehavior.Title\"",
             "HeaderKey=\"Settings.OpenMethod.Title\"",
             "HeaderKey=\"Settings.Interaction.Hover.Title\"",
             "HeaderKey=\"Settings.ResizeSnap.Title\"",
-            "HeaderKey=\"Settings.WidgetLayerMode.Title\"");
+            "HeaderKey=\"Settings.DesktopDoubleClick.Title\"");
 
         AssertAscending(slice, "Interaction elevated notice placement",
             "HeaderKey=\"Settings.GlobalHotkey.Title\"",
             "HeaderKey=\"Settings.GlobalHotkey.ElevatedNotice.Title\"",
-            "HeaderKey=\"Settings.DesktopDoubleClick.Title\"");
+            "HeaderKey=\"Settings.ShowDesktopBehavior.Title\"");
     }
 
     // -------------------------------------------------------------- J. 窗口子页
@@ -482,8 +477,9 @@ public sealed class SettingsAccordionAndOrderingContractTests
 
     // ------------------------------------------------------------ L. 其他 Section
 
-    // Spec L1: Theme < Accent < Material, and the widget-groups card after
-    // animation with TrayIcon after it.
+    // Spec L1: Theme < TrayIcon < Accent < Material (the tray-icon card sits
+    // between the theme and the accent colors), and the widget-groups card
+    // after animation.
     [Fact]
     public void AppearanceSection_FollowsThePinnedOrder()
     {
@@ -492,13 +488,13 @@ public sealed class SettingsAccordionAndOrderingContractTests
 
         AssertAscending(xaml, "AppearanceSection ordering (colors)",
             "HeaderKey=\"Settings.Theme.Title\"",
+            "HeaderKey=\"Settings.TrayIcon.Title\"",
             "HeaderKey=\"Settings.Accent.Title\"",
             "HeaderKey=\"Settings.Material.Title\"");
 
-        AssertAscending(xaml, "AppearanceSection ordering (groups and tray)",
+        AssertAscending(xaml, "AppearanceSection ordering (groups)",
             "HeaderKey=\"Settings.Group.Animation.Title\"",
-            "HeaderKey=\"Settings.Section.WidgetGroups\"",
-            "HeaderKey=\"Settings.TrayIcon.Title\"");
+            "HeaderKey=\"Settings.Section.WidgetGroups\"");
     }
 
     // Spec L2: the managed-storage section is no longer force-inserted at index 1.

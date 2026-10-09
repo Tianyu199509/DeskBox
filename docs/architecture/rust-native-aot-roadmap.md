@@ -106,7 +106,7 @@
 
 | 旧方案判断 | 当前证据 | 修订结论 |
 | --- | --- | --- |
-| Windows App SDK 已具备 Native AOT 条件 | 当前项目使用 Windows App SDK 2.2.0；Native AOT 支持早已在 Windows App SDK 1.6 引入 | 判断成立，不需要为了“获得 AOT 能力”先升级 SDK |
+| Windows App SDK 已具备 Native AOT 条件 | 当前项目使用 Windows App SDK 2.5.1；Native AOT 支持早已在 Windows App SDK 1.6 引入 | 判断成立，不需要为了“获得 AOT 能力”先升级 SDK |
 | AOT 可以做可选实验 | x64 发布已经能产出主程序，但有大量兼容性问题 | 从“可选实验”调整为“确定目标、分批迁移、JIT 保底” |
 | 103 个 `[ObservableProperty]` 字段都要迁移 | 初始有 24 个 public partial property 和 79 个字段式声明；阶段 2 已迁移 `SettingsViewModel` 67 个、`SearchPopupViewModel` 12 个 | 103 处现在全部是 public partial property，最新 AOT 日志中 `MVVMTK0045` 为 0 |
 | 49 处 `JsonSerializer` 调用、没有 source-generation context | 4B-0 精确冻结为 49 处、16 个文件；4B-1 至 4B-3C 已迁移全部产品调用并使用 14 个分域 context，4B-4 已在默认反射关闭的审计构建中验证；后续 AOT runner 全部显式使用独立或复用的 source-generated context | 初始判断成立；当前为 26 个文件、61/61 处 source-generated 调用、24 个 context 所有者、0 处反射型重载，产品持久化格式未因 evidence context 改变 |
@@ -122,12 +122,12 @@
 
 - 主项目和更新器目标均为 `net10.0-windows10.0.22621.0`。
 - 支持普通 JIT 的 `win-x64` 和 `win-arm64`；现有 `DeskBoxAotAudit` 是显式 opt-in，不改变默认 Debug/Release。3C-3-R 后，Native AOT 暂只允许 `Platform=x64`、`RuntimeIdentifier=win-x64` 且显式启用 Rust 模块；ARM64 AOT 在阶段 7 前由项目和审计脚本共同 fail fast。
-- 主项目使用 Windows App SDK 2.2.0；4A 已直接使用当前解析到的 `FolderPicker(WindowId)`、`PickSingleFolderAsync()` 和 `PickFolderResult.Path`，没有为此升级 SDK。
-- `global.json` 已固定 .NET SDK 10.0.303，并允许 `latestPatch` 范围的补丁滚动。
+- 主项目使用 Windows App SDK 2.5.1；4A 已直接使用当前解析到的 `FolderPicker(WindowId)`、`PickSingleFolderAsync()` 和 `PickFolderResult.Path`，没有为此升级 SDK。
+- `global.json` 已固定 .NET SDK 10.0.401，并允许 `latestPatch` 范围的补丁滚动。
 - 仓库 override 已实际验证为 Rust 1.96.0 MSVC x64；`rustc`、`cargo`、`clippy`、`rustfmt` 和 `x86_64-pc-windows-msvc` target 均可用。`aarch64-pc-windows-msvc` 保留到阶段 7。
 - 当前 Cargo workspace 包含生产 `deskbox-native` crate 和仅供 5B-3C 测试的静音音频 session 夹具；生产模块覆盖五类 shortcut 操作、音乐音量、Explorer 托管启动、Quick Access 以及内部回收站精确查询/恢复，ABI 为 2，x64 能力掩码为 511、必需导出为十个。AOT 编译以 `DESKBOX_NATIVE_AOT` 排除四类旧 C# COM/dynamic oracle，普通 JIT 默认仍保留它们；产品回收站删除仍使用 C# `SHFileOperationW`，测试夹具不进入产品发布。
 
-后续升级 Windows App SDK 可以单独评估，但不应与首批 AOT 兼容性修改合并。当前 2.2.0 已足以推进现有 AOT 兼容性工作；分开升级更容易判断警告、运行行为和安装依赖变化由哪一项引起。
+后续升级 Windows App SDK 可以单独评估，但不应与首批 AOT 兼容性修改合并。当前 2.5.1 已足以推进现有 AOT 兼容性工作；分开升级更容易判断警告、运行行为和安装依赖变化由哪一项引起。
 
 ### 3.2 静态清单
 

@@ -431,8 +431,7 @@ public abstract partial class WidgetWindowBase
             CompleteCompactArrangementDrag();
             RectInt32 finalBounds = GetActualWindowBounds();
             finalBounds = CompleteExpandedWidgetDrag(finalBounds);
-            CapturePositionAnchor(finalBounds.X, finalBounds.Y, finalBounds.Width, finalBounds.Height);
-            UpdateConfigBoundsFromPhysical(finalBounds.X, finalBounds.Y, finalBounds.Width, finalBounds.Height, persist: true);
+            CommitUserPlacementFromWindow(WidgetPlacementSource.Drag);
             if (_targetCollapsed)
             {
                 // The pointer is still resting on the just-dropped capsule; an
@@ -716,8 +715,7 @@ public abstract partial class WidgetWindowBase
             CompleteCompactArrangementDrag();
             RectInt32 finalBounds = GetActualWindowBounds();
             finalBounds = CompleteExpandedWidgetDrag(finalBounds);
-            CapturePositionAnchor(finalBounds.X, finalBounds.Y, finalBounds.Width, finalBounds.Height);
-            UpdateConfigBoundsFromPhysical(finalBounds.X, finalBounds.Y, finalBounds.Width, finalBounds.Height, persist: true);
+            CommitUserPlacementFromWindow(WidgetPlacementSource.Drag);
             if (_targetCollapsed)
             {
                 _suppressHoverExpansionAfterDragUntilPointerExit = true;

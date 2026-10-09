@@ -1,5 +1,7 @@
 # 格子屏幕归属与显示器预览（2026-10-04 已实现，待真机验收）
 
+> **2026-10-07 起部分被取代**：绑定语义、解析链、右键菜单、设置页按钮与兼容策略以 `docs/requirements/multiscreen-behavior-spec.md`（v2）为准（具体取代范围见其文首）。本文的 XAML 资源红线（R0）、测试与 AOT 红线（R5）、预览区视觉终案（R8）仍然有效。
+
 > **状态**：批1-3 已全部落地（2026-10-04，未提交）：绑定模型+稳定 ID 解析链+右键菜单、设置页「显示器与格子」分区（预览画布/识别/批量操作）、12 语言、单测+契约同步，4784/4784 绿。
 > **对标**：Windows 显示设置的"设为主显示器"开关 + 显示器排列预览。
 > **实现索引**：`Services/WidgetScreenCatalog.cs`（屏幕目录）、`Services/WidgetScreenMenuBuilder.cs`（右键菜单）、`Views/SettingsSections/DisplaySettingsSection.xaml(.cs)`（设置页）、`Views/DisplayIdentifyOverlayWindow.cs`（识别闪屏）、解析链改造在 `Services/WidgetPositioningService.cs`（SelectWorkAreaCore）。

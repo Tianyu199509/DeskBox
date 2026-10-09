@@ -429,6 +429,19 @@ public sealed class ManagedStorageCopyMigrationTests : IDisposable
     }
 
     [Fact]
+    public async Task NestedStorageRootClassifiesRootsOverlapInBothDirections()
+    {
+        foreach (string nested in new[] { Path.Combine(Old, "inside"), _root })
+        {
+            var error = await Assert.ThrowsAsync<StorageMigrationException>(
+                () => _manager.UpdateDefaultManagedStorageRootAsync(nested));
+            Assert.Equal(StorageMigrationProblem.RootsOverlap, error.Problem);
+            Assert.True(ManagedStorageMigrationPresentation.NeedsNewLocation(error.Problem));
+        }
+        AssertOldMapping();
+    }
+
+    [Fact]
     public void CopyPercentageUsesBytesInsteadOfNumberOfFiles()
     {
         var progress = new ManagedStorageMigrationProgress(ManagedStorageMigrationPhase.Copying,

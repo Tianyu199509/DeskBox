@@ -28,7 +28,10 @@ public sealed class DesktopOrganizationCoordinator
         var classifier = new DesktopOrganizationClassifier();
         _scanner = new DesktopOrganizationScanner(classifier);
         _planner = new DesktopOrganizationPlanner(new DesktopOrganizationRuleResolver());
-        _transaction = new DesktopOrganizationTransaction(settingsService, fileService)
+        _transaction = new DesktopOrganizationTransaction(
+            settingsService,
+            fileService,
+            widgetManager: widgetManager)
         {
             AutoOrganizationSuppressions = organizerService.AutoOrganizationSuppressions
         };

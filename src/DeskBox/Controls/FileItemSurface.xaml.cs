@@ -120,9 +120,11 @@ public sealed partial class FileItemSurface : UserControl, INotifyPropertyChange
             : Visibility.Collapsed;
 
     public HorizontalAlignment SurfaceHorizontalAlignment =>
-        Mode == FileItemSurfaceMode.List
-            ? HorizontalAlignment.Left
-            : HorizontalAlignment.Stretch;
+        // Both layouts stretch so the interactive surface - hover, selection,
+        // drop feedback - covers the full row in list mode (Explorer-style
+        // full-row select) and the full tile in icon mode. The list content
+        // itself stays left-aligned inside the stretched border.
+        HorizontalAlignment.Stretch;
 
     public double SurfaceMaxWidth => double.PositiveInfinity;
 

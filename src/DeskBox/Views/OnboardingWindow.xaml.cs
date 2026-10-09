@@ -98,6 +98,7 @@ public sealed partial class OnboardingWindow : Window
         Closed += (_, _) =>
         {
             _isClosed = true;
+            WindowsCompatibilityService.ReleaseTitleBarExtensions(this, _appWindow);
             StopSceneLoops();
             RemoveMinimumSizeHook();
             _localizationService.LanguageChanged -= OnLanguageChanged;

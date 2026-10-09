@@ -52,6 +52,18 @@ public sealed record DragDropPermissionRepairResult(
     string FailureMessage,
     bool RequiresStartupSettings);
 
+/// <summary>
+/// Lightweight elevation snapshot for the launch gate: unlike
+/// <see cref="DragDropPermissionService.Diagnose"/>, it touches no shortcuts,
+/// startup registrations, or pending diagnostics — only the current token,
+/// the Explorer token, and the UAC policy.
+/// </summary>
+public sealed record StartupElevationAssessment(
+    bool IsCurrentProcessElevated,
+    bool IsExplorerElevated,
+    bool IsUacDisabled,
+    bool CanRelaunchUnelevated);
+
 public static class DragDropPermissionService
 {
     private const string AppCompatLayersKey = @"Software\Microsoft\Windows NT\CurrentVersion\AppCompatFlags\Layers";
@@ -168,13 +180,74 @@ public static class DragDropPermissionService
             needsRelaunch);
     }
 
-    public static DragDropPermissionRepairResult Repair(SettingsService settingsService)
+    /// <summary>
+    /// Single source of truth for "is this process elevated".
+    /// WindowsPrincipal.IsInRole is false on a UAC filtered token (the
+    /// Administrators group is deny-only there) and true on the elevated
+    /// token — unlike an Owner-vs-User comparison, which merely reports
+    /// whether the *user* sits in the Administrators group (a filtered
+    /// token's default owner stays the Administrators SID) and therefore
+    /// misfires on every admin-account machine.
+    /// </summary>
+    public static bool IsCurrentProcessElevated()
+    {
+        try
+        {
+            using var identity = WindowsIdentity.GetCurrent();
+            return new WindowsPrincipal(identity).IsInRole(WindowsBuiltInRole.Administrator);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    public static StartupElevationAssessment AssessStartupElevation()
+    {
+        ProcessTokenSnapshot currentToken = GetCurrentProcessTokenSnapshot();
+        if (currentToken.IsElevated != true)
+        {
+            return new StartupElevationAssessment(
+                IsCurrentProcessElevated: false,
+                IsExplorerElevated: false,
+                IsUacDisabled: false,
+                CanRelaunchUnelevated: false);
+        }
+
+        ProcessTokenSnapshot explorerToken = GetExplorerTokenSnapshot();
+        UacPolicySnapshot uacPolicy = GetUacPolicySnapshot();
+        bool isUacDisabled = uacPolicy.EnableLua == 0;
+        bool isExplorerElevated = explorerToken.IsElevated == true;
+        return new StartupElevationAssessment(
+            IsCurrentProcessElevated: true,
+            IsExplorerElevated: isExplorerElevated,
+            IsUacDisabled: isUacDisabled,
+            CanRelaunchUnelevated: ComputeCanRelaunchUnelevated(isUacDisabled, isExplorerElevated));
+    }
+
+    /// <summary>
+    /// Stricter than Diagnose's NeedsRelaunch: the Explorer-parent relaunch
+    /// only produces an unelevated instance when Explorer itself runs
+    /// unelevated (with UAC on). With UAC off — or an elevated Explorer —
+    /// the parent-process handover would spawn another elevated instance,
+    /// so the notice must explain instead of offering a restart.
+    /// </summary>
+    public static bool ComputeCanRelaunchUnelevated(bool isUacDisabled, bool isExplorerElevated)
+    {
+        return !isUacDisabled && !isExplorerElevated;
+    }
+
+    /// <summary>
+    /// Removes the AppCompat RUNASADMIN-style layers that keep relaunching
+    /// DeskBox elevated. Used by Repair and by the launch gate before an
+    /// unelevated relaunch, so the next start is not elevated again.
+    /// Failures go to <paramref name="failures"/> when supplied (Repair's
+    /// report), otherwise to the log only (launch path).
+    /// </summary>
+    public static int ClearElevationCompatibilityFlags(List<string>? failures = null)
     {
         string currentExePath = GetCurrentExePath();
-        var before = Diagnose();
-        int repairedCount = 0;
-        List<string> failures = [];
-        bool requiresStartupSettings = false;
+        int clearedCount = 0;
 
         foreach (var entry in GetRelevantAppCompatEntries(currentExePath))
         {
@@ -192,15 +265,33 @@ public static class DragDropPermissionService
                         key.DeleteValue(entry.ExePath, throwOnMissingValue: false);
                     }
 
-                    repairedCount++;
+                    clearedCount++;
                     App.Log($"[DragDropPermission] Removed AppCompat layer root={entry.RootName} path='{entry.ExePath}' value='{entry.Value}'");
                 }
             }
             catch (Exception ex)
             {
-                failures.Add($"AppCompat {entry.ExePath}: {ex.Message}");
+                if (failures is null)
+                {
+                    App.Log($"[DragDropPermission] AppCompat clear failed for '{entry.ExePath}': {ex.Message}");
+                }
+                else
+                {
+                    failures.Add($"AppCompat {entry.ExePath}: {ex.Message}");
+                }
             }
         }
+
+        return clearedCount;
+    }
+
+    public static DragDropPermissionRepairResult Repair(SettingsService settingsService)
+    {
+        string currentExePath = GetCurrentExePath();
+        var before = Diagnose();
+        List<string> failures = [];
+        bool requiresStartupSettings = false;
+        int repairedCount = ClearElevationCompatibilityFlags(failures);
 
         try
         {
@@ -268,7 +359,15 @@ public static class DragDropPermissionService
             requiresStartupSettings);
     }
 
-    public static bool TryRelaunchAsExplorerUser()
+    /// <summary>
+    /// Relaunches this executable at Explorer's (standard-user) integrity via
+    /// PROC_THREAD_ATTRIBUTE_PARENT_PROCESS. When <paramref name="additionalArguments"/>
+    /// is given it is appended to the new instance's command line — the launch
+    /// gate passes "--await-parent-exit &lt;pid&gt;" (plus "--startup" for
+    /// unattended launches) so the new instance waits out the elevated
+    /// holder of the single-instance mutex instead of racing it.
+    /// </summary>
+    public static bool TryRelaunchAsExplorerUser(string additionalArguments = "")
     {
         string exePath = GetCurrentExePath();
         if (!File.Exists(exePath))
@@ -323,7 +422,9 @@ public static class DragDropPermissionService
                 }
 
                 startupInfo.lpAttributeList = attributeList;
-                string commandLine = $"\"{exePath}\"";
+                string commandLine = string.IsNullOrWhiteSpace(additionalArguments)
+                    ? $"\"{exePath}\""
+                    : $"\"{exePath}\" {additionalArguments.Trim()}";
                 bool created = DragDropPermissionNativeMethods.CreateProcess(
                     null,
                     commandLine,

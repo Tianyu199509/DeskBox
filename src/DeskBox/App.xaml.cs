@@ -16,6 +16,7 @@ using H.NotifyIcon;
 using H.NotifyIcon.Core;
 using Microsoft.Windows.AppLifecycle;
 using Microsoft.Windows.AppNotifications;
+using Microsoft.UI.Dispatching;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -41,6 +42,15 @@ public partial class App : Application
     private const int BackgroundMemoryCleanupRetryDelaySeconds = 5;
     private const int BackgroundMemoryCleanupMaximumRetryDelaySeconds = 30;
     private const string UpdateInstallResultArgument = "--update-install-result";
+    private const string AwaitParentExitArgument = "--await-parent-exit";
+    // The unelevated relaunch waits out the elevated instance's graceful
+    // shutdown (which releases the single-instance mutex); the timeout only
+    // guards a shutdown that wedges, after which the launch continues into
+    // the normal secondary-instance path. The graceful shutdown sequence has
+    // five bounded 15s steps plus teardown margins (worst case ~50s), so the
+    // wait must outlast that budget or a slow-but-healthy shutdown reads as
+    // wedged and the relaunch gives up.
+    private const int AwaitParentExitTimeoutMs = 60_000;
     private const int MaxQueuedLogLines = 4096;
     private const long MaxLogFileSizeBytes = 5 * 1024 * 1024; // 5 MB before rotation
     private const string TodoReminderNotificationSource = "source=todoReminder";
@@ -98,6 +108,7 @@ public partial class App : Application
     private MenuFlyoutItem? _trayExitItem;
     private SettingsWindow? _settingsWindow;
     private OnboardingWindow? _onboardingWindow;
+    private ElevationNoticeWindow? _elevationNoticeWindow;
     internal event Action<bool>? OnboardingWidgetsVisibilityChanged;
     private NativeAppNotificationService? _nativeNotificationService;
     private NativeNotificationActivationBootstrap? _nativeNotificationBootstrap;
@@ -155,11 +166,33 @@ public partial class App : Application
     private bool _externalActivationHandling;
     private DateTimeOffset? _lastBareExternalActivationAtUtc;
     private readonly bool _processStartupLaunchDetected;
+    private readonly StartupElevationAssessment _startupElevationAssessment = new(false, false, false, false);
     private bool _cloudBackupUnverifiedToastShown;
 
     public static new App Current => (App)Application.Current;
 
     public static Microsoft.UI.Dispatching.DispatcherQueue UiDispatcherQueue { get; private set; } = null!;
+
+    /// <summary>
+    /// Raised after an external display topology change (hot-plug, resolution
+    /// change) has been processed. Always invoked on the UI thread via
+    /// <see cref="UiDispatcherQueue"/>; settings sections subscribe to drop
+    /// stale arrangement previews.
+    /// </summary>
+    public event Action? DisplayTopologyChanged;
+
+    /// <summary>
+    /// Raised (UI thread) when a widget's screen home changes anywhere —
+    /// drag commits, context-menu moves, move-all/undo — so open UI surfaces
+    /// such as the settings display preview refresh promptly instead of
+    /// waiting for the page to be reopened.
+    /// </summary>
+    public event Action? ScreenHomeChanged;
+
+    internal void NotifyScreenHomeChanged()
+    {
+        UiDispatcherQueue?.TryEnqueue(() => ScreenHomeChanged?.Invoke());
+    }
 
     public bool IsStartupMode { get; set; }
 
@@ -205,6 +238,12 @@ public partial class App : Application
 
     public App()
     {
+        // An unelevated relaunch (created by the elevated instance while it
+        // still held the single-instance mutex) waits here for its parent to
+        // exit before the mutex is taken, so the takeover cannot be mistaken
+        // for a secondary instance and forwarded into the old process.
+        WaitForRelaunchParentExit(Environment.GetCommandLineArgs());
+
         // Register AUMID early so the taskbar button and Jump List work
         // for both packaged (MSIX) and unpackaged (Direct) distributions.
         JumpListService.RegisterAppUserModelId();
@@ -295,6 +334,60 @@ public partial class App : Application
             _nativeNotificationService?.Dispose();
             DrainLogQueue();
             Environment.Exit(0);
+        }
+
+        // Elevation gate: an elevated DeskBox cannot receive OLE drops from
+        // Explorer (UIPI) and cannot start XAML drags either, so an elevated
+        // launch either relaunches itself unelevated or surfaces a notice.
+        // The mutex stays owned by the kernel on these exits: the replacement
+        // instance waits for this process via --await-parent-exit.
+        _startupElevationAssessment = DragDropPermissionService.AssessStartupElevation();
+        if (_startupElevationAssessment.IsCurrentProcessElevated)
+        {
+            Log(
+                $"[Elevation] Elevated launch detected " +
+                $"uacDisabled={_startupElevationAssessment.IsUacDisabled} " +
+                $"explorerElevated={_startupElevationAssessment.IsExplorerElevated} " +
+                $"canRelaunch={_startupElevationAssessment.CanRelaunchUnelevated}");
+            if (_processStartupLaunchDetected)
+            {
+                // Nobody is watching an unattended launch: fix the cause and
+                // relaunch unelevated instead of parking a dialog. A failed
+                // relaunch keeps this instance running (drag-drop degraded).
+                _ = DragDropPermissionService.ClearElevationCompatibilityFlags();
+
+                // Two loop breakers: only relaunch when Explorer really offers
+                // a standard-user context, and never twice in a row — a
+                // relaunch that lands elevated again (elevated Explorer, or
+                // the ShellExecute fallback spawning an elevated child) must
+                // not restart forever on an unattended desktop.
+                bool alreadyRelaunchedForElevation =
+                    TryGetAwaitParentExitProcessId(Environment.GetCommandLineArgs()) is not null;
+                if (_startupElevationAssessment.CanRelaunchUnelevated &&
+                    !alreadyRelaunchedForElevation)
+                {
+                    string relaunchArguments =
+                        $"{AwaitParentExitArgument} {Environment.ProcessId} --startup";
+                    if (DragDropPermissionService.TryRelaunchAsExplorerUser(relaunchArguments))
+                    {
+                        Log("[Elevation] Unattended launch relaunched unelevated; exiting elevated instance");
+                        _nativeNotificationService?.Dispose();
+                        DrainLogQueue();
+                        Environment.Exit(0);
+                    }
+
+                    Log("[Elevation] Unattended relaunch failed; continuing elevated");
+                }
+                else
+                {
+                    Log(
+                        "[Elevation] Unattended relaunch skipped " +
+                        $"(canRelaunch={_startupElevationAssessment.CanRelaunchUnelevated}, " +
+                        $"alreadyRelaunched={alreadyRelaunchedForElevation}); continuing elevated");
+                }
+            }
+            // Interactive launches defer the notice to OnLaunched, once the
+            // tray exists and the startup pipeline is no longer watching.
         }
 
         InitializeComponent();
@@ -824,6 +917,62 @@ public partial class App : Application
         return null;
     }
 
+    internal static int? TryGetAwaitParentExitProcessId(IReadOnlyList<string> arguments)
+    {
+        for (int index = 0; index < arguments.Count; index++)
+        {
+            string argument = arguments[index].Trim().Trim('"');
+            if (string.Equals(argument, AwaitParentExitArgument, StringComparison.OrdinalIgnoreCase) &&
+                index + 1 < arguments.Count &&
+                int.TryParse(arguments[index + 1].Trim().Trim('"'), out int processId) &&
+                processId > 0)
+            {
+                return processId;
+            }
+
+            string prefix = AwaitParentExitArgument + "=";
+            if (argument.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) &&
+                int.TryParse(argument[prefix.Length..], out int inlineProcessId) &&
+                inlineProcessId > 0)
+            {
+                return inlineProcessId;
+            }
+        }
+
+        return null;
+    }
+
+    private static void WaitForRelaunchParentExit(IReadOnlyList<string> arguments)
+    {
+        if (TryGetAwaitParentExitProcessId(arguments) is not int parentProcessId)
+        {
+            return;
+        }
+
+        try
+        {
+            using Process parent = Process.GetProcessById(parentProcessId);
+            Log($"[Elevation] Relaunched unelevated; waiting for elevated pid={parentProcessId} to exit");
+            if (!parent.WaitForExit(AwaitParentExitTimeoutMs))
+            {
+                Log($"[Elevation] Timed out waiting for pid={parentProcessId}; continuing startup");
+            }
+            else
+            {
+                Log($"[Elevation] Elevated pid={parentProcessId} exited; proceeding with single-instance claim");
+            }
+        }
+        catch (ArgumentException)
+        {
+            // The elevated instance already exited before we could look at it.
+            Log($"[Elevation] Elevated pid={parentProcessId} already exited");
+        }
+        catch (Exception ex)
+        {
+            Log($"[Elevation] Parent wait failed for pid={parentProcessId}: {ex.Message}");
+        }
+    }
+
     private static string? NormalizeUpdateInstallOutcome(string? outcome)
     {
         return outcome?.Trim().Trim('"').ToLowerInvariant() switch
@@ -1102,12 +1251,43 @@ public partial class App : Application
                 DesktopDoubleClickActivationService.RefreshRegistration();
             });
             RunOptionalStartupStep("display-topology-coordinator", () =>
+            {
                 _displayTopologyTransitionCoordinator = new DisplayTopologyTransitionCoordinator(
                     UiDispatcherQueue,
                     DisplayAreaWatcherService.CaptureCurrentSignature,
                     async (generation, reasons) =>
                         WidgetManager is null ||
-                        await WidgetManager.RestoreWidgetPositionsAsync(generation, reasons)));
+                        await WidgetManager.RestoreWidgetPositionsAsync(generation, reasons));
+                StartTopologyGatePolling();
+                if (WidgetManager is not null)
+                {
+                    WidgetManager.EndRemovalGraceByUserAction = EndDisplayRemovalGraceByUserAction;
+                    WidgetManager.NotifyScreenHomeChangedAction = NotifyScreenHomeChanged;
+                    WidgetManager.SessionManager.InteractionActiveChanged += () =>
+                    {
+                        var g = _displayTopologyTransitionCoordinator?.Gate;
+                        if (g is null)
+                        {
+                            return;
+                        }
+
+                        if (WidgetManager.SessionManager.IsInteractionActive)
+                        {
+                            g.Close(DisplayTopologyGateReason.UserInteraction);
+                        }
+                        else
+                        {
+                            g.Open(DisplayTopologyGateReason.UserInteraction);
+                        }
+                    };
+                }
+            });
+
+            // Startup settling (spec 5.6): bounded wait for missing displays
+            // before the widget restore phase runs.
+            await RunOptionalStartupStepAsync(
+                "display-startup-settling",
+                WaitForStartupDisplaySettlingAsync);
 
             // Phase 3: Restore widgets (the startup snapshot must finish
             // before the restoration phase starts writing normalized state).
@@ -1118,7 +1298,8 @@ public partial class App : Application
                 "desktop-organization-recovery",
                 async () => recoveredDesktopItems = await new DesktopOrganizationTransaction(
                     SettingsService,
-                    FileService).RecoverPendingAsync());
+                    FileService,
+                    widgetManager: WidgetManager).RecoverPendingAsync());
             if (recoveredDesktopItems > 0)
             {
                 Log($"[DesktopOrganization] Recovered {recoveredDesktopItems} items from an interrupted transaction.");
@@ -1277,6 +1458,8 @@ public partial class App : Application
             // can act on: it would own the single-instance mutex and swallow
             // every later launch.
             await EnsureStartupProducedUsableSurfaceAsync();
+
+            RunOptionalStartupStep("elevation-notice", ShowElevationNoticeIfNeeded);
 
             EnsureStartupPipeline().WriteSummary();
             Log("OnLaunched completed successfully");
@@ -1464,12 +1647,17 @@ public partial class App : Application
             // Invalidate the desktop icon view cache since work areas may have changed
             WidgetLayerService.InvalidateDesktopIconViewCache();
 
+            ApplyRemovalGrace();
             RequestDisplayTopologyRestore("display-area-watcher");
             VirtualDisplayAdvisor.WarnIfPrimaryDisplayIsVirtual(
                 (titleKey, bodyKey) => ShowSettingsNotification(
                     titleKey,
                     bodyKey,
                     NotificationIcon.Warning));
+
+            // TryEnqueue keeps the raise on the UI thread regardless of which
+            // thread the watcher fired from.
+            UiDispatcherQueue.TryEnqueue(() => DisplayTopologyChanged?.Invoke());
         }
         catch (Exception ex)
         {
@@ -1477,9 +1665,160 @@ public partial class App : Application
         }
     }
 
+    /// <summary>
+    /// Removal grace (spec 5.6): when the new display set only REMOVED
+    /// displays (unplug, dock-off, KVM input switch, DP sleep), park the
+    /// restore for a grace window instead of instantly reshuffling widgets.
+    /// The shared 2s poll advances the grace; the displays returning cancels
+    /// it outright.
+    /// </summary>
+    private void ApplyRemovalGrace()
+    {
+        if (_displayTopologyTransitionCoordinator?.Gate is not { } gate ||
+            SettingsService is null)
+        {
+            return;
+        }
+
+        HashSet<string> current = DisplayIdentityTokens.CurrentSet();
+        if (gate.ClosedReasons.Contains(DisplayTopologyGateReason.RemovalGrace))
+        {
+            gate.ObserveDisplays(current);
+            return;
+        }
+
+        HashSet<string> active = DisplayIdentityTokens.ActiveProfileSet(SettingsService.Settings);
+        if (active.Count > 0 && DisplayIdentityTokens.IsTrueSubset(current, active))
+        {
+            gate.StartRemovalGrace(active, current);
+        }
+    }
+
+    private DispatcherQueueTimer? _topologyGatePollTimer;
+
+    /// <summary>
+    /// Shared 2s poll (spec 5.6): parks restores while a fullscreen app owns
+    /// the screen, and advances an open removal grace. Cheap single P/Invoke
+    /// per tick.
+    /// </summary>
+    private void StartTopologyGatePolling()
+    {
+        if (_topologyGatePollTimer is not null || UiDispatcherQueue is null)
+        {
+            return;
+        }
+
+        var gate = _displayTopologyTransitionCoordinator?.Gate;
+        if (gate is null)
+        {
+            return;
+        }
+
+        _topologyGatePollTimer = UiDispatcherQueue.CreateTimer();
+        _topologyGatePollTimer.Interval = TimeSpan.FromSeconds(2);
+        _topologyGatePollTimer.IsRepeating = true;
+        _topologyGatePollTimer.Tick += (_, _) =>
+        {
+            try
+            {
+                if (Win32Helper.IsFullscreenAppActive())
+                {
+                    gate.Close(DisplayTopologyGateReason.FullscreenApp);
+                }
+                else
+                {
+                    gate.Open(DisplayTopologyGateReason.FullscreenApp);
+                }
+
+                if (gate.ClosedReasons.Contains(DisplayTopologyGateReason.RemovalGrace))
+                {
+                    gate.ObserveDisplays(DisplayIdentityTokens.CurrentSet());
+                }
+            }
+            catch (Exception ex)
+            {
+                Log($"[DisplayTopology] Gate poll failed: {ex.Message}");
+            }
+        };
+        _topologyGatePollTimer.Start();
+    }
+
+    /// <summary>
+    /// Startup settling (spec 5.6): when the displays present at launch are
+    /// a subset of the last active arrangement, wait (bounded at 5 s) for the
+    /// missing displays before the widget restore runs, so docked setups do
+    /// not get the "everything crams onto the laptop, then moves back" dance.
+    /// </summary>
+    private async Task WaitForStartupDisplaySettlingAsync()
+    {
+        try
+        {
+            HashSet<string> active = DisplayIdentityTokens.ActiveProfileSet(SettingsService.Settings);
+            if (active.Count == 0)
+            {
+                return;
+            }
+
+            var deadline = DateTimeOffset.UtcNow + TimeSpan.FromSeconds(5);
+            while (DateTimeOffset.UtcNow < deadline)
+            {
+                HashSet<string> current = DisplayIdentityTokens.CurrentSet();
+                if (!DisplayIdentityTokens.IsTrueSubset(current, active))
+                {
+                    break;
+                }
+
+                await Task.Delay(500);
+            }
+        }
+        catch (Exception ex)
+        {
+            Log($"[DisplayTopology] Startup settling failed: {ex.Message}");
+        }
+    }
+
     internal void RequestDisplayTopologyRestore(string reason)
     {
         _displayTopologyTransitionCoordinator?.RequestRestore(reason);
+    }
+
+    /// <summary>
+    /// User reveal / drag / settings-page move ends the removal grace early
+    /// (spec 5.6): the parked restore runs now.
+    /// </summary>
+    internal void EndDisplayRemovalGraceByUserAction()
+    {
+        _displayTopologyTransitionCoordinator?.Gate.EndGraceByUserAction();
+    }
+
+    /// <summary>
+    /// Lifecycle gate events (spec 5.6): lock/logoff/remote-disconnect and
+    /// display-off park topology restores; their counterparts reopen the
+    /// gate (the reopen path re-requests any parked restore itself).
+    /// </summary>
+    private void OnLifecycleGateEvent(string eventName)
+    {
+        var gate = _displayTopologyTransitionCoordinator?.Gate;
+        if (gate is null)
+        {
+            return;
+        }
+
+        switch (eventName)
+        {
+            case "session-locked":
+                gate.Close(DisplayTopologyGateReason.SessionLocked);
+                break;
+            case "session-unlocked":
+                gate.Open(DisplayTopologyGateReason.SessionLocked);
+                break;
+            case "display-power-off":
+                gate.Close(DisplayTopologyGateReason.DisplayOff);
+                break;
+            case "display-power-on":
+                gate.Open(DisplayTopologyGateReason.DisplayOff);
+                break;
+        }
     }
 
     private AppDiagnosticsService? _diagnosticsService;
@@ -1500,7 +1839,8 @@ public partial class App : Application
                     trayHwnd,
                     UiDispatcherQueue,
                     OnLifecycleRecoveryRequested,
-                    FlushSettingsForEndSession);
+                    FlushSettingsForEndSession,
+                    OnLifecycleGateEvent);
             }
         }
         catch (Exception ex)
@@ -2370,6 +2710,15 @@ public partial class App : Application
 
     private async Task HandleExternalActivationAsync()
     {
+        // An activation racing shutdown would re-show windows the teardown
+        // sequence just closed (it runs after the settings-window step has
+        // already nulled its references).
+        if (IsShuttingDown)
+        {
+            Log("HandleExternalActivationAsync skipped: shutdown in progress");
+            return;
+        }
+
         if (!_externalActivationReady)
         {
             _externalActivationRequestedWhileBusy = true;
@@ -3098,6 +3447,29 @@ public partial class App : Application
         // skips the guide. Closing the window leaves the current step resumable.
         ShowOnboarding(resumeProgress: true);
         return true;
+    }
+
+    /// <summary>
+    /// Shows the elevated-launch notice once startup has produced a usable
+    /// surface. Skipped for unattended launches (the constructor already
+    /// attempted a silent unelevated relaunch; nobody is watching a dialog)
+    /// and on shutdown.
+    /// </summary>
+    private void ShowElevationNoticeIfNeeded()
+    {
+        if (!_startupElevationAssessment.IsCurrentProcessElevated ||
+            IsStartupMode ||
+            IsShuttingDown ||
+            _elevationNoticeWindow is not null)
+        {
+            return;
+        }
+
+        _elevationNoticeWindow = new ElevationNoticeWindow(LocalizationService, _startupElevationAssessment);
+        _elevationNoticeWindow.Closed += (_, _) => _elevationNoticeWindow = null;
+        ThemeService.TrackWindow(_elevationNoticeWindow);
+        _elevationNoticeWindow.Activate();
+        Log("[Elevation] Notice shown for interactive elevated launch");
     }
 
     public void ShowOnboarding(bool resumeProgress = false)

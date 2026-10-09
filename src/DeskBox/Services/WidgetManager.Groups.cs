@@ -1674,6 +1674,19 @@ public sealed partial class WidgetManager
                 group,
                 Math.Max(1, removedIndex + 1),
                 detachedPosition);
+            if (detachedPosition is { } dropPoint)
+            {
+                // Drag-out is a user placement (spec 5.4): the drop point —
+                // not the inherited group home — decides the new standalone
+                // surface's home display.
+                CommitUserPlacement(
+                    removedConfig,
+                    new Windows.Graphics.RectInt32(dropPoint.X, dropPoint.Y, 1, 1),
+                    new Windows.Graphics.RectInt32(dropPoint.X, dropPoint.Y, 1, 1),
+                    WidgetPlacementSource.Drag,
+                    captureIntent: false);
+            }
+
             removedConfig.IsVisible = revealStandalone && group.IsVisible;
 
             WidgetGroupConfig? survivingGroup = group.MemberIds.Count >= 2 ? group : null;
@@ -2225,16 +2238,40 @@ public sealed partial class WidgetManager
         }
 
         string? targetId = string.Equals(
-            _groupDragSourceId,
-            sourceWidgetId,
-            StringComparison.Ordinal) &&
+                _groupDragSourceId,
+                sourceWidgetId,
+                StringComparison.Ordinal) &&
             _groupDragDropReady &&
             IsGroupDragTargetUnderCursor()
             ? _groupDragTargetId
             : null;
         ClearGroupDragPreview();
-        return targetId is not null &&
-               await MergeWidgetsAsync(sourceWidgetId, targetId);
+        if (targetId is not null &&
+            await MergeWidgetsAsync(sourceWidgetId, targetId))
+        {
+            // The merge created a new group surface: commit its landing once
+            // so the entry lands under the group surface id as authoritative
+            // (spec 5.4 合并建组 entry).
+            if (FindConfig(sourceWidgetId) is { } merged &&
+                GetLoadedWindow(sourceWidgetId) is { } hostWindow &&
+                Win32Helper.GetWindowRect(hostWindow.WindowHandle, out Win32Helper.RECT hostRect))
+            {
+                CommitUserPlacement(
+                    merged,
+                    new Windows.Graphics.RectInt32(
+                        hostRect.Left, hostRect.Top,
+                        hostRect.Right - hostRect.Left, hostRect.Bottom - hostRect.Top),
+                    new Windows.Graphics.RectInt32(
+                        hostRect.Left, hostRect.Top,
+                        hostRect.Right - hostRect.Left, hostRect.Bottom - hostRect.Top),
+                    WidgetPlacementSource.GroupMerge,
+                    captureIntent: false);
+            }
+
+            return true;
+        }
+
+        return false;
     }
 
     public void CancelWidgetGroupDrag(string sourceWidgetId)
@@ -2291,6 +2328,7 @@ public sealed partial class WidgetManager
             PositionMonitorWasPrimary = source.PositionMonitorWasPrimary,
             ScreenBindingMode = source.ScreenBindingMode,
             BoundScreenId = source.BoundScreenId,
+            BoundScreenLabel = source.BoundScreenLabel,
             BoundsCoordinateVersion = source.BoundsCoordinateVersion,
             Width = source.Width,
             Height = source.Height,
@@ -2321,6 +2359,7 @@ public sealed partial class WidgetManager
         group.PositionMonitorWasPrimary = member.PositionMonitorWasPrimary;
         group.ScreenBindingMode = member.ScreenBindingMode;
         group.BoundScreenId = member.BoundScreenId;
+        group.BoundScreenLabel = member.BoundScreenLabel;
         group.BoundsCoordinateVersion = member.BoundsCoordinateVersion;
         group.Width = member.Width;
         group.Height = member.Height;
@@ -2355,6 +2394,7 @@ public sealed partial class WidgetManager
         member.PositionMonitorWasPrimary = group.PositionMonitorWasPrimary;
         member.ScreenBindingMode = group.ScreenBindingMode;
         member.BoundScreenId = group.BoundScreenId;
+        member.BoundScreenLabel = group.BoundScreenLabel;
         member.BoundsCoordinateVersion = group.BoundsCoordinateVersion;
         member.Width = group.Width;
         member.Height = group.Height;
@@ -2420,6 +2460,7 @@ public sealed partial class WidgetManager
         // monitor the group was bound to, as a standalone surface.
         member.ScreenBindingMode = group.ScreenBindingMode;
         member.BoundScreenId = group.BoundScreenId;
+        member.BoundScreenLabel = group.BoundScreenLabel;
         member.CompactPlacement = null;
     }
 

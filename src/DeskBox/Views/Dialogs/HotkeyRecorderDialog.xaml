@@ -1,0 +1,116 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ContentDialog
+    x:Class="DeskBox.Views.Dialogs.HotkeyRecorderDialog"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    DefaultButton="Primary"
+    CornerRadius="8"
+    PrimaryButtonStyle="{StaticResource AccentButtonStyle}"
+    CloseButtonStyle="{StaticResource DefaultButtonStyle}"
+    Opened="OnOpened"
+    Closing="OnClosing"
+    PrimaryButtonClick="OnPrimaryButtonClick">
+
+    <ContentDialog.Resources>
+        <!-- Key-cap chip: sits inside the recessed input well below.
+             Slightly thicker bottom edge gives the physical key-cap look
+             PowerToys uses. -->
+        <Style x:Key="KeyCapStyle" TargetType="Border">
+            <Setter Property="MinWidth" Value="38" />
+            <Setter Property="MinHeight" Value="36" />
+            <Setter Property="Padding" Value="12,5" />
+            <Setter Property="CornerRadius" Value="6" />
+            <Setter Property="BorderThickness" Value="1,1,1,2" />
+            <Setter Property="Background" Value="{ThemeResource ControlFillColorSecondaryBrush}" />
+            <Setter Property="BorderBrush" Value="{ThemeResource ControlStrongStrokeColorDefaultBrush}" />
+        </Style>
+        <Style x:Key="PresetButtonStyle" TargetType="ToggleButton">
+            <Setter Property="MinWidth" Value="0" />
+            <Setter Property="MinHeight" Value="32" />
+            <Setter Property="Padding" Value="12,4" />
+            <Setter Property="CornerRadius" Value="{ThemeResource ControlCornerRadius}" />
+        </Style>
+        <Style x:Key="RecorderLinkButtonStyle" TargetType="HyperlinkButton">
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="MinHeight" Value="28" />
+            <Setter Property="Padding" Value="8,2" />
+        </Style>
+    </ContentDialog.Resources>
+
+    <StackPanel MinWidth="460" MaxWidth="560" Spacing="14">
+        <TextBlock
+            x:Name="RuleHintTextBlock"
+            Style="{StaticResource CaptionTextBlockStyle}"
+            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+            TextWrapping="Wrap" />
+
+        <Grid ColumnSpacing="16">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <!-- Recessed input well: reads as "keys go here". -->
+            <Border
+                MinHeight="52"
+                Padding="8,6"
+                VerticalAlignment="Center"
+                Background="{ThemeResource ControlFillColorInputActiveBrush}"
+                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                BorderThickness="1"
+                CornerRadius="6">
+                <StackPanel
+                    x:Name="KeysPanel"
+                    VerticalAlignment="Center"
+                    Orientation="Horizontal"
+                    Spacing="8" />
+            </Border>
+            <StackPanel
+                Grid.Column="1"
+                VerticalAlignment="Center"
+                Orientation="Horizontal"
+                Spacing="14">
+                <HyperlinkButton
+                    x:Name="ResetButton"
+                    Click="ResetButton_Click"
+                    Style="{StaticResource RecorderLinkButtonStyle}" />
+                <HyperlinkButton
+                    x:Name="ClearButton"
+                    Click="ClearButton_Click"
+                    Style="{StaticResource RecorderLinkButtonStyle}" />
+            </StackPanel>
+        </Grid>
+
+        <InfoBar
+            x:Name="CaptureStatusInfoBar"
+            IsClosable="False"
+            IsOpen="False"
+            Severity="Warning" />
+        <InfoBar
+            x:Name="WarningInfoBar"
+            IsClosable="False"
+            IsOpen="False"
+            Severity="Warning" />
+        <InfoBar
+            x:Name="ErrorInfoBar"
+            IsClosable="False"
+            IsOpen="False"
+            Severity="Error" />
+
+        <StackPanel x:Name="PresetsSection" Spacing="8">
+            <TextBlock
+                x:Name="PresetsLabel"
+                Style="{StaticResource CaptionTextBlockStyle}"
+                Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+            <ScrollViewer
+                HorizontalScrollBarVisibility="Auto"
+                HorizontalScrollMode="Enabled"
+                VerticalScrollBarVisibility="Disabled"
+                VerticalScrollMode="Disabled">
+                <StackPanel
+                    x:Name="PresetsPanel"
+                    Orientation="Horizontal"
+                    Spacing="8" />
+            </ScrollViewer>
+        </StackPanel>
+    </StackPanel>
+</ContentDialog>

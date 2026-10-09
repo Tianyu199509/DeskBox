@@ -33,6 +33,19 @@
                     controls:SettingsComboBox.Value="{Binding Theme, Mode=TwoWay}" />
             </toolkit:SettingsCard>
 
+            <toolkit:SettingsCard
+                HorizontalContentAlignment="Right"
+                svc:Localized.DescriptionKey="Settings.TrayIcon.Description"
+                svc:Localized.HeaderKey="Settings.TrayIcon.Title">
+                <toolkit:SettingsCard.HeaderIcon>
+                    <FontIcon Glyph="&#xE713;" />
+                </toolkit:SettingsCard.HeaderIcon>
+                <ComboBox
+                    MinWidth="{StaticResource SettingsControlMinWidth}"
+                    ItemsSource="{Binding AvailableTrayIconStyleOptions}"
+                    controls:SettingsComboBox.Value="{Binding TrayIconStyle, Mode=TwoWay}" />
+            </toolkit:SettingsCard>
+
             <toolkit:SettingsExpander
                 IsExpanded="False"
                 svc:Localized.DescriptionKey="Settings.Accent.Source.Description"
@@ -159,19 +172,6 @@
                 <toolkit:SettingsCard.HeaderIcon>
                     <FontIcon Glyph="&#xE713;" />
                 </toolkit:SettingsCard.HeaderIcon>
-            </toolkit:SettingsCard>
-
-            <toolkit:SettingsCard
-                HorizontalContentAlignment="Right"
-                svc:Localized.DescriptionKey="Settings.TrayIcon.Description"
-                svc:Localized.HeaderKey="Settings.TrayIcon.Title">
-                <toolkit:SettingsCard.HeaderIcon>
-                    <FontIcon Glyph="&#xE713;" />
-                </toolkit:SettingsCard.HeaderIcon>
-                <ComboBox
-                    MinWidth="{StaticResource SettingsControlMinWidth}"
-                    ItemsSource="{Binding AvailableTrayIconStyleOptions}"
-                    controls:SettingsComboBox.Value="{Binding TrayIconStyle, Mode=TwoWay}" />
             </toolkit:SettingsCard>
 
             <toolkit:SettingsCard

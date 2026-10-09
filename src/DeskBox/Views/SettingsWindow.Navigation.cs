@@ -537,7 +537,7 @@ public sealed partial class SettingsWindow
         {
             EnsureSettingsSectionCreated(inlineSectionTag);
         }
-        PinDeferredNoticeInfoBarBrushes();
+        PrepareDeferredNoticeInfoBars();
         foreach ((string tag, FrameworkElement sectionElement) in _settingsSectionElements)
         {
             bool isPrimarySection = string.Equals(
@@ -1316,7 +1316,11 @@ public sealed partial class SettingsWindow
         FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.InfoBar>(
             "AppearanceMaterialSettings", "Windows10CompatibilityInfoBar");
 
-    private void PinDeferredNoticeInfoBarBrushes()
+    private global::Microsoft.UI.Xaml.Controls.InfoBar? CloudBackupSyncNoticeInfoBar =>
+        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.InfoBar>(
+            "CloudBackupSettings", "CloudBackupSyncNoticeInfoBar");
+
+    private void PrepareDeferredNoticeInfoBars()
     {
         // ThemeResource severity brushes inside the InfoBar template fail to
         // resolve for sections realized through DataTemplate.LoadContent
@@ -1327,6 +1331,10 @@ public sealed partial class SettingsWindow
         // its section has been created.
         PinInformationalSeverityBrushes(GlobalHotkeyElevatedNoticeInfoBar);
         PinInformationalSeverityBrushes(Windows10CompatibilityInfoBar);
+        ApplyNoticeMessageTypography(CloudBackupSyncNoticeInfoBar);
+        ApplyNoticeMessageTypography(GlobalHotkeyElevatedNoticeInfoBar);
+        ApplyNoticeMessageTypography(Windows10CompatibilityInfoBar);
+        ApplyNoticeMessageTypography(AboutStoreNoticeInfoBar);
     }
 
     private void PinInformationalSeverityBrushes(InfoBar? infoBar)
@@ -1359,5 +1367,102 @@ public sealed partial class SettingsWindow
         {
             infoBar.Foreground = foregroundBrush;
         }
+    }
+
+    // ── Notice InfoBar message typography ───────────────────────
+
+    // The InfoBar control template reads its Title/Message font sizes
+    // through StaticResource lookups that resolve inside the control
+    // library's generic.xaml, so neither element-local resource overrides
+    // nor implicit text styles can reach those two text blocks (unlike
+    // the severity brushes, which are ThemeResource values pinned above).
+    // Size the message text block down to the settings-card description
+    // spec directly once the template has been applied; the title keeps
+    // the template default (14px semi-bold). Shared with the search
+    // section's notices.
+    internal static void ApplyNoticeMessageTypography(InfoBar? infoBar)
+    {
+        if (infoBar is null)
+        {
+            return;
+        }
+
+        if (infoBar.IsLoaded)
+        {
+            SetNoticeMessageTypography(infoBar);
+            return;
+        }
+
+        // Deferred sections are created before they join the visual tree;
+        // wait for the first Loaded (template applied) and detach after.
+        infoBar.Loaded -= OnNoticeLoadedForTypography;
+        infoBar.Loaded += OnNoticeLoadedForTypography;
+    }
+
+    private static void OnNoticeLoadedForTypography(object sender, RoutedEventArgs e)
+    {
+        if (sender is not InfoBar infoBar)
+        {
+            return;
+        }
+
+        infoBar.Loaded -= OnNoticeLoadedForTypography;
+        SetNoticeMessageTypography(infoBar);
+    }
+
+    private static void SetNoticeMessageTypography(InfoBar infoBar)
+    {
+        if (TryApplyNoticeMessageTypography(infoBar))
+        {
+            return;
+        }
+
+        // Loaded fires before the first layout pass, so the template parts
+        // (Title/Message text blocks) may not exist in the visual tree yet;
+        // retry from the first LayoutUpdated, which runs after ApplyTemplate.
+        EventHandler<object> retry = null!;
+        retry = (_, _) =>
+        {
+            if (TryApplyNoticeMessageTypography(infoBar))
+            {
+                infoBar.LayoutUpdated -= retry;
+            }
+        };
+        infoBar.LayoutUpdated += retry;
+    }
+
+    private static bool TryApplyNoticeMessageTypography(InfoBar infoBar)
+    {
+        if (FindNamedDescendant(infoBar, "Message") is not TextBlock message)
+        {
+            return false;
+        }
+
+        message.FontSize = 12;
+        return true;
+    }
+
+    private static FrameworkElement? FindNamedDescendant(DependencyObject root, string name)
+    {
+        int childCount = VisualTreeHelper.GetChildrenCount(root);
+        for (int index = 0; index < childCount; index++)
+        {
+            if (VisualTreeHelper.GetChild(root, index) is not FrameworkElement child)
+            {
+                continue;
+            }
+
+            if (child.Name == name)
+            {
+                return child;
+            }
+
+            if (FindNamedDescendant(child, name) is { } match)
+            {
+                return match;
+            }
+        }
+
+        return null;
     }
 }

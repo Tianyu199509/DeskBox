@@ -15,7 +15,7 @@ namespace DeskBox.Services;
 internal sealed class WidgetTopologyLayoutService
 {
     internal const int MaximumRetainedProfiles = 12;
-    private const string CurrentTopologyKeyPrefix = "v3-";
+    private const string CurrentTopologyKeyPrefix = "v4-";
 
     public bool ActivateCurrentTopology(AppSettings settings)
     {
@@ -42,18 +42,43 @@ internal sealed class WidgetTopologyLayoutService
 
         profile.Monitors = CloneMonitors(topology.Monitors);
         profile.LastUsedAtUtc = DateTimeOffset.UtcNow;
+        // A capture here means the user placed the surface by hand (drag
+        // persist / explicit move): the profile is no longer provisional.
+        PromoteProvisionalProfile(topology.Key);
         WidgetGroupConfig? group = WidgetGroupSettings.FindByMember(settings, member.Id);
         if (group is not null)
         {
             string surfaceId = ResolveGroupSurfaceId(group);
-            profile.Surfaces[surfaceId] = CaptureGroupLayout(group, profile.Monitors);
+            profile.Surfaces[surfaceId] = PreserveAuthority(
+                profile.Surfaces.GetValueOrDefault(surfaceId),
+                CaptureGroupLayout(group, profile.Monitors));
         }
         else
         {
-            profile.Surfaces[member.Id] = CaptureWidgetLayout(member, profile.Monitors);
+            profile.Surfaces[member.Id] = PreserveAuthority(
+                profile.Surfaces.GetValueOrDefault(member.Id),
+                CaptureWidgetLayout(member, profile.Monitors));
         }
 
         return true;
+    }
+
+    /// <summary>
+    /// Captures overwrite geometry but never promote authority (spec 4.2):
+    /// an existing authoritative flag survives the rewrite; fresh captures
+    /// stay non-authoritative until the user places the surface by hand.
+    /// </summary>
+    private static WidgetSurfaceLayoutProfile PreserveAuthority(
+        WidgetSurfaceLayoutProfile? existing,
+        WidgetSurfaceLayoutProfile captured)
+    {
+        if (existing?.IsAuthoritative == true)
+        {
+            captured.IsAuthoritative = true;
+            captured.AuthoredAtUtc = existing.AuthoredAtUtc;
+        }
+
+        return captured;
     }
 
     public bool RemoveSurface(AppSettings settings, string surfaceId)
@@ -66,6 +91,12 @@ internal sealed class WidgetTopologyLayoutService
 
         return changed;
     }
+
+    /// <summary>
+    /// Group surface id for callers outside this service (screen-home
+    /// commits address group surfaces, not individual members).
+    /// </summary>
+    internal string ResolveSurfaceIdForGroup(WidgetGroupConfig group) => ResolveGroupSurfaceId(group);
 
     internal bool Activate(AppSettings settings, WidgetDisplayTopologySnapshot topology)
     {
@@ -116,11 +147,15 @@ internal sealed class WidgetTopologyLayoutService
             }
             else if (initialCapture && sourceProfile is null)
             {
-                CaptureAllSurfaces(settings, targetProfile);
+                CaptureAllSurfaces(settings, targetProfile, initialAuthoritative: true);
             }
             else
             {
                 SeedProfile(settings, sourceProfile, targetProfile);
+                // First-seen combination: provisional until it survives 10 s
+                // or receives a user placement commit (spec 5.6) — a
+                // transient topology cannot evict real arrangements via LRU.
+                TrackProvisionalProfile(topology.Key);
             }
             settings.WidgetTopologyLayouts[topology.Key] = targetProfile;
             changed = true;
@@ -171,7 +206,7 @@ internal sealed class WidgetTopologyLayoutService
         }
 
         changed |= RemoveStaleSurfaces(settings);
-        changed |= PruneProfiles(settings, topology.Key);
+        changed |= PruneProfiles(settings, topology.Key, _provisionalProfiles);
         return changed;
     }
 
@@ -207,8 +242,17 @@ internal sealed class WidgetTopologyLayoutService
 
     private static string CreateTopologyKey(IReadOnlyList<WidgetTopologyMonitorProfile> monitors)
     {
-        string signature = CreateTopologySignature(monitors);
-        byte[] hash = SHA256.HashData(Encoding.UTF8.GetBytes(signature));
+        // v4: the stable-id SET is the topology identity. Position, primary
+        // flag, DPI, and geometry are metadata that can change under one key
+        // without spawning a new profile (spec 5.6 / D5 — resolution flips
+        // must not revive old arrangements).
+        IEnumerable<string> tokens = monitors
+            .Select(monitor => DisplayIdentityTokens.TokenFor(
+                monitor.StableId,
+                monitor.MonitorWidth,
+                monitor.MonitorHeight))
+            .OrderBy(token => token, StringComparer.Ordinal);
+        byte[] hash = SHA256.HashData(Encoding.UTF8.GetBytes(string.Join("|", tokens)));
         return CurrentTopologyKeyPrefix + Convert.ToHexString(hash.AsSpan(0, 12));
     }
 
@@ -300,15 +344,85 @@ internal sealed class WidgetTopologyLayoutService
         IReadOnlyList<WidgetTopologyMonitorProfile> sourceMonitors,
         IReadOnlyList<WidgetTopologyMonitorProfile> targetMonitors)
     {
+        // Same v4 key, only metadata moved (resolution/DPI/primary/alias):
+        // refresh the identity HINTS on each entry but never rewrite the
+        // stored sizes/margins — the placement intent survives intact and is
+        // only clamped when realized (spec 5.6, fixing defect B5).
+        Dictionary<string, WidgetTopologyMonitorProfile> byStableId = targetMonitors
+            .ToDictionary(
+                monitor => DisplayIdentityTokens.TokenFor(monitor),
+                monitor => monitor,
+                StringComparer.OrdinalIgnoreCase);
         foreach ((string surfaceId, WidgetSurfaceLayoutProfile layout) in profile.Surfaces.ToList())
         {
-            profile.Surfaces[surfaceId] = MapToTopology(
-                layout,
-                sourceMonitors,
-                targetMonitors);
+            bool hasGeometry = ParseGeometryFromKey(
+                layout.PositionMonitorKey,
+                out int _,
+                out int _);
+            string token = DisplayIdentityTokens.TokenFor(
+                layout.PositionMonitorStableId,
+                hasGeometry ? SafeWidth(layout.PositionMonitorKey) : 0,
+                hasGeometry ? SafeHeight(layout.PositionMonitorKey) : 0);
+            if (byStableId.TryGetValue(token, out WidgetTopologyMonitorProfile? monitor))
+            {
+                layout.PositionMonitorDeviceName = monitor.DeviceName;
+                layout.PositionMonitorKey = CreateWorkAreaKey(monitor);
+                layout.PositionMonitorWasPrimary = monitor.IsPrimary;
+                if (!DisplayPlacementResolver.IsDegenerateIdentity(monitor.StableId))
+                {
+                    layout.PositionMonitorStableId = monitor.StableId;
+                }
+
+                if (layout.CompactPlacement is { } compact)
+                {
+                    compact.PositionMonitorDeviceName = monitor.DeviceName;
+                    compact.PositionMonitorKey = CreateWorkAreaKey(monitor);
+                    compact.PositionMonitorWasPrimary = monitor.IsPrimary;
+                    if (!DisplayPlacementResolver.IsDegenerateIdentity(monitor.StableId))
+                    {
+                        compact.PositionMonitorStableId = monitor.StableId;
+                    }
+                }
+            }
         }
     }
 
+    private static int SafeWidth(string? key) =>
+        ParseGeometryFromKey(key, out int width, out _) ? width : 0;
+
+    private static int SafeHeight(string? key) =>
+        ParseGeometryFromKey(key, out _, out int height) ? height : 0;
+
+    private static bool ParseGeometryFromKey(string? key, out int width, out int height)
+    {
+        width = 0;
+        height = 0;
+        if (string.IsNullOrWhiteSpace(key))
+        {
+            return false;
+        }
+
+        var parts = key.Split(':');
+        if (parts.Length == 4 &&
+            int.TryParse(parts[2], out width) &&
+            int.TryParse(parts[3], out height) &&
+            width > 0 && height > 0)
+        {
+            return true;
+        }
+
+        width = 0;
+        height = 0;
+        return false;
+    }
+
+    /// <summary>
+    /// Seeds a fresh profile surface-by-surface (spec 5.3): every surface
+    /// independently picks its newest authoritative entry across ALL stored
+    /// profiles (home-aware), instead of inheriting one whole profile — the
+    /// old whole-profile seeding propagated fallback-state placements into
+    /// brand-new display combinations (defect B3).
+    /// </summary>
     private static void SeedProfile(
         AppSettings settings,
         WidgetTopologyLayoutProfile? sourceProfile,
@@ -316,16 +430,12 @@ internal sealed class WidgetTopologyLayoutService
     {
         foreach ((string surfaceId, WidgetConfig config, WidgetGroupConfig? group) in EnumerateSurfaces(settings))
         {
-            WidgetSurfaceLayoutProfile current = group is null
-                ? CaptureWidgetLayout(config, sourceProfile?.Monitors ?? targetProfile.Monitors)
-                : CaptureGroupLayout(group, sourceProfile?.Monitors ?? targetProfile.Monitors);
-            WidgetSurfaceLayoutProfile source = sourceProfile?.Surfaces.TryGetValue(surfaceId, out WidgetSurfaceLayoutProfile? saved) == true
-                ? saved
-                : current;
-            targetProfile.Surfaces[surfaceId] = MapToTopology(
-                source,
-                sourceProfile?.Monitors ?? targetProfile.Monitors,
-                targetProfile.Monitors);
+            targetProfile.Surfaces[surfaceId] = SeedSurfaceEntry(
+                settings,
+                surfaceId,
+                config,
+                group,
+                targetProfile);
         }
     }
 
@@ -342,29 +452,285 @@ internal sealed class WidgetTopologyLayoutService
                 continue;
             }
 
-            WidgetSurfaceLayoutProfile current = group is null
-                ? CaptureWidgetLayout(config, sourceProfile?.Monitors ?? targetProfile.Monitors)
-                : CaptureGroupLayout(group, sourceProfile?.Monitors ?? targetProfile.Monitors);
-            WidgetSurfaceLayoutProfile source = sourceProfile?.Surfaces.TryGetValue(surfaceId, out WidgetSurfaceLayoutProfile? saved) == true
-                ? saved
-                : current;
-            targetProfile.Surfaces[surfaceId] = MapToTopology(
-                source,
-                sourceProfile?.Monitors ?? targetProfile.Monitors,
-                targetProfile.Monitors);
+            targetProfile.Surfaces[surfaceId] = SeedSurfaceEntry(
+                settings,
+                surfaceId,
+                config,
+                group,
+                targetProfile);
             changed = true;
         }
 
         return changed;
     }
 
-    private static void CaptureAllSurfaces(AppSettings settings, WidgetTopologyLayoutProfile profile)
+    /// <summary>
+    /// Resolves the entry a surface should use when <paramref name="targetProfile"/>
+    /// activates: its own entry when it still matches the surface's intent,
+    /// otherwise a freshly seeded one (spec 5.3).
+    /// </summary>
+    private static WidgetSurfaceLayoutProfile ResolveSurfaceEntryForActivation(
+        AppSettings settings,
+        string surfaceId,
+        WidgetConfig config,
+        WidgetGroupConfig? group,
+        WidgetTopologyLayoutProfile targetProfile)
+    {
+        if (!targetProfile.Surfaces.TryGetValue(surfaceId, out WidgetSurfaceLayoutProfile? existing) ||
+            existing is null)
+        {
+            return SeedSurfaceEntry(settings, surfaceId, config, group, targetProfile);
+        }
+
+        var intent = SurfaceIntent(config, group);
+        bool needsReseed = intent.Mode == WidgetScreenBindingMode.FollowPrimary
+            ? EntryDisplay(existing, targetProfile)?.IsPrimary != true
+            : !string.IsNullOrWhiteSpace(intent.HomeId) &&
+              !string.Equals(
+                  EntryStableId(existing),
+                  intent.HomeId?.Trim(),
+                  StringComparison.OrdinalIgnoreCase);
+
+        return needsReseed
+            ? SeedSurfaceEntry(settings, surfaceId, config, group, targetProfile)
+            : existing;
+    }
+
+    private static WidgetSurfaceLayoutProfile SeedSurfaceEntry(
+        AppSettings settings,
+        string surfaceId,
+        WidgetConfig config,
+        WidgetGroupConfig? group,
+        WidgetTopologyLayoutProfile targetProfile)
+    {
+        var intent = SurfaceIntent(config, group);
+
+        // Newest-authoritative-first history across every stored profile.
+        // Ties on the authored timestamp (batch captures share one) break to
+        // the fuller display set — an arrangement captured with more monitors
+        // attached is the more deliberate placement.
+        List<(WidgetSurfaceLayoutProfile Entry, WidgetTopologyLayoutProfile Profile)> authored = settings
+            .WidgetTopologyLayouts.Values
+            .Where(profile => profile.Surfaces.TryGetValue(surfaceId, out _))
+            .SelectMany(profile => profile.Surfaces
+                .Where(pair => string.Equals(pair.Key, surfaceId, StringComparison.Ordinal))
+                .Select(pair => (Entry: pair.Value, Profile: profile)))
+            .Where(candidate => candidate.Entry.IsAuthoritative == true)
+            .OrderByDescending(candidate => candidate.Entry.AuthoredAtUtc ?? DateTimeOffset.MinValue)
+            .ThenByDescending(candidate => candidate.Profile.Monitors.Count)
+            .ToList();
+
+        WidgetSurfaceLayoutProfile FallbackCurrent()
+        {
+            return group is null
+                ? CaptureWidgetLayout(config, targetProfile.Monitors)
+                : CaptureGroupLayout(group, targetProfile.Monitors);
+        }
+
+        WidgetSurfaceLayoutProfile src;
+        WidgetTopologyLayoutProfile srcProfile;
+        WidgetScreenInfo? targetDisplay = null;
+        if (intent.Mode == WidgetScreenBindingMode.FollowPrimary)
+        {
+            (src, srcProfile) = authored.Count > 0 ? (authored[0].Entry, authored[0].Profile) : (FallbackCurrent(), targetProfile);
+            targetDisplay = PrimaryOf(targetProfile);
+        }
+        else if (!string.IsNullOrWhiteSpace(intent.HomeId))
+        {
+            var onHome = authored.FirstOrDefault(candidate =>
+                string.Equals(
+                    EntryStableId(candidate.Entry),
+                    intent.HomeId!.Trim(),
+                    StringComparison.OrdinalIgnoreCase));
+            if (onHome.Entry is not null)
+            {
+                (src, srcProfile) = (onHome.Entry, onHome.Profile);
+            }
+            else if (authored.Count > 0)
+            {
+                (src, srcProfile) = (authored[0].Entry, authored[0].Profile);
+            }
+            else
+            {
+                (src, srcProfile) = (FallbackCurrent(), targetProfile);
+            }
+
+            targetDisplay = FindMonitor(targetProfile, intent.HomeId) ?? ResolveHeuristicTarget(src, srcProfile, targetProfile);
+        }
+        else
+        {
+            // Newest authoritative entry whose display is online wins; among
+            // equally fresh ones the fuller display set wins (ordering above).
+            var onlineNow = authored.FirstOrDefault(candidate =>
+                FindMonitor(targetProfile, EntryStableId(candidate.Entry)) is not null);
+            if (onlineNow.Entry is not null)
+            {
+                (src, srcProfile) = (onlineNow.Entry, onlineNow.Profile);
+                targetDisplay = FindMonitor(targetProfile, EntryStableId(onlineNow.Entry));
+            }
+            else if (authored.Count > 0)
+            {
+                (src, srcProfile) = (authored[0].Entry, authored[0].Profile);
+                targetDisplay = ResolveHeuristicTarget(src, srcProfile, targetProfile);
+            }
+            else
+            {
+                (src, srcProfile) = (FallbackCurrent(), targetProfile);
+                targetDisplay = ResolveHeuristicTarget(src, srcProfile, targetProfile);
+            }
+        }
+
+        WidgetScreenInfo? srcDisplay = FindMonitor(srcProfile, EntryStableId(src));
+        bool sameDisplay = targetDisplay is not null &&
+            srcDisplay is not null &&
+            string.Equals(
+                targetDisplay.StableId.Trim(),
+                srcDisplay.StableId.Trim(),
+                StringComparison.OrdinalIgnoreCase);
+
+        WidgetSurfaceLayoutProfile seeded;
+        var srcMonitorInfo = MonitorProfileFor(srcProfile, srcDisplay);
+        var targetMonitorInfo = MonitorProfileFor(targetProfile, targetDisplay);
+        if (srcProfile.Monitors.Count == 0 || targetDisplay is null || srcMonitorInfo is null || targetMonitorInfo is null)
+        {
+            seeded = CloneLayout(src);
+            seeded.IsAuthoritative = false;
+            seeded.AuthoredAtUtc = null;
+        }
+        else
+        {
+            // Always run the mapper: even on the same display a DPI/geometry
+            // change must recompute the physical X/Y cache from the anchors
+            // (a ratio-1 clone would keep the old-scale pixels).
+            seeded = MapToTopology(
+                src,
+                [.. srcProfile.Monitors],
+                [.. targetProfile.Monitors]);
+            // Same-display projections keep the user's authored placement;
+            // cross-display mappings are heuristic and never authoritative.
+            seeded.IsAuthoritative = sameDisplay && src.IsAuthoritative == true;
+            seeded.AuthoredAtUtc = seeded.IsAuthoritative == true ? src.AuthoredAtUtc : null;
+        }
+
+        return seeded;
+    }
+
+    private static DisplayPlacementIntent SurfaceIntent(WidgetConfig config, WidgetGroupConfig? group) =>
+        group is not null
+            ? new DisplayPlacementIntent(group.ScreenBindingMode, group.BoundScreenId)
+            : new DisplayPlacementIntent(config.ScreenBindingMode, config.BoundScreenId);
+
+    private static string? EntryStableId(WidgetSurfaceLayoutProfile entry) =>
+        DisplayPlacementResolver.IsDegenerateIdentity(entry.PositionMonitorStableId)
+            ? null
+            : entry.PositionMonitorStableId?.Trim();
+
+    private static WidgetScreenInfo? EntryDisplay(
+        WidgetSurfaceLayoutProfile entry,
+        WidgetTopologyLayoutProfile profile)
+    {
+        if (profile.Monitors.Count == 0)
+        {
+            return null;
+        }
+
+        return DisplayPlacementResolver.ResolveEntryDisplay(
+            new DisplayPlacementEntryReference(
+                entry.PositionMonitorStableId,
+                entry.PositionMonitorDeviceName,
+                entry.PositionMonitorKey,
+                entry.PositionMonitorWasPrimary),
+            [.. profile.Monitors.Select((monitor, index) => ToScreenInfo(monitor, index + 1))]);
+    }
+
+    private static WidgetScreenInfo? ResolveHeuristicTarget(
+        WidgetSurfaceLayoutProfile src,
+        WidgetTopologyLayoutProfile srcProfile,
+        WidgetTopologyLayoutProfile targetProfile)
+    {
+        if (targetProfile.Monitors.Count == 0)
+        {
+            return null;
+        }
+
+        ResolvedDisplayPlacement decision = DisplayPlacementResolver.Resolve(
+            new DisplayPlacementIntent(WidgetScreenBindingMode.Unbound, null),
+            new DisplayPlacementEntryReference(
+                src.PositionMonitorStableId,
+                src.PositionMonitorDeviceName,
+                src.PositionMonitorKey,
+                src.PositionMonitorWasPrimary),
+            [.. targetProfile.Monitors.Select((monitor, index) => ToScreenInfo(monitor, index + 1))]);
+        return decision.Display;
+    }
+
+    private static WidgetScreenInfo? PrimaryOf(WidgetTopologyLayoutProfile profile)
+    {
+        var primary = profile.Monitors.FirstOrDefault(monitor => monitor.IsPrimary) ??
+            profile.Monitors.FirstOrDefault();
+        return primary is null ? null : ToScreenInfo(primary, 1);
+    }
+
+    private static WidgetScreenInfo? FindMonitor(WidgetTopologyLayoutProfile profile, string? stableId)
+    {
+        if (DisplayPlacementResolver.IsDegenerateIdentity(stableId))
+        {
+            return null;
+        }
+
+        WidgetTopologyMonitorProfile? match = profile.Monitors.FirstOrDefault(monitor =>
+            string.Equals(monitor.StableId.Trim(), stableId!.Trim(), StringComparison.OrdinalIgnoreCase));
+        return match is null ? null : ToScreenInfo(match, 1);
+    }
+
+    private static WidgetTopologyMonitorProfile? MonitorProfileFor(
+        WidgetTopologyLayoutProfile profile,
+        WidgetScreenInfo? screen) =>
+        screen is null
+            ? null
+            : profile.Monitors.FirstOrDefault(monitor =>
+                string.Equals(monitor.StableId.Trim(), screen.StableId.Trim(), StringComparison.OrdinalIgnoreCase));
+
+    private static WidgetScreenInfo ToScreenInfo(WidgetTopologyMonitorProfile monitor, int number) =>
+        new(
+            number,
+            monitor.StableId,
+            monitor.DeviceName,
+            new Windows.Graphics.RectInt32(
+                monitor.MonitorX,
+                monitor.MonitorY,
+                monitor.MonitorWidth,
+                monitor.MonitorHeight),
+            new Windows.Graphics.RectInt32(
+                monitor.WorkAreaX,
+                monitor.WorkAreaY,
+                monitor.WorkAreaWidth,
+                monitor.WorkAreaHeight),
+            monitor.IsPrimary,
+            NormalizeScale(monitor.DpiScale));
+
+    private static void CaptureAllSurfaces(
+        AppSettings settings,
+        WidgetTopologyLayoutProfile profile,
+        bool initialAuthoritative = false)
     {
         foreach ((string surfaceId, WidgetConfig config, WidgetGroupConfig? group) in EnumerateSurfaces(settings))
         {
-            profile.Surfaces[surfaceId] = group is null
+            WidgetSurfaceLayoutProfile captured = group is null
                 ? CaptureWidgetLayout(config, profile.Monitors)
                 : CaptureGroupLayout(group, profile.Monitors);
+            if (initialAuthoritative)
+            {
+                // First-run capture records the user's existing arrangement.
+                captured.IsAuthoritative = true;
+                captured.AuthoredAtUtc = DateTimeOffset.UtcNow;
+            }
+            else
+            {
+                captured = PreserveAuthority(profile.Surfaces.GetValueOrDefault(surfaceId), captured);
+            }
+
+            profile.Surfaces[surfaceId] = captured;
         }
 
         profile.LastUsedAtUtc = DateTimeOffset.UtcNow;
@@ -372,14 +738,33 @@ internal sealed class WidgetTopologyLayoutService
 
     private static void ApplyProfile(AppSettings settings, WidgetTopologyLayoutProfile profile)
     {
+        // Activation re-resolves each surface's entry against its intent
+        // (spec 5.3): an entry whose screen no longer matches the surface's
+        // home / follow-primary intent is re-seeded instead of applied.
+        WidgetSurfaceLayoutProfile ResolveEntry(
+            string surfaceId,
+            WidgetConfig config,
+            WidgetGroupConfig? group)
+        {
+            WidgetSurfaceLayoutProfile entry = ResolveSurfaceEntryForActivation(
+                settings,
+                surfaceId,
+                config,
+                group,
+                profile);
+            RealizeEntryPhysicalCache(entry, profile.Monitors);
+            profile.Surfaces[surfaceId] = entry;
+            return entry;
+        }
+
         foreach (WidgetGroupConfig group in settings.WidgetGroups)
         {
-            if (!profile.Surfaces.TryGetValue(
-                    ResolveGroupSurfaceId(group),
-                    out WidgetSurfaceLayoutProfile? layout))
-            {
-                continue;
-            }
+            WidgetConfig? representative = settings.Widgets.FirstOrDefault(widget =>
+                group.MemberIds.Contains(widget.Id, StringComparer.Ordinal));
+            WidgetSurfaceLayoutProfile layout = ResolveEntry(
+                ResolveGroupSurfaceId(group),
+                representative ?? new WidgetConfig { Id = group.MemberIds.FirstOrDefault() ?? group.SurfaceId },
+                group);
 
             ApplyToGroup(group, layout);
             foreach (string memberId in group.MemberIds)
@@ -398,10 +783,9 @@ internal sealed class WidgetTopologyLayoutService
             .ToHashSet(StringComparer.Ordinal);
         foreach (WidgetConfig widget in settings.Widgets)
         {
-            if (!groupedMemberIds.Contains(widget.Id) &&
-                profile.Surfaces.TryGetValue(widget.Id, out WidgetSurfaceLayoutProfile? layout))
+            if (!groupedMemberIds.Contains(widget.Id))
             {
-                ApplyToWidget(widget, layout);
+                ApplyToWidget(widget, ResolveEntry(widget.Id, widget, null));
             }
         }
     }
@@ -454,7 +838,12 @@ internal sealed class WidgetTopologyLayoutService
             compact.BoundsCoordinateVersion = WidgetConfig.CurrentBoundsCoordinateVersion;
             compact.PositionMarginX = Math.Max(0, compact.PositionMarginX * ratioX);
             compact.PositionMarginY = Math.Max(0, compact.PositionMarginY * ratioY);
+            // The capsule is derived from its surface (spec 4.4): migration
+            // writes the surface's target-monitor identity into the capsule
+            // so a stale capsule reference can never resolve to the old
+            // screen (defect B4).
             compact.PositionMonitorDeviceName = targetMonitor.DeviceName;
+            compact.PositionMonitorStableId = mapped.PositionMonitorStableId;
             compact.PositionMonitorWasPrimary = targetMonitor.IsPrimary;
             compact.PositionMonitorKey = CreateWorkAreaKey(targetMonitor);
         }
@@ -600,6 +989,51 @@ internal sealed class WidgetTopologyLayoutService
         return layout;
     }
 
+    /// <summary>
+    /// Realizes the physical X/Y cache of an entry from its anchor + margins
+    /// (DIP) at the CURRENT monitor metadata (spec 5.2). The stored sizes
+    /// and margins — the placement intent — are never touched here; only the
+    /// "last actual position" cache follows DPI/geometry changes under the
+    /// same v4 key.
+    /// </summary>
+    private static void RealizeEntryPhysicalCache(
+        WidgetSurfaceLayoutProfile entry,
+        IReadOnlyList<WidgetTopologyMonitorProfile> monitors)
+    {
+        if (monitors.Count == 0)
+        {
+            return;
+        }
+
+        string token = DisplayIdentityTokens.TokenFor(
+            entry.PositionMonitorStableId,
+            SafeWidth(entry.PositionMonitorKey),
+            SafeHeight(entry.PositionMonitorKey));
+        WidgetTopologyMonitorProfile? monitor = monitors.FirstOrDefault(candidate =>
+            string.Equals(
+                DisplayIdentityTokens.TokenFor(candidate),
+                token,
+                StringComparison.OrdinalIgnoreCase)) ??
+            monitors.FirstOrDefault(candidate => candidate.IsPrimary) ??
+            monitors[0];
+
+        double scale = NormalizeScale(monitor.DpiScale);
+        int width = Math.Max(1, (int)Math.Round(Math.Max(SettingsService.MinWidgetWidth, entry.Width) * scale));
+        int height = Math.Max(1, (int)Math.Round(Math.Max(SettingsService.MinWidgetHeight, entry.Height) * scale));
+        bool anchorRight = entry.PositionAnchor is WidgetPositionAnchors.RightTop or WidgetPositionAnchors.RightBottom;
+        bool anchorBottom = entry.PositionAnchor is WidgetPositionAnchors.LeftBottom or WidgetPositionAnchors.RightBottom;
+        int marginX = Math.Max(0, (int)Math.Round(Math.Max(0, entry.PositionMarginX) * scale));
+        int marginY = Math.Max(0, (int)Math.Round(Math.Max(0, entry.PositionMarginY) * scale));
+        entry.X = anchorRight
+            ? monitor.WorkAreaX + monitor.WorkAreaWidth - width - marginX
+            : monitor.WorkAreaX + marginX;
+        entry.Y = anchorBottom
+            ? monitor.WorkAreaY + monitor.WorkAreaHeight - height - marginY
+            : monitor.WorkAreaY + marginY;
+        entry.Width = Math.Max(SettingsService.MinWidgetWidth, entry.Width);
+        entry.Height = Math.Max(SettingsService.MinWidgetHeight, entry.Height);
+    }
+
     private static void ApplyToWidget(WidgetConfig config, WidgetSurfaceLayoutProfile layout)
     {
         config.X = layout.X;
@@ -650,33 +1084,27 @@ internal sealed class WidgetTopologyLayoutService
         WidgetSurfaceLayoutProfile layout,
         IReadOnlyList<WidgetTopologyMonitorProfile> monitors)
     {
-        if (!string.IsNullOrWhiteSpace(layout.PositionMonitorStableId))
+        if (monitors.Count == 0)
         {
-            WidgetTopologyMonitorProfile? stable = monitors.FirstOrDefault(monitor =>
-                string.Equals(monitor.StableId, layout.PositionMonitorStableId, StringComparison.OrdinalIgnoreCase));
-            if (stable is not null)
-            {
-                return stable;
-            }
+            return null;
         }
 
-        if (!string.IsNullOrWhiteSpace(layout.PositionMonitorDeviceName))
+        // Identity resolution goes through the shared resolver (spec 5.1) so
+        // degenerate stable ids can never match a renumbered alias here.
+        WidgetScreenInfo? resolved = DisplayPlacementResolver.ResolveEntryDisplay(
+            new DisplayPlacementEntryReference(
+                layout.PositionMonitorStableId,
+                layout.PositionMonitorDeviceName,
+                layout.PositionMonitorKey,
+                layout.PositionMonitorWasPrimary),
+            [.. monitors.Select((monitor, index) => ToScreenInfo(monitor, index + 1))]);
+        if (resolved is not null)
         {
-            WidgetTopologyMonitorProfile? device = monitors.FirstOrDefault(monitor =>
-                string.Equals(monitor.DeviceName, layout.PositionMonitorDeviceName, StringComparison.OrdinalIgnoreCase));
-            if (device is not null)
+            WidgetTopologyMonitorProfile? matched = monitors.FirstOrDefault(monitor =>
+                string.Equals(monitor.StableId.Trim(), resolved.StableId.Trim(), StringComparison.OrdinalIgnoreCase));
+            if (matched is not null)
             {
-                return device;
-            }
-        }
-
-        if (!string.IsNullOrWhiteSpace(layout.PositionMonitorKey))
-        {
-            WidgetTopologyMonitorProfile? keyed = monitors.FirstOrDefault(monitor =>
-                string.Equals(CreateWorkAreaKey(monitor), layout.PositionMonitorKey, StringComparison.Ordinal));
-            if (keyed is not null)
-            {
-                return keyed;
+                return matched;
             }
         }
 
@@ -709,39 +1137,25 @@ internal sealed class WidgetTopologyLayoutService
             }
         }
 
-        if (sourceMonitor is not null)
+        // Target selection funnels through the shared resolver (spec 5.1):
+        // entry identity first (same physical monitor), then the direction /
+        // size / alias heuristic. This replaces the previous placement-and-
+        // WasPrimary heuristics that could diverge from runtime resolution.
+        if (targets.Count > 0)
         {
-            WidgetTopologyMonitorProfile? stable = targets.FirstOrDefault(target =>
-                MonitorIdentityEquals(sourceMonitor, target));
-            if (stable is not null)
+            ResolvedDisplayPlacement decision = DisplayPlacementResolver.Resolve(
+                new DisplayPlacementIntent(WidgetScreenBindingMode.Unbound, null),
+                new DisplayPlacementEntryReference(
+                    sourceMonitor?.StableId ?? layout.PositionMonitorStableId,
+                    sourceMonitor?.DeviceName ?? layout.PositionMonitorDeviceName,
+                    sourceMonitor is null ? layout.PositionMonitorKey : null,
+                    layout.PositionMonitorWasPrimary ?? sourceMonitor?.IsPrimary),
+                [.. targets.Select((target, index) => ToScreenInfo(target, index + 1))]);
+            WidgetTopologyMonitorProfile? matched = targets.FirstOrDefault(target =>
+                string.Equals(target.StableId.Trim(), decision.Display.StableId.Trim(), StringComparison.OrdinalIgnoreCase));
+            if (matched is not null)
             {
-                return stable;
-            }
-
-            WidgetTopologyMonitorProfile? samePlacement = targets.FirstOrDefault(target =>
-                MonitorPlacementEquals(sourceMonitor, target));
-            if (samePlacement is not null)
-            {
-                return samePlacement;
-            }
-        }
-
-        if (layout.PositionMonitorWasPrimary == true || sourceMonitor?.IsPrimary == true)
-        {
-            WidgetTopologyMonitorProfile? primary = targets.FirstOrDefault(target => target.IsPrimary);
-            if (primary is not null)
-            {
-                return primary;
-            }
-        }
-
-        if (!string.IsNullOrWhiteSpace(layout.PositionMonitorDeviceName))
-        {
-            WidgetTopologyMonitorProfile? device = targets.FirstOrDefault(target =>
-                string.Equals(target.DeviceName, layout.PositionMonitorDeviceName, StringComparison.OrdinalIgnoreCase));
-            if (device is not null)
-            {
-                return device;
+                return matched;
             }
         }
 
@@ -792,13 +1206,52 @@ internal sealed class WidgetTopologyLayoutService
         left.MonitorHeight == right.MonitorHeight &&
         Math.Abs(NormalizeScale(left.DpiScale) - NormalizeScale(right.DpiScale)) < 0.001;
 
-    private static bool PruneProfiles(AppSettings settings, string activeKey)
+    /// <summary>
+    /// Provisional (first-seen) profile bookkeeping (spec 5.6): keys that
+    /// have neither survived the 10-second window nor received a user
+    /// placement commit are excluded from LRU eviction so a transient
+    /// topology cannot evict a real arrangement. In-memory only.
+    /// </summary>
+    private readonly Dictionary<string, DateTimeOffset> _provisionalProfiles = new(StringComparer.Ordinal);
+    private static readonly TimeSpan ProvisionalSurvival = TimeSpan.FromSeconds(10);
+
+    internal void PromoteProvisionalProfile(string? key)
+    {
+        if (!string.IsNullOrWhiteSpace(key))
+        {
+            _provisionalProfiles.Remove(key);
+        }
+    }
+
+    private void TrackProvisionalProfile(string key)
+    {
+        // Lazy promotion on activity: surviving past the window makes the
+        // profile a real candidate for retention/eviction.
+        foreach ((string provisionalKey, DateTimeOffset firstSeen) in _provisionalProfiles.ToList())
+        {
+            if (DateTimeOffset.UtcNow - firstSeen >= ProvisionalSurvival)
+            {
+                _provisionalProfiles.Remove(provisionalKey);
+            }
+        }
+
+        if (!_provisionalProfiles.ContainsKey(key))
+        {
+            _provisionalProfiles[key] = DateTimeOffset.UtcNow;
+        }
+    }
+
+    private static bool PruneProfiles(
+        AppSettings settings,
+        string activeKey,
+        IReadOnlyDictionary<string, DateTimeOffset> provisionalProfiles)
     {
         bool changed = false;
         while (settings.WidgetTopologyLayouts.Count > MaximumRetainedProfiles)
         {
             string? oldest = settings.WidgetTopologyLayouts
-                .Where(pair => !string.Equals(pair.Key, activeKey, StringComparison.Ordinal))
+                .Where(pair => !string.Equals(pair.Key, activeKey, StringComparison.Ordinal) &&
+                               !provisionalProfiles.ContainsKey(pair.Key))
                 .OrderBy(pair => pair.Value.LastUsedAtUtc)
                 .Select(pair => pair.Key)
                 .FirstOrDefault();
@@ -875,6 +1328,8 @@ internal sealed class WidgetTopologyLayoutService
             PositionMonitorStableId = source.PositionMonitorStableId,
             ScreenBindingMode = source.ScreenBindingMode,
             BoundScreenId = source.BoundScreenId,
+            IsAuthoritative = source.IsAuthoritative,
+            AuthoredAtUtc = source.AuthoredAtUtc,
             X = source.X,
             Y = source.Y,
             PositionAnchor = source.PositionAnchor,

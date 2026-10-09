@@ -87,6 +87,19 @@
                     controls:SettingsComboBox.Value="{Binding ExpansionDirection, Mode=TwoWay}" />
             </toolkit:SettingsCard>
 
+            <toolkit:SettingsCard
+                HorizontalContentAlignment="Right"
+                svc:Localized.DescriptionKey="Settings.CompactContent.Description"
+                svc:Localized.HeaderKey="Settings.CompactContent.Title">
+                <toolkit:SettingsCard.HeaderIcon>
+                    <FontIcon Glyph="&#xE8A5;" />
+                </toolkit:SettingsCard.HeaderIcon>
+                <ComboBox
+                    MinWidth="{StaticResource SettingsControlMinWidth}"
+                    ItemsSource="{Binding AvailableContentModeOptions}"
+                    controls:SettingsComboBox.Value="{Binding ContentMode, Mode=TwoWay}" />
+            </toolkit:SettingsCard>
+
             <toolkit:SettingsExpander
                 IsExpanded="False"
                 svc:Localized.DescriptionKey="Settings.Capsule.Arrangement.Description"
@@ -133,33 +146,6 @@
                     </toolkit:SettingsCard>
                 </toolkit:SettingsExpander.Items>
             </toolkit:SettingsExpander>
-
-            <toolkit:SettingsCard
-                HorizontalContentAlignment="Right"
-                svc:Localized.DescriptionKey="Settings.CompactContent.Description"
-                svc:Localized.HeaderKey="Settings.CompactContent.Title">
-                <toolkit:SettingsCard.HeaderIcon>
-                    <FontIcon Glyph="&#xE8A5;" />
-                </toolkit:SettingsCard.HeaderIcon>
-                <ComboBox
-                    MinWidth="{StaticResource SettingsControlMinWidth}"
-                    ItemsSource="{Binding AvailableContentModeOptions}"
-                    controls:SettingsComboBox.Value="{Binding ContentMode, Mode=TwoWay}" />
-            </toolkit:SettingsCard>
-
-            <toolkit:SettingsCard
-                HorizontalContentAlignment="Right"
-                svc:Localized.DescriptionKey="Settings.CompactPrivacy.Description"
-                svc:Localized.HeaderKey="Settings.CompactPrivacy.Title">
-                <toolkit:SettingsCard.HeaderIcon>
-                    <FontIcon Glyph="&#xE72E;" />
-                </toolkit:SettingsCard.HeaderIcon>
-                <ToggleSwitch
-                    MinWidth="0"
-                    OffContent=""
-                    OnContent=""
-                    IsOn="{Binding HideSensitiveContent, Mode=TwoWay}" />
-            </toolkit:SettingsCard>
 
             <toolkit:SettingsExpander
                 IsExpanded="False"
@@ -221,6 +207,20 @@
                     </toolkit:SettingsCard>
                 </toolkit:SettingsExpander.Items>
             </toolkit:SettingsExpander>
+
+            <toolkit:SettingsCard
+                HorizontalContentAlignment="Right"
+                svc:Localized.DescriptionKey="Settings.CompactPrivacy.Description"
+                svc:Localized.HeaderKey="Settings.CompactPrivacy.Title">
+                <toolkit:SettingsCard.HeaderIcon>
+                    <FontIcon Glyph="&#xE72E;" />
+                </toolkit:SettingsCard.HeaderIcon>
+                <ToggleSwitch
+                    MinWidth="0"
+                    OffContent=""
+                    OnContent=""
+                    IsOn="{Binding HideSensitiveContent, Mode=TwoWay}" />
+            </toolkit:SettingsCard>
 
             <toolkit:SettingsCard
                 Click="NestedSettingsButton_Click"

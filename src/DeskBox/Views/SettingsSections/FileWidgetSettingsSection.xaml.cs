@@ -64,11 +64,11 @@ public sealed partial class FileWidgetSettingsSection : UserControl
 
     /// <summary>
     /// Mounts the managed-storage (收纳与路径) section inside the overview
-    /// card stack — after 桌面整理 (0), 文件显示 (1) and 文件叠放 (2), and
-    /// before 文件夹打开方式 and the context-menu card — instead of as a
-    /// sibling appended at page end.
+    /// card stack — directly below the 桌面整理 entry card (index 0) and
+    /// above 文件显示: storage path card → drag-behavior expander →
+    /// desktop-shortcut card, all inside this one attached stack.
     /// </summary>
-    private const int ManagedStorageSectionIndex = 3;
+    private const int ManagedStorageSectionIndex = 1;
 
     public void AttachManagedStorageSection(FrameworkElement section)
     {

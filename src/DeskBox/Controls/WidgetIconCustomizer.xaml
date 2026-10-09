@@ -3,6 +3,7 @@
     x:Class="DeskBox.Controls.WidgetIconCustomizer"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:helpers="using:DeskBox.Helpers"
     xmlns:controls="using:DeskBox.Controls"
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:local="using:DeskBox.Controls"
@@ -85,7 +86,7 @@
                             BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
                             BorderThickness="1"
                             CornerRadius="12">
-                            <TextBlock Text="{x:Bind Label}" />
+                            <TextBlock helpers:WidgetTextShadow.Cast="False" Text="{x:Bind Label}" />
                         </Border>
                     </DataTemplate>
                 </GridView.ItemTemplate>
@@ -102,6 +103,7 @@
                     <DataTemplate x:DataType="x:String">
                         <Border Width="38" Height="38">
                             <TextBlock
+                                helpers:WidgetTextShadow.Cast="False"
                                 HorizontalAlignment="Center"
                                 VerticalAlignment="Center"
                                 FontFamily="Segoe UI Emoji"

@@ -144,7 +144,7 @@ public sealed class SettingsServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task LoadAsync_MigratesLegacySchemaFiveProfileThroughTheFullChainToEleven()
+    public async Task LoadAsync_MigratesLegacySchemaFiveProfileThroughTheFullChainToThirteen()
     {
         // A realistic settings.json as an older DeskBox build would have left
         // it on disk: widgets with geometry, Everything consent captured under
@@ -202,7 +202,7 @@ public sealed class SettingsServiceTests : IDisposable
 
         Assert.Equal(SettingsLoadRecoveryState.Primary, service.LastLoadRecoveryState);
         Assert.Equal(SettingsMigrationPipeline.CurrentSchemaVersion, service.Settings.SchemaVersion);
-        Assert.Equal(11, service.Settings.SchemaVersion);
+        Assert.Equal(13, service.Settings.SchemaVersion);
 
         // Widgets survive the chain (and the layout-store adoption): both
         // instances keep their identity, kind, and legacy geometry — the 5→6
@@ -219,6 +219,15 @@ public sealed class SettingsServiceTests : IDisposable
         Assert.Equal(80, fileWidget.Y);
         Assert.Equal(420, fileWidget.Width);
         Assert.Equal(360, fileWidget.Height);
+
+        // 11→12 (screen-home model): the legacy widgets keep their geometry
+        // and gain Unbound homes — no profiles exist yet to infer from, and
+        // the legacy entries carry no stable monitor ids.
+        Assert.Equal(WidgetScreenBindingMode.Unbound, fileWidget.ScreenBindingMode);
+        Assert.Equal(WidgetScreenBindingMode.Unbound, todoWidget.ScreenBindingMode);
+        Assert.Equal(
+            SettingsService.WidgetNewPlacementCursorDisplay,
+            service.Settings.WidgetNewPlacementTarget);
 
         // 5→6: bounded topology layouts start empty; legacy geometry stays
         // the active truth until the first stable startup captures it.
@@ -254,7 +263,7 @@ public sealed class SettingsServiceTests : IDisposable
         // The migrated profile is persisted back at the current schema.
         using JsonDocument persisted = JsonDocument.Parse(
             await File.ReadAllTextAsync(settingsPath));
-        Assert.Equal(11, persisted.RootElement.GetProperty("schemaVersion").GetInt32());
+        Assert.Equal(13, persisted.RootElement.GetProperty("schemaVersion").GetInt32());
         Assert.True(persisted.RootElement.GetProperty("fileStacksEnabled").GetBoolean());
         Assert.False(persisted.RootElement.GetProperty("fileStackAutoStacking").GetBoolean());
 
@@ -263,7 +272,7 @@ public sealed class SettingsServiceTests : IDisposable
         var reloaded = new SettingsService(_settingsRoot);
         await reloaded.LoadAsync();
         Assert.Equal(SettingsLoadRecoveryState.Primary, reloaded.LastLoadRecoveryState);
-        Assert.Equal(11, reloaded.Settings.SchemaVersion);
+        Assert.Equal(13, reloaded.Settings.SchemaVersion);
         Assert.True(reloaded.Settings.FileStacksEnabled);
         Assert.False(reloaded.Settings.FileStackAutoStacking);
         Assert.Equal(2, reloaded.Settings.Widgets.Count);

@@ -498,8 +498,18 @@ public abstract partial class WidgetWindowBase
 
         if (updateConfig)
         {
-            UpdateConfigBoundsFromPhysical(x, y, width, height, persist: false);
+            // Restore paths may only refresh the physical X/Y cache (spec
+            // 5.2): width/height are placement intent and must survive
+            // topology repositioning untouched, so the write is physical-
+            // position-only here.
+            UpdateConfigPhysicalPositionOnly(x, y);
         }
+    }
+
+    private void UpdateConfigPhysicalPositionOnly(int x, int y)
+    {
+        Config.X = x;
+        Config.Y = y;
     }
 
     protected SizeInt32 GetPhysicalMinimumWindowSize(int x, int y, int width, int height)
@@ -542,6 +552,36 @@ public abstract partial class WidgetWindowBase
         {
             WidgetPositioningService.CaptureAnchor(Config, bounds, workArea);
         }
+    }
+
+    /// <summary>
+    /// Unified user-placement commit (spec 5.4): captures the placement with
+    /// max-intersection display ownership, updates the surface's home display
+    /// ("放哪属于哪"), and marks the profile entry authoritative. Expanded
+    /// state captures the main anchor; compact state keeps the capsule
+    /// capture and only commits home/entry.
+    /// </summary>
+    protected void CommitUserPlacementFromWindow(WidgetPlacementSource source)
+    {
+        WidgetManager? manager = App.Current?.WidgetManager;
+        if (manager is null)
+        {
+            return;
+        }
+
+        RectInt32 actual = GetActualWindowBounds();
+        if (IsCompactBoundsStateActive)
+        {
+            CaptureCompactPlacement(actual, persist: false);
+            manager.CommitUserPlacement(Config, actual, actual, source, captureIntent: false);
+            return;
+        }
+
+        manager.CommitUserPlacement(
+            Config,
+            CollapseHostBoundsToContent(actual),
+            actual,
+            source);
     }
 
     // ── Display change restoration ─────────────────────────────

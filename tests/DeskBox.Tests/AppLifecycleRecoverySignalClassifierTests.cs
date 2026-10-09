@@ -92,13 +92,35 @@ public sealed class AppLifecycleRecoverySignalClassifierTests
         }
     }
 
-    [Theory]
-    [InlineData(0)]
-    [InlineData(2)]
-    public void DisplayPowerOffOrDimmed_DoesNotRecover(byte data)
+    [Fact]
+    public void DisplayPowerOff_IsGateSignal_NotRecoveryReason()
+    {
+        // Screen-off is a topology-gate signal (spec 5.6): the classifier
+        // surfaces it so the watcher can close the gate, but it is not a
+        // recovery reason and must never schedule a restore on its own.
+        IntPtr setting = MarshalPowerBroadcastSetting(
+            Win32Helper.ConsoleDisplayStatePowerSetting, data: 0);
+        try
+        {
+            string? reason = AppLifecycleRecoverySignalClassifier.ResolveRecoveryReason(
+                AppLifecycleRecoverySignalClassifier.WmPowerBroadcast,
+                new UIntPtr(Win32Helper.PbtPowerSettingChange),
+                setting,
+                TaskbarCreatedMessage);
+
+            Assert.Equal("display-power-off", reason);
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(setting);
+        }
+    }
+
+    [Fact]
+    public void DisplayDimmed_DoesNotRecover()
     {
         IntPtr setting = MarshalPowerBroadcastSetting(
-            Win32Helper.ConsoleDisplayStatePowerSetting, data);
+            Win32Helper.ConsoleDisplayStatePowerSetting, data: 2);
         try
         {
             string? reason = AppLifecycleRecoverySignalClassifier.ResolveRecoveryReason(

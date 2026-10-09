@@ -24,6 +24,14 @@ internal sealed class DisplayTopologyTransitionCoordinator : IDisposable
     private bool _verificationPending;
     private bool _isExecuting;
     private bool _isDisposed;
+    private string _lastBlockedReasons = string.Empty;
+
+    /// <summary>
+    /// Application gate (spec 5.6). While closed, restore requests are
+    /// parked: the latest reasons are recorded, no observation runs, and no
+    /// retry budget is spent. Opening the gate re-requests automatically.
+    /// </summary>
+    internal DisplayTopologyGate Gate { get; } = new();
 
     public DisplayTopologyTransitionCoordinator(
         DispatcherQueue dispatcherQueue,
@@ -36,6 +44,24 @@ internal sealed class DisplayTopologyTransitionCoordinator : IDisposable
         _timer = dispatcherQueue.CreateTimer();
         _timer.IsRepeating = false;
         _timer.Tick += Timer_Tick;
+        Gate.GateOpened += _ => OnGateOpened();
+    }
+
+    private void OnGateOpened()
+    {
+        if (!_dispatcherQueue.HasThreadAccess)
+        {
+            _dispatcherQueue.TryEnqueue(OnGateOpened);
+            return;
+        }
+
+        if (_isDisposed || string.IsNullOrEmpty(_pendingReasons))
+        {
+            return;
+        }
+
+        App.Log("[DisplayTopology] gate opened; resuming parked restore");
+        RequestRestore("gate-open");
     }
 
     public void RequestRestore(string reason)
@@ -56,6 +82,19 @@ internal sealed class DisplayTopologyTransitionCoordinator : IDisposable
         _restoreRetryCount = 0;
         _verificationPending = false;
         _stabilityTracker.Reset();
+        if (Gate.IsClosed)
+        {
+            string reasons = string.Join("|", Gate.ClosedReasons);
+            if (!string.Equals(reasons, _lastBlockedReasons, StringComparison.Ordinal))
+            {
+                App.Log($"[DisplayTopology] gate closed reason={reasons}; parking restore");
+                _lastBlockedReasons = reasons;
+            }
+
+            return;
+        }
+
+        _lastBlockedReasons = string.Empty;
         Schedule(ObservationInterval);
     }
 

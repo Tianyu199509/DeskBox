@@ -101,7 +101,7 @@ public sealed class FeatureSettingsBoundaryContractTests
         // default title display mode, default navigation style) write through
         // GroupNavigationSettingsCoordinator.
         Regex groupNavigationWrite = new(
-            @"\b(?:_settingsService\s*\.\s*Settings|settings)\s*\.\s*(?:WidgetLayout\s*\.\s*)?(?:WidgetGroupWheelSwitchEnabled|WidgetGroupHoverSwitchEnabled|WidgetGroupDefaultTitleDisplayMode|WidgetGroupDefaultNavigationStyle)\s*=(?!=)");
+            @"\b(?:_settingsService\s*\.\s*Settings|settings)\s*\.\s*(?:WidgetLayout\s*\.\s*)?(?:WidgetGroupWheelSwitchEnabled|WidgetGroupHoverSwitchEnabled|WidgetGroupDefaultTitleDisplayMode|WidgetGroupDefaultNavigationStyle|WidgetGroupSwitchAnimationStyle)\s*=(?!=)");
         // Batch 38: the feature-section writes — music presentation, the
         // weather options (data source, location, units, default view, skin,
         // display toggles, refresh interval; the policy path used to write

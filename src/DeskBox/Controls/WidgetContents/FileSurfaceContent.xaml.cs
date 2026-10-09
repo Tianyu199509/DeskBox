@@ -814,7 +814,11 @@ public sealed partial class FileSurfaceContent :
 
     // Elevated widget windows cannot receive OLE drops from Explorer (UIPI),
     // so the empty state calls that case out instead of letting the drop fail
-    // silently (#458 follow-up).
+    // silently (#458 follow-up). The elevation check deliberately routes
+    // through DragDropPermissionService: an Owner-vs-User comparison (used
+    // here originally) is true for every admin-account user even on a
+    // standard filtered token — the Administrators SID stays the token's
+    // default owner — which disabled dragging on non-elevated instances.
     private static bool IsCurrentProcessElevatedCached()
     {
         if (s_isProcessElevated is { } cached)
@@ -822,8 +826,7 @@ public sealed partial class FileSurfaceContent :
             return cached;
         }
 
-        using var identity = System.Security.Principal.WindowsIdentity.GetCurrent();
-        s_isProcessElevated = identity.Owner != identity.User;
+        s_isProcessElevated = DragDropPermissionService.IsCurrentProcessElevated();
         return s_isProcessElevated.Value;
     }
 

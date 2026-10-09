@@ -957,9 +957,9 @@ public sealed partial class AppearanceSettingsViewModel : ObservableObject
         {
             string[] keys =
             [
-                "Settings.Corner.Square",
+                "Settings.Corner.Round",
                 "Settings.Corner.Small",
-                "Settings.Corner.Round"
+                "Settings.Corner.Square"
             ];
             _cachedCornerPreferenceNames ??= keys.Select(key => _localize(key)).ToArray();
             var options = new SettingsOption[CornerPreferences.Length];
@@ -2030,6 +2030,13 @@ public sealed partial class AppearanceSettingsViewModel : ObservableObject
         _cachedCornerPreferenceNames = null;
         _cachedFileNameLineCountNames = null;
         _cachedTitleIconModeNames = null;
+        _cachedLayoutDensityNames = null;
+        _cachedAnimationPresetNames = null;
+        _cachedAnimationEffectNames = null;
+        _cachedAnimationSpeedNames = null;
+        _cachedAnimationSlideDirectionNames = null;
+        _cachedAnimationEasingIntensityNames = null;
+        _cachedChromeModeNames = null;
         OnPropertyChanged(nameof(AvailableThemeOptions));
         OnPropertyChanged(nameof(AvailableTrayIconStyleOptions));
         OnPropertyChanged(nameof(AvailableAccentColorSourceOptions));

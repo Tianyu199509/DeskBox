@@ -532,7 +532,11 @@ public sealed class AppearanceSettingsEditorTests : IDisposable
         Assert.Contains("controls:SettingsComboBox.Value=\"{Binding AnimationPreset, Mode=TwoWay}\"", window);
         Assert.Contains("Value=\"{Binding WidgetTransparency, Mode=TwoWay}\"", window);
         Assert.Contains("Value=\"{Binding TextSize, Mode=TwoWay}\"", window);
-        Assert.Contains("Visibility=\"{Binding ShowOpacitySlider, Converter={StaticResource SettingsBoolToVisibilityConverter}}\"", window);
+        // Conditional appearance sub-settings stay visible and gray out
+        // instead of collapsing, so the expanders always have content.
+        Assert.Contains("IsEnabled=\"{Binding ShowOpacitySlider}\"", window);
+        Assert.Contains("IsEnabled=\"{Binding ShowMaterialIntensitySlider}\"", window);
+        Assert.Contains("IsEnabled=\"{Binding ShowForegroundCustomColor}\"", window);
         Assert.Contains("IsOpen=\"{Binding Windows10Compatibility}\"", window);
         Assert.Contains("IsEnabled=\"{Binding NativeCornersSupported}\"", window);
 
@@ -560,5 +564,36 @@ public sealed class AppearanceSettingsEditorTests : IDisposable
         Assert.DoesNotContain("nameof(SelectedWidgetMaterialType)", shellBridge);
         Assert.DoesNotContain("nameof(WidgetTransparency)", shellBridge);
         Assert.DoesNotContain("nameof(SelectedTheme)", shellBridge);
+    }
+
+    [Fact]
+    public void RefreshLocalization_ClearsEveryCachedNameArray()
+    {
+        // After a language change the option tables must re-localize: every
+        // "_cached*Names" array has to be nulled inside RefreshLocalization,
+        // otherwise a lazily built cache (??=) keeps serving the old language.
+        System.Reflection.FieldInfo[] cachedNameFields = typeof(AppearanceSettingsViewModel)
+            .GetFields(System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
+            .Where(field => field.FieldType == typeof(string[]) &&
+                            field.Name.StartsWith("_cached", StringComparison.Ordinal) &&
+                            field.Name.EndsWith("Names", StringComparison.Ordinal))
+            .ToArray();
+        Assert.NotEmpty(cachedNameFields);
+
+        string source = File.ReadAllText(
+            Path.Combine(TestPaths.FromRepository("src/DeskBox"), "Features/Appearance/AppearanceSettingsViewModel.cs"));
+        int methodStart = source.IndexOf("public void RefreshLocalization()", StringComparison.Ordinal);
+        Assert.True(methodStart >= 0, "AppearanceSettingsViewModel.RefreshLocalization not found.");
+        int methodEnd = source.IndexOf("private static string NormalizeHexColor", StringComparison.Ordinal);
+        Assert.True(methodEnd > methodStart, "RefreshLocalization method bounds not found.");
+        string body = source.Substring(methodStart, methodEnd - methodStart);
+
+        foreach (System.Reflection.FieldInfo field in cachedNameFields)
+        {
+            Assert.True(
+                body.Contains($"{field.Name} = null;", StringComparison.Ordinal),
+                $"RefreshLocalization must null the {field.Name} cache, otherwise its " +
+                "combo box keeps the previous language's option text.");
+        }
     }
 }

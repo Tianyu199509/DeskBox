@@ -80,6 +80,18 @@ public class WidgetConfig
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? BoundScreenId { get; set; }
 
+    /// <summary>Friendly name of the bound display captured at bind time; shown when the display is offline (the stable id itself is a machine path).</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? BoundScreenLabel { get; set; }
+
+    /// <summary>
+    /// Set while the surface is collapsed BY THE SYSTEM because its home
+    /// display disconnected (spec D3/5.7): records the home id so the surface
+    /// auto-expands when that display returns. A manual expand/collapse clears it.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? DisconnectCollapsedForScreenId { get; set; }
+
     /// <summary>Bounds coordinate model version. Version 0 is legacy physical pixels; version 1 stores size and anchor margins in logical pixels.</summary>
     public int BoundsCoordinateVersion { get; set; }
 

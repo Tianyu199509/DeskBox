@@ -213,6 +213,13 @@ public sealed class SettingsCopyAndHierarchyTests
             ["Settings.WidgetGroupNavigation.Stack"] = "折叠显示",
             ["Settings.WidgetGroupNavigation.Tabs"] = "并排显示",
             ["Settings.WidgetGroupNavigation.Title"] = "标题栏布局",
+            ["Settings.WidgetGroupSwitchAnimation.Auto"] = "自动",
+            ["Settings.WidgetGroupSwitchAnimation.Description"] = "切换格子组内格子时的过渡效果，自动时按标题栏布局选择方向",
+            ["Settings.WidgetGroupSwitchAnimation.Fade"] = "淡入淡出",
+            ["Settings.WidgetGroupSwitchAnimation.Horizontal"] = "左右滑动",
+            ["Settings.WidgetGroupSwitchAnimation.None"] = "无动画",
+            ["Settings.WidgetGroupSwitchAnimation.Title"] = "切换动画",
+            ["Settings.WidgetGroupSwitchAnimation.Vertical"] = "上下滑动",
             ["Settings.WidgetGroups.PageDescription"] = "将多个格子放在同一位置，通过标题栏切换。每个格子的内容仍然相互独立。",
             ["Settings.WidgetGroups.FollowDefaultWithValue"] = "跟随默认（{0}）",
             ["Widget.Group.Join"] = "组合格子…",
@@ -468,13 +475,13 @@ public sealed class SettingsCopyAndHierarchyTests
             StringComparison.Ordinal);
 
         Assert.True(interactionSection >= 0);
-        Assert.True(globalHotkey > interactionSection);
-        Assert.True(desktopDoubleClick > globalHotkey);
-        Assert.True(showDesktopBehavior > desktopDoubleClick);
+        Assert.True(widgetLayer > interactionSection);
+        Assert.True(globalHotkey > widgetLayer);
+        Assert.True(showDesktopBehavior > globalHotkey);
         Assert.True(openMethod > showDesktopBehavior);
         Assert.True(hoverActions > openMethod);
         Assert.True(resizeSnap > hoverActions);
-        Assert.True(widgetLayer > resizeSnap);
+        Assert.True(desktopDoubleClick > resizeSnap);
         Assert.True(generalSection >= 0);
         Assert.True(generalSection < language);
         Assert.True(language < autoStart);

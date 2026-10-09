@@ -14,17 +14,11 @@
         </ResourceDictionary>
     </UserControl.Resources>
 
-    <!-- Windows display-settings anatomy: header card with the Identify
-         action, a frameless arrangement preview (single-monitor systems keep
-         a compact preview, matching how Windows still draws the arrangement;
-         see R8.5.2/R8.7 in widget-screen-binding.md), the selected display's
-         settings card below it, and the widget rows with inline "show on"
-         combos. No frame box around the preview; unselected cards keep their
-         default Fluent styling, while the selected card is fully
-         accent-filled like the native display page (selection fill, state
-         brushes, and contrast colors are applied in code-behind from the
-         live system accent). -->
-    <StackPanel Style="{StaticResource SectionPanelStyle}" Spacing="12">
+    <!-- Stage-4 layout (spec 6.3): header + Identify, arrangement preview,
+         selected display card with "把所有格子移到这里", "新格子出现在",
+         "多显示器" expander with the disconnect behavior, per-widget rows.
+         Selection styling stays in code-behind (accent fill per R8). -->
+    <StackPanel Style="{StaticResource SectionPanelStyle}">
         <InfoBar
             x:Name="DisplaysStatusInfo"
             IsClosable="True"
@@ -48,7 +42,6 @@
             <TextBlock
                 x:Name="PreviewHintText"
                 FontSize="12"
-                Opacity="0.7"
                 svc:Localized.Key="Settings.Displays.PreviewHint" />
             <Viewbox
                 x:Name="PreviewViewbox"
@@ -66,19 +59,45 @@
             <toolkit:SettingsCard.HeaderIcon>
                 <FontIcon Glyph="&#xE7F4;" />
             </toolkit:SettingsCard.HeaderIcon>
-            <StackPanel Orientation="Horizontal" Spacing="8">
-                <Button
-                    x:Name="SetDefaultScreenButton"
-                    Click="SetDefaultScreenButton_Click"
-                    Style="{StaticResource AccentButtonStyle}" />
-                <Button
-                    x:Name="PinAllWidgetsButton"
-                    Click="PinAllWidgetsButton_Click"
-                    svc:Localized.Key="Settings.Displays.PinAll" />
-            </StackPanel>
+            <Button
+                x:Name="MoveAllWidgetsButton"
+                Click="MoveAllWidgetsButton_Click"
+                svc:Localized.Key="Settings.Displays.MoveAll" />
         </toolkit:SettingsCard>
 
-        <StackPanel Spacing="6">
+        <toolkit:SettingsCard
+            HorizontalContentAlignment="Right"
+            svc:Localized.DescriptionKey="Settings.Displays.NewWidgets.Description"
+            svc:Localized.HeaderKey="Settings.Displays.NewWidgets.Header">
+            <toolkit:SettingsCard.HeaderIcon>
+                <FontIcon Glyph="&#xE710;" />
+            </toolkit:SettingsCard.HeaderIcon>
+            <ComboBox
+                x:Name="NewPlacementCombo"
+                MinWidth="240"
+                SelectionChanged="NewPlacementCombo_SelectionChanged" />
+        </toolkit:SettingsCard>
+
+        <toolkit:SettingsExpander
+            HorizontalContentAlignment="Stretch"
+            svc:Localized.HeaderKey="Settings.Displays.MultipleDisplays.Header">
+            <toolkit:SettingsExpander.HeaderIcon>
+                <FontIcon Glyph="&#xE7F4;" />
+            </toolkit:SettingsExpander.HeaderIcon>
+            <toolkit:SettingsExpander.Items>
+                <toolkit:SettingsCard
+                    HorizontalContentAlignment="Right"
+                    svc:Localized.DescriptionKey="Settings.Displays.Disconnect.Description"
+                    svc:Localized.HeaderKey="Settings.Displays.Disconnect.Header">
+                    <ComboBox
+                        x:Name="DisconnectBehaviorCombo"
+                        MinWidth="240"
+                        SelectionChanged="DisconnectBehaviorCombo_SelectionChanged" />
+                </toolkit:SettingsCard>
+            </toolkit:SettingsExpander.Items>
+        </toolkit:SettingsExpander>
+
+        <StackPanel x:Name="WidgetListPanel" Spacing="6">
             <TextBlock
                 Style="{StaticResource SettingsSubsectionTitleTextStyle}"
                 svc:Localized.Key="Settings.Displays.Widgets.SectionTitle" />

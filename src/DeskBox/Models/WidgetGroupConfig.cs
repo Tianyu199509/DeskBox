@@ -57,6 +57,14 @@ public sealed class WidgetGroupConfig
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? BoundScreenId { get; set; }
 
+    /// <summary>Friendly name of the bound display captured at bind time; shown when the display is offline (the stable id itself is a machine path).</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? BoundScreenLabel { get; set; }
+
+    /// <summary>System-collapsed marker for disconnected-home groups (spec 5.7).</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? DisconnectCollapsedForScreenId { get; set; }
+
     public int BoundsCoordinateVersion { get; set; } = WidgetConfig.CurrentBoundsCoordinateVersion;
 
     public double Width { get; set; } = 300;

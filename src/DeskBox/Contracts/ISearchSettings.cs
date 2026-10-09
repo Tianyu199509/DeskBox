@@ -54,6 +54,7 @@ public interface ISearchSettings
     void UpdatePreferences(SearchPreferenceChange change);
     SearchHotkeyUpdateResult SetHotkeyEnabled(bool enabled);
     SearchHotkeyUpdateResult ApplyHotkey(GlobalHotkeyGesture gesture);
+    bool IsGestureOwnedByMainHotkey(GlobalHotkeyGesture gesture);
     Task<EverythingConnectionSnapshot> RefreshConnectionAsync(CancellationToken cancellationToken);
     Task<EverythingConnectionSnapshot> DetectAutomaticallyAsync(CancellationToken cancellationToken);
     Task<bool> SelectExecutableAsync(string path, CancellationToken cancellationToken);
@@ -87,4 +88,5 @@ public interface ISearchHotkeyController
     GlobalHotkeyGesture CurrentGesture { get; }
     void SetEnabled(bool enabled);
     bool TryApplyGesture(GlobalHotkeyGesture gesture, out string? error);
+    bool IsGestureOwnedByMainHotkey(GlobalHotkeyGesture gesture);
 }

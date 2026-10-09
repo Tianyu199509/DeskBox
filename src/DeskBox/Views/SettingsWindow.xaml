@@ -329,7 +329,7 @@ Text="DeskBox" />
                             <toolkit:SettingsExpander.Items>
                                 <toolkit:SettingsCard
                                     HorizontalContentAlignment="Right"
-                                    Visibility="{Binding ShowOpacitySlider, Converter={StaticResource SettingsBoolToVisibilityConverter}}"
+                                    IsEnabled="{Binding ShowOpacitySlider}"
                                     svc:Localized.DescriptionKey="Settings.Opacity.Description"
                                     svc:Localized.HeaderKey="Settings.Opacity.Title">
                                     <StackPanel
@@ -355,7 +355,7 @@ Text="DeskBox" />
 
                                 <toolkit:SettingsCard
                                     HorizontalContentAlignment="Right"
-                                    Visibility="{Binding ShowMaterialIntensitySlider, Converter={StaticResource SettingsBoolToVisibilityConverter}}"
+                                    IsEnabled="{Binding ShowMaterialIntensitySlider}"
                                     svc:Localized.DescriptionKey="Settings.MaterialIntensity.Description"
                                     svc:Localized.HeaderKey="Settings.MaterialIntensity.Title">
                                     <StackPanel
@@ -394,7 +394,7 @@ Text="DeskBox" />
                             <toolkit:SettingsExpander.Items>
                                 <toolkit:SettingsCard
                                     HorizontalContentAlignment="Right"
-                                    Visibility="{Binding ShowForegroundCustomColor, Converter={StaticResource SettingsBoolToVisibilityConverter}}"
+                                    IsEnabled="{Binding ShowForegroundCustomColor}"
                                     svc:Localized.DescriptionKey="Settings.WidgetForeground.CustomColor.Description"
                                     svc:Localized.HeaderKey="Settings.WidgetForeground.CustomColor.Title">
                                     <toolkit:SettingsCard.HeaderIcon>
@@ -712,73 +712,73 @@ Text="DeskBox" />
                     Visibility="Collapsed"
                     Style="{StaticResource SectionPanelStyle}">
                     <StackPanel Margin="0,8,0,0" Spacing="4">
-                        <toolkit:SettingsExpander
+                        <toolkit:SettingsCard
+                            HorizontalContentAlignment="Right"
                             svc:Localized.DescriptionKey="Settings.Group.Animation.Description"
                             svc:Localized.HeaderKey="Settings.Group.Animation.Title">
-                            <toolkit:SettingsExpander.HeaderIcon>
+                            <toolkit:SettingsCard.HeaderIcon>
                                 <FontIcon Glyph="&#xE7B5;" />
-                            </toolkit:SettingsExpander.HeaderIcon>
+                            </toolkit:SettingsCard.HeaderIcon>
                             <ComboBox
                                 MinWidth="{StaticResource SettingsControlMinWidth}"
                                 ItemsSource="{Binding AvailableAnimationPresetOptions}"
                                 controls:SettingsComboBox.Value="{Binding AnimationPreset, Mode=TwoWay}" />
-                            <toolkit:SettingsExpander.Items>
-                                <toolkit:SettingsCard
-                                    HorizontalContentAlignment="Right"
-                                    svc:Localized.DescriptionKey="Settings.Animation.Effect.Description"
-                                    svc:Localized.HeaderKey="Settings.Animation.Effect.Title">
-                                    <ComboBox
-                                        MinWidth="{StaticResource SettingsControlMinWidth}"
-                                        ItemsSource="{Binding AvailableAnimationEffectOptions}"
-                                        controls:SettingsComboBox.Value="{Binding AnimationEffect, Mode=TwoWay}" />
-                                </toolkit:SettingsCard>
+                        </toolkit:SettingsCard>
 
-                                <toolkit:SettingsCard
-                                    HorizontalContentAlignment="Right"
-                                    svc:Localized.DescriptionKey="Settings.Animation.Speed.Description"
-                                    svc:Localized.HeaderKey="Settings.Animation.Speed.Title">
-                                    <ComboBox
-                                        MinWidth="{StaticResource SettingsControlMinWidth}"
-                                        IsEnabled="{Binding IsSpeedEnabled}"
-                                        ItemsSource="{Binding AvailableAnimationSpeedOptions}"
-                                        controls:SettingsComboBox.Value="{Binding AnimationSpeed, Mode=TwoWay}" />
-                                </toolkit:SettingsCard>
+                        <toolkit:SettingsCard
+                            HorizontalContentAlignment="Right"
+                            svc:Localized.DescriptionKey="Settings.Animation.Effect.Description"
+                            svc:Localized.HeaderKey="Settings.Animation.Effect.Title">
+                            <ComboBox
+                                MinWidth="{StaticResource SettingsControlMinWidth}"
+                                ItemsSource="{Binding AvailableAnimationEffectOptions}"
+                                controls:SettingsComboBox.Value="{Binding AnimationEffect, Mode=TwoWay}" />
+                        </toolkit:SettingsCard>
 
-                                <toolkit:SettingsCard
-                                    HorizontalContentAlignment="Right"
-                                    svc:Localized.DescriptionKey="Settings.Animation.Direction.Description"
-                                    svc:Localized.HeaderKey="Settings.Animation.Direction.Title">
-                                    <ComboBox
-                                        MinWidth="{StaticResource SettingsControlMinWidth}"
-                                        IsEnabled="{Binding IsDirectionEnabled}"
-                                        ItemsSource="{Binding AvailableAnimationSlideDirectionOptions}"
-                                        controls:SettingsComboBox.Value="{Binding AnimationSlideDirection, Mode=TwoWay}" />
-                                </toolkit:SettingsCard>
+                        <toolkit:SettingsCard
+                            HorizontalContentAlignment="Right"
+                            svc:Localized.DescriptionKey="Settings.Animation.Speed.Description"
+                            svc:Localized.HeaderKey="Settings.Animation.Speed.Title">
+                            <ComboBox
+                                MinWidth="{StaticResource SettingsControlMinWidth}"
+                                IsEnabled="{Binding IsSpeedEnabled}"
+                                ItemsSource="{Binding AvailableAnimationSpeedOptions}"
+                                controls:SettingsComboBox.Value="{Binding AnimationSpeed, Mode=TwoWay}" />
+                        </toolkit:SettingsCard>
 
-                                <toolkit:SettingsCard
-                                    HorizontalContentAlignment="Right"
-                                    svc:Localized.DescriptionKey="Settings.Animation.Easing.Description"
-                                    svc:Localized.HeaderKey="Settings.Animation.Easing.Title">
-                                    <ComboBox
-                                        MinWidth="{StaticResource SettingsControlMinWidth}"
-                                        IsEnabled="{Binding IsEasingEnabled}"
-                                        ItemsSource="{Binding AvailableAnimationEasingIntensityOptions}"
-                                        controls:SettingsComboBox.Value="{Binding AnimationEasingIntensity, Mode=TwoWay}" />
-                                </toolkit:SettingsCard>
+                        <toolkit:SettingsCard
+                            HorizontalContentAlignment="Right"
+                            svc:Localized.DescriptionKey="Settings.Animation.Direction.Description"
+                            svc:Localized.HeaderKey="Settings.Animation.Direction.Title">
+                            <ComboBox
+                                MinWidth="{StaticResource SettingsControlMinWidth}"
+                                IsEnabled="{Binding IsDirectionEnabled}"
+                                ItemsSource="{Binding AvailableAnimationSlideDirectionOptions}"
+                                controls:SettingsComboBox.Value="{Binding AnimationSlideDirection, Mode=TwoWay}" />
+                        </toolkit:SettingsCard>
 
-                                <toolkit:SettingsCard
-                                    HorizontalContentAlignment="Right"
-                                    svc:Localized.DescriptionKey="Settings.Animation.Stagger.Description"
-                                    svc:Localized.HeaderKey="Settings.Animation.Stagger.Title">
-                                    <ToggleSwitch
-                                        MinWidth="0"
-                                        OffContent=""
-                                        OnContent=""
-                                        IsEnabled="{Binding IsStaggerEnabled}"
-                                        IsOn="{Binding AnimationStaggerEnabled, Mode=TwoWay}" />
-                                </toolkit:SettingsCard>
-                            </toolkit:SettingsExpander.Items>
-                        </toolkit:SettingsExpander>
+                        <toolkit:SettingsCard
+                            HorizontalContentAlignment="Right"
+                            svc:Localized.DescriptionKey="Settings.Animation.Easing.Description"
+                            svc:Localized.HeaderKey="Settings.Animation.Easing.Title">
+                            <ComboBox
+                                MinWidth="{StaticResource SettingsControlMinWidth}"
+                                IsEnabled="{Binding IsEasingEnabled}"
+                                ItemsSource="{Binding AvailableAnimationEasingIntensityOptions}"
+                                controls:SettingsComboBox.Value="{Binding AnimationEasingIntensity, Mode=TwoWay}" />
+                        </toolkit:SettingsCard>
+
+                        <toolkit:SettingsCard
+                            HorizontalContentAlignment="Right"
+                            svc:Localized.DescriptionKey="Settings.Animation.Stagger.Description"
+                            svc:Localized.HeaderKey="Settings.Animation.Stagger.Title">
+                            <ToggleSwitch
+                                MinWidth="0"
+                                OffContent=""
+                                OnContent=""
+                                IsEnabled="{Binding IsStaggerEnabled}"
+                                IsOn="{Binding AnimationStaggerEnabled, Mode=TwoWay}" />
+                        </toolkit:SettingsCard>
 
                     </StackPanel>
                 </StackPanel>
@@ -807,6 +807,16 @@ Text="DeskBox" />
                                 MinWidth="{StaticResource SettingsControlMinWidth}"
                                 ItemsSource="{Binding AvailableTitleDisplayModeOptions}"
                                 controls:SettingsComboBox.Value="{Binding DefaultTitleDisplayMode, Mode=TwoWay}" />
+                        </toolkit:SettingsCard>
+
+                        <toolkit:SettingsCard
+                            HorizontalContentAlignment="Right"
+                            svc:Localized.DescriptionKey="Settings.WidgetGroupSwitchAnimation.Description"
+                            svc:Localized.HeaderKey="Settings.WidgetGroupSwitchAnimation.Title">
+                            <ComboBox
+                                MinWidth="{StaticResource SettingsControlMinWidth}"
+                                ItemsSource="{Binding AvailableSwitchAnimationOptions}"
+                                controls:SettingsComboBox.Value="{Binding DefaultSwitchAnimationStyle, Mode=TwoWay}" />
                         </toolkit:SettingsCard>
 
                         <toolkit:SettingsCard
@@ -1099,59 +1109,7 @@ Text="DeskBox" />
                         <StackPanel x:Name="FileStorageSettingsSection" Visibility="Collapsed" Style="{StaticResource SectionPanelStyle}">
                     <StackPanel Spacing="4">
                         <toolkit:SettingsCard
-                            HorizontalContentAlignment="Right"
-                            svc:Localized.DescriptionKey="Settings.DropAction.Description"
-                            svc:Localized.HeaderKey="Settings.DropAction.Title">
-                            <ComboBox
-                                MinWidth="{StaticResource SettingsControlMinWidth}"
-                                ItemsSource="{Binding AvailableDropActionOptions}"
-                                controls:SettingsComboBox.Value="{Binding DropAction, Mode=TwoWay}" />
-                        </toolkit:SettingsCard>
-
-                        <toolkit:SettingsCard
-                            HorizontalContentAlignment="Right"
-                            svc:Localized.DescriptionKey="Settings.DragOutAction.Description"
-                            svc:Localized.HeaderKey="Settings.DragOutAction.Title">
-                            <StackPanel Spacing="4">
-                                <ComboBox
-                                    MinWidth="{StaticResource SettingsControlMinWidth}"
-                                    HorizontalAlignment="Right"
-                                    ItemsSource="{Binding AvailableDragOutActionOptions}"
-                                    controls:SettingsComboBox.Value="{Binding DragOutAction, Mode=TwoWay}" />
-                                <TextBlock
-                                    x:Name="DragOutWin10Note"
-                                    Style="{StaticResource SettingDescriptionTextStyle}"
-                                    TextWrapping="Wrap"
-                                    HorizontalAlignment="Right"
-                                    TextAlignment="Right"
-                                    Visibility="Collapsed"
-                                    svc:Localized.Key="Settings.DragOutAction.Win10Note" />
-                            </StackPanel>
-                        </toolkit:SettingsCard>
-
-                        <toolkit:SettingsExpander
-                            svc:Localized.DescriptionKey="Settings.DragOutTips.Group.Description"
-                            svc:Localized.HeaderKey="Settings.DragOutTips.Group.Title">
-                            <toolkit:SettingsExpander.HeaderIcon>
-                                <FontIcon Glyph="&#xE82F;" />
-                            </toolkit:SettingsExpander.HeaderIcon>
-                            <toolkit:SettingsExpander.Items>
-                                <toolkit:SettingsCard
-                                    HorizontalContentAlignment="Right"
-                                    svc:Localized.DescriptionKey="Settings.DragOutTips.Modifier.Description"
-                                    svc:Localized.HeaderKey="Settings.DragOutTips.Modifier.Title">
-                                    <ToggleSwitch x:Name="DragOutModifierTipToggle" MinWidth="0" VerticalAlignment="Center" OnContent="" OffContent="" IsOn="{Binding DragOutModifierTipEnabled, Mode=TwoWay}" />
-                                </toolkit:SettingsCard>
-                                <toolkit:SettingsCard
-                                    HorizontalContentAlignment="Right"
-                                    svc:Localized.DescriptionKey="Settings.DragOutTips.Result.Description"
-                                    svc:Localized.HeaderKey="Settings.DragOutTips.Result.Title">
-                                    <ToggleSwitch MinWidth="0" VerticalAlignment="Center" OnContent="" OffContent="" IsOn="{Binding DragOutResultHintEnabled, Mode=TwoWay}" />
-                                </toolkit:SettingsCard>
-                            </toolkit:SettingsExpander.Items>
-                        </toolkit:SettingsExpander>
-
-                        <toolkit:SettingsCard
+                            x:Name="ManagedStoragePathCard"
                             ContentAlignment="Vertical"
                             HorizontalContentAlignment="Stretch"
                             svc:Localized.DescriptionKey="Settings.ManagedPath.Description"
@@ -1187,10 +1145,67 @@ Text="DeskBox" />
                             </StackPanel>
                         </toolkit:SettingsCard>
 
+                        <toolkit:SettingsExpander
+                            svc:Localized.DescriptionKey="Settings.DragBehavior.Group.Description"
+                            svc:Localized.HeaderKey="Settings.DragBehavior.Group.Title">
+                            <toolkit:SettingsExpander.HeaderIcon>
+                                <FontIcon Glyph="&#xE82F;" />
+                            </toolkit:SettingsExpander.HeaderIcon>
+                            <toolkit:SettingsExpander.Items>
+                                <toolkit:SettingsCard
+                                    HorizontalContentAlignment="Right"
+                                    svc:Localized.DescriptionKey="Settings.DragOutAction.Description"
+                                    svc:Localized.HeaderKey="Settings.DragOutAction.Title">
+                                    <StackPanel Spacing="4">
+                                        <ComboBox
+                                            MinWidth="{StaticResource SettingsControlMinWidth}"
+                                            HorizontalAlignment="Right"
+                                            ItemsSource="{Binding AvailableDragOutActionOptions}"
+                                            controls:SettingsComboBox.Value="{Binding DragOutAction, Mode=TwoWay}" />
+                                        <TextBlock
+                                            x:Name="DragOutWin10Note"
+                                            Style="{StaticResource SettingDescriptionTextStyle}"
+                                            TextWrapping="Wrap"
+                                            HorizontalAlignment="Right"
+                                            TextAlignment="Right"
+                                            Visibility="Collapsed"
+                                            svc:Localized.Key="Settings.DragOutAction.Win10Note" />
+                                    </StackPanel>
+                                </toolkit:SettingsCard>
+
+                                <toolkit:SettingsCard
+                                    HorizontalContentAlignment="Right"
+                                    svc:Localized.DescriptionKey="Settings.DropAction.Description"
+                                    svc:Localized.HeaderKey="Settings.DropAction.Title">
+                                    <ComboBox
+                                        MinWidth="{StaticResource SettingsControlMinWidth}"
+                                        ItemsSource="{Binding AvailableDropActionOptions}"
+                                        controls:SettingsComboBox.Value="{Binding DropAction, Mode=TwoWay}" />
+                                </toolkit:SettingsCard>
+
+                                <toolkit:SettingsCard
+                                    HorizontalContentAlignment="Right"
+                                    svc:Localized.DescriptionKey="Settings.DragOutTips.Modifier.Description"
+                                    svc:Localized.HeaderKey="Settings.DragOutTips.Modifier.Title">
+                                    <ToggleSwitch x:Name="DragOutModifierTipToggle" MinWidth="0" VerticalAlignment="Center" OnContent="" OffContent="" IsOn="{Binding DragOutModifierTipEnabled, Mode=TwoWay}" />
+                                </toolkit:SettingsCard>
+
+                                <toolkit:SettingsCard
+                                    HorizontalContentAlignment="Right"
+                                    svc:Localized.DescriptionKey="Settings.DragOutTips.Result.Description"
+                                    svc:Localized.HeaderKey="Settings.DragOutTips.Result.Title">
+                                    <ToggleSwitch MinWidth="0" VerticalAlignment="Center" OnContent="" OffContent="" IsOn="{Binding DragOutResultHintEnabled, Mode=TwoWay}" />
+                                </toolkit:SettingsCard>
+                            </toolkit:SettingsExpander.Items>
+                        </toolkit:SettingsExpander>
+
                         <toolkit:SettingsCard
                             HorizontalContentAlignment="Right"
                             svc:Localized.DescriptionKey="Settings.ManagedPath.DesktopShortcut.Description"
                             svc:Localized.HeaderKey="Settings.ManagedPath.DesktopShortcut.Title">
+                            <toolkit:SettingsCard.HeaderIcon>
+                                <FontIcon Glyph="&#xE8A5;" />
+                            </toolkit:SettingsCard.HeaderIcon>
                             <ToggleSwitch
                                 x:Name="ManagedStorageDesktopShortcutToggle"
                                 MinWidth="0"
@@ -1461,6 +1476,19 @@ Text="DeskBox" />
                     <DataTemplate x:Key="InteractionWindowSettingsSectionTemplate" x:DataType="viewModels:SettingsViewModel">
                         <StackPanel x:Name="InteractionWindowSettingsSection" Margin="0,-12,0,0" Visibility="Collapsed" Style="{StaticResource SectionPanelStyle}">
                     <StackPanel Spacing="4">
+                        <toolkit:SettingsCard
+                            HorizontalContentAlignment="Right"
+                            svc:Localized.DescriptionKey="Settings.WidgetLayerMode.Description"
+                            svc:Localized.HeaderKey="Settings.WidgetLayerMode.Title">
+                            <toolkit:SettingsCard.HeaderIcon>
+                                <FontIcon Glyph="&#xE81E;" />
+                            </toolkit:SettingsCard.HeaderIcon>
+                            <ComboBox
+                                MinWidth="{StaticResource SettingsControlMinWidth}"
+                                ItemsSource="{Binding AvailableLayerModeOptions}"
+                                controls:SettingsComboBox.Value="{Binding LayerMode, Mode=TwoWay}" />
+                        </toolkit:SettingsCard>
+
                         <toolkit:SettingsExpander
                             HorizontalContentAlignment="Stretch"
                             Description="{Binding HotkeyDescription}"
@@ -1474,76 +1502,6 @@ Text="DeskBox" />
                                 OffContent=""
                                 OnContent="" />
                             <toolkit:SettingsExpander.Items>
-                                <toolkit:SettingsCard
-                                    ContentAlignment="Vertical"
-                                    HorizontalContentAlignment="Stretch">
-                                    <StackPanel Spacing="8">
-                                        <StackPanel Spacing="3">
-                                            <TextBlock
-                                                Style="{StaticResource SettingTitleTextStyle}"
-                                                svc:Localized.Key="Settings.GlobalHotkey.PresetsTitle" />
-                                        </StackPanel>
-                                        <ScrollViewer
-                                            HorizontalScrollBarVisibility="Auto"
-                                            HorizontalScrollMode="Enabled"
-                                            VerticalScrollBarVisibility="Disabled"
-                                            VerticalScrollMode="Disabled">
-                                            <StackPanel
-                                                x:Name="GlobalHotkeyPresetButtonsPanel"
-                                                Orientation="Horizontal"
-                                                Spacing="8">
-                                                <ToggleButton
-                                                    x:Name="GlobalHotkeyPresetF7Button"
-                                                    MinWidth="0"
-                                                    Padding="12,6"
-                                                    Click="GlobalHotkeyPresetButton_Click"
-                                                    Tag="F7">
-                                                    <TextBlock svc:Localized.Key="Settings.GlobalHotkey.Preset.F7" />
-                                                </ToggleButton>
-                                                <ToggleButton
-                                                    x:Name="GlobalHotkeyPresetDoubleControlButton"
-                                                    MinWidth="0"
-                                                    Padding="12,6"
-                                                    Click="GlobalHotkeyPresetButton_Click"
-                                                    Tag="DoubleControl">
-                                                    <TextBlock svc:Localized.Key="Settings.GlobalHotkey.Preset.DoubleControl" />
-                                                </ToggleButton>
-                                                <ToggleButton
-                                                    x:Name="GlobalHotkeyPresetAltSpaceButton"
-                                                    MinWidth="0"
-                                                    Padding="12,6"
-                                                    Click="GlobalHotkeyPresetButton_Click"
-                                                    Tag="AltSpace">
-                                                    <TextBlock svc:Localized.Key="Settings.GlobalHotkey.Preset.AltSpace" />
-                                                </ToggleButton>
-                                                <ToggleButton
-                                                    x:Name="GlobalHotkeyPresetWinSpaceButton"
-                                                    MinWidth="0"
-                                                    Padding="12,6"
-                                                    Click="GlobalHotkeyPresetButton_Click"
-                                                    Tag="WinSpace">
-                                                    <TextBlock svc:Localized.Key="Settings.GlobalHotkey.Preset.WinSpace" />
-                                                </ToggleButton>
-                                                <ToggleButton
-                                                    x:Name="GlobalHotkeyPresetWindowsTapButton"
-                                                    MinWidth="0"
-                                                    Padding="12,6"
-                                                    Click="GlobalHotkeyPresetButton_Click"
-                                                    Tag="WindowsTap">
-                                                    <TextBlock svc:Localized.Key="Settings.GlobalHotkey.Preset.WindowsTap" />
-                                                </ToggleButton>
-                                                <ToggleButton
-                                                    x:Name="GlobalHotkeyPresetCopilotKeyButton"
-                                                    MinWidth="0"
-                                                    Padding="12,6"
-                                                    Click="GlobalHotkeyPresetButton_Click"
-                                                    Tag="CopilotKey">
-                                                    <TextBlock svc:Localized.Key="Settings.GlobalHotkey.Preset.CopilotKey" />
-                                                </ToggleButton>
-                                            </StackPanel>
-                                        </ScrollViewer>
-                                    </StackPanel>
-                                </toolkit:SettingsCard>
                                 <toolkit:SettingsCard
                                     ContentAlignment="Vertical"
                                     HorizontalContentAlignment="Stretch">
@@ -1590,8 +1548,6 @@ Text="DeskBox" />
                                                 MinWidth="132"
                                                 HorizontalAlignment="Stretch"
                                                 Click="ChangeGlobalHotkeyButton_Click"
-                                                KeyDown="GlobalHotkeyCaptureButton_KeyDown"
-                                                LostFocus="GlobalHotkeyCaptureButton_LostFocus"
                                                 Style="{StaticResource ActionButtonStyle}"
                                                 svc:Localized.ToolTipKey="Settings.GlobalHotkey.ChangeTooltip" />
                                             <Button
@@ -1625,7 +1581,13 @@ Text="DeskBox" />
                              the search section's placement): the long wrapped message
                              lays out at page width, and the severity brushes are
                              pinned from code-behind because ThemeResource severity
-                             lookups fail inside late-created section templates. -->
+                             lookups fail inside late-created section templates.
+                             The message typography is also pinned from code-behind
+                             (SettingsWindow.ApplyNoticeMessageTypography): the
+                             template's Title/Message font sizes resolve through
+                             StaticResource lookups inside the control library's
+                             generic.xaml, so element-local resource overrides
+                             cannot reach them. -->
                         <InfoBar
                             x:Name="GlobalHotkeyElevatedNoticeInfoBar"
                             IsClosable="False"
@@ -1634,21 +1596,6 @@ Text="DeskBox" />
                             Severity="Informational"
                             svc:Localized.DescriptionKey="Settings.GlobalHotkey.ElevatedNotice.Description"
                             svc:Localized.HeaderKey="Settings.GlobalHotkey.ElevatedNotice.Title" />
-
-                        <toolkit:SettingsCard
-                            HorizontalContentAlignment="Right"
-                            svc:Localized.DescriptionKey="Settings.DesktopDoubleClick.Description"
-                            svc:Localized.HeaderKey="Settings.DesktopDoubleClick.Title">
-                            <toolkit:SettingsCard.HeaderIcon>
-                                <FontIcon Glyph="&#xE8B0;" />
-                            </toolkit:SettingsCard.HeaderIcon>
-                            <ToggleSwitch
-                                x:Name="DesktopDoubleClickToggle"
-                                MinWidth="0"
-                                OffContent=""
-                                OnContent=""
-                                Toggled="DesktopDoubleClickToggle_Toggled" />
-                        </toolkit:SettingsCard>
 
                         <toolkit:SettingsCard HorizontalContentAlignment="Right" svc:Localized.DescriptionKey="Settings.ShowDesktopBehavior.Description" svc:Localized.HeaderKey="Settings.ShowDesktopBehavior.Title">
                             <toolkit:SettingsCard.HeaderIcon><FontIcon Glyph="&#xE7F4;" /></toolkit:SettingsCard.HeaderIcon>
@@ -1720,15 +1667,17 @@ Text="DeskBox" />
 
                         <toolkit:SettingsCard
                             HorizontalContentAlignment="Right"
-                            svc:Localized.DescriptionKey="Settings.WidgetLayerMode.Description"
-                            svc:Localized.HeaderKey="Settings.WidgetLayerMode.Title">
+                            svc:Localized.DescriptionKey="Settings.DesktopDoubleClick.Description"
+                            svc:Localized.HeaderKey="Settings.DesktopDoubleClick.Title">
                             <toolkit:SettingsCard.HeaderIcon>
-                                <FontIcon Glyph="&#xE81E;" />
+                                <FontIcon Glyph="&#xE8B0;" />
                             </toolkit:SettingsCard.HeaderIcon>
-                            <ComboBox
-                                MinWidth="{StaticResource SettingsControlMinWidth}"
-                                ItemsSource="{Binding AvailableLayerModeOptions}"
-                                controls:SettingsComboBox.Value="{Binding LayerMode, Mode=TwoWay}" />
+                            <ToggleSwitch
+                                x:Name="DesktopDoubleClickToggle"
+                                MinWidth="0"
+                                OffContent=""
+                                OnContent=""
+                                Toggled="DesktopDoubleClickToggle_Toggled" />
                         </toolkit:SettingsCard>
                     </StackPanel>
                 </StackPanel>
@@ -2726,6 +2675,7 @@ Text="DeskBox" />
                     <StackPanel Margin="0,8,0,0" Spacing="4">
 
                         <InfoBar
+                            x:Name="CloudBackupSyncNoticeInfoBar"
                             IsClosable="False"
                             IsIconVisible="True"
                             IsOpen="True"
@@ -3628,6 +3578,7 @@ Text="DeskBox" />
                         </StackPanel>
 
                         <InfoBar
+                            x:Name="AboutStoreNoticeInfoBar"
                             IsClosable="False"
                             IsIconVisible="True"
                             IsOpen="True"

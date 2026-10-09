@@ -4,15 +4,14 @@ using Microsoft.UI.Xaml.Controls;
 namespace DeskBox.Services;
 
 /// <summary>
-/// Builds the per-widget "belong to screen" submenu. Mirrors the Windows 11
-/// context: a radio group over 自动 / 跟随主屏 / one entry per attached monitor,
-/// hidden entirely on single-monitor systems the way Windows hides commands
-/// that cannot apply.
+/// Builds the per-widget "移到显示器" submenu (spec 6.1): a radio group over
+/// the online displays with the check on the widget's ACTUAL display, a
+/// "始终在主显示器" toggle, and — for fallback placements — a disabled row
+/// naming the disconnected home display. Hidden entirely on single-display
+/// systems; null must never reach Items.Add.
 /// </summary>
 internal static class WidgetScreenMenuBuilder
 {
-    private const string RadioGroupName = "widget-screen-binding";
-
     public static MenuFlyoutSubItem? TryCreate(
         LocalizationService localizationService,
         WidgetConfig config,
@@ -30,27 +29,39 @@ internal static class WidgetScreenMenuBuilder
             Icon = new FontIcon { Glyph = "\uE7F4" }
         };
 
-        menu.Items.Add(CreateRadioItem(
-            localizationService.T("Widget.ScreenBinding.Auto"),
-            config.ScreenBindingMode == WidgetScreenBindingMode.Unbound,
-            () => applyBinding(WidgetScreenBindingMode.Unbound, null)));
+        WidgetScreenInfo? actual = ResolveActualDisplay(config, screens);
+        WidgetScreenInfo? home = config.ScreenBindingMode == WidgetScreenBindingMode.Pinned
+            ? WidgetScreenCatalog.TryFindScreen(screens, config.BoundScreenId)
+            : null;
 
-        menu.Items.Add(CreateRadioItem(
-            localizationService.T("Widget.ScreenBinding.FollowPrimary"),
-            config.ScreenBindingMode == WidgetScreenBindingMode.FollowPrimary,
-            () => applyBinding(WidgetScreenBindingMode.FollowPrimary, null)));
+        // Idempotence guard (menu side): re-clicking the entry that mirrors
+        // the persisted state must not re-run the binding pipeline. The
+        // manager guards again; this keeps the menu itself from even asking.
+        void ApplyIfChanged(WidgetScreenBindingMode mode, string? boundId)
+        {
+            if (config.ScreenBindingMode == mode &&
+                string.Equals(
+                    config.BoundScreenId?.Trim(),
+                    boundId?.Trim(),
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            applyBinding(mode, boundId);
+        }
 
         foreach (WidgetScreenInfo screen in screens)
         {
-            bool isBound = config.ScreenBindingMode == WidgetScreenBindingMode.Pinned &&
-                string.Equals(
-                    config.BoundScreenId?.Trim(),
-                    screen.StableId.Trim(),
-                    StringComparison.OrdinalIgnoreCase);
+            // Follow-primary surfaces have no pinned home, so no radio is
+            // checked — the toggle below carries the selection instead.
+            bool isActual = config.ScreenBindingMode == WidgetScreenBindingMode.Pinned &&
+                actual is not null &&
+                string.Equals(actual.StableId, screen.StableId, StringComparison.OrdinalIgnoreCase);
             string text = localizationService.Format(
                 "Widget.ScreenBinding.MonitorFormat",
                 screen.Number,
-                screen.PhysicalSizeText);
+                screen.DisplayName);
             if (screen.IsPrimary)
             {
                 text += localizationService.T("Widget.ScreenBinding.PrimarySuffix");
@@ -59,11 +70,65 @@ internal static class WidgetScreenMenuBuilder
             string stableId = screen.StableId;
             menu.Items.Add(CreateRadioItem(
                 text,
-                isBound,
-                () => applyBinding(WidgetScreenBindingMode.Pinned, stableId)));
+                isActual,
+                () => ApplyIfChanged(WidgetScreenBindingMode.Pinned, stableId)));
+        }
+
+        menu.Items.Add(new MenuFlyoutSeparator());
+
+        var followPrimary = new ToggleMenuFlyoutItem
+        {
+            Text = localizationService.T("Widget.ScreenBinding.FollowPrimary"),
+            Icon = new FontIcon { Glyph = "\uE718" },
+            IsChecked = config.ScreenBindingMode == WidgetScreenBindingMode.FollowPrimary
+        };
+        followPrimary.Click += (_, _) =>
+        {
+            if (followPrimary.IsChecked)
+            {
+                ApplyIfChanged(WidgetScreenBindingMode.FollowPrimary, null);
+            }
+            else
+            {
+                // Turning the toggle off keeps the widget where it is: home
+                // becomes the current actual display (spec 5.10).
+                ApplyIfChanged(
+                    WidgetScreenBindingMode.Pinned,
+                    actual?.StableId ?? home?.StableId);
+            }
+        };
+        menu.Items.Add(followPrimary);
+
+        // Fallback placement: name the disconnected home display compactly
+        // ("DELL U2720Q（未连接）") — menu rows must stay short; the full
+        // "returns when reconnected" sentence lives in the settings page row
+        // description, not here.
+        if (config.ScreenBindingMode == WidgetScreenBindingMode.Pinned && home is null)
+        {
+            string labelText = string.IsNullOrWhiteSpace(config.BoundScreenLabel)
+                ? localizationService.T("Widget.ScreenBinding.HomeOfflineFallbackName")
+                : config.BoundScreenLabel!;
+            var offline = new MenuFlyoutItem
+            {
+                Text = localizationService.Format(
+                    "Widget.ScreenBinding.HomeOfflineCompact",
+                    labelText),
+                IsEnabled = false
+            };
+            menu.Items.Add(offline);
         }
 
         return menu;
+    }
+
+    private static WidgetScreenInfo? ResolveActualDisplay(
+        WidgetConfig config,
+        IReadOnlyList<WidgetScreenInfo> screens)
+    {
+        Windows.Graphics.PointInt32 point = new(
+            (int)Math.Round(double.IsFinite(config.X) ? config.X : 0),
+            (int)Math.Round(double.IsFinite(config.Y) ? config.Y : 0));
+        return WidgetScreenCatalog.FindScreenForPoint(screens, point);
     }
 
     private static RadioMenuFlyoutItem CreateRadioItem(
@@ -74,7 +139,7 @@ internal static class WidgetScreenMenuBuilder
         var item = new RadioMenuFlyoutItem
         {
             Text = text,
-            GroupName = RadioGroupName,
+            GroupName = "widget-screen-home",
             IsChecked = isChecked
         };
         item.Click += (_, _) => apply();

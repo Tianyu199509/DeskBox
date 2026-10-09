@@ -94,20 +94,6 @@ public sealed partial class SettingsWindow
         FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.StackPanel>("Interaction", "InteractionSection")!;
     private global::Microsoft.UI.Xaml.Controls.StackPanel InteractionWindowSettingsSection =>
         FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.StackPanel>("InteractionWindowSettings", "InteractionWindowSettingsSection")!;
-    private global::Microsoft.UI.Xaml.Controls.StackPanel GlobalHotkeyPresetButtonsPanel =>
-        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.StackPanel>("InteractionWindowSettings", "GlobalHotkeyPresetButtonsPanel")!;
-    private global::Microsoft.UI.Xaml.Controls.Primitives.ToggleButton GlobalHotkeyPresetF7Button =>
-        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.Primitives.ToggleButton>("InteractionWindowSettings", "GlobalHotkeyPresetF7Button")!;
-    private global::Microsoft.UI.Xaml.Controls.Primitives.ToggleButton GlobalHotkeyPresetDoubleControlButton =>
-        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.Primitives.ToggleButton>("InteractionWindowSettings", "GlobalHotkeyPresetDoubleControlButton")!;
-    private global::Microsoft.UI.Xaml.Controls.Primitives.ToggleButton GlobalHotkeyPresetAltSpaceButton =>
-        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.Primitives.ToggleButton>("InteractionWindowSettings", "GlobalHotkeyPresetAltSpaceButton")!;
-    private global::Microsoft.UI.Xaml.Controls.Primitives.ToggleButton GlobalHotkeyPresetWinSpaceButton =>
-        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.Primitives.ToggleButton>("InteractionWindowSettings", "GlobalHotkeyPresetWinSpaceButton")!;
-    private global::Microsoft.UI.Xaml.Controls.Primitives.ToggleButton GlobalHotkeyPresetWindowsTapButton =>
-        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.Primitives.ToggleButton>("InteractionWindowSettings", "GlobalHotkeyPresetWindowsTapButton")!;
-    private global::Microsoft.UI.Xaml.Controls.Primitives.ToggleButton GlobalHotkeyPresetCopilotKeyButton =>
-        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.Primitives.ToggleButton>("InteractionWindowSettings", "GlobalHotkeyPresetCopilotKeyButton")!;
     private global::Microsoft.UI.Xaml.Controls.Grid GlobalHotkeyCustomRow =>
         FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.Grid>("InteractionWindowSettings", "GlobalHotkeyCustomRow")!;
     private global::Microsoft.UI.Xaml.Controls.Grid GlobalHotkeyActionsPanel =>
