@@ -47,7 +47,12 @@
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="CheckBox">
-                        <Grid ColumnDefinitions="Auto,*">
+                        <!-- Root carries the templated background so the whole row
+                             hit-tests; without it the empty title area is dead space
+                             even though it looks like part of the toggle. -->
+                        <Grid x:Name="RootGrid" ColumnDefinitions="Auto,*"
+                              Background="{TemplateBinding Background}"
+                              CornerRadius="4">
                             <Border x:Name="SelectionBox" Width="20" Height="20" CornerRadius="4"
                                     BorderBrush="{ThemeResource ControlStrokeColorDefaultBrush}" BorderThickness="1"
                                     Background="Transparent">
@@ -60,6 +65,29 @@
                                               HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
                                               Content="{TemplateBinding Content}" />
                             <VisualStateManager.VisualStateGroups>
+                                <VisualStateGroup x:Name="CommonStates">
+                                    <!-- Row-as-toggle: hover lights the row (subtle) plus
+                                         the box, mirroring the file tile's Subtle treatment. -->
+                                    <VisualState x:Name="Normal" />
+                                    <VisualState x:Name="PointerOver">
+                                        <VisualState.Setters>
+                                            <Setter Target="RootGrid.Background" Value="{ThemeResource SubtleFillColorSecondaryBrush}" />
+                                            <Setter Target="SelectionBox.Background" Value="{ThemeResource ControlAltFillColorTertiaryBrush}" />
+                                            <Setter Target="SelectionBox.BorderBrush" Value="{ThemeResource ControlStrongStrokeColorDefaultBrush}" />
+                                        </VisualState.Setters>
+                                    </VisualState>
+                                    <VisualState x:Name="Pressed">
+                                        <VisualState.Setters>
+                                            <Setter Target="RootGrid.Background" Value="{ThemeResource SubtleFillColorTertiaryBrush}" />
+                                            <Setter Target="SelectionBox.Background" Value="{ThemeResource ControlAltFillColorQuarternaryBrush}" />
+                                        </VisualState.Setters>
+                                    </VisualState>
+                                    <VisualState x:Name="Disabled">
+                                        <VisualState.Setters>
+                                            <Setter Target="RootGrid.Opacity" Value="0.4" />
+                                        </VisualState.Setters>
+                                    </VisualState>
+                                </VisualStateGroup>
                                 <VisualStateGroup x:Name="CheckStates">
                                     <VisualState x:Name="Unchecked" />
                                     <VisualState x:Name="Checked">

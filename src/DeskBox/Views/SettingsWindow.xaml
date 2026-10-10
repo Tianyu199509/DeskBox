@@ -487,7 +487,7 @@ Text="DeskBox" />
                                                 Click="ChooseWidgetBackgroundImage_Click"
                                                 Style="{StaticResource ActionButtonStyle}">
                                                 <StackPanel Orientation="Horizontal" Spacing="8">
-                                                    <SymbolIcon Symbol="OpenFile" />
+                                                    <FontIcon Glyph="&#xE8E5;" FontSize="16" />
                                                     <TextBlock svc:Localized.Key="Widget.CustomBackground.ChooseImage" />
                                                 </StackPanel>
                                             </Button>
@@ -536,7 +536,7 @@ Text="DeskBox" />
                                                 Click="ClearPerWidgetBackgroundsButton_Click"
                                                 Style="{StaticResource ActionButtonStyle}">
                                                 <StackPanel Orientation="Horizontal" Spacing="8">
-                                                    <SymbolIcon Symbol="Delete" />
+                                                    <FontIcon Glyph="&#xE74D;" FontSize="16" />
                                                     <TextBlock svc:Localized.Key="Settings.WidgetBackground.PerWidget.Clear" />
                                                 </StackPanel>
                                             </Button>
@@ -598,7 +598,7 @@ Text="DeskBox" />
                                             Click="OpenSystemTransparencySettingsButton_Click"
                                             Style="{StaticResource ActionButtonStyle}">
                                             <StackPanel Orientation="Horizontal" Spacing="8">
-                                                <FontIcon FontSize="14" Glyph="&#xE713;" />
+                                                <FontIcon FontSize="16" Glyph="&#xE713;" />
                                                 <TextBlock svc:Localized.Key="Settings.SystemEffect.OpenSystemSettings" />
                                             </StackPanel>
                                         </Button>
@@ -621,7 +621,7 @@ Text="DeskBox" />
                                             Click="OpenWindowShadowSettingsButton_Click"
                                             Style="{StaticResource ActionButtonStyle}">
                                             <StackPanel Orientation="Horizontal" Spacing="8">
-                                                <FontIcon FontSize="14" Glyph="&#xE713;" />
+                                                <FontIcon FontSize="16" Glyph="&#xE713;" />
                                                 <TextBlock svc:Localized.Key="Settings.SystemEffect.OpenSystemSettings" />
                                             </StackPanel>
                                         </Button>
@@ -746,7 +746,7 @@ Text="DeskBox" />
                                     svc:Localized.HeaderKey="Settings.DisplayWidgetChrome.Title">
                                     <StackPanel Orientation="Horizontal" Spacing="8">
                                         <Button svc:Localized.AutomationNameKey="Settings.DisplayWidgetChrome.ResetTooltip" Command="{x:Bind ResetDisplayWidgetChromeOverridesCommand, Mode=OneWay}" Style="{StaticResource IconActionButtonStyle}" svc:Localized.ToolTipKey="Settings.DisplayWidgetChrome.ResetTooltip">
-                                            <FontIcon FontSize="14" Glyph="&#xE72C;" />
+                                            <FontIcon FontSize="16" Glyph="&#xE72C;" />
                                         </Button>
                                         <ComboBox svc:Localized.AutomationNameKey="Settings.DisplayWidgetChrome.Title" MinWidth="{StaticResource SettingsControlMinWidth}" ItemsSource="{Binding AvailableDisplayChromeModeOptions}" controls:SettingsComboBox.Value="{Binding DisplayChromeMode, Mode=TwoWay}" />
                                     </StackPanel>
@@ -758,7 +758,7 @@ Text="DeskBox" />
                                     svc:Localized.HeaderKey="Settings.InteractiveWidgetChrome.Title">
                                     <StackPanel Orientation="Horizontal" Spacing="8">
                                         <Button svc:Localized.AutomationNameKey="Settings.InteractiveWidgetChrome.ResetTooltip" Command="{x:Bind ResetInteractiveWidgetChromeOverridesCommand, Mode=OneWay}" Style="{StaticResource IconActionButtonStyle}" svc:Localized.ToolTipKey="Settings.InteractiveWidgetChrome.ResetTooltip">
-                                            <FontIcon FontSize="14" Glyph="&#xE72C;" />
+                                            <FontIcon FontSize="16" Glyph="&#xE72C;" />
                                         </Button>
                                         <ComboBox svc:Localized.AutomationNameKey="Settings.InteractiveWidgetChrome.Title" MinWidth="{StaticResource SettingsControlMinWidth}" ItemsSource="{Binding AvailableInteractiveChromeModeOptions}" controls:SettingsComboBox.Value="{Binding InteractiveChromeMode, Mode=TwoWay}" />
                                     </StackPanel>
@@ -1063,7 +1063,7 @@ Text="DeskBox" />
                                                                     Style="{StaticResource IconActionButtonStyle}"
                                                                     Tag="{Binding}"
                                                                     svc:Localized.ToolTipKey="Settings.WidgetGroups.Existing.Member.MoveUp">
-                                                                    <FontIcon FontSize="12" Glyph="&#xE70E;" />
+                                                                    <FontIcon FontSize="16" Glyph="&#xE70E;" />
                                                                 </Button>
                                                                 <Button svc:Localized.AutomationNameKey="Settings.WidgetGroups.Existing.Member.MoveDown"
                                                                     Click="MoveWidgetGroupMemberDownButton_Click"
@@ -1071,14 +1071,14 @@ Text="DeskBox" />
                                                                     Style="{StaticResource IconActionButtonStyle}"
                                                                     Tag="{Binding}"
                                                                     svc:Localized.ToolTipKey="Settings.WidgetGroups.Existing.Member.MoveDown">
-                                                                    <FontIcon FontSize="12" Glyph="&#xE70D;" />
+                                                                    <FontIcon FontSize="16" Glyph="&#xE70D;" />
                                                                 </Button>
                                                                 <Button svc:Localized.AutomationNameKey="Settings.WidgetGroups.Existing.Member.Remove"
                                                                     Click="RemoveWidgetGroupMemberButton_Click"
                                                                     Style="{StaticResource IconActionButtonStyle}"
                                                                     Tag="{Binding}"
                                                                     svc:Localized.ToolTipKey="Settings.WidgetGroups.Existing.Member.Remove">
-                                                                    <FontIcon FontSize="12" Glyph="&#xE8D9;" />
+                                                                    <FontIcon FontSize="16" Glyph="&#xE8D9;" />
                                                                 </Button>
                                                             </StackPanel>
                                                         </Grid>
@@ -1092,11 +1092,13 @@ Text="DeskBox" />
                                                 <Button
                                                     Click="ResetWidgetGroupOverrideButton_Click"
                                                     IsEnabled="{Binding HasOverrides}"
+                                                    Style="{StaticResource ActionButtonStyle}"
                                                     Tag="{Binding GroupId}">
                                                     <TextBlock svc:Localized.Key="Settings.WidgetGroups.Existing.FollowDefaultAction" />
                                                 </Button>
                                                 <Button
                                                     Click="DissolveWidgetGroupButton_Click"
+                                                    Style="{StaticResource ActionButtonStyle}"
                                                     Tag="{Binding FirstMemberId}">
                                                     <TextBlock svc:Localized.Key="Widget.Group.Dissolve" />
                                                 </Button>
@@ -1131,7 +1133,7 @@ Text="DeskBox" />
                                                 <TextBlock Style="{StaticResource SettingDescriptionTextStyle}" Text="{Binding Summary}" />
                                             </StackPanel>
                                         </toolkit:SettingsCard.Header>
-                                        <Button Click="ResetCapsuleWidgetOverrideButton_Click" Tag="{Binding WidgetId}">
+                                        <Button Click="ResetCapsuleWidgetOverrideButton_Click" Style="{StaticResource ActionButtonStyle}" Tag="{Binding WidgetId}">
                                             <TextBlock svc:Localized.Key="Settings.Capsule.Overrides.FollowGlobal" />
                                         </Button>
                                     </toolkit:SettingsCard>
@@ -1139,8 +1141,8 @@ Text="DeskBox" />
                             </ItemsControl.ItemTemplate>
                         </ItemsControl>
                         <toolkit:SettingsCard Visibility="{Binding ShowOverridesList, Converter={StaticResource SettingsBoolToVisibilityConverter}}" HorizontalContentAlignment="Right" svc:Localized.DescriptionKey="Settings.Capsule.Overrides.ResetAll.Description" svc:Localized.HeaderKey="Settings.Capsule.Overrides.ResetAll.Title">
-                            <Button Command="{x:Bind ResetAllCapsuleOverridesCommand, Mode=OneWay}">
-                                <StackPanel Orientation="Horizontal" Spacing="6"><FontIcon FontSize="13" Glyph="&#xE777;" /><TextBlock svc:Localized.Key="Settings.Capsule.Overrides.ResetAll.Action" /></StackPanel>
+                            <Button Command="{x:Bind ResetAllCapsuleOverridesCommand, Mode=OneWay}" Style="{StaticResource ActionButtonStyle}">
+                                <StackPanel Orientation="Horizontal" Spacing="6"><FontIcon FontSize="16" Glyph="&#xE777;" /><TextBlock svc:Localized.Key="Settings.Capsule.Overrides.ResetAll.Action" /></StackPanel>
                             </Button>
                         </toolkit:SettingsCard>
                     </StackPanel>
@@ -1234,16 +1236,16 @@ Text="DeskBox" />
                                 <TextBlock Style="{StaticResource SettingDescriptionTextStyle}" Text="{Binding QuickAccessStatusText}" />
                                 <StackPanel x:Name="PathActionsPanel" HorizontalAlignment="Right" Orientation="Horizontal" Spacing="8">
                                     <Button x:Name="OpenPathButton" Click="OpenManagedStoragePathButton_Click" Style="{StaticResource ActionButtonStyle}" svc:Localized.ToolTipKey="Settings.ManagedPath.OpenTooltip">
-                                        <StackPanel Orientation="Horizontal" Spacing="8"><SymbolIcon Symbol="OpenFile" /><TextBlock svc:Localized.Key="Common.Open" /></StackPanel>
+                                        <StackPanel Orientation="Horizontal" Spacing="8"><FontIcon Glyph="&#xE8E5;" FontSize="16" /><TextBlock svc:Localized.Key="Common.Open" /></StackPanel>
                                     </Button>
                                     <Button x:Name="PinQuickAccessButton" Click="PinManagedStorageToQuickAccessButton_Click" IsEnabled="{Binding CanInvokeQuickAccessAction}" Style="{StaticResource ActionButtonStyle}" ToolTipService.ToolTip="{Binding PinQuickAccessToolTipText}">
-                                        <StackPanel Orientation="Horizontal" Spacing="8"><SymbolIcon Symbol="Pin" /><TextBlock Text="{Binding PinQuickAccessButtonText}" /></StackPanel>
+                                        <StackPanel Orientation="Horizontal" Spacing="8"><FontIcon Glyph="&#xE718;" FontSize="16" /><TextBlock Text="{Binding PinQuickAccessButtonText}" /></StackPanel>
                                     </Button>
                                     <Button x:Name="ChangePathButton" Click="ChangeManagedStoragePathButton_Click" Style="{StaticResource ActionButtonStyle}" svc:Localized.ToolTipKey="Settings.ManagedPath.ChangeTooltip">
-                                        <StackPanel Orientation="Horizontal" Spacing="8"><SymbolIcon Symbol="Folder" /><TextBlock svc:Localized.Key="Common.Change" /></StackPanel>
+                                        <StackPanel Orientation="Horizontal" Spacing="8"><FontIcon Glyph="&#xE8B7;" FontSize="16" /><TextBlock svc:Localized.Key="Common.Change" /></StackPanel>
                                     </Button>
                                     <Button x:Name="CleanupStorageButton" Click="CleanupManagedStorageButton_Click" Style="{StaticResource ActionButtonStyle}" svc:Localized.ToolTipKey="Settings.ManagedStorage.ManageTooltip">
-                                        <StackPanel Orientation="Horizontal" Spacing="8"><SymbolIcon Symbol="Setting" /><TextBlock svc:Localized.Key="Settings.ManagedStorage.Manage" /></StackPanel>
+                                        <StackPanel Orientation="Horizontal" Spacing="8"><FontIcon Glyph="&#xE713;" FontSize="16" /><TextBlock svc:Localized.Key="Settings.ManagedStorage.Manage" /></StackPanel>
                                     </Button>
                                 </StackPanel>
                             </StackPanel>
@@ -1514,7 +1516,7 @@ Text="DeskBox" />
                                                         Grid.Column="0"
                                                         FontSize="14"
                                                         Glyph="&#xE700;"
-                                                        Opacity="0.58"
+                                                        Opacity="0.7"
                                                         svc:Localized.ToolTipKey="Settings.FileStacks.Custom.DragTooltip"
                                                         VerticalAlignment="Center" />
                                                     <Grid Grid.Row="0" Grid.Column="1" ColumnDefinitions="*,Auto" ColumnSpacing="8">
@@ -1529,20 +1531,20 @@ Text="DeskBox" />
                                                                 IsEnabled="{Binding CanMoveUp}"
                                                                 Style="{StaticResource IconActionButtonStyle}"
                                                                 svc:Localized.ToolTipKey="Settings.FileStacks.Custom.MoveUp">
-                                                                <FontIcon FontSize="12" Glyph="&#xE70E;" />
+                                                                <FontIcon FontSize="16" Glyph="&#xE70E;" />
                                                             </Button>
                                                             <Button svc:Localized.AutomationNameKey="Settings.FileStacks.Custom.MoveDown"
                                                                 Click="MoveFileStackRuleDownButton_Click"
                                                                 IsEnabled="{Binding CanMoveDown}"
                                                                 Style="{StaticResource IconActionButtonStyle}"
                                                                 svc:Localized.ToolTipKey="Settings.FileStacks.Custom.MoveDown">
-                                                                <FontIcon FontSize="12" Glyph="&#xE70D;" />
+                                                                <FontIcon FontSize="16" Glyph="&#xE70D;" />
                                                             </Button>
                                                             <Button svc:Localized.AutomationNameKey="Settings.FileStacks.Custom.Remove"
                                                                 Click="RemoveFileStackRuleButton_Click"
                                                                 Style="{StaticResource IconActionButtonStyle}"
                                                                 svc:Localized.ToolTipKey="Settings.FileStacks.Custom.Remove">
-                                                                <FontIcon FontSize="12" Glyph="&#xE74D;" />
+                                                                <FontIcon FontSize="16" Glyph="&#xE74D;" />
                                                             </Button>
                                                         </StackPanel>
                                                     </Grid>
@@ -1673,7 +1675,7 @@ Text="DeskBox" />
                                                 Style="{StaticResource ActionButtonStyle}"
                                                 svc:Localized.ToolTipKey="Settings.GlobalHotkey.ResetTooltip">
                                                 <StackPanel Orientation="Horizontal" Spacing="8">
-                                                    <SymbolIcon Symbol="Refresh" />
+                                                    <FontIcon Glyph="&#xE72C;" FontSize="16" />
                                                     <TextBlock svc:Localized.Key="Common.Restore" />
                                                 </StackPanel>
                                             </Button>
@@ -1833,7 +1835,7 @@ Text="DeskBox" />
                                         Style="{StaticResource ActionButtonStyle}"
                                         svc:Localized.ToolTipKey="Settings.ManagedStorage.RefreshTooltip">
                                         <StackPanel Orientation="Horizontal" Spacing="8">
-                                            <SymbolIcon Symbol="Refresh" />
+                                            <FontIcon Glyph="&#xE72C;" FontSize="16" />
                                             <TextBlock svc:Localized.Key="Common.Refresh" />
                                         </StackPanel>
                                     </Button>
@@ -2040,17 +2042,17 @@ Text="DeskBox" />
                                 <toolkit:SettingsExpander.Items>
                                     <toolkit:SettingsCard Description="{Binding ImageCacheText}" HorizontalContentAlignment="Right" svc:Localized.HeaderKey="Settings.QuickCapture.ImageCacheTitle">
                                         <Button Click="CleanupQuickCaptureImageCacheButton_Click" IsEnabled="{Binding CanClearImageCache}" Style="{StaticResource ActionButtonStyle}" svc:Localized.ToolTipKey="Settings.QuickCapture.ImageCacheCleanupTooltip">
-                                            <StackPanel Orientation="Horizontal" Spacing="8"><SymbolIcon Symbol="Delete" /><TextBlock svc:Localized.Key="Common.Cleanup" /></StackPanel>
+                                            <StackPanel Orientation="Horizontal" Spacing="8"><FontIcon Glyph="&#xE74D;" FontSize="16" /><TextBlock svc:Localized.Key="Common.Cleanup" /></StackPanel>
                                         </Button>
                                     </toolkit:SettingsCard>
                                     <toolkit:SettingsCard HorizontalContentAlignment="Right" svc:Localized.DescriptionKey="Settings.QuickCapture.ClearRecentDescription" svc:Localized.HeaderKey="Settings.QuickCapture.ClearRecentTitle">
                                         <Button Click="ClearQuickCaptureRecentButton_Click" Style="{StaticResource ActionButtonStyle}" svc:Localized.ToolTipKey="Settings.QuickCapture.ClearRecentTooltip">
-                                            <StackPanel Orientation="Horizontal" Spacing="8"><SymbolIcon Symbol="Delete" /><TextBlock svc:Localized.Key="Common.Delete" /></StackPanel>
+                                            <StackPanel Orientation="Horizontal" Spacing="8"><FontIcon Glyph="&#xE74D;" FontSize="16" /><TextBlock svc:Localized.Key="Common.Delete" /></StackPanel>
                                         </Button>
                                     </toolkit:SettingsCard>
                                     <toolkit:SettingsCard HorizontalContentAlignment="Right" svc:Localized.DescriptionKey="Settings.QuickCapture.ClearDescription" svc:Localized.HeaderKey="Settings.QuickCapture.ClearTitle">
                                         <Button Click="ClearQuickCaptureDataButton_Click" Style="{StaticResource ActionButtonStyle}">
-                                            <StackPanel Orientation="Horizontal" Spacing="8"><SymbolIcon Symbol="Delete" /><TextBlock svc:Localized.Key="Common.Delete" /></StackPanel>
+                                            <StackPanel Orientation="Horizontal" Spacing="8"><FontIcon Glyph="&#xE74D;" FontSize="16" /><TextBlock svc:Localized.Key="Common.Delete" /></StackPanel>
                                         </Button>
                                     </toolkit:SettingsCard>
                                 </toolkit:SettingsExpander.Items>
@@ -2767,19 +2769,19 @@ Text="DeskBox" />
                             <StackPanel Spacing="12">
                                 <StackPanel Orientation="Horizontal" Spacing="8">
                                     <Button x:Name="RestoreDataBackupButton" Click="RestoreDataBackupButton_Click" Style="{StaticResource ActionButtonStyle}" svc:Localized.ToolTipKey="Settings.DataBackup.RestoreTooltip">
-                                        <StackPanel Orientation="Horizontal" Spacing="8"><FontIcon FontSize="14" Glyph="&#xE777;" /><TextBlock svc:Localized.Key="Settings.DataBackup.Restore" /></StackPanel>
+                                        <StackPanel Orientation="Horizontal" Spacing="8"><FontIcon FontSize="16" Glyph="&#xE777;" /><TextBlock svc:Localized.Key="Settings.DataBackup.Restore" /></StackPanel>
                                     </Button>
                                     <Button x:Name="ExportDataBackupButton" Click="ExportDataBackupButton_Click" Style="{StaticResource ActionButtonStyle}" svc:Localized.ToolTipKey="Settings.DataBackup.Tooltip">
-                                        <StackPanel Orientation="Horizontal" Spacing="8"><FontIcon FontSize="14" Glyph="&#xE74E;" /><TextBlock svc:Localized.Key="Settings.DataBackup.Export" /></StackPanel>
+                                        <StackPanel Orientation="Horizontal" Spacing="8"><FontIcon FontSize="16" Glyph="&#xE74E;" /><TextBlock svc:Localized.Key="Settings.DataBackup.Export" /></StackPanel>
                                     </Button>
                                     <Button x:Name="CreateBackupSnapshotButton" Click="CreateBackupSnapshotButton_Click" Style="{StaticResource ActionButtonStyle}" svc:Localized.ToolTipKey="Settings.DataBackup.Snapshots.BackupNowTooltip">
-                                        <StackPanel Orientation="Horizontal" Spacing="8"><FontIcon FontSize="14" Glyph="&#xE74E;" /><TextBlock svc:Localized.Key="Settings.DataBackup.Snapshots.BackupNow" /></StackPanel>
+                                        <StackPanel Orientation="Horizontal" Spacing="8"><FontIcon FontSize="16" Glyph="&#xE74E;" /><TextBlock svc:Localized.Key="Settings.DataBackup.Snapshots.BackupNow" /></StackPanel>
                                     </Button>
                                     <Button x:Name="OpenBackupFolderButton" Click="OpenBackupFolderButton_Click" Style="{StaticResource ActionButtonStyle}">
-                                        <StackPanel Orientation="Horizontal" Spacing="8"><SymbolIcon Symbol="OpenFile" /><TextBlock svc:Localized.Key="Settings.DataBackup.Snapshots.OpenFolder" /></StackPanel>
+                                        <StackPanel Orientation="Horizontal" Spacing="8"><FontIcon Glyph="&#xE8E5;" FontSize="16" /><TextBlock svc:Localized.Key="Settings.DataBackup.Snapshots.OpenFolder" /></StackPanel>
                                     </Button>
                                     <Button x:Name="RefreshBackupSnapshotsButton" Click="RefreshBackupSnapshotsButton_Click" Style="{StaticResource ActionButtonStyle}">
-                                        <StackPanel Orientation="Horizontal" Spacing="8"><SymbolIcon Symbol="Refresh" /><TextBlock svc:Localized.Key="Settings.DataBackup.Snapshots.Refresh" /></StackPanel>
+                                        <StackPanel Orientation="Horizontal" Spacing="8"><FontIcon Glyph="&#xE72C;" FontSize="16" /><TextBlock svc:Localized.Key="Settings.DataBackup.Snapshots.Refresh" /></StackPanel>
                                     </Button>
                                 </StackPanel>
                                 <StackPanel Spacing="3">
@@ -2883,8 +2885,6 @@ Text="DeskBox" />
                                     <TextBox AutomationProperties.LabeledBy="{Binding ElementName=CloudBackupRemotePathLabel}" IsEnabled="{Binding ActionsEnabled}" Text="{Binding RemotePath, Mode=TwoWay}" />
                                     <TextBlock
                                         Margin="0,2,0,0"
-                                        FontSize="11"
-                                        Opacity="0.7"
                                         Style="{StaticResource SettingDescriptionTextStyle}"
                                         TextWrapping="Wrap"
                                         svc:Localized.Key="Settings.CloudBackup.RemotePath.Hint" />
@@ -2986,10 +2986,10 @@ Text="DeskBox" />
                             <StackPanel Spacing="12">
                                 <StackPanel Orientation="Horizontal" Spacing="8">
                                     <Button x:Name="CloudBackupNowButton" Click="CloudBackupNowButton_Click" IsEnabled="{Binding ActionsEnabled}" Style="{StaticResource ActionButtonStyle}">
-                                        <StackPanel Orientation="Horizontal" Spacing="8"><FontIcon FontSize="14" Glyph="&#xE74E;" /><TextBlock svc:Localized.Key="Settings.CloudBackup.BackupNow" /></StackPanel>
+                                        <StackPanel Orientation="Horizontal" Spacing="8"><FontIcon FontSize="16" Glyph="&#xE74E;" /><TextBlock svc:Localized.Key="Settings.CloudBackup.BackupNow" /></StackPanel>
                                     </Button>
                                     <Button x:Name="CloudBackupRefreshSnapshotsButton" Click="CloudBackupRefreshSnapshotsButton_Click" IsEnabled="{Binding ActionsEnabled}" Style="{StaticResource ActionButtonStyle}">
-                                        <StackPanel Orientation="Horizontal" Spacing="8"><SymbolIcon Symbol="Refresh" /><TextBlock svc:Localized.Key="Settings.CloudBackup.RefreshSnapshots" /></StackPanel>
+                                        <StackPanel Orientation="Horizontal" Spacing="8"><FontIcon Glyph="&#xE72C;" FontSize="16" /><TextBlock svc:Localized.Key="Settings.CloudBackup.RefreshSnapshots" /></StackPanel>
                                     </Button>
                                 </StackPanel>
                                 <TextBlock Style="{StaticResource SettingDescriptionTextStyle}" Text="{Binding StatusText}" TextWrapping="Wrap" />
@@ -3049,7 +3049,7 @@ Text="DeskBox" />
                                     Style="{StaticResource ActionButtonStyle}"
                                     svc:Localized.ToolTipKey="Settings.AttachmentHealth.CheckTooltip">
                                     <StackPanel Orientation="Horizontal" Spacing="8">
-                                        <SymbolIcon Symbol="Refresh" />
+                                        <FontIcon Glyph="&#xE72C;" FontSize="16" />
                                         <TextBlock svc:Localized.Key="Settings.AttachmentHealth.Check" />
                                     </StackPanel>
                                 </Button>
@@ -3077,7 +3077,7 @@ Text="DeskBox" />
                                 Style="{StaticResource ActionButtonStyle}"
                                 svc:Localized.ToolTipKey="Settings.Restore.Tooltip">
                                 <StackPanel Orientation="Horizontal" Spacing="8">
-                                    <SymbolIcon Symbol="Refresh" />
+                                    <FontIcon Glyph="&#xE72C;" FontSize="16" />
                                     <TextBlock svc:Localized.Key="Common.Restore" />
                                 </StackPanel>
                             </Button>
@@ -3151,7 +3151,7 @@ Text="DeskBox" />
                                         Style="{StaticResource ActionButtonStyle}"
                                         svc:Localized.ToolTipKey="Settings.DragDropPermission.RefreshTooltip">
                                         <StackPanel Orientation="Horizontal" Spacing="8">
-                                            <SymbolIcon Symbol="Refresh" />
+                                            <FontIcon Glyph="&#xE72C;" FontSize="16" />
                                             <TextBlock svc:Localized.Key="Common.Refresh" />
                                         </StackPanel>
                                     </Button>
@@ -3161,7 +3161,7 @@ Text="DeskBox" />
                                         Style="{StaticResource ActionButtonStyle}"
                                         svc:Localized.ToolTipKey="Settings.DragDropPermission.RepairTooltip">
                                         <StackPanel Orientation="Horizontal" Spacing="8">
-                                            <SymbolIcon Symbol="Setting" />
+                                            <FontIcon Glyph="&#xE713;" FontSize="16" />
                                             <TextBlock svc:Localized.Key="Settings.DragDropPermission.RepairButton" />
                                         </StackPanel>
                                     </Button>
@@ -3170,7 +3170,7 @@ Text="DeskBox" />
                                         Style="{StaticResource ActionButtonStyle}"
                                         svc:Localized.ToolTipKey="Settings.DragDropPermission.OpenUacTooltip">
                                         <StackPanel Orientation="Horizontal" Spacing="8">
-                                            <SymbolIcon Symbol="OpenFile" />
+                                            <FontIcon Glyph="&#xE8E5;" FontSize="16" />
                                             <TextBlock svc:Localized.Key="Settings.DragDropPermission.OpenUacButton" />
                                         </StackPanel>
                                     </Button>
@@ -3206,7 +3206,7 @@ Text="DeskBox" />
                                         Style="{StaticResource ActionButtonStyle}"
                                         svc:Localized.ToolTipKey="Settings.Diagnostics.ExportTooltip">
                                         <StackPanel Orientation="Horizontal" Spacing="8">
-                                            <SymbolIcon Symbol="Save" />
+                                            <FontIcon Glyph="&#xE74E;" FontSize="16" />
                                             <TextBlock svc:Localized.Key="Settings.Diagnostics.Export" />
                                         </StackPanel>
                                     </Button>
@@ -3216,7 +3216,7 @@ Text="DeskBox" />
                                         Style="{StaticResource ActionButtonStyle}"
                                         svc:Localized.ToolTipKey="Settings.RuntimeHealth.ResyncTooltip">
                                         <StackPanel Orientation="Horizontal" Spacing="8">
-                                            <SymbolIcon Symbol="Refresh" />
+                                            <FontIcon Glyph="&#xE72C;" FontSize="16" />
                                             <TextBlock svc:Localized.Key="Settings.RuntimeHealth.Resync" />
                                         </StackPanel>
                                     </Button>
@@ -3288,7 +3288,7 @@ Text="DeskBox" />
                                                 Style="{StaticResource ActionButtonStyle}"
                                                 svc:Localized.ToolTipKey="Settings.About.AboutMeTitle">
                                                 <StackPanel Orientation="Horizontal" Spacing="6">
-                                                    <FontIcon FontSize="14" Glyph="&#xE77B;" />
+                                                    <FontIcon FontSize="16" Glyph="&#xE77B;" />
                                                     <TextBlock svc:Localized.Key="Settings.About.AboutMeButton" />
                                                 </StackPanel>
                                             </Button>
@@ -3298,7 +3298,7 @@ Text="DeskBox" />
                                                 Style="{StaticResource ActionButtonStyle}"
                                                 ToolTipService.ToolTip="{Binding OfficialWebsiteLink}">
                                                 <StackPanel Orientation="Horizontal" Spacing="6">
-                                                    <FontIcon FontSize="14" Glyph="&#xE774;" />
+                                                    <FontIcon FontSize="16" Glyph="&#xE774;" />
                                                     <TextBlock svc:Localized.Key="Settings.About.Website" />
                                                 </StackPanel>
                                             </Button>
@@ -3346,7 +3346,7 @@ Text="DeskBox" />
                                         IsEnabled="{Binding IsOneClickActionEnabled}"
                                         Style="{StaticResource ActionButtonStyle}">
                                         <StackPanel Orientation="Horizontal" Spacing="8">
-                                            <FontIcon FontSize="14" Glyph="&#xE895;" />
+                                            <FontIcon FontSize="16" Glyph="&#xE895;" />
                                             <TextBlock Text="{Binding OneClickActionButtonText}" />
                                         </StackPanel>
                                     </Button>
@@ -3356,7 +3356,7 @@ Text="DeskBox" />
                                         Click="ViewReleaseNotesButton_Click"
                                         Style="{StaticResource ActionButtonStyle}">
                                         <StackPanel Orientation="Horizontal" Spacing="8">
-                                            <FontIcon FontSize="14" Glyph="&#xE8A5;" />
+                                            <FontIcon FontSize="16" Glyph="&#xE8A5;" />
                                             <TextBlock Text="{Binding ViewReleaseNotesButtonText}" TextWrapping="NoWrap" />
                                         </StackPanel>
                                     </Button>
@@ -3417,7 +3417,7 @@ Text="DeskBox" />
                                             Style="{StaticResource ActionButtonStyle}"
                                             ToolTipService.ToolTip="{Binding ManualUpdateDownloadUrl}">
                                             <StackPanel Orientation="Horizontal" Spacing="8">
-                                                <FontIcon FontSize="14" Glyph="&#xE774;" />
+                                                <FontIcon FontSize="16" Glyph="&#xE774;" />
                                                 <TextBlock Text="{Binding UpdateFallbackActionText}" />
                                             </StackPanel>
                                         </Button>
@@ -3440,9 +3440,9 @@ Text="DeskBox" />
                                 <Button
                                     x:Name="ShowFeedbackDialogButton"
                                     Click="ShowFeedbackDialogButton_Click"
-                                    Style="{StaticResource AccentButtonStyle}">
+                                    Style="{StaticResource AccentActionButtonStyle}">
                                     <StackPanel Orientation="Horizontal" Spacing="8">
-                                        <FontIcon FontSize="14" Glyph="&#xE715;" />
+                                        <FontIcon FontSize="16" Glyph="&#xE715;" />
                                         <TextBlock svc:Localized.Key="Settings.About.FeedbackSendButton" />
                                     </StackPanel>
                                 </Button>
@@ -3451,7 +3451,7 @@ Text="DeskBox" />
                                     Click="ShowMyFeedbackButton_Click"
                                     Style="{StaticResource ActionButtonStyle}">
                                     <StackPanel Orientation="Horizontal" Spacing="8">
-                                        <FontIcon FontSize="14" Glyph="&#xE8A5;" />
+                                        <FontIcon FontSize="16" Glyph="&#xE8A5;" />
                                         <TextBlock svc:Localized.Key="Settings.About.FeedbackMineButton" />
                                     </StackPanel>
                                 </Button>
@@ -3473,7 +3473,7 @@ Text="DeskBox" />
                                 Style="{StaticResource ActionButtonStyle}"
                                 svc:Localized.ToolTipKey="Settings.About.StoreSupportDescription">
                                 <StackPanel Orientation="Horizontal" Spacing="8">
-                                    <FontIcon FontSize="14" Glyph="&#xE719;" />
+                                    <FontIcon FontSize="16" Glyph="&#xE719;" />
                                     <TextBlock svc:Localized.Key="Settings.About.StoreSupportButton" />
                                 </StackPanel>
                             </Button>
@@ -3540,7 +3540,7 @@ Text="DeskBox" />
                                 Style="{StaticResource ActionButtonStyle}"
                                 Visibility="{Binding AutoStartSystemSettingsVisibility}">
                                 <StackPanel Orientation="Horizontal" Spacing="8">
-                                    <FontIcon FontSize="14" Glyph="&#xE713;" />
+                                    <FontIcon FontSize="16" Glyph="&#xE713;" />
                                     <TextBlock svc:Localized.Key="Settings.AutoStart.OpenSystemSettings" />
                                 </StackPanel>
                             </Button>
@@ -3613,7 +3613,7 @@ Text="DeskBox" />
                                 Style="{StaticResource ActionButtonStyle}"
                                 svc:Localized.ToolTipKey="Settings.Onboarding.Tooltip">
                                 <StackPanel Orientation="Horizontal" Spacing="8">
-                                    <FontIcon FontSize="14" Glyph="&#xE82D;" />
+                                    <FontIcon FontSize="16" Glyph="&#xE82D;" />
                                     <TextBlock svc:Localized.Key="Common.View" />
                                 </StackPanel>
                             </Button>
@@ -3756,7 +3756,7 @@ Text="DeskBox" />
                                     Style="{StaticResource ActionButtonStyle}"
                                     ToolTipService.ToolTip="{Binding MicrosoftStoreLink}">
                                     <StackPanel Orientation="Horizontal" Spacing="6">
-                                        <FontIcon FontSize="13" Glyph="&#xE719;" />
+                                        <FontIcon FontSize="16" Glyph="&#xE719;" />
                                         <TextBlock FontSize="13" svc:Localized.Key="Settings.Dialog.SupportStoreButton" />
                                     </StackPanel>
                                 </Button>

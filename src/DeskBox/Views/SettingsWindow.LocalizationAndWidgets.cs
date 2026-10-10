@@ -232,7 +232,7 @@ public sealed partial class SettingsWindow
                 Content = new FontIcon
                 {
                     Glyph = "\uE72C",
-                    FontSize = 13,
+                    FontSize = 16,
                     FontFamily = (FontFamily)Application.Current.Resources["SymbolThemeFontFamily"]
                 }
             };

@@ -482,7 +482,6 @@
             Height="24"
             HorizontalAlignment="Center"
             VerticalAlignment="Center"
-            Foreground="White"
             IsActive="False"
             Visibility="Collapsed" />
     </Grid>

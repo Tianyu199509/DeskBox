@@ -927,5 +927,41 @@
                     Text="{Binding LoadingText}" />
             </StackPanel>
         </Grid>
+
+        <!-- First-load failure overlay: same covering layer as LoadingOverlay
+             so the widget never changes height; auto-retry (IsRefreshing) and
+             recovery (HasData) both retire it through ErrorVisibility. -->
+        <Grid
+            x:Name="ErrorOverlay"
+            Background="{ThemeResource LayerFillColorDefaultBrush}"
+            Visibility="{Binding ErrorVisibility}">
+            <StackPanel
+                HorizontalAlignment="Center"
+                VerticalAlignment="Center"
+                Spacing="8">
+                <FontIcon
+                    HorizontalAlignment="Center"
+                    FontSize="24"
+                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                    Glyph="&#xE7BA;" />
+                <TextBlock
+                    HorizontalAlignment="Center"
+                    FontSize="{x:Bind ViewModel.BodyTextSize, Mode=OneWay}"
+                    FontWeight="SemiBold"
+                    Foreground="{ThemeResource TextFillColorPrimaryBrush}"
+                    Text="{Binding ErrorTitle}" />
+                <TextBlock
+                    HorizontalAlignment="Center"
+                    FontSize="{x:Bind ViewModel.BodyTextSize, Mode=OneWay}"
+                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                    Text="{Binding ErrorBody}"
+                    TextAlignment="Center"
+                    TextWrapping="Wrap" />
+                <Button
+                    HorizontalAlignment="Center"
+                    Click="RefreshButton_Click"
+                    Content="{Binding ErrorRetryText}" />
+            </StackPanel>
+        </Grid>
     </Grid>
 </UserControl>

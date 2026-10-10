@@ -1312,44 +1312,14 @@ public sealed partial class SearchPopupWindow : Window
         FilterImagesItem.Content = _localizationService.T("Search.Filter.Images");
         FilterDocumentsItem.Content = _localizationService.T("Search.Filter.Documents");
         FilterDeskBoxItem.Content = _localizationService.T("Search.Filter.DeskBox");
-        HomeSectionHeader.Text = _localizationService.T("Search.Section.RecommendedApps");
         OpenSelectedLabel.Text = _localizationService.T("Search.Menu.Open");
         OpenLocationLabel.Text = _localizationService.T("Search.Menu.OpenLocation");
         AttachSelectedLabel.Text = _localizationService.T("Search.Menu.AttachToTodo");
         SaveSelectedLabel.Text = _localizationService.T("Search.Menu.SaveToNote");
 
-        // Recommendation panel localization
-        FavoritesHeaderText.Text = _localizationService.T("Search.Recommend.Favorite");
-        RecentSearchesHeaderText.Text = _localizationService.T("Search.Recommend.History");
-        ClearAllButton.Content = _localizationService.T("Search.Section.ClearHistory");
-        ClearRecentButton.Content = _localizationService.T("Search.Section.ClearHistory");
-        ConfirmClearAllItem.Text = _localizationService.T("Search.Section.ClearHistory");
-        ConfirmClearRecentItem.Text = _localizationService.T("Search.Section.ClearHistory");
-
         TabsList.ItemsSource = _viewModel.Tabs;
         ResultsRepeater.ItemsSource = _viewModel.CurrentResults;
         RecommendedAppsRepeater.ItemsSource = _viewModel.CurrentResults;
-        
-        // Bind recommendation panels (favorites and recent searches)
-        var favorites = _viewModel.FavoriteQueries
-            .Select(query => new SearchRecommendationItem
-            {
-                Kind = SearchResultKind.Favorite,
-                Title = query,
-                HistoryQuery = query
-            })
-            .ToList();
-        var recent = _viewModel.RecentQueries
-            .Take(8)
-            .Select(query => new SearchRecommendationItem
-            {
-                Kind = SearchResultKind.History,
-                Title = query,
-                HistoryQuery = query
-            })
-            .ToList();
-        FavoritesRepeater.ItemsSource = favorites;
-        RecentSearchesRepeater.ItemsSource = recent;
 
         UpdatePanelVisibility();
         UpdateSortHeaders();
@@ -1778,10 +1748,6 @@ public sealed partial class SearchPopupWindow : Window
             ? Visibility.Visible
             : Visibility.Collapsed;
 
-        HomeSectionHeader.Visibility = Visibility.Collapsed;
-
-        RecommendationPanel.Visibility = Visibility.Collapsed;
-
         UpdateSelectionActions();
     }
 
@@ -2018,15 +1984,6 @@ public sealed partial class SearchPopupWindow : Window
     /// so Click fires for mouse, touch and Enter/Space alike and survives
     /// container recycling without an ElementPrepared re-hook.
     /// </summary>
-    private void OnRecommendationItem_Click(object sender, RoutedEventArgs e)
-    {
-        if (sender is FrameworkElement fe &&
-            fe.DataContext is SearchRecommendationItem { HistoryQuery: { } queryText })
-        {
-            _viewModel.ApplyQuery(queryText);
-        }
-    }
-
     private void OpenSettingsButton_Click(object sender, RoutedEventArgs e)
     {
         _viewModel.InvokeAction("open-settings");
@@ -2196,7 +2153,6 @@ public sealed partial class SearchPopupWindow : Window
         AppsSkeletonRepeater.ItemsSource = Enumerable.Range(0, count).Select(_ => new object()).ToList();
         AppsSkeletonPanel.Visibility = Visibility.Visible;
         RecommendedAppsPanel.Visibility = Visibility.Collapsed;
-        HomeSectionHeader.Visibility = Visibility.Collapsed;
 
         var visual = ElementCompositionPreview.GetElementVisual(AppsSkeletonPanel);
         visual.StopAnimation("Opacity");
@@ -2556,38 +2512,6 @@ public sealed partial class SearchPopupWindow : Window
             // Assigning the same value the view model already holds would
             // re-enter SelectionChanged without changing state.
             ResultFilterComboBox.SelectedIndex = index;
-        }
-    }
-
-    /// <summary>
-    /// Clear history button clicked - confirms via flyout and clears appropriate data.
-    /// </summary>
-    private void ClearHistoryButton_Click(object sender, RoutedEventArgs e)
-    {
-        // This method is a placeholder; actual clearing happens in ConfirmClearHistory_Click
-    }
-
-    /// <summary>
-    /// Confirms clear action from the confirmation menu item.
-    /// Uses the button's Tag property to identify type of clear.
-    /// </summary>
-    private void ConfirmClearHistory_Click(object sender, RoutedEventArgs e)
-    {
-        var menuItem = sender as MenuFlyoutItem;
-        if (menuItem?.Parent is MenuFlyout parentFlyout)
-        {
-            // Get tag from the button to determine type
-            if (parentFlyout.Target is Button buttonElement && buttonElement.Tag is string clearType)
-            {
-                if (clearType == "all")
-                {
-                    _viewModel.ClearAllHistory();
-                }
-                else
-                {
-                    _viewModel.ClearRecentSearches();
-                }
-            }
         }
     }
 
@@ -4437,8 +4361,6 @@ public sealed partial class SearchPopupWindow : Window
         _rubberBandAutoScrollTimer?.Stop();
         ResultsRepeater.ItemsSource = null;
         RecommendedAppsRepeater.ItemsSource = null;
-        FavoritesRepeater.ItemsSource = null;
-        RecentSearchesRepeater.ItemsSource = null;
         TabsList.ItemsSource = null;
         DisposeAcrylicController();
         DisposeMicaController();

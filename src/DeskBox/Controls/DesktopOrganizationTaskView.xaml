@@ -23,6 +23,27 @@
                             <ContentPresenter Grid.Column="1" Margin="8,0,0,0" VerticalAlignment="Center"
                                               Content="{TemplateBinding Content}" />
                             <VisualStateManager.VisualStateGroups>
+                                <VisualStateGroup x:Name="CommonStates">
+                                    <!-- Win11 default checkbox hovers the 20px box only,
+                                         never the whole row (generic.xaml DefaultCheckBoxStyle). -->
+                                    <VisualState x:Name="Normal" />
+                                    <VisualState x:Name="PointerOver">
+                                        <VisualState.Setters>
+                                            <Setter Target="SelectionBox.Background" Value="{ThemeResource ControlAltFillColorTertiaryBrush}" />
+                                            <Setter Target="SelectionBox.BorderBrush" Value="{ThemeResource ControlStrongStrokeColorDefaultBrush}" />
+                                        </VisualState.Setters>
+                                    </VisualState>
+                                    <VisualState x:Name="Pressed">
+                                        <VisualState.Setters>
+                                            <Setter Target="SelectionBox.Background" Value="{ThemeResource ControlAltFillColorQuarternaryBrush}" />
+                                        </VisualState.Setters>
+                                    </VisualState>
+                                    <VisualState x:Name="Disabled">
+                                        <VisualState.Setters>
+                                            <Setter Target="SelectionBox.Opacity" Value="0.4" />
+                                        </VisualState.Setters>
+                                    </VisualState>
+                                </VisualStateGroup>
                                 <VisualStateGroup x:Name="CheckStates">
                                     <VisualState x:Name="Unchecked" />
                                     <VisualState x:Name="Checked">

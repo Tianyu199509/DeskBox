@@ -37,16 +37,14 @@ public sealed class AotStage4D1AContractTests
     [Fact]
     public void SearchHistoryAndFavorites_UseTheExistingTypedRecommendationModel()
     {
+        // The favorites/recent panel was dead UI (never made visible) and has
+        // been removed along with its projection/handlers; the typed model and
+        // its JSON history persistence stay. Lock the removal so the dead
+        // x:Bind surface does not quietly return.
         string source = ReadRepositoryFile("src/DeskBox/Views/SearchPopupWindow.xaml.cs");
 
-        Assert.Contains("new SearchRecommendationItem", source, StringComparison.Ordinal);
-        Assert.Contains("Kind = SearchResultKind.Favorite", source, StringComparison.Ordinal);
-        Assert.Contains("Kind = SearchResultKind.History", source, StringComparison.Ordinal);
-        Assert.Contains("HistoryQuery = query", source, StringComparison.Ordinal);
-        Assert.Contains(
-            "DataContext is SearchRecommendationItem",
-            source,
-            StringComparison.Ordinal);
+        Assert.DoesNotContain("new SearchRecommendationItem", source, StringComparison.Ordinal);
+        Assert.DoesNotContain("DataContext is SearchRecommendationItem", source, StringComparison.Ordinal);
         Assert.DoesNotContain("new { Title", source, StringComparison.Ordinal);
         Assert.DoesNotContain(
             "GetType().GetProperty(\"Title\")",

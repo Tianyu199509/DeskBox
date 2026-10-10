@@ -72,12 +72,16 @@ public sealed class AotStage4E3ContractTests
         Assert.Contains("xmlns:models=\"using:DeskBox.Models\"", xaml, StringComparison.Ordinal);
         Assert.Equal(1, CountOccurrences(xaml, "x:DataType=\"models:SearchTabItem\""));
         Assert.Equal(1, CountOccurrences(xaml, "x:DataType=\"models:SearchResultItem\""));
-        Assert.Equal(2, CountOccurrences(xaml, "x:DataType=\"models:SearchRecommendationItem\""));
+        // The favorites/recent recommendation panel was dead UI (created and
+        // immediately collapsed since 07-22, no Visible writer in its entire
+        // history) and has been removed; its typed templates must not return.
+        Assert.Equal(0, CountOccurrences(xaml, "x:DataType=\"models:SearchRecommendationItem\""));
+        Assert.DoesNotContain("x:Name=\"FavoritesRepeater\"", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("x:Name=\"RecentSearchesRepeater\"", xaml, StringComparison.Ordinal);
 
         int recommendedApps = xaml.IndexOf("x:Name=\"RecommendedAppsRepeater\"", StringComparison.Ordinal);
         int resultTemplate = xaml.IndexOf("x:DataType=\"models:SearchResultItem\"", StringComparison.Ordinal);
-        int favorites = xaml.IndexOf("x:Name=\"FavoritesRepeater\"", StringComparison.Ordinal);
-        Assert.True(recommendedApps >= 0 && resultTemplate > recommendedApps && resultTemplate < favorites);
+        Assert.True(recommendedApps >= 0 && resultTemplate > recommendedApps);
     }
 
     [Fact]
@@ -90,10 +94,9 @@ public sealed class AotStage4E3ContractTests
         Assert.Equal(0, CountOccurrences(xaml, "{x:Bind Count, Mode=OneWay}"));
         Assert.Equal(1, CountOccurrences(xaml, "{x:Bind Icon, Mode=OneTime}"));
         Assert.Equal(1, CountOccurrences(xaml, "{x:Bind AppDisplayName, Mode=OneTime}"));
-        // 4 = favorites/recent inner TextBlock x2 + the Button rows own
-        // AutomationProperties.Name x2 (the Button peer does not derive a
-        // name from a Grid content template).
-        Assert.Equal(4, CountOccurrences(xaml, "{x:Bind Title, Mode=OneTime}"));
+        // The dead favorites/recent panel (and its four Title OneTime binds)
+        // is gone; no new Title binds may return without a live host panel.
+        Assert.Equal(0, CountOccurrences(xaml, "{x:Bind Title, Mode=OneTime}"));
         Assert.DoesNotContain("{Binding ", xaml, StringComparison.Ordinal);
     }
 

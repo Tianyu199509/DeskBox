@@ -71,6 +71,16 @@
         <Setter Property="CornerRadius" Value="6" />
     </Style>
 
+    <!-- Accent counterpart of ActionButtonStyle: same metrics so paired
+         accent+plain buttons in one row stay height-aligned. -->
+    <Style x:Key="AccentActionButtonStyle" TargetType="Button" BasedOn="{StaticResource AccentButtonStyle}">
+        <Setter Property="MinHeight" Value="34" />
+        <Setter Property="Height" Value="34" />
+        <Setter Property="MinWidth" Value="104" />
+        <Setter Property="Padding" Value="12,0" />
+        <Setter Property="CornerRadius" Value="6" />
+    </Style>
+
     <Style x:Key="IconActionButtonStyle" TargetType="Button">
         <Setter Property="Width" Value="30" />
         <Setter Property="Height" Value="30" />

@@ -206,6 +206,17 @@
                                         <ColumnDefinition Width="Auto" />
                                         <ColumnDefinition Width="*" />
                                     </Grid.ColumnDefinitions>
+                                    <!-- Hover wash mirrors TodoWidgetContent's dual feedback
+                                         (card brightens + action buttons appear); sits under
+                                         content and never hit-tests. -->
+                                    <Border
+                                        x:Name="QuickCaptureItemHoverBackground"
+                                        Grid.ColumnSpan="2"
+                                        Margin="-8,-6"
+                                        Background="{ThemeResource SubtleFillColorSecondaryBrush}"
+                                        CornerRadius="{StaticResource WidgetCornerRadiusSmall}"
+                                        IsHitTestVisible="False"
+                                        Opacity="0" />
                                     <ContentControl
                                         Grid.Column="0"
                                         HorizontalContentAlignment="Stretch"
@@ -313,7 +324,7 @@
                 </ListView>
 
                 <StackPanel Margin="16" HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="7" Visibility="{Binding EmptyStateVisibility}">
-                    <FontIcon HorizontalAlignment="Center" FontSize="{Binding EmptyIconSize}" Glyph="&#xE8A5;" />
+                    <FontIcon HorizontalAlignment="Center" FontSize="{Binding EmptyIconSize}" Foreground="{ThemeResource TextFillColorTertiaryBrush}" Glyph="&#xE8A5;" />
                     <TextBlock HorizontalAlignment="Center" FontSize="{Binding TitleTextSize}" Text="{Binding EmptyStateTitle}" />
                     <TextBlock HorizontalAlignment="Center" FontSize="{Binding TextSize}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="{Binding EmptyStateText}" TextAlignment="Center" TextWrapping="Wrap" />
                 </StackPanel>

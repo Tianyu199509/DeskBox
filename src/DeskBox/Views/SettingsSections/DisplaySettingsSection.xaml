@@ -36,6 +36,7 @@
             </toolkit:SettingsCard.HeaderIcon>
             <Button svc:Localized.AutomationNameKey="Settings.Displays.Identify"
                 x:Name="IdentifyButton"
+                Style="{StaticResource ActionButtonStyle}"
                 Click="IdentifyButton_Click"
                 svc:Localized.Key="Settings.Displays.Identify" />
         </toolkit:SettingsCard>
@@ -63,6 +64,7 @@
             </toolkit:SettingsCard.HeaderIcon>
             <Button svc:Localized.AutomationNameKey="Settings.Displays.MoveAll"
                 x:Name="MoveAllWidgetsButton"
+                Style="{StaticResource ActionButtonStyle}"
                 Click="MoveAllWidgetsButton_Click"
                 svc:Localized.Key="Settings.Displays.MoveAll" />
         </toolkit:SettingsCard>

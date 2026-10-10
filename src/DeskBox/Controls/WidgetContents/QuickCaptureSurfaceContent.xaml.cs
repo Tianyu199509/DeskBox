@@ -2899,14 +2899,23 @@ public sealed partial class QuickCaptureSurfaceContent :
         DependencyObject? itemRoot,
         bool isVisible)
     {
-        if (itemRoot is null ||
-            FindQuickCaptureVisualChild<Border>(itemRoot, "QuickCaptureItemActionButtons") is not { } actionButtons)
+        if (itemRoot is null)
         {
             return;
         }
 
-        actionButtons.Opacity = isVisible ? 1 : 0;
-        actionButtons.IsHitTestVisible = isVisible;
+        if (FindQuickCaptureVisualChild<Border>(itemRoot, "QuickCaptureItemActionButtons") is { } actionButtons)
+        {
+            actionButtons.Opacity = isVisible ? 1 : 0;
+            actionButtons.IsHitTestVisible = isVisible;
+        }
+
+        // Same pass also toggles the hover wash so the card itself reacts,
+        // matching the Todo widget's dual hover feedback.
+        if (FindQuickCaptureVisualChild<Border>(itemRoot, "QuickCaptureItemHoverBackground") is { } hoverBackground)
+        {
+            hoverBackground.Opacity = isVisible ? 1 : 0;
+        }
     }
 
     private static T? FindQuickCaptureVisualChild<T>(DependencyObject parent, string name)

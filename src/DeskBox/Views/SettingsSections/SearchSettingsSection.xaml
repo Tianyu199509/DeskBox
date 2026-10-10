@@ -47,7 +47,6 @@
 
                     <TextBlock
                         x:Name="EverythingPathText"
-                        Opacity="0.7"
                         Style="{StaticResource SettingDescriptionTextStyle}"
                         TextWrapping="Wrap" />
 
@@ -69,7 +68,7 @@
                         <StackPanel Grid.Column="0" Spacing="2">
                             <TextBlock svc:Localized.Key="Settings.Search.Everything.AdvancedSyntax.Title" />
                             <TextBlock
-                                Opacity="0.7"
+                                Foreground="{ThemeResource TextFillColorTertiaryBrush}"
                                 Style="{StaticResource SettingDescriptionTextStyle}"
                                 TextWrapping="Wrap"
                                 svc:Localized.Key="Settings.Search.Everything.AdvancedSyntax.Description" />

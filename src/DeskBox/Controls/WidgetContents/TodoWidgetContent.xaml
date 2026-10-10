@@ -471,7 +471,6 @@
                     FontSize="24"
                     Foreground="{ThemeResource TextFillColorTertiaryBrush}"
                     Glyph="&#xE73E;"
-                    Opacity="0.72"
                     Style="{StaticResource WidgetEmptyStateIconStyle}" />
                 <TextBlock
                     helpers:WidgetTextShadow.Cast="True"

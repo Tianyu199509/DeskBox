@@ -58,7 +58,16 @@ public sealed class FileItemSurfaceStyleCacheTests
         Assert.Contains("_selectedHoverSurfaceBrush", cache, StringComparison.Ordinal);
         Assert.DoesNotContain("_dropTargetSurfaceBrush", cache, StringComparison.Ordinal);
         Assert.DoesNotContain("_dropTargetBorderBrush", cache, StringComparison.Ordinal);
-        Assert.Contains("new Thickness(0)", cache, StringComparison.Ordinal);
+        // Selection now draws a constant 1px neutral ring (DeskBoxNeutralLine
+        // values); thickness never changes per state so batch selections do
+        // not re-measure. Drop targets still swap to the transparent border,
+        // and accent must not enter any border.
+        Assert.Contains("SelectedBorderThickness = new(1)", cache, StringComparison.Ordinal);
+        Assert.Contains(
+            "border.BorderBrush = isSelected ? _selectedBorderBrush : _normalBorderBrush;",
+            cache,
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("Accent", cache, StringComparison.Ordinal);
         // The stack drop highlight must not rebuild an accent border or
         // background either.
         Assert.DoesNotContain("_stackDropBorderBrush", visuals, StringComparison.Ordinal);

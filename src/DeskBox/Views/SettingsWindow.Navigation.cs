@@ -24,6 +24,10 @@ namespace DeskBox.Views;
 
 public sealed partial class SettingsWindow
 {
+    // Sentinel tag for the single-line "no results" suggestion row; it must
+    // never reach navigation.
+    private const string SettingsSearchNoResultsTag = "__settings-search-no-results";
+
     private Storyboard? _settingsSearchHighlightStoryboard;
     private EventHandler<object>? _settingsSearchHighlightCompletedHandler;
     private FrameworkElement? _settingsSearchHighlightTarget;
@@ -138,8 +142,27 @@ public sealed partial class SettingsWindow
         }
 
         SettingsSearchResult[] matches = FindSettingsSearchMatches(normalizedQuery, 10);
+        if (matches.Length == 0)
+        {
+            // AutoSuggestBox guidance: with no matches, show a single-line
+            // "no results" row instead of a silently closed flyout. The
+            // sentinel SectionTag is guarded in QuerySubmitted/Activate.
+            SettingsSearchBox.ItemsSource = new object[]
+            {
+                new SettingsSearchResult(
+                    SettingsSearchNoResultsTag,
+                    _localizationService.T("Settings.Search.NoResults"),
+                    string.Empty,
+                    string.Empty,
+                    null,
+                    null)
+            };
+            SettingsSearchBox.IsSuggestionListOpen = true;
+            return;
+        }
+
         SettingsSearchBox.ItemsSource = matches.Cast<object>().ToArray();
-        SettingsSearchBox.IsSuggestionListOpen = matches.Length > 0;
+        SettingsSearchBox.IsSuggestionListOpen = true;
     }
 
     private IEnumerable<SettingsSearchResult> CreateSettingItemSearchResults()
@@ -231,7 +254,8 @@ public sealed partial class SettingsWindow
             result = FindSettingsSearchMatches(query, 1).FirstOrDefault();
         }
 
-        if (result is null)
+        if (result is null ||
+            string.Equals(result.SectionTag, SettingsSearchNoResultsTag, StringComparison.Ordinal))
         {
             return;
         }

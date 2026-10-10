@@ -30,10 +30,13 @@
             <Setter Property="Padding" Value="12,4" />
             <Setter Property="CornerRadius" Value="{ThemeResource ControlCornerRadius}" />
         </Style>
-        <Style x:Key="RecorderLinkButtonStyle" TargetType="HyperlinkButton">
+        <!-- Commands are buttons, not links: a link navigates, these mutate
+             the capture state (Win11 command vs navigation distinction). -->
+        <Style x:Key="RecorderInlineButtonStyle" TargetType="Button">
             <Setter Property="FontSize" Value="12" />
             <Setter Property="MinHeight" Value="28" />
             <Setter Property="Padding" Value="8,2" />
+            <Setter Property="CornerRadius" Value="4" />
         </Style>
     </ContentDialog.Resources>
 
@@ -69,14 +72,14 @@
                 VerticalAlignment="Center"
                 Orientation="Horizontal"
                 Spacing="14">
-                <HyperlinkButton
+                <Button
                     x:Name="ResetButton"
                     Click="ResetButton_Click"
-                    Style="{StaticResource RecorderLinkButtonStyle}" />
-                <HyperlinkButton
+                    Style="{StaticResource RecorderInlineButtonStyle}" />
+                <Button
                     x:Name="ClearButton"
                     Click="ClearButton_Click"
-                    Style="{StaticResource RecorderLinkButtonStyle}" />
+                    Style="{StaticResource RecorderInlineButtonStyle}" />
             </StackPanel>
         </Grid>
 

@@ -25,7 +25,13 @@ public sealed class FileItemSurfaceStyleCache
     private SolidColorBrush? _hoverSurfaceBrush;
     private SolidColorBrush? _selectedHoverSurfaceBrush;
     private SolidColorBrush? _normalBorderBrush;
+    private SolidColorBrush? _selectedBorderBrush;
     private bool? _isDark;
+
+    // Selection reads as a pointer state, not semantic emphasis, so the ring
+    // uses the neutral line token (DeskBoxNeutralLineBrush) instead of accent,
+    // staying in the same language as the marquee selection rectangle.
+    private static readonly Thickness SelectedBorderThickness = new(1);
 
     public void Apply(
         Border border,
@@ -54,8 +60,11 @@ public sealed class FileItemSurfaceStyleCache
             : state == FileItemSurfaceVisualState.Normal && isSelected
                 ? _selectedSurfaceBrush
                 : _normalSurfaceBrush;
-        border.BorderBrush = _normalBorderBrush;
-        border.BorderThickness = new Thickness(0);
+        // Thickness is constant so toggling selection only swaps the brush —
+        // changing thickness per state would re-measure every tile in batch
+        // selections.
+        border.BorderThickness = SelectedBorderThickness;
+        border.BorderBrush = isSelected ? _selectedBorderBrush : _normalBorderBrush;
         border.Opacity = isCut ? 0.58 : 1.0;
     }
 
@@ -87,6 +96,12 @@ public sealed class FileItemSurfaceStyleCache
         _hoverSurfaceBrush = UpdateBrush(_hoverSurfaceBrush, hoverBackground);
         _selectedHoverSurfaceBrush = UpdateBrush(_selectedHoverSurfaceBrush, selectedHoverBackground);
         _normalBorderBrush = UpdateBrush(_normalBorderBrush, Colors.Transparent);
+        // Mirrors DeskBoxNeutralLineBrush (App.xaml): #72000000 light / #8BFFFFFF dark.
+        _selectedBorderBrush = UpdateBrush(
+            _selectedBorderBrush,
+            isDark
+                ? Windows.UI.Color.FromArgb(0x8B, 0xFF, 0xFF, 0xFF)
+                : Windows.UI.Color.FromArgb(0x72, 0x00, 0x00, 0x00));
     }
 
     private static SolidColorBrush UpdateBrush(SolidColorBrush? brush, Windows.UI.Color color)

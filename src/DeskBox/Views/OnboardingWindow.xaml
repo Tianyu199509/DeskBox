@@ -159,11 +159,14 @@
                         BorderThickness="2"
                         CornerRadius="18"
                         Opacity="0">
-                        <TextBlock
+                        <!-- Brand storage svg (box + file) replaces the emoji hero;
+                             WidgetTitleIcon clamps to 34px so the Image goes direct. -->
+                        <Image
+                            Width="72"
+                            Height="72"
                             HorizontalAlignment="Center"
                             VerticalAlignment="Center"
-                            FontSize="44"
-                            Text="📁"/>
+                            Source="/Assets/WidgetTitleIcons/managed-storage.svg"/>
                     </Border>
                     <Border
                         x:Name="SceneFileToken"
@@ -178,7 +181,7 @@
                         Padding="9"
                         Opacity="0">
                         <Grid RowDefinitions="Auto,*" RowSpacing="8">
-                            <TextBlock HorizontalAlignment="Center" FontSize="28" Text="📄"/>
+                            <FontIcon HorizontalAlignment="Center" FontSize="24" Glyph="&#xE8A5;" Foreground="{ThemeResource TextFillColorPrimaryBrush}"/>
                             <Border Grid.Row="1" Height="4" VerticalAlignment="Bottom" Background="{ThemeResource TextFillColorSecondaryBrush}" CornerRadius="2" Opacity="0.5"/>
                         </Grid>
                     </Border>
@@ -254,7 +257,7 @@
                         x:Name="SceneTrayMenu"
                         Canvas.Left="88"
                         Canvas.Top="104"
-                        Width="200"
+                        Width="208"
                         Background="{ThemeResource AcrylicInAppFillColorDefaultBrush}"
                         BorderBrush="{ThemeResource SurfaceStrokeColorDefaultBrush}"
                         BorderThickness="1"
@@ -263,21 +266,23 @@
                         Opacity="0"
                         RenderTransformOrigin="0.9,1">
                         <StackPanel>
+                            <!-- Glyphs mirror the real Win32 tray menu (App.Tray.cs)
+                                 so onboarding shows the product's actual skin. -->
                             <Grid Style="{StaticResource SceneMenuRow}" ColumnDefinitions="Auto,*" ColumnSpacing="10">
-                                <TextBlock VerticalAlignment="Center" FontSize="14" Text="🗂️"/>
+                                <FontIcon VerticalAlignment="Center" FontSize="16" Glyph="&#xE74C;"/>
                                 <TextBlock Grid.Column="1" VerticalAlignment="Center" FontSize="12" svc:Localized.Key="Tray.OrganizeDesktop"/>
                             </Grid>
                             <Grid Style="{StaticResource SceneMenuRow}" ColumnDefinitions="Auto,*" ColumnSpacing="10">
-                                <TextBlock VerticalAlignment="Center" FontSize="14" Text="🗃️"/>
+                                <FontIcon VerticalAlignment="Center" FontSize="16" Glyph="&#xE710;"/>
                                 <TextBlock Grid.Column="1" VerticalAlignment="Center" FontSize="12" svc:Localized.Key="Common.NewWidget"/>
                             </Grid>
                             <Grid Style="{StaticResource SceneMenuRow}" ColumnDefinitions="Auto,*" ColumnSpacing="10">
-                                <TextBlock VerticalAlignment="Center" FontSize="14" Text="📂"/>
+                                <FontIcon VerticalAlignment="Center" FontSize="16" Glyph="&#xE8E5;"/>
                                 <TextBlock Grid.Column="1" VerticalAlignment="Center" FontSize="12" svc:Localized.Key="Common.NewFolderMapping"/>
                             </Grid>
                             <Rectangle Height="1" Margin="7,4" Fill="{ThemeResource DividerStrokeColorDefaultBrush}"/>
                             <Grid Style="{StaticResource SceneMenuRow}" ColumnDefinitions="Auto,*" ColumnSpacing="10">
-                                <TextBlock VerticalAlignment="Center" FontSize="14" Text="⚙️"/>
+                                <FontIcon VerticalAlignment="Center" FontSize="16" Glyph="&#xE713;"/>
                                 <TextBlock Grid.Column="1" VerticalAlignment="Center" FontSize="12" svc:Localized.Key="Tray.Settings"/>
                             </Grid>
                         </StackPanel>
@@ -353,7 +358,7 @@
                         <TextBlock Style="{StaticResource StepTitleText}" svc:Localized.Key="Onboarding.Step1.Title"/>
                         <TextBlock Style="{StaticResource StepBodyText}" svc:Localized.Key="Onboarding.Step1.Body"/>
                         <StackPanel Orientation="Horizontal" Spacing="9" Margin="0,4,0,0">
-                            <FontIcon VerticalAlignment="Center" FontSize="13" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" Glyph="&#xE73E;"/>
+                            <FontIcon VerticalAlignment="Center" FontSize="16" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" Glyph="&#xE73E;"/>
                             <TextBlock Style="{StaticResource HintRow}" svc:Localized.Key="Onboarding.Step1.Hint"/>
                         </StackPanel>
                     </StackPanel>
@@ -364,7 +369,7 @@
                         <TextBlock Style="{StaticResource StepBodyText}" svc:Localized.Key="Onboarding.Step2.Body"/>
                         <Border Style="{StaticResource SettingCard}" Margin="0,6,0,0">
                             <Grid ColumnDefinitions="Auto,*" ColumnSpacing="11">
-                                <FontIcon VerticalAlignment="Top" Margin="0,1,0,0" FontSize="14" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" Glyph="&#xE946;"/>
+                                <FontIcon VerticalAlignment="Top" Margin="0,1,0,0" FontSize="16" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" Glyph="&#xE946;"/>
                                 <TextBlock Grid.Column="1" Style="{StaticResource HintRow}" svc:Localized.Key="Onboarding.Step2.Note"/>
                             </Grid>
                         </Border>
@@ -386,7 +391,7 @@
                                     <FontIcon
                                         x:Name="Step3StatusIcon"
                                         VerticalAlignment="Center"
-                                        FontSize="13"
+                                        FontSize="16"
                                         Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
                                         Glyph="&#xE946;"/>
                                     <TextBlock
@@ -398,7 +403,7 @@
                             </Border>
                         </StackPanel>
                         <StackPanel Orientation="Horizontal" Spacing="9">
-                            <FontIcon VerticalAlignment="Center" FontSize="13" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" Glyph="&#xE73E;"/>
+                            <FontIcon VerticalAlignment="Center" FontSize="16" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" Glyph="&#xE73E;"/>
                             <TextBlock Style="{StaticResource HintRow}" svc:Localized.Key="Onboarding.Step3.Hint"/>
                         </StackPanel>
                     </StackPanel>
@@ -416,7 +421,7 @@
                             Style="{ThemeResource AccentButtonStyle}"
                             svc:Localized.Key="Onboarding.Step4.OpenMenu"/>
                         <StackPanel Orientation="Horizontal" Spacing="9">
-                            <FontIcon VerticalAlignment="Center" FontSize="13" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" Glyph="&#xE73E;"/>
+                            <FontIcon VerticalAlignment="Center" FontSize="16" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" Glyph="&#xE73E;"/>
                             <TextBlock Style="{StaticResource HintRow}" svc:Localized.Key="Onboarding.Step4.Hint"/>
                         </StackPanel>
                     </StackPanel>
@@ -500,7 +505,7 @@
                             </Border>
                         </Grid>
                         <StackPanel Orientation="Horizontal" Spacing="9">
-                            <FontIcon VerticalAlignment="Center" FontSize="13" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" Glyph="&#xE946;"/>
+                            <FontIcon VerticalAlignment="Center" FontSize="16" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" Glyph="&#xE946;"/>
                             <TextBlock Style="{StaticResource HintRow}" svc:Localized.Key="Onboarding.Step5.OptionalBody"/>
                         </StackPanel>
                     </StackPanel>

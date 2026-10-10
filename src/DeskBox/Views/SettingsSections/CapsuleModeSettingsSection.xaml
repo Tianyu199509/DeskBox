@@ -65,7 +65,7 @@
                         IsEnabled="{Binding HasWidthOverrides}"
                         Style="{StaticResource IconActionButtonStyle}"
                         svc:Localized.ToolTipKey="Settings.Capsule.Overrides.ResetWidth">
-                        <FontIcon FontSize="14" Glyph="&#xE72C;" />
+                        <FontIcon FontSize="16" Glyph="&#xE72C;" />
                     </Button>
                     <ComboBox svc:Localized.AutomationNameKey="Settings.Capsule.WidthMode.Title"
                         MinWidth="{StaticResource SettingsControlMinWidth}"

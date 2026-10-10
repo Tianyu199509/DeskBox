@@ -148,6 +148,7 @@ public sealed partial class WeatherWidgetViewModel
     {
         _consecutiveRefreshFailures = 0;
         _automaticRefreshNotBeforeUtc = DateTimeOffset.UtcNow + refreshInterval;
+        MarkRefreshAttempted();
     }
 
     private void RegisterRefreshFailure()
@@ -159,6 +160,23 @@ public sealed partial class WeatherWidgetViewModel
         App.Log(
             $"[WeatherWidget] Refresh backoff failures={_consecutiveRefreshFailures} " +
             $"delayMinutes={delay.TotalMinutes:0}");
+        MarkRefreshAttempted();
+    }
+
+    /// <summary>
+    /// Arms the first-load error overlay once any refresh outcome is known;
+    /// visibility itself is computed from HasData/IsRefreshing so retries and
+    /// recoveries retire it without dedicated cleanup.
+    /// </summary>
+    private void MarkRefreshAttempted()
+    {
+        if (_hasAttemptedRefresh)
+        {
+            return;
+        }
+
+        _hasAttemptedRefresh = true;
+        OnPropertyChanged(nameof(ErrorVisibility));
     }
 
     public void ApplyAppearance()

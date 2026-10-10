@@ -99,6 +99,7 @@ public sealed partial class WeatherWidgetViewModel : ObservableObject, IDisposab
     private string _locationDisplay = string.Empty;
     private bool _isDay = true;
     private bool _hasData;
+    private bool _hasAttemptedRefresh;
     private int _currentWeatherCode;
     private WeatherCodeMapper.WeatherCondition _currentCondition = WeatherCodeMapper.WeatherCondition.Unknown;
 
@@ -176,6 +177,7 @@ public sealed partial class WeatherWidgetViewModel : ObservableObject, IDisposab
             if (SetProperty(ref _isRefreshing, value))
             {
                 OnPropertyChanged(nameof(LoadingVisibility));
+                OnPropertyChanged(nameof(ErrorVisibility));
             }
         }
     }
@@ -338,6 +340,7 @@ public sealed partial class WeatherWidgetViewModel : ObservableObject, IDisposab
             if (SetProperty(ref _hasData, value))
             {
                 OnPropertyChanged(nameof(LoadingVisibility));
+                OnPropertyChanged(nameof(ErrorVisibility));
             }
         }
     }
@@ -347,6 +350,16 @@ public sealed partial class WeatherWidgetViewModel : ObservableObject, IDisposab
     /// Existing weather remains visible during manual and automatic refreshes.
     /// </summary>
     public Visibility LoadingVisibility => _isRefreshing && !_hasData
+        ? Visibility.Visible
+        : Visibility.Collapsed;
+
+    /// <summary>
+    /// First-load failure state: a refresh has been attempted, nothing is in
+    /// hand and no fetch is running. Success hides it via HasData; the next
+    /// automatic retry hides it via IsRefreshing — both without extra flags.
+    /// Stale data (HasData with a past timestamp) deliberately stays visible.
+    /// </summary>
+    public Visibility ErrorVisibility => _hasAttemptedRefresh && !_hasData && !_isRefreshing
         ? Visibility.Visible
         : Visibility.Collapsed;
 
@@ -677,6 +690,9 @@ public sealed partial class WeatherWidgetViewModel : ObservableObject, IDisposab
     public string RefreshTooltip => _localizationService.T("Common.Refresh");
 
     public string LoadingText => _localizationService.T("Weather.Loading");
+    public string ErrorTitle => _localizationService.T("Weather.Error.Title");
+    public string ErrorBody => _localizationService.T("Weather.Error.Body");
+    public string ErrorRetryText => _localizationService.T("Weather.Error.Retry");
     public string HumidityLabel => _localizationService.T("Weather.Metric.Humidity");
     public string WindLabel => _localizationService.T("Weather.Metric.Wind");
     public string PrecipitationLabel => _localizationService.T("Weather.Metric.Precipitation");

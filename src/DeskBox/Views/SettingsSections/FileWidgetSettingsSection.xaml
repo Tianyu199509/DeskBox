@@ -31,7 +31,7 @@
                 <StackPanel Orientation="Horizontal" Spacing="8">
                     <Button Click="OrganizeDesktopButton_Click" Style="{StaticResource AccentButtonStyle}">
                         <StackPanel Orientation="Horizontal" Spacing="6">
-                            <FontIcon FontSize="13" Glyph="&#xE74C;" />
+                            <FontIcon FontSize="16" Glyph="&#xE74C;" />
                             <TextBlock svc:Localized.Key="DesktopOrganization.Settings.StartAction" />
                         </StackPanel>
                     </Button>

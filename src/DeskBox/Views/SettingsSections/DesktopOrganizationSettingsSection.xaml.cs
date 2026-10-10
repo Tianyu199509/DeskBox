@@ -93,45 +93,23 @@ public sealed partial class DesktopOrganizationSettingsSection : UserControl
         {
             DesktopOrganizationRule? rule = settings.DesktopOrganizationRules.FirstOrDefault(candidate =>
                 string.Equals(candidate.TargetWidgetId, widget.Id, StringComparison.Ordinal));
-            var button = new Button
+            var card = new CommunityToolkit.WinUI.Controls.SettingsCard
             {
-                HorizontalAlignment = HorizontalAlignment.Stretch,
-                HorizontalContentAlignment = HorizontalAlignment.Stretch,
                 Tag = widget.Id,
-                Padding = new Thickness(16, 11, 16, 11)
+                IsClickEnabled = true,
+                HorizontalContentAlignment = HorizontalAlignment.Right,
+                Header = widget.Name,
+                Description = BuildRuleSummary(rule)
             };
-            button.Click += WidgetRuleButton_Click;
-
-            var grid = new Grid { ColumnSpacing = 12 };
-            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-            var icon = new FontIcon { Glyph = "\uE8B7", FontSize = 18, VerticalAlignment = VerticalAlignment.Center };
-            var text = new StackPanel { Spacing = 3 };
-            text.Children.Add(new TextBlock
-            {
-                Text = widget.Name,
-                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold
-            });
-            text.Children.Add(new TextBlock
-            {
-                Text = BuildRuleSummary(rule),
-                Foreground = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["TextFillColorSecondaryBrush"],
-                TextWrapping = TextWrapping.Wrap
-            });
-            var chevron = new FontIcon
+            card.HeaderIcon = new FontIcon { Glyph = "\uE8B7" };
+            card.Content = new FontIcon
             {
                 Glyph = "\uE76C",
                 FontSize = 12,
                 VerticalAlignment = VerticalAlignment.Center
             };
-            Grid.SetColumn(text, 1);
-            Grid.SetColumn(chevron, 2);
-            grid.Children.Add(icon);
-            grid.Children.Add(text);
-            grid.Children.Add(chevron);
-            button.Content = grid;
-            WidgetRuleCards.Children.Add(button);
+            card.Click += WidgetRuleButton_Click;
+            WidgetRuleCards.Children.Add(card);
         }
 
         if (widgets.Count == 0)
@@ -399,6 +377,7 @@ public sealed partial class DesktopOrganizationSettingsSection : UserControl
         RuleListPanel.Visibility = Visibility.Collapsed;
         RuleDetailPanel.Visibility = Visibility.Visible;
         RuleStatusInfo.IsOpen = false;
+        ResetHostScrollToTop();
         RuleDetailTitle.Text = _selectedWidget.Name;
         RuleDetailPath.Text = _selectedWidget.MappedFolderPath ?? string.Empty;
         _isRefreshing = true;
@@ -409,6 +388,25 @@ public sealed partial class DesktopOrganizationSettingsSection : UserControl
         BuildExtensionChips();
         BuildExcludedExtensionChips();
         BuildRuleTokens();
+    }
+
+    /// <summary>
+    /// Drill-down within the section keeps the host page's scroller, which
+    /// route navigation normally resets; entering rule detail must do the
+    /// same so the header starts in view instead of at the list's offset.
+    /// </summary>
+    private void ResetHostScrollToTop()
+    {
+        DependencyObject ancestor = this;
+        while (ancestor is not null)
+        {
+            if (ancestor is ScrollViewer scroller)
+            {
+                scroller.ChangeView(null, 0, null, disableAnimation: true);
+                return;
+            }
+            ancestor = Microsoft.UI.Xaml.Media.VisualTreeHelper.GetParent(ancestor);
+        }
     }
 
     private void BuildSubtypeChecks()

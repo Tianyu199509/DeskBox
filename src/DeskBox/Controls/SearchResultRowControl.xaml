@@ -57,11 +57,12 @@
             <TextBlock x:Name="TitleText" Text="{x:Bind Item.Title, Mode=OneTime}" FontSize="14"
                        Foreground="{ThemeResource TextFillColorPrimaryBrush}"
                        TextTrimming="CharacterEllipsis"/>
-            <TextBlock x:Name="SubtitleText" Text="{x:Bind Item.Subtitle, Mode=OneTime}" FontSize="10.5"
+            <TextBlock x:Name="SubtitleText" Text="{x:Bind Item.Subtitle, Mode=OneTime}" FontSize="12"
                        Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                       TextTrimming="CharacterEllipsis" Margin="0,2,0,0"/>
+                       TextTrimming="CharacterEllipsis" Margin="0,2,0,0"
+                       ToolTipService.ToolTip="{x:Bind Item.DetailPath, Mode=OneTime}"/>
         </StackPanel>
-        <TextBlock x:Name="TypeText" Grid.Column="3" Text="{x:Bind Item.TypeDisplay, Mode=OneTime}" FontSize="11.5"
+        <TextBlock x:Name="TypeText" Grid.Column="3" Text="{x:Bind Item.TypeDisplay, Mode=OneTime}" FontSize="12"
                    Foreground="{ThemeResource TextFillColorTertiaryBrush}"
                    VerticalAlignment="Center" Margin="4,0,6,0"
                    TextTrimming="CharacterEllipsis"/>

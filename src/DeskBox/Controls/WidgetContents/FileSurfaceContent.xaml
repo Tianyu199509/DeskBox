@@ -819,6 +819,7 @@
                 <FontIcon
                     HorizontalAlignment="Center"
                     FontSize="24"
+                    Foreground="{ThemeResource TextFillColorTertiaryBrush}"
                     Glyph="{Binding EmptyStateGlyph}" />
                 <TextBlock
                     HorizontalAlignment="Center"

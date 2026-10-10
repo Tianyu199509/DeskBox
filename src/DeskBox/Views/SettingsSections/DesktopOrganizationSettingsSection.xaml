@@ -14,13 +14,13 @@
         </ResourceDictionary>
     </UserControl.Resources>
 
-    <StackPanel Style="{StaticResource SectionPanelStyle}" Spacing="12">
+    <StackPanel Style="{StaticResource SectionPanelStyle}">
         <InfoBar
             x:Name="RuleStatusInfo"
             IsOpen="False"
             IsClosable="True" />
 
-        <StackPanel x:Name="RuleListPanel" Spacing="16">
+        <StackPanel x:Name="RuleListPanel" Spacing="4">
             <toolkit:SettingsCard
                 x:Name="OrganizationSummaryCard"
                 HorizontalContentAlignment="Right">
@@ -33,18 +33,19 @@
                     Spacing="8">
                     <Button svc:Localized.AutomationNameKey="DesktopOrganization.Notification.Undo"
                         x:Name="UndoOrganizationButton"
+                        Style="{StaticResource ActionButtonStyle}"
                         Visibility="Collapsed"
                         Click="UndoOrganizationButton_Click"
                         svc:Localized.Key="DesktopOrganization.Notification.Undo" />
                         <Button svc:Localized.AutomationNameKey="DesktopOrganization.OneClick.Action"
                             x:Name="OrganizeNowButton"
-                            Style="{StaticResource AccentButtonStyle}"
+                            Style="{StaticResource AccentActionButtonStyle}"
                             Click="OrganizeNowButton_Click"
                             svc:Localized.Key="DesktopOrganization.OneClick.Action" />
                 </StackPanel>
             </toolkit:SettingsCard>
 
-            <StackPanel Spacing="6">
+            <StackPanel Margin="0,8,0,0" Spacing="4">
                 <toolkit:SettingsCard
                     x:Name="AutoSetupCard"
                     HorizontalContentAlignment="Right"
@@ -54,6 +55,7 @@
                         <FontIcon Glyph="&#xE713;" />
                     </toolkit:SettingsCard.HeaderIcon>
                     <Button svc:Localized.AutomationNameKey="DesktopOrganization.Auto.SetupAction"
+                        Style="{StaticResource ActionButtonStyle}"
                         Click="AutoSetupButton_Click"
                         svc:Localized.Key="DesktopOrganization.Auto.SetupAction" />
                 </toolkit:SettingsCard>
@@ -96,12 +98,11 @@
                 </toolkit:SettingsExpander>
             </StackPanel>
 
-            <StackPanel Spacing="6">
+            <StackPanel Margin="0,8,0,0" Spacing="4">
                 <TextBlock
                     Style="{StaticResource SettingsSubsectionTitleTextStyle}" AutomationProperties.HeadingLevel="Level2"
                     svc:Localized.Key="DesktopOrganization.Rules.SectionTitle" />
                 <TextBlock
-                    Margin="0,-3,0,2"
                     Style="{StaticResource SettingDescriptionTextStyle}"
                     svc:Localized.Key="DesktopOrganization.Rules.SectionDescription" />
                 <AutoSuggestBox
@@ -131,7 +132,7 @@
 
         </StackPanel>
 
-        <StackPanel x:Name="RuleDetailPanel" Visibility="Collapsed" Spacing="12">
+        <StackPanel x:Name="RuleDetailPanel" Visibility="Collapsed" Spacing="4">
             <Grid ColumnDefinitions="Auto,*" ColumnSpacing="12">
                 <Button svc:Localized.AutomationNameKey="DesktopOrganization.Common.Back"
                     Width="36"
@@ -139,10 +140,10 @@
                     Padding="0"
                     Click="CloseRuleDetailButton_Click"
                     svc:Localized.ToolTipKey="DesktopOrganization.Common.Back">
-                    <FontIcon Glyph="&#xE72B;" FontSize="13" />
+                    <FontIcon Glyph="&#xE72B;" FontSize="16" />
                 </Button>
                 <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
-                    <TextBlock x:Name="RuleDetailTitle" FontSize="24" FontWeight="SemiBold" />
+                    <TextBlock x:Name="RuleDetailTitle" FontSize="20" FontWeight="SemiBold" />
                     <TextBlock
                         x:Name="RuleDetailPath"
                         Style="{StaticResource SettingDescriptionTextStyle}"
@@ -182,7 +183,6 @@
                                 Style="{StaticResource SettingTitleTextStyle}"
                                 svc:Localized.Key="DesktopOrganization.Rule.Categories" />
                             <TextBlock
-                                Margin="0,-8,0,0"
                                 Style="{StaticResource SettingDescriptionTextStyle}"
                                 TextWrapping="Wrap"
                                 svc:Localized.Key="DesktopOrganization.Rule.CategoriesDescription" />
@@ -191,7 +191,6 @@
                                 Style="{StaticResource SettingTitleTextStyle}"
                                 svc:Localized.Key="DesktopOrganization.Rule.SpecificTypes" />
                             <TextBlock
-                                Margin="0,-8,0,0"
                                 Style="{StaticResource SettingDescriptionTextStyle}"
                                 TextWrapping="Wrap"
                                 svc:Localized.Key="DesktopOrganization.Rule.SpecificTypesDescription" />

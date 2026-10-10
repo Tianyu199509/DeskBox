@@ -481,10 +481,12 @@
                     Grid.Row="2"
                     FontSize="{Binding CaptionTextSize}"
                     Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                    MaxLines="1"
+                    MaxLines="2"
                     MinWidth="0"
                     Text="{Binding StatusText}"
-                    TextTrimming="CharacterEllipsis" />
+                    TextTrimming="CharacterEllipsis"
+                    TextWrapping="Wrap"
+                    ToolTipService.ToolTip="{Binding StatusText}" />
             </Grid>
 
             <Grid

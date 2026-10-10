@@ -292,65 +292,6 @@
                 </Setter>
             </Style>
 
-            <!--
-                Favorites / recent query rows. Native Button so the rows gain
-                keyboard activation (Enter/Space), UIA Invoke semantics and a
-                focus visual; the template keeps the previous hand-built look
-                (subtle fill, radius 7, no border) and adds only the same
-                tertiary hover fill the sort headers use. The accessible name
-                comes from the bound Title on the Button itself.
-            -->
-            <Style x:Key="RecItemButtonStyle" TargetType="Button">
-                <Setter Property="Padding" Value="8,7"/>
-                <Setter Property="Margin" Value="0,0,0,4"/>
-                <Setter Property="CornerRadius" Value="8"/>
-                <Setter Property="Background" Value="{ThemeResource SubtleFillColorSecondaryBrush}"/>
-                <Setter Property="BorderThickness" Value="0"/>
-                <Setter Property="HorizontalAlignment" Value="Stretch"/>
-                <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
-                <Setter Property="VerticalContentAlignment" Value="Center"/>
-                <Setter Property="UseSystemFocusVisuals" Value="True"/>
-                <Setter Property="Template">
-                    <Setter.Value>
-                        <ControlTemplate TargetType="Button">
-                            <Grid Background="Transparent">
-                                <VisualStateManager.VisualStateGroups>
-                                    <VisualStateGroup x:Name="CommonStates">
-                                        <VisualState x:Name="Normal"/>
-                                        <VisualState x:Name="PointerOver">
-                                            <Storyboard>
-                                                <ObjectAnimationUsingKeyFrames Storyboard.TargetName="RecItemSurface"
-                                                                               Storyboard.TargetProperty="Background">
-                                                    <DiscreteObjectKeyFrame KeyTime="0"
-                                                                            Value="{ThemeResource SubtleFillColorSecondaryBrush}"/>
-                                                </ObjectAnimationUsingKeyFrames>
-                                            </Storyboard>
-                                        </VisualState>
-                                        <VisualState x:Name="Pressed">
-                                            <Storyboard>
-                                                <ObjectAnimationUsingKeyFrames Storyboard.TargetName="RecItemSurface"
-                                                                               Storyboard.TargetProperty="Background">
-                                                    <DiscreteObjectKeyFrame KeyTime="0"
-                                                                            Value="{ThemeResource SubtleFillColorTertiaryBrush}"/>
-                                                </ObjectAnimationUsingKeyFrames>
-                                            </Storyboard>
-                                        </VisualState>
-                                    </VisualStateGroup>
-                                </VisualStateManager.VisualStateGroups>
-                                <Border x:Name="RecItemSurface"
-                                        Background="{TemplateBinding Background}"
-                                        CornerRadius="{TemplateBinding CornerRadius}">
-                                    <ContentPresenter
-                                        Padding="{TemplateBinding Padding}"
-                                        Content="{TemplateBinding Content}"
-                                        HorizontalContentAlignment="{TemplateBinding HorizontalContentAlignment}"
-                                        VerticalContentAlignment="{TemplateBinding VerticalContentAlignment}"/>
-                                </Border>
-                            </Grid>
-                        </ControlTemplate>
-                    </Setter.Value>
-                </Setter>
-            </Style>
         </Grid.Resources>
 
         <Grid.RowDefinitions>
@@ -442,7 +383,7 @@
                     Background="Transparent" BorderThickness="0"
                     Click="ClosePopupButton_Click"
                     svc:Localized.ToolTipKey="Common.Close">
-                <FontIcon Glyph="&#xE8BB;" FontSize="12"/>
+                <FontIcon Glyph="&#xE8BB;" FontSize="16"/>
             </Button>
 
             <ProgressBar x:Name="SearchProgressBar" Height="2"
@@ -596,11 +537,6 @@
                         Opacity="0.32"/>
             </Grid>
 
-            <TextBlock x:Name="HomeSectionHeader" Grid.Row="1"
-                       Margin="12,5,12,7" FontSize="12.5" FontWeight="SemiBold"
-                       Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                       Visibility="Collapsed"/>
-
             <!-- Result rows (SearchResultRowControl owns hover/selection visuals) -->
             <ScrollViewer x:Name="ResultsPanel" Grid.Row="2" Visibility="Collapsed"
                           VerticalScrollBarVisibility="Auto" Padding="12,2,12,12"
@@ -634,7 +570,7 @@
                         HorizontalAlignment="Center" VerticalAlignment="Center"
                         Padding="0,20">
                 <FontIcon Glyph="&#xE8B7;" FontSize="26"
-                          Foreground="{ThemeResource TextFillColorDisabledBrush}"
+                          Foreground="{ThemeResource TextFillColorTertiaryBrush}"
                           HorizontalAlignment="Center"/>
                 <TextBlock x:Name="EmptyTabHintText" FontSize="12.5"
                            Foreground="{ThemeResource TextFillColorTertiaryBrush}"
@@ -651,7 +587,7 @@
                     </TransitionCollection>
                 </StackPanel.ChildrenTransitions>
                 <FontIcon Glyph="&#xE721;" FontSize="30"
-                          Foreground="{ThemeResource TextFillColorDisabledBrush}"
+                          Foreground="{ThemeResource TextFillColorTertiaryBrush}"
                           HorizontalAlignment="Center"/>
                 <TextBlock x:Name="NoResultsTitle" FontSize="14" FontWeight="SemiBold"
                            Foreground="{ThemeResource TextFillColorSecondaryBrush}"
@@ -754,141 +690,16 @@
                     </ItemsRepeater.ItemTemplate>
                 </ItemsRepeater>
             </ScrollViewer>
-
-            <!-- Recommendation panel for empty state (history + favorites) -->
-            <StackPanel x:Name="RecommendationPanel" Grid.Row="2" Visibility="Collapsed"
-                        Padding="12,8,12,12" HorizontalAlignment="Stretch">
-                <StackPanel.ChildrenTransitions>
-                    <TransitionCollection>
-                        <EntranceThemeTransition IsStaggeringEnabled="True"/>
-                    </TransitionCollection>
-                </StackPanel.ChildrenTransitions>
-                
-                <!-- Favorites section -->
-                <Grid x:Name="FavoritesSection" Margin="0,0,0,12" Visibility="Visible">
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto"/>
-                        <RowDefinition Height="Auto"/>
-                    </Grid.RowDefinitions>
-                    
-                    <!-- Header with count and clear button -->
-                    <Grid Grid.Row="0" Margin="0,0,0,8">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*"/>
-                            <ColumnDefinition Width="Auto"/>
-                        </Grid.ColumnDefinitions>
-                        
-                        <TextBlock x:Name="FavoritesHeaderText" Grid.Column="0" FontSize="12.5" FontWeight="SemiBold"
-                                   Foreground="{ThemeResource TextFillColorPrimaryBrush}" VerticalAlignment="Center"/>
-                        <Button svc:Localized.AutomationNameKey="Search.Section.ClearHistory" x:Name="ClearAllButton" Grid.Column="1" FontSize="11"
-                                Padding="8,4" CornerRadius="6"
-                                Background="{ThemeResource ControlFillColorDefaultBrush}"
-                                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                                Tag="all"
-                                Click="ClearHistoryButton_Click">
-                            <Button.Flyout>
-                                <MenuFlyout Placement="Bottom">
-                                    <MenuFlyoutItem x:Name="ConfirmClearAllItem" Click="ConfirmClearHistory_Click"/>
-                                </MenuFlyout>
-                            </Button.Flyout>
-                        </Button>
-                    </Grid>
-                    
-                    <!-- Favorites list -->
-                    <ItemsRepeater x:Name="FavoritesRepeater" MaxHeight="140">
-                        <ItemsRepeater.ItemTemplate>
-                            <DataTemplate x:DataType="models:SearchRecommendationItem">
-                                <Button Style="{StaticResource RecItemButtonStyle}"
-                                        AutomationProperties.Name="{x:Bind Title, Mode=OneTime}"
-                                        Click="OnRecommendationItem_Click">
-                                    <Grid>
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="*"/>
-                                            <ColumnDefinition Width="Auto"/>
-                                        </Grid.ColumnDefinitions>
-
-                                        <TextBlock Grid.Column="0" Text="{x:Bind Title, Mode=OneTime}" FontSize="13"
-                                                   Foreground="{ThemeResource TextFillColorPrimaryBrush}"
-                                                   TextTrimming="CharacterEllipsis" VerticalAlignment="Center"/>
-                                        <FontIcon Grid.Column="1" Glyph="\uE9D9" FontSize="11"
-                                                  Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                                                  Margin="8,0,0,0" VerticalAlignment="Center"/>
-                                    </Grid>
-                                </Button>
-                            </DataTemplate>
-                        </ItemsRepeater.ItemTemplate>
-                    </ItemsRepeater>
-                </Grid>
-                
-                <!-- Divider -->
-                <Rectangle Height="1" Fill="{ThemeResource DividerStrokeColorDefaultBrush}" Margin="0,0,0,12"/>
-                
-                <!-- Recent searches section -->
-                <Grid x:Name="RecentSearchesSection">
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto"/>
-                        <RowDefinition Height="Auto"/>
-                    </Grid.RowDefinitions>
-                    
-                    <!-- Header with count and clear button -->
-                    <Grid Grid.Row="0" Margin="0,0,0,8">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*"/>
-                            <ColumnDefinition Width="Auto"/>
-                        </Grid.ColumnDefinitions>
-                        
-                        <TextBlock x:Name="RecentSearchesHeaderText" Grid.Column="0" FontSize="12.5" FontWeight="SemiBold"
-                                   Foreground="{ThemeResource TextFillColorPrimaryBrush}" VerticalAlignment="Center"/>
-                        <Button svc:Localized.AutomationNameKey="Search.Section.ClearHistory" x:Name="ClearRecentButton" Grid.Column="1" FontSize="11"
-                                Padding="8,4" CornerRadius="6"
-                                Background="{ThemeResource ControlFillColorDefaultBrush}"
-                                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-                                Tag="recent"
-                                Click="ClearHistoryButton_Click">
-                            <Button.Flyout>
-                                <MenuFlyout Placement="Bottom">
-                                    <MenuFlyoutItem x:Name="ConfirmClearRecentItem" Click="ConfirmClearHistory_Click"/>
-                                </MenuFlyout>
-                            </Button.Flyout>
-                        </Button>
-                    </Grid>
-                    
-                    <!-- Recent searches list -->
-                    <ItemsRepeater x:Name="RecentSearchesRepeater" MaxHeight="140">
-                        <ItemsRepeater.ItemTemplate>
-                            <DataTemplate x:DataType="models:SearchRecommendationItem">
-                                <Button Style="{StaticResource RecItemButtonStyle}"
-                                        AutomationProperties.Name="{x:Bind Title, Mode=OneTime}"
-                                        Click="OnRecommendationItem_Click">
-                                    <Grid>
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="*"/>
-                                            <ColumnDefinition Width="Auto"/>
-                                        </Grid.ColumnDefinitions>
-
-                                        <TextBlock Grid.Column="0" Text="{x:Bind Title, Mode=OneTime}" FontSize="13"
-                                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                                   TextTrimming="CharacterEllipsis" VerticalAlignment="Center"/>
-                                        <FontIcon Grid.Column="1" Glyph="\uE81C" FontSize="11"
-                                                  Foreground="{ThemeResource TextFillColorDisabledBrush}"
-                                                  Margin="8,0,0,0" VerticalAlignment="Center"/>
-                                    </Grid>
-                                </Button>
-                            </DataTemplate>
-                        </ItemsRepeater.ItemTemplate>
-                    </ItemsRepeater>
-                </Grid>
-            </StackPanel>
         </Grid>
 
         <!-- Persistent footer: contextual result actions on the left, settings on the right. -->
         <Grid x:Name="FooterBar" Grid.Row="4">
-            <!-- Keep the 50% acrylic on its own layer so footer controls remain crisp. -->
+            <!-- Layer fill is the Win11 command-bar/footer material on a Mica
+                 base; large in-app acrylic reads as a washed-out hole. -->
             <Border x:Name="FooterAcrylicSurface"
-                    Background="{ThemeResource SystemControlAcrylicElementBrush}"
+                    Background="{ThemeResource LayerFillColorDefaultBrush}"
                     BorderBrush="{ThemeResource DividerStrokeColorDefaultBrush}"
                     BorderThickness="0,1,0,0"
-                    Opacity="0.5"
                     IsHitTestVisible="False"/>
             <Grid Padding="12,7" ColumnSpacing="8">
                 <Grid.ColumnDefinitions>
@@ -902,49 +713,49 @@
                 <Button svc:Localized.AutomationNameKey="Search.Menu.Open" x:Name="OpenSelectedButton" Padding="10,5"
                         Click="OpenSelectedButton_Click">
                     <StackPanel Orientation="Horizontal" Spacing="6">
-                        <FontIcon Glyph="&#xE8E5;" FontSize="12"/>
+                        <FontIcon Glyph="&#xE8E5;" FontSize="16"/>
                         <TextBlock x:Name="OpenSelectedLabel"/>
                     </StackPanel>
                 </Button>
                 <Button svc:Localized.AutomationNameKey="Search.Menu.OpenLocation" x:Name="OpenLocationButton" Padding="10,5"
                         Click="OpenLocationButton_Click">
                     <StackPanel Orientation="Horizontal" Spacing="6">
-                        <FontIcon Glyph="&#xE838;" FontSize="12"/>
+                        <FontIcon Glyph="&#xE838;" FontSize="16"/>
                         <TextBlock x:Name="OpenLocationLabel"/>
                     </StackPanel>
                 </Button>
                 <Button svc:Localized.AutomationNameKey="Search.Menu.AttachToTodo" x:Name="AttachSelectedButton" Padding="10,5"
                         Click="AttachSelectedButton_Click">
                     <StackPanel Orientation="Horizontal" Spacing="6">
-                        <FontIcon Glyph="&#xE723;" FontSize="12"/>
+                        <FontIcon Glyph="&#xE723;" FontSize="16"/>
                         <TextBlock x:Name="AttachSelectedLabel"/>
                     </StackPanel>
                 </Button>
                 <Button svc:Localized.AutomationNameKey="Search.Menu.SaveToNote" x:Name="SaveSelectedButton" Padding="10,5"
                         Click="SaveSelectedButton_Click">
                     <StackPanel Orientation="Horizontal" Spacing="6">
-                        <FontIcon Glyph="&#xE70B;" FontSize="12"/>
+                        <FontIcon Glyph="&#xE70B;" FontSize="16"/>
                         <TextBlock x:Name="SaveSelectedLabel"/>
                     </StackPanel>
                 </Button>
                 <Button svc:Localized.AutomationNameKey="Common.Copy" x:Name="CopySelectedButton" Padding="10,5"
                         Click="CopySelectedButton_Click" Visibility="Collapsed">
                     <StackPanel Orientation="Horizontal" Spacing="6">
-                        <FontIcon Glyph="&#xE8C8;" FontSize="12"/>
+                        <FontIcon Glyph="&#xE8C8;" FontSize="16"/>
                         <TextBlock x:Name="CopySelectedLabel"/>
                     </StackPanel>
                 </Button>
                 <Button svc:Localized.AutomationNameKey="Common.Cut" x:Name="CutSelectedButton" Padding="10,5"
                         Click="CutSelectedButton_Click" Visibility="Collapsed">
                     <StackPanel Orientation="Horizontal" Spacing="6">
-                        <FontIcon Glyph="&#xE8C6;" FontSize="12"/>
+                        <FontIcon Glyph="&#xE8C6;" FontSize="16"/>
                         <TextBlock x:Name="CutSelectedLabel"/>
                     </StackPanel>
                 </Button>
                 <Button svc:Localized.AutomationNameKey="Search.Delete.Action" x:Name="DeleteSelectedButton" Padding="10,5"
                         Click="DeleteSelectedButton_Click" Visibility="Collapsed">
                     <StackPanel Orientation="Horizontal" Spacing="6">
-                        <FontIcon Glyph="&#xE74D;" FontSize="12"/>
+                        <FontIcon Glyph="&#xE74D;" FontSize="16"/>
                         <TextBlock x:Name="DeleteSelectedLabel"/>
                     </StackPanel>
                 </Button>
@@ -962,8 +773,8 @@
                         HorizontalAlignment="Right"
                         Click="OpenSettingsButton_Click">
                     <StackPanel Orientation="Horizontal" Spacing="6">
-                        <Image Source="/Assets/WidgetTitleIcons/settings.svg" Width="16" Height="16"/>
-                        <TextBlock x:Name="OpenSettingsLabel" FontSize="12.5"/>
+                        <FontIcon Glyph="&#xE713;" FontSize="16"/>
+                        <TextBlock x:Name="OpenSettingsLabel"/>
                     </StackPanel>
                 </Button>
             </Grid>

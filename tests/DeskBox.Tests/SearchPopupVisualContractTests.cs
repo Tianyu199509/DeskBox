@@ -119,11 +119,11 @@ public sealed class SearchPopupVisualContractTests
             "<Setter Property=\"AllowFocusOnInteraction\" Value=\"False\"/>",
             searchPopup,
             StringComparison.Ordinal);
-        // Sort headers and favorite/recent rows joined the tab chain, so
-        // both styles keep the system focus visual on (IsTabStop=True);
-        // AllowFocusOnInteraction stays False on the sort headers so mouse
-        // sorting never steals focus from the search box.
-        Assert.Equal(2, CountOccurrences(searchPopup, "<Setter Property=\"UseSystemFocusVisuals\" Value=\"True\"/>"));
+        // Sort headers keep the system focus visual on (IsTabStop=True);
+        // AllowFocusOnInteraction stays False on them so mouse sorting never
+        // steals focus from the search box. The favorites/recent row style
+        // that used to carry the second occurrence was dead UI and is gone.
+        Assert.Equal(1, CountOccurrences(searchPopup, "<Setter Property=\"UseSystemFocusVisuals\" Value=\"True\"/>"));
         Assert.Contains(
             "<Setter Property=\"CornerRadius\" Value=\"2\"/>",
             searchPopup,
@@ -140,9 +140,12 @@ public sealed class SearchPopupVisualContractTests
         Assert.Contains("SortSizeDivider", searchPopup, StringComparison.Ordinal);
         Assert.Contains("SortDateDivider", searchPopup, StringComparison.Ordinal);
         Assert.Contains("x:Name=\"FooterAcrylicSurface\"", searchPopup, StringComparison.Ordinal);
-        Assert.Contains("Background=\"{ThemeResource SystemControlAcrylicElementBrush}\"", searchPopup, StringComparison.Ordinal);
-        Assert.Contains("Opacity=\"0.5\"", searchPopup, StringComparison.Ordinal);
+        // Footer material is the Win11 command-layer fill on the Mica base;
+        // large in-app acrylic (SystemControlAcrylicElementBrush @ 0.5) was
+        // retired because it read as a washed-out hole in light theme.
+        Assert.Contains("Background=\"{ThemeResource LayerFillColorDefaultBrush}\"", searchPopup, StringComparison.Ordinal);
         Assert.Contains("IsHitTestVisible=\"False\"", searchPopup, StringComparison.Ordinal);
+        Assert.DoesNotContain("SystemControlAcrylicElementBrush", searchPopup, StringComparison.Ordinal);
         Assert.DoesNotContain("SortHeaderBackground", searchPopup, StringComparison.Ordinal);
         Assert.DoesNotContain("Margin=\"-12,0,0,0\"", searchPopup, StringComparison.Ordinal);
         Assert.DoesNotContain("IsPointerOnRowInteractivePart", searchInteractions, StringComparison.Ordinal);
