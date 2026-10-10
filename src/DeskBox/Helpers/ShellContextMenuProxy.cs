@@ -24,7 +24,20 @@ internal static class ShellContextMenuProxy
     {
         Invoked,
         Cancelled,
-        Failed
+        Failed,
+        /// <summary>
+        /// The user picked the host-owned rename entry that the proxy appends
+        /// to the Shell menu. The host must run its own rename pipeline; the
+        /// Shell side has nothing to invoke.
+        /// </summary>
+        CustomRename,
+        /// <summary>InvokeCommand answered E_FAIL: the handler does not own
+        /// or cannot run the picked command for this item.</summary>
+        FailedUnsupported,
+        /// <summary>InvokeCommand failed with a cancellation HRESULT.</summary>
+        FailedCancelled,
+        /// <summary>InvokeCommand failed with an access-denied HRESULT.</summary>
+        FailedAccessDenied
     }
 
     private enum ProtocolKind
@@ -41,11 +54,21 @@ internal static class ShellContextMenuProxy
 
     private sealed record RoundOutcome(MenuResult Result, bool TransportFailure);
 
-    private readonly record struct PendingRequest(string Path, int ScreenX, int ScreenY);
+    private readonly record struct PendingRequest(
+        string Path,
+        int ScreenX,
+        int ScreenY,
+        string? RenameLabel);
 
     internal const int InvokedExitCode = 0;
     internal const int CancelledExitCode = 2;
     internal const int FailedExitCode = 3;
+    // Exit code 4 stays reserved for proxy-level failures from the child's
+    // main(); menu protocol codes live above it.
+    internal const int CustomRenameExitCode = 5;
+    internal const int FailedUnsupportedExitCode = 6;
+    internal const int FailedCancelledExitCode = 7;
+    internal const int FailedAccessDeniedExitCode = 8;
     private const string ServerArgument = "--context-menu-server";
     private const string OneShotArgument = "--context-menu";
     private const string ReadyMessage = "ready";
@@ -72,12 +95,21 @@ internal static class ShellContextMenuProxy
         AppDomain.CurrentDomain.ProcessExit += (_, _) => DisposeServer();
     }
 
+    /// <param name="renameLabel">
+    /// Localized label for the host-owned rename entry the proxy appends to
+    /// the Shell menu. Null or blank appends nothing, so callers that cannot
+    /// localize keep the previous behavior.
+    /// </param>
     public static async Task<MenuResult> ShowAsync(
         string path,
         int screenX,
-        int screenY)
+        int screenY,
+        string? renameLabel = null)
     {
         string normalizedPath = NormalizePath(path);
+        string? normalizedLabel = string.IsNullOrWhiteSpace(renameLabel)
+            ? null
+            : renameLabel.Trim();
         if (string.IsNullOrWhiteSpace(normalizedPath))
         {
             App.Log($"[ShellContextMenuProxy] Invalid source path={normalizedPath}");
@@ -92,7 +124,11 @@ internal static class ShellContextMenuProxy
             // request, so the new menu opens as soon as the old one is gone.
             lock (s_pendingGate)
             {
-                s_pendingRequest = new PendingRequest(normalizedPath, screenX, screenY);
+                s_pendingRequest = new PendingRequest(
+                    normalizedPath,
+                    screenX,
+                    screenY,
+                    normalizedLabel);
             }
 
             CancelOpenMenu();
@@ -101,7 +137,7 @@ internal static class ShellContextMenuProxy
 
         try
         {
-            var current = new PendingRequest(normalizedPath, screenX, screenY);
+            var current = new PendingRequest(normalizedPath, screenX, screenY, normalizedLabel);
             while (true)
             {
                 MenuResult result = await ShowOneRequestAsync(current);
@@ -168,7 +204,8 @@ internal static class ShellContextMenuProxy
         RoundOutcome outcome = await TryShowWithRetryAsync(
             request.Path,
             request.ScreenX,
-            request.ScreenY);
+            request.ScreenY,
+            request.RenameLabel);
         if (!outcome.TransportFailure)
         {
             return outcome.Result;
@@ -183,7 +220,8 @@ internal static class ShellContextMenuProxy
         RoundOutcome fallback = await TryShowOneShotAsync(
             request.Path,
             request.ScreenX,
-            request.ScreenY);
+            request.ScreenY,
+            request.RenameLabel);
         return fallback.Result;
     }
 
@@ -226,12 +264,14 @@ internal static class ShellContextMenuProxy
     private static async Task<RoundOutcome> TryShowWithRetryAsync(
         string normalizedPath,
         int screenX,
-        int screenY)
+        int screenY,
+        string? renameLabel)
     {
         RoundOutcome outcome = await TryShowServerRoundAsync(
             normalizedPath,
             screenX,
-            screenY);
+            screenY,
+            renameLabel);
         if (!outcome.TransportFailure)
         {
             return outcome;
@@ -240,13 +280,18 @@ internal static class ShellContextMenuProxy
         App.Log(
             "[ShellContextMenuProxy] Retrying menu with a fresh server " +
             $"path={normalizedPath}");
-        return await TryShowServerRoundAsync(normalizedPath, screenX, screenY);
+        return await TryShowServerRoundAsync(
+            normalizedPath,
+            screenX,
+            screenY,
+            renameLabel);
     }
 
     private static async Task<RoundOutcome> TryShowServerRoundAsync(
         string normalizedPath,
         int screenX,
-        int screenY)
+        int screenY,
+        string? renameLabel)
     {
         var timing = Stopwatch.StartNew();
         await s_serverGate.WaitAsync();
@@ -267,12 +312,19 @@ internal static class ShellContextMenuProxy
 
             long serverMs = timing.ElapsedMilliseconds;
             GrantForegroundTo(server.ProcessId);
+            // The trailing rename-label field is optional on the native side;
+            // it is only sent when the caller localized one, and tabs cannot
+            // appear in a Windows path so the field boundaries are stable.
             string command =
                 "menu\t" +
                 $"{screenX.ToString(CultureInfo.InvariantCulture)}\t" +
                 $"{screenY.ToString(CultureInfo.InvariantCulture)}\t" +
                 $"{MenuThemeToken()}\t" +
                 normalizedPath;
+            if (renameLabel is not null)
+            {
+                command += "\t" + renameLabel;
+            }
             try
             {
                 await server.SendCommandAsync(command, BuildTimeout);
@@ -381,7 +433,8 @@ internal static class ShellContextMenuProxy
     private static async Task<RoundOutcome> TryShowOneShotAsync(
         string normalizedPath,
         int screenX,
-        int screenY)
+        int screenY,
+        string? renameLabel)
     {
         string executablePath = ResolveProxyExecutablePath();
         if (!File.Exists(executablePath))
@@ -404,6 +457,10 @@ internal static class ShellContextMenuProxy
         startInfo.ArgumentList.Add(screenX.ToString(CultureInfo.InvariantCulture));
         startInfo.ArgumentList.Add(screenY.ToString(CultureInfo.InvariantCulture));
         startInfo.ArgumentList.Add(MenuThemeToken());
+        if (renameLabel is not null)
+        {
+            startInfo.ArgumentList.Add(renameLabel);
+        }
 
         using var process = new Process { StartInfo = startInfo };
         try
@@ -543,6 +600,10 @@ internal static class ShellContextMenuProxy
     {
         InvokedExitCode => MenuResult.Invoked,
         CancelledExitCode => MenuResult.Cancelled,
+        CustomRenameExitCode => MenuResult.CustomRename,
+        FailedUnsupportedExitCode => MenuResult.FailedUnsupported,
+        FailedCancelledExitCode => MenuResult.FailedCancelled,
+        FailedAccessDeniedExitCode => MenuResult.FailedAccessDenied,
         _ => MenuResult.Failed
     };
 

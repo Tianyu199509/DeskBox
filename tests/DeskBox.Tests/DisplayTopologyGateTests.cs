@@ -92,6 +92,26 @@ public sealed class DisplayTopologyGateTests
     }
 
     [Fact]
+    public void R14_RemovalGrace_DuplicateTokens_RequiresEveryUnitBack()
+    {
+        // Two same-spec degenerate monitors share one geo token: the grace
+        // must track them as two units, not fold them into one id.
+        var now = DateTimeOffset.Parse("2026-10-08T10:00:00Z");
+        var gate = new DisplayTopologyGate(() => now);
+        gate.StartRemovalGrace(["geo:1920x1080", "geo:1920x1080"], ["geo:1920x1080"]);
+        Assert.True(gate.IsClosed);
+
+        // One of the two identical units is still gone: keep waiting.
+        now += TimeSpan.FromSeconds(2);
+        gate.ObserveDisplays(["geo:1920x1080"]);
+        Assert.True(gate.IsClosed);
+
+        // Every unit returned: cancel outright, nothing to apply.
+        gate.ObserveDisplays(["geo:1920x1080", "geo:1920x1080"]);
+        Assert.False(gate.IsClosed);
+    }
+
+    [Fact]
     public void R14_UserAction_EndsGraceImmediately()
     {
         var (gate, _) = Create();

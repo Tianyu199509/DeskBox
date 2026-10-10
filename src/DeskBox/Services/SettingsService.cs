@@ -2782,14 +2782,19 @@ settings.FocusClickedWidgetOnRaise = false;
         settings.RecentOrganizationHistory ??= [];
 
         settings.DesktopOrganizationRules ??= [];
-        var validFileWidgetIds = settings.Widgets
-            .Where(widget =>
-                widget.WidgetKind == WidgetKind.File &&
-                !widget.IsDisabled &&
-                !settings.DeletedWidgetIds.Contains(widget.Id) &&
-                !string.IsNullOrWhiteSpace(widget.MappedFolderPath))
+        // Deletion is decided by the widget tombstone (DeletedWidgetIds, or a
+        // target id that no longer resolves to any widget), never by probing
+        // the disk: a detached drive is indistinguishable from a deleted
+        // folder at load time, and widget hydration recreates mapped folders
+        // anyway. Recoverable target states - the widget is disabled, or the
+        // mapped path has not been backfilled yet - leave the rule enabled
+        // and merely pending, so a later re-enable or backfill resumes
+        // organization instead of losing the rule permanently.
+        var liveWidgetIds = settings.Widgets
+            .Where(widget => !settings.DeletedWidgetIds.Contains(widget.Id))
             .Select(widget => widget.Id)
             .ToHashSet(StringComparer.Ordinal);
+        bool deletedTargetDisabled = false;
         var normalizedDesktopRules = settings.DesktopOrganizationRules
             .Where(rule => rule is not null)
             .Select(rule =>
@@ -2806,9 +2811,10 @@ settings.FocusClickedWidgetOnRaise = false;
                     StringComparer.Ordinal);
                 rule.Extensions = NormalizeDesktopOrganizationExtensions(rule.Extensions);
                 rule.ExcludedExtensions = NormalizeDesktopOrganizationExtensions(rule.ExcludedExtensions);
-                if (!validFileWidgetIds.Contains(rule.TargetWidgetId))
+                if (rule.IsEnabled && !liveWidgetIds.Contains(rule.TargetWidgetId))
                 {
                     rule.IsEnabled = false;
+                    deletedTargetDisabled = true;
                 }
                 return rule;
             })
@@ -2821,18 +2827,32 @@ settings.FocusClickedWidgetOnRaise = false;
             changed = true;
         }
         settings.DesktopOrganizationRules = normalizedDesktopRules;
+        // A pending rule still counts as effective for the master switch:
+        // normalize also runs at load time, before widget hydration backfills
+        // MappedFolderPath, and closing the switch there would disable the
+        // feature on every boot (the runtime resolver skips such rules until
+        // the target becomes usable again).
         bool hasEffectiveDesktopOrganizationRule = normalizedDesktopRules.Any(rule =>
             rule.IsEnabled &&
-            validFileWidgetIds.Contains(rule.TargetWidgetId) &&
+            liveWidgetIds.Contains(rule.TargetWidgetId) &&
             (rule.CategoryIds.Count > 0 ||
              rule.SubtypeIds.Count > 0 ||
              rule.Extensions.Count > 0));
         if (settings.DesktopAutoOrganizationEnabled &&
-            !hasEffectiveDesktopOrganizationRule)
+            !hasEffectiveDesktopOrganizationRule &&
+            deletedTargetDisabled)
         {
+            // Only a truly deleted target may close the master switch
+            // automatically; recoverable unavailability keeps the switch on
+            // and is surfaced through a notification instead. The baseline is
+            // preserved on purpose: the watcher reconciles with
+            // BaselineUtc ?? now, and clearing it here would widen the
+            // post-restart organization window.
             settings.DesktopAutoOrganizationEnabled = false;
-            settings.DesktopAutoOrganizationBaselineUtc = null;
             changed = true;
+            App.Log(
+                "[DesktopAutoOrganization] Master switch closed automatically: " +
+                "the last effective rule target widget was deleted.");
         }
         int normalizedAutoOrganizationDelay = DesktopAutoOrganizationPolicy.NormalizeDelaySeconds(
             settings.DesktopOrganization.DesktopAutoOrganizationDelaySeconds);

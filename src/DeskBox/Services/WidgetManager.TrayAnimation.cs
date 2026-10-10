@@ -165,8 +165,14 @@ public sealed partial class WidgetManager
             }
             else
             {
-                QueueTrayRaiseTopMostConfirmation(shownWindows);
+                // The HWND_TOP group lift cannot cross the foreground window
+                // while DeskBox is still a background process; activating the
+                // idle-highest widget first gives the lift a foreground owner
+                // so every raised window lands above the application the user
+                // invoked from (first-raise-after-idle otherwise shows only
+                // the activated widget).
                 ActivateIdleHighestWindow(shownWindows);
+                QueueTrayRaiseTopMostConfirmation(shownWindows);
             }
             SaveBatchVisibilityState();
             await _trayBatchAnimationDriver.WaitForIdleAsync();

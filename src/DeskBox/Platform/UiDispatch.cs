@@ -51,6 +51,13 @@ internal static class UiDispatch
     private sealed class PendingItem
     {
         public required Func<Task> Invoker { get; init; }
+
+        /// <summary>
+        /// Completes the item's completion source as canceled so its awaiter
+        /// observes shutdown instead of hanging. Safe on an already-completed
+        /// source: TrySetCanceled simply returns false.
+        /// </summary>
+        public required Action Cancel { get; init; }
     }
 
     private static readonly object Gate = new();
@@ -151,11 +158,13 @@ internal static class UiDispatch
 
     /// <summary>
     /// Called from the shutdown sequence: subsequent dispatch requests are
-    /// dropped, pending deferrals are discarded, and the queue reference is
-    /// released so nothing replays after exit.
+    /// dropped, pending deferrals are cancelled so their awaiters observe a
+    /// canceled task instead of hanging, and the queue reference is released
+    /// so nothing replays after exit.
     /// </summary>
     public static void MarkShutdown()
     {
+        int droppedCount;
         lock (Gate)
         {
             if (_shutdown)
@@ -164,10 +173,31 @@ internal static class UiDispatch
             }
 
             _shutdown = true;
-            Interlocked.Add(ref _deferredDroppedCount, Pending.Count);
-            Pending.Clear();
+            droppedCount = CancelPendingNoLock();
+            Interlocked.Add(ref _deferredDroppedCount, droppedCount);
             _queue = null;
         }
+
+        App.Log($"[UiDispatch] Shutdown cancelled {droppedCount} deferred dispatch action(s).");
+    }
+
+    /// <summary>
+    /// Cancels every queued deferral and empties the queue; returns the
+    /// number of cancelled items. Callers must hold <see cref="Gate"/>.
+    /// Cancellation under the lock is safe: the completion sources were
+    /// created with RunContinuationsAsynchronously, and TrySetCanceled is a
+    /// no-op on an already-completed source.
+    /// </summary>
+    private static int CancelPendingNoLock()
+    {
+        int cancelledCount = Pending.Count;
+        foreach (PendingItem item in Pending)
+        {
+            item.Cancel();
+        }
+
+        Pending.Clear();
+        return cancelledCount;
     }
 
     /// <summary>
@@ -277,7 +307,10 @@ internal static class UiDispatch
     {
         lock (Gate)
         {
-            Pending.Clear();
+            // Cancel rather than just clear: a leftover deferral's awaiter
+            // must not hang past the reset. MarkShutdown is deliberately not
+            // reused here — it early-outs on _shutdown and counts drops.
+            _ = CancelPendingNoLock();
             _queue = null;
             _originThreadId = -1;
             _shutdown = false;
@@ -390,7 +423,8 @@ internal static class UiDispatch
                     {
                         completion.SetException(ex);
                     }
-                }
+                },
+                Cancel = () => completion.TrySetCanceled(new CancellationToken(canceled: true)),
             });
         }
 

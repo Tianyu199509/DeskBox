@@ -16,7 +16,7 @@
     </UserControl.Resources>
 
     <StackPanel Style="{StaticResource SectionPanelStyle}">
-        <TextBlock Style="{StaticResource SectionTitleTextStyle}" svc:Localized.Key="Settings.Appearance.DetailTitle" />
+        <TextBlock Style="{StaticResource SectionTitleTextStyle}" AutomationProperties.HeadingLevel="Level1" svc:Localized.Key="Settings.Appearance.DetailTitle" />
         <StackPanel x:Name="SectionCardsPanel" Margin="0,8,0,0" Spacing="4">
             <toolkit:SettingsCard
                 Click="NestedSettingsButton_Click"
@@ -59,7 +59,7 @@
                 <toolkit:SettingsCard.HeaderIcon>
                     <FontIcon Glyph="&#xE81E;" />
                 </toolkit:SettingsCard.HeaderIcon>
-                <ToggleSwitch
+                <ToggleSwitch svc:Localized.AutomationNameKey="Settings.FileStacks.Title"
                     MinWidth="0"
                     OnContent=""
                     OffContent=""
@@ -73,7 +73,7 @@
                 <toolkit:SettingsCard.HeaderIcon>
                     <FontIcon Glyph="&#xE838;" />
                 </toolkit:SettingsCard.HeaderIcon>
-                <ComboBox
+                <ComboBox svc:Localized.AutomationNameKey="Settings.FileWidget.FolderOpenBehavior.Title"
                     MinWidth="{StaticResource SettingsControlMinWidth}"
                     VerticalAlignment="Center"
                     ItemsSource="{x:Bind FeatureWidgets.AvailableFolderOpenBehaviorOptionItems, Mode=OneWay}"
@@ -83,11 +83,13 @@
             <toolkit:SettingsCard
                 HorizontalContentAlignment="Right"
                 svc:Localized.DescriptionKey="Settings.FileWidget.SystemContextMenu.Description"
-                svc:Localized.HeaderKey="Settings.FileWidget.SystemContextMenu.Title">
+                svc:Localized.HeaderKey="Settings.FileWidget.SystemContextMenu.Title"
+                svc:InfoTip.TitleKey="Settings.FileWidget.SystemContextMenu.InfoTip.Title"
+                svc:InfoTip.BodyKey="Settings.FileWidget.SystemContextMenu.InfoTip.Description">
                 <toolkit:SettingsCard.HeaderIcon>
                     <FontIcon Glyph="&#xE712;" />
                 </toolkit:SettingsCard.HeaderIcon>
-                <ToggleSwitch
+                <ToggleSwitch svc:Localized.AutomationNameKey="Settings.FileWidget.SystemContextMenu.Title"
                     MinWidth="0"
                     VerticalAlignment="Center"
                     OnContent=""

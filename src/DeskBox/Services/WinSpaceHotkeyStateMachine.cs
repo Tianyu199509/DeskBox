@@ -7,7 +7,16 @@ internal enum ReservedHotkeyEventDisposition
     PassThrough,
     Suppress,
     TriggerAndSuppress,
-    TriggerAndPassThrough
+    TriggerAndPassThrough,
+
+    /// <summary>
+    /// A Windows-key press edge in WindowsTap mode: pass the event through,
+    /// but inject the Start-menu mask key now. Masking at the down edge
+    /// breaks the "isolated tap" condition for the whole key-hold duration
+    /// instead of racing the key-up delivery with a trailing mask
+    /// (feedback 367).
+    /// </summary>
+    PrepareMaskAndPassThrough
 }
 
 internal enum ReservedHotkeyMode

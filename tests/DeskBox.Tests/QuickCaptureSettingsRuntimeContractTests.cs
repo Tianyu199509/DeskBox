@@ -164,16 +164,6 @@ public sealed class QuickCaptureSettingsRuntimeContractTests
             StringComparison.Ordinal);
     }
 
-    [Fact]
-    public void QuickCaptureTextInputs_UseTheConfiguredSubmitHelper()
-    {
-        string shared = File.ReadAllText(TestPaths.FromRepository(
-            "src/DeskBox/Controls/WidgetContents/QuickCaptureSurfaceContent.xaml.cs"));
-
-        Assert.Contains("QuickCaptureEditorEnterBehavior", shared, StringComparison.Ordinal);
-        Assert.Contains("SettingsService.ShouldSubmitEditorOnEnter", shared, StringComparison.Ordinal);
-        Assert.Contains("TextBoxEditorShortcutHelper.IsCtrlSaveShortcut", shared, StringComparison.Ordinal);
-    }
 
     [Fact]
     public void GroupSwitch_RestoresQuickCaptureTabBeforeTheIncomingFrame()

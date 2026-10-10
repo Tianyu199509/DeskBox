@@ -42,17 +42,20 @@ public sealed class FileItemMultiDragTests
     [InlineData(SettingsService.ManagedDragOutActionCopy, true,
         DataPackageOperation.Copy | DataPackageOperation.Move)]
     // Windows 10 collapses to a single effect: Explorer there prompts on
-    // every multi-effect drop. FollowWindows has no observable meaning on
-    // that path and resolves to Move; unknown values take the same safe
-    // default.
+    // every multi-effect drop. The silent single-bit shape cannot carry
+    // Windows' volume-dependent default, so an explicit setting performs
+    // what it says while the default (FollowWindows) and unknown values
+    // resolve to Copy — the safe side of the forced choice, because a
+    // Move-only offer makes IM-style receivers resolve Move and delete
+    // the original themselves (feedback 500).
     [InlineData(SettingsService.ManagedDragOutActionMove, false,
         DataPackageOperation.Move)]
     [InlineData(SettingsService.ManagedDragOutActionCopy, false,
         DataPackageOperation.Copy)]
     [InlineData(SettingsService.ManagedDragOutActionFollowWindows, false,
-        DataPackageOperation.Move)]
-    [InlineData("Nonsense", false, DataPackageOperation.Move)]
-    [InlineData(null, false, DataPackageOperation.Move)]
+        DataPackageOperation.Copy)]
+    [InlineData("Nonsense", false, DataPackageOperation.Copy)]
+    [InlineData(null, false, DataPackageOperation.Copy)]
     public void ResolveDragOutAllowedOperations_CollapsesToSingleEffectOnWin10(
         string? action,
         bool isWindows11OrLater,
@@ -63,6 +66,106 @@ public sealed class FileItemMultiDragTests
             FileItemDragPackage.ResolveDragOutAllowedOperations(
                 action,
                 isWindows11OrLater));
+    }
+
+    [Fact]
+    public void ResolveDragOutAllowedOperations_Win10DefaultNeverOffersMove()
+    {
+        // Feedback 500: a Move-only advertisement made the WeChat send box
+        // resolve the drop to Move and delete the original into the Recycle
+        // Bin itself. The Win10 default (FollowWindows) and unknown values
+        // must therefore advertise Copy-only: receivers can resolve at most
+        // Copy, so the original can never be removed by the target.
+        foreach (string? action in new[]
+                 {
+                     SettingsService.ManagedDragOutActionFollowWindows,
+                     "Nonsense",
+                     null,
+                 })
+        {
+            DataPackageOperation allowed =
+                FileItemDragPackage.ResolveDragOutAllowedOperations(
+                    action,
+                    isWindows11OrLater: false);
+
+            Assert.Equal(DataPackageOperation.Copy, allowed);
+            Assert.False(allowed.HasFlag(DataPackageOperation.Move));
+        }
+    }
+
+    [Fact]
+    public void Win10DefaultDropOutCopyResolutionNeverEntersFullRemovalWatch()
+    {
+        // The defense chain for feedback 500 on Win10: the default tier
+        // advertises Copy-only, a compliant receiver resolves Copy, and a
+        // Copy completion only ever runs the brief existence probe — never
+        // the full removal watch — so originals stay and no row is pruned.
+        DataPackageOperation allowed =
+            FileItemDragPackage.ResolveDragOutAllowedOperations(
+                SettingsService.ManagedDragOutActionFollowWindows,
+                isWindows11OrLater: false);
+        DataPackageOperation resolved = allowed & DataPackageOperation.Copy;
+
+        Assert.Equal(
+            FileSurfaceContent.ExternalDragObservation.Brief,
+            FileSurfaceContent.ResolveExternalDragObservation(
+                resolved,
+                hasStorageItems: true,
+                handledAsStackMembership: false,
+                fromStackPopover: false));
+    }
+
+    [Fact]
+    public void ExternalDragOutReconcilePath_DeletesNothingItself()
+    {
+        // DeskBox never deletes a drag-out source: the completion path may
+        // only reconcile rows for files the RECEIVER already moved
+        // (feedback 500's deletion was performed by WeChat, which is why
+        // the file landed in the Recycle Bin rather than vanishing). Pin
+        // that the observation method reconciles solely through row
+        // removal and contains no Shell/File delete calls of its own.
+        string root = FindRepositoryRoot();
+        string source = File.ReadAllText(Path.Combine(
+            root,
+            "src/DeskBox/Controls/WidgetContents/FileSurfaceContent.xaml.cs"));
+
+        int methodStart = source.IndexOf(
+            "private async Task ObserveExternalDragOutAsync(",
+            StringComparison.Ordinal);
+        Assert.True(methodStart >= 0, "ObserveExternalDragOutAsync not found.");
+        int methodEnd = source.IndexOf(
+            "private void SuppressDesktopDragOutArrivals(",
+            StringComparison.Ordinal);
+        Assert.True(
+            methodEnd > methodStart,
+            "Method boundary not found.");
+        string method = source[methodStart..methodEnd];
+
+        Assert.Contains("HandleItemsMovedOutAsync", method, StringComparison.Ordinal);
+        Assert.DoesNotContain("DeleteEntriesWithShell", method, StringComparison.Ordinal);
+        Assert.DoesNotContain("File.Delete", method, StringComparison.Ordinal);
+        Assert.DoesNotContain("Directory.Delete", method, StringComparison.Ordinal);
+        Assert.DoesNotContain("RecycleBin", method, StringComparison.Ordinal);
+    }
+
+    private static string FindRepositoryRoot()
+    {
+        DirectoryInfo? current = new(AppContext.BaseDirectory);
+        while (current is not null)
+        {
+            if (File.Exists(Path.Combine(
+                    current.FullName,
+                    "src",
+                    "DeskBox",
+                    "DeskBox.csproj")))
+            {
+                return current.FullName;
+            }
+
+            current = current.Parent;
+        }
+
+        throw new InvalidOperationException("Repository root not found.");
     }
     [Theory]
     [InlineData(true, true, true, false, true)]

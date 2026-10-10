@@ -174,7 +174,7 @@
                         Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
                         BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
                         BorderThickness="1"
-                        CornerRadius="12"
+                        CornerRadius="8"
                         Padding="9"
                         Opacity="0">
                         <Grid RowDefinitions="Auto,*" RowSpacing="8">
@@ -258,7 +258,7 @@
                         Background="{ThemeResource AcrylicInAppFillColorDefaultBrush}"
                         BorderBrush="{ThemeResource SurfaceStrokeColorDefaultBrush}"
                         BorderThickness="1"
-                        CornerRadius="12"
+                        CornerRadius="8"
                         Padding="7,5"
                         Opacity="0"
                         RenderTransformOrigin="0.9,1">
@@ -375,7 +375,7 @@
                         <TextBlock Style="{StaticResource StepTitleText}" svc:Localized.Key="Onboarding.Step3.Title"/>
                         <TextBlock x:Name="Step3BodyText" Style="{StaticResource StepBodyText}"/>
                         <StackPanel Orientation="Horizontal" Spacing="12" Margin="0,2,0,0">
-                            <Button
+                            <Button svc:Localized.AutomationNameKey="Onboarding.Step3.Try"
                                 x:Name="Step3TryButton"
                                 MinHeight="38"
                                 Click="Step3Try_Click"
@@ -407,7 +407,7 @@
                     <StackPanel x:Name="Step4Panel" Spacing="16" Visibility="Collapsed">
                         <TextBlock Style="{StaticResource StepTitleText}" svc:Localized.Key="Onboarding.Step4.Title"/>
                         <TextBlock Style="{StaticResource StepBodyText}" svc:Localized.Key="Onboarding.Step4.Body"/>
-                        <Button
+                        <Button svc:Localized.AutomationNameKey="Onboarding.Step4.OpenMenu"
                             x:Name="Step4OpenMenuButton"
                             MinHeight="38"
                             HorizontalAlignment="Left"
@@ -433,9 +433,9 @@
                                             <controls:WidgetTitleIcon IconKind="Todo" Mode="Color" IconSize="15"/>
                                             <TextBlock VerticalAlignment="Center" FontSize="12.5" FontWeight="SemiBold" svc:Localized.Key="Todo.Title"/>
                                         </StackPanel>
-                                        <ToggleSwitch x:Name="Step5TodoToggle" Grid.Column="1" MinWidth="0" HorizontalAlignment="Right" VerticalAlignment="Center" OnContent="" OffContent="" Tag="Todo" Toggled="Step5FeatureToggle_Toggled"/>
+                                        <ToggleSwitch svc:Localized.AutomationNameKey="Todo.Title" x:Name="Step5TodoToggle" Grid.Column="1" MinWidth="0" HorizontalAlignment="Right" VerticalAlignment="Center" OnContent="" OffContent="" Tag="Todo" Toggled="Step5FeatureToggle_Toggled"/>
                                     </Grid>
-                                    <TextBlock Grid.Row="1" Margin="0,5,0,0" FontSize="10.5" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" svc:Localized.Key="Onboarding.Feature.Todo"/>
+                                    <TextBlock Grid.Row="1" Margin="0,5,0,0" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" svc:Localized.Key="Onboarding.Feature.Todo"/>
                                 </Grid>
                             </Border>
                             <Border x:Name="Step5QuickCaptureCard" Grid.Column="1" Style="{StaticResource FeatureChoiceCard}">
@@ -445,9 +445,9 @@
                                             <controls:WidgetTitleIcon IconKind="QuickCapture" Mode="Color" IconSize="15"/>
                                             <TextBlock VerticalAlignment="Center" FontSize="12.5" FontWeight="SemiBold" svc:Localized.Key="QuickCapture.Name"/>
                                         </StackPanel>
-                                        <ToggleSwitch x:Name="Step5QuickCaptureToggle" Grid.Column="1" MinWidth="0" HorizontalAlignment="Right" VerticalAlignment="Center" OnContent="" OffContent="" Tag="QuickCapture" Toggled="Step5FeatureToggle_Toggled"/>
+                                        <ToggleSwitch svc:Localized.AutomationNameKey="QuickCapture.Name" x:Name="Step5QuickCaptureToggle" Grid.Column="1" MinWidth="0" HorizontalAlignment="Right" VerticalAlignment="Center" OnContent="" OffContent="" Tag="QuickCapture" Toggled="Step5FeatureToggle_Toggled"/>
                                     </Grid>
-                                    <TextBlock Grid.Row="1" Margin="0,5,0,0" FontSize="10.5" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" svc:Localized.Key="Onboarding.Feature.QuickCapture"/>
+                                    <TextBlock Grid.Row="1" Margin="0,5,0,0" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" svc:Localized.Key="Onboarding.Feature.QuickCapture"/>
                                 </Grid>
                             </Border>
                             <Border x:Name="Step5SearchCard" Grid.Row="1" Style="{StaticResource FeatureChoiceCard}">
@@ -457,9 +457,9 @@
                                             <controls:WidgetTitleIcon IconKind="Search" Mode="Color" IconSize="15"/>
                                             <TextBlock VerticalAlignment="Center" FontSize="12.5" FontWeight="SemiBold" svc:Localized.Key="Search.Title"/>
                                         </StackPanel>
-                                        <ToggleSwitch x:Name="Step5SearchToggle" Grid.Column="1" MinWidth="0" HorizontalAlignment="Right" VerticalAlignment="Center" OnContent="" OffContent="" Tag="Search" Toggled="Step5FeatureToggle_Toggled"/>
+                                        <ToggleSwitch svc:Localized.AutomationNameKey="Search.Title" x:Name="Step5SearchToggle" Grid.Column="1" MinWidth="0" HorizontalAlignment="Right" VerticalAlignment="Center" OnContent="" OffContent="" Tag="Search" Toggled="Step5FeatureToggle_Toggled"/>
                                     </Grid>
-                                    <TextBlock Grid.Row="1" Margin="0,5,0,0" FontSize="10.5" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" svc:Localized.Key="Onboarding.Feature.Search"/>
+                                    <TextBlock Grid.Row="1" Margin="0,5,0,0" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" svc:Localized.Key="Onboarding.Feature.Search"/>
                                 </Grid>
                             </Border>
                             <Border x:Name="Step5WeatherCard" Grid.Row="1" Grid.Column="1" Style="{StaticResource FeatureChoiceCard}">
@@ -469,9 +469,9 @@
                                             <controls:WidgetTitleIcon IconKind="Weather" Mode="Color" IconSize="15"/>
                                             <TextBlock VerticalAlignment="Center" FontSize="12.5" FontWeight="SemiBold" svc:Localized.Key="Weather.Title"/>
                                         </StackPanel>
-                                        <ToggleSwitch x:Name="Step5WeatherToggle" Grid.Column="1" MinWidth="0" HorizontalAlignment="Right" VerticalAlignment="Center" OnContent="" OffContent="" Tag="Weather" Toggled="Step5FeatureToggle_Toggled"/>
+                                        <ToggleSwitch svc:Localized.AutomationNameKey="Weather.Title" x:Name="Step5WeatherToggle" Grid.Column="1" MinWidth="0" HorizontalAlignment="Right" VerticalAlignment="Center" OnContent="" OffContent="" Tag="Weather" Toggled="Step5FeatureToggle_Toggled"/>
                                     </Grid>
-                                    <TextBlock Grid.Row="1" Margin="0,5,0,0" FontSize="10.5" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" svc:Localized.Key="Onboarding.Feature.Weather"/>
+                                    <TextBlock Grid.Row="1" Margin="0,5,0,0" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" svc:Localized.Key="Onboarding.Feature.Weather"/>
                                 </Grid>
                             </Border>
                             <Border x:Name="Step5MusicCard" Grid.Row="2" Style="{StaticResource FeatureChoiceCard}">
@@ -481,9 +481,9 @@
                                             <controls:WidgetTitleIcon IconKind="Music" Mode="Color" IconSize="15"/>
                                             <TextBlock VerticalAlignment="Center" FontSize="12.5" FontWeight="SemiBold" svc:Localized.Key="Music.Title"/>
                                         </StackPanel>
-                                        <ToggleSwitch x:Name="Step5MusicToggle" Grid.Column="1" MinWidth="0" HorizontalAlignment="Right" VerticalAlignment="Center" OnContent="" OffContent="" Tag="Music" Toggled="Step5FeatureToggle_Toggled"/>
+                                        <ToggleSwitch svc:Localized.AutomationNameKey="Music.Title" x:Name="Step5MusicToggle" Grid.Column="1" MinWidth="0" HorizontalAlignment="Right" VerticalAlignment="Center" OnContent="" OffContent="" Tag="Music" Toggled="Step5FeatureToggle_Toggled"/>
                                     </Grid>
-                                    <TextBlock Grid.Row="1" Margin="0,5,0,0" FontSize="10.5" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" svc:Localized.Key="Onboarding.Feature.Music"/>
+                                    <TextBlock Grid.Row="1" Margin="0,5,0,0" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" svc:Localized.Key="Onboarding.Feature.Music"/>
                                 </Grid>
                             </Border>
                             <Border x:Name="Step5GlanceCard" Grid.Row="2" Grid.Column="1" Style="{StaticResource FeatureChoiceCard}">
@@ -493,9 +493,9 @@
                                             <controls:WidgetTitleIcon IconKind="Glance" Mode="Color" IconSize="15"/>
                                             <TextBlock VerticalAlignment="Center" FontSize="12.5" FontWeight="SemiBold" svc:Localized.Key="Glance.Title"/>
                                         </StackPanel>
-                                        <ToggleSwitch x:Name="Step5GlanceToggle" Grid.Column="1" MinWidth="0" HorizontalAlignment="Right" VerticalAlignment="Center" OnContent="" OffContent="" Tag="Glance" Toggled="Step5FeatureToggle_Toggled"/>
+                                        <ToggleSwitch svc:Localized.AutomationNameKey="Glance.Title" x:Name="Step5GlanceToggle" Grid.Column="1" MinWidth="0" HorizontalAlignment="Right" VerticalAlignment="Center" OnContent="" OffContent="" Tag="Glance" Toggled="Step5FeatureToggle_Toggled"/>
                                     </Grid>
-                                    <TextBlock Grid.Row="1" Margin="0,5,0,0" FontSize="10.5" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" svc:Localized.Key="WidgetContent.Glance.StatusDescription"/>
+                                    <TextBlock Grid.Row="1" Margin="0,5,0,0" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" svc:Localized.Key="WidgetContent.Glance.StatusDescription"/>
                                 </Grid>
                             </Border>
                         </Grid>

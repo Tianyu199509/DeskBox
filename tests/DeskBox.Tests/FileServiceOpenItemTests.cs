@@ -3,55 +3,110 @@ using DeskBox.Services;
 namespace DeskBox.Tests;
 
 /// <summary>
-/// Folder-shortcut dispatch (#459): a shortcut whose target is a local
-/// directory must be opened with the Shell's default verb — the desktop
-/// double-click dispatch — so third-party file managers registered as the
-/// Folder default handler take over. Every other kind keeps the existing
-/// explorer-first "open" pipeline, and the #339 search-popup boundary stays
-/// untouched.
+/// Default-verb dispatch: template documents (feedback 366 / confirmed 81)
+/// and shortcuts to local-filesystem targets (#459 folders, feedback 246
+/// apps) must be opened with the Shell's default verb — the desktop
+/// double-click dispatch, launched locally — because an explicit "open" verb
+/// overwrites template semantics and dies silently inside Explorer's
+/// fire-and-forget dispatch on machines whose OS-side "open" resolution is
+/// damaged. Every other kind keeps the existing explorer-first pipeline, and
+/// the #339 search-popup boundary stays untouched.
 /// </summary>
 public sealed class FileServiceOpenItemTests
 {
     [Fact]
-    public void SelectOpenDispatchMode_OnlyFolderShortcutsUseTheDefaultVerb()
+    public void SelectOpenDispatchMode_TemplatesUseTheDefaultVerb()
     {
-        // The one new branch: a shortcut to an existing local directory.
+        // The template table wins for plain items of every template kind,
+        // whatever the case of the extension.
+        foreach (string path in new[]
+                 {
+                     @"C:\Templates\Book.xltx",
+                     @"C:\Templates\Book.xltm",
+                     @"C:\Templates\Letter.dotx",
+                     @"C:\Templates\Letter.dotm",
+                     @"C:\Templates\Deck.potx",
+                     @"C:\Templates\Deck.potm",
+                     @"C:\Templates\Flowchart.vstx",
+                     @"C:\Templates\Flowchart.vstm",
+                     @"C:\Templates\Ledger.xlt",
+                     @"C:\Templates\Memo.dot",
+                     @"C:\Templates\Sheet.ots",
+                     @"C:\Templates\Minutes.ott",
+                     @"C:\Templates\UPPER.XLTX"
+                 })
+        {
+            Assert.Equal(
+                OpenItemDispatchMode.LocalDefaultVerb,
+                FileService.SelectOpenDispatchMode(
+                    isShellLinkShortcut: false,
+                    targetKind: ShortcutTargetKind.LocalFileSystem,
+                    pathToOpen: path));
+        }
+    }
+
+    [Fact]
+    public void SelectOpenDispatchMode_LocalShortcutsUseTheDefaultVerb()
+    {
+        // Folder shortcuts (#459): the Folder default handler — possibly a
+        // third-party file manager — must take over.
         Assert.Equal(
             OpenItemDispatchMode.LocalDefaultVerb,
             FileService.SelectOpenDispatchMode(
-                isShortcut: true,
+                isShellLinkShortcut: true,
                 targetKind: ShortcutTargetKind.LocalFileSystem,
-                targetIsDirectory: true));
+                pathToOpen: @"C:\Tools\folder.lnk"));
 
-        // File shortcuts keep the explicit-"open" pipeline.
+        // App/document shortcuts to existing local files (feedback 246):
+        // the explorer-hosted explicit-"open" dispatch is fire-and-forget,
+        // so these join the local default-verb dispatch too.
+        Assert.Equal(
+            OpenItemDispatchMode.LocalDefaultVerb,
+            FileService.SelectOpenDispatchMode(
+                isShellLinkShortcut: true,
+                targetKind: ShortcutTargetKind.LocalFileSystem,
+                pathToOpen: @"C:\Tools\app.lnk"));
+    }
+
+    [Fact]
+    public void SelectOpenDispatchMode_NonLocalShortcutTargetsKeepExplorer()
+    {
+        // UNC, network and URI/shell-namespace targets stay with Explorer,
+        // which owns credentials and shell-item resolution for those.
+        foreach (ShortcutTargetKind kind in new[]
+                 {
+                     ShortcutTargetKind.Unc,
+                     ShortcutTargetKind.NetworkDrive,
+                     ShortcutTargetKind.UriOrShellNamespace,
+                     ShortcutTargetKind.Unknown
+                 })
+        {
+            Assert.Equal(
+                OpenItemDispatchMode.ShellDispatch,
+                FileService.SelectOpenDispatchMode(
+                    isShellLinkShortcut: true,
+                    targetKind: kind,
+                    pathToOpen: @"C:\Tools\shortcut.lnk"));
+        }
+    }
+
+    [Fact]
+    public void SelectOpenDispatchMode_PlainFoldersAndFilesKeepExplorer()
+    {
+        // Plain folders and files are the #339 scope, not the default-verb
+        // table: unchanged.
         Assert.Equal(
             OpenItemDispatchMode.ShellDispatch,
             FileService.SelectOpenDispatchMode(
-                true,
-                ShortcutTargetKind.LocalFileSystem,
-                false));
-
-        // UNC, network and URI/shell-namespace targets stay with Explorer.
-        Assert.Equal(
-            OpenItemDispatchMode.ShellDispatch,
-            FileService.SelectOpenDispatchMode(true, ShortcutTargetKind.Unc, true));
-        Assert.Equal(
-            OpenItemDispatchMode.ShellDispatch,
-            FileService.SelectOpenDispatchMode(true, ShortcutTargetKind.NetworkDrive, true));
-        Assert.Equal(
-            OpenItemDispatchMode.ShellDispatch,
-            FileService.SelectOpenDispatchMode(true, ShortcutTargetKind.UriOrShellNamespace, true));
-        Assert.Equal(
-            OpenItemDispatchMode.ShellDispatch,
-            FileService.SelectOpenDispatchMode(true, ShortcutTargetKind.Unknown, true));
-
-        // Plain folder entries are the #339 scope, not #459: unchanged.
+                isShellLinkShortcut: false,
+                targetKind: ShortcutTargetKind.LocalFileSystem,
+                pathToOpen: @"C:\Users\simon\Documents"));
         Assert.Equal(
             OpenItemDispatchMode.ShellDispatch,
             FileService.SelectOpenDispatchMode(
-                false,
-                ShortcutTargetKind.LocalFileSystem,
-                true));
+                isShellLinkShortcut: false,
+                targetKind: ShortcutTargetKind.LocalFileSystem,
+                pathToOpen: @"C:\Users\simon\Documents\Report.docx"));
     }
 
     [Fact]
@@ -94,7 +149,7 @@ public sealed class FileServiceOpenItemTests
     }
 
     [Fact]
-    public void OpenItemCore_DispatchesFolderShortcutsThroughTheDefaultVerbBranch()
+    public void OpenItemCore_DispatchesTemplatesAndLocalShortcutsThroughTheDefaultVerbBranch()
     {
         string openItem = File.ReadAllText(TestPaths.FromRepository(
             "src/DeskBox/Services/FileService.OpenItem.cs"));
@@ -105,6 +160,10 @@ public sealed class FileServiceOpenItemTests
             StringComparison.Ordinal);
         Assert.Contains(
             "Win32Helper.OpenWithDefaultVerbLocally(",
+            openItem,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "TemplateDocumentVerbPolicy.IsTemplateDocument(pathToOpen)",
             openItem,
             StringComparison.Ordinal);
         // The legacy pipeline stays for everything else.
@@ -145,6 +204,32 @@ public sealed class FileServiceOpenItemTests
         Assert.Contains(
             "SuppressElectronRunAsNodeForChildLaunch();",
             fallback,
+            StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Pins the feedback 246 half of the fix: neither the local fallback in
+    /// <c>OpenFileOrChooseApp</c> nor the drop-on-shortcut launcher may force
+    /// an explicit "open" verb. The desktop double-click dispatch is a NULL
+    /// verb, and only that dispatch survives machines whose OS-side "open"
+    /// resolution alone is damaged.
+    /// </summary>
+    [Fact]
+    public void LocalLaunchFallbacks_UseTheDefaultVerbNotExplicitOpen()
+    {
+        string win32Helper = File.ReadAllText(TestPaths.FromRepository(
+            "src/DeskBox/Platform/Win32Helper.cs"));
+        string openFile = Slice(
+            win32Helper,
+            "public static bool OpenFileOrChooseApp",
+            "internal static bool OpenWithDefaultVerbLocally");
+        Assert.DoesNotContain("Verb = \"open\"", openFile, StringComparison.Ordinal);
+
+        string shortcutLauncher = File.ReadAllText(TestPaths.FromRepository(
+            "src/DeskBox/Helpers/ShortcutFileLauncher.cs"));
+        Assert.DoesNotContain(
+            "Verb = \"open\"",
+            shortcutLauncher,
             StringComparison.Ordinal);
     }
 

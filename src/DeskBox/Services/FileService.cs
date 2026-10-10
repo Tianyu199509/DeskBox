@@ -637,18 +637,9 @@ public sealed partial class FileService
 
         try
         {
-            string name = Path.GetFileName(normalizedPath);
-            System.IO.FileAttributes attributes = File.GetAttributes(normalizedPath);
-            // Stale Steam game shortcuts (.url whose game is uninstalled) are
-            // deliberately NOT filtered: opening them launches Steam's install
-            // flow, so they remain useful and must stay visible in the box.
-            if (name.Equals("desktop.ini", StringComparison.OrdinalIgnoreCase) ||
-                (attributes & System.IO.FileAttributes.Hidden) != 0)
-            {
-                return FolderEntryRefreshStatus.Filtered;
-            }
-
-            return FolderEntryRefreshStatus.Available;
+            return ClassifyExistingEntry(
+                Path.GetFileName(normalizedPath),
+                File.GetAttributes(normalizedPath));
         }
         catch (UnauthorizedAccessException)
         {
@@ -664,6 +655,90 @@ public sealed partial class FileService
             // now be read is a race/provider failure, not proof of deletion.
             return FolderEntryRefreshStatus.Unavailable;
         }
+    }
+
+    /// <summary>
+    /// Classifies one direct child against the live file system with a single
+    /// stat, replacing the per-batch full-root enumeration the incremental
+    /// refresh path used to pay. A missing final path component is the same
+    /// deletion proof the complete-parent snapshot provided; a missing
+    /// ancestor directory stays Unavailable so an offline watched root can
+    /// never be read as a mass deletion of its children.
+    /// </summary>
+    internal static FolderEntryRefreshStatus ClassifyDirectChild(string path)
+    {
+        string normalizedPath;
+        try
+        {
+            normalizedPath = Path.GetFullPath(path);
+        }
+        catch
+        {
+            return FolderEntryRefreshStatus.Unavailable;
+        }
+
+        try
+        {
+            return ClassifyExistingEntry(
+                Path.GetFileName(normalizedPath),
+                File.GetAttributes(normalizedPath));
+        }
+        catch (FileNotFoundException)
+        {
+            // The leaf entry itself is gone while its parent enumerated - the
+            // per-path equivalent of "absent from a complete snapshot".
+            return FolderEntryRefreshStatus.NotFound;
+        }
+        catch (DirectoryNotFoundException)
+        {
+            return FolderEntryRefreshStatus.Unavailable;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return FolderEntryRefreshStatus.AccessDenied;
+        }
+        catch (System.Security.SecurityException)
+        {
+            return FolderEntryRefreshStatus.AccessDenied;
+        }
+        catch (IOException)
+        {
+            // A path that cannot be read right now is a race/provider failure,
+            // not proof of deletion - the same contract as the snapshot-based
+            // classification.
+            return FolderEntryRefreshStatus.Unavailable;
+        }
+    }
+
+    /// <summary>
+    /// Runs the shared display-filter classification over an entry whose
+    /// attributes were just read successfully.
+    /// </summary>
+    private static FolderEntryRefreshStatus ClassifyExistingEntry(
+        string name,
+        System.IO.FileAttributes attributes)
+    {
+        // Stale Steam game shortcuts (.url whose game is uninstalled) are
+        // deliberately NOT filtered: opening them launches Steam's install
+        // flow, so they remain useful and must stay visible in the box.
+        if (name.Equals("desktop.ini", StringComparison.OrdinalIgnoreCase) ||
+            (attributes & System.IO.FileAttributes.Hidden) != 0)
+        {
+            return FolderEntryRefreshStatus.Filtered;
+        }
+
+        return FolderEntryRefreshStatus.Available;
+    }
+
+    /// <summary>
+    /// Async wrapper for <see cref="ClassifyDirectChild(string)"/>: the stat
+    /// is blocking I/O and the refresh pipeline awaits it from the UI thread,
+    /// so it hops to the thread pool exactly like the snapshot enumeration it
+    /// replaced.
+    /// </summary>
+    internal static Task<FolderEntryRefreshStatus> ClassifyDirectChildAsync(string path)
+    {
+        return Task.Run(() => ClassifyDirectChild(path));
     }
 
     /// <summary>

@@ -538,11 +538,22 @@ public sealed partial class FileSurfaceContent
                 await ShellContextMenuProxy.ShowAsync(
                     item.Path,
                     screenX,
-                    screenY);
-            if (result == ShellContextMenuProxy.MenuResult.Failed)
+                    screenY,
+                    // The native proxy has no resources of its own; the host
+                    // labels the rename entry it injects into the Shell menu.
+                    T("Common.Rename"));
+            if (result == ShellContextMenuProxy.MenuResult.CustomRename)
+            {
+                // The user picked the host-owned rename entry (a view-host
+                // verb the pure Shell menu cannot offer); run the built-in
+                // rename pipeline, the same one the WinUI flyout uses.
+                await RenameItemAsync(item);
+            }
+            else if (result != ShellContextMenuProxy.MenuResult.Invoked &&
+                result != ShellContextMenuProxy.MenuResult.Cancelled)
             {
                 ShowFeedback(new WidgetFeedbackRequest(
-                    T("Widget.Error.OperationIncomplete"),
+                    SystemMenuFailureText(result),
                     WidgetFeedbackSeverity.Warning,
                     "system-context-menu"));
             }
@@ -565,6 +576,36 @@ public sealed partial class FileSurfaceContent
                 _stackPopoverSystemContextMenuOpen = false;
                 CompleteStackPopoverContextMenu();
             }
+        }
+    }
+
+    /// <summary>
+    /// Failure text for a native Shell menu round. InvokeCommand failures are
+    /// classified by the proxy (unsupported verb, cancellation, permission)
+    /// so the toast can say what happened instead of a generic "did not
+    /// complete" for every HRESULT.
+    /// </summary>
+    private static string SystemMenuFailureText(
+        ShellContextMenuProxy.MenuResult result) => result switch
+    {
+        ShellContextMenuProxy.MenuResult.FailedUnsupported =>
+            LocalizeSystemMenuText("Widget.SystemMenu.Unsupported"),
+        ShellContextMenuProxy.MenuResult.FailedCancelled =>
+            LocalizeSystemMenuText("Widget.SystemMenu.Cancelled"),
+        ShellContextMenuProxy.MenuResult.FailedAccessDenied =>
+            LocalizeSystemMenuText("Widget.SystemMenu.AccessDenied"),
+        _ => LocalizeSystemMenuText("Widget.Error.OperationIncomplete")
+    };
+
+    private static string LocalizeSystemMenuText(string key)
+    {
+        try
+        {
+            return global::DeskBox.App.Current?.LocalizationService?.T(key) ?? key;
+        }
+        catch
+        {
+            return key;
         }
     }
 

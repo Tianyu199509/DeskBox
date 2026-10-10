@@ -142,6 +142,21 @@ internal sealed class WidgetGroupSwitchRequest : IDisposable
 
     public CancellationToken CancellationToken { get; }
 
+    /// <summary>
+    /// Relative navigation gestures (wheel step, Ctrl+Tab) can only start
+    /// from a visible surface. When one reaches execution after the group
+    /// was already stowed, the gesture straddled the interruption boundary
+    /// and must be dropped instead of committing a silent member flip that
+    /// replays on the next reveal (feedback 387). Absolute targets (picker
+    /// selection, drag hover) and programmatic changes keep the designed
+    /// hidden-surface fast path.
+    /// </summary>
+    public static bool IsRelativeGestureOrigin(WidgetGroupSwitchOrigin origin)
+    {
+        return origin is WidgetGroupSwitchOrigin.Wheel or
+            WidgetGroupSwitchOrigin.Keyboard;
+    }
+
     public void Cancel()
     {
         try

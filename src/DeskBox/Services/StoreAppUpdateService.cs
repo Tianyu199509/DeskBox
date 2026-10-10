@@ -59,21 +59,7 @@ public sealed class StoreAppUpdateService : IAppUpdateService
                 Channel = "store",
                 Version = GetDisplayVersion(_pendingUpdates),
                 DownloadUrl = StoreUpdateUri,
-                Summary =
-                {
-                    ["zh-CN"] = "Microsoft Store 中有可用更新，可由商店完成下载和安装。",
-                    ["zh-TW"] = "Microsoft Store 中有可用更新，可由商店完成下載與安裝。",
-                    ["en-US"] = "An update is available in Microsoft Store. The Store will handle download and installation.",
-                    ["hi-IN"] = "Microsoft Store में अपडेट उपलब्ध है। Microsoft Store इसे डाउनलोड और इंस्टॉल करेगा।",
-                    ["es-ES"] = "Hay una actualización disponible en Microsoft Store. Microsoft Store se encargará de descargarla e instalarla.",
-                    ["fr-FR"] = "Une mise à jour est disponible dans le Microsoft Store. Le Microsoft Store se chargera du téléchargement et de l’installation.",
-                    ["ar-SA"] = "يتوفر تحديث في Microsoft Store. سيتولى المتجر تنزيله وتثبيته.",
-                    ["bn-BD"] = "Microsoft Store-এ একটি আপডেট পাওয়া যাচ্ছে। Microsoft Store এটি ডাউনলোড ও ইনস্টল করবে।",
-                    ["ru-RU"] = "В Microsoft Store доступно обновление. Microsoft Store выполнит загрузку и установку.",
-                    ["ja-JP"] = "Microsoft Store でアップデートが利用可能です。ストアがダウンロードとインストールを行います。",
-                    ["de-DE"] = "Ein Update ist im Microsoft Store verfügbar. Der Store übernimmt Download und Installation.",
-                    ["pt-BR"] = "Há uma atualização disponível na Microsoft Store. A Store fará o download e a instalação."
-                }
+                Summary = []
             };
 
             return SetLastCheckResult(new AppUpdateCheckResult(

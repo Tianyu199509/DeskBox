@@ -9,7 +9,8 @@
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     xmlns:models="using:DeskBox.Models"
     Foreground="{ThemeResource TextFillColorPrimaryBrush}"
-    mc:Ignorable="d">
+    mc:Ignorable="d"
+    xmlns:svc="using:DeskBox.Services">
 
     <UserControl.Resources>
         <Style
@@ -82,7 +83,7 @@
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
-        <Button
+        <Button svc:Localized.AutomationNameKey="Search.Placeholder"
             x:Name="SearchBarButton"
             Grid.Row="0"
             Click="SearchBar_Click"
@@ -225,7 +226,7 @@
                 </Grid>
             </ScrollViewer>
 
-            <Button
+            <Button svc:Localized.AutomationNameKey="Widget.Search.Clear"
                 x:Name="ClearHistoryButton"
                 Grid.Row="2"
                 Margin="0,3,0,0"

@@ -81,6 +81,13 @@ public abstract partial class WidgetWindowBase
                         Text = localization.T("Widget.Foreground.CustomColor"),
                         FontWeight = FontWeights.SemiBold
                     },
+                    new TextBlock
+                    {
+                        Text = localization.T("Widget.Foreground.ContrastHint"),
+                        FontSize = 11,
+                        Opacity = 0.7,
+                        TextWrapping = TextWrapping.Wrap
+                    },
                     picker,
                     new StackPanel
                     {

@@ -560,21 +560,7 @@ public sealed partial class AppUpdateService : IAppUpdateService
                 {
                     ["en-US"] = release.Body
                 },
-            Summary =
-            {
-                ["zh-CN"] = $"DeskBox {version} 已发布，可从 GitHub Releases 下载更新。",
-                ["zh-TW"] = $"DeskBox {version} 已發布，可從 GitHub Releases 下載更新。",
-                ["en-US"] = $"DeskBox {version} is available from GitHub Releases.",
-                ["ja-JP"] = $"DeskBox {version} は GitHub Releases から入手できます。",
-                ["de-DE"] = $"DeskBox {version} ist über GitHub Releases verfügbar.",
-                ["pt-BR"] = $"O DeskBox {version} está disponível no GitHub Releases.",
-                ["hi-IN"] = $"DeskBox {version} GitHub Releases से उपलब्ध है।",
-                ["es-ES"] = $"DeskBox {version} está disponible en GitHub Releases.",
-                ["fr-FR"] = $"DeskBox {version} est disponible sur GitHub Releases.",
-                ["ar-SA"] = $"يتوفر DeskBox {version} في إصدارات GitHub.",
-                ["bn-BD"] = $"DeskBox {version} GitHub Releases-এ পাওয়া যাচ্ছে।",
-                ["ru-RU"] = $"DeskBox {version} доступен в GitHub Releases."
-            }
+            Summary = []
         };
     }
 

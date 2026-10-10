@@ -1,6 +1,6 @@
 
 using DeskBox.Contracts;
-using DeskBox.Platform;
+using DeskBox.Services;
 namespace DeskBox.Helpers;
 
 /// <summary>
@@ -298,294 +298,56 @@ public static class WeatherCodeMapper
     }
 
     /// <summary>
-    /// Returns the Chinese description for the given WMO weather code.
+    /// Returns the localization resource key for the given WMO weather
+    /// interpretation code ("Weather.Condition.*" in Strings/{lang}.json).
+    /// Unrecognized codes fall back to "Weather.Condition.Unknown".
     /// </summary>
-    public static string GetDescriptionZh(int code)
+    public static string GetDescriptionKey(int code)
     {
         return code switch
         {
-            0 => "晴",
-            1 => "晴间多云",
-            2 => "多云",
-            3 => "阴",
-            45 => "雾",
-            48 => "冻雾",
-            51 => "小雨",
-            53 => "小雨",
-            55 => "中雨",
-            56 => "冻雨",
-            57 => "冻雨",
-            61 => "小雨",
-            63 => "中雨",
-            65 => "大雨",
-            66 => "冻雨",
-            67 => "冻雨",
-            71 => "小雪",
-            73 => "中雪",
-            75 => "大雪",
-            77 => "米雪",
-            80 => "阵雨",
-            81 => "阵雨",
-            82 => "强阵雨",
-            85 => "阵雪",
-            86 => "强阵雪",
-            95 => "雷阵雨",
-            96 => "雷阵雨伴冰雹",
-            99 => "雷阵雨伴大冰雹",
-            _ => "未知"
+            0 => "Weather.Condition.0",
+            1 => "Weather.Condition.1",
+            2 => "Weather.Condition.2",
+            3 => "Weather.Condition.3",
+            45 => "Weather.Condition.45",
+            48 => "Weather.Condition.48",
+            51 => "Weather.Condition.51",
+            53 => "Weather.Condition.53",
+            55 => "Weather.Condition.55",
+            56 => "Weather.Condition.56",
+            57 => "Weather.Condition.57",
+            61 => "Weather.Condition.61",
+            63 => "Weather.Condition.63",
+            65 => "Weather.Condition.65",
+            66 => "Weather.Condition.66",
+            67 => "Weather.Condition.67",
+            71 => "Weather.Condition.71",
+            73 => "Weather.Condition.73",
+            75 => "Weather.Condition.75",
+            77 => "Weather.Condition.77",
+            80 => "Weather.Condition.80",
+            81 => "Weather.Condition.81",
+            82 => "Weather.Condition.82",
+            85 => "Weather.Condition.85",
+            86 => "Weather.Condition.86",
+            95 => "Weather.Condition.95",
+            96 => "Weather.Condition.96",
+            99 => "Weather.Condition.99",
+            _ => "Weather.Condition.Unknown"
         };
     }
 
     /// <summary>
-    /// Returns the English description for the given WMO weather code.
+    /// Returns the localized description for the given WMO weather interpretation
+    /// code in the current UI language. The wording lives in the shared
+    /// Strings/{lang}.json resources and is resolved through
+    /// <see cref="LocalizationService"/>, so no language word table is compiled
+    /// into this mapper.
     /// </summary>
-    public static string GetDescriptionEn(int code)
+    public static string GetDescription(int code, LocalizationService localizationService)
     {
-        return code switch
-        {
-            0 => "Clear sky",
-            1 => "Mainly clear",
-            2 => "Partly cloudy",
-            3 => "Overcast",
-            45 => "Fog",
-            48 => "Rime fog",
-            51 => "Light rain",
-            53 => "Light rain",
-            55 => "Moderate rain",
-            56 => "Freezing rain",
-            57 => "Freezing rain",
-            61 => "Light rain",
-            63 => "Moderate rain",
-            65 => "Heavy rain",
-            66 => "Freezing rain",
-            67 => "Freezing rain",
-            71 => "Light snow",
-            73 => "Moderate snow",
-            75 => "Heavy snow",
-            77 => "Snow grains",
-            80 => "Rain showers",
-            81 => "Rain showers",
-            82 => "Heavy rain showers",
-            85 => "Snow showers",
-            86 => "Heavy snow showers",
-            95 => "Thundershowers",
-            96 => "Thundershowers with hail",
-            99 => "Thundershowers with heavy hail",
-            _ => "Unknown"
-        };
-    }
-
-    /// <summary>
-    /// Returns the localized description for the given WMO weather code.
-    /// </summary>
-    public static string GetDescription(int code, string language)
-    {
-        return language switch
-        {
-            "zh-CN" => GetDescriptionZh(code),
-            "zh-TW" => ChineseTextConverter.ToTraditional(GetDescriptionZh(code)),
-            "ja-JP" => GetDescriptionJa(code),
-            "de-DE" => GetDescriptionDe(code),
-            "pt-BR" => GetDescriptionPt(code),
-            "hi-IN" => GetDescriptionHi(code),
-            "es-ES" => GetDescriptionEs(code),
-            "fr-FR" => GetDescriptionFr(code),
-            "ar-SA" => GetDescriptionAr(code),
-            "bn-BD" => GetDescriptionBn(code),
-            "ru-RU" => GetDescriptionRu(code),
-            _ => GetDescriptionEn(code)
-        };
-    }
-
-    private static string GetDescriptionJa(int code)
-    {
-        return code switch
-        {
-            0 => "晴天",
-            1 => "ほぼ晴れ",
-            2 => "曇りがち",
-            3 => "曇り",
-            45 => "霧",
-            48 => "着氷霧",
-            51 => "弱い雨",
-            53 => "弱い雨",
-            55 => "雨",
-            56 => "着氷雨",
-            57 => "着氷雨",
-            61 => "弱い雨",
-            63 => "雨",
-            65 => "強い雨",
-            66 => "着氷雨",
-            67 => "着氷雨",
-            71 => "弱い雪",
-            73 => "雪",
-            75 => "強い雪",
-            77 => "霧雪",
-            80 => "にわか雨",
-            81 => "にわか雨",
-            82 => "強いにわか雨",
-            85 => "にわか雪",
-            86 => "強いにわか雪",
-            95 => "雷雨",
-            96 => "雹を伴う雷雨",
-            99 => "激しい雹を伴う雷雨",
-            _ => "不明"
-        };
-    }
-
-    private static string GetDescriptionDe(int code)
-    {
-        return code switch
-        {
-            0 => "Klar",
-            1 => "Überwiegend klar",
-            2 => "Teilweise bewölkt",
-            3 => "Bedeckt",
-            45 => "Nebel",
-            48 => "Reifnebel",
-            51 => "Leichter Regen",
-            53 => "Leichter Regen",
-            55 => "Mäßiger Regen",
-            56 => "Gefrierender Regen",
-            57 => "Gefrierender Regen",
-            61 => "Leichter Regen",
-            63 => "Mäßiger Regen",
-            65 => "Starker Regen",
-            66 => "Gefrierender Regen",
-            67 => "Gefrierender Regen",
-            71 => "Leichter Schnee",
-            73 => "Mäßiger Schnee",
-            75 => "Starker Schnee",
-            77 => "Schneegriesel",
-            80 => "Regenschauer",
-            81 => "Regenschauer",
-            82 => "Starke Regenschauer",
-            85 => "Schneeschauer",
-            86 => "Starke Schneeschauer",
-            95 => "Gewitter",
-            96 => "Gewitter mit Hagel",
-            99 => "Gewitter mit starkem Hagel",
-            _ => "Unbekannt"
-        };
-    }
-
-    private static string GetDescriptionPt(int code)
-    {
-        return code switch
-        {
-            0 => "Céu limpo",
-            1 => "Predominantemente limpo",
-            2 => "Parcialmente nublado",
-            3 => "Nublado",
-            45 => "Nevoeiro",
-            48 => "Nevoeiro com geada",
-            51 => "Chuva fraca",
-            53 => "Chuva fraca",
-            55 => "Chuva moderada",
-            56 => "Chuva congelante",
-            57 => "Chuva congelante",
-            61 => "Chuva fraca",
-            63 => "Chuva moderada",
-            65 => "Chuva forte",
-            66 => "Chuva congelante",
-            67 => "Chuva congelante",
-            71 => "Neve fraca",
-            73 => "Neve moderada",
-            75 => "Neve forte",
-            77 => "Grãos de neve",
-            80 => "Pancadas de chuva",
-            81 => "Pancadas de chuva",
-            82 => "Pancadas de chuva fortes",
-            85 => "Pancadas de neve",
-            86 => "Pancadas de neve fortes",
-            95 => "Trovoada",
-            96 => "Trovoada com granizo",
-            99 => "Trovoada com granizo forte",
-            _ => "Desconhecido"
-        };
-    }
-
-    private static string GetDescriptionHi(int code)
-    {
-        return code switch
-        {
-            0 => "साफ आसमान", 1 => "अधिकतर साफ", 2 => "आंशिक बादल", 3 => "बादल छाए",
-            45 => "कोहरा", 48 => "पाला कोहरा", 51 or 53 or 61 => "हल्की बारिश",
-            55 or 63 => "मध्यम बारिश", 65 => "तेज़ बारिश", 56 or 57 or 66 or 67 => "जमने वाली बारिश",
-            71 => "हल्की बर्फ", 73 => "मध्यम बर्फ", 75 => "तेज़ बर्फ", 77 => "बर्फ के कण",
-            80 or 81 => "बारिश की बौछारें", 82 => "तेज़ बारिश की बौछारें", 85 => "बर्फीली बौछारें",
-            86 => "तेज़ बर्फीली बौछारें", 95 => "गरज के साथ बारिश", 96 => "ओलों के साथ गरज",
-            99 => "भारी ओलों के साथ गरज", _ => "अज्ञात"
-        };
-    }
-
-    private static string GetDescriptionEs(int code)
-    {
-        return code switch
-        {
-            0 => "Cielo despejado", 1 => "Principalmente despejado", 2 => "Parcialmente nublado", 3 => "Cubierto",
-            45 => "Niebla", 48 => "Niebla helada", 51 or 53 or 61 => "Lluvia ligera",
-            55 or 63 => "Lluvia moderada", 65 => "Lluvia intensa", 56 or 57 or 66 or 67 => "Lluvia helada",
-            71 => "Nieve ligera", 73 => "Nieve moderada", 75 => "Nieve intensa", 77 => "Granos de nieve",
-            80 or 81 => "Chubascos", 82 => "Chubascos intensos", 85 => "Chubascos de nieve",
-            86 => "Chubascos de nieve intensos", 95 => "Tormenta", 96 => "Tormenta con granizo",
-            99 => "Tormenta con granizo intenso", _ => "Desconocido"
-        };
-    }
-
-    private static string GetDescriptionFr(int code)
-    {
-        return code switch
-        {
-            0 => "Ciel dégagé", 1 => "Globalement dégagé", 2 => "Partiellement nuageux", 3 => "Couvert",
-            45 => "Brouillard", 48 => "Brouillard givrant", 51 or 53 or 61 => "Pluie légère",
-            55 or 63 => "Pluie modérée", 65 => "Forte pluie", 56 or 57 or 66 or 67 => "Pluie verglaçante",
-            71 => "Neige légère", 73 => "Neige modérée", 75 => "Forte neige", 77 => "Neige en grains",
-            80 or 81 => "Averses", 82 => "Fortes averses", 85 => "Averses de neige",
-            86 => "Fortes averses de neige", 95 => "Orage", 96 => "Orage avec grêle",
-            99 => "Orage avec forte grêle", _ => "Inconnu"
-        };
-    }
-
-    private static string GetDescriptionAr(int code)
-    {
-        return code switch
-        {
-            0 => "سماء صافية", 1 => "صحو غالبًا", 2 => "غائم جزئيًا", 3 => "غائم",
-            45 => "ضباب", 48 => "ضباب متجمد", 51 or 53 or 61 => "أمطار خفيفة",
-            55 or 63 => "أمطار متوسطة", 65 => "أمطار غزيرة", 56 or 57 or 66 or 67 => "أمطار متجمدة",
-            71 => "ثلوج خفيفة", 73 => "ثلوج متوسطة", 75 => "ثلوج غزيرة", 77 => "حبيبات ثلج",
-            80 or 81 => "زخات مطر", 82 => "زخات مطر غزيرة", 85 => "زخات ثلج",
-            86 => "زخات ثلج غزيرة", 95 => "عواصف رعدية", 96 => "عواصف رعدية مع بَرَد",
-            99 => "عواصف رعدية مع بَرَد شديد", _ => "غير معروف"
-        };
-    }
-
-    private static string GetDescriptionBn(int code)
-    {
-        return code switch
-        {
-            0 => "পরিষ্কার আকাশ", 1 => "প্রধানত পরিষ্কার", 2 => "আংশিক মেঘলা", 3 => "মেঘাচ্ছন্ন",
-            45 => "কুয়াশা", 48 => "জমাট কুয়াশা", 51 or 53 or 61 => "হালকা বৃষ্টি",
-            55 or 63 => "মাঝারি বৃষ্টি", 65 => "ভারী বৃষ্টি", 56 or 57 or 66 or 67 => "বরফ জমা বৃষ্টি",
-            71 => "হালকা তুষার", 73 => "মাঝারি তুষার", 75 => "ভারী তুষার", 77 => "তুষারকণা",
-            80 or 81 => "বৃষ্টির ঝাপটা", 82 => "ভারী বৃষ্টির ঝাপটা", 85 => "তুষারের ঝাপটা",
-            86 => "ভারী তুষারের ঝাপটা", 95 => "বজ্রঝড়", 96 => "শিলাসহ বজ্রঝড়",
-            99 => "ভারী শিলাসহ বজ্রঝড়", _ => "অজানা"
-        };
-    }
-
-    private static string GetDescriptionRu(int code)
-    {
-        return code switch
-        {
-            0 => "Ясное небо", 1 => "Преимущественно ясно", 2 => "Переменная облачность", 3 => "Пасмурно",
-            45 => "Туман", 48 => "Изморозь", 51 or 53 or 61 => "Небольшой дождь",
-            55 or 63 => "Умеренный дождь", 65 => "Сильный дождь", 56 or 57 or 66 or 67 => "Ледяной дождь",
-            71 => "Небольшой снег", 73 => "Умеренный снег", 75 => "Сильный снег", 77 => "Снежная крупа",
-            80 or 81 => "Ливневый дождь", 82 => "Сильный ливень", 85 => "Снегопад",
-            86 => "Сильный снегопад", 95 => "Гроза", 96 => "Гроза с градом",
-            99 => "Гроза с сильным градом", _ => "Неизвестно"
-        };
+        ArgumentNullException.ThrowIfNull(localizationService);
+        return localizationService.T(GetDescriptionKey(code));
     }
 }

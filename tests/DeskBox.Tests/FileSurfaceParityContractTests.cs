@@ -238,7 +238,16 @@ public sealed class FileSurfaceParityContractTests
             fileService,
             StringComparison.Ordinal);
         Assert.Contains("IFileOperationNative", shellTransfer, StringComparison.Ordinal);
-        Assert.Contains("thread.SetApartmentState(ApartmentState.STA)", shellTransfer, StringComparison.Ordinal);
+        // The dedicated STA dispatch moved into the bounded runner (feedback
+        // 455): the transfer still owns an STA worker thread, now with a
+        // watchdog that abandons a wedged one instead of hanging the import.
+        Assert.Contains("s_shellTransferRunner", shellTransfer, StringComparison.Ordinal);
+        Assert.Contains(
+            "thread.SetApartmentState(ApartmentState.STA)",
+            File.ReadAllText(Path.Combine(
+                root,
+                "src/DeskBox/Helpers/BoundedStaOperationRunner.cs")),
+            StringComparison.Ordinal);
         Assert.Contains("fileOperation.SetOwnerWindow(ownerWindowHandle)", shellTransfer, StringComparison.Ordinal);
         Assert.Contains("useShellProgress: true", surface, StringComparison.Ordinal);
         Assert.Contains("useShellProgress: true", itemVisuals, StringComparison.Ordinal);

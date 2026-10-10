@@ -230,4 +230,89 @@ public sealed class UiDispatchTests : IDisposable
             _ = _controller.ShutdownQueueAsync();
         }
     }
+
+    [Fact]
+    public async Task Shutdown_CancelsPendingDeferredActions()
+    {
+        UiDispatch.MarkUiOriginThread();
+        long droppedBefore = UiDispatch.DeferredDroppedCount;
+
+        Task deferred = null!;
+        // Braces matter: the lambda must be an Action, otherwise the
+        // assignment expression makes it Func<Task> and Task.Run unwraps —
+        // the await would then block on the deferred task itself.
+        await Task.Run(() => { deferred = UiDispatch.RunAsync(() => Task.FromResult(1)); });
+        Assert.Equal(1, UiDispatch.PendingCount);
+        Assert.False(deferred.IsCompleted);
+
+        UiDispatch.MarkShutdown();
+
+        await Assert.ThrowsAsync<TaskCanceledException>(() => deferred);
+        Assert.Equal(0, UiDispatch.PendingCount);
+        Assert.Equal(droppedBefore + 1, UiDispatch.DeferredDroppedCount);
+    }
+
+    [Fact]
+    public async Task Shutdown_AfterRunOrDeferDeferral_StaysSilent()
+    {
+        UiDispatch.MarkUiOriginThread();
+        long droppedBefore = UiDispatch.DeferredDroppedCount;
+
+        bool ran = false;
+        await Task.Run(() => UiDispatch.RunOrDefer(() => ran = true));
+        Assert.Equal(1, UiDispatch.PendingCount);
+
+        // The fire-and-forget deferral path must observe cancellation
+        // silently: no thrown exception here, and a canceled task never
+        // surfaces as an unobserved exception later.
+        UiDispatch.MarkShutdown();
+
+        bool ranAfterShutdown = false;
+        UiDispatch.RunOrDefer(() => ranAfterShutdown = true);
+
+        Assert.False(ran);
+        Assert.False(ranAfterShutdown);
+        Assert.Equal(0, UiDispatch.PendingCount);
+        Assert.Equal(droppedBefore + 1, UiDispatch.DeferredDroppedCount);
+    }
+
+    [Fact]
+    public async Task RepeatedShutdown_DoesNotRecountDroppedActions()
+    {
+        UiDispatch.MarkUiOriginThread();
+        long droppedBefore = UiDispatch.DeferredDroppedCount;
+
+        await Task.Run(() =>
+        {
+            for (int i = 0; i < 3; i++)
+            {
+                UiDispatch.RunOrDefer(() => { });
+            }
+        });
+        Assert.Equal(3, UiDispatch.PendingCount);
+
+        UiDispatch.MarkShutdown();
+        long droppedAfterFirst = UiDispatch.DeferredDroppedCount;
+
+        UiDispatch.MarkShutdown();
+
+        Assert.Equal(droppedBefore + 3, droppedAfterFirst);
+        Assert.Equal(droppedAfterFirst, UiDispatch.DeferredDroppedCount);
+        Assert.Equal(0, UiDispatch.PendingCount);
+    }
+
+    [Fact]
+    public async Task ResetForTests_CancelsLeftoverDeferredActions()
+    {
+        UiDispatch.MarkUiOriginThread();
+
+        Task deferred = null!;
+        await Task.Run(() => { deferred = UiDispatch.RunAsync(() => Task.FromResult(1)); });
+        Assert.Equal(1, UiDispatch.PendingCount);
+
+        UiDispatch.ResetForTests();
+
+        await Assert.ThrowsAsync<TaskCanceledException>(() => deferred);
+        Assert.Equal(0, UiDispatch.PendingCount);
+    }
 }

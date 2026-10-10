@@ -74,6 +74,8 @@ public sealed class GlanceCalendarAndImageServiceTests : IDisposable
             "src/DeskBox/ViewModels/GlanceWidgetViewModel.cs"));
         string codeBehind = File.ReadAllText(TestPaths.FromRepository(
             "src/DeskBox/Controls/WidgetContents/GlanceWidgetContent.xaml.cs"));
+        string decorationBuilder = File.ReadAllText(TestPaths.FromRepository(
+            "src/DeskBox/Services/GlanceCalendarDayDecorationBuilder.cs"));
         string visualCalculator = File.ReadAllText(TestPaths.FromRepository(
             "src/DeskBox/Services/WidgetMaterialVisualCalculator.cs"));
         string backdrop = File.ReadAllText(TestPaths.FromRepository(
@@ -181,11 +183,21 @@ public sealed class GlanceCalendarAndImageServiceTests : IDisposable
         Assert.Contains("ApplyImageAwareTheme", codeBehind, StringComparison.Ordinal);
         Assert.Contains("x:Key=\"GlanceCalendarDayItemStyle\"", xaml, StringComparison.Ordinal);
         Assert.Contains("CalendarItemCornerRadius=\"6\"", xaml, StringComparison.Ordinal);
-        Assert.Contains("TodayBackground=\"{ThemeResource AccentFillColorDefaultBrush}\"", xaml, StringComparison.Ordinal);
+        // The today accent is host-side: the native TodayBackground runs on a
+        // today date the CalendarView caches once at creation and never
+        // refreshes across midnight (microsoft-ui-xaml #11205), so the surface
+        // must keep the native chrome off and draw the pill from Tag.IsToday.
+        Assert.Contains("IsTodayHighlighted=\"False\"", xaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("TodayBackground=", xaml, StringComparison.Ordinal);
+        // Pin the host-side pill binding itself: without it the flag above
+        // would silently drop today's visual distinction entirely.
+        Assert.Contains("Tag.IsToday", xaml, StringComparison.Ordinal);
         Assert.Contains("Tag.SecondaryText", xaml, StringComparison.Ordinal);
         Assert.Contains("Tag.HasSecondaryText", xaml, StringComparison.Ordinal);
-        Assert.Contains("day?.FestivalText", codeBehind, StringComparison.Ordinal);
-        Assert.Contains("day?.TraditionalText", codeBehind, StringComparison.Ordinal);
+        Assert.Contains("day?.FestivalText", decorationBuilder, StringComparison.Ordinal);
+        Assert.Contains("day?.TraditionalText", decorationBuilder, StringComparison.Ordinal);
+        Assert.Contains("GlanceCalendarDayDecorationBuilder.Build", codeBehind, StringComparison.Ordinal);
+        Assert.Contains("RefreshIfObservedDateChanged", viewModel, StringComparison.Ordinal);
         Assert.Contains("TraditionalCalendarTitle", xaml, StringComparison.Ordinal);
         Assert.Contains("LineHeight=\"10\"", xaml, StringComparison.Ordinal);
         Assert.Contains("Opacity=\"0.86\"", xaml, StringComparison.Ordinal);

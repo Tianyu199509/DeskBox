@@ -14,7 +14,6 @@ namespace DeskBox.ViewModels;
 /// </summary>
 public partial class WidgetViewModel : ObservableObject, IDisposable
 {
-    private const int IncrementalRefreshBatchThreshold = 24;
     private const int IconHydrationBatchSize = 8;
     private const int IconHydrationRetryCount = 3;
     private static readonly TimeSpan[] s_iconHydrationRetryDelays =

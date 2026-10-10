@@ -283,7 +283,9 @@ public sealed class MusicWidgetContentLayoutTests
             .Order(StringComparer.Ordinal)
             .ToArray();
 
-        Assert.Equal(34, dataContextPaths.Length);
+        // 35 paths: the system volume slider's accessible name binds
+        // SystemVolumeLabel, which is registered in the AOT bindable list.
+        Assert.Equal(35, dataContextPaths.Length);
         Assert.Contains("[WinRT.GeneratedBindableCustomProperty([", bindableSource, StringComparison.Ordinal);
         Assert.Contains("public sealed partial class MusicWidgetViewModel", bindableSource, StringComparison.Ordinal);
         foreach (string path in dataContextPaths)

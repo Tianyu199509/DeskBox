@@ -2642,8 +2642,10 @@ public static partial class Win32Helper
     /// First delegates to the running Explorer desktop process so launched applications
     /// inherit the current user shell environment rather than DeskBox's potentially stale
     /// startup environment. If Explorer is unavailable, falls back to ShellExecuteEx via
-    /// <see cref="Process.Start(ProcessStartInfo)"/>. <paramref name="ownerWindow"/> is
-    /// forwarded to the "Open With" fallback so any system dialog has a real parent.
+    /// <see cref="Process.Start(ProcessStartInfo)"/> with the Shell default verb — the
+    /// desktop double-click dispatch — instead of an explicit "open" verb (feedback 246).
+    /// <paramref name="ownerWindow"/> is forwarded to the "Open With" fallback so any
+    /// system dialog has a real parent.
     /// </remarks>
     public static bool OpenFileOrChooseApp(IntPtr ownerWindow, string path)
     {
@@ -2702,8 +2704,12 @@ public static partial class Win32Helper
         {
             FileName = path,
             UseShellExecute = true,
-            Verb = "open",
             WorkingDirectory = directory
+            // Deliberately no Verb (feedback 246): a NULL verb is the desktop
+            // double-click dispatch. An explicit "open" verb both forces
+            // default-verb classes (templates: feedback 366) open as regular
+            // documents and breaks when the OS-side "open" resolution alone
+            // is damaged — the same machine still double-clicks fine.
         };
 
         using IDisposable? electronRunAsNodeScope = SuppressElectronRunAsNodeForChildLaunch();
@@ -2748,11 +2754,15 @@ public static partial class Win32Helper
     /// <summary>
     /// Opens <paramref name="path"/> locally with the Shell's default verb — the
     /// dispatch a desktop double-click performs — instead of the explicit "open"
-    /// verb, and without delegating to the Explorer desktop process. Folder
-    /// shortcuts need this (#459): third-party file managers register as the
-    /// Folder default handler, and an explicit "open" verb never reaches that
-    /// registration. Shares the local-launch pipeline (environment scrub,
-    /// pending observation) with the fallback in
+    /// verb, and without delegating to the Explorer desktop process. Used for the
+    /// classes where an explicit "open" verb is wrong or fragile: folder
+    /// shortcuts (#459, third-party file managers register as the Folder default
+    /// handler), template documents (feedback 366, the default "New" verb creates
+    /// a copy instead of opening — and enabling an overwrite of — the template),
+    /// and shortcuts to local files (feedback 246, the default verb is exactly
+    /// what the desktop dispatches and local failures throw instead of dying
+    /// silently in Explorer's fire-and-forget). Shares the local-launch pipeline
+    /// (environment scrub, pending observation) with the fallback in
     /// <see cref="OpenFileOrChooseApp(IntPtr, string)"/>.
     /// </summary>
     internal static bool OpenWithDefaultVerbLocally(string path, string workingDirectory)

@@ -119,10 +119,11 @@ public sealed class SearchPopupVisualContractTests
             "<Setter Property=\"AllowFocusOnInteraction\" Value=\"False\"/>",
             searchPopup,
             StringComparison.Ordinal);
-        Assert.Contains(
-            "<Setter Property=\"UseSystemFocusVisuals\" Value=\"False\"/>",
-            searchPopup,
-            StringComparison.Ordinal);
+        // Sort headers and favorite/recent rows joined the tab chain, so
+        // both styles keep the system focus visual on (IsTabStop=True);
+        // AllowFocusOnInteraction stays False on the sort headers so mouse
+        // sorting never steals focus from the search box.
+        Assert.Equal(2, CountOccurrences(searchPopup, "<Setter Property=\"UseSystemFocusVisuals\" Value=\"True\"/>"));
         Assert.Contains(
             "<Setter Property=\"CornerRadius\" Value=\"2\"/>",
             searchPopup,
@@ -218,6 +219,18 @@ public sealed class SearchPopupVisualContractTests
         Assert.Contains("ReferenceEquals(previousSelection, _viewModel.SelectedItem)", popup, StringComparison.Ordinal);
         Assert.Contains("UpdateSelectionHighlight();", popup, StringComparison.Ordinal);
         Assert.Contains("FocusSelectedResult();", popup, StringComparison.Ordinal);
+    }
+
+    private static int CountOccurrences(string content, string needle)
+    {
+        int count = 0;
+        int index = 0;
+        while ((index = content.IndexOf(needle, index, StringComparison.Ordinal)) >= 0)
+        {
+            count++;
+            index += needle.Length;
+        }
+        return count;
     }
 
     private static string FindRepositoryRoot()

@@ -26,6 +26,12 @@ public sealed class WidgetZOrderRestoreContractTests
             manager,
             "internal bool ReassertRaisedWidgetGroupAfterDeskBoxActivation",
             "public bool RequestRestoreRaisedWidgetsToDesktopLayer");
+        string layerService = File.ReadAllText(TestPaths.FromRepository(
+            "src/DeskBox/Services/WidgetLayerService.cs"));
+        string reassertOrder = SliceMethod(
+            layerService,
+            "public static bool ApplyRaisedGroupReassertOrder",
+            "internal static bool IsForeignWindowAboveRaisedPeers");
         string contentWindow = File.ReadAllText(TestPaths.FromRepository(
             "src/DeskBox/Views/ContentWidgetWindow.WindowInteraction.cs"));
         string stackPopover = File.ReadAllText(TestPaths.FromRepository(
@@ -33,8 +39,17 @@ public sealed class WidgetZOrderRestoreContractTests
 
         Assert.Contains("_widgetsRaisedFromTray", method, StringComparison.Ordinal);
         Assert.Contains("IsForegroundDeskBoxWindow()", method, StringComparison.Ordinal);
-        Assert.Contains("ApplyPeerOrderHighestToLowest", method, StringComparison.Ordinal);
+        Assert.Contains("ApplyRaisedGroupReassertOrder", method, StringComparison.Ordinal);
         Assert.DoesNotContain("RestoreRaisedWidgetsToDesktopLayer", method, StringComparison.Ordinal);
+
+        // The reassert order must escalate: a tray raise that ran while
+        // DeskBox was a background process pins the peers below the
+        // then-foreground window, and only a repeated group lift can repair
+        // that split band once DeskBox owns the foreground. An intact band
+        // keeps the repaint-free peer reorder.
+        Assert.Contains("RaisedGroupReassertPolicy.Resolve", reassertOrder, StringComparison.Ordinal);
+        Assert.Contains("BringGroupTemporarilyToFront", reassertOrder, StringComparison.Ordinal);
+        Assert.Contains("ApplyPeerOrderHighestToLowest", reassertOrder, StringComparison.Ordinal);
         Assert.Contains(
             "ReassertRaisedWidgetGroupAfterDeskBoxActivation",
             contentWindow,

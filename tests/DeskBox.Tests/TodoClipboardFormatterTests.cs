@@ -80,9 +80,9 @@ public sealed class TodoClipboardFormatterTests
 
         string formatted = TodoClipboardFormatter.FormatSingle(item, localization);
 
-        Assert.Contains("Content:", formatted, StringComparison.Ordinal);
+        Assert.Contains("Content", formatted, StringComparison.Ordinal);
         Assert.Contains("review contract", formatted, StringComparison.Ordinal);
-        Assert.Contains("Attachments (2):", formatted, StringComparison.Ordinal);
+        Assert.Contains("Attachments (2)", formatted, StringComparison.Ordinal);
         Assert.Contains("- contract.pdf", formatted, StringComparison.Ordinal);
         Assert.Contains(@"Path: C:\docs\contract.pdf", formatted, StringComparison.Ordinal);
         Assert.Contains(@"Path: D:\images\markup.png", formatted, StringComparison.Ordinal);

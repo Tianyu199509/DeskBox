@@ -1351,10 +1351,6 @@ public sealed partial class SearchPopupWindow : Window
         FavoritesRepeater.ItemsSource = favorites;
         RecentSearchesRepeater.ItemsSource = recent;
 
-        // Hook up item tap events for recommendations
-        FavoritesRepeater.ElementPrepared += (s, e) => UpdateRecItemClickEvent(e.Element);
-        RecentSearchesRepeater.ElementPrepared += (s, e) => UpdateRecItemClickEvent(e.Element);
-
         UpdatePanelVisibility();
         UpdateSortHeaders();
     }
@@ -1412,12 +1408,20 @@ public sealed partial class SearchPopupWindow : Window
         // ── Recommended apps panel takes priority when visible ──
         bool recommendedVisible = RecommendedAppsPanel.Visibility == Visibility.Visible;
 
-        // Escape: clear recommended app selection first, then hide popup.
+        // Escape: clear recommended app selection first, then hand focus back
+        // from a sort header to the search box (same tier as the results
+        // panel's Escape), then hide popup.
         if (e.Key == Windows.System.VirtualKey.Escape)
         {
             if (_selectedAppIndex >= 0)
             {
                 ClearRecommendedAppSelection();
+                SearchTextBox.Focus(FocusState.Programmatic);
+                e.Handled = true;
+                return;
+            }
+            if (FocusManager.GetFocusedElement() is Button focusedHeader && IsSortHeaderButton(focusedHeader))
+            {
                 SearchTextBox.Focus(FocusState.Programmatic);
                 e.Handled = true;
                 return;
@@ -1473,7 +1477,32 @@ public sealed partial class SearchPopupWindow : Window
                 e.Handled = true;
             }
         }
+
+        // Sort headers joined the tab chain: printable keys falling through
+        // from a focused header must keep flowing into the query, mirroring
+        // the results panel's redirect (ResultsPanel_KeyDown default branch).
+        // Modifier chords stay untouched — Ctrl+A/C/V must not insert
+        // literal characters into the query.
+        if (!Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Control) &&
+            !Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Menu) &&
+            FocusManager.GetFocusedElement() is Button focusedControl &&
+            IsSortHeaderButton(focusedControl))
+        {
+            if (TryRedirectCharToSearchBox(e.Key))
+            {
+                e.Handled = true;
+            }
+        }
     }
+
+    /// <summary>
+    /// The four result sort headers are the only buttons on the tab chain
+    /// whose character input must flow into the query instead of being
+    /// dropped; the filter combos and other controls keep their own editing.
+    /// </summary>
+    private bool IsSortHeaderButton(Button button) =>
+        button == SortNameHeader || button == SortTypeHeader ||
+        button == SortSizeHeader || button == SortDateHeader;
 
     private bool TryMoveResultSelection(Windows.System.VirtualKey key)
     {
@@ -1985,25 +2014,16 @@ public sealed partial class SearchPopupWindow : Window
     }
 
     /// <summary>
-    /// Updates click event handlers on recommendation list items so tapping applies the query.
+    /// Applies the tapped favorite/recent query. The rows are template Buttons,
+    /// so Click fires for mouse, touch and Enter/Space alike and survives
+    /// container recycling without an ElementPrepared re-hook.
     /// </summary>
-    private void UpdateRecItemClickEvent(DependencyObject element)
-    {
-        if (element is FrameworkElement fe &&
-            fe.DataContext is SearchRecommendationItem)
-        {
-            fe.PointerPressed -= OnRecommendationItem_PointerPressed;
-            fe.PointerPressed += OnRecommendationItem_PointerPressed;
-        }
-    }
-
-    private void OnRecommendationItem_PointerPressed(object sender, PointerRoutedEventArgs e)
+    private void OnRecommendationItem_Click(object sender, RoutedEventArgs e)
     {
         if (sender is FrameworkElement fe &&
             fe.DataContext is SearchRecommendationItem { HistoryQuery: { } queryText })
         {
             _viewModel.ApplyQuery(queryText);
-            e.Handled = true;
         }
     }
 

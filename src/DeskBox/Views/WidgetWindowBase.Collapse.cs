@@ -456,14 +456,18 @@ public abstract partial class WidgetWindowBase
     }
 
     /// <summary>
-    /// Creates the initial compact placement when a widget enters compact
-    /// behavior for the first time. Existing placements are preserved here;
-    /// entering compact behavior from always-expanded re-derives through
-    /// <see cref="DeriveCompactPlacementFromExpandedBounds"/> instead so the
-    /// capsule follows the window's current region rather than a dormant,
-    /// possibly stale remembered spot.
+    /// Computes the first capsule bounds when a widget that has never been
+    /// collapsed enters the compact state. Existing placements are preserved.
+    /// The derived bounds are deliberately transient (feedback 340): a
+    /// capsule placement may only be created by a user placement commit or
+    /// by the capsule bar arrangement, never fabricated from the expanded
+    /// window corner and persisted — restore-period expanded geometry is not
+    /// user intent, and persisting it stranded capsules at scattered panel
+    /// corners across restarts. Until the user drags the capsule (or the bar
+    /// arrangement assigns a slot), the capsule simply follows the expanded
+    /// window's current region.
     /// </summary>
-    private void EnsureCompactPlacementFromExpandedBounds(bool persist)
+    private void EnsureCompactPlacementFromExpandedBounds()
     {
         if (_targetCollapsed ||
             !UsesCompactExpansionGeometry() ||
@@ -473,10 +477,17 @@ public abstract partial class WidgetWindowBase
             return;
         }
 
-        DeriveCompactPlacementFromExpandedBounds(persist);
+        DeriveCompactPlacementFromExpandedBounds();
     }
 
-    private void DeriveCompactPlacementFromExpandedBounds(bool persist)
+    /// <param name="capturePlacement">
+    /// True only for the deliberate user action of entering compact behavior
+    /// from always-expanded with an existing placement: that action re-commits
+    /// the capsule to the window's current region (legacy semantics, keeps the
+    /// visible capsule and the stored placement from diverging). Every other
+    /// caller leaves the placement untouched (transient derivation).
+    /// </param>
+    private void DeriveCompactPlacementFromExpandedBounds(bool capturePlacement = false)
     {
         if (_targetCollapsed ||
             !UsesCompactExpansionGeometry() ||
@@ -501,7 +512,16 @@ public abstract partial class WidgetWindowBase
             new SizeInt32(measuredCompact.Width, measuredCompact.Height),
             anchor);
         _compactExpansionAnchor = anchor;
-        CaptureCompactPlacement(fresh, persist);
+        if (capturePlacement)
+        {
+            CaptureCompactPlacement(fresh, persist: true);
+            return;
+        }
+
+        // Transient visual memo only: no CaptureCompactPlacement here, so a
+        // first collapse never fabricates Config.CompactPlacement from the
+        // expanded window corner (feedback 340).
+        _stableCompactBounds = fresh;
     }
 
     protected void ResetCompactWidthOverride()
@@ -1337,9 +1357,11 @@ public abstract partial class WidgetWindowBase
 
         CancelTimer(ref _collapseHoverTimer);
         CancelTimer(ref _collapseLeaveTimer);
-        // Only create a placement if this widget has never had one. Existing
-        // capsule coordinates are user-owned and must survive tray hide/show.
-        EnsureCompactPlacementFromExpandedBounds(persist: true);
+        // Tray hide is a system path over freshly restored geometry: it must
+        // never fabricate a persisted capsule placement (feedback 340). The
+        // collapse below still lands on the expanded window's corner, but
+        // only transiently — the following SetCollapsedState derives those
+        // bounds without capturing them.
         SetCollapsedState(
             collapsed: true,
             persistManualState: false,
@@ -1964,10 +1986,13 @@ public abstract partial class WidgetWindowBase
         if (enteredCompactBehavior && !_targetCollapsed)
         {
             // Entering capsule mode from always-expanded collapses in place:
-            // the current window region is the user's source of truth, so any
-            // dormant remembered capsule spot is re-derived rather than
-            // resurrected and teleporting the widget across the screen.
-            DeriveCompactPlacementFromExpandedBounds(persist: true);
+            // the current window region is the source of the transient
+            // capsule bounds, so any dormant remembered capsule spot is not
+            // resurrected. Only the deliberate re-commit of an existing
+            // placement captures (legacy semantics); a widget that has never
+            // been collapsed stays transient (feedback 340).
+            DeriveCompactPlacementFromExpandedBounds(
+                capturePlacement: Config.CompactPlacement is not null);
         }
 
         ApplyCollapseBehaviorVisuals();
@@ -2999,7 +3024,10 @@ public abstract partial class WidgetWindowBase
             CancelPendingCompactExpansion();
             if (!_targetCollapsed && UsesCompactExpansionGeometry())
             {
-                EnsureCompactPlacementFromExpandedBounds(persist: true);
+                // First collapse computes its bounds in place but never
+                // persists them (feedback 340): restore-period expanded
+                // geometry must not become the widget's capsule placement.
+                EnsureCompactPlacementFromExpandedBounds();
             }
         }
 
@@ -3008,6 +3036,11 @@ public abstract partial class WidgetWindowBase
             UsesCompactExpansionGeometry())
         {
             if (expandingFromCompact &&
+                // Re-sync only an existing placement. When the capsule bounds
+                // were transiently derived (no placement yet), capturing here
+                // would launder restore-period geometry into a permanent
+                // placement the user never committed (feedback 340).
+                Config.CompactPlacement is not null &&
                 WidgetCompactTransitionPolicy.ShouldCaptureCurrentCompactPlacement(
                     transitionReason,
                     wasTargetCollapsed,
@@ -4086,7 +4119,11 @@ public abstract partial class WidgetWindowBase
             return;
         }
 
-        CaptureCompactPlacement(bounds, persist: true);
+        // Memo-only (feedback 340): collapse transitions stabilize their
+        // capsule bounds in the visual memo, but a placement is never created
+        // here — only user placement commits and the capsule bar arrangement
+        // write persisted capsule coordinates.
+        _stableCompactBounds = bounds;
     }
 
     protected void CaptureCompactPlacement(RectInt32 bounds, bool persist)

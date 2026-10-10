@@ -42,7 +42,7 @@
     <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
   </resheader>
   <data name="AppDisplayName" xml:space="preserve">
-    <value>DeskBox Widgets</value>
+    <value>DeskBox</value>
     <comment>应用显示名称，显示在开始菜单、商店和任务栏。</comment>
   </data>
   <data name="AppDescription" xml:space="preserve">

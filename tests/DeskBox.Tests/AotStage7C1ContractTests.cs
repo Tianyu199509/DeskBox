@@ -141,6 +141,10 @@ public sealed class AotStage7C1ContractTests
             Assert.Contains(token, script, StringComparison.Ordinal);
         }
 
+        // The working-tree fingerprint is the audit's reproducibility
+        // evidence and must not be dropped from the snapshot again.
+        Assert.Contains("Fingerprint", script, StringComparison.Ordinal);
+
         System.Text.RegularExpressions.Match minimumVersionMatch =
             System.Text.RegularExpressions.Regex.Match(
                 script,

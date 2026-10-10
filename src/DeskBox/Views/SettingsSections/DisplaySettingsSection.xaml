@@ -28,11 +28,13 @@
             x:Name="DisplaysOverviewCard"
             HorizontalContentAlignment="Right"
             svc:Localized.DescriptionKey="Settings.Displays.Description"
-            svc:Localized.HeaderKey="Settings.Displays.Title">
+            svc:Localized.HeaderKey="Settings.Displays.Title"
+            svc:InfoTip.TitleKey="Settings.Displays.BindingInfoTip.Title"
+            svc:InfoTip.BodyKey="Settings.Displays.BindingInfoTip.Description">
             <toolkit:SettingsCard.HeaderIcon>
                 <FontIcon Glyph="&#xE7F4;" />
             </toolkit:SettingsCard.HeaderIcon>
-            <Button
+            <Button svc:Localized.AutomationNameKey="Settings.Displays.Identify"
                 x:Name="IdentifyButton"
                 Click="IdentifyButton_Click"
                 svc:Localized.Key="Settings.Displays.Identify" />
@@ -59,7 +61,7 @@
             <toolkit:SettingsCard.HeaderIcon>
                 <FontIcon Glyph="&#xE7F4;" />
             </toolkit:SettingsCard.HeaderIcon>
-            <Button
+            <Button svc:Localized.AutomationNameKey="Settings.Displays.MoveAll"
                 x:Name="MoveAllWidgetsButton"
                 Click="MoveAllWidgetsButton_Click"
                 svc:Localized.Key="Settings.Displays.MoveAll" />
@@ -72,7 +74,7 @@
             <toolkit:SettingsCard.HeaderIcon>
                 <FontIcon Glyph="&#xE710;" />
             </toolkit:SettingsCard.HeaderIcon>
-            <ComboBox
+            <ComboBox svc:Localized.AutomationNameKey="Settings.Displays.NewWidgets.Header"
                 x:Name="NewPlacementCombo"
                 MinWidth="240"
                 SelectionChanged="NewPlacementCombo_SelectionChanged" />
@@ -89,7 +91,7 @@
                     HorizontalContentAlignment="Right"
                     svc:Localized.DescriptionKey="Settings.Displays.Disconnect.Description"
                     svc:Localized.HeaderKey="Settings.Displays.Disconnect.Header">
-                    <ComboBox
+                    <ComboBox svc:Localized.AutomationNameKey="Settings.Displays.Disconnect.Header"
                         x:Name="DisconnectBehaviorCombo"
                         MinWidth="240"
                         SelectionChanged="DisconnectBehaviorCombo_SelectionChanged" />
@@ -99,7 +101,8 @@
 
         <StackPanel x:Name="WidgetListPanel" Spacing="6">
             <TextBlock
-                Style="{StaticResource SettingsSubsectionTitleTextStyle}"
+                Style="{StaticResource SettingsSubsectionTitleTextStyle}" AutomationProperties.HeadingLevel="Level2"
+                VerticalAlignment="Center"
                 svc:Localized.Key="Settings.Displays.Widgets.SectionTitle" />
             <StackPanel x:Name="WidgetBindingCards" Spacing="4" />
         </StackPanel>

@@ -97,4 +97,54 @@ public sealed class GlobalHotkeyGestureTests
         Assert.True(GlobalHotkeyService.IsValidGesture(SearchHotkeyService.AltSpaceGesture));
         Assert.True(GlobalHotkeyService.IsReservedSystemGesture(SearchHotkeyService.AltSpaceGesture));
     }
+
+    [Fact]
+    public void UsesRegisterHotKeyChord_PlainChordsRideHeartbeatReservedModesDoNot()
+    {
+        // RegisterHotKey chords deliver WM_HOTKEY, have no callback and no
+        // query API, so exactly they ride the watchdog heartbeat; the
+        // reserved low-level-hook modes stay on callback liveness probing.
+        Assert.True(GlobalHotkeyService.UsesRegisterHotKeyChord(
+            GlobalHotkeyActivation.FromChord(new GlobalHotkeyGesture(
+                HotkeyModifierKeys.None, (int)VirtualKey.F7))));
+        Assert.True(GlobalHotkeyService.UsesRegisterHotKeyChord(
+            GlobalHotkeyActivation.FromChord(new GlobalHotkeyGesture(
+                HotkeyModifierKeys.Control | HotkeyModifierKeys.Alt, (int)VirtualKey.J))));
+        Assert.True(GlobalHotkeyService.UsesRegisterHotKeyChord(
+            GlobalHotkeyActivation.FromChord(GlobalHotkeyService.CopilotKeyGesture)));
+
+        Assert.False(GlobalHotkeyService.UsesRegisterHotKeyChord(
+            GlobalHotkeyActivation.FromChord(new GlobalHotkeyGesture(
+                HotkeyModifierKeys.Windows, (int)VirtualKey.Space))));
+        Assert.False(GlobalHotkeyService.UsesRegisterHotKeyChord(
+            GlobalHotkeyActivation.FromChord(new GlobalHotkeyGesture(
+                HotkeyModifierKeys.Alt, (int)VirtualKey.Space))));
+        Assert.False(GlobalHotkeyService.UsesRegisterHotKeyChord(
+            new GlobalHotkeyActivation(
+                HotkeyActivationKind.DoubleControl,
+                new GlobalHotkeyGesture(HotkeyModifierKeys.Control, 0))));
+        Assert.False(GlobalHotkeyService.UsesRegisterHotKeyChord(
+            new GlobalHotkeyActivation(
+                HotkeyActivationKind.WindowsTap,
+                new GlobalHotkeyGesture(HotkeyModifierKeys.Windows, 0))));
+
+        // Unregistrable configurations must not join the heartbeat either —
+        // they would just burn retries against a guaranteed failure.
+        Assert.False(GlobalHotkeyService.UsesRegisterHotKeyChord(
+            GlobalHotkeyActivation.FromChord(new GlobalHotkeyGesture(
+                HotkeyModifierKeys.Control, 0))));
+    }
+
+    [Fact]
+    public void SearchUsesRegisterHotKeyChord_ExcludesAltSpaceAndUnregistrableGestures()
+    {
+        Assert.True(SearchHotkeyService.UsesRegisterHotKeyChord(new GlobalHotkeyGesture(
+            HotkeyModifierKeys.Control, (int)VirtualKey.K)));
+        Assert.False(SearchHotkeyService.UsesRegisterHotKeyChord(
+            SearchHotkeyService.AltSpaceGesture));
+        Assert.False(SearchHotkeyService.UsesRegisterHotKeyChord(new GlobalHotkeyGesture(
+            HotkeyModifierKeys.Windows, (int)VirtualKey.K)));
+        Assert.False(SearchHotkeyService.UsesRegisterHotKeyChord(new GlobalHotkeyGesture(
+            HotkeyModifierKeys.None, 0)));
+    }
 }

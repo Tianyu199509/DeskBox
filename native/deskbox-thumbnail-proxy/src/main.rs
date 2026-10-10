@@ -14,7 +14,7 @@ mod windows_proxy {
         path::{Path, PathBuf},
         sync::{
             Mutex, OnceLock,
-            atomic::{AtomicBool, AtomicI8, AtomicIsize, AtomicUsize, Ordering},
+            atomic::{AtomicBool, AtomicI8, AtomicIsize, AtomicU32, AtomicUsize, Ordering},
             mpsc,
         },
         time::{Duration, Instant},
@@ -46,8 +46,8 @@ mod windows_proxy {
                 Shell::{
                     CMF_EXPLORE, CMF_ITEMMENU, CMF_NORMAL, CMIC_MASK_CONTROL_DOWN,
                     CMIC_MASK_PTINVOKE, CMIC_MASK_SHIFT_DOWN, CMINVOKECOMMANDINFOEX,
-                    Common::ITEMIDLIST, IContextMenu, IContextMenu2, IContextMenu3,
-                    IShellFolder,
+                    Common::ITEMIDLIST, GCS_VERBW, IContextMenu, IContextMenu2,
+                    IContextMenu3, IShellFolder,
                     IShellItemImageFactory, SHBindToParent, SHCreateItemFromParsingName,
                     SHFILEINFOW, SHGFI_ADDOVERLAYS, SHGFI_ICON, SHGFI_LARGEICON,
                     SHGFI_OVERLAYINDEX, SHGFI_SYSICONINDEX, SHGetFileInfoW, SHGetImageList,
@@ -55,20 +55,23 @@ mod windows_proxy {
                     SIIGBF_ICONONLY, SIIGBF_SCALEUP, SIIGBF_THUMBNAILONLY,
                 },
                 WindowsAndMessaging::{
-                    CallNextHookEx, CreatePopupMenu, CreateWindowExW, DefWindowProcW,
-                    DestroyIcon, DestroyMenu, DestroyWindow, DispatchMessageW, GetClassNameW,
-                    GetIconInfo, GetMenuItemCount, GetMessageW, HICON, HMENU, ICONINFO, MSG,
-                    MSLLHOOKSTRUCT, PM_REMOVE, PeekMessageW, PostMessageW, PostThreadMessageW,
-                    RegisterClassW, SW_SHOWNORMAL,
-                    SetForegroundWindow, SetWindowsHookExW, TPM_RETURNCMD, TrackPopupMenuEx,
-                    TranslateMessage, UnhookWindowsHookEx, WH_MOUSE_LL, WINDOW_STYLE, WM_DRAWITEM,
+                    AppendMenuW, CallNextHookEx, CreatePopupMenu, CreateWindowExW,
+                    DefWindowProcW, DestroyIcon, DestroyMenu, DestroyWindow, DispatchMessageW,
+                    GetClassNameW, GetIconInfo, GetMenuItemCount, GetMenuItemInfoW,
+                    GetMessageW, HICON,
+                    HMENU, ICONINFO, InsertMenuItemW, MENUITEMINFOW, MFT_SEPARATOR,
+                    MFT_STRING, MF_SEPARATOR, MIIM_FTYPE, MIIM_ID, MIIM_STRING,
+                    MSG, MSLLHOOKSTRUCT, PM_REMOVE, PeekMessageW, PostMessageW,
+                    PostThreadMessageW, RegisterClassW, SW_SHOWNORMAL, SetForegroundWindow,
+                    SetWindowsHookExW, TPM_RETURNCMD, TrackPopupMenuEx, TranslateMessage,
+                    UnhookWindowsHookEx, WH_MOUSE_LL, WINDOW_STYLE, WM_DRAWITEM,
                     WM_INITMENUPOPUP, WM_KEYDOWN, WM_KEYUP, WM_LBUTTONDOWN, WM_MEASUREITEM,
                     WM_MBUTTONDOWN, WM_MENUCHAR, WM_NULL, WM_QUIT, WM_RBUTTONDOWN,
                     WM_XBUTTONDOWN, WNDCLASSW, WS_EX_TOPMOST, WindowFromPoint,
                 },
             },
         },
-        core::{BOOL, Interface, PCSTR, PCWSTR},
+        core::{BOOL, Interface, PCSTR, PCWSTR, PSTR, PWSTR},
     };
 
     const MIN_THUMBNAIL_SIZE: i32 = 24;
@@ -82,8 +85,25 @@ mod windows_proxy {
     const CONTEXT_MENU_EXIT_INVOKED: i32 = 0;
     const CONTEXT_MENU_EXIT_CANCELLED: i32 = 2;
     const CONTEXT_MENU_EXIT_FAILED: i32 = 3;
+    // Exit code 4 is reserved for proxy-level failures from main(); menu
+    // protocol codes start above it.
     const CONTEXT_MENU_FIRST_COMMAND_ID: u32 = 1;
     const CONTEXT_MENU_LAST_COMMAND_ID: u32 = 0x7000;
+    // Host custom menu items live in a reserved id range ABOVE the range the
+    // Shell handlers are offered, so a handler can never collide with them
+    // (Raymond Chen, "How to host an IContextMenu, part 9 - Adding custom
+    // commands"). 0x7001 is "rename", which is a view-host verb no pure
+    // IContextMenu surfaces; the host labels and executes it itself.
+    const CONTEXT_MENU_CUSTOM_COMMAND_FIRST: u32 = 0x7001;
+    const CONTEXT_MENU_CUSTOM_RENAME_COMMAND_ID: u32 = CONTEXT_MENU_CUSTOM_COMMAND_FIRST;
+    const CONTEXT_MENU_CUSTOM_LABEL_MAX_LEN: usize = 256;
+    const CONTEXT_MENU_EXIT_CUSTOM_COMMAND: i32 = 5;
+    // Classified InvokeCommand failures so the host can say more than "the
+    // operation did not complete". E_FAIL from InvokeCommand is the documented
+    // "this handler does not own that command" signal, not a transport error.
+    const CONTEXT_MENU_EXIT_FAILED_UNSUPPORTED: i32 = 6;
+    const CONTEXT_MENU_EXIT_FAILED_CANCELLED: i32 = 7;
+    const CONTEXT_MENU_EXIT_FAILED_ACCESS_DENIED: i32 = 8;
     const CONTEXT_MENU_INVOKE_GRACE: Duration = Duration::from_millis(2000);
     // windows-rs does not generate this mask; the value is from shobjidl_core.
     const CMIC_MASK_UNICODE: u32 = 0x0004_0000;
@@ -97,7 +117,22 @@ mod windows_proxy {
     const EXTRACT_BATCH_MAGIC: u32 = 0x4458_4231; // "1BXD" as bytes, "DXB1" logical
     const EXTRACT_BATCH_VERSION: u32 = 1;
     const EXTRACT_BATCH_MAX_REQUESTS: u32 = 64;
-    const EXTRACT_BATCH_MAX_WORKERS: usize = 8;
+    // Four workers absorb a full host batch (8 requests = 2 waves, well
+    // inside the host's 2500 ms batch timeout) while quartering the burst of
+    // per-thread CRT data allocations that eager 8-way spawning caused right
+    // after sleep/resume on memory-fragmented machines (feedback 226/452/495:
+    // the CRT terminated the whole proxy with runtime error R6016).
+    const EXTRACT_BATCH_MAX_WORKERS: usize = 4;
+    // Explorer and the COM surrogate run the same Shell handler DLLs on
+    // 1 MiB STA threads; matching that stack halves the Rust default and
+    // keeps the fan-out's reserved address space small.
+    const EXTRACT_BATCH_WORKER_STACK_BYTES: usize = 1024 * 1024;
+    // The supervisor starts at most one worker per tick while the unclaimed
+    // queue stays deeper than the live worker count: lazy start plus
+    // staggering, so thread creations never land on a fragmented heap all
+    // at once and a batch of fast items never pays for workers it does not
+    // need.
+    const EXTRACT_BATCH_RAMP_POLL: Duration = Duration::from_millis(15);
     const EXTRACT_BATCH_MAX_PATH_BYTES: usize = 64 * 1024;
     const TPM_LEFTALIGN: u32 = 0x0000;
     const TPM_RIGHTBUTTON: u32 = 0x0002;
@@ -116,6 +151,9 @@ mod windows_proxy {
     /// Whether the last menu reached the foreground and got an input hook.
     static MENU_FOREGROUND_OK: AtomicBool = AtomicBool::new(false);
     static MENU_HOOK_INSTALLED: AtomicBool = AtomicBool::new(false);
+    /// HRESULT of the last failed InvokeCommand (0 when none), surfaced in the
+    /// server "result" line for diagnostics.
+    static LAST_INVOKE_FAILURE_HR: AtomicU32 = AtomicU32::new(0);
 
     /// Window class of every Win32 menu, including the Shell menu we host.
     const MENU_WINDOW_CLASS: &str = "#32768";
@@ -171,6 +209,7 @@ mod windows_proxy {
             screen_x: i32,
             screen_y: i32,
             dark: bool,
+            rename_label: Option<String>,
         },
         ContextMenuServer {
             dark: bool,
@@ -579,7 +618,14 @@ mod windows_proxy {
                 screen_x,
                 screen_y,
                 dark,
-            } => match show_context_menu(&path, screen_x, screen_y, dark) {
+                rename_label,
+            } => match show_context_menu(
+                &path,
+                screen_x,
+                screen_y,
+                dark,
+                rename_label.as_deref(),
+            ) {
                 Ok(exit_code) => Ok(exit_code),
                 Err(error) => {
                     eprintln!("{error}");
@@ -634,6 +680,12 @@ mod windows_proxy {
                 .next()
                 .map(|value| menu_dark_from_token(&value.to_string_lossy()))
                 .unwrap_or(false);
+            // Optional fifth argument: the localized label for the host-owned
+            // "rename" entry. Absent or blank means no custom item is added.
+            let rename_label = arguments
+                .next()
+                .map(|value| value.to_string_lossy().into_owned())
+                .filter(|value| !value.trim().is_empty());
             if arguments.next().is_some() {
                 return Err("unexpected extra arguments".to_string());
             }
@@ -642,6 +694,7 @@ mod windows_proxy {
                 screen_x,
                 screen_y,
                 dark,
+                rename_label,
             });
         }
 
@@ -1195,44 +1248,133 @@ mod windows_proxy {
         //    stay fully parallel; they never collided in any measurement.
         let directory_gate = Mutex::new(());
         let next_request = AtomicUsize::new(0);
+        let completed = AtomicUsize::new(0);
+        let client_gone = AtomicBool::new(false);
         std::thread::scope(|scope| {
-            let worker_count = requests.len().min(EXTRACT_BATCH_MAX_WORKERS);
-            for _ in 0..worker_count {
-                scope.spawn(|| loop {
-                    let index = next_request.fetch_add(1, Ordering::Relaxed);
-                    if index >= requests.len() {
+            // Workers start lazily (feedback 226/452/495: the eager full
+            // fan-out tripped CRT runtime error R6016 right after
+            // sleep/resume, because every extra STA thread multiplies the
+            // per-thread CRT data the Shell handler DLLs must allocate while
+            // the heap is still settling). This supervisor thread adds one
+            // worker per poll tick while the unclaimed queue is deeper than
+            // the live worker count, never exceeding
+            // EXTRACT_BATCH_MAX_WORKERS. spawn_scoped reports OS-level
+            // creation failures instead of panicking, so the exhausted
+            // state degrades to the live workers draining the queue; if no
+            // worker can be created at all, this thread extracts serially
+            // so the batch still completes.
+            let mut workers: Vec<std::thread::ScopedJoinHandle<'_, ()>> = Vec::new();
+            let mut spawning_exhausted = false;
+            loop {
+                if client_gone.load(Ordering::Relaxed) {
+                    break;
+                }
+                workers.retain(|handle| !handle.is_finished());
+                if completed.load(Ordering::Relaxed) >= requests.len() {
+                    break;
+                }
+
+                let unclaimed = requests.len()
+                    - next_request.load(Ordering::Relaxed).min(requests.len());
+                if !spawning_exhausted
+                    && workers.len() < EXTRACT_BATCH_MAX_WORKERS
+                    && unclaimed > workers.len()
+                {
+                    match std::thread::Builder::new()
+                        .name("extract-batch-worker".to_string())
+                        .stack_size(EXTRACT_BATCH_WORKER_STACK_BYTES)
+                        .spawn_scoped(scope, || {
+                            serve_batch_requests(
+                                &requests,
+                                &directory_gate,
+                                &next_request,
+                                &completed,
+                                &client_gone,
+                            );
+                        })
+                    {
+                        Ok(handle) => workers.push(handle),
+                        Err(error) => {
+                            // Creating one more thread failed (the same
+                            // exhausted state that raises R6016 inside Shell
+                            // handler DLLs). Live workers keep draining the
+                            // queue; give up on further growth only.
+                            eprintln!("batch worker spawn failed: {error}");
+                            spawning_exhausted = true;
+                        }
+                    }
+                }
+
+                if workers.is_empty() {
+                    if spawning_exhausted {
+                        serve_batch_requests(
+                            &requests,
+                            &directory_gate,
+                            &next_request,
+                            &completed,
+                            &client_gone,
+                        );
                         break;
                     }
 
-                    let request = &requests[index];
-                    let directory_guard = if request.path.is_dir() {
-                        Some(
-                            directory_gate
-                                .lock()
-                                .unwrap_or_else(|poisoned| poisoned.into_inner()),
-                        )
-                    } else {
-                        None
-                    };
-                    let payload =
-                        extract_shell_image_payload(&request.path, request.size, request.mode);
-                    drop(directory_guard);
-                    let frame = match payload {
-                        Ok(bytes) => encode_batch_frame(index as u32, 0, &bytes),
-                        Err(error) => {
-                            eprintln!("batch extract {index} failed: {error}");
-                            encode_batch_frame(index as u32, 1, &[])
-                        }
-                    };
-                    if write_batch_frame(&frame).is_err() {
-                        // The client is gone; remaining frames are moot.
-                        return;
-                    }
-                });
+                    // A spawn is still allowed; the queue check above starts
+                    // the first worker on the next pass through the loop.
+                    // The tick keeps this corner from ever spinning hot.
+                    std::thread::sleep(EXTRACT_BATCH_RAMP_POLL);
+                    continue;
+                }
+
+                std::thread::sleep(EXTRACT_BATCH_RAMP_POLL);
             }
         });
 
         Ok(0)
+    }
+
+    /// Claims requests from the shared index counter until the manifest is
+    /// exhausted, serializing directory requests on `directory_gate` and
+    /// reporting progress through `completed` so the supervisor can decide
+    /// when another worker is useful and when the whole batch is done.
+    fn serve_batch_requests(
+        requests: &[BatchExtractRequest],
+        directory_gate: &Mutex<()>,
+        next_request: &AtomicUsize,
+        completed: &AtomicUsize,
+        client_gone: &AtomicBool,
+    ) {
+        loop {
+            let index = next_request.fetch_add(1, Ordering::Relaxed);
+            if index >= requests.len() {
+                break;
+            }
+
+            let request = &requests[index];
+            let directory_guard = if request.path.is_dir() {
+                Some(
+                    directory_gate
+                        .lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner()),
+                )
+            } else {
+                None
+            };
+            let payload =
+                extract_shell_image_payload(&request.path, request.size, request.mode);
+            drop(directory_guard);
+            let frame = match payload {
+                Ok(bytes) => encode_batch_frame(index as u32, 0, &bytes),
+                Err(error) => {
+                    eprintln!("batch extract {index} failed: {error}");
+                    encode_batch_frame(index as u32, 1, &[])
+                }
+            };
+            if write_batch_frame(&frame).is_err() {
+                // The client is gone; remaining frames are moot.
+                client_gone.store(true, Ordering::Relaxed);
+                return;
+            }
+            completed.fetch_add(1, Ordering::Relaxed);
+        }
     }
 
     fn read_batch_manifest(input: &mut impl BufRead) -> Result<Vec<BatchExtractRequest>, String> {
@@ -1358,18 +1500,28 @@ mod windows_proxy {
         screen_x: i32,
         screen_y: i32,
         dark: bool,
+        rename_label: Option<&str>,
     ) -> Result<i32, String> {
         apply_per_monitor_dpi_awareness();
         set_process_menu_theme(dark);
         let _com_guard = initialize_com()?;
         let owner = create_context_menu_window()?;
-        run_menu_on_owner(owner.0, path, screen_x, screen_y, dark, b"ready\n")
+        run_menu_on_owner(
+            owner.0,
+            path,
+            screen_x,
+            screen_y,
+            dark,
+            b"ready\n",
+            rename_label,
+        )
     }
 
     /// Builds, shows, and invokes the Shell context menu for one item on an
     /// already-created owner window. `announce` is written to stdout right
     /// before the menu opens (the one-shot mode handshakes with "ready", the
     /// server mode reports "shown"); every earlier failure returns Err.
+    /// `rename_label`, when present, appends the host-owned rename entry.
     fn run_menu_on_owner(
         owner: HWND,
         path: &Path,
@@ -1377,6 +1529,7 @@ mod windows_proxy {
         screen_y: i32,
         dark: bool,
         announce: &[u8],
+        rename_label: Option<&str>,
     ) -> Result<i32, String> {
         if !path.exists() {
             return Err("Shell context menu source does not exist".to_string());
@@ -1418,6 +1571,8 @@ mod windows_proxy {
         query_result
             .ok()
             .map_err(|error| format!("Shell menu population failed: {error}"))?;
+        insert_host_rename_item(&context_menu, menu.0, rename_label)?;
+        LAST_INVOKE_FAILURE_HR.store(0, Ordering::Relaxed);
 
         ACTIVE_CONTEXT_MENU.with(|active| {
             *active.borrow_mut() = message_handler;
@@ -1466,6 +1621,11 @@ mod windows_proxy {
         let _ = unsafe { PostMessageW(Some(owner), WM_NULL, WPARAM(0), LPARAM(0)) };
         if selected == 0 {
             return Ok(CONTEXT_MENU_EXIT_CANCELLED);
+        }
+        if selected >= CONTEXT_MENU_CUSTOM_COMMAND_FIRST {
+            // Host-owned command (rename today). The host executes it with its
+            // own view-host pipeline; nothing to invoke on the Shell side.
+            return Ok(CONTEXT_MENU_EXIT_CUSTOM_COMMAND);
         }
         if selected < CONTEXT_MENU_FIRST_COMMAND_ID {
             return Err("Shell returned an invalid menu command".to_string());
@@ -1527,18 +1687,237 @@ mod windows_proxy {
         // CMINVOKECOMMANDINFO prefix the interface expects; numeric lpVerb
         // offsets are the documented IContextMenu ABI and the structure lives
         // through the call.
-        unsafe {
+        if let Err(error) = unsafe {
             context_menu.InvokeCommand(
                 (&invoke_info as *const CMINVOKECOMMANDINFOEX).cast(),
             )
+        } {
+            // A refused command is a classified outcome, not a proxy failure:
+            // the exit code lets the host say "unsupported"/"cancelled"/
+            // "permission" instead of a generic "did not complete", and the
+            // HRESULT rides along in the server result line.
+            let hresult = error.code().0 as u32;
+            LAST_INVOKE_FAILURE_HR.store(hresult, Ordering::Relaxed);
+            eprintln!("Shell command invocation failed: {error} (hr=0x{hresult:08X})");
+            return Ok(classify_invoke_failure(hresult));
         }
-        .map_err(|error| format!("Shell command invocation failed: {error}"))?;
 
         // Verbs that return before finishing (posted-message completion, STA
         // callbacks, dialogs parented to the owner) need a pumping thread; the
         // grace window lets that work drain instead of dying with the round.
         pump_messages(CONTEXT_MENU_INVOKE_GRACE);
         Ok(CONTEXT_MENU_EXIT_INVOKED)
+    }
+
+    /// Inserts the host-owned "rename" entry into a populated Shell menu,
+    /// directly above the Shell's Properties entry when that verb can be
+    /// located, so the layout matches Explorer's (... delete, rename,
+    /// ---, Properties). Falls back to appending at the end when Properties
+    /// cannot be identified.
+    fn insert_host_rename_item(
+        context_menu: &IContextMenu,
+        menu: HMENU,
+        rename_label: Option<&str>,
+    ) -> Result<(), String> {
+        insert_host_rename_item_with_verb_probe(menu, rename_label, |command_id| {
+            shell_menu_item_verb(context_menu, command_id)
+        })
+    }
+
+    /// Verb probe for a populated Shell menu command id. GCS_VERBW is the
+    /// documented wide-verb query and works on every shell that implements
+    /// IContextMenu; handlers that do not implement it simply fail, which the
+    /// caller treats as "unknown item".
+    fn shell_menu_item_verb(context_menu: &IContextMenu, command_id: u32) -> Option<String> {
+        if command_id < CONTEXT_MENU_FIRST_COMMAND_ID || command_id > CONTEXT_MENU_LAST_COMMAND_ID
+        {
+            return None;
+        }
+
+        let mut buffer = [0u16; 64];
+        // SAFETY: The buffer outlives the call; GCS_VERBW writes wide
+        // characters through the byte-typed parameter, which is the documented
+        // ABI for the wide variant.
+        let queried = unsafe {
+            context_menu.GetCommandString(
+                (command_id - CONTEXT_MENU_FIRST_COMMAND_ID) as usize,
+                GCS_VERBW,
+                None,
+                PSTR(buffer.as_mut_ptr().cast()),
+                buffer.len() as u32,
+            )
+        };
+        if queried.is_err() {
+            return None;
+        }
+
+        let length = buffer
+            .iter()
+            .position(|&wide| wide == 0)
+            .unwrap_or(buffer.len());
+        Some(String::from_utf16_lossy(&buffer[..length]))
+    }
+
+    fn insert_host_rename_item_with_verb_probe(
+        menu: HMENU,
+        rename_label: Option<&str>,
+        verb_of_command_id: impl Fn(u32) -> Option<String>,
+    ) -> Result<(), String> {
+        let Some(label) = rename_label.map(str::trim) else {
+            return Ok(());
+        };
+        if label.is_empty() || label.len() > CONTEXT_MENU_CUSTOM_LABEL_MAX_LEN {
+            return Ok(());
+        }
+
+        if let Some(index) = find_properties_item_index(menu, &verb_of_command_id) {
+            // Explorer closes the edit group with a separator before
+            // Properties; joining that group keeps the native layout instead
+            // of stacking rename directly beneath Properties.
+            let insert_at = if index > 0 && menu_item_is_separator(menu, index - 1) {
+                index - 1
+            } else {
+                index
+            };
+            let mut label_buffer: Vec<u16> =
+                label.encode_utf16().chain(std::iter::once(0)).collect();
+            let item = MENUITEMINFOW {
+                cbSize: size_of::<MENUITEMINFOW>() as u32,
+                fMask: MIIM_ID | MIIM_STRING | MIIM_FTYPE,
+                fType: MFT_STRING,
+                wID: CONTEXT_MENU_CUSTOM_RENAME_COMMAND_ID,
+                cch: (label_buffer.len().saturating_sub(1)) as u32,
+                dwTypeData: PWSTR(label_buffer.as_mut_ptr()),
+                ..Default::default()
+            };
+            // SAFETY: The info struct and label buffer stay alive for the call
+            // and the index came from this same menu's item count.
+            unsafe { InsertMenuItemW(menu, insert_at, true, &item) }
+                .map_err(|error| format!("Host menu rename insert failed: {error}"))?;
+            return Ok(());
+        }
+
+        // Properties could not be identified (a localized or minimal handler
+        // that fails the verb probe, or a menu without it): keep the previous
+        // end-of-menu placement.
+        append_host_rename_item(menu, Some(label))
+    }
+
+    fn find_properties_item_index(
+        menu: HMENU,
+        verb_of_command_id: &dyn Fn(u32) -> Option<String>,
+    ) -> Option<u32> {
+        let count = unsafe { GetMenuItemCount(Some(menu)) };
+        if count <= 0 {
+            return None;
+        }
+
+        for index in 0..count as u32 {
+            let mut info = MENUITEMINFOW {
+                cbSize: size_of::<MENUITEMINFOW>() as u32,
+                fMask: MIIM_ID,
+                ..Default::default()
+            };
+            // SAFETY: Read-only query against a valid index of this menu.
+            if !unsafe { GetMenuItemInfoW(menu, index, true, &mut info) }.is_ok() {
+                continue;
+            }
+
+            let is_properties = verb_of_command_id(info.wID)
+                .is_some_and(|verb| verb.eq_ignore_ascii_case("properties"));
+            if is_properties {
+                return Some(index);
+            }
+        }
+
+        None
+    }
+
+    fn menu_item_is_separator(menu: HMENU, index: u32) -> bool {
+        let mut info = MENUITEMINFOW {
+            cbSize: size_of::<MENUITEMINFOW>() as u32,
+            fMask: MIIM_FTYPE,
+            ..Default::default()
+        };
+        // SAFETY: Read-only query against a valid index of this menu.
+        unsafe { GetMenuItemInfoW(menu, index, true, &mut info) }.is_ok()
+            && info.fType == MFT_SEPARATOR
+    }
+
+    /// Appends the host-owned "rename" entry to a populated Shell menu. The id
+    /// sits above the range offered to the Shell handlers, so it can never
+    /// collide. A plain text item matches the classic Win10 menu look (no
+    /// icon, no owner-draw); the trailing separator is skipped when the Shell
+    /// menu already ends with one, so no blank gap is doubled.
+    fn append_host_rename_item(
+        menu: HMENU,
+        rename_label: Option<&str>,
+    ) -> Result<(), String> {
+        let Some(label) = rename_label.map(str::trim) else {
+            return Ok(());
+        };
+        if label.is_empty() || label.len() > CONTEXT_MENU_CUSTOM_LABEL_MAX_LEN {
+            return Ok(());
+        }
+
+        let mut separator_needed = true;
+        // SAFETY: Read-only menu query; the info struct is the documented
+        // MENUITEMINFOW for the last position.
+        let item_count = unsafe { GetMenuItemCount(Some(menu)) };
+        if item_count > 0 {
+            let mut info = MENUITEMINFOW {
+                cbSize: size_of::<MENUITEMINFOW>() as u32,
+                fMask: MIIM_FTYPE,
+                ..Default::default()
+            };
+            // SAFETY: The last item index is valid because item_count > 0 and
+            // the menu is not concurrently modified on this STA thread.
+            let query = unsafe {
+                GetMenuItemInfoW(menu, (item_count - 1) as u32, true, &mut info)
+            };
+            if query.is_ok() && info.fType == MFT_SEPARATOR {
+                separator_needed = false;
+            }
+        }
+
+        if separator_needed {
+            // SAFETY: Appending a separator cannot affect Shell-owned ids.
+            unsafe { AppendMenuW(menu, MF_SEPARATOR, 0, PCWSTR::null()) }
+                .map_err(|error| format!("Host menu separator append failed: {error}"))?;
+        }
+
+        let wide: Vec<u16> = label.encode_utf16().chain(std::iter::once(0)).collect();
+        // SAFETY: The label buffer is NUL-terminated and outlives the append.
+        unsafe {
+            AppendMenuW(
+                menu,
+                Default::default(),
+                CONTEXT_MENU_CUSTOM_RENAME_COMMAND_ID as usize,
+                PCWSTR(wide.as_ptr()),
+            )
+        }
+        .map_err(|error| format!("Host menu rename append failed: {error}"))?;
+        Ok(())
+    }
+
+    /// Maps a failed InvokeCommand HRESULT onto the protocol's classified
+    /// exit codes. E_FAIL is the documented "handler does not own this
+    /// command" answer; cancelled and permission families get their own codes
+    /// so the host can show a specific message instead of a generic failure.
+    fn classify_invoke_failure(hresult: u32) -> i32 {
+        const E_FAIL: u32 = 0x8000_4005;
+        const E_ABORT: u32 = 0x8000_4004;
+        const ERROR_CANCELLED_AS_HRESULT: u32 = 0x8007_007A;
+        const E_ACCESSDENIED: u32 = 0x8007_0005;
+        const ERROR_ELEVATION_REQUIRED_AS_HRESULT: u32 = 0x8007_02E4;
+        match hresult {
+            E_FAIL => CONTEXT_MENU_EXIT_FAILED_UNSUPPORTED,
+            E_ABORT | ERROR_CANCELLED_AS_HRESULT => CONTEXT_MENU_EXIT_FAILED_CANCELLED,
+            E_ACCESSDENIED | ERROR_ELEVATION_REQUIRED_AS_HRESULT => {
+                CONTEXT_MENU_EXIT_FAILED_ACCESS_DENIED
+            }
+            _ => CONTEXT_MENU_EXIT_FAILED,
+        }
     }
 
     /// Long-lived context-menu server: one STA apartment and owner window are
@@ -1615,7 +1994,7 @@ mod windows_proxy {
                 continue;
             };
             let result_code = match parse_menu_command(payload) {
-                Ok((path, screen_x, screen_y, dark)) => {
+                Ok((path, screen_x, screen_y, dark, rename_label)) => {
                     match run_menu_on_owner(
                         owner.0,
                         &path,
@@ -1623,6 +2002,7 @@ mod windows_proxy {
                         screen_y,
                         dark,
                         b"shown\n",
+                        rename_label.as_deref(),
                     ) {
                         Ok(code) => code,
                         Err(error) => {
@@ -1636,27 +2016,36 @@ mod windows_proxy {
                     CONTEXT_MENU_EXIT_FAILED
                 }
             };
-            write_stdout(
-                format!(
-                    "result {result_code} src={} fg={} hook={}\n",
-                    if MENU_CANCELLED_BY_OUTSIDE_CLICK.load(Ordering::Relaxed) {
-                        "outside-click"
-                    } else {
-                        "menu"
-                    },
-                    if MENU_FOREGROUND_OK.load(Ordering::Relaxed) {
-                        1
-                    } else {
-                        0
-                    },
-                    if MENU_HOOK_INSTALLED.load(Ordering::Relaxed) {
-                        1
-                    } else {
-                        0
-                    },
-                )
-                .as_bytes(),
-            )?;
+            let mut detail = format!(
+                "result {result_code} src={} fg={} hook={}",
+                if MENU_CANCELLED_BY_OUTSIDE_CLICK.load(Ordering::Relaxed) {
+                    "outside-click"
+                } else {
+                    "menu"
+                },
+                if MENU_FOREGROUND_OK.load(Ordering::Relaxed) {
+                    1
+                } else {
+                    0
+                },
+                if MENU_HOOK_INSTALLED.load(Ordering::Relaxed) {
+                    1
+                } else {
+                    0
+                },
+            );
+            if result_code == CONTEXT_MENU_EXIT_CUSTOM_COMMAND {
+                detail.push_str(" custom=rename");
+            }
+            let invoke_hr = LAST_INVOKE_FAILURE_HR.load(Ordering::Relaxed);
+            if invoke_hr != 0 {
+                detail.push_str(&format!(" hr=0x{invoke_hr:08X}"));
+            }
+            // The host reads this with a line reader; without the terminating
+            // newline the round stalls until the pipe EOFs or the 10-minute
+            // interaction budget expires, swallowing every later right-click.
+            detail.push('\n');
+            write_stdout(detail.as_bytes())?;
             menus_served += 1;
             if result_code == CONTEXT_MENU_EXIT_FAILED {
                 consecutive_failures += 1;
@@ -1755,8 +2144,12 @@ mod windows_proxy {
         }
     }
 
-    fn parse_menu_command(payload: &str) -> Result<(PathBuf, i32, i32, bool), String> {
-        let mut fields = payload.splitn(4, '\t');
+    fn parse_menu_command(
+        payload: &str,
+    ) -> Result<(PathBuf, i32, i32, bool, Option<String>), String> {
+        // "x\ty\tdark\tpath[\trename-label]". Tabs are invalid in Windows
+        // paths, so splitting on the next tab cannot truncate a real path.
+        let mut fields = payload.splitn(5, '\t');
         let screen_x = fields
             .next()
             .and_then(|value| value.parse::<i32>().ok())
@@ -1773,7 +2166,11 @@ mod windows_proxy {
             .next()
             .filter(|value| !value.is_empty())
             .ok_or("missing context menu path")?;
-        Ok((PathBuf::from(path), screen_x, screen_y, dark))
+        let rename_label = fields
+            .next()
+            .map(|value| value.to_string())
+            .filter(|value| !value.trim().is_empty());
+        Ok((PathBuf::from(path), screen_x, screen_y, dark, rename_label))
     }
 
     fn encode_wide_path(path: &Path) -> Vec<u16> {
@@ -2064,6 +2461,7 @@ mod windows_proxy {
                     screen_x,
                     screen_y,
                     dark,
+                    ..
                 } => {
                     assert_eq!(path, PathBuf::from(r"C:\Desk Box"));
                     assert_eq!(screen_x, -120);
@@ -2147,7 +2545,7 @@ mod windows_proxy {
 
         #[test]
         fn menu_command_payload_accepts_signed_coordinates_and_spaced_paths() {
-            let (path, screen_x, screen_y, dark) =
+            let (path, screen_x, screen_y, dark, rename_label) =
                 parse_menu_command("120\t-845\tdark\tC:\\Desk Box\\my file.txt")
                     .expect("menu command payload");
 
@@ -2155,6 +2553,30 @@ mod windows_proxy {
             assert_eq!(screen_x, 120);
             assert_eq!(screen_y, -845);
             assert!(dark);
+            assert!(rename_label.is_none(), "no label field means no custom item");
+        }
+
+        #[test]
+        fn menu_command_payload_accepts_optional_rename_label() {
+            let (path, screen_x, screen_y, dark, rename_label) = parse_menu_command(
+                "120\t-845\tlight\tC:\\file.txt\t重命名 (&R)",
+            )
+            .expect("menu command payload with label");
+
+            assert_eq!(path, PathBuf::from(r"C:\file.txt"));
+            assert_eq!(screen_x, 120);
+            assert_eq!(screen_y, -845);
+            assert!(!dark);
+            assert_eq!(
+                rename_label.as_deref(),
+                Some("重命名 (&R)"),
+                "label may be any localized text"
+            );
+
+            let (_, _, _, _, blank) =
+                parse_menu_command("120\t-845\tlight\tC:\\file.txt\t   ")
+                    .expect("whitespace-only label still parses");
+            assert!(blank.is_none(), "blank label means no custom item");
         }
 
         #[test]
@@ -2163,6 +2585,226 @@ mod windows_proxy {
             assert!(parse_menu_command("x\t845\tlight\tC:\\file").is_err());
             assert!(parse_menu_command("120\t845\tlight\t").is_err());
         }
+
+        #[test]
+        fn one_shot_context_menu_request_accepts_optional_rename_label() {
+            let request = parse_request_from(
+                [
+                    "--context-menu",
+                    r"C:\file.txt",
+                    "120",
+                    "-845",
+                    "dark",
+                    "Rename",
+                ]
+                .into_iter()
+                .map(OsString::from),
+            )
+            .expect("one-shot request with label");
+
+            match request {
+                ProxyRequest::ContextMenu {
+                    path,
+                    screen_x,
+                    screen_y,
+                    dark,
+                    rename_label,
+                } => {
+                    assert_eq!(path, PathBuf::from(r"C:\file.txt"));
+                    assert_eq!(screen_x, 120);
+                    assert_eq!(screen_y, -845);
+                    assert!(dark);
+                    assert_eq!(rename_label.as_deref(), Some("Rename"));
+                }
+                _ => panic!("unexpected proxy request"),
+            }
+
+            let unlabeled = parse_request_from(
+                ["--context-menu", r"C:\file.txt", "120", "-845", "light"]
+                    .into_iter()
+                    .map(OsString::from),
+            )
+            .expect("one-shot request without label");
+            match unlabeled {
+                ProxyRequest::ContextMenu { rename_label, .. } => {
+                    assert!(rename_label.is_none());
+                }
+                _ => panic!("unexpected proxy request"),
+            }
+
+            let error = parse_request_from(
+                [
+                    "--context-menu",
+                    r"C:\file.txt",
+                    "120",
+                    "-845",
+                    "light",
+                    "Rename",
+                    "extra",
+                ]
+                .into_iter()
+                .map(OsString::from),
+            )
+            .expect_err("extra arguments must still be rejected");
+            assert!(error.contains("unexpected extra arguments"));
+        }
+
+        #[test]
+        fn invoke_command_failures_are_classified_into_protocol_exit_codes() {
+            assert_eq!(
+                classify_invoke_failure(0x8000_4005),
+                CONTEXT_MENU_EXIT_FAILED_UNSUPPORTED,
+                "E_FAIL is the documented unrecognized-verb answer"
+            );
+            assert_eq!(classify_invoke_failure(0x8000_4004), CONTEXT_MENU_EXIT_FAILED_CANCELLED);
+            assert_eq!(classify_invoke_failure(0x8007_007A), CONTEXT_MENU_EXIT_FAILED_CANCELLED);
+            assert_eq!(classify_invoke_failure(0x8007_0005), CONTEXT_MENU_EXIT_FAILED_ACCESS_DENIED);
+            assert_eq!(
+                classify_invoke_failure(0x8007_02E4),
+                CONTEXT_MENU_EXIT_FAILED_ACCESS_DENIED,
+                "elevation required reads as a permission problem"
+            );
+            assert_eq!(classify_invoke_failure(0xC000_0005), CONTEXT_MENU_EXIT_FAILED);
+            assert_eq!(classify_invoke_failure(0x8007_0057), CONTEXT_MENU_EXIT_FAILED);
+            // The custom command id must stay outside the Shell handler range
+            // so a handler can never mint it.
+            assert!(CONTEXT_MENU_CUSTOM_RENAME_COMMAND_ID > CONTEXT_MENU_LAST_COMMAND_ID);
+            assert_eq!(CONTEXT_MENU_EXIT_CUSTOM_COMMAND, 5);
+        }
+
+        #[test]
+        fn host_rename_item_inserts_above_properties_joining_the_edit_group() {
+            let menu = MenuGuard(unsafe { CreatePopupMenu() }.expect("popup menu"));
+            let mut push_item = |label: &str, id: u32| {
+                let wide: Vec<u16> = label.encode_utf16().chain(std::iter::once(0)).collect();
+                unsafe {
+                    AppendMenuW(menu.0, Default::default(), id as usize, PCWSTR(wide.as_ptr()))
+                }
+                .expect("seed item");
+            };
+            unsafe {
+                AppendMenuW(menu.0, MF_SEPARATOR, 0, PCWSTR::null())
+                    .expect("seed separator");
+            }
+            push_item("Cut", 1);
+            push_item("Copy", 2);
+            unsafe {
+                AppendMenuW(menu.0, MF_SEPARATOR, 0, PCWSTR::null())
+                    .expect("separator before properties");
+            }
+            push_item("Properties", 3);
+
+            // Verb probe answers only for the Properties command id.
+            insert_host_rename_item_with_verb_probe(menu.0, Some("Rename"), |command_id| {
+                (command_id == 3).then(|| "properties".to_string())
+            })
+            .expect("rename inserted");
+
+            let count = unsafe { GetMenuItemCount(Some(menu.0)) };
+            assert_eq!(count, 6, "rename joined without adding items");
+            let mut info = MENUITEMINFOW {
+                cbSize: size_of::<MENUITEMINFOW>() as u32,
+                fMask: MIIM_ID,
+                ..Default::default()
+            };
+            // SAFETY: Read-only queries over valid indexes of this menu.
+            unsafe { GetMenuItemInfoW(menu.0, 3, true, &mut info) }.expect("item at 3");
+            assert_eq!(
+                info.wID, CONTEXT_MENU_CUSTOM_RENAME_COMMAND_ID,
+                "rename sits above the separator that closes the edit group"
+            );
+            unsafe { GetMenuItemInfoW(menu.0, 5, true, &mut info) }.expect("item at 5");
+            assert_eq!(info.wID, 3, "properties stays last");
+        }
+
+        #[test]
+        fn host_rename_item_inserts_directly_above_properties_without_separator() {
+            let menu = MenuGuard(unsafe { CreatePopupMenu() }.expect("popup menu"));
+            let wide: Vec<u16> = "Properties".encode_utf16().chain(std::iter::once(0)).collect();
+            unsafe {
+                AppendMenuW(menu.0, Default::default(), 7, PCWSTR(wide.as_ptr()))
+                    .expect("seed properties");
+            }
+
+            insert_host_rename_item_with_verb_probe(menu.0, Some("Rename"), |command_id| {
+                (command_id == 7).then(|| "Properties".to_string())
+            })
+            .expect("rename inserted");
+
+            let mut info = MENUITEMINFOW {
+                cbSize: size_of::<MENUITEMINFOW>() as u32,
+                fMask: MIIM_ID,
+                ..Default::default()
+            };
+            // SAFETY: Read-only query over a valid index of this menu.
+            unsafe { GetMenuItemInfoW(menu.0, 0, true, &mut info) }.expect("item at 0");
+            assert_eq!(
+                info.wID, CONTEXT_MENU_CUSTOM_RENAME_COMMAND_ID,
+                "rename lands directly above properties when no separator divides them"
+            );
+        }
+
+        #[test]
+        fn host_rename_item_falls_back_to_append_when_verb_probe_fails() {
+            let menu = MenuGuard(unsafe { CreatePopupMenu() }.expect("popup menu"));
+            let wide: Vec<u16> = "Open".encode_utf16().chain(std::iter::once(0)).collect();
+            unsafe {
+                AppendMenuW(menu.0, Default::default(), 1, PCWSTR(wide.as_ptr()))
+                    .expect("seed item");
+            }
+
+            insert_host_rename_item_with_verb_probe(menu.0, Some("Rename"), |_| None)
+                .expect("fallback append");
+            let count = unsafe { GetMenuItemCount(Some(menu.0)) };
+            assert_eq!(count, 3, "separator + rename appended at the end");
+
+            let mut info = MENUITEMINFOW {
+                cbSize: size_of::<MENUITEMINFOW>() as u32,
+                fMask: MIIM_ID,
+                ..Default::default()
+            };
+            // SAFETY: Read-only query over a valid index of this menu.
+            unsafe { GetMenuItemInfoW(menu.0, 2, true, &mut info) }.expect("item at 2");
+            assert_eq!(info.wID, CONTEXT_MENU_CUSTOM_RENAME_COMMAND_ID);
+        }
+
+        #[test]
+        fn host_rename_item_appends_after_shell_items_with_separator_guard() {
+            let menu = MenuGuard(unsafe { CreatePopupMenu() }.expect("popup menu"));
+            // Two plain Shell-style items: separator logic must see the last
+            // one is not a separator and add its own.
+            unsafe {
+                AppendMenuW(menu.0, MF_SEPARATOR, 0, PCWSTR::null())
+                    .expect("seed separator");
+                let item: Vec<u16> = "Open".encode_utf16().chain(std::iter::once(0)).collect();
+                AppendMenuW(menu.0, Default::default(), 1, PCWSTR(item.as_ptr()))
+                    .expect("seed item");
+            }
+
+            append_host_rename_item(menu.0, Some("Rename"))
+                .expect("rename item appended");
+            let count = unsafe { GetMenuItemCount(Some(menu.0)) };
+            assert_eq!(count, 4, "separator + rename appended after two items");
+
+            // Trailing separator already present: no second separator added.
+            let menu2 = MenuGuard(unsafe { CreatePopupMenu() }.expect("popup menu"));
+            unsafe {
+                AppendMenuW(menu2.0, MF_SEPARATOR, 0, PCWSTR::null())
+                    .expect("seed trailing separator");
+            }
+            append_host_rename_item(menu2.0, Some("Rename"))
+                .expect("rename item appended");
+            let count2 = unsafe { GetMenuItemCount(Some(menu2.0)) };
+            assert_eq!(count2, 2, "existing trailing separator is reused");
+
+            // No label: the menu must be untouched.
+            let menu3 = MenuGuard(unsafe { CreatePopupMenu() }.expect("popup menu"));
+            append_host_rename_item(menu3.0, None).expect("no label is a no-op");
+            append_host_rename_item(menu3.0, Some("   ")).expect("blank label is a no-op");
+            let count3 = unsafe { GetMenuItemCount(Some(menu3.0)) };
+            assert_eq!(count3, 0, "no custom item without a label");
+        }
+
 
         #[test]
         fn icon_with_overlays_request_has_a_distinct_extraction_mode() {

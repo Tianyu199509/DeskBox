@@ -235,9 +235,16 @@
                 <Setter Property="Height" Value="28"/>
                 <Setter Property="MinHeight" Value="28"/>
                 <Setter Property="CornerRadius" Value="2"/>
-                <Setter Property="IsTabStop" Value="False"/>
+                <!-- Keyboard-reachable but mouse-quiet: IsTabStop opens the
+                     tab chain to the headers (Enter/Space activate natively),
+                     while AllowFocusOnInteraction stays False so a mouse sort
+                     click never steals focus from the search box — typing
+                     after a click must keep flowing into the query. Character
+                     input landing on a focused header is redirected by
+                     RootGrid_KeyDown's default branch. -->
+                <Setter Property="IsTabStop" Value="True"/>
                 <Setter Property="AllowFocusOnInteraction" Value="False"/>
-                <Setter Property="UseSystemFocusVisuals" Value="False"/>
+                <Setter Property="UseSystemFocusVisuals" Value="True"/>
                 <Setter Property="HorizontalAlignment" Value="Stretch"/>
                 <Setter Property="HorizontalContentAlignment" Value="Left"/>
                 <Setter Property="VerticalContentAlignment" Value="Center"/>
@@ -271,6 +278,66 @@
                                 <Border x:Name="InteractionSurface"
                                         HorizontalAlignment="Left"
                                         VerticalAlignment="Stretch"
+                                        Background="{TemplateBinding Background}"
+                                        CornerRadius="{TemplateBinding CornerRadius}">
+                                    <ContentPresenter
+                                        Padding="{TemplateBinding Padding}"
+                                        Content="{TemplateBinding Content}"
+                                        HorizontalContentAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                        VerticalContentAlignment="{TemplateBinding VerticalContentAlignment}"/>
+                                </Border>
+                            </Grid>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
+
+            <!--
+                Favorites / recent query rows. Native Button so the rows gain
+                keyboard activation (Enter/Space), UIA Invoke semantics and a
+                focus visual; the template keeps the previous hand-built look
+                (subtle fill, radius 7, no border) and adds only the same
+                tertiary hover fill the sort headers use. The accessible name
+                comes from the bound Title on the Button itself.
+            -->
+            <Style x:Key="RecItemButtonStyle" TargetType="Button">
+                <Setter Property="Padding" Value="8,7"/>
+                <Setter Property="Margin" Value="0,0,0,4"/>
+                <Setter Property="CornerRadius" Value="8"/>
+                <Setter Property="Background" Value="{ThemeResource SubtleFillColorSecondaryBrush}"/>
+                <Setter Property="BorderThickness" Value="0"/>
+                <Setter Property="HorizontalAlignment" Value="Stretch"/>
+                <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+                <Setter Property="VerticalContentAlignment" Value="Center"/>
+                <Setter Property="UseSystemFocusVisuals" Value="True"/>
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="Button">
+                            <Grid Background="Transparent">
+                                <VisualStateManager.VisualStateGroups>
+                                    <VisualStateGroup x:Name="CommonStates">
+                                        <VisualState x:Name="Normal"/>
+                                        <VisualState x:Name="PointerOver">
+                                            <Storyboard>
+                                                <ObjectAnimationUsingKeyFrames Storyboard.TargetName="RecItemSurface"
+                                                                               Storyboard.TargetProperty="Background">
+                                                    <DiscreteObjectKeyFrame KeyTime="0"
+                                                                            Value="{ThemeResource SubtleFillColorSecondaryBrush}"/>
+                                                </ObjectAnimationUsingKeyFrames>
+                                            </Storyboard>
+                                        </VisualState>
+                                        <VisualState x:Name="Pressed">
+                                            <Storyboard>
+                                                <ObjectAnimationUsingKeyFrames Storyboard.TargetName="RecItemSurface"
+                                                                               Storyboard.TargetProperty="Background">
+                                                    <DiscreteObjectKeyFrame KeyTime="0"
+                                                                            Value="{ThemeResource SubtleFillColorTertiaryBrush}"/>
+                                                </ObjectAnimationUsingKeyFrames>
+                                            </Storyboard>
+                                        </VisualState>
+                                    </VisualStateGroup>
+                                </VisualStateManager.VisualStateGroups>
+                                <Border x:Name="RecItemSurface"
                                         Background="{TemplateBinding Background}"
                                         CornerRadius="{TemplateBinding CornerRadius}">
                                     <ContentPresenter
@@ -322,7 +389,7 @@
                         typed text sit visibly above the box's optical center. Letting the box
                         collapse to the text height lets VerticalAlignment=Center do its job.
                     -->
-                    <TextBox x:Name="SearchTextBox" Grid.Column="1"
+                    <TextBox svc:Localized.AutomationNameKey="Search.Placeholder" x:Name="SearchTextBox" Grid.Column="1"
                              BorderThickness="0"
                              Background="Transparent"
                              FontSize="15"
@@ -357,7 +424,7 @@
 
                     <!-- Keycap-style hotkey badge. The native TextBox clear button
                          is the only clear affordance once text is present. -->
-                    <Border x:Name="HotkeyHintBadge" Grid.Column="2" Padding="7,3,7,4" CornerRadius="5"
+                    <Border x:Name="HotkeyHintBadge" Grid.Column="2" Padding="7,3,7,4" CornerRadius="4"
                             Background="{ThemeResource SubtleFillColorSecondaryBrush}"
                             BorderBrush="{ThemeResource ControlStrokeColorDefaultBrush}"
                             BorderThickness="1"
@@ -369,7 +436,7 @@
                 </Grid>
             </Border>
 
-            <Button x:Name="ClosePopupButton" Grid.Column="1"
+            <Button svc:Localized.AutomationNameKey="Common.Close" x:Name="ClosePopupButton" Grid.Column="1"
                     Width="32" Height="32" Padding="0"
                     HorizontalAlignment="Center" VerticalAlignment="Center"
                     Background="Transparent" BorderThickness="0"
@@ -416,7 +483,7 @@
                     <TextBlock x:Name="ResultFilterLabel" FontSize="11.5"
                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                                VerticalAlignment="Center"/>
-                    <ComboBox x:Name="ResultFilterComboBox" MinWidth="130" Height="30"
+                    <ComboBox svc:Localized.AutomationNameKey="Search.Filter.Label" x:Name="ResultFilterComboBox" MinWidth="130" Height="30"
                               FontSize="12" SelectedIndex="0"
                               SelectionChanged="ResultFilterComboBox_SelectionChanged">
                         <ComboBoxItem x:Name="FilterAllItem" Tag="All"/>
@@ -464,7 +531,7 @@
                     <ColumnDefinition Width="110"/>
                 </Grid.ColumnDefinitions>
 
-                <Button x:Name="SortNameHeader" Grid.Column="2"
+                <Button svc:Localized.AutomationNameKey="Search.Sort.Name" x:Name="SortNameHeader" Grid.Column="2"
                         Padding="0,0,8,0" HorizontalContentAlignment="Left"
                         Style="{StaticResource SortHeaderButtonStyle}" Click="SortNameHeader_Click">
                     <StackPanel Orientation="Horizontal">
@@ -476,7 +543,7 @@
                     </StackPanel>
                 </Button>
 
-                <Button x:Name="SortTypeHeader" Grid.Column="3"
+                <Button svc:Localized.AutomationNameKey="Search.Sort.Type" x:Name="SortTypeHeader" Grid.Column="3"
                         Padding="4,0,6,0" HorizontalContentAlignment="Left"
                         Style="{StaticResource SortHeaderButtonStyle}" Click="SortTypeHeader_Click">
                     <StackPanel Orientation="Horizontal">
@@ -488,7 +555,7 @@
                     </StackPanel>
                 </Button>
 
-                <Button x:Name="SortSizeHeader" Grid.Column="4"
+                <Button svc:Localized.AutomationNameKey="Search.Sort.Size" x:Name="SortSizeHeader" Grid.Column="4"
                         Padding="6,0" HorizontalContentAlignment="Left"
                         Style="{StaticResource SortHeaderButtonStyle}" Click="SortSizeHeader_Click">
                     <StackPanel Orientation="Horizontal">
@@ -500,7 +567,7 @@
                     </StackPanel>
                 </Button>
 
-                <Button x:Name="SortDateHeader" Grid.Column="5"
+                <Button svc:Localized.AutomationNameKey="Search.Sort.Date" x:Name="SortDateHeader" Grid.Column="5"
                         Margin="0" Padding="0" HorizontalContentAlignment="Left"
                         Style="{StaticResource SortHeaderButtonStyle}" Click="SortDateHeader_Click">
                     <StackPanel Orientation="Horizontal">
@@ -615,10 +682,10 @@
                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                                VerticalAlignment="Center" TextWrapping="NoWrap"/>
                 </StackPanel>
-                <Border Height="46" CornerRadius="7" Background="{ThemeResource SubtleFillColorSecondaryBrush}"/>
-                <Border Height="46" CornerRadius="7" Background="{ThemeResource SubtleFillColorSecondaryBrush}" Opacity="0.82"/>
-                <Border Height="46" CornerRadius="7" Background="{ThemeResource SubtleFillColorSecondaryBrush}" Opacity="0.64"/>
-                <Border Height="46" CornerRadius="7" Background="{ThemeResource SubtleFillColorSecondaryBrush}" Opacity="0.46"/>
+                <Border Height="46" CornerRadius="8" Background="{ThemeResource SubtleFillColorSecondaryBrush}"/>
+                <Border Height="46" CornerRadius="8" Background="{ThemeResource SubtleFillColorSecondaryBrush}" Opacity="0.82"/>
+                <Border Height="46" CornerRadius="8" Background="{ThemeResource SubtleFillColorSecondaryBrush}" Opacity="0.64"/>
+                <Border Height="46" CornerRadius="8" Background="{ThemeResource SubtleFillColorSecondaryBrush}" Opacity="0.46"/>
             </StackPanel>
 
             <!-- Skeleton placeholder shown while app icons are loading -->
@@ -632,7 +699,7 @@
                     </ItemsRepeater.Layout>
                     <ItemsRepeater.ItemTemplate>
                         <DataTemplate>
-                            <Grid Width="104" Height="92" Padding="8,7" CornerRadius="7">
+                            <Grid Width="104" Height="92" Padding="8,7" CornerRadius="8">
                                 <Grid.RowDefinitions>
                                     <RowDefinition Height="*"/>
                                     <RowDefinition Height="Auto"/>
@@ -663,7 +730,7 @@
                     <ItemsRepeater.ItemTemplate>
                         <DataTemplate x:DataType="models:SearchResultItem">
                             <Grid Width="104" Height="92" Padding="8,7" Margin="0"
-                                  Background="Transparent" CornerRadius="7"
+                                  Background="Transparent" CornerRadius="8"
                                   PointerPressed="RecommendedApp_PointerPressed"
                                   PointerEntered="RecommendedApp_PointerEntered"
                                   PointerExited="RecommendedApp_PointerExited"
@@ -713,7 +780,7 @@
                         
                         <TextBlock x:Name="FavoritesHeaderText" Grid.Column="0" FontSize="12.5" FontWeight="SemiBold"
                                    Foreground="{ThemeResource TextFillColorPrimaryBrush}" VerticalAlignment="Center"/>
-                        <Button x:Name="ClearAllButton" Grid.Column="1" FontSize="11"
+                        <Button svc:Localized.AutomationNameKey="Search.Section.ClearHistory" x:Name="ClearAllButton" Grid.Column="1" FontSize="11"
                                 Padding="8,4" CornerRadius="6"
                                 Background="{ThemeResource ControlFillColorDefaultBrush}"
                                 BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
@@ -731,13 +798,15 @@
                     <ItemsRepeater x:Name="FavoritesRepeater" MaxHeight="140">
                         <ItemsRepeater.ItemTemplate>
                             <DataTemplate x:DataType="models:SearchRecommendationItem">
-                                <Border Padding="8,7" Margin="0,0,0,4" CornerRadius="7" Background="{ThemeResource SubtleFillColorSecondaryBrush}">
-                                    <Grid x:Name="RecItemGrid" PointerPressed="OnRecommendationItem_PointerPressed">
+                                <Button Style="{StaticResource RecItemButtonStyle}"
+                                        AutomationProperties.Name="{x:Bind Title, Mode=OneTime}"
+                                        Click="OnRecommendationItem_Click">
+                                    <Grid>
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="*"/>
                                             <ColumnDefinition Width="Auto"/>
                                         </Grid.ColumnDefinitions>
-                                        
+
                                         <TextBlock Grid.Column="0" Text="{x:Bind Title, Mode=OneTime}" FontSize="13"
                                                    Foreground="{ThemeResource TextFillColorPrimaryBrush}"
                                                    TextTrimming="CharacterEllipsis" VerticalAlignment="Center"/>
@@ -745,7 +814,7 @@
                                                   Foreground="{ThemeResource TextFillColorTertiaryBrush}"
                                                   Margin="8,0,0,0" VerticalAlignment="Center"/>
                                     </Grid>
-                                </Border>
+                                </Button>
                             </DataTemplate>
                         </ItemsRepeater.ItemTemplate>
                     </ItemsRepeater>
@@ -770,7 +839,7 @@
                         
                         <TextBlock x:Name="RecentSearchesHeaderText" Grid.Column="0" FontSize="12.5" FontWeight="SemiBold"
                                    Foreground="{ThemeResource TextFillColorPrimaryBrush}" VerticalAlignment="Center"/>
-                        <Button x:Name="ClearRecentButton" Grid.Column="1" FontSize="11"
+                        <Button svc:Localized.AutomationNameKey="Search.Section.ClearHistory" x:Name="ClearRecentButton" Grid.Column="1" FontSize="11"
                                 Padding="8,4" CornerRadius="6"
                                 Background="{ThemeResource ControlFillColorDefaultBrush}"
                                 BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
@@ -788,13 +857,15 @@
                     <ItemsRepeater x:Name="RecentSearchesRepeater" MaxHeight="140">
                         <ItemsRepeater.ItemTemplate>
                             <DataTemplate x:DataType="models:SearchRecommendationItem">
-                                <Border Padding="8,7" Margin="0,0,0,4" CornerRadius="7" Background="{ThemeResource SubtleFillColorSecondaryBrush}">
-                                    <Grid x:Name="RecItemGrid" PointerPressed="OnRecommendationItem_PointerPressed">
+                                <Button Style="{StaticResource RecItemButtonStyle}"
+                                        AutomationProperties.Name="{x:Bind Title, Mode=OneTime}"
+                                        Click="OnRecommendationItem_Click">
+                                    <Grid>
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="*"/>
                                             <ColumnDefinition Width="Auto"/>
                                         </Grid.ColumnDefinitions>
-                                        
+
                                         <TextBlock Grid.Column="0" Text="{x:Bind Title, Mode=OneTime}" FontSize="13"
                                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                                                    TextTrimming="CharacterEllipsis" VerticalAlignment="Center"/>
@@ -802,7 +873,7 @@
                                                   Foreground="{ThemeResource TextFillColorDisabledBrush}"
                                                   Margin="8,0,0,0" VerticalAlignment="Center"/>
                                     </Grid>
-                                </Border>
+                                </Button>
                             </DataTemplate>
                         </ItemsRepeater.ItemTemplate>
                     </ItemsRepeater>
@@ -828,49 +899,49 @@
             <toolkit:WrapPanel x:Name="SelectionActionBar" Grid.Column="0"
                                Orientation="Horizontal" HorizontalSpacing="6"
                                VerticalSpacing="6" Visibility="Collapsed">
-                <Button x:Name="OpenSelectedButton" Padding="10,5"
+                <Button svc:Localized.AutomationNameKey="Search.Menu.Open" x:Name="OpenSelectedButton" Padding="10,5"
                         Click="OpenSelectedButton_Click">
                     <StackPanel Orientation="Horizontal" Spacing="6">
                         <FontIcon Glyph="&#xE8E5;" FontSize="12"/>
                         <TextBlock x:Name="OpenSelectedLabel"/>
                     </StackPanel>
                 </Button>
-                <Button x:Name="OpenLocationButton" Padding="10,5"
+                <Button svc:Localized.AutomationNameKey="Search.Menu.OpenLocation" x:Name="OpenLocationButton" Padding="10,5"
                         Click="OpenLocationButton_Click">
                     <StackPanel Orientation="Horizontal" Spacing="6">
                         <FontIcon Glyph="&#xE838;" FontSize="12"/>
                         <TextBlock x:Name="OpenLocationLabel"/>
                     </StackPanel>
                 </Button>
-                <Button x:Name="AttachSelectedButton" Padding="10,5"
+                <Button svc:Localized.AutomationNameKey="Search.Menu.AttachToTodo" x:Name="AttachSelectedButton" Padding="10,5"
                         Click="AttachSelectedButton_Click">
                     <StackPanel Orientation="Horizontal" Spacing="6">
                         <FontIcon Glyph="&#xE723;" FontSize="12"/>
                         <TextBlock x:Name="AttachSelectedLabel"/>
                     </StackPanel>
                 </Button>
-                <Button x:Name="SaveSelectedButton" Padding="10,5"
+                <Button svc:Localized.AutomationNameKey="Search.Menu.SaveToNote" x:Name="SaveSelectedButton" Padding="10,5"
                         Click="SaveSelectedButton_Click">
                     <StackPanel Orientation="Horizontal" Spacing="6">
                         <FontIcon Glyph="&#xE70B;" FontSize="12"/>
                         <TextBlock x:Name="SaveSelectedLabel"/>
                     </StackPanel>
                 </Button>
-                <Button x:Name="CopySelectedButton" Padding="10,5"
+                <Button svc:Localized.AutomationNameKey="Common.Copy" x:Name="CopySelectedButton" Padding="10,5"
                         Click="CopySelectedButton_Click" Visibility="Collapsed">
                     <StackPanel Orientation="Horizontal" Spacing="6">
                         <FontIcon Glyph="&#xE8C8;" FontSize="12"/>
                         <TextBlock x:Name="CopySelectedLabel"/>
                     </StackPanel>
                 </Button>
-                <Button x:Name="CutSelectedButton" Padding="10,5"
+                <Button svc:Localized.AutomationNameKey="Common.Cut" x:Name="CutSelectedButton" Padding="10,5"
                         Click="CutSelectedButton_Click" Visibility="Collapsed">
                     <StackPanel Orientation="Horizontal" Spacing="6">
                         <FontIcon Glyph="&#xE8C6;" FontSize="12"/>
                         <TextBlock x:Name="CutSelectedLabel"/>
                     </StackPanel>
                 </Button>
-                <Button x:Name="DeleteSelectedButton" Padding="10,5"
+                <Button svc:Localized.AutomationNameKey="Search.Delete.Action" x:Name="DeleteSelectedButton" Padding="10,5"
                         Click="DeleteSelectedButton_Click" Visibility="Collapsed">
                     <StackPanel Orientation="Horizontal" Spacing="6">
                         <FontIcon Glyph="&#xE74D;" FontSize="12"/>
@@ -885,7 +956,7 @@
                            Foreground="{ThemeResource TextFillColorTertiaryBrush}"/>
             </Grid>
 
-                <Button x:Name="OpenSettingsButton" Grid.Column="1"
+                <Button svc:Localized.AutomationNameKey="Search.Action.OpenSettings" x:Name="OpenSettingsButton" Grid.Column="1"
                         Style="{StaticResource QuickButtonStyle}"
                         MinHeight="30" Padding="9,0"
                         HorizontalAlignment="Right"

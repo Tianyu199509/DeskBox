@@ -100,6 +100,31 @@ public sealed partial class LocalizationResourceContractTests
     }
 
     [Fact]
+    public void JsonLocales_ContainNoTemplateLeftoversOrControlCharacters()
+    {
+        // Authoring scripts interpolate quote helpers (${LQ}/${RQ}) into
+        // values; a leak ships those literals to users (2026-10-10
+        // incident: Settings.AutoStart.Mode.Description across 12 locales).
+        // Control characters (\u0001 etc.) are always authoring dirt.
+        string root = FindRepositoryRoot();
+        string stringsDirectory = Path.Combine(root, "src", "DeskBox", "Strings");
+
+        foreach (string file in Directory.EnumerateFiles(stringsDirectory, "*.json"))
+        {
+            IReadOnlyDictionary<string, string> locale = ReadJsonLocale(file);
+            foreach ((string key, string value) in locale)
+            {
+                Assert.False(
+                    value.Contains("${", StringComparison.Ordinal),
+                    $"{Path.GetFileName(file)}:{key} contains a template placeholder leak.");
+                Assert.False(
+                    value.IndexOf('\u0001') >= 0 || value.IndexOf('\u0000') >= 0 || value.IndexOf('\u000b') >= 0,
+                    $"{Path.GetFileName(file)}:{key} contains a control character.");
+            }
+        }
+    }
+
+    [Fact]
     public void UserFacingFailureSurfaces_DoNotExposeRawExceptionMessages()
     {
         string root = FindRepositoryRoot();

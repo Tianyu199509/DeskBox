@@ -107,6 +107,12 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
     [ObservableProperty] public partial bool AutoStart { get; set; }
     private bool _autoStartUsedFallback;
     private bool _autoStartOperationFailed;
+    // Captured before ApplyAutoStartState's first overwrite so "persisted
+    // preference was on, but the registration is gone" can be told apart
+    // from an ordinary user-off: security/cleanup tools remove the registry
+    // entry on reboot (feedback 376/481) and the switch would otherwise
+    // silently flip with no explanation.
+    private bool? _autoStartPreferenceAtLoad;
     [ObservableProperty] public partial string SelectedAutoStartMode { get; set; } = nameof(StartupMode.Standard);
     public object[] AvailableAutoStartModeOptions =>
     [
@@ -133,6 +139,9 @@ public partial class SettingsViewModel : ObservableObject, IDisposable
         StartupRegistrationState.PathMismatch or
         StartupRegistrationState.BlockedOrFailed =>
             _localizationService.T("Settings.AutoStart.Failed"),
+        StartupRegistrationState.NotRegistered
+            when _autoStartPreferenceAtLoad == true =>
+            _localizationService.T("Settings.AutoStart.ExternallyRemoved"),
         _ => string.Empty
     };
     public Visibility AutoStartStatusVisibility => string.IsNullOrEmpty(AutoStartStatusText)

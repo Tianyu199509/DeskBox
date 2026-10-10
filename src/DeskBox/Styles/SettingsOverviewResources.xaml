@@ -34,6 +34,10 @@
         <Setter Property="TextWrapping" Value="Wrap" />
     </Style>
 
+    <!-- Retired with the hand-built drill-down rows (now native SettingsCards)
+         but kept as the SettingsCopyAndHierarchyTests anchor: its presence
+         pins the identity-spacing token while the usage-side assertions keep
+         the scaffolding pattern from coming back. -->
     <Style x:Key="SettingCardIdentityGridStyle" TargetType="Grid">
         <Setter Property="ColumnSpacing" Value="{StaticResource SettingsHeaderIconTextSpacing}" />
     </Style>

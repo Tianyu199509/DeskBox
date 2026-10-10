@@ -232,7 +232,7 @@ public sealed partial class SettingsWindow : Window
         LogConstructionCheckpoint("xaml");
         
         // ✅ Set localized title
-        this.Title = _localizationService.T("Window.Settings.Title");
+        this.Title = _localizationService.T("Settings.WindowTitle");
         
         InitializeSettingsSectionElements();
         LogConstructionCheckpoint("section-registry");
@@ -636,6 +636,7 @@ public sealed partial class SettingsWindow : Window
         PageScroller.Padding = isNarrow
             ? new Thickness(PageSidePadding, 16, PageSidePadding, 34)
             : new Thickness(PageSidePadding, 16, PageSidePadding, 38);
+        SettingsBreadcrumbHost.Padding = new Thickness(PageSidePadding, 16, PageSidePadding, 0);
 
         // The search box has no explicit Height (a fixed 32px height corrupted
         // the template's re-measure on width changes: corners flattened and
@@ -647,6 +648,10 @@ public sealed partial class SettingsWindow : Window
 
         ContentHost.Width = Math.Min(ContentMaxWidth, availableContentWidth);
         ContentHost.MaxWidth = ContentMaxWidth;
+        // The breadcrumb lives outside the scroller; mirror the content width
+        // math so its leading edge stays aligned with the cards below.
+        SettingsBreadcrumbBar.Width = Math.Min(ContentMaxWidth, availableContentWidth);
+        SettingsBreadcrumbBar.MaxWidth = ContentMaxWidth;
         if (PathActionsPanel is not null)
         {
             PathActionsPanel.HorizontalAlignment = isNarrow ? HorizontalAlignment.Stretch : HorizontalAlignment.Right;

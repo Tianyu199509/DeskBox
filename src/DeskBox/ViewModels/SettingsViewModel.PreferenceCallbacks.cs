@@ -57,6 +57,14 @@ public partial class SettingsViewModel
 
     private void ApplyAutoStartState(StartupRegistrationState state)
     {
+        // First call runs before any overwrite: capture the persisted
+        // preference so a vanished registration can be attributed to
+        // external cleanup (see the field's comment).
+        if (_autoStartPreferenceAtLoad is null)
+        {
+            _autoStartPreferenceAtLoad = AutoStart;
+        }
+
         _autoStartState = state;
         bool effectiveValue = state is
             StartupRegistrationState.Enabled or

@@ -13,6 +13,7 @@ using Microsoft.UI.Composition.SystemBackdrops;
 using Microsoft.UI.Input;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Controls.Primitives;
 using Microsoft.UI.Xaml.Input;
@@ -1278,6 +1279,27 @@ IsHideAnimationRunning = true;
         ToolTipService.SetToolTip(ContentWidgetShell.AddActionButton, localization.T("Widget.Tooltip.Add"));
         ToolTipService.SetToolTip(ContentWidgetShell.MoreActionButton, localization.T("Widget.Tooltip.More"));
         ToolTipService.SetToolTip(ContentWidgetShell.CloseActionButton, localization.T("Widget.FeatureWidget.Disable"));
+        ApplyTitleActionAccessibleNames();
+    }
+
+    /// <summary>
+    /// Accessible names for the shell title action buttons. The lock buttons are
+    /// state-aware (lock/unlock wording), so this runs on language change and
+    /// whenever the lock state is reapplied via ApplyLockActionIconState.
+    /// </summary>
+    private void ApplyTitleActionAccessibleNames()
+    {
+        var localization = App.Current.LocalizationService;
+        AutomationProperties.SetName(
+            ContentWidgetShell.PositionLockActionButton,
+            localization.T(_config.IsPositionLocked ? "Widget.UnlockPosition" : "Widget.LockPosition"));
+        AutomationProperties.SetName(
+            ContentWidgetShell.SizeLockActionButton,
+            localization.T(_config.IsSizeLocked ? "Widget.UnlockSize" : "Widget.LockSize"));
+        AutomationProperties.SetName(ContentWidgetShell.AddActionButton, localization.T("Widget.Tooltip.Add"));
+        AutomationProperties.SetName(ContentWidgetShell.MoreActionButton, localization.T("Widget.Tooltip.More"));
+        AutomationProperties.SetName(ContentWidgetShell.CloseActionButton, localization.T("Widget.FeatureWidget.Disable"));
+        AutomationProperties.SetName(ContentWidgetShell.CollapseActionButton, localization.T("Widget.Shell.Collapse"));
     }
 
     private void SetupEventHandlers()

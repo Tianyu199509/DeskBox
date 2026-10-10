@@ -1,4 +1,5 @@
 using DeskBox.Models;
+using DeskBox.Platform;
 using DeskBox.Views;
 using Microsoft.UI.Windowing;
 using Windows.Graphics;
@@ -9,6 +10,14 @@ public sealed partial class WidgetManager
 {
     private const double CapsuleBarEdgeMargin = 12;
 
+    /// <summary>
+    /// Trailing debounce for the post-restore capsule bar consistency check
+    /// (feedback 327). All trigger points are completion events that can
+    /// burst (topology restore + verification re-run, tray reveal batches),
+    /// so the check waits for the burst to end before rearranging once.
+    /// </summary>
+    internal static readonly TimeSpan CapsuleArrangementConsistencyDelay = TimeSpan.FromMilliseconds(500);
+
     private readonly Dictionary<string, RectInt32> _lastCapsuleBarBounds =
         new(StringComparer.Ordinal);
     private string _lastEffectiveCapsuleArrangementMode = SettingsService.WidgetCapsuleArrangementFree;
@@ -18,6 +27,8 @@ public sealed partial class WidgetManager
     private double _lastCapsuleBarSpacing = SettingsService.DefaultWidgetCapsuleBarSpacing;
     private string _lastCapsuleArrangementMemberSignature = string.Empty;
     private bool _isApplyingCapsuleArrangement;
+    private int _capsuleArrangementConsistencyTicket;
+    private long _capsuleArrangementConsistencyRunCount;
     private CapsuleBarDragSession? _capsuleBarDragSession;
 
     private void InitializeCapsuleArrangementState()
@@ -34,6 +45,79 @@ public sealed partial class WidgetManager
 
     internal void RefreshCapsuleBarLayout()
     {
+        ApplyCapsuleArrangementIfChanged(force: true);
+    }
+
+    /// <summary>
+    /// Diagnostic/test observation of how many consistency passes actually
+    /// reached the forced bar arrangement (feedback 327).
+    /// </summary>
+    internal long CapsuleArrangementConsistencyRunCount =>
+        Volatile.Read(ref _capsuleArrangementConsistencyRunCount);
+
+    /// <summary>
+    /// Schedules the one-shot capsule bar consistency check (feedback 327):
+    /// display-topology restores, the deferred startup bounds pass, and tray
+    /// reveal batches re-resolve every window independently, which can land
+    /// two bar members on the same slot (diagnostics #9/#11 fully overlapping)
+    /// with no later event to heal it until a manual drag. The check is
+    /// trailing-edge debounced so a burst of completions coalesces into one
+    /// forced arrangement pass, and it only constrains bar members — free
+    /// capsules are user placements and must never be forced back.
+    /// </summary>
+    internal void ScheduleCapsuleArrangementConsistencyCheck(string reason)
+    {
+        if (!HasUiThreadAccess())
+        {
+            UiDispatch.RunOrDefer(() => ScheduleCapsuleArrangementConsistencyCheck(reason));
+            return;
+        }
+
+        int ticket = ++_capsuleArrangementConsistencyTicket;
+        _ = RunCapsuleArrangementConsistencyCheckAsync(ticket, reason);
+    }
+
+    private async Task RunCapsuleArrangementConsistencyCheckAsync(int ticket, string reason)
+    {
+        try
+        {
+            await Task.Delay(CapsuleArrangementConsistencyDelay);
+            ApplyCapsuleArrangementConsistencyCheck(ticket, reason);
+        }
+        catch (Exception ex)
+        {
+            // Fire-and-forget pass: a failing arrangement must never surface
+            // as an unobserved task exception; the next completion event
+            // schedules a fresh check anyway.
+            App.Log($"[CapsuleArrangement] Consistency check failed: {ex.Message}");
+        }
+    }
+
+    private void ApplyCapsuleArrangementConsistencyCheck(int ticket, string reason)
+    {
+        if (!HasUiThreadAccess())
+        {
+            UiDispatch.RunOrDefer(() => ApplyCapsuleArrangementConsistencyCheck(ticket, reason));
+            return;
+        }
+
+        // A newer completion event superseded this one: its own delayed pass
+        // owns the arrangement, so this ticket dissolves into the debounce.
+        if (ticket != _capsuleArrangementConsistencyTicket)
+        {
+            return;
+        }
+
+        // Only the bar is a system-owned layout contract. Free capsules are
+        // user placements and are deliberately left wherever they restored
+        // to (this also skips applying any stale free-placement backups).
+        if (ResolveEffectiveCapsuleArrangementMode() != SettingsService.WidgetCapsuleArrangementBar)
+        {
+            return;
+        }
+
+        Interlocked.Increment(ref _capsuleArrangementConsistencyRunCount);
+        App.LogVerbose($"[CapsuleArrangement] Consistency check reason={reason}");
         ApplyCapsuleArrangementIfChanged(force: true);
     }
 

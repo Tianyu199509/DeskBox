@@ -71,6 +71,8 @@ public sealed partial class WidgetBackgroundCustomizer : UserControl
         FitContainItem.Content = localization.T("Widget.CustomBackground.FitContain");
         DimLabel.Text = localization.T("Widget.CustomBackground.DimLabel");
         ColorLabel.Text = localization.T("Widget.CustomBackground.ColorLabel");
+        ColorHintText.Text = localization.T("Widget.CustomBackground.ColorHint");
+        DimHintText.Text = localization.T("Widget.CustomBackground.DimHint");
         ClearButton.Content = localization.T("Widget.CustomBackground.Clear");
         RefreshFromConfig();
     }

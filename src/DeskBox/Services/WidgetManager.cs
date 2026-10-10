@@ -1487,6 +1487,11 @@ public sealed partial class WidgetManager
             NormalizeIdleWidgetZOrder("set-all-visible");
             SaveBatchVisibilityState();
             await _trayBatchAnimationDriver.WaitForIdleAsync();
+            // Reveal re-shows each window from its own persisted placement
+            // without re-running the bar arrangement; overlapping capsules
+            // then only healed on the next drag. Verify the bar once the
+            // reveal settles (feedback 327).
+            ScheduleCapsuleArrangementConsistencyCheck("tray-reveal-completed");
             App.LogVerbose($"[TrayBatch] SetAllVisible completed visible=true prepared={windowsToShow.Count} shown={shownWindows.Count}");
             return;
         }
@@ -1606,11 +1611,20 @@ public sealed partial class WidgetManager
 
         await Task.Yield();
         QueueIdleWidgetZOrderNormalization("display-topology-restored");
+        // 289: topology/DPI churn is a known leak window for the pinned
+        // group's owner-band bedding; verify it once the positions settle.
+        QueueDesktopPinnedBeddingRecheck(
+            "display-topology-restored",
+            TimeSpan.FromMilliseconds(400));
         PlacePendingInitialWidgets();
         ApplyDisconnectCollapsePolicy(
             Win32Helper.GetMonitorWorkAreaInfos()
                 .Select(area => Win32Helper.ResolveStableMonitorId(area.DeviceName))
                 .ToList());
+        // Per-window restore can strand two bar members on one slot with no
+        // later event to heal it (feedback 327). The debounced check
+        // re-runs the bar arrangement once the burst of restores settles.
+        ScheduleCapsuleArrangementConsistencyCheck("display-topology-restored");
         return allRestored;
     }
 
@@ -1632,11 +1646,15 @@ public sealed partial class WidgetManager
     /// group surface and every member when grouped (regardless of which
     /// member the change arrives through), repositions the live host window,
     /// and captures the settled geometry into the active topology profile.
+    /// Batch callers (move-all) pass <paramref name="persistImmediately"/>:
+    /// false to skip the trailing per-surface save and persist the whole
+    /// batch once themselves at the end.
     /// </summary>
     public async Task ApplyScreenBindingAsync(
         string widgetId,
         WidgetScreenBindingMode mode,
-        string? boundScreenId)
+        string? boundScreenId,
+        bool persistImmediately = true)
     {
         if (FindConfig(widgetId) is not { } config)
         {
@@ -1726,7 +1744,13 @@ public sealed partial class WidgetManager
         MarkSurfaceEntryAuthoritative(
             config,
             stableIdOverride: mode == WidgetScreenBindingMode.Pinned ? boundScreenId : null);
-        await _settingsService.SaveAsync();
+        // persistImmediately=false: a batch caller (move-all) saves the whole
+        // batch once at its end; the in-memory binding, window reposition,
+        // and topology capture above are already complete at this point.
+        if (persistImmediately)
+        {
+            await _settingsService.SaveAsync();
+        }
         NotifyScreenHomeChangedAction?.Invoke();
     }
 
@@ -2259,6 +2283,10 @@ public sealed partial class WidgetManager
                 await Task.Delay(120);
                 await RestoreVisibleWidgetGroupsAsync();
                 RestoreLoadedWidgetBoundsAfterStartup();
+                // The last bounds-writing pass of startup re-resolves windows
+                // independently and can re-scatter the capsule bar; heal it
+                // once, debounced (feedback 327).
+                ScheduleCapsuleArrangementConsistencyCheck("startup-bounds-reconciled");
             }
             catch (Exception ex)
             {
@@ -2501,6 +2529,7 @@ public sealed partial class WidgetManager
     {
         CancelAllWidgetSurfaceSwitches();
         StopTrayLayerRestoreMonitor();
+        StopDesktopPinnedBeddingWatchdog();
         DisposeWidgetDetachPlacementPreview();
         _settingsService.SettingsChanged -= OnSettingsChanged;
         _settingsService.AppearancePreviewChanged -= ApplyAppearancePreview;

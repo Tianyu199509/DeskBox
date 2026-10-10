@@ -31,12 +31,12 @@
                     HorizontalAlignment="Right"
                     Orientation="Horizontal"
                     Spacing="8">
-                    <Button
+                    <Button svc:Localized.AutomationNameKey="DesktopOrganization.Notification.Undo"
                         x:Name="UndoOrganizationButton"
                         Visibility="Collapsed"
                         Click="UndoOrganizationButton_Click"
                         svc:Localized.Key="DesktopOrganization.Notification.Undo" />
-                        <Button
+                        <Button svc:Localized.AutomationNameKey="DesktopOrganization.OneClick.Action"
                             x:Name="OrganizeNowButton"
                             Style="{StaticResource AccentButtonStyle}"
                             Click="OrganizeNowButton_Click"
@@ -53,7 +53,7 @@
                     <toolkit:SettingsCard.HeaderIcon>
                         <FontIcon Glyph="&#xE713;" />
                     </toolkit:SettingsCard.HeaderIcon>
-                    <Button
+                    <Button svc:Localized.AutomationNameKey="DesktopOrganization.Auto.SetupAction"
                         Click="AutoSetupButton_Click"
                         svc:Localized.Key="DesktopOrganization.Auto.SetupAction" />
                 </toolkit:SettingsCard>
@@ -63,11 +63,13 @@
                     Visibility="Collapsed"
                     IsExpanded="False"
                     svc:Localized.DescriptionKey="DesktopOrganization.Auto.Description"
-                    svc:Localized.HeaderKey="DesktopOrganization.Auto.Title">
+                    svc:Localized.HeaderKey="DesktopOrganization.Auto.Title"
+                    svc:InfoTip.TitleKey="DesktopOrganization.Auto.InfoTip.Title"
+                    svc:InfoTip.BodyKey="DesktopOrganization.Auto.InfoTip.Description">
                     <toolkit:SettingsExpander.HeaderIcon>
                         <FontIcon Glyph="&#xE7F4;" />
                     </toolkit:SettingsExpander.HeaderIcon>
-                    <ToggleSwitch
+                    <ToggleSwitch svc:Localized.AutomationNameKey="DesktopOrganization.Auto.Title"
                         x:Name="AutoOrganizationToggle"
                         MinWidth="0"
                         OffContent=""
@@ -79,11 +81,13 @@
                             Visibility="Collapsed"
                             HorizontalContentAlignment="Right"
                             svc:Localized.DescriptionKey="DesktopOrganization.Auto.Interval.Description"
-                            svc:Localized.HeaderKey="DesktopOrganization.Auto.Interval.Title">
+                            svc:Localized.HeaderKey="DesktopOrganization.Auto.Interval.Title"
+                            svc:InfoTip.TitleKey="DesktopOrganization.Auto.Interval.InfoTip.Title"
+                            svc:InfoTip.BodyKey="DesktopOrganization.Auto.Interval.InfoTip.Description">
                             <toolkit:SettingsCard.HeaderIcon>
                                 <FontIcon Glyph="&#xE823;" />
                             </toolkit:SettingsCard.HeaderIcon>
-                            <ComboBox
+                            <ComboBox svc:Localized.AutomationNameKey="DesktopOrganization.Auto.Interval.Title"
                                 x:Name="AutoIntervalComboBox"
                                 MinWidth="150"
                                 SelectionChanged="AutoIntervalComboBox_SelectionChanged" />
@@ -94,7 +98,7 @@
 
             <StackPanel Spacing="6">
                 <TextBlock
-                    Style="{StaticResource SettingsSubsectionTitleTextStyle}"
+                    Style="{StaticResource SettingsSubsectionTitleTextStyle}" AutomationProperties.HeadingLevel="Level2"
                     svc:Localized.Key="DesktopOrganization.Rules.SectionTitle" />
                 <TextBlock
                     Margin="0,-3,0,2"
@@ -129,7 +133,7 @@
 
         <StackPanel x:Name="RuleDetailPanel" Visibility="Collapsed" Spacing="12">
             <Grid ColumnDefinitions="Auto,*" ColumnSpacing="12">
-                <Button
+                <Button svc:Localized.AutomationNameKey="DesktopOrganization.Common.Back"
                     Width="36"
                     Height="36"
                     Padding="0"
@@ -154,7 +158,7 @@
                 <toolkit:SettingsCard.HeaderIcon>
                     <FontIcon Glyph="&#xE7F4;" />
                 </toolkit:SettingsCard.HeaderIcon>
-                <ToggleSwitch
+                <ToggleSwitch svc:Localized.AutomationNameKey="DesktopOrganization.Rule.Enable.Title"
                     x:Name="RuleEnabledToggle"
                     MinWidth="0"
                     OffContent=""
@@ -215,7 +219,7 @@
                                 <TextBox
                                     x:Name="ExtensionInput"
                                     KeyDown="ExtensionInput_KeyDown" />
-                                <Button
+                                <Button svc:Localized.AutomationNameKey="DesktopOrganization.Common.Add"
                                     Grid.Column="1"
                                     Click="AddExtensionButton_Click"
                                     svc:Localized.Key="DesktopOrganization.Common.Add" />
@@ -229,7 +233,7 @@
                                 <TextBox
                                     x:Name="ExcludedExtensionInput"
                                     KeyDown="ExcludedExtensionInput_KeyDown" />
-                                <Button
+                                <Button svc:Localized.AutomationNameKey="DesktopOrganization.Common.Add"
                                     Grid.Column="1"
                                     Click="AddExcludedExtensionButton_Click"
                                     svc:Localized.Key="DesktopOrganization.Common.Add" />

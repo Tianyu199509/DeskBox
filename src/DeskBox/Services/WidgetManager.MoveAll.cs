@@ -34,6 +34,14 @@ public sealed class WidgetMoveAllUndoToken
     /// to restore once any later placement/binding change invalidated it.
     /// </summary>
     internal long PlacementVersion { get; set; }
+
+    /// <summary>
+    /// Whether the batch's single trailing persistence (one physical save for
+    /// the whole move) succeeded. False means every in-memory binding is
+    /// applied and undo still works, but nothing reached disk — callers
+    /// surface that as an error without discarding the batch result.
+    /// </summary>
+    internal bool Persisted { get; set; }
 }
 
 public sealed partial class WidgetManager
@@ -92,14 +100,16 @@ public sealed partial class WidgetManager
                 group?.Height ?? config.Height));
         }
 
-        // 2. Move every surface onto the display.
+        // 2. Move every surface onto the display. Each binding is applied to
+        // memory and live windows only; the batch persists once below.
         int moved = 0;
         foreach (WidgetMoveAllUndoToken.SurfaceSnapshot snapshot in token.Surfaces)
         {
             await ApplyScreenBindingAsync(
                 snapshot.ApplyWidgetId,
                 WidgetScreenBindingMode.Pinned,
-                displayStableId);
+                displayStableId,
+                persistImmediately: false);
             moved++;
         }
 
@@ -109,6 +119,13 @@ public sealed partial class WidgetManager
         // button disabled, so a user drag interleaving between surfaces is
         // accepted as part of the move.
         token.PlacementVersion = _placementGeneration;
+
+        // 3. Single transactional persistence for the whole batch (was: one
+        // save per surface inside ApplyScreenBindingAsync → N physical saves
+        // and N SettingsChanged notifications). The checked save reports
+        // whether the batch actually reached disk; on failure the in-memory
+        // bindings above are still applied and the undo token stays valid.
+        token.Persisted = await _settingsService.SaveCheckedAsync();
 
         return (moved, token);
     }

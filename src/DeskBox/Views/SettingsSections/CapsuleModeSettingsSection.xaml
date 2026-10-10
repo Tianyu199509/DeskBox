@@ -35,7 +35,7 @@
     </UserControl.Resources>
 
     <StackPanel Style="{StaticResource SectionPanelStyle}">
-        <TextBlock Style="{StaticResource SectionTitleTextStyle}" svc:Localized.Key="Settings.Section.CapsuleMode" />
+        <TextBlock Style="{StaticResource SectionTitleTextStyle}" AutomationProperties.HeadingLevel="Level1" svc:Localized.Key="Settings.Section.CapsuleMode" />
         <StackPanel Margin="0,8,0,0" Spacing="4">
                 <toolkit:SettingsCard
                     HorizontalContentAlignment="Right"
@@ -44,7 +44,7 @@
                     <toolkit:SettingsCard.HeaderIcon>
                         <FontIcon Glyph="&#xE73F;" />
                     </toolkit:SettingsCard.HeaderIcon>
-                    <ComboBox
+                    <ComboBox svc:Localized.AutomationNameKey="Settings.CollapseBehavior.Title"
                         MinWidth="{StaticResource SettingsControlMinWidth}"
                         ItemsSource="{Binding AvailableCollapseBehaviorOptions}"
                         controls:SettingsComboBox.Value="{Binding CollapseBehavior, Mode=TwoWay}" />
@@ -60,14 +60,14 @@
                     <FontIcon Glyph="&#xE8A7;" />
                 </toolkit:SettingsCard.HeaderIcon>
                 <StackPanel Orientation="Horizontal" Spacing="8">
-                    <Button
+                    <Button svc:Localized.AutomationNameKey="Settings.Capsule.Overrides.ResetWidth"
                         Command="{x:Bind ViewModel.ResetCapsuleWidthOverridesCommand, Mode=OneWay}"
                         IsEnabled="{Binding HasWidthOverrides}"
                         Style="{StaticResource IconActionButtonStyle}"
                         svc:Localized.ToolTipKey="Settings.Capsule.Overrides.ResetWidth">
                         <FontIcon FontSize="14" Glyph="&#xE72C;" />
                     </Button>
-                    <ComboBox
+                    <ComboBox svc:Localized.AutomationNameKey="Settings.Capsule.WidthMode.Title"
                         MinWidth="{StaticResource SettingsControlMinWidth}"
                         ItemsSource="{Binding AvailableWidthModeOptions}"
                         controls:SettingsComboBox.Value="{Binding WidthMode, Mode=TwoWay}" />
@@ -81,7 +81,7 @@
                 <toolkit:SettingsCard.HeaderIcon>
                     <FontIcon Glyph="&#xE8CB;" />
                 </toolkit:SettingsCard.HeaderIcon>
-                <ComboBox
+                <ComboBox svc:Localized.AutomationNameKey="Settings.Capsule.ExpansionDirection.Title"
                     MinWidth="{StaticResource SettingsControlMinWidth}"
                     ItemsSource="{Binding AvailableExpansionDirectionOptions}"
                     controls:SettingsComboBox.Value="{Binding ExpansionDirection, Mode=TwoWay}" />
@@ -94,7 +94,7 @@
                 <toolkit:SettingsCard.HeaderIcon>
                     <FontIcon Glyph="&#xE8A5;" />
                 </toolkit:SettingsCard.HeaderIcon>
-                <ComboBox
+                <ComboBox svc:Localized.AutomationNameKey="Settings.CompactContent.Title"
                     MinWidth="{StaticResource SettingsControlMinWidth}"
                     ItemsSource="{Binding AvailableContentModeOptions}"
                     controls:SettingsComboBox.Value="{Binding ContentMode, Mode=TwoWay}" />
@@ -107,7 +107,7 @@
                 <toolkit:SettingsExpander.HeaderIcon>
                     <FontIcon Glyph="&#xE8FD;" />
                 </toolkit:SettingsExpander.HeaderIcon>
-                <ComboBox
+                <ComboBox svc:Localized.AutomationNameKey="Settings.Capsule.Arrangement.Title"
                     MinWidth="{StaticResource SettingsControlMinWidth}"
                     ItemsSource="{Binding AvailableArrangementOptions}"
                     controls:SettingsComboBox.Value="{Binding ArrangementMode, Mode=TwoWay}" />
@@ -120,7 +120,7 @@
                         <toolkit:SettingsCard.HeaderIcon>
                             <FontIcon Glyph="&#xE707;" />
                         </toolkit:SettingsCard.HeaderIcon>
-                        <ComboBox
+                        <ComboBox svc:Localized.AutomationNameKey="Settings.Capsule.ArrangementDetails.Title"
                             MinWidth="{StaticResource SettingsControlMinWidth}"
                             IsEnabled="{Binding IsBarEnabled}"
                             ItemsSource="{Binding AvailableBarPlacementOptions}"
@@ -133,7 +133,7 @@
                         svc:Localized.HeaderKey="Settings.Capsule.Spacing.Title">
                         <StackPanel VerticalAlignment="Center" Orientation="Horizontal" Spacing="8">
                             <TextBlock Style="{StaticResource SliderSettingValueTextStyle}" Text="{Binding BarSpacingText}" />
-                            <Slider Maximum="32" Minimum="0" StepFrequency="1" Style="{StaticResource InlineMetricSliderStyle}" Value="{Binding BarSpacing, Mode=TwoWay}" />
+                            <Slider svc:Localized.AutomationNameKey="Settings.Capsule.Spacing.Title" Maximum="32" Minimum="0" StepFrequency="1" Style="{StaticResource InlineMetricSliderStyle}" Value="{Binding BarSpacing, Mode=TwoWay}" />
                         </StackPanel>
                     </toolkit:SettingsCard>
                     <toolkit:SettingsCard
@@ -142,7 +142,7 @@
                         svc:Localized.DescriptionKey="Settings.Capsule.Direction.Description"
                         svc:Localized.HeaderKey="Settings.Capsule.Direction.Title">
                         <toolkit:SettingsCard.HeaderIcon><FontIcon Glyph="&#xE72A;" /></toolkit:SettingsCard.HeaderIcon>
-                        <ComboBox MinWidth="{StaticResource SettingsControlMinWidth}" ItemsSource="{Binding AvailableBarDirectionOptions}" controls:SettingsComboBox.Value="{Binding BarDirection, Mode=TwoWay}" />
+                        <ComboBox svc:Localized.AutomationNameKey="Settings.Capsule.Direction.Title" MinWidth="{StaticResource SettingsControlMinWidth}" ItemsSource="{Binding AvailableBarDirectionOptions}" controls:SettingsComboBox.Value="{Binding BarDirection, Mode=TwoWay}" />
                     </toolkit:SettingsCard>
                 </toolkit:SettingsExpander.Items>
             </toolkit:SettingsExpander>
@@ -155,7 +155,7 @@
                 <toolkit:SettingsExpander.HeaderIcon>
                     <FontIcon Glyph="&#xE823;" />
                 </toolkit:SettingsExpander.HeaderIcon>
-                <ComboBox
+                <ComboBox svc:Localized.AutomationNameKey="Settings.Capsule.HoverResponse.Title"
                     MinWidth="{StaticResource SettingsControlMinWidth}"
                     ItemsSource="{Binding AvailableHoverResponseOptions}"
                     controls:SettingsComboBox.Value="{Binding HoverResponse, Mode=TwoWay}" />
@@ -167,7 +167,7 @@
                         svc:Localized.HeaderKey="Settings.Capsule.ExpandDelay.Title">
                         <StackPanel VerticalAlignment="Center" Orientation="Horizontal" Spacing="8">
                             <TextBlock Style="{StaticResource SliderSettingValueTextStyle}" Text="{Binding ExpandDelayText}" />
-                            <Slider Maximum="1000" Minimum="100" StepFrequency="10" Style="{StaticResource InlineMetricSliderStyle}" Value="{Binding ExpandDelayMs, Mode=TwoWay}" />
+                            <Slider svc:Localized.AutomationNameKey="Settings.Capsule.ExpandDelay.Title" Maximum="1000" Minimum="100" StepFrequency="10" Style="{StaticResource InlineMetricSliderStyle}" Value="{Binding ExpandDelayMs, Mode=TwoWay}" />
                         </StackPanel>
                     </toolkit:SettingsCard>
                     <toolkit:SettingsCard
@@ -177,7 +177,7 @@
                         svc:Localized.HeaderKey="Settings.Capsule.CollapseDelay.Title">
                         <StackPanel VerticalAlignment="Center" Orientation="Horizontal" Spacing="8">
                             <TextBlock Style="{StaticResource SliderSettingValueTextStyle}" Text="{Binding CollapseDelayText}" />
-                            <Slider Maximum="1500" Minimum="200" StepFrequency="20" Style="{StaticResource InlineMetricSliderStyle}" Value="{Binding CollapseDelayMs, Mode=TwoWay}" />
+                            <Slider svc:Localized.AutomationNameKey="Settings.Capsule.CollapseDelay.Title" Maximum="1500" Minimum="200" StepFrequency="20" Style="{StaticResource InlineMetricSliderStyle}" Value="{Binding CollapseDelayMs, Mode=TwoWay}" />
                         </StackPanel>
                     </toolkit:SettingsCard>
                 </toolkit:SettingsExpander.Items>
@@ -190,7 +190,7 @@
                 <toolkit:SettingsExpander.HeaderIcon>
                     <FontIcon Glyph="&#xE7B5;" />
                 </toolkit:SettingsExpander.HeaderIcon>
-                <ComboBox
+                <ComboBox svc:Localized.AutomationNameKey="Settings.Capsule.Animation.Title"
                     MinWidth="{StaticResource SettingsControlMinWidth}"
                     ItemsSource="{Binding AvailableAnimationEffectOptions}"
                     controls:SettingsComboBox.Value="{Binding AnimationEffect, Mode=TwoWay}" />
@@ -202,7 +202,7 @@
                         svc:Localized.HeaderKey="Settings.Capsule.AnimationDuration.Title">
                         <StackPanel VerticalAlignment="Center" Orientation="Horizontal" Spacing="8">
                             <TextBlock Style="{StaticResource SliderSettingValueTextStyle}" Text="{Binding AnimationDurationText}" />
-                            <Slider Maximum="400" Minimum="120" StepFrequency="10" Style="{StaticResource InlineMetricSliderStyle}" Value="{Binding AnimationDurationMs, Mode=TwoWay}" />
+                            <Slider svc:Localized.AutomationNameKey="Settings.Capsule.AnimationDuration.Title" Maximum="400" Minimum="120" StepFrequency="10" Style="{StaticResource InlineMetricSliderStyle}" Value="{Binding AnimationDurationMs, Mode=TwoWay}" />
                         </StackPanel>
                     </toolkit:SettingsCard>
                 </toolkit:SettingsExpander.Items>
@@ -211,11 +211,13 @@
             <toolkit:SettingsCard
                 HorizontalContentAlignment="Right"
                 svc:Localized.DescriptionKey="Settings.CompactPrivacy.Description"
-                svc:Localized.HeaderKey="Settings.CompactPrivacy.Title">
+                svc:Localized.HeaderKey="Settings.CompactPrivacy.Title"
+                svc:InfoTip.TitleKey="Settings.CompactPrivacy.InfoTip.Title"
+                svc:InfoTip.BodyKey="Settings.CompactPrivacy.InfoTip.Description">
                 <toolkit:SettingsCard.HeaderIcon>
                     <FontIcon Glyph="&#xE72E;" />
                 </toolkit:SettingsCard.HeaderIcon>
-                <ToggleSwitch
+                <ToggleSwitch svc:Localized.AutomationNameKey="Settings.CompactPrivacy.Title"
                     MinWidth="0"
                     OffContent=""
                     OnContent=""

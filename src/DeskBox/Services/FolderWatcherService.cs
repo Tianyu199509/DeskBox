@@ -44,7 +44,13 @@ public sealed record FolderWatcherHealthSnapshot(
 public sealed class FolderWatcherService : IDisposable
 {
     private const int DebounceDelayMs = 250;
-    private const int MaxBufferedChangesBeforeReload = 64;
+    // Overflow protection, and since the view model stopped escalating large
+    // known batches to full reloads, the ONLY count-based escalation left:
+    // exceeding the buffered-change cap means events arrive faster than
+    // debatching drains them - the same shape as a native buffer overflow -
+    // so the batch falls back to the authoritative full reload rather than
+    // trust a change list that large.
+    internal const int MaxBufferedChangesBeforeReload = 64;
     private const int MaxReconnectAttempts = 8;
     private const int ReconnectBaseDelaySeconds = 2;
     // A persistent per-subtree AccessDenied makes the native watcher error,

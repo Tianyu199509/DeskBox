@@ -278,6 +278,10 @@ public sealed partial class WidgetManager
         if (group is not null)
         {
             _widgetGroupSwitchRequests.Cancel(group.SurfaceId);
+            // Same interrupt contract as the stow/dissolve/removal cancel
+            // sites: a compact stow hides the window without PointerExited,
+            // so optimistic gesture state must be dropped here too (387).
+            InterruptWidgetGroupInteraction(group);
         }
     }
 }

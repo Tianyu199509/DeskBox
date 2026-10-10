@@ -60,6 +60,62 @@
                     <Thickness x:Key="ComboBoxDropdownBorderPadding">0</Thickness>
                     <Thickness x:Key="ComboBoxDropdownContentMargin">4</Thickness>
                 </ResourceDictionary>
+                <!-- Fallback theme dictionary (WinUI convention keeps dark
+                     values in Default). Light/Dark resolve first, so this is
+                     inert outside high contrast; HighContrast below owns the
+                     system-owned contrast mapping. -->
+                <ResourceDictionary x:Key="Default">
+                    <SolidColorBrush x:Key="WidgetDragHandleBrush" Color="#D6D6D6" />
+                    <SolidColorBrush x:Key="WidgetOverlaySurfaceBrush" Color="#2A3038" />
+                    <SolidColorBrush x:Key="WidgetOverlayInputSurfaceBrush" Color="#222830" />
+                    <SolidColorBrush x:Key="WidgetOverlayStrokeBrush" Color="#52FFFFFF" />
+                    <SolidColorBrush x:Key="WidgetLayerFillSecondaryBrush" Color="#0DFFFFFF" />
+                    <SolidColorBrush x:Key="WidgetLayerStrokeBrush" Color="#20FFFFFF" />
+                    <SolidColorBrush x:Key="DeskBoxNeutralFillSecondaryBrush" Color="#0FFFFFFF" />
+                    <SolidColorBrush x:Key="DeskBoxNeutralFillTertiaryBrush" Color="#0AFFFFFF" />
+                    <SolidColorBrush x:Key="DeskBoxNeutralLineBrush" Color="#8BFFFFFF" />
+                    <SolidColorBrush x:Key="DeskBoxNeutralTextPrimaryBrush" Color="#FFFFFFFF" />
+                    <CornerRadius x:Key="OverlayCornerRadius">8</CornerRadius>
+                    <CornerRadius x:Key="ComboBoxItemCornerRadius">6</CornerRadius>
+                    <CornerRadius x:Key="ComboBoxHiglightBorderCornerRadius">8</CornerRadius>
+                    <CornerRadius x:Key="ComboBoxDropDownButtonBackgroundCornerRadius">6</CornerRadius>
+                    <Thickness x:Key="ComboBoxDropdownBorderThickness">1</Thickness>
+                    <Thickness x:Key="ComboBoxDropdownBorderPadding">0</Thickness>
+                    <Thickness x:Key="ComboBoxDropdownContentMargin">4</Thickness>
+                </ResourceDictionary>
+                <!-- High contrast stays system-owned: RequestedTheme is ignored
+                     by the framework under high contrast, so the widget windows
+                     and search popup resolve these keys against the system
+                     contrast palette. Without this dictionary the lookup chain
+                     (HighContrast -> Default at the time it was authored) found
+                     nothing and ThemeResource resolution failed at parse time.
+                     Overlay/layer surfaces map to the system window color
+                     (readable solid base — every consumer is a container
+                     background, nothing peeks through); strokes and handles map
+                     to the system window text color; the code-resolved
+                     DeskBoxNeutral washes map to Transparent. The DeskBoxNeutral*
+                     entries are inert here today: they are resolved from code by
+                     element ActualTheme (Light/Dark only) and are mirrored
+                     solely to keep the four dictionaries' key sets identical. -->
+                <ResourceDictionary x:Key="HighContrast">
+                    <SolidColorBrush x:Key="WidgetDragHandleBrush" Color="{ThemeResource SystemColorWindowTextColor}" />
+                    <SolidColorBrush x:Key="WidgetOverlaySurfaceBrush" Color="{ThemeResource SystemColorWindowColor}" />
+                    <SolidColorBrush x:Key="WidgetOverlayInputSurfaceBrush" Color="{ThemeResource SystemColorWindowColor}" />
+                    <SolidColorBrush x:Key="WidgetOverlayStrokeBrush" Color="{ThemeResource SystemColorWindowTextColor}" />
+                    <SolidColorBrush x:Key="WidgetLayerFillSecondaryBrush" Color="{ThemeResource SystemColorWindowColor}" />
+                    <SolidColorBrush x:Key="WidgetLayerStrokeBrush" Color="{ThemeResource SystemColorWindowTextColor}" />
+                    <SolidColorBrush x:Key="DeskBoxNeutralFillSecondaryBrush" Color="Transparent" />
+                    <SolidColorBrush x:Key="DeskBoxNeutralFillTertiaryBrush" Color="Transparent" />
+                    <SolidColorBrush x:Key="DeskBoxNeutralLineBrush" Color="{ThemeResource SystemColorWindowTextColor}" />
+                    <SolidColorBrush x:Key="DeskBoxNeutralTextPrimaryBrush" Color="{ThemeResource SystemColorWindowTextColor}" />
+                    <CornerRadius x:Key="OverlayCornerRadius">8</CornerRadius>
+                    <CornerRadius x:Key="ComboBoxItemCornerRadius">6</CornerRadius>
+                    <CornerRadius x:Key="ComboBoxHiglightBorderCornerRadius">8</CornerRadius>
+                    <CornerRadius x:Key="ComboBoxDropDownButtonBackgroundCornerRadius">6</CornerRadius>
+                    <Thickness x:Key="ComboBoxDropdownBorderThickness">1</Thickness>
+                    <Thickness x:Key="ComboBoxDropdownBorderPadding">0</Thickness>
+                    <Thickness x:Key="ComboBoxDropdownContentMargin">4</Thickness>
+                </ResourceDictionary>
             </ResourceDictionary.ThemeDictionaries>
 
             <!-- DeskBox visual language: three radii. -->
@@ -85,6 +141,61 @@
                 <Setter Property="BorderThickness" Value="0" />
                 <Setter Property="CornerRadius" Value="{StaticResource WidgetCornerRadiusSmall}" />
                 <Setter Property="UseSystemFocusVisuals" Value="True" />
+            </Style>
+
+            <!-- Anchor badge for svc:InfoTip explanation flyouts. Attached to
+                 SettingsCard/SettingsExpander elements; the badge button is
+                 manufactured by InfoTip.CreateAnchorButton and shown beside
+                 the card header text. Quiet by design: neutral translucent
+                 fill + secondary text color (subtler than the header), 13px
+                 circle, Segoe Fluent "?" glyph; hover softens via opacity. -->
+            <Style x:Key="InfoTipButtonStyle" TargetType="Button">
+                <Setter Property="Width" Value="16" />
+                <Setter Property="Height" Value="16" />
+                <Setter Property="MinWidth" Value="16" />
+                <Setter Property="MinHeight" Value="16" />
+                <Setter Property="Padding" Value="0" />
+                <Setter Property="CornerRadius" Value="8" />
+                <Setter Property="UseSystemFocusVisuals" Value="True" />
+                <Setter Property="Background" Value="{ThemeResource ControlFillColorDefaultBrush}" />
+                <Setter Property="Foreground" Value="{ThemeResource TextFillColorSecondaryBrush}" />
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="Button">
+                            <Grid
+                                x:Name="Root"
+                                Background="{TemplateBinding Background}"
+                                CornerRadius="8">
+                                <ContentPresenter
+                                    HorizontalAlignment="Center"
+                                    VerticalAlignment="Center" />
+                                <VisualStateManager.VisualStateGroups>
+                                    <VisualStateGroup x:Name="CommonStates">
+                                        <VisualState x:Name="Normal" />
+                                        <VisualState x:Name="PointerOver">
+                                            <Storyboard>
+                                                <DoubleAnimation
+                                                    Storyboard.TargetName="Root"
+                                                    Storyboard.TargetProperty="Opacity"
+                                                    To="0.8"
+                                                    Duration="0:0:0.08" />
+                                            </Storyboard>
+                                        </VisualState>
+                                        <VisualState x:Name="Pressed">
+                                            <Storyboard>
+                                                <DoubleAnimation
+                                                    Storyboard.TargetName="Root"
+                                                    Storyboard.TargetProperty="Opacity"
+                                                    To="0.65"
+                                                    Duration="0:0:0.04" />
+                                            </Storyboard>
+                                        </VisualState>
+                                    </VisualStateGroup>
+                                </VisualStateManager.VisualStateGroups>
+                            </Grid>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
             </Style>
 
             <!-- Shared ToggleSwitch template tuning for settings-style rows. -->
