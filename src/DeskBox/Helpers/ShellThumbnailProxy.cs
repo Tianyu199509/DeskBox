@@ -48,6 +48,11 @@ internal static class ShellThumbnailProxy
         TimeSpan.FromMilliseconds(2500);
     private const uint BatchProtocolMagic = 0x4458_4231;
     private const uint BatchProtocolVersion = 1;
+    // One batch process runs at a time (the dispatcher drains the queue
+    // sequentially), so a larger chunk only amortizes process creation and
+    // Shell handler DLL loads. The native proxy caps its own worker fan-out
+    // independently (feedback 226/452/495), so this stays above that cap on
+    // purpose.
     private const int MaximumBatchRequests = 8;
     private static readonly TimeSpan BatchCoalesceWindow =
         TimeSpan.FromMilliseconds(25);

@@ -66,6 +66,11 @@
                 x:Name="BackgroundColorPicker"
                 IsAlphaEnabled="False"
                 MinWidth="256" />
+            <TextBlock
+                x:Name="ColorHintText"
+                FontSize="11"
+                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                TextWrapping="Wrap" />
         </StackPanel>
 
         <!-- Fit + dim, only meaningful while an image is set -->
@@ -94,12 +99,17 @@
                         FontSize="11"
                         Opacity="0.7" />
                 </Grid>
-                <Slider
+                <Slider AutomationProperties.LabeledBy="{Binding ElementName=DimLabel}"
                     x:Name="DimSlider"
                     Maximum="100"
                     Minimum="0"
                     SmallChange="5"
                     StepFrequency="5" />
+                <TextBlock
+                    x:Name="DimHintText"
+                    FontSize="11"
+                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                    TextWrapping="Wrap" />
             </StackPanel>
         </StackPanel>
 

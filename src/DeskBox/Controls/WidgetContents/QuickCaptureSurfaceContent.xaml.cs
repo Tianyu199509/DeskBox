@@ -876,32 +876,6 @@ public sealed partial class QuickCaptureSurfaceContent :
     private async void AddButton_Click(object sender, RoutedEventArgs e)
     {
         await RunAsync(AddInputWithFeedbackAsync);
-        InputTextBox.Focus(FocusState.Programmatic);
-    }
-
-    private async void InputTextBox_KeyDown(object sender, KeyRoutedEventArgs e)
-    {
-        bool controlPressed = Win32Helper.IsKeyPressed(
-            Windows.System.VirtualKey.Control);
-        bool saveShortcut = TextBoxEditorShortcutHelper.IsCtrlSaveShortcut(
-            e.Key,
-            controlPressed,
-            Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Shift));
-        if (e.Key != Windows.System.VirtualKey.Enter && !saveShortcut)
-        {
-            return;
-        }
-
-        e.Handled = true;
-        if (saveShortcut || SettingsService.ShouldSubmitEditorOnEnter(
-                _settingsService.Settings.QuickCaptureEditorEnterBehavior,
-                controlPressed))
-        {
-            await RunAsync(AddInputWithFeedbackAsync);
-            return;
-        }
-
-        TextBoxEditorShortcutHelper.InsertLineBreak(InputTextBox);
     }
 
     private void SearchTextBox_KeyDown(object sender, KeyRoutedEventArgs e)
@@ -3166,10 +3140,6 @@ public sealed partial class QuickCaptureSurfaceContent :
         object? focused = XamlRoot is null
             ? null
             : FocusManager.GetFocusedElement(XamlRoot);
-        if (ReferenceEquals(focused, InputTextBox))
-        {
-            return "Input";
-        }
         if (ReferenceEquals(focused, SearchTextBox))
         {
             return "Search";
@@ -3188,7 +3158,6 @@ public sealed partial class QuickCaptureSurfaceContent :
         _pendingFocusTarget = null;
         FrameworkElement element = target switch
         {
-            "Input" => InputTextBox,
             "Search" => SearchTextBox,
             "Items" => ItemsList,
             _ => ResponsiveContentGrid

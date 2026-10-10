@@ -1,6 +1,7 @@
 using DeskBox.Models;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
+using Microsoft.UI.Xaml.Automation.Peers;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Animation;
@@ -61,11 +62,43 @@ public sealed partial class WidgetFeedbackPresenter : UserControl
         FeedbackSurface.IsHitTestVisible = hasAction || request.DismissAction is not null;
         FeedbackSurface.Visibility = Visibility.Visible;
 
+        // Announce through UIA rather than relying on the live region alone:
+        // the text is written before the surface becomes visible, so a
+        // LiveSetting-only region never fires for Narrator, and an identical
+        // follow-up message would stay silent either way.
+        AnnounceToAutomation(request.Message, request.Severity);
+
         AnimateIn();
         _ = DismissAfterDelayAsync(
             generation,
             request.DisplayDuration,
             _dismissCancellation.Token);
+    }
+
+    /// <summary>
+    /// Raises a UIA notification for the toast so screen readers announce the
+    /// result. Success maps to ActionCompleted; warnings and errors use
+    /// ImportantMostRecent so they are not swallowed by queued speech.
+    /// </summary>
+    private void AnnounceToAutomation(string message, WidgetFeedbackSeverity severity)
+    {
+        // CreatePeerForElement rather than FromElement alone: the peer may not
+        // exist yet on the first toast (or right after Narrator activates),
+        // and a missing peer would silently drop the announcement.
+        AutomationPeer? peer = FrameworkElementAutomationPeer.FromElement(MessageText) ??
+                                FrameworkElementAutomationPeer.CreatePeerForElement(MessageText);
+        if (peer is null)
+        {
+            return;
+        }
+
+        AutomationNotificationKind kind = severity == WidgetFeedbackSeverity.Success
+            ? AutomationNotificationKind.ActionCompleted
+            : AutomationNotificationKind.Other;
+        AutomationNotificationProcessing processing = severity is WidgetFeedbackSeverity.Warning or WidgetFeedbackSeverity.Error
+            ? AutomationNotificationProcessing.ImportantMostRecent
+            : AutomationNotificationProcessing.MostRecent;
+        peer.RaiseNotificationEvent(kind, processing, message, "DeskBox.Feedback");
     }
 
     public void Clear(string? deduplicationKey = null)

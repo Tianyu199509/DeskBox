@@ -142,7 +142,8 @@ public sealed partial class WidgetManager
                     }
 
                     using var frameTimeout = new CancellationTokenSource(
-                        WidgetGroupFirstFrameTimeout);
+                        ResolveWidgetGroupFirstFrameBudget(
+                            candidate.CurrentContent));
                     await candidate.WaitForFirstPresentedFrameAsync(
                         frameTimeout.Token);
                 },

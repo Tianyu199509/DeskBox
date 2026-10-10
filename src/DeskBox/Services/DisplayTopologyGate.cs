@@ -27,8 +27,10 @@ public sealed class DisplayTopologyGate
     private readonly HashSet<DisplayTopologyGateReason> _closedReasons = [];
 
     private DateTimeOffset? _graceStartedAt;
-    private readonly HashSet<string> _graceActiveIds = new(StringComparer.OrdinalIgnoreCase);
-    private readonly HashSet<string> _graceRemovedIds = new(StringComparer.OrdinalIgnoreCase);
+    // Counting maps, not sets: two degenerate monitors with the same
+    // resolution share one geo token, and the grace must track them as two
+    // units (a duplicate id can be removed and return independently).
+    private readonly Dictionary<string, int> _graceActiveIds = new(StringComparer.OrdinalIgnoreCase);
 
     public DisplayTopologyGate(Func<DateTimeOffset>? clock = null)
     {
@@ -75,21 +77,17 @@ public sealed class DisplayTopologyGate
         IReadOnlyCollection<string> activeIds,
         IReadOnlyCollection<string> currentIds)
     {
+        // IReadOnlyCollection.Count over a duplicate-bearing sequence is the
+        // total unit count, which is exactly the comparison wanted here.
         if (currentIds.Count >= activeIds.Count)
         {
             return;
         }
 
         _graceActiveIds.Clear();
-        _graceRemovedIds.Clear();
         foreach (string id in activeIds)
         {
-            _graceActiveIds.Add(id);
-        }
-
-        foreach (string id in currentIds)
-        {
-            _graceRemovedIds.Add(id);
+            _graceActiveIds[id] = _graceActiveIds.GetValueOrDefault(id) + 1;
         }
 
         _graceStartedAt = _clock();
@@ -98,9 +96,10 @@ public sealed class DisplayTopologyGate
     }
 
     /// <summary>
-    /// Observes the current display set while a grace is running: returning
-    /// displays cancel the grace outright (nothing to apply); otherwise the
-    /// gate keeps waiting until the grace duration elapses.
+    /// Observes the current display set while a grace is running: every
+    /// removed unit returning (duplicates counted) cancels the grace
+    /// outright (nothing to apply); otherwise the gate keeps waiting until
+    /// the grace duration elapses.
     /// </summary>
     public void ObserveDisplays(IReadOnlyCollection<string> currentIds)
     {
@@ -109,10 +108,21 @@ public sealed class DisplayTopologyGate
             return;
         }
 
-        bool allReturned = true;
-        foreach (string id in _graceActiveIds)
+        Dictionary<string, int> currentCounts = new(StringComparer.OrdinalIgnoreCase);
+        foreach (string id in currentIds)
         {
-            if (!_graceRemovedIds.Contains(id) && !currentIds.Contains(id, StringComparer.OrdinalIgnoreCase))
+            currentCounts[id] = currentCounts.GetValueOrDefault(id) + 1;
+        }
+
+        // Counting-superset rule: the grace only cancels when every active
+        // unit is back. Accepted trade versus the old set rule: a mixed swap
+        // (one of two identical degenerate monitors leaves while a different
+        // display arrives) reads as "not fully returned" and simply waits out
+        // the bounded grace window instead of cancelling early.
+        bool allReturned = true;
+        foreach ((string id, int activeCount) in _graceActiveIds)
+        {
+            if (currentCounts.GetValueOrDefault(id) < activeCount)
             {
                 allReturned = false;
                 break;

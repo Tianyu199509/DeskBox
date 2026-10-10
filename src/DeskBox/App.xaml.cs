@@ -135,7 +135,7 @@ public partial class App : Application
     private BackupRuntime? _backupRuntime;
     private readonly ShutdownSequence _shutdownSequence = new(Log);
     private static int s_shutdownRequested;
-    private static bool IsShuttingDown => Volatile.Read(ref s_shutdownRequested) != 0;
+    internal static bool IsShuttingDown => Volatile.Read(ref s_shutdownRequested) != 0;
     private TodoReminderService? _todoReminderService => _todoReminderRuntime?.Current as TodoReminderService;
     private DisplayAreaWatcherService? _displayAreaWatcher;
     private DisplayTopologyTransitionCoordinator? _displayTopologyTransitionCoordinator;
@@ -1390,8 +1390,20 @@ public partial class App : Application
                     OrganizerService,
                     widgetManager);
                 DesktopAutoOrganizationWatcher.ItemOrganized += ShowDesktopAutoOrganizationNotification;
+                DesktopAutoOrganizationWatcher.AutoOrganizationTargetUnavailable +=
+                    ShowDesktopAutoOrganizationTargetUnavailableNotification;
                 DesktopAutoOrganizationWatcher.Start();
             });
+
+            // The availability probe can block on offline devices for the
+            // network timeout, so it runs after startup on a pool thread —
+            // never inside the settings load/save normalize passes.
+            await RunOptionalStartupStepAsync(
+                "desktop-organization-target-availability",
+                () => Task.Run(() =>
+                    DesktopOrganizationTargetAvailabilityAdvisor.WarnIfUnavailableTargets(
+                        SettingsService,
+                        ShowDesktopAutoOrganizationTargetUnavailableNotification)));
 
             await RunOptionalStartupStepAsync(
                 "onboarding",
@@ -1681,14 +1693,14 @@ public partial class App : Application
             return;
         }
 
-        HashSet<string> current = DisplayIdentityTokens.CurrentSet();
+        IReadOnlyList<string> current = DisplayIdentityTokens.CurrentSet();
         if (gate.ClosedReasons.Contains(DisplayTopologyGateReason.RemovalGrace))
         {
             gate.ObserveDisplays(current);
             return;
         }
 
-        HashSet<string> active = DisplayIdentityTokens.ActiveProfileSet(SettingsService.Settings);
+        IReadOnlyList<string> active = DisplayIdentityTokens.ActiveProfileSet(SettingsService.Settings);
         if (active.Count > 0 && DisplayIdentityTokens.IsTrueSubset(current, active))
         {
             gate.StartRemovalGrace(active, current);
@@ -1754,7 +1766,7 @@ public partial class App : Application
     {
         try
         {
-            HashSet<string> active = DisplayIdentityTokens.ActiveProfileSet(SettingsService.Settings);
+            IReadOnlyList<string> active = DisplayIdentityTokens.ActiveProfileSet(SettingsService.Settings);
             if (active.Count == 0)
             {
                 return;
@@ -1763,7 +1775,7 @@ public partial class App : Application
             var deadline = DateTimeOffset.UtcNow + TimeSpan.FromSeconds(5);
             while (DateTimeOffset.UtcNow < deadline)
             {
-                HashSet<string> current = DisplayIdentityTokens.CurrentSet();
+                IReadOnlyList<string> current = DisplayIdentityTokens.CurrentSet();
                 if (!DisplayIdentityTokens.IsTrueSubset(current, active))
                 {
                     break;
@@ -1861,6 +1873,11 @@ public partial class App : Application
                 _hookHealthWatchdog.Watch(() => GlobalHotkeyService);
                 _hookHealthWatchdog.Watch(() => _searchHotkeyService);
                 _hookHealthWatchdog.Watch(() => DesktopDoubleClickActivationService);
+                // RegisterHotKey chords have no hook to probe; the watchdog
+                // keeps them alive with a periodic unregister+register
+                // round-trip instead (feedback 308/371).
+                _hookHealthWatchdog.WatchMaintenance(() => GlobalHotkeyService);
+                _hookHealthWatchdog.WatchMaintenance(() => _searchHotkeyService);
             }
             catch (Exception ex)
             {
@@ -2183,6 +2200,62 @@ public partial class App : Application
             options: new NativeAppNotificationOptions(
                 Tag: "desktop-auto-organization",
                 Group: "desktop-organization"));
+    }
+
+    /// <summary>
+    /// User-visible counterpart of the recoverable-skip policy: a rule whose
+    /// target folder is temporarily unreachable keeps the auto-organization
+    /// switch on and is skipped at runtime, and this notice makes that skip
+    /// visible instead of silent. Shared by the startup availability advisor
+    /// and the watcher's move-time unavailability episodes.
+    /// </summary>
+    private void ShowDesktopAutoOrganizationTargetUnavailableNotification(
+        DesktopOrganizationTargetUnavailableSummary summary)
+    {
+        if (UiDispatcherQueue is { HasThreadAccess: false } dispatcherQueue)
+        {
+            dispatcherQueue.TryEnqueue(() =>
+                ShowDesktopAutoOrganizationTargetUnavailableNotification(summary));
+            return;
+        }
+
+        if (LocalizationService is null || IsShuttingDown ||
+            summary.WidgetNames.Count == 0)
+        {
+            return;
+        }
+
+        string title = LocalizationService.T(
+            "DesktopOrganization.Auto.TargetUnavailableTitle");
+        string message = summary.WidgetNames.Count == 1
+            ? LocalizationService.Format(
+                "DesktopOrganization.Auto.TargetUnavailableBody.Widget",
+                summary.WidgetNames[0])
+            : LocalizationService.Format(
+                "DesktopOrganization.Auto.TargetUnavailableBody.Count",
+                summary.WidgetNames.Count);
+        if (_nativeNotificationService?.TryShow(title, message) == true || _trayIcon is null)
+        {
+            return;
+        }
+
+        try
+        {
+            _trayIcon.ShowNotification(
+                title,
+                message,
+                NotificationIcon.Warning,
+                customIconHandle: null,
+                largeIcon: false,
+                sound: false,
+                respectQuietTime: true,
+                realtime: false,
+                timeout: TimeSpan.FromSeconds(10));
+        }
+        catch (Exception ex)
+        {
+            Log($"[DesktopAutoOrganization] Target-unavailable notification failed: {ex.Message}");
+        }
     }
 
     private async Task UndoDesktopOrganizationFromNotificationAsync(string historyId)
@@ -3291,7 +3364,8 @@ public partial class App : Application
                 action => UiDispatcherQueue.TryEnqueue(() => action()),
                 ex => Log($"[BackupSettings] Operation failed: {ex}"),
                 localize: LocalizationService.T,
-                format: (key, args) => LocalizationService.Format(key, args)),
+                format: (key, args) => LocalizationService.Format(key, args),
+                isStoreChannel: AppDistributionService.Current.IsMicrosoftStore),
             _backupRestoreActions ?? throw new InvalidOperationException(
                 "Backup restore actions are not initialized."),
             _quickCaptureSettings ?? throw new InvalidOperationException("Quick Capture is not initialized."),

@@ -148,6 +148,105 @@ public sealed class WidgetManagerMoveAllTests : IDisposable
     }
 
     [Fact]
+    public async Task MoveAll_PersistsOnce_NotPerSurface()
+    {
+        Harness harness = Create();
+        AddPinnedWidget(harness, "w1", "screen-a", 10, 20);
+        AddPinnedWidget(harness, "w2", "screen-a", 30, 40);
+        AddPinnedWidget(harness, "w3", "screen-a", 50, 60);
+
+        // The batch runs UpdateWidget(notifySubscribers:false) per surface
+        // and its debounced saves never notify, so the ONLY SettingsChanged
+        // notification must come from the single trailing checked save (the
+        // old code saved — and notified — once per surface).
+        int notifications = 0;
+        harness.Settings.SettingsChanged += () => notifications++;
+
+        (int moved, WidgetMoveAllUndoToken token) =
+            await harness.Manager.MoveAllWidgetSurfacesToDisplayAsync("screen-b");
+
+        Assert.True(moved >= 3);
+        Assert.True(token.Persisted);
+        Assert.Equal(1, notifications);
+    }
+
+    [Fact]
+    public async Task MoveAll_SaveFails_StillReturnsTokenAndSurfacesApplied()
+    {
+        Harness harness = Create();
+        WidgetConfig first = AddPinnedWidget(harness, "w1", "screen-a", 10, 20);
+        WidgetConfig second = AddPinnedWidget(harness, "w2", "screen-a", 30, 40);
+
+        // Sabotage the store (SettingsServiceTests technique): move the
+        // settings directory aside and park a same-named FILE in its place,
+        // so the batch's single trailing save cannot even stage its temp
+        // file. The internal SettingsService constructor already created
+        // the directory.
+        string settingsRoot = Path.Combine(_root, "settings");
+        string movedAside = settingsRoot + "-moved";
+        Directory.Move(settingsRoot, movedAside);
+        File.WriteAllText(settingsRoot, "not a directory");
+
+        (int moved, WidgetMoveAllUndoToken token) =
+            await harness.Manager.MoveAllWidgetSurfacesToDisplayAsync("screen-b");
+
+        // The in-memory batch result and the undo token survive the failed
+        // persistence; only the physical save is reported as failed.
+        Assert.True(moved >= 2);
+        Assert.False(token.Persisted);
+        Assert.NotNull(harness.Settings.LastPersistenceFailure);
+        Assert.All(
+            harness.Settings.Settings.Widgets,
+            widget => Assert.Equal("screen-b", widget.BoundScreenId));
+
+        // Restore the store: the undo path must still work against the
+        // in-memory state the failed batch left behind.
+        File.Delete(settingsRoot);
+        Directory.Move(movedAside, settingsRoot);
+        Assert.True(await harness.Manager.UndoMoveAllWidgetSurfacesAsync(token));
+        Assert.All(
+            harness.Settings.Settings.Widgets,
+            widget => Assert.Equal("screen-a", widget.BoundScreenId));
+        Assert.Equal(10, first.X);
+        Assert.Equal(20, first.Y);
+        Assert.Equal(30, second.X);
+        Assert.Equal(40, second.Y);
+    }
+
+    [Fact]
+    public async Task MoveAll_PersistenceFailure_DoesNotThrow()
+    {
+        Harness harness = Create();
+        AddPinnedWidget(harness, "w1", "screen-a", 10, 20);
+
+        string settingsRoot = Path.Combine(_root, "settings");
+        string movedAside = settingsRoot + "-moved";
+        Directory.Move(settingsRoot, movedAside);
+        File.WriteAllText(settingsRoot, "not a directory");
+
+        // SaveToFileOnlyAsync converts every persistence failure into a
+        // false result, so a broken store must never bubble an exception
+        // out of the batch.
+        int moved = 0;
+        WidgetMoveAllUndoToken? token = null;
+        Exception? thrown = null;
+        try
+        {
+            (moved, token) = await harness.Manager
+                .MoveAllWidgetSurfacesToDisplayAsync("screen-b");
+        }
+        catch (Exception ex)
+        {
+            thrown = ex;
+        }
+
+        Assert.Null(thrown);
+        Assert.True(moved >= 1);
+        Assert.NotNull(token);
+        Assert.False(token!.Persisted);
+    }
+
+    [Fact]
     public void DisconnectCollapse_ExpandsStillCollapsedSurfaceWhenHomeReturns()
     {
         Harness harness = Create();

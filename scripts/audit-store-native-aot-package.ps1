@@ -130,6 +130,19 @@ function Get-FileSha256 {
     return (Get-FileHash -Algorithm SHA256 -LiteralPath $Path).Hash
 }
 
+function Get-TextSha256 {
+    param([AllowEmptyString()][string]$Value)
+
+    $sha256 = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        return ([System.BitConverter]::ToString(
+                $sha256.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($Value)))).Replace("-", "")
+    }
+    finally {
+        $sha256.Dispose()
+    }
+}
+
 if (-not (Test-Path -LiteralPath $resolvedMsix -PathType Leaf)) {
     throw "The MSIX package does not exist: '$resolvedMsix'."
 }
@@ -387,6 +400,7 @@ function Get-WorkingTreeSnapshot {
     [pscustomobject]@{
         GitCommit = $commit
         GitDirty = -not [string]::IsNullOrWhiteSpace($status)
+        Fingerprint = Get-TextSha256 -Value ($status + "`n" + $diff)
         StatusEntries = @($status -split "`n" | Where-Object { $_ })
     }
 }

@@ -98,7 +98,7 @@ public sealed partial class SettingsWindow
         {
             XamlRoot = SettingsRoot.XamlRoot,
             Title = _localizationService.T("Settings.ManagedPath.Error.DesktopOverlapTitle"),
-            CloseButtonText = _localizationService.T("Common.Ok"),
+            CloseButtonText = _localizationService.T("Common.Close"),
             DefaultButton = ContentDialogButton.Close,
             Content = new TextBlock
             {
@@ -283,7 +283,7 @@ public sealed partial class SettingsWindow
                 Title = shouldUnpin
                     ? _localizationService.T("Settings.Dialog.UnpinQuickAccessFailedTitle")
                     : _localizationService.T("Settings.Dialog.PinQuickAccessFailedTitle"),
-                CloseButtonText = _localizationService.T("Common.Ok"),
+                CloseButtonText = _localizationService.T("Common.Close"),
                 DefaultButton = ContentDialogButton.Close,
                 Content = new TextBlock
                 {
@@ -305,7 +305,7 @@ public sealed partial class SettingsWindow
                     Title = shouldUnpin
                         ? _localizationService.T("Settings.Dialog.UnpinQuickAccessFailedTitle")
                         : _localizationService.T("Settings.Dialog.PinQuickAccessFailedTitle"),
-                    CloseButtonText = _localizationService.T("Common.Ok"),
+                    CloseButtonText = _localizationService.T("Common.Close"),
                     DefaultButton = ContentDialogButton.Close,
                     Content = new TextBlock
                     {
@@ -415,28 +415,10 @@ public sealed partial class SettingsWindow
         while (result is { Success: false, FailureKind: not AppUpdateDownloadFailureKind.Cancelled } &&
                SettingsRoot.XamlRoot is not null)
         {
-            var dialog = new ContentDialog
-            {
-                XamlRoot = SettingsRoot.XamlRoot,
-                Title = _localizationService.T("Settings.Update.DownloadFailedTitle"),
-                Content = new TextBlock
-                {
-                    Text = _localizationService.Format(
-                        "Settings.Update.DownloadFailedBody",
-                        ViewModel.UpdateDetailText),
-                    TextWrapping = TextWrapping.Wrap
-                },
-                PrimaryButtonText = _localizationService.T("Settings.Update.OneClick.Retry"),
-                CloseButtonText = _localizationService.T("Common.Cancel"),
-                DefaultButton = ContentDialogButton.Primary
-            };
-
-            if (ViewModel.CanOpenManualUpdateDownload)
-            {
-                dialog.SecondaryButtonText = ViewModel.UpdateFallbackActionText;
-            }
-
-            ContentDialogResult choice = await dialog.ShowAsync();
+            // Raised from a download continuation, so it can land while the
+            // user already has a dialog open on this window; the coordinator
+            // retries briefly instead of crashing on the second ShowAsync.
+            ContentDialogResult choice = await ShowDialogWhenFreeAsync(BuildDownloadFailureDialog);
             if (choice == ContentDialogResult.Secondary)
             {
                 OpenManualUpdateDownload();
@@ -450,6 +432,32 @@ public sealed partial class SettingsWindow
 
             result = await ViewModel.DownloadAvailableUpdateAsync();
         }
+    }
+
+    private ContentDialog BuildDownloadFailureDialog()
+    {
+        var dialog = new ContentDialog
+        {
+            XamlRoot = SettingsRoot.XamlRoot,
+            Title = _localizationService.T("Settings.Update.DownloadFailedTitle"),
+            Content = new TextBlock
+            {
+                Text = _localizationService.Format(
+                    "Settings.Update.DownloadFailedBody",
+                    ViewModel.UpdateDetailText),
+                TextWrapping = TextWrapping.Wrap
+            },
+            PrimaryButtonText = _localizationService.T("Settings.Update.OneClick.Retry"),
+            CloseButtonText = _localizationService.T("Common.Cancel"),
+            DefaultButton = ContentDialogButton.Primary
+        };
+
+        if (ViewModel.CanOpenManualUpdateDownload)
+        {
+            dialog.SecondaryButtonText = ViewModel.UpdateFallbackActionText;
+        }
+
+        return dialog;
     }
 
     private async Task<bool> CreatePreUpdateRecoverySnapshotAsync()
@@ -530,7 +538,10 @@ public sealed partial class SettingsWindow
                 ? "Settings.Update.InstallPathMismatchBody"
                 : "Settings.Update.InstallFailedBody";
 
-        var dialog = new ContentDialog
+        // Queued from the updater process exit path, so it can land while a
+        // user dialog is open; route through the same coordinator as the
+        // download-failure retry dialog.
+        ContentDialogResult choice = await ShowDialogWhenFreeAsync(() => new ContentDialog
         {
             XamlRoot = SettingsRoot.XamlRoot,
             Title = _localizationService.T(titleKey),
@@ -540,11 +551,11 @@ public sealed partial class SettingsWindow
                 TextWrapping = TextWrapping.Wrap
             },
             PrimaryButtonText = ViewModel.UpdateFallbackActionText,
-            CloseButtonText = _localizationService.T("Common.Ok"),
+            CloseButtonText = _localizationService.T("Common.Close"),
             DefaultButton = ContentDialogButton.Close
-        };
+        });
 
-        if (await dialog.ShowAsync() == ContentDialogResult.Primary)
+        if (choice == ContentDialogResult.Primary)
         {
             OpenManualUpdateDownload();
         }

@@ -82,10 +82,15 @@ internal static class ShortcutFileLauncher
         try
         {
             // No WorkingDirectory: the link's own start-in folder must win.
+            // No Verb either (feedback 246): a NULL verb is the desktop
+            // double-click dispatch, and link resolution forwards it to the
+            // target's default launch. An explicit "open" verb adds nothing
+            // on healthy machines and breaks where only the OS-side "open"
+            // resolution is damaged — the same machine still drops onto the
+            // shortcut in Explorer fine.
             Process.Start(new ProcessStartInfo(shortcutPath, arguments)
             {
-                UseShellExecute = true,
-                Verb = "open"
+                UseShellExecute = true
             });
             App.Log(
                 $"[ShortcutLaunch] Launched '{shortcutPath}' with " +

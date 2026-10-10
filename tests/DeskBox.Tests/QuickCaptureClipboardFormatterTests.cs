@@ -43,9 +43,9 @@ public sealed class QuickCaptureClipboardFormatterTests
 
         string formatted = QuickCaptureClipboardFormatter.FormatSingle(item, localization);
 
-        Assert.Contains("Content:", formatted, StringComparison.Ordinal);
+        Assert.Contains("Content", formatted, StringComparison.Ordinal);
         Assert.Contains("meeting notes", formatted, StringComparison.Ordinal);
-        Assert.Contains("Attachments (2):", formatted, StringComparison.Ordinal);
+        Assert.Contains("Attachments (2)", formatted, StringComparison.Ordinal);
         Assert.Contains(@"Path: C:\captures\one.png", formatted, StringComparison.Ordinal);
         Assert.Contains(@"Path: C:\captures\brief.pdf", formatted, StringComparison.Ordinal);
     }
@@ -97,9 +97,9 @@ public sealed class QuickCaptureClipboardFormatterTests
 
         string formatted = QuickCaptureClipboardFormatter.FormatSingle(item, localization);
 
-        Assert.Contains("内容：", formatted, StringComparison.Ordinal);
-        Assert.Contains("附件（1）：", formatted, StringComparison.Ordinal);
-        Assert.Contains(@"路径：C:\资料\会议.pdf", formatted, StringComparison.Ordinal);
+        Assert.Contains("内容", formatted, StringComparison.Ordinal);
+        Assert.Contains("附件(1)", formatted, StringComparison.Ordinal);
+        Assert.Contains(@"路径: C:\资料\会议.pdf", formatted, StringComparison.Ordinal);
     }
 
     [Theory]

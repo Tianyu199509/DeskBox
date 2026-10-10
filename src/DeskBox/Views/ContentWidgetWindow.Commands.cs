@@ -82,6 +82,8 @@ public sealed partial class ContentWidgetWindow
             ContentWidgetShell.SizeLockActionIcon,
             ContentWidgetShell.SizeLockFilledActionIcon,
             _config.IsSizeLocked);
+        // The lock button accessible names flip between lock/unlock wording.
+        ApplyTitleActionAccessibleNames();
     }
 
     // ── Button click handlers ──────────────────────────────────

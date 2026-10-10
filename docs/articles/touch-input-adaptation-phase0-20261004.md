@@ -48,7 +48,7 @@ Phase 0 产出：修正后的断点定案清单 + 批 1'–批 5' 范围定稿�
 - 第三轮 grep 证实全仓库**零** `InputPane`/`InputPaneInterop`/触摸键盘处理；受影响输入框全景：搜索弹窗（`Views/SearchPopupWindow.xaml:324`）、快速捕获输入（`Controls/WidgetContents/QuickCaptureSurfaceContent.xaml:106`）、文件内联重命名（`FileSurfaceContent.xaml:800`）、通用内联编辑器（`WidgetInlineEditor.xaml:44`）、堆叠弹层改名窗（`Views/StackPopoverInlineRenameWindow.cs:38`）、Todo 标题/步骤三框（`TodoWidgetContent.xaml:670/798/834`）、Markdown 源编辑器、设置页搜索 + 云备份表单（约 10 处）。
 - 理论上[触摸设计指引](https://learn.microsoft.com/en-us/windows/apps/design/input/touch-interactions)称"Windows app text input controls invoke the touch keyboard by default"，但 WinUI 3 desktop 没有 CoreWindow，触摸键盘不自动弹出是该形态的已知缺陷（对照：[键盘 API 迁移指南](https://learn.microsoft.com/en-us/windows/apps/windows-app-sdk/migrate-to-windows-app-sdk/guides/keyboard-events)、[microsoft-ui-xaml 讨论 #8874](https://github.com/microsoft/microsoft-ui-xaml/discussions/8874)）。
 - 标准修法（社区 + 文档一致）：`InputPaneInterop.GetForWindow(hwnd)` 取 `InputPane`，在文本框获得焦点（`FocusState.Pointer`）时 `TryShow()`（[TryShow 文档](https://learn.microsoft.com/en-us/uwp/api/windows.ui.viewmanagement.inputpane.tryshow)注明为 best-effort）。
-- **"很多功能都不能用"的反馈与此高度吻合**：纯触摸用户点开搜索/快采/重命名，键盘不弹出，一切打字链路死亡。这是触摸用户最先撞到的墙。
+- **"很多功能都不能用"的反馈与此高度吻合**：纯触摸用户点开搜索/随记/重命名，键盘不弹出，一切打字链路死亡。这是触摸用户最先撞到的墙。
 
 ### 2.3 长按冲突（社区证据支持，仍需实测表现）
 
@@ -90,7 +90,7 @@ Phase 0 产出：修正后的断点定案清单 + 批 1'–批 5' 范围定稿�
 | B1 | 触摸按下时 `IsLeftButtonPressed == true`（WinUI 3 投影与文档一致） | 打点版 Debug：PointerPressed 处记设备类型 + `IsLeftButtonPressed` + `IsInContact`（一处样例打点即可，建议挂文件格子标题栏） | 通过 → 左键门替换批彻底取消；不通过 → 恢复原批 1（21 处替换为 `IsLeftButtonPressed \|\| (Touch/Pen && IsInContact)`） |
 | B2 | 触摸按住拖动期间 `GetCursorPos` 持续跟手指；抬指后停在最后触点 | 打点版：窗口拖动路径同时记 `GetCursorPos` 与 `e.GetCurrentPoint` 屏幕坐标，触摸拖动 3 秒比对 | 跟随 → 窗口拖动/胶囊探针/拖入判定"半可用"，坐标源改造降级为打磨项；不跟 → 坐标源改造独立成批（本线最大单项工程） |
 | B3 | 文件项长按：RightTapped（原生 Shell 菜单）与 CanDrag 拖拽谁触发 | 触摸：a) 按住不动 1.5s；b) 按住立刻拖动；c) 短按 | a 出菜单 + b 起拖 = 冲突可共存；只出一方 → 批 5' 启用手势分流（社区 #1500 三方案） |
-| B4 | 触摸点各文本框，SIP 弹不弹 | 逐个输入框点按（搜索/快采/重命名/todo/设置页） | 任一不弹 → 批 1'（SIP 接线）成立；全弹 → 批 1' 降级为防回归 |
+| B4 | 触摸点各文本框，SIP 弹不弹 | 逐个输入框点按（搜索/随记/重命名/todo/设置页） | 任一不弹 → 批 1'（SIP 接线）成立；全弹 → 批 1' 降级为防回归 |
 | B5 | 桌面空白触摸双击 → WH_MOUSE_LL 收到合成消息 → 唤出格子 | `DesktopDoubleClickActivationService.cs:405/413` 已放行 LLMHF_INJECTED；触摸双击桌面观察格子是否唤出 | 不唤出 → 静默启动的触摸用户只剩托盘入口，批 4' 加格子表面唤出 |
 | B6 | 子类化 `WM_LBUTTONDOWN` 关原生菜单路径收不收触摸合成消息 | 触摸点格子内空白处，观察已开的原生 Shell 菜单是否关闭（`NativeDragDrop.cs:756`、`StackPopoverHostWindow.cs:344`） | 不关 → 原生菜单触摸下关不掉，批 5' 补 XAML 层关闭兜底 |
 | B7 | 桌面钉住（NOACTIVATE）格子的触摸点按能否激活窗口/聚焦内嵌输入 | 触摸点钉住格子的重命名框 | 不聚焦 → 与 B4 叠加，钉住格子的触摸输入全灭，批 1' 需含激活策略调整 |
@@ -122,7 +122,7 @@ Phase 0 产出：修正后的断点定案清单 + 批 1'–批 5' 范围定稿�
 **阶段 3 · 拖拽**
 10. 文件项长按后拖动 → 拖到桌面/其他窗口（拖出）（B3b）
 11. Explorer 触摸拖文件进格子（拖入，默认意图）
-12. 格子内拖动重排；快采/todo 列表项拖动；tab 拖出重排（B3 泛化）
+12. 格子内拖动重排；随记/todo 列表项拖动；tab 拖出重排（B3 泛化）
 
 **阶段 4 · 窗口管理**
 13. 触摸拖标题栏移动格子；拖 Overlay 格子的悬浮把手（168×14，B2 综合）
@@ -164,7 +164,7 @@ Phase 0 产出：修正后的断点定案清单 + 批 1'–批 5' 范围定稿�
 | 批次 | 范围 | 触发条件 | 预估 |
 |---|---|---|---|
 | 批 1' | SIP 全接线：`InputPaneInterop` 服务 + 全部文本框 GotFocus→TryShow + SIP 弹出后的窗口避让（reflow 指引）；叠加 B7 钉住激活问题 | B4 任一 FAIL（预期成立） | 1–1.5 天 |
-| 批 2' | hover 杀手：App 级"最后输入设备"检测 → 触摸模式；条目操作按钮（快采/todo/附件/Glance）、胶囊动作区、Overlay 把手在触摸模式常显或按住浮现；胶囊 hover 闸门补触摸路径 | B8 FAIL（预期成立，静态已证 hover-only 无替代） | 1–2 天 |
+| 批 2' | hover 杀手：App 级"最后输入设备"检测 → 触摸模式；条目操作按钮（随记/todo/附件/Glance）、胶囊动作区、Overlay 把手在触摸模式常显或按住浮现；胶囊 hover 闸门补触摸路径 | B8 FAIL（预期成立，静态已证 hover-only 无替代） | 1–2 天 |
 | 批 3' | 手势等价设计批：捏合缩放映射 IconSizing；长按进入多选模式（修饰键触摸等价，Android/iOS 惯例）；swipe 快捷命令评估 | 设计拍板项，Simon 决定做多大 | 0.5–2 天 |
 | 批 4' | 入口与命中：托盘补搜索/整理项或格子表面入口；命中目标按 40/44 epx + 4 epx 间距在触摸模式扩展（视觉尺寸不变，扩热区） | 矩阵阶段 5 结果 | 0.5–1 天 |
 | 批 5' | 实证失败项修复池：B2 坐标源改造（若不跟手指，本线最大工程，独立成批）/ B3 手势分流（StartDragAsync 手动路径 or Holding 菜单）/ B5 唤出入口 / B6 菜单关闭 / B9 dwell 门 / B11 双击阈值 | 逐条由矩阵结果点亮 | 按项计 |

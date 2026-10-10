@@ -254,6 +254,10 @@ public sealed class SettingsSliceOwnershipContractTests
         // reconciled without reacting to unrelated debounced saves.
         ["src/DeskBox/Services/TodoSettingsCoordinator.cs"] = 1,
         ["src/DeskBox/Services/DesktopOrganizationCoordinator.cs"] = 13,
+        // 4 = the target-availability advisor's read-only mirror of the rule
+        // gate: master switch, rule list, widget list, and tombstone list.
+        // It only classifies targets for a warning and never writes.
+        ["src/DeskBox/Services/DesktopOrganizationTargetAvailability.cs"] = 4,
         ["src/DeskBox/Services/DesktopOrganizationTransaction.Restore.cs"] = 3,
         ["src/DeskBox/Services/DesktopOrganizationTransaction.cs"] = 9,
         ["src/DeskBox/Services/DirectStartupService.cs"] = 2,
@@ -262,7 +266,9 @@ public sealed class SettingsSliceOwnershipContractTests
         ["src/DeskBox/Services/FeatureWidgetSettings.cs"] = 13,
         ["src/DeskBox/Services/FileWidgetFolderOpenBehaviorNames.cs"] = 1,
         ["src/DeskBox/Services/FileWidgetIconLayout.cs"] = 6,
-        ["src/DeskBox/Services/GlobalHotkeyService.cs"] = 17,
+        // +1 each: the watchdog chord heartbeat reads the enabled flag once
+        // per cycle via RegistrationMaintenanceWanted (feedback 308/371 fix).
+        ["src/DeskBox/Services/GlobalHotkeyService.cs"] = 18,
         ["src/DeskBox/Services/InitialFileWidgetSetupPolicy.cs"] = 2,
         ["src/DeskBox/Services/JumpListService.cs"] = 1,
         ["src/DeskBox/Services/LocalizationService.cs"] = 3,
@@ -270,10 +276,10 @@ public sealed class SettingsSliceOwnershipContractTests
         ["src/DeskBox/Services/PerformanceSettingsPolicy.cs"] = 78,
         ["src/DeskBox/Services/QuickCaptureClipboardService.cs"] = 6,
         ["src/DeskBox/Services/SearchEngineService.cs"] = 7,
-        ["src/DeskBox/Services/SearchHotkeyService.cs"] = 12,
+        ["src/DeskBox/Services/SearchHotkeyService.cs"] = 13,
         ["src/DeskBox/Services/SearchResultActionService.cs"] = 2,
         ["src/DeskBox/Services/SettingsMigrationService.cs"] = 55,
-        ["src/DeskBox/Services/SettingsSearchCatalog.cs"] = 23,
+        ["src/DeskBox/Services/SettingsSearchCatalog.cs"] = 25,
         ["src/DeskBox/Services/SettingsService.cs"] = 613,
         ["src/DeskBox/Services/ThemeService.cs"] = 11,
         ["src/DeskBox/Views/SettingsSections/DisplaySettingsSection.xaml.cs"] = 14,
@@ -361,7 +367,7 @@ public sealed class SettingsSliceOwnershipContractTests
         ["src/DeskBox/ViewModels/SettingsViewModel.HotkeyAndStorage.cs"] = 6,
         ["src/DeskBox/ViewModels/SettingsViewModel.RuntimeDiagnostics.cs"] = 1,
         ["src/DeskBox/ViewModels/SettingsViewModel.SettingsSync.cs"] = 7,
-        ["src/DeskBox/ViewModels/SettingsViewModel.cs"] = 15,
+        ["src/DeskBox/ViewModels/SettingsViewModel.cs"] = 16,
         ["src/DeskBox/ViewModels/TodoWidgetViewModel.DetailAndAttachments.cs"] = 1,
         ["src/DeskBox/ViewModels/TodoWidgetViewModel.FilteringAndAppearance.cs"] = 21,
         ["src/DeskBox/ViewModels/TodoWidgetViewModel.cs"] = 12,

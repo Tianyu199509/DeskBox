@@ -34,6 +34,7 @@
 
                 <Button
                     x:Name="CloseButtonElement"
+                    AutomationProperties.Name="{x:Bind CancelText, Mode=OneWay}"
                     Grid.Column="1"
                     Click="CancelButton_Click"
                     Style="{StaticResource WidgetInlineEditorCloseButtonStyle}">
@@ -43,6 +44,7 @@
 
             <TextBox
                 x:Name="EditorTextBoxElement"
+                AutomationProperties.LabeledBy="{Binding ElementName=TitleTextBlockElement}"
                 Grid.Row="1"
                 FontSize="{x:Bind EditorFontSize, Mode=OneWay}"
                 Style="{StaticResource WidgetEditorTextBoxStyle}"
@@ -53,16 +55,18 @@
                 HorizontalAlignment="Right"
                 Orientation="Horizontal"
                 Spacing="8">
-                <Button
-                    x:Name="CancelButtonElement"
-                    Click="CancelButton_Click"
-                    Content="{x:Bind CancelText, Mode=OneWay}"
-                    FontSize="{x:Bind CommandFontSize, Mode=OneWay}"
-                    Style="{StaticResource WidgetEditorCommandButtonStyle}" />
+                <!-- Affirmative (Save) sits on the left, matching the app-wide
+                     ContentDialog convention (Primary = affirmative = left). -->
                 <Button
                     x:Name="SaveButtonElement"
                     Click="SaveButton_Click"
                     Content="{x:Bind SaveText, Mode=OneWay}"
+                    FontSize="{x:Bind CommandFontSize, Mode=OneWay}"
+                    Style="{StaticResource WidgetEditorCommandButtonStyle}" />
+                <Button
+                    x:Name="CancelButtonElement"
+                    Click="CancelButton_Click"
+                    Content="{x:Bind CancelText, Mode=OneWay}"
                     FontSize="{x:Bind CommandFontSize, Mode=OneWay}"
                     Style="{StaticResource WidgetEditorCommandButtonStyle}" />
             </StackPanel>

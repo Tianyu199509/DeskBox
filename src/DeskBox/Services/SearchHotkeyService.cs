@@ -13,7 +13,7 @@ namespace DeskBox.Services;
 /// Alt+Space preset rides the reserved low-level hook, matching how the main
 /// hotkey handles system-reserved gestures.
 /// </summary>
-public sealed class SearchHotkeyService : IDisposable, IHookHealthProbeTarget, ISearchHotkeyController
+public sealed class SearchHotkeyService : IDisposable, IHookHealthProbeTarget, IHookRegistrationMaintenanceTarget, ISearchHotkeyController
 {
     private const int SearchHotkeyId = 0x4444;
     private const uint WmReservedSearchHotkey = 0x8444;
@@ -33,6 +33,7 @@ public sealed class SearchHotkeyService : IDisposable, IHookHealthProbeTarget, I
     private bool _isRegistered;
     private bool _usesReservedHook;
     private bool _isInvoking;
+    private bool _suspendedForRecording;
     private long _receivedSequence;
     private long _invocationSequence;
     private long _dispatchFailureSequence;
@@ -84,6 +85,17 @@ public sealed class SearchHotkeyService : IDisposable, IHookHealthProbeTarget, I
 
     public void RefreshRegistration()
     {
+        RefreshRegistrationCore(quiet: false);
+    }
+
+    /// <summary>
+    /// The registration round-trip. RegisterHotKey has no query API, so the
+    /// unregister+register pair doubles as the self-check; the quiet mode is
+    /// used by the watchdog heartbeat so a healthy periodic refresh does not
+    /// flood the log.
+    /// </summary>
+    private void RefreshRegistrationCore(bool quiet)
+    {
         Unregister();
 
         if (_windowHandle == IntPtr.Zero || !_settingsService.Settings.SearchHotkeyEnabled)
@@ -122,12 +134,15 @@ public sealed class SearchHotkeyService : IDisposable, IHookHealthProbeTarget, I
         if (Register(_windowHandle, gesture))
         {
             _isRegistered = true;
-            App.Log($"[SearchHotkey] Registered gesture={FormatGesture(gesture)}");
+            if (!quiet)
+            {
+                App.Log($"[SearchHotkey] Registered gesture={FormatGesture(gesture)}");
+            }
+
+            return;
         }
-        else
-        {
-            App.Log($"[SearchHotkey] Failed to register gesture={FormatGesture(gesture)} (may be in use by another app)");
-        }
+
+        App.Log($"[SearchHotkey] Failed to register gesture={FormatGesture(gesture)} (may be in use by another app)");
     }
 
     private void ApplyReservedAltSpaceGesture()
@@ -285,11 +300,13 @@ public sealed class SearchHotkeyService : IDisposable, IHookHealthProbeTarget, I
     /// </summary>
     public void SuspendForRecording()
     {
+        _suspendedForRecording = true;
         Unregister();
     }
 
     public void ResumeAfterRecording()
     {
+        _suspendedForRecording = false;
         RefreshRegistration();
     }
 
@@ -305,6 +322,45 @@ public sealed class SearchHotkeyService : IDisposable, IHookHealthProbeTarget, I
         _reservedHotkeyHook.ProbeAliveAsync(echoWaitMilliseconds);
 
     void IHookHealthProbeTarget.RecoverHook() => RefreshRegistration();
+
+    string IHookRegistrationMaintenanceTarget.MaintenanceName => "search-hotkey-registration";
+
+    bool IHookRegistrationMaintenanceTarget.RegistrationMaintenanceWanted =>
+        !_suspendedForRecording &&
+        _windowHandle != IntPtr.Zero &&
+        _settingsService.Settings.SearchHotkeyEnabled &&
+        UsesRegisterHotKeyChord(CurrentGesture);
+
+    bool IHookRegistrationMaintenanceTarget.RegistrationHealthy => IsRegistered;
+
+    void IHookRegistrationMaintenanceTarget.RunRegistrationHeartbeat()
+    {
+        // Suspend-aware for the same reason as the main hotkey: the recorder
+        // dialog must be able to capture keys without the live hotkey firing.
+        // Both this method and suspend/resume run on the UI dispatcher.
+        if (_suspendedForRecording)
+        {
+            return;
+        }
+
+        RefreshRegistrationCore(quiet: true);
+        App.Log(
+            $"[SearchHotkey] Heartbeat refreshed gesture={FormatGesture(CurrentGesture)} " +
+            $"registered={IsRegistered}");
+    }
+
+    /// <summary>
+    /// True when the gesture rides the plain RegisterHotKey path (the one the
+    /// watchdog heartbeat keeps alive); Alt+Space rides the reserved
+    /// low-level hook that the liveness probe covers instead, and
+    /// Win-modifier/invalid gestures can never register.
+    /// </summary>
+    internal static bool UsesRegisterHotKeyChord(GlobalHotkeyGesture gesture)
+    {
+        return !gesture.Equals(AltSpaceGesture) &&
+            !gesture.Modifiers.HasFlag(HotkeyModifierKeys.Windows) &&
+            GlobalHotkeyService.IsValidGesture(gesture);
+    }
 
     private IntPtr WindowSubclassProc(IntPtr hWnd, uint message, UIntPtr wParam, IntPtr lParam, UIntPtr uIdSubclass, UIntPtr dwRefData)
     {

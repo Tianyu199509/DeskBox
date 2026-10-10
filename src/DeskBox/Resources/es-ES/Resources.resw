@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <root>
   <data name="AppDisplayName" xml:space="preserve">
-    <value>DeskBox Widgets</value>
+    <value>DeskBox</value>
   </data>
   <data name="AppDescription" xml:space="preserve">
     <value>Herramienta ligera de organización del escritorio para Windows 10/11</value>

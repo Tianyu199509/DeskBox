@@ -15,7 +15,7 @@ namespace DeskBox.Controls;
 public sealed partial class WidgetGroupTitleSwitcher
 {
     private DateTimeOffset _pointerEnteredAt;
-    private string? _pendingWheelTargetId;
+    private readonly WidgetGroupWheelSwitchCursor _wheelCursor = new();
     private double _wheelAccumulator;
     private DateTimeOffset _lastObservedWheelInputAt;
     private int _wheelGestureDirection;
@@ -248,6 +248,24 @@ public sealed partial class WidgetGroupTitleSwitcher
         _lastObservedWheelInputAt = default;
         _wheelGestureDirection = 0;
         _wheelGestureCommitted = false;
+    }
+
+    /// <summary>
+    /// The hosting group surface was interrupted (stowed to tray, member
+    /// removed, group dissolved). Hiding the window under the pointer raises
+    /// no PointerExited, so every optimistic hover/wheel gesture state that
+    /// would otherwise survive the interruption is dropped here (feedback
+    /// 387: a surviving cursor replayed as one extra page flip after the
+    /// next reveal).
+    /// </summary>
+    internal void NotifyInteractionInterrupted()
+    {
+        _wheelCursor.NotifyInterrupted();
+        ResetWheelGesture();
+        CancelWheelFeedback();
+        _isPointerOverSelector = false;
+        _isSelectorPressed = false;
+        _pointerEnteredAt = default;
     }
 
     private void AnimateWheelDirectionFeedback(bool scrollsUp)
@@ -580,11 +598,11 @@ public sealed partial class WidgetGroupTitleSwitcher
             _presentation.Members,
             _presentation.ActiveMemberId);
         if (origin == WidgetGroupSwitchOrigin.Wheel &&
-            !string.IsNullOrWhiteSpace(_pendingWheelTargetId))
+            !string.IsNullOrWhiteSpace(_wheelCursor.PendingTargetId))
         {
             int pendingIndex = FindMemberIndex(
                 _presentation.Members,
-                _pendingWheelTargetId);
+                _wheelCursor.PendingTargetId);
             if (pendingIndex >= 0)
             {
                 activeIndex = pendingIndex;
@@ -612,11 +630,11 @@ public sealed partial class WidgetGroupTitleSwitcher
             // persistence and the content transition. Keep the optimistic
             // target until the manager commits or rejects it so slow members
             // cannot repeatedly restart the same request.
-            _pendingWheelTargetId = targetId;
+            _wheelCursor.SetPending(targetId);
         }
         else
         {
-            _pendingWheelTargetId = null;
+            _wheelCursor.Clear();
         }
 
         MemberInvoked?.Invoke(
@@ -637,47 +655,33 @@ public sealed partial class WidgetGroupTitleSwitcher
             CompleteTabInvocation(widgetId, succeeded, version);
         }
 
-        if (!string.Equals(
-                _pendingWheelTargetId,
+        if (!_wheelCursor.ShouldReleaseOnCompletion(
                 widgetId,
-                StringComparison.Ordinal))
+                succeeded,
+                _presentation?.ActiveMemberId))
         {
             return;
         }
 
-        if (succeeded &&
-            !string.Equals(
-                _presentation?.ActiveMemberId,
-                widgetId,
-                StringComparison.Ordinal))
-        {
-            // A coalesced duplicate reports success while the original
-            // request is still preparing. Keep its optimistic cursor until
-            // the committed presentation catches up.
-            return;
-        }
-
-        _pendingWheelTargetId = null;
+        _wheelCursor.Clear();
         _wheelAccumulator = 0;
     }
 
     private void ReconcilePendingWheelTarget(
         WidgetGroupPresentation? presentation)
     {
-        if (presentation is null ||
-            string.IsNullOrWhiteSpace(_pendingWheelTargetId))
+        if (presentation is null)
         {
-            _pendingWheelTargetId = null;
+            _wheelCursor.Clear();
             return;
         }
 
-        if (string.Equals(
-                presentation.ActiveMemberId,
-                _pendingWheelTargetId,
-                StringComparison.Ordinal))
-        {
-            _pendingWheelTargetId = null;
-        }
+        // Discard the cursor when the committed presentation already shows
+        // it, or when it predates the latest interruption (stow): a reveal
+        // must never replay a pre-stow cursor as an extra wheel step. A
+        // non-matching post-interruption cursor is kept for the in-flight
+        // switch.
+        _wheelCursor.Reconcile(presentation.ActiveMemberId);
     }
 
     private void AnimateIdentityTransition(

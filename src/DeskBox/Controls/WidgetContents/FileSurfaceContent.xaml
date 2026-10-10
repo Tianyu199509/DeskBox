@@ -322,7 +322,7 @@
                                     Text="{Binding CountText}" />
                             </Border>
                         </Grid>
-                        <Button
+                        <Button svc:Localized.AutomationNameKey="Widget.Stack.Collapse"
                             Width="{Binding PreviewItemSize}"
                             Height="{Binding PreviewItemSize}"
                             MinWidth="28"
@@ -488,7 +488,7 @@
                                     Text="{Binding CountText}" />
                             </Border>
                         </Grid>
-                        <Button
+                        <Button svc:Localized.AutomationNameKey="Widget.Stack.Collapse"
                             Width="{Binding ListIconSize}"
                             Height="{Binding ListIconSize}"
                             Padding="0"
@@ -503,7 +503,7 @@
                         <TextBlock helpers:WidgetTextShadow.Cast="True" FontSize="{Binding LabelFontSize}" Tag="StackName" Text="{Binding Name}" TextTrimming="CharacterEllipsis" />
                         <TextBlock helpers:WidgetTextShadow.Cast="True" FontSize="11" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Text="{Binding Summary}" TextTrimming="CharacterEllipsis" />
                     </StackPanel>
-                    <Button
+                    <Button AutomationProperties.Name="{Binding AutomationState}"
                         Grid.Column="2"
                         Width="28"
                         Height="28"
@@ -832,7 +832,7 @@
                     TextAlignment="Center"
                     TextWrapping="Wrap"
                     svc:Localized.Key="Widget.Empty.ActionsHint" />
-                <Button
+                <Button svc:Localized.AutomationNameKey="Widget.AddFile"
                     x:Name="EmptyAddButton"
                     HorizontalAlignment="Center"
                     Click="AddButton_Click">

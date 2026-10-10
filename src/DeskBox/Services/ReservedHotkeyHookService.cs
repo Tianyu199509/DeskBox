@@ -41,6 +41,7 @@ internal sealed class ReservedHotkeyHookService : IDisposable
     private long _lastCallbackTicks;
     private long _probeCount;
     private long _probeFailureCount;
+    private long _startMenuLeakCount;
     private ReservedHotkeyMode _mode = ReservedHotkeyMode.WinSpace;
     private bool _disposed;
 
@@ -77,6 +78,20 @@ internal sealed class ReservedHotkeyHookService : IDisposable
     public long InputFailureCount => Interlocked.Read(ref _inputFailureCount);
     public long ProbeCount => Interlocked.Read(ref _probeCount);
     public long ProbeFailureCount => Interlocked.Read(ref _probeFailureCount);
+
+    /// <summary>
+    /// Times the WindowsTap trigger fired but the native Start menu won the
+    /// mask race anyway (observed via the delayed foreground check). The
+    /// injected mask itself never reports an error for a lost race, so this
+    /// counter is the only observable trace of feedback 367 (diagnostic
+    /// only; dismissing the menu was rejected as a visible flicker).
+    /// </summary>
+    public long StartMenuLeakCount => Interlocked.Read(ref _startMenuLeakCount);
+
+    internal void RecordStartMenuLeak()
+    {
+        Interlocked.Increment(ref _startMenuLeakCount);
+    }
 
     /// <summary>
     /// Environment.TickCount64 of the most recent hook-callback invocation,
@@ -319,6 +334,12 @@ internal sealed class ReservedHotkeyHookService : IDisposable
         IntPtr installedHook = IntPtr.Zero;
         try
         {
+            // Same rationale as the desktop double-click hook thread: the LL
+            // keyboard callback is delivered as a message here, and a thread
+            // that misses LowLevelHooksTimeout (capped at 1000ms) gets its
+            // hook silently removed. AboveNormal rides out CPU pressure
+            // without touching time-critical scheduling.
+            Thread.CurrentThread.Priority = ThreadPriority.AboveNormal;
             lock (_sync)
             {
                 if (_disposed || generation != _lifecycleGeneration)
@@ -457,6 +478,27 @@ internal sealed class ReservedHotkeyHookService : IDisposable
         }
         if (disposition == ReservedHotkeyEventDisposition.PassThrough)
         {
+            return Win32Helper.CallNextHookEx(hookHandle, nCode, wParam, lParam);
+        }
+
+        if (disposition == ReservedHotkeyEventDisposition.PrepareMaskAndPassThrough)
+        {
+            // Narrow the Start-menu race (feedback 367): injecting the mask
+            // while the Windows key is still held breaks the isolated-tap
+            // condition before the key-up is ever delivered, so the mask no
+            // longer competes with the key-up in the input stream. Best
+            // effort only — the release-side trigger path re-masks when a
+            // tap completes, and a failed prepare must never block the
+            // pass-through or the trigger.
+            if (!Win32Helper.TrySendTaggedKeyPress(
+                    InternalMaskVirtualKey,
+                    InjectedEventTag,
+                    out int prepareError))
+            {
+                Interlocked.Increment(ref _inputFailureCount);
+                Volatile.Write(ref _lastErrorCode, prepareError);
+            }
+
             return Win32Helper.CallNextHookEx(hookHandle, nCode, wParam, lParam);
         }
 

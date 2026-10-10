@@ -160,7 +160,9 @@ public sealed class ModuleBoundaryContractTests
         ["src/DeskBox/Services/WidgetSettingsMenuHelper.cs"] = 2,
         // UiDispatch migration: the settings-changed marshal now routes
         // through DeskBox.Platform.UiDispatch (count 14 → 13).
-        ["src/DeskBox/Services/WidgetManager.ZOrder.cs"] = 13,
+        // Z-order self-heal (289/447/468): the desktop-pinned bedding
+        // watchdog timer creation (13 → 14); enqueues use UiDispatch.
+        ["src/DeskBox/Services/WidgetManager.ZOrder.cs"] = 14,
         ["src/DeskBox/Services/WidgetManager.Surfaces.cs"] = 1,
         ["src/DeskBox/Services/WidgetManager.Storage.cs"] = 1,
         // UiDispatch migration: the enable-state marshal and the feature

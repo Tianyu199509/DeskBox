@@ -46,7 +46,7 @@ JSON 有、全仓（src/tests，含 12 语言）零引用。按族：
 
 ## 5. 术语与质量
 
-**zh-CN（基准，质量最好）**：widget=格子 326 vs 小组件 3（两处例外应改：`Settings.Performance.IdleWorkingSetTrim.Description`、`Settings.Dialog.AboutMe*` 自述可容忍）；随记 79 vs 快采 0 ✅（一处"速记"应改：`Settings.CloudBackup.QuickCaptureData.Description`）；托盘/快捷键统一 ✅。
+**zh-CN（基准，质量最好）**：widget=格子 326 vs 小组件 3（两处例外应改：`Settings.Performance.IdleWorkingSetTrim.Description`、`Settings.Dialog.AboutMe*` 自述可容忍）；随记 79 vs 随记 0 ✅（一处"速记"应改：`Settings.CloudBackup.QuickCaptureData.Description`）；托盘/快捷键统一 ✅。
 
 **zh-TW（问题最多）**：
 - widget **系统性分裂**：小工具 188 次 vs 格子 124 键（不同批次混翻，如"收纳格子↔收納小工具"）→ **需产品定名后批量统一（P1）**；

@@ -62,7 +62,7 @@
           <uap5:StartupTask
             TaskId="DeskBoxStartupTask"
             Enabled="false"
-            DisplayName="DeskBox" />
+            DisplayName="ms-resource:AppDisplayName" />
         </uap5:Extension>
         <desktop:Extension Category="windows.toastNotificationActivation">
           <desktop:ToastNotificationActivation ToastActivatorCLSID="4D54EEC6-13BE-4C8F-A8F7-81FE72F4B2C9" />

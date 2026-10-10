@@ -141,6 +141,75 @@ public sealed partial class FileSurfaceContent
             : name + " - Shortcut.lnk";
     }
 
+    /// <summary>
+    /// Materializes pasted virtual Shell namespace items (This PC, Recycle
+    /// Bin, ...) as .lnk files in the widget's current folder. This is what
+    /// Explorer does when such an item is pasted into a filesystem folder:
+    /// there is no item body to move or copy, only a PIDL to store via
+    /// IShellLink::SetIDList.
+    /// </summary>
+    private async Task<int> CreateShortcutsForPastedNamespaceItemsAsync(
+        IReadOnlyList<ShellClipboardHelper.ShellNamespaceClipboardItem> items)
+    {
+        if (items.Count == 0)
+        {
+            return 0;
+        }
+
+        string? destinationFolderPath =
+            ViewModel.CurrentFolderPath ?? ViewModel.MappedFolderPath;
+        if (string.IsNullOrWhiteSpace(destinationFolderPath))
+        {
+            // Shortcut creation needs a concrete folder to write into; without
+            // one the paste would create nothing and stay silent.
+            return 0;
+        }
+
+        string destination = Path.GetFullPath(destinationFolderPath);
+        Directory.CreateDirectory(destination);
+        var reserved = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        int created = 0;
+        foreach (ShellClipboardHelper.ShellNamespaceClipboardItem item in items)
+        {
+            string itemName = FileService.SanitizeFileSystemName(item.DisplayName);
+            if (string.IsNullOrWhiteSpace(itemName))
+            {
+                itemName = "Shortcut";
+            }
+
+            string linkPath = FileService.GetAvailablePath(
+                Path.Combine(destination, $"{itemName} - Shortcut.lnk"),
+                reserved);
+            try
+            {
+                ShortcutHelper.CreateShellNamespaceShortcut(
+                    linkPath,
+                    item.ParsingName,
+                    T("Widget.CreateShortcut"));
+                reserved.Add(linkPath);
+                created++;
+            }
+            catch (Exception ex)
+            {
+                App.Log(
+                    "[Paste] Namespace shortcut creation failed " +
+                    $"target='{item.ParsingName}': {ex.Message}");
+            }
+
+            // Keep multi-item pastes responsive; the shortcut backends are
+            // apartment-sensitive, so the COM work stays on this thread.
+            await Task.Yield();
+        }
+
+        if (created > 0 &&
+            !string.IsNullOrWhiteSpace(ViewModel.MappedFolderPath))
+        {
+            await ViewModel.RefreshFromConfigAsync();
+        }
+
+        return created;
+    }
+
     private async Task<IReadOnlyList<string>> CreateShortcutFilesAsync(
         IReadOnlyList<DroppedFilePath> droppedFiles,
         string destinationFolderPath,

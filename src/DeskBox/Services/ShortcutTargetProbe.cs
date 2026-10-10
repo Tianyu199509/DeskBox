@@ -74,8 +74,9 @@ internal static class ShortcutTargetProbe
 
         try
         {
-            // Directory existence doubles as the dispatch hint (#459): a
-            // shortcut to a local folder must use the default verb.
+            // Target existence is the dispatch input (#459, feedback 246):
+            // a shortcut to an existing local target — file or directory —
+            // uses the default verb.
             bool targetIsDirectory = Directory.Exists(expandedTarget);
             return new(
                 kind,

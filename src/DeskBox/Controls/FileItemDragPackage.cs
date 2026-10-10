@@ -43,14 +43,20 @@ public static class FileItemDragPackage
     // Windows 10's Explorer shows its copy/move picker on EVERY drop whose
     // brokered drag advertises more than one effect: the drop arrives
     // without mouse-button state and the shell cannot confirm a unique
-    // default, so it asks. The preferred effect never reaches it — only a
-    // single-effect offer matching the target's default resolves silently
-    // (the shipped 1.5.5 Win10 shape). The user's setting therefore
-    // collapses the advertised set to one bit on Win10 (FollowWindows has
-    // no observable meaning there and resolves to Move); Windows 11 keeps
-    // the full Copy|Move mask. The OS flag is injectable so tests pin both
-    // branches on any host. Trade-off on Win10: Move/FollowWindows drops
-    // are rejected by copy-only receivers (VS Code, Chromium, WinForms).
+    // default, so it asks (verified on a Win10 19045 VM across all three
+    // settings tiers; a single-effect offer is the only silent shape — see
+    // docs/articles/win10-drag-out-incident-20260930.md §7). The advertised
+    // set therefore stays collapsed to one bit on Windows 10. Which bit:
+    // an explicit Move/Copy setting performs exactly what it says, while
+    // the default (FollowWindows) and unknown values resolve to Copy. The
+    // silent single-bit shape cannot carry Windows' volume-dependent
+    // default, and Move-only forces IM-style receivers (the WeChat send
+    // box, feedback 500) to resolve the drop to Move and delete the
+    // original into the Recycle Bin themselves — announcing Copy is the
+    // safe side of the forced choice: originals stay, copy-only receivers
+    // (VS Code, Chromium, WinForms) accept the drag, and users who want
+    // moves select the Move tier explicitly. The OS flag is injectable so
+    // tests pin both branches on any host.
     internal static DataPackageOperation ResolveDragOutAllowedOperations(
         string? action,
         bool? isWindows11OrLater = null)
@@ -61,12 +67,12 @@ public static class FileItemDragPackage
             return SupportedOperations;
         }
 
-        return string.Equals(
-                action,
-                SettingsService.ManagedDragOutActionCopy,
-                StringComparison.Ordinal)
-            ? DataPackageOperation.Copy
-            : DataPackageOperation.Move;
+        return action switch
+        {
+            SettingsService.ManagedDragOutActionMove => DataPackageOperation.Move,
+            SettingsService.ManagedDragOutActionCopy => DataPackageOperation.Copy,
+            _ => DataPackageOperation.Copy,
+        };
     }
 
     public static IReadOnlyList<WidgetItem> ResolveDraggedItems(

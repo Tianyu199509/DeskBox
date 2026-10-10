@@ -278,10 +278,11 @@ public partial class WidgetViewModel
             {
                 // A full reload mid-import would re-sync, re-sort and
                 // re-hydrate the whole list, throwing away the batching the
-                // open scope just bought — and a large import reliably trips
-                // the reload threshold (desktop widgets reload on every
-                // batch). Defer one authoritative refresh to the batch
-                // finalization instead of fighting the import for the list.
+                // open scope just bought — and an import's event storm can
+                // still trip the watcher's buffered-change cap or its
+                // overflow/error channels. Defer one authoritative refresh to
+                // the batch finalization instead of fighting the import for
+                // the list.
                 if (_itemMutationBatchDepth > 0)
                 {
                     _pendingFolderRefreshAfterBatch = true;
@@ -293,19 +294,22 @@ public partial class WidgetViewModel
                 return;
             }
 
-            FolderPathSnapshot snapshot =
-                await FileService.CaptureDirectChildSnapshotAsync(changeBatch.WatchedPath);
-            if (!FolderSnapshotStatusPolicy.IsSuccessful(snapshot.Status))
+            // A large batch with a KNOWN change set no longer detours through
+            // a full reload: coalesce the shell/antivirus event multiplication
+            // to one change per path, then apply the batch inside a single
+            // mutation scope so the whole batch pays one sort-order
+            // normalization, one manual-order persistence, one hydration start
+            // (which itself only processes items still missing metadata) and
+            // one render reconcile - cost proportional to the batch, not the
+            // folder. Only the state-loss signals in ShouldUseFullReload still
+            // reload; the watcher's buffered-change cap routes true event
+            // storms there.
+            using (EnterItemMutationScope())
             {
-                App.Log(
-                    $"[FolderRefresh] Incremental root unavailable; retaining snapshot: " +
-                    $"'{changeBatch.WatchedPath}'");
-                return;
-            }
-
-            foreach (var change in changeBatch.Changes)
-            {
-                await ApplyFolderChangeAsync(change, snapshot);
+                foreach (FolderChange change in CoalesceFolderChanges(changeBatch.Changes))
+                {
+                    await ApplyFolderChangeAsync(change);
+                }
             }
         }
         catch (Exception ex)
@@ -385,9 +389,21 @@ public partial class WidgetViewModel
         StartItemHydration();
     }
 
-    private bool ShouldUseFullReload(FolderChangeBatch changeBatch, string mappedFolderPath)
+    /// <summary>
+    /// Decides whether a watcher batch must pay a full reload. Only
+    /// state-loss signals qualify: the watcher's overflow/error/query
+    /// channels (ReadDirectoryChangesW provides just a blanket notification
+    /// once its buffer overflows, so <c>RequiresFullReload</c> batches cannot
+    /// trust their change list), an empty change list, the combined desktop
+    /// roots (the incremental path applies single-root changes), and batches
+    /// from a folder this widget no longer displays. Batch SIZE is
+    /// deliberately not a criterion: a large batch with a known change set
+    /// runs as a coalesced incremental pass inside one mutation scope, so a
+    /// multi-folder drag storm no longer triggers reload-per-batch.
+    /// </summary>
+    internal static bool ShouldUseFullReload(FolderChangeBatch changeBatch, string mappedFolderPath)
     {
-        if (changeBatch.RequiresFullReload || changeBatch.Changes.Count == 0 || changeBatch.Changes.Count > IncrementalRefreshBatchThreshold)
+        if (changeBatch.RequiresFullReload || changeBatch.Changes.Count == 0)
         {
             return true;
         }
@@ -435,9 +451,56 @@ public partial class WidgetViewModel
         return changeBatch.Generation == watcher.Generation;
     }
 
-    private async Task ApplyFolderChangeAsync(
-        FolderChange change,
-        FolderPathSnapshot snapshot)
+    /// <summary>
+    /// Collapses a watcher batch to its last event per path, keeping the
+    /// surviving events in their original batch order. Shell copies and
+    /// antivirus scans report several events per path (Created plus
+    /// LastWrite/Size/Attributes Changed); classification re-reads current
+    /// disk state, so only the newest signal per path carries information
+    /// and every older duplicate would just repeat a classification and an
+    /// upsert. Renamed events are exempt: a rename carries its own old-path
+    /// removal, and a later event against the renamed path (the copy engine
+    /// writing the moved file) must not swallow that removal.
+    /// </summary>
+    internal static IReadOnlyList<FolderChange> CoalesceFolderChanges(
+        IReadOnlyList<FolderChange> changes)
+    {
+        if (changes.Count <= 1)
+        {
+            return changes;
+        }
+
+        var lastEventIndexByPath = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        for (int index = 0; index < changes.Count; index++)
+        {
+            FolderChange change = changes[index];
+            if (change.ChangeType != WatcherChangeTypes.Renamed)
+            {
+                lastEventIndexByPath[change.FullPath] = index;
+            }
+        }
+
+        if (lastEventIndexByPath.Count == changes.Count)
+        {
+            // No renames and every path distinct - nothing to collapse.
+            return changes;
+        }
+
+        var coalesced = new List<FolderChange>(changes.Count);
+        for (int index = 0; index < changes.Count; index++)
+        {
+            FolderChange change = changes[index];
+            if (change.ChangeType == WatcherChangeTypes.Renamed ||
+                lastEventIndexByPath[change.FullPath] == index)
+            {
+                coalesced.Add(change);
+            }
+        }
+
+        return coalesced;
+    }
+
+    private async Task ApplyFolderChangeAsync(FolderChange change)
     {
         if (change.ChangeType == WatcherChangeTypes.Renamed && !string.IsNullOrWhiteSpace(change.OldFullPath))
         {
@@ -445,9 +508,9 @@ public partial class WidgetViewModel
                 ? FindItemIndexByPath(change.OldFullPath)
                 : -1;
             FolderEntryRefreshStatus oldState =
-                FileService.ClassifyDirectChild(snapshot, change.OldFullPath);
+                await FileService.ClassifyDirectChildAsync(change.OldFullPath);
             FolderEntryRefreshStatus newState =
-                FileService.ClassifyDirectChild(snapshot, change.FullPath);
+                await FileService.ClassifyDirectChildAsync(change.FullPath);
             if (ShouldRemoveExistingItem(WatcherChangeTypes.Renamed, oldState))
             {
                 if (newState == FolderEntryRefreshStatus.Available)
@@ -476,7 +539,7 @@ public partial class WidgetViewModel
         }
 
         FolderEntryRefreshStatus state =
-            FileService.ClassifyDirectChild(snapshot, change.FullPath);
+            await FileService.ClassifyDirectChildAsync(change.FullPath);
         if (ShouldRemoveExistingItem(change.ChangeType, state))
         {
             RemoveItemByPath(change.FullPath);

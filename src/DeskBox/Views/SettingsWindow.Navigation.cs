@@ -146,6 +146,16 @@ public sealed partial class SettingsWindow
     {
         foreach (SettingsSearchCatalogEntry entry in SettingsSearchCatalog.Entries)
         {
+            // Store-channel filter (route 1): the entries flagged by the
+            // policy only have UI in the direct-installer build, so their
+            // search results would dead-end in Store builds. The key set is
+            // pinned against the catalog by SettingsSearchChannelPolicyTests.
+            if (SettingsSearchChannelPolicy.IsHiddenInStore(entry.HeaderKey) &&
+                AppDistributionService.Current.IsMicrosoftStore)
+            {
+                continue;
+            }
+
             string destinationTag = NormalizeSettingsSectionTag(entry.SectionTag);
             if (!TryGetSectionRoute(
                     destinationTag,
@@ -1320,6 +1330,14 @@ public sealed partial class SettingsWindow
         FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.InfoBar>(
             "CloudBackupSettings", "CloudBackupSyncNoticeInfoBar");
 
+    private global::Microsoft.UI.Xaml.Controls.InfoBar? MusicSmtcNoticeInfoBar =>
+        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.InfoBar>(
+            "MusicSettings", "MusicSmtcNoticeInfoBar");
+
+    private global::Microsoft.UI.Xaml.Controls.InfoBar? StoreUninstallDataNoticeInfoBar =>
+        FindCreatedSectionElement<global::Microsoft.UI.Xaml.Controls.InfoBar>(
+            "CloudBackupSettings", "StoreUninstallDataNoticeInfoBar");
+
     private void PrepareDeferredNoticeInfoBars()
     {
         // ThemeResource severity brushes inside the InfoBar template fail to
@@ -1331,10 +1349,14 @@ public sealed partial class SettingsWindow
         // its section has been created.
         PinInformationalSeverityBrushes(GlobalHotkeyElevatedNoticeInfoBar);
         PinInformationalSeverityBrushes(Windows10CompatibilityInfoBar);
+        PinInformationalSeverityBrushes(MusicSmtcNoticeInfoBar);
+        PinInformationalSeverityBrushes(StoreUninstallDataNoticeInfoBar);
         ApplyNoticeMessageTypography(CloudBackupSyncNoticeInfoBar);
         ApplyNoticeMessageTypography(GlobalHotkeyElevatedNoticeInfoBar);
         ApplyNoticeMessageTypography(Windows10CompatibilityInfoBar);
         ApplyNoticeMessageTypography(AboutStoreNoticeInfoBar);
+        ApplyNoticeMessageTypography(MusicSmtcNoticeInfoBar);
+        ApplyNoticeMessageTypography(StoreUninstallDataNoticeInfoBar);
     }
 
     private void PinInformationalSeverityBrushes(InfoBar? infoBar)

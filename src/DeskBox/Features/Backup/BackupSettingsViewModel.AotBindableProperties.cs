@@ -45,6 +45,7 @@ namespace DeskBox.Features.Backup;
     nameof(ServerUrl),
     nameof(ShowHttpWarning),
     nameof(ShowLocalFallbackWarning),
+    nameof(ShowStoreUninstallNotice),
     nameof(ShowWebDavFields),
     nameof(StatusText),
     nameof(IncludeTodoData),

@@ -269,10 +269,34 @@ internal sealed class WidgetTopologyLayoutService
                 .ThenBy(monitor => monitor.MonitorY)
                 .ThenBy(monitor => monitor.MonitorWidth)
                 .ThenBy(monitor => monitor.MonitorHeight)
-                .Select(monitor =>
-                    FormattableString.Invariant(
-                        $"{NormalizeStableIdentityForKey(monitor.StableId)};{monitor.IsPrimary};{NormalizeScale(monitor.DpiScale):F3};{monitor.MonitorX},{monitor.MonitorY},{monitor.MonitorWidth},{monitor.MonitorHeight}")));
+                .Select(FormatTopologySignatureSegment));
         return signature;
+    }
+
+    /// <summary>
+    /// One monitor's compatibility-signature segment. Degenerate
+    /// (geometry-only) monitors contribute identity + primary + DPI but NOT
+    /// X/Y/W/H: a same-spec degenerate display changing resolution must still
+    /// match its stored profile so the arrangement is reused after the flip
+    /// (the v4 goal) — the geo topology KEY keeps the resolution, and that
+    /// key/content split is the price of the persisted format. Accepted
+    /// trade: equal-count degenerate sets are mutually compatible regardless
+    /// of side-by-side vs stacked arrangement; the count match plus anchor
+    /// re-realization at apply time bounds the damage. Non-degenerate
+    /// monitors keep the full segment, so real stable ids never lose
+    /// precision.
+    /// </summary>
+    private static string FormatTopologySignatureSegment(WidgetTopologyMonitorProfile monitor)
+    {
+        string identity = NormalizeStableIdentityForKey(monitor.StableId);
+        if (identity.Equals("geometry-only", StringComparison.Ordinal))
+        {
+            return FormattableString.Invariant(
+                $"{identity};{monitor.IsPrimary};{NormalizeScale(monitor.DpiScale):F3}");
+        }
+
+        return FormattableString.Invariant(
+            $"{identity};{monitor.IsPrimary};{NormalizeScale(monitor.DpiScale):F3};{monitor.MonitorX},{monitor.MonitorY},{monitor.MonitorWidth},{monitor.MonitorHeight}");
     }
 
     private static WidgetTopologyLayoutProfile? FindCompatibleProfile(
@@ -348,11 +372,27 @@ internal sealed class WidgetTopologyLayoutService
         // refresh the identity HINTS on each entry but never rewrite the
         // stored sizes/margins — the placement intent survives intact and is
         // only clamped when realized (spec 5.6, fixing defect B5).
-        Dictionary<string, WidgetTopologyMonitorProfile> byStableId = targetMonitors
-            .ToDictionary(
-                monitor => DisplayIdentityTokens.TokenFor(monitor),
-                monitor => monitor,
-                StringComparer.OrdinalIgnoreCase);
+        Dictionary<string, WidgetTopologyMonitorProfile> byStableId = [];
+        foreach (var tokenGroup in targetMonitors.GroupBy(
+                     monitor => DisplayIdentityTokens.TokenFor(monitor),
+                     StringComparer.OrdinalIgnoreCase))
+        {
+            WidgetTopologyMonitorProfile[] groupMonitors = [.. tokenGroup];
+            if (groupMonitors.Length > 1)
+            {
+                // Two same-spec degenerate monitors collapse onto one geo
+                // token: which one an entry belongs to is undecidable, so
+                // leave those entries' stale hints in place (same severity
+                // as a token with no live match) instead of throwing on the
+                // duplicate key.
+                App.Log(
+                    $"[DisplayTopology] Monitor token {tokenGroup.Key} is ambiguous " +
+                    $"across {groupMonitors.Length} monitors; skipping hint refresh");
+                continue;
+            }
+
+            byStableId[tokenGroup.Key] = groupMonitors[0];
+        }
         foreach ((string surfaceId, WidgetSurfaceLayoutProfile layout) in profile.Surfaces.ToList())
         {
             bool hasGeometry = ParseGeometryFromKey(
@@ -1009,13 +1049,35 @@ internal sealed class WidgetTopologyLayoutService
             entry.PositionMonitorStableId,
             SafeWidth(entry.PositionMonitorKey),
             SafeHeight(entry.PositionMonitorKey));
-        WidgetTopologyMonitorProfile? monitor = monitors.FirstOrDefault(candidate =>
+        List<WidgetTopologyMonitorProfile> tokenMatches = monitors.Where(candidate =>
             string.Equals(
                 DisplayIdentityTokens.TokenFor(candidate),
                 token,
-                StringComparison.OrdinalIgnoreCase)) ??
-            monitors.FirstOrDefault(candidate => candidate.IsPrimary) ??
-            monitors[0];
+                StringComparison.OrdinalIgnoreCase)).ToList();
+        WidgetTopologyMonitorProfile? monitor;
+        if (tokenMatches.Count > 1)
+        {
+            // Same-spec degenerate monitors share one geo token: prefer the
+            // candidate whose alias still matches the entry's device-name
+            // hint, then the shared fallback chain.
+            App.Log(
+                $"[DisplayTopology] Monitor token {token} is ambiguous across " +
+                $"{tokenMatches.Count} monitors");
+            monitor = DisplayPlacementResolver.IsDegenerateIdentity(entry.PositionMonitorStableId)
+                ? tokenMatches.FirstOrDefault(candidate => string.Equals(
+                    candidate.DeviceName,
+                    entry.PositionMonitorDeviceName,
+                    StringComparison.OrdinalIgnoreCase))
+                : tokenMatches[0];
+            monitor ??= monitors.FirstOrDefault(candidate => candidate.IsPrimary) ??
+                monitors[0];
+        }
+        else
+        {
+            monitor = tokenMatches.FirstOrDefault() ??
+                monitors.FirstOrDefault(candidate => candidate.IsPrimary) ??
+                monitors[0];
+        }
 
         double scale = NormalizeScale(monitor.DpiScale);
         int width = Math.Max(1, (int)Math.Round(Math.Max(SettingsService.MinWidgetWidth, entry.Width) * scale));

@@ -546,7 +546,7 @@ public sealed partial class TodoWidgetContent : UserControl
         CustomDueDateTitleText.Text = localization.T("Todo.Due.Custom");
         CustomDueDatePicker.PlaceholderText = localization.T("Todo.Due.Custom");
         CustomDueDateCancelButton.Content = localization.T("Common.Cancel");
-        CustomDueDateSaveButton.Content = localization.T("Common.Ok");
+        CustomDueDateSaveButton.Content = localization.T("Common.Save");
     }
 
     public void OpenAddEditor() => _ = OpenAddEditorAsync();

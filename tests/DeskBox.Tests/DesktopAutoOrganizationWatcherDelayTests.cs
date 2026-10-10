@@ -30,7 +30,7 @@ public sealed class DesktopAutoOrganizationWatcherDelayTests : IDisposable
         // The advance clears the due time plus the directory-quiet and
         // stability gates, which also run on the manual clock.
         harness.Clock.Advance(TimeSpan.FromSeconds(40));
-        await WaitUntilAsync(() => !File.Exists(desktopFile));
+        await WaitUntilFileMovedAsync(harness, desktopFile);
         Assert.True(File.Exists(Path.Combine(harness.TargetStoragePath, "note.txt")));
         await WaitUntilAsync(() => !harness.Completed.IsEmpty);
         Assert.All(harness.Completed, e => Assert.Equal("note.txt", e.FileName));
@@ -53,7 +53,7 @@ public sealed class DesktopAutoOrganizationWatcherDelayTests : IDisposable
         Assert.True(File.Exists(desktopFile));
 
         harness.Clock.Advance(TimeSpan.FromSeconds(30));
-        await WaitUntilAsync(() => !File.Exists(desktopFile));
+        await WaitUntilFileMovedAsync(harness, desktopFile);
         Assert.True(File.Exists(Path.Combine(harness.TargetStoragePath, "note.txt")));
     }
 
@@ -78,7 +78,7 @@ public sealed class DesktopAutoOrganizationWatcherDelayTests : IDisposable
         Assert.True(File.Exists(desktopFile));
 
         harness.Clock.Advance(TimeSpan.FromSeconds(40));
-        await WaitUntilAsync(() => !File.Exists(desktopFile));
+        await WaitUntilFileMovedAsync(harness, desktopFile);
         Assert.True(File.Exists(Path.Combine(harness.TargetStoragePath, "note.txt")));
     }
 
@@ -93,6 +93,38 @@ public sealed class DesktopAutoOrganizationWatcherDelayTests : IDisposable
         }
         catch (UnauthorizedAccessException)
         {
+        }
+    }
+
+    /// <summary>
+    /// Waits for the file to move while nudging the manual clock past the
+    /// watcher's deferred-retry window: a transient failure at move time
+    /// schedules a retry two fake minutes out, which a frozen clock would
+    /// never reach within a real-time-only wait.
+    /// </summary>
+    private static async Task WaitUntilFileMovedAsync(
+        WatcherHarness harness,
+        string desktopFile)
+    {
+        TimeSpan advanced = TimeSpan.Zero;
+        TimeSpan budget = TimeSpan.FromMinutes(6);
+        TimeSpan step = TimeSpan.FromMinutes(2.5);
+        DateTime deadline = DateTime.UtcNow + TimeSpan.FromSeconds(20);
+        while (File.Exists(desktopFile))
+        {
+            if (DateTime.UtcNow >= deadline)
+            {
+                Assert.Fail(
+                    $"File was not moved before the timeout " +
+                    $"(clock advanced {advanced} beyond the scripted steps).");
+            }
+
+            await Task.Delay(100);
+            if (advanced < budget)
+            {
+                harness.Clock.Advance(step);
+                advanced += step;
+            }
         }
     }
 

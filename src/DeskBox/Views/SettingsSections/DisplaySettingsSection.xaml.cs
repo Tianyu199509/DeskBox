@@ -590,9 +590,15 @@ public sealed partial class DisplaySettingsSection : UserControl
             }
         };
         DisplaysStatusInfo.ActionButton = undoButton;
+        // token.Persisted=false: the batch's single physical save failed.
+        // Every binding already applied in memory and the undo token is
+        // valid, so the undo button stays, but the InfoBar downgrades to an
+        // error with the dedicated failure wording instead of claiming done.
         ShowStatus(
-            InfoBarSeverity.Success,
-            Format("Settings.Displays.MoveAll.Done", moved, displayNumber),
+            token.Persisted ? InfoBarSeverity.Success : InfoBarSeverity.Error,
+            token.Persisted
+                ? Format("Settings.Displays.MoveAll.Done", moved, displayNumber)
+                : T("Settings.Displays.MoveAll.Failed"),
             string.Empty);
     }
 

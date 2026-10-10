@@ -8,8 +8,10 @@ namespace DeskBox.Helpers;
 /// cross-process COM calls on the Explorer desktop thread, so once Explorer
 /// starts answering with RPC-class failures, each further click re-pays the
 /// same storm and can drag Explorer into a hang or crash. The breaker opens
-/// on RPC-class failures only and re-arms solely when the shell process
-/// identity changes — that is, Explorer actually restarted. Direct
+/// on RPC-class failures only and closes again when the shell process
+/// identity changes — that is, Explorer actually restarted — or, once a
+/// cooldown has elapsed, when a single released half-open probe launch
+/// succeeds; a failing probe restarts the cooldown. Direct
 /// <see cref="ExplorerShellLaunchService"/> callers such as the AOT shell
 /// smoke diagnostics bypass the breaker by design: they must observe the real
 /// Explorer path, not a locally recovered one.
@@ -66,20 +68,33 @@ internal sealed class ExplorerLaunchCircuitBreakerState
     private const int RpcWin32ErrorLow = 1700;
     private const int RpcWin32ErrorHigh = 1799;
 
+    // How long an open breaker keeps bypassing before releasing a single
+    // half-open probe launch to test whether the shell has recovered.
+    private static readonly TimeSpan DefaultOpenCooldown = TimeSpan.FromMinutes(5);
+    private static readonly Func<long> DefaultClock = static () => Environment.TickCount64;
+
     private readonly object _gate = new();
     private readonly int _rpcFailureThreshold;
     private readonly Func<uint> _probeShellProcessId;
+    private readonly Func<long> _clock;
+    private readonly TimeSpan _openCooldown;
 
     private int _consecutiveRpcFailures;
     private bool _open;
     private uint _shellProcessIdAtOpen;
+    private long _openedAtTick;
+    private bool _halfOpenProbeGranted;
 
     internal ExplorerLaunchCircuitBreakerState(
         int rpcFailureThreshold,
-        Func<uint> probeShellProcessId)
+        Func<uint> probeShellProcessId,
+        Func<long>? clock = null,
+        TimeSpan? openCooldown = null)
     {
         _rpcFailureThreshold = rpcFailureThreshold;
         _probeShellProcessId = probeShellProcessId;
+        _clock = clock ?? DefaultClock;
+        _openCooldown = openCooldown ?? DefaultOpenCooldown;
     }
 
     internal static bool IsRpcClassFailure(int hresult)
@@ -112,18 +127,44 @@ internal sealed class ExplorerLaunchCircuitBreakerState
                 return true;
             }
 
-            if (currentShellProcessId == _shellProcessIdAtOpen)
+            if (currentShellProcessId != _shellProcessIdAtOpen)
             {
+                // The shell process changed since the breaker opened, so
+                // Explorer was restarted: give the explorer-hosted path a
+                // fresh chance. The identity reset outranks the cooldown.
+                _consecutiveRpcFailures = 0;
+                _open = false;
+                _shellProcessIdAtOpen = 0;
+                _openedAtTick = 0;
+                _halfOpenProbeGranted = false;
+                return false;
+            }
+
+            if (_halfOpenProbeGranted)
+            {
+                // A half-open probe launch is still outstanding: keep
+                // bypassing until it resolves via RecordSuccess or
+                // RecordFailure.
                 return true;
             }
 
-            // The shell process changed since the breaker opened, so Explorer
-            // was restarted: give the explorer-hosted path a fresh chance.
-            _consecutiveRpcFailures = 0;
-            _open = false;
-            _shellProcessIdAtOpen = 0;
-            return false;
+            long cooldownElapsedMs = _clock() - _openedAtTick;
+            if (cooldownElapsedMs < _openCooldown.TotalMilliseconds)
+            {
+                // Still cooling down from the last RPC-class failure.
+                return true;
+            }
+
+            // Cooldown elapsed: release exactly one real launch as the
+            // half-open probe. No extra COM probing — the probe is the
+            // launch itself; its outcome closes the breaker or restarts
+            // the cooldown.
+            _halfOpenProbeGranted = true;
         }
+
+        App.Log(
+            "[ExplorerLaunchCircuitBreaker] Cooldown elapsed; releasing one half-open probe launch.");
+        return false;
     }
 
     internal void RecordFailure(int hresult)
@@ -132,7 +173,18 @@ internal sealed class ExplorerLaunchCircuitBreakerState
         {
             if (!IsRpcClassFailure(hresult))
             {
-                // Non-RPC failures say nothing about shell health.
+                // Non-RPC failures say nothing about shell health and never
+                // accumulate toward the threshold. One observed while a
+                // half-open probe is outstanding still means the probe launch
+                // happened and did not succeed: consume the probe and restart
+                // the cooldown rather than letting a sick shell ping-pong
+                // straight into further probes.
+                if (_open && _halfOpenProbeGranted)
+                {
+                    _halfOpenProbeGranted = false;
+                    _openedAtTick = _clock();
+                }
+
                 return;
             }
 
@@ -141,6 +193,15 @@ internal sealed class ExplorerLaunchCircuitBreakerState
             {
                 _open = true;
                 _shellProcessIdAtOpen = _probeShellProcessId();
+                _openedAtTick = _clock();
+                _halfOpenProbeGranted = false;
+            }
+            else if (_open)
+            {
+                // Already open (cooling or half-open): the shell is still
+                // sick, so restart the cooldown window from now.
+                _openedAtTick = _clock();
+                _halfOpenProbeGranted = false;
             }
         }
     }
@@ -149,7 +210,13 @@ internal sealed class ExplorerLaunchCircuitBreakerState
     {
         lock (_gate)
         {
+            // A successful explorer-hosted launch — including a half-open
+            // probe — is proof of a healthy shell: fully close the breaker.
             _consecutiveRpcFailures = 0;
+            _open = false;
+            _shellProcessIdAtOpen = 0;
+            _openedAtTick = 0;
+            _halfOpenProbeGranted = false;
         }
     }
 
@@ -160,6 +227,8 @@ internal sealed class ExplorerLaunchCircuitBreakerState
             _consecutiveRpcFailures = 0;
             _open = false;
             _shellProcessIdAtOpen = 0;
+            _openedAtTick = 0;
+            _halfOpenProbeGranted = false;
         }
     }
 }

@@ -31,6 +31,7 @@ namespace DeskBox.ViewModels;
     nameof(SecondaryTextSize),
     nameof(StatusText),
     nameof(SystemVolume),
+    nameof(SystemVolumeLabel),
     nameof(SystemVolumeText),
     nameof(ThumbnailImage),
     nameof(ThumbnailPlaceholderVisibility),

@@ -326,6 +326,7 @@ public sealed partial class WidgetShell : UserControl
     private double _responsiveTargetContentWidth;
     private double _responsiveTargetContentHeight;
     private bool _isTransitionContentLayoutFrozen;
+    private bool _isTransitionTitleBarLayoutFrozen;
     private WidgetCompactWidthTier _compactWidthTier = WidgetCompactWidthTier.Standard;
     private bool _isPointerOverShell;
     private bool _isHostVisualActivityEnabled;
@@ -1714,7 +1715,8 @@ public sealed partial class WidgetShell : UserControl
         FreezeTransitionContentLayout(
             Math.Max(0, frozenWindowWidth ?? targetWindowWidth),
             Math.Max(0, (frozenWindowHeight ?? targetWindowHeight) - titleHeight),
-            expansionAnchor);
+            expansionAnchor,
+            frozenWindowWidth ?? targetWindowWidth);
         _responsiveLayoutContent?.BeginResponsiveLayoutTransition(
                 _responsiveTargetContentWidth,
                 _responsiveTargetContentHeight,
@@ -1753,42 +1755,68 @@ public sealed partial class WidgetShell : UserControl
     private void FreezeTransitionContentLayout(
         double contentWidth,
         double contentHeight,
-        WidgetCompactExpansionAnchor expansionAnchor)
+        WidgetCompactExpansionAnchor expansionAnchor,
+        double stableWindowWidth = double.NaN)
     {
-        if (contentWidth <= 0 || contentHeight <= 0)
+        if (contentWidth > 0 && contentHeight > 0)
         {
-            return;
+            bool anchorsRight = expansionAnchor is
+                WidgetCompactExpansionAnchor.RightTop or
+                WidgetCompactExpansionAnchor.RightBottom;
+            bool anchorsBottom = expansionAnchor is
+                WidgetCompactExpansionAnchor.LeftBottom or
+                WidgetCompactExpansionAnchor.RightBottom;
+            ShellContentPresenter.Width = contentWidth;
+            ShellContentPresenter.Height = contentHeight;
+            ShellContentPresenter.HorizontalAlignment = anchorsRight
+                ? HorizontalAlignment.Right
+                : HorizontalAlignment.Left;
+            ShellContentPresenter.VerticalAlignment = anchorsBottom
+                ? VerticalAlignment.Bottom
+                : VerticalAlignment.Top;
+            _isTransitionContentLayoutFrozen = true;
         }
 
-        bool anchorsRight = expansionAnchor is
-            WidgetCompactExpansionAnchor.RightTop or
-            WidgetCompactExpansionAnchor.RightBottom;
-        bool anchorsBottom = expansionAnchor is
-            WidgetCompactExpansionAnchor.LeftBottom or
-            WidgetCompactExpansionAnchor.RightBottom;
-        ShellContentPresenter.Width = contentWidth;
-        ShellContentPresenter.Height = contentHeight;
-        ShellContentPresenter.HorizontalAlignment = anchorsRight
-            ? HorizontalAlignment.Right
-            : HorizontalAlignment.Left;
-        ShellContentPresenter.VerticalAlignment = anchorsBottom
-            ? VerticalAlignment.Bottom
-            : VerticalAlignment.Top;
-        _isTransitionContentLayoutFrozen = true;
+        // The title bar must not re-wrap at every intermediate window width
+        // during the bounds animation: each re-layout lands on the UI thread
+        // alongside the frame-paced window move and turns into visible
+        // stutter on the title (group tab strips above all). Freezing it at
+        // the transition's stable width follows the same convention the
+        // content presenter already uses — the moving HWND edge reveals or
+        // clips it, no reflow, no new animation semantics.
+        WidgetTitleBarTransitionFreeze titleFreeze =
+            WidgetTitleBarTransitionFreezePolicy.Evaluate(
+                IsOverlayChromeMode,
+                TitleBarGrid.Visibility == Visibility.Visible,
+                stableWindowWidth,
+                expansionAnchor);
+        if (titleFreeze.ShouldFreeze)
+        {
+            TitleBarGrid.Width = titleFreeze.Width;
+            TitleBarGrid.HorizontalAlignment = titleFreeze.AlignRight
+                ? HorizontalAlignment.Right
+                : HorizontalAlignment.Left;
+            _isTransitionTitleBarLayoutFrozen = true;
+        }
     }
 
     private void RestoreTransitionContentLayout()
     {
-        if (!_isTransitionContentLayoutFrozen)
+        if (_isTransitionContentLayoutFrozen)
         {
-            return;
+            ShellContentPresenter.Width = double.NaN;
+            ShellContentPresenter.Height = double.NaN;
+            ShellContentPresenter.HorizontalAlignment = HorizontalAlignment.Stretch;
+            ShellContentPresenter.VerticalAlignment = VerticalAlignment.Stretch;
+            _isTransitionContentLayoutFrozen = false;
         }
 
-        ShellContentPresenter.Width = double.NaN;
-        ShellContentPresenter.Height = double.NaN;
-        ShellContentPresenter.HorizontalAlignment = HorizontalAlignment.Stretch;
-        ShellContentPresenter.VerticalAlignment = VerticalAlignment.Stretch;
-        _isTransitionContentLayoutFrozen = false;
+        if (_isTransitionTitleBarLayoutFrozen)
+        {
+            TitleBarGrid.Width = double.NaN;
+            TitleBarGrid.HorizontalAlignment = HorizontalAlignment.Stretch;
+            _isTransitionTitleBarLayoutFrozen = false;
+        }
     }
 
     public void SetCollapsed(bool collapsed, string contentMode)
@@ -5345,6 +5373,11 @@ public sealed partial class WidgetShell : UserControl
             widgetId,
             succeeded,
             tabSelectionRequestVersion);
+    }
+
+    internal void NotifyGroupInteractionInterrupted()
+    {
+        GroupTitleSwitcher.NotifyInteractionInterrupted();
     }
 
     private void TitleBarGrid_PointerPressed(object sender, PointerRoutedEventArgs e)

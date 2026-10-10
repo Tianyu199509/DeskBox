@@ -74,7 +74,7 @@
                                 TextWrapping="Wrap"
                                 svc:Localized.Key="Settings.Search.Everything.AdvancedSyntax.Description" />
                         </StackPanel>
-                        <ToggleSwitch
+                        <ToggleSwitch svc:Localized.AutomationNameKey="Settings.Search.Everything.Title"
                             x:Name="EverythingAdvancedSyntaxToggle"
                             Grid.Column="1"
                             MinWidth="0"
@@ -142,7 +142,7 @@
                 <toolkit:SettingsExpander.HeaderIcon>
                     <FontIcon Glyph="&#xE721;" />
                 </toolkit:SettingsExpander.HeaderIcon>
-                <ToggleSwitch
+                <ToggleSwitch svc:Localized.AutomationNameKey="Settings.Search.Hotkey.Title"
                     x:Name="SearchHotkeyToggle"
                     MinWidth="0"
                     OffContent=""
@@ -220,7 +220,7 @@
                 HorizontalContentAlignment="Right"
                 svc:Localized.DescriptionKey="Settings.Search.Scope.DeskBox.Description"
                 svc:Localized.HeaderKey="Settings.Search.Scope.DeskBox">
-                <ToggleSwitch
+                <ToggleSwitch svc:Localized.AutomationNameKey="Settings.Search.Scope.DeskBox"
                     x:Name="SearchDeskBoxContentToggle"
                     OnContent=""
                     OffContent=""
@@ -236,7 +236,7 @@
                 <toolkit:SettingsCard.HeaderIcon>
                     <FontIcon Glyph="&#xE8F1;" />
                 </toolkit:SettingsCard.HeaderIcon>
-                <ToggleSwitch
+                <ToggleSwitch svc:Localized.AutomationNameKey="Settings.Search.Recommendations.Title"
                     x:Name="SearchRecommendationsToggle"
                     OnContent=""
                     OffContent=""
@@ -251,7 +251,7 @@
                 <toolkit:SettingsCard.HeaderIcon>
                     <FontIcon Glyph="&#xE7C5;" />
                 </toolkit:SettingsCard.HeaderIcon>
-                <ComboBox x:Name="SearchDefaultTabComboBox"
+                <ComboBox svc:Localized.AutomationNameKey="Settings.Search.DefaultTab.Title" x:Name="SearchDefaultTabComboBox"
                           MinWidth="150"
                           SelectionChanged="SearchDefaultTabComboBox_SelectionChanged">
                     <ComboBoxItem Tag="all">
@@ -277,7 +277,7 @@
                 <toolkit:SettingsCard.HeaderIcon>
                     <FontIcon Glyph="&#xE945;" />
                 </toolkit:SettingsCard.HeaderIcon>
-                <ComboBox x:Name="SearchIconAnimationComboBox"
+                <ComboBox svc:Localized.AutomationNameKey="Settings.Search.IconAnimation.Title" x:Name="SearchIconAnimationComboBox"
                           MinWidth="130"
                           SelectionChanged="SearchIconAnimationComboBox_SelectionChanged">
                     <ComboBoxItem Tag="0">

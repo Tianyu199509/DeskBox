@@ -18,8 +18,6 @@ public sealed record WidgetGroupJoinTarget(
 
 public sealed partial class WidgetManager
 {
-    private static readonly TimeSpan WidgetGroupFirstFrameTimeout =
-        TimeSpan.FromMilliseconds(900);
     private readonly SemaphoreSlim _widgetGroupGate = new(1, 1);
     private readonly WidgetSurfaceSwitchGatePool _widgetSurfaceSwitchGates =
         new();
@@ -1290,6 +1288,20 @@ public sealed partial class WidgetManager
                 return false;
             }
 
+            if (!group.IsVisible &&
+                WidgetGroupSwitchRequest.IsRelativeGestureOrigin(origin))
+            {
+                // A relative wheel/keyboard step that outlived a stow must
+                // not commit a silent flip on the hidden surface; it would
+                // replay as one extra page flip when the group is revealed
+                // again (feedback 387).
+                App.LogVerbose(
+                    $"[WidgetGroup] Dropped post-stow gesture switch " +
+                    $"surface={group.SurfaceId} target={targetWidgetId} " +
+                    $"origin={origin}");
+                return false;
+            }
+
             if (string.Equals(group.ActiveMemberId, targetWidgetId, StringComparison.Ordinal))
             {
                 return true;
@@ -1479,8 +1491,13 @@ public sealed partial class WidgetManager
             // transaction must settle atomically. A later navigation request
             // waits on the surface gate; it must not cancel us between the
             // visual swap and the group identity commit.
+            int projectedItemCount =
+                GetWidgetGroupFirstFrameProjectedItemCount(plan.Content);
+            TimeSpan firstFrameBudget =
+                WidgetGroupFirstFrameBudgetPolicy.ResolveBudget(
+                    projectedItemCount);
             using var frameTimeout = new CancellationTokenSource();
-            frameTimeout.CancelAfter(WidgetGroupFirstFrameTimeout);
+            frameTimeout.CancelAfter(firstFrameBudget);
             try
             {
                 await persistentWindow.WaitForFirstPresentedFrameAsync(
@@ -1494,6 +1511,8 @@ public sealed partial class WidgetManager
                     $"[WidgetGroup] In-place first-frame wait timed out; " +
                     $"keeping previous member group={group.Id} " +
                     $"target={targetConfig.Id} previous={previousActiveId} " +
+                    $"projectedItems={projectedItemCount} " +
+                    $"budgetMs={(long)firstFrameBudget.TotalMilliseconds} " +
                     timeline.Describe(sinceLastActive: null));
                 transition.Rollback();
                 LogWidgetSurfaceEvidence(group, "timeout-rollback");
@@ -1596,6 +1615,31 @@ public sealed partial class WidgetManager
         return true;
     }
 
+    /// <summary>
+    /// Feedback 497: the first-frame gate used one fixed 900ms budget, which
+    /// a file-heavy group member (thousands of tiles to lay out before the
+    /// first composition frames) can never meet — the switch then rolled back
+    /// deterministically and the member was unreachable. The budget now
+    /// scales with the incoming member's projected item count; see
+    /// <see cref="WidgetGroupFirstFrameBudgetPolicy"/> for the curve and its
+    /// ceiling. The rollback itself stays: it is what prevents committing the
+    /// group identity onto a member that never presented a frame.
+    /// </summary>
+    private static int GetWidgetGroupFirstFrameProjectedItemCount(
+        IWidgetContent? content)
+    {
+        return content is FileWidgetContentAdapter fileSurface
+            ? fileSurface.ViewModel.VisibleItems.Count()
+            : 0;
+    }
+
+    private static TimeSpan ResolveWidgetGroupFirstFrameBudget(
+        IWidgetContent? incomingContent)
+    {
+        return WidgetGroupFirstFrameBudgetPolicy.ResolveBudget(
+            GetWidgetGroupFirstFrameProjectedItemCount(incomingContent));
+    }
+
     private static async Task ShowGroupMemberLoadingAfterDelayAsync(
         ContentWidgetWindow window,
         string widgetId,
@@ -1629,6 +1673,7 @@ public sealed partial class WidgetManager
         if (pendingGroup is not null)
         {
             _widgetGroupSwitchRequests.Cancel(pendingGroup.SurfaceId);
+            InterruptWidgetGroupInteraction(pendingGroup);
         }
 
         await _widgetGroupGate.WaitAsync();
@@ -1893,6 +1938,7 @@ public sealed partial class WidgetManager
         if (pendingGroup is not null)
         {
             _widgetGroupSwitchRequests.Cancel(pendingGroup.SurfaceId);
+            InterruptWidgetGroupInteraction(pendingGroup);
         }
 
         await _widgetGroupGate.WaitAsync();
@@ -2163,6 +2209,7 @@ public sealed partial class WidgetManager
         if (!isVisible)
         {
             _widgetGroupSwitchRequests.Cancel(group.SurfaceId);
+            InterruptWidgetGroupInteraction(group);
         }
 
         group.IsVisible = isVisible;
@@ -2537,7 +2584,8 @@ public sealed partial class WidgetManager
                 WidgetGroupFailureProbe.ThrowIfRequested(
                     "reused-detach-first-frame");
                 using var frameTimeout = new CancellationTokenSource(
-                    WidgetGroupFirstFrameTimeout);
+                    ResolveWidgetGroupFirstFrameBudget(
+                        replacementContent.CurrentContent));
                 await replacementContent.WaitForFirstPresentedFrameAsync(
                     frameTimeout.Token);
             }
@@ -2881,7 +2929,7 @@ public sealed partial class WidgetManager
         }
 
         using var frameTimeout = new CancellationTokenSource(
-            WidgetGroupFirstFrameTimeout);
+            ResolveWidgetGroupFirstFrameBudget(content.CurrentContent));
         await content.WaitForFirstPresentedFrameAsync(frameTimeout.Token);
     }
 
@@ -3044,6 +3092,36 @@ public sealed partial class WidgetManager
         }
 
         return GetLegacyLoadedWindow(widgetId);
+    }
+
+    /// <summary>
+    /// Drops every optimistic group-gesture state (wheel cursor, hover
+    /// gesture, feedback animations) on the loaded windows of a surface whose
+    /// switch requests were just cancelled by a stow, member removal or
+    /// dissolve. Hiding a window under the pointer raises no PointerExited,
+    /// so this explicit notification is the only deterministic reset point
+    /// (feedback 387).
+    /// </summary>
+    private void InterruptWidgetGroupInteraction(WidgetGroupConfig group)
+    {
+        foreach (IDesktopWidgetWindow window in group.MemberIds
+                     .Select(GetLoadedWindow)
+                     .Where(window => window is not null)
+                     .Cast<IDesktopWidgetWindow>()
+                     .DistinctBy(window => window.WindowHandle))
+        {
+            try
+            {
+                (window as WidgetWindowBase)?
+                    .NotifyGroupInteractionInterrupted();
+            }
+            catch (Exception ex)
+            {
+                App.Log(
+                    $"[WidgetGroup] Failed to interrupt group interaction " +
+                    $"surface={group.SurfaceId}: {ex}");
+            }
+        }
     }
 
     private void RetireLoadedWindowForGroup(string widgetId, bool keepConfigVisible)

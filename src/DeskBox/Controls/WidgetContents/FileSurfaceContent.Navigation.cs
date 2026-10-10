@@ -341,7 +341,7 @@ public sealed partial class FileSurfaceContent
         }
 
         var slide = compositor.CreateVector3KeyFrameAnimation();
-        slide.Duration = TimeSpan.FromMilliseconds(190);
+        slide.Duration = TimeSpan.FromMilliseconds(WidgetMotion.SpatialMilliseconds);
         slide.InsertKeyFrame(
             1,
             Vector3.Zero,
@@ -351,7 +351,7 @@ public sealed partial class FileSurfaceContent
         contentVisual.StartAnimation("Translation", slide);
 
         var fade = compositor.CreateScalarKeyFrameAnimation();
-        fade.Duration = TimeSpan.FromMilliseconds(140);
+        fade.Duration = TimeSpan.FromMilliseconds(WidgetMotion.TransitionMilliseconds);
         fade.InsertKeyFrame(1, 1);
         contentVisual.StartAnimation("Opacity", fade);
         _folderNavigationVisualPrepared = false;

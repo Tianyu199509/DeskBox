@@ -561,9 +561,8 @@ public static class ShortcutHelper
         string appUserModelId,
         string description)
     {
-        string normalizedShortcutPath = Path.GetFullPath(shortcutPath);
         string normalizedAppUserModelId = appUserModelId?.Trim() ?? string.Empty;
-        int separatorIndex = normalizedAppUserModelId.IndexOf('!');
+        int separatorIndex = normalizedAppUserModelId.IndexOf("!");
         if (string.IsNullOrWhiteSpace(normalizedAppUserModelId) ||
             normalizedAppUserModelId.Length > 1024 ||
             normalizedAppUserModelId.Contains('\0') ||
@@ -579,6 +578,35 @@ public static class ShortcutHelper
                 nameof(appUserModelId));
         }
 
+        CreateShellNamespaceShortcut(
+            shortcutPath,
+            $"shell:AppsFolder\\{normalizedAppUserModelId}",
+            description);
+    }
+
+    /// <summary>
+    /// Creates a filesystem .lnk that targets a Shell namespace object by its
+    /// parsing name (for example "::{20D04FE0-...}" for This PC). Virtual
+    /// namespace items have no file-system path, so the shortcut stores the
+    /// resolved PIDL via IShellLink::SetIDList, which is also how Explorer
+    /// materializes pasted namespace objects.
+    /// </summary>
+    public static void CreateShellNamespaceShortcut(
+        string shortcutPath,
+        string parsingName,
+        string description)
+    {
+        string normalizedShortcutPath = Path.GetFullPath(shortcutPath);
+        string normalizedParsingName = parsingName?.Trim() ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(normalizedParsingName) ||
+            normalizedParsingName.Length > 1024 ||
+            normalizedParsingName.Contains('\0'))
+        {
+            throw new ArgumentException(
+                "A Shell parsing name is required.",
+                nameof(parsingName));
+        }
+
         string? shortcutDirectory = Path.GetDirectoryName(normalizedShortcutPath);
         if (string.IsNullOrWhiteSpace(shortcutDirectory))
         {
@@ -588,19 +616,18 @@ public static class ShortcutHelper
         }
 
         Directory.CreateDirectory(shortcutDirectory);
-        string parsingName = $"shell:AppsFolder\\{normalizedAppUserModelId}";
 
 #if DESKBOX_NATIVE_AOT
         ShortcutNativeWriteCallResult native =
             ShortcutNativeBackend.WriteShellNamespaceShortcut(
                 normalizedShortcutPath,
-                parsingName,
+                normalizedParsingName,
                 description);
         if (!native.Success)
         {
-            LogNativeWriteFailure("AppsFolder write", normalizedShortcutPath, native);
+            LogNativeWriteFailure("namespace write", normalizedShortcutPath, native);
             throw new InvalidOperationException(
-                $"Rust AppsFolder shortcut write failed: {native.Failure}; {native.Detail}");
+                $"Rust namespace shortcut write failed: {native.Failure}; {native.Detail}");
         }
 #else
         if (ShortcutBackendPolicy.Current == ShortcutBackendMode.Rust)
@@ -608,20 +635,20 @@ public static class ShortcutHelper
             ShortcutNativeWriteCallResult native =
                 ShortcutNativeBackend.WriteShellNamespaceShortcut(
                     normalizedShortcutPath,
-                    parsingName,
+                    normalizedParsingName,
                     description);
             if (!native.Success)
             {
-                LogNativeWriteFailure("AppsFolder write", normalizedShortcutPath, native);
+                LogNativeWriteFailure("namespace write", normalizedShortcutPath, native);
                 throw new InvalidOperationException(
-                    $"Rust AppsFolder shortcut write failed: {native.Failure}; {native.Detail}");
+                    $"Rust namespace shortcut write failed: {native.Failure}; {native.Detail}");
             }
         }
         else
         {
             CreateShellNamespaceShortcutWithCSharp(
                 normalizedShortcutPath,
-                parsingName,
+                normalizedParsingName,
                 description);
         }
 #endif

@@ -368,7 +368,7 @@
                         <ColumnDefinition Width="*" />
                         <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
-                    <Button
+                    <Button AutomationProperties.Name="{Binding DetailBackText}"
                         x:Name="DetailBackButton"
                         Grid.Column="0"
                         Click="DetailBackButton_Click"
@@ -382,8 +382,8 @@
                         Width="28"
                         Height="28"
                         HorizontalAlignment="Left">
-                        <Button x:Name="DetailEditButton" Click="DetailEditButton_Click" Style="{StaticResource QuickCaptureSharedDetailIconButtonStyle}" ToolTipService.ToolTip="{Binding DetailEditText}"><FontIcon FontSize="{StaticResource QuickCaptureDetailActionIconSize}" Glyph="&#xE70F;" /></Button>
-                        <Button x:Name="DetailDoneButton" Click="DetailDoneButton_Click" Style="{StaticResource QuickCaptureSharedDetailIconButtonStyle}" ToolTipService.ToolTip="{Binding DetailDoneText}" Visibility="Collapsed"><FontIcon FontSize="{StaticResource QuickCaptureDetailActionIconSize}" Glyph="&#xE73E;" /></Button>
+                        <Button AutomationProperties.Name="{Binding DetailEditText}" x:Name="DetailEditButton" Click="DetailEditButton_Click" Style="{StaticResource QuickCaptureSharedDetailIconButtonStyle}" ToolTipService.ToolTip="{Binding DetailEditText}"><FontIcon FontSize="{StaticResource QuickCaptureDetailActionIconSize}" Glyph="&#xE70F;" /></Button>
+                        <Button AutomationProperties.Name="{Binding DetailDoneText}" x:Name="DetailDoneButton" Click="DetailDoneButton_Click" Style="{StaticResource QuickCaptureSharedDetailIconButtonStyle}" ToolTipService.ToolTip="{Binding DetailDoneText}" Visibility="Collapsed"><FontIcon FontSize="{StaticResource QuickCaptureDetailActionIconSize}" Glyph="&#xE73E;" /></Button>
                     </Grid>
                     <StackPanel
                         x:Name="DetailHeaderActions"
@@ -391,9 +391,9 @@
                         HorizontalAlignment="Right"
                         Orientation="Horizontal"
                         Spacing="2">
-                        <Button x:Name="DetailPinButton" Click="DetailPinButton_Click" Style="{StaticResource QuickCaptureSharedDetailIconButtonStyle}" ToolTipService.ToolTip="{Binding DetailPinText}"><controls:PinStateIcon x:Name="DetailPinIcon" Width="13" Height="13" Foreground="{ThemeResource TextFillColorSecondaryBrush}" /></Button>
-                        <Button x:Name="DetailCopyButton" Click="DetailCopyButton_Click" Style="{StaticResource QuickCaptureSharedDetailIconButtonStyle}" ToolTipService.ToolTip="{Binding DetailCopyText}"><FontIcon FontSize="{StaticResource QuickCaptureDetailActionIconSize}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Glyph="&#xE8C8;" /></Button>
-                        <Button x:Name="DetailDeleteButton" Click="DetailDeleteButton_Click" Style="{StaticResource QuickCaptureSharedDetailIconButtonStyle}" ToolTipService.ToolTip="{Binding DetailDeleteText}"><FontIcon FontSize="{StaticResource QuickCaptureDetailActionIconSize}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Glyph="&#xE74D;" /></Button>
+                        <Button AutomationProperties.Name="{Binding DetailPinText}" x:Name="DetailPinButton" Click="DetailPinButton_Click" Style="{StaticResource QuickCaptureSharedDetailIconButtonStyle}" ToolTipService.ToolTip="{Binding DetailPinText}"><controls:PinStateIcon x:Name="DetailPinIcon" Width="13" Height="13" Foreground="{ThemeResource TextFillColorSecondaryBrush}" /></Button>
+                        <Button AutomationProperties.Name="{Binding DetailCopyText}" x:Name="DetailCopyButton" Click="DetailCopyButton_Click" Style="{StaticResource QuickCaptureSharedDetailIconButtonStyle}" ToolTipService.ToolTip="{Binding DetailCopyText}"><FontIcon FontSize="{StaticResource QuickCaptureDetailActionIconSize}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Glyph="&#xE8C8;" /></Button>
+                        <Button AutomationProperties.Name="{Binding DetailDeleteText}" x:Name="DetailDeleteButton" Click="DetailDeleteButton_Click" Style="{StaticResource QuickCaptureSharedDetailIconButtonStyle}" ToolTipService.ToolTip="{Binding DetailDeleteText}"><FontIcon FontSize="{StaticResource QuickCaptureDetailActionIconSize}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Glyph="&#xE74D;" /></Button>
                     </StackPanel>
                     </Grid>
                 </Grid>
@@ -500,12 +500,12 @@
                     </Grid>
                 </Border>
                 <StackPanel x:Name="DetailMaterialPalette" Grid.Row="1" Margin="2,0,0,0" Orientation="Horizontal" Spacing="5" Visibility="Collapsed">
-                    <Button x:Name="DefaultMaterialButton" Click="DetailMaterialButton_Click" Style="{StaticResource QuickCaptureSharedMaterialButtonStyle}" Tag="Default" ToolTipService.ToolTip="{Binding MaterialDefaultText}"><Border Width="18" Height="12" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="3" /></Button>
-                    <Button x:Name="PaperMaterialButton" Click="DetailMaterialButton_Click" Style="{StaticResource QuickCaptureSharedMaterialButtonStyle}" Tag="Paper" ToolTipService.ToolTip="{Binding MaterialPaperText}"><Border Width="18" Height="12" Background="#FFF4EEE2" CornerRadius="3" /></Button>
-                    <Button x:Name="YellowMaterialButton" Click="DetailMaterialButton_Click" Style="{StaticResource QuickCaptureSharedMaterialButtonStyle}" Tag="StickyYellow" ToolTipService.ToolTip="{Binding MaterialYellowText}"><Border Width="18" Height="12" Background="#FFFFD96A" CornerRadius="3" /></Button>
-                    <Button x:Name="RoseMaterialButton" Click="DetailMaterialButton_Click" Style="{StaticResource QuickCaptureSharedMaterialButtonStyle}" Tag="Rose" ToolTipService.ToolTip="{Binding MaterialRoseText}"><Border Width="18" Height="12" Background="#FFF2A7B8" CornerRadius="3" /></Button>
-                    <Button x:Name="MintMaterialButton" Click="DetailMaterialButton_Click" Style="{StaticResource QuickCaptureSharedMaterialButtonStyle}" Tag="Mint" ToolTipService.ToolTip="{Binding MaterialMintText}"><Border Width="18" Height="12" Background="#FFA8D8B5" CornerRadius="3" /></Button>
-                    <Button x:Name="BlueMaterialButton" Click="DetailMaterialButton_Click" Style="{StaticResource QuickCaptureSharedMaterialButtonStyle}" Tag="MistBlue" ToolTipService.ToolTip="{Binding MaterialBlueText}"><Border Width="18" Height="12" Background="#FFA9C7E8" CornerRadius="3" /></Button>
+                    <Button AutomationProperties.Name="{Binding MaterialDefaultText}" x:Name="DefaultMaterialButton" Click="DetailMaterialButton_Click" Style="{StaticResource QuickCaptureSharedMaterialButtonStyle}" Tag="Default" ToolTipService.ToolTip="{Binding MaterialDefaultText}"><Border Width="18" Height="12" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="3" /></Button>
+                    <Button AutomationProperties.Name="{Binding MaterialPaperText}" x:Name="PaperMaterialButton" Click="DetailMaterialButton_Click" Style="{StaticResource QuickCaptureSharedMaterialButtonStyle}" Tag="Paper" ToolTipService.ToolTip="{Binding MaterialPaperText}"><Border Width="18" Height="12" Background="#FFF4EEE2" CornerRadius="3" /></Button>
+                    <Button AutomationProperties.Name="{Binding MaterialYellowText}" x:Name="YellowMaterialButton" Click="DetailMaterialButton_Click" Style="{StaticResource QuickCaptureSharedMaterialButtonStyle}" Tag="StickyYellow" ToolTipService.ToolTip="{Binding MaterialYellowText}"><Border Width="18" Height="12" Background="#FFFFD96A" CornerRadius="3" /></Button>
+                    <Button AutomationProperties.Name="{Binding MaterialRoseText}" x:Name="RoseMaterialButton" Click="DetailMaterialButton_Click" Style="{StaticResource QuickCaptureSharedMaterialButtonStyle}" Tag="Rose" ToolTipService.ToolTip="{Binding MaterialRoseText}"><Border Width="18" Height="12" Background="#FFF2A7B8" CornerRadius="3" /></Button>
+                    <Button AutomationProperties.Name="{Binding MaterialMintText}" x:Name="MintMaterialButton" Click="DetailMaterialButton_Click" Style="{StaticResource QuickCaptureSharedMaterialButtonStyle}" Tag="Mint" ToolTipService.ToolTip="{Binding MaterialMintText}"><Border Width="18" Height="12" Background="#FFA8D8B5" CornerRadius="3" /></Button>
+                    <Button AutomationProperties.Name="{Binding MaterialBlueText}" x:Name="BlueMaterialButton" Click="DetailMaterialButton_Click" Style="{StaticResource QuickCaptureSharedMaterialButtonStyle}" Tag="MistBlue" ToolTipService.ToolTip="{Binding MaterialBlueText}"><Border Width="18" Height="12" Background="#FFA9C7E8" CornerRadius="3" /></Button>
                 </StackPanel>
                 <TextBlock
                     x:Name="DetailTimestampText"
@@ -559,6 +559,5 @@
                 </StackPanel>
             </Grid>
         </Grid>
-        <TextBox x:Name="InputTextBox" Visibility="Collapsed" />
     </Grid>
 </UserControl>

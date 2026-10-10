@@ -4,8 +4,9 @@ namespace DeskBox.Services;
 
 /// <summary>
 /// Recognizes an isolated left or right Windows-key tap while preserving every
-/// Windows-key chord. Start-menu masking is performed by the hook service only
-/// after this state machine reports a completed isolated tap.
+/// Windows-key chord. Start-menu masking is performed by the hook service at
+/// each Windows-key press edge (prepare) and again when this state machine
+/// reports a completed isolated tap.
 /// </summary>
 internal sealed class WindowsTapHotkeyStateMachine
 {
@@ -46,13 +47,25 @@ internal sealed class WindowsTapHotkeyStateMachine
 
         if (isKeyDown)
         {
+            bool isDownTransition = !keyDown;
             if (!keyDown && HasWindowsKeyDown)
             {
                 _chordObserved = true;
             }
 
             keyDown = true;
-            return ReservedHotkeyEventDisposition.PassThrough;
+            if (!isDownTransition)
+            {
+                // Auto-repeat key-downs keep the original press's semantics.
+                return ReservedHotkeyEventDisposition.PassThrough;
+            }
+
+            // Mask the Start menu at the press edge, not only on the release
+            // that completes a tap: the release-side mask races the delivery
+            // of the key-up itself and loses whenever the hook thread or the
+            // system is busy (boot, feedback 367). A mask injected while the
+            // key is held has the entire key-hold duration to land.
+            return ReservedHotkeyEventDisposition.PrepareMaskAndPassThrough;
         }
 
         if (!keyDown)

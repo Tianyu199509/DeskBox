@@ -1,5 +1,6 @@
 using CommunityToolkit.WinUI.Controls;
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 
@@ -39,6 +40,20 @@ public static class Localized
     public static readonly DependencyProperty DescriptionKeyProperty =
         DependencyProperty.RegisterAttached(
             "DescriptionKey",
+            typeof(string),
+            typeof(Localized),
+            new PropertyMetadata(null, OnLocalizationPropertyChanged));
+
+    public static readonly DependencyProperty PlaceholderKeyProperty =
+        DependencyProperty.RegisterAttached(
+            "PlaceholderKey",
+            typeof(string),
+            typeof(Localized),
+            new PropertyMetadata(null, OnLocalizationPropertyChanged));
+
+    public static readonly DependencyProperty AutomationNameKeyProperty =
+        DependencyProperty.RegisterAttached(
+            "AutomationNameKey",
             typeof(string),
             typeof(Localized),
             new PropertyMetadata(null, OnLocalizationPropertyChanged));
@@ -83,6 +98,26 @@ public static class Localized
     public static void SetDescriptionKey(DependencyObject obj, string? value)
     {
         obj.SetValue(DescriptionKeyProperty, value);
+    }
+
+    public static string? GetPlaceholderKey(DependencyObject obj)
+    {
+        return (string?)obj.GetValue(PlaceholderKeyProperty);
+    }
+
+    public static void SetPlaceholderKey(DependencyObject obj, string? value)
+    {
+        obj.SetValue(PlaceholderKeyProperty, value);
+    }
+
+    public static string? GetAutomationNameKey(DependencyObject obj)
+    {
+        return (string?)obj.GetValue(AutomationNameKeyProperty);
+    }
+
+    public static void SetAutomationNameKey(DependencyObject obj, string? value)
+    {
+        obj.SetValue(AutomationNameKeyProperty, value);
     }
 
         public static void RefreshAll(LocalizationService localizationService)
@@ -141,10 +176,22 @@ public static class Localized
         }
 
         Track(target);
-        if (App.Current?.LocalizationService is { } localizationService)
+        if (CurrentService is { } localizationService)
         {
             Apply(target, localizationService);
         }
+    }
+
+    private static LocalizationService? CurrentService => App.Current?.LocalizationService;
+
+    /// <summary>
+    /// Resolves one key outside the attached-property pipeline (e.g. the
+    /// shared InfoTip flyout fills its text at open time). Falls back to
+    /// the key itself, matching LocalizationService.T's fallback.
+    /// </summary>
+    public static string T(string key)
+    {
+        return CurrentService?.T(key) ?? key;
     }
 
     private static void Track(DependencyObject target)
@@ -223,6 +270,27 @@ public static class Localized
         {
             ToolTipService.SetToolTip(element, localizationService.T(toolTipKey));
         }
+
+        string? placeholderKey = GetPlaceholderKey(target);
+        if (!string.IsNullOrWhiteSpace(placeholderKey))
+        {
+            string placeholder = localizationService.T(placeholderKey);
+            switch (target)
+            {
+                case TextBox placeholderTextBox:
+                    placeholderTextBox.PlaceholderText = placeholder;
+                    break;
+                case AutoSuggestBox placeholderAutoSuggestBox:
+                    placeholderAutoSuggestBox.PlaceholderText = placeholder;
+                    break;
+            }
+        }
+
+        string? automationNameKey = GetAutomationNameKey(target);
+        if (!string.IsNullOrWhiteSpace(automationNameKey) && target is UIElement automationElement)
+        {
+            AutomationProperties.SetName(automationElement, localizationService.T(automationNameKey));
+        }
     }
 
     private static void SetLocalizedHeader(DependencyObject target, string value)
@@ -230,10 +298,10 @@ public static class Localized
         switch (target)
         {
             case SettingsCard settingsCard:
-                settingsCard.Header = value;
+                settingsCard.Header = InfoTip.TryCreateHeaderContent(settingsCard, value) ?? value;
                 break;
             case SettingsExpander settingsExpander:
-                settingsExpander.Header = value;
+                settingsExpander.Header = InfoTip.TryCreateHeaderContent(settingsExpander, value) ?? value;
                 break;
             case TextBox textBox:
                 textBox.Header = value;

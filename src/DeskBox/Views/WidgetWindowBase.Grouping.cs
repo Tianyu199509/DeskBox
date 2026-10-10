@@ -58,6 +58,16 @@ public abstract partial class WidgetWindowBase
         WidgetShellControl.SetGroupDropPreview(visible, ready, messageKey);
     }
 
+    /// <summary>
+    /// Drops every optimistic group-gesture state (wheel cursor, wheel
+    /// accumulator, hover flags) after the group surface was interrupted by a
+    /// stow, member removal or dissolve. Callers run on the UI thread.
+    /// </summary>
+    internal void NotifyGroupInteractionInterrupted()
+    {
+        WidgetShellControl.NotifyGroupInteractionInterrupted();
+    }
+
     public RectInt32? GetGroupMergeTitleScreenBounds()
     {
         Microsoft.UI.Xaml.FrameworkElement? titleTarget =

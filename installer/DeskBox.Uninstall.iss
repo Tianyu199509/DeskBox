@@ -466,17 +466,43 @@ begin
   // all-users uninstaller is elevated from the initiating user's session, so
   // that user's package registration is the one that matters. PowerShell exit
   // codes: 0 = the package is registered for this user, 1 = Get-AppxPackage
-  // returned nothing (not installed), anything else = the probe itself
-  // failed. A failed probe never silently becomes "not installed": it is
-  // resolved by the AppX platform pre-check below, or stays Unknown, which
-  // callers treat as installed.
+  // returned nothing (not installed), 2 = the probe itself failed, 3 = the
+  // probe exceeded its 30-second Wait-Job budget, anything else = the probe
+  // failed unexpectedly. A failed or timed-out probe never silently becomes
+  // "not installed": systems without the AppX platform are short-circuited
+  // by the pre-check below before PowerShell is spawned, and every other
+  // failure stays Unknown, which callers treat as installed.
   Result := StoreDeskBoxStateUnknown;
 
+  // Platform pre-check, using only native Inno Setup calls so no extra
+  // process is spawned. LTSC and stripped-down Windows ship without the AppX
+  // platform: with neither the %WINDIR%\System32\WindowsApps directory nor
+  // the AppXSvc service present, no Store edition can be installed at all,
+  // so the purge may proceed. It runs before the PowerShell probe so those
+  // systems never spawn a process that cannot answer the question. On an
+  // AppX-capable system the state stays Unknown and callers must fail closed.
+  if (not DirExists(ExpandConstant('{win}\System32\WindowsApps'))) and
+     (not RegKeyExists(HKEY_LOCAL_MACHINE, 'SYSTEM\CurrentControlSet\Services\AppXSvc')) then
+  begin
+    Result := StoreDeskBoxStateNotInstalled;
+    Log('DeskBox uninstall found no AppX platform (WindowsApps directory and AppXSvc service are absent); the Microsoft Store edition cannot be installed.');
+    Exit;
+  end;
+
+  // The Get-AppxPackage probe runs inside a PowerShell job with a hard
+  // 30-second budget: a wedged AppX repository must not hang the uninstall
+  // entry points that call this function. A job's exit code does not
+  // propagate to the parent, so the job scriptblock reports 0/1/2 as its
+  // output and the outer script maps that output to its own exit codes;
+  // a timeout stops and removes the job and exits 3, which lands in the
+  // catch-all branch below (Unknown, fail closed).
   if not Exec(
        ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
-       '-NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "try { if (Get-AppxPackage -Name ''' +
+       '-NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "try { $job = Start-Job { try { if (Get-AppxPackage -Name ''' +
          DeskBoxStorePackageIdentityName +
-         ''' -ErrorAction Stop) { exit 0 } else { exit 1 } } catch { exit 2 }"',
+         ''' -ErrorAction Stop) { 0 } else { 1 } } catch { 2 } }; if (Wait-Job -Job $job -Timeout 30) { $code = Receive-Job -Job $job; ' +
+         'Remove-Job -Job $job -Force; if ($code -eq 0) { exit 0 }; if ($code -eq 1) { exit 1 }; exit 2 }; ' +
+         'Stop-Job -Job $job; Remove-Job -Job $job -Force; exit 3 } catch { exit 2 }"',
        '',
        SW_HIDE,
        ewWaitUntilTerminated,
@@ -502,20 +528,7 @@ begin
     end;
   end;
 
-  // Platform pre-check, using only native Inno Setup calls so no extra
-  // process is spawned. LTSC and stripped-down Windows ship without the AppX
-  // platform: with neither the %WINDIR%\System32\WindowsApps directory nor
-  // the AppXSvc service present, no Store edition can be installed at all,
-  // so the purge may proceed. On an AppX-capable system the state stays
-  // Unknown and callers must fail closed.
-  if (not DirExists(ExpandConstant('{win}\System32\WindowsApps'))) and
-     (not RegKeyExists(HKEY_LOCAL_MACHINE, 'SYSTEM\CurrentControlSet\Services\AppXSvc')) then
-  begin
-    Result := StoreDeskBoxStateNotInstalled;
-    Log('DeskBox uninstall found no AppX platform (WindowsApps directory and AppXSvc service are absent); the Microsoft Store edition cannot be installed.');
-  end
-  else
-    Log('DeskBox uninstall could not verify the Microsoft Store edition on an AppX-capable system; treating it as installed to protect user data.');
+  Log('DeskBox uninstall could not verify the Microsoft Store edition on an AppX-capable system; treating it as installed to protect user data.');
 end;
 
 function ChooseAppDataRemoval: Boolean;

@@ -467,6 +467,19 @@ public static class IconHelper
             byte[]? bytes = await ShellThumbnailProxy.TryLoadAsync(
                 path,
                 decodePixelWidth);
+            if (bytes is not { Length: > 0 })
+            {
+                // The proxy failed, or the path sits in its 30 s failure
+                // blacklist (feedback 226/452/495: the proxy process could
+                // die with CRT runtime error R6016 after sleep/resume).
+                // Containers a built-in WIC decoder can read are still
+                // decodable in-process; the decoder is pinned by GUID so no
+                // third-party codec loads into DeskBox.
+                bytes = await WicBuiltInThumbnailDecoder.DecodeAsync(
+                    path,
+                    decodePixelWidth);
+            }
+
             return bytes is { Length: > 0 }
                 ? await CreateBitmapImageAsync(
                     dispatcher,
@@ -627,6 +640,7 @@ public static class IconHelper
         if (resetTransientFailures)
         {
             ShellThumbnailProxy.Invalidate(path);
+            WicBuiltInThumbnailDecoder.Invalidate(path);
         }
 
         if (IsMediaFile(path))
@@ -739,6 +753,7 @@ public static class IconHelper
         }
 
         ShellThumbnailProxy.ClearTransientFailures();
+        WicBuiltInThumbnailDecoder.ClearTransientFailures();
     }
 
     /// <summary>
@@ -907,6 +922,7 @@ public static class IconHelper
         s_iconSourceTimeouts.Clear();
         s_iconBytesTimeouts.Clear();
         ShellThumbnailProxy.ClearTransientFailures();
+        WicBuiltInThumbnailDecoder.ClearTransientFailures();
 
         return new IdleIconCacheReleaseResult(
             Math.Max(0, thumbnailCountBefore - thumbnailCountAfter),

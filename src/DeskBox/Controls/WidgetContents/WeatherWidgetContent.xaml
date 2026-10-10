@@ -132,7 +132,7 @@
                         ToolTipService.ToolTip="{Binding LocationFallbackTooltip}"
                         Visibility="{Binding LocationFallbackVisibility}" />
                 </StackPanel>
-                <Button
+                <Button AutomationProperties.Name="{Binding RefreshTooltip}"
                     Grid.Column="1"
                     Width="20"
                     Height="20"
@@ -226,7 +226,7 @@
                         ToolTipService.ToolTip="{Binding LocationFallbackTooltip}"
                         Visibility="{Binding LocationFallbackVisibility}" />
                 </StackPanel>
-                <Button
+                <Button AutomationProperties.Name="{Binding RefreshTooltip}"
                     Grid.Column="1"
                     Width="24"
                     Height="24"
@@ -442,7 +442,7 @@
                     </toolkit:SegmentedItem>
                 </toolkit:Segmented>
 
-                <Button
+                <Button AutomationProperties.Name="{Binding RefreshTooltip}"
                     Grid.Column="2"
                     Click="RefreshButton_Click"
                     Style="{StaticResource WeatherIconButtonStyle}"

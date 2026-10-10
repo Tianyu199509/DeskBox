@@ -61,7 +61,7 @@ public sealed class PlaceholderWidgetContent : IWidgetContent
 
         var description = new TextBlock
         {
-            Text = "Content placeholder",
+            Text = Localized.T("Widget.Placeholder.Description"),
             FontSize = 12,
             Opacity = 0.72,
             TextAlignment = TextAlignment.Center,

@@ -35,6 +35,9 @@ internal static partial class ClipboardNativeMethods
     internal static extern IntPtr GlobalAlloc(uint flags, nuint bytes);
 
     [DllImport("kernel32.dll", SetLastError = true)]
+    internal static extern IntPtr GlobalSize(IntPtr memoryHandle);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
     internal static extern IntPtr GlobalLock(IntPtr memoryHandle);
 
     [DllImport("kernel32.dll", SetLastError = true)]

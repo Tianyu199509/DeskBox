@@ -1025,7 +1025,7 @@ public partial class App
 
         _trayIcon.ToolTipText = _widgetsRaisedFromTray
             ? LocalizationService.T("Tray.TooltipRaised")
-            : LocalizationService.T("Tray.Tooltip");
+            : LocalizationService.T("Tray.TooltipNormal");
     }
 
     private static string GetCreateEntryText(WidgetContentDescriptor descriptor, LocalizationService localization)

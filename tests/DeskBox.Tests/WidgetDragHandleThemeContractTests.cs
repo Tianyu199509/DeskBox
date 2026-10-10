@@ -15,7 +15,10 @@ public sealed class WidgetDragHandleThemeContractTests
         string searchCode = File.ReadAllText(TestPaths.FromRepository(
             "src/DeskBox/Views/SearchPopupWindow.xaml.cs"));
 
-        Assert.Equal(2, CountOccurrences(appXaml, "x:Key=\"WidgetDragHandleBrush\""));
+        // Light/Dark/Default/HighContrast: RequestedTheme is ignored under
+        // high contrast, so the handle brush must exist in all four theme
+        // dictionaries or the widget windows fail to resolve it.
+        Assert.Equal(4, CountOccurrences(appXaml, "x:Key=\"WidgetDragHandleBrush\""));
         Assert.Contains(
             "x:Key=\"WidgetDragHandleBrush\" Color=\"#6B6B6B\"",
             appXaml,

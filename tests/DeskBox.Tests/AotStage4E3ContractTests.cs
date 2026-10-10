@@ -90,7 +90,10 @@ public sealed class AotStage4E3ContractTests
         Assert.Equal(0, CountOccurrences(xaml, "{x:Bind Count, Mode=OneWay}"));
         Assert.Equal(1, CountOccurrences(xaml, "{x:Bind Icon, Mode=OneTime}"));
         Assert.Equal(1, CountOccurrences(xaml, "{x:Bind AppDisplayName, Mode=OneTime}"));
-        Assert.Equal(2, CountOccurrences(xaml, "{x:Bind Title, Mode=OneTime}"));
+        // 4 = favorites/recent inner TextBlock x2 + the Button rows own
+        // AutomationProperties.Name x2 (the Button peer does not derive a
+        // name from a Grid content template).
+        Assert.Equal(4, CountOccurrences(xaml, "{x:Bind Title, Mode=OneTime}"));
         Assert.DoesNotContain("{Binding ", xaml, StringComparison.Ordinal);
     }
 

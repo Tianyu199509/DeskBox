@@ -14,10 +14,14 @@ public sealed class WidgetCompactTrayVisibilityContractTests
 
         Assert.Contains("UsesSmartCollapseBehavior()", method, StringComparison.Ordinal);
         Assert.Contains("_isSmartPinnedOpen", method, StringComparison.Ordinal);
-        Assert.Contains(
-            "EnsureCompactPlacementFromExpandedBounds(persist: true);",
+        // Feedback 340: tray hide runs over freshly restored geometry and must
+        // never fabricate a persisted capsule placement from the expanded
+        // window corner — the collapse below derives bounds transiently.
+        Assert.DoesNotContain(
+            "EnsureCompactPlacementFromExpandedBounds",
             method,
             StringComparison.Ordinal);
+        Assert.DoesNotContain("CaptureCompactPlacement", method, StringComparison.Ordinal);
         Assert.DoesNotContain(
             "Config.CompactPlacement = null;",
             method,
@@ -260,7 +264,7 @@ public sealed class WidgetCompactTrayVisibilityContractTests
     }
 
     [Fact]
-    public void EnteringCompactBehavior_DerivesPlacementFromCurrentBoundsBeforeStateTransition()
+    public void EnteringCompactBehavior_DerivesCapsuleBoundsBeforeStateTransition()
     {
         string source = File.ReadAllText(TestPaths.FromRepository(
             "src/DeskBox/Views/WidgetWindowBase.Collapse.cs"));
@@ -269,11 +273,19 @@ public sealed class WidgetCompactTrayVisibilityContractTests
             "private void ApplyEffectiveCollapseBehavior(bool animate)",
             "private void SynchronizeCompactPointerStateForSmartEntry()");
 
+        // Feedback 340: the derivation is transient for widgets that have
+        // never been collapsed; only the deliberate re-commit of an existing
+        // placement captures. Either way the bounds are derived before the
+        // state transition so the collapse lands on the window's region.
         int captureIndex = method.IndexOf(
-            "DeriveCompactPlacementFromExpandedBounds(persist: true);",
+            "DeriveCompactPlacementFromExpandedBounds(",
             StringComparison.Ordinal);
         int transitionIndex = method.IndexOf("SetCollapsedState(", StringComparison.Ordinal);
         Assert.True(captureIndex >= 0 && captureIndex < transitionIndex);
+        Assert.Contains(
+            "capturePlacement: Config.CompactPlacement is not null",
+            method,
+            StringComparison.Ordinal);
     }
 
     [Fact]
@@ -288,7 +300,7 @@ public sealed class WidgetCompactTrayVisibilityContractTests
 
         Assert.DoesNotContain("CompactPlacementNeedsDirectionRepair()", method, StringComparison.Ordinal);
         Assert.DoesNotContain("RefreshCompactPlacementFromExpandedBounds", method, StringComparison.Ordinal);
-        Assert.Contains("EnsureCompactPlacementFromExpandedBounds(persist: true);", method, StringComparison.Ordinal);
+        Assert.Contains("EnsureCompactPlacementFromExpandedBounds();", method, StringComparison.Ordinal);
     }
 
     [Fact]

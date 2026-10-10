@@ -35,6 +35,17 @@ internal static class WidgetLockMenuBuilder
         sizeItem.Click += (_, _) => setSizeLocked(sizeItem.IsChecked);
         menu.Items.Add(sizeItem);
 
+        // Scope hint (feedback 438): locking reads as "pin everything" to
+        // users, while it only gates dragging/resizing. Disabled items don't
+        // raise clicks but still render text — same pattern as the offline
+        // display row in the screen menu.
+        menu.Items.Add(new MenuFlyoutSeparator());
+        menu.Items.Add(new MenuFlyoutItem
+        {
+            Text = localizationService.T("Widget.Lock.Hint"),
+            IsEnabled = false
+        });
+
         return menu;
     }
 }

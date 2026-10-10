@@ -1011,9 +1011,13 @@ public sealed partial class FileSurfaceContent :
             activeView.SelectedItems.Add(item);
         }
 
-        if (_settingsService.Settings.FileItemSystemContextMenuEnabled &&
-            item is not WidgetStackItem &&
-            GetSelectedItems().Count == 1)
+        bool nativeMenuEnabled =
+            _settingsService.Settings.FileItemSystemContextMenuEnabled;
+        bool isStackTile = item is WidgetStackItem;
+        int selectionCount = GetSelectedItems().Count;
+        if (nativeMenuEnabled &&
+            !isStackTile &&
+            selectionCount == 1)
         {
             // The native Shell menu only supports a single item, and stack
             // tiles have no file-system path; both keep the built-in flyout.
@@ -1258,8 +1262,10 @@ public sealed partial class FileSurfaceContent :
         _activeDragHasStorageItems = result.HasStorageItems;
         // Windows 10 collapses the advertised set to a single effect —
         // Explorer there prompts for every multi-effect drop regardless of
-        // the preferred operation. Windows 11 keeps Copy|Move plus the
-        // preference below.
+        // the preferred operation. The default (FollowWindows) resolves to
+        // Copy so IM-style receivers can never resolve the drop to Move
+        // and delete the original (feedback 500); Windows 11 keeps Copy|Move
+        // plus the preference below.
         e.AllowedOperations = FileItemDragPackage.ResolveDragOutAllowedOperations(
             _settingsService.Settings.FileWidget.ManagedDragOutAction);
         _activeDragAllowedOperations = e.AllowedOperations;
@@ -5371,8 +5377,43 @@ public sealed partial class FileSurfaceContent :
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToArray();
         }
+
+        // Namespace objects (This PC, Recycle Bin, Control Panel, user shell
+        // folders) never expose CF_HDROP or storage items; Explorer's copy of
+        // them is a CFSTR_SHELLIDLIST payload. Real paths among them import
+        // normally; purely virtual items land as shortcuts, matching both
+        // Explorer's paste behavior and DeskBox's drag-to-grid behavior.
+        int createdNamespaceShortcuts = 0;
+        if (sourcePaths.Length == 0 &&
+            ShellClipboardHelper.TryGetShellIdListItems(
+                out IReadOnlyList<ShellClipboardHelper.ShellNamespaceClipboardItem> namespaceItems))
+        {
+            sourcePaths = namespaceItems
+                .Where(item => !string.IsNullOrWhiteSpace(item.FileSystemPath))
+                .Select(item => item.FileSystemPath)
+                .Where(path => File.Exists(path) || Directory.Exists(path))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+            createdNamespaceShortcuts = await CreateShortcutsForPastedNamespaceItemsAsync(
+                namespaceItems
+                    .Where(item => string.IsNullOrWhiteSpace(item.FileSystemPath))
+                    .ToArray());
+        }
+
         if (sourcePaths.Length == 0)
         {
+            if (createdNamespaceShortcuts > 0)
+            {
+                _cutClipboardPaths = [];
+                ApplyCutState();
+                ShowFeedback(new WidgetFeedbackRequest(
+                    _localizationService.Format(
+                        "Widget.PastedCount",
+                        createdNamespaceShortcuts),
+                    WidgetFeedbackSeverity.Success,
+                    "file-paste"));
+            }
+
             return;
         }
 
@@ -5396,7 +5437,7 @@ public sealed partial class FileSurfaceContent :
         ShowFeedback(new WidgetFeedbackRequest(
             _localizationService.Format(
                 move ? "Widget.MovedCount" : "Widget.PastedCount",
-                sourcePaths.Length),
+                sourcePaths.Length + createdNamespaceShortcuts),
             WidgetFeedbackSeverity.Success,
             move ? "file-move" : "file-paste"));
     }
@@ -5415,7 +5456,8 @@ public sealed partial class FileSurfaceContent :
 
     private bool CanPasteFromClipboard()
     {
-        if (ShellClipboardHelper.HasFileDropList())
+        if (ShellClipboardHelper.HasFileDropList() ||
+            ShellClipboardHelper.HasShellIdList())
         {
             return true;
         }

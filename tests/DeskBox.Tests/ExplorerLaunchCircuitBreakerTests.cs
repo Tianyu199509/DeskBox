@@ -16,6 +16,10 @@ public sealed class ExplorerLaunchCircuitBreakerTests
     private const int UnexpectedFailure = unchecked((int)0x8000FFFF);
     private const int AccessDenied = unchecked((int)0x80070005);
 
+    // The state's default open cooldown (five minutes), in the injected
+    // clock's millisecond unit.
+    private const long DefaultOpenCooldownMs = 300_000;
+
     [Fact]
     public void RpcClassFailureCodes_AreTheOnlyTripSignatures()
     {
@@ -159,6 +163,113 @@ public sealed class ExplorerLaunchCircuitBreakerTests
 
         Assert.Contains("ExplorerShellLaunchService.TryOpen(", smoke, StringComparison.Ordinal);
         Assert.DoesNotContain("ExplorerLaunchCircuitBreaker", smoke, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void OpenBreaker_KeepsBypassingWhileTheCooldownHasNotElapsed()
+    {
+        long now = 1_000_000;
+        var state = new ExplorerLaunchCircuitBreakerState(1, () => 4242, () => now);
+
+        state.RecordFailure(RpcCallFailed);
+
+        Assert.True(state.ShouldBypass());
+        now += 60_000;
+        Assert.True(state.ShouldBypass());
+        now += DefaultOpenCooldownMs - 60_000 - 1;
+        Assert.True(state.ShouldBypass());
+    }
+
+    [Fact]
+    public void ElapsedCooldown_GrantsExactlyOneHalfOpenProbe()
+    {
+        long now = 1_000_000;
+        var state = new ExplorerLaunchCircuitBreakerState(1, () => 4242, () => now);
+
+        state.RecordFailure(RpcCallFailed);
+        now += DefaultOpenCooldownMs - 1;
+        Assert.True(state.ShouldBypass());
+
+        now += 1;
+        Assert.False(state.ShouldBypass());
+        Assert.True(state.ShouldBypass());
+        Assert.True(state.ShouldBypass());
+    }
+
+    [Fact]
+    public void HalfOpenProbe_RpcFailure_RestartsTheCooldown()
+    {
+        long now = 1_000_000;
+        var state = new ExplorerLaunchCircuitBreakerState(1, () => 4242, () => now);
+
+        state.RecordFailure(RpcCallFailed);
+        now += DefaultOpenCooldownMs;
+        Assert.False(state.ShouldBypass());
+
+        state.RecordFailure(RpcCallFailed);
+
+        now += DefaultOpenCooldownMs - 1;
+        Assert.True(state.ShouldBypass());
+        now += 1;
+        Assert.False(state.ShouldBypass());
+    }
+
+    [Fact]
+    public void HalfOpenProbe_Success_FullyClosesTheBreaker()
+    {
+        long now = 1_000_000;
+        uint shellProcessId = 4242;
+        var state = new ExplorerLaunchCircuitBreakerState(1, () => shellProcessId, () => now);
+
+        state.RecordFailure(RpcCallFailed);
+        now += DefaultOpenCooldownMs;
+        Assert.False(state.ShouldBypass());
+
+        state.RecordSuccess();
+
+        // Closed again, not merely probing: no further bypass however far
+        // the clock advances, and the failure count starts from zero.
+        now += 10_000_000;
+        Assert.False(state.ShouldBypass());
+        state.RecordFailure(RpcCallFailed);
+        Assert.True(state.ShouldBypass());
+    }
+
+    [Fact]
+    public void ShellRestartDuringCooldown_ClosesTheBreakerImmediately()
+    {
+        long now = 1_000_000;
+        uint shellProcessId = 4242;
+        var state = new ExplorerLaunchCircuitBreakerState(1, () => shellProcessId, () => now);
+
+        state.RecordFailure(RpcCallFailed);
+        now += 1;
+        shellProcessId = 9090;
+        Assert.False(state.ShouldBypass());
+
+        // Fully closed: a fresh RPC failure opens a brand-new cooldown
+        // window even though the clock has barely moved.
+        state.RecordFailure(RpcCallFailed);
+        Assert.True(state.ShouldBypass());
+    }
+
+    [Fact]
+    public void HalfOpenProbe_NonRpcFailure_ConsumesProbeAndRestartsCooldown()
+    {
+        long now = 1_000_000;
+        var state = new ExplorerLaunchCircuitBreakerState(1, () => 4242, () => now);
+
+        state.RecordFailure(RpcCallFailed);
+        now += DefaultOpenCooldownMs;
+        Assert.False(state.ShouldBypass());
+
+        state.RecordFailure(AccessDenied);
+
+        Assert.True(state.ShouldBypass());
+        now += DefaultOpenCooldownMs - 1;
+        Assert.True(state.ShouldBypass());
+        now += 1;
+        Assert.False(state.ShouldBypass());
     }
 
     private static string Slice(string source, string startMarker, string endMarker)

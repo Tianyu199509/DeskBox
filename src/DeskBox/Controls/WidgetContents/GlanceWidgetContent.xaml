@@ -43,6 +43,17 @@
                         <!-- CalendarView keeps native navigation and date semantics;
                              this compact template owns the two-line day typography. -->
                         <Grid MinWidth="34" MinHeight="24" Background="Transparent">
+                            <!-- Host-side today pill: the native TodayBackground is
+                                 driven by a today date cached once at control
+                                 creation (microsoft-ui-xaml #11205) and never moves
+                                 across midnight. Drawing it from Tag.IsToday — the
+                                 same host-computed flag the text highlight uses —
+                                 keeps background and text on one refresh path. -->
+                            <Border
+                                Background="{ThemeResource AccentFillColorDefaultBrush}"
+                                CornerRadius="6"
+                                IsHitTestVisible="False"
+                                Visibility="{Binding Tag.IsToday, RelativeSource={RelativeSource TemplatedParent}, Converter={StaticResource BoolToVisibility}}" />
                             <StackPanel
                                 HorizontalAlignment="Center"
                                 VerticalAlignment="Center"
@@ -329,14 +340,11 @@
                                     HorizontalDayItemAlignment="Center"
                                     IsGroupLabelVisible="False"
                                     IsOutOfScopeEnabled="True"
-                                    IsTodayHighlighted="True"
+                                    IsTodayHighlighted="False"
                                     NumberOfWeeksInView="6"
                                     OutOfScopeBackground="Transparent"
                                     OutOfScopeForeground="{ThemeResource TextFillColorDisabledBrush}"
                                     SelectionMode="None"
-                                    TodayBackground="{ThemeResource AccentFillColorDefaultBrush}"
-                                    TodayFontWeight="SemiBold"
-                                    TodayForeground="{ThemeResource TextOnAccentFillColorPrimaryBrush}"
                                     VerticalDayItemAlignment="Center">
                                     <CalendarView.Resources>
                                         <x:Double x:Key="CalendarViewHeaderNavigationButtonFontSize">13</x:Double>
@@ -392,7 +400,7 @@
                     <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
-                <Button
+                <Button AutomationProperties.Name="{Binding PauseToolTip}"
                     x:Name="PauseButton"
                     Grid.Column="0"
                     Width="28"
@@ -442,7 +450,7 @@
                         </Canvas>
                     </Viewbox>
                 </Button>
-                <Button
+                <Button AutomationProperties.Name="{Binding PhotoInfoText}"
                     x:Name="SourceButton"
                     Grid.Column="2"
                     Width="28"

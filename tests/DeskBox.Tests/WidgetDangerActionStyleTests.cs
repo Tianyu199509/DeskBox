@@ -77,7 +77,7 @@ public sealed class WidgetDangerActionStyleTests
             Path.Combine(root, "src/DeskBox/Strings/zh-CN.json")));
 
         Assert.Equal(
-            "格子内的文件怎么处理？",
+            "格子内的文件怎么处理?",
             strings.RootElement.GetProperty("Widget.DeleteManagedInfo").GetString());
         Assert.Equal(
             "同时移入回收站",

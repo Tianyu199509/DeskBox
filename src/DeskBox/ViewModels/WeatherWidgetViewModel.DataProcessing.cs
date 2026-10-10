@@ -128,7 +128,7 @@ public sealed partial class WeatherWidgetViewModel
             {
                 _latitude = 39.9042;
                 _longitude = 116.4074;
-                _locationName = _localizationService.ApiLanguageCode switch { "zh" => "北京", "ja" => "北京", "de" => "Peking", "pt" => "Pequim", _ => "Beijing" };
+                _locationName = _localizationService.T("Weather.LocationFallbackCity");
                 _locationInitialized = true;
                 _locationRetryNotBeforeUtc = now + WeatherRefreshBackoffPolicy.LocationFailureDelay;
                 IsUsingFallbackLocation = true;
@@ -200,7 +200,7 @@ public sealed partial class WeatherWidgetViewModel
             // Last resort: use a neutral default so the widget renders something.
             _latitude = 39.9042;
             _longitude = 116.4074;
-            _locationName = _localizationService.ApiLanguageCode switch { "zh" => "北京", "ja" => "北京", "de" => "Peking", "pt" => "Pequim", _ => "Beijing" };
+            _locationName = _localizationService.T("Weather.LocationFallbackCity");
             _locationInitialized = true;
             IsUsingFallbackLocation = true;
         }
@@ -241,7 +241,7 @@ public sealed partial class WeatherWidgetViewModel
                 {
                     _latitude = 39.9042;
                     _longitude = 116.4074;
-                    _locationName = _localizationService.ApiLanguageCode switch { "zh" => "北京", "ja" => "北京", "de" => "Peking", "pt" => "Pequim", _ => "Beijing" };
+                    _locationName = _localizationService.T("Weather.LocationFallbackCity");
                     _locationInitialized = true;
                     IsUsingFallbackLocation = true;
                 }
@@ -274,7 +274,7 @@ public sealed partial class WeatherWidgetViewModel
         CurrentCondition = WeatherCodeMapper.GetCondition(current.WeatherCode);
         CurrentIconGlyph = WeatherCodeMapper.GetGlyph(current.WeatherCode, IsDay);
         CurrentIcon = CreateIcon(current.WeatherCode, IsDay);
-        CurrentDescription = WeatherCodeMapper.GetDescription(current.WeatherCode, _localizationService.CurrentCultureName);
+        CurrentDescription = WeatherCodeMapper.GetDescription(current.WeatherCode, _localizationService);
         CurrentTemperatureText = FormatTemperature(current.Temperature);
         
         ApparentTemperatureText = _localizationService.Format("Weather.FeelsLike", FormatTemperature(current.ApparentTemperature));
@@ -459,7 +459,7 @@ public sealed partial class WeatherWidgetViewModel
                 DayLabel = dayLabel,
                 IconGlyph = WeatherCodeMapper.GetGlyph(wmoCode, isDay: true),
                 Icon = CreateIcon(wmoCode, isDay: true),
-                Description = WeatherCodeMapper.GetDescription(wmoCode, lang),
+                Description = WeatherCodeMapper.GetDescription(wmoCode, _localizationService),
                 TempMaxText = FormatTemperature(tempMax),
                 TempMinText = FormatTemperature(tempMin),
                 PrecipitationText = $"{(int)precipProb}%",

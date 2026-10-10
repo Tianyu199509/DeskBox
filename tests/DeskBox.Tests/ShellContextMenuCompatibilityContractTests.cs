@@ -26,7 +26,13 @@ public sealed class ShellContextMenuCompatibilityContractTests
             StringComparison.Ordinal);
         Assert.Contains("item.Path,", surface, StringComparison.Ordinal);
         Assert.Contains("screenX,", surface, StringComparison.Ordinal);
-        Assert.Contains("screenY);", surface, StringComparison.Ordinal);
+        Assert.Contains("screenY,", surface, StringComparison.Ordinal);
+        // The host labels the rename entry the native proxy appends; the
+        // label reuses the shared localized "Rename" string.
+        Assert.Contains(
+            "T(\"Common.Rename\")",
+            surface,
+            StringComparison.Ordinal);
         Assert.DoesNotContain(
             "ShellContextMenuHelper.ShowContextMenu(",
             surface,

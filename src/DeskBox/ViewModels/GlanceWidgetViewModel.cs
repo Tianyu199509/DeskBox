@@ -55,6 +55,7 @@ public sealed partial class GlanceWidgetViewModel : ObservableObject, IDisposabl
         DateTime.Today.Year,
         DateTime.Today.Month,
         1);
+    private DateOnly _lastObservedDate = DateOnly.FromDateTime(DateTime.Today);
 
     public GlanceWidgetViewModel(
         WidgetConfig config,
@@ -303,6 +304,9 @@ public sealed partial class GlanceWidgetViewModel : ObservableObject, IDisposabl
         if (visible)
         {
             UpdateDateAndTime();
+            // The clock timer stops while hidden; catch up on any day change
+            // missed across midnight so the calendar is not stale on reveal.
+            RefreshIfObservedDateChanged(DateOnly.FromDateTime(DateTime.Now));
             if (!_isCompact && IsOnlineSource(_settings.BackgroundSource) && !_onlineRefreshCompletedForSession)
             {
                 _ = RefreshOnlineInBackgroundAsync();
@@ -318,9 +322,13 @@ public sealed partial class GlanceWidgetViewModel : ObservableObject, IDisposabl
             CancelOnlineRefresh();
         }
         UpdateTimers();
-        if (!collapsed && _isWindowVisible && IsOnlineSource(_settings.BackgroundSource) && !_onlineRefreshCompletedForSession)
+        if (!collapsed && _isWindowVisible)
         {
-            _ = RefreshOnlineInBackgroundAsync();
+            RefreshIfObservedDateChanged(DateOnly.FromDateTime(DateTime.Now));
+            if (IsOnlineSource(_settings.BackgroundSource) && !_onlineRefreshCompletedForSession)
+            {
+                _ = RefreshOnlineInBackgroundAsync();
+            }
         }
     }
 
@@ -980,22 +988,42 @@ public sealed partial class GlanceWidgetViewModel : ObservableObject, IDisposabl
 
     private void ClockTimer_Tick(DispatcherQueueTimer sender, object args)
     {
-        DateOnly previousDate = DateOnly.FromDateTime(DateTime.Now.AddMinutes(-1));
         DateOnly currentDate = DateOnly.FromDateTime(DateTime.Now);
         UpdateDateAndTime();
-        if (previousDate != currentDate)
-        {
-            DateOnly previousMonth = new(previousDate.Year, previousDate.Month, 1);
-            DateOnly currentMonth = new(currentDate.Year, currentDate.Month, 1);
-            if (_displayedCalendarMonth == previousMonth && previousMonth != currentMonth)
-            {
-                _displayedCalendarMonth = currentMonth;
-                OnPropertyChanged(nameof(DisplayedCalendarMonth));
-            }
-
-            _ = UpdateCalendarAsync();
-        }
+        RefreshIfObservedDateChanged(currentDate);
         UpdateClockTimer();
+    }
+
+    /// <summary>
+    /// Single cross-day path: the midnight tick and every re-show/expand after
+    /// the window was hidden or compact across midnight funnel through here.
+    /// Calendar data, the text highlight and the today background all hang off
+    /// this refresh, so none of them can lag the others.
+    /// </summary>
+    private void RefreshIfObservedDateChanged(DateOnly currentDate)
+    {
+        if (currentDate == _lastObservedDate)
+        {
+            return;
+        }
+
+        GlanceCalendarDayChangeDecision decision = GlanceCalendarDayChangePolicy.Evaluate(
+            _lastObservedDate,
+            currentDate,
+            _displayedCalendarMonth);
+        _lastObservedDate = currentDate;
+        if (!decision.CalendarRefreshRequired)
+        {
+            return;
+        }
+
+        if (decision.DisplayedMonth != _displayedCalendarMonth)
+        {
+            _displayedCalendarMonth = decision.DisplayedMonth;
+            OnPropertyChanged(nameof(DisplayedCalendarMonth));
+        }
+
+        _ = UpdateCalendarAsync();
     }
 
     private void RotationTimer_Tick(DispatcherQueueTimer sender, object args)

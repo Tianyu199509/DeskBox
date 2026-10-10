@@ -463,7 +463,10 @@ public sealed partial class TodoWidgetContent
         return new FontIcon
         {
             Glyph = isSelected ? "\uE73E" : "\u25CF",
-            FontFamily = isSelected ? new FontFamily("Segoe MDL2 Assets") : new FontFamily("Segoe UI Symbol"),
+            // Selected checkmark goes through the default SymbolThemeFontFamily
+            // (Fluent on Win11, MDL2 fallback on Win10) like every other E73E
+            // glyph in this file; the unselected dot keeps Segoe UI Symbol.
+            FontFamily = isSelected ? null : new FontFamily("Segoe UI Symbol"),
             FontSize = isSelected ? 12 : 10,
             Foreground = new SolidColorBrush(color)
         };

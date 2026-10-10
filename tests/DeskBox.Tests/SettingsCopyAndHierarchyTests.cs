@@ -196,7 +196,7 @@ public sealed class SettingsCopyAndHierarchyTests
             ["Settings.CollapseBehavior.Expanded"] = "始终展开",
             ["Widget.CollapseBehavior.Title"] = "展开方式",
             ["Widget.CollapseBehavior.System"] = "跟随默认",
-            ["Widget.CollapseBehavior.Click"] = "点击展开",
+            ["Widget.CollapseBehavior.Click"] = "单击展开",
             ["Widget.CollapseBehavior.Smart"] = "悬停自动展开",
             ["Settings.Capsule.Overrides.FollowGlobal"] = "恢复默认",
             ["Widget.OpenStorageFolder"] = "打开格子文件夹",
@@ -221,7 +221,7 @@ public sealed class SettingsCopyAndHierarchyTests
             ["Settings.WidgetGroupSwitchAnimation.Title"] = "切换动画",
             ["Settings.WidgetGroupSwitchAnimation.Vertical"] = "上下滑动",
             ["Settings.WidgetGroups.PageDescription"] = "将多个格子放在同一位置，通过标题栏切换。每个格子的内容仍然相互独立。",
-            ["Settings.WidgetGroups.FollowDefaultWithValue"] = "跟随默认（{0}）",
+            ["Settings.WidgetGroups.FollowDefaultWithValue"] = "跟随默认({0})",
             ["Widget.Group.Join"] = "组合格子…",
             ["Widget.DeleteFolderToRecycleBin"] = "同时移入回收站",
             ["Search.Delete.Action"] = "移入回收站",
@@ -246,9 +246,9 @@ public sealed class SettingsCopyAndHierarchyTests
             ["Settings.DataBackup.Description"] = "备份设置、格子、随记、待办和附件副本，不含文件格子中的文件",
             ["Settings.Restore.Description"] = "恢复默认设置，保留语言、开机启动、格子开关和已有内容",
             ["Settings.Restore.Tooltip"] = "恢复默认设置，不会删除已有内容",
-            ["Settings.Todo.Group.FooterActions.Description"] = "选择底部显示的剩余任务数量和清除已完成按钮",
+            ["Settings.Todo.Group.FooterActions.Description"] = "选择底部显示的剩余待办数量和清除已完成按钮",
             ["Settings.Todo.FooterDisplay.Title"] = "显示内容",
-            ["Settings.Todo.ShowFooterStats.Title"] = "剩余任务数量",
+            ["Settings.Todo.ShowFooterStats.Title"] = "剩余待办数量",
             ["Settings.Todo.ShowClearCompleted.Title"] = "清除已完成按钮",
             ["Settings.Onboarding.Description"] = "重新查看格子创建、文件收纳、功能格子、外观和快捷键说明",
             ["Settings.Weather.LocationMode.Title"] = "位置来源",
@@ -488,8 +488,11 @@ public sealed class SettingsCopyAndHierarchyTests
         Assert.True(autoStart < attachmentStorage);
         Assert.True(attachmentStorage < onboarding);
         Assert.DoesNotContain("InteractionHotkeySettings", windowXaml, StringComparison.Ordinal);
+        // Two occurrences are expected: the card HeaderKey plus the combo box
+        // AutomationNameKey, which deliberately reuses the same header key so
+        // the accessible name stays same-sourced with the visible label.
         Assert.Equal(
-            1,
+            2,
             windowXaml.Split("Settings.WidgetLayerMode.Title", StringSplitOptions.None).Length - 1);
     }
 

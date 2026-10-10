@@ -23,7 +23,8 @@ public sealed class AotStage4E2ContractTests
         Assert.Equal(1, CountOccurrences(xaml, "{x:Bind TitleFontSize, Mode=OneWay}"));
         Assert.Equal(1, CountOccurrences(xaml, "{x:Bind Title, Mode=OneWay}"));
         Assert.Equal(1, CountOccurrences(xaml, "{x:Bind EditorFontSize, Mode=OneWay}"));
-        Assert.Equal(1, CountOccurrences(xaml, "{x:Bind CancelText, Mode=OneWay}"));
+        // 2 = cancel button Content + its AutomationProperties.Name (a11y same-source).
+        Assert.Equal(2, CountOccurrences(xaml, "{x:Bind CancelText, Mode=OneWay}"));
         Assert.Equal(2, CountOccurrences(xaml, "{x:Bind CommandFontSize, Mode=OneWay}"));
         Assert.Equal(1, CountOccurrences(xaml, "{x:Bind SaveText, Mode=OneWay}"));
         Assert.DoesNotContain("ElementName=InlineEditorRoot", xaml, StringComparison.Ordinal);
