@@ -930,32 +930,39 @@
 
         <!-- First-load failure overlay: same covering layer as LoadingOverlay
              so the widget never changes height; auto-retry (IsRefreshing) and
-             recovery (HasData) both retire it through ErrorVisibility. -->
-        <Grid
-            x:Name="ErrorOverlay"
-            Background="{ThemeResource LayerFillColorDefaultBrush}"
-            Visibility="{Binding ErrorVisibility}">
+             recovery (HasData) both retire it through ErrorVisibility. The
+             cover and texts pass input through (like LoadingOverlay) so the
+             header stays operable; only the retry button is interactive. -->
+        <Grid x:Name="ErrorOverlay" Visibility="{Binding ErrorVisibility}">
+            <Border
+                Background="{ThemeResource LayerFillColorDefaultBrush}"
+                IsHitTestVisible="False" />
             <StackPanel
                 HorizontalAlignment="Center"
                 VerticalAlignment="Center"
                 Spacing="8">
                 <FontIcon
                     HorizontalAlignment="Center"
+                    IsHitTestVisible="False"
                     FontSize="24"
                     Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                     Glyph="&#xE7BA;" />
                 <TextBlock
                     HorizontalAlignment="Center"
+                    IsHitTestVisible="False"
                     FontSize="{x:Bind ViewModel.BodyTextSize, Mode=OneWay}"
                     FontWeight="SemiBold"
                     Foreground="{ThemeResource TextFillColorPrimaryBrush}"
                     Text="{Binding ErrorTitle}" />
                 <TextBlock
                     HorizontalAlignment="Center"
+                    IsHitTestVisible="False"
                     FontSize="{x:Bind ViewModel.BodyTextSize, Mode=OneWay}"
                     Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                    MaxLines="2"
                     Text="{Binding ErrorBody}"
                     TextAlignment="Center"
+                    TextTrimming="CharacterEllipsis"
                     TextWrapping="Wrap" />
                 <Button
                     HorizontalAlignment="Center"

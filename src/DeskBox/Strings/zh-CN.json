@@ -1816,8 +1816,6 @@
   "Search.Action.ToggleWidgets": "显示/隐藏所有格子",
   "Search.Action.ToggleTheme": "切换主题",
   "Search.Recommend.StartMenu": "开始菜单",
-  "Search.Section.RecommendedApps": "推荐应用",
-  "Search.Section.Favorites": "收藏",
   "Search.Section.RecentSearches": "最近搜索",
   "Search.Section.RecentlyUsed": "最近使用",
   "Search.Section.Continue": "继续",

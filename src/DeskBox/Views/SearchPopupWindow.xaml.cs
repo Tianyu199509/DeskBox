@@ -153,7 +153,6 @@ public sealed partial class SearchPopupWindow : Window
 
         _viewModel.ActionRequested += OnViewModelActionRequested;
         _viewModel.ContentRequested += OnViewModelContentRequested;
-        _viewModel.QueryApplied += OnViewModelQueryApplied;
         _viewModel.PropertyChanged += OnViewModelPropertyChanged;
         ResultsRepeater.ElementPrepared += OnResultsElementPrepared;
         RecommendedAppsRepeater.ElementPrepared += OnRecommendedAppsElementPrepared;
@@ -1979,11 +1978,6 @@ public sealed partial class SearchPopupWindow : Window
         return true;
     }
 
-    /// <summary>
-    /// Applies the tapped favorite/recent query. The rows are template Buttons,
-    /// so Click fires for mouse, touch and Enter/Space alike and survives
-    /// container recycling without an ElementPrepared re-hook.
-    /// </summary>
     private void OpenSettingsButton_Click(object sender, RoutedEventArgs e)
     {
         _viewModel.InvokeAction("open-settings");
@@ -4325,14 +4319,6 @@ public sealed partial class SearchPopupWindow : Window
         ContentRequested?.Invoke(this, item);
     }
 
-    private void OnViewModelQueryApplied(object? sender, string query)
-    {
-        // Reflect the applied history/favorite query into the search box and re-focus.
-        SearchTextBox.Text = query;
-        SearchTextBox.Focus(FocusState.Programmatic);
-        UpdatePanelVisibility();
-    }
-
     private void OnWindowClosed(object sender, WindowEventArgs args)
     {
         App.Log(
@@ -4340,7 +4326,6 @@ public sealed partial class SearchPopupWindow : Window
             $"hwnd=0x{_hwnd.ToInt64():X}");
         _viewModel.ActionRequested -= OnViewModelActionRequested;
         _viewModel.ContentRequested -= OnViewModelContentRequested;
-        _viewModel.QueryApplied -= OnViewModelQueryApplied;
         _viewModel.PropertyChanged -= OnViewModelPropertyChanged;
         ResultsRepeater.ElementPrepared -= OnResultsElementPrepared;
         RecommendedAppsRepeater.ElementPrepared -= OnRecommendedAppsElementPrepared;

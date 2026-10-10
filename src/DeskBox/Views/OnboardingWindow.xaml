@@ -257,7 +257,7 @@
                         x:Name="SceneTrayMenu"
                         Canvas.Left="88"
                         Canvas.Top="104"
-                        Width="208"
+                        Width="256"
                         Background="{ThemeResource AcrylicInAppFillColorDefaultBrush}"
                         BorderBrush="{ThemeResource SurfaceStrokeColorDefaultBrush}"
                         BorderThickness="1"

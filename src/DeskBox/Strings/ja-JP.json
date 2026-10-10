@@ -1817,8 +1817,6 @@
   "Search.Action.ToggleWidgets": "すべてのウィジェットを表示/非表示",
   "Search.Action.ToggleTheme": "テーマを切り替え",
   "Search.Recommend.StartMenu": "スタートメニュー",
-  "Search.Section.RecommendedApps": "おすすめアプリ",
-  "Search.Section.Favorites": "お気に入り",
   "Search.Section.RecentSearches": "最近の検索",
   "Search.Section.RecentlyUsed": "最近使用したもの",
   "Search.Section.Continue": "続行",

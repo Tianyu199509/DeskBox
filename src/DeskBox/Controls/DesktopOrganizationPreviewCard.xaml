@@ -65,43 +65,87 @@
                                               HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
                                               Content="{TemplateBinding Content}" />
                             <VisualStateManager.VisualStateGroups>
-                                <VisualStateGroup x:Name="CommonStates">
-                                    <!-- Row-as-toggle: hover lights the row (subtle) plus
-                                         the box, mirroring the file tile's Subtle treatment. -->
-                                    <VisualState x:Name="Normal" />
-                                    <VisualState x:Name="PointerOver">
+                                <!-- Single cartesian group (the official CheckBox pattern):
+                                     separate CommonStates/CheckStates groups would both write
+                                     SelectionBox.Background and the most recently entered
+                                     state wins, erasing the checked fill while hovering.
+                                     Row-as-toggle: hover lights the row in both check
+                                     states, mirroring the file tile's Subtle treatment. -->
+                                <VisualStateGroup x:Name="CombinedStates">
+                                    <VisualState x:Name="Unchecked" />
+                                    <VisualState x:Name="UncheckedPointerOver">
                                         <VisualState.Setters>
                                             <Setter Target="RootGrid.Background" Value="{ThemeResource SubtleFillColorSecondaryBrush}" />
                                             <Setter Target="SelectionBox.Background" Value="{ThemeResource ControlAltFillColorTertiaryBrush}" />
                                             <Setter Target="SelectionBox.BorderBrush" Value="{ThemeResource ControlStrongStrokeColorDefaultBrush}" />
                                         </VisualState.Setters>
                                     </VisualState>
-                                    <VisualState x:Name="Pressed">
+                                    <VisualState x:Name="UncheckedPressed">
                                         <VisualState.Setters>
                                             <Setter Target="RootGrid.Background" Value="{ThemeResource SubtleFillColorTertiaryBrush}" />
                                             <Setter Target="SelectionBox.Background" Value="{ThemeResource ControlAltFillColorQuarternaryBrush}" />
                                         </VisualState.Setters>
                                     </VisualState>
-                                    <VisualState x:Name="Disabled">
+                                    <VisualState x:Name="UncheckedDisabled">
                                         <VisualState.Setters>
                                             <Setter Target="RootGrid.Opacity" Value="0.4" />
                                         </VisualState.Setters>
                                     </VisualState>
-                                </VisualStateGroup>
-                                <VisualStateGroup x:Name="CheckStates">
-                                    <VisualState x:Name="Unchecked" />
                                     <VisualState x:Name="Checked">
                                         <VisualState.Setters>
-                                            <!-- Matches the neutral checkbox treatment the
-                                                 todo widget uses; a checked box is a
-                                                 selection state, not semantic emphasis. -->
                                             <Setter Target="SelectionBox.Background" Value="{ThemeResource TextFillColorPrimaryBrush}" />
+                                            <Setter Target="CheckIcon.Visibility" Value="Visible" />
+                                        </VisualState.Setters>
+                                    </VisualState>
+                                    <VisualState x:Name="CheckedPointerOver">
+                                        <VisualState.Setters>
+                                            <Setter Target="RootGrid.Background" Value="{ThemeResource SubtleFillColorSecondaryBrush}" />
+                                            <Setter Target="SelectionBox.Background" Value="{ThemeResource TextFillColorPrimaryBrush}" />
+                                            <Setter Target="SelectionBox.BorderBrush" Value="{ThemeResource ControlStrongStrokeColorDefaultBrush}" />
+                                            <Setter Target="CheckIcon.Visibility" Value="Visible" />
+                                        </VisualState.Setters>
+                                    </VisualState>
+                                    <VisualState x:Name="CheckedPressed">
+                                        <VisualState.Setters>
+                                            <Setter Target="RootGrid.Background" Value="{ThemeResource SubtleFillColorTertiaryBrush}" />
+                                            <Setter Target="SelectionBox.Background" Value="{ThemeResource TextFillColorPrimaryBrush}" />
+                                            <Setter Target="SelectionBox.BorderBrush" Value="{ThemeResource ControlStrongStrokeColorDefaultBrush}" />
+                                            <Setter Target="CheckIcon.Visibility" Value="Visible" />
+                                        </VisualState.Setters>
+                                    </VisualState>
+                                    <VisualState x:Name="CheckedDisabled">
+                                        <VisualState.Setters>
+                                            <Setter Target="RootGrid.Opacity" Value="0.4" />
                                             <Setter Target="CheckIcon.Visibility" Value="Visible" />
                                         </VisualState.Setters>
                                     </VisualState>
                                     <VisualState x:Name="Indeterminate">
                                         <VisualState.Setters>
                                             <Setter Target="SelectionBox.Background" Value="{ThemeResource TextFillColorPrimaryBrush}" />
+                                            <Setter Target="CheckIcon.Visibility" Value="Visible" />
+                                            <Setter Target="CheckIcon.Opacity" Value="0.6" />
+                                        </VisualState.Setters>
+                                    </VisualState>
+                                    <VisualState x:Name="IndeterminatePointerOver">
+                                        <VisualState.Setters>
+                                            <Setter Target="RootGrid.Background" Value="{ThemeResource SubtleFillColorSecondaryBrush}" />
+                                            <Setter Target="SelectionBox.Background" Value="{ThemeResource TextFillColorPrimaryBrush}" />
+                                            <Setter Target="SelectionBox.BorderBrush" Value="{ThemeResource ControlStrongStrokeColorDefaultBrush}" />
+                                            <Setter Target="CheckIcon.Visibility" Value="Visible" />
+                                            <Setter Target="CheckIcon.Opacity" Value="0.6" />
+                                        </VisualState.Setters>
+                                    </VisualState>
+                                    <VisualState x:Name="IndeterminatePressed">
+                                        <VisualState.Setters>
+                                            <Setter Target="RootGrid.Background" Value="{ThemeResource SubtleFillColorTertiaryBrush}" />
+                                            <Setter Target="SelectionBox.Background" Value="{ThemeResource TextFillColorPrimaryBrush}" />
+                                            <Setter Target="CheckIcon.Visibility" Value="Visible" />
+                                            <Setter Target="CheckIcon.Opacity" Value="0.6" />
+                                        </VisualState.Setters>
+                                    </VisualState>
+                                    <VisualState x:Name="IndeterminateDisabled">
+                                        <VisualState.Setters>
+                                            <Setter Target="RootGrid.Opacity" Value="0.4" />
                                             <Setter Target="CheckIcon.Visibility" Value="Visible" />
                                             <Setter Target="CheckIcon.Opacity" Value="0.6" />
                                         </VisualState.Setters>

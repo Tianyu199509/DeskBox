@@ -160,12 +160,15 @@ Text="DeskBox" />
                                 MaxLines="1"
                                 Text="{Binding Title}"
                                 TextTrimming="CharacterEllipsis" />
+                            <!-- Collapses for the single-line "no results" sentinel,
+                                 which carries no breadcrumb. -->
                             <TextBlock
                                 FontSize="12"
                                 Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                                 MaxLines="1"
                                 Text="{Binding Breadcrumb}"
-                                TextTrimming="CharacterEllipsis" />
+                                TextTrimming="CharacterEllipsis"
+                                Visibility="{Binding HasBreadcrumb, Converter={StaticResource SettingsBoolToVisibilityConverter}}" />
                         </StackPanel>
                     </DataTemplate>
                 </AutoSuggestBox.ItemTemplate>
@@ -1470,7 +1473,7 @@ Text="DeskBox" />
                                             IsEnabled="{Binding CanAddRule}"
                                             Style="{StaticResource ActionButtonStyle}">
                                             <StackPanel Orientation="Horizontal" Spacing="7">
-                                                <SymbolIcon Symbol="Add" />
+                                                <FontIcon Glyph="&#xE710;" FontSize="16" />
                                                 <TextBlock svc:Localized.Key="Settings.FileStacks.Custom.AddRule" />
                                             </StackPanel>
                                         </Button>

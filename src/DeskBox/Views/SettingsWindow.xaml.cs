@@ -927,6 +927,10 @@ public sealed partial class SettingsWindow : Window
     {
         public bool IsPage => TargetHeaderKey is null;
 
+        // Real matches always carry at least one breadcrumb segment; the
+        // "no results" sentinel passes an empty one and collapses the line.
+        public bool HasBreadcrumb => Breadcrumb.Length > 0;
+
         public override string ToString()
         {
             return Title;

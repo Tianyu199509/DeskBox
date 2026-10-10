@@ -30,7 +30,7 @@ public sealed class AotStage4E5ContractTests
     }
 
     [Fact]
-    public void SearchResultRow_UsesEightManuallyRefreshedOneTimeCompiledBindings()
+    public void SearchResultRow_UsesNineManuallyRefreshedOneTimeCompiledBindings()
     {
         string xaml = ReadRepositoryFile(
             "src/DeskBox/Controls/SearchResultRowControl.xaml");

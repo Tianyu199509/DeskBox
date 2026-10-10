@@ -1829,8 +1829,6 @@
   "Search.Action.ToggleWidgets": "সমস্ত উইজেট দেখান/লুকান",
   "Search.Action.ToggleTheme": "থিম টগল করুন",
   "Search.Recommend.StartMenu": "স্টার্ট মেনু থেকে সার্চ করুন",
-  "Search.Section.RecommendedApps": "প্রস্তাবিত অ্যাপস",
-  "Search.Section.Favorites": "প্রিয়",
   "Search.Section.RecentSearches": "সাম্প্রতিক অনুসন্ধান",
   "Search.Section.RecentlyUsed": "সম্প্রতি ব্যবহৃত",
   "Search.Section.Continue": "চালিয়ে যান",
