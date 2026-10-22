@@ -1246,6 +1246,82 @@ public static partial class Win32Helper
     [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
     private static extern int SHOpenWithDialog(IntPtr hwndParent, ref OpenAsInfo openAsInfo);
 
+    [DllImport("shlwapi.dll", CharSet = CharSet.Unicode)]
+    private static extern int SHLoadIndirectString(
+        string source,
+        System.Text.StringBuilder outputBuffer,
+        uint outputBufferLength,
+        IntPtr reserved);
+
+    /// <summary>
+    /// Resolves an indirect resource string ("<c>@shell32.dll,-30318</c>")
+    /// to its localized text; plain strings pass through unchanged. The
+    /// same expansion the shell applies to MenuText/FriendlyTypeName
+    /// registry values.
+    /// </summary>
+    public static string? TryResolveIndirectString(string? value)
+    {
+        if (string.IsNullOrEmpty(value) || value[0] != '@')
+        {
+            return value;
+        }
+
+        try
+        {
+            string expanded = Environment.ExpandEnvironmentVariables(value);
+            var buffer = new System.Text.StringBuilder(512);
+            int result = SHLoadIndirectString(expanded, buffer, 512, IntPtr.Zero);
+            if (result < 0 || buffer.Length == 0)
+            {
+                return null;
+            }
+
+            return buffer.ToString();
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private const uint ShopFilePath = 0x01;
+
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SHObjectProperties(
+        IntPtr hwnd,
+        uint shopType,
+        string objectName,
+        string? propertyPageName);
+
+    /// <summary>
+    /// Opens the shell's Properties sheet for a file path — the same sheet
+    /// the New→Shortcut flow lets the user finish a placeholder link in.
+    /// Modal: returns after the sheet closes. Contract note: the sheet
+    /// loads the type's PropSheetHandlers in-process, but lnkfile's are
+    /// shell32 built-ins in practice (verified on a heavily extended
+    /// machine: third parties hook ContextMenuHandlers, never property
+    /// sheets) and the hosting contract's rejection target is the
+    /// IContextMenu family, which this path never touches.
+    /// </summary>
+    public static bool ShowFileProperties(IntPtr ownerWindow, string filePath)
+    {
+        if (string.IsNullOrWhiteSpace(filePath))
+        {
+            return false;
+        }
+
+        try
+        {
+            return SHObjectProperties(ownerWindow, ShopFilePath, filePath, null);
+        }
+        catch (Exception ex)
+        {
+            App.Log($"[ShellNew] properties failed '{filePath}': {ex.Message}");
+            return false;
+        }
+    }
+
     private const uint AssocfNone = 0;
     private const uint AssocstrCommand = 1;
     private const uint AssocstrProgId = 20; // ASSOCSTR_PROGID

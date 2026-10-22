@@ -11,10 +11,10 @@ namespace DeskBox.Platform;
 /// object is created and loaded here; no third-party shell extension runs
 /// in-process, so the shell-extension isolation contract holds.
 /// Vtable slots verified against the Windows SDK 10.0.26100 headers:
-/// IPersistFile — GetClassID 3, IsDirty 4, Load 5; IShellLinkW — GetPath 3,
-/// GetIDList 4, SetIDList 5; IShellItem — BindToHandler 3, GetParent 4,
-/// GetDisplayName 5. Call from an STA thread (the menu-build UI thread);
-/// Shell link parsing follows the Shell COM apartment rules.
+/// IPersistFile — GetClassID 3, IsDirty 4, Load 5, Save 6; IShellLinkW —
+/// GetPath 3, GetIDList 4, SetIDList 5; IShellItem — BindToHandler 3,
+/// GetParent 4, GetDisplayName 5. Call from an STA thread (the menu-build
+/// UI thread); Shell link parsing follows the Shell COM apartment rules.
 /// </summary>
 internal static class ShellLinkVtableInterop
 {
@@ -34,11 +34,18 @@ internal static class ShellLinkVtableInterop
     private const uint StgmRead = 0;
 
     private const int PersistFileLoadSlot = 5;
+    private const int PersistFileSaveSlot = 6;
     private const int ShellLinkGetIdListSlot = 4;
     private const int ShellItemGetDisplayNameSlot = 5;
 
     [UnmanagedFunctionPointer(CallingConvention.StdCall, CharSet = CharSet.Unicode)]
     private delegate int PersistFileLoadInvoker(IntPtr self, string path, uint stgm);
+
+    [UnmanagedFunctionPointer(CallingConvention.StdCall, CharSet = CharSet.Unicode)]
+    private delegate int PersistFileSaveInvoker(
+        IntPtr self,
+        string path,
+        [MarshalAs(UnmanagedType.Bool)] bool remember);
 
     [UnmanagedFunctionPointer(CallingConvention.StdCall)]
     private delegate int ShellLinkGetIdListInvoker(IntPtr self, out IntPtr pidl);
@@ -52,6 +59,58 @@ internal static class ShellLinkVtableInterop
         IntPtr pidl,
         ref Guid riid,
         out IntPtr shellItem);
+
+    /// <summary>
+    /// Persists a fresh, target-less Shell link at <paramref name="shortcutPath"/>
+    /// — the New→Shortcut placeholder. The user completes it in the link's
+    /// Properties sheet. Only the Shell's own link object runs here, on the
+    /// menu-build STA thread like the reader.
+    /// </summary>
+    internal static bool TryCreateEmptyShortcut(string shortcutPath)
+    {
+        IntPtr link = IntPtr.Zero;
+        IntPtr persistFile = IntPtr.Zero;
+        try
+        {
+            Guid clsid = s_clsidShellLink;
+            Guid linkIid = s_iidIShellLinkW;
+            if (!ComVtable.TryCreateInProcessInstance(
+                    ref clsid,
+                    ref linkIid,
+                    out link))
+            {
+                return false;
+            }
+
+            Guid persistIid = s_iidIPersistFile;
+            if (ComVtable.QueryInterface(link, ref persistIid, out persistFile) < 0 ||
+                persistFile == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            int saveResult = ComVtable.Slot<PersistFileSaveInvoker>(
+                persistFile,
+                PersistFileSaveSlot)(persistFile, shortcutPath, true);
+            return saveResult >= 0;
+        }
+        catch
+        {
+            return false;
+        }
+        finally
+        {
+            if (persistFile != IntPtr.Zero)
+            {
+                _ = Marshal.Release(persistFile);
+            }
+
+            if (link != IntPtr.Zero)
+            {
+                _ = Marshal.Release(link);
+            }
+        }
+    }
 
     /// <summary>
     /// The link's stored target as a desktop-absolute parsing name

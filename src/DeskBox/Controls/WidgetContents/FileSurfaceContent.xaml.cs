@@ -1084,27 +1084,59 @@ public sealed partial class FileSurfaceContent :
 
     private void Items_RightTapped(object sender, RightTappedRoutedEventArgs e)
     {
-        WidgetItem? item = FindItemFromSource(e.OriginalSource);
-        if (item is null)
+        // A right-button marquee shows its menu on pointer release; if the
+        // gesture still raises this event, swallow the duplicate.
+        if (_suppressNextRightTap)
         {
-            _lastItemContextScreenPoint = null;
-            ClearSelection();
-            FrameworkElement contentTarget =
-                sender as FrameworkElement ?? Root;
-            MenuFlyout contentAreaFlyout = CreateContentAreaFlyout();
-            if (ReferenceEquals(sender, _stackPopoverItemsView))
-            {
-                contentAreaFlyout.Opened += (_, _) => BeginPopoverFlyoutBandPromotion();
-                contentAreaFlyout.Closed += (_, _) => EndPopoverFlyoutBandPromotion();
-            }
-
-            contentAreaFlyout.ShowAt(
-                contentTarget,
-                e.GetPosition(contentTarget));
+            _suppressNextRightTap = false;
             e.Handled = true;
             return;
         }
 
+        FileItemSurface? hitSurface =
+            FindItemSurface(e.OriginalSource);
+
+        // Explorer list semantics: only the icon+label block of a list row
+        // is the item's right-click zone; the stretched remainder of the
+        // row is blank surface, opening the content-area menu and clearing
+        // the selection exactly like a right-click on true blank space.
+        // Icon-mode tiles are primary zone throughout.
+        if (hitSurface is { IsListMode: true } listSurface &&
+            !listSurface.IsPointWithinListPrimaryContent(
+                e.GetPosition(listSurface)))
+        {
+            ShowContentAreaFlyoutForBlankTap(sender, e);
+            return;
+        }
+
+        WidgetItem? item =
+            (hitSurface ?? FindItemElement(e.OriginalSource))
+                ?.DataContext as WidgetItem;
+        if (item is null)
+        {
+            ShowContentAreaFlyoutForBlankTap(sender, e);
+            return;
+        }
+
+        ShowItemContextMenuForSelection(
+            sender,
+            item,
+            target => e.GetPosition(target));
+        e.Handled = true;
+    }
+
+    /// <summary>
+    /// The item-menu path shared by the right-tap and the right-button
+    /// marquee release: anchors the native-menu screen point, keeps the
+    /// existing selection when the item is already part of it (the marquee
+    /// case), and places the flyout inside the tree of whichever view
+    /// raised the gesture.
+    /// </summary>
+    private void ShowItemContextMenuForSelection(
+        object sender,
+        WidgetItem item,
+        Func<FrameworkElement, Windows.Foundation.Point> getPosition)
+    {
         if (Win32Helper.GetCursorPos(out Win32Helper.POINT contextPoint))
         {
             _lastItemContextScreenPoint = (contextPoint.X, contextPoint.Y);
@@ -1132,7 +1164,6 @@ public sealed partial class FileSurfaceContent :
             // The native Shell menu only supports a single item, and stack
             // tiles have no file-system path; both keep the built-in flyout.
             _ = ShowSystemContextMenuAsync(item);
-            e.Handled = true;
             return;
         }
 
@@ -1160,12 +1191,12 @@ public sealed partial class FileSurfaceContent :
                 }
             };
         }
-        if (item is WidgetStackItem)
+        if (item is WidgetStackItem removedStack)
         {
             flyout.Closed += (_, _) =>
             {
-                ItemsGrid.SelectedItems.Remove(item);
-                ItemsList.SelectedItems.Remove(item);
+                ItemsGrid.SelectedItems.Remove(removedStack);
+                ItemsList.SelectedItems.Remove(removedStack);
             };
         }
         try
@@ -1177,8 +1208,9 @@ public sealed partial class FileSurfaceContent :
             // against this surface's Root (in the widget window's tree)
             // produces a cross-tree point that lands the menu far from the
             // clicked icon.
-            FrameworkElement placementTarget = sender as FrameworkElement ?? Root;
-            flyout.ShowAt(placementTarget, e.GetPosition(placementTarget));
+            FrameworkElement placementTarget =
+                sender as FrameworkElement ?? Root;
+            flyout.ShowAt(placementTarget, getPosition(placementTarget));
         }
         catch
         {
@@ -1188,7 +1220,46 @@ public sealed partial class FileSurfaceContent :
             }
             throw;
         }
+    }
+
+    /// <summary>
+    /// The blank-surface right-click path shared by true blank space and the
+    /// non-primary remainder of a list row: drop any item-menu anchor,
+    /// clear the selection (Explorer clears on background right-click), and
+    /// show the content-area menu at the tap point.
+    /// </summary>
+    private void ShowContentAreaFlyoutForBlankTap(
+        object sender,
+        RightTappedRoutedEventArgs e)
+    {
+        ShowContentAreaFlyoutAt(
+            sender,
+            target => e.GetPosition(target));
         e.Handled = true;
+    }
+
+    /// <summary>
+    /// Core blank-surface menu show, position-provider style so the
+    /// right-button marquee (a pointer event) shares the exact path.
+    /// </summary>
+    private void ShowContentAreaFlyoutAt(
+        object sender,
+        Func<FrameworkElement, Windows.Foundation.Point> getPosition)
+    {
+        _lastItemContextScreenPoint = null;
+        ClearSelection();
+        FrameworkElement contentTarget =
+            sender as FrameworkElement ?? Root;
+        MenuFlyout contentAreaFlyout = CreateContentAreaFlyout();
+        if (ReferenceEquals(sender, _stackPopoverItemsView))
+        {
+            contentAreaFlyout.Opened += (_, _) => BeginPopoverFlyoutBandPromotion();
+            contentAreaFlyout.Closed += (_, _) => EndPopoverFlyoutBandPromotion();
+        }
+
+        contentAreaFlyout.ShowAt(
+            contentTarget,
+            getPosition(contentTarget));
     }
 
     private void BeginPopoverFlyoutBandPromotion()
@@ -1212,6 +1283,23 @@ public sealed partial class FileSurfaceContent :
             $"sender={sender?.GetType().Name} " +
             $"original={e.OriginalSource?.GetType().Name} " +
             $"allowed={e.AllowedOperations}");
+
+        // A press on a list row's blank remainder is pending as a marquee
+        // (Explorer semantics, both buttons). The press sits on the item
+        // container, so its drag machinery wants the same gesture — cancel
+        // it while the marquee has not crossed the threshold yet; once it
+        // has, the marquee's pointer capture keeps drag away on its own.
+        // A plain click never reaches this pending state's drag window,
+        // and drags from the icon+label block never enter the marquee
+        // pipeline at all.
+        if (_selectionPointerPressed &&
+            !_isBoxSelecting &&
+            _selectionPressOnRowBlank)
+        {
+            e.Cancel = true;
+            return;
+        }
+
         _sourceDragSession.Complete(_activeDragSessionId);
         _activeDragSessionId = null;
         bool fromStackPopover = IsFromStackPopover(sender);

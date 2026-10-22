@@ -80,13 +80,21 @@ public sealed class StackPopoverMenuBandContractTests
 
         // From the stack popover the items live in the popover's own visual
         // tree; positioning against this surface's Root (in the widget
-        // window's tree) lands the menu far from the clicked icon.
+        // window's tree) lands the menu far from the clicked icon. Since the
+        // show block moved into ShowItemContextMenuForSelection (shared with
+        // the right-button marquee release), the pin anchors on the
+        // position-provider show: the caller's view stays the placement
+        // target and the point stays in that view's coordinates.
         Assert.Contains(
-            "FrameworkElement placementTarget = sender as FrameworkElement ?? Root;",
+            "FrameworkElement placementTarget =",
             source,
             StringComparison.Ordinal);
         Assert.Contains(
-            "flyout.ShowAt(placementTarget, e.GetPosition(placementTarget));",
+            "sender as FrameworkElement ?? Root;",
+            source,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "flyout.ShowAt(placementTarget, getPosition(placementTarget));",
             source,
             StringComparison.Ordinal);
 

@@ -1621,7 +1621,43 @@ public static class IconHelper
         {
             using var icon = Icon.FromHandle(shinfo.hIcon);
             using var bitmap = icon.ToBitmap();
-            return EncodeIconBitmapAsPng(bitmap, rejectPaddedShortcutIcon);
+            return EncodeIconBitmapAsPng(bitmap, rejectPaddedShortcutIcon: false);
+        }
+        finally
+        {
+            ShellIconNativeMethods.DestroyIcon(shinfo.hIcon);
+        }
+    }
+
+    /// <summary>
+    /// PNG bytes for a file TYPE's icon, resolved from the extension
+    /// association alone — the file does not have to exist. Used by the
+    /// New submenu, whose entries have no backing file yet.
+    /// </summary>
+    internal static byte[]? GetFileTypeIconPngBytes(
+        string fileNameWithExtension)
+    {
+        const uint fileAttributeNormal = 0x80;
+        var shinfo = new ShellIconNativeMethods.SHFILEINFO();
+        IntPtr hImg = ShellIconNativeMethods.SHGetFileInfo(
+            fileNameWithExtension,
+            fileAttributeNormal,
+            ref shinfo,
+            (uint)Marshal.SizeOf(shinfo),
+            ShellIconNativeMethods.SHGFI_ICON |
+            ShellIconNativeMethods.SHGFI_LARGEICON |
+            ShellIconNativeMethods.SHGFI_USEFILEATTRIBUTES);
+
+        if (hImg == IntPtr.Zero || shinfo.hIcon == IntPtr.Zero)
+        {
+            return null;
+        }
+
+        try
+        {
+            using var icon = Icon.FromHandle(shinfo.hIcon);
+            using var bitmap = icon.ToBitmap();
+            return EncodeIconBitmapAsPng(bitmap, rejectPaddedShortcutIcon: false);
         }
         finally
         {

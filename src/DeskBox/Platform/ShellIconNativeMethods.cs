@@ -29,6 +29,7 @@ internal static class ShellIconNativeMethods
     internal const uint SHGFI_SYSICONINDEX = 0x4000;
     internal const uint SHGFI_USEFILEATTRIBUTES = 0x10;
     internal const uint SHGFI_PIDL = 0x8;
+    internal const uint SHGFI_TYPENAME = 0x400;
 
     [DllImport("shell32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     internal static extern IntPtr SHGetFileInfo(

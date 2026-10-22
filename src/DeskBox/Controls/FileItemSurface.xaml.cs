@@ -67,6 +67,7 @@ public sealed partial class FileItemSurface : UserControl, INotifyPropertyChange
     private TextBlock? _listItemNameText;
     private FrameworkElement? _iconIconHost;
     private FrameworkElement? _listIconHost;
+    private FrameworkElement? _listTextHost;
 
     public FileItemSurface()
     {
@@ -125,6 +126,43 @@ public sealed partial class FileItemSurface : UserControl, INotifyPropertyChange
         // full-row select) and the full tile in icon mode. The list content
         // itself stays left-aligned inside the stretched border.
         HorizontalAlignment.Stretch;
+
+    internal bool IsListMode => Mode == FileItemSurfaceMode.List;
+
+    /// <summary>Edge slack so the zone stays clickable on thin rows.</summary>
+    private const double PrimaryContentZoneInflation = 4;
+
+    /// <summary>
+    /// Whether a point in this surface's coordinates lands on the list row's
+    /// primary content — the icon plus the name/detail block. Explorer
+    /// semantics: only this zone right-clicks into the item's menu; the
+    /// stretched remainder of the row is blank surface for the content-area
+    /// menu. Missing zone elements (template drift) fall back to the
+    /// legacy whole-row behavior instead of eating clicks.
+    /// </summary>
+    internal bool IsPointWithinListPrimaryContent(
+        Windows.Foundation.Point point)
+    {
+        if (_listIconHost is not { } iconHost ||
+            _listTextHost is not { } textHost)
+        {
+            return true;
+        }
+
+        return FileItemSelectionGeometry.BuildPrimaryContentZone(
+                BoundsRelativeToRoot(iconHost),
+                BoundsRelativeToRoot(textHost),
+                PrimaryContentZoneInflation)
+            .Contains(point);
+
+        Windows.Foundation.Rect BoundsRelativeToRoot(FrameworkElement element) =>
+            element.TransformToVisual(this)
+                .TransformBounds(new Windows.Foundation.Rect(
+                    0,
+                    0,
+                    element.ActualWidth,
+                    element.ActualHeight));
+    }
 
     public double SurfaceMaxWidth => double.PositiveInfinity;
 
@@ -248,26 +286,35 @@ public sealed partial class FileItemSurface : UserControl, INotifyPropertyChange
         {
             if (_listLayout is null)
             {
-                (_listLayout, _listItemNameText, _listIconHost) = CreateLayout(
-                    "ListItemLayoutTemplate", "ListItemNameText", "ListItemIconHost");
+                (_listLayout, _listItemNameText, _listIconHost, _listTextHost) =
+                    CreateLayout(
+                        "ListItemLayoutTemplate",
+                        "ListItemNameText",
+                        "ListItemIconHost",
+                        "ListItemTextHost");
             }
         }
         else if (_iconLayout is null)
         {
-            (_iconLayout, _iconItemNameText, _iconIconHost) = CreateLayout(
-                "IconItemLayoutTemplate", "IconItemNameText", "IconItemIconHost");
+            (_iconLayout, _iconItemNameText, _iconIconHost, _) = CreateLayout(
+                "IconItemLayoutTemplate", "IconItemNameText", "IconItemIconHost",
+                null);
         }
     }
 
-    private (FrameworkElement Layout, TextBlock NameText, FrameworkElement IconHost) CreateLayout(
+    private (FrameworkElement Layout, TextBlock NameText, FrameworkElement IconHost, FrameworkElement? TextHost) CreateLayout(
         string templateKey,
         string nameElement,
-        string iconHostElement)
+        string iconHostElement,
+        string? textHostElement)
     {
         var template = (DataTemplate)Resources[templateKey];
         var layout = (FrameworkElement)template.LoadContent();
         var nameText = (TextBlock)layout.FindName(nameElement);
         var iconHost = (FrameworkElement)layout.FindName(iconHostElement);
+        var textHost = textHostElement is null
+            ? null
+            : (FrameworkElement?)layout.FindName(textHostElement);
         var bindings = Microsoft.UI.Xaml.Markup.XamlBindingHelper
             .GetDataTemplateComponent(layout) ??
             throw new InvalidOperationException($"Missing file item bindings: {templateKey}");
@@ -278,7 +325,7 @@ public sealed partial class FileItemSurface : UserControl, INotifyPropertyChange
         // Ordinary file/thumbnail bindings therefore keep their original source.
         bindings.ProcessBindings(this, 0, 0, out _);
         LayoutHost.Children.Add(layout);
-        return (layout, nameText, iconHost);
+        return (layout, nameText, iconHost, textHost);
     }
 
     internal void SetTransferState(

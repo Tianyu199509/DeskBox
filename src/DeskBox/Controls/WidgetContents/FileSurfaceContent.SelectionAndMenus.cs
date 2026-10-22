@@ -23,6 +23,9 @@ public sealed partial class FileSurfaceContent
 
     private bool _selectionPointerPressed;
     private bool _isBoxSelecting;
+    private bool _selectionStartedWithRightButton;
+    private bool _selectionPressOnRowBlank;
+    private bool _suppressNextRightTap;
     private bool _isSynchronizingSelection;
     private Windows.Foundation.Point _selectionStartPoint;
     private Windows.Foundation.Point _selectionCurrentPoint;
@@ -45,13 +48,25 @@ public sealed partial class FileSurfaceContent
         UIElement pointerSurface,
         PointerRoutedEventArgs e)
     {
-        if (!e.GetCurrentPoint(pointerSurface).Properties.IsLeftButtonPressed ||
+        // A stale one-shot suppress must never eat the next gesture.
+        _suppressNextRightTap = false;
+
+        bool isLeftButtonPressed =
+            e.GetCurrentPoint(pointerSurface).Properties.IsLeftButtonPressed;
+        bool isRightButtonPressed =
+            e.GetCurrentPoint(pointerSurface).Properties.IsRightButtonPressed;
+        _selectionPressOnRowBlank = false;
+        if ((!isLeftButtonPressed && !isRightButtonPressed) ||
             Win32Helper.IsKeyPressed(Windows.System.VirtualKey.Shift) ||
-            !CanStartBoxSelection(e.OriginalSource))
+            !CanStartBoxSelection(e.OriginalSource, e))
         {
             return;
         }
 
+        // The right button joins Explorer's marquee: right-drag on blank
+        // space sweeps a selection, and the release opens the context menu
+        // for whatever it caught (blank-area menu when it caught nothing).
+        _selectionStartedWithRightButton = isRightButtonPressed;
         if (ReferenceEquals(listView, _stackPopoverItemsView))
         {
             listView.Focus(FocusState.Programmatic);
@@ -140,12 +155,41 @@ public sealed partial class FileSurfaceContent
         PointerRoutedEventArgs e)
     {
         bool wasBoxSelecting = _isBoxSelecting;
+        bool completedRightMarquee =
+            wasBoxSelecting && _selectionStartedWithRightButton;
         FinishBoxSelection(listView);
         _pendingPointerDragItems = [];
+        _selectionStartedWithRightButton = false;
+        _selectionPressOnRowBlank = false;
         if (wasBoxSelecting)
         {
             pointerSurface.ReleasePointerCapture(e.Pointer);
             e.Handled = true;
+        }
+
+        if (completedRightMarquee)
+        {
+            // Explorer: the right-button marquee ends by opening the
+            // context menu for the swept selection at the release point —
+            // the blank-area menu when the sweep caught nothing. The menu
+            // is placed through the view that hosts the items (the popover
+            // menu path keys off that view), and a possible duplicate
+            // RightTapped is swallowed by the one-shot suppress.
+            _suppressNextRightTap = true;
+            WidgetItem? selectionAnchor = GetSelectedItems().FirstOrDefault();
+            if (selectionAnchor is not null)
+            {
+                ShowItemContextMenuForSelection(
+                    listView,
+                    selectionAnchor,
+                    target => e.GetCurrentPoint(target).Position);
+            }
+            else
+            {
+                ShowContentAreaFlyoutAt(
+                    listView,
+                    target => e.GetCurrentPoint(target).Position);
+            }
         }
     }
 
@@ -169,18 +213,40 @@ public sealed partial class FileSurfaceContent
         _pendingPointerDragItems = [];
     }
 
-    private bool CanStartBoxSelection(object? originalSource)
+    private bool CanStartBoxSelection(
+        object? originalSource,
+        PointerRoutedEventArgs e)
     {
         if (originalSource is not DependencyObject source)
         {
             return false;
         }
 
+        if (FileItemSelectionGeometry.HasAncestor<ScrollBar>(source) ||
+            FileItemSelectionGeometry.HasAncestor<ButtonBase>(source) ||
+            FileItemSelectionGeometry.HasAncestor<TextBox>(source))
+        {
+            return false;
+        }
+
+        // A list row's blank remainder (outside the icon+label block) is
+        // blank surface for the marquee — Explorer starts its rubber band
+        // there for BOTH buttons, and a full list has no true blank left
+        // to start from. A left press on row blank keeps Explorer's click
+        // semantics: the view's built-in click still selects the row on
+        // release, and the item-container drag is cancelled while the
+        // marquee is pending (see Items_DragStarting). The primary
+        // icon+label block stays item territory for both buttons.
+        if (FindItemSurface(source) is { } surface)
+        {
+            _selectionPressOnRowBlank = surface.IsListMode &&
+                !surface.IsPointWithinListPrimaryContent(
+                    e.GetCurrentPoint(surface).Position);
+            return _selectionPressOnRowBlank;
+        }
+
         return !FileItemSelectionGeometry.IsWithinItemSurface(source) &&
-               !FileItemSelectionGeometry.HasAncestor<SelectorItem>(source) &&
-               !FileItemSelectionGeometry.HasAncestor<ScrollBar>(source) &&
-               !FileItemSelectionGeometry.HasAncestor<ButtonBase>(source) &&
-               !FileItemSelectionGeometry.HasAncestor<TextBox>(source);
+               !FileItemSelectionGeometry.HasAncestor<SelectorItem>(source);
     }
 
     private void CacheSelectionHits(
@@ -410,6 +476,30 @@ public sealed partial class FileSurfaceContent
     private static WidgetItem? FindItemFromSource(object? source)
     {
         return FindItemElement(source)?.DataContext as WidgetItem;
+    }
+
+    /// <summary>
+    /// The enclosing item surface, or null on true blank space. A type
+    /// walk, deliberately NOT <see cref="FindItemElement"/>: every element
+    /// inside a row inherits the WidgetItem DataContext, so the
+    /// DataContext-based walk stops at the innermost hit element and can
+    /// never return the surface itself (which silently disabled the list
+    /// right-click zone until this helper existed).
+    /// </summary>
+    private static FileItemSurface? FindItemSurface(object? source)
+    {
+        DependencyObject? current = source as DependencyObject;
+        while (current is not null)
+        {
+            if (current is FileItemSurface surface)
+            {
+                return surface;
+            }
+
+            current = VisualTreeHelper.GetParent(current);
+        }
+
+        return null;
     }
 
     private static FrameworkElement? FindItemElement(object? source)
@@ -1248,8 +1338,30 @@ public sealed partial class FileSurfaceContent
         };
         menu.Items.Add(newFolder);
 
+        var iconTargets =
+            new List<(MenuFlyoutItem Item, string ProbeFileName)>();
+
         if (hasMappedFolder)
         {
+            // Second pinned row, exactly like Explorer: the label comes
+            // from the OS-localized .lnk ShellNew registration.
+            if (ShellNewMenuHelper.TryGetShortcutNewTemplate(
+                    out string shortcutText,
+                    out string? shortcutBase))
+            {
+                MenuFlyoutItem newShortcut = new()
+                {
+                    Text = shortcutText
+                };
+                newShortcut.Click += async (_, _) =>
+                {
+                    await CreateShortcutInMappedLocationAsync(
+                        shortcutBase ?? shortcutText);
+                };
+                menu.Items.Add(newShortcut);
+                iconTargets.Add((newShortcut, "new.lnk"));
+            }
+
             IReadOnlyList<ShellNewEntry> entries = [];
             try
             {
@@ -1257,13 +1369,14 @@ public sealed partial class FileSurfaceContent
             }
             catch
             {
-                // The registry New list is best-effort; the folder entry
-                // above still works without it.
+                // The registry New list is best-effort; the pinned entries
+                // above still work without it.
             }
 
             if (entries.Count > 0)
             {
-                menu.Items.Add(new MenuFlyoutSeparator());
+                // No separator: Explorer's New submenu runs folder, shortcut
+                // and file types as one flat list.
                 foreach (ShellNewEntry entry in entries)
                 {
                     ShellNewEntry captured = entry;
@@ -1276,11 +1389,94 @@ public sealed partial class FileSurfaceContent
                         await CreateFileFromShellNewEntryAsync(captured);
                     };
                     menu.Items.Add(newItem);
+                    iconTargets.Add((newItem, "new" + captured.Extension));
                 }
             }
         }
 
+        PrefetchNewEntryIcons(iconTargets);
+
         return menu;
+    }
+
+    /// <summary>
+    /// Fills the New submenu entries with their file-type icons in the
+    /// background (same pattern as the Open With app icons): the shell is
+    /// only asked for the type's icon by extension, and the menu stays
+    /// responsive while the icons stream in. Entries without a type icon
+    /// stay text-only, matching the native menu's tolerance.
+    /// </summary>
+    private void PrefetchNewEntryIcons(
+        IReadOnlyList<(MenuFlyoutItem Item, string ProbeFileName)> targets)
+    {
+        if (targets.Count == 0 || Root.DispatcherQueue is not { } dispatcher)
+        {
+            return;
+        }
+
+        // No teardown flag: unlike the Open With prefetch, nothing here
+        // owns COM lifetimes — a late TryEnqueue after the flyout closed
+        // only touches an already-detached MenuFlyoutItem.
+        _ = Task.Run(async () =>
+        {
+            foreach ((MenuFlyoutItem item, string probeFileName) in targets)
+            {
+                byte[]? png = await Task.Run(() =>
+                    IconHelper.GetFileTypeIconPngBytes(probeFileName));
+                if (png is null)
+                {
+                    continue;
+                }
+
+                Microsoft.UI.Xaml.Media.Imaging.BitmapImage? image =
+                    await IconHelper.CreateBitmapImageAsync(
+                        dispatcher,
+                        png,
+                        20);
+                if (image is null)
+                {
+                    continue;
+                }
+
+                dispatcher.TryEnqueue(() =>
+                {
+                    item.Icon = new ImageIcon { Source = image };
+                });
+            }
+        });
+    }
+
+    private async Task CreateShortcutInMappedLocationAsync(string baseName)
+    {
+        string? folderPath = ViewModel.CurrentFolderPath;
+        if (string.IsNullOrWhiteSpace(folderPath) ||
+            TryBlockTransferMutation(folderPath))
+        {
+            return;
+        }
+
+        await RunAsync(async () =>
+        {
+            string targetPath = FileService.GetAvailablePath(
+                Path.Combine(folderPath, baseName + ".lnk"));
+            if (!ShellLinkVtableInterop.TryCreateEmptyShortcut(targetPath))
+            {
+                ShowFeedback(new WidgetFeedbackRequest(
+                    T("Widget.Error.OperationIncomplete"),
+                    WidgetFeedbackSeverity.Warning,
+                    "new-shortcut"));
+                return;
+            }
+
+            await ViewModel.RefreshFolderContentsAsync();
+
+            // The placeholder has no target yet; the Properties sheet's
+            // Shortcut tab is where the user completes it (Explorer's own
+            // New→Shortcut uses its in-process wizard for the same step).
+            // Modal — the refresh below also picks up a rename made there.
+            _ = Win32Helper.ShowFileProperties(_hostWindowHandle, targetPath);
+            await ViewModel.RefreshFolderContentsAsync();
+        });
     }
 
     private async Task CreateFileFromShellNewEntryAsync(

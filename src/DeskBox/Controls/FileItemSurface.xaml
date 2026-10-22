@@ -130,6 +130,7 @@
                     </Border>
                 </Grid>
                 <StackPanel
+                    x:Name="ListItemTextHost"
                     Grid.Column="1"
                     HorizontalAlignment="Left"
                     VerticalAlignment="Center"
