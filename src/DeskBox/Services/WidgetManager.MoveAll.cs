@@ -9,6 +9,13 @@ namespace DeskBox.Services;
 /// </summary>
 public sealed class WidgetMoveAllUndoToken
 {
+    /// <summary>
+    /// Set only on tokens minted by the remote settings-host facade: the
+    /// main-process registry id the host must send back to undo. Null for
+    /// ordinary in-process tokens.
+    /// </summary>
+    public long? IpcHandleId { get; init; }
+
     internal sealed record SurfaceSnapshot(
         string SurfaceId,
         string ApplyWidgetId,

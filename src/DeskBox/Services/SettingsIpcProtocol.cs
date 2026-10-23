@@ -64,6 +64,75 @@ public static class SettingsIpcMethods
     public const string DataQuickCaptureClearRecent = "data.qc-clear-recent";
     public const string DataQuickCaptureCacheCleanup = "data.qc-cache-cleanup";
     public const string DataQuickCaptureCacheInfo = "data.qc-cache-info";
+
+    // ── Restore facade (batch 3c-2) ─────────────────────────────────
+    public const string RestorePrepare = "restore.prepare";
+    public const string RestoreConfirm = "restore.confirm";
+    public const string RestoreCancel = "restore.cancel";
+    public const string RestoreInventory = "restore.inventory";
+    public const string RestoreDeleteSnapshot = "restore.delete-snapshot";
+    public const string RestoreAttachmentHealth = "restore.attachment-health";
+
+    // ── Widget facade (batch 3c-2) ──────────────────────────────────
+    public const string WidgetIsFeatureEnabled = "widget.is-feature-enabled";
+    public const string WidgetSyncFeatureEnabled = "widget.sync-feature-enabled";
+    public const string WidgetResetFeature = "widget.reset-feature";
+    public const string WidgetRefreshLayers = "widget.refresh-layers";
+    public const string WidgetNotifyGroupPresentation = "widget.notify-group-presentation";
+    public const string WidgetReorderGroupMember = "widget.reorder-group-member";
+    public const string WidgetRemoveFromGroup = "widget.remove-from-group";
+    public const string WidgetDissolveGroup = "widget.dissolve-group";
+    public const string WidgetGetOrphans = "widget.get-orphans";
+    public const string WidgetRestoreOrphans = "widget.restore-orphans";
+    public const string WidgetMoveOrphanToDesktop = "widget.move-orphan-to-desktop";
+    public const string WidgetDeleteOrphan = "widget.delete-orphan";
+    public const string WidgetManagedCount = "widget.managed-count";
+    public const string WidgetMigratePreview = "widget.migrate-preview";
+    public const string WidgetMigrateRoot = "widget.migrate-root";
+    public const string WidgetMigrationProgress = "widget.migration-progress";
+    public const string WidgetGlanceList = "widget.glance-list";
+    public const string WidgetGlanceFeatureEnabled = "widget.glance-feature-enabled";
+    public const string WidgetGlanceCreate = "widget.glance-create";
+    public const string WidgetGlanceSetEnabled = "widget.glance-set-enabled";
+    public const string WidgetGlanceLocate = "widget.glance-locate";
+    public const string WidgetGlanceRemove = "widget.glance-remove";
+    public const string WidgetGlanceRename = "widget.glance-rename";
+    public const string WidgetMoveAll = "widget.move-all";
+    public const string WidgetMoveAllUndo = "widget.move-all-undo";
+    public const string WidgetApplyScreenBinding = "widget.apply-screen-binding";
+    public const string WidgetFolderWatcherHealth = "widget.folder-watcher-health";
+    public const string WidgetLatestUndoableOrgEntry = "widget.latest-undoable-org-entry";
+    public const string WidgetOrgHistoryEntry = "widget.org-history-entry";
+    public const string WidgetOrgUndo = "widget.org-undo";
+    public const string WidgetOrgAbandon = "widget.org-abandon";
+
+    // ── App facade (batch 3c-2) ─────────────────────────────────────
+    public const string AppShutdownForRestart = "app.shutdown-for-restart";
+    public const string AppShutdownForUpdate = "app.shutdown-for-update";
+    public const string AppScheduleRestart = "app.schedule-restart";
+    public const string AppRelaunchAsExplorerUser = "app.relaunch-as-explorer-user";
+    public const string AppShowOnboarding = "app.show-onboarding";
+    public const string AppShowDesktopOrgWindow = "app.show-desktop-org-window";
+    public const string AppOpenReleaseNotes = "app.open-release-notes";
+    public const string AppUpdateTrayIcon = "app.update-tray-icon";
+    public const string AppSetSnapEnabled = "app.set-snap-enabled";
+    public const string AppSetSnapSpacing = "app.set-snap-spacing";
+    public const string AppScheduleLightCleanup = "app.schedule-light-cleanup";
+    public const string AppScheduleHiddenCleanup = "app.schedule-hidden-cleanup";
+    public const string AppRaiseBand = "app.raise-band";
+    public const string AppReleaseBand = "app.release-band";
+    public const string AppHasShortcut = "app.has-shortcut";
+    public const string AppCreateShortcut = "app.create-shortcut";
+    public const string AppRemoveShortcut = "app.remove-shortcut";
+    public const string AppSyncShortcut = "app.sync-shortcut";
+    public const string AppExportDiagnostics = "app.export-diagnostics";
+    public const string AppUploadDiagnostics = "app.upload-diagnostics";
+    public const string AppRuntimeHealth = "app.runtime-health";
+    public const string AppForceExternalRecovery = "app.force-external-recovery";
+    public const string AppDiagnoseDragDrop = "app.diagnose-drag-drop";
+    public const string AppRepairDragDrop = "app.repair-drag-drop";
+    public const string AppDisplayTopologyChanged = "app.display-topology-changed";
+    public const string AppScreenHomeChanged = "app.screen-home-changed";
 }
 
 /// <summary>
@@ -105,6 +174,34 @@ public static class SettingsIpcReloadPayload
 /// <summary>Two ints over the wire (Quick Capture counts).</summary>
 public sealed record SettingsIpcIntPair(int A, int B);
 
+// ── Batch 3c-2 wire shapes ─────────────────────────────────────────
+
+public sealed record SettingsIpcStringPair(string A, string B);
+
+public sealed record SettingsIpcKindArg(int Kind, bool Enabled);
+
+public sealed record SettingsIpcOrphanDelete(string Path, long OwnerHwnd);
+
+public sealed record SettingsIpcOrgUndo(string HistoryId, long OwnerHwnd);
+
+public sealed record SettingsIpcScreenBinding(string WidgetId, int Mode, string? BoundScreenId, bool Persist);
+
+public sealed record SettingsIpcGlanceSetEnabled(string WidgetId, bool Enabled);
+
+public sealed record SettingsIpcGlanceRename(string WidgetId, string NewName);
+
+public sealed record SettingsIpcGlanceCreate(string? SourceWidgetId);
+
+public sealed record SettingsIpcMoveAllResult(int MovedCount, long Handle);
+
+public sealed record SettingsIpcMigrationRequest(string NewRootPath, bool RestartIfCopiesRemoved);
+
+public sealed record SettingsIpcReleaseNotes(
+    string? ManifestJson,
+    string Version,
+    bool AllowLazyFetch,
+    long OwnerHwnd);
+
 /// <summary>Payload encode/decode helpers over the source-generated context.</summary>
 public static class SettingsIpcPayload
 {
@@ -138,4 +235,36 @@ public static class SettingsIpcPayload
 [JsonSerializable(typeof(QuickCaptureImageCacheInfo))]
 [JsonSerializable(typeof(QuickCaptureImageCacheCleanupResult))]
 [JsonSerializable(typeof(SettingsIpcIntPair))]
+[JsonSerializable(typeof(SettingsIpcStringPair))]
+[JsonSerializable(typeof(SettingsIpcKindArg))]
+[JsonSerializable(typeof(SettingsIpcOrphanDelete))]
+[JsonSerializable(typeof(SettingsIpcOrgUndo))]
+[JsonSerializable(typeof(SettingsIpcScreenBinding))]
+[JsonSerializable(typeof(SettingsIpcGlanceSetEnabled))]
+[JsonSerializable(typeof(SettingsIpcGlanceRename))]
+[JsonSerializable(typeof(SettingsIpcGlanceCreate))]
+[JsonSerializable(typeof(SettingsIpcMoveAllResult))]
+[JsonSerializable(typeof(SettingsIpcMigrationRequest))]
+[JsonSerializable(typeof(SettingsIpcReleaseNotes))]
+[JsonSerializable(typeof(DeskBoxRestorePreparation))]
+[JsonSerializable(typeof(DeskBoxBackupSnapshotInfo))]
+[JsonSerializable(typeof(List<DeskBoxBackupSnapshotInfo>))]
+[JsonSerializable(typeof(DeskBoxAttachmentHealthReport))]
+[JsonSerializable(typeof(ManagedStorageFolderCleanupCandidate))]
+[JsonSerializable(typeof(List<ManagedStorageFolderCleanupCandidate>))]
+[JsonSerializable(typeof(ManagedStorageMigrationPreview))]
+[JsonSerializable(typeof(ManagedStorageMigrationResult))]
+[JsonSerializable(typeof(ManagedStorageMigrationProgress))]
+[JsonSerializable(typeof(GlanceWidgetInstanceInfo))]
+[JsonSerializable(typeof(List<GlanceWidgetInstanceInfo>))]
+[JsonSerializable(typeof(FolderWatcherHealthSnapshot))]
+[JsonSerializable(typeof(List<FolderWatcherHealthSnapshot>))]
+[JsonSerializable(typeof(List<string>))]
+[JsonSerializable(typeof(OrganizationHistoryEntry))]
+[JsonSerializable(typeof(DesktopOrganizationUndoResult))]
+[JsonSerializable(typeof(AppRelaunchScheduleResult))]
+[JsonSerializable(typeof(AppRuntimeHealthSnapshot))]
+[JsonSerializable(typeof(AppUpdateManifest))]
+[JsonSerializable(typeof(DragDropPermissionDiagnostic))]
+[JsonSerializable(typeof(DragDropPermissionRepairResult))]
 internal sealed partial class SettingsIpcJsonContext : JsonSerializerContext;

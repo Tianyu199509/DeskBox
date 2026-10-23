@@ -4,10 +4,11 @@ using DeskBox.Services;
 
 /// <summary>
 /// Main-process side of the settings-host IPC pipe (batch 3c): owns the
-/// server, the method router over the in-process facades, and the reload
-/// push that follows every durable local save — carrying the host commit id
-/// of the last applied external snapshot so the settings host can
-/// echo-suppress its own writes.
+/// server, the method router over the in-process facades, and the event
+/// pushes — reload after every durable local save (carrying the host commit
+/// id of the last applied external snapshot so the settings host can
+/// echo-suppress its own writes), hotkey registration changes, and the
+/// display/screen-home notifications.
 /// </summary>
 public partial class App
 {
@@ -30,7 +31,19 @@ public partial class App
                 SettingsService),
             new InProcessSettingsDataActions(
                 QuickCaptureService ?? throw new InvalidOperationException("Quick Capture service is not initialized."),
-                LocalizationService));
+                LocalizationService),
+            new InProcessSettingsRestoreActions(
+                DataBackupService ?? throw new InvalidOperationException("Backup service is not initialized."),
+                AttachmentHealthService ?? throw new InvalidOperationException("Attachment health service is not initialized.")),
+            new InProcessSettingsWidgetActions(
+                WidgetManager,
+                SettingsService,
+                FileService,
+                OrganizerService,
+                LocalizationService),
+            new InProcessSettingsAppActions(this, LocalizationService),
+            pushEvent: (method, payload) =>
+                _settingsIpcServer?.SendEventAsync(method, payload) ?? Task.CompletedTask);
         _settingsIpcRouter = router;
         _settingsIpcServer = SettingsIpcServer.Start(
             DeskBoxDataPathService.Current.SettingsIpcPipeName,
@@ -38,6 +51,8 @@ public partial class App
 
         SettingsService.LocalPersistCompleted += OnSettingsIpcLocalPersistCompleted;
         GlobalHotkeyService.RegistrationChanged += OnSettingsIpcHotkeyRegistrationChanged;
+        DisplayTopologyChanged += OnSettingsIpcDisplayTopologyChanged;
+        ScreenHomeChanged += OnSettingsIpcScreenHomeChanged;
         Log("[SettingsIpc] Server started");
     }
 
@@ -52,6 +67,16 @@ public partial class App
     private void OnSettingsIpcHotkeyRegistrationChanged()
     {
         _ = PushSettingsIpcEventAsync(SettingsIpcMethods.HotkeyRegistrationChanged, null);
+    }
+
+    private void OnSettingsIpcDisplayTopologyChanged()
+    {
+        _ = PushSettingsIpcEventAsync(SettingsIpcMethods.AppDisplayTopologyChanged, null);
+    }
+
+    private void OnSettingsIpcScreenHomeChanged()
+    {
+        _ = PushSettingsIpcEventAsync(SettingsIpcMethods.AppScreenHomeChanged, null);
     }
 
     private async Task PushSettingsIpcEventAsync(string method, string? payload)
