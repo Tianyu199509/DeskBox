@@ -1,5 +1,6 @@
 // Copyright (c) DeskBox. All rights reserved.
 
+using DeskBox.Contracts;
 using DeskBox.Helpers;
 using DeskBox.Models;
 using DeskBox.Services;
@@ -38,6 +39,7 @@ public sealed partial class HotkeyRecorderDialog : ContentDialog
         "M5.6 6.0 L10.6 6.0 L10.6 10.9 L5.6 10.9 Z";
 
     private readonly LocalizationService _localization;
+    private readonly ISettingsHotkeyActions _hotkeyActions;
     private readonly Scope _scope;
     private readonly GlobalHotkeyActivation _initialActivation;
     private readonly IReadOnlyList<Preset> _presets;
@@ -63,6 +65,7 @@ public sealed partial class HotkeyRecorderDialog : ContentDialog
     public HotkeyRecorderDialog(
         XamlRoot xamlRoot,
         LocalizationService localization,
+        ISettingsHotkeyActions hotkeyActions,
         Scope scope,
         GlobalHotkeyActivation initialActivation,
         IReadOnlyList<Preset> presets,
@@ -80,6 +83,7 @@ public sealed partial class HotkeyRecorderDialog : ContentDialog
         GotFocus += (_, e) => AdjustButtonPassthrough(e.OriginalSource, +1);
         LostFocus += (_, e) => AdjustButtonPassthrough(e.OriginalSource, -1);
         _localization = localization;
+        _hotkeyActions = hotkeyActions;
         _scope = scope;
         _initialActivation = initialActivation;
         _presets = presets;
@@ -122,8 +126,7 @@ public sealed partial class HotkeyRecorderDialog : ContentDialog
 
         // Suspend the live registrations first so neither hotkey fires nor its
         // reserved hook eats the keys we are about to record.
-        App.Current.GlobalHotkeyService?.SuspendForRecording();
-        App.Current.SearchHotkeyService?.SuspendForRecording();
+        _hotkeyActions.SuspendHotkeysForRecording();
 
         _hook.KeyCaptured += OnKeyCaptured;
         if (!_hook.TryStart(out int errorCode))
@@ -154,8 +157,7 @@ public sealed partial class HotkeyRecorderDialog : ContentDialog
 
         _hook.KeyCaptured -= OnKeyCaptured;
         _hook.Stop();
-        App.Current.SearchHotkeyService?.ResumeAfterRecording();
-        App.Current.GlobalHotkeyService?.ResumeAfterRecording();
+        _hotkeyActions.ResumeHotkeysAfterRecording();
     }
 
     /// <summary>

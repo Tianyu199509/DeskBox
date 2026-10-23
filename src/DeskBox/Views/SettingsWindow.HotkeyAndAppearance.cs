@@ -78,12 +78,12 @@ public sealed partial class SettingsWindow
     private async void ChangeGlobalHotkeyButton_Click(object sender, RoutedEventArgs e)
     {
         if (SettingsRoot.XamlRoot is null ||
-            App.Current.GlobalHotkeyService is not { } hotkeyService)
+            _hotkeyActions.GetRuntimeState() is not { } hotkeyState)
         {
             return;
         }
 
-        GlobalHotkeyActivation current = hotkeyService.CurrentActivation;
+        GlobalHotkeyActivation current = hotkeyState.CurrentActivation;
         HotkeyRecorderDialog.Preset[] presets =
         [
             new(
@@ -122,6 +122,7 @@ public sealed partial class SettingsWindow
         var dialog = new HotkeyRecorderDialog(
             SettingsRoot.XamlRoot,
             _localizationService,
+            _hotkeyActions,
             HotkeyRecorderDialog.Scope.Global,
             current,
             presets,
@@ -133,13 +134,13 @@ public sealed partial class SettingsWindow
     private Task<string?> ApplyGlobalHotkeyActivationFromRecorderAsync(
         GlobalHotkeyActivation activation)
     {
-        if (App.Current.GlobalHotkeyService is not { } hotkeyService)
+        if (_hotkeyActions.GetRuntimeState() is null)
         {
             return Task.FromResult<string?>(
                 _localizationService.T("Settings.GlobalHotkey.Status.Unavailable"));
         }
 
-        string? error = hotkeyService.TryApplyActivation(activation, out string? applyError)
+        string? error = _hotkeyActions.TryApplyActivation(activation, out string? applyError)
             ? null
             : applyError ?? _localizationService.T(
                 "Settings.GlobalHotkey.Status.Unregistered");
@@ -154,7 +155,7 @@ public sealed partial class SettingsWindow
 
     private string? GetGlobalHotkeyRecorderConflict(GlobalHotkeyGesture gesture)
     {
-        return GlobalHotkeyService.IsGestureOwnedBySearchHotkey(gesture)
+        return _hotkeyActions.IsGestureOwnedBySearchHotkey(gesture)
             ? _localizationService.T("Settings.GlobalHotkey.Status.SearchHotkeyConflict")
             : null;
     }
@@ -166,22 +167,12 @@ public sealed partial class SettingsWindow
             return;
         }
 
-        bool applied;
-        int errorCode = 0;
-        if (App.Current.DesktopDoubleClickActivationService is { } service)
-        {
-            applied = service.TrySetEnabled(toggle.IsOn, out errorCode);
-        }
-        else
-        {
-            _settingsService.Settings.DesktopDoubleClickEnabled = toggle.IsOn;
-            _settingsService.SaveDebounced();
-            applied = true;
-        }
+        DesktopDoubleClickToggleResult result =
+            _hotkeyActions.TrySetDesktopDoubleClickEnabled(toggle.IsOn);
 
-        if (!applied)
+        if (!result.Applied)
         {
-            App.Log($"[DesktopDoubleClick] Settings toggle failed error={errorCode}");
+            App.Log($"[DesktopDoubleClick] Settings toggle failed error={result.ErrorCode}");
             await ShowInfoDialogAsync(
                 _localizationService.T("Settings.GlobalHotkey.Dialog.FailedTitle"),
                 _localizationService.T("Settings.DesktopDoubleClick.Status.Unavailable"));
@@ -192,12 +183,12 @@ public sealed partial class SettingsWindow
 
     private async void ResetGlobalHotkeyButton_Click(object sender, RoutedEventArgs e)
     {
-        if (App.Current.GlobalHotkeyService is not { } hotkeyService)
+        if (_hotkeyActions.GetRuntimeState() is null)
         {
             return;
         }
 
-        if (!hotkeyService.ResetToDefault(out string? error))
+        if (!_hotkeyActions.ResetToDefault(out string? error))
         {
             await ShowInfoDialogAsync(
                 _localizationService.T("Settings.GlobalHotkey.Dialog.FailedTitle"),

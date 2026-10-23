@@ -257,6 +257,10 @@ public sealed class SettingsSliceOwnershipContractTests
         // 5 = legacy 4 + DesktopDoubleClickEnabled read backing the hook
         // watchdog's HookProbeWanted gate (activation service line 122).
         ["src/DeskBox/Services/DesktopDoubleClickActivationService.cs"] = 5,
+        // Hotkey facade: 1 = the desktop double-click no-service fallback
+        // writing the preference directly, exactly the passthrough the
+        // settings window used inline before the facade.
+        ["src/DeskBox/Services/InProcessSettingsHotkeyActions.cs"] = 1,
         // TodoSettingsCoordinator reads Settings.Widgets once in the
         // reminder-reconcile change guard: the Todo widget id set has no
         // slice projection, and watching it keeps external widget deletions

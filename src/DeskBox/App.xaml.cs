@@ -4436,10 +4436,18 @@ public partial class App : Application
                 _performanceSettings ?? throw new InvalidOperationException("Performance settings are not initialized."),
                 _interactionSettings ?? throw new InvalidOperationException("Interaction settings are not initialized."),
                 LocalizationService.T,
-                () => LocalizationService.IsChinese));
+                () => LocalizationService.IsChinese),
+            CreateSettingsHotkeyActions());
         _settingsWindow.Closed += SettingsWindow_ClosedForApp;
         return _settingsWindow;
     }
+
+    private Contracts.ISettingsHotkeyActions CreateSettingsHotkeyActions() =>
+        new InProcessSettingsHotkeyActions(
+            GlobalHotkeyService,
+            SearchHotkeyService,
+            DesktopDoubleClickActivationService,
+            SettingsService);
 
     private void SettingsWindow_ClosedForApp(object sender, WindowEventArgs args)
     {

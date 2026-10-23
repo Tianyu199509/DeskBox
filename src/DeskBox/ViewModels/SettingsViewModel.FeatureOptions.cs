@@ -106,7 +106,7 @@ public partial class SettingsViewModel
             return;
         }
 
-        App.Current?.GlobalHotkeyService?.SetEnabled(value);
+        _hotkeyActions.SetEnabled(value);
         RefreshGlobalHotkeyState();
     }
 

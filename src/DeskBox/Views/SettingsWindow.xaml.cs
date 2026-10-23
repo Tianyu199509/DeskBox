@@ -139,6 +139,7 @@ public sealed partial class SettingsWindow : Window
     private readonly DeskBox.Features.Capsule.CapsuleSettingsViewModel _capsuleSettingsViewModel;
     private readonly DeskBox.Features.GroupNavigation.GroupNavigationSettingsViewModel _groupNavigationSettingsViewModel;
     private readonly DeskBox.Features.Performance.PerformanceSettingsViewModel _performanceSettingsViewModel;
+    private readonly ISettingsHotkeyActions _hotkeyActions;
 
     /// <summary>
     /// The file-display section's editor. Exposed for the AOT managed-UI
@@ -184,7 +185,8 @@ public sealed partial class SettingsWindow : Window
         DeskBox.Features.Music.MusicSettingsViewModel musicSettings,
         DeskBox.Features.ManagedStorage.ManagedStorageSettingsViewModel managedStorageSettings,
         DeskBox.Features.Maintenance.MaintenanceSettingsViewModel maintenanceSettings,
-        DeskBox.Features.Performance.PerformanceSettingsViewModel performanceSettings)
+        DeskBox.Features.Performance.PerformanceSettingsViewModel performanceSettings,
+        ISettingsHotkeyActions hotkeyActions)
     {
         var constructionStopwatch = Stopwatch.StartNew();
         long previousCheckpointMilliseconds = 0;
@@ -216,13 +218,15 @@ public sealed partial class SettingsWindow : Window
         _capsuleSettingsViewModel = capsuleSettings;
         _groupNavigationSettingsViewModel = groupNavigationSettings;
         _performanceSettingsViewModel = performanceSettings;
+        _hotkeyActions = hotkeyActions;
         _themeService = themeService;
         _localizationService = localizationService;
         ViewModel = new SettingsViewModel(settingsService, themeService, todoSettings, weatherSettings,
             backupSettings, quickCaptureSettings, quickCaptureSettingsEditor, searchFeatureSettings, appearanceSettings,
             capsuleSettings, interactionSettings, fileDisplaySettings, fileStackSettings,
             groupNavigationSettings, featureWidgetsSettings, musicSettings,
-            managedStorageSettings, maintenanceSettings, performanceSettings, localizationService,
+            managedStorageSettings, maintenanceSettings, performanceSettings, hotkeyActions,
+            localizationService,
             App.Current.AppUpdateService);
         LogConstructionCheckpoint("view-model");
         _settingsRootPointerPressedHandler = SettingsRoot_PointerPressedHandled;
@@ -284,10 +288,7 @@ public sealed partial class SettingsWindow : Window
         _themeService.AppearanceChanged += OnAppearanceChanged;
         _localizationService.LanguageChanged += OnLanguageChanged;
         ViewModel.PropertyChanged += ViewModel_PropertyChanged;
-        if (App.Current.GlobalHotkeyService is { } hotkeyService)
-        {
-            hotkeyService.RegistrationChanged += OnGlobalHotkeyRegistrationChanged;
-        }
+        _hotkeyActions.RegistrationChanged += OnGlobalHotkeyRegistrationChanged;
 
         ApplyTitleBarButtonColors();
         ApplyLocalizedText();
@@ -491,10 +492,7 @@ public sealed partial class SettingsWindow : Window
         _themeService.AppearanceChanged -= OnAppearanceChanged;
         _localizationService.LanguageChanged -= OnLanguageChanged;
         ViewModel.PropertyChanged -= ViewModel_PropertyChanged;
-        if (App.Current.GlobalHotkeyService is { } hotkeyService)
-        {
-            hotkeyService.RegistrationChanged -= OnGlobalHotkeyRegistrationChanged;
-        }
+        _hotkeyActions.RegistrationChanged -= OnGlobalHotkeyRegistrationChanged;
 
         if (AppearanceDetailSection is not null)
         {

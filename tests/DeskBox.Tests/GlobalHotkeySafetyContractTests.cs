@@ -34,9 +34,14 @@ public sealed class GlobalHotkeySafetyContractTests
         Assert.DoesNotContain("Settings.GlobalHotkey.SystemTitle", xaml, StringComparison.Ordinal);
 
         // Recording rides the dedicated low-level hook dialog: registrations
-        // suspend while it is open and restore on close.
-        Assert.Contains("SuspendForRecording", dialogCode, StringComparison.Ordinal);
-        Assert.Contains("ResumeAfterRecording", dialogCode, StringComparison.Ordinal);
+        // suspend while it is open and restore on close. The dialog drives
+        // the suspension through the injected hotkey facade; the in-process
+        // facade implementation is what touches the two live services.
+        Assert.Contains("SuspendHotkeysForRecording", dialogCode, StringComparison.Ordinal);
+        Assert.Contains("ResumeHotkeysAfterRecording", dialogCode, StringComparison.Ordinal);
+        string facadeCode = Read("src/DeskBox/Services/InProcessSettingsHotkeyActions.cs");
+        Assert.Contains("SuspendForRecording", facadeCode, StringComparison.Ordinal);
+        Assert.Contains("ResumeAfterRecording", facadeCode, StringComparison.Ordinal);
         Assert.Contains("x:Name=\"ErrorInfoBar\"", dialogXaml, StringComparison.Ordinal);
         Assert.DoesNotContain("UseWinSpaceHotkeyButton_Click", hotkeyCode, StringComparison.Ordinal);
     }

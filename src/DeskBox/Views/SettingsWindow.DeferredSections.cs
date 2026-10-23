@@ -83,7 +83,7 @@ public sealed partial class SettingsWindow
         switch (section)
         {
             case SearchSettingsSection searchSettings:
-                searchSettings.Configure(_searchSettingsViewModel, _localizationService, _hWnd);
+                searchSettings.Configure(_searchSettingsViewModel, _localizationService, _hotkeyActions, _hWnd);
                 break;
             case FileWidgetSettingsSection fileSettings:
                 fileSettings.FileStack = _fileStackSettingsViewModel;

@@ -78,8 +78,8 @@ public partial class SettingsViewModel
                 app.ResizeGuideOverlay.IsSnapEnabled = _interactionSettings.SnapEnabled;
             }
 
-            App.Current?.GlobalHotkeyService?.RefreshRegistration();
-            App.Current?.UpdateTrayIcon();
+        _hotkeyActions.RefreshRegistration();
+        App.Current?.UpdateTrayIcon();
             RefreshGlobalHotkeyState();
             _themeService.RefreshAppearance();
             RefreshAccentPreview();
