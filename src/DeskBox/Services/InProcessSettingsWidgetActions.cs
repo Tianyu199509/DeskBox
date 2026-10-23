@@ -14,11 +14,22 @@ public sealed class InProcessSettingsWidgetActions : ISettingsWidgetActions
 {
     private readonly WidgetManager? _widgetManager;
     private readonly SettingsService _settingsService;
+    private readonly FileService? _fileService;
+    private readonly OrganizerService? _organizerService;
+    private readonly LocalizationService _localizationService;
 
-    public InProcessSettingsWidgetActions(WidgetManager? widgetManager, SettingsService settingsService)
+    public InProcessSettingsWidgetActions(
+        WidgetManager? widgetManager,
+        SettingsService settingsService,
+        FileService? fileService,
+        OrganizerService? organizerService,
+        LocalizationService localizationService)
     {
         _widgetManager = widgetManager;
         _settingsService = settingsService;
+        _fileService = fileService;
+        _organizerService = organizerService;
+        _localizationService = localizationService;
     }
 
     public bool IsHostAvailable => _widgetManager is not null;
@@ -108,6 +119,8 @@ public sealed class InProcessSettingsWidgetActions : ISettingsWidgetActions
     public IReadOnlyList<GlanceWidgetInstanceInfo> GetGlanceWidgetInstances() =>
         _widgetManager?.GetGlanceWidgetInstances() ?? [];
 
+    public bool IsGlanceFeatureEnabled => _widgetManager?.IsGlanceFeatureEnabled ?? false;
+
     public Task<GlanceWidgetInstanceInfo> CreateGlanceWidgetAsync(string? sourceWidgetId) =>
         _widgetManager is { } manager
             ? manager.CreateGlanceWidgetAsync(sourceWidgetId)
@@ -155,4 +168,82 @@ public sealed class InProcessSettingsWidgetActions : ISettingsWidgetActions
 
     public IReadOnlyList<FolderWatcherHealthSnapshot>? GetFolderWatcherHealthSnapshots() =>
         _widgetManager?.GetFolderWatcherHealthSnapshots();
+
+    public OrganizationHistoryEntry? GetLatestUndoableDesktopOrganizationEntry() =>
+        _organizerService?.GetLatestUndoableEntry();
+
+    public OrganizationHistoryEntry? GetDesktopOrganizationHistoryEntry(string historyId) =>
+        _settingsService.OrganizationHistory.Entries.FirstOrDefault(candidate =>
+            string.Equals(candidate.Id, historyId, StringComparison.Ordinal));
+
+    public async Task<DesktopOrganizationUndoResult> UndoDesktopOrganizationAsync(
+        string historyId,
+        nint ownerWindowHandle)
+    {
+        if (_widgetManager is not { } manager ||
+            _fileService is not { } fileService ||
+            _organizerService is not { } organizerService)
+        {
+            return new DesktopOrganizationUndoResult(
+                DesktopOrganizationUndoOutcome.Failed,
+                Error: "host-unavailable");
+        }
+
+        var coordinator = new DesktopOrganizationCoordinator(
+            _settingsService,
+            fileService,
+            manager,
+            organizerService,
+            _localizationService);
+        try
+        {
+            await coordinator.UndoAsync(historyId, (IntPtr)ownerWindowHandle);
+            return new DesktopOrganizationUndoResult(DesktopOrganizationUndoOutcome.Completed);
+        }
+        catch (DesktopOrganizationIncompleteUndoException ex)
+        {
+            return new DesktopOrganizationUndoResult(
+                DesktopOrganizationUndoOutcome.Incomplete,
+                ex.RestoredCount,
+                ex.RemainingCount);
+        }
+        catch (Exception ex)
+        {
+            App.Log($"[DesktopOrganization] Undo from settings failed: {ex}");
+            return new DesktopOrganizationUndoResult(
+                DesktopOrganizationUndoOutcome.Failed,
+                Error: ex.Message);
+        }
+    }
+
+    public async Task<DesktopOrganizationUndoResult> AbandonDesktopOrganizationUndoAsync(string historyId)
+    {
+        if (_widgetManager is not { } manager ||
+            _fileService is not { } fileService ||
+            _organizerService is not { } organizerService)
+        {
+            return new DesktopOrganizationUndoResult(
+                DesktopOrganizationUndoOutcome.Failed,
+                Error: "host-unavailable");
+        }
+
+        var coordinator = new DesktopOrganizationCoordinator(
+            _settingsService,
+            fileService,
+            manager,
+            organizerService,
+            _localizationService);
+        try
+        {
+            await coordinator.AbandonUndoAsync(historyId);
+            return new DesktopOrganizationUndoResult(DesktopOrganizationUndoOutcome.Completed);
+        }
+        catch (Exception ex)
+        {
+            App.Log($"[DesktopOrganization] Abandon undo from settings failed: {ex}");
+            return new DesktopOrganizationUndoResult(
+                DesktopOrganizationUndoOutcome.Failed,
+                Error: ex.Message);
+        }
+    }
 }

@@ -1,3 +1,4 @@
+using DeskBox.Contracts;
 using DeskBox.Helpers;
 using DeskBox.Models;
 using DeskBox.Services;
@@ -15,6 +16,24 @@ public sealed partial class DesktopOrganizationSettingsSection : UserControl
     private DesktopOrganizationRule? _selectedRule;
     private bool _selectedRuleIsDraft;
     private bool _isRefreshing;
+    private ISettingsWidgetActions _widgetActions = null!;
+    private ISettingsAppActions _appActions = null!;
+    private nint _ownerWindow;
+
+    /// <summary>
+    /// Injected by the settings window when the deferred section is created,
+    /// before the first Loaded (host commands plus this window's owner
+    /// handle for main-process dialog parenting).
+    /// </summary>
+    public void Configure(
+        ISettingsWidgetActions widgetActions,
+        ISettingsAppActions appActions,
+        nint ownerWindow)
+    {
+        _widgetActions = widgetActions;
+        _appActions = appActions;
+        _ownerWindow = ownerWindow;
+    }
 
     public DesktopOrganizationSettingsSection()
     {
@@ -49,8 +68,7 @@ public sealed partial class DesktopOrganizationSettingsSection : UserControl
         ExtensionInput.PlaceholderText = T("DesktopOrganization.Rule.ExtensionPlaceholder");
         ExcludedExtensionInput.PlaceholderText = T(
             "DesktopOrganization.Rule.ExclusionPlaceholder");
-        OrganizationHistoryEntry? latest = global::DeskBox.App.Current.OrganizerService
-            .GetLatestUndoableEntry();
+        OrganizationHistoryEntry? latest = _widgetActions.GetLatestUndoableDesktopOrganizationEntry();
         UndoOrganizationButton.Visibility = latest is null
             ? Visibility.Collapsed
             : Visibility.Visible;
@@ -218,7 +236,7 @@ public sealed partial class DesktopOrganizationSettingsSection : UserControl
 
     private void OrganizeNowButton_Click(object sender, RoutedEventArgs e)
     {
-        global::DeskBox.App.Current.ShowDesktopOrganizationWindow();
+        _appActions.ShowDesktopOrganizationWindow();
     }
 
     private void AutoSetupButton_Click(object sender, RoutedEventArgs e)
@@ -238,50 +256,44 @@ public sealed partial class DesktopOrganizationSettingsSection : UserControl
     private async void UndoOrganizationButton_Click(object sender, RoutedEventArgs e)
     {
         if (UndoOrganizationButton.Tag is not string historyId ||
-            global::DeskBox.App.Current.WidgetManager is not { } widgetManager)
+            !_widgetActions.IsHostAvailable)
         {
             return;
         }
 
         UndoOrganizationButton.IsEnabled = false;
-        try
+        DesktopOrganizationUndoResult result =
+            await _widgetActions.UndoDesktopOrganizationAsync(historyId, _ownerWindow);
+        switch (result.Outcome)
         {
-            var app = global::DeskBox.App.Current;
-            var coordinator = new DesktopOrganizationCoordinator(
-                app.SettingsService,
-                app.FileService,
-                widgetManager,
-                app.OrganizerService,
-                app.LocalizationService);
-            nint owner = app.SettingsWindowInstance is { } window
-                ? WinRT.Interop.WindowNative.GetWindowHandle(window) : 0;
-            await coordinator.UndoAsync(historyId, owner);
-            RuleStatusInfo.ActionButton = null;
-            RuleStatusInfo.Severity = InfoBarSeverity.Success;
-            RuleStatusInfo.Title = T("DesktopOrganization.Undo.Success");
-            RuleStatusInfo.Message = string.Empty;
-            RuleStatusInfo.IsOpen = true;
-            Refresh();
-        }
-        catch (DesktopOrganizationIncompleteUndoException ex)
-        {
-            RuleStatusInfo.ActionButton = null;
-            RuleStatusInfo.Severity = InfoBarSeverity.Warning;
-            RuleStatusInfo.Title = T("DesktopOrganization.Public.UndoPendingTitle");
-            RuleStatusInfo.Message = Format("DesktopOrganization.Public.UndoPending", ex.RestoredCount, ex.RemainingCount);
-            RuleStatusInfo.IsOpen = true;
-            AttachAbandonRestoreAction(historyId);
-            Refresh();
-        }
-        catch (Exception ex)
-        {
-            App.Log($"[DesktopOrganization] Undo from settings failed: {ex}");
-            RuleStatusInfo.ActionButton = null;
-            RuleStatusInfo.Severity = InfoBarSeverity.Error;
-            RuleStatusInfo.Title = T("DesktopOrganization.Undo.Failed");
-            RuleStatusInfo.Message = T("DesktopOrganization.Undo.FailedBody");
-            RuleStatusInfo.IsOpen = true;
-            UndoOrganizationButton.IsEnabled = true;
+            case DesktopOrganizationUndoOutcome.Completed:
+                RuleStatusInfo.ActionButton = null;
+                RuleStatusInfo.Severity = InfoBarSeverity.Success;
+                RuleStatusInfo.Title = T("DesktopOrganization.Undo.Success");
+                RuleStatusInfo.Message = string.Empty;
+                RuleStatusInfo.IsOpen = true;
+                Refresh();
+                break;
+            case DesktopOrganizationUndoOutcome.Incomplete:
+                RuleStatusInfo.ActionButton = null;
+                RuleStatusInfo.Severity = InfoBarSeverity.Warning;
+                RuleStatusInfo.Title = T("DesktopOrganization.Public.UndoPendingTitle");
+                RuleStatusInfo.Message = Format(
+                    "DesktopOrganization.Public.UndoPending",
+                    result.RestoredCount,
+                    result.RemainingCount);
+                RuleStatusInfo.IsOpen = true;
+                AttachAbandonRestoreAction(historyId);
+                Refresh();
+                break;
+            default:
+                RuleStatusInfo.ActionButton = null;
+                RuleStatusInfo.Severity = InfoBarSeverity.Error;
+                RuleStatusInfo.Title = T("DesktopOrganization.Undo.Failed");
+                RuleStatusInfo.Message = T("DesktopOrganization.Undo.FailedBody");
+                RuleStatusInfo.IsOpen = true;
+                UndoOrganizationButton.IsEnabled = true;
+                break;
         }
     }
 
@@ -298,10 +310,8 @@ public sealed partial class DesktopOrganizationSettingsSection : UserControl
             abandon.IsEnabled = false;
             try
             {
-                var app = global::DeskBox.App.Current;
-                var entry = app.SettingsService.OrganizationHistory.Entries
-                    .FirstOrDefault(candidate => string.Equals(candidate.Id, historyId, StringComparison.Ordinal));
-                if (entry is not { CanUndo: true } || app.WidgetManager is not { } widgetManager)
+                var entry = _widgetActions.GetDesktopOrganizationHistoryEntry(historyId);
+                if (entry is not { CanUndo: true } || !_widgetActions.IsHostAvailable)
                 {
                     Refresh();
                     return;
@@ -309,34 +319,33 @@ public sealed partial class DesktopOrganizationSettingsSection : UserControl
 
                 if (!await Controls.DesktopOrganizationAbandonDialog.ConfirmAsync(
                         XamlRoot,
-                        app.LocalizationService,
-                        Controls.DesktopOrganizationAbandonDialog.BuildItemDetails(app.LocalizationService, entry)))
+                        global::DeskBox.App.Current.LocalizationService,
+                        Controls.DesktopOrganizationAbandonDialog.BuildItemDetails(
+                            global::DeskBox.App.Current.LocalizationService,
+                            entry)))
                 {
                     abandon.IsEnabled = true;
                     return;
                 }
 
-                var coordinator = new DesktopOrganizationCoordinator(
-                    app.SettingsService,
-                    app.FileService,
-                    widgetManager,
-                    app.OrganizerService,
-                    app.LocalizationService);
-                await coordinator.AbandonUndoAsync(historyId);
-                RuleStatusInfo.ActionButton = null;
-                RuleStatusInfo.Severity = InfoBarSeverity.Success;
-                RuleStatusInfo.Title = T("DesktopOrganization.Public.AbandonDone");
-                RuleStatusInfo.Message = string.Empty;
-                RuleStatusInfo.IsOpen = true;
-            }
-            catch (Exception ex)
-            {
-                App.Log($"[DesktopOrganization] Abandon restore from settings failed: {ex}");
-                RuleStatusInfo.ActionButton = null;
-                RuleStatusInfo.Severity = InfoBarSeverity.Error;
-                RuleStatusInfo.Title = T("DesktopOrganization.Undo.Failed");
-                RuleStatusInfo.Message = T("DesktopOrganization.Undo.FailedBody");
-                RuleStatusInfo.IsOpen = true;
+                DesktopOrganizationUndoResult result =
+                    await _widgetActions.AbandonDesktopOrganizationUndoAsync(historyId);
+                if (result.Outcome == DesktopOrganizationUndoOutcome.Completed)
+                {
+                    RuleStatusInfo.ActionButton = null;
+                    RuleStatusInfo.Severity = InfoBarSeverity.Success;
+                    RuleStatusInfo.Title = T("DesktopOrganization.Public.AbandonDone");
+                    RuleStatusInfo.Message = string.Empty;
+                    RuleStatusInfo.IsOpen = true;
+                }
+                else
+                {
+                    RuleStatusInfo.ActionButton = null;
+                    RuleStatusInfo.Severity = InfoBarSeverity.Error;
+                    RuleStatusInfo.Title = T("DesktopOrganization.Undo.Failed");
+                    RuleStatusInfo.Message = T("DesktopOrganization.Undo.FailedBody");
+                    RuleStatusInfo.IsOpen = true;
+                }
             }
             finally
             {

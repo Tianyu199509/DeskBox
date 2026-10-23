@@ -15,6 +15,11 @@ using DeskBox.Services;
 /// </summary>
 public interface ISettingsAppActions
 {
+    /// <summary>Forwarded from the host: display topology changed (hot-plug, resolution).</summary>
+    event Action? DisplayTopologyChanged;
+
+    /// <summary>Forwarded from the host: the home screen changed.</summary>
+    event Action? ScreenHomeChanged;
     // ── Lifecycle ───────────────────────────────────────────────────
 
     Task ShutdownForRestartAsync();

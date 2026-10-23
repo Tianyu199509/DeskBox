@@ -1,4 +1,5 @@
 using CommunityToolkit.WinUI.Controls;
+using DeskBox.Contracts;
 using DeskBox.Models;
 using DeskBox.Services;
 using Microsoft.UI;
@@ -25,6 +26,8 @@ public sealed partial class DisplaySettingsSection : UserControl
     private IReadOnlyList<WidgetScreenInfo> _screens = [];
     private WidgetScreenInfo? _selectedScreen;
     private bool _isRefreshing;
+    private ISettingsWidgetActions _widgetActions = null!;
+    private ISettingsAppActions _appActions = null!;
 
     public DisplaySettingsSection()
     {
@@ -39,20 +42,30 @@ public sealed partial class DisplaySettingsSection : UserControl
         };
     }
 
+    /// <summary>
+    /// Injected by the settings window when the deferred section is created,
+    /// before the first Loaded (host commands and the host-raised events).
+    /// </summary>
+    public void Configure(ISettingsWidgetActions widgetActions, ISettingsAppActions appActions)
+    {
+        _widgetActions = widgetActions;
+        _appActions = appActions;
+    }
+
     // H5: the app raises this when the display topology changes outside the
     // settings page (hot-plug, resolution change), so the preview and combos
     // do not keep showing a stale arrangement.
     private void OnSectionLoaded(object sender, RoutedEventArgs e)
     {
-        global::DeskBox.App.Current.DisplayTopologyChanged += OnExternalDisplayTopologyChanged;
-        global::DeskBox.App.Current.ScreenHomeChanged += OnExternalScreenHomeChanged;
+        _appActions.DisplayTopologyChanged += OnExternalDisplayTopologyChanged;
+        _appActions.ScreenHomeChanged += OnExternalScreenHomeChanged;
         Refresh();
     }
 
     private void OnSectionUnloaded(object sender, RoutedEventArgs e)
     {
-        global::DeskBox.App.Current.DisplayTopologyChanged -= OnExternalDisplayTopologyChanged;
-        global::DeskBox.App.Current.ScreenHomeChanged -= OnExternalScreenHomeChanged;
+        _appActions.DisplayTopologyChanged -= OnExternalDisplayTopologyChanged;
+        _appActions.ScreenHomeChanged -= OnExternalScreenHomeChanged;
         _refreshDebounce?.Stop();
     }
 
@@ -504,7 +517,7 @@ public sealed partial class DisplaySettingsSection : UserControl
     private async void MoveAllWidgetsButton_Click(object sender, RoutedEventArgs e)
     {
         if (_selectedScreen is not { } screen ||
-            global::DeskBox.App.Current.WidgetManager is not { } manager)
+            !_widgetActions.IsHostAvailable)
         {
             return;
         }
@@ -538,7 +551,7 @@ public sealed partial class DisplaySettingsSection : UserControl
         try
         {
             (int moved, WidgetMoveAllUndoToken token) =
-                await manager.MoveAllWidgetSurfacesToDisplayAsync(screen.StableId);
+                await _widgetActions.MoveAllWidgetSurfacesToDisplayAsync(screen.StableId);
             _lastMoveAllToken = token;
             ShowMoveAllDone(moved, screen.Number, token);
         }
@@ -560,17 +573,17 @@ public sealed partial class DisplaySettingsSection : UserControl
     private void ShowMoveAllDone(int moved, int displayNumber, WidgetMoveAllUndoToken token)
     {
         var undoButton = new Button { Content = T("Settings.Displays.MoveAll.Undo") };
-        undoButton.Click += async (_, _) =>
-        {
-            undoButton.IsEnabled = false;
-            try
+            undoButton.Click += async (_, _) =>
             {
-                if (global::DeskBox.App.Current.WidgetManager is { } manager)
+                undoButton.IsEnabled = false;
+                try
                 {
-                    // New signature: false means the snapshot went stale
-                    // (widgets moved again after the move-all) and nothing
-                    // was restored.
-                    bool undone = await manager.UndoMoveAllWidgetSurfacesAsync(token);
+                    if (_widgetActions.IsHostAvailable)
+                    {
+                        // New signature: false means the snapshot went stale
+                        // (widgets moved again after the move-all) and nothing
+                        // was restored.
+                        bool undone = await _widgetActions.UndoMoveAllWidgetSurfacesAsync(token);
                     _lastMoveAllToken = null;
                     ShowStatus(
                         undone ? InfoBarSeverity.Informational : InfoBarSeverity.Warning,
@@ -842,7 +855,7 @@ public sealed partial class DisplaySettingsSection : UserControl
     {
         if (_isRefreshing ||
             sender is not ComboBox { SelectedItem: ComboBoxItem { Tag: string tag } } combo ||
-            global::DeskBox.App.Current.WidgetManager is not { } manager)
+            !_widgetActions.IsHostAvailable)
         {
             return;
         }
@@ -852,18 +865,17 @@ public sealed partial class DisplaySettingsSection : UserControl
             ? (WidgetScreenBindingMode.FollowPrimary, null)
             : (WidgetScreenBindingMode.Pinned, tag);
 
-        _ = ApplyBindingAndRefreshAsync(manager, widgetId, mode, boundId);
+        _ = ApplyBindingAndRefreshAsync(widgetId, mode, boundId);
     }
 
     private async Task ApplyBindingAndRefreshAsync(
-        WidgetManager manager,
         string widgetId,
         WidgetScreenBindingMode mode,
         string? boundId)
     {
         try
         {
-            await manager.ApplyScreenBindingAsync(widgetId, mode, boundId);
+            await _widgetActions.ApplyScreenBindingAsync(widgetId, mode, boundId);
         }
         catch (Exception ex)
         {

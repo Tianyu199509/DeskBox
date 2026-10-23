@@ -94,7 +94,13 @@ public sealed partial class SettingsWindow
                 capsuleSettings.ViewModel = ViewModel;
                 break;
             case GlanceWidgetSettingsSection glanceSettings:
-                glanceSettings.SetOwnerWindow(_hWnd);
+                glanceSettings.Configure(_widgetActions, _hWnd);
+                break;
+            case DisplaySettingsSection displaySettings:
+                displaySettings.Configure(_widgetActions, _appActions);
+                break;
+            case DesktopOrganizationSettingsSection organizationSettings:
+                organizationSettings.Configure(_widgetActions, _appActions, _hWnd);
                 break;
         }
 

@@ -5,6 +5,25 @@ using DeskBox.Models;
 using DeskBox.Services;
 
 /// <summary>
+/// Outcome of a desktop-organization undo (or undo-abandon) run, shaped as a
+/// record so a remote settings host can carry it across the process
+/// boundary — the exception types the in-process coordinator throws do not
+/// survive serialization.
+/// </summary>
+public enum DesktopOrganizationUndoOutcome
+{
+    Completed,
+    Incomplete,
+    Failed,
+}
+
+public sealed record DesktopOrganizationUndoResult(
+    DesktopOrganizationUndoOutcome Outcome,
+    int RestoredCount = 0,
+    int RemainingCount = 0,
+    string? Error = null);
+
+/// <summary>
 /// Settings-side surface for widget-host operations, which live in the main
 /// process once the settings UI runs in its own process: feature-widget
 /// enable state, widget group editing, orphan managed-folder cleanup,
@@ -78,6 +97,9 @@ public interface ISettingsWidgetActions
 
     IReadOnlyList<GlanceWidgetInstanceInfo> GetGlanceWidgetInstances();
 
+    /// <summary>Whether the glance feature itself is enabled host-side.</summary>
+    bool IsGlanceFeatureEnabled { get; }
+
     Task<GlanceWidgetInstanceInfo> CreateGlanceWidgetAsync(string? sourceWidgetId);
 
     Task SetGlanceWidgetInstanceEnabledAsync(string widgetId, bool enabled);
@@ -105,4 +127,18 @@ public interface ISettingsWidgetActions
 
     /// <summary>Watcher health snapshots, or null when no manager exists.</summary>
     IReadOnlyList<FolderWatcherHealthSnapshot>? GetFolderWatcherHealthSnapshots();
+
+    // ── Desktop organization undo ───────────────────────────────────
+
+    /// <summary>Latest undoable organization history entry, or null.</summary>
+    OrganizationHistoryEntry? GetLatestUndoableDesktopOrganizationEntry();
+
+    /// <summary>One organization history entry by id, or null.</summary>
+    OrganizationHistoryEntry? GetDesktopOrganizationHistoryEntry(string historyId);
+
+    Task<DesktopOrganizationUndoResult> UndoDesktopOrganizationAsync(
+        string historyId,
+        nint ownerWindowHandle);
+
+    Task<DesktopOrganizationUndoResult> AbandonDesktopOrganizationUndoAsync(string historyId);
 }

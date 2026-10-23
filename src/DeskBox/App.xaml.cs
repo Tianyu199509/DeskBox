@@ -4438,7 +4438,12 @@ public partial class App : Application
                 LocalizationService.T,
                 () => LocalizationService.IsChinese),
             CreateSettingsHotkeyActions(),
-            new InProcessSettingsWidgetActions(WidgetManager, SettingsService),
+            new InProcessSettingsWidgetActions(
+                WidgetManager,
+                SettingsService,
+                FileService,
+                OrganizerService,
+                LocalizationService),
             new InProcessSettingsRestoreActions(
                 DataBackupService ?? throw new InvalidOperationException("Backup service is not initialized."),
                 AttachmentHealthService ?? throw new InvalidOperationException("Attachment health service is not initialized.")),

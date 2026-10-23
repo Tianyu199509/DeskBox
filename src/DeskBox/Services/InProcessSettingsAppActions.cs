@@ -23,7 +23,20 @@ public sealed class InProcessSettingsAppActions : ISettingsAppActions
     {
         _app = app;
         _localizationService = localizationService;
+        // Forwarded eagerly for the facade's lifetime: the settings window is
+        // the only consumer and re-subscribes per Loaded/Unloaded on the
+        // facade event, not the App event.
+        _app.DisplayTopologyChanged += OnDisplayTopologyChanged;
+        _app.ScreenHomeChanged += OnScreenHomeChanged;
     }
+
+    public event Action? DisplayTopologyChanged;
+
+    public event Action? ScreenHomeChanged;
+
+    private void OnDisplayTopologyChanged() => DisplayTopologyChanged?.Invoke();
+
+    private void OnScreenHomeChanged() => ScreenHomeChanged?.Invoke();
 
     public Task ShutdownForRestartAsync() => _app.ShutdownForRestartAsync();
 
