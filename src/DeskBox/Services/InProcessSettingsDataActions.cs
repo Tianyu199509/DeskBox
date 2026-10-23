@@ -42,6 +42,6 @@ public sealed class InProcessSettingsDataActions : ISettingsDataActions
     public Task<QuickCaptureImageCacheCleanupResult> ClearUnusedQuickCaptureImageCacheAsync() =>
         _quickCaptureService.CleanupUnusedImageCacheAsync();
 
-    public Task<QuickCaptureImageCacheInfo?> GetQuickCaptureImageCacheInfoAsync() =>
-        _quickCaptureService.GetImageCacheInfoAsync();
+    public async Task<QuickCaptureImageCacheInfo?> GetQuickCaptureImageCacheInfoAsync() =>
+        await _quickCaptureService.GetImageCacheInfoAsync();
 }
