@@ -49,6 +49,11 @@ public sealed class JsonSerializationBaselineContractTests : IDisposable
             // 2: the wipe-recovery offer marker (read deserialize, atomic save serialize).
             ["src/DeskBox/Services/RecoveryOfferStore.cs"] = 2,
             ["src/DeskBox/Services/SearchHistoryService.cs"] = 2,
+            // Settings-host IPC pipe (batch 3b): envelope encode/decode on the
+            // client and server plus the remote sink's snapshot serialize.
+            ["src/DeskBox/Services/RemoteSettingsPersistenceSink.cs"] = 1,
+            ["src/DeskBox/Services/SettingsIpcClient.cs"] = 2,
+            ["src/DeskBox/Services/SettingsIpcServer.cs"] = 2,
             ["src/DeskBox/Services/SettingsMigrationService.cs"] = 2,
             // 5: legacy 3 + the settings-host split's external-snapshot apply
             // and disk-reload deserializes (batch 3a).
@@ -86,8 +91,8 @@ public sealed class JsonSerializationBaselineContractTests : IDisposable
             Assert.Equal(expectedCount, actual[path]);
         }
 
-        Assert.Equal(41, actual.Count);
-        Assert.Equal(98, actual.Values.Sum());
+        Assert.Equal(44, actual.Count);
+        Assert.Equal(103, actual.Values.Sum());
 
         string[] expectedContextOwners =
         [
@@ -117,6 +122,7 @@ public sealed class JsonSerializationBaselineContractTests : IDisposable
             "src/DeskBox/Services/QuickCaptureStore.cs",
             "src/DeskBox/Services/RecoveryOfferStore.cs",
             "src/DeskBox/Services/SearchHistoryService.cs",
+            "src/DeskBox/Services/SettingsIpcProtocol.cs",
             "src/DeskBox/Services/SettingsService.cs",
             "src/DeskBox/Services/StartupSessionLedger.cs",
             "src/DeskBox/Services/SyncRevisionsStore.cs",
@@ -137,7 +143,7 @@ public sealed class JsonSerializationBaselineContractTests : IDisposable
             .Order()
             .ToArray();
 
-        Assert.Equal(37, actualContextOwners.Length);
+        Assert.Equal(38, actualContextOwners.Length);
         Assert.Equal(expectedContextOwners, actualContextOwners);
     }
 

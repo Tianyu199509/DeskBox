@@ -33,6 +33,9 @@ public sealed class DeskBoxDataPathService
     public string InstanceScope { get; }
     public string ActivationEventName => $"DeskBox_Activate_Event_{InstanceScope}";
     public string SingleInstanceMutexName => $"DeskBox_SingleInstance_Mutex_{InstanceScope}";
+    /// <summary>Duplex pipe carrying settings-host IPC (batch 3b of the
+    /// settings-process split); same user only, per instance scope.</summary>
+    public string SettingsIpcPipeName => $"DeskBox_Settings_Ipc_{InstanceScope}";
     public string DataDirectory => Path.Combine(RootPath, "data");
     public string UpdatesDirectory => Path.Combine(RootPath, "updates");
     // Recovery snapshots intentionally live beside, rather than inside, the
