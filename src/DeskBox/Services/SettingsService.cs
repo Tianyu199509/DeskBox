@@ -470,6 +470,20 @@ public const int DefaultSearchMaxResults = 100;
     public event Action<SettingsPersistenceFailure>? PersistenceFailed;
 
     /// <summary>
+    /// Raised after a locally-committed save (batch 3a): carries the commit
+    /// id so the settings-host bridge can push a reload notice that the
+    /// receiving side can match against its own outbound commits.
+    /// </summary>
+    public event Action<long>? LocalPersistCompleted;
+
+    /// <summary>
+    /// Raised after an external snapshot was applied and broadcast (before =
+    /// the pre-apply in-memory state, after = the applied state), so the
+    /// host can run diff-driven appliers for fields without subscribers.
+    /// </summary>
+    public event Action<AppSettings, AppSettings>? ExternalSnapshotApplied;
+
+    /// <summary>
     /// Dimension of the most recent SettingsChanged notification. Subscribers
     /// whose work is fully covered by the appearance preview channel can skip
     /// the redundant re-apply when this is <see cref="SettingsChangeKind.Appearance"/>.
@@ -718,23 +732,33 @@ settings.CustomAccentColor = "#0078D4";
 settings.FocusClickedWidgetOnRaise = false;
     }
 
-    public SettingsService()
+    public SettingsService(ISettingsPersistenceSink? persistenceSink = null)
     {
         _settingsPath = InitializeSettingsPath(DeskBoxDataPathService.Current.DataDirectory);
         OrganizationHistory = new DesktopOrganizationHistoryStore(
             Path.Combine(Path.GetDirectoryName(_settingsPath)!, "desktop-organization-history.json"));
         Layout = new WidgetLayoutStore(
             Path.Combine(Path.GetDirectoryName(_settingsPath)!, "widget-layout.json"));
+        _persistenceSink = persistenceSink ?? new LocalPersistenceSink();
     }
 
-    internal SettingsService(string dataDir)
+    internal SettingsService(string dataDir, ISettingsPersistenceSink? persistenceSink = null)
     {
         _settingsPath = InitializeSettingsPath(dataDir);
         OrganizationHistory = new DesktopOrganizationHistoryStore(
             Path.Combine(dataDir, "desktop-organization-history.json"));
         Layout = new WidgetLayoutStore(
             Path.Combine(dataDir, "widget-layout.json"));
+        _persistenceSink = persistenceSink ?? new LocalPersistenceSink();
     }
+
+    private readonly ISettingsPersistenceSink _persistenceSink;
+
+    // Process-local commit sequence handed to the persistence sink; the
+    // latest outbound id doubles as the echo-suppression token for reload
+    // pushes coming back from the process that applied our snapshot.
+    private long _commitSequence;
+    private long _lastOutboundCommitId;
 
     /// <summary>
     /// FileSafety-domain store owning the desktop-organization undo receipts.
@@ -1082,100 +1106,33 @@ settings.FocusClickedWidgetOnRaise = false;
         await FileWriteLock.WaitAsync();
         try
         {
-            // Layout first when the device store is authoritative: it owns the
-            // durable layout state, and a crash between the two commits still
-            // leaves a consistent pair (newer layout file plus an older
-            // settings file that no longer carries those keys anyway). A file
-            // stamped by a NEWER schema than this build understands is never
-            // overwritten — the typed slice cannot represent its unknown
-            // fields. That read-only stance must be honest: layout mutations
-            // made this session cannot persist anywhere, so the save reports
-            // failure (and keeps the settings keys) instead of a false
-            // success that silently discards the changes.
-            bool layoutSaved = true;
-            bool layoutCommitted = false;
-            string layoutFailureReason = "widget-layout.json commit failed";
-            if (Layout.IsAuthoritative && _widgetLayoutMerged)
+            long commitId = Interlocked.Increment(ref _commitSequence);
+            Volatile.Write(ref _lastOutboundCommitId, commitId);
+            SettingsPersistenceCommit commit;
+            lock (_lock)
             {
-                // _widgetLayoutMerged, not just IsAuthoritative: the store
-                // flips IsAuthoritative inside its own load, before the
-                // merge lock copies the file data into _settings. A save in
-                // that sub-window would otherwise commit the pre-merge
-                // slice — in the steady state an EMPTY layout — over the
-                // durable widget-layout.json. No writer can reach this
-                // window today (settings-load precedes every saver); the
-                // flag makes that structural instead of incidental.
-                if (Layout.CanWrite)
-                {
-                    layoutSaved = await Layout.SaveCheckedAsync(WriteLayoutTempFileAsync);
-                    layoutCommitted = layoutSaved;
-                }
-                else
-                {
-                    layoutSaved = false;
-                    layoutFailureReason =
-                        $"widget-layout.json schema {Layout.LoadedSchemaVersion} is newer " +
-                        "than this build understands; layout changes cannot persist";
-                    App.Log($"[SettingsService] Save refused: {layoutFailureReason}");
-                }
+                commit = new SettingsPersistenceCommit(
+                    commitId,
+                    _settings,
+                    _widgetLayoutMerged);
             }
 
-            // Fail-closed: when the layout commit failed, the layout slice
-            // exists only in memory — the settings file must keep carrying
-            // the keys so the data survives to the next successful save.
-            bool stripLayoutKeys = Layout.IsAuthoritative && _widgetLayoutMerged && layoutSaved;
-            try
+            bool saved = await _persistenceSink.SaveAsync(this, commit);
+            if (saved)
             {
-                await ResilientJsonStore.SaveAsync(
-                    _settingsPath,
-                    tempPath => WriteSettingsTempFileAsync(tempPath, stripLayoutKeys));
-            }
-            catch
-            {
-                // The two stores cannot commit atomically, so callers treat
-                // a false result as "nothing persisted". That contract is
-                // only honest if the layout commit is undone too — restore
-                // the layout primary to its pre-commit bytes (held in .bak
-                // by the commit that just ran) so the durable pair stays
-                // consistent instead of pointing half at the new state.
-                if (layoutCommitted)
-                {
-                    try
-                    {
-                        Layout.RevertLastCommit();
-                    }
-                    catch (Exception revertException)
-                    {
-                        App.Log(
-                            $"[SettingsService] Settings commit failed and the " +
-                            $"layout rollback failed too: {revertException}");
-                    }
-                }
-
-                throw;
-            }
-            if (!layoutSaved)
-            {
-                var failure = new SettingsPersistenceFailure(
-                    "save",
-                    layoutFailureReason,
-                    DateTimeOffset.UtcNow);
-                LastPersistenceFailure = failure;
                 try
                 {
-                    PersistenceFailed?.Invoke(failure);
+                    LocalPersistCompleted?.Invoke(commitId);
                 }
-                catch (Exception notificationException)
+                catch (Exception observerException)
                 {
                     App.Log(
-                        $"[SettingsService] Persistence failure observer threw: " +
-                        notificationException);
+                        $"[SettingsService] Local persist observer threw: " +
+                        observerException);
                 }
-                return false;
             }
 
-            LastPersistenceFailure = null;
-            return true;
+            return saved;
         }
         catch (Exception ex)
         {
@@ -1200,6 +1157,279 @@ settings.FocusClickedWidgetOnRaise = false;
         finally
         {
             FileWriteLock.Release();
+        }
+    }
+
+    /// <summary>
+    /// Echo-suppression token (batch 3a): a reload push carrying this commit
+    /// id is the round-trip of the latest write this process initiated and
+    /// must not be reloaded.
+    /// </summary>
+    internal bool IsLatestOutboundCommit(long commitId) =>
+        commitId != 0 && Volatile.Read(ref _lastOutboundCommitId) == commitId;
+
+    internal long LatestOutboundCommitId => Volatile.Read(ref _lastOutboundCommitId);
+
+    /// <summary>
+    /// Applies a settings snapshot serialized by another process (the
+    /// settings host's commit, batch 3a): parse, schema gate, preserve the
+    /// main-owned runtime markers, swap the in-memory state, persist through
+    /// the normal path, then broadcast SettingsChanged and raise
+    /// <see cref="ExternalSnapshotApplied"/> for diff-driven appliers.
+    /// </summary>
+    public async Task<bool> ApplyExternalSnapshotAsync(string settingsJson)
+    {
+        if (string.IsNullOrWhiteSpace(settingsJson))
+        {
+            return false;
+        }
+
+        AppSettings? parsed;
+        try
+        {
+            parsed = System.Text.Json.JsonSerializer.Deserialize<AppSettings>(
+                settingsJson,
+                SettingsJsonContext.Default.AppSettings);
+        }
+        catch (System.Text.Json.JsonException ex)
+        {
+            App.Log($"[SettingsService] External snapshot parse failed: {ex}");
+            return false;
+        }
+
+        if (parsed is null)
+        {
+            return false;
+        }
+
+        if (parsed.SchemaVersion > SettingsMigrationPipeline.CurrentSchemaVersion)
+        {
+            App.Log(
+                "[SettingsService] External snapshot schema " +
+                $"{parsed.SchemaVersion} is newer than this build; refused");
+            return false;
+        }
+
+        AppSettings before;
+        lock (_lock)
+        {
+            before = _settings;
+            // Runtime markers only this process authors would otherwise be
+            // rolled back by every settings-host commit that was loaded
+            // before the marker flip.
+            parsed.LastUpdateCheckAt = before.LastUpdateCheckAt;
+            parsed.LastRunVersion = before.LastRunVersion;
+            parsed.HasResolvedInitialFileWidgetSetup = before.HasResolvedInitialFileWidgetSetup;
+            parsed.AutoStartDefaultApplied = before.AutoStartDefaultApplied;
+            parsed.FullyElevatedNoticeAcknowledgedUtcTicks =
+                before.FullyElevatedNoticeAcknowledgedUtcTicks;
+            _settings = parsed;
+            _settingsSchemaNewerThanBuild = false;
+        }
+
+        if (!await SaveCheckedAsync(notifySubscribers: false))
+        {
+            return false;
+        }
+
+        NotifySettingsChangedSafely(SettingsChangeKind.General);
+        try
+        {
+            ExternalSnapshotApplied?.Invoke(before, parsed);
+        }
+        catch (Exception observerException)
+        {
+            App.Log(
+                $"[SettingsService] External snapshot observer threw: " +
+                observerException);
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Re-reads settings.json from disk into memory (the settings-host side
+    /// of the reload push, batch 3a). Fails closed — corrupt, missing, or
+    /// newer-schema files leave the current state untouched. Corrupt-file
+    /// quarantine stays the startup load's responsibility.
+    /// </summary>
+    public async Task<bool> TryReloadFromDiskAsync(bool notifySubscribers = true)
+    {
+        string json;
+        try
+        {
+            if (!File.Exists(_settingsPath))
+            {
+                return false;
+            }
+
+            json = await File.ReadAllTextAsync(_settingsPath);
+        }
+        catch (Exception ex)
+        {
+            App.Log($"[SettingsService] Reload read failed: {ex}");
+            return false;
+        }
+
+        AppSettings? parsed;
+        try
+        {
+            parsed = System.Text.Json.JsonSerializer.Deserialize<AppSettings>(
+                json,
+                SettingsJsonContext.Default.AppSettings);
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return false;
+        }
+
+        if (parsed is null ||
+            parsed.SchemaVersion > SettingsMigrationPipeline.CurrentSchemaVersion)
+        {
+            return false;
+        }
+
+        lock (_lock)
+        {
+            _settings = parsed;
+            _settingsSchemaNewerThanBuild = false;
+        }
+
+        if (notifySubscribers)
+        {
+            NotifySettingsChangedSafely(SettingsChangeKind.General);
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Default sink: the pre-split composite commit moved verbatim — the
+    /// layout/settings durable pair with fail-closed rollback, running under
+    /// the caller's FileWriteLock exactly as before.
+    /// </summary>
+    private sealed class LocalPersistenceSink : ISettingsPersistenceSink
+    {
+        public async Task<bool> SaveAsync(SettingsService owner, SettingsPersistenceCommit commit)
+        {
+            try
+            {
+                // Layout first when the device store is authoritative: it owns the
+                // durable layout state, and a crash between the two commits still
+                // leaves a consistent pair (newer layout file plus an older
+                // settings file that no longer carries those keys anyway). A file
+                // stamped by a NEWER schema than this build understands is never
+                // overwritten — the typed slice cannot represent its unknown
+                // fields. That read-only stance must be honest: layout mutations
+                // made this session cannot persist anywhere, so the save reports
+                // failure (and keeps the settings keys) instead of a false
+                // success that silently discards the changes.
+                bool layoutSaved = true;
+                bool layoutCommitted = false;
+                string layoutFailureReason = "widget-layout.json commit failed";
+                if (owner.Layout.IsAuthoritative && owner._widgetLayoutMerged)
+                {
+                    // _widgetLayoutMerged, not just IsAuthoritative: the store
+                    // flips IsAuthoritative inside its own load, before the
+                    // merge lock copies the file data into _settings. A save in
+                    // that sub-window would otherwise commit the pre-merge
+                    // slice — in the steady state an EMPTY layout — over the
+                    // durable widget-layout.json. No writer can reach this
+                    // window today (settings-load precedes every saver); the
+                    // flag makes that structural instead of incidental.
+                    if (owner.Layout.CanWrite)
+                    {
+                        layoutSaved = await owner.Layout.SaveCheckedAsync(
+                            owner.WriteLayoutTempFileAsync);
+                        layoutCommitted = layoutSaved;
+                    }
+                    else
+                    {
+                        layoutSaved = false;
+                        layoutFailureReason =
+                            $"widget-layout.json schema {owner.Layout.LoadedSchemaVersion} is newer " +
+                            "than this build understands; layout changes cannot persist";
+                        App.Log($"[SettingsService] Save refused: {layoutFailureReason}");
+                    }
+                }
+
+                // Fail-closed: when the layout commit failed, the layout slice
+                // exists only in memory — the settings file must keep carrying
+                // the keys so the data survives to the next successful save.
+                bool stripLayoutKeys = owner.Layout.IsAuthoritative && owner._widgetLayoutMerged && layoutSaved;
+                try
+                {
+                    await ResilientJsonStore.SaveAsync(
+                        owner._settingsPath,
+                        tempPath => owner.WriteSettingsTempFileAsync(tempPath, stripLayoutKeys));
+                }
+                catch
+                {
+                    // The two stores cannot commit atomically, so callers treat
+                    // a false result as "nothing persisted". That contract is
+                    // only honest if the layout commit is undone too — restore
+                    // the layout primary to its pre-commit bytes (held in .bak
+                    // by the commit that just ran) so the durable pair stays
+                    // consistent instead of pointing half at the new state.
+                    if (layoutCommitted)
+                    {
+                        try
+                        {
+                            owner.Layout.RevertLastCommit();
+                        }
+                        catch (Exception revertException)
+                        {
+                            App.Log(
+                                "[SettingsService] Settings commit failed and the " +
+                                $"layout rollback failed too: {revertException}");
+                        }
+                    }
+
+                    throw;
+                }
+                if (!layoutSaved)
+                {
+                    var failure = new SettingsPersistenceFailure(
+                        "save",
+                        layoutFailureReason,
+                        DateTimeOffset.UtcNow);
+                    owner.LastPersistenceFailure = failure;
+                    try
+                    {
+                        owner.PersistenceFailed?.Invoke(failure);
+                    }
+                    catch (Exception notificationException)
+                    {
+                        App.Log(
+                            $"[SettingsService] Persistence failure observer threw: " +
+                            notificationException);
+                    }
+                    return false;
+                }
+
+                owner.LastPersistenceFailure = null;
+                return true;
+            }
+            catch (Exception ex)
+            {
+                var failure = new SettingsPersistenceFailure(
+                    "save",
+                    ex.Message,
+                    DateTimeOffset.UtcNow);
+                owner.LastPersistenceFailure = failure;
+                App.Log($"[SettingsService] Failed to save settings: {ex}");
+                try
+                {
+                    owner.PersistenceFailed?.Invoke(failure);
+                }
+                catch (Exception notificationException)
+                {
+                    App.Log(
+                        $"[SettingsService] Persistence failure observer threw: " +
+                        notificationException);
+                }
+                return false;
+            }
         }
     }
 

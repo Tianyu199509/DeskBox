@@ -50,7 +50,9 @@ public sealed class JsonSerializationBaselineContractTests : IDisposable
             ["src/DeskBox/Services/RecoveryOfferStore.cs"] = 2,
             ["src/DeskBox/Services/SearchHistoryService.cs"] = 2,
             ["src/DeskBox/Services/SettingsMigrationService.cs"] = 2,
-            ["src/DeskBox/Services/SettingsService.cs"] = 3,
+            // 5: legacy 3 + the settings-host split's external-snapshot apply
+            // and disk-reload deserializes (batch 3a).
+            ["src/DeskBox/Services/SettingsService.cs"] = 5,
             // Startup session ledger: read-previous + write-current breadcrumb.
             ["src/DeskBox/Services/StartupSessionLedger.cs"] = 2,
             // Crash event report serialization for the support package.
@@ -85,7 +87,7 @@ public sealed class JsonSerializationBaselineContractTests : IDisposable
         }
 
         Assert.Equal(41, actual.Count);
-        Assert.Equal(96, actual.Values.Sum());
+        Assert.Equal(98, actual.Values.Sum());
 
         string[] expectedContextOwners =
         [
@@ -237,7 +239,9 @@ public sealed class JsonSerializationBaselineContractTests : IDisposable
 
         var expectedTypeInfoReferences = new Dictionary<string, int>(StringComparer.Ordinal)
         {
-            ["SettingsJsonContext.Default.AppSettings"] = 3,
+            // 5: legacy 3 + the settings-host split's external-snapshot apply
+            // and disk-reload deserializes (batch 3a).
+            ["SettingsJsonContext.Default.AppSettings"] = 5,
             ["QuickCaptureJsonContext.Default.StoreData"] = 2,
             ["TodoJsonContext.Default.StoreData"] = 3,
             ["GlancePreferencesJsonContext.Default.Preferences"] = 7,
@@ -255,7 +259,7 @@ public sealed class JsonSerializationBaselineContractTests : IDisposable
                     Regex.Escape(reference) + @"\b").Count);
         }
 
-        Assert.Equal(24, expectedTypeInfoReferences.Values.Sum());
+        Assert.Equal(26, expectedTypeInfoReferences.Values.Sum());
         Assert.DoesNotContain("JsonSerializerOptions", allPhaseTwoSources, StringComparison.Ordinal);
         Assert.DoesNotContain(
             "new JsonStringEnumConverter()",

@@ -500,6 +500,7 @@ public partial class App : Application
 
         SettingsService = Services.GetRequiredService<SettingsService>();
         SettingsService.PersistenceFailed += OnSettingsPersistenceFailed;
+        SettingsService.ExternalSnapshotApplied += OnExternalSettingsSnapshotApplied;
         DataBackupService = Services.GetRequiredService<DeskBoxDataBackupService>();
         DataBackupService.AutomaticSnapshotFallbackDetected += OnAutomaticBackupFallbackDetected;
         // While a wipe-recovery decision is pending, scheduled automatic
@@ -4008,9 +4009,32 @@ public partial class App : Application
         }
     }
 
-    private void OnSettingsPersistenceFailed(SettingsPersistenceFailure failure)
+    /// <summary>
+    /// Batch 3a of the settings-process split: an external snapshot (the
+    /// settings host's commit) was applied, so the value-shaped fields that
+    /// have no coordinator subscription on the main side get their diff
+    /// appliers run against the live services.
+    /// </summary>
+    private void OnExternalSettingsSnapshotApplied(
+        DeskBox.Models.AppSettings before,
+        DeskBox.Models.AppSettings after)
     {
-        Log(
+        ExternalSettingsAppliers.ApplyValueAppliers(
+            before,
+            after,
+            new ExternalSettingsAppliers.Delegates(
+                () => GlobalHotkeyService?.RefreshRegistration(),
+                () => DesktopDoubleClickActivationService?.RefreshRegistration(),
+                (snapEnabled, snapSpacingDips) =>
+                {
+                    ResizeGuideOverlay.IsSnapEnabled = snapEnabled;
+                    ResizeGuideOverlay.SnapSpacingDips = snapSpacingDips;
+                },
+                UpdateTrayIcon));
+    }
+
+    private void OnSettingsPersistenceFailed(SettingsPersistenceFailure failure)
+    {        Log(
             $"[SettingsService] Persistence failure operation={failure.Operation} " +
             $"at={failure.OccurredAt:O} message={failure.Message}");
         if (UiDispatcherQueue is { HasThreadAccess: false } dispatcher)
