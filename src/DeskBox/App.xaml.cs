@@ -305,6 +305,17 @@ public partial class App : Application
         // for a secondary instance and forwarded into the old process.
         WaitForRelaunchParentExit(Environment.GetCommandLineArgs());
 
+        // Phase 0 PoC: a settings-process launch skips every primary-instance
+        // responsibility below (AUMID, activation event, single-instance
+        // mutex, watchdog, elevation gate, DI container) — see
+        // App.SettingsProcessPoC.cs; replaced by the real settings host in
+        // batch 3.
+        if (IsSettingsProcessLaunch(Environment.GetCommandLineArgs()))
+        {
+            InitializeSettingsProcess();
+            return;
+        }
+
         // Register AUMID early so the taskbar button and Jump List work
         // for both packaged (MSIX) and unpackaged (Direct) distributions.
         JumpListService.RegisterAppUserModelId();
@@ -1112,6 +1123,12 @@ public partial class App : Application
 
     protected override async void OnLaunched(LaunchActivatedEventArgs args)
     {
+        if (IsSettingsProcess)
+        {
+            ShowSettingsProcessPoCWindow();
+            return;
+        }
+
         if (_isLaunched)
         {
             Log("OnLaunched skipped: already launched");
