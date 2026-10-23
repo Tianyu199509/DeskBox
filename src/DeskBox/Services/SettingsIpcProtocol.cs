@@ -133,6 +133,46 @@ public static class SettingsIpcMethods
     public const string AppRepairDragDrop = "app.repair-drag-drop";
     public const string AppDisplayTopologyChanged = "app.display-topology-changed";
     public const string AppScreenHomeChanged = "app.screen-home-changed";
+
+    // ── Backup commands (IBackupCommands, batch 3c-3a) ─────────────
+    public const string BackupIsStopping = "backup.is-stopping";
+    public const string BackupCreateSnapshotNow = "backup.create-snapshot-now";
+    public const string BackupExport = "backup.export";
+    public const string BackupUploadNow = "backup.upload-now";
+
+    // ── Backup settings (IBackupSettings, batch 3c-3a) ─────────────
+    public const string BackupSettingsRead = "backupsettings.read";
+    public const string BackupSettingsUpdate = "backupsettings.update";
+    public const string BackupSettingsIsValidLocalDir = "backupsettings.is-valid-local-dir";
+    public const string BackupSettingsSave = "backupsettings.save";
+    public const string BackupSettingsHasCredential = "backupsettings.has-credential";
+    public const string BackupSettingsSaveCredential = "backupsettings.save-credential";
+    public const string BackupSettingsProbe = "backupsettings.probe";
+    public const string BackupSettingsList = "backupsettings.list";
+    public const string BackupUploadCompleted = "backup.upload-completed";
+
+    // ── Cloud restore actions (IBackupRestoreActions, batch 3c-3a) ─
+    public const string CloudStop = "cloud.stop";
+    public const string CloudIsCurrentEndpoint = "cloud.is-current-endpoint";
+    public const string CloudDeleteSnapshot = "cloud.delete-snapshot";
+    public const string CloudDownloadSnapshot = "cloud.download-snapshot";
+    public const string CloudPrepareScopedRestore = "cloud.prepare-scoped-restore";
+    public const string CloudCancelPendingRestore = "cloud.cancel-pending-restore";
+    public const string CloudSetReplaceMode = "cloud.set-replace-mode";
+    public const string CloudScheduleRelaunch = "cloud.schedule-relaunch";
+    public const string CloudShutdownForRestart = "cloud.shutdown-for-restart";
+    public const string CloudDeleteTemporaryDownload = "cloud.delete-temporary-download";
+
+    // ── Update service (IAppUpdateService, batch 3c-3a) ────────────
+    public const string UpdateState = "update.state";
+    public const string UpdateCheck = "update.check";
+    public const string UpdateDownload = "update.download";
+    public const string UpdateClearInstaller = "update.clear-installer";
+    public const string UpdatePruneStale = "update.prune-stale";
+    public const string UpdateStartInstaller = "update.start-installer";
+    public const string UpdateCheckCompleted = "update.check-completed";
+    public const string UpdateDownloadProgress = "update.download-progress";
+    public const string UpdateDownloadCompleted = "update.download-completed";
 }
 
 /// <summary>
@@ -202,6 +242,26 @@ public sealed record SettingsIpcReleaseNotes(
     bool AllowLazyFetch,
     long OwnerHwnd);
 
+public sealed record SettingsIpcEndpointName(BackupEndpoint Endpoint, string Name, string? Directory = null);
+
+public sealed record SettingsIpcScopedRestore(string ArchivePath, int Scope);
+
+public sealed record SettingsIpcCredential(BackupEndpoint Endpoint, string? Secret, string? SecretOverride);
+
+public sealed record SettingsIpcLocalDirCheck(bool Valid, string? RejectionReasonKey);
+
+public sealed record SettingsIpcUpdateState(
+    string? CheckResultJson,
+    long LastCheckTicks,
+    string ManifestUrl,
+    int DeliveryKind,
+    string? LastDownloadedInstallerPath,
+    bool DownloadInProgress);
+
+public sealed record SettingsIpcUpdateCheck(string? CurrentVersion);
+
+public sealed record SettingsIpcStartInstaller(string InstallerPath, bool Silent, string? AppCultureName);
+
 /// <summary>Payload encode/decode helpers over the source-generated context.</summary>
 public static class SettingsIpcPayload
 {
@@ -267,4 +327,22 @@ public static class SettingsIpcPayload
 [JsonSerializable(typeof(AppUpdateManifest))]
 [JsonSerializable(typeof(DragDropPermissionDiagnostic))]
 [JsonSerializable(typeof(DragDropPermissionRepairResult))]
+[JsonSerializable(typeof(BackupEndpoint))]
+[JsonSerializable(typeof(LocalBackupResult))]
+[JsonSerializable(typeof(CloudBackupRunResult))]
+[JsonSerializable(typeof(BackupSettingsSnapshot))]
+[JsonSerializable(typeof(BackupSettingsChange))]
+[JsonSerializable(typeof(List<BackupRemoteSnapshot>))]
+[JsonSerializable(typeof(BackupUploadNotification))]
+[JsonSerializable(typeof(SettingsIpcEndpointName))]
+[JsonSerializable(typeof(SettingsIpcScopedRestore))]
+[JsonSerializable(typeof(SettingsIpcCredential))]
+[JsonSerializable(typeof(SettingsIpcLocalDirCheck))]
+[JsonSerializable(typeof(SettingsIpcUpdateState))]
+[JsonSerializable(typeof(SettingsIpcUpdateCheck))]
+[JsonSerializable(typeof(SettingsIpcStartInstaller))]
+[JsonSerializable(typeof(AppUpdateCheckResult))]
+[JsonSerializable(typeof(AppUpdateDownloadProgress))]
+[JsonSerializable(typeof(AppUpdateDownloadResult))]
+[JsonSerializable(typeof(AppUpdateInstallResult))]
 internal sealed partial class SettingsIpcJsonContext : JsonSerializerContext;

@@ -115,6 +115,10 @@ public sealed class SettingsIpcFacadeTests : IDisposable
         FakeRestoreActions Restore,
         FakeWidgetActions Widget,
         FakeAppActions AppActions,
+        FakeBackupCommands BackupCommands,
+        FakeBackupRestore BackupRestore,
+        FakeBackupSettings BackupSettings,
+        FakeUpdateService UpdateService,
         SettingsIpcClient Client);
 
     private static async Task<Loopback> StartLoopbackAsync(string pipeName, SettingsService settings)
@@ -124,6 +128,10 @@ public sealed class SettingsIpcFacadeTests : IDisposable
         var restore = new FakeRestoreActions();
         var widget = new FakeWidgetActions();
         var appActions = new FakeAppActions();
+        var backupCommands = new FakeBackupCommands();
+        var backupRestore = new FakeBackupRestore();
+        var backupSettings = new FakeBackupSettings();
+        var updateService = new FakeUpdateService();
         SettingsIpcServer? server = null;
         var router = new SettingsIpcMethodRouter(
             settings,
@@ -133,12 +141,18 @@ public sealed class SettingsIpcFacadeTests : IDisposable
             widget,
             appActions,
             pushEvent: (method, payload) =>
-                server?.SendEventAsync(method, payload) ?? Task.CompletedTask);
+                server?.SendEventAsync(method, payload) ?? Task.CompletedTask,
+            backupCommands: backupCommands,
+            backupRestore: backupRestore,
+            backupSettings: backupSettings,
+            appUpdate: updateService);
         server = SettingsIpcServer.Start(pipeName, router.DispatchAsync);
         var client = await SettingsIpcClient.ConnectAsync(pipeName, TimeSpan.FromMilliseconds(200), attempts: 25);
         (bool ok, string? payload, _) = await client.RequestAsync(SettingsIpcMethods.Ping);
         Assert.True(ok, "loopback ping failed: " + payload);
-        return new Loopback(server, hotkey, data, restore, widget, appActions, client);
+        return new Loopback(
+            server, hotkey, data, restore, widget, appActions,
+            backupCommands, backupRestore, backupSettings, updateService, client);
     }
 
     private static string PipeName() => "deskbox-tests-facade-ipc-" + Guid.NewGuid().ToString("N");
@@ -779,6 +793,331 @@ public sealed class SettingsIpcFacadeTests : IDisposable
 
             await loop.Server.SendEventAsync(SettingsIpcMethods.AppDisplayTopologyChanged, null);
             await topologyChanged.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        }
+        finally
+        {
+            await loop.Client.DisposeAsync();
+            await loop.Server.DisposeAsync();
+        }
+    }
+
+
+    private sealed class FakeBackupCommands : IBackupCommands
+    {
+        public bool Stopping;
+        public string? ExportDir;
+
+        public LocalBackupResult SnapshotResult = new(BackupOutcome.Succeeded);
+
+        public CloudBackupRunResult UploadResult = new(true, "remote.zip", 1);
+
+        public bool IsStopping => Stopping;
+
+        public Task<LocalBackupResult> CreateSnapshotNowAsync(CancellationToken cancellationToken = default) =>
+            Task.FromResult(SnapshotResult);
+
+        public Task<string> ExportAsync(string destinationDirectory, CancellationToken cancellationToken = default)
+        {
+            ExportDir = destinationDirectory;
+            return Task.FromResult("C:\\backup.zip");
+        }
+
+        public Task<CloudBackupRunResult> UploadNowAsync(CancellationToken cancellationToken = default) =>
+            Task.FromResult(UploadResult);
+    }
+
+    private sealed class FakeBackupRestore : IBackupRestoreActions
+    {
+        public bool Stopped;
+        public BackupEndpoint? EndpointArg;
+        public string? DeletedSnapshotName;
+        public (string Endpoint, string Name, string Directory)? DownloadTarget;
+        public (string Archive, CloudBackupDomain Scope)? ScopedRestore;
+        public bool Cancelled;
+        public bool? ReplaceMode;
+        public string? DeletedTempDownload;
+
+        public Task StopAsync()
+        {
+            Stopped = true;
+            return Task.CompletedTask;
+        }
+
+        public bool IsCurrentEndpoint(BackupEndpoint endpoint)
+        {
+            EndpointArg = endpoint;
+            return true;
+        }
+
+        public Task DeleteSnapshotAsync(BackupEndpoint endpoint, string name, CancellationToken cancellationToken = default)
+        {
+            DeletedSnapshotName = name;
+            return Task.CompletedTask;
+        }
+
+        public Task<string> DownloadSnapshotAsync(BackupEndpoint endpoint, string name, string directory, CancellationToken cancellationToken = default)
+        {
+            DownloadTarget = (endpoint.Provider, name, directory);
+            return Task.FromResult("C:\\dl\\snap.zip");
+        }
+
+        public Task<DeskBoxRestorePreparation> PrepareScopedRestoreAsync(string archivePath, CloudBackupDomain scope, CancellationToken cancellationToken = default)
+        {
+            ScopedRestore = (archivePath, scope);
+            return Task.FromResult(new DeskBoxRestorePreparation(
+                DateTimeOffset.UtcNow, "1.6.0", 1, 10, 15, true));
+        }
+
+        public Task CancelPendingRestoreAsync(CancellationToken cancellationToken = default)
+        {
+            Cancelled = true;
+            return Task.CompletedTask;
+        }
+
+        public Task<bool> SetPendingRestoreItemReplaceModeAsync(bool replace, CancellationToken cancellationToken = default)
+        {
+            ReplaceMode = replace;
+            return Task.FromResult(true);
+        }
+
+        public AppRelaunchScheduleResult ScheduleRelaunch() => new(true, null);
+
+        public Task ShutdownForRestartAsync() => Task.CompletedTask;
+
+        public void DeleteTemporaryDownload(string? directory) => DeletedTempDownload = directory;
+    }
+
+    private sealed class FakeBackupSettings : IBackupSettings
+    {
+        public BackupSettingsSnapshot Snapshot = new(
+            true, 30, 3, "C:\\backups", "C:\\backups", "C:\\backups", false,
+            "webdav", "https://cloud", "/deskbox", "user",
+            true, false, true, 60, 5, 100, 0, 0,
+            new BackupEndpoint("webdav", "https://cloud", "/deskbox", "user"),
+            true);
+        public BackupSettingsChange? LastChange;
+        public string? LastValidDir;
+        public BackupEndpoint? CredentialEndpoint;
+        public BackupEndpoint? ProbedEndpoint;
+        public BackupEndpoint? ListedEndpoint;
+
+        public event Action<BackupUploadNotification>? UploadCompleted;
+
+        public BackupSettingsSnapshot Read() => Snapshot;
+
+        public void Update(BackupSettingsChange change) => LastChange = change;
+
+        public bool IsValidLocalDirectory(string path, out string? rejectionReasonKey)
+        {
+            LastValidDir = path;
+            rejectionReasonKey = path == "C:\\bad" ? "Settings.Backup.DirectoryInvalid" : null;
+            return path != "C:\\bad";
+        }
+
+        public Task SaveAsync() => Task.CompletedTask;
+
+        public Task<bool> HasCredentialAsync(BackupEndpoint endpoint, CancellationToken cancellationToken)
+        {
+            CredentialEndpoint = endpoint;
+            return Task.FromResult(true);
+        }
+
+        public Task SaveCredentialAsync(BackupEndpoint endpoint, string secret, CancellationToken cancellationToken)
+        {
+            CredentialEndpoint = endpoint;
+            return Task.CompletedTask;
+        }
+
+        public Task ProbeAsync(BackupEndpoint endpoint, string? secretOverride, CancellationToken cancellationToken)
+        {
+            ProbedEndpoint = endpoint;
+            return Task.CompletedTask;
+        }
+
+        public Task<IReadOnlyList<BackupRemoteSnapshot>> ListAsync(BackupEndpoint endpoint, CancellationToken cancellationToken)
+        {
+            ListedEndpoint = endpoint;
+            return Task.FromResult<IReadOnlyList<BackupRemoteSnapshot>>(
+            [
+                new("snap-1.zip", 2048, DateTimeOffset.UtcNow),
+            ]);
+        }
+    }
+
+    private sealed class FakeUpdateService : IAppUpdateService
+    {
+        public AppUpdateCheckResult CheckResult = new(
+            DeskBox.Models.AppUpdateCheckStatus.UpdateAvailable,
+            "1.5.9",
+            new DeskBox.Models.AppUpdateManifest());
+        public string? CheckVersionArg;
+        public DeskBox.Models.AppUpdateManifest? DownloadManifestArg;
+        public string? InstallerPathArg;
+        public string InstallerUrlResult = "https://update/next";
+
+        public event Action<DeskBox.Models.AppUpdateCheckResult>? CheckCompleted;
+
+        public event Action<DeskBox.Models.AppUpdateDownloadProgress>? DownloadProgressChanged;
+
+        public event Action<DeskBox.Models.AppUpdateDownloadResult>? DownloadCompleted;
+
+        public AppUpdateCheckResult? LastCheckResult => CheckResult;
+
+        public DateTime? LastCheckTimeUtc => new(2026, 10, 23, 12, 0, 0, DateTimeKind.Utc);
+
+        public string ManifestUrl => InstallerUrlResult;
+
+        public AppUpdateDeliveryKind DeliveryKind => AppUpdateDeliveryKind.DirectInstaller;
+
+        public string? LastDownloadedInstallerPath => "C:\\downloads\\setup.exe";
+
+        public bool IsDownloadInProgress => false;
+
+        public Task<AppUpdateCheckResult> CheckForUpdatesAsync(CancellationToken cancellationToken = default) =>
+            Task.FromResult(CheckResult);
+
+        public Task<AppUpdateCheckResult> CheckForUpdatesAsync(string currentVersion, CancellationToken cancellationToken = default)
+        {
+            CheckVersionArg = currentVersion;
+            return Task.FromResult(CheckResult);
+        }
+
+        public Task<DeskBox.Models.AppUpdateDownloadResult> DownloadUpdateAsync(
+            DeskBox.Models.AppUpdateManifest manifest,
+            IProgress<DeskBox.Models.AppUpdateDownloadProgress>? progress = null,
+            CancellationToken cancellationToken = default)
+        {
+            DownloadManifestArg = manifest;
+            return Task.FromResult(DeskBox.Models.AppUpdateDownloadResult.Completed("C:/downloads/setup.exe"));
+        }
+
+        public void ClearLastDownloadedInstaller()
+        {
+        }
+
+        public void PruneStaleInstallerDirectories()
+        {
+        }
+
+        public AppUpdateInstallResult StartInstallerHelper(string installerPath, bool silent = true, string? appCultureName = null)
+        {
+            InstallerPathArg = installerPath;
+            return AppUpdateInstallResult.Started();
+        }
+    }
+
+    [Fact]
+    public async Task BackupSurfaces_RoundTripCommandsSettingsAndCloudActions()
+    {
+        var settings = new SettingsService(_tempRoot);
+        var loop = await StartLoopbackAsync(PipeName(), settings);
+        try
+        {
+            var commands = new RemoteBackupCommands(loop.Client);
+            var backupSettings = new RemoteBackupSettings(loop.Client);
+            var cloud = new RemoteBackupRestoreActions(loop.Client);
+
+            // IBackupCommands
+            Assert.False(commands.IsStopping);
+            LocalBackupResult snapshot = await commands.CreateSnapshotNowAsync();
+            Assert.Equal(BackupOutcome.Succeeded, snapshot.Outcome);
+            Assert.Equal("C:\\backup.zip", await commands.ExportAsync("C:\\out"));
+            Assert.Equal("C:\\out", loop.BackupCommands.ExportDir);
+            CloudBackupRunResult upload = await commands.UploadNowAsync();
+            Assert.True(upload.Uploaded);
+
+            // IBackupSettings
+            BackupSettingsSnapshot read = backupSettings.Read();
+            Assert.True(read.LocalEnabled);
+            Assert.Equal("webdav", read.CloudProvider);
+            Assert.True(read.HasEndpoint);
+
+            backupSettings.Update(new BackupSettingsChange(LocalEnabled: false));
+            Assert.False(loop.BackupSettings.LastChange!.LocalEnabled);
+
+            Assert.True(backupSettings.IsValidLocalDirectory("C:\\good", out string? goodReason));
+            Assert.Null(goodReason);
+            Assert.False(backupSettings.IsValidLocalDirectory("C:\\bad", out string? badReason));
+            Assert.NotNull(badReason);
+            Assert.Equal("C:\\bad", loop.BackupSettings.LastValidDir);
+
+            var endpoint = new BackupEndpoint("webdav", "https://cloud", "/deskbox", "user");
+            Assert.True(await backupSettings.HasCredentialAsync(endpoint, CancellationToken.None));
+            await backupSettings.SaveCredentialAsync(endpoint, "secret", CancellationToken.None);
+            Assert.Equal(endpoint, loop.BackupSettings.CredentialEndpoint);
+            await backupSettings.ProbeAsync(endpoint, "override", CancellationToken.None);
+            Assert.Equal(endpoint, loop.BackupSettings.ProbedEndpoint);
+            IReadOnlyList<BackupRemoteSnapshot> snapshots = await backupSettings.ListAsync(endpoint, CancellationToken.None);
+            var remoteSnapshot = Assert.Single(snapshots);
+            Assert.Equal("snap-1.zip", remoteSnapshot.Name);
+
+            // IBackupRestoreActions
+            await cloud.StopAsync();
+            Assert.True(loop.BackupRestore.Stopped);
+            Assert.True(cloud.IsCurrentEndpoint(endpoint));
+            await cloud.DeleteSnapshotAsync(endpoint, "snap-1.zip");
+            Assert.Equal("snap-1.zip", loop.BackupRestore.DeletedSnapshotName);
+            Assert.Equal("C:\\dl\\snap.zip", await cloud.DownloadSnapshotAsync(endpoint, "snap-1.zip", "C:\\dl"));
+            Assert.Equal(("webdav", "snap-1.zip", "C:\\dl"), loop.BackupRestore.DownloadTarget);
+            DeskBoxRestorePreparation preparation = await cloud.PrepareScopedRestoreAsync("C:\\dl\\snap.zip", CloudBackupDomain.TodoData);
+            Assert.Equal("1.6.0", preparation.AppVersion);
+            Assert.Equal(("C:\\dl\\snap.zip", CloudBackupDomain.TodoData), loop.BackupRestore.ScopedRestore);
+            await cloud.CancelPendingRestoreAsync();
+            Assert.True(loop.BackupRestore.Cancelled);
+            Assert.True(await cloud.SetPendingRestoreItemReplaceModeAsync(true));
+            Assert.True(loop.BackupRestore.ReplaceMode);
+            Assert.True(cloud.ScheduleRelaunch().Started);
+            await cloud.ShutdownForRestartAsync();
+            cloud.DeleteTemporaryDownload("C:\\dl");
+            Assert.Equal("C:\\dl", loop.BackupRestore.DeletedTempDownload);
+        }
+        finally
+        {
+            await loop.Client.DisposeAsync();
+            await loop.Server.DisposeAsync();
+        }
+    }
+
+    [Fact]
+    public async Task UpdateService_RoundTripsStateCheckDownloadAndEvents()
+    {
+        var settings = new SettingsService(_tempRoot);
+        var loop = await StartLoopbackAsync(PipeName(), settings);
+        try
+        {
+            var remote = new RemoteAppUpdateService(loop.Client);
+
+            var checkCompleted = new TaskCompletionSource<DeskBox.Models.AppUpdateCheckResult>(
+                TaskCreationOptions.RunContinuationsAsynchronously);
+            remote.CheckCompleted += result => checkCompleted.TrySetResult(result);
+
+            Assert.NotNull(remote.LastCheckResult);
+            Assert.Equal(new DateTime(2026, 10, 23, 12, 0, 0, DateTimeKind.Utc), remote.LastCheckTimeUtc);
+            Assert.Equal("https://update/next", remote.ManifestUrl);
+            Assert.Equal(AppUpdateDeliveryKind.DirectInstaller, remote.DeliveryKind);
+            Assert.Equal("C:\\downloads\\setup.exe", remote.LastDownloadedInstallerPath);
+            Assert.False(remote.IsDownloadInProgress);
+
+            DeskBox.Models.AppUpdateCheckResult check = await remote.CheckForUpdatesAsync("1.5.9");
+            Assert.Equal("1.5.9", check.CurrentVersion);
+            Assert.Equal("1.5.9", loop.UpdateService.CheckVersionArg);
+
+            DeskBox.Models.AppUpdateDownloadResult download =
+                await remote.DownloadUpdateAsync(new DeskBox.Models.AppUpdateManifest());
+            Assert.NotNull(download);
+            Assert.NotNull(loop.UpdateService.DownloadManifestArg);
+
+            AppUpdateInstallResult install = remote.StartInstallerHelper("C:\\downloads\\setup.exe");
+            Assert.Equal("C:\\downloads\\setup.exe", loop.UpdateService.InstallerPathArg);
+
+            // Event push reaches the remote subscriber.
+            await loop.Server.SendEventAsync(
+                SettingsIpcMethods.UpdateCheckCompleted,
+                SettingsIpcPayload.Encode(
+                    loop.UpdateService.CheckResult,
+                    SettingsIpcJsonContext.Default.AppUpdateCheckResult));
+            DeskBox.Models.AppUpdateCheckResult pushed = await checkCompleted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.Equal("1.5.9", pushed.CurrentVersion);
         }
         finally
         {

@@ -124,7 +124,7 @@ public sealed partial class SettingsWindow : Window
     public SettingsViewModel ViewModel { get; }
     private readonly SearchSettingsViewModel _searchSettingsViewModel;
     private readonly BackupSettingsViewModel _backupSettingsViewModel;
-    private readonly BackupRestoreActions _backupRestoreActions;
+    private readonly IBackupRestoreActions _backupRestoreActions;
     private readonly IBackupCommands _backupCommands;
     private readonly DeskBox.Features.Music.MusicSettingsViewModel _musicSettingsViewModel;
     private readonly DeskBox.Features.QuickCapture.QuickCaptureSettingsViewModel _quickCaptureSettingsViewModel;
@@ -174,7 +174,7 @@ public sealed partial class SettingsWindow : Window
         TodoSettingsViewModel todoSettings,
         DeskBox.Features.Weather.WeatherSettingsViewModel weatherSettings,
         SearchSettingsViewModel searchSettings,
-        BackupSettingsViewModel backupSettings, BackupRestoreActions backupRestoreActions,
+        BackupSettingsViewModel backupSettings, IBackupRestoreActions backupRestoreActions,
             IQuickCaptureSettings quickCaptureSettings,
             DeskBox.Features.QuickCapture.QuickCaptureSettingsViewModel quickCaptureSettingsEditor,
             ISearchFeatureSettings searchFeatureSettings,

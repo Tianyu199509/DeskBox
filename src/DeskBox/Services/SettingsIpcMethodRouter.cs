@@ -21,6 +21,10 @@ public sealed class SettingsIpcMethodRouter
     private readonly ISettingsRestoreActions? _restore;
     private readonly ISettingsWidgetActions? _widget;
     private readonly ISettingsAppActions? _appActions;
+    private readonly IBackupCommands? _backupCommands;
+    private readonly IBackupRestoreActions? _backupRestore;
+    private readonly IBackupSettings? _backupSettings;
+    private readonly IAppUpdateService? _appUpdate;
 
     // Move-all undo tokens minted for the settings host: the token object
     // itself cannot cross the wire, so the main side keeps it and the host
@@ -36,7 +40,11 @@ public sealed class SettingsIpcMethodRouter
         ISettingsRestoreActions? restore = null,
         ISettingsWidgetActions? widget = null,
         ISettingsAppActions? appActions = null,
-        Func<string, string?, Task>? pushEvent = null)
+        Func<string, string?, Task>? pushEvent = null,
+        IBackupCommands? backupCommands = null,
+        IBackupRestoreActions? backupRestore = null,
+        IBackupSettings? backupSettings = null,
+        IAppUpdateService? appUpdate = null)
     {
         _settings = settings;
         _hotkey = hotkey;
@@ -44,6 +52,10 @@ public sealed class SettingsIpcMethodRouter
         _restore = restore;
         _widget = widget;
         _appActions = appActions;
+        _backupCommands = backupCommands;
+        _backupRestore = backupRestore;
+        _backupSettings = backupSettings;
+        _appUpdate = appUpdate;
         PushEvent = pushEvent;
     }
 
@@ -615,6 +627,270 @@ public sealed class SettingsIpcMethodRouter
                 return (true, SettingsIpcPayload.Encode(
                     _appActions.RepairDragDropPermissions(),
                     SettingsIpcJsonContext.Default.DragDropPermissionRepairResult), null);
+
+            // ── Backup commands (batch 3c-3a) ────────────────────────
+
+            case SettingsIpcMethods.BackupIsStopping:
+                if (_backupCommands is null) return unavailable(method);
+                return (true, SettingsIpcPayload.EncodeBoolean(_backupCommands.IsStopping), null);
+
+            case SettingsIpcMethods.BackupCreateSnapshotNow:
+                if (_backupCommands is null) return unavailable(method);
+                LocalBackupResult snapshot = await _backupCommands.CreateSnapshotNowAsync(cancellationToken);
+                return (true, SettingsIpcPayload.Encode(
+                    snapshot,
+                    SettingsIpcJsonContext.Default.LocalBackupResult), null);
+
+            case SettingsIpcMethods.BackupExport:
+                if (_backupCommands is null) return unavailable(method);
+                return (true, await _backupCommands.ExportAsync(payload ?? string.Empty, cancellationToken), null);
+
+            case SettingsIpcMethods.BackupUploadNow:
+                if (_backupCommands is null) return unavailable(method);
+                CloudBackupRunResult upload = await _backupCommands.UploadNowAsync(cancellationToken);
+                return (true, SettingsIpcPayload.Encode(
+                    upload,
+                    SettingsIpcJsonContext.Default.CloudBackupRunResult), null);
+
+            // ── Backup settings (batch 3c-3a) ────────────────────────
+
+            case SettingsIpcMethods.BackupSettingsRead:
+                if (_backupSettings is null) return unavailable(method);
+                return (true, SettingsIpcPayload.Encode(
+                    _backupSettings.Read(),
+                    SettingsIpcJsonContext.Default.BackupSettingsSnapshot), null);
+
+            case SettingsIpcMethods.BackupSettingsUpdate:
+                if (_backupSettings is null) return unavailable(method);
+                if (SettingsIpcPayload.Decode(payload, SettingsIpcJsonContext.Default.BackupSettingsChange)
+                    is not { } change)
+                {
+                    return (false, null, "missing payload");
+                }
+
+                _backupSettings.Update(change);
+                return (true, null, null);
+
+            case SettingsIpcMethods.BackupSettingsIsValidLocalDir:
+                if (_backupSettings is null) return unavailable(method);
+                bool valid = _backupSettings.IsValidLocalDirectory(
+                    payload ?? string.Empty,
+                    out string? rejectionKey);
+                return (true, SettingsIpcPayload.Encode(
+                    new SettingsIpcLocalDirCheck(valid, rejectionKey),
+                    SettingsIpcJsonContext.Default.SettingsIpcLocalDirCheck), null);
+
+            case SettingsIpcMethods.BackupSettingsSave:
+                if (_backupSettings is null) return unavailable(method);
+                await _backupSettings.SaveAsync();
+                return (true, null, null);
+
+            case SettingsIpcMethods.BackupSettingsHasCredential:
+                if (_backupSettings is null) return unavailable(method);
+                if (SettingsIpcPayload.Decode(payload, SettingsIpcJsonContext.Default.BackupEndpoint)
+                    is not { } hasEndpoint)
+                {
+                    return (false, null, "missing payload");
+                }
+
+                return (true, SettingsIpcPayload.EncodeBoolean(
+                    await _backupSettings.HasCredentialAsync(hasEndpoint, cancellationToken)), null);
+
+            case SettingsIpcMethods.BackupSettingsSaveCredential:
+                if (_backupSettings is null) return unavailable(method);
+                if (SettingsIpcPayload.Decode(payload, SettingsIpcJsonContext.Default.SettingsIpcCredential)
+                    is not { } credential || credential.Secret is null)
+                {
+                    return (false, null, "missing payload");
+                }
+
+                await _backupSettings.SaveCredentialAsync(credential.Endpoint, credential.Secret, cancellationToken);
+                return (true, null, null);
+
+            case SettingsIpcMethods.BackupSettingsProbe:
+                if (_backupSettings is null) return unavailable(method);
+                if (SettingsIpcPayload.Decode(payload, SettingsIpcJsonContext.Default.SettingsIpcCredential)
+                    is not { } probe)
+                {
+                    return (false, null, "missing payload");
+                }
+
+                await _backupSettings.ProbeAsync(probe.Endpoint, probe.SecretOverride, cancellationToken);
+                return (true, null, null);
+
+            case SettingsIpcMethods.BackupSettingsList:
+                if (_backupSettings is null) return unavailable(method);
+                if (SettingsIpcPayload.Decode(payload, SettingsIpcJsonContext.Default.BackupEndpoint)
+                    is not { } listEndpoint)
+                {
+                    return (false, null, "missing payload");
+                }
+
+                IReadOnlyList<BackupRemoteSnapshot> remoteSnapshots =
+                    await _backupSettings.ListAsync(listEndpoint, cancellationToken);
+                return (true, SettingsIpcPayload.Encode(
+                    remoteSnapshots.ToList(),
+                    SettingsIpcJsonContext.Default.ListBackupRemoteSnapshot), null);
+
+            // ── Cloud restore actions (batch 3c-3a) ──────────────────
+
+            case SettingsIpcMethods.CloudStop:
+                if (_backupRestore is null) return unavailable(method);
+                await _backupRestore.StopAsync();
+                return (true, null, null);
+
+            case SettingsIpcMethods.CloudIsCurrentEndpoint:
+                if (_backupRestore is null) return unavailable(method);
+                if (SettingsIpcPayload.Decode(payload, SettingsIpcJsonContext.Default.BackupEndpoint)
+                    is not { } currentEndpoint)
+                {
+                    return (false, null, "missing payload");
+                }
+
+                return (true, SettingsIpcPayload.EncodeBoolean(
+                    _backupRestore.IsCurrentEndpoint(currentEndpoint)), null);
+
+            case SettingsIpcMethods.CloudDeleteSnapshot:
+                if (_backupRestore is null) return unavailable(method);
+                if (SettingsIpcPayload.Decode(payload, SettingsIpcJsonContext.Default.SettingsIpcEndpointName)
+                    is not { } deleteTarget)
+                {
+                    return (false, null, "missing payload");
+                }
+
+                await _backupRestore.DeleteSnapshotAsync(deleteTarget.Endpoint, deleteTarget.Name, cancellationToken);
+                return (true, null, null);
+
+            case SettingsIpcMethods.CloudDownloadSnapshot:
+                if (_backupRestore is null) return unavailable(method);
+                if (SettingsIpcPayload.Decode(payload, SettingsIpcJsonContext.Default.SettingsIpcEndpointName)
+                    is not { } downloadTarget)
+                {
+                    return (false, null, "missing payload");
+                }
+
+                return (true, await _backupRestore.DownloadSnapshotAsync(
+                    downloadTarget.Endpoint,
+                    downloadTarget.Name,
+                    downloadTarget.Directory ?? string.Empty,
+                    cancellationToken), null);
+
+            case SettingsIpcMethods.CloudPrepareScopedRestore:
+                if (_backupRestore is null) return unavailable(method);
+                if (SettingsIpcPayload.Decode(payload, SettingsIpcJsonContext.Default.SettingsIpcScopedRestore)
+                    is not { } scoped)
+                {
+                    return (false, null, "missing payload");
+                }
+
+                DeskBoxRestorePreparation scopedPreparation = await _backupRestore.PrepareScopedRestoreAsync(
+                    scoped.ArchivePath,
+                    (CloudBackupDomain)scoped.Scope,
+                    cancellationToken);
+                return (true, SettingsIpcPayload.Encode(
+                    scopedPreparation,
+                    SettingsIpcJsonContext.Default.DeskBoxRestorePreparation), null);
+
+            case SettingsIpcMethods.CloudCancelPendingRestore:
+                if (_backupRestore is null) return unavailable(method);
+                await _backupRestore.CancelPendingRestoreAsync(cancellationToken);
+                return (true, null, null);
+
+            case SettingsIpcMethods.CloudSetReplaceMode:
+                if (_backupRestore is null) return unavailable(method);
+                return (await _backupRestore.SetPendingRestoreItemReplaceModeAsync(
+                    SettingsIpcPayload.DecodeBoolean(payload),
+                    cancellationToken), null, null);
+
+            case SettingsIpcMethods.CloudScheduleRelaunch:
+                if (_backupRestore is null) return unavailable(method);
+                AppRelaunchScheduleResult relaunch = _backupRestore.ScheduleRelaunch();
+                return (true, SettingsIpcPayload.Encode(
+                    relaunch,
+                    SettingsIpcJsonContext.Default.AppRelaunchScheduleResult), null);
+
+            case SettingsIpcMethods.CloudShutdownForRestart:
+                if (_backupRestore is null) return unavailable(method);
+                await _backupRestore.ShutdownForRestartAsync();
+                return (true, null, null);
+
+            case SettingsIpcMethods.CloudDeleteTemporaryDownload:
+                if (_backupRestore is null) return unavailable(method);
+                _backupRestore.DeleteTemporaryDownload(payload);
+                return (true, null, null);
+
+            // ── Update service (batch 3c-3a) ─────────────────────────
+
+            case SettingsIpcMethods.UpdateState:
+                if (_appUpdate is null) return unavailable(method);
+                return (true, SettingsIpcPayload.Encode(
+                    new SettingsIpcUpdateState(
+                        _appUpdate.LastCheckResult is { } lastCheck
+                            ? SettingsIpcPayload.Encode(
+                                lastCheck,
+                                SettingsIpcJsonContext.Default.AppUpdateCheckResult)
+                            : null,
+                        _appUpdate.LastCheckTimeUtc?.Ticks ?? 0,
+                        _appUpdate.ManifestUrl,
+                        (int)_appUpdate.DeliveryKind,
+                        _appUpdate.LastDownloadedInstallerPath,
+                        _appUpdate.IsDownloadInProgress),
+                    SettingsIpcJsonContext.Default.SettingsIpcUpdateState), null);
+
+            case SettingsIpcMethods.UpdateCheck:
+                if (_appUpdate is null) return unavailable(method);
+                string? version = SettingsIpcPayload.Decode(
+                        payload,
+                        SettingsIpcJsonContext.Default.SettingsIpcUpdateCheck)
+                    ?.CurrentVersion;
+                AppUpdateCheckResult checkResult = string.IsNullOrEmpty(version)
+                    ? await _appUpdate.CheckForUpdatesAsync(cancellationToken)
+                    : await _appUpdate.CheckForUpdatesAsync(version, cancellationToken);
+                return (true, SettingsIpcPayload.Encode(
+                    checkResult,
+                    SettingsIpcJsonContext.Default.AppUpdateCheckResult), null);
+
+            case SettingsIpcMethods.UpdateDownload:
+                if (_appUpdate is null) return unavailable(method);
+                if (SettingsIpcPayload.Decode(payload, SettingsIpcJsonContext.Default.AppUpdateManifest)
+                    is not { } downloadManifest)
+                {
+                    return (false, null, "missing payload");
+                }
+
+                AppUpdateDownloadResult downloadResult = await _appUpdate.DownloadUpdateAsync(
+                    downloadManifest,
+                    progress: null,
+                    cancellationToken);
+                return (true, SettingsIpcPayload.Encode(
+                    downloadResult,
+                    SettingsIpcJsonContext.Default.AppUpdateDownloadResult), null);
+
+            case SettingsIpcMethods.UpdateClearInstaller:
+                if (_appUpdate is null) return unavailable(method);
+                _appUpdate.ClearLastDownloadedInstaller();
+                return (true, null, null);
+
+            case SettingsIpcMethods.UpdatePruneStale:
+                if (_appUpdate is null) return unavailable(method);
+                _appUpdate.PruneStaleInstallerDirectories();
+                return (true, null, null);
+
+            case SettingsIpcMethods.UpdateStartInstaller:
+                if (_appUpdate is null) return unavailable(method);
+                if (SettingsIpcPayload.Decode(payload, SettingsIpcJsonContext.Default.SettingsIpcStartInstaller)
+                    is not { } installer)
+                {
+                    return (false, null, "missing payload");
+                }
+
+                AppUpdateInstallResult installResult = _appUpdate.StartInstallerHelper(
+                    installer.InstallerPath,
+                    installer.Silent,
+                    installer.AppCultureName);
+                return (true, SettingsIpcPayload.Encode(
+                    installResult,
+                    SettingsIpcJsonContext.Default.AppUpdateInstallResult), null);
 
             default:
                 return (false, null, $"unknown method {method}");

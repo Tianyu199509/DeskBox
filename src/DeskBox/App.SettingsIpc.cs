@@ -1,5 +1,6 @@
 namespace DeskBox;
 
+using DeskBox.Contracts;
 using DeskBox.Services;
 
 /// <summary>
@@ -43,7 +44,11 @@ public partial class App
                 LocalizationService),
             new InProcessSettingsAppActions(this, LocalizationService),
             pushEvent: (method, payload) =>
-                _settingsIpcServer?.SendEventAsync(method, payload) ?? Task.CompletedTask);
+                _settingsIpcServer?.SendEventAsync(method, payload) ?? Task.CompletedTask,
+            backupCommands: _backupRuntime,
+            backupRestore: _backupRestoreActions,
+            backupSettings: _backupSettings,
+            appUpdate: AppUpdateService);
         _settingsIpcRouter = router;
         _settingsIpcServer = SettingsIpcServer.Start(
             DeskBoxDataPathService.Current.SettingsIpcPipeName,
@@ -53,6 +58,10 @@ public partial class App
         GlobalHotkeyService.RegistrationChanged += OnSettingsIpcHotkeyRegistrationChanged;
         DisplayTopologyChanged += OnSettingsIpcDisplayTopologyChanged;
         ScreenHomeChanged += OnSettingsIpcScreenHomeChanged;
+        CloudBackupService.BackupRunCompleted += OnSettingsIpcBackupRunCompleted;
+        AppUpdateService.CheckCompleted += OnSettingsIpcUpdateCheckCompleted;
+        AppUpdateService.DownloadProgressChanged += OnSettingsIpcUpdateDownloadProgress;
+        AppUpdateService.DownloadCompleted += OnSettingsIpcUpdateDownloadCompleted;
         Log("[SettingsIpc] Server started");
     }
 
@@ -77,6 +86,45 @@ public partial class App
     private void OnSettingsIpcScreenHomeChanged()
     {
         _ = PushSettingsIpcEventAsync(SettingsIpcMethods.AppScreenHomeChanged, null);
+    }
+
+    private void OnSettingsIpcBackupRunCompleted(CloudBackupRunCompletedInfo info)
+    {
+        if (info.Endpoint is not { } endpoint)
+        {
+            return;
+        }
+
+        // Same conversion BackupSettingsCoordinator applies for its
+        // UploadCompleted subscribers (non-secret endpoint identity only).
+        _ = PushSettingsIpcEventAsync(
+            SettingsIpcMethods.BackupUploadCompleted,
+            SettingsIpcPayload.Encode(
+                new BackupUploadNotification(endpoint, info.Uploaded, info.RemoteFilePath),
+                SettingsIpcJsonContext.Default.BackupUploadNotification));
+    }
+
+    private void OnSettingsIpcUpdateCheckCompleted(DeskBox.Models.AppUpdateCheckResult result) =>
+        PushEncodedEventAsync(
+            SettingsIpcMethods.UpdateCheckCompleted,
+            result,
+            SettingsIpcJsonContext.Default.AppUpdateCheckResult);
+
+    private void OnSettingsIpcUpdateDownloadProgress(DeskBox.Models.AppUpdateDownloadProgress progress) =>
+        PushEncodedEventAsync(
+            SettingsIpcMethods.UpdateDownloadProgress,
+            progress,
+            SettingsIpcJsonContext.Default.AppUpdateDownloadProgress);
+
+    private void OnSettingsIpcUpdateDownloadCompleted(DeskBox.Models.AppUpdateDownloadResult result) =>
+        PushEncodedEventAsync(
+            SettingsIpcMethods.UpdateDownloadCompleted,
+            result,
+            SettingsIpcJsonContext.Default.AppUpdateDownloadResult);
+
+    private void PushEncodedEventAsync<T>(string method, T payload, System.Text.Json.Serialization.Metadata.JsonTypeInfo<T> typeInfo)
+    {
+        _ = PushSettingsIpcEventAsync(method, SettingsIpcPayload.Encode(payload, typeInfo));
     }
 
     private async Task PushSettingsIpcEventAsync(string method, string? payload)
