@@ -990,13 +990,12 @@ public sealed partial class SettingsWindow
                 {
                     MoveUpTargetWidgetId: string targetId
                 } member
-            } ||
-            App.Current.WidgetManager is not { } manager)
+            })
         {
             return;
         }
 
-        if (await manager.ReorderWidgetGroupMemberAsync(
+        if (await _widgetActions.ReorderWidgetGroupMemberAsync(
                 member.WidgetId,
                 targetId))
         {
@@ -1014,13 +1013,12 @@ public sealed partial class SettingsWindow
                 {
                     MoveDownTargetWidgetId: string targetId
                 } member
-            } ||
-            App.Current.WidgetManager is not { } manager)
+            })
         {
             return;
         }
 
-        if (await manager.ReorderWidgetGroupMemberAsync(
+        if (await _widgetActions.ReorderWidgetGroupMemberAsync(
                 member.WidgetId,
                 targetId))
         {
@@ -1035,15 +1033,12 @@ public sealed partial class SettingsWindow
         if (sender is not Button
             {
                 Tag: WidgetGroupMemberSettingsItem member
-            } ||
-            App.Current.WidgetManager is not { } manager)
+            })
         {
             return;
         }
 
-        if (await manager.RemoveWidgetFromGroupAsync(
-                member.WidgetId,
-                revealStandalone: true))
+        if (await _widgetActions.RemoveWidgetFromGroupAsync(member.WidgetId))
         {
             ViewModel.RefreshWidgetGroupSettings();
         }
@@ -1054,7 +1049,6 @@ public sealed partial class SettingsWindow
         RoutedEventArgs e)
     {
         if (sender is not Button { Tag: string memberId } ||
-            App.Current.WidgetManager is not { } manager ||
             SettingsRoot.XamlRoot is null)
         {
             return;
@@ -1082,7 +1076,7 @@ public sealed partial class SettingsWindow
             return;
         }
 
-        if (await manager.DissolveWidgetGroupContainingAsync(memberId))
+        if (await _widgetActions.DissolveWidgetGroupContainingAsync(memberId))
         {
             ViewModel.RefreshWidgetGroupSettings();
         }

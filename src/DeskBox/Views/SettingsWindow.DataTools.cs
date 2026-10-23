@@ -154,15 +154,13 @@ public sealed partial class SettingsWindow
     {
         ManagedStorageFolderList.Children.Clear();
 
-        if (App.Current.WidgetManager is not { } widgetManager)
+        if (_widgetActions.GetOrphanManagedStorageFolders() is not { } candidates)
         {
             ManagedStorageEmptyState.Visibility = Visibility.Visible;
             ManagedStorageFolderList.Visibility = Visibility.Collapsed;
             ManagedStorageSummaryText.Text = _localizationService.T("Settings.ManagedStorage.SummaryUnavailable");
             return;
         }
-
-        var candidates = widgetManager.GetOrphanManagedStorageFolders();
         bool hasCandidates = candidates.Count > 0;
         ManagedStorageEmptyState.Visibility = hasCandidates ? Visibility.Collapsed : Visibility.Visible;
         ManagedStorageFolderList.Visibility = hasCandidates ? Visibility.Visible : Visibility.Collapsed;
@@ -274,14 +272,14 @@ public sealed partial class SettingsWindow
 
     private async Task RestoreManagedStorageFolderAsync(string folderPath)
     {
-        if (App.Current.WidgetManager is null)
+        if (!_widgetActions.IsHostAvailable)
         {
             return;
         }
 
         try
         {
-            int restoredCount = await App.Current.WidgetManager.RestoreOrphanManagedStorageFoldersAsync([folderPath]);
+            int restoredCount = await _widgetActions.RestoreOrphanManagedStorageFoldersAsync([folderPath]);
             RefreshManagedStorageFolderList();
             await ShowInfoDialogAsync(
                 _localizationService.T("Settings.ManagedStorage.RestoreCompleteTitle"),
@@ -312,7 +310,7 @@ public sealed partial class SettingsWindow
 
     private async Task MoveManagedStorageFolderToDesktopAsync(string folderPath, string folderName)
     {
-        if (App.Current.WidgetManager is null ||
+        if (!_widgetActions.IsHostAvailable ||
             !await ConfirmManagedStorageActionAsync(
                 _localizationService.T("Settings.ManagedStorage.MoveConfirmTitle"),
                 _localizationService.Format("Settings.ManagedStorage.MoveConfirmBody", folderName),
@@ -323,7 +321,7 @@ public sealed partial class SettingsWindow
 
         try
         {
-            await App.Current.WidgetManager.MoveOrphanManagedStorageFolderContentsToDesktopAsync(folderPath);
+            await _widgetActions.MoveOrphanManagedStorageFolderContentsToDesktopAsync(folderPath);
             RefreshManagedStorageFolderList();
             await ShowInfoDialogAsync(
                 _localizationService.T("Settings.ManagedStorage.MoveCompleteTitle"),
@@ -340,7 +338,7 @@ public sealed partial class SettingsWindow
 
     private async Task DeleteManagedStorageFolderAsync(string folderPath, string folderName)
     {
-        if (App.Current.WidgetManager is null ||
+        if (!_widgetActions.IsHostAvailable ||
             !await ConfirmManagedStorageActionAsync(
                 _localizationService.T("Settings.ManagedStorage.DeleteConfirmTitle"),
                 _localizationService.Format("Settings.ManagedStorage.DeleteConfirmBody", folderName),
@@ -351,7 +349,7 @@ public sealed partial class SettingsWindow
 
         try
         {
-            await App.Current.WidgetManager.DeleteOrphanManagedStorageFolderAsync(
+            await _widgetActions.DeleteOrphanManagedStorageFolderAsync(
                 folderPath,
                 _hWnd);
             RefreshManagedStorageFolderList();

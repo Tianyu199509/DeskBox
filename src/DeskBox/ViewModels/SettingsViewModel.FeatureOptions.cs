@@ -129,8 +129,7 @@ public partial class SettingsViewModel
         // the section editor's projection (batch 47).
         if (kind == WidgetKind.Todo) return _todoSettings.Enabled;
         if (kind == WidgetKind.Search) return _searchFeatureSettings.Enabled;
-        return App.Current?.WidgetManager?.IsFeatureWidgetEnabled(kind) ??
-               FeatureWidgetSettings.IsEnabled(_settingsService.Settings, kind);
+        return _widgetActions.IsFeatureWidgetEnabled(kind);
     }
 
     public void SetWidgetEnabled(WidgetKind kind, bool enabled)
@@ -166,15 +165,7 @@ public partial class SettingsViewModel
         try
         {
             await ApplyFeatureWidgetDefaultSettingsAsync(kind);
-
-            if (App.Current?.WidgetManager is { } widgetManager)
-            {
-                await widgetManager.ResetFeatureWidgetAsync(kind);
-            }
-            else
-            {
-                await _settingsService.SaveAsync();
-            }
+            await _widgetActions.ResetFeatureWidgetAsync(kind);
         }
         catch (Exception ex)
         {
@@ -272,13 +263,7 @@ public partial class SettingsViewModel
     {
         try
         {
-            if (App.Current?.WidgetManager is not { } widgetManager)
-            {
-                await _settingsService.SaveAsync();
-                return;
-            }
-
-            await widgetManager.SetFeatureWidgetEnabledAsync(kind, enabled, reveal: enabled);
+            await _widgetActions.SyncFeatureWidgetEnabledAsync(kind, enabled);
         }
         catch (Exception ex)
         {

@@ -140,6 +140,7 @@ public sealed partial class SettingsWindow : Window
     private readonly DeskBox.Features.GroupNavigation.GroupNavigationSettingsViewModel _groupNavigationSettingsViewModel;
     private readonly DeskBox.Features.Performance.PerformanceSettingsViewModel _performanceSettingsViewModel;
     private readonly ISettingsHotkeyActions _hotkeyActions;
+    private readonly ISettingsWidgetActions _widgetActions;
 
     /// <summary>
     /// The file-display section's editor. Exposed for the AOT managed-UI
@@ -186,7 +187,8 @@ public sealed partial class SettingsWindow : Window
         DeskBox.Features.ManagedStorage.ManagedStorageSettingsViewModel managedStorageSettings,
         DeskBox.Features.Maintenance.MaintenanceSettingsViewModel maintenanceSettings,
         DeskBox.Features.Performance.PerformanceSettingsViewModel performanceSettings,
-        ISettingsHotkeyActions hotkeyActions)
+        ISettingsHotkeyActions hotkeyActions,
+        ISettingsWidgetActions widgetActions)
     {
         var constructionStopwatch = Stopwatch.StartNew();
         long previousCheckpointMilliseconds = 0;
@@ -219,6 +221,7 @@ public sealed partial class SettingsWindow : Window
         _groupNavigationSettingsViewModel = groupNavigationSettings;
         _performanceSettingsViewModel = performanceSettings;
         _hotkeyActions = hotkeyActions;
+        _widgetActions = widgetActions;
         _themeService = themeService;
         _localizationService = localizationService;
         ViewModel = new SettingsViewModel(settingsService, themeService, todoSettings, weatherSettings,
@@ -226,7 +229,7 @@ public sealed partial class SettingsWindow : Window
             capsuleSettings, interactionSettings, fileDisplaySettings, fileStackSettings,
             groupNavigationSettings, featureWidgetsSettings, musicSettings,
             managedStorageSettings, maintenanceSettings, performanceSettings, hotkeyActions,
-            localizationService,
+            widgetActions, localizationService,
             App.Current.AppUpdateService);
         LogConstructionCheckpoint("view-model");
         _settingsRootPointerPressedHandler = SettingsRoot_PointerPressedHandled;

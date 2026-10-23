@@ -217,7 +217,7 @@ public partial class SettingsViewModel
     // projection rebuild (now pushed into the editor).
     private void AfterWidgetGroupPresentationChange()
     {
-        App.Current?.WidgetManager?.NotifyWidgetGroupPresentationSettingsChanged();
+        _widgetActions.NotifyWidgetGroupPresentationSettingsChanged();
         NotifyExistingWidgetGroupPropertiesChanged();
     }
 
@@ -230,7 +230,7 @@ public partial class SettingsViewModel
     private void CompleteWidgetGroupSettingsChange()
     {
         _settingsService.SaveDebounced(notifySubscribers: false);
-        App.Current?.WidgetManager?.NotifyWidgetGroupPresentationSettingsChanged();
+        _widgetActions.NotifyWidgetGroupPresentationSettingsChanged();
     }
 
     private WidgetGroupConfig? FindWidgetGroup(string groupId) =>

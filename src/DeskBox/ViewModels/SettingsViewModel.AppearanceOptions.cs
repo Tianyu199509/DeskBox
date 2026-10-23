@@ -37,7 +37,7 @@ public partial class SettingsViewModel
     // shell because it reaches the host's widget manager.
     private void OnInteractionLayerModeUserChanged()
     {
-        App.Current?.WidgetManager?.RefreshVisibleWidgetDesktopLayers("settings-layer-mode");
+        _widgetActions.RefreshVisibleWidgetDesktopLayers("settings-layer-mode");
     }
 
     public string SelectedLanguage

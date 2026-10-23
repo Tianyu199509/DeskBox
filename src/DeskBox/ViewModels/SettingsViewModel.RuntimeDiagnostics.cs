@@ -17,7 +17,7 @@ public partial class SettingsViewModel
         App? app = App.Current;
         AppRuntimeHealthSnapshot? snapshot = app?.DiagnosticsService?.GetRuntimeHealthSnapshot(
             app.EverythingSearchService,
-            app.WidgetManager?.GetFolderWatcherHealthSnapshots());
+            _widgetActions.GetFolderWatcherHealthSnapshots());
         if (snapshot is null)
         {
             _backupSettings.SetRuntimeHealth(

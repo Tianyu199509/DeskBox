@@ -4437,7 +4437,8 @@ public partial class App : Application
                 _interactionSettings ?? throw new InvalidOperationException("Interaction settings are not initialized."),
                 LocalizationService.T,
                 () => LocalizationService.IsChinese),
-            CreateSettingsHotkeyActions());
+            CreateSettingsHotkeyActions(),
+            new InProcessSettingsWidgetActions(WidgetManager, SettingsService));
         _settingsWindow.Closed += SettingsWindow_ClosedForApp;
         return _settingsWindow;
     }

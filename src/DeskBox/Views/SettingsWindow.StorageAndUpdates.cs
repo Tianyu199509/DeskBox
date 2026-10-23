@@ -57,10 +57,10 @@ public sealed partial class SettingsWindow
                 continue;
             }
 
-            if (App.Current.WidgetManager is not { } manager) return;
+            if (!_widgetActions.IsHostAvailable) return;
             var choice = await ManagedStorageMigrationDialog.ConfirmAsync(SettingsRoot.XamlRoot, _localizationService,
-                manager.GetDefaultManagedStorageWidgetCount(), ViewModel.ManagedStorageRootPath, normalizedPath,
-                token => manager.PreviewManagedStorageMigrationAsync(normalizedPath, token));
+                _widgetActions.GetDefaultManagedStorageWidgetCount(), ViewModel.ManagedStorageRootPath, normalizedPath,
+                token => _widgetActions.PreviewManagedStorageMigrationAsync(normalizedPath, token));
             if (choice is null) return;
             if (choice == StorageMigrationStartChoice.ChooseLocation)
             {
@@ -69,7 +69,7 @@ public sealed partial class SettingsWindow
             var outcome = await ManagedStorageMigrationDialog.RunAsync(
                 SettingsRoot.XamlRoot, SettingsRoot.DispatcherQueue, _localizationService,
                 ViewModel.ManagedStorageRootPath, normalizedPath,
-                options => manager.UpdateDefaultManagedStorageRootAsync(normalizedPath, options),
+                options => _widgetActions.UpdateDefaultManagedStorageRootAsync(normalizedPath, options),
                 restart: choice == StorageMigrationStartChoice.Restart);
             if (outcome.ChooseLocation)
             {

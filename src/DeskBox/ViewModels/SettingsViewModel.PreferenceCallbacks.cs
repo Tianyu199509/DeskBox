@@ -178,7 +178,7 @@ public partial class SettingsViewModel
 
     private void OnInteractionShowDesktopBehaviorUserChanged()
     {
-        App.Current?.WidgetManager?.RefreshVisibleWidgetDesktopLayers(
+        _widgetActions.RefreshVisibleWidgetDesktopLayers(
             "settings-show-desktop-visibility");
     }
 
