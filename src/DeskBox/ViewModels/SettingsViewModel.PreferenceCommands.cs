@@ -34,7 +34,7 @@ public partial class SettingsViewModel
         // final slider value. Persist without broadcasting the same appearance
         // pass a second time through SettingsChanged.
         _settingsService.SaveDebounced(notifySubscribers: false);
-        App.ScheduleLightMemoryCleanup();
+        _appActions.ScheduleLightMemoryCleanup();
     }
 
     public void SetCustomAccentColor(Color color)
@@ -71,15 +71,12 @@ public partial class SettingsViewModel
             ApplySettingsSnapshot();
             IconHelper.ClearAllThumbnailCaches();
 
-            if (App.Current is { } app)
-            {
-                // ApplySettingsSnapshot above already re-projected the
-                // restored snap state onto the interaction editor.
-                app.ResizeGuideOverlay.IsSnapEnabled = _interactionSettings.SnapEnabled;
-            }
+            // ApplySettingsSnapshot above already re-projected the
+            // restored snap state onto the interaction editor.
+            _appActions.SetSnapEnabled(_interactionSettings.SnapEnabled);
 
-        _hotkeyActions.RefreshRegistration();
-        App.Current?.UpdateTrayIcon();
+            _hotkeyActions.RefreshRegistration();
+            _appActions.UpdateTrayIcon();
             RefreshGlobalHotkeyState();
             _themeService.RefreshAppearance();
             RefreshAccentPreview();

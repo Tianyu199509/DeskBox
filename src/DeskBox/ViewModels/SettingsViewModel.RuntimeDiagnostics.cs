@@ -14,10 +14,7 @@ public partial class SettingsViewModel
 {
     public void RefreshRuntimeDiagnostics()
     {
-        App? app = App.Current;
-        AppRuntimeHealthSnapshot? snapshot = app?.DiagnosticsService?.GetRuntimeHealthSnapshot(
-            app.EverythingSearchService,
-            _widgetActions.GetFolderWatcherHealthSnapshots());
+        AppRuntimeHealthSnapshot? snapshot = _appActions.GetRuntimeHealthSnapshot();
         if (snapshot is null)
         {
             _backupSettings.SetRuntimeHealth(
@@ -95,10 +92,7 @@ public partial class SettingsViewModel
         _backupSettings.SetRuntimeResyncBusy(true);
         try
         {
-            if (App.Current is { } app)
-            {
-                await app.ForceExternalStateRecoveryAsync();
-            }
+            await _appActions.ForceExternalStateRecoveryAsync();
 
             RefreshRuntimeDiagnostics();
         }

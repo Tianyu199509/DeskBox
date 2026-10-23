@@ -4438,7 +4438,15 @@ public partial class App : Application
                 LocalizationService.T,
                 () => LocalizationService.IsChinese),
             CreateSettingsHotkeyActions(),
-            new InProcessSettingsWidgetActions(WidgetManager, SettingsService));
+            new InProcessSettingsWidgetActions(WidgetManager, SettingsService),
+            new InProcessSettingsRestoreActions(
+                DataBackupService ?? throw new InvalidOperationException("Backup service is not initialized."),
+                AttachmentHealthService ?? throw new InvalidOperationException("Attachment health service is not initialized.")),
+            new InProcessSettingsAppActions(this, LocalizationService),
+            new InProcessSettingsDataActions(
+                QuickCaptureService ?? throw new InvalidOperationException("Quick Capture service is not initialized."),
+                LocalizationService),
+            AppUpdateService);
         _settingsWindow.Closed += SettingsWindow_ClosedForApp;
         return _settingsWindow;
     }

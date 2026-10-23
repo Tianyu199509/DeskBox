@@ -79,7 +79,7 @@ public sealed partial class SettingsWindow
             if (result is not null)
             {
                 ViewModel.UpdateManagedStorageRootPath(result.NewRootPath);
-                try { await App.Current.ManagedStorageDesktopShortcutService.SyncAsync(result.OldRootPath); }
+                try { await _appActions.SyncManagedStorageDesktopShortcutAsync(result.OldRootPath); }
                 catch (Exception ex) { App.Log($"[ManagedStorageMigration] Desktop shortcut sync deferred: {ex.Message}"); }
             }
             RefreshManagedStoragePathWarning();
@@ -183,7 +183,7 @@ public sealed partial class SettingsWindow
 
         SetManagedStorageDesktopShortcutToggleState(
             toggle,
-            App.Current.ManagedStorageDesktopShortcutService.HasShortcut());
+            _appActions.HasManagedStorageDesktopShortcut());
     }
 
     private async void ManagedStorageDesktopShortcutToggle_Toggled(
@@ -200,11 +200,9 @@ public sealed partial class SettingsWindow
         toggle.IsEnabled = false;
         try
         {
-            ManagedStorageDesktopShortcutService shortcutService =
-                App.Current.ManagedStorageDesktopShortcutService;
             bool succeeded = requestedState
-                ? await shortcutService.CreateAsync()
-                : await shortcutService.RemoveAsync();
+                ? await _appActions.CreateManagedStorageDesktopShortcutAsync()
+                : await _appActions.RemoveManagedStorageDesktopShortcutAsync();
             if (succeeded)
             {
                 return;
@@ -421,7 +419,7 @@ public sealed partial class SettingsWindow
                 return;
             }
 
-            await App.Current.ShutdownForUpdateAsync();
+            await _appActions.ShutdownForUpdateAsync();
             return;
         }
 
@@ -621,7 +619,7 @@ public sealed partial class SettingsWindow
         // settings button and the automatic/toast openers can never show
         // two release-notes windows at once.
         AppUpdateManifest? manifest = ViewModel.LatestUpdateManifest;
-        App.Current.OpenAppReleaseNotesWindow(
+        _appActions.OpenReleaseNotesWindow(
             manifest,
             ViewModel.AppVersion,
             manifest is null ? ViewModel.FetchLatestManifestForReleaseNotesAsync : null,

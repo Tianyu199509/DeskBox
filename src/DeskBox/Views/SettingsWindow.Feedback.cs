@@ -345,22 +345,7 @@ public sealed partial class SettingsWindow
         string tempDirectory = Path.Combine(Path.GetTempPath(), FeedbackTempDirectoryName);
         try
         {
-            DeskBoxDiagnosticSnapshot snapshot = App.Current.CreateDiagnosticSnapshot();
-            string archivePath = await App.Current.DiagnosticsBundleService.ExportAsync(
-                tempDirectory,
-                snapshot,
-                DeskBoxDataPathService.Current.LogFilePath);
-            try
-            {
-                DeskBoxFeedbackDiagnosticsStatus status = await FeedbackService.UploadDiagnosticsAsync(
-                    feedbackId,
-                    archivePath);
-                return status == DeskBoxFeedbackDiagnosticsStatus.Uploaded;
-            }
-            finally
-            {
-                try { File.Delete(archivePath); } catch (Exception ex) { App.Log($"[Feedback] Temp diagnostics cleanup failed: {ex.Message}"); }
-            }
+            return await _appActions.UploadDiagnosticsForFeedbackAsync(feedbackId, tempDirectory);
         }
         catch (Exception ex)
         {

@@ -723,9 +723,11 @@ public sealed class SettingsCopyAndHierarchyTests
             windowXaml,
             StringComparison.Ordinal);
         Assert.Contains("_isSynchronizingManagedStorageDesktopShortcutToggle", storageCode, StringComparison.Ordinal);
-        Assert.Contains("ManagedStorageDesktopShortcutService.HasShortcut()", storageCode, StringComparison.Ordinal);
-        Assert.Contains("shortcutService.CreateAsync()", storageCode, StringComparison.Ordinal);
-        Assert.Contains("shortcutService.RemoveAsync()", storageCode, StringComparison.Ordinal);
+        // The toggle mirrors real file-system state through the settings app
+        // facade (the guarantee is unchanged; the calls moved behind it).
+        Assert.Contains("_appActions.HasManagedStorageDesktopShortcut()", storageCode, StringComparison.Ordinal);
+        Assert.Contains("_appActions.CreateManagedStorageDesktopShortcutAsync()", storageCode, StringComparison.Ordinal);
+        Assert.Contains("_appActions.RemoveManagedStorageDesktopShortcutAsync()", storageCode, StringComparison.Ordinal);
     }
 
     private static string SliceSection(string xaml, string startToken, string endToken)

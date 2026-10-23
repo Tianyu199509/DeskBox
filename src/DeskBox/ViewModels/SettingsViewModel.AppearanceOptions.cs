@@ -81,7 +81,7 @@ public partial class SettingsViewModel
     {
         // The editor already persisted the style through the appearance
         // coordinator; the tray icon refresh reaches the host.
-        App.Current.UpdateTrayIcon();
+        _appActions.UpdateTrayIcon();
     }
 
     private void OnAppearanceAccentColorSourceUserChanged(bool useSystem)

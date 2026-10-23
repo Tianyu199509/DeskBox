@@ -141,6 +141,9 @@ public sealed partial class SettingsWindow : Window
     private readonly DeskBox.Features.Performance.PerformanceSettingsViewModel _performanceSettingsViewModel;
     private readonly ISettingsHotkeyActions _hotkeyActions;
     private readonly ISettingsWidgetActions _widgetActions;
+    private readonly ISettingsRestoreActions _restoreActions;
+    private readonly ISettingsAppActions _appActions;
+    private readonly ISettingsDataActions _dataActions;
 
     /// <summary>
     /// The file-display section's editor. Exposed for the AOT managed-UI
@@ -188,7 +191,11 @@ public sealed partial class SettingsWindow : Window
         DeskBox.Features.Maintenance.MaintenanceSettingsViewModel maintenanceSettings,
         DeskBox.Features.Performance.PerformanceSettingsViewModel performanceSettings,
         ISettingsHotkeyActions hotkeyActions,
-        ISettingsWidgetActions widgetActions)
+        ISettingsWidgetActions widgetActions,
+        ISettingsRestoreActions restoreActions,
+        ISettingsAppActions appActions,
+        ISettingsDataActions dataActions,
+        IAppUpdateService? appUpdateService)
     {
         var constructionStopwatch = Stopwatch.StartNew();
         long previousCheckpointMilliseconds = 0;
@@ -222,6 +229,9 @@ public sealed partial class SettingsWindow : Window
         _performanceSettingsViewModel = performanceSettings;
         _hotkeyActions = hotkeyActions;
         _widgetActions = widgetActions;
+        _restoreActions = restoreActions;
+        _appActions = appActions;
+        _dataActions = dataActions;
         _themeService = themeService;
         _localizationService = localizationService;
         ViewModel = new SettingsViewModel(settingsService, themeService, todoSettings, weatherSettings,
@@ -229,8 +239,8 @@ public sealed partial class SettingsWindow : Window
             capsuleSettings, interactionSettings, fileDisplaySettings, fileStackSettings,
             groupNavigationSettings, featureWidgetsSettings, musicSettings,
             managedStorageSettings, maintenanceSettings, performanceSettings, hotkeyActions,
-            widgetActions, localizationService,
-            App.Current.AppUpdateService);
+            widgetActions, appActions, dataActions, localizationService,
+            appUpdateService);
         LogConstructionCheckpoint("view-model");
         _settingsRootPointerPressedHandler = SettingsRoot_PointerPressedHandled;
         _settingsRootPointerReleasedHandler = SettingsRoot_PointerReleasedHandled;
@@ -338,7 +348,7 @@ public sealed partial class SettingsWindow : Window
         // group held topmost) lifts this window above the widgets instead of
         // leaving it in the normal band below them. Outside a session this is
         // the ordinary bring-to-front pulse, matching the other popups.
-        App.Current.WidgetManager?.BringAuxiliaryWindowToFront(
+        _appActions.BringSettingsWindowToRaisedBand(
             _hWnd,
             "settings-shown");
         Activate();
@@ -442,10 +452,10 @@ public sealed partial class SettingsWindow : Window
         _appWindow.Hide();
         UpdateSearchSettingsActivity();
         UpdateBackupSettingsActivity();
-        App.Current.WidgetManager?.ReleaseRaisedBandGuest(
+        _appActions.ReleaseRaisedBandGuest(
             _hWnd,
             "settings-hidden");
-        App.ScheduleBackgroundMemoryCleanup("settings-hidden");
+        _appActions.ScheduleSettingsHiddenCleanup();
     }
 
     private void SettingsRoot_ActualThemeChanged(FrameworkElement sender, object args) =>

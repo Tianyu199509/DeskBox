@@ -36,11 +36,7 @@ public sealed partial class SettingsWindow
         ExportDiagnosticsButton.IsEnabled = false;
         try
         {
-            DeskBoxDiagnosticSnapshot snapshot = App.Current.CreateDiagnosticSnapshot();
-            string archivePath = await App.Current.DiagnosticsBundleService.ExportAsync(
-                folderPath,
-                snapshot,
-                DeskBoxDataPathService.Current.LogFilePath);
+            string archivePath = await _appActions.ExportDiagnosticBundleAsync(folderPath);
             await ShowInfoDialogAsync(
                 _localizationService.T("Settings.Diagnostics.SuccessTitle"),
                 _localizationService.Format("Settings.Diagnostics.SuccessBody", archivePath));
@@ -111,14 +107,14 @@ public sealed partial class SettingsWindow
 
             if (await dialog.ShowAsync() == ContentDialogResult.Primary)
             {
-                if (DragDropPermissionService.TryRelaunchAsExplorerUser(
+                if (_appActions.TryRelaunchAsExplorerUser(
                         $"--await-parent-exit {Environment.ProcessId}"))
                 {
                     // Same trap as the elevation notice: a bare inline
                     // Application.Exit() is deferred through the XAML message
                     // loop and never consumed. The full shutdown path carries
                     // the deadline and Environment.Exit fallbacks.
-                    await App.Current.ShutdownForRestartAsync();
+                    await _appActions.ShutdownForRestartAsync();
                 }
                 else
                 {
@@ -227,7 +223,7 @@ public sealed partial class SettingsWindow
         bool restartScheduled = false;
         try
         {
-            DeskBoxRestorePreparation preparation = await App.Current.DataBackupService.PrepareRestoreAsync(
+            DeskBoxRestorePreparation preparation = await _restoreActions.PrepareRestoreAsync(
                 archivePath);
             string integrityWarning = preparation.HasIntegrityManifest
                 ? string.Empty
@@ -259,7 +255,7 @@ public sealed partial class SettingsWindow
 
             if (await dialog.ShowAsync() != ContentDialogResult.Primary)
             {
-                await App.Current.DataBackupService.CancelPendingRestoreAsync();
+                await _restoreActions.CancelPendingRestoreAsync();
                 return;
             }
 
@@ -267,19 +263,19 @@ public sealed partial class SettingsWindow
             // persist the confirmation now so a crash, hidden window, or
             // exit between here and the relaunch discards the restore at
             // the next launch instead of applying it unconfirmed.
-            if (!await App.Current.DataBackupService.ConfirmPendingFullRestoreAsync())
+            if (!await _restoreActions.ConfirmPendingFullRestoreAsync())
             {
-                await App.Current.DataBackupService.CancelPendingRestoreAsync();
+                await _restoreActions.CancelPendingRestoreAsync();
                 await ShowInfoDialogAsync(
                     _localizationService.T("Settings.DataBackup.RestoreFailedTitle"),
                     _localizationService.Format("Settings.DataBackup.RestoreFailedBody", string.Empty));
                 return;
             }
 
-            AppRelaunchScheduleResult relaunch = AppRelaunchService.ScheduleAfterCurrentProcessExit();
+            AppRelaunchScheduleResult relaunch = _appActions.ScheduleRestartAfterCurrentProcessExit();
             if (!relaunch.Started)
             {
-                await App.Current.DataBackupService.CancelPendingRestoreAsync();
+                await _restoreActions.CancelPendingRestoreAsync();
                 await ShowInfoDialogAsync(
                     _localizationService.T("Settings.DataBackup.RestartFailedTitle"),
                     _localizationService.Format(
@@ -289,14 +285,14 @@ public sealed partial class SettingsWindow
             }
 
             restartScheduled = true;
-            await App.Current.ShutdownForRestartAsync();
+            await _appActions.ShutdownForRestartAsync();
         }
         catch (Exception ex)
         {
             App.Log($"[DataBackup] Restore preparation failed: {ex}");
             if (!restartScheduled)
             {
-                await App.Current.DataBackupService.CancelPendingRestoreAsync();
+                await _restoreActions.CancelPendingRestoreAsync();
             }
             await ShowInfoDialogAsync(
                 _localizationService.T("Settings.DataBackup.RestoreFailedTitle"),
@@ -414,7 +410,7 @@ public sealed partial class SettingsWindow
         try
         {
             IReadOnlyList<DeskBoxBackupSnapshotInfo> snapshots =
-                await App.Current.DataBackupService.GetSnapshotInventoryAsync();
+                await _restoreActions.GetSnapshotInventoryAsync();
             var rows = snapshots.Select(snapshot =>
             {
                 string kind = snapshot.Kind == "pre-restore"
@@ -490,7 +486,7 @@ public sealed partial class SettingsWindow
 
         try
         {
-            await App.Current.DataBackupService.DeleteSnapshotAsync(item.Path);
+            await _restoreActions.DeleteSnapshotAsync(item.Path);
             await RefreshBackupSnapshotInventoryAsync();
         }
         catch (Exception ex)
@@ -508,7 +504,7 @@ public sealed partial class SettingsWindow
         AttachmentHealthSummaryText.Text = _localizationService.T("Settings.AttachmentHealth.Checking");
         try
         {
-            DeskBoxAttachmentHealthReport report = await App.Current.AttachmentHealthService.ScanAsync();
+            DeskBoxAttachmentHealthReport report = await _restoreActions.ScanAttachmentHealthAsync();
             string key = report.UnreadableStoreCount > 0
                 ? "Settings.AttachmentHealth.Partial"
                 : report.IsHealthy

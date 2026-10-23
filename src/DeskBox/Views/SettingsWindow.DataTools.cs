@@ -28,9 +28,7 @@ public sealed partial class SettingsWindow
             return;
         }
 
-        var data = await App.Current.QuickCaptureService.GetDataAsync();
-        int recordCount = data.Items.Count(item => !item.IsDeleted);
-        int recentCount = data.RecentItems.Count(item => !item.IsDeleted);
+        var (recordCount, recentCount) = await _dataActions.GetQuickCaptureCountsAsync();
         var dialog = new ContentDialog
         {
             XamlRoot = SettingsRoot.XamlRoot,
@@ -53,10 +51,7 @@ public sealed partial class SettingsWindow
             return;
         }
 
-        await App.Current.QuickCaptureService.ClearAsync();
-        await WidgetFirstRunGuideFactory.EnsureQuickCaptureGuideAsync(
-            App.Current.QuickCaptureService,
-            _localizationService);
+        await _dataActions.ClearQuickCaptureDataAsync();
         await ViewModel.RefreshQuickCaptureImageCacheInfoAsync();
     }
 
@@ -67,8 +62,7 @@ public sealed partial class SettingsWindow
             return;
         }
 
-        var data = await App.Current.QuickCaptureService.GetDataAsync();
-        int recentCount = data.RecentItems.Count(item => !item.IsDeleted);
+        var (_, recentCount) = await _dataActions.GetQuickCaptureCountsAsync();
         var dialog = new ContentDialog
         {
             XamlRoot = SettingsRoot.XamlRoot,
@@ -90,7 +84,7 @@ public sealed partial class SettingsWindow
             return;
         }
 
-        await App.Current.QuickCaptureService.ClearRecentAsync();
+        await _dataActions.ClearQuickCaptureRecentAsync();
         await ViewModel.RefreshQuickCaptureImageCacheInfoAsync();
     }
 
@@ -101,7 +95,7 @@ public sealed partial class SettingsWindow
             return;
         }
 
-        var result = await App.Current.QuickCaptureService.CleanupUnusedImageCacheAsync();
+        var result = await _dataActions.ClearUnusedQuickCaptureImageCacheAsync();
         await ViewModel.RefreshQuickCaptureImageCacheInfoAsync();
 
         var dialog = new ContentDialog
@@ -125,7 +119,7 @@ public sealed partial class SettingsWindow
 
     private void ShowOnboardingButton_Click(object sender, RoutedEventArgs e)
     {
-        App.Current.ShowOnboarding();
+        _appActions.ShowOnboarding();
     }
 
     private async void ShowAboutMeButton_Click(object sender, RoutedEventArgs e)

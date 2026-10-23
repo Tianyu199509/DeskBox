@@ -459,6 +459,9 @@ public sealed class ModuleBoundaryContractTests
         new Dictionary<string, int>(StringComparer.Ordinal)
     {
         ["src/DeskBox/App.AotHotkeySmoke.cs"] = 1,
+        // Settings app facade: 1 = deleting the feedback diagnostics archive
+        // after upload (moved verbatim from the feedback window partial).
+        ["src/DeskBox/Services/InProcessSettingsAppActions.cs"] = 1,
         ["src/DeskBox/App.AotLocalFilePersistenceSmoke.cs"] = 3,
         ["src/DeskBox/App.AotManagedUiSmoke.cs"] = 1,
         ["src/DeskBox/App.AotMusicVolumeMutationSmoke.cs"] = 3,
