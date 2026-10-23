@@ -1,3 +1,4 @@
+using DeskBox.Contracts;
 using DeskBox.Features.FeatureWidgets;
 using DeskBox.Features.FileStack;
 using DeskBox.Features.Interaction;
@@ -49,6 +50,12 @@ public sealed partial class FileWidgetSettingsSection : UserControl
         get => (FileStackSettingsViewModel?)GetValue(FileStackProperty);
         set => SetValue(FileStackProperty, value);
     }
+
+    /// <summary>
+    /// Host app actions for the desktop-organization opener; injected by the
+    /// settings window alongside the editor properties.
+    /// </summary>
+    public ISettingsAppActions? AppActions { get; set; }
 
     public FeatureWidgetsSettingsViewModel? FeatureWidgets
     {
@@ -107,6 +114,6 @@ public sealed partial class FileWidgetSettingsSection : UserControl
 
     private void OrganizeDesktopButton_Click(object sender, RoutedEventArgs e)
     {
-        global::DeskBox.App.Current.ShowDesktopOrganizationWindow();
+        AppActions?.ShowDesktopOrganizationWindow();
     }
 }

@@ -89,6 +89,7 @@ public sealed partial class SettingsWindow
                 fileSettings.FileStack = _fileStackSettingsViewModel;
                 fileSettings.FeatureWidgets = _featureWidgetsSettingsViewModel;
                 fileSettings.Interaction = _interactionSettingsViewModel;
+                fileSettings.AppActions = _appActions;
                 break;
             case CapsuleModeSettingsSection capsuleSettings:
                 capsuleSettings.ViewModel = ViewModel;
