@@ -53,6 +53,7 @@ public sealed class JsonSerializationBaselineContractTests : IDisposable
             // client and server plus the remote sink's snapshot serialize.
             ["src/DeskBox/Services/RemoteSettingsPersistenceSink.cs"] = 1,
             ["src/DeskBox/Services/SettingsIpcClient.cs"] = 2,
+            ["src/DeskBox/Services/SettingsIpcProtocol.cs"] = 3,
             ["src/DeskBox/Services/SettingsIpcServer.cs"] = 2,
             ["src/DeskBox/Services/SettingsMigrationService.cs"] = 2,
             // 5: legacy 3 + the settings-host split's external-snapshot apply
@@ -91,8 +92,8 @@ public sealed class JsonSerializationBaselineContractTests : IDisposable
             Assert.Equal(expectedCount, actual[path]);
         }
 
-        Assert.Equal(44, actual.Count);
-        Assert.Equal(103, actual.Values.Sum());
+        Assert.Equal(45, actual.Count);
+        Assert.Equal(106, actual.Values.Sum());
 
         string[] expectedContextOwners =
         [
