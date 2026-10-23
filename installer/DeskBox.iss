@@ -12,6 +12,8 @@
 #define MyAppExeName "DeskBox.exe"
 #define MyAppOutputBaseName "DeskBox_Setup"
 #define MyAppRuntimeArchitecture "x64"
+// PE machine field of the binaries this script installs ($8664 = x64).
+#define DeskBoxInstallerPeMachineHex "$8664"
 #ifndef MyAppPackageSuffix
 #define MyAppPackageSuffix ""
 #endif
@@ -132,6 +134,11 @@ brazilianportuguese.MultipleInstallationsTitle=Várias instalações do DeskBox 
 brazilianportuguese.MultipleInstallationsBody=As seguintes pastas de instalação do DeskBox foram encontradas:%n%n%1
 brazilianportuguese.MultipleInstallationsFooter=Para evitar a criação de outra cópia, desinstale a versão extra nas Configurações do Windows e execute a instalação novamente.
 brazilianportuguese.UpgradeDirectoryMismatch=Esta é uma atualização, mas a pasta de instalação solicitada não corresponde à instalação existente.%n%nPasta existente: %1%nPasta solicitada: %2%n%nA atualização deve usar a pasta existente. Cancele a instalação e execute-a novamente.
+chinesesimplified.ArchitectureMismatchBody=%1 处已有的 DeskBox 安装是原生 ARM64 版本。此 x64 安装包会把它替换为模拟运行的 x64 版本，且后续更新将一直停留在 x64 通道。若要保留原生 ARM64 版本，请改用 DeskBox_Setup_arm64.exe。
+english.ArchitectureMismatchBody=The existing DeskBox installation at %1 is the native ARM64 build. This x64 installer would replace it with an emulated build, and every future update would stay on the x64 channel. To keep the native ARM64 build, run DeskBox_Setup_arm64.exe instead.
+japanese.ArchitectureMismatchBody=%1 の既存の DeskBox はネイティブ ARM64 版です。この x64 インストーラーはそれをエミュレーションで実行される x64 版に置き換え、今後の更新も x64 チャネルのままになります。ネイティブ ARM64 版を残すには、代わりに DeskBox_Setup_arm64.exe を実行してください。
+german.ArchitectureMismatchBody=Die vorhandene DeskBox-Installation unter %1 ist die native ARM64-Version. Dieses x64-Installationsprogramm würde sie durch eine emulierte x64-Version ersetzen, und alle künftigen Updates blieben auf dem x64-Kanal. Um die native ARM64-Version zu behalten, verwenden Sie stattdessen DeskBox_Setup_arm64.exe.
+brazilianportuguese.ArchitectureMismatchBody=A instalação existente do DeskBox em %1 é a versão ARM64 nativa. Este instalador x64 a substituiria por uma versão x64 emulada, e todas as atualizações futuras permaneceriam no canal x64. Para manter a versão ARM64 nativa, execute o DeskBox_Setup_arm64.exe.
 chinesesimplified.ConfirmStorageTitle=检测到 DeskBox 收纳目录中仍有内容
 chinesesimplified.ConfirmStorageBody=当前包含 %1 个文件夹、%2 个文件。
 chinesesimplified.ConfirmStorageFooter=卸载 DeskBox 不会删除这个目录，也不会删除里面的用户文件。%n请确认你已经知道这些文件的位置。是否继续卸载？
@@ -254,12 +261,16 @@ Source: "..\scripts\cleanup-deskbox-install.ps1"; Flags: dontcopy
 Source: "DeskBox.LegacyBundledRuntimeFiles.txt"; Flags: dontcopy
 Source: "{#MyAppReleaseDir}\DeskBox.InstallManifest.txt"; DestDir: "{tmp}"; DestName: "DeskBox.InstallManifest.current.txt"; Flags: ignoreversion deleteafterinstall
 Source: "{#MyAppReleaseDir}\*"; DestDir: "{app}"; Excludes: "DeskBox.Updater.*,deskbox_native.dll,deskbox_native.pdb,DeskBox.InstallManifest.txt"; Flags: ignoreversion recursesubdirs createallsubdirs
+#if DeskBoxNativeAot
 Source: "{#MyAppReleaseDir}\deskbox_native.dll"; DestDir: "{app}"; Flags: ignoreversion
+#endif
 Source: "{#MyAppReleaseDir}\DeskBox.Updater.*"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#MyAppReleaseDir}\DeskBox.InstallManifest.txt"; DestDir: "{app}"; Flags: ignoreversion; BeforeInstall: CleanupDeskBoxInstall
 #else
 Source: "{#MyAppReleaseDir}\*"; DestDir: "{app}"; Excludes: "DeskBox.Updater.*,deskbox_native.dll,deskbox_native.pdb"; Flags: ignoreversion recursesubdirs createallsubdirs
+#if DeskBoxNativeAot
 Source: "{#MyAppReleaseDir}\deskbox_native.dll"; DestDir: "{app}"; Flags: ignoreversion
+#endif
 Source: "{#MyAppReleaseDir}\DeskBox.Updater.*"; DestDir: "{app}"; Flags: ignoreversion
 #endif
 

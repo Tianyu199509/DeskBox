@@ -632,7 +632,11 @@ end;
 procedure StopDeskBoxProcess;
 begin
   Log('正在停止 DeskBox 进程。');
-  if not StopDeskBoxProcessesAtPath(ExpandConstant('{app}')) then
+  if StopDeskBoxProcessesAtPath(ExpandConstant('{app}')) then
+    // The uninstaller does not run Restart Manager, so give the killed
+    // processes a beat to release their file handles before DelTree.
+    Sleep(1500)
+  else
     Log('DeskBox uninstall could not stop only the current installation processes.');
 end;
 
@@ -823,11 +827,14 @@ begin
         'DeskBox-Recovery') then
       AppendFailedCleanupPath(FailedPaths, RecoveryPath);
 
+    // The product registry key carries the installer language and install
+    // state a re-install may want; it is purge data, so it belongs inside
+    // the purge branch. Outside it, a "keep app data" uninstall deleted it
+    // unconditionally (the admin branch never did — asymmetric).
+    if RegKeyExists(HKEY_CURRENT_USER, DeskBoxProductRegistryKey) and
+       not RegDeleteKeyIncludingSubkeys(HKEY_CURRENT_USER, DeskBoxProductRegistryKey) then
+      Log('DeskBox uninstall could not remove the DeskBox product registry key.');
   end;
-
-  if RegKeyExists(HKEY_CURRENT_USER, DeskBoxProductRegistryKey) and
-     not RegDeleteKeyIncludingSubkeys(HKEY_CURRENT_USER, DeskBoxProductRegistryKey) then
-    Log('DeskBox uninstall could not remove the DeskBox product registry key.');
 
   if FailedPaths <> '' then
     SuppressibleMsgBox(

@@ -68,14 +68,19 @@ internal static class Program
                 return RestartApp(options.AppPath) ? 0 : 3;
             }
 
+            // Wait for the parent to exit BEFORE touching the installer or
+            // deciding anything: restarting the app while the old instance
+            // still holds the single-instance mutex makes the new process a
+            // bare secondary that drops this result argument and exits,
+            // leaving the desktop without an app until the next manual start.
+            WaitForParentExit(options.ParentProcessId);
+
             if (string.IsNullOrWhiteSpace(options.InstallerPath) || !File.Exists(options.InstallerPath))
             {
                 Log("Installer not found.");
                 RestartAfterIncompleteUpdate(options, "failed");
                 return 2;
             }
-
-            WaitForParentExit(options.ParentProcessId);
 
             int exitCode = RunInstaller(options);
             if (exitCode == 0 && !string.IsNullOrWhiteSpace(options.AppPath) && File.Exists(options.AppPath))
@@ -157,6 +162,18 @@ internal static class Program
             startInfo.ArgumentList.Add(argument);
         }
 
+        // Inno's own log is the only place a failed silent setup explains
+        // itself; keep one per version under the updates root.
+        string? installerDirectory = Path.GetDirectoryName(options.InstallerPath);
+        string? updatesRoot = Path.GetDirectoryName(installerDirectory);
+        if (options.Silent &&
+            !string.IsNullOrWhiteSpace(updatesRoot) &&
+            !string.IsNullOrWhiteSpace(installerDirectory))
+        {
+            startInfo.ArgumentList.Add(
+                $"/LOG={Path.Combine(updatesRoot, $"installer-{Path.GetFileName(installerDirectory)}.log")}");
+        }
+
         Log(
             $"Starting installer: {options.InstallerPath}; " +
             $"target directory: {installDirectory}; scope: {installScope}; " +
@@ -168,7 +185,24 @@ internal static class Program
             return 3;
         }
 
-        process.WaitForExit();
+        // A wedged installer (stuck custom setup code, full disk) must not
+        // strand the updater forever: the app is already gone, so past the
+        // generous ceiling restart with the failure outcome instead.
+        const int InstallerTimeoutMilliseconds = 30 * 60 * 1000;
+        if (!process.WaitForExit(InstallerTimeoutMilliseconds))
+        {
+            try
+            {
+                process.Kill();
+            }
+            catch (Exception killException)
+            {
+                Log($"Failed to kill the timed-out installer: {killException.Message}");
+            }
+
+            Log($"Installer timed out after {InstallerTimeoutMilliseconds / 60_000} minutes.");
+            return 5;
+        }
         Log($"Installer exited with code {process.ExitCode}.");
         if (process.ExitCode != 0)
         {
@@ -448,7 +482,7 @@ internal static class Program
         // keeps that outcome searchable in the log.
         for (int attempt = 1; attempt <= 3; attempt++)
         {
-            if (TryStartApp(appPath, appPath, updateInstallOutcome))
+            if (TryStartApp(appPath, Path.GetDirectoryName(appPath), updateInstallOutcome))
             {
                 Log($"Restarting app: {appPath} (attempt {attempt})");
                 return true;

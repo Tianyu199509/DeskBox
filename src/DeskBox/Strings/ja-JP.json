@@ -2739,7 +2739,7 @@
   "Settings.CloudBackup.SyncNotice.Title": "現在のバージョン：バックアップと復元",
   "Settings.CloudBackup.SyncNotice.Description": "WebDAV（Nextcloud、Nutstoreなど）への接続、手動・定期自動バックアップ、保持数の管理、他デバイスでのスナップショットの閲覧と復元に対応しています。2台以上のデバイス間でのリアルタイム同期は、今後のバージョンで順次提供予定です。",
   "Settings.Backup.StoreUninstallDataNotice.Title": "ストア版をアンインストールするとローカルのバックアップスナップショットが削除されます",
-  "Settings.Backup.StoreUninstallDataNotice.Description": "Microsoft Store からインストールした場合、ローカルのバックアップと復元のスナップショットはシステムが管理するアプリデータフォルダーに保存され、アプリのアンインストール時に一緒に削除されます。WebDAV のクラウドバックアップは遠隔のサーバーに保存されるため、アンインストールの影響を受けません。ローカルのスナップショットを残すには、事前にエクスポートするか、クラウドバックアップを利用してください。",
+  "Settings.Backup.StoreUninstallDataNotice.Description": "Microsoft Store からインストールした場合、ローカルのバックアップと復元のスナップショットはシステムが管理するアプリデータフォルダーに保存され、アプリのアンインストール時に一緒に削除されます。カスタムバックアップフォルダーはアプリデータ（AppData）フォルダーの外（例えば「ドキュメント」の下）に指定してください。AppData 内のフォルダーは同様にストアのサンドボックス管理下にあり、アンインストール時に一緒に削除されます。WebDAV のクラウドバックアップは遠隔のサーバーに保存されるため、アンインストールの影響を受けません。ローカルのスナップショットを残すには、事前にエクスポートするか、クラウドバックアップを利用してください。",
   "Settings.CloudBackup.Provider.Title": "プロバイダー",
   "Settings.CloudBackup.Provider.Description": "スナップショットは WebDAV でアップロードされます。Nextcloud、Nutstore、大多数の NAS に対応しています。",
   "Settings.CloudBackup.Provider.Off": "オフ",

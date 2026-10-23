@@ -475,12 +475,18 @@ public sealed class ModuleBoundaryContractTests
         ["src/DeskBox/App.AotTodoNotificationForwardingSmoke.cs"] = 1,
         ["src/DeskBox/App.AotTodoNotificationLifecycleSmoke.cs"] = 1,
         ["src/DeskBox/App.AotTodoRecurrenceReminderSmoke.cs"] = 1,
-        ["src/DeskBox/App.xaml.cs"] = 3,
+        // +1: the secondary-instance update-result forwarder deletes its
+        // pending marker file under the app data root after the primary
+        // consumes it (TakePendingUpdateInstallResult).
+        ["src/DeskBox/App.xaml.cs"] = 4,
         ["src/DeskBox/Helpers/NativeDropTarget.cs"] = 5,
         ["src/DeskBox/Services/AotShellMoveFixture.cs"] = 1,
         // +1: retiring a downloaded installer reclaims its version-scoped
         // directory under the updates root (TryDeleteRetiredInstallerDirectory).
-        ["src/DeskBox/Services/AppUpdateService.cs"] = 6,
+        // +2: the startup sweep (PruneStaleInstallerDirectories) deletes
+        // stale version directories and stale installer logs under the same
+        // updates root.
+        ["src/DeskBox/Services/AppUpdateService.cs"] = 8,
         ["src/DeskBox/Services/AttachmentStorageService.cs"] = 1,
         // Cloud backup orchestrator cleans up its own %TEMP% upload staging
         // directory — it never touches the data root (that stays inside

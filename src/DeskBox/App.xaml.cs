@@ -84,6 +84,7 @@ public partial class App : Application
     private const string QuickCaptureFeatureRuntimeId = "quick-capture";
     private const string TodoRemindersFeatureRuntimeId = "todo-reminders";
     private const string PendingJumpListArgumentFileName = "pending-jumplist-arg.txt";
+    private const string PendingUpdateInstallResultFileName = "pending-update-install-result.txt";
     private const string VerboseLoggingEnvironmentVariable = "DESKBOX_VERBOSE_LOG";
     private static readonly bool EnableVerboseLogging = IsEnabledEnvironmentValue(
         Environment.GetEnvironmentVariable(VerboseLoggingEnvironmentVariable));
@@ -95,6 +96,9 @@ public partial class App : Application
     private static readonly string PendingJumpListArgumentPath = Path.Combine(
         DeskBoxDataPathService.Current.RootPath,
         PendingJumpListArgumentFileName);
+    private static readonly string PendingUpdateInstallResultPath = Path.Combine(
+        DeskBoxDataPathService.Current.RootPath,
+        PendingUpdateInstallResultFileName);
     private static readonly System.Collections.Concurrent.ConcurrentQueue<string> s_logQueue = new();
     private static readonly SemaphoreSlim s_logSignal = new(0);
     private static int s_logWorkerStarted;
@@ -390,6 +394,18 @@ public partial class App : Application
                 if (jumpListArg is not null)
                 {
                     StorePendingJumpListArgument(jumpListArg);
+                }
+
+                // The updater restarts the app with the update-result
+                // argument after a failed install; when this secondary
+                // launch races a still-living primary, forward the outcome
+                // the same way instead of dropping it (the dialog would
+                // otherwise never appear anywhere).
+                string? pendingUpdateResult = TryGetUpdateInstallOutcome(
+                    Environment.GetCommandLineArgs());
+                if (!string.IsNullOrWhiteSpace(pendingUpdateResult))
+                {
+                    StorePendingUpdateInstallResult(pendingUpdateResult);
                 }
             }
 
@@ -1603,13 +1619,34 @@ public partial class App : Application
             // Unattended launches defer the whole block — the offer surfaces on
             // the first external activation instead.
             RecoveryOfferOutcome recoveryOfferOutcome = RecoveryOfferOutcome.NotOffered;
+            bool recoveryDecisionPending = false;
             if (!IsStartupMode && !IsShuttingDown)
             {
-                recoveryOfferOutcome = await ShowRecoveryOfferIfNeededAsync();
+                // The offer window blocks the pipeline on a human decision:
+                // keep feeding the startup watchdog while it is open so an
+                // unanswered question on a tray-less machine cannot become a
+                // "startup failed" fatal box — the surface step that marks
+                // the lifeline runs only after this await.
+                Task<RecoveryOfferOutcome> offerTask = ShowRecoveryOfferIfNeededAsync();
+                while (!offerTask.IsCompleted)
+                {
+                    MarkStartupProgress();
+                    await Task.WhenAny(offerTask, Task.Delay(TimeSpan.FromSeconds(30)));
+                }
+
+                recoveryOfferOutcome = await offerTask;
                 if (recoveryOfferOutcome == RecoveryOfferOutcome.RestoreScheduled)
                 {
                     return;
                 }
+
+                // A Dismissed return from an in-flight call means "the offer
+                // is being asked elsewhere", not "declined": the activation
+                // path defers the first-run flows while the window is open,
+                // and the pipeline must honor the same contract or it walks
+                // a wipe victim through onboarding under the open question.
+                recoveryDecisionPending =
+                    _recoveryOfferWindow is not null || _recoveryOfferInFlight;
             }
 
             // A restore may also have been scheduled from an activation that
@@ -1621,11 +1658,14 @@ public partial class App : Application
                 return;
             }
 
-            await RunOptionalStartupStepAsync(
-                "initial-file-widget-setup",
-                () => EnsureInitialFileWidgetSetupAsync(
-                    isInteractiveLaunch: !IsStartupMode,
-                    allowDefaultAfterRecoveryFailure: recoveryOfferOutcome == RecoveryOfferOutcome.FreshStart));
+            if (!recoveryDecisionPending)
+            {
+                await RunOptionalStartupStepAsync(
+                    "initial-file-widget-setup",
+                    () => EnsureInitialFileWidgetSetupAsync(
+                        isInteractiveLaunch: !IsStartupMode,
+                        allowDefaultAfterRecoveryFailure: recoveryOfferOutcome == RecoveryOfferOutcome.FreshStart));
+            }
             await RunOptionalStartupStepAsync(
                 "managed-storage-desktop-shortcut",
                 () => ManagedStorageDesktopShortcutService.SyncAsync());
@@ -1671,15 +1711,21 @@ public partial class App : Application
                         SettingsService,
                         ShowDesktopAutoOrganizationTargetUnavailableNotification)));
 
-            await RunOptionalStartupStepAsync(
-                "onboarding",
-                () => EnsureOnboardingAsync(isInteractiveLaunch: !IsStartupMode));
+            if (!recoveryDecisionPending)
+            {
+                await RunOptionalStartupStepAsync(
+                    "onboarding",
+                    () => EnsureOnboardingAsync(isInteractiveLaunch: !IsStartupMode));
+            }
 
             RunOptionalStartupStep(
                 "release-notes-after-update",
                 () => ShowReleaseNotesAfterUpdateOnce());
 
             RunOptionalStartupStep("background-update-check", ScheduleBackgroundUpdateCheck);
+            RunOptionalStartupStep(
+                "update-installer-prune",
+                () => AppUpdateService.PruneStaleInstallerDirectories());
             RunOptionalStartupStep("diagnostics-service", () =>
             {
                 _diagnosticsService = new AppDiagnosticsService(UiDispatcherQueue);
@@ -2443,6 +2489,21 @@ public partial class App : Application
 
     private void OpenAppReleaseNotesWindow(string version)
     {
+        OpenAppReleaseNotesWindow(
+            manifest: null,
+            version,
+            manifestLoader: cancellationToken => LoadReleaseNotesManifestForVersionAsync(version, cancellationToken));
+    }
+
+    // Single flight for every release-notes opener (the automatic post-
+    // update window, the update toast, and the settings-page button) so two
+    // windows can never stack for the same surface.
+    internal void OpenAppReleaseNotesWindow(
+        AppUpdateManifest? manifest,
+        string version,
+        Func<CancellationToken, Task<AppUpdateManifest?>>? manifestLoader,
+        IntPtr ownerHwnd = default)
+    {
         if (IsShuttingDown)
         {
             return;
@@ -2453,11 +2514,11 @@ public partial class App : Application
             if (_appReleaseNotesWindow is null)
             {
                 var window = new ReleaseNotesWindow(
-                    manifest: null,
+                    manifest,
                     version,
                     ThemeService,
                     LocalizationService,
-                    manifestLoader: cancellationToken => LoadReleaseNotesManifestForVersionAsync(version, cancellationToken));
+                    manifestLoader);
                 _appReleaseNotesWindow = window;
                 window.Closed += (_, _) =>
                 {
@@ -2467,8 +2528,16 @@ public partial class App : Application
                     }
                 };
             }
+            else if (manifest is not null)
+            {
+                _appReleaseNotesWindow.UpdateManifest(manifest, version);
+            }
+            else
+            {
+                _appReleaseNotesWindow.RetryManifestLoad();
+            }
 
-            _appReleaseNotesWindow.ShowWindow();
+            _appReleaseNotesWindow.ShowWindow(ownerHwnd);
         }
         catch (Exception ex)
         {
@@ -3273,6 +3342,40 @@ public partial class App : Application
         }
     }
 
+    private static void StorePendingUpdateInstallResult(string outcome)
+    {
+        try
+        {
+            Directory.CreateDirectory(DeskBoxDataPathService.Current.RootPath);
+            File.WriteAllText(PendingUpdateInstallResultPath, outcome);
+            Log($"[Update] Forwarded update install result to running instance outcome={outcome}");
+        }
+        catch (Exception ex)
+        {
+            Log($"[Update] Failed to forward update install result: {ex}");
+        }
+    }
+
+    private static string? TakePendingUpdateInstallResult()
+    {
+        try
+        {
+            if (!File.Exists(PendingUpdateInstallResultPath))
+            {
+                return null;
+            }
+
+            string outcome = File.ReadAllText(PendingUpdateInstallResultPath);
+            File.Delete(PendingUpdateInstallResultPath);
+            return string.IsNullOrWhiteSpace(outcome) ? null : outcome;
+        }
+        catch (Exception ex)
+        {
+            Log($"[Update] Failed to take pending update install result: {ex.Message}");
+            return null;
+        }
+    }
+
     private static string? TakePendingJumpListArgument()
     {
         try
@@ -3607,6 +3710,17 @@ public partial class App : Application
                     activationHandled = true;
                 }
 
+                // Forwarded from a secondary launch that raced a living
+                // primary: show the same About + result dialog the direct
+                // --update-install-result startup path shows.
+                string? pendingUpdateInstallOutcome = TakePendingUpdateInstallResult();
+                if (!string.IsNullOrWhiteSpace(pendingUpdateInstallOutcome))
+                {
+                    ShowSettings("About");
+                    _settingsWindow?.QueueUpdateInstallResultDialog(pendingUpdateInstallOutcome);
+                    activationHandled = true;
+                }
+
                 if (activationHandled)
                 {
                     continue;
@@ -3658,12 +3772,6 @@ public partial class App : Application
                     continue;
                 }
 
-                // The first interactive activation of a startup-mode session
-                // stands in for the startup pipeline's deferred
-                // release-notes step (the recovery offer and onboarding
-                // above outrank it).
-                ShowReleaseNotesAfterUpdateOnce(isInteractiveActivation: true);
-
                 if (WidgetManager is not null)
                 {
                     bool hasConfiguredWidgets = SettingsService.Settings.Widgets.Any(widget =>
@@ -3689,6 +3797,13 @@ public partial class App : Application
                 }
 
                 OpenSettings();
+
+                // The first interactive activation of a startup-mode session
+                // stands in for the startup pipeline's deferred
+                // release-notes step (the recovery offer and onboarding
+                // above outrank it). Shown after OpenSettings so the notes
+                // window is the one that lands on top.
+                ShowReleaseNotesAfterUpdateOnce(isInteractiveActivation: true);
             }
             while (_externalActivationRequestedWhileBusy);
         }
@@ -4675,16 +4790,26 @@ public partial class App : Application
                     ["section"] = "BackupRestoreSettings"
                 }) != true)
         {
-            _trayIcon?.ShowNotification(
-                title,
-                message,
-                isError ? NotificationIcon.Error : NotificationIcon.Info,
-                customIconHandle: null,
-                largeIcon: false,
-                sound: false,
-                respectQuietTime: true,
-                realtime: false,
-                timeout: TimeSpan.FromSeconds(10));
+            // Same guard as every other balloon fallback: the tray icon may
+            // be absent (the hidden style removes it at startup), and
+            // ShowNotification throws rather than no-ops in that state.
+            try
+            {
+                _trayIcon?.ShowNotification(
+                    title,
+                    message,
+                    isError ? NotificationIcon.Error : NotificationIcon.Info,
+                    customIconHandle: null,
+                    largeIcon: false,
+                    sound: false,
+                    respectQuietTime: true,
+                    realtime: false,
+                    timeout: TimeSpan.FromSeconds(10));
+            }
+            catch (Exception ex)
+            {
+                Log($"[Recovery] Tray balloon fallback failed: {ex.Message}");
+            }
         }
     }
 

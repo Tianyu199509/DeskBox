@@ -31,6 +31,8 @@ public sealed class StoreAppUpdateService : IAppUpdateService
     public bool IsDownloadInProgress => false;
     public void ClearLastDownloadedInstaller() { }
 
+    public void PruneStaleInstallerDirectories() { }
+
     public Task<AppUpdateCheckResult> CheckForUpdatesAsync(CancellationToken cancellationToken = default)
     {
         return CheckForUpdatesAsync(AppUpdateService.GetCurrentAppVersion(), cancellationToken);
@@ -77,8 +79,21 @@ public sealed class StoreAppUpdateService : IAppUpdateService
                 currentVersion,
                 manifest));
         }
-        catch (Exception ex) when (ex is COMException or InvalidOperationException or TaskCanceledException)
+        catch (TaskCanceledException)
         {
+            // Cancellation here is the re-entry path cancelling a previous
+            // check; reporting it as "store unavailable" flashes a failure
+            // state that the newer check immediately overwrites.
+            return SetLastCheckResult(new AppUpdateCheckResult(
+                AppUpdateCheckStatus.Failed,
+                currentVersion,
+                errorMessage: $"{StoreCanceledError}:canceled"));
+        }
+        catch (Exception ex)
+        {
+            // Broad catch on purpose: WinRT store errors surface as bare
+            // System.Exception shapes (signed-out, offline) that the old
+            // COM/invalid-operation filter let escape to the global handler.
             return SetLastCheckResult(new AppUpdateCheckResult(
                 AppUpdateCheckStatus.Failed,
                 currentVersion,
@@ -143,8 +158,16 @@ public sealed class StoreAppUpdateService : IAppUpdateService
                 AppUpdateDownloadFailureKind.Network,
                 $"{StoreInstallFailedError}:{overallState}");
         }
-        catch (Exception ex) when (ex is COMException or InvalidOperationException or TaskCanceledException)
+        catch (TaskCanceledException)
         {
+            return AppUpdateDownloadResult.Failed(
+                AppUpdateDownloadFailureKind.Network,
+                StoreCanceledError);
+        }
+        catch (Exception ex)
+        {
+            // Broad catch on purpose, mirroring the check path: bare WinRT
+            // exceptions must not escape to the global handler.
             return AppUpdateDownloadResult.Failed(
                 AppUpdateDownloadFailureKind.Network,
                 $"{StoreUnavailableError}:{ex.Message}");

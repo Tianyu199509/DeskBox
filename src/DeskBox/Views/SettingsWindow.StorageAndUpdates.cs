@@ -399,7 +399,13 @@ public sealed partial class SettingsWindow
                 DefaultButton = ContentDialogButton.Primary
             };
 
-            if (await dialog.ShowAsync() != ContentDialogResult.Primary) return;
+            // Routed through the coordinator: a toast "update now" click can
+            // reach this flow while another dialog is already open, and a
+            // raw ShowAsync would throw and be swallowed as a silent no-op.
+            // Being displaced here reads as Cancel — the install simply does
+            // not start.
+            ContentDialogResult confirmation = await ShowDialogWhenFreeAsync(() => dialog);
+            if (confirmation != ContentDialogResult.Primary) return;
 
             if (!await CreatePreUpdateRecoverySnapshotAsync())
             {
@@ -611,34 +617,14 @@ public sealed partial class SettingsWindow
     {
         // The button is always visible: when no check has produced a
         // manifest yet the window still opens and resolves its manifest
-        // lazily inside itself.
+        // lazily inside itself. Routed through App's single flight so the
+        // settings button and the automatic/toast openers can never show
+        // two release-notes windows at once.
         AppUpdateManifest? manifest = ViewModel.LatestUpdateManifest;
-        if (_releaseNotesWindow is null)
-        {
-            var releaseNotesWindow = new ReleaseNotesWindow(
-                manifest,
-                ViewModel.AppVersion,
-                _themeService,
-                _localizationService,
-                manifest is null ? ViewModel.FetchLatestManifestForReleaseNotesAsync : null);
-            _releaseNotesWindow = releaseNotesWindow;
-            releaseNotesWindow.Closed += (_, _) =>
-            {
-                if (ReferenceEquals(_releaseNotesWindow, releaseNotesWindow))
-                {
-                    _releaseNotesWindow = null;
-                }
-            };
-        }
-        else if (manifest is not null)
-        {
-            _releaseNotesWindow.UpdateManifest(manifest, ViewModel.AppVersion);
-        }
-        else
-        {
-            _releaseNotesWindow.RetryManifestLoad();
-        }
-
-        _releaseNotesWindow.ShowWindow(_hWnd);
+        App.Current.OpenAppReleaseNotesWindow(
+            manifest,
+            ViewModel.AppVersion,
+            manifest is null ? ViewModel.FetchLatestManifestForReleaseNotesAsync : null,
+            _hWnd);
     }
 }

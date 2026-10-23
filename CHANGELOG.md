@@ -32,6 +32,7 @@
 - Right-clicking a todo item and hovering into the color submenu no longer terminates the app on Windows 11 25H2: the unselected color dot is now drawn as pure geometry instead of a glyph pinned to a font whose file 25H2 removed while leaving its registration behind — the first measure of that menu failed fatally.
 - Menus opened from a stack popover no longer render beneath it: while such a flyout is open, its bridge window is lifted into the topmost band alongside the popover, so the menu stays clickable.
 - Per-widget backgrounds and title icons no longer keep showing the previous image after being changed: assets now load through a stream backed by a source-keyed cache, sidestepping the framework's URI-keyed image cache that has no eviction.
+- Running the x64 setup over a native ARM64 install is now refused with an explanation instead of silently replacing it with the emulated build (which would strand every future update on the x64 channel); deliberately switching to the native ARM64 build in the other direction keeps working.
 
 ### 中文
 
@@ -63,6 +64,7 @@
 - 待办格子右键「颜色标记」子菜单不再在 Windows 11 25H2 上闪退：未选中的颜色圆点改为纯几何绘制，不再钉在 25H2 已删除文件却残留注册表项的字体上——该菜单首次度量即致命失败并终止进程。
 - 叠放弹窗上打开的菜单不再被压在弹窗下面：弹窗内菜单打开期间，其桥接窗口被抬入置顶带与弹窗同层，菜单始终可点。
 - 每格背景与标题图标换图后不再残留旧图：资产图片改为经流式加载并按来源键缓存，绕开框架按键缓存且无法逐出的 URI 图像缓存。
+- 在原生 ARM64 安装上运行 x64 安装包现在会被拒绝并说明原因，而不是静默替换成模拟运行的 x64 版本（那会让后续所有更新都停留在 x64 通道）；反向刻意切换到原生 ARM64 版本不受影响。
 
 ## 1.5.8 - 2026-10-14
 

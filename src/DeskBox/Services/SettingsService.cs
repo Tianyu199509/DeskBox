@@ -1052,10 +1052,30 @@ settings.FocusClickedWidgetOnRaise = false;
     {
         if (_settingsSchemaNewerThanBuild)
         {
-            App.Log(
-                "[SettingsService] Save refused: settings.json schema " +
-                $"{_settings.SchemaVersion} is newer than this build understands; " +
-                "settings changes cannot persist");
+            string schemaNewerReason =
+                "settings.json schema " + _settings.SchemaVersion +
+                " is newer than this build understands; settings changes cannot persist";
+            App.Log($"[SettingsService] Save refused: {schemaNewerReason}");
+            // Report the refusal through the same failure channel the
+            // layout store uses: a downgrade session silently dropping
+            // every settings change (while widget-layout refusals DO warn)
+            // is the inconsistent half the user cannot diagnose.
+            var schemaNewerFailure = new SettingsPersistenceFailure(
+                "save",
+                schemaNewerReason,
+                DateTimeOffset.UtcNow);
+            LastPersistenceFailure = schemaNewerFailure;
+            try
+            {
+                PersistenceFailed?.Invoke(schemaNewerFailure);
+            }
+            catch (Exception notificationException)
+            {
+                App.Log(
+                    $"[SettingsService] Persistence failure observer threw: " +
+                    notificationException);
+            }
+
             return false;
         }
 

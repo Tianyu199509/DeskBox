@@ -407,6 +407,8 @@ public sealed partial class SettingsWindow
             }
         };
 
-        await dialog.ShowAsync();
+        // Coordinator-routed like the update dialogs: this surfaces failure
+        // notices whose triggers can land while another dialog is open.
+        await ShowDialogWhenFreeAsync(() => dialog);
     }
 }

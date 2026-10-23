@@ -23,7 +23,10 @@
   </Properties>
 
   <Dependencies>
-    <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.19041.0" MaxVersionTested="10.0.26100.0" />
+    <!-- MaxVersionTested stays at the TFM floor (22621): the build pipeline
+         regenerates the deployed manifest from the TFM anyway, and a source
+         value above it never took effect — aligned to reality. -->
+    <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.19041.0" MaxVersionTested="10.0.22621.0" />
   </Dependencies>
 
   <Resources>

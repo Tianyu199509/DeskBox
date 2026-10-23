@@ -67,6 +67,7 @@ public sealed partial class AppUpdateService : IAppUpdateService
     private string? _lastDownloadedInstallerPath;
     private string? _lastDownloadedVersion;
     private int _downloadInProgress;
+    private volatile bool _installerHelperArmed;
 
     public string? LastDownloadedInstallerPath => _lastDownloadedInstallerPath;
     public bool IsDownloadInProgress => Volatile.Read(ref _downloadInProgress) != 0;
@@ -112,6 +113,69 @@ public sealed partial class AppUpdateService : IAppUpdateService
         catch (Exception ex)
         {
             App.Log($"[Update] Failed to delete retired installer directory: {ex.Message}");
+        }
+    }
+
+    // One successful update leaves its installer directory behind: the
+    // process that downloaded it exits for the install, and the next process
+    // starts with empty download fields, so the in-session retirement above
+    // never fires for it. Sweep the updates root at startup: keep only the
+    // running version's directory (still a retry source until the first
+    // check retires it), the updater helper, the offline release-notes
+    // cache, and the current version's installer log.
+    public void PruneStaleInstallerDirectories()
+    {
+        try
+        {
+            string currentSegment = SanitizePathSegment(GetCurrentAppVersion());
+            foreach (string directory in Directory.EnumerateDirectories(_updateRootPath))
+            {
+                string name = Path.GetFileName(directory);
+                if (string.Equals(name, currentSegment, StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(name, "helper", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(name, "release-notes", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                try
+                {
+                    Directory.Delete(directory, recursive: true);
+                    App.Log($"[Update] Pruned stale installer directory '{name}'");
+                }
+                catch (Exception ex)
+                {
+                    App.Log($"[Update] Failed to prune stale installer directory '{name}': {ex.Message}");
+                }
+            }
+
+            string currentLogName = $"installer-{currentSegment}.log";
+            foreach (string logFile in Directory.EnumerateFiles(
+                         _updateRootPath,
+                         "installer-*.log"))
+            {
+                if (string.Equals(
+                        Path.GetFileName(logFile),
+                        currentLogName,
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                try
+                {
+                    File.Delete(logFile);
+                    App.Log($"[Update] Pruned stale installer log '{Path.GetFileName(logFile)}'");
+                }
+                catch (Exception ex)
+                {
+                    App.Log($"[Update] Failed to prune stale installer log: {ex.Message}");
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            App.Log($"[Update] Failed to sweep the updates root: {ex.Message}");
         }
     }
 
@@ -369,6 +433,11 @@ public sealed partial class AppUpdateService : IAppUpdateService
         {
             return AppUpdateInstallResult.Failed("The downloaded installer no longer exists.");
         }
+
+        // From here to process exit this app hands the installer over to the
+        // detached updater: a periodic check landing in that window must not
+        // retire (delete) the directory the armed installer lives in.
+        _installerHelperArmed = true;
 
         string? appPath = Environment.ProcessPath;
         if (string.IsNullOrWhiteSpace(appPath) || !File.Exists(appPath))
@@ -809,12 +878,20 @@ public sealed partial class AppUpdateService : IAppUpdateService
         if (result.IsUpdateAvailable && result.Manifest is { } offered &&
             !string.Equals(offered.Version, _lastDownloadedVersion, StringComparison.Ordinal))
         {
-            TryDeleteRetiredInstallerDirectory();
+            if (!_installerHelperArmed)
+            {
+                TryDeleteRetiredInstallerDirectory();
+            }
+
             ClearLastDownloadedInstaller();
         }
         else if (result.Status == AppUpdateCheckStatus.UpToDate && _lastDownloadedInstallerPath is not null)
         {
-            TryDeleteRetiredInstallerDirectory();
+            if (!_installerHelperArmed)
+            {
+                TryDeleteRetiredInstallerDirectory();
+            }
+
             ClearLastDownloadedInstaller();
         }
 

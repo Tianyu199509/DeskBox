@@ -40,6 +40,14 @@ public interface IAppUpdateService
         IProgress<AppUpdateDownloadProgress>? progress = null,
         CancellationToken cancellationToken = default);
     void ClearLastDownloadedInstaller();
+
+    /// <summary>
+    /// Reclaims installer directories and logs left behind by updates that
+    /// completed in a previous process (the direct service's download state
+    /// is per-session). No-op on channels that never download installers.
+    /// </summary>
+    void PruneStaleInstallerDirectories();
+
     AppUpdateInstallResult StartInstallerHelper(
         string installerPath,
         bool silent = true,

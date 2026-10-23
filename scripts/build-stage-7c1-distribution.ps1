@@ -299,6 +299,15 @@ if ($null -eq $installer -or $installer.Name -ne "$installerOutputBaseName.exe")
     throw "The Native AOT Inno installer was not produced with the expected name '$installerOutputBaseName.exe'."
 }
 
+# Per-installer .sha256 sidecar (bare 64-hex form, the 1.5.6+ convention the
+# updater's ExtractSha256FromText and docs/code-signing.md both consume).
+# Generated from the produced file so it can never drift from a manual step;
+# when signing goes live it MUST be regenerated from the signed file.
+$installerSidecarPath = "$($installer.FullName).sha256"
+$installerSha256 = (Get-FileHash -LiteralPath $installer.FullName -Algorithm SHA256).Hash
+[IO.File]::WriteAllText($installerSidecarPath, $installerSha256)
+Write-Host "Wrote installer hash sidecar '$installerSidecarPath'."
+
 $storeOutputDirectory = Join-Path $OutputDirectory "store"
 $storeBuildArguments = @{
     Configuration = $configuration

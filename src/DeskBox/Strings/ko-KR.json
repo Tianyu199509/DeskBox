@@ -2739,7 +2739,7 @@
   "Settings.CloudBackup.SyncNotice.Title": "현재 버전: 백업 및 복원",
   "Settings.CloudBackup.SyncNotice.Description": "WebDAV(Jianguoyun, Nextcloud 등) 연결, 수동 및 예약 자동 백업, 보관 개수 제어, 다른 디바이스에서 스냅샷 찾아보기 및 복원을 지원합니다. 두 대 이상의 디바이스 간 실시간 동기화는 이후 버전에 순차적으로 추가될 예정입니다.",
   "Settings.Backup.StoreUninstallDataNotice.Title": "스토어 버전을 제거하면 로컬 백업 스냅샷이 삭제됩니다",
-  "Settings.Backup.StoreUninstallDataNotice.Description": "Microsoft Store에서 설치한 버전은 로컬 백업 및 복원 스냅샷이 시스템 관리 앱 데이터 폴더에 저장되며, 앱을 제거하면 함께 삭제됩니다. WebDAV 클라우드 백업은 원격 서버에 저장되므로 제거 여부에 영향을 받지 않습니다. 로컬 스냅샷을 유지하려면 먼저 내보내거나 클라우드 백업을 사용하세요.",
+  "Settings.Backup.StoreUninstallDataNotice.Description": "Microsoft Store에서 설치한 버전은 로컬 백업 및 복원 스냅샷이 시스템 관리 앱 데이터 폴더에 저장되며, 앱을 제거하면 함께 삭제됩니다. 사용자 지정 백업 폴더는 앱 데이터(AppData) 폴더 외부(예: 문서 폴더)에 지정해야 합니다. AppData 내부의 모든 폴더는 같은 방식으로 스토어 샌드박스의 관리를 받아 앱 제거 시 함께 삭제됩니다. WebDAV 클라우드 백업은 원격 서버에 저장되므로 제거 여부에 영향을 받지 않습니다. 로컬 스냅샷을 유지하려면 먼저 내보내거나 클라우드 백업을 사용하세요.",
   "Settings.CloudBackup.Provider.Title": "백업 공급자",
   "Settings.CloudBackup.Provider.Description": "스냅샷을 WebDAV로 업로드합니다. Nextcloud, Jianguoyun 및 대부분의 NAS와 호환됩니다.",
   "Settings.CloudBackup.Provider.Off": "끄기",

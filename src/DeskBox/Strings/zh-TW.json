@@ -2739,7 +2739,7 @@
   "Settings.CloudBackup.SyncNotice.Title": "目前版本：備份與還原",
   "Settings.CloudBackup.SyncNotice.Description": "支援連接 WebDAV（Nextcloud、堅果雲等）、手動與定時自動備份、保留份數控制，以及在其他裝置上瀏覽與還原快照。雙裝置、多裝置的即時同步將於後續版本陸續更新。",
   "Settings.Backup.StoreUninstallDataNotice.Title": "解除安裝商店版會刪除本機備份快照",
-  "Settings.Backup.StoreUninstallDataNotice.Description": "透過 Microsoft Store 安裝的版本，本機備份與還原快照儲存在系統管理的應用程式資料目錄中，解除安裝應用程式時會一併刪除。WebDAV 雲端備份儲存在遠端伺服器，不受解除安裝影響。如需保留本機快照，請先匯出或使用雲端備份。",
+  "Settings.Backup.StoreUninstallDataNotice.Description": "透過 Microsoft Store 安裝的版本，本機備份與還原快照儲存在系統管理的應用程式資料目錄中，解除安裝應用程式時會一併刪除。自訂備份目錄需選擇應用程式資料（AppData）以外的位置（如文件資料夾）——AppData 內的任何目錄同樣受商店沙箱管理，解除安裝時會一併刪除。WebDAV 雲端備份儲存在遠端伺服器，不受解除安裝影響。如需保留本機快照，請先匯出或使用雲端備份。",
   "Settings.CloudBackup.Provider.Title": "備份管道",
   "Settings.CloudBackup.Provider.Description": "快照上傳到 WebDAV，相容 Nextcloud、堅果雲與多數 NAS。",
   "Settings.CloudBackup.Provider.Off": "關閉",

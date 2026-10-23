@@ -80,7 +80,6 @@ public sealed partial class SettingsWindow : Window
     private bool _isSyncingNavigationSelection;
     private bool _isSelectingCity;
     private bool _isRefreshingBackupSnapshots;
-    private ReleaseNotesWindow? _releaseNotesWindow;
     private string _currentSettingsSection = "General";
     private readonly Dictionary<string, FrameworkElement> _settingsSectionElements = new(StringComparer.Ordinal);
     private int _settingsNavigationGeneration;
@@ -510,8 +509,8 @@ public sealed partial class SettingsWindow : Window
         Bindings.StopTracking();
         Localized.UntrackTree(SettingsRoot);
         SettingsRoot.DataContext = null;
-        _releaseNotesWindow?.Close();
-        _releaseNotesWindow = null;
+        // The release-notes window is owned by App's single flight now; it
+        // outlives this window on purpose and is closed by shutdown steps.
         ClearFeatureWidgetRows();
         ManagedStorageFolderList?.Children.Clear();
         ViewModel.Dispose();

@@ -260,10 +260,68 @@ begin
   end;
 end;
 
+const
+  // PE machine field (IMAGE_FILE_HEADER.Machine) of an ARM64 image. The
+  // guard below only blocks this one direction: the x64 installer is the
+  // default download everywhere, so it is the one that lands on ARM64
+  // machines by accident; the deliberate x64 -> ARM64 conversion stays open.
+  DESKBOX_PE_MACHINE_ARM64 = $AA64;
+
+function ExpectedInstallerPeMachine: Integer;
+begin
+  Result := {#DeskBoxInstallerPeMachineHex};
+end;
+
+// Reads the PE machine field of an executable. Returns False when the file
+// is missing, too short, or not a PE image — callers treat that as
+// "unknown" and never block on it. TFileStream.Read stores each byte in the
+// corresponding character of the string, so high bytes survive as chars
+// U+0080..U+00FF and Ord() recovers the exact byte value.
+function TryReadPeMachine(FileName: string; var Machine: Integer): Boolean;
+var
+  Stream: TFileStream;
+  S: string;
+  PeOffset: Integer;
+begin
+  Result := False;
+  Machine := 0;
+  if not FileExists(FileName) then
+    Exit;
+  try
+    Stream := TFileStream.Create(FileName, fmOpenRead or fmShareDenyNone);
+    try
+      if Stream.Size < $40 then
+        Exit;
+      Stream.Seek($3C, soFromBeginning);
+      S := '';
+      if Stream.Read(S, 4) <> 4 then
+        Exit;
+      PeOffset := Ord(S[1]) or (Ord(S[2]) shl 8) or (Ord(S[3]) shl 16) or
+        (Ord(S[4]) shl 24);
+      if (PeOffset < 0) or (PeOffset + 6 > Stream.Size) then
+        Exit;
+      Stream.Seek(PeOffset, soFromBeginning);
+      S := '';
+      if Stream.Read(S, 6) <> 6 then
+        Exit;
+      if (S[1] <> 'P') or (S[2] <> 'E') or (S[3] <> #0) or (S[4] <> #0) then
+        Exit;
+      Machine := Ord(S[5]) or (Ord(S[6]) shl 8);
+      Result := True;
+    finally
+      Stream.Free;
+    end;
+  except
+    Result := False;
+    Machine := 0;
+  end;
+end;
+
 function PrepareDirectInstallPlan: Boolean;
 var
   ExplicitDirectory: string;
   MessageText: string;
+  ExistingMachine: Integer;
 begin
   Result := False;
   DirectInstallUpgrade := False;
@@ -293,6 +351,23 @@ begin
     begin
       MessageText := FmtMessage(ExpandConstant('{cm:UpgradeDirectoryMismatch}'), [ExistingInstallPath, ExplicitDirectory]);
       Log('DeskBox installation blocked because /DIR does not match the existing install: ' + ExplicitDirectory);
+      if not ShouldSuppressDirectInstallMessages then
+        MsgBox(MessageText, mbError, MB_OK);
+      DirectInstallUpgrade := False;
+      Exit;
+    end;
+
+    // Architecture guard: silently replacing a native ARM64 install with
+    // the emulated x64 build strands every future update on the x64 channel
+    // (the running x64 process always selects x64 assets). The deliberate
+    // conversion direction — the ARM64 installer over an x64 install —
+    // stays allowed.
+    if (ExpectedInstallerPeMachine <> DESKBOX_PE_MACHINE_ARM64) and
+       TryReadPeMachine(AddBackslash(ExistingInstallPath) + '{#MyAppExeName}', ExistingMachine) and
+       (ExistingMachine = DESKBOX_PE_MACHINE_ARM64) then
+    begin
+      MessageText := FmtMessage(ExpandConstant('{cm:ArchitectureMismatchBody}'), [ExistingInstallPath]);
+      Log('DeskBox installation blocked: the existing DeskBox.exe is the native ARM64 build; this installer is x64.');
       if not ShouldSuppressDirectInstallMessages then
         MsgBox(MessageText, mbError, MB_OK);
       DirectInstallUpgrade := False;
@@ -336,7 +411,7 @@ begin
   CommandLine :=
     '$target = [System.IO.Path]::GetFullPath(''' + EscapePowerShellString(InstallPath) + ''').TrimEnd(''\''); ' +
     'Get-CimInstance Win32_Process | ' +
-    'Where-Object { $_.Name -ieq ''DeskBox.exe'' -and $_.ExecutablePath -and ' +
+    'Where-Object { (@(''DeskBox.exe'', ''DeskBox.ThumbnailProxy.exe'') -icontains $_.Name) -and $_.ExecutablePath -and ' +
     '([System.IO.Path]::GetDirectoryName($_.ExecutablePath)).TrimEnd(''\'') -ieq $target } | ' +
     'ForEach-Object { Stop-Process -Id $_.ProcessId -Force }';
   Parameters := '-NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "' + CommandLine + '"';

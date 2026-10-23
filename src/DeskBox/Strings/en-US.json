@@ -2739,7 +2739,7 @@
   "Settings.CloudBackup.SyncNotice.Title": "Current version: backup and restore",
   "Settings.CloudBackup.SyncNotice.Description": "Connect a WebDAV server (Nextcloud, Jianguoyun and others), run manual or scheduled backups with retention control, and browse or restore snapshots on any device. Real-time sync across two or more devices will roll out in upcoming releases.",
   "Settings.Backup.StoreUninstallDataNotice.Title": "Uninstalling the Store version deletes local backup snapshots",
-  "Settings.Backup.StoreUninstallDataNotice.Description": "When DeskBox is installed from the Microsoft Store, local backup and restore snapshots are kept in the system-managed app-data folder and are deleted when the app is uninstalled. WebDAV cloud backups are stored on the remote server and are not affected by uninstalling. To keep local snapshots, export them first or use cloud backup.",
+  "Settings.Backup.StoreUninstallDataNotice.Description": "When DeskBox is installed from the Microsoft Store, local backup and restore snapshots are kept in the system-managed app-data folder and are deleted when the app is uninstalled. A custom backup directory must live outside the AppData folders (for example, under Documents) — any folder inside AppData is managed by the Store sandbox the same way and is deleted with the app. WebDAV cloud backups are stored on the remote server and are not affected by uninstalling. To keep local snapshots, export them first or use cloud backup.",
   "Settings.CloudBackup.Provider.Title": "Provider",
   "Settings.CloudBackup.Provider.Description": "Snapshots upload over WebDAV; compatible with Nextcloud, Jianguoyun, and most NAS devices.",
   "Settings.CloudBackup.Provider.Off": "Off",
