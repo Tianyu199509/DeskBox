@@ -183,9 +183,13 @@ public sealed class SettingsExternalCommitTests : IDisposable
             ResizeSnapEnabled = !before.ResizeSnapEnabled,
             WidgetSnapSpacing = before.WidgetSnapSpacing + 4,
             TrayIconStyle = "Hidden",
+            Theme = "Dark",
+            Language = "en-US",
+            SearchIncludeDeskBoxContent = !before.SearchIncludeDeskBoxContent,
         };
 
-        int hotkey = 0, doubleClick = 0, tray = 0;
+        int hotkey = 0, doubleClick = 0, tray = 0, theme = 0, language = 0;
+        var searchToggleCalls = new List<bool>();
         var snapCalls = new List<(bool Enabled, double Spacing)>();
         ExternalSettingsAppliers.ApplyValueAppliers(
             before,
@@ -194,11 +198,17 @@ public sealed class SettingsExternalCommitTests : IDisposable
                 () => hotkey++,
                 () => doubleClick++,
                 (enabled, spacing) => snapCalls.Add((enabled, spacing)),
-                () => tray++));
+                () => tray++,
+                () => theme++,
+                () => language++,
+                enabled => searchToggleCalls.Add(enabled)));
 
         Assert.Equal(1, hotkey);
         Assert.Equal(0, doubleClick);
         Assert.Equal(1, tray);
+        Assert.Equal(1, theme);
+        Assert.Equal(1, language);
+        Assert.Equal([after.SearchIncludeDeskBoxContent], searchToggleCalls);
         var snap = Assert.Single(snapCalls);
         Assert.Equal(after.ResizeSnapEnabled, snap.Enabled);
         Assert.Equal(after.WidgetSnapSpacing, snap.Spacing);
@@ -212,7 +222,10 @@ public sealed class SettingsExternalCommitTests : IDisposable
                 () => any++,
                 () => any++,
                 (_, _) => any++,
-                () => any++));
+                () => any++,
+                () => any++,
+                () => any++,
+                _ => any++));
         Assert.Equal(0, any);
 
         // The desktop double-click group trips only its own delegate.
@@ -225,7 +238,10 @@ public sealed class SettingsExternalCommitTests : IDisposable
                 () => Assert.Fail("hotkey applier must not run"),
                 () => doubleClickOnly++,
                 (_, _) => Assert.Fail("snap applier must not run"),
-                () => Assert.Fail("tray applier must not run")));
+                () => Assert.Fail("tray applier must not run"),
+                () => Assert.Fail("theme applier must not run"),
+                () => Assert.Fail("language applier must not run"),
+                _ => Assert.Fail("search applier must not run")));
         Assert.Equal(1, doubleClickOnly);
     }
 

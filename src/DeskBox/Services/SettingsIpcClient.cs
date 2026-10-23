@@ -10,6 +10,10 @@ using System.Text.Json;
 /// settings process: connects to the main process's pipe with retries,
 /// correlates request/response envelopes by id, surfaces server-pushed
 /// events, and faults pending requests when the pipe drops.
+/// Every await is ConfigureAwait(false): the remote facades call back into
+/// this class with synchronous GetResult() blocking on the UI thread, so a
+/// continuation captured on the UI synchronization context would deadlock
+/// there.
 /// </summary>
 public sealed class SettingsIpcClient : IAsyncDisposable
 {
@@ -44,14 +48,14 @@ public sealed class SettingsIpcClient : IAsyncDisposable
                 PipeOptions.Asynchronous);
             try
             {
-                await stream.ConnectAsync((int)timeout.TotalMilliseconds);
+                await stream.ConnectAsync((int)timeout.TotalMilliseconds).ConfigureAwait(false);
                 var client = new SettingsIpcClient(stream);
                 client.StartReader();
                 return client;
             }
             catch (TimeoutException)
             {
-                await stream.DisposeAsync();
+                await stream.DisposeAsync().ConfigureAwait(false);
                 if (attempt >= attempts)
                 {
                     throw;
@@ -69,7 +73,7 @@ public sealed class SettingsIpcClient : IAsyncDisposable
             {
                 while (!_cts.IsCancellationRequested)
                 {
-                    string? line = await reader.ReadLineAsync(_cts.Token);
+                    string? line = await reader.ReadLineAsync(_cts.Token).ConfigureAwait(false);
                     if (line is null)
                     {
                         break;
@@ -162,10 +166,10 @@ public sealed class SettingsIpcClient : IAsyncDisposable
             _cts.Token);
         try
         {
-            await _stream.WriteAsync(bytes, linked.Token);
-            await _stream.FlushAsync(linked.Token);
+            await _stream.WriteAsync(bytes, linked.Token).ConfigureAwait(false);
+            await _stream.FlushAsync(linked.Token).ConfigureAwait(false);
 
-            SettingsIpcEnvelope response = await completion.Task.WaitAsync(linked.Token);
+            SettingsIpcEnvelope response = await completion.Task.WaitAsync(linked.Token).ConfigureAwait(false);
             return (response.Ok, response.Payload, response.Error);
         }
         finally
@@ -196,7 +200,7 @@ public sealed class SettingsIpcClient : IAsyncDisposable
         FailPending("client disposed");
         try
         {
-            await _stream.DisposeAsync();
+            await _stream.DisposeAsync().ConfigureAwait(false);
         }
         catch (IOException)
         {

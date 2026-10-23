@@ -1,0 +1,341 @@
+using System.Diagnostics;
+
+namespace DeskBox;
+
+using DeskBox.Contracts;
+using DeskBox.Features.QuickCapture;
+using DeskBox.Services;
+
+/// <summary>
+/// The real settings host (batch 3c-3b): a second DeskBox.exe instance
+/// launched as <c>DeskBox.exe --settings &lt;mainPid&gt;</c> shows the actual
+/// settings window in its own process, so closing the window exits the
+/// process and releases everything the old hide-and-reuse window kept
+/// resident. Everything host-side runs over the settings IPC pipe: settings
+/// commits travel through the remote persistence sink, host commands through
+/// the remote facades, and the main process pushes reloads, hotkey
+/// registration changes, and backup/update events back.
+/// </summary>
+public partial class App
+{
+    /// <summary>
+    /// Command-line contract of the settings host. Exact token match only —
+    /// a Contains check would also swallow the jump list's --open-settings.
+    /// </summary>
+    internal const string SettingsHostLaunchArgument = "--settings";
+
+    internal sealed class SettingsHostLaunch
+    {
+        internal const string Argument = SettingsHostLaunchArgument;
+
+        internal static bool IsSettingsHostLaunch(string[] arguments)
+        {
+            for (int i = 1; i < arguments.Length; i++)
+            {
+                if (string.Equals(arguments[i], Argument, StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// Parses "--settings &lt;pid&gt;"; returns 0 when the pid is missing or
+        /// malformed (the host exits with a log line in that case).
+        /// </summary>
+        internal static int TryGetMainProcessId(string[] arguments)
+        {
+            for (int i = 1; i < arguments.Length - 1; i++)
+            {
+                if (string.Equals(arguments[i], Argument, StringComparison.OrdinalIgnoreCase) &&
+                    int.TryParse(arguments[i + 1], out int pid) &&
+                    pid > 0)
+                {
+                    return pid;
+                }
+            }
+
+            return 0;
+        }
+    }
+
+    private bool _isSettingsHost;
+    private SettingsIpcClient? _settingsHostClient;
+    private int _settingsHostMainProcessId;
+
+    // Spawn-to-shown trace for the measurement script and crash diagnosis,
+    // in the temp directory so it never touches the data root.
+    private static readonly long SettingsHostBaselineTimestamp = Stopwatch.GetTimestamp();
+
+    private static void SettingsHostTrace(string marker)
+    {
+        double elapsedMs =
+            (Stopwatch.GetTimestamp() - SettingsHostBaselineTimestamp) * 1000.0 /
+            Stopwatch.Frequency;
+        try
+        {
+            System.IO.File.AppendAllText(
+                System.IO.Path.Combine(System.IO.Path.GetTempPath(), "deskbox-settings-host.log"),
+                $"{DateTimeOffset.UtcNow:O} +{elapsedMs:F0}ms pid={Environment.ProcessId} {marker}{Environment.NewLine}");
+        }
+        catch (System.IO.IOException)
+        {
+            // Trace logging must never take the host down.
+        }
+    }
+
+    internal bool IsSettingsHost => _isSettingsHost;
+
+    private SettingsService? SettingsHostSettingsService { get; set; }
+
+    private LocalizationService? SettingsHostLocalizationService { get; set; }
+
+    /// <summary>
+    /// App-constructor branch for the settings host: initialize XAML only.
+    /// The LogPath static initializer has already switched to the host log
+    /// file, and every primary-instance responsibility below this branch
+    /// (AUMID, activation event, single-instance mutex, watchdog, elevation
+    /// gate, DI container) stays skipped.
+    /// </summary>
+    private void InitializeSettingsHost()
+    {
+        _isSettingsHost = true;
+        SettingsHostTrace("branch-entered");
+        Log("[SettingsHost] Constructor branch entered");
+        InitializeComponent();
+        UnhandledException += (_, eventArgs) =>
+        {
+            Log($"[SettingsHost] Unhandled exception: {eventArgs.Message}");
+            eventArgs.Handled = true;
+        };
+    }
+
+    /// <summary>
+    /// OnLaunched branch of the settings host: connect to the main process,
+    /// build the host-side service subset, show the real settings window,
+    /// and arm the main-process watchdog. Runs on the UI thread.
+    /// </summary>
+    private async void LaunchSettingsHostAsync()
+    {
+        UiDispatcherQueue = Microsoft.UI.Dispatching.DispatcherQueue.GetForCurrentThread();
+        _settingsHostMainProcessId = SettingsHostLaunch.TryGetMainProcessId(
+            Environment.GetCommandLineArgs());
+        if (_settingsHostMainProcessId == 0)
+        {
+            Log("[SettingsHost] Missing main process id argument; exiting");
+            ExitSettingsHost();
+            return;
+        }
+
+        SettingsIpcClient client;
+        try
+        {
+            client = await SettingsIpcClient.ConnectAsync(
+                DeskBoxDataPathService.Current.SettingsIpcPipeName,
+                TimeSpan.FromMilliseconds(500),
+                attempts: 20);
+        }
+        catch (Exception ex)
+        {
+            Log($"[SettingsHost] IPC connect failed: {ex.Message}");
+            ExitSettingsHost();
+            return;
+        }
+
+        _settingsHostClient = client;
+        Log("[SettingsHost] IPC connected");
+        var settings = new SettingsService(new RemoteSettingsPersistenceSink(client));
+        Log("[SettingsHost] SettingsService constructed");
+        await settings.LoadAsync();
+        Log("[SettingsHost] Settings loaded");
+        var localization = new LocalizationService(settings);
+        var theme = new ThemeService(settings);
+
+        // The settings tree reads these two through App.Current; publish the
+        // host instances for the lifetime of the process.
+        SettingsService = settings;
+        SettingsHostSettingsService = settings;
+        SettingsHostLocalizationService = localization;
+        LocalizationService = localization;
+
+        // The reload/echo bridge: the main process pushes settings-reloaded
+        // after every durable save; pushes carrying our own commit id are
+        // the round-trip of our write and must not be reloaded.
+        client.EventReceived += (method, payload) =>
+        {
+            if (method != SettingsIpcMethods.SettingsReloaded)
+            {
+                return;
+            }
+
+            if (SettingsIpcReloadPayload.TryParse(payload, out _, out long? hostCommitId) &&
+                hostCommitId is { } hostId &&
+                settings.IsLatestOutboundCommit(hostId))
+            {
+                return;
+            }
+
+            UiDispatcherQueue.TryEnqueue(async () =>
+            {
+                string beforeTheme = settings.Settings.Theme;
+                string beforeAccent = settings.Settings.AccentColorMode;
+                string beforeCustomAccent = settings.Settings.CustomAccentColor;
+                string beforeLanguage = settings.Settings.Language;
+                if (await settings.TryReloadFromDiskAsync())
+                {
+                    if (!string.Equals(beforeTheme, settings.Settings.Theme, StringComparison.Ordinal) ||
+                        !string.Equals(beforeAccent, settings.Settings.AccentColorMode, StringComparison.Ordinal) ||
+                        !string.Equals(beforeCustomAccent, settings.Settings.CustomAccentColor, StringComparison.Ordinal))
+                    {
+                        theme.RefreshAppearance();
+                    }
+
+                    if (!string.Equals(beforeLanguage, settings.Settings.Language, StringComparison.Ordinal))
+                    {
+                        localization.NotifyExternalLanguageChange();
+                    }
+                }
+            });
+        };
+
+        ArmSettingsHostWatchdog(_settingsHostMainProcessId);
+        Log("[SettingsHost] Watchdog armed");
+
+        var input = BuildSettingsHostFactoryInput(settings, localization, theme, client);
+        Log("[SettingsHost] Factory input built");
+        var window = input.CreateWindow();
+        Log("[SettingsHost] Window constructed");
+        window._isHostProcessWindow = true;
+        bool activatedTraced = false;
+        window.Activated += (_, _) =>
+        {
+            if (!activatedTraced)
+            {
+                activatedTraced = true;
+                SettingsHostTrace("window-activated");
+            }
+        };
+        window.Closed += (_, _) =>
+        {
+            SettingsHostTrace("window-closed");
+            ExitSettingsHost();
+        };
+        window.Activate();
+        SettingsHostTrace("onlaunched-done");
+        Log("[SettingsHost] Window shown");
+    }
+
+    private SettingsWindowFactoryInput BuildSettingsHostFactoryInput(
+        SettingsService settings,
+        LocalizationService localization,
+        ThemeService theme,
+        SettingsIpcClient client)
+    {
+        // Ten coordinators take SettingsService alone; Todo/Search/QuickCapture
+        // take host-side no-op callbacks for the widget/reminder side effects
+        // the MAIN process re-applies itself from its own SettingsChanged
+        // subscription after our commit lands there.
+        var todo = new TodoSettingsCoordinator(settings);
+        var featureWidgets = new FeatureWidgetsSettingsCoordinator(settings);
+        var search = new SearchSettingsCoordinator(
+            settings,
+            localization,
+            getConnection: () => null,
+            ensureConnection: () => null,
+            getHotkey: () => null,
+            setContentSearchEnabled: _ => { },
+            applyWidget: null,
+            setRuntimeEnabled: null,
+            tryEnqueue: action => UiDispatcherQueue.TryEnqueue(() => action()),
+            reportError: ex => Log($"[SearchSettings] Operation failed: {ex}"));
+        var quickCaptureClipboard = new QuickCaptureClipboardRuntime(
+            shouldListen: () => false,
+            create: null,
+            reportError: ex => Log($"[QuickCapture] Clipboard runtime failed: {ex}"));
+        var quickCapture = new QuickCaptureSettingsCoordinator(
+            settings,
+            quickCaptureClipboard,
+            applyWidget: (_, _) => Task.CompletedTask,
+            tryEnqueue: action => UiDispatcherQueue.TryEnqueue(() => action()),
+            reportError: ex => Log($"[QuickCapture] Settings operation failed: {ex}"));
+
+        var hotkey = new RemoteSettingsHotkeyActions(client);
+        return new SettingsWindowFactoryInput(
+            settings, theme, localization,
+            todo,
+            featureWidgets,
+            search,
+            new RemoteBackupSettings(client),
+            new RemoteBackupRestoreActions(client),
+            quickCapture,
+            new RemoteBackupCommands(client),
+            new AppearanceSettingsCoordinator(settings),
+            new CapsuleSettingsCoordinator(settings),
+            new InteractionSettingsCoordinator(settings),
+            new FileDisplaySettingsCoordinator(settings),
+            new FileStackSettingsCoordinator(settings),
+            new GroupNavigationSettingsCoordinator(settings),
+            new ManagedStorageSettingsCoordinator(settings),
+            new MaintenanceSettingsCoordinator(settings),
+            new PerformanceSettingsCoordinator(settings),
+            hotkey,
+            new RemoteSettingsWidgetActions(client),
+            new RemoteSettingsRestoreActions(client),
+            new RemoteSettingsAppActions(client),
+            new RemoteSettingsDataActions(client),
+            new RemoteAppUpdateService(client),
+            action => UiDispatcherQueue.TryEnqueue(() => action()));
+    }
+
+    /// <summary>
+    /// Exits the host when the main process dies (crash, shutdown, sign-out):
+    /// a settings window whose every command faults is worse than none. The
+    /// StartTime snapshot guards against pid reuse.
+    /// </summary>
+    private void ArmSettingsHostWatchdog(int mainProcessId)
+    {
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                using var main = Process.GetProcessById(mainProcessId);
+                _ = main.StartTime;
+                await main.WaitForExitAsync();
+            }
+            catch (Exception)
+            {
+                // Process already gone: fall through and exit.
+            }
+
+            Log($"[SettingsHost] Main process {mainProcessId} exited; shutting down host");
+            UiDispatcherQueue?.TryEnqueue(ExitSettingsHost);
+            if (UiDispatcherQueue is null)
+            {
+                ExitSettingsHost();
+            }
+        });
+    }
+
+    /// <summary>
+    /// The single exit path of the host: flush the host log, drop the pipe,
+    /// and terminate. Hard-exit on purpose — mirroring the PoC finding, a
+    /// bare Application.Exit defers through the XAML message loop and a
+    /// half-dead settings window must not linger.
+    /// </summary>
+    private void ExitSettingsHost()
+    {
+        try
+        {
+            _settingsHostClient?.DisposeAsync().AsTask().GetAwaiter().GetResult();
+        }
+        catch (Exception ex)
+        {
+            Log($"[SettingsHost] IPC dispose failed: {ex.Message}");
+        }
+
+        DrainLogQueue();
+        Environment.Exit(0);
+    }
+}

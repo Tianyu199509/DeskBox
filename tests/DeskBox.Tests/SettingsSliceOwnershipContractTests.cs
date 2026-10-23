@@ -237,6 +237,10 @@ public sealed class SettingsSliceOwnershipContractTests
         ["src/DeskBox/App.ImmediateHiddenWorkingSetTrim.cs"] = 2,
         ["src/DeskBox/App.Tray.cs"] = 3,
         ["src/DeskBox/App.xaml.cs"] = 36,
+        // Settings host (batch 3c-3b): 8 = the reload bridge diffing theme
+        // (3 fields), language, and nothing else against the pre-reload
+        // state to decide which host-side replay to run.
+        ["src/DeskBox/App.SettingsHost.cs"] = 8,
         ["src/DeskBox/Controls/DesktopOrganizationPreviewCard.xaml.cs"] = 11,
         ["src/DeskBox/Controls/DesktopOrganizationTaskView.Appearance.cs"] = 1,
         ["src/DeskBox/Controls/DesktopOrganizationTaskView.xaml.cs"] = 1,

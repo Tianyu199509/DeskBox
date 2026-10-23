@@ -73,6 +73,10 @@ public sealed partial class SettingsWindow : Window
     private bool _isSubclassInstalled;
     private bool _isClosed;
     private bool _allowRealClose;
+
+    // Set only by the settings-host process (batch 3c-3b): user close means
+    // real close there — the process exits with the window.
+    internal bool _isHostProcessWindow;
     private bool _hasShownOnce;
     private bool _isAppearanceSliderDragging;
     private bool _isRefreshingHotkeyControls;
@@ -435,11 +439,16 @@ public sealed partial class SettingsWindow : Window
     // via CloseForShutdown. Window.Closed therefore keeps its pure
     // real-close meaning, which also keeps ThemeService's
     // closed-means-untrack bookkeeping honest.
+    //
+    // Host mode (batch 3c-3b) bypasses both: this window lives in its own
+    // process, so a user close really closes, the Closed teardown runs, and
+    // the host process exits right after — no reuse means no leak and no
+    // hide branch to run.
     private void SettingsWindow_AppWindowClosing(
         AppWindow sender,
         AppWindowClosingEventArgs args)
     {
-        if (_allowRealClose)
+        if (_allowRealClose || _isHostProcessWindow)
         {
             return;
         }

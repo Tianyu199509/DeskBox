@@ -17,7 +17,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$pocLog = Join-Path ([System.IO.Path]::GetTempPath()) 'deskbox-settings-poc.log'
+$pocLog = Join-Path ([System.IO.Path]::GetTempPath()) 'deskbox-settings-host.log'
 
 function Get-MainProcess {
     Get-Process DeskBox -ErrorAction SilentlyContinue |
@@ -64,7 +64,7 @@ if ($main) {
 for ($i = 1; $i -le $Iterations; $i++) {
     if (Test-Path $pocLog) { Remove-Item $pocLog -Force }
     $spawnUtc = [datetimeoffset]::UtcNow
-    $proc = Start-Process -FilePath $ExePath -ArgumentList '--settings-poc' -PassThru
+    $proc = Start-Process -FilePath $ExePath -ArgumentList "--settings $($main.Id)" -PassThru
     $activatedLine = $null
     $deadline = [datetime]::Now.AddSeconds(25)
     while ([datetime]::Now -lt $deadline) {

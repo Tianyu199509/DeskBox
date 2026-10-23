@@ -17,7 +17,10 @@ internal static class ExternalSettingsAppliers
         Action RefreshHotkeyRegistration,
         Action RefreshDesktopDoubleClickRegistration,
         Action<bool, double> ApplySnapOptions,
-        Action RefreshTrayIcon);
+        Action RefreshTrayIcon,
+        Action RefreshThemeAppearance,
+        Action ReplayLanguageChange,
+        Action<bool> ApplySearchContentToggle);
 
     internal static void ApplyValueAppliers(
         AppSettings before,
@@ -46,6 +49,26 @@ internal static class ExternalSettingsAppliers
         if (!string.Equals(before.TrayIconStyle, after.TrayIconStyle, StringComparison.Ordinal))
         {
             delegates.RefreshTrayIcon();
+        }
+
+        // ThemeService does not subscribe to SettingsChanged (it follows the
+        // system color stream), and LanguageChanged only raises from
+        // SetLanguage — external commits must drive both explicitly.
+        if (!string.Equals(before.Theme, after.Theme, StringComparison.Ordinal) ||
+            !string.Equals(before.AccentColorMode, after.AccentColorMode, StringComparison.Ordinal) ||
+            !string.Equals(before.CustomAccentColor, after.CustomAccentColor, StringComparison.Ordinal))
+        {
+            delegates.RefreshThemeAppearance();
+        }
+
+        if (!string.Equals(before.Language, after.Language, StringComparison.Ordinal))
+        {
+            delegates.ReplayLanguageChange();
+        }
+
+        if (before.SearchIncludeDeskBoxContent != after.SearchIncludeDeskBoxContent)
+        {
+            delegates.ApplySearchContentToggle(after.SearchIncludeDeskBoxContent);
         }
     }
 }

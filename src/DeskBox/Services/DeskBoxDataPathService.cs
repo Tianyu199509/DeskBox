@@ -57,6 +57,13 @@ public sealed class DeskBoxDataPathService
             "DeskBox-Recovery");
     public string LogFilePath => Path.Combine(RootPath, "DeskBox.log");
 
+    /// <summary>
+    /// The settings-host process's own log (batch 3c-3b): same directory and
+    /// queue/rotation machinery as the main log, different file, so the two
+    /// processes never append the same file concurrently.
+    /// </summary>
+    public string SettingsHostLogFilePath => Path.Combine(RootPath, "DeskBox.Settings.log");
+
     private static string? ResolveConfiguredRoot()
     {
 #if DEBUG

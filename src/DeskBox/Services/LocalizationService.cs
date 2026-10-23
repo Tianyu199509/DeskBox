@@ -135,6 +135,14 @@ public sealed class LocalizationService
     }
 
     /// <summary>
+    /// Re-raises <see cref="LanguageChanged"/> after an external snapshot
+    /// (the settings host's commit) changed the persisted language: new
+    /// string reads pick the language up from Settings directly, but every
+    /// already-rendered surface only refreshes through this event.
+    /// </summary>
+    internal void NotifyExternalLanguageChange() => RaiseLanguageChanged();
+
+    /// <summary>
     /// Invokes all LanguageChanged handlers, catching exceptions per-handler
     /// so that one failing subscriber does not prevent subsequent subscribers
     /// from receiving the notification.

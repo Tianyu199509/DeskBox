@@ -89,7 +89,13 @@ public partial class App : Application
     private static readonly bool EnableVerboseLogging = IsEnabledEnvironmentValue(
         Environment.GetEnvironmentVariable(VerboseLoggingEnvironmentVariable));
 
-    private static readonly string LogPath = DeskBoxDataPathService.Current.LogFilePath;
+    // The settings-host process logs to its own file (batch 3c-3b): the
+    // static initializer must judge by command line because the instance
+    // IsSettingsProcess flag flips later, inside the App constructor.
+    private static readonly string LogPath =
+        App.SettingsHostLaunch.IsSettingsHostLaunch(Environment.GetCommandLineArgs())
+            ? DeskBoxDataPathService.Current.SettingsHostLogFilePath
+            : DeskBoxDataPathService.Current.LogFilePath;
     private static readonly NativeNotificationActivationEnvelopeStore
         PendingNativeNotificationActivationStore = new(
             DeskBoxDataPathService.Current.RootPath);
@@ -305,14 +311,13 @@ public partial class App : Application
         // for a secondary instance and forwarded into the old process.
         WaitForRelaunchParentExit(Environment.GetCommandLineArgs());
 
-        // Phase 0 PoC: a settings-process launch skips every primary-instance
-        // responsibility below (AUMID, activation event, single-instance
-        // mutex, watchdog, elevation gate, DI container) — see
-        // App.SettingsProcessPoC.cs; replaced by the real settings host in
-        // batch 3.
-        if (IsSettingsProcessLaunch(Environment.GetCommandLineArgs()))
+        // Settings host (batch 3c-3b): a second-process settings launch skips
+        // every primary-instance responsibility below (AUMID, activation
+        // event, single-instance mutex, watchdog, elevation gate, DI
+        // container) — see App.SettingsHost.cs.
+        if (SettingsHostLaunch.IsSettingsHostLaunch(Environment.GetCommandLineArgs()))
         {
-            InitializeSettingsProcess();
+            InitializeSettingsHost();
             return;
         }
 
@@ -1124,9 +1129,9 @@ public partial class App : Application
 
     protected override async void OnLaunched(LaunchActivatedEventArgs args)
     {
-        if (IsSettingsProcess)
+        if (IsSettingsHost)
         {
-            ShowSettingsProcessPoCWindow();
+            LaunchSettingsHostAsync();
             return;
         }
 
@@ -4016,7 +4021,8 @@ public partial class App : Application
     /// Batch 3a of the settings-process split: an external snapshot (the
     /// settings host's commit) was applied, so the value-shaped fields that
     /// have no coordinator subscription on the main side get their diff
-    /// appliers run against the live services.
+    /// appliers run against the live services. Runs on a pipe reader thread
+    /// for theme changes — marshal window-affecting work to the UI thread.
     /// </summary>
     private void OnExternalSettingsSnapshotApplied(
         DeskBox.Models.AppSettings before,
@@ -4033,8 +4039,13 @@ public partial class App : Application
                     ResizeGuideOverlay.IsSnapEnabled = snapEnabled;
                     ResizeGuideOverlay.SnapSpacingDips = snapSpacingDips;
                 },
-                UpdateTrayIcon));
+                UpdateTrayIcon,
+                () => UiDispatch.RunOrDefer(RefreshThemeAppearanceOnUi),
+                () => LocalizationService.NotifyExternalLanguageChange(),
+                enabled => _searchEngineService?.SetDeskBoxContentSearchEnabled(enabled)));
     }
+
+    private void RefreshThemeAppearanceOnUi() => ThemeService.RefreshAppearance();
 
     private void OnSettingsPersistenceFailed(SettingsPersistenceFailure failure)
     {        Log(
@@ -4395,75 +4406,25 @@ public partial class App : Application
 
     private SettingsWindow CreateSettingsWindow()
     {
-        _settingsWindow = new SettingsWindow(
+        var input = new SettingsWindowFactoryInput(
             SettingsService, ThemeService, LocalizationService,
-            new TodoSettingsViewModel(
-                _todoSettings ?? throw new InvalidOperationException("Todo settings are not initialized."),
-                LocalizationService.T,
-                (key, args) => LocalizationService.Format(key, args),
-                ex => Log($"[TodoSettings] Update failed: {ex}")),
-            new DeskBox.Features.Weather.WeatherSettingsViewModel(
-                _featureWidgetsSettings ?? throw new InvalidOperationException("Feature widgets settings are not initialized."),
-                LocalizationService.T,
-                (key, args) => LocalizationService.Format(key, args),
-                ex => Log($"[WeatherSettings] Update failed: {ex}")),
-            new SearchSettingsViewModel(
-                _searchSettings ?? throw new InvalidOperationException("Search settings are not initialized."),
-                action => UiDispatcherQueue.TryEnqueue(() => action()),
-                ex => Log($"[SearchSettings] Operation failed: {ex}")),
-            new BackupSettingsViewModel(
-                _backupSettings ?? throw new InvalidOperationException("Backup settings are not initialized."),
-                action => UiDispatcherQueue.TryEnqueue(() => action()),
-                ex => Log($"[BackupSettings] Operation failed: {ex}"),
-                localize: LocalizationService.T,
-                format: (key, args) => LocalizationService.Format(key, args),
-                isStoreChannel: AppDistributionService.Current.IsMicrosoftStore),
+            _todoSettings ?? throw new InvalidOperationException("Todo settings are not initialized."),
+            _featureWidgetsSettings ?? throw new InvalidOperationException("Feature widgets settings are not initialized."),
+            _searchSettings ?? throw new InvalidOperationException("Search settings are not initialized."),
+            _backupSettings ?? throw new InvalidOperationException("Backup settings are not initialized."),
             _backupRestoreActions ?? throw new InvalidOperationException(
                 "Backup restore actions are not initialized."),
             _quickCaptureSettings ?? throw new InvalidOperationException("Quick Capture is not initialized."),
-            new DeskBox.Features.QuickCapture.QuickCaptureSettingsViewModel(
-                _quickCaptureSettings ?? throw new InvalidOperationException("Quick Capture is not initialized."),
-                LocalizationService.T,
-                (key, args) => LocalizationService.Format(key, args),
-                message => Log(message),
-                ex => Log($"[QuickCapture] Settings operation failed: {ex}")),
-            _searchSettings ?? throw new InvalidOperationException("Search settings are not initialized."),
             _backupRuntime ?? throw new InvalidOperationException("Backup runtime is not initialized."),
-            new DeskBox.Features.Appearance.AppearanceSettingsViewModel(
-                _appearanceSettings ?? throw new InvalidOperationException("Appearance settings are not initialized."),
-                LocalizationService.T),
-            new DeskBox.Features.Capsule.CapsuleSettingsViewModel(
-                _capsuleSettings ?? throw new InvalidOperationException("Capsule settings are not initialized."),
-                LocalizationService.T,
-                (key, args) => LocalizationService.Format(key, args)),
-            new DeskBox.Features.Interaction.InteractionSettingsViewModel(
-                _interactionSettings ?? throw new InvalidOperationException("Interaction settings are not initialized."),
-                LocalizationService.T),
-            new DeskBox.Features.FileDisplay.FileDisplaySettingsViewModel(
-                _fileDisplaySettings ?? throw new InvalidOperationException("File display settings are not initialized.")),
-            new DeskBox.Features.FileStack.FileStackSettingsViewModel(
-                _fileStackSettings ?? throw new InvalidOperationException("File stack settings are not initialized."),
-                LocalizationService.T,
-                (key, args) => LocalizationService.Format(key, args)),
-            new DeskBox.Features.GroupNavigation.GroupNavigationSettingsViewModel(
-                _groupNavigationSettings ?? throw new InvalidOperationException("Group navigation settings are not initialized."),
-                LocalizationService.T),
-            new DeskBox.Features.FeatureWidgets.FeatureWidgetsSettingsViewModel(
-                _featureWidgetsSettings ?? throw new InvalidOperationException("Feature widgets settings are not initialized."),
-                LocalizationService.T),
-            new DeskBox.Features.Music.MusicSettingsViewModel(
-                _featureWidgetsSettings ?? throw new InvalidOperationException("Feature widgets settings are not initialized."),
-                LocalizationService.T),
-            new DeskBox.Features.ManagedStorage.ManagedStorageSettingsViewModel(
-                _managedStorageSettings ?? throw new InvalidOperationException("Managed storage settings are not initialized."),
-                LocalizationService.T),
-            new DeskBox.Features.Maintenance.MaintenanceSettingsViewModel(
-                _maintenanceSettings ?? throw new InvalidOperationException("Maintenance settings are not initialized.")),
-            new DeskBox.Features.Performance.PerformanceSettingsViewModel(
-                _performanceSettings ?? throw new InvalidOperationException("Performance settings are not initialized."),
-                _interactionSettings ?? throw new InvalidOperationException("Interaction settings are not initialized."),
-                LocalizationService.T,
-                () => LocalizationService.IsChinese),
+            _appearanceSettings ?? throw new InvalidOperationException("Appearance settings are not initialized."),
+            _capsuleSettings ?? throw new InvalidOperationException("Capsule settings are not initialized."),
+            _interactionSettings ?? throw new InvalidOperationException("Interaction settings are not initialized."),
+            _fileDisplaySettings ?? throw new InvalidOperationException("File display settings are not initialized."),
+            _fileStackSettings ?? throw new InvalidOperationException("File stack settings are not initialized."),
+            _groupNavigationSettings ?? throw new InvalidOperationException("Group navigation settings are not initialized."),
+            _managedStorageSettings ?? throw new InvalidOperationException("Managed storage settings are not initialized."),
+            _maintenanceSettings ?? throw new InvalidOperationException("Maintenance settings are not initialized."),
+            _performanceSettings ?? throw new InvalidOperationException("Performance settings are not initialized."),
             CreateSettingsHotkeyActions(),
             new InProcessSettingsWidgetActions(
                 WidgetManager,
@@ -4478,7 +4439,9 @@ public partial class App : Application
             new InProcessSettingsDataActions(
                 QuickCaptureService ?? throw new InvalidOperationException("Quick Capture service is not initialized."),
                 LocalizationService),
-            AppUpdateService);
+            AppUpdateService,
+            action => UiDispatcherQueue.TryEnqueue(() => action()));
+        _settingsWindow = input.CreateWindow();
         _settingsWindow.Closed += SettingsWindow_ClosedForApp;
         return _settingsWindow;
     }
