@@ -132,10 +132,41 @@ public partial class App
 
             _settingsHostProcess = Process.Start(startInfo);
             Log("[SettingsHost] Spawned pid=" + (_settingsHostProcess?.Id.ToString() ?? "null"));
+            if (_settingsHostProcess is { } spawnedHost)
+            {
+                spawnedHost.EnableRaisingEvents = true;
+                spawnedHost.Exited += OnSettingsHostProcessExited;
+            }
         }
         catch (Exception ex)
         {
             Log($"[SettingsHost] Spawn failed: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// A settings-host that dies mid-hotkey-recording never sends the
+    /// resume; the global hotkey would stay suspended until the next
+    /// settings change. Watch the process and self-heal (batch R3).
+    /// </summary>
+    private void OnSettingsHostProcessExited(object? sender, EventArgs e)
+    {
+        try
+        {
+            if (sender is Process host)
+            {
+                host.Exited -= OnSettingsHostProcessExited;
+            }
+
+            if (GlobalHotkeyService is { IsSuspendedForRecording: true } hotkey)
+            {
+                Log("[SettingsHost] Host died while hotkeys suspended; resuming");
+                UiDispatcherQueue?.TryEnqueue(hotkey.ResumeAfterRecording);
+            }
+        }
+        catch (Exception ex)
+        {
+            Log($"[SettingsHost] Exit guard failed: {ex.Message}");
         }
     }
 

@@ -793,7 +793,14 @@ public sealed class SettingsIpcFacadeTests : IDisposable
             Assert.True(remote.TryRelaunchAsExplorerUser("--args"));
             Assert.Equal("--args", loop.AppActions.ExplorerRelaunchArgs);
 
+            // Fire-and-forget: the flag lands after the UI-thread marshal.
             remote.ShowOnboarding();
+            var onboardingDeadline = System.Diagnostics.Stopwatch.StartNew();
+            while (!loop.AppActions.OnboardingShown &&
+                   onboardingDeadline.ElapsedMilliseconds < 5000)
+            {
+                await Task.Delay(50);
+            }
             Assert.True(loop.AppActions.OnboardingShown);
 
             remote.ShowDesktopOrganizationWindow(0x42);

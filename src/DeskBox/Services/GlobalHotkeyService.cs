@@ -366,6 +366,13 @@ public sealed class GlobalHotkeyService : IDisposable, IHookHealthProbeTarget, I
         RefreshRegistration();
     }
 
+    /// <summary>
+    /// True while a recorder holds the hotkeys suspended (batch R3): the
+    /// settings-host death guard watches this so a host that dies mid-
+    /// recording cannot leave the global hotkey dead until restart.
+    /// </summary>
+    public bool IsSuspendedForRecording => _suspendedForRecording;
+
     string IHookHealthProbeTarget.ProbeName => "global-hotkey";
 
     // The reserved-gesture path owns a low-level hook that Windows silently

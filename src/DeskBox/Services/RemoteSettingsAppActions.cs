@@ -62,9 +62,12 @@ public sealed class RemoteSettingsAppActions : ISettingsAppActions
         return ok;
     }
 
-    public void ShowOnboarding(bool resumeProgress = false) =>
-        RequestVoidAsync(SettingsIpcMethods.AppShowOnboarding, SettingsIpcPayload.EncodeBoolean(resumeProgress))
-            .GetAwaiter().GetResult();
+    public void ShowOnboarding(bool resumeProgress = false)
+    {
+        // Fire-and-forget: the main process builds a heavy window; blocking
+        // the host UI thread on that reads as a frozen settings page.
+        _ = RequestVoidAsync(SettingsIpcMethods.AppShowOnboarding, SettingsIpcPayload.EncodeBoolean(resumeProgress));
+    }
 
     public void ShowDesktopOrganizationWindow(nint ownerWindowHandle = 0)
     {
@@ -80,19 +83,21 @@ public sealed class RemoteSettingsAppActions : ISettingsAppActions
         AppUpdateManifest? manifest,
         string version,
         Func<CancellationToken, Task<AppUpdateManifest?>>? manifestLoader,
-        nint ownerWindowHandle = 0) =>
-        RequestVoidAsync(
-                SettingsIpcMethods.AppOpenReleaseNotes,
-                SettingsIpcPayload.Encode(
-                    new SettingsIpcReleaseNotes(
-                        manifest is null
-                            ? null
-                            : SettingsIpcPayload.Encode(manifest, SettingsIpcJsonContext.Default.AppUpdateManifest),
-                        version,
-                        AllowLazyFetch: manifestLoader is not null,
-                        OwnerHwnd: ownerWindowHandle),
-                    SettingsIpcJsonContext.Default.SettingsIpcReleaseNotes))
-            .GetAwaiter().GetResult();
+        nint ownerWindowHandle = 0)
+    {
+        // Fire-and-forget, same rationale as ShowOnboarding.
+        _ = RequestVoidAsync(
+            SettingsIpcMethods.AppOpenReleaseNotes,
+            SettingsIpcPayload.Encode(
+                new SettingsIpcReleaseNotes(
+                    manifest is null
+                        ? null
+                        : SettingsIpcPayload.Encode(manifest, SettingsIpcJsonContext.Default.AppUpdateManifest),
+                    version,
+                    AllowLazyFetch: manifestLoader is not null,
+                    OwnerHwnd: ownerWindowHandle),
+                SettingsIpcJsonContext.Default.SettingsIpcReleaseNotes));
+    }
 
     public void UpdateTrayIcon() =>
         RequestVoidAsync(SettingsIpcMethods.AppUpdateTrayIcon).GetAwaiter().GetResult();

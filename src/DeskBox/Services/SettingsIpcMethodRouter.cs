@@ -168,12 +168,23 @@ public sealed class SettingsIpcMethodRouter
 
             case SettingsIpcMethods.HotkeySuspend:
                 if (_hotkey is null) return unavailable(method);
-                _hotkey.SuspendHotkeysForRecording();
+                // The suspend/resume calls are documented to run on the UI
+                // dispatcher; acknowledge after the marshal completes so a
+                // failure surfaces to the recorder before its hook starts.
+                await DeskBox.Platform.UiDispatch.RunAsync(() =>
+                {
+                    _hotkey.SuspendHotkeysForRecording();
+                    return Task.CompletedTask;
+                });
                 return (true, null, null);
 
             case SettingsIpcMethods.HotkeyResume:
                 if (_hotkey is null) return unavailable(method);
-                _hotkey.ResumeHotkeysAfterRecording();
+                await DeskBox.Platform.UiDispatch.RunAsync(() =>
+                {
+                    _hotkey.ResumeHotkeysAfterRecording();
+                    return Task.CompletedTask;
+                });
                 return (true, null, null);
 
             case SettingsIpcMethods.DataQuickCaptureCounts:
@@ -567,7 +578,14 @@ public sealed class SettingsIpcMethodRouter
 
             case SettingsIpcMethods.AppShowOnboarding:
                 if (_appActions is null) return unavailable(method);
-                _appActions.ShowOnboarding(SettingsIpcPayload.DecodeBoolean(payload));
+                // The onboarding window is heavy XAML; build it on the UI
+                // thread and answer immediately (org-window pattern).
+                bool onboardingResume = SettingsIpcPayload.DecodeBoolean(payload);
+                _ = DeskBox.Platform.UiDispatch.RunAsync(() =>
+                {
+                    _appActions.ShowOnboarding(onboardingResume);
+                    return Task.CompletedTask;
+                });
                 return (true, null, null);
 
             case SettingsIpcMethods.AppShowDesktopOrgWindow:
@@ -595,8 +613,14 @@ public sealed class SettingsIpcMethodRouter
                     : SettingsIpcPayload.Decode(notes.ManifestJson, SettingsIpcJsonContext.Default.AppUpdateManifest);
                 // The manifest loader delegate cannot cross the wire; the
                 // allow-lazy-fetch flag tells the main side to fall back to
-                // its own fetch when no manifest rides along.
-                _appActions.OpenReleaseNotesWindow(manifest, notes.Version, null, (nint)notes.OwnerHwnd);
+                // its own fetch when no manifest rides along. The window is
+                // XAML-heavy: open on the UI thread and answer immediately
+                // (org-window pattern).
+                _ = DeskBox.Platform.UiDispatch.RunAsync(() =>
+                {
+                    _appActions.OpenReleaseNotesWindow(manifest, notes.Version, null, (nint)notes.OwnerHwnd);
+                    return Task.CompletedTask;
+                });
                 return (true, null, null);
 
             case SettingsIpcMethods.AppUpdateTrayIcon:

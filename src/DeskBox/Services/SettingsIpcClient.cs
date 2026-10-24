@@ -64,6 +64,33 @@ public sealed class SettingsIpcClient : IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// Per-method request ceilings (batch R3): most commands are short, but
+    /// downloads/uploads/exports/scans legitimately run for minutes — a flat
+    /// 15s ceiling made the host report failure while the main process kept
+    /// working. Methods not listed keep the default.
+    /// </summary>
+    private static readonly IReadOnlyDictionary<string, TimeSpan> MethodTimeouts =
+        new Dictionary<string, TimeSpan>(StringComparer.Ordinal)
+        {
+            [SettingsIpcMethods.UpdateDownload] = TimeSpan.FromMinutes(30),
+            [SettingsIpcMethods.CloudDownloadSnapshot] = TimeSpan.FromMinutes(30),
+            [SettingsIpcMethods.CloudPrepareScopedRestore] = TimeSpan.FromMinutes(10),
+            [SettingsIpcMethods.BackupUploadNow] = TimeSpan.FromMinutes(30),
+            [SettingsIpcMethods.BackupCreateSnapshotNow] = TimeSpan.FromMinutes(10),
+            [SettingsIpcMethods.BackupExport] = TimeSpan.FromMinutes(10),
+            [SettingsIpcMethods.AppExportDiagnostics] = TimeSpan.FromMinutes(10),
+            [SettingsIpcMethods.AppUploadDiagnostics] = TimeSpan.FromMinutes(10),
+            [SettingsIpcMethods.RestoreAttachmentHealth] = TimeSpan.FromMinutes(10),
+            [SettingsIpcMethods.WidgetOrgUndo] = TimeSpan.FromMinutes(10),
+            [SettingsIpcMethods.WidgetOrgAbandon] = TimeSpan.FromMinutes(10),
+        };
+
+    private static TimeSpan TimeoutFor(string method) =>
+        MethodTimeouts.TryGetValue(method, out TimeSpan timeout)
+            ? timeout
+            : TimeSpan.FromSeconds(15);
+
     private void StartReader()
     {
         _ = Task.Run(async () =>
@@ -167,8 +194,9 @@ public sealed class SettingsIpcClient : IAsyncDisposable
         // A main process buried in restore/startup work must not hang the
         // host window forever: the remote facades call this synchronously on
         // the UI thread, so bounded waits turn into visible "unavailable"
-        // states instead of a dead settings page.
-        linked.CancelAfter(TimeSpan.FromSeconds(15));
+        // states instead of a dead settings page. Long-running operations
+        // get per-method ceilings (see MethodTimeouts).
+        linked.CancelAfter(TimeoutFor(method));
         try
         {
             await _stream.WriteAsync(bytes, linked.Token).ConfigureAwait(false);

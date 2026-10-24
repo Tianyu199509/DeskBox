@@ -115,6 +115,7 @@ public partial class App
     private SettingsIpcClient? _settingsHostClient;
     private int _settingsHostMainProcessId;
     private Views.SettingsWindow? _settingsHostWindow;
+    private RemoteSearchConnectionClient? _settingsHostEverythingConnection;
 
     // Spawn-to-shown trace for the measurement script and crash diagnosis,
     // in the temp directory so it never touches the data root.
@@ -331,6 +332,14 @@ public partial class App
             window.QueueUpdateInstallResultDialog(launchInstallResult);
         }
 
+        // Warm the Everything connection cache off the startup path: a busy
+        // main process must not add a synchronous round trip before the
+        // first frame (batch R3).
+        if (_settingsHostEverythingConnection is { } everythingWarmup)
+        {
+            _ = Task.Run(everythingWarmup.Prime);
+        }
+
         SettingsHostTrace("onlaunched-done");
         Log("[SettingsHost] Window shown");
     }
@@ -347,7 +356,8 @@ public partial class App
         // subscription after our commit lands there.
         var todo = new TodoSettingsCoordinator(settings);
         var featureWidgets = new FeatureWidgetsSettingsCoordinator(settings);
-        var everythingConnection = new RemoteSearchConnectionClient(client).Prime();
+        var everythingConnection = new RemoteSearchConnectionClient(client);
+        _settingsHostEverythingConnection = everythingConnection;
         var search = new SearchSettingsCoordinator(
             settings,
             localization,
