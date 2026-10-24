@@ -1812,12 +1812,14 @@ public partial class App : Application
             {
                 RunOptionalStartupStep("update-install-result", () =>
                 {
-                    ShowSettings("About");
 #if DESKBOX_AOT_SMOKE_HARNESS
+                    ShowSettings("About");
                     _settingsWindow?.QueueUpdateInstallResultDialog(updateInstallOutcome!);
 #else
-                    _ = PushSettingsIpcEventAsync(
-                        SettingsIpcMethods.HostQueueUpdateResult, updateInstallOutcome);
+                    // The result rides the spawn (cold) or the connected
+                    // pipe (warm) — a bare push after ShowSettings raced the
+                    // host's pipe connection and was dropped (batch R1).
+                    ShowSettingsViaHost("About", null, installResult: updateInstallOutcome);
 #endif
                 });
             }
@@ -2822,8 +2824,15 @@ public partial class App : Application
                     // Same target as the tray's About entry, without the
                     // tray-flyout close delay the tray path waits out; the
                     // one-click flow then spares the user finding the button.
+                    // The spawn carries the intent: pushing right after a
+                    // cold spawn lands before the host pipe connects and
+                    // would be silently dropped (batch R1).
+#if DESKBOX_AOT_SMOKE_HARNESS
                     OpenAboutSettingsFromTray();
                     _ = RunOneClickUpdateFromToastAsync();
+#else
+                    ShowSettingsViaHost("About", null, oneClickUpdate: true);
+#endif
                     return;
                 }
 
@@ -3757,12 +3766,11 @@ public partial class App : Application
                 string? pendingUpdateInstallOutcome = TakePendingUpdateInstallResult();
                 if (!string.IsNullOrWhiteSpace(pendingUpdateInstallOutcome))
                 {
-                    ShowSettings("About");
 #if DESKBOX_AOT_SMOKE_HARNESS
+                    ShowSettings("About");
                     _settingsWindow?.QueueUpdateInstallResultDialog(pendingUpdateInstallOutcome);
 #else
-                    _ = PushSettingsIpcEventAsync(
-                        SettingsIpcMethods.HostQueueUpdateResult, pendingUpdateInstallOutcome);
+                    ShowSettingsViaHost("About", null, installResult: pendingUpdateInstallOutcome);
 #endif
                     activationHandled = true;
                 }

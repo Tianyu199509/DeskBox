@@ -68,6 +68,35 @@ public partial class App
         internal static string? TryGetGlanceArgument(string[] arguments) =>
             TryGetValueAfter(arguments, "--settings-glance");
 
+        /// <summary>Whether the one-click-update flag rides the launch (spawn intent).</summary>
+        internal static bool HasOneClickUpdateArgument(string[] arguments)
+        {
+            for (int i = 1; i < arguments.Length; i++)
+            {
+                if (string.Equals(arguments[i], OneClickUpdateArgument, StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// The value after the install-result argument, normalized like the
+        /// main process's own --update-install-result parser (spawn intent).
+        /// </summary>
+        internal static string? TryGetInstallResultArgument(string[] arguments)
+        {
+            string? raw = TryGetValueAfter(arguments, InstallResultArgument);
+            return string.IsNullOrWhiteSpace(raw) ? null : NormalizeUpdateInstallOutcome(raw);
+        }
+
+        internal const string SectionArgument = "--settings-section";
+        internal const string GlanceArgument = "--settings-glance";
+        internal const string OneClickUpdateArgument = "--settings-one-click-update";
+        internal const string InstallResultArgument = "--settings-install-result";
+
         private static string? TryGetValueAfter(string[] arguments, string name)
         {
             for (int i = 1; i < arguments.Length - 1; i++)
@@ -263,6 +292,36 @@ public partial class App
             ExitSettingsHost();
         };
         window.Activate();
+
+        // Spawn-carried intent (batch R1): section/glance deep links, the
+        // toast one-click-update flow, and the installer result dialog.
+        // These ride the command line because the host cannot receive
+        // pushed events before its pipe connects — pushing right after a
+        // spawn is a silent drop.
+        string[] launchArguments = Environment.GetCommandLineArgs();
+        if (SettingsHostLaunch.TryGetGlanceArgument(launchArguments) is { } launchGlance)
+        {
+            window.ShowGlanceSection(launchGlance);
+        }
+        else if (SettingsHostLaunch.TryGetSectionArgument(launchArguments) is { } launchSection)
+        {
+            window.ShowSection(launchSection);
+            if (string.Equals(launchSection, "About", StringComparison.Ordinal))
+            {
+                window.BringUpdateStatusIntoView();
+            }
+        }
+
+        if (SettingsHostLaunch.HasOneClickUpdateArgument(launchArguments))
+        {
+            _ = window.RunOneClickUpdateFlowAsync();
+        }
+
+        if (SettingsHostLaunch.TryGetInstallResultArgument(launchArguments) is { } launchInstallResult)
+        {
+            window.QueueUpdateInstallResultDialog(launchInstallResult);
+        }
+
         SettingsHostTrace("onlaunched-done");
         Log("[SettingsHost] Window shown");
     }

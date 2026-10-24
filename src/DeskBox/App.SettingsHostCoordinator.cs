@@ -26,7 +26,11 @@ public partial class App
     /// </summary>
     internal bool IsSettingsHostVisible => IsSettingsHostRunning;
 
-    private void ShowSettingsViaHost(string? sectionTag, string? glanceWidgetId)
+    private void ShowSettingsViaHost(
+        string? sectionTag,
+        string? glanceWidgetId,
+        bool oneClickUpdate = false,
+        string? installResult = null)
     {
         if (IsShuttingDown)
         {
@@ -35,11 +39,17 @@ public partial class App
 
         if (!IsSettingsHostRunning)
         {
-            StartSettingsHostProcess(BuildSettingsHostArguments(sectionTag, glanceWidgetId));
+            StartSettingsHostProcess(BuildSettingsHostArguments(
+                sectionTag,
+                glanceWidgetId,
+                oneClickUpdate,
+                installResult));
             return;
         }
 
-        // The host is up, so the pipe is connected: push the navigation.
+        // The host is up, so the pipe is connected: push the navigation and
+        // any intent that would otherwise race the spawn (one-click update,
+        // installer result).
         if (glanceWidgetId is not null)
         {
             _ = PushSettingsIpcEventAsync(SettingsIpcMethods.HostShowGlance, glanceWidgetId);
@@ -48,15 +58,30 @@ public partial class App
         {
             _ = PushSettingsIpcEventAsync(SettingsIpcMethods.HostShow, sectionTag);
         }
+
+        if (oneClickUpdate)
+        {
+            _ = PushSettingsIpcEventAsync(SettingsIpcMethods.HostOneClickUpdate, null);
+        }
+
+        if (!string.IsNullOrEmpty(installResult))
+        {
+            _ = PushSettingsIpcEventAsync(SettingsIpcMethods.HostQueueUpdateResult, installResult);
+        }
     }
 
     /// <summary>
     /// The host command line: the launch argument pair plus the initial
-    /// deep link (a section tag or a glance widget id). The deep link rides
+    /// deep link (a section tag or a glance widget id) and any spawn intent
+    /// (one-click update, installer result). Everything beyond the pid rides
     /// the command line because the host cannot receive pushed events
     /// before its pipe connects, and callers do not wait for that.
     /// </summary>
-    private static List<string> BuildSettingsHostArguments(string? sectionTag, string? glanceWidgetId)
+    private static List<string> BuildSettingsHostArguments(
+        string? sectionTag,
+        string? glanceWidgetId,
+        bool oneClickUpdate = false,
+        string? installResult = null)
     {
         var arguments = new List<string>
         {
@@ -72,6 +97,17 @@ public partial class App
         {
             arguments.Add("--settings-section");
             arguments.Add(sectionTag);
+        }
+
+        if (oneClickUpdate)
+        {
+            arguments.Add("--settings-one-click-update");
+        }
+
+        if (!string.IsNullOrEmpty(installResult))
+        {
+            arguments.Add("--settings-install-result");
+            arguments.Add(installResult);
         }
 
         return arguments;
