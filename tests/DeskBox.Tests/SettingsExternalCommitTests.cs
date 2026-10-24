@@ -132,6 +132,37 @@ public sealed class SettingsExternalCommitTests : IDisposable
     }
 
     [Fact]
+    public async Task ExternalSnapshot_PreservesMainOwnedWidgetLayoutDomain()
+    {
+        var main = new SettingsService(SettingsRoot);
+        await main.LoadAsync();
+        // Live main-process layout state: the host snapshot was serialized
+        // before this state existed, exactly like a real settings-host
+        // session loaded before the user moved widgets around.
+        main.Settings.WidgetLayout.FeatureWidgetEnabledStates["Music"] = true;
+        main.Settings.WidgetLayout.FeatureWidgetEnabledStates["Weather"] = true;
+        main.Settings.Widgets.Add(new WidgetConfig { Id = "w-live", WidgetKind = WidgetKind.Music });
+
+        var host = new SettingsService(SettingsRoot);
+        await host.LoadAsync();
+        Assert.DoesNotContain(host.Settings.Widgets, w => w.Id == "w-live");
+        host.Settings.Theme = "Light";
+
+        string payload = System.Text.Json.JsonSerializer.Serialize(
+            host.Settings,
+            SettingsJsonContext.Default.AppSettings);
+        Assert.True(await main.ApplyExternalSnapshotAsync(payload));
+
+        // The main process keeps its authoritative layout domain: feature
+        // enablement and the live widget list survive the host commit.
+        Assert.True(main.Settings.WidgetLayout.FeatureWidgetEnabledStates["Music"]);
+        Assert.True(main.Settings.WidgetLayout.FeatureWidgetEnabledStates["Weather"]);
+        Assert.Contains(main.Settings.Widgets, w => w.Id == "w-live");
+        // The host's actual change landed.
+        Assert.Equal("Light", main.Settings.Theme);
+    }
+
+    [Fact]
     public async Task ExternalSnapshot_RefusesNewerSchemaAndGarbage()
     {
         var main = new SettingsService(SettingsRoot);

@@ -1223,6 +1223,13 @@ settings.FocusClickedWidgetOnRaise = false;
             parsed.AutoStartDefaultApplied = before.AutoStartDefaultApplied;
             parsed.FullyElevatedNoticeAcknowledgedUtcTicks =
                 before.FullyElevatedNoticeAcknowledgedUtcTicks;
+            // The widget-layout domain (widgets list, groups, deleted ids,
+            // feature-widget enabled states) is authoritative in the MAIN
+            // process only: the host loaded its copy from disk before the
+            // main process's newer in-memory state existed, so accepting its
+            // snapshot here would flip live feature widgets off and persist
+            // that corruption into widget-layout.json.
+            parsed.WidgetLayout.CopyFrom(before.WidgetLayout);
             _settings = parsed;
             _settingsSchemaNewerThanBuild = false;
         }
