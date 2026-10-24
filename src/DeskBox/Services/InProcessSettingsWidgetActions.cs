@@ -159,17 +159,6 @@ public sealed class InProcessSettingsWidgetActions : ISettingsWidgetActions
         _widgetManager?.IsFeatureWidgetEnabled(kind) ??
         FeatureWidgetSettings.IsEnabled(_settingsService.Settings, kind);
 
-    public async Task SyncFeatureWidgetEnabledAsync(WidgetKind kind, bool enabled)
-    {
-        if (_widgetManager is not { } manager)
-        {
-            await _settingsService.SaveAsync();
-            return;
-        }
-
-        await manager.SetFeatureWidgetEnabledAsync(kind, enabled, reveal: enabled);
-    }
-
     public async Task<bool> SetFeatureWidgetEnabled(WidgetKind kind, bool enabled)
     {
         // Every feature switch rides this one command. QuickCapture/Todo/

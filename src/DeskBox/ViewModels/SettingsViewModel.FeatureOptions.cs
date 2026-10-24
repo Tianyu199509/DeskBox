@@ -275,21 +275,5 @@ public partial class SettingsViewModel
         }
     }
 
-    private async Task SyncFeatureWidgetAsync(WidgetKind kind, bool enabled)
-    {
-        try
-        {
-            await _widgetActions.SyncFeatureWidgetEnabledAsync(kind, enabled);
-        }
-        catch (Exception ex)
-        {
-            App.Log($"[SettingsViewModel] Failed to sync feature widget enabled state kind={kind}: {ex}");
-        }
-        finally
-        {
-            OnPropertyChanged(nameof(FeatureWidgetEntries));
-        }
-    }
-
 // ─── Weather Settings Properties ──────────────────────────────
 }

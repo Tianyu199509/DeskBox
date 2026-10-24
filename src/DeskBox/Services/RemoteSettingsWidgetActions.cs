@@ -77,13 +77,6 @@ public sealed class RemoteSettingsWidgetActions : ISettingsWidgetActions
         return ok && SettingsIpcPayload.DecodeBoolean(payload);
     }
 
-    public Task SyncFeatureWidgetEnabledAsync(WidgetKind kind, bool enabled) =>
-        RequestVoidAsync(
-            SettingsIpcMethods.WidgetSyncFeatureEnabled,
-            SettingsIpcPayload.Encode(
-                new SettingsIpcKindArg((int)kind, enabled),
-                SettingsIpcJsonContext.Default.SettingsIpcKindArg));
-
     public async Task<bool> SetFeatureWidgetEnabled(WidgetKind kind, bool enabled)
     {
         (bool ok, string? payload, _) = await _client.RequestAsync(

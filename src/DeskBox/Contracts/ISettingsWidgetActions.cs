@@ -47,12 +47,6 @@ public interface ISettingsWidgetActions
     bool IsFeatureWidgetEnabled(WidgetKind kind);
 
     /// <summary>
-    /// Applies an enable change through the live manager, falling back to a
-    /// plain settings save when no manager exists.
-    /// </summary>
-    Task SyncFeatureWidgetEnabledAsync(WidgetKind kind, bool enabled);
-
-    /// <summary>
     /// Applies a settings-UI group-presentation edit (or reset) to the
     /// authoritative layout: assigns the six presentation fields on the
     /// group, persists, and notifies the host presentation. Null fields are

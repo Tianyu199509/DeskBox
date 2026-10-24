@@ -14,11 +14,20 @@ public sealed class RemoteAppUpdateService : IAppUpdateService
 {
     private readonly SettingsIpcClient _client;
 
+    private SettingsIpcUpdateState? _cachedState;
+
     public RemoteAppUpdateService(SettingsIpcClient client)
     {
         _client = client;
         _client.EventReceived += OnEventReceived;
     }
+
+    /// <summary>
+    /// Marks the cached state dirty (batch R4): the About page reads the
+    /// state properties several times per refresh — without a cache each
+    /// getter was a synchronous pipe round trip on the UI thread.
+    /// </summary>
+    public void RefreshState() => _cachedState = null;
 
     public event Action<AppUpdateCheckResult>? CheckCompleted;
 
@@ -28,6 +37,8 @@ public sealed class RemoteAppUpdateService : IAppUpdateService
 
     private void OnEventReceived(string method, string? payload)
     {
+        // Any update lifecycle event invalidates the cached snapshot.
+        _cachedState = null;
         switch (method)
         {
             case SettingsIpcMethods.UpdateCheckCompleted:
@@ -122,13 +133,19 @@ public sealed class RemoteAppUpdateService : IAppUpdateService
         return result;
     }
 
-    public void ClearLastDownloadedInstaller() =>
+    public void ClearLastDownloadedInstaller()
+    {
         _client.RequestAsync(SettingsIpcMethods.UpdateClearInstaller)
             .GetAwaiter().GetResult();
+        _cachedState = null;
+    }
 
-    public void PruneStaleInstallerDirectories() =>
+    public void PruneStaleInstallerDirectories()
+    {
         _client.RequestAsync(SettingsIpcMethods.UpdatePruneStale)
             .GetAwaiter().GetResult();
+        _cachedState = null;
+    }
 
     public AppUpdateInstallResult StartInstallerHelper(
         string installerPath,
@@ -153,9 +170,15 @@ public sealed class RemoteAppUpdateService : IAppUpdateService
 
     private SettingsIpcUpdateState ReadState()
     {
+        if (_cachedState is { } cached)
+        {
+            return cached;
+        }
+
         (bool ok, string? payload, _) = _client.RequestAsync(SettingsIpcMethods.UpdateState)
             .GetAwaiter().GetResult();
-        return SettingsIpcPayload.Decode(payload, SettingsIpcJsonContext.Default.SettingsIpcUpdateState)
+        _cachedState = SettingsIpcPayload.Decode(payload, SettingsIpcJsonContext.Default.SettingsIpcUpdateState)
             ?? new SettingsIpcUpdateState(null, 0, string.Empty, 0, null, false);
+        return _cachedState;
     }
 }

@@ -367,8 +367,6 @@ public sealed class SettingsIpcFacadeTests : IDisposable
             return true;
         }
 
-        public Task SyncFeatureWidgetEnabledAsync(WidgetKind kind, bool enabled) => Task.CompletedTask;
-
         public List<Contracts.GroupPresentationChange> GroupPresentations { get; } = [];
         public List<Contracts.GroupNavigationDefaultsChange> NavDefaults { get; } = [];
         public List<Contracts.LayoutPreferencesChange> LayoutPreferences { get; } = [];

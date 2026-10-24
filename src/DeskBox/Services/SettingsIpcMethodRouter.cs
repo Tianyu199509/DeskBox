@@ -68,14 +68,15 @@ public sealed class SettingsIpcMethodRouter
     private Func<string, string?, Task>? PushEvent { get; }
 
     /// <summary>
-    /// The host commit id of the last settings-commit applied through this
-    /// router. Scoped to a single dispatch: every non-snapshot command also
-    /// makes the main process write (feature switches run coordinator
-    /// chains that save), and those writes must NOT carry a stale host
-    /// commit id into the reload push — the host would mistake its own
-    /// state refresh for an echo and never see the switch result.
+    /// The host commit id of the settings-commit currently being applied
+    /// through this router. AsyncLocal: dispatches run concurrently on pool
+    /// threads and each one's chained writes must only ever see its own
+    /// echo tag — a shared field let command B's save carry command A's
+    /// hostCommitId, making the host skip a reload it needed (batch R4).
     /// </summary>
-    public long LastAppliedHostCommitId { get; private set; }
+    private static readonly AsyncLocal<long> CurrentDispatchHostCommitId = new();
+
+    public long LastAppliedHostCommitId => CurrentDispatchHostCommitId.Value;
 
     public async Task<(bool Ok, string? Payload, string? Error)> DispatchAsync(
         string method,
@@ -83,8 +84,8 @@ public sealed class SettingsIpcMethodRouter
         CancellationToken cancellationToken)
     {
         // Snapshot-scoped: a host echo tag only ever applies to the write
-        // caused by that snapshot itself (see LastAppliedHostCommitId).
-        LastAppliedHostCommitId = 0;
+        // caused by that snapshot itself (see CurrentDispatchHostCommitId).
+        CurrentDispatchHostCommitId.Value = 0;
         switch (method)
         {
             case SettingsIpcMethods.Ping:
@@ -112,7 +113,7 @@ public sealed class SettingsIpcMethodRouter
                     await SettingsIpcDispatch.SettingsCommitAsync(_settings, payload);
                 if (ok && long.TryParse(resultPayload, out long hostCommitId))
                 {
-                    LastAppliedHostCommitId = hostCommitId;
+                    CurrentDispatchHostCommitId.Value = hostCommitId;
                 }
 
                 return (ok, resultPayload, error);

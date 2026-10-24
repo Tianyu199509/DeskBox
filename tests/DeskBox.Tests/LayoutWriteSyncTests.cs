@@ -100,7 +100,6 @@ public sealed class LayoutWriteSyncTests : IDisposable
 
         public bool IsHostAvailable => true;
         public bool IsFeatureWidgetEnabled(Models.WidgetKind kind) => true;
-        public Task SyncFeatureWidgetEnabledAsync(Models.WidgetKind kind, bool enabled) => Task.CompletedTask;
         public Task<bool> SetFeatureWidgetEnabled(Models.WidgetKind kind, bool enabled) => Task.FromResult(true);
         public Task ApplyGroupPresentation(GroupPresentationChange change)
         {
