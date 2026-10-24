@@ -58,9 +58,10 @@ public sealed class JsonSerializationBaselineContractTests : IDisposable
             ["src/DeskBox/Services/SettingsIpcProtocol.cs"] = 3,
             ["src/DeskBox/Services/SettingsIpcServer.cs"] = 2,
             ["src/DeskBox/Services/SettingsMigrationService.cs"] = 2,
-            // 6: legacy 3 + external-snapshot apply + disk-reload +
-            // the appearance-preview apply deserialize (batch 3d).
-            ["src/DeskBox/Services/SettingsService.cs"] = 6,
+            // 8: legacy 3 + external-snapshot apply + disk-reload +
+            // appearance-preview apply + external layout merge + serialize
+            // current layout (batches 3d/R2).
+            ["src/DeskBox/Services/SettingsService.cs"] = 8,
             // Startup session ledger: read-previous + write-current breadcrumb.
             ["src/DeskBox/Services/StartupSessionLedger.cs"] = 2,
             // Crash event report serialization for the support package.
@@ -95,7 +96,7 @@ public sealed class JsonSerializationBaselineContractTests : IDisposable
         }
 
         Assert.Equal(46, actual.Count);
-        Assert.Equal(108, actual.Values.Sum());
+        Assert.Equal(110, actual.Values.Sum());
 
         string[] expectedContextOwners =
         [

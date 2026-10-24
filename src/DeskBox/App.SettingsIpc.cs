@@ -65,6 +65,7 @@ public partial class App
             router.DispatchAsync);
 
         SettingsService.LocalPersistCompleted += OnSettingsIpcLocalPersistCompleted;
+        SettingsService.LayoutPersistCompleted += OnSettingsIpcLayoutPersistCompleted;
         GlobalHotkeyService.RegistrationChanged += OnSettingsIpcHotkeyRegistrationChanged;
         DisplayTopologyChanged += OnSettingsIpcDisplayTopologyChanged;
         ScreenHomeChanged += OnSettingsIpcScreenHomeChanged;
@@ -73,6 +74,15 @@ public partial class App
         AppUpdateService.DownloadProgressChanged += OnSettingsIpcUpdateDownloadProgress;
         AppUpdateService.DownloadCompleted += OnSettingsIpcUpdateDownloadCompleted;
         Log("[SettingsIpc] Server started");
+    }
+
+    private void OnSettingsIpcLayoutPersistCompleted()
+    {
+        // The authoritative layout slice changed on disk: push it so the
+        // host's mirror (group list, displays, capsule counts) stays live.
+        _ = PushSettingsIpcEventAsync(
+            SettingsIpcMethods.LayoutChanged,
+            SettingsService.SerializeCurrentLayout());
     }
 
     private void OnSettingsIpcLocalPersistCompleted(long mainCommitId)

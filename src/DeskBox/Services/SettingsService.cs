@@ -42,6 +42,7 @@ public sealed record SettingsPersistenceFailure(
     UseStringEnumConverter = true,
     WriteIndented = true)]
 [JsonSerializable(typeof(AppSettings), TypeInfoPropertyName = "AppSettings")]
+[JsonSerializable(typeof(WidgetLayoutSettingsSlice))]
 internal sealed partial class SettingsJsonContext : JsonSerializerContext
 {
 }
@@ -477,6 +478,13 @@ public const int DefaultSearchMaxResults = 100;
     public event Action<long>? LocalPersistCompleted;
 
     /// <summary>
+    /// Raised after a locally-committed save that included a widget-layout
+    /// commit (batch R2): the authoritative layout slice changed on disk, so
+    /// the settings-host bridge pushes it to the host's mirror.
+    /// </summary>
+    public event Action? LayoutPersistCompleted;
+
+    /// <summary>
     /// Raised after an external snapshot was applied and broadcast (before =
     /// the pre-apply in-memory state, after = the applied state), so the
     /// host can run diff-driven appliers for fields without subscribers.
@@ -759,6 +767,7 @@ settings.FocusClickedWidgetOnRaise = false;
     // pushes coming back from the process that applied our snapshot.
     private long _commitSequence;
     private long _lastOutboundCommitId;
+    private bool _lastCommitIncludedLayout;
 
     /// <summary>
     /// FileSafety-domain store owning the desktop-organization undo receipts.
@@ -1123,6 +1132,10 @@ settings.FocusClickedWidgetOnRaise = false;
                 try
                 {
                     LocalPersistCompleted?.Invoke(commitId);
+                    if (_lastCommitIncludedLayout)
+                    {
+                        LayoutPersistCompleted?.Invoke();
+                    }
                 }
                 catch (Exception observerException)
                 {
@@ -1157,6 +1170,61 @@ settings.FocusClickedWidgetOnRaise = false;
         finally
         {
             FileWriteLock.Release();
+        }
+    }
+
+    /// <summary>
+    /// Merges an authoritative widget-layout slice pushed by the main
+    /// process (batch R2) into this process's mirror and broadcasts
+    /// SettingsChanged, so every layout-reading surface (group list,
+    /// displays, capsule counts) re-projects live state. Pure memory merge —
+    /// no file IO, no persistence.
+    /// </summary>
+    public bool ApplyExternalLayout(string layoutJson)
+    {
+        if (string.IsNullOrWhiteSpace(layoutJson))
+        {
+            return false;
+        }
+
+        WidgetLayoutSettingsSlice? parsed;
+        try
+        {
+            parsed = System.Text.Json.JsonSerializer.Deserialize<WidgetLayoutSettingsSlice>(
+                layoutJson,
+                SettingsJsonContext.Default.WidgetLayoutSettingsSlice);
+        }
+        catch (System.Text.Json.JsonException ex)
+        {
+            App.Log($"[SettingsService] External layout parse failed: {ex}");
+            return false;
+        }
+
+        if (parsed is null)
+        {
+            return false;
+        }
+
+        lock (_lock)
+        {
+            _settings.WidgetLayout.CopyFrom(parsed);
+        }
+
+        NotifySettingsChangedSafely(SettingsChangeKind.General);
+        return true;
+    }
+
+    /// <summary>
+    /// Serializes this process's current widget-layout slice (the settings
+    /// host sends this back in write commands and preview payloads).
+    /// </summary>
+    public string SerializeCurrentLayout()
+    {
+        lock (_lock)
+        {
+            return System.Text.Json.JsonSerializer.Serialize(
+                _settings.WidgetLayout,
+                SettingsJsonContext.Default.WidgetLayoutSettingsSlice);
         }
     }
 
@@ -1329,6 +1397,7 @@ settings.FocusClickedWidgetOnRaise = false;
         {
             try
             {
+                owner._lastCommitIncludedLayout = false;
                 // Layout first when the device store is authoritative: it owns the
                 // durable layout state, and a crash between the two commits still
                 // leaves a consistent pair (newer layout file plus an older
@@ -1357,6 +1426,7 @@ settings.FocusClickedWidgetOnRaise = false;
                         layoutSaved = await owner.Layout.SaveCheckedAsync(
                             owner.WriteLayoutTempFileAsync);
                         layoutCommitted = layoutSaved;
+                        owner._lastCommitIncludedLayout = layoutSaved;
                     }
                     else
                     {

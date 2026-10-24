@@ -721,19 +721,27 @@ public sealed partial class DisplaySettingsSection : UserControl
         }
 
         var service = global::DeskBox.App.Current.SettingsService;
+        string newPlacementTarget;
+        string? defaultBoundScreenId = null;
         if (tag is SettingsService.WidgetNewPlacementCursorDisplay or
             SettingsService.WidgetNewPlacementMainDisplay)
         {
-            service.Settings.WidgetNewPlacementTarget = tag;
+            newPlacementTarget = tag;
         }
         else
         {
-            service.Settings.WidgetNewPlacementTarget =
-                SettingsService.WidgetNewPlacementSpecificDisplay;
-            service.Settings.WidgetDefaultBoundScreenId = tag;
+            newPlacementTarget = SettingsService.WidgetNewPlacementSpecificDisplay;
+            defaultBoundScreenId = tag;
         }
 
-        _ = service.SaveAsync();
+        service.Settings.WidgetNewPlacementTarget = newPlacementTarget;
+        service.Settings.WidgetDefaultBoundScreenId = defaultBoundScreenId;
+        // The layout domain never rides snapshots: the preference write
+        // travels as its own command and the response merges the
+        // authoritative slice (batch R2).
+        _ = _widgetActions.ApplyLayoutPreferences(new LayoutPreferencesChange(
+            NewPlacementTarget: newPlacementTarget,
+            DefaultBoundScreenId: defaultBoundScreenId));
         // The preview's "新格子" badge mirrors this setting — schedule a
         // refresh instead of calling Refresh() inline: this handler runs
         // inside the combo's own SelectionChanged, and a synchronous rebuild
@@ -753,9 +761,11 @@ public sealed partial class DisplaySettingsSection : UserControl
         }
 
         var service = global::DeskBox.App.Current.SettingsService;
-        service.Settings.WidgetDisplayDisconnectBehavior =
+        string normalizedDisconnect =
             SettingsService.NormalizeWidgetDisplayDisconnectBehavior(tag);
-        _ = service.SaveAsync();
+        service.Settings.WidgetDisplayDisconnectBehavior = normalizedDisconnect;
+        _ = _widgetActions.ApplyLayoutPreferences(new LayoutPreferencesChange(
+            DisconnectBehavior: normalizedDisconnect));
     }
 
     // ── Widget rows with inline "show on" combos ───────────────

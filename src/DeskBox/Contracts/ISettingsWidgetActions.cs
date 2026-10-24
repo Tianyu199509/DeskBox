@@ -53,6 +53,27 @@ public interface ISettingsWidgetActions
     Task SyncFeatureWidgetEnabledAsync(WidgetKind kind, bool enabled);
 
     /// <summary>
+    /// Applies a settings-UI group-presentation edit (or reset) to the
+    /// authoritative layout: assigns the six presentation fields on the
+    /// group, persists, and notifies the host presentation. Null fields are
+    /// left untouched, so a reset sends explicit defaults for all six.
+    /// </summary>
+    Task ApplyGroupPresentation(GroupPresentationChange change);
+
+    /// <summary>Applies the four group-navigation defaults (full snapshot).</summary>
+    Task ApplyGroupNavigationDefaults(GroupNavigationDefaultsChange change);
+
+    /// <summary>Applies the new-widget placement preferences (full snapshot).</summary>
+    Task ApplyLayoutPreferences(LayoutPreferencesChange change);
+
+    /// <summary>
+    /// Runs a capsule-override reset on the authoritative layout (the reset
+    /// logic itself lives in CapsuleOverrideResetter so both processes run
+    /// identical code).
+    /// </summary>
+    Task ResetCapsuleOverrides(CapsuleOverrideReset reset);
+
+    /// <summary>
     /// The feature-widget switch write: records the enabled dictionary (the
     /// MAIN process owns it — snapshots never carry it) and applies the
     /// change through the live manager. One command so the dictionary write

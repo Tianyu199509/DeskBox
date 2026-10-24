@@ -369,6 +369,35 @@ public sealed class SettingsIpcFacadeTests : IDisposable
 
         public Task SyncFeatureWidgetEnabledAsync(WidgetKind kind, bool enabled) => Task.CompletedTask;
 
+        public List<Contracts.GroupPresentationChange> GroupPresentations { get; } = [];
+        public List<Contracts.GroupNavigationDefaultsChange> NavDefaults { get; } = [];
+        public List<Contracts.LayoutPreferencesChange> LayoutPreferences { get; } = [];
+        public List<Contracts.CapsuleOverrideReset> CapsuleResets { get; } = [];
+
+        public Task ApplyGroupPresentation(Contracts.GroupPresentationChange change)
+        {
+            GroupPresentations.Add(change);
+            return Task.CompletedTask;
+        }
+
+        public Task ApplyGroupNavigationDefaults(Contracts.GroupNavigationDefaultsChange change)
+        {
+            NavDefaults.Add(change);
+            return Task.CompletedTask;
+        }
+
+        public Task ApplyLayoutPreferences(Contracts.LayoutPreferencesChange change)
+        {
+            LayoutPreferences.Add(change);
+            return Task.CompletedTask;
+        }
+
+        public Task ResetCapsuleOverrides(Contracts.CapsuleOverrideReset reset)
+        {
+            CapsuleResets.Add(reset);
+            return Task.CompletedTask;
+        }
+
         public Task<bool> SetFeatureWidgetEnabled(WidgetKind kind, bool enabled)
         {
             SyncToggles.Add((kind, enabled));
@@ -662,7 +691,9 @@ public sealed class SettingsIpcFacadeTests : IDisposable
         var loop = await StartLoopbackAsync(PipeName(), settings);
         try
         {
-            var remote = new RemoteSettingsWidgetActions(loop.Client);
+            var hostMirror = new SettingsService(Path.Combine(_tempRoot, "widget-host"));
+            await hostMirror.LoadAsync();
+            var remote = new RemoteSettingsWidgetActions(loop.Client, hostMirror);
 
             Assert.True(remote.IsHostAvailable);
             Assert.True(remote.IsFeatureWidgetEnabled(WidgetKind.Todo));

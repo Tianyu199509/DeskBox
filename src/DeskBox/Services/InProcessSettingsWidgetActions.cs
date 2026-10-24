@@ -44,6 +44,117 @@ public sealed class InProcessSettingsWidgetActions : ISettingsWidgetActions
 
     public bool IsHostAvailable => _widgetManager is not null;
 
+    public async Task ApplyGroupPresentation(Contracts.GroupPresentationChange change)
+    {
+        WidgetGroupConfig? group = _settingsService.Settings.WidgetGroups.FirstOrDefault(candidate =>
+            string.Equals(candidate.Id, change.GroupId, StringComparison.Ordinal));
+        if (group is null)
+        {
+            return;
+        }
+
+        if (change.NavigationStyle is not null)
+        {
+            group.NavigationStyle = change.NavigationStyle;
+        }
+
+        if (change.TitleDisplayMode is not null)
+        {
+            group.TitleDisplayMode = change.TitleDisplayMode;
+        }
+
+        if (change.WheelSwitch != Contracts.GroupPresentationTriState.Unset)
+        {
+            group.WheelSwitchEnabled = FromTriState(change.WheelSwitch);
+        }
+
+        if (change.HoverSwitch != Contracts.GroupPresentationTriState.Unset)
+        {
+            group.HoverSwitchEnabled = FromTriState(change.HoverSwitch);
+        }
+
+        if (change.CollapseBehavior is not null)
+        {
+            group.CollapseBehavior = change.CollapseBehavior;
+        }
+
+        if (change.ChromeMode is not null)
+        {
+            group.ChromeMode = change.ChromeMode;
+        }
+
+        _settingsService.SaveDebounced(notifySubscribers: false);
+        NotifyPresentationChanged();
+    }
+
+    public async Task ApplyGroupNavigationDefaults(Contracts.GroupNavigationDefaultsChange change)
+    {
+        if (change.NavigationStyle is not null)
+        {
+            _settingsService.Settings.WidgetGroupDefaultNavigationStyle = change.NavigationStyle;
+        }
+
+        if (change.TitleDisplayMode is not null)
+        {
+            _settingsService.Settings.WidgetGroupDefaultTitleDisplayMode = change.TitleDisplayMode;
+        }
+
+        if (change.WheelSwitchEnabled is not null)
+        {
+            _settingsService.Settings.WidgetGroupWheelSwitchEnabled = change.WheelSwitchEnabled.Value;
+        }
+
+        if (change.HoverSwitchEnabled is not null)
+        {
+            _settingsService.Settings.WidgetGroupHoverSwitchEnabled = change.HoverSwitchEnabled.Value;
+        }
+
+        _settingsService.SaveDebounced(notifySubscribers: false);
+        NotifyPresentationChanged();
+    }
+
+    public async Task ApplyLayoutPreferences(Contracts.LayoutPreferencesChange change)
+    {
+        if (change.NewPlacementTarget is not null)
+        {
+            _settingsService.Settings.WidgetNewPlacementTarget = change.NewPlacementTarget;
+        }
+
+        if (change.DefaultBoundScreenId is not null)
+        {
+            _settingsService.Settings.WidgetDefaultBoundScreenId = change.DefaultBoundScreenId;
+        }
+
+        if (change.DisconnectBehavior is not null)
+        {
+            _settingsService.Settings.WidgetDisplayDisconnectBehavior = change.DisconnectBehavior;
+        }
+
+        _settingsService.SaveDebounced(notifySubscribers: false);
+    }
+
+    public async Task ResetCapsuleOverrides(Contracts.CapsuleOverrideReset reset)
+    {
+        if (!CapsuleOverrideResetter.Run(_settingsService.Settings, reset))
+        {
+            return;
+        }
+
+        _settingsService.SaveDebounced();
+    }
+
+    private static bool? FromTriState(Contracts.GroupPresentationTriState state) =>
+        state switch
+        {
+            Contracts.GroupPresentationTriState.False => false,
+            Contracts.GroupPresentationTriState.True => true,
+            _ => null,
+        };
+
+    private void NotifyPresentationChanged() =>
+        DeskBox.Platform.UiDispatch.RunOrDefer(
+            () => _widgetManager?.NotifyWidgetGroupPresentationSettingsChanged());
+
     public bool IsFeatureWidgetEnabled(WidgetKind kind) =>
         _widgetManager?.IsFeatureWidgetEnabled(kind) ??
         FeatureWidgetSettings.IsEnabled(_settingsService.Settings, kind);

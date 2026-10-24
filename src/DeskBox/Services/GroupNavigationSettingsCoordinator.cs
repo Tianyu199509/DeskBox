@@ -27,9 +27,34 @@ public sealed class GroupNavigationSettingsCoordinator : IGroupNavigationSetting
 
     internal bool IsStopped => _stopped;
 
-    public GroupNavigationSettingsCoordinator(SettingsService settings)
+    private readonly Func<Contracts.GroupNavigationDefaultsChange, Task>? _applyExternal;
+
+    public GroupNavigationSettingsCoordinator(
+        SettingsService settings,
+        Func<Contracts.GroupNavigationDefaultsChange, Task>? applyExternal = null)
     {
         _settings = settings;
+        _applyExternal = applyExternal;
+    }
+
+    /// <summary>
+    /// Fires the external layout write (settings-host split, batch R2): the
+    /// layout domain never rides snapshots, so a host-process instance
+    /// forwards each defaults write as its own command. Null in-process —
+    /// the shared instance already writes the authoritative settings.
+    /// </summary>
+    private void PersistDefaults()
+    {
+        _settings.SaveDebounced();
+        if (_applyExternal is { } apply)
+        {
+            WidgetLayoutSettingsSlice layout = _settings.Settings.WidgetLayout;
+            _ = apply(new Contracts.GroupNavigationDefaultsChange(
+                layout.WidgetGroupDefaultNavigationStyle,
+                layout.WidgetGroupDefaultTitleDisplayMode,
+                layout.WidgetGroupWheelSwitchEnabled,
+                layout.WidgetGroupHoverSwitchEnabled));
+        }
     }
 
     public GroupNavigationSettingsSnapshot ReadAll()
@@ -59,7 +84,7 @@ public sealed class GroupNavigationSettingsCoordinator : IGroupNavigationSetting
         }
 
         layout.WidgetGroupDefaultNavigationStyle = normalized;
-        _settings.SaveDebounced();
+        PersistDefaults();
         return true;
     }
 
@@ -79,7 +104,7 @@ public sealed class GroupNavigationSettingsCoordinator : IGroupNavigationSetting
         }
 
         layout.WidgetGroupDefaultTitleDisplayMode = normalized;
-        _settings.SaveDebounced();
+        PersistDefaults();
         return true;
     }
 
@@ -93,7 +118,7 @@ public sealed class GroupNavigationSettingsCoordinator : IGroupNavigationSetting
         }
 
         layout.WidgetGroupWheelSwitchEnabled = value;
-        _settings.SaveDebounced();
+        PersistDefaults();
         return true;
     }
 
@@ -107,7 +132,7 @@ public sealed class GroupNavigationSettingsCoordinator : IGroupNavigationSetting
         }
 
         layout.WidgetGroupHoverSwitchEnabled = value;
-        _settings.SaveDebounced();
+        PersistDefaults();
         return true;
     }
 

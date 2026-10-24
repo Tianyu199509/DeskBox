@@ -13,12 +13,60 @@ public sealed class RemoteSettingsWidgetActions : ISettingsWidgetActions
 {
     private readonly SettingsIpcClient _client;
 
-    public RemoteSettingsWidgetActions(SettingsIpcClient client)
+    public bool IsHostAvailable => true;
+
+    private readonly SettingsService _settingsService;
+
+    public RemoteSettingsWidgetActions(SettingsIpcClient client, SettingsService settingsService)
     {
         _client = client;
+        _settingsService = settingsService;
     }
 
-    public bool IsHostAvailable => true;
+    public Task ApplyGroupPresentation(DeskBox.Contracts.GroupPresentationChange change) =>
+        SendLayoutWrite(
+            SettingsIpcMethods.WidgetApplyGroupPresentation,
+            SettingsIpcPayload.Encode(change, SettingsIpcJsonContext.Default.GroupPresentationChange));
+
+    public Task ApplyGroupNavigationDefaults(DeskBox.Contracts.GroupNavigationDefaultsChange change) =>
+        SendLayoutWrite(
+            SettingsIpcMethods.WidgetApplyGroupNavDefaults,
+            SettingsIpcPayload.Encode(change, SettingsIpcJsonContext.Default.GroupNavigationDefaultsChange));
+
+    public Task ApplyLayoutPreferences(DeskBox.Contracts.LayoutPreferencesChange change) =>
+        SendLayoutWrite(
+            SettingsIpcMethods.WidgetApplyLayoutPreferences,
+            SettingsIpcPayload.Encode(change, SettingsIpcJsonContext.Default.LayoutPreferencesChange));
+
+    public Task ResetCapsuleOverrides(DeskBox.Contracts.CapsuleOverrideReset reset) =>
+        SendLayoutWrite(
+            SettingsIpcMethods.WidgetResetCapsuleOverrides,
+            SettingsIpcPayload.Encode(reset, SettingsIpcJsonContext.Default.CapsuleOverrideReset));
+
+    /// <summary>
+    /// Layout writes: the response carries the authoritative slice — merge
+    /// it into the local mirror BEFORE returning so the caller's immediate
+    /// refresh reads fresh state (no stale flash, no reliance on push
+    /// ordering).
+    /// </summary>
+    private async Task SendLayoutWrite(string method, string payload)
+    {
+        (bool ok, string? sliceJson, _) = await _client.RequestAsync(method, payload);
+        if (ok &&
+            !string.IsNullOrEmpty(sliceJson) &&
+            _settingsService.ApplyExternalLayout(sliceJson))
+        {
+            return;
+        }
+
+        // Best effort: pull the slice directly when the response carried none.
+        (bool fetchOk, string? fetched, _) = await _client.RequestAsync(
+            SettingsIpcMethods.WidgetLayoutRead);
+        if (fetchOk && !string.IsNullOrEmpty(fetched))
+        {
+            _settingsService.ApplyExternalLayout(fetched);
+        }
+    }
 
     public bool IsFeatureWidgetEnabled(WidgetKind kind)
     {

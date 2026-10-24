@@ -212,6 +212,15 @@ public partial class App
         LocalizationService = localization;
 
         client.EventReceived += OnSettingsHostCommandEvent;
+        client.EventReceived += (method, payload) =>
+        {
+            if (method != SettingsIpcMethods.LayoutChanged)
+            {
+                return;
+            }
+
+            UiDispatcherQueue.TryEnqueue(() => settings.ApplyExternalLayout(payload));
+        };
 
         // The reload/echo bridge: the main process pushes settings-reloaded
         // after every durable save; pushes carrying our own commit id are
@@ -362,6 +371,7 @@ public partial class App
             tryEnqueue: action => UiDispatcherQueue.TryEnqueue(() => action()),
             reportError: ex => Log($"[QuickCapture] Settings operation failed: {ex}"));
 
+        var widgetActions = new RemoteSettingsWidgetActions(client, settings);
         var hotkey = new RemoteSettingsHotkeyActions(client);
         return new SettingsWindowFactoryInput(
             settings, theme, localization,
@@ -377,12 +387,14 @@ public partial class App
             new InteractionSettingsCoordinator(settings),
             new FileDisplaySettingsCoordinator(settings),
             new FileStackSettingsCoordinator(settings),
-            new GroupNavigationSettingsCoordinator(settings),
+            new GroupNavigationSettingsCoordinator(
+                settings,
+                applyExternal: change => widgetActions.ApplyGroupNavigationDefaults(change)),
             new ManagedStorageSettingsCoordinator(settings),
             new MaintenanceSettingsCoordinator(settings),
             new PerformanceSettingsCoordinator(settings),
             hotkey,
-            new RemoteSettingsWidgetActions(client),
+            widgetActions,
             new RemoteSettingsRestoreActions(client),
             new RemoteSettingsAppActions(client),
             new RemoteSettingsDataActions(client),

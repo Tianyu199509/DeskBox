@@ -196,6 +196,22 @@ public static class SettingsIpcMethods
     /// preview-only and never persists).
     /// </summary>
     public const string AppearancePreview = "settings.appearance-preview";
+
+    // ── Layout writes + sync (batch R2) ─────────────────────────────
+    public const string WidgetApplyGroupPresentation = "widget.apply-group-presentation";
+    public const string WidgetApplyGroupNavDefaults = "widget.apply-group-nav-defaults";
+    public const string WidgetApplyLayoutPreferences = "widget.apply-layout-preferences";
+    public const string WidgetResetCapsuleOverrides = "widget.reset-capsule-overrides";
+
+    /// <summary>Reads the authoritative widget-layout slice JSON.</summary>
+    public const string WidgetLayoutRead = "widget.layout-read";
+
+    /// <summary>
+    /// Main → settings host: the authoritative widget-layout slice changed
+    /// (payload = WidgetLayoutSettingsSlice JSON). The host merges it into
+    /// its mirror so every layout-reading surface sees live state.
+    /// </summary>
+    public const string LayoutChanged = "layout-changed";
 }
 
 /// <summary>
@@ -368,6 +384,11 @@ public static class SettingsIpcPayload
 [JsonSerializable(typeof(SettingsIpcUpdateState))]
 [JsonSerializable(typeof(SettingsIpcUpdateCheck))]
 [JsonSerializable(typeof(SettingsIpcStartInstaller))]
+[JsonSerializable(typeof(WidgetLayoutSettingsSlice))]
+[JsonSerializable(typeof(DeskBox.Contracts.GroupPresentationChange))]
+[JsonSerializable(typeof(DeskBox.Contracts.GroupNavigationDefaultsChange))]
+[JsonSerializable(typeof(DeskBox.Contracts.LayoutPreferencesChange))]
+[JsonSerializable(typeof(DeskBox.Contracts.CapsuleOverrideReset))]
 [JsonSerializable(typeof(AppUpdateCheckResult))]
 [JsonSerializable(typeof(AppUpdateDownloadProgress))]
 [JsonSerializable(typeof(AppUpdateDownloadResult))]

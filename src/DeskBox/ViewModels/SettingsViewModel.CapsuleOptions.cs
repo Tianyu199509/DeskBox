@@ -1,3 +1,4 @@
+using DeskBox.Contracts;
 using CommunityToolkit.Mvvm.Input;
 using DeskBox.Models;
 using DeskBox.Services;
@@ -57,6 +58,8 @@ public partial class SettingsViewModel
         {
             _settingsService.SaveDebounced();
             NotifyCapsuleOverridePropertiesChanged();
+            _ = _widgetActions.ResetCapsuleOverrides(new CapsuleOverrideReset(
+                CapsuleOverrideResetScope.BehaviorOnly));
         }
     }
 
@@ -130,6 +133,9 @@ public partial class SettingsViewModel
 
         _settingsService.SaveDebounced();
         NotifyCapsuleOverridePropertiesChanged();
+        _ = _widgetActions.ResetCapsuleOverrides(new CapsuleOverrideReset(
+            CapsuleOverrideResetScope.WidgetAndGroup,
+            widgetId));
     }
 
     [RelayCommand]
@@ -152,6 +158,8 @@ public partial class SettingsViewModel
 
         _settingsService.SaveDebounced();
         NotifyCapsuleOverridePropertiesChanged();
+        _ = _widgetActions.ResetCapsuleOverrides(new CapsuleOverrideReset(
+            CapsuleOverrideResetScope.All));
     }
 
     private static bool HasCapsuleOverride(WidgetConfig widget) =>
@@ -202,6 +210,8 @@ public partial class SettingsViewModel
         {
             _settingsService.SaveDebounced();
             NotifyCapsuleOverridePropertiesChanged();
+            _ = _widgetActions.ResetCapsuleOverrides(new CapsuleOverrideReset(
+                CapsuleOverrideResetScope.WidthsOnly));
         }
     }
 

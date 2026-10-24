@@ -1,3 +1,4 @@
+using DeskBox.Contracts;
 using DeskBox.Models;
 using DeskBox.Services;
 
@@ -30,7 +31,7 @@ public partial class SettingsViewModel
         }
 
         group.Name = normalized;
-        CompleteWidgetGroupSettingsChange();
+        CompleteWidgetGroupSettingsChange(group);
         NotifyExistingWidgetGroupPropertiesChanged();
         return true;
     }
@@ -62,7 +63,7 @@ public partial class SettingsViewModel
             group.WheelSwitchEnabled = null;
         }
 
-        CompleteWidgetGroupSettingsChange();
+        CompleteWidgetGroupSettingsChange(group);
         return true;
     }
 
@@ -83,7 +84,7 @@ public partial class SettingsViewModel
         }
 
         group.TitleDisplayMode = normalized;
-        CompleteWidgetGroupSettingsChange();
+        CompleteWidgetGroupSettingsChange(group);
         return true;
     }
 
@@ -102,7 +103,7 @@ public partial class SettingsViewModel
         }
 
         group.WheelSwitchEnabled = normalized;
-        CompleteWidgetGroupSettingsChange();
+        CompleteWidgetGroupSettingsChange(group);
         return true;
     }
 
@@ -121,7 +122,7 @@ public partial class SettingsViewModel
         }
 
         group.HoverSwitchEnabled = normalized;
-        CompleteWidgetGroupSettingsChange();
+        CompleteWidgetGroupSettingsChange(group);
         return true;
     }
 
@@ -144,7 +145,7 @@ public partial class SettingsViewModel
         }
 
         group.CollapseBehavior = settingValue;
-        CompleteWidgetGroupSettingsChange();
+        CompleteWidgetGroupSettingsChange(group);
         return true;
     }
 
@@ -171,7 +172,7 @@ public partial class SettingsViewModel
         }
 
         group.ChromeMode = settingValue;
-        CompleteWidgetGroupSettingsChange();
+        CompleteWidgetGroupSettingsChange(group);
         return true;
     }
 
@@ -205,7 +206,7 @@ public partial class SettingsViewModel
         group.HoverSwitchEnabled = null;
         group.CollapseBehavior = WidgetCollapseBehaviorNames.System;
         group.ChromeMode = WidgetChromeModeNames.Standard;
-        CompleteWidgetGroupSettingsChange();
+        CompleteWidgetGroupSettingsChange(group);
         NotifyExistingWidgetGroupPropertiesChanged();
         return true;
     }
@@ -227,11 +228,29 @@ public partial class SettingsViewModel
     private void OnGroupNavigationPresentationUserChanged() =>
         AfterWidgetGroupPresentationChange();
 
-    private void CompleteWidgetGroupSettingsChange()
+    private void CompleteWidgetGroupSettingsChange(WidgetGroupConfig group)
     {
-        _settingsService.SaveDebounced(notifySubscribers: false);
-        _widgetActions.NotifyWidgetGroupPresentationSettingsChanged();
+        // The layout domain never rides snapshots (main-process owned), so
+        // the group's six presentation fields travel as their own command;
+        // the response merges the authoritative slice back into the mirror
+        // before the caller's refresh reads it (batch R2).
+        _ = _widgetActions.ApplyGroupPresentation(new GroupPresentationChange(
+            group.Id,
+            group.NavigationStyle,
+            group.TitleDisplayMode,
+            ToTriState(group.WheelSwitchEnabled),
+            ToTriState(group.HoverSwitchEnabled),
+            group.CollapseBehavior,
+            group.ChromeMode));
     }
+
+    private static GroupPresentationTriState ToTriState(bool? value) =>
+        value switch
+        {
+            false => GroupPresentationTriState.False,
+            true => GroupPresentationTriState.True,
+            _ => GroupPresentationTriState.Null,
+        };
 
     private WidgetGroupConfig? FindWidgetGroup(string groupId) =>
         _settingsService.Settings.WidgetGroups.FirstOrDefault(candidate =>

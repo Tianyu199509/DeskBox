@@ -245,6 +245,54 @@ public sealed class SettingsIpcMethodRouter
 
             // ── Widget facade (batch 3c-2) ───────────────────────────
 
+            case SettingsIpcMethods.WidgetApplyGroupPresentation:
+                if (_widget is null) return unavailable(method);
+                if (SettingsIpcPayload.Decode(payload, SettingsIpcJsonContext.Default.GroupPresentationChange)
+                    is not { } groupPresentation)
+                {
+                    return (false, null, "missing payload");
+                }
+
+                await _widget.ApplyGroupPresentation(groupPresentation);
+                return (true, SerializeLayout(_settings), null);
+
+            case SettingsIpcMethods.WidgetApplyGroupNavDefaults:
+                if (_widget is null) return unavailable(method);
+                if (SettingsIpcPayload.Decode(payload, SettingsIpcJsonContext.Default.GroupNavigationDefaultsChange)
+                    is not { } navDefaults)
+                {
+                    return (false, null, "missing payload");
+                }
+
+                await _widget.ApplyGroupNavigationDefaults(navDefaults);
+                return (true, SerializeLayout(_settings), null);
+
+            case SettingsIpcMethods.WidgetApplyLayoutPreferences:
+                if (_widget is null) return unavailable(method);
+                if (SettingsIpcPayload.Decode(payload, SettingsIpcJsonContext.Default.LayoutPreferencesChange)
+                    is not { } layoutPreferences)
+                {
+                    return (false, null, "missing payload");
+                }
+
+                await _widget.ApplyLayoutPreferences(layoutPreferences);
+                return (true, SerializeLayout(_settings), null);
+
+            case SettingsIpcMethods.WidgetResetCapsuleOverrides:
+                if (_widget is null) return unavailable(method);
+                if (SettingsIpcPayload.Decode(payload, SettingsIpcJsonContext.Default.CapsuleOverrideReset)
+                    is not { } capsuleReset)
+                {
+                    return (false, null, "missing payload");
+                }
+
+                await _widget.ResetCapsuleOverrides(capsuleReset);
+                return (true, SerializeLayout(_settings), null);
+
+            case SettingsIpcMethods.WidgetLayoutRead:
+                if (_settings is null) return unavailable(method);
+                return (true, SerializeLayout(_settings), null);
+
             case SettingsIpcMethods.WidgetIsFeatureEnabled:
                 if (_widget is null) return unavailable(method);
                 return (true, SettingsIpcPayload.EncodeBoolean(
@@ -976,6 +1024,9 @@ public sealed class SettingsIpcMethodRouter
                 return (false, null, $"unknown method {method}");
         }
     }
+
+    private static string SerializeLayout(SettingsService settings) =>
+        settings.SerializeCurrentLayout();
 
     private static WidgetKind DecodeKind(string? payload) =>
         int.TryParse(payload, out int kind) ? (WidgetKind)kind : WidgetKind.File;
