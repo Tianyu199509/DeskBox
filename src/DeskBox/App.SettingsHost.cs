@@ -230,6 +230,7 @@ public partial class App
         var input = BuildSettingsHostFactoryInput(settings, localization, theme, client);
         Log("[SettingsHost] Factory input built");
         var window = input.CreateWindow();
+        _settingsHostWindow = window;
         Log("[SettingsHost] Window constructed");
         window._isHostProcessWindow = true;
         bool activatedTraced = false;
@@ -276,7 +277,8 @@ public partial class App
             reportError: ex => Log($"[SearchSettings] Operation failed: {ex}"));
         var quickCaptureClipboard = new QuickCaptureClipboardRuntime(
             shouldListen: () => false,
-            create: null,
+            create: () => throw new InvalidOperationException(
+                "The settings host never listens to the clipboard"),
             reportError: ex => Log($"[QuickCapture] Clipboard runtime failed: {ex}"));
         var quickCapture = new QuickCaptureSettingsCoordinator(
             settings,
