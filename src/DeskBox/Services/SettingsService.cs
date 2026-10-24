@@ -1300,6 +1300,12 @@ settings.FocusClickedWidgetOnRaise = false;
 
         lock (_lock)
         {
+            // settings.json never carries the widget-layout domain (the
+            // durable pair strips it), so a whole-graph swap here would wipe
+            // this process's layout mirror — the feature-enable dictionary
+            // included — on every reload push. Keep the current domain; the
+            // main process owns it and feature switches travel as commands.
+            parsed.WidgetLayout.CopyFrom(_settings.WidgetLayout);
             _settings = parsed;
             _settingsSchemaNewerThanBuild = false;
         }
