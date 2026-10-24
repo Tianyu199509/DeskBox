@@ -59,11 +59,33 @@ public partial class App
 
             return 0;
         }
+
+        /// <summary>The value after "--settings-section", or null (spawn deep link).</summary>
+        internal static string? TryGetSectionArgument(string[] arguments) =>
+            TryGetValueAfter(arguments, "--settings-section");
+
+        /// <summary>The value after "--settings-glance", or null (spawn deep link).</summary>
+        internal static string? TryGetGlanceArgument(string[] arguments) =>
+            TryGetValueAfter(arguments, "--settings-glance");
+
+        private static string? TryGetValueAfter(string[] arguments, string name)
+        {
+            for (int i = 1; i < arguments.Length - 1; i++)
+            {
+                if (string.Equals(arguments[i], name, StringComparison.OrdinalIgnoreCase))
+                {
+                    return arguments[i + 1];
+                }
+            }
+
+            return null;
+        }
     }
 
     private bool _isSettingsHost;
     private SettingsIpcClient? _settingsHostClient;
     private int _settingsHostMainProcessId;
+    private Views.SettingsWindow? _settingsHostWindow;
 
     // Spawn-to-shown trace for the measurement script and crash diagnosis,
     // in the temp directory so it never touches the data root.
@@ -159,6 +181,8 @@ public partial class App
         SettingsHostSettingsService = settings;
         SettingsHostLocalizationService = localization;
         LocalizationService = localization;
+
+        client.EventReceived += OnSettingsHostCommandEvent;
 
         // The reload/echo bridge: the main process pushes settings-reloaded
         // after every durable save; pushes carrying our own commit id are
@@ -287,6 +311,71 @@ public partial class App
             new RemoteSettingsDataActions(client),
             new RemoteAppUpdateService(client),
             action => UiDispatcherQueue.TryEnqueue(() => action()));
+    }
+
+    /// <summary>
+    /// Main-process commands to the host (batch 3d): navigation wakes,
+    /// update/desktop-organization refreshes, and the shutdown notice.
+    /// </summary>
+    private void OnSettingsHostCommandEvent(string method, string? payload)
+    {
+        void RunOnUi(Action action) => UiDispatcherQueue.TryEnqueue(() => action());
+
+        switch (method)
+        {
+            case SettingsIpcMethods.HostShow:
+                RunOnUi(() =>
+                {
+                    if (_settingsHostWindow is { } window)
+                    {
+                        window.ShowWindow();
+                        if (!string.IsNullOrEmpty(payload))
+                        {
+                            window.ShowSection(payload);
+                        }
+                    }
+                });
+                break;
+            case SettingsIpcMethods.HostShowGlance:
+                if (!string.IsNullOrEmpty(payload))
+                {
+                    string widgetId = payload;
+                    RunOnUi(() => _settingsHostWindow?.ShowWindow());
+                    RunOnUi(() => _settingsHostWindow?.ShowGlanceSection(widgetId));
+                }
+
+                break;
+            case SettingsIpcMethods.HostUpdateStateRefresh:
+                RunOnUi(() =>
+                {
+                    _settingsHostWindow?.ViewModel.RefreshCachedUpdateState();
+                    _settingsHostWindow?.BringUpdateStatusIntoView();
+                });
+                break;
+            case SettingsIpcMethods.HostQueueUpdateResult:
+                if (!string.IsNullOrEmpty(payload))
+                {
+                    string outcome = payload;
+                    RunOnUi(() => _settingsHostWindow?.QueueUpdateInstallResultDialog(outcome));
+                }
+
+                break;
+            case SettingsIpcMethods.HostDesktopOrgRefresh:
+                RunOnUi(() => _settingsHostWindow?.RefreshDesktopOrganizationState());
+                break;
+            case SettingsIpcMethods.HostOneClickUpdate:
+                RunOnUi(async () =>
+                {
+                    if (_settingsHostWindow is { } window)
+                    {
+                        await window.RunOneClickUpdateFlowAsync();
+                    }
+                });
+                break;
+            case SettingsIpcMethods.HostShutdown:
+                RunOnUi(ExitSettingsHost);
+                break;
+        }
     }
 
     /// <summary>

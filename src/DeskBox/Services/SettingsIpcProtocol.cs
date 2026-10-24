@@ -173,6 +173,15 @@ public static class SettingsIpcMethods
     public const string UpdateCheckCompleted = "update.check-completed";
     public const string UpdateDownloadProgress = "update.download-progress";
     public const string UpdateDownloadCompleted = "update.download-completed";
+
+    // ── Host commands: main → settings host pushes (batch 3d) ───────
+    public const string HostShow = "host.show";
+    public const string HostShowGlance = "host.show-glance";
+    public const string HostUpdateStateRefresh = "host.update-state";
+    public const string HostQueueUpdateResult = "host.queue-update-result";
+    public const string HostDesktopOrgRefresh = "host.desktop-org-refresh";
+    public const string HostOneClickUpdate = "host.one-click-update";
+    public const string HostShutdown = "host.shutdown";
 }
 
 /// <summary>

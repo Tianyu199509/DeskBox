@@ -1813,7 +1813,12 @@ public partial class App : Application
                 RunOptionalStartupStep("update-install-result", () =>
                 {
                     ShowSettings("About");
+#if DESKBOX_AOT_SMOKE_HARNESS
                     _settingsWindow?.QueueUpdateInstallResultDialog(updateInstallOutcome!);
+#else
+                    _ = PushSettingsIpcEventAsync(
+                        SettingsIpcMethods.HostQueueUpdateResult, updateInstallOutcome);
+#endif
                 });
             }
 
@@ -2609,9 +2614,15 @@ public partial class App : Application
     {
         try
         {
+#if DESKBOX_AOT_SMOKE_HARNESS
             if (_settingsWindow is not null)
             {
                 await _settingsWindow.RunOneClickUpdateFlowAsync();
+#else
+            if (IsSettingsHostRunning)
+            {
+                _ = PushSettingsIpcEventAsync(SettingsIpcMethods.HostOneClickUpdate, null);
+#endif
             }
         }
         catch (Exception ex)
@@ -3440,7 +3451,11 @@ public partial class App : Application
             ClearUpdateAvailableReminder();
         }
 
+#if DESKBOX_AOT_SMOKE_HARNESS
         _settingsWindow?.RefreshUpdateStateFromService();
+#else
+        _ = PushSettingsIpcEventAsync(SettingsIpcMethods.HostUpdateStateRefresh, null);
+#endif
     }
 
     /// <summary>
@@ -3507,7 +3522,7 @@ public partial class App : Application
 
         // The settings page shows the downloaded state live; a toast on top
         // of it would repeat what is already on screen.
-        if (_settingsWindow is { IsVisibleToUser: true })
+        if (IsSettingsHostVisible)
         {
             return;
         }
@@ -3566,7 +3581,7 @@ public partial class App : Application
         string message = LocalizationService.Format("Tray.UpdateAvailableMessage", manifest.Version);
         // A manual check that surfaces a version already on screen (the
         // settings About page) does not need a toast repeating it.
-        if (_settingsWindow is { IsVisibleToUser: true })
+        if (IsSettingsHostVisible)
         {
             return;
         }
@@ -3743,7 +3758,12 @@ public partial class App : Application
                 if (!string.IsNullOrWhiteSpace(pendingUpdateInstallOutcome))
                 {
                     ShowSettings("About");
+#if DESKBOX_AOT_SMOKE_HARNESS
                     _settingsWindow?.QueueUpdateInstallResultDialog(pendingUpdateInstallOutcome);
+#else
+                    _ = PushSettingsIpcEventAsync(
+                        SettingsIpcMethods.HostQueueUpdateResult, pendingUpdateInstallOutcome);
+#endif
                     activationHandled = true;
                 }
 
@@ -3753,7 +3773,7 @@ public partial class App : Application
                 }
 
                 DateTimeOffset activationAtUtc = DateTimeOffset.UtcNow;
-                bool settingsWindowOpen = _settingsWindow is { IsVisibleToUser: true };
+                bool settingsWindowOpen = IsSettingsHostVisible;
                 bool coalesceBareActivation =
                     ExternalActivationPolicy.ShouldCoalesceBareActivation(
                         _lastBareExternalActivationAtUtc,
@@ -4399,9 +4419,15 @@ public partial class App : Application
 
     private void OpenSettings()
     {
+#if DESKBOX_AOT_SMOKE_HARNESS
+        // The harness drives the settings window inside its own single
+        // process; a second-process host cannot exist there.
         CancelBackgroundMemoryCleanup();
         var settingsWindow = _settingsWindow ?? CreateSettingsWindow();
         settingsWindow.ShowWindow();
+#else
+        ShowSettingsViaHost(null, null);
+#endif
     }
 
     private SettingsWindow CreateSettingsWindow()
@@ -4480,19 +4506,27 @@ public partial class App : Application
     public void ShowSettings(string sectionTag)
     {
         if (IsShuttingDown) return;
+#if DESKBOX_AOT_SMOKE_HARNESS
         CancelBackgroundMemoryCleanup();
         var settingsWindow = _settingsWindow ?? CreateSettingsWindow();
         settingsWindow.ShowWindow();
         settingsWindow.ShowSection(sectionTag);
+#else
+        ShowSettingsViaHost(sectionTag, null);
+#endif
     }
 
     public void ShowGlanceSettings(string widgetId)
     {
         if (IsShuttingDown) return;
+#if DESKBOX_AOT_SMOKE_HARNESS
         CancelBackgroundMemoryCleanup();
         var settingsWindow = _settingsWindow ?? CreateSettingsWindow();
         settingsWindow.ShowWindow();
         settingsWindow.ShowGlanceSection(widgetId);
+#else
+        ShowSettingsViaHost(null, widgetId);
+#endif
     }
 
     private async Task EnsureInitialFileWidgetSetupAsync(
@@ -5296,7 +5330,7 @@ public partial class App : Application
         return new MemoryCleanupActivitySnapshot(
             HasVisibleWidgets: visibility.HasNativeVisibleWidgets,
             IsWidgetInteractionActive: widgetManager?.IsWidgetInteractionActive == true,
-            IsSettingsOpen: _settingsWindow is { IsVisibleToUser: true },
+            IsSettingsOpen: IsSettingsHostVisible,
             IsOnboardingOpen: _onboardingWindow is not null,
             IsSearchPopupVisible: _searchPopupWindow?.IsPopupVisible == true,
             IsDeskBoxForeground: isDeskBoxForeground,
@@ -6011,7 +6045,7 @@ public partial class App : Application
             return false;
         }
 
-        if (_settingsWindow is { IsVisibleToUser: true })
+        if (IsSettingsHostVisible)
         {
             blockReason = "settings-open";
             return false;
@@ -6651,7 +6685,12 @@ public partial class App : Application
             ShutdownStep.Sync("global-hotkey", () => { GlobalHotkeyService?.Dispose(); GlobalHotkeyService = null; }),
             ShutdownStep.Sync("widgets", () => WidgetManager?.CloseAll()),
             ShutdownStep.Sync("desktop-organization-window", () => { _desktopOrganizationWindow?.CloseForShutdown(); _desktopOrganizationWindow = null; }),
-            ShutdownStep.Sync("settings-window", () => { _settingsWindow?.CloseForShutdown(); _settingsWindow = null; }),
+            ShutdownStep.Sync("settings-window", () =>
+            {
+                _settingsWindow?.CloseForShutdown();
+                _settingsWindow = null;
+                ShutdownSettingsHost();
+            }),
             ShutdownStep.Sync("backup-settings", () => _backupSettings?.Dispose()),
             ShutdownStep.Sync("onboarding-window", () => { _onboardingWindow?.Close(); _onboardingWindow = null; }),
             ShutdownStep.Sync("recovery-offer-window", () => { _recoveryOfferWindow?.Close(); _recoveryOfferWindow = null; }),

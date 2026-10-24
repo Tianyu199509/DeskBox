@@ -1,3 +1,4 @@
+using DeskBox.Services;
 using DeskBox.Views;
 
 namespace DeskBox;
@@ -28,8 +29,14 @@ public partial class App
         return _desktopOrganizationWindow;
     }
 
-    private void DesktopOrganizationWindow_StateChanged(object? sender, EventArgs e) =>
+    private void DesktopOrganizationWindow_StateChanged(object? sender, EventArgs e)
+    {
+#if DESKBOX_AOT_SMOKE_HARNESS
         _settingsWindow?.RefreshDesktopOrganizationState();
+#else
+        _ = PushSettingsIpcEventAsync(SettingsIpcMethods.HostDesktopOrgRefresh, null);
+#endif
+    }
 
     private void DesktopOrganizationWindow_Closed(object sender, Microsoft.UI.Xaml.WindowEventArgs args)
     {
