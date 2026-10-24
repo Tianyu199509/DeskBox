@@ -66,11 +66,15 @@ public sealed class RemoteSettingsAppActions : ISettingsAppActions
         RequestVoidAsync(SettingsIpcMethods.AppShowOnboarding, SettingsIpcPayload.EncodeBoolean(resumeProgress))
             .GetAwaiter().GetResult();
 
-    public void ShowDesktopOrganizationWindow(nint ownerWindowHandle = 0) =>
-        RequestVoidAsync(
-                SettingsIpcMethods.AppShowDesktopOrgWindow,
-                ((long)ownerWindowHandle).ToString())
-            .GetAwaiter().GetResult();
+    public void ShowDesktopOrganizationWindow(nint ownerWindowHandle = 0)
+    {
+        // Fire-and-forget on purpose: the main process builds a heavy window
+        // and scans the desktop before this command would answer; blocking
+        // the host UI thread on that reads as a frozen settings page.
+        _ = _client.RequestAsync(
+            SettingsIpcMethods.AppShowDesktopOrgWindow,
+            ((long)ownerWindowHandle).ToString());
+    }
 
     public void OpenReleaseNotesWindow(
         AppUpdateManifest? manifest,

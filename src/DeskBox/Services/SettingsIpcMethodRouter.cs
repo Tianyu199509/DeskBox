@@ -90,6 +90,18 @@ public sealed class SettingsIpcMethodRouter
             case SettingsIpcMethods.Ping:
                 return (true, "pong", null);
 
+            case SettingsIpcMethods.AppearancePreview:
+                if (_settings is null)
+                {
+                    return (false, null, "settings service unavailable");
+                }
+
+                // Preview-only apply: swap memory + preview broadcast, never
+                // a durable write (the host commits the snapshot on release).
+                bool previewApplied = await DeskBox.Platform.UiDispatch.RunAsync(
+                    () => Task.FromResult(_settings.ApplyExternalAppearancePreview(payload ?? string.Empty)));
+                return (previewApplied, null, previewApplied ? null : "preview rejected");
+
             case SettingsIpcMethods.SettingsCommit:
                 if (_settings is null)
                 {
@@ -512,7 +524,14 @@ public sealed class SettingsIpcMethodRouter
 
             case SettingsIpcMethods.AppShowDesktopOrgWindow:
                 if (_appActions is null) return unavailable(method);
-                _appActions.ShowDesktopOrganizationWindow(long.TryParse(payload, out long orgHwnd) ? (nint)orgHwnd : 0);
+                // The window build + desktop scan can outlast the host's
+                // UI-thread wait; acknowledge now and open on the UI thread.
+                long orgOwner = long.TryParse(payload, out long parsedOwner) ? parsedOwner : 0;
+                _ = DeskBox.Platform.UiDispatch.RunAsync(() =>
+                {
+                    _appActions.ShowDesktopOrganizationWindow((nint)orgOwner);
+                    return Task.CompletedTask;
+                });
                 return (true, null, null);
 
             case SettingsIpcMethods.AppOpenReleaseNotes:

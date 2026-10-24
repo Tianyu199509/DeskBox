@@ -189,6 +189,13 @@ public static class SettingsIpcMethods
     public const string SearchEverythingAuto = "search.everything-auto";
     public const string SearchEverythingSetPath = "search.everything-set-path";
     public const string SearchEverythingLaunch = "search.everything-launch";
+
+    /// <summary>
+    /// Settings host → main: streaming appearance preview while a slider
+    /// drags (payload = full settings JSON; the main side applies it
+    /// preview-only and never persists).
+    /// </summary>
+    public const string AppearancePreview = "settings.appearance-preview";
 }
 
 /// <summary>

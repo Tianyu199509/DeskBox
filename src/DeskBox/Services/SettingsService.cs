@@ -1691,6 +1691,59 @@ settings.FocusClickedWidgetOnRaise = false;
     }
 
     /// <summary>
+    /// Applies an appearance-only preview payload from the settings host
+    /// (batch 3d follow-up): swap the in-memory graph exactly like
+    /// ApplyExternalSnapshotAsync (same preservation rules), then broadcast
+    /// the PREVIEW channel only — no durable write, no SettingsChanged. The
+    /// real save still happens when the host commits the snapshot, so a
+    /// slider drag streams previews at IPC latency instead of riding the
+    /// debounced snapshot+apply chain.
+    /// </summary>
+    public bool ApplyExternalAppearancePreview(string settingsJson)
+    {
+        if (string.IsNullOrWhiteSpace(settingsJson))
+        {
+            return false;
+        }
+
+        AppSettings? parsed;
+        try
+        {
+            parsed = System.Text.Json.JsonSerializer.Deserialize<AppSettings>(
+                settingsJson,
+                SettingsJsonContext.Default.AppSettings);
+        }
+        catch (System.Text.Json.JsonException ex)
+        {
+            App.Log($"[SettingsService] External preview parse failed: {ex}");
+            return false;
+        }
+
+        if (parsed is null ||
+            parsed.SchemaVersion > SettingsMigrationPipeline.CurrentSchemaVersion)
+        {
+            return false;
+        }
+
+        lock (_lock)
+        {
+            parsed.WidgetLayout.CopyFrom(_settings.WidgetLayout);
+            parsed.LastUpdateCheckAt = _settings.LastUpdateCheckAt;
+            parsed.LastRunVersion = _settings.LastRunVersion;
+            parsed.HasResolvedInitialFileWidgetSetup = _settings.HasResolvedInitialFileWidgetSetup;
+            parsed.AutoStartDefaultApplied = _settings.AutoStartDefaultApplied;
+            parsed.FullyElevatedNoticeAcknowledgedUtcTicks =
+                _settings.FullyElevatedNoticeAcknowledgedUtcTicks;
+            _settings = parsed;
+            _settingsSchemaNewerThanBuild = false;
+        }
+
+        _appearancePreviewCts?.Cancel();
+        AppearancePreviewChanged?.Invoke();
+        return true;
+    }
+
+    /// <summary>
     /// Update a widget's configuration. If the widget doesn't exist, it will be added.
     /// </summary>
     public void UpdateWidget(WidgetConfig config, bool notifySubscribers = true)

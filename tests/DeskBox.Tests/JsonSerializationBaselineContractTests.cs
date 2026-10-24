@@ -18,6 +18,8 @@ public sealed class JsonSerializationBaselineContractTests : IDisposable
         var expected = new Dictionary<string, int>(StringComparer.Ordinal)
         {
             ["src/DeskBox/App.AotHotkeySmoke.cs"] = 1,
+            // Appearance-preview forwarder's host-graph serialize (batch 3d).
+            ["src/DeskBox/App.SettingsHost.cs"] = 1,
             ["src/DeskBox/App.AotShortcutSmoke.cs"] = 1,
             ["src/DeskBox/App.AotShellSmoke.cs"] = 1,
             ["src/DeskBox/App.AotQuickAccessMutationSmoke.cs"] = 1,
@@ -56,9 +58,9 @@ public sealed class JsonSerializationBaselineContractTests : IDisposable
             ["src/DeskBox/Services/SettingsIpcProtocol.cs"] = 3,
             ["src/DeskBox/Services/SettingsIpcServer.cs"] = 2,
             ["src/DeskBox/Services/SettingsMigrationService.cs"] = 2,
-            // 5: legacy 3 + the settings-host split's external-snapshot apply
-            // and disk-reload deserializes (batch 3a).
-            ["src/DeskBox/Services/SettingsService.cs"] = 5,
+            // 6: legacy 3 + external-snapshot apply + disk-reload +
+            // the appearance-preview apply deserialize (batch 3d).
+            ["src/DeskBox/Services/SettingsService.cs"] = 6,
             // Startup session ledger: read-previous + write-current breadcrumb.
             ["src/DeskBox/Services/StartupSessionLedger.cs"] = 2,
             // Crash event report serialization for the support package.
@@ -92,8 +94,8 @@ public sealed class JsonSerializationBaselineContractTests : IDisposable
             Assert.Equal(expectedCount, actual[path]);
         }
 
-        Assert.Equal(45, actual.Count);
-        Assert.Equal(106, actual.Values.Sum());
+        Assert.Equal(46, actual.Count);
+        Assert.Equal(108, actual.Values.Sum());
 
         string[] expectedContextOwners =
         [
@@ -248,7 +250,7 @@ public sealed class JsonSerializationBaselineContractTests : IDisposable
         {
             // 5: legacy 3 + the settings-host split's external-snapshot apply
             // and disk-reload deserializes (batch 3a).
-            ["SettingsJsonContext.Default.AppSettings"] = 5,
+            ["SettingsJsonContext.Default.AppSettings"] = 6,
             ["QuickCaptureJsonContext.Default.StoreData"] = 2,
             ["TodoJsonContext.Default.StoreData"] = 3,
             ["GlancePreferencesJsonContext.Default.Preferences"] = 7,
@@ -266,7 +268,7 @@ public sealed class JsonSerializationBaselineContractTests : IDisposable
                     Regex.Escape(reference) + @"\b").Count);
         }
 
-        Assert.Equal(26, expectedTypeInfoReferences.Values.Sum());
+        Assert.Equal(27, expectedTypeInfoReferences.Values.Sum());
         Assert.DoesNotContain("JsonSerializerOptions", allPhaseTwoSources, StringComparison.Ordinal);
         Assert.DoesNotContain(
             "new JsonStringEnumConverter()",

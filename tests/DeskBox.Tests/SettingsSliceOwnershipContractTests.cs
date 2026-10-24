@@ -300,7 +300,9 @@ public sealed class SettingsSliceOwnershipContractTests
         ["src/DeskBox/Services/SearchResultActionService.cs"] = 2,
         ["src/DeskBox/Services/SettingsMigrationService.cs"] = 55,
         ["src/DeskBox/Services/SettingsSearchCatalog.cs"] = 25,
-        ["src/DeskBox/Services/SettingsService.cs"] = 613,
+        // +5: the appearance-preview apply preserves the runtime markers and the
+// layout domain before the preview broadcast (batch 3d follow-up).
+        ["src/DeskBox/Services/SettingsService.cs"] = 618,
         ["src/DeskBox/Services/ThemeService.cs"] = 11,
         ["src/DeskBox/Views/SettingsSections/DisplaySettingsSection.xaml.cs"] = 14,
         ["src/DeskBox/Services/TodoReminderService.cs"] = 8,

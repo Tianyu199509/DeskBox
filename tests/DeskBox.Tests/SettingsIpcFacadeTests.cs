@@ -766,6 +766,14 @@ public sealed class SettingsIpcFacadeTests : IDisposable
             Assert.True(loop.AppActions.OnboardingShown);
 
             remote.ShowDesktopOrganizationWindow(0x42);
+            // Fire-and-forget since the window build must not block the host
+            // UI thread; the owner lands after the UI-thread marshal.
+            var ownerDeadline = System.Diagnostics.Stopwatch.StartNew();
+            while (loop.AppActions.DesktopOrgOwnerHwnd != (nint)0x42 &&
+                   ownerDeadline.ElapsedMilliseconds < 5000)
+            {
+                await Task.Delay(50);
+            }
             Assert.Equal((nint)0x42, loop.AppActions.DesktopOrgOwnerHwnd);
 
             remote.UpdateTrayIcon();

@@ -224,6 +224,21 @@ public partial class App
             });
         };
 
+        // Appearance sliders stream previews through the host-side preview
+        // channel (66ms debounce): forward each preview tick over the pipe;
+        // the main process applies it preview-only (no durable write). The
+        // snapshot commit still happens on release, exactly like the
+        // pre-split single-process flow.
+        settings.AppearancePreviewChanged += () =>
+        {
+            string previewJson = System.Text.Json.JsonSerializer.Serialize(
+                settings.Settings,
+                DeskBox.Services.SettingsJsonContext.Default.AppSettings);
+            _ = client.RequestAsync(
+                DeskBox.Services.SettingsIpcMethods.AppearancePreview,
+                previewJson);
+        };
+
         ArmSettingsHostWatchdog(_settingsHostMainProcessId);
         Log("[SettingsHost] Watchdog armed");
 
