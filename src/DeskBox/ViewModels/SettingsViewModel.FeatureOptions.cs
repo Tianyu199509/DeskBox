@@ -132,14 +132,43 @@ public partial class SettingsViewModel
         return _widgetActions.IsFeatureWidgetEnabled(kind);
     }
 
-    public void SetWidgetEnabled(WidgetKind kind, bool enabled)
+    public async void SetWidgetEnabled(WidgetKind kind, bool enabled)
     {
         // Every feature switch rides the one facade command: the main
         // process runs the kind's full chain (coordinator side effects for
         // QuickCapture/Todo/Search, dictionary + manager apply for the
-        // rest). Host-local editor writes never carried these across the
-        // process boundary.
-        _ = _widgetActions.SetFeatureWidgetEnabled(kind, enabled);
+        // rest). The local memory mirror flips the switch UI immediately;
+        // the command response reconciles it with the authoritative value —
+        // the reload push alone can lag seconds behind the widget
+        // animation, and the dictionary never rides settings.json at all,
+        // so waiting for the reload would show a permanently stale switch.
+        MirrorFeatureEnabledLocally(kind, enabled);
+        bool applied = await _widgetActions.SetFeatureWidgetEnabled(kind, enabled);
+        if (applied != enabled)
+        {
+            MirrorFeatureEnabledLocally(kind, applied);
+        }
+    }
+
+    private void MirrorFeatureEnabledLocally(WidgetKind kind, bool enabled)
+    {
+        // Memory mirror for the switch UI, routed through each feature's
+        // owning editor/coordinator exactly like the pre-split switch did —
+        // direct migrated-field writes from the shell are contract-forbidden.
+        switch (kind)
+        {
+            case WidgetKind.QuickCapture:
+                _quickCaptureSettingsEditor.SetFeatureEnabled(enabled);
+                break;
+            case WidgetKind.Todo:
+                _todoSettings.Enabled = enabled;
+                break;
+            default:
+                FeatureWidgetSettings.SetEnabled(_settingsService.Settings, kind, enabled);
+                break;
+        }
+
+        OnPropertyChanged(nameof(FeatureWidgetEntries));
     }
 
     public async Task ResetFeatureWidgetAsync(WidgetKind kind)

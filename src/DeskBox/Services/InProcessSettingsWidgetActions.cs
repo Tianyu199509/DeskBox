@@ -59,7 +59,7 @@ public sealed class InProcessSettingsWidgetActions : ISettingsWidgetActions
         await manager.SetFeatureWidgetEnabledAsync(kind, enabled, reveal: enabled);
     }
 
-    public async Task SetFeatureWidgetEnabled(WidgetKind kind, bool enabled)
+    public async Task<bool> SetFeatureWidgetEnabled(WidgetKind kind, bool enabled)
     {
         // Every feature switch rides this one command. QuickCapture/Todo/
         // Search have their own explicit coordinator chains whose side
@@ -73,7 +73,7 @@ public sealed class InProcessSettingsWidgetActions : ISettingsWidgetActions
                 if (_applyQuickCaptureEnabled is { } applyQuickCapture)
                 {
                     await applyQuickCapture(enabled);
-                    return;
+                    return FeatureWidgetSettings.IsEnabled(_settingsService.Settings, kind);
                 }
 
                 break;
@@ -81,7 +81,7 @@ public sealed class InProcessSettingsWidgetActions : ISettingsWidgetActions
                 if (_applyTodoEnabled is { } applyTodo)
                 {
                     await applyTodo(enabled);
-                    return;
+                    return FeatureWidgetSettings.IsEnabled(_settingsService.Settings, kind);
                 }
 
                 break;
@@ -89,7 +89,7 @@ public sealed class InProcessSettingsWidgetActions : ISettingsWidgetActions
                 if (_applySearchEnabled is { } applySearch)
                 {
                     await applySearch(enabled);
-                    return;
+                    return FeatureWidgetSettings.IsEnabled(_settingsService.Settings, kind);
                 }
 
                 break;
@@ -99,10 +99,11 @@ public sealed class InProcessSettingsWidgetActions : ISettingsWidgetActions
         if (_widgetManager is not { } manager)
         {
             await _settingsService.SaveAsync();
-            return;
+            return enabled;
         }
 
         await manager.SetFeatureWidgetEnabledAsync(kind, enabled, reveal: enabled);
+        return enabled;
     }
 
     public async Task ResetFeatureWidgetAsync(WidgetKind kind)

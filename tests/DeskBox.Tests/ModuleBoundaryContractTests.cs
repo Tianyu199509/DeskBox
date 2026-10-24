@@ -330,7 +330,7 @@ public sealed class ModuleBoundaryContractTests
             manager, StringComparison.Ordinal);
         // Batch 3d follow-up: the switch rides the facade command; the main
         // process runs the coordinator chain (delegates wired in App).
-        Assert.Contains("_ = _widgetActions.SetFeatureWidgetEnabled(kind, enabled);",
+        Assert.Contains("bool applied = await _widgetActions.SetFeatureWidgetEnabled(kind, enabled);",
             settings, StringComparison.Ordinal);
         string app = ProductionSource().Single(item =>
             item.Path == "src/DeskBox/App.xaml.cs").Source;

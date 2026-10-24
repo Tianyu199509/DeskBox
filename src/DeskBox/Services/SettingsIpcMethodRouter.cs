@@ -239,9 +239,10 @@ public sealed class SettingsIpcMethodRouter
                 if (_widget is null) return unavailable(method);
                 SettingsIpcKindArg sync = DecodeKindArg(payload);
                 // The feature switch: dictionary write + widget apply in one
-                // command (see ISettingsWidgetActions.SetFeatureWidgetEnabled).
-                await _widget.SetFeatureWidgetEnabled((WidgetKind)sync.Kind, sync.Enabled);
-                return (true, null, null);
+                // command; the response carries the applied value so the
+                // host can mirror its switch UI immediately.
+                bool switchApplied = await _widget.SetFeatureWidgetEnabled((WidgetKind)sync.Kind, sync.Enabled);
+                return (true, SettingsIpcPayload.EncodeBoolean(switchApplied), null);
 
             case SettingsIpcMethods.WidgetResetFeature:
                 if (_widget is null) return unavailable(method);

@@ -36,12 +36,19 @@ public sealed class RemoteSettingsWidgetActions : ISettingsWidgetActions
                 new SettingsIpcKindArg((int)kind, enabled),
                 SettingsIpcJsonContext.Default.SettingsIpcKindArg));
 
-    public Task SetFeatureWidgetEnabled(WidgetKind kind, bool enabled) =>
-        RequestVoidAsync(
+    public async Task<bool> SetFeatureWidgetEnabled(WidgetKind kind, bool enabled)
+    {
+        (bool ok, string? payload, _) = await _client.RequestAsync(
             SettingsIpcMethods.WidgetSyncFeatureEnabled,
             SettingsIpcPayload.Encode(
                 new SettingsIpcKindArg((int)kind, enabled),
                 SettingsIpcJsonContext.Default.SettingsIpcKindArg));
+        // The response carries the applied authoritative value; on failure
+        // keep the requested value so the optimistic mirror stands.
+        return ok && SettingsIpcPayload.DecodeBoolean(payload) is { } applied && applied != enabled
+            ? applied
+            : enabled;
+    }
 
     public Task ResetFeatureWidgetAsync(WidgetKind kind) =>
         RequestVoidAsync(

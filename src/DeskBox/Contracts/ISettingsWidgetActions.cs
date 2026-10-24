@@ -56,9 +56,11 @@ public interface ISettingsWidgetActions
     /// The feature-widget switch write: records the enabled dictionary (the
     /// MAIN process owns it — snapshots never carry it) and applies the
     /// change through the live manager. One command so the dictionary write
-    /// and the widget apply can never diverge across processes.
+    /// and the widget apply can never diverge across processes. Returns the
+    /// applied authoritative value so a settings host can mirror its switch
+    /// UI without waiting for the (animation-delayed) reload push.
     /// </summary>
-    Task SetFeatureWidgetEnabled(WidgetKind kind, bool enabled);
+    Task<bool> SetFeatureWidgetEnabled(WidgetKind kind, bool enabled);
 
     /// <summary>
     /// Resets a feature widget to defaults through the live manager, falling
