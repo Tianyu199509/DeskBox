@@ -41,7 +41,16 @@ public partial class App
                 SettingsService,
                 FileService,
                 OrganizerService,
-                LocalizationService),
+                LocalizationService,
+                applyQuickCaptureEnabled: enabled =>
+                    (_quickCaptureSettings ?? throw new InvalidOperationException(
+                        "Quick Capture is not initialized.")).SetEnabledAsync(enabled, reveal: enabled),
+                applyTodoEnabled: enabled =>
+                    (_todoSettings ?? throw new InvalidOperationException(
+                        "Todo settings are not initialized.")).SetEnabledAsync(enabled),
+                applySearchEnabled: enabled =>
+                    (_searchSettings ?? throw new InvalidOperationException(
+                        "Search settings are not initialized.")).SetEnabledAsync(enabled, reveal: enabled)),
             new InProcessSettingsAppActions(this, LocalizationService),
             pushEvent: (method, payload) =>
                 _settingsIpcServer?.SendEventAsync(method, payload) ?? Task.CompletedTask,

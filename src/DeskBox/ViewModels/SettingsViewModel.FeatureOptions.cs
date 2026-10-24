@@ -134,25 +134,11 @@ public partial class SettingsViewModel
 
     public void SetWidgetEnabled(WidgetKind kind, bool enabled)
     {
-        switch (kind)
-        {
-            case WidgetKind.QuickCapture:
-                // The Quick Capture switch's write chain (persist + host
-                // widget apply) lives on the section editor (batch 46).
-                _quickCaptureSettingsEditor.SetFeatureEnabled(enabled);
-                return;
-            case WidgetKind.Todo:
-                // The Todo switch's write chain (persist + host widget
-                // apply) lives on the section editor (batch 47).
-                _todoSettings.SetFeatureEnabled(enabled);
-                return;
-            case WidgetKind.Search:
-                TrackSearchFeatureAction(_searchFeatureSettings.SetEnabledAsync(enabled, reveal: enabled));
-                return;
-        }
-
-        // One facade command: the enabled dictionary (main-process owned)
-        // and the live widget apply ride together and can never diverge.
+        // Every feature switch rides the one facade command: the main
+        // process runs the kind's full chain (coordinator side effects for
+        // QuickCapture/Todo/Search, dictionary + manager apply for the
+        // rest). Host-local editor writes never carried these across the
+        // process boundary.
         _ = _widgetActions.SetFeatureWidgetEnabled(kind, enabled);
     }
 

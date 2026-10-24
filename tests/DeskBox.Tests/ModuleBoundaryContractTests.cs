@@ -328,8 +328,13 @@ public sealed class ModuleBoundaryContractTests
             manager, StringComparison.Ordinal);
         Assert.Contains("_searchFeatureSettings.CommitEnabledStateAsync(enabled)",
             manager, StringComparison.Ordinal);
-        Assert.Contains("TrackSearchFeatureAction(_searchFeatureSettings.SetEnabledAsync(enabled, reveal: enabled))",
+        // Batch 3d follow-up: the switch rides the facade command; the main
+        // process runs the coordinator chain (delegates wired in App).
+        Assert.Contains("_ = _widgetActions.SetFeatureWidgetEnabled(kind, enabled);",
             settings, StringComparison.Ordinal);
+        string app = ProductionSource().Single(item =>
+            item.Path == "src/DeskBox/App.xaml.cs").Source;
+        Assert.Contains("applySearchEnabled: enabled =>", app, StringComparison.Ordinal);
     }
 
     [Fact]

@@ -18,13 +18,23 @@ public sealed class InProcessSettingsWidgetActions : ISettingsWidgetActions
     private readonly OrganizerService? _organizerService;
     private readonly LocalizationService _localizationService;
 
+    private readonly Func<bool, Task>? _applyQuickCaptureEnabled;
+    private readonly Func<bool, Task>? _applyTodoEnabled;
+    private readonly Func<bool, Task>? _applySearchEnabled;
+
     public InProcessSettingsWidgetActions(
         WidgetManager? widgetManager,
         SettingsService settingsService,
         FileService? fileService,
         OrganizerService? organizerService,
-        LocalizationService localizationService)
+        LocalizationService localizationService,
+        Func<bool, Task>? applyQuickCaptureEnabled = null,
+        Func<bool, Task>? applyTodoEnabled = null,
+        Func<bool, Task>? applySearchEnabled = null)
     {
+        _applyQuickCaptureEnabled = applyQuickCaptureEnabled;
+        _applyTodoEnabled = applyTodoEnabled;
+        _applySearchEnabled = applySearchEnabled;
         _widgetManager = widgetManager;
         _settingsService = settingsService;
         _fileService = fileService;
@@ -51,10 +61,40 @@ public sealed class InProcessSettingsWidgetActions : ISettingsWidgetActions
 
     public async Task SetFeatureWidgetEnabled(WidgetKind kind, bool enabled)
     {
-        // The dictionary write and the widget apply ride one command: the
-        // dictionary is main-process-owned (snapshots carry the widget-list
-        // domain but never this dictionary), so writing it here — where the
-        // apply also runs — is the only place both stay consistent.
+        // Every feature switch rides this one command. QuickCapture/Todo/
+        // Search have their own explicit coordinator chains whose side
+        // effects (widget apply, runtime release, reminder refresh) only
+        // happen on the explicit call — an external snapshot alone never
+        // triggers them. The dictionary kinds write the main-process-owned
+        // dictionary and apply through the manager in the same command.
+        switch (kind)
+        {
+            case WidgetKind.QuickCapture:
+                if (_applyQuickCaptureEnabled is { } applyQuickCapture)
+                {
+                    await applyQuickCapture(enabled);
+                    return;
+                }
+
+                break;
+            case WidgetKind.Todo:
+                if (_applyTodoEnabled is { } applyTodo)
+                {
+                    await applyTodo(enabled);
+                    return;
+                }
+
+                break;
+            case WidgetKind.Search:
+                if (_applySearchEnabled is { } applySearch)
+                {
+                    await applySearch(enabled);
+                    return;
+                }
+
+                break;
+        }
+
         FeatureWidgetSettings.SetEnabled(_settingsService.Settings, kind, enabled);
         if (_widgetManager is not { } manager)
         {

@@ -4461,7 +4461,16 @@ public partial class App : Application
                 SettingsService,
                 FileService,
                 OrganizerService,
-                LocalizationService),
+                LocalizationService,
+                applyQuickCaptureEnabled: enabled =>
+                    (_quickCaptureSettings ?? throw new InvalidOperationException(
+                        "Quick Capture is not initialized.")).SetEnabledAsync(enabled, reveal: enabled),
+                applyTodoEnabled: enabled =>
+                    (_todoSettings ?? throw new InvalidOperationException(
+                        "Todo settings are not initialized.")).SetEnabledAsync(enabled),
+                applySearchEnabled: enabled =>
+                    (_searchSettings ?? throw new InvalidOperationException(
+                        "Search settings are not initialized.")).SetEnabledAsync(enabled, reveal: enabled)),
             new InProcessSettingsRestoreActions(
                 DataBackupService ?? throw new InvalidOperationException("Backup service is not initialized."),
                 AttachmentHealthService ?? throw new InvalidOperationException("Attachment health service is not initialized.")),
