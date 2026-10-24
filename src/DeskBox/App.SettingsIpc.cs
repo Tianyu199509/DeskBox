@@ -57,7 +57,8 @@ public partial class App
             backupCommands: _backupRuntime,
             backupRestore: _backupRestoreActions,
             backupSettings: _backupSettings,
-            appUpdate: AppUpdateService);
+            appUpdate: AppUpdateService,
+            everythingClient: _everythingSearchService);
         _settingsIpcRouter = router;
         _settingsIpcServer = SettingsIpcServer.Start(
             DeskBoxDataPathService.Current.SettingsIpcPipeName,

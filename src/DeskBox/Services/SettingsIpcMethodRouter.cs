@@ -22,6 +22,7 @@ public sealed class SettingsIpcMethodRouter
     private readonly ISettingsWidgetActions? _widget;
     private readonly ISettingsAppActions? _appActions;
     private readonly IBackupCommands? _backupCommands;
+    private readonly DeskBox.Contracts.ISearchConnectionClient? _everythingClient;
     private readonly IBackupRestoreActions? _backupRestore;
     private readonly IBackupSettings? _backupSettings;
     private readonly IAppUpdateService? _appUpdate;
@@ -44,7 +45,8 @@ public sealed class SettingsIpcMethodRouter
         IBackupCommands? backupCommands = null,
         IBackupRestoreActions? backupRestore = null,
         IBackupSettings? backupSettings = null,
-        IAppUpdateService? appUpdate = null)
+        IAppUpdateService? appUpdate = null,
+        DeskBox.Contracts.ISearchConnectionClient? everythingClient = null)
     {
         _settings = settings;
         _hotkey = hotkey;
@@ -53,6 +55,7 @@ public sealed class SettingsIpcMethodRouter
         _widget = widget;
         _appActions = appActions;
         _backupCommands = backupCommands;
+        _everythingClient = everythingClient;
         _backupRestore = backupRestore;
         _backupSettings = backupSettings;
         _appUpdate = appUpdate;
@@ -901,6 +904,54 @@ public sealed class SettingsIpcMethodRouter
                 return (true, SettingsIpcPayload.Encode(
                     installResult,
                     SettingsIpcJsonContext.Default.AppUpdateInstallResult), null);
+
+            // ── Everything integration (batch 3d follow-up) ──────────
+
+            case SettingsIpcMethods.SearchEverythingState:
+                if (_everythingClient is null) return unavailable(method);
+                return (true, SettingsIpcPayload.Encode(
+                    _everythingClient.CurrentSnapshot,
+                    SettingsIpcJsonContext.Default.EverythingConnectionSnapshot), null);
+
+            case SettingsIpcMethods.SearchEverythingRefresh:
+                if (_everythingClient is null) return unavailable(method);
+                bool allowProbe = SettingsIpcPayload.Decode(
+                    payload, SettingsIpcJsonContext.Default.SettingsIpcEverythingRefresh)
+                    ?.AllowIpcProbe ?? true;
+                // The refresh touches the Everything process and file system;
+                // run it marshalled like every other settings-side chain.
+                DeskBox.Contracts.EverythingConnectionSnapshot refreshed =
+                    await DeskBox.Platform.UiDispatch.RunAsync(() =>
+                        _everythingClient.RefreshConnectionAsync(allowProbe, cancellationToken));
+                return (true, SettingsIpcPayload.Encode(
+                    refreshed,
+                    SettingsIpcJsonContext.Default.EverythingConnectionSnapshot), null);
+
+            case SettingsIpcMethods.SearchEverythingAuto:
+                if (_everythingClient is null) return unavailable(method);
+                await DeskBox.Platform.UiDispatch.RunAsync(
+                    () => _everythingClient.UseAutomaticDetectionAsync(cancellationToken));
+                return (true, SettingsIpcPayload.Encode(
+                    _everythingClient.CurrentSnapshot,
+                    SettingsIpcJsonContext.Default.EverythingConnectionSnapshot), null);
+
+            case SettingsIpcMethods.SearchEverythingSetPath:
+                if (_everythingClient is null) return unavailable(method);
+                if (SettingsIpcPayload.Decode(payload, SettingsIpcJsonContext.Default.SettingsIpcEverythingPath)
+                    is not { } everythingPath)
+                {
+                    return (false, null, "missing payload");
+                }
+
+                bool pathApplied = await DeskBox.Platform.UiDispatch.RunAsync(() =>
+                    _everythingClient.SetExecutablePathAsync(everythingPath.Path, cancellationToken));
+                return (pathApplied, null, pathApplied ? null : "path rejected");
+
+            case SettingsIpcMethods.SearchEverythingLaunch:
+                if (_everythingClient is null) return unavailable(method);
+                bool launched = await DeskBox.Platform.UiDispatch.RunAsync(() =>
+                    _everythingClient.LaunchEverythingAsync(cancellationToken));
+                return (launched, null, launched ? null : "launch failed");
 
             default:
                 return (false, null, $"unknown method {method}");

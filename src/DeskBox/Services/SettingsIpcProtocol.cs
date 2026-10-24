@@ -182,6 +182,13 @@ public static class SettingsIpcMethods
     public const string HostDesktopOrgRefresh = "host.desktop-org-refresh";
     public const string HostOneClickUpdate = "host.one-click-update";
     public const string HostShutdown = "host.shutdown";
+
+    // ── Everything integration (batch 3d follow-up) ─────────────────
+    public const string SearchEverythingState = "search.everything-state";
+    public const string SearchEverythingRefresh = "search.everything-refresh";
+    public const string SearchEverythingAuto = "search.everything-auto";
+    public const string SearchEverythingSetPath = "search.everything-set-path";
+    public const string SearchEverythingLaunch = "search.everything-launch";
 }
 
 /// <summary>
@@ -271,6 +278,10 @@ public sealed record SettingsIpcUpdateCheck(string? CurrentVersion);
 
 public sealed record SettingsIpcStartInstaller(string InstallerPath, bool Silent, string? AppCultureName);
 
+public sealed record SettingsIpcEverythingRefresh(bool AllowIpcProbe);
+
+public sealed record SettingsIpcEverythingPath(string Path);
+
 /// <summary>Payload encode/decode helpers over the source-generated context.</summary>
 public static class SettingsIpcPayload
 {
@@ -354,4 +365,7 @@ public static class SettingsIpcPayload
 [JsonSerializable(typeof(AppUpdateDownloadProgress))]
 [JsonSerializable(typeof(AppUpdateDownloadResult))]
 [JsonSerializable(typeof(AppUpdateInstallResult))]
+[JsonSerializable(typeof(DeskBox.Contracts.EverythingConnectionSnapshot))]
+[JsonSerializable(typeof(SettingsIpcEverythingRefresh))]
+[JsonSerializable(typeof(SettingsIpcEverythingPath))]
 internal sealed partial class SettingsIpcJsonContext : JsonSerializerContext;

@@ -264,11 +264,12 @@ public partial class App
         // subscription after our commit lands there.
         var todo = new TodoSettingsCoordinator(settings);
         var featureWidgets = new FeatureWidgetsSettingsCoordinator(settings);
+        var everythingConnection = new RemoteSearchConnectionClient(client).Prime();
         var search = new SearchSettingsCoordinator(
             settings,
             localization,
-            getConnection: () => null,
-            ensureConnection: () => null,
+            getConnection: () => everythingConnection,
+            ensureConnection: () => everythingConnection,
             getHotkey: () => null,
             setContentSearchEnabled: _ => { },
             applyWidget: null,
