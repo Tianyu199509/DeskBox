@@ -280,7 +280,10 @@ public sealed class SettingsSliceOwnershipContractTests
         ["src/DeskBox/Services/DirectStartupService.cs"] = 2,
         ["src/DeskBox/Services/DragDropPermissionService.cs"] = 3,
         ["src/DeskBox/Services/EverythingSearchService.cs"] = 12,
-        ["src/DeskBox/Services/FeatureWidgetSettings.cs"] = 13,
+        // +2: the missing-dictionary-key fallback reads the widgets list and
+        // deleted ids to decide whether a feature widget is live (the list
+        // IS the enabled state for never-authored keys).
+        ["src/DeskBox/Services/FeatureWidgetSettings.cs"] = 15,
         ["src/DeskBox/Services/FileWidgetFolderOpenBehaviorNames.cs"] = 1,
         ["src/DeskBox/Services/FileWidgetIconLayout.cs"] = 6,
         // +1 each: the watchdog chord heartbeat reads the enabled flag once

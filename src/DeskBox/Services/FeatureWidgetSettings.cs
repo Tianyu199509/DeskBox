@@ -139,13 +139,26 @@ public static class FeatureWidgetSettings
         {
             WidgetKind.QuickCapture => settings.QuickCaptureEnabled,
             WidgetKind.Todo => settings.TodoEnabled,
-            WidgetKind.Music => false,
-            WidgetKind.Weather => false,
-            WidgetKind.Search => false,
-            WidgetKind.Glance => false,
+            // Music/Weather/Search/Glance never had persisted legacy mirrors.
+            // A MISSING dictionary key means "never authored", and the live
+            // widgets list is the truth then: a widget of this kind sitting
+            // in the list IS the enabled state. Falling back to a constant
+            // false turned every holey dictionary (a pre-dictionary backup
+            // restore, or the layout write-back corruption) into "everything
+            // off" on the next save — the search-toggle collateral.
+            WidgetKind.Music => HasLiveWidget(settings, WidgetKind.Music),
+            WidgetKind.Weather => HasLiveWidget(settings, WidgetKind.Weather),
+            WidgetKind.Search => HasLiveWidget(settings, WidgetKind.Search),
+            WidgetKind.Glance => HasLiveWidget(settings, WidgetKind.Glance),
             _ => false
         };
     }
+
+    private static bool HasLiveWidget(AppSettings settings, WidgetKind kind) =>
+        settings.Widgets.Any(widget =>
+            widget.WidgetKind == kind &&
+            !widget.IsDisabled &&
+            !settings.DeletedWidgetIds.Contains(widget.Id));
 
     private static void SetLegacyEnabled(AppSettings settings, WidgetKind kind, bool enabled)
     {
