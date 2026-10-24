@@ -220,7 +220,7 @@ public partial class App
                 return;
             }
 
-            UiDispatcherQueue.TryEnqueue(() => settings.ApplyExternalLayout(payload));
+            UiDispatcherQueue.TryEnqueue(() => settings.ApplyExternalLayout(payload ?? string.Empty));
         };
 
         // The reload/echo bridge: the main process pushes settings-reloaded

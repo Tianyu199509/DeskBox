@@ -1050,8 +1050,8 @@ public sealed class SettingsIpcMethodRouter
         }
     }
 
-    private static string SerializeLayout(SettingsService settings) =>
-        settings.SerializeCurrentLayout();
+    private static string SerializeLayout(SettingsService? settings) =>
+        settings?.SerializeCurrentLayout() ?? string.Empty;
 
     private static WidgetKind DecodeKind(string? payload) =>
         int.TryParse(payload, out int kind) ? (WidgetKind)kind : WidgetKind.File;
