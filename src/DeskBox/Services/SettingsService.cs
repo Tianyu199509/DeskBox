@@ -1224,12 +1224,16 @@ settings.FocusClickedWidgetOnRaise = false;
             parsed.FullyElevatedNoticeAcknowledgedUtcTicks =
                 before.FullyElevatedNoticeAcknowledgedUtcTicks;
             // The widget-layout domain (widgets list, groups, deleted ids,
-            // feature-widget enabled states) is authoritative in the MAIN
-            // process only: the host loaded its copy from disk before the
-            // main process's newer in-memory state existed, so accepting its
-            // snapshot here would flip live feature widgets off and persist
-            // that corruption into widget-layout.json.
+            // topology) is authoritative in the MAIN process only: the host
+            // loaded its copy from disk before the main process's newer
+            // in-memory state existed, so accepting its snapshot here would
+            // rewind live widget state and persist that corruption into
+            // widget-layout.json. The feature-widget ENABLED dictionary is
+            // the one exception: its only writer is the settings UI (the
+            // host process), so the host's values must survive.
+            var hostFeatureWidgetEnabledStates = parsed.WidgetLayout.FeatureWidgetEnabledStates;
             parsed.WidgetLayout.CopyFrom(before.WidgetLayout);
+            parsed.WidgetLayout.FeatureWidgetEnabledStates = hostFeatureWidgetEnabledStates;
             _settings = parsed;
             _settingsSchemaNewerThanBuild = false;
         }

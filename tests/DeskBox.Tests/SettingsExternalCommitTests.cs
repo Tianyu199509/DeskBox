@@ -138,27 +138,31 @@ public sealed class SettingsExternalCommitTests : IDisposable
         await main.LoadAsync();
         // Live main-process layout state: the host snapshot was serialized
         // before this state existed, exactly like a real settings-host
-        // session loaded before the user moved widgets around.
-        main.Settings.WidgetLayout.FeatureWidgetEnabledStates["Music"] = true;
-        main.Settings.WidgetLayout.FeatureWidgetEnabledStates["Weather"] = true;
+        // session loaded before the user moved widgets around. The enabled
+        // dictionary itself is HOST-owned (its only writer is the settings
+        // UI), so the main process never mutates it out from under a host.
         main.Settings.Widgets.Add(new WidgetConfig { Id = "w-live", WidgetKind = WidgetKind.Music });
 
         var host = new SettingsService(SettingsRoot);
         await host.LoadAsync();
         Assert.DoesNotContain(host.Settings.Widgets, w => w.Id == "w-live");
         host.Settings.Theme = "Light";
+        // The user toggles feature widgets inside the host: Weather on,
+        // Music off (a close, the exact case the blanket protection broke).
+        FeatureWidgetSettings.SetEnabled(host.Settings, WidgetKind.Weather, true);
+        FeatureWidgetSettings.SetEnabled(host.Settings, WidgetKind.Music, false);
 
         string payload = System.Text.Json.JsonSerializer.Serialize(
             host.Settings,
             SettingsJsonContext.Default.AppSettings);
         Assert.True(await main.ApplyExternalSnapshotAsync(payload));
 
-        // The main process keeps its authoritative layout domain: feature
-        // enablement and the live widget list survive the host commit.
-        Assert.True(main.Settings.WidgetLayout.FeatureWidgetEnabledStates["Music"]);
-        Assert.True(main.Settings.WidgetLayout.FeatureWidgetEnabledStates["Weather"]);
+        // Host-owned enablement lands in the main process.
+        Assert.True(FeatureWidgetSettings.IsEnabled(main.Settings, WidgetKind.Weather));
+        Assert.False(FeatureWidgetSettings.IsEnabled(main.Settings, WidgetKind.Music));
+        // Main-owned layout survives: the live widget list is not rewound.
         Assert.Contains(main.Settings.Widgets, w => w.Id == "w-live");
-        // The host's actual change landed.
+        // The host's actual settings change landed.
         Assert.Equal("Light", main.Settings.Theme);
     }
 
