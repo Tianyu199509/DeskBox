@@ -143,24 +143,24 @@ public sealed class SettingsExternalCommitTests : IDisposable
         // UI), so the main process never mutates it out from under a host.
         main.Settings.Widgets.Add(new WidgetConfig { Id = "w-live", WidgetKind = WidgetKind.Music });
 
+        // The host's dictionary drifted (stale false values from an older
+        // load): the snapshot must NOT carry it — feature switches travel as
+        // their own command now.
+        main.Settings.WidgetLayout.FeatureWidgetEnabledStates["Music"] = true;
         var host = new SettingsService(SettingsRoot);
         await host.LoadAsync();
+        host.Settings.WidgetLayout.FeatureWidgetEnabledStates["Music"] = false;
         Assert.DoesNotContain(host.Settings.Widgets, w => w.Id == "w-live");
         host.Settings.Theme = "Light";
-        // The user toggles feature widgets inside the host: Weather on,
-        // Music off (a close, the exact case the blanket protection broke).
-        FeatureWidgetSettings.SetEnabled(host.Settings, WidgetKind.Weather, true);
-        FeatureWidgetSettings.SetEnabled(host.Settings, WidgetKind.Music, false);
 
         string payload = System.Text.Json.JsonSerializer.Serialize(
             host.Settings,
             SettingsJsonContext.Default.AppSettings);
         Assert.True(await main.ApplyExternalSnapshotAsync(payload));
 
-        // Host-owned enablement lands in the main process.
-        Assert.True(FeatureWidgetSettings.IsEnabled(main.Settings, WidgetKind.Weather));
-        Assert.False(FeatureWidgetSettings.IsEnabled(main.Settings, WidgetKind.Music));
-        // Main-owned layout survives: the live widget list is not rewound.
+        // The whole widget-layout domain — including the enabled dictionary —
+        // keeps the main process's authoritative values.
+        Assert.True(FeatureWidgetSettings.IsEnabled(main.Settings, WidgetKind.Music));
         Assert.Contains(main.Settings.Widgets, w => w.Id == "w-live");
         // The host's actual settings change landed.
         Assert.Equal("Light", main.Settings.Theme);

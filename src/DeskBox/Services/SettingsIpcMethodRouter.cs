@@ -231,7 +231,9 @@ public sealed class SettingsIpcMethodRouter
             case SettingsIpcMethods.WidgetSyncFeatureEnabled:
                 if (_widget is null) return unavailable(method);
                 SettingsIpcKindArg sync = DecodeKindArg(payload);
-                await _widget.SyncFeatureWidgetEnabledAsync((WidgetKind)sync.Kind, sync.Enabled);
+                // The feature switch: dictionary write + widget apply in one
+                // command (see ISettingsWidgetActions.SetFeatureWidgetEnabled).
+                await _widget.SetFeatureWidgetEnabled((WidgetKind)sync.Kind, sync.Enabled);
                 return (true, null, null);
 
             case SettingsIpcMethods.WidgetResetFeature:

@@ -49,6 +49,22 @@ public sealed class InProcessSettingsWidgetActions : ISettingsWidgetActions
         await manager.SetFeatureWidgetEnabledAsync(kind, enabled, reveal: enabled);
     }
 
+    public async Task SetFeatureWidgetEnabled(WidgetKind kind, bool enabled)
+    {
+        // The dictionary write and the widget apply ride one command: the
+        // dictionary is main-process-owned (snapshots carry the widget-list
+        // domain but never this dictionary), so writing it here — where the
+        // apply also runs — is the only place both stay consistent.
+        FeatureWidgetSettings.SetEnabled(_settingsService.Settings, kind, enabled);
+        if (_widgetManager is not { } manager)
+        {
+            await _settingsService.SaveAsync();
+            return;
+        }
+
+        await manager.SetFeatureWidgetEnabledAsync(kind, enabled, reveal: enabled);
+    }
+
     public async Task ResetFeatureWidgetAsync(WidgetKind kind)
     {
         if (_widgetManager is not { } manager)

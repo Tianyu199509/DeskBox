@@ -53,6 +53,14 @@ public interface ISettingsWidgetActions
     Task SyncFeatureWidgetEnabledAsync(WidgetKind kind, bool enabled);
 
     /// <summary>
+    /// The feature-widget switch write: records the enabled dictionary (the
+    /// MAIN process owns it — snapshots never carry it) and applies the
+    /// change through the live manager. One command so the dictionary write
+    /// and the widget apply can never diverge across processes.
+    /// </summary>
+    Task SetFeatureWidgetEnabled(WidgetKind kind, bool enabled);
+
+    /// <summary>
     /// Resets a feature widget to defaults through the live manager, falling
     /// back to a plain settings save when no manager exists.
     /// </summary>

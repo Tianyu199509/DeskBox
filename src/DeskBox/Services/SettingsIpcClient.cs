@@ -164,6 +164,11 @@ public sealed class SettingsIpcClient : IAsyncDisposable
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(
             cancellationToken,
             _cts.Token);
+        // A main process buried in restore/startup work must not hang the
+        // host window forever: the remote facades call this synchronously on
+        // the UI thread, so bounded waits turn into visible "unavailable"
+        // states instead of a dead settings page.
+        linked.CancelAfter(TimeSpan.FromSeconds(15));
         try
         {
             await _stream.WriteAsync(bytes, linked.Token).ConfigureAwait(false);

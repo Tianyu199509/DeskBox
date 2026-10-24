@@ -151,8 +151,9 @@ public partial class SettingsViewModel
                 return;
         }
 
-        _featureWidgetsSettings.SetFeatureWidgetEnabled(kind, enabled);
-        _ = SyncFeatureWidgetAsync(kind, enabled);
+        // One facade command: the enabled dictionary (main-process owned)
+        // and the live widget apply ride together and can never diverge.
+        _ = _widgetActions.SetFeatureWidgetEnabled(kind, enabled);
     }
 
     public async Task ResetFeatureWidgetAsync(WidgetKind kind)

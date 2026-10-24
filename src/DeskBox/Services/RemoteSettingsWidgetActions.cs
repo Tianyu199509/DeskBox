@@ -36,6 +36,13 @@ public sealed class RemoteSettingsWidgetActions : ISettingsWidgetActions
                 new SettingsIpcKindArg((int)kind, enabled),
                 SettingsIpcJsonContext.Default.SettingsIpcKindArg));
 
+    public Task SetFeatureWidgetEnabled(WidgetKind kind, bool enabled) =>
+        RequestVoidAsync(
+            SettingsIpcMethods.WidgetSyncFeatureEnabled,
+            SettingsIpcPayload.Encode(
+                new SettingsIpcKindArg((int)kind, enabled),
+                SettingsIpcJsonContext.Default.SettingsIpcKindArg));
+
     public Task ResetFeatureWidgetAsync(WidgetKind kind) =>
         RequestVoidAsync(
             SettingsIpcMethods.WidgetResetFeature,

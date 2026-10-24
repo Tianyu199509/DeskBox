@@ -369,6 +369,14 @@ public sealed class SettingsIpcFacadeTests : IDisposable
 
         public Task SyncFeatureWidgetEnabledAsync(WidgetKind kind, bool enabled) => Task.CompletedTask;
 
+        public Task SetFeatureWidgetEnabled(WidgetKind kind, bool enabled)
+        {
+            SyncToggles.Add((kind, enabled));
+            return Task.CompletedTask;
+        }
+
+        public List<(WidgetKind Kind, bool Enabled)> SyncToggles { get; } = [];
+
         public Task ResetFeatureWidgetAsync(WidgetKind kind) => Task.CompletedTask;
 
         public void RefreshVisibleWidgetDesktopLayers(string reason) => LayerReason = reason;
