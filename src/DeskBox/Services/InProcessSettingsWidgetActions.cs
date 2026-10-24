@@ -129,6 +129,11 @@ public sealed class InProcessSettingsWidgetActions : ISettingsWidgetActions
             _settingsService.Settings.WidgetGroupSwitchAnimationStyle = change.SwitchAnimationStyle;
         }
 
+        if (change.GroupsEnabled is not null)
+        {
+            _settingsService.Settings.WidgetGroupsEnabled = change.GroupsEnabled.Value;
+        }
+
         _settingsService.SaveDebounced(notifySubscribers: false);
         NotifyPresentationChanged();
         return Task.CompletedTask;

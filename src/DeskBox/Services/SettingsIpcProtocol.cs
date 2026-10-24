@@ -68,6 +68,14 @@ public static class SettingsIpcMethods
     public const string HotkeyResume = "hotkey.resume";
     public const string HotkeyRegistrationChanged = "hotkey.registration-changed";
 
+    // ── Search hotkey facade (batch R9) ─────────────────────────────
+    // The search section's hotkey card rides these; see ISettingsHotkeyActions.
+    public const string SearchHotkeyState = "search-hotkey.state";
+    public const string SearchHotkeySetEnabled = "search-hotkey.set-enabled";
+    public const string SearchHotkeyApplyGesture = "search-hotkey.apply-gesture";
+    public const string SearchHotkeyGestureOwnedByMain = "search-hotkey.gesture-owned-by-main";
+    public const string SearchHotkeyRefreshRegistration = "search-hotkey.refresh-registration";
+
     // ── Data facade (batch 3c-1) ─────────────────────────────────────
     public const string DataQuickCaptureCounts = "data.qc-counts";
     public const string DataQuickCaptureClear = "data.qc-clear";

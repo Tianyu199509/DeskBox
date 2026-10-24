@@ -77,6 +77,43 @@ public sealed class RemoteSettingsHotkeyActions : ISettingsHotkeyActions
         return ok && SettingsIpcPayload.DecodeBoolean(payload);
     }
 
+    public bool IsSearchHotkeyRegistered()
+    {
+        (bool ok, string? payload, _) = _client.RequestAsync(
+                SettingsIpcMethods.SearchHotkeyState)
+            .GetAwaiter().GetResult();
+        return ok && SettingsIpcPayload.DecodeBoolean(payload);
+    }
+
+    public void SetSearchHotkeyEnabled(bool enabled) =>
+        _client.RequestAsync(
+                SettingsIpcMethods.SearchHotkeySetEnabled,
+                SettingsIpcPayload.EncodeBoolean(enabled))
+            .GetAwaiter().GetResult();
+
+    public bool TryApplySearchHotkeyGesture(GlobalHotkeyGesture gesture, out string? error)
+    {
+        (bool ok, _, string? applyError) = _client.RequestAsync(
+                SettingsIpcMethods.SearchHotkeyApplyGesture,
+                SettingsIpcPayload.Encode(gesture, SettingsIpcJsonContext.Default.GlobalHotkeyGesture))
+            .GetAwaiter().GetResult();
+        error = applyError;
+        return ok;
+    }
+
+    public bool IsGestureOwnedByMainHotkey(GlobalHotkeyGesture gesture)
+    {
+        (bool ok, string? payload, _) = _client.RequestAsync(
+                SettingsIpcMethods.SearchHotkeyGestureOwnedByMain,
+                SettingsIpcPayload.Encode(gesture, SettingsIpcJsonContext.Default.GlobalHotkeyGesture))
+            .GetAwaiter().GetResult();
+        return ok && SettingsIpcPayload.DecodeBoolean(payload);
+    }
+
+    public void RefreshSearchHotkeyRegistration() =>
+        _client.RequestAsync(SettingsIpcMethods.SearchHotkeyRefreshRegistration)
+            .GetAwaiter().GetResult();
+
     public DesktopDoubleClickToggleResult TrySetDesktopDoubleClickEnabled(bool enabled)
     {
         (bool ok, string? payload, _) = _client.RequestAsync(

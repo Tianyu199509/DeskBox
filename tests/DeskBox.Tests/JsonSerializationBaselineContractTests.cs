@@ -51,9 +51,10 @@ public sealed class JsonSerializationBaselineContractTests : IDisposable
             // 2: the wipe-recovery offer marker (read deserialize, atomic save serialize).
             ["src/DeskBox/Services/RecoveryOfferStore.cs"] = 2,
             ["src/DeskBox/Services/SearchHistoryService.cs"] = 2,
-            // Settings-host IPC pipe (batch 3b): envelope encode/decode on the
-            // client and server plus the remote sink's snapshot serialize.
-            ["src/DeskBox/Services/RemoteSettingsPersistenceSink.cs"] = 1,
+            // Settings-host IPC pipe (batch 3b): envelope encode/decode on
+            // the client and server. The remote sink itself serializes via
+            // SettingsService.SerializeCurrentSettings under the service
+            // lock since batch R9, so it no longer appears here.
             ["src/DeskBox/Services/SettingsIpcClient.cs"] = 2,
             ["src/DeskBox/Services/SettingsIpcProtocol.cs"] = 3,
             ["src/DeskBox/Services/SettingsIpcServer.cs"] = 2,
@@ -96,8 +97,8 @@ public sealed class JsonSerializationBaselineContractTests : IDisposable
             Assert.Equal(expectedCount, actual[path]);
         }
 
-        Assert.Equal(46, actual.Count);
-        Assert.Equal(113, actual.Values.Sum());
+        Assert.Equal(45, actual.Count);
+        Assert.Equal(112, actual.Values.Sum());
 
         string[] expectedContextOwners =
         [

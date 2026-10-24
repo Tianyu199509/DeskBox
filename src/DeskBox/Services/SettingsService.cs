@@ -1041,10 +1041,9 @@ settings.FocusClickedWidgetOnRaise = false;
     {
         CancelPendingDebouncedSave();
         bool saved = await SaveToFileOnlyAsync();
-        if (saved)
-        {
-            Volatile.Write(ref _hasPendingSave, 0);
-        }
+        // Clear even on failure (batch R9): a latched pending flag suppressed
+        // every later reload push — divergence without convergence.
+        Volatile.Write(ref _hasPendingSave, 0);
         if (notifySubscribers)
         {
             NotifySettingsChangedSafely();
@@ -1060,10 +1059,8 @@ settings.FocusClickedWidgetOnRaise = false;
     {
         CancelPendingDebouncedSave();
         bool saved = await SaveToFileOnlyAsync();
-        if (saved)
-        {
-            Volatile.Write(ref _hasPendingSave, 0);
-        }
+        // Clear even on failure (batch R9): see SaveAsync.
+        Volatile.Write(ref _hasPendingSave, 0);
         if (saved && notifySubscribers)
         {
             NotifySettingsChangedSafely();
@@ -1283,9 +1280,11 @@ settings.FocusClickedWidgetOnRaise = false;
         {
             _settings = parsed;
             _settingsSchemaNewerThanBuild = false;
-            // The layout domain arrived inside the graph; flag the merge so
-            // this session's save path keeps its organizer normalization
-            // semantics instead of running suspended forever.
+            // The layout domain arrived inside the graph; keep the merged
+            // flag consistent with a completed disk load (its consumers —
+            // the local sink's layout commit/stripping and the organizer
+            // normalize gate — only run under the main process's local
+            // sink, but consistent state costs nothing).
             _widgetLayoutMerged = true;
             LastLoadRecoveryState = SettingsLoadRecoveryState.Primary;
         }
@@ -1736,6 +1735,19 @@ settings.FocusClickedWidgetOnRaise = false;
                 if (!token.IsCancellationRequested)
                 {
                     saved = await SaveToFileOnlyAsync();
+                    if (!saved && !token.IsCancellationRequested)
+                    {
+                        // One bounded retry: a refused or timed-out commit is
+                        // usually the peer process being busy, and giving up
+                        // after the first attempt left _hasPendingSave latched
+                        // forever — every subsequent reload push was skipped
+                        // and the mirror silently diverged (batch R9).
+                        await Task.Delay(5000, token);
+                        if (!token.IsCancellationRequested)
+                        {
+                            saved = await SaveToFileOnlyAsync();
+                        }
+                    }
                 }
             }
             catch (TaskCanceledException) { }
@@ -1747,8 +1759,12 @@ settings.FocusClickedWidgetOnRaise = false;
                     {
                         _debounceCts = null;
                         debounceCts.Dispose();
-                        if (saved && generation == _debounceGeneration)
+                        if (generation == _debounceGeneration)
                         {
+                            // Clear even on failure: the pending-edit guard
+                            // must not outlive its save attempt, or reload
+                            // pushes stayed suppressed forever after one bad
+                            // commit — divergence without convergence.
                             Volatile.Write(ref _hasPendingSave, 0);
                         }
                     }

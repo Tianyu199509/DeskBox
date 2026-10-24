@@ -50,6 +50,28 @@ public interface ISettingsHotkeyActions
     /// </summary>
     bool IsGestureOwnedBySearchHotkey(GlobalHotkeyGesture gesture);
 
+    // ── Search hotkey (batch R9) ────────────────────────────────────
+    // SearchSettingsCoordinator consumes ISearchHotkeyController, whose
+    // live registration state lives only in the MAIN process. Without these
+    // members the settings host's search section rendered the hotkey card
+    // permanently unavailable — the toggle/capture/reset controls could
+    // never reach the service at all.
+
+    /// <summary>Live registration state of the search hotkey service.</summary>
+    bool IsSearchHotkeyRegistered();
+
+    /// <summary>Enables or disables the search hotkey registration.</summary>
+    void SetSearchHotkeyEnabled(bool enabled);
+
+    /// <summary>Applies a captured gesture through the live service.</summary>
+    bool TryApplySearchHotkeyGesture(GlobalHotkeyGesture gesture, out string? error);
+
+    /// <summary>Whether the main activation hotkey currently owns the gesture.</summary>
+    bool IsGestureOwnedByMainHotkey(GlobalHotkeyGesture gesture);
+
+    /// <summary>Re-runs the search hotkey registration against persisted settings.</summary>
+    void RefreshSearchHotkeyRegistration();
+
     /// <summary>
     /// Applies the desktop double-click toggle through the live service,
     /// falling back to persisting the preference when no service exists.

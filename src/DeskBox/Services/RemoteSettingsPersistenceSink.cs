@@ -20,9 +20,13 @@ public sealed class RemoteSettingsPersistenceSink : ISettingsPersistenceSink
 
     public async Task<bool> SaveAsync(SettingsService owner, SettingsPersistenceCommit commit)
     {
-        string json = JsonSerializer.Serialize(
-            commit.Snapshot,
-            SettingsJsonContext.Default.AppSettings);
+        // Serialize under the service lock (batch R9): the commit's Snapshot
+        // is a LIVE graph reference, and serializing it on a pool thread
+        // raced UI-thread mutations — torn enumerations/exceptions. The
+        // locked serializer reads the same graph consistently; the commit
+        // gate keeps this the only save in flight, so the payload cannot
+        // skip ahead of a later edit.
+        string json = owner.SerializeCurrentSettings();
         string payload = commit.CommitId + "\n" + json;
         (bool ok, _, string? error) = await _client.RequestAsync(
             SettingsIpcMethods.SettingsCommit,

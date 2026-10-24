@@ -276,6 +276,29 @@ public sealed class GlanceWidgetStoreTests : IDisposable
         }
     }
 
+    [Fact]
+    public async Task SaveAsync_WithFailingRelay_RollsTheCacheBackAndThrows()
+    {
+        // A relay failure means the authoritative save never landed in the
+        // MAIN process: the local cache must not keep the fabricated value
+        // (batch R9).
+        var store = new GlanceWidgetStore(_tempRoot, "relay-fail-widget");
+        GlanceWidgetStore.SaveRelay = (_, _) =>
+            throw new InvalidOperationException("pipe broken");
+        try
+        {
+            await Assert.ThrowsAsync<InvalidOperationException>(
+                () => store.SaveAsync(new GlanceWidgetData { TimeScale = 1.35 }));
+        }
+        finally
+        {
+            GlanceWidgetStore.SaveRelay = null;
+        }
+
+        GlanceWidgetData reloaded = await store.LoadAsync();
+        Assert.NotEqual(1.35, reloaded.TimeScale);
+    }
+
     public void Dispose()
     {
         try

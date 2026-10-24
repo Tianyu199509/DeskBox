@@ -99,16 +99,39 @@ public sealed class RemoteSettingsWidgetActions : ISettingsWidgetActions
 
     public async Task<bool> SetFeatureWidgetEnabled(WidgetKind kind, bool enabled)
     {
-        (bool ok, string? payload, _) = await _client.RequestAsync(
-            SettingsIpcMethods.WidgetSyncFeatureEnabled,
-            SettingsIpcPayload.Encode(
-                new SettingsIpcKindArg((int)kind, enabled),
-                SettingsIpcJsonContext.Default.SettingsIpcKindArg));
-        // The response carries the applied authoritative value; on failure
-        // keep the requested value so the optimistic mirror stands.
-        return ok && SettingsIpcPayload.DecodeBoolean(payload) is { } applied && applied != enabled
-            ? applied
-            : enabled;
+        try
+        {
+            (bool ok, string? payload, string? error) = await _client.RequestAsync(
+                SettingsIpcMethods.WidgetSyncFeatureEnabled,
+                SettingsIpcPayload.Encode(
+                    new SettingsIpcKindArg((int)kind, enabled),
+                    SettingsIpcJsonContext.Default.SettingsIpcKindArg));
+            if (!ok)
+            {
+                // A refused command left the authoritative dictionary on its
+                // old value: report the OPPOSITE of the request so every
+                // optimistic mirror (card, Todo/QC section switches) reverts
+                // instead of showing a fabricated success (batch R9).
+                App.Log(
+                    $"[SettingsIpc] Feature switch {kind} refused: {error ?? "unknown"} — reverting the optimistic mirror");
+                return !enabled;
+            }
+
+            // The response carries the applied authoritative value; on failure
+            // keep the requested value so the optimistic mirror stands.
+            return SettingsIpcPayload.DecodeBoolean(payload) is { } applied && applied != enabled
+                ? applied
+                : enabled;
+        }
+        catch (Exception ex)
+        {
+            // Same revert contract for transport failures/timeouts: the main
+            // process either never saw the switch or will report the truth
+            // with its next layout push.
+            App.Log(
+                $"[SettingsIpc] Feature switch {kind} failed: {ex.Message} — reverting the optimistic mirror");
+            return !enabled;
+        }
     }
 
     public Task ResetFeatureWidgetAsync(WidgetKind kind) =>

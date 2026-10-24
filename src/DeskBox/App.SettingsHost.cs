@@ -240,6 +240,21 @@ public partial class App
         settings.AdoptExternalSnapshot(snapshotJson);
         Log("[SettingsHost] Settings adopted from main-process snapshot");
 
+        // Commit failures must at least reach the host log: the sink's
+        // refusal returns false without an exception, and the old
+        // silent path meant edits vanished with zero trace (the user-facing
+        // failure surface stays a registered debt, batch R9).
+        settings.PersistenceFailed += failure =>
+            Log($"[SettingsHost] Settings commit failed ({failure.Operation}): {failure.Message}");
+
+        // The autostart toggle executes in THIS process (the settings page
+        // calls StartupService directly). Without Configure the static fell
+        // back to the parameterless DirectStartupService — the wrong backend
+        // on the Store channel (Run key pointing into WindowsApps instead
+        // of the StartupTask API) and a null mode writer on Direct, so
+        // autostart mode switches never persisted (batch R9).
+        StartupService.Configure(StartupServiceFactory.Create(DistributionService, settings));
+
         // Per-widget Glance data edits from the settings section ride the
         // IPC relay: the desktop widgets' live Changed listeners and the
         // glance store file both belong to the MAIN process. Without the
@@ -248,19 +263,17 @@ public partial class App
         // cached write-back (batch R8).
         GlanceWidgetStore.SaveRelay = async (widgetId, dataJson) =>
         {
-            try
+            // Failures THROW on purpose: the store rolls its cache back and
+            // the section's SaveAsync surfaces the error path — a log-only
+            // relay used to leave the host showing a fabricated success
+            // (batch R9).
+            (bool ok, _, string? glanceError) = await client.RequestAsync(
+                SettingsIpcMethods.WidgetGlanceApplyData,
+                widgetId + "\n" + dataJson);
+            if (!ok)
             {
-                (bool ok, _, string? glanceError) = await client.RequestAsync(
-                    SettingsIpcMethods.WidgetGlanceApplyData,
-                    widgetId + "\n" + dataJson);
-                if (!ok)
-                {
-                    Log($"[SettingsHost] Glance apply rejected for {widgetId}: {glanceError ?? "unknown"}");
-                }
-            }
-            catch (Exception ex)
-            {
-                Log($"[SettingsHost] Glance apply failed for {widgetId}: {ex.Message}");
+                throw new InvalidOperationException(
+                    $"Glance apply rejected for {widgetId}: {glanceError ?? "unknown"}");
             }
         };
 
@@ -419,6 +432,13 @@ public partial class App
         SettingsIpcClient client)
     {
         var widgetActions = new RemoteSettingsWidgetActions(client, settings);
+        var appActions = new RemoteSettingsAppActions(client, (uint)_settingsHostMainProcessId);
+        // Forward the display-topology push onto the App-level event: the
+        // host's identify-display overlay self-closes on it, and nothing
+        // raised it in the host process — the guard was dead code here
+        // (batch R9).
+        appActions.DisplayTopologyChanged += () => UiDispatcherQueue.TryEnqueue(
+            () => DisplayTopologyChanged?.Invoke());
 
         // The Todo/QuickCapture enable switches are feature-widget state: the
         // enabled dictionary lives in the widget-layout domain, which the main
@@ -447,12 +467,24 @@ public partial class App
         var featureWidgets = new FeatureWidgetsSettingsCoordinator(settings);
         var everythingConnection = new RemoteSearchConnectionClient(client);
         _settingsHostEverythingConnection = everythingConnection;
+        // The search section's hotkey card rides the search-hotkey IPC
+        // commands (batch R9): the live registration state lives only in
+        // the MAIN process, and a null getHotkey here used to render the
+        // card permanently unavailable — toggle/capture/reset could never
+        // reach the service. CurrentGesture reads the local settings
+        // mirror exactly like the real service does.
+        var hotkey = new RemoteSettingsHotkeyActions(client);
+        var searchHotkey = new RemoteSearchHotkeyController(
+            hotkey,
+            () => GlobalHotkeyService.NormalizeGesture(
+                settings.Settings.Search.SearchHotkeyModifiers,
+                settings.Settings.Search.SearchHotkeyKey));
         var search = new SearchSettingsCoordinator(
             settings,
             localization,
             getConnection: () => everythingConnection,
             ensureConnection: () => everythingConnection,
-            getHotkey: () => null,
+            getHotkey: () => searchHotkey,
             setContentSearchEnabled: _ => { },
             // Explicit no-op (null falls back to a full settings save — a
             // write amplifier on every external enable change, batch R7).
@@ -477,7 +509,6 @@ public partial class App
             tryEnqueue: action => UiDispatcherQueue.TryEnqueue(() => action()),
             reportError: ex => Log($"[QuickCapture] Settings operation failed: {ex}"));
 
-        var hotkey = new RemoteSettingsHotkeyActions(client);
         return new SettingsWindowFactoryInput(
             settings, theme, localization,
             todo,
@@ -503,7 +534,7 @@ public partial class App
             hotkey,
             widgetActions,
             new RemoteSettingsRestoreActions(client),
-            new RemoteSettingsAppActions(client),
+            appActions,
             new RemoteSettingsDataActions(client),
             new RemoteAppUpdateService(client),
             action => UiDispatcherQueue.TryEnqueue(() => action()));

@@ -13,11 +13,39 @@ namespace DeskBox.Services;
 public sealed class RemoteSettingsAppActions : ISettingsAppActions
 {
     private readonly SettingsIpcClient _client;
+    private readonly uint _mainProcessId;
 
-    public RemoteSettingsAppActions(SettingsIpcClient client)
+    public RemoteSettingsAppActions(SettingsIpcClient client, uint mainProcessId = 0)
     {
         _client = client;
+        _mainProcessId = mainProcessId;
         _client.EventReceived += OnEventReceived;
+    }
+
+    /// <summary>
+    /// Window-opener senders grant the MAIN process the foreground right
+    /// first: the host window is the foreground process, and a background
+    /// process's SetForegroundWindow is refused by the OS — the opened
+    /// onboarding/organization/release-notes window used to appear BEHIND
+    /// the large settings window with nothing but a flashing taskbar button
+    /// (batch R9).
+    /// </summary>
+    private void GrantMainProcessForegroundRight()
+    {
+        if (_mainProcessId == 0)
+        {
+            return;
+        }
+
+        try
+        {
+            Platform.Win32Helper.AllowSetForegroundWindow(_mainProcessId);
+        }
+        catch
+        {
+            // Best-effort: a refused grant only costs the focus race, never
+            // the window itself.
+        }
     }
 
     public event Action? DisplayTopologyChanged;
@@ -66,6 +94,7 @@ public sealed class RemoteSettingsAppActions : ISettingsAppActions
     {
         // Fire-and-forget: the main process builds a heavy window; blocking
         // the host UI thread on that reads as a frozen settings page.
+        GrantMainProcessForegroundRight();
         _ = RequestVoidAsync(SettingsIpcMethods.AppShowOnboarding, SettingsIpcPayload.EncodeBoolean(resumeProgress));
     }
 
@@ -74,6 +103,7 @@ public sealed class RemoteSettingsAppActions : ISettingsAppActions
         // Fire-and-forget on purpose: the main process builds a heavy window
         // and scans the desktop before this command would answer; blocking
         // the host UI thread on that reads as a frozen settings page.
+        GrantMainProcessForegroundRight();
         _ = _client.RequestAsync(
             SettingsIpcMethods.AppShowDesktopOrgWindow,
             ((long)ownerWindowHandle).ToString());
@@ -86,6 +116,7 @@ public sealed class RemoteSettingsAppActions : ISettingsAppActions
         nint ownerWindowHandle = 0)
     {
         // Fire-and-forget, same rationale as ShowOnboarding.
+        GrantMainProcessForegroundRight();
         _ = RequestVoidAsync(
             SettingsIpcMethods.AppOpenReleaseNotes,
             SettingsIpcPayload.Encode(

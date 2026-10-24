@@ -26,6 +26,8 @@ public sealed class DeskBoxDataPathService
         InstanceScope = IsDevelopmentRoot
             ? CreateInstanceScope(RootPath)
             : ProductionInstanceScope;
+        SettingsIpcPipeName =
+            $"DeskBox_Settings_Ipc_{InstanceScope}_S{System.Diagnostics.Process.GetCurrentProcess().SessionId}";
     }
 
     public string RootPath { get; }
@@ -34,8 +36,15 @@ public sealed class DeskBoxDataPathService
     public string ActivationEventName => $"DeskBox_Activate_Event_{InstanceScope}";
     public string SingleInstanceMutexName => $"DeskBox_SingleInstance_Mutex_{InstanceScope}";
     /// <summary>Duplex pipe carrying settings-host IPC (batch 3b of the
-    /// settings-process split); same user only, per instance scope.</summary>
-    public string SettingsIpcPipeName => $"DeskBox_Settings_Ipc_{InstanceScope}";
+    /// settings-process split); same user only, per instance scope.
+    /// Named pipes live in a MACHINE-GLOBAL namespace (unlike the mutex and
+    /// activation event above, whose kernel objects default to the
+    /// session-local namespace): without a session discriminator, a DeskBox
+    /// instance left running in a disconnected fast-user-switch session held
+    /// the single pipe instance and the next user's settings host could
+    /// never connect — settings silently unopenable for that whole session
+    /// (batch R9).</summary>
+    public string SettingsIpcPipeName { get; }
     public string DataDirectory => Path.Combine(RootPath, "data");
     public string UpdatesDirectory => Path.Combine(RootPath, "updates");
     // Recovery snapshots intentionally live beside, rather than inside, the

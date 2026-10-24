@@ -850,15 +850,6 @@ public sealed partial class TodoSettingsViewModel : ObservableObject, IDisposabl
     }
 
     /// <summary>
-    /// The feature-card toggle's write path (the overview row in the
-    /// feature-widgets section): mirrors the section switch's enable chain.
-    /// </summary>
-    public void SetFeatureEnabled(bool enabled)
-    {
-        Enabled = enabled;
-    }
-
-    /// <summary>
     /// Re-projects the persisted Todo state onto the binding surface
     /// without writing back. Called on construction, settings broadcasts,
     /// appearance text-size commits and default restores; the coordinator

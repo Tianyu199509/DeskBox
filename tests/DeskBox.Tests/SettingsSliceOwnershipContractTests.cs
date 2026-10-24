@@ -237,9 +237,11 @@ public sealed class SettingsSliceOwnershipContractTests
         ["src/DeskBox/App.ImmediateHiddenWorkingSetTrim.cs"] = 2,
         ["src/DeskBox/App.Tray.cs"] = 3,
         ["src/DeskBox/App.xaml.cs"] = 36,
-        // Layout-write facade (batch R2/R5): 9 = R2's eight plus the
-        // switch-animation default write added with the fifth nav default.
-        ["src/DeskBox/Services/InProcessSettingsWidgetActions.cs"] = 9,
+        // Layout-write facade (batch R2/R5/R9): 10 = R2's eight plus the
+        // switch-animation default write (R5) plus the groups master switch
+        // the restore-defaults command carries (R9 — snapshots strip the
+        // layout domain, so the reset rides ApplyGroupNavigationDefaults).
+        ["src/DeskBox/Services/InProcessSettingsWidgetActions.cs"] = 10,
         // Capsule override resetter (batch R2): 8 = Widgets/WidgetGroups
         // scans shared by the host mirror and the main-process executor.
         ["src/DeskBox/Services/CapsuleOverrideResetter.cs"] = 8,

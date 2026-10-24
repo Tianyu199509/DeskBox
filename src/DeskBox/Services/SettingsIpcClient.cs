@@ -92,6 +92,18 @@ public sealed class SettingsIpcClient : IAsyncDisposable
             [SettingsIpcMethods.RestoreAttachmentHealth] = TimeSpan.FromMinutes(10),
             [SettingsIpcMethods.WidgetOrgUndo] = TimeSpan.FromMinutes(10),
             [SettingsIpcMethods.WidgetOrgAbandon] = TimeSpan.FromMinutes(10),
+            // Batch R9: these run whole-tree copies, archive extraction, or
+            // network deletes — a flat 15s made the host report failure
+            // while the main process kept migrating/restoring (the migrate
+            // dialog even lost its progress subscription mid-flight).
+            [SettingsIpcMethods.RestorePrepare] = TimeSpan.FromMinutes(10),
+            [SettingsIpcMethods.WidgetMigratePreview] = TimeSpan.FromMinutes(10),
+            [SettingsIpcMethods.WidgetMigrateRoot] = TimeSpan.FromMinutes(10),
+            [SettingsIpcMethods.WidgetRestoreOrphans] = TimeSpan.FromMinutes(10),
+            [SettingsIpcMethods.WidgetMoveOrphanToDesktop] = TimeSpan.FromMinutes(10),
+            [SettingsIpcMethods.WidgetDeleteOrphan] = TimeSpan.FromMinutes(10),
+            [SettingsIpcMethods.CloudDeleteSnapshot] = TimeSpan.FromMinutes(2),
+            [SettingsIpcMethods.DataQuickCaptureCacheCleanup] = TimeSpan.FromMinutes(2),
         };
 
     private static TimeSpan TimeoutFor(string method) =>

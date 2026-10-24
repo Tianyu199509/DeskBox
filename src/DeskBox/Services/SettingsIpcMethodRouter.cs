@@ -166,6 +166,43 @@ public sealed class SettingsIpcMethodRouter
 
                 return (true, SettingsIpcPayload.EncodeBoolean(_hotkey.IsGestureOwnedBySearchHotkey(gesture)), null);
 
+            case SettingsIpcMethods.SearchHotkeyState:
+                if (_hotkey is null) return unavailable(method);
+                return (true, SettingsIpcPayload.EncodeBoolean(
+                    _hotkey.IsSearchHotkeyRegistered()), null);
+
+            case SettingsIpcMethods.SearchHotkeySetEnabled:
+                if (_hotkey is null) return unavailable(method);
+                _hotkey.SetSearchHotkeyEnabled(SettingsIpcPayload.DecodeBoolean(payload));
+                return (true, null, null);
+
+            case SettingsIpcMethods.SearchHotkeyApplyGesture:
+                if (_hotkey is null) return unavailable(method);
+                if (SettingsIpcPayload.DecodeStruct(payload, SettingsIpcJsonContext.Default.GlobalHotkeyGesture)
+                    is not { } searchGesture)
+                {
+                    return (false, null, "missing gesture payload");
+                }
+
+                bool searchApplied = _hotkey.TryApplySearchHotkeyGesture(searchGesture, out string? searchError);
+                return (searchApplied, null, searchError);
+
+            case SettingsIpcMethods.SearchHotkeyGestureOwnedByMain:
+                if (_hotkey is null) return unavailable(method);
+                if (SettingsIpcPayload.DecodeStruct(payload, SettingsIpcJsonContext.Default.GlobalHotkeyGesture)
+                    is not { } ownedGesture)
+                {
+                    return (false, null, "missing gesture payload");
+                }
+
+                return (true, SettingsIpcPayload.EncodeBoolean(
+                    _hotkey.IsGestureOwnedByMainHotkey(ownedGesture)), null);
+
+            case SettingsIpcMethods.SearchHotkeyRefreshRegistration:
+                if (_hotkey is null) return unavailable(method);
+                _hotkey.RefreshSearchHotkeyRegistration();
+                return (true, null, null);
+
             case SettingsIpcMethods.HotkeyDoubleClickSet:
                 if (_hotkey is null) return unavailable(method);
                 DesktopDoubleClickToggleResult toggle =

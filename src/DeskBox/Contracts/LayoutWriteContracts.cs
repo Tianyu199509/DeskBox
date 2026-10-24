@@ -34,7 +34,12 @@ public sealed record GroupNavigationDefaultsChange(
     string? TitleDisplayMode = null,
     bool? WheelSwitchEnabled = null,
     bool? HoverSwitchEnabled = null,
-    string? SwitchAnimationStyle = null);
+    string? SwitchAnimationStyle = null,
+    // The groups master switch also lives in the layout domain: only the
+    // "restore defaults" flow sends it (normal edits go through the group
+    // capsule in the MAIN process), so it rides this command instead of
+    // a snapshot commit that would strip it (batch R9).
+    bool? GroupsEnabled = null);
 
 public sealed record LayoutPreferencesChange(
     string? NewPlacementTarget = null,

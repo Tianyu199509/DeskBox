@@ -39,6 +39,29 @@ public sealed class InProcessSettingsHotkeyActions : ISettingsHotkeyActions
 
     private void OnRegistrationChanged() => RegistrationChanged?.Invoke();
 
+    public bool IsSearchHotkeyRegistered() =>
+        _searchHotkeyService?.IsRegistered == true;
+
+    public void SetSearchHotkeyEnabled(bool enabled) =>
+        _searchHotkeyService?.SetEnabled(enabled);
+
+    public bool TryApplySearchHotkeyGesture(GlobalHotkeyGesture gesture, out string? error)
+    {
+        if (_searchHotkeyService is not { } search)
+        {
+            error = "search hotkey service unavailable";
+            return false;
+        }
+
+        return search.TryApplyGesture(gesture, out error);
+    }
+
+    public bool IsGestureOwnedByMainHotkey(GlobalHotkeyGesture gesture) =>
+        _searchHotkeyService?.IsGestureOwnedByMainHotkey(gesture) == true;
+
+    public void RefreshSearchHotkeyRegistration() =>
+        _searchHotkeyService?.RefreshRegistration();
+
     public GlobalHotkeyRuntimeState? GetRuntimeState()
     {
         if (_hotkeyService is not { } hotkey)

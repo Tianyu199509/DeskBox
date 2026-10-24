@@ -126,12 +126,14 @@ public sealed class GlanceWidgetStore
         ArgumentNullException.ThrowIfNull(data);
         if (SaveRelay is { } relay && _widgetId.Length > 0)
         {
+            GlanceWidgetData? previousCache;
             await _gate.WaitAsync();
             try
             {
                 // Keep this instance's cache in step for local re-reads; the
                 // authoritative normalize + persist + Changed happen in the
                 // MAIN process, whose store owns the file.
+                previousCache = _cached;
                 _cached = Normalize(Clone(data));
             }
             finally
@@ -139,9 +141,30 @@ public sealed class GlanceWidgetStore
                 _gate.Release();
             }
 
-            await relay(
-                _widgetId,
-                JsonSerializer.Serialize(data, GlancePreferencesJsonContext.Default.Preferences));
+            try
+            {
+                await relay(
+                    _widgetId,
+                    JsonSerializer.Serialize(data, GlancePreferencesJsonContext.Default.Preferences));
+            }
+            catch
+            {
+                // The authoritative save never landed in the MAIN process:
+                // roll this cache back so local re-reads tell the truth
+                // instead of a fabricated success (batch R9).
+                await _gate.WaitAsync();
+                try
+                {
+                    _cached = previousCache;
+                }
+                finally
+                {
+                    _gate.Release();
+                }
+
+                throw;
+            }
+
             return;
         }
 
