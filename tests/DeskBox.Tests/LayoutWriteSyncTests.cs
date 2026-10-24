@@ -93,6 +93,54 @@ public sealed class LayoutWriteSyncTests : IDisposable
         Assert.Contains(widget.Resets, r => r.Scope == CapsuleOverrideResetScope.All);
     }
 
+    [Fact]
+    public async Task AppearanceClear_RoutesThroughThePipeAsTheFifthLayoutWrite()
+    {
+        var main = new SettingsService(_tempRoot);
+        await main.LoadAsync();
+
+        var widget = new FakeWidgetFacade();
+        var router = new SettingsIpcMethodRouter(main, null, null, restore: null, widget: widget);
+
+        var (ok, slice, _) = await router.DispatchAsync(
+            SettingsIpcMethods.AppearanceClearPerWidgetBackgrounds,
+            string.Empty,
+            CancellationToken.None);
+        Assert.True(ok, "clear write failed");
+        Assert.False(string.IsNullOrEmpty(slice),
+            "the response must carry the layout slice for the mirror merge");
+        Assert.Equal(1, widget.ClearPerWidgetBackgroundsCalls);
+    }
+
+    [Fact]
+    public void AdoptExternalSnapshot_MirrorsTheMainGraphWithoutADiskLoad()
+    {
+        var main = new SettingsService(_tempRoot);
+        main.LoadAsync().GetAwaiter().GetResult();
+        main.Settings.LastRunVersion = "adopt-roundtrip";
+        main.Settings.Widgets.Add(new Models.WidgetConfig
+        {
+            Id = "w-adopt",
+            WidgetKind = Models.WidgetKind.Glance,
+        });
+        main.Settings.WidgetLayout.FeatureWidgetEnabledStates["Todo"] = true;
+        string json = main.SerializeCurrentSettings();
+
+        // Host boot shape: a fresh service that never disk-loads. Adoption
+        // alone must produce the complete mirror — settings, main-owned
+        // runtime markers (verbatim here; the host never authors them), and
+        // the layout domain riding inside the graph.
+        var host = new SettingsService(_tempRoot);
+        host.AdoptExternalSnapshot(json);
+        Assert.Equal("adopt-roundtrip", host.Settings.LastRunVersion);
+        Assert.Contains(host.Settings.Widgets, w => w.Id == "w-adopt");
+        Assert.True(host.Settings.WidgetLayout.FeatureWidgetEnabledStates["Todo"]);
+
+        // Malformed payloads throw so the host boot fails loudly instead of
+        // running on a fabricated graph.
+        Assert.Throws<InvalidOperationException>(() => host.AdoptExternalSnapshot("{ broken"));
+    }
+
     private sealed class FakeWidgetFacade : ISettingsWidgetActions
     {
         public List<GroupPresentationChange> Presentations { get; } = [];
@@ -112,6 +160,13 @@ public sealed class LayoutWriteSyncTests : IDisposable
         public Task ResetCapsuleOverrides(CapsuleOverrideReset reset)
         {
             Resets.Add(reset);
+            return Task.CompletedTask;
+        }
+
+        public int ClearPerWidgetBackgroundsCalls { get; set; }
+        public Task ClearPerWidgetBackgrounds()
+        {
+            ClearPerWidgetBackgroundsCalls++;
             return Task.CompletedTask;
         }
 

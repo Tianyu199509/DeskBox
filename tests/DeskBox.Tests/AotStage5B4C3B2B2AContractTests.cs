@@ -119,7 +119,7 @@ public sealed class AotStage5B4C3B2B2AContractTests
             managed,
             StringComparison.Ordinal);
         Assert.Contains("Assert.Equal(46, actual.Count)", baseline, StringComparison.Ordinal);
-        Assert.Contains("Assert.Equal(110, actual.Values.Sum())", baseline, StringComparison.Ordinal);
+        Assert.Contains("Assert.Equal(113, actual.Values.Sum())", baseline, StringComparison.Ordinal);
         Assert.Contains(
             "Assert.Equal(38, actualContextOwners.Length)",
             baseline,

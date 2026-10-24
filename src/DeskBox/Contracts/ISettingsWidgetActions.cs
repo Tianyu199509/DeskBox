@@ -68,6 +68,14 @@ public interface ISettingsWidgetActions
     Task ResetCapsuleOverrides(CapsuleOverrideReset reset);
 
     /// <summary>
+    /// Clears every per-widget background override in the authoritative
+    /// layout (metadata + stored asset files). The overrides live in the
+    /// layout domain, which snapshots never carry — the appearance page's
+    /// batch clear must ride this command (batch R8).
+    /// </summary>
+    Task ClearPerWidgetBackgrounds();
+
+    /// <summary>
     /// The feature-widget switch write: records the enabled dictionary (the
     /// MAIN process owns it — snapshots never carry it) and applies the
     /// change through the live manager. One command so the dictionary write

@@ -690,6 +690,58 @@ public sealed class TodoSettingsCoordinatorTests : IDisposable
     }
 
     [Fact]
+    public async Task SetEnabledAsync_WithCallback_RidesTheCommandWithoutASnapshotCommit()
+    {
+        var settings = new SettingsService(_root);
+        await settings.LoadAsync();
+        string settingsPath = Path.Combine(_root, "settings.json");
+        string onDiskAfterLoad = File.ReadAllText(settingsPath);
+        int commandCalls = 0;
+        var coordinator = new TodoSettingsCoordinator(
+            settings,
+            _ =>
+            {
+                commandCalls++;
+                return Task.CompletedTask;
+            });
+
+        await coordinator.SetEnabledAsync(true);
+
+        Assert.Equal(1, commandCalls);
+        // The command IS the write. A snapshot commit on top would be a
+        // write amplifier in the settings host — and the dictionary inside
+        // it would be stripped by the main process anyway (batch R8: the
+        // host's enable switch once fell into the null-callback snapshot
+        // branch and never flipped the widget).
+        Assert.Equal(onDiskAfterLoad, File.ReadAllText(settingsPath));
+    }
+
+    [Fact]
+    public void SetEnabledPresentationOnly_FlipsProjectionWithoutTheWriteChain()
+    {
+        var settings = new SettingsService(_root);
+        int commandCalls = 0;
+        var coordinator = new TodoSettingsCoordinator(
+            settings,
+            _ =>
+            {
+                commandCalls++;
+                return Task.CompletedTask;
+            });
+        using var editor = new TodoSettingsViewModel(
+            coordinator, _ => string.Empty, (key, args) => key, _ => { });
+
+        bool before = editor.Enabled;
+        editor.SetEnabledPresentationOnly(!before);
+
+        Assert.Equal(!before, editor.Enabled);
+        // The feature card sends its own SetFeatureWidgetEnabled command;
+        // a plain Enabled assignment here used to fire a second, racing
+        // one through this same coordinator (batch R8).
+        Assert.Equal(0, commandCalls);
+    }
+
+    [Fact]
     public async Task Stop_CancelsQueuedTransitionAndWaitsForActiveHostOperation()
     {
         var settings = new SettingsService(_root);

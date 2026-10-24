@@ -4,6 +4,7 @@ namespace DeskBox;
 
 using DeskBox.Contracts;
 using DeskBox.Features.QuickCapture;
+using DeskBox.Models;
 using DeskBox.Services;
 
 /// <summary>
@@ -219,8 +220,50 @@ public partial class App
         Log("[SettingsHost] IPC connected");
         var settings = new SettingsService(new RemoteSettingsPersistenceSink(client));
         Log("[SettingsHost] SettingsService constructed");
-        await settings.LoadAsync();
-        Log("[SettingsHost] Settings loaded");
+
+        // Boot adoption (batch R8): the host mirrors the MAIN process's
+        // in-memory graph — always at least as fresh as disk — instead of
+        // disk-loading. A corrupt settings.json + .bak pair must not seed a
+        // defaults graph that a later host commit would push back over the
+        // main process's healthy state, and the load-time store writes
+        // (layout seed adoption, .bak promotion, legacy migration) belong
+        // to the single writer. The payload carries the live widget-layout
+        // slice inside the AppSettings graph.
+        (bool snapshotOk, string? snapshotJson, string? snapshotError) =
+            await client.RequestAsync(SettingsIpcMethods.SettingsSnapshot);
+        if (!snapshotOk || string.IsNullOrEmpty(snapshotJson))
+        {
+            throw new InvalidOperationException(
+                $"Settings snapshot unavailable: {snapshotError ?? "empty response"}");
+        }
+
+        settings.AdoptExternalSnapshot(snapshotJson);
+        Log("[SettingsHost] Settings adopted from main-process snapshot");
+
+        // Per-widget Glance data edits from the settings section ride the
+        // IPC relay: the desktop widgets' live Changed listeners and the
+        // glance store file both belong to the MAIN process. Without the
+        // relay the host's direct file writes were invisible to open
+        // widgets and could be silently reverted by the main store's
+        // cached write-back (batch R8).
+        GlanceWidgetStore.SaveRelay = async (widgetId, dataJson) =>
+        {
+            try
+            {
+                (bool ok, _, string? glanceError) = await client.RequestAsync(
+                    SettingsIpcMethods.WidgetGlanceApplyData,
+                    widgetId + "\n" + dataJson);
+                if (!ok)
+                {
+                    Log($"[SettingsHost] Glance apply rejected for {widgetId}: {glanceError ?? "unknown"}");
+                }
+            }
+            catch (Exception ex)
+            {
+                Log($"[SettingsHost] Glance apply failed for {widgetId}: {ex.Message}");
+            }
+        };
+
         var localization = new LocalizationService(settings);
         var theme = new ThemeService(settings);
 
@@ -375,11 +418,32 @@ public partial class App
         ThemeService theme,
         SettingsIpcClient client)
     {
-        // Ten coordinators take SettingsService alone; Todo/Search/QuickCapture
-        // take host-side no-op callbacks for the widget/reminder side effects
-        // the MAIN process re-applies itself from its own SettingsChanged
-        // subscription after our commit lands there.
-        var todo = new TodoSettingsCoordinator(settings);
+        var widgetActions = new RemoteSettingsWidgetActions(client, settings);
+
+        // The Todo/QuickCapture enable switches are feature-widget state: the
+        // enabled dictionary lives in the widget-layout domain, which the main
+        // process strips from every snapshot commit (main-owned). A host-side
+        // commit alone therefore never flips the widget — the switch MUST ride
+        // the SetFeatureWidgetEnabled command so the MAIN process runs the
+        // authoritative chain (dictionary write, widget apply, reminder
+        // reconcile). The comment that used to sit here claimed SettingsChanged
+        // re-application covers the side effects; that only holds for
+        // settings.json slices (Search), never for the dictionary kinds
+        // (Todo/QuickCapture) — batch R8, same family as the R7 Search fix.
+        var todo = new TodoSettingsCoordinator(
+            settings,
+            setWidgetEnabled: async enabled =>
+            {
+                // Optimistic mirror so the switch survives the post-roundtrip
+                // Refresh(); the command response and the layout-changed push
+                // deliver the authoritative dictionary.
+                FeatureWidgetSettings.SetEnabled(settings.Settings, WidgetKind.Todo, enabled);
+                bool applied = await widgetActions.SetFeatureWidgetEnabled(WidgetKind.Todo, enabled);
+                if (applied != enabled)
+                {
+                    FeatureWidgetSettings.SetEnabled(settings.Settings, WidgetKind.Todo, applied);
+                }
+            });
         var featureWidgets = new FeatureWidgetsSettingsCoordinator(settings);
         var everythingConnection = new RemoteSearchConnectionClient(client);
         _settingsHostEverythingConnection = everythingConnection;
@@ -404,11 +468,15 @@ public partial class App
         var quickCapture = new QuickCaptureSettingsCoordinator(
             settings,
             quickCaptureClipboard,
-            applyWidget: (_, _) => Task.CompletedTask,
+            // The enable chain rides the feature-switch command (see the Todo
+            // wiring above): the main process owns the dictionary and the
+            // widget window, and decides reveal like every other
+            // SetFeatureWidgetEnabled caller.
+            applyWidget: (enabled, _) =>
+                widgetActions.SetFeatureWidgetEnabled(WidgetKind.QuickCapture, enabled),
             tryEnqueue: action => UiDispatcherQueue.TryEnqueue(() => action()),
             reportError: ex => Log($"[QuickCapture] Settings operation failed: {ex}"));
 
-        var widgetActions = new RemoteSettingsWidgetActions(client, settings);
         var hotkey = new RemoteSettingsHotkeyActions(client);
         return new SettingsWindowFactoryInput(
             settings, theme, localization,
@@ -419,7 +487,9 @@ public partial class App
             new RemoteBackupRestoreActions(client),
             quickCapture,
             new RemoteBackupCommands(client),
-            new AppearanceSettingsCoordinator(settings),
+            new AppearanceSettingsCoordinator(
+                settings,
+                clearPerWidgetBackgroundsExternal: () => widgetActions.ClearPerWidgetBackgrounds()),
             new CapsuleSettingsCoordinator(settings),
             new InteractionSettingsCoordinator(settings),
             new FileDisplaySettingsCoordinator(settings),

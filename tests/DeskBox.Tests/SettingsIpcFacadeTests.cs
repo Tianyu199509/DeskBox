@@ -396,6 +396,13 @@ public sealed class SettingsIpcFacadeTests : IDisposable
             return Task.CompletedTask;
         }
 
+        public int ClearPerWidgetBackgroundsCalls { get; set; }
+        public Task ClearPerWidgetBackgrounds()
+        {
+            ClearPerWidgetBackgroundsCalls++;
+            return Task.CompletedTask;
+        }
+
         public Task<bool> SetFeatureWidgetEnabled(WidgetKind kind, bool enabled)
         {
             SyncToggles.Add((kind, enabled));

@@ -161,7 +161,10 @@ public partial class SettingsViewModel
                 _quickCaptureSettingsEditor.SetFeatureEnabled(enabled);
                 break;
             case WidgetKind.Todo:
-                _todoSettings.Enabled = enabled;
+                // Presentation-only: the card's own command below is the
+                // write; re-entering the section switch chain here fired a
+                // second, racing enable (batch R8).
+                _todoSettings.SetEnabledPresentationOnly(enabled);
                 break;
             default:
                 FeatureWidgetSettings.SetEnabled(_settingsService.Settings, kind, enabled);

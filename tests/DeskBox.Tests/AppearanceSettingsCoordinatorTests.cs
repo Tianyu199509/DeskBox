@@ -258,4 +258,53 @@ public sealed class AppearanceSettingsCoordinatorTests : IDisposable
             SettingsService.DefaultWidgetOpacity,
             settings.Settings.WidgetShell.WidgetOpacity);
     }
+
+    [Fact]
+    public async Task ClearPerWidgetBackgrounds_WithExternalChannel_PredictsCountAndSkipsLocalMutation()
+    {
+        var settings = new SettingsService(_root);
+        await settings.LoadAsync();
+        var widget = new WidgetConfig { Id = "w-clear-external", WidgetKind = WidgetKind.File };
+        WidgetBackgroundCustomization.SetColorOverride(
+            widget,
+            Windows.UI.Color.FromArgb(0xFF, 0xAA, 0x11, 0x22));
+        settings.Settings.Widgets.Add(widget);
+
+        int externalCalls = 0;
+        var coordinator = new AppearanceSettingsCoordinator(
+            settings,
+            clearPerWidgetBackgroundsExternal: () =>
+            {
+                externalCalls++;
+                return Task.CompletedTask;
+            });
+
+        int cleared = coordinator.ClearPerWidgetBackgrounds();
+
+        Assert.Equal(1, cleared);
+        Assert.Equal(1, externalCalls);
+        // The local mirror stays untouched — the MAIN process owns the
+        // clear (layout domain), and its response slice re-merges this
+        // mirror. Deleting asset files host-side would strand a
+        // half-applied state (batch R8).
+        Assert.NotNull(WidgetBackgroundCustomization.GetColorOverride(widget));
+    }
+
+    [Fact]
+    public async Task ClearPerWidgetBackgrounds_WithoutExternalChannel_ClearsLocally()
+    {
+        var settings = new SettingsService(_root);
+        await settings.LoadAsync();
+        var widget = new WidgetConfig { Id = "w-clear-local", WidgetKind = WidgetKind.File };
+        WidgetBackgroundCustomization.SetColorOverride(
+            widget,
+            Windows.UI.Color.FromArgb(0xFF, 0xAA, 0x11, 0x22));
+        settings.Settings.Widgets.Add(widget);
+
+        var coordinator = new AppearanceSettingsCoordinator(settings);
+        int cleared = coordinator.ClearPerWidgetBackgrounds();
+
+        Assert.Equal(1, cleared);
+        Assert.Null(WidgetBackgroundCustomization.GetColorOverride(widget));
+    }
 }

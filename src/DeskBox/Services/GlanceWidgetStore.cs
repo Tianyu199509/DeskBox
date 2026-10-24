@@ -30,9 +30,22 @@ public sealed class GlanceWidgetStore
     internal static int CachedWidgetStoreCount => WidgetStores.Count;
 
     private readonly SemaphoreSlim _gate = new(1, 1);
+    private readonly string _widgetId;
     private readonly string _storePath;
     private readonly string? _legacyStorePath;
     private GlanceWidgetData? _cached;
+
+    /// <summary>
+    /// Settings-host relay (batch R8): in the two-process world the settings
+    /// section runs in the host process, but this store's live Changed
+    /// listeners (the desktop Glance widgets) and the store file both belong
+    /// to the MAIN process. When set (settings-host boot only), SaveAsync
+    /// forwards the serialized data over the settings IPC pipe instead of
+    /// writing disk — the main process stays the sole writer and its store
+    /// instance raises Changed so open widgets update live. Null in the main
+    /// process and the in-process settings harness: direct disk semantics.
+    /// </summary>
+    public static Func<string, string, Task>? SaveRelay { get; set; }
 
     public GlanceWidgetStore()
         : this(Path.Combine(DeskBoxDataPathService.Current.DataDirectory, "glance"))
@@ -40,22 +53,24 @@ public sealed class GlanceWidgetStore
     }
 
     internal GlanceWidgetStore(string dataDirectory)
-        : this(Path.Combine(dataDirectory, "glance.json"), legacyStorePath: null, exactPath: true)
+        : this(string.Empty, Path.Combine(dataDirectory, "glance.json"), legacyStorePath: null, exactPath: true)
     {
     }
 
     internal GlanceWidgetStore(string dataDirectory, string widgetId)
         : this(
+            widgetId,
             Path.Combine(dataDirectory, $"{GetSafeWidgetFileName(widgetId)}.json"),
             legacyStorePath: null,
             exactPath: true)
     {
     }
 
-    private GlanceWidgetStore(string storePath, string? legacyStorePath, bool exactPath)
+    private GlanceWidgetStore(string widgetId, string storePath, string? legacyStorePath, bool exactPath)
     {
         _ = exactPath;
         Directory.CreateDirectory(Path.GetDirectoryName(storePath)!);
+        _widgetId = widgetId;
         _storePath = storePath;
         _legacyStorePath = legacyStorePath;
     }
@@ -73,6 +88,7 @@ public sealed class GlanceWidgetStore
                     DeskBoxDataPathService.Current.DataDirectory,
                     "glance");
                 return new GlanceWidgetStore(
+                    id,
                     Path.Combine(
                         glanceDirectory,
                         "widgets",
@@ -108,6 +124,27 @@ public sealed class GlanceWidgetStore
     public async Task SaveAsync(GlanceWidgetData data)
     {
         ArgumentNullException.ThrowIfNull(data);
+        if (SaveRelay is { } relay && _widgetId.Length > 0)
+        {
+            await _gate.WaitAsync();
+            try
+            {
+                // Keep this instance's cache in step for local re-reads; the
+                // authoritative normalize + persist + Changed happen in the
+                // MAIN process, whose store owns the file.
+                _cached = Normalize(Clone(data));
+            }
+            finally
+            {
+                _gate.Release();
+            }
+
+            await relay(
+                _widgetId,
+                JsonSerializer.Serialize(data, GlancePreferencesJsonContext.Default.Preferences));
+            return;
+        }
+
         await _gate.WaitAsync();
         try
         {

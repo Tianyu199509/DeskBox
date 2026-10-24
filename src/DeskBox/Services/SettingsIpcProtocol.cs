@@ -46,6 +46,16 @@ public static class SettingsIpcMethods
     /// </summary>
     public const string SettingsReloaded = "settings-reloaded";
 
+    /// <summary>
+    /// Settings host → main: boot adoption source (batch R8). The response
+    /// is the MAIN process's current AppSettings JSON — the host's initial
+    /// mirror — which also carries the live widget-layout slice inside the
+    /// graph. Replaces the host's former disk LoadAsync, whose degraded
+    /// defaults (corrupt settings.json + .bak) a later host commit would
+    /// have pushed back over the main process's healthy state.
+    /// </summary>
+    public const string SettingsSnapshot = "settings.snapshot";
+
     // ── Hotkey facade (batch 3c-1) ───────────────────────────────────
     public const string HotkeyState = "hotkey.state";
     public const string HotkeyApply = "hotkey.apply";
@@ -97,6 +107,14 @@ public static class SettingsIpcMethods
     public const string WidgetGlanceLocate = "widget.glance-locate";
     public const string WidgetGlanceRemove = "widget.glance-remove";
     public const string WidgetGlanceRename = "widget.glance-rename";
+
+    /// <summary>
+    /// Applies per-widget Glance preferences edited in the settings section
+    /// (payload = "widgetId\nGlanceWidgetData JSON"). The main process owns
+    /// the store file and the live widgets; the settings host never writes
+    /// it directly.
+    /// </summary>
+    public const string WidgetGlanceApplyData = "widget.glance-apply-data";
     public const string WidgetMoveAll = "widget.move-all";
     public const string WidgetMoveAllUndo = "widget.move-all-undo";
     public const string WidgetApplyScreenBinding = "widget.apply-screen-binding";
@@ -202,6 +220,14 @@ public static class SettingsIpcMethods
     public const string WidgetApplyGroupNavDefaults = "widget.apply-group-nav-defaults";
     public const string WidgetApplyLayoutPreferences = "widget.apply-layout-preferences";
     public const string WidgetResetCapsuleOverrides = "widget.reset-capsule-overrides";
+
+    /// <summary>
+    /// Clears every per-widget background override in the authoritative
+    /// layout (metadata + stored asset files). The overrides live in the
+    /// layout domain, which snapshots never carry — this command is the
+    /// appearance page's only valid channel for the batch clear.
+    /// </summary>
+    public const string AppearanceClearPerWidgetBackgrounds = "appearance.clear-per-widget-backgrounds";
 
     /// <summary>Reads the authoritative widget-layout slice JSON.</summary>
     public const string WidgetLayoutRead = "widget.layout-read";

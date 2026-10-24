@@ -44,6 +44,16 @@ public sealed class RemoteSettingsWidgetActions : ISettingsWidgetActions
             SettingsIpcPayload.Encode(reset, SettingsIpcJsonContext.Default.CapsuleOverrideReset));
 
     /// <summary>
+    /// The appearance page's "清除每格背景" button (batch R8): the overrides
+    /// live in the layout domain the main process owns, so the clear rides a
+    /// dedicated command (asset deletion included) instead of the snapshot.
+    /// </summary>
+    public Task ClearPerWidgetBackgrounds() =>
+        SendLayoutWrite(
+            SettingsIpcMethods.AppearanceClearPerWidgetBackgrounds,
+            string.Empty);
+
+    /// <summary>
     /// Layout writes: the response carries the authoritative slice — merge
     /// it into the local mirror BEFORE returning so the caller's immediate
     /// refresh reads fresh state (no stale flash, no reliance on push

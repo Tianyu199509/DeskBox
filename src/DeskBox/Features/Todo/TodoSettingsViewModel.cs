@@ -160,6 +160,25 @@ public sealed partial class TodoSettingsViewModel : ObservableObject, IDisposabl
         }
     }
 
+    /// <summary>
+    /// The feature-card toggle's mirror path: flips the switch projection
+    /// without re-entering the enable write chain — the card itself sends
+    /// the SetFeatureWidgetEnabled command, and a plain Enabled assignment
+    /// here would fire a second, racing one (batch R8).
+    /// </summary>
+    public void SetEnabledPresentationOnly(bool enabled)
+    {
+        _isSyncingPresentation = true;
+        try
+        {
+            Enabled = enabled;
+        }
+        finally
+        {
+            _isSyncingPresentation = false;
+        }
+    }
+
     public bool RemindersEnabled
     {
         get => _remindersEnabled;

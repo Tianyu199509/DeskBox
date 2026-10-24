@@ -11,6 +11,44 @@ namespace DeskBox.Tests;
 public sealed class SettingsHostLaunchIntentTests
 {
     [Fact]
+    public void HostFactory_WiresRealChannelsForTheDictionaryAndStoreDomains()
+    {
+        string host = File.ReadAllText(TestPaths.FromRepository(
+            "src/DeskBox/App.SettingsHost.cs"));
+
+        // The Todo/QuickCapture enable switches are layout-domain dictionary
+        // writes: they must ride the SetFeatureWidgetEnabled command — the
+        // null/no-op callback shapes once silently dropped them (the host
+        // committed a snapshot whose dictionary the main process strips;
+        // batch R8). QuickCapture's wiring is pinned by its (enabled, _)
+        // shape; Search's (_, _) no-op is deliberate and stays (its enable
+        // state is a settings.json slice, so the snapshot IS the channel).
+        Assert.Contains(
+            "SetFeatureWidgetEnabled(WidgetKind.Todo, enabled)", host, StringComparison.Ordinal);
+        Assert.Contains(
+            "SetFeatureWidgetEnabled(WidgetKind.QuickCapture, enabled)", host, StringComparison.Ordinal);
+        Assert.Contains("applyWidget: (enabled, _) =>", host, StringComparison.Ordinal);
+
+        // The appearance page's per-widget background clear is a
+        // layout-domain write: same rule, dedicated command.
+        Assert.Contains("clearPerWidgetBackgroundsExternal:", host, StringComparison.Ordinal);
+
+        // Boot adoption: the host mirrors the MAIN process's memory, never
+        // disk-loads settings (corrupt-disk defaults must not round-trip
+        // back over a healthy main process; load-time store writes belong
+        // to the single writer).
+        Assert.Contains("SettingsIpcMethods.SettingsSnapshot", host, StringComparison.Ordinal);
+        Assert.Contains(
+            "settings.AdoptExternalSnapshot(snapshotJson)", host, StringComparison.Ordinal);
+        Assert.DoesNotContain(
+            "await settings.LoadAsync()", host, StringComparison.Ordinal);
+
+        // The glance store relay: per-widget data edits belong to the MAIN
+        // process (sole writer + live Changed listeners).
+        Assert.Contains("GlanceWidgetStore.SaveRelay =", host, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void LaunchArguments_ParseSectionGlanceOneClickAndInstallResult()
     {
         string[] args =

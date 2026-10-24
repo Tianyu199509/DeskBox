@@ -19,13 +19,17 @@ public sealed class AppearanceSettingsCoordinator : IAppearanceSettings
     private const string TrayIconStyleHidden = "Hidden";
 
     private readonly SettingsService _settings;
+    private readonly Func<Task>? _clearPerWidgetBackgroundsExternal;
     private bool _stopped;
 
     internal bool IsStopped => _stopped;
 
-    public AppearanceSettingsCoordinator(SettingsService settings)
+    public AppearanceSettingsCoordinator(
+        SettingsService settings,
+        Func<Task>? clearPerWidgetBackgroundsExternal = null)
     {
         _settings = settings;
+        _clearPerWidgetBackgroundsExternal = clearPerWidgetBackgroundsExternal;
     }
 
     public AppearanceMaterialSettings ReadMaterial()
@@ -434,6 +438,19 @@ public sealed class AppearanceSettingsCoordinator : IAppearanceSettings
     public int ClearPerWidgetBackgrounds()
     {
         ThrowIfStopped();
+        if (_clearPerWidgetBackgroundsExternal is { } clearExternal)
+        {
+            // Two-process mode: the overrides live in the layout domain,
+            // which only the MAIN process accepts writes for — the clear
+            // rides the appearance.clear-per-widget-backgrounds command
+            // (asset deletion included, response slice re-merges the
+            // mirror). The count comes from a read-only scan of the live
+            // mirror so the result toast stays accurate (batch R8).
+            int predicted = CountPerWidgetBackgroundOverrides();
+            _ = clearExternal();
+            return predicted;
+        }
+
         int cleared = 0;
         foreach (WidgetConfig widget in _settings.Settings.WidgetLayout.Widgets)
         {
@@ -461,6 +478,11 @@ public sealed class AppearanceSettingsCoordinator : IAppearanceSettings
 
         return cleared;
     }
+
+    private int CountPerWidgetBackgroundOverrides() =>
+        _settings.Settings.WidgetLayout.Widgets.Count(widget =>
+            WidgetBackgroundCustomization.GetImageFileNameOverride(widget) is not null ||
+            WidgetBackgroundCustomization.GetColorOverride(widget) is not null);
 
     public void SetFileNameLineCount(int lineCount)
     {

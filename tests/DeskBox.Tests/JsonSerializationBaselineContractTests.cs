@@ -43,7 +43,7 @@ public sealed class JsonSerializationBaselineContractTests : IDisposable
             ["src/DeskBox/Services/DesktopOrganizationRecoveryStore.cs"] = 2,
             ["src/DeskBox/Services/FeedbackService.cs"] = 4,
             ["src/DeskBox/Services/GlanceImageService.cs"] = 2,
-            ["src/DeskBox/Services/GlanceWidgetStore.cs"] = 7,
+            ["src/DeskBox/Services/GlanceWidgetStore.cs"] = 8,
             ["src/DeskBox/Services/LocalizationService.cs"] = 1,
             ["src/DeskBox/Services/ManagedStorageMigrationService.cs"] = 2,
             ["src/DeskBox/Services/NativeNotificationActivationEnvelopeStore.cs"] = 2,
@@ -58,10 +58,11 @@ public sealed class JsonSerializationBaselineContractTests : IDisposable
             ["src/DeskBox/Services/SettingsIpcProtocol.cs"] = 3,
             ["src/DeskBox/Services/SettingsIpcServer.cs"] = 2,
             ["src/DeskBox/Services/SettingsMigrationService.cs"] = 2,
-            // 8: legacy 3 + external-snapshot apply + disk-reload +
+            // 10: legacy 3 + external-snapshot apply + disk-reload +
             // appearance-preview apply + external layout merge + serialize
-            // current layout (batches 3d/R2).
-            ["src/DeskBox/Services/SettingsService.cs"] = 8,
+            // current layout (batches 3d/R2) + boot-adoption deserialize +
+            // snapshot serialize (batch R8 settings.snapshot).
+            ["src/DeskBox/Services/SettingsService.cs"] = 10,
             // Startup session ledger: read-previous + write-current breadcrumb.
             ["src/DeskBox/Services/StartupSessionLedger.cs"] = 2,
             // Crash event report serialization for the support package.
@@ -96,7 +97,7 @@ public sealed class JsonSerializationBaselineContractTests : IDisposable
         }
 
         Assert.Equal(46, actual.Count);
-        Assert.Equal(110, actual.Values.Sum());
+        Assert.Equal(113, actual.Values.Sum());
 
         string[] expectedContextOwners =
         [
@@ -249,12 +250,15 @@ public sealed class JsonSerializationBaselineContractTests : IDisposable
 
         var expectedTypeInfoReferences = new Dictionary<string, int>(StringComparer.Ordinal)
         {
-            // 5: legacy 3 + the settings-host split's external-snapshot apply
-            // and disk-reload deserializes (batch 3a).
-            ["SettingsJsonContext.Default.AppSettings"] = 6,
+            // 8: legacy 3 + the settings-host split's external-snapshot apply
+            // and disk-reload deserializes (batch 3a) + the boot-adoption
+            // deserialize and snapshot serialize (batch R8).
+            ["SettingsJsonContext.Default.AppSettings"] = 8,
             ["QuickCaptureJsonContext.Default.StoreData"] = 2,
             ["TodoJsonContext.Default.StoreData"] = 3,
-            ["GlancePreferencesJsonContext.Default.Preferences"] = 7,
+            // 8: the seven pre-existing store calls (load/save/update
+            // paths) + the settings-host relay serialize (batch R8).
+            ["GlancePreferencesJsonContext.Default.Preferences"] = 8,
             ["GlanceImageCatalogJsonContext.Default.ImageCatalog"] = 2,
             ["WidgetMetadataJsonContext.Default.StringMap"] = 2,
             ["WidgetMetadataJsonContext.Default.StringListMap"] = 2,
@@ -269,7 +273,7 @@ public sealed class JsonSerializationBaselineContractTests : IDisposable
                     Regex.Escape(reference) + @"\b").Count);
         }
 
-        Assert.Equal(27, expectedTypeInfoReferences.Values.Sum());
+        Assert.Equal(30, expectedTypeInfoReferences.Values.Sum());
         Assert.DoesNotContain("JsonSerializerOptions", allPhaseTwoSources, StringComparison.Ordinal);
         Assert.DoesNotContain(
             "new JsonStringEnumConverter()",

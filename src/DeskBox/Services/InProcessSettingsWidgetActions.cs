@@ -193,6 +193,46 @@ public sealed class InProcessSettingsWidgetActions : ISettingsWidgetActions
         _widgetManager?.IsFeatureWidgetEnabled(kind) ??
         FeatureWidgetSettings.IsEnabled(_settingsService.Settings, kind);
 
+    public async Task ClearPerWidgetBackgrounds()
+    {
+        await DeskBox.Platform.UiDispatch.RunAsync(ClearPerWidgetBackgroundsOnUi);
+    }
+
+    private Task<int> ClearPerWidgetBackgroundsOnUi()
+    {
+        // Mirrors AppearanceSettingsCoordinator.ClearPerWidgetBackgrounds,
+        // but against the MAIN process's authoritative layout: the host's
+        // button would otherwise delete the asset files host-side while the
+        // overrides themselves survive (snapshots never carry the layout
+        // domain) — a half-applied state that could not self-heal.
+        int cleared = 0;
+        foreach (WidgetConfig widget in _settingsService.Settings.WidgetLayout.Widgets)
+        {
+            string? fileName = WidgetBackgroundCustomization.GetImageFileNameOverride(widget);
+            if (fileName is null &&
+                WidgetBackgroundCustomization.GetColorOverride(widget) is null)
+            {
+                continue;
+            }
+
+            WidgetBackgroundCustomization.Clear(widget);
+            if (fileName is not null)
+            {
+                WidgetTitleIconAssetStore.Current.DeleteImage(widget.Id, fileName);
+            }
+
+            cleared++;
+        }
+
+        if (cleared > 0)
+        {
+            _settingsService.RequestAppearancePreview();
+            _settingsService.SaveDebounced(notifySubscribers: true);
+        }
+
+        return Task.FromResult(cleared);
+    }
+
     public async Task<bool> SetFeatureWidgetEnabled(WidgetKind kind, bool enabled)
     {
         // Every feature switch rides this one command. QuickCapture/Todo/

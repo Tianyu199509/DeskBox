@@ -1229,6 +1229,69 @@ settings.FocusClickedWidgetOnRaise = false;
     }
 
     /// <summary>
+    /// Serializes this process's current AppSettings graph — the settings
+    /// host's boot-adoption source (<c>settings.snapshot</c>, batch R8).
+    /// Unlike the disk writer this never strips the layout keys: the live
+    /// widget-layout slice travels inside the graph so a fresh host mirror
+    /// starts complete.
+    /// </summary>
+    public string SerializeCurrentSettings()
+    {
+        lock (_lock)
+        {
+            return System.Text.Json.JsonSerializer.Serialize(
+                _settings,
+                SettingsJsonContext.Default.AppSettings);
+        }
+    }
+
+    /// <summary>
+    /// Settings-host boot adoption (batch R8): replaces the host's former
+    /// disk <see cref="LoadAsync"/>. The MAIN process's in-memory graph is
+    /// authoritative and always at least as fresh as disk (debounced saves
+    /// lag memory), so the host adopts its serialized snapshot verbatim:
+    /// no disk reads (a corrupt settings.json + .bak pair must not seed a
+    /// defaults graph that a later host commit would push back over the
+    /// main process), no load-time store writes (seed adoption, .bak
+    /// promotion, legacy migration all belong to the single writer), no
+    /// migration pass (the main process ran it before its pipe server
+    /// started). Throws on parse failure so the host boot fails loudly
+    /// instead of running on a fabricated graph.
+    /// </summary>
+    public void AdoptExternalSnapshot(string settingsJson)
+    {
+        AppSettings? parsed;
+        try
+        {
+            parsed = System.Text.Json.JsonSerializer.Deserialize<AppSettings>(
+                settingsJson,
+                SettingsJsonContext.Default.AppSettings);
+        }
+        catch (System.Text.Json.JsonException ex)
+        {
+            throw new InvalidOperationException(
+                "Main-process settings snapshot parse failed", ex);
+        }
+
+        if (parsed is null)
+        {
+            throw new InvalidOperationException(
+                "Main-process settings snapshot was empty");
+        }
+
+        lock (_lock)
+        {
+            _settings = parsed;
+            _settingsSchemaNewerThanBuild = false;
+            // The layout domain arrived inside the graph; flag the merge so
+            // this session's save path keeps its organizer normalization
+            // semantics instead of running suspended forever.
+            _widgetLayoutMerged = true;
+            LastLoadRecoveryState = SettingsLoadRecoveryState.Primary;
+        }
+    }
+
+    /// <summary>
     /// Echo-suppression token (batch 3a): a reload push carrying this commit
     /// id is the round-trip of the latest write this process initiated and
     /// must not be reloaded.

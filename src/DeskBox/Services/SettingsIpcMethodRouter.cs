@@ -308,6 +308,15 @@ public sealed class SettingsIpcMethodRouter
                 await _widget.ResetCapsuleOverrides(capsuleReset);
                 return (true, SerializeLayout(_settings), null);
 
+            case SettingsIpcMethods.AppearanceClearPerWidgetBackgrounds:
+                if (_widget is null) return unavailable(method);
+                await _widget.ClearPerWidgetBackgrounds();
+                return (true, SerializeLayout(_settings), null);
+
+            case SettingsIpcMethods.SettingsSnapshot:
+                if (_settings is null) return unavailable(method);
+                return (true, _settings.SerializeCurrentSettings(), null);
+
             case SettingsIpcMethods.WidgetLayoutRead:
                 if (_settings is null) return unavailable(method);
                 return (true, SerializeLayout(_settings), null);
@@ -481,6 +490,9 @@ public sealed class SettingsIpcMethodRouter
 
                 await _widget.RenameWidgetAsync(rename.WidgetId, rename.NewName);
                 return (true, null, null);
+
+            case SettingsIpcMethods.WidgetGlanceApplyData:
+                return await HandleGlanceApplyDataAsync(payload);
 
             case SettingsIpcMethods.WidgetMoveAll:
                 if (_widget is null) return unavailable(method);
@@ -1069,6 +1081,50 @@ public sealed class SettingsIpcMethodRouter
 
     private static (bool, string?, string?) unavailable(string method) =>
         (false, null, $"{method}: host service unavailable");
+
+    /// <summary>
+    /// widget.glance-apply-data (batch R8): the settings section's per-widget
+    /// Glance edits land in the MAIN process's store instance — it owns the
+    /// file and its Changed event is what live desktop Glance widgets
+    /// re-read from. The UI-thread marshal matches the in-process section,
+    /// which always saved from the UI thread.
+    /// </summary>
+    private static async Task<(bool, string?, string?)> HandleGlanceApplyDataAsync(
+        string? payload)
+    {
+        if (string.IsNullOrEmpty(payload))
+        {
+            return (false, null, "empty payload");
+        }
+
+        int separator = payload.IndexOf('\n');
+        if (separator <= 0 || separator == payload.Length - 1)
+        {
+            return (false, null, "malformed payload");
+        }
+
+        string widgetId = payload[..separator];
+        GlanceWidgetData? data;
+        try
+        {
+            data = SettingsIpcPayload.Decode(
+                payload[(separator + 1)..],
+                GlancePreferencesJsonContext.Default.Preferences);
+        }
+        catch (JsonException)
+        {
+            return (false, null, "malformed payload");
+        }
+
+        if (string.IsNullOrWhiteSpace(widgetId) || data is null)
+        {
+            return (false, null, "malformed payload");
+        }
+
+        GlanceWidgetStore store = GlanceWidgetStore.ForWidget(widgetId);
+        await DeskBox.Platform.UiDispatch.RunAsync(() => store.SaveAsync(data));
+        return (true, null, null);
+    }
 
     private static string? SerializeNullable<T>(T? value, JsonTypeInfo<T> typeInfo) where T : class =>
         value is null ? null : SettingsIpcPayload.Encode(value, typeInfo);
