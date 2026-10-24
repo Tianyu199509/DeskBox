@@ -154,6 +154,9 @@ public partial class App
     private void InitializeSettingsHost()
     {
         _isSettingsHost = true;
+        // Group the host window with the main app's taskbar button (without
+        // touching the Start Menu shortcut — see RegisterProcessAppUserModelIdOnly).
+        JumpListService.RegisterProcessAppUserModelIdOnly();
         SettingsHostTrace("branch-entered");
         Log("[SettingsHost] Constructor branch entered");
         InitializeComponent();
@@ -532,7 +535,7 @@ public partial class App
     /// bare Application.Exit defers through the XAML message loop and a
     /// half-dead settings window must not linger.
     /// </summary>
-    private void ExitSettingsHost()
+    internal void ExitSettingsHost()
     {
         // Flush any debounced (1s) pending save first: the host process is
         // the writer, and dying inside the debounce window used to silently

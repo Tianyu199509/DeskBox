@@ -41,6 +41,24 @@ public static class JumpListService
     }
 
     /// <summary>
+    /// Registers only the process AUMID — for the settings-host process,
+    /// whose window must group with the main app's taskbar button but which
+    /// must not touch the Start Menu shortcut (batch R6).
+    /// </summary>
+    public static void RegisterProcessAppUserModelIdOnly()
+    {
+        try
+        {
+            JumpListNativeMethods.SetCurrentProcessExplicitAppUserModelID(AppUserModelId);
+            App.LogVerbose($"[JumpList] Process AUMID registered: {AppUserModelId}");
+        }
+        catch (Exception ex)
+        {
+            App.Log($"[JumpList] Failed to register process AUMID: {ex.Message}");
+        }
+    }
+
+    /// <summary>
     /// Configure the taskbar Jump List with quick action items.
     /// Safe to call for both packaged (MSIX) and unpackaged apps.
     /// </summary>

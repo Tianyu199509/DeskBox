@@ -619,10 +619,13 @@ public sealed partial class SettingsWindow
         // settings button and the automatic/toast openers can never show
         // two release-notes windows at once.
         AppUpdateManifest? manifest = ViewModel.LatestUpdateManifest;
+        // No cross-process ownership: the release-notes window lives in the
+        // main process while this HWND dies with the settings host — an
+        // owner here made Windows destroy the child window too (batch R6).
         _appActions.OpenReleaseNotesWindow(
             manifest,
             ViewModel.AppVersion,
             manifest is null ? ViewModel.FetchLatestManifestForReleaseNotesAsync : null,
-            _hWnd);
+            0);
     }
 }

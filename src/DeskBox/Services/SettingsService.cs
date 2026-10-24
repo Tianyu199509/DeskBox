@@ -1291,6 +1291,13 @@ settings.FocusClickedWidgetOnRaise = false;
             parsed.AutoStartDefaultApplied = before.AutoStartDefaultApplied;
             parsed.FullyElevatedNoticeAcknowledgedUtcTicks =
                 before.FullyElevatedNoticeAcknowledgedUtcTicks;
+            // Onboarding completion is authored by the MAIN process's
+            // onboarding window; a host snapshot serialized before the
+            // completion save would otherwise roll it back and force a
+            // second run on next launch (batch R6).
+            parsed.HasCompletedOnboarding = before.HasCompletedOnboarding;
+            parsed.CompletedOnboardingVersion = before.CompletedOnboardingVersion;
+            parsed.OnboardingStepIndex = before.OnboardingStepIndex;
             // The widget-layout domain — widgets list, groups, deleted ids,
             // topology, AND the feature-widget enabled dictionary — is
             // authoritative in the MAIN process only: the host's in-memory

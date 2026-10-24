@@ -53,6 +53,8 @@ public sealed partial class SettingsWindow : Window
     private static readonly TimeSpan ResizeSettleDelay = TimeSpan.FromMilliseconds(120);
     private static readonly TimeSpan SectionLayoutSettleDelay = TimeSpan.FromMilliseconds(90);
     private const uint WmGetMinMaxInfo = 0x0024;
+    private const uint WmQueryEndSession = 0x0011;
+    private const uint WmEndSession = 0x0016;
     private const uint WmNcDestroy = 0x0082;
     private static readonly UIntPtr SettingsWindowSubclassId = new(1);
 
@@ -904,6 +906,17 @@ public sealed partial class SettingsWindow : Window
         if (message == WmNcDestroy)
         {
             RemoveMinimumSizeHook();
+        }
+
+        if (_isHostProcessWindow &&
+            (message == WmQueryEndSession || message == WmEndSession))
+        {
+            // Session end never raises Window.Closed — without this the
+            // host's debounced (1s) pending save was silently lost on
+            // "edit setting → sign out". ExitSettingsHost flushes it while
+            // the pipe to the main process is still alive (batch R6).
+            App.Current.ExitSettingsHost();
+            return IntPtr.Zero;
         }
 
         return Win32Helper.DefSubclassProc(hWnd, message, wParam, lParam);
