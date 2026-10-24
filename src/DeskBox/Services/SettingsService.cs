@@ -1811,6 +1811,12 @@ settings.FocusClickedWidgetOnRaise = false;
             parsed.AutoStartDefaultApplied = _settings.AutoStartDefaultApplied;
             parsed.FullyElevatedNoticeAcknowledgedUtcTicks =
                 _settings.FullyElevatedNoticeAcknowledgedUtcTicks;
+            // Same onboarding guard as the commit path: a preview payload
+            // serialized from stale host memory must not roll completion back
+            // (a later save would persist the rollback — batch R7).
+            parsed.HasCompletedOnboarding = _settings.HasCompletedOnboarding;
+            parsed.CompletedOnboardingVersion = _settings.CompletedOnboardingVersion;
+            parsed.OnboardingStepIndex = _settings.OnboardingStepIndex;
             _settings = parsed;
             _settingsSchemaNewerThanBuild = false;
         }

@@ -22,6 +22,11 @@ public sealed class SettingsIpcClient : IAsyncDisposable
     private readonly ConcurrentDictionary<long, TaskCompletionSource<SettingsIpcEnvelope>> _pending = new();
     private long _nextRequestId;
     private volatile bool _disposed;
+    // Serializes request writes: the appearance-preview forwarder fires from
+    // a pool thread while UI-thread facades call synchronously and the
+    // background Everything warmup primes — concurrent Writes on one
+    // NamedPipeClientStream interleave envelopes (batch R7).
+    private readonly SemaphoreSlim _writeGate = new(1, 1);
 
     private SettingsIpcClient(NamedPipeClientStream stream)
     {
@@ -202,8 +207,16 @@ public sealed class SettingsIpcClient : IAsyncDisposable
         linked.CancelAfter(TimeoutFor(method));
         try
         {
-            await _stream.WriteAsync(bytes, linked.Token).ConfigureAwait(false);
-            await _stream.FlushAsync(linked.Token).ConfigureAwait(false);
+            await _writeGate.WaitAsync(linked.Token).ConfigureAwait(false);
+            try
+            {
+                await _stream.WriteAsync(bytes, linked.Token).ConfigureAwait(false);
+                await _stream.FlushAsync(linked.Token).ConfigureAwait(false);
+            }
+            finally
+            {
+                _writeGate.Release();
+            }
 
             SettingsIpcEnvelope response = await completion.Task.WaitAsync(linked.Token).ConfigureAwait(false);
             return (response.Ok, response.Payload, response.Error);

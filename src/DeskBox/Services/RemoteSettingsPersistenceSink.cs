@@ -26,7 +26,7 @@ public sealed class RemoteSettingsPersistenceSink : ISettingsPersistenceSink
         string payload = commit.CommitId + "\n" + json;
         (bool ok, _, string? error) = await _client.RequestAsync(
             SettingsIpcMethods.SettingsCommit,
-            payload);
+            payload).ConfigureAwait(false);
         if (!ok)
         {
             App.Log($"[SettingsIpc] Remote commit {commit.CommitId} refused: {error ?? "unknown"}");

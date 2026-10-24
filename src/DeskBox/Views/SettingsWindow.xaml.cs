@@ -915,8 +915,12 @@ public sealed partial class SettingsWindow : Window
             // host's debounced (1s) pending save was silently lost on
             // "edit setting → sign out". ExitSettingsHost flushes it while
             // the pipe to the main process is still alive (batch R6).
+            // QUERYENDSESSION must answer TRUE — returning zero would
+            // REFUSE the sign-off system-wide. Flushing already on QUERY
+            // (not only ENDSESSION) covers a death mid-broadcast; a second
+            // call from ENDSESSION is an idempotent no-op.
             App.Current.ExitSettingsHost();
-            return IntPtr.Zero;
+            return new IntPtr(1);
         }
 
         return Win32Helper.DefSubclassProc(hWnd, message, wParam, lParam);

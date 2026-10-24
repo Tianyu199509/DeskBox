@@ -53,7 +53,8 @@ public sealed class GroupNavigationSettingsCoordinator : IGroupNavigationSetting
                 layout.WidgetGroupDefaultNavigationStyle,
                 layout.WidgetGroupDefaultTitleDisplayMode,
                 layout.WidgetGroupWheelSwitchEnabled,
-                layout.WidgetGroupHoverSwitchEnabled));
+                layout.WidgetGroupHoverSwitchEnabled,
+                layout.WidgetGroupSwitchAnimationStyle));
         }
     }
 

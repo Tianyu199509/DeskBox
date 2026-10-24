@@ -265,7 +265,13 @@ public partial class App
                 string beforeAccent = settings.Settings.AccentColorMode;
                 string beforeCustomAccent = settings.Settings.CustomAccentColor;
                 string beforeLanguage = settings.Settings.Language;
-                if (await settings.TryReloadFromDiskAsync())
+                // Skip the reload while a debounced save is pending: the
+                // in-memory graph holds newer user edits, and a whole-graph
+                // reload would roll them back AND let the pending save
+                // persist the rollback (batch R7). Convergence comes from
+                // the pending commit itself (or the next push).
+                if (!settings.HasPendingSave &&
+                    await settings.TryReloadFromDiskAsync())
                 {
                     if (!string.Equals(beforeTheme, settings.Settings.Theme, StringComparison.Ordinal) ||
                         !string.Equals(beforeAccent, settings.Settings.AccentColorMode, StringComparison.Ordinal) ||
@@ -384,7 +390,9 @@ public partial class App
             ensureConnection: () => everythingConnection,
             getHotkey: () => null,
             setContentSearchEnabled: _ => { },
-            applyWidget: null,
+            // Explicit no-op (null falls back to a full settings save — a
+            // write amplifier on every external enable change, batch R7).
+            applyWidget: (_, _) => Task.CompletedTask,
             setRuntimeEnabled: null,
             tryEnqueue: action => UiDispatcherQueue.TryEnqueue(() => action()),
             reportError: ex => Log($"[SearchSettings] Operation failed: {ex}"));
@@ -542,7 +550,13 @@ public partial class App
         // drop the user's last edit (batch R5).
         try
         {
-            SettingsHostSettingsService?.FlushPendingSaveAsync().Wait(TimeSpan.FromSeconds(2));
+            if (SettingsHostSettingsService is { } pendingService &&
+                !pendingService.FlushPendingSaveAsync().Wait(TimeSpan.FromSeconds(2)))
+            {
+                // A lost race with the in-flight debounced write: the wait
+                // timed out. Without this line the dropped edit left no trace.
+                Log("[SettingsHost] Pending save flush timed out after 2s; last edit may be lost");
+            }
         }
         catch (Exception ex)
         {
