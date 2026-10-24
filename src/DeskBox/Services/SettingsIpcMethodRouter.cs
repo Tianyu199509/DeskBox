@@ -109,13 +109,20 @@ public sealed class SettingsIpcMethodRouter
                     return (false, null, "settings service unavailable");
                 }
 
-                (bool ok, string? resultPayload, string? error) =
-                    await SettingsIpcDispatch.SettingsCommitAsync(_settings, payload);
-                if (ok && long.TryParse(resultPayload, out long hostCommitId))
+                // The commit id must be visible BEFORE the apply: the
+                // LocalPersistCompleted push fires inside SaveCheckedAsync,
+                // so setting it afterwards meant every push carried 0 and the
+                // host reloaded its own writes (echo suppression never
+                // engaged — batch R5). The payload is "commitId\njson".
+                int separatorIndex = payload?.IndexOf('\n') ?? -1;
+                if (separatorIndex > 0 &&
+                    long.TryParse(payload!.AsSpan(0, separatorIndex), out long hostCommitId))
                 {
                     CurrentDispatchHostCommitId.Value = hostCommitId;
                 }
 
+                (bool ok, string? resultPayload, string? error) =
+                    await SettingsIpcDispatch.SettingsCommitAsync(_settings, payload);
                 return (ok, resultPayload, error);
 
             case SettingsIpcMethods.HotkeyState:

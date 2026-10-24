@@ -46,48 +46,63 @@ public sealed class InProcessSettingsWidgetActions : ISettingsWidgetActions
 
     public async Task ApplyGroupPresentation(Contracts.GroupPresentationChange change)
     {
+        // Settings-side layout writes must serialize on the UI thread: the
+        // dispatch server runs requests concurrently on pool threads, and
+        // these bodies enumerate/assign the live layout graph (batch R5).
+        await DeskBox.Platform.UiDispatch.RunAsync(() =>
+            ApplyGroupPresentationOnUi(change));
+    }
+
+    private Task ApplyGroupPresentationOnUi(Contracts.GroupPresentationChange change)
+    {
         WidgetGroupConfig? group = _settingsService.Settings.WidgetGroups.FirstOrDefault(candidate =>
             string.Equals(candidate.Id, change.GroupId, StringComparison.Ordinal));
-        if (group is null)
+        if (group is not null)
         {
-            return;
+            if (change.NavigationStyle is not null)
+            {
+                group.NavigationStyle = change.NavigationStyle;
+            }
+
+            if (change.TitleDisplayMode is not null)
+            {
+                group.TitleDisplayMode = change.TitleDisplayMode;
+            }
+
+            if (change.WheelSwitch != Contracts.GroupPresentationTriState.Unset)
+            {
+                group.WheelSwitchEnabled = FromTriState(change.WheelSwitch);
+            }
+
+            if (change.HoverSwitch != Contracts.GroupPresentationTriState.Unset)
+            {
+                group.HoverSwitchEnabled = FromTriState(change.HoverSwitch);
+            }
+
+            if (change.CollapseBehavior is not null)
+            {
+                group.CollapseBehavior = change.CollapseBehavior;
+            }
+
+            if (change.ChromeMode is not null)
+            {
+                group.ChromeMode = change.ChromeMode;
+            }
+
+            _settingsService.SaveDebounced(notifySubscribers: false);
+            NotifyPresentationChanged();
         }
 
-        if (change.NavigationStyle is not null)
-        {
-            group.NavigationStyle = change.NavigationStyle;
-        }
-
-        if (change.TitleDisplayMode is not null)
-        {
-            group.TitleDisplayMode = change.TitleDisplayMode;
-        }
-
-        if (change.WheelSwitch != Contracts.GroupPresentationTriState.Unset)
-        {
-            group.WheelSwitchEnabled = FromTriState(change.WheelSwitch);
-        }
-
-        if (change.HoverSwitch != Contracts.GroupPresentationTriState.Unset)
-        {
-            group.HoverSwitchEnabled = FromTriState(change.HoverSwitch);
-        }
-
-        if (change.CollapseBehavior is not null)
-        {
-            group.CollapseBehavior = change.CollapseBehavior;
-        }
-
-        if (change.ChromeMode is not null)
-        {
-            group.ChromeMode = change.ChromeMode;
-        }
-
-        _settingsService.SaveDebounced(notifySubscribers: false);
-        NotifyPresentationChanged();
+        return Task.CompletedTask;
     }
 
     public async Task ApplyGroupNavigationDefaults(Contracts.GroupNavigationDefaultsChange change)
+    {
+        await DeskBox.Platform.UiDispatch.RunAsync(() =>
+            ApplyGroupNavigationDefaultsOnUi(change));
+    }
+
+    private Task ApplyGroupNavigationDefaultsOnUi(Contracts.GroupNavigationDefaultsChange change)
     {
         if (change.NavigationStyle is not null)
         {
@@ -109,11 +124,23 @@ public sealed class InProcessSettingsWidgetActions : ISettingsWidgetActions
             _settingsService.Settings.WidgetGroupHoverSwitchEnabled = change.HoverSwitchEnabled.Value;
         }
 
+        if (change.SwitchAnimationStyle is not null)
+        {
+            _settingsService.Settings.WidgetGroupSwitchAnimationStyle = change.SwitchAnimationStyle;
+        }
+
         _settingsService.SaveDebounced(notifySubscribers: false);
         NotifyPresentationChanged();
+        return Task.CompletedTask;
     }
 
     public async Task ApplyLayoutPreferences(Contracts.LayoutPreferencesChange change)
+    {
+        await DeskBox.Platform.UiDispatch.RunAsync(() =>
+            ApplyLayoutPreferencesOnUi(change));
+    }
+
+    private Task ApplyLayoutPreferencesOnUi(Contracts.LayoutPreferencesChange change)
     {
         if (change.NewPlacementTarget is not null)
         {
@@ -131,16 +158,23 @@ public sealed class InProcessSettingsWidgetActions : ISettingsWidgetActions
         }
 
         _settingsService.SaveDebounced(notifySubscribers: false);
+        return Task.CompletedTask;
     }
 
     public async Task ResetCapsuleOverrides(Contracts.CapsuleOverrideReset reset)
     {
-        if (!CapsuleOverrideResetter.Run(_settingsService.Settings, reset))
+        await DeskBox.Platform.UiDispatch.RunAsync(() =>
+            ResetCapsuleOverridesOnUi(reset));
+    }
+
+    private Task ResetCapsuleOverridesOnUi(Contracts.CapsuleOverrideReset reset)
+    {
+        if (CapsuleOverrideResetter.Run(_settingsService.Settings, reset))
         {
-            return;
+            _settingsService.SaveDebounced();
         }
 
-        _settingsService.SaveDebounced();
+        return Task.CompletedTask;
     }
 
     private static bool? FromTriState(Contracts.GroupPresentationTriState state) =>

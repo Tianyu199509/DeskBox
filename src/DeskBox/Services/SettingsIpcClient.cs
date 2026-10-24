@@ -74,6 +74,9 @@ public sealed class SettingsIpcClient : IAsyncDisposable
         new Dictionary<string, TimeSpan>(StringComparer.Ordinal)
         {
             [SettingsIpcMethods.UpdateDownload] = TimeSpan.FromMinutes(30),
+            [SettingsIpcMethods.UpdateCheck] = TimeSpan.FromSeconds(60),
+            [SettingsIpcMethods.BackupSettingsProbe] = TimeSpan.FromMinutes(2),
+            [SettingsIpcMethods.BackupSettingsList] = TimeSpan.FromMinutes(2),
             [SettingsIpcMethods.CloudDownloadSnapshot] = TimeSpan.FromMinutes(30),
             [SettingsIpcMethods.CloudPrepareScopedRestore] = TimeSpan.FromMinutes(10),
             [SettingsIpcMethods.BackupUploadNow] = TimeSpan.FromMinutes(30),

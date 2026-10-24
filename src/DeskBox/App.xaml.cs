@@ -4069,7 +4069,10 @@ public partial class App : Application
                 },
                 UpdateTrayIcon,
                 () => UiDispatch.RunOrDefer(RefreshThemeAppearanceOnUi),
-                () => LocalizationService.NotifyExternalLanguageChange(),
+                // The commit lands on an IPC pool thread; language replay
+                // touches XAML across the whole main process (same reason
+                // the theme delegate marshals).
+                () => UiDispatch.RunOrDefer(LocalizationService.NotifyExternalLanguageChange),
                 enabled => _searchEngineService?.SetDeskBoxContentSearchEnabled(enabled)));
     }
 

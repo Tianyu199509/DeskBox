@@ -150,7 +150,7 @@ public sealed class GroupNavigationSettingsCoordinator : IGroupNavigationSetting
         }
 
         layout.WidgetGroupSwitchAnimationStyle = normalized;
-        _settings.SaveDebounced();
+        PersistDefaults();
         return true;
     }
 

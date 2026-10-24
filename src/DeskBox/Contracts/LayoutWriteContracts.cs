@@ -33,7 +33,8 @@ public sealed record GroupNavigationDefaultsChange(
     string? NavigationStyle = null,
     string? TitleDisplayMode = null,
     bool? WheelSwitchEnabled = null,
-    bool? HoverSwitchEnabled = null);
+    bool? HoverSwitchEnabled = null,
+    string? SwitchAnimationStyle = null);
 
 public sealed record LayoutPreferencesChange(
     string? NewPlacementTarget = null,

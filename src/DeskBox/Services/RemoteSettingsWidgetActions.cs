@@ -51,20 +51,30 @@ public sealed class RemoteSettingsWidgetActions : ISettingsWidgetActions
     /// </summary>
     private async Task SendLayoutWrite(string method, string payload)
     {
-        (bool ok, string? sliceJson, _) = await _client.RequestAsync(method, payload);
-        if (ok &&
-            !string.IsNullOrEmpty(sliceJson) &&
-            _settingsService.ApplyExternalLayout(sliceJson))
+        // The callers are fire-and-forget (_ = ...): without this catch a
+        // pipe failure/timeout vanished with zero logs while the local
+        // mirror kept the edit — a silent false success (batch R5).
+        try
         {
-            return;
-        }
+            (bool ok, string? sliceJson, _) = await _client.RequestAsync(method, payload);
+            if (ok &&
+                !string.IsNullOrEmpty(sliceJson) &&
+                _settingsService.ApplyExternalLayout(sliceJson))
+            {
+                return;
+            }
 
-        // Best effort: pull the slice directly when the response carried none.
-        (bool fetchOk, string? fetched, _) = await _client.RequestAsync(
-            SettingsIpcMethods.WidgetLayoutRead);
-        if (fetchOk && !string.IsNullOrEmpty(fetched))
+            // Best effort: pull the slice directly when the response carried none.
+            (bool fetchOk, string? fetched, _) = await _client.RequestAsync(
+                SettingsIpcMethods.WidgetLayoutRead);
+            if (fetchOk && !string.IsNullOrEmpty(fetched))
+            {
+                _settingsService.ApplyExternalLayout(fetched);
+            }
+        }
+        catch (Exception ex)
         {
-            _settingsService.ApplyExternalLayout(fetched);
+            App.Log($"[LayoutWrite] {method} failed: {ex.Message}");
         }
     }
 

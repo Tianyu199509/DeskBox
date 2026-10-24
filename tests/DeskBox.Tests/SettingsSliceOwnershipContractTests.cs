@@ -237,10 +237,9 @@ public sealed class SettingsSliceOwnershipContractTests
         ["src/DeskBox/App.ImmediateHiddenWorkingSetTrim.cs"] = 2,
         ["src/DeskBox/App.Tray.cs"] = 3,
         ["src/DeskBox/App.xaml.cs"] = 36,
-        // Layout-write facade (batch R2): 8 = group presentation six-field
-        // assigns + the four nav-default / three preference writes reading
-        // and writing the WidgetLayout slice.
-        ["src/DeskBox/Services/InProcessSettingsWidgetActions.cs"] = 8,
+        // Layout-write facade (batch R2/R5): 9 = R2's eight plus the
+        // switch-animation default write added with the fifth nav default.
+        ["src/DeskBox/Services/InProcessSettingsWidgetActions.cs"] = 9,
         // Capsule override resetter (batch R2): 8 = Widgets/WidgetGroups
         // scans shared by the host mirror and the main-process executor.
         ["src/DeskBox/Services/CapsuleOverrideResetter.cs"] = 8,

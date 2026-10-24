@@ -723,6 +723,7 @@ public sealed partial class DisplaySettingsSection : UserControl
         var service = global::DeskBox.App.Current.SettingsService;
         string newPlacementTarget;
         string? defaultBoundScreenId = null;
+        bool setDefaultBoundScreenId = false;
         if (tag is SettingsService.WidgetNewPlacementCursorDisplay or
             SettingsService.WidgetNewPlacementMainDisplay)
         {
@@ -732,10 +733,19 @@ public sealed partial class DisplaySettingsSection : UserControl
         {
             newPlacementTarget = SettingsService.WidgetNewPlacementSpecificDisplay;
             defaultBoundScreenId = tag;
+            setDefaultBoundScreenId = true;
         }
 
         service.Settings.WidgetNewPlacementTarget = newPlacementTarget;
-        service.Settings.WidgetDefaultBoundScreenId = defaultBoundScreenId;
+        // Mirror the pre-split behavior exactly: the bound screen id only
+        // changes when the specific-display mode is chosen; cursor/main
+        // leave the previous value (the payload's null = untouched matches
+        // this on the main-process side).
+        if (setDefaultBoundScreenId)
+        {
+            service.Settings.WidgetDefaultBoundScreenId = defaultBoundScreenId;
+        }
+
         // The layout domain never rides snapshots: the preference write
         // travels as its own command and the response merges the
         // authoritative slice (batch R2).

@@ -197,6 +197,22 @@ public partial class App
         }
 
         _settingsHostClient = client;
+        try
+        {
+            await RunSettingsHostBootAsync(client);
+        }
+        catch (Exception ex)
+        {
+            // A busy main process can make any boot step (load, VM
+            // construction) throw — without this the host stayed alive with
+            // no window (zombie) until the main process died (batch R5).
+            Log($"[SettingsHost] Boot failed: {ex.Message}");
+            ExitSettingsHost();
+        }
+    }
+
+    private async Task RunSettingsHostBootAsync(SettingsIpcClient client)
+    {
         Log("[SettingsHost] IPC connected");
         var settings = new SettingsService(new RemoteSettingsPersistenceSink(client));
         Log("[SettingsHost] SettingsService constructed");
@@ -518,6 +534,18 @@ public partial class App
     /// </summary>
     private void ExitSettingsHost()
     {
+        // Flush any debounced (1s) pending save first: the host process is
+        // the writer, and dying inside the debounce window used to silently
+        // drop the user's last edit (batch R5).
+        try
+        {
+            SettingsHostSettingsService?.FlushPendingSaveAsync().Wait(TimeSpan.FromSeconds(2));
+        }
+        catch (Exception ex)
+        {
+            Log($"[SettingsHost] Pending save flush failed: {ex.Message}");
+        }
+
         try
         {
             _settingsHostClient?.DisposeAsync().AsTask().GetAwaiter().GetResult();
