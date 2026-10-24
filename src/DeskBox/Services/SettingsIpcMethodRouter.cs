@@ -66,7 +66,11 @@ public sealed class SettingsIpcMethodRouter
 
     /// <summary>
     /// The host commit id of the last settings-commit applied through this
-    /// router (0 = the last durable change was not host-initiated).
+    /// router. Scoped to a single dispatch: every non-snapshot command also
+    /// makes the main process write (feature switches run coordinator
+    /// chains that save), and those writes must NOT carry a stale host
+    /// commit id into the reload push — the host would mistake its own
+    /// state refresh for an echo and never see the switch result.
     /// </summary>
     public long LastAppliedHostCommitId { get; private set; }
 
@@ -75,6 +79,9 @@ public sealed class SettingsIpcMethodRouter
         string? payload,
         CancellationToken cancellationToken)
     {
+        // Snapshot-scoped: a host echo tag only ever applies to the write
+        // caused by that snapshot itself (see LastAppliedHostCommitId).
+        LastAppliedHostCommitId = 0;
         switch (method)
         {
             case SettingsIpcMethods.Ping:
