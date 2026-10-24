@@ -334,6 +334,10 @@ public partial class App
                         if (!string.IsNullOrEmpty(payload))
                         {
                             window.ShowSection(payload);
+                            if (string.Equals(payload, "About", StringComparison.Ordinal))
+                            {
+                                window.BringUpdateStatusIntoView();
+                            }
                         }
                     }
                 });

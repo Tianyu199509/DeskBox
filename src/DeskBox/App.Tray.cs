@@ -1366,9 +1366,7 @@ public partial class App
     private void OpenSettingsFromTray()
     {
         Log("[Tray] Settings selected in primary instance");
-        CancelBackgroundMemoryCleanup();
-        var settingsWindow = _settingsWindow ?? CreateSettingsWindow();
-        settingsWindow.ShowWindow();
+        OpenSettings();
     }
 
     private void OpenFeatureWidgetsFromTray()
@@ -1385,10 +1383,9 @@ public partial class App
     private void OpenAboutSettingsFromTray()
     {
         CancelBackgroundMemoryCleanup();
-        var settingsWindow = _settingsWindow ?? CreateSettingsWindow();
-        settingsWindow.ShowWindow();
-        settingsWindow.ShowSection("About");
-        settingsWindow.BringUpdateStatusIntoView();
+        // ShowSettings deep-links "About"; the host brings the update status
+        // into view when it applies the section navigation.
+        ShowSettings("About");
     }
 
     private void OpenManagedStorageFromTray()

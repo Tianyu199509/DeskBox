@@ -4430,6 +4430,10 @@ public partial class App : Application
 #endif
     }
 
+#if DESKBOX_AOT_SMOKE_HARNESS
+    // In-process settings window construction — smoke harness only (batch 4:
+    // the retail binary opens settings exclusively in the settings-host
+    // process).
     private SettingsWindow CreateSettingsWindow()
     {
         var input = new SettingsWindowFactoryInput(
@@ -4496,6 +4500,7 @@ public partial class App : Application
         ScheduleLightMemoryCleanup(completedHeavyOperation: true);
         ScheduleBackgroundMemoryCleanup("settings-closed");
     }
+#endif
 
     public void ShowSettings()
     {
