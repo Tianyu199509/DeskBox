@@ -67,13 +67,25 @@ public sealed class InProcessSettingsWidgetActions : ISettingsWidgetActions
         // happen on the explicit call — an external snapshot alone never
         // triggers them. The dictionary kinds write the main-process-owned
         // dictionary and apply through the manager in the same command.
+        // The coordinator/manager chains touch windows and depend on the UI
+        // dispatcher; on an IPC pool thread they either deadlock on the
+        // UI-thread marshal or throw cross-thread. Run the whole switch on
+        // the UI thread. The response reports the requested value: reading
+        // IsEnabled back races the chain's own SettingsChanged re-entries
+        // (legacy fallbacks can momentarily disagree mid-apply).
+        await DeskBox.Platform.UiDispatch.RunAsync(() => ApplyFeatureSwitchOnUi(kind, enabled));
+        return enabled;
+    }
+
+    private async Task ApplyFeatureSwitchOnUi(WidgetKind kind, bool enabled)
+    {
         switch (kind)
         {
             case WidgetKind.QuickCapture:
                 if (_applyQuickCaptureEnabled is { } applyQuickCapture)
                 {
                     await applyQuickCapture(enabled);
-                    return FeatureWidgetSettings.IsEnabled(_settingsService.Settings, kind);
+                    return;
                 }
 
                 break;
@@ -81,7 +93,7 @@ public sealed class InProcessSettingsWidgetActions : ISettingsWidgetActions
                 if (_applyTodoEnabled is { } applyTodo)
                 {
                     await applyTodo(enabled);
-                    return FeatureWidgetSettings.IsEnabled(_settingsService.Settings, kind);
+                    return;
                 }
 
                 break;
@@ -89,7 +101,7 @@ public sealed class InProcessSettingsWidgetActions : ISettingsWidgetActions
                 if (_applySearchEnabled is { } applySearch)
                 {
                     await applySearch(enabled);
-                    return FeatureWidgetSettings.IsEnabled(_settingsService.Settings, kind);
+                    return;
                 }
 
                 break;
@@ -99,11 +111,10 @@ public sealed class InProcessSettingsWidgetActions : ISettingsWidgetActions
         if (_widgetManager is not { } manager)
         {
             await _settingsService.SaveAsync();
-            return enabled;
+            return;
         }
 
         await manager.SetFeatureWidgetEnabledAsync(kind, enabled, reveal: enabled);
-        return enabled;
     }
 
     public async Task ResetFeatureWidgetAsync(WidgetKind kind)
