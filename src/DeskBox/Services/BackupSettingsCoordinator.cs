@@ -88,6 +88,22 @@ public sealed class BackupSettingsCoordinator : IBackupSettings, IDisposable
             string value = provider is CloudBackupSettingsPolicy.ProviderWebDav
                 ? CloudBackupSettingsPolicy.ProviderWebDav : CloudBackupSettingsPolicy.ProviderNone;
             if (cloud.CloudBackupProvider != value) { cloud.CloudBackupProvider = value; changed = true; }
+
+            // The provider dropdown is the cloud-backup master switch
+            // (product decision, batch R12 follow-up): turning it off must
+            // leave cloud backup fully off — not "endpoint gone but the
+            // remembered content toggles still read as half-on". The same
+            // write clears the three backup domains so the whole cloud
+            // state lands as OFF atomically; re-enabling WebDAV starts
+            // from a clean slate instead of silently resuming the old
+            // scope. (Scheduling already stops at provider=none — this is
+            // about the persisted and displayed state matching.)
+            if (value == CloudBackupSettingsPolicy.ProviderNone)
+            {
+                if (cloud.CloudBackupTodoDataEnabled) { cloud.CloudBackupTodoDataEnabled = false; changed = true; }
+                if (cloud.CloudBackupQuickCaptureDataEnabled) { cloud.CloudBackupQuickCaptureDataEnabled = false; changed = true; }
+                if (cloud.CloudBackupWidgetStyleEnabled) { cloud.CloudBackupWidgetStyleEnabled = false; changed = true; }
+            }
         }
         if (change.CloudServerUrl is { } url && cloud.CloudBackupServerUrl != url)
             { cloud.CloudBackupServerUrl = url; changed = true; }

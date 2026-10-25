@@ -137,6 +137,36 @@ public sealed class BackupSettingsSurfaceTests
     }
 
     [Fact]
+    public async Task TurningProviderOff_SwitchesEveryCloudDomainOff()
+    {
+        // Batch R12 product decision: the provider dropdown is the cloud
+        // master switch — WebDAV off means cloud backup is fully off. The
+        // page must flip all three domain toggles immediately and send the
+        // off writes (the coordinator clears the persisted domains in the
+        // same write; these are the idempotent follow-ups).
+        var fake = new FakeBackupSettings(DefaultSnapshot(DavA) with
+        {
+            CloudTodoEnabled = true,
+            CloudQuickCaptureEnabled = true,
+            CloudWidgetStyleEnabled = true,
+        });
+        using var editor = Create(fake);
+
+        Assert.True(editor.IncludeTodoData);
+        editor.SelectedProvider = "none";
+        await editor.PendingReads;
+
+        Assert.False(editor.IncludeTodoData);
+        Assert.False(editor.IncludeQuickCaptureData);
+        Assert.False(editor.IncludeWidgetStyle);
+        Assert.False(editor.ShowWebDavFields);
+        Assert.Contains(fake.Changes, c => c.CloudProvider == "none");
+        Assert.Contains(fake.Changes, c => c.CloudTodoEnabled == false);
+        Assert.Contains(fake.Changes, c => c.CloudQuickCaptureEnabled == false);
+        Assert.Contains(fake.Changes, c => c.CloudWidgetStyleEnabled == false);
+    }
+
+    [Fact]
     public void ProjectionRefresh_DoesNotWriteBack()
     {
         var fake = new FakeBackupSettings(DefaultSnapshot(DavA));
