@@ -225,6 +225,28 @@ public sealed class SettingsIpcFacadeTests : IDisposable
     }
 
     [Fact]
+    public async Task HostBootReady_RoutesToTheCoordinatorCallback()
+    {
+        // Deep review R13 (D5): the coordinator queues intent pushes until
+        // this notice arrives — pin the routing so a protocol regression
+        // cannot silently strand every queued intent.
+        var settings = new SettingsService(_tempRoot);
+        bool seen = false;
+        var router = new SettingsIpcMethodRouter(
+            settings,
+            new FakeHotkeyActions(),
+            new FakeDataActions(),
+            onHostBootReady: () => seen = true);
+        (bool ok, string? _, string? error) = await router.DispatchAsync(
+            SettingsIpcMethods.HostBootReady,
+            null,
+            cancellationToken: default);
+        Assert.True(ok);
+        Assert.Null(error);
+        Assert.True(seen);
+    }
+
+    [Fact]
     public async Task HotkeyFacade_RoundTripsEveryCommand()
     {
         var settings = new SettingsService(_tempRoot);

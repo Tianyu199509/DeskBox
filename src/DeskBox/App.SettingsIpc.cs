@@ -76,7 +76,8 @@ public partial class App
                 {
                     MarkSettingsHostExiting(senderPid);
                 }
-            });
+            },
+            onHostBootReady: OnSettingsHostBootReady);
         _settingsIpcRouter = router;
         _settingsIpcServer = SettingsIpcServer.Start(
             DeskBoxDataPathService.Current.SettingsIpcPipeName,

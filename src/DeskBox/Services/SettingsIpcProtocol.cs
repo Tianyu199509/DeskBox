@@ -212,6 +212,16 @@ public static class SettingsIpcMethods
     public const string HostDesktopOrgRefresh = "host.desktop-org-refresh";
     public const string HostOneClickUpdate = "host.one-click-update";
     public const string HostShutdown = "host.shutdown";
+    /// <summary>
+    /// Deep review R13 (D5 adversarial hunt): the host sends this request at
+    /// the end of its boot, after its event subscriptions and window exist.
+    /// The coordinator queues intent pushes (host.show / show-glance /
+    /// one-click-update / queue-update-result) that arrive before this
+    /// signal — during the boot window they were silently dropped in three
+    /// segments (no server-side client yet / client not subscribing yet /
+    /// window not built yet).
+    /// </summary>
+    public const string HostBootReady = "host.boot-ready";
     // Host → main farewell (batch R11): sent at the very start of the
     // host's exit sequence. The main process treats a still-alive host
     // process as show-capable ("!HasExited"), so during the exit window

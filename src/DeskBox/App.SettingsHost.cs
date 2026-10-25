@@ -448,6 +448,20 @@ public partial class App
             _ = Task.Run(everythingWarmup.Prime);
         }
 
+        // Deep review R13 (D5): a host from a PREVIOUS era that crashed
+        // mid-hotkey-recording never sent the resume, and the coordinator's
+        // exit guard now skips stale eras (generation check) — clear any
+        // leftover suspension here. Resume is idempotent; the theoretical
+        // overlap with a closing previous host's own recorder is narrower
+        // than the stuck-suspension bug this closes.
+        _ = client.RequestAsync(SettingsIpcMethods.HotkeyResume);
+
+        // Boot-ready notice (deep review R13, D5): the coordinator queued
+        // any intent pushes that arrived before the subscriptions above and
+        // this window existed; tell it to flush them now, when the pipe,
+        // the event handlers, and the window are all guaranteed live.
+        _ = client.RequestAsync(SettingsIpcMethods.HostBootReady);
+
         SettingsHostTrace("onlaunched-done");
         Log("[SettingsHost] Window shown");
     }

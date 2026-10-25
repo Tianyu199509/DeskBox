@@ -87,9 +87,27 @@ r1-r3：四条写命令全链读码（宿主 SendLayoutWrite 权威切片合并+
 - 测试+2：`OrderedWriteCommands_ApplyInWireOrder`（slow 被压住时 fast 不得先应用——无 lane 必红）/`LockedGraphMutations_NeverTearConcurrentSerializations`（150 锁内加格子×15 次并发保存零丢零异常）。
 - **登记债（机械后续批）**：WidgetManager ~20 处 UI 图写点（Widgets/WidgetGroups 增删、拖动落位）未进闸——引用共享使跨换图写存活，剩余窗口=与主进程自身锁内序列化的撕裂竞争（拖格子恰逢落盘），窄；后续批逐入口包 MutateGraphUnderLock。
 
+## D5：宿主生命周期对抗复审（完成）
+
+探员七角度猎杀（排除清单=R11/R12 已修项）。B（垂死宿主在途写入：单实例管道+flush await 顺序保证）/C（关机序列：commit 链不经 UiDispatch 无死锁）/F（会话隔离）判**干净**。四个真发现，三修一挪：
+
+- **E（已修，用户可见面最宽）**：新生宿主 boot 期推送三段丢窗（服务端未连/宿主未订阅/窗口未建各一段）——注释自认"pipe is connected"是错的（IsSettingsHostRunning 只验进程）。修=host.boot-ready 协议通知+协调器意图队列（64 上限 FIFO，boot 确认后按序补推；spawn 意图仍走命令线）。
+- **A（已修）**：farewell 池线程 vs UI spawn 对 _settingsHostProcess 的 check-then-act TOCTOU——读旧宿主→UI 装新宿主→池线程清字段=新宿主被逐出注册表→身份门拒其管道→闪退。修=Interlocked.CompareExchange 原子化"确认即驱逐"。
+- **D（已修）**：Exited 热键自愈跨纪元误伤（旧宿主迟到的 Exited 恢复了新宿主刚挂起的录制）——世代计数守卫 + 宿主 boot 末尾无条件 hotkey.resume（清掉崩溃纪元卡死的挂起，幂等）。
+- **G1（挪 D7）**：身份门/驱逐钉的 PID 复用面（看门狗有 StartTime 快照，门没有）——可利用性极低（同用户+pid 彩票），并入 D7 管道安全批统一做（provider 返回 pid+StartTime 双素）。
+- 附带小修：stale farewell 日志文案误导（双字段皆空也印"current host still registered"）。
+- 风格债登记：_settingsIpcServer 无 DisposeAsync 调用（进程退出 OS 收管，无害）。
+
+## D6：保存管线深审（完成，含债①，提交 052c8964）
+
+装载链（ResilientJson 主/备/默认三源+16 个 Normalize 有序编排+layout 设备层合并+organizer 延后归一化防误删 #553 族）读码判定：结构合理、每步带历史注释、无冗余。RecentOrganizationHistory 确认已迁独立 store（settings 内为清除残留）。
+
+- **债① 已实施**：PersistenceFailed 上报唯一所有权归调用方（sink 返回 false 的拒绝路径统一上报——原先 exception-only+RemoteSink 只落日志，用户在不会持久化的面上继续编辑）；宿主设置窗壳层 SaveFailedInfoBar（复用既有 13 语言键 Settings.Persistence.SaveFailedTitle/Body；成功提交收敛关闭；shell 声明无需画刷钉扎）。主进程侧本就有通知面（App.xaml.cs:4081，5 分钟节流）不动。
+- 测试+1（RefusingSink 拒绝必触发）；TodoReminder flaky 重跑即绿（已知名单）。
+
 ## 待 Simon 拍板（累积）
 
-（暂无——D4 判定与债②实施均在显式授权范围；WidgetManager 进闸后续批为机械收尾）
+（暂无）
 
 ## 债登记（累积）
 

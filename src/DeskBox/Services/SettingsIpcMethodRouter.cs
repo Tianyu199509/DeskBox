@@ -52,7 +52,8 @@ public sealed class SettingsIpcMethodRouter
         IBackupSettings? backupSettings = null,
         IAppUpdateService? appUpdate = null,
         DeskBox.Contracts.ISearchConnectionClient? everythingClient = null,
-        Action<string?>? onHostFarewell = null)
+        Action<string?>? onHostFarewell = null,
+        Action? onHostBootReady = null)
     {
         _settings = settings;
         _hotkey = hotkey;
@@ -66,6 +67,7 @@ public sealed class SettingsIpcMethodRouter
         _backupSettings = backupSettings;
         _appUpdate = appUpdate;
         OnHostFarewell = onHostFarewell;
+        OnHostBootReady = onHostBootReady;
         PushEvent = pushEvent;
     }
 
@@ -75,6 +77,13 @@ public sealed class SettingsIpcMethodRouter
     /// process actually terminates (batch R11).
     /// </summary>
     private Action<string?>? OnHostFarewell { get; }
+
+    /// <summary>
+    /// Raised when a freshly spawned settings host finishes booting
+    /// (host.boot-ready, deep review R13): the coordinator flushes the
+    /// intent pushes it queued during the boot window.
+    /// </summary>
+    private Action? OnHostBootReady { get; }
 
     /// <summary>
     /// Optional event push (the owning server), used for migration progress.
@@ -109,6 +118,13 @@ public sealed class SettingsIpcMethodRouter
                 // Payload = the sender's own pid: only a farewell from the
                 // registered host may flip the spawn-vs-show decision.
                 OnHostFarewell?.Invoke(payload);
+                return (true, null, null);
+
+            case SettingsIpcMethods.HostBootReady:
+                // Deep review R13 (D5): the host finished booting — its
+                // subscriptions and window are live, so the coordinator can
+                // flush any intent pushes queued during the boot window.
+                OnHostBootReady?.Invoke();
                 return (true, null, null);
 
             case SettingsIpcMethods.AppearancePreview:
