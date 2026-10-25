@@ -31,6 +31,8 @@ internal sealed partial class WidgetMaterialSystemBackdrop : SystemBackdrop, IDi
     private SystemBackdropConfiguration? _configuration;
     private MicaController? _micaController;
     private DesktopAcrylicController? _acrylicController;
+    private Windows.UI.Composition.Compositor? _glassCompositor;
+    private FrostedGlassBrush? _glassBrush;
     private bool _isSuspended;
     private bool _isDisposed;
     private readonly bool _closeElementTargetOnDisconnect;
@@ -44,10 +46,11 @@ internal sealed partial class WidgetMaterialSystemBackdrop : SystemBackdrop, IDi
     }
 
     internal static bool IsSupported(string materialType) =>
-        SettingsService.IsMicaMaterial(materialType)
+        materialType == SettingsService.WidgetMaterialTypeGlass ||
+        (SettingsService.IsMicaMaterial(materialType)
             ? WindowsCompatibilityService.SupportsMica
             : SettingsService.IsAcrylicMaterial(materialType) &&
-              WindowsCompatibilityService.SupportsDesktopAcrylic;
+              WindowsCompatibilityService.SupportsDesktopAcrylic);
 
     internal void UpdateAppearance(
         WidgetMaterialBackdropAppearance appearance)
@@ -137,6 +140,18 @@ internal sealed partial class WidgetMaterialSystemBackdrop : SystemBackdrop, IDi
         if (_isDisposed || _isSuspended) return;
         try
         {
+            if (_appearance.MaterialType == SettingsService.WidgetMaterialTypeGlass && _target is not null)
+            {
+                DisposeMicaController();
+                DisposeAcrylicController();
+                _glassCompositor ??= new Windows.UI.Composition.Compositor();
+                _glassBrush ??= new FrostedGlassBrush(_glassCompositor, _appearance.MaterialIntensity);
+                _glassBrush.UpdateStrength(_appearance.MaterialIntensity);
+                _target.SystemBackdrop = _glassBrush.Brush;
+                return;
+            }
+            ClearGlassBrush();
+
             if (SettingsService.IsMicaMaterial(_appearance.MaterialType))
             {
                 ApplyMicaController();
@@ -230,8 +245,7 @@ internal sealed partial class WidgetMaterialSystemBackdrop : SystemBackdrop, IDi
         _acrylicController.Kind = useBase
             ? DesktopAcrylicKind.Base
             : DesktopAcrylicKind.Thin;
-        Windows.UI.Color tintColor =
-            WidgetMaterialVisualCalculator.BuildContentTintColor(
+        Windows.UI.Color tintColor = WidgetMaterialVisualCalculator.BuildContentTintColor(
                 _appearance.IsDark,
                 _appearance.AccentColor);
         _acrylicController.TintColor = tintColor;
@@ -263,8 +277,20 @@ internal sealed partial class WidgetMaterialSystemBackdrop : SystemBackdrop, IDi
 
     private void DisposeControllers()
     {
+        ClearGlassBrush();
         DisposeMicaController();
         DisposeAcrylicController();
+    }
+
+    private void ClearGlassBrush()
+    {
+        if (_glassBrush is null) return;
+        if (_target is not null && ReferenceEquals(_target.SystemBackdrop, _glassBrush.Brush))
+            _target.SystemBackdrop = null;
+        _glassBrush.Dispose();
+        _glassBrush = null;
+        _glassCompositor?.Dispose();
+        _glassCompositor = null;
     }
 
     private void DisposeMicaController()

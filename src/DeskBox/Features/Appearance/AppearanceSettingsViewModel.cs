@@ -440,6 +440,9 @@ public sealed partial class AppearanceSettingsViewModel : ObservableObject
             OnPropertyChanged(nameof(MaterialTypeText));
             OnPropertyChanged(nameof(ShowOpacitySlider));
             OnPropertyChanged(nameof(ShowMaterialIntensitySlider));
+            OnPropertyChanged(nameof(ShowOpacitySetting));
+            OnPropertyChanged(nameof(MaterialIntensityTitle));
+            OnPropertyChanged(nameof(MaterialIntensityDescription));
         }
     }
 
@@ -525,6 +528,12 @@ public sealed partial class AppearanceSettingsViewModel : ObservableObject
 
     /// <summary>Whether the opacity slider applies to the current material.</summary>
     public bool ShowOpacitySlider => WidgetMaterialKinds.SupportsOpacity(MaterialType);
+
+    public bool ShowOpacitySetting => MaterialType != WidgetMaterialKinds.Glass;
+    public string MaterialIntensityTitle => _localize(MaterialType == WidgetMaterialKinds.Glass
+        ? "Settings.GlassStrength.Title" : "Settings.MaterialIntensity.Title");
+    public string MaterialIntensityDescription => _localize(MaterialType == WidgetMaterialKinds.Glass
+        ? "Settings.GlassStrength.Description" : "Settings.MaterialIntensity.Description");
 
     /// <summary>Whether the material-intensity slider applies to the current material.</summary>
     public bool ShowMaterialIntensitySlider =>
@@ -1885,6 +1894,7 @@ public sealed partial class AppearanceSettingsViewModel : ObservableObject
     {
         return material switch
         {
+            WidgetMaterialKinds.Glass => _localize("Settings.Material.Glass"),
             WidgetMaterialKinds.Mica => _localize("Settings.Material.Mica"),
             WidgetMaterialKinds.MicaAlt => _localize("Settings.Material.MicaAlt"),
             WidgetMaterialKinds.AcrylicBase => _localize("Settings.Material.AcrylicBase"),
@@ -2107,6 +2117,8 @@ public sealed partial class AppearanceSettingsViewModel : ObservableObject
         OnPropertyChanged(nameof(AvailableInteractiveChromeModeOptions));
         OnPropertyChanged(nameof(MaterialTypeText));
         OnPropertyChanged(nameof(Windows10CompatibilityTitle));
+        OnPropertyChanged(nameof(MaterialIntensityTitle));
+        OnPropertyChanged(nameof(MaterialIntensityDescription));
         OnPropertyChanged(nameof(Windows10CompatibilityMessage));
         OnPropertyChanged(nameof(SystemShadowStatusText));
         OnPropertyChanged(nameof(SystemTransparencyStatusText));

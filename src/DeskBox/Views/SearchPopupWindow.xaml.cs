@@ -59,6 +59,7 @@ public sealed partial class SearchPopupWindow : Window
     // Native backdrop controllers (same approach as desktop widgets).
     private MicaController? _micaController;
     private DesktopAcrylicController? _acrylicController;
+    private FrostedGlassBackdrop? _glassBackdrop;
     private SystemBackdropConfiguration? _backdropConfiguration;
     private ICompositionSupportsSystemBackdrop? _backdropTarget;
     private bool _micaControllerAttached;
@@ -862,6 +863,12 @@ public sealed partial class SearchPopupWindow : Window
         double surfaceOpacity = Math.Clamp(_settingsService.Settings.WidgetOpacity, 0.0, 1.0);
         double materialIntensity = Math.Clamp(_settingsService.Settings.WidgetMaterialIntensity, 0.0, 1.0);
 
+        if (materialType != SettingsService.WidgetMaterialTypeGlass && _glassBackdrop is not null)
+        {
+            if (ReferenceEquals(SystemBackdrop, _glassBackdrop)) SystemBackdrop = null;
+            _glassBackdrop = null;
+        }
+
         try
         {
             Win32Helper.SetWindowTheme(_hwnd, isDark);
@@ -870,7 +877,16 @@ public sealed partial class SearchPopupWindow : Window
             int backdropType;
             bool controllerApplied = false;
 
-            if (SettingsService.IsMicaMaterial(materialType))
+            if (materialType == SettingsService.WidgetMaterialTypeGlass)
+            {
+                DetachAcrylicControllerTarget();
+                DetachMicaControllerTarget();
+                _glassBackdrop ??= new FrostedGlassBackdrop(materialIntensity);
+                _glassBackdrop.UpdateStrength(materialIntensity);
+                if (!ReferenceEquals(SystemBackdrop, _glassBackdrop)) SystemBackdrop = _glassBackdrop;
+                controllerApplied = true;
+            }
+            else if (SettingsService.IsMicaMaterial(materialType))
             {
                 controllerApplied = ApplyMicaController(
                     isDark,
@@ -1074,17 +1090,10 @@ public sealed partial class SearchPopupWindow : Window
         _acrylicController.TintColor = tintColor;
         _acrylicController.FallbackColor = tintColor;
 
-        double intensity = Math.Clamp(_settingsService.Settings.WidgetMaterialIntensity, 0.0, 1.0);
-        double surfaceStrength = Lerp(0.08, 1.0, Math.Clamp(surfaceOpacity, 0.0, 1.0));
-        double tintOpacity = useBase
-            ? Lerp(isDark ? 0.18 : 0.12, isDark ? 0.72 : 0.62, intensity)
-            : Lerp(isDark ? 0.04 : 0.02, isDark ? 0.42 : 0.34, intensity);
-        double luminosityOpacity = useBase
-            ? Lerp(isDark ? 0.38 : 0.46, isDark ? 0.82 : 0.90, intensity)
-            : Lerp(isDark ? 0.16 : 0.22, isDark ? 0.56 : 0.64, intensity);
-
-        _acrylicController.TintOpacity = (float)Math.Clamp(tintOpacity * surfaceStrength, 0.0, 1.0);
-        _acrylicController.LuminosityOpacity = (float)Math.Clamp(luminosityOpacity * surfaceStrength, 0.0, 1.0);
+        var profile = WidgetMaterialVisualCalculator.CalculateAcrylic(
+            isDark, useBase, surfaceOpacity, _settingsService.Settings.WidgetMaterialIntensity);
+        _acrylicController.TintOpacity = (float)profile.TintOpacity;
+        _acrylicController.LuminosityOpacity = (float)profile.LuminosityOpacity;
         return true;
     }
 
@@ -4348,6 +4357,8 @@ public sealed partial class SearchPopupWindow : Window
         ResultsRepeater.ItemsSource = null;
         RecommendedAppsRepeater.ItemsSource = null;
         TabsList.ItemsSource = null;
+        if (_glassBackdrop is not null && ReferenceEquals(SystemBackdrop, _glassBackdrop)) SystemBackdrop = null;
+        _glassBackdrop = null;
         DisposeAcrylicController();
         DisposeMicaController();
         _viewModel.Dispose();

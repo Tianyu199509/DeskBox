@@ -19,7 +19,7 @@ public sealed class WidgetShellSettingsSlice
     /// <summary>
     /// Material type for widget window backdrops.
     /// Valid values: <c>"Mica"</c>, <c>"MicaAlt"</c>, <c>"Acrylic"</c>,
-    /// <c>"AcrylicBase"</c>, <c>"Solid"</c>.
+    /// <c>"AcrylicBase"</c>, <c>"Glass"</c>, <c>"Solid"</c>.
     /// </summary>
     public string WidgetMaterialType { get; set; } = "Mica";
 

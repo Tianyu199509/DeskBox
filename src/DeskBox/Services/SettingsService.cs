@@ -72,6 +72,7 @@ public sealed class SettingsService
     public const string WidgetMaterialTypeMicaAlt = Contracts.WidgetMaterialKinds.MicaAlt;
     public const string WidgetMaterialTypeAcrylic = Contracts.WidgetMaterialKinds.Acrylic;
     public const string WidgetMaterialTypeAcrylicBase = Contracts.WidgetMaterialKinds.AcrylicBase;
+    public const string WidgetMaterialTypeGlass = Contracts.WidgetMaterialKinds.Glass;
     public const string WidgetMaterialTypeSolid = Contracts.WidgetMaterialKinds.Solid;
     public const string WidgetBorderColorModeNeutral = Contracts.WidgetBorderKinds.ColorNeutral;
     public const string WidgetBorderColorModeAccent = Contracts.WidgetBorderKinds.ColorAccent;
@@ -1677,6 +1678,7 @@ settings.FocusClickedWidgetOnRaise = false;
             WidgetMaterialTypeMicaAlt or
             WidgetMaterialTypeAcrylic or
             WidgetMaterialTypeAcrylicBase or
+            WidgetMaterialTypeGlass or
             WidgetMaterialTypeSolid))
         {
             // Migrate legacy "Auto" to "Acrylic"

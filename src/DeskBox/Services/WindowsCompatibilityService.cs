@@ -144,11 +144,13 @@ public static class WindowsCompatibilityService
             SettingsService.WidgetMaterialTypeMicaAlt or
             SettingsService.WidgetMaterialTypeAcrylic or
             SettingsService.WidgetMaterialTypeAcrylicBase or
+            SettingsService.WidgetMaterialTypeGlass or
             SettingsService.WidgetMaterialTypeSolid
                 ? requestedMaterialType
                 : SettingsService.WidgetMaterialTypeAcrylic;
 
-        if (osBuild < Windows11Build && SettingsService.IsMicaMaterial(normalized))
+        if (osBuild < Windows11Build &&
+            (SettingsService.IsMicaMaterial(normalized) || normalized == SettingsService.WidgetMaterialTypeGlass))
         {
             return SettingsService.WidgetMaterialTypeAcrylic;
         }

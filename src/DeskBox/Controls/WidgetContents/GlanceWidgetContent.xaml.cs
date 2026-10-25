@@ -27,6 +27,7 @@ public sealed partial class GlanceWidgetContent : UserControl
     private readonly DispatcherTimer _calendarWheelGestureTimer = new() { Interval = TimeSpan.FromMilliseconds(180) };
     private readonly Dictionary<CalendarViewDayItem, DateOnly> _realizedCalendarDays = [];
     private readonly SolidColorBrush _calendarSolidMaterialBrush = new();
+    private FrostedGlassXamlBrush? _calendarGlassBrush;
     private readonly LinearGradientBrush _calendarImageGradientBrush = new()
     {
         StartPoint = new Windows.Foundation.Point(0, 0),
@@ -283,6 +284,14 @@ public sealed partial class GlanceWidgetContent : UserControl
                     useAlt,
                     _viewModel.CalendarMaterialIntensity);
             CalendarMaterialSurface.Background = _calendarSolidMaterialBrush;
+            return;
+        }
+
+        if (materialType == SettingsService.WidgetMaterialTypeGlass)
+        {
+            _calendarGlassBrush ??= new FrostedGlassXamlBrush(CalendarMaterialSurface);
+            _calendarGlassBrush.UpdateStrength(_viewModel.CalendarMaterialIntensity);
+            CalendarMaterialSurface.Background = _calendarGlassBrush;
             return;
         }
 

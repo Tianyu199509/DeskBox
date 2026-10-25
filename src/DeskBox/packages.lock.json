@@ -88,6 +88,15 @@
           "Microsoft.Extensions.DependencyInjection.Abstractions": "8.0.2"
         }
       },
+      "Microsoft.Graphics.Win2D": {
+        "type": "Direct",
+        "requested": "[1.4.0, )",
+        "resolved": "1.4.0",
+        "contentHash": "/04yyf3xEOxeBK+SXxGB6OYLjXBVuujcLQF04mREcRcBT59IMI+oDbXOZZG2c/mJL8kKFC8r3wqz6MyA6IP3oA==",
+        "dependencies": {
+          "Microsoft.WindowsAppSDK.WinUI": "1.8.260204000"
+        }
+      },
       "Microsoft.Windows.AI.MachineLearning": {
         "type": "Direct",
         "requested": "[2.1.74, )",
@@ -119,6 +128,18 @@
           "Microsoft.WindowsAppSDK.Search": "2.5.5",
           "Microsoft.WindowsAppSDK.Widgets": "2.0.5",
           "Microsoft.WindowsAppSDK.WinUI": "2.3.9"
+        }
+      },
+      "Microsoft.WindowsAppSDK.WinUI": {
+        "type": "Direct",
+        "requested": "[2.3.9, )",
+        "resolved": "2.3.9",
+        "contentHash": "GiuYUQqMYD5lycT+X2AGX1rlbHU/zf8xoPeZNXZbJj4mZcSr4STsxeRUMxnTUQLAmmjjQaPrTIRjn78vbPhAvg==",
+        "dependencies": {
+          "Microsoft.Web.WebView2": "1.0.3719.77",
+          "Microsoft.WindowsAppSDK.Base": "2.0.4",
+          "Microsoft.WindowsAppSDK.Foundation": "2.3.12",
+          "Microsoft.WindowsAppSDK.InteractiveExperiences": "2.1.8"
         }
       },
       "WinUIEx": {
@@ -295,17 +316,6 @@
           "Microsoft.WindowsAppSDK.Base": "2.0.3"
         }
       },
-      "Microsoft.WindowsAppSDK.WinUI": {
-        "type": "Transitive",
-        "resolved": "2.3.9",
-        "contentHash": "GiuYUQqMYD5lycT+X2AGX1rlbHU/zf8xoPeZNXZbJj4mZcSr4STsxeRUMxnTUQLAmmjjQaPrTIRjn78vbPhAvg==",
-        "dependencies": {
-          "Microsoft.Web.WebView2": "1.0.3719.77",
-          "Microsoft.WindowsAppSDK.Base": "2.0.4",
-          "Microsoft.WindowsAppSDK.Foundation": "2.3.12",
-          "Microsoft.WindowsAppSDK.InteractiveExperiences": "2.1.8"
-        }
-      },
       "System.Drawing.Common": {
         "type": "Transitive",
         "resolved": "10.0.0",
@@ -321,6 +331,15 @@
       }
     },
     "net10.0-windows10.0.22621/win-arm64": {
+      "Microsoft.Graphics.Win2D": {
+        "type": "Direct",
+        "requested": "[1.4.0, )",
+        "resolved": "1.4.0",
+        "contentHash": "/04yyf3xEOxeBK+SXxGB6OYLjXBVuujcLQF04mREcRcBT59IMI+oDbXOZZG2c/mJL8kKFC8r3wqz6MyA6IP3oA==",
+        "dependencies": {
+          "Microsoft.WindowsAppSDK.WinUI": "1.8.260204000"
+        }
+      },
       "Microsoft.Windows.AI.MachineLearning": {
         "type": "Direct",
         "requested": "[2.1.74, )",
@@ -351,6 +370,15 @@
       }
     },
     "net10.0-windows10.0.22621/win-x64": {
+      "Microsoft.Graphics.Win2D": {
+        "type": "Direct",
+        "requested": "[1.4.0, )",
+        "resolved": "1.4.0",
+        "contentHash": "/04yyf3xEOxeBK+SXxGB6OYLjXBVuujcLQF04mREcRcBT59IMI+oDbXOZZG2c/mJL8kKFC8r3wqz6MyA6IP3oA==",
+        "dependencies": {
+          "Microsoft.WindowsAppSDK.WinUI": "1.8.260204000"
+        }
+      },
       "Microsoft.Windows.AI.MachineLearning": {
         "type": "Direct",
         "requested": "[2.1.74, )",

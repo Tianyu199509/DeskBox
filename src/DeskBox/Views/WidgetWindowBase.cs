@@ -332,6 +332,7 @@ public abstract partial class WidgetWindowBase : Window
         DisplayChangeWatcher?.Dispose();
         DisplayChangeWatcher = null;
         ClearSolidColorBackdrop();
+        ClearGlassBackdrop();
         DisposeAcrylicController();
         DisposeMicaController();
         WidgetLayerService.ReleaseWindow(HWnd);

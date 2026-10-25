@@ -167,6 +167,7 @@ public partial class SettingsViewModel
         isWindows11OrLater
             ?
             [
+                SettingsService.WidgetMaterialTypeGlass,
                 SettingsService.WidgetMaterialTypeAcrylic,
                 SettingsService.WidgetMaterialTypeAcrylicBase,
                 SettingsService.WidgetMaterialTypeMica,

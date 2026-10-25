@@ -275,6 +275,7 @@ public sealed class AppearanceSettingsCoordinator : IAppearanceSettings
             SettingsService.WidgetMaterialTypeMicaAlt or
             SettingsService.WidgetMaterialTypeAcrylic or
             SettingsService.WidgetMaterialTypeAcrylicBase or
+            SettingsService.WidgetMaterialTypeGlass or
             SettingsService.WidgetMaterialTypeSolid
                 ? materialType
                 : SettingsService.WidgetMaterialTypeAcrylic;

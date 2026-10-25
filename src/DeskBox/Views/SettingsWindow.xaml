@@ -365,6 +365,7 @@ Text="DeskBox" />
                                 <toolkit:SettingsCard
                                     HorizontalContentAlignment="Right"
                                     IsEnabled="{Binding ShowOpacitySlider}"
+                                    Visibility="{Binding ShowOpacitySetting, Converter={StaticResource SettingsBoolToVisibilityConverter}}"
                                     svc:Localized.DescriptionKey="Settings.Opacity.Description"
                                     svc:Localized.HeaderKey="Settings.Opacity.Title"
                                     svc:InfoTip.TitleKey="Settings.Opacity.InfoTip.Title"
@@ -393,14 +394,14 @@ Text="DeskBox" />
                                 <toolkit:SettingsCard
                                     HorizontalContentAlignment="Right"
                                     IsEnabled="{Binding ShowMaterialIntensitySlider}"
-                                    svc:Localized.DescriptionKey="Settings.MaterialIntensity.Description"
-                                    svc:Localized.HeaderKey="Settings.MaterialIntensity.Title">
+                                    Description="{Binding MaterialIntensityDescription}"
+                                    Header="{Binding MaterialIntensityTitle}">
                                     <StackPanel
                                         VerticalAlignment="Center"
                                         Orientation="Horizontal"
                                         Spacing="8">
                                         <TextBlock Style="{StaticResource SliderSettingValueTextStyle}" Text="{Binding MaterialIntensityValueText}" />
-                                        <Slider svc:Localized.AutomationNameKey="Settings.MaterialIntensity.Title"
+                                        <Slider AutomationProperties.Name="{Binding MaterialIntensityTitle}"
                                             Maximum="1"
                                             Minimum="0"
                                             StepFrequency="0.02"

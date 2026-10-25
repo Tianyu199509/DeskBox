@@ -22,6 +22,8 @@ namespace DeskBox.Views;
 
 public abstract partial class WidgetWindowBase
 {
+    private FrostedGlassBackdrop? _glassBackdrop;
+
     private readonly record struct BackdropSignature(
         bool IsDark,
         string MaterialType,
@@ -57,6 +59,11 @@ public abstract partial class WidgetWindowBase
             return;
         }
 
+        if (materialType != SettingsService.WidgetMaterialTypeGlass)
+        {
+            ClearGlassBackdrop();
+        }
+
         try
         {
             // The immersive-dark-mode attribute, sheet-of-glass frame and DWM
@@ -76,7 +83,17 @@ public abstract partial class WidgetWindowBase
             int backdropType;
             bool controllerApplied = false;
 
-            if (materialType == SettingsService.WidgetMaterialTypeSolid)
+            if (materialType == SettingsService.WidgetMaterialTypeGlass)
+            {
+                ClearSolidColorBackdrop();
+                DetachAcrylicControllerTarget();
+                DetachMicaControllerTarget();
+                _glassBackdrop ??= new FrostedGlassBackdrop(SettingsService.Settings.WidgetMaterialIntensity);
+                _glassBackdrop.UpdateStrength(SettingsService.Settings.WidgetMaterialIntensity);
+                if (!ReferenceEquals(SystemBackdrop, _glassBackdrop)) SystemBackdrop = _glassBackdrop;
+                controllerApplied = true;
+            }
+            else if (materialType == SettingsService.WidgetMaterialTypeSolid)
             {
                 controllerApplied = ApplySolidColorBackdrop(tintColor);
             }
@@ -275,6 +292,9 @@ public abstract partial class WidgetWindowBase
             return false;
         }
 
+        if (signature.MaterialType == SettingsService.WidgetMaterialTypeGlass)
+            return _glassBackdrop is not null && ReferenceEquals(SystemBackdrop, _glassBackdrop);
+
         return SettingsService.IsMicaMaterial(signature.MaterialType)
             ? MicaController is not null && MicaControllerAttached
             : SettingsService.IsAcrylicMaterial(signature.MaterialType)
@@ -335,6 +355,13 @@ public abstract partial class WidgetWindowBase
         }
 
         _solidColorBackdrop = null;
+    }
+
+    private void ClearGlassBackdrop()
+    {
+        if (_glassBackdrop is null) return;
+        if (ReferenceEquals(SystemBackdrop, _glassBackdrop)) SystemBackdrop = null;
+        _glassBackdrop = null;
     }
 
     protected static SolidColorBrush GetOrUpdateSolidColorBrush(Brush? current, Windows.UI.Color color)
@@ -422,7 +449,8 @@ public abstract partial class WidgetWindowBase
         {
             SettingsService.WidgetMaterialTypeMica or SettingsService.WidgetMaterialTypeMicaAlt =>
                 AcrylicController is not null,
-            SettingsService.WidgetMaterialTypeAcrylic or SettingsService.WidgetMaterialTypeAcrylicBase =>
+            SettingsService.WidgetMaterialTypeAcrylic or SettingsService.WidgetMaterialTypeAcrylicBase or
+            SettingsService.WidgetMaterialTypeGlass =>
                 MicaController is not null,
             _ => AcrylicController is not null || MicaController is not null
         };
