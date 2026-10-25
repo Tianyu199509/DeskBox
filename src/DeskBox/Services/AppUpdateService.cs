@@ -292,8 +292,17 @@ public sealed partial class AppUpdateService : IAppUpdateService
         AppUpdateDownloadResult result;
         try
         {
+            // Deep review R13 (R12 debt ③): the core reports every 128KB
+            // chunk; the throttler collapses that to percent steps / 100ms
+            // beats so the IPC push lane and the About page stop flooding.
+            var throttle = new AppUpdateDownloadProgressThrottle();
             var reportingProgress = new Progress<AppUpdateDownloadProgress>(p =>
             {
+                if (!throttle.ShouldPush(p, Environment.TickCount64))
+                {
+                    return;
+                }
+
                 progress?.Report(p);
                 DownloadProgressChanged?.Invoke(p);
             });
