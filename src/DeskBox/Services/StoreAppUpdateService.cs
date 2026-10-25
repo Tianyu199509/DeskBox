@@ -29,9 +29,6 @@ public sealed class StoreAppUpdateService : IAppUpdateService
     public AppUpdateDeliveryKind DeliveryKind => AppUpdateDeliveryKind.MicrosoftStore;
     public string? LastDownloadedInstallerPath => null;
     public bool IsDownloadInProgress => false;
-    public void ClearLastDownloadedInstaller() { }
-
-    public void PruneStaleInstallerDirectories() { }
 
     public Task<AppUpdateCheckResult> CheckForUpdatesAsync(CancellationToken cancellationToken = default)
     {

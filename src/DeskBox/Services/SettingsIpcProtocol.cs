@@ -197,8 +197,8 @@ public static class SettingsIpcMethods
     public const string UpdateState = "update.state";
     public const string UpdateCheck = "update.check";
     public const string UpdateDownload = "update.download";
-    public const string UpdateClearInstaller = "update.clear-installer";
-    public const string UpdatePruneStale = "update.prune-stale";
+    // (update.clear-installer / update.prune-stale removed in deep review
+    // R13-2: no host caller ever existed — dead wires, D19 audit.)
     public const string UpdateStartInstaller = "update.start-installer";
     public const string UpdateCheckCompleted = "update.check-completed";
     public const string UpdateDownloadProgress = "update.download-progress";

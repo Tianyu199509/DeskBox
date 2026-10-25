@@ -43,6 +43,12 @@ public sealed class SettingsIpcServer : IAsyncDisposable
         SettingsIpcMethods.WidgetResetCapsuleOverrides,
         SettingsIpcMethods.AppearanceClearPerWidgetBackgrounds,
         SettingsIpcMethods.WidgetSyncFeatureEnabled,
+        // Deep review R13-2 (D10 audit): the hotkey enable toggles are
+        // same-key writes too — a fast double-flip could apply the second
+        // dispatch before the first and leave the OLDER registration
+        // standing (same disease C/F family as the layout writes).
+        SettingsIpcMethods.HotkeySetEnabled,
+        SettingsIpcMethods.SearchHotkeySetEnabled,
     };
 
     // Bounded: a wedged ordered consumer applies backpressure to the read

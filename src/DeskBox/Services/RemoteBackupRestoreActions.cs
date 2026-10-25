@@ -26,16 +26,26 @@ public sealed class RemoteBackupRestoreActions : IBackupRestoreActions
         return ok && SettingsIpcPayload.DecodeBoolean(payload);
     }
 
-    public Task DeleteSnapshotAsync(
+    public async Task DeleteSnapshotAsync(
         BackupEndpoint endpoint,
         string name,
-        CancellationToken cancellationToken = default) =>
-        RequestVoidAsync(
+        CancellationToken cancellationToken = default)
+    {
+        // Deep review R13-2 (D18 audit): deleting a remote snapshot is
+        // destructive — a server-side failure (ok=false) must surface as
+        // an exception like the in-process service, not vanish while the
+        // UI optimistically drops the row.
+        (bool ok, _, string? error) = await _client.RequestAsync(
             SettingsIpcMethods.CloudDeleteSnapshot,
             SettingsIpcPayload.Encode(
                 new SettingsIpcEndpointName(endpoint, name),
                 SettingsIpcJsonContext.Default.SettingsIpcEndpointName),
             cancellationToken);
+        if (!ok)
+        {
+            throw new InvalidOperationException(error ?? "remote snapshot delete failed");
+        }
+    }
 
     public async Task<string> DownloadSnapshotAsync(
         BackupEndpoint endpoint,

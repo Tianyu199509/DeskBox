@@ -23,11 +23,14 @@ public sealed class SettingsHostLaunchIntentTests
         // batch R8). QuickCapture's wiring is pinned by its (enabled, _)
         // shape; Search's (_, _) no-op is deliberate and stays (its enable
         // state is a settings.json slice, so the snapshot IS the channel).
+        // Deep review R13-2: QuickCapture's wiring grew the same optimistic
+        // mirror + applied rollback the Todo switch always had (the bare
+        // (enabled, _) lambda discarded the applied value).
         Assert.Contains(
             "SetFeatureWidgetEnabled(WidgetKind.Todo, enabled)", host, StringComparison.Ordinal);
         Assert.Contains(
             "SetFeatureWidgetEnabled(WidgetKind.QuickCapture, enabled)", host, StringComparison.Ordinal);
-        Assert.Contains("applyWidget: (enabled, _) =>", host, StringComparison.Ordinal);
+        Assert.Contains("applyWidget: async (enabled, _) =>", host, StringComparison.Ordinal);
 
         // The appearance page's per-widget background clear is a
         // layout-domain write: same rule, dedicated command.

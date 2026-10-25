@@ -235,8 +235,13 @@ public sealed class SearchSettingsCoordinatorTests : IAsyncLifetime
         Assert.Equal(before, coordinator.Read().Hotkey.Gesture);
 
         SearchHotkeyUpdateResult enabled = coordinator.SetHotkeyEnabled(true);
-        Assert.False(enabled.Succeeded);
-        Assert.NotNull(enabled.Error);
+        // Deep review R13-2 (D11): the enable command is fire-and-forget,
+        // so reading the registration immediately raced the command and
+        // reported false failures right after a successful enable. The
+        // result now reflects command acceptance; the card's registered
+        // state converges through the registration-changed push (the R14
+        // async-ification restores true outcome reporting).
+        Assert.True(enabled.Succeeded);
         Assert.True(coordinator.Read().Hotkey.Enabled);
         Assert.False(coordinator.Read().Hotkey.Registered);
     }

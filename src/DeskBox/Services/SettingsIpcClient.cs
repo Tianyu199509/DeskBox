@@ -85,7 +85,10 @@ public sealed class SettingsIpcClient : IAsyncDisposable
         new Dictionary<string, TimeSpan>(StringComparer.Ordinal)
         {
             [SettingsIpcMethods.UpdateDownload] = TimeSpan.FromMinutes(30),
-            [SettingsIpcMethods.UpdateCheck] = TimeSpan.FromSeconds(60),
+            // Deep review R13-2 (D19): the main-side HTTP check itself runs
+            // up to 100s — a 60s ceiling turned every slow-network check
+            // into a timeout throw while the main process was still working.
+            [SettingsIpcMethods.UpdateCheck] = TimeSpan.FromSeconds(110),
             [SettingsIpcMethods.BackupSettingsProbe] = TimeSpan.FromMinutes(2),
             [SettingsIpcMethods.BackupSettingsList] = TimeSpan.FromMinutes(2),
             [SettingsIpcMethods.CloudDownloadSnapshot] = TimeSpan.FromMinutes(30),

@@ -281,7 +281,18 @@ public partial class App
             if (GlobalHotkeyService is { IsSuspendedForRecording: true } hotkey)
             {
                 Log("[SettingsHost] Host died while hotkeys suspended; resuming");
-                UiDispatcherQueue?.TryEnqueue(hotkey.ResumeAfterRecording);
+                UiDispatcherQueue?.TryEnqueue(() =>
+                {
+                    hotkey.ResumeAfterRecording();
+                    // Deep review R13-2 (D10 audit): the recorder suspends
+                    // BOTH services (see InProcessSettingsHotkeyActions),
+                    // but this guard only ever resumed the global one — a
+                    // host death during a SEARCH hotkey recording left the
+                    // search hotkey suspended and unregistered with its
+                    // heartbeat gated, until the next host boot's
+                    // unconditional resume.
+                    _searchHotkeyService?.ResumeAfterRecording();
+                });
             }
         }
         catch (Exception ex)

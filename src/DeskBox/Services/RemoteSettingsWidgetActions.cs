@@ -17,10 +17,17 @@ public sealed class RemoteSettingsWidgetActions : ISettingsWidgetActions
 
     private readonly SettingsService _settingsService;
 
-    public RemoteSettingsWidgetActions(SettingsIpcClient client, SettingsService settingsService)
+    // Deep review R13-2 (D15 audit): layout writes fail into the log only —
+    // the host's combos showed new values while the desktop kept the old
+    // ones with zero user-visible signal. Optional failure reporter wired
+    // by the settings host to its save-failed banner.
+    private readonly Action? _onWriteFailure;
+
+    public RemoteSettingsWidgetActions(SettingsIpcClient client, SettingsService settingsService, Action? onWriteFailure = null)
     {
         _client = client;
         _settingsService = settingsService;
+        _onWriteFailure = onWriteFailure;
     }
 
     public Task ApplyGroupPresentation(DeskBox.Contracts.GroupPresentationChange change) =>
@@ -63,7 +70,9 @@ public sealed class RemoteSettingsWidgetActions : ISettingsWidgetActions
     {
         // The callers are fire-and-forget (_ = ...): without this catch a
         // pipe failure/timeout vanished with zero logs while the local
-        // mirror kept the edit — a silent false success (batch R5).
+        // mirror kept the edit — a silent false success (batch R5). R13-2
+        // adds the failure reporter: the banner tells the user the change
+        // did not land instead of leaving the UI and desktop diverging.
         try
         {
             (bool ok, string? sliceJson, _) = await _client.RequestAsync(method, payload);
@@ -77,14 +86,18 @@ public sealed class RemoteSettingsWidgetActions : ISettingsWidgetActions
             // Best effort: pull the slice directly when the response carried none.
             (bool fetchOk, string? fetched, _) = await _client.RequestAsync(
                 SettingsIpcMethods.WidgetLayoutRead);
-            if (fetchOk && !string.IsNullOrEmpty(fetched))
+            if (fetchOk && !string.IsNullOrEmpty(fetched) &&
+                _settingsService.ApplyExternalLayout(fetched))
             {
-                _settingsService.ApplyExternalLayout(fetched);
+                return;
             }
+
+            _onWriteFailure?.Invoke();
         }
         catch (Exception ex)
         {
             App.Log($"[LayoutWrite] {method} failed: {ex.Message}");
+            _onWriteFailure?.Invoke();
         }
     }
 

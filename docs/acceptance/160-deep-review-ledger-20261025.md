@@ -112,6 +112,47 @@ r1-r3：四条写命令全链读码（宿主 SendLayoutWrite 权威切片合并+
 - **线程不变式已钉**：`SettingsIpcThreadingContractTests` 冻结计数 32（Remote* 门面 GetResult 调用点只减不增，R14 落地后降门槛）。
 - 中介管道既有防线复核维持 R12 结论（32MB 行限/4096 队列/16 并发上限+有序道），无新增发现。
 
+## 债③：下载进度节流（完成，提交 14ab863e）
+
+128KB/条逐块上报收敛为整数百分比步进+100ms 地板（首末必达+回退丢弃+进度永不倒退），`AppUpdateDownloadProgressThrottle` 抽类+6 测试。IPC 推送道与关于页停止刷屏。
+
+**四债收账总览：①=052c8964 ②=df686e63 ③=14ab863e ④=d8ccabb7；⑤位置持久化按 Simon 拍板维持只记录。**
+
+## R14 前备（等节组探员返回后按族分批）
+
+32 处同步调用点分布：RemoteSettingsHotkeyActions 8 / RemoteSettingsAppActions 6 / RemoteSettingsWidgetActions 7（部分或为本地镜像读，无需过线）/ RemoteBackupSettings 3+RemoteBackupCommands 1+RemoteBackupRestoreActions 2+RemoteSearchConnectionClient 1 / RemoteAppUpdateService 4。策略=按族改接口签名（sync→Async）+InProcess 包 Task.FromResult+VM 消费端 await 化+smoke harness 适配，每族一批全门。冻结计数棘轮（32）随族落地降门槛。
+
+## 阶段5 复用资产索引
+
+- 隔离根启动器/停止：`%TEMP%\deskbox-review160\launch-isolated.ps1`、`stop-review.ps1`（按路径杀，注意会杀 Simon 实例——定向清理用 PID）
+- SACL/boot 冒烟探针：`probe-sacl-bootready.ps1`（先清日志防陈旧行误读；定向按 PID 清理）
+- 管道复现脚本族：`pipe-repro*.ps1`（D7 考古用，可删）
+- R10 脚本库：`%TEMP%\deskbox-r10-accept\`（uia2/探针/repro/b10-nav/b12-final/内存矩阵）
+- 提交辅助：`git-commit.ps1`（Mimosa 绕行：数组拆分+消息文件）
+
+## D8-D20：节组深审与修复（完成，探员四路+复核修复批）
+
+四探员普查（D8 老路径/债清单、D9-D12、D13-D16、D17-D20 三节组）共报 P1×4+P2×15+P3×10，修复批落地：
+
+**已修（本批）**：
+- P1 搜索热键挂起无自愈（R3/R13 修一半：退出守卫只救全局热键）→ 守卫双连 resume。
+- P1 云备份三假成功（凭证保存/probe/云端删快照=ok 被门面吞）→ RequireOkAsync 抛出恢复进程内语义；本地 DeleteSnapshotAsync 同修。
+- P2 QC 开关回滚缺失（R8/R9「修一半」实锤：lambda 丢 applied）→ Todo 同款乐观镜像+回滚。
+- P2 applied 应答回声失实 → InProcess 链尾锁内读回权威字典（UI 线程 await 后竞态论据不成立）。
+- P2 热键 set-enabled 双命令族并入有序道（病C/F 同族）。
+- P2 搜索开关读己之写假失败 → 不即时判注册（推送收敛；R14 恢复真应答）。
+- P2 Glance 中继失败/layout 写失败零用户面 → 接 SaveFailedInfoBar（Relay 拒绝即横幅；SendLayoutWrite 注入 onWriteFailure）。
+- P2 update.check 超时 60s→110s（对齐内层 HTTP 100s）+ VM 检查失败 catch 转 Failed（原卡「正在检查」）。
+- P2 BackupSettingsCoordinator.Update 进图锁（split 引入的池线程无锁写窗）。
+- 死码清理：update.clear-installer/prune-stale 死线（接口成员+线+case 全删，主进程直调保留）、Geometry 死命令（无绑定+不发命令）、SetLegacyWideDetailPane 死兼容面、D8 两处零触达 #if 隔离块（:3463/:34 改无条件零售分支）。
+- 测试适配×2（搜索开关键新契约、QC 接线锚点 async 形态）。
+
+**登记（维持/后批）**：
+- R14 归口：Glance 节 6 处同步往返热点、IsCurrentEndpoint 3 连击、录制器每键冲突检查、搜索 Read() IsRegistered 往返、宿主下载无进度（VM in-flight 丢事件+门面丢 IProgress 双因素）。
+- 1.7 维持：组列表跟随/layout-changed 空写噪声（捆绑）、B3 预览含 layout 域、AOT 冒烟宿主场景、QC 诊断行/captureCurrent、跨机还原 rebase 面。
+- raised-band 宿主 hwnd（D8 给了记忆法方案，z-order 契约敏感单独立项）；数据清理命令族失败面（DataTools catch，随 R14 或手工矩阵批）；宿主侧 layout 写 SaveDebounced 写放大（GroupNavigationSettingsCoordinator 可条件化，P3）；预测计数死值（P3）。
+- D8 结论：1.7 债清单 3 项已被 R13 覆盖（host-ready 队列/B1 保留块抽取/Todo checkNow——后者 R8 就修了）。
+
 ## 待 Simon 拍板（累积）
 
 （暂无）

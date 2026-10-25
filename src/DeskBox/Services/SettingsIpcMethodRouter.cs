@@ -1079,16 +1079,6 @@ public sealed class SettingsIpcMethodRouter
                     downloadResult,
                     SettingsIpcJsonContext.Default.AppUpdateDownloadResult), null);
 
-            case SettingsIpcMethods.UpdateClearInstaller:
-                if (_appUpdate is null) return unavailable(method);
-                _appUpdate.ClearLastDownloadedInstaller();
-                return (true, null, null);
-
-            case SettingsIpcMethods.UpdatePruneStale:
-                if (_appUpdate is null) return unavailable(method);
-                _appUpdate.PruneStaleInstallerDirectories();
-                return (true, null, null);
-
             case SettingsIpcMethods.UpdateStartInstaller:
                 if (_appUpdate is null) return unavailable(method);
                 if (SettingsIpcPayload.Decode(payload, SettingsIpcJsonContext.Default.SettingsIpcStartInstaller)

@@ -63,45 +63,13 @@ public partial class SettingsViewModel
         }
     }
 
-    [RelayCommand]
-    private void ResetCapsuleGeometryOverrides()
-    {
-        int changed = 0;
-        foreach (var widget in _settingsService.Settings.Widgets)
-        {
-            if (widget.CompactWidth is not null)
-            {
-                widget.CompactWidth = null;
-                changed++;
-            }
-
-            if (widget.CompactPlacement is not null)
-            {
-                widget.CompactPlacement = null;
-                changed++;
-            }
-        }
-        foreach (WidgetGroupConfig group in _settingsService.Settings.WidgetGroups)
-        {
-            if (group.CompactWidth is not null)
-            {
-                group.CompactWidth = null;
-                changed++;
-            }
-
-            if (group.CompactPlacement is not null)
-            {
-                group.CompactPlacement = null;
-                changed++;
-            }
-        }
-
-        if (changed > 0)
-        {
-            _settingsService.SaveDebounced();
-            NotifyCapsuleOverridePropertiesChanged();
-        }
-    }
+    // ResetCapsuleGeometryOverrides removed (deep review R13-2, D8 debt
+    // census): zero XAML bindings, zero callers, and unlike its three
+    // siblings it never sent the layout-write command — a host-side call
+    // would have silently written nothing but the local mirror (the
+    // authoritative layout domain is preserved away from host commits).
+    // Reviving this needs a Geometry scope on CapsuleOverrideReset plus
+    // the command pair.
 
     public void ResetCapsuleOverridesForWidget(string widgetId)
     {
@@ -309,7 +277,6 @@ public partial class SettingsViewModel
             HasSmartCapsuleCollapseOverride);
         ResetCapsuleBehaviorOverridesCommand.NotifyCanExecuteChanged();
         ResetCapsuleWidthOverridesCommand.NotifyCanExecuteChanged();
-        ResetCapsuleGeometryOverridesCommand.NotifyCanExecuteChanged();
         ResetAllCapsuleOverridesCommand.NotifyCanExecuteChanged();
     }
 }

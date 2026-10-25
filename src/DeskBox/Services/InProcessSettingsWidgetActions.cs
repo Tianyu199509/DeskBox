@@ -290,11 +290,22 @@ public sealed class InProcessSettingsWidgetActions : ISettingsWidgetActions
         // The coordinator/manager chains touch windows and depend on the UI
         // dispatcher; on an IPC pool thread they either deadlock on the
         // UI-thread marshal or throw cross-thread. Run the whole switch on
-        // the UI thread. The response reports the requested value: reading
-        // IsEnabled back races the chain's own SettingsChanged re-entries
-        // (legacy fallbacks can momentarily disagree mid-apply).
+        // the UI thread.
         await DeskBox.Platform.UiDispatch.RunAsync(() => ApplyFeatureSwitchOnUi(kind, enabled));
-        return enabled;
+        // Deep review R13-2 (D12/D16 audit): report the AUTHORIZED
+        // dictionary state, not the request echo. Reading back after the
+        // chain's UI-thread await is safe — the chain's own
+        // SettingsChanged re-entries queue on that same UI thread behind
+        // us, and every chain writes the dictionary before returning, so
+        // the dictionary wins over any transient legacy fallback. A
+        // request echo here turned silent half-failures inside the apply
+        // chains into fabricated successes on the host's switches.
+        bool applied = false;
+        _settingsService.MutateGraphUnderLock(() =>
+        {
+            applied = FeatureWidgetSettings.IsEnabled(_settingsService.Settings, kind);
+        });
+        return applied;
     }
 
     private async Task ApplyFeatureSwitchOnUi(WidgetKind kind, bool enabled)

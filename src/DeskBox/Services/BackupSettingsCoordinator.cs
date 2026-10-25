@@ -60,9 +60,17 @@ public sealed class BackupSettingsCoordinator : IBackupSettings, IDisposable
     public void Update(BackupSettingsChange change)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
+        bool changed = false;
+        // Deep review R13-2 (D18 audit): this runs on the IPC dispatch
+        // pool thread while settings-commit applies swap the whole graph
+        // under the service lock — an unsynchronized read-modify-write
+        // could land its fields on the outgoing graph and silently lose
+        // the change (split-introduced window; pre-split both writers
+        // shared the UI thread).
+        _settings.MutateGraphUnderLock(() =>
+        {
         AppSettings settings = _settings.Settings;
         CloudBackupSettingsSlice cloud = settings.CloudBackup;
-        bool changed = false;
         if (change.LocalEnabled is { } localEnabled && settings.Backup.AutomaticBackupEnabled != localEnabled)
             { settings.Backup.AutomaticBackupEnabled = localEnabled; changed = true; }
         if (change.LocalIntervalMinutes is { } localInterval)
@@ -127,6 +135,7 @@ public sealed class BackupSettingsCoordinator : IBackupSettings, IDisposable
             int value = CloudBackupSettingsPolicy.NormalizeRetentionCount(retention);
             if (cloud.CloudBackupRetentionCount != value) { cloud.CloudBackupRetentionCount = value; changed = true; }
         }
+        });
         if (!changed) return;
         _settings.SaveDebounced();
         _refreshRuntimeOptions();

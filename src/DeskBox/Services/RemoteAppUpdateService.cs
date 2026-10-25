@@ -133,19 +133,10 @@ public sealed class RemoteAppUpdateService : IAppUpdateService
         return result;
     }
 
-    public void ClearLastDownloadedInstaller()
-    {
-        _client.RequestAsync(SettingsIpcMethods.UpdateClearInstaller)
-            .GetAwaiter().GetResult();
-        _cachedState = null;
-    }
-
-    public void PruneStaleInstallerDirectories()
-    {
-        _client.RequestAsync(SettingsIpcMethods.UpdatePruneStale)
-            .GetAwaiter().GetResult();
-        _cachedState = null;
-    }
+    // update.clear-installer / update.prune-stale wires removed (deep
+    // review R13-2, D19 audit): no host caller ever existed — the main
+    // process calls its own service directly, and the interface members
+    // went with the wires (the concrete service keeps the methods).
 
     public AppUpdateInstallResult StartInstallerHelper(
         string installerPath,

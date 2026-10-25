@@ -63,28 +63,47 @@ public sealed class RemoteBackupSettings : IBackupSettings
 
     public Task SaveAsync() =>
         RequestVoidAsync(SettingsIpcMethods.BackupSettingsSave);
-
     public Task<bool> HasCredentialAsync(BackupEndpoint endpoint, CancellationToken cancellationToken) =>
         RequestBoolAsync(
             SettingsIpcMethods.BackupSettingsHasCredential,
             SettingsIpcPayload.Encode(endpoint, SettingsIpcJsonContext.Default.BackupEndpoint),
             cancellationToken);
 
-    public Task SaveCredentialAsync(BackupEndpoint endpoint, string secret, CancellationToken cancellationToken) =>
-        RequestVoidAsync(
+    public async Task SaveCredentialAsync(BackupEndpoint endpoint, string secret, CancellationToken cancellationToken)
+    {
+        // Deep review R13-2 (D18 audit): the main-side credential write
+        // throws on vault failures and the server converts that to ok=false
+        // — discarding it (RequestVoidAsync) reported "password saved" on a
+        // failed write. Throwing restores the in-process semantics the
+        // view-model's catch blocks were written against.
+        await RequireOkAsync(
             SettingsIpcMethods.BackupSettingsSaveCredential,
             SettingsIpcPayload.Encode(
                 new SettingsIpcCredential(endpoint, secret, null),
                 SettingsIpcJsonContext.Default.SettingsIpcCredential),
             cancellationToken);
+    }
 
-    public Task ProbeAsync(BackupEndpoint endpoint, string? secretOverride, CancellationToken cancellationToken) =>
-        RequestVoidAsync(
+    public async Task ProbeAsync(BackupEndpoint endpoint, string? secretOverride, CancellationToken cancellationToken)
+    {
+        // Same contract as SaveCredentialAsync: a failed probe is a user-
+        // visible failure, not a silent success.
+        await RequireOkAsync(
             SettingsIpcMethods.BackupSettingsProbe,
             SettingsIpcPayload.Encode(
                 new SettingsIpcCredential(endpoint, null, secretOverride),
                 SettingsIpcJsonContext.Default.SettingsIpcCredential),
             cancellationToken);
+    }
+
+    private async Task RequireOkAsync(string method, string payload, CancellationToken cancellationToken)
+    {
+        (bool ok, _, string? error) = await _client.RequestAsync(method, payload, cancellationToken);
+        if (!ok)
+        {
+            throw new InvalidOperationException(error ?? $"{method} failed");
+        }
+    }
 
     public async Task<IReadOnlyList<BackupRemoteSnapshot>> ListAsync(
         BackupEndpoint endpoint,

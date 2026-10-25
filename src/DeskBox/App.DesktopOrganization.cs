@@ -31,11 +31,10 @@ public partial class App
 
     private void DesktopOrganizationWindow_StateChanged(object? sender, EventArgs e)
     {
-#if DESKBOX_AOT_SMOKE_HARNESS
-        _settingsWindow?.RefreshDesktopOrganizationState();
-#else
+        // Deep review R13-2 (D8 census): the smoke-harness branch was never
+        // consumed (no smoke drives the desktop-organization window) and
+        // the retail push no-ops safely without the IPC server.
         _ = PushSettingsIpcEventAsync(SettingsIpcMethods.HostDesktopOrgRefresh, null);
-#endif
     }
 
     private void DesktopOrganizationWindow_Closed(object sender, Microsoft.UI.Xaml.WindowEventArgs args)

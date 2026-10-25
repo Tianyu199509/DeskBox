@@ -1751,7 +1751,10 @@ public partial class App : Application
             RunOptionalStartupStep("background-update-check", ScheduleBackgroundUpdateCheck);
             RunOptionalStartupStep(
                 "update-installer-prune",
-                () => AppUpdateService.PruneStaleInstallerDirectories());
+                // Interface-typed property: pruning only exists on the
+                // direct service (the store channel never downloads
+                // installers, so skipping it there is the old no-op).
+                () => (AppUpdateService as Services.AppUpdateService)?.PruneStaleInstallerDirectories());
             RunOptionalStartupStep("diagnostics-service", () =>
             {
                 _diagnosticsService = new AppDiagnosticsService(UiDispatcherQueue);
@@ -3460,11 +3463,11 @@ public partial class App : Application
             ClearUpdateAvailableReminder();
         }
 
-#if DESKBOX_AOT_SMOKE_HARNESS
-        _settingsWindow?.RefreshUpdateStateFromService();
-#else
+        // Deep review R13-2 (D8 census): the smoke-harness branch here was
+        // never consumed (managed-ui smoke disables the update check) and
+        // the retail push is a safe no-op without the IPC server — the
+        // unconditional push replaced the #if split.
         _ = PushSettingsIpcEventAsync(SettingsIpcMethods.HostUpdateStateRefresh, null);
-#endif
     }
 
     /// <summary>

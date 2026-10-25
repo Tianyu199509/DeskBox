@@ -1214,13 +1214,8 @@ public sealed class SettingsIpcFacadeTests : IDisposable
             return Task.FromResult(DeskBox.Models.AppUpdateDownloadResult.Completed("C:/downloads/setup.exe"));
         }
 
-        public void ClearLastDownloadedInstaller()
-        {
-        }
-
-        public void PruneStaleInstallerDirectories()
-        {
-        }
+        // ClearLastDownloadedInstaller / PruneStaleInstallerDirectories
+        // left the interface with their dead IPC wires (deep review R13-2).
 
         public AppUpdateInstallResult StartInstallerHelper(string installerPath, bool silent = true, string? appCultureName = null)
         {

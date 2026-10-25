@@ -325,6 +325,22 @@ public partial class SettingsViewModel
             _maintenanceSettings.RecordUpdateCheck(DateTimeOffset.Now);
             ApplyUpdateCheckResult(result);
         }
+        catch (OperationCanceledException)
+        {
+            // A cancelled check returns to the idle status; the caller's
+            // next action re-arms the Checking text.
+        }
+        catch (Exception ex)
+        {
+            // Deep review R13-2 (D19): without this catch a failed check
+            // (IPC refusal, slow-network timeout) left the status row
+            // stuck on "checking" forever — the in-process service reports
+            // failures as a Failed result, so mirror that here.
+            ApplyUpdateCheckResult(new AppUpdateCheckResult(
+                DeskBox.Models.AppUpdateCheckStatus.Failed,
+                AppVersion,
+                errorMessage: ex.Message));
+        }
         finally
         {
             IsCheckingForUpdates = false;

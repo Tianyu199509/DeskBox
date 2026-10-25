@@ -295,6 +295,12 @@ public partial class App
                 widgetId + "\n" + dataJson);
             if (!ok)
             {
+                // Deep review R13-2 (D14 audit): glance saves do not ride
+                // the settings sink, so the save-failed banner never heard
+                // about them — surface the failure here too (the throw
+                // alone only reached the host log through the section's
+                // async-void handlers).
+                UiDispatcherQueue?.TryEnqueue(() => _settingsHostWindow?.ShowSaveFailedBanner());
                 throw new InvalidOperationException(
                     $"Glance apply rejected for {widgetId}: {glanceError ?? "unknown"}");
             }
@@ -472,7 +478,13 @@ public partial class App
         ThemeService theme,
         SettingsIpcClient client)
     {
-        var widgetActions = new RemoteSettingsWidgetActions(client, settings);
+        var widgetActions = new RemoteSettingsWidgetActions(
+            client,
+            settings,
+            // Deep review R13-2 (D15): layout write failures surface on the
+            // save-failed banner instead of only the log.
+            onWriteFailure: () => UiDispatcherQueue?.TryEnqueue(
+                () => _settingsHostWindow?.ShowSaveFailedBanner()));
         var appActions = new RemoteSettingsAppActions(
             client,
             (uint)_settingsHostMainProcessId,
@@ -549,9 +561,21 @@ public partial class App
             // The enable chain rides the feature-switch command (see the Todo
             // wiring above): the main process owns the dictionary and the
             // widget window, and decides reveal like every other
-            // SetFeatureWidgetEnabled caller.
-            applyWidget: (enabled, _) =>
-                widgetActions.SetFeatureWidgetEnabled(WidgetKind.QuickCapture, enabled),
+            // SetFeatureWidgetEnabled caller. Optimistic mirror + applied
+            // rollback, exactly like the Todo wiring — the R8/R9 batch
+            // comments claimed "the same treatment", but this lambda used
+            // to discard the applied value, so a refused switch left the UI
+            // on a fabricated success until the next layout push (deep
+            // review R13-2, D13/D16 audit).
+            applyWidget: async (enabled, _) =>
+            {
+                FeatureWidgetSettings.SetEnabled(settings.Settings, WidgetKind.QuickCapture, enabled);
+                bool applied = await widgetActions.SetFeatureWidgetEnabled(WidgetKind.QuickCapture, enabled);
+                if (applied != enabled)
+                {
+                    FeatureWidgetSettings.SetEnabled(settings.Settings, WidgetKind.QuickCapture, applied);
+                }
+            },
             tryEnqueue: action => UiDispatcherQueue.TryEnqueue(() => action()),
             reportError: ex => Log($"[QuickCapture] Settings operation failed: {ex}"));
 

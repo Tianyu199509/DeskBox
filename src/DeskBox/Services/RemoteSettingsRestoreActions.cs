@@ -46,8 +46,19 @@ public sealed class RemoteSettingsRestoreActions : ISettingsRestoreActions
                 : [];
     }
 
-    public Task DeleteSnapshotAsync(string snapshotPath) =>
-        RequestVoidAsync(SettingsIpcMethods.RestoreDeleteSnapshot, snapshotPath);
+    public async Task DeleteSnapshotAsync(string snapshotPath)
+    {
+        // Deep review R13-2 (D18 audit): destructive delete — a server-side
+        // refusal must throw like the in-process service instead of being
+        // swallowed by the void-request helper.
+        (bool ok, _, string? error) = await _client.RequestAsync(
+            SettingsIpcMethods.RestoreDeleteSnapshot,
+            snapshotPath);
+        if (!ok)
+        {
+            throw new InvalidOperationException(error ?? "snapshot delete failed");
+        }
+    }
 
     public async Task<DeskBoxAttachmentHealthReport> ScanAttachmentHealthAsync()
     {
