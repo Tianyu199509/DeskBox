@@ -1173,7 +1173,13 @@ public partial class App
                 result.DeepSettings.SearchActivatedSection,
                 "BackupRestoreSettings",
                 StringComparison.Ordinal) &&
-            result.DeepSettings.PageTransitions.Count == 25 &&
+            // Deep review R13-5: 22 = SettingsWindow.AotDeepSmoke's
+            // deepSettingsRoutes length. The route table was trimmed from 25
+            // to 22 sections in an earlier batch without this pin — every
+            // deep-settings run since then failed on a healthy traversal
+            // (both the pre-R13 worktree and HEAD reproduced 22/22 pages
+            // with all other conditions green; instrumented DIAG run).
+            result.DeepSettings.PageTransitions.Count == 22 &&
             result.DeepSettings.BreadcrumbParentReturned &&
             result.DeepSettings.FileStackRuleCount == 1 &&
             result.DeepSettings.BackupSnapshotCount > 0,
