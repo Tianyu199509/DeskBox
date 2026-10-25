@@ -235,6 +235,7 @@ public partial class App
                 // guard below only self-heals for THIS era (deep review R13,
                 // D5 — see OnSettingsHostProcessExited).
                 _settingsHostBootConfirmed = false;
+                _settingsHostStartTime = TryGetStartTime(spawnedHost);
                 int generation = ++_settingsHostGeneration;
                 spawnedHost.EnableRaisingEvents = true;
                 void ExitHandler(object? sender, EventArgs args)
@@ -323,6 +324,11 @@ public partial class App
                 if (ReferenceEquals(exchanged, current))
                 {
                     _exitingSettingsHost = current;
+                    // Query the dying Process object itself rather than
+                    // pairing the (racy) spawn-time field: a respawn racing
+                    // this branch could otherwise stamp the NEW host's start
+                    // time onto the OLD host's dying identity.
+                    _exitingSettingsHostStartTime = TryGetStartTime(current);
                     Log("[SettingsHost] Farewell received; treating host as not running for show decisions");
                     return;
                 }
@@ -348,14 +354,36 @@ public partial class App
     }
 
     /// <summary>
-    /// The pipe identity gate (batch R12): the pid of the settings host this
-    /// process spawned, or the dying one still saying goodbye. Zero/absent
-    /// disables the gate (loopback tests).
+    /// The pipe identity gate (batch R12, hardened in deep review R13):
+    /// pid + spawn-time creation stamp of the settings host this process
+    /// spawned, or of the dying one still saying goodbye. The start time
+    /// closes the pid-reuse hole (a recycled pid belongs to a different
+    /// process with a different creation time). Zero pid disables the gate
+    /// (loopback tests).
     /// </summary>
-    internal uint SettingsHostPipeClientPid =>
-        (uint?)(_settingsHostProcess?.Id ?? _exitingSettingsHost?.Id) ?? 0u;
+    internal (uint Pid, DateTime? StartTime) SettingsHostPipeClientIdentity =>
+        _settingsHostProcess is { } host
+            ? ((uint)host.Id, _settingsHostStartTime)
+            : _exitingSettingsHost is { } dying
+                ? ((uint)dying.Id, _exitingSettingsHostStartTime)
+                : (0, null);
 
     private Process? _exitingSettingsHost;
+    private DateTime? _settingsHostStartTime;
+    private DateTime? _exitingSettingsHostStartTime;
+
+    private static DateTime? TryGetStartTime(Process process)
+    {
+        try
+        {
+            return process.StartTime;
+        }
+        catch (Exception)
+        {
+            // Already-exited or access-denied: the pid-only contract stays.
+            return null;
+        }
+    }
 
     /// <summary>
     /// Shutdown step (batch 3d): tell the host to close, give it a short

@@ -105,6 +105,13 @@ r1-r3：四条写命令全链读码（宿主 SendLayoutWrite 权威切片合并+
 - **债① 已实施**：PersistenceFailed 上报唯一所有权归调用方（sink 返回 false 的拒绝路径统一上报——原先 exception-only+RemoteSink 只落日志，用户在不会持久化的面上继续编辑）；宿主设置窗壳层 SaveFailedInfoBar（复用既有 13 语言键 Settings.Persistence.SaveFailedTitle/Body；成功提交收敛关闭；shell 声明无需画刷钉扎）。主进程侧本就有通知面（App.xaml.cs:4081，5 分钟节流）不动。
 - 测试+1（RefusingSink 拒绝必触发）；TodoReminder flaky 重跑即绿（已知名单）。
 
+## D7：管道安全+线程不变式+债④ SACL+G1（完成）
+
+- **债④ 已实施（原生创建路径）**：`Win32Helper.TryCreateSettingsIpcPipe` 原生 CreateNamedPipeW+单 SDDL 描述符（`D:(A;;GWGR;;;<sid>)S:(ML;;NW;;;ME)`=用户独占 DACL+中级完整性 no-write-up 标签，**创建时原子生效**）。三层探针考古：①事后 SetKernelObjectSecurity 需句柄带 WRITE_OWNER（托管创建不给）→失败实锤；②SDDL 别名 MW 非法（ERROR_INVALID_SID）应为 ME；③PIPE_TYPE_BYTE=0x0 非 0x1（0x1=MESSAGE|NOWAIT→ConnectNamedPipe 即时 ERROR_PIPE_LISTENING）；FILE_FLAG_FIRST_PIPE_INSTANCE 在本机原生调用恒 ERROR_INVALID_PARAMETER（弃用，管道名 scope+session 唯一+maxInstances=1+PID 门已覆盖其价值）。真机验证：新码零 Accept failed+宿主全链绿；新增 `SettingsIpcNativePipeCreationTests` 回声钉。
+- **G1 已实施**：身份门升级 pid+StartTime 双素（spawn 时快照；垂死宿主从其 Process 对象现取防跨字段配对竞态；>500ms 漂移拒连）。provider 签名改为 identity 元组（无测试用旧签名，零破坏）。
+- **线程不变式已钉**：`SettingsIpcThreadingContractTests` 冻结计数 32（Remote* 门面 GetResult 调用点只减不增，R14 落地后降门槛）。
+- 中介管道既有防线复核维持 R12 结论（32MB 行限/4096 队列/16 并发上限+有序道），无新增发现。
+
 ## 待 Simon 拍板（累积）
 
 （暂无）

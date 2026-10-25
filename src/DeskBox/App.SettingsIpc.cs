@@ -83,8 +83,10 @@ public partial class App
             DeskBoxDataPathService.Current.SettingsIpcPipeName,
             router.DispatchAsync,
             // Batch R12: only the settings host this process spawned (or
-            // the dying one saying goodbye) may use the pipe.
-            expectedClientPidProvider: () => SettingsHostPipeClientPid);
+            // the dying one saying goodbye) may use the pipe. Deep review
+            // R13 adds the spawn-time stamp so a recycled pid from an
+            // unrelated process cannot pass the number check.
+            expectedClientIdentityProvider: () => SettingsHostPipeClientIdentity);
 
         SettingsService.LocalPersistCompleted += OnSettingsIpcLocalPersistCompleted;
         SettingsService.LayoutPersistCompleted += OnSettingsIpcLayoutPersistCompleted;

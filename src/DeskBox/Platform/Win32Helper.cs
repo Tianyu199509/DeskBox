@@ -2101,6 +2101,130 @@ public static partial class Win32Helper
     internal static bool GetNamedPipeClientProcessId(Microsoft.Win32.SafeHandles.SafePipeHandle pipeHandle, out uint clientPid) =>
         GetNamedPipeClientProcessId(pipeHandle.DangerousGetHandle(), out clientPid);
 
+    [DllImport("advapi32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+    private static extern bool ConvertStringSecurityDescriptorToSecurityDescriptorW(
+        string stringSecurityDescriptor,
+        uint stringSecurityDescriptorRevision,
+        out IntPtr securityDescriptor,
+        IntPtr securityDescriptorSize);
+
+    [DllImport("kernel32.dll")]
+    private static extern IntPtr LocalFree(IntPtr hMem);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct SecurityAttributes
+    {
+        public nint Length;
+        public IntPtr SecurityDescriptor;
+        public IntPtr InheritHandle;
+    }
+
+    [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+    private static extern Microsoft.Win32.SafeHandles.SafePipeHandle CreateNamedPipeW(
+        string pipeName,
+        uint openMode,
+        uint pipeMode,
+        uint maxInstances,
+        uint outBufferSize,
+        uint inBufferSize,
+        uint defaultTimeOut,
+        ref SecurityAttributes securityAttributes);
+
+    private const uint PipeAccessDuplex = 0x00000003;
+    // No FILE_FLAG_FIRST_PIPE_INSTANCE here on purpose: raw CreateNamedPipeW
+    // with that flag fails with ERROR_INVALID_PARAMETER on this OS family
+    // (probe matrix, deep review R13 — the managed ACL creator never passed
+    // it either). The pipe name is already instance-scope + session unique
+    // and maxInstances=1, so a foreign pre-created instance cannot hide
+    // under our name; the pid identity gate covers the rest.
+    private const uint FileFlagOverlapped = 0x40000000;
+    // PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT are ALL zero — a
+    // literal 1 here is PIPE_TYPE_MESSAGE | PIPE_NOWAIT, and NOWAIT makes
+    // ConnectNamedPipe return ERROR_PIPE_LISTENING immediately (probe-
+    // verified the hard way, deep review R13).
+    private const uint PipeModeByteWaiting = 0x00000000;
+
+    /// <summary>
+    /// Creates the settings-IPC named pipe with a user-only DACL AND a
+    /// medium-integrity "no write up" mandatory label stamped at creation
+    /// (deep review R13, R12 debt ④). The label must ride the creation
+    /// descriptor: setting it afterwards via SetKernelObjectSecurity needs
+    /// WRITE_OWNER on the handle, which the managed ACL creator does not
+    /// grant (probe-verified — the post-create attempt failed with access
+    /// denied). Low-integrity same-user processes (sandboxed browser
+    /// content is the canonical case) are thereby denied by the kernel.
+    /// Returns null when creation fails (caller retries like the previous
+    /// accept-failure path).
+    /// </summary>
+    internal static Microsoft.Win32.SafeHandles.SafePipeHandle? TryCreateSettingsIpcPipe(
+        string pipeName,
+        int bufferSize)
+    {
+        string? sid = null;
+        try
+        {
+            sid = System.Security.Principal.WindowsIdentity.GetCurrent().User?.Value;
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+
+        if (string.IsNullOrEmpty(sid))
+        {
+            return null;
+        }
+
+        // D:(A;;GWGR;;;<sid>) — generic read+write for the current user
+        // only (equivalent to the previous PipeAccessRights.ReadWrite rule);
+        // S:(ML;;NW;;;ME) — mandatory label at MEDIUM integrity (the SDDL
+        // alias is ME — MW is not a valid SID alias and fails conversion
+        // with ERROR_INVALID_SID), no-write-up: the kernel denies write
+        // access from lower-integrity processes.
+        // TEMP-DIAG removed: null-SD experiment proved the descriptor was
+        // NOT the WaitForConnection failure — the pipe mode constant was.
+        if (!ConvertStringSecurityDescriptorToSecurityDescriptorW(
+                $"D:(A;;GWGR;;;{sid})S:(ML;;NW;;;ME)",
+                1,
+                out IntPtr descriptor,
+                IntPtr.Zero))
+        {
+            return null;
+        }
+
+        try
+        {
+            var attributes = new SecurityAttributes
+            {
+                Length = (nint)System.Runtime.InteropServices.Marshal.SizeOf<SecurityAttributes>(),
+                SecurityDescriptor = descriptor,
+                InheritHandle = IntPtr.Zero,
+            };
+            Microsoft.Win32.SafeHandles.SafePipeHandle handle = CreateNamedPipeW(
+                pipeName,
+                PipeAccessDuplex | FileFlagOverlapped,
+                PipeModeByteWaiting,
+                maxInstances: 1,
+                outBufferSize: (uint)bufferSize,
+                inBufferSize: (uint)bufferSize,
+                defaultTimeOut: 0,
+                ref attributes);
+            if (handle.IsInvalid)
+            {
+                int error = System.Runtime.InteropServices.Marshal.GetLastWin32Error();
+                handle.Dispose();
+                throw new InvalidOperationException(
+                    $"CreateNamedPipeW failed with win32 error {error} for {pipeName}");
+            }
+
+            return handle;
+        }
+        finally
+        {
+            LocalFree(descriptor);
+        }
+    }
+
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern bool SetProcessWorkingSetSize(
         IntPtr hProcess,

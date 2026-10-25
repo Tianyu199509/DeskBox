@@ -1,8 +1,7 @@
 namespace DeskBox.Services;
 
+using System.Diagnostics;
 using System.IO.Pipes;
-using System.Security.AccessControl;
-using System.Security.Principal;
 using System.Text;
 using System.Text.Json;
 using DeskBox.Platform;
@@ -90,29 +89,32 @@ public sealed class SettingsIpcServer : IAsyncDisposable
     /// Method dispatcher: returns (ok, payload, error) for a request. Runs on
     /// a pool thread — marshal to the UI thread where needed.
     /// </param>
-    /// <param name="expectedClientPidProvider">
+    /// <param name="expectedClientIdentityProvider">
     /// Batch R12 security audit: the pipe grants its full method surface
     /// (shutdown, installer launch, snapshot reads) to whoever connects.
     /// The DACL stops other users/sandboxes, but any same-user process can
-    /// still connect. When this provider returns a pid, a connecting client
-    /// whose process id does not match is dropped before a single request
-    /// is served; null disables the gate (loopback tests, dev probes).
+    /// still connect. When this provider returns an identity, a connecting
+    /// client whose process id does not match is dropped before a single
+    /// request is served. The optional start time closes the pid-reuse hole
+    /// (deep review R13, D5/G1): a recycled pid from a different process
+    /// has a different creation time and is rejected even when the number
+    /// matches. Null disables the gate (loopback tests, dev probes).
     /// </param>
     public static SettingsIpcServer Start(
         string pipeName,
         Func<string, string?, CancellationToken, Task<(bool Ok, string? Payload, string? Error)>> dispatcher,
-        Func<uint?>? expectedClientPidProvider = null)
+        Func<(uint Pid, DateTime? StartTime)?>? expectedClientIdentityProvider = null)
     {
         var server = new SettingsIpcServer(pipeName, dispatcher)
         {
-            _expectedClientPidProvider = expectedClientPidProvider,
+            _expectedClientIdentityProvider = expectedClientIdentityProvider,
         };
         server._acceptLoop = Task.Run(server.AcceptLoopAsync);
         server._orderedLaneLoop = Task.Run(server.RunOrderedLaneAsync);
         return server;
     }
 
-    private Func<uint?>? _expectedClientPidProvider;
+    private Func<(uint Pid, DateTime? StartTime)?>? _expectedClientIdentityProvider;
 
     /// <summary>
     /// Drops the connection when the client process is not the settings
@@ -121,17 +123,17 @@ public sealed class SettingsIpcServer : IAsyncDisposable
     /// </summary>
     private bool ClientIdentityMatches(NamedPipeServerStream stream)
     {
-        if (_expectedClientPidProvider is not { } provider)
+        if (_expectedClientIdentityProvider is not { } provider)
         {
             return true;
         }
 
-        uint expected = provider() ?? 0;
+        (uint expected, DateTime? expectedStart) = provider() ?? (0, null);
         if (expected == 0)
         {
             // Self-review (batch R12): "no host known" is the boot window
             // before the first spawn — an open door, not a state to allow.
-            // The coordinator sets the pid before the spawned host can
+            // The coordinator sets the identity before the spawned host can
             // possibly connect, so rejecting here breaks nothing legitimate.
             App.Log("[SettingsIpc] Rejected pipe client: no settings host is registered");
             return false;
@@ -151,6 +153,19 @@ public sealed class SettingsIpcServer : IAsyncDisposable
                 return false;
             }
 
+            // Pid-reuse guard (deep review R13, D5/G1): a same-number
+            // different-process impostor cannot reproduce the spawn-time
+            // creation stamp. A missing expected stamp (lookup failed at
+            // spawn) keeps the pid-only contract.
+            if (expectedStart is { } expectedStartTime &&
+                Process.GetProcessById((int)clientPid).StartTime - expectedStartTime is
+                    { } drift && Math.Abs(drift.TotalMilliseconds) > 500)
+            {
+                App.Log(
+                    $"[SettingsIpc] Rejected pipe client pid={clientPid}: start time mismatch (suspected pid reuse)");
+                return false;
+            }
+
             return true;
         }
         catch (Exception ex)
@@ -167,20 +182,27 @@ public sealed class SettingsIpcServer : IAsyncDisposable
             NamedPipeServerStream stream;
             try
             {
-                var security = new PipeSecurity();
-                security.AddAccessRule(new PipeAccessRule(
-                    WindowsIdentity.GetCurrent().User!,
-                    PipeAccessRights.ReadWrite,
-                    AccessControlType.Allow));
-                stream = NamedPipeServerStreamAcl.Create(
-                    _pipeName,
+                // Creation-time security descriptor (deep review R13, R12
+                // debt ④): user-only DACL plus a medium-integrity
+                // no-write-up label, applied by the kernel at creation —
+                // a low-integrity same-user process (sandboxed browser
+                // content) is denied before any handshake. The native path
+                // replaces NamedPipeServerStreamAcl because the managed
+                // creator cannot carry SACL labels, and post-creation
+                // labeling needs WRITE_OWNER the handle never had.
+                Microsoft.Win32.SafeHandles.SafePipeHandle? handle = Win32Helper.TryCreateSettingsIpcPipe(
+                    @"\\.\pipe\" + _pipeName,
+                    bufferSize: 64 * 1024);
+                if (handle is null)
+                {
+                    throw new InvalidOperationException("CreateNamedPipeW failed");
+                }
+
+                stream = new NamedPipeServerStream(
                     PipeDirection.InOut,
-                    maxNumberOfServerInstances: 1,
-                    PipeTransmissionMode.Byte,
-                    PipeOptions.Asynchronous,
-                    inBufferSize: 64 * 1024,
-                    outBufferSize: 64 * 1024,
-                    security);
+                    true,
+                    false,
+                    handle);
                 await stream.WaitForConnectionAsync(_cts.Token);
             }
             catch (OperationCanceledException)
