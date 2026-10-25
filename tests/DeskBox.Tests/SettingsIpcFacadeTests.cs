@@ -201,6 +201,30 @@ public sealed class SettingsIpcFacadeTests : IDisposable
     private static string PipeName() => "deskbox-tests-facade-ipc-" + Guid.NewGuid().ToString("N");
 
     [Fact]
+    public async Task HostFarewell_RoutesSenderPidToTheCoordinatorCallback()
+    {
+        // Batch R12 re-review: the farewell carries the sender's own pid so
+        // a stale goodbye can never evict a freshly spawned replacement
+        // host — this pins the payload's end-to-end delivery through the
+        // router (the coordinator-side eviction logic is App-coupled and
+        // lives behind the callback wired in production).
+        var settings = new SettingsService(_tempRoot);
+        string? seen = "unset";
+        var router = new SettingsIpcMethodRouter(
+            settings,
+            new FakeHotkeyActions(),
+            new FakeDataActions(),
+            onHostFarewell: received => seen = received);
+        (bool ok, string? payload, string? error) = await router.DispatchAsync(
+            SettingsIpcMethods.HostFarewell,
+            "12345",
+            cancellationToken: default);
+        Assert.True(ok);
+        Assert.Null(error);
+        Assert.Equal("12345", seen);
+    }
+
+    [Fact]
     public async Task HotkeyFacade_RoundTripsEveryCommand()
     {
         var settings = new SettingsService(_tempRoot);

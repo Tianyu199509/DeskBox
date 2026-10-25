@@ -142,23 +142,19 @@ public sealed class SettingsIpcServer : IAsyncDisposable
                 continue;
             }
 
+            // Identity gate BEFORE the stream becomes the event target
+            // (re-review of R12): rejecting after the assignment left a
+            // microsecond window where pushed events were written to the
+            // rejected client's pipe.
+            if (!ClientIdentityMatches(stream))
+            {
+                await stream.DisposeAsync();
+                continue;
+            }
+
             lock (_writeLock)
             {
                 _current = stream;
-            }
-
-            if (!ClientIdentityMatches(stream))
-            {
-                lock (_writeLock)
-                {
-                    if (ReferenceEquals(_current, stream))
-                    {
-                        _current = null;
-                    }
-                }
-
-                await stream.DisposeAsync();
-                continue;
             }
 
             try
