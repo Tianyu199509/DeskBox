@@ -117,27 +117,12 @@ public sealed class RemoteBackupRestoreActions : IBackupRestoreActions
             directory,
             nameof(DeleteTemporaryDownload));
 
-    private async Task NotifyWithoutBlockingAsync(string method, string? payload, string caller)
-    {
-        try
-        {
-            (bool ok, _, string? error) = await _client.RequestAsync(method, payload);
-            if (!ok)
-            {
-                App.Log($"[SettingsIpc] {caller} failed: {error ?? "unknown error"}");
-            }
-        }
-        catch (Exception ex)
-        {
-            App.Log($"[SettingsIpc] {caller} failed: {ex.Message}");
-        }
-    }
+    private Task NotifyWithoutBlockingAsync(string method, string? payload, string caller) =>
+        SettingsIpcShell.NotifyWithoutBlockingAsync(_client, method, payload, caller);
 
-    private async Task RequestVoidAsync(
+    private Task RequestVoidAsync(
         string method,
         string? payload = null,
-        CancellationToken cancellationToken = default)
-    {
-        await _client.RequestAsync(method, payload, cancellationToken);
-    }
+        CancellationToken cancellationToken = default) =>
+        SettingsIpcShell.RequestVoidAsync(_client, method, payload, cancellationToken);
 }

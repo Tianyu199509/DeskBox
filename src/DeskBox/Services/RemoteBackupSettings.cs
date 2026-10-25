@@ -108,8 +108,6 @@ public sealed class RemoteBackupSettings : IBackupSettings
         return ok && SettingsIpcPayload.DecodeBoolean(result);
     }
 
-    private async Task RequestVoidAsync(string method, string? payload = null, CancellationToken cancellationToken = default)
-    {
-        await _client.RequestAsync(method, payload, cancellationToken);
-    }
+    private Task RequestVoidAsync(string method, string? payload = null, CancellationToken cancellationToken = default) =>
+        SettingsIpcShell.RequestVoidAsync(_client, method, payload, cancellationToken);
 }

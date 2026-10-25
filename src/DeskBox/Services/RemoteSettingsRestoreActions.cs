@@ -68,8 +68,6 @@ public sealed class RemoteSettingsRestoreActions : ISettingsRestoreActions
         return ok;
     }
 
-    private async Task RequestVoidAsync(string method, string? payload = null)
-    {
-        await _client.RequestAsync(method, payload);
-    }
+    private Task RequestVoidAsync(string method, string? payload = null) =>
+        SettingsIpcShell.RequestVoidAsync(_client, method, payload);
 }

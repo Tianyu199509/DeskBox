@@ -49,8 +49,6 @@ public sealed class RemoteSettingsDataActions : ISettingsDataActions
             : null;
     }
 
-    private async Task RequestVoidAsync(string method)
-    {
-        await _client.RequestAsync(method);
-    }
+    private Task RequestVoidAsync(string method) =>
+        SettingsIpcShell.RequestVoidAsync(_client, method);
 }

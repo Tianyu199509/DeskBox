@@ -51,9 +51,35 @@
 - R10 真机自动化验收报告所列 aot-quickcheck 债正式闭环（该报告 :68 行的「脚本本身待修」）。
 - 隔离纪律：所有真机自动化一律走 launch-isolated.ps1（env 硬编码进脚本），杜绝 R10 真实数据触碰事故重演。
 
+## D1：IPC 协议命令面（完成，提交 db91f6f0）
+
+普查（agent）+亲验：141 常量 / 124 路由 case / 22 超时项；事件通道 18 条全配对；wire record 22 个零死项。
+
+- **B 类（有发送方无路由，运行时会 unavailable）= 0**——命令面健康，无「过度扩张」证据。
+- 死命令 4 个：`widget.is-feature-enabled`（R11 改本地镜像后的路由 case 残留，ever-wired）/ `app.schedule-light-cleanup`、`app.schedule-hidden-cleanup`（never-wired，宿主侧本就是 no-op）/ `ping`（测试+探针专用，保留）。前三者常量+case 已删。
+- **超时表漏网 5 个长任务**（R9 超时假失败族同类）：restore.inventory=10m、widget.get-orphans=10m、data.qc-clear(-recent)=2m、app.force-external-recovery=60s——已补。
+- 新增 `SettingsIpcCommandSurfaceContractTests` 面棘轮：请求型常量必须有路由 case+生产发送方（ping 白名单）；事件通道必须双向引用；面缩水地板 120。
+- 冗余判定：命令面不冗余（每常量都活、与契约一一对应）；固定税见 D2。
+
+## D2：InProcess/Remote 门面对（修复中）
+
+分析（agent）结论：**双壳无逻辑双写**——widget/backup 的 InProcess 侧本就是服务本体；app/data/hotkey/restore 四族双薄壳约 1040 行；Remote 壳 75-80% 机械转发，20-25% 是带批次编号（R4-R12）的刻意偏离（线程规则/缓存规则/失败合成）。逐方法 6 个手写落点（契约/InProcess/Remote/路由/协议常量/JsonSerializable）。
+
+- **已收冗余**：`SettingsIpcShell` 共享壳（NotifyWithoutBlockingAsync ×4 逐字拷贝 + RequestVoidAsync ×5 签名漂移拷贝 → 一行委托，净删约 90 行，单一事实源）。两份 RequestBoolAsync 语义不同（一个只回 ok、一个解码布尔）**刻意不并**。
+- **判定：保持手写双壳**（生成器方案会吃掉 20-25% 逐方法策略或回退 R10/R11 死锁修复；复杂度只是换形态）。理由已量化记录，不另立项。
+- **缺口登记（债）**：①无 InProcess↔Remote 等价性测试钉（现 loopback 用 Fake，InProcess 改坏 wire 链照常绿）——以「InProcess 侧行为由既有 SettingsService/协调器测试+AOT 冒烟覆盖」为现状辩护，等价性钉成本高收益低，暂不做；②loopback 覆盖洞：widget 24/36（缺 SetFeatureWidgetEnabled/5 个 SendLayoutWrite/3 组操作等）、app 19/26、backup 漏 SaveAsync、update 漏 Clear/Prune——随各节深审（D9-D20）按需补。
+
+## D3：回声抑制机制（修复中）
+
+r1-r2 读码+普查：commitId/AsyncLocal 机制本身健全（R4 作用域化、R5 接线、R7 pending 守卫、R12 竞态全修过；host 侧 commit 严格串行）。
+
+- **真 bug（已修）**：宿主全图提交的「主进程侧保留清单」是枚举式，Backup/CloudBackup 域全部写者都在主进程侧（备份协调器命令、云备份运行时 ticks、还原 rebase），宿主 UI 只读不写——保留缺失导致「宿主 pending save 跳过 reload 窗口内，主进程侧刚写的备份参数/云备份 ticks 被宿主下一笔提交静默回滚」。修=`PreserveMainOwnedState` 共享 helper（Backup/CloudBackup 域 CopyFrom + 胶囊顺序/自由放置集合保留），**提交路径与外观预览路径统一**（预览路径原有独立手抄清单，是 R7 抓过的「修一半」形态——滑杆预览换图后下一笔落盘会把陈旧备份域持久化）。两 slice 补 CopyFrom（沿用 WidgetLayout 引用共享模式）。测试 +2（提交路径+预览路径）。
+- **共享域镜像分歧（登记，随 D9/D10 细审）**：主题/热键/双击/搜索路径 VM 做本地镜像+命令双写；命令失败回滚时（如双击激活注册失败）镜像与权威可能短暂分歧，收敛依赖 reload push——各节深审时逐个核对命令应答是否带 applied 值（widget 族已带）。
+- 其余普查残留：Maintenance 时间戳写者归属未彻查（D16 常规节处理）。
+
 ## 待 Simon 拍板（累积）
 
-（空——按域追加）
+（暂无——D2「保持手写双壳」与 D3 修法均按显式授权范围内的合理化处理，如需推翻见上两节理由）
 
 ## 债登记（累积）
 
