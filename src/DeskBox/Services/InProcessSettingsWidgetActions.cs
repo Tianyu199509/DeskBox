@@ -55,40 +55,54 @@ public sealed class InProcessSettingsWidgetActions : ISettingsWidgetActions
 
     private Task ApplyGroupPresentationOnUi(Contracts.GroupPresentationChange change)
     {
-        WidgetGroupConfig? group = _settingsService.Settings.WidgetGroups.FirstOrDefault(candidate =>
-            string.Equals(candidate.Id, change.GroupId, StringComparison.Ordinal));
-        if (group is not null)
+        // Deep review R13 (R12 debt ②, 病 A): the find-then-assign below
+        // straddles pool-thread graph swaps without the graph lock — the
+        // assignment could land in the outgoing graph and vanish. Only the
+        // graph mutation runs under the gate; SaveDebounced schedules and
+        // the presentation notify walks live windows, both too slow to hold
+        // the lock for.
+        bool groupFound = false;
+        _settingsService.MutateGraphUnderLock(() =>
         {
-            if (change.NavigationStyle is not null)
+            WidgetGroupConfig? group = _settingsService.Settings.WidgetGroups.FirstOrDefault(candidate =>
+                string.Equals(candidate.Id, change.GroupId, StringComparison.Ordinal));
+            if (group is not null)
             {
-                group.NavigationStyle = change.NavigationStyle;
-            }
+                groupFound = true;
+                if (change.NavigationStyle is not null)
+                {
+                    group.NavigationStyle = change.NavigationStyle;
+                }
 
-            if (change.TitleDisplayMode is not null)
-            {
-                group.TitleDisplayMode = change.TitleDisplayMode;
-            }
+                if (change.TitleDisplayMode is not null)
+                {
+                    group.TitleDisplayMode = change.TitleDisplayMode;
+                }
 
-            if (change.WheelSwitch != Contracts.GroupPresentationTriState.Unset)
-            {
-                group.WheelSwitchEnabled = FromTriState(change.WheelSwitch);
-            }
+                if (change.WheelSwitch != Contracts.GroupPresentationTriState.Unset)
+                {
+                    group.WheelSwitchEnabled = FromTriState(change.WheelSwitch);
+                }
 
-            if (change.HoverSwitch != Contracts.GroupPresentationTriState.Unset)
-            {
-                group.HoverSwitchEnabled = FromTriState(change.HoverSwitch);
-            }
+                if (change.HoverSwitch != Contracts.GroupPresentationTriState.Unset)
+                {
+                    group.HoverSwitchEnabled = FromTriState(change.HoverSwitch);
+                }
 
-            if (change.CollapseBehavior is not null)
-            {
-                group.CollapseBehavior = change.CollapseBehavior;
-            }
+                if (change.CollapseBehavior is not null)
+                {
+                    group.CollapseBehavior = change.CollapseBehavior;
+                }
 
-            if (change.ChromeMode is not null)
-            {
-                group.ChromeMode = change.ChromeMode;
+                if (change.ChromeMode is not null)
+                {
+                    group.ChromeMode = change.ChromeMode;
+                }
             }
+        });
 
+        if (groupFound)
+        {
             _settingsService.SaveDebounced(notifySubscribers: false);
             NotifyPresentationChanged();
         }
@@ -104,35 +118,39 @@ public sealed class InProcessSettingsWidgetActions : ISettingsWidgetActions
 
     private Task ApplyGroupNavigationDefaultsOnUi(Contracts.GroupNavigationDefaultsChange change)
     {
-        if (change.NavigationStyle is not null)
+        // Same graph-lock gate as ApplyGroupPresentationOnUi (病 A).
+        _settingsService.MutateGraphUnderLock(() =>
         {
-            _settingsService.Settings.WidgetGroupDefaultNavigationStyle = change.NavigationStyle;
-        }
+            if (change.NavigationStyle is not null)
+            {
+                _settingsService.Settings.WidgetGroupDefaultNavigationStyle = change.NavigationStyle;
+            }
 
-        if (change.TitleDisplayMode is not null)
-        {
-            _settingsService.Settings.WidgetGroupDefaultTitleDisplayMode = change.TitleDisplayMode;
-        }
+            if (change.TitleDisplayMode is not null)
+            {
+                _settingsService.Settings.WidgetGroupDefaultTitleDisplayMode = change.TitleDisplayMode;
+            }
 
-        if (change.WheelSwitchEnabled is not null)
-        {
-            _settingsService.Settings.WidgetGroupWheelSwitchEnabled = change.WheelSwitchEnabled.Value;
-        }
+            if (change.WheelSwitchEnabled is not null)
+            {
+                _settingsService.Settings.WidgetGroupWheelSwitchEnabled = change.WheelSwitchEnabled.Value;
+            }
 
-        if (change.HoverSwitchEnabled is not null)
-        {
-            _settingsService.Settings.WidgetGroupHoverSwitchEnabled = change.HoverSwitchEnabled.Value;
-        }
+            if (change.HoverSwitchEnabled is not null)
+            {
+                _settingsService.Settings.WidgetGroupHoverSwitchEnabled = change.HoverSwitchEnabled.Value;
+            }
 
-        if (change.SwitchAnimationStyle is not null)
-        {
-            _settingsService.Settings.WidgetGroupSwitchAnimationStyle = change.SwitchAnimationStyle;
-        }
+            if (change.SwitchAnimationStyle is not null)
+            {
+                _settingsService.Settings.WidgetGroupSwitchAnimationStyle = change.SwitchAnimationStyle;
+            }
 
-        if (change.GroupsEnabled is not null)
-        {
-            _settingsService.Settings.WidgetGroupsEnabled = change.GroupsEnabled.Value;
-        }
+            if (change.GroupsEnabled is not null)
+            {
+                _settingsService.Settings.WidgetGroupsEnabled = change.GroupsEnabled.Value;
+            }
+        });
 
         _settingsService.SaveDebounced(notifySubscribers: false);
         NotifyPresentationChanged();
@@ -147,20 +165,24 @@ public sealed class InProcessSettingsWidgetActions : ISettingsWidgetActions
 
     private Task ApplyLayoutPreferencesOnUi(Contracts.LayoutPreferencesChange change)
     {
-        if (change.NewPlacementTarget is not null)
+        // Same graph-lock gate as ApplyGroupPresentationOnUi (病 A).
+        _settingsService.MutateGraphUnderLock(() =>
         {
-            _settingsService.Settings.WidgetNewPlacementTarget = change.NewPlacementTarget;
-        }
+            if (change.NewPlacementTarget is not null)
+            {
+                _settingsService.Settings.WidgetNewPlacementTarget = change.NewPlacementTarget;
+            }
 
-        if (change.DefaultBoundScreenId is not null)
-        {
-            _settingsService.Settings.WidgetDefaultBoundScreenId = change.DefaultBoundScreenId;
-        }
+            if (change.DefaultBoundScreenId is not null)
+            {
+                _settingsService.Settings.WidgetDefaultBoundScreenId = change.DefaultBoundScreenId;
+            }
 
-        if (change.DisconnectBehavior is not null)
-        {
-            _settingsService.Settings.WidgetDisplayDisconnectBehavior = change.DisconnectBehavior;
-        }
+            if (change.DisconnectBehavior is not null)
+            {
+                _settingsService.Settings.WidgetDisplayDisconnectBehavior = change.DisconnectBehavior;
+            }
+        });
 
         _settingsService.SaveDebounced(notifySubscribers: false);
         return Task.CompletedTask;
@@ -174,7 +196,14 @@ public sealed class InProcessSettingsWidgetActions : ISettingsWidgetActions
 
     private Task ResetCapsuleOverridesOnUi(Contracts.CapsuleOverrideReset reset)
     {
-        if (CapsuleOverrideResetter.Run(_settingsService.Settings, reset))
+        // Same graph-lock gate as the other layout writers (病 A).
+        bool resetApplied = false;
+        _settingsService.MutateGraphUnderLock(() =>
+        {
+            resetApplied = CapsuleOverrideResetter.Run(_settingsService.Settings, reset);
+        });
+
+        if (resetApplied)
         {
             _settingsService.SaveDebounced();
         }
@@ -210,23 +239,35 @@ public sealed class InProcessSettingsWidgetActions : ISettingsWidgetActions
         // button would otherwise delete the asset files host-side while the
         // overrides themselves survive (snapshots never carry the layout
         // domain) — a half-applied state that could not self-heal.
+        // Deep review R13 (病 A): the clear runs under the graph lock, but
+        // asset file deletion is IO — collect the names inside the gate and
+        // delete after it.
         int cleared = 0;
-        foreach (WidgetConfig widget in _settingsService.Settings.WidgetLayout.Widgets)
+        var deletedAssets = new List<(string WidgetId, string FileName)>();
+        _settingsService.MutateGraphUnderLock(() =>
         {
-            string? fileName = WidgetBackgroundCustomization.GetImageFileNameOverride(widget);
-            if (fileName is null &&
-                WidgetBackgroundCustomization.GetColorOverride(widget) is null)
+            foreach (WidgetConfig widget in _settingsService.Settings.WidgetLayout.Widgets)
             {
-                continue;
-            }
+                string? fileName = WidgetBackgroundCustomization.GetImageFileNameOverride(widget);
+                if (fileName is null &&
+                    WidgetBackgroundCustomization.GetColorOverride(widget) is null)
+                {
+                    continue;
+                }
 
-            WidgetBackgroundCustomization.Clear(widget);
-            if (fileName is not null)
-            {
-                WidgetTitleIconAssetStore.Current.DeleteImage(widget.Id, fileName);
-            }
+                WidgetBackgroundCustomization.Clear(widget);
+                if (fileName is not null)
+                {
+                    deletedAssets.Add((widget.Id, fileName));
+                }
 
-            cleared++;
+                cleared++;
+            }
+        });
+
+        foreach ((string widgetId, string fileName) in deletedAssets)
+        {
+            WidgetTitleIconAssetStore.Current.DeleteImage(widgetId, fileName);
         }
 
         if (cleared > 0)
@@ -286,7 +327,12 @@ public sealed class InProcessSettingsWidgetActions : ISettingsWidgetActions
                 break;
         }
 
-        FeatureWidgetSettings.SetEnabled(_settingsService.Settings, kind, enabled);
+        // Deep review R13 (病 A): the dictionary write is a graph mutation —
+        // gate it against pool-thread graph swaps.
+        _settingsService.MutateGraphUnderLock(() =>
+        {
+            FeatureWidgetSettings.SetEnabled(_settingsService.Settings, kind, enabled);
+        });
         if (_widgetManager is not { } manager)
         {
             await _settingsService.SaveAsync();

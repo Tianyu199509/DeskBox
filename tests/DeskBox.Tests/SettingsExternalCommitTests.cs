@@ -232,6 +232,43 @@ public sealed class SettingsExternalCommitTests : IDisposable
     }
 
     [Fact]
+    public async Task LockedGraphMutations_NeverTearConcurrentSerializations()
+    {
+        // Deep review R13 (R12 debt ②, 病 A): field-level graph writers run
+        // under the graph lock — the same lock the save path serializes the
+        // graph under. Hammering both concurrently must stay exception-free
+        // and lose nothing (an unlocked writer straddling a serialize or a
+        // graph swap is the lost-edit window the gate closes).
+        var main = new SettingsService(SettingsRoot);
+        await main.LoadAsync();
+
+        var writer = Task.Run(async () =>
+        {
+            for (int i = 0; i < 150; i++)
+            {
+                int index = i;
+                main.MutateGraphUnderLock(() => main.Settings.Widgets.Add(
+                    new WidgetConfig { Id = "hammer-" + index.ToString(System.Globalization.CultureInfo.InvariantCulture), WidgetKind = WidgetKind.Music }));
+            }
+        });
+
+        for (int i = 0; i < 15; i++)
+        {
+            await main.SaveAsync(notifySubscribers: false);
+        }
+
+        await writer;
+        await main.SaveAsync(notifySubscribers: false);
+
+        Assert.Equal(150, main.Settings.Widgets.Count(widget =>
+            widget.Id.StartsWith("hammer-", StringComparison.Ordinal)));
+        var fresh = new SettingsService(SettingsRoot);
+        await fresh.LoadAsync();
+        Assert.Equal(150, fresh.Settings.Widgets.Count(widget =>
+            widget.Id.StartsWith("hammer-", StringComparison.Ordinal)));
+    }
+
+    [Fact]
     public async Task ExternalSnapshot_RefusesNewerSchemaAndGarbage()
     {
         var main = new SettingsService(SettingsRoot);

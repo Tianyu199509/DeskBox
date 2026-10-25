@@ -77,9 +77,19 @@ r1-r2 读码+普查：commitId/AsyncLocal 机制本身健全（R4 作用域化�
 - **共享域镜像分歧（登记，随 D9/D10 细审）**：主题/热键/双击/搜索路径 VM 做本地镜像+命令双写；命令失败回滚时（如双击激活注册失败）镜像与权威可能短暂分歧，收敛依赖 reload push——各节深审时逐个核对命令应答是否带 applied 值（widget 族已带）。
 - 其余普查残留：Maintenance 时间戳写者归属未彻查（D16 常规节处理）。
 
+## D4：layout 域保留与写通道（完成，含债②实施）
+
+r1-r3：四条写命令全链读码（宿主 SendLayoutWrite 权威切片合并+兜底直拉→路由→InProcess UiDispatch 编组写）+ R12 定夺记录考古。
+
+- **设计判定：四命令+域保留=正解不冗余**。layout 域主进程独占（快照剥离+保留清单双保险），宿主只能经窄写命令+权威切片应答；对照 PowerToys 全量 JSON 消息模型，本仓字段级 change record 更精确。1.7 候选债里的「layout-changed 空写噪声/组列表不跟随」维持 1.7 排期不动。
+- **债② 病A（布局标量丢写）已实施**：`SettingsService.MutateGraphUnderLock` 锁暴露（R12 定案方向）；InProcess 七个写体进闸（组呈现/组导航默认/布局偏好/胶囊重置/清背景两段式[图锁内收集+锁外删资产文件]/功能开关字典）。重要发现：保留式换图（CopyFrom 引用共享）使布局域跨换图写天然存活——锁的真正价值=消灭「序列化撕裂」窗口（UI 改图 vs 池线程锁内序列化）。
+- **债② 病C/F（写命令保序闸）已实施**：SettingsIpcServer 有序道（六写命令族进 FIFO 单消费 lane，读循环按到达序入队=线缆序；bounded 64 背压；其余命令维持并发分发 16 上限）。
+- 测试+2：`OrderedWriteCommands_ApplyInWireOrder`（slow 被压住时 fast 不得先应用——无 lane 必红）/`LockedGraphMutations_NeverTearConcurrentSerializations`（150 锁内加格子×15 次并发保存零丢零异常）。
+- **登记债（机械后续批）**：WidgetManager ~20 处 UI 图写点（Widgets/WidgetGroups 增删、拖动落位）未进闸——引用共享使跨换图写存活，剩余窗口=与主进程自身锁内序列化的撕裂竞争（拖格子恰逢落盘），窄；后续批逐入口包 MutateGraphUnderLock。
+
 ## 待 Simon 拍板（累积）
 
-（暂无——D2「保持手写双壳」与 D3 修法均按显式授权范围内的合理化处理，如需推翻见上两节理由）
+（暂无——D4 判定与债②实施均在显式授权范围；WidgetManager 进闸后续批为机械收尾）
 
 ## 债登记（累积）
 

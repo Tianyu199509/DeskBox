@@ -151,6 +151,71 @@ public sealed class SettingsIpcTransportTests : IDisposable
         await Assert.ThrowsAnyAsync<Exception>(() => pending);
     }
 
+    [Fact]
+    public async Task OrderedWriteCommands_ApplyInWireOrder()
+    {
+        // Deep review R13 (R12 debt ②, diseases C/F): a dropdown flipped
+        // twice sends two write commands back-to-back; concurrent dispatch
+        // could apply the second (fast) before the first (slow) and leave
+        // the OLDER value standing. Ordered methods must apply in wire
+        // order.
+        string pipe = PipeName;
+        var applied = new List<string>();
+        var slowArrived = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var slowGate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using var server = SettingsIpcServer.Start(pipe, (method, payload, _) =>
+        {
+            if (method == SettingsIpcMethods.WidgetApplyGroupPresentation)
+            {
+                string marker = payload ?? string.Empty;
+                if (marker == "slow")
+                {
+                    slowArrived.TrySetResult();
+                    return RunSlowAsync();
+                }
+
+                lock (applied)
+                {
+                    applied.Add(marker);
+                }
+            }
+
+            return Task.FromResult((true, (string?)"done", (string?)null));
+
+            async Task<(bool Ok, string? Payload, string? Error)> RunSlowAsync()
+            {
+                await slowGate.Task;
+                lock (applied)
+                {
+                    applied.Add("slow");
+                }
+
+                return (true, "done", null);
+            }
+        });
+
+        await using var client = await SettingsIpcClient.ConnectAsync(pipe, TimeSpan.FromSeconds(2));
+
+        // Wire order is pinned by waiting for the server to SEE the first
+        // request before sending the second.
+        Task<(bool, string?, string?)> first = client.RequestAsync(
+            SettingsIpcMethods.WidgetApplyGroupPresentation, "slow");
+        await slowArrived.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        Task<(bool, string?, string?)> second = client.RequestAsync(
+            SettingsIpcMethods.WidgetApplyGroupPresentation, "fast");
+
+        // Give the fast write time to reach the server: without the ordered
+        // lane it would dispatch immediately and apply while slow is held.
+        await Task.Delay(250);
+        slowGate.TrySetResult();
+        await Task.WhenAll(first, second);
+
+        lock (applied)
+        {
+            Assert.Equal(new[] { "slow", "fast" }, applied.ToArray());
+        }
+    }
+
     public void Dispose()
     {
         try

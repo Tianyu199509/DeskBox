@@ -27,6 +27,57 @@ public sealed class SettingsIpcServer : IAsyncDisposable
     private long _nextEventId = -1;
     private volatile bool _disposed;
 
+    /// <summary>
+    /// Deep review R13 (R12 debt ②, diseases C/F): write commands whose
+    /// application order must match their wire order. A dropdown flipped
+    /// twice sends two of these back-to-back; concurrent dispatch could
+    /// apply the second (fast) before the first (slow) and leave the
+    /// OLDER value standing on the desktop. Layout writes and the feature
+    /// switch are the same-key families; everything else (reads, long
+    /// ops, notifications) keeps concurrent dispatch.
+    /// </summary>
+    private static readonly HashSet<string> OrderedApplyMethods = new(StringComparer.Ordinal)
+    {
+        SettingsIpcMethods.WidgetApplyGroupPresentation,
+        SettingsIpcMethods.WidgetApplyGroupNavDefaults,
+        SettingsIpcMethods.WidgetApplyLayoutPreferences,
+        SettingsIpcMethods.WidgetResetCapsuleOverrides,
+        SettingsIpcMethods.AppearanceClearPerWidgetBackgrounds,
+        SettingsIpcMethods.WidgetSyncFeatureEnabled,
+    };
+
+    // Bounded: a wedged ordered consumer applies backpressure to the read
+    // loop (which applies it to the client) instead of growing unboundedly;
+    // the 32MB line guard already bounds a single item.
+    private readonly System.Threading.Channels.Channel<(SettingsIpcEnvelope Envelope, System.IO.Pipes.NamedPipeServerStream Origin)> _orderedLane =
+        System.Threading.Channels.Channel.CreateBounded<(SettingsIpcEnvelope, System.IO.Pipes.NamedPipeServerStream)>(
+            new System.Threading.Channels.BoundedChannelOptions(64)
+            {
+                FullMode = System.Threading.Channels.BoundedChannelFullMode.Wait,
+            });
+
+    private Task? _orderedLaneLoop;
+
+    private async Task RunOrderedLaneAsync()
+    {
+        await foreach ((SettingsIpcEnvelope envelope, System.IO.Pipes.NamedPipeServerStream origin) in
+                       _orderedLane.Reader.ReadAllAsync(_cts.Token))
+        {
+            try
+            {
+                await RunBoundedDispatchAsync(envelope, origin);
+            }
+            catch (OperationCanceledException)
+            {
+                break;
+            }
+            catch (Exception ex)
+            {
+                App.Log($"[SettingsIpc] Ordered dispatch failed for {envelope.Method}: {ex.Message}");
+            }
+        }
+    }
+
     private SettingsIpcServer(
         string pipeName,
         Func<string, string?, CancellationToken, Task<(bool Ok, string? Payload, string? Error)>> dispatcher)
@@ -57,6 +108,7 @@ public sealed class SettingsIpcServer : IAsyncDisposable
             _expectedClientPidProvider = expectedClientPidProvider,
         };
         server._acceptLoop = Task.Run(server.AcceptLoopAsync);
+        server._orderedLaneLoop = Task.Run(server.RunOrderedLaneAsync);
         return server;
     }
 
@@ -228,16 +280,29 @@ public sealed class SettingsIpcServer : IAsyncDisposable
 
             if (envelope.Type == SettingsIpcEnvelope.TypeRequest)
             {
-                // Batch R11: bounded concurrent dispatch. Unbounded Task.Run
-                // per request let a chatty host (preview spam + commits +
-                // reads) spawn unbounded pool threads, each ending in a
-                // locked write — under a wedged pipe that turned into pool
-                // starvation. The cap keeps a burst from amplifying; long
-                // ops (10min migrate) still run without blocking others.
-                // Task.Run keeps the dispatch off the read loop (a sync
-                // dispatcher prefix would otherwise head-of-line block
-                // reads); the gate bounds how many run at once.
-                _ = Task.Run(() => RunBoundedDispatchAsync(envelope, stream));
+                // Deep review R13 (R12 debt ②, diseases C/F): same-key
+                // write commands must APPLY in wire order. The bounded
+                // concurrent dispatch below lets a fast second write
+                // overtake a slow first one, so ordered methods ride a
+                // single FIFO lane instead — the read loop enqueues in
+                // arrival order, one consumer applies them sequentially.
+                if (OrderedApplyMethods.Contains(envelope.Method))
+                {
+                    await _orderedLane.Writer.WriteAsync((envelope, stream), _cts.Token);
+                }
+                else
+                {
+                    // Batch R11: bounded concurrent dispatch. Unbounded Task.Run
+                    // per request let a chatty host (preview spam + commits +
+                    // reads) spawn unbounded pool threads, each ending in a
+                    // locked write — under a wedged pipe that turned into pool
+                    // starvation. The cap keeps a burst from amplifying; long
+                    // ops (10min migrate) still run without blocking others.
+                    // Task.Run keeps the dispatch off the read loop (a sync
+                    // dispatcher prefix would otherwise head-of-line block
+                    // reads); the gate bounds how many run at once.
+                    _ = Task.Run(() => RunBoundedDispatchAsync(envelope, stream));
+                }
             }
             // Client→server events have no consumer yet; batch 3d routes them.
         }
@@ -445,6 +510,24 @@ public sealed class SettingsIpcServer : IAsyncDisposable
         catch (OperationCanceledException)
         {
         }
+
+        // Deep review R13: drain the ordered lane's single consumer. The
+        // cancellation token makes its ReadAllAsync throw, so a best-effort
+        // await is all that is needed; a lane item mid-dispatch completes
+        // (or faults) on its own and its response write fails into the
+        // already-disposed stream, which the write path tolerates.
+        _orderedLane.Writer.TryComplete();
+        try
+        {
+            if (_orderedLaneLoop is not null)
+            {
+                await _orderedLaneLoop;
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+
         _cts.Dispose();
     }
 }

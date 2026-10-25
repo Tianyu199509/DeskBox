@@ -1301,6 +1301,25 @@ settings.FocusClickedWidgetOnRaise = false;
     internal long LatestOutboundCommitId => Volatile.Read(ref _lastOutboundCommitId);
 
     /// <summary>
+    /// Runs a field-level graph mutation under the same lock the external
+    /// snapshot/preview apply holds (R12 debt ② "病 A", implemented in deep
+    /// review R13). Those applies SWAP the whole <c>_settings</c> reference
+    /// on a router pool thread, so an unsynchronized read-modify-write on
+    /// the UI thread (find the group, then assign) could straddle the swap
+    /// and write into the orphaned outgoing graph — a silently lost edit.
+    /// Every writer that reaches into the layout graph field-by-field must
+    /// go through this gate. Do nothing slow inside: the pool-thread apply
+    /// serializes the whole graph under the same lock.
+    /// </summary>
+    internal void MutateGraphUnderLock(Action mutation)
+    {
+        lock (_lock)
+        {
+            mutation();
+        }
+    }
+
+    /// <summary>
     /// Applies a settings snapshot serialized by another process (the
     /// settings host's commit, batch 3a): parse, schema gate, preserve the
     /// main-owned runtime markers, swap the in-memory state, persist through
