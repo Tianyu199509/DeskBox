@@ -33,6 +33,9 @@ public sealed class RemoteSettingsPersistenceSink : ISettingsPersistenceSink
             payload).ConfigureAwait(false);
         if (!ok)
         {
+            // Detailed reason stays in the log; the caller owns the
+            // PersistenceFailed notification for the refusal path (deep
+            // review R13, R12 debt ①).
             App.Log($"[SettingsIpc] Remote commit {commit.CommitId} refused: {error ?? "unknown"}");
         }
 

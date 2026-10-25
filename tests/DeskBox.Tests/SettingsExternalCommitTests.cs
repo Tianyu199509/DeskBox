@@ -268,6 +268,37 @@ public sealed class SettingsExternalCommitTests : IDisposable
             widget.Id.StartsWith("hammer-", StringComparison.Ordinal)));
     }
 
+    private sealed class RefusingSink : ISettingsPersistenceSink
+    {
+        public Task<bool> SaveAsync(SettingsService owner, SettingsPersistenceCommit commit) =>
+            Task.FromResult(false);
+    }
+
+    [Fact]
+    public async Task SinkRefusal_RaisesPersistenceFailedForTheVisibleSurface()
+    {
+        // Deep review R13 (R12 debt ①): a sink returning false without
+        // throwing must still raise PersistenceFailed — the settings host's
+        // save-failed banner rides that event, and the remote sink's
+        // refusal used to be log-only.
+        var host = new SettingsService(SettingsRoot, new RefusingSink());
+        await host.LoadAsync();
+
+        SettingsPersistenceFailure? reported = null;
+        using var gate = new System.Threading.ManualResetEventSlim(false);
+        host.PersistenceFailed += failure =>
+        {
+            reported = failure;
+            gate.Set();
+        };
+
+        host.Settings.Theme = "Dark";
+        Assert.False(await host.SaveCheckedAsync());
+        Assert.True(gate.Wait(TimeSpan.FromSeconds(5)));
+        Assert.NotNull(reported);
+        Assert.Equal("save", reported.Operation);
+    }
+
     [Fact]
     public async Task ExternalSnapshot_RefusesNewerSchemaAndGarbage()
     {

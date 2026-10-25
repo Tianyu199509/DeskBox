@@ -1124,25 +1124,38 @@ settings.FocusClickedWidgetOnRaise = false;
             }
 
             bool saved = await _persistenceSink.SaveAsync(this, commit);
-            if (saved)
+            if (!saved)
             {
-                try
-                {
-                    LocalPersistCompleted?.Invoke(commitId);
-                    if (_lastCommitIncludedLayout)
-                    {
-                        LayoutPersistCompleted?.Invoke();
-                    }
-                }
-                catch (Exception observerException)
-                {
-                    App.Log(
-                        $"[SettingsService] Local persist observer threw: " +
-                        observerException);
-                }
+                // Deep review R13 (R12 debt ①): the refusal path (sink
+                // returns false without throwing) reports through the same
+                // channel as exceptions — the settings host's save-failed
+                // banner rides this event, and a silent false used to leave
+                // the user editing a surface that would not persist. Sinks
+                // log their detailed reasons; this raise is the single
+                // owner of the notification.
+                ReportPersistenceFailure(new SettingsPersistenceFailure(
+                    "save",
+                    "persistence sink refused the commit",
+                    DateTimeOffset.UtcNow));
+                return false;
             }
 
-            return saved;
+            try
+            {
+                LocalPersistCompleted?.Invoke(commitId);
+                if (_lastCommitIncludedLayout)
+                {
+                    LayoutPersistCompleted?.Invoke();
+                }
+            }
+            catch (Exception observerException)
+            {
+                App.Log(
+                    $"[SettingsService] Local persist observer threw: " +
+                    observerException);
+            }
+
+            return true;
         }
         catch (Exception ex)
         {
@@ -1316,6 +1329,29 @@ settings.FocusClickedWidgetOnRaise = false;
         lock (_lock)
         {
             mutation();
+        }
+    }
+
+    /// <summary>
+    /// Sinks report their own failures through this channel so a refusal
+    /// (sink returns false without throwing) reaches the same
+    /// <see cref="PersistenceFailed"/> observers as exceptions do (R12
+    /// debt ①, implemented in deep review R13): a refused remote commit
+    /// previously vanished into the log while the user kept editing a
+    /// settings surface that would not persist.
+    /// </summary>
+    internal void ReportPersistenceFailure(SettingsPersistenceFailure failure)
+    {
+        LastPersistenceFailure = failure;
+        try
+        {
+            PersistenceFailed?.Invoke(failure);
+        }
+        catch (Exception notificationException)
+        {
+            App.Log(
+                $"[SettingsService] Persistence failure observer threw: " +
+                notificationException);
         }
     }
 
@@ -1564,21 +1600,9 @@ settings.FocusClickedWidgetOnRaise = false;
                 }
                 if (!layoutSaved)
                 {
-                    var failure = new SettingsPersistenceFailure(
-                        "save",
-                        layoutFailureReason,
-                        DateTimeOffset.UtcNow);
-                    owner.LastPersistenceFailure = failure;
-                    try
-                    {
-                        owner.PersistenceFailed?.Invoke(failure);
-                    }
-                    catch (Exception notificationException)
-                    {
-                        App.Log(
-                            $"[SettingsService] Persistence failure observer threw: " +
-                            notificationException);
-                    }
+                    // Refusals return false; the caller owns the
+                    // PersistenceFailed notification (deep review R13).
+                    App.Log($"[SettingsService] Save refused: {layoutFailureReason}");
                     return false;
                 }
 
@@ -1587,22 +1611,9 @@ settings.FocusClickedWidgetOnRaise = false;
             }
             catch (Exception ex)
             {
-                var failure = new SettingsPersistenceFailure(
-                    "save",
-                    ex.Message,
-                    DateTimeOffset.UtcNow);
-                owner.LastPersistenceFailure = failure;
+                // The caller's catch reports the failure; keep the detailed
+                // reason here.
                 App.Log($"[SettingsService] Failed to save settings: {ex}");
-                try
-                {
-                    owner.PersistenceFailed?.Invoke(failure);
-                }
-                catch (Exception notificationException)
-                {
-                    App.Log(
-                        $"[SettingsService] Persistence failure observer threw: " +
-                        notificationException);
-                }
                 return false;
             }
         }

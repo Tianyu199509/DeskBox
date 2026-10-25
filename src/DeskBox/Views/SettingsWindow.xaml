@@ -3940,5 +3940,22 @@ Text="DeskBox" />
                     Padding="4,2" />
             </StackPanel>
         </Border>
+
+        <!-- Deep review R13 (R12 debt ①): a settings commit the main process
+             refused (or whose pipe round trip failed) used to vanish into
+             the host log while the user kept editing a surface that would
+             not persist. Shell-level so it is visible on every section;
+             closes on user action or on the next successful commit. Wired
+             only by the settings-host process (App.SettingsHost). -->
+        <InfoBar
+            x:Name="SaveFailedInfoBar"
+            Grid.Row="1"
+            Margin="16,12,16,0"
+            HorizontalAlignment="Stretch"
+            VerticalAlignment="Top"
+            Canvas.ZIndex="40"
+            IsClosable="True"
+            IsOpen="False"
+            Severity="Warning" />
     </Grid>
 </Window>

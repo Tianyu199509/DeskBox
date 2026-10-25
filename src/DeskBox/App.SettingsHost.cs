@@ -255,12 +255,20 @@ public partial class App
         settings.AdoptExternalSnapshot(snapshotJson);
         Log("[SettingsHost] Settings adopted from main-process snapshot");
 
-        // Commit failures must at least reach the host log: the sink's
-        // refusal returns false without an exception, and the old
-        // silent path meant edits vanished with zero trace (the user-facing
-        // failure surface stays a registered debt, batch R9).
+        // Commit failures must reach the user, not just the host log: the
+        // sink's refusal now raises PersistenceFailed (deep review R13, R12
+        // debt ①), and the window banner keeps the user from editing a
+        // surface that silently would not persist. The banner closes again
+        // on the next successful commit — the recovery signal.
         settings.PersistenceFailed += failure =>
+        {
             Log($"[SettingsHost] Settings commit failed ({failure.Operation}): {failure.Message}");
+            UiDispatcherQueue?.TryEnqueue(() => _settingsHostWindow?.ShowSaveFailedBanner());
+        };
+        settings.LocalPersistCompleted += _ =>
+        {
+            UiDispatcherQueue?.TryEnqueue(() => _settingsHostWindow?.DismissSaveFailedBanner());
+        };
 
         // The autostart toggle executes in THIS process (the settings page
         // calls StartupService directly). Without Configure the static fell
