@@ -44,11 +44,12 @@ public interface ISettingsHotkeyActions
     /// <summary>Enables or disables the global hotkey host-side.</summary>
     void SetEnabled(bool enabled);
 
-    /// <summary>
-    /// Whether the search hotkey currently owns the gesture (registration
-    /// state lives with the running services, not in settings.json alone).
-    /// </summary>
-    bool IsGestureOwnedBySearchHotkey(GlobalHotkeyGesture gesture);
+    // IsGestureOwnedBySearchHotkey / IsGestureOwnedByMainHotkey removed
+    // (deep review R13-3, R14 hot-path pass): both predicates derive purely
+    // from settings-mirror fields (the search hotkey gesture and the main
+    // activation normalization), so the settings host computes them locally
+    // — the per-keystroke synchronous round trips this interface used to
+    // carry were the R10/R11 modal-loop wedge family.
 
     // ── Search hotkey (batch R9) ────────────────────────────────────
     // SearchSettingsCoordinator consumes ISearchHotkeyController, whose
@@ -57,17 +58,18 @@ public interface ISettingsHotkeyActions
     // permanently unavailable — the toggle/capture/reset controls could
     // never reach the service at all.
 
-    /// <summary>Live registration state of the search hotkey service.</summary>
-    bool IsSearchHotkeyRegistered();
+    /// <summary>
+    /// Live registration state of the search hotkey service. Async since
+    /// deep review R13-3: the host's controller caches the answer off the
+    /// registration-changed push instead of blocking callers.
+    /// </summary>
+    Task<bool> IsSearchHotkeyRegisteredAsync();
 
     /// <summary>Enables or disables the search hotkey registration.</summary>
     void SetSearchHotkeyEnabled(bool enabled);
 
     /// <summary>Applies a captured gesture through the live service.</summary>
     bool TryApplySearchHotkeyGesture(GlobalHotkeyGesture gesture, out string? error);
-
-    /// <summary>Whether the main activation hotkey currently owns the gesture.</summary>
-    bool IsGestureOwnedByMainHotkey(GlobalHotkeyGesture gesture);
 
     /// <summary>Re-runs the search hotkey registration against persisted settings.</summary>
     void RefreshSearchHotkeyRegistration();

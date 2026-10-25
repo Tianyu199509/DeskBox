@@ -247,8 +247,11 @@ public sealed class SettingsSliceOwnershipContractTests
         ["src/DeskBox/Services/CapsuleOverrideResetter.cs"] = 8,
         // Settings host (batch 3c-3b): 8 = the reload bridge diffing theme
         // (3 fields), language, and nothing else against the pre-reload
-        // state to decide which host-side replay to run.
-        ["src/DeskBox/App.SettingsHost.cs"] = 8,
+        // state to decide which host-side replay to run. Deep review R13-3
+        // (+3): the search-hotkey controller's local mirror computations
+        // (Search gesture 2 fields + main activation kind/modifiers/key)
+        // replaced per-keystroke pipe round trips.
+        ["src/DeskBox/App.SettingsHost.cs"] = 11,
         ["src/DeskBox/Controls/DesktopOrganizationPreviewCard.xaml.cs"] = 11,
         ["src/DeskBox/Controls/DesktopOrganizationTaskView.Appearance.cs"] = 1,
         ["src/DeskBox/Controls/DesktopOrganizationTaskView.xaml.cs"] = 1,

@@ -155,7 +155,21 @@ public sealed partial class SettingsWindow
 
     private string? GetGlobalHotkeyRecorderConflict(GlobalHotkeyGesture gesture)
     {
-        return _hotkeyActions.IsGestureOwnedBySearchHotkey(gesture)
+        // Deep review R13-3 (R14 hot-path pass): this check runs on every
+        // captured keystroke, so it must not take a pipe round trip (the
+        // R10/R11 modal-loop wedge family). The predicate is exactly the
+        // service's: the search hotkey's current gesture normalized from
+        // the same settings fields both processes mirror.
+        var search = App.Current?.SettingsService?.Settings.Search;
+        if (search is null)
+        {
+            return null;
+        }
+
+        GlobalHotkeyGesture searchGesture = GlobalHotkeyService.NormalizeGesture(
+            search.SearchHotkeyModifiers,
+            search.SearchHotkeyKey);
+        return searchGesture.Equals(gesture)
             ? _localizationService.T("Settings.GlobalHotkey.Status.SearchHotkeyConflict")
             : null;
     }

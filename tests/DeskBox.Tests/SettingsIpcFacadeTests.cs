@@ -78,20 +78,13 @@ public sealed class SettingsIpcFacadeTests : IDisposable
 
         public void SetEnabled(bool enabled) => SetEnabledArg = enabled;
 
-        public bool IsGestureOwnedBySearchHotkey(GlobalHotkeyGesture gesture)
-        {
-            GestureOwnedArg = true;
-            return GestureOwnedResult;
-        }
-
         public bool SearchHotkeyRegistered = true;
         public bool? SearchSetEnabledArg;
         public GlobalHotkeyGesture? SearchAppliedGesture;
         public bool SearchApplyResult = true;
-        public bool SearchGestureOwnedByMainResult;
         public bool SearchRefreshCalled;
 
-        public bool IsSearchHotkeyRegistered() => SearchHotkeyRegistered;
+        public Task<bool> IsSearchHotkeyRegisteredAsync() => Task.FromResult(SearchHotkeyRegistered);
 
         public void SetSearchHotkeyEnabled(bool enabled) => SearchSetEnabledArg = enabled;
 
@@ -101,9 +94,6 @@ public sealed class SettingsIpcFacadeTests : IDisposable
             error = SearchApplyResult ? null : "search apply failed";
             return SearchApplyResult;
         }
-
-        public bool IsGestureOwnedByMainHotkey(GlobalHotkeyGesture gesture) =>
-            SearchGestureOwnedByMainResult;
 
         public void RefreshSearchHotkeyRegistration() => SearchRefreshCalled = true;
 
@@ -286,8 +276,9 @@ public sealed class SettingsIpcFacadeTests : IDisposable
             await UntilAsync(() => hotkey.SetEnabledArg is false);
             Assert.False(hotkey.SetEnabledArg);
 
-            hotkey.GestureOwnedResult = true;
-            Assert.True(remote.IsGestureOwnedBySearchHotkey(activation.Gesture));
+            // (gesture-owned round trips removed in deep review R13-3: the
+            // predicates are settings-mirror computations the host performs
+            // locally — no wire left to round-trip.)
 
             DesktopDoubleClickToggleResult toggle = remote.TrySetDesktopDoubleClickEnabled(true);
             Assert.True(hotkey.DoubleClickArg);
@@ -323,7 +314,7 @@ public sealed class SettingsIpcFacadeTests : IDisposable
             var remote = new RemoteSettingsHotkeyActions(client);
 
             hotkey.SearchHotkeyRegistered = true;
-            Assert.True(remote.IsSearchHotkeyRegistered());
+            Assert.True(await remote.IsSearchHotkeyRegisteredAsync());
 
             remote.SetSearchHotkeyEnabled(false);
             await UntilAsync(() => hotkey.SearchSetEnabledArg is false);
@@ -339,17 +330,19 @@ public sealed class SettingsIpcFacadeTests : IDisposable
             Assert.Equal("search apply failed", failedError);
             hotkey.SearchApplyResult = true;
 
-            hotkey.SearchGestureOwnedByMainResult = true;
-            Assert.True(remote.IsGestureOwnedByMainHotkey(gesture));
-
             remote.RefreshSearchHotkeyRegistration();
             await UntilAsync(() => hotkey.SearchRefreshCalled);
             Assert.True(hotkey.SearchRefreshCalled);
 
-            // The coordinator-facing adapter rides the same commands.
+            // The coordinator-facing adapter rides the same commands; the
+            // registration cache converges off the async probe (deep review
+            // R13-3), and the main-hotkey ownership predicate is a local
+            // mirror computation.
             var controller = new RemoteSearchHotkeyController(
                 remote,
-                () => new GlobalHotkeyGesture(HotkeyModifierKeys.Alt, 0x44));
+                () => new GlobalHotkeyGesture(HotkeyModifierKeys.Alt, 0x44),
+                () => DeskBox.Models.GlobalHotkeyActivation.FromChord(gesture));
+            await UntilAsync(() => controller.IsRegistered);
             Assert.True(controller.IsRegistered);
             Assert.Equal(
                 new GlobalHotkeyGesture(HotkeyModifierKeys.Alt, 0x44),
@@ -358,6 +351,8 @@ public sealed class SettingsIpcFacadeTests : IDisposable
             await UntilAsync(() => hotkey.SearchSetEnabledArg is true);
             Assert.True(hotkey.SearchSetEnabledArg);
             Assert.True(controller.IsGestureOwnedByMainHotkey(gesture));
+            Assert.False(controller.IsGestureOwnedByMainHotkey(
+                new GlobalHotkeyGesture(HotkeyModifierKeys.Control, 0x44)));
         }
         finally
         {

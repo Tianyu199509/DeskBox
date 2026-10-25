@@ -77,20 +77,18 @@ public sealed class RemoteSettingsHotkeyActions : ISettingsHotkeyActions
             SettingsIpcPayload.EncodeBoolean(enabled),
             nameof(SetEnabled));
 
-    public bool IsGestureOwnedBySearchHotkey(GlobalHotkeyGesture gesture)
-    {
-        (bool ok, string? payload, _) = _client.RequestAsync(
-                SettingsIpcMethods.HotkeyGestureOwned,
-                SettingsIpcPayload.Encode(gesture, SettingsIpcJsonContext.Default.GlobalHotkeyGesture))
-            .GetAwaiter().GetResult();
-        return ok && SettingsIpcPayload.DecodeBoolean(payload);
-    }
+    // IsGestureOwnedBySearchHotkey / IsGestureOwnedByMainHotkey removed
+    // with the interface members (deep review R13-3): both predicates are
+    // settings-mirror computations the settings host performs locally —
+    // the per-keystroke synchronous round trips were the R10/R11
+    // modal-loop wedge family.
 
-    public bool IsSearchHotkeyRegistered()
+    public async Task<bool> IsSearchHotkeyRegisteredAsync()
     {
-        (bool ok, string? payload, _) = _client.RequestAsync(
-                SettingsIpcMethods.SearchHotkeyState)
-            .GetAwaiter().GetResult();
+        // Deep review R13-3: async — the host's controller caches the
+        // answer off the registration push instead of blocking a caller.
+        (bool ok, string? payload, _) = await _client.RequestAsync(
+                SettingsIpcMethods.SearchHotkeyState);
         return ok && SettingsIpcPayload.DecodeBoolean(payload);
     }
 
@@ -111,15 +109,6 @@ public sealed class RemoteSettingsHotkeyActions : ISettingsHotkeyActions
             .GetAwaiter().GetResult();
         error = applyError;
         return ok;
-    }
-
-    public bool IsGestureOwnedByMainHotkey(GlobalHotkeyGesture gesture)
-    {
-        (bool ok, string? payload, _) = _client.RequestAsync(
-                SettingsIpcMethods.SearchHotkeyGestureOwnedByMain,
-                SettingsIpcPayload.Encode(gesture, SettingsIpcJsonContext.Default.GlobalHotkeyGesture))
-            .GetAwaiter().GetResult();
-        return ok && SettingsIpcPayload.DecodeBoolean(payload);
     }
 
     // Same fire-and-forget contract as the notifications above (batch R11

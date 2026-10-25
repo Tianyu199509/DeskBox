@@ -53,8 +53,8 @@ public sealed class InProcessSettingsHotkeyActions : ISettingsHotkeyActions
     private SearchHotkeyService? SearchHotkey =>
         _searchHotkeyProvider?.Invoke() ?? _searchHotkeyService;
 
-    public bool IsSearchHotkeyRegistered() =>
-        SearchHotkey?.IsRegistered == true;
+    public Task<bool> IsSearchHotkeyRegisteredAsync() =>
+        Task.FromResult(SearchHotkey?.IsRegistered == true);
 
     public void SetSearchHotkeyEnabled(bool enabled) =>
         SearchHotkey?.SetEnabled(enabled);
@@ -69,9 +69,6 @@ public sealed class InProcessSettingsHotkeyActions : ISettingsHotkeyActions
 
         return search.TryApplyGesture(gesture, out error);
     }
-
-    public bool IsGestureOwnedByMainHotkey(GlobalHotkeyGesture gesture) =>
-        SearchHotkey?.IsGestureOwnedByMainHotkey(gesture) == true;
 
     public void RefreshSearchHotkeyRegistration() =>
         SearchHotkey?.RefreshRegistration();
@@ -116,8 +113,9 @@ public sealed class InProcessSettingsHotkeyActions : ISettingsHotkeyActions
 
     public void SetEnabled(bool enabled) => _hotkeyService?.SetEnabled(enabled);
 
-    public bool IsGestureOwnedBySearchHotkey(GlobalHotkeyGesture gesture) =>
-        GlobalHotkeyService.IsGestureOwnedBySearchHotkey(gesture);
+    // IsGestureOwnedBySearchHotkey/ByMainHotkey left the interface with
+    // their round trips (deep review R13-3): both are settings-mirror
+    // computations the settings host now performs locally.
 
     public DesktopDoubleClickToggleResult TrySetDesktopDoubleClickEnabled(bool enabled)
     {

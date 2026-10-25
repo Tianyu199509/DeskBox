@@ -62,7 +62,10 @@ public static class SettingsIpcMethods
     public const string HotkeyReset = "hotkey.reset";
     public const string HotkeyRefreshRegistration = "hotkey.refresh-registration";
     public const string HotkeySetEnabled = "hotkey.set-enabled";
-    public const string HotkeyGestureOwned = "hotkey.gesture-owned";
+    // (hotkey.gesture-owned / search-hotkey.gesture-owned-by-main removed
+    // in deep review R13-3: both predicates are settings-mirror
+    // computations the host performs locally — the per-keystroke sync
+    // round trips were the modal-loop wedge family.)
     public const string HotkeyDoubleClickSet = "hotkey.double-click-set";
     public const string HotkeySuspend = "hotkey.suspend";
     public const string HotkeyResume = "hotkey.resume";
@@ -73,7 +76,6 @@ public static class SettingsIpcMethods
     public const string SearchHotkeyState = "search-hotkey.state";
     public const string SearchHotkeySetEnabled = "search-hotkey.set-enabled";
     public const string SearchHotkeyApplyGesture = "search-hotkey.apply-gesture";
-    public const string SearchHotkeyGestureOwnedByMain = "search-hotkey.gesture-owned-by-main";
     public const string SearchHotkeyRefreshRegistration = "search-hotkey.refresh-registration";
 
     // ── Data facade (batch 3c-1) ─────────────────────────────────────

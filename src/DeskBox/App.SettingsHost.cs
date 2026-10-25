@@ -536,7 +536,14 @@ public partial class App
             hotkey,
             () => GlobalHotkeyService.NormalizeGesture(
                 settings.Settings.Search.SearchHotkeyModifiers,
-                settings.Settings.Search.SearchHotkeyKey));
+                settings.Settings.Search.SearchHotkeyKey),
+            // Deep review R13-3: the "owned by main hotkey" predicate is
+            // computed locally from the mirror, with the same normalization
+            // GlobalHotkeyService.CurrentActivation applies — no round trip.
+            () => GlobalHotkeyService.NormalizeActivation(
+                settings.Settings.GlobalHotkeyActivationKind,
+                settings.Settings.GlobalHotkeyModifiers,
+                settings.Settings.GlobalHotkeyKey));
         var search = new SearchSettingsCoordinator(
             settings,
             localization,
