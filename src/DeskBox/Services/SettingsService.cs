@@ -1369,31 +1369,7 @@ settings.FocusClickedWidgetOnRaise = false;
         lock (_lock)
         {
             before = _settings;
-            // Runtime markers only this process authors would otherwise be
-            // rolled back by every settings-host commit that was loaded
-            // before the marker flip.
-            parsed.LastUpdateCheckAt = before.LastUpdateCheckAt;
-            parsed.LastRunVersion = before.LastRunVersion;
-            parsed.HasResolvedInitialFileWidgetSetup = before.HasResolvedInitialFileWidgetSetup;
-            parsed.AutoStartDefaultApplied = before.AutoStartDefaultApplied;
-            parsed.FullyElevatedNoticeAcknowledgedUtcTicks =
-                before.FullyElevatedNoticeAcknowledgedUtcTicks;
-            // Onboarding completion is authored by the MAIN process's
-            // onboarding window; a host snapshot serialized before the
-            // completion save would otherwise roll it back and force a
-            // second run on next launch (batch R6).
-            parsed.HasCompletedOnboarding = before.HasCompletedOnboarding;
-            parsed.CompletedOnboardingVersion = before.CompletedOnboardingVersion;
-            parsed.OnboardingStepIndex = before.OnboardingStepIndex;
-            // The widget-layout domain — widgets list, groups, deleted ids,
-            // topology, AND the feature-widget enabled dictionary — is
-            // authoritative in the MAIN process only: the host's in-memory
-            // copy drifts from the main process's (it reloads settings.json
-            // but never widget-layout.json), so accepting its snapshot here
-            // would rewind whatever the host has not seen. Feature switches
-            // travel as their own IPC command instead
-            // (ISettingsWidgetActions.SetFeatureWidgetEnabled).
-            parsed.WidgetLayout.CopyFrom(before.WidgetLayout);
+            PreserveMainOwnedState(before, parsed);
             _settings = parsed;
             _settingsSchemaNewerThanBuild = false;
         }
@@ -1910,19 +1886,13 @@ settings.FocusClickedWidgetOnRaise = false;
 
         lock (_lock)
         {
-            parsed.WidgetLayout.CopyFrom(_settings.WidgetLayout);
-            parsed.LastUpdateCheckAt = _settings.LastUpdateCheckAt;
-            parsed.LastRunVersion = _settings.LastRunVersion;
-            parsed.HasResolvedInitialFileWidgetSetup = _settings.HasResolvedInitialFileWidgetSetup;
-            parsed.AutoStartDefaultApplied = _settings.AutoStartDefaultApplied;
-            parsed.FullyElevatedNoticeAcknowledgedUtcTicks =
-                _settings.FullyElevatedNoticeAcknowledgedUtcTicks;
-            // Same onboarding guard as the commit path: a preview payload
-            // serialized from stale host memory must not roll completion back
-            // (a later save would persist the rollback — batch R7).
-            parsed.HasCompletedOnboarding = _settings.HasCompletedOnboarding;
-            parsed.CompletedOnboardingVersion = _settings.CompletedOnboardingVersion;
-            parsed.OnboardingStepIndex = _settings.OnboardingStepIndex;
+            // Same ownership rules as the commit path: a preview payload
+            // serialized from stale host memory must not roll main-owned
+            // state back — and since the preview swap makes the stale
+            // graph live, the NEXT durable save from any source would
+            // persist the rollback (deep review R13 unified the two
+            // previously hand-copied preserve lists).
+            PreserveMainOwnedState(_settings, parsed);
             _settings = parsed;
             _settingsSchemaNewerThanBuild = false;
         }
@@ -1930,6 +1900,64 @@ settings.FocusClickedWidgetOnRaise = false;
         _appearancePreviewCts?.Cancel();
         AppearancePreviewChanged?.Invoke();
         return true;
+    }
+
+    /// <summary>
+    /// Ownership rules applied when swapping in an <see cref="AppSettings"/>
+    /// graph serialized by the settings host — used by both the durable
+    /// commit path (<see cref="ApplyExternalSnapshotAsync"/>) and the
+    /// appearance preview path (<see cref="ApplyExternalAppearancePreview"/>).
+    /// Everything the MAIN process authors must survive the swap, because
+    /// the host's copy is stale-or-equal for those fields. Callers hold
+    /// <c>_lock</c> and discard the <paramref name="before"/> graph right
+    /// after the swap (collection reference-sharing relies on that).
+    /// </summary>
+    private static void PreserveMainOwnedState(AppSettings before, AppSettings parsed)
+    {
+        // Runtime markers only this process authors would otherwise be
+        // rolled back by every settings-host commit that was loaded
+        // before the marker flip.
+        parsed.LastUpdateCheckAt = before.LastUpdateCheckAt;
+        parsed.LastRunVersion = before.LastRunVersion;
+        parsed.HasResolvedInitialFileWidgetSetup = before.HasResolvedInitialFileWidgetSetup;
+        parsed.AutoStartDefaultApplied = before.AutoStartDefaultApplied;
+        parsed.FullyElevatedNoticeAcknowledgedUtcTicks =
+            before.FullyElevatedNoticeAcknowledgedUtcTicks;
+        // Onboarding completion is authored by the MAIN process's
+        // onboarding window; a host snapshot serialized before the
+        // completion save would otherwise roll it back and force a
+        // second run on next launch (batch R6).
+        parsed.HasCompletedOnboarding = before.HasCompletedOnboarding;
+        parsed.CompletedOnboardingVersion = before.CompletedOnboardingVersion;
+        parsed.OnboardingStepIndex = before.OnboardingStepIndex;
+        // The widget-layout domain — widgets list, groups, deleted ids,
+        // topology, AND the feature-widget enabled dictionary — is
+        // authoritative in the MAIN process only: the host's in-memory
+        // copy drifts from the main process's (it reloads settings.json
+        // but never widget-layout.json), so accepting its snapshot here
+        // would rewind whatever the host has not seen. Feature switches
+        // travel as their own IPC command instead
+        // (ISettingsWidgetActions.SetFeatureWidgetEnabled).
+        parsed.WidgetLayout.CopyFrom(before.WidgetLayout);
+        // The backup domains are main-owned too, but for a different
+        // reason than the layout domain: every writer (the
+        // backup-settings coordinator on router commands, the
+        // cloud-backup runtime's LastSuccess/Failure/Unverified
+        // bookkeeping, restore path rebasing) runs in the MAIN process,
+        // and the settings host never writes them through its own
+        // graph — its UI reads and commands over the wire. A host
+        // snapshot therefore carries a stale-or-equal copy, and without
+        // this preserve a host commit racing a backup run or a
+        // just-commanded setting change (the reload push is skipped
+        // while the host has a pending debounced save) silently
+        // reverted main-side state (deep review R13).
+        parsed.Backup.CopyFrom(before.Backup);
+        parsed.CloudBackup.CopyFrom(before.CloudBackup);
+        // Capsule bar order and free placements are desktop-surface
+        // drag state, owned by the main process; the settings tree never
+        // writes them.
+        parsed.WidgetShell.WidgetCapsuleBarOrder = before.WidgetShell.WidgetCapsuleBarOrder;
+        parsed.WidgetShell.WidgetCapsuleFreePlacements = before.WidgetShell.WidgetCapsuleFreePlacements;
     }
 
     /// <summary>

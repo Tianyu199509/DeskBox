@@ -167,6 +167,71 @@ public sealed class SettingsExternalCommitTests : IDisposable
     }
 
     [Fact]
+    public async Task ExternalSnapshot_PreservesMainOwnedBackupDomainsAndCapsuleState()
+    {
+        var main = new SettingsService(SettingsRoot);
+        await main.LoadAsync();
+        // Main-side writes that happen while the host session is live: the
+        // backup-settings coordinator applying a router command, the cloud
+        // runtime recording a successful run, and a capsule drag reorder.
+        main.Settings.AutomaticBackupIntervalMinutes = 720;
+        main.Settings.CloudBackup.CloudBackupProvider = "webdav";
+        main.Settings.CloudBackup.CloudBackupLastSuccessUtcTicks = 123456789L;
+        main.Settings.WidgetCapsuleBarOrder = ["b-first", "a-second"];
+        main.Settings.WidgetCapsuleFreePlacements["capsule-1"] = new WidgetCompactPlacement();
+
+        // The host loaded before any of that existed, so its snapshot
+        // carries the stale defaults.
+        var host = new SettingsService(SettingsRoot);
+        await host.LoadAsync();
+        Assert.Equal(24 * 60, host.Settings.AutomaticBackupIntervalMinutes);
+        Assert.Equal("none", host.Settings.CloudBackup.CloudBackupProvider);
+        Assert.Equal(0L, host.Settings.CloudBackup.CloudBackupLastSuccessUtcTicks);
+        Assert.Empty(host.Settings.WidgetCapsuleBarOrder);
+        host.Settings.Theme = "Light";
+
+        string payload = JsonSerializer.Serialize(
+            host.Settings,
+            SettingsJsonContext.Default.AppSettings);
+        Assert.True(await main.ApplyExternalSnapshotAsync(payload));
+
+        // Every main-owned domain and collection survives the apply, while
+        // the host's actual settings change still lands (deep review R13:
+        // without the preserve, a host commit racing a backup run or a
+        // just-commanded backup setting change silently reverted them).
+        Assert.Equal(720, main.Settings.AutomaticBackupIntervalMinutes);
+        Assert.Equal("webdav", main.Settings.CloudBackup.CloudBackupProvider);
+        Assert.Equal(123456789L, main.Settings.CloudBackup.CloudBackupLastSuccessUtcTicks);
+        Assert.Equal(["b-first", "a-second"], main.Settings.WidgetCapsuleBarOrder);
+        Assert.Contains("capsule-1", main.Settings.WidgetCapsuleFreePlacements.Keys);
+        Assert.Equal("Light", main.Settings.Theme);
+    }
+
+    [Fact]
+    public async Task AppearancePreview_PreservesMainOwnedBackupDomains()
+    {
+        var main = new SettingsService(SettingsRoot);
+        await main.LoadAsync();
+        main.Settings.CloudBackup.CloudBackupLastSuccessUtcTicks = 42L;
+        main.Settings.AutomaticBackupEnabled = false;
+
+        var host = new SettingsService(SettingsRoot);
+        await host.LoadAsync();
+        host.Settings.Theme = "Dark";
+        string payload = JsonSerializer.Serialize(
+            host.Settings,
+            SettingsJsonContext.Default.AppSettings);
+
+        // The preview swap makes the stale graph live in the main process —
+        // the preserve keeps main-owned state intact so the next durable
+        // save from any source cannot persist a rollback (deep review R13).
+        Assert.True(main.ApplyExternalAppearancePreview(payload));
+        Assert.Equal(42L, main.Settings.CloudBackup.CloudBackupLastSuccessUtcTicks);
+        Assert.False(main.Settings.AutomaticBackupEnabled);
+        Assert.Equal("Dark", main.Settings.Theme);
+    }
+
+    [Fact]
     public async Task ExternalSnapshot_RefusesNewerSchemaAndGarbage()
     {
         var main = new SettingsService(SettingsRoot);

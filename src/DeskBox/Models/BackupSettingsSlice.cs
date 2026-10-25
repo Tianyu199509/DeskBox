@@ -27,4 +27,21 @@ public sealed class BackupSettingsSlice
     /// recovery directory outside the app-data root.
     /// </summary>
     public string AutomaticBackupDirectory { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Ownership transfer used when applying an external (settings-host)
+    /// snapshot: this domain is written only by main-side actors (the
+    /// backup-settings coordinator on router commands, restore path
+    /// rebasing), so the host's copy is always stale-or-equal and the
+    /// main-side state must survive the apply (deep review R13).
+    /// </summary>
+    internal void CopyFrom(BackupSettingsSlice other)
+    {
+        ArgumentNullException.ThrowIfNull(other);
+
+        AutomaticBackupEnabled = other.AutomaticBackupEnabled;
+        AutomaticBackupIntervalMinutes = other.AutomaticBackupIntervalMinutes;
+        AutomaticBackupRetentionCount = other.AutomaticBackupRetentionCount;
+        AutomaticBackupDirectory = other.AutomaticBackupDirectory;
+    }
 }

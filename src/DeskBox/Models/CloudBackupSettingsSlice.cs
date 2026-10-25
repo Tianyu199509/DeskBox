@@ -52,4 +52,30 @@ public sealed class CloudBackupSettingsSlice
     /// the flag describes the newest run against the current endpoint.
     /// </summary>
     public long CloudBackupLastUnverifiedUtcTicks { get; set; }
+
+    /// <summary>
+    /// Ownership transfer used when applying an external (settings-host)
+    /// snapshot: this domain is written only by main-side actors (the
+    /// backup-settings coordinator on router commands, the cloud-backup
+    /// runtime's success/failure bookkeeping), so the host's copy is
+    /// always stale-or-equal and the main-side state must survive the
+    /// apply (deep review R13).
+    /// </summary>
+    internal void CopyFrom(CloudBackupSettingsSlice other)
+    {
+        ArgumentNullException.ThrowIfNull(other);
+
+        CloudBackupProvider = other.CloudBackupProvider;
+        CloudBackupServerUrl = other.CloudBackupServerUrl;
+        CloudBackupRemotePath = other.CloudBackupRemotePath;
+        CloudBackupUsername = other.CloudBackupUsername;
+        CloudBackupTodoDataEnabled = other.CloudBackupTodoDataEnabled;
+        CloudBackupQuickCaptureDataEnabled = other.CloudBackupQuickCaptureDataEnabled;
+        CloudBackupWidgetStyleEnabled = other.CloudBackupWidgetStyleEnabled;
+        CloudBackupRetentionCount = other.CloudBackupRetentionCount;
+        CloudBackupIntervalMinutes = other.CloudBackupIntervalMinutes;
+        CloudBackupLastSuccessUtcTicks = other.CloudBackupLastSuccessUtcTicks;
+        CloudBackupLastFailureUtcTicks = other.CloudBackupLastFailureUtcTicks;
+        CloudBackupLastUnverifiedUtcTicks = other.CloudBackupLastUnverifiedUtcTicks;
+    }
 }
