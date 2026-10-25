@@ -74,3 +74,12 @@
 ## 附：本轮补验证据
 - A15 崩溃复放：三轮 `repro-plain.ps1`（boot+6s 开设置）全部双进程存活、宿主构造完整（SettingsPerf complete）、当日零 fatal/unhandled。
 - A16 语言：`语言=English` → settings.json `language=en-US`（主进程写盘）+ UI 同会话英文化 → 切回 `zh-CN` 同步。
+
+## 附：R13 深审长跑收口（2026-10-26 凌晨，本地零推送）
+
+Simon 批准的全分支深审·合理化重构·真机回归已完成主体（账本=`160-deep-review-ledger-20261025.md`，20 笔本地提交 5b7ea202..4cc42b88）：
+
+- **C 节债全收**：①=052c8964（横幅+拒绝路径上报）②=df686e63（图锁+保序道）③=14ab863e（下载节流）④=d8ccabb7（原生管道+SACL+pid/StartTime 身份门）；⑤维持拍板。
+- **新增修复 30+**（详见账本各节）：boot-ready 意图队列（D5-E）、farewell CAS（D5-A）、热键世代守卫+搜索热键自愈（D5-D/R13-2）、Backup/CloudBackup 域保留（D3 真 bug）、云备份三假成功（R13-2）、QC 开关回滚（R8 修一半）、托盘样式拆分静默失败（E10）、统一背景同扩展名重选（E8）、超时表 7 项、死线/死码 10 处、面/线程/切片三棘轮。
+- **真机回归（P5-1）17/17 全绿**：原生管道+boot 链+关窗即退+farewell+两轮急关急开+看门狗 0.5s+日志零异常（`%TEMP%\deskbox-review160\p5-1-lifecycle.ps1` 可复跑）。
+- **待 Simon 项不变**（S1-S16+⑤+R14 冷路径 27 处维持有界等待契约的裁定，账本「待拍板」节）；E8/E10 修法建议真机顺手复验（静态证据链完整）。
