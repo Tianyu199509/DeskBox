@@ -67,8 +67,16 @@ public partial class App
             everythingClient: _everythingSearchService,
             // Batch R11: the coordinator flips its spawn-vs-show decision
             // the moment the host announces its exit, not when the process
-            // handle finally reports death (~2s later, mid-flush).
-            onHostFarewell: MarkSettingsHostExiting);
+            // handle finally reports death (~2s later, mid-flush). The
+            // payload is the sender pid (R12 re-review) so a stale goodbye
+            // from an old host can never evict a fresh replacement.
+            onHostFarewell: payload =>
+            {
+                if (uint.TryParse(payload, out uint senderPid))
+                {
+                    MarkSettingsHostExiting(senderPid);
+                }
+            });
         _settingsIpcRouter = router;
         _settingsIpcServer = SettingsIpcServer.Start(
             DeskBoxDataPathService.Current.SettingsIpcPipeName,

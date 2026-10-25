@@ -178,18 +178,30 @@ public partial class App
     /// host and was silently lost. Flip the decision back to spawn; keep
     /// the process reference so shutdown can still hard-kill a hung exit.
     /// </summary>
-    internal void MarkSettingsHostExiting()
+    /// <param name="senderPid">
+    /// The farewell carries the sender's own pid (re-review of R11+R12): a
+    /// late farewell from an OLD host must never evict a freshly spawned
+    /// replacement — without the pin, a delayed goodbye during the
+    /// close-reopen race unregistered the new host and cost the next open.
+    /// </param>
+    internal void MarkSettingsHostExiting(uint senderPid)
     {
         try
         {
-            if (_settingsHostProcess is not { } exiting)
+            if (_settingsHostProcess is { } current && (uint)current.Id == senderPid)
+            {
+                _exitingSettingsHost = current;
+                _settingsHostProcess = null;
+                Log("[SettingsHost] Farewell received; treating host as not running for show decisions");
+                return;
+            }
+
+            if (_exitingSettingsHost is { } dying && (uint)dying.Id == senderPid)
             {
                 return;
             }
 
-            _exitingSettingsHost = exiting;
-            _settingsHostProcess = null;
-            Log("[SettingsHost] Farewell received; treating host as not running for show decisions");
+            Log($"[SettingsHost] Stale farewell from pid {senderPid} ignored (current host still registered)");
         }
         catch (Exception ex)
         {

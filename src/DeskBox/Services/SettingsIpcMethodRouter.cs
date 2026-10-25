@@ -52,7 +52,7 @@ public sealed class SettingsIpcMethodRouter
         IBackupSettings? backupSettings = null,
         IAppUpdateService? appUpdate = null,
         DeskBox.Contracts.ISearchConnectionClient? everythingClient = null,
-        Action? onHostFarewell = null)
+        Action<string?>? onHostFarewell = null)
     {
         _settings = settings;
         _hotkey = hotkey;
@@ -74,7 +74,7 @@ public sealed class SettingsIpcMethodRouter
     /// so the coordinator can flip the spawn-vs-show decision before the
     /// process actually terminates (batch R11).
     /// </summary>
-    private Action? OnHostFarewell { get; }
+    private Action<string?>? OnHostFarewell { get; }
 
     /// <summary>
     /// Optional event push (the owning server), used for migration progress.
@@ -106,7 +106,9 @@ public sealed class SettingsIpcMethodRouter
                 return (true, "pong", null);
 
             case SettingsIpcMethods.HostFarewell:
-                OnHostFarewell?.Invoke();
+                // Payload = the sender's own pid: only a farewell from the
+                // registered host may flip the spawn-vs-show decision.
+                OnHostFarewell?.Invoke(payload);
                 return (true, null, null);
 
             case SettingsIpcMethods.AppearancePreview:

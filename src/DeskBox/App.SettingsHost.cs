@@ -688,7 +688,9 @@ public partial class App
         // back to the old process-exit detection.
         try
         {
-            _ = _settingsHostClient?.RequestAsync(SettingsIpcMethods.HostFarewell, null);
+            _ = _settingsHostClient?.RequestAsync(
+                SettingsIpcMethods.HostFarewell,
+                Environment.ProcessId.ToString(System.Globalization.CultureInfo.InvariantCulture));
         }
         catch (Exception ex)
         {
